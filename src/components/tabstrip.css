@@ -21,6 +21,8 @@
 /* Sideways only once the tabs are their icons and still don't fit; the edge that has more fades. */
 .ws-tabs-scroll { position: relative; flex: 1; min-width: 0; height: 100%; display: flex; align-items: flex-end; gap: 2px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .ws-tabs-scroll::-webkit-scrollbar { display: none; }
+/* As much as the scroll bars' rule for every element (styles.css, under :root), which this file can load before. */
+:root .ws-tabs-scroll { scrollbar-width: none; }
 .ws-tabs-scroll.more-right { -webkit-mask-image: linear-gradient(to left, transparent, #000 32px); mask-image: linear-gradient(to left, transparent, #000 32px); }
 .ws-tabs-scroll.more-left { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px); mask-image: linear-gradient(to right, transparent, #000 32px); }
 .ws-tabs-scroll.more-left.more-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }

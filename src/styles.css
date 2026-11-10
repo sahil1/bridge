@@ -143,7 +143,8 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border-radius: 4px; backgro
 /* One look for every scroll area, as macOS draws its overlay scroll bars: thin, no track, and the
    thumb only while the pointer is over that area or you're scrolling it (src/scrolling.js), in the
    light and the dark look alike. On a Mac that shows scroll bars only while scrolling, they stay the
-   system's own. A strip that hides its bar (scrollbar-width: none) keeps it hidden, and a terminal
+   system's own. A strip that hides its bar (scrollbar-width: none, under :root too in a stylesheet a
+   component brings, which can load before this one) keeps it hidden, and a terminal
    keeps its own (.live-term). Under :root, so a library's own reset for every element (the sheet
    editor's, loaded when one opens) doesn't put the browser's back everywhere else. */
 @supports (scrollbar-color: auto) {
