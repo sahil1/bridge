@@ -187,10 +187,14 @@ try {
     ok(wider && wider.width === before.width + 120 && wider.x + wider.width === before.x + before.width && whole(l1) && l1.w === before.width + 120 - 24, 'its left edge dragged 120 points left: the window 120 wider, its right edge where it was, the card filling it', { before, wider, card: l1 })
     before = await bounds()
     const lines0 = await card.$$eval('.fc-said-line', (x) => x.length)
+    // As far as the screen lets it (CI's screens are short): no taller than it less 8 points each
+    // side, nor past its bottom but for the 12 around the card.
+    const wa = await el.evaluate(({ screen }) => screen.getDisplayMatching(globalThis.floatWin.getBounds()).workArea)
+    const want = Math.min(before.height + 160, wa.height - 16, wa.y + wa.height + 12 - before.y)
     const taller = await resize('se', 0, 160)
     const l2 = await look()
     const said = await card.evaluate(() => { const b = document.querySelector('.fc-said'); const last = [...b.querySelectorAll('.fc-said-line')].pop(); const r = b.getBoundingClientRect(), q = last?.getBoundingClientRect(); return { lines: b.querySelectorAll('.fc-said-line').length, lastShown: !!q && q.bottom <= r.bottom + 1 && q.top >= r.top - 1 } })
-    ok(taller && taller.height === before.height + 160 && taller.y === before.y && whole(l2) && said.lines > lines0 && said.lastShown, 'its bottom right corner dragged 160 down: 160 taller, its top where it was, and more of what\'s been said shows, the newest line in view', { before, taller, card: l2, said, lines0 })
+    ok(taller && Math.abs(taller.height - want) <= 1 && taller.height > before.height && taller.y === before.y && whole(l2) && said.lines > lines0 && said.lastShown, 'its bottom right corner dragged 160 down: that much taller (as far as the screen lets it), its top where it was, and more of what\'s been said shows, the newest line in view', { before, taller, want, wa, card: l2, said, lines0 })
     await capture('float-resized')
     const kept = await card.evaluate(() => JSON.parse(localStorage.getItem('cc-float-size') || 'null'))
     ok(kept?.w === l1.w && kept?.h === l2.h, 'the size is kept on this computer', kept)

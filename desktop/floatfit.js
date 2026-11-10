@@ -58,13 +58,14 @@ function fitFloat(win, screen, w, h, low) {
 const LIMITS = { minW: 260, maxW: 720, minH: 120 }
 // The window's bounds b resized from edge (n, s, e, w or a corner, as ne) by the pointer moving
 // from p to q: that edge follows the pointer and the other stays, within the card's limits at zoom
-// z and on the screen a (the 12 pixels around the card may go past its edge, as when it's put
-// against one). height: the window's height now, for an edge that only resizes it sideways.
+// z and on the screen a (no bigger than it less 8 points each side, as the card fits itself; the 12
+// pixels around the card may go past its edge, as when it's put against one). height: the window's
+// height now, for an edge that only resizes it sideways.
 function resizedBounds(b, p, q, edge, z, a, height = b.height) {
   const m = 12 * z
   const clamp = (v, lo, hi) => Math.round(Math.max(lo, Math.min(Math.max(lo, hi), v)))
-  const minW = Math.ceil((LIMITS.minW + 24) * z), maxW = Math.min(a.width + 2 * m, Math.floor((LIMITS.maxW + 24) * z))
-  const minH = Math.ceil((LIMITS.minH + 24) * z), maxH = a.height + 2 * m
+  const minW = Math.ceil((LIMITS.minW + 24) * z), maxW = Math.min(a.width - 16, Math.floor((LIMITS.maxW + 24) * z))
+  const minH = Math.ceil((LIMITS.minH + 24) * z), maxH = a.height - 16
   const dx = q.x - p.x, dy = q.y - p.y
   const n = { x: b.x, y: b.y, width: b.width, height: /[ns]/.test(edge) ? b.height : height }
   if (edge.includes('e')) n.width = clamp(b.width + dx, minW, Math.min(maxW, a.x + a.width + m - b.x))
