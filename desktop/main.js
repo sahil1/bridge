@@ -144,6 +144,14 @@ const openOutside = (u) => { try { if (senders.OUTSIDE.has(new URL(u).protocol))
 // (senders.js opens: from another computer's window, only that computer's). Never in a window of
 // the app's. w: the window it's for.
 const openLink = (w) => ({ url }) => { if (pages.opens(url, w.webContents.getURL())) shell.openExternal(url); return { action: 'deny' } }
+// Back and Forward from the mouse's side buttons, which Windows hands the app as commands, and from
+// a swipe on a Mac's trackpad (with Swipe between pages set to two or three fingers): to the page, as
+// its own ‹ and › (src/backForward.js; the page takes the buttons themselves on a Mac and Linux).
+function backForward(w) {
+  const go = (dir) => { if (!w.isDestroyed()) w.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('bridge-nav', { detail: '${dir}' }))`).catch(() => {}) }
+  w.on('app-command', (_e, cmd) => { if (cmd === 'browser-backward') go('back'); else if (cmd === 'browser-forward') go('forward') })
+  w.on('swipe', (_e, dir) => { if (dir === 'right') go('back'); else if (dir === 'left') go('forward') })
+}
 
 // Shown for the second or so while the server starts: the logo and a line of text.
 const LOGO = (() => { for (const f of ['dist/mark.svg', 'public/mark.svg']) { try { return fs.readFileSync(path.join(ROOT, f), 'utf8') } catch { /* next */ } } return '' })()
@@ -177,6 +185,7 @@ async function createWindow() {
   // Links to anything but the app open in their own apps (Teams, Outlook, Mail, the browser), and a
   // file the app shows, opened in a new tab, in the browser.
   win.webContents.setWindowOpenHandler(openLink(win))
+  backForward(win)
   win.webContents.on('will-navigate', (e, url) => { if (!isLocal(url) && !url.startsWith('data:')) { e.preventDefault(); openOutside(url) } })
   // Its title as the page says it (what waits on you, and which computer it is, for the Dock's and
   // the Window menu's list of windows); the count also goes on the Dock's badge.
@@ -295,6 +304,7 @@ ipc.handle('bridge:open-machine', (e, { id = null, agent = null, pass = '' } = {
   w.once('ready-to-show', () => w.show())
   w.webContents.setWindowOpenHandler(openLink(w))
   w.webContents.on('will-navigate', (ev, url) => { if (!isLocal(url)) { ev.preventDefault(); openOutside(url) } })
+  backForward(w)
   if (was?.maximized) w.maximize()
   for (const ev of ['resize', 'move', 'close']) w.on(ev, () => saveDeviceBounds(key, w))
   // Whether it shows an error: an answer that isn't the page (that device wasn't reachable), or one
