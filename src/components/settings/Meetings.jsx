@@ -14,7 +14,8 @@ import '../meetings/meetings.css'
 // Settings › Meetings: which engine turns speech into text (on this computer, or a service you have
 // a key for), the language, names and terms, the model that writes the notes and what it does by
 // itself (the summary, cleaning up, naming who spoke, preparing: on unless turned off, and what each
-// reads goes to that model, so which and where it runs is said there), calls and their sound, and
+// reads goes to that model, so which and where it runs is said there), calls and their sound (and, in
+// the desktop app, the floating card's reminder before a meeting), and
 // saving them as Markdown. Under Advanced: the other speech services, suggesting what to ask, who
 // spoke, the key that mentions a meeting in a message, the floating card, and where and how notes
 // are saved. Server: speech.js, meetings.js.
@@ -165,6 +166,9 @@ export default function Meetings({ onOpenAgent }) {
   const win = window.bridgeApp?.platform === 'win32'
   const hide = ['sharing', 'always', 'never'].includes(m.floatHide) ? m.floatHide : 'sharing'
   const card = !['off', 'menubar'].includes(m.floatCard) || (m.floatCard === 'menubar' && !mac)
+  // Reminded before meetings, unless turned off: before there was a switch of its own, Prepare for
+  // each meeting off meant none (server/meetprep.js reminds).
+  const remind = typeof m.remind === 'boolean' ? m.remind : m.prep !== false
   const model = d.local.models.find((x) => x.id === d.local.model)
   const pickFolder = window.bridgeApp?.pickFolder
   // A speech service: first when it's the one picked or its key is saved, else under Advanced.
@@ -276,6 +280,17 @@ export default function Meetings({ onOpenAgent }) {
 
       <section className="st-sec" data-setting="calls">
         <h4>Calls</h4>
+        {/* The floating card's reminder before a meeting (desktop/main.js): only in the desktop app,
+            with a calendar, and only while there's a card to show it on. The card's own menu turns
+            it off too, and says it's turned back on here. */}
+        {calendar && window.bridgeApp?.desktop && (
+          <label className="st-check" data-setting="meeting-remind">
+            <input type="checkbox" checked={remind} onChange={(e) => set({ remind: e.target.checked })} disabled={!card} />
+            <span title={t('Ten minutes before a meeting with other people, the floating card shows it with Join and what to go in with. Its menu puts it off until a minute before, hides it until the next meeting or turns these reminders off. Never over a screen you share.')}><b>{t('Remind me before meetings')}</b> <span className="muted small">{card
+              ? t('The floating card, ten minutes before a meeting with other people, with Join.')
+              : t('The floating card is off, under Advanced, so there\'s nothing to remind you with.')}</span></span>
+          </label>
+        )}
         <label className="st-check" data-setting="call-audio">
           <input type="checkbox" checked={m.callAudio !== false} onChange={(e) => set({ callAudio: e.target.checked })} disabled={!d.canRecordCall} />
           <span><b>Record the other side of calls</b> <span className="muted small">{d.canRecordCall ? t('What your Mac plays (Zoom, Meet, Teams), so the transcript says You or Them. macOS asks once.') : 'On a Mac with macOS 14.2 or later. Here your mic records the meeting, which still hears a call on speakers.'}</span></span>

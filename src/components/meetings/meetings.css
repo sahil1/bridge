@@ -276,6 +276,14 @@ html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box
 .fc-sub-row .fc-sub { flex: 1; min-width: 0; }
 .fc-join { flex: none; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; margin: 2px 0 0; }
 .fc-ask .fc-x { margin-top: 3px; }
+/* A reminder's menu by its × (Remind me 1 min before, Hide, Turn off), over the card. */
+.fc-opts-at { flex: none; align-self: flex-start; }
+.fc-ask .fc-opts-at + .fc-x { margin-left: -6px; }
+.float-card .fc-menu { top: calc(100% + 2px); right: -2px; min-width: 214px; user-select: none; }
+.fc-menu .menu-item { white-space: nowrap; }
+.fc-menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.fc-menu-hint { flex: none; color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.fc-confirm p { font-size: 12.5px; }
 /* Its buttons: icons, plain until pointed at. */
 .fc-x { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; color: var(--ink-2); }
 .fc-x:hover { background: var(--pane-2); color: var(--ink); }

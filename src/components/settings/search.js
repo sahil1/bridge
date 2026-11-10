@@ -58,6 +58,7 @@ export const SETTINGS = [
     ['transcript-cleanup', tx('Clean up the transcript when a meeting ends'), 'clean up fix misheard words transcript'],
     ['name-speakers', tx('Name who spoke on the call'), 'speakers names them who said'],
     ['prep', tx('Prepare for each meeting'), 'prepare prep goals questions mail invite calendar', { near: 'notes-model' }],
+    ['meeting-remind', tx('Remind me before meetings'), 'remind reminder before meeting snooze later floating card join turn off', { when: 'desktop', near: 'calls' }],
     ['calls', tx('Calls'), 'notice calls zoom meet teams record other side system audio stop'],
     ['save-markdown', tx('Save every meeting as Markdown'), 'markdown obsidian save notes folder'],
     ['meeting-assist', tx('AI Assist in meetings'), 'ai assist suggest what to ask how often instructions summary'],

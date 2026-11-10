@@ -9,7 +9,9 @@
 // follows the pointer and the other stays, the card fills its window, taller shows more of what's
 // been said, the size is kept, and a double-click puts it back. While the screen is shared (a
 // stand-in for native/callwatch): a meeting about to start and what needs you aren't shown, and
-// come back by themselves once it stops; the meeting being recorded stays.
+// come back by themselves once it stops; the meeting being recorded stays. A reminder's menu by its
+// ×, whole in the window: Remind me 1 min before (put off, and the app told to look again now), Hide
+// until the next meeting, and Turn off meeting reminders, asked first, saying where they come back.
 // 3.13.2's card at 110% (⌘+ once): its window stayed the card's size at 100%, which cut it off on
 // the right and at the bottom.
 import fs from 'node:fs'
@@ -293,6 +295,54 @@ try {
     sharing(false)
     ok(!!(await until(() => visible(), 5000, 100)), 'the share ends: the reminder comes back by itself, still wanted')
     await capture('float-reminder-after-sharing')
+  }
+
+  // ---------- The reminder's menu ----------
+  // By its ×: Remind me 1 min before (put off on the server, and the app told to look again now),
+  // Hide until the next meeting, and Turn off meeting reminders, which asks first and says where
+  // they're turned back on. The menu fits in the window, however short the card.
+  {
+    const soonK = KINDS.find((x) => x.name === 'a meeting about to start')
+    const sent = []
+    await ctx.route(/\/api\/calls\/snooze(\?|$)/, (r) => { sent.push(['snooze', r.request().postDataJSON()]); return r.fulfill({ json: { until: new Date(Date.parse(soonK.calls.soon.start) - 60e3).toISOString() } }) })
+    await ctx.route(/\/api\/settings(\?|$)/, (r) => { if (r.request().method() !== 'PATCH') return r.continue(); sent.push(['settings', r.request().postDataJSON()]); return r.fulfill({ json: { ok: true } }) })
+    const asked = () => el.evaluate(() => ({ ...globalThis.asked }))
+    await card.reload()
+    await card.waitForSelector('.float-card', { timeout: 15000 })
+    await show(soonK)
+    await card.click('.float-card .fc-opts')
+    const menu = card.locator('.float-card .fc-menu')
+    await menu.waitFor({ timeout: 5000 }).catch(() => {})
+    const items = (await menu.locator('.menu-item').allInnerTexts()).map((x) => x.replace(/\s+/g, ' ').trim())
+    const at = new Date(Date.parse(soonK.calls.soon.start) - 60e3).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(/\s+/g, ' ')
+    ok(items.length === 3 && items[0] === `Remind me 1 min before ${at}` && items[1] === 'Hide until the next meeting' && items[2] === 'Turn off meeting reminders…', 'the menu by its ×: Remind me 1 min before (at what time), Hide until the next meeting, Turn off meeting reminders…', items)
+    const fits = await until(async () => { const b = await card.evaluate(() => { const m = document.querySelector('.fc-menu').getBoundingClientRect(); return { bottom: m.bottom, right: m.right, left: m.left, w: innerWidth, h: innerHeight } }); return b.bottom <= b.h && b.right <= b.w && b.left >= 0 ? b : null }, 4000, 100)
+    ok(!!fits, 'and it fits in the window', fits)
+    await capture('float-reminder-menu')
+    const was = await asked()
+    await menu.locator('.fc-later').click()
+    ok(!!(await until(async () => sent.some(([k, b]) => k === 'snooze' && b.id === soonK.calls.soon.id) && (await asked()).look > was.look, 4000, 100)) && !(await card.$('.fc-menu')), 'Remind me 1 min before: put off on the server for this meeting, the app told to look again at once, the menu closed', { sent, asked: await asked() })
+    // Turn off: asked first, saying where they come back; Cancel leaves them on.
+    await card.click('.float-card .fc-opts')
+    await card.locator('.fc-menu .fc-off').click()
+    const confirm = card.locator('.float-card .fc-confirm')
+    const said = await until(async () => { const x = await confirm.innerText().catch(() => ''); return /Turn off meeting reminders\?/.test(x) && x }, 4000, 100)
+    ok(!!said && /Settings › Meetings › Remind me before meetings/.test(said), 'Turn off meeting reminders… asks first, saying where to turn them back on', said)
+    const l = await until(async () => { const x = await look(); return whole(x) && !x.past.length && !x.cut.length ? x : null }, 4000, 100)
+    ok(!!l, 'whole in its window, nothing past its edge or cut off', await look())
+    await capture('float-reminder-turn-off')
+    await confirm.locator('button', { hasText: 'Cancel' }).click()
+    ok(!(await confirm.count()) && !sent.some(([k]) => k === 'settings'), 'Cancel: still on, nothing changed')
+    await card.click('.float-card .fc-opts')
+    await card.locator('.fc-menu .fc-off').click()
+    const before = await asked()
+    await confirm.locator('button', { hasText: 'Turn off' }).click()
+    ok(!!(await until(async () => sent.some(([k, b]) => k === 'settings' && b?.meetings?.remind === false) && (await asked()).look > before.look, 4000, 100)), 'Turn off: Remind me before meetings off, and the app told to look again at once', sent)
+    await card.click('.float-card .fc-opts')
+    await card.locator('.fc-menu .fc-hide').click()
+    ok(!!(await until(async () => (await asked()).hide === before.hide + 1, 4000, 100)), 'Hide until the next meeting: hidden as its × does')
+    await ctx.unroute(/\/api\/calls\/snooze(\?|$)/)
+    await ctx.unroute(/\/api\/settings(\?|$)/)
   }
 
   // ---------- A short screen ----------

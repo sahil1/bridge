@@ -258,15 +258,48 @@ const hidden = () => new Set(Array.isArray(cfg.calendar?.hidden) ? cfg.calendar.
 // Today's and tomorrow's events as the app last had them: the floating card asks every two seconds,
 // so this never waits on the calendar, and it never asks macOS for it either.
 const todays = () => { const d = helpers.calendar?.(); return d ? [...(d.today || []), ...(d.tomorrow || [])] : [] }
+// Reminded before meetings (Settings › Meetings › Remind me before meetings), unless it's turned off,
+// there or from the card. Before there was a switch of its own, Prepare for each meeting off meant
+// no reminders either, and it still does until this one is set.
+export const reminds = () => (typeof cfg.meetings?.remind === 'boolean' ? cfg.meetings.remind : cfg.meetings?.prep !== false)
+// Reminders put off, from the floating card: { [the meeting's key]: { until, start } }, kept on disk
+// so a restart keeps them. Remind me again a minute before it starts, or at its start when that
+// minute has begun; one that's due again stays up a few minutes past its start (Join as it begins).
+const LATER = cacheFile('meeting-reminders.json')
+const LATE_MS = 5 * 60e3
+const later = () => { const v = readJSON(LATER, {}); return v && typeof v === 'object' && !Array.isArray(v) ? v : {} }
 // The next meeting with other people that starts within ten minutes, for the floating card, unless
-// Prepare for each meeting is off.
+// reminders are off; one put off, once it's due again. snoozed: it was put off.
 export function soon(now = Date.now()) {
-  if (cfg.meetings?.prep === false) return null
+  if (!reminds()) return null
   const hide = hidden()
-  const e = todays().filter((x) => worthIt(x) && !hide.has(x.calendar) && Date.parse(x.start) > now && Date.parse(x.start) - now <= SOON_MS).sort((a, b) => a.start.localeCompare(b.start))[0]
+  const put = later()
+  const due = (x) => {
+    const s = Date.parse(x.start)
+    const z = put[keyOf(eventOf(x))]
+    if (z) return now >= Date.parse(z.until) && now < s + LATE_MS && !(Date.parse(x.end) <= now)
+    return s > now && s - now <= SOON_MS
+  }
+  const e = todays().filter((x) => worthIt(x) && !hide.has(x.calendar) && due(x)).sort((a, b) => a.start.localeCompare(b.start))[0]
   if (!e) return null
-  const kept = cache()[keyOf(eventOf(e))]
-  return { ...e, suggestions: kept?.items?.length || 0 }
+  const key = keyOf(eventOf(e))
+  const kept = cache()[key]
+  return { ...e, suggestions: kept?.items?.length || 0, snoozed: !!put[key] }
+}
+// Remind me again when it's about to start, for this one meeting (id: the calendar's): a minute
+// before, or at its start when that's sooner than a minute away. { until }.
+export function snooze(id, now = Date.now()) {
+  const e = todays().find((x) => x.id === id)
+  if (!e) throw new Error("That meeting isn't on your calendar for today or tomorrow, so it can't be put off.")
+  const s = Date.parse(e.start)
+  if (!(s > now)) throw new Error('It has started already.')
+  const until = new Date(s - 60e3 > now ? s - 60e3 : s).toISOString()
+  // What's past is dropped.
+  const v = Object.fromEntries(Object.entries(later()).filter(([, x]) => Date.parse(x?.start) > now - 864e5))
+  v[keyOf(eventOf(e))] = { until, start: e.start }
+  fs.mkdirSync(path.dirname(LATER), { recursive: true })
+  writeFileAtomic(LATER, JSON.stringify(v, null, 1))
+  return { until }
 }
 // Every minute: a meeting with other people starting within fifteen minutes gets its suggestions,
 // once, when there's a model and Prepare for each meeting isn't turned off.

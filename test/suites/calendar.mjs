@@ -525,6 +525,47 @@ try {
     await p.context().close()
   }
 
+  // ---------- The reminder: put off, turned off and on ----------
+  // Remind me 1 min before: gone until then, for that meeting alone, kept through a restart, and
+  // back once it's due. Remind me before meetings off (from the card's menu, or Settings): no
+  // reminder; on again, it's back. Settings › Meetings has the switch in the desktop app.
+  {
+    const soonNow = (await api('/calls')).soon
+    const snoozed = await api('/calls/snooze', { id: soonNow.id })
+    ok(Date.parse(snoozed.until) === Date.parse(soonNow.start) - 60e3 && (await api('/calls')).soon === null, 'Remind me 1 min before: the reminder goes until a minute before the meeting starts', { snoozed, start: soonNow.start })
+    const bad = await err('/calls/snooze', { id: 'no-such-meeting' })
+    ok(/isn't on your calendar/.test(bad?.message || ''), "a meeting that isn't on the calendar: refused, saying why", bad?.message)
+    await kit.restart()
+    await api('/calendar')
+    ok(!!(await until(async () => (await api('/calendar')).today.length > 0, 8000)) && (await api('/calls')).soon === null, 'Bridge AI restarted: still put off')
+    // A minute before it starts: due again (the time it was put off until, moved to now).
+    const file = path.join(kit.data, 'cache', 'meeting-reminders.json')
+    const kept = JSON.parse(fs.readFileSync(file, 'utf8'))
+    fs.writeFileSync(file, JSON.stringify(Object.fromEntries(Object.entries(kept).map(([k, v]) => [k, { ...v, until: new Date(Date.now() + OFFSET - 1000).toISOString() }]))))
+    const back = (await api('/calls')).soon
+    ok(back?.id === soonNow.id && back.snoozed === true, 'once it\'s due: the reminder is back, for the same meeting', back)
+    await api('/settings', { meetings: { remind: false } }, 'PATCH')
+    ok((await api('/calls')).soon === null, 'reminders turned off: none')
+    await api('/settings', { meetings: { remind: true, prep: false } }, 'PATCH')
+    ok((await api('/calls')).soon?.id === soonNow.id, 'turned on again: back (and on even with Prepare for each meeting off, once it\'s been set)')
+    await api('/settings', { meetings: { prep: true } }, 'PATCH')
+    // Settings › Meetings, in the desktop app: Remind me before meetings, off and on.
+    // (Said to be the desktop app once the page is up, for Settings to show what's the app's.)
+    const { p, errors } = await open({ mode: 'light' })
+    await p.evaluate(() => { window.bridgeApp = { desktop: true, platform: 'darwin' }; window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meeting-remind' } })) })
+    const sw = p.locator('.modal.settings [data-setting="meeting-remind"]')
+    await until(() => sw.isVisible(), 10000)
+    const box = sw.locator('input[type="checkbox"]')
+    ok(await sw.isVisible() && /Remind me before meetings/.test(await sw.innerText()) && await box.isChecked(), 'Settings › Meetings › Remind me before meetings, on, found as ⌘K finds it', await sw.innerText().catch(() => ''))
+    await box.click() // (it shows off once the server has it)
+    ok(!!(await until(async () => (await api('/settings')).effective.meetings?.remind === false && (await api('/calls')).soon === null && !(await box.isChecked()), 5000)), 'turned off there: no reminder, and it shows off')
+    await shot(p, `${tag}calendar-remind-setting`)
+    await box.click()
+    ok(!!(await until(async () => (await api('/calls')).soon?.id === soonNow.id, 5000)), 'and on again: the reminder is back')
+    ok(real(errors).length === 0, 'Settings: no page errors', errors)
+    await p.context().close()
+  }
+
   // ---------- Home's Coming Up ----------
   {
     await api('/settings', { trials: { home: true } }, 'PATCH')

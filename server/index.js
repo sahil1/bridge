@@ -1827,6 +1827,8 @@ app.get('/api/calls', wrap(() => {
   }
 }))
 app.post('/api/calls/dismiss', wrap(() => { prompt = null; return { ok: true } }))
+// The floating card's reminder before a meeting, put off until it's about to start (meetprep.js).
+app.post('/api/calls/snooze', wrap((req) => meetPrep.snooze(String(req.body?.id || '').slice(0, 400))))
 // Screen Recording, for the names a call shows as people talk: whether it's allowed, and Allow
 // (macOS's own window the first time; after that, System Settings is where it's turned on).
 // fresh=1: looked at now, not what was kept from a moment ago. started: when this server started.

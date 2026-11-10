@@ -47,4 +47,8 @@ app.whenReady().then(() => {
   const ours = (e) => float && !float.isDestroyed() && e.sender === float.webContents
   ipcMain.on('bridge:float-size', (e, w, h, low) => { if (ours(e)) fitWhileResizing(float, screen, resizer, w, h, low) })
   ipcMain.on('bridge:float-resize', (e, edge) => { if (ours(e)) resizer.set(edge) })
+  // Looked at again now (a reminder put off or turned off), and hidden by its ×: counted.
+  globalThis.asked = { look: 0, hide: 0 }
+  ipcMain.handle('bridge:float-look', (e) => { if (ours(e)) globalThis.asked.look++; return true })
+  ipcMain.handle('bridge:float-hide', (e) => { if (ours(e)) globalThis.asked.hide++; return true })
 })

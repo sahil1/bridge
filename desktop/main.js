@@ -814,8 +814,9 @@ function buildMenu() {
 // A small window over the others, on every desktop and over full-screen apps: the meeting being
 // recorded, Take notes when a call starts, Stop when it ends, a meeting's prep shortly before it
 // starts, or what needs you. It's the app's own
-// page (?float=1); this decides when it shows, from the server's /api/calls, every two seconds,
-// and from whether the screen is shared.
+// page (?float=1); this decides when it shows, from the server's /api/calls, every two seconds
+// (at once when the card asks: a reminder put off or turned off), and from whether the screen is
+// shared.
 const FLOAT_STATE = path.join(app.getPath('userData'), 'float.json')
 let float = null
 let floatResize = null // resizing it by an edge (desktop/floatfit.js)
@@ -870,13 +871,15 @@ function placeFloat(c) {
   else hideFloat()
   setTray(p.bar ? c : null, p.instead)
 }
+let floatLook = null // looks again now, rather than in two seconds
 async function watchCalls() {
   for (;;) {
     try {
       const c = await fetch(`${URL_BASE}/api/calls`, { signal: AbortSignal.timeout(3000) }).then((r) => (r.ok ? r.json() : null))
       if (c) placeFloat(c)
     } catch { /* server down or restarting */ }
-    await new Promise((r) => setTimeout(r, 2000))
+    await new Promise((r) => { floatLook = r; setTimeout(r, 2000) })
+    floatLook = null
   }
 }
 
@@ -949,6 +952,8 @@ ipc.on('bridge:float-size', (e, w, h, low) => { if (fromFloat(e)) fitWhileResizi
 // Resized by an edge or a corner: which one the pointer took, or null when it's let go.
 ipc.on('bridge:float-resize', (e, edge) => { if (fromFloat(e)) floatResize.set(edge) })
 ipc.handle('bridge:float-hide', (e) => { if (!fromFloat(e)) return false; floatHiddenFor = floatKey; floatShare.stop(); hideFloat(); return true })
+// What the card shows changed on the server (a reminder put off, or turned off): looked at now.
+ipc.handle('bridge:float-look', (e) => { if (!fromFloat(e)) return false; floatLook?.(); return true })
 // Dragged from anywhere on it: kept whole on the screen it's over. (null, null): let go, so it's
 // remembered there.
 ipc.on('bridge:float-move', (e, x, y) => {
