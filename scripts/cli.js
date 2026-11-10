@@ -16,7 +16,7 @@
 //   bridge-ai relay [update|forget] update the relay, or stop using it
 //   bridge-ai pair                  pair a phone: QR code, link and code
 //   bridge-ai phones [remove <name>]  paired phones, or remove one
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import path from 'node:path'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
@@ -71,7 +71,16 @@ function find(list, q) {
   return list.find((t) => t.paneId === q) || list.find((t) => t.label.toLowerCase().endsWith(low)) || list.find((t) => t.label.toLowerCase().includes(low)) || null
 }
 
+// Run by the app's "Open in your terminal app" (server/terminal.js gives BRIDGE_OPENED): it's told
+// how this went, so it says "Opened" only once the agent shows here, and why not otherwise.
+const OPENED = process.env.BRIDGE_OPENED || null
+const tell = (state, error) => (!OPENED ? Promise.resolve()
+  : Promise.race([api('/terminal/opened', { method: 'POST', body: { token: OPENED, state, ...(error ? { error } : {}) } }).catch(() => {}), new Promise((r) => setTimeout(r, 2000))]))
+// eslint-disable-next-line no-control-regex
+const plainText = (s) => String(s).replace(/\x1b\[[0-9;]*m/g, '')
+
 async function attach(q) {
+  await tell('started')
   const list = await targets()
   const t = q ? find(list, q) : await pick(list)
   if (!t) throw new Error(q ? `No agent or shell matches "${q}". Run: bridge-ai list` : 'Nothing picked.')
@@ -80,7 +89,13 @@ async function attach(q) {
   // herdr owns these panes: focus this one and open herdr itself, in the session Bridge AI uses.
   if (runtime?.name === 'herdr') {
     await api(`/agents/${encodeURIComponent(t.paneId)}/focus`, { method: 'POST' }).catch(() => {})
-    const r = spawnSync('herdr', runtime.session ? ['session', 'attach', runtime.session] : [], { stdio: 'inherit' })
+    const r = await new Promise((resolve) => {
+      const c = spawn('herdr', runtime.session ? ['session', 'attach', runtime.session] : [], { stdio: 'inherit' })
+      c.on('spawn', () => tell('attached'))
+      c.on('error', (error) => resolve({ error }))
+      c.on('exit', (status) => resolve({ status }))
+    })
+    if (r.error) throw new Error(`Couldn't start herdr: ${r.error.code === 'ENOENT' ? 'it isn\'t on this terminal\'s PATH' : r.error.message}`)
     process.exit(r.status ?? 0)
   }
 
@@ -91,16 +106,21 @@ async function attach(q) {
   console.log(DIM(`Attaching to ${t.label}. Ctrl+] to detach; the agent keeps running in Bridge AI.`))
   const ws = new WebSocket(url)
   let done = false
-  const finish = (msg) => {
+  let attached = false
+  // code: 1 when it went wrong, so a window opened for this stays open to say why.
+  const finish = async (msg, code = 0) => {
     if (done) return
     done = true
     if (process.stdin.isTTY) process.stdin.setRawMode(false)
     // Leave the terminal clean: main screen, cursor on, mouse and paste modes off.
     process.stdout.write('\x1b[0m\x1b[?1049l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?1l\r\n')
     console.log(msg)
-    process.exit(0)
+    if (code && !attached) await tell('failed', plainText(msg))
+    process.exit(code)
   }
   ws.on('open', () => {
+    attached = true
+    tell('attached')
     if (process.stdin.isTTY) process.stdin.setRawMode(true)
     process.stdin.resume()
     process.stdin.on('data', (buf) => {
@@ -115,13 +135,13 @@ async function attach(q) {
       try {
         const m = JSON.parse(s)
         if (m.type === 'exit') return finish(DIM(`${t.label} ended.`))
-        if (m.type === 'error') return finish(`Couldn't attach: ${m.message}`)
+        if (m.type === 'error') return finish(`Couldn't attach: ${m.message}`, 1)
       } catch { /* program output that happens to look like JSON */ }
     }
     process.stdout.write(s)
   })
-  ws.on('close', () => finish(DIM('Connection closed.')))
-  ws.on('error', (e) => finish(`Couldn't attach: ${e.message}`))
+  ws.on('close', () => finish(DIM('Connection closed.'), attached ? 0 : 1))
+  ws.on('error', (e) => finish(`Couldn't attach: ${e.message}`, 1))
 }
 
 // ---------- status, relay and phones (for a machine with no screen) ----------
@@ -373,6 +393,8 @@ const run = {
   ls: async () => printList(await targets()),
   attach: () => attach(args.join(' ').trim()),
   a: () => attach(args.join(' ').trim()),
+  // A window the app opened runs this first (a herdr session's): it's open.
+  opened: () => tell('attached'),
   status: () => statusCmd(),
   relay: () => relayCmd(args),
   pair: () => pairCmd(args),
@@ -397,4 +419,4 @@ const run = {
 }
 const fn = run[cmd]
 if (!fn) { console.error(`Unknown command: ${cmd}`); run.help(); process.exit(2) }
-Promise.resolve().then(fn).catch((e) => { console.error(e.message); process.exit(1) })
+Promise.resolve().then(fn).catch(async (e) => { console.error(e.message); await tell('failed', e.message); process.exit(1) })

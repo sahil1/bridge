@@ -85,7 +85,7 @@ import * as studioFound from './studiofound.js'
 import * as explorer from './explorer.js'
 import * as studioApps from './studioapps.js'
 import * as openIn from './openin.js'
-import { terminals, openAttach, openCommand } from './terminal.js'
+import { terminals, autoTerminal, openAttach, openCommand, opened as terminalOpened } from './terminal.js'
 import { mcpRoutes } from './mcp.js'
 import * as notify from './notify.js'
 import * as push from './push.js'
@@ -293,7 +293,11 @@ app.get('/api/agents/:pane/screen', wrap(async (req) => {
     rt.read(req.params.pane, lines),
     paneCols(req.params.pane).catch(() => null),
   ])
-  return { ansi, cols }
+  // A full-screen app that takes the mouse keeps its history itself: the view passes it the wheel
+  // (the built-in runtime says; herdr doesn't).
+  let modes = null
+  try { modes = rt.modes?.(req.params.pane) || null } catch { /* gone meanwhile */ }
+  return { ansi, cols, ...(modes ? { alt: modes.alt, mouse: modes.mouse } : {}) }
 }))
 app.get('/api/agents/:pane/commands', wrap(async (req) => {
   const a = await findAgent(req.params.pane)
@@ -3270,22 +3274,29 @@ app.post('/api/herdr/sessions/:name/stop', wrap(async (req) => {
 app.post('/api/herdr/sessions/:name/terminal', wrap(async (req) => {
   herdrOnly()
   const argv = await herdrSessions.attachCommand(req.params.name, { create: !!req.body?.create })
-  return openCommand(argv, { app: cfg.terminal?.app, label: `herdr session ${req.params.name}`, unset: ['HERDR_SOCKET_PATH', 'HERDR_SESSION', 'HERDR_ENV', 'TMUX'] })
+  return openCommand(argv, { app: cfg.terminal?.app, env: terminalEnv(), label: `herdr session ${req.params.name}`, unset: ['HERDR_SOCKET_PATH', 'HERDR_SESSION', 'HERDR_ENV', 'TMUX'] })
 }))
 
 // ---------- Open a pane in your own terminal app ----------
-app.get('/api/terminals', wrap(async () => ({ found: await terminals(), app: cfg.terminal?.app || 'auto' })))
+// Where this server is, for the command run in the terminal app, when it isn't the default.
+function terminalEnv() {
+  const env = {}
+  if (process.env.BRIDGE_HOME) env.BRIDGE_HOME = DATA
+  if ((cfg.port || 7420) !== 7420) env.BRIDGE_PORT = String(cfg.port)
+  return env
+}
+app.get('/api/terminals', wrap(async () => ({ found: await terminals(), auto: await autoTerminal(), app: cfg.terminal?.app || 'auto' })))
+// The command a terminal app was given says how it went (scripts/cli.js): the open waiting on it
+// answers then (server/terminal.js).
+app.post('/api/terminal/opened', wrap((req) => ({ ok: terminalOpened(req.body?.token, { state: req.body?.state, error: req.body?.error }) })))
 app.post('/api/panes/:pane/terminal', wrap(async (req) => {
   let pane = req.params.pane
   const f = await rt.fleet()
   if (pane.startsWith('tab:')) pane = f.tabs.find((t) => t.tabId === pane.slice(4))?.panes[0]?.paneId || pane
   const p = (f.panes || []).find((x) => x.paneId === pane)
   if (!p) throw new Error(`No pane ${pane}`)
-  // Tell the terminal client where this server is when it isn't the default.
-  const env = {}
-  if (process.env.BRIDGE_HOME) env.BRIDGE_HOME = DATA
-  if ((cfg.port || 7420) !== 7420) env.BRIDGE_PORT = String(cfg.port)
-  return openAttach(pane, { app: cfg.terminal?.app, env, label: `${p.workspace} › ${p.tab}` })
+  // Answers once the agent shows in the terminal app, or says why it doesn't.
+  return openAttach(pane, { app: cfg.terminal?.app, env: terminalEnv(), label: `${p.workspace} › ${p.tab}` })
 }))
 
 // ---------- Consult another model (second opinions, live news, long documents) ----------

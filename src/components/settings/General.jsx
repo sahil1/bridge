@@ -201,12 +201,13 @@ function ModelField({ value, models, onSave }) {
 // "Open in terminal" uses this app; `bridge-ai attach` works in any terminal too.
 function TerminalApp({ value, onSave }) {
   const [found, setFound] = useState(null)
-  useEffect(() => { api('/terminals').then((r) => setFound(r.found)).catch(() => setFound([])) }, [])
+  const [auto, setAuto] = useState(null) // what Automatic opens now: the one you have open, else the first found
+  useEffect(() => { api('/terminals').then((r) => { setFound(r.found); setAuto(r.auto === undefined ? r.found?.[0] || null : r.auto) }).catch(() => setFound([])) }, [])
   return (
     <section className="st-sec" data-setting="terminal">
       <Line label={t('Terminal app')} hint={t('For "Open in terminal" on an agent.')} title={t('If you installed Bridge AI with npm, bridge-ai attach in any terminal works too; Ctrl+] leaves.')}>
         <select className="st-input" value={value} onChange={(e) => onSave(e.target.value)} aria-label={t('Terminal app')}>
-          <option value="auto">Automatic{found?.[0] ? ` (${found[0].name})` : ''}</option>
+          <option value="auto">Automatic{auto ? ` (${auto.name})` : ''}</option>
           {(found || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
         </select>
       </Line>

@@ -2078,6 +2078,7 @@
   "Open {path} in Files": "{path} को फ़ाइलों में खोलें",
   "Opened in {app}. Ctrl+] detaches there.": "{app} में खुला। वहाँ Ctrl+] से अलग करें।",
   "Opened {when}": "{when} खोली गई",
+  "Opening in your terminal app…": "अपने टर्मिनल ऐप में खोल रहे हैं…",
   "Opening the whiteboard…": "व्हाइटबोर्ड खुल रहा है…",
   "Opening {name}…": "{name} खुल रहा है…",
   "Opening…": "खुल रहा है…",

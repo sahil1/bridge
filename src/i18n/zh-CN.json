@@ -2078,6 +2078,7 @@
   "Open {path} in Files": "在“文件”中打开 {path}",
   "Opened in {app}. Ctrl+] detaches there.": "已在 {app} 中打开。在那里按 Ctrl+] 可分离。",
   "Opened {when}": "{when}打开过",
+  "Opening in your terminal app…": "正在你的终端应用中打开…",
   "Opening the whiteboard…": "正在打开白板…",
   "Opening {name}…": "正在打开 {name}…",
   "Opening…": "正在打开…",

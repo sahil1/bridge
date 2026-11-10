@@ -2078,6 +2078,7 @@
   "Open {path} in Files": "{path} in Dateien öffnen",
   "Opened in {app}. Ctrl+] detaches there.": "In {app} geöffnet. Ctrl+] trennt dort.",
   "Opened {when}": "Geöffnet: {when}",
+  "Opening in your terminal app…": "Wird in deiner Terminal-App geöffnet…",
   "Opening the whiteboard…": "Whiteboard wird geöffnet…",
   "Opening {name}…": "{name} wird geöffnet…",
   "Opening…": "Wird geöffnet…",
