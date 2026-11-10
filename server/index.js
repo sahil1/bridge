@@ -3339,6 +3339,17 @@ app.get('/{*splat}', (req, res) => {
   res.sendFile('index.html', { root: dist })
 })
 
+// What couldn't be read of a request (express.json, above): one whose page went away as it was
+// sent (a window closed or reloaded) has no one to answer and isn't worth its stack in the log; one
+// too big or not JSON is told why, in JSON like every other answer here (it was a page of HTML,
+// which the app could only show as "HTTP 413").
+app.use((err, req, res, next) => {
+  if (err?.type === 'request.aborted' || req.destroyed) return
+  if (err?.type === 'entity.too.large') return res.status(413).json({ error: `That's more than Bridge AI takes at once (${Math.round(err.limit / 1048576)} MB at most)` })
+  if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'Bridge AI couldn\'t read what was sent (it wasn\'t JSON)' })
+  next(err)
+})
+
 const server = http.createServer(app)
 // WebSockets: herdr's live view (herdr runtime) and terminal clients attaching to a pane
 // (`bridge-ai attach`, built-in runtime). Each checked by the guard first.

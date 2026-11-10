@@ -96,6 +96,28 @@ try {
     ok(!fs.existsSync(path.join(kit.home, 'new.txt')), 'and still throws a new file away', thrown)
   }
 
+  // What can't be read of a request: too big or not JSON, told why in JSON; one whose page went
+  // away as it was sent, nothing to answer and nothing in the log.
+  {
+    const post = (body, { cut = false } = {}) => new Promise((resolve) => {
+      const r = http.request({ host: '127.0.0.1', port: kit.port, path: '/api/settings', method: 'PATCH', headers: { Host: `127.0.0.1:${kit.port}`, 'Content-Type': 'application/json', 'Content-Length': cut ? body.length * 10 : Buffer.byteLength(body) } }, (res) => {
+        let s = ''
+        res.on('data', (c) => { s += c })
+        res.on('end', () => { let j = null; try { j = JSON.parse(s) } catch { /* not JSON */ } resolve({ status: res.statusCode, j }) })
+      })
+      r.on('error', () => resolve({ status: 0 }))
+      // Cut: the start of it sent, then the connection gone, as a window closing does.
+      if (cut) { r.on('close', () => resolve({ status: 0 })); r.write(body, () => r.destroy()) } else r.end(body)
+    })
+    const big = await post(JSON.stringify({ name: 'x'.repeat(1.2 * 1048576) }))
+    ok(big.status === 413 && /more than Bridge AI takes at once \(1 MB at most\)/.test(big.j?.error || ''), 'a request too big: told so, in JSON', big)
+    const bad = await post('{"name": ')
+    ok(bad.status === 400 && /couldn't read what was sent/.test(bad.j?.error || ''), 'one that isn\'t JSON: told so, in JSON', bad)
+    await post('{"name": "half', { cut: true })
+    await kit.api('/config') // (the server has had that connection end by the time it answers this)
+    ok(!/request aborted/.test(kit.log()), 'one whose page went away as it was sent: nothing in the log', kit.log().slice(-600))
+  }
+
   // What's typed in Claude's input box, before a message goes in (promptsafe.js), on screens as
   // Claude Code 2.1 draws them: the ❯ greys while it works, its cursor is an inverse cell, and a
   // placeholder or suggestion is faint, possibly starting under the cursor.
