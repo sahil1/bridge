@@ -90,18 +90,27 @@ export const autoTerminal = () => pickApp('auto').catch(() => null)
 // Start the app (on a Mac, ask `open` to). It can't be started, or `open` fails (no such app):
 // an error in its own words. A Linux terminal runs as long as its window is open, so one still
 // running after a moment has started.
+// BRIDGE_TERMINAL_STANDIN (tests): a program run in its place, handed what it was (wt.exe, cmd.exe)
+// and the same arguments. On Windows that's a .cmd, whose Node script is run directly: started on
+// its own, a .cmd gets no console, and Node would open one of its own.
 function launch(cmd, args) {
+  const name = path.basename(cmd)
+  const standIn = process.env.BRIDGE_TERMINAL_STANDIN
+  if (standIn) {
+    const js = IS_WIN && /\.cmd$/i.test(standIn) ? standIn.replace(/\.cmd$/i, '.cjs') : null
+    ;[cmd, args] = js && fs.existsSync(js) ? [process.execPath, [js, name, ...args]] : [standIn, [name, ...args]]
+  }
   return new Promise((resolve, reject) => {
     let said = ''
     let child
-    try { child = spawn(cmd, args, { detached: true, stdio: ['ignore', 'ignore', IS_MAC ? 'pipe' : 'ignore'], windowsHide: false }) } catch (e) { reject(e); return }
+    try { child = spawn(cmd, args, { detached: true, stdio: ['ignore', 'ignore', IS_MAC ? 'pipe' : 'ignore'], windowsHide: !!standIn && IS_WIN }) } catch (e) { reject(e); return }
     child.stderr?.on('data', (d) => { said += d })
     const started = setTimeout(() => { child.stderr?.destroy(); child.unref(); resolve() }, IS_MAC ? 15000 : 2000)
-    child.on('error', (e) => { clearTimeout(started); reject(new Error(e.code === 'ENOENT' ? `${cmd} wasn't found` : e.message)) })
+    child.on('error', (e) => { clearTimeout(started); reject(new Error(e.code === 'ENOENT' ? `${name} wasn't found` : e.message)) })
     child.on('exit', (code) => {
       clearTimeout(started)
       child.unref()
-      if (code) reject(new Error(said.trim().split('\n').pop() || `${cmd} stopped (${code})`))
+      if (code) reject(new Error(said.trim().split('\n').pop() || `${name} stopped (${code})`))
       else resolve()
     })
   })
