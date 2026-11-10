@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import SoundButton from './components/SoundButton.jsx'
 import StatusMenu, { UsageChip, UsageGlance, WeatherChip, ClockChip } from './components/StatusMenu.jsx'
 import Icon, { StatusDot } from './components/Icon.jsx'
@@ -8,6 +8,7 @@ import ErrorBoundary, { Quiet } from './components/ErrorBoundary.jsx'
 import { CrashNotice } from './components/CrashReport.jsx'
 import Rail, { agentName } from './components/Rail.jsx'
 import Board from './components/Board.jsx'
+import TabStrip from './components/TabStrip.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty, showChat } from './components/Console.jsx'
 import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, WhiteboardsHome, WhiteboardPage, StudioHome, StudioPage, Explorer, UsageStats, preloadViews } from './lazy.jsx'
@@ -603,9 +604,12 @@ function App() {
   const linked = useRef(false)
   useEffect(() => { if (fleet && !linked.current) { linked.current = true; openLink() } }, [fleet])
 
-  const closeTab = (id) => setW((w) => {
+  // then: the tab to show in its place (the strip's next one, as in a browser), when it isn't already
+  // on screen; else the first that isn't.
+  const closeTab = (id, then = null) => setW((w) => {
     const tabs = w.tabs.filter((t) => t !== id)
-    const next = (cur) => (cur === id ? tabs.find((t) => t !== w.active && t !== w.side) || null : cur)
+    const free = (t) => t !== w.active && t !== w.side
+    const next = (cur) => (cur === id ? (tabs.includes(then) && free(then) ? then : tabs.find(free)) || null : cur)
     let active = next(w.active)
     let side = next(w.side)
     if (!active && side) { active = side; side = null }
@@ -727,9 +731,6 @@ function App() {
     return () => window.removeEventListener('bridge-tour', on)
   }, [])
   const endTour = () => { setTour(false); setToured((t) => ({ ...t, [device]: true })) }
-  // The tab being dragged (below). Up here, before the phone layout returns, so a phone turned
-  // sideways into the wide layout keeps the same hooks instead of crashing.
-  const [tabDrag, setTabDrag] = useState(null) // { id, over, after }
 
   const nextTheme = { system: 'dark', dark: 'light', light: 'system' }[theme]
   // Home and Everything open full size on a computer, as the map does (opening anything from them
@@ -1112,95 +1113,17 @@ function App() {
     return { ...w, tabs }
   })
 
-  // Tab Groups (a beta feature): the tabs kept together as the sidebar has them. Home and the other
-  // views first, then each space of this computer in the sidebar's order, then each of your other
-  // computers under its name, so what's from elsewhere is out of the way of what you're doing here.
-  // A group's name folds it to that name, how many it holds and the most urgent dot among them (the
-  // tab on screen stays out); with only one group there are no names, nor for a space whose one tab
-  // is named as it is (the Chief of Staff's). Each tab's place in its group
-  // is yours, as before (drag, or Ctrl+Shift+←/→).
+  // The tabs above the agents (TabStrip.jsx), with Tab Groups when that beta feature is on.
   const grouping = conf?.trials?.['tab-groups'] === true
-  const openTabs = W.tabs.filter((id) => byId[id])
-  const groupOf = (id) => {
-    const a = byId[id]
-    if (a.view) return { key: 'views', at: -1 }
-    if (a.remote) return { key: `dev:${a.remote.machine || 'here'}`, at: 1e6, label: a.device || t('Another computer'), device: true }
-    const spaces = fleet?.workspaces || []
-    const i = spaces.findIndex((w) => w.id === a.workspaceId)
-    return { key: `ws:${a.workspaceId || ''}`, at: i < 0 ? 1e5 : i, label: spaces[i]?.label || a.workspace || t('Space') }
-  }
-  const groups = !grouping ? [{ key: 'all', ids: openTabs }] : [...openTabs.reduce((m, id, n) => {
-    const g = groupOf(id)
-    if (!m.has(g.key)) m.set(g.key, { ...g, first: n, ids: [] })
-    m.get(g.key).ids.push(id)
-    return m
-  }, new Map()).values()].sort((x, y) => x.at - y.at || x.first - y.first)
-  // An agent's tab is named as the sidebar names it (its tab's name, not its terminal's title, which
-  // on Windows can be the shell's own); a view, a terminal or another computer's agent by its title.
-  const tabName = (a) => (a.view || a.shellTab || a.remote ? a.title : agentName(a))
-  const named = groups.filter((g) => g.label).length > 1 || groups.some((g) => g.device)
-  const headed = (g) => named && !!g.label && (g.device || g.ids.length > 1 || String(tabName(byId[g.ids[0]]) || '').trim().toLowerCase() !== String(g.label).trim().toLowerCase())
-  const URGENT = { blocked: 0, working: 1, done: 2, idle: 3 }
-  const worstOf = (ids) => ids.map((id) => byId[id]?.status).filter((x) => x in URGENT).sort((x, y) => URGENT[x] - URGENT[y])[0] || 'unknown'
   const foldGroup = (key) => setW((w) => ({ ...w, folded: { ...(w.folded || {}), [key]: !w.folded?.[key] } }))
-  const groupHead = (g, folded) => (
-    <button type="button" className={`ws-group ${folded ? 'folded' : ''} ${g.device ? 'device' : ''}`} onClick={() => foldGroup(g.key)} aria-expanded={!folded}
-      title={folded ? (g.ids.length === 1 ? t('{name}: 1 tab. Show it', { name: g.label }) : t('{name}: {n} tabs. Show them', { name: g.label, n: g.ids.length })) : t('{name}: fold its tabs away', { name: g.label })}>
-      {g.device ? <Icon name="laptop" size={11} /> : <StatusDot status={worstOf(g.ids)} size={6} />}
-      <span className="ws-group-name">{g.label}</span>
-      {folded && <span className="ws-group-n">{g.ids.length}</span>}
-    </button>
-  )
   const tabStrip = (
-    <div className="ws-tabs" role="tablist" aria-label={t('Open agents')}>
-      <div className="ws-tabs-scroll">
-        {groups.map((g) => {
-          const folded = headed(g) && !!W.folded?.[g.key]
-          const ids = folded ? g.ids.filter((id) => id === W.active || (split && id === W.side)) : g.ids
-          return (
-            <Fragment key={g.key}>
-              {headed(g) && groupHead(g, folded)}
-              {ids.map((id) => {
-                const a = byId[id]
-                const inMain = id === W.active
-                const inSide = split && id === W.side
-                return (
-                  <div key={id} role="tab" data-pane={id} aria-selected={inMain || inSide} tabIndex={0} draggable
-                    className={`ws-tab ${inMain ? 'main' : ''} ${inSide ? 'side' : ''} ${(inMain && W.group === 'main') || (inSide && W.group === 'side') ? 'focus' : ''} ${tabDrag?.id === id ? 'dragging' : ''} ${tabDrag?.over === id && tabDrag.id !== id ? (tabDrag.after ? 'drop-after' : 'drop-before') : ''}`}
-                    onClick={() => openAgent(id)} onAuxClick={(e) => { if (e.button === 1) closeTab(id) }}
-                    onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-bridge-tab', id); setTabDrag({ id }) }}
-                    onDragOver={(e) => {
-                      if (!tabDrag) return
-                      e.preventDefault()
-                      const r = e.currentTarget.getBoundingClientRect()
-                      const after = e.clientX > r.left + r.width / 2
-                      if (tabDrag.over !== id || tabDrag.after !== after) setTabDrag({ ...tabDrag, over: id, after })
-                    }}
-                    onDrop={(e) => { e.preventDefault(); if (tabDrag) moveTab(tabDrag.id, id, tabDrag.after); setTabDrag(null) }}
-                    onDragEnd={() => setTabDrag(null)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') openAgent(id)
-                      if (e.ctrlKey && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); nudgeTab(id, e.key === 'ArrowLeft' ? -1 : 1) }
-                    }} title={a.view ? a.title : a.shellTab ? `${a.workspace} › ${a.label}` : a.remote ? `${a.title}\n${t('On {name}', { name: a.device })}` : `${a.title}\n${a.cwd}`}>
-                    {a.view ? <Icon name={a.icon} size={12} className="muted" /> : a.chief ? <Icon name="helm" size={13} className="tab-ship" /> : a.shellTab ? <Icon name="terminal" size={12} className="muted" /> : <StatusDot status={a.status} size={7} />}
-                    <span className="ws-tab-name">{tabName(a)}</span>
-                    {a.remote && a.device && !named && <span className="ws-tab-where">{a.device}</span>}
-                    {a.chief && <StatusDot status={a.status} size={6} />}
-                    <button className="ws-tab-x" aria-label={t('Close {name}', { name: tabName(a) })} onClick={(e) => { e.stopPropagation(); closeTab(id) }}><Icon name="x" size={11} /></button>
-                  </div>
-                )
-              })}
-            </Fragment>
-          )
-        })}
-      </div>
-      <div className="ws-tab-tools">
-        <button className={`win-btn ${split ? 'on' : ''}`} onClick={toggleSplit} disabled={!canSplit || W.tabs.length < 2}
-          title={!canSplit ? t('Not enough room to split') : W.tabs.length < 2 ? t('Open a second agent to split') : split ? t('Unsplit') : t('Split side by side')} aria-label={t('Split')}>
-          <Icon name="split" size={15} />
-        </button>
-      </div>
-    </div>
+    <TabStrip ids={W.tabs} byId={byId} active={W.active} side={split ? W.side : null} focus={W.group} folded={W.folded} grouping={grouping} spaces={fleet?.workspaces}
+      onOpen={openAgent} onClose={closeTab} onMove={moveTab} onNudge={nudgeTab} onFold={foldGroup}>
+      <button className={`win-btn ${split ? 'on' : ''}`} onClick={toggleSplit} disabled={!canSplit || W.tabs.length < 2}
+        title={!canSplit ? t('Not enough room to split') : W.tabs.length < 2 ? t('Open a second agent to split') : split ? t('Unsplit') : t('Split side by side')} aria-label={t('Split')}>
+        <Icon name="split" size={15} />
+      </button>
+    </TabStrip>
   )
 
   const boardEl = (
