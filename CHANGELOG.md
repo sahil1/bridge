@@ -4,7 +4,7 @@ Each version's section here becomes its GitHub release notes (`npm run release`)
 
 ## 3.13.4
 
-Fixes: a PowerPoint shows its own background in Studio; the tabs all stay on screen, as in Chrome; the sidebar folds and scrolls as one; scroll bars only when you need them.
+Fixes: a PowerPoint shows its own background in Studio; the tabs all stay on screen, as in Chrome; the sidebar folds and scrolls as one; scroll bars only when you need them; Studio takes a phone's photo; a setting found in Settings stays where it shows; and what can't load in Settings › Model Providers can be tried again.
 
 ### Fixes
 
@@ -18,13 +18,6 @@ Fixes: a PowerPoint shows its own background in Studio; the tabs all stay on scr
 - **The sidebar folds**: Views (Home to Files) folds to one row of icons and Spaces to how many there are, each kept on this computer. The sidebar scrolls as one, with both headings always in sight, and a long day or month of meetings has Show more instead of a list scrolling on its own.
 - **Scroll bars show only when you need them**, as macOS draws them: thin, with no track, while the pointer is over that area or you scroll it, in light and dark. They no longer show in every pane at once when your Mac is set to always show them.
 - **A meeting in a short panel scrolls as one page** (a small window, or the Agents panel under it), rather than the page scrolling and each column inside it scrolling too.
-
-## 3.13.3
-
-Fixes: Studio takes a phone's photo; a setting found in Settings stays where it shows; and what can't load in Settings › Model Providers can be tried again.
-
-### Fixes
-
 - **Studio takes a picture over 1 MB**, as most phones' photos are, in a document or a deck, and a Word copy or a deck for AI Assist over 1 MB: they were turned away as "HTTP 413".
 - **A setting found in Settings stays where it shows** while the rest of its section comes: on a busy computer, what came above it a few seconds later (Set up's list, Permissions) slid it down, off the window, and a click meant for it could land on something else.
 - **Settings › Model Providers has Retry** when your agents' sign-ins, your accounts or the cloud agents couldn't be checked (Bridge AI starting again after an update, say): they stayed so until you left the window and came back.
