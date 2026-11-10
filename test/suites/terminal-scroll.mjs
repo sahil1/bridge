@@ -4,7 +4,9 @@
 // of its own that takes the mouse, as Claude Code's fullscreen renderer does.
 // The runtime keeps all 8,000. The Terminal tab opens on the latest; scrolling up with the keys, the
 // rest is read in before the view reaches the top of the first lines it read, and the scroll goes
-// on through without stopping, never jumping and never showing the terminal empty; the wheel
+// on through without stopping: in every frame shown, the view is never further up than the keys
+// pressed so far take it, never goes back down, and never shows the terminal empty. So too on a
+// slow computer (the page slowed: Chromium's CPU six times, WebKit's every frame by 25 ms); the wheel
 // scrolls too; the scroll bar's thumb taken to the top shows line 1, and only then is it said
 // that's as far back as the terminal keeps; back at the bottom it's the latest again. With the
 // agent printing meanwhile, the lines you're reading stay put when the rest comes in, and what's
@@ -14,7 +16,7 @@
 // the full-screen agent scrolls its history; a New terminal scrolls by a swipe too.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, withoutCutOff, TEST } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, withoutCutOff, TEST, IS_WIN } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('terminal-scroll')
 const kit = await startKit('terminal-scroll')
@@ -35,31 +37,76 @@ const top = (p) => p.evaluate((sel) => {
   return m ? Number(m[1]) : null
 }, TERM)
 const hint = (p) => p.locator(`${TERM} .term-hint`).filter({ visible: true }).first().innerText().catch(() => '')
-// The top line in every frame drawn, from now until stopped. Read as each frame is about to be
-// shown (a ResizeObserver's turn comes after every requestAnimationFrame callback, xterm's drawing
-// among them, and before the frame is shown), so it's what's on screen, not a moment between.
+// The top line in every frame drawn, and when each Page Up was pressed, from now until stopped.
+// Read as each frame is about to be shown (a ResizeObserver's turn comes after every
+// requestAnimationFrame callback, xterm's drawing among them, and before the frame is shown), so
+// it's what's on screen, not a moment between.
 const watch = (p) => p.evaluate((sel) => {
-  window.__tops = []
+  window.__frames = []
+  window.__keys = []
   const probe = document.createElement('div')
   probe.style.cssText = 'position:fixed;left:-20px;top:0;width:1px;height:1px'
   document.body.append(probe)
   const ro = new ResizeObserver(() => {
     const row = [...document.querySelectorAll(`${sel} .xterm-rows`)].find((e) => e.offsetParent && e.getBoundingClientRect().height > 0)?.firstElementChild
     const m = /line (\d+) of/.exec(row?.textContent || '')
-    window.__tops.push(m ? Number(m[1]) : null)
+    window.__frames.push([performance.now(), m ? Number(m[1]) : null])
   })
   ro.observe(probe)
+  const key = (e) => { if (e.key === 'PageUp') window.__keys.push(performance.now()) }
+  document.addEventListener('keydown', key, true)
   const each = () => {
-    if (!window.__watching) { ro.disconnect(); probe.remove(); return }
+    if (!window.__watching) { ro.disconnect(); probe.remove(); document.removeEventListener('keydown', key, true); return }
     probe.style.width = probe.style.width === '1px' ? '2px' : '1px'
     requestAnimationFrame(each)
   }
   window.__watching = true
   requestAnimationFrame(each)
 }, TERM)
-const watched = (p) => p.evaluate(() => { window.__watching = false; return window.__tops })
-// Frames that went the wrong way, or further than two pages at once, or showed no line at all.
-const jumps = (tops, page) => tops.map((t, i) => [tops[i - 1], t]).slice(1).filter(([a, t]) => t == null || a == null || t > a || a - t > page * 2)
+const watched = (p) => p.evaluate(() => { window.__watching = false; return { frames: window.__frames, keys: window.__keys } })
+// Frames that showed no line, went down, or had the view further up than the Page Ups pressed so
+// far take it (a page is the terminal's rows less one). A slow computer draws fewer frames, so
+// several keys can fall between two, and a key's page can show a frame late; the view still never
+// gets ahead of the keys, and never goes back down.
+const jumps = ({ frames, keys }, page) => {
+  const out = []
+  const start = frames[0]?.[1]
+  for (let i = 1; i < frames.length; i++) {
+    const [ta, a] = frames[i - 1]
+    const [tb, t] = frames[i]
+    const pressed = keys.filter((k) => k <= tb).length
+    if (a == null || t == null || t > a || start - t > page * pressed) out.push({ from: a, to: t, ms: Math.round(tb - ta), pressed, moved: start - t })
+  }
+  return out
+}
+// The page slowed as a slower computer is: Chromium's CPU six times slower, WebKit (which can't be
+// slowed that way) busy for 25 ms of every frame. Gives back a function that ends it.
+const slow = async (p, which) => {
+  if (which === 'chromium') {
+    const cdp = await p.context().newCDPSession(p)
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 })
+    return () => cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+  }
+  await p.evaluate(() => {
+    window.__slow = true
+    const busy = () => { if (!window.__slow) return; const t = performance.now(); while (performance.now() - t < 25) { /* a slow frame */ } requestAnimationFrame(busy) }
+    requestAnimationFrame(busy)
+  })
+  return () => p.evaluate(() => { window.__slow = false })
+}
+// Up with the keys, a page at a time, as fast as a hand scrolls, until the top line is above `to`.
+// Gives back the top line when the long read was asked for (null: it wasn't).
+const pageUp = async (p, to, asked) => {
+  let at = null
+  for (let i = 0; i < 300; i++) {
+    await p.keyboard.press('Shift+PageUp')
+    await p.waitForTimeout(40)
+    const tp = await top(p)
+    if (at == null && asked()) at = tp
+    if (tp != null && tp < to) break
+  }
+  return at
+}
 const thumb = (p) => p.locator(`${TERM} .xterm-scrollable-element > .scrollbar.vertical > .slider`).filter({ visible: true }).first()
 // The scroll bar's thumb dragged to the top (or the bottom) of its track, as a hand would.
 const dragThumb = async (p, to) => {
@@ -85,6 +132,7 @@ try {
   fs.mkdirSync(dir, { recursive: true })
   const plain = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Long run', newSpace: 'Work', prompt: 'plain 8000' })
   const workspaceId = plain.paneId.split(':')[0]
+  const slowOne = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Slow computer', workspaceId, prompt: 'plain 8000' })
   await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Busy run', workspaceId, prompt: 'busy 8000' })
   const full = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Full view', workspaceId, prompt: 'fullscreen 8000' })
   const kept = await until(async () => { const s = await kit.api(`/agents/${enc(plain.paneId)}/screen?lines=20000`); return /line 8000 of/.test(s.ansi) && s }, 30000, 500)
@@ -97,28 +145,23 @@ try {
   // ---------- An agent that printed 8,000 lines ----------
   const { ctx, p, errors } = await page(b, kit.url, { height: 900 })
   const reads = []
-  p.on('request', (r) => { const m = /\/agents\/([^/]+)\/screen\?lines=(\d+)/.exec(r.url()); if (m && decodeURIComponent(m[1]) === plain.paneId) reads.push({ lines: Number(m[2]), at: Date.now() }) })
+  p.on('request', (r) => { const m = /\/agents\/([^/]+)\/screen\?lines=(\d+)/.exec(r.url()); if (m) reads.push({ pane: decodeURIComponent(m[1]), lines: Number(m[2]), at: Date.now() }) })
+  const longRead = (pane) => () => reads.some((r) => r.pane === pane && r.lines === 20000)
   await openTerminal(p, 'Long run')
   ok(!!(await until(async () => /line 8000 of/.test(await p.locator(`${TERM} .xterm-rows`).filter({ visible: true }).first().innerText().catch(() => '')), 20000)), 'its Terminal tab opens on the latest line')
-  ok(reads.length > 0 && reads.every((r) => r.lines === 1500), 'while you watch, it reads the last 1,500 lines', reads.map((r) => r.lines))
-  const page1 = await rowsPerPage(p)
+  const mine = reads.filter((r) => r.pane === plain.paneId)
+  ok(mine.length > 0 && mine.every((r) => r.lines === 1500), 'while you watch, it reads the last 1,500 lines', mine.map((r) => r.lines))
+  const page1 = (await rowsPerPage(p)) - 1
 
   // Up with the keys, a page at a time, as fast as a hand scrolls: the rest is read in on the way.
   await p.locator(`${TERM} .terminal-host`).filter({ visible: true }).first().click()
   await watch(p)
-  let readAt = null
-  for (let i = 0; i < 200; i++) {
-    await p.keyboard.press('Shift+PageUp')
-    await p.waitForTimeout(40)
-    const tp = await top(p)
-    if (readAt == null && reads.some((r) => r.lines === 20000)) readAt = tp
-    if (tp != null && tp < 6000) break
-  }
-  const tops = await watched(p)
-  ok(readAt != null && readAt > 6501, 'scrolling up, the rest is read in before the view reaches the top of the first 1,500 lines', { readAt, reads: reads.map((r) => r.lines) })
+  const readAt = await pageUp(p, 6000, longRead(plain.paneId))
+  const seen = await watched(p)
+  ok(readAt != null && readAt > 6501, 'scrolling up, the rest is read in before the view reaches the top of the first 1,500 lines', { readAt })
   ok((await top(p)) < 6501, 'and the scroll goes on past them without stopping', { top: await top(p) })
-  const bad = jumps(tops, page1)
-  ok(tops.length > 10 && bad.length === 0, 'in every frame on the way, the view moved up or stayed: it never jumped and never showed the terminal empty', { frames: tops.length, bad: bad.slice(0, 5) })
+  const bad = jumps(seen, page1)
+  ok(seen.frames.length > 10 && bad.length === 0, 'in every frame on the way, the view moved up only as far as the keys took it, never down, and never showed the terminal empty', { frames: seen.frames.length, bad: bad.slice(0, 5) })
 
   // The wheel scrolls it too.
   const host = await p.locator(`${TERM} .terminal-host`).filter({ visible: true }).first().boundingBox()
@@ -147,20 +190,29 @@ try {
   await p.keyboard.press('Shift+PageUp')
   await p.waitForTimeout(100)
   await watch(p)
-  for (let i = 0; i < 200; i++) {
-    await p.keyboard.press('Shift+PageUp')
-    await p.waitForTimeout(60)
-    if ((await top(p) ?? 1e9) < 6200) break
-  }
-  const busyTops = await watched(p)
-  const busyBad = jumps(busyTops, page1)
-  ok(busyBad.length === 0, 'with new lines coming in while the rest is read in, the lines you\'re reading stay put: no frame jumps', { frames: busyTops.length, bad: busyBad.slice(0, 5) })
+  await pageUp(p, 6200, () => false)
+  const busySeen = await watched(p)
+  const busyBad = jumps(busySeen, page1)
+  ok(busyBad.length === 0, 'with new lines coming in while the rest is read in, the lines you\'re reading stay put: no frame jumps', { frames: busySeen.frames.length, bad: busyBad.slice(0, 5) })
   const still = await top(p)
   await p.waitForTimeout(2500)
   ok((await top(p)) === still, 'reading back, the view holds still while the agent prints', { before: still, after: await top(p) })
   ok(await p.locator(`${TERM} .term-jump`).first().isVisible(), 'and offers New output · jump to latest')
   await p.locator(`${TERM} .term-jump`).first().click()
   ok(!!(await until(async () => !(await p.locator(`${TERM} .term-jump`).first().isVisible()) && /line 8\d\d\d of/.test(await p.locator(`${TERM} .xterm-rows`).filter({ visible: true }).first().innerText().catch(() => '')), 5000)), 'which shows the latest lines')
+
+  // ---------- On a slow computer ----------
+  await openTerminal(p, 'Slow computer')
+  ok(!!(await until(async () => /line 8000 of/.test(await p.locator(`${TERM} .xterm-rows`).filter({ visible: true }).first().innerText().catch(() => '')), 20000)), 'slow computer: the Terminal tab opens on the latest line')
+  await p.locator(`${TERM} .terminal-host`).filter({ visible: true }).first().click()
+  const fast = await slow(p, which)
+  await watch(p)
+  const slowAt = await pageUp(p, 6000, longRead(slowOne.paneId))
+  const slowSeen = await watched(p)
+  await fast()
+  ok(slowAt != null && slowAt > 6501 && (await top(p)) < 6501, 'slow computer: the rest is read in on the way up, and the scroll goes on past the first lines without stopping', { readAt: slowAt, top: await top(p) })
+  const slowBad = jumps(slowSeen, page1)
+  ok(slowSeen.frames.length > 10 && slowBad.length === 0, 'slow computer: in every frame, the view moved up only as far as the keys took it, never down, and never showed the terminal empty', { frames: slowSeen.frames.length, bad: slowBad.slice(0, 5) })
 
   // ---------- A full-screen agent that keeps its own history ----------
   await openTerminal(p, 'Full view')
@@ -181,12 +233,14 @@ try {
 
   // ---------- A New terminal, on a touch screen ----------
   const sh = await kit.api('/agents/launch', { kind: 'shell', cwd: kit.home, label: 'Terminal', newSpace: 'Terminals' })
-  await until(async () => /\$\s*$/.test(plainText((await kit.api(`/agents/${enc(sh.paneId)}/screen?lines=20`)).ansi).trimEnd()), 10000)
-  await kit.api(`/panes/${enc(sh.paneId)}/input`, { steps: [{ text: 'i=1; while [ $i -le 3000 ]; do echo "line $i of the agent\'s output"; i=$((i+1)); done' }, { keys: ['enter'] }] })
-  await until(async () => /line 3000 of/.test(plainText((await kit.api(`/agents/${enc(sh.paneId)}/screen?lines=20`)).ansi)), 15000)
+  await until(async () => /[$>]\s*$/.test(plainText((await kit.api(`/agents/${enc(sh.paneId)}/screen?lines=20`)).ansi).trimEnd()), 20000)
+  // 3,000 numbered lines, as the shell there writes them (PowerShell on Windows).
+  const count = IS_WIN ? '1..3000 | % { "line $_ of the agent\'s output" }' : 'i=1; while [ $i -le 3000 ]; do echo "line $i of the agent\'s output"; i=$((i+1)); done'
+  await kit.api(`/panes/${enc(sh.paneId)}/input`, { steps: [{ text: count }, { keys: ['enter'] }] })
+  await until(async () => /line 3000 of/.test(plainText((await kit.api(`/agents/${enc(sh.paneId)}/screen?lines=20`)).ansi)), 30000)
   const shTab = (await kit.api('/fleet')).tabs.find((x) => x.panes.some((q) => q.paneId === sh.paneId))
   await p.evaluate((paneId) => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId } })), `tab:${shTab.tabId}`)
-  ok(!!(await until(async () => /line 3000 of/.test(await p.locator('.live-shell .xterm-rows').first().innerText().catch(() => '')), 15000)), 'a New terminal shows what it printed')
+  ok(!!(await until(async () => /line 3000 of/.test(await p.locator('.live-shell .xterm-rows').first().innerText().catch(() => '')), 20000)), 'a New terminal shows what it printed', plainText((await kit.api(`/agents/${enc(sh.paneId)}/screen?lines=20`)).ansi).slice(-300))
   const shTop = () => p.evaluate(() => { const m = /line (\d+) of/.exec(document.querySelector('.live-shell .xterm-rows')?.firstElementChild?.textContent || ''); return m ? Number(m[1]) : null })
   const was = await shTop()
   const swiped = await p.evaluate(async () => {
