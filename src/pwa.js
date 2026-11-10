@@ -1,4 +1,4 @@
-import { api, viaRelay, embedded } from './api.js'
+import { api, viaRelay, embedded, machineId } from './api.js'
 
 // Bridge AI as an app on your phone (or in your browser): the service worker, push notifications
 // for this device, and links from notifications. The desktop app has its own notifications, so
@@ -27,15 +27,18 @@ export function openLink(href = location.href) {
 }
 
 // Say when you're using Bridge AI on this computer (its window in front, or you typed or clicked in
-// it), so your phone stays quiet meanwhile. Only from this computer; a phone never says it.
+// it), so your phone stays quiet meanwhile. Only from this computer's own page: a phone never says
+// it, nor a window showing another computer (it would go to that one, which takes it from no page
+// but its own). It goes even as the page is left or reloaded (keepalive), which would otherwise cut
+// it off: leaving is worth saying too.
 export function reportPresence() {
-  if (viaRelay || embedded || !/^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname)) return
+  if (viaRelay || embedded || machineId || !/^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname)) return
   const id = Math.random().toString(36).slice(2)
   let told = 0
   const say = async (input) => {
     // The desktop app also knows how long since you last touched the computer at all.
     const idle = await window.bridgeApp?.idle?.().catch(() => null)
-    api('/presence', { method: 'POST', body: { id, focused: document.hasFocus() && !document.hidden, input, idle } }).catch(() => {})
+    api('/presence', { method: 'POST', keepalive: true, body: { id, focused: document.hasFocus() && !document.hidden, input, idle } }).catch(() => {})
   }
   const onInput = () => { if (Date.now() - told > 20000) { told = Date.now(); say(true) } }
   for (const ev of ['focus', 'blur']) window.addEventListener(ev, () => say(false))
