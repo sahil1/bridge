@@ -404,10 +404,11 @@ try {
   for (const look of [{ mode: 'light', theme: 'sky' }, { mode: 'dark', theme: 'midnight' }, { mode: 'light', theme: 'sky', phone: true }, { mode: 'dark', theme: 'midnight', phone: true }]) {
     const t = `settings ${look.theme}${look.phone ? ' phone' : ''}`
     const { ctx, p, errors } = await page(b, kit.url, { ...look, before: fake })
-    await p.locator('.topbar .status-btn, .tabbar button').first().waitFor({ timeout: 15000 }).catch(() => {})
+    const up = await p.locator('.topbar .status-btn, .tabbar button').first().waitFor({ timeout: 15000 }).then(() => true, () => false)
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'accounts' } })))
     const sec = p.locator('#pv-accounts')
-    await sec.waitFor({ timeout: 15000 })
+    // (Once in CI it never showed: what the window had then.)
+    await sec.waitFor({ timeout: 15000 }).catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} (the window ${up ? 'was' : 'wasn\'t'} up when Settings was asked for; Settings: ${(await p.locator('.modal.settings').first().innerText({ timeout: 1000 }).catch(() => 'not open')).replace(/\s+/g, ' ').slice(0, 400)})`) })
     ok(!!(await until(async () => /Main/.test(await sec.innerText()) && /your usual login/.test(await sec.innerText()), 10000)), `${t}: Main, said to be your usual login`, await sec.innerText().catch(() => ''))
     await sec.scrollIntoViewIfNeeded()
     await p.waitForTimeout(300)
