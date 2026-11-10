@@ -1,6 +1,6 @@
-// Stand-in for macOS's open, first on a test's PATH (and beside the stand-in agents, which open the
-// browser with it), so nothing a test runs opens a real browser: each thing it's asked to open goes
-// in opened.log beside it, one a line.
+// Stand-in for macOS's open, first on a test's PATH (and beside the stand-in agents, which run this
+// script with Node to open the browser), so nothing a test runs opens a real browser: each thing
+// it's asked to open goes in opened.log beside it, one a line.
 const fs = require('node:fs')
 const path = require('node:path')
 

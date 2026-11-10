@@ -5,7 +5,7 @@
 //   codex login status          says whether it's signed in (exits 1 when it isn't)
 //   codex login                 the browser's way: listens on localhost (1455 for the real one; here
 //                               a free port, in ~/codex-login-port.txt), opens the browser there (with
-//                               the stand-in `open` beside it, a test's, never the computer's own),
+//                               the stand-in open.cjs beside it, a test's, never the computer's own),
 //                               prints the link and waits. The browser coming back signs it in.
 //   codex login --device-auth   a one-time code instead: the page and the code (ABCD-12345), then it
 //                               waits until ~/codex-device-ok is there (the test signing in on that
@@ -29,7 +29,8 @@ const DEVICE = 'https://auth.openai.com/codex/device'
 const say = (s) => process.stdout.write(s.replace(/\n/g, '\r\n'))
 const signedIn = () => { fs.mkdirSync(home, { recursive: true }); fs.writeFileSync(auth, JSON.stringify({ tokens: { id_token: 'stand-in' } })) }
 const isIn = () => { try { return Object.keys(JSON.parse(fs.readFileSync(auth, 'utf8')).tokens || {}).length > 0 } catch { return false } }
-const openBrowser = (url) => { const open = path.join(__dirname, process.platform === 'win32' ? 'open.cmd' : 'open'); if (fs.existsSync(open)) spawn(open, [url], { stdio: 'ignore', shell: process.platform === 'win32' }).unref() }
+// The browser, as stand-ins/claude.cjs opens it: the stand-in open.cjs beside this, run by Node.
+const openBrowser = (url) => { const open = path.join(__dirname, 'open.cjs'); if (fs.existsSync(open)) spawn(process.execPath, [open, url], { stdio: 'ignore', windowsHide: true }).unref() }
 const authorize = (port) => `https://auth.openai.com/oauth/authorize?response_type=code&client_id=app_stand_in&redirect_uri=http%3A%2F%2Flocalhost%3A${port}%2Fauth%2Fcallback&scope=openid&state=stand-in`
 const waitForDevice = (then) => { const t = setInterval(() => { if (fs.existsSync(path.join(os.homedir(), 'codex-device-ok'))) { clearInterval(t); signedIn(); then() } }, 300) }
 

@@ -79,8 +79,10 @@ const linkTo = (back) => `${AUTHORIZE}&redirect_uri=${encodeURIComponent(back)}&
 const CODE_PAGE = 'https://platform.claude.com/oauth/code/callback'
 // Signed in: what `claude auth status` and Bridge AI's own look (~/.claude/.credentials.json) see.
 const signedIn = (dir) => { fs.mkdirSync(dir, { recursive: true }); fs.rmSync(path.join(dir, 'stand-in-signed-out'), { force: true }); fs.writeFileSync(path.join(dir, '.credentials.json'), '{"stand-in":true}') }
-// The browser, opened with the stand-in `open` beside this (a test's), never the computer's own.
-const openBrowser = (url) => { const open = path.join(__dirname, process.platform === 'win32' ? 'open.cmd' : 'open'); if (fs.existsSync(open)) spawn(open, [url], { stdio: 'ignore', shell: process.platform === 'win32' }).unref() }
+// The browser, opened with the stand-in `open` beside this (a test's), never the computer's own:
+// its script run by Node itself, the link one argument as it is. (Through open.cmd, Windows' cmd.exe
+// would read the link's & as the end of the command and open only up to it.)
+const openBrowser = (url) => { const open = path.join(__dirname, 'open.cjs'); if (fs.existsSync(open)) spawn(process.execPath, [open, url], { stdio: 'ignore', windowsHide: true }).unref() }
 // claude auth login, as 2.1.311 does it: it listens on 127.0.0.1 (IPv4 only) for the browser to
 // come back to http://localhost:<port>/callback, opens the browser there, prints the other link
 // and waits at "Paste code here if prompted > ". The browser coming back, or a code typed there
