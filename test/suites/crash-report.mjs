@@ -242,9 +242,10 @@ try {
     // A page with Meetings' code held (as on a slow network), and what it says of a crash in its view.
     const open = async (slow) => {
       const held = []
+      const failing = { on: false, asked: 0 } // once on, Meetings' code fails each time it's asked for
       const s = await page(b, kit.url, {
         before: async (c) => {
-          await c.route(meetings, (r) => { held.push(r) })
+          await c.route(meetings, (r) => { if (failing.on) { failing.asked++; r.abort().catch(() => {}) } else held.push(r) })
           await c.route((u) => u.pathname === '/', async (r) => { if (slow.on) await new Promise((ok) => setTimeout(ok, 1500)); await r.fallback().catch(() => {}) })
         },
       })
@@ -253,7 +254,7 @@ try {
       await s.p.locator('.topbar .search-btn').waitFor({ timeout: 15000 })
       // Meetings opened (asked again until its tab is there), waiting for its code.
       await until(async () => { await s.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'view:meetings' } }))); return held.length && /Meetings/.test(await s.p.locator('.ws-tab.main').innerText().catch(() => '')) }, 10000, 200)
-      return { ...s, held, heard }
+      return { ...s, held, heard, failing }
     }
     const slow = { on: false }
     const a = await open(slow)
@@ -268,12 +269,16 @@ try {
     // A failure while the page looks to be going (a "Leave this page?" you said Stay to), and it stays.
     const c = await open(slow)
     await c.p.evaluate(() => window.dispatchEvent(new Event('beforeunload')))
-    for (const r of c.held) await r.abort().catch(() => {})
+    c.failing.on = true // and asked for again (React tries a view once more, Vite's loader after a preload), it fails again
+    for (const r of c.held.splice(0)) await r.abort().catch(() => {})
     const crash = c.p.locator('.crash', { hasText: 'This view hit an error' })
     await c.p.waitForTimeout(800)
     ok(!(await crash.count()) && !c.heard.length && written() === before, 'one while the page looks to be going: nothing yet', { heard: c.heard, crash: await crash.count() })
+    // Used again: a key, and a press on the page (on nothing that does anything).
+    await c.p.evaluate(() => { window.__keys = 0; addEventListener('keydown', () => window.__keys++, true) })
     await c.p.keyboard.press('Shift')
-    ok(!!(await until(() => crash.isVisible(), 5000)) && !!(await until(() => written() > before, 5000)), 'and once it\'s used again: its error shows, and is written down', { heard: c.heard, written: written() - before })
+    await c.p.evaluate(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+    ok(!!(await until(() => crash.isVisible(), 5000)) && !!(await until(() => written() > before, 5000)), 'and once it\'s used again: its error shows, and is written down', { heard: c.heard, written: written() - before, askedAgain: c.failing.asked, held: c.held.length, keys: await c.p.evaluate(() => window.__keys).catch(() => null), focus: await c.p.evaluate(() => `${document.hasFocus()} ${document.activeElement?.tagName}`).catch(() => null) })
     await c.ctx.unrouteAll({ behavior: 'ignoreErrors' })
     ok([...a.errors, ...c.errors].filter((e) => !/due to access control checks|Importing a module script failed|Load failed/.test(e)).length === 0, 'no other page errors', [...a.errors, ...c.errors])
     await c.ctx.close()
