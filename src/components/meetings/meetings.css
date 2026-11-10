@@ -224,6 +224,8 @@ html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box
 /* Open, it fits on the screen: the bar and AI Assist's suggestion stay, and what's under them
    scrolls past the screen's height (--fc-more-max, from FloatCard.jsx). */
 .float-card .fc-more { max-height: var(--fc-more-max, 560px); overflow-y: auto; overscroll-behavior: contain; grid-auto-rows: max-content; }
+/* So does a meeting's prep, before it starts (a small screen, zoomed in). */
+.float-card .fc-scroll { min-width: 0; max-height: var(--fc-more-max, 560px); overflow-y: auto; overscroll-behavior: contain; margin: 0 -6px; padding: 0 6px; } /* (room for its rows' links, which reach past it) */
 .fc-more { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 2px 0 4px; }
 /* Resized by its edges and corners (FloatCard.jsx): a band along each, a little past the card's
    edge, the pointer showing which way it goes. Made taller while recording, what's been said takes
