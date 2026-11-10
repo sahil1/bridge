@@ -13,7 +13,9 @@
 // crash written down when its server isn't answering. In the app: the card after a crash, Report on
 // GitHub showing the whole issue to change before anything is sent (nothing reaches GitHub until
 // the link is followed), the crash screen's Report on GitHub over it, too long for a link, and on a
-// phone. With no crash server (the tests' default) nothing more shows. With one (stood in for): Send
+// phone. A view whose code is still coming as the page is left is no crash: nothing shows and nothing
+// is written down, unless the page stays after all. With no crash server (the tests' default)
+// nothing more shows. With one (stood in for): Send
 // to Bold Bridge on a crash's report sends that report as shown, with nothing personal, and offers
 // to send them by themselves from then on; on, a crash sends itself, once; Settings › About &
 // Updates has the switch and each report sent, as it went; DO_NOT_TRACK keeps it off. Each crash is
@@ -228,6 +230,53 @@ try {
     await shot(p, `${tag}crash-report-over-crash-screen`)
     ok(errors.filter((e) => !/A crash made by a test|due to access control checks/.test(e)).length === 0, 'no other page errors', errors)
     await ctx.close()
+  }
+  // A view whose code is still coming as the page is left (a reload slow to come back, as switching
+  // to another computer is): no crash. WebKit stops what the page is fetching as soon as it starts to
+  // go, and the view failed then: it showed its error, and wrote it down (with sending on, sent it).
+  // On a page that stays after all, the same failure shows and is written down, once it's used again.
+  {
+    const meetings = new RegExp(`/assets/${fs.readdirSync(path.join(ROOT, 'dist', 'assets')).find((f) => /^Meetings-[\w-]+\.js$/.test(f))}$`)
+    const written = () => { try { return (fs.readFileSync(path.join(kit.data, 'logs', 'ui-errors.log'), 'utf8').match(/\[This view\]/g) || []).length } catch { return 0 } }
+    const before = written()
+    // A page with Meetings' code held (as on a slow network), and what it says of a crash in its view.
+    const open = async (slow) => {
+      const held = []
+      const s = await page(b, kit.url, {
+        before: async (c) => {
+          await c.route(meetings, (r) => { held.push(r) })
+          await c.route((u) => u.pathname === '/', async (r) => { if (slow.on) await new Promise((ok) => setTimeout(ok, 1500)); await r.fallback().catch(() => {}) })
+        },
+      })
+      const heard = []
+      s.p.on('console', (m) => { if (/^\[This view\]/.test(m.text())) heard.push(m.text().slice(0, 200)) })
+      await s.p.locator('.topbar .search-btn').waitFor({ timeout: 15000 })
+      // Meetings opened (asked again until its tab is there), waiting for its code.
+      await until(async () => { await s.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'view:meetings' } }))); return held.length && /Meetings/.test(await s.p.locator('.ws-tab.main').innerText().catch(() => '')) }, 10000, 200)
+      return { ...s, held, heard }
+    }
+    const slow = { on: false }
+    const a = await open(slow)
+    slow.on = true
+    await a.p.evaluate(() => location.reload())
+    await a.p.locator('.topbar .search-btn').waitFor({ timeout: 15000 })
+    slow.on = false
+    await a.p.waitForTimeout(500)
+    ok(!a.heard.length && written() === before, 'a view whose code was still coming as the page was left: no crash shown or written down', { heard: a.heard, written: written() - before })
+    await a.ctx.unrouteAll({ behavior: 'ignoreErrors' })
+    await a.ctx.close()
+    // A failure while the page looks to be going (a "Leave this page?" you said Stay to), and it stays.
+    const c = await open(slow)
+    await c.p.evaluate(() => window.dispatchEvent(new Event('beforeunload')))
+    for (const r of c.held) await r.abort().catch(() => {})
+    const crash = c.p.locator('.crash', { hasText: 'This view hit an error' })
+    await c.p.waitForTimeout(800)
+    ok(!(await crash.count()) && !c.heard.length && written() === before, 'one while the page looks to be going: nothing yet', { heard: c.heard, crash: await crash.count() })
+    await c.p.keyboard.press('Shift')
+    ok(!!(await until(() => crash.isVisible(), 5000)) && !!(await until(() => written() > before, 5000)), 'and once it\'s used again: its error shows, and is written down', { heard: c.heard, written: written() - before })
+    await c.ctx.unrouteAll({ behavior: 'ignoreErrors' })
+    ok([...a.errors, ...c.errors].filter((e) => !/due to access control checks|Importing a module script failed|Load failed/.test(e)).length === 0, 'no other page errors', [...a.errors, ...c.errors])
+    await c.ctx.close()
   }
   // On a phone: the card fits.
   {

@@ -1,5 +1,6 @@
 import { Component, useEffect, useState } from 'react'
 import { api } from '../api.js'
+import { isLeaving, whenStaying } from '../leaving.js'
 import { t } from '../i18n/index.js'
 import { ReportButton } from './CrashReport.jsx'
 
@@ -10,10 +11,17 @@ import { ReportButton } from './CrashReport.jsx'
 // rest of the window carries on. Every crash is written down on your computer
 // (<data>/logs/ui-errors.log), Copy details gives what's needed to fix it, and Report on GitHub
 // fills in an issue with it, to read and change before sending it there (CrashReport.jsx).
+// What breaks while the page is being left (a view whose code was still coming, which WebKit stops
+// as the page starts to go) is no crash: nothing shows and nothing is written down, unless the page
+// stays after all (held: leaving.js).
 export default class ErrorBoundary extends Component {
-  constructor(props) { super(props); this.state = { error: null, stack: '' }; this.tries = 0 }
-  static getDerivedStateFromError(error) { return { error } }
+  constructor(props) { super(props); this.state = { error: null, stack: '', held: false }; this.tries = 0 }
+  static getDerivedStateFromError(error) { return { error, held: isLeaving() } }
   componentDidCatch(error, info) {
+    if (!this.state.held) return this.caught(error, info)
+    whenStaying(() => { if (this.state.error !== error) return; this.setState({ held: false }); this.caught(error, info) })
+  }
+  caught(error, info) {
     const message = String(error?.message || error)
     const stack = `${error?.stack || ''}\n${info?.componentStack || ''}`.trim()
     if (this.props.quiet) {
@@ -32,8 +40,8 @@ export default class ErrorBoundary extends Component {
   render() {
     const { error, stack } = this.state
     if (!error) return this.props.children
-    if (this.props.quiet) return null
-    const retry = () => this.setState({ error: null, stack: '' })
+    if (this.props.quiet || this.state.held) return null
+    const retry = () => this.setState({ error: null, stack: '', held: false })
     if (this.props.full) return <CrashScreen name={this.props.name} error={error} stack={stack} onRetry={retry} />
     return (
       <div className="crash">

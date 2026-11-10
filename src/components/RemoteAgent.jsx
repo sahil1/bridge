@@ -24,14 +24,15 @@ export default function RemoteAgent({ a }) {
   // The look and such, passed as it opens (a change to them later would load it again).
   const src = useMemo(() => `${machineUrl(machine, `/?window=${encodeURIComponent(pane)}`)}${passOn({ prefs: !!machine && apart })}`, [machine, pane])
   // Where its page is: at its port here, else (a phone, Tailscale, Docker) beside this one. Not
-  // known yet: nothing it says is listened to till it is.
+  // known yet: nothing it says is listened to till it is, and words said for it meanwhile are kept
+  // and shown, never put in a box of this computer's (it's where you are, all the same).
   const { data } = useMachines(10000, !viaRelay)
   const port = machine ? data?.machines?.find((m) => m.id === machine)?.port : null
   const origin = viaRelay ? location.origin : !data ? null : port ? `${location.protocol}//${location.hostname}:${port}` : location.origin
   const away = !machine && !!data?.machinePage
   const frame = useRef(null)
   useEffect(() => {
-    if (away || !origin) return
+    if (away) return
     const box = { frame: true, name: a.title, origin, el: () => frame.current, win: () => frame.current?.contentWindow || null, visible: () => !!frame.current?.getClientRects().length, insert: (text) => handOver(box, text) }
     return registerBox(a.paneId, box)
   }, [a.paneId, a.title, origin, away])

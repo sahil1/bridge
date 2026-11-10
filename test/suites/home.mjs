@@ -36,7 +36,7 @@
 // test, both servers and every page from then (testClock in the harness).
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startRelay, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, changeAnswer, testClock, OUT, TEST } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, changeAnswer, testClock, withoutCutOff, OUT, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('home')
 const clock = testClock()
@@ -465,8 +465,9 @@ try {
     const mine = await ey.innerText()
     ok(/Book the venue/.test(mine) && !/My sketch/.test(mine), 'Only what needs me', mine.slice(0, 300))
     await shot(p, `${tag}home-everything`)
-    // (Switching computers and reloading cut off what the page was asking, which WebKit reports as an error.)
-    ok(errors.filter((e) => !/due to access control checks/.test(e)).length === 0, 'desktop: no page errors', errors)
+    // (Switching computers and reloading cut off what the page was asking, and the app's own files it
+    // was fetching ahead, which WebKit reports as errors.)
+    ok(withoutCutOff(errors).length === 0, 'desktop: no page errors', errors)
     await ctx.close()
   }
   // Home that can't load says why, with Try again.

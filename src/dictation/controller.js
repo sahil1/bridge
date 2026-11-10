@@ -75,7 +75,8 @@ export const isPaused = () => paused
 // ---------- Where the text goes ----------
 // Message boxes say they're there (Composer.jsx): { insert(text, caret), visible() }. So does
 // another device's agent in a tab (RemoteAgent.jsx): { frame: true, name, origin, el(), win(),
-// insert(text), visible() }, its insert a promise of whether its page took them.
+// insert(text), visible() }, its insert a promise of whether its page took them (origin null while
+// its page's address isn't known here: nothing goes to that page, nor is heard from it).
 const boxes = new Map()
 let lastBox = null
 let onScreen = () => null // the agent on screen (App.jsx)
@@ -178,7 +179,7 @@ const spoke = new WeakSet()
 const answers = new Map() // a message's id -> what its answer settles
 let asked = 0
 const tabOf = (e) => [...boxes.values()].find((b) => b.frame && b.win?.() === e.source && e.origin === b.origin) || null
-const toTab = (b, type, more = {}) => { try { b.win()?.postMessage({ [MSG]: type, ...more }, b.origin) } catch { /* gone */ } }
+const toTab = (b, type, more = {}) => { if (!b.origin) return; try { b.win()?.postMessage({ [MSG]: type, ...more }, b.origin) } catch { /* gone */ } }
 const hostSays = () => ({ listens: !!lending, app: !!window.bridgeApp?.desktop })
 // The words, to a tab's page: whether it put them, or false after a while (it went, or it's a Bridge
 // AI from before this, which never answers).
