@@ -2,12 +2,22 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
-## 3.13.3
+## 3.13.4
 
-Fixes: Studio takes a phone's photo; a setting found in Settings stays where it shows; and what can't load in Settings › Model Providers can be tried again.
+Fixes: a PowerPoint shows its own background in Studio; the tabs all stay on screen, as in Chrome; the sidebar folds and scrolls as one; scroll bars only when you need them; Studio takes a phone's photo; a setting found in Settings stays where it shows; and what can't load in Settings › Model Providers can be tried again.
 
 ### Fixes
 
+- **A PowerPoint's background shows as it does in PowerPoint**: a picture on its master, layout or slide showed as white in Studio. Tiled pictures, the theme's background styles, gradients, patterns and see-through colours are drawn as PowerPoint draws them too, and a picture a browser can't show (TIFF, EMF) shows the colour under it, and Studio says so.
+- **A PowerPoint's subtitles use its master's body style**: they were drawn in the title's font, bold and big.
+- **A PowerPoint's lighter and darker theme colours match PowerPoint's**: a table's banded rows and the theme's shape and background styles were a shade off.
+- **A PowerPoint saved as a Markdown deck keeps its colours**, a dark one dark, instead of turning white; AI Assist shows the slides it writes for a PowerPoint in the deck's own colours.
+- **The tabs above your agents all stay on screen**, as in Chrome: they share the strip's width and narrow evenly as more open, the one you're on keeping its name and ×; past that, Search tabs (the ⌄ at the end) says how many are out of sight and finds any tab as you type. Close a tab with the pointer and the next one's × is right under it; hover a tab for a moment to see its whole name and its space.
+- **Tab Groups look and work like Chrome's** (Beta Features): each group starts with a chip in its own colour, with a line in that colour under its tabs; click the chip to fold the group, right-click to fold it, start an agent in that space or close its tabs.
+- **The top bar's chips match**: the same size and look, quiet until you point at one, with only what needs you filled in colour; in a smaller window the time and the weather go first, then words give way to icons.
+- **The sidebar folds**: Views (Home to Files) folds to one row of icons and Spaces to how many there are, each kept on this computer. The sidebar scrolls as one, with both headings always in sight, and a long day or month of meetings has Show more instead of a list scrolling on its own.
+- **Scroll bars show only when you need them**, as macOS draws them: thin, with no track, while the pointer is over that area or you scroll it, in light and dark. They no longer show in every pane at once when your Mac is set to always show them.
+- **A meeting in a short panel scrolls as one page** (a small window, or the Agents panel under it), rather than the page scrolling and each column inside it scrolling too.
 - **Studio takes a picture over 1 MB**, as most phones' photos are, in a document or a deck, and a Word copy or a deck for AI Assist over 1 MB: they were turned away as "HTTP 413".
 - **A setting found in Settings stays where it shows** while the rest of its section comes: on a busy computer, what came above it a few seconds later (Set up's list, Permissions) slid it down, off the window, and a click meant for it could land on something else.
 - **Settings › Model Providers has Retry** when your agents' sign-ins, your accounts or the cloud agents couldn't be checked (Bridge AI starting again after an update, say): they stayed so until you left the window and came back.

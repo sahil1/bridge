@@ -555,6 +555,17 @@ export function MeetingPage({ id, onBack }) {
   const sent = useRef({})
   const focused = useRef(null) // the meeting whose notes got the cursor as it recorded
   const wasRecording = useRef(false)
+  // A panel too short for the columns to keep room to read in (a small window, the Agents panel
+  // under it): the page flows as one instead (meetings.css .mt-page.flow). A phone's flows already.
+  const [flow, setFlow] = useState(false)
+  const loaded = !!data
+  useEffect(() => {
+    const el = pageRef.current
+    if (!el || phone || typeof ResizeObserver === 'undefined') { setFlow(false); return }
+    const ro = new ResizeObserver(() => setFlow(el.clientHeight > 0 && el.clientHeight < 440))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [loaded, phone])
   // Voices in a room: whether they can be told apart here, and Who spoke's answer once it's done.
   const { data: vst } = usePoll(data ? '/meetings/voices' : null, 60_000)
   const told = useRef(null) // when Who spoke was asked: the voices' time before
@@ -1023,7 +1034,7 @@ export function MeetingPage({ id, onBack }) {
   return (
     <div className="mt-view">
       {head}
-      <div ref={pageRef} className={`mt-page${dropping ? ' dropping' : ''}`} onDragOver={(e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); setDropping(true) } }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropping(false) }} onDrop={onDrop}>
+      <div ref={pageRef} className={`mt-page${dropping ? ' dropping' : ''}${flow ? ' flow' : ''}`} onDragOver={(e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); setDropping(true) } }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropping(false) }} onDrop={onDrop}>
         {phone && <div className="mt-meta">{meta}</div>}
         <RecordingBar id={id} data={data} />
         {(recording || Date.now() - Date.parse(data.startedAt) < 36 * 3600e3) && <SinceLastTime path={`/meetings/${encodeURIComponent(id)}/since`} onOpen={(mid) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: mid } }))} />}

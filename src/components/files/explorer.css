@@ -33,6 +33,8 @@
 .fx-bar .win-btn:disabled { opacity: .35; cursor: default; }
 .fx-path { flex: 1; min-width: 60px; display: flex; align-items: center; gap: 2px; overflow-x: auto; scrollbar-width: none; white-space: nowrap; }
 .fx-path::-webkit-scrollbar { display: none; }
+/* As much as the scroll bars' rule for every element (styles.css, under :root), which this file can load before. */
+:root .fx-path { scrollbar-width: none; }
 .fx-path[hidden] { display: none; }
 .fx-crumb-wrap { display: inline-flex; align-items: center; gap: 2px; color: var(--ink-3); }
 .fx-crumb { flex: none; height: 26px; padding: 0 7px; border-radius: 6px; color: var(--ink-2); font: 13px var(--font); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }

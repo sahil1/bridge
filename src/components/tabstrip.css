@@ -1,0 +1,116 @@
+/* ============ The tabs above the agents (TabStrip.jsx) ============ */
+/* Tab Groups' colors, as Chrome's: deep enough for white words on them in a light look (yellow's are
+   dark), light enough for dark ones in a dark look (4.5:1 each way). Your other computers' groups
+   are grey. */
+.ws-tabs, .tab-search, .tab-card {
+  --tg-on: #fff; --tg-grey: #5f6368; --tg-blue: #1967d2; --tg-red: #d93025; --tg-yellow: #f9ab00; --tg-yellow-on: #202124; --tg-green: #188038;
+  --tg-pink: #c5157a; --tg-purple: #8430ce; --tg-cyan: #007b83; --tg-orange: #c2410c;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) :is(.ws-tabs, .tab-search, .tab-card) {
+    --tg-on: #202124; --tg-grey: #bdc1c6; --tg-blue: #8ab4f8; --tg-red: #f28b82; --tg-yellow: #fdd663; --tg-green: #81c995;
+    --tg-pink: #ff8bcb; --tg-purple: #d7aefb; --tg-cyan: #78d9ec; --tg-orange: #fcad70;
+  }
+}
+:root[data-theme="dark"] :is(.ws-tabs, .tab-search, .tab-card) {
+  --tg-on: #202124; --tg-grey: #bdc1c6; --tg-blue: #8ab4f8; --tg-red: #f28b82; --tg-yellow: #fdd663; --tg-green: #81c995;
+  --tg-pink: #ff8bcb; --tg-purple: #d7aefb; --tg-cyan: #78d9ec; --tg-orange: #fcad70;
+}
+
+.ws-tabs { flex: none; display: flex; align-items: flex-end; gap: 6px; height: 38px; padding: 0 2px; min-width: 0; }
+/* Sideways only once the tabs are their icons and still don't fit; the edge that has more fades. */
+.ws-tabs-scroll { position: relative; flex: 1; min-width: 0; height: 100%; display: flex; align-items: flex-end; gap: 2px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.ws-tabs-scroll::-webkit-scrollbar { display: none; }
+/* As much as the scroll bars' rule for every element (styles.css, under :root), which this file can load before. */
+:root .ws-tabs-scroll { scrollbar-width: none; }
+.ws-tabs-scroll.more-right { -webkit-mask-image: linear-gradient(to left, transparent, #000 32px); mask-image: linear-gradient(to left, transparent, #000 32px); }
+.ws-tabs-scroll.more-left { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px); mask-image: linear-gradient(to right, transparent, #000 32px); }
+.ws-tabs-scroll.more-left.more-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
+
+/* Each as wide as the others, 224px at most, down to 72 (a few letters of its name). */
+.ws-tab {
+  position: relative; flex: 1 1 0; min-width: 72px; max-width: 224px; box-sizing: border-box; display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 5px 0 11px;
+  border-radius: 10px 10px 0 0; border: 1px solid transparent; border-bottom: 0; color: var(--ink-3); font-weight: 500; font-size: 12.5px; cursor: default; user-select: none;
+}
+/* A thin line between two tabs, as in Chrome: not beside the one on screen or the one under the pointer. */
+.ws-tab + .ws-tab::after { content: ""; position: absolute; left: -2px; top: 9px; bottom: 9px; width: 1px; background: var(--line-2); }
+.ws-tab:is(.main, .side, :hover, .dragging) + .ws-tab::after, .ws-tab + .ws-tab:is(.main, .side, :hover, .dragging)::after { display: none; }
+.ws-tab:hover { color: var(--ink); background: color-mix(in srgb, var(--pane) 60%, transparent); }
+.ws-tab.main, .ws-tab.side { min-width: 124px; background: var(--pane); color: var(--ink); border-color: var(--line); }
+.ws-tab.focus::before { content: ""; position: absolute; left: 10px; right: 10px; top: -1px; height: 2px; border-radius: 2px; background: var(--accent-fill); }
+.ws-tab.side:not(.focus)::before { content: ""; position: absolute; left: 10px; right: 10px; top: -1px; height: 2px; border-radius: 2px; background: var(--line-2); }
+.ws-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ws-tab-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-tab-where { flex: none; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--ink-3); }
+/* What a dot or an icon stands for is on the tab's card: no browser tooltip of its own over it. */
+.ws-tab > .sdot, .ws-tab > .icon { pointer-events: none; }
+.tab-ship { color: var(--accent); }
+/* The ×: on the tab on screen, and on the others under the pointer (or the keyboard). */
+.ws-tab-x { display: none; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 6px; color: var(--ink-3); }
+.ws-tab:is(.main, .side, :hover, :focus-within) .ws-tab-x { display: grid; }
+.ws-tab-x:hover { background: var(--pane-3); color: var(--ink); }
+/* Reordering: the tab being dragged, and where it would go. */
+.ws-tab.dragging { opacity: .45; }
+.ws-tabs-scroll > .ws-tab:is(.drop-before, .drop-after)::after { content: ""; display: block; position: absolute; top: 6px; bottom: 6px; left: -2px; width: 2px; border-radius: 2px; background: var(--accent-fill); }
+.ws-tabs-scroll > .ws-tab.drop-after::after { left: auto; right: -2px; }
+
+/* Less room: the others narrower than 72, the tab on screen keeping its name and ×; less still, the
+   others their icon alone (and their × only by the middle button, as in Chrome). */
+.ws-tabs-scroll.tight .ws-tab:not(.main, .side) { min-width: 38px; max-width: 72px; padding: 0 4px 0 10px; }
+.ws-tabs-scroll.icons .ws-tab:not(.main, .side) { justify-content: center; gap: 0; padding: 0; }
+.ws-tabs-scroll.icons .ws-tab:not(.main, .side) :is(.ws-tab-name, .ws-tab-where, .ws-tab-x) { display: none; }
+.ws-tabs-scroll.icons .ws-tab:not(.main, .side) > .sdot:not(:first-child):not(.sdot-blocked) { display: none; }
+.ws-tabs-scroll.icons .ws-tab:not(.main, .side):has(> .sdot-blocked:not(:first-child)) > .tab-ship { display: none; }
+
+/* Tab Groups: the group's chip in its color, where its tabs start, and its line under them. */
+.ws-group {
+  flex: none; position: relative; align-self: flex-end; display: inline-flex; align-items: center; gap: 5px; height: 22px; max-width: 120px; margin: 0 2px 5px 6px; padding: 0 9px;
+  border-radius: 8px; background: var(--gc, var(--tg-grey)); color: var(--gc-on, var(--tg-on)); font: 600 11.5px var(--font); white-space: nowrap;
+}
+.ws-group:first-child { margin-left: 0; }
+.ws-group:hover { filter: brightness(1.08); }
+.ws-group:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ws-group::after { content: ""; position: absolute; left: 4px; right: -4px; bottom: -5px; height: 2px; border-radius: 2px 0 0 2px; background: var(--gc, var(--tg-grey)); }
+.ws-group.alone::after { right: 4px; border-radius: 2px; }
+.ws-group-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-group-n { font-variant-numeric: tabular-nums; opacity: .85; }
+/* Folded, its most urgent dot, on a disc of the pane so it reads on any color. */
+.ws-group-dot { display: inline-grid; place-items: center; flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--pane); }
+.ws-group-dot .sdot { pointer-events: none; }
+.ws-tab-line { position: absolute; left: -1px; right: -3px; bottom: 0; height: 2px; background: var(--gc); pointer-events: none; }
+.ws-tab.group-end .ws-tab-line { right: -1px; border-radius: 0 2px 2px 0; }
+
+/* Search tabs, at the end of the strip, with how many are out of sight; and Split. */
+.ws-tab-tools { flex: none; display: flex; align-items: center; gap: 2px; padding-bottom: 4px; }
+.ws-tab-tools .tab-search-btn { width: auto; min-width: 28px; display: inline-flex; align-items: center; gap: 3px; padding: 0 7px; }
+.ws-tab-tools .tab-search-btn.more { color: var(--ink); background: var(--pane-3); }
+.tab-search-btn b { font: 600 11.5px var(--font); font-variant-numeric: tabular-nums; }
+
+/* A moment's hover on a tab: its whole name and where it is (Rail's hover card, under the tab). */
+.hover-card.tab-card { width: auto; min-width: 220px; max-width: 320px; animation: tab-card-in .12s ease; }
+@keyframes tab-card-in { from { opacity: 0; transform: translateY(-3px); } }
+.tab-card .hc-crumb { display: flex; align-items: center; gap: 6px; }
+.tab-card .hc-title b { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tab-card .hc-meta span { display: inline-flex; align-items: center; gap: 6px; }
+.tab-card-swatch { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 3px; margin-right: 6px; background: var(--gc); }
+.tab-card .tab-card-swatch { margin-right: 0; }
+
+/* Search tabs' list. */
+.tab-search { position: fixed; z-index: 90; width: 360px; max-width: calc(100vw - 24px); max-height: min(70vh, 560px); display: flex; flex-direction: column; padding: 6px; border-radius: 12px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: 0 12px 32px rgb(0 0 0 / .16), 0 2px 6px rgb(0 0 0 / .06); color: var(--ink); animation: fade-in .1s ease; }
+.tab-search-q { flex: none; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border-radius: 8px; background: var(--pane-2); border: 1px solid var(--line); color: var(--ink-3); }
+.tab-search-q:focus-within { border-color: var(--accent); }
+.tab-search-q input { flex: 1; min-width: 0; height: 100%; border: 0; padding: 0; background: none; outline: none; color: var(--ink); font: 13px var(--font); }
+.tab-search-head { flex: none; padding: 9px 8px 4px; font: 600 10.5px var(--font); letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); }
+.tab-search-head span { margin-left: 4px; font-variant-numeric: tabular-nums; }
+.tab-search-list { list-style: none; margin: 0; padding: 0; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.tab-search-row { display: flex; align-items: center; gap: 9px; min-height: 40px; padding: 3px 5px 3px 9px; border-radius: 8px; cursor: default; }
+.tab-search-row.at { background: var(--pane-3); }
+.tab-search-icon { flex: none; display: grid; place-items: center; width: 16px; color: var(--ink-3); }
+.tab-search-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.tab-search-text b { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-search-text small { display: flex; align-items: center; min-width: 0; font-size: 11.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-search-on { flex: none; font-size: 11px; font-weight: 600; color: var(--accent); }
+.tab-search-x { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--ink-3); opacity: 0; }
+.tab-search-row:is(.at, :hover) .tab-search-x, .tab-search-x:focus-visible { opacity: 1; }
+.tab-search-x:hover { background: var(--line); color: var(--ink); }
+.tab-search-none { margin: 10px 8px 8px; font-size: 12.5px; color: var(--ink-3); }
