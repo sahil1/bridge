@@ -180,7 +180,7 @@ const open = async (look = {}) => {
 }
 // Each page runs at the test's time, as the server does.
 const setUp = async (c) => { await noServiceWorker(c); if (CLOCK) await c.clock.install({ time: Date.now() + OFFSET }) }
-const openEvent = (p, e) => p.evaluate((d) => window.dispatchEvent(new CustomEvent('bridge-open-event', { detail: d })), { date: ymd(e.start), id: `${e.title}|${e.start}` })
+const openEvent = (p, e, { busy = 0 } = {}) => p.evaluate(({ d, busy }) => { window.dispatchEvent(new CustomEvent('bridge-open-event', { detail: d })); for (const t = Date.now(); Date.now() - t < busy;); }, { d: { date: ymd(e.start), id: `${e.title}|${e.start}` }, busy })
 const keyColors = (p) => p.evaluate(() => Object.fromEntries([...document.querySelectorAll('.cal-key:not(.task)')].map((k) => [k.innerText.trim(), k.style.getPropertyValue('--c').trim()])))
 const asked = (re) => model.asked(re)
 
@@ -345,8 +345,27 @@ try {
     ok(from.length > 0 && from.every((d) => new Date(`${d}T12:00`).getDay() === 1), 'the week is read once it\'s known which day it starts on, never first as the browser\'s language starts it', from)
     await p.context().close()
   }
+  // On cue (behind: { held, after }), the view read after a change is kept (one `after` picks) is
+  // answered only when the test says, with what the server said then; inFlight: the page's asks
+  // about the view not yet answered.
+  let behind = null
+  const inFlight = new Set()
+  const lateView = async (c) => {
+    c.on('request', (r) => { if (/\/api\/calendar\/view$/.test(r.url())) inFlight.add(r) })
+    c.on('requestfailed', (r) => inFlight.delete(r))
+    c.on('requestfinished', (r) => { inFlight.delete(r); if (behind && r.method() === 'PATCH' && /\/api\/calendar\/view$/.test(r.url()) && behind.after(r.postData() || '')) behind.kept = true })
+    await c.route(/\/api\/calendar\/view$/, async (r) => {
+      const l = behind
+      if (!l?.kept || l.got || r.request().method() !== 'GET') return r.fallback()
+      l.got = r.request()
+      const res = await r.fetch()
+      l.read = true
+      await l.held
+      await r.fulfill({ response: res }).catch(() => {})
+    })
+  }
   for (const mode of ['light', 'dark']) {
-    const { p, errors } = await open({ mode })
+    const { p, errors } = await open({ mode, before: lateView })
     await until(() => p.locator('.tg-ev').count(), 15000)
     if (mode === 'light') {
       // Colours: the week's keys, then next week's, the same.
@@ -383,12 +402,23 @@ try {
       ok(await p.locator('.cal-key.off', { hasText: 'Family' }).count() === 1 && !(await p.locator('.tg-ev', { hasText: 'Dinner with the Okafors' }).count()), 'still hidden after a reload')
       await p.locator('.cal-key', { hasText: 'Family' }).click()
       ok(!!(await until(async () => (await p.locator('.tg-ev', { hasText: 'Dinner with the Okafors' }).count()) > 0, 5000)) && !!(await until(async () => (await api('/calendar/view')).hidden.length === 0, 5000)), 'a click brings it back')
-      // Week start and working hours.
+      // Week start and working hours. The view read after the week's start is kept comes back only
+      // once the working hours' start is set and the page has sent what it would for it: the end is
+      // then set from the start just set, not the one before (on CI's Mac, now and then, it was).
+      const held = Promise.withResolvers()
+      behind = { held: held.promise, after: (sent) => /"weekStart"/.test(sent) }
       await p.locator('.calv-view-btn').click()
       await p.locator('.calv-menu select[aria-label="Week starts on"]').selectOption('0')
       const sun = await until(async () => /^Sun/.test((await p.locator('.tg-day small').first().innerText().catch(() => '')).trim()), 5000)
       ok(!!sun && !!(await until(async () => (await api('/calendar/view')).weekStart === 0, 5000)), 'the week starts on Sunday when you say so', await p.locator('.tg-day small').allInnerTexts())
+      await until(() => behind.read, 5000, 50)
       await p.locator('.calv-menu select[aria-label="Working hours start"]').selectOption('8')
+      await p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+      await until(() => [...inFlight].every((r) => r === behind.got), 5000, 50)
+      held.resolve()
+      await behind.got?.response().catch(() => null)
+      await p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+      behind = null
       await p.locator('.calv-menu select[aria-label="Working hours end"]').selectOption('18')
       await until(async () => (await api('/calendar/view')).workEnd === 18, 5000)
       await shot(p, `${tag}calendar-menu`)
@@ -522,9 +552,11 @@ try {
   }
 
   // ---------- A phone, light and dark ----------
+  // The event asked for on a busy phone (held up for a moment as it's asked, which once kept its
+  // Today from opening until after the event was said, and the sheet never came).
   for (const mode of ['light', 'dark']) {
     const { p, errors } = await open({ mode, phone: true })
-    await openEvent(p, LATER)
+    await openEvent(p, LATER, { busy: 200 })
     const sheet = p.locator('.cal-sheet')
     await until(async () => /wrote these/.test(await sheet.innerText().catch(() => '')), 15000)
     ok(/Ines Varga/.test(await sheet.innerText().catch(() => '')), `phone, ${mode}: the event opens in a sheet with its prep`)

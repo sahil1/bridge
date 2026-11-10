@@ -616,8 +616,9 @@ try {
     const quick = (row) => row.locator('.hm-quick').evaluate((e) => getComputedStyle(e).opacity)
     ok(await quick(roadmap) === '0', 'what you can do with a row is out of the way until you point at it', await quick(roadmap))
     await roadmap.hover()
-    await p.waitForTimeout(250)
-    ok(await quick(roadmap) === '1' && /Pull request/.test(await roadmap.locator('.hm-quick').innerText()) && /Clear/.test(await roadmap.locator('.hm-quick').innerText()) && /Open/.test(await roadmap.locator('.hm-quick').innerText()), 'and pointed at: its pull request, Clear and Open', await roadmap.locator('.hm-quick').innerText())
+    // (They fade in, which a busy computer can take a while to finish.)
+    const pointed = async () => { const x = await roadmap.locator('.hm-quick').innerText(); return await quick(roadmap) === '1' && /Pull request/.test(x) && /Clear/.test(x) && /Open/.test(x) }
+    ok(!!(await until(pointed, 3000, 100)), 'and pointed at: its pull request, Clear and Open', [await quick(roadmap), await roadmap.locator('.hm-quick').innerText()])
     await shot(p, `${tag}home-morning-1440-hover`)
     // Opened: the whole of what it said, and what you can do with it.
     await roadmap.locator('.hm-item-main').click()
@@ -973,11 +974,22 @@ try {
       send('pointerup', pts.at(-1))
     }, { pts, hold })
   }
-  // The busy day, with a save of the arrangement that fails on cue.
+  // The busy day, with a save of the arrangement that fails on cue, and on cue Home's list read before
+  // a save that comes after the one read after it (behind: { held }, read once the server answered).
   let failLayout = false
+  let behind = null
   const arrangeDay = async (c2) => {
     await busyDay(c2)
     await c2.route(/\/api\/home-layout$/, (r) => (failLayout ? r.fulfill({ status: 500, json: { error: 'the disk is full' } }) : r.fallback()))
+    await c2.route(/\/api\/home(\?|$)/, async (r) => {
+      const l = behind
+      if (!l || l.got || !r.request().url().includes('live=1')) return r.fallback()
+      l.got = r.request()
+      const real = await (await r.fetch()).json()
+      l.read = true
+      await l.held
+      await r.fulfill({ json: { ...real, items: busy, devices: busyDevs } }).catch(() => {})
+    })
   }
   // From the middle of one tile to just above another, in steps.
   const dragPath = async (p, from, to) => {
@@ -1007,6 +1019,21 @@ try {
     ok(wiggle === 'hm-wiggle', 'the tiles wiggle gently', wiggle)
     ok(/1 needs you|3 need you/.test(await tile(p, 'waiting').innerText()) && /3 other computers|need you there/.test(await tile(p, 'away').innerText()), 'each tile says what\'s in it', [await tile(p, 'waiting').innerText(), await tile(p, 'away').innerText()])
     await shot(p, `${tag}home-edit-1440-light`)
+    // Home's list asked for just before a change, and answered after the one read after it was
+    // saved, doesn't undo it (− then + at once now and then left Coming Up hidden).
+    const held = Promise.withResolvers()
+    behind = { held: held.promise }
+    await until(() => behind.read, 15000, 50)
+    const fresh = p.waitForResponse(async (r) => /\/api\/home\?live=1$/.test(r.url()) && !!(await r.json().catch(() => null))?.layouts?.computer?.hidden?.includes('coming')).catch(() => null)
+    await tap(tile(p, 'coming').locator('.hm-tile-badge'))
+    await fresh
+    held.resolve()
+    await behind.got?.response().catch(() => null)
+    await p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+    behind = null
+    ok((await hiddenTiles(p)).join() === 'coming', "a change in Edit Home stays, though a list asked for before it comes after", await hiddenTiles(p))
+    if ((await hiddenTiles(p)).includes('coming')) await tap(tile(p, 'coming').locator('.hm-tile-badge.plus'))
+    await until(async () => !(await kept('computer'))?.hidden.length, 4000)
     // Done leaves, the keyboard back on Edit; Esc leaves too.
     await hm.locator('.hm-done').click()
     ok(!!(await until(async () => !(await ed.count()) && (await p.evaluate(() => document.activeElement?.classList.contains('hm-edit-btn'))), 4000)), 'Done leaves Edit Home, the keyboard back on Edit')

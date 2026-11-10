@@ -24,7 +24,6 @@ export function arrange(kept) {
 }
 
 export const isDefault = (a) => a.order.join() === SECTIONS.join() && !a.hidden.length
-export const equal = (a, b) => a.order.join() === b.order.join() && a.hidden.join() === b.hidden.join()
 
 // The sections shown while arranging (ids) in a new order. One that isn't shown (hidden, or not for
 // this computer) goes with the one before it, so brought back it's after the same one as it was.

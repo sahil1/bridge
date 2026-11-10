@@ -9,7 +9,7 @@ import { api, hostApi, machineId } from '../api.js'
 import { t, tx, locale } from '../i18n/index.js'
 import { sentTo } from '../sendbox.js'
 import { split, isQuiet, compare, TOP, QUIET_DAYS } from '../../shared/focus.js'
-import { arrange, isDefault, equal, reorder } from '../../shared/homelayout.js'
+import { arrange, isDefault, reorder } from '../../shared/homelayout.js'
 import './needshome.css'
 
 // Home (a beta feature, `home`): Needs you as the place the app opens at, on a computer and a
@@ -77,10 +77,18 @@ function dayName(key) {
 
 // The list from the device this page comes from: every few seconds while it's on screen (less
 // often for a count elsewhere). uid: an item's id with its device's, as each device numbers its own.
+// An answer that comes after a later one is dropped: asked before a change was saved (your other
+// computers can take a while to answer), it would put back what was there before.
 export function useHome(on = true, every = 5000) {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
-  const load = useCallback(() => hostApi(`/home${every <= 5000 ? '?live=1' : ''}`).then((d) => { setData({ ...d, items: (d.items || []).map((i) => ({ ...i, uid: `${i.machine || 'here'}|${i.id}` })) }); setError(null) }, (e) => setError(e.message || String(e))), [every])
+  const asked = useRef(0)
+  const shown = useRef(0)
+  const load = useCallback(() => {
+    const n = ++asked.current
+    const latest = () => { if (n < shown.current) return false; shown.current = n; return true }
+    return hostApi(`/home${every <= 5000 ? '?live=1' : ''}`).then((d) => { if (latest()) { setData({ ...d, items: (d.items || []).map((i) => ({ ...i, uid: `${i.machine || 'here'}|${i.id}` })) }); setError(null) } }, (e) => { if (latest()) setError(e.message || String(e)) })
+  }, [every])
   useEffect(() => {
     if (!on) return
     load()
@@ -190,18 +198,22 @@ const SIDE = ['ready', 'coming', 'chief']
 
 // How the sections are arranged: kept on the computer this page comes from (server/home.js), one
 // for its own window and one for phones. Changed here at once and saved in turn; one that couldn't
-// be saved goes back to what the computer has and says why.
+// be saved goes back to what the computer has and says why. What you arranged shows until the list
+// read after the last save is in: a list from between two saves (− then + at once) has the first
+// one only, and arranging from it would bring that back.
 function useArrangement(data, refresh, setNote, phone) {
   const which = phone ? 'phone' : 'computer'
   const saved = useMemo(() => arrange(data?.layouts?.[which]), [data, which])
-  const [mine, setMine] = useState(null) // until the list says so too
-  useEffect(() => setMine((m) => (m && equal(m, saved) ? null : m)), [saved])
+  const [mine, setMine] = useState(null)
+  const saving = useRef(0)
   const queue = useRef(Promise.resolve())
   const put = (next, body) => {
     setMine(next)
+    saving.current++
     queue.current = queue.current
       .then(() => hostApi('/home-layout', { method: 'POST', body: { for: which, ...body } }))
       .then(() => refresh(), (e) => { setMine(null); setNote({ text: t("Couldn't save how Home is arranged: {why}", { why: e.message }) }) })
+      .finally(() => { if (!--saving.current) setMine(null) })
   }
   const now = mine || saved
   return {
