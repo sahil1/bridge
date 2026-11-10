@@ -635,7 +635,8 @@ function objOf(el, src, cx, inGroup = false) {
   const txBody = kid(el, 'p:txBody')
   const lt = (p) => p && kid(kid(p.el, 'p:txBody'), 'a:lstStyle')
   const master = cx.master
-  const ms = !ph ? (master?.txStyles.other) : /title|ctrTitle/i.test(ph.type) ? master?.txStyles.title : ['dt', 'ftr', 'sldNum', 'hdr'].includes(ph.type) ? master?.txStyles.other : master?.txStyles.body
+  // A title takes the master's title style; a subtitle, as the rest, its body style.
+  const ms = !ph ? (master?.txStyles.other) : ph.type === 'title' || ph.type === 'ctrTitle' ? master?.txStyles.title : ['dt', 'ftr', 'sldNum', 'hdr'].includes(ph.type) ? master?.txStyles.other : master?.txStyles.body
   const base = levelsOf(cx.doc.defaultText, cx)
   const fontColor = fo ? colorOf(colorKid(fo), cx) : null
   const fontRefFont = fo ? (fo.attrs.idx === 'major' ? '+mj-lt' : fo.attrs.idx === 'minor' ? '+mn-lt' : null) : null
