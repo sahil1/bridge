@@ -252,7 +252,8 @@ const FIRST_TRY = 250
 const LAST_TRY = 10000
 let backoff = FIRST_TRY
 let retryTimer = null
-let started = false // start() has read the pairing
+let started = false // start() has read the pairing, or is reading it with the link on its way
+let loaded = null // reading the pairing (start)
 let asking = false // a pairing link's "Pair with …?" is up: the link to the relay comes up meanwhile, and the tap pairs
 // The service worker while it's on its way (null once it's there, and in the iPhone app, which has
 // none). What Bridge AI asks for goes through it, so Bridge AI waits for it (showApp); the link
@@ -267,6 +268,7 @@ let unchecked = false // turned away, or answered with another key: said, and tr
 const streams = new Map() // id -> { onHead, onChunk, onEnd, onError }
 let nextId = 1
 let inbox = Promise.resolve()
+let notes = Promise.resolve() // the relay's word about the notes it keeps, one at a time (onText)
 
 // Wait for the link, unless the relay already said the computer is away (or it can't be reached).
 const ready = (ms = away ? 0 : 15000) => (session ? Promise.resolve() : ws?.readyState === 1 && !hostOnline ? Promise.reject(new Error(offlineText())) : new Promise((ok, no) => {
@@ -503,9 +505,12 @@ setInterval(() => {
 }, 1000)
 
 // The relay's own messages: whether your computer is there, or about the notes it keeps.
-function onText(m) {
+async function onText(m) {
+  await loaded // this phone's pairing, read while the link came up (start)
   if (m.t === 'limit') return onLimit(m)
-  if (m.t) return offline.fromRelay(m)
+  // What the relay says about the notes it keeps is kept on this phone (IndexedDB), in order, but
+  // not ahead of the link: the computer's welcome, which comes right after, doesn't wait for it.
+  if (m.t) { notes = notes.then(() => offline.fromRelay(m)).catch((e) => console.error(e)); return }
   if (m.q === 1 && !relayKeeps) { relayKeeps = true; offline.relayReady().catch(() => {}) }
   return onStatus(m)
 }
@@ -1227,14 +1232,18 @@ async function start() {
     sw.then(() => { if (worker === sw) worker = null }, stop)
     fetch('/_relay/health', { cache: 'no-store' }).then((r) => r.json()).then((j) => { relayBuild = j.build || null }, () => {})
   }
-  paired = (await pairing.get()) || null
+  // Opened as usual (not from a pairing link): the link to the relay comes up while this phone's
+  // pairing is read, and waits for it (onText).
+  loaded = pairing.get().then((p) => { paired = p || null })
+  const hash = new URLSearchParams(location.hash.slice(1))
+  const fromLink = hash.get('pair')
+  if (!fromLink && relay) { started = true; connect() }
+  await loaded
   if (stopped) return
   offline.tidy().catch(() => {})
   // A code you just scanned pairs this phone afresh, even if it was paired before (a new
   // computer, or after it was removed): once you say so (askPair). A phone paired with nothing
   // here connects to the relay meanwhile, so the tap pairs at once.
-  const hash = new URLSearchParams(location.hash.slice(1))
-  const fromLink = hash.get('pair')
   if (fromLink && normCode(fromLink) !== paired?.code && relay) {
     askPair(normCode(fromLink), hash.get('name'))
     if (!paired) { asking = true; connect() }
