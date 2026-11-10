@@ -163,7 +163,17 @@ const jsonSmall = express.json({ limit: '1mb' })
 const jsonFile = express.json({ limit: '6mb' })
 // And a whiteboard, with the pictures pasted into it (boards.js).
 const jsonBoard = express.json({ limit: '45mb' })
-app.use((req, res, next) => (req.method === 'PUT' && /^\/api\/agents\/[^/]+\/file$/.test(req.path) ? jsonFile : /^\/api\/boards(\/|$)/.test(req.path) ? jsonBoard : jsonSmall)(req, res, next))
+// And Studio: a picture put in a document or a deck, a new file (a Word copy), a deck for AI Assist
+// with its pictures. Every limit is here, read before any route: one a route gave itself came after
+// the 1 MB here, which had turned a phone's photo away already.
+const jsonStudio = express.json({ limit: '30mb' })
+const jsonDeckAi = express.json({ limit: '40mb' })
+const jsonFor = (req) => (req.method === 'PUT' && /^\/api\/agents\/[^/]+\/file$/.test(req.path) ? jsonFile
+  : /^\/api\/boards(\/|$)/.test(req.path) ? jsonBoard
+  : req.method === 'POST' && /^\/api\/studio\/(new|picture)$/.test(req.path) ? jsonStudio
+  : req.method === 'POST' && req.path === '/api/studio/deck/ai' ? jsonDeckAi
+  : jsonSmall)
+app.use((req, res, next) => jsonFor(req)(req, res, next))
 
 const wrap = (fn) => async (req, res) => {
   try {
@@ -497,7 +507,7 @@ app.get('/api/studio/version', async (req, res) => {
   } catch (e) { res.status(e.status || 404).json({ error: e.message }) }
 })
 app.post('/api/studio/restore', wrap(async (req) => { const q = sq(req); return studio.restore(await rootOf(q.root), q.path, String(req.body?.id || '')) }))
-app.post('/api/studio/new', express.json({ limit: '30mb' }), wrap(async (req) => {
+app.post('/api/studio/new', wrap(async (req) => {
   const q = sq(req)
   return studio.create(await rootOf(q.root), String(req.body?.dir || ''), String(req.body?.name || ''), req.body?.data ? Buffer.from(String(req.body.data), 'base64') : Buffer.from(String(req.body?.text || '')))
 }))
@@ -582,7 +592,7 @@ app.get('/api/studio/proposal', wrap(async (req) => { const q = sq(req); return 
 // Decks written by a model (the one meeting notes use, unless one's picked): a whole deck from what
 // it's about or a document, a slide rewritten, a slide added. The page shows it before it's taken.
 app.get('/api/studio/models', wrap(async () => ({ models: (await chatModels.models().catch(() => [])).map(({ id, label, provider, via }) => ({ id, label, provider, via })), pick: cfg.meetings?.model || await pickMeetingModel() })))
-app.post('/api/studio/deck/ai', express.json({ limit: '40mb' }), wrap(async (req) => {
+app.post('/api/studio/deck/ai', wrap(async (req) => {
   const b = req.body || {}
   const mode = ['deck', 'slide', 'add'].includes(b.mode) ? b.mode : 'deck'
   const use = String(b.model || '') || cfg.meetings?.model || await pickMeetingModel()
@@ -594,7 +604,7 @@ app.post('/api/studio/deck/ai', express.json({ limit: '40mb' }), wrap(async (req
   return { ...studio.deckAnswer(r?.text), model: use }
 }))
 // A picture put on a slide, saved beside the deck.
-app.post('/api/studio/picture', express.json({ limit: '30mb' }), wrap(async (req) => { const q = sq(req); return studio.savePicture(await rootOf(q.root), q.path, req.body?.name, Buffer.from(String(req.body?.data || ''), 'base64')) }))
+app.post('/api/studio/picture', wrap(async (req) => { const q = sq(req); return studio.savePicture(await rootOf(q.root), q.path, req.body?.name, Buffer.from(String(req.body?.data || ''), 'base64')) }))
 app.get('/api/agents/:pane/files', wrap(async (req) => files.listDir(await rootOf(req.params.pane), String(req.query.path || ''), { showHidden: req.query.hidden === '1' })))
 app.get('/api/agents/:pane/file', wrap(async (req) => files.readFile(await rootOf(req.params.pane), String(req.query.path || ''))))
 app.put('/api/agents/:pane/file', async (req, res) => {
@@ -3338,7 +3348,6 @@ app.get('/{*splat}', (req, res) => {
   // /tmp/.mount_… or ~/.local, and the page was a 404 there.
   res.sendFile('index.html', { root: dist })
 })
-
 // What couldn't be read of a request (express.json, above): one whose page went away as it was
 // sent (a window closed or reloaded) has no one to answer and isn't worth its stack in the log; one
 // too big or not JSON is told why, in JSON like every other answer here (it was a page of HTML,
