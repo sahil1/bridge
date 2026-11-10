@@ -538,7 +538,9 @@ try {
     const ht = await row.innerText().catch(() => '')
     ok(/3 invited/.test(ht) && /Last time: Northwind pricing sync/.test(ht) && /Agree on/.test(ht), "Home's Coming Up: Prep under the meeting", ht)
     ok(!(await rowOf('Budget office hours').count()), "a meeting you declined isn't in Coming Up")
-    const listed = await p.locator('.hm-ev-main > b').allInnerTexts()
+    // Once a day: the meetings left today and tomorrow's, so a daily one run before it's on today
+    // (after midnight) is under both days.
+    const listed = await p.locator('.hm-day').evaluateAll((days) => days.flatMap((d) => [...d.querySelectorAll('.hm-ev-main > b')].map((b) => `${d.querySelector('h4')?.textContent}: ${b.textContent}`)))
     ok(listed.length > 1 && new Set(listed).size === listed.length, 'Coming Up lists each meeting once', listed)
     await shot(p, `${tag}calendar-home`)
     // View Calendar, as it's Bridge AI's own: "Open in" is for another app (Open in Calendar, Open in Word).
