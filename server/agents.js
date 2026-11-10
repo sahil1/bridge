@@ -62,7 +62,9 @@ export const AGENTS = [
     caps: { chat: true, subagents: true, commands: true, questions: true, inputBox: true, typeAhead: true, rewind: true, undo: true, btw: true, fork: true },
   },
   {
-    kind: 'codex', label: 'Codex', model: (m) => ['--model', m], models: [], install: { unix: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh', win: 'powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"', npm: '@openai/codex', brew: '--cask codex' }, bin: ['codex'], herdr: 'codex', usage: 'codex',
+    // Its installer ends by asking "Start Codex now? [y/N]", which waits forever in an install tab
+    // nobody is looking at: CODEX_NON_INTERACTIVE says no.
+    kind: 'codex', label: 'Codex', model: (m) => ['--model', m], models: [], install: { unix: 'curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh', win: '$env:CODEX_NON_INTERACTIVE=\'1\'; powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"', npm: '@openai/codex', brew: '--cask codex' }, bin: ['codex'], herdr: 'codex', usage: 'codex',
     sessionId: 'discover',
     start: ({ prompt }) => (prompt ? [prompt] : []), promptArg: true,
     resume: (id) => ['resume', id],
