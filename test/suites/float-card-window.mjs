@@ -4,7 +4,10 @@
 // AI Assist's suggestion; one whose call ended with no sound from it; a call that started; a meeting
 // about to start, with its prep; what needs you) is whole in its window, with room for its shadow and
 // no more, and nothing in it runs past its edge or is cut off. The same in each of the app's
-// languages. And on a short screen, opened, it's no taller than the screen, zoomed or not.
+// languages. And on a short screen, opened, it's no taller than the screen, zoomed or not. Resized
+// by its edges and corners as any window (a stand-in pointer, so the real one stays put): the edge
+// follows the pointer and the other stays, the card fills its window, taller shows more of what's
+// been said, the size is kept, and a double-click puts it back.
 // 3.13.2's card at 110% (⌘+ once): its window stayed the card's size at 100%, which cut it off on
 // the right and at the bottom.
 import fs from 'node:fs'
@@ -59,6 +62,7 @@ try {
     id: ID, title: TITLE, status: 'recording', call: 'on', me: 'Sam', assist: true, levels: { you: 0.4, them: 0.6 },
     assistItems: [{ id: 'a1', t: 300, kind: 'question', text: 'Ask who signs off on the pilot budget, and by when they need the numbers from finance.', why: 'Just said', state: 'new' }],
     transcript: [
+      ...Array.from({ length: 9 }, (_, i) => ({ src: i % 2 ? 'them' : 'you', t0: 600 + i * 10, t1: 606 + i * 10, text: `Earlier line ${i + 1}: where the pilot stands, and who's waiting on what.` })),
       { src: 'you', t0: 700, t1: 706, text: "Let's go through the rollout plan for the second quarter first." },
       { src: 'them', t0: 707, t1: 715, name: 'Priya Raman', text: 'Sure. The platform team needs two more weeks for the migration.' },
       { src: 'you', t0: 716, t1: 720, text: 'Okay, what does that do to the launch date?' },
@@ -112,7 +116,8 @@ try {
     const r = c.getBoundingClientRect()
     const past = []
     const cut = []
-    for (const e of c.querySelectorAll('*')) {
+    // (The bands to resize it by go a little past its edge on purpose.)
+    for (const e of c.querySelectorAll(':scope *:not(.fc-grip)')) {
       const b = e.getBoundingClientRect()
       if (!b.width || !b.height) continue
       const what = `${e.tagName.toLowerCase()}.${String(e.className?.baseVal ?? e.className).trim().replace(/\s+/g, '.')}`
@@ -151,6 +156,75 @@ try {
     ok(!bad.length, `${k.name}: whole in its window at every zoom from 83% to 207%, nothing in it past its edge or cut off`, bad.slice(0, 3))
   }
   await zoomTo(0)
+
+  // ---------- Resized by its edges and corners ----------
+  {
+    const bounds = () => el.evaluate(() => globalThis.floatWin.getBounds())
+    const point = (x, y) => el.evaluate((_e, q) => { globalThis.cursor = q }, { x, y })
+    // Takes the grip, moves the stand-in pointer by (dx, dy) on the screen, and lets go.
+    const resize = async (g, dx, dy) => {
+      const box = await card.locator(`.fc-grip.${g}`).boundingBox()
+      if (!box) return null
+      await point(1000, 500)
+      await card.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+      await card.mouse.down()
+      await point(1000 + dx, 500 + dy)
+      await until(async () => { const b = await bounds(); return b.width !== before.width || b.height !== before.height }, 3000, 50)
+      await until(async () => whole(await look()), 3000, 50)
+      await card.mouse.up()
+      await point(null)
+      return bounds()
+    }
+    let before
+    const k = KINDS.find((x) => x.name.startsWith('the call ended')) // open while recording, as tall as it gets
+    await show(k)
+    await until(async () => whole(await look()), 4000, 100)
+    const grips = await card.$$eval('.fc-grip', (g) => g.map((x) => x.className.replace('fc-grip ', '')).sort().join(' '))
+    ok(grips === 'e n ne nw s se sw w', 'open while recording: it resizes by each edge and corner', grips)
+    before = await bounds()
+    const wider = await resize('w', -120, 0)
+    const l1 = await look()
+    ok(wider && wider.width === before.width + 120 && wider.x + wider.width === before.x + before.width && whole(l1) && l1.w === before.width + 120 - 24, 'its left edge dragged 120 points left: the window 120 wider, its right edge where it was, the card filling it', { before, wider, card: l1 })
+    before = await bounds()
+    const lines0 = await card.$$eval('.fc-said-line', (x) => x.length)
+    // As far as the screen lets it (CI's screens are short): no taller than it less 8 points each
+    // side, nor past its bottom but for the 12 around the card.
+    const wa = await el.evaluate(({ screen }) => screen.getDisplayMatching(globalThis.floatWin.getBounds()).workArea)
+    const want = Math.min(before.height + 160, wa.height - 16, wa.y + wa.height + 12 - before.y)
+    const taller = await resize('se', 0, 160)
+    const l2 = await look()
+    const said = await card.evaluate(() => { const b = document.querySelector('.fc-said'); const last = [...b.querySelectorAll('.fc-said-line')].pop(); const r = b.getBoundingClientRect(), q = last?.getBoundingClientRect(); return { lines: b.querySelectorAll('.fc-said-line').length, lastShown: !!q && q.bottom <= r.bottom + 1 && q.top >= r.top - 1 } })
+    ok(taller && Math.abs(taller.height - want) <= 1 && taller.height > before.height && taller.y === before.y && whole(l2) && said.lines > lines0 && said.lastShown, 'its bottom right corner dragged 160 down: that much taller (as far as the screen lets it), its top where it was, and more of what\'s been said shows, the newest line in view', { before, taller, want, wa, card: l2, said, lines0 })
+    await capture('float-resized')
+    const kept = await card.evaluate(() => JSON.parse(localStorage.getItem('cc-float-size') || 'null'))
+    ok(kept?.w === l1.w && kept?.h === l2.h, 'the size is kept on this computer', kept)
+    await card.reload()
+    await card.waitForSelector(k.ready, { timeout: 15000 }).catch(() => {})
+    const again = await until(async () => { const b = await bounds(); return Math.abs(b.width - taller.width) <= 1 && Math.abs(b.height - taller.height) <= 1 ? b : null }, 5000, 100)
+    ok(!!again, 'opened again, it\'s the size it was given', { again: await bounds(), taller })
+    // Slim, only sideways (its height is its bar's), at the width it was given.
+    calls = KINDS[0].calls
+    await card.mouse.move(1, 1)
+    await until(() => card.$(KINDS[0].ready), 8000, 100)
+    const slim = await card.$$eval('.fc-grip', (g) => g.map((x) => x.className.replace('fc-grip ', '')).sort().join(' '))
+    const ls = await until(async () => { const x = await look(); return whole(x) ? x : null }, 4000, 100)
+    ok(slim === 'e w' && ls?.w === l1.w, 'slim, it resizes only sideways, at the width it was given', { slim, card: ls })
+    // Zoomed, the edge still follows the pointer and the card still fits (open first: the pointer
+    // on its edge opens it).
+    await zoomTo(2)
+    await card.hover('.float-card .fc-head').catch(() => {})
+    await until(() => card.$(KINDS[1].ready), 5000, 100)
+    await until(async () => whole(await look()), 4000, 100)
+    before = await bounds()
+    const zoomed = await resize('w', -90, 0)
+    const lz = await look()
+    // (Let go, the window fits the card again, to the point above at this zoom.)
+    ok(zoomed && Math.abs(zoomed.width - (before.width + 90)) <= 1 && zoomed.x + zoomed.width === before.x + before.width && whole(lz), 'zoomed to 144%, its left edge follows the pointer and the card fills the window', { before, zoomed, card: lz })
+    await zoomTo(0)
+    await card.locator('.fc-grip.e').dblclick()
+    const usual = await until(async () => { const x = await look(); return whole(x) && x.w === 300 ? x : null }, 4000, 100)
+    ok(!!usual && !(await card.evaluate(() => localStorage.getItem('cc-float-size'))), 'a double-click on an edge: its usual size again', await look())
+  }
 
   // ---------- In each language ----------
   // The card's words at 100% (a word takes the same room in the page's pixels at any zoom).
