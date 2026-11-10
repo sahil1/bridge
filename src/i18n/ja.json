@@ -2786,6 +2786,7 @@
   "Status: {n} things want you": "ステータス: {n}件が対応待ち",
   "Still open, theirs": "未完了（相手の分）",
   "Still open, yours": "未完了（あなたの分）",
+  "Still writing out the last one…": "前の分をまだ文字に変換中…",
   "Stop": "停止",
   "Stop and transcribe": "停止して文字起こし",
   "Stop following \"{name}\" in Bridge AI?": "Bridge AI での「{name}」の追跡をやめますか？",

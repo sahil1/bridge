@@ -677,7 +677,7 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   const queues = agentBusy && !editing
   const attachNums = numbered(draft.files)
   const attachPics = draft.files.filter((f) => f.image && f.preview).map((f) => ({ path: f.path, src: f.preview, name: attachNums.count > 1 ? t('Image {n} · {name}', { n: attachNums.of(f), name: f.name }) : f.name }))
-  const status = busy ? t('Transcribing on your computer…') : uploading ? (uploading > 1 ? t('Uploading {n} files…', { n: uploading }) : t('Uploading {n} file…', { n: uploading })) : null
+  const status = busy ? (dict.early ? t('Still writing out the last one…') : t('Transcribing on your computer…')) : uploading ? (uploading > 1 ? t('Uploading {n} files…', { n: uploading }) : t('Uploading {n} file…', { n: uploading })) : null
   const stopBtn = onStop && <button className="stop-btn" onClick={onStop} title={t('Interrupt the agent (sends Esc)')} aria-label={t('Stop the agent')}><Icon name="stop" size={phone ? 13 : 11} /> {t('Stop')}</button>
   const nowBtn = <button className="now-btn" onClick={() => send(true)} title={t('Stop what the agent is doing and send this now')}>{t('Send now')}</button>
 

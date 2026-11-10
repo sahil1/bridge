@@ -373,6 +373,9 @@ export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440
   // A ResizeObserver that couldn't hand over every change in one frame is reported as a page error
   // (by WebKit, now and then). It's the browser's notice, not a fault in the page.
   p.on('pageerror', (e) => { if (e.message !== 'ResizeObserver loop completed with undelivered notifications.') errors.push(e.message) })
+  // A page whose process crashed is closed, and every call on it fails as "Target page, context or
+  // browser has been closed" (dictation-cleanup in WebKit, once in CI): the log says so, and where.
+  p.on('crash', () => console.log(`the page crashed (${b.browserType().name()}): ${p.url()}`))
   await p.goto(url)
   return { ctx, p, errors }
 }
