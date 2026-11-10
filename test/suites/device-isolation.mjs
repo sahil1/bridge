@@ -78,7 +78,7 @@ const senders = require('../../desktop/senders.js')
   const main = src('main.js')
   const chans = [...new Set([...main.matchAll(/\bipc\.(?:handle|on)\('([\w:-]+)'/g), ...src('dictation.js').matchAll(/\bipcMain\.(?:handle|on)\('([\w:-]+)'/g)].map((x) => x[1]))]
   ok(chans.length > 40 && !/\bipcMain\.(handle|on)\(/.test(main) && /electron: parts/.test(main) && /ipcMain: ipc\b/.test(main), 'main.js answers no message but through the check, and hands dictation.js the checked one', { chans: chans.length })
-  const handlers = main.split('setWindowOpenHandler(').slice(1).map((x) => x.split('\n')[0])
+  const handlers = main.split('setWindowOpenHandler(').slice(1).map((x) => x.split(/\r?\n/)[0]) // (Windows checks out CRLF)
   ok(handlers.length >= 4 && handlers.every((h) => /^openLink\((win|w|float)\)\)$/.test(h) || h === "() => ({ action: 'deny' }))"), 'every window\'s links opened in a new window go where that says for the page it shows (or, the tile\'s, nowhere)', handlers)
   const handled = {}
   const stand = { handle: (ch, fn) => { handled[ch] = fn }, on: (ch, fn) => { handled[ch] = fn } }

@@ -389,7 +389,7 @@ try {
     const dialogs = []
     p.on('dialog', (d) => { dialogs.push(d.message()); d.accept().catch(() => {}) })
     await p.locator('.rail').waitFor({ timeout: 30000 }).catch(() => {})
-    await p.locator('.rail').getByText('Projects/site').first().click({ timeout: 10000 }).catch(() => {})
+    await p.locator('.rail').getByText(/Projects[\\/]site/).first().click({ timeout: 10000 }).catch(() => {}) // (Windows: Projects\site)
     await p.locator('.console button[aria-label="Saved prompts"]').first().waitFor({ timeout: 15000 }).catch(() => {})
     await p.locator('.console button[aria-label="Saved prompts"]').first().click({ timeout: 10000 }).catch(() => {})
     await p.locator('.saved-pop button[aria-label="Delete Weekly note"]').click({ timeout: 5000 }).catch(() => {})
