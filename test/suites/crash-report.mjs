@@ -26,7 +26,7 @@ import http from 'node:http'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { ROOT, OUT, startKit, checks, until, browser, page, shot, freePort } from '../lib/harness.mjs'
+import { ROOT, OUT, startKit, checks, until, browser, page, shot, freePort, noServiceWorker } from '../lib/harness.mjs'
 
 const { ok, done } = checks('crash-report')
 // Each browser's run has folders of its own: the two can run at once.
@@ -245,6 +245,9 @@ try {
       const failing = { on: false, asked: 0 } // once on, Meetings' code fails each time it's asked for
       const s = await page(b, kit.url, {
         before: async (c) => {
+          // The app's service worker kept out: in WebKit, once it has the page, what it fetches isn't
+          // routed, and Meetings' code would come as on a fast network.
+          await noServiceWorker(c)
           await c.route(meetings, (r) => { if (failing.on) { failing.asked++; r.abort().catch(() => {}) } else held.push(r) })
           await c.route((u) => u.pathname === '/', async (r) => { if (slow.on) await new Promise((ok) => setTimeout(ok, 1500)); await r.fallback().catch(() => {}) })
         },
@@ -253,7 +256,8 @@ try {
       s.p.on('console', (m) => { if (/^\[This view\]/.test(m.text())) heard.push(m.text().slice(0, 200)) })
       await s.p.locator('.topbar .search-btn').waitFor({ timeout: 15000 })
       // Meetings opened (asked again until its tab is there), waiting for its code.
-      await until(async () => { await s.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'view:meetings' } }))); return held.length && /Meetings/.test(await s.p.locator('.ws-tab.main').innerText().catch(() => '')) }, 10000, 200)
+      const waiting = await until(async () => { await s.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'view:meetings' } }))); return held.length && /Meetings/.test(await s.p.locator('.ws-tab.main').innerText().catch(() => '')) }, 10000, 200)
+      if (!waiting) throw new Error(`Meetings opened without its code held (${held.length} asked for)`)
       return { ...s, held, heard, failing }
     }
     const slow = { on: false }
