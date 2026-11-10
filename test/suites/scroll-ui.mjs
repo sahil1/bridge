@@ -12,7 +12,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, checks, until, browser, page, shot, withoutCutOff, TEST, ROOT } from '../lib/harness.mjs'
 
-const { ok, done } = checks('scroll-ui')
+const { ok, skip, done } = checks('scroll-ui')
 const trials = Object.fromEntries([...fs.readFileSync(path.join(ROOT, 'src', 'trials.js'), 'utf8').matchAll(/\{ id: '([a-z-]+)'/g)].map((m) => [m[1], true]))
 const kit = await startKit('scroll-ui', { config: { trials } })
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
@@ -63,6 +63,18 @@ try {
     await p.locator('.mt-home .mt-row').first().waitFor({ timeout: 15000 }).catch(() => {})
     await p.mouse.move(700, 20) // over the top bar: no scroll area
     await p.waitForTimeout(200)
+    // A browser without scroll bar colours (WebKit before Safari 26, as CI's macOS 15 has): the
+    // fallback is what draws them (thin, no track, a faint thumb always there); the rest is for one with.
+    const modern = await p.evaluate(() => CSS.supports('scrollbar-color', 'auto'))
+    if (!modern) {
+      const fallback = await p.evaluate(() => [...document.styleSheets].flatMap((s) => { try { return [...s.cssRules] } catch { return [] } }).some((r) => r instanceof CSSSupportsRule && /not\s*\(scrollbar-color/.test(r.conditionText) && CSS.supports(r.conditionText) && /::-webkit-scrollbar-thumb[^}]*border-radius/.test(r.cssText) && /::-webkit-scrollbar\s*\{[^}]*width: 10px/.test(r.cssText)))
+      ok(fallback && await widthOf(p, '.ws-tabs-scroll') === 'none', `${mode}: no scroll bar colours in this browser: its scroll bars are drawn thin with no track and a faint thumb, and the tab strip still hides its bar`, { fallback })
+      skip(`${mode}: the thumb only over an area or while it scrolls`, 'this browser has no scroll bar colours to show it with')
+      await shot(p, `${tag}scroll-rest-${mode}`)
+      ok(withoutCutOff(errors).length === 0, `${mode}: no page errors`, errors)
+      await ctx.close()
+      continue
+    }
     const rest = { rail: await colorOf(p, '.rail-scroll'), meetings: await colorOf(p, '.mt-home'), width: [await widthOf(p, '.rail-scroll'), await widthOf(p, '.mt-home')] }
     ok(CLEAR.test(rest.rail) && CLEAR.test(rest.meetings) && rest.width.every((w) => w === 'thin'), `${mode}: at rest, the sidebar's and Meetings' scroll bars are thin and clear, with no track`, rest)
     await shot(p, `${tag}scroll-rest-${mode}`)
