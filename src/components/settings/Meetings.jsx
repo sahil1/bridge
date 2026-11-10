@@ -88,16 +88,17 @@ function ScreenNames() {
   const here = onThisComputer()
   const { data, refresh } = usePoll(here ? '/calls/screen' : null, 10_000)
   const [asked, setAsked] = useState(false)
+  const [err, setErr] = useState(null) // macOS couldn't be asked, and why
   if (!here || data?.allowed == null) return null
   return (
     <div className="st-row st-screen-names">
       <span><b>{t('Names from the call')}</b> <span className="muted small">{data.allowed
         ? t('Screen Recording is on: the names your call shows go on the transcript. Only the words are kept, never the picture.')
         : asked ? t('Turn on Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in Screen Recording.')
-          : t('Screen Recording puts the names your call shows on the transcript. Only the words are kept, never the picture.')}</span></span>
+          : t('Screen Recording puts the names your call shows on the transcript. Only the words are kept, never the picture.')}</span>{err && <span className="error-text small"> {err}</span>}</span>
       {!data.allowed && (asked
         ? <OpenSettings pane="audio">{t('Open it')}</OpenSettings>
-        : <button type="button" className="btn small" onClick={async () => { setAsked(true); await api('/calls/screen', { method: 'POST' }).catch(() => {}); refresh() }}>{t('Allow')}</button>)}
+        : <button type="button" className="btn small" onClick={async () => { setErr(null); try { await api('/calls/screen', { method: 'POST' }); setAsked(true) } catch (e) { setErr(t("Couldn't ask macOS: {error}", { error: e.message })) } refresh() }}>{t('Allow')}</button>)}
     </div>
   )
 }

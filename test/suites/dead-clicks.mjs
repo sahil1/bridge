@@ -8,6 +8,8 @@
 // asked to do something. A click after which nothing changed fails, with where it was and what
 // it's called. What isn't pressed (it deletes, signs out, sends, starts real work) and what may
 // show nothing (each with why) are listed below. DEAD_CLICKS_DEBUG=1 says what each press did.
+// And a click whose request fails says why (deleting a saved prompt; a new window the browser
+// blocks).
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -375,6 +377,31 @@ async function walk(shape) {
 
 try {
   if (pane) {
+    // ---------- what fails says why ----------
+    // A click whose request fails (here, refused by a route) shows why, where it was silent: deleting
+    // a saved prompt; and opening an agent in its own window when the browser blocks pop-ups.
+    await kit.api('/prompts', { name: 'Weekly note', text: 'Write the weekly note for {{week}}.' })
+    const { p, ctx, errors } = await page(b, kit.url, { before: async (c) => {
+      await noServiceWorker(c)
+      await c.route(/\/api\/prompts\/[^/?]+(\?|$)/, (r) => (r.request().method() === 'DELETE' ? r.fulfill({ status: 500, json: { error: 'the disk is full' } }) : r.fallback()))
+      await c.addInitScript(() => { window.open = () => null })
+    } })
+    const dialogs = []
+    p.on('dialog', (d) => { dialogs.push(d.message()); d.accept().catch(() => {}) })
+    await p.locator('.rail').waitFor({ timeout: 30000 }).catch(() => {})
+    await p.locator('.rail').getByText('Projects/site').first().click({ timeout: 10000 }).catch(() => {})
+    await p.locator('.console button[aria-label="Saved prompts"]').first().waitFor({ timeout: 15000 }).catch(() => {})
+    await p.locator('.console button[aria-label="Saved prompts"]').first().click({ timeout: 10000 }).catch(() => {})
+    await p.locator('.saved-pop button[aria-label="Delete Weekly note"]').click({ timeout: 5000 }).catch(() => {})
+    const said = await p.locator('.saved-pop .error-text').innerText({ timeout: 5000 }).catch(() => '')
+    ok(/Couldn't delete it: the disk is full/.test(said), 'a saved prompt that couldn\'t be deleted says why', { said, dialogs })
+    await p.keyboard.press('Escape')
+    const n = dialogs.length
+    await p.locator('.console button[aria-label="Open in its own window"]').first().click({ timeout: 5000 }).catch(() => {})
+    await sleep(500)
+    ok(dialogs.slice(n).some((m) => /blocked the new window/.test(m)), 'opened in its own window with pop-ups blocked: it says the browser blocked it, and what to do', dialogs.slice(n))
+    ok(!withoutCutOff(errors).length, 'and no page errors', errors)
+    await ctx.close()
     const [desk, web] = await Promise.all([walk('desktop'), walk('browser')])
     for (const [shape, r] of [['the desktop app', desk], ['a browser', web]]) {
       ok(r.pressed > 150, `in ${shape}, the main views' buttons and links are pressed (${r.pressed}; ${r.missed} gone or covered by then, ${r.skipped.length} skipped)`, r.pressed)

@@ -267,7 +267,7 @@ function SavedPrompts({ current, onPick, onClose }) {
               <b>{p.name}</b><span className="muted small">{p.text.replace(/\s+/g, ' ').slice(0, 90)}</span>
             </button>
             <button className="win-btn" onClick={() => setNaming({ id: p.id, name: p.name })} aria-label={t('Rename {name}', { name: p.name })} title={t('Rename')}><Icon name="edit" size={12} /></button>
-            <button className="win-btn" onClick={async () => { if (window.confirm(t('Delete the saved prompt "{name}"?', { name: p.name }))) { await api(`/prompts/${p.id}`, { method: 'DELETE' }).catch(() => {}); load() } }} aria-label={t('Delete {name}', { name: p.name })} title={t('Delete')}><Icon name="trash" size={12} /></button>
+            <button className="win-btn" onClick={async () => { if (window.confirm(t('Delete the saved prompt "{name}"?', { name: p.name }))) { setErr(null); await api(`/prompts/${p.id}`, { method: 'DELETE' }).catch((e) => setErr(t("Couldn't delete it: {error}", { error: e.message }))); load() } }} aria-label={t('Delete {name}', { name: p.name })} title={t('Delete')}><Icon name="trash" size={12} /></button>
           </div>
         ))}
       </div>

@@ -9,6 +9,7 @@ import ErrorBoundary from './ErrorBoundary.jsx'
 import Icon from './Icon.jsx'
 import { useFleet, usePoll, machineId, embedded } from '../api.js'
 import Dictation from '../dictation/Dictation.jsx'
+import { t } from '../i18n/index.js'
 
 // A channel for each device's windows: windows for two devices side by side can have agents with
 // the same id.
@@ -20,9 +21,11 @@ export const nameOf = (a) => (a.chief ? (a.thread && !a.thread.main ? `Chief of 
 
 export const tell = (msg) => { const ch = new BroadcastChannel(CHANNEL); ch.postMessage(msg); ch.close() }
 
+// In a browser that blocks pop-ups, nothing opens: it says so, rather than nothing happening.
 export function popOut(agent) {
   if (window.bridgeApp?.popOut) return window.bridgeApp.popOut(agent.paneId, nameOf(agent))
-  window.open(`?window=${encodeURIComponent(agent.paneId)}`, `bridge-${agent.paneId}`, 'popup,width=960,height=820')
+  const w = window.open(`?window=${encodeURIComponent(agent.paneId)}`, `bridge-${agent.paneId}`, 'popup,width=960,height=820')
+  if (!w) window.alert(t('Your browser blocked the new window. Allow pop-ups for this page, then try again.'))
 }
 
 export default function Solo({ paneId }) {

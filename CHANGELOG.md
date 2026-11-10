@@ -4,11 +4,20 @@ Each version's section here becomes its GitHub release notes (`npm run release`)
 
 ## 3.13.4
 
-Fixes: the meeting card is whole when the app is zoomed; a PowerPoint shows its own background in Studio; the tabs all stay on screen, as in Chrome; the sidebar folds and scrolls as one; scroll bars only when you need them; Studio takes a phone's photo; a setting found in Settings stays where it shows; and what can't load in Settings › Model Providers can be tried again.
+Fixes: the meeting card is whole when the app is zoomed; an agent's terminal scrolls back through all it keeps, and opens in your terminal app; no button that does nothing; a PowerPoint shows its own background in Studio; the tabs all stay on screen, as in Chrome; the sidebar folds and scrolls as one; scroll bars only when you need them; Studio takes a phone's photo; a setting found in Settings stays where it shows; and what can't load in Settings › Model Providers can be tried again.
 
 ### Fixes
 
 - **The meeting card is whole when the app is zoomed**: zoomed in with ⌘+ in the main window, the card zoomed too but its window didn't, so its right side and bottom were cut off (Stop, Watch screen, the last buttons). Its window now fits it at every zoom, on any screen; the dictation pill's too. And on a short screen, the card no longer runs past it: what's under the bar, or a meeting's prep before it starts, scrolls.
+- **An agent's terminal scrolls back through all it keeps without stopping**: it stopped a few hundred lines up. The rest of its history comes in before you reach the top, the lines you're reading stay put while the agent prints, and "That's as far back as this terminal keeps" shows only at the very top.
+- **Claude Code's full-screen view scrolls in the Terminal tab**: the wheel and a swipe go to the agent, as in Terminal or iTerm, so its own history scrolls, instead of stopping after one screen.
+- **A swipe scrolls a terminal on a phone or tablet**, in an agent's Terminal tab and a New terminal, and a flick glides on.
+- **Open in your terminal app opens the agent there, or says why not**: it said "Opened" as soon as it asked, and any failure closed the window at once. It now says "Opened" only once the agent shows there; otherwise it says why, with a command to run instead, and the window stays open to say why too. Automatic opens the terminal app you have open, never Warp (which can't be handed a command), and Settings › General shows which.
+- **Files' Collapse all looks like it folds, and says why it's off**: drawn as an expand, it did nothing with no folder open. Exit full size's arrows point in, no longer the same as Full size's.
+- **In the desktop app, Open in a new tab opens the file in your browser**: for a picture, PDF, video or page in Files, or a chat's picture or attachment, it did nothing.
+- **Copy buttons say Copied, or why they couldn't**: most said nothing either way, and Files' Copy path showed a tick even when it hadn't copied.
+- **What fails says why, rather than nothing happening**: buttons that open System Settings or Finder; Settings › Voice's Test; Settings › Devices' Unmute and Remove; the meeting card's Not now; deleting a saved prompt; removing a Files place; a meeting's Look again, and Allow for names from the call; and opening an agent in its own window when the browser blocks pop-ups.
+- **Settings › Mail keeps one working day on, and says so**: clicking the last one did nothing.
 - **A PowerPoint's background shows as it does in PowerPoint**: a picture on its master, layout or slide showed as white in Studio. Tiled pictures, the theme's background styles, gradients, patterns and see-through colours are drawn as PowerPoint draws them too, and a picture a browser can't show (TIFF, EMF) shows the colour under it, and Studio says so.
 - **A PowerPoint's subtitles use its master's body style**: they were drawn in the title's font, bold and big.
 - **A PowerPoint's lighter and darker theme colours match PowerPoint's**: a table's banded rows and the theme's shape and background styles were a shade off.

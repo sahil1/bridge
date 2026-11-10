@@ -63,14 +63,15 @@ function AskScreen() {
   const { data, refresh } = usePoll(here ? '/calls/screen' : null, 10_000)
   const [gone, setGone] = useState(() => { try { return localStorage.getItem(ASKED_SCREEN) === '1' } catch { return false } })
   const [asked, setAsked] = useState(false)
+  const [err, setErr] = useState(null) // macOS couldn't be asked, and why
   if (!here || gone || data?.allowed !== false) return null
-  const allow = async () => { setAsked(true); await api('/calls/screen', { method: 'POST' }).catch(() => {}); refresh() }
+  const allow = async () => { setErr(null); try { await api('/calls/screen', { method: 'POST' }); setAsked(true) } catch (e) { setErr(t("Couldn't ask macOS: {error}", { error: e.message })) } refresh() }
   const later = () => { setGone(true); try { localStorage.setItem(ASKED_SCREEN, '1') } catch { /* asks again next time */ } }
   return (
     <p className="mt-ask-screen small" role="status">
       <Icon name="users" size={12} /> <span><b>{t("Names for who's talking.")}</b> {asked
         ? t('Turn on Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in Screen Recording.')
-        : t('Screen Recording lets Bridge AI read the names your call shows as people talk, to put them on the transcript. Only the words are kept, never the picture.')}</span>
+        : t('Screen Recording lets Bridge AI read the names your call shows as people talk, to put them on the transcript. Only the words are kept, never the picture.')}{err && <span className="error-text"> {err}</span>}</span>
       {asked
         ? <OpenSettings pane="audio" className="link-btn">{t('Open it')}</OpenSettings>
         : <button type="button" className="btn small" onClick={allow}>{t('Allow')}</button>}
