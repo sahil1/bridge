@@ -591,6 +591,34 @@ export function slideView(doc, slide) {
   })
   return view
 }
+// The deck's look in a Markdown deck's terms (pptx.js, and AI Assist's slides shown before they're
+// kept), from its first slide's master: its background as one colour (a see-through one over
+// white, a gradient's middle, a pattern's two mixed, a picture's nearest: the colour its colour map
+// makes the background), its titles' colour (its title style, through that map), its first accent
+// and its fonts. Words that wouldn't read on that background are the theme's dark or light,
+// whichever reads. Colours as #rrggbb.
+export function deckLook(doc) {
+  const s = doc.slides[0]
+  const layout = s?.layout ? doc.layoutOf(s.layout) : null
+  const master = layout?.master ? doc.masterOf(layout.master) : null
+  if (!master) return null
+  const theme = master.theme ? doc.themeOf(master.theme) : themeOf('')
+  const cx = { doc, theme, scheme: theme.scheme, map: { ...master.clrMap, ...(layout?.clrMapOvr || {}) }, layout, master }
+  const named = (n) => colorOf({ name: 'a:schemeClr', attrs: { val: n }, kids: [] }, cx) || { hex: n === 'bg1' ? 'FFFFFF' : '000000', alpha: 1 }
+  const blend = (c, under = 'FFFFFF') => { const a = rgbOf(c.hex), b = rgbOf(under); return hexOf(a.map((v, i) => v * c.alpha + b[i] * (1 - c.alpha))) }
+  const mixed = (a, b, t) => ({ hex: hexOf(rgbOf(a.hex).map((v, i) => v + (rgbOf(b.hex)[i] - v) * t)), alpha: a.alpha + (b.alpha - a.alpha) * t })
+  const own = kid(kid(master.top, 'p:cSld'), 'p:bg')
+  const bg = own ? backgroundOf(own, { ...cx, rels: master.rels }) : { type: 'none' }
+  const at = (stops, x) => { const i = stops.findIndex((g) => g.at >= x); if (i < 0) return stops.at(-1).color; if (i === 0) return stops[0].color; const a = stops[i - 1], b = stops[i]; return mixed(a.color, b.color, (x - a.at) / Math.max(0.001, b.at - a.at)) }
+  const one = bg.type === 'solid' && bg.color ? bg.color : bg.type === 'grad' && bg.stops.length ? at(bg.stops, 50) : bg.type === 'pattern' ? mixed(bg.fg, bg.bg, 0.5) : null
+  const back = blend(one || named('bg1'))
+  const lum = (h) => { const [r, g, b] = rgbOf(h).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * r + 0.7152 * g + 0.0722 * b }
+  const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
+  const title = levelsOf(master.txStyles.title, cx)[0]?.rPr?.color
+  let text = blend(title || named('tx1'), back)
+  if (contrast(text, back) < 3) text = [named('dk1').hex, named('lt1').hex].sort((a, b) => contrast(b, back) - contrast(a, back))[0]
+  return { name: 'theme', colors: { background: `#${back.toLowerCase()}`, text: `#${text.toLowerCase()}`, accent: `#${blend(named('accent1')).toLowerCase()}` }, fonts: { heading: theme.fonts.major, body: theme.fonts.minor } }
+}
 // A background (p:bg): its own fill (p:bgPr), or one of the theme's styles in a colour (p:bgRef:
 // 1001 and on the background styles, 1 to 999 the shapes' fills), a picture's in the part that
 // names it (the theme's, for a style).

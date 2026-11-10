@@ -9,7 +9,7 @@ import * as X from '../pptxtext.js'
 import { slideHtml, SLIDE_CSS, paraAttrs, runCss, missingIn } from '../pptxdraw.js'
 import { Item, Swatches, Glyph, COMMON_FONTS, SIZES, fontHere } from '../doctools.jsx'
 import { Menu, Present, DeckFind, AiPanel, deckAssist, useSize } from './DeckParts.jsx'
-import { deckRenderer, PLAIN } from '../deck.js'
+import { deckRenderer, PLAIN, withFront, FRONT_COLORS } from '../deck.js'
 import { slidesOf } from '../pptx.js'
 import '../deck.css'
 import '../doc.css'
@@ -989,11 +989,12 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
   const showMatchQuiet = (m) => { setCur(m.si); setSel([m.at]); setEdit(null) }
 
   // ---------- Writing with AI ----------
-  // What it writes is Markdown slides (as for a Markdown deck), shown first in Studio's look; kept,
-  // each goes in on the file's own layout for its kind, its title and points in its placeholders.
+  // What it writes is Markdown slides (as for a Markdown deck), shown first in the file's own colours
+  // and fonts (its background, its titles' colour); kept, each goes in on the file's own layout for
+  // its kind, its title and points in its placeholders.
   const [aiOpen, setAiOpen] = useState(false)
   const [aiMode, setAiMode] = useState('deck')
-  const previewer = useMemo(() => { const r = deckRenderer(); r.setLook(PLAIN); return r }, [])
+  const previewer = useMemo(() => { const r = deckRenderer(); r.setLook(P.deckLook(doc) || PLAIN); return r }, [doc])
   const aiCss = useMemo(() => (aiOpen ? previewer.render('---\nmarp: true\n---\n\n#').css : ''), [aiOpen, previewer])
   const asMarkdown = (s) => {
     const lines = []
@@ -1096,7 +1097,10 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
       const deck = await deckFromPptx(await P.writePptx(doc, slidesRef.current, { media: media.current }), file.name)
       const name = file.name.replace(/\.pptx$/i, '')
       const dir = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : ''
+      // Its master's background, its titles' colour and its accent go with it, so it opens looking
+      // as the PowerPoint does.
       let text = deck.md
+      if (deck.look) for (const [k, key] of Object.entries(FRONT_COLORS)) text = withFront(text, key, deck.look.colors[k])
       for (const m of deck.media) {
         const r = await api('/studio/picture', { method: 'POST', body: { root: file.root, path: file.path, name: `${name}-${m.id}`, data: base64(m.bytes) } })
         text = text.split(`](media:${m.id}`).join(`](${r.src}`)

@@ -4,8 +4,9 @@
 // Keynote see a title as a title and a list as a list (PptxGenJS, MIT). The deck's look goes in as
 // the file's theme too: its colours and fonts. A PowerPoint comes back as a Markdown deck: each
 // slide's title, text, lists, pictures, tables and speaker notes, on the layout it was on, in its
-// theme's colours and fonts. Nothing here needs a page, so the tests use it as it is.
+// master's background and colours and its theme's fonts. Nothing here needs a page, so the tests use it as it is.
 import { deckRenderer, colorsOf, isBg, W, H, PLAIN, LAYOUTS } from './deck.js'
+import { readPptx, deckLook } from './pptxdoc.js'
 
 export { blankDeck } from './deck.js'
 
@@ -406,16 +407,9 @@ export async function deckFromPptx(buf, name = 'Deck') {
   const pres = xmlTree(await read('ppt/presentation.xml') || '')
   const presRels = relsOf(await read('ppt/_rels/presentation.xml.rels'), 'ppt/')
   const order = deep(pres, 'p:sldId').map((s) => presRels[s.attrs['r:id']]?.target).filter(Boolean)
-  // Its look: the theme's colours and fonts.
-  const themePath = Object.values(presRels).find((r) => r.type === 'theme')?.target
-  let look = null
-  if (themePath) {
-    const th = xmlTree(await read(themePath) || '')
-    const col = (tag) => { const el = deep(th, `a:${tag}`)[0]; const v = deep(el, 'a:srgbClr')[0]?.attrs.val || deep(el, 'a:sysClr')[0]?.attrs.lastClr; return v ? `#${v.toLowerCase()}` : null }
-    const font = (which) => deep(deep(th, `a:${which}`)[0], 'a:latin')[0]?.attrs.typeface || null
-    const colors = { background: col('lt1'), text: col('dk1'), accent: col('accent1') }
-    if (colors.background && colors.text) look = { name: 'theme', colors, fonts: { heading: font('majorFont'), body: font('minorFont') } }
-  }
+  // Its look: its master's background as it's drawn, its titles' colour through the master's
+  // colour map (a dark master's are light), its accent and its theme's fonts.
+  const look = await readPptx(buf).then(deckLook, () => null)
   const media = []
   const mediaId = new Map()
   let skipped = 0

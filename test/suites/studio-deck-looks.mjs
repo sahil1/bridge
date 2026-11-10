@@ -8,19 +8,21 @@
 // browser can't show (TIFF).
 // The files (no page): each background read as the file has it (a picture's address and size, a
 // gradient's angle and centre, a pattern, its nearest for a picture that can't be shown), a
-// subtitle in the master's body style, a dark master's words light; and each saved by Studio
+// subtitle in the master's body style, a dark master's words light; the deck's look for a Markdown
+// deck from its master's real background through its colour map; and each saved by Studio
 // unchanged byte for byte, and with its words changed, everything but that slide as it was and the
 // slide's own background too.
 // The page: each opened (the first from Studio's Recent list, as you would), its slide in the
 // middle, its thumbnail down the side and presenting, each looked at in its corners and centre
 // against what the deck says (a colour, a gradient's ends, the picture's colours), a picture of
 // each; see-through backgrounds still over white in dark mode; a background that can't be shown,
-// said once. At 1440 wide and on a 390 phone, light and dark.
+// said once; AI Assist's slides shown in the deck's colours; a Markdown deck of it keeping them. At
+// 1440 wide and on a 390 phone, light and dark.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { startKit, checks, until, sleep, browser, page, shot, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, ROOT } from '../lib/harness.mjs'
 import { bgCases, bgDeck, readPng, rgb, hexOf } from '../lib/bgdecks.mjs'
 
 const require = createRequire(path.join(ROOT, 'package.json'))
@@ -28,7 +30,9 @@ const JSZip = require('jszip')
 const { ok, done } = checks('studio-deck-looks')
 const X = await import(pathToFileURL(path.join(ROOT, 'src/components/studio/pptxdoc.js')).href)
 const R = await import(pathToFileURL(path.join(ROOT, 'src/components/studio/pptxdraw.js')).href)
+const P = await import(pathToFileURL(path.join(ROOT, 'src/components/studio/pptx.js')).href)
 const kit = await startKit('studio-deck-looks')
+const model = await startModel('studio-deck-looks')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const api = kit.api
@@ -116,6 +120,10 @@ try {
   const dark = v('dark-master')
   ok(dark.bg.color.hex === '111827' && runOf(dark.objs[0]).color.hex === 'FFFFFF' && runOf(dark.objs[2]).color.hex === 'D1D5DB', 'a dark master: its background dk1 and its words lt1, through its colour map', { bg: dark.bg, words: dark.objs.map((o) => runOf(o).color) })
   ok(v('keynote').objs[0].img.alpha === 0.5 && /opacity:0\.5/.test(R.slideHtml(v('keynote'))) && v('mac').under.length === 1 && v('mac').under[0].fill.color.hex === 'B4C7E7', 'a picture made half see-through (Keynote); PowerPoint for Mac\'s alternate content and its colours made lighter', { keynote: v('keynote').objs[0].img, mac: v('mac').under.map((o) => o.fill) })
+  // A Markdown deck of it: its master's background as it's drawn, through its colour map.
+  const lookOf = async (n) => (await P.deckFromPptx(files.get(n), `${n}.pptx`)).look.colors
+  const looks = { dark: await lookOf('dark-master'), layout: await lookOf('layout-over-master'), ref: await lookOf('bgref-solid'), tiff: await lookOf('tiff'), plain: await lookOf('solid') }
+  ok(looks.dark.background === '#111827' && looks.dark.text === '#ffffff' && looks.layout.background === '#b91c1c' && looks.ref.background === '#5b9bd5' && looks.tiff.background === '#e0f2fe' && looks.plain.background === '#ffffff' && looks.plain.text === '#000000', 'a Markdown deck of it: its master\'s background (a dark one dk1, a theme style\'s colour), its words\' colour through the colour map', looks)
   // Saved by Studio: unchanged, every part byte for byte; its words changed, all but that slide as
   // they were, and the slide's own background too.
   const moved = []
@@ -191,6 +199,29 @@ try {
   const fontsDrawn = await p.evaluate(() => [...document.querySelectorAll('.px-canvas .px-draw > .px-slide > [data-o] span[data-r]')].map((s) => { const c = getComputedStyle(s); return { font: c.fontFamily.split(',')[0].replace(/['"]/g, ''), weight: c.fontWeight, color: c.color, size: c.fontSize } }))
   ok(fontsDrawn.length === 2 && fontsDrawn[0].font === 'Georgia' && Number(fontsDrawn[0].weight) >= 700 && fontsDrawn[0].color === 'rgb(237, 125, 49)' && fontsDrawn[0].size === '72px' && fontsDrawn[1].font === 'Courier New' && fontsDrawn[1].color === 'rgb(0, 0, 0)', 'drawn in them: the title in Georgia, bold, accent 2 at 54 pt, the subtitle in Courier New', fontsDrawn)
 
+  // AI Assist's slides, shown before they're kept, in the deck's own colours.
+  await api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
+  await api('/settings', { meetings: { model: 'openai:gpt-5' } }, 'PATCH')
+  await open(p, byName['dark-master'])
+  await p.locator('.sd-file .pane-head button[aria-label="AI Assist"]').click()
+  await p.locator('.ai-menu button', { hasText: 'Write the deck' }).click()
+  await p.locator('.sd-ai textarea').fill('Our quarter')
+  await p.locator('.sd-ai button', { hasText: 'Write the deck' }).click()
+  const shown = p.locator('.sd-ai-result .sd-slide').nth(1)
+  await shown.waitFor({ timeout: 15000 })
+  const aiOff = await settle(async () => offSpots(await shown.screenshot(), byName['dark-master'], [[0.5, 0.97, '111827', 6], [0.03, 0.97, '111827', 6]]))
+  ok(!aiOff.length, 'AI Assist\'s slides shown in the deck\'s own colours (a dark master\'s), not Studio\'s white', aiOff)
+  await shot(p, `${tag}looks-ai`)
+  await p.locator('.sd-ai-head button[aria-label="Close AI Assist"]').click()
+  // A Markdown deck of it, beside it: its master's background and words' colour kept, and drawn so.
+  await p.locator('.px-row button[aria-label="Export"]').click()
+  await p.locator('.sd-tool-menu .menu-item', { hasText: 'Markdown deck, beside it' }).click()
+  const mdPath = path.join(dir, 'dark-master.md')
+  ok(!!(await until(() => fs.existsSync(mdPath) && /^background: "#111827"$/m.test(fs.readFileSync(mdPath, 'utf8')) && /^textColor: "#ffffff"$/m.test(fs.readFileSync(mdPath, 'utf8')), 10000, 100)), 'a Markdown deck of it, beside it, keeping its background and its words\' colour', fs.existsSync(mdPath) ? fs.readFileSync(mdPath, 'utf8').slice(0, 200) : 'not made')
+  await until(async () => { await p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'dark-master.md' } })), { root }); return p.locator('.sd-canvas section[id]').waitFor({ timeout: 3000 }).then(() => true, () => false) }, 30000, 300)
+  const mdOff = await settle(async () => offSpots(await p.locator('.sd-canvas section[id]').first().screenshot(), byName['dark-master'], [[0.03, 0.96, '111827', 6], [0.5, 0.96, '111827', 6]]))
+  const h1 = await p.locator('.sd-canvas section[id] h1').first().evaluate((e) => getComputedStyle(e).color).catch(() => '')
+  ok(!mdOff.length && h1 === 'rgb(255, 255, 255)', 'and opened, drawn in them: dark, its title white', { mdOff, h1 })
   ok(w.errors.length === 0, 'no page errors', w.errors)
 
   // Dark: a see-through background still over white, not the page's dark; a dark master as it is.
@@ -227,6 +258,6 @@ try {
 } finally {
   for (const x of pages) await x.ctx.close().catch(() => {})
   await b.close()
-  kit.stop()
+  kit.stop(); model.stop()
 }
 process.exit(done().fail ? 1 : 0)
