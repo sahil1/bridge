@@ -6,7 +6,9 @@
 //   desktop app hands the window in front (with the key from any app on, it hears the key itself),
 //   held with Desk's agent's message box focused, puts the words in that box, never in Studio's
 //   Chief of Staff's; kept on Studio as typed for Desk's agent. The key pressed in Desk's box itself
-//   (the page's own key): there too. With nothing focused and Desk's agent on screen: its message box.
+//   (the page's own key): there too. Before Studio's page knows where Desk's page is (its list of
+//   your devices slow to come), the words are shown and kept, never put in Studio's Chief of Staff's
+//   box. With nothing focused and Desk's agent on screen: its message box.
 //   What the desktop app's dictation window heard for a window showing Desk (that page can't use this
 //   computer's microphone): put in Desk's agent's message box; a page with nowhere to put them says
 //   so, and they're kept. Desk's mic button held in its tab, and Ask out loud on Desk's Chief of
@@ -164,6 +166,30 @@ try {
     // Desk's in the tab), and handed Desk's page the words.
     const here = await until(async () => (await studio.api('/dictations?limit=20')).items.find((x) => x.text === 'Typed from here.'), 5000, 200)
     ok(here?.how === 'typed' && here.agent?.id === rid, 'Studio\'s page listened for it, and handed Desk\'s page the words', here)
+    ok(real(s.errors).length === 0, 'no page errors', s.errors)
+    await s.ctx.close()
+  }
+
+  // ---------- Desk's tab, before Studio's page knows where Desk's page is ----------
+  // (Studio's list of your devices, which says, held back, as on a slow start.) The words said for
+  // Desk's agent are shown and kept, never put in Studio's Chief of Staff's box (they were).
+  {
+    let letGo = null
+    const held = new Promise((r) => { letGo = r })
+    const s = await page(b, studio.url, { before: async (ctx) => { await before(ctx); await ctx.route(`${studio.url}/api/machines`, async (r) => { await held; await r.fallback().catch(() => {}) }) }, store: { 'cc-ws': { tabs: [chief, rid], active: chief, side: rid, split: true, group: 'side' }, 'cc-remote-tabs': remoteInfo } })
+    const p = s.p
+    const chiefBox = p.locator(`textarea[data-composer="${chief}"]`)
+    const deskBox = p.frameLocator('.remote-frame').locator('textarea[data-composer]')
+    await chiefBox.waitFor({ timeout: 30000 })
+    await deskBox.waitFor({ timeout: 45000 })
+    await deskBox.click()
+    said.push('not for the chief')
+    await hold(p)
+    const note = await until(async () => { const x = await p.locator('.dict-dock').innerText().catch(() => ''); return /Not for the chief\./.test(x) && x }, 8000, 100)
+    ok(!!note && !(await chiefBox.inputValue()).includes('chief'), 'Desk\'s box focused before Studio\'s page knows where Desk\'s page is: the words are shown, not put in Studio\'s Chief of Staff\'s box', { note, chief: await chiefBox.inputValue() })
+    const kept = await until(async () => (await studio.api('/dictations?limit=30')).items.find((x) => x.text === 'Not for the chief.'), 5000, 200)
+    ok(!!kept && !kept.how && !kept.agent, 'and kept on Studio, put nowhere', kept)
+    letGo()
     ok(real(s.errors).length === 0, 'no page errors', s.errors)
     await s.ctx.close()
   }
