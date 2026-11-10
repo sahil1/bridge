@@ -252,15 +252,23 @@ const FIRST_TRY = 250
 const LAST_TRY = 10000
 let backoff = FIRST_TRY
 let retryTimer = null
-let started = false // start() has read the pairing
+let started = false // start() has read the pairing, or is reading it with the link on its way
+let loaded = null // reading the pairing (start)
+let asking = false // a pairing link's "Pair with …?" is up: the link to the relay comes up meanwhile, and the tap pairs
+// The service worker while it's on its way (null once it's there, and in the iPhone app, which has
+// none). What Bridge AI asks for goes through it, so Bridge AI waits for it (showApp); the link
+// doesn't, and comes up meanwhile.
+let worker = null
 let readyWaiters = []
 let appShown = false
+let shown = 0 // each time Bridge AI is opened in the frame
 let relayKeeps = false // this relay keeps notes for the computer (offline.js)
 let away = false // showing what the computer last sent: it's offline, or the relay can't be reached
 let unchecked = false // turned away, or answered with another key: said, and tried again (refused)
 const streams = new Map() // id -> { onHead, onChunk, onEnd, onError }
 let nextId = 1
 let inbox = Promise.resolve()
+let notes = Promise.resolve() // the relay's word about the notes it keeps, one at a time (onText)
 
 // Wait for the link, unless the relay already said the computer is away (or it can't be reached).
 const ready = (ms = away ? 0 : 15000) => (session ? Promise.resolve() : ws?.readyState === 1 && !hostOnline ? Promise.reject(new Error(offlineText())) : new Promise((ok, no) => {
@@ -287,10 +295,10 @@ function onLimit(m) {
       : m.why === 'all'
         ? `Bridge AI's relay has carried all it can today, for every computer on it. It starts again at ${when(until)}. For no limits, put the relay on your own Cloudflare account (Settings › Devices, on the computer), or use Tailscale.`
         : String(m.text || 'Bridge AI\'s relay can\'t take this right now.').slice(0, 300)
-  limited = { why: m.why, text, until }
   const title = { window: 'Relay allowance used for now', week: 'Relay allowance used this week', all: 'Daily limit reached', off: 'Bridge AI\'s relay is off', phones: 'Too many connected', suspended: 'Account suspended', relay: 'No relay on this account', deleted: 'Account deleted', token: 'Not signed in on the computer' }[m.why] || 'One moment…'
+  limited = { why: m.why, text, until, title }
   if (appShown) bar(text, true)
-  else waitScreen(title, text, false)
+  else if (!asking) waitScreen(title, text, false) // (asking: said once you tap Pair)
 }
 
 function bar(msg, off) {
@@ -497,9 +505,12 @@ setInterval(() => {
 }, 1000)
 
 // The relay's own messages: whether your computer is there, or about the notes it keeps.
-function onText(m) {
+async function onText(m) {
+  await loaded // this phone's pairing, read while the link came up (start)
   if (m.t === 'limit') return onLimit(m)
-  if (m.t) return offline.fromRelay(m)
+  // What the relay says about the notes it keeps is kept on this phone (IndexedDB), in order, but
+  // not ahead of the link: the computer's welcome, which comes right after, doesn't wait for it.
+  if (m.t) { notes = notes.then(() => offline.fromRelay(m)).catch((e) => console.error(e)); return }
   if (m.q === 1 && !relayKeeps) { relayKeeps = true; offline.relayReady().catch(() => {}) }
   return onStatus(m)
 }
@@ -508,6 +519,7 @@ async function onStatus(st) {
   hostOnline = !!st.host
   hostSeen = st.seen || hostSeen
   heardStatus = true
+  if (asking) return // the tap pairs, or says it's offline
   if (!st.host) {
     silent = false
     dropSession(offlineText()) // with Bridge AI showing, the banner
@@ -1112,8 +1124,12 @@ function showApp() {
   if (away) awayBanner() // back from a start screen to what it last sent
   if (appShown) return
   appShown = true
-  f.src = openOnLoad ? `/?agent=${encodeURIComponent(openOnLoad)}` : `/${location.search}`
+  const src = openOnLoad ? `/?agent=${encodeURIComponent(openOnLoad)}` : `/${location.search}`
   openOnLoad = null
+  const n = ++shown
+  const load = () => { if (appShown && n === shown) f.src = src }
+  if (worker) worker.then(load, (e) => waitScreen('Something went wrong', e.message, true))
+  else load()
   // Match the app's background and bar colour around it (the notch and the Home indicator area).
   f.onload = () => {
     try {
@@ -1167,11 +1183,13 @@ $('pair-form').onsubmit = async (e) => {
   code = c
   paired = null
   started = true
+  asking = false
   waitScreen('Pairing…', '')
   watchStart()
-  if (ws?.readyState === 1 && hostOnline) handshake().catch(fail)
-  else if (ws?.readyState === 1) waitScreen('Your computer is offline', `${offlineText()} Pairing finishes as soon as it's back.`, true)
-  else connect()
+  if (limited.until > Date.now()) waitScreen(limited.title, limited.text, false)
+  else if (ws?.readyState === 1 && hostOnline) handshake().catch(fail)
+  else if (ws?.readyState === 1 && heardStatus) waitScreen('Your computer is offline', `${offlineText()} Pairing finishes as soon as it's back.`, true)
+  else connect() // (or the relay is about to say whether it's there: onStatus pairs)
 }
 $('code').oninput = (e) => { if (/[:/.]/.test(e.target.value)) return; const v = normCode(e.target.value).slice(0, 20); e.target.value = formatCode(v) }
 $('scan').onclick = () => (native ? native.post({ type: 'scan' }) : window.bridgeAndroid.scan())
@@ -1209,17 +1227,28 @@ async function start() {
   if (native || window.bridgeAndroid) $('scan').hidden = false // the apps scan the QR code themselves
   if (!native) {
     if (!('serviceWorker' in navigator)) { waitScreen('This browser can\'t run Bridge AI', 'Use Safari on iPhone or Chrome on Android.'); return }
-    await navigator.serviceWorker.register('/sw.js', { scope: '/' })
-    await navigator.serviceWorker.ready
+    const sw = navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(() => navigator.serviceWorker.ready)
+    worker = sw
+    sw.then(() => { if (worker === sw) worker = null }, stop)
     fetch('/_relay/health', { cache: 'no-store' }).then((r) => r.json()).then((j) => { relayBuild = j.build || null }, () => {})
   }
-  paired = (await pairing.get()) || null
-  offline.tidy().catch(() => {})
-  // A code you just scanned pairs this phone afresh, even if it was paired before (a new
-  // computer, or after it was removed): once you say so (askPair).
+  // Opened as usual (not from a pairing link): the link to the relay comes up while this phone's
+  // pairing is read, and waits for it (onText).
+  loaded = pairing.get().then((p) => { paired = p || null })
   const hash = new URLSearchParams(location.hash.slice(1))
   const fromLink = hash.get('pair')
-  if (fromLink && normCode(fromLink) !== paired?.code && relay) return askPair(normCode(fromLink), hash.get('name'))
+  if (!fromLink && relay) { started = true; connect() }
+  await loaded
+  if (stopped) return
+  offline.tidy().catch(() => {})
+  // A code you just scanned pairs this phone afresh, even if it was paired before (a new
+  // computer, or after it was removed): once you say so (askPair). A phone paired with nothing
+  // here connects to the relay meanwhile, so the tap pairs at once.
+  if (fromLink && normCode(fromLink) !== paired?.code && relay) {
+    askPair(normCode(fromLink), hash.get('name'))
+    if (!paired) { asking = true; connect() }
+    return
+  }
   if (!relay) { // the iPhone app before its first pairing: the link says which relay, a code alone doesn't
     linkOnly()
     show('pair')
@@ -1232,7 +1261,18 @@ async function start() {
   watchStart()
   connect()
 }
-start().catch((e) => waitScreen('Something went wrong', e.message, true))
+// What this page needs that this browser won't give (the service worker, somewhere to keep the
+// pairing): said, and nothing more is tried.
+let stopped = null
+function stop(e) {
+  stopped = e
+  started = false
+  asking = false
+  abandon()
+  clearTimeout(retryTimer)
+  waitScreen('Something went wrong', e.message, true)
+}
+start().catch(stop)
 // A pairing link opened while this page is already open: start over with its code.
 addEventListener('hashchange', () => { if (/[#&]pair=/.test(location.hash)) location.reload() })
 

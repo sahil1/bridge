@@ -107,7 +107,8 @@ export const settingsChanged = () => window.dispatchEvent(new Event('bridge-sett
 // The same for one endpoint (after an account switch, every view of /quota).
 export const refetch = (path) => window.dispatchEvent(new CustomEvent('bridge-refetch', { detail: path }))
 
-// Poll an endpoint while the tab is visible. Returns { data, error, loading, refresh }.
+// Poll an endpoint while the tab is visible. Returns { data, error, loading, stale, refresh }.
+// stale: data is a path's it no longer shows (the last range's, until the new one's comes).
 // After an error it retries within a minute, whatever the interval.
 // Polled GETs are shared across the app: components asking for the same path at the same time
 // share one request, and a view that mounts again starts from the last answer (then refreshes)
@@ -126,7 +127,7 @@ function sharedGet(path, force) {
 export function usePoll(path, intervalMs, { enabled = true } = {}) {
   const [state, setState] = useState(() => {
     const hit = path && lastData.get(path)
-    return hit ? { data: hit.data, error: null, loading: false } : { data: null, error: null, loading: true }
+    return hit ? { data: hit.data, of: path, error: null, loading: false } : { data: null, of: null, error: null, loading: true }
   })
   const pathRef = useRef(path)
   pathRef.current = path
@@ -139,7 +140,7 @@ export function usePoll(path, intervalMs, { enabled = true } = {}) {
     if (!asked) return
     try {
       const data = suffix ? await api(asked + suffix) : await sharedGet(asked, !shared)
-      if (asked === pathRef.current) setState({ data, error: null, errorCode: null, loading: false })
+      if (asked === pathRef.current) setState({ data, of: asked, error: null, errorCode: null, loading: false })
     } catch (error) {
       if (asked === pathRef.current) setState((s) => ({ ...s, error: error.message, errorCode: error.code || null, loading: false }))
     }
@@ -167,7 +168,8 @@ export function usePoll(path, intervalMs, { enabled = true } = {}) {
     return () => clearTimeout(t)
   }, [state.error, enabled, path, intervalMs, refresh])
 
-  return { ...state, refresh }
+  const { of, ...rest } = state
+  return { ...rest, stale: !!state.data && of !== path, refresh }
 }
 
 // Live fleet over server-sent events, with a polling fallback.

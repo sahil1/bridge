@@ -37,13 +37,14 @@ const SOUND_MS = 3000
 // key status, while asking whether the key should work from any app too. tidying: the words are
 // with the model being tidied (Tidy what I say, below); result.by is then the model that tidied
 // them, result.said what you said when that changed it, and result.untidied why they weren't
-// ({ code, error, local }).
+// ({ code, error, local }). early: pressed again before those words were in, which is said till
+// they are (press, below).
 export const LEVELS = 18
 const QUIET = Array(LEVELS).fill(0)
-let st = { phase: 'idle', mode: null, target: null, level: 0, levels: QUIET, live: '', since: 0, note: null, setup: null, result: null, retry: false, offer: null, tidying: false }
+let st = { phase: 'idle', mode: null, target: null, level: 0, levels: QUIET, live: '', since: 0, note: null, setup: null, result: null, retry: false, offer: null, tidying: false, early: false }
 const subs = new Set()
 // Done with listening (the text is in, or it isn't coming): its live words go with it.
-const set = (p) => { st = { ...st, ...p, ...(p.phase === 'idle' ? { live: '', tidying: false } : {}) }; for (const f of subs) f() }
+const set = (p) => { st = { ...st, ...p, ...(p.phase === 'idle' ? { live: '', tidying: false, early: false } : {}) }; for (const f of subs) f() }
 // ...or, while the window this page is in listens for a press made here, that one's (lent).
 export const getState = () => hosted()?.state() || st
 export const subscribe = (f) => { subs.add(f); return () => subs.delete(f) }
@@ -74,7 +75,8 @@ export const isPaused = () => paused
 // ---------- Where the text goes ----------
 // Message boxes say they're there (Composer.jsx): { insert(text, caret), visible() }. So does
 // another device's agent in a tab (RemoteAgent.jsx): { frame: true, name, origin, el(), win(),
-// insert(text), visible() }, its insert a promise of whether its page took them.
+// insert(text), visible() }, its insert a promise of whether its page took them (origin null while
+// its page's address isn't known here: nothing goes to that page, nor is heard from it).
 const boxes = new Map()
 let lastBox = null
 let onScreen = () => null // the agent on screen (App.jsx)
@@ -177,7 +179,7 @@ const spoke = new WeakSet()
 const answers = new Map() // a message's id -> what its answer settles
 let asked = 0
 const tabOf = (e) => [...boxes.values()].find((b) => b.frame && b.win?.() === e.source && e.origin === b.origin) || null
-const toTab = (b, type, more = {}) => { try { b.win()?.postMessage({ [MSG]: type, ...more }, b.origin) } catch { /* gone */ } }
+const toTab = (b, type, more = {}) => { if (!b.origin) return; try { b.win()?.postMessage({ [MSG]: type, ...more }, b.origin) } catch { /* gone */ } }
 const hostSays = () => ({ listens: !!lending, app: !!window.bridgeApp?.desktop })
 // The words, to a tab's page: whether it put them, or false after a while (it went, or it's a Bridge
 // AI from before this, which never answers).
@@ -331,7 +333,9 @@ export async function press(target, at = Date.now()) {
   }
   lent = null
   if (st.phase === 'listening' || st.phase === 'opening') { if (st.mode === 'free') finish(); return }
-  if (st.phase === 'working') return
+  // The last words still being turned into text (or tidied): it says so, rather than a press that
+  // does nothing, and the next press once they're in listens as ever.
+  if (st.phase === 'working') { if (!st.early) set({ early: true }); return }
   if (!target) { set({ note: t('Click where the words should go, or open an agent, then try again.'), target: null }); return }
   if (target.kind === 'password') { set({ note: t("Can't dictate into a password field."), target: null }); return }
   if (noMic()) {

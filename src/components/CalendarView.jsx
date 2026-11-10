@@ -124,19 +124,26 @@ function useNow(ms = 60000) {
 }
 
 // How it's shown (server: calendar.js viewOf), the same on each of your devices. save(patch): shown
-// at once, put back with why when it couldn't be kept. known: it has come (or couldn't be read, and
-// the defaults stand).
+// at once, kept in turn, and shown as you set it until the view read after the last one is in (one
+// finished while you set the next, say the week's start then the working hours, put back what the
+// next was then set from); put back with why when it couldn't be kept. known: it has come (or
+// couldn't be read, and the defaults stand).
 const VIEW = { weekStart: null, workStart: 9, workEnd: 17, hidden: [], tasks: true }
 function useView() {
   const { data, error: unread, refresh } = usePoll('/calendar/view', 10 * 60 * 1000)
   const [mine, setMine] = useState(null)
   const [error, setError] = useState(null)
+  const saving = useRef(0)
+  const queue = useRef(Promise.resolve())
   const v = { ...VIEW, ...(data || {}), ...(mine || {}) }
-  const save = async (patch) => {
+  const save = (patch) => {
     setMine((m) => ({ ...(m || {}), ...patch }))
     setError(null)
-    try { await api('/calendar/view', { method: 'PATCH', body: patch }); await refresh() } catch (x) { setError(x.message) }
-    setMine(null)
+    saving.current++
+    queue.current = queue.current
+      .then(() => api('/calendar/view', { method: 'PATCH', body: patch }))
+      .then(() => refresh(), (x) => setError(x.message))
+      .finally(() => { if (!--saving.current) setMine(null) })
   }
   return { view: { ...v, ws: v.weekStart ?? localWeekStart() }, save, error, known: !!data || !!unread }
 }

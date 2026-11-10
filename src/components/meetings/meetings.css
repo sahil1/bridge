@@ -856,6 +856,9 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mi-basis { display: flex; gap: 6px; align-items: baseline; }
 .mi-basis svg { flex: none; position: relative; top: 1px; }
 .mi-bar { justify-content: flex-start; }
+/* Another range picked: the last one's numbers, dimmed, until the new ones come. */
+.mi-stale > :not(.mi-bar) { opacity: .55; transition: opacity .15s; }
+.mi-loading { display: inline-flex; align-items: center; gap: 5px; }
 .mi-kinds button .muted { font-variant-numeric: tabular-nums; }
 .mi .us-grid { grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
 .mi-tile { cursor: default; position: relative; }

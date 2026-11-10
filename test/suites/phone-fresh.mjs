@@ -76,16 +76,18 @@ try {
   await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
   ok(await entryOf(ph.p) === entry0, 'the phone opens on the computer\'s UI')
 
-  // Off the screen meanwhile, the computer updates; back on it: the new one, by itself.
+  // Off the screen meanwhile, the computer updates; back on it: the new one, by itself. On a slow
+  // machine the page's first look (15 s after it opened) can come while it's off the screen, and
+  // loads it then, which is as good. Counted once the reload's own load event has come: the new
+  // page's entry file is in its DOM as soon as the page is read, and on a busy machine its load
+  // event can come a second after that.
   await screen(ph.p, false)
+  let before = loads
   const v1 = update()
   await settle()
-  let before = loads
-  // Counted once the reload's own load event has come: the new page's entry file is in its DOM as
-  // soon as the page is read, and on a busy machine its load event can come a second after that.
-  const reloaded = ph.p.waitForEvent('load', { timeout: 15000 }).then(() => true, () => false)
   await screen(ph.p, true)
-  ok(await reloaded && (await entryOf(ph.p)) === v1, 'back on the screen after the computer updated, the phone loads the new version by itself', await entryOf(ph.p))
+  const reloaded = await until(async () => loads > before && (await entryOf(ph.p)) === v1, 15000, 100)
+  ok(!!reloaded, 'back on the screen after the computer updated, the phone loads the new version by itself', { entry: await entryOf(ph.p), loads, before })
   await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
   await until(() => ph.p.evaluate(() => typeof window.bridgeFresh?.check === 'function'), 10000)
   ok(loads === before + 1, 'once', { loads, before })

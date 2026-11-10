@@ -164,7 +164,16 @@ const runOne = (j, attempt) => new Promise((resolve) => {
     // 3221225786 for a console that went away), so the next one says what happened.
     const how = signal ? `stopped by ${signal}` : `exit code ${code}`
     const last = text.trim().split('\n').reverse().find((l) => /: \d+ passed, \d+ failed/.test(l)) || (text.trim() ? `(no result, ${how}: see the log)` : `(no output at all, ${how})`)
-    resolve({ ok: code === 0, ms: Date.now() - t0, line: last.replace(/^[\w-]+: /, ''), fails: text.split('\n').filter((l) => l.startsWith('FAIL ')), log })
+    // A crash says where in the test it was (from its stack), and a page that crashed says so: a
+    // flaky one's log isn't kept in CI, so its line is all there is to go on.
+    const lines = text.split('\n')
+    const fails = lines.flatMap((l, i) => {
+      if (l.startsWith('the page crashed')) return [`FAIL ${l}`]
+      if (!l.startsWith('FAIL ')) return []
+      const at = /^FAIL ([\w-]+ )?crashed: /.test(l) && lines.slice(i + 1, i + 40).join('\n').match(/test[\\/]suites[\\/]([\w-]+\.mjs:\d+)/)?.[1]
+      return [at ? l.replace(/crashed: /, `crashed at ${at}: `) : l]
+    })
+    resolve({ ok: code === 0, ms: Date.now() - t0, line: last.replace(/^[\w-]+: /, ''), fails, log })
   })
 })
 

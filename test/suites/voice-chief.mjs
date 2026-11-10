@@ -9,7 +9,8 @@
 //   let go, what was said goes to it marked "(Asked out loud)"; once it's answered, the answer is
 //   read aloud for the ear (no Markdown, pane ids or links' addresses) by the device's own voice,
 //   never the internet one; Stop, Again. Its instructions say how to answer out loud. Kept in the
-//   history as sent to the Chief of Staff. On a phone, held with a finger.
+//   history as sent to the Chief of Staff. Tapped: it listens on, saying to press it again. On a
+//   phone, held with a finger.
 //   Interrupting: Esc stops it at once, and so does pressing Ask out loud again (before it listens).
 //   Settings › Voice › Spoken Answers: this device's own voices, the most natural first and picked
 //   (Premium, then Enhanced, then the rest; novelty voices left out; Chrome's two of one name once),
@@ -146,10 +147,14 @@ const toSettings = async (p) => {
   await sec.waitFor({ timeout: 10000 })
   return sec
 }
+// Listening: the mic's sound has come, and the pill's ✓ is on. Nothing before that is recorded, and
+// on a busy computer it can come a while after the press, so a hold is timed from then.
+const listens = (p) => until(() => p.locator('.dict-dock .dp-ok:enabled').count(), 5000, 50)
 const hold = async (p, el, ms = 1400) => {
   const r = await el.boundingBox()
   await p.mouse.move(r.x + r.width / 2, r.y + r.height / 2)
   await p.mouse.down()
+  await listens(p)
   await sleep(ms)
   await p.mouse.up()
 }
@@ -173,6 +178,7 @@ try {
     await p.mouse.move(r.x + r.width / 2, r.y + r.height / 2)
     await p.mouse.down()
     ok(!!(await until(async () => /To Chief of Staff/.test(await p.locator('.dict-dock').innerText().catch(() => '')), 5000, 100)), `${mode}: held: the pill, "To Chief of Staff"`)
+    await listens(p)
     await sleep(1200)
     await shot(p, `${tag}voice-chief-asking-${mode}`)
     await p.mouse.up()
@@ -202,6 +208,7 @@ try {
       await p.mouse.move(r2.x + r2.width / 2, r2.y + r2.height / 2)
       await p.mouse.down()
       ok((await p.evaluate(() => window.__cancels)) > c1, 'pressing Ask out loud again while it reads stops it at once, before it listens')
+      await listens(p)
       await sleep(1200)
       await p.mouse.up()
       ok(!!(await until(() => p.evaluate(([h, k]) => { const s = window.__said.filter((x) => x.text.trim()); return s.length > k && s.at(-1).text === h }, [HEARD, n1]), 10000, 200)), 'and then it listens, and the new answer is read')
@@ -211,6 +218,22 @@ try {
   }
   const kept = await until(async () => (await kit.api('/dictations?limit=20')).items.find((x) => x.text === "What's blocked." || x.text === "What's blocked?"), 5000, 200)
   ok(kept?.how === 'sent' && kept.agent?.chief === true, 'kept in the history as sent to the Chief of Staff', kept)
+  // Tapped (Enter on it, or let go before the mic was on): it listens on, and says to press it again
+  // rather than to let go; pressed again, what was said goes.
+  {
+    const { ctx, p, errors } = await open(LOCAL, { said: 'anything new' })
+    await toChief(p)
+    await p.locator('.ask-btn').focus()
+    await p.keyboard.press('Enter')
+    await listens(p)
+    const line = await p.locator('.ask-line').innerText()
+    ok(/Listening… press Ask out loud again when you're done/.test(line), 'tapped: it listens on, and says to press Ask out loud again when you\'re done (not to let go)', line)
+    await sleep(1200)
+    await p.keyboard.press('Enter')
+    ok(!!(await until(() => prompts.at(-1) === '(Asked out loud) Anything new.', 8000, 100)), 'pressed again: what was said goes to the Chief of Staff', prompts.at(-1))
+    ok(real(errors).length === 0, 'no page errors', errors)
+    await ctx.close()
+  }
 
   // Settings › Voice › Spoken Answers: this device's own voices, a speed, Test.
   {
@@ -385,6 +408,7 @@ try {
     const btn = p.locator('.ask-btn')
     await btn.waitFor({ timeout: 15000 })
     await btn.dispatchEvent('pointerdown', { button: 0, pointerType: 'touch', isPrimary: true, pointerId: 6 })
+    await listens(p)
     await sleep(1400)
     await p.evaluate(() => window.dispatchEvent(new PointerEvent('pointerup', { button: 0, pointerType: 'touch', isPrimary: true, pointerId: 6 })))
     ok(!!(await until(() => p.evaluate(() => window.__played >= 2), 10000, 100)) && spoken(from).length >= 2 && fs.readFileSync(path.join(kit.bin, 'espeak.log'), 'utf8') === before, 'a phone with no voice of its own: the computer\'s natural voice reads it, played on the phone, not eSpeak NG', spoken(from))
@@ -410,6 +434,7 @@ try {
     const btn = p.locator('.ask-btn')
     await btn.waitFor({ timeout: 15000 })
     await btn.dispatchEvent('pointerdown', { button: 0, pointerType: 'touch', isPrimary: true, pointerId: 5 })
+    await listens(p)
     await sleep(1400)
     await p.evaluate(() => window.dispatchEvent(new PointerEvent('pointerup', { button: 0, pointerType: 'touch', isPrimary: true, pointerId: 5 })))
     ok(!!(await until(() => prompts.at(-1) === '(Asked out loud) Anything for me.', 8000, 100)) && !!(await until(() => p.evaluate((h) => window.__said.at(-1)?.text === h, HEARD), 10000, 200)), 'on a phone: held with a finger, asked, and the answer read aloud', prompts.at(-1))

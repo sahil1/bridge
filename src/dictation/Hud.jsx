@@ -7,7 +7,7 @@ import { useRecheck } from '../permissions.js'
 import { store } from '../components/layout.jsx'
 import { keyLabel } from '../../shared/dictation/keys.js'
 import { corrections } from '../../shared/dictation/corrected.js'
-import { useDictation, configure, press, release, finish, cancel, dismiss, retry, keysPlatform, dictationKey, amend, forget, lookedAt, latest } from './controller.js'
+import { useDictation, getState, configure, press, release, finish, cancel, dismiss, retry, keysPlatform, dictationKey, amend, forget, lookedAt, latest } from './controller.js'
 import { Morph, Listening, Working, Done } from './Pill.jsx'
 import { untidiedWhy, TidyNeeds } from './Tidy.jsx'
 import Remember from './Remember.jsx'
@@ -142,6 +142,10 @@ export default function Hud() {
   // knows it.
   useEffect(() => {
     const begin = (at, name, bundle, win = false) => {
+      // Pressed again while the last words are still being turned into text: those carry on as
+      // they were, to where they were said (not the app or window of this press), and the pill
+      // says to wait for them (controller.js press).
+      if (getState().phase === 'working') { press(null, at); return }
       clearTimeout(timer.current); clearTimeout(going.current); setLeaving(false)
       setDone(null); setErr(null); setPicking(false); setWhy(null); setOffer(false); setPasting(false); setAllowed(false); setEditing(false); setEdited(null); setAsSaid(false); setDraft(null); setFixes([])
       setInto(win ? null : name || null)
@@ -414,7 +418,7 @@ export default function Hud() {
     <div className={`hud-root${leaving || view === 'idle' ? ' leaving' : ''}`}>
       <Morph key={shown} className={`hud${card ? ' card' : ''}`} role="dialog" aria-label={t('Dictation')} onSize={(z) => setRoom(z.h)}>
         {view === 'listening' && <Listening s={s} to={toChip} hint={hint} onCancel={() => { cancel(); hide() }} onStop={finish} />}
-        {view === 'working' && <Working s={s} text={s.tidying ? t('Tidying what you said…') : undefined} />}
+        {view === 'working' && <Working s={s} text={s.early ? t('Still writing out the last one…') : s.tidying ? t('Tidying what you said…') : undefined} />}
         {view === 'pasting' && <Working s={s} text={editing ? t('Changing what you selected…') : into ? t('Pasting into {app}…', { app: into }) : t('Pasting…')} />}
         {view === 'done' && <Done text={done} warn={!!untidied} note={untidiedWhy(untidied)} />}
         {view === 'card' && (

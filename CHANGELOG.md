@@ -2,6 +2,41 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.13.2
+
+Fixes: dictation keeps all of what you said and says when to wait; the phone opens Bridge AI sooner; Home and the calendar keep what you set; Studio never loses a version on Windows; meeting notes never half written; Insights quick on a busy computer; and pairing that only you decide: a code adds one device, which your computer asks you to keep, and nothing the relay says can unpair it.
+
+### Fixes
+
+- **Dictation keeps all of what you said when the computer is busy as you let go**: the end of it, or all of a short one ("Recording too short"), could be lost, mostly in Safari and the iPhone app.
+- **Dictation says to wait when you press it again before the last words are in**, rather than doing nothing while what you say is lost. In the dictation window, those last words still go where you said them, not to the app or window of the new press.
+- **Dictation for another computer's agent in a tab never lands in this computer's Chief of Staff**: in a window's first moments, the words are shown and kept instead.
+- **Ask out loud says to press it again once it's listening hands-free**, after a tap or a let go before the mic was on, instead of telling you to let go.
+- **The phone opens Bridge AI sooner**: after a pairing link, it gets ready and connects while it asks "Pair with …?", so Pair goes straight through; opened again, it no longer waits on what the phone keeps before connecting.
+- **Studio never loses a file's versions on Windows**: a look at them while one was being kept could come back empty, and a version kept then could be written over the others.
+- **A meeting's saved notes are never half written**: your notes app could read an empty note while it saved, and a note saved twice at once could stop being kept up to date.
+- **Edit Home keeps what you arrange**: hiding a section and bringing it straight back could leave it hidden, or put back an order you had changed.
+- **Working hours set right after the week's start are kept** in the calendar: the start went back to 9 AM.
+- **A meeting opened from Home or the floating card opens in its sheet on a busy phone**, not just at its day.
+- **Insights opens quickly on a busy computer**: its first look over your agents' logs could take seconds while other windows were opening.
+- **Meeting Insights says when it's still loading another range**: the last range's numbers showed as if they were the new one's until those came; now they're dimmed, and the range says Loading….
+- **A chat keeps its end in view when what the agent has running opens under it**: its last card could sit out of sight until the next message, then jump up under the pointer.
+- **A chat with any model names its model from the start**: its model button said Default until the first reply.
+- **An agent's old shells show as ended** once its terminal no longer counts them, not running now and then.
+- **Files' sidebar comes whole**: Locations no longer shows alone first and then jumps down under the rest.
+- **Settings › Model Providers' accounts don't move down as the page loads.**
+- **Saying you're at the computer still gets through as you leave or reload the page**, so your phone knows when you've gone.
+- **Leaving a page while a view is still loading no longer reports a crash**: switching a window to another computer, or reloading, before a view's code had come showed its error and wrote it down (and could send it) as if the app had crashed.
+
+### Pairing and the Relay
+
+- **A pairing code adds one device**, and your computer says so, with Keep and Remove. Another phone takes a new code (Add another device). A pairing link asks "Pair with <name>?" first, and a computer linked with this one's code meets your other computers only once you keep it.
+- **Only your computer can unpair a device**: an answer from the relay that can't be checked is said, and tried again, rather than removing the pairing from your phone or unlinking a computer.
+- **What a device says about itself comes inside the encryption**: its name, whether it's a phone or a computer, and its relay. A relay can't rename a device, make a phone look like a computer, or move it to another relay.
+- **Removing a device stops its notifications at once**, and the six digits for linking a computer never show in a notification.
+- **The Android app carries its own copy of the phone page**, as the iPhone app does, so the code that does the encrypting comes with the app, never from the relay.
+- **A relay on your own Cloudflare account offers an update** in Settings › Devices, for these changes.
+
 ## 3.13.1
 
 What you told us about 3.13.0, made better: the floating meeting card redone, Memory where you use it, Settings in fewer words, dictation that goes where you are, voices that sound like people, Studio's toolbars, switching computers in a moment, and another computer's pages kept apart from this one.

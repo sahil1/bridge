@@ -92,6 +92,11 @@ try {
   ok(!!(await until(async () => /weekly limit/.test(await card.innerText().catch(() => '')), 15000)), 'the weekly one too')
   const wk = await card.innerText()
   ok(/Resets Oct 29 at 5am/.test(wk) && /It won't carry on by itself/.test(wk), "the weekly one: it won't carry on by itself", wk)
+  // What it has running opens under the chat, which keeps its end in view: the card and its
+  // buttons, rather than out of sight until the chat jumps to them.
+  const atEnd = () => p.evaluate(() => { const c = document.querySelector('.chat-limit')?.closest('.chat'); return !!c && c.scrollHeight - c.scrollTop - c.clientHeight < 2 })
+  // (As it's drawn: the chat is put back at its end when it's laid out, the frame after the tray.)
+  ok(!!(await p.locator('.sa-tray').first().waitFor({ timeout: 15000 }).then(() => true, () => false)) && !!(await until(atEnd, 3000)), 'what it has running opens under the chat, and the chat keeps its end in view, the card with its buttons')
   await card.locator('button', { hasText: 'Continue now on Work' }).click()
   const onWork = await until(() => agentOf((a) => a.sessionId === weekly.sessionId && a.paneId !== weekly.paneId && a.accountId === work.id), 30000, 500)
   ok(!!onWork, 'Continue now: the conversation goes on on Work', ((await kit.api('/fleet')).agents || []).map((a) => ({ pane: a.paneId, session: a.sessionId, account: a.accountId })))

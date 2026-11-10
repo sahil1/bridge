@@ -185,14 +185,16 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     if (!up) { stopTree(server); throw new Error(`the server didn't start on ${port}: ${fs.readFileSync(path.join(dir, 'server.log'), 'utf8').slice(-1500)}`) }
   }
   await run()
-  // Bridge AI quit and opened again, on the same folders (what it kept, it keeps).
-  const restart = async () => {
+  // Bridge AI quit and opened again, on the same folders (what it kept, it keeps). between(): what
+  // changes while it's closed, so nothing it was still doing (a summary tried again) changes it too.
+  const restart = async (between) => {
     const was = server
     const gone = new Promise((r) => (was.exitCode != null ? r() : was.once('exit', r)))
     const rest = stopTree(was, { itselfFirst: true })
     await gone
     for (const p of rest) { try { process.kill(p, 'SIGTERM') } catch { /* gone */ } }
     await until(async () => !(await fetch(`${url}/api/config`).then(() => true, () => false)), 10000, 100)
+    await between?.()
     await run()
   }
   // api(path, body, method): the JSON back; a refusal throws with the server's own words.
@@ -373,6 +375,9 @@ export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440
   // A ResizeObserver that couldn't hand over every change in one frame is reported as a page error
   // (by WebKit, now and then). It's the browser's notice, not a fault in the page.
   p.on('pageerror', (e) => { if (e.message !== 'ResizeObserver loop completed with undelivered notifications.') errors.push(e.message) })
+  // A page whose process crashed is closed, and every call on it fails as "Target page, context or
+  // browser has been closed" (dictation-cleanup in WebKit, once in CI): the log says so, and where.
+  p.on('crash', () => console.log(`the page crashed (${b.browserType().name()}): ${p.url()}`))
   await p.goto(url)
   return { ctx, p, errors }
 }

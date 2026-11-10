@@ -9,7 +9,7 @@ import { CalendarView, UsageStats } from '../lazy.jsx'
 import MailView, { useMail } from './MailView.jsx'
 import MarketsView from './MarketsView.jsx'
 import ErrorBoundary from './ErrorBoundary.jsx'
-import { openToday } from './today.js'
+import { openToday, takeToday } from './today.js'
 import { usePoll } from '../api.js'
 import { t, tx } from '../i18n/index.js'
 
@@ -68,13 +68,16 @@ export function TodayBody({ wide, phone = false, onOpenAgent, tab, setTab, stack
   const [mailId, setMailId] = useState(null)
   const [focus, setFocus] = useState(null) // { date, event, at }: a day in the calendar, and an event on it to open
   const here = useMailHere()
+  // Where openToday() sent it: at once while it's open, and as it opens for one said before then.
   useEffect(() => {
-    const on = (e) => {
-      const d = e.detail || {}
+    const on = () => {
+      const d = takeToday()
+      if (!d) return
       if (d.tab) setTab(d.tab)
       if (d.mailId) setMailId(d.mailId)
       if (d.date) setFocus({ date: d.date, event: d.event || null, at: Date.now() })
     }
+    on()
     window.addEventListener('cc-today', on)
     return () => window.removeEventListener('cc-today', on)
   }, [setTab])

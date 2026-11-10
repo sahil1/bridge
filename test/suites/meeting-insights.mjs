@@ -27,7 +27,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
-import { startKit, checks, until, browser, page, shot, phoneFaults, withoutCutOff, IS_WIN, ROOT } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, phoneFaults, withoutCutOff, noServiceWorker, IS_WIN, ROOT } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('meeting-insights')
 // The calendar: a stand-in bridgecal that answers from bridgecal.json beside it ({ status, events }).
@@ -176,7 +176,21 @@ try {
   ok((await api('/config')).trials?.['meeting-insights'] === false && off?.status === 404 && /Meeting Insights is a beta feature\. Turn it on in Settings › About & Updates › Beta Features/.test(off.message)
     && (await err('/meetings/people'))?.status === 404 && (await err('/meetings/people/merge', { a: 'x', b: 'y' }))?.status === 404,
   'a beta feature, off to start with: its routes answer 404, saying how to turn it on', { off: off?.message, trials: (await api('/config')).trials })
-  const desk = await page(b, kit.url, { store: { 'cc-rail-meetings': true, 'cc-meet-tab': 'insights' } })
+  // On cue (held: { range, answer }), that range's insights are read at once and answered only
+  // when the test says, with what the server said then.
+  let held = null
+  const holdRange = async (c) => {
+    await noServiceWorker(c)
+    await c.route(/\/api\/meetings\/insights\?/, async (r) => {
+      const h = held
+      if (!h || h.got || !r.request().url().includes(`days=${h.range}&`)) return r.fallback()
+      h.got = r.request()
+      const res = await r.fetch()
+      await h.answer
+      await r.fulfill({ response: res }).catch(() => {})
+    })
+  }
+  const desk = await page(b, kit.url, { store: { 'cc-rail-meetings': true, 'cc-meet-tab': 'insights' }, before: holdRange })
   pages.push(desk)
   const p = desk.p
   // Meetings, from the sidebar once the app is up (clicked again until it shows: WebKit, and a busy
@@ -363,10 +377,28 @@ try {
   ok(/^\w+ · \d+ (AM|PM)–\d+ (AM|PM)\s+\d+ (min|h).* in \d+ meetings?$/.test((await heat.locator('.tooltip').innerText().catch(() => '')).trim()), 'and pointing at one, the hour, the time and how many meetings', await heat.locator('.tooltip').innerText().catch(() => ''))
   const heads = await p.locator('.mi-grid .mi-colhead').allInnerTexts()
   ok(heads.length === 1 && /You spoke\s+Meetings/.test(heads[0]), 'the share by kind has its columns named, not explained in a footnote', heads)
+  // Another range picked, its numbers slow to come: the last range's stay, dimmed and said to be
+  // loading, not passed off as the new one's; back on 90 days before they come, they never show.
+  const answer = Promise.withResolvers()
+  held = { range: 30, answer: answer.promise }
+  await p.locator('.mi-bar button', { hasText: '30 days' }).click()
+  await until(() => held.got, 8000, 50)
+  const mi = p.locator('.mi')
+  const faded = () => p.locator('.mi-tiles').evaluate((e) => Number(getComputedStyle(e).opacity))
+  const dimmed = await until(async () => (await mi.getAttribute('aria-busy')) === 'true' && /Loading…/.test(await p.locator('.mi-bar').innerText()) && (await p.locator('.mi-bar button[aria-selected="true"]').getAttribute('aria-busy')) === 'true' && await faded() < 0.6, 5000)
+  ok(!!dimmed && (await subs())[0] === '▲ 7 more than the 90 days before', 'another range picked, its numbers slow to come: the last range\'s stay, dimmed, the range said to be loading', { faded: await faded(), bar: await p.locator('.mi-bar').innerText(), sub: (await subs())[0] })
+  await p.locator('.mi-bar button', { hasText: '90 days' }).click()
+  await until(async () => (await mi.getAttribute('aria-busy')) !== 'true', 8000)
+  answer.resolve()
+  await held.got.response().catch(() => null)
+  await p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  held = null
+  ok((await subs())[0] === '▲ 7 more than the 90 days before' && (await mi.getAttribute('aria-busy')) !== 'true' && !/Loading…/.test(await p.locator('.mi-bar').innerText()), 'back on 90 days before the 30 came: the 90 days, and the 30 days\' late answer never shows', { sub: (await subs())[0], bar: await p.locator('.mi-bar').innerText() })
   await p.locator('.mi-bar button', { hasText: '30 days' }).click()
   ok(!!(await until(async () => (await subs())[0] === 'none in the 30 days before', 8000)), 'with no meetings in the days before: none, not "8 more"', await subs())
   await p.locator('.mi-bar button', { hasText: '90 days' }).click()
-  await until(async () => (await tiles())[0] === '8', 8000)
+  // (The 30 days have the same 8 meetings: the 90 days are in once the tile says what's before them.)
+  await until(async () => (await tiles())[0] === '8' && (await subs())[0] === '▲ 7 more than the 90 days before', 8000)
   const basis = await p.locator('[data-basis="talk"]').innerText().catch(() => '')
   ok(/From 5 meetings where who spoke is known: on a call, your mic and the call's sound; in a room, voices told apart and one of them you\. 2 in a room without the voices told apart aren't counted\. 1 with nothing transcribed isn't counted\./.test(basis), 'what your share of the talk is based on, and what isn\'t counted', basis)
   ok(/Worked out on this computer from 9 recorded meetings/.test(await p.locator('.mi-lede').innerText()) && /Archived meetings are left out/.test(await p.locator('.mi-lede').innerText()), 'and where it all comes from')
