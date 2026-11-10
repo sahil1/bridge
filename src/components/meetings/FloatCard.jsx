@@ -20,12 +20,21 @@ import './meetings.css'
 // With AI Assist's Suggest what to ask on, its newest suggestion shows under the bar, open or not,
 // since you're looking at the call: ✓ puts it in your notes, ✕ dismisses it. Ten minutes before a
 // meeting with other people: Join, and what to go in with at a glance (prep.jsx's PrepGlance).
-// Drag it from anywhere that isn't a button.
+// Drag it from anywhere that isn't a button. Resize it by its edges and corners, as any window: its
+// width for every card, and open while recording its height too, which shows more of what's been
+// said; double-click an edge for its usual size. Kept on this computer.
 // The recording itself is in the main window; this one asks it over a BroadcastChannel, and asks
 // the desktop app (preload) to start notes for a call, to open things and to fit its size.
 const app = () => window.bridgeApp || {}
 const PIN = 'cc-float-pin'
 const pinned0 = () => { try { return localStorage.getItem(PIN) === '1' } catch { return false } }
+// The size you gave it, in the page's pixels: { w, h } (h: open while recording), within the
+// desktop app's limits (desktop/floatfit.js).
+const SIZE = 'cc-float-size'
+const LIMITS = { minW: 260, maxW: 720, minH: 120 }
+const size0 = () => { try { const v = JSON.parse(localStorage.getItem(SIZE)); return v && typeof v === 'object' ? v : {} } catch { return {} } }
+const keepSize = (v) => { try { if (v.w || v.h) localStorage.setItem(SIZE, JSON.stringify(v)); else localStorage.removeItem(SIZE) } catch { /* no storage */ } }
+const GRIP = { n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize' }
 
 // Who's talked how much of everything said: your share, in percent (null before anyone has).
 function talkShare(lines) {
@@ -57,12 +66,43 @@ export default function FloatCard() {
   const { data: m } = usePoll(r ? `/meetings/${encodeURIComponent(r.id)}` : null, hover || pinned ? 1500 : 4000)
   // ⌘+ and ⌘− in the main window zoom this page too: its window is the wrong size for the card then,
   // without the card changing size, so the page says so again (and how much of the screen it has).
+  // While it's resized by an edge, the window follows the pointer and the card fills the window.
   const [zoom, setZoom] = useState(() => app().zoom?.() || 1)
+  const [size, setSize] = useState(size0)
+  const sizeNow = useRef(size)
+  sizeNow.current = size
+  const [resizing, setResizing] = useState(null) // the edge being dragged
+  const edgeNow = useRef(null)
   useEffect(() => {
-    const z = () => setZoom(app().zoom?.() || 1)
+    const z = () => {
+      setZoom(app().zoom?.() || 1)
+      const edge = edgeNow.current
+      if (edge) setSize((v) => ({ ...v, ...(/[ew]/.test(edge) ? { w: Math.round(innerWidth - 24) } : {}), ...(/[ns]/.test(edge) ? { h: Math.round(innerHeight - 24) } : {}) }))
+    }
     window.addEventListener('resize', z)
     return () => window.removeEventListener('resize', z)
   }, [])
+  const canResize = !!app().floatResize
+  const grab = (edge) => (e) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* moves still come while it's over the edge */ }
+    clearTimeout(leave.current)
+    edgeNow.current = edge
+    setResizing(edge)
+    app().floatResize(edge)
+  }
+  const letGo = () => {
+    if (!edgeNow.current) return
+    edgeNow.current = null
+    setResizing(null)
+    app().floatResize(null)
+    keepSize(sizeNow.current)
+    // Let go off the card: it closes as it would have when the pointer left it.
+    if (!card.current?.matches(':hover')) out()
+  }
+  const usualSize = () => { setSize({}); keepSize({}) }
   const ev = useCallEvent(!r && c?.prompt ? c.prompt.at : null, c?.prompt?.app)
 
   useEffect(() => {
@@ -99,6 +139,10 @@ export default function FloatCard() {
     ro.observe(el)
     return () => ro.disconnect()
   })
+  // Made taller, what's been said shows more lines, the newest at the bottom, in view as they come.
+  const saidBox = useRef(null)
+  const saidCount = m?.transcript?.length || 0
+  useLayoutEffect(() => { const el = saidBox.current; if (el && size.h) el.scrollTop = el.scrollHeight }, [saidCount, size.h, hover])
   // Hidden (the window, or what it shows changed): no longer under the pointer.
   useEffect(() => { setHover(false) }, [r?.id, c?.prompt?.at])
   useEffect(() => {
@@ -113,7 +157,7 @@ export default function FloatCard() {
   const drag = useRef(null)
   const [dragging, setDragging] = useState(false)
   const down = (e) => {
-    if (e.button !== 0 || e.target.closest('button, input, select, textarea, a, summary, label')) return
+    if (e.button !== 0 || e.target.closest('button, input, select, textarea, a, summary, label, .fc-grip')) return
     drag.current = { x: e.screenX, y: e.screenY, wx: window.screenX, wy: window.screenY, moved: false, head: !!e.target.closest('.fc-head'), frame: 0 }
     if (app().floatMove) try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* a pointer that can't be captured: moves still come while it's over the card */ }
   }
@@ -138,7 +182,7 @@ export default function FloatCard() {
   // Open while the pointer is on it, or while a note is being written in it; closed a moment after.
   const writing = () => { const i = card.current?.querySelector('.fc-note input'); return !!i && (i.value.trim() !== '' || (document.activeElement === i && document.hasFocus())) }
   const enter = () => { clearTimeout(leave.current); if (onHover && !drag.current?.moved) setHover(true) }
-  const out = () => { clearTimeout(leave.current); if (onHover && !drag.current?.moved) leave.current = setTimeout(() => { if (!writing()) setHover(false) }, 500) }
+  const out = () => { clearTimeout(leave.current); if (onHover && !drag.current?.moved && !edgeNow.current) leave.current = setTimeout(() => { if (!writing()) setHover(false) }, 500) }
   // macOS lets Bridge AI hear a call only once it's allowed (System Audio Recording): until then a
   // call's sound is silence. Opens the settings page to allow it.
   const allowCall = () => api('/fix/settings', { method: 'POST', body: { pane: 'audio' } }).catch((e) => setErr(e.message))
@@ -157,8 +201,10 @@ export default function FloatCard() {
   if (r) {
     const paused = live?.rec?.id === r.id ? live.rec.paused : r.status === 'paused'
     const secs = live?.rec?.id === r.id ? live.elapsed : (Date.now() - new Date(r.startedAt).getTime()) / 1000
+    open = hover || (onHover && pinned) || !!r.callEnded
+    const tall = open && !!size.h
     const said = (m?.transcript || []).filter((l) => l.text)
-    const recent = said.slice(-3)
+    const recent = said.slice(tall ? -40 : -3)
     const left = r.stopsAt ? Math.max(0, Math.round((new Date(r.stopsAt).getTime() - Date.now()) / 1000)) : null
     const share = talkShare(said)
     const here = live?.rec?.id === r.id
@@ -169,7 +215,6 @@ export default function FloatCard() {
     const tip = m?.assist ? [...(m.assistItems || [])].reverse().find((x) => x.state === 'new') : null
     const info = [part, toEnd != null && (toEnd >= 0 ? t('Ends {time}, in {n} min', { time: end.toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }), n: toEnd }) : t('{n} min past its end', { n: -toEnd })), m?.event?.attendees?.length ? t('{n} invited', { n: m.event.attendees.length }) : null].filter(Boolean).join(' · ')
     const call = m?.call === 'on'
-    open = hover || (onHover && pinned) || !!r.callEnded
     body = (
       <>
         {/* The bar: the same open or not, so what's under the pointer as it opens stays put. */}
@@ -209,7 +254,7 @@ export default function FloatCard() {
             )}
             <div className="fc-live">
               {info && <p className="fc-info" title={info}>{info}</p>}
-              <div className="fc-said">
+              <div className="fc-said" ref={saidBox}>
                 {recent.length ? recent.map((l) => <p key={`${l.src}:${l.t0}`} className={`fc-said-line ${l.src}`}><b>{l.name || (l.me ? m?.me || t('You') : l.voice ? t('Speaker {n}', { n: l.voice }) : l.src === 'them' ? t('Them') : m?.me || t('You'))}</b> {l.text}</p>) : !m?.partial && <p className="fc-said-none">{paused ? t('Paused.') : t('Listening…')}</p>}
                 {/* Live words: what someone is still saying, before its line is in. */}
                 {!paused && ['you', 'them'].filter((src) => m?.partial?.[src]?.text).map((src) => <p key={`so-far-${src}`} className={`fc-said-line ${src} so-far`}><b>{src === 'them' ? t('Them') : m?.me || t('You')}</b> {m.partial[src].cut ? '… ' : ''}{m.partial[src].text}</p>)}
@@ -329,12 +374,21 @@ export default function FloatCard() {
     upAt.current = bar > (window.screen.availTop || 0) + window.screen.availHeight / 2
   }
   const up = upAt.current
+  // Its width, and open while recording its height, as you resized it (no taller than the screen).
+  const tallToo = !!(r && open)
+  const w = size.w ? Math.max(LIMITS.minW, Math.min(LIMITS.maxW, size.w)) : null
+  const h = tallToo && size.h ? Math.max(LIMITS.minH, Math.min(Math.floor(((window.screen?.availHeight || 900) - 16) / zoom - 24), size.h)) : null
   return (
     <div className="float-root">
-      <div ref={card} className={`float-card${r && !open ? ' slim' : ''}${up ? ' up' : ''}${dragging ? ' dragging' : ''}`} onMouseEnter={enter} onMouseLeave={out} onFocus={enter} onBlur={out}
+      <div ref={card} className={`float-card${r && !open ? ' slim' : ''}${up ? ' up' : ''}${dragging ? ' dragging' : ''}${h ? ' sized' : ''}${resizing ? ' resizing' : ''}`} onMouseEnter={enter} onMouseLeave={out} onFocus={enter} onBlur={out}
+        style={{ ...(w ? { '--fc-w': `${w}px` } : {}), ...(h ? { '--fc-h': `${h}px` } : {}), ...(resizing ? { cursor: GRIP[resizing] } : {}) }}
         onPointerDown={down} onPointerMove={move} onPointerUp={release} onPointerCancel={release}>
         {body}
         {err && <p className="error-text small fc-line">{err}</p>}
+        {canResize && ['e', 'w', ...(tallToo ? ['n', 's', 'ne', 'nw', 'se', 'sw'] : [])].map((g) => (
+          <span key={g} className={`fc-grip ${g}`} aria-hidden="true" title={t('Drag to resize. Double-click for its usual size.')}
+            onPointerDown={grab(g)} onPointerUp={letGo} onLostPointerCapture={letGo} onDoubleClick={usualSize} />
+        ))}
       </div>
     </div>
   )

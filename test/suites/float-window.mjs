@@ -2,7 +2,7 @@
 // its bar's side, so a card opened taller than half the screen and closed again is back where it
 // was, not at the other end of the screen; on the screen whatever its size; and from a page older
 // than this (no side said), by the window's middle as before. Its size zoomed (⌘+ in the main window
-// zooms the card too): the card's times the zoom, on the screen.
+// zooms the card too): the card's times the zoom, on the screen. Resized by its edges, as any window.
 // And when it's kept out of pictures of the screen (desktop/floatshare.js), with a stand-in for
 // native/callwatch sharing: on a Mac, only while the screen is shared or recorded, so a screenshot
 // shows it; until the helper has said, when it can't or has gone, and off a Mac, always; Always and
@@ -14,7 +14,7 @@ import { checks, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('float-window')
 const require = createRequire(import.meta.url)
-const { floatPlace, floatSize } = require(path.join(ROOT, 'desktop', 'floatfit.js'))
+const { floatPlace, floatSize, resizedBounds, LIMITS } = require(path.join(ROOT, 'desktop', 'floatfit.js'))
 
 const a = { x: 0, y: 25, width: 1440, height: 875 } // a screen's work area, under the menu bar
 // Resized the way Electron does it: the top left stays, then floatPlace moves it.
@@ -54,6 +54,31 @@ ok(bigUp.y === a.y, 'opened up from near the top taller than what\'s above: it s
   ok(big.width === Math.ceil(420 * 1.5) && big.height === small.height - 16, 'taller than a small screen: no taller than it, less 8 points above and below (the card scrolls the rest)', big)
   ok(floatSize(800, 200, 2, small).width === small.width - 16, 'and no wider than it', floatSize(800, 200, 2, small))
   ok(JSON.stringify(floatSize(324, 280, undefined, a)) === JSON.stringify(floatSize(324, 280, 1, a)) && JSON.stringify(floatSize(324, 280, 0, a)) === JSON.stringify(floatSize(324, 280, 1, a)), "a zoom it can't read counts as 100%")
+}
+
+// ---------- Resized by its edges ----------
+// The edge you drag follows the pointer and the other stays; no narrower than the card's bar needs or
+// wider than a column of text reads well (times the zoom); on the screen.
+{
+  const b = { x: 900, y: 100, width: 324, height: 400 }
+  const p = { x: 900, y: 300 }
+  const left = resizedBounds(b, p, { x: 780, y: 330 }, 'w', 1, a)
+  ok(left.width === 444 && left.x + left.width === b.x + b.width && left.y === b.y && left.height === b.height, 'its left edge dragged 120 points left: 120 wider, its right edge where it was, its height its own', left)
+  const corner = resizedBounds(b, p, { x: 960, y: 450 }, 'se', 1, a)
+  ok(corner.x === b.x && corner.y === b.y && corner.width === 384 && corner.height === 550, 'its bottom right corner: wider and taller, its top left where it was', corner)
+  const top = resizedBounds(b, p, { x: 900, y: 250 }, 'n', 1, a)
+  ok(top.height === 450 && top.y + top.height === b.y + b.height && top.width === b.width, 'its top edge up 50: 50 taller, its bottom where it was', top)
+  const narrow = resizedBounds(b, p, { x: 1100, y: 300 }, 'w', 1, a)
+  const narrowZoomed = resizedBounds(b, p, { x: 1100, y: 300 }, 'w', 1.5, a)
+  ok(narrow.width === LIMITS.minW + 24 && narrowZoomed.width === Math.ceil((LIMITS.minW + 24) * 1.5) && narrow.x + narrow.width === b.x + b.width, 'no narrower than the card\'s bar needs, zoomed or not', { narrow, narrowZoomed })
+  const wide = resizedBounds({ ...b, x: 100 }, p, { x: 2000, y: 300 }, 'e', 1, a)
+  ok(wide.width === LIMITS.maxW + 24, 'no wider than a column of text reads well', wide)
+  const offRight = resizedBounds({ ...b, x: 1440 - 336 }, p, { x: 1300, y: 300 }, 'e', 1, a)
+  ok(offRight.x + offRight.width <= a.x + a.width + 12, 'its right edge dragged past the screen\'s: it stops there (the 12 around the card may go over)', offRight)
+  const short = resizedBounds(b, p, { x: 900, y: -400 }, 's', 1, a)
+  const tall = resizedBounds({ ...b, y: 30 }, p, { x: 900, y: 2000 }, 's', 1, a)
+  ok(short.height === LIMITS.minH + 24 && tall.y + tall.height <= a.y + a.height + 12, 'no shorter than its bar, no taller than the screen', { short, tall })
+  ok(resizedBounds(b, p, { x: 860, y: 900 }, 'w', 1, a, 420).height === 420, 'dragged sideways, its height is the card\'s (its words wrap again), wherever the pointer goes up or down')
 }
 
 // ---------- Kept out of pictures of the screen ----------

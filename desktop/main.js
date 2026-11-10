@@ -14,7 +14,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const crashes = require('./crashes.js')
-const { floatWindow, fitFloat, zoomOf } = require('./floatfit.js')
+const { floatWindow, zoomOf, floatResizer, fitWhileResizing } = require('./floatfit.js')
 
 // Where Bridge AI's code is: inside the app when built, the repo next to this folder from source.
 // BRIDGE_ROOT overrides both (a built app running your clone, say).
@@ -811,6 +811,7 @@ function buildMenu() {
 // page (?float=1); this decides when it shows, from the server's /api/calls, every two seconds.
 const FLOAT_STATE = path.join(app.getPath('userData'), 'float.json')
 let float = null
+let floatResize = null // resizing it by an edge (desktop/floatfit.js)
 let floatHiddenFor = null // what was on the card when you hid it: it stays hidden until that changes
 let floatKey = null
 // Kept out of pictures of the screen while you share or record it (desktop/floatshare.js).
@@ -841,11 +842,12 @@ function showFloat() {
   float.webContents.setWindowOpenHandler(({ url }) => { if (!isLocal(url)) openOutside(url); return { action: 'deny' } })
   float.webContents.on('will-navigate', (e) => e.preventDefault())
   float.on('moved', () => { try { const b = float.getBounds(); fs.writeFileSync(FLOAT_STATE, JSON.stringify({ x: b.x, y: b.y })) } catch { /* read-only */ } })
-  float.on('closed', () => { float = null })
+  floatResize = floatResizer(float, screen)
+  float.on('closed', () => { floatResize?.stop(); float = null })
   float.once('ready-to-show', () => float?.showInactive())
   float.loadURL(`${URL_BASE}/?float=1`)
 }
-const hideFloat = () => { floatShare.stop(); if (float && !float.isDestroyed() && float.isVisible()) float.hide() }
+const hideFloat = () => { floatShare.stop(); floatResize?.stop(); if (float && !float.isDestroyed() && float.isVisible()) float.hide() }
 async function watchCalls() {
   for (;;) {
     try {
@@ -933,7 +935,9 @@ const fromFloat = (e) => !!float && !float.isDestroyed() && e.sender === float.w
 // As big as the card at its zoom, up to the screen's size (opened, with AI Assist's suggestion, it's
 // taller than a fixed 420 was, and was cut off; the card scrolls what's under its bar past that),
 // from its bar's side (desktop/floatfit.js).
-ipc.on('bridge:float-size', (e, w, h, low) => { if (fromFloat(e)) fitFloat(float, screen, w, h, low) })
+ipc.on('bridge:float-size', (e, w, h, low) => { if (fromFloat(e)) fitWhileResizing(float, screen, floatResize, w, h, low) })
+// Resized by an edge or a corner: which one the pointer took, or null when it's let go.
+ipc.on('bridge:float-resize', (e, edge) => { if (fromFloat(e)) floatResize.set(edge) })
 ipc.handle('bridge:float-hide', (e) => { if (!fromFloat(e)) return false; floatHiddenFor = floatKey; hideFloat(); return true })
 // Dragged from anywhere on it: kept whole on the screen it's over. (null, null): let go, so it's
 // remembered there.

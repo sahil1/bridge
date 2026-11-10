@@ -210,7 +210,7 @@ html.is-float, html.is-float body, html.is-float #root { background: transparent
    (a bigger one was cut off at the window's edge, a hard dark line around the card). */
 /* One column the card's width: nothing in it (a longer word in another language, a wider font) can
    make it wider than the card and run past its edge; it wraps or ends in … instead. */
-.float-card { --fc-them: #8e4ec6; --fc-rec: #e5484d; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; width: 300px; padding: 8px 12px; border-radius: 14px; background: var(--pane); color: var(--ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 10%, transparent), 0 4px 10px -2px rgb(0 0 0 / .22), 0 1px 2px rgb(0 0 0 / .08); font: 13px/1.4 var(--font); user-select: none; transition: box-shadow .12s; }
+.float-card { --fc-them: #8e4ec6; --fc-rec: #e5484d; position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; width: var(--fc-w, 300px); padding: 8px 12px; border-radius: 14px; background: var(--pane); color: var(--ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 10%, transparent), 0 4px 10px -2px rgb(0 0 0 / .22), 0 1px 2px rgb(0 0 0 / .08); font: 13px/1.4 var(--font); user-select: none; transition: box-shadow .12s; }
 html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 14%, transparent), 0 4px 10px -2px rgb(0 0 0 / .5); }
 .in-bridge-app .float-card { cursor: grab; }
 .in-bridge-app .float-card:active, .float-card.dragging, .float-card.dragging * { cursor: grabbing !important; }
@@ -225,6 +225,27 @@ html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box
    scrolls past the screen's height (--fc-more-max, from FloatCard.jsx). */
 .float-card .fc-more { max-height: var(--fc-more-max, 560px); overflow-y: auto; overscroll-behavior: contain; grid-auto-rows: max-content; }
 .fc-more { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 2px 0 4px; }
+/* Resized by its edges and corners (FloatCard.jsx): a band along each, a little past the card's
+   edge, the pointer showing which way it goes. Made taller while recording, what's been said takes
+   the room, its newest line at the bottom. */
+.fc-grip { position: absolute; z-index: 3; touch-action: none; }
+.fc-grip.e, .fc-grip.w { top: 12px; bottom: 12px; width: 10px; cursor: ew-resize; }
+.fc-grip.e { right: -7px; }
+.fc-grip.w { left: -7px; }
+.fc-grip.n, .fc-grip.s { left: 12px; right: 12px; height: 10px; cursor: ns-resize; }
+.fc-grip.n { top: -7px; }
+.fc-grip.s { bottom: -7px; }
+.fc-grip.ne, .fc-grip.nw, .fc-grip.se, .fc-grip.sw { width: 16px; height: 16px; }
+.fc-grip.ne { top: -7px; right: -7px; cursor: nesw-resize; }
+.fc-grip.sw { bottom: -7px; left: -7px; cursor: nesw-resize; }
+.fc-grip.nw { top: -7px; left: -7px; cursor: nwse-resize; }
+.fc-grip.se { bottom: -7px; right: -7px; cursor: nwse-resize; }
+.float-card.resizing * { cursor: inherit !important; }
+.float-card.sized { height: var(--fc-h); display: flex; flex-direction: column; }
+.float-card.sized > .fc-more { flex: 1; min-height: 0; max-height: none; display: flex; flex-direction: column; }
+.float-card.sized .fc-live { flex: 1; min-height: 60px; display: flex; flex-direction: column; }
+.float-card.sized .fc-said { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; align-content: safe end; }
+.float-card.sized .fc-said-line { display: block; -webkit-line-clamp: unset; overflow: visible; }
 .fc-grow { flex: 1; }
 
 /* The bar: the recording's dot, how long, what; Pause or Resume. Other cards: a badge for what it's
