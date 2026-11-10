@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
+import { OpenSettings } from '../PermissionFix.jsx'
 import { api, usePoll, onThisComputer } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
 import { useTrial } from '../../trials.js'
@@ -95,7 +96,7 @@ function ScreenNames() {
         : asked ? t('Turn on Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in Screen Recording.')
           : t('Screen Recording puts the names your call shows on the transcript. Only the words are kept, never the picture.')}</span></span>
       {!data.allowed && (asked
-        ? <button type="button" className="btn small" onClick={() => api('/fix/settings', { method: 'POST', body: { pane: 'audio' } }).catch(() => {})}>{t('Open it')}</button>
+        ? <OpenSettings pane="audio">{t('Open it')}</OpenSettings>
         : <button type="button" className="btn small" onClick={async () => { setAsked(true); await api('/calls/screen', { method: 'POST' }).catch(() => {}); refresh() }}>{t('Allow')}</button>)}
     </div>
   )

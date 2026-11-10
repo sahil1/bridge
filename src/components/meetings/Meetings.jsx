@@ -15,7 +15,7 @@ import { Menu as AtMenu } from '../FileExtras.jsx'
 import { FilesPane, linkFiles } from './context.jsx'
 import { AssistPane, setAssist } from './assist.jsx'
 import AiAssist from '../AiAssist.jsx'
-import PermissionFix from '../PermissionFix.jsx'
+import PermissionFix, { OpenSettings } from '../PermissionFix.jsx'
 import { MicFix } from '../Composer.jsx'
 import { sendPicture, pictureUrl } from './screen.js'
 import './meetings.css'
@@ -72,7 +72,7 @@ function AskScreen() {
         ? t('Turn on Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in Screen Recording.')
         : t('Screen Recording lets Bridge AI read the names your call shows as people talk, to put them on the transcript. Only the words are kept, never the picture.')}</span>
       {asked
-        ? <button type="button" className="link-btn" onClick={() => api('/fix/settings', { method: 'POST', body: { pane: 'audio' } }).catch(() => {})}>{t('Open it')}</button>
+        ? <OpenSettings pane="audio" className="link-btn">{t('Open it')}</OpenSettings>
         : <button type="button" className="btn small" onClick={allow}>{t('Allow')}</button>}
       <button type="button" className="ghost-btn" onClick={later}>{t('Not now')}</button>
     </p>
@@ -109,7 +109,7 @@ function RecordingBar({ id, data }) {
       {phone && !r.missed && <p className="mt-hint-call muted small">{t('Keep Bridge AI in front while it records: a phone stops the mic of an app in the background.')}</p>}
       {data?.callError && <p className="mt-trouble small" role="status">{data.callError} {t('Your mic still records.')}</p>}
       {call === 'on' && !m.screen && <AskScreen />}
-      {call === 'on' && data?.callQuiet && <p className="mt-hint-call muted small" role="status">{t('No sound from the call yet. If one is playing and this stays quiet, allow Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in System Audio Recording Only.')} <button type="button" className="link-btn" onClick={() => api('/fix/settings', { method: 'POST', body: { pane: 'audio' } }).catch(() => {})}>{t('Open it')}</button></p>}
+      {call === 'on' && data?.callQuiet && <p className="mt-hint-call muted small" role="status">{t('No sound from the call yet. If one is playing and this stays quiet, allow Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in System Audio Recording Only.')} <OpenSettings pane="audio" className="link-btn">{t('Open it')}</OpenSettings></p>}
     </div>
   )
 }
