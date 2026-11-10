@@ -348,7 +348,7 @@ function statusOf(p) {
   const busy = !!a.busy?.test(tail)
   // Not gated on busy: the trust screen itself says "Esc to cancel".
   const setup = knows(p.kind) && !p.pastSetup ? firstRun(p.kind, screenRows(p)) : null
-  const key = setup ? `${setup.step} ${setup.url || ''}` : null
+  const key = setup ? `${setup.step} ${setup.url || ''} ${setup.code || ''}` : null
   if (key !== (p.setupKey ?? null)) { p.setupKey = key; p.seq++ }
   p.setup = setup // its keys follow the pointer, if you move it in the terminal
   let s = 'idle'
@@ -375,7 +375,7 @@ export async function fleet() {
     workspace: wsLabel(p.workspaceId), tab: tabOf(p.tabId)?.label || '',
     kind: p.kind, status: statusOf(p), title: p.title, cwd: p.cwd, account: accounts.labelOf(p.account), accountId: p.account, accountSure: !!p.account,
     sessionId: p.sessionId, model: p.model, focused: false, seq: p.seq,
-    setup: p.setup?.step || null, setupUrl: p.setup?.url || null, setupKeys: p.setup?.keys || null,
+    setup: p.setup?.step || null, setupUrl: p.setup?.url || null, setupKeys: p.setup?.keys || null, setupCode: p.setup?.code || null,
   }))
   const tabList = tabs.map((t) => ({
     tabId: t.tabId, workspaceId: t.workspaceId, workspace: wsLabel(t.workspaceId), label: t.label,

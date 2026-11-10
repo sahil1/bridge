@@ -16,9 +16,24 @@ import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { startKit, startModel, checks, until, browser, page, shot, IS_WIN, IS_MAC, devToolsStandIn } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, browser, page, shot, IS_WIN, IS_MAC, TEST, devToolsStandIn } from '../lib/harness.mjs'
+import { signInScreen, firstRun, SIGN_IN_ENDED } from '../../server/firstrun.js'
 
 const { ok, done } = checks('new-install')
+
+// Signing in as Claude Code and Codex do (stand-ins/claude.cjs, stand-ins/codex.cjs), signed out,
+// with the stand-in open first on the PATH (bin/opened.log): no real browser opens. Their sign-in
+// pages are never reached from the test's browser either (noSignInPages).
+const logOf = (dir, f) => { try { return fs.readFileSync(path.join(dir, f), 'utf8').trim().split('\n').filter(Boolean) } catch { return [] } }
+const openedBy = (k) => logOf(k.bin, 'opened.log')
+const signedOut = (k) => {
+  fs.mkdirSync(path.join(k.home, '.claude'), { recursive: true })
+  fs.writeFileSync(path.join(k.home, '.claude', 'stand-in-signed-out'), '')
+  fs.rmSync(path.join(k.home, '.claude', '.credentials.json'), { force: true })
+}
+const standInSignIns = (k) => { k.program('open', fs.readFileSync(path.join(TEST, 'stand-ins', 'open.cjs'), 'utf8')); fs.writeFileSync(path.join(k.home, 'claude-login.json'), '{}'); signedOut(k) }
+const noSignInPages = (c) => c.route(/^https:\/\/(claude\.com|claude\.ai|platform\.claude\.com|auth\.openai\.com)\//, (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<title>A sign-in page (a test)</title>' }))
+const signInTabs = async (k) => ((await k.api('/fleet')).tabs || []).filter((x) => /^Sign in: /.test(x.label))
 
 // A stand-in nodejs.org: one long-term-support release, built for this computer, as nodejs.org
 // packs it: a .tar.gz with bin/node on macOS and Linux, whose "node" only says its version; a .zip
@@ -75,6 +90,23 @@ const later = async (p) => { await p.waitForSelector('.wiz-levels', { timeout: 1
 const rowsOf = (p) => p.$$eval('.wiz-agents li', (l) => l.map((li) => ({ name: li.querySelector('b')?.innerText, note: li.querySelector('small')?.innerText, btn: li.querySelector('.signin')?.innerText.replace(/\s+/g, ' ').trim() })))
 
 try {
+  // ---------- Claude Code 2.1.311's and Codex's own sign-in screens, as the app reads them ----------
+  {
+    // claude auth login, in a terminal 60 columns wide: the link it prints wraps, inside a link of the terminal's own.
+    const link = 'https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&state=s'
+    const rows = (s) => s.match(/.{1,60}/g).join('\r\n')
+    const login = `Last login: Mon Nov 10 on ttys001\r\n$ claude auth login; echo '${SIGN_IN_ENDED}'\r\nOpening browser to sign in…\r\n${rows(`If the browser didn't open, visit: \x1b]8;;${link}\x07\x1b[94m${link}\x1b[39m\x1b]8;;\x07`.replace(/\x1b\][^\x07]*\x07|\x1b\[\d+m/g, ''))}\r\nPaste code here if prompted > \r\n\r\n`
+    const waits = signInScreen('claude', login)
+    ok(waits.codeUrl === link && waits.asksCode && !waits.ended, 'Claude Code\'s sign-in: the link it prints (to the page that shows a code) is read whole, and that it waits for a code', waits)
+    const failed = signInScreen('claude', `${login}abc\r\nLogin failed: that code isn't valid.\r\n${SIGN_IN_ENDED}\r\n$ `)
+    ok(failed.ended && !failed.success && failed.problem === 'Login failed: that code isn\'t valid.', 'and that it ended without signing in, in its own words', failed)
+    ok(signInScreen('claude', `${login}\r\nLogin successful.\r\n${SIGN_IN_ENDED}\r\n$ `).success, 'or that it signed in')
+    const device = signInScreen('codex', `$ codex login --device-auth; echo '${SIGN_IN_ENDED}'\r\n\r\n1. Open this link in your browser and sign in to your account\r\n   https://auth.openai.com/codex/device\r\n\r\n2. Enter this one-time code (expires in 15 minutes)\r\n   ABCD-12345\r\n`)
+    ok(device.device?.url === 'https://auth.openai.com/codex/device' && device.device.code === 'ABCD-12345', 'Codex with a one-time code: its page and the code', device)
+    const tui = firstRun('claude', ['', " Browser didn't open? Use the url below to sign in (c to copy)", '', link.slice(0, 120), link.slice(120), '', ' Paste code here if prompted > '])
+    ok(tui?.step === 'browser' && tui.url === link, 'a new Claude Code\'s sign-in screen: its link at claude.com, where 2.1.311 signs in, is offered', tui)
+  }
+
   // ---------- First run, nothing installed ----------
   for (const phone of [false, true]) for (const [name, look] of LOOKS) {
     const t = `${phone ? 'phone' : 'desktop'} ${name}`
@@ -321,6 +353,112 @@ try {
     ok(errors.length === 0, 'providers: no page errors', errors)
     await kit.api('/providers/openai', {}, 'DELETE')
     await ctx.close()
+  }
+  // ---------- Signing in always has a way through: Claude Code and Codex here, signed out ----------
+  // In setup: Claude Code giving up on the browser, a code that doesn't work, its tab closed, each
+  // said with Try again; Codex's one-time code instead of the browser. Then each one's own first
+  // run in Chat, where the same ways through are on its card.
+  {
+    const k = await startKit('new-install-signin')
+    for (const n of ['claude', 'codex']) k.program(n, fs.readFileSync(path.join(TEST, 'stand-ins', `${n}.cjs`), 'utf8'))
+    standInSignIns(k)
+    fs.writeFileSync(path.join(k.home, 'claude-login.json'), JSON.stringify({ endAfter: 2500 }))
+    await k.api('/agents/catalog')
+    const { ctx, p, errors } = await page(b, k.url, { ...LOOKS[1][1], before: noSignInPages })
+    try {
+      await later(p)
+      await p.waitForSelector('.wiz-agents li', { timeout: 15000 })
+      const claude = p.locator('.wiz-agents li', { hasText: 'Claude Code' })
+      const codex = p.locator('.wiz-agents li', { hasText: 'Codex' })
+      const says = (card, re) => until(async () => { const x = await card.innerText(); return re.test(x) && x }, 20000)
+      // Claude Code gives up waiting for the browser.
+      await claude.locator('button', { hasText: 'Sign in' }).click()
+      let x = await says(claude, /The sign-in ended before you signed in/)
+      ok(/timed out waiting for the browser/.test(x || '') && await claude.locator('button', { hasText: 'Try again' }).count() === 1, 'the sign-in ending without signing in says so, and why, with Try again', x || (await claude.innerText()))
+      await shot(p, `${tag}new-signin-ended`)
+      fs.writeFileSync(path.join(k.home, 'claude-login.json'), '{}')
+      await claude.locator('button', { hasText: 'Try again' }).click()
+      ok(!!(await says(claude, /Your browser opened to sign in/)) && (await signInTabs(k)).length === 1, 'Try again starts it again, in place of the one that ended', (await signInTabs(k)).map((t) => t.label))
+      // A code that doesn't work.
+      await claude.locator('a', { hasText: 'Sign in with a code' }).click()
+      await claude.locator('input[aria-label="Sign-in code"]').fill('not-a-code')
+      await claude.locator('button', { hasText: /^Sign in$/ }).click()
+      x = await says(claude, /The sign-in ended before you signed in/)
+      ok(/that code isn't valid/.test(x || '') && await claude.locator('button', { hasText: 'Try again' }).count() === 1, 'a code that doesn\'t work: Claude Code\'s words for it, and Try again', x || (await claude.innerText()))
+      // Its tab closed while it waits.
+      await claude.locator('button', { hasText: 'Try again' }).click()
+      await says(claude, /Your browser opened to sign in/)
+      for (const t of await signInTabs(k)) await k.api(`/tabs/${t.tabId}/close`, {})
+      x = await says(claude, /The sign-in was closed before you signed in/)
+      ok(!!x && await claude.locator('button', { hasText: 'Try again' }).count() === 1, 'its tab closed before signing in: said so, with Try again', x || (await claude.innerText()))
+      // Codex: the browser's way, or a one-time code instead.
+      await codex.locator('button', { hasText: 'Sign in' }).click()
+      x = await says(codex, /Your browser opened to sign in with your ChatGPT account/)
+      ok(!!x && /can't connect to localhost/.test(x) && openedBy(k).some((u) => /auth\.openai\.com\/oauth\/authorize\?.*redirect_uri=http%3A%2F%2Flocalhost/.test(u)), 'Codex: its browser sign-in, and a way out when the browser can\'t come back to it', x || (await codex.innerText()))
+      await codex.locator('button', { hasText: 'Sign in with a code instead' }).click()
+      x = await says(codex, /ABCD-12345/)
+      const where = await codex.locator('a', { hasText: 'Open the sign-in page' }).getAttribute('href').catch(() => null)
+      const tabs = (await signInTabs(k)).filter((t) => /Codex/.test(t.label))
+      ok(!!x && /enter this code there/.test(x) && where === 'https://auth.openai.com/codex/device' && tabs.length === 1, 'Sign in with a code instead: Codex\'s page and its one-time code, in place of the browser\'s sign-in', { x, where, tabs: tabs.map((t) => t.label) })
+      await shot(p, `${tag}new-signin-codex-code`)
+      fs.writeFileSync(path.join(k.home, 'codex-device-ok'), '')
+      ok(!!(await says(codex, /Ready to work/)), 'signed in on that page: Codex is ready', await codex.innerText())
+      ok(errors.length === 0, 'signing in: no page errors', errors)
+    } finally { await ctx.close() }
+
+    // Each one's own first run in Chat (Claude Code 2.1.311's and Codex's sign-in screens).
+    await k.api('/setup', {})
+    signedOut(k)
+    fs.rmSync(path.join(k.home, '.codex'), { recursive: true, force: true })
+    fs.rmSync(path.join(k.home, 'codex-device-ok'), { force: true })
+    for (const n of ['claude', 'codex']) fs.writeFileSync(path.join(k.home, `${n}-first-run.json`), '{}')
+    const work = path.join(k.home, 'work')
+    fs.mkdirSync(work, { recursive: true })
+    const agent = async (kind) => {
+      const a = await k.api('/agents/launch', { kind, cwd: work, label: `First ${kind}`, newSpace: 'Work' })
+      await until(async () => (await k.api('/fleet')).agents.find((x) => x.paneId === a.paneId)?.setup, 15000)
+      return a
+    }
+    const step = async (a) => (await k.api('/fleet')).agents.find((x) => x.paneId === a.paneId)?.setup || null
+    for (const phone of [false, true]) {
+      const t = phone ? 'phone' : 'desktop'
+      const { ctx: c2, p: q, errors: errs } = await page(b, k.url, { ...LOOKS[1][1], phone, before: noSignInPages })
+      try {
+        await q.waitForSelector('.rail-nav-btn, .tabbar', { timeout: 30000 }).catch(() => {})
+        const show = (a) => q.evaluate((paneId) => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId } })), a.paneId)
+        const card = q.locator('.firstrun')
+        // Claude Code: Sign in, the browser opens; the page that shows a code, and the code here.
+        const c = await agent('claude')
+        await show(c)
+        await card.locator('button', { hasText: 'Sign in with Claude account' }).click({ timeout: 15000 })
+        const x = await until(async () => { const s = await card.innerText().catch(() => ''); return /can't connect to localhost/.test(s) && s }, 15000)
+        const href = await card.locator('a', { hasText: 'Sign in with a code' }).getAttribute('href').catch(() => null)
+        ok(!!x && /Your browser opened to sign in/.test(x) && /^https:\/\/claude\.com\/cai\/oauth\/authorize\?/.test(href || ''), `${t}: a new Claude Code's sign-in in Chat: the browser opened, and a code instead when it can't come back`, { x, href })
+        await shot(q, `${tag}new-${t}-firstrun-claude`)
+        await card.locator('a', { hasText: 'Sign in with a code' }).click()
+        await card.locator('input[aria-label="Sign-in code"]').fill(`good-${t}`)
+        await card.locator('button', { hasText: /^Sign in$/ }).click()
+        ok(!!(await until(async () => logOf(k.home, 'claude-codes.log').includes(`good-${t}`) && !(await step(c)) && !(await q.$('.firstrun')), 20000)), `${t}: the code goes in at its prompt, it's signed in, and the card is gone`, { codes: logOf(k.home, 'claude-codes.log'), step: await step(c) })
+        // Codex: waiting for the browser; a one-time code instead.
+        const o = await agent('codex')
+        await show(o)
+        const y = await until(async () => { const s = await card.innerText().catch(() => ''); return /Sign in with a code instead/.test(s) && s }, 15000)
+        ok(!!y, `${t}: a new Codex waiting for the browser offers a one-time code instead`, y)
+        await card.locator('button', { hasText: 'Sign in with a code instead' }).click()
+        const z = await until(async () => { const s = await card.innerText().catch(() => ''); return /ABCD-12345/.test(s) && s }, 15000)
+        const devicePage = await card.locator('a', { hasText: 'Open the sign-in page' }).getAttribute('href').catch(() => null)
+        ok(!!z && devicePage === 'https://auth.openai.com/codex/device', `${t}: which goes to its own Sign in with Device Code, and shows the page and the code`, { z, devicePage, typed: logOf(k.home, 'codex-typed.log') })
+        await shot(q, `${tag}new-${t}-firstrun-codex-code`)
+        fs.writeFileSync(path.join(k.home, 'codex-device-ok'), '')
+        ok(!!(await until(async () => !(await step(o)) && !(await q.$('.firstrun')), 20000)), `${t}: signed in on that page, Codex carries on and the card is gone`, await step(o))
+        ok(errs.length === 0, `${t}: first runs: no page errors`, errs)
+        for (const a of [c, o]) { const tab = (await k.api('/fleet')).agents.find((x) => x.paneId === a.paneId)?.tabId; if (tab) await k.api(`/tabs/${tab}/close`, {}).catch(() => {}) }
+        fs.rmSync(path.join(k.home, 'codex-device-ok'), { force: true })
+        fs.rmSync(path.join(k.home, '.codex'), { recursive: true, force: true })
+        signedOut(k)
+      } finally { await c2.close() }
+    }
+    k.stop()
   }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
