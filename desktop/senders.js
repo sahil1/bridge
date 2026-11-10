@@ -37,16 +37,23 @@ function create(port, { ports = () => ({}) } = {}) {
   // navigation may go, and copying may come from.
   const local = (u) => { const x = parse(u); return !!x && (Number(x.port) === port || !!machineAt(Number(x.port))) }
   // Where a link a page opens in a new window goes (a target=_blank link, window.open): 'outside',
-  // the web, mail and Mail's, each in its own app; 'browser', a file this app's server serves (a
-  // picture, a PDF or a page in Files, a chat's attachment, at /api/... or a computer's
-  // /m/<id>/api/...), as the app has no window to show it in; null, the app's own pages (its
-  // windows open their own way: bridgeApp) and anything else (file:, smb: and other schemes can
-  // mount a network share or start a program).
-  const opens = (u) => {
+  // the web, mail and Mail's, each in its own app; 'browser', a file the app's server serves (a
+  // picture, a PDF or a page in Files, a chat's attachment), as the app has no window to show it in;
+  // null, the app's own pages (its windows open their own way: bridgeApp) and anything else (file:,
+  // smb: and other schemes can mount a network share or start a program). at: the page the window
+  // shows. This computer's own pages may open any of its files (at /api/... or a computer's
+  // /m/<id>/api/...); another computer's window only that computer's, as it reaches nothing else
+  // of this one's.
+  const opens = (u, at) => {
     let x
     try { x = new URL(u) } catch { return null }
     if (!local(u)) return OUTSIDE.has(x.protocol) ? 'outside' : null
-    return /^(\/m\/[A-Za-z0-9_-]{1,20})?\/api\//.test(x.pathname) ? 'browser' : null
+    const file = /^(?:\/m\/([A-Za-z0-9_-]{1,20}))?\/api\//.exec(x.pathname)
+    const page = of(at)
+    if (!file || !page) return null
+    if (page.kind === 'own') return 'browser'
+    const p = Number(x.port)
+    return file[1] === page.machine && (p === port || machineAt(p) === page.machine) ? 'browser' : null
   }
   // The page an IPC message came from, if it's the main frame of its window.
   const from = (e) => { const f = e?.senderFrame; return f && !f.parent ? of(f.url) : null }

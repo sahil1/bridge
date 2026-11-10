@@ -276,7 +276,7 @@ async function walk(shape) {
       if (now.gone) what = 'the page went'
       else if (now.muts) what = `${now.muts} change${now.muts > 1 ? 's' : ''} (${now.where.join(', ')})`
       else if (now.asked.length) what = `the app asked: ${now.asked.join(', ')}`
-      else if (now.links.some((u) => pages.opens(u))) what = `the app opened ${now.links[0]}`
+      else if (now.links.some((u) => pages.opens(u, `${kit.url}/`))) what = `the app opened ${now.links[0]}`
       else if (asked.length) what = `asked ${asked[0]}`
       else if (now.scrolls) what = 'it scrolled'
       else if (now.sounds) what = 'a sound'
@@ -349,7 +349,7 @@ async function walk(shape) {
     await link.click().catch(() => {})
     await sleep(500)
     const went = desktop ? (await p.evaluate(() => window.__dc.links)).slice(was.links) : []
-    ok(desktop ? label === 'Open in your browser' && went.length === 1 && pages.opens(went[0]) === 'browser' && /\/raw\?path=dot\.png/.test(went[0]) : label === 'Open in a new tab' && st.popups > was.popups,
+    ok(desktop ? label === 'Open in your browser' && went.length === 1 && pages.opens(went[0], `${kit.url}/`) === 'browser' && /\/raw\?path=dot\.png/.test(went[0]) : label === 'Open in a new tab' && st.popups > was.popups,
       desktop ? 'in the desktop app, a picture\'s Open in your browser hands the app its address, which opens it in the browser' : 'in a browser, a picture\'s Open in a new tab opens one', { label, went, popups: st.popups - was.popups })
     const full = p.locator('.console .pane-head button[aria-label="Full size"]')
     const outIcon = await full.locator('svg').innerHTML().catch(() => '')
