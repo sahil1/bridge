@@ -502,6 +502,8 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
   }
   const toggle = (p) => setExpanded((s) => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n })
 
+  // Collapse all has something to do only while a folder shows open (one inside a closed folder doesn't).
+  const anyOpen = (root.data?.entries || []).some((e) => e.dir && expanded.has(e.path))
 
   // The menu's actions. Paths are relative to the agent's folder ('' is the folder itself).
   const sep = cwd.includes('\\') && !cwd.includes('/') ? '\\' : '/'
@@ -579,7 +581,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
           <input ref={pickRef} type="file" multiple hidden onChange={(e) => { const l = [...(e.target.files || [])]; e.target.value = ''; if (l.length) setPicked({ list: l, dir: pickFor.current }) }} data-testid="send-files" />
           <button className="win-btn" onClick={() => setQuick(true)} title="Go to file (⌘P)" aria-label="Go to file"><Icon name="search" size={13} /></button>
           <button className={`win-btn ${showHidden ? 'on' : ''}`} onClick={() => setShowHidden(!showHidden)} title={showHidden ? 'Hide dotfiles' : 'Show dotfiles'} aria-label="Toggle hidden files"><Icon name={showHidden ? 'eye' : 'eye-off'} size={13} /></button>
-          <button className="win-btn" onClick={() => setExpanded(new Set())} title="Collapse all" aria-label="Collapse all"><Icon name="shrink" size={13} /></button>
+          <button className="win-btn" onClick={() => setExpanded(new Set())} disabled={!anyOpen} title={anyOpen ? t('Collapse all') : t('Collapse all: no folder is open')} aria-label={t('Collapse all')}><Icon name="collapse-all" size={13} /></button>
           {assistOn && <AiAssist className="win-btn" compact on={assist != null} items={() => [{ label: t('Look over this folder'), hint: t('Duplicates, big and forgotten files, a tidier layout'), on: assist != null, run: () => setAssist(assist != null ? null : '') }]} />}
         </div>
         <div className={`tree-scroll ${dropAt ? 'drop-on' : ''}`} onContextMenu={(e) => { e.preventDefault(); onMenu({ path: '', name: rootName, dir: true }, e) }} {...rootDrops}>

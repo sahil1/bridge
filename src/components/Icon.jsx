@@ -57,7 +57,10 @@ const PATHS = {
   down: <path d="m6 9 6 6 6-6"/>,
   minimize: <path d="M5 12h14"/>,
   maximize: <><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/></>,
-  shrink: <><path d="m15 15 6 6"/><path d="m15 9 6-6"/><path d="M21 16v5h-5"/><path d="M21 8V3h-5"/><path d="M3 16v5h5"/><path d="m3 21 6-6"/><path d="M3 8V3h5"/><path d="M9 9 3 3"/></>,
+  // Out of full size: maximize's arrows turned in (it was drawn with them out, as an expand).
+  shrink: <><path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="m14 10 7-7"/><path d="m3 21 7-7"/></>,
+  // A tree's folders all closed (Files' Collapse all).
+  'collapse-all': <><path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/></>,
   'expand-v': <><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></>,
   focus: <><path d="M3 8V5a2 2 0 0 1 2-2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><rect x="8" y="8" width="8" height="8" rx="1"/></>,
   x: <><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>,
