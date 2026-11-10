@@ -10,7 +10,7 @@ import './prep.css'
 // people you've met before and the ones new to your meetings), what happened last time with them
 // (the summary and what's still open, yours and theirs), the invite's agenda and files, your mail
 // with them, and a few goals or questions from the model that writes your notes, each with what
-// it's based on and which model said it. Made when you ask, or by itself shortly before the meeting,
+// it's based on, said to be Bridge AI's with the model that wrote them on hover. Made when you ask, or by itself shortly before the meeting,
 // and kept. With no model, all the rest shows, and it says how to add one. It only reads: nothing
 // here changes the calendar, answers an invite or sends mail.
 // size: full (the calendar's event panel), compact (Home's Coming Up, the floating card).
@@ -55,6 +55,9 @@ function basisWords(b) {
   return parts.length ? list(parts) : null
 }
 
+// Who wrote the suggestions: Bridge AI, in its own name; the model it wrote them with, on hover.
+const writtenWith = (s) => (s?.label || s?.model ? t('Written with {model}', { model: s.label || s.model }) : undefined)
+
 const openSettings = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))
 
 function Suggestions({ p, prep, compact, onSettings }) {
@@ -81,8 +84,8 @@ function Suggestions({ p, prep, compact, onSettings }) {
         </div>
       ))}
       {s?.error && <p className="error-text small">{t("Couldn't suggest anything: {error}", { error: s.error })}</p>}
-      {items.length > 0 && !compact && <p className="prep-foot muted small">{from ? t('{model} wrote these at {time}, from {what}.', { model: s.label || s.model, time: fmtTime(s.at), what: from }) : t('{model} wrote these at {time}.', { model: s.label || s.model, time: fmtTime(s.at) })}</p>}
-      {items.length > 0 && compact && <p className="prep-foot muted small">{t('By {model} at {time}', { model: s.label || s.model, time: fmtTime(s.at) })}</p>}
+      {items.length > 0 && !compact && <p className="prep-foot muted small" title={writtenWith(s)}>{from ? t('Bridge AI wrote these at {time}, from {what}.', { time: fmtTime(s.at), what: from }) : t('Bridge AI wrote these at {time}.', { time: fmtTime(s.at) })}</p>}
+      {items.length > 0 && compact && <p className="prep-foot muted small" title={writtenWith(s)}>{t('By Bridge AI at {time}', { time: fmtTime(s.at) })}</p>}
       <div className="prep-acts">
         {d.writer && (items.length || s?.error
           ? <button type="button" className="ghost-btn" disabled={working} onClick={() => prep(true)}><Icon name="refresh" size={12} /> {working ? t('Thinking…') : s?.error ? t('Try again') : t('Again')}</button>
@@ -223,8 +226,9 @@ export function PrepCard({ e, size = 'full', invite = true, prep = null, onOpenM
 }
 
 // Shortly before a meeting, on the floating card: what to go in with, at a glance. The goals and
-// questions (three at most, all of each on hover), who's coming and last time in a line each, which
-// model wrote them, and the rest in Today › Calendar (onOpenEvent: View Calendar). With no
+// questions (three at most, all of each on hover), who's coming and last time in a line each, when
+// Bridge AI wrote them (with which model on hover), and the rest in Today › Calendar (onOpenEvent:
+// View Calendar). With no
 // suggestions yet, the invite's agenda, and Suggest (or how to add a model) as the panel has it.
 export function PrepGlance({ e, onOpenEvent }) {
   const p = usePrep(e)
@@ -268,7 +272,7 @@ export function PrepGlance({ e, onOpenEvent }) {
             : <p className="pg-none">{t('Suggested goals and questions need a model to write them. Add one in Settings › Model Providers, or sign in to an agent.')}</p>)}
           {(items.length > 0 || onOpenEvent) && (
             <div className="pg-foot">
-              {items.length > 0 && <span className="pg-by">{t('By {model} at {time}', { model: s.label || s.model, time: fmtTime(s.at) })}</span>}
+              {items.length > 0 && <span className="pg-by" title={writtenWith(s)}>{t('By Bridge AI at {time}', { time: fmtTime(s.at) })}</span>}
               {onOpenEvent && <button type="button" className="fc-link" onClick={onOpenEvent}>{t('View Calendar')} <Icon name="chevron" size={10} /></button>}
             </div>
           )}
