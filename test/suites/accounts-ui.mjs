@@ -417,6 +417,24 @@ try {
     ok(errors.length === 0, `${t}: no page errors`, errors)
     await ctx.close()
   }
+
+  // Settings' agents and accounts when asking for them failed (Bridge AI starting again after an
+  // update, say): each says so, with Retry, which brings it.
+  {
+    const failing = { on: true }
+    const { ctx, p, errors } = await page(b, kit.url, { before: async (c) => { await fake(c); await c.route(/\/api\/(accounts|subscriptions)(\?|$)/, (r) => (failing.on ? r.fulfill({ status: 503, json: { error: 'Bridge AI is starting again' } }) : r.continue())) } })
+    await p.locator('.topbar .status-btn').waitFor({ timeout: 15000 })
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'accounts' } })))
+    const err = (what) => p.locator('.modal.settings .pv-err', { hasText: what })
+    ok(!!(await until(async () => (await err("Couldn't check agent sign-ins: Bridge AI is starting again").isVisible()) && (await err("Couldn't load accounts: Bridge AI is starting again").isVisible()), 15000)), 'Settings, its agents and accounts not answered: each says why', await p.locator('.modal.settings .pv-err').allInnerTexts().catch(() => []))
+    failing.on = false
+    await err("Couldn't load accounts").getByRole('button', { name: 'Retry' }).click()
+    ok(!!(await until(async () => /Main/.test(await p.locator('#pv-accounts').innerText().catch(() => '')), 10000)), 'and Retry brings the accounts')
+    await err("Couldn't check agent sign-ins").getByRole('button', { name: 'Retry' }).click()
+    ok(!!(await until(async () => (await p.locator('.modal.settings .pv-agent').count()) > 0 && !(await p.locator('.modal.settings .pv-err').count()), 10000)), 'and the agents\' sign-ins')
+    ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+  }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))

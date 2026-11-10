@@ -23,7 +23,7 @@ function Chip({ tone, children, title }) {
 
 function AgentsStrip({ subs, error, onRefresh, refreshing }) {
   const [showAll, setShowAll] = useState(false)
-  if (error) return <p className="pv-note pv-err">Couldn't check agent sign-ins: {error}</p>
+  if (error) return <p className="pv-note pv-err">Couldn't check agent sign-ins: {error} <button type="button" className="ghost-btn" onClick={onRefresh} disabled={refreshing}>Retry</button></p>
   if (!subs) return <div className="pv-agents pv-loading" aria-busy="true"><span className="pv-skel" /><span className="pv-skel" /><span className="pv-skel" /></div>
   const inst = subs.filter((s) => s.installed)
   const list = showAll ? subs : inst
@@ -182,7 +182,7 @@ function AccountsSection({ shown = true }) {
     try { await api(`/accounts/order/${k.kind}`, { method: 'POST', body: { ids } }); refetch('/quota') } catch (e) { setShowErr(e.message); load(true) }
   }
   if (!shown) return null
-  if (err) return <p className="pv-note pv-err">Couldn't load accounts: {err}</p>
+  if (err) return <p className="pv-note pv-err">Couldn't load accounts: {err} <button type="button" className="ghost-btn" onClick={() => load(true)}>Retry</button></p>
   const list = (kinds || []).filter((k) => k.installed)
   if (!list.length) return null
   return (
