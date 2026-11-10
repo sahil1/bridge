@@ -16,6 +16,7 @@
 //   The desktop app's dictation window (?dictate=1): the level while you talk, then the text, Send to
 //   the agent you last looked at or one picked, Copy, Esc, and a press from before it was ready;
 //   the mic's sound coming late; a let go with the page busy for a moment (all that was said kept);
+//   pressed again while the last words are still being turned into text (it says so);
 //   for a window of Bridge AI's showing another of your devices, the words into that window's page
 //   (or left on the card when it had nowhere to put them, saying so); the agent you looked at last,
 //   kept by whichever window you looked at it in, or said to be gone with nobody picked;
@@ -50,6 +51,8 @@ const said = []
 const prompts = []
 // What the computer answers a message with: gone in, unless a test makes it held for a busy agent.
 let promptAnswer = { ok: true }
+// How long the computer takes to turn a recording into text, when a test makes it slow.
+const slow = { ms: 0 }
 // A WAV of 16 kHz mono 16-bit PCM, with some sound in it: { head: its first 44 bytes, length }.
 const wavOk = (w) => {
   if (!w?.head) return false
@@ -105,7 +108,9 @@ const before = async (ctx) => {
   }
   await ctx.route('**/api/transcribe', async (route) => {
     sent.push(Date.now())
-    await route.fulfill({ json: { text: said.shift() ?? 'hello there' } })
+    const text = said.shift() ?? 'hello there'
+    if (slow.ms) await sleep(slow.ms)
+    await route.fulfill({ json: { text } }).catch(() => {})
   })
   await ctx.route('**/api/voice', (route) => route.fulfill({ json: { ready: true, model: true, missing: [] } }))
 }
@@ -859,6 +864,32 @@ try {
     const wav = await until(() => h.evaluate(() => window.__wavs.at(-1)), 8000, 100)
     ok(!!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Said as it got busy.', 8000, 100)) && wav?.length > 44 + 16000 * 0.6 * 2 && real(he).length === 0, 'the page busy as you let go: the words, all of them (not "Recording too short", nor the end cut off)', [await h.locator('.hud').innerText().catch(() => ''), wav?.length, he])
     // Never heard (when that fails): not left for the next dictation to be answered with.
+    said.splice(0)
+    await hc.close()
+  }
+  {
+    // Pressed again while the last words are still being turned into text (here in a window of
+    // Bridge AI's showing another device): it says so, rather than a press that does nothing; those
+    // words come as they were, on the card, not into that window; and once they're in, the next
+    // press listens straight away.
+    const { ctx: hc, p: h, errors: he } = await hudPage()
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    const hud = () => h.locator('.hud').innerText().catch(() => '')
+    slow.ms = 3000
+    said.push('the first part')
+    await key(h, 'down'); await listens(h); await sleep(1300); await key(h, 'up')
+    await until(async () => /Transcribing/.test(await hud()), 3000, 50)
+    await h.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: 'down', at: Date.now(), into: true } })))
+    const told = !!(await until(async () => /Still writing out the last one/.test(await hud()), 2000, 50))
+    await key(h, 'up')
+    slow.ms = 0
+    const first = !!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'The first part.', 8000, 100))
+    ok(told && first && !/Nowhere to put it/.test(await hud()) && (await h.locator('.hud-to-btn').count()) === 1, 'pressed again while the last words are being turned into text: it says so, and those come as they were, on the card for the agent', { told, first, hud: await hud() })
+    said.push('and the second')
+    await key(h, 'down')
+    const again = !!(await listens(h))
+    await sleep(1300); await key(h, 'up')
+    ok(again && !!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'And the second.', 8000, 100)) && real(he).length === 0, 'and once they\'re in, the next press listens at once, with no second try', [await hud(), he])
     said.splice(0)
     await hc.close()
   }

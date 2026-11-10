@@ -97,7 +97,8 @@ export default function AskOutLoud({ agent, onSend }) {
   if (!voice?.system?.length && !voice?.natural?.have && !voice?.espeak) return null
   const listening = dict.phase === 'opening' || dict.phase === 'listening'
   const down = (e) => {
-    if (e.button !== 0 || dict.phase === 'working') return
+    // (While what was asked is still being turned into text, the press says to wait: controller.js.)
+    if (e.button !== 0) return
     e.preventDefault()
     stop()
     unlock()
@@ -108,7 +109,7 @@ export default function AskOutLoud({ agent, onSend }) {
   }
   // Tapped, or let go before the mic was on: it listens on till it's pressed again.
   const line = listening ? (dict.mode === 'free' ? t('Listening… press {key} again when you\'re done', { key: t('Ask out loud') }) : t('Listening… let go when you\'re done'))
-    : dict.phase === 'working' ? t('Turning it into text…')
+    : dict.phase === 'working' ? (dict.early ? t('Still writing out the last one…') : t('Turning it into text…'))
       : state === 'sending' ? t('Asking…')
         : state?.queued ? sentTo(state.queued, t('Chief of Staff'))
         : state === 'waiting' ? t('The Chief of Staff is working on it…')
