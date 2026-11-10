@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
+import CopyButton from './CopyButton.jsx'
 import { viaRelay } from '../api.js'
 import { useFix } from './PermissionFix.jsx'
 import { keepReturn } from '../permissions.js'
@@ -80,7 +81,7 @@ export default function RestartChip({ fleet, runtime, keep, line = false, startO
               <div className="update-acts col">
                 <p className="muted small">{t('Restart it from a terminal, in your Bridge AI folder:')}</p>
                 <code className="small">{cmd}</code>
-                <div className="update-acts"><button type="button" className="ghost-btn" onClick={() => navigator.clipboard?.writeText(cmd).catch(() => {})}><Icon name="copy" size={12} /> {t('Copy')}</button></div>
+                <div className="update-acts"><CopyButton text={cmd} /></div>
               </div>
             )}
         </div>

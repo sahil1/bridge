@@ -19,6 +19,8 @@ import diffLang from 'highlight.js/lib/languages/diff'
 import dockerfile from 'highlight.js/lib/languages/dockerfile'
 import { markdownHtml } from '../markdown.js'
 import Icon from './Icon.jsx'
+import CopyButton from './CopyButton.jsx'
+import { copyText } from '../copy.js'
 import { Handle, usePersisted, useWidth } from './layout.jsx'
 import { api, usePoll, BASE, machineId } from '../api.js'
 import PermissionFix, { InstallFix, protectedFolder } from './PermissionFix.jsx'
@@ -179,6 +181,8 @@ function normalize(p) {
 // which the server refuses for any API call). From disk, or from the text you're editing.
 const SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals'
 const siteUrl = (pane, p, base = BASE) => `${base}/api/agents/${enc(pane)}/site/${p.split('/').map(enc).join('/')}`
+// The desktop app has no tabs: a file opened in a new one goes to the browser (desktop/main.js openLink).
+const newTabLabel = () => (window.bridgeApp ? t('Open in your browser') : t('Open in a new tab'))
 export function HtmlView({ pane, filePath, text, reload = 0, base = BASE }) {
   // While editing, show the draft (after a short pause in typing). A <base> makes its relative
   // links (styles, scripts, images) load from the file's folder, as they would from disk.
@@ -214,7 +218,6 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
   const studio = useTrial('studio') // a beta feature (src/trials.js)
   const [state, setState] = useState({ loading: true })
   const [mode, setMode] = usePersisted('cc-md-mode', 'preview')
-  const [copied, setCopied] = useState(false)
   const key = `${pane}\n${filePath}`
   const [draft, setDraftState] = useState(() => drafts.get(key) ?? null)
   const [saving, setSaving] = useState(false)
@@ -326,12 +329,10 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
             <button className="btn small" onClick={discard} disabled={saving || !dirty} title="Throw away your changes">Revert</button>
             <button className="btn small primary" onClick={() => save()} disabled={saving || !dirty} title="Save (⌘S)">{saving ? 'Saving…' : 'Save'}</button>
           </>}
-          <button className="win-btn" title="Copy path" aria-label="Copy path" onClick={() => { navigator.clipboard?.writeText(filePath); setCopied(true); setTimeout(() => setCopied(false), 1200) }}>
-            <Icon name={copied ? 'check' : 'copy'} size={13} />
-          </button>
+          <CopyButton text={filePath} label={null} title="Copy path" className="win-btn" size={13} />
           {!dirty && <button className="win-btn" title="Reload" aria-label="Reload" onClick={() => { load(); setFrameKey((k) => k + 1) }}><Icon name="refresh" size={13} /></button>}
           {f && !['binary', 'video', 'audio'].includes(f.kind) && canSave && <SaveButton f={f} src={raw} />}
-          {(f?.kind === 'image' || f?.kind === 'pdf' || f?.kind === 'video' || f?.kind === 'audio' || isHtml) && <a className="win-btn" href={isHtml ? site : raw} target="_blank" rel="noreferrer" title="Open in new tab" aria-label="Open in new tab"><Icon name="external" size={13} /></a>}
+          {(f?.kind === 'image' || f?.kind === 'pdf' || f?.kind === 'video' || f?.kind === 'audio' || isHtml) && <a className="win-btn" href={isHtml ? site : raw} target="_blank" rel="noreferrer" title={newTabLabel()} aria-label={newTabLabel()}><Icon name="external" size={13} /></a>}
           {f && onCopyHere && <button className="ghost-btn small copy-here" onClick={() => onCopyHere({ path: filePath, name: f.name, dir: false, size: f.size })} title={copyHereLabel()} aria-label={copyHereLabel()}><Icon name="download" size={12} /><span>{copyHereLabel()}</span></button>}
           {/* Studio edits Word, Excel, PowerPoint, Markdown, CSV, HTML and PDF files, with versions and Ask an agent. */}
           {f && studioHere && studio && STUDIO_OPENS.test(filePath) && <button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root: pane, path: filePath } }))} title={t('Edit it in Studio, with every version kept and your agents to change it')}><Icon name="layers" size={12} /> {t('Open in Studio')}</button>}
@@ -502,6 +503,8 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
   }
   const toggle = (p) => setExpanded((s) => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n })
 
+  // Collapse all has something to do only while a folder shows open (one inside a closed folder doesn't).
+  const anyOpen = (root.data?.entries || []).some((e) => e.dir && expanded.has(e.path))
 
   // The menu's actions. Paths are relative to the agent's folder ('' is the folder itself).
   const sep = cwd.includes('\\') && !cwd.includes('/') ? '\\' : '/'
@@ -513,8 +516,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
     try {
       if (op === 'copyPath' || op === 'copyRel') {
         const text = op === 'copyRel' ? e.path : e.path ? `${cwd}${sep}${e.path.split('/').join(sep)}` : cwd
-        await navigator.clipboard.writeText(text)
-        return say('Path copied')
+        return say(await copyText(text) ? t('Path copied') : t('Couldn\'t copy it here: {path}', { path: text }))
       }
       if (op === 'newFile' || op === 'newFolder') {
         return setDialog({ title: `New ${op === 'newFile' ? 'file' : 'folder'} in ${e.path || rootName}`, action: 'Create', initial: '', submit: async (name) => {
@@ -579,7 +581,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
           <input ref={pickRef} type="file" multiple hidden onChange={(e) => { const l = [...(e.target.files || [])]; e.target.value = ''; if (l.length) setPicked({ list: l, dir: pickFor.current }) }} data-testid="send-files" />
           <button className="win-btn" onClick={() => setQuick(true)} title="Go to file (⌘P)" aria-label="Go to file"><Icon name="search" size={13} /></button>
           <button className={`win-btn ${showHidden ? 'on' : ''}`} onClick={() => setShowHidden(!showHidden)} title={showHidden ? 'Hide dotfiles' : 'Show dotfiles'} aria-label="Toggle hidden files"><Icon name={showHidden ? 'eye' : 'eye-off'} size={13} /></button>
-          <button className="win-btn" onClick={() => setExpanded(new Set())} title="Collapse all" aria-label="Collapse all"><Icon name="shrink" size={13} /></button>
+          <button className="win-btn" onClick={() => setExpanded(new Set())} disabled={!anyOpen} title={anyOpen ? t('Collapse all') : t('Collapse all: no folder is open')} aria-label={t('Collapse all')}><Icon name="collapse-all" size={13} /></button>
           {assistOn && <AiAssist className="win-btn" compact on={assist != null} items={() => [{ label: t('Look over this folder'), hint: t('Duplicates, big and forgotten files, a tidier layout'), on: assist != null, run: () => setAssist(assist != null ? null : '') }]} />}
         </div>
         <div className={`tree-scroll ${dropAt ? 'drop-on' : ''}`} onContextMenu={(e) => { e.preventDefault(); onMenu({ path: '', name: rootName, dir: true }, e) }} {...rootDrops}>

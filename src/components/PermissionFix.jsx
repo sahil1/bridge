@@ -6,6 +6,19 @@ import { t, tx } from '../i18n/index.js'
 
 export { useFix, useRecheck }
 
+// A button that opens a pane of System Settings (server/fixes.js), saying why when it couldn't (it
+// did nothing then).
+export function OpenSettings({ pane, className = 'btn small', children }) {
+  const [err, setErr] = useState(null)
+  const go = () => { setErr(null); api('/fix/settings', { method: 'POST', body: { pane } }).catch((e) => setErr(e.message)) }
+  return (
+    <>
+      <button type="button" className={className} onClick={go}>{children}</button>
+      {err && <span className="error-text small" role="alert"> {err}</span>}
+    </>
+  )
+}
+
 // A tool to install or sign in to, with one button: it runs a fixed command (server/fixes.js) in a
 // terminal tab you can watch and answer, and looks again by itself while that runs and when you
 // come back to the window. what: homebrew, icalbuddy, gh, gh-login, xcode.
@@ -75,6 +88,9 @@ export default function PermissionFix({ pane, folder, onCheck, stale = false, ro
   // A while in System Settings and still off: Reset and ask again is offered there too.
   const [late, setLate] = useState(false)
   useEffect(() => { setLate(false); if (step !== 'settings') return; const id = setTimeout(() => setLate(true), 20000); return () => clearTimeout(id) }, [step, p.since])
+  // Why a link here (System Settings' Notifications, Show it in Finder) couldn't do what it says.
+  const [err, setErr] = useState(null)
+  const error = p.error || err
   // Off a Mac (and Windows, for its own few) there's nothing to allow.
   if (p.known && !p.mac && !(p.win && k.win)) return null
 
@@ -89,8 +105,8 @@ export default function PermissionFix({ pane, folder, onCheck, stale = false, ro
   const here = where === 'here'
   const desktopTile = here && !!fix?.app?.desktop && !!window.bridgeApp?.fixTile
   // Notifications' own page, on Bridge AI (the app opens it; an older one through the server).
-  const openNotes = () => (window.bridgeApp?.permission?.open ? window.bridgeApp.permission.open('notifications')
-    : api('/fix/settings', { method: 'POST', body: { pane: 'notifications' } }).then(() => window.bridgeApp?.fixTile?.('notifications'))).catch(() => {})
+  const openNotes = () => { setErr(null); return (window.bridgeApp?.permission?.open ? window.bridgeApp.permission.open('notifications')
+    : api('/fix/settings', { method: 'POST', body: { pane: 'notifications' } }).then(() => window.bridgeApp?.fixTile?.('notifications'))).catch((e) => setErr(e.message)) }
   const settled = state === 'ok' || state === 'restricted' || state === 'restart'
 
   // The one button, by what it is and where this is.
@@ -146,7 +162,7 @@ export default function PermissionFix({ pane, folder, onCheck, stale = false, ro
           ? <p className="muted small">{pane === 'full-disk' ? t('Drag {name} from the tile at the bottom of your screen into the list, then turn it on.', { name: who }) : t('Turn on {name} in the list.', { name: who })} {on}{reset}</p>
           : (
             <ol className="perm-steps">
-              <li>{t('Turn on {name} in {place}.', { name: who, place })}{pane === 'full-disk' ? <> {t('Not in the list? Click + and pick it.')}{fix?.app?.desktop ? <> <button type="button" className="link-btn" onClick={() => api('/fix/reveal', { method: 'POST' }).catch(() => {})}>{t('Show it in Finder')}</button></> : null}</> : null}</li>
+              <li>{t('Turn on {name} in {place}.', { name: who, place })}{pane === 'full-disk' ? <> {t('Not in the list? Click + and pick it.')}{fix?.app?.desktop ? <> <button type="button" className="link-btn" onClick={() => { setErr(null); api('/fix/reveal', { method: 'POST' }).catch((e) => setErr(e.message)) }}>{t('Show it in Finder')}</button></> : null}</> : null}</li>
               {k.restart && <li>{fix?.app?.desktop ? t('Then restart Bridge AI so it takes effect.') : <>{t('Then restart Bridge AI so it takes effect:')} <code>npm run stop</code>, <code>npm start</code></>}</li>}
               <li>{on}{reset}</li>
             </ol>
@@ -167,7 +183,7 @@ export default function PermissionFix({ pane, folder, onCheck, stale = false, ro
           {primary}
         </div>
         {(from || lead || doing) && <div className="perm-row-more">{from}{lead}{doing}</div>}
-        {p.error && <p className="error-text small">{p.error}</p>}
+        {error && <p className="error-text small">{error}</p>}
       </div>
     )
   }
@@ -178,7 +194,7 @@ export default function PermissionFix({ pane, folder, onCheck, stale = false, ro
       {lead}
       {(primary || again) && <div className="perm-acts">{primary}{again}</div>}
       {doing}
-      {p.error && <p className="error-text small">{p.error}</p>}
+      {error && <p className="error-text small">{error}</p>}
     </div>
   )
 }

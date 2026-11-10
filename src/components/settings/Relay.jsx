@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
+import CopyButton from '../CopyButton.jsx'
 import { InstallNode, openSettings } from '../SignIn.jsx'
 import { RelayUse } from './Account.jsx'
 import { api, viaRelay, relayComputers } from '../../api.js'
@@ -378,9 +379,7 @@ function Computers() {
 // Pair a device: one code for a phone or another computer, as a QR code, a link and the code itself.
 function PairCode({ p, onStop, forPhone = false }) {
   const left = Math.max(0, Math.round((p.expires - Date.now()) / 60000))
-  const [copied, setCopied] = useState(false)
   const host = p.link.split('#')[0].replace(/^https:\/\//, '').replace(/\/$/, '')
-  const copy = () => navigator.clipboard?.writeText(p.link).then(() => setCopied(true), () => {})
   return (
     <div className="ph-pair">
       <div className="ph-qr" aria-label={t('QR code to pair a device')} dangerouslySetInnerHTML={{ __html: p.qr }} />
@@ -396,7 +395,7 @@ function PairCode({ p, onStop, forPhone = false }) {
         </div>
         <p className="muted small">{left === 1 ? t('The code works for 1 more minute, for one device.') : t('The code works for {n} more minutes, for one device.', { n: left })}</p>
         <div className="st-row">
-          <button type="button" className="ghost-btn" onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={12} /> {copied ? t('Copied') : t('Copy link')}</button>
+          <CopyButton text={p.link} label={t('Copy link')} />
           <button type="button" className="ghost-btn" onClick={onStop}>{t('Done')}</button>
         </div>
       </div>

@@ -56,7 +56,14 @@ export default function SpokenAnswers() {
   // Where to get a more natural voice, when this device's best is a basic one.
   const better = !usingNatural && list.length ? betterVoices(list) : null
   const basic = !usingNatural && list.length > 0 && quality(list[0]) >= 2
-  const test = <button type="button" className="btn small" onClick={() => say(SAMPLE())}><Icon name="play" size={12} /> {t('Test')}</button>
+  // The sample read aloud, or why it couldn't be (no voice here, the device said no): it was silent.
+  const testIt = async () => {
+    setErr(null)
+    const r = say(SAMPLE())
+    if (!r.error) await r.done
+    if (r.error && !['interrupted', 'canceled'].includes(r.error)) setErr(t('Couldn\'t read the test aloud: {why}', { why: r.error }))
+  }
+  const test = <button type="button" className="btn small" onClick={testIt}><Icon name="play" size={12} /> {t('Test')}</button>
   const label = (v) => `${v.name}${tier(v) && !v.name.includes(tier(v)) ? ` · ${t(tier(v))}` : ''}${v.lang ? ` (${v.lang})` : ''}`
   const options = [
     ...list.map((v) => <option key={keyOf(v)} value={keyOf(v)}>{label(v)}</option>),

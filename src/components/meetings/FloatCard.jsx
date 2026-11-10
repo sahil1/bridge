@@ -265,7 +265,7 @@ export default function FloatCard() {
         </div>
         <div className="fc-acts fc-end">
           {/* Not now always works, even while Take notes is still starting. */}
-          <button type="button" className="btn small" onClick={() => { setErr(null); api('/calls/dismiss', { method: 'POST' }).catch(() => {}).finally(refresh) }}>{t('Not now')}</button>
+          <button type="button" className="btn small" onClick={() => { setErr(null); api('/calls/dismiss', { method: 'POST' }).catch((e) => setErr(e.message)).finally(refresh) }}>{t('Not now')}</button>
           <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => app().floatStart?.({ app: c.prompt.app }))} title={t('Your mic and the call, transcribed as you go.')}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Take notes')}</button>
         </div>
       </>

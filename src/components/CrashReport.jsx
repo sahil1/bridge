@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
+import CopyButton from './CopyButton.jsx'
 import { api } from '../api.js'
 import { t } from '../i18n/index.js'
 import { reportText, scrub, issueLink } from '../../shared/crashreport.js'
@@ -16,7 +17,6 @@ import './crashReport.css'
 // crash the server kept (its own, or the desktop app's window).
 export default function CrashReport({ crash, onClose, onSent }) {
   const [r, setR] = useState(null) // { title, what, details }
-  const [copied, setCopied] = useState(false)
   const [server, setServer] = useState(null) // the crash server's state (/api/crashes/sending)
   const [sent, setSent] = useState(null) // null | 'sending' | 'sent' | an error
   useEffect(() => { api('/crashes/sending').then(setServer, () => setServer(null)) }, [])
@@ -34,7 +34,6 @@ export default function CrashReport({ crash, onClose, onSent }) {
     return () => window.removeEventListener('keydown', key)
   }, [onClose])
   const link = r ? issueLink(r) : null
-  const copy = (text) => navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) }, () => {})
   const set = (k) => (e) => setR((x) => ({ ...x, [k]: e.target.value }))
   return (
     <div className="modal-backdrop crash-report-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -61,7 +60,7 @@ export default function CrashReport({ crash, onClose, onSent }) {
           </>
         )}
         <footer className="modal-foot">
-          <button type="button" className="ghost-btn" disabled={!r} onClick={() => copy(`${r.title}\n\n${r.what}\n\n${r.details}`)}><Icon name={copied ? 'check' : 'copy'} size={12} /> {copied ? t('Copied') : t('Copy')}</button>
+          <CopyButton text={() => `${r.title}\n\n${r.what}\n\n${r.details}`} disabled={!r} />
           <button type="button" className="ghost-btn" onClick={onClose}>{t('Cancel')}</button>
           {r && server?.available && sent !== 'sent' && <button type="button" className="btn cr-send" disabled={sent === 'sending'} onClick={() => { setSent('sending'); api('/crashes/send', { method: 'POST', body: { ...r, kind: crash.kind, crashKind: crash.crashKind } }).then(() => { setSent('sent'); onSent?.() }, (e) => setSent(e.message || t('Couldn\'t send it'))) }}><Icon name="send" size={13} /> {sent === 'sending' ? t('Sending…') : t('Send to Bold Bridge')}</button>}
           {r && <a className="btn primary cr-open" href={link.url} target="_blank" rel="noreferrer" onClick={() => { if (!link.fits) navigator.clipboard?.writeText(r.details).catch(() => {}); onSent?.() }}><Icon name="external" size={13} /> {t('Open on GitHub')}</a>}

@@ -40,6 +40,10 @@ const SUITES = [
   { name: 'rail-ui', build: 'dist', browser: true, covers: [/^src\/components\/(Rail|Palette|Tour|Console)\.jsx$/, /^src\/components\/meetings\/(RailMeetings|bulk)\.jsx$/, /^src\/App\.jsx$/, /^src\/styles\.css$/, /^server\/(meetings|threads)\.js$/] },
   { name: 'settings-ui', build: 'dist', browser: true, covers: [/^src\/components\/settings\//, /^src\/components\/(Settings|Appearance|Palette|Machines)\.jsx$/, /^src\/(dictation|voice)\/[\w.]+\.css$/, /^src\/styles\.css$/] },
   { name: 'app-ui', build: 'dist', browser: true, covers: [/^src\//, /^index\.html$/, /^public\//, /^vite\.config\.js$/, /^server\/(index|attach|terminal|settings)\.js$/, /^server\/runtime\//] },
+  // Every button and link you can see on the main views (Home, an agent's Chat, Terminal and Files,
+  // Files, Studio, Meetings, Calendar, Settings' sections, the top bar and its menus, the sidebar,
+  // the tabs and the board), pressed in the desktop app and in a browser: each has to do something.
+  { name: 'dead-clicks', build: 'dist', browser: true, covers: [/^src\//, /^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/] },
   { name: 'tab-strip', build: 'dist', browser: true, covers: [/^src\/components\/(TabStrip|Rail|Icon|NewAgent)\.jsx$/, /^src\/components\/tabstrip\.css$/, /^src\/(App\.jsx|styles\.css|trials\.js)$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'crash-report', build: 'dist', browser: true, covers: [/^src\/components\/settings\/CrashReports\.jsx$/, /^shared\/(crashreport|private)\.js$/, /^server\/crashes\.js$/, /^desktop\/crashes\.js$/, /^src\/components\/(CrashReport|ErrorBoundary)\.jsx$/, /^src\/components\/crashReport\.css$/, /^scripts\/check-private\.js$/] },
   { name: 'chat-background', build: 'dist', browser: true, covers: [/^server\/(subagents|logread|transcripts|usage|index)\.js$/, /^server\/runtime\//, /^src\/components\/(Subagents|Console)\.jsx$/, /^src\/styles\.css$/] },

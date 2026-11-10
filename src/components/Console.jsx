@@ -1,5 +1,6 @@
 import { createContext, Fragment, useContext, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
+import { copyText } from '../copy.js'
 import { Terminal, FilesView, ChangesView, PreviewView } from '../lazy.jsx'
 import Subagents from './Subagents.jsx'
 import ChiefTasks from './ChiefTasks.jsx'
@@ -873,8 +874,8 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
       <span className="sub-where">{where}</span>
       {/* The chief's and the chats' folders are Bridge AI's own: nothing to browse there. */}
       {!agent.chief && !agent.plainChat && (
-        <button className="path-chip" onClick={() => setView('files')} title={`${tildePath(agent.cwd)}\n${t('Click to browse; right-click to copy')}`}
-          onContextMenu={(e) => { e.preventDefault(); navigator.clipboard?.writeText(agent.cwd); setFlash(t('Path copied')) }}>
+        <button className="path-chip" onClick={() => setView('files')} title={`${tildePath(agent.cwd)}\n${t('Click to browse; right-click to copy')}`} aria-current={view === 'files' ? 'page' : undefined}
+          onContextMenu={async (e) => { e.preventDefault(); setFlash(await copyText(agent.cwd) ? t('Path copied') : t('Couldn\'t copy it here: {path}', { path: agent.cwd })) }}>
           <Icon name="folder" size={10} /> <span>{tildePath(agent.cwd)}</span>
           {g && <span className="pc-git"><Icon name="branch" size={10} />{g.branch}{g.dirty > 0 && <b>+{g.dirty}</b>}</span>}
         </button>
