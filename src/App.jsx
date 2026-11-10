@@ -94,15 +94,15 @@ const toStart = !cloudOnly ? null : window.bridgeAndroid?.home ? () => window.br
 // and the clock are in the Status menu (StatusMenu.jsx), and each of those that's pinned
 // (src/pins.js: all but sounds, unless you change it) shows in the bar too while there's room. When
 // it doesn't all fit (a laptop's screen, a busy day), the bar gives way a step at a time, least
-// needed first: the pinned chips' words (Update, Restart to apply, usage's account), so each is its
-// icon and value; then their long values (which limit usage's figure is, setup's how far it is);
-// the next meeting's title; the word Status; the Bridge and Herdr tabs' words; then the
-// pinned chips themselves, one at a time: setup, sounds, the clock, a restart to apply, usage, the
-// weather, the update and Updated (the news among them then counted on the Status button; all of
-// them still in its menu); the recording's title, the words after what's waiting, the next meeting
-// (in the Status menu too), the computer's name, and last the search's width. Each step is a class
-// on the bar (fit-1 to fit-18, styles.css). The search's words are picked after: whole, shorter, or
-// none, never cut off.
+// needed first: the time, then the weather (the menu bar and Status have both); the pinned chips'
+// words (Update, Restart to apply, usage's account), so each is its icon and value; then their long
+// values (which limit usage's figure is, setup's how far it is); the next meeting's title; the word
+// Status; the Bridge and Herdr tabs' words; then the other pinned chips themselves, one at a time:
+// setup, sounds, a restart to apply, usage, the update and Updated (the news among them then
+// counted on the Status button; all of them still in its menu); the recording's title, the words
+// after what's waiting, the next meeting (in the Status menu too), the computer's name, and last the
+// search's width. Each step is a class on the bar (fit-1 to fit-18, styles.css). The search's words
+// are picked after: whole, shorter, or none, never cut off.
 //
 // It's tried again whenever anything in the bar changes size, not only the bar: text that grows
 // while the bar stays the same (a font arriving after the first try, a font or text size picked in
