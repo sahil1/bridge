@@ -68,7 +68,10 @@ jobs:
         run: |
           v=$(node -p "require('./desktop/package-lock.json').packages['node_modules/electron'].version")
           npm install --prefix "$RUNNER_TEMP/electron" --no-save --no-package-lock --no-audit --no-fund "electron@$v"
-          echo "BRIDGE_TEST_ELECTRON=$(node -p "require(require('path').join(process.env.RUNNER_TEMP, 'electron', 'node_modules', 'electron'))")" >> "$GITHUB_ENV"
+          # Its program is downloaded on first use, saying so on stdout: fetched here, and its path
+          # written by Node itself, so nothing else lands in the line.
+          node "$RUNNER_TEMP/electron/node_modules/electron/install.js"
+          node -e "const fs = require('fs'), p = require(require('path').join(process.env.RUNNER_TEMP, 'electron', 'node_modules', 'electron')); if (!fs.existsSync(p)) throw new Error('no Electron at ' + p); fs.appendFileSync(process.env.GITHUB_ENV, 'BRIDGE_TEST_ELECTRON=' + p + '\\n')"
 
       # The herdr test drives a real herdr (elsewhere it checks only what it can without one): a
       # pinned release, refused unless it matches its checksum.
