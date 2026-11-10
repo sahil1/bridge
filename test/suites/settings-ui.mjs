@@ -10,7 +10,7 @@
 // unfinished work. Nothing was lost: every setting that was there before Advanced (each control by its
 // name) is still in its section, Advanced opened. At phone width (375 px), dark: Meetings with
 // Advanced open, nothing wider than the screen or cut off, and Advanced a whole 40 px target.
-import { startKit, startModel, checks, until, browser, page, shot, phoneFaults, advanced, withoutCutOff, IS_MAC } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, advanced, withoutCutOff, noServiceWorker, IS_MAC } from '../lib/harness.mjs'
 
 const { ok, done } = checks('settings-ui')
 const kit = await startKit('settings-ui')
@@ -209,6 +209,31 @@ try {
     }
     await p.locator('.modal.settings [data-setting="notes-model"]').scrollIntoViewIfNeeded()
     await shot(p, `${tag}settings-ui-notes-model`)
+    ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+  }
+
+  // ---------- A setting found keeps its place as the rest of its section comes ----------
+  // A busy computer: Set up's list and Permissions (above it) come 3 seconds after it shows. It
+  // stays just where it showed, and ticked then, it ticks.
+  {
+    const held = []
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', before: async (c) => { await noServiceWorker(c); await c.route(/\/api\/(setup\/plan|fix\/list)(\?|$)/, (r) => held.push(r)) } })
+    await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'keep-agents' } })))
+    const tick = p.locator('.modal.settings [data-setting="keep-agents"] input')
+    await tick.waitFor({ timeout: 8000 })
+    const y0 = (await tick.boundingBox())?.y
+    await until(() => held.length >= 2, 5000)
+    await sleep(3000)
+    const asked = held.length
+    for (const r of held.splice(0)) await r.continue().catch(() => {})
+    await settled(p)
+    const y1 = (await tick.boundingBox())?.y
+    ok(asked >= 2 && y0 != null && Math.abs(y1 - y0) < 1, 'Settings at Keep agents running, with what\'s above it coming seconds later: it stays just where it showed', { asked, y0, y1, grew: await p.locator('.modal.settings .st-scroll').evaluate((e) => e.scrollHeight) })
+    await tick.uncheck()
+    ok(!!(await until(async () => (await kit.api('/settings')).effective.keepAgents === false, 5000)), 'and ticked then, it\'s the one that changes')
+    await kit.api('/settings', { keepAgents: true }, 'PATCH')
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
   }
