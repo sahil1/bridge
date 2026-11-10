@@ -1,7 +1,8 @@
 // Where the floating card's window goes as the card grows and shrinks (desktop/floatfit.js): from
 // its bar's side, so a card opened taller than half the screen and closed again is back where it
 // was, not at the other end of the screen; on the screen whatever its size; and from a page older
-// than this (no side said), by the window's middle as before.
+// than this (no side said), by the window's middle as before. Its size zoomed (⌘+ in the main window
+// zooms the card too): the card's times the zoom, on the screen.
 // And when it's kept out of pictures of the screen (desktop/floatshare.js), with a stand-in for
 // native/callwatch sharing: on a Mac, only while the screen is shared or recorded, so a screenshot
 // shows it; until the helper has said, when it can't or has gone, and off a Mac, always; Always and
@@ -13,7 +14,7 @@ import { checks, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('float-window')
 const require = createRequire(import.meta.url)
-const { floatPlace } = require(path.join(ROOT, 'desktop', 'floatfit.js'))
+const { floatPlace, floatSize } = require(path.join(ROOT, 'desktop', 'floatfit.js'))
 
 const a = { x: 0, y: 25, width: 1440, height: 875 } // a screen's work area, under the menu bar
 // Resized the way Electron does it: the top left stays, then floatPlace moves it.
@@ -40,6 +41,20 @@ const big = resize(mid, 420, 860, false)
 ok(big.y >= a.y && big.y + big.height <= a.y + a.height, 'opened down from the middle taller than what\'s left below: moved up to stay on the screen', big)
 const bigUp = resize({ x: 600, y: 100, width: 348, height: 74 }, 420, 860, true)
 ok(bigUp.y === a.y, 'opened up from near the top taller than what\'s above: it starts at the top of the screen', bigUp)
+
+// ---------- Its size, zoomed ----------
+// The page measures the card in its own pixels; zoomed with the main window (⌘+), each is zoom points
+// on the screen. 3.13.2 made the window the page's numbers in points: at 110% the card was cut off.
+{
+  const card = { w: 324, h: 280 } // the card, 300 by 256, and the 12 around it
+  const sizes = [1, 1.1, 1.25, 1.5, 2, 3, 0.8].map((z) => ({ z, ...floatSize(card.w, card.h, z, a) }))
+  ok(sizes.every(({ z, width, height }) => width >= card.w * z && width - card.w * z < 1 && height >= card.h * z && height - card.h * z < 1), 'zoomed from 80% to 300%: the window is the card times the zoom, to the point above', sizes)
+  const small = { x: 0, y: 25, width: 1024, height: 615 } // a 13-inch Mac at Larger Text
+  const big = floatSize(420, 900, 1.5, small)
+  ok(big.width === Math.ceil(420 * 1.5) && big.height === small.height - 16, 'taller than a small screen: no taller than it, less 8 points above and below (the card scrolls the rest)', big)
+  ok(floatSize(800, 200, 2, small).width === small.width - 16, 'and no wider than it', floatSize(800, 200, 2, small))
+  ok(JSON.stringify(floatSize(324, 280, undefined, a)) === JSON.stringify(floatSize(324, 280, 1, a)) && JSON.stringify(floatSize(324, 280, 0, a)) === JSON.stringify(floatSize(324, 280, 1, a)), "a zoom it can't read counts as 100%")
+}
 
 // ---------- Kept out of pictures of the screen ----------
 {

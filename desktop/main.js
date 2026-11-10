@@ -14,7 +14,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const crashes = require('./crashes.js')
-const { floatPlace } = require('./floatfit.js')
+const { floatWindow, fitFloat, zoomOf } = require('./floatfit.js')
 
 // Where Bridge AI's code is: inside the app when built, the repo next to this folder from source.
 // BRIDGE_ROOT overrides both (a built app running your clone, say).
@@ -833,11 +833,7 @@ function showFloat() {
   if (float && !float.isDestroyed()) { if (!float.isVisible()) float.showInactive(); return }
   const W = 324, H = 150
   const at = floatAt(W, H)
-  float = new BrowserWindow({
-    width: W, height: H, x: at.x, y: at.y, frame: false, transparent: true, resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
-    skipTaskbar: true, hasShadow: false, alwaysOnTop: true, acceptFirstMouse: true, show: false, title: `${APP_NAME} card`,
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true },
-  })
+  float = new BrowserWindow(floatWindow({ width: W, height: H, x: at.x, y: at.y, title: `${APP_NAME} card`, preload: path.join(__dirname, 'preload.js') }))
   float.setAlwaysOnTop(true, 'floating')
   float.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   float.setContentProtection(floatShare.hidden())
@@ -934,21 +930,10 @@ function setTray(c, instead) {
   tray.setContextMenu(Menu.buildFromTemplate(items))
 }
 const fromFloat = (e) => !!float && !float.isDestroyed() && e.sender === float.webContents
-ipc.on('bridge:float-size', (e, w, h, low) => {
-  if (!fromFloat(e) || !Number.isFinite(w) || !Number.isFinite(h)) return
-  // As tall as the card, up to the screen's height (opened, with AI Assist's suggestion, it's taller
-  // than a fixed 420 was, and was cut off; the card scrolls what's under its bar past that).
-  const b = float.getBounds()
-  const a = screen.getDisplayMatching(b).workArea
-  const [cw, ch] = float.getContentSize()
-  const nw = Math.max(60, Math.min(420, Math.round(w))), nh = Math.max(40, Math.min(a.height - 16, Math.round(h)))
-  if (cw === nw && ch === nh) return
-  // From its bar's side, staying on the screen (desktop/floatfit.js).
-  float.setContentSize(nw, nh)
-  const n = float.getBounds()
-  const { x, y } = floatPlace(b, n, a, low)
-  if (x !== n.x || y !== n.y) float.setPosition(x, y)
-})
+// As big as the card at its zoom, up to the screen's size (opened, with AI Assist's suggestion, it's
+// taller than a fixed 420 was, and was cut off; the card scrolls what's under its bar past that),
+// from its bar's side (desktop/floatfit.js).
+ipc.on('bridge:float-size', (e, w, h, low) => { if (fromFloat(e)) fitFloat(float, screen, w, h, low) })
 ipc.handle('bridge:float-hide', (e) => { if (!fromFloat(e)) return false; floatHiddenFor = floatKey; hideFloat(); return true })
 // Dragged from anywhere on it: kept whole on the screen it's over. (null, null): let go, so it's
 // remembered there.
@@ -957,16 +942,18 @@ ipc.on('bridge:float-move', (e, x, y) => {
   const b = float.getBounds()
   if (x == null || y == null) {
     // Let go near an edge of the screen (within 24 points of the card): against it, as a widget.
-    // The card sits 12 points inside its window, so the window goes 12 past the edge's line.
+    // The card sits 12 of its pixels inside its window (more points when it's zoomed), so the
+    // window goes that far past the edge's line.
     const a = screen.getDisplayMatching(b).workArea
+    const m = Math.round(12 * zoomOf(float))
     const near = (v, edge) => Math.abs(v - edge) <= 24
     let { x: nx, y: ny } = b
-    if (near(b.x + 12, a.x)) nx = a.x - 12 + 8
-    else if (near(b.x + b.width - 12, a.x + a.width)) nx = a.x + a.width - b.width + 12 - 8
-    if (near(b.y + 12, a.y)) ny = a.y - 12 + 8
-    else if (near(b.y + b.height - 12, a.y + a.height)) ny = a.y + a.height - b.height + 12 - 8
-    nx = Math.max(a.x - 12, Math.min(nx, a.x + a.width - b.width + 12))
-    ny = Math.max(a.y, Math.min(ny, a.y + a.height - b.height + 12))
+    if (near(b.x + m, a.x)) nx = a.x - m + 8
+    else if (near(b.x + b.width - m, a.x + a.width)) nx = a.x + a.width - b.width + m - 8
+    if (near(b.y + m, a.y)) ny = a.y - m + 8
+    else if (near(b.y + b.height - m, a.y + a.height)) ny = a.y + a.height - b.height + m - 8
+    nx = Math.max(a.x - m, Math.min(nx, a.x + a.width - b.width + m))
+    ny = Math.max(a.y, Math.min(ny, a.y + a.height - b.height + m))
     if (nx !== b.x || ny !== b.y) float.setPosition(Math.round(nx), Math.round(ny))
     try { const n = float.getBounds(); fs.writeFileSync(FLOAT_STATE, JSON.stringify({ x: n.x, y: n.y })) } catch { /* read-only */ }
     return

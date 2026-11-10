@@ -4,10 +4,11 @@ Each version's section here becomes its GitHub release notes (`npm run release`)
 
 ## 3.13.4
 
-Fixes: a PowerPoint shows its own background in Studio; the tabs all stay on screen, as in Chrome; the sidebar folds and scrolls as one; scroll bars only when you need them; Studio takes a phone's photo; a setting found in Settings stays where it shows; and what can't load in Settings › Model Providers can be tried again.
+Fixes: the meeting card is whole when the app is zoomed; a PowerPoint shows its own background in Studio; the tabs all stay on screen, as in Chrome; the sidebar folds and scrolls as one; scroll bars only when you need them; Studio takes a phone's photo; a setting found in Settings stays where it shows; and what can't load in Settings › Model Providers can be tried again.
 
 ### Fixes
 
+- **The meeting card is whole when the app is zoomed**: zoomed in with ⌘+ in the main window, the card zoomed too but its window didn't, so its right side and bottom were cut off (Stop, Watch screen, the last buttons). Its window now fits it at every zoom, on any screen; the dictation pill's too. And on a short screen, the card no longer runs past it: what's under the bar, or a meeting's prep before it starts, scrolls.
 - **A PowerPoint's background shows as it does in PowerPoint**: a picture on its master, layout or slide showed as white in Studio. Tiled pictures, the theme's background styles, gradients, patterns and see-through colours are drawn as PowerPoint draws them too, and a picture a browser can't show (TIFF, EMF) shows the colour under it, and Studio says so.
 - **A PowerPoint's subtitles use its master's body style**: they were drawn in the title's font, bold and big.
 - **A PowerPoint's lighter and darker theme colours match PowerPoint's**: a table's banded rows and the theme's shape and background styles were a shade off.
