@@ -50,12 +50,36 @@ const senders = require('../../desktop/senders.js')
   const kinds = cases.map(([u]) => pages.of(u)?.kind || null)
   ok(cases.every(([, want], i) => kinds[i] === want), 'this computer\'s own page, another computer\'s at its own port, and nothing else counts as either (not one at this computer\'s port or another computer\'s, a page an agent made, an unknown port, a site, a data: page, a name)', cases.map(([u], i) => `${u} ${kinds[i]}`))
   ok(pages.of(m('desk1'))?.machine === 'desk1' && pages.machineUrl('desk1', '/?window=a') === `http://127.0.0.1:${P}/m/desk1/?window=a` && pages.local(m('desk1')) && !pages.local('http://127.0.0.1:7999/'), 'which computer; a window for one asks this computer\'s address (which sends it to its port); and only these ports are the app\'s')
+  // A link a page opens in a new window (Open in a new tab): a file the app's server serves goes to
+  // the browser (it did nothing in the app), the web and mail to their apps, and the app's own pages
+  // and other schemes nowhere. From this computer's own page.
+  const OWN = `http://127.0.0.1:${P}/`
+  const links = [
+    [`http://127.0.0.1:${P}/api/agents/w1%3Ap3/raw?path=scan.pdf`, 'browser'], [`http://127.0.0.1:${P}/api/agents/w1/site/index.html`, 'browser'], [m('desk1', '/api/agents/p2/raw?path=a.png'), 'browser'], [`http://127.0.0.1:${P}/m/desk1/api/uploads/a.png`, 'browser'],
+    ['https://example.com/', 'outside'], ['mailto:me@example.com', 'outside'], [`http://127.0.0.1:${P + 1}/`, 'outside'],
+    [`http://127.0.0.1:${P}/`, null], [`http://localhost:${P}/?window=w1`, null], [m('desk1'), null], [`http://127.0.0.1:${P}/apis`, null], ['file:///etc/hosts', null], ['smb://nas/share', null], ['not a link', null],
+  ]
+  const went = links.map(([u]) => pages.opens(u, OWN))
+  ok(links.every(([, want], i) => went[i] === want), 'a link opened in a new window: a file the app shows in the browser, the web and mail in their own apps, the app\'s own pages and other schemes nowhere', links.map(([u], i) => `${u} ${went[i]}`))
+  // From another computer's window: only that computer's files (it reaches nothing else of this
+  // one's), the web and mail as from any page; and from a page that's neither (one an agent made),
+  // no file at all.
+  const fromDesk = [
+    [m('desk1', '/api/agents/p2/raw?path=a.png'), 'browser'], [`http://127.0.0.1:${P}/m/desk1/api/uploads/a.png`, 'browser'],
+    [`http://127.0.0.1:${P}/api/agents/w1%3Ap3/raw?path=scan.pdf`, null], [`http://127.0.0.1:${P}/m/other/api/uploads/a.png`, null], [m('desk1', '/m/other/api/x'), null],
+    ['https://example.com/', 'outside'],
+  ]
+  const deskWent = fromDesk.map(([u]) => pages.opens(u, m('desk1')))
+  const agentPage = pages.opens(`http://127.0.0.1:${P}/api/agents/w1%3Ap3/raw?path=scan.pdf`, `http://127.0.0.1:${P}/api/agents/w1/site/index.html`)
+  ok(fromDesk.every(([, want], i) => deskWent[i] === want) && agentPage === null, 'from another computer\'s window, only that computer\'s files go to the browser, not this one\'s; from a page an agent made, none', { desk: fromDesk.map(([u], i) => `${u} ${deskWent[i]}`), agentPage })
 
   // Every channel main.js and dictation.js answer, checked first.
   const src = (f) => fs.readFileSync(path.join(ROOT, 'desktop', f), 'utf8')
   const main = src('main.js')
   const chans = [...new Set([...main.matchAll(/\bipc\.(?:handle|on)\('([\w:-]+)'/g), ...src('dictation.js').matchAll(/\bipcMain\.(?:handle|on)\('([\w:-]+)'/g)].map((x) => x[1]))]
   ok(chans.length > 40 && !/\bipcMain\.(handle|on)\(/.test(main) && /electron: parts/.test(main) && /ipcMain: ipc\b/.test(main), 'main.js answers no message but through the check, and hands dictation.js the checked one', { chans: chans.length })
+  const handlers = main.split('setWindowOpenHandler(').slice(1).map((x) => x.split(/\r?\n/)[0]) // (Windows checks out CRLF)
+  ok(handlers.length >= 4 && handlers.every((h) => /^openLink\((win|w|float)\)\)$/.test(h) || h === "() => ({ action: 'deny' }))"), 'every window\'s links opened in a new window go where that says for the page it shows (or, the tile\'s, nowhere)', handlers)
   const handled = {}
   const stand = { handle: (ch, fn) => { handled[ch] = fn }, on: (ch, fn) => { handled[ch] = fn } }
   const refused = []

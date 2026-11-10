@@ -75,7 +75,7 @@ function Suggestions({ p, prep, compact, onSettings }) {
   return (
     <div className="prep-sug">
       {shown.map((x, i) => (
-        <div key={i} className={`prep-tip ${x.kind}`}>
+        <div key={i} className={`prep-tip k-${x.kind}`}>
           <span className="prep-tip-kind">{t(PREP_KIND[x.kind] || PREP_KIND.goal)}</span>
           <span className="prep-tip-text" title={x.why ? `${x.text}\n${x.why}` : x.text}><span className="prep-tip-say">{x.text}</span>{x.why && <small>{x.why}</small>}</span>
         </div>
@@ -253,7 +253,7 @@ export function PrepGlance({ e, onOpenEvent }) {
             <div className="pg-sug">
               <span className="pg-head"><Icon name="wand" size={12} /> {working && !items.length ? t('Thinking…') : t('Goals and Questions')}</span>
               {items.map((x, i) => (
-                <p key={i} className={`pg-item prep-tip-text ${x.kind}`} title={x.why ? `${x.text}\n${x.why}` : x.text}><span className="pg-kind">{t(PREP_KIND[x.kind] || PREP_KIND.goal)}</span> {x.text}</p>
+                <p key={i} className={`pg-item prep-tip-text k-${x.kind}`} title={x.why ? `${x.text}\n${x.why}` : x.text}><span className="pg-kind">{t(PREP_KIND[x.kind] || PREP_KIND.goal)}</span> {x.text}</p>
               ))}
             </div>
           )}

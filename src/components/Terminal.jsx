@@ -9,18 +9,24 @@ import gpu from '../termGpu.js'
 import altArrows from '../altArrows.js'
 import FindBar from './FindBar.jsx'
 import termFinder from '../termFind.js'
+import touchScroll from '../termTouch.js'
 import { t } from '../i18n/index.js'
 
 // Live mirror of a herdr pane you can type into. herdr has no output stream per pane, so the
 // screen is re-read (fast while you type) and drawn at the pane's own width, so lines wrap the
 // same as in herdr. Keystrokes go to the pane in order. Scrolling up holds the view until you
 // jump back down. Clicking a numbered option in a menu picks it.
-// The last 1,500 lines while you watch; scrolled to the top, 5,000 more at a time, up to 20,000 (as
-// much as the runtime keeps: herdr's own scrollback, the built-in runtime's 10,000), the way Chat
-// loads earlier messages.
+// The last 1,500 lines while you watch. Scrolling up, everything the runtime keeps (herdr's own
+// scrollback, the built-in runtime's 10,000 lines; at most 20,000) is read in before you reach the
+// top of those, so the scroll carries on through without stopping, on the line you were reading.
+// Drawing that many lines takes a moment on a slower computer, so it's drawn at the first pause in
+// your scrolling, or once you're near the top, never in the middle of a scroll.
+// An agent showing a full-screen view that takes the mouse (Claude Code's fullscreen one) keeps its
+// history itself: there the wheel and a swipe go to it, as in a terminal app, and it scrolls.
 const LIVE_LINES = 1500
-const MORE_LINES = 5000
 const MAX_LINES = 20000
+const NEAR_TOP = 1000 // lines from the top of what's read in: read the rest in now
+const PAUSE = 150 // ms without scrolling: a pause, to draw what was read in
 
 // Turn what xterm.js emits for a keystroke or paste into herdr input steps.
 export function toSteps(data, typed = data.length === 1) {
@@ -98,6 +104,28 @@ function shellCursor(term) {
   term.write('\x1b[?25l')
 }
 
+// n rows of a buffer from row y, as plain text.
+function rowsText(b, y, n) {
+  const out = []
+  for (let i = y; i < y + n; i++) out.push(b.getLine(i)?.translateToString(true) ?? '')
+  return out.join('\n')
+}
+
+// Where the rows kept from before ({ at, len, text }) are in the buffer now that it goes further
+// back: as far down as the lines read in above them, or nearby when the agent printed more below
+// meanwhile (or the runtime dropped its oldest lines), the nearest place they match.
+function findRows(b, keep) {
+  const want = keep.at + b.length - keep.len
+  const n = keep.text.split('\n').length
+  const first = keep.text.split('\n')[0]
+  for (let d = 0; d <= 4000; d++) {
+    for (const y of d ? [want + d, want - d] : [want]) {
+      if (y >= 0 && y + n <= b.length && (b.getLine(y)?.translateToString(true) ?? '') === first && rowsText(b, y, n) === keep.text) return y
+    }
+  }
+  return Math.max(0, Math.min(want, b.length - 1))
+}
+
 // Text size from Appearance (one step smaller on a phone).
 const termFont = () => {
   const n = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--term-font')) || 13
@@ -114,9 +142,11 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
   const fastUntil = useRef(0)
   const kick = useRef(null)
   const pendingRef = useRef(null)
-  const wantRef = useRef(LIVE_LINES) // how many lines to read
-  const fullRef = useRef(false) // the last read came back full: there may be more above
-  const growRef = useRef(null) // reading more: how long the buffer was, to keep your place
+  const growRef = useRef(null) // { want, ansi, live }: reading further back; ansi once it's in, not yet drawn
+  const scrolledAt = useRef(0) // when you last scrolled
+  const pauseRef = useRef(null) // the timer that draws it at a pause
+  const allRef = useRef(false) // what's drawn is all the runtime keeps: nothing more above
+  const modesRef = useRef(null) // { alt, mouse } as the built-in runtime says (herdr: unknown)
   const heldRef = useRef(false)
   const paintingRef = useRef(false) // a paint is writing: the scrolling it causes isn't yours
   // The xterm and its key handlers are made once, but the same panel is reused when you switch
@@ -221,28 +251,85 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
     const host = hostRef.current
     const onType = (e) => term.paste(String(e.detail || ''))
     host.addEventListener('bridge-type', onType)
-    // You scrolled (the wheel, the scrollbar or the keyboard): back at the bottom, the latest
-    // again; at the top, read further back.
+    // You scrolled (the wheel, the scrollbar, the keyboard or a finger): back at the bottom, the
+    // latest again; nearing the top of what's read in, the rest is read in now, so you never wait
+    // at the top; at the very top of all of it, that's said.
     const scrolled = () => {
       if (paintingRef.current) return
+      scrolledAt.current = Date.now()
       const b = term.buffer.active
       if (b.viewportY >= b.baseY - 1) {
         setHeld(false)
         setMore(null)
-        wantRef.current = LIVE_LINES // the light read again
         growRef.current = null
+        clearTimeout(pauseRef.current)
         if (pendingRef.current != null) paint(pendingRef.current)
         return
       }
-      if (b.viewportY === 0 && b.baseY > 0 && !growRef.current) {
-        if (!fullRef.current || wantRef.current >= MAX_LINES) { setMore('all'); return }
-        wantRef.current = Math.min(MAX_LINES, wantRef.current + MORE_LINES)
-        growRef.current = { len: b.length, want: wantRef.current }
+      // Further back is in: drawn near the top, or once you pause.
+      if (growRef.current?.ansi != null) {
+        clearTimeout(pauseRef.current)
+        if (b.viewportY <= term.rows * 2) drawHistory()
+        else pauseRef.current = setTimeout(drawHistory, PAUSE)
+        return
+      }
+      if (b.viewportY <= NEAR_TOP && !allRef.current && !growRef.current) {
+        growRef.current = { want: MAX_LINES }
         setMore('loading')
         kick.current?.()
+        return
       }
+      if (!growRef.current) setMore(b.viewportY === 0 && allRef.current && !modesRef.current?.alt ? 'all' : null)
     }
     const onScroll = term.onScroll(scrolled)
+    // One line's height as drawn now.
+    const lineHeight = () => (term.element?.querySelector('.xterm-screen')?.getBoundingClientRect().height || 0) / term.rows
+    // A full-screen app that takes the mouse (Claude Code's fullscreen view) keeps its history
+    // itself and scrolls it as the wheel turns, as it would in a terminal app: the wheel goes to it
+    // (each line of the wheel's turn one report, sent together every 50 ms). One that doesn't:
+    // there's nothing here to scroll, and that's said.
+    let wheelQ = 0
+    let wheelRest = 0
+    let wheelT = null
+    const wheelTo = (n) => {
+      wheelQ += n
+      if (wheelT) return
+      wheelT = setTimeout(() => {
+        wheelT = null
+        const q = Math.max(-60, Math.min(60, wheelQ))
+        wheelQ = 0
+        if (q) send([{ keys: Array(Math.abs(q)).fill(q < 0 ? 'wheelup' : 'wheeldown') }])
+      }, 50)
+    }
+    const toApp = () => !!(modesRef.current?.alt && modesRef.current.mouse)
+    const onWheel = (e) => {
+      if (toApp()) {
+        e.preventDefault()
+        e.stopPropagation() // not xterm's own scrolling of what's drawn here
+        const h = lineHeight() || 16
+        wheelRest += e.deltaMode === 1 ? e.deltaY : e.deltaMode === 2 ? e.deltaY * term.rows : e.deltaY / h
+        const n = Math.trunc(wheelRest)
+        if (n) { wheelRest -= n; wheelTo(Math.max(-5, Math.min(5, n))) }
+        return
+      }
+      const b = term.buffer.active
+      // herdr doesn't say: no scrollback at all means a full-screen view.
+      const alt = modesRef.current ? modesRef.current.alt : b.baseY === 0
+      if (!shell && e.deltaY < 0 && alt && b.viewportY === 0) setNoHistory(true)
+    }
+    host.addEventListener('wheel', onWheel, { capture: true, passive: false })
+    // A finger scrolls it too (xterm.js 6 doesn't), or the app's own history, as the wheel does
+    // (a report for every three lines the finger moves, as the app scrolls three at a time).
+    let fingerRest = 0
+    const untouch = touchScroll(host, {
+      lineHeight,
+      scroll: (n) => {
+        if (!toApp()) { term.scrollLines(n); return }
+        fingerRest += n
+        const r = Math.trunc(fingerRest / 3)
+        if (r) { fingerRest -= r * 3; wheelTo(r) }
+      },
+    })
     const ta = term.textarea
     const onFocus = () => setFocused(true)
     const onBlur = () => setFocused(false)
@@ -262,6 +349,8 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
     return () => {
       sub.dispose(); onScroll.dispose(); ro.disconnect(); mo.disconnect(); mq.removeEventListener('change', applyTheme)
       host.removeEventListener('bridge-type', onType)
+      host.removeEventListener('wheel', onWheel, { capture: true })
+      untouch(); clearTimeout(wheelT); clearTimeout(pauseRef.current)
       ta?.removeEventListener('focus', onFocus); ta?.removeEventListener('blur', onBlur)
       finder.detach()
       disposeTerm(term); termRef.current = null; lastRef.current = ''
@@ -275,17 +364,23 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
     kick.current?.()
   }
 
-  // keepAt: the buffer's length before, when reading further back: stay on the line you were at.
-  const paint = (ansi, keepAt = null) => {
+  // history: what's read in goes further back, while you're reading: stay on the lines you're
+  // reading, found again in it (what the agent printed meanwhile goes in below them).
+  const paint = (ansi, { history = false } = {}) => {
     const term = termRef.current
     if (!term) return
     pendingRef.current = null
-    lastRef.current = ansi
     paintingRef.current = true
-    // Find's current match, found again once it's drawn (the lines read further back go in above).
-    const mark = finder.mark()
-    const before = term.buffer.active.length
-    term.reset()
+    // Find's current match, found again once it's drawn (the lines read further back go in above),
+    // and the lines you're reading: both taken just before the new lines go in, in the same turn,
+    // so a page you scrolled meanwhile counts.
+    let mark = null
+    let keep = null
+    term.write('', () => {
+      mark = finder.mark()
+      const b = term.buffer.active
+      keep = history && b.viewportY < b.baseY - 1 ? { at: b.viewportY, len: b.length, text: rowsText(b, b.viewportY, Math.min(term.rows, 12)) } : null
+    })
     // The agent's screen is often taller than what it drew (a short prompt at the top of a tall
     // terminal); drop the blank rows below, so the view doesn't scroll down to empty space.
     // Claude also pads the space between its output and its input box with empty rows; on a view
@@ -294,15 +389,36 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
     // eslint-disable-next-line no-control-regex
     const blank = /^(?:\x1b\[[0-9;?]*[A-Za-z]|[ \t\r])*$/
     // Rows end in CRLF (herdr, the built-in runtime); a bare LF would leave each row where the last ended.
-    const lines = ansi.split('\n').map((l) => l.replace(/\r$/, '')).filter((l, i, all) => !(blank.test(l) && i > 0 && blank.test(all[i - 1]) && blank.test(all[i + 1] ?? '')))
+    const raw = ansi.split('\n')
+    const lines = raw.map((l) => l.replace(/\r$/, '')).filter((l, i, all) => !(blank.test(l) && i > 0 && blank.test(all[i - 1]) && blank.test(all[i + 1] ?? '')))
+    // The reset goes in with the lines (ESC c, as term.reset() does), so no frame shows the
+    // terminal empty or half drawn: what's on screen changes once, when it's all in.
     // eslint-disable-next-line no-control-regex
-    term.write(lines.join('\r\n').replace(/(?:\r?\n(?:\x1b\[[0-9;?]*[A-Za-z]|[ \t])*)+$/, ''), () => {
-      if (keepAt != null) term.scrollToLine(Math.max(0, term.buffer.active.length - keepAt))
-      else term.scrollToBottom()
-      finder.restore(mark, keepAt != null ? term.buffer.active.length - before : 0)
+    term.write(`\x1bc${lines.join('\r\n').replace(/(?:\r?\n(?:\x1b\[[0-9;?]*[A-Za-z]|[ \t])*)+$/, '')}`, () => {
+      let moved = 0
+      if (keep) {
+        const at = findRows(term.buffer.active, keep)
+        term.scrollToLine(at)
+        moved = at - keep.at
+      } else term.scrollToBottom()
+      finder.restore(mark, moved)
+      // All the runtime keeps is in when a read further back came in, or a light read wasn't full.
+      allRef.current = history || raw.length < LIVE_LINES
       ;(shell ? shellCursor : placeCursor)(term)
       paintingRef.current = false
     })
+  }
+
+  // What was read further back, drawn now, the view where you were reading, the latest below it.
+  const drawHistory = () => {
+    const g = growRef.current
+    clearTimeout(pauseRef.current)
+    if (!termRef.current || g?.ansi == null) return
+    growRef.current = null
+    lastRef.current = g.live
+    setHeld(false)
+    setMore(null)
+    paint(g.ansi, { history: true })
   }
 
   // Asked to take the keyboard (e.g. after a slash command opened a picker in the agent).
@@ -311,8 +427,10 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
   useEffect(() => {
     lastRef.current = ''
     pendingRef.current = null
-    wantRef.current = LIVE_LINES
     growRef.current = null
+    clearTimeout(pauseRef.current)
+    allRef.current = false
+    modesRef.current = null
     setHeld(false)
     setMore(null)
     termRef.current?.reset()
@@ -330,30 +448,38 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
       clearTimeout(t)
       if (reading) { again = true; return }
       reading = true
+      let atBottom = true
       try {
-        const want = wantRef.current
-        const { ansi, cols } = await api(`/agents/${encodeURIComponent(paneId)}/screen?lines=${want}`)
+        // The last lines (light, read often), or everything kept when you've scrolled near the top.
+        const grow = growRef.current?.ansi == null ? growRef.current : null
+        const r = await api(`/agents/${encodeURIComponent(paneId)}/screen?lines=${grow ? grow.want : LIVE_LINES}`)
+        const { ansi, cols } = r
+        modesRef.current = typeof r.alt === 'boolean' ? { alt: r.alt, mouse: !!r.mouse } : null
         if (cols && cols !== colsRef.current) { colsRef.current = cols; layout(); lastRef.current = '' }
         const term = termRef.current
-        fullRef.current = ansi.split('\n').length >= want
-        const grow = growRef.current
-        if (!stop && term && grow && want >= grow.want) {
-          // Further back, as asked: shown now, where you were reading.
-          growRef.current = null
-          setMore(fullRef.current ? null : 'all')
-          paint(ansi, grow.len)
-        } else if (!stop && term && !grow && ansi !== lastRef.current) {
+        if (!stop && term) {
           const b = term.buffer.active
-          const atBottom = b.viewportY >= b.baseY - 1
-          // Reading back through history: hold still and offer a jump to the latest.
-          if (!atBottom && lastRef.current) { pendingRef.current = ansi; setHeld(true) } else paint(ansi)
+          atBottom = b.viewportY >= b.baseY - 1
+          // What the light read would have been: its last lines.
+          const live = grow ? ansi.split('\n').slice(-LIVE_LINES).join('\n') : ansi
+          if (grow && growRef.current === grow) {
+            // Further back, as asked: drawn now, or at the first pause while you're scrolling.
+            grow.ansi = ansi
+            grow.live = live
+            if (Date.now() - scrolledAt.current < PAUSE && b.viewportY > term.rows * 2) pauseRef.current = setTimeout(drawHistory, PAUSE)
+            else drawHistory()
+          } else if (live !== lastRef.current) {
+            // Reading back through history: hold still and offer a jump to the latest.
+            if (!atBottom && lastRef.current) { pendingRef.current = live; setHeld(true) } else paint(live)
+            lastRef.current = live
+          }
         }
       } catch { /* pane gone; the fleet view will update */ }
       reading = false
       if (stop) return
       if (again) { again = false; t = setTimeout(tick, 0); return }
-      // Reading back through history: less often (each read is a longer one then).
-      t = setTimeout(tick, document.hidden ? 4000 : Date.now() < fastUntil.current ? 150 : heldRef.current || wantRef.current > LIVE_LINES ? 3000 : 1000)
+      // Reading back through history: less often (what's new waits for you below).
+      t = setTimeout(tick, document.hidden ? 4000 : Date.now() < fastUntil.current ? 150 : heldRef.current || !atBottom ? 3000 : 1000)
     }
     kick.current = () => { clearTimeout(t); t = setTimeout(tick, 60) }
     tick()
@@ -381,8 +507,7 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
   return (
     <div className={`live-term ${focused ? 'focused' : ''}`} data-find="terminal" ref={wrapRef}>
       <FindBar host={wrapRef} finder={finder} label={t('Find in this terminal')} />
-      <div className="terminal-host" ref={hostRef} onClick={onClick}
-        onWheel={(e) => { const b = termRef.current?.buffer.active; if (!shell && e.deltaY < 0 && b && b.baseY === 0) setNoHistory(true) }} />
+      <div className="terminal-host" ref={hostRef} onClick={onClick} />
       {held && (
         <button className="term-jump" onClick={() => { termRef.current?.scrollToBottom(); if (pendingRef.current != null) paint(pendingRef.current); setHeld(false) }}>
           <Icon name="chevron" size={11} className="rot90" /> New output · jump to latest

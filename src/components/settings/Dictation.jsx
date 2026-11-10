@@ -3,7 +3,7 @@ import { api, refetch } from '../../api.js'
 import { RECENT, ANY } from '../dictations/shared.jsx'
 import Icon from '../Icon.jsx'
 import { useSettings, SaveNote } from './General.jsx'
-import PermissionFix, { UpdateApp } from '../PermissionFix.jsx'
+import PermissionFix, { UpdateApp, OpenSettings } from '../PermissionFix.jsx'
 import { keyLabel, keyFromEvent } from '../../../shared/dictation/keys.js'
 import { pause, keysPlatform, dictationKey } from '../../dictation/controller.js'
 import { TidyNeeds } from '../../dictation/Tidy.jsx'
@@ -143,7 +143,7 @@ export default function Dictation() {
             </PermissionFix>
           )}
           {d.key === 'Fn' && FN_DOES[status?.fnUsage] && (
-            <p className="st-note"><Icon name="info" size={13} /> {t('macOS also {does} when 🌐 is pressed. In System Settings › Keyboard, set "Press 🌐 key to" to Do Nothing.', { does: t(FN_DOES[status.fnUsage]) })} <button type="button" className="link-btn" onClick={() => api('/fix/settings', { method: 'POST', body: { pane: 'keyboard' } }).catch(() => {})}>{t('Open Keyboard settings')}</button></p>
+            <p className="st-note"><Icon name="info" size={13} /> {t('macOS also {does} when 🌐 is pressed. In System Settings › Keyboard, set "Press 🌐 key to" to Do Nothing.', { does: t(FN_DOES[status.fnUsage]) })} <OpenSettings pane="keyboard" className="link-btn">{t('Open Keyboard settings')}</OpenSettings></p>
           )}
           {d.key === 'RightAlt' && plat !== 'darwin' && status?.lone && <p className="muted small">{t('Right Alt is AltGr on many keyboards: a character typed with it cancels dictation.')}</p>}
           {status?.loneFallback && <p className="st-note"><Icon name="info" size={13} /> {t('{key} can\'t be heard from other apps on this computer, so {other} works there instead.', { key: keyLabel(status.loneFallback, plat), other: keyLabel(dictationKey({}), plat) })}</p>}

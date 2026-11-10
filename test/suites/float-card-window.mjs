@@ -60,7 +60,8 @@ try {
   // The meeting as it records: lines said, AI Assist's suggestion, the call's sound, a section.
   await ctx.route(new RegExp(`/api/meetings/${ID}(\\?|$)`), (r) => r.fulfill({ json: {
     id: ID, title: TITLE, status: 'recording', call: 'on', me: 'Sam', assist: true, levels: { you: 0.4, them: 0.6 },
-    assistItems: [{ id: 'a1', t: 300, kind: 'question', text: 'Ask who signs off on the pilot budget, and by when they need the numbers from finance.', why: 'Just said', state: 'new' }],
+    // An Idea, as the owner saw: it took the Ideas list's .idea, laid out with its words 18 pixels wide.
+    assistItems: [{ id: 'a1', t: 300, kind: 'idea', text: 'Ask each integration lead to name the one dependency that would slip their date, and who owns unblocking it.', why: 'Just said', state: 'new' }],
     transcript: [
       ...Array.from({ length: 9 }, (_, i) => ({ src: i % 2 ? 'them' : 'you', t0: 600 + i * 10, t1: 606 + i * 10, text: `Earlier line ${i + 1}: where the pilot stands, and who's waiting on what.` })),
       { src: 'you', t0: 700, t1: 706, text: "Let's go through the rollout plan for the second quarter first." },

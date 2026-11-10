@@ -252,7 +252,7 @@ function RoutineRow({ r, editing, onChanged, onOpenAgent, setFlash, beta, comput
           </>
         ) : (
           <div className="r-meta">
-            {r.note && <span className={`r-note ${r.state}`}>{r.note}</span>}
+            {r.note && <span className={`r-note s-${r.state}`}>{r.note}</span>}
             {r.last ? <span title={`${exact(r.last.at)} · ${r.last.source}`}>{t('Last {time}', { time: fmtRelative(r.last.at) })}</span> : <span>{t('No run found')}</span>}
             {launched && <span title={exact(r.lastLaunch.at)}>{t('Started {time}', { time: fmtRelative(r.lastLaunch.at) })}</span>}
             <span>{everyLabel(r.every)}</span>

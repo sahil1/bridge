@@ -1,5 +1,6 @@
 import { createContext, Fragment, useContext, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
+import { copyText } from '../copy.js'
 import { Terminal, FilesView, ChangesView, PreviewView } from '../lazy.jsx'
 import Subagents from './Subagents.jsx'
 import ChiefTasks from './ChiefTasks.jsx'
@@ -512,7 +513,7 @@ function Chat({ agent, going = [], queued = [], delivered = [], outbox = [], que
           </div>
         ))}
         {shownOutbox.map((o) => (
-          <div key={o.id} className={`msg user outbox ${o.state}`}>
+          <div key={o.id} className={`msg user outbox s-${o.state}`}>
             <div className="msg-text">{o.kind === 'answer' ? t('Answer: {text}', { text: o.text }) : <UserText text={o.text} paneId={agent.paneId} />}</div>
             <div className="msg-time">
               <Icon name={o.state === 'waiting' ? 'clock' : o.state === 'delivered' ? 'check' : 'x'} size={11} /> {o.status}
@@ -647,6 +648,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   const heldIds = [...queued, ...delivered].map((q) => q.cid).filter(Boolean).join(' ')
   useEffect(() => { if (heldIds) landed(new Set(heldIds.split(' '))) }, [heldIds])
   const [flash, setFlash] = useState(null)
+  const [opening, setOpening] = useState(false) // Open in your terminal app, waiting to hear it did
   const [atLimit, setAtLimit] = useState(false) // stopped at its usage limit (its chat says, from its log)
   const [btw, setBtw] = useState(null) // a /btw side question and its answer
   // Editing a sent message: it goes into the message box; sending it rewinds the agent to just
@@ -830,7 +832,14 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
       setTimeout(() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: r.paneId } })), 1200)
     } catch (e) { setFlash(e.message) }
   }
-  const inTerminal = async () => { try { setFlash(t('Opened in {app}. Ctrl+] detaches there.', { app: (await openInTerminal(agent.paneId)).app })) } catch (e) { setFlash(e.message) } }
+  // Said once the agent shows in the terminal app (the server waits to hear from it), or why not.
+  const inTerminal = async () => {
+    if (opening) return
+    setOpening(true)
+    setFlash(t('Opening in your terminal app…'))
+    try { setFlash(t('Opened in {app}. Ctrl+] detaches there.', { app: (await openInTerminal(agent.paneId)).app })) } catch (e) { setFlash(e.message) }
+    setOpening(false)
+  }
   // nudge: it stopped at its usage limit, so it's told to carry on once it's back.
   const continueOn = async (x, { nudge = false } = {}) => {
     if (!window.confirm(`${t('Continue this conversation on {name}?', { name: nameOf(x) })}\n\n${nudge ? t('The agent stops and starts again signed in as {name}, with the same conversation, and is told to carry on from where it stopped.', { name: nameOf(x) }) : t('The agent stops and starts again signed in as {name}, with the same conversation.', { name: nameOf(x) })}`)) return
@@ -865,8 +874,8 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
       <span className="sub-where">{where}</span>
       {/* The chief's and the chats' folders are Bridge AI's own: nothing to browse there. */}
       {!agent.chief && !agent.plainChat && (
-        <button className="path-chip" onClick={() => setView('files')} title={`${tildePath(agent.cwd)}\n${t('Click to browse; right-click to copy')}`}
-          onContextMenu={(e) => { e.preventDefault(); navigator.clipboard?.writeText(agent.cwd); setFlash(t('Path copied')) }}>
+        <button className="path-chip" onClick={() => setView('files')} title={`${tildePath(agent.cwd)}\n${t('Click to browse; right-click to copy')}`} aria-current={view === 'files' ? 'page' : undefined}
+          onContextMenu={async (e) => { e.preventDefault(); setFlash(await copyText(agent.cwd) ? t('Path copied') : t('Couldn\'t copy it here: {path}', { path: agent.cwd })) }}>
           <Icon name="folder" size={10} /> <span>{tildePath(agent.cwd)}</span>
           {g && <span className="pc-git"><Icon name="branch" size={10} />{g.branch}{g.dirty > 0 && <b>+{g.dirty}</b>}</span>}
         </button>
@@ -894,7 +903,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
           <button className="win-btn" title={t('Fork: a copy of this conversation in a new tab, to try another way (this one stays as it is)')} aria-label={t('Fork this conversation')} onClick={fork}><Icon name="split" size={14} /></button>
         )}
         {!minimized && variant !== 'mobile' && (
-          <button className="win-btn" onClick={inTerminal} title={t('Open in your terminal app')} aria-label={t('Open in your terminal app')}><Icon name="terminal" size={14} /></button>
+          <button className="win-btn" onClick={inTerminal} disabled={opening} aria-busy={opening} title={t('Open in your terminal app')} aria-label={t('Open in your terminal app')}><Icon name="terminal" size={14} /></button>
         )}
         {onPopOut && !minimized && (
           <button className="win-btn" onClick={onPopOut} title={t('Open in its own window (bring it back from there)')} aria-label={t('Open in its own window')}><Icon name="popout" size={14} /></button>

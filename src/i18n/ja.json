@@ -2078,6 +2078,7 @@
   "Open {path} in Files": "{path} を「ファイル」で開く",
   "Opened in {app}. Ctrl+] detaches there.": "{app} で開きました。そこで Ctrl+] を押すと切り離せます。",
   "Opened {when}": "{when}に開いた",
+  "Opening in your terminal app…": "ターミナルアプリで開いています…",
   "Opening the whiteboard…": "ホワイトボードを開いています…",
   "Opening {name}…": "{name} を開いています…",
   "Opening…": "開いています…",

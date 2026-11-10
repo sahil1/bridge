@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import Icon from '../Icon.jsx'
+import CopyButton from '../CopyButton.jsx'
 import { api, settingsChanged } from '../../api.js'
 import { SaveNote } from './General.jsx'
 import { useBusy } from '../../busy.js'
@@ -29,7 +29,7 @@ export default function ConfigFile() {
     <div className="st-sections" data-setting="config-file">
       <div className="st-row between">
         <code className="st-path" title={s.file}>{s.file}</code>
-        <button type="button" className="ghost-btn" onClick={() => navigator.clipboard?.writeText(s.file).catch(() => {})}><Icon name="copy" size={12} /> Copy path</button>
+        <CopyButton text={s.file} label="Copy path" />
       </div>
       <p className="muted small" title={t('Only what you set goes here; everything else comes from the defaults. Most changes apply right away; {keys} apply after a restart.', { keys: s.restartKeys.join(', ') })}>{t("Only what you set; the rest comes from the defaults. API keys don't belong here: add them under Model Providers.")}</p>
       <textarea className="st-code" value={text} onChange={(e) => { setText(e.target.value); setNote(null) }} spellCheck={false} rows={16} aria-label="config.json" />

@@ -107,7 +107,9 @@ export default function Mail() {
           <span>{t('Working days')}</span>
           {order.map((d) => {
             const on = sched.days.includes(d)
-            return <button key={d} type="button" className={`fchip ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => { const days = on ? sched.days.filter((x) => x !== d) : [...sched.days, d]; if (days.length) put({ days: days.sort() }) }}>{day(d)}</button>
+            // The last day on stays on, and says why (its click did nothing).
+            const last = on && sched.days.length === 1
+            return <button key={d} type="button" className={`fchip ${on ? 'on' : ''}`} aria-pressed={on} disabled={last} title={last ? t('At least one working day stays on') : undefined} onClick={() => { const days = on ? sched.days.filter((x) => x !== d) : [...sched.days, d]; if (days.length) put({ days: days.sort() }) }}>{day(d)}</button>
           })}
         </div>
         <div className="st-row">

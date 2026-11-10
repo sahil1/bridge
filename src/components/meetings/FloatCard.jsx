@@ -230,7 +230,7 @@ export default function FloatCard() {
           {!onHover && <button type="button" className="fc-x" onClick={() => setHover((v) => !v)} aria-expanded={open} aria-label={open ? t('Show less') : t('Show more')} title={open ? t('Show less') : t('Show more')}><Icon name={open ? 'up' : 'down'} size={13} /></button>}
         </div>
         {tip && (
-          <div className={`fc-tip ${tip.kind}`} role="status">
+          <div className={`fc-tip k-${tip.kind}`} role="status">
             <span className="fc-tip-kind"><Icon name="wand" size={11} /> {t(KIND[tip.kind] || KIND.idea)}</span>
             <span className="fc-tip-text" title={tip.why || ''}>{tip.text}</span>
             <span className="fc-tip-acts">
@@ -256,9 +256,9 @@ export default function FloatCard() {
             <div className="fc-live">
               {info && <p className="fc-info" title={info}>{info}</p>}
               <div className="fc-said" ref={saidBox}>
-                {recent.length ? recent.map((l) => <p key={`${l.src}:${l.t0}`} className={`fc-said-line ${l.src}`}><b>{l.name || (l.me ? m?.me || t('You') : l.voice ? t('Speaker {n}', { n: l.voice }) : l.src === 'them' ? t('Them') : m?.me || t('You'))}</b> {l.text}</p>) : !m?.partial && <p className="fc-said-none">{paused ? t('Paused.') : t('Listening…')}</p>}
+                {recent.length ? recent.map((l) => <p key={`${l.src}:${l.t0}`} className={`fc-said-line src-${l.src}`}><b>{l.name || (l.me ? m?.me || t('You') : l.voice ? t('Speaker {n}', { n: l.voice }) : l.src === 'them' ? t('Them') : m?.me || t('You'))}</b> {l.text}</p>) : !m?.partial && <p className="fc-said-none">{paused ? t('Paused.') : t('Listening…')}</p>}
                 {/* Live words: what someone is still saying, before its line is in. */}
-                {!paused && ['you', 'them'].filter((src) => m?.partial?.[src]?.text).map((src) => <p key={`so-far-${src}`} className={`fc-said-line ${src} so-far`}><b>{src === 'them' ? t('Them') : m?.me || t('You')}</b> {m.partial[src].cut ? '… ' : ''}{m.partial[src].text}</p>)}
+                {!paused && ['you', 'them'].filter((src) => m?.partial?.[src]?.text).map((src) => <p key={`so-far-${src}`} className={`fc-said-line src-${src} so-far`}><b>{src === 'them' ? t('Them') : m?.me || t('You')}</b> {m.partial[src].cut ? '… ' : ''}{m.partial[src].text}</p>)}
               </div>
               {/* How loud you and the call are now, and who's talked how much of everything said. */}
               <div className="fc-talk" title={t("Who's talked, of everything said so far")}>
@@ -310,7 +310,7 @@ export default function FloatCard() {
         </div>
         <div className="fc-acts fc-end">
           {/* Not now always works, even while Take notes is still starting. */}
-          <button type="button" className="btn small" onClick={() => { setErr(null); api('/calls/dismiss', { method: 'POST' }).catch(() => {}).finally(refresh) }}>{t('Not now')}</button>
+          <button type="button" className="btn small" onClick={() => { setErr(null); api('/calls/dismiss', { method: 'POST' }).catch((e) => setErr(e.message)).finally(refresh) }}>{t('Not now')}</button>
           <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => app().floatStart?.({ app: c.prompt.app }))} title={t('Your mic and the call, transcribed as you go.')}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Take notes')}</button>
         </div>
       </>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
+import CopyButton from './CopyButton.jsx'
 import { api } from '../api.js'
 import { appVersion, newer } from '../permissions.js'
 import { t } from '../i18n/index.js'
@@ -84,7 +85,7 @@ export default function UpdateChip({ u, onDetails, onDone, row = false }) {
             ? <p className="st-note ok small"><Icon name="refresh" size={12} className="spin" /> {t('Updating. Bridge AI closes and reopens by itself in a few seconds; your agents carry on.')}</p>
             : u.how === 'app' || u.forApp
               ? <div className="update-acts"><button type="button" className="btn small primary" onClick={install}><Icon name="download" size={12} /> {u.failed ? t('Try again') : t('Update now')}</button><a className="small" href={u.url} target="_blank" rel="noreferrer">{t("What's new")}</a></div>
-              : <div className="update-acts col"><p className="muted small">{u.how === 'source' ? t('Update your clone in a terminal:') : t('Update from a terminal:')}</p><code className="small">{u.command}</code><div className="update-acts"><button type="button" className="ghost-btn" onClick={() => navigator.clipboard?.writeText(u.command).catch(() => {})}><Icon name="copy" size={12} /> {t('Copy')}</button><a className="small" href={u.url} target="_blank" rel="noreferrer">{t("What's new")}</a></div></div>}
+              : <div className="update-acts col"><p className="muted small">{u.how === 'source' ? t('Update your clone in a terminal:') : t('Update from a terminal:')}</p><code className="small">{u.command}</code><div className="update-acts"><CopyButton text={u.command} /><a className="small" href={u.url} target="_blank" rel="noreferrer">{t("What's new")}</a></div></div>}
           {state?.error && <p className="error-text small">{state.error}</p>}
           <button type="button" className="link-btn small" onClick={() => { setOpen(false); onDetails() }}>{t('Update settings')}</button>
         </div>

@@ -60,7 +60,7 @@ export function Brief({ onOpenAgent, onShowCard }) {
             {l.routines?.length > 0 && onShowCard && (
               <div className="brief-items">
                 {l.routines.map((r) => (
-                  <button key={r.id} className={`chip r-chip ${r.state}`} onClick={() => onShowCard('repeat')}><Icon name="repeat" size={11} /> {r.name}</button>
+                  <button key={r.id} className={`chip r-chip s-${r.state}`} onClick={() => onShowCard('repeat')}><Icon name="repeat" size={11} /> {r.name}</button>
                 ))}
               </div>
             )}

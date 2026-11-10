@@ -227,7 +227,7 @@ function Item({ x, seen, dicts, onSave, onRemove }) {
           {x.note && <span className="muted small mt-mem-note">{x.note}</span>}
         </span>
         <span className="mm-tags">
-          <span className={`mm-kind ${x.kind}${x.guessed ? ' guess' : ''}`} title={x.guessed ? t('A guess, from its note and your meetings. Edit it to say what it is.') : undefined}>{t(KIND[x.kind])}</span>
+          <span className={`mm-kind k-${x.kind}${x.guessed ? ' guess' : ''}`} title={x.guessed ? t('A guess, from its note and your meetings. Edit it to say what it is.') : undefined}>{t(KIND[x.kind])}</span>
           <span className={`mt-mem-src ${x.source}`}>{x.source === 'you' ? t('yours') : t('learned')}</span>
           {from && <button type="button" className="ghost-btn mm-from small" aria-expanded={shown} onClick={() => setShown((v) => !v)}>{from}</button>}
         </span>

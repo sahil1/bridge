@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
+import CopyButton from '../CopyButton.jsx'
 import { api, usePoll, viaRelay, relayComputers } from '../../api.js'
 import Relay, { KeepAwake } from './Relay.jsx'
 import { MachinesSettings } from '../Machines.jsx'
@@ -91,7 +92,7 @@ function PhoneSetup({ quiet, picked }) {
                 <li><b>Open it from the Home Screen</b> and turn on notifications below (Settings › Devices, on the phone).</li>
               </ol>
               <div className="st-row">
-                <button type="button" className="ghost-btn" onClick={() => navigator.clipboard?.writeText(st.url).catch(() => {})}><Icon name="copy" size={12} /> Copy link</button>
+                <CopyButton text={st.url} label="Copy link" />
                 <button type="button" className="ghost-btn" disabled={busy} onClick={() => toggle(false)}>Turn off phone access</button>
               </div>
               <KeepAwake />
@@ -174,12 +175,13 @@ function DesktopNotes({ onMsg }) {
 function WhatToSend() {
   const { s, save, note } = useSettings()
   const fleet = usePoll('/fleet', 15000)
+  const [err, setErr] = useState(null) // why Unmute didn't take
   if (!s) return null
   const n = s.effective.notify || {}
   const set = (k, v) => save({ notify: { ...n, [k]: v } })
   const below = n.quotaBelow ?? 15
   const muted = (fleet.data?.agents || []).filter((a) => a.muted)
-  const unmute = async (a) => { await api(`/agents/${encodeURIComponent(a.paneId)}/mute`, { method: 'POST', body: { muted: false } }).catch(() => {}); fleet.refresh() }
+  const unmute = async (a) => { setErr(null); await api(`/agents/${encodeURIComponent(a.paneId)}/mute`, { method: 'POST', body: { muted: false } }).catch((e) => setErr(e.message)); fleet.refresh() }
   return (
     <section className="st-sec" data-setting="notify">
       <h4>What to notify about</h4>
@@ -209,6 +211,7 @@ function WhatToSend() {
                   </li>
                 ))}
               </ul>
+              {err && <p className="st-note bad"><Icon name="alert" size={13} /> {err}</p>}
             </>
           )}
         </section>
@@ -219,10 +222,11 @@ function WhatToSend() {
 
 function Devices() {
   const [list, setList] = useState(null)
+  const [err, setErr] = useState(null) // why Remove didn't take
   const load = () => api('/push/devices').then(setList).catch(() => setList([]))
   useEffect(() => { load() }, [])
   if (!list?.length) return null
-  const remove = async (id) => { await api('/push/unsubscribe', { method: 'POST', body: { id } }).catch(() => {}); load() }
+  const remove = async (id) => { setErr(null); await api('/push/unsubscribe', { method: 'POST', body: { id } }).catch((e) => setErr(e.message)); load() }
   return (
     <Advanced order={40}>
     <section className="st-sec" data-setting="notify-devices">
@@ -236,6 +240,7 @@ function Devices() {
           </li>
         ))}
       </ul>
+      {err && <p className="st-note bad"><Icon name="alert" size={13} /> {err}</p>}
     </section>
     </Advanced>
   )

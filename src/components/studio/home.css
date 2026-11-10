@@ -65,12 +65,12 @@
 .sd-files-row.wait span { display: inline-flex; align-items: center; gap: 6px; }
 .sd-file-name { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 6px 4px; border-radius: 8px; color: var(--ink); text-align: left; }
 .sd-file-ic { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--pane-2); color: var(--ink-2); }
-.sd-file-ic.doc { background: color-mix(in srgb, #2b6cde 13%, var(--pane)); color: #2b6cde; }
-.sd-file-ic.sheet { background: color-mix(in srgb, #1e8e3e 13%, var(--pane)); color: #1e8e3e; }
-.sd-file-ic.deck { background: color-mix(in srgb, #e8710a 14%, var(--pane)); color: #d9650a; }
-.sd-file-ic.pdf { background: color-mix(in srgb, #d93025 12%, var(--pane)); color: #d93025; }
-.sd-file-ic.page { background: color-mix(in srgb, #7c4dff 12%, var(--pane)); color: #7c4dff; }
-.sd-file-ic.board { background: color-mix(in srgb, #0f9d8f 13%, var(--pane)); color: #0f9d8f; }
+.sd-file-ic.k-doc { background: color-mix(in srgb, #2b6cde 13%, var(--pane)); color: #2b6cde; }
+.sd-file-ic.k-sheet { background: color-mix(in srgb, #1e8e3e 13%, var(--pane)); color: #1e8e3e; }
+.sd-file-ic.k-deck { background: color-mix(in srgb, #e8710a 14%, var(--pane)); color: #d9650a; }
+.sd-file-ic.k-pdf { background: color-mix(in srgb, #d93025 12%, var(--pane)); color: #d93025; }
+.sd-file-ic.k-page { background: color-mix(in srgb, #7c4dff 12%, var(--pane)); color: #7c4dff; }
+.sd-file-ic.k-board { background: color-mix(in srgb, #0f9d8f 13%, var(--pane)); color: #0f9d8f; }
 .sd-file-text { display: grid; min-width: 0; }
 .sd-file-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; font-size: 13px; }
 .sd-file-text small { font-size: 11.5px; }

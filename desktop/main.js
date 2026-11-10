@@ -136,9 +136,14 @@ ipc.handle('bridge:capture', async (e, r) => {
   return (await w.webContents.capturePage(rect)).toPNG().toString('base64')
 })
 // Links out of the app open in their own apps, but only web, mail and Mail's message links: file:,
-// smb: and other schemes can mount a network share or start a program.
-const OUTSIDE = new Set(['http:', 'https:', 'mailto:', 'message:'])
-const openOutside = (u) => { try { if (OUTSIDE.has(new URL(u).protocol)) shell.openExternal(u) } catch { /* not a link */ } }
+// smb: and other schemes can mount a network share or start a program (senders.js OUTSIDE).
+const openOutside = (u) => { try { if (senders.OUTSIDE.has(new URL(u).protocol)) shell.openExternal(u) } catch { /* not a link */ } }
+// A link a page opens in a new window: out of the app as above, and a file the app's server serves
+// (Files' and a picture's Open in a new tab, a chat's attachment) in the browser, which shows it as
+// a tab would; it did nothing here, as only the app's own pages were kept from going out
+// (senders.js opens: from another computer's window, only that computer's). Never in a window of
+// the app's. w: the window it's for.
+const openLink = (w) => ({ url }) => { if (pages.opens(url, w.webContents.getURL())) shell.openExternal(url); return { action: 'deny' } }
 
 // Shown for the second or so while the server starts: the logo and a line of text.
 const LOGO = (() => { for (const f of ['dist/mark.svg', 'public/mark.svg']) { try { return fs.readFileSync(path.join(ROOT, f), 'utf8') } catch { /* next */ } } return '' })()
@@ -169,8 +174,9 @@ async function createWindow() {
   win.on('closed', () => { if (win === self) win = null })
   win.on('session-end', shuttingDown) // Windows: shutting down, restarting or signing out
 
-  // Links to anything but the app open in their own apps (Teams, Outlook, Mail, the browser).
-  win.webContents.setWindowOpenHandler(({ url }) => { if (!isLocal(url)) openOutside(url); return { action: 'deny' } })
+  // Links to anything but the app open in their own apps (Teams, Outlook, Mail, the browser), and a
+  // file the app shows, opened in a new tab, in the browser.
+  win.webContents.setWindowOpenHandler(openLink(win))
   win.webContents.on('will-navigate', (e, url) => { if (!isLocal(url) && !url.startsWith('data:')) { e.preventDefault(); openOutside(url) } })
   // Its title as the page says it (what waits on you, and which computer it is, for the Dock's and
   // the Window menu's list of windows); the count also goes on the Dock's badge.
@@ -250,7 +256,7 @@ ipc.handle('bridge:popout', (e, { paneId, title, machine } = {}) => {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true },
   })
   w.once('ready-to-show', () => w.show())
-  w.webContents.setWindowOpenHandler(({ url }) => { if (!isLocal(url)) openOutside(url); return { action: 'deny' } })
+  w.webContents.setWindowOpenHandler(openLink(w))
   w.webContents.on('will-navigate', (ev, url) => { if (!isLocal(url)) { ev.preventDefault(); openOutside(url) } })
   w.loadURL(on ? pages.machineUrl(on, `/?window=${encodeURIComponent(paneId.slice(on.length + 1))}`) : `${URL_BASE}/?window=${encodeURIComponent(paneId)}`)
   pops.set(paneId, w)
@@ -287,7 +293,7 @@ ipc.handle('bridge:open-machine', (e, { id = null, agent = null, pass = '' } = {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true },
   })
   w.once('ready-to-show', () => w.show())
-  w.webContents.setWindowOpenHandler(({ url }) => { if (!isLocal(url)) openOutside(url); return { action: 'deny' } })
+  w.webContents.setWindowOpenHandler(openLink(w))
   w.webContents.on('will-navigate', (ev, url) => { if (!isLocal(url)) { ev.preventDefault(); openOutside(url) } })
   if (was?.maximized) w.maximize()
   for (const ev of ['resize', 'move', 'close']) w.on(ev, () => saveDeviceBounds(key, w))
@@ -839,7 +845,7 @@ function showFloat() {
   float.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   float.setContentProtection(floatShare.hidden())
   // Join and an invite's files, from a meeting's prep: in their own apps, as from the main window.
-  float.webContents.setWindowOpenHandler(({ url }) => { if (!isLocal(url)) openOutside(url); return { action: 'deny' } })
+  float.webContents.setWindowOpenHandler(openLink(float))
   float.webContents.on('will-navigate', (e) => e.preventDefault())
   float.on('moved', () => { try { const b = float.getBounds(); fs.writeFileSync(FLOAT_STATE, JSON.stringify({ x: b.x, y: b.y })) } catch { /* read-only */ } })
   floatResize = floatResizer(float, screen)

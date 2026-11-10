@@ -2078,6 +2078,7 @@
   "Open {path} in Files": "Ouvrir {path} dans Fichiers",
   "Opened in {app}. Ctrl+] detaches there.": "Ouvert dans {app}. Ctrl+] pour s'en détacher.",
   "Opened {when}": "Ouvert : {when}",
+  "Opening in your terminal app…": "Ouverture dans votre app de terminal…",
   "Opening the whiteboard…": "Ouverture du tableau blanc…",
   "Opening {name}…": "Ouverture de {name}…",
   "Opening…": "Ouverture…",

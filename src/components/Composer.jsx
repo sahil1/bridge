@@ -212,7 +212,7 @@ function SlashMenu({ items, sel, onPick, onHover, title, mention, jumps = [], em
       )}
       {title && <div className="slash-title">{title}</div>}
       {items.map((it, i) => (
-        <button key={it.key} role="option" aria-selected={i === sel} className={`slash-item ${it.kind || ''} ${i === sel ? 'on' : ''}`} onMouseMove={() => onHover(i)} onClick={() => onPick(it)}>
+        <button key={it.key} role="option" aria-selected={i === sel} className={`slash-item${it.kind ? ` k-${it.kind}` : ''} ${i === sel ? 'on' : ''}`} onMouseMove={() => onHover(i)} onClick={() => onPick(it)}>
           <b>{it.icon && <Icon name={it.icon} size={12} />}{it.label}</b>
           <span className="slash-desc">{it.description}</span>
           {it.badge && <span className="slash-badge">{it.badge}</span>}
@@ -267,7 +267,7 @@ function SavedPrompts({ current, onPick, onClose }) {
               <b>{p.name}</b><span className="muted small">{p.text.replace(/\s+/g, ' ').slice(0, 90)}</span>
             </button>
             <button className="win-btn" onClick={() => setNaming({ id: p.id, name: p.name })} aria-label={t('Rename {name}', { name: p.name })} title={t('Rename')}><Icon name="edit" size={12} /></button>
-            <button className="win-btn" onClick={async () => { if (window.confirm(t('Delete the saved prompt "{name}"?', { name: p.name }))) { await api(`/prompts/${p.id}`, { method: 'DELETE' }).catch(() => {}); load() } }} aria-label={t('Delete {name}', { name: p.name })} title={t('Delete')}><Icon name="trash" size={12} /></button>
+            <button className="win-btn" onClick={async () => { if (window.confirm(t('Delete the saved prompt "{name}"?', { name: p.name }))) { setErr(null); await api(`/prompts/${p.id}`, { method: 'DELETE' }).catch((e) => setErr(t("Couldn't delete it: {error}", { error: e.message }))); load() } }} aria-label={t('Delete {name}', { name: p.name })} title={t('Delete')}><Icon name="trash" size={12} /></button>
           </div>
         ))}
       </div>

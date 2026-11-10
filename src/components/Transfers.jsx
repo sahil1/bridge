@@ -390,7 +390,7 @@ export function PlacesMenu({ x, y, agentName, agentPath, current, places, onPick
     if (!p) return
     try { const r = await api('/places', { method: 'POST', body: { path: p } }); onAdded(r.place); onClose() } catch (e) { setErr(e.message) }
   }
-  const take = async (p) => { await api(`/places/${enc(p.id)}`, { method: 'DELETE' }).catch(() => {}); onAdded(null, p) }
+  const take = async (p) => { setErr(null); try { await api(`/places/${enc(p.id)}`, { method: 'DELETE' }); onAdded(null, p) } catch (e) { setErr(t("Couldn't remove {name}: {error}", { name: p.name || p.path, error: e.message })) } }
   return createPortal(
     <div className="ctx-menu places-menu" ref={ref} role="menu" style={{ left: Math.max(8, Math.min(x, window.innerWidth - 268)), top: y }}>
       <button role="menuitemradio" aria-checked={!current} onClick={() => { onPick(null); onClose() }}><Icon name={!current ? 'check' : 'folder'} size={13} /><span>{agentName}<small className="muted">{agentPath}</small></span></button>

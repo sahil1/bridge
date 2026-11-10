@@ -245,7 +245,7 @@ function Place({ pdf, setup, marks, setMarks, picked, setPicked, onApprove, date
           {marks.map((m) => (
             <li key={m.id} className={`${m.approved ? 'ok' : ''}${picked === m.id ? ' on' : ''}`}>
               <button type="button" className="sd-place-open" onClick={() => pick(m)} aria-current={picked === m.id || undefined}>
-                <span className={`sd-place-ic ${m.kind}`}><Icon name={m.approved ? 'check' : m.kind === 'date' ? 'calendar' : 'signature'} size={12} /></span>
+                <span className={`sd-place-ic k-${m.kind}`}><Icon name={m.approved ? 'check' : m.kind === 'date' ? 'calendar' : 'signature'} size={12} /></span>
                 <span className="sd-place-name"><b>{t(KIND[m.kind])} · {t('page {n}', { n: m.page })}</b><small className="muted">{m.source === 'text' ? t(FROM.text, { label: m.label.length > 34 ? `${m.label.slice(0, 33)}…` : m.label }) : t(FROM[m.source] || FROM.you)}</small></span>
               </button>
               {m.approved
