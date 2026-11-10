@@ -72,7 +72,8 @@ function SignInWait({ kind, paneId, device, onDone, onAgain, onShow }) {
   // A code typed at the agent's prompt, then Enter once it has taken it in.
   const typeCode = async (code) => {
     const at = `/panes/${encodeURIComponent(paneId)}/input`
-    await api(at, { method: 'POST', body: { steps: [{ text: code }] } })
+    // (A code has no spaces or lines: whatever came with it in a paste stays out of the terminal.)
+    await api(at, { method: 'POST', body: { steps: [{ text: String(code).replace(/\s+/g, '') }] } })
     await pause(150)
     await api(at, { method: 'POST', body: { steps: [{ keys: ['enter'] }] } })
     setSent(true)

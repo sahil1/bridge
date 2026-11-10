@@ -60,7 +60,8 @@ export default function FirstRunCard({ agent, onOpenTerminal }) {
   const claude = agent.kind === 'claude'
   // A code pasted at Claude Code's "Paste code here if prompted >", then Enter once it has it.
   const typeCode = async (code) => {
-    await api(`/panes/${pane}/input`, { method: 'POST', body: { steps: [{ text: code }] } })
+    // (A code has no spaces or lines: whatever came with it in a paste stays out of the terminal.)
+    await api(`/panes/${pane}/input`, { method: 'POST', body: { steps: [{ text: String(code).replace(/\s+/g, '') }] } })
     await pause(150)
     await api(`/panes/${pane}/input`, { method: 'POST', body: { steps: [{ keys: ['enter'] }] } })
   }
