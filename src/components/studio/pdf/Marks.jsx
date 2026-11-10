@@ -104,7 +104,7 @@ export default function Marks({ pdf, layout, marks, setMarks, picked, setPicked,
           date = <span className="sd-mark-date" style={{ fontSize: size * r.px, left: DATE_PAD * r.px, bottom: Math.max(0, (at.v - size * 0.21) * r.px) }}>{dateText}</span>
         }
         return (
-          <div key={m.id} className={`sd-mark ${m.kind}${m.approved ? ' ok' : ''}${on ? ' on' : ''}`} style={{ left: r.left, top: r.top, width: r.width, height: r.height }}
+          <div key={m.id} className={`sd-mark k-${m.kind}${m.approved ? ' ok' : ''}${on ? ' on' : ''}`} style={{ left: r.left, top: r.top, width: r.width, height: r.height }}
             data-mark={m.id} data-kind={m.kind} data-page={m.page} data-box={[m.x, m.y, m.w, m.h].map((v) => Math.round(v * 10) / 10).join(',')}
             role="button" tabIndex={0} aria-pressed={on} aria-label={`${t(KIND[m.kind])}, ${t('page {n}', { n: m.page })}${m.approved ? `, ${t('approved')}` : ''}`}
             onPointerDown={(e) => drag(e, m, 'move')} onFocus={() => setPicked(m.id)}>

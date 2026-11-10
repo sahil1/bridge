@@ -4,11 +4,12 @@ Each version's section here becomes its GitHub release notes (`npm run release`)
 
 ## 3.13.4
 
-Fixes: the meeting card is whole when the app is zoomed, and resizes as any window does; an agent's terminal scrolls back through all it keeps, and opens in your terminal app; no button that does nothing; a PowerPoint shows its own background in Studio; the tabs all stay on screen, as in Chrome; the sidebar folds and scrolls as one; scroll bars only when you need them; Studio takes a phone's photo; a setting found in Settings stays where it shows; and what can't load in Settings › Model Providers can be tried again.
+Fixes: the meeting card is whole when the app is zoomed, shows AI Assist's Ideas in full, and resizes as any window does; an agent's terminal scrolls back through all it keeps, and opens in your terminal app; no button that does nothing; a PowerPoint shows its own background in Studio; the tabs all stay on screen, as in Chrome; the sidebar folds and scrolls as one; scroll bars only when you need them; Studio takes a phone's photo; a setting found in Settings stays where it shows; and what can't load in Settings › Model Providers can be tried again.
 
 ### Fixes
 
 - **The meeting card is whole when the app is zoomed**: zoomed in with ⌘+ in the main window, the card zoomed too but its window didn't, so its right side and bottom were cut off (Stop, Watch screen, the last buttons). Its window now fits it at every zoom, on any screen; the dictation pill's too. And on a short screen, the card no longer runs past it: what's under the bar, or a meeting's prep before it starts, scrolls.
+- **AI Assist's Idea suggestions show in full**: on the meeting card and in a meeting's AI Assist list, an Idea was squeezed into a column a few letters wide, its ✓ over its label, as it took on the look of the Ideas list's rows. A meeting's mail and the / menu's MCP commands no longer take on another part's look either.
 - **The meeting card resizes as any window does**: drag an edge or a corner. Its width holds for every card; open while recording, its height too, and a taller card shows more of what's been said, the newest line at the bottom. It keeps that size on this computer; double-click an edge for its usual size.
 - **An agent's terminal scrolls back through all it keeps without stopping**: it stopped a few hundred lines up. The rest of its history comes in before you reach the top, the lines you're reading stay put while the agent prints, and "That's as far back as this terminal keeps" shows only at the very top.
 - **Claude Code's full-screen view scrolls in the Terminal tab**: the wheel and a swipe go to the agent, as in Terminal or iTerm, so its own history scrolls, instead of stopping after one screen.

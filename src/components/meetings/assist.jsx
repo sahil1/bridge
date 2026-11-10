@@ -99,7 +99,7 @@ export function AssistPane({ id, data, onChange, onMsg }) {
       {on && !items.length && !data.assistError && <p className="muted small mt-hint">{live ? (data.assistAt ? t('Nothing stood out yet. Suggest now asks straight away.') : t('Suggestions appear here once there\'s something to go on. Suggest now asks straight away.')) : t('Nothing was suggested.')}</p>}
       <div className="mt-assist-list">
         {items.map((x) => (
-          <div key={x.id} className={`mt-tip ${x.kind}${x.state === 'kept' ? ' kept' : ''}`}>
+          <div key={x.id} className={`mt-tip k-${x.kind}${x.state === 'kept' ? ' kept' : ''}`}>
             <span className="mt-tip-kind">{t(KIND[x.kind] || KIND.idea)}</span>
             <span className="mt-tip-text">{x.text}{x.why && <small className="muted">{x.why}</small>}</span>
             <span className="mt-t">{clock(x.t)}</span>

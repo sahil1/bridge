@@ -84,7 +84,7 @@ export function SetupList({ plan, onOpen, reload, only = null, onRetry = null })
       {items.length > 0
         ? <ul className="sa-list">
         {items.map((i) => (
-          <li key={i.id} className={`sa-item ${i.state}`} data-id={i.id}>
+          <li key={i.id} className={`sa-item s-${i.state}`} data-id={i.id}>
             <span className="sa-main"><b>{name(i.id)}</b><small>{about(i)}</small>
               {adds(i) && <small>{adds(i)}</small>}
               {i.state === 'failed' && i.error && <small className="error-text">{i.error}</small>}

@@ -46,7 +46,7 @@ function Row({ id, l, onChange, onMsg }) {
   const tip = [l.kind === 'file' ? l.path : l.kind === 'url' ? l.url : `${l.mail?.from ? t('Email from {name}', { name: l.mail.from }) : t('Email')}${l.mail?.received ? `, ${when(l.mail.received)}` : ''}`, from, gone ? t("It isn't where it was: move it back, or remove it here.") : l.kind === 'file' && l.readable === false ? t("Its words can't be read for the notes, but it's linked.") : ''].filter(Boolean).join('\n')
   const where = l.kind === 'file' ? l.path.replace(/^\/Users\/[^/]+/, '~') : l.kind === 'url' ? l.url : `${l.mail?.from ? t('From {name}', { name: l.mail.from }) : t('An email')}${l.mail?.received ? `, ${when(l.mail.received)}` : ''}${l.mail?.files?.length ? ` · ${l.mail.files.join(', ')}` : ''}`
   return (
-    <div className={`mt-file ${l.kind}${gone ? ' gone' : ''}`}>
+    <div className={`mt-file k-${l.kind}${gone ? ' gone' : ''}`}>
       <span className="mt-file-icon"><Icon name={ICON[l.kind] || 'file'} size={14} /></span>
       <button type="button" className="mt-file-main" onClick={() => open()} title={tip}>
         <span className="mt-file-name">{l.name}{l.from === 'invite' && <small>{t('invite')}</small>}{(l.from === 'mail' || l.kind === 'mail') && <small>{t('email')}</small>}</span>

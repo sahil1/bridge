@@ -513,7 +513,7 @@ function Chat({ agent, going = [], queued = [], delivered = [], outbox = [], que
           </div>
         ))}
         {shownOutbox.map((o) => (
-          <div key={o.id} className={`msg user outbox ${o.state}`}>
+          <div key={o.id} className={`msg user outbox s-${o.state}`}>
             <div className="msg-text">{o.kind === 'answer' ? t('Answer: {text}', { text: o.text }) : <UserText text={o.text} paneId={agent.paneId} />}</div>
             <div className="msg-time">
               <Icon name={o.state === 'waiting' ? 'clock' : o.state === 'delivered' ? 'check' : 'x'} size={11} /> {o.status}

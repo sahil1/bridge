@@ -100,7 +100,7 @@
 .mt-lines { overflow: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; min-height: 0; max-height: 100%; padding-right: 4px; }
 .mt-line { display: grid; grid-template-columns: auto auto 1fr; gap: 2px 8px; margin: 0; font-size: 13.5px; line-height: 1.5; }
 .mt-who { font-weight: 600; font-size: 12px; color: var(--accent); }
-.mt-line.them .mt-who { color: color-mix(in srgb, #8e4ec6 65%, var(--ink)); } /* toward the ink, to read in either mode */
+.mt-line.src-them .mt-who { color: color-mix(in srgb, #8e4ec6 65%, var(--ink)); } /* toward the ink, to read in either mode */
 .mt-t { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; padding-top: 2px; }
 .mt-text { grid-column: 1 / -1; color: var(--ink); }
 /* Live words: what someone is still saying, quieter than the lines that are in. */
@@ -284,7 +284,7 @@ html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box
 /* AI Assist's newest suggestion, under the bar, open or not. */
 .fc-tip { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 4px; padding: 7px 4px 8px 10px; border-radius: 10px; background: var(--ai-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ai) 16%, transparent); }
 .fc-tip-kind { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--ai); }
-.fc-tip.check .fc-tip-kind { color: var(--warning); }
+.fc-tip.k-check .fc-tip-kind { color: var(--warning); }
 .fc-tip-text { grid-column: 1; font-size: 12.5px; line-height: 1.4; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .fc-tip-acts { grid-column: 2; grid-row: 1 / span 2; display: inline-flex; align-self: start; margin-top: -3px; }
 .fc-tip .fc-x { width: 24px; height: 24px; }
@@ -303,7 +303,7 @@ html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box
 .fc-said p { font-size: 12.5px; line-height: 1.4; }
 .fc-said-line { color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .fc-said-line b { font-weight: 600; color: var(--accent); margin-right: 2px; }
-.fc-said-line.them b { color: var(--fc-them); }
+.fc-said-line.src-them b { color: var(--fc-them); }
 .fc-said-line.so-far { color: var(--ink-3); }
 .fc-said-none { color: var(--ink-3); }
 .fc-talk { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 500; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -598,7 +598,7 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .mt-tip { display: grid; grid-template-columns: auto 1fr auto auto; align-items: start; gap: 4px 10px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane-2); }
 .mt-tip.kept { opacity: .7; }
 .mt-tip-kind { font-size: 10.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--accent); padding-top: 2px; }
-.mt-tip.check .mt-tip-kind { color: var(--warning); }
+.mt-tip.k-check .mt-tip-kind { color: var(--warning); }
 .mt-tip-text { display: grid; gap: 2px; font-size: 13.5px; line-height: 1.45; min-width: 0; }
 .mt-tip-text small { font-size: 11.5px; line-height: 1.35; }
 .mt-tip .mt-t { padding-top: 2px; }

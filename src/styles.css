@@ -1152,8 +1152,8 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 .r-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 3px; font-size: 11.5px; color: var(--ink-3); }
 .r-meta a { color: var(--accent); display: inline-flex; align-items: center; gap: 3px; }
 .r-note { font-weight: 600; color: var(--ink-2); }
-.r-note.due, .r-note.overdue { color: var(--warning); }
-.r-note.ok { color: var(--good); }
+.r-note.s-due, .r-note.s-overdue { color: var(--warning); }
+.r-note.s-ok { color: var(--good); }
 .r-actions { display: flex; align-items: center; gap: 4px; }
 .run-btn { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 7px; font-size: 12px; font-weight: 600; background: var(--pane-3); color: var(--ink-2); }
 .run-btn:hover { color: var(--ink); filter: brightness(.97); }
@@ -1171,8 +1171,8 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 .r-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .r-form-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .r-form p { margin: 0; }
-.chip.r-chip.due, .chip.r-chip.never { color: var(--warning); }
-.chip.r-chip.overdue, .chip.r-chip.error, .chip.r-chip.missed { color: var(--critical); }
+.chip.r-chip.s-due, .chip.r-chip.s-never { color: var(--warning); }
+.chip.r-chip.s-overdue, .chip.r-chip.s-error, .chip.r-chip.s-missed { color: var(--critical); }
 /* Scheduled Routines (a beta feature): when each runs, its runs, the schedule picker, suggestions */
 .r-row.st-paused .r-state { background: var(--pane-3); color: var(--ink-3); }
 .r-row.st-missed .r-state { background: color-mix(in srgb, var(--critical) 14%, transparent); color: var(--critical); }
@@ -1396,11 +1396,11 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 .app.narrow .msg.queued .link { min-height: 40px; min-width: 40px; padding: 0 6px; }
 .app.narrow .queued-edit { font-size: 16px; }
 /* Sent from the phone while your computer was offline (relay/web/offline.js) */
-.msg.user.outbox.waiting .msg-text { opacity: .75; border: 1px dashed var(--line-3, var(--line-2)); background: transparent; color: var(--ink); }
-.msg.user.outbox.failed .msg-text { opacity: .6; }
+.msg.user.outbox.s-waiting .msg-text { opacity: .75; border: 1px dashed var(--line-3, var(--line-2)); background: transparent; color: var(--ink); }
+.msg.user.outbox.s-failed .msg-text { opacity: .6; }
 .msg.outbox .msg-time { display: flex; align-items: center; gap: 5px; justify-content: flex-end; opacity: 1; }
 .msg.from-phone .msg-time { opacity: 1; }
-.msg.outbox.failed .msg-time { color: var(--critical); }
+.msg.outbox.s-failed .msg-time { color: var(--critical); }
 .msg.outbox .link { margin-left: 6px; }
 .msg-sent { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; }
 /* The phone is showing what your computer last sent: what it didn't keep is missing, not an error. */
@@ -2015,9 +2015,9 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
    computer that didn't answer) shows on a phone too, where the keys don't. */
 .slash-title .slash-where { font-weight: 400; margin-left: 8px; }
 .slash-item b svg { flex: none; margin-right: 6px; vertical-align: -2px; color: var(--accent); }
-.slash-item.meeting b, .slash-item.jump b { font: 600 13px var(--font); overflow: hidden; text-overflow: ellipsis; max-width: 46ch; }
-.slash-item.meeting .slash-badge { color: var(--accent); background: var(--accent-soft); }
-.slash-item.meeting.on .slash-badge { background: var(--pane); }
+.slash-item.k-meeting b, .slash-item.k-jump b { font: 600 13px var(--font); overflow: hidden; text-overflow: ellipsis; max-width: 46ch; }
+.slash-item.k-meeting .slash-badge { color: var(--accent); background: var(--accent-soft); }
+.slash-item.k-meeting.on .slash-badge { background: var(--pane); }
 .slash-go { color: var(--ink-3); align-self: center; }
 .slash-empty { font-size: 12.5px; color: var(--ink-3); padding: 8px 10px 10px; }
 .slash-keys { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }

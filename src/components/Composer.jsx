@@ -212,7 +212,7 @@ function SlashMenu({ items, sel, onPick, onHover, title, mention, jumps = [], em
       )}
       {title && <div className="slash-title">{title}</div>}
       {items.map((it, i) => (
-        <button key={it.key} role="option" aria-selected={i === sel} className={`slash-item ${it.kind || ''} ${i === sel ? 'on' : ''}`} onMouseMove={() => onHover(i)} onClick={() => onPick(it)}>
+        <button key={it.key} role="option" aria-selected={i === sel} className={`slash-item${it.kind ? ` k-${it.kind}` : ''} ${i === sel ? 'on' : ''}`} onMouseMove={() => onHover(i)} onClick={() => onPick(it)}>
           <b>{it.icon && <Icon name={it.icon} size={12} />}{it.label}</b>
           <span className="slash-desc">{it.description}</span>
           {it.badge && <span className="slash-badge">{it.badge}</span>}

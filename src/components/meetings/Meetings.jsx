@@ -357,7 +357,7 @@ function Line({ l, id, me, onSaved, onError, onWho }) {
     try { await api(`/meetings/${encodeURIComponent(id)}/note`, { method: 'POST', body: { text: note, at: l.t0 } }); setNote(null); onSaved() } catch (e) { onError(e.message) }
   }
   return (
-    <div className={`mt-line ${l.src}${l.edited ? ' edited' : ''}${l.dropped ? ' dropped' : ''}${open ? ' open' : ''}`} onClick={(e) => { if (l.key && !e.target.closest('button, input, textarea, a') && !window.getSelection()?.toString()) setOpen((o) => !o) }}>
+    <div className={`mt-line src-${l.src}${l.edited ? ' edited' : ''}${l.dropped ? ' dropped' : ''}${open ? ' open' : ''}`} onClick={(e) => { if (l.key && !e.target.closest('button, input, textarea, a') && !window.getSelection()?.toString()) setOpen((o) => !o) }}>
       <button type="button" className={`mt-who${l.name ? ' named' : ''}${l.guess ? ' guess' : ''}`} disabled={!l.key || !onWho} onClick={(e) => onWho?.(e, l)}
         title={l.name ? (l.byVoice ? t('{name}: known by their voice. Click to change', { name: l.name }) : l.guess ? t('{name}: worked out from the meeting. Click to change', { name: l.name }) : t('{name}. Click to change', { name: l.name })) : l.voice && !l.me ? t('Speaker {n}, told apart by voice. Click to name them, once for all their lines', { n: l.voice }) : t('Who said it? Click to name them')}>{l.name || (l.me ? me || t('You') : l.voice ? t('Speaker {n}', { n: l.voice }) : l.src === 'them' ? t('Them') : me || t('You'))}</button>
       <span className="mt-t">{clock(l.t0)}</span>
@@ -939,7 +939,7 @@ export function MeetingPage({ id, onBack }) {
             : <div key={`note-${x.i}`} className="mt-mark"><Icon name="edit" size={11} /><span className="mt-t">{clock(x.n.t)}</span><span>{x.n.text}</span></div>))}
         {/* Live words (server/livewords.js): what someone is still saying, before its line is in. */}
         {recording && ['you', 'them'].filter((src) => data.partial?.[src]?.text).map((src) => (
-          <div key={`so-far-${src}`} className={`mt-line mt-so-far ${src}`} aria-live="off">
+          <div key={`so-far-${src}`} className={`mt-line mt-so-far src-${src}`} aria-live="off">
             <span className="mt-who">{src === 'them' ? t('Them') : data.me || t('You')}</span>
             <span className="mt-t">{clock(data.partial[src].t0)}</span>
             <span className="mt-text">{data.partial[src].cut ? '… ' : ''}{data.partial[src].text}</span>

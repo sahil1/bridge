@@ -156,7 +156,7 @@ export function YourFiles({ recent, refreshRecent, describe, areaOf, onOpen, onE
               const other = f.opens === false
               const open = other ? (inApp ? () => openInApp(f) : null) : () => onOpen({ root: f.root, path: f.path })
               const inner = <>
-                <span className={`sd-file-ic ${f.kind || ''}`}><Icon name={KIND_ICON[f.kind] || 'file'} size={15} /></span>
+                <span className={`sd-file-ic${f.kind ? ` k-${f.kind}` : ''}`}><Icon name={KIND_ICON[f.kind] || 'file'} size={15} /></span>
                 <span className="sd-file-text"><b>{f.name}</b><small className="muted">{other ? t('{kind}, opened in its own app', { kind: d.kind }) : d.kind}</small></span>
               </>
               return (
