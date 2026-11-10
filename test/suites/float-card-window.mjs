@@ -7,7 +7,9 @@
 // languages. And on a short screen, opened, it's no taller than the screen, zoomed or not. Resized
 // by its edges and corners as any window (a stand-in pointer, so the real one stays put): the edge
 // follows the pointer and the other stays, the card fills its window, taller shows more of what's
-// been said, the size is kept, and a double-click puts it back.
+// been said, the size is kept, and a double-click puts it back. While the screen is shared (a
+// stand-in for native/callwatch): a meeting about to start and what needs you aren't shown, and
+// come back by themselves once it stops; the meeting being recorded stays.
 // 3.13.2's card at 110% (⌘+ once): its window stayed the card's size at 100%, which cut it off on
 // the right and at the bottom.
 import fs from 'node:fs'
@@ -34,7 +36,19 @@ if (!electron || !screenOk) {
 
 const kit = await startKit('float-card-window')
 const { _electron } = await import('playwright-core')
-const env = { ...process.env, KIT_URL: kit.url, ...(screenOk.DISPLAY ? { DISPLAY: screenOk.DISPLAY } : {}) }
+// Whether the screen is shared: a stand-in for native/callwatch sharing, saying what bin/sharing.json
+// says, a line each time it changes, as the helper does (not on Windows, which can't tell).
+const shareBin = process.platform === 'win32' ? null : path.join(kit.bin, 'callwatch')
+if (shareBin) {
+  fs.writeFileSync(`${shareBin}.cjs`, `const fs = require('node:fs'), path = require('node:path'), parent = process.ppid
+let last = ''
+const look = () => { let v = false; try { v = JSON.parse(fs.readFileSync(path.join(__dirname, 'sharing.json'), 'utf8')).sharing } catch {} const line = JSON.stringify({ sharing: v }); if (line !== last) { last = line; process.stdout.write(line + '\\n') } }
+look(); setInterval(look, 100)
+setInterval(() => { try { process.kill(parent, 0) } catch { process.exit(0) } }, 500)`)
+  fs.writeFileSync(shareBin, `#!/bin/sh\nexec "${process.execPath}" "${shareBin}.cjs" "$@"\n`, { mode: 0o755 })
+}
+const sharing = (v) => fs.writeFileSync(path.join(kit.bin, 'sharing.json'), JSON.stringify({ sharing: v }))
+const env = { ...process.env, KIT_URL: kit.url, ...(shareBin ? { BRIDGE_CALLWATCH: shareBin } : {}), ...(screenOk.DISPLAY ? { DISPLAY: screenOk.DISPLAY } : {}) }
 delete env.ELECTRON_RUN_AS_NODE
 let el = null
 try {
@@ -249,6 +263,37 @@ try {
     ok(!bad.length, `${lang}: every kind of card whole, nothing past its edge or cut off`, bad.slice(0, 3))
   }
   await card.evaluate(() => localStorage.setItem('cc-lang', JSON.stringify('en')))
+
+  // ---------- While the screen is shared ----------
+  // Placed as desktop/main.js places it (floatshare.js), with the stand-in saying when the screen is
+  // shared: a meeting about to start, or what needs you, isn't shown while it is, and comes back by
+  // itself once it stops; the meeting being recorded stays.
+  if (shareBin) {
+    const visible = () => el.evaluate(() => globalThis.floatWin.isVisible())
+    const placed = (c) => el.evaluate((_e, c) => globalThis.placeCard(c), c)
+    const soonK = KINDS.find((x) => x.name === 'a meeting about to start')
+    sharing(false)
+    await show(soonK)
+    const p0 = await until(async () => { const p = await placed(soonK.calls); return p.show && await visible() && p }, 5000, 100)
+    ok(!!p0, 'nothing shared: the reminder shows', p0)
+    sharing(true)
+    ok(!!(await until(async () => !(await visible()), 5000, 100)), 'a call starts sharing the screen: the reminder goes, by itself', await placed(soonK.calls))
+    const held = await placed(soonK.calls)
+    ok(held.held && !held.show && !(await visible()), 'and stays gone while it shares (looked at again)', held)
+    const needs = KINDS.find((x) => x.name === 'what needs you')
+    const pn = await placed(needs.calls)
+    ok(pn.held && !(await visible()), 'what needs you waits too', pn)
+    const recK = KINDS[0]
+    await show(recK)
+    const pr = await placed(recK.calls)
+    ok(pr.show && !!(await until(() => visible(), 3000, 100)), 'the meeting being recorded: its card stays while you share (kept out of the share by its setting)', pr)
+    await show(soonK)
+    await placed(soonK.calls)
+    ok(!!(await until(async () => !(await visible()), 3000, 100)), 'the recording over and the next meeting soon, still sharing: no reminder')
+    sharing(false)
+    ok(!!(await until(() => visible(), 5000, 100)), 'the share ends: the reminder comes back by itself, still wanted')
+    await capture('float-reminder-after-sharing')
+  }
 
   // ---------- A short screen ----------
   // Opened, as tall as it gets (the call ended with no sound, AI Assist's suggestion), and a meeting

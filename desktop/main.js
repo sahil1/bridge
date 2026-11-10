@@ -814,17 +814,23 @@ function buildMenu() {
 // A small window over the others, on every desktop and over full-screen apps: the meeting being
 // recorded, Take notes when a call starts, Stop when it ends, a meeting's prep shortly before it
 // starts, or what needs you. It's the app's own
-// page (?float=1); this decides when it shows, from the server's /api/calls, every two seconds.
+// page (?float=1); this decides when it shows, from the server's /api/calls, every two seconds,
+// and from whether the screen is shared.
 const FLOAT_STATE = path.join(app.getPath('userData'), 'float.json')
 let float = null
 let floatResize = null // resizing it by an edge (desktop/floatfit.js)
 let floatHiddenFor = null // what was on the card when you hid it: it stays hidden until that changes
 let floatKey = null
-// Kept out of pictures of the screen while you share or record it (desktop/floatshare.js).
-const floatShare = require('./floatshare.js').make({
+let floatCalls = null // the last /api/calls, to place the card again as sharing starts or stops
+// Kept out of pictures of the screen while you share or record it, and, unless it's the meeting
+// being recorded, not shown at all then: it shows once sharing stops (desktop/floatshare.js).
+const { make: watchSharing, place: placeOf } = require('./floatshare.js')
+let placing = null
+const placeSoon = () => { if (!placing) placing = setImmediate(() => { placing = null; if (floatCalls) placeFloat(floatCalls) }) }
+const floatShare = watchSharing({
   bin: process.env.BRIDGE_CALLWATCH || (fs.existsSync(path.join(ROOT, 'native', 'bin', 'callwatch')) ? path.join(ROOT, 'native', 'bin', 'callwatch') : null),
   mac: IS_MAC,
-  onChange: () => { if (float && !float.isDestroyed()) float.setContentProtection(floatShare.hidden()) },
+  onChange: () => { if (float && !float.isDestroyed()) float.setContentProtection(floatShare.hidden()); placeSoon() },
 })
 function floatAt(w, h) {
   try {
@@ -853,24 +859,22 @@ function showFloat() {
   float.once('ready-to-show', () => float?.showInactive())
   float.loadURL(`${URL_BASE}/?float=1`)
 }
-const hideFloat = () => { floatShare.stop(); floatResize?.stop(); if (float && !float.isDestroyed() && float.isVisible()) float.hide() }
+// (The helper that says whether the screen is shared keeps running while a card waits for it.)
+const hideFloat = () => { floatResize?.stop(); if (float && !float.isDestroyed() && float.isVisible()) float.hide() }
+// The card, the menu bar, or neither, for what /api/calls says now (floatshare.js place).
+function placeFloat(c) {
+  floatCalls = c
+  const p = placeOf(c, { hiddenFor: floatHiddenFor, mac: IS_MAC, share: floatShare })
+  floatKey = p.key
+  if (p.show) showFloat()
+  else hideFloat()
+  setTray(p.bar ? c : null, p.instead)
+}
 async function watchCalls() {
   for (;;) {
     try {
       const c = await fetch(`${URL_BASE}/api/calls`, { signal: AbortSignal.timeout(3000) }).then((r) => (r.ok ? r.json() : null))
-      if (c) {
-        const mode = c.float === 'menubar' && !IS_MAC ? 'meetings' : c.float || 'meetings'
-        // A meeting with other people starting within ten minutes: the card shows its prep.
-        floatKey = c.recording ? `rec:${c.recording.id}:${c.recording.callEnded || ''}` : c.prompt ? `call:${c.prompt.app}:${c.prompt.at}` : c.soon ? `soon:${c.soon.id}` : 'idle'
-        const want = mode === 'always' || (mode === 'meetings' && floatKey !== 'idle')
-        const card = want && floatHiddenFor !== floatKey
-        floatShare.set(c.floatHide, card)
-        if (card) showFloat()
-        else hideFloat()
-        // The menu bar: instead of the card (Settings), or for a meeting whose card you moved there.
-        const bar = mode === 'menubar' ? !!(c.recording || c.prompt) : IS_MAC && want && !card && !!c.recording
-        setTray(bar ? c : null, mode === 'menubar')
-      }
+      if (c) placeFloat(c)
     } catch { /* server down or restarting */ }
     await new Promise((r) => setTimeout(r, 2000))
   }
@@ -944,7 +948,7 @@ const fromFloat = (e) => !!float && !float.isDestroyed() && e.sender === float.w
 ipc.on('bridge:float-size', (e, w, h, low) => { if (fromFloat(e)) fitWhileResizing(float, screen, floatResize, w, h, low) })
 // Resized by an edge or a corner: which one the pointer took, or null when it's let go.
 ipc.on('bridge:float-resize', (e, edge) => { if (fromFloat(e)) floatResize.set(edge) })
-ipc.handle('bridge:float-hide', (e) => { if (!fromFloat(e)) return false; floatHiddenFor = floatKey; hideFloat(); return true })
+ipc.handle('bridge:float-hide', (e) => { if (!fromFloat(e)) return false; floatHiddenFor = floatKey; floatShare.stop(); hideFloat(); return true })
 // Dragged from anywhere on it: kept whole on the screen it's over. (null, null): let go, so it's
 // remembered there.
 ipc.on('bridge:float-move', (e, x, y) => {

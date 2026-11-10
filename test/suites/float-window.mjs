@@ -6,7 +6,11 @@
 // And when it's kept out of pictures of the screen (desktop/floatshare.js), with a stand-in for
 // native/callwatch sharing: on a Mac, only while the screen is shared or recorded, so a screenshot
 // shows it; until the helper has said, when it can't or has gone, and off a Mac, always; Always and
-// Never as they say; the helper only while the card shows.
+// Never as they say; the helper only while the card shows, and a macOS that can't say not asked again
+// every two seconds. And a card that isn't the meeting being recorded (a meeting about to start, what
+// needs you, a call that started) not shown at all while the screen is shared, whatever the setting:
+// it waits (Take notes in the menu bar meanwhile), for the helper's first word too, and shows once
+// sharing ends; where it can't be told (Windows, no helper, one that never answers), it shows.
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
@@ -118,8 +122,6 @@ ok(bigUp.y === a.y, 'opened up from near the top taller than what\'s above: it s
   card.set('sharing', true)
   const h2 = helpers[helpers.length - 1]
   ok(helpers.length === 2 && h2 !== h, 'and asked again')
-  h2.say('{"sharing":null}')
-  ok(card.hidden(), 'a macOS that doesn\'t say: kept out')
   h2.say('{"sharing":false}')
   card.set('always', true)
   ok(h2.killed && card.hidden(), 'Always: kept out of screenshots too, with no helper')
@@ -127,9 +129,18 @@ ok(bigUp.y === a.y, 'opened up from near the top taller than what\'s above: it s
   ok(!card.hidden() && helpers.length === 2, 'Never: in every picture')
   card.set('sharing', true)
   const h3 = helpers[helpers.length - 1]
+  ok(helpers.length === 3, 'While I share my screen again: asked again')
   h3.say('{"sharing":false}')
   card.stop()
   ok(h3.killed && card.hidden(), 'the card hidden: the helper stopped, and the window kept out for when it shows again')
+  const old = make({ bin: '/stand-in/callwatch', mac: true, spawn })
+  old.set('sharing', true)
+  const h4 = helpers[helpers.length - 1]
+  h4.say('{"sharing":null}')
+  h4.emit('exit', 0)
+  const n4 = helpers.length
+  old.set('sharing', true)
+  ok(old.hidden() && helpers.length === n4, 'a macOS that doesn\'t say: kept out, and not asked again every two seconds')
   const win = make({ bin: '/stand-in/callwatch', mac: false, spawn })
   const n = helpers.length
   win.set('sharing', true)
@@ -139,6 +150,45 @@ ok(bigUp.y === a.y, 'opened up from near the top taller than what\'s above: it s
   const none = make({ bin: null, mac: true, spawn })
   none.set('sharing', true)
   ok(helpers.length === n && none.hidden(), 'a Mac without the helper: kept out')
+
+  // ---------- Not shown at all while the screen is shared ----------
+  // A meeting about to start, or what needs you: held while a call shares the screen or something
+  // records it, whatever the setting, and shown once that stops. The meeting being recorded isn't.
+  const { place } = require(path.join(ROOT, 'desktop', 'floatshare.js'))
+  let said = 0
+  const share = make({ bin: '/stand-in/callwatch', mac: true, spawn, onChange: () => said++, wait: 300 })
+  const soon = { float: 'meetings', floatHide: 'never', soon: { id: 'ev1', title: 'Design review' }, recording: null, prompt: null }
+  let p = place(soon, { mac: true, share })
+  const hs = helpers[helpers.length - 1]
+  ok(!p.show && p.held && p.key === 'soon:ev1' && hs.args.join() === 'sharing', 'a meeting about to start: the helper asked (even set to Never), and the card waits for its first word, so it never shows for an instant over a share', p)
+  hs.say('{"sharing":true}')
+  p = place(soon, { mac: true, share })
+  ok(!p.show && p.held && !p.bar, 'the screen is shared: the reminder doesn\'t show, nor anything in the menu bar', p)
+  const before = said
+  hs.say('{"sharing":false}')
+  p = place(soon, { mac: true, share })
+  ok(said > before && p.show && !p.held, 'the share ends: the app is told at once, and the reminder shows', p)
+  hs.say('{"sharing":true}')
+  const always = { ...soon, float: 'always', soon: null }
+  p = place(always, { mac: true, share })
+  ok(p.key === 'idle' && !p.show && p.held, 'set to Always: what needs you waits too', p)
+  const prompt = { ...soon, soon: null, prompt: { app: 'Zoom', at: '2026-11-10T10:00:00Z' } }
+  p = place(prompt, { mac: true, share })
+  ok(!p.show && p.held && p.bar, 'a call that starts while the screen is shared: Take notes in the menu bar, not the card', p)
+  const rec = { ...soon, soon: null, recording: { id: 'm1', callEnded: null } }
+  p = place(rec, { mac: true, share })
+  ok(p.show && !p.held && !p.bar, 'the meeting being recorded: its card shows as before (kept out of the share by its setting)', p)
+  p = place(soon, { mac: true, share, hiddenFor: 'soon:ev1' })
+  ok(!p.show && !p.held && !p.bar && hs.killed, 'its × pressed: hidden until the next meeting, and the helper stopped', p)
+  // A helper that never answers: the card shows after a moment rather than never.
+  const slow = make({ bin: '/stand-in/callwatch', mac: true, spawn, wait: 50 })
+  p = place(soon, { mac: true, share: slow })
+  ok(p.held, 'a helper slow to answer: waited for, for a moment')
+  await new Promise((r) => setTimeout(r, 80))
+  ok(place(soon, { mac: true, share: slow }).show, 'and shown once it has been too long')
+  // Off a Mac (Windows can't tell), or a Mac with no helper: shown as before.
+  ok(place(soon, { mac: false, share: make({ bin: '/stand-in/callwatch', mac: false, spawn }) }).show && place(soon, { mac: true, share: make({ bin: null, mac: true, spawn }) }).show, "where it can't be told the screen is shared (Windows, no helper): the reminder shows")
+  ok(place({ ...soon, float: 'menubar' }, { mac: true, share }).instead && !place({ ...soon, float: 'menubar' }, { mac: true, share }).show, 'in the menu bar instead (Settings): no card, as before')
 }
 
 process.exit(done().fail ? 1 : 0)
