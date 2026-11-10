@@ -3353,7 +3353,8 @@ app.get('/{*splat}', (req, res) => {
 // too big or not JSON is told why, in JSON like every other answer here (it was a page of HTML,
 // which the app could only show as "HTTP 413").
 app.use((err, req, res, next) => {
-  if (err?.type === 'request.aborted' || req.destroyed) return
+  // (Only that: a request read to its end counts as destroyed too, and it still needs its answer.)
+  if (err?.type === 'request.aborted') return
   if (err?.type === 'entity.too.large') return res.status(413).json({ error: `That's more than Bridge AI takes at once (${Math.round(err.limit / 1048576)} MB at most)` })
   if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'Bridge AI couldn\'t read what was sent (it wasn\'t JSON)' })
   next(err)
