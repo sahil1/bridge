@@ -271,7 +271,10 @@ export function InsightsView({ onPerson, onOpen, onPeople }) {
   const [days, setDays] = usePersisted('cc-mi-range', '90')
   const [kind, setKind] = useState('all')
   const [metric, setMetric] = usePersisted('cc-mi-metric', 'hours')
-  const { data, error } = usePoll(`/meetings/insights?days=${days}&kind=${kind}`, 60_000)
+  // Another range or kind picked: what was shown stays, dimmed and said to be loading, until the
+  // new numbers come (they looked like the new range's, and weren't). An answer for one left since
+  // isn't shown (usePoll).
+  const { data, error, stale } = usePoll(`/meetings/insights?days=${days}&kind=${kind}`, 60_000)
   if (error && !data) return <p className="error-text small" role="alert">{error}</p>
   if (!data) return <div className="skeleton-rows"><div /><div /><div /></div>
   if (!data.total && !data.failed) {
@@ -295,13 +298,14 @@ export function InsightsView({ onPerson, onOpen, onPeople }) {
   const youPct = pct(data.talk.you, talk)
   const busiestWeek = data.weeks.reduce((b, w) => (!b || w.seconds > b.seconds ? w : b), null)
   return (
-    <div className="mi">
+    <div className={`mi${stale ? ' mi-stale' : ''}`} aria-busy={stale || undefined}>
       <p className="muted small mi-lede">{data.total === 1 ? t('Worked out on this computer from {n} recorded meeting, its transcript and invite. Nothing here is sent anywhere, and none of it is a score of anyone.', { n: data.total }) : t('Worked out on this computer from {n} recorded meetings, their transcripts and invites. Nothing here is sent anywhere, and none of it is a score of anyone.', { n: data.total })}{data.archived ? ` ${t('Archived meetings are left out, as they are from search.')}` : ''}{data.failed ? ` ${data.failed === 1 ? t("{n} meeting couldn't be read, so it isn't counted.", { n: data.failed }) : t("{n} meetings couldn't be read, so they aren't counted.", { n: data.failed })}` : ''}</p>
       {data.total < ENOUGH && <p className="mi-soon-bar small" role="status"><Icon name="info" size={13} /> <span>{t('{n} of {of} meetings so far. After {of}, Insights shows when in the week you meet, the series that take your time and who you spend it with.', { n: data.total, of: ENOUGH })}</span></p>}
       <div className="us-bar mi-bar">
         <div className="seg small-seg" role="tablist" aria-label={t('Range')}>
-          {RANGES.map(([v, l]) => <button key={v} type="button" role="tab" aria-selected={String(days) === v} className={String(days) === v ? 'on' : ''} onClick={() => setDays(v)}>{t(l)}</button>)}
+          {RANGES.map(([v, l]) => <button key={v} type="button" role="tab" aria-selected={String(days) === v} aria-busy={(stale && String(days) === v) || undefined} className={String(days) === v ? 'on' : ''} onClick={() => setDays(v)}>{t(l)}</button>)}
         </div>
+        {stale && (error ? <span className="error-text small" role="alert">{error}</span> : <span className="muted small mi-loading" role="status"><Icon name="refresh" size={12} className="spin" /> {t('Loading…')}</span>)}
       </div>
       <div className="mt-places mi-kinds" role="tablist" aria-label={t('Kind of meeting')}>
         <button type="button" role="tab" aria-selected={kind === 'all'} className={kind === 'all' ? 'on' : ''} onClick={() => setKind('all')}>{t('All kinds')} <span className="muted">{data.kinds.reduce((a, k) => a + k.n, 0)}</span></button>
