@@ -57,7 +57,9 @@ export default function Sidebar({ side, error, computers, machine, loc, onGo, on
           <Section title={t('Places')}>{side.places.map((it) => row(it))}</Section>
         </>
       )}
-      <Section title={t('Locations')}>
+      {/* Drawn with the rest, so it doesn't show alone and then jump down under them; or, when
+          they can't be read, still there to go to your other computers. */}
+      {(side || error) && <Section title={t('Locations')}>
         {(side?.drives || []).map((it) => row(it))}
         {computers.others.length > 0 && [
           machine && (
@@ -72,7 +74,7 @@ export default function Sidebar({ side, error, computers, machine, loc, onGo, on
             </button>
           )),
         ]}
-      </Section>
+      </Section>}
     </nav>
   )
 }

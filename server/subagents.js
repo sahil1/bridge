@@ -287,19 +287,27 @@ function withFooter(items, foot) {
   return [...foot.rows.map((r, i) => ({ id: `screen-${i}`, description: r.doing, type: r.type, status: 'running', fromScreen: true, elapsed: r.elapsed, tokens: r.tokens, steps: [], tools: 0 })), ...items]
 }
 
-// mainFile: the session's own transcript (or null); screen: its terminal's last lines.
+// The terminal's last lines, read once its logs have been: a footer at least as new as what they
+// say. Read before them, it could be from before the newest shell started, and leave an old one
+// it no longer counts running.
+const screenOf = async (screen) => (typeof screen === 'function' ? screen() : screen)
+
+// mainFile: the session's own transcript (or null); screen: its terminal's last lines, or how to
+// read them.
 export async function listSubagents(mainFile, screen = '') {
   const now = Date.now()
-  const foot = footerOf(screen)
   let items = []
   let tasks = []
+  let found = []
   if (mainFile) {
     const c = await scan(mainFile)
     const subs = await subagents(mainFile, c.ends, now)
     items = subs.map((s) => s.item)
     const theirs = await Promise.all(subs.map(async ({ file, item }) => tasksOf(await scan(file), now, item.description).catch(() => [])))
-    tasks = settle([...(await tasksOf(c, now, null)), ...theirs.flat()], foot, now)
+    found = [...(await tasksOf(c, now, null)), ...theirs.flat()]
   }
+  const foot = footerOf(await screenOf(screen))
+  if (mainFile) tasks = settle(found, foot, now)
   items = withFooter(items, foot).sort(byState)
   tasks.sort(byState)
   return { items, tasks, running: items.filter((i) => i.status === 'running').length + tasks.filter((t) => t.status === 'running').length }
@@ -328,7 +336,7 @@ async function summaryOf(file, screen) {
     const c = await scan(file)
     items = (await subagents(file, c.ends, now)).map((s) => s.item)
   }
-  items = withFooter(items, footerOf(screen)).sort(byState)
+  items = withFooter(items, footerOf(await screenOf(screen))).sort(byState)
   const on = items.filter((i) => i.status === 'running')
   const just = items.filter((i) => i.status !== 'running' && !i.fromScreen && now - Date.parse(i.updatedAt) < JUST_MS)
   if (!on.length && !just.length) return null
@@ -350,7 +358,7 @@ export function runningFor(a, { locate, read }) {
   if (due && !s.busy) {
     s.busy = true
     s.key = key
-    ;(async () => { s.v = await summaryOf(locate(a), await read(a.paneId).catch(() => '')) })()
+    ;(async () => { s.v = await summaryOf(locate(a), () => read(a.paneId).catch(() => '')) })()
       .catch(() => { /* its logs aren't readable now: as it was */ })
       .finally(() => { s.busy = false; s.when = Date.now() })
   }

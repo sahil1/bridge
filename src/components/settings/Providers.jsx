@@ -149,7 +149,9 @@ function AccountRow({ a, kind, auto, only, slots, others, onChange, onUp, onDown
   )
 }
 
-function AccountsSection() {
+// shown: once your agents above it are in (read meanwhile), so it doesn't move down under the
+// pointer as they come.
+function AccountsSection({ shown = true }) {
   const [kinds, setKinds] = useState(null)
   const [err, setErr] = useState(null)
   // Only the newest check counts: one that started before a Remove can answer after it.
@@ -179,6 +181,7 @@ function AccountsSection() {
     setKinds((all) => all.map((x) => (x.kind === k.kind ? { ...x, accounts: ids.map((id) => x.accounts.find((a) => a.id === id)) } : x)))
     try { await api(`/accounts/order/${k.kind}`, { method: 'POST', body: { ids } }); refetch('/quota') } catch (e) { setShowErr(e.message); load(true) }
   }
+  if (!shown) return null
   if (err) return <p className="pv-note pv-err">Couldn't load accounts: {err}</p>
   const list = (kinds || []).filter((k) => k.installed)
   if (!list.length) return null
@@ -481,7 +484,7 @@ export default function Providers() {
       </p>
 
       <AgentsStrip subs={subs} error={subsErr} onRefresh={() => loadSubs(true)} refreshing={refreshing} />
-      <AccountsSection />
+      <AccountsSection shown={!!subs || !!subsErr} />
       <Advanced order={30}><CloudKeys /></Advanced>
 
       {err && <p className="pv-note pv-err">Couldn't load providers: {err} <button type="button" className="ghost-btn" onClick={loadProviders}>Retry</button></p>}

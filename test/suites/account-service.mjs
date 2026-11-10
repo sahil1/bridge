@@ -218,11 +218,15 @@ try {
     const list = (await s.call('/v1/me', { token: a.deviceToken })).j.devices.map((d) => d.name)
     ok(swapped.status === 200 && list.length === 5 && list.includes('Mini') && !list.includes('Desk'), 'the same code, naming one to replace: that one\'s out and this one\'s in', list)
     ok((await s.call('/v1/me', { token: again.deviceToken })).j.code === 'signed-out', 'and the device taken out is signed out at once')
-    // Renewed past half its life; ended at its end.
-    shift = 91 * DAY
+    // Renewed past half its life (at midday, so a few seconds on are the same day); ended at its end.
+    shift = (Math.floor((realNow() + 91 * DAY) / DAY) + 0.5) * DAY - realNow()
     const renew = await s.call('/v1/me', { token: a.deviceToken })
     ok(renew.status === 200 && renew.j.deviceToken && payload(renew.j.deviceToken).iat > t.iat && verifies(renew.j.deviceToken), 'past half its life, /v1/me gives a new device token', payload(renew.j.deviceToken || ''))
-    ok((await s.call('/v1/me', { token: a.deviceToken })).status === 200 && (await s.call('/v1/me', { token: renew.j.deviceToken })).status === 200, 'the old one works until the new one is used, and the new one works')
+    // The old one used again a few seconds on (its answer lost, or two asks at once): the new one
+    // isn't replaced, which would sign out the device holding it.
+    shift += 5000
+    const old = await s.call('/v1/me', { token: a.deviceToken })
+    ok(old.status === 200 && (!old.j.deviceToken || old.j.deviceToken === renew.j.deviceToken) && (await s.call('/v1/me', { token: renew.j.deviceToken })).status === 200, 'the old one works until the new one is used, and the new one works, the old one used again or not', { old: old.status, same: old.j?.deviceToken === renew.j.deviceToken })
     shift = 181 * DAY
     const mini = (await s.call('/v1/me', { token: renew.j.deviceToken })).j.devices.find((d) => d.name === 'Mini')
     ok(mini && (await s.call('/v1/me', { token: swapped.j.deviceToken })).j.code === 'signed-out', 'a token past its 180 days is refused', null)

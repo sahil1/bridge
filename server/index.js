@@ -319,8 +319,7 @@ app.get('/api/agents/:pane/subagents', wrap(async (req) => {
   const a = await findAgent(req.params.pane)
   if (!caps(a.kind).subagents) return { items: [], tasks: [] }
   // The terminal's footer says which shells and monitors are still running, and shows subagents its logs don't.
-  const screen = await rt.read(req.params.pane, 60).catch(() => '')
-  return listSubagents(a.sessionId ? locate('claude', a.sessionId, a.cwd) : null, screen)
+  return listSubagents(a.sessionId ? locate('claude', a.sessionId, a.cwd) : null, () => rt.read(req.params.pane, 60).catch(() => ''))
 }))
 app.get('/api/agents/:pane/transcript', wrap(async (req) => transcript(await findAgent(req.params.pane))))
 app.get('/api/agents/:pane/transcript/earlier', wrap(async (req) => earlier(await findAgent(req.params.pane), Number(req.query.before), String(req.query.after || '') || null, Math.min(200, Number(req.query.want) || 60))))
@@ -1030,8 +1029,10 @@ app.post('/api/agents/launch', wrap(async (req) => {
 async function launchFrom(body) {
   const { kind = cfg.defaultAgent || 'claude', cwd, workspaceId, newSpace, label, prompt, account, alsoKind, ownBranch, branch, base, setup, remember, model, access } = body
   if (kind !== 'shell' && kind !== 'chat' && !(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
-  // Any model, on the one picked, and allowed what the access chip says.
-  const chatEnv = kind === 'chat' ? { env: { ...(typeof model === 'string' && model.trim() ? { BRIDGE_CHAT_MODEL: model.trim().slice(0, 200) } : {}), ...(['edits', 'full'].includes(access) ? { BRIDGE_CHAT_ACCESS: access } : {}) } } : {}
+  // Any model, on the one picked (its agent started on it, so the model button names it before its
+  // first reply), and allowed what the access chip says.
+  const chatModel = kind === 'chat' && typeof model === 'string' && model.trim() ? model.trim().slice(0, 200) : null
+  const chatEnv = kind === 'chat' ? { env: { ...(chatModel ? { BRIDGE_CHAT_MODEL: chatModel } : {}), ...(['edits', 'full'].includes(access) ? { BRIDGE_CHAT_ACCESS: access } : {}) }, ...(chatModel ? { model: chatModel } : {}) } : {}
   const dir = await places.resolveDir(cwd)
   const name = String(label || path.basename(dir)).trim().slice(0, 60)
   const space = String(newSpace || '').trim()
@@ -3218,7 +3219,7 @@ app.post('/api/chats', wrap(async (req) => {
   const f = await rt.fleet()
   const ws = f.workspaces.find((w) => w.label === 'Chats')
   const title = String(req.body?.title || req.body?.prompt || 'New chat').replace(/\s+/g, ' ').trim().slice(0, 40) || 'New chat'
-  const out = await launchAgent({ kind, model: (kind !== 'chat' && model) || undefined, cwd: dir, label: title, workspaceId: ws?.id, newSpace: ws ? undefined : 'Chats', prompt: String(req.body?.prompt || '').trim() || undefined, account: req.body?.account ? String(req.body.account) : undefined, ...(kind === 'chat' && model ? { env: { BRIDGE_CHAT_MODEL: model } } : {}) })
+  const out = await launchAgent({ kind, model: model || undefined, cwd: dir, label: title, workspaceId: ws?.id, newSpace: ws ? undefined : 'Chats', prompt: String(req.body?.prompt || '').trim() || undefined, account: req.body?.account ? String(req.body.account) : undefined, ...(kind === 'chat' && model ? { env: { BRIDGE_CHAT_MODEL: model } } : {}) })
   pushFleet()
   if (req.body?.typed && req.body?.prompt) noteTyped({ typed: req.body.typed, text: req.body.prompt }, { kind, title, plainChat: true, paneId: out?.paneId })
   return out

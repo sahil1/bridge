@@ -358,6 +358,7 @@ function Chat({ agent, going = [], queued = [], delivered = [], outbox = [], que
   useEffect(() => { onLimit?.(stopped); return () => onLimit?.(false) }, [stopped]) // eslint-disable-line react-hooks/exhaustive-deps
   const scrollRef = useRef(null)
   const stick = useRef(true)
+  const scrolledTo = useRef(0) // where it was last scrolled to
   // Older messages, loaded on request: Chat starts with the end of the agent's log, which after
   // long work and a few /compacts holds only the latest part of the conversation.
   const [older, setOlder] = useState({ messages: [], more: undefined, busy: false, error: null })
@@ -398,6 +399,22 @@ function Chat({ agent, going = [], queued = [], delivered = [], outbox = [], que
     // Not while Find is on a match: new messages come in below it, and it stays where it is.
     if (stick.current && !finder.current.holding()) el.scrollTop = el.scrollHeight
   }, [data, going, queued.length, delivered.length, outbox.length, older.messages.length])
+  // And when the chat itself changes size (what the agent has running opening under it, a card
+  // growing its buttons), as it's drawn: else its end waits out of sight for the next message,
+  // then jumps up, under the pointer about to press it.
+  const sized = useRef(null)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el === sized.current?.el) return
+    sized.current?.ro.disconnect()
+    sized.current = null
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => { if (stick.current && anchor.current == null && !finder.current.holding()) el.scrollTop = el.scrollHeight })
+    ro.observe(el)
+    for (const c of el.children) ro.observe(c)
+    sized.current = { el, ro }
+  })
+  useEffect(() => () => sized.current?.ro.disconnect(), [])
 
   // In the chat since it went in (`at`, by your computer's clock, as the chat's times are): a message
   // the same as an earlier one ("yes") doesn't count as there before it is.
@@ -437,7 +454,11 @@ function Chat({ agent, going = [], queued = [], delivered = [], outbox = [], que
   return (
     <div className="chat" data-find="chat" ref={scrollRef} onScroll={(e) => {
       const el = e.currentTarget
-      stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+      // Away from its end only by going up: the chat getting shorter (what's under it opening)
+      // leaves it at its end.
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) stick.current = true
+      else if (el.scrollTop < scrolledTo.current) stick.current = false
+      scrolledTo.current = el.scrollTop
     }}>
       {/* Find's bar, held at the top while the chat scrolls under it */}
       <div className="find-dock"><FindBar host={scrollRef} finder={finder.current} label={t('Find in this chat')} /></div>
