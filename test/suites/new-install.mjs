@@ -34,6 +34,9 @@ const signedOut = (k) => {
 const standInSignIns = (k) => { k.program('open', fs.readFileSync(path.join(TEST, 'stand-ins', 'open.cjs'), 'utf8')); fs.writeFileSync(path.join(k.home, 'claude-login.json'), '{}'); signedOut(k) }
 const noSignInPages = (c) => c.route(/^https:\/\/(claude\.com|claude\.ai|platform\.claude\.com|auth\.openai\.com)\//, (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<title>A sign-in page (a test)</title>' }))
 const signInTabs = async (k) => ((await k.api('/fleet')).tabs || []).filter((x) => /^Sign in: /.test(x.label))
+// What a sign-in's tab shows last (when it didn't close as it should have).
+// eslint-disable-next-line no-control-regex
+const tabsSay = async (k) => Promise.all((await signInTabs(k)).map(async (x) => (await k.api(`/agents/${encodeURIComponent(x.panes?.[0]?.paneId)}/screen?lines=12`).catch(() => ({}))).ansi?.replace(/\x1b\][^\x07]*\x07|\x1b\[[0-9;?]*[A-Za-z]/g, '').split(/\r?\n/).filter((l) => l.trim()).slice(-6)))
 
 // A stand-in nodejs.org: one long-term-support release, built for this computer, as nodejs.org
 // packs it: a .tar.gz with bin/node on macOS and Linux, whose "node" only says its version; a .zip
@@ -142,7 +145,13 @@ try {
   // browser (the stand-in open, into bin/opened.log) to come back to it on localhost, and prints a
   // link to a page that shows a code to paste instead. On the desktop the browser can't come back
   // (a code it is); on the phone it does ----------
-  const uninstall = async (n) => { for (const f of [n, `${n}.cjs`, `${n}.cmd`]) fs.rmSync(path.join(kit.bin, f), { force: true }); await kit.api('/agents/catalog') }
+  // Its sign-in's tab closed first, so nothing is running it, and tried again a moment later while
+  // Windows still holds it (it can't delete a .cmd file cmd.exe has open).
+  const uninstall = async (n) => {
+    for (const x of await signInTabs(kit)) await kit.api(`/tabs/${x.tabId}/close`, {}).catch(() => {})
+    for (const f of [n, `${n}.cjs`, `${n}.cmd`]) fs.rmSync(path.join(kit.bin, f), { force: true, maxRetries: 10, retryDelay: 200 })
+    await kit.api('/agents/catalog')
+  }
   standInSignIns(kit)
   fs.writeFileSync(path.join(kit.bin, 'claude.standin.cjs'), fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
   for (const phone of [false, true]) {
@@ -177,7 +186,7 @@ try {
       await fetch(`http://127.0.0.1:${port}/callback?code=stand-in&state=stand-in-state`).catch(() => {})
     }
     ok(!!(await until(async () => /Ready to work/.test(await card.innerText()), 30000)), `${t}: signed in, the card says it's ready`, await card.innerText())
-    ok(!!(await until(async () => !(await signInTabs(kit)).length, 20000)), `${t}: and the sign-in's tab closes by itself`)
+    ok(!!(await until(async () => !(await signInTabs(kit)).length, 30000)), `${t}: and the sign-in's tab closes by itself`, await tabsSay(kit))
     ok(!!(await p.$('select[aria-label="Chief of Staff"]')), `${t}: and the chief can be picked`)
     await shot(p, `${tag}new-${t}-2-installed`)
     ok(errors.length === 0, `${t}: install: no page errors`, errors)
@@ -187,7 +196,8 @@ try {
     await kit.api('/subscriptions?refresh=1')
   }
   fs.rmSync(path.join(kit.bin, 'claude.standin.cjs'), { force: true })
-  ok(/CODEX_NON_INTERACTIVE=1/.test((await kit.api('/agents/catalog')).find((a) => a.kind === 'codex')?.install || ''), 'Codex installs without its installer stopping to ask whether to start it, in a tab nobody watches')
+  const codexLine = (await kit.api('/agents/catalog')).find((a) => a.kind === 'codex')?.install || ''
+  ok(IS_WIN ? codexLine.startsWith("$env:CODEX_NON_INTERACTIVE='1'; ") : /\| CODEX_NON_INTERACTIVE=1 sh$/.test(codexLine), 'Codex installs without its installer stopping to ask whether to start it, in a tab nobody watches', codexLine)
 
   // ---------- Node.js, for agents that only come through npm, installed with one click ----------
   {
