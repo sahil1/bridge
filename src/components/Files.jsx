@@ -19,6 +19,8 @@ import diffLang from 'highlight.js/lib/languages/diff'
 import dockerfile from 'highlight.js/lib/languages/dockerfile'
 import { markdownHtml } from '../markdown.js'
 import Icon from './Icon.jsx'
+import CopyButton from './CopyButton.jsx'
+import { copyText } from '../copy.js'
 import { Handle, usePersisted, useWidth } from './layout.jsx'
 import { api, usePoll, BASE, machineId } from '../api.js'
 import PermissionFix, { InstallFix, protectedFolder } from './PermissionFix.jsx'
@@ -179,10 +181,10 @@ function normalize(p) {
 // which the server refuses for any API call). From disk, or from the text you're editing.
 const SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals'
 const siteUrl = (pane, p, base = BASE) => `${base}/api/agents/${enc(pane)}/site/${p.split('/').map(enc).join('/')}`
-export function HtmlView({ pane, filePath, text, reload = 0, base = BASE }) {
-  // While editing, show the draft (after a short pause in typing). A <base> makes its relative
 // The desktop app has no tabs: a file opened in a new one goes to the browser (desktop/main.js openLink).
 const newTabLabel = () => (window.bridgeApp ? t('Open in your browser') : t('Open in a new tab'))
+export function HtmlView({ pane, filePath, text, reload = 0, base = BASE }) {
+  // While editing, show the draft (after a short pause in typing). A <base> makes its relative
   // links (styles, scripts, images) load from the file's folder, as they would from disk.
   const [doc, setDoc] = useState(text)
   useEffect(() => { if (text == null) return; const t = setTimeout(() => setDoc(text), 300); return () => clearTimeout(t) }, [text])
@@ -216,7 +218,6 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
   const studio = useTrial('studio') // a beta feature (src/trials.js)
   const [state, setState] = useState({ loading: true })
   const [mode, setMode] = usePersisted('cc-md-mode', 'preview')
-  const [copied, setCopied] = useState(false)
   const key = `${pane}\n${filePath}`
   const [draft, setDraftState] = useState(() => drafts.get(key) ?? null)
   const [saving, setSaving] = useState(false)
@@ -328,9 +329,7 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
             <button className="btn small" onClick={discard} disabled={saving || !dirty} title="Throw away your changes">Revert</button>
             <button className="btn small primary" onClick={() => save()} disabled={saving || !dirty} title="Save (⌘S)">{saving ? 'Saving…' : 'Save'}</button>
           </>}
-          <button className="win-btn" title="Copy path" aria-label="Copy path" onClick={() => { navigator.clipboard?.writeText(filePath); setCopied(true); setTimeout(() => setCopied(false), 1200) }}>
-            <Icon name={copied ? 'check' : 'copy'} size={13} />
-          </button>
+          <CopyButton text={filePath} label={null} title="Copy path" className="win-btn" size={13} />
           {!dirty && <button className="win-btn" title="Reload" aria-label="Reload" onClick={() => { load(); setFrameKey((k) => k + 1) }}><Icon name="refresh" size={13} /></button>}
           {f && !['binary', 'video', 'audio'].includes(f.kind) && canSave && <SaveButton f={f} src={raw} />}
           {(f?.kind === 'image' || f?.kind === 'pdf' || f?.kind === 'video' || f?.kind === 'audio' || isHtml) && <a className="win-btn" href={isHtml ? site : raw} target="_blank" rel="noreferrer" title={newTabLabel()} aria-label={newTabLabel()}><Icon name="external" size={13} /></a>}
@@ -517,8 +516,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
     try {
       if (op === 'copyPath' || op === 'copyRel') {
         const text = op === 'copyRel' ? e.path : e.path ? `${cwd}${sep}${e.path.split('/').join(sep)}` : cwd
-        await navigator.clipboard.writeText(text)
-        return say('Path copied')
+        return say(await copyText(text) ? t('Path copied') : t('Couldn\'t copy it here: {path}', { path: text }))
       }
       if (op === 'newFile' || op === 'newFolder') {
         return setDialog({ title: `New ${op === 'newFile' ? 'file' : 'folder'} in ${e.path || rootName}`, action: 'Create', initial: '', submit: async (name) => {

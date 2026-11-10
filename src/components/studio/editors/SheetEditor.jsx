@@ -17,6 +17,7 @@ import '@univerjs/preset-sheets-find-replace/lib/index.css'
 import '@univerjs/preset-sheets-hyper-link/lib/index.css'
 import '@univerjs/preset-sheets-note/lib/index.css'
 import Icon from '../../Icon.jsx'
+import CopyButton from '../../CopyButton.jsx'
 import { AssistHead } from '../../AiAssist.jsx'
 import { api as call, useFleet } from '../../../api.js'
 import { t, tx, currentLang } from '../../../i18n/index.js'
@@ -508,7 +509,7 @@ function AskPanel({ hidden, preset, onShow, file, univer, sel, dark, onDirty, on
             )}
             {state.chart && <figure className="sh-fig"><figcaption>{state.chart.spec.title || t('Chart')}</figcaption><SheetChart chart={state.chart.view} dark={dark} /></figure>}
             {p.answer && !state.before.length && !state.chart
-              ? <div className="sh-acts"><button type="button" className="btn small" onClick={() => navigator.clipboard?.writeText(String(p.answer))}><Icon name="copy" size={12} /> {t('Copy')}</button><button type="button" className="ghost-btn" onClick={() => setState({ step: 'idle' })}>{t('Done')}</button></div>
+              ? <div className="sh-acts"><CopyButton text={String(p.answer)} className="btn small" /><button type="button" className="ghost-btn" onClick={() => setState({ step: 'idle' })}>{t('Done')}</button></div>
               : <div className="sh-acts"><button type="button" className="btn small primary" onClick={keep}><Icon name="check" size={12} /> {t('Keep')}</button><button type="button" className="btn small" onClick={putBack}>{t('Discard')}</button></div>}
           </div>
         )}

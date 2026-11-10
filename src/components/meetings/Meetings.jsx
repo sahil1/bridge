@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../Icon.jsx'
+import { copyText } from '../../copy.js'
 import Lightbox from '../Lightbox.jsx'
 import { Menu } from '../Rail.jsx'
 import { api, usePoll, onThisComputer, refetch } from '../../api.js'
@@ -866,7 +867,7 @@ export function MeetingPage({ id, onBack }) {
       )}
       {/* Saving by itself didn't work (the folder can't be written): why, and Save to try again. */}
       <button type="button" className={`path-chip mt-saved${data.saveError ? ' warn' : ''}`} onClick={() => (data.saved && !data.saveError ? (here() ? reveal() : setMsg({ text: tilde(data.saved) })) : save())}
-        onContextMenu={(e) => { if (!data.saved) return; e.preventDefault(); navigator.clipboard?.writeText(data.saved); setMsg({ text: t('Path copied') }) }}
+        onContextMenu={async (e) => { if (!data.saved) return; e.preventDefault(); setMsg(await copyText(data.saved) ? { text: t('Path copied') } : { error: true, text: t("Couldn't copy") }) }}
         title={data.saveError ? `${t("Couldn't save it to your notes folder:")} ${data.saveError}\n${t('Click to try again')}` : data.saved ? `${(data.savedFiles || [data.saved]).map(tilde).join('\n')}\n${t('Click to show in Finder; right-click to copy')}` : t('Not saved to your notes folder yet. Click to save it')}>
         <Icon name="folder" size={10} /> <span>{data.saveError ? t("Couldn't save") : savedDir || t('Not saved yet')}</span>
       </button>

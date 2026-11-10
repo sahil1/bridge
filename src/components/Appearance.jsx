@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import Icon from './Icon.jsx'
+import CopyButton from './CopyButton.jsx'
 import { useMedia } from './layout.jsx'
 import { THEMES, TEXT_SIZES, FONTS, DEFAULTS, useAppearance, resolve, isDark, validHex, luminance, themeString, parseThemeString } from '../appearance.js'
 import { PINS, usePins, setPin } from '../pins.js'
@@ -98,15 +98,11 @@ export default function Appearance() {
   const [a, save] = useAppearance()
   const bar = useMedia('(min-width: 900px)') && !cloudOnly // the desktop's top bar (App.jsx's wide)
   const [paste, setPaste] = useState('')
-  const [copied, setCopied] = useState(false)
   const dark = isDark(a.mode)
 
   const current = resolve(a) || { chrome: dark ? '#0f1115' : '#eef0f3', accent: dark ? '#4e82ef' : '#2f6fe0' }
   const setCustom = (patch) => save({ theme: 'custom', custom: { ...a.custom, ...patch } })
   const pasted = parseThemeString(paste)
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(themeString(current)); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* no clipboard */ }
-  }
 
   return (
     <div className="appearance">
@@ -178,7 +174,7 @@ export default function Appearance() {
             <h4>{t('Share a Theme')}</h4>
             <div className="ap-share">
               <code title={t('Send this to someone so they can use your theme')}>{themeString(current)}</code>
-              <button type="button" className="ghost-btn" onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={12} />{copied ? t('Copied') : t('Copy')}</button>
+              <CopyButton text={() => themeString(current)} />
               <form className="ap-paste" onSubmit={(e) => { e.preventDefault(); if (pasted) { save({ theme: 'custom', custom: pasted }); setPaste('') } }}>
                 <input value={paste} onChange={(e) => setPaste(e.target.value)} placeholder={t('Paste a theme…')} spellCheck={false} aria-label={t('Paste a theme')} />
                 <button className="ghost-btn strong" disabled={!pasted}>{t('Use')}</button>

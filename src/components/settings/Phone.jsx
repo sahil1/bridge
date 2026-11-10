@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
+import CopyButton from '../CopyButton.jsx'
 import { api, usePoll, viaRelay, relayComputers } from '../../api.js'
 import Relay, { KeepAwake } from './Relay.jsx'
 import { MachinesSettings } from '../Machines.jsx'
@@ -91,7 +92,7 @@ function PhoneSetup({ quiet, picked }) {
                 <li><b>Open it from the Home Screen</b> and turn on notifications below (Settings › Devices, on the phone).</li>
               </ol>
               <div className="st-row">
-                <button type="button" className="ghost-btn" onClick={() => navigator.clipboard?.writeText(st.url).catch(() => {})}><Icon name="copy" size={12} /> Copy link</button>
+                <CopyButton text={st.url} label="Copy link" />
                 <button type="button" className="ghost-btn" disabled={busy} onClick={() => toggle(false)}>Turn off phone access</button>
               </div>
               <KeepAwake />

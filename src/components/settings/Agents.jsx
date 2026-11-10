@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
+import CopyButton from '../CopyButton.jsx'
 import AgentMark from './agentMark.jsx'
 import { api } from '../../api.js'
 import SignInButton, { canSignIn } from '../SignIn.jsx'
@@ -44,7 +45,6 @@ export default function Agents({ onOpenAgent }) {
     try { const r = await api('/chats', { method: 'POST', body: { kind: a.kind, title: `${a.label} chat` } }); onOpenAgent?.(r.paneId) } catch (e) { setMsg({ error: e.message }) }
     setBusy(null)
   }
-  const copy = (t) => navigator.clipboard?.writeText(t).catch(() => {})
 
   if (!list) return <div className="skeleton-rows"><div /><div /><div /></div>
   const sorted = [...list].sort((a, b) => b.installed - a.installed)
@@ -92,7 +92,7 @@ export default function Agents({ onOpenAgent }) {
                   ? <button type="button" className="btn" disabled={busy === a.kind} onClick={() => start(a)}>{sub?.signedIn === false ? 'Open to sign in' : 'New chat'}</button>
                   : a.install
                     ? <>
-                        <button type="button" className="ghost-btn" onClick={() => copy(a.install)} title="Copy the command"><Icon name="copy" size={12} /></button>
+                        <CopyButton text={a.install} label={null} title="Copy the command" />
                         <button type="button" className="btn" disabled={busy === a.kind} onClick={() => install(a)}>{busy === a.kind ? 'Starting…' : 'Install'}</button>
                       </>
                     : null}

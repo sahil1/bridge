@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { markdownHtml } from '../../markdown.js'
 import Icon from '../Icon.jsx'
+import { copyText } from '../../copy.js'
 import { api } from '../../api.js'
 import { day } from './bulk.jsx'
 import { t } from '../../i18n/index.js'
@@ -34,10 +35,10 @@ const cited = (html, sources) => {
 }
 
 function Answer({ a, onOpen }) {
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState(null) // true | false: it couldn't
   const sources = a.sources || []
   const open = (n) => { const s = sources.find((x) => x.n === Number(n)); if (s) onOpen?.(s.id) }
-  const copy = async () => { try { await navigator.clipboard.writeText(a.a); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* not allowed */ } }
+  const copy = async () => { const done = await copyText(a.a); setCopied(done); setTimeout(() => setCopied(null), done ? 1500 : 4000) }
   return (
     <div className="mt-qa">
       <p className="mt-q">{a.q}</p>
@@ -53,7 +54,7 @@ function Answer({ a, onOpen }) {
                 </button>
               ))}
               <span className="mt-grow" />
-              <button type="button" className="ghost-btn" onClick={copy} aria-label={t('Copy the answer')}><Icon name={copied ? 'check' : 'copy'} size={12} /> {copied ? t('Copied') : t('Copy')}</button>
+              <button type="button" className="ghost-btn" onClick={copy} aria-label={t('Copy the answer')} title={copied === false ? t("Couldn't copy. Select the text and copy it yourself.") : undefined}><Icon name={copied ? 'check' : copied === false ? 'alert' : 'copy'} size={12} /> {copied ? t('Copied') : copied === false ? t("Couldn't copy") : t('Copy')}</button>
             </div>
           )}
         </>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
+import CopyButton from '../CopyButton.jsx'
 import UsageCounts from './UsageCounts.jsx'
 import CrashReports from './CrashReports.jsx'
 import { api, usePoll } from '../../api.js'
@@ -98,7 +99,7 @@ function Updates() {
               ? <p className="st-note ok"><Icon name="refresh" size={13} /> {t('Updating to {version}. Bridge AI closes and reopens by itself in a few seconds; your agents carry on where they were.', { version: u.latest })}</p>
               : u.how === 'app' || u.forApp
                 ? <div className="st-row"><button type="button" className="btn small primary" onClick={install}><Icon name="download" size={13} /> {t('Update to {version}', { version: u.latest })}</button>{news}</div>
-                : <div className="ab-cmd"><p className="muted small">{u.how === 'source' ? t('You run Bridge AI from a clone; update it in a terminal, in that folder:') : u.how === 'docker' ? t('Bridge AI runs in Docker; update it on that device, in the folder with docker-compose.yml:') : t('Update from a terminal (it asks for your password to install the package):')}</p><code>{u.command}</code><div className="st-row"><button type="button" className="btn small" onClick={() => navigator.clipboard?.writeText(u.command).catch(() => {})}><Icon name="copy" size={13} /> {t('Copy')}</button>{news}</div></div>
+                : <div className="ab-cmd"><p className="muted small">{u.how === 'source' ? t('You run Bridge AI from a clone; update it in a terminal, in that folder:') : u.how === 'docker' ? t('Bridge AI runs in Docker; update it on that device, in the folder with docker-compose.yml:') : t('Update from a terminal (it asks for your password to install the package):')}</p><code>{u.command}</code><div className="st-row"><CopyButton text={u.command} className="btn small" size={13} />{news}</div></div>
           )}
           {state?.error && <p className="st-note bad"><Icon name="alert" size={13} /> {state.error}</p>}
           <div className="st-row">
@@ -279,10 +280,8 @@ function Trials() {
 
 function Report() {
   const [d, setD] = useState(null)
-  const [copied, setCopied] = useState(false)
   useEffect(() => { api('/diagnostics').then(setD).catch(() => setD(null)) }, [])
   const text = d ? Object.entries(d).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') || 'none' : v}`).join('\n') : ''
-  const copy = () => navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) }).catch(() => {})
   const issue = `${REPO}/issues/new?template=bug.yml&diagnostics=${encodeURIComponent(text)}`
   return (
     <section className="st-sec" data-setting="report">
@@ -291,7 +290,7 @@ function Report() {
       <div className="st-row">
         <a className="btn small primary" href={issue} target="_blank" rel="noreferrer"><Icon name="alert" size={13} /> {t('Report a problem')}</a>
         <a className="btn small" href={`${REPO}/issues/new?template=feature.yml`} target="_blank" rel="noreferrer"><Icon name="sparkle" size={13} /> {t('Suggest an idea')}</a>
-        <button type="button" className="btn small" disabled={!d} onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={13} /> {copied ? t('Copied') : t('Copy details')}</button>
+        <CopyButton text={text} label={t('Copy details')} className="btn small" size={13} disabled={!d} />
       </div>
       <Advanced order={20}>
         <section className="st-sec" data-setting="report-details">
