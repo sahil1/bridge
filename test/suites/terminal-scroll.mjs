@@ -264,7 +264,8 @@ try {
     const fb = await ph.p.locator(`${TERM} .terminal-host`).filter({ visible: true }).first().boundingBox()
     await swipe(fb.x + 120, fb.y + 60, fb.y + fb.height - 60)
     const swiped = await until(() => /\x1b\[<64;/.test(sentTo()), 5000)
-    ok(!!swiped && (await top(ph.p) ?? 1e9) < 7900, 'phone: a swipe on the full-screen agent scrolls its own history, as the wheel does', { sent: JSON.stringify(sentTo()).slice(0, 120), top: await top(ph.p) })
+    const back = swiped && await until(async () => (await top(ph.p) ?? 1e9) < 7900, 5000)
+    ok(!!back, 'phone: a swipe on the full-screen agent scrolls its own history, as the wheel does', { sent: JSON.stringify(sentTo()).slice(0, 120), top: await top(ph.p) })
     await shot(ph.p, `${tag}terminal-scroll-phone`)
   }
   ok(withoutCutOff(ph.errors).length === 0, 'phone: no page errors', ph.errors)
