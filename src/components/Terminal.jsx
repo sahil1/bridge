@@ -19,11 +19,14 @@ import { t } from '../i18n/index.js'
 // The last 1,500 lines while you watch. Scrolling up, everything the runtime keeps (herdr's own
 // scrollback, the built-in runtime's 10,000 lines; at most 20,000) is read in before you reach the
 // top of those, so the scroll carries on through without stopping, on the line you were reading.
+// Drawing that many lines takes a moment on a slower computer, so it's drawn at the first pause in
+// your scrolling, or once you're near the top, never in the middle of a scroll.
 // An agent showing a full-screen view that takes the mouse (Claude Code's fullscreen one) keeps its
 // history itself: there the wheel and a swipe go to it, as in a terminal app, and it scrolls.
 const LIVE_LINES = 1500
 const MAX_LINES = 20000
-const NEAR_TOP = 500 // lines from the top of what's read in: read the rest in now
+const NEAR_TOP = 1000 // lines from the top of what's read in: read the rest in now
+const PAUSE = 150 // ms without scrolling: a pause, to draw what was read in
 
 // Turn what xterm.js emits for a keystroke or paste into herdr input steps.
 export function toSteps(data, typed = data.length === 1) {
@@ -139,7 +142,9 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
   const fastUntil = useRef(0)
   const kick = useRef(null)
   const pendingRef = useRef(null)
-  const growRef = useRef(null) // { want }: reading further back, asked for and not in yet
+  const growRef = useRef(null) // { want, ansi, live }: reading further back; ansi once it's in, not yet drawn
+  const scrolledAt = useRef(0) // when you last scrolled
+  const pauseRef = useRef(null) // the timer that draws it at a pause
   const allRef = useRef(false) // what's drawn is all the runtime keeps: nothing more above
   const modesRef = useRef(null) // { alt, mouse } as the built-in runtime says (herdr: unknown)
   const heldRef = useRef(false)
@@ -251,12 +256,21 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
     // at the top; at the very top of all of it, that's said.
     const scrolled = () => {
       if (paintingRef.current) return
+      scrolledAt.current = Date.now()
       const b = term.buffer.active
       if (b.viewportY >= b.baseY - 1) {
         setHeld(false)
         setMore(null)
         growRef.current = null
+        clearTimeout(pauseRef.current)
         if (pendingRef.current != null) paint(pendingRef.current)
+        return
+      }
+      // Further back is in: drawn near the top, or once you pause.
+      if (growRef.current?.ansi != null) {
+        clearTimeout(pauseRef.current)
+        if (b.viewportY <= term.rows * 2) drawHistory()
+        else pauseRef.current = setTimeout(drawHistory, PAUSE)
         return
       }
       if (b.viewportY <= NEAR_TOP && !allRef.current && !growRef.current) {
@@ -336,7 +350,7 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
       sub.dispose(); onScroll.dispose(); ro.disconnect(); mo.disconnect(); mq.removeEventListener('change', applyTheme)
       host.removeEventListener('bridge-type', onType)
       host.removeEventListener('wheel', onWheel, { capture: true })
-      untouch(); clearTimeout(wheelT)
+      untouch(); clearTimeout(wheelT); clearTimeout(pauseRef.current)
       ta?.removeEventListener('focus', onFocus); ta?.removeEventListener('blur', onBlur)
       finder.detach()
       disposeTerm(term); termRef.current = null; lastRef.current = ''
@@ -395,6 +409,18 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
     })
   }
 
+  // What was read further back, drawn now, the view where you were reading, the latest below it.
+  const drawHistory = () => {
+    const g = growRef.current
+    clearTimeout(pauseRef.current)
+    if (!termRef.current || g?.ansi == null) return
+    growRef.current = null
+    lastRef.current = g.live
+    setHeld(false)
+    setMore(null)
+    paint(g.ansi, { history: true })
+  }
+
   // Asked to take the keyboard (e.g. after a slash command opened a picker in the agent).
   useEffect(() => { if (focusKey && active) setTimeout(() => termRef.current?.focus(), 80) }, [focusKey, active])
 
@@ -402,6 +428,7 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
     lastRef.current = ''
     pendingRef.current = null
     growRef.current = null
+    clearTimeout(pauseRef.current)
     allRef.current = false
     modesRef.current = null
     setHeld(false)
@@ -424,7 +451,7 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
       let atBottom = true
       try {
         // The last lines (light, read often), or everything kept when you've scrolled near the top.
-        const grow = growRef.current
+        const grow = growRef.current?.ansi == null ? growRef.current : null
         const r = await api(`/agents/${encodeURIComponent(paneId)}/screen?lines=${grow ? grow.want : LIVE_LINES}`)
         const { ansi, cols } = r
         modesRef.current = typeof r.alt === 'boolean' ? { alt: r.alt, mouse: !!r.mouse } : null
@@ -436,12 +463,11 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
           // What the light read would have been: its last lines.
           const live = grow ? ansi.split('\n').slice(-LIVE_LINES).join('\n') : ansi
           if (grow && growRef.current === grow) {
-            // Further back, as asked: in now, the view where you were reading, the latest below it.
-            growRef.current = null
-            lastRef.current = live
-            setHeld(false)
-            setMore(null)
-            paint(ansi, { history: true })
+            // Further back, as asked: drawn now, or at the first pause while you're scrolling.
+            grow.ansi = ansi
+            grow.live = live
+            if (Date.now() - scrolledAt.current < PAUSE && b.viewportY > term.rows * 2) pauseRef.current = setTimeout(drawHistory, PAUSE)
+            else drawHistory()
           } else if (live !== lastRef.current) {
             // Reading back through history: hold still and offer a jump to the latest.
             if (!atBottom && lastRef.current) { pendingRef.current = live; setHeld(true) } else paint(live)
