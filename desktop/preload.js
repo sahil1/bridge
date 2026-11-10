@@ -74,6 +74,7 @@ if (!own) {
   // floating card fits its size, hides, takes notes for a call and opens things in the main window.
   recording: (on) => ipcRenderer.invoke('bridge:recording', !!on),
   floatSize: (w, h, low) => ipcRenderer.send('bridge:float-size', w, h, low),
+  floatResize: (edge) => ipcRenderer.send('bridge:float-resize', typeof edge === 'string' ? edge : null),
   // The page's zoom (⌘+ and ⌘− in the main window zoom the card too): what's left of the screen,
   // in its own pixels.
   zoom: () => { try { return webFrame.getZoomFactor() } catch { return 1 } },
