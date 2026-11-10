@@ -176,19 +176,24 @@ try {
   await card.evaluate(() => localStorage.setItem('cc-lang', JSON.stringify('en')))
 
   // ---------- A short screen ----------
-  // Opened, as tall as it gets (the call ended with no sound, AI Assist's suggestion), on a screen
-  // 520 points tall: what's under the bar scrolls, and the window is no taller than the screen, at
-  // 100% and at 144%.
+  // Opened, as tall as it gets (the call ended with no sound, AI Assist's suggestion), and a meeting
+  // about to start with its prep, on a screen 520 points tall: what's under the bar scrolls, and the
+  // window is no taller than the screen, from 100% to 207%. (A Mac on CI, at 207%: the prep was cut
+  // off at the bottom.)
   await ctx.addInitScript(() => { Object.defineProperty(screen, 'availHeight', { get: () => 520 }) })
-  calls = KINDS[2].calls
-  await card.reload()
-  await card.waitForSelector(KINDS[2].ready, { timeout: 15000 }).catch(() => {})
-  for (const level of [0, 2]) {
-    await zoomTo(level)
-    const z = await zoomOf()
-    const l = await until(async () => { const x = await look(); return whole(x) && (await sizeOf())[1] <= 520 - 16 ? x : null }, 4000, 100) || await look()
-    const tall = (await sizeOf())[1]
-    ok(whole(l) && tall <= 504 && !l.past.length, `a screen 520 points tall at ${Math.round(z * 100)}%: the card fits on it (its window ${tall} tall), whole`, l)
+  for (const k of [KINDS[2], KINDS[4]]) {
+    calls = k.calls
+    await card.reload()
+    await card.waitForSelector(k.ready, { timeout: 15000 }).catch(() => {})
+    const bad = []
+    for (const level of [0, 2, 4]) {
+      await zoomTo(level)
+      const z = await zoomOf()
+      const l = await until(async () => { const x = await look(); return whole(x) && (await sizeOf())[1] <= 520 - 16 ? x : null }, 4000, 100) || await look()
+      const tall = (await sizeOf())[1]
+      if (!whole(l) || tall > 504 || l.past.length) bad.push({ zoom: `${Math.round(z * 100)}%`, tall, ...l })
+    }
+    ok(!bad.length, `${k.name}, on a screen 520 points tall from 100% to 207%: it fits on it, whole`, bad)
   }
   await zoomTo(0)
 } catch (x) {

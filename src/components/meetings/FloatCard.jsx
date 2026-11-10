@@ -77,19 +77,20 @@ export default function FloatCard() {
     return () => ch.close()
   }, [])
   // The window fits the card (the desktop app makes it the card's size times its zoom). Open, what's
-  // under the bar scrolls past what's left of the screen: the screen's height in the page's pixels
+  // under the bar (a meeting's prep, before it starts) scrolls past what's left of the screen: the screen's height in the page's pixels
   // (its points over the zoom), less the desktop app's 8 points above and below the window, the 12
   // pixels around the card and the rest of the card (its bar, AI Assist's suggestion). A fixed
   // allowance for the rest asked for more than the screen when the suggestion took three lines,
-  // and zoomed, and the window was cut off at the bottom.
+  // and zoomed, and the window was cut off at the bottom. However little room is left, it scrolls
+  // rather than run past the screen.
   useLayoutEffect(() => {
     const el = card.current
     if (!el) return
     const fit = () => {
-      const more = el.querySelector('.fc-more')
+      const more = el.querySelector('.fc-more, .fc-scroll')
       if (more) {
         const rest = el.getBoundingClientRect().height - more.getBoundingClientRect().height
-        el.style.setProperty('--fc-more-max', `${Math.max(120, Math.floor(((window.screen?.availHeight || 900) - 16) / zoom - 24 - rest))}px`)
+        el.style.setProperty('--fc-more-max', `${Math.max(40, Math.floor(((window.screen?.availHeight || 900) - 16) / zoom - 24 - rest))}px`)
       }
       const b = el.getBoundingClientRect()
       app().floatSize?.(Math.ceil(b.width) + 24, Math.ceil(b.height) + 24, !!upAt.current)
@@ -287,7 +288,7 @@ export default function FloatCard() {
           </span>
           {hide}
         </div>
-        <PrepGlance e={e} onOpenEvent={app().floatOpen ? () => app().floatOpen({ event: { date: day, id: e.id } }) : null} />
+        <div className="fc-scroll"><PrepGlance e={e} onOpenEvent={app().floatOpen ? () => app().floatOpen({ event: { date: day, id: e.id } }) : null} /></div>
       </>
     )
   } else {
