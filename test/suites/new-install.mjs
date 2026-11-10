@@ -19,7 +19,7 @@ import { execFileSync } from 'node:child_process'
 import { startKit, startModel, checks, until, browser, page, shot, IS_WIN, IS_MAC, TEST, devToolsStandIn } from '../lib/harness.mjs'
 import { signInScreen, firstRun, SIGN_IN_ENDED } from '../../server/firstrun.js'
 
-const { ok, done } = checks('new-install')
+const { ok, skip, done } = checks('new-install')
 
 // Signing in as Claude Code and Codex do (stand-ins/claude.cjs, stand-ins/codex.cjs), signed out,
 // with the stand-in open first on the PATH (bin/opened.log): no real browser opens. Their sign-in
@@ -423,11 +423,17 @@ try {
       for (const t of await signInTabs(k)) await k.api(`/tabs/${t.tabId}/close`, {})
       x = await says(claude, /The sign-in was closed before you signed in/)
       ok(!!x && await claude.locator('button', { hasText: 'Try again' }).count() === 1, 'its tab closed before signing in: said so, with Try again', x || (await claude.innerText()))
-      // Codex: the browser's way, or a one-time code instead.
+      // Codex: the browser's way, or a one-time code instead. A computer with no screen (Linux with no
+      // display, as on CI) has no browser to open: there it's the one-time code from the start
+      // (server/accounts.js NO_BROWSER).
       await codex.locator('button', { hasText: 'Sign in' }).click()
-      x = await says(codex, /Your browser opened to sign in with your ChatGPT account/)
-      ok(!!x && /can't connect to localhost/.test(x) && openedBy(k).some((u) => /auth\.openai\.com\/oauth\/authorize\?.*redirect_uri=http%3A%2F%2Flocalhost/.test(u)), 'Codex: its browser sign-in, and a way out when the browser can\'t come back to it', x || (await codex.innerText()))
-      await codex.locator('button', { hasText: 'Sign in with a code instead' }).click()
+      if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
+        skip('Codex: its browser sign-in, and a way out when the browser can\'t come back to it', 'no screen here: Codex signs in with a one-time code from the start')
+      } else {
+        x = await says(codex, /Your browser opened to sign in with your ChatGPT account/)
+        ok(!!x && /can't connect to localhost/.test(x) && openedBy(k).some((u) => /auth\.openai\.com\/oauth\/authorize\?.*redirect_uri=http%3A%2F%2Flocalhost/.test(u)), 'Codex: its browser sign-in, and a way out when the browser can\'t come back to it', x || (await codex.innerText()))
+        await codex.locator('button', { hasText: 'Sign in with a code instead' }).click()
+      }
       x = await says(codex, /ABCD-12345/)
       const where = await codex.locator('a', { hasText: 'Open the sign-in page' }).getAttribute('href').catch(() => null)
       const tabs = (await signInTabs(k)).filter((t) => /Codex/.test(t.label))
