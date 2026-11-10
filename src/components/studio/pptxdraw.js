@@ -10,6 +10,7 @@ import { css, fontCss, esc } from './pptxdoc.js'
 export const SLIDE_CSS = `.px-slide{position:relative;overflow:hidden;box-sizing:border-box;line-height:normal;text-align:left;color:#000;-webkit-font-smoothing:antialiased;font-kerning:normal}
 .px-slide *,.px-editing *{box-sizing:border-box}
 .px-slide p,.px-editing p{margin:0;padding:0}
+.px-bg{position:absolute;inset:0;overflow:hidden;pointer-events:none}
 .px-o{position:absolute}
 .px-o>svg{position:absolute;inset:0;overflow:visible}
 .px-tx{position:absolute;display:flex;flex-direction:column;overflow:visible}
@@ -128,12 +129,59 @@ function customPath(paths, w, h) {
 
 // ---------- Fills and lines ----------
 const DASH = { dash: [4, 3], dot: [1, 2], dashDot: [4, 3, 1, 3], lgDash: [8, 3], lgDashDot: [8, 3, 1, 3], lgDashDotDot: [8, 3, 1, 3, 1, 3], sysDash: [3, 1], sysDot: [1, 1], sysDashDot: [3, 1, 1, 1], sysDashDotDot: [3, 1, 1, 1, 1, 1] }
-function svgFill(fill, defs, id) {
+// PowerPoint's patterns (pattFill), each a tile of 8 by 8 dots: which dots are the foreground's.
+// The percentages spread their dots evenly (an ordered dither); lines, grids, checks and bricks as
+// drawn; the rest, which are pictures of their own (plaid, weave, waves…), as dots as dense.
+const BAYER = [[0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26], [12, 44, 4, 36, 14, 46, 6, 38], [60, 28, 52, 20, 62, 30, 54, 22], [3, 35, 11, 43, 1, 33, 9, 41], [51, 19, 59, 27, 49, 17, 57, 25], [15, 47, 7, 39, 13, 45, 5, 37], [63, 31, 55, 23, 61, 29, 53, 21]]
+const dn = (x, y) => (x - y + 8) % 8, up = (x, y) => (x + y) % 8
+const PATTERN = {
+  horz: (x, y) => y === 0, ltHorz: (x, y) => y % 4 === 0, narHorz: (x, y) => y % 2 === 0, dkHorz: (x, y) => y % 4 < 2, dashHorz: (x, y) => y % 4 === 0 && (x + (y % 8 ? 4 : 0)) % 8 < 4,
+  vert: (x) => x === 0, ltVert: (x) => x % 4 === 0, narVert: (x) => x % 2 === 0, dkVert: (x) => x % 4 < 2, dashVert: (x, y) => x % 4 === 0 && (y + (x % 8 ? 4 : 0)) % 8 < 4,
+  dnDiag: (x, y) => dn(x, y) === 0, ltDnDiag: (x, y) => dn(x, y) % 4 === 0, dkDnDiag: (x, y) => dn(x, y) % 4 < 2, wdDnDiag: (x, y) => dn(x, y) < 3, dashDnDiag: (x, y) => dn(x, y) % 4 === 0 && y % 4 < 2,
+  upDiag: (x, y) => up(x, y) === 7, ltUpDiag: (x, y) => up(x, y) % 4 === 3, dkUpDiag: (x, y) => up(x, y) % 4 >= 2, wdUpDiag: (x, y) => up(x, y) >= 5, dashUpDiag: (x, y) => up(x, y) % 4 === 3 && y % 4 < 2,
+  cross: (x, y) => x === 0 || y === 0, lgGrid: (x, y) => x === 0 || y === 0, smGrid: (x, y) => x % 4 === 0 || y % 4 === 0, dotGrid: (x, y) => (y === 0 && x % 2 === 0) || (x === 0 && y % 2 === 0),
+  diagCross: (x, y) => dn(x, y) === 0 || up(x, y) === 7, openDmnd: (x, y) => dn(x, y) === 0 || up(x, y) === 7, smCheck: (x, y) => ((x >> 1) + (y >> 1)) % 2 === 0, lgCheck: (x, y) => ((x >> 2) + (y >> 2)) % 2 === 0,
+  horzBrick: (x, y) => y === 0 || y === 4 || (x === 0 && y < 4) || (x === 4 && y > 4), diagBrick: (x, y) => up(x, y) === 7 || (dn(x, y) === 0 && y >= 4),
+  solidDmnd: (x, y) => Math.abs(x - 3.5) + Math.abs(y - 3.5) <= 3.5, dotDmnd: (x, y) => (x % 4 === 0 && y % 4 === 0) || (x % 4 === 2 && y % 4 === 2),
+}
+const PATTERN_DENSE = { smConfetti: 0.2, lgConfetti: 0.35, plaid: 0.5, sphere: 0.5, weave: 0.5, divot: 0.15, shingle: 0.3, wave: 0.3, trellis: 0.5, zigZag: 0.3 }
+// A pattern's tile as a picture of 8 by 8 dots (a BMP): a picture, unlike drawn shapes, keeps its
+// dots' mix when it's made small (a thumbnail) in every browser. A see-through colour is mixed with
+// white first, as on a slide.
+function patternUrl(f) {
+  const pct = /^pct(\d+)$/.exec(f.prst)
+  const on = PATTERN[f.prst] || ((x, y) => BAYER[y][x] < (pct ? Number(pct[1]) / 100 : PATTERN_DENSE[f.prst] ?? 0.5) * 64)
+  const bgr = (c) => [4, 2, 0].map((i) => Math.round(parseInt(c.hex.slice(i, i + 2), 16) * c.alpha + 255 * (1 - c.alpha)))
+  const fg = bgr(f.fg), bg = bgr(f.bg)
+  const b = new Uint8Array(54 + 8 * 8 * 3)
+  const put = (at, v, n) => { for (let i = 0; i < n; i++) b[at + i] = (v >>> (8 * i)) & 255 }
+  b[0] = 0x42; b[1] = 0x4d; put(2, b.length, 4); put(10, 54, 4); put(14, 40, 4); put(18, 8, 4); put(22, -8, 4); put(26, 1, 2); put(28, 24, 2); put(34, 192, 4)
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) b.set(on(x, y) ? fg : bg, 54 + (y * 8 + x) * 3)
+  return `data:image/bmp;base64,${btoa(String.fromCharCode(...b))}`
+}
+const cssUrl = (u) => `url("${String(u).replace(/["\\\n]/g, '')}")`
+// A gradient as CSS, in a box w by h: a linear one at its angle (0 left to right, 90 top to bottom;
+// scaled, as if the box were square and then stretched), a radial one from its focus, its first
+// stop there and its last at the far corner (a rectangular one as an ellipse to its sides).
+function gradCss(f, w, h) {
+  const stops = f.stops.map((s) => `${css(s.color)} ${n2(s.at)}%`).join(', ')
+  if (f.radial) {
+    const at = `at ${n2((f.focus?.x ?? 0.5) * 100)}% ${n2((f.focus?.y ?? 0.5) * 100)}%`
+    const centred = Math.abs((f.focus?.x ?? 0.5) - 0.5) < 0.01 && Math.abs((f.focus?.y ?? 0.5) - 0.5) < 0.01
+    return `radial-gradient(${f.path === 'circle' || !f.path ? 'circle farthest-corner' : centred ? 'closest-side' : 'farthest-corner'} ${at}, ${stops})`
+  }
+  let deg = f.angle
+  if (f.scaled && w > 0 && h > 0) { const t = (deg * Math.PI) / 180; deg = (Math.atan2(Math.sin(t) / h, Math.cos(t) / w) * 180) / Math.PI }
+  return `linear-gradient(${n2(deg + 90)}deg, ${stops})`
+}
+// What a picture fill's look does to it, as CSS (grey, brighter, more contrasting).
+const filterCss = (p) => { const f = [p.gray ? 'grayscale(1)' : '', p.lum?.bright ? `brightness(${n2(1 + p.lum.bright)})` : '', p.lum?.contrast ? `contrast(${n2(1 + p.lum.contrast)})` : ''].filter(Boolean); return f.length ? `filter:${f.join(' ')};` : '' }
+function svgFill(fill, defs, id, box) {
   if (!fill || fill.type === 'none' || fill.type === 'group') return 'none'
   if (fill.type === 'solid') return css(fill.color)
   if (fill.type === 'grad' && fill.stops.length) {
     const stops = fill.stops.map((s) => `<stop offset="${n2(s.at)}%" stop-color="#${s.color.hex}"${s.color.alpha < 1 ? ` stop-opacity="${n2(s.color.alpha)}"` : ''}/>`).join('')
-    if (fill.radial) defs.push(`<radialGradient id="${id}">${stops}</radialGradient>`)
+    if (fill.radial) defs.push(`<radialGradient id="${id}" cx="${n2(fill.focus?.x ?? 0.5)}" cy="${n2(fill.focus?.y ?? 0.5)}" r="${fill.path === 'circle' ? 0.71 : 0.5}">${stops}</radialGradient>`)
     else {
       const t = (fill.angle * Math.PI) / 180
       const x = Math.cos(t) / 2, y = Math.sin(t) / 2
@@ -141,8 +189,16 @@ function svgFill(fill, defs, id) {
     }
     return `url(#${id})`
   }
+  if (fill.type === 'pattern') {
+    defs.push(`<pattern id="${id}" patternUnits="userSpaceOnUse" width="8" height="8"><image href="${esc(patternUrl(fill))}" width="8" height="8"/></pattern>`)
+    return `url(#${id})`
+  }
   if (fill.type === 'blip' && fill.url) {
-    defs.push(`<pattern id="${id}" patternContentUnits="objectBoundingBox" width="1" height="1"><image href="${esc(fill.url)}" width="1" height="1" preserveAspectRatio="none"/></pattern>`)
+    const look = `${fill.alpha < 1 ? ` opacity="${n2(fill.alpha)}"` : ''}`
+    if (fill.tile && fill.size && box) {
+      const tw = Math.max(1, fill.size.w * fill.tile.sx), th = Math.max(1, fill.size.h * fill.tile.sy)
+      defs.push(`<pattern id="${id}" patternUnits="userSpaceOnUse" x="${n2(fill.tile.tx)}" y="${n2(fill.tile.ty)}" width="${n2(tw)}" height="${n2(th)}"><image href="${esc(fill.url)}" width="${n2(tw)}" height="${n2(th)}" preserveAspectRatio="none"${look}/></pattern>`)
+    } else defs.push(`<pattern id="${id}" patternContentUnits="objectBoundingBox" width="1" height="1"><image href="${esc(fill.url)}" width="1" height="1" preserveAspectRatio="none"${look}/></pattern>`)
     return `url(#${id})`
   }
   return 'none'
@@ -150,9 +206,36 @@ function svgFill(fill, defs, id) {
 export function cssFill(fill) {
   if (!fill || fill.type === 'none') return 'transparent'
   if (fill.type === 'solid') return css(fill.color)
-  if (fill.type === 'grad' && fill.stops.length) return `${fill.radial ? 'radial-gradient(circle' : `linear-gradient(${n2(fill.angle + 90)}deg`}, ${fill.stops.map((s) => `${css(s.color)} ${n2(s.at)}%`).join(', ')})`
-  if (fill.type === 'blip' && fill.url) return `center / 100% 100% no-repeat url("${String(fill.url).replace(/["\\\n]/g, '')}")`
+  if (fill.type === 'grad' && fill.stops.length) return gradCss(fill, 0, 0)
+  if (fill.type === 'pattern') return `${cssUrl(patternUrl(fill))} 0 0 / 8px 8px repeat`
+  if (fill.type === 'blip' && fill.url) return `center / 100% 100% no-repeat ${cssUrl(fill.url)}`
   return 'transparent'
+}
+
+// ---------- A slide's background ----------
+// Drawn as PowerPoint draws it, on white (what's see-through in it shows white): a colour, a
+// gradient, a pattern, or a picture stretched over the slide (into its fillRect, cropped by its
+// srcRect) or tiled at its own size from its corner, see-through, grey or brighter as it says.
+// One layer under everything else on the slide.
+export function bgHtml(bg, w, h) {
+  if (!bg) return ''
+  const layer = (style) => `<div class="px-bg" style="${esc(style)}"></div>`
+  if (bg.type === 'solid' && bg.color) return layer(`background:${css(bg.color)}`)
+  if (bg.type === 'grad' && bg.stops.length) return layer(`background:${gradCss(bg, w, h)}`)
+  if (bg.type === 'pattern') return layer(`background:${cssFill(bg)}`)
+  if (bg.type !== 'blip' || !bg.url) return ''
+  const look = `${bg.alpha < 1 ? `opacity:${n2(bg.alpha)};` : ''}${filterCss(bg)}`
+  if (bg.tile && bg.size) {
+    const tw = Math.max(1, bg.size.w * bg.tile.sx), th = Math.max(1, bg.size.h * bg.tile.sy)
+    const a = bg.tile.algn
+    const x = (/^(tr|r|br)$/.test(a) ? w - tw : /^(t|ctr|b)$/.test(a) ? (w - tw) / 2 : 0) + bg.tile.tx
+    const y = (/^(bl|b|br)$/.test(a) ? h - th : /^(l|ctr|r)$/.test(a) ? (h - th) / 2 : 0) + bg.tile.ty
+    return layer(`${look}background:${cssUrl(bg.url)} ${n2(x)}px ${n2(y)}px / ${n2(tw)}px ${n2(th)}px repeat`)
+  }
+  const i = bg.inset || { l: 0, t: 0, r: 0, b: 0 }, c = bg.crop || { l: 0, t: 0, r: 0, b: 0 }
+  const bw = w * (1 - i.l - i.r), bh = h * (1 - i.t - i.b)
+  const iw = bw / Math.max(0.01, 1 - c.l - c.r), ih = bh / Math.max(0.01, 1 - c.t - c.b)
+  return layer(`${look}left:${n2(i.l * w)}px;top:${n2(i.t * h)}px;width:${n2(bw)}px;height:${n2(bh)}px;background:${cssUrl(bg.url)} ${n2(-c.l * iw)}px ${n2(-c.t * ih)}px / ${n2(iw)}px ${n2(ih)}px no-repeat`)
 }
 const ARROW_SIZE = { sm: 2, med: 3, lg: 5 }
 function marker(end, color, id, defs, start) {
@@ -214,7 +297,7 @@ function tableHtml(o, opts) {
     if (c.hMerge || c.vMerge) return ''
     const b = c.text?.body || { l: 7.2, r: 7.2, t: 3.6, b: 3.6, anchor: 't' }
     const inner = c.text ? c.text.paras.map((p, i) => { const a = paraAttrs(p, i, b); return `<p data-p="${i}" style="${a.style}"${a.bu}>${runsHtml(p, opts)}</p>` }).join('') : ''
-    return `<td data-cell="${ri}:${ci}"${c.span > 1 ? ` colspan="${c.span}"` : ''}${c.rowSpan > 1 ? ` rowspan="${c.rowSpan}"` : ''} style="background:${cssFill(c.fill)};border-left:${borderCss(c.border.l)};border-right:${borderCss(c.border.r)};border-top:${borderCss(c.border.t)};border-bottom:${borderCss(c.border.b)};padding:${n2(b.t)}px ${n2(b.r)}px ${n2(b.b)}px ${n2(b.l)}px;vertical-align:${b.anchor === 'ctr' ? 'middle' : b.anchor === 'b' ? 'bottom' : 'top'}"><div class="px-cell"${opts.editCell === `${ri}:${ci}` ? ' style="visibility:hidden"' : ''}>${inner}</div></td>`
+    return `<td data-cell="${ri}:${ci}"${c.span > 1 ? ` colspan="${c.span}"` : ''}${c.rowSpan > 1 ? ` rowspan="${c.rowSpan}"` : ''} style="background:${esc(cssFill(c.fill))};border-left:${borderCss(c.border.l)};border-right:${borderCss(c.border.r)};border-top:${borderCss(c.border.t)};border-bottom:${borderCss(c.border.b)};padding:${n2(b.t)}px ${n2(b.r)}px ${n2(b.b)}px ${n2(b.l)}px;vertical-align:${b.anchor === 'ctr' ? 'middle' : b.anchor === 'b' ? 'bottom' : 'top'}"><div class="px-cell"${opts.editCell === `${ri}:${ci}` ? ' style="visibility:hidden"' : ''}>${inner}</div></td>`
   }).join('')}</tr>`).join('')
   return `<table class="px-table" style="left:0;top:0;width:${n2(t.cols.reduce((a, b) => a + b, 0))}px"><colgroup>${cols}</colgroup><tbody>${rows}</tbody></table>`
 }
@@ -330,7 +413,7 @@ function objHtml(o, box, opts, top) {
   const paths = g.prst === 'custom' ? customPath(g.paths || [], box.w, box.h) : [{ ...presetPath(g.prst, box.w, box.h, g.av), fill: true, stroke: true }]
   const ln = o.line && !o.line.none && o.line.color ? o.line : null
   const lw = ln ? Math.max(0.75, ln.width ?? 0.75) : 0
-  const fill = o.kind === 'pic' || o.kind === 'cxn' ? 'none' : svgFill(o.fill, defs, `${id}f`)
+  const fill = o.kind === 'pic' || o.kind === 'cxn' ? 'none' : svgFill(o.fill, defs, `${id}f`, box)
   const lc = ln ? css(ln.color) : 'none'
   const dash = ln?.dash && DASH[ln.dash] ? ` stroke-dasharray="${DASH[ln.dash].map((d) => n2(d * lw)).join(' ')}"` : ''
   const ends = ln ? `${marker(ln.head, lc, `${id}h`, defs, true)}${marker(ln.tail, lc, `${id}t`, defs, false)}` : ''
@@ -338,7 +421,8 @@ function objHtml(o, box, opts, top) {
     const c = o.img.crop || { l: 0, t: 0, r: 0, b: 0 }
     const iw = box.w / Math.max(0.01, 1 - c.l - c.r), ih = box.h / Math.max(0.01, 1 - c.t - c.b)
     const clip = g.prst === 'ellipse' ? 'border-radius:50%;' : g.prst === 'roundRect' ? `border-radius:${n2(Math.min(box.w, box.h) * 0.16667)}px;` : ''
-    const img = o.img.url ? `<img alt="${esc(o.descr || o.name)}" src="${esc(o.img.url)}" draggable="false" style="left:${n2(-c.l * iw)}px;top:${n2(-c.t * ih)}px;width:${n2(iw)}px;height:${n2(ih)}px">` : `<div class="px-missing">${esc(opts.words?.picture || 'Picture')}</div>`
+    const look = `${o.img.alpha < 1 ? `opacity:${n2(o.img.alpha)};` : ''}${filterCss(o.img)}`
+    const img = o.img.url ? `<img alt="${esc(o.descr || o.name)}" src="${esc(o.img.url)}" draggable="false" style="left:${n2(-c.l * iw)}px;top:${n2(-c.t * ih)}px;width:${n2(iw)}px;height:${n2(ih)}px;${look}">` : `<div class="px-missing">${esc(opts.words?.picture || 'Picture')}</div>`
     parts.push(`<div class="px-pic" style="inset:0;${clip}${flip ? `transform:${flip};` : ''}">${img}${o.img.video ? '<svg viewBox="0 0 24 24" style="position:absolute;left:50%;top:50%;width:48px;height:48px;margin:-24px 0 0 -24px"><circle cx="12" cy="12" r="11" fill="rgb(0 0 0/.55)"/><path d="M10 8l6 4-6 4z" fill="#fff"/></svg>' : ''}</div>`)
   }
   const drawShape = o.kind !== 'pic' || ln
@@ -361,10 +445,9 @@ function objHtml(o, box, opts, top) {
 // ({ picture, chart, diagram, other }: said where one can't be drawn) }.
 export function slideHtml(view, opts = {}) {
   const o2 = { ...opts, uid: (opts.uid ?? Math.random().toString(36).slice(2, 7)) }
-  const bg = cssFill(view.bg)
   const under = view.under.map((o) => objHtml(o, o, o2, false)).join('')
   const objs = view.objs.map((o) => objHtml(o, o, o2, true)).join('')
-  return `<div class="px-slide" style="width:${n2(view.w)}px;height:${n2(view.h)}px;background:${bg === 'transparent' ? '#fff' : bg}">${under}${objs}</div>`
+  return `<div class="px-slide" style="width:${n2(view.w)}px;height:${n2(view.h)}px;background:#fff">${bgHtml(view.bg, view.w, view.h)}${under}${objs}</div>`
 }
 // What a slide has that can't be drawn here: { pictures, charts, diagrams, other }.
 export function missingIn(view) {

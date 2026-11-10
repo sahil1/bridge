@@ -1112,6 +1112,8 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
   const canvasHtml = useMemo(() => slideHtml(view, { number: at + 1, prompts: !readOnly, promptOf, editing: edit?.at, editCell: edit?.cell ? edit.cell.join(':') : null, font, words, uid: 'cv' }), [view, at, readOnly, promptOf, edit, font, words])
   const missing = useMemo(() => slides.reduce((acc, s) => { const m = missingIn(viewOf(s)); return acc + m.pictures + m.charts + m.diagrams + m.other }, 0), [slides, viewOf])
   const lost = slides.filter((s) => P.animationsLost(s)).length
+  // A background picture that can't be drawn here (an EMF, a TIFF): its kinds, said once.
+  const bgLost = useMemo(() => [...new Set(slides.map((s) => viewOf(s).bgLost).filter(Boolean))], [slides, viewOf])
   const editBox = (() => {
     if (!edit) return null
     const o = objAt(edit.at, viewOf(slide))
@@ -1269,7 +1271,7 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
       </div>
       {find && <DeckFind key={find.n} count={found.list.length} at={found.at} replace={find.replace} on={findOn} onClose={() => { setFind(null); setFound({ list: [], at: 0 }) }} />}
       {msg && <p className={`small sd-note${msg.error ? ' error-text' : ''}`} role={msg.error ? 'alert' : 'status'}>{msg.text} {msg.open && <button type="button" className="link-btn" onClick={() => onOpen?.({ root: file.root, path: msg.open })}>{t('Open it')}</button>} <button type="button" className="link-btn" onClick={() => setMsg(null)}>{t('Close')}</button></p>}
-      {(missing > 0 || lost > 0) && <p className="small sd-note sd-deck-said"><Icon name="info" size={12} /> {missing > 0 && (missing === 1 ? t('1 thing on its slides isn\'t shown here (a chart, diagram or picture Studio can\'t draw); it\'s kept in the file as it is.') : t('{n} things on its slides aren\'t shown here (charts, diagrams or pictures Studio can\'t draw); they\'re kept in the file as they are.', { n: missing }))} {lost > 0 && t('Animations on {n} slides name something taken off them, so they go when it\'s saved.', { n: lost })}</p>}
+      {(missing > 0 || lost > 0 || bgLost.length > 0) && <p className="small sd-note sd-deck-said"><Icon name="info" size={12} /> {bgLost.length > 0 && t('A background picture on its slides can\'t be shown here ({kind}): they show the theme\'s background colour in its place, and the picture is kept in the file as it is.', { kind: bgLost.map((k) => (k === 'missing' ? t('it isn\'t in the file') : k)).join(', ') })} {missing > 0 && (missing === 1 ? t('1 thing on its slides isn\'t shown here (a chart, diagram or picture Studio can\'t draw); it\'s kept in the file as it is.') : t('{n} things on its slides aren\'t shown here (charts, diagrams or pictures Studio can\'t draw); they\'re kept in the file as they are.', { n: missing }))} {lost > 0 && t('Animations on {n} slides name something taken off them, so they go when it\'s saved.', { n: lost })}</p>}
       <div className="sd-deck-body">
         <ol className="sd-strip" ref={stripRef} aria-label={t('Slides')} aria-multiselectable="true">
           {slides.map((s, i) => <Thumb key={s.key} s={s} i={i} draw={draw} w={160} h={Math.round((160 * H) / W)} on={i === at} picked={picked.has(s.key)} readOnly={readOnly}
