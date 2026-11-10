@@ -52,6 +52,11 @@
    is short (a small window, a banner, the Agents panel under it), the page scrolls instead of
    squeezing them to a sliver. */
 .mt-page > .mt-cols { flex: 1 1 auto; min-height: 240px; }
+/* That short (flow, Meetings.jsx), the summary and the transcript flow down the page as on a phone,
+   so it scrolls in one place, not the page and each column inside it too. Not while it records: then
+   the transcript follows along in its own place, beside your notes. */
+.mt-page.flow > .mt-cols:not(.pinned) { flex: none; }
+.mt-page.flow > .mt-cols:not(.pinned) > .mt-notes, .mt-page.flow > .mt-cols:not(.pinned) .mt-lines { overflow: visible; max-height: none; }
 .mt-msg { margin: -2px 0 0; }
 .mt-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-height: 30px; }
 .mt-loading { padding: 20px; }

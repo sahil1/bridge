@@ -4,7 +4,10 @@
 // track, and the thumb clear until the pointer is over that area or it's scrolled from the keys (a
 // moment after, clear again), in the light look and the dark; a strip that hides its bar keeps it
 // hidden; a terminal keeps its own; and the sheet editor's own reset, loaded when a sheet opens,
-// doesn't undo it for the rest of the app.
+// doesn't undo it for the rest of the app. Then each main view scrolls in one place, at 1440x900 and
+// at 1024x700 with the Agents panel under it: Home, Meetings, a meeting (its summary and transcript
+// flowing down the page when its panel is that short), Studio's home and a document, a sheet and a
+// page in it, Files in a folder of 100, Whiteboards, Agent Map, Dictations, Usage and Settings.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, checks, until, browser, page, shot, withoutCutOff, TEST, ROOT } from '../lib/harness.mjs'
@@ -100,6 +103,67 @@ try {
       ok(after.sheet === 1 && CLEAR.test(after.rail) && after.width === 'thin', 'with a sheet open (its editor\'s own styles loaded), the sidebar\'s bar is still thin and clear', after)
     }
     ok(withoutCutOff(errors).length === 0, `${mode}: no page errors`, errors)
+    await ctx.close()
+  }
+
+  // ---------- Each view scrolls in one place ----------
+  // Every scroll area on the page, and the one it's in that scrolls too, if any: what shows two bars.
+  const nested = (p) => p.evaluate(() => {
+    const over = (v) => /(auto|scroll)/.test(v)
+    const scrolls = (e) => {
+      if (!e.clientWidth || !e.clientHeight) return false
+      const s = getComputedStyle(e)
+      return (over(s.overflowY) && e.scrollHeight > e.clientHeight + 1) || (over(s.overflowX) && s.scrollbarWidth !== 'none' && e.scrollWidth > e.clientWidth + 1)
+    }
+    const name = (e) => `${e.tagName.toLowerCase()}${typeof e.className === 'string' && e.className.trim() ? `.${e.className.trim().split(/\s+/).slice(0, 2).join('.')}` : ''}`
+    const out = []
+    for (const e of document.querySelectorAll('*')) {
+      if (!e.getClientRects().length || !scrolls(e)) continue
+      for (let up = e.parentElement; up; up = up.parentElement) if (scrolls(up)) { out.push(`${name(e)} in ${name(up)}`); break }
+    }
+    return out
+  })
+  const mid = (await kit.api('/meetings')).meetings[0].id
+  const studio = (f) => (p) => p.evaluate((d) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: d })), { root: `place:${place.id}`, path: f })
+  const VIEWS = [
+    ['Home', (p) => open(p, 'view:home'), '.hm'],
+    ['Meetings', (p) => open(p, 'view:meetings'), '.mt-home .mt-row'],
+    ['a meeting', (p) => p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id } })), mid), '.mt-page .mt-line'],
+    ['Studio\'s home', (p) => open(p, 'view:studio'), '.sd-home .sd-file-name'],
+    ['a document in Studio', studio('notes-1.md'), '.sd-desk'],
+    ['a sheet in Studio', studio('data-1.csv'), '.sd-univer canvas'],
+    ['a page in Studio', studio('page-1.html'), '.sd-page-ed'],
+    ['Files, in a folder of 100', async (p) => { await open(p, 'view:files'); await p.locator('.fx-side-row', { hasText: 'Work' }).first().click({ timeout: 15000 }) }, '.fx-body :text("notes-2.md")'],
+    ['Whiteboards', (p) => open(p, 'view:whiteboards'), '.wb-home'],
+    ['Agent Map', (p) => open(p, 'view:map'), '.am-row'],
+    ['Dictations', (p) => open(p, 'view:dictations'), '.dc-home'],
+    ['Usage', async (p) => {
+      await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-card', { detail: { id: 'gauge' } })))
+      await p.locator('.usage-card button', { hasText: 'Stats, patterns and history' }).first().click({ timeout: 15000 })
+    }, '.ustats'],
+    ...['General', 'Model Providers', 'Meetings', 'Devices', 'About & Updates'].map((s) => [`Settings › ${s}`, async (p) => {
+      if (!(await p.locator('.modal.settings').count())) await p.locator('button[aria-label="Settings"]').first().click()
+      await p.locator('.st-nav-item', { hasText: s }).first().click({ timeout: 8000 })
+    }, '.modal.settings .st-scroll']),
+  ]
+  for (const [width, height] of [[1440, 900], [1024, 700]]) {
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'dark', theme: 'midnight', width, height, store })
+    await p.waitForSelector('.rail .tab-row', { timeout: 20000 }).catch(() => {})
+    const twice = []
+    for (const [name, go, ready] of VIEWS) {
+      // The usage card is a desktop popover that needs room for the Today panel beside it.
+      if (name === 'Usage' && width < 1440) continue
+      try {
+        await go(p)
+        await p.locator(ready).first().waitFor({ timeout: 20000 })
+        await p.waitForTimeout(600)
+        const found = await nested(p)
+        if (found.length) twice.push({ name, found })
+        if (name === 'a meeting') await shot(p, `${tag}scroll-meeting-${width}`)
+      } catch (e) { twice.push({ name, failed: e.message.split('\n')[0] }) }
+    }
+    ok(!twice.length, `${width}x${height}: Home, Meetings, a meeting, Studio's home and a document, sheet and page in it, Files, Whiteboards, Agent Map, Dictations, Usage and Settings each scroll in one place, none with a scroll area inside another`, twice)
+    ok(withoutCutOff(errors).filter((e) => !/sandboxed and lacks the 'allow-same-origin'/.test(e)).length === 0, `${width}x${height}: no page errors`, errors)
     await ctx.close()
   }
 } catch (e) {
