@@ -181,6 +181,8 @@ const SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow
 const siteUrl = (pane, p, base = BASE) => `${base}/api/agents/${enc(pane)}/site/${p.split('/').map(enc).join('/')}`
 export function HtmlView({ pane, filePath, text, reload = 0, base = BASE }) {
   // While editing, show the draft (after a short pause in typing). A <base> makes its relative
+// The desktop app has no tabs: a file opened in a new one goes to the browser (desktop/main.js openLink).
+const newTabLabel = () => (window.bridgeApp ? t('Open in your browser') : t('Open in a new tab'))
   // links (styles, scripts, images) load from the file's folder, as they would from disk.
   const [doc, setDoc] = useState(text)
   useEffect(() => { if (text == null) return; const t = setTimeout(() => setDoc(text), 300); return () => clearTimeout(t) }, [text])
@@ -331,7 +333,7 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
           </button>
           {!dirty && <button className="win-btn" title="Reload" aria-label="Reload" onClick={() => { load(); setFrameKey((k) => k + 1) }}><Icon name="refresh" size={13} /></button>}
           {f && !['binary', 'video', 'audio'].includes(f.kind) && canSave && <SaveButton f={f} src={raw} />}
-          {(f?.kind === 'image' || f?.kind === 'pdf' || f?.kind === 'video' || f?.kind === 'audio' || isHtml) && <a className="win-btn" href={isHtml ? site : raw} target="_blank" rel="noreferrer" title="Open in new tab" aria-label="Open in new tab"><Icon name="external" size={13} /></a>}
+          {(f?.kind === 'image' || f?.kind === 'pdf' || f?.kind === 'video' || f?.kind === 'audio' || isHtml) && <a className="win-btn" href={isHtml ? site : raw} target="_blank" rel="noreferrer" title={newTabLabel()} aria-label={newTabLabel()}><Icon name="external" size={13} /></a>}
           {f && onCopyHere && <button className="ghost-btn small copy-here" onClick={() => onCopyHere({ path: filePath, name: f.name, dir: false, size: f.size })} title={copyHereLabel()} aria-label={copyHereLabel()}><Icon name="download" size={12} /><span>{copyHereLabel()}</span></button>}
           {/* Studio edits Word, Excel, PowerPoint, Markdown, CSV, HTML and PDF files, with versions and Ask an agent. */}
           {f && studioHere && studio && STUDIO_OPENS.test(filePath) && <button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root: pane, path: filePath } }))} title={t('Edit it in Studio, with every version kept and your agents to change it')}><Icon name="layers" size={12} /> {t('Open in Studio')}</button>}

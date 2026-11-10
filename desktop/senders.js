@@ -16,6 +16,9 @@ const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]'])
 // page, which check it's the tile.
 const MACHINE = ['bridge:popout', 'bridge:focus-main', 'bridge:focus-popout', 'bridge:open-machine', 'bridge:busy-said', 'bridge:looking']
 const SELF = ['bridge:tile-drag', 'bridge:tile-close']
+// Links out of the app open in their own apps, but only web, mail and Mail's message links: file:,
+// smb: and other schemes can mount a network share or start a program.
+const OUTSIDE = new Set(['http:', 'https:', 'mailto:', 'message:'])
 
 // port: the app's page's. ports(): each linked computer's, by its id ({ id: port }).
 function create(port, { ports = () => ({}) } = {}) {
@@ -33,6 +36,18 @@ function create(port, { ports = () => ({}) } = {}) {
   // Anything this app's server serves, at its port or a computer's: where links and the app's own
   // navigation may go, and copying may come from.
   const local = (u) => { const x = parse(u); return !!x && (Number(x.port) === port || !!machineAt(Number(x.port))) }
+  // Where a link a page opens in a new window goes (a target=_blank link, window.open): 'outside',
+  // the web, mail and Mail's, each in its own app; 'browser', a file this app's server serves (a
+  // picture, a PDF or a page in Files, a chat's attachment, at /api/... or a computer's
+  // /m/<id>/api/...), as the app has no window to show it in; null, the app's own pages (its
+  // windows open their own way: bridgeApp) and anything else (file:, smb: and other schemes can
+  // mount a network share or start a program).
+  const opens = (u) => {
+    let x
+    try { x = new URL(u) } catch { return null }
+    if (!local(u)) return OUTSIDE.has(x.protocol) ? 'outside' : null
+    return /^(\/m\/[A-Za-z0-9_-]{1,20})?\/api\//.test(x.pathname) ? 'browser' : null
+  }
   // The page an IPC message came from, if it's the main frame of its window.
   const from = (e) => { const f = e?.senderFrame; return f && !f.parent ? of(f.url) : null }
   const own = (e) => from(e)?.kind === 'own'
@@ -55,7 +70,7 @@ function create(port, { ports = () => ({}) } = {}) {
   const permits = (perm, { url, mainFrame = true } = {}) => (perm === 'clipboard-sanitized-write' ? local(url) : ASK.has(perm) && mainFrame !== false && of(url)?.kind === 'own')
   // Another computer's page, for a window: asked of the app's address, which sends it to its port.
   const machineUrl = (id, rest = '/') => `http://127.0.0.1:${port}/m/${id}${rest}`
-  return { of, local, from, own, guard, permits, machineUrl }
+  return { of, local, opens, from, own, guard, permits, machineUrl }
 }
 
-module.exports = { create, MACHINE, SELF }
+module.exports = { create, MACHINE, SELF, OUTSIDE }
