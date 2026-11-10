@@ -349,10 +349,10 @@ try {
     await phone.goto(`${ra.url}/#pair=${code}`, { waitUntil: 'commit' })
     await phone.locator('#pair-go').click({ timeout: 15000 }) // a pairing link asks first: one tap
     const app = () => phone.frames().find((f) => f !== phone.mainFrame() && f.url().startsWith(ra.url))
-    // Not open: what the relay's page says instead (still pairing, offline, turned away), and the
-    // phone's part goes no further.
+    // Not open: where its frames are, what the relay's page says instead (still pairing, offline,
+    // turned away) and what's in Bridge AI's frame, and the phone's part goes no further.
     const opened = await until(() => app()?.evaluate(() => fetch('/api/version').then((x) => x.ok)), 30000, 200)
-    ok(!!opened, 'the phone is paired with Studio, Bridge AI open in it', opened ? undefined : await phone.locator('body').innerText().catch((e) => e.message))
+    ok(!!opened, 'the phone is paired with Studio, Bridge AI open in it', opened ? undefined : { frames: phone.frames().map((f) => f.url()), page: await phone.locator('body').innerText().catch((e) => e.message), app: await app()?.evaluate(() => ({ text: document.body?.innerText.slice(0, 120), controlled: !!navigator.serviceWorker?.controller })).catch((e) => e.message) })
     if (!opened) throw new Error('the phone didn\'t open Bridge AI')
     const fromPhone = await app().evaluate(() => fetch('/api/places', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: '~' }) }).then((x) => x.status))
     ok(fromPhone === 403, 'a phone can\'t add a place to Studio', fromPhone)
