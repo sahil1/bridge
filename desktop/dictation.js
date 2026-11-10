@@ -35,6 +35,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { spawn, execFile } = require('node:child_process')
 const { pathToFileURL } = require('node:url')
+const { zoomOf } = require('./floatfit.js')
 
 // ---------- What hears the key ----------
 // Each: { ok, stop() }, calling onDown(at, info) and onUp(at). at: when, in ms since 1970.
@@ -405,7 +406,10 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, askAccess, tru
   // chat's, an agent's), and the top is where macOS shows the mic is on. It keeps its width and its
   // top, and grows down to fit what it shows, so nothing in it moves; on a Mac and Windows clicks go
   // through it except on the pill itself (the page says when the pointer is on it).
+  // In the page's own pixels: the window is these times the page's zoom (⌘+ in the main window zooms
+  // this one too), or the pill was cut off on the right and at the bottom.
   const SIZE = { w: 420, h: 60 }
+  let tall = SIZE.h // what the page last asked for
   const CLICK_THROUGH = IS_MAC || process.platform === 'win32'
   function place(w = SIZE.w, h = SIZE.h) {
     const a = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
@@ -438,8 +442,8 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, askAccess, tru
       hud.loadURL(`${URL_BASE}/?dictate=1`)
       return
     }
-    const [, h] = hud.getContentSize()
-    hud.setBounds(place(SIZE.w, h))
+    const z = zoomOf(hud)
+    hud.setBounds(place(2 * Math.ceil((SIZE.w * z) / 2), Math.ceil(tall * z)))
     if (CLICK_THROUGH) hud.setIgnoreMouseEvents?.(true, { forward: true })
     if (!hud.isVisible()) hud.showInactive()
   }
@@ -454,11 +458,14 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, askAccess, tru
   ipcMain.handle('bridge:hud-ready', (e) => { if (!fromHud(e)) return null; ready = true; const p = pending; pending = null; return p })
   ipcMain.on('bridge:hud-size', (e, w, h) => {
     if (!fromHud(e) || !Number.isFinite(h)) return
-    const nh = Math.max(48, Math.min(560, Math.round(h)))
+    tall = Math.max(48, Math.min(560, h))
+    const z = zoomOf(hud)
+    // (An even width, so its middle stays on the same point zoomed and back.)
+    const nw = 2 * Math.ceil((SIZE.w * z) / 2), nh = Math.ceil(tall * z)
     const b = hud.getBounds()
-    if (b.height === nh) return
-    // It grows down, keeping its top, its middle and its width where they were.
-    hud.setBounds({ x: b.x, y: b.y, width: b.width, height: nh })
+    if (b.height === nh && b.width === nw) return
+    // It grows down, keeping its top and its middle where they were.
+    hud.setBounds({ x: Math.round(b.x + (b.width - nw) / 2), y: b.y, width: nw, height: nh })
   })
   // The pointer on the pill: clicks are the window's; off it, they go through to what's beneath.
   ipcMain.on('bridge:hud-pointer', (e, on) => { if (fromHud(e) && CLICK_THROUGH) hud.setIgnoreMouseEvents?.(!on, { forward: true }) })

@@ -60,6 +60,16 @@ jobs:
       - name: Browsers
         run: npx playwright-core install --with-deps chromium ${{ matrix.browser != 'chromium' && 'webkit' || '' }}
 
+      # The desktop app's own Electron (the version in desktop/package-lock.json), for the tests of its
+      # windows: the meeting card in a real window, zoomed and in each language (float-card-window).
+      - name: Electron
+        if: matrix.browser == 'chromium'
+        shell: bash
+        run: |
+          v=$(node -p "require('./desktop/package-lock.json').packages['node_modules/electron'].version")
+          npm install --prefix "$RUNNER_TEMP/electron" --no-save --no-package-lock --no-audit --no-fund "electron@$v"
+          echo "BRIDGE_TEST_ELECTRON=$(node -p "require(require('path').join(process.env.RUNNER_TEMP, 'electron', 'node_modules', 'electron'))")" >> "$GITHUB_ENV"
+
       # The herdr test drives a real herdr (elsewhere it checks only what it can without one): a
       # pinned release, refused unless it matches its checksum.
       - name: herdr

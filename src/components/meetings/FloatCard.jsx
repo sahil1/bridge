@@ -55,6 +55,14 @@ export default function FloatCard() {
   // above the bar. In a browser tab the page doesn't move. Set below, once it's known if it's open.
   const upAt = useRef(null)
   const { data: m } = usePoll(r ? `/meetings/${encodeURIComponent(r.id)}` : null, hover || pinned ? 1500 : 4000)
+  // ⌘+ and ⌘− in the main window zoom this page too: its window is the wrong size for the card then,
+  // without the card changing size, so the page says so again (and how much of the screen it has).
+  const [zoom, setZoom] = useState(() => app().zoom?.() || 1)
+  useEffect(() => {
+    const z = () => setZoom(app().zoom?.() || 1)
+    window.addEventListener('resize', z)
+    return () => window.removeEventListener('resize', z)
+  }, [])
   const ev = useCallEvent(!r && c?.prompt ? c.prompt.at : null, c?.prompt?.app)
 
   useEffect(() => {
@@ -68,11 +76,24 @@ export default function FloatCard() {
     ch.postMessage({ type: 'hello' })
     return () => ch.close()
   }, [])
-  // The window fits the card.
+  // The window fits the card (the desktop app makes it the card's size times its zoom). Open, what's
+  // under the bar scrolls past what's left of the screen: the screen's height in the page's pixels
+  // (its points over the zoom), less the desktop app's 8 points above and below the window, the 12
+  // pixels around the card and the rest of the card (its bar, AI Assist's suggestion). A fixed
+  // allowance for the rest asked for more than the screen when the suggestion took three lines,
+  // and zoomed, and the window was cut off at the bottom.
   useLayoutEffect(() => {
     const el = card.current
     if (!el) return
-    const fit = () => { const b = el.getBoundingClientRect(); app().floatSize?.(Math.ceil(b.width) + 24, Math.ceil(b.height) + 24, !!upAt.current) }
+    const fit = () => {
+      const more = el.querySelector('.fc-more')
+      if (more) {
+        const rest = el.getBoundingClientRect().height - more.getBoundingClientRect().height
+        el.style.setProperty('--fc-more-max', `${Math.max(120, Math.floor(((window.screen?.availHeight || 900) - 16) / zoom - 24 - rest))}px`)
+      }
+      const b = el.getBoundingClientRect()
+      app().floatSize?.(Math.ceil(b.width) + 24, Math.ceil(b.height) + 24, !!upAt.current)
+    }
     fit()
     const ro = new ResizeObserver(fit)
     ro.observe(el)
@@ -304,13 +325,13 @@ export default function FloatCard() {
   if (!app().floatSize) upAt.current = false
   else if (!(r && open) || upAt.current == null) {
     const head = card.current?.querySelector('.fc-head')?.getBoundingClientRect()
-    const bar = window.screenY + (head ? head.top + head.height / 2 : window.outerHeight / 2)
+    const bar = window.screenY + (head ? (head.top + head.height / 2) * zoom : window.outerHeight / 2)
     upAt.current = bar > (window.screen.availTop || 0) + window.screen.availHeight / 2
   }
   const up = upAt.current
   return (
     <div className="float-root">
-      <div ref={card} className={`float-card${r && !open ? ' slim' : ''}${up ? ' up' : ''}${dragging ? ' dragging' : ''}`} style={{ '--fc-more-max': `${Math.max(220, (window.screen?.availHeight || 900) - 180)}px` }} onMouseEnter={enter} onMouseLeave={out} onFocus={enter} onBlur={out}
+      <div ref={card} className={`float-card${r && !open ? ' slim' : ''}${up ? ' up' : ''}${dragging ? ' dragging' : ''}`} onMouseEnter={enter} onMouseLeave={out} onFocus={enter} onBlur={out}
         onPointerDown={down} onPointerMove={move} onPointerUp={release} onPointerCancel={release}>
         {body}
         {err && <p className="error-text small fc-line">{err}</p>}

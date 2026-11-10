@@ -706,7 +706,7 @@ process.exit(1)`)
     const box = more.getBoundingClientRect()
     return { more: true, scrolls, card: Math.round(card.height), asked: Math.max(...window.__heights), lastShown: !!last && last.bottom <= box.bottom + 1 && last.top >= box.top - 1, tip: !!document.querySelector('.float-card .fc-tip') }
   })
-  ok(fits.more && fits.tip && fits.scrolls && fits.lastShown && fits.card + 24 <= 400 && fits.asked <= 400, 'open with AI Assist on a short screen: the card fits it, and what\'s under the bar scrolls to its last button', fits)
+  ok(fits.more && fits.tip && fits.scrolls && fits.lastShown && fits.card + 24 <= 400 - 16 && fits.asked <= 400 - 16, 'open with AI Assist on a short screen: the card fits it (less the 8 points the desktop app leaves above and below), and what\'s under the bar scrolls to its last button', fits)
   // Opened taller than half the screen, it keeps the side it opened to, and tells the desktop app to
   // grow from its bar's side: a window as tall as asked (outerHeight) once moved its middle past the
   // screen's, and the card flipped. High on the screen it opens down; low, up.

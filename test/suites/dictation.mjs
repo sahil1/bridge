@@ -480,7 +480,7 @@ else {
   class Win {
     static getFocusedWindow() { return focused }
     static getAllWindows() { return [ours] }
-    constructor(o) { hud = this; this.shown = false; this.made = o; this.bounds = { x: o.x, y: o.y, width: o.width, height: o.height }; this.through = []; this.told = []; this.focusable = []; this.focused = false; this.ons = {}; this.webContents = { setWindowOpenHandler() {}, on() {}, isDestroyed: () => false, executeJavaScript: async (js) => { this.told.push(js) } } }
+    constructor(o) { hud = this; this.shown = false; this.made = o; this.bounds = { x: o.x, y: o.y, width: o.width, height: o.height }; this.through = []; this.told = []; this.focusable = []; this.focused = false; this.ons = {}; this.zoom = 1; this.webContents = { setWindowOpenHandler() {}, on() {}, isDestroyed: () => false, executeJavaScript: async (js) => { this.told.push(js) }, getZoomFactor: () => this.zoom } }
     setAlwaysOnTop() {} setVisibleOnAllWorkspaces() {} setContentProtection() {} loadURL() {}
     on(ev, fn) { (this.ons[ev] ||= []).push(fn) }
     emit(ev) { if (ev === 'blur') this.focused = false; for (const fn of this.ons[ev] || []) fn() }
@@ -540,6 +540,15 @@ else {
     call('bridge:hud-size', from, 999, 80)
     const shrunk = hud.getBounds()
     ok(grown.x === 510 && grown.y === 2 && grown.width === 420 && grown.height === 260 && shrunk.x === 510 && shrunk.y === 2 && shrunk.width === 420 && shrunk.height === 80, 'it grows down and back, keeping its top, its middle and its width', { grown, shrunk })
+    // Zoomed with the main window (⌘+ twice, 125%): the window is the pill's size times that, around
+    // the same middle, or the pill was cut off on the right and at the bottom.
+    hud.zoom = 1.25
+    call('bridge:hud-size', from, 420, 80)
+    const zoomed = hud.getBounds()
+    hud.zoom = 1
+    call('bridge:hud-size', from, 420, 80)
+    const unzoomed = hud.getBounds()
+    ok(zoomed.width === 526 && zoomed.height === 100 && zoomed.x + zoomed.width / 2 === 720 && zoomed.y === 2 && unzoomed.width === 420 && unzoomed.x === 510, 'zoomed to 125%: its window is 125% of the pill, around the same middle, and back at 100%', { zoomed, unzoomed })
     call('bridge:hud-pointer', from, true)
     call('bridge:hud-pointer', from, false)
     call('bridge:hud-pointer', me, true)

@@ -5,7 +5,7 @@
 // it, and forgetting an answer that doesn't take), sets up the dictation key and its window, makes
 // its own window full screen for Studio's Focus, and says what an update would lose in the window.
 // Nothing else is exposed.
-const { contextBridge, ipcRenderer, webUtils } = require('electron')
+const { contextBridge, ipcRenderer, webUtils, webFrame } = require('electron')
 // Another of your devices, shown through this one (/m/<id>/, at an address of its own: senders.js):
 // its pages get windows and nothing of this computer's (no Finder, files, mic, screen or floating
 // card), as on a phone. So does any page that isn't this computer's own at its own address (a page an
@@ -74,6 +74,9 @@ if (!own) {
   // floating card fits its size, hides, takes notes for a call and opens things in the main window.
   recording: (on) => ipcRenderer.invoke('bridge:recording', !!on),
   floatSize: (w, h, low) => ipcRenderer.send('bridge:float-size', w, h, low),
+  // The page's zoom (⌘+ and ⌘− in the main window zoom the card too): what's left of the screen,
+  // in its own pixels.
+  zoom: () => { try { return webFrame.getZoomFactor() } catch { return 1 } },
   floatHide: () => ipcRenderer.invoke('bridge:float-hide'),
   floatStart: (o) => ipcRenderer.invoke('bridge:float-start', o),
   floatOpen: (o) => ipcRenderer.invoke('bridge:float-open', o),
