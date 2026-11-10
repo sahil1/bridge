@@ -34,6 +34,17 @@ tools() { local d; d=$(xcode-select -p 2>/dev/null) && [ -x "$d/usr/bin/git" ]; 
 # One password for all of it. sudo remembers it for 5 minutes, and the developer tools alone take
 # longer than that, so it's kept fresh while this runs (and only then: it stops when this ends).
 if [ -n "$devtools$homebrew" ]; then
+  # A clean screen, so what shows is what's asked and why (not the line typed to start this).
+  names=()
+  [ -n "$devtools" ] && names+=("Apple's command line developer tools")
+  [ -n "$homebrew" ] && names+=("Homebrew")
+  for f in "${formulas[@]}"; do case "$f" in ical-buddy) names+=("icalBuddy") ;; whisper-cpp) names+=("whisper.cpp") ;; *) names+=("$f") ;; esac; done
+  printf '\033[2J\033[H'
+  echo "Setting up Bridge AI: $(IFS=,; echo "${names[*]}" | sed 's/,/, /g')."
+  echo
+  echo "Your Mac's password is needed once: the one you log in to this Mac with."
+  echo "Nothing shows as you type it. Press Return when you're done."
+  echo
   sudo -v -p "Password for this Mac, to set up Bridge AI: " || stop
   ( while kill -0 $$ 2>/dev/null && sudo -n -v 2>/dev/null; do sleep 50; done ) >/dev/null 2>&1 &
   keep=$!
@@ -57,7 +68,7 @@ if [ -n "$devtools" ] && [ -z "$homebrew" ] && ! tools; then
   sudo rm -f "$placeholder"
   # Not listed, or it didn't install: macOS's own window, then wait for it (an hour at most).
   if ! tools; then
-    say "Click Install in the window macOS opened. This carries on by itself once the tools are installed."
+    say "Click Install in the window macOS opened (not Get Xcode), then Agree. This carries on by itself once the tools are installed."
     xcode-select --install
     n=0
     until tools || [ "$n" -ge 720 ]; do sleep 5; n=$((n + 1)); done

@@ -14,7 +14,7 @@ export { useSetupPlan }
 const ITEMS = {
   node: [tx('Node.js'), tx('So any coding agent installs in one click.')],
   devtools: [tx('Developer tools'), tx('Apple\'s command line tools, so git works for your agents and the Chief of Staff without macOS stopping to ask. About 1 GB from Apple, so it takes a while.')],
-  homebrew: [tx('Homebrew'), tx('Brings the programs below. It asks for your password once, in a terminal tab.')],
+  homebrew: [tx('Homebrew'), tx('Brings the programs below. It needs your Mac\'s password once, typed here.')],
   meetings: [tx('Meeting notes'), tx('A speech model, so meetings are transcribed on this computer.')],
   voice: [tx('Voice notes'), tx('The speech model, so what you say becomes text here.')],
   calendar: [tx('Your calendar'), tx('icalBuddy reads macOS Calendar, then Bridge AI asks to see it.')],
@@ -48,9 +48,9 @@ export function NeedsYou({ plan, onOpen }) {
   if (!what) return null
   const here = !viaRelay && !!plan.paneId && what !== 'window'
   const say = {
-    password: here ? t('Your Mac\'s password, once. Type it below and press Return; the rest carries on by itself.') : t('Your Mac\'s password, once, in the Set up Bridge AI tab on your computer.'),
+    password: here ? t('Your Mac\'s password, once: the one you log in to this Mac with. Click below, type it and press Return. Nothing shows as you type; the rest carries on by itself.') : t('Your Mac\'s password, once, in the Set up Bridge AI tab on your computer.'),
     terminal: here ? t('The Set up Bridge AI tab is waiting for you, below.') : t('The Set up Bridge AI tab is waiting for you.'),
-    window: t('Click Install in the window macOS opened for the developer tools. Closed it? Close the Set up Bridge AI tab, then try again.'),
+    window: t('Click Install in the window macOS opened for the developer tools (not Get Xcode), then Agree. Closed it? Close the Set up Bridge AI tab, then try again.'),
   }[what]
   return (
     <div className="sa-you" role="status">

@@ -3388,6 +3388,12 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .wiz-levels b { font: 600 14px var(--font); }
 .wiz-levels small { color: var(--ink-3); font-size: 12.5px; }
 .wiz-levels li.on label { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+/* What Everything will ask of you, said before it starts. */
+.wiz-expect { display: grid; gap: 6px; margin: 2px 0 4px; padding: 10px 14px; border-radius: 12px; background: var(--pane-2); }
+.wiz-expect b { font: 600 12.5px var(--font); color: var(--ink); }
+.wiz-expect ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+.wiz-expect li { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.wiz-expect li svg { flex: none; margin-top: 3px; color: var(--ink-3); }
 .wiz-awake { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 12px 0 0; padding: 0 14px; cursor: pointer; }
 .wiz-awake input { grid-row: span 2; margin-top: 3px; accent-color: var(--accent); }
 .wiz-awake b { font: 600 13.5px var(--font); }

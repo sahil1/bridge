@@ -84,6 +84,26 @@ const fullNote = (plan, note) => {
   const left = (id) => plan.items.some((i) => i.id === id && i.state !== 'done')
   return left('devtools') ? FULL.devtools : left('homebrew') ? note : FULL.nopassword
 }
+// What Everything will ask of you on this Mac, said before it starts (each only where it applies):
+// the password (typed here, in setup), macOS's own window for the developer tools when it opens
+// one, and what's yours to allow, which macOS only asks about once you press its Allow.
+function Expect({ plan }) {
+  const left = (id) => plan.items.some((i) => i.id === id && !['done', 'running'].includes(i.state))
+  const rows = [
+    (left('devtools') || left('homebrew')) && ['unlock', t('Your Mac\'s password, once, typed right here in setup: the one you log in to this Mac with. Nothing shows as you type it.')],
+    left('devtools') && ['tool', t('If macOS opens a window for Apple\'s developer tools, click Install (not Get Xcode), then Agree. Everything else carries on by itself.')],
+    (left('calendar') || left('mail')) && ['calendar', left('calendar') && left('mail') ? t('Your calendar and Mail each get an Allow button. macOS asks only when you press it.')
+      : left('calendar') ? t('Your calendar gets an Allow button. macOS asks only when you press it.') : t('Mail gets an Allow button. macOS asks only when you press it.')],
+  ].filter(Boolean)
+  if (!rows.length) return null
+  return (
+    <div className="wiz-expect">
+      <b>{t('What you\'ll see')}</b>
+      <ul>{rows.map(([icon, text]) => <li key={icon}><Icon name={icon} size={13} /><span>{text}</span></li>)}</ul>
+    </div>
+  )
+}
+
 // What the Set up Bridge AI tab is waiting for, as a link back to it in setup's first step.
 const WAITS = { password: tx('Type your Mac\'s password'), terminal: tx('See the Set up Bridge AI tab'), window: tx('Click Install in macOS\'s window') }
 const ago = (t) => {
@@ -208,6 +228,7 @@ export default function Onboarding({ onDone }) {
                   </li>
                 ))}
               </ul>
+              {level === 'full' && setup.plan?.mac && <Expect plan={setup.plan} />}
               </>
               : <SetupList plan={setup.plan} reload={setup.load} only={started === 'basic' ? 'basic' : null} onRetry={() => setup.run(started).catch((e) => setErr(e.message))} />}
             {phone.offer && !started && <PhonePick />}

@@ -99,6 +99,8 @@ try {
     const asked = l.filter((x) => x.startsWith('sudo asked: '))
     ok(asked.length === 1 && l[0].startsWith('sudo asked: '), 'your Mac\'s password is asked once, first', l)
     ok(ASKS.test(asked[0]?.slice(12).trim() || ''), 'in words the server shows as "needs you"', asked[0])
+    const before = r.out.slice(0, r.out.indexOf('Password for this Mac'))
+    ok(/^\x1b\[2J\x1b\[H/.test(r.out) && /Setting up Bridge AI: Apple's command line developer tools\./.test(before) && /the one you log in to this Mac with/.test(before) && /Nothing shows as you type it/.test(before), 'on a clean screen that says what it sets up, which password, and that nothing shows as you type it', before)
     ok(l.includes('sudo kept fresh'), 'and kept fresh while it runs (installing the tools takes longer than sudo remembers it)', l)
     ok(count(l, /^softwareupdate -i /) === 1, 'they\'re installed exactly once', l)
     ok(l.includes('softwareupdate -i Command Line Tools for Xcode 26.4-26.4.1'), 'with the newest label softwareupdate lists (by Xcode version, not a beta)', l)
@@ -114,7 +116,7 @@ try {
     const l = s.lines()
     ok(r.status === 0, 'softwareupdate lists none: it still finishes', r.out.slice(-600))
     ok(count(l, /xcode-select --install/) === 1 && count(l, /^softwareupdate -i/) === 0, 'through macOS\'s own window instead, once', l)
-    ok(/Click Install in the window macOS opened/.test(r.out), 'and says to click Install there (the server shows that as needing you)', r.out.slice(-600))
+    ok(/Click Install in the window macOS opened \(not Get Xcode\), then Agree/.test(r.out), 'and says to click Install there, not Get Xcode, then Agree (the server shows that as needing you)', r.out.slice(-600))
     fs.rmSync(s.dir, { recursive: true, force: true })
   }
 

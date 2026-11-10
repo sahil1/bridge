@@ -43,6 +43,13 @@ if (update && fs.existsSync(fails)) {
   const line = `Bridge AI install: ${fs.readFileSync(fails, 'utf8').trim()}`
   setTimeout(() => { if (update[1] === 'ps1') process.stdout.write(`${line}\r\n`); else { process.stderr.write(`${line}\n`); process.exitCode = 1 } }, 300)
 } else if (/setup-mac\.sh/.test(cmd) && /\s(devtools|homebrew)(\s|$)/.test(cmd)) {
+  // As setup-mac.sh starts: a clean screen, what it sets up, and the password it needs.
+  process.stdout.write('\x1b[2J\x1b[H')
+  say(`Setting up Bridge AI: ${cmd.split(/\s+/).slice(2).map((a) => ({ devtools: "Apple's command line developer tools", homebrew: 'Homebrew', 'ical-buddy': 'icalBuddy', 'whisper-cpp': 'whisper.cpp' })[a] || a).join(', ')}.`)
+  say('')
+  say("Your Mac's password is needed once: the one you log in to this Mac with.")
+  say("Nothing shows as you type it. Press Return when you're done.")
+  say('')
   process.stdout.write('Password for this Mac, to set up Bridge AI: ')
   let typed = ''
   process.stdin.setEncoding('utf8')
