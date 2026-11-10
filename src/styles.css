@@ -152,11 +152,15 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border-radius: 4px; backgro
   :root:hover, :root :hover, :root [data-scrolling] { scrollbar-color: color-mix(in srgb, var(--ink) 32%, transparent) transparent; }
 }
 /* A browser without scrollbar-color (Safari before it had it) draws them from these instead: thin
-   with no track, the thumb always there but faint (these browsers don't redraw a thumb for :hover). */
+   with no track, the thumb always there but faint (these browsers don't redraw a thumb for :hover).
+   Not on a phone: its scroll bars float over the page as they are, and these take room from it (a
+   10 px bar made Settings' list scroll sideways on a 375 px screen). */
 @supports not (scrollbar-color: auto) {
-  ::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
-  ::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 6px; background: color-mix(in srgb, var(--ink) 20%, transparent) padding-box; }
-  ::-webkit-scrollbar-corner { background: transparent; }
+  @media (pointer: fine) {
+    ::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
+    ::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 6px; background: color-mix(in srgb, var(--ink) 20%, transparent) padding-box; }
+    ::-webkit-scrollbar-corner { background: transparent; }
+  }
 }
 
 .btn {
