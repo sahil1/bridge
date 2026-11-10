@@ -60,14 +60,14 @@ export function Advanced({ order = 50, children }) {
 
 // Shows one setting (its data-setting, search.js) in the Settings window: once its section has
 // loaded it, the Advanced it's in opened, scrolled to the top of the panel and marked for a moment,
-// and kept just where it is while the rest of the section comes, until you scroll, tap or type
-// there. near: what to show instead when it isn't there a moment after that has come (dictation's
-// extras while dictation is off). False if neither came.
+// and kept there while the rest of the section comes, until you scroll, tap or type there. near:
+// what to show instead when it isn't there a moment after that has come (dictation's extras while
+// dictation is off). False if neither came.
 // Kept as each change is made, before anything else can see the page (the browser keeps what's at
 // the top in place, which on a slow computer is what's still coming: Set up's list, Permissions), so
-// it's never somewhere else for a moment, not even for a click; and room coming below it doesn't
-// pull it up. Kept until you act (20 seconds at most), not just a moment: on a busy computer the
-// rest can take seconds.
+// what comes above it never moves it, not even for a moment for a click; room coming below takes it
+// up to the top, where it was meant to be. Kept until you act (20 seconds at most), not just a
+// moment: on a busy computer the rest can take seconds.
 let keeping = null
 export function reveal(id, near = null) {
   return new Promise((done) => {
@@ -90,12 +90,9 @@ export function reveal(id, near = null) {
       el.classList.add('st-found')
       setTimeout(() => el.classList.remove('st-found'), 2400)
       if (box) {
-        const at = () => el.getBoundingClientRect().top - box.getBoundingClientRect().top
-        const was = at()
         const keep = () => {
           if (!el.isConnected || !box.isConnected) return stop()
-          const by = at() - was
-          if (Math.abs(by) >= 1) box.scrollTop += by
+          el.scrollIntoView({ block: 'start' })
         }
         // Each change to the page, as it's made; a size that changes without one (a font, a picture), a frame later.
         const mo = new MutationObserver(keep)
