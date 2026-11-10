@@ -4,7 +4,9 @@
 // bar, the top bar's menu and the floating card (with Pause there), naming who said a line, the
 // right-click menu, folders, the archive and deleting after a warning. Action items into work: Start
 // an agent and To Chief of Staff on each, what became of them, and since last time. The floating card following
-// dark mode while it's open, its frame, and its warning when the call has no sound. The mic set for the room
+// dark mode while it's open, its frame, and its warning when the call has no sound: the list to turn on
+// (System Audio Recording Only, the second), then Restart Bridge AI (saying it stops the recording) and,
+// restarted and still quiet, Reset and ask again for the sound alone (tccutil stood in for). The mic set for the room
 // (no echo or noise handling, which drops the people around the table) with no call on the
 // computer, and for a call while one is on. In Chromium with its fake
 // mic; in WebKit (BRIDGE_TEST_BROWSER=webkit) the parts that record are skipped, since it has none.
@@ -18,7 +20,13 @@ import { spawnSync } from 'node:child_process'
 import { startKit, startModel, checks, until, sleep, browser, page, shot, solid, noServiceWorker, changeAnswer, TEST, IS_MAC, advanced } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('meetings-ui')
-const kit = await startKit('meetings-ui')
+// On a Mac, tccutil stood in for (bin/tcc.log), for Reset and ask again on the call's sound.
+const tccutil = (bin) => {
+  fs.writeFileSync(path.join(bin, 'tccutil.cjs'), `require('node:fs').appendFileSync(require('node:path').join(__dirname, 'tcc.log'), process.argv.slice(2).join(' ') + '\\n')`)
+  fs.writeFileSync(path.join(bin, 'tccutil'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'tccutil.cjs')}" "$@"\n`, { mode: 0o755 })
+  return path.join(bin, 'tccutil')
+}
+const kit = await startKit('meetings-ui', { env: ({ bin }) => (IS_MAC ? { BRIDGE_TCCUTIL: tccutil(bin), BRIDGE_FIX_BUNDLE_ID: 'dev.bridge-ai.test' } : {}) })
 const model = await startModel('meetings-ui')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -666,6 +674,8 @@ process.exit(1)`)
   } })
   const card = await fl.ctx.newPage()
   card.on('pageerror', (e) => fl.errors.push(`card: ${e.message}`))
+  // The desktop app's restart, stood in for: counted.
+  await card.addInitScript(() => { window.bridgeApp = { restart: async () => { window.__restarts = (window.__restarts || 0) + 1; return true } } })
   await card.setViewportSize({ width: 360, height: 520 })
   await card.goto(`${kit.url}/?float=1`)
   await card.waitForSelector('.float-card', { timeout: 10000 }).catch(() => {})
@@ -675,13 +685,33 @@ process.exit(1)`)
   ok(!!(await until(() => warn.isVisible(), 8000)), 'a call with no sound: a warning on the bar')
   await card.hover('.float-card .fc-head')
   const quiet = card.locator('.fc-quiet')
-  ok(!!(await until(() => quiet.isVisible(), 5000)) && /No sound from the call/.test(await quiet.innerText()) && /System Audio Recording Only/.test(await quiet.innerText()), 'and, open, what to allow', await quiet.innerText().catch(() => ''))
+  ok(!!(await until(() => quiet.isVisible(), 5000)) && /No sound from the call/.test(await quiet.innerText()) && /System Audio Recording Only, the second list/.test(await quiet.innerText()) && /Screen Recording, above it, doesn't cover the sound/.test(await quiet.innerText()), "and, open, what to allow: System Audio Recording Only, the second list, which Screen Recording above it doesn't cover", await quiet.innerText().catch(() => ''))
   const bg = () => card.evaluate(() => { const m = getComputedStyle(document.querySelector('.float-card')).backgroundColor.match(/\d+/g).map(Number); return m[0] + m[1] + m[2] })
   ok((await bg()) > 600, '(the card is light in light mode)', await bg())
   await fl.p.evaluate(() => localStorage.setItem('cc-appearance', JSON.stringify({ mode: 'dark', theme: 'midnight', text: 'm' })))
   ok(!!(await until(async () => (await card.evaluate(() => document.documentElement.getAttribute('data-theme'))) === 'dark' && (await bg()) < 200, 5000)), 'switched to dark in the main window: the open card follows', { theme: await card.evaluate(() => document.documentElement.getAttribute('data-theme')), bg: await bg() })
   await sleep(400) // its buttons' colours fade over
   await shot(card, `${tag}float-quiet-dark`)
+  // On there and still quiet: macOS applies it once Bridge AI restarts, which stops the recording,
+  // so it says so first. Restarted and still quiet: Reset, for the call's sound alone.
+  const qt = () => quiet.innerText().catch(() => '')
+  await quiet.locator('button', { hasText: 'Open it' }).click()
+  ok(!!(await until(async () => /Already on there\? macOS applies it once Bridge AI restarts\./.test(await qt()) && await quiet.locator('button', { hasText: 'Restart Bridge AI' }).count() === 1, 5000)), 'once it\'s open there: already on there? macOS applies it once Bridge AI restarts, with Restart Bridge AI', await qt())
+  await quiet.locator('button', { hasText: 'Restart Bridge AI' }).click()
+  ok(!!(await until(async () => /Restarting stops this recording/.test(await qt()) && await quiet.locator('button', { hasText: 'Restart now' }).count() === 1, 4000)) && !(await card.evaluate(() => window.__restarts)), 'a meeting records: it says a restart stops it, before restarting', await qt())
+  await shot(card, `${tag}float-quiet-restart`)
+  await quiet.locator('button', { hasText: 'Restart now' }).click()
+  ok(!!(await until(() => card.evaluate(() => window.__restarts === 1), 4000)), 'Restart now restarts Bridge AI')
+  if (IS_MAC) {
+    await kit.restart()
+    await card.reload()
+    await card.waitForSelector('.float-card', { timeout: 10000 }).catch(() => {})
+    await card.hover('.float-card .fc-head')
+    ok(!!(await until(async () => /Still no sound since Bridge AI restarted/.test(await qt()) && await quiet.locator('button', { hasText: 'Reset and ask again' }).count() === 1, 10000)), 'restarted and still quiet: why, and Reset and ask again', await qt())
+    await quiet.locator('button', { hasText: 'Reset and ask again' }).click()
+    const tcc = () => { try { return fs.readFileSync(path.join(kit.bin, 'tcc.log'), 'utf8').trim() } catch { return '' } }
+    ok(!!(await until(async () => /macOS asks again the next time a call is recorded/.test(await qt()) && tcc() === 'reset AudioCapture dev.bridge-ai.test', 5000)), "Reset forgets macOS's answer for the call's sound only (not Screen Recording)", { text: await qt(), tcc: tcc() })
+  }
   // Open, with AI Assist's suggestion under the bar, on a short screen: the card asks for no more
   // than the screen's height, and what's under the bar scrolls, down to its last button.
   await api(`/meetings/${A.id}/assist`, { on: true })

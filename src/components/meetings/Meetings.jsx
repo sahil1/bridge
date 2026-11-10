@@ -15,7 +15,8 @@ import { Menu as AtMenu } from '../FileExtras.jsx'
 import { FilesPane, linkFiles } from './context.jsx'
 import { AssistPane, setAssist } from './assist.jsx'
 import AiAssist from '../AiAssist.jsx'
-import PermissionFix, { OpenSettings } from '../PermissionFix.jsx'
+import PermissionFix from '../PermissionFix.jsx'
+import { useScreenAccess, useAllowCall, allowSteps } from './allowcall.jsx'
 import { MicFix } from '../Composer.jsx'
 import { sendPicture, pictureUrl } from './screen.js'
 import './meetings.css'
@@ -55,27 +56,40 @@ const span = (ms) => (ms < 90_000 ? t('{n} seconds', { n: Math.max(1, Math.round
 
 // Names for who's talking on a call, with nothing for you to do: Screen Recording lets Bridge AI
 // look at the call's window as people talk and read the names it shows. Asked for here, the first
-// time a call records, saying why; Allow shows macOS's own window, then where to turn it on. Not
-// now hides it on this device.
+// time a call records, saying why; Allow shows macOS's own window, then where to turn it on, and
+// once that's open, that macOS applies it when Bridge AI restarts, with Restart, and Reset and ask
+// again if it's still off after (allowcall.jsx). Not now hides it on this device.
 const ASKED_SCREEN = 'cc-asked-screen'
 function AskScreen() {
-  const here = onThisComputer()
-  const { data, refresh } = usePoll(here ? '/calls/screen' : null, 10_000)
+  const { data, refresh, here } = useScreenAccess()
   const [gone, setGone] = useState(() => { try { return localStorage.getItem(ASKED_SCREEN) === '1' } catch { return false } })
   const [asked, setAsked] = useState(false)
   const [err, setErr] = useState(null) // macOS couldn't be asked, and why
+  const a = useAllowCall('screen', { recording: true, started: data?.started, onAsked: refresh })
   if (!here || gone || data?.allowed !== false) return null
   const allow = async () => { setErr(null); try { await api('/calls/screen', { method: 'POST' }); setAsked(true) } catch (e) { setErr(t("Couldn't ask macOS: {error}", { error: e.message })) } refresh() }
   const later = () => { setGone(true); try { localStorage.setItem(ASKED_SCREEN, '1') } catch { /* asks again next time */ } }
+  const steps = asked || a.stage !== 'off'
+  const s = allowSteps('screen', a)
   return (
     <p className="mt-ask-screen small" role="status">
-      <Icon name="users" size={12} /> <span><b>{t("Names for who's talking.")}</b> {asked
+      <Icon name="users" size={12} /> <span><b>{t("Names for who's talking.")}</b> {steps
         ? t('Turn on Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in Screen Recording.')
-        : t('Screen Recording lets Bridge AI read the names your call shows as people talk, to put them on the transcript. Only the words are kept, never the picture.')}{err && <span className="error-text"> {err}</span>}</span>
-      {asked
-        ? <OpenSettings pane="audio" className="link-btn">{t('Open it')}</OpenSettings>
-        : <button type="button" className="btn small" onClick={allow}>{t('Allow')}</button>}
-      <button type="button" className="ghost-btn" onClick={later}>{t('Not now')}</button>
+        : t('Screen Recording lets Bridge AI read the names your call shows as people talk, to put them on the transcript. Only the words are kept, never the picture.')}{steps && s.say}{err && <span className="error-text"> {err}</span>}</span>
+      {steps ? s.acts : <button type="button" className="btn small" onClick={allow}>{t('Allow')}</button>}
+      {!a.sure && <button type="button" className="ghost-btn" onClick={later}>{t('Not now')}</button>}
+    </p>
+  )
+}
+// A call that's silent while it records: what to turn on (the second list on System Settings' page,
+// which the top one doesn't cover), then Restart and Reset as for the screen (allowcall.jsx).
+function QuietCall() {
+  const { data } = useScreenAccess()
+  const a = useAllowCall('sound', { recording: true, started: data?.started })
+  const s = allowSteps('sound', a, { link: true })
+  return (
+    <p className="mt-hint-call mt-quiet-call muted small" role="status">
+      {t('No sound from the call yet. If one is playing and this stays quiet, turn on Bridge AI in System Audio Recording Only: the second list under System Settings › Privacy & Security › Screen & System Audio Recording. Bridge AI on in Screen Recording, the list above it, doesn\'t cover the sound.')}{s.say} {s.acts}
     </p>
   )
 }
@@ -110,7 +124,7 @@ function RecordingBar({ id, data }) {
       {phone && !r.missed && <p className="mt-hint-call muted small">{t('Keep Bridge AI in front while it records: a phone stops the mic of an app in the background.')}</p>}
       {data?.callError && <p className="mt-trouble small" role="status">{data.callError} {t('Your mic still records.')}</p>}
       {call === 'on' && !m.screen && <AskScreen />}
-      {call === 'on' && data?.callQuiet && <p className="mt-hint-call muted small" role="status">{t('No sound from the call yet. If one is playing and this stays quiet, allow Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in System Audio Recording Only.')} <OpenSettings pane="audio" className="link-btn">{t('Open it')}</OpenSettings></p>}
+      {call === 'on' && data?.callQuiet && <QuietCall />}
     </div>
   )
 }

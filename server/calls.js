@@ -129,8 +129,13 @@ export function windowTitles(app) {
 
 // Screen Recording, which lets Bridge AI look at the call's window as people talk and read the
 // names it shows (who's talking, captions), to put names on the transcript. screen(): whether
-// macOS allows it, never asking (null off a Mac, or with no callwatch). screenAsk(): the same,
-// asking macOS the first time (its own window), for Allow on a meeting.
+// macOS allows it, never asking (null off a Mac, or with no callwatch), kept for a moment as each
+// look asks; fresh: looked at now (you came back to the window, from System Settings). macOS
+// applies a switch turned on there once Bridge AI restarts, which restarts this server too, so
+// its first look after one is always its own. screenAsk(): the same, asking macOS the first time
+// (its own window), for Allow on a meeting. started: when this server started, so a page can tell
+// whether Bridge AI has restarted since it asked for that.
+export const started = new Date().toISOString()
 const once = (args, ms = 5000) => new Promise((resolve) => {
   const bin = watchBin()
   if (!bin) return resolve(null)
@@ -140,8 +145,8 @@ const once = (args, ms = 5000) => new Promise((resolve) => {
 })
 let screenSaid = { at: 0, allowed: null }
 const SCREEN_RECHECK_MS = Number(process.env.BRIDGE_SCREEN_RECHECK_MS || 30_000)
-export async function screen() {
-  if (Date.now() - screenSaid.at < SCREEN_RECHECK_MS) return screenSaid.allowed
+export async function screen({ fresh = false } = {}) {
+  if (!fresh && Date.now() - screenSaid.at < SCREEN_RECHECK_MS) return screenSaid.allowed
   const r = await once(['screen'])
   screenSaid = { at: Date.now(), allowed: typeof r?.allowed === 'boolean' ? r.allowed : null }
   return screenSaid.allowed

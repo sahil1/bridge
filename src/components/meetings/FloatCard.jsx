@@ -4,6 +4,7 @@ import { api, usePoll, useFleet } from '../../api.js'
 import { MEETINGS_CHANNEL, clock, useCallEvent, QuickNote, endedWords } from './recording.jsx'
 import { KIND, setAssist, markAssist } from './assist.jsx'
 import { PrepGlance } from './prep.jsx'
+import { useScreenAccess, useAllowCall, allowSteps } from './allowcall.jsx'
 import { joined } from '../Agenda.jsx'
 import { t, locale } from '../../i18n/index.js'
 import './meetings.css'
@@ -41,6 +42,20 @@ function talkShare(lines) {
   let a = 0, b = 0
   for (const l of lines) { const d = Math.max(0, (l.t1 ?? l.t0) - l.t0); if (l.src === 'them') b += d; else a += d }
   return a + b > 0 ? Math.round((a / (a + b)) * 100) : null
+}
+// A call that's silent while it records: the list to turn Bridge AI on in (the second on System
+// Settings' page: Screen Recording, above it, doesn't cover the sound), then Restart Bridge AI, and
+// Reset and ask again if it's still quiet after (allowcall.jsx).
+function QuietBanner() {
+  const { data } = useScreenAccess()
+  const a = useAllowCall('sound', { recording: true, started: data?.started })
+  const s = allowSteps('sound', a)
+  return (
+    <div className="fc-banner fc-quiet" role="status">
+      <p><b>{t('No sound from the call.')}</b> {t('If people are talking, turn on Bridge AI in System Audio Recording Only, the second list under System Settings › Privacy & Security › Screen & System Audio Recording. Screen Recording, above it, doesn\'t cover the sound.')}{s.say}</p>
+      <span className="fc-banner-acts">{s.acts}</span>
+    </div>
+  )
 }
 const Level = ({ v = 0, label }) => {
   const on = Math.min(5, Math.round(Math.sqrt(v) * 5 * 1.4))
@@ -223,7 +238,7 @@ export default function FloatCard() {
           <span className={`fc-dot${paused ? ' paused' : ''}`}><span className="rec-dot" aria-hidden="true" /></span>
           <b className="fc-time">{clock(secs)}</b>
           <span className="fc-title" title={r.title}>{r.title}</span>
-          {r.callQuiet && !paused && <button type="button" className="fc-x fc-warn" onClick={allowCall} aria-label={t('No sound from the call')} title={t("No sound from the call. If people are talking, Bridge AI isn't allowed to hear it yet: click to open the setting")}><Icon name="alert" size={13} /></button>}
+          {r.callQuiet && !paused && <button type="button" className="fc-x fc-warn" onClick={allowCall} aria-label={t('No sound from the call')} title={t('No sound from the call. If people are talking, turn on Bridge AI in System Audio Recording Only, the second list on that page of System Settings: click to open it')}><Icon name="alert" size={13} /></button>}
           {!r.callEnded && (paused
             ? <button type="button" className="fc-x fc-play" onClick={() => op('resume')} aria-label={t('Resume')} title={t('Resume recording')}><Icon name="play" size={13} /></button>
             : <button type="button" className="fc-x" onClick={() => op('pause')} aria-label={t('Pause')} title={t('Pause recording')}><Icon name="pause" size={13} /></button>)}
@@ -247,12 +262,7 @@ export default function FloatCard() {
                 <button type="button" className="btn small" disabled={busy} onClick={() => act(() => api(`/meetings/${r.id}/keep`, { method: 'POST' }))}>{t('Keep recording')}</button>
               </div>
             )}
-            {r.callQuiet && !paused && (
-              <div className="fc-banner fc-quiet" role="status">
-                <p><b>{t('No sound from the call.')}</b> {t('If people are talking, allow Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in System Audio Recording Only.')}</p>
-                <button type="button" className="btn small" onClick={allowCall}>{t('Open it')}</button>
-              </div>
-            )}
+            {r.callQuiet && !paused && <QuietBanner />}
             <div className="fc-live">
               {info && <p className="fc-info" title={info}>{info}</p>}
               <div className="fc-said" ref={saidBox}>

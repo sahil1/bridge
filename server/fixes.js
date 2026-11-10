@@ -143,14 +143,16 @@ function askAutomation() {
 // differently (up to 3.4.2 the app was signed ad hoc), or one that's gone wrong, can show as on in
 // System Settings and still block Bridge AI. tccutil forgets this app's answer, for this one thing
 // only, without a password; the next ask is macOS's own question again.
-// BRIDGE_TCCUTIL: the tests' stand-in (in dry runs, without it, nothing runs).
-export async function reset(pane, { folder } = {}) {
+// BRIDGE_TCCUTIL: the tests' stand-in (in dry runs, without it, nothing runs). service: one of the
+// page's lists only (Screen & System Audio Recording's ScreenCapture or AudioCapture), so the other
+// stays as it is.
+export async function reset(pane, { folder, service } = {}) {
   if (!IS_MAC) throw new Error('This is a macOS setting')
   const p = PANES[pane]
   if (!p?.tcc) throw new Error('Nothing to reset for this')
   const id = await bundleId()
   if (!id) throw new Error('Bridge AI can reset this only for its own app. In System Settings, remove the app from the list with −, then allow it again.')
-  const services = pane === 'files' && FOLDERS.includes(folder) ? [`SystemPolicy${folder}Folder`] : p.tcc
+  const services = pane === 'files' && FOLDERS.includes(folder) ? [`SystemPolicy${folder}Folder`] : p.tcc.includes(service) ? [service] : p.tcc
   const bin = process.env.BRIDGE_TCCUTIL || (DRYRUN ? null : '/usr/bin/tccutil')
   for (const s of services) {
     if (!bin) { console.log(`[fix dry-run] tccutil reset ${s} ${id}`); continue }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { OpenSettings } from '../PermissionFix.jsx'
-import { api, usePoll, onThisComputer } from '../../api.js'
+import { useMeetings } from '../meetings/recording.jsx'
+import { useScreenAccess, useAllowCall, allowSteps } from '../meetings/allowcall.jsx'
+import { api, usePoll } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
 import { useTrial } from '../../trials.js'
 import { openMemory } from '../meetings/tools.jsx'
@@ -83,21 +84,26 @@ function SaveNotes({ set, pickFolder }) {
   )
 }
 // Names from the call's window: Screen Recording, with why, and Allow (macOS asks once; after that
-// it's turned on in System Settings). Only on the computer it's for, where it can be asked.
+// it's turned on in System Settings, and applies once Bridge AI restarts: Restart, and Reset and ask
+// again if it's still off after, as on a meeting: meetings/allowcall.jsx). Only on the computer it's
+// for, where it can be asked. Looked at again whenever you come back to the window.
 function ScreenNames() {
-  const here = onThisComputer()
-  const { data, refresh } = usePoll(here ? '/calls/screen' : null, 10_000)
+  const { data, refresh, here } = useScreenAccess()
+  const rec = !!useMeetings()?.rec
   const [asked, setAsked] = useState(false)
   const [err, setErr] = useState(null) // macOS couldn't be asked, and why
+  const a = useAllowCall('screen', { recording: rec, started: data?.started, onAsked: refresh })
   if (!here || data?.allowed == null) return null
+  const steps = !data.allowed && (asked || a.stage !== 'off')
+  const s = allowSteps('screen', a)
   return (
     <div className="st-row st-screen-names">
       <span><b>{t('Names from the call')}</b> <span className="muted small">{data.allowed
         ? t('Screen Recording is on: the names your call shows go on the transcript. Only the words are kept, never the picture.')
-        : asked ? t('Turn on Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in Screen Recording.')
-          : t('Screen Recording puts the names your call shows on the transcript. Only the words are kept, never the picture.')}</span>{err && <span className="error-text small"> {err}</span>}</span>
-      {!data.allowed && (asked
-        ? <OpenSettings pane="audio">{t('Open it')}</OpenSettings>
+        : steps ? t('Turn on Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in Screen Recording.')
+          : t('Screen Recording puts the names your call shows on the transcript. Only the words are kept, never the picture.')}{steps && s.say}</span>{err && <span className="error-text small"> {err}</span>}</span>
+      {!data.allowed && (steps
+        ? <span className="st-screen-acts">{s.acts}</span>
         : <button type="button" className="btn small" onClick={async () => { setErr(null); try { await api('/calls/screen', { method: 'POST' }); setAsked(true) } catch (e) { setErr(t("Couldn't ask macOS: {error}", { error: e.message })) } refresh() }}>{t('Allow')}</button>)}
     </div>
   )

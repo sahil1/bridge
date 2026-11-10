@@ -10,10 +10,31 @@
 // unfinished work. Nothing was lost: every setting that was there before Advanced (each control by its
 // name) is still in its section, Advanced opened. At phone width (375 px), dark: Meetings with
 // Advanced open, nothing wider than the screen or cut off, and Advanced a whole 40 px target.
+// Meetings' Names from the call, on a Mac, where Screen Recording shows as on in System Settings and
+// doesn't take until Bridge AI restarts: after Open it, Restart Bridge AI (the top bar's Restart to
+// apply, in a browser); restarted and still off, Reset and ask again, for Screen Recording alone;
+// and on, seen as soon as you come back to the window, not 30 seconds later. Stand-ins for
+// native/callwatch (bin/callwatch.json says whether it's allowed) and tccutil (bin/tcc.log).
+import fs from 'node:fs'
+import path from 'node:path'
 import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, advanced, withoutCutOff, noServiceWorker, IS_MAC } from '../lib/harness.mjs'
 
 const { ok, done } = checks('settings-ui')
-const kit = await startKit('settings-ui')
+const stand = (bin, name, source) => {
+  fs.writeFileSync(path.join(bin, `${name}.cjs`), source)
+  fs.writeFileSync(path.join(bin, name), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, `${name}.cjs`)}" "$@"\n`, { mode: 0o755 })
+  return path.join(bin, name)
+}
+const kit = await startKit('settings-ui', { env: ({ bin }) => (IS_MAC ? {
+  BRIDGE_CALLWATCH: stand(bin, 'callwatch', `const fs = require('node:fs'), path = require('node:path')
+const read = () => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'callwatch.json'), 'utf8')) } catch { return {} } }
+const say = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); process.exit(0) }
+if (process.argv[2] === 'screen-ask') { fs.appendFileSync(path.join(__dirname, 'screen-asked'), 'asked\\n'); say({ allowed: !!read().screen }) }
+if (process.argv[2] === 'screen') say({ allowed: !!read().screen })
+setInterval(() => {}, 1000); process.stdout.write('{"input":[]}\\n')`),
+  BRIDGE_TCCUTIL: stand(bin, 'tccutil', `require('node:fs').appendFileSync(require('node:path').join(__dirname, 'tcc.log'), process.argv.slice(2).join(' ') + '\\n')`),
+  BRIDGE_FIX_BUNDLE_ID: 'dev.bridge-ai.test',
+} : {}) })
 const model = await startModel('settings-ui')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -235,6 +256,53 @@ try {
     ok(!!(await until(async () => (await kit.api('/settings')).effective.keepAgents === false, 5000)), 'and ticked then, it\'s the one that changes')
     await kit.api('/settings', { keepAgents: true }, 'PATCH')
     ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+  }
+
+  // ---------- Names from the call: Screen Recording on there, and not yet here ----------
+  if (IS_MAC) {
+    const said = (f) => { try { return fs.readFileSync(path.join(kit.bin, f), 'utf8') } catch { return '' } }
+    fs.writeFileSync(path.join(kit.bin, 'callwatch.json'), JSON.stringify({ screen: false }))
+    const go = async (p) => {
+      await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meetings' } })))
+      await p.locator('.modal.settings .st-sections').first().waitFor({ timeout: 8000 })
+      await settled(p)
+      await advanced(p)
+      return p.locator('.modal.settings .st-screen-names')
+    }
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+    let row = await go(p)
+    const text = () => row.innerText().catch(() => '')
+    ok(!!(await until(async () => /Screen Recording puts the names/.test(await text()), 8000)) && await row.locator('button', { hasText: 'Allow' }).count() === 1, 'Screen Recording off: why, and Allow', await text())
+    await row.locator('button', { hasText: 'Allow' }).click()
+    ok(!!(await until(async () => /Turn on Bridge AI under System Settings .* in Screen Recording/.test(await text()), 5000)) && /asked/.test(said('screen-asked')), 'Allow asks macOS, then says where to turn it on, with Open it', await text())
+    await row.locator('button', { hasText: 'Open it' }).click()
+    ok(!!(await until(async () => /Already on there\? macOS applies it once Bridge AI restarts\./.test(await text()), 5000)) && await row.locator('button', { hasText: 'Restart Bridge AI' }).count() === 1, 'once it\'s open there: already on there? macOS applies it once Bridge AI restarts, with Restart Bridge AI', await text())
+    await row.scrollIntoViewIfNeeded().catch(() => {})
+    await shot(p, `${tag}settings-ui-screen-restart`)
+    await row.locator('button', { hasText: 'Restart Bridge AI' }).click()
+    ok(!!(await until(async () => (await kit.api('/fix')).restart.some((x) => x.pane === 'audio') && await p.locator('.update-pop', { hasText: 'Restart to apply' }).isVisible(), 5000)), 'in a browser, Restart Bridge AI opens the top bar\'s Restart to apply, for Screen & System Audio Recording', (await kit.api('/fix')).restart)
+    await p.keyboard.press('Escape')
+    // Bridge AI restarted (the server too), and Screen Recording is still off: Reset, for it alone.
+    const was = (await kit.api('/calls/screen')).started
+    await kit.restart()
+    await p.reload()
+    await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+    row = await go(p)
+    const now = (await kit.api('/calls/screen')).started
+    ok(now > was, 'the server says when it started, so the page can tell it restarted', { was, now })
+    ok(!!(await until(async () => /Still off since Bridge AI restarted/.test(await text()), 8000)) && await row.locator('button', { hasText: 'Reset and ask again' }).count() === 1, 'still off after the restart: why, and Reset and ask again', await text())
+    await row.scrollIntoViewIfNeeded().catch(() => {})
+    await shot(p, `${tag}settings-ui-screen-reset`)
+    const asks = said('screen-asked').split('\n').filter(Boolean).length
+    await row.locator('button', { hasText: 'Reset and ask again' }).click()
+    ok(!!(await until(async () => /macOS asks again/.test(await text()), 5000)) && said('tcc.log').trim() === 'reset ScreenCapture dev.bridge-ai.test' && said('screen-asked').split('\n').filter(Boolean).length === asks + 1, 'Reset forgets macOS\'s answer for Screen Recording only (not the call\'s sound) and asks again', { text: await text(), tcc: said('tcc.log') })
+    // Turned on, and back to the window: seen at once, not from what the server kept.
+    fs.writeFileSync(path.join(kit.bin, 'callwatch.json'), JSON.stringify({ screen: true }))
+    await p.evaluate(() => window.dispatchEvent(new Event('focus')))
+    ok(!!(await until(async () => /Screen Recording is on/.test(await text()), 3000)), 'turned on and back to the window: it says it\'s on straight away', await text())
+    ok(withoutCutOff(errors).length === 0, 'Screen Recording: no page errors', errors)
     await ctx.close()
   }
 

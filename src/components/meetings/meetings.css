@@ -74,6 +74,10 @@
 .mt-trouble, .mt-hint-call { flex-basis: 100%; margin: 0; }
 .mt-ask-screen { flex-basis: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 2px 0 0; padding: 7px 10px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 8%, var(--pane)); color: var(--ink-2); }
 .mt-ask-screen > span { flex: 1 1 260px; min-width: 0; }
+/* A call's switches in System Settings (allowcall.jsx): what next, and its buttons side by side. */
+.mt-ask-screen > .ac-acts, .st-screen-acts, .fc-banner-acts { flex: none; display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.mt-quiet-call .btn { margin-left: 4px; vertical-align: baseline; }
+.st-screen-names > span:first-child { flex: 1 1 260px; min-width: 0; }
 .mt-trouble { color: var(--warning, #b7791f); }
 .btn.danger-soft { color: var(--critical); }
 

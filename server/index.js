@@ -1514,7 +1514,7 @@ app.get('/api/fix/list', wrap(() => fixes.list({ callSound: !!meetings.tapBin() 
 app.get('/api/fix/check', wrap((req) => fixes.check(String(req.query.pane || ''), { folder: String(req.query.folder || '') })))
 app.post('/api/fix/claim', wrap((req) => fixes.claim(String(req.body?.pane || ''))))
 app.post('/api/fix/settings', wrap((req) => { onComputer(req); return fixes.openSettings(String(req.body?.pane || '')) }))
-app.post('/api/fix/reset', wrap((req) => { onComputer(req); return fixes.reset(String(req.body?.pane || ''), { folder: String(req.body?.folder || '') }) }))
+app.post('/api/fix/reset', wrap((req) => { onComputer(req); return fixes.reset(String(req.body?.pane || ''), { folder: String(req.body?.folder || ''), service: String(req.body?.service || '') }) }))
 // What the desktop app on this computer is allowed (desktop/main.js, now and then).
 app.post('/api/fix/desktop', wrap((req) => { onComputer(req); return fixes.appReport(req.body || {}) }))
 // Another of your devices, or your phone, asking this computer to show macOS's question: the one
@@ -1829,7 +1829,8 @@ app.get('/api/calls', wrap(() => {
 app.post('/api/calls/dismiss', wrap(() => { prompt = null; return { ok: true } }))
 // Screen Recording, for the names a call shows as people talk: whether it's allowed, and Allow
 // (macOS's own window the first time; after that, System Settings is where it's turned on).
-app.get('/api/calls/screen', wrap(async () => ({ allowed: await calls.screen() })))
+// fresh=1: looked at now, not what was kept from a moment ago. started: when this server started.
+app.get('/api/calls/screen', wrap(async (req) => ({ allowed: await calls.screen({ fresh: req.query.fresh === '1' }), started: calls.started })))
 app.post('/api/calls/screen', wrap(async (req) => { hereOnly(req, 'Allow Screen Recording'); return { allowed: await calls.screenAsk() } }))
 // The calendar event to take notes for (callevent.js): the one the call on app is for (or the call
 // on now), by its window's title, a Join in Bridge AI or when it started; with no call, the one
