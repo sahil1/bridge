@@ -150,7 +150,8 @@ try {
   ok(!!(await until(() => /hello from the terminal app/.test(typed()), 8000)), 'what you type there reaches the agent', typed())
   term.write('\x1d')
   ok(!!(await until(() => term.code !== null, 8000)) && term.code === 0, 'Ctrl+] leaves it, and the command ends', { code: term.code, tail: term.text().slice(-200) })
-  ok(/Detached from Work › Billing/.test(term.text()) && !/Press Return/.test(term.text()), 'saying it detached, nothing to read', term.text().slice(-200))
+  // (On Windows the tab goes by the title PowerShell gives its window.)
+  ok((process.platform === 'win32' ? /Detached from Work › / : /Detached from Work › Billing/).test(term.text()) && !/Press Return/.test(term.text()), 'saying it detached, nothing to read', term.text().slice(-200))
   term.stop()
 
   // ---------- The app didn't run it ----------
