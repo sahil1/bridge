@@ -10,7 +10,8 @@
 #     brew=<path> the Homebrew that's here already
 #     <formula>   what then installs with Homebrew (ical-buddy, whisper-cpp)
 # It ends with "Setup stopped before the end" when something didn't work (Bridge AI reads that).
-# BRIDGE_SETUP_STANDINS (tests): a folder whose programs are used first, so nothing real runs.
+# BRIDGE_SETUP_STANDINS (tests): a folder whose programs are used first, so nothing real runs, and
+# whose root/ stands for / where Homebrew puts itself.
 
 PATH="${BRIDGE_SETUP_STANDINS:+$BRIDGE_SETUP_STANDINS:}/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 devtools=
@@ -25,6 +26,11 @@ for a in "$@"; do
     *) formulas+=("$a") ;;
   esac
 done
+
+# Where Homebrew's installer puts it, as it decides by uname -m: /opt/homebrew on Apple silicon,
+# /usr/local on Intel (and in an Intel shell, under Rosetta).
+case "$(uname -m)" in arm64) prefix=/opt/homebrew ;; *) prefix=/usr/local ;; esac
+[ -n "${BRIDGE_SETUP_STANDINS:-}" ] && prefix="$BRIDGE_SETUP_STANDINS/root$prefix"
 
 say() { printf '\n==> %s\n' "$*"; }
 stop() { echo; echo "Setup stopped before the end. What went wrong is above. Close this tab, then try again in Bridge AI."; exit 1; }
@@ -79,8 +85,10 @@ fi
 if [ -n "$homebrew" ]; then
   say "Homebrew"
   NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || stop
-  # Not on the PATH until your shell profile says so: where its installer puts it.
-  brew=$(command -v brew 2>/dev/null || { [ -x /opt/homebrew/bin/brew ] && echo /opt/homebrew/bin/brew; } || echo /usr/local/bin/brew)
+  # Not on the PATH until your shell profile says so: where its installer put it, first (an older
+  # Homebrew on the PATH can be another one: Intel's, left on an Apple silicon Mac).
+  if [ -x "$prefix/bin/brew" ]; then brew="$prefix/bin/brew"; else brew=$(command -v brew 2>/dev/null); fi
+  [ -n "$brew" ] || { echo; echo "Homebrew's installer finished, but there's no brew in $prefix/bin."; stop; }
 fi
 
 if [ "${#formulas[@]}" -gt 0 ]; then
