@@ -14,8 +14,11 @@ import { registerServiceWorker, reportPresence } from './pwa.js'
 import { countActiveTime } from './activeTime.js'
 import { answerBusy } from './busy.js'
 import { resume as resumeSending } from './sendbox.js'
+import { watchScrolling } from './scrolling.js'
 
 apply()
+// A scroll bar's thumb while you scroll that area from the keys too, not only while you're over it.
+watchScrolling()
 // ?window=<pane>: one agent in a window of its own. ?float=1: the desktop app's floating card.
 // ?dictate=1: its dictation window (dictation/Hud.jsx).
 const solo = new URLSearchParams(location.search).get('window')

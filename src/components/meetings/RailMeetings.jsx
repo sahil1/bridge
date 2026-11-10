@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { usePoll } from '../../api.js'
 import { usePersisted } from '../layout.jsx'
@@ -17,9 +17,11 @@ import { t, locale } from '../../i18n/index.js'
 // group of its own, the two most recent open; older ones are under Earlier, by week for the month
 // before that and by month after, folded until you open them. What you open or fold is kept on this
 // device. The meeting recording and the one open always show, under their group's heading when it's
-// folded.
+// folded. A group of more than ten shows its first eight and Show more for the rest, so a busy week
+// or month doesn't push your spaces far down: the sidebar scrolls as one, no list in it on its own.
 
 const DAY = 864e5
+const FIRST = 8
 const pad = (n) => String(n).padStart(2, '0')
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const midnight = (v) => { const d = new Date(v); d.setHours(0, 0, 0, 0); return d }
@@ -71,14 +73,20 @@ export default function RailMeetings({ selected, onOpen }) {
   }
   // Always shown: the one recording, and the one open.
   const keep = (x) => x.status === 'recording' || x.status === 'paused' || selected === `view:meeting:${x.id}`
-  const shownOf = (g, on) => (on ? g.items : g.items.filter(keep))
+  // Groups shown in full (Show more), until the page is loaded again.
+  const [whole, setWhole] = useState({})
+  const shownOf = (g, on, key) => {
+    if (!on) return g.items.filter(keep)
+    if (whole[key] || g.items.length <= FIRST + 2) return g.items
+    return g.items.filter((x, i) => i < FIRST || keep(x))
+  }
   const inFolder = (f) => all.filter((x) => !x.archived && x.folder === f)
   // In the order shown, for Shift-click runs.
   const shown = [
-    ...days.flatMap((g) => shownOf(g, isOpen(g.key))),
-    ...(earlier ? earlier.groups.flatMap((g) => shownOf(g, isOpen('earlier') && isOpen(g.key))) : []),
-    ...folders.flatMap((f) => shownOf({ items: inFolder(f) }, !!open[f])),
-    ...shownOf({ items: archived }, !!open[':archived']),
+    ...days.flatMap((g) => shownOf(g, isOpen(g.key), g.key)),
+    ...(earlier ? earlier.groups.flatMap((g) => shownOf(g, isOpen('earlier') && isOpen(g.key), g.key)) : []),
+    ...folders.flatMap((f) => shownOf({ items: inFolder(f) }, !!open[f], f)),
+    ...shownOf({ items: archived }, !!open[':archived'], ':archived'),
   ]
   const selection = useSelection(shown)
   const { sel, toggle, clear } = selection
@@ -109,25 +117,34 @@ export default function RailMeetings({ selected, onOpen }) {
     </button>
   )
   const dated = (x) => row(x, shortDate(x.startedAt))
+  // A group's rows, and Show more under them while some are left out.
+  const rows = (g, on, key, draw) => {
+    const list = shownOf(g, on, key)
+    const left = on ? g.items.length - list.length : 0
+    return <>
+      {list.map(draw)}
+      {left > 0 && <button type="button" className="link-btn small rm-more" onClick={() => setWhole({ ...whole, [key]: true })}>{t('Show {n} more', { n: left })}</button>}
+    </>
+  }
   const group = (key, icon, label, items) => (
     <div key={key} className="rm-day rm-folder">
       <button type="button" className="rm-folder-head" onClick={() => setOpen({ ...open, [key]: !open[key] })} aria-expanded={!!open[key]}>
         <Icon name="chevron" size={10} className={`caret ${open[key] ? 'rot90' : ''}`} /><Icon name={icon} size={11} /><span className="rm-title">{label}</span><span className="rm-time muted">{items.length}</span>
       </button>
-      {shownOf({ items }, !!open[key]).map(dated)}
+      {rows({ items }, !!open[key], key, dated)}
     </div>
   )
   const earlyOpen = earlier && isOpen('earlier')
   return (
     <div className="rail-meetings" aria-label={t('Meetings')}>
       {!all.length && <p className="muted small rm-empty">{t('No meetings yet. The record button above starts one.')}</p>}
-      <div className="rm-scroll">
+      <div className="rm-list">
         {days.map((g) => {
           const on = isOpen(g.key)
           return (
             <div key={g.key} className="rm-day">
               {head(g.label, g.items.length, on, () => fold(g.key), 'rm-day-head')}
-              {shownOf(g, on).map((x) => row(x))}
+              {rows(g, on, g.key, (x) => row(x))}
             </div>
           )
         })}
@@ -140,7 +157,7 @@ export default function RailMeetings({ selected, onOpen }) {
                 return (
                   <div key={g.key} className="rm-day rm-span">
                     {head(g.label, g.items.length, on, () => fold(g.key), 'rm-span-head')}
-                    {shownOf(g, on).map(dated)}
+                    {rows(g, on, g.key, dated)}
                   </div>
                 )
               })

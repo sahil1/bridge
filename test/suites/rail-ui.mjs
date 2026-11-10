@@ -5,12 +5,15 @@
 // it, ⌘K has one entry for it, and the tour points at the row. Then a few hundred meetings over a
 // year: the last week by day, two days open, older ones under Earlier by week and month, all
 // folding; the one recording and the one open stay in sight when their group is folded; what's
-// folded is kept after a reload; and the list stays short and quick however many there are. On a
-// 1280x800 window with it and Dictations' list long, the sidebar's top scrolls on its own, Spaces
-// stays in view, and the window is never pushed up past the top bar.
+// folded is kept after a reload; a month of more than ten shows eight and Show more; and the list
+// stays short and quick however many there are. On a 1280x800 window with every Beta Feature on, it
+// and Dictations' list long, the sidebar scrolls as one (no list in it scrolls on its own), the Views
+// and Spaces headings stay in sight however far it's scrolled, and the window is never pushed up past
+// the top bar; Views fold to one row of icons with your spaces right under it, Spaces fold to how
+// many there are, and both stay folded after a reload.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, TEST } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, TEST, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('rail-ui')
 const kit = await startKit('rail-ui')
@@ -114,6 +117,16 @@ try {
   const old = made[150] // about six months ago
   const oldTitle = listed.find((m) => m.id === old.id).title
 
+  // Every Beta Feature on, as the owner has it (Home, Studio and Files in the sidebar too), and a space
+  // with an agent in it under Spaces.
+  const trials = [...fs.readFileSync(path.join(ROOT, 'src', 'trials.js'), 'utf8').matchAll(/\{ id: '([a-z-]+)'/g)].map((m) => m[1])
+  await kit.api('/settings', { trials: Object.fromEntries(trials.map((x) => [x, true])) }, 'PATCH')
+  const work = path.join(kit.home, 'code', 'bit')
+  fs.mkdirSync(work, { recursive: true })
+  await kit.api('/agents/launch', { kind: 'claude', cwd: work, label: 'Payments', newSpace: 'BIT', prompt: 'idle' })
+  // And dictations, for Dictations' list under Meetings' (there before the page opens, which asks
+  // whether there are any only now and then).
+  for (let i = 0; i < 14; i++) await kit.api('/dictations', { text: `Remind me about the launch, part ${i}`, ms: 1500 })
   const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', store: { 'cc-rail-meetings': true } })
   const list = p.locator('.rail-meetings')
   await p.waitForSelector('.rail-meetings .rm-fold', { timeout: 20000 }).catch(() => {})
@@ -145,6 +158,12 @@ try {
   await month.locator('.rm-span-head').click()
   const inMonth = await month.locator('.rm-row').count()
   ok(inMonth > 1 && /^[A-Z][a-z]{2} \d+$/.test((await month.locator('.rm-row .rm-time').first().innerText()).trim()), 'a month opens on its meetings, each with its date', { n: inMonth, d: await month.locator('.rm-row .rm-time').first().innerText().catch(() => '') })
+  // A month of more than ten: its first eight (and the one open), then Show more for the rest.
+  const inAll = Number((await month.locator('.rm-span-head .rm-time').innerText()).trim())
+  const more = month.locator('.rm-more')
+  ok(inAll > 10 && inMonth <= 9 && new RegExp(`^Show ${inAll - inMonth} more$`).test((await more.innerText().catch(() => '')).trim()), 'a month of more than ten shows its first eight, and Show more for the rest, rather than a list that scrolls on its own', { inAll, inMonth, more: await more.innerText().catch(() => '') })
+  await more.click()
+  ok(await month.locator('.rm-row').count() === inAll && await month.locator('.rm-more').count() === 0, 'which shows them all', await month.locator('.rm-row').count())
   const nodes = await list.evaluate((el) => el.querySelectorAll('*').length)
   ok(nodes < 600, 'still a short list for the page to draw', nodes)
   await shot(p, `${tag}rail-meetings-earlier`)
@@ -154,19 +173,68 @@ try {
   await p.waitForTimeout(500)
   const again = await p.evaluate(() => [...document.querySelectorAll('.rail-meetings .rm-day-head, .rail-meetings .rm-span-head')].filter((e) => e.getAttribute('aria-expanded') === 'true').map((e) => e.innerText.replace(/\s+/g, ' ').trim()))
   ok(!again.some((x) => /^today/i.test(x)) && again.some((x) => /^yesterday/i.test(x)) && again.some((x) => /^earlier/i.test(x)) && again.length === 3, 'after a reload, what was open or folded stays so', again)
-  // A 1280x800 window, Meetings' list that long and Dictations' open under it: the top of the sidebar
-  // scrolls on its own, Spaces stays in view, and bringing its last row into view (as the keyboard or
-  // the app does) never pushes the whole window up past the top bar.
-  for (let i = 0; i < 14; i++) await kit.api('/dictations', { text: `Remind me about the launch, part ${i}`, ms: 1500 })
+  // A 1280x800 window with every Beta Feature on, Meetings' list that long and Dictations' open under
+  // it: the sidebar scrolls as one, with no list in it scrolling on its own; Spaces' heading stays in
+  // view at its foot; and bringing its last row into view (as the keyboard or the app does) never
+  // pushes the whole window up past the top bar.
   await p.setViewportSize({ width: 1280, height: 800 })
   const dictFold = p.locator('.rail-nav-row', { has: p.locator('.rail-nav-btn', { hasText: 'Dictations' }) }).locator('.rail-nav-fold')
   await dictFold.waitFor({ timeout: 20000 }).catch(() => {})
   if (await dictFold.getAttribute('aria-expanded').catch(() => null) === 'false') await dictFold.click()
-  await until(() => p.locator('.rail-nav .rail-meetings').nth(1).locator('.rm-row').count(), 10000)
-  await p.locator('.rail-nav-btn', { hasText: 'Whiteboards' }).scrollIntoViewIfNeeded()
-  const fit = await p.evaluate(() => ({ bar: Math.round(document.querySelector('.topbar').getBoundingClientRect().top), page: document.scrollingElement.scrollTop, spaces: Math.round(document.querySelector('.rail-head').getBoundingClientRect().bottom), height: innerHeight, nav: [document.querySelector('.rail-nav').scrollHeight, document.querySelector('.rail-nav').clientHeight] }))
-  ok(fit.bar === 0 && fit.page === 0 && fit.spaces < fit.height && fit.nav[0] > fit.nav[1], '1280x800 with both lists long: the sidebar\'s top scrolls on its own, Spaces stays in view, and the window stays put under the top bar', fit)
+  ok(!!(await until(() => p.locator('.rail-nav .rail-meetings').nth(1).locator('.rm-row').count(), 10000)), 'Dictations\' list open under Meetings\'', await p.locator('.rail-nav').innerText().catch(() => ''))
+  await p.locator('.rail .tab-row', { hasText: 'Payments' }).waitFor({ timeout: 20000 }).catch(() => {})
+  ok(await p.locator('.rail-nav-btn', { hasText: /^\s*(Studio|Files)\s*$/ }).count() === 2, 'every Beta Feature on: Studio and Files are in the sidebar too', await p.locator('.rail-nav-btn').allInnerTexts())
+  await p.locator('.rail-nav-btn', { hasText: 'Files' }).scrollIntoViewIfNeeded()
+  // The sidebar's scroll areas, and where its headings are against what scrolls.
+  const look = () => p.evaluate(() => {
+    const box = (s) => { const r = document.querySelector(s)?.getBoundingClientRect(); return r ? { top: Math.round(r.top), bottom: Math.round(r.bottom) } : null }
+    return {
+      scrolls: [...document.querySelectorAll('.rail, .rail *')].filter((e) => /(auto|scroll)/.test(getComputedStyle(e).overflowY) && e.scrollHeight > e.clientHeight + 1).map((e) => e.className),
+      bar: Math.round(document.querySelector('.topbar').getBoundingClientRect().top), page: document.scrollingElement.scrollTop,
+      rail: box('.rail-scroll'), views: box('.rail-views-head'), spaces: box('.rail-spaces-head'), space: box('.rail .ws-row'),
+    }
+  })
+  let fit = await look()
+  ok(fit.scrolls.length === 1 && fit.scrolls[0] === 'rail-scroll', '1280x800, every Beta Feature on and both lists long: the sidebar has one scroll area, not one for its top, one for its spaces and one for each list', fit.scrolls)
+  ok(fit.bar === 0 && fit.page === 0 && fit.spaces.bottom <= fit.rail.bottom + 1 && fit.spaces.top > fit.views.bottom, 'Spaces\' heading stays in view at its foot, and the window stays put under the top bar', fit)
   await shot(p, `${tag}rail-lists-1280`)
+  // Scrolled halfway and to the end: both headings in sight. And with more spaces than the sidebar
+  // holds (stood in for by room under the one there), Spaces' heading stops under Views' as you
+  // scroll into them, rather than going up out of sight.
+  const seen = []
+  for (const [at, tall] of [[0.5, false], [1, false], [0.97, true]]) {
+    await p.locator('.rail-scroll').evaluate((e, [to, more]) => { e.querySelector('.rail-spaces').style.paddingBottom = more ? '2000px' : ''; e.scrollTop = (e.scrollHeight - e.clientHeight) * to }, [at, tall])
+    await p.waitForTimeout(150)
+    seen.push(await look())
+  }
+  ok(seen.every((x) => x.views.top === x.rail.top && x.spaces.top >= x.views.bottom - 1 && x.spaces.bottom <= x.rail.bottom + 1), 'scrolled halfway and to the end, both headings stay in sight, so either fold is a click away', seen.map((x) => ({ rail: x.rail, views: x.views, spaces: x.spaces })))
+  ok(seen[1].space.top >= seen[1].spaces.bottom - 1 && Math.abs(seen[2].spaces.top - seen[2].views.bottom) <= 1, 'Spaces\' heading sits over your spaces, and under Views\' once you\'ve scrolled into a long list of them', seen.slice(1))
+  await p.locator('.rail-spaces').evaluate((e) => { e.style.paddingBottom = '' })
+  await shot(p, `${tag}rail-lists-1280-end`)
+  // Views folded: one row of their icons, your spaces right under it; still folded after a reload.
+  await p.locator('.rail-scroll').evaluate((e) => { e.scrollTop = 0 })
+  await p.locator('.rail-views-head .rail-sec').click()
+  const icons = p.locator('.rail-views-head .rail-icon')
+  await icons.first().waitFor({ timeout: 5000 }).catch(() => {})
+  const row = await icons.evaluateAll((els) => els.map((e) => ({ name: e.getAttribute('aria-label'), top: Math.round(e.getBoundingClientRect().top) })))
+  ok(row.length >= 8 && new Set(row.map((x) => x.top)).size === 1 && ['Home', 'New', 'Chief of Staff', 'Dictations', 'Whiteboards', 'Studio', 'Files'].every((n) => row.some((x) => x.name === n)) && row.some((x) => /^Meetings/.test(x.name)), 'Views folded: one row of their icons', row)
+  fit = await look()
+  ok(await p.locator('.rail-nav').count() === 0 && fit.spaces.top - fit.views.bottom <= 1 && fit.space?.bottom < 200, 'and your spaces right under it, in view', fit)
+  await shot(p, `${tag}rail-views-folded`)
+  await icons.nth(row.findIndex((x) => x.name === 'Studio')).click()
+  ok(!!(await until(async () => (await p.locator('.rail-views-head .rail-icon.on').getAttribute('aria-label').catch(() => '')) === 'Studio', 8000)), 'an icon opens its view, and shows it\'s the one open', await p.locator('.rail-views-head .rail-icon.on').getAttribute('aria-label').catch(() => ''))
+  // Spaces folded: out of sight, its heading saying how many there are.
+  await p.locator('.rail-spaces-head .rail-sec').click()
+  ok(await p.locator('.rail .ws-row').count() === 0 && /^\d+$/.test((await p.locator('.rail-spaces-head .ws-count').innerText().catch(() => '')).trim()), 'Spaces folded: out of sight, its heading saying how many', await p.locator('.rail-spaces-head').innerText())
+  await shot(p, `${tag}rail-both-folded`)
+  await p.reload()
+  await p.locator('.rail-views-head').waitFor({ timeout: 20000 }).catch(() => {})
+  await until(async () => (await p.locator('.rail-views-head .rail-icon').count()) === row.length, 8000)
+  ok(await p.locator('.rail-views-head .rail-sec').getAttribute('aria-expanded') === 'false' && await p.locator('.rail-spaces-head .rail-sec').getAttribute('aria-expanded') === 'false' && await p.locator('.rail-nav').count() === 0 && await p.locator('.rail-views-head .rail-icon').count() === row.length, 'after a reload, both are still folded', await p.locator('.rail').innerText())
+  // Open again: as they were.
+  await p.locator('.rail-views-head .rail-sec').click()
+  await p.locator('.rail-spaces-head .rail-sec').click()
+  ok(!!(await until(async () => (await p.locator('.rail-nav .rail-meetings').count()) === 2 && (await p.locator('.rail .tab-row', { hasText: 'Payments' }).count()) === 1, 8000)), 'unfolded, Views and Spaces are back as they were, with both lists', { lists: await p.locator('.rail-nav .rail-meetings').count(), kept: await p.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([k]) => /^cc-rail/.test(k)))), tabs: await p.locator('.rail .tab-row').allInnerTexts(), nav: await p.locator('.rail-nav').innerText().catch(() => '') })
   // WebKit counts a request the reload cut off (the presence ping, the live feed) as a page error.
   ok(errors.filter((e) => !/\/api\/\S+ due to access control checks/.test(e)).length === 0, 'no page errors', errors)
   await ctx.close()

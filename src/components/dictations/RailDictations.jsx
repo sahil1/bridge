@@ -15,7 +15,7 @@ export default function RailDictations() {
   return (
     <div className="rail-meetings rail-dictations" aria-label={t('Dictations')}>
       {!items.length && <p className="muted small rm-empty">{t('Nothing dictated yet.')}</p>}
-      <div className="rm-scroll">
+      <div className="rm-list">
         {groups.map((g) => (
           <div key={g.d} className="rm-day">
             <div className="rd-day muted">{g.d}</div>
