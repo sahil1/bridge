@@ -744,34 +744,7 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 .app.narrow .top-chip { height: 30px; padding: 0 9px; box-shadow: none; }
 .app.narrow .top-chip .chip-sep { display: none; }
 
-/* ============ Editor tabs ============ */
-.ws-tabs { flex: none; display: flex; align-items: flex-end; gap: 8px; height: 38px; padding: 0 2px; }
-.ws-tabs-scroll { display: flex; align-items: flex-end; gap: 3px; overflow-x: auto; scrollbar-width: none; min-width: 0; flex: 1; }
-.ws-tab {
-  flex: none; display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 6px 0 12px; max-width: 240px;
-  border-radius: 10px 10px 0 0; color: var(--ink-3); font-weight: 500; font-size: 12.5px; cursor: pointer; position: relative;
-  border: 1px solid transparent; border-bottom: 0; user-select: none;
-}
-.ws-tab:hover { color: var(--ink); background: color-mix(in srgb, var(--pane) 60%, transparent); }
-.ws-tab.main, .ws-tab.side { background: var(--pane); color: var(--ink); border-color: var(--line); }
-.ws-tab.focus::before { content: ""; position: absolute; left: 10px; right: 10px; top: -1px; height: 2px; border-radius: 2px; background: var(--accent-fill); }
-.ws-tab.side:not(.focus)::before { content: ""; position: absolute; left: 10px; right: 10px; top: -1px; height: 2px; border-radius: 2px; background: var(--line-2); }
-.ws-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-tab-where { flex: none; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--ink-3); }
-.tab-ship { color: var(--accent); }
-.ws-tab-x { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; color: var(--ink-3); opacity: 0; flex: none; }
-.ws-tab:hover .ws-tab-x, .ws-tab.main .ws-tab-x, .ws-tab.side .ws-tab-x { opacity: 1; }
-.ws-tab-x:hover { background: var(--pane-3); color: var(--ink); }
-.ws-tab-tools { display: flex; align-items: center; gap: 4px; padding-bottom: 4px; }
-/* Tab Groups (a beta feature): a group's name before its tabs (a space, or another of your
-   computers), which folds them away to that name and how many. */
-.ws-group { flex: none; align-self: flex-end; display: inline-flex; align-items: center; gap: 5px; height: 22px; max-width: 160px; margin: 0 1px 5px 9px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--pane-2); color: var(--ink-3); font-size: 11px; font-weight: 600; }
-.ws-group:first-child { margin-left: 0; }
-.ws-group:hover { color: var(--ink); }
-.ws-group.folded { color: var(--ink-2); background: var(--pane); }
-.ws-group.device { border-style: dashed; }
-.ws-group-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-group-n { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+/* ============ Editor tabs: TabStrip.jsx, tabstrip.css ============ */
 .win-btn.on { background: var(--accent-soft); color: var(--accent); }
 .win-btn:disabled { opacity: .35; cursor: default; }
 .group { flex: 1; min-height: 0; display: flex; flex-direction: column; border-radius: var(--r); }
@@ -2133,12 +2106,6 @@ button.ue-row:hover { background: var(--pane-2); }
 .crash-more { width: 100%; text-align: left; font-size: 12px; }
 .crash-more summary { cursor: pointer; color: var(--ink-3); text-align: center; }
 .crash-more pre { max-height: 200px; overflow: auto; margin: 8px 0 4px; padding: 8px 10px; border-radius: 8px; background: var(--pane-2); font: 11px var(--font-mono); white-space: pre-wrap; word-break: break-word; }
-/* Reordering open tabs */
-.ws-tab { cursor: default; }
-.ws-tab.dragging { opacity: .45; }
-.ws-tab.drop-before::after, .ws-tab.drop-after::after { content: ""; position: absolute; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: var(--accent-fill); }
-.ws-tab.drop-before::after { left: -3px; }
-.ws-tab.drop-after::after { right: -3px; }
 .warn-text { color: var(--warn, #b7791f); white-space: normal; }
 
 /* ============ Subagents tray (sits on the message box, same width) ============ */
@@ -2521,21 +2488,47 @@ button.ue-row:hover { background: var(--pane-2); }
 .app.wide .search-btn.s-short .s-short { display: inline; }
 .app.wide .search-btn.s-none { justify-content: space-between; }
 .app.wide .search-btn kbd { margin-left: 0; }
-/* What's pinned to the bar (src/pins.js), beside its three places. A chip's words (pin-word) and a
-   long value (pin-long) are what go first. The clock is its time alone, as it was before the
-   Status menu. */
-.app.wide .top-x .clock { padding: 0 2px; white-space: nowrap; }
+/* The bar's chips, one family, as Chrome's toolbar buttons are: the same height, corners, padding,
+   words and icons (14px, a caret 11), each quiet, with no fill or border, until the pointer is on it
+   or its menu is open. One is filled: what needs you, which wants you now. A state keeps its tint:
+   another computer shown, an update out for days. The search field is the bar's one box. */
+.app.wide .top-right { gap: 4px; }
+.app.wide .topbar :where(.top-chip, .needs-chip, .mc-chip, .rec-pill) {
+  height: 32px; padding: 0 10px; gap: 6px; border-radius: 9px; border: 0; background: transparent; box-shadow: none;
+  color: var(--ink-2); font: 500 12.5px var(--font); font-variant-numeric: tabular-nums; white-space: nowrap; transition: background .12s, color .12s, filter .12s;
+}
+.app.wide .topbar :is(.top-chip, .mc-chip, .rec-pill):is(:hover, [aria-expanded="true"]) { background: var(--pane); color: var(--ink); }
+.app.wide .topbar :is(.top-chip, .needs-chip, .mc-chip, .rec-pill) > .icon { width: 14px; height: 14px; }
+.app.wide .topbar :is(.top-chip, .mc-chip) > :is(.usage-caret, .icon:last-child:not(:first-child)) { width: 11px; height: 11px; }
+.app.wide .topbar .needs-chip { padding: 0 11px; background: var(--needs-fill); color: #fff; font-weight: 600; }
+.app.wide .topbar .needs-chip:hover { filter: brightness(1.08); }
+.app.wide .topbar .needs-chip:not(.quiet) .sdot { background: #fff; box-shadow: none; }
+.app.wide .topbar .needs-chip.quiet { background: transparent; box-shadow: none; color: var(--ink-2); font-weight: 500; }
+.app.wide .topbar .needs-chip.quiet:hover { background: var(--pane); color: var(--ink); filter: none; }
+.app.wide .topbar .mc-chip.remote { background: var(--accent-soft); color: var(--ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+.app.wide .topbar .update-chip { color: var(--accent); font-weight: 600; }
+.app.wide .topbar .update-chip.loud { background: var(--accent-soft); }
+.app.wide .topbar .setup-chip.you { color: var(--ink); }
+.app.wide .view-tabs button { height: 32px; padding: 0 10px; gap: 6px; font: 500 12.5px var(--font); }
+.app.wide .view-tabs button > .icon { width: 14px; height: 14px; }
+.app.wide .topbar .win-btn { width: 32px; height: 32px; border-radius: 9px; }
+.app.wide .topbar .win-btn > .icon { width: 15px; height: 15px; }
+/* What's pinned to the bar (src/pins.js), beside its three places. The clock is its time alone, as
+   it was before the Status menu, in a chip's room. */
+.app.wide .top-x .clock { display: inline-flex; align-items: center; height: 32px; padding: 0 6px; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
 .app.wide .top-x .wx-chip .icon { color: var(--ink-3); }
 .app.wide .top-x .usage-acct { max-width: none; }
-/* The steps the bar gives way in (useFit in App.jsx), least needed first: the pinned chips' words,
-   their long values, other words, then the pinned chips one at a time, and the rest. */
-.app.wide .topbar.fit-1 .top-x .pin-word { display: none; }
-.app.wide .topbar.fit-2 .top-x .pin-long { display: none; }
-.app.wide .topbar.fit-3 .meet-chip :is(.meet-title, small) { display: none; }
-.app.wide .topbar.fit-4 .status-word { display: none; }
-.app.wide .topbar.fit-5 .view-tabs .vt-word { display: none; }
-.app.wide .topbar.fit-6 .x-setup, .app.wide .topbar.fit-7 .x-sounds, .app.wide .topbar.fit-8 .x-clock, .app.wide .topbar.fit-9 .x-restart,
-.app.wide .topbar.fit-10 .x-usage, .app.wide .topbar.fit-11 .x-weather, .app.wide .topbar.fit-12 .x-update, .app.wide .topbar.fit-13 .x-fresh { display: none; }
+/* The steps the bar gives way in (useFit in App.jsx), least needed first: the time and the weather
+   (both in Status), the pinned chips' words, their long values, other words, then the pinned chips
+   one at a time, and the rest. */
+.app.wide .topbar.fit-1 .x-clock, .app.wide .topbar.fit-2 .x-weather { display: none; }
+.app.wide .topbar.fit-3 .top-x .pin-word { display: none; }
+.app.wide .topbar.fit-4 .top-x .pin-long { display: none; }
+.app.wide .topbar.fit-5 .meet-chip :is(.meet-title, small) { display: none; }
+.app.wide .topbar.fit-6 .status-word { display: none; }
+.app.wide .topbar.fit-7 .view-tabs .vt-word { display: none; }
+.app.wide .topbar.fit-8 .x-setup, .app.wide .topbar.fit-9 .x-sounds, .app.wide .topbar.fit-10 .x-restart,
+.app.wide .topbar.fit-11 .x-usage, .app.wide .topbar.fit-12 .x-update, .app.wide .topbar.fit-13 .x-fresh { display: none; }
 .app.wide .topbar.fit-14 .rec-name { display: none; }
 .app.wide .topbar.fit-15 .needs-word { display: none; }
 .app.wide .topbar.fit-16 .meet-chip { display: none; }

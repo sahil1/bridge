@@ -18,7 +18,9 @@
 // two lines, the news that had no room counted on Status and in its menu with usage, sounds, the
 // weather and the time; a font that grows the words gives way again. What's pinned to it: by default
 // the weather, the clock, usage and the news, not sounds; each says what it is on hover; as the
-// window narrows the pinned chips go down to their icons before any leaves the bar; a pin in Status
+// window narrows the time and the weather leave the bar first, then the other pinned chips go down to
+// their icons before any of them leaves it; its chips are one family, all as tall, quiet but for what
+// needs you; a pin in Status
 // puts one in the bar or takes it out (an unpinned one isn't counted), kept for the next window;
 // Settings › Appearance › In the Top Bar has the same switches; and the weather with none to show
 // (no city picked, or not fetched) says why, at every width, and opens the city picker. Usage
@@ -441,12 +443,19 @@ try {
     const seen = (e) => e.getClientRects().length > 0
     out.pins = [...bar.querySelectorAll('.top-x')].map((x) => {
       const chip = x.querySelector('button, time')
-      return chip && { id: [...x.classList].find((c) => c.startsWith('x-')).slice(2), in: seen(chip), words: [...x.querySelectorAll('.pin-word, .pin-long')].some(seen), hover: chip.getAttribute('title') || chip.getAttribute('aria-label') || '' }
+      return chip && { id: [...x.classList].find((c) => c.startsWith('x-')).slice(2), in: seen(chip), words: [...x.querySelectorAll('.pin-word, .pin-long')].some(seen), wordy: x.querySelectorAll('.pin-word, .pin-long').length > 0, hover: chip.getAttribute('title') || chip.getAttribute('aria-label') || '' }
     }).filter(Boolean)
     out.pinned = [...bar.querySelectorAll('.top-x')].map((x) => [...x.classList].find((c) => c.startsWith('x-')).slice(2))
     out.count = Number(bar.querySelector('.status-count')?.textContent || 0)
     out.name = bar.querySelector('.mc-chip .mc-name')?.title
     out.fit = [...bar.classList].filter((c) => c.startsWith('fit-')).length
+    // Its chips (not the search field, the bar's one box): how tall each is, and which are filled
+    // (a state's tint aside: the Bridge or Herdr tab picked, another computer shown, an update out
+    // for days).
+    const chips = [...bar.querySelectorAll('.top-chip, .needs-chip, .mc-chip, .rec-pill, .view-tabs button, .win-btn, .top-x .clock')].filter((e) => !inPop(e) && e.getClientRects().length)
+    out.heights = chips.map((e) => `${name(e)} ${Math.round(e.getBoundingClientRect().height)}`)
+    out.tall = [...new Set(chips.map((e) => Math.round(e.getBoundingClientRect().height)))]
+    out.filled = chips.filter((e) => !/^(transparent|rgba\(\d+, \d+, \d+, 0\))$/.test(getComputedStyle(e).backgroundColor) && !e.matches('.view-tabs .on, .mc-chip.remote, .update-chip.loud')).map(name)
     return out
   })
   // The bar once it's done giving way: it fits itself on the frame after anything in it changes size,
@@ -462,6 +471,7 @@ try {
     }
     return was
   }
+  const FIRST = ['clock', 'weather'] // the pinned chips that leave the bar first
   const statusRows = async (p) => {
     const pop = p.locator('.status-pop')
     if (!(await pop.count())) await p.locator('.topbar .status-btn').click()
@@ -473,6 +483,8 @@ try {
     return text
   }
   const checkBar = async (p, t) => {
+    await p.mouse.move(400, 600) // off the bar, so no chip is under the pointer (its hover gone in .12s)
+    await p.waitForTimeout(300)
     const bar = await settledBar(p)
     ok(bar.over <= 0 && !bar.past.length, `${t}: nothing runs past the bar`, { over: bar.over, past: bar.past })
     ok(!bar.squeezed.length && !bar.broken.length, `${t}: nothing narrower than what it says, nothing on two lines`, { squeezed: bar.squeezed, broken: bar.broken })
@@ -480,9 +492,14 @@ try {
     ok(bar.has.needs && bar.has.search && bar.has.devices && bar.has.status && bar.has.settings, `${t}: what needs you, search, the computer, Status and Settings are always there`, bar.has)
     const folded = ['setup', 'restart', 'update'].filter((k) => bar.pinned.includes(k) && !bar.has[k])
     ok(bar.count === folded.length, `${t}: the Status button counts the news that left the bar (${folded.join(', ') || 'none'})`, { count: bar.count, has: bar.has })
-    // Icons first, then out: no pinned chip leaves the bar while another still shows its words.
-    const gone = bar.pins.filter((x) => !x.in).map((x) => x.id)
-    ok(!gone.length || !bar.pins.some((x) => x.in && x.words), `${t}: the pinned chips are down to their icons before any leaves the bar${gone.length ? ` (out: ${gone.join(', ')})` : ''}`, bar.pins)
+    // The time and the weather go first (Status has both, and the Mac's menu bar the time); then icons
+    // first, then out: no other pinned chip leaves the bar while another still shows its words.
+    const rest = bar.pins.filter((x) => !FIRST.includes(x.id))
+    const gone = rest.filter((x) => !x.in).map((x) => x.id)
+    ok(!rest.some((x) => x.wordy && (!x.in || !x.words)) || !bar.pins.some((x) => FIRST.includes(x.id) && x.in), `${t}: the time and the weather leave the bar before any other pinned chip gives way`, bar.pins)
+    ok(!gone.length || !rest.some((x) => x.in && x.words), `${t}: past them, the pinned chips are down to their icons before any leaves the bar${gone.length ? ` (out: ${gone.join(', ')})` : ''}`, bar.pins)
+    ok(bar.tall.length === 1 && bar.heights.length > 5, `${t}: the bar's chips are all the same height (${bar.tall.join(', ')}px)`, bar.heights)
+    ok(bar.filled.length === 1 && /need/.test(bar.filled[0]), `${t}: one chip is filled, what needs you; the rest are quiet until the pointer is on them`, bar.filled)
     ok(bar.pins.every((x) => x.hover), `${t}: each pinned chip says what it is on hover`, bar.pins)
     const rows = await statusRows(p)
     const want = { setup: /Setting up · 1 of 3/, restart: /Restart Bridge AI to apply it/, update: /Bridge AI 3\.7\.0 is available/, meeting: /Now APM Platform/ }
@@ -500,11 +517,12 @@ try {
       if ([1600, 1280, 900].includes(w)) await shot(p, `${tag}top-bar-${w}`, { clip: { x: 0, y: 0, width: w, height: 64 } })
     }
     ok(at[1600].has.update && at[1600].has.meeting && at[900].fit > at[1600].fit, 'with room the update and the meeting are in the bar; on a small window more of it gives way', { 1600: at[1600].has, fit: [at[1600].fit, at[900].fit] })
-    // What's pinned to begin with (nothing chosen yet), and how it gives way: first each pinned chip
-    // goes down to its icon and value, all of them still in the bar; then they leave it.
+    // What's pinned to begin with (nothing chosen yet), and how it gives way: the time and the weather
+    // first; then each other pinned chip goes down to its icon and value, all of them still in the
+    // bar; then they leave it.
     ok(['weather', 'clock', 'usage', 'update', 'restart', 'setup'].every((k) => at[1600].pinned.includes(k)) && !at[1600].pinned.includes('sounds'), 'by default the weather, the clock, usage and the news are pinned to the bar, sounds not', at[1600].pinned)
-    const compact = Object.keys(at).find((w) => at[w].pins.length && at[w].pins.every((x) => x.in && !x.words))
-    ok(!!compact && at[900].pins.some((x) => !x.in), `as the window narrows the pinned chips go down to their icons, all still in the bar (${compact || 'at no width'}), then leave it`, Object.fromEntries(Object.entries(at).map(([w, x]) => [w, x.pins.map((c) => `${c.id}${c.in ? (c.words ? '+words' : '') : ':out'}`).join(' ')])))
+    const compact = Object.keys(at).find((w) => { const rest = at[w].pins.filter((x) => !FIRST.includes(x.id)); return rest.length && rest.every((x) => x.in && !x.words) && at[w].pins.every((x) => !FIRST.includes(x.id) || !x.in) })
+    ok(!!compact && at[900].pins.some((x) => !FIRST.includes(x.id) && !x.in), `as the window narrows the time and the weather leave the bar, then the other pinned chips go down to their icons, all still in the bar (${compact || 'at no width'}), then leave it`, Object.fromEntries(Object.entries(at).map(([w, x]) => [w, x.pins.map((c) => `${c.id}${c.in ? (c.words ? '+words' : '') : ':out'}`).join(' ')])))
     // A font picked in Appearance: the words grow, the bar doesn't change size, and it gives way again.
     await p.setViewportSize({ width: 1280, height: 900 })
     await p.waitForTimeout(500)
