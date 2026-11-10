@@ -22,3 +22,13 @@ export function openMemory({ all = false } = {}) {
   memoryTab({ all })
   window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { list: true } }))
 }
+// Someone's page in Meetings › People (Meeting Insights), from a meeting's guests: who you've met.
+// Meetings takes it at once if it's open, else as it opens.
+let pendingPerson = null
+export function openPerson(id) {
+  pendingPerson = id
+  store.set('cc-meet-tab', 'people')
+  window.dispatchEvent(new CustomEvent('bridge-meetings-tab', { detail: { tab: 'people', person: id } }))
+  window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { list: true } }))
+}
+export const takePerson = () => { const p = pendingPerson; pendingPerson = null; return p }

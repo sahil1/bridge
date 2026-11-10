@@ -3,6 +3,7 @@ import Icon from '../Icon.jsx'
 import { api, fmtTime } from '../../api.js'
 import { t, tx, locale } from '../../i18n/index.js'
 import { AssistHead } from '../AiAssist.jsx'
+import { Guests, openPerson } from './invite.jsx'
 import './prep.css'
 
 // AI Assist's Prepare for this meeting, before a meeting, as its suggestions are during one
@@ -94,14 +95,23 @@ function Suggestions({ p, prep, compact, onSettings }) {
 }
 
 // insights: whether Meeting Insights (a beta feature) knew who's been in your meetings. Without it,
-// who's invited is all that's said: nobody met before, nobody new.
-function People({ people, compact }) {
+// who's invited is all that's said: nobody met before, nobody new. Compact, "7 invited" opens the
+// event's guests under it, with their replies (e: the event).
+function People({ people, compact, e }) {
+  const [open, setOpen] = useState(false)
   const { known, new: fresh, more, insights = true } = people
   if (!known.length && !fresh.length) return <p className="muted small">{t('No one else is invited.')}</p>
   if (compact) {
     const n = known.length + fresh.length + more
     const said = [n === 1 ? t('1 invited') : t('{n} invited', { n }), known.length ? (known.length === 1 ? t('1 you\'ve met') : t('{n} you\'ve met', { n: known.length })) : null, fresh.length && insights ? t('{n} new to your meetings', { n: fresh.length }) : null].filter(Boolean).join(' · ')
-    return <p className="prep-line small" title={[...known.map((x) => x.name), ...fresh].join(', ')}>{said}</p>
+    const names = [...known.map((x) => x.name), ...fresh].join(', ')
+    if (!e?.guests?.length) return <p className="prep-line small" title={names}>{said}</p>
+    return (
+      <>
+        <button type="button" className="prep-line small prep-who" aria-expanded={open} onClick={() => setOpen(!open)} title={names}><span>{said}</span><Icon name="chevron" size={10} className={open ? 'rot90' : ''} /></button>
+        {open && <Guests e={e} people={people} onPerson={openPerson} compact head="replies" />}
+      </>
+    )
   }
   return (
     <div className="prep-people">
@@ -202,7 +212,7 @@ export function PrepCard({ e, size = 'full', invite = true, prep = null, onOpenM
       {p.error && <p className="error-text small">{p.error} <button type="button" className="link-btn" onClick={p.load}>{t('Try again')}</button></p>}
       {d && (compact ? (
         <>
-          <People people={d.people} compact />
+          <People people={d.people} compact e={e} />
           <Last last={d.last} compact />
           {invite && <InviteFiles agenda={d.agenda} files={d.files} compact />}
           <Suggestions p={p} prep={p.suggest} compact onSettings={onSettings} />
@@ -223,11 +233,13 @@ export function PrepCard({ e, size = 'full', invite = true, prep = null, onOpenM
 }
 
 // Shortly before a meeting, on the floating card: what to go in with, at a glance. The goals and
-// questions (three at most, all of each on hover), who's coming and last time in a line each, which
-// model wrote them, and the rest in Today › Calendar (onOpenEvent: View Calendar). With no
-// suggestions yet, the invite's agenda, and Suggest (or how to add a model) as the panel has it.
+// questions (three at most, all of each on hover), who's coming and last time in a line each (who's
+// coming opens to everyone invited, with their replies), which model wrote them, and the rest in
+// Today › Calendar (onOpenEvent: View Calendar). With no suggestions yet, the invite's agenda, and
+// Suggest (or how to add a model) as the panel has it.
 export function PrepGlance({ e, onOpenEvent }) {
   const p = usePrep(e)
+  const [guests, setGuests] = useState(false)
   const d = p.data
   const s = d?.suggest
   const items = (s?.items || []).slice(0, 3)
@@ -258,7 +270,11 @@ export function PrepGlance({ e, onOpenEvent }) {
             </div>
           )}
           <div className="pg-facts">
-            {who && <p className="pg-fact prep-line" title={[...people.known.map((x) => x.name), ...people.new].join(', ')}><Icon name="users" size={12} /><span>{who}</span></p>}
+            {/* "7 invited" opens who they are under it, with their replies. */}
+            {who && (e.guests?.length > 0
+              ? <button type="button" className="pg-fact prep-line pg-who" aria-expanded={guests} onClick={() => setGuests(!guests)} title={[...people.known.map((x) => x.name), ...people.new].join(', ')}><Icon name="users" size={12} /><span>{who}</span><Icon name="chevron" size={10} className={`pg-who-open ${guests ? 'rot90' : ''}`} /></button>
+              : <p className="pg-fact prep-line" title={[...people.known.map((x) => x.name), ...people.new].join(', ')}><Icon name="users" size={12} /><span>{who}</span></p>)}
+            {who && guests && <Guests e={e} people={people} compact head="replies" />}
             {lastSaid && <p className="pg-fact prep-line" title={lastSaid}><Icon name="clock" size={12} /><span>{lastSaid}</span></p>}
             {!items.length && d.agenda && <p className="pg-fact prep-line" title={d.agenda}><Icon name="doc" size={12} /><span>{t('The invite: {text}', { text: d.agenda })}</span></p>}
           </div>

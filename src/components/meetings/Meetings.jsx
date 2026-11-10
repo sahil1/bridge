@@ -25,7 +25,7 @@ import { useTrial } from '../../trials.js'
 import { InsightsView } from './insights.jsx'
 import { PeopleView } from './people.jsx'
 import Memory from '../memory/Memory.jsx'
-import { setMemoryAll } from '../memory/open.js'
+import { setMemoryAll, takePerson } from '../memory/open.js'
 
 // The meeting pages: the list of meetings, and one meeting with your notes beside its transcript, the
 // summary, questions about it, and its action items for the Chief of Staff. The recording itself is
@@ -217,13 +217,14 @@ export function MeetingsHome({ onOpen }) {
   const [tabKept, setTab] = usePersisted('cc-meet-tab', 'list')
   const tab = tabKept === 'memory' || (insightsOn && ['insights', 'people'].includes(tabKept)) ? tabKept : 'list'
   const tabs = HOME_TABS.filter(([v]) => insightsOn || v === 'list' || v === 'memory')
-  const [person, setPerson] = useState(null)
+  // Someone's page asked for from elsewhere (a meeting's guests) before Meetings was open.
+  const [person, setPerson] = useState(takePerson)
   // Turned on by itself once there were meetings to add up (server/index.js): the tabs at once, and
   // a note saying so until it's read.
   const autoOn = data?.insightsOn
   useEffect(() => { if (autoOn && !insightsOn) refetch('/config') }, [autoOn, insightsOn])
   useEffect(() => {
-    const on = (e) => { setTab(e.detail?.tab || 'list'); setPerson(e.detail?.person || null) }
+    const on = (e) => { takePerson(); setTab(e.detail?.tab || 'list'); setPerson(e.detail?.person || null) }
     window.addEventListener('bridge-meetings-tab', on)
     return () => window.removeEventListener('bridge-meetings-tab', on)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps

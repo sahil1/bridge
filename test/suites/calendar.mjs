@@ -13,8 +13,11 @@
 // Checks: each calendar keeps its colour from week to week (its own, or one from its name); hiding
 // one takes it off the grid and off the Schedule, kept on the server, and a click brings it back;
 // week start and working hours; tasks on their day; your answer to each invite shown, never changed;
-// the event panel's parts (the invite's files and agenda, the recorded meeting's notes and action
-// items, the prep, AI Assist at the right end of its buttons); Open in Calendar (this Mac's id for an
+// the event panel's parts (who's invited, with their addresses, replies and roles, and who you've
+// met, as Google Calendar shows them; the invite's words, files and call; the recorded meeting's
+// notes and action items, the prep, AI Assist at the right end of its buttons), and "3 invited" on
+// the floating card, Home and the Schedule opening to them; the same through icalBuddy, with no
+// replies, on a Mac; Open in Calendar (this Mac's id for an
 // event and whether it repeats, Calendar's link to it opened in Calendar itself, both stood in for,
 // saying so or what macOS said; none for an event with no id here, from a phone or another computer,
 // or off a Mac); the prep with no model (all the rest,
@@ -354,6 +357,72 @@ try {
     await p.context().close()
   }
 
+  // ---------- An event's guests and invite, as Google Calendar shows them ----------
+  // Copies are kept in the page (window.__copied) rather than on this computer's clipboard.
+  const copies = (c) => c.addInitScript(() => { const got = window.__copied = []; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (x) => { got.push(x) } } }) })
+  for (const mode of ['light', 'dark']) {
+    const { p, errors } = await open({ mode, before: copies })
+    await until(() => p.locator('.tg-ev').count(), 15000)
+    await openEvent(p, KICKOFF)
+    const sec = p.locator('.cal-detail .cal-guests')
+    await until(async () => /Met in 2 meetings/.test(await sec.innerText().catch(() => '')), 15000)
+    const rows = () => sec.locator('.gu-row').evaluateAll((rs) => rs.map((r) => r.innerText.replace(/\s+/g, ' ').trim()))
+    const head = await sec.locator('.gu-sum').innerText().catch(() => '')
+    const few = await rows()
+    ok(head === '12 guests · 6 yes · 2 no · 1 maybe · 3 awaiting' && few.length === 6 && /Priya Shah Organizer priya\.shah@example\.org Accepted/.test(few[0]) && /Tester You tester@example\.com Accepted/.test(few[1]) && await sec.locator('button', { hasText: 'Show all 12' }).count() === 1, `${mode}: the panel's guests: how many and how they replied, the organizer and you first, the first six with Show all`, { head, few })
+    const maya = sec.locator('.gu-row', { hasText: 'Maya Okafor' })
+    ok(/Met in 2 meetings/.test(await maya.innerText()) && await maya.locator('button.gu-met').count() === 1 && !(await sec.locator('.gu-row', { hasText: 'Sam Ortiz' }).locator('.gu-met').count()), `${mode}: who you've met says how often, a link to them; who you haven't, nothing`, await maya.innerText())
+    await shot(p, `${tag}calendar-guests-${mode}`)
+    await sec.locator('button', { hasText: 'Show all 12' }).click()
+    const every = await rows()
+    const row = (name) => every.find((r) => r.includes(name)) || ''
+    ok(every.length === 12 && /Declined$/.test(row('Leo Brandt')) && /Maybe$/.test(row('Ines Varga')) && /Not replied$/.test(row('Ravi Menon')) && /Sam Ortiz Optional/.test(row('Sam Ortiz')) && /lena\.fischer@example\.org Not replied/.test(row('lena.fischer')) && /Leo Brandt|Pat Lin/.test(every.at(-1)) && !every.some((r) => /Boardroom|Payments/.test(r)), `${mode}: Show all: everyone, each reply and role, who declined last, and no room or team list`, every)
+    if (mode === 'light') {
+      // Copy an address, or all of them, to write to them.
+      await maya.locator('.gu-copy').click()
+      await sec.locator('button', { hasText: 'Copy addresses' }).click()
+      const copied = await p.evaluate(() => window.__copied)
+      ok(copied[0] === 'maya.okafor@example.org' && copied[1]?.startsWith('Priya Shah <priya.shah@example.org>, Tester <tester@example.com>') && copied[1].split(', ').length === 12 && copied[1].includes('lena.fischer@example.org'), 'a guest\'s copy button copies their address, and Copy addresses every guest\'s, by name', copied)
+      // The invite's words, whole, with its links; a long one folded, with Show more; its call.
+      const inv = p.locator('.cal-detail .cal-invite')
+      const words = await inv.locator('.iv-words').innerText().catch(() => '')
+      const link = inv.locator('.iv-words a[href="https://northwind.sharepoint.com/:w:/s/launch/brief.docx"]')
+      ok(/^Kick off the Northwind launch/.test(words) && /Scope and what's out/.test(words) && await link.count() === 1 && await link.getAttribute('target') === '_blank' && !/Passcode/.test(await inv.innerText()), "the invite's words, whole, its links opening where they go, and no passcode", words)
+      const more = inv.locator('.iv-more')
+      ok(await more.innerText() === 'Show more' && await inv.locator('.iv-words.folded').count() === 1, 'a long invite is folded, with Show more')
+      await more.click()
+      ok(await more.innerText() === 'Show less' && !(await inv.locator('.iv-words.folded').count()) && /I'll share the timeline before we meet\./.test(await inv.locator('.iv-words').innerText()), 'Show more: all of it')
+      ok(/Microsoft Teams meeting/.test(await inv.locator('.iv-call').innerText()) && await inv.locator('.iv-call a[href="https://teams.microsoft.com/l/meetup-join/19%3akickoff"]').count() === 1 && await inv.locator('.iv-call .iv-copy').count() === 1 && /brief\.docx/.test(await inv.locator('.prep-files').innerText()), "and its call, with the link to copy, and its files", await inv.innerText())
+      await shot(p, `${tag}calendar-invite-light`)
+      // A big invite: everyone counted, the replies of those listed, and where the rest are.
+      await openEvent(p, ALLHANDS)
+      await until(async () => /180 guests/.test(await sec.innerText().catch(() => '')), 10000)
+      const bt = await sec.innerText().catch(() => '')
+      ok(/^180 guests · 50 yes · 50 no · 50 awaiting$/m.test(bt) && /Show all 150/.test(bt) && /And 30 more on the invite: your calendar app lists them all\./.test(bt), 'a big invite: all 180 counted, the replies of the 150 listed, and the rest in your calendar app', bt.slice(0, 300))
+      await openEvent(p, KICKOFF)
+      await until(async () => /Met in 2 meetings/.test(await sec.innerText().catch(() => '')), 10000)
+      // Who you've met opens their page in Meetings › People.
+      await maya.locator('button.gu-met').click()
+      ok(!!(await until(async () => (await p.locator('.mi-person h3').innerText().catch(() => '')) === 'Maya Okafor', 10000)), "who you've met opens their page in Meetings › People")
+    }
+    ok(real(errors).length === 0, `${mode}: no page errors`, errors)
+    await p.context().close()
+  }
+  // The Schedule: a meeting opens to who's invited, with their replies, and View Calendar.
+  {
+    const { p, errors } = await open({ store: { 'cc-today-tab': 'overview' } })
+    const row = p.locator('.agenda .ev', { hasText: SOON.title })
+    await until(() => row.count(), 15000)
+    await row.locator('.ev-main').click()
+    const gu = row.locator('.ev-more .gu')
+    await until(() => gu.count(), 5000)
+    ok((await gu.locator('.gu-sum').innerText().catch(() => '')) === '4 guests · 2 yes · 1 maybe · 1 awaiting' && (await gu.locator('.gu-row').count()) === 4, "the Schedule: a meeting opens to how many are invited, how they replied and who they are", await row.innerText())
+    await row.locator('.ev-view').click()
+    ok(!!(await until(async () => (await p.locator('.cal-detail h4').innerText().catch(() => '')) === SOON.title, 10000)), 'and View Calendar opens it in Today › Calendar, with its panel')
+    ok(real(errors).length === 0, 'the Schedule: no page errors', errors)
+    await p.context().close()
+  }
+
   // ---------- A model ----------
   await api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
   await api('/settings', { meetings: { model: 'openai:gpt-5' } }, 'PATCH')
@@ -503,8 +572,8 @@ try {
     ok(/Goals and Questions/i.test(text) && /Ines: mock up the empty states/.test(text) && /gpt-5 wrote these at .*, from the invite, 1 file in it, last time \(Design review with Ines, .*\),? and 1 person you've met\./.test(text) && await card.locator('button', { hasText: 'Again' }).count() === 1, 'the panel shows the suggestions, which model wrote them, when, and from what', text)
     const say = await card.locator('.prep-tip.k-goal .prep-tip-say').innerText().catch(() => '')
     const hover = await card.locator('.prep-tip.k-goal .prep-tip-text').getAttribute('title').catch(() => '')
-    const ag = await p.locator('.cal-detail .cal-sec .prep-agenda').innerText().catch(() => '')
-    ok(say === `Agree on: ${laterEv.agenda}` && hover?.startsWith(say) && ag === laterEv.agenda, `${mode}: the goal shows whole (the agenda ending at a word, with "…"), all of it on hover too`, { say, hover, ag })
+    const ag = await p.locator('.cal-detail .cal-invite .iv-words').innerText().catch(() => '')
+    ok(say === `Agree on: ${laterEv.agenda}` && hover?.startsWith(say) && ag.startsWith(`${LONG_AGENDA}\n`), `${mode}: the goal shows whole (the agenda ending at a word, with "…"), all of it on hover too, and the panel the invite's words in full`, { say, hover, ag })
     await shot(p, `${tag}calendar-prep-${mode}`)
     // AI Assist's Prepare for this meeting: its suggestions are there already, so nothing more is asked.
     const n1 = asked(/^Prepare me for a meeting:/).length
@@ -570,6 +639,16 @@ try {
     const clamped = await card.evaluate(() => [...document.querySelectorAll('.float-card .prep-line, .float-card .prep-tip-text')].map((x) => ({ text: x.innerText.split('\n')[0], title: x.getAttribute('title') || '' })))
     ok(clamped.length > 3 && clamped.every((x) => x.title && x.title.replace(/\n.*/s, '').length >= Math.min(x.text.length, 1)), 'on the card, each line that may be clamped has all of it on hover', clamped)
     await shot(card, `${tag}calendar-float`)
+    // "3 invited" opens who they are, with their replies; who you've met is said (the card's own
+    // window has no Meetings to open them in), and View Calendar has the rest.
+    const who = card.locator('.float-card .pg-who')
+    ok(await who.getAttribute('aria-expanded') === 'false' && /3 invited/.test(await who.innerText()), 'on the card, "3 invited" is a button', await who.innerText().catch(() => ''))
+    await who.click()
+    const gl = card.locator('.float-card .gu')
+    await until(() => gl.count(), 3000)
+    const cardRows = await gl.locator('.gu-row').evaluateAll((rs) => rs.map((r) => r.innerText.replace(/\s+/g, ' ').trim()))
+    ok(await who.getAttribute('aria-expanded') === 'true' && (await gl.locator('.gu-sum').innerText()) === '2 yes · 1 maybe · 1 awaiting' && cardRows.length === 4 && /Maya Okafor Organizer Met in 2 meetings Accepted/.test(cardRows[0]) && /Tester You Accepted/.test(cardRows[1]) && /Ravi Menon Optional Not replied/.test(cardRows[3]) && !(await gl.locator('button.gu-met').count()), "it opens to everyone invited, how they replied and who you've met, said rather than a link", cardRows)
+    await shot(card, `${tag}calendar-float-guests`)
     ok(real(errors).length === 0, 'the card: no page errors', errors)
     await api('/settings', { meetings: { prep: false } }, 'PATCH')
     ok((await api('/calls')).soon === null, 'Prepare for each meeting off: the card shows no meeting before it starts')
@@ -591,6 +670,10 @@ try {
     await until(async () => /Agree on/.test(await row.innerText().catch(() => '')), 10000)
     const ht = await row.innerText().catch(() => '')
     ok(/3 invited/.test(ht) && /Last time: Northwind pricing sync/.test(ht) && /Agree on/.test(ht), "Home's Coming Up: Prep under the meeting", ht)
+    await row.locator('.prep-who').click()
+    const hg = row.locator('.gu')
+    await until(() => hg.count(), 3000)
+    ok((await hg.locator('.gu-row').count()) === 4 && await hg.locator('button.gu-met').count() === 2, "and \"3 invited\" opens to everyone invited, who you've met each a link to them", await hg.innerText().catch(() => ''))
     ok(!(await rowOf('Budget office hours').count()), "a meeting you declined isn't in Coming Up")
     // Once a day: the meetings left today and tomorrow's, so a daily one run before it's on today
     // (after midnight) is under both days.
@@ -620,6 +703,20 @@ try {
     await shot(p, `${tag}calendar-phone-sheet-${mode}`)
     const faults = await phoneFaults(p, '.cal-sheet')
     ok(!faults.length, `phone, ${mode}: the sheet fits the phone, every control a whole target`, faults)
+    // A big invite: its guests, all of them, and its words, unfolded.
+    await openEvent(p, KICKOFF)
+    await until(async () => /12 guests/.test(await sheet.locator('.cal-guests').innerText().catch(() => '')), 10000)
+    await sheet.locator('.cal-guests button', { hasText: 'Show all 12' }).click()
+    await sheet.locator('.cal-invite .iv-more').click()
+    const gf = []
+    for (const at of ['.cal-guests .gu-head', '.cal-guests .gu-row:nth-child(7)', '.cal-guests .gu-row:last-child', '.cal-invite .iv-words', '.cal-invite .iv-call']) {
+      await sheet.locator(at).first().scrollIntoViewIfNeeded().catch(() => {})
+      await sleep(150)
+      gf.push(...Object.entries(await phoneFaults(p, '.cal-sheet')).map(([k, v]) => `${at}: ${k} ${JSON.stringify(v)}`))
+      if (at === '.cal-guests .gu-row:nth-child(7)') await shot(p, `${tag}calendar-phone-guests-${mode}`)
+      if (at === '.cal-invite .iv-words') await shot(p, `${tag}calendar-phone-invite-${mode}`)
+    }
+    ok(!gf.length, `phone, ${mode}: a big invite's guests and words fit the phone, every control a whole target`, gf)
     await p.locator('.cal-sheet .icon-btn[aria-label="Close"]').click()
     await p.locator('.seg button', { hasText: /^W$/ }).click().catch(() => {})
     await sleep(800)
@@ -643,13 +740,23 @@ try {
   // ---------- Through icalBuddy ----------
   // On a Mac whose calendar helper only says it may read (one from before it could), icalBuddy reads
   // instead: who's invited by name (an address when that's all there is), with no address, reply or
-  // role.
+  // role, and the panel says why there are no replies.
   if (IS_MAC) {
     const day = ymd(at(9, 12))
     fs.writeFileSync(path.join(kit.bin, 'bridgecal.json'), JSON.stringify({ status: 'old', events: [] }))
     kit.program('icalBuddy', `process.stdout.write(${JSON.stringify(`@@EV@@Partner check-in (Work)\u00a6${day} at 15:00 - 15:30\u00a6attendees: Priya Shah, Dan Ruiz, Tester, sam@example.org, Conf Room 4 (8)\u00a6notes: Catch up on the pilot.\nhttps://docs.google.com/document/d/pilot/edit\n`)})`)
     const ib = by('Partner check-in', (await api(`/calendar/range?from=${day}&to=${day}&refresh=1`)).events)
     ok(ib?.replies === false && ib.guests.map((x) => x.name || x.email).join() === 'Priya Shah,Dan Ruiz,Tester,sam@example.org' && ib.guests.every((x) => x.status === null && x.role === null && !x.organizer) && ib.guests[3].email === 'sam@example.org' && ib.attendees.join() === 'Priya Shah,Dan Ruiz,Tester,sam' && ib.description === 'Catch up on the pilot.\nhttps://docs.google.com/document/d/pilot/edit', "through icalBuddy: who's invited by name (an address alone as one), no replies, and the invite's words", ib)
+    const { p, errors } = await open()
+    await until(() => p.locator('.calv-nav h3').count(), 15000)
+    await openEvent(p, ib)
+    const sec = p.locator('.cal-detail .cal-guests')
+    await until(async () => /4 guests/.test(await sec.innerText().catch(() => '')), 10000)
+    const it = await sec.innerText()
+    ok(/^4 guests$/m.test(it) && /Who has replied isn't known here: icalBuddy reads only who's invited\./.test(it) && !(await sec.locator('.gu-reply').count()) && /sam@example\.org/.test(it) && !/Conf Room/.test(it), "the panel lists them with no replies, and says why", it)
+    await shot(p, `${tag}calendar-icalbuddy`)
+    ok(real(errors).length === 0, 'icalBuddy: no page errors', errors)
+    await p.context().close()
     fs.writeFileSync(path.join(kit.bin, 'bridgecal.json'), JSON.stringify({ status: 'granted', events: EVENTS }))
   }
 
