@@ -151,6 +151,10 @@ export function colorOf(el, cx, ph = null) {
   if (!hex) return null
   return applyMods({ hex, alpha: 1 }, el)
 }
+// Tints and shades are worked out in linear light, as PowerPoint does (accent 1, 4472C4, tinted
+// 40% is CFD5EA, a table's banded rows), not in the screen's values.
+const toLinear = (x) => (x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4)
+const toSrgb = (x) => (x <= 0.0031308 ? x * 12.92 : 1.055 * Math.max(0, x) ** (1 / 2.4) - 0.055)
 function applyMods(c, el) {
   let [r, g, b] = rgbOf(c.hex)
   let alpha = c.alpha ?? 1
@@ -166,8 +170,8 @@ function applyMods(c, el) {
       else x[0] *= val
       x[1] = Math.max(0, Math.min(1, x[1])); x[2] = Math.max(0, Math.min(1, x[2]))
       ;[r, g, b] = rgb(x)
-    } else if (m.name === 'a:tint') [r, g, b] = [r, g, b].map((x) => x + (1 - x) * (1 - val))
-    else if (m.name === 'a:shade') [r, g, b] = [r, g, b].map((x) => x * val)
+    } else if (m.name === 'a:tint') [r, g, b] = [r, g, b].map((x) => toSrgb(toLinear(x) * val + 1 - val))
+    else if (m.name === 'a:shade') [r, g, b] = [r, g, b].map((x) => toSrgb(toLinear(x) * val))
     else if (m.name === 'a:alpha') alpha = val
     else if (m.name === 'a:alphaMod') alpha *= val
     else if (m.name === 'a:inv') [r, g, b] = [1 - r, 1 - g, 1 - b]
