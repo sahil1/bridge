@@ -2,6 +2,17 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.13.3
+
+Fixes: Studio takes a phone's photo; a setting found in Settings stays where it shows; and what can't load in Settings › Model Providers can be tried again.
+
+### Fixes
+
+- **Studio takes a picture over 1 MB**, as most phones' photos are, in a document or a deck, and a Word copy or a deck for AI Assist over 1 MB: they were turned away as "HTTP 413".
+- **A setting found in Settings stays where it shows** while the rest of its section comes: on a busy computer, what came above it a few seconds later (Set up's list, Permissions) slid it down, off the window, and a click meant for it could land on something else.
+- **Settings › Model Providers has Retry** when your agents' sign-ins, your accounts or the cloud agents couldn't be checked (Bridge AI starting again after an update, say): they stayed so until you left the window and came back.
+- **A request too big for Bridge AI says so**, with how much it takes, rather than "HTTP 413"; and a window closed or reloaded while it sends something no longer leaves an error in Bridge AI's log.
+
 ## 3.13.2
 
 Fixes: dictation keeps all of what you said and says when to wait; the phone opens Bridge AI sooner; Home and the calendar keep what you set; Studio never loses a version on Windows; meeting notes never half written; Insights quick on a busy computer; and pairing that only you decide: a code adds one device, which your computer asks you to keep, and nothing the relay says can unpair it.

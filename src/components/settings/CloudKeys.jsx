@@ -133,7 +133,7 @@ export default function CloudKeys({ focus, bare = false, onChange }) {
           <span className="muted small">Agents that run on the provider's computers, on a repo it hosts. Start one from {cloudOnly ? 'New cloud agent' : 'New agent › In the cloud'}.</span>
         </div>
       )}
-      {err && <p className="pv-note pv-err">Couldn't load cloud agents: {err}</p>}
+      {err && <p className="pv-note pv-err">Couldn't load cloud agents: {err} <button type="button" className="ghost-btn" onClick={load}>Retry</button></p>}
       {!list && !err && <div className="pv-agents pv-loading" aria-busy="true"><span className="pv-skel" /><span className="pv-skel" /></div>}
       {list && (
         <div className="cl-list">

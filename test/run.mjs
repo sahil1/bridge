@@ -16,6 +16,7 @@ import path from 'node:path'
 import { ROOT, OUT, stopTree } from './lib/harness.mjs'
 
 // Each test, what it needs built, and the files it covers (a change to one of them runs it).
+// alone: it measures how quick things are, so it runs with no other test beside it.
 const SUITES = [
   { name: 'server', build: null, covers: [/^server\//, /^shared\//, /^scripts\/(start|cli)\.js$/] },
   { name: 'relay-signin', build: null, covers: [/^server\/(relay|agents|nodejs|paths)\.js$/] },
@@ -28,7 +29,7 @@ const SUITES = [
   { name: 'studio-sheets', build: 'dist', browser: true, covers: [/^src\/components\/studio\/(xlsx|csv|sheetkeys|sheetcells|focus)\.js$/, /^src\/components\/studio\/(sheetchart\.jsx|sheet\.css|editors\/SheetEditor\.jsx)$/, /^src\/App\.jsx$/] },
   { name: 'studio-deck', build: 'dist', browser: true, covers: [/^server\/(studio|index)\.js$/, /^src\/components\/studio\/(deck\.js|deck\.css|pptx\.js|pptxdoc\.js|pptxdraw\.js|pptxtext\.js|packs\.jsx|doctools\.jsx|doc\.css|Studio\.jsx|focus\.js)$/, /^src\/components\/studio\/editors\/(Deck|Slides)/, /^test\/lib\/deckfile\.mjs$/, /^test\/stand-ins\/model\.mjs$/] },
   { name: 'meetings-limit', build: null, covers: [/^server\/(meetings|consult|accounts|chatmodels)\.js$/, /^test\/stand-ins\/claude\.cjs$/] },
-  { name: 'perf', build: 'dist', browser: true, covers: [/^src\//, /^server\//, /^desktop\//] },
+  { name: 'perf', build: 'dist', browser: true, alone: true, covers: [/^src\//, /^server\//, /^desktop\//] },
   { name: 'call-event', build: 'dist', browser: true, covers: [/^server\/(callevent|calls|calendar|meetings|index)\.js$/, /^src\/components\/(Console|Agenda|CalendarView)\.jsx$/, /^src\/components\/meetings\/(Meetings|recording|FloatCard)\.jsx$/, /^server\/runtime\/builtin\.js$/, /^native\/callwatch\.swift$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'calendar', build: 'dist', browser: true, covers: [/^server\/(calendar|meetprep|meetwork|meetinsights|mail|home|chieftasks|openin|index)\.js$/, /^src\/components\/(CalendarView|Agenda|NeedsHome|Dock)\.jsx$/, /^src\/components\/openin\.js$/, /^test\/stand-ins\/mailbox\.mjs$/, /^src\/components\/meetings\/(prep|FloatCard)\.(jsx|css)$/, /^src\/styles\.css$/, /^native\/bridgecal\.swift$/, /^test\/stand-ins\/model\.mjs$/] },
   { name: 'memory', build: 'dist', browser: true, covers: [/^server\/(meetmemory|memoryview|meetings|meetinsights|dictations|dictation|chief|index)\.js$/, /^src\/components\/memory\//, /^src\/components\/meetings\/(tools|Meetings)\.jsx$/, /^src\/components\/dictations\/(Dictations|shared)\.jsx$/, /^src\/components\/dictations\/dictations\.css$/, /^src\/components\/settings\/Meetings\.jsx$/, /^src\/components\/(Rail|Settings)\.jsx$/, /^src\/(trials|App|lazy)\.jsx?$/, /^chief\/INSTRUCTIONS\.md$/, /^test\/stand-ins\/model\.mjs$/] },
@@ -165,7 +166,7 @@ const runOne = (j, attempt) => new Promise((resolve) => {
     const how = signal ? `stopped by ${signal}` : `exit code ${code}`
     const last = text.trim().split('\n').reverse().find((l) => /: \d+ passed, \d+ failed/.test(l)) || (text.trim() ? `(no result, ${how}: see the log)` : `(no output at all, ${how})`)
     // A crash says where in the test it was (from its stack), and a page that crashed says so: a
-    // flaky one's log isn't kept in CI, so its line is all there is to go on.
+    // flaky one's line is what's read first.
     const lines = text.split('\n')
     const fails = lines.flatMap((l, i) => {
       if (l.startsWith('the page crashed')) return [`FAIL ${l}`]
@@ -181,17 +182,31 @@ console.log(`Running ${jobs.map((j) => j.label).join(', ')} (${Math.min(lanes, j
 const t0 = Date.now()
 const results = []
 const queue = [...jobs]
+// A test that runs alone waits for the others running to end, and none starts beside it.
+// (Looked at and counted in one go, so two can't both see nothing running.)
+let running = 0
+let alone = 0 // waiting to run alone, or running so
+const wait = () => new Promise((r) => setTimeout(r, 200))
 await Promise.all(Array.from({ length: Math.min(lanes, jobs.length) }, async () => {
   for (let j = queue.shift(); j; j = queue.shift()) {
+    if (j.alone) alone++
+    while (j.alone ? running > 0 : alone > 0) await wait()
+    running++
     let r = await runOne(j, 1)
     if (!r.ok && !flag('--no-retry')) {
       const again = await runOne(j, 2)
       if (again.ok) r = { ...again, flaky: r }
       else r = { ...again, first: r }
     }
+    running--
+    if (j.alone) alone--
     results.push({ j, r })
     console.log(`${r.ok ? (r.flaky ? 'FLAKY' : 'ok   ') : 'FAIL '} ${j.label}: ${r.line} (${Math.round(r.ms / 1000)} s)${r.flaky ? `: failed once (${(r.flaky.fails.length ? r.flaky.fails.slice(0, 2).join('; ') : r.flaky.line).slice(0, 200)}), passed on its own` : ''}`)
     if (!r.ok) for (const f of r.fails.slice(0, 8)) console.log(`        ${f.slice(0, 300)}`)
+    // CI keeps the logs of a run that failed, not of one that passed when tried again: the end of
+    // the try that failed is in the job's log instead, folded, with what a crash printed (its stack,
+    // its servers' last words).
+    if (r.flaky && process.env.GITHUB_ACTIONS) console.log(`::group::${j.label}: the end of the try that failed\n${fs.readFileSync(r.flaky.log, 'utf8').slice(-8000)}\n::endgroup::`)
   }
 }))
 const failed = results.filter((x) => !x.r.ok)

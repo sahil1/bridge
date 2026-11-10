@@ -123,7 +123,8 @@ const ask = (k, p, { method = 'GET', port: at = null, headers = {}, body = null 
     res.on('data', (c) => { s += c })
     res.on('end', () => { let j = null; try { j = JSON.parse(s) } catch { /* not JSON */ } resolve({ status: res.statusCode, headers: res.headers, body: j, text: s }) })
   })
-  r.on('error', reject)
+  // Which request it was: what failed in the server's hands has no line of the test in its stack.
+  r.on('error', (e) => reject(new Error(`${method} ${p} at ${String(to) === new URL(k.url).port ? 'Studio\'s port' : 'Desk\'s port'}: ${e.message}`)))
   r.end(body ? JSON.stringify(body) : undefined)
 })
 const { b, which } = await browser()

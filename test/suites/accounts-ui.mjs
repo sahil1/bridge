@@ -16,7 +16,7 @@
 // deletes its folder; and the last account stays.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, sleep, browser, page, shot, solid, noServiceWorker, TEST } from '../lib/harness.mjs'
+import { startKit, checks, until, sleep, browser, page, shot, solid, noServiceWorker, advanced, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('accounts-ui')
 const kit = await startKit('accounts-ui')
@@ -404,16 +404,38 @@ try {
   for (const look of [{ mode: 'light', theme: 'sky' }, { mode: 'dark', theme: 'midnight' }, { mode: 'light', theme: 'sky', phone: true }, { mode: 'dark', theme: 'midnight', phone: true }]) {
     const t = `settings ${look.theme}${look.phone ? ' phone' : ''}`
     const { ctx, p, errors } = await page(b, kit.url, { ...look, before: fake })
-    await p.locator('.topbar .status-btn, .tabbar button').first().waitFor({ timeout: 15000 }).catch(() => {})
+    const up = await p.locator('.topbar .status-btn, .tabbar button').first().waitFor({ timeout: 15000 }).then(() => true, () => false)
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'accounts' } })))
     const sec = p.locator('#pv-accounts')
-    await sec.waitFor({ timeout: 15000 })
+    // (Once in CI it never showed: what the window had then.)
+    await sec.waitFor({ timeout: 15000 }).catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} (the window ${up ? 'was' : 'wasn\'t'} up when Settings was asked for; Settings: ${(await p.locator('.modal.settings').first().innerText({ timeout: 1000 }).catch(() => 'not open')).replace(/\s+/g, ' ').slice(0, 400)})`) })
     ok(!!(await until(async () => /Main/.test(await sec.innerText()) && /your usual login/.test(await sec.innerText()), 10000)), `${t}: Main, said to be your usual login`, await sec.innerText().catch(() => ''))
     await sec.scrollIntoViewIfNeeded()
     await p.waitForTimeout(300)
     if (look.phone) ok((await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1, `${t}: nothing wider than the phone`)
     await shot(p, `${tag}accounts-settings-${look.theme}${look.phone ? '-phone' : ''}`)
     ok(errors.length === 0, `${t}: no page errors`, errors)
+    await ctx.close()
+  }
+
+  // Settings' agents, accounts and cloud agents when asking for them failed (Bridge AI starting
+  // again after an update, say): each says so, with Retry, which brings it.
+  {
+    const failing = { on: true }
+    const { ctx, p, errors } = await page(b, kit.url, { before: async (c) => { await fake(c); await c.route(/\/api\/(accounts|subscriptions|cloud)(\?|$)/, (r) => (failing.on ? r.fulfill({ status: 503, json: { error: 'Bridge AI is starting again' } }) : r.continue())) } })
+    await p.locator('.topbar .status-btn').waitFor({ timeout: 15000 })
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'accounts' } })))
+    const err = (what) => p.locator('.modal.settings .pv-err', { hasText: what })
+    await advanced(p)
+    ok(!!(await until(async () => (await err("Couldn't check agent sign-ins: Bridge AI is starting again").isVisible()) && (await err("Couldn't load accounts: Bridge AI is starting again").isVisible()) && (await err("Couldn't load cloud agents: Bridge AI is starting again").isVisible()), 15000)), 'Settings, its agents, accounts and cloud agents not answered: each says why', await p.locator('.modal.settings .pv-err').allInnerTexts().catch(() => []))
+    failing.on = false
+    await err("Couldn't load cloud agents").getByRole('button', { name: 'Retry' }).click()
+    ok(!!(await until(async () => (await p.locator('#pv-cloud .cl-list').count()) > 0 && !(await err("Couldn't load cloud agents").count()), 10000)), 'and Retry brings the cloud agents')
+    await err("Couldn't load accounts").getByRole('button', { name: 'Retry' }).click()
+    ok(!!(await until(async () => /Main/.test(await p.locator('#pv-accounts').innerText().catch(() => '')), 10000)), 'and Retry brings the accounts')
+    await err("Couldn't check agent sign-ins").getByRole('button', { name: 'Retry' }).click()
+    ok(!!(await until(async () => (await p.locator('.modal.settings .pv-agent').count()) > 0 && !(await p.locator('.modal.settings .pv-err').count()), 10000)), 'and the agents\' sign-ins')
+    ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
   }
 } catch (e) {

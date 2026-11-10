@@ -526,7 +526,10 @@ jobs:
 
       - name: The machine, and its user
         run: |
-          ${{ matrix.prepare }}
+          # Its packages, tried again a minute later while its mirror is mid-sync (Ubuntu's was, for
+          # 3.13.2): a failure here is the machine's and said here, not later as curl not found (a
+          # command failing in an && list doesn't end the step).
+          for i in 1 2 3; do (${{ matrix.prepare }}) && break; if [ $i = 3 ]; then echo "::error::Couldn't set up this machine's packages (its mirror?), three times"; exit 1; fi; sleep 60; done
           useradd -m -d "$HOMEDIR" -s /bin/sh joerg
           mkdir -p "$OUT"; chmod 777 "$OUT"
           command -v sudo || echo "No sudo"
