@@ -9,6 +9,7 @@ import gpu from '../termGpu.js'
 import altArrows from '../altArrows.js'
 import FindBar from './FindBar.jsx'
 import termFinder from '../termFind.js'
+import touchScroll from '../termTouch.js'
 import { t } from '../i18n/index.js'
 
 // A plain terminal you type into, like a terminal app: brew upgrade, a dev server, anything you'd
@@ -92,6 +93,8 @@ function Attached({ paneId }) {
     const onType = (e) => term.paste(String(e.detail || ''))
     host.addEventListener('bridge-type', onType)
     const sized = term.onResize(({ cols, rows }) => send(JSON.stringify({ type: 'resize', cols, rows })))
+    // A finger scrolls it on a phone or tablet (xterm.js 6 scrolls only with the wheel and its bar).
+    const untouch = touchScroll(host, { lineHeight: () => (term.element?.querySelector('.xterm-screen')?.getBoundingClientRect().height || 0) / term.rows, scroll: (n) => term.scrollLines(n) })
     const ro = new ResizeObserver(() => { try { fit.fit() } catch { /* hidden */ } })
     ro.observe(hostRef.current)
     const mo = new MutationObserver(() => {
@@ -103,7 +106,7 @@ function Attached({ paneId }) {
     return () => {
       stop = true
       clearTimeout(retry)
-      typed.dispose(); sized.dispose(); ro.disconnect(); mo.disconnect()
+      typed.dispose(); sized.dispose(); untouch(); ro.disconnect(); mo.disconnect()
       host.removeEventListener('bridge-type', onType)
       try { ws?.close() } catch { /* closed */ }
       finder.detach()

@@ -293,7 +293,11 @@ app.get('/api/agents/:pane/screen', wrap(async (req) => {
     rt.read(req.params.pane, lines),
     paneCols(req.params.pane).catch(() => null),
   ])
-  return { ansi, cols }
+  // A full-screen app that takes the mouse keeps its history itself: the view passes it the wheel
+  // (the built-in runtime says; herdr doesn't).
+  let modes = null
+  try { modes = rt.modes?.(req.params.pane) || null } catch { /* gone meanwhile */ }
+  return { ansi, cols, ...(modes ? { alt: modes.alt, mouse: modes.mouse } : {}) }
 }))
 app.get('/api/agents/:pane/commands', wrap(async (req) => {
   const a = await findAgent(req.params.pane)

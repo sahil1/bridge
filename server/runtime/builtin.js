@@ -21,7 +21,7 @@ import { shellCommand, agentEnv, SETUP_DONE } from './spawn.js'
 import { providerEnv } from '../providers.js'
 import * as accounts from '../accounts.js'
 import { firstRun, knows } from '../firstrun.js'
-import { lineAnsi, SCROLLBACK } from './screen.js'
+import { lineAnsi, SCROLLBACK, watchModes, wheelBytes } from './screen.js'
 import * as host from './hostlink.js'
 
 const { Terminal } = headless
@@ -178,6 +178,7 @@ async function openTerm(paneId, file, argv, opts, meta) {
 async function wire(p, from) {
   p.term = new Terminal({ cols: from?.cols || COLS, rows: from?.rows || ROWS, scrollback: SCROLLBACK, allowProposedApi: true })
   p.term.onTitleChange((t) => { p.title = t })
+  watchModes(p.term)
   if (from?.screen) await new Promise((r) => p.term.write(from.screen, r))
   p.proc.onData((d) => { if (p.setupPending && d.includes(SETUP_DONE)) p.setupPending = false; p.term.write(d); p.lastOutput = Date.now(); for (const c of p.clients) c.onData(d) })
   p.proc.onExit(() => {
@@ -412,6 +413,12 @@ export async function read(paneId, lines = 300) {
   for (let y = Math.max(0, end - lines); y < end; y++) out.push(lineAnsi(buf.getLine(y), p.term.cols, cell))
   return out.join('\r\n') // CRLF, like herdr: the browser's mirror writes it straight into a terminal
 }
+// Whether it shows a full-screen app (the alternate screen), and whether that takes the mouse: then
+// its history is inside it (Claude Code's fullscreen view), and the mirror's wheel goes to it.
+export function modes(paneId) {
+  const p = need(paneId)
+  return { alt: p.term.buffer.active.type === 'alternate', mouse: p.term.modes.mouseTrackingMode !== 'none' }
+}
 
 // Key names as the UI sends them, to the bytes a terminal expects.
 const CSI = '\x1b['
@@ -441,7 +448,12 @@ export async function input(paneId, steps) {
   const p = need(paneId)
   for (const st of steps || []) {
     if (typeof st?.text === 'string' && st.text) (st.text.length > 1 ? paste(p, st.text.slice(0, 20000)) : write(p, st.text))
-    else if (Array.isArray(st?.keys)) for (const k of st.keys) write(p, keyBytes(String(k)))
+    else if (Array.isArray(st?.keys)) {
+      for (const k of st.keys) {
+        // The wheel, from the mirror of an app that takes the mouse (modes): its own history scrolls.
+        if (k === 'wheelup' || k === 'wheeldown') { const b = wheelBytes(p.term, k === 'wheelup'); if (b) write(p, b) } else write(p, keyBytes(String(k)))
+      }
+    }
   }
 }
 export const keys = (paneId, k) => input(paneId, [{ keys: k }])

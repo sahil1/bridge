@@ -9,6 +9,30 @@ export const PROTOCOL = 1
 // Lines are only kept as they're printed, so a quiet terminal costs nothing for it.
 export const SCROLLBACK = 10000
 
+// How the program in a terminal wants mouse reports sent (CSI ? 1006 h: as SGR, which every
+// current one asks for; without it, the old 3-byte form). xterm keeps this to itself, so it's
+// watched here: a terminal's mirror passes the wheel on to a full-screen app with it (wheelBytes).
+const sgr = new WeakMap()
+export function watchModes(term) {
+  const set = (on) => (params) => { if (params.includes(1006)) sgr.set(term, on); return false }
+  term.parser.registerCsiHandler({ prefix: '?', final: 'h' }, set(true))
+  term.parser.registerCsiHandler({ prefix: '?', final: 'l' }, set(false))
+  term.parser.registerEscHandler({ final: 'c' }, () => { sgr.delete(term); return false })
+}
+// Unknown (a terminal picked up from a host older than this): SGR, as Claude Code and Codex use.
+const sgrOn = (term) => sgr.get(term) ?? true
+
+// The wheel turned once, up or down, over the middle of the screen, as the program asked for mouse
+// reports. Empty when it didn't ask (the wheel then has nothing to send).
+export function wheelBytes(term, up) {
+  if (term.modes.mouseTrackingMode === 'none') return ''
+  const col = Math.ceil(term.cols / 2)
+  const row = Math.ceil(term.rows / 2)
+  const button = up ? 64 : 65
+  if (sgrOn(term)) return `\x1b[<${button};${col};${row}M`
+  return `\x1b[M${String.fromCharCode(32 + button, 32 + Math.min(col, 223), 32 + Math.min(row, 223))}`
+}
+
 // One buffer line as text with color codes (SGR only, no cursor moves), the same shape herdr returns.
 function sgrOf(c) {
   const out = [0]
@@ -65,7 +89,7 @@ export function snapshot(term, title = '') {
   const mouse = { x10: 9, vt200: 1000, drag: 1002, any: 1003 }[m.mouseTrackingMode]
   out += [
     m.bracketedPasteMode && '\x1b[?2004h', m.applicationCursorKeysMode && '\x1b[?1h', m.applicationKeypadMode && '\x1b=',
-    mouse && `\x1b[?${mouse}h`, m.sendFocusMode && '\x1b[?1004h', m.insertMode && '\x1b[4h',
+    mouse && `\x1b[?${mouse}h`, mouse && sgr.get(term) && '\x1b[?1006h', m.sendFocusMode && '\x1b[?1004h', m.insertMode && '\x1b[4h',
     m.reverseWraparoundMode && '\x1b[?45h', !m.wraparoundMode && '\x1b[?7l',
   ].filter(Boolean).join('')
   // eslint-disable-next-line no-control-regex
