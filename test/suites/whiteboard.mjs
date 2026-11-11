@@ -500,6 +500,21 @@ try {
   ok(!dark.errors.length, 'no page errors in the dark theme', dark.errors)
   await dark.ctx.close()
 
+  // Left while Excalidraw's own parts it loads ahead (its file pickers, its drawing of rounded
+  // boxes) are still coming, slowed here: WebKit stops them as the page goes, and nothing waits on
+  // them, which isn't an error of the page's (src/leaving.js).
+  let slowed = 0
+  const away = await page(b, kit.url, { store: { 'cc-ws': { tabs: [`view:whiteboard:${board}`], active: `view:whiteboard:${board}`, side: null, split: false, group: 'main' } }, before: async (c) => {
+    await noServiceWorker(c)
+    await c.route(/\/assets\/(file-open|directory-open|file-save|roundRect)-[\w-]+\.js$/, async (r) => { slowed++; await sleep(3000); await r.continue().catch(() => {}) })
+  } })
+  await away.p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
+  await away.p.evaluate(() => location.reload())
+  await away.p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
+  await sleep(500)
+  ok(slowed > 0 && !away.errors.length, "a board left while Excalidraw's own parts are still coming: no page errors as it goes", { slowed, errors: away.errors })
+  await away.ctx.close()
+
   // ---------- On a phone ----------
   const ph = await page(b, kit.url, { phone: true, before: async (c) => watch(c) })
   await ph.p.waitForSelector('.tabbar', { timeout: 30000 })
