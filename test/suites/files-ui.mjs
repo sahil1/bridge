@@ -23,7 +23,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import { pathToFileURL } from 'node:url'
-import { startKit, startRelay, checks, until, browser, page, shot, phoneFaults, sleep, ROOT, TEST, IS_MAC, IS_WIN } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, page, shot, phoneFaults, sleep, noServiceWorker, ROOT, TEST, IS_MAC, IS_WIN } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('files-ui')
 const { b, which } = await browser()
@@ -256,7 +256,9 @@ try {
   // ---------- the app ----------
   const rows = (p) => p.locator('.fx-body .fx-row').evaluateAll((els) => els.map((e) => e.dataset.name))
   const crumbs = (p) => p.locator('.fx-path .fx-crumb').allInnerTexts()
-  const { p, errors } = await page(b, desk.url, { width: 1440, height: 900 })
+  // Without the app's service worker: in WebKit, the requests of a page it's in charge of pass the
+  // test's routes by (a search held to be stopped wasn't held).
+  const { p, errors } = await page(b, desk.url, { width: 1440, height: 900, before: noServiceWorker })
   const shots = []
   // (After what's opening has faded in.)
   const snap = async (name) => { await sleep(300); await shot(p, `${tag}files-ui-${name}`); shots.push(name) }
@@ -388,13 +390,16 @@ try {
     await p.locator('.ws-tab', { hasText: 'Files' }).first().click()
     await p.locator('.fx').waitFor({ timeout: 8000 })
     await p.locator('.fx-search input').fill('')
-    // Stop: a search that takes its time (held here), stopped.
-    await p.route(/\/api\/files\/search/, async (r) => { await sleep(4000); await r.continue().catch(() => {}) })
+    // Stop: a search that takes its time (held here until it's stopped), stopped.
+    let letGo
+    const held = new Promise((r) => { letGo = r })
+    await p.route(/\/api\/files\/search/, async (r) => { await held; await r.continue().catch(() => {}) })
     await p.locator('.fx-search input').fill('match')
     const stop = p.locator('.fx-search-note button', { hasText: 'Stop' })
     ok(await stop.waitFor({ timeout: 5000 }).then(() => true, () => false), 'a search under way says so, with Stop')
     await stop.click()
     ok(/stopped part way/.test(await p.locator('.fx-search-note').innerText().catch(() => '')), 'Stop stops it, and says it stopped part way', await p.locator('.fx-search-note').innerText().catch(() => ''))
+    letGo()
     await p.unroute(/\/api\/files\/search/)
     await p.locator('.fx-search input').fill('')
     await p.locator('.fx-row[data-name="notes.txt"]').waitFor()
