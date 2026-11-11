@@ -22,7 +22,7 @@ import { AssistHead } from '../../AiAssist.jsx'
 import { api as call, useFleet } from '../../../api.js'
 import { t, tx, currentLang } from '../../../i18n/index.js'
 import { withKeys } from '../keys.js'
-import { readSheet, writeSheet, kindWords } from '../xlsx.js'
+import { readSheet, writeSheet, kindWords, takeMake } from '../xlsx.js'
 import { ENCODINGS } from '../csv.js'
 import SheetChart, { chartOfGrid } from '../sheetchart.jsx'
 import { googleKeys } from '../sheetkeys.js'
@@ -158,6 +158,17 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
   const commentRef = useRef(null)
   commentRef.current = () => { if (!threadsRef.current.on) return; setPanel('comments'); threadsRef.current.start() }
   useEffect(() => { if (panel === 'comments') threadsRef.current.cellPicked(sel) }, [sel, panel])
+  // Make a sheet (with Comments and @bridge, for now): an empty Excel sheet made from what it's for,
+  // asked here or by New › Sheet (xlsx.js takeMake), made as soon as it opens.
+  const makes = threading && !readOnly && !info?.csv
+  const [making, setMaking] = useState(false) // its panel opened once: kept from then on
+  const [makePreset, setMakePreset] = useState(null)
+  useEffect(() => { if (panel === 'make') setMaking(true) }, [panel])
+  useEffect(() => {
+    if (!ready || !empty || !makes) return
+    const want = takeMake(file.root, file.path)
+    if (want) { setMakePreset({ text: want, n: Date.now() }); setPanel('make') }
+  }, [ready, empty, makes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Printed from a page of its own: the sheet in view as it shows (Univer's own copy of its cells,
   // formats and all), to the system's Print, where Save as PDF is too.
@@ -357,14 +368,23 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
       {msg && <p className={`small sd-note sh-note${msg.error ? ' error-text' : ''}`} role={msg.error ? 'alert' : 'status'}><Icon name={msg.error ? 'alert' : 'info'} size={12} /><span>{msg.text}</span><button type="button" className="link-btn" onClick={() => setMsg(null)}>{t('OK')}</button></p>}
       <div className="sh-body">
         <div ref={host} className="sd-univer" data-own-keys="mod+k" />
-        {empty && ready && !panel && (
-          <div className="sh-start" role="note">
-            <Icon name="grid" size={18} />
-            <span><b>{t('An empty sheet')}</b><small className="muted">{t('Type in any cell or paste a table, or have an agent start it: "a budget for a team of five".')}</small></span>
-            <button type="button" className="btn small" onClick={() => setPanel('ask')}><Icon name="wand" size={12} /> {t('Start this sheet')}</button>
-            <button type="button" className="win-btn" onClick={() => setEmpty(false)} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button>
-          </div>
-        )}
+        {empty && ready && !panel && (makes
+          ? (
+            <div className="sh-start" role="note">
+              <Icon name="grid" size={18} />
+              <span><b>{t('An empty sheet')}</b><small className="muted">{t('Type in any cell or paste a table, or say what it\'s for and AI Assist makes it: "a budget for a team of five".')}</small></span>
+              <button type="button" className="btn small sh-make-open" onClick={() => setPanel('make')}><Icon name="wand" size={12} /> {t('Make a sheet')}</button>
+              <button type="button" className="win-btn" onClick={() => setEmpty(false)} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button>
+            </div>
+          ) : (
+            <div className="sh-start" role="note">
+              <Icon name="grid" size={18} />
+              <span><b>{t('An empty sheet')}</b><small className="muted">{t('Type in any cell or paste a table, or have an agent start it: "a budget for a team of five".')}</small></span>
+              <button type="button" className="btn small" onClick={() => setPanel('ask')}><Icon name="wand" size={12} /> {t('Start this sheet')}</button>
+              <button type="button" className="win-btn" onClick={() => setEmpty(false)} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button>
+            </div>
+          ))}
+        {making && <MakePanel hidden={panel !== 'make'} preset={makePreset} file={file} univer={univer} onDirty={changed} onMade={(kept) => setEmpty(!kept)} onShow={() => setPanel('make')} onClose={() => setPanel(null)} />}
         {/* AI Assist's panel stays as it was (waiting for an answer, say) while Charts is open instead. */}
         {asked && <AskPanel hidden={panel !== 'ask'} preset={preset} onShow={() => setPanel('ask')} file={file} univer={univer} sel={sel} dark={isDark} onDirty={changed} onChart={(c) => setAdded((a) => [...a, { ...c, id: `c${Date.now().toString(36)}` }])} onClose={() => setPanel(null)} />}
         {panel === 'comments' && threadMode && <Threads threads={threads} readOnly={readOnly} say={SAY.sheet} className="sh-side sh-threads" onComment={() => commentRef.current()} onClose={() => setPanel(null)} />}
@@ -696,6 +716,147 @@ function chartFrom(sheet, c) {
   if (!view.series.length) throw new Error(t('there are no numbers in {ref} to chart', { ref }))
   const spec = { sheet: sheet.getSheetId(), sheetName: sheet.getSheetName(), type, title: String(c.title || ''), ref, at: { col: range.getColumn() + range.getWidth() + 1, row: range.getRow() }, size: { cols: 8, rows: 16 } }
   return { spec, view }
+}
+
+// ---------- Make a sheet ----------
+// An empty sheet made from what it's for ("a budget for a team of five"): AI Assist's model writes
+// the whole workbook (its sheets, cells and formulas, formats, widths, dropdowns, the heading row
+// frozen) on the sheet's fast path, put on the sheet outlined as a suggestion: Keep, and it's an
+// edit like any other, saved into the Excel file; Discard, and the sheet's empty again. preset: what
+// New › Sheet was told it's for, made at once.
+const MAX_BOOK_CELLS = 2000
+const colOf = (s) => { let n = 0; for (const ch of String(s).toUpperCase()) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1 }
+// The workbook put on the (empty) sheet, with what it takes to put it back: { first, name, added,
+// widths, marks, sheets, cells }.
+function putBook(u, spec) {
+  const wb = u.getActiveWorkbook()
+  const first = wb.getSheets()[0]
+  const made = { first: first.getSheetId(), name: first.getSheetName(), added: [], widths: [], marks: [], sheets: 0, cells: 0 }
+  const used = new Set(wb.getSheets().map((s) => s.getSheetName().toLowerCase()))
+  try {
+    spec.sheets.slice(0, 6).forEach((s, i) => {
+      let name = String(s.name || '').replace(/[\\/?*[\]:]/g, ' ').trim().slice(0, 31) || t('Sheet{n}', { n: i + 1 })
+      if (i > 0) { let k = 2; const base = name; while (used.has(name.toLowerCase())) name = `${base.slice(0, 28)} ${k++}` }
+      used.add(name.toLowerCase())
+      let sh
+      if (i === 0) { sh = first; if (name !== first.getSheetName()) sh.setName(name) } else { sh = wb.insertSheet(name); made.added.push(sh.getSheetId()) }
+      made.sheets++
+      for (const [ref, v] of Object.entries(s.cells || {})) {
+        if (!/^[A-Z]{1,3}[1-9]\d{0,6}$/i.test(ref) || made.cells >= MAX_BOOK_CELLS) continue
+        setCell(sh.getRange(ref.toUpperCase()), v)
+        made.cells++
+      }
+      for (const [col, w] of Object.entries(s.widths && typeof s.widths === 'object' ? s.widths : {})) {
+        const c = colOf(col)
+        if (!/^[A-Z]{1,3}$/i.test(col) || !(Number(w) > 0)) continue
+        if (sh.getSheetId() === made.first) made.widths.push([c, sh.getColumnWidth(c)])
+        sh.setColumnWidth(c, Math.round(Math.min(80, Number(w)) * 7 + 10))
+      }
+      const each = (o, fn) => { for (const [ref, x] of Object.entries(o && typeof o === 'object' ? o : {})) { try { fn(sh.getRange(String(ref).toUpperCase()), x) } catch { /* a range it can't use: left as it is */ } } }
+      each(s.formats, (r, f) => r.setNumberFormat(String(f)))
+      each(Object.fromEntries([].concat(s.bold || []).map((ref) => [ref, true])), (r) => r.setFontWeight('bold'))
+      each(s.fills, (r, c) => { if (/^#[0-9a-f]{6}$/i.test(String(c))) r.setBackgroundColor(String(c)) })
+      for (const d of [].concat(s.dropdowns || [])) {
+        const vals = (Array.isArray(d?.values) ? d.values : []).map(String).filter(Boolean).slice(0, 50)
+        try {
+          if (!vals.length) continue
+          const r = sh.getRange(String(d.range).toUpperCase())
+          r.setDataValidation(u.newDataValidation().requireValueInList(vals).build())
+          // Wide enough for its longest choice in its chip, with the arrow.
+          const c = r.getColumn(), want = Math.min(260, Math.max(...vals.map((v) => v.length)) * 8 + 40)
+          if (sh.getColumnWidth(c) < want) { if (sh.getSheetId() === made.first && !made.widths.some((x) => x[0] === c)) made.widths.push([c, sh.getColumnWidth(c)]); sh.setColumnWidth(c, want) }
+        } catch { /* no dropdown there */ }
+      }
+      const fr = s.freeze && typeof s.freeze === 'object' ? s.freeze : {}
+      if (Number(fr.rows) > 0) sh.setFrozenRows(Math.min(10, Number(fr.rows)))
+      if (Number(fr.cols) > 0) sh.setFrozenColumns(Math.min(5, Number(fr.cols)))
+      const rows = (sh.getLastRow() ?? -1) + 1, cols = (sh.getLastColumn() ?? -1) + 1
+      if (rows > 0 && cols > 0) { try { made.marks.push(sh.highlightRanges([sh.getRange(0, 0, rows, cols)], MARK)) } catch { /* shown without the marks */ } }
+    })
+  } catch (e) { takeBook(u, made); throw e }
+  wb.setActiveSheet(wb.getSheetBySheetId(made.first))
+  return made
+}
+const unmarkBook = (made) => { for (const m of made.marks) { try { m.dispose() } catch { /* gone */ } } made.marks = [] }
+// Discarded: the sheets it added gone, and the first as it was (empty, its name and widths).
+function takeBook(u, made) {
+  unmarkBook(made)
+  const wb = u.getActiveWorkbook()
+  for (const id of [...made.added].reverse()) { try { wb.deleteSheet(id) } catch { /* gone */ } }
+  const first = wb.getSheetBySheetId(made.first)
+  if (!first) return
+  try {
+    const rows = (first.getLastRow() ?? -1) + 1, cols = (first.getLastColumn() ?? -1) + 1
+    if (rows > 0 && cols > 0) { const all = first.getRange(0, 0, rows, cols); all.setDataValidation(null); first.clear() }
+    first.setFrozenRows(0); first.setFrozenColumns(0)
+    for (const [c, w] of made.widths.reverse()) first.setColumnWidth(c, w)
+    if (first.getSheetName() !== made.name) first.setName(made.name)
+    wb.setActiveSheet(first)
+  } catch { /* as much as could be put back */ }
+}
+
+function MakePanel({ hidden, preset, file, univer, onDirty, onMade, onShow, onClose }) {
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null) // { message, noModel }
+  const [made, setMade] = useState(null) // { by, summary, made }: on the sheet, to keep or discard
+  const [note, setNote] = useState(null)
+  const [writer, setWriter] = useState(null)
+  const live = useRef(true)
+  const madeRef = useRef(null)
+  madeRef.current = made
+  useEffect(() => () => { live.current = false; if (madeRef.current) unmarkBook(madeRef.current.made) }, [])
+  useEffect(() => { if (!hidden) call('/studio/writer').then((w) => live.current && setWriter(w), () => live.current && setWriter((w) => w || { model: null, models: [] })) }, [hidden])
+  const model = writer?.model && !writer.model.missing ? writer.models.find((m) => m.id === writer.model.id) || writer.model : null
+  const noModel = !!writer && !model && !writer.models.length
+  const make = async (said = text) => {
+    if (!String(said).trim() || busy || made) return
+    setBusy(true); setErr(null); setNote(null)
+    try {
+      const r = await call('/studio/sheet/ai', { method: 'POST', body: { root: file.root, path: file.path, mode: 'book', instruction: said } })
+      if (!live.current) return
+      const m = putBook(univer.current, r.book)
+      setMade({ by: r.by, summary: r.book.summary, made: m })
+      onDirty(true)
+      onShow()
+    } catch (x) { if (live.current) setErr({ message: x.message, noModel: x.code === 'noModel' }) } finally { if (live.current) setBusy(false) }
+  }
+  useEffect(() => { if (preset?.text) { setText(preset.text); make(preset.text) } }, [preset?.n]) // eslint-disable-line react-hooks/exhaustive-deps
+  const keep = () => { unmarkBook(made.made); setMade(null); setText(''); setNote(t('Kept. Save to write it to the file; undo takes it back.')); onMade(true) }
+  const discard = () => { takeBook(univer.current, made.made); setMade(null); onDirty(false); onMade(false) }
+  const goes = !model ? '' : model.via === 'local' ? t('What you say stays on this computer ({model}).', { model: model.label }) : t('What you say goes to {model} ({provider}). Nothing else leaves this computer.', { model: model.label, provider: model.provider || model.label })
+  return (
+    <aside className="sh-side sh-ask sh-make" aria-label={t('Make a sheet')} hidden={hidden}>
+      <AssistHead className="sd-panel-head" what={t('Make a sheet')} onClose={() => { if (made) discard(); onClose() }} />
+      <div className="sh-side-body">
+        <p className="small muted sh-picked">{t('Say what it\'s for. AI Assist writes its sheets, formulas, formats and dropdowns, shown here before anything\'s kept.')}</p>
+        <form className="sh-ask-form" onSubmit={(e) => { e.preventDefault(); make() }}>
+          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} disabled={busy || !!made} placeholder={t('"A budget for a team of five", "a reading log with ratings"')} aria-label={t('What the sheet is for')} onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); make() } }} />
+          <div className="sh-ask-foot">
+            {model && <span className="muted small sh-model-one">{model.label}</span>}
+            <span className="sd-grow" />
+            <button type="submit" className="btn small primary sh-send" disabled={busy || !!made || noModel || !text.trim()} title={withKeys(t('Make it'), 'mod', 'enter')}>
+              <Icon name={busy ? 'refresh' : 'wand'} size={12} className={busy ? 'spin' : ''} /> {busy ? t('Making it…') : t('Make it')}
+            </button>
+          </div>
+        </form>
+        {noModel
+          ? <p className="small sh-goes" role="note">{t('No model to answer with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers.')} <button type="button" className="link-btn" onClick={openProviders}>{t('Model Providers')}</button></p>
+          : goes && <p className="muted small sh-goes">{goes}</p>}
+        {busy && <div className="sh-wait" role="status"><Icon name="refresh" size={13} className="spin" /><span>{t('Making it with {model}…', { model: model?.label || t('the model') })}</span></div>}
+        {err && <div className="sh-wait bad" role="alert"><Icon name="alert" size={13} /><span>{err.message}{err.noModel && <> <button type="button" className="link-btn" onClick={openProviders}>{t('Model Providers')}</button></>}</span><button type="button" className="link-btn" onClick={() => setErr(null)}>{t('OK')}</button></div>}
+        {note && !made && <div className="sh-wait ok" role="status"><Icon name="check" size={13} /><span>{note}</span></div>}
+        {made && (
+          <div className="sh-change sh-suggestion sh-made">
+            <small className="muted sh-by"><Icon name="wand" size={11} /> {t('Suggested by {name}, not kept yet', { name: made.by })}</small>
+            {made.summary && <b className="sh-sum">{made.summary}</b>}
+            <small className="muted">{made.made.sheets === 1 ? t('1 sheet, {n} cells, outlined', { n: made.made.cells }) : t('{s} sheets, {n} cells, outlined', { s: made.made.sheets, n: made.made.cells })}</small>
+            <div className="sh-acts"><button type="button" className="btn small primary" onClick={keep}><Icon name="check" size={12} /> {t('Keep')}</button><button type="button" className="btn small" onClick={discard}>{t('Discard')}</button></div>
+          </div>
+        )}
+      </div>
+    </aside>
+  )
 }
 
 // ---------- Charts ----------

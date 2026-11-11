@@ -652,16 +652,19 @@ app.post('/api/studio/deck/ai', wrap(async (req) => {
 // A sheet's AI Assist (studio.sheetAsk): the cells picked and what to do with them, answered by
 // Studio's model (the one picked for it, else the one the app reaches first) as a change the page
 // shows on the sheet to keep or discard.
+// mode: 'book', a whole workbook made from what it's for (an empty sheet's Make a sheet).
 const sheetAi = async (req, thread = null) => {
   const b = req.body || {}
   const use = String(b.model || '') || await studioModel()
   if (!use) throw Object.assign(new Error('No model to answer with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers.'), { code: 'noModel' })
-  const ask = studio.sheetAsk({ rel: sq(req).path, instruction: b.instruction, selection: b.selection, where: b.where, sheet: b.sheet, sheets: b.sheets, used: b.used, thread })
-  const r = await chatModels.reply(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, json: studio.SHEET_SCHEMA, feature: 'studio' })
+  const book = b.mode === 'book' && !thread
+  const ask = book ? studio.bookAsk({ instruction: b.instruction, rel: sq(req).path }) : studio.sheetAsk({ rel: sq(req).path, instruction: b.instruction, selection: b.selection, where: b.where, sheet: b.sheet, sheets: b.sheets, used: b.used, thread })
+  const r = await chatModels.reply(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, json: book ? studio.BOOK_SCHEMA : studio.SHEET_SCHEMA, feature: 'studio' })
   const d = (await chatModels.models().catch(() => [])).find((x) => x.id === use)
-  return { ...studio.sheetAnswer(r?.text), model: use, by: d?.label || String(use).split(':').slice(1).join(':') || use }
+  return { ...(book ? studio.bookAnswer(r?.text) : studio.sheetAnswer(r?.text)), model: use, by: d?.label || String(use).split(':').slice(1).join(':') || use }
 }
-app.post('/api/studio/sheet/ai', wrap((req) => sheetAi(req)))
+// Make a sheet (mode: 'book') comes with Comments and @bridge, a beta feature, for now.
+app.post('/api/studio/sheet/ai', (req, res, next) => (req.body?.mode === 'book' ? trialOff('comments', 'Comments and @bridge')(req, res, next) : next()), wrap((req) => sheetAi(req)))
 // @bridge in a comment on a sheet's cells (Comments and @bridge, a beta feature): the same fast
 // path, with the thread so far, given as what to work on.
 app.post('/api/studio/sheet/comment', trialOff('comments', 'Comments and @bridge'), wrap((req) => sheetAi(req, Array.isArray(req.body?.thread) ? req.body.thread : [])))

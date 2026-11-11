@@ -125,6 +125,23 @@ function sheetChange(text) {
   return json({ summary: 'Nothing to do', answer: 'echo' })
 }
 
+// A sheet made from what it's for ("Make a spreadsheet: …"): a budget for a team of five, its Team
+// sheet's salaries summed into the Budget's first line, totals and yearly figures as formulas,
+// money formats, a Status dropdown and the heading row frozen; "not a sheet" answers in words.
+function bookOf(text) {
+  if (/not a sheet/i.test(text)) return 'A budget would have rows for each cost.'
+  const team = [['Ana', 'Lead', 9000], ['Ben', 'Engineer', 7500], ['Cai', 'Engineer', 7200], ['Dee', 'Designer', 6800], ['Eli', 'Analyst', 6100]]
+  const lines = [['Salaries', '=SUM(Team!C2:C6)'], ['Tools', 900], ['Travel', 1500], ['Training', 600]]
+  const budget = { A1: 'Item', B1: 'Monthly', C1: 'Yearly', D1: 'Status', A6: 'Total', B6: '=SUM(B2:B5)', C6: '=SUM(C2:C5)' }
+  lines.forEach(([n, v], i) => { const r = i + 2; Object.assign(budget, { [`A${r}`]: n, [`B${r}`]: v, [`C${r}`]: `=B${r}*12`, [`D${r}`]: i ? 'Pending' : 'Approved' }) })
+  const people = { A1: 'Name', B1: 'Role', C1: 'Monthly salary' }
+  team.forEach(([n, role, pay], i) => Object.assign(people, { [`A${i + 2}`]: n, [`B${i + 2}`]: role, [`C${i + 2}`]: pay }))
+  return `\`\`\`json\n${JSON.stringify({ summary: 'A monthly and yearly budget for a team of five, with salaries from the Team sheet.', sheets: [
+    { name: 'Budget', cells: budget, widths: { A: 18, B: 14, C: 14, D: 12 }, formats: { 'B2:C6': '$#,##0' }, bold: ['A1:D1', 'A6:C6'], fills: { 'A1:D1': '#DCE6F1' }, dropdowns: [{ range: 'D2:D5', values: ['Approved', 'Pending'] }], freeze: { rows: 1, cols: 0 } },
+    { name: 'Team', cells: people, widths: { A: 14, B: 14, C: 16 }, formats: { 'C2:C6': '$#,##0' }, bold: ['A1:C1'], fills: { 'A1:C1': '#DCE6F1' }, freeze: { rows: 1 } },
+  ] })}\n\`\`\``
+}
+
 function answer(b) {
   const m = b.messages || []
   const last = words([...m].reverse().find((x) => x.role === 'user')?.content)
@@ -170,6 +187,7 @@ function answer(b) {
     return say(`\`\`\`json\n${JSON.stringify({ kind: 'Mutual NDA', what: 'Two companies agree to keep what they share with each other secret for two years.', parties: [{ name: 'Northwind Labs', role: 'shares and receives' }, { name: 'Contoso Ltd', role: 'shares and receives' }], money: ['A fee of $1,200 a year, paid by Contoso Ltd'], dates: ['Starts on signing; lasts two years'], obligations: ['Keep the other side\'s information secret', 'Return or destroy it when asked'], renewal: 'It renews by itself every year unless either side says no 30 days before.', termination: 'Either side can end it with 30 days\' notice.', watch: [{ what: 'It renews by itself unless you say no in time.', page: 1, quote: 'renews automatically' }] })}\n\`\`\``)
   }
   if (/^Suggest how to organize this folder\./.test(first)) return say(filesPlan(first))
+  if (/^Make a spreadsheet: /.test(first)) return say(bookOf(first))
   if (/^In the spreadsheet /.test(first)) return say(sheetChange(first))
   const tail = m.at(-1)
   const file = /EDIT (\S+)/.exec(last)?.[1]

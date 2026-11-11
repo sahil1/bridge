@@ -121,6 +121,12 @@ function sayWhy(m) {
   return m
 }
 
+// What New › Sheet was told a new sheet is for, by where it is: made on it as it opens (the
+// sheet's Make a sheet), once.
+const toMake = new Map()
+export const makeOnOpen = (root, path, text) => { if (String(text || '').trim()) toMake.set(`${root}\n${path}`, String(text).trim().slice(0, 4000)) }
+export const takeMake = (root, path) => { const k = `${root}\n${path}`; const v = toMake.get(k) || null; toMake.delete(k); return v }
+
 // A new Excel file (Studio's New › Sheet): an empty workbook, with what's given written in.
 export async function bytesOf(data) {
   const { newBook, readBook, writeBook } = await loadBook()
