@@ -13,11 +13,13 @@
 // The meeting named after the calendar event on now is Mac-only (macOS Calendar). Watching a
 // screen (a canvas, as the picker's answer) and the looks at it while someone on the call talks.
 // Who said what in a room: Speaker 1 and 2, named once from who was invited or you; Who spoke and
-// Settings' Voices in a room, and neither where voices can't be told apart.
+// Settings' Voices in a room, and neither where voices can't be told apart. AI Assist's live board (a
+// beta feature): the meeting's Board filling in, kept and discarded there and on the board itself,
+// the floating card's line, the summary's link, its action items onto the task list and Settings.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, solid, noServiceWorker, changeAnswer, TEST, IS_MAC, advanced } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, solid, noServiceWorker, changeAnswer, phoneFaults, TEST, IS_MAC, advanced } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('meetings-ui')
 // On a Mac, tccutil stood in for (bin/tcc.log), for Reset and ask again on the call's sound.
@@ -26,7 +28,8 @@ const tccutil = (bin) => {
   fs.writeFileSync(path.join(bin, 'tccutil'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'tccutil.cjs')}" "$@"\n`, { mode: 0o755 })
   return path.join(bin, 'tccutil')
 }
-const kit = await startKit('meetings-ui', { env: ({ bin }) => (IS_MAC ? { BRIDGE_TCCUTIL: tccutil(bin), BRIDGE_FIX_BUNDLE_ID: 'dev.bridge-ai.test' } : {}) })
+// BRIDGE_BOARD_MS: the live board's minute, 1.5 s here.
+const kit = await startKit('meetings-ui', { env: ({ bin }) => ({ BRIDGE_BOARD_MS: '1500', ...(IS_MAC ? { BRIDGE_TCCUTIL: tccutil(bin), BRIDGE_FIX_BUNDLE_ID: 'dev.bridge-ai.test' } : {}) }) })
 const model = await startModel('meetings-ui')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -531,6 +534,158 @@ process.exit(1)`)
   ok(!!(await until(async () => ((await api(`/meetings/${I.id}`)).links || []).some((l) => /Mara_Lind_Resume\.pdf$/.test(l.path || '')), 5000)), 'Add links it to the meeting')
   await api(`/meetings/${I.id}/assist`, { on: false })
   await api(`/meetings/${I.id}/stop`, {})
+
+  // ---------- AI Assist's live board (a beta feature) ----------
+  // With it on in Beta Features, a recording meeting has a Board: off, it says what it does; its
+  // switch turns it on and says plainly where what's said goes and who runs the model. Update now
+  // fills it in, each part in its list, dashed as a suggestion; what's said after comes in by itself
+  // (the board's minute is BRIDGE_BOARD_MS's 1.5 s here); Keep and Discard there, and on the board
+  // itself, with the way back to its meeting; the floating card's one line, which opens it; after
+  // the meeting, the summary's link and the action items onto the task list with a click; and
+  // Settings › Meetings saying what it sends where. In light, dark and on a phone.
+  await api('/settings', { trials: { 'meeting-board': true } }, 'PATCH')
+  const boardMarks = (name) => { try { return JSON.parse(fs.readFileSync(path.join(kit.data, 'boards', `${name}.excalidraw`), 'utf8')).elements.filter((e) => e.type === 'rectangle' && e.customData?.bridge?.suggestion).length } catch { return -1 } }
+  const boardText = (name) => { try { return JSON.parse(fs.readFileSync(path.join(kit.data, 'boards', `${name}.excalidraw`), 'utf8')).elements.map((e) => e.text || '').join('\n') } catch { return '' } }
+  const LB = await api('/meetings', { title: 'Launch sync', call: false, event: { title: 'Launch sync', attendees: ['Priya Shah', 'Dan Ruiz', 'Tester'] } })
+  said(LB.id, [['them', 2, 'We decided to ship the beta to ten customers first. Priya will send the pricing deck by Friday.'], ['you', 9, "Priya's beta ships on 24 Nov. Who owns the migration?"]])
+  await openMeeting('Launch sync')
+  const boardTab = p.locator('.seg button[data-view="board"]')
+  ok(!!(await until(() => boardTab.isVisible(), 8000)), 'with the beta feature on, a recording meeting has a Board')
+  await boardTab.click()
+  const bp = p.locator('.mt-board')
+  ok(!!(await until(async () => /AI Assist keeps a whiteboard of it from what's said/.test(await bp.innerText().catch(() => '')), 5000)) && !(await bp.locator('.mt-board-parts').count()), 'off, the Board says what it does, and there\'s no board', await bp.innerText().catch(() => ''))
+  await bp.locator('.mt-assist-on input').click()
+  ok(!!(await until(async () => (await api(`/meetings/${LB.id}`)).board === true && await bp.locator('.mt-assist-on input').isChecked(), 5000)), 'its switch turns the live board on for the meeting')
+  ok(!!(await until(async () => /It uses the model that writes your notes, gpt-5 \(OpenAI\): what's said goes there as it comes, a minute or so at a time, with what's on the board\./.test(await bp.innerText()), 5000)), 'and says plainly where what\'s said goes, and who runs the model', await bp.innerText())
+  await p.locator('.mt-view .pane-head button[aria-label="AI Assist"]').click()
+  ok(await p.locator('.ai-menu [aria-checked="true"]', { hasText: 'Keep a live board' }).count() === 1, 'AI Assist\'s menu has it too, ticked')
+  await p.keyboard.press('Escape')
+  await bp.locator('button', { hasText: 'Update now' }).click()
+  ok(!!(await until(async () => (await bp.locator('.mt-bitem.sug').count()) === 4, 10000)), 'Update now: the board fills in, each one a suggestion', await bp.innerText())
+  const partText = (part) => bp.locator(`.mt-bpart.p-${part}`).innerText().catch(() => '')
+  ok(/Ship the beta to ten customers first/.test(await partText('decision')) && /Beta ships · Priya · 24 Nov/.test(await partText('step')) && /Priya\s+Send the pricing deck · Friday/.test(await partText('action')) && /Who owns the migration\?/.test(await partText('question')), 'what was decided, the timeline with owner and date, who does what (by person) and the open question, each in its list', { d: await partText('decision'), s: await partText('step'), a: await partText('action'), q: await partText('question') })
+  await shot(p, `${tag}meeting-board`)
+  // What's said after comes in by itself: a line, the board's minute, and the page shows it.
+  said(LB.id, [['them', 30, 'Dan will write the migration plan by Monday. We agreed to keep the old pricing for existing customers. The team went through the plan for the next two weeks in some detail.']])
+  await send(LB.id, Buffer.concat([tone(2, true), tone(1.5)]))
+  ok(!!(await until(async () => /Write the migration plan · Monday/.test(await partText('action')) && /Keep the old pricing/.test(await partText('decision')), 15000)), 'as more is said, the board fills in by itself, here as it does', await bp.innerText())
+  const lbId = (await api(`/meetings/${LB.id}`)).liveBoard.id
+  const decision = bp.locator('.mt-bitem', { hasText: 'Ship the beta to ten customers first' })
+  await decision.locator('button[aria-label="Keep"]').click()
+  ok(!!(await until(async () => /Kept/.test(await decision.innerText().catch(() => '')) && !(await decision.evaluate((e) => e.classList.contains('sug')).catch(() => true)), 5000)) && boardMarks(lbId) === 5, 'Keep: kept here, and on the board its mark comes off', boardMarks(lbId))
+  const question = bp.locator('.mt-bitem', { hasText: 'Who owns the migration?' })
+  await question.locator('button[aria-label="Discard"]').click()
+  ok(!!(await until(async () => (await question.count()) === 0, 5000)) && !/Who owns the migration/.test(boardText(lbId)) && /No open questions yet/.test(await partText('question')), 'Discard: off the list, and off the board', boardText(lbId))
+  // The floating card: one line, what's on the board, that opens it.
+  const fcCalls = { watching: true, calls: [], detect: true, float: 'meetings', floatHover: true, prompt: null, recording: { id: LB.id, title: 'Launch sync', status: 'recording', startedAt: new Date(Date.now() - 60000).toISOString(), seconds: 60, callApps: [], callEnded: null, callEndedApp: null, stopsAt: null, callQuiet: false } }
+  const fb = await page(b, kit.url, { before: async (c) => { await noServiceWorker(c); await c.route(/\/api\/calls(\?|$)/, (r) => r.fulfill({ json: fcCalls })) } })
+  const fcard = await fb.ctx.newPage()
+  await fcard.addInitScript(() => { window.bridgeApp = { floatOpen: async (o) => { window.__opened = o; return true } } })
+  await fcard.setViewportSize({ width: 360, height: 520 })
+  await fcard.goto(`${kit.url}/?float=1`)
+  await fcard.waitForSelector('.float-card', { timeout: 10000 }).catch(() => {})
+  await fcard.hover('.float-card .fc-head')
+  const fline = fcard.locator('.float-card .fc-board')
+  ok(!!(await until(async () => /^Board: 2 decisions, 2 action items$/.test((await fline.innerText().catch(() => '')).trim()), 8000)), 'the floating card: one line, "Board: 2 decisions, 2 action items"', await fline.innerText().catch(() => ''))
+  await shot(fcard, `${tag}meeting-board-float`)
+  await fline.click()
+  ok((await fcard.evaluate(() => window.__opened))?.board === lbId, 'which opens the board', await fcard.evaluate(() => window.__opened))
+  await fb.ctx.close()
+  // The board itself: the same suggestions, dashed with Keep and Discard, and a link back.
+  await bp.locator('button', { hasText: 'Open the board' }).click()
+  const sugTags = p.locator('.wb-sug-tag')
+  ok(!!(await until(async () => (await sugTags.count()) === 4, 15000)), 'Open the board: the whiteboard, each suggestion outlined there with Keep and Discard', await sugTags.count())
+  ok(await p.locator('.wb-view .wb-meeting').isVisible(), 'with the way back to its meeting')
+  await sleep(800)
+  await shot(p, `${tag}meeting-board-whiteboard`)
+  await sugTags.first().locator('button', { hasText: 'Keep' }).click()
+  ok(!!(await until(() => boardMarks(lbId) === 3, 8000)), 'Keep on the board itself: saved', boardMarks(lbId))
+  await p.locator('.wb-view .wb-meeting').click()
+  await boardTab.click({ timeout: 5000 }).catch(() => {})
+  ok(!!(await until(async () => (await bp.locator('.mt-bitem.sug').count()) === 3, 8000)), 'and the meeting\'s Board says so', await bp.locator('.mt-bitem.sug').count())
+  // Dark, and on a phone.
+  for (const look of [{ mode: 'dark', theme: 'midnight' }, { phone: true }]) {
+    const x = await page(b, kit.url, look)
+    if (look.phone) {
+      await x.p.waitForSelector('.tabbar button', { timeout: 15000 })
+      await x.p.locator('.tabbar button', { hasText: 'Meetings' }).click()
+      await x.p.locator('.m-meetings .mt-row-open', { hasText: 'Launch sync' }).click()
+    } else await until(async () => { await x.p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id } })), LB.id); return x.p.locator('.mt-title').isVisible() }, 10000, 1000)
+    await x.p.locator('.seg button[data-view="board"]').click({ timeout: 8000 }).catch(() => {})
+    await x.p.locator('.mt-board .mt-bitem').first().waitFor({ timeout: 8000 }).catch(() => {})
+    if (look.phone) {
+      await x.p.locator('.mt-board .mt-bpart.p-action').scrollIntoViewIfNeeded().catch(() => {})
+      const faults = await phoneFaults(x.p, '.mt-board')
+      ok(!Object.values(faults).some((v) => (Array.isArray(v) ? v.length : v > 0)), 'on a phone: the Board fits, its buttons big enough to tap', faults)
+    } else ok(await x.p.locator('.mt-board .mt-bitem.sug').first().evaluate((e) => getComputedStyle(e).borderTopStyle === 'dashed').catch(() => false), 'dark: a suggestion is dashed here too')
+    await shot(x.p, `${tag}meeting-board-${look.phone ? 'phone' : 'dark'}`)
+    ok(x.errors.length === 0, `${look.phone ? 'phone' : 'dark'}: no page errors`, x.errors)
+    await x.ctx.close()
+  }
+  // After the meeting: the board stays; the summary links to it, and its action items go onto the
+  // task list with one click.
+  await api(`/meetings/${LB.id}/stop`, {})
+  await until(async () => !/Recording|Finishing/.test(await p.locator('.mt-view .mt-state').first().innerText({ timeout: 1000 }).catch(() => 'Recording')), 10000)
+  await p.locator('.seg button[data-view="summary"]').click({ timeout: 8000 }).catch(() => {})
+  const blink = p.locator('.mt-board-link')
+  ok(!!(await until(async () => /Live board: 2 decisions, 2 action items/.test(await blink.innerText().catch(() => '')), 8000)), 'after it, the summary links to the board, in a few words', await blink.innerText().catch(() => ''))
+  await blink.locator('button', { hasText: 'As lists' }).click()
+  const toTasks = bp.locator('button', { hasText: 'Add 2 action items to Tasks' })
+  ok(!!(await until(() => toTasks.isVisible(), 5000)), 'its action items, a click from the task list')
+  await toTasks.click()
+  ok(!!(await until(async () => { const tl = ((await api('/chief/tasks')).items || []).map((x) => x.title); return tl.includes('Priya: Send the pricing deck · Friday') && tl.includes('Dan: Write the migration plan · Monday') }, 5000)) && !!(await until(async () => (await bp.locator('.mt-bitem', { hasText: 'On the task list' }).count()) === 2, 5000)), 'Add to Tasks: on the Chief of Staff\'s task list, and each says so', await bp.innerText({ timeout: 1000 }).catch(() => ''))
+  // On a phone after it: the views (the summary, the board, your notes, the transcript, the files)
+  // still fit across, and the board stays.
+  const ap = await page(b, kit.url, { phone: true })
+  await ap.p.waitForSelector('.tabbar button', { timeout: 15000 })
+  await ap.p.locator('.tabbar button', { hasText: 'Meetings' }).click()
+  await ap.p.locator('.m-meetings .mt-row-open', { hasText: 'Launch sync' }).first().click()
+  await ap.p.locator('.seg button[data-view="board"]').click({ timeout: 8000 }).catch(() => {})
+  await ap.p.locator('.mt-board .mt-bitem').first().waitFor({ timeout: 8000 }).catch(() => {})
+  const headFaults = await phoneFaults(ap.p, '.mt-view .pane-head')
+  ok(!Object.keys(headFaults).length && await ap.p.locator('.mt-board .mt-bitem').count() === 5 && /Kept while the meeting recorded/.test(await ap.p.locator('.mt-board').innerText()), 'on a phone after it: the views still fit across, and the board is there', headFaults)
+  await shot(ap.p, `${tag}meeting-board-after-phone`)
+  await ap.ctx.close()
+  // Settings › Meetings: on for every meeting, and what it sends where.
+  await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meetings' } })))
+  const sb = p.locator('.st-meet [data-setting="meeting-board"]')
+  ok(!!(await until(async () => /Keep a live board, in every meeting/.test(await sb.innerText().catch(() => '')) && /what's been said since and what's on the board go to gpt-5 \(OpenAI\)/.test(await sb.innerText().catch(() => '')), 8000)), 'Settings › Meetings: Live Board, on for every meeting or not, and what it sends where', await sb.innerText().catch(() => ''))
+  await sb.scrollIntoViewIfNeeded().catch(() => {})
+  await shot(p, `${tag}meeting-board-settings`)
+  await p.keyboard.press('Escape')
+  // The board open while the meeting adds to it: what it adds comes in by itself; and with an edit
+  // of yours not saved yet (its save held back here), its new notes come in too, without asking
+  // which to keep, and once saved the board has both.
+  let holdSave = false
+  const wx = await page(b, kit.url, { before: async (c) => { await noServiceWorker(c); await c.route(/\/api\/boards\/[^/?]+(\?|$)/, (r) => (r.request().method() === 'PUT' && holdSave ? r.fulfill({ status: 503, json: { error: 'held back' } }) : r.continue())) } })
+  await until(async () => { if (await wx.p.locator('.excalidraw canvas.interactive').count()) return true; await wx.p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id } })), lbId); return false }, 30000, 1000)
+  // How many suggestions wait on it, in sight or not: the count at its foot.
+  const tagsNow = async () => Number(/^(\d+) suggestions/.exec((await wx.p.locator('.wb-sug-bar').innerText({ timeout: 1000 }).catch(() => '')).trim())?.[1] || 0)
+  const t0 = await until(async () => { const n = await tagsNow(); return n > 0 && n }, 10000)
+  said(LB.id, [['them', 120, 'Mia will update the status page by Friday. The team went through the plan for the next two weeks in some detail.']])
+  await api(`/meetings/${LB.id}/board`, {})
+  ok(!!t0 && !!(await until(async () => (await tagsNow()) === t0 + 1, 10000)), 'the board open while the meeting adds to it: what it adds comes in by itself', { t0, now: await tagsNow() })
+  const wbox = await wx.p.locator('.wb-canvas').boundingBox()
+  const wFrame = () => wx.p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  const drawBox = async (x, y) => {
+    await until(async () => { await wx.p.locator('[data-testid="toolbar-rectangle"]').click({ force: true }); return wx.p.locator('input[data-testid="toolbar-rectangle"]:checked').count() }, 5000, 200)
+    await wx.p.mouse.move(x, y); await wFrame(); await wx.p.mouse.down(); await wFrame()
+    for (let i = 1; i <= 4; i++) { await wx.p.mouse.move(x + i * 15, y + i * 8); await wFrame() }
+    await wx.p.mouse.up(); await wFrame(); await wx.p.keyboard.press('Escape')
+  }
+  const handDrawn = () => { try { return JSON.parse(fs.readFileSync(path.join(kit.data, 'boards', `${lbId}.excalidraw`), 'utf8')).elements.filter((e) => e.type === 'rectangle' && !e.customData?.bridge?.meeting).length } catch { return -1 } }
+  holdSave = true
+  await drawBox(wbox.x + 40, wbox.y + wbox.height - 140)
+  ok(!!(await until(() => wx.p.locator('.wb-state.bad').count(), 6000)), '(an edit on the board, its save held back)')
+  said(LB.id, [['them', 140, 'Leo will order the launch swag by Tuesday. The team went through the plan for the next two weeks in some detail.']])
+  await api(`/meetings/${LB.id}/board`, {})
+  ok(!!(await until(async () => (await tagsNow()) === t0 + 2, 10000)) && !(await wx.p.locator('.wb-conflict').count()), 'with an edit not saved yet, what the meeting adds comes in too, without asking which to keep', { now: await tagsNow(), asked: await wx.p.locator('.wb-conflict').count() })
+  holdSave = false
+  await drawBox(wbox.x + 140, wbox.y + wbox.height - 140)
+  ok(!!(await until(() => handDrawn() === 2 && /Leo: Order the launch swag/.test(boardText(lbId)), 10000)), 'and once it saves, the board has both: your edits and the meeting\'s notes', { handDrawn: handDrawn(), leo: /Leo/.test(boardText(lbId)) })
+  ok(wx.errors.length === 0, 'the open board: no page errors', wx.errors)
+  await wx.ctx.close()
+  await api('/settings', { trials: { 'meeting-board': false }, meetings: { board: false } }, 'PATCH')
 
   // ---------- Who said what in a room ----------
   // A meeting with your mic only, its voices told apart (voices.json, as voices.js writes it): each

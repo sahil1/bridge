@@ -3,6 +3,7 @@ import Icon, { StatusDot } from '../Icon.jsx'
 import { api, usePoll, useFleet } from '../../api.js'
 import { MEETINGS_CHANNEL, clock, useCallEvent, QuickNote, endedWords } from './recording.jsx'
 import { KIND, setAssist, markAssist } from './assist.jsx'
+import { boardWords } from './board.jsx'
 import { PrepGlance } from './prep.jsx'
 import { useScreenAccess, useAllowCall, allowSteps } from './allowcall.jsx'
 import { joined } from '../Agenda.jsx'
@@ -18,6 +19,7 @@ import './meetings.css'
 // instead (Settings › Meetings), a click on the bar opens and closes it. On a Mac it can move to the
 // menu bar for the meeting, out of the way of a screen you share. When a call starts: Take notes.
 // When it ends: Stop or keep recording. Otherwise (Settings › Meetings › Always): what needs you.
+// With AI Assist's live board on (a beta feature), a line says what's on it and opens it.
 // With AI Assist's Suggest what to ask on, its newest suggestion shows under the bar, open or not,
 // since you're looking at the call: ✓ puts it in your notes, ✕ dismisses it. Ten minutes before a
 // meeting with other people: Join, and what to go in with at a glance (prep.jsx's PrepGlance), with
@@ -332,6 +334,8 @@ export default function FloatCard() {
                 </>
                 : live.canWatch && app().floatWatch && <button type="button" className="fc-chip" onClick={() => app().floatWatch()} title={t('Pick the window or screen being shared. A picture is kept each time it changes.')}><Icon name="screen" size={12} /> {t('Watch screen')}</button>)}
             </div>
+            {/* AI Assist's live board (a beta feature): how much is on it, a click from opening it. */}
+            {m?.liveBoard?.id && <button type="button" className="fc-board" onClick={() => app().floatOpen?.({ meeting: r.id, board: m.liveBoard.id })} title={t('Open "{name}", the whiteboard of this meeting', { name: m.liveBoard.id })}><Icon name="shapes" size={12} /><span>{boardWords(m.liveBoard) ? t('Board: {what}', { what: boardWords(m.liveBoard) }) : t('Board')}</span></button>}
             <div className="fc-acts">
               <button type="button" className="btn small" onClick={() => op('section')} title={t('Start the next part of the meeting here, like a lap. The transcript, your notes and the summary get a heading for each part.')}><Icon name="flag" size={12} /> {t('New section')}</button>
               <span className="fc-grow" />

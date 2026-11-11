@@ -366,7 +366,7 @@ async function run(job) {
     if (text && !/^(thank you\.?|thanks for watching!?|you)$/i.test(text)) {
       const line = { src: job.src, t0: round(job.t0), t1: round(job.t1), text, engine: r.engine }
       append(job.id, line)
-      if (!job.retry) assistSoon(job.id)
+      if (!job.retry) { assistSoon(job.id); boardSoon(job.id) }
       // In a room, whose voice it was, while it records (voices.js decides whether it can).
       if (!job.retry) voices.heard(job.id, line, job.pcm, lines(job.id)).catch(() => {})
     }
@@ -397,6 +397,9 @@ function settle(id) {
   const m = readJSON(path.join(DIR, id, 'meeting.json'))
   if (!m || m.status !== 'transcribing' || waiting(id) || decoding.has(id)) return
   saveMeta({ ...m, status: 'done', ...(m.again ? { again: { ...m.again, done: new Date().toISOString() } } : {}) })
+  // A live board's last look, at what was said since its last (meetboard.js), unless it was a
+  // transcript made again.
+  if (!m.again) boardSoon(id, { last: true })
   // Cleaning up goes to the notes model too: by itself only when the summary does, unless you've
   // turned it on (someone who keeps the transcript from a model until they ask isn't surprised).
   const clean = (cfg.meetings?.cleanup ?? cfg.meetings?.autoSummary !== false) && transcript(id).filter((l) => l.text).length >= 3
@@ -459,6 +462,8 @@ export function start({ title, event, language, kind, call = true, callApps = []
     startedAt: new Date().toISOString(), endedAt: null, status: 'recording', language: language || null, kind: KINDS[kind] ? kind : kindOf(`${name} ${event?.title || ''}`), ...(KINDS[kind] ? { kindPicked: true } : {}), seconds: 0, call: 'off',
     callApps: [...new Set([].concat(callApps || []).map(String))].slice(0, 5),
     assist: cfg.meetings?.assist === true,
+    // Its live board, a beta feature (boardSoon): on when you have it on for every meeting.
+    board: cfg.meetings?.board === true,
   })
   const why = call && cfg.meetings?.callAudio !== false ? listen(id) : 'Recording the call\'s sound is off (Settings › Meetings).'
   speech.prepare(cfg)
@@ -552,6 +557,7 @@ export async function stop(id) {
   unlisten(id)
   clearTimeout(stopping.get(id)); stopping.delete(id)
   clearTimeout(assistLater.get(id)); assistLater.delete(id)
+  clearTimeout(boardLater.get(id)); boardLater.delete(id)
   const l = live.get(id)
   live.delete(id)
   const seconds = l ? Math.max(0, ...Object.values(l.sources).map((x) => x.samples)) / RATE : m.seconds
@@ -2009,6 +2015,158 @@ export function markAssist(id, aid, state) {
   return a
 }
 export const assisted = (id) => assisting.has(id)
+
+// ---------- AI Assist's live board ----------
+// A Beta Feature (Live Meeting Board, src/trials.js): while a meeting records with its board on,
+// AI Assist keeps a whiteboard of it from what's said: what was decided, a timeline with owners and
+// dates, who does what, and the questions still open. meetboard.js puts each on the board as a
+// suggestion to keep or discard (helpers.board, set by index.js). It works in batches: once about a
+// minute has gone by since its last look (BOARD_MS) and a sentence or two more has been said
+// (BOARD_WORDS), and never more often than AI Assist's level has Suggest what to ask look
+// (ASSIST_LEVELS: Low waits three times as long; High no less than the minute). Each time it's sent what was said since, the lines just before it for
+// context, what's on the board already (yours too) and what was taken off it, so it adds only
+// what's new and never the same thing twice. Update now asks straight away; once the meeting stops
+// and every line is in, one more look takes in the last of it. The model is the one meeting notes
+// are written with (this meeting's pick, Settings', or the one Automatic is), local ones too.
+// Kept in board.json: { at, upTo, error, looks, model, board, added: [{ key, part, text }], tasked }.
+const BOARD_MS = Number(process.env.BRIDGE_BOARD_MS || 60_000)
+const BOARD_WORDS = 30 // at least this much said since, a sentence or two: not a look for "OK" and "Yes"
+const BOARD_PARTS = { decisions: 'decision', timeline: 'step', actions: 'action', questions: 'question' }
+const BOARD_SAY = { decision: 'Decision', step: 'Timeline', action: 'Who does what', question: 'Open question' }
+const boardItem = { type: 'object', properties: { text: { type: 'string' }, who: { type: 'string' }, when: { type: 'string' } }, required: ['text'] }
+const BOARD_SCHEMA = { type: 'object', properties: Object.fromEntries(Object.keys(BOARD_PARTS).map((k) => [k, { type: 'array', maxItems: 6, items: boardItem }])), required: Object.keys(BOARD_PARTS) }
+const boardOk = (v) => Object.keys(BOARD_PARTS).some((k) => Array.isArray(v[k])) && Object.keys(BOARD_PARTS).every((k) => v[k] == null || Array.isArray(v[k]))
+export const boardOn = () => cfg.trials?.['meeting-board'] === true
+const boardFile = (id) => path.join(dirOf(id), 'board.json')
+export const boardOf = (id) => readJSON(boardFile(id), null) || { at: null, upTo: 0, error: null, looks: 0, added: [] }
+const boarding = new Map() // id -> promise
+const boardLater = new Map() // id -> timer
+const clip = (s, n) => { s = String(s || ''); return s.length > n ? `${s.slice(0, n)}\n(…cut)` : s }
+// The same thing said another way: most of the words of the shorter one are in the other.
+const BOARD_STOP = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'will', 'are', 'was', 'our', 'its', 'has', 'have', 'from', 'into', 'about', 'should', 'need', 'needs'])
+const gist = (s) => new Set(String(s || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter((w) => w.length > 2 && !BOARD_STOP.has(w)))
+export function sameThing(a, b) {
+  const x = gist(a), y = gist(b)
+  if (!x.size || !y.size) return clean(a, 300).toLowerCase() === clean(b, 300).toLowerCase()
+  let n = 0
+  for (const w of x) if (y.has(w)) n++
+  return n / Math.min(x.size, y.size) >= 0.8
+}
+// When in the meeting something was said: the line of those given with the most of its words.
+function saidAt(text, lines) {
+  const want = gist(text)
+  let best = null, most = 0
+  for (const l of lines) {
+    const have = gist(l.text)
+    let n = 0
+    for (const w of want) if (have.has(w)) n++
+    if (n > most) { most = n; best = l }
+  }
+  return (best || lines[0])?.t0 ?? null
+}
+// Called as each line comes in (and once more when it's all in, last): a look once it's time.
+function boardSoon(id, { last = false } = {}) {
+  if (!boardOn() || !helpers.board) return
+  let m
+  try { m = meta(id) } catch { return }
+  if (!m.board || boarding.has(id) || boardLater.has(id)) return
+  if (!last && m.status !== 'recording') return
+  const b = boardOf(id)
+  const wait = Math.max(0, BOARD_MS * Math.max(1, ASSIST_LEVELS[assistLevel()].every) - (Date.now() - Date.parse(b.at || 0)))
+  boardLater.set(id, setTimeout(() => { boardLater.delete(id); boardLook(id, { last }).catch(() => {}) }, wait))
+}
+export function setBoard(id, on) {
+  const m = patchMeta(id, { board: !!on })
+  if (on) boardSoon(id)
+  else { clearTimeout(boardLater.get(id)); boardLater.delete(id) }
+  return { on: !!m.board, ...boardOf(id) }
+}
+// The model it uses: the meeting's own pick for its notes, Settings', or the one Automatic is.
+export const boardModel = async (m) => m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel?.() || null
+// One look: what's new since the last, onto the board. now: Update now (whatever was said since).
+// last: the meeting's last look, once every line is in. Resolves with board.json as it is then.
+export function boardLook(id, { now = false, last = false, model } = {}) {
+  if (boarding.has(id)) return boarding.get(id)
+  const p = (async () => {
+    const m = meta(id)
+    const b = boardOf(id)
+    const said = transcript(id).filter((l) => l.text)
+    const fresh = said.filter((l) => l.t1 > (b.upTo || 0))
+    const n = fresh.reduce((k, l) => k + tokens(l.text).length, 0)
+    if (!fresh.length || (!now && n < (last ? 8 : BOARD_WORDS))) return b
+    const use = model || await boardModel(m)
+    const fail = (e) => { writeFileAtomic(boardFile(id), JSON.stringify({ ...b, at: new Date().toISOString(), error: e.message }, null, 1)); throw e }
+    if (!use) fail(noModel())
+    try { await roomy(use, 'a live board') } catch (e) { fail(e) }
+    const scene = await helpers.board.scene(m, b.board).catch(() => ({ items: [], other: [] }))
+    const here = new Set(scene.items.map((x) => x.key))
+    const gone = (b.added || []).filter((x) => !here.has(x.key))
+    const local = isLocal(use)
+    const line = (l) => `[${clock(l.t0)}] ${speaker(l)}: ${l.text}`
+    const freshText = fresh.map(line).join('\n')
+    const before = said.filter((l) => l.t1 <= (b.upTo || 0)).slice(-6).map(line).join('\n')
+    const size = local ? await budget(use, freshText, { answer: 1024 }) : 60_000
+    const onBoard = [...scene.items.map((x) => `- ${BOARD_SAY[x.part] || 'Decision'}: ${x.label}`), ...scene.other.slice(0, 40).map((x) => `- Written on the board: ${clean(x, 200)}`)].join('\n')
+    const off = gone.slice(-30).map((x) => `- ${BOARD_SAY[x.part] || 'Decision'}: ${x.text}`).join('\n')
+    const room = Math.max(1500, Math.floor(size * 0.8) - onBoard.length - off.length - 3000)
+    const freshIn = freshText.length > room ? `(earlier lines left out)\n${freshText.slice(-room)}` : freshText
+    const me = String(cfg.name || '').trim()
+    const people = guests(m)
+    const secs = nowIn(id, m) ?? m.seconds ?? 0
+    const ask = [
+      `Keep a live board of a meeting${last ? ' that has just ended' : ' going on now'}: what was decided, a timeline, who does what, and the open questions.`,
+      `Meeting: ${m.title}`, people.length ? `Invited, besides You: ${people.join(', ')}` : '', me ? `"You" is ${me}, who is recording it.` : '"You" is the person recording it.',
+      last ? '' : `It's ${clock(secs)} in.`,
+      onBoard ? `\nOn the board already (don't add these again, or anything that says the same):\n${clip(onBoard, local ? 3000 : 12_000)}` : '\nThe board is empty so far.',
+      off ? `\nTaken off the board by the user (don't add these again):\n${clip(off, local ? 1500 : 4000)}` : '',
+      '\nFrom what was said since the board was last updated, add only what is new and was clearly said:',
+      '- "decisions": what was decided or agreed, in plain words, a short sentence each.',
+      '- "timeline": a step or milestone with a date or an order: "text" (what), "who" (its owner, when said), "when" (the date or time as said, like "Friday" or "1 Dec").',
+      '- "actions": something a person is to do: "who" (their name as said, or "You" for the person recording), "text" (what, starting with a verb), "when" (when said).',
+      '- "questions": a question raised and not answered yet.',
+      'Leave out "who" and "when" when they weren\'t said. Leave a list empty when there\'s nothing new for it; all empty is often right. Never make up names, dates or anything that wasn\'t said.',
+      'Answer with one JSON object and nothing else: {"decisions": [{"text": "..."}], "timeline": [{"text": "...", "who": "...", "when": "..."}], "actions": [{"who": "...", "text": "...", "when": "..."}], "questions": [{"text": "..."}]}',
+    ].filter((x) => x !== '').join('\n')
+    const msg = `${ask}${before ? `\n\nSaid before (already looked at, for context):\n${clip(before, local ? 1500 : 4000)}` : ''}\n\nSaid since the board was last updated:\n${freshIn}`
+    let r
+    try { r = await jsonReply(use, [{ role: 'user', text: msg }], { system: 'You keep a meeting\'s board up to date as it goes: its decisions, timeline, action items and open questions, from what was said. You are brief and never make things up.', feature: 'board' }, { schema: BOARD_SCHEMA, check: boardOk, schemaFirst: true }) } catch (e) { fail(e) }
+    // What's new: each part's items, in plain words, none that's on the board already, was taken
+    // off it, or came twice in this answer.
+    const seen = [...scene.items.map((x) => x.label), ...scene.items.map((x) => x.text), ...scene.other, ...gone.map((x) => x.text)]
+    const items = []
+    for (const [k, part] of Object.entries(BOARD_PARTS)) {
+      for (const x of [].concat(r.value?.[k] || []).slice(0, 6)) {
+        const text = clean(x?.text, 200).replace(/[.;]+$/, '')
+        if (!text) continue
+        const who = clean(x.who, 60) || null, when = clean(x.when, 40) || null
+        const it = { part, text, ...(who && part !== 'decision' && part !== 'question' ? { who } : {}), ...(when && part !== 'decision' && part !== 'question' ? { when } : {}), t: Math.round(saidAt(text, fresh) ?? secs) }
+        const words = [text, helpers.board.labelOf(it)]
+        if (seen.some((s) => words.some((w) => sameThing(w, s)))) continue
+        seen.push(...words)
+        items.push(it)
+      }
+    }
+    const error = r.value ? null : `${r.model} answered, but not in a form the board can read. It tries again with the next lines.`
+    let put = { id: b.board || null, keys: [] }
+    try { put = await helpers.board.add(m, items.slice(0, 10), { by: helpers.board.nameOf ? await helpers.board.nameOf(r.model) : r.model, hint: b.board }) } catch (e) { fail(e) }
+    const added = [...(b.added || []), ...put.keys.map((key, i) => ({ key, part: items[i].part, text: items[i].text }))].slice(-400)
+    const out = { ...b, at: new Date().toISOString(), upTo: fresh[fresh.length - 1].t1, error, looks: (b.looks || 0) + 1, model: r.model, board: put.id || b.board || null, added }
+    writeFileAtomic(boardFile(id), JSON.stringify(out, null, 1))
+    if (put.id && m.boardId !== put.id) patchMeta(id, { boardId: put.id })
+    return out
+  })().finally(() => boarding.delete(id))
+  boarding.set(id, p)
+  return p
+}
+export const boardBusy = (id) => boarding.has(id)
+// The action items on the board, as tasks once: tasked keeps which went, so a second click adds
+// only the ones that came since.
+export function boardTasked(id, keys) {
+  const b = boardOf(id)
+  const out = { ...b, tasked: [...new Set([...(b.tasked || []), ...keys])].slice(-400) }
+  writeFileAtomic(boardFile(id), JSON.stringify(out, null, 1))
+  return out
+}
 
 // ---------- Across meetings ----------
 // Each meeting's words for search and for questions about several, kept until its files change.

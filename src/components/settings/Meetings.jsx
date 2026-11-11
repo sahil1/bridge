@@ -14,7 +14,8 @@ import '../meetings/meetings.css'
 // Settings › Meetings: which engine turns speech into text (on this computer, or a service you have
 // a key for), the language, names and terms, the model that writes the notes and what it does by
 // itself (the summary, cleaning up, naming who spoke, preparing: on unless turned off, and what each
-// reads goes to that model, so which and where it runs is said there), calls and their sound (and, in
+// reads goes to that model, so which and where it runs is said there), AI Assist's live board (a
+// beta feature: on for every meeting, and what it sends where), calls and their sound (and, in
 // the desktop app, the floating card's reminder before a meeting), and
 // saving them as Markdown. Under Advanced: the other speech services, suggesting what to ask, who
 // spoke, the key that mentions a meeting in a message, the floating card, and where and how notes
@@ -156,6 +157,7 @@ export default function Meetings({ onOpenAgent }) {
   // Preparing for meetings needs the calendar: only where there's one (a Mac).
   const calendar = usePoll('/config', 10 * 60 * 1000).data?.calendar === true
   const home = useTrial('home') // Home, a beta feature: named only when it's there
+  const liveBoard = useTrial('meeting-board') // AI Assist's live board, a beta feature
   useEffect(() => { api('/chat/models').then((r) => { setModels(r.models || []); setAuto(r.automatic || null) }).catch(() => setModels([])) }, [])
   const m = s?.effective?.meetings || {}
   useEffect(() => { if (s) { setVocab(m.vocabulary || ''); setInstr(m.instructions || '') } }, [s]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -277,6 +279,20 @@ export default function Meetings({ onOpenAgent }) {
             : t('Fifteen minutes before, AI Assist reads the invite and your mail with the people invited, with the model above.')}</span></span>
         </label>}
       </section>
+
+      {/* AI Assist's live board, a beta feature: on for every meeting or not, and what it sends where. */}
+      {liveBoard && (
+        <section className="st-sec" data-setting="meeting-board">
+          <h4 className="st-wand"><Icon name="wand" size={13} /> {t('Live Board')}</h4>
+          <label className="st-check">
+            <input type="checkbox" checked={m.board === true} onChange={(e) => set({ board: e.target.checked })} />
+            <span title={t("While a meeting records, AI Assist keeps a whiteboard of it from what's said: what's decided, a timeline with owners and dates, who does what and the open questions, each a suggestion to keep or discard. The Board on a meeting turns it on or off there, and for the meetings after.")}><b>{t('Keep a live board, in every meeting')}</b> <span className="muted small">{t("Decisions, a timeline, who does what and open questions, on a whiteboard of the meeting's own.")}</span></span>
+          </label>
+          <p className="muted small" data-board-where>{!models ? ' ' : !notes ? t('No model to keep it with yet: sign in to an agent, or add one in Settings › Model Providers.')
+            : notes.via === 'local' ? t("While a meeting records, about once a minute, what's been said since and what's on the board go to {model}, on this computer: they stay here.", { model: notes.label })
+              : t("While a meeting records, about once a minute, what's been said since and what's on the board go to {model} ({provider}). Nothing else is sent.", { model: notes.label, provider: notes.provider })}</p>
+        </section>
+      )}
 
       <section className="st-sec" data-setting="calls">
         <h4>Calls</h4>

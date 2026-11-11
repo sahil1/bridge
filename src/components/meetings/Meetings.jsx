@@ -14,6 +14,8 @@ import { FixWord, TranscribeAgain, useChatModels, NOTE_LANGS, Dialog, openMemory
 import { Menu as AtMenu } from '../FileExtras.jsx'
 import { FilesPane, linkFiles } from './context.jsx'
 import { AssistPane, setAssist } from './assist.jsx'
+import { BoardPane, BoardLink, setBoard } from './board.jsx'
+import { openBoard } from '../whiteboard/links.js'
 import AiAssist from '../AiAssist.jsx'
 import PermissionFix from '../PermissionFix.jsx'
 import { useScreenAccess, useAllowCall, allowSteps } from './allowcall.jsx'
@@ -518,7 +520,8 @@ function WrittenFrom({ from, onView }) {
 // ⋯), then the view: the summary, your notes, the transcript or its files, with the transcript
 // beside the first three on a wide screen. Each has its own Copy. While it records, your notes stay
 // in view whatever else you look at: beside it on a wide screen, above it on a phone.
-const VIEWS = [['summary', 'sparkle', tx('Summary')], ['assist', 'bulb', tx('Suggestions')], ['mine', 'edit', tx('My notes')], ['transcript', 'chat', tx('Transcript')], ['files', 'paperclip', tx('Files')]]
+// Board: AI Assist's live board, a beta feature (board.jsx), there once the server says how it is.
+const VIEWS = [['summary', 'sparkle', tx('Summary')], ['assist', 'bulb', tx('Suggestions')], ['board', 'shapes', tx('Board')], ['mine', 'edit', tx('My notes')], ['transcript', 'chat', tx('Transcript')], ['files', 'paperclip', tx('Files')]]
 const here = onThisComputer
 const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 // For <input type="datetime-local">: the time where you are.
@@ -539,7 +542,7 @@ export function MeetingPage({ id, onBack }) {
   const touch = useMedia('(pointer: coarse)')
   // A touch screen or a narrow one: who said a line is picked from a list, not a small menu.
   const sheet = touch || !wide
-  const [view, setView] = useState(null) // summary | assist | mine | transcript | files
+  const [view, setView] = useState(null) // summary | assist | board | mine | transcript | files
   const [showLeft, setShowLeft] = useState(false) // the lines the cleanup left out, shown
   const [calWhy, setCalWhy] = useState(null) // why the calendar couldn't be read: calendarAccess, ...
   const [calAgain, setCalAgain] = useState(0)
@@ -771,10 +774,12 @@ export function MeetingPage({ id, onBack }) {
   const recording = isRecording
   // While it records, your notes are always shown, so the views are what goes with them: the
   // transcript, or AI Assist's suggestions when they're on. After, the summary once it's being written.
+  // With the live board on (and Suggest what to ask off), its Board.
+  const lb = data.liveBoard || null
   const showing = recording
-    ? (view && view !== 'mine' ? view : data.assist ? 'assist' : 'transcript')
+    ? (view && view !== 'mine' ? view : data.assist ? 'assist' : lb?.on ? 'board' : 'transcript')
     : view || (data.summary || data.summarizing || data.summaryError ? 'summary' : 'mine')
-  const views = VIEWS.filter(([v]) => (v !== 'assist' || recording || data.assist || data.assistItems?.length) && (v !== 'mine' || !recording))
+  const views = VIEWS.filter(([v]) => (v !== 'assist' || recording || data.assist || data.assistItems?.length) && (v !== 'board' || (!!lb && (recording || lb.on || !!lb.id))) && (v !== 'mine' || !recording))
   // The lines the cleanup left out are kept, and shown on request (Put back on one keeps it).
   const all = data.transcript || []
   const lines = all.filter((l) => !l.dropped)
@@ -845,8 +850,11 @@ export function MeetingPage({ id, onBack }) {
   // summary, the transcript's cleanup, who said what, a question about it and a deck of it.
   const asking = () => { const box = pageRef.current?.querySelector('.mt-askbox input'); box?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); box?.focus({ preventScroll: true }) }
   const suggesting = () => act('assist', async () => { const on = !data.assist; await setAssist(id, on); if (on) setView('assist') })
+  const boarding = () => act('board', async () => { const on = !lb?.on; await setBoard(id, on); if (on) setView('board') })
   const assists = () => [
     recording && { label: t('Suggest what to ask'), hint: t('While it records: what to ask, raise or check next, from what\'s said, the invite and the files'), on: !!data.assist, run: suggesting },
+    recording && lb && { label: t('Keep a live board'), hint: t('While it records: what\'s decided, a timeline, who does what and open questions, on a whiteboard of its own'), on: !!lb.on, run: boarding },
+    !recording && lb?.id && { label: t('Open the board'), hint: t('The whiteboard AI Assist kept of this meeting'), run: () => openBoard(lb.id) },
     !recording && lines.length > 0 && { label: data.summary ? t('Write the summary again') : t('Write the summary'), hint: t('With the language, model and template under Summary'), disabled: busy === 'summary' || data.summarizing, run: summarize },
     done && lines.length > 0 && { label: data.cleanedAt ? t('Clean up the transcript again') : t('Clean up the transcript'), hint: t('Misheard words and names fixed, and what nobody said left out'), disabled: busy === 'clean', run: cleanUp },
     heard && { label: t('Work out who said each line'), hint: t('From names said, the screen and who was invited'), disabled: busy === 'who', run: nameAll },
@@ -908,7 +916,7 @@ export function MeetingPage({ id, onBack }) {
       </div>
       {wide && !recording && showing !== 'transcript' && <button type="button" className={`win-btn${split ? ' on' : ''}`} onClick={() => setSplit(!split)} aria-pressed={split} aria-label={split ? t('Hide the transcript beside it') : t('Show the transcript beside it')} title={split ? t('Hide the transcript beside it') : t('Show the transcript beside it')}><Icon name="panel-right" size={14} /></button>}
       <button type="button" className="win-btn mt-hb" onClick={save} disabled={busy === 'save'} aria-label={t('Save')} title={t('Save as Markdown in your notes folder')}><Icon name="download" size={14} /></button>
-      <AiAssist className="btn small mt-ai-btn" compact={phone} on={recording && !!data.assist} items={assists} />
+      <AiAssist className="btn small mt-ai-btn" compact={phone} on={recording && (!!data.assist || !!lb?.on)} items={assists} />
       <span className="menu-anchor">
         <button type="button" className="win-btn" onClick={() => setMenu(!menu)} aria-label={t('More actions')} title={t('More')}><Icon name="more" size={14} /></button>
         {menu && <Menu onClose={() => setMenu(false)} items={[
@@ -1030,6 +1038,7 @@ export function MeetingPage({ id, onBack }) {
       ) : <div className="mt-summary md" dangerouslySetInnerHTML={{ __html: md(data.summary) }} />)
         : !data.summarizing && !data.summaryError && <p className="muted small mt-hint">{done ? t('No summary yet. Summarize writes one from the transcript, your notes, the screen and the files.') : t('The summary is written when the meeting ends. Meanwhile, My notes is yours to write in.')}</p>}
       {data.summary && data.summaryFrom && !data.summarizing && <WrittenFrom from={data.summaryFrom} onView={(v) => { setView(v); if (v === 'transcript') setSel(null) }} />}
+      {lb?.id && <BoardLink b={lb} onView={() => setView('board')} />}
       {shots.length > 0 && data.summary && (
         <div className="mt-gallery" aria-label={t('From the screen')}>
           <b className="mt-gallery-head">{t('From the screen')}</b>
@@ -1047,6 +1056,8 @@ export function MeetingPage({ id, onBack }) {
     </section>
   ) : showing === 'mine' ? mine : showing === 'assist' ? (
     <section className="mt-notes" aria-label={t('Suggestions')}><AssistPane id={id} data={data} onChange={refresh} onMsg={setMsg} /></section>
+  ) : showing === 'board' && lb ? (
+    <section className="mt-notes" aria-label={t('Board')}><BoardPane id={id} data={data} onChange={refresh} onMsg={setMsg} models={models} /></section>
   ) : showing === 'files' ? (
     <section className="mt-notes" aria-label={t('Files')}><FilesPane id={id} data={data} onChange={refresh} onMsg={setMsg} shots={shots} pictureUrl={pictureUrl} onOpenPic={openPic} /></section>
   ) : null
