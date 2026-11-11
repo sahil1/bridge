@@ -218,7 +218,7 @@ try {
   await pick('our roadmap')
   await p.keyboard.press(`${MOD}+k`)
   await p.locator('.sd-linkbar input').fill('example.com/roadmap')
-  await p.keyboard.press('Enter')
+  await p.locator('.sd-linkbar input').press('Enter')
   await caret('See our roadmap here', 6)
   const bubble = p.locator('.sd-link-pop')
   ok(!!(await until(async () => /example\.com\/roadmap/.test(await bubble.innerText().catch(() => '')), 3000, 100)) && (await bubble.locator('a').getAttribute('href')) === 'https://example.com/roadmap' && (await bubble.locator('button').evaluateAll((x) => x.map((e) => e.getAttribute('aria-label')))).join() === 'Copy the address,Change the link,Remove the link', 'the cursor in a link: its address (to open), with Copy, Change and Remove', await bubble.innerText().catch(() => ''))
