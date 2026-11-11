@@ -25,6 +25,8 @@ The meeting reminder snoozes, turns off and keeps out of the way of a screen you
 - **Screen Recording and a call's sound stop asking when they're already on**: after Open it, the meeting, the floating card and Settings › Meetings say macOS applies it once Bridge AI restarts, with Restart Bridge AI, and Reset and ask again if it's still off after. The no-sound banner now says it's System Audio Recording Only, the second list on that page, which the Screen Recording switch doesn't cover.
 - **The meeting reminder says By Bridge AI**: the floating card's prep, Home's Coming Up, the calendar's prep and Mail's reply drafts said the model's name; they now say Bridge AI, with the model it was written with on hover.
 - **Join in a calendar event is a whole tap target on a phone.**
+- **On Windows, an agent's card and tab keep its name**: they showed the console's own title, "Administrator: C:\Windows\System32\…\powershell.exe", in its place.
+- **On Windows, New takes a folder typed as a whole path** (D:\Projects\billing): it said the folder didn't exist yet, and Start agent stayed off.
 
 ## 3.13.4
 

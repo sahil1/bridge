@@ -219,4 +219,12 @@ try {
 } finally {
   asker.stop()
 }
+// A tab's name from its terminal's title: Windows' default console title (the program's own path)
+// gives way to the name Bridge AI gave it, where it had replaced an agent's on its card and tab.
+{
+  const { titleOf } = await import('../../server/runtime/screen.js')
+  const named = [['Administrator: C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ''], ['C:\\Program Files\\nodejs\\node.exe', ''], ['D:\\a\\bin\\claude.CMD auth login', ''], ['✳ Claude Code', '✳ Claude Code'], ['vim notes.md', 'vim notes.md']]
+  const got = named.map(([t]) => titleOf(t))
+  ok(named.every(([, want], i) => got[i] === want), "a terminal's title names its tab, but not Windows' default (the program's own path)", got)
+}
 process.exit(done().fail ? 1 : 0)

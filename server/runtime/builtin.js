@@ -21,7 +21,7 @@ import { shellCommand, agentEnv, SETUP_DONE } from './spawn.js'
 import { providerEnv } from '../providers.js'
 import * as accounts from '../accounts.js'
 import { firstRun, knows } from '../firstrun.js'
-import { lineAnsi, SCROLLBACK, watchModes, wheelBytes } from './screen.js'
+import { lineAnsi, SCROLLBACK, titleOf, watchModes, wheelBytes } from './screen.js'
 import * as host from './hostlink.js'
 
 const { Terminal } = headless
@@ -179,7 +179,7 @@ async function openTerm(paneId, file, argv, opts, meta) {
 // and what happens when the terminal ends.
 async function wire(p, from) {
   p.term = new Terminal({ cols: from?.cols || COLS, rows: from?.rows || ROWS, scrollback: SCROLLBACK, allowProposedApi: true })
-  p.term.onTitleChange((t) => { p.title = t })
+  p.term.onTitleChange((t) => { p.title = titleOf(t) })
   watchModes(p.term)
   if (from?.screen) await new Promise((r) => p.term.write(from.screen, r))
   p.proc.onData((d) => { if (p.setupPending && d.includes(SETUP_DONE)) p.setupPending = false; p.term.write(d); p.lastOutput = Date.now(); for (const c of p.clients) c.onData(d) })

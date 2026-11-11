@@ -29,7 +29,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pty from 'node-pty'
 import headless from '@xterm/headless'
-import { PROTOCOL, SCROLLBACK, snapshot, watchModes } from './screen.js'
+import { PROTOCOL, SCROLLBACK, snapshot, titleOf, watchModes } from './screen.js'
 
 const { Terminal } = headless
 const IS_WIN = process.platform === 'win32'
@@ -106,7 +106,7 @@ function spawnTerm(c, m) {
   const env = Object.fromEntries(Object.entries(m.env || {}).filter(([, v]) => typeof v === 'string'))
   const p = pty.spawn(str(m.file), Array.isArray(m.args) ? m.args.map(String) : [], { name: 'xterm-256color', cols, rows, cwd: str(m.cwd) || undefined, env })
   const t = { id, p, term: new Terminal({ cols, rows, scrollback: SCROLLBACK, allowProposedApi: true }), pid: p.pid, title: '', startedAt: Date.now(), lastOutput: 0, meta: m.meta ?? null, exited: null }
-  t.term.onTitleChange((s) => { t.title = s })
+  t.term.onTitleChange((s) => { t.title = titleOf(s) })
   watchModes(t.term)
   p.onData((d) => {
     t.lastOutput = Date.now()

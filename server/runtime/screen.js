@@ -8,6 +8,14 @@ export const PROTOCOL = 1
 // Lines kept above the screen, the same on both sides so a picked-up terminal keeps all of them.
 // Lines are only kept as they're printed, so a quiet terminal costs nothing for it.
 export const SCROLLBACK = 10000
+// A terminal's title as a name for its tab, or '' when it's only the console's default: on Windows,
+// the program's own path ("Administrator: C:\Windows\System32\…\powershell.exe"), which took the
+// place of the agent's name on its card and its tab until something set a better one, and stayed on
+// a New terminal for good.
+export function titleOf(t) {
+  const s = String(t || '').trim()
+  return /^(?:Administrator:\s*)?(?:[A-Za-z]:[\\/]|\\\\)[^\n]*?\.(?:exe|cmd|bat|com)(?:\s.*)?$/i.test(s) ? '' : s
+}
 
 // How the program in a terminal wants mouse reports sent (CSI ? 1006 h: as SGR, which every
 // current one asks for; without it, the old 3-byte form). xterm keeps this to itself, so it's
