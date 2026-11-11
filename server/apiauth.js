@@ -47,7 +47,7 @@ export function makeAuth({ port, token, ui, viaTailnet = () => false, tailnetSer
   const cookieOf = (req) => {
     for (const part of String(req.headers.cookie || '').split(';')) {
       const i = part.indexOf('=')
-      if (i > 0 && part.slice(0, i).trim() === NAME) return decodeURIComponent(part.slice(i + 1).trim())
+      if (i > 0 && part.slice(0, i).trim() === NAME) { try { return decodeURIComponent(part.slice(i + 1).trim()) } catch { return null } }
     }
     return null
   }
