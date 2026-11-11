@@ -1407,6 +1407,23 @@ try {
     ok(errors.length === 0, `phone ${width}: no page errors`, errors)
     await ctx.close()
   }
+  // A phone opened afresh, Agents tapped before its agents came (a slow start, here held back): it
+  // stays on Agents once they come, not taken to Home (it was, from wherever you'd gone).
+  {
+    let go = null
+    let came = false
+    const first = new Promise((r) => { go = r })
+    const { ctx, p, errors } = await pageAt(b, a.url, { phone: true, before: async (c2) => { await desk(c2); await c2.route(/\/api\/(fleet|events)(\?|$)/, async (r) => { await first; await r.continue().catch(() => {}); came = true }) } })
+    await p.locator('.tabbar button', { hasText: 'Agents' }).click({ timeout: 20000 })
+    go()
+    // The page has its agents and its settings: what it does with them is done in a moment.
+    await until(async () => came && (await p.locator('.tabbar button').allInnerTexts())[0]?.includes('Home'), 15000)
+    await p.waitForTimeout(1500)
+    const on = await p.locator('.tabbar button[aria-current="true"]').innerText().catch(() => '')
+    ok(/Agents/.test(on) && !(await p.locator('.hm').isVisible()), 'a phone opened afresh, Agents tapped before its first answers came: it stays on Agents, not taken to Home', on)
+    ok(errors.length === 0, 'and no page errors', errors)
+    await ctx.close()
+  }
 
   // Off again: nothing leads to it, and the app opens as it did.
   await a.api('/settings', { trials: { home: false } }, 'PATCH')

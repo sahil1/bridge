@@ -600,12 +600,20 @@ function App() {
   // Home on: a new window opens there (an agent a link names still comes after). A reload, or this
   // window switched to another of your computers and back, opens what you were on there instead:
   // each computer keeps its own tabs, layout and phone tab (layout.jsx), so Home only when there's
-  // nothing to go back to.
+  // nothing to go back to. Nor once you've tapped, clicked or pressed a key here before the page's
+  // first answers came: you've picked where you are (it used to take you to Home from there).
   const homed = useRef(false)
+  const picked = useRef(false)
+  useEffect(() => {
+    const on = (e) => { if (e.isTrusted) picked.current = true }
+    window.addEventListener('pointerdown', on, true)
+    window.addEventListener('keydown', on, true)
+    return () => { window.removeEventListener('pointerdown', on, true); window.removeEventListener('keydown', on, true) }
+  }, [])
   useEffect(() => {
     if (homed.current || !fleet || !conf || cloudOnly) return
     homed.current = true
-    if (!homeOn) return
+    if (!homeOn || picked.current) return
     const back = openedBefore && (wide ? !!W.active && (isView(W.active) || isRemote(W.active) || !!byId[W.active]) : store.get('cc-mtab', null) != null)
     if (back) return
     if (wide) { setW((w) => ({ ...w, tabs: w.tabs.includes('view:home') ? w.tabs : ['view:home', ...w.tabs], active: 'view:home', group: 'main' })); set({ max: 'main' }) }
