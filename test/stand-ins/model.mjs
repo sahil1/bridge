@@ -28,7 +28,8 @@
 //   Cache box beside the first shape with an arrow to it; its review says ok. Ask about these
 //   ("A question about …"): the shapes it was sent, named in quotes, and whether it saw a picture.
 //   The meeting moves: a timeline (Dan's design review, Priya's beta, your launch), Priya's and
-//   your action items, and notes grouped by theme (Pricing, Sign-in, and Team for the rest).
+//   your action items, and notes grouped by theme (Pricing, Sign-in, and Team for the rest). A
+//   board written up as a document: its name, what it was sent, and a next step.
 //   AI Assist's Sign this, "Explain this document": a mutual NDA between Northwind Labs and Contoso
 //   Ltd, a fee, a renewal worth a look on page 1 ("renews automatically").
 //   A sheet's AI Assist ("In the spreadsheet …"): the change asked for, as JSON (sheetChange).
@@ -115,6 +116,12 @@ function answer(b) {
     if (/office network/i.test(first)) return say(JSON.stringify(NET))
     if (/Make it a timeline/.test(first)) return say(JSON.stringify(TIMELINE))
     if (/Make it the action items for each person/.test(first)) return say(JSON.stringify(ACTIONS))
+  }
+  // A board written up as a document: its name as the title, what it was sent, and a next step.
+  const board = /^Write a document from the whiteboard "([^"]+)"/.exec(first)
+  if (board) {
+    const lines = (/"""\n([\s\S]*?)\n"""/.exec(first)?.[1] || '').split('\n')
+    return say(['```markdown', `# ${board[1]}`, '', '## What the board shows', '', ...lines, '', '## Next', '', '- **Priya** fixes the login bug by Friday.', '```'].join('\n'))
   }
   // Group by theme: pricing notes, sign-in notes, and the rest as the team's.
   if (/^Group these notes from a whiteboard by theme/.test(first)) {
@@ -209,7 +216,7 @@ function answer(b) {
   // Studio's decks: a deck (from what it's about, or a document's words: its first line becomes the
   // title), slide n rewritten as big numbers, a new slide of next steps.
   if (/^Write a slide deck(: | from the document)/m.test(last)) {
-    const doc = /The document \([^)]*\), to make it from:\n"""\n([^\n]+)/.exec(last)?.[1]
+    const doc = /The document \([^)]*\), to make it from:\n"""\n(?:- )?([^\n]+)/.exec(last)?.[1]
     const title = (doc || /^Write a slide deck: (.+?)\.?$/m.exec(last)?.[1] || 'A deck').slice(0, 40)
     return say(['```markdown', '<!-- _class: title -->', '', `# ${title}`, '', '## Written for the test', '', '---', '', '# Why now', '', '- Customers asked', '- It is ready', '', '<!-- Say why -->', '', '---', '', '<!-- _class: stats -->', '', '# What changed', '', '- **42%** of trials convert', '- **3x** more seats', '', '---', '', '<!-- _class: section -->', '', '# Next', '```'].join('\n'))
   }

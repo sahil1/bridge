@@ -23,13 +23,17 @@
 //   model on this computer drawing and refining with no picture; Refine's rounds as one suggestion,
 //   kept with each container's own lines back; the meeting moves (a meeting's notes grouped by
 //   theme and discarded back into place, a timeline and the action items drawn from the board, the
-//   action items onto the Chief of Staff's task list); the credit in About; on a phone, the panels fit.
+//   action items onto the Chief of Staff's task list); the board made a Word document and a deck in
+//   Studio's own folder, each linking back to it, and opened there; the credit in About; on a
+//   phone, the panels fit.
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { startKit, startModel, checks, until, sleep, browser, page, shot, ROOT, advanced } from '../lib/harness.mjs'
 
+const JSZip = createRequire(path.join(ROOT, 'package.json'))('jszip')
 const { ok, done } = checks('whiteboard-v2')
 // AI Assist, at the right end of a board's header (or a diagram file's bar), and one of its verbs:
 // Draw this or Change it.
@@ -67,6 +71,8 @@ const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${n
 
 try {
   await api('/setup', { name: 'Tester' })
+  // Studio on, for AI Assist's Make a document and Make a deck (whiteboard.mjs has it off).
+  await api('/settings', { trials: { studio: true } }, 'PATCH')
   await api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
 
   // ---------- The server ----------
@@ -589,6 +595,40 @@ try {
     const tasks = (await api('/chief/tasks')).items.map((x) => x.title)
     ok(tasks.includes('Priya: Fix the login bug · Friday') && tasks.includes('You: Send the budget to finance · Friday'), 'each is on the Chief of Staff\'s task list, by who does it', tasks)
     await p.locator('.wb-draw select[aria-label="Rounds of refining"]').selectOption('3').catch(() => {})
+  })
+
+  await part('the board as a document and a deck', async () => {
+    // A Word file of the board in Studio's own folder, with a line linking back to the board's file.
+    const own = path.join(kit.data, 'studio', 'files')
+    const id = 'Launch sync'
+    await assist(p, 'Make a document')
+    const docx = await until(() => fs.existsSync(path.join(own, `${id}.docx`)) && path.join(own, `${id}.docx`), 20000)
+    const zip = docx ? await JSZip.loadAsync(fs.readFileSync(docx)) : null
+    const xml = zip ? await zip.file('word/document.xml').async('string') : ''
+    const rels = zip ? await zip.file('word/_rels/document.xml.rels').async('string') : ''
+    ok(/Launch sync/.test(xml) && /Pricing page copy/.test(xml) && /Hire a designer/.test(xml) && /Made from the whiteboard/.test(xml) && /Target="\.\.\/\.\.\/boards\/Launch%20sync\.excalidraw"/.test(rels), 'Make a document: a Word file of what\'s on the board, in Studio\'s own folder, with a link back to the board', { files: fs.existsSync(own) ? fs.readdirSync(own) : [], rels: rels.slice(0, 400) })
+    ok(await until(() => p.locator('.sd-file .pane-head', { hasText: `${id}.docx` }).count(), 20000), 'and opened in Studio')
+    await sleep(800)
+    await shot(p, `${tag}whiteboard-v2-made-document`)
+    // A deck as Studio makes them, its first slide's notes linking back to the board.
+    await openBoard(id)
+    const n0 = model.asked().length
+    await assist(p, 'Make a deck')
+    const deck = await until(() => { try { return fs.readFileSync(path.join(own, `${id} deck.md`), 'utf8') } catch { return null } }, 20000)
+    ok(!!deck && /^---\nmarp: true\npaginate: true\n---\n/.test(deck) && /<!-- Made from the whiteboard "Launch sync": \.\.\/\.\.\/boards\/Launch%20sync\.excalidraw -->/.test(deck) && (deck.match(/\n---\n/g) || []).length >= 4, 'Make a deck: a deck as Studio makes them, its first slide\'s notes linking back to the board', deck?.slice(0, 500))
+    ok(model.asked().slice(n0).some((q) => /^Write a slide deck: the whiteboard "Launch sync"/m.test(q) && /Priya: Fix the login bug · Friday/.test(q)), 'written from what\'s on the board, each box with what\'s in it', model.asked().slice(n0).map((q) => q.slice(0, 300)))
+    ok(await until(() => p.locator('.sd-file .pane-head', { hasText: `${id} deck.md` }).count(), 20000), 'and opened in Studio')
+    await sleep(800)
+    await shot(p, `${tag}whiteboard-v2-made-deck`)
+    // AI Assist's menu on a board, dark: the meeting moves and the write-ups with Studio on.
+    const night = await page(b, kit.url, { mode: 'dark', store: { 'cc-ws': { tabs: [`view:whiteboard:${id}`], active: `view:whiteboard:${id}`, side: null, split: false, group: 'main' } }, before: async (c) => watch(c) })
+    await night.p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
+    await night.p.locator('.wb-view .pane-extras button[aria-label="AI Assist"]').click()
+    const items = await night.p.locator('.ai-menu .ai-item-label').allInnerTexts()
+    ok(['Group by theme', 'A timeline', 'Action items', 'Make a document', 'Make a deck'].every((x) => items.includes(x)), 'with Studio on, a board\'s AI Assist offers Make a document and Make a deck after the meeting moves', items)
+    await shot(night.p, `${tag}whiteboard-v2-ai-menu-dark`)
+    ok(!night.errors.length, 'dark: no page errors', night.errors)
+    await night.ctx.close()
   })
 
   await part('the credit in About', async () => {

@@ -30,6 +30,7 @@ import * as meetings from './meetings.js'
 import * as projects from './projects.js'
 import { gitReady } from './gitready.js'
 import { readSpec, SCHEMA } from '../shared/whiteboard/spec.js'
+import { deckAsk, deckAnswer } from './studio.js'
 import { SETS, ITEMS, shapesFor, CONTAINER_KINDS } from '../shared/whiteboard/catalog.js'
 
 const EXT = '.excalidraw'
@@ -573,6 +574,55 @@ export async function themes({ scene, selected = false, model } = {}) {
   return { groups: r.got.groups, model: r.model, calls: r.calls }
 }
 
+// ---------- A board written up ----------
+// Make a document or Make a deck: the board's words (wordsOf) written up by the board's model, as a
+// document in Markdown or a deck as Studio makes them (studio.js deckAsk), for the page to put in
+// Studio's own folder with a link back to the board. Only what's on the board.
+// What's on a board in words: each box with what's in it, the rest, and the arrows between them.
+// What a suggestion takes away (src/components/whiteboard/suggest.js) is left out.
+export function wordsOf(b) {
+  const d = describe((b.data.elements || []).filter((e) => e?.customData?.bridge?.suggestion?.kind !== 'remove'))
+  const name = new Map(d.shapes.map((s) => [s.id, s.text]))
+  const within = (s, c) => s.x >= c.x - 1 && s.y >= c.y - 1 && s.x + s.w <= c.x + c.w + 1 && s.y + s.h <= c.y + c.h + 1
+  const boxes = d.shapes.filter((s) => s.shape === 'container')
+  const held = new Set()
+  const lines = []
+  for (const c of boxes) {
+    const has = d.shapes.filter((s) => s.shape !== 'container' && s.text && within(s, c))
+    has.forEach((s) => held.add(s.id))
+    if (c.text || has.length) lines.push(`- ${c.text || 'A box'}: ${has.map((s) => s.text).join('; ') || '(nothing in it)'}`)
+  }
+  for (const s of d.shapes) if (s.shape !== 'container' && s.text && !held.has(s.id)) lines.push(`- ${s.text}`)
+  for (const t of d.texts) if (t.text) lines.push(`- ${t.text}`)
+  for (const a of d.arrows) if (name.get(a.from) && name.get(a.to)) lines.push(`- ${name.get(a.from)} -> ${name.get(a.to)}${a.text ? ` ("${a.text}")` : ''}`)
+  return lines.join('\n')
+}
+const DOC_SYSTEM = 'You turn whiteboards into clear, well-structured documents in Markdown. You answer with the Markdown and nothing else.'
+export async function writeUp(id, { as = 'doc', model } = {}) {
+  const b = await readBoard(id)
+  const use = model || await helpers.pickModel?.()
+  if (!use) throw Object.assign(new Error('No model to write with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers'), { code: 'noModel' })
+  const words = wordsOf(b)
+  if (!words) throw new Error('There\'s nothing written on this board to make it from yet')
+  const source = clip(words, Math.round(30_000 * (await shareFor(use)).n))
+  if (as === 'deck') {
+    const q = deckAsk({ mode: 'deck', prompt: `the whiteboard "${b.title}"`, source, sourceName: `the whiteboard "${b.title}"` })
+    const r = await ask(use, [{ role: 'user', text: q.prompt }], q.system)
+    return { title: b.title, slides: deckAnswer(r.text).slides, model: r.model }
+  }
+  const prompt = [
+    `Write a document from the whiteboard "${b.title}". What's on it (each box with what's in it, then the rest, then the arrows between them):`,
+    `"""\n${source}\n"""`,
+    '',
+    'A title as "# …", then sections as "## …", with short paragraphs and bullet lists: what the board is about, its parts and how they connect, what was decided, and who does what and by when where the board says. Only what\'s on the board; nothing made up. Answer with the Markdown only.',
+  ].join('\n')
+  const r = await ask(use, [{ role: 'user', text: prompt }], DOC_SYSTEM)
+  let md = r.text.replace(/^```(?:markdown|md)?[ \t]*\n([\s\S]*?)\n```$/, '$1').trim()
+  if (!md) throw new Error('The model sent back nothing. Try again, or pick another model.')
+  if (!/^#\s/.test(md)) md = `# ${b.title}\n\n${md}`
+  return { title: b.title, markdown: md, model: r.model }
+}
+
 // ---------- Refine ----------
 // One round of a model looking over what it drew and making it better. The page draws the result
 // and checks it (src/components/whiteboard/review.js), and sends what the check found, and a
@@ -740,6 +790,7 @@ export function routes(app, { wrap, onComputer, counted }) {
   app.get('/api/boards/:id/text', route(async (req) => ({ text: sayBoard(await read(req.params.id)) })))
   app.get('/api/boards/:id/rounds', route((req) => rounds(req.params.id)))
   app.put('/api/boards/:id/rounds', route((req) => saveRounds(req.params.id, req.body || {})))
+  app.post('/api/boards/:id/write', route((req) => writeUp(req.params.id, req.body || {})))
   // dotfiles: the boards live in a dot folder (~/.bridge-ai), which sendFile otherwise won't serve from.
   app.get('/api/boards/:id/preview', async (req, res) => { try { res.set('Cache-Control', 'no-cache'); res.sendFile(await previewFile(req.params.id), { dotfiles: 'allow' }) } catch (e) { fail(res, e) } })
   app.put('/api/boards/:id', route((req) => save(req.params.id, req.body || {})))

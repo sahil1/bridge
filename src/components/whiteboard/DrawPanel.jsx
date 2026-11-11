@@ -78,11 +78,13 @@ const say = (issues) => issues.map((x) => t(ISSUE[x.kind] || x.kind, { n: x.n })
 // board: { X, api } of the drawing on screen. start: a drawing asked for before the board opened
 // ({ prompt, kind, from, model, refine }), drawn straight away. boardId: the board's name, to keep
 // its rounds by. look: the board's look. prefs: what the whiteboard has learnt (colours, spacing,
-// direction). onDrawn({ ids, direction }): after a model has drawn, for learning from the edits
+// direction). onSave(): the board saved now (before it's written up). onDrawn({ ids, direction }):
+// after a model has drawn, for learning from the edits
 // that follow. want: { mode, n }, the way AI Assist's menu asked for (Draw this, Change it or Ask),
-// or a meeting move to make straight away (themes, timeline, actions).
-const modeOf = (w) => (w === 'themes' ? 'change' : w === 'timeline' || w === 'actions' ? 'draw' : w)
-export default function DrawPanel({ board, start, want = null, onStarted, onClose, compact = false, boardId = null, look = 'clean', prefs = null, onDrawn }) {
+// or a meeting move to make straight away (themes, timeline, actions), or the board written up as
+// a document or a deck (doc, deck), which keeps the panel as it was.
+const modeOf = (w) => (w === 'themes' ? 'change' : w === 'timeline' || w === 'actions' ? 'draw' : w === 'doc' || w === 'deck' ? null : w)
+export default function DrawPanel({ board, start, want = null, onStarted, onClose, compact = false, boardId = null, look = 'clean', prefs = null, onDrawn, onSave }) {
   const els = board.api?.getSceneElements() || []
   const [mode, setMode] = useState(start ? 'draw' : modeOf(want?.mode) || (els.length ? 'change' : 'draw'))
   const [text, setText] = useState(start?.prompt || '')
@@ -261,6 +263,23 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
     } catch (e) { setActions((a) => ({ ...a, busy: false, added: n || null, error: e.message })) }
   }
 
+  // Make a document or Make a deck: the board, as it is now, written up by its model into a file in
+  // Studio's folder with a link back here (writeup.js), and opened in Studio.
+  const [made, setMade] = useState(null) // { root, path, name, as }
+  const make = async (as) => {
+    if (!boardId) return
+    setBusy(true); setErr(null); setAnswer(null); setMade(null)
+    setNote(as === 'deck' ? t('Writing a deck of this board…') : t('Writing a document of this board…'))
+    try {
+      await onSave?.()
+      const { writeUp } = await import('./writeup.js')
+      const f = await writeUp(boardId, as, m.id || undefined)
+      setMade({ ...f, as })
+      setNote(t('{model} wrote {name}, in Studio\'s files, with a link back to this board.', { model: labelOf(m, f.model), name: f.name }))
+      openStudio(f)
+    } catch (e) { setNote(null); setErr(e.message) } finally { setBusy(false) }
+  }
+
   // "Group these notes by theme": the notes selected (or all of them) gathered in a box per theme,
   // as a suggestion like any other change (moved back where they were if it's discarded).
   const themes = async () => {
@@ -415,6 +434,7 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
   useEffect(() => {
     const w = want?.mode
     if (!w || busy) return
+    if (w === 'doc' || w === 'deck') { make(w); return }
     setMode(modeOf(w))
     if (w === 'themes') { themes(); return }
     if (w !== 'timeline' && w !== 'actions') return
@@ -544,6 +564,7 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
           {actions.error && <p className="error-text small" role="alert">{t("Couldn't add them all: {error}", { error: actions.error })}</p>}
         </div>
       )}
+      {made && !busy && <div className="wb-sug-acts"><button type="button" className="btn small" onClick={() => openStudio(made)}><Icon name={made.as === 'deck' ? 'screen' : 'doc'} size={12} /> {t('Open {name}', { name: made.name })}</button></div>}
       {scene.sugs > 0 && !busy && (sug && scene.waits ? (
         <div className="wb-sug-acts">
           <button type="button" className="btn small primary" onClick={() => settle(keepIt)}><Icon name="check" size={12} /> {t('Keep')}</button>
@@ -562,5 +583,6 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
   )
 }
 const labelOf = (m, id) => m.models.find((x) => x.id === id)?.label || id
+const openStudio = (f) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root: f.root, path: f.path } }))
 // A new suggestion's mark: which it is, and the model that made it, by name.
 function newSuggestion(by) { return { id: `ai-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, by: by || '' } }

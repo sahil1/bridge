@@ -21,6 +21,7 @@ import { openBoard, openBoards } from './links.js'
 import { NameDialog } from '../FileExtras.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { useBusy } from '../../busy.js'
+import { useTrial } from '../../trials.js'
 import './whiteboard.css'
 
 // Whiteboards: the list (WhiteboardsHome), one board (WhiteboardPage), and a diagram file in an
@@ -35,7 +36,7 @@ const enc = encodeURIComponent
 // about the shapes selected (or the whole board); and the meeting moves (DrawPanel.jsx KINDS),
 // made straight away. open: the panel is open; drawn: something's on the board; sel: how many
 // shapes are selected; show(mode): opens the panel that way.
-const drawAssist = (open, drawn, show, sel = 0) => [
+const drawAssist = (open, drawn, show, sel = 0, studio = false) => [
   { label: t('Draw this'), hint: t('A diagram from what you describe, a meeting or a document'), run: () => show('draw') },
   { label: t('Change it'), hint: drawn ? t('The whole board, or the shapes you select') : t('Once there\'s something on the board'), disabled: !drawn, run: () => show('change') },
   { label: sel ? t('Ask about these') : t('Ask about the board'), hint: !drawn ? t('Once there\'s something on the board') : sel ? t('A question about the {n} selected, answered here', { n: sel }) : t('Select shapes to ask about only those'), disabled: !drawn, run: () => show('ask') },
@@ -44,6 +45,10 @@ const drawAssist = (open, drawn, show, sel = 0) => [
   { label: t('Group by theme'), hint: !drawn ? t('Once there\'s something on the board') : sel ? t('The {n} selected, gathered in a box per theme', { n: sel }) : t('The notes on the board, gathered in a box per theme'), disabled: !drawn, run: () => show('themes') },
   { label: t('A timeline'), hint: drawn ? t('With owners and dates, from what\'s on the board') : t('With owners and dates, from a meeting'), run: () => show('timeline') },
   { label: t('Action items'), hint: t('For each person, to put on your task list'), run: () => show('actions') },
+  // The board written up, into Studio (a beta feature: offered only once it's on).
+  studio && 'sep',
+  studio && { label: t('Make a document'), hint: drawn ? t('A Word document of this board, in Studio') : t('Once there\'s something on the board'), disabled: !drawn, run: () => show('doc') },
+  studio && { label: t('Make a deck'), hint: drawn ? t('Slides of this board, in Studio, to present or send as PowerPoint') : t('Once there\'s something on the board'), disabled: !drawn, run: () => show('deck') },
   open && 'sep',
   open && { label: t('Close AI Assist'), run: () => show(null) },
 ]
@@ -348,6 +353,8 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
   const dark = useDarkMode()
   // Whether this computer can show the folder (not in Docker, or on Linux with no desktop).
   const canOpen = !!usePoll('/boards', 10 * 60 * 1000).data?.canOpen
+  // Make a document or a deck writes into Studio, a beta feature (src/trials.js).
+  const studio = useTrial('studio')
   const boardLook = look || d.ready?.look || 'clean'
   const scheme = prefs?.on ? prefs.prefs?.colours?.value || 'soft' : 'soft'
   // How much is on the board and selected, for the empty board's hint and the menus.
@@ -461,7 +468,7 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
           )} />}
         </span>}
         <button type="button" className={`win-btn${panel === 'settings' ? ' on' : ''}`} onClick={() => setPanel(panel === 'settings' ? null : 'settings')} aria-label={t('Whiteboard Settings')} title={t('Whiteboard Settings')} aria-pressed={panel === 'settings'}><Icon name="settings" size={14} /></button>
-        <AiAssist className="btn small wb-ai-btn" compact={!wide} on={panel === 'draw'} disabled={!d.board.api} items={() => drawAssist(panel === 'draw', !!count.n, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel('draw') } else setPanel(null) }, count.sel)} />
+        <AiAssist className="btn small wb-ai-btn" compact={!wide} on={panel === 'draw'} disabled={!d.board.api} items={() => drawAssist(panel === 'draw', !!count.n, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel('draw') } else setPanel(null) }, count.sel, studio)} />
         <span className="menu-anchor">
           <button type="button" className="win-btn" onClick={() => setMenu(menu === 'more' ? null : 'more')} aria-label={t('More')} title={t('More')}><Icon name="more" size={14} /></button>
           {menu === 'more' && <Menu onClose={() => setMenu(null)} items={[
@@ -497,7 +504,7 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
               </div>
             </div>
           )}
-          {panel === 'draw' && d.board.api && <div className="wb-draw-wrap"><DrawPanel board={d.board} start={start} want={want} onStarted={() => setStart(null)} onClose={() => setPanel(null)} compact={!wide} boardId={id} look={boardLook} prefs={prefs} onDrawn={drawn} /></div>}
+          {panel === 'draw' && d.board.api && <div className="wb-draw-wrap"><DrawPanel board={d.board} start={start} want={want} onStarted={() => setStart(null)} onClose={() => setPanel(null)} compact={!wide} boardId={id} look={boardLook} prefs={prefs} onDrawn={drawn} onSave={() => d.flush()} /></div>}
           {panel === 'settings' && <div className="wb-draw-wrap"><BoardSettings look={boardLook} onLook={pickLook} prefs={prefs} onPrefs={setPrefs} onClose={() => setPanel(null)} /></div>}
         </div>
       </div>
