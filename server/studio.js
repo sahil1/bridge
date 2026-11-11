@@ -180,11 +180,14 @@ export function askText({ rel, kind, instruction, selection, where, propose = fa
 // JSON beside it (a dot file in the same folder, where any agent may write), Studio shows it on
 // the open file, and you keep it or not. Taken once: read, then deleted.
 const proposalName = (rel) => `.${path.basename(rel)}.studio-change.json`
+// A change to a sheet, as an agent writes it beside the file and as AI Assist's model answers.
+const SHEET_CHANGE = '{"summary": "what this does, in one sentence", "sheet": "the sheet\'s name", "cells": {"D2": "=B2*C2", "D1": "Total", "B7": 42}, "answer": "for a question: the answer, in a few sentences", "chart": {"type": "column|bar|line|pie", "title": "…", "range": "A1:B7"}}'
+const SHEET_RULES = 'Only what the change needs: "cells" maps A1 references to their new contents (a formula starts with =, numbers as numbers, "" empties a cell), "answer" is for a question (a summary of the cells, say), "chart" for a chart of a range whose first column is the labels and first row the series names.'
 const PROPOSE = {
   sheet: (name) => [
     `Don't change the file itself. Write your change as JSON to ${name} in the same folder as it, and nothing else; Studio shows it to me on the sheet, and makes it if I keep it:`,
-    '{"summary": "what this does, in one sentence", "sheet": "the sheet\'s name", "cells": {"D2": "=B2*C2", "D1": "Total", "B7": 42}, "answer": "for a question: the answer, in a few sentences", "chart": {"type": "column|bar|line|pie", "title": "…", "range": "A1:B7"}}',
-    'Only what the change needs: "cells" maps A1 references to their new contents (a formula starts with =, numbers as numbers, "" empties a cell), "answer" is for a question (a summary of the cells, say), "chart" for a chart of a range whose first column is the labels and first row the series names. Read the file yourself if you need more of it than the part above.',
+    SHEET_CHANGE,
+    `${SHEET_RULES} Read the file yourself if you need more of it than the part above.`,
   ].join('\n'),
 }
 export async function takeProposal(root, rel) {
@@ -203,6 +206,41 @@ export async function dropProposal(root, rel) {
 }
 export function noteAsk(root, rel, name) {
   return safePath(root, rel).then(({ real }) => { asked.set(real, { name: String(name || 'an agent').slice(0, 80), at: Date.now() }) })
+}
+
+// ---------- A sheet's AI Assist ----------
+// Write a formula, Clean this column, Summarise, Chart this, or anything asked about the cells
+// picked: answered by AI Assist's model in one go (seconds, not an agent's turn), in the same change
+// an agent writes beside the file, which the page shows on the sheet to keep or discard. It sees
+// only what the page sends: the cells picked (with their column's heading), the sheet's name and
+// size, and the names of the others.
+export const SHEET_SCHEMA = { type: 'object', properties: { summary: { type: 'string' }, sheet: { type: 'string' }, cells: { type: 'object' }, answer: { type: 'string' }, chart: { type: 'object', properties: { type: { type: 'string', enum: ['column', 'bar', 'line', 'pie'] }, title: { type: 'string' }, range: { type: 'string' } } } } }
+export function sheetAsk({ rel, instruction, selection, where, sheet, sheets = [], used }) {
+  const said = String(instruction || '').trim()
+  if (!said) throw new Error('Say what to do with the cells')
+  const others = (Array.isArray(sheets) ? sheets : []).map(String).filter((s) => s && s !== sheet).slice(0, 30)
+  const prompt = [
+    `In the spreadsheet ${path.basename(String(rel || 'a sheet'))}${sheet ? `, on the sheet "${String(sheet).slice(0, 100)}"` : ''}: ${said.slice(0, 4000)}`,
+    used ? `That sheet's cells run ${String(used).slice(0, 40)}.` : '',
+    others.length ? `Its other sheets: ${others.join(', ')}.` : '',
+    selection ? `The cells I picked${where ? ` (${String(where).slice(0, 120)})` : ''}, column letters across and row numbers down, a formula shown with its result:\n"""\n${String(selection).slice(0, 30_000)}\n"""` : 'I picked no cells: it\'s about the whole sheet.',
+    '\nAnswer with the change as JSON only, in this shape, leaving out what you don\'t need:',
+    SHEET_CHANGE,
+    `${SHEET_RULES} Formulas as Excel writes them, referring to the cells by their letters and numbers above. Keep what each value means.`,
+  ].filter(Boolean).join('\n')
+  return { system: 'You help with spreadsheets. You answer with a change to the cells, or the answer to a question, as JSON and nothing else.', prompt }
+}
+// The change in a model's answer: its JSON (in a fence or not), with something in it to show.
+export function sheetAnswer(text) {
+  const s = String(text || '')
+  const block = /```(?:json)?\s*\n([\s\S]*?)```/.exec(s)
+  const raw = block ? block[1] : s.slice(s.indexOf('{'), s.lastIndexOf('}') + 1)
+  let j = null
+  try { j = JSON.parse(raw) } catch { j = null }
+  if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('The model\'s answer wasn\'t a change Studio can show. Try again, or pick another model.')
+  const has = (j.cells && typeof j.cells === 'object' && Object.keys(j.cells).length) || (typeof j.answer === 'string' && j.answer.trim()) || (j.chart && typeof j.chart === 'object')
+  if (!has) throw new Error('The model found nothing to change there. Say it another way, or pick other cells.')
+  return { proposal: j }
 }
 
 // ---------- Opening, saving, watching ----------

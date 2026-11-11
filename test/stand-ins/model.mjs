@@ -28,6 +28,7 @@
 //   Cache box beside the first shape with an arrow to it; its review says ok.
 //   AI Assist's Sign this, "Explain this document": a mutual NDA between Northwind Labs and Contoso
 //   Ltd, a fee, a renewal worth a look on page 1 ("renews automatically").
+//   A sheet's AI Assist ("In the spreadsheet …"): the change asked for, as JSON (sheetChange).
 //   Studio's decks: a deck of four slides (its title from what it's about, or the document's first
 //   line), a slide rewritten as big numbers ("Rewritten"), a new slide of next steps.
 //   Ollama's own API (a model server on this computer, when OLLAMA_HOST points here): its models
@@ -67,6 +68,36 @@ function filesPlan(text) {
   return `\`\`\`json\n${JSON.stringify({ summary: 'Put the screenshots in a folder of their own and clear out the installers.', folders: [{ name: 'Screenshots', holds: 'Every screenshot, by year', examples: [shot] }, { name: 'Installers', holds: 'Apps to install, until they are', examples: [] }], steps: ['Make a Screenshots folder and move the screenshots in.', 'Delete the installers of apps you have installed.'] })}\n\`\`\``
 }
 
+// A sheet's AI Assist, from the cells it was sent (a row of column letters, then each row's number
+// and values): a formula doubling column B into the column after them for each row (C at least),
+// the first column's words trimmed
+// and capitalised, a summary of the numbers, a column chart of the cells picked; "not a change"
+// answers in words, which isn't the JSON asked for.
+function sheetChange(text) {
+  const grid = /"""\n([\s\S]*?)\n"""/.exec(text)?.[1] || ''
+  const [head, ...rows] = grid.split('\n').filter((l) => /^\d*\t/.test(l))
+  const cols = (head || '').split('\t').slice(1)
+  const cells = rows.map((l) => { const [r, ...v] = l.split('\t'); return { r: Number(r), v } })
+  const sheet = /on the sheet "([^"]+)"/.exec(text)?.[1]
+  const where = /The cells I picked \(([A-Z]+\d+(?::[A-Z]+\d+)?) on /.exec(text)?.[1] || 'A1:B3'
+  const json = (o) => `\`\`\`json\n${JSON.stringify(o)}\n\`\`\``
+  if (/not a change/i.test(text)) return 'I would double the costs, I think.'
+  if (/Write a formula/.test(text)) {
+    const to = String.fromCharCode(Math.max(66, (cols.at(-1) || 'A').charCodeAt(0)) + 1)
+    return json({ summary: `Doubled each cost in column ${to}`, sheet, cells: Object.fromEntries([[`${to}1`, 'Doubled'], ...cells.filter((c) => c.r > 1).map((c) => [`${to}${c.r}`, `=B${c.r}*2`])]) })
+  }
+  if (/Clean up the values/.test(text)) {
+    const fixed = cells.filter((c) => c.r > 1).map((c) => [`${cols[0]}${c.r}`, c.v[0], c.v[0].trim().replace(/\s+/g, ' ').replace(/^./, (x) => x.toUpperCase())]).filter((x) => x[1] !== x[2])
+    return json({ summary: `Trimmed and capitalised ${fixed.length} names`, sheet, cells: Object.fromEntries(fixed.map((x) => [x[0], x[2]])) })
+  }
+  if (/^Summarise the cells/m.test(text) || /Summarise the cells I picked/.test(text)) {
+    const nums = cells.flatMap((c) => c.v.map(Number).filter((n) => Number.isFinite(n) && n !== 0))
+    return json({ summary: 'A summary of the cells picked', answer: `${nums.length} numbers come to ${nums.reduce((a, n) => a + n, 0)}; the highest is ${Math.max(...nums)}.` })
+  }
+  if (/Make a chart/.test(text)) return json({ summary: 'A column chart of the costs', chart: { type: 'column', title: 'Costs', range: where } })
+  return json({ summary: 'Nothing to do', answer: 'echo' })
+}
+
 function answer(b) {
   const m = b.messages || []
   const last = words([...m].reverse().find((x) => x.role === 'user')?.content)
@@ -90,6 +121,7 @@ function answer(b) {
     return say(`\`\`\`json\n${JSON.stringify({ kind: 'Mutual NDA', what: 'Two companies agree to keep what they share with each other secret for two years.', parties: [{ name: 'Northwind Labs', role: 'shares and receives' }, { name: 'Contoso Ltd', role: 'shares and receives' }], money: ['A fee of $1,200 a year, paid by Contoso Ltd'], dates: ['Starts on signing; lasts two years'], obligations: ['Keep the other side\'s information secret', 'Return or destroy it when asked'], renewal: 'It renews by itself every year unless either side says no 30 days before.', termination: 'Either side can end it with 30 days\' notice.', watch: [{ what: 'It renews by itself unless you say no in time.', page: 1, quote: 'renews automatically' }] })}\n\`\`\``)
   }
   if (/^Suggest how to organize this folder\./.test(first)) return say(filesPlan(first))
+  if (/^In the spreadsheet /.test(first)) return say(sheetChange(first))
   const tail = m.at(-1)
   const file = /EDIT (\S+)/.exec(last)?.[1]
   if (b.tools && file && tail.role === 'user') return call(`r${m.length}`, 'read_file', { path: file })
