@@ -91,7 +91,13 @@ const openBrowser = (url) => { const open = path.join(__dirname, 'open.cjs'); if
 // The port it listens on goes in ~/claude-login-port.txt, for a test to play the browser.
 function signIn(dir, how) {
   const say = (s) => process.stdout.write(s)
-  const done = (ok, why) => { if (ok) { signedIn(dir); say('\r\nLogin successful.\r\n') } else say(`\r\nLogin failed: ${why}\r\n`); process.exit(ok ? 0 : 1) }
+  // Let go of the keyboard first: on Windows, a Node program reading its console, started by a .cmd,
+  // could print its last line and never hand the console back (PowerShell never ran what came next).
+  const done = (ok, why) => {
+    if (ok) { signedIn(dir); say('\r\nLogin successful.\r\n') } else say(`\r\nLogin failed: ${why}\r\n`)
+    try { if (process.stdin.isTTY) process.stdin.setRawMode(false); process.stdin.pause(); process.stdin.destroy() } catch { /* not a console */ }
+    process.stdout.write('', () => process.exit(ok ? 0 : 1))
+  }
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://localhost')
     if (u.pathname !== '/callback') { res.writeHead(404).end(); return }
