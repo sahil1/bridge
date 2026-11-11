@@ -718,7 +718,10 @@ try {
     await ph.p.locator('.sd-ask button', { hasText: 'Cancel' }).click()
     // A sheet: the grid with its tabs, and AI Assist's panel over it from the bottom, fitting.
     await ph.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'budget.xlsx' } })), { root })
-    ok(!!(await until(async () => (await ph.p.locator('.sd-univer canvas').count()) > 0 && /Budget/.test(await ph.p.locator('.sd-univer').innerText().catch(() => '')), 30000)), `phone ${width}: a sheet opens, with its tabs`)
+    const sheetOpen = await until(async () => (await ph.p.locator('.sd-univer canvas').count()) > 0 && /Budget/.test(await ph.p.locator('.sd-univer').innerText().catch(() => '')), 30000)
+    // (Else what the page shows: the file's name, a sheet drawn or not, its tabs, what it says.)
+    ok(!!sheetOpen, `phone ${width}: a sheet opens, with its tabs`, sheetOpen || await ph.p.evaluate(() => ({ head: document.querySelector('.sd-file .pane-head h2')?.innerText ?? null, sheet: !!document.querySelector('.sd-univer'), canvases: document.querySelectorAll('.sd-univer canvas').length, tabs: document.querySelector('.sd-univer')?.innerText.slice(0, 120) ?? null, says: document.querySelector('.sd-file')?.innerText.slice(0, 300) ?? null })))
+    if (!sheetOpen) throw new Error(`phone ${width}: the sheet didn't open`)
     await sleep(600)
     // (Its page as wide as the screen too, whatever its header holds: a name and its buttons once
     // made it wider, and AI Assist's panel with it.)
