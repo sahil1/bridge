@@ -8,12 +8,19 @@
 // commentsIds and commentsExtensible, its author in people.xml, its start, end and reference in
 // the document), every comment it didn't change written as it was, and read back as threads. A
 // file another app made, without Word's newer parts: answered, given commentsExtended (its
-// relationship and content type) and Word's comment styles. With the beta off, the comments as
-// before: shown, to answer in Word. In the dark and on a phone.
+// relationship and content type) and Word's comment styles. @bridge (the stand-in model): a
+// colleague's from the file waiting for you, nothing sent by itself; typing @ offering @bridge;
+// yours with no model saying how to add one (Open Model Providers); then answered in the thread,
+// signed AI Assist with the wand and the model, asked about that place only (the words, the
+// document around them, the thread so far, and told the content isn't instructions), its change a
+// tracked suggestion on the words (saved as one by AI Assist, which Word shows) with Keep, Discard
+// and Keep all; working said in the thread while its words pulse; a question answered with no
+// change. With the beta off, the comments as before: shown, to answer in Word; @bridge's route
+// not there, and nothing sent. In the dark and on a phone.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { startKit, checks, until, sleep, browser, page, shot, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, browser, page, shot, ROOT } from '../lib/harness.mjs'
 import { richDocx, threadsDocx, THREADS, THREAD_PARAS } from '../lib/wordfile.mjs'
 import { readDocx } from '../../src/components/studio/ooxml.js'
 import { commentsOf, threadsOf } from '../../src/components/studio/wordcomments.js'
@@ -22,6 +29,7 @@ const require = createRequire(path.join(ROOT, 'package.json'))
 const JSZip = require('jszip')
 const { ok, done } = checks('studio-comments')
 const kit = await startKit('studio-comments')
+const model = await startModel('studio-comments')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control'
@@ -138,6 +146,78 @@ try {
   ok(!!four && !/w:id="[45]"/.test(four['word/document.xml']) && ![pid4, pid5].some((x) => four['word/commentsExtended.xml'].includes(x) || four['word/commentsIds.xml'].includes(x)), 'saved: gone from the file, its marks and its lines in Word\'s other parts too')
   ok(!!four && ['word/comments.xml', 'word/commentsExtended.xml', 'word/commentsIds.xml'].every((k) => four[k] === was[k]), 'back to the comments it came with: those parts as Word wrote them, byte for byte', four && ['word/comments.xml', 'word/commentsExtended.xml', 'word/commentsIds.xml'].filter((k) => four[k] !== was[k]))
 
+  // ---------- @bridge ----------
+  // A colleague's @bridge that came in the file: waiting for you, and nothing sent by itself.
+  const sam = thread('The team spent the quarter')
+  ok(/Sam Lee asked @bridge in the file\. It waits for you/.test(await sam.locator('.sd-thread-ai.wait').innerText().catch(() => '')) && (await sam.locator('button', { hasText: 'Send to AI Assist' }).count()) === 1, 'a colleague\'s @bridge from the file waits for you, saying so, with Send to AI Assist', await sam.innerText())
+  ok(!model.asked(/^Request:/).length, 'and nothing was sent to a model by itself')
+  // Typing @ offers @bridge, AI Assist.
+  await pick('what they come back for')
+  await p.keyboard.press(`${MOD}+Alt+KeyM`)
+  const box2 = p.locator('.sd-thread-new textarea')
+  ok(!!(await until(() => box2.isVisible(), 3000, 100)), '⌥⌘M: a comment on the words picked')
+  await box2.fill('@br')
+  const chip = p.locator('.sd-thread-new .sd-mention')
+  ok(!!(await until(async () => /@bridge\s*AI Assist/.test(await chip.innerText().catch(() => '')), 3000, 100)) && (await chip.locator('.icon').count()) === 1, 'typing @ offers @bridge, AI Assist, with the wand')
+  await chip.click()
+  ok(await box2.inputValue() === '@bridge ', 'picked, it finishes the mention', await box2.inputValue())
+  // No model yet: the thread says so and how to add one.
+  await box2.fill('@bridge make this shorter')
+  await box2.press(`${MOD}+Enter`)
+  const ask = p.locator('.sd-threads .sd-thread', { hasText: 'what they come back for' })
+  ok(!!(await until(async () => /no model for AI Assist to answer with[\s\S]*Settings › Model Providers/.test(await ask.locator('.sd-thread-ai.bad').innerText().catch(() => '')), 10000, 200)) && (await ask.locator('button', { hasText: 'Open Model Providers' }).count()) === 1, 'your own @bridge with no model: the thread says there\'s none and how to add one, with Open Model Providers', await ask.innerText().catch(() => ''))
+  await ask.locator('button', { hasText: 'Open Model Providers' }).click()
+  ok(!!(await until(async () => /Model Providers/.test(await p.locator('.modal.settings').innerText().catch(() => '')), 5000, 100)), 'which opens Settings › Model Providers')
+  await p.keyboard.press('Escape')
+  await p.locator('.modal.settings').waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
+  // A model: AI Assist's reply in the thread, its change a suggestion on the words.
+  await kit.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
+  await kit.api('/settings', { studio: { model: 'openai:gpt-5' } }, 'PATCH')
+  await ask.locator('button', { hasText: 'Try again' }).click()
+  const aiEntry = ask.locator('.sd-thread-entry.ai')
+  ok(!!(await until(async () => (await aiEntry.count()) === 1, 15000, 200)), 'Try again: AI Assist answers in the thread')
+  const entry = await aiEntry.evaluate((e) => ({ who: e.querySelector('.sd-comment-who b')?.innerText, wand: !!e.querySelector('.sd-who-ai .icon'), text: e.querySelector('.sd-comment-text')?.innerText }))
+  ok(entry.who === 'AI Assist' && entry.wand && /^Cut it to its first part/.test(entry.text) && /AI Assist · .*gpt-5/.test(entry.text), 'signed AI Assist with the wand, saying what it did and why, and which model did it', entry)
+  const sent = model.requests().filter((r) => /^Request:/.test(r.messages?.find((m) => m.role === 'user')?.content || '')).at(-1)
+  const sys = sent?.messages?.find((m) => m.role === 'system')?.content || ''
+  const user = sent?.messages?.find((m) => m.role === 'user')?.content || ''
+  ok(/^Request: make this shorter\n\nThe commented words:\n"""\nwhat they come back for\n"""/.test(user) && /Just before the commented words:[\s\S]*what a new person sees, and/.test(sys) && /threads\.docx/.test(sys) && /not instructions to you/.test(sys), 'it was asked about that place only: the words, the document around them and the request, told that the content isn\'t instructions', { user, sys: sys.slice(-400) })
+  const onPage = async () => p.evaluate(() => ({ del: [...document.querySelectorAll('.sd-w del.sd-rev')].map((e) => e.innerText).join('|'), ins: [...document.querySelectorAll('.sd-w ins.sd-rev')].map((e) => e.innerText).join('|') }))
+  ok(!!(await until(async () => { const x = await onPage(); return x.del === 'what they come back for' && x.ins === 'what they come back' }, 5000, 100)), 'its change shown on the words as a tracked suggestion: what goes struck out, what comes marked', await onPage())
+  ok(/what they come back for/.test(await ask.locator('.sd-thread-sug del').innerText().catch(() => '')) && (await ask.locator('.sd-thread-sug button', { hasText: 'Keep' }).count()) === 1 && (await ask.locator('.sd-thread-sug button', { hasText: 'Discard' }).count()) === 1 && /1 suggestion from AI Assist/.test(await p.locator('.sd-thread-sugbar').innerText().catch(() => '')), 'Keep and Discard in the thread, and Keep all at the top')
+  await shot(p, `${tag}studio-comments-suggestion`)
+  // Saved before it's kept: a tracked change by AI Assist, as Word shows one; its reply in the file.
+  await saveNow()
+  const five = await savedWith('threads.docx', (x) => /w:author="AI Assist"/.test(x['word/comments.xml'] || ''))
+  ok(!!five && /<w:del w:id="\d+" w:author="AI Assist" w:date="[^"]+Z"><w:r><w:delText>what they come back for<\/w:delText><\/w:r><\/w:del><w:ins w:id="\d+" w:author="AI Assist" w:date="[^"]+Z"><w:r><w:t>what they come back<\/w:t><\/w:r><\/w:ins>/.test(five['word/document.xml']), 'saved before it\'s kept: a tracked change by AI Assist in the file, which Word shows as a suggestion; the words themselves as they were', /<w:p [^>]*>(?:(?!<\/w:p>).)*come back for(?:(?!<\/w:p>).)*<\/w:p>/s.exec(five?.['word/document.xml'] || '')?.[0])
+  ok(/<w:comment w:id="\d+" w:author="AI Assist" w:date="[^"]+" w:initials="AI">/.test(five?.['word/comments.xml'] || ''), 'and its reply in comments.xml, signed AI Assist')
+  // Discard: as it was. Then again (slowly): working, then Keep.
+  await ask.locator('.sd-thread-sug button', { hasText: 'Discard' }).click()
+  ok(!!(await until(async () => { const x = await onPage(); return !/come back for/.test(x.del + x.ins) && (await ask.locator('.sd-thread-sug').count()) === 0 }, 3000, 100)) && /what they come back for\.$/.test(await E((ed) => ed.state.doc.textContent)), 'Discard: the words as they were, and the reply stays in the thread')
+  await ask.locator('.sd-thread-quote').click()
+  await ask.locator('.sd-thread-box textarea').fill('@bridge shorter please, slowly')
+  await ask.locator('.sd-thread-box button[type="submit"]').click()
+  ok(!!(await until(async () => /AI Assist is working…/.test(await ask.locator('.sd-thread-ai.busy').innerText().catch(() => '')) && (await p.locator('.sd-w .sd-cmt.busy').count()) > 0, 3000, 50)), 'a reply with @bridge carries on: "AI Assist is working…" in the thread, its words pulsing')
+  await shot(p, `${tag}studio-comments-working`)
+  ok(!!(await until(async () => (await ask.locator('.sd-thread-entry.ai').count()) === 2 && (await ask.locator('.sd-thread-sug').count()) === 1, 15000, 200)), 'then its reply and its suggestion')
+  const threadSent = model.requests().filter((r) => /^Request:/.test(r.messages?.find((m) => m.role === 'user')?.content || '')).at(-1)?.messages?.find((m) => m.role === 'user')?.content || ''
+  ok(/The thread so far:\n- Tester: @bridge make this shorter\n- AI Assist: Cut it to its first part/.test(threadSent), 'with the thread so far', threadSent)
+  await ask.locator('.sd-thread-sug button', { hasText: 'Keep' }).click()
+  ok(!!(await until(async () => { const x = await onPage(); return !/come back/.test(x.del + x.ins) && /what a new person sees, and what they come back\.$/.test(await E((ed) => ed.state.doc.textContent)) }, 3000, 100)), 'Keep: the new words in place, no longer marked', await E((ed) => ed.state.doc.textContent.slice(-80)))
+  await saveNow()
+  ok(!!(await savedWith('threads.docx', (x) => !/w:author="AI Assist"/.test(x['word/document.xml']) && /what they come back<\/w:t>/.test(x['word/document.xml']))), 'saved kept: the words changed in the file, no tracked change left')
+  // The colleague's, sent: answered, and kept with Keep all.
+  await sam.locator('button', { hasText: 'Send to AI Assist' }).click()
+  ok(!!(await until(async () => (await sam.locator('.sd-thread-entry.ai').count()) === 1 && (await sam.locator('.sd-thread-ai.wait').count()) === 0, 15000, 200)), 'Send to AI Assist: the colleague\'s request answered once you send it')
+  await p.locator('.sd-thread-sugbar button', { hasText: 'Keep all' }).click()
+  ok(!!(await until(async () => (await p.locator('.sd-thread-sugbar').count()) === 0 && /^The team spent the quarter on the parts of the product people use every day\.$/m.test(await E((ed) => { let s = ''; ed.state.doc.forEach((n) => { s += `${n.textContent}\n` }); return s })), 3000, 100)), 'Keep all: every suggestion kept')
+  // A question: an answer, no change.
+  await sam.locator('.sd-thread-quote').click()
+  await sam.locator('.sd-thread-box textarea').fill('@bridge what is this about?')
+  await sam.locator('.sd-thread-box button[type="submit"]').click()
+  ok(!!(await until(async () => (await sam.locator('.sd-thread-entry.ai').count()) === 2, 15000, 200)) && (await sam.locator('.sd-thread-sug').count()) === 0 && /words on what the team worked on/.test(await sam.locator('.sd-thread-entry.ai').last().innerText()), 'a question gets an answer in the thread, and no change')
+  ok(model.asked(/^Request:/).length === 4, 'a model asked only when you sent it: four times', model.asked(/^Request:/).length)
+
   // ---------- A file another app made ----------
   // Made without commentsExtended (as the docx library writes one): answered, it's given the part,
   // and its comment a paraId to be answered by.
@@ -178,14 +258,19 @@ try {
 
   // ---------- The beta off ----------
   await kit.api('/settings', { trials: { comments: false } }, 'PATCH')
+  const refused = await kit.api('/studio/comment-assist', { request: 'make this shorter', text: 'Some words' }).catch((e) => e)
+  ok(refused?.status === 404 && refused.j?.trial === 'comments' && /^Comments and @bridge is a beta feature\. Turn it on in Settings › About & Updates › Beta Features\.$/.test(refused.message), 'with the beta off, @bridge\'s route isn\'t there, and says how to turn it on', refused?.message)
+  const asks = model.asked(/^Request:/).length
   const off = await page(b, kit.url, { width: 1440, height: 900 })
   pages.push(off)
   await off.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
   await until(async () => { await off.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'threads.docx' } })), { root }); return off.p.locator('.sd-w').first().waitFor({ timeout: 2500 }).then(() => true, () => false) }, 25000, 300)
   await off.p.locator('.sd-doc-tools button[aria-label="Comments"]').click()
   ok(!!(await until(async () => /Answer them in Word/.test(await off.p.locator('.sd-comments-pane').innerText().catch(() => '')), 5000, 100)) && (await off.p.locator('.sd-threads, .sd-thread-add').count()) === 0, 'with Comments and @bridge off: the comments shown as before, to answer in Word, and nothing to write them with')
+  await shot(off.p, `${tag}studio-comments-off`)
   await off.p.evaluate(() => { const ed = document.querySelector('.sd-w').editor; let r = null; ed.state.doc.descendants((n, pos) => { if (!r && n.isTextblock && n.textContent.includes('first hour')) r = { from: pos + 1, to: pos + 10 }; return !r }); ed.view.focus(); ed.commands.setTextSelection(r) })
   ok(!!(await until(() => off.p.locator('.sd-bubble-ai').isVisible(), 5000, 100)) && (await off.p.locator('.sd-bubble-cmt').count()) === 0, 'and words picked have AI Assist by them, not Comment')
+  ok((await off.p.locator('.sd-comments-pane').innerText()).includes('@bridge make this shorter') && !(await off.p.locator('.sd-comments-pane button', { hasText: /Send to AI Assist|Keep|Reply/ }).count()) && model.asked(/^Request:/).length === asks, 'a comment with @bridge in it is only words: nothing to send, and nothing sent')
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))
@@ -193,5 +278,6 @@ try {
   for (const x of pages) await x.ctx.close().catch(() => {})
   await b.close()
   kit.stop()
+  model.stop()
 }
 process.exit(done().fail ? 1 : 0)

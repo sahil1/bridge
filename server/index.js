@@ -82,6 +82,7 @@ import * as studio from './studio.js'
 import * as signing from './signing.js'
 import * as doctext from './doctext.js'
 import * as studioFound from './studiofound.js'
+import * as commentAssist from './commentassist.js'
 import * as explorer from './explorer.js'
 import * as studioApps from './studioapps.js'
 import * as openIn from './openin.js'
@@ -603,6 +604,16 @@ app.post('/api/studio/rewrite', async (req, res) => {
   try {
     const model = String(req.body?.model || '') || await studioModel()
     const out = await studioFound.rewrite({ ...req.body, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
+    const d = (await chatModels.models().catch(() => [])).find((x) => x.id === model)
+    res.json({ ...out, model, by: d?.label || model })
+  } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
+})
+// @bridge in a document's comment (Comments and @bridge, a beta feature): AI Assist's reply for
+// the thread and, when asked for, the words rewritten, by the model AI Assist uses for documents.
+app.post('/api/studio/comment-assist', trialOff('comments', 'Comments and @bridge'), async (req, res) => {
+  try {
+    const model = String(req.body?.model || '') || await studioModel()
+    const out = await commentAssist.assist({ ...req.body, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
     const d = (await chatModels.models().catch(() => [])).find((x) => x.id === model)
     res.json({ ...out, model, by: d?.label || model })
   } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }

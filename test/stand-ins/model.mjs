@@ -30,6 +30,10 @@
 //   Ltd, a fee, a renewal worth a look on page 1 ("renews automatically").
 //   Studio's decks: a deck of four slides (its title from what it's about, or the document's first
 //   line), a slide rewritten as big numbers ("Rewritten"), a new slide of next steps.
+//   @bridge in a document's comment ("Request: …" and the commented words): a question answered
+//   with no change; "shorter" cut to the words before the first colon or full stop (or without its
+//   last word), saying why, in a JSON code fence; anything else the words with "teh" spelled
+//   right. "slowly" answers after 2.5 s.
 //   Ollama's own API (a model server on this computer, when OLLAMA_HOST points here): its models
 //   (llama3.1:8b, and llama3.2-vision:11b, which can see), what each can do, none running, and
 //   /api/chat answering as Ollama does (its message, pictures as base64 in `images`) with the same
@@ -99,6 +103,14 @@ function answer(b) {
     if (asked === 'read_file') return call(`e${m.length}`, 'edit_file', { path: file, old_text: 'hello', new_text: 'hello world' })
     if (asked === 'edit_file') return call(`x${m.length}`, 'run_command', { command: `cat ${file}` })
     if (asked === 'run_command') return say(`All done: ${tail.content.replace(/\n/g, ' | ')}`)
+  }
+  const asked = /^Request: ([^\n]*)\n\nThe commented words:\n"""\n([\s\S]*?)\n"""/.exec(last)
+  if (asked) {
+    const [, req, w] = asked
+    if (/\?\s*$/.test(req)) return say(JSON.stringify({ reply: `It's about ${w.split(/\s+/).length} words on what the team worked on.`, change: null }))
+    const cut = w.split(/[:.]/)[0].trim()
+    if (/shorter|shorten/i.test(req)) return say('```json\n' + JSON.stringify({ reply: 'Cut it to its first part: what comes after repeats what the paragraph already says.', change: cut === w.trim() ? cut.split(/\s+/).slice(0, -1).join(' ') : `${cut}.` }) + '\n```')
+    return say(JSON.stringify({ reply: 'Fixed the spelling.', change: w.replace(/\bteh\b/g, 'the') }))
   }
   const edit = /^Instruction: [\s\S]*?\n\nText:\n([\s\S]*)$/.exec(last)
   if (edit) { const t = edit[1].replace(/\bteh\b/g, 'the'); return say('```\n"' + t.charAt(0).toUpperCase() + t.slice(1) + '"\n```') }
@@ -243,7 +255,8 @@ http.createServer((req, res) => {
       log({ model: b.model, tools: (b.tools || []).map((t) => t.function.name), messages: b.messages, ...(b.response_format ? { format: b.response_format.type } : {}) })
       const said = dictated(words([...(b.messages || [])].reverse().find((x) => x.role === 'user')?.content)) || ''
       if (/fail on purpose/i.test(said)) return j(500, { error: { message: 'The server had an error while processing your request.' } })
-      return setTimeout(() => j(200, answer(b)), /take your time/i.test(said) ? 8000 : 300)
+      const slow = /^Request: [^\n]*\bslowly\b/.test(words([...(b.messages || [])].reverse().find((x) => x.role === 'user')?.content))
+      return setTimeout(() => j(200, answer(b)), /take your time/i.test(said) ? 8000 : slow ? 2500 : 300)
     }
     j(404, { error: { message: 'not found' } })
   })

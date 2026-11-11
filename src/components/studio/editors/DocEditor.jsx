@@ -353,7 +353,8 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
   // Comments as threads (a beta feature): what the page marks is theirs (doccomments.jsx).
   const threading = useTrial('comments')
   const skip = useRef(() => false)
-  const plugins = useMemo(() => Extension.create({ name: 'wordView', addProseMirrorPlugins: () => [listPlugin(model, info), commentPlugin({ skip: (id) => skip.current(id) }), findPlugin(), pagesPlugin] }), [model, info, pagesPlugin])
+  const busy = useRef(() => false)
+  const plugins = useMemo(() => Extension.create({ name: 'wordView', addProseMirrorPlugins: () => [listPlugin(model, info), commentPlugin({ skip: (id) => skip.current(id), busy: (id) => busy.current(id) }), findPlugin(), pagesPlugin] }), [model, info, pagesPlugin])
   // What's pasted, dropped or clicked, handled where the editor's own handling isn't Google Docs'
   // (its handlers are set once; what they do is this render's).
   const own = useRef({})
@@ -390,8 +391,9 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
   const comments = useMemo(() => [...model.comments.entries()].filter(([, c]) => c.text), [model])
   const [showComments, setShowComments] = useState(false)
   const author = useAuthor()
-  const threads = useThreads({ editor, model, on: threading && !readOnly, author, dirty: () => { touched.current = true; onDirty(true) } })
+  const threads = useThreads({ editor, model, on: threading && !readOnly, author, name: file.name, dirty: () => { touched.current = true; onDirty(true) } })
   skip.current = threading ? threads.skip : () => false
+  busy.current = threading ? threads.busy : () => false
   // A comment on the words picked: in the comments beside the page, its box ready.
   const comment = () => { setShowComments(true); threads.start() }
   // Words with a comment, clicked: its thread, in the comments.
