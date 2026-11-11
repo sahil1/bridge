@@ -36,6 +36,12 @@ const RTT = 2 * (NET.ms + NET.host)
 const say = (...a) => console.log(...a)
 
 const { b, which } = await browser()
+// CI's macOS runner is slow in WebKit, and its speed varies from run to run (3 of 4 runs on 10 and
+// 11 Nov: a first screen in 4.1 to 4.8 s, opened again in 2.6 s, where this Mac takes 1.2 s): there
+// the limits for how long the phone waits get half as much again. Anywhere else, as they are.
+const ROOM = process.env.GITHUB_ACTIONS && which === 'webkit' ? 1.5 : 1
+const limit = (ms) => ms * ROOM
+const says = (ms) => `limit ${(limit(ms) / 1000).toLocaleString('en', { maximumFractionDigits: 2 })} s`
 const tag = which === 'webkit' ? 'webkit-' : ''
 let kit = null
 let relay = null
@@ -92,7 +98,7 @@ try {
   const first = await answered(t0)
   const firstBytes = (await test('state')).sent.downBytes
   say(`first open: answers at ${first} ms, ${Math.round(firstBytes / 1024)} KB over the link`)
-  ok(first != null && first < 4000, `paired and opened: Bridge AI's first screen has its answers in ${s(first)} (limit 4 s)`, first)
+  ok(first != null && first < limit(4000), `paired and opened: Bridge AI's first screen has its answers in ${s(first)} (${says(4000)})`, first)
   ok(firstBytes < 900 * 1024, `with ${Math.round(firstBytes / 1024)} KB over the link, its files compressed (limit 900 KB; 1.9 MB when they weren't)`, firstBytes)
   await app().locator('.tabbar button').first().waitFor({ timeout: 15000 }).catch(() => {})
   ok(await app().locator('.tabbar button').count() > 0, 'and the app works: its tabs are there')
@@ -118,7 +124,7 @@ try {
     return { shellDone: at('/shell.js')?.responseEnd, linkAsked: at('/link.js')?.startTime, offlineAsked: at('/offline.js')?.startTime }
   })
   say(`reopen: answers at ${again} ms, page files ${pageBytes} bytes`, order)
-  ok(again != null && again < 2500, `opened again: answers in ${s(again)} (limit 2.5 s)`, again)
+  ok(again != null && again < limit(2500), `opened again: answers in ${s(again)} (${says(2500)})`, again)
   // (Playwright's WebKit keeps nothing in its cache from one page to the next; Safari does.)
   if (which === 'webkit') skip('the page\'s own files aren\'t downloaded again', 'Playwright\'s WebKit keeps no cache between pages')
   else ok(pageBytes < 20 * 1024, `the page's own files aren't downloaded again (${pageBytes} bytes; they were 210 KB each time)`, pageBytes)
@@ -183,7 +189,7 @@ try {
   await ctx.setOffline(false)
   const online = await backIn(20000)
   say(`back online: ${online} ms`)
-  ok(online != null && online < 4000, `16 s with no network, then back: answering again in ${s(online)} (limit 4 s)`, online)
+  ok(online != null && online < limit(4000), `16 s with no network, then back: answering again in ${s(online)} (${says(4000)})`, online)
 
   // ---------- its connection dies without a word, then Bridge AI is back on the screen ----------
   await sleep(1500)
@@ -354,7 +360,7 @@ try {
   await ph.p.goto(`${relay.url}/`)
   const off = await saysIn(ph.p, /^Studio is offline/, t0)
   say(`the app, Studio offline: ${off.ms} ms`, off.l)
-  ok(off.ms != null && off.ms < 4000 && !off.l.app, `the app opening on Studio, offline: the start screen says so in ${s(off.ms)} (limit 4 s), rather than opening what it last sent`, off.l)
+  ok(off.ms != null && off.ms < limit(4000) && !off.l.app, `the app opening on Studio, offline: the start screen says so in ${s(off.ms)} (${says(4000)}), rather than opening what it last sent`, off.l)
   const offers = await until(async () => { const l = await look(ph.p); return l.others.includes('Desk') && l.saved && l.cloud && l.demo ? l : null }, 2000, 100)
   ok(!!offers, 'with Desk a tap away, what Studio last sent, Cloud Agents and the demo', await look(ph.p))
   await shot(ph.p, `${tag}phone-computer-offline`)
