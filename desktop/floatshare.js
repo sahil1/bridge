@@ -1,22 +1,22 @@
-// Whether the floating card is kept out of pictures of the screen (desktop/main.js, Settings ›
-// Meetings › Hide it from screen sharing): a screen you share on a call, a recording of it, the
-// meeting's own (Watch a screen). The setting (hide):
-//   'sharing'  the first choice: only while something shares or records the screen, so your
-//              screenshots show it. On a Mac, native/callwatch sharing says when, from the moment
-//              the card shows; until it has said, when it can't (no helper, a macOS that doesn't
-//              say, the helper gone), and anywhere else, as 'always'.
-//   'always'   never in a share, a recording or a screenshot.
-//   'never'    in every picture.
-// Kept out isn't always out: macOS 15 and later lets a capture made with ScreenCaptureKit (most
-// calls' screen sharing now) take a window that asks to be left out, and Apple says there's no
-// public way to stop it. So a card that isn't the meeting being recorded (a meeting about to start,
-// what needs you, a call that started) doesn't show at all while the screen is shared or recorded
-// (hold): it waits, and shows once sharing stops, if it's still wanted. On a Mac only, where the
-// helper can tell (Windows can't); held for a moment while the helper is first asked, so it never
-// shows for an instant over a share; never held where the helper can't say (no helper, a macOS
-// that doesn't say, one that went without a word), so it isn't lost there.
-// make({ bin, mac, spawn, onChange, wait }): bin, the helper (null: none); onChange(), when hidden()
-// or held() may have changed; wait, how long its first answer is waited for.
+// The floating card and a screen you share or record (desktop/main.js, Settings › Meetings › Hide it
+// from screen sharing): a screen you share on a call, a recording of it. On a Mac, native/callwatch
+// sharing says when, from the moment the card is wanted.
+// Asking macOS to leave a window out of pictures of the screen isn't enough: macOS 15 and later lets
+// a capture made with ScreenCaptureKit (most calls' screen sharing now) take a window that asks to
+// be left out, and Apple says there's no public way to stop it. So while the screen is shared the
+// card isn't there to be seen: the meeting being recorded's goes to the menu bar and comes back
+// after, and any other card waits (place, below). Windows can't tell when its screen is shared, but
+// keeps a window out of a share as asked. The setting (hide):
+//   'sharing'  the first choice: on a Mac, the card goes to the menu bar while the screen is shared,
+//              and is asked to be left out of pictures meanwhile (which older ways of capturing
+//              keep to), so your screenshots show it. Asked to be left out until the helper has
+//              said, when it can't (no helper, a macOS that doesn't say, the helper gone), and
+//              anywhere else, as 'always'.
+//   'always'   the same, and asked to be left out of screenshots too, where macOS keeps to it.
+//   'never'    the meeting being recorded's card stays on the screen while you share, in every
+//              picture. (Any other card still waits until you stop sharing.)
+// make({ bin, mac, spawn, onChange, wait }): bin, the helper (null: none); onChange(), when hidden(),
+// sharing() or waiting() may have changed; wait, how long its first answer is waited for.
 const { spawn: spawnReal } = require('node:child_process')
 
 const MODES = ['sharing', 'always', 'never']
@@ -24,7 +24,6 @@ const modeOf = (v) => (MODES.includes(v) ? v : 'sharing')
 
 function make({ bin = null, mac = process.platform === 'darwin', spawn = spawnReal, onChange = () => {}, wait = 2000 } = {}) {
   let hide = 'sharing'
-  let hold = false
   let shared = null // what the helper last said: true, false, or null (not said, or it can't)
   let proc = null
   let asking = false // started, and not said anything yet
@@ -66,39 +65,58 @@ function make({ bin = null, mac = process.platform === 'darwin', spawn = spawnRe
   }
   return {
     // The setting, from /api/calls; whether the card is wanted (the helper runs only while it is);
-    // and whether it waits while the screen is shared (it isn't the meeting being recorded).
-    set(v, showing, held = false) {
+    // and whether it goes while the screen is shared (watch: the helper's needed whatever the setting).
+    set(v, showing, watching = false) {
       const was = hide
       hide = modeOf(v)
-      hold = !!held
-      watch(showing && (hide === 'sharing' || hold))
+      watch(showing && (hide === 'sharing' || watching))
       if (hide !== was) onChange()
     },
     hidden: () => hide === 'always' || (hide === 'sharing' && shared !== false),
-    // Not shown now: it waits while the screen is shared, or for the helper's first word.
-    held: () => hold && !!proc && (shared === true || asking),
+    // The helper says the screen is shared or recorded now; it's been asked and hasn't said yet.
+    sharing: () => !!proc && shared === true,
+    waiting: () => !!proc && asking,
+    mode: () => hide,
     stop: () => watch(false),
   }
 }
 
-// What the card shows and where, from /api/calls (c): { key, show, held, bar, instead }. key: what's
-// on it (its × hides it until that changes: hiddenFor); show: the card's window up now; held: wanted
-// but waiting while the screen is shared; bar: the menu bar's (a recording whose card went there, or
-// in the menu bar instead, or a call that started while the screen is shared); instead: the menu bar
-// instead of the card (Settings). share: make()'s, told what's wanted, and asked whether it waits.
-function place(c, { hiddenFor = null, mac = false, share = null } = {}) {
+// What the card shows and where, from /api/calls (c): { key, show, held, bar, instead, moved }. key:
+// what's on it (its × hides it until that changes: hiddenFor); show: the card's window up now; held:
+// wanted, but not shown while the screen is shared; bar: the menu bar's (a recording whose card went
+// there, by you or for a share, in the menu bar instead, or Take notes while the screen is shared);
+// instead: the menu bar instead of the card (Settings); moved: the meeting's card went to the menu
+// bar for a share (place's answer, given back next time). share: make()'s, told what's wanted.
+//   A card that isn't the meeting being recorded (a meeting about to start, what needs you, a call
+//   that started) waits while the screen is shared or recorded, whatever the setting, and for the
+//   helper's first word, so it never shows for an instant over a share.
+//   The meeting being recorded's card goes to the menu bar while the screen is shared (unless set to
+//   Never: then it stays, and anyone you share with may see it), and comes back as it was once
+//   sharing stops; keep: you asked for it back from the menu bar during this share (Show the card).
+// The helper can't tell Bridge AI's own looks at the screen from a share: they're said here.
+//   capturing: a look at the call's window for its names (server/calls.js shot) is being taken, or
+//   was a moment ago (the helper's word trails it by a second and a half). One alone doesn't move
+//   the card, nor bring back a card that went for a share (they come every few seconds while
+//   people talk, and a share goes on through them).
+//   watching: the meeting watches a screen (Watch a screen, in the main window), all the while it
+//   does. A share then can't be told from it, so the card stays, as its Capture is on it.
+function place(c, { hiddenFor = null, mac = false, share = null, watching = false, capturing = false, moved = false, keep = null } = {}) {
   const mode = c.float === 'menubar' && !mac ? 'meetings' : c.float || 'meetings'
   // A meeting with other people starting within ten minutes: the card shows its prep.
   const key = c.recording ? `rec:${c.recording.id}:${c.recording.callEnded || ''}` : c.prompt ? `call:${c.prompt.app}:${c.prompt.at}` : c.soon ? `soon:${c.soon.id}` : 'idle'
   const want = mode === 'always' || (mode === 'meetings' && key !== 'idle')
   const card = want && hiddenFor !== key
-  share?.set(c.floatHide, card, card && !c.recording)
-  const held = card && !!share?.held()
+  const rec = !!c.recording
+  share?.set(c.floatHide, card, card && (!rec || modeOf(c.floatHide) !== 'never'))
+  const shared = !!share?.sharing() && !watching
+  let held = false
+  let went = false
+  if (card && !rec) held = (shared && !capturing) || !!share?.waiting()
+  else if (card && modeOf(c.floatHide) !== 'never') went = shared && (moved || !capturing) && keep !== key
+  held ||= went
   const show = card && !held
-  // The menu bar: instead of the card (Settings), for a meeting whose card you moved there, or for
-  // Take notes while the card waits for a share to end.
-  const bar = mode === 'menubar' ? !!(c.recording || c.prompt) : mac && want && !show && (!!c.recording || (held && !!c.prompt))
-  return { key, show, held, bar, instead: mode === 'menubar' }
+  const bar = mode === 'menubar' ? !!(c.recording || c.prompt) : mac && want && !show && (rec || (held && !!c.prompt))
+  return { key, show, held, bar, instead: mode === 'menubar', moved: went }
 }
 
 module.exports = { make, modeOf, place }

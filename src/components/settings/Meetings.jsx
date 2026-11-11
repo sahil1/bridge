@@ -364,13 +364,16 @@ export default function Meetings({ onOpenAgent }) {
                 <span><b>Open it when I point at it</b> <span className="muted small">Otherwise it stays a slim bar until you click it.</span></span>
               </label>
             )}
-            {/* Kept out of pictures of the screen (desktop/main.js): on a Mac, only while something
-                shares or records it, so a call doesn't see it and your screenshots do; elsewhere the
-                app can't tell, so it's on or off. Linux can't keep a window out of them at all. */}
+            {/* Out of a screen you share (desktop/floatshare.js). On a Mac, asking for a window to be
+                left out of pictures of the screen no longer holds (macOS 15 and later lets most calls'
+                screen sharing take it), so while something shares or records the screen the card
+                goes to the menu bar and comes back after; Never leaves it where it is. Only what
+                still holds is said. Windows keeps a window out of a share as asked, but can't tell
+                when the screen is shared, so it's on or off. Linux can't keep a window out at all. */}
             {card && mac && (
-              <Line label={t('Hide it from screen sharing')} hint={hide === 'sharing'
-                ? t('While you share or record your screen, a call or a recording never sees it. Your screenshots do.')
-                : hide === 'always' ? t('Never in a share, a recording or a screenshot.') : t('Anyone you share your screen with sees it.')}>
+              <Line label={t('Hide it from screen sharing')} title={t("macOS 15 and later can show a call you share your screen on a window that asks to be left out, so while you share, the card goes to the menu bar instead. A reminder before a meeting waits until you stop sharing, whatever this says.")} hint={hide === 'sharing'
+                ? t('While you share or record your screen, it goes to the menu bar and comes back after. Your screenshots show it.')
+                : hide === 'always' ? t("It goes to the menu bar while you share, and asks to be left out of your screenshots too, where macOS still keeps to that.") : t('It stays on the screen while you share, so anyone you share your screen with may see it.')}>
                 <select className="st-input" value={hide} onChange={(e) => set({ floatHide: e.target.value })} aria-label={t('Hide it from screen sharing')}>
                   <option value="sharing">{t('While I share my screen')}</option>
                   <option value="always">{t('Always, screenshots too')}</option>

@@ -14,12 +14,16 @@ let float = null
 let resizer = null
 // Shown or not as desktop/main.js places it (floatshare.js place), for what /api/calls says (c):
 // whether the screen is shared from a stand-in for native/callwatch (BRIDGE_CALLWATCH), placed again
-// as soon as that changes. As on a Mac, wherever it runs.
+// as soon as that changes. As on a Mac, wherever it runs. globalThis.own: Bridge AI's own looks at
+// the screen ({ watching, capturing }), as desktop/main.js hears of them.
 let calls = null
+let moved = false
+globalThis.own = { watching: false, capturing: false }
 const share = make({ bin: process.env.BRIDGE_CALLWATCH || null, mac: true, onChange: () => setImmediate(() => { if (calls) globalThis.placeCard(calls) }) })
 globalThis.placeCard = (c) => {
   calls = c
-  const p = place(c, { mac: true, share })
+  const p = place(c, { mac: true, share, moved, ...globalThis.own })
+  moved = p.moved
   if (float && !float.isDestroyed()) {
     if (p.show && !float.isVisible()) float.showInactive()
     else if (!p.show && float.isVisible()) float.hide()

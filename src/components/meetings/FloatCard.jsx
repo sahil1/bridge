@@ -23,7 +23,8 @@ import './meetings.css'
 // meeting with other people: Join, and what to go in with at a glance (prep.jsx's PrepGlance), with
 // a small menu by its ×: remind me again when it's about to start, hide it until the next meeting,
 // or turn these reminders off (Settings › Meetings › Remind me before meetings turns them back on).
-// While the screen is shared, only the meeting being recorded shows (desktop/floatshare.js).
+// While you share or record your screen on a Mac it isn't there: the meeting being recorded's card goes
+// to the menu bar by itself and comes back as it was after, and any other waits (desktop/floatshare.js).
 // Drag it from anywhere that isn't a button. Resize it by its edges and corners, as any window: its
 // width for every card, and open while recording its height too, which shows more of what's been
 // said; double-click an edge for its usual size. Kept on this computer.
@@ -196,10 +197,14 @@ export default function FloatCard() {
   const saidBox = useRef(null)
   const saidCount = m?.transcript?.length || 0
   useLayoutEffect(() => { const el = saidBox.current; if (el && size.h) el.scrollTop = el.scrollHeight }, [saidCount, size.h, hover])
-  // Hidden (the window, or what it shows changed): no longer under the pointer.
+  // Hidden (the window, or what it shows changed): no longer under the pointer. Set to open on a
+  // click, it stays as it was while its window is hidden (gone to the menu bar for a share), and
+  // comes back so.
   useEffect(() => { setHover(false) }, [r?.id, c?.prompt?.at])
+  const hoverOpens = useRef(onHover)
+  hoverOpens.current = onHover
   useEffect(() => {
-    const v = () => { if (document.hidden) setHover(false) }
+    const v = () => { if (document.hidden && hoverOpens.current) setHover(false) }
     document.addEventListener('visibilitychange', v)
     return () => document.removeEventListener('visibilitychange', v)
   }, [])

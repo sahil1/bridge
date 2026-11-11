@@ -157,11 +157,20 @@ export async function screenAsk() {
   return screenSaid.allowed
 }
 // A picture of the call app's window, as a PNG buffer, or null (not allowed, no window on screen).
+// capturing(): one is being taken, or was a moment ago. macOS counts it as the screen being
+// recorded, as a share is, so the desktop app (which moves the floating card out of a share) is told
+// it's Bridge AI's own (/api/calls); callwatch sharing's word trails it by a second and a half.
+let shooting = 0
+let shotAt = 0
+const SHOT_TAIL_MS = 3000
+export const capturing = () => shooting > 0 || Date.now() - shotAt < SHOT_TAIL_MS
 export async function shot(app) {
   const ids = APPS.filter(([, a]) => a === app).map(([id]) => id)
   if (!ids.length || !watchBin()) return null
   const file = path.join(os.tmpdir(), `bridge-call-${process.pid}-${Date.now()}.png`)
-  const r = await once(['shot', file, ...ids], 10_000)
+  shooting++
+  let r
+  try { r = await once(['shot', file, ...ids], 10_000) } finally { shooting--; shotAt = Date.now() }
   if (r?.error === 'not-allowed') screenSaid = { at: Date.now(), allowed: false }
   try { return r?.ok ? await fs.promises.readFile(file) : null } catch { return null } finally { fs.promises.rm(file, { force: true }).catch(() => {}) }
 }

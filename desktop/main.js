@@ -325,7 +325,19 @@ ipc.handle('bridge:pick-files', async (e) => {
 })
 // While a meeting watches a shared screen, the window keeps its timers on time even when it's
 // hidden behind the call, so a new slide is noticed.
-ipc.handle('bridge:watching', (e, on) => { if (fromApp(e) && e.sender === win?.webContents) win.webContents.setBackgroundThrottling(!on); return true })
+// To macOS, watching a screen is recording it, as a share is: the floating card, which goes to the
+// menu bar while the screen is shared, is told it's Bridge AI's own (floatshare.js place), until a
+// moment after it stops, as callwatch's word trails it by a second and a half.
+let screenWatched = false
+let watchedUntil = 0
+ipc.handle('bridge:watching', (e, on) => {
+  if (!fromApp(e) || e.sender !== win?.webContents) return true
+  win.webContents.setBackgroundThrottling(!on)
+  screenWatched = !!on
+  if (!on) { watchedUntil = Date.now() + 3000; setTimeout(() => floatLook?.(), 3100) }
+  floatLook?.()
+  return true
+})
 // Studio's Focus: the window the page is in made full screen, or back (on: true or false), or
 // whether it is (no on). The app's own pages only, and only their own window.
 ipc.handle('bridge:full-screen', (e, on) => {
@@ -822,16 +834,17 @@ let float = null
 let floatResize = null // resizing it by an edge (desktop/floatfit.js)
 let floatHiddenFor = null // what was on the card when you hid it: it stays hidden until that changes
 let floatKey = null
-let floatCalls = null // the last /api/calls, to place the card again as sharing starts or stops
-// Kept out of pictures of the screen while you share or record it, and, unless it's the meeting
-// being recorded, not shown at all then: it shows once sharing stops (desktop/floatshare.js).
+let floatMoved = false // the meeting's card went to the menu bar for a share
+let floatKeep = null // what was on the card when you asked for it back from the menu bar during a share
+// Not there while you share or record your screen: the meeting being recorded's card goes to the
+// menu bar and comes back after, any other waits, and it's asked to be left out of pictures of the
+// screen meanwhile (desktop/floatshare.js). Sharing starting or stopping: looked at again at once,
+// with whether Bridge AI is looking at the screen itself (/api/calls capturing) as it is now.
 const { make: watchSharing, place: placeOf } = require('./floatshare.js')
-let placing = null
-const placeSoon = () => { if (!placing) placing = setImmediate(() => { placing = null; if (floatCalls) placeFloat(floatCalls) }) }
 const floatShare = watchSharing({
   bin: process.env.BRIDGE_CALLWATCH || (fs.existsSync(path.join(ROOT, 'native', 'bin', 'callwatch')) ? path.join(ROOT, 'native', 'bin', 'callwatch') : null),
   mac: IS_MAC,
-  onChange: () => { if (float && !float.isDestroyed()) float.setContentProtection(floatShare.hidden()); placeSoon() },
+  onChange: () => { if (float && !float.isDestroyed()) float.setContentProtection(floatShare.hidden()); floatLook?.() },
 })
 function floatAt(w, h) {
   try {
@@ -864,12 +877,13 @@ function showFloat() {
 const hideFloat = () => { floatResize?.stop(); if (float && !float.isDestroyed() && float.isVisible()) float.hide() }
 // The card, the menu bar, or neither, for what /api/calls says now (floatshare.js place).
 function placeFloat(c) {
-  floatCalls = c
-  const p = placeOf(c, { hiddenFor: floatHiddenFor, mac: IS_MAC, share: floatShare })
+  if (!floatShare.sharing()) floatKeep = null
+  const p = placeOf(c, { hiddenFor: floatHiddenFor, mac: IS_MAC, share: floatShare, watching: screenWatched || Date.now() < watchedUntil, capturing: !!c.capturing, moved: floatMoved, keep: floatKeep })
   floatKey = p.key
+  floatMoved = p.moved
   if (p.show) showFloat()
   else hideFloat()
-  setTray(p.bar ? c : null, p.instead)
+  setTray(p.bar ? c : null, p.instead, p.moved)
 }
 let floatLook = null // looks again now, rather than in two seconds
 async function watchCalls() {
@@ -904,7 +918,8 @@ function trayTitle() {
 // An action on the meeting, done by the main window (it has the mic when it's the one recording).
 const meetingOp = (op, id) => tellMain(`window.dispatchEvent(new CustomEvent('bridge-meeting-op', { detail: ${JSON.stringify({ op, id })} }))`, false)
 const openFromBar = (detail) => tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: ${JSON.stringify(detail)} }))`, true)
-function setTray(c, instead) {
+// forShare: the card went up here by itself while the screen is shared, and comes back after.
+function setTray(c, instead, forShare = false) {
   if (!c) {
     if (tray) { clearInterval(trayTick); tray.destroy(); tray = null; trayMenu = null; trayAt = null }
     return
@@ -922,7 +937,7 @@ function setTray(c, instead) {
   const paused = r?.status === 'paused'
   trayAt = { c, at: Date.now(), base: was && (paused || (s < was && was - s < 8)) ? was : s }
   trayTitle()
-  const key = JSON.stringify([r?.id, r?.title, paused, r?.callEnded, r?.endWhy, c.prompt?.app, c.prompt?.at, instead])
+  const key = JSON.stringify([r?.id, r?.title, paused, r?.callEnded, r?.endWhy, c.prompt?.app, c.prompt?.at, instead, forShare])
   if (key === trayMenu) return
   trayMenu = key
   const title = (t) => (t.length > 48 ? `${t.slice(0, 47)}…` : t)
@@ -935,7 +950,7 @@ function setTray(c, instead) {
       { type: 'separator' },
       { label: 'Open the meeting', click: () => openFromBar({ id: r.id }) },
       { label: 'All meetings', click: () => openFromBar({ list: true }) },
-      ...(instead ? [] : [{ type: 'separator' }, { label: 'Show the card', click: () => { floatHiddenFor = null; setTray(null); showFloat() } }]),
+      ...(instead ? [] : [{ type: 'separator' }, ...(forShare ? [{ label: 'Up here while you share your screen', enabled: false }] : []), { label: 'Show the card', click: () => { floatHiddenFor = null; if (forShare) floatKeep = floatKey; floatMoved = false; setTray(null); showFloat() } }]),
     ]
     : [
       { label: `${c.prompt.browser ? `A call in ${c.prompt.app}` : `${c.prompt.app} call`} started`, enabled: false },

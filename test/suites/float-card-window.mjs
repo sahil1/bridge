@@ -9,7 +9,8 @@
 // follows the pointer and the other stays, the card fills its window, taller shows more of what's
 // been said, the size is kept, and a double-click puts it back. While the screen is shared (a
 // stand-in for native/callwatch): a meeting about to start and what needs you aren't shown, and
-// come back by themselves once it stops; the meeting being recorded stays. A reminder's menu by its
+// come back by themselves once it stops; the meeting being recorded's card goes to the menu bar and
+// comes back as it was, where it was (not for Bridge AI's own look at the screen). A reminder's menu by its
 // ×, whole in the window: Remind me 1 min before (put off, and the app told to look again now), Hide
 // until the next meeting, and Turn off meeting reminders, asked first, saying where they come back.
 // 3.13.2's card at 110% (⌘+ once): its window stayed the card's size at 100%, which cut it off on
@@ -269,7 +270,7 @@ try {
   // ---------- While the screen is shared ----------
   // Placed as desktop/main.js places it (floatshare.js), with the stand-in saying when the screen is
   // shared: a meeting about to start, or what needs you, isn't shown while it is, and comes back by
-  // itself once it stops; the meeting being recorded stays.
+  // itself once it stops; the meeting being recorded's goes to the menu bar and comes back after.
   if (shareBin) {
     const visible = () => el.evaluate(() => globalThis.floatWin.isVisible())
     const placed = (c) => el.evaluate((_e, c) => globalThis.placeCard(c), c)
@@ -285,16 +286,63 @@ try {
     const needs = KINDS.find((x) => x.name === 'what needs you')
     const pn = await placed(needs.calls)
     ok(pn.held && !(await visible()), 'what needs you waits too', pn)
-    const recK = KINDS[0]
-    await show(recK)
-    const pr = await placed(recK.calls)
-    ok(pr.show && !!(await until(() => visible(), 3000, 100)), 'the meeting being recorded: its card stays while you share (kept out of the share by its setting)', pr)
     await show(soonK)
     await placed(soonK.calls)
-    ok(!!(await until(async () => !(await visible()), 3000, 100)), 'the recording over and the next meeting soon, still sharing: no reminder')
     sharing(false)
     ok(!!(await until(() => visible(), 5000, 100)), 'the share ends: the reminder comes back by itself, still wanted')
     await capture('float-reminder-after-sharing')
+
+    // The meeting being recorded: to the menu bar while the screen is shared, and back after as it
+    // was (slim, or pinned open) and where it was. Bridge AI's own looks at the screen (stood in for)
+    // aren't a share: watching a screen keeps the card; a look at the call's window doesn't move it.
+    const own = (o) => el.evaluate((_e, o) => { globalThis.own = o }, { watching: false, capturing: false, ...o })
+    const bounds = () => el.evaluate(() => globalThis.floatWin.getBounds())
+    const opened = () => card.evaluate(() => !document.querySelector('.float-card')?.classList.contains('slim'))
+    for (const pin of [false, true]) {
+      const recK = KINDS[0]
+      calls = recK.calls
+      await card.reload()
+      await card.waitForSelector('.float-card .fc-time', { timeout: 15000 })
+      await until(async () => (await placed(recK.calls)).show && await visible(), 5000, 100)
+      if (pin) {
+        await card.hover('.float-card .fc-head')
+        await card.click('.float-card .fc-links button[aria-label="Pin it open"]')
+      }
+      await card.mouse.move(1, 1)
+      const was = await until(async () => ((await opened()) === pin ? 'yes' : null), 5000, 100)
+      ok(!!was, pin ? 'the meeting\'s card pinned open' : 'the meeting\'s card slim', await opened())
+      const at0 = await bounds()
+      sharing(true)
+      ok(!!(await until(async () => !(await visible()), 5000, 100)), `${pin ? 'pinned open' : 'slim'}: a call starts sharing the screen, and the meeting's card goes, by itself`)
+      const pr = await placed(recK.calls)
+      ok(pr.bar && pr.moved && !pr.show, 'to the menu bar (its time, Pause, Stop and the rest in its menu)', pr)
+      if (!pin) {
+        await own({ watching: true })
+        const pw = await placed(recK.calls)
+        ok(pw.show && !pw.bar && !!(await until(() => visible(), 3000, 100)), "the meeting watches a screen: a share can't be told from that, so the card stays, with Capture on it", pw)
+        await own({})
+        const pg = await placed(recK.calls)
+        ok(!pg.show && pg.moved && !!(await until(async () => !(await visible()), 3000, 100)), 'it stops watching, the screen still shared: the card goes again', pg)
+        await own({ capturing: true })
+        const pc = await placed(recK.calls)
+        ok(!pc.show && !(await visible()), "a look at the call's window during the share doesn't bring it back", pc)
+        await own({})
+      }
+      sharing(false)
+      ok(!!(await until(async () => await visible() && (await opened()) === pin, 5000, 100)) && JSON.stringify(await bounds()) === JSON.stringify(at0), `sharing stops: it comes back by itself, ${pin ? 'pinned open' : 'slim'} as it was, where it was`, { at0, now: await bounds(), open: await opened() })
+      if (pin) await capture('float-recording-after-sharing')
+    }
+    await card.evaluate(() => localStorage.setItem('cc-float-pin', '0'))
+    // A look at the call's window for its names alone, nothing shared: macOS counts it as recording
+    // the screen, and the card stays.
+    await own({ capturing: true })
+    sharing(true)
+    await new Promise((r) => setTimeout(r, 600))
+    const pl = await placed(KINDS[0].calls)
+    ok(pl.show && await visible(), "a look at the call's window, nothing shared: the card stays", pl)
+    await own({})
+    sharing(false)
+    await until(async () => (await placed(KINDS[0].calls)).show, 3000, 100)
   }
 
   // ---------- The reminder's menu ----------
