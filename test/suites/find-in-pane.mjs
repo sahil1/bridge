@@ -135,6 +135,16 @@ try {
   const last = await marks(p)
   ok((await count()) === '5 of 5' && (!last || (last.now === 'LEDGER' && last.shown && last.scroll > top.scroll + 200)), 'and back past it to the last, scrolled down to', { count: await count(), last, top })
   await shot(p, `${tag}find-chat`)
+  // The chat made shorter under the current match (what the agent runs opening under it, a phone's
+  // keyboard): the match is brought back into view.
+  if (last) {
+    await p.evaluate(() => { const r = [...CSS.highlights.get('bridge-find-now')][0]; const chat = r.startContainer.parentElement.closest('.chat'); chat.scrollTop += r.getBoundingClientRect().bottom - (chat.getBoundingClientRect().bottom - 30) })
+    const low = await marks(p)
+    await p.setViewportSize({ width: 1440, height: 550 })
+    const kept = await until(async () => { const m = await marks(p); return m.chat[1] < low.at[0] && m.shown && m }, 3000, 100)
+    ok(low.shown && !!kept && kept.now === 'LEDGER', 'the chat made shorter under the current match: it\'s brought back into view', { low, kept: kept || await marks(p) })
+    await p.setViewportSize({ width: 1440, height: 800 })
+  }
 
   await bar.locator('button[aria-label="Match case"]').click()
   ok(!!(await until(async () => /of 3$/.test(await count()), 3000)) && (await bar.locator('button[aria-label="Match case"]').getAttribute('aria-pressed')) === 'true', 'Match case: only "ledger" as typed (3)', await count())

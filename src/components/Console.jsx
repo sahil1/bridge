@@ -404,7 +404,8 @@ function Chat({ agent, going = [], queued = [], delivered = [], outbox = [], que
   }, [data, going, queued.length, delivered.length, outbox.length, older.messages.length])
   // And when the chat itself changes size (what the agent has running opening under it, a card
   // growing its buttons), as it's drawn: else its end waits out of sight for the next message,
-  // then jumps up, under the pointer about to press it.
+  // then jumps up, under the pointer about to press it. While Find is on a match, the match stays
+  // in view instead, when the chat gets shorter under it.
   const sized = useRef(null)
   useEffect(() => {
     const el = scrollRef.current
@@ -412,7 +413,9 @@ function Chat({ agent, going = [], queued = [], delivered = [], outbox = [], que
     sized.current?.ro.disconnect()
     sized.current = null
     if (!el || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => { if (stick.current && anchor.current == null && !finder.current.holding()) el.scrollTop = el.scrollHeight })
+    const ro = new ResizeObserver((seen) => {
+      if (finder.current.holding()) { if (seen.some((x) => x.target === el)) finder.current.keep() } else if (stick.current && anchor.current == null) el.scrollTop = el.scrollHeight
+    })
     ro.observe(el)
     for (const c of el.children) ro.observe(c)
     sized.current = { el, ro }
