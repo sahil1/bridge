@@ -50,7 +50,15 @@ const OPENER = "const fs = require('fs'); const path = require('path'); fs.appen
 const relays = []
 const kits = []
 // Each part on its own: one that breaks is a failed check, and the rest go on.
-const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: ${String(e.message).split('\n')[0]}`) } }
+const part = async (name, fn) => {
+  try { await fn() } catch (e) {
+    // What it was waiting for, and where in this file.
+    const lines = String(e.message).split('\n')
+    const waiting = lines.find((l) => /waiting for /.test(l))?.trim().replace(/\x1b\[\d+m/g, '')
+    const at = /files-ui\.mjs:(\d+)/.exec(e.stack || '')?.[1]
+    ok(false, `${name}: ${lines[0]}${waiting ? ` (${waiting})` : ''}${at ? ` at files-ui.mjs:${at}` : ''}`)
+  }
+}
 // The answer to a request as it came: its status and JSON.
 const ask = async (base, p, opts = {}) => { const r = await fetch(`${base}/api${p}`, opts); return { s: r.status, j: await r.json().catch(() => ({})) } }
 try {
@@ -223,7 +231,9 @@ try {
     const left = fetch(`${desk.url}/api/files/search?root=home&path=Deep&q=zzz`, { signal: ctl.signal }).catch((e) => e.name)
     setTimeout(() => ctl.abort(), 20)
     const t0 = Date.now()
-    ok(await left === 'AbortError' && (await ask(desk.url, '/version')).s === 200 && Date.now() - t0 < 2000, 'a search left part way is let go, and the server carries on')
+    const gone = await left
+    const after = await ask(desk.url, '/version')
+    ok(gone === 'AbortError' && after.s === 200 && Date.now() - t0 < 2000, 'a search left part way is let go, and the server carries on', { left: typeof gone === 'string' ? gone : `answered ${gone?.status}`, version: after.s, ms: Date.now() - t0 })
   })
   await part('from another computer', async () => {
     const M = `${lap.url}/m/${deskOnLap.id}`
