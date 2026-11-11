@@ -21,6 +21,7 @@ Fixes: the whole app in your language, every pack complete; and the bugs behind 
 - **Sign this works when picked while a PDF is still opening.**
 - **Find in a chat keeps its match in view** when the chat gets shorter.
 - **Mail no longer shows "database is locked"** while Mail updates its index: it waits a moment, then says plainly if Mail stays busy.
+- **The inbox reads after Mail has quit on macOS 15**, rather than asking for Full Disk Access you'd already given.
 - **The banner asking to keep a device or allow a link** no longer moves the page under your finger.
 - **With Home on, a new window no longer takes you to Home** after you've already tapped somewhere.
 - **A dropdown made in a sheet is saved into Excel as its choices** (Yes, No), not as `["Yes","No"]`.

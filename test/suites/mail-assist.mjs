@@ -291,7 +291,7 @@ INSERT INTO messages VALUES (141, 0, 0, 0, ${t2 + 6}, ${t2 + 1}, 1, 1, 91, 141, 
   await api('/mail/3/times')
   ok(snap() === was, 'Mail\'s index and message files are exactly as they were, after reading, Done, Remind me, learning, drafting and scheduling')
   const sq = runs().filter((x) => x.sqlite3)
-  ok(sq.length > 5 && sq.every((x) => x.sqlite3.includes('-readonly') && x.sqlite3.some((a) => /\?mode=ro$/.test(a))), 'sqlite3 was only ever opened read only', sq.filter((x) => !x.sqlite3.includes('-readonly')).slice(0, 3))
+  ok(sq.length > 5 && sq.every((x) => x.sqlite3.includes('-readonly') && x.sqlite3.some((a) => /\?mode=ro(?:&immutable=1)?$/.test(a))), 'sqlite3 was only ever opened read only (as it stands, once Mail has quit)', sq.filter((x) => !x.sqlite3.includes('-readonly')).slice(0, 3))
 }
 
 try {

@@ -85,6 +85,12 @@ try {
     if (newer) {
       const INDEX = path.join(dir, 'Envelope Index')
       spawnSync('sqlite3', [INDEX, 'PRAGMA journal_mode=WAL'])
+      // Mail has quit: it folded its log into the index, and macOS 15's SQLite took the log away
+      // (this Mac's may keep it, so it's taken away here). A read-only reader can't open that.
+      for (const f of ['-wal', '-shm']) fs.rmSync(INDEX + f, { force: true })
+      const quit = await k.api('/mail?refresh=1').catch((e) => ({ error: e.message }))
+      ok(!quit.error && quit.available !== false && quit.messages?.length === 2, `${which}: Mail has quit and its index's log is gone: the inbox reads, rather than asking for Full Disk Access`, quit.error || quit.reason)
+      ok(!fs.readdirSync(dir).some((f) => /-(wal|shm)$/.test(f)), `${which}: and nothing is written beside Mail's index`, fs.readdirSync(dir))
       let writing = true
       // Mail opening, writing and quitting, over and over: each sqlite3 is one of those.
       const mail = (async () => { while (writing) await new Promise((res) => spawn('sqlite3', [INDEX, 'UPDATE messages SET read = read WHERE ROWID = 2']).on('close', res)) })()

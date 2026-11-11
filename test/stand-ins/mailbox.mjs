@@ -84,6 +84,9 @@ ${to.map((n) => `INSERT INTO recipients (message, address, type) VALUES (${id}, 
   message({ id: 130, box: 2, from: 2, to: [5], subject: 'Contract for the pilot', when: now - 2 * 86400, conv: 300, read: 1, body: 'Hi Kim,\n\nAttached is the contract for the pilot. Could you sign it this week?\n\nCheers,\nSam' })
   const made = spawnSync(SQLITE, [INDEX], { input: text, encoding: 'utf8' })
   if (made.status) throw new Error(`the made-up index: ${made.stderr}`)
+  // Mail isn't running as the test starts: its log is folded into the index and, as macOS 15's
+  // SQLite does, taken away (this Mac's may keep it), so every Mac reads the index as CI's does.
+  for (const f of ['-wal', '-shm']) fs.rmSync(INDEX + f, { force: true })
   seedMeetings(kit)
   return { V, INDEX, sqlite, emlx, who, rfc, LOCAL, now }
 }
