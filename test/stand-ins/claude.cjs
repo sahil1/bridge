@@ -167,10 +167,12 @@ function firstRunSignIn() {
   const screen = (rows) => process.stdout.write(`\x1b[2J\x1b[H${rows.join('\r\n')}`)
   let at = 'login'
   let typed = ''
-  screen([' Claude Code can be used with your Claude subscription or billed based on API usage through your Console account.', '', ' Select login method:', '',
-    ' ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise', '   2. Anthropic Console account · API usage billing', '   3. 3rd-party platform · Amazon Bedrock, Microsoft Foundry, Google Vertex AI', ''])
+  // Keys a key at a time before its screen is up: Enter pressed the moment it shows, while the
+  // terminal still read whole lines, came as a new line, which isn't Enter here (once in CI).
   if (process.stdin.isTTY) process.stdin.setRawMode(true)
   process.stdin.setEncoding('utf8')
+  screen([' Claude Code can be used with your Claude subscription or billed based on API usage through your Console account.', '', ' Select login method:', '',
+    ' ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise', '   2. Anthropic Console account · API usage billing', '   3. 3rd-party platform · Amazon Bedrock, Microsoft Foundry, Google Vertex AI', ''])
   process.stdin.on('data', (d) => {
     if (at === 'login' && d.includes('\r')) {
       at = 'browser'
