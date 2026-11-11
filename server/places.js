@@ -42,9 +42,11 @@ const expand = (p) => (p?.startsWith('~') ? path.join(HOME, p.slice(1)) : p)
 // Directory completion inside the home folder: "~/Desk" -> ~/Desktop, "~/Desktop/" -> its folders.
 export async function completeDir(input) {
   const raw = String(input || '~/').trim() || '~/'
-  const full = path.resolve(expand(raw.startsWith('/') || raw.startsWith('~') ? raw : `~/${raw}`))
+  // A whole path as typed (C:\Users\… on Windows too), or one from your home folder. Only "/" counted
+  // as whole, so on Windows a typed path became one inside home, and New said it didn't exist.
+  const full = path.resolve(expand(path.isAbsolute(raw) || raw.startsWith('~') ? raw : `~/${raw}`))
   if (full !== HOME && !full.startsWith(HOME + path.sep)) return { dirs: [] }
-  const endsSlash = /\/$/.test(raw)
+  const endsSlash = /[\\/]$/.test(raw)
   const dir = endsSlash ? full : path.dirname(full)
   const prefix = endsSlash ? '' : path.basename(full).toLowerCase()
   const [ents, st] = await Promise.all([fs.promises.readdir(dir, { withFileTypes: true }).catch(() => []), fs.promises.stat(full).catch((e) => e)]) // [] when not a folder
