@@ -84,7 +84,7 @@ function MiniTerm({ pane, selected, onSelect, onZoom, zoomed, fontSize, onLineHe
         <Icon name="terminal" size={11} />
         <span className="mono" title={pane.cwd}>{pane.title && !/^(zsh|bash|fish|-?zsh)$/.test(pane.title) ? pane.title : base(pane.cwd)}</span>
         <span className="muted">{cols}×{rows}</span>
-        <button className="mini-zoom" onClick={(e) => { e.stopPropagation(); onZoom(pane.paneId) }} title={zoomed ? 'Show all panes' : 'Zoom this pane'} aria-label={zoomed ? 'Show all panes' : 'Zoom pane'}>
+        <button className="mini-zoom" onClick={(e) => { e.stopPropagation(); onZoom(pane.paneId) }} title={zoomed ? t('Show all panes') : t('Zoom this pane')} aria-label={zoomed ? t('Show all panes') : t('Zoom pane')}>
           <Icon name={zoomed ? 'shrink' : 'maximize'} size={11} />
         </button>
       </div>
@@ -144,17 +144,17 @@ export default function ShellTab({ tab, controls = {}, onOpenInHerdr }) {
   const selName = sel.title && !/^(zsh|bash|fish|-?zsh)$/.test(sel.title) ? sel.title : base(sel.cwd)
 
   return (
-    <section className={`pane console shell-tab ${controls.minimized ? 'is-min' : ''}`} aria-label={`${tab.label} tab`}>
-      <PaneHeader icon="terminal" title={tab.label || 'shell'} subtitle={single ? `${tab.workspace} · ${home(sel.cwd)}` : `${tab.workspace} · ${panes.length} panes · ${home(sel.cwd)}`} {...controls}>
+    <section className={`pane console shell-tab ${controls.minimized ? 'is-min' : ''}`} aria-label={t('{name} tab', { name: tab.label })}>
+      <PaneHeader icon="terminal" title={tab.label || t('shell')} subtitle={single ? `${tab.workspace} · ${home(sel.cwd)}` : `${tab.workspace} · ${t('{n} panes', { n: panes.length })} · ${home(sel.cwd)}`} {...controls}>
         <div className="seg" role="tablist">
-          {[['panes', single ? 'terminal' : 'grid', single ? 'Terminal' : 'Panes'], ['files', 'folder', 'Files'], ['changes', 'branch', 'Changes'], ['preview', 'play', 'Preview']].map(([id, icon, label]) => (
+          {[['panes', single ? 'terminal' : 'grid', single ? t('Terminal') : t('Panes')], ['files', 'folder', t('Files')], ['changes', 'branch', t('Changes')], ['preview', 'play', t('Preview')]].map(([id, icon, label]) => (
             <button key={id} role="tab" aria-selected={view === id} className={view === id ? 'on' : ''} onClick={() => setView(id)} title={label}><Icon name={icon} size={14} /><span>{label}</span></button>
           ))}
         </div>
         {/* ⌘F does the same; on a phone this is the way in. */}
         {view === 'panes' && single && <button className="win-btn" onClick={(e) => openFind(e.currentTarget.closest('.pane'))} title={withKeys(t('Find in this terminal'), 'mod', 'f')} aria-label={t('Find in this terminal')}><Icon name="search" size={14} /></button>}
-        <button className="win-btn" onClick={() => openInTerminal(`tab:${tab.tabId}`).catch((e) => window.alert(e.message))} title="Open in your terminal app" aria-label="Open in your terminal app"><Icon name="terminal" size={14} /></button>
-        {onOpenInHerdr && <button className="win-btn" onClick={() => onOpenInHerdr(`tab:${tab.tabId}`)} title="Open in Herdr view" aria-label="Open in Herdr view"><Icon name="external" size={14} /></button>}
+        <button className="win-btn" onClick={() => openInTerminal(`tab:${tab.tabId}`).catch((e) => window.alert(e.message))} title={t('Open in your terminal app')} aria-label={t('Open in your terminal app')}><Icon name="terminal" size={14} /></button>
+        {onOpenInHerdr && <button className="win-btn" onClick={() => onOpenInHerdr(`tab:${tab.tabId}`)} title={t('Open in Herdr view')} aria-label={t('Open in Herdr view')}><Icon name="external" size={14} /></button>}
       </PaneHeader>
       <div className="console-body">
         {view === 'panes' && single && <div className="term-wrap"><LiveShell key={sel.paneId} paneId={sel.paneId} /></div>}
@@ -179,13 +179,13 @@ export default function ShellTab({ tab, controls = {}, onOpenInHerdr }) {
               <div className="shell-line">
                 <span className="shell-target" title={sel.cwd}><Icon name="terminal" size={12} /> {selName}</span>
                 <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); send() } }}
-                  placeholder={panes.length > 1 ? 'Type into the selected pane (click a pane to switch)…' : 'Type into this pane…'} autoCapitalize="off" autoCorrect="off" spellCheck="false" />
+                  placeholder={panes.length > 1 ? t('Type into the selected pane (click a pane to switch)…') : t('Type into this pane…')} autoCapitalize="off" autoCorrect="off" spellCheck="false" />
               </div>
               <div className="comp-tools">
-                <button className={`comp-btn ${keysOpen ? 'on' : ''}`} onClick={() => setKeysOpen(!keysOpen)} aria-label="Toggle keys" title="Keys"><Icon name="keyboard" size={16} /></button>
-                <button className={`comp-text-btn toggle ${withEnter ? 'on' : ''}`} onClick={() => setWithEnter(!withEnter)} title="Press Enter after the text">⏎ {withEnter ? 'runs it' : 'types only'}</button>
-                <span className={`comp-hint ${flash ? 'status' : ''}`}>{flash || <span className="hide-touch">Double-click a pane to zoom</span>}</span>
-                <button className="send" onClick={send} disabled={!text && !withEnter} aria-label="Send to pane" title="Send"><Icon name="send" size={15} /></button>
+                <button className={`comp-btn ${keysOpen ? 'on' : ''}`} onClick={() => setKeysOpen(!keysOpen)} aria-label={t('Toggle keys')} title={t('Keys')}><Icon name="keyboard" size={16} /></button>
+                <button className={`comp-text-btn toggle ${withEnter ? 'on' : ''}`} onClick={() => setWithEnter(!withEnter)} title={t('Press Enter after the text')}>⏎ {withEnter ? t('runs it') : t('types only')}</button>
+                <span className={`comp-hint ${flash ? 'status' : ''}`}>{flash || <span className="hide-touch">{t('Double-click a pane to zoom')}</span>}</span>
+                <button className="send" onClick={send} disabled={!text && !withEnter} aria-label={t('Send to pane')} title={t('Send')}><Icon name="send" size={15} /></button>
               </div>
             </div>
           </div>

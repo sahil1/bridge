@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { createPortal } from 'react-dom'
 import { StatusDot } from './Icon.jsx'
 import { openSettings } from './SignIn.jsx'
+import { t, tn, tx } from '../i18n/index.js'
 
 // A short walk through the real UI for someone new: the page dims, the part being explained stays
 // lit, and a card beside it says what it is. Shown once per device after setup (the phone layout
@@ -9,45 +10,46 @@ import { openSettings } from './SignIn.jsx'
 // element marked data-tour="..."; a step whose element isn't on screen is skipped.
 
 // What the status dots mean, drawn with the dots themselves.
-const legend = (
+const LEGEND = [['working', tx('Working')], ['done', tx('Finished')], ['blocked', tx('Needs you')]]
+const Legend = () => (
   <span className="tour-legend">
-    {[['working', 'Working'], ['done', 'Finished'], ['blocked', 'Needs you']].map(([s, label]) => (
-      <span key={s}><span aria-hidden="true"><StatusDot status={s} size={9} /></span>{label}</span>
+    {LEGEND.map(([s, label]) => (
+      <span key={s}><span aria-hidden="true"><StatusDot status={s} size={9} /></span>{t(label)}</span>
     ))}
   </span>
 )
 
 // The chief of staff's one place: its row at the top of the sidebar (and ⌘K), or the phone's Chief tab.
-const CHIEF = { at: 'chief', title: 'Your Chief of Staff', body: 'Always here, at the top of the sidebar, and in ⌘K. Tell it what you need in plain words: it hands the work to the right agent, starts a new one when nothing fits, and tells you when it\'s done.' }
-const CHIEF_PHONE = { ...CHIEF, body: 'Its own tab. Tell it what you need in plain words: it hands the work to the right agent, starts a new one when nothing fits, and tells you when it\'s done.' }
+const CHIEF = { at: 'chief', title: tx('Your Chief of Staff'), body: tx('Always here, at the top of the sidebar, and in ⌘K. Tell it what you need in plain words: it hands the work to the right agent, starts a new one when nothing fits, and tells you when it\'s done.') }
+const CHIEF_PHONE = { ...CHIEF, body: tx('Its own tab. Tell it what you need in plain words: it hands the work to the right agent, starts a new one when nothing fits, and tells you when it\'s done.') }
 
 // at: the data-tour name to point at. last: always shown (mid-screen if its element isn't there),
 // with the first-action button. link: a second button that ends the tour and opens that part of
-// Settings.
+// Settings. A {legend} in the body is where the status dots show.
 const STEPS = {
   desktop: [
-    { at: 'agents', title: 'Your agents', body: <>Everything you run, grouped in spaces, with its folder and git branch. The dot shows what each one is doing: {legend}</> },
+    { at: 'agents', title: tx('Your agents'), body: tx('Everything you run, grouped in spaces, with its folder and git branch. The dot shows what each one is doing: {legend}') },
     CHIEF,
-    { at: 'views', title: 'Chat or terminal', body: 'Chat is the conversation. Terminal is the agent\'s real screen, live, and you can type in it.' },
-    { at: 'composer', title: 'Talk to it', body: 'Type here to send a message: @ adds a file, / runs a command. When an agent asks you something, its question shows up just above as a card you can click.' },
-    { at: 'changes', title: 'Review and ship', body: 'Changes shows what the agent edited. Comment on any line to send it feedback, then commit, push and open a pull request from here.' },
-    { at: 'usage', title: 'Status at a glance', body: 'The ring is how much of your plan is left. Click it for this 5-hour window and this week, your accounts, updates, sounds, the weather and the time.' },
-    { at: 'settings', title: 'On your phone too, free', body: 'In Settings › Devices, follow the steps and scan the QR code with your phone. Everything between your phone and this computer is end-to-end encrypted, and you get a ping when an agent needs you or finishes.', link: { label: 'Set up phone', section: 'phone' } },
-    { at: 'new-agent', title: 'Your turn', body: 'Pick a folder and the agent to work in it, or start a chat with any model. Agents in the same project can each get their own copy, so they don\'t get in each other\'s way.', last: true },
+    { at: 'views', title: tx('Chat or terminal'), body: tx('Chat is the conversation. Terminal is the agent\'s real screen, live, and you can type in it.') },
+    { at: 'composer', title: tx('Talk to it'), body: tx('Type here to send a message: @ adds a file, / runs a command. When an agent asks you something, its question shows up just above as a card you can click.') },
+    { at: 'changes', title: tx('Review and ship'), body: tx('Changes shows what the agent edited. Comment on any line to send it feedback, then commit, push and open a pull request from here.') },
+    { at: 'usage', title: tx('Status at a glance'), body: tx('The ring is how much of your plan is left. Click it for this 5-hour window and this week, your accounts, updates, sounds, the weather and the time.') },
+    { at: 'settings', title: tx('On your phone too, free'), body: tx('In Settings › Devices, follow the steps and scan the QR code with your phone. Everything between your phone and this computer is end-to-end encrypted, and you get a ping when an agent needs you or finishes.'), link: { label: tx('Set up phone'), section: 'phone' } },
+    { at: 'new-agent', title: tx('Your turn'), body: tx('Pick a folder and the agent to work in it, or start a chat with any model. Agents in the same project can each get their own copy, so they don\'t get in each other\'s way.'), last: true },
   ],
   // The simple layout: what you need on day one.
   simple: [
     CHIEF,
-    { at: 'composer', title: 'Talk to it', body: 'Type here and press Enter. When it asks you something, the question shows up just above as a card you can click.' },
-    { at: 'agents', title: 'Your agents', body: <>Everything you run is listed here. The dot shows what each one is doing: {legend}</> },
-    { at: 'new-agent', title: 'Your turn', body: 'Start an agent in a project folder, or a chat with any model. Settings › General › Layout shows every panel when you want more.', last: true },
+    { at: 'composer', title: tx('Talk to it'), body: tx('Type here and press Enter. When it asks you something, the question shows up just above as a card you can click.') },
+    { at: 'agents', title: tx('Your agents'), body: tx('Everything you run is listed here. The dot shows what each one is doing: {legend}') },
+    { at: 'new-agent', title: tx('Your turn'), body: tx('Start an agent in a project folder, or a chat with any model. Settings › General › Layout shows every panel when you want more.'), last: true },
   ],
   phone: [
-    { at: 'agents', title: 'Your agents', body: <>Every agent you run and what it's doing: {legend} The badge counts the ones waiting on you.</> },
+    { at: 'agents', title: tx('Your agents'), body: tx('Every agent you run and what it\'s doing: {legend} The badge counts the ones waiting on you.') },
     CHIEF_PHONE,
-    { at: 'views', title: 'Chat or terminal', body: 'Switch between the conversation, the agent\'s live terminal, its files and its changes.' },
-    { at: 'settings', title: 'Get notified', body: 'In Settings › Devices, turn on notifications to hear when an agent needs you or finishes.' },
-    { at: 'search', title: 'Your turn', body: 'Search finds any agent, file or command. It\'s also where you start a new agent.', last: true },
+    { at: 'views', title: tx('Chat or terminal'), body: tx('Switch between the conversation, the agent\'s live terminal, its files and its changes.') },
+    { at: 'settings', title: tx('Get notified'), body: tx('In Settings › Devices, turn on notifications to hear when an agent needs you or finishes.') },
+    { at: 'search', title: tx('Your turn'), body: tx('Search finds any agent, file or command. It\'s also where you start a new agent.'), last: true },
   ],
 }
 
@@ -189,20 +191,20 @@ export default function Tour({ phone, simple, actionLabel, onAction, onClose }) 
         style={h ? { top: h.top, left: h.left, width: h.right - h.left, height: h.bottom - h.top } : undefined} />
       <div className="tour-card" ref={cardRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={bodyId}
         style={pos ? { top: pos.top, left: pos.left } : { opacity: 0 }}>
-        <button type="button" className="ghost-btn tour-skip" onClick={onClose}>{last ? 'Close' : 'Skip'}</button>
+        <button type="button" className="ghost-btn tour-skip" onClick={onClose}>{last ? t('Close') : t('Skip')}</button>
         <div className="tour-text" aria-live="polite">
-          <h3 id={titleId}>{step.title}</h3>
-          <p id={bodyId}>{step.body}</p>
+          <h3 id={titleId}>{t(step.title)}</h3>
+          <p id={bodyId}>{tn(step.body, { legend: <Legend /> })}</p>
         </div>
         <footer className="tour-foot">
           {live.avail.length > 1 && (
-            <span className="tour-dots" role="img" aria-label={`Step ${k + 1} of ${live.avail.length}`}>
+            <span className="tour-dots" role="img" aria-label={t('Step {n} of {total}', { n: k + 1, total: live.avail.length })}>
               {live.avail.map((i) => <span key={i} className={i === at ? 'on' : ''} />)}
             </span>
           )}
-          {live.avail.some((i) => i < at) && <button type="button" className="btn small" onClick={prev}>Back</button>}
-          {step.link && <button type="button" className="btn small" onClick={() => { onClose(); openSettings(step.link.section) }}>{step.link.label}</button>}
-          <button type="button" ref={primaryRef} className="btn small primary" onClick={last ? onAction : next}>{last ? actionLabel : 'Next'}</button>
+          {live.avail.some((i) => i < at) && <button type="button" className="btn small" onClick={prev}>{t('Back')}</button>}
+          {step.link && <button type="button" className="btn small" onClick={() => { onClose(); openSettings(step.link.section) }}>{t(step.link.label)}</button>}
+          <button type="button" ref={primaryRef} className="btn small primary" onClick={last ? onAction : next}>{last ? actionLabel : t('Next')}</button>
         </footer>
       </div>
     </div>,

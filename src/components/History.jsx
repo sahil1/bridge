@@ -9,12 +9,12 @@ import CommandHistory from './CommandHistory.jsx'
 import { api } from '../api.js'
 import { locale, t } from '../i18n/index.js'
 
-const ago = (t) => {
-  const s = (Date.now() - (typeof t === 'number' ? t : Date.parse(t))) / 1000
+const ago = (when) => {
+  const s = (Date.now() - (typeof when === 'number' ? when : Date.parse(when))) / 1000
   if (!Number.isFinite(s)) return ''
-  if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m ago`
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`
-  if (s < 86400 * 30) return `${Math.round(s / 86400)}d ago`
+  if (s < 3600) return t('{n}m ago', { n: Math.max(1, Math.round(s / 60)) })
+  if (s < 86400) return t('{n}h ago', { n: Math.round(s / 3600) })
+  if (s < 86400 * 30) return t('{n}d ago', { n: Math.round(s / 86400) })
   return new Date(Date.now() - s * 1000).toLocaleDateString(locale(), { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
@@ -59,16 +59,16 @@ export default function History({ onClose, onOpen, commands = false }) {
   }
   const forget = async (x) => { try { await api(`/archive/${x.id}`, { method: 'DELETE' }); loadClosed() } catch (e) { setErr(e.message) } }
   const Act = ({ r, k }) => (r.paneId
-    ? <button className="btn small" onClick={() => { onOpen(r.paneId); onClose() }}>Open</button>
-    : <button className="btn small primary" onClick={() => resume(r, k)} disabled={!!busy}>{busy === k ? 'Resuming…' : 'Resume'}</button>)
+    ? <button className="btn small" onClick={() => { onOpen(r.paneId); onClose() }}>{t('Open')}</button>
+    : <button className="btn small primary" onClick={() => resume(r, k)} disabled={!!busy}>{busy === k ? t('Resuming…') : t('Resume')}</button>)
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="modal history" role="dialog" aria-label="History">
+      <div className="modal history" role="dialog" aria-label={t('History')}>
         <header className="modal-head">
           <Icon name="clock" size={16} />
-          <h3>History</h3>
-          <button type="button" className="win-btn" onClick={onClose} aria-label="Close"><Icon name="x" size={14} /></button>
+          <h3>{t('History')}</h3>
+          <button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={14} /></button>
         </header>
         {commands && (
           <nav className="hist-tabs" role="tablist" aria-label={t('History')}>
@@ -79,20 +79,23 @@ export default function History({ onClose, onOpen, commands = false }) {
         {commands && tab === 'commands' ? <CommandHistory onClose={onClose} onSettings={() => { onClose(); window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'commands' } })) }} /> : <>
         <div className="hist-search">
           <Icon name="search" size={14} />
-          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search every conversation: a customer, a file, an error…" aria-label="Search conversations" />
+          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search every conversation: a customer, a file, an error…')} aria-label={t('Search conversations')} />
         </div>
         {err && <p className="error-text small">{err}</p>}
         <div className="hist-list">
           {found ? (
             <>
-              <p className="muted small hist-sub">{found.total ? `${found.total} conversation${found.total === 1 ? '' : 's'} mention "${found.q}"${found.total > found.results.length ? `; the ${found.results.length} most recent` : ''}` : `Nothing mentions "${found.q}".`}</p>
+              <p className="muted small hist-sub">{!found.total ? t('Nothing mentions "{q}".', { q: found.q })
+                : found.total === 1 ? t('1 conversation mentions "{q}"', { q: found.q })
+                : found.total > found.results.length ? t('{n} conversations mention "{q}"; the {shown} most recent', { n: found.total, q: found.q, shown: found.results.length })
+                : t('{n} conversations mention "{q}"', { n: found.total, q: found.q })}</p>
               {found.results.map((r) => (
                 <div key={r.sessionId} className="hist-item">
                   <AgentMark kind={r.kind} size={18} />
                   <div className="hist-body">
-                    <div className="hist-title">{r.label || r.title || 'Conversation'}{r.paneId && <span className="hist-live">running</span>}</div>
+                    <div className="hist-title">{r.label || r.title || t('Conversation')}{r.paneId && <span className="hist-live">{t('running')}</span>}</div>
                     <div className="muted small mono hist-where">{[r.workspace, r.cwd].filter(Boolean).join(' › ')} · {ago(r.last)}</div>
-                    {r.hits.map((h, i) => <div key={i} className="hist-hit"><span className="muted small">{h.role === 'user' ? 'You' : 'Agent'}:</span> <Snip text={h.text} q={found.q} /></div>)}
+                    {r.hits.map((h, i) => <div key={i} className="hist-hit"><span className="muted small">{h.role === 'user' ? t('You') : t('Agent')}:</span> <Snip text={h.text} q={found.q} /></div>)}
                   </div>
                   <Act r={r} k={r.sessionId} />
                 </div>
@@ -100,17 +103,17 @@ export default function History({ onClose, onOpen, commands = false }) {
             </>
           ) : (
             <>
-              <p className="muted small hist-sub">{closed?.length ? 'Agents you closed. Resume one to pick up with its full history.' : closed ? 'Agents you close show up here, to resume later. Search above finds any conversation.' : 'Loading…'}</p>
+              <p className="muted small hist-sub">{closed?.length ? t('Agents you closed. Resume one to pick up with its full history.') : closed ? t('Agents you close show up here, to resume later. Search above finds any conversation.') : t('Loading…')}</p>
               {(closed || []).map((x) => (
                 <div key={x.id} className="hist-item">
                   <AgentMark kind={x.kind} size={18} />
                   <div className="hist-body">
-                    <div className="hist-title">{x.label || 'Agent'}{x.paneId && <span className="hist-live">running</span>}</div>
-                    <div className="muted small mono hist-where">{[x.workspace, x.cwd].filter(Boolean).join(' › ')} · closed {ago(x.closedAt)}</div>
+                    <div className="hist-title">{x.label || t('Agent')}{x.paneId && <span className="hist-live">{t('running')}</span>}</div>
+                    <div className="muted small mono hist-where">{[x.workspace, x.cwd].filter(Boolean).join(' › ')} · {t('closed {when}', { when: ago(x.closedAt) })}</div>
                     {x.preview && <div className="hist-hit muted">{x.preview}</div>}
                   </div>
                   <Act r={x} k={x.id} />
-                  <button className="win-btn" onClick={() => forget(x)} title="Remove from this list (the conversation stays on disk)" aria-label="Remove from list"><Icon name="x" size={12} /></button>
+                  <button className="win-btn" onClick={() => forget(x)} title={t('Remove from this list (the conversation stays on disk)')} aria-label={t('Remove from list')}><Icon name="x" size={12} /></button>
                 </div>
               ))}
             </>

@@ -9,6 +9,7 @@ import disposeTerm from '../disposeTerm.js'
 import gpu from '../termGpu.js'
 import altArrows from '../altArrows.js'
 import { openSocket } from '../api.js'
+import { t, tn, tx } from '../i18n/index.js'
 
 // One Dark, matching herdr's theme and Ghostty's default.
 const ONE_DARK = {
@@ -18,6 +19,9 @@ const ONE_DARK = {
 }
 
 const clearTerm = (term) => { try { term?.reset() } catch { /* disposed */ } }
+
+// The connection's state, as the bar shows it (anything else is herdr's own message).
+const STATUS = { idle: tx('idle'), connecting: tx('connecting'), reconnecting: tx('reconnecting'), detached: tx('detached') }
 
 const TOUCH_KEYS = [
   ['⌃b', '\x02'], ['Esc', '\x1b'], ['Tab', '\t'], ['⇧Tab', '\x1b[Z'], ['↑', '\x1b[A'], ['↓', '\x1b[B'], ['←', '\x1b[D'], ['→', '\x1b[C'], ['⏎', '\r'], ['⌃c', '\x03'],
@@ -103,7 +107,7 @@ export default function HerdrView({ active, onViewHotkey, session: want }) {
       }
       ws.onclose = (ev) => {
         if (closed) return
-        if (ev.code === 4001) { setStatus('Screen too narrow for herdr; use Terminals'); return }
+        if (ev.code === 4001) { setStatus(t('Screen too narrow for herdr; use Terminals')); return }
         setStatus((s) => (s === 'live' || s === 'connecting' ? 'reconnecting' : s))
         retry = setTimeout(connect, soonRef.current ? 0 : 2500)
         soonRef.current = false
@@ -146,14 +150,14 @@ export default function HerdrView({ active, onViewHotkey, session: want }) {
     <section className="herdr-view" hidden={!active} aria-label="Herdr">
       <div className="herdr-bar">
         <span className={`conn conn-${status === 'live' ? 'live' : status === 'connecting' || status === 'reconnecting' ? 'wait' : 'off'}`}>
-          <span className="conn-dot" />{status === 'live' ? `herdr · ${session}` : status}
+          <span className="conn-dot" />{status === 'live' ? `herdr · ${session}` : typeof STATUS[status] === 'string' ? t(STATUS[status]) : status}
         </span>
-        <span className="herdr-hint">Your herdr, live. Same keys: prefix <kbd>ctrl</kbd>+<kbd>b</kbd>. <kbd>alt</kbd>+<kbd>1</kbd> back to Command.</span>
+        <span className="herdr-hint">{tn('Your herdr, live. Same keys: prefix {prefix}. {back} back to Command.', { prefix: <><kbd>ctrl</kbd>+<kbd>b</kbd></>, back: <><kbd>alt</kbd>+<kbd>1</kbd></> })}</span>
         <div className="herdr-tools">
-          <button className="win-btn" onClick={() => setFontSize(Math.max(8, fontSize - 1))} aria-label="Smaller text" title="Smaller text"><Icon name="minus" size={14} /></button>
+          <button className="win-btn" onClick={() => setFontSize(Math.max(8, fontSize - 1))} aria-label={t('Smaller text')} title={t('Smaller text')}><Icon name="minus" size={14} /></button>
           <span className="font-size">{fontSize}</span>
-          <button className="win-btn" onClick={() => setFontSize(Math.min(22, fontSize + 1))} aria-label="Larger text" title="Larger text"><Icon name="plus" size={14} /></button>
-          <button className="win-btn" onClick={reconnect} aria-label="Reconnect" title="Reconnect"><Icon name="refresh" size={14} /></button>
+          <button className="win-btn" onClick={() => setFontSize(Math.min(22, fontSize + 1))} aria-label={t('Larger text')} title={t('Larger text')}><Icon name="plus" size={14} /></button>
+          <button className="win-btn" onClick={reconnect} aria-label={t('Reconnect')} title={t('Reconnect')}><Icon name="refresh" size={14} /></button>
         </div>
       </div>
       <div className="herdr-term" ref={hostRef} onClick={() => termRef.current?.focus()} />

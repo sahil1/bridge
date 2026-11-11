@@ -49,7 +49,7 @@ import RemoteAgent from './components/RemoteAgent.jsx'
 import Dictation from './dictation/Dictation.jsx'
 import BackForward from './components/BackForward.jsx'
 import { start as navStart, stop as navStop, seen as navSeen, recheck as navRecheck, usePlaces, placeOf, placeLabel, showPlaceIn, replacedWith, renamedTab, slotOf } from './backForward.js'
-import { t, tx } from './i18n/index.js'
+import { t, tn, tx } from './i18n/index.js'
 
 const MIN_PANE = 420
 const TOUR_ON_START = false
@@ -1143,7 +1143,7 @@ function App() {
       if (!fleet?.down) return <Home fleet={fleet} onLaunched={fromHome} onMore={(init) => setNewAgent(init)} autoFocus={false} />
       return (
         <section className="pane empty-pane">
-          <div className="viewer-empty"><Icon name="terminal" size={24} /><p>{fleet.session ? <>The herdr session <b>{fleet.session}</b> isn't running. {t('Start it from the sidebar.')}</> : t('No herdr session is running.')}</p></div>
+          <div className="viewer-empty"><Icon name="terminal" size={24} /><p>{fleet.session ? <>{tn('The herdr session {name} isn\'t running.', { name: <b>{fleet.session}</b> })} {t('Start it from the sidebar.')}</> : t('No herdr session is running.')}</p></div>
         </section>
       )
     }
@@ -1165,7 +1165,7 @@ function App() {
               <section className="pane popped-pane">
                 <div className="viewer-empty">
                   <Icon name="popout" size={26} />
-                  <p><b>{nameOf(a)}</b> is open in its own window.</p>
+                  <p>{tn('{name} is open in its own window.', { name: <b>{nameOf(a)}</b> })}</p>
                   <div className="popped-acts">
                     <button className="btn small" onClick={() => showPopped(a.paneId)}>{t('Show window')}</button>
                     <button className="btn small primary" onClick={() => bringBack(a.paneId)}>{t('Bring back here')}</button>
