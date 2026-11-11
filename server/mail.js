@@ -25,6 +25,7 @@ const SETUP = {
   noAccess: 'Bridge AI needs Full Disk Access to read Mail\'s local index. Nothing leaves your Mac.',
   notMac: 'The inbox reads Apple Mail on macOS. It isn\'t available on this platform yet.',
   noMail: 'Mail has nothing on this Mac yet. Add your account to Mail and open it once, so it can sync.',
+  busy: 'Mail is busy updating its index, so your mail couldn\'t be read just now. Try again in a moment.',
 }
 
 function findIndex() {
@@ -39,9 +40,11 @@ function findIndex() {
 }
 
 const sql = (file, query) => new Promise((resolve, reject) => {
-  // mode=ro: never writes; Mail keeps working on its own copy.
-  execFile('sqlite3', ['-readonly', '-json', `file:${file}?mode=ro`, query], { timeout: 20000, maxBuffer: 32 * 1024 * 1024 }, (err, out, errOut) => {
-    if (err) return reject(new Error((errOut || err.message).trim().split('\n')[0]))
+  // mode=ro: never writes; Mail keeps working on its own copy. .timeout: a read that comes just as
+  // Mail opens, quits or writes its index waits for Mail to let go of it (for up to 5 seconds),
+  // rather than failing with "database is locked"; still locked after that, it says Mail is busy.
+  execFile('sqlite3', ['-readonly', '-json', '-cmd', '.timeout 5000', `file:${file}?mode=ro`, query], { timeout: 20000, maxBuffer: 32 * 1024 * 1024 }, (err, out, errOut) => {
+    if (err) { const why = (errOut || err.message).trim().split('\n')[0]; return reject(new Error(/database is locked|database table is locked/i.test(why) ? SETUP.busy : why)) }
     try { resolve(out.trim() ? JSON.parse(out) : []) } catch (e) { reject(e) }
   })
 })
