@@ -70,6 +70,15 @@ try {
     const warn = p.locator('[data-setting="default-agent"] .st-note.warn')
     const reads = () => warn.evaluate((e) => e.textContent.replace(/\s+/g, ' ').trim())
     ok(!!(await until(async () => (await reads()) === none, 8000)) && (await warn.locator('button').innerText()) === say(l, 'Install one'), `${l}: Settings › General, a sentence with a link in it`, await reads().catch(() => ''))
+    // The link sits in the sentence: what follows it goes on from beside it, not on a line of its own.
+    const inline = await warn.evaluate((e) => {
+      const b = e.querySelector('button'), after = b.nextSibling
+      if (!after?.textContent.trim()) return true
+      const r = document.createRange(); r.setStart(after, 0); r.setEnd(after, 1)
+      const a = r.getClientRects()[0], q = b.getBoundingClientRect()
+      return { ok: !!a && Math.abs((a.top + a.bottom) / 2 - (q.top + q.bottom) / 2) < 8 && a.left >= q.right - 1, a: a && [a.left, a.top], q: [q.right, q.top] }
+    })
+    ok(inline === true || inline.ok, `${l}: and its link in the line`, inline)
     if (phone) {
       const ph = await page(b, kit.url, { ...look, phone: true, store: { 'cc-lang': l } })
       await ph.p.waitForSelector('.tabbar button', { timeout: 15000 })

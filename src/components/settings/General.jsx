@@ -78,7 +78,7 @@ export default function General({ onGo, onOpenAgent }) {
       <section className="st-sec" data-setting="default-agent">
         <h4>{t('Default agent')}</h4>
         <p className="muted small">{t('New agents, chats, routines and mail tasks start with it unless you pick another.')}</p>
-        {agents && !installed.length && <p className="st-note warn">{tn('No agents installed yet. {install} to get started, or chat with any model through an API key: New chat, then Any model.', { install: <button className="link-btn" onClick={() => onGo('agents')}>{t('Install one')}</button> })}</p>}
+        {agents && !installed.length && <p className="st-note warn"><span>{tn('No agents installed yet. {install} to get started, or chat with any model through an API key: New chat, then Any model.', { install: <button className="link-btn" onClick={() => onGo('agents')}>{t('Install one')}</button> })}</span></p>}
         <div className="st-agent-grid">
           {installed.map((a) => (
             <button key={a.kind} type="button" className={`st-agent ${def === a.kind ? 'on' : ''}`} aria-pressed={def === a.kind} onClick={() => save({ defaultAgent: a.kind })}>
@@ -167,7 +167,7 @@ function HerdrSession({ value, onSave }) {
   if (!d) return null
   if (!d.installed) {
     return (
-      <p className="st-note warn"><Icon name="alert" size={13} /> {tn("herdr isn't installed, or isn't running. Install it from {site} and start it once, or choose Built in above.", { site: <a href="https://herdr.dev" target="_blank" rel="noreferrer">herdr.dev</a> })}
+      <p className="st-note warn"><Icon name="alert" size={13} /> <span>{tn("herdr isn't installed, or isn't running. Install it from {site} and start it once, or choose Built in above.", { site: <a href="https://herdr.dev" target="_blank" rel="noreferrer">herdr.dev</a> })}</span>
         <button type="button" className="link-btn" onClick={load}>{t('Check again')}</button></p>
     )
   }
