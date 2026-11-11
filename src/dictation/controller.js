@@ -182,15 +182,15 @@ const tabOf = (e) => [...boxes.values()].find((b) => b.frame && b.win?.() === e.
 const toTab = (b, type, more = {}) => { if (!b.origin) return; try { b.win()?.postMessage({ [MSG]: type, ...more }, b.origin) } catch { /* gone */ } }
 const hostSays = () => ({ listens: !!lending, app: !!window.bridgeApp?.desktop })
 // The words, to a tab's page: whether it put them, or false after a while (it went, or it's a Bridge
-// AI from before this, which never answers).
-function askTab(b, type, text, at) {
+// AI from before this, which never answers). n: which of its presses they were said for.
+function askTab(b, type, text, at, n) {
   const w = b.win?.()
   if (!w || !spoke.has(w)) return Promise.resolve(false)
   return new Promise((resolve) => {
     const id = ++asked
     const timer = setTimeout(() => { answers.delete(id); resolve(false) }, ANSWER_MS)
     answers.set(id, (put) => { clearTimeout(timer); answers.delete(id); resolve(put === true) })
-    toTab(b, type, { id, text, ...(Number.isFinite(at) ? { at } : {}) })
+    toTab(b, type, { id, text, ...(Number.isFinite(at) ? { at } : {}), ...(n ? { n } : {}) })
   })
 }
 // ...heard here for it (RemoteAgent.jsx's insert).
@@ -223,7 +223,8 @@ function fromTab(e) {
   const inIt = document.hasFocus() && document.activeElement === b.el?.() && navigator.userActivation?.isActive !== false
   const forIt = () => st.target?.kind === 'frame' && boxes.get(st.target.id) === b
   const at = Number.isFinite(d.at) ? d.at : Date.now()
-  if (type === 'press' && inIt) lending.press(at, d.target ? { from: e.source, ask: d.ask === true, sentence: d.sentence !== false, give: (text, when) => askTab(b, 'give', text, when) } : null)
+  const n = typeof d.n === 'string' && d.n.length <= 40 ? d.n : null
+  if (type === 'press' && inIt) lending.press(at, d.target ? { from: e.source, ask: d.ask === true, sentence: d.sentence !== false, give: (text, when) => askTab(b, 'give', text, when, n) } : null)
   else if (type === 'release' && forIt()) lending.release(at)
   else if (type === 'cancel' && forIt()) lending.cancel()
   else if (type === 'finish' && forIt()) lending.finish()
@@ -246,21 +247,29 @@ if (typeof window !== 'undefined' && !embedded) {
 // the one listening for a press made here, which then has the key's let go, Esc, Enter and the state.
 let around = null // { origin, listens, app }: that window's page, once it says it's there
 let mirror = { phase: 'idle', mode: null } // how its listening for this page is going
-let pending = null // what this page's press was for: { ask, sentence, give }
+// What this page's last few presses were for: { ask, sentence, give }, each by a name of its own,
+// which the words come back with. They're for the press that started the listening, which a later
+// one may have ended (the mic button tapped to listen hands-free, then Ask out loud pressed): they
+// go where that first one was for, not to the Chief of Staff; and words for a press made on the
+// page this tab showed before aren't taken for one of this page's. (A window's page from before
+// this gives them back with no name: where the last press was for.)
+const pending = new Map()
+const PAGE = Math.random().toString(36).slice(2, 10)
 let pressed = 0
 let stated = 0
 const aroundAt = (o) => { try { const u = new URL(o); return u.origin === location.origin || (u.protocol === 'http:' && /^(127\.0\.0\.1|localhost|\[::1\])$/.test(u.hostname)) } catch { return false } }
 const toHost = (type, more = {}) => { try { window.parent.postMessage({ [MSG]: type, ...more }, around?.origin || '*') } catch { /* gone */ } }
 const relayed = {
   press: (at, from) => {
-    if (from) pending = from
     mirror = { phase: 'opening', mode: 'hold' }
     const n = ++pressed
+    const name = `${PAGE}.${n}`
+    if (from) { pending.set(name, from); for (const k of pending.keys()) if (pending.size > 8) pending.delete(k) }
     // Nothing back from it (it went): this page isn't left thinking it listens.
     setTimeout(() => { if (pressed === n && stated < n) mirror = { phase: 'idle', mode: null } }, ANSWER_MS)
     // The focus in this tab, which that page asks of a press (a button held here may not move it).
     try { window.focus() } catch { /* it stays where it was */ }
-    toHost('press', { at, ...(from ? { target: true, ask: !!from.ask, sentence: from.sentence !== false } : {}) })
+    toHost('press', { at, n: name, ...(from ? { target: true, ask: !!from.ask, sentence: from.sentence !== false } : {}) })
   },
   release: (at) => toHost('release', { at }),
   cancel: () => toHost('cancel'),
@@ -276,7 +285,8 @@ function fromHost(e) {
   if (e.origin !== around?.origin) return
   if (type === 'state') { stated = pressed; mirror = { phase: PHASES.has(d.phase) ? d.phase : 'idle', mode: d.mode === 'free' || d.mode === 'hold' ? d.mode : null }; return }
   const text = typeof d.text === 'string' ? d.text.slice(0, 200_000) : ''
-  const put = type === 'give' ? (pending && text ? pending.give(text, Number.isFinite(d.at) ? d.at : Date.now()) : false) : take(text)
+  const was = type === 'give' ? (typeof d.n === 'string' ? pending.get(d.n) : [...pending.values()].at(-1)) : null
+  const put = type === 'give' ? (was && text ? was.give(text, Number.isFinite(d.at) ? d.at : Date.now()) : false) : take(text)
   Promise.resolve(put).then((x) => x === true, () => false).then((x) => toHost(type === 'give' ? 'given' : 'took', { id: d.id, put: x }))
 }
 if (typeof window !== 'undefined' && embedded) {
