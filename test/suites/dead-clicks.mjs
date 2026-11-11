@@ -46,7 +46,7 @@ const QUIET = [
 ]
 
 // ---------- a Bridge AI with something in each view ----------
-const kit = await startKit('dead-clicks', { config: { trials: { studio: true, home: true, files: true, routines: true, 'meeting-insights': true, 'tab-groups': true, 'usage-everywhere': true, 'signature-assist': true } } })
+const kit = await startKit('dead-clicks', { config: { trials: { studio: true, home: true, files: true, routines: true, 'meeting-insights': true, 'tab-groups': true, 'usage-everywhere': true, 'signature-assist': true, 'recommended-settings': true } } })
 // macOS's open, osascript (Finder, Terminal) and xdg-open: written down, never run.
 const NOTE = "require('fs').appendFileSync(require('path').join(__dirname, 'opened.log'), JSON.stringify(process.argv.slice(1)) + '\\n')\n"
 for (const n of ['open', 'osascript', 'xdg-open']) kit.program(n, NOTE)

@@ -6,12 +6,14 @@ import { api } from '../../api.js'
 import SignInButton, { canSignIn } from '../SignIn.jsx'
 import { useRecheck } from '../PermissionFix.jsx'
 import { Advanced } from './Advanced.jsx'
+import { RecommendCard, StartsWith, useRecommended } from '../Recommended.jsx'
 import { t } from '../../i18n/index.js'
 
 // Settings › Agents: every agent CLI Bridge AI knows, whether it's installed and signed in,
 // and one click to install it (in a terminal tab you can watch) or start it.
 // Their own sign-in, from here (SignIn.jsx); the others sign in the first time they open. Under
-// Advanced: the models the Chief of Staff can consult.
+// Advanced: the models the Chief of Staff can consult. With Recommended Settings on (a beta
+// feature), under Claude Code: what's recommended for your plan, and what it starts with.
 
 export default function Agents({ onOpenAgent }) {
   const [list, setList] = useState(null)
@@ -19,6 +21,7 @@ export default function Agents({ onOpenAgent }) {
   const [consult, setConsult] = useState(null)
   const [busy, setBusy] = useState(null)
   const [msg, setMsg] = useState(null)
+  const rec = useRecommended()
   const load = () => {
     api('/agents/catalog').then(setList).catch((e) => setMsg({ error: e.message }))
     api('/consult').then(setConsult).catch(() => setConsult([]))
@@ -29,6 +32,7 @@ export default function Agents({ onOpenAgent }) {
   const recheck = () => {
     api('/agents/catalog').then(setList).catch(() => {})
     api('/subscriptions?refresh=1').then((r) => setSubs(Object.fromEntries((r || []).map((x) => [x.kind, x])))).catch(() => {})
+    if (rec.on) rec.reload(true) // signed in meanwhile: its plan's recommendation
   }
   useRecheck(recheck, msg?.paneId ? 8000 : 0)
 
@@ -52,9 +56,10 @@ export default function Agents({ onOpenAgent }) {
     <div className="st-sections">
       <div className="st-row between">
         <p className="muted small">{t("Bridge AI uses the agents' own sign-ins and subscriptions; it never sees your passwords or tokens.")}</p>
-        <button type="button" className="ghost-btn" onClick={load}><Icon name="refresh" size={12} /> Refresh</button>
+        <button type="button" className="ghost-btn" onClick={() => { load(); if (rec.on) rec.reload(true) }}><Icon name="refresh" size={12} /> Refresh</button>
       </div>
       {msg?.error && <p className="st-note bad"><Icon name="alert" size={13} /> {msg.error}</p>}
+      {rec.error && <p className="st-note bad"><Icon name="alert" size={13} /> {t("Couldn't look up the settings recommended for your plan: {error}", { error: rec.error })}</p>}
       {msg?.ok && <p className="st-note ok"><Icon name="terminal" size={13} /> {msg.ok} {msg.paneId && <button className="link-btn" onClick={() => onOpenAgent?.(msg.paneId)}>Open it</button>}</p>}
       {consult && consult.length > 0 && (
         <Advanced order={10}>
@@ -75,8 +80,9 @@ export default function Agents({ onOpenAgent }) {
         {sorted.map((a) => {
           const sub = subs[a.kind]
           const state = !a.installed ? { t: 'Not installed', c: '' } : sub?.signedIn === true ? { t: `Signed in${sub.method ? ` · ${sub.method}` : ''}${sub.account ? ` · ${sub.account}` : ''}`, c: 'good' } : sub?.signedIn === false ? { t: 'Installed, not signed in', c: 'warn' } : { t: 'Installed', c: 'good' }
+          const r = a.installed && rec.data?.agents.find((x) => x.kind === a.kind)
           return (
-            <li key={a.kind} className={`st-agent-row ${a.installed ? '' : 'off'}`} data-setting={`agent-${a.kind}`}>
+            <li key={a.kind} className={`st-agent-row ${a.installed ? '' : 'off'} ${r ? 'has-rec' : ''}`} data-setting={`agent-${a.kind}`}>
               <AgentMark kind={a.kind} label={a.label} size={34} />
               <div className="st-agent-text">
                 <b>{a.label}</b>
@@ -97,6 +103,12 @@ export default function Agents({ onOpenAgent }) {
                       </>
                     : null}
               </div>
+              {r && (
+                <div className="rec-below">
+                  <RecommendCard r={r} onAnswer={rec.answer} />
+                  <StartsWith r={r} runtime={rec.data.runtime} onSave={rec.save} />
+                </div>
+              )}
             </li>
           )
         })}
