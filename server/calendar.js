@@ -1,11 +1,12 @@
 // Today's calendar, read locally from macOS Calendar: through Bridge AI's own helper
 // (native/bridgecal.swift), or icalBuddy on a Mac without it. The Exchange account is
 // already synced there, so there's no sign-in and nothing leaves the Mac.
-// Meeting notes carry Teams passcodes and organizer links; only the join link and the
-// short agenda above the Teams boilerplate are kept. With bridgecal, each event also has its
-// calendar's colour, a lasting id, this Mac's own id for it (for Open in Calendar, openin.js) and
-// whether it repeats, your answer to it, who organised it and the addresses of who's invited. It
-// only reads: nothing here adds, changes or answers an event.
+// Meeting notes carry Teams passcodes and organizer links; only the join link, the invite's own
+// words above the Teams boilerplate (whole, and as a short agenda) and the files it links to are
+// kept. With bridgecal, each event also has its calendar's colour, a lasting id, this Mac's own id
+// for it (for Open in Calendar, openin.js) and whether it repeats, your answer to it, who organised
+// it, and who's invited with each one's address, reply and role. It only reads: nothing here adds,
+// changes or answers an event.
 import { execFile } from 'node:child_process'
 import { tool, calBin } from './fixes.js'
 import { notPerson } from './notpeople.js'
@@ -105,6 +106,58 @@ function agendaOf(notes) {
   const text = lines.join(' · ').replace(/(\w)\?{3}(\w)/g, "$1'$2").replace(/\s+/g, ' ').trim()
   return text ? whole(text, 220) : null
 }
+// Outlook's safe link, as where it goes.
+const unwrap = (url) => {
+  try { const u = new URL(url); return /safelinks\.protection\.outlook\.com$/i.test(u.hostname) && u.searchParams.get('url') ? u.searchParams.get('url') : url } catch { return url }
+}
+// The invite's own words, whole, for the event's panel: its lines as written (blank ones kept to
+// one), with Outlook's safe links as where they go and Exchange's "???" as apostrophes. Up to the
+// call app's part (Teams' or Zoom's join details, passcodes and dial-ins, which Join stands for), as
+// the agenda is, and Google Meet's and Webex's; that part starts with a line of its own, so an
+// invite that only names Teams keeps its words. 6,000 characters at most, ended at a word.
+const CALL_PART = /_{8,}|-::~:~::~|-- Do not delete or change any of the following text\. --|^[ \t]*(?:Microsoft Teams meeting|Microsoft Teams Need help\?|Join Zoom Meeting|Join with Google Meet|Join on your computer, mobile app or room device)/im
+function inviteOf(notes) {
+  let text = String(notes || '').replace(/\r\n?/g, '\n').split(CALL_PART)[0]
+    .replace(/https?:\/\/[^\s<>"']+/g, unwrap)
+    .replace(/(\w)\?{3}(\w)/g, "$1'$2")
+    .split('\n').map((l) => l.replace(/\s+$/, '')).join('\n')
+    .replace(/\n{3,}/g, '\n\n').trim()
+  if (text.length > 6000) { const c = text.slice(0, 6000); text = `${(c.slice(0, c.search(/\s\S*$/)) || c).trimEnd()}…` }
+  return text || null
+}
+
+// Who's invited, as the event's panel and the floating card show them: each one's name, address,
+// reply (accepted, declined, tentative, pending; null when it isn't known), role (required,
+// optional, chair; null), whether they organised it and whether it's you, the organizer first.
+// bridgecal says all of that (given: its guests); icalBuddy, and a bridgecal from before it did,
+// only who's on the invite (names: a name, or an address when that's all there is; addresses: the
+// same people's, when there's one each), so no one's reply is known. People only, as attendees:
+// told while their address is whole. The organizer is one of them even when the invite doesn't list
+// them.
+const REPLIES = new Set(['accepted', 'declined', 'tentative', 'pending'])
+const ROLES = new Set(['required', 'optional', 'chair'])
+const ADDRESS = /^[^\s@]+@[^\s@]+$/
+const line = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n)
+function guestsOf(given, names, addresses, organizer) {
+  const list = Array.isArray(given)
+    ? given.filter((g) => g && typeof g === 'object').map((g) => ({ name: line(g.name, 120), email: line(g.email, 200).toLowerCase(), status: REPLIES.has(g.status) ? g.status : null, role: ROLES.has(g.role) ? g.role : null, organizer: g.organizer === true, you: g.you === true }))
+    : names.map((a, i) => {
+      const s = line(a, 200)
+      const email = ADDRESS.test(s) ? s.toLowerCase() : names.length === addresses.length ? line(addresses[i], 200).toLowerCase() : ''
+      return { name: ADDRESS.test(s) ? '' : s.slice(0, 120), email, status: null, role: null, organizer: false, you: false }
+    })
+  const out = list.map((g) => ({ ...g, email: ADDRESS.test(g.email) ? g.email : null, name: g.name && !ADDRESS.test(g.name) ? g.name : null }))
+    .filter((g) => (g.name || g.email) && !notPerson(g.name && g.email ? `${g.name} <${g.email}>` : g.name || g.email))
+  // icalBuddy's organizer and an older bridgecal's: by name, among them or added.
+  if (!Array.isArray(given) && organizer) {
+    const o = out.find((g) => g.name === organizer || g.email === organizer.toLowerCase())
+    if (o) o.organizer = true
+    else if (!notPerson(organizer)) out.unshift({ name: ADDRESS.test(organizer) ? null : organizer, email: ADDRESS.test(organizer) ? organizer.toLowerCase() : null, status: null, role: null, organizer: true, you: false })
+  }
+  return [...out.filter((g) => g.organizer), ...out.filter((g) => !g.organizer)]
+}
+// How many of them each event carries: everyone on a big invite is counted, and the first 150 shown.
+const GUESTS_MAX = 150
 
 export function parse(out) {
   const events = []
@@ -138,9 +191,13 @@ const HEX = /^#[0-9a-f]{6}$/i
 // (callevent.js and meetings keep it); uid: the event's own lasting id with its start, when the
 // calendar has one, so a renamed event is still itself. local: this Mac's id for it in its calendar
 // store, and repeats: whether it's one of a series, which Open in Calendar finds it by (bridgecal's;
-// none from icalBuddy, so no Open in Calendar).
-function eventOf({ title, calendar, start, end, allDay, location, url, notes, attendees: all = [], emails = [], canceled = false, color, uid, local, repeats, response, organizer }) {
-  const attendees = all.filter((a) => !notPerson(a))
+// none from icalBuddy, so no Open in Calendar). attendees: the names of who's on the invite, and of
+// who organised it when that's someone else not on it (for Prep, a meeting's people and Meeting
+// Insights, which go by name); guests: all of them as the panel shows them (guestsOf), you too.
+function eventOf({ title, calendar, start, end, allDay, location, url, notes, attendees: all = [], emails = [], guests: given, canceled = false, color, uid, local, repeats, response, organizer }) {
+  const listed = all.map(String).filter((a) => !notPerson(a))
+  const attendees = organizer && !listed.some((a) => a.toLowerCase() === organizer.toLowerCase()) && !notPerson(organizer) ? [organizer, ...listed] : listed
+  const guests = guestsOf(given, all.map(String), emails, organizer)
   return {
     id: `${title}|${start.toISOString()}`,
     uid: uid ? `${uid}|${start.toISOString()}` : null,
@@ -158,11 +215,16 @@ function eventOf({ title, calendar, start, end, allDay, location, url, notes, at
     location: location && !/^Microsoft Teams Meeting$/i.test(location) ? location : null,
     online: /teams|zoom|meet/i.test(`${location || ''} ${url || ''} ${notes || ''}`),
     join: joinLink(url) || joinLink(notes),
-    attendees: attendees.slice(0, 12).map((a) => (a.includes('@') ? a.split('@')[0] : a)),
+    attendees: attendees.slice(0, 50).map((a) => (a.includes('@') ? a.split('@')[0] : a)),
     attendeeCount: attendees.length,
+    guests: guests.slice(0, GUESTS_MAX),
+    guestCount: guests.length,
+    // Whether the calendar said who's replied (bridgecal), or only who's invited (icalBuddy).
+    replies: Array.isArray(given),
     // Their addresses, for AI Assist's prep to find your mail with them and the people you've met.
     emails: emails.filter((x) => /^[^\s@]+@[^\s@]+$/.test(x) && !notPerson(x)).slice(0, 50).map((x) => x.toLowerCase()),
     agenda: agendaOf(notes),
+    description: inviteOf(notes),
     links: docLinks(url, notes),
   }
 }

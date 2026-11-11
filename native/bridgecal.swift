@@ -13,8 +13,9 @@
 //                      own colour (as Calendar shows it), a lasting id, this Mac's own id for it
 //                      and whether it repeats (what Calendar's link to it takes: Open in Calendar),
 //                      and your answer to it (accepted, tentative, declined, none yet; organizer
-//                      when it's yours). Read only: nothing here adds, changes or answers an
-//                      event. Without full access it prints the status word instead and exits 3.
+//                      when it's yours); full, who's invited too, each with their address, reply
+//                      and role. Read only: nothing here adds, changes or answers an event.
+//                      Without full access it prints the status word instead and exits 3.
 // The reading used to be icalBuddy's; on current macOS it sees no calendars even with full access.
 //   swiftc -O -target arm64-apple-macos14.0 native/bridgecal.swift -o native/bin/bridgecal
 import EventKit
@@ -42,6 +43,23 @@ let mail = { (p: EKParticipant) -> String? in
   let u = p.url.absoluteString
   return u.lowercased().hasPrefix("mailto:") ? String(u.dropFirst(7)) : nil
 }
+// Someone invited, as the event's panel shows them: their name, address, reply, role, whether they
+// organised it and whether it's you. Replies: unknown 0, pending 1, accepted 2, declined 3,
+// tentative 4, delegated 5, completed 6, in process 7 (unknown and the rest: none). Roles: unknown 0,
+// required 1, optional 2, chair 3, non-participant 4.
+func guest(_ p: EKParticipant, organizer: Bool) -> [String: Any] {
+  let replies = [1: "pending", 2: "accepted", 3: "declined", 4: "tentative"]
+  let roles = [1: "required", 2: "optional", 3: "chair"]
+  return [
+    "name": p.name ?? "",
+    "email": mail(p) ?? "",
+    "status": replies[p.participantStatus.rawValue] ?? "",
+    "role": roles[p.participantRole.rawValue] ?? "",
+    "organizer": organizer,
+    "you": p.isCurrentUser,
+  ]
+}
+let same = { (a: EKParticipant, b: EKParticipant) -> Bool in a.url.absoluteString.lowercased() == b.url.absoluteString.lowercased() }
 
 func done(_ word: String, _ code: Int32 = 0) -> Never {
   print(word)
@@ -111,6 +129,13 @@ if args.first == "events" {
         it["attendees"] = people.map { p in p.name ?? p.url.absoluteString.replacingOccurrences(of: "mailto:", with: "") }
         it["emails"] = people.compactMap(mail)
         if let o = e.organizer { it["organizer"] = o.isCurrentUser ? "" : (o.name ?? mail(o) ?? "") }
+        // Each of them with their reply and role, and who organised it among them, first when the
+        // invite doesn't list them.
+        var guests = people.map { p in guest(p, organizer: e.organizer.map { same($0, p) } ?? false) }
+        if let o = e.organizer, o.participantType == .person || o.participantType == .unknown, !people.contains(where: { same($0, o) }) {
+          guests.insert(guest(o, organizer: true), at: 0)
+        }
+        it["guests"] = guests
       }
       out.append(it)
     }

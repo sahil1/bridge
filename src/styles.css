@@ -1900,7 +1900,7 @@ button.yg-day:hover { box-shadow: 0 0 0 1.5px var(--accent); }
 .app.narrow .calv-bar { padding: 8px 10px; }
 .app.narrow .calv-nav h3 { font-size: 14px; }
 /* A phone: every control in the calendar a whole 40 px target, and its menu's fields 16 px (iOS zooms into smaller). */
-.app.narrow :is(.calv-bar .icon-btn, .calv-bar .btn, .calv-bar .seg button, .cal-key, .cal-detail .ghost-btn, .cal-detail .btn, .cal-detail .icon-btn, .prep-files a, .cal-files a) { min-height: 40px; min-width: 40px; }
+.app.narrow :is(.calv-bar .icon-btn, .calv-bar .btn, .calv-bar .seg button, .cal-key, .cal-detail .ghost-btn, .cal-detail .btn, .cal-detail .icon-btn, .cal-detail .join-btn, .prep-files a, .cal-files a) { min-height: 40px; min-width: 40px; }
 .app.narrow .calv-bar .seg button { justify-content: center; }
 .app.narrow .calv-menu select { height: 40px; font-size: 16px; }
 .app.narrow .calv-menu-check { min-height: 40px; align-items: center; }

@@ -4,6 +4,7 @@ import { usePersisted, useWidth } from './layout.jsx'
 import { api, usePoll } from '../api.js'
 import { CalendarSetup, joined } from './Agenda.jsx'
 import { PrepCard, InviteFiles, usePrep } from './meetings/prep.jsx'
+import { Guests, InviteText, CallLink, openPerson } from './meetings/invite.jsx'
 import AiAssist from './AiAssist.jsx'
 import { openToday } from './today.js'
 import { useOpenIn } from './openin.js'
@@ -14,7 +15,8 @@ import { t, tx, locale } from '../i18n/index.js'
 // (Calendar's, else one from its name, so it's the same every week), and a click on its key hides
 // it or brings it back. The week starts on the day your language has it (or the one you pick), and
 // the grids show your working hours at least, the rest shaded. Your answer to each invite shows as
-// Calendar has it. An event's panel has the invite's files and links, the notes of a meeting already
+// Calendar has it. An event's panel shows it as Google Calendar and Outlook do, who's invited with
+// their replies and the invite's words, files and call, with the notes of a meeting already
 // recorded, and AI Assist's Prepare for this meeting for one coming up. It's read-only: nothing here
 // adds, moves, changes or answers an event; that stays in your calendar app, where Open in Calendar
 // shows it (on this Mac).
@@ -266,20 +268,31 @@ function EventDetail({ e, color, now, onClose, onOpenAgent }) {
       </div>
       {msg && <p className="small muted">{msg}</p>}
       {opened && <p className={`small ${opened.bad ? 'error-text' : 'muted'} cal-opened`} role={opened.bad ? 'alert' : 'status'}>{opened.text}</p>}
-      {(e.agenda || e.links?.length > 0) && (
-        <div className="cal-sec">
-          <h5>{t('From the Invite')}</h5>
-          <InviteFiles agenda={e.agenda} files={e.links} />
+      {/* Who's invited, with their replies; who you've met, from the prep. From a computer whose
+          Bridge AI is older (a window that shows another of yours), only their names. */}
+      {e.guests?.length > 0 ? (
+        <div className="cal-sec cal-guests">
+          <h5><Icon name="users" size={11} /> {t('Guests')}</h5>
+          <Guests e={e} people={p.data?.people} onPerson={openPerson} head />
         </div>
-      )}
-      {e.recorded && <RecordedNotes id={e.recorded.id} onOpen={() => openMeeting(e.recorded.id)} />}
-      {prepping && <div ref={prepRef}><PrepCard e={e} prep={p} invite={false} onOpenMeeting={openMeeting} onOpenMail={(id) => openToday('mail', { mailId: id })} /></div>}
-      {e.attendees?.length > 0 && (
+      ) : e.attendees?.length > 0 && (
         <div className="cal-sec cal-detail-people">
           <h5>{e.attendeeCount === 1 ? t('1 Attendee') : t('{n} Attendees', { n: e.attendeeCount })}</h5>
           <p>{e.attendeeCount > e.attendees.length ? t('{names} and {n} more', { names: e.attendees.join(', '), n: e.attendeeCount - e.attendees.length }) : e.attendees.join(', ')}</p>
         </div>
       )}
+      {/* The invite's words, whole, with their links (its agenda alone from an older Bridge AI), its
+          files and its call. */}
+      {(e.description || e.agenda || e.links?.length > 0 || e.join) && (
+        <div className="cal-sec cal-invite">
+          <h5>{t('From the Invite')}</h5>
+          {e.description ? <InviteText text={e.description} /> : null}
+          <InviteFiles agenda={e.description ? null : e.agenda} files={e.links} />
+          <CallLink join={e.join} />
+        </div>
+      )}
+      {e.recorded && <RecordedNotes id={e.recorded.id} onOpen={() => openMeeting(e.recorded.id)} />}
+      {prepping && <div ref={prepRef}><PrepCard e={e} prep={p} invite={false} onOpenMeeting={openMeeting} onOpenMail={(id) => openToday('mail', { mailId: id })} /></div>}
     </div>
   )
 }

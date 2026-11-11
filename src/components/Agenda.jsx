@@ -4,6 +4,7 @@ import { Card, Updated } from './Trackers.jsx'
 import { api, refetch, usePoll, viaRelay } from '../api.js'
 import PermissionFix, { useFix, useRecheck } from './PermissionFix.jsx'
 import { openToday } from './today.js'
+import { Guests } from './meetings/invite.jsx'
 import { t, locale } from '../i18n/index.js'
 
 // Why the calendar can't be read yet, and one button that fixes it: install icalBuddy in a terminal
@@ -107,11 +108,15 @@ function EventRow({ e, now, past }) {
         </span>
       </button>
       {!past && <JoinBtn e={e} strong={live} />}
+      {/* Open: what the invite says and who's invited, with their replies, and the rest in Today ›
+          Calendar (View Calendar). */}
       {open && (
         <div className="ev-more">
           {e.agenda && <p>{e.agenda}</p>}
-          {e.attendees.length > 0 && <p className="muted">{e.attendeeCount > e.attendees.length ? t('{names} and {n} more', { names: e.attendees.join(', '), n: e.attendeeCount - e.attendees.length }) : e.attendees.join(', ')}</p>}
+          {e.guests?.length > 0 ? <Guests e={e} compact head />
+            : e.attendees.length > 0 && <p className="muted">{e.attendeeCount > e.attendees.length ? t('{names} and {n} more', { names: e.attendees.join(', '), n: e.attendeeCount - e.attendees.length }) : e.attendees.join(', ')}</p>}
           {!e.agenda && !e.attendees.length && <p className="muted">{t('No details.')}</p>}
+          <button type="button" className="link-btn ev-view" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-event', { detail: { date: new Date(e.start).toLocaleDateString('en-CA'), id: e.id } }))}>{t('View Calendar')}</button>
         </div>
       )}
     </li>
