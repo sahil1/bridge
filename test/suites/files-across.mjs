@@ -23,7 +23,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { pathToFileURL } from 'node:url'
-import { startKit, startRelay, checks, until, browser, sleep, shot, ROOT, TEST, IS_WIN, IS_MAC, browserNotice } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, sleep, shot, ROOT, TEST, IS_WIN, IS_MAC, browserNotice, phoneNotes, phoneSaw } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('files-across')
 const { b, which } = await browser()
@@ -344,15 +344,19 @@ try {
     const code = (await a.api('/relay/pair', {})).pairing.code
     const pctx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: which === 'chromium', hasTouch: true, deviceScaleFactor: 2 })
     await pctx.addInitScript(() => { try { localStorage.setItem('cc-toured', JSON.stringify({ desktop: true, phone: true })); localStorage.setItem('cc-appearance', JSON.stringify({ mode: 'light', theme: 'sky', text: 'm' })) } catch { /* no storage */ } })
+    await phoneNotes(pctx)
     const phone = await pctx.newPage()
     phone.on('pageerror', (e) => { if (!browserNotice(e.message)) errors.push(e.message) })
     await phone.goto(`${ra.url}/#pair=${code}`, { waitUntil: 'commit' })
     await phone.locator('#pair-go').click({ timeout: 15000 }) // a pairing link asks first: one tap
     const app = () => phone.frames().find((f) => f !== phone.mainFrame() && f.url().startsWith(ra.url))
-    // Not open: where its frames are, what the relay's page says instead (still pairing, offline,
-    // turned away) and what's in Bridge AI's frame, and the phone's part goes no further.
+    // Not open: where its frames are, how far the relay's page got (its service worker, its frame,
+    // what it says instead: still pairing, offline, turned away) and what's in Bridge AI's frame, and
+    // the phone's part goes no further.
     const opened = await until(() => app()?.evaluate(() => fetch('/api/version').then((x) => x.ok)), 30000, 200)
-    ok(!!opened, 'the phone is paired with Studio, Bridge AI open in it', opened ? undefined : { frames: phone.frames().map((f) => f.url()), page: await phone.locator('body').innerText().catch((e) => e.message), app: await app()?.evaluate(() => ({ text: document.body?.innerText.slice(0, 120), controlled: !!navigator.serviceWorker?.controller })).catch((e) => e.message) })
+    const saw = opened ? null : { frames: phone.frames().map((f) => f.url()), app: await app()?.evaluate(() => ({ text: document.body?.innerText.slice(0, 120), controlled: !!navigator.serviceWorker?.controller })).catch((e) => e.message), page: await phoneSaw(phone) }
+    if (saw) console.log('the phone page, as far as it got:', JSON.stringify(saw))
+    ok(!!opened, 'the phone is paired with Studio, Bridge AI open in it', saw || undefined)
     if (!opened) throw new Error('the phone didn\'t open Bridge AI')
     const fromPhone = await app().evaluate(() => fetch('/api/places', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: '~' }) }).then((x) => x.status))
     ok(fromPhone === 403, 'a phone can\'t add a place to Studio', fromPhone)

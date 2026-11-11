@@ -19,7 +19,7 @@
 //   A UI that keeps itself up to date does it through the relay too.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startRelay, checks, until, browser, page, sleep, shot, noServiceWorker, OUT, ROOT, browserNotice } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, page, sleep, shot, noServiceWorker, OUT, ROOT, browserNotice, phoneNotes, phoneSaw } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('phone-fresh')
 const COMPUTER = 'Studio Mac'
@@ -217,13 +217,20 @@ try {
   const code = (await kit.api('/relay/pair', {})).pairing.code
   const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, ...(which === 'chromium' ? { isMobile: true } : {}), hasTouch: true, deviceScaleFactor: 2 })
   await ctx.addInitScript(() => { try { localStorage.setItem('cc-toured', JSON.stringify({ desktop: true, phone: true })) } catch { /* no storage */ } })
+  await phoneNotes(ctx)
   const p = await ctx.newPage()
   const errors = []
   p.on('pageerror', (e) => errors.push(e.message))
   await p.goto(`${relay.url}/#pair=${code}`)
   await p.locator('#pair-go').click({ timeout: 15000 }) // a pairing link asks first: one tap
   const frame = () => p.frames().find((f) => f !== p.mainFrame() && f.url().startsWith(relay.url))
-  ok(!!(await until(() => frame()?.locator('#old').count(), 30000)), 'paired: the phone page shows the computer\'s UI, an older one')
+  // Not open: how far the phone page got (its service worker, its frame, what it says instead), and
+  // the rest goes no further.
+  const opened = await until(() => frame()?.locator('#old').count(), 30000)
+  const saw = opened ? null : { frames: p.frames().map((f) => f.url()), page: await phoneSaw(p) }
+  if (saw) console.log('the phone page, as far as it got:', JSON.stringify(saw))
+  ok(!!opened, 'paired: the phone page shows the computer\'s UI, an older one', saw || undefined)
+  if (!opened) throw new Error('the phone page didn\'t open Bridge AI')
   await p.evaluate(() => { window.__same = true })
 
   // The computer updates and starts again (its link to the phone drops, and comes back).

@@ -448,6 +448,35 @@ export const changeAnswer = (ctx, url, change, { orElse } = {}) => ctx.route(url
   } catch { await r.continue().catch(() => {}) }
 })
 export const noServiceWorker = (ctx) => ctx.addInitScript(() => { try { delete Navigator.prototype.serviceWorker } catch { /* none */ } })
+// The phone page (relay/web) on its way to Bridge AI, for a test to say how far it got when Bridge AI
+// didn't open in it: phoneNotes(ctx) before the page opens notes, from its start (ms), when its
+// service worker took it over, each request the worker handed it to send to the computer (Bridge
+// AI's own page first), each address its frame was given and each load there; phoneSaw(page) adds
+// what's there now: the worker's state, the frame's address, and which screen the page shows.
+export const phoneNotes = (ctx) => ctx.addInitScript(() => {
+  if (window !== window.top || !navigator.serviceWorker) return
+  const notes = window.__phoneNotes = []
+  const note = (what) => { if (notes.length < 30) notes.push(`${Math.round(performance.now())} ${what}`) }
+  let files = 0
+  navigator.serviceWorker.addEventListener('controllerchange', () => note('worker took over'))
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.type !== 'fetch') return
+    if (!String(e.data.u).startsWith('/assets/')) note(`worker asks ${e.data.m} ${e.data.u}`)
+    else if (++files === 1) note('worker asks for the app\'s files')
+  })
+  const frame = () => {
+    const f = document.getElementById('app')
+    if (!f) return setTimeout(frame, 20)
+    new MutationObserver(() => note(`frame given ${f.getAttribute('src')}`)).observe(f, { attributes: true, attributeFilter: ['src'] })
+    f.addEventListener('load', () => { let at = '?'; try { at = f.contentWindow.location.href } catch { /* another site */ } note(`frame loaded ${at}`) })
+  }
+  frame()
+})
+export const phoneSaw = (p) => p.evaluate(async () => {
+  const r = await navigator.serviceWorker?.getRegistration().catch(() => null)
+  const shown = ['pair', 'wait', 'home', 'away', 'bar'].filter((id) => document.getElementById(id) && !document.getElementById(id).hidden).map((id) => `${id}: ${document.getElementById(id).innerText.trim().slice(0, 80)}`)
+  return { worker: { controls: !!navigator.serviceWorker?.controller, active: r?.active?.state || null, installing: r?.installing?.state || null, waiting: r?.waiting?.state || null }, frame: document.getElementById('app')?.getAttribute('src') ?? null, shown, notes: window.__phoneNotes || null }
+}).catch((e) => e.message)
 // The time a test runs at: now, or what BRIDGE_TEST_CLOCK names, a time today ("21:30") or a weekday
 // and a time ("Sat 00:30": that weekday nearest today), so a test can be tried at any hour on any day.
 // The clock flows on from there as the real one does.
