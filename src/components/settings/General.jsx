@@ -142,7 +142,7 @@ export default function General({ onGo, onOpenAgent }) {
         <section className="st-sec" data-setting="runtime">
           <Line label={t('Where agents run')} hint={t('herdr, installed separately, adds its own terminal and split panes. Applies after a restart.')}
             title={t('Built in needs nothing else. herdr (optional, installed separately) adds its own terminal UI, split panes and the live Herdr view; your agents then share your herdr session. Applies after a restart.')}>
-            {seg('Runtime', eff.runtime === 'herdr' ? 'herdr' : 'builtin', [['builtin', 'Built in'], ['herdr', 'herdr']], (id) => save({ runtime: id }))}
+            {seg('Runtime', eff.runtime === 'herdr' ? 'herdr' : 'builtin', [['builtin', tx('Built in')], ['herdr', 'herdr']], (id) => save({ runtime: id }))}
           </Line>
           {eff.runtime === 'herdr' && <HerdrSession value={eff.herdr?.session || ''} onSave={(session) => save({ herdr: { ...(eff.herdr || {}), session: session || null } })} />}
           {eff.runtime !== 'herdr' && (
