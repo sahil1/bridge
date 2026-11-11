@@ -54,7 +54,9 @@ function SignIn({ st, onIn }) {
     setBusy(true); setProblem(null)
     try { return await fn() } catch (e) { setProblem({ text: e.message, code: e.code, devices: e.data?.devices, retryAfter: e.data?.retryAfter }); return null } finally { setBusy(false) }
   }
-  const send = () => run(async () => { const r = await api('/account/code', { method: 'POST', body: { email } }); setSentTo(r.pending?.email || email.trim()); setCode(''); setStep('code'); return true })
+  // The old code goes as a new one is asked for, not when the answer comes: the email can be
+  // quicker, and a code typed from it meanwhile stays.
+  const send = () => run(async () => { setCode(''); const r = await api('/account/code', { method: 'POST', body: { email } }); setSentTo(r.pending?.email || email.trim()); setStep('code'); return true })
   const verify = (replace) => run(async () => { const s = await api('/account/verify', { method: 'POST', body: { email, code, ...(replace ? { replace } : {}) } }); onIn(s); return s })
   const other = () => { api('/account/cancel', { method: 'POST' }).catch(() => {}); setStep('email'); setCode(''); setProblem(null) }
   // What went wrong, with the way on: a new code, another email, a device to remove.
