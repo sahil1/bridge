@@ -682,21 +682,25 @@ try {
     await api('/settings', { meetings: { remind: true, prep: false } }, 'PATCH')
     ok((await api('/calls')).soon?.id === soonNow.id, 'turned on again: back (and on even with Prepare for each meeting off, once it\'s been set)')
     await api('/settings', { meetings: { prep: true } }, 'PATCH')
-    // Settings › Meetings, in the desktop app: Remind me before meetings, off and on.
-    // (Said to be the desktop app once the page is up, for Settings to show what's the app's.)
-    const { p, errors } = await open({ mode: 'light' })
-    await p.evaluate(() => { window.bridgeApp = { desktop: true, platform: 'darwin' }; window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meeting-remind' } })) })
-    const sw = p.locator('.modal.settings [data-setting="meeting-remind"]')
-    await until(() => sw.isVisible(), 10000)
-    const box = sw.locator('input[type="checkbox"]')
-    ok(await sw.isVisible() && /Remind me before meetings/.test(await sw.innerText()) && await box.isChecked(), 'Settings › Meetings › Remind me before meetings, on, found as ⌘K finds it', await sw.innerText().catch(() => ''))
-    await box.click() // (it shows off once the server has it)
-    ok(!!(await until(async () => (await api('/settings')).effective.meetings?.remind === false && (await api('/calls')).soon === null && !(await box.isChecked()), 5000)), 'turned off there: no reminder, and it shows off')
-    await shot(p, `${tag}calendar-remind-setting`)
-    await box.click()
-    ok(!!(await until(async () => (await api('/calls')).soon?.id === soonNow.id, 5000)), 'and on again: the reminder is back')
-    ok(real(errors).length === 0, 'Settings: no page errors', errors)
-    await p.context().close()
+    // Settings › Meetings, in the desktop app: Remind me before meetings, off and on. (Only where
+    // there's a calendar to remind from: a Mac's.)
+    if (!IS_MAC) skip('Settings › Meetings › Remind me before meetings, off and on', 'it shows only with a calendar, which is a Mac\'s (Calendar or icalBuddy)')
+    else {
+      // (Said to be the desktop app once the page is up, for Settings to show what's the app's.)
+      const { p, errors } = await open({ mode: 'light' })
+      await p.evaluate(() => { window.bridgeApp = { desktop: true, platform: 'darwin' }; window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meeting-remind' } })) })
+      const sw = p.locator('.modal.settings [data-setting="meeting-remind"]')
+      await until(() => sw.isVisible(), 10000)
+      const box = sw.locator('input[type="checkbox"]')
+      ok(await sw.isVisible() && /Remind me before meetings/.test(await sw.innerText()) && await box.isChecked(), 'Settings › Meetings › Remind me before meetings, on, found as ⌘K finds it', await sw.innerText().catch(() => ''))
+      await box.click() // (it shows off once the server has it)
+      ok(!!(await until(async () => (await api('/settings')).effective.meetings?.remind === false && (await api('/calls')).soon === null && !(await box.isChecked()), 5000)), 'turned off there: no reminder, and it shows off')
+      await shot(p, `${tag}calendar-remind-setting`)
+      await box.click()
+      ok(!!(await until(async () => (await api('/calls')).soon?.id === soonNow.id, 5000)), 'and on again: the reminder is back')
+      ok(real(errors).length === 0, 'Settings: no page errors', errors)
+      await p.context().close()
+    }
   }
 
   // ---------- Home's Coming Up ----------

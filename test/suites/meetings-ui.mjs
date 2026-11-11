@@ -695,6 +695,9 @@ process.exit(1)`)
   // On there and still quiet: macOS applies it once Bridge AI restarts, which stops the recording,
   // so it says so first. Restarted and still quiet: Reset, for the call's sound alone.
   const qt = () => quiet.innerText().catch(() => '')
+  // (macOS's lists: elsewhere a call's sound needs no allowing.)
+  if (!IS_MAC) skip('once it\'s open there: already on there? macOS applies it once Bridge AI restarts, with Restart Bridge AI', 'System Audio Recording is macOS\'s')
+  else {
   await quiet.locator('button', { hasText: 'Open it' }).click()
   ok(!!(await until(async () => /Already on there\? macOS applies it once Bridge AI restarts\./.test(await qt()) && await quiet.locator('button', { hasText: 'Restart Bridge AI' }).count() === 1, 5000)), 'once it\'s open there: already on there? macOS applies it once Bridge AI restarts, with Restart Bridge AI', await qt())
   await quiet.locator('button', { hasText: 'Restart Bridge AI' }).click()
@@ -702,6 +705,7 @@ process.exit(1)`)
   await shot(card, `${tag}float-quiet-restart`)
   await quiet.locator('button', { hasText: 'Restart now' }).click()
   ok(!!(await until(() => card.evaluate(() => window.__restarts === 1), 4000)), 'Restart now restarts Bridge AI')
+  }
   if (IS_MAC) {
     await kit.restart()
     await card.reload()
