@@ -280,15 +280,16 @@ async function walk(shape) {
     if (DEBUG) console.log(`  ${shape} ${pl.name}: open in ${Date.now() - tg} ms`)
     return p.evaluate(WHERE, pl.scope)
   }
-  // One press, and what came of it (null: nothing).
-  const press = async (pl, it) => {
+  // One press, and what came of it (null: nothing). Patient: a second try, given longer to hover and
+  // click (a busy computer).
+  const press = async (pl, it, patient = false) => {
     if (!(await p.evaluate(MARK, { scope: pl.scope, name: it.name, nth: it.nth }))) return { gone: true }
     const el = p.locator('[data-dc="1"]')
-    if (!(await el.hover({ timeout: 600 }).then(() => true, () => false))) return { covered: true }
+    if (!(await el.hover({ timeout: patient ? 3000 : 600 }).then(() => true, () => false))) return { covered: true }
     await sleep(60)
     const was = await p.evaluate(() => { const dc = window.__dc; Object.assign(dc, { muts: 0, where: [], scrolls: 0, sounds: 0, calls: 0, asked: [], links: [] }); return document.activeElement?.outerHTML?.slice(0, 80) || '' })
     const n0 = { reqs: st.reqs.length, popups: st.popups, dialogs: st.dialogs, downloads: st.downloads, choosers: st.choosers, url: p.url() }
-    if (!(await el.click({ timeout: 800, noWaitAfter: true }).then(() => true, () => false))) return { covered: true }
+    if (!(await el.click({ timeout: patient ? 3000 : 800, noWaitAfter: true }).then(() => true, () => false))) return { covered: true }
     pressed++
     let what = null
     for (let waited = 0; waited < 1000 && !what; waited += 50) {
@@ -319,8 +320,9 @@ async function walk(shape) {
       if (q) { quiet.push(`${pl.name} · ${it.name}: ${q.what}`); continue }
       const tp = Date.now()
       let r = await press(pl, it).catch((e) => ({ failed: e.message.split('\n')[0] }))
-      // Not there now (a press before it went somewhere else in the place): the place again, once.
-      if (r.gone && pl.open) { base = await goTo(pl); r = await press(pl, it).catch((e) => ({ failed: e.message.split('\n')[0] })) }
+      // Not there now (a press before it went somewhere else in the place), or under something a press
+      // before it left open (or not ready in time, on a busy computer): the place again, once.
+      if ((r.gone || r.covered) && pl.open) { base = await goTo(pl); r = await press(pl, it, true).catch((e) => ({ failed: e.message.split('\n')[0] })) }
       // Nothing came of it: once more, from the page loaded again (what changed by itself then may not now).
       if (!r.gone && !r.covered && !r.failed && !r.what) { base = await goTo(pl, true); r = await press(pl, it).catch((e) => ({ failed: e.message.split('\n')[0] })) }
       if (DEBUG) console.log(`  ${shape} ${pl.name} · ${it.name}: ${r.gone ? '(gone)' : r.covered ? '(covered)' : r.failed ? `(${r.failed})` : r.what || 'NOTHING'} ${Date.now() - tp} ms`)
