@@ -379,9 +379,13 @@ try {
     await p.evaluate(() => localStorage.setItem('cc-appearance', JSON.stringify({ mode: 'dark', theme: 'midnight', text: 'm' })))
     await p.locator('.mc-chip').click()
     // While Desk's page comes, the devices menu says it's switching to Desk: noted (in what Studio's
-    // page keeps for this tab) the moment it does, and read back on Studio's page below.
-    await p.evaluate(() => new MutationObserver(() => { const c = document.querySelector('.mc-chip.going'); if (c && /Desk/.test(c.textContent)) sessionStorage.setItem('test-going', String(performance.now())) }).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true }))
-    const picked = await p.evaluate(() => performance.now())
+    // page keeps for this tab) the moment it first does, and read back on Studio's page below (each
+    // change to the page after that used to note it again, later and later). From the click itself,
+    // as the page has it: what Playwright takes to find Desk in the menu and press it isn't the page's.
+    await p.evaluate(() => {
+      new MutationObserver(() => { const c = document.querySelector('.mc-chip.going'); if (c && /Desk/.test(c.textContent) && !sessionStorage.getItem('test-going')) sessionStorage.setItem('test-going', String(performance.now())) }).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true })
+      document.addEventListener('click', (e) => { if (e.target.closest?.('.mc-menu .mc-item') && /Desk/.test(e.target.closest('.mc-item').textContent)) sessionStorage.setItem('test-picked', String(performance.now())) }, true)
+    })
     await p.locator('.mc-menu .mc-item', { hasText: 'Desk' }).first().click()
     await until(() => isMachine(p.url()), 20000, 100)
     await p.waitForSelector('.mc-chip', { timeout: 45000 })
@@ -400,8 +404,8 @@ try {
     await note.locator('button', { hasText: 'Go to Studio' }).click()
     ok(!!(await until(() => p.url().startsWith(`http://127.0.0.1:${port}/`), 20000, 100)), 'and Go to Studio: Studio\'s own page, at its own address', p.url())
     await p.waitForSelector('.mc-chip', { timeout: 30000 })
-    const saw = Number(await p.evaluate(() => sessionStorage.getItem('test-going')))
-    ok(saw > picked && saw - picked < 1000, 'Desk picked: the devices menu said it was switching to Desk, at once, while Desk\'s page came', { picked, saw })
+    const [picked, saw] = (await p.evaluate(() => ['test-picked', 'test-going'].map((k) => sessionStorage.getItem(k)))).map((x) => (x == null ? null : Number(x)))
+    ok(picked != null && saw >= picked && saw - picked < 1000, 'Desk picked: the devices menu said it was switching to Desk, at once, while Desk\'s page came', { picked, saw })
     ok(real(s.errors).length === 0, 'no page errors', s.errors)
     await s.ctx.close()
   }
