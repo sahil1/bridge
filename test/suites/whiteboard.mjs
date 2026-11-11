@@ -13,7 +13,9 @@
 //   from the first, a sequence diagram's messages in order down the page; words handed over
 //   measured in another font measured again in the board's; "Draw this" from the list and on a
 //   board (boxes, arrows joined to them and words you can edit, not a picture; Mermaid that
-//   doesn't draw sent back once); "Change it" in place, and undone; PNG and SVG export; ⌘K over
+//   doesn't draw sent back once); "Change it" in place, and undone; what a model draws or changes
+//   a suggestion (marked in the file, dashed, outlined with who made it, still there opened again),
+//   discarded from AI Assist's panel or the board, kept with the bar's Keep; PNG and SVG export; ⌘K over
 //   the board opening Bridge AI's search; a dark theme. Diagram files in an agent's Files tab:
 //   .excalidraw drawn and saved back into the file, .mmd and .drawio (plain and compressed) drawn
 //   as shapes, saved beside or added to Whiteboards; a Mermaid block in Markdown and in the
@@ -228,7 +230,7 @@ try {
   ok(await wand.evaluate((e) => e.parentElement.lastElementChild === e.nextElementSibling && e.nextElementSibling?.classList.contains('menu-anchor')), 'AI Assist at the right end of the board\'s header, with only More after it')
   await wand.click()
   const verbs = await again.locator('.ai-menu .ai-item-label').allInnerTexts()
-  ok(JSON.stringify(verbs) === JSON.stringify(['Draw this', 'Change it']) && await again.locator('.ai-menu button', { hasText: 'Change it' }).isEnabled(), 'a board\'s AI Assist: Draw this and Change it, Change it offered with a shape on the board', verbs)
+  ok(JSON.stringify(verbs) === JSON.stringify(['Draw this', 'Change it', 'Ask about the board', 'Group by theme', 'A timeline', 'Action items']) && await again.locator('.ai-menu button', { hasText: 'Change it' }).isEnabled(), 'a board\'s AI Assist: Draw this, Change it, Ask about the board, and the meeting moves (Group by theme, A timeline, Action items), Change it offered with a shape on the board', verbs)
   await shot(again, `${tag}whiteboard-ai-menu`)
   await again.locator('.ai-menu button', { hasText: 'Change it' }).click()
   ok(await until(() => again.locator('.wb-draw [role="tab"][aria-selected="true"]', { hasText: 'Change it' }).count(), 5000) && /AI Assist/.test(await again.locator('.wb-draw-head').innerText()), 'Change it opens AI Assist\'s panel on Change it')
@@ -280,6 +282,68 @@ try {
   await p.locator('.wb-draw').getByRole('button', { name: 'Draw', exact: true }).click()
   ok(await until(() => texts(readBoard(board)).filter((x) => x === 'Start').length === 2, 15000), 'Mermaid that doesn\'t draw goes back to the model once and the fixed one is drawn', texts(readBoard(board)))
   ok(model.asked().slice(before).some((q) => /didn't draw/.test(q) && /The error was/.test(q)), 'saying why it didn\'t draw', model.asked().slice(before).map((q) => q.slice(0, 200)))
+
+  // What a model draws is a suggestion: marked in the file (so it travels with it), drawn dashed,
+  // outlined on the board with the wand and who made it, to keep or discard; Keep all for several.
+  const marked = (j) => live(j).filter((e) => e.customData?.bridge?.suggestion)
+  const sugIds = (j) => [...new Set(marked(j).map((e) => e.customData.bridge.suggestion.id))]
+  const two = readBoard(board)
+  ok(sugIds(two).length === 2 && marked(two).every((e) => e.customData.bridge.suggestion.by === 'gpt-5') && marked(two).filter((e) => e.type === 'rectangle' || e.type === 'diamond' || e.type === 'arrow').every((e) => e.strokeStyle === 'dashed'), 'each drawing is a suggestion: marked in the board\'s file with the model that made it, its shapes and arrows dashed', { ids: sugIds(two), styles: marked(two).map((e) => [e.type, e.strokeStyle]).slice(0, 8) })
+  ok(await until(async () => (await p.locator('.wb-sug').count()) === 2, 5000), 'the board outlines each', await p.locator('.wb-sugs').innerText().catch(() => ''))
+  ok(/Suggested by gpt-5/.test(await p.locator('.wb-sug-tag').first().innerText()) && (await p.locator('.wb-sug-tag').first().locator('button').allInnerTexts()).join('|') === 'Keep|Discard', 'each outline says who made it, with Keep and Discard', await p.locator('.wb-sug-tag').first().innerText())
+  ok((await p.locator('.wb-draw .wb-sug-acts button').allInnerTexts()).map((x) => x.trim()).join('|') === 'Keep|Discard|Keep all 2' && !(await p.locator('.wb-sug-bar').count()), 'AI Assist\'s panel keeps or discards the last, or keeps all of them, in place of the board\'s bar it would cover', await p.locator('.wb-draw .wb-sug-acts').innerText().catch(() => ''))
+  await shot(p, `${tag}whiteboard-suggestions`)
+  // Opened again, they're still suggestions, and the board's bar says how many, with Keep all.
+  const re = await ctx.newPage()
+  await re.goto(kit.url)
+  await re.waitForSelector('.excalidraw canvas', { timeout: 30000 })
+  ok(await until(async () => (await re.locator('.wb-sug').count()) === 2 && /2 suggestions from AI Assist/.test(await re.locator('.wb-sug-bar').innerText()) && (await re.locator('.wb-sug-bar button', { hasText: 'Keep all' }).count()) === 1, 10000), 'opened again, the board shows them as suggestions still, and how many, with Keep all', await re.locator('.wb-sugs').innerText().catch(() => ''))
+  await shot(re, `${tag}whiteboard-suggestions-bar`)
+  await re.close()
+  await p.locator('.wb-draw .wb-sug-acts button', { hasText: 'Discard' }).click()
+  ok(await until(() => texts(readBoard(board)).filter((x) => x === 'Start').length === 1 && sugIds(readBoard(board)).length === 1, 8000), 'Discard in AI Assist\'s panel takes the last one off the board', texts(readBoard(board)))
+  await p.locator('.wb-draw-head button[aria-label="Close AI Assist"]').click()
+  await p.locator('.wb-sug-bar button', { hasText: 'Keep' }).click()
+  ok(await until(() => { const j = readBoard(board); return !marked(j).length && texts(j).includes('Start') && live(j).filter((e) => e.type === 'rectangle' || e.type === 'diamond').every((e) => e.strokeStyle === 'solid') }, 8000), 'Keep keeps the other: no marks left in the file, its lines solid again', live(readBoard(board)).map((e) => [e.type, e.strokeStyle, !!e.customData?.bridge?.suggestion]).slice(0, 8))
+  ok(await until(async () => !(await p.locator('.wb-sug, .wb-sug-bar').count()), 3000), 'and the board has no outlines left')
+  // A change: what it renamed or added is suggested; Discard puts the board back as it was.
+  await assist(p, 'Change it')
+  await p.fill('.wb-draw textarea', 'Rename Start to Begin, colour Ship red, and add a cache')
+  await p.locator('.wb-draw').getByRole('button', { name: 'Change', exact: true }).click()
+  ok(await until(() => texts(readBoard(board)).includes('Cache') && sugIds(readBoard(board)).length === 1, 15000), 'a change is a suggestion too', texts(readBoard(board)))
+  await p.locator('.wb-sug-tag button', { hasText: 'Discard' }).first().click()
+  ok(await until(() => { const j = readBoard(board); return texts(j).includes('Start') && !texts(j).includes('Begin') && !texts(j).includes('Cache') && !live(j).some((e) => e.backgroundColor === '#ffc9c9') && !marked(j).length }, 8000), 'discarded on the board: its old words, colour and shapes back, nothing of it left', texts(readBoard(board)))
+
+  // Ask about the board, then about part of it: answered in AI Assist's panel, naming the shapes
+  // (each a click from being picked on the board), with a picture for a model that can see; the
+  // board stays as it is.
+  const unchanged = JSON.stringify(live(readBoard(board)).map((e) => [e.id, e.version]))
+  const cbox = await p.locator('.wb-canvas').boundingBox()
+  await p.mouse.click(cbox.x + cbox.width * 0.6, cbox.y + cbox.height - 30)
+  await p.locator('.wb-view .pane-extras button[aria-label="AI Assist"]').click()
+  const offered = await p.locator('.ai-menu .ai-item-label').allInnerTexts()
+  ok(JSON.stringify(offered.slice(0, 3)) === JSON.stringify(['Draw this', 'Change it', 'Ask about the board']), 'with nothing selected, AI Assist offers Ask about the board', offered)
+  await p.locator('.ai-menu button', { hasText: 'Ask about the board' }).click()
+  ok(await until(() => p.locator('.wb-draw [role="tab"][aria-selected="true"]', { hasText: 'Ask' }).count(), 5000) && /About the whole board/.test(await p.locator('.wb-draw .wb-scope').innerText()), 'which opens AI Assist\'s panel on Ask, about the whole board')
+  const asked0 = model.asked().length
+  await p.fill('.wb-draw textarea', 'What is missing between these steps?')
+  await p.locator('.wb-draw').getByRole('button', { name: 'Ask', exact: true }).click()
+  const answer = p.locator('.wb-answer')
+  ok(await until(async () => /4 shapes: "Start", "Tests pass\?", "Ship", "Fix"/.test(await answer.innerText().catch(() => '')), 15000), 'the answer, in the panel, names the shapes it\'s about', await answer.innerText().catch(() => ''))
+  ok((await answer.locator('.wb-answer-shapes .chip').allInnerTexts()).join('|') === 'Start|Tests pass?|Ship|Fix' && /from the shapes and a picture of them/.test(await answer.innerText()), 'each named shape a chip, and it says it looked at a picture', await answer.innerText())
+  const q1 = model.asked().slice(asked0).find((q) => /^A question about a diagram on a whiteboard: What is missing between these steps\?/.test(q)) || ''
+  ok(/"text":"Tests pass\?"/.test(q1) && /\[image\]/.test(q1), 'the model is sent the board\'s shapes and a picture of them, as it can see', q1.slice(0, 300))
+  await answer.locator('.wb-answer-shapes .chip', { hasText: 'Ship' }).click()
+  await p.locator('.wb-view .pane-extras button[aria-label="AI Assist"]').click()
+  ok(await until(() => p.locator('.ai-menu button', { hasText: 'Ask about these' }).count(), 3000) && /A question about the 1 selected/.test(await p.locator('.ai-menu').innerText()), 'a shape it named, clicked, is picked on the board: AI Assist offers Ask about these', await p.locator('.ai-menu').innerText().catch(() => ''))
+  await p.locator('.ai-menu button', { hasText: 'Ask about these' }).click()
+  await p.fill('.wb-draw textarea', 'What does this step do?')
+  await p.locator('.wb-draw').getByRole('button', { name: 'Ask', exact: true }).click()
+  ok(await until(async () => /One shape: "Ship"/.test(await answer.innerText().catch(() => '')), 15000), 'asked about it alone, the answer is about it alone', await answer.innerText().catch(() => ''))
+  const q2 = model.asked().find((q) => /What does this step do\?/.test(q)) || ''
+  ok(/^A question about part of a diagram on a whiteboard \(the shapes selected\)/.test(q2) && !/"text":"Fix"/.test(q2) && /\[image\]/.test(q2), 'only the shapes selected go to the model, with a picture of them', q2.slice(0, 300))
+  await shot(p, `${tag}whiteboard-ask`)
+  ok(JSON.stringify(live(readBoard(board)).map((e) => [e.id, e.version])) === unchanged, 'and asking changes nothing on the board')
 
   // Export.
   await p.getByRole('button', { name: 'Export' }).click()
@@ -417,6 +481,22 @@ try {
   await dark.p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
   ok(await dark.p.locator('.excalidraw.theme--dark').count() === 1, 'in a dark theme, the board is dark too')
   await shot(dark.p, `${tag}whiteboard-dark`)
+  await assist(dark.p, 'Change it')
+  await dark.p.fill('.wb-draw textarea', 'Rename Start to Begin, colour Ship red, and add a cache')
+  await dark.p.locator('.wb-draw').getByRole('button', { name: 'Change', exact: true }).click()
+  ok(await until(async () => (await dark.p.locator('.wb-sug').count()) && dark.p.locator('.wb-draw .wb-sug-acts').count(), 15000), 'dark: a suggestion outlined on the board')
+  await shot(dark.p, `${tag}whiteboard-suggestion-dark`)
+  await dark.p.locator('.wb-draw .wb-sug-acts button', { hasText: 'Discard' }).click()
+  ok(await until(() => { const j = readBoard(board); return texts(j).includes('Start') && !texts(j).includes('Cache') }, 8000), 'and discarded', texts(readBoard(board)))
+  await dark.p.locator('.wb-draw [role="tab"]', { hasText: 'Ask' }).click()
+  await dark.p.fill('.wb-draw textarea', 'What is missing?')
+  await dark.p.locator('.wb-draw').getByRole('button', { name: 'Ask', exact: true }).click()
+  ok(await until(() => dark.p.locator('.wb-answer .chip').count(), 15000), 'dark: Ask\'s answer in the panel')
+  await shot(dark.p, `${tag}whiteboard-ask-dark`)
+  await assist(dark.p, 'Action items')
+  ok(await until(() => dark.p.locator('.wb-tasks button', { hasText: 'Add them to Tasks' }).count(), 20000), 'dark: Action items drawn from the board, with Add them to Tasks')
+  await shot(dark.p, `${tag}whiteboard-actions-dark`)
+  await dark.p.locator('.wb-draw .wb-sug-acts button', { hasText: 'Discard' }).first().click()
   ok(!dark.errors.length, 'no page errors in the dark theme', dark.errors)
   await dark.ctx.close()
 

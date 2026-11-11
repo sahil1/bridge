@@ -7,7 +7,8 @@
 //   in a JSON shape; a model on Ollama or LM Studio is listed as on this computer, asked in plain
 //   words first and again (held to the JSON shape) when its answer can't be drawn, sent only what
 //   fits of a long meeting, and asked whether it can see (one that can is sent the board's picture in
-//   Ollama's own chat); the chief of staff hands over a spec and lists the shapes; a preference kept,
+//   Ollama's own chat, for Refine and for Ask about these, and one that can't the shapes in words);
+//   the chief of staff hands over a spec and lists the shapes; a preference kept,
 //   sent in the next prompt, and forgotten. The build the app runs from carries its PDF code.
 //   The app, in Chromium or WebKit: the clean look by default (straight lines, the pane's own
 //   background, Bridge AI's accent, right-angled arrows joined to shapes) with Excalidraw's menu,
@@ -19,14 +20,20 @@
 //   with the calls counted and a picture sent to a model that can see; PDF export with the board's
 //   words in it (its code loaded only then), and of a selection; a preference learnt from laying a
 //   drawing out the other way, applied to the next prompt and forgotten, and one set by hand; a
-//   model on this computer drawing and refining with no picture; the credit in About; on a phone,
-//   the panels fit.
+//   model on this computer drawing and refining with no picture; Refine's rounds as one suggestion,
+//   kept with each container's own lines back; the meeting moves (a meeting's notes grouped by
+//   theme and discarded back into place, a timeline and the action items drawn from the board, the
+//   action items onto the Chief of Staff's task list); the board made a Word document and a deck in
+//   Studio's own folder, each linking back to it, and opened there; the credit in About; on a
+//   phone, the panels fit.
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { startKit, startModel, checks, until, sleep, browser, page, shot, ROOT, advanced } from '../lib/harness.mjs'
 
+const JSZip = createRequire(path.join(ROOT, 'package.json'))('jszip')
 const { ok, done } = checks('whiteboard-v2')
 // AI Assist, at the right end of a board's header (or a diagram file's bar), and one of its verbs:
 // Draw this or Change it.
@@ -64,6 +71,8 @@ const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${n
 
 try {
   await api('/setup', { name: 'Tester' })
+  // Studio on, for AI Assist's Make a document and Make a deck (whiteboard.mjs has it off).
+  await api('/settings', { trials: { studio: true } }, 'PATCH')
   await api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
 
   // ---------- The server ----------
@@ -135,6 +144,15 @@ try {
     const sent3 = model.requests().slice(n3)
     const asked3 = sent3[0]?.messages?.find((x) => x.role === 'user')
     ok(rv.saw === 'picture' && rv.spec?.edges?.[0]?.label === 'HTTP' && sent3.length === 1 && sent3[0].path === '/api/chat' && sent3[0].model === 'llama3.2-vision:11b' && asked3?.images?.length === 1 && asked3.images[0] === PNG.split(',')[1] && /A picture of it as drawn/.test(asked3.content), 'a round of Refine on a model on Ollama that can see sends the board\'s picture to Ollama\'s own chat, in the message\'s images, and its answer is drawn', { rv, sent: sent3.map((x) => [x.path, x.model, x.messages?.map((m) => [m.role, m.images?.length || 0])]) })
+    // Ask about these: a model on Ollama that can see gets the shapes and their picture; one that
+    // can't, the shapes alone. Either answers naming them, with their ids.
+    const scene = { shapes: [{ id: 's1', shape: 'rectangle', text: 'Start' }, { id: 's2', shape: 'rectangle', text: 'Ship' }], arrows: [{ id: 'a1', from: 's1', to: 's2', text: '' }], texts: [] }
+    const n4 = model.requests().length
+    const seeing = await api('/boards/ask', { prompt: 'What is missing?', scene, selected: true, image: PNG, model: 'ollama:llama3.2-vision:11b' }).catch((e) => ({ error: e.message }))
+    const blind = await api('/boards/ask', { prompt: 'What is missing?', scene, selected: true, image: PNG, model: 'ollama:llama3.1:8b' }).catch((e) => ({ error: e.message }))
+    const sent4 = model.requests().slice(n4).map((x) => x.messages.find((y) => y.role === 'user'))
+    ok(seeing.saw === 'picture' && /"Start", "Ship"/.test(seeing.answer) && seeing.shapes?.join() === 's1,s2' && sent4[0]?.images?.length === 1 && /A picture of it as drawn is attached/.test(sent4[0].content), 'Ask about these on a model on Ollama that can see: the shapes and their picture, answered naming them', { seeing, sent: sent4[0]?.content?.slice(0, 200) })
+    ok(blind.saw === 'words' && /"Start", "Ship"/.test(blind.answer) && !sent4[1]?.images?.length && !/picture/.test(sent4[1]?.content || ''), 'and on one that can\'t see: the shapes alone, in words', { blind, sent: sent4[1]?.content?.slice(0, 200) })
   })
 
   await part('the chief of staff', async () => {
@@ -407,6 +425,12 @@ try {
     ok(await until(() => bare(readBoard(board)) === 2, 8000), 'stepping back to the draft puts it back on the board (two arrows with no label)', bare(readBoard(board)))
     await p.locator('.wb-versions .chip', { hasText: 'Round 2' }).click()
     ok(await until(() => bare(readBoard(board)) === 0, 8000), 'and forward to the last round again', bare(readBoard(board)))
+    // All its rounds are one suggestion, still waiting, its icons and containers outlined too.
+    const ids = new Set(live(readBoard(board)).map((e) => e.customData?.bridge?.suggestion?.id).filter(Boolean))
+    const all = live(readBoard(board)).filter((e) => e.type !== 'text')
+    ok(ids.size === 1 && all.every((e) => e.customData?.bridge?.suggestion) && (await p.locator('.wb-sug').count()) === 1, 'Refine\'s rounds are one suggestion, every shape of it marked, outlined once on the board', { ids: [...ids], unmarked: all.filter((e) => !e.customData?.bridge?.suggestion).map((e) => e.type) })
+    await p.locator('.wb-draw .wb-sug-acts button', { hasText: 'Keep' }).first().click()
+    ok(await until(() => !live(readBoard(board)).some((e) => e.customData?.bridge?.suggestion) && live(readBoard(board)).some((e) => holder(e) === 'region' && e.strokeStyle === 'dashed') && live(readBoard(board)).some((e) => holder(e) === 'vpc' && e.strokeStyle === 'solid'), 8000), 'kept: no marks left, and each container with its own lines again (a region\'s dashed, a VPC\'s solid)', live(readBoard(board)).filter((e) => holder(e)).map((e) => [holder(e), e.strokeStyle]))
   })
 
   await part('PDF export', async () => {
@@ -527,6 +551,135 @@ try {
     ok(sent.length > 0 && sent.every((x) => x.model === 'llama3.1:8b') && reviews.length === 2 && reviews.every((x) => typeof x.messages.find((m) => m.role === 'user').content === 'string'), 'everything goes to that model, and as it can\'t see, the reviews go without a picture', sent.map((x) => [x.model, typeof x.messages.at(-1).content]))
     ok(/4 calls/.test(await p.locator('.wb-cost').innerText()), 'counting the drawing asked twice and two rounds', await p.locator('.wb-cost').innerText())
     await shot(p, `${tag}whiteboard-v2-local`)
+  })
+
+  await part('meeting moves', async () => {
+    // A meeting's notes on a board, each a box with its words.
+    const { id } = await api('/boards', { title: 'Launch sync', source: { kind: 'mermaid', text: 'flowchart TD\n  a[Pricing page copy]\n  b[Cheaper annual plan]\n  c[Login bug]\n  d[Slow sign-in]\n  e[Hire a designer]' } })
+    await openBoard(id)
+    await until(() => texts(readBoard(id)).includes('Hire a designer') && !readBoard(id)?.bridge, 15000)
+    await saved()
+    const notes = live(readBoard(id))
+    const was = Object.fromEntries(notes.filter((e) => e.type === 'rectangle').map((e) => [labelOf(notes, e), [e.x, e.y]]))
+    // Refine off, so what's checked is what the model sent; gpt-5 again after the model on this computer.
+    if (!(await p.locator('.wb-draw').count())) await assist(p, 'Change it')
+    await p.locator('.wb-draw [role="tab"]', { hasText: 'Change it' }).click()
+    await p.locator('.wb-draw select[aria-label="Rounds of refining"]').selectOption('0')
+    await p.locator('.wb-draw select.wb-model').selectOption('openai:gpt-5')
+    // Group by theme, from AI Assist's menu: a box per theme, named for it, with its notes in it.
+    await assist(p, 'Group by theme')
+    const box = (els, t) => els.find((e) => holder(e) === 'group' && labelOf(els, e) === t)
+    const grouped = await until(() => { const els = live(readBoard(id)); return box(els, 'Pricing') && box(els, 'Sign-in') && box(els, 'Team') && els }, 20000)
+    const els = grouped || []
+    const isIn = (note, t) => { const n = byLabel(els, note), c = box(els, t); return !!n && !!c && inside(n, c) }
+    ok(!!grouped && isIn('Pricing page copy', 'Pricing') && isIn('Cheaper annual plan', 'Pricing') && isIn('Login bug', 'Sign-in') && isIn('Slow sign-in', 'Sign-in') && isIn('Hire a designer', 'Team'), 'Group by theme gathers the notes in a box per theme, named for it', els.map((e) => [e.type, holder(e), labelOf(els, e)]).filter((x) => x[2]))
+    ok(els.filter((e) => e.type === 'rectangle').every((e) => e.customData?.bridge?.suggestion), 'as a suggestion: the boxes, and the notes it moved')
+    await shot(p, `${tag}whiteboard-v2-themes`)
+    await p.locator('.wb-draw .wb-sug-acts button', { hasText: 'Discard' }).click()
+    ok(await until(() => { const now = live(readBoard(id)); return !now.some((e) => holder(e) === 'group') && Object.entries(was).every(([t, [x, y]]) => { const n = byLabel(now, t); return n && Math.abs(n.x - x) < 1 && Math.abs(n.y - y) < 1 }) }, 8000), 'discarded: the boxes gone, and every note back where it was', live(readBoard(id)).map((e) => [labelOf(live(readBoard(id)), e), Math.round(e.x), Math.round(e.y)]).filter((x) => x[0]))
+    // A timeline, from what's on the board.
+    const n0 = model.asked().length
+    await assist(p, 'A timeline')
+    const steps = await until(() => { const now = live(readBoard(id)); const s = ['Design review · Dan · 3 Nov', 'Beta ships · Priya · 10 Nov', 'Launch · You · 1 Dec'].map((t) => byLabel(now, t)); return s.every(Boolean) && s }, 20000)
+    ok(!!steps && steps[0].x < steps[1].x && steps[1].x < steps[2].x, 'A timeline: each step with its owner and date, left to right in order', steps && steps.map((e) => Math.round(e.x)))
+    ok(await p.evaluate(() => JSON.parse(localStorage.getItem('cc-board-kind') || '"auto"')) !== 'timeline', 'and the kind of diagram remembered for the next drawing is left as it was', await p.evaluate(() => localStorage.getItem('cc-board-kind')))
+    const asked = model.asked().slice(n0).find((q) => /Make it a timeline/.test(q)) || ''
+    ok(/What's on the whiteboard now/.test(asked) && /- Login bug/.test(asked) && /- Hire a designer/.test(asked), 'drawn from the notes on the board', asked.slice(0, 500))
+    // Action items for each person, then onto the task list with a click.
+    await assist(p, 'Action items')
+    ok(await until(async () => /2 action items/.test(await p.locator('.wb-tasks').innerText().catch(() => '')), 20000), 'Action items: what each person is to do, and how many', await p.locator('.wb-draw').innerText().catch(() => ''))
+    const people = await until(() => { const now = live(readBoard(id)); const o = { priya: box(now, 'Priya'), mine: box(now, 'You'), bug: byLabel(now, 'Fix the login bug · Friday'), budget: byLabel(now, 'Send the budget to finance · Friday') }; return Object.values(o).every(Boolean) && o }, 8000)
+    ok(!!people && inside(people.bug, people.priya) && inside(people.budget, people.mine), 'a box for each person, with what they\'re to do in it', live(readBoard(id)).map((e) => [holder(e), labelOf(live(readBoard(id)), e)]).filter((x) => x[1]))
+    await shot(p, `${tag}whiteboard-v2-actions`)
+    await p.locator('.wb-tasks button', { hasText: 'Add them to Tasks' }).click()
+    ok(await until(async () => /On the Chief of Staff's task list/.test(await p.locator('.wb-tasks').innerText().catch(() => '')), 8000), 'Add them to Tasks, a click, says where they went')
+    const tasks = (await api('/chief/tasks')).items.map((x) => x.title)
+    ok(tasks.includes('Priya: Fix the login bug · Friday') && tasks.includes('You: Send the budget to finance · Friday'), 'each is on the Chief of Staff\'s task list, by who does it', tasks)
+    await p.locator('.wb-draw select[aria-label="Rounds of refining"]').selectOption('3').catch(() => {})
+  })
+
+  await part('the board as a document and a deck', async () => {
+    // A Word file of the board in Studio's own folder, with a line linking back to the board's file.
+    const own = path.join(kit.data, 'studio', 'files')
+    const id = 'Launch sync'
+    await assist(p, 'Make a document')
+    const docx = await until(() => fs.existsSync(path.join(own, `${id}.docx`)) && path.join(own, `${id}.docx`), 20000)
+    const zip = docx ? await JSZip.loadAsync(fs.readFileSync(docx)) : null
+    const xml = zip ? await zip.file('word/document.xml').async('string') : ''
+    const rels = zip ? await zip.file('word/_rels/document.xml.rels').async('string') : ''
+    ok(/Launch sync/.test(xml) && /Pricing page copy/.test(xml) && /Hire a designer/.test(xml) && /Made from the whiteboard/.test(xml) && /Target="\.\.\/\.\.\/boards\/Launch%20sync\.excalidraw"/.test(rels), 'Make a document: a Word file of what\'s on the board, in Studio\'s own folder, with a link back to the board', { files: fs.existsSync(own) ? fs.readdirSync(own) : [], rels: rels.slice(0, 400) })
+    ok(await until(() => p.locator('.sd-file .pane-head', { hasText: `${id}.docx` }).count(), 20000), 'and opened in Studio')
+    await sleep(800)
+    await shot(p, `${tag}whiteboard-v2-made-document`)
+    // A deck as Studio makes them, its first slide's notes linking back to the board.
+    await openBoard(id)
+    const n0 = model.asked().length
+    await assist(p, 'Make a deck')
+    const deck = await until(() => { try { return fs.readFileSync(path.join(own, `${id} deck.md`), 'utf8') } catch { return null } }, 20000)
+    ok(!!deck && /^---\nmarp: true\npaginate: true\n---\n/.test(deck) && /<!-- Made from the whiteboard "Launch sync": \.\.\/\.\.\/boards\/Launch%20sync\.excalidraw -->/.test(deck) && (deck.match(/\n---\n/g) || []).length >= 4, 'Make a deck: a deck as Studio makes them, its first slide\'s notes linking back to the board', deck?.slice(0, 500))
+    ok(model.asked().slice(n0).some((q) => /^Write a slide deck: the whiteboard "Launch sync"/m.test(q) && /Priya: Fix the login bug · Friday/.test(q)), 'written from what\'s on the board, each box with what\'s in it', model.asked().slice(n0).map((q) => q.slice(0, 300)))
+    ok(await until(() => p.locator('.sd-file .pane-head', { hasText: `${id} deck.md` }).count(), 20000), 'and opened in Studio')
+    await sleep(800)
+    await shot(p, `${tag}whiteboard-v2-made-deck`)
+    // AI Assist's menu on a board, dark: the meeting moves and the write-ups with Studio on.
+    const night = await page(b, kit.url, { mode: 'dark', store: { 'cc-ws': { tabs: [`view:whiteboard:${id}`], active: `view:whiteboard:${id}`, side: null, split: false, group: 'main' } }, before: async (c) => watch(c) })
+    await night.p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
+    await night.p.locator('.wb-view .pane-extras button[aria-label="AI Assist"]').click()
+    const items = await night.p.locator('.ai-menu .ai-item-label').allInnerTexts()
+    ok(['Group by theme', 'A timeline', 'Action items', 'Make a document', 'Make a deck'].every((x) => items.includes(x)), 'with Studio on, a board\'s AI Assist offers Make a document and Make a deck after the meeting moves', items)
+    await shot(night.p, `${tag}whiteboard-v2-ai-menu-dark`)
+    ok(!night.errors.length, 'dark: no page errors', night.errors)
+    await night.ctx.close()
+  })
+
+  await part('versions of a board', async () => {
+    // On the server: kept after a break, before an AI Assist change, and before one is put back.
+    const box = (id, x) => ({ id, type: 'rectangle', x, y: 100, width: 200, height: 100, angle: 0, strokeColor: '#1e1e1e', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 1, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1, link: null, locked: false })
+    const doc = (n) => JSON.stringify({ type: 'excalidraw', version: 2, source: 'test', elements: Array.from({ length: n }, (_, i) => box(`r${i}`, i * 260)), appState: { viewBackgroundColor: 'transparent' }, files: {} })
+    const { id } = await api('/boards', { title: 'Kept' })
+    let at = await api(`/boards/${enc(id)}`, { text: doc(1), mtime: (await api(`/boards/${enc(id)}/stat`)).mtime }, 'PUT')
+    at = await api(`/boards/${enc(id)}`, { text: doc(2), mtime: at.mtime }, 'PUT')
+    ok(!(await api(`/boards/${enc(id)}/versions`)).versions.length, 'saves close together keep no version')
+    const back = new Date(Date.now() - 10 * 60_000)
+    fs.utimesSync(file(id), back, back)
+    at = await api(`/boards/${enc(id)}`, { text: doc(3), mtime: fs.statSync(file(id)).mtimeMs }, 'PUT')
+    at = await api(`/boards/${enc(id)}`, { text: doc(4), mtime: at.mtime, version: { by: 'ai', label: 'Drawn by gpt-5' } }, 'PUT')
+    const vs = (await api(`/boards/${enc(id)}/versions`)).versions
+    const rects = (vid) => (JSON.parse(fs.readFileSync(path.join(BOARDS, '.versions', id, `${vid}.excalidraw`), 'utf8')).elements || []).length
+    ok(vs.length === 2 && vs[0].by === 'ai' && vs[0].label === 'Drawn by gpt-5' && rects(vs[0].id) === 3 && vs[1].by === 'you' && rects(vs[1].id) === 2, 'the board as you left it, kept when you come back after a break; and as it was before an AI Assist change, named for it', vs)
+    // In the app: Versions in the board's header, each as its picture, and Put back.
+    await openBoard(id)
+    await p.locator('.wb-view .pane-head button[aria-label="Versions"]').click()
+    const panel = p.locator('.wb-vers')
+    ok(await until(async () => (await panel.locator('.wb-vers-list li').count()) === 2, 8000) && /Before AI Assist: Drawn by gpt-5/.test(await panel.innerText()) && /As you left it/.test(await panel.innerText()), 'Versions, from the board\'s header: what each was before, newest first', await panel.innerText().catch(() => ''))
+    await shot(p, `${tag}whiteboard-v2-versions`)
+    await panel.locator('.wb-vers-list li', { hasText: 'As you left it' }).getByRole('button', { name: 'Put back' }).click()
+    ok(await until(() => live(readBoard(id)).length === 2, 8000) && await until(async () => (await panel.locator('.wb-vers-list li').count()) === 3, 5000), 'Put back: the board as it was, drawn and saved, and what was there kept as a version first', { rects: live(readBoard(id)).length, list: await panel.innerText().catch(() => '') })
+    ok(/Before a version was put back/.test(await panel.innerText()), 'named for it', await panel.innerText())
+    // An AI Assist change made in the app keeps the board as it was before it.
+    const launch = (await api(`/boards/${enc('Launch sync')}/versions`)).versions
+    ok(launch.some((v) => v.by === 'ai' && /^Grouped by theme by gpt-5$/.test(v.label || '')) && launch.some((v) => v.by === 'ai' && /^Drawn by gpt-5$/.test(v.label || '')), 'each AI Assist change in the app keeps the board as it was before it, named for the change', launch.map((v) => [v.by, v.label]))
+    await openBoard('Launch sync')
+    if (!(await p.locator('.wb-vers').count())) await p.locator('.wb-view .pane-head button[aria-label="Versions"]').click()
+    const pics = () => p.locator('.wb-vers-list img').evaluateAll((imgs) => imgs.filter((i) => i.complete && i.naturalWidth > 0).length)
+    ok(await until(async () => (await pics()) > 0, 8000), 'each version looked at as the picture the board had then', await pics())
+    await p.locator('.wb-vers-list .wb-vers-pic').first().click()
+    await shot(p, `${tag}whiteboard-v2-versions-pictures`)
+    await p.locator('.wb-vers button[aria-label="Close"]').click()
+    await openBoard(id)
+    // A rename takes them along; a delete takes them away.
+    await api(`/boards/${enc(id)}`, { title: 'Kept too' }, 'PATCH')
+    ok((await api(`/boards/${enc('Kept too')}/versions`)).versions.length === 3, 'renamed, the board keeps its versions')
+    await p.locator('.wb-vers button[aria-label="Close"]').click({ timeout: 2000 }).catch(() => {})
+    // Dark.
+    const night = await page(b, kit.url, { mode: 'dark', store: { 'cc-ws': { tabs: ['view:whiteboard:Kept too'], active: 'view:whiteboard:Kept too', side: null, split: false, group: 'main' } }, before: async (c) => watch(c) })
+    await night.p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
+    await night.p.locator('.wb-view .pane-head button[aria-label="Versions"]').click()
+    ok(await until(() => night.p.locator('.wb-vers .wb-vers-list li').count(), 8000), 'dark: Versions')
+    await shot(night.p, `${tag}whiteboard-v2-versions-dark`)
+    await night.ctx.close()
+    await api(`/boards/${enc('Kept too')}`, null, 'DELETE')
+    ok(!fs.existsSync(path.join(BOARDS, '.versions', 'Kept too')), 'deleted, its versions go too')
   })
 
   await part('the credit in About', async () => {

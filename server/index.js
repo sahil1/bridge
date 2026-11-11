@@ -624,6 +624,18 @@ app.post('/api/studio/deck/ai', wrap(async (req) => {
   const r = await chatModels.reply(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, feature: 'studio' })
   return { ...studio.deckAnswer(r?.text), model: use }
 }))
+// A sheet's AI Assist (studio.sheetAsk): the cells picked and what to do with them, answered by
+// Studio's model (the one picked for it, else the one the app reaches first) as a change the page
+// shows on the sheet to keep or discard.
+app.post('/api/studio/sheet/ai', wrap(async (req) => {
+  const b = req.body || {}
+  const use = String(b.model || '') || await studioModel()
+  if (!use) throw Object.assign(new Error('No model to answer with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers.'), { code: 'noModel' })
+  const ask = studio.sheetAsk({ rel: sq(req).path, instruction: b.instruction, selection: b.selection, where: b.where, sheet: b.sheet, sheets: b.sheets, used: b.used })
+  const r = await chatModels.reply(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, json: studio.SHEET_SCHEMA, feature: 'studio' })
+  const d = (await chatModels.models().catch(() => [])).find((x) => x.id === use)
+  return { ...studio.sheetAnswer(r?.text), model: use, by: d?.label || String(use).split(':').slice(1).join(':') || use }
+}))
 // A picture put on a slide, saved beside the deck.
 app.post('/api/studio/picture', wrap(async (req) => { const q = sq(req); return studio.savePicture(await rootOf(q.root), q.path, req.body?.name, Buffer.from(String(req.body?.data || ''), 'base64')) }))
 app.get('/api/agents/:pane/files', wrap(async (req) => files.listDir(await rootOf(req.params.pane), String(req.query.path || ''), { showHidden: req.query.hidden === '1' })))
