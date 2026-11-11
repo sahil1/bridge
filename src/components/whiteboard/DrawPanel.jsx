@@ -5,7 +5,7 @@ import { usePersisted } from '../layout.jsx'
 import { api, usePoll, fmtRelative } from '../../api.js'
 import { t, tx } from '../../i18n/index.js'
 import { defaultKey, keyLabel } from '../../../shared/dictation/keys.js'
-import { fromMermaid, placeBeside, describe, applyOps } from './convert.js'
+import { fromMermaid, placeBeside, describe, applyOps, groupBy } from './convert.js'
 import { fromSpec } from './spec.js'
 import { reroute, layoutBoard, fitInView } from './layout.js'
 import { review } from './review.js'
@@ -25,8 +25,11 @@ import CopyButton from '../CopyButton.jsx'
 // there's nothing left to fix. Every round is kept as a version to step back to, with what changed
 // and why, and the calls it took are counted. The last Refine is kept beside the board too
 // (server/boards.js), so coming back to it later, its versions can still be put on the board.
-export const KINDS = [['auto', tx('Any kind')], ['flowchart', tx('Flowchart')], ['architecture', tx('Architecture')], ['network', tx('Network')], ['sequence', tx('Sequence')], ['org', tx('Org chart')], ['mindmap', tx('Mind map')]]
-const FROM = [['', tx('Just my words')], ['meeting', tx('A meeting')], ['project', tx('A project')], ['agent', tx("An agent's work")]]
+// The meeting moves: a timeline with owners and dates, and the action items for each person (which
+// go onto the Chief of Staff's task list with a click), drawn from what's on the board or a meeting;
+// and Change it's Group by theme (themes()).
+export const KINDS = [['auto', tx('Any kind')], ['flowchart', tx('Flowchart')], ['architecture', tx('Architecture')], ['network', tx('Network')], ['sequence', tx('Sequence')], ['org', tx('Org chart')], ['mindmap', tx('Mind map')], ['timeline', tx('Timeline')], ['actions', tx('Action items')]]
+const FROM = [['', tx('Just my words')], ['board', tx("What's on this board")], ['meeting', tx('A meeting')], ['project', tx('A project')], ['agent', tx("An agent's work")]]
 const ROUNDS = [0, 1, 2, 3, 4, 5]
 
 // The model to draw with: the one picked here before, else the one meeting notes use.
@@ -44,7 +47,7 @@ function useChoices(from) {
   const [items, setItems] = useState(null)
   useEffect(() => {
     setItems(null)
-    if (!from) return
+    if (!from || from === 'board') return
     const get = from === 'meeting' ? api('/meetings').then((r) => (r.meetings || []).filter((m) => !m.archived).sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt))).slice(0, 40).map((m) => ({ id: m.id, label: `${m.title} · ${new Date(m.startedAt).toLocaleDateString()}` })))
       : from === 'project' ? api('/projects').then((r) => (r.projects || []).map((p) => ({ id: p.path, label: p.name })))
         : api('/fleet').then((f) => (f.agents || []).filter((a) => !a.chief && !a.cloud && !a.shellTab).map((a) => ({ id: a.paneId, label: `${a.title || a.kind}${a.workspace ? ` · ${a.workspace}` : ''}` })))
@@ -56,7 +59,7 @@ function useChoices(from) {
 // Where the words go, said plainly before anything is sent.
 function goesTo(model, from, refine) {
   if (!model) return ''
-  const what = from === 'meeting' ? t('Your words and the meeting') : from === 'project' ? t("Your words and the project's file names and README") : from === 'agent' ? t("Your words and the agent's conversation") : t('Your words')
+  const what = from === 'board' ? t('Your words and what\'s written on the board') : from === 'meeting' ? t('Your words and the meeting') : from === 'project' ? t("Your words and the project's file names and README") : from === 'agent' ? t("Your words and the agent's conversation") : t('Your words')
   const base = model.via === 'local' ? t('{what} stay on this computer ({model}).', { what, model: model.label }) : t('{what} go to {model} ({provider}). Nothing else leaves this computer.', { what, model: model.label, provider: model.provider || model.label })
   return refine && model.via !== 'local' ? `${base} ${t('Refine sends it the drawing as well, and a picture of the board when it can look at one.')}` : base
 }
@@ -76,12 +79,14 @@ const say = (issues) => issues.map((x) => t(ISSUE[x.kind] || x.kind, { n: x.n })
 // ({ prompt, kind, from, model, refine }), drawn straight away. boardId: the board's name, to keep
 // its rounds by. look: the board's look. prefs: what the whiteboard has learnt (colours, spacing,
 // direction). onDrawn({ ids, direction }): after a model has drawn, for learning from the edits
-// that follow. want: { mode, n }, the way AI Assist's menu asked for (Draw this, Change it or Ask).
+// that follow. want: { mode, n }, the way AI Assist's menu asked for (Draw this, Change it or Ask),
+// or a meeting move to make straight away (themes, timeline, actions).
+const modeOf = (w) => (w === 'themes' ? 'change' : w === 'timeline' || w === 'actions' ? 'draw' : w)
 export default function DrawPanel({ board, start, want = null, onStarted, onClose, compact = false, boardId = null, look = 'clean', prefs = null, onDrawn }) {
   const els = board.api?.getSceneElements() || []
-  const [mode, setMode] = useState(start ? 'draw' : want?.mode || (els.length ? 'change' : 'draw'))
-  useEffect(() => { if (want?.mode) setMode(want.mode) }, [want?.n]) // eslint-disable-line react-hooks/exhaustive-deps
+  const [mode, setMode] = useState(start ? 'draw' : modeOf(want?.mode) || (els.length ? 'change' : 'draw'))
   const [text, setText] = useState(start?.prompt || '')
+  const [actions, setActions] = useState(null) // action items drawn: { items: [title], busy, added, error }
   const [kind, setKind] = usePersisted('cc-board-kind', 'auto')
   const [refine, setRefine] = usePersisted('cc-board-refine', 2)
   const [from, setFrom] = useState(start?.from ? Object.keys(start.from)[0] : '')
@@ -183,10 +188,10 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
   const draw = async (o = {}) => {
     const { X, api: ex } = board
     const prompt = (o.prompt ?? text).trim()
-    const src = o.from || (from && fromId ? { [from]: fromId } : null)
+    const src = o.from || (from === 'board' ? { board: describe(ex.getSceneElements()) } : from && fromId ? { [from]: fromId } : null)
     const want = o.refine ?? rounds
     if (!prompt && !src) { setErr(t('Say what to draw')); return }
-    setBusy(true); setErr(null); setNote(null); setPast(null); stopRef.current = false
+    setBusy(true); setErr(null); setNote(null); setPast(null); setActions(null); stopRef.current = false
     try {
       const body = { prompt, kind: o.kind || kind, from: src, model: o.model || m.id || undefined }
       setRun({ rounds: [], at: 0, calls: 0, status: 'running', step: 'draft', round: 0, of: want })
@@ -237,7 +242,44 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
       setSug(s)
       setNote(t('Drawn by {model}, as a suggestion: keep it or discard it, here or on the board.', { model: labelOf(m, r.model) }))
       setText('')
+      // Action items: each one ("Priya: Fix the login bug · Friday"), to put on the task list.
+      if (body.kind === 'actions' && spec) {
+        const who = new Map((spec.groups || []).map((g) => [g.id, g.label]))
+        const items = (spec.nodes || []).filter((n) => n.label).map((n) => (who.get(n.group) ? `${who.get(n.group)}: ${n.label}` : n.label))
+        setActions(items.length ? { items } : null)
+      } else setActions(null)
     } catch (e) { setErr(e.message); setRun((x) => (x && x.rounds.length ? { ...x, status: 'done', stop: 'error' } : null)) } finally { setBusy(false) }
+  }
+  // The action items onto the Chief of Staff's task list, as its Tasks panel adds them.
+  const toTasks = async () => {
+    if (!actions || actions.busy || actions.added) return
+    setActions((a) => ({ ...a, busy: true, error: null }))
+    let n = 0
+    try {
+      for (const title of actions.items) { await api('/chief/tasks', { method: 'POST', body: { title } }); n++ }
+      setActions((a) => ({ ...a, busy: false, added: n }))
+    } catch (e) { setActions((a) => ({ ...a, busy: false, added: n || null, error: e.message })) }
+  }
+
+  // "Group these notes by theme": the notes selected (or all of them) gathered in a box per theme,
+  // as a suggestion like any other change (moved back where they were if it's discarded).
+  const themes = async () => {
+    const { X, api: ex } = board
+    setBusy(true); setErr(null); setNote(t('Grouping the notes by theme…')); setAnswer(null); setActions(null); setRun(null)
+    try {
+      const all = ex.getSceneElements()
+      const picked = new Set(Object.entries(ex.getAppState().selectedElementIds || {}).filter(([, on]) => on).map(([id]) => id))
+      for (const e of all) if (picked.has(e.id) && holderOf(e)) contents(e, all).forEach((c) => picked.add(c.id))
+      const base = before(ex.getSceneElementsIncludingDeleted())
+      const r = await api('/boards/themes', { method: 'POST', body: { scene: describe(all, picked.size ? picked : null), selected: picked.size > 0, model: m.id || undefined } })
+      await fontsReady(look)
+      const s = newSuggestion(labelOf(m, r.model))
+      const { elements, touched } = groupBy(X, ex.getSceneElementsIncludingDeleted(), r.groups, look)
+      ex.updateScene({ elements: mark(X, base, elements, s), appState: { selectedElementIds: {} }, captureUpdate: X.CaptureUpdateAction.IMMEDIATELY })
+      fit(ex.getSceneElements().filter((e) => touched.includes(e.id)))
+      setSug(s)
+      setNote(t('Grouped into {n} themes by {model}, as a suggestion: keep it or discard it, here or on the board.', { n: r.groups.length, model: labelOf(m, r.model) }))
+    } catch (e) { setNote(null); setErr(e.message) } finally { setBusy(false) }
   }
 
   const change = async () => {
@@ -367,6 +409,20 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
     draw({ prompt: start.prompt, kind: start.kind, from: start.from, model: start.model, refine: start.refine })
   }, [board.api, m.loaded]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The way AI Assist's menu asked for: Draw this, Change it or Ask; or a meeting move, made
+  // straight away: Group by theme, or a timeline or the action items from what's on the board (with
+  // nothing on it, from a meeting, picked here).
+  useEffect(() => {
+    const w = want?.mode
+    if (!w || busy) return
+    setMode(modeOf(w))
+    if (w === 'themes') { themes(); return }
+    if (w !== 'timeline' && w !== 'actions') return
+    setKind(w)
+    const all = board.api?.getSceneElements() || []
+    if (all.length) { setFrom('board'); draw({ prompt: '', kind: w, from: { board: describe(all) } }) } else setFrom('meeting')
+  }, [want?.n]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const go = (e) => { e?.preventDefault(); if (!busy) (mode === 'draw' ? draw() : mode === 'ask' ? ask() : change()) }
   const noModel = m.loaded && !m.models.length
   const cur = run?.rounds[run.at]
@@ -392,15 +448,20 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
           <label className="wb-from">
             <span className="muted small">{t('From')}</span>
             <select value={from} onChange={(e) => { setFrom(e.target.value); setFromId('') }} aria-label={t('Draw from')}>
-              {FROM.map(([id, label]) => <option key={id} value={id}>{t(label)}</option>)}
+              {FROM.filter(([id]) => id !== 'board' || scene.n).map(([id, label]) => <option key={id} value={id}>{t(label)}</option>)}
             </select>
-            {from && <select value={fromId} onChange={(e) => setFromId(e.target.value)} aria-label={t('Which one')} disabled={!choices?.length}>
+            {from && from !== 'board' && <select value={fromId} onChange={(e) => setFromId(e.target.value)} aria-label={t('Which one')} disabled={!choices?.length}>
               {!choices ? <option>{t('Loading…')}</option> : !choices.length ? <option>{t('None yet')}</option> : choices.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
             </select>}
           </label>
         </div>
       )}
       {mode === 'change' && <p className="muted small wb-scope">{sel ? t('Changes the {n} selected; the rest stays as it is.', { n: sel }) : t('Changes the whole board. Select shapes first to change only those.')}</p>}
+      {mode === 'change' && (
+        <div className="wb-moves">
+          <button type="button" className="chip" onClick={themes} disabled={busy || noModel || !scene.n} title={sel ? t('The {n} selected, gathered in a box per theme', { n: sel }) : t('The notes on the board, gathered in a box per theme')}><Icon name="layers" size={11} /> {t('Group these notes by theme')}</button>
+        </div>
+      )}
       {asking && <p className="muted small wb-scope">{sel ? t('About the {n} selected. The board stays as it is.', { n: sel }) : t('About the whole board. Select shapes first to ask about only those.')}</p>}
       <div className="wb-draw-foot">
         {m.models.length > 1
@@ -416,7 +477,7 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
         )}
         <span className="wb-grow" />
         {busy && run && <button type="button" className="btn small" onClick={() => { stopRef.current = true }}>{t('Stop')}</button>}
-        <button type="submit" className="btn small primary" disabled={busy || noModel || (!text.trim() && !(mode === 'draw' && from && fromId))}>
+        <button type="submit" className="btn small primary" disabled={busy || noModel || (!text.trim() && !(mode === 'draw' && from && (fromId || from === 'board')))}>
           <Icon name={busy ? 'refresh' : 'wand'} size={12} className={busy ? 'spin' : ''} /> {busy ? (mode === 'draw' ? t('Drawing…') : asking ? t('Asking…') : t('Changing…')) : mode === 'draw' ? t('Draw') : asking ? t('Ask') : t('Change')}
         </button>
       </div>
@@ -474,6 +535,15 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
       )}
       {err && <p className="error-text small" role="alert">{err}</p>}
       {note && <p className="muted small wb-note" role="status">{note}</p>}
+      {actions && !busy && (
+        <div className="wb-tasks">
+          <span className="small">{actions.items.length === 1 ? t('1 action item') : t('{n} action items', { n: actions.items.length })}</span>
+          {actions.added
+            ? <span className="muted small" role="status"><Icon name="check" size={11} /> {t('On the Chief of Staff\'s task list')}</span>
+            : <button type="button" className="btn small" onClick={toTasks} disabled={actions.busy} title={actions.items.join('\n')}><Icon name="check" size={12} /> {actions.busy ? t('Adding…') : t('Add them to Tasks')}</button>}
+          {actions.error && <p className="error-text small" role="alert">{t("Couldn't add them all: {error}", { error: actions.error })}</p>}
+        </div>
+      )}
       {scene.sugs > 0 && !busy && (sug && scene.waits ? (
         <div className="wb-sug-acts">
           <button type="button" className="btn small primary" onClick={() => settle(keepIt)}><Icon name="check" size={12} /> {t('Keep')}</button>

@@ -32,12 +32,18 @@ import './whiteboard.css'
 
 const enc = encodeURIComponent
 // What AI Assist offers on a board: its panel, to draw something new, change what's there, or ask
-// about the shapes selected (or the whole board). open: the panel is open; drawn: something's on
-// the board; sel: how many shapes are selected; show(mode): opens the panel that way.
+// about the shapes selected (or the whole board); and the meeting moves (DrawPanel.jsx KINDS),
+// made straight away. open: the panel is open; drawn: something's on the board; sel: how many
+// shapes are selected; show(mode): opens the panel that way.
 const drawAssist = (open, drawn, show, sel = 0) => [
   { label: t('Draw this'), hint: t('A diagram from what you describe, a meeting or a document'), run: () => show('draw') },
   { label: t('Change it'), hint: drawn ? t('The whole board, or the shapes you select') : t('Once there\'s something on the board'), disabled: !drawn, run: () => show('change') },
   { label: sel ? t('Ask about these') : t('Ask about the board'), hint: !drawn ? t('Once there\'s something on the board') : sel ? t('A question about the {n} selected, answered here', { n: sel }) : t('Select shapes to ask about only those'), disabled: !drawn, run: () => show('ask') },
+  'sep',
+  // After a meeting: its notes on the board sorted, put on a timeline, or turned into who does what.
+  { label: t('Group by theme'), hint: !drawn ? t('Once there\'s something on the board') : sel ? t('The {n} selected, gathered in a box per theme', { n: sel }) : t('The notes on the board, gathered in a box per theme'), disabled: !drawn, run: () => show('themes') },
+  { label: t('A timeline'), hint: drawn ? t('With owners and dates, from what\'s on the board') : t('With owners and dates, from a meeting'), run: () => show('timeline') },
+  { label: t('Action items'), hint: t('For each person, to put on your task list'), run: () => show('actions') },
   open && 'sep',
   open && { label: t('Close AI Assist'), run: () => show(null) },
 ]

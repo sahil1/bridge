@@ -20,8 +20,10 @@
 //   with the calls counted and a picture sent to a model that can see; PDF export with the board's
 //   words in it (its code loaded only then), and of a selection; a preference learnt from laying a
 //   drawing out the other way, applied to the next prompt and forgotten, and one set by hand; a
-//   model on this computer drawing and refining with no picture; the credit in About; on a phone,
-//   the panels fit.
+//   model on this computer drawing and refining with no picture; Refine's rounds as one suggestion,
+//   kept with each container's own lines back; the meeting moves (a meeting's notes grouped by
+//   theme and discarded back into place, a timeline and the action items drawn from the board, the
+//   action items onto the Chief of Staff's task list); the credit in About; on a phone, the panels fit.
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
@@ -543,6 +545,50 @@ try {
     ok(sent.length > 0 && sent.every((x) => x.model === 'llama3.1:8b') && reviews.length === 2 && reviews.every((x) => typeof x.messages.find((m) => m.role === 'user').content === 'string'), 'everything goes to that model, and as it can\'t see, the reviews go without a picture', sent.map((x) => [x.model, typeof x.messages.at(-1).content]))
     ok(/4 calls/.test(await p.locator('.wb-cost').innerText()), 'counting the drawing asked twice and two rounds', await p.locator('.wb-cost').innerText())
     await shot(p, `${tag}whiteboard-v2-local`)
+  })
+
+  await part('meeting moves', async () => {
+    // A meeting's notes on a board, each a box with its words.
+    const { id } = await api('/boards', { title: 'Launch sync', source: { kind: 'mermaid', text: 'flowchart TD\n  a[Pricing page copy]\n  b[Cheaper annual plan]\n  c[Login bug]\n  d[Slow sign-in]\n  e[Hire a designer]' } })
+    await openBoard(id)
+    await until(() => texts(readBoard(id)).includes('Hire a designer') && !readBoard(id)?.bridge, 15000)
+    await saved()
+    const notes = live(readBoard(id))
+    const was = Object.fromEntries(notes.filter((e) => e.type === 'rectangle').map((e) => [labelOf(notes, e), [e.x, e.y]]))
+    // Refine off, so what's checked is what the model sent; gpt-5 again after the model on this computer.
+    if (!(await p.locator('.wb-draw').count())) await assist(p, 'Change it')
+    await p.locator('.wb-draw [role="tab"]', { hasText: 'Change it' }).click()
+    await p.locator('.wb-draw select[aria-label="Rounds of refining"]').selectOption('0')
+    await p.locator('.wb-draw select.wb-model').selectOption('openai:gpt-5')
+    // Group by theme, from AI Assist's menu: a box per theme, named for it, with its notes in it.
+    await assist(p, 'Group by theme')
+    const box = (els, t) => els.find((e) => holder(e) === 'group' && labelOf(els, e) === t)
+    const grouped = await until(() => { const els = live(readBoard(id)); return box(els, 'Pricing') && box(els, 'Sign-in') && box(els, 'Team') && els }, 20000)
+    const els = grouped || []
+    const isIn = (note, t) => { const n = byLabel(els, note), c = box(els, t); return !!n && !!c && inside(n, c) }
+    ok(!!grouped && isIn('Pricing page copy', 'Pricing') && isIn('Cheaper annual plan', 'Pricing') && isIn('Login bug', 'Sign-in') && isIn('Slow sign-in', 'Sign-in') && isIn('Hire a designer', 'Team'), 'Group by theme gathers the notes in a box per theme, named for it', els.map((e) => [e.type, holder(e), labelOf(els, e)]).filter((x) => x[2]))
+    ok(els.filter((e) => e.type === 'rectangle').every((e) => e.customData?.bridge?.suggestion), 'as a suggestion: the boxes, and the notes it moved')
+    await shot(p, `${tag}whiteboard-v2-themes`)
+    await p.locator('.wb-draw .wb-sug-acts button', { hasText: 'Discard' }).click()
+    ok(await until(() => { const now = live(readBoard(id)); return !now.some((e) => holder(e) === 'group') && Object.entries(was).every(([t, [x, y]]) => { const n = byLabel(now, t); return n && Math.abs(n.x - x) < 1 && Math.abs(n.y - y) < 1 }) }, 8000), 'discarded: the boxes gone, and every note back where it was', live(readBoard(id)).map((e) => [labelOf(live(readBoard(id)), e), Math.round(e.x), Math.round(e.y)]).filter((x) => x[0]))
+    // A timeline, from what's on the board.
+    const n0 = model.asked().length
+    await assist(p, 'A timeline')
+    const steps = await until(() => { const now = live(readBoard(id)); const s = ['Design review · Dan · 3 Nov', 'Beta ships · Priya · 10 Nov', 'Launch · You · 1 Dec'].map((t) => byLabel(now, t)); return s.every(Boolean) && s }, 20000)
+    ok(!!steps && steps[0].x < steps[1].x && steps[1].x < steps[2].x, 'A timeline: each step with its owner and date, left to right in order', steps && steps.map((e) => Math.round(e.x)))
+    const asked = model.asked().slice(n0).find((q) => /Make it a timeline/.test(q)) || ''
+    ok(/What's on the whiteboard now/.test(asked) && /- Login bug/.test(asked) && /- Hire a designer/.test(asked), 'drawn from the notes on the board', asked.slice(0, 500))
+    // Action items for each person, then onto the task list with a click.
+    await assist(p, 'Action items')
+    ok(await until(async () => /2 action items/.test(await p.locator('.wb-tasks').innerText().catch(() => '')), 20000), 'Action items: what each person is to do, and how many', await p.locator('.wb-draw').innerText().catch(() => ''))
+    const people = await until(() => { const now = live(readBoard(id)); const o = { priya: box(now, 'Priya'), mine: box(now, 'You'), bug: byLabel(now, 'Fix the login bug · Friday'), budget: byLabel(now, 'Send the budget to finance · Friday') }; return Object.values(o).every(Boolean) && o }, 8000)
+    ok(!!people && inside(people.bug, people.priya) && inside(people.budget, people.mine), 'a box for each person, with what they\'re to do in it', live(readBoard(id)).map((e) => [holder(e), labelOf(live(readBoard(id)), e)]).filter((x) => x[1]))
+    await shot(p, `${tag}whiteboard-v2-actions`)
+    await p.locator('.wb-tasks button', { hasText: 'Add them to Tasks' }).click()
+    ok(await until(async () => /On the Chief of Staff's task list/.test(await p.locator('.wb-tasks').innerText().catch(() => '')), 8000), 'Add them to Tasks, a click, says where they went')
+    const tasks = (await api('/chief/tasks')).items.map((x) => x.title)
+    ok(tasks.includes('Priya: Fix the login bug · Friday') && tasks.includes('You: Send the budget to finance · Friday'), 'each is on the Chief of Staff\'s task list, by who does it', tasks)
+    await p.locator('.wb-draw select[aria-label="Rounds of refining"]').selectOption('3').catch(() => {})
   })
 
   await part('the credit in About', async () => {

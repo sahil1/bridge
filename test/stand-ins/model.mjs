@@ -27,6 +27,8 @@
 //   {"ok":true} once every arrow has one. "Change it": Start renamed Begin, Ship coloured red, a
 //   Cache box beside the first shape with an arrow to it; its review says ok. Ask about these
 //   ("A question about …"): the shapes it was sent, named in quotes, and whether it saw a picture.
+//   The meeting moves: a timeline (Dan's design review, Priya's beta, your launch), Priya's and
+//   your action items, and notes grouped by theme (Pricing, Sign-in, and Team for the rest).
 //   AI Assist's Sign this, "Explain this document": a mutual NDA between Northwind Labs and Contoso
 //   Ltd, a fee, a renewal worth a look on page 1 ("renews automatically").
 //   A sheet's AI Assist ("In the spreadsheet …"): the change asked for, as JSON (sheetChange).
@@ -61,6 +63,10 @@ const ARCH = { direction: 'LR', groups: [{ id: 'aws', label: 'AWS us-east-1', ki
   edges: [{ from: 'users', to: 'lb', label: 'HTTPS' }, { from: 'lb', to: 'app1' }, { from: 'lb', to: 'app2' }, { from: 'app1', to: 'db', label: 'SQL' }, { from: 'app2', to: 'db', label: 'SQL' }] }
 const NET = { direction: 'TB', groups: [{ id: 'lan', label: 'Office LAN', kind: 'vpc' }], nodes: [{ id: 'inet', label: 'Internet', shape: 'internet' }, { id: 'fw', label: 'Firewall', shape: 'firewall' }, { id: 'sw', label: 'Switch', shape: 'switch', group: 'lan' }, { id: 'srv', label: 'File server', shape: 'server', group: 'lan' }, { id: 'pc', label: 'Desktops', shape: 'client', group: 'lan' }],
   edges: [{ from: 'inet', to: 'fw', label: 'WAN' }, { from: 'fw', to: 'sw', label: '1 Gbps' }, { from: 'sw', to: 'srv', label: 'LAN' }, { from: 'sw', to: 'pc', label: 'LAN' }] }
+
+// The meeting moves: a timeline of three steps with owners and dates, and two people's action items.
+const TIMELINE = { direction: 'LR', groups: [], nodes: [{ id: 't1', label: 'Design review · Dan · 3 Nov', shape: 'process' }, { id: 't2', label: 'Beta ships · Priya · 10 Nov', shape: 'process' }, { id: 't3', label: 'Launch · You · 1 Dec', shape: 'start' }], edges: [{ from: 't1', to: 't2' }, { from: 't2', to: 't3' }] }
+const ACTIONS = { direction: 'LR', groups: [{ id: 'priya', label: 'Priya', kind: 'group' }, { id: 'you', label: 'You', kind: 'group' }], nodes: [{ id: 'a1', label: 'Fix the login bug · Friday', shape: 'note', group: 'priya' }, { id: 'a2', label: 'Send the budget to finance · Friday', shape: 'note', group: 'you' }], edges: [] }
 
 // AI Assist's suggestion for a folder, from the names it was sent.
 function filesPlan(text) {
@@ -107,6 +113,15 @@ function answer(b) {
     if (/\blocal\b/i.test(first) && m.filter((x) => x.role === 'user').length === 1) return say('{"nodes": "a load balancer and a server"}')
     if (/aws|3-tier|\blocal\b/i.test(first)) return say(`\`\`\`json\n${JSON.stringify(ARCH)}\n\`\`\``)
     if (/office network/i.test(first)) return say(JSON.stringify(NET))
+    if (/Make it a timeline/.test(first)) return say(JSON.stringify(TIMELINE))
+    if (/Make it the action items for each person/.test(first)) return say(JSON.stringify(ACTIONS))
+  }
+  // Group by theme: pricing notes, sign-in notes, and the rest as the team's.
+  if (/^Group these notes from a whiteboard by theme/.test(first)) {
+    const notes = JSON.parse(/The notes, as JSON:\n(\[.*\])\n/.exec(first)?.[1] || '[]')
+    const of = (re) => notes.filter((x) => re.test(x.text)).map((x) => x.id)
+    const pricing = of(/pric|plan|cheap/i), signin = of(/login|sign-in/i)
+    return say(JSON.stringify({ groups: [{ theme: 'Pricing', ids: pricing }, { theme: 'Sign-in', ids: signin }, { theme: 'Team', ids: notes.map((x) => x.id).filter((id) => !pricing.includes(id) && !signin.includes(id)) }] }))
   }
   if (/^You drew a diagram for:/.test(first)) {
     const spec = JSON.parse(/Your diagram, as JSON:\n(\{.*\})\n/.exec(first)?.[1] || '{}')

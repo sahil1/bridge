@@ -112,6 +112,14 @@
 .wb-sug-bar > svg { flex: none; color: var(--ai); }
 .wb-sug-bar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-sug-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* The meeting moves: Group by theme under Change it; action items drawn, to add to Tasks. */
+.wb-moves { display: flex; flex-wrap: wrap; gap: 4px; }
+.wb-moves .chip { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; border: 1px solid color-mix(in srgb, var(--ai) 35%, transparent); }
+.wb-moves .chip:hover:not(:disabled) { background: var(--accent-soft); }
+.wb-moves .chip > svg { color: var(--ai); }
+.wb-tasks { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 9px; background: var(--pane-2); border: 1px solid var(--line); }
+.wb-tasks > span:first-child { flex: 1; min-width: 0; }
+.wb-tasks .error-text { flex-basis: 100%; margin: 0; }
 /* Ask's answer, under the box: who answered and from what, the answer, the shapes it names. */
 .wb-answer { display: grid; gap: 6px; padding: 8px 10px; border-radius: 9px; background: color-mix(in srgb, var(--ai) 6%, var(--pane-2)); border: 1px solid color-mix(in srgb, var(--ai) 30%, var(--line)); }
 .wb-answer-by { display: inline-flex; align-items: center; gap: 4px; }

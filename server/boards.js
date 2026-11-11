@@ -304,6 +304,8 @@ const KIND_ASK = {
   sequence: 'Make it a sequence diagram (sequenceDiagram): who sends what to whom, in order.',
   org: 'Make it an org chart, top to bottom: one box per person or team, "Name, role" when there is a role, managers above the people they lead.',
   mindmap: 'Make it a mind map, left to right: the main idea first, its branches after it.',
+  timeline: 'Make it a timeline, left to right ("direction": "LR"): one node per milestone or step, in date order, each joined to the next by an edge. Label each node "What · who · when", with the owner and the date as they were given; leave out either one when it isn\'t known. Groups only for phases, when there are clear ones.',
+  actions: 'Make it the action items for each person: one group per person (kind "group", labelled with their name), and in each one node per thing they are to do (shape "note"), labelled "What to do · when", leaving the date out when none was given. No edges. Only real action items, who does what, from what you were given; none made up.',
 }
 const RULES = [
   'Answer with one Mermaid diagram in a ```mermaid block and nothing else.',
@@ -318,7 +320,7 @@ const clip = (s, n) => { s = String(s || ''); return s.length > n ? `${s.slice(0
 // The shape sets a drawing needs: boxes for a flowchart, icons and containers for an
 // architecture or a network, and a cloud's own when it's named (or the user prefers it).
 export function setsFor(kind, words = '', prefer = null) {
-  const sets = kind === 'flowchart' || kind === 'org' || kind === 'mindmap' ? ['flowchart'] : kind === 'architecture' || kind === 'network' ? ['network', 'containers'] : ['flowchart', 'network', 'containers']
+  const sets = kind === 'flowchart' || kind === 'org' || kind === 'mindmap' ? ['flowchart'] : kind === 'architecture' || kind === 'network' ? ['network', 'containers'] : kind === 'timeline' || kind === 'actions' ? ['flowchart', 'containers'] : ['flowchart', 'network', 'containers']
   const w = String(words || '')
   if (/\baws\b|amazon|\bec2\b|\bs3\b|lambda|\brds\b|dynamo|cloudfront|route ?53/i.test(w) || prefer === 'aws') sets.push('aws')
   if (/azure|microsoft cloud|\baks\b|cosmos ?db/i.test(w) || prefer === 'azure') sets.push('azure')
@@ -329,6 +331,19 @@ export function setsFor(kind, words = '', prefer = null) {
 // What the diagram is drawn from, besides your words. Each says what it is, for the prompt. n: how
 // much of it to send at most (shareFor).
 async function context(from = {}, n = 1) {
+  // The board itself (a timeline or the action items from its notes): its words, as the page sent
+  // them (src/components/whiteboard/convert.js describe).
+  if (from.board) {
+    const s = sceneOf(from.board, n < 1)
+    const name = new Map(s.shapes.map((x) => [x.id, String(x.text || '')]))
+    const lines = [
+      ...s.shapes.filter((x) => x.text).map((x) => `- ${x.text}`),
+      ...s.texts.filter((x) => x.text).map((x) => `- ${x.text}`),
+      ...s.arrows.filter((a) => name.get(a.from) && name.get(a.to)).map((a) => `- ${name.get(a.from)} -> ${name.get(a.to)}${a.text ? ` (${a.text})` : ''}`),
+    ]
+    if (!lines.length) throw new Error('There\'s nothing written on this board to draw from yet')
+    return { label: 'the notes on the whiteboard', text: `What's on the whiteboard now: its notes and shapes, and the arrows between them.\n${clip(lines.join('\n'), 30_000 * n)}` }
+  }
   if (from.meeting) {
     const m = meetings.get(String(from.meeting))
     const body = m.summary?.trim() ? `Its notes:\n${clip(m.summary, 20_000 * n)}` : `What was said:\n${clip(meetings.transcriptText(m.id), 30_000 * n)}`
@@ -527,6 +542,37 @@ export async function askAbout({ prompt, scene, selected = false, image, model }
   return { answer: r.got.answer.slice(0, 4000), shapes: r.got.shapes, model: r.model, calls: r.calls, saw: sees ? 'picture' : 'words' }
 }
 
+// ---------- Group these notes by theme ----------
+// Which theme each note on the board (or each one selected) belongs to, for the page to gather
+// them in a box per theme (src/components/whiteboard/convert.js groupBy). Only the notes it was
+// sent, each in one group.
+const THEMES = { type: 'object', properties: { groups: { type: 'array', items: { type: 'object', properties: { theme: { type: 'string' }, ids: { type: 'array', items: { type: 'string' } } }, required: ['theme', 'ids'] } } }, required: ['groups'] }
+export async function themes({ scene, selected = false, model } = {}) {
+  const use = model || await helpers.pickModel?.()
+  if (!use) throw Object.assign(new Error('No model to group with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers'), { code: 'noModel' })
+  const s = sceneOf(scene, (await shareFor(use)).small)
+  const notes = [...s.shapes, ...s.texts].filter((x) => String(x.text || '').trim()).map((x) => ({ id: String(x.id), text: String(x.text).slice(0, 300) }))
+  if (notes.length < 2) throw new Error('Group by theme needs two notes or more with words on them')
+  const prompt = [
+    `Group these notes from a whiteboard by theme${selected ? ' (the ones selected)' : ''}.`,
+    'The notes, as JSON:',
+    JSON.stringify(notes),
+    '',
+    'Put each note in exactly one group: 2 to 8 groups, each with a short theme of a few words. Use only the ids above.',
+    'Answer with JSON only: {"groups": [{"theme": "the theme", "ids": ["the ids of its notes"]}]}',
+  ].join('\n')
+  const ids = new Set(notes.map((x) => x.id))
+  const read = (t) => {
+    const j = jsonIn(t)
+    const seen = new Set()
+    const take = (id) => ids.has(id) && !seen.has(id) && !!seen.add(id)
+    const groups = arr(j?.groups).map((g) => ({ theme: String(g?.theme || '').trim().slice(0, 60), ids: arr(g?.ids).map(String).filter(take) })).filter((g) => g.theme && g.ids.length).slice(0, 8)
+    return groups.length ? { groups } : { error: 'It had no groups of the notes it was sent.' }
+  }
+  const r = await askChecked(use, prompt, 'You sort notes from a whiteboard into themes, as JSON.', read, { json: THEMES })
+  return { groups: r.got.groups, model: r.model, calls: r.calls }
+}
+
 // ---------- Refine ----------
 // One round of a model looking over what it drew and making it better. The page draws the result
 // and checks it (src/components/whiteboard/review.js), and sends what the check found, and a
@@ -681,6 +727,7 @@ export function routes(app, { wrap, onComputer, counted }) {
   app.post('/api/boards/change', route((req) => change(req.body || {})))
   app.post('/api/boards/review', route((req) => review(req.body || {})))
   app.post('/api/boards/ask', route((req) => askAbout(req.body || {})))
+  app.post('/api/boards/themes', route((req) => themes(req.body || {})))
   app.get('/api/boards/shapes', wrap(() => ({ text: shapesText() })))
   // Whether the model can look at a picture of the board (Refine sends one only then).
   app.get('/api/boards/sees', wrap(async (req) => ({ sees: !!(await helpers.canSee(String(req.query.model || '') || await helpers.pickModel?.()).catch(() => false)) })))
