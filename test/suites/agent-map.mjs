@@ -284,6 +284,11 @@ try {
       await v.p.waitForTimeout(300)
       await v.p.keyboard.press('Enter')
     } else {
+      // Studio hasn't kept Desk and Laptop yet, so a banner over the page asks to. It comes with an
+      // answer of its own, a moment after the page, and moves all under it down: Map tapped before it
+      // came was somewhere else by the time the tap landed (on the banner), and no map opened. So
+      // first the page as it settles, banner and all.
+      await v.p.locator('.ask-banner .new-device').first().waitFor({ timeout: 15000 })
       // From the phone's Agents tab, whose head has room for Map and New.
       await v.p.locator('.tabbar button', { hasText: 'Agents' }).click()
       const btn = v.p.locator('.m-acts button', { hasText: 'Map' })
