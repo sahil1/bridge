@@ -32,7 +32,9 @@
 //   board written up as a document: its name, what it was sent, and a next step.
 //   AI Assist's Sign this, "Explain this document": a mutual NDA between Northwind Labs and Contoso
 //   Ltd, a fee, a renewal worth a look on page 1 ("renews automatically").
-//   A sheet's AI Assist ("In the spreadsheet …"): the change asked for, as JSON (sheetChange).
+//   A sheet's AI Assist ("In the spreadsheet …"): the change asked for, as JSON (sheetChange). Asked
+//   in a comment on cells (@bridge): a question answered with their total, "double" each number
+//   doubled into the column after them; "slowly" answers after 2.5 s.
 //   Studio's decks: a deck of four slides (its title from what it's about, or the document's first
 //   line), a slide rewritten as big numbers ("Rewritten"), a new slide of next steps.
 //   @bridge in a document's comment ("Request: …" and the commented words): a question answered
@@ -91,9 +93,22 @@ function sheetChange(text) {
   const cols = (head || '').split('\t').slice(1)
   const cells = rows.map((l) => { const [r, ...v] = l.split('\t'); return { r: Number(r), v } })
   const sheet = /on the sheet "([^"]+)"/.exec(text)?.[1]
-  const where = /The cells I picked \(([A-Z]+\d+(?::[A-Z]+\d+)?) on /.exec(text)?.[1] || 'A1:B3'
+  const where = /The cells I (?:picked|commented on) \(([A-Z]+\d+(?::[A-Z]+\d+)?) on /.exec(text)?.[1] || 'A1:B3'
   const json = (o) => `\`\`\`json\n${JSON.stringify(o)}\n\`\`\``
+  const asked = /^In the spreadsheet [^:]*: ([^\n]*)/.exec(text)?.[1] || ''
   if (/not a change/i.test(text)) return 'I would double the costs, I think.'
+  // @bridge in a comment on cells: a question answered with their total; "double" doubles each
+  // number into the column after them.
+  if (/^The comment thread on them so far:/m.test(text) || /The cells I commented on/.test(text)) {
+    const nums = cells.flatMap((c) => c.v.map(Number).filter((n) => Number.isFinite(n) && n !== 0))
+    if (/\?\s*$/.test(asked)) return json({ summary: `They come to ${nums.reduce((a, n) => a + n, 0)}.`, answer: `${nums.length} numbers come to ${nums.reduce((a, n) => a + n, 0)}.` })
+    if (/double/i.test(asked)) {
+      const last = cols.at(-1) || 'B'
+      const to = String.fromCharCode(last.charCodeAt(0) + 1)
+      const rowsWith = cells.filter((c) => c.v.some((v) => Number.isFinite(Number(v)) && v !== ''))
+      return json({ summary: `Doubled each cost into column ${to}, so the original numbers stay as they were.`, sheet, cells: Object.fromEntries(rowsWith.map((c) => [`${to}${c.r}`, `=${last}${c.r}*2`])) })
+    }
+  }
   if (/Write a formula/.test(text)) {
     const to = String.fromCharCode(Math.max(66, (cols.at(-1) || 'A').charCodeAt(0)) + 1)
     return json({ summary: `Doubled each cost in column ${to}`, sheet, cells: Object.fromEntries([[`${to}1`, 'Doubled'], ...cells.filter((c) => c.r > 1).map((c) => [`${to}${c.r}`, `=B${c.r}*2`])]) })
@@ -317,7 +332,7 @@ http.createServer((req, res) => {
       log({ model: b.model, tools: (b.tools || []).map((t) => t.function.name), messages: b.messages, ...(b.response_format ? { format: b.response_format.type } : {}) })
       const said = dictated(words([...(b.messages || [])].reverse().find((x) => x.role === 'user')?.content)) || ''
       if (/fail on purpose/i.test(said)) return j(500, { error: { message: 'The server had an error while processing your request.' } })
-      const slow = /^Request: [^\n]*\bslowly\b/.test(words([...(b.messages || [])].reverse().find((x) => x.role === 'user')?.content))
+      const slow = /^(Request: |In the spreadsheet )[^\n]*\bslowly\b/.test(words([...(b.messages || [])].reverse().find((x) => x.role === 'user')?.content))
       return setTimeout(() => j(200, answer(b)), /take your time/i.test(said) ? 8000 : slow ? 2500 : 300)
     }
     j(404, { error: { message: 'not found' } })

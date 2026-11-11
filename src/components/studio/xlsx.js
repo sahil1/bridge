@@ -58,17 +58,17 @@ export async function readSheet(buf, name, ext, opts = {}) {
     return { kind: 'csv', data: w.data, lost: [], charts: [], csv }
   }
   const { readBook } = await loadBook()
-  const r = await readBook(bytes, name)
+  const r = await readBook(bytes, name, { threads: !!opts.threads })
   // Its charts are drawn in Charts, so they aren't among what isn't shown.
   const lost = r.lost.filter((k) => !(k === 'charts' && r.charts?.length))
-  return { kind: 'xlsx', data: r.data, lost, charts: r.charts || [], keep: r.keep, original: bytes }
+  return { kind: 'xlsx', data: r.data, lost, charts: r.charts || [], keep: r.keep, original: bytes, threads: r.threads || {} }
 }
 
 // ---------- Writing ----------
 // Back to the file's own kind: { bytes, notKept (in words, said before it's saved) }. A CSV keeps
 // its first sheet's values (a formula as its result) in its own separator, encoding and line
 // endings; an Excel file everything, unless a change can't be kept, which the writer says.
-export async function writeSheet(book, now, { ops = [], charts = [] } = {}) {
+export async function writeSheet(book, now, { ops = [], charts = [], threads = null } = {}) {
   if (book.kind === 'csv') {
     const sh = now.sheets[now.sheetOrder[0]]
     const filled = (c) => c && c.v != null && c.v !== ''
@@ -91,7 +91,7 @@ export async function writeSheet(book, now, { ops = [], charts = [] } = {}) {
     return { bytes: out.bytes, notKept }
   }
   const { writeBook } = await loadBook()
-  const r = await writeBook(book.original, book.keep, now, { ops, charts })
+  const r = await writeBook(book.original, book.keep, now, { ops, charts, threads })
   return { bytes: r.bytes, notKept: r.notKept.map(sayWhy) }
 }
 // The writer's reasons, in the app's language: "{what} on {sheet}" and the rest as they are.

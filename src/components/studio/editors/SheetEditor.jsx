@@ -27,6 +27,9 @@ import { ENCODINGS } from '../csv.js'
 import SheetChart, { chartOfGrid } from '../sheetchart.jsx'
 import { googleKeys } from '../sheetkeys.js'
 import { sheetCells, formulaErrorWords } from '../sheetcells.js'
+import { useTrial } from '../../../trials.js'
+import { Threads, SAY, useAuthor } from '../doccomments.jsx'
+import { useSheetThreads, commentKey } from '../sheetcomments.jsx'
 import '../sheet.css'
 
 // A sheet: Univer (Apache-2.0, what GenOffice's Sheets is built on too) with its ribbon, formula
@@ -35,7 +38,9 @@ import '../sheet.css'
 // app's light or dark look and its language where Univer has it. AI Assist (the page's header, or
 // Ask about these cells on a right-click) sends the cells picked to one of your agents, which
 // answers with the change rather than making it: it's shown on the sheet, and kept or not. The
-// page's Ask an agent opens it too. Charts the file has are drawn beside it, from its cells. handle:
+// page's Ask an agent opens it too. Charts the file has are drawn beside it, from its cells. With
+// Comments and @bridge on, an Excel file's threaded comments are threads beside it, written back
+// into it (sheetcomments.jsx), and @bridge in one is AI Assist on those cells. handle:
 // save() gives { bytes, notKept }, selection() the cells picked ("B2:D9 on Budget") with their
 // values, ask() opens AI Assist's panel, assist() what AI Assist offers here.
 const dark = () => { const m = document.documentElement.getAttribute('data-theme'); return m ? m === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches }
@@ -133,6 +138,26 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
   const setPanelRef = useRef(setPanel)
   setPanelRef.current = setPanel
   const changed = useCallback((d) => { dirty.current = d; onDirty(d) }, [onDirty])
+  // Comments on the cells, as threads (Comments and @bridge, a beta feature), in an Excel file: read
+  // with it when the beta is on as it opens, and written back into it (sheetcomments.jsx). @bridge's
+  // changes go on the sheet as AI Assist's do (putChange), to keep or discard from the thread.
+  const threading = useTrial('comments')
+  const author = useAuthor()
+  const core = useRef(null) // Univer itself, for the services its facade doesn't reach
+  const [threadMode, setThreadMode] = useState(false) // read with its threads
+  const [threadsIn, setThreadsIn] = useState(null)
+  const change = useMemo(() => ({
+    put: (p, name) => putChange(univer.current, p, name),
+    keep: (s) => { if (keepChange(s, (spec) => setAdded((a) => [...a, { ...spec, id: `c${Date.now().toString(36)}` }]))) changed(true) },
+    back: (s) => putBackChange(univer.current, s),
+  }), [changed])
+  const threads = useSheetThreads({ univer, core, ready, initial: threadsIn, on: threadMode && !readOnly, author, file, dirty: () => changed(true), gridText, change })
+  const threadsRef = useRef(threads)
+  threadsRef.current = threads
+  // Comment (Insert › Comment, a right-click, ⌥⌘M): on the cells picked, in the comments beside the sheet.
+  const commentRef = useRef(null)
+  commentRef.current = () => { if (!threadsRef.current.on) return; setPanel('comments'); threadsRef.current.start() }
+  useEffect(() => { if (panel === 'comments') threadsRef.current.cellPicked(sel) }, [sel, panel])
 
   // Printed from a page of its own: the sheet in view as it shows (Univer's own copy of its cells,
   // formats and all), to the system's Print, where Save as PDF is too.
@@ -195,10 +220,12 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
     let made = null
     const offs = []
     setReady(false); setErr(null); ops.current = []
-    Promise.all([readSheet(data, file.name, file.ext, picked), univerWords(), officeFonts()]).then(([wb, { code, words }]) => {
+    Promise.all([readSheet(data, file.name, file.ext, { ...picked, threads: threading }), univerWords(), officeFonts()]).then(([wb, { code, words }]) => {
       if (!on || !host.current) return
       book.current = wb
       setInfo({ lost: wb.lost, charts: wb.charts || [], csv: wb.csv || null })
+      setThreadMode(threading && wb.kind === 'xlsx')
+      setThreadsIn(wb.threads || {})
       const n = wb.data.sheetOrder.length
       onStats?.({ text: n === 1 ? t('1 sheet') : t('{n} sheets', { n }) })
       const narrow = narrowNow()
@@ -223,6 +250,8 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
       })
       const u = made.univerAPI
       univer.current = u
+      core.current = made.univer
+      const commenting = threading && !csv && !readOnly
       // Charts and Print as the ribbon's own buttons, and AI Assist's Ask about these cells on a
       // right-click (AI Assist itself is at the right end of the page's header).
       if (!readOnly) {
@@ -237,6 +266,16 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
           if (!csv) u.createMenu({ id: 'bridge.sheet.insert-chart', title: t('Chart'), tooltip: t('A chart of the cells you picked: their labels and numbers, with the headings above them. Saved as an Excel chart.'), icon: 'BridgeChartIcon', action: () => chartRef.current('column'), order: -1, gridLayout: { row: 1, column: 1, rowSpan: 2, showLabel: true } }).appendTo(['ribbon.insert', 'ribbon.insert.charts'])
           u.createMenu({ id: 'bridge.sheet.charts', title: t('Charts'), tooltip: t('The charts in this file, drawn from its cells'), icon: 'BridgeChartsIcon', action: () => setPanelRef.current((p) => (p === 'charts' ? null : 'charts')), order: 0, gridLayout: { row: 1, column: 1, rowSpan: 2, showLabel: true } }).appendTo(['ribbon.insert', 'ribbon.insert.charts'])
           u.createMenu({ id: 'bridge.sheet.ask-ai-here', title: t('Ask about these cells'), tooltip: t('AI Assist: ask one of your agents about the cells you picked. You see the change before it\'s made.'), icon: 'BridgeAiAssistIcon', action: () => setPanelRef.current('ask'), order: -10 }).appendTo('contextMenu.mainArea')
+          // Comment and Comments (Insert, and a right-click), as Excel's Review has them.
+          if (commenting) {
+            icons.register('BridgeCommentIcon', ({ style }) => <Icon name="chat" size={style?.width || 16} className="sh-ribbon-icon" />)
+            icons.register('BridgeCommentsIcon', ({ style }) => <Icon name="list" size={style?.width || 16} className="sh-ribbon-icon" />)
+            const tip = withKeys(t('A comment on the cells you picked, kept in the Excel file. @bridge in it asks AI Assist.'), 'mod', 'alt', 'm')
+            const big = { gridLayout: { row: 1, column: 1, rowSpan: 2, showLabel: true } }
+            u.createMenu({ id: 'bridge.sheet.comment', title: t('Comment'), tooltip: tip, icon: 'BridgeCommentIcon', action: () => commentRef.current(), order: 10, ...big }).appendTo(['ribbon.insert', 'ribbon.insert.media'])
+            u.createMenu({ id: 'bridge.sheet.comments', title: t('Comments'), tooltip: t('The comments on this file\'s cells'), icon: 'BridgeCommentsIcon', action: () => setPanelRef.current((p) => (p === 'comments' ? null : 'comments')), order: 11, ...big }).appendTo(['ribbon.insert', 'ribbon.insert.media'])
+            u.createMenu({ id: 'bridge.sheet.comment-here', title: t('Comment'), tooltip: tip, icon: 'BridgeCommentIcon', action: () => commentRef.current(), order: -9 }).appendTo('contextMenu.mainArea')
+          }
         } catch { /* a Univer without these menus: Ask an agent in the page's header still opens it */ }
       }
       u.createWorkbook(wb.data)
@@ -244,6 +283,7 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
       // its own (sheetcells.js).
       try { offs.push(googleKeys(made.univer, u, { container: host.current, onPrint: () => printRef.current(), onSay: (text) => on && setMsg({ text, error: true }) })) } catch { /* Univer's own keys still work */ }
       try { offs.push(sheetCells(made.univer)) } catch { /* cells as Univer has them */ }
+      if (commenting) { try { offs.push(commentKey(made.univer, () => commentRef.current())) } catch { /* Comment in the ribbon still */ } }
       setEmpty(!readOnly && Object.values(wb.data.sheets).every((s) => !Object.keys(s.cellData || {}).length))
       setReady(true)
       if (readOnly) u.getActiveWorkbook()?.setEditable?.(false)
@@ -261,7 +301,7 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
       offs.push(u.addEvent(u.Event.CommandExecuted, (cmd) => {
         if (settled && cmd.type === 2 && !cmd.options?.onlyLocal && !String(cmd.id).startsWith('doc.')) { changed(true); setEmpty(false) }
         const op = OPS[cmd.id]
-        if (op && cmd.params?.subUnitId) ops.current.push({ sheet: cmd.params.subUnitId, ...op(cmd.params) })
+        if (op && cmd.params?.subUnitId) { const o = { sheet: cmd.params.subUnitId, ...op(cmd.params) }; ops.current.push(o); threadsRef.current.moved(o) }
         if (cmd.id === 'sheet.operation.set-selections' || cmd.id === 'sheet.command.set-worksheet-activate') look()
         // A sheet added, copied or deleted: the status line counts them again.
         if (cmd.id === 'sheet.mutation.insert-sheet' || cmd.id === 'sheet.mutation.remove-sheet') { const k = u.getActiveWorkbook()?.getSheets().length || 0; onStats?.({ text: k === 1 ? t('1 sheet') : t('{n} sheets', { n: k }) }) }
@@ -273,8 +313,8 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
 
   const save = useCallback(async () => {
     const now = univer.current.getActiveWorkbook().save()
-    return writeSheet(book.current, now, { ops: ops.current, charts: added })
-  }, [added])
+    return writeSheet(book.current, now, { ops: ops.current, charts: added, threads: threadMode ? threadsRef.current.save() : null })
+  }, [added, threadMode])
   handle.current = {
     save,
     selection: () => {
@@ -327,6 +367,7 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
         )}
         {/* AI Assist's panel stays as it was (waiting for an answer, say) while Charts is open instead. */}
         {asked && <AskPanel hidden={panel !== 'ask'} preset={preset} onShow={() => setPanel('ask')} file={file} univer={univer} sel={sel} dark={isDark} onDirty={changed} onChart={(c) => setAdded((a) => [...a, { ...c, id: `c${Date.now().toString(36)}` }])} onClose={() => setPanel(null)} />}
+        {panel === 'comments' && threadMode && <Threads threads={threads} readOnly={readOnly} say={SAY.sheet} className="sh-side sh-threads" onComment={() => commentRef.current()} onClose={() => setPanel(null)} />}
         {panel === 'charts' && <ChartsPanel charts={sheetCharts} univer={univer} sel={sel} dark={isDark} csv={!!info?.csv} onInsert={insertChart} onEdit={editChart} onAsk={() => { setPreset({ q: QUICK.find((q) => q.id === 'chart'), n: Date.now() }); setPanel('ask') }} onClose={() => setPanel(null)} />}
       </div>
       {!ready && <div className="sd-empty sd-loading sd-over" role="status"><Icon name="refresh" size={16} className="spin" /><span className="muted">{t('Opening {name}…', { name: file.name })}</span></div>}
@@ -401,9 +442,9 @@ function AskPanel({ hidden, preset, onShow, file, univer, sel, dark, onDirty, on
   const [note, setNote] = useState(null) // what was kept, and what's next
   const [writer, setWriter] = useState(null) // Studio's model, and the others to pick from
   const box = useRef(null)
-  const lit = useRef(new Map()) // each suggestion's marks on the sheet
+  const lit = useRef(new Map()) // the suggestions on the sheet, their marks taken off when it closes
   const live = useRef(true)
-  useEffect(() => () => { live.current = false; for (const l of lit.current.values()) { try { l.dispose() } catch { /* gone */ } } }, [])
+  useEffect(() => () => { live.current = false; for (const s of lit.current.values()) unmarkChange(s) }, [])
   // Looked at each time the panel shows: a model added in Settings meanwhile is the one it uses.
   useEffect(() => { if (!hidden) call('/studio/writer').then((w) => live.current && setWriter(w), () => live.current && setWriter((w) => w || { model: null, models: [] })) }, [hidden])
   const pickModel = async (id) => {
@@ -463,61 +504,34 @@ function AskPanel({ hidden, preset, onShow, file, univer, sel, dark, onDirty, on
     return () => clearInterval(id)
   }, [agent]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // A change shown: put on the sheet, what was there kept to put back, and outlined. An answer
-  // alone is said here instead. False when it can't be shown, and why.
+  // A change shown: put on the sheet, what was there kept to put back, and outlined (putChange). An
+  // answer alone is said here instead. False when it can't be shown, and why.
   const show = (p, asked) => {
     try {
-      if (!p || typeof p !== 'object') throw new Error(t('it isn\'t a change'))
-      const wb = univer.current.getActiveWorkbook()
-      if (p.sheet && !wb.getSheetByName(String(p.sheet))) throw new Error(t('there\'s no sheet named {name}', { name: String(p.sheet) }))
-      const sheet = (p.sheet && wb.getSheetByName(String(p.sheet))) || (asked.sheet && wb.getSheetByName(asked.sheet)) || wb.getActiveSheet()
-      const cells = Object.entries(p.cells && typeof p.cells === 'object' ? p.cells : {}).slice(0, 5000)
-      const bad = cells.find(([ref]) => !/^\$?[A-Z]{1,3}\$?[1-9]\d{0,6}$/i.test(ref))
-      if (bad) throw new Error(t('"{ref}" isn\'t a cell', { ref: bad[0] }))
-      const chart = p.chart && typeof p.chart === 'object' && p.chart.range ? chartFrom(sheet, p.chart) : null
-      if (!cells.length && !chart) {
+      const s = putChange(univer.current, p, asked.sheet)
+      if (!s) {
         if (!p.answer) throw new Error(t('it has nothing to show'))
         setAnswer({ by: asked.name, summary: p.summary ? String(p.summary) : null, text: String(p.answer) })
         onShow()
         return true
       }
-      if (wb.getActiveSheet().getSheetId() !== sheet.getSheetId()) wb.setActiveSheet(sheet)
-      const before = []
-      for (const [ref, val] of cells) {
-        const at = ref.replace(/\$/g, '').toUpperCase()
-        const r = sheet.getRange(at)
-        const was = r.getCellData() || {}
-        before.push({ ref: at, f: was.f || null, v: was.v ?? null })
-        setCell(r, val)
-      }
-      const id = `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
-      if (before.length) {
-        try { lit.current.set(id, sheet.highlightRanges(before.map((b) => sheet.getRange(b.ref)), MARK)) } catch { /* shown without the marks */ }
-        onDirty(true)
-      }
-      setList((l) => [...l, { id, by: asked.name, proposal: p, before, chart, sheetId: sheet.getSheetId() }])
+      lit.current.set(s.id, s)
+      if (s.before.length) onDirty(true)
+      setList((l) => [...l, Object.assign(s, { by: asked.name })])
       onShow()
       return true
     } catch (x) { setErr({ message: t("Couldn't show {name}'s change: {error}", { name: asked.name, error: x.message }) }); return false }
   }
-  const unmark = (s) => { try { lit.current.get(s.id)?.dispose() } catch { /* gone */ } lit.current.delete(s.id) }
   const keep = (s) => {
-    unmark(s)
-    if (s.chart) { onChart(s.chart.spec); onDirty(true) }
+    lit.current.delete(s.id)
+    const chart = keepChange(s, onChart)
+    if (chart) onDirty(true)
     setList((l) => l.filter((x) => x.id !== s.id))
-    return !!s.chart
+    return chart
   }
   const putBack = (s) => {
-    unmark(s)
-    try {
-      const sheet = univer.current.getActiveWorkbook().getSheetBySheetId(s.sheetId)
-      for (const b of [...s.before].reverse()) {
-        const r = sheet.getRange(b.ref)
-        if (b.f) r.setFormula(b.f)
-        else if (b.v != null && b.v !== '') r.setValue(b.v)
-        else r.clearContent()
-      }
-    } catch { /* the sheet's gone: nothing to put back */ }
+    lit.current.delete(s.id)
+    putBackChange(univer.current, s)
     setList((l) => l.filter((x) => x.id !== s.id))
   }
   const kept = (charts) => setNote(charts ? t('Kept, with its chart (in Charts). Save to write it to the file.') : t('Kept. Save to write it to the file; undo takes it back.'))
@@ -617,6 +631,54 @@ function AskPanel({ hidden, preset, onShow, file, univer, sel, dark, onDirty, on
     </aside>
   )
 }
+// A change put on the sheet as a suggestion (AI Assist's, an agent's, or @bridge's in a comment):
+// its cells set, what was there kept to put back, and outlined; a chart drawn first, added only if
+// it's kept. Null when it has neither (an answer alone); throws, saying why, when it can't be shown.
+// sheetName: the sheet it was asked about, when the change doesn't name one.
+export function putChange(u, p, sheetName) {
+  if (!p || typeof p !== 'object') throw new Error(t('it isn\'t a change'))
+  const wb = u.getActiveWorkbook()
+  if (p.sheet && !wb.getSheetByName(String(p.sheet))) throw new Error(t('there\'s no sheet named {name}', { name: String(p.sheet) }))
+  const sheet = (p.sheet && wb.getSheetByName(String(p.sheet))) || (sheetName && wb.getSheetByName(sheetName)) || wb.getActiveSheet()
+  const cells = Object.entries(p.cells && typeof p.cells === 'object' ? p.cells : {}).slice(0, 5000)
+  const bad = cells.find(([ref]) => !/^\$?[A-Z]{1,3}\$?[1-9]\d{0,6}$/i.test(ref))
+  if (bad) throw new Error(t('"{ref}" isn\'t a cell', { ref: bad[0] }))
+  const chart = p.chart && typeof p.chart === 'object' && p.chart.range ? chartFrom(sheet, p.chart) : null
+  if (!cells.length && !chart) return null
+  if (wb.getActiveSheet().getSheetId() !== sheet.getSheetId()) wb.setActiveSheet(sheet)
+  const before = []
+  for (const [ref, val] of cells) {
+    const at = ref.replace(/\$/g, '').toUpperCase()
+    const r = sheet.getRange(at)
+    const was = r.getCellData() || {}
+    before.push({ ref: at, f: was.f || null, v: was.v ?? null })
+    setCell(r, val)
+  }
+  const s = { id: `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, proposal: p, before, chart, sheetId: sheet.getSheetId(), mark: null }
+  if (before.length) { try { s.mark = sheet.highlightRanges(before.map((b) => sheet.getRange(b.ref)), MARK) } catch { /* shown without the marks */ } }
+  return s
+}
+export function unmarkChange(s) { try { s.mark?.dispose() } catch { /* gone */ } s.mark = null }
+// Kept: no longer outlined, and its chart handed to onChart. True when it had one.
+export function keepChange(s, onChart) {
+  unmarkChange(s)
+  if (s.chart) onChart(s.chart.spec)
+  return !!s.chart
+}
+// Discarded: each cell as it was, the newest change's first.
+export function putBackChange(u, s) {
+  unmarkChange(s)
+  try {
+    const sheet = u.getActiveWorkbook().getSheetBySheetId(s.sheetId)
+    for (const b of [...s.before].reverse()) {
+      const r = sheet.getRange(b.ref)
+      if (b.f) r.setFormula(b.f)
+      else if (b.v != null && b.v !== '') r.setValue(b.v)
+      else r.clearContent()
+    }
+  } catch { /* the sheet's gone: nothing to put back */ }
+}
+
 // A value the model or the agent gave: a formula, a number, true or false, words, or "" to empty the cell.
 function setCell(range, val) {
   if (val == null || val === '') return range.clearContent()
