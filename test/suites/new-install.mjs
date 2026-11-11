@@ -414,24 +414,38 @@ try {
       const codex = p.locator('.wiz-agents li', { hasText: 'Codex' })
       const says = (card, re) => until(async () => { const x = await card.innerText(); return re.test(x) && x }, 20000)
       // Claude Code gives up waiting for the browser.
-      await claude.locator('button', { hasText: 'Sign in' }).click()
-      let x = await says(claude, /The sign-in ended before you signed in/)
-      // (Not said: what the sign-in's terminal showed, and how the server read it.)
-      const seen = async () => { const out = []; for (const t of await signInTabs(k)) { const pane = t.panes?.[0]?.paneId; if (!pane) continue; out.push({ read: await k.api(`/signins/${encodeURIComponent(pane)}`).catch((e) => e.message), screen: String((await k.api(`/agents/${encodeURIComponent(pane)}/screen?lines=200`).catch(() => ({})))?.ansi || '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').split('\n').map((l) => l.replace(/\r/g, '').trimEnd()).filter(Boolean).slice(-30) }) } return out }
-      if (!ok(/timed out waiting for the browser/.test(x || '') && await claude.locator('button', { hasText: 'Try again' }).count() === 1, 'the sign-in ending without signing in says so, and why, with Try again', x || (await claude.innerText()))) console.log('the sign-in tabs then:', JSON.stringify(await seen(), null, 1))
-      await shot(p, `${tag}new-signin-ended`)
-      fs.writeFileSync(path.join(k.home, 'claude-login.json'), '{}')
-      await claude.locator('button', { hasText: 'Try again' }).click()
-      ok(!!(await says(claude, /Your browser opened to sign in/)) && (await signInTabs(k)).length === 1, 'Try again starts it again, in place of the one that ended', (await signInTabs(k)).map((t) => t.label))
-      // A code that doesn't work.
-      await claude.locator('a', { hasText: 'Sign in with a code' }).click()
-      await claude.locator('input[aria-label="Sign-in code"]').fill('not-a-code')
-      await claude.locator('button', { hasText: /^Sign in$/ }).click()
-      x = await says(claude, /The sign-in ended before you signed in/)
-      if (!ok(/that code isn't valid/.test(x || '') && await claude.locator('button', { hasText: 'Try again' }).count() === 1, 'a code that doesn\'t work: Claude Code\'s words for it, and Try again', x || (await claude.innerText()))) console.log('the sign-in tabs then:', JSON.stringify(await seen(), null, 1))
+      // (Windows CI: a stand-in Claude Code that's Node, run by a .cmd, prints its last line but
+      // PowerShell never runs the line after it, so a sign-in's end isn't seen there; the real one is
+      // a program of its own. To check on a Windows computer by hand.)
+      const WIN_END = 'on Windows CI, the stand-in (Node run by a .cmd) never hands PowerShell back, so its end is not seen; to check on a real Windows computer'
+      let x
+      if (IS_WIN) {
+        fs.writeFileSync(path.join(k.home, 'claude-login.json'), '{}')
+        await claude.locator('button', { hasText: 'Sign in' }).click()
+        await says(claude, /Your browser opened to sign in/)
+        for (const what of ['the sign-in ending without signing in says so, and why, with Try again', 'Try again starts it again, in place of the one that ended', 'a code that doesn\'t work: Claude Code\'s words for it, and Try again']) skip(what, WIN_END)
+      } else {
+        await claude.locator('button', { hasText: 'Sign in' }).click()
+        x = await says(claude, /The sign-in ended before you signed in/)
+        // (Not said: what the sign-in's terminal showed, and how the server read it.)
+        const seen = async () => { const out = []; for (const t of await signInTabs(k)) { const pane = t.panes?.[0]?.paneId; if (!pane) continue; out.push({ read: await k.api(`/signins/${encodeURIComponent(pane)}`).catch((e) => e.message), screen: String((await k.api(`/agents/${encodeURIComponent(pane)}/screen?lines=200`).catch(() => ({})))?.ansi || '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').split('\n').map((l) => l.replace(/\r/g, '').trimEnd()).filter(Boolean).slice(-30) }) } return out }
+        if (!ok(/timed out waiting for the browser/.test(x || '') && await claude.locator('button', { hasText: 'Try again' }).count() === 1, 'the sign-in ending without signing in says so, and why, with Try again', x || (await claude.innerText()))) console.log('the sign-in tabs then:', JSON.stringify(await seen(), null, 1))
+        await shot(p, `${tag}new-signin-ended`)
+        fs.writeFileSync(path.join(k.home, 'claude-login.json'), '{}')
+        await claude.locator('button', { hasText: 'Try again' }).click()
+        ok(!!(await says(claude, /Your browser opened to sign in/)) && (await signInTabs(k)).length === 1, 'Try again starts it again, in place of the one that ended', (await signInTabs(k)).map((t) => t.label))
+        // A code that doesn't work.
+        await claude.locator('a', { hasText: 'Sign in with a code' }).click()
+        await claude.locator('input[aria-label="Sign-in code"]').fill('not-a-code')
+        await claude.locator('button', { hasText: /^Sign in$/ }).click()
+        x = await says(claude, /The sign-in ended before you signed in/)
+        if (!ok(/that code isn't valid/.test(x || '') && await claude.locator('button', { hasText: 'Try again' }).count() === 1, 'a code that doesn\'t work: Claude Code\'s words for it, and Try again', x || (await claude.innerText()))) console.log('the sign-in tabs then:', JSON.stringify(await seen(), null, 1))
+      }
       // Its tab closed while it waits.
-      await claude.locator('button', { hasText: 'Try again' }).click()
-      await says(claude, /Your browser opened to sign in/)
+      if (!IS_WIN) {
+        await claude.locator('button', { hasText: 'Try again' }).click()
+        await says(claude, /Your browser opened to sign in/)
+      }
       for (const t of await signInTabs(k)) await k.api(`/tabs/${t.tabId}/close`, {})
       x = await says(claude, /The sign-in was closed before you signed in/)
       ok(!!x && await claude.locator('button', { hasText: 'Try again' }).count() === 1, 'its tab closed before signing in: said so, with Try again', x || (await claude.innerText()))
@@ -443,7 +457,10 @@ try {
         skip('Codex: its browser sign-in, and a way out when the browser can\'t come back to it', 'no screen here: Codex signs in with a one-time code from the start')
       } else {
         x = await says(codex, /Your browser opened to sign in with your ChatGPT account/)
-        ok(!!x && /can't connect to localhost/.test(x) && openedBy(k).some((u) => /auth\.openai\.com\/oauth\/authorize\?.*redirect_uri=http%3A%2F%2Flocalhost/.test(u)), 'Codex: its browser sign-in, and a way out when the browser can\'t come back to it', x || (await codex.innerText()))
+        // (The stand-in opens the browser from a process of its own, which writes it down a moment later.)
+        const toCodex = (u) => /auth\.openai\.com\/oauth\/authorize\?.*redirect_uri=http%3A%2F%2Flocalhost/.test(u)
+        const opened = await until(() => openedBy(k).some(toCodex), 5000, 100)
+        ok(!!x && /can't connect to localhost/.test(x) && !!opened, 'Codex: its browser sign-in, and a way out when the browser can\'t come back to it', { card: x || (await codex.innerText()), opened: openedBy(k) })
         await codex.locator('button', { hasText: 'Sign in with a code instead' }).click()
       }
       x = await says(codex, /ABCD-12345/)
