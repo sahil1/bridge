@@ -547,7 +547,9 @@ process.exit(1)`)
   await p.locator('.seg button[data-view="transcript"]').click({ timeout: 5000 }).catch(() => {})
   const roomWhos = () => p.locator('.mt-transcript .mt-line .mt-who').allInnerTexts().catch(() => [])
   ok(!!(await until(async () => (await roomWhos()).join('|') === 'Speaker 1|Speaker 2|Speaker 1|Speaker 2', 8000)), 'a room meeting: each line says which voice, Speaker 1 or 2', await roomWhos())
-  const whoSpokeShown = await p.locator('.mt-transcript .mt-voices-btn').isVisible().catch(() => false)
+  // Who spoke waits for whether this computer can tell voices apart (/api/meetings/voices), which
+  // comes after the meeting on a busy machine.
+  const whoSpokeShown = !!(await until(() => p.locator('.mt-transcript .mt-voices-btn').isVisible(), 8000))
   ok(whoSpokeShown, 'and Who spoke is there for it')
   await p.locator('.mt-transcript .mt-line .mt-who', { hasText: 'Speaker 2' }).first().click({ timeout: 5000 }).catch(() => {})
   await p.waitForSelector('.ctx-menu', { timeout: 4000 }).catch(() => {})
