@@ -3,8 +3,10 @@
 // all going in the background (Node.js and the speech model downloaded by the server, the programs
 // installed in one terminal tab: on a Mac, scripts/setup-mac.sh with the developer tools, Homebrew,
 // whose installer brings them, then icalBuddy; speech needs no program, only its model), the list
-// says how each is doing, and what needs you says so where you are: the Mac's password, typed
-// right there in setup, into that tab (a download that can't get through says why; closing the
+// says how each is doing, and what needs you says so where you are: before it starts, what you'll
+// see (the password, macOS's window for the developer tools and what to click there, and Allow
+// buttons for what macOS asks about); then the Mac's password, typed right there in setup, into that
+// tab, said to be the one you log in with and to show nothing as you type (a download that can't get through says why; closing the
 // terminal tab puts what it was installing back to Not set up; Try again once nothing's going).
 // The next steps say how far it is and link back to what needs you; closing setup shows the tab
 // when it still waits for the password, and the top bar says "Setting up · n of N" (or that it
@@ -50,11 +52,19 @@ try {
     const basic = await p.locator('.wiz-levels li', { hasText: 'Just what agents need' }).innerText()
     ok(/No password, nothing to allow/.test(basic) && !/developer tools/.test(basic), 'Just what agents need still asks for nothing, and doesn\'t bring them', basic)
   }
+  const mailHere = before.items.find((i) => i.id === 'mail')?.state === 'done'
+  ok(!(await p.$('.wiz-expect')), 'Just what agents need, picked: nothing to expect, as it asks for nothing')
   await p.check('input[name="wiz-level"][value="full"]')
+  if (IS_MAC) {
+    const expect = await until(async () => { const x = await p.innerText('.wiz-expect').catch(() => ''); return /What you'll see/.test(x) && x }, 5000)
+    ok(/Your Mac's password, once, typed right here in setup/.test(expect || '') && /the one you log in to this Mac with/.test(expect || '') && /Nothing shows as you type it/.test(expect || ''), 'Everything, picked: before it starts, it says the password is asked once, right here, which one, and that nothing shows as you type it', expect)
+    ok(/If macOS opens a window for Apple's developer tools, click Install \(not Get Xcode\), then Agree/.test(expect || ''), 'and what to click if macOS opens its window for the developer tools', expect)
+    ok(new RegExp(`${mailHere ? 'Your calendar gets' : 'Your calendar and Mail each get'} an Allow button\\. macOS asks only when you press it`).test(expect || ''), 'and that what macOS asks about (the calendar, and Mail unless it\'s allowed already) waits for an Allow you press', expect)
+    await shot(p, `${tag}setup-all-expect`)
+  } else ok(!(await p.$('.wiz-expect')), 'not a Mac: nothing that asks, so nothing to expect')
   await p.click('.wiz-foot button:has-text("Set up everything")')
   await p.waitForSelector('.sa-list', { timeout: 10000 })
   const names = await p.$$eval('.sa-item b', (l) => l.map((x) => x.innerText))
-  const mailHere = before.items.find((i) => i.id === 'mail')?.state === 'done'
   ok(names.join('|') === (IS_MAC ? `Node.js|Developer tools|Homebrew|Meeting notes|Voice notes|Your calendar${mailHere ? '' : '|Mail'}` : 'Node.js|Meeting notes|Voice notes'), 'Set up everything: the list of what it sets up, Node.js first', names)
   if (mailHere) ok((await p.innerText('.sa-kept').catch(() => '')) === 'Already set up, so left as it is: Mail', 'what\'s set up already isn\'t listed, just named', await p.innerText('.sa-kept').catch(() => ''))
   const started = await kit.api('/setup/plan')
@@ -74,7 +84,8 @@ try {
     ok(!!(await until(async () => (await kit.api('/setup/plan')).needsYou === 'password', 15000)), 'the tab asks for the Mac\'s password: setup needs you')
     const term = await until(() => p.$('.sa-you .sa-term .xterm'), 15000)
     const you = await p.innerText('.sa-you').catch(() => '')
-    ok(!!term && /Needs you/.test(you) && /Mac's password, once/.test(you), 'setup says it needs your password, with the terminal to type it in right there (not behind setup)', you)
+    ok(!!term && /Needs you/.test(you) && /Mac's password, once: the one you log in to this Mac with/.test(you) && /Nothing shows as you type/.test(you), 'setup says it needs your password (the one you log in with, nothing showing as you type), with the terminal to type it in right there (not behind setup)', you)
+    ok(!!(await until(async () => /Password for this Mac, to set up Bridge AI:/.test(await p.innerText('.sa-you .sa-term').catch(() => '')), 5000)), 'and the question is in view in that terminal', await p.innerText('.sa-you .sa-term').catch(() => ''))
     await shot(p, `${tag}setup-all-needs-you`)
     if (term) {
       await p.click('.sa-you .sa-term .terminal-host')

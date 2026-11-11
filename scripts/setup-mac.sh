@@ -10,7 +10,8 @@
 #     brew=<path> the Homebrew that's here already
 #     <formula>   what then installs with Homebrew (ical-buddy, whisper-cpp)
 # It ends with "Setup stopped before the end" when something didn't work (Bridge AI reads that).
-# BRIDGE_SETUP_STANDINS (tests): a folder whose programs are used first, so nothing real runs.
+# BRIDGE_SETUP_STANDINS (tests): a folder whose programs are used first, so nothing real runs, and
+# whose root/ stands for / where Homebrew puts itself.
 
 PATH="${BRIDGE_SETUP_STANDINS:+$BRIDGE_SETUP_STANDINS:}/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 devtools=
@@ -26,6 +27,11 @@ for a in "$@"; do
   esac
 done
 
+# Where Homebrew's installer puts it, as it decides by uname -m: /opt/homebrew on Apple silicon,
+# /usr/local on Intel (and in an Intel shell, under Rosetta).
+case "$(uname -m)" in arm64) prefix=/opt/homebrew ;; *) prefix=/usr/local ;; esac
+[ -n "${BRIDGE_SETUP_STANDINS:-}" ] && prefix="$BRIDGE_SETUP_STANDINS/root$prefix"
+
 say() { printf '\n==> %s\n' "$*"; }
 stop() { echo; echo "Setup stopped before the end. What went wrong is above. Close this tab, then try again in Bridge AI."; exit 1; }
 # The tools are here: their folder (what xcode-select says, never asking) has a real git.
@@ -34,6 +40,17 @@ tools() { local d; d=$(xcode-select -p 2>/dev/null) && [ -x "$d/usr/bin/git" ]; 
 # One password for all of it. sudo remembers it for 5 minutes, and the developer tools alone take
 # longer than that, so it's kept fresh while this runs (and only then: it stops when this ends).
 if [ -n "$devtools$homebrew" ]; then
+  # A clean screen, so what shows is what's asked and why (not the line typed to start this).
+  names=()
+  [ -n "$devtools" ] && names+=("Apple's command line developer tools")
+  [ -n "$homebrew" ] && names+=("Homebrew")
+  for f in "${formulas[@]}"; do case "$f" in ical-buddy) names+=("icalBuddy") ;; whisper-cpp) names+=("whisper.cpp") ;; *) names+=("$f") ;; esac; done
+  printf '\033[2J\033[H'
+  echo "Setting up Bridge AI: $(IFS=,; echo "${names[*]}" | sed 's/,/, /g')."
+  echo
+  echo "Your Mac's password is needed once: the one you log in to this Mac with."
+  echo "Nothing shows as you type it. Press Return when you're done."
+  echo
   sudo -v -p "Password for this Mac, to set up Bridge AI: " || stop
   ( while kill -0 $$ 2>/dev/null && sudo -n -v 2>/dev/null; do sleep 50; done ) >/dev/null 2>&1 &
   keep=$!
@@ -57,7 +74,7 @@ if [ -n "$devtools" ] && [ -z "$homebrew" ] && ! tools; then
   sudo rm -f "$placeholder"
   # Not listed, or it didn't install: macOS's own window, then wait for it (an hour at most).
   if ! tools; then
-    say "Click Install in the window macOS opened. This carries on by itself once the tools are installed."
+    say "Click Install in the window macOS opened (not Get Xcode), then Agree. This carries on by itself once the tools are installed."
     xcode-select --install
     n=0
     until tools || [ "$n" -ge 720 ]; do sleep 5; n=$((n + 1)); done
@@ -68,8 +85,10 @@ fi
 if [ -n "$homebrew" ]; then
   say "Homebrew"
   NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || stop
-  # Not on the PATH until your shell profile says so: where its installer puts it.
-  brew=$(command -v brew 2>/dev/null || { [ -x /opt/homebrew/bin/brew ] && echo /opt/homebrew/bin/brew; } || echo /usr/local/bin/brew)
+  # Not on the PATH until your shell profile says so: where its installer put it, first (an older
+  # Homebrew on the PATH can be another one: Intel's, left on an Apple silicon Mac).
+  if [ -x "$prefix/bin/brew" ]; then brew="$prefix/bin/brew"; else brew=$(command -v brew 2>/dev/null); fi
+  [ -n "$brew" ] || { echo; echo "Homebrew's installer finished, but there's no brew in $prefix/bin."; stop; }
 fi
 
 if [ "${#formulas[@]}" -gt 0 ]; then

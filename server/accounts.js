@@ -57,6 +57,8 @@ const KINDS = {
     shareDirs: ['sessions'],
     // Codex's usual login waits for the browser on localhost:1455; with no browser here, a code instead.
     login: NO_BROWSER ? ['login', '--device-auth'] : ['login'],
+    // With a one-time code, typed on its sign-in page: for when the browser can't come back to it.
+    device: ['login', '--device-auth'],
     logout: ['logout'],
     async status(bin, env) {
       const r = await run(bin, ['login', 'status'], env)
@@ -651,14 +653,15 @@ export async function remove(id) {
 }
 
 // The line to type in a terminal to sign this account in: the agent's own login flow, pointed at
-// the account's folder.
-export function loginCommand(id) {
+// the account's folder. bin: where it's installed, so the terminal's shell runs that one (its PATH
+// can lack ~/.local/bin, where a new install goes, or find another first). device: with a one-time
+// code instead of the browser, where the agent has that (Codex).
+export function loginCommand(id, { bin = null, device = false } = {}) {
   const kind = id.replace(/-[^-]+$/, '')
   const k = KINDS[kind]
   if (!k || !known(kind, id)) throw new Error('No such account')
   statusCache.delete(id)
-  const bin = adapter(kind).bin[0]
-  const cmd = quoteCommand(bin, k.login)
+  const cmd = quoteCommand(bin || adapter(kind).bin[0], (device && k.device) || k.login)
   const env = envFor(kind, id)
   const dir = env[k.env]
   if (id !== defaultId(kind) && !dir) throw new Error('No such account')

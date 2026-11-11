@@ -86,6 +86,26 @@ const fullNote = (plan, note) => {
   const left = (id) => plan.items.some((i) => i.id === id && i.state !== 'done')
   return left('devtools') ? FULL.devtools : left('homebrew') ? note : FULL.nopassword
 }
+// What Everything will ask of you on this Mac, said before it starts (each only where it applies):
+// the password (typed here, in setup), macOS's own window for the developer tools when it opens
+// one, and what's yours to allow, which macOS only asks about once you press its Allow.
+function Expect({ plan }) {
+  const left = (id) => plan.items.some((i) => i.id === id && !['done', 'running'].includes(i.state))
+  const rows = [
+    (left('devtools') || left('homebrew')) && ['unlock', t('Your Mac\'s password, once, typed right here in setup: the one you log in to this Mac with. Nothing shows as you type it.')],
+    left('devtools') && ['tool', t('If macOS opens a window for Apple\'s developer tools, click Install (not Get Xcode), then Agree. Everything else carries on by itself.')],
+    (left('calendar') || left('mail')) && ['calendar', left('calendar') && left('mail') ? t('Your calendar and Mail each get an Allow button. macOS asks only when you press it.')
+      : left('calendar') ? t('Your calendar gets an Allow button. macOS asks only when you press it.') : t('Mail gets an Allow button. macOS asks only when you press it.')],
+  ].filter(Boolean)
+  if (!rows.length) return null
+  return (
+    <div className="wiz-expect">
+      <b>{t('What you\'ll see')}</b>
+      <ul>{rows.map(([icon, text]) => <li key={icon}><Icon name={icon} size={13} /><span>{text}</span></li>)}</ul>
+    </div>
+  )
+}
+
 // What the Set up Bridge AI tab is waiting for, as a link back to it in setup's first step.
 const WAITS = { password: tx('Type your Mac\'s password'), terminal: tx('See the Set up Bridge AI tab'), window: tx('Click Install in macOS\'s window') }
 const ago = (t) => {
@@ -104,6 +124,7 @@ export default function Onboarding({ onDone }) {
   const [level, setLevel] = useState('basic')
   const [awake, setAwake] = useState(null) // { can, on }: keep this computer awake for your phone (server/relay.js)
   const [started, setStarted] = useState(null) // the level set going
+  const [installing, setInstalling] = useState(() => new Set()) // agents installed from here: once in, their sign-in starts by itself
   const phone = usePhoneOffer() // where to set up your phone, when Bridge AI's relay is offered
   const setup = useSetupPlan()
   // Recommended Settings (a beta feature): once Claude Code is signed in, what suits its plan.
@@ -214,6 +235,7 @@ export default function Onboarding({ onDone }) {
                   </li>
                 ))}
               </ul>
+              {level === 'full' && setup.plan?.mac && <Expect plan={setup.plan} />}
               </>
               : <SetupList plan={setup.plan} reload={setup.load} only={started === 'basic' ? 'basic' : null} onRetry={() => setup.run(started).catch((e) => setErr(e.message))} />}
             {phone.offer && !started && <PhonePick />}
@@ -234,16 +256,18 @@ export default function Onboarding({ onDone }) {
                 {cards.map((c) => {
                   const here = c.here
                   const out = here?.signedIn === false
+                  // Installed from here just now: signing in is the rest of the same step.
+                  const next = installing.has(c.kind) && canSignIn(c.kind)
                   return (
                     <li key={c.kind}>
                       <AgentMark kind={c.kind} label={c.a.label} size={28} />
                       <span className="wiz-agent-main">
                         <b>{c.a.label}</b>
-                        <small>{here ? (out ? t('Installed. Sign in once with your account.') : t('Ready to work.')) : c.plan ? t(c.plan) : t('Not installed.')}</small>
+                        <small>{here ? (out ? (next ? t('Installed. Now sign in once with your account.') : t('Installed. Sign in once with your account.')) : t('Ready to work.')) : c.plan ? t(c.plan) : t('Not installed.')}</small>
                       </span>
                       {here && !out && <span className="wiz-ready"><Icon name="check" size={12} /> {t('Ready')}</span>}
-                      {here && out && canSignIn(c.kind) && <SignInButton kind={c.kind} onCheck={recheck} terminalLink={false} className="btn small" />}
-                      {!here && <InstallAgentButton kind={c.kind} needs={c.a.needs} onCheck={load} showLink={false} />}
+                      {here && out && canSignIn(c.kind) && <SignInButton kind={c.kind} onCheck={recheck} terminalLink={false} className="btn small" auto={next} />}
+                      {!here && <InstallAgentButton kind={c.kind} needs={c.a.needs} onCheck={load} onStart={() => setInstalling((s) => new Set(s).add(c.kind))} showLink={false} signIn={canSignIn(c.kind)} />}
                       {here && !out && <RecommendCard r={rec.data?.agents.find((r) => r.kind === c.kind)} onAnswer={rec.answer} compact />}
                     </li>
                   )

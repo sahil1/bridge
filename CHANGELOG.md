@@ -27,6 +27,19 @@ The meeting reminder snoozes, turns off and keeps out of the way of a screen you
 - **Join in a calendar event is a whole tap target on a phone.**
 - **On Windows, an agent's card and tab keep its name**: they showed the console's own title, "Administrator: C:\Windows\System32\…\powershell.exe", in its place.
 - **On Windows, New takes a folder typed as a whole path** (D:\Projects\billing): it said the folder didn't exist yet, and Start agent stayed off.
+## 3.13.5
+
+Fixes for a first-time user: signing in to Claude Code or Codex always has a way through, an agent installed in setup signs in by itself, and Set up says what macOS will ask before it asks.
+
+### Fixes
+
+- **Signing in to Claude Code or Codex always has a way through**: when the browser says it can't connect to localhost (a work VPN or proxy, an account made on a phone, or the sign-in given up while you made one), or nothing opens, Sign in with a code opens Claude's page that shows a code, and the code goes in from Bridge AI; Codex signs in with a one-time code instead. A sign-in that ends or is closed without signing in says so, with Try again.
+- **A sign-in runs the Claude Code or Codex Bridge AI found**, not whichever comes first on the terminal's PATH.
+- **A new Claude Code in Chat shows its sign-in page again**: Claude Code now signs in at claude.com, so the card had no link to open.
+- **An agent installed in setup signs in by itself** once it's in, instead of leaving a second button to find.
+- **Codex installs without stopping to ask**: its installer waited on "Start Codex now?" in a tab nobody was looking at.
+- **Set up says what macOS will ask before it asks**: your Mac's password once (nothing shows as you type), Install (not Get Xcode) then Agree if macOS opens its window for the developer tools, and Allow for the calendar and Mail. The password's terminal opens on a clean screen saying what it's for.
+- **Setup finds Homebrew on an Intel Mac**, in /usr/local where its installer puts it, and says so when it can't.
 
 ## 3.13.4
 
