@@ -15,32 +15,20 @@
 //                                   it needs your Bold Bridge account, signed in in Settings › Account)
 //   bridge-ai relay [update|forget] update the relay, or stop using it
 //   bridge-ai pair                  pair a phone: QR code, link and code
+//   bridge-ai mcp                   Bridge AI as an MCP server on stdio, for another app (scripts/mcp.js)
 //   bridge-ai phones [remove <name>]  paired phones, or remove one
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { loadConfig, IS_WIN, IS_MAC } from '../server/paths.js'
+import { IS_WIN, IS_MAC } from '../server/paths.js'
 import { hostedBase } from '../server/hosted.js'
 import { accountsBase } from '../server/account.js'
-import { authHeaders, readToken } from '../server/apitoken.js'
+// The running server's API, with its key from the data folder (localapi.js, shared with `mcp`).
+import { api, BASE, wsHeaders } from './localapi.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-const cfg = loadConfig()
-const BASE = process.env.BRIDGE_URL || `http://127.0.0.1:${cfg.port || 7420}`
 const DIM = (s) => (process.stdout.isTTY ? `\x1b[2m${s}\x1b[0m` : s)
-
-async function api(p, opts = {}) {
-  let res
-  try {
-    // With Bridge AI's key from its data folder (server/apitoken.js).
-    res = await fetch(`${BASE}/api${p}`, { method: opts.method || 'GET', headers: { ...(opts.body ? { 'Content-Type': 'application/json' } : {}), ...authHeaders(readToken()) }, body: opts.body ? JSON.stringify(opts.body) : undefined })
-  } catch { throw new Error(`Bridge AI isn't running at ${BASE}. Start it with: bridge-ai start`) }
-  const data = await res.json().catch(() => ({}))
-  // code: what the server says it was (hostedFull…), for a way on to offer.
-  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), data.code ? { code: data.code } : {})
-  return data
-}
 
 // Agents and plain shells, numbered the same way every time (by space, then tab).
 async function targets() {
@@ -106,7 +94,7 @@ async function attach(q) {
   const rows = process.stdout.rows || 40
   const url = `${BASE.replace(/^http/, 'ws')}/api/panes/${encodeURIComponent(t.paneId)}/attach?cols=${cols}&rows=${rows}`
   console.log(DIM(`Attaching to ${t.label}. Ctrl+] to detach; the agent keeps running in Bridge AI.`))
-  const ws = new WebSocket(url, { headers: authHeaders(readToken()) })
+  const ws = new WebSocket(url, { headers: wsHeaders() })
   let done = false
   let attached = false
   // code: 1 when it went wrong, so a window opened for this stays open to say why.
@@ -409,6 +397,9 @@ const run = {
   // A window the app opened runs this first (a herdr session's): it's open.
   opened: () => tell('attached'),
   status: () => statusCmd(),
+  // Bridge AI as an MCP server for another app (Claude Code, Claude Desktop, Cursor, Codex), on
+  // stdin and stdout: that app runs this (Settings › MCP Servers adds it).
+  mcp: async () => { const { serve } = await import('./mcp.js'); await serve() },
   relay: () => relayCmd(args),
   pair: () => pairCmd(args),
   phones: () => phonesCmd(args),
@@ -422,6 +413,8 @@ const run = {
                                 target: a number from list, a pane id like w1:p3, or a tab name
 
   bridge-ai status              is it running, which agents, the relay and paired phones
+  bridge-ai mcp                 Bridge AI as an MCP server, on stdin and stdout, for Claude Code,
+                                Claude Desktop, Cursor or Codex (Settings › MCP Servers adds it)
   bridge-ai relay setup         put your phone relay on Cloudflare with an API token
                                 (asks for it, or reads CLOUDFLARE_API_TOKEN or stdin)${hostedBase() && accountsBase() ? `
   bridge-ai relay setup --hosted  use Bridge AI's relay instead, with your Bold Bridge account
