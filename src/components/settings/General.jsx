@@ -58,7 +58,7 @@ export default function General({ onGo, onOpenAgent }) {
   const defAgent = (agents || []).find((a) => a.kind === def)
   const model = eff.agents?.[def]?.model || ''
   const seg = (label, value, options, onPick) => (
-    <div className="seg ap-seg" role="radiogroup" aria-label={label}>
+    <div className="seg ap-seg" role="radiogroup" aria-label={t(label)}>
       {options.map(([v, l]) => <button key={l} type="button" role="radio" aria-checked={value === v} className={value === v ? 'on' : ''} onClick={() => onPick(v)}>{t(l)}</button>)}
     </div>
   )
@@ -110,7 +110,7 @@ export default function General({ onGo, onOpenAgent }) {
       <section className="st-sec" data-setting="layout">
         <Line label={t('Layout')} hint={t('Simple: your Chief of Staff and your agents. Everything: every panel.')}
           title={t('Simple keeps the screen to your chief of staff and your agents: the Today panel waits behind one button, and the Agents board shows up once you have agents. Everything shows every panel.')}>
-          {seg('Layout', !!eff.simple, [[true, 'Simple'], [false, 'Everything']], (on) => save({ simple: on }))}
+          {seg('Layout', !!eff.simple, [[true, tx('Simple')], [false, tx('Everything')]], (on) => save({ simple: on }))}
         </Line>
       </section>
 
@@ -142,7 +142,7 @@ export default function General({ onGo, onOpenAgent }) {
         <section className="st-sec" data-setting="runtime">
           <Line label={t('Where agents run')} hint={t('herdr, installed separately, adds its own terminal and split panes. Applies after a restart.')}
             title={t('Built in needs nothing else. herdr (optional, installed separately) adds its own terminal UI, split panes and the live Herdr view; your agents then share your herdr session. Applies after a restart.')}>
-            {seg('Runtime', eff.runtime === 'herdr' ? 'herdr' : 'builtin', [['builtin', tx('Built in')], ['herdr', 'herdr']], (id) => save({ runtime: id }))}
+            {seg(tx('Runtime'), eff.runtime === 'herdr' ? 'herdr' : 'builtin', [['builtin', tx('Built in')], ['herdr', 'herdr']], (id) => save({ runtime: id }))}
           </Line>
           {eff.runtime === 'herdr' && <HerdrSession value={eff.herdr?.session || ''} onSave={(session) => save({ herdr: { ...(eff.herdr || {}), session: session || null } })} />}
           {eff.runtime !== 'herdr' && (
