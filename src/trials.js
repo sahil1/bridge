@@ -20,6 +20,7 @@ export const TRIALS = [
   { id: 'recommended-settings', label: tx('Recommended Settings'), hint: tx('Claude Code started with the model and effort that suit your plan (Pro, Max, Team or an API key), shown in Settings › Agents with Use these or Keep Claude Code\'s defaults. And an effort for each task, from what you ask, as a chip you can change in New and Home\'s box, and for the agents Chief of Staff starts. Worked out on this computer; Claude Code\'s own settings are left as they are.') },
   // needs: another beta feature it's part of, which must be on too.
   { id: 'signature-assist', label: tx('Sign PDFs'), needs: 'studio', hint: tx('In Studio, AI Assist\'s Sign this on a PDF you\'re asked to sign: what it says in plain words, read by the model you pick, then the signature you drew put where it goes, and a signed copy saved in a _signed folder beside it.') },
+  { id: 'comments', label: tx('Comments and @bridge'), needs: 'studio', hint: tx('In Studio, comments on a Word file\'s words that you add, answer, resolve and delete, kept in the file itself so Word shows them too. And @bridge in a comment asks AI Assist: it answers in the thread, and a change it makes is a suggestion on the words, to keep or discard. A comment from someone else that mentions @bridge waits for you to send it.') },
 ]
 
 // Whether a trial is on, from the config every part of the app shares (it's asked again when

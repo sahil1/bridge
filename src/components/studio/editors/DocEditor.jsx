@@ -20,6 +20,8 @@ import { findPlugin } from '../search.js'
 import { cleanPaste, listsOut } from '../paste.js'
 import { keys } from '../keys.js'
 import { Tool, Drop, Item, Glyph, Swatches, Markers, markerCss, FindBar, Outline, useHeadings, WordCount, Shortcuts, AskInPlace, askItems, countWords, fontHere, COMMON_FONTS, SIZES } from '../doctools.jsx'
+import { useThreads, useAuthor, Threads } from '../doccomments.jsx'
+import { useTrial } from '../../../trials.js'
 import '../doc.css'
 
 // A document. A Word file is edited as Word has it (ooxml.js): its pages at their size and margins,
@@ -348,7 +350,10 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
     bind: (fn) => { again.current = fn },
     onChrome: (which) => { if (!readOnly) setEditingHf(which) },
   }), [info, normal, readOnly])
-  const plugins = useMemo(() => Extension.create({ name: 'wordView', addProseMirrorPlugins: () => [listPlugin(model, info), commentPlugin(), findPlugin(), pagesPlugin] }), [model, info, pagesPlugin])
+  // Comments as threads (a beta feature): what the page marks is theirs (doccomments.jsx).
+  const threading = useTrial('comments')
+  const skip = useRef(() => false)
+  const plugins = useMemo(() => Extension.create({ name: 'wordView', addProseMirrorPlugins: () => [listPlugin(model, info), commentPlugin({ skip: (id) => skip.current(id) }), findPlugin(), pagesPlugin] }), [model, info, pagesPlugin])
   // What's pasted, dropped or clicked, handled where the editor's own handling isn't Google Docs'
   // (its handlers are set once; what they do is this render's).
   const own = useRef({})
@@ -384,6 +389,21 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
   const [outline, setOutline] = usePane('outline', true)
   const comments = useMemo(() => [...model.comments.entries()].filter(([, c]) => c.text), [model])
   const [showComments, setShowComments] = useState(false)
+  const author = useAuthor()
+  const threads = useThreads({ editor, model, on: threading && !readOnly, author, dirty: () => { touched.current = true; onDirty(true) } })
+  skip.current = threading ? threads.skip : () => false
+  // A comment on the words picked: in the comments beside the page, its box ready.
+  const comment = () => { setShowComments(true); threads.start() }
+  // Words with a comment, clicked: its thread, in the comments.
+  const threadsRef = useRef(threads)
+  threadsRef.current = threads
+  useEffect(() => {
+    if (!editor || !threading) return undefined
+    const dom = editor.view.dom
+    const click = (e) => { const el = e.target.closest?.('.sd-cmt[data-cid]'); if (el && dom.contains(el)) { setShowComments(true); threadsRef.current.pick(el.getAttribute('data-cid')) } }
+    dom.addEventListener('click', click)
+    return () => dom.removeEventListener('click', click)
+  }, [editor, threading])
   // The page at its size where it fits beside the outline (and the comments), smaller where it
   // doesn't, and no pages on a phone; the outline only where there's room for both.
   const showOutline = outline && !flow && mainW >= g.w + 236 + 56 + (showComments ? 300 : 0)
@@ -407,7 +427,7 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
         const was = model.hf[which].default
         if (was) { if (now !== was.json) edits[was.path] = now || { type: 'doc', content: [{ type: 'paragraph' }] } } else if (now) make[which] = now
       }
-      return writeDocx(model, editor.getJSON(), { hf: edits, make, page: page !== model.page ? page : null })
+      return writeDocx(model, editor.getJSON(), { hf: edits, make, page: page !== model.page ? page : null, more: threading ? threads.save : null })
     },
     selection: () => {
       if (!editor) return null
@@ -731,6 +751,7 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
         <TableTool editor={editor} c={c} on={s.table} width={g.w - g.left - g.right} />
         <Drop name={t('Insert')} className="sd-wide-only" icon="plus" tip={t('Insert a page break, header or footer')} panel={(close) => (<>
           <Item icon="page-break" label={t('Page break')} keys={['mod', 'enter']} run={() => c().insertContent([{ type: 'paragraph', content: [{ type: 'pbr' }] }]).run()} close={close} />
+          {threading && <Item icon="comment" label={t('Comment')} keys={['mod', 'alt', 'm']} run={comment} close={close} />}
           <Item icon="header-footer" label={hf.header ? t('Edit the header') : t('Add a header')} run={() => setEditingHf('header')} close={close} />
           <Item icon="header-footer" label={hf.footer ? t('Edit the footer') : t('Add a footer')} run={() => setEditingHf('footer')} close={close} />
         </>)} />
@@ -742,7 +763,9 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
           <Item icon="check" label={t('Accept all')} run={() => resolveAll(true)} close={close} />
           <Item icon="x" label={t('Reject all')} run={() => resolveAll(false)} close={close} />
         </>)} />}
-        {comments.length > 0 && <Tool name={t('Comments')} icon="comment" on={showComments} run={() => setShowComments((x) => !x)} tip={t('{n} comments', { n: comments.length })}><span className="sd-tool-n">{comments.length}</span></Tool>}
+        {threading
+          ? <Tool name={t('Comments')} icon="comment" on={showComments} run={() => setShowComments((x) => !x)} tip={t('Comments: add one on the words picked, answer and resolve them')}>{threads.threads.some((x) => !x.done) && <span className="sd-tool-n">{threads.threads.filter((x) => !x.done).length}</span>}</Tool>
+          : comments.length > 0 && <Tool name={t('Comments')} icon="comment" on={showComments} run={() => setShowComments((x) => !x)} tip={t('{n} comments', { n: comments.length })}><span className="sd-tool-n">{comments.length}</span></Tool>}
         {!flow && <Tool name={t('Outline')} icon="outline" on={showOutline} run={() => setOutline(!showOutline)} tip={t('Outline: the headings, to go to')} />}
         <Tool name={t('Find and replace')} icon="search" on={!!finding} run={() => setFinding(finding ? null : 'find')} keys={['mod', 'f']} />
         <Drop name={t('File')} className="sd-wide-only" icon="printer" tip={t('Page setup, print, and a copy as Markdown')} disabled={exporting} panel={(close) => (<>
@@ -761,7 +784,7 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
     </div>
   )
   return (
-    <div className={`sd-doc sd-word${flow ? ' flow' : ''}`} onKeyDown={onKeys}>
+    <div className={`sd-doc sd-word${flow ? ' flow' : ''}`} onKeyDown={(e) => { if (threading && !readOnly && (e.metaKey || e.ctrlKey) && e.altKey && e.code === 'KeyM') { e.preventDefault(); comment(); return } onKeys(e) }}>
       <style>{css}</style>
       <div className="sd-doc-head">
         {toolbar}
@@ -776,9 +799,9 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
             <EditorContent editor={editor} className="sd-page-host" />
           </div>
         </div>
-        {showComments && <Comments editor={editor} comments={comments} onClose={() => setShowComments(false)} />}
+        {showComments && (threading ? <Threads threads={threads} readOnly={readOnly} onComment={comment} onClose={() => setShowComments(false)} /> : <Comments editor={editor} comments={comments} onClose={() => setShowComments(false)} />)}
       </div>
-      {!readOnly && <AskInPlace editor={editor} file={file} scroller={desk} hook={asking} selection={() => pickedOf(editor)} apply={(range, text, below) => { touched.current = true; putIn(editor, range, text, below, (a) => ({ ...a, x: null, pa: '' })) }} />}
+      {!readOnly && <AskInPlace editor={editor} file={file} scroller={desk} hook={asking} selection={() => pickedOf(editor)} apply={(range, text, below) => { touched.current = true; putIn(editor, range, text, below, (a) => ({ ...a, x: null, pa: '' })) }} onComment={threading ? comment : null} />}
       {counting && <WordCount editor={editor} pages={flow ? null : pages.total} onClose={() => setCount(false)} />}
       {editingHf && <HfEditor which={editingHf} info={info} model={model} page={page} css={css} scope={scope} value={hf} onClose={() => setEditingHf(null)} onDone={(next) => { touched.current = true; setHf(next); hfRef.current = next; stamp.current++; setEditingHf(null); onDirty(true); again.current?.() }} />}
       {helping && <Shortcuts word onClose={() => { setHelp(false); editor.commands.focus() }} />}

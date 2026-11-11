@@ -429,7 +429,7 @@ const rootOf = async (pane) => {
 // One that's no longer a beta stays in older configs, read by nothing (memory: Memory, now a page
 // for everyone). One can be on to start with (config.example.json's trials: Back and Forward), until
 // it's turned off.
-const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings']
+const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings', 'comments']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 const FILES_OFF = 'Files is a beta feature. Turn it on in Settings › About & Updates › Beta Features.'
