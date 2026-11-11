@@ -1048,8 +1048,10 @@ try {
     let clicked = true
     await h.locator('.hud button', { hasText: 'Copy' }).click({ timeout: 5000 }).catch((e) => { clicked = e.message.split('\n')[0] })
     const seen = await until(() => h.evaluate(() => window.__seen.copied && window.__seen), 3000, 100)
+    // (Not so on CI's Mac in 3.15.0: whether the page loaded again, which leaves no window.__seen.)
+    const loads = await h.evaluate(() => performance.getEntriesByType('navigation').length + (window.__reloads || 0)).catch(() => null)
     const noOffer = !!seen && !seen.offer
-    ok(chip && why && noOffer, 'no Accessibility yet: not even tried; while you talk, the agent to send it to as before, then the text to copy with one line, pasting needs Accessibility (and Copy asks nothing more: it\'s picked already)', { chip, why, noOffer, shown, clicked, seen: await h.evaluate(() => window.__seen).catch(() => null), copied: await h.evaluate(() => window.__hud.copied).catch(() => null), now: await hudText(h) })
+    ok(chip && why && noOffer, 'no Accessibility yet: not even tried; while you talk, the agent to send it to as before, then the text to copy with one line, pasting needs Accessibility (and Copy asks nothing more: it\'s picked already)', { chip, why, noOffer, shown, clicked, loads, url: h.url(), after: await hudText(h).catch(() => null), seen: await h.evaluate(() => window.__seen).catch(() => null), copied: await h.evaluate(() => window.__hud.copied).catch(() => null), now: await hudText(h) })
     await hc.close()
   }
   {
