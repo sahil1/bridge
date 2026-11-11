@@ -59,6 +59,7 @@ import { prepareChief } from './chief.js'
 import { makeTasks } from './chieftasks.js'
 import { makeThreads, isChiefName } from './threads.js'
 import { providerRoutes, providerEnv, subscriptions, signedInNow } from './providers.js'
+import { signInScreen, SIGN_IN_ENDED } from './firstrun.js'
 import * as settings from './settings.js'
 import * as consult from './consult.js'
 import * as insights from './insights.js'
@@ -3153,21 +3154,56 @@ app.get('/api/accounts/:id/status', wrap(async (req) => {
   if (!r.signedIn) justIn.delete(r.id)
   return r
 }))
+// Each sign-in tab, while it's there: whose sign-in it is, so what started it can follow it (GET
+// /api/signins/:pane) and offer the way through when the browser can't come back to the agent.
+// again: signing in an account that already counts as signed in (its sign-in ran out).
+const signIns = new Map() // paneId -> { kind, id, again, at }
+const noteSignIn = (paneId, kind, { id = null, again = false } = {}) => {
+  for (const [k, v] of signIns) if (Date.now() - v.at > 6 * 60 * 60 * 1000) signIns.delete(k)
+  signIns.set(paneId, { kind, id, again, at: Date.now() })
+}
+const tabOfPane = async (paneId) => ((await rt.fleet().catch(() => null))?.tabs || []).find((t) => (t.panes || []).some((p) => p.paneId === paneId)) || null
+// The line typed for a sign-in: the agent's login, then one that says it's over, however it ended
+// (signed in, or not: it gave up, a code didn't work, it was stopped), for the page to read.
+const signInLine = (command) => `${command}; echo '${SIGN_IN_ENDED}'`
+// Where a sign-in is: signed in, still waiting (and for what: the browser, or a code), or over
+// without signing in, and why when it said (firstrun.js, signInScreen). open: its tab is still there.
+app.get('/api/signins/:pane', wrap(async (req) => {
+  const s = signIns.get(req.params.pane)
+  if (!s) throw new Error('That sign-in is over. Sign in again.')
+  const signedIn = (s.id ? (await accounts.check(s.id).catch(() => ({}))).signedIn : await signedInNow(s.kind)) === true
+  if (!(await tabOfPane(req.params.pane))) return { kind: s.kind, open: false, signedIn, done: signedIn }
+  const screen = signInScreen(s.kind, await rt.read(req.params.pane, 200).catch(() => ''))
+  return { kind: s.kind, open: true, signedIn, done: signedIn && (!s.again || screen.success), ...screen }
+}))
+
 // Sign in: the agent's own login flow (like /login) in a terminal tab you can watch and answer.
+// device: Codex with a one-time code instead of the browser. A sign-in of the same account still
+// open is stopped first (two of Codex's would both want port 1455).
 app.post('/api/accounts/:id/login', wrap(async (req) => {
-  const { kind, command } = accounts.loginCommand(req.params.id)
-  if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
+  const device = req.body?.device === true
+  const { kind } = accounts.loginCommand(req.params.id)
+  const bin = (await installed()).find((k) => k.kind === kind)?.path
+  if (!bin) throw notInstalled(kind)
+  const { command } = accounts.loginCommand(req.params.id, { bin, device })
   // Its sign-in ran out: renewed without a browser if it can be (accounts.renew), else its login.
   const id = req.params.id, again = !!cfg.quota?.read && accounts.lapsed(id)
   if (again && await accounts.renew(id, { force: true })) {
     await quota.account(id)
     if (!accounts.lapsed(id)) return { renewed: true }
   }
+  for (const [pane, s] of signIns) {
+    if (s.id !== id) continue
+    const t = await tabOfPane(pane)
+    if (t) await rt.closeTab(t.tabId).catch(() => {})
+    signIns.delete(pane)
+  }
   const f = await rt.fleet()
   const ws = f.workspaces.find((w) => w.label === 'Setup')
   const label = accounts.nameOf(kind, req.params.id)
   const out = await rt.launch({ kind: 'shell', cwd: os.homedir(), label: `Sign in: ${adapter(kind).label} (${label})`, workspaceId: ws?.id, newSpace: ws ? undefined : 'Setup' })
-  await typeLine(out.paneId, command)
+  noteSignIn(out.paneId, kind, { id, again })
+  await typeLine(out.paneId, signInLine(command))
   // Signing in again: it already counts as signed in, so it's done once its usage reads again,
   // which also puts the new reading in Usage.
   closeWhenDone(out.paneId, async () => (await accounts.check(id)).signedIn === true && (!again || (await quota.account(id), !accounts.lapsed(id))))
@@ -3207,7 +3243,8 @@ app.post('/api/signin/:kind', wrap(async (req) => {
   const f = await rt.fleet()
   const ws = f.workspaces.find((w) => w.label === 'Setup')
   const out = await rt.launch({ kind: 'shell', cwd: os.homedir(), label: `Sign in: ${a.label}`, workspaceId: ws?.id, newSpace: ws ? undefined : 'Setup' })
-  await typeLine(out.paneId, quoteCommand(bin, a.login))
+  noteSignIn(out.paneId, kind)
+  await typeLine(out.paneId, signInLine(quoteCommand(bin, a.login)))
   closeWhenDone(out.paneId, async () => (await signedInNow(kind)) === true, undefined, { anyScreen: kind === 'gemini' })
   pushFleet()
   const openId = await openIdOf(out.paneId)
