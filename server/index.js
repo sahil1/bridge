@@ -445,7 +445,7 @@ const rootOf = async (pane) => {
 // One that's no longer a beta stays in older configs, read by nothing (memory: Memory, now a page
 // for everyone). One can be on to start with (config.example.json's trials: Back and Forward), until
 // it's turned off.
-const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings', 'comments', 'mcp-server']
+const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings', 'comments', 'mcp-server', 'make-sheet']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 const FILES_OFF = 'Files is a beta feature. Turn it on in Settings › About & Updates › Beta Features.'
@@ -673,8 +673,8 @@ const sheetAi = async (req, thread = null) => {
   const d = (await chatModels.models().catch(() => [])).find((x) => x.id === use)
   return { ...(book ? studio.bookAnswer(r?.text) : studio.sheetAnswer(r?.text)), model: use, by: d?.label || String(use).split(':').slice(1).join(':') || use }
 }
-// Make a sheet (mode: 'book') comes with Comments and @bridge, a beta feature, for now.
-app.post('/api/studio/sheet/ai', (req, res, next) => (req.body?.mode === 'book' ? trialOff('comments', 'Comments and @bridge')(req, res, next) : next()), wrap((req) => sheetAi(req)))
+// Make a sheet (mode: 'book') is a beta feature of its own, Make a Sheet.
+app.post('/api/studio/sheet/ai', (req, res, next) => (req.body?.mode === 'book' ? trialOff('make-sheet', 'Make a Sheet')(req, res, next) : next()), wrap((req) => sheetAi(req)))
 // @bridge in a comment on a sheet's cells (Comments and @bridge, a beta feature): the same fast
 // path, with the thread so far, given as what to work on.
 app.post('/api/studio/sheet/comment', trialOff('comments', 'Comments and @bridge'), wrap((req) => sheetAi(req, Array.isArray(req.body?.thread) ? req.body.thread : [])))

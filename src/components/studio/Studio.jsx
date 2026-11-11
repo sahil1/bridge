@@ -151,8 +151,8 @@ export function StudioHome({ onOpen }) {
   const [empty, setEmpty] = useState(false) // no files at all yet: New's cards, as the start
   const [making, setMaking] = useState(null) // the New kind being named
   const [name, setName] = useState('')
-  const [forWhat, setForWhat] = useState('') // what a new sheet is for, for AI Assist to make (Comments and @bridge)
-  const makeSheets = useTrial('comments')
+  const [forWhat, setForWhat] = useState('') // what a new sheet is for, for AI Assist to make (Make a Sheet)
+  const makeSheets = useTrial('make-sheet')
   const [where, setWhere] = useState('')
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)

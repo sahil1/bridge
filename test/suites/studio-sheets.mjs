@@ -13,7 +13,7 @@
 // answered by its model (the stand-in) in seconds: saying how to add one when there's none, Write a
 // formula and Clean this column as suggestions outlined on the sheet, discarded or kept (Keep all),
 // Summarise said beside it, Chart this drawn first, an answer that isn't a change said, and Hand to
-// an agent still there; Make a sheet (with Comments and @bridge on): New › Sheet said what it's for
+// an agent still there; Make a sheet (Make a Sheet, a beta feature): New › Sheet said what it's for
 // (or the empty sheet's Make a sheet) gives a whole workbook shown first, Discard emptying it again,
 // Keep saving it as an Excel file with its sheets, formulas, formats, a dropdown and the heading
 // row frozen, and no model said; with the beta off, nothing new; light and dark; no page errors.
@@ -361,12 +361,12 @@ try {
   ok(w.errors.length === 0, 'no page errors', w.errors)
 
   // ---------- Make a sheet ----------
-  // With Comments and @bridge on: an empty Excel sheet made from what it's for, by AI Assist's model
+  // With Make a Sheet on (a beta feature, off to start): an empty Excel sheet made from what it's for, by AI Assist's model
   // on the sheet's fast path, from New › Sheet or the empty sheet itself; shown on the sheet
   // before it's kept (Discard empties it again), then saved as an Excel file with its sheets,
   // formulas, formats, dropdowns and frozen headings. With the beta off, the empty sheet as before.
   const offBook = await kit.api('/studio/sheet/ai', { root, path: 'costs.xlsx', mode: 'book', instruction: 'A budget' }).catch((e) => e)
-  ok(offBook?.status === 404 && offBook.j?.trial === 'comments', 'with Comments and @bridge off, Make a sheet\'s route isn\'t there', offBook?.message)
+  ok(offBook?.status === 404 && offBook.j?.trial === 'make-sheet' && /^Make a Sheet is a beta feature/.test(offBook.message), 'with Make a Sheet off (as it starts), its route isn\'t there', offBook?.message)
   const studioHome = () => until(async () => { await p.locator('.rail-nav-btn', { hasText: 'Studio' }).click(); return p.locator('.sd-home').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 20000, 300)
   const newSheet = async (name, forWhat) => {
     await studioHome()
@@ -382,7 +382,7 @@ try {
   await p.locator('.sd-new-menu [role="menuitem"]', { hasText: 'Sheet' }).first().click()
   ok((await p.locator('.sd-new-for').count()) === 0, 'and New › Sheet asks only its name and folder, as before')
   await p.locator('.sd-new-form button', { hasText: 'Cancel' }).click()
-  await kit.api('/settings', { trials: { comments: true } }, 'PATCH')
+  await kit.api('/settings', { trials: { 'make-sheet': true } }, 'PATCH')
   const booksAsked = model.asked(/^Make a spreadsheet: /).length
   await newSheet('Team budget', 'A budget for a team of five')
   const made = p.locator('.sh-make')

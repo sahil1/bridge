@@ -254,6 +254,7 @@ const SHORT = {
   routines: tx('Routines that run by themselves at the time you set, and History › Commands.'),
   files: tx('Every folder on this computer and your others, as Finder shows them. Read-only for now.'),
   'signature-assist': tx('In Studio, AI Assist\'s Sign this on a PDF you\'re asked to sign.'),
+  'make-sheet': tx('In Studio, a new sheet written by AI Assist from what it\'s for, shown to keep or discard.'),
   'mcp-server': tx('Claude Code, Claude Desktop, Cursor and Codex read your boards, files and meeting summaries, and suggest changes you keep. Set up in Settings › MCP Servers.'),
 }
 function Trials() {

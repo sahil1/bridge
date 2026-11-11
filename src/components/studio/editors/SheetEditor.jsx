@@ -158,9 +158,10 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
   const commentRef = useRef(null)
   commentRef.current = () => { if (!threadsRef.current.on) return; setPanel('comments'); threadsRef.current.start() }
   useEffect(() => { if (panel === 'comments') threadsRef.current.cellPicked(sel) }, [sel, panel])
-  // Make a sheet (with Comments and @bridge, for now): an empty Excel sheet made from what it's for,
+  // Make a sheet (Make a Sheet, a beta feature): an empty Excel sheet made from what it's for,
   // asked here or by New › Sheet (xlsx.js takeMake), made as soon as it opens.
-  const makes = threading && !readOnly && !info?.csv
+  const makeOn = useTrial('make-sheet')
+  const makes = makeOn && !readOnly && !info?.csv
   const [making, setMaking] = useState(false) // its panel opened once: kept from then on
   const [makePreset, setMakePreset] = useState(null)
   useEffect(() => { if (panel === 'make') setMaking(true) }, [panel])
