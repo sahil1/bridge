@@ -25,7 +25,8 @@
 //   model asked for "local" answers wrong the first time (no nodes), right when told why.
 //   Refine ("You drew a diagram for"): labels the first arrow without a label, saying so, and says
 //   {"ok":true} once every arrow has one. "Change it": Start renamed Begin, Ship coloured red, a
-//   Cache box beside the first shape with an arrow to it; its review says ok.
+//   Cache box beside the first shape with an arrow to it; its review says ok. Ask about these
+//   ("A question about …"): the shapes it was sent, named in quotes, and whether it saw a picture.
 //   AI Assist's Sign this, "Explain this document": a mutual NDA between Northwind Labs and Contoso
 //   Ltd, a fee, a renewal worth a look on page 1 ("renews automatically").
 //   A sheet's AI Assist ("In the spreadsheet …"): the change asked for, as JSON (sheetChange).
@@ -116,6 +117,13 @@ function answer(b) {
     return say(JSON.stringify({ ok: false, ...spec, changes: [`Labelled the arrow from ${name(bare.from)} to ${name(bare.to)} with HTTP, so it says what goes along it.`] }))
   }
   if (/^You changed this diagram as asked:/.test(first)) return say('{"ok":true}')
+  // Ask about these: the shapes it was sent, named in quotes, and whether it had a picture.
+  if (/^A question about /.test(first)) {
+    const scene = JSON.parse(/as JSON[^\n]*:\n(\{.*\})\n/.exec(first)?.[1] || '{}')
+    const shapes = (scene.shapes || []).filter((s) => s.text)
+    const saw = m.find((x) => x.role === 'user' && Array.isArray(x.content) && x.content.some((p) => p.image_url))
+    return say(JSON.stringify({ answer: `${shapes.length === 1 ? 'One shape' : `${shapes.length} shapes`}: ${shapes.map((s) => `"${s.text}"`).join(', ')}. Nothing between them is missing.${saw ? ' I looked at the picture too.' : ''}`, shapes: shapes.map((s) => s.id) }))
+  }
   // AI Assist's Sign this, "What you're signing": a mutual NDA, in the shape it asks for.
   if (/^Explain this document, which I have been asked to sign\./.test(first)) {
     return say(`\`\`\`json\n${JSON.stringify({ kind: 'Mutual NDA', what: 'Two companies agree to keep what they share with each other secret for two years.', parties: [{ name: 'Northwind Labs', role: 'shares and receives' }, { name: 'Contoso Ltd', role: 'shares and receives' }], money: ['A fee of $1,200 a year, paid by Contoso Ltd'], dates: ['Starts on signing; lasts two years'], obligations: ['Keep the other side\'s information secret', 'Return or destroy it when asked'], renewal: 'It renews by itself every year unless either side says no 30 days before.', termination: 'Either side can end it with 30 days\' notice.', watch: [{ what: 'It renews by itself unless you say no in time.', page: 1, quote: 'renews automatically' }] })}\n\`\`\``)

@@ -11,8 +11,11 @@ import { reroute, layoutBoard, fitInView } from './layout.js'
 import { review } from './review.js'
 import { solidBackground, fontsReady } from './look.js'
 import { before, mark, markOne, keep as keepIt, discard as discardIt } from './suggest.js'
+import { holderOf, contents } from './holders.js'
+import CopyButton from '../CopyButton.jsx'
 
-// "Draw this" and "Change it": words (typed, or said with the dictation key) to a model, and back
+// "Draw this", "Change it" and "Ask" (about the shapes selected, answered here and changing
+// nothing): words (typed, or said with the dictation key) to a model, and back
 // as shapes on the board: a suggestion, marked on the board (suggest.js) to keep or discard there
 // or here, which ⌘Z takes back too. Drawing can also start from a meeting, a project or an agent's
 // work. The model is yours (models()): what it's sent is said under the button.
@@ -58,6 +61,13 @@ function goesTo(model, from, refine) {
   return refine && model.via !== 'local' ? `${base} ${t('Refine sends it the drawing as well, and a picture of the board when it can look at one.')}` : base
 }
 
+// And for Ask: the shapes selected, or the whole board, with a picture where the model can see.
+function goesAsk(model, sel) {
+  if (!model) return ''
+  const what = sel ? t('Your words and the shapes selected') : t('Your words and the board')
+  return model.via === 'local' ? t('{what} stay on this computer ({model}).', { what, model: model.label }) : `${t('{what} go to {model} ({provider}). Nothing else leaves this computer.', { what, model: model.label, provider: model.provider || model.label })} ${t('With a picture of them, when it can look at one.')}`
+}
+
 const toDataUrl = (blob) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(blob) })
 const ISSUE = { overlap: tx('shapes on top of each other ({n})'), crossing: tx('crossing arrows ({n})'), unlabeled: tx('arrows without a label ({n})'), sizes: tx('uneven sizes'), cramped: tx('shapes too close ({n})'), spacing: tx('uneven gaps'), colours: tx('too many colours ({n})'), straddle: tx('half in a container ({n})') }
 const say = (issues) => issues.map((x) => t(ISSUE[x.kind] || x.kind, { n: x.n })).join(', ')
@@ -66,7 +76,7 @@ const say = (issues) => issues.map((x) => t(ISSUE[x.kind] || x.kind, { n: x.n })
 // ({ prompt, kind, from, model, refine }), drawn straight away. boardId: the board's name, to keep
 // its rounds by. look: the board's look. prefs: what the whiteboard has learnt (colours, spacing,
 // direction). onDrawn({ ids, direction }): after a model has drawn, for learning from the edits
-// that follow. want: { mode, n }, the way AI Assist's menu asked for (Draw this or Change it).
+// that follow. want: { mode, n }, the way AI Assist's menu asked for (Draw this, Change it or Ask).
 export default function DrawPanel({ board, start, want = null, onStarted, onClose, compact = false, boardId = null, look = 'clean', prefs = null, onDrawn }) {
   const els = board.api?.getSceneElements() || []
   const [mode, setMode] = useState(start ? 'draw' : want?.mode || (els.length ? 'change' : 'draw'))
@@ -87,13 +97,13 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
   const box = useRef(null)
   const form = useRef(null)
   const ran = useRef(false)
-  // How much is on the board and how much is selected, kept up as you draw.
-  // And whether the last suggestion is still waiting on the board, to keep or discard.
-  const [sug, setSug] = useState(null) // the last one made here: { id, by }
+  const [answer, setAnswer] = useState(null) // Ask's: { text, shapes: [{ id, label }], model, saw }
+  // How much is on the board and how much is selected, kept up as you draw; whether the last
+  // suggestion made here still waits on the board, and how many wait in all, for Keep all (the
+  // board's own bar is under this panel while it's open).
+  const [sug, setSug] = useState(null) // the last suggestion made here: { id, by }
   const sugRef = useRef(null)
   sugRef.current = sug
-  // And how many suggestions wait on the board in all, for Keep all (the board's own bar is under
-  // this panel while it's open).
   const count = (elements, appState) => {
     const ids = new Set(elements.filter((e) => !e.isDeleted && e.customData?.bridge?.suggestion?.id).map((e) => e.customData.bridge.suggestion.id))
     return { n: elements.filter((e) => !e.isDeleted).length, sel: Object.values(appState?.selectedElementIds || {}).filter(Boolean).length, waits: !!sugRef.current && ids.has(sugRef.current.id), sugs: ids.size }
@@ -285,6 +295,35 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
     } catch (e) { setErr(e.message); setRun((x) => (x && x.rounds.length ? { ...x, status: 'done', stop: 'error' } : null)) } finally { setBusy(false) }
   }
 
+  // "Ask about these": a question about the shapes selected (with what's inside a container
+  // selected), or the whole board, answered here, naming the shapes it's about; a model that can
+  // see gets a picture of them. The board isn't changed.
+  const ask = async () => {
+    const { api: ex } = board
+    const prompt = text.trim()
+    if (!prompt) { setErr(t('Say what to ask')); return }
+    setBusy(true); setErr(null); setNote(null); setAnswer(null)
+    try {
+      const all = ex.getSceneElements()
+      const picked = new Set(Object.entries(ex.getAppState().selectedElementIds || {}).filter(([, on]) => on).map(([id]) => id))
+      for (const e of all) if (picked.has(e.id) && holderOf(e)) contents(e, all).forEach((c) => picked.add(c.id))
+      const scope = picked.size ? picked : null
+      const image = await sees(m.id) ? await picture(scope).catch(() => null) : null
+      const r = await api('/boards/ask', { method: 'POST', body: { prompt, scene: describe(all, scope), selected: !!scope, image, model: m.id || undefined } })
+      const d = describe(all)
+      const named = new Map([...d.shapes, ...d.texts].map((x) => [x.id, x.text]))
+      setAnswer({ text: r.answer, shapes: r.shapes.filter((id) => named.has(id)).map((id) => ({ id, label: named.get(id) || t('(no words)') })), model: r.model, saw: r.saw })
+    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+  // A shape the answer names, picked on the board and brought into view.
+  const point = (id) => {
+    const { api: ex } = board
+    const el = ex.getSceneElements().filter((e) => e.id === id)
+    if (!el.length) return
+    ex.updateScene({ appState: { selectedElementIds: { [id]: true } } })
+    ex.scrollToContent(el, { animate: true })
+  }
+
   // A version picked: the board as it was after that round (⌘Z goes back).
   const show = (k) => {
     const { X, api: ex } = board
@@ -328,21 +367,23 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
     draw({ prompt: start.prompt, kind: start.kind, from: start.from, model: start.model, refine: start.refine })
   }, [board.api, m.loaded]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const go = (e) => { e?.preventDefault(); if (!busy) (mode === 'draw' ? draw() : change()) }
+  const go = (e) => { e?.preventDefault(); if (!busy) (mode === 'draw' ? draw() : mode === 'ask' ? ask() : change()) }
   const noModel = m.loaded && !m.models.length
   const cur = run?.rounds[run.at]
   const was = past?.rounds[past.pick]
+  const asking = mode === 'ask'
   return (
     <form ref={form} className={`wb-draw${compact ? ' compact' : ''}`} onSubmit={go} aria-label={t('AI Assist')}>
       <AssistHead className="wb-draw-head" onClose={onClose}>
         <div className="seg small-seg" role="tablist">
           <button type="button" role="tab" aria-selected={mode === 'draw'} className={mode === 'draw' ? 'on' : ''} onClick={() => setMode('draw')}><Icon name="shapes" size={12} /> {t('Draw this')}</button>
           <button type="button" role="tab" aria-selected={mode === 'change'} className={mode === 'change' ? 'on' : ''} onClick={() => setMode('change')} disabled={!scene.n}><Icon name="edit" size={12} /> {t('Change it')}</button>
+          <button type="button" role="tab" aria-selected={asking} className={asking ? 'on' : ''} onClick={() => setMode('ask')} disabled={!scene.n} title={sel ? t('Ask about the {n} selected', { n: sel }) : t('Ask about the board')}><Icon name="chat" size={12} /> {t('Ask')}</button>
         </div>
       </AssistHead>
       <textarea ref={box} rows={compact ? 2 : 3} value={text} onChange={(e) => setText(e.target.value)} disabled={busy}
-        placeholder={mode === 'draw' ? t('A 3-tier web app on AWS, how a pull request gets merged, our office network, who reports to whom…') : sel ? t('What to change in the {n} selected', { n: sel }) : t('What to change: rename a box, add a step, colour the risky parts red…')}
-        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) go(e) }} aria-label={mode === 'draw' ? t('What to draw') : t('What to change')} />
+        placeholder={mode === 'draw' ? t('A 3-tier web app on AWS, how a pull request gets merged, our office network, who reports to whom…') : asking ? (sel ? t('What to ask about the {n} selected: what\'s missing between these steps, what this part does…', { n: sel }) : t('What to ask about the board: what\'s missing, what a part does…')) : sel ? t('What to change in the {n} selected', { n: sel }) : t('What to change: rename a box, add a step, colour the risky parts red…')}
+        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) go(e) }} aria-label={mode === 'draw' ? t('What to draw') : asking ? t('What to ask') : t('What to change')} />
       {mode === 'draw' && (
         <div className="wb-draw-opts">
           <div className="wb-kinds" role="radiogroup" aria-label={t('Kind of diagram')}>
@@ -360,26 +401,41 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
         </div>
       )}
       {mode === 'change' && <p className="muted small wb-scope">{sel ? t('Changes the {n} selected; the rest stays as it is.', { n: sel }) : t('Changes the whole board. Select shapes first to change only those.')}</p>}
+      {asking && <p className="muted small wb-scope">{sel ? t('About the {n} selected. The board stays as it is.', { n: sel }) : t('About the whole board. Select shapes first to ask about only those.')}</p>}
       <div className="wb-draw-foot">
         {m.models.length > 1
           ? <select className="wb-model" value={m.id} onChange={(e) => m.pick(e.target.value)} aria-label={t('Model')}>{m.models.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</select>
           : m.model && <span className="muted small wb-model-one">{m.model.label}</span>}
-        <label className="wb-refine" title={t('After drawing, the model looks over its own work and improves it, up to this many times.')}>
-          <span className="muted small">{t('Refine')}</span>
-          <select value={rounds} onChange={(e) => setRefine(Number(e.target.value))} aria-label={t('Rounds of refining')} disabled={busy}>
-            {ROUNDS.map((n) => <option key={n} value={n}>{n ? `×${n}` : t('Off')}</option>)}
-          </select>
-        </label>
+        {!asking && (
+          <label className="wb-refine" title={t('After drawing, the model looks over its own work and improves it, up to this many times.')}>
+            <span className="muted small">{t('Refine')}</span>
+            <select value={rounds} onChange={(e) => setRefine(Number(e.target.value))} aria-label={t('Rounds of refining')} disabled={busy}>
+              {ROUNDS.map((n) => <option key={n} value={n}>{n ? `×${n}` : t('Off')}</option>)}
+            </select>
+          </label>
+        )}
         <span className="wb-grow" />
         {busy && run && <button type="button" className="btn small" onClick={() => { stopRef.current = true }}>{t('Stop')}</button>}
         <button type="submit" className="btn small primary" disabled={busy || noModel || (!text.trim() && !(mode === 'draw' && from && fromId))}>
-          <Icon name={busy ? 'refresh' : 'wand'} size={12} className={busy ? 'spin' : ''} /> {busy ? (mode === 'draw' ? t('Drawing…') : t('Changing…')) : mode === 'draw' ? t('Draw') : t('Change')}
+          <Icon name={busy ? 'refresh' : 'wand'} size={12} className={busy ? 'spin' : ''} /> {busy ? (mode === 'draw' ? t('Drawing…') : asking ? t('Asking…') : t('Changing…')) : mode === 'draw' ? t('Draw') : asking ? t('Ask') : t('Change')}
         </button>
       </div>
       {noModel
         ? <p className="small wb-privacy">{t('No model to draw with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers. You can still draw by hand.')} <button type="button" className="link-btn" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))}>{t('Model Providers')}</button></p>
-        : <p className="muted small wb-privacy">{goesTo(m.model, mode === 'draw' ? from : '', rounds > 0)}{!compact && dictKey ? ` ${t('Hold {key} to say it.', { key: dictKey })}` : ''}</p>}
-      {run && (run.rounds.length > 0 || run.status === 'running') && (
+        : <p className="muted small wb-privacy">{asking ? goesAsk(m.model, sel) : goesTo(m.model, mode === 'draw' ? from : '', rounds > 0)}{!compact && dictKey ? ` ${t('Hold {key} to say it.', { key: dictKey })}` : ''}</p>}
+      {asking && answer && (
+        <div className="wb-answer" role="status" aria-label={t('The answer')}>
+          <small className="muted wb-answer-by"><Icon name="wand" size={11} /> {answer.saw === 'picture' ? t('{model} answered, from the shapes and a picture of them', { model: labelOf(m, answer.model) }) : t('{model} answered, from the shapes', { model: labelOf(m, answer.model) })}</small>
+          <p className="wb-answer-text">{answer.text}</p>
+          {answer.shapes.length > 0 && (
+            <div className="wb-answer-shapes" aria-label={t('The shapes it names')}>
+              {answer.shapes.map((s) => <button type="button" key={s.id} className="chip" onClick={() => point(s.id)} title={t('Pick it on the board')}>{s.label}</button>)}
+            </div>
+          )}
+          <div className="wb-sug-acts"><CopyButton text={answer.text} className="btn small" /><button type="button" className="ghost-btn" onClick={() => setAnswer(null)}>{t('Done')}</button></div>
+        </div>
+      )}
+      {!asking && run && (run.rounds.length > 0 || run.status === 'running') && (
         <div className="wb-rounds" aria-label={t('Rounds')}>
           <div className="wb-rounds-head">
             <span className="small">
@@ -403,7 +459,7 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
           )}
         </div>
       )}
-      {!run && was && (
+      {!asking && !run && was && (
         <div className="wb-rounds" aria-label={t('Last Refine')}>
           <div className="wb-rounds-head">
             <span className="small">{t('Last Refine, {when}', { when: fmtRelative(past.at) })}</span>

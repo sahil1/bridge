@@ -112,6 +112,14 @@
 .wb-sug-bar > svg { flex: none; color: var(--ai); }
 .wb-sug-bar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-sug-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* Ask's answer, under the box: who answered and from what, the answer, the shapes it names. */
+.wb-answer { display: grid; gap: 6px; padding: 8px 10px; border-radius: 9px; background: color-mix(in srgb, var(--ai) 6%, var(--pane-2)); border: 1px solid color-mix(in srgb, var(--ai) 30%, var(--line)); }
+.wb-answer-by { display: inline-flex; align-items: center; gap: 4px; }
+.wb-answer-by > svg { color: var(--ai); }
+.wb-answer-text { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+.wb-answer-shapes { display: flex; flex-wrap: wrap; gap: 4px; }
+.wb-answer-shapes .chip { cursor: pointer; border: 1px solid color-mix(in srgb, var(--ai) 35%, transparent); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-answer-shapes .chip:hover { background: var(--accent-soft); }
 .app.narrow .wb-sug-btn { padding: 8px 12px; }
 .app.narrow .wb-sug-bar .btn { height: 40px; }
 

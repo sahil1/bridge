@@ -31,14 +31,17 @@ import './whiteboard.css'
 // Export (PNG, SVG, PDF) and the whiteboard's settings.
 
 const enc = encodeURIComponent
-// What AI Assist offers on a board: its panel, to draw something new or change what's there.
-// open: the panel is open; drawn: something's on the board; show(mode): opens the panel that way.
-const drawAssist = (open, drawn, show) => [
+// What AI Assist offers on a board: its panel, to draw something new, change what's there, or ask
+// about the shapes selected (or the whole board). open: the panel is open; drawn: something's on
+// the board; sel: how many shapes are selected; show(mode): opens the panel that way.
+const drawAssist = (open, drawn, show, sel = 0) => [
   { label: t('Draw this'), hint: t('A diagram from what you describe, a meeting or a document'), run: () => show('draw') },
   { label: t('Change it'), hint: drawn ? t('The whole board, or the shapes you select') : t('Once there\'s something on the board'), disabled: !drawn, run: () => show('change') },
+  { label: sel ? t('Ask about these') : t('Ask about the board'), hint: !drawn ? t('Once there\'s something on the board') : sel ? t('A question about the {n} selected, answered here', { n: sel }) : t('Select shapes to ask about only those'), disabled: !drawn, run: () => show('ask') },
   open && 'sep',
   open && { label: t('Close AI Assist'), run: () => show(null) },
 ]
+const selected = (ex) => Object.values(ex?.getAppState().selectedElementIds || {}).filter(Boolean).length
 const fileOp = (pane, op, path, name) => api(`/agents/${enc(pane)}/fileop`, { method: 'POST', body: { op, path, name } })
 
 // A small menu under a button: a click outside or Escape closes it. title: a line above the
@@ -452,7 +455,7 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
           )} />}
         </span>}
         <button type="button" className={`win-btn${panel === 'settings' ? ' on' : ''}`} onClick={() => setPanel(panel === 'settings' ? null : 'settings')} aria-label={t('Whiteboard Settings')} title={t('Whiteboard Settings')} aria-pressed={panel === 'settings'}><Icon name="settings" size={14} /></button>
-        <AiAssist className="btn small wb-ai-btn" compact={!wide} on={panel === 'draw'} disabled={!d.board.api} items={() => drawAssist(panel === 'draw', !!count.n, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel('draw') } else setPanel(null) })} />
+        <AiAssist className="btn small wb-ai-btn" compact={!wide} on={panel === 'draw'} disabled={!d.board.api} items={() => drawAssist(panel === 'draw', !!count.n, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel('draw') } else setPanel(null) }, count.sel)} />
         <span className="menu-anchor">
           <button type="button" className="win-btn" onClick={() => setMenu(menu === 'more' ? null : 'more')} aria-label={t('More')} title={t('More')}><Icon name="more" size={14} /></button>
           {menu === 'more' && <Menu onClose={() => setMenu(null)} items={[
@@ -667,7 +670,7 @@ export function FileDrawing({ pane, f, onSaved, onOpenPath }) {
         <span className="wb-grow" />
         {!own && <button type="button" className="btn small" onClick={saveBeside} disabled={!d.board.api} title={t('Saves the drawing as {name} next to this file', { name: `${base}.excalidraw` })}>{t('Save as .excalidraw')}</button>}
         <button type="button" className="btn small" onClick={done ? () => openBoard(done) : toBoards} disabled={!d.board.api}><Icon name="shapes" size={12} /> {done ? t('Open in Whiteboards') : t('Add to Whiteboards')}</button>
-        <AiAssist className="btn small wb-ai-btn" on={panel} disabled={!d.board.api} items={() => drawAssist(panel, true, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel(true) } else setPanel(false) })} />
+        <AiAssist className="btn small wb-ai-btn" on={panel} disabled={!d.board.api} items={() => drawAssist(panel, true, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel(true) } else setPanel(false) }, selected(d.board.api))} />
       </div>
       {d.conflict && <Conflict onTheirs={() => d.takeTheirs().catch((e) => setErr(e.message))} onMine={() => d.flush(true)} />}
       {err && <p className="error-text small wb-err" role="alert">{err}</p>}

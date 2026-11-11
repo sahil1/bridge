@@ -7,7 +7,8 @@
 //   in a JSON shape; a model on Ollama or LM Studio is listed as on this computer, asked in plain
 //   words first and again (held to the JSON shape) when its answer can't be drawn, sent only what
 //   fits of a long meeting, and asked whether it can see (one that can is sent the board's picture in
-//   Ollama's own chat); the chief of staff hands over a spec and lists the shapes; a preference kept,
+//   Ollama's own chat, for Refine and for Ask about these, and one that can't the shapes in words);
+//   the chief of staff hands over a spec and lists the shapes; a preference kept,
 //   sent in the next prompt, and forgotten. The build the app runs from carries its PDF code.
 //   The app, in Chromium or WebKit: the clean look by default (straight lines, the pane's own
 //   background, Bridge AI's accent, right-angled arrows joined to shapes) with Excalidraw's menu,
@@ -135,6 +136,15 @@ try {
     const sent3 = model.requests().slice(n3)
     const asked3 = sent3[0]?.messages?.find((x) => x.role === 'user')
     ok(rv.saw === 'picture' && rv.spec?.edges?.[0]?.label === 'HTTP' && sent3.length === 1 && sent3[0].path === '/api/chat' && sent3[0].model === 'llama3.2-vision:11b' && asked3?.images?.length === 1 && asked3.images[0] === PNG.split(',')[1] && /A picture of it as drawn/.test(asked3.content), 'a round of Refine on a model on Ollama that can see sends the board\'s picture to Ollama\'s own chat, in the message\'s images, and its answer is drawn', { rv, sent: sent3.map((x) => [x.path, x.model, x.messages?.map((m) => [m.role, m.images?.length || 0])]) })
+    // Ask about these: a model on Ollama that can see gets the shapes and their picture; one that
+    // can't, the shapes alone. Either answers naming them, with their ids.
+    const scene = { shapes: [{ id: 's1', shape: 'rectangle', text: 'Start' }, { id: 's2', shape: 'rectangle', text: 'Ship' }], arrows: [{ id: 'a1', from: 's1', to: 's2', text: '' }], texts: [] }
+    const n4 = model.requests().length
+    const seeing = await api('/boards/ask', { prompt: 'What is missing?', scene, selected: true, image: PNG, model: 'ollama:llama3.2-vision:11b' }).catch((e) => ({ error: e.message }))
+    const blind = await api('/boards/ask', { prompt: 'What is missing?', scene, selected: true, image: PNG, model: 'ollama:llama3.1:8b' }).catch((e) => ({ error: e.message }))
+    const sent4 = model.requests().slice(n4).map((x) => x.messages.find((y) => y.role === 'user'))
+    ok(seeing.saw === 'picture' && /"Start", "Ship"/.test(seeing.answer) && seeing.shapes?.join() === 's1,s2' && sent4[0]?.images?.length === 1 && /A picture of it as drawn is attached/.test(sent4[0].content), 'Ask about these on a model on Ollama that can see: the shapes and their picture, answered naming them', { seeing, sent: sent4[0]?.content?.slice(0, 200) })
+    ok(blind.saw === 'words' && /"Start", "Ship"/.test(blind.answer) && !sent4[1]?.images?.length && !/picture/.test(sent4[1]?.content || ''), 'and on one that can\'t see: the shapes alone, in words', { blind, sent: sent4[1]?.content?.slice(0, 200) })
   })
 
   await part('the chief of staff', async () => {

@@ -2,10 +2,10 @@
 // editors open) in ~/.bridge-ai/boards, one file per board, named as the board is. The page draws
 // them (src/components/whiteboard); this keeps the files and asks a model to draw or change one.
 //
-// A model is only asked when you press Draw or Change (and for each round of Refine), and it's the
-// one you picked or the one meeting notes use (your sign-in to an agent, a key, a model on this
+// A model is only asked when you press Draw, Change or Ask (and for each round of Refine), and it's
+// the one you picked or the one meeting notes use (your sign-in to an agent, a key, a model on this
 // computer): what's sent is your words, the shapes and words on the board (and a picture of it,
-// for Refine with a model that can see), the meeting, project or agent's work you chose to draw
+// for Refine and Ask with a model that can see), the meeting, project or agent's work you chose to draw
 // from, and what the whiteboard has learnt you like (preferences.json). Nothing else leaves the
 // computer.
 //
@@ -492,6 +492,41 @@ export async function change({ prompt, scene, model, selected = false } = {}) {
   return { ops: r.got.ops, model: r.model, calls: r.calls }
 }
 
+// ---------- Ask about these ----------
+// A question about the shapes selected (or the whole board), answered in a few sentences that name
+// the shapes it's about by their words, with their ids for the page to point at. A model that can
+// see gets a picture of them too. Nothing on the board changes.
+const ASK_SCHEMA = { type: 'object', properties: { answer: { type: 'string' }, shapes: { type: 'array', items: { type: 'string' } } }, required: ['answer'] }
+export async function askAbout({ prompt, scene, selected = false, image, model } = {}) {
+  const words = String(prompt || '').trim()
+  if (!words) throw new Error('Say what to ask')
+  const use = model || await helpers.pickModel?.()
+  if (!use) throw Object.assign(new Error('No model to ask yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers'), { code: 'noModel' })
+  const s = sceneOf(scene, (await shareFor(use)).small)
+  if (!s.shapes.length && !s.arrows.length && !s.texts.length) throw new Error('There\'s nothing there to ask about: select some shapes first')
+  const sees = typeof image === 'string' && /^data:image\/png;base64,/.test(image) && image.length < 8_000_000 && await helpers.canSee(use).catch(() => false)
+  const text = [
+    `A question about ${selected ? 'part of a diagram on a whiteboard (the shapes selected)' : 'a diagram on a whiteboard'}: ${words.slice(0, 4000)}`,
+    '',
+    `The ${selected ? 'shapes selected' : 'diagram'}, as JSON (each shape with its id and its words; each arrow with the ids it joins):`,
+    JSON.stringify(s),
+    sees ? 'A picture of it as drawn is attached.' : '',
+    '',
+    'Answer from what is there, in a few short sentences, naming each shape you mean by its words in quotes. Say so when the answer isn\'t on the board.',
+    'Answer with JSON only: {"answer": "your answer", "shapes": ["the id of each shape your answer names"]}',
+  ].filter((x) => x !== null).join('\n').replace(/\n{3,}/g, '\n\n')
+  const ids = new Set([...s.shapes, ...s.arrows, ...s.texts].map((x) => String(x.id)))
+  // An answer in plain words, not the JSON asked for, is still an answer.
+  const read = (t) => {
+    const j = jsonIn(t)
+    if (j && typeof j.answer === 'string' && j.answer.trim()) return { answer: j.answer.trim(), shapes: arr(j.shapes).map(String).filter((id) => ids.has(id)).slice(0, 20) }
+    const plain = String(t || '').replace(/```[\s\S]*?```/g, '').trim()
+    return plain ? { answer: plain, shapes: [] } : { error: 'The answer was empty.' }
+  }
+  const r = await askChecked(use, text, 'You answer questions about diagrams on a whiteboard, briefly, from what is on it.', read, { json: ASK_SCHEMA, images: sees ? [image] : null })
+  return { answer: r.got.answer.slice(0, 4000), shapes: r.got.shapes, model: r.model, calls: r.calls, saw: sees ? 'picture' : 'words' }
+}
+
 // ---------- Refine ----------
 // One round of a model looking over what it drew and making it better. The page draws the result
 // and checks it (src/components/whiteboard/review.js), and sends what the check found, and a
@@ -645,6 +680,7 @@ export function routes(app, { wrap, onComputer, counted }) {
   app.post('/api/boards/draw', route((req) => { counted?.('whiteboards.drawn'); return draw(req.body || {}) }))
   app.post('/api/boards/change', route((req) => change(req.body || {})))
   app.post('/api/boards/review', route((req) => review(req.body || {})))
+  app.post('/api/boards/ask', route((req) => askAbout(req.body || {})))
   app.get('/api/boards/shapes', wrap(() => ({ text: shapesText() })))
   // Whether the model can look at a picture of the board (Refine sends one only then).
   app.get('/api/boards/sees', wrap(async (req) => ({ sees: !!(await helpers.canSee(String(req.query.model || '') || await helpers.pickModel?.()).catch(() => false)) })))
