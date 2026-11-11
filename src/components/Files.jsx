@@ -180,17 +180,37 @@ function normalize(p) {
 // The page itself, sandboxed: its scripts run, but it can't reach this app (an opaque origin,
 // which the server refuses for any API call). From disk, or from the text you're editing.
 const SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals'
-const siteUrl = (pane, p, base = BASE) => `${base}/api/agents/${enc(pane)}/site/${p.split('/').map(enc).join('/')}`
+// Its own files load from that sandbox, which carries none of this page's sign-in, so their address
+// carries a key the server gives for that folder's files alone (server/apiauth.js): asked once for
+// each folder, on this device or the one shown (base).
+const siteKeys = new Map() // base + pane -> key, or the promise of it
+function useSiteKey(pane, base = BASE) {
+  const id = `${base}\n${pane}`
+  const [key, setKey] = useState(() => (typeof siteKeys.get(id) === 'string' ? siteKeys.get(id) : null))
+  useEffect(() => {
+    let live = true
+    const have = siteKeys.get(id)
+    if (typeof have === 'string') { setKey(have); return undefined }
+    const p = have || fetch(`${base}/api/agents/${enc(pane)}/site-key`).then((r) => (r.ok ? r.json() : {})).then((j) => (j.key ? j.key : null), () => null)
+    siteKeys.set(id, p)
+    p.then((k) => { if (k) siteKeys.set(id, k); else siteKeys.delete(id); if (live) setKey(k) })
+    return () => { live = false }
+  }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  return key
+}
+const siteUrl = (pane, p, base = BASE, key = null) => `${base}/api/agents/${enc(pane)}/site/${key ? `~${key}/` : ''}${p.split('/').map(enc).join('/')}`
 // The desktop app has no tabs: a file opened in a new one goes to the browser (desktop/main.js openLink).
 const newTabLabel = () => (window.bridgeApp ? t('Open in your browser') : t('Open in a new tab'))
 export function HtmlView({ pane, filePath, text, reload = 0, base = BASE }) {
   // While editing, show the draft (after a short pause in typing). A <base> makes its relative
   // links (styles, scripts, images) load from the file's folder, as they would from disk.
   const [doc, setDoc] = useState(text)
+  const key = useSiteKey(pane, base)
   useEffect(() => { if (text == null) return; const t = setTimeout(() => setDoc(text), 300); return () => clearTimeout(t) }, [text])
-  if (text == null) return <iframe key={reload} className="html-view" src={siteUrl(pane, filePath, base)} title={filePath} sandbox={SANDBOX} />
+  if (!key) return <div className="html-view" aria-busy="true" />
+  if (text == null) return <iframe key={reload} className="html-view" src={siteUrl(pane, filePath, base, key)} title={filePath} sandbox={SANDBOX} />
   const dir = parentOf(filePath)
-  const baseTag = `<base href="${siteUrl(pane, dir ? `${dir}/` : '', base)}">`
+  const baseTag = `<base href="${siteUrl(pane, dir ? `${dir}/` : '', base, key)}">`
   const html = /<head[^>]*>/i.test(doc || '') ? doc.replace(/<head[^>]*>/i, (m) => m + baseTag) : baseTag + (doc || '')
   return <iframe className="html-view" srcDoc={html} title={filePath} sandbox={SANDBOX} />
 }
@@ -246,7 +266,8 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
   const shown = editing ? 'edit' : isDrawing ? (drawMode === 'source' ? 'source' : 'drawing') : (isMd || isHtml) ? (mode === 'edit' ? 'preview' : mode) : 'source'
   // Preview and Source show your unsaved edits too, so on a narrow screen you can flip to check them.
   const text = dirty ? draft : f?.text
-  const site = siteUrl(pane, filePath)
+  const siteKey = useSiteKey(pane)
+  const site = siteUrl(pane, filePath, BASE, siteKey)
   const crumbs = filePath.split('/')
   // An app's index.html is often only a shell that its dev server fills in (a blank page here):
   // point to the running app, or to starting it, in the Preview tab.

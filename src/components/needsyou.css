@@ -106,3 +106,18 @@
   .ny-head h2 { font-size: 14px; }
   .ny-device { max-width: 52%; }
 }
+
+/* What another app asks through Bridge AI's MCP server (OutsideItem): its words as they came. */
+.ny-item.t-outside { border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.ny-item.t-outside .ny-top > .icon { color: var(--accent); }
+.ny-said { margin: 4px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); font-style: italic; overflow-wrap: anywhere; }
+.ny-change-wrap { margin-top: 6px; }
+.ny-change-wrap summary { cursor: pointer; font-size: 12px; color: var(--ink-2); min-height: 24px; display: flex; align-items: center; }
+.ny-change { margin: 6px 0 0; padding: 6px 8px; border-radius: 7px; background: var(--pane); border: 1px solid var(--line); color: var(--ink); font: 12px/1.45 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 14em; overflow: auto; }
+.ny-edits { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.ny-edits li { display: grid; gap: 2px; font: 12px/1.45 var(--font-mono); overflow-wrap: anywhere; white-space: pre-wrap; max-height: 10em; overflow: auto; }
+.ny-edits del { color: var(--critical); background: color-mix(in srgb, var(--critical) 8%, transparent); border-radius: 4px; padding: 1px 4px; }
+.ny-edits ins { color: var(--good); background: color-mix(in srgb, var(--good) 9%, transparent); border-radius: 4px; padding: 1px 4px; text-decoration: none; }
+.ny-problem { margin: 6px 0 0; display: flex; align-items: flex-start; gap: 6px; font-size: 12.5px; line-height: 1.4; color: var(--critical); }
+.ny-problem .icon { flex: none; margin-top: 2px; }
+.ny-warn { align-self: center; }

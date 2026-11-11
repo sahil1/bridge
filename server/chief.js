@@ -7,6 +7,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { ROOT, dataFile, ensureDir } from './paths.js'
+import { TOKEN_FILE } from './apitoken.js'
 
 const TEMPLATE = path.join(ROOT, 'chief')
 
@@ -31,7 +32,8 @@ export function prepareChief(cfg = {}) {
   copyIfMissing(path.join(TEMPLATE, 'state', 'playbook.md'), path.join(dir, 'state', 'playbook.md'), you)
   copyIfMissing(path.join(TEMPLATE, 'state', 'ledger.md'), path.join(dir, 'state', 'ledger.md'), you)
   copyIfMissing(path.join(TEMPLATE, 'state', 'tasks.md'), path.join(dir, 'state', 'tasks.md'), you)
-  // The CLI reaches this server; tell it where if the port isn't the default.
-  fs.writeFileSync(path.join(dir, 'bin', 'bridge.json'), JSON.stringify({ url: `http://127.0.0.1:${cfg.port || 7420}`, name: you }, null, 2))
+  // The CLI reaches this server; tell it where if the port isn't the default, and where the key it
+  // sends is (apitoken.js).
+  fs.writeFileSync(path.join(dir, 'bin', 'bridge.json'), JSON.stringify({ url: `http://127.0.0.1:${cfg.port || 7420}`, name: you, key: TOKEN_FILE }, null, 2))
   return dir
 }

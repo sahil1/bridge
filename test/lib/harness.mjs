@@ -20,6 +20,39 @@ export const OUT = path.join(TEST, '.out')
 export const IS_WIN = process.platform === 'win32'
 export const IS_MAC = process.platform === 'darwin'
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// Each kit's server needs its key (server/apiauth.js), which it makes in its data folder as it starts.
+// Every test gets it without asking: fetch to a kit's address sends it (unless the call gives an
+// Authorization of its own), and each browser context has each kit's cookie, as the desktop app's
+// windows and a browser let in do. rawFetch: fetch with nothing added, to try a call without it.
+const KITS = new Map() // port -> { data, key }
+const keyOf = (port) => {
+  const k = KITS.get(Number(port))
+  if (!k) return null
+  if (!k.key) { try { k.key = fs.readFileSync(path.join(k.data, 'api-token'), 'utf8').trim() || null } catch { /* not made yet */ } }
+  return k.key
+}
+export const kitKey = keyOf
+// The cookie a browser let in keeps for a kit (server/apitoken.js makes the same).
+export const kitCookie = (port) => { const k = keyOf(port); return k ? { name: `bridge-ai-${port}`, value: crypto.createHmac('sha256', k).update('bridge-ai browser').digest('base64url') } : null }
+export const rawFetch = globalThis.fetch.bind(globalThis)
+globalThis.fetch = (input, init = {}) => {
+  try {
+    const u = new URL(typeof input === 'string' || input instanceof URL ? String(input) : input.url)
+    const key = /^(127\.0\.0\.1|localhost|\[::1\])$/.test(u.hostname) && keyOf(u.port)
+    if (key) {
+      const h = new Headers(init.headers || (input instanceof Request ? input.headers : undefined))
+      if (!h.has('authorization')) { h.set('authorization', `Bearer ${key}`); init = { ...init, headers: h } }
+    }
+  } catch { /* not an address */ }
+  return rawFetch(input, init)
+}
+const contexts = new Set()
+async function letIn(ctx) {
+  const all = []
+  for (const port of KITS.keys()) { const c = kitCookie(port); if (c) for (const domain of ['127.0.0.1', 'localhost']) all.push({ ...c, domain, path: '/', httpOnly: true, sameSite: 'Strict' }) }
+  if (all.length) await ctx.addCookies(all).catch(() => {})
+}
 // fn's value once it's truthy, or null after ms.
 export async function until(fn, ms = 15000, step = 300) {
   const end = Date.now() + ms
@@ -178,11 +211,13 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   const log = fs.openSync(path.join(dir, 'server.log'), 'w')
   const more = typeof env === 'function' ? env({ bin, data, home, PATH }) : env
   const url = `http://127.0.0.1:${port}`
+  KITS.set(port, { data: more.BRIDGE_HOME || data, key: null })
   let server = null
   const run = async () => {
     server = spawn(node, [path.join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...base, ...more }, stdio: ['ignore', log, log] })
     const up = await until(async () => (await fetch(`${url}/api/config`)).ok, 60000, 250)
     if (!up) { stopTree(server); throw new Error(`the server didn't start on ${port}: ${fs.readFileSync(path.join(dir, 'server.log'), 'utf8').slice(-1500)}`) }
+    for (const ctx of contexts) await letIn(ctx)
   }
   await run()
   // Bridge AI quit and opened again, on the same folders (what it kept, it keeps). between(): what
@@ -204,7 +239,7 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     if (!r.ok) throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { status: r.status, j })
     return j
   }
-  return { port, url, dir, home, data, bin, api, program, restart, stop: () => stopTree(server), log: () => fs.readFileSync(path.join(dir, 'server.log'), 'utf8') }
+  return { port, url, dir, home, data, bin, api, program, restart, stop: () => stopTree(server), log: () => fs.readFileSync(path.join(dir, 'server.log'), 'utf8'), get key() { return keyOf(port) }, get cookie() { return kitCookie(port) } }
 }
 
 // A Mac with or without Apple's command line developer tools, whatever this one has: a stand-in
@@ -353,6 +388,15 @@ export async function browser() {
   const pw = await import('playwright-core')
   const which = process.env.BRIDGE_TEST_BROWSER === 'webkit' ? 'webkit' : 'chromium'
   const b = await pw[which].launch(which === 'chromium' ? { args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] } : {})
+  // Each context it opens is let in to every kit (above).
+  const open = b.newContext.bind(b)
+  b.newContext = async (...a) => {
+    const ctx = await open(...a)
+    contexts.add(ctx)
+    ctx.on('close', () => contexts.delete(ctx))
+    await letIn(ctx)
+    return ctx
+  }
   return { b, which }
 }
 // A page with Bridge AI's tour done and a look picked: { mode, theme }; phone: a phone's screen and

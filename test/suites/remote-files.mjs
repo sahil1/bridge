@@ -132,7 +132,7 @@ try {
   // A reader that stops (a paused video): what Studio sends stops too, a little ahead of it.
   await relayTest(ra, 'count')
   const paused = await new Promise((resolve) => {
-    const req = http.get(raw(M, 'huge.bin'), (res) => {
+    const req = http.get(raw(M, 'huge.bin'), { headers: { authorization: `Bearer ${lap.key}` } }, (res) => {
       let got = 0
       res.on('data', (c) => { got += c.length; if (got > 128 * 1024) res.pause() })
       setTimeout(async () => { const st = await relayTest(ra, 'state'); res.destroy(); resolve({ s: res.statusCode, sent: st.sent.downBytes }) }, 4000)

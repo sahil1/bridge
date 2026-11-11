@@ -291,6 +291,74 @@ export function NeedsItem({ it, focused, onOpen, onGone, setNote, pin = null, to
   )
 }
 
+// What another app asks of you through Bridge AI's MCP server (server/outside.js): a change it
+// suggests to a whiteboard or a file, to keep or discard, or a message for one of your agents, to
+// send or not. Its own words (its summary, the change, the message) are shown as they came, as
+// what it wants, never as Bridge AI's. Nothing happens until you press Keep or Send.
+function OutsideChange({ it }) {
+  const c = it.change || {}
+  if (it.kind === 'send') return <pre className="ny-change">{c.message}</pre>
+  if (c.diagram != null) {
+    return (
+      <details className="ny-change-wrap">
+        <summary>{c.mode === 'replace' ? t('In place of what\'s on the board: a {format} diagram', { format: c.format }) : t('Beside what\'s on the board: a {format} diagram', { format: c.format })}</summary>
+        <pre className="ny-change">{c.diagram}</pre>
+      </details>
+    )
+  }
+  if (c.edits) {
+    return (
+      <ul className="ny-edits">
+        {c.edits.map((e, i) => <li key={i}><del>{e.find}</del><ins>{e.replace || t('(taken out)')}</ins></li>)}
+        {c.more > 0 && <li className="muted small">{t('and {n} more', { n: c.more })}</li>}
+      </ul>
+    )
+  }
+  return (
+    <details className="ny-change-wrap">
+      <summary>{t('Its whole new text')}</summary>
+      <pre className="ny-change">{c.text}{c.cut ? '\n…' : ''}</pre>
+    </details>
+  )
+}
+export function OutsideItem({ it, onDone, setNote }) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState(it.problem || null)
+  const app = it.client?.name || t('Another app')
+  const send = it.kind === 'send'
+  const decide = async (yes) => {
+    setBusy(true)
+    try {
+      const r = await onDevice(null, `/outside/${encodeURIComponent(it.id)}`, { yes })
+      onDone(it)
+      setNote({ text: r.item?.note || (yes ? (send ? t('Sent') : t('Kept')) : (send ? t('Not sent') : t('Discarded'))) })
+    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
+  }
+  const what = send ? t('{app} asks to send this to {agent}', { app, agent: it.target?.name || t('an agent') })
+    : it.target?.type === 'board' ? t('{app} suggests a change to {what}', { app, what: it.target.name })
+      : t('{app} suggests a change to {name} in {place}', { app, name: it.target?.name, place: it.target?.where })
+  return (
+    <article className={`ny-item t-outside ${send ? 'send' : ''}`} aria-label={what}>
+      <div className="ny-top">
+        <Icon name={send ? 'send' : 'edit'} size={12} />
+        <span className="ny-kind">{send ? t('Send to an agent') : t('Suggested change')}</span>
+        <span className="ny-age" title={new Date(it.at).toLocaleString()}>{ago(it.at)}</span>
+        <span className="ny-grow" />
+        <span className="ny-device here" title={t('Through Bridge AI as an MCP Server (Settings › MCP Servers)')}><Icon name="link" size={11} />{app}</span>
+      </div>
+      <p className="ny-text">{what}{send && it.target?.folder ? ` (${it.target.folder})` : ''}.</p>
+      {!send && it.summary && <p className="ny-said">“{it.summary}”</p>}
+      <OutsideChange it={it} />
+      {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
+      <div className="ny-acts">
+        <button type="button" className="btn small primary" disabled={busy} onClick={() => decide(true)}><Icon name={send ? 'send' : 'check'} size={12} /> {send ? t('Send') : t('Keep')}</button>
+        <button type="button" className="btn small" disabled={busy} onClick={() => decide(false)}>{send ? t('Don\'t send') : t('Discard')}</button>
+        {send && <span className="muted small ny-warn">{t('The agent runs commands on this computer.')}</span>}
+      </div>
+    </article>
+  )
+}
+
 // The inbox itself: a panel under the chip on a computer, the whole screen on a phone.
 // focus: { paneId, machine } to show first (from a notification).
 export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onClose, onOpen }) {
@@ -350,7 +418,8 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
   }
   const focused = focus?.paneId ? all.find((i) => i.paneId === focus.paneId && (i.machine || null) === (focus.machine || null)) : null
   const focusId = focused ? uid(focused) : null
-  const waiting = all.filter((i) => isAsk(i) && i.online && !isQuiet(i)).length
+  const outside = (data?.outside || []).filter((x) => !gone[`outside|${x.id}`])
+  const waiting = all.filter((i) => isAsk(i) && i.online && !isQuiet(i)).length + outside.length
   const list = (rows) => rows.map((it) => <NeedsItem key={uid(it)} it={it} focused={uid(it) === focusId} top={top.has(uid(it))} onOpen={onOpen} onGone={onGone} setNote={setNote} />)
   // Clear all that have gone quiet, each on its own device: off the list at once, and back with a
   // note for any its device couldn't clear.
@@ -395,7 +464,13 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
       {note && <p className="ny-note" role="status">{note.text}</p>}
       <div className="ny-list">
         {!data && <div className="skeleton-rows pad"><div /><div /></div>}
-        {data && !items.length && (
+        {outside.length > 0 && (
+          <section className="ny-group" aria-label={t('From other apps')}>
+            <h3>{t('From other apps')}<span className="fcount">{outside.length}</span></h3>
+            {outside.map((x) => <OutsideItem key={x.id} it={x} setNote={setNote} onDone={(o) => { setGone((g) => ({ ...g, [`outside|${o.id}`]: Date.now() })); for (const ms of [0, 1500]) setTimeout(() => refresh(''), ms) }} />)}
+          </section>
+        )}
+        {data && !items.length && !outside.length && (
           <div className="ny-empty"><Icon name="check" size={20} /><p>{t('Nothing needs you right now.')}</p><small className="muted">{quiet.length ? t('Only what has been quiet for a while, folded below.') : t('Questions, permissions, failed runs and finished work from all your devices show here.')}</small></div>
         )}
         {by === 'urgent'

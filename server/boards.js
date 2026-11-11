@@ -96,6 +96,9 @@ function sourceOf(s) {
   }
   return { kind, text }
 }
+// Whether a diagram can be handed over, before it's kept for later (an outside app's suggestion,
+// mcptools.js): throws why not.
+export const checkSource = sourceOf
 
 // ---------- The boards ----------
 export async function list() {

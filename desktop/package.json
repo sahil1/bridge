@@ -34,6 +34,7 @@
       "floatfit.js",
       "floatshare.js",
       "senders.js",
+      "apitoken.js",
       "package.json",
       "!node_modules/uiohook-napi/{libuiohook,src,binding.gyp}{,/**}"
     ],

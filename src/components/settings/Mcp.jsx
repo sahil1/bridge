@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { api } from '../../api.js'
+import { api, onThisComputer } from '../../api.js'
 import { AgentIcon } from './ProviderIcon.jsx'
 import { MCP_CATALOG, MCP_CATEGORIES } from './mcpCatalog.js'
+import BridgeServer from './BridgeServer.jsx'
 import './mcp.css'
 
 // Settings › MCP servers. One screen: what's installed across every agent, and an inline panel
@@ -333,6 +334,7 @@ export default function Mcp() {
 
   return (
     <div className="mcp">
+      <BridgeServer here={onThisComputer()} />
       <div className="mcp-intro">
         <p className="muted small" title="Tools your agents can call: browsers, GitHub, docs search, databases and more. Servers added here go to each agent's own config, for all projects.">Tools your agents can call, added to each agent's own config for all projects.</p>
         {!adding && <button type="button" className="btn small primary" onClick={() => setAdding({ start: null })} disabled={!data}><Icon name="plus" size={13} />Add server</button>}

@@ -89,12 +89,12 @@ cd bridge
 npm start
 ```
 
-Open http://127.0.0.1:7420. The first start installs dependencies and builds the UI, which takes a minute.
+Open the link it prints, which lets your browser in (Bridge AI answers only browsers you let in, and its own programs; later, or in another browser, run `bridge-ai open`). The first start installs dependencies and builds the UI, which takes a minute.
 
 The first time you open it, Bridge AI looks at what's already on your computer: the agent CLIs you have and whether you're signed in to them (your Claude, ChatGPT or Gemini subscriptions keep working as they are), your name and your time zone. Setup is three short steps, any of them skipped or closed: how much Bridge AI sets up by itself, your AI (a plan you sign in to, with Install and Sign in right there, an API key, or a model on this computer) and your projects. It asks for no password or permission; your name, the weather and your phone keep their guessed defaults and live in Settings. If no agent is installed yet, it asks which AI you pay for and installs its agent in a terminal tab you can watch. New installs start on the **simple layout**: your chief of staff and your agents, with the Today panel behind one button and the Agents board once you have agents. Settings › General › Layout switches to **Everything**. Then a short tour points out the main parts of the app (the phone gets its own); take it again any time from Settings › About & Updates or `⌘K`.
 
 ```bash
-npm start -- dev     # hot reload: open :7421; UI edits appear live, server edits restart the API
+npm start -- dev     # hot reload: open :7421 (in a browser let in once); UI edits appear live, server edits restart the API
 npm run desktop:dev  # the desktop app with hot reload (runs next to the installed app)
 npm start -- phone   # also publish over Tailscale HTTPS for your phone
 npm run stop         # stop the server; agents keep running (npm run stop -- agents stops them too)
@@ -108,7 +108,8 @@ Run `npm link` once in the repo to get the `bridge-ai` command:
 bridge-ai list              # every agent and shell, numbered
 bridge-ai attach 2          # work in one from this terminal (or: bridge-ai attach "api tests"); Ctrl+] detaches
 bridge-ai attach            # pick from a list
-bridge-ai open              # open the app in your browser
+bridge-ai open              # open the app in your browser, let in by a one-time link (--print: just the link)
+bridge-ai mcp               # Bridge AI as an MCP server for another app (Settings › MCP Servers adds it)
 bridge-ai start / stop
 bridge-ai status            # is it running, which agents, the relay and paired phones
 bridge-ai relay setup       # your phone relay, with a Cloudflare API token (no browser needed)
@@ -324,7 +325,7 @@ You rarely need to edit the file by hand. **Settings** (the gear in the top bar,
 | Voice | The speech models this computer can run (Parakeet, Parakeet English, Whisper), which one voice notes and meetings use, and their downloads |
 | Meetings | Speech to text (this computer or a service), the language, names and terms, recording the call's sound, noticing calls and stopping when they end, the floating card, the model that writes notes, and where and how they're saved |
 | Mail | On a Mac: How You Write, for Reply Assist, and your working hours |
-| MCP Servers | The tools your agents can call, across all of them, with a catalog of 35 popular servers by category (web search, docs and notes, planning, Microsoft 365, deploy and monitoring, data, design) |
+| MCP Servers | The tools your agents can call, across all of them, with a catalog of 35 popular servers by category (web search, docs and notes, planning, Microsoft 365, deploy and monitoring, data, design); and Bridge AI as an MCP Server (a Beta Feature), so Claude Code, Claude Desktop, Cursor and Codex can read your whiteboards, files in your Places and meeting summaries, and suggest changes you keep in Needs You |
 | Devices | Your relay (sign in to Cloudflare or an API token) or Tailscale, pairing a phone, linking your other computers, and what you're notified about on which devices |
 | Appearance | Theme, color mode, text size, density, font, language |
 | Config File | Your `config.json`, editable, checked before it's saved, with the effective settings and defaults beside it |
