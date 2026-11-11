@@ -157,6 +157,7 @@ const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks|WebSocket|_relay|Load failed|Failed to fetch|NetworkError/.test(e))
 const said = []
+let heard = 0 // how many times a page asked for its words
 // Names under localhost, which WebKit on macOS 15 and before can't look up: none is ever asked for.
 const named = []
 const before = async (ctx) => {
@@ -168,7 +169,7 @@ const before = async (ctx) => {
       Object.defineProperty(MediaDevices.prototype, 'getUserMedia', { value: tone, configurable: true, writable: true })
     })
   }
-  await ctx.route('**/api/transcribe', (r) => r.fulfill({ json: { text: said.shift() ?? 'hello there' } }))
+  await ctx.route('**/api/transcribe', (r) => { heard++; return r.fulfill({ json: { text: said.shift() ?? 'hello there' } }) })
   await ctx.route('**/api/voice', (r) => r.fulfill({ json: { ready: true, model: true, missing: [] } }))
   // Studio's page with the desktop app's powers on it, as the preload gives them to it alone (only
   // what's tried below, and not saying it's the app, so the page carries on as in a browser).
@@ -341,6 +342,7 @@ try {
 
     // Dictation: a message from anything but that tab is ignored; one from it starts nothing unless
     // you're in it; and the tab still gets the words, and only the words.
+    // (Anything started at all: the pill, from the moment it opens the microphone.)
     const listening = () => p.locator('.dict-dock .rec-stop, .dict-dock .dp-ok').count()
     await p.evaluate(() => window.postMessage({ 'bridge-dictation': 'press', at: Date.now(), target: true }, '*'))
     await fr.evaluate(() => { const f = document.createElement('iframe'); f.srcdoc = '<script>top.postMessage({ "bridge-dictation": "press", at: Date.now(), target: true }, "*")<\/script>'; document.body.appendChild(f) })
@@ -356,11 +358,20 @@ try {
     await fr.evaluate(() => { window.__got = []; addEventListener('message', (e) => { if (e.data && typeof e.data === 'object') window.__got.push(e.data) }) })
     await deskBox.click()
     said.push('only the words')
-    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: 'down', at: Date.now() } })))
-    await until(listening, 6000, 50)
+    const heard0 = heard
+    // Where the key found the focus on Studio's page (Desk's tab: its frame), and whether it listened.
+    const focus = await p.evaluate(() => { const el = document.activeElement; window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: 'down', at: Date.now() } })); return `${el?.tagName}.${el?.className || ''}` })
+    // Held until it listens, as you would: its ✓ comes on once the microphone's sound does (a key let
+    // go before then was a tap, which listens on hands-free, and no words came).
+    const t0 = Date.now()
+    const listened = await until(() => p.locator('.dict-dock .rec-stop:enabled, .dict-dock .dp-ok:enabled').count(), 8000, 50) ? Date.now() - t0 : null
     await sleep(1300)
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-dictate-key', { detail: { type: 'up', at: Date.now() } })))
-    ok(!!(await until(async () => (await deskBox.inputValue()) === 'Only the words.', 8000)), 'the tab still works: the words go into Desk\'s box', await deskBox.inputValue())
+    const went = await until(async () => (await deskBox.inputValue()) === 'Only the words.', 8000)
+    // Not there: how far it got (listening at all, the words asked for, what Studio kept of them and
+    // what its bar said), so a failure says which side it was.
+    const how = went ? null : { box: await deskBox.inputValue().catch((e) => e.message), focus, listened, asked: heard - heard0, kept: (await studio.api('/dictations?limit=5').catch(() => ({}))).items?.find((x) => /only the words/i.test(x.text || '')) || null, bar: await p.locator('.dict-dock').innerText().catch(() => '') }
+    ok(!!went, 'the tab still works: the words go into Desk\'s box', how || undefined)
     const got = await fr.evaluate(() => window.__got)
     const KEYS = new Set(['bridge-dictation', 'id', 'text', 'at', 'listens', 'app', 'phase', 'mode'])
     ok(got.length > 0 && got.every((d) => Object.keys(d).every((k) => KEYS.has(k)) && Object.values(d).every((v) => v === null || ['string', 'number', 'boolean'].includes(typeof v))), 'and all Desk\'s page heard from Studio\'s was whether it listens, how that went, and the words', got)
