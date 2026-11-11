@@ -3,6 +3,7 @@ import Icon from './Icon.jsx'
 import AgentMark from './settings/agentMark.jsx'
 import { AllowKeychain, nameOf } from './AccountMenu.jsx'
 import { api, refetch, viaRelay } from '../api.js'
+import { t, tx } from '../i18n/index.js'
 import './addAccount.css'
 
 // Another sign-in for Claude Code or Codex (as many as you like, each named as you like), in one
@@ -15,7 +16,7 @@ export const addAccount = (kind, account) => window.dispatchEvent(new CustomEven
 const changed = (detail = {}) => { refetch('/quota'); window.dispatchEvent(new CustomEvent('bridge-accounts-changed', { detail })) }
 
 const NAMES = { claude: 'Claude', codex: 'Codex' }
-const SUGGEST = ['Work', 'Personal', 'Work backup', 'Personal backup']
+const SUGGEST = [tx('Work'), tx('Personal'), tx('Work backup'), tx('Personal backup')]
 const POLL = 2500
 const SLOW = 5 * 60000
 
@@ -47,10 +48,10 @@ const succeeded = (lines) => lines.slice(1).some((l) => /\b(successful|successfu
 function Steps({ step }) {
   const at = { name: 0, signin: 1, done: 2 }[step]
   return (
-    <ol className="aa-steps" aria-label="Steps">
-      {['Name it', 'Sign in', 'Start an agent'].map((s, i) => (
+    <ol className="aa-steps" aria-label={t('Steps')}>
+      {[tx('Name it'), tx('Sign in'), tx('Start an agent')].map((s, i) => (
         <li key={s} className={i < at ? 'did' : i === at ? 'now' : ''} aria-current={i === at ? 'step' : undefined}>
-          <span className="aa-num">{i < at ? <Icon name="check" size={11} /> : i + 1}</span><span className="aa-step-name">{s}</span>
+          <span className="aa-num">{i < at ? <Icon name="check" size={11} /> : i + 1}</span><span className="aa-step-name">{t(s)}</span>
         </li>
       ))}
     </ol>
@@ -139,9 +140,9 @@ export default function AddAccount({ initial = {}, onClose, onStart, onOpenAgent
         const l = tailOf(scr.ansi, scr.cols)
         setLines(l)
         const bad = failure(l)
-        if (bad) setProblem(`The sign-in stopped: ${bad.trim()}`)
+        if (bad) setProblem(t('The sign-in stopped: {why}', { why: bad.trim() }))
       } catch {
-        if (!stop) setProblem(`The sign-in tab closed before ${acct.label} signed in.`)
+        if (!stop) setProblem(t('The sign-in tab closed before {name} signed in.', { name: acct.label }))
         return
       }
       if (Date.now() - login.at > SLOW) setSlow(true)
@@ -178,7 +179,7 @@ export default function AddAccount({ initial = {}, onClose, onStart, onOpenAgent
     onClose()
   }
   const dismiss = () => {
-    if (step === 'signin' && made && !window.confirm(`Stop signing in? ${acct?.label} isn't signed in yet, so it's removed.`)) return
+    if (step === 'signin' && made && !window.confirm(t('Stop signing in? {name} isn\'t signed in yet, so it\'s removed.', { name: acct?.label }))) return
     cancel()
   }
   // Only this dialog: not New agent or Settings under it.
@@ -196,20 +197,20 @@ export default function AddAccount({ initial = {}, onClose, onStart, onOpenAgent
       <div className="modal add-acct" role="dialog" aria-modal="true" aria-labelledby="aa-title">
         <header className="modal-head">
           <Icon name="users" size={16} />
-          <h3 id="aa-title">{given ? `Sign in to ${given.label}` : step === 'name' ? 'Add another account' : `Add ${name}`}</h3>
-          <button type="button" className="win-btn" onClick={dismiss} aria-label="Close"><Icon name="x" size={14} /></button>
+          <h3 id="aa-title">{given ? t('Sign in to {name}', { name: given.label }) : step === 'name' ? t('Add another account') : t('Add {name}', { name })}</h3>
+          <button type="button" className="win-btn" onClick={dismiss} aria-label={t('Close')}><Icon name="x" size={14} /></button>
         </header>
         {!given && <Steps step={step} />}
 
         {step === 'name' && (
           <form className="aa-body" onSubmit={create}>
-            <p className="aa-lead">Add as many {agentName} accounts as you like and name each one: Work main, Work backup, Personal. Each agent you start runs on one of them, with its own sign-in and plan. Settings, skills and history stay shared.</p>
+            <p className="aa-lead">{t('Add as many {agent} accounts as you like and name each one: Work main, Work backup, Personal. Each agent you start runs on one of them, with its own sign-in and plan. Settings, skills and history stay shared.', { agent: agentName })}</p>
             {loadErr && <p className="error-text">{loadErr}</p>}
-            {groups && !kinds.length && <p className="na-warn">Install Claude Code or Codex first (Settings › Agents).</p>}
+            {groups && !kinds.length && <p className="na-warn">{t('Install Claude Code or Codex first (Settings › Agents).')}</p>}
             {kinds.length > 1 && (
               <div className="na-field">
-                <span className="na-label">Agent</span>
-                <div className="na-kinds" role="radiogroup" aria-label="Agent">
+                <span className="na-label">{t('Agent')}</span>
+                <div className="na-kinds" role="radiogroup" aria-label={t('Agent')}>
                   {kinds.map((g) => (
                     <button type="button" key={g.kind} role="radio" aria-checked={kind === g.kind} className={`na-kind ${kind === g.kind ? 'on' : ''}`} onClick={() => setKind(g.kind)}>
                       <AgentMark kind={g.kind} label={g.label} size={20} />{g.label}
@@ -219,17 +220,17 @@ export default function AddAccount({ initial = {}, onClose, onStart, onOpenAgent
               </div>
             )}
             <label className="na-field">
-              <span className="na-label">Name</span>
-              <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Work backup, Personal…" maxLength={40} autoFocus autoComplete="off" spellCheck="false" />
+              <span className="na-label">{t('Name')}</span>
+              <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('Work backup, Personal…')} maxLength={40} autoFocus autoComplete="off" spellCheck="false" />
             </label>
             <div className="aa-suggest">
-              {SUGGEST.filter((s) => !taken.has(s.toLowerCase())).slice(0, 3).map((s) => <button type="button" key={s} className="fchip" onClick={() => setLabel(s)}>{s}</button>)}
-              {group && <span className="muted small">You have: {group.accounts.map((a) => (a.isDefault && a.named !== false ? `${a.label} (your usual login)` : nameOf(a))).join(', ')}. Rename any of them in Settings › Model Providers.</span>}
+              {SUGGEST.map((s) => t(s)).filter((s) => !taken.has(s.toLowerCase())).slice(0, 3).map((s) => <button type="button" key={s} className="fchip" onClick={() => setLabel(s)}>{s}</button>)}
+              {group && <span className="muted small">{t('You have: {accounts}. Rename any of them in Settings › Model Providers.', { accounts: group.accounts.map((a) => (a.isDefault && a.named !== false ? t('{name} (your usual login)', { name: a.label }) : nameOf(a))).join(', ') })}</span>}
             </div>
             {err && <p className="error-text" role="alert">{err}</p>}
             <footer className="modal-foot">
-              <button type="button" className="btn" onClick={dismiss}>Cancel</button>
-              <button type="submit" className="btn primary" disabled={!label.trim() || busy || (groups && !kinds.length)}>{busy ? 'Adding…' : 'Add and sign in'}</button>
+              <button type="button" className="btn" onClick={dismiss}>{t('Cancel')}</button>
+              <button type="submit" className="btn primary" disabled={!label.trim() || busy || (groups && !kinds.length)}>{busy ? t('Adding…') : t('Add and sign in')}</button>
             </footer>
           </form>
         )}
@@ -239,20 +240,20 @@ export default function AddAccount({ initial = {}, onClose, onStart, onOpenAgent
             <div className={`aa-state ${problem ? 'bad' : ''}`} role="status" aria-live="polite">
               {problem ? <Icon name="alert" size={15} /> : <span className="aa-spin" aria-hidden="true" />}
               <div>
-                <b>{problem ? 'Not signed in' : login ? `Waiting for ${name} to sign in…` : 'Opening the sign-in…'}</b>
+                <b>{problem ? t('Not signed in') : login ? t('Waiting for {name} to sign in…', { name }) : t('Opening the sign-in…')}</b>
                 <span>{problem || (viaRelay
-                  ? `${agentName}'s sign-in page opens on your computer, or open it here with the button below. Sign in with your ${name} account.`
-                  : `Your browser opens ${agentName}'s sign-in page. Sign in there with your ${name} account: switch accounts in the browser first, or open the link in a private window.`)}</span>
-                {slow && !problem && <span className="na-warn">Still waiting. If the sign-in page is gone, try again.</span>}
+                  ? t('{agent}\'s sign-in page opens on your computer, or open it here with the button below. Sign in with your {name} account.', { agent: agentName, name })
+                  : t('Your browser opens {agent}\'s sign-in page. Sign in there with your {name} account: switch accounts in the browser first, or open the link in a private window.', { agent: agentName, name }))}</span>
+                {slow && !problem && <span className="na-warn">{t('Still waiting. If the sign-in page is gone, try again.')}</span>}
               </div>
             </div>
-            {link && !problem && <a className="btn small aa-link" href={link} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> Open the sign-in page</a>}
+            {link && !problem && <a className="btn small aa-link" href={link} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {t('Open the sign-in page')}</a>}
             {login && (
               <div className="aa-term">
-                <div className="aa-term-head"><Icon name="terminal" size={12} /><span>Sign in: {agentName} ({name})</span></div>
-                <pre ref={termRef} aria-label="The sign-in, as it goes">{lines.length ? lines.join('\n') : '…'}</pre>
+                <div className="aa-term-head"><Icon name="terminal" size={12} /><span>{t('Sign in: {agent} ({name})', { agent: agentName, name })}</span></div>
+                <pre ref={termRef} aria-label={t('The sign-in, as it goes')}>{lines.length ? lines.join('\n') : '…'}</pre>
                 <form className="aa-type" onSubmit={(e) => { e.preventDefault(); if (typed) send([{ text: typed }, { keys: ['enter'] }]); else send([{ keys: ['enter'] }]); setTyped('') }}>
-                  <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="If it asks, type or paste here (a code, say)" aria-label="Type into the sign-in" autoComplete="off" spellCheck="false" />
+                  <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={t('If it asks, type or paste here (a code, say)')} aria-label={t('Type into the sign-in')} autoComplete="off" spellCheck="false" />
                   <button type="button" className="ghost-btn" onClick={() => send([{ keys: ['up'] }])} aria-label="Up">↑</button>
                   <button type="button" className="ghost-btn" onClick={() => send([{ keys: ['down'] }])} aria-label="Down">↓</button>
                   <button type="submit" className="btn small">Enter</button>
@@ -260,9 +261,9 @@ export default function AddAccount({ initial = {}, onClose, onStart, onOpenAgent
               </div>
             )}
             <footer className="modal-foot">
-              {login && <button type="button" className="link-btn small aa-open" onClick={openTab}>Open in a tab</button>}
-              <button type="button" className="btn" onClick={cancel} title={made ? `Stops signing in and removes ${name}` : 'Stops signing in'}>Cancel</button>
-              {problem && <button type="button" className="btn primary" onClick={() => startLogin()}><Icon name="refresh" size={12} /> Try again</button>}
+              {login && <button type="button" className="link-btn small aa-open" onClick={openTab}>{t('Open in a tab')}</button>}
+              <button type="button" className="btn" onClick={cancel} title={made ? t('Stops signing in and removes {name}', { name }) : t('Stops signing in')}>{t('Cancel')}</button>
+              {problem && <button type="button" className="btn primary" onClick={() => startLogin()}><Icon name="refresh" size={12} /> {t('Try again')}</button>}
             </footer>
           </div>
         )}
@@ -272,14 +273,14 @@ export default function AddAccount({ initial = {}, onClose, onStart, onOpenAgent
             <div className="aa-state good" role="status">
               <Icon name="check" size={15} />
               <div>
-                <b>Signed in as {name}{plan && <span className="plan-tag">{plan}</span>}</b>
-                <span>New {agentName} agents can start on {name} or your other {agentName} accounts, at the same time. Pick one in New agent, or switch from the usage chip in the top bar.</span>
+                <b>{t('Signed in as {name}', { name })}{plan && <span className="plan-tag">{plan}</span>}</b>
+                <span>{t('New {agent} agents can start on {name} or your other {agent} accounts, at the same time. Pick one in New agent, or switch from the usage chip in the top bar.', { agent: agentName, name })}</span>
               </div>
             </div>
             {allow && <AllowKeychain id={acct.id} onDone={() => setAllow(false)} />}
             <footer className="modal-foot">
-              <button type="button" className="btn" onClick={onClose}>Done</button>
-              <button type="button" className="btn primary" onClick={() => onStart?.(acct.kind, acct.id)} autoFocus><Icon name="plus" size={12} /> Start an agent on {name}</button>
+              <button type="button" className="btn" onClick={onClose}>{t('Done')}</button>
+              <button type="button" className="btn primary" onClick={() => onStart?.(acct.kind, acct.id)} autoFocus><Icon name="plus" size={12} /> {t('Start an agent on {name}', { name })}</button>
             </footer>
           </div>
         )}

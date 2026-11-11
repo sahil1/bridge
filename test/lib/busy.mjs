@@ -26,6 +26,8 @@ export async function busyKit(name) {
     return { ...a, sessionId: x?.sessionId, began: Date.now() }
   }
   const working = (ag) => until(async () => (await agentOf(ag.paneId))?.status === 'working', 20000, 200)
+  // A turn of "hold" ends: the test has seen what it wanted to while the agent works.
+  const release = (ag) => fs.writeFileSync(path.join(kit.home, `claude-go-${ag.sessionId}`), '')
   // Done with its first message (`secs` long).
   const settled = async (ag, secs) => {
     await sleep(Math.max(0, ag.began + secs * 1000 - Date.now()))
@@ -45,7 +47,7 @@ export async function busyKit(name) {
     await sleep(1000)
     return got(ag.sessionId)
   }
-  return { kit, b, tag: which === 'webkit' ? 'webkit-' : '', got, agentOf, queueOf, launch, working, settled, phone, wentIn }
+  return { kit, b, tag: which === 'webkit' ? 'webkit-' : '', got, agentOf, queueOf, launch, working, release, settled, phone, wentIn }
 }
 
 export const openChat = async (p, paneId) => {

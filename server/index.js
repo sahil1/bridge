@@ -2487,7 +2487,7 @@ const notByMachine = (req) => { if (viaMachine(req)) throw Object.assign(new Err
 // newDevices: phones and computers paired with Pair a device's code and not kept yet, said in the
 // app with Keep and Remove (Machines.jsx).
 const newDevices = () => relay.status().devices.filter((d) => d.fresh).map(({ id, name, kind, relay: at, addedAt }) => ({ id, name, kind, relay: at, addedAt, machine: kind === 'computer' ? machines.list().find((m) => m.relay === at)?.id || null : null }))
-app.get('/api/machines', wrap(async (req) => ({ here: { ...machines.here(), about: { ...(await machines.about()), runtime: rt.name } }, machines: machines.list().map((m) => ({ ...m, port: pages.portFor(req, m.id) })), machinePage: req.machinePage || null, strays: machines.strays(), asks: relay.status().asks, newDevices: newDevices(), canBeLinked: !!relay.relayUrl(), hostedAvailable: relay.status().hostedAvailable })))
+app.get('/api/machines', wrap(async (req) => ({ here: { ...machines.here(), about: { ...(await machines.about()), runtime: rt.name } }, machines: await Promise.all(machines.list().map(async (m) => ({ ...m, port: await pages.portFor(req, m.id) }))), machinePage: req.machinePage || null, strays: machines.strays(), asks: relay.status().asks, newDevices: newDevices(), canBeLinked: !!relay.relayUrl(), hostedAvailable: relay.status().hostedAvailable })))
 // This device's name, as your devices and phones show it: set here, or from one of your other
 // devices (through its link). '' goes back to the computer's own name.
 relay.useName(() => cfg.deviceName)

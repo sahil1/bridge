@@ -7,7 +7,7 @@
 // to carry on.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, solid, TEST } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('chat-account')
 const kit = await startKit('chat-account')
@@ -77,6 +77,10 @@ try {
   const openIdle = async (label, prompt) => {
     const l = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label, newSpace: label, prompt })
     const a = await until(() => agentOf((x) => x.paneId === l.paneId && x.sessionId && x.status !== 'working' && x.status !== 'unknown'), 60000, 1000)
+    // And its whole log written, the limit last: the stand-in draws its screen first, so it looked
+    // done while what it has running wasn't in its log yet, and the tray under the chat, read then,
+    // only looked again 15 seconds later (Claude Code writes its log as it works).
+    await until(async () => !!(await kit.api(`/agents/${encodeURIComponent(l.paneId)}/transcript`).catch(() => null))?.limit, 30000, 500)
     await p.locator('.tab-main', { hasText: label }).first().click({ timeout: 20000 })
     return a
   }
@@ -96,7 +100,11 @@ try {
   // buttons, rather than out of sight until the chat jumps to them.
   const atEnd = () => p.evaluate(() => { const c = document.querySelector('.chat-limit')?.closest('.chat'); return !!c && c.scrollHeight - c.scrollTop - c.clientHeight < 2 })
   // (As it's drawn: the chat is put back at its end when it's laid out, the frame after the tray.)
-  ok(!!(await p.locator('.sa-tray').first().waitFor({ timeout: 15000 }).then(() => true, () => false)) && !!(await until(atEnd, 3000)), 'what it has running opens under the chat, and the chat keeps its end in view, the card with its buttons')
+  const trayUp = await p.locator('.sa-tray').first().waitFor({ timeout: 15000 }).then(() => true, () => false)
+  const ended = trayUp && await until(atEnd, 3000)
+  // (If not: whether the tray came, and where the chat was.)
+  const scroll = () => p.evaluate(() => { const c = document.querySelector('.chat-limit')?.closest('.chat'); return c && { scrollHeight: c.scrollHeight, scrollTop: c.scrollTop, clientHeight: c.clientHeight } })
+  ok(trayUp && !!ended, 'what it has running opens under the chat, and the chat keeps its end in view, the card with its buttons', ended ? undefined : { trayUp, chat: await scroll() })
   await card.locator('button', { hasText: 'Continue now on Work' }).click()
   const onWork = await until(() => agentOf((a) => a.sessionId === weekly.sessionId && a.paneId !== weekly.paneId && a.accountId === work.id), 30000, 500)
   ok(!!onWork, 'Continue now: the conversation goes on on Work', ((await kit.api('/fleet')).agents || []).map((a) => ({ pane: a.paneId, session: a.sessionId, account: a.accountId })))
@@ -126,12 +134,14 @@ try {
 
   // Your usual login taken off the list while an agent is still on it: the agent goes by the
   // account it's signed in as when that's one you listed (Work here), else by its email, never
-  // "Your usual login". The quota feed's answer is laid over, as plan usage reads real accounts.
+  // "Your usual login". The quota feed's answer is laid over, as plan usage reads real accounts
+  // (with no service worker: in WebKit what a page asks for once one has it skips the test's route).
   {
     const usualOn = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Usual', newSpace: 'Usual', prompt: 'idle', account: 'claude-default' })
     await until(() => agentOf((a) => a.paneId === usualOn.paneId && a.sessionId && a.status !== 'working' && a.status !== 'unknown'), 60000, 1000)
     const chipFor = async (same) => {
       const { ctx: c2, p: p2 } = await page(b, kit.url, { before: async (c) => {
+        await noServiceWorker(c)
         await c.route(/\/api\/quota(\?|$)/, async (route) => {
           const r = await route.fetch()
           const j = await r.json()

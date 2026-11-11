@@ -27,7 +27,7 @@ import PermissionFix, { InstallFix, protectedFolder } from './PermissionFix.jsx'
 import { OfficeView, Menu, menuItems, NameDialog, fileOp, onComputer } from './FileExtras.jsx'
 import { MediaView, PictureView, OtherFile, useSave, canSave, saveLabel } from './FileMedia.jsx'
 import { SendDialog, UploadSheet, TransferStrip, PlacesMenu, usePlaces, canCopyHere, copyHereLabel, canAddPlace, canDrag, dragData, dropOk, onDrop } from './Transfers.jsx'
-import { locale, t } from '../i18n/index.js'
+import { locale, t, tn, tx } from '../i18n/index.js'
 import { FileDrawing } from '../lazy.jsx'
 import { isDiagramFile, addMermaidButtons, whiteboards as studioHere } from './whiteboard/links.js'
 import { useTrial } from '../trials.js'
@@ -102,7 +102,7 @@ function QuickOpen({ pane, onPick, onClose }) {
   }
   return (
     <div className="quick-open" onKeyDown={onKey}>
-      <div className="qo-input"><Icon name="search" size={14} /><input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Go to file…" aria-label="Go to file" /></div>
+      <div className="qo-input"><Icon name="search" size={14} /><input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Go to file…')} aria-label={t('Go to file')} /></div>
       {res.length > 0 && (
         <ul className="qo-list" role="listbox">
           {res.map((f, k) => (
@@ -114,7 +114,7 @@ function QuickOpen({ pane, onPick, onClose }) {
           ))}
         </ul>
       )}
-      {q && !res.length && <p className="qo-empty">No matching files</p>}
+      {q && !res.length && <p className="qo-empty">{t('No matching files')}</p>}
     </div>
   )
 }
@@ -231,7 +231,7 @@ function Editor({ value, onChange, onSave }) {
       requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = a + 2 })
     }
   }
-  return <textarea className="file-editor" value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={onKey} spellCheck={false} autoFocus aria-label="File text" />
+  return <textarea className="file-editor" value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={onKey} spellCheck={false} autoFocus aria-label={t('File text')} />
 }
 
 function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere }) {
@@ -273,8 +273,8 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
   // point to the running app, or to starting it, in the Preview tab.
   const devInfo = usePoll(isHtml && /^index\.html?$/i.test(f?.name || '') ? `/agents/${enc(pane)}/servers` : null, 15000).data
   const devHint = devInfo && (devInfo.servers?.length
-    ? { text: `Your app is running on port ${devInfo.servers[0].port}${devInfo.servers.length > 1 ? ` (and ${devInfo.servers.length - 1} more)` : ''}. This file alone may show a blank page.`, act: 'Show the app' }
-    : devInfo.commands?.some((c) => c.label !== 'Serve this folder') ? { text: 'If this page comes out blank, it probably needs the project\'s dev server.', act: 'Start it in Preview' } : null)
+    ? { text: devInfo.servers.length > 1 ? t('Your app is running on port {port} (and {n} more). This file alone may show a blank page.', { port: devInfo.servers[0].port, n: devInfo.servers.length - 1 }) : t('Your app is running on port {port}. This file alone may show a blank page.', { port: devInfo.servers[0].port }), act: t('Show the app') }
+    : devInfo.commands?.some((c) => c.label !== 'Serve this folder') ? { text: t('If this page comes out blank, it probably needs the project\'s dev server.'), act: t('Start it in Preview') } : null)
 
   const save = useCallback(async (force = false) => {
     if (!f || draft == null) return
@@ -284,7 +284,7 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
       const data = await res.json().catch(() => ({}))
       if (res.status === 409) { setSaveMsg({ conflict: true, text: data.error }); return }
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-      setState({ f: data }); setDraft(null); setSaveMsg({ ok: true, text: 'Saved' }); setFrameKey((k) => k + 1)
+      setState({ f: data }); setDraft(null); setSaveMsg({ ok: true, text: t('Saved') }); setFrameKey((k) => k + 1)
       setTimeout(() => setSaveMsg((m) => (m?.ok ? null : m)), 1500)
     } catch (e) { setSaveMsg({ text: e.message }) } finally { setSaving(false) }
   }, [f, draft, pane, filePath, setDraft])
@@ -312,14 +312,14 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
   return (
     <div className="viewer" ref={boxRef}>
       <div className="viewer-head">
-        {onBack && <button className="win-btn narrow-back" onClick={onBack} aria-label="Back to files"><Icon name="chevron" size={15} className="flip" /></button>}
+        {onBack && <button className="win-btn narrow-back" onClick={onBack} aria-label={t('Back to files')}><Icon name="chevron" size={15} className="flip" /></button>}
         <div className="crumbs">
           {crumbs.map((c, i) => (
             <span key={i} className="crumb">
               {i > 0 && <Icon name="chevron" size={10} />}
               {i < crumbs.length - 1
                 ? <button onClick={() => onOpenPath(crumbs.slice(0, i + 1).join('/'), true)}>{c}</button>
-                : <b>{c}{dirty && <span className="dirty-dot" title="Unsaved changes" aria-label="Unsaved changes" />}</b>}
+                : <b>{c}{dirty && <span className="dirty-dot" title={t('Unsaved changes')} aria-label={t('Unsaved changes')} />}</b>}
             </span>
           ))}
         </div>
@@ -329,36 +329,36 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
           {canEdit && (
             <div className="seg small-seg">
               {isDrawing && <button className={shown === 'drawing' ? 'on' : ''} onClick={() => pick('drawing')}>{t('Drawing')}</button>}
-              {(isMd || isHtml) && <button className={shown === 'preview' ? 'on' : ''} onClick={() => pick('preview')}>Preview</button>}
-              <button className={shown === 'source' ? 'on' : ''} onClick={() => pick('source')}>{isMd || isHtml || isDrawing ? 'Source' : 'View'}</button>
-              <button className={shown === 'edit' ? 'on' : ''} onClick={() => pick('edit')}>Edit</button>
+              {(isMd || isHtml) && <button className={shown === 'preview' ? 'on' : ''} onClick={() => pick('preview')}>{t('Preview')}</button>}
+              <button className={shown === 'source' ? 'on' : ''} onClick={() => pick('source')}>{isMd || isHtml || isDrawing ? t('Source') : t('View')}</button>
+              <button className={shown === 'edit' ? 'on' : ''} onClick={() => pick('edit')}>{t('Edit')}</button>
             </div>
           )}
           {!canEdit && isDrawing && (
             <div className="seg small-seg">
               <button className={shown === 'drawing' ? 'on' : ''} onClick={() => setDrawMode('drawing')}>{t('Drawing')}</button>
-              <button className={shown === 'source' ? 'on' : ''} onClick={() => setDrawMode('source')}>Source</button>
+              <button className={shown === 'source' ? 'on' : ''} onClick={() => setDrawMode('source')}>{t('Source')}</button>
             </div>
           )}
           {!canEdit && (isMd || isHtml) && (
             <div className="seg small-seg">
-              <button className={shown === 'preview' ? 'on' : ''} onClick={() => setMode('preview')}>Preview</button>
-              <button className={shown === 'source' ? 'on' : ''} onClick={() => setMode('source')}>Source</button>
+              <button className={shown === 'preview' ? 'on' : ''} onClick={() => setMode('preview')}>{t('Preview')}</button>
+              <button className={shown === 'source' ? 'on' : ''} onClick={() => setMode('source')}>{t('Source')}</button>
             </div>
           )}
           {(editing || dirty) && <>
-            <button className="btn small" onClick={discard} disabled={saving || !dirty} title="Throw away your changes">Revert</button>
-            <button className="btn small primary" onClick={() => save()} disabled={saving || !dirty} title="Save (⌘S)">{saving ? 'Saving…' : 'Save'}</button>
+            <button className="btn small" onClick={discard} disabled={saving || !dirty} title={t('Throw away your changes')}>{t('Revert')}</button>
+            <button className="btn small primary" onClick={() => save()} disabled={saving || !dirty} title={t('Save (⌘S)')}>{saving ? t('Saving…') : t('Save')}</button>
           </>}
-          <CopyButton text={filePath} label={null} title="Copy path" className="win-btn" size={13} />
-          {!dirty && <button className="win-btn" title="Reload" aria-label="Reload" onClick={() => { load(); setFrameKey((k) => k + 1) }}><Icon name="refresh" size={13} /></button>}
+          <CopyButton text={filePath} label={null} title={t('Copy path')} className="win-btn" size={13} />
+          {!dirty && <button className="win-btn" title={t('Reload')} aria-label={t('Reload')} onClick={() => { load(); setFrameKey((k) => k + 1) }}><Icon name="refresh" size={13} /></button>}
           {f && !['binary', 'video', 'audio'].includes(f.kind) && canSave && <SaveButton f={f} src={raw} />}
           {(f?.kind === 'image' || f?.kind === 'pdf' || f?.kind === 'video' || f?.kind === 'audio' || isHtml) && <a className="win-btn" href={isHtml ? site : raw} target="_blank" rel="noreferrer" title={newTabLabel()} aria-label={newTabLabel()}><Icon name="external" size={13} /></a>}
           {f && onCopyHere && <button className="ghost-btn small copy-here" onClick={() => onCopyHere({ path: filePath, name: f.name, dir: false, size: f.size })} title={copyHereLabel()} aria-label={copyHereLabel()}><Icon name="download" size={12} /><span>{copyHereLabel()}</span></button>}
           {/* Studio edits Word, Excel, PowerPoint, Markdown, CSV, HTML and PDF files, with versions and Ask an agent. */}
           {f && studioHere && studio && STUDIO_OPENS.test(filePath) && <button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root: pane, path: filePath } }))} title={t('Edit it in Studio, with every version kept and your agents to change it')}><Icon name="layers" size={12} /> {t('Open in Studio')}</button>}
-          {f?.kind === 'office' && onComputer && <button className="btn small" onClick={() => fileOp(pane, 'open', filePath).catch((e) => setSaveMsg({ text: e.message }))} title="Open it in the app that usually opens it"><Icon name="external" size={12} /> Open in app</button>}
-          {onMenu && <button className="win-btn" title="More" aria-label="More actions for this file" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onMenu({ path: filePath, name: crumbs.at(-1), dir: false }, { clientX: r.right - 200, clientY: r.bottom + 4 }) }}><Icon name="more" size={14} /></button>}
+          {f?.kind === 'office' && onComputer && <button className="btn small" onClick={() => fileOp(pane, 'open', filePath).catch((e) => setSaveMsg({ text: e.message }))} title={t('Open it in the app that usually opens it')}><Icon name="external" size={12} /> {t('Open in app')}</button>}
+          {onMenu && <button className="win-btn" title={t('More')} aria-label={t('More actions for this file')} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onMenu({ path: filePath, name: crumbs.at(-1), dir: false }, { clientX: r.right - 200, clientY: r.bottom + 4 }) }}><Icon name="more" size={14} /></button>}
         </div>
       </div>
       {devHint && shown === 'preview' && (
@@ -369,9 +369,9 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
       )}
       {saveMsg?.conflict && (
         <div className="save-conflict" role="alert">
-          <Icon name="alert" size={13} /><span>{saveMsg.text}, probably by an agent.</span>
-          <button className="btn small" onClick={discard}>Discard mine, load theirs</button>
-          <button className="btn small" onClick={() => save(true)}>Overwrite with mine</button>
+          <Icon name="alert" size={13} /><span>{t('{what}, probably by an agent.', { what: saveMsg.text })}</span>
+          <button className="btn small" onClick={discard}>{t('Discard mine, load theirs')}</button>
+          <button className="btn small" onClick={() => save(true)}>{t('Overwrite with mine')}</button>
         </div>
       )}
       <div className={`viewer-body ${editing ? 'editing' : ''} ${split ? 'split' : ''} ${shown === 'drawing' ? 'drawing' : ''}`}>
@@ -390,7 +390,7 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
           : shown === 'preview' && isHtml
           ? <HtmlView pane={pane} filePath={f.path} text={dirty ? draft : undefined} reload={frameKey} />
           : <Code text={text} ext={f.ext.slice(1) || f.name.toLowerCase()} />)}
-        {f?.truncated && shown !== 'drawing' && <p className="muted small pad">Showing the first 1 MB, so this file can't be edited here.</p>}
+        {f?.truncated && shown !== 'drawing' && <p className="muted small pad">{t('Showing the first 1 MB, so this file can\'t be edited here.')}</p>}
         {f?.kind === 'image' && <PictureView f={f} src={raw} />}
         {f?.kind === 'pdf' && <iframe className="pdf-view" src={raw} title={f.name} />}
         {(f?.kind === 'video' || f?.kind === 'audio') && <MediaView f={f} src={raw} />}
@@ -540,7 +540,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
         return say(await copyText(text) ? t('Path copied') : t('Couldn\'t copy it here: {path}', { path: text }))
       }
       if (op === 'newFile' || op === 'newFolder') {
-        return setDialog({ title: `New ${op === 'newFile' ? 'file' : 'folder'} in ${e.path || rootName}`, action: 'Create', initial: '', submit: async (name) => {
+        return setDialog({ title: op === 'newFile' ? t('New file in {folder}', { folder: e.path || rootName }) : t('New folder in {folder}', { folder: e.path || rootName }), action: t('Create'), initial: '', submit: async (name) => {
           const r = await fileOp(pane, op, e.path, name)
           if (e.path) setExpanded((x) => new Set(x).add(e.path))
           refresh()
@@ -548,13 +548,13 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
         } })
       }
       if (op === 'rename') {
-        return setDialog({ title: `Rename ${e.name}`, action: 'Rename', initial: e.name, submit: async (name) => { const r = await fileOp(pane, 'rename', e.path, name); moved(e.path, r.path); refresh() } })
+        return setDialog({ title: t('Rename {name}', { name: e.name }), action: t('Rename'), initial: e.name, submit: async (name) => { const r = await fileOp(pane, 'rename', e.path, name); moved(e.path, r.path); refresh() } })
       }
       if (op === 'trash') {
-        if (!window.confirm(`Move ${e.name} to the Trash?${e.dir ? ' Everything in the folder goes with it.' : ''}`)) return
+        if (!window.confirm(e.dir ? t('Move {name} to the Trash? Everything in the folder goes with it.', { name: e.name }) : t('Move {name} to the Trash?', { name: e.name }))) return
         await fileOp(pane, 'trash', e.path)
         moved(e.path, null); refresh()
-        return say(`${e.name} moved to the Trash`)
+        return say(t('{name} moved to the Trash', { name: e.name }))
       }
       if (op === 'send' || op === 'copyHere') return setSend({ src: { pane, path: e.path, name: e.path ? e.name : rootName, dir: !!e.dir, size: e.size ?? null }, here: op === 'copyHere' })
       if (op === 'upload') { pickFor.current = e.path; pickRef.current?.click(); return }
@@ -562,7 +562,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
         const r = await fileOp(pane, 'duplicate', e.path)
         refresh()
         if (!e.dir) open(r.path)
-        return say(`Made ${r.path.split('/').pop()}`)
+        return say(t('Made {name}', { name: r.path.split('/').pop() }))
       }
       await fileOp(pane, op, e.path) // reveal, open
     } catch (x) { if (x.code === 'automation') setAutomation(true); else say(x.message) }
@@ -597,17 +597,17 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
           {places.length > 0 || canAddPlace
             ? <button className="tree-root tree-root-pick" title={cwd} aria-haspopup="menu" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setPlacesAt({ x: r.left, y: r.bottom + 4 }) }}><Icon name={place ? 'pin' : 'folder'} size={13} /> <span>{rootName}</span><Icon name="chevron" size={10} className="rot90" /></button>
             : <span className="tree-root" title={cwd}><Icon name="folder" size={13} /> {rootName}</span>}
-          <button className="win-btn" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onMenu({ path: '', name: rootName, dir: true }, { clientX: r.left, clientY: r.bottom + 4 }) }} title="New file or folder" aria-label="New file or folder"><Icon name="plus" size={13} /></button>
+          <button className="win-btn" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onMenu({ path: '', name: rootName, dir: true }, { clientX: r.left, clientY: r.bottom + 4 }) }} title={t('New file or folder')} aria-label={t('New file or folder')}><Icon name="plus" size={13} /></button>
           <button className="win-btn" onClick={() => { pickFor.current = ''; pickRef.current?.click() }} title={t('Send files from this device')} aria-label={t('Send files from this device')}><Icon name="upload" size={13} /></button>
           <input ref={pickRef} type="file" multiple hidden onChange={(e) => { const l = [...(e.target.files || [])]; e.target.value = ''; if (l.length) setPicked({ list: l, dir: pickFor.current }) }} data-testid="send-files" />
-          <button className="win-btn" onClick={() => setQuick(true)} title="Go to file (⌘P)" aria-label="Go to file"><Icon name="search" size={13} /></button>
-          <button className={`win-btn ${showHidden ? 'on' : ''}`} onClick={() => setShowHidden(!showHidden)} title={showHidden ? 'Hide dotfiles' : 'Show dotfiles'} aria-label="Toggle hidden files"><Icon name={showHidden ? 'eye' : 'eye-off'} size={13} /></button>
+          <button className="win-btn" onClick={() => setQuick(true)} title={t('Go to file (⌘P)')} aria-label={t('Go to file')}><Icon name="search" size={13} /></button>
+          <button className={`win-btn ${showHidden ? 'on' : ''}`} onClick={() => setShowHidden(!showHidden)} title={showHidden ? t('Hide dotfiles') : t('Show dotfiles')} aria-label={t('Toggle hidden files')}><Icon name={showHidden ? 'eye' : 'eye-off'} size={13} /></button>
           <button className="win-btn" onClick={() => setExpanded(new Set())} disabled={!anyOpen} title={anyOpen ? t('Collapse all') : t('Collapse all: no folder is open')} aria-label={t('Collapse all')}><Icon name="collapse-all" size={13} /></button>
           {assistOn && <AiAssist className="win-btn" compact on={assist != null} items={() => [{ label: t('Look over this folder'), hint: t('Duplicates, big and forgotten files, a tidier layout'), on: assist != null, run: () => setAssist(assist != null ? null : '') }]} />}
         </div>
         <div className={`tree-scroll ${dropAt ? 'drop-on' : ''}`} onContextMenu={(e) => { e.preventDefault(); onMenu({ path: '', name: rootName, dir: true }, e) }} {...rootDrops}>
           {root.error && root.errorCode === 'EPERM' && protectedFolder(cwd)
-            ? <div className="pad"><PermissionFix pane="files" folder={protectedFolder(cwd)} onCheck={() => root.refresh()}><p>This project is in your {protectedFolder(cwd)} folder, and macOS hasn't let Bridge AI in yet.</p></PermissionFix></div>
+            ? <div className="pad"><PermissionFix pane="files" folder={protectedFolder(cwd)} onCheck={() => root.refresh()}><p>{t('This project is in your {folder} folder, and macOS hasn\'t let Bridge AI in yet.', { folder: protectedFolder(cwd) })}</p></PermissionFix></div>
             : root.error && <p className="error-text pad">{root.error}</p>}
           {(root.data?.entries || []).map((e) => (
             <TreeNode key={e.path} pane={pane} entry={e} depth={0} selected={selected} onOpen={open} expanded={expanded} toggle={toggle} showHidden={showHidden} ver={ver} onMenu={onMenu} onDropIn={onDropIn} />
@@ -615,9 +615,9 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
         </div>
         <TransferStrip />
         {toast && <div className="tree-toast" role="status">{toast}</div>}
-        {automation && <div className="pad"><PermissionFix pane="automation" onCheck={() => setAutomation(false)}><p>Moving to the Trash goes through Finder on this Mac, and macOS asks you to allow that once.</p></PermissionFix></div>}
+        {automation && <div className="pad"><PermissionFix pane="automation" onCheck={() => setAutomation(false)}><p>{t('Moving to the Trash goes through Finder on this Mac, and macOS asks you to allow that once.')}</p></PermissionFix></div>}
       </aside>
-      {!narrow && <Handle axis="x" size={treeW} min={160} max={520} onSize={setTreeW} label="Resize file tree" />}
+      {!narrow && <Handle axis="x" size={treeW} min={160} max={520} onSize={setTreeW} label={t('Resize file tree')} />}
       <section className="viewer-wrap" hidden={narrow && !selected}>
         {tabs.length > 1 && (
           <div className="file-tabs" role="tablist" aria-label={t('Open files')}>
@@ -636,7 +636,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
           : (
             <div className="viewer-empty">
               <Icon name="folder-open" size={26} />
-              <p>Pick a file, or press <kbd>⌘</kbd> <kbd>P</kbd> to jump to one.</p>
+              <p>{tn('Pick a file, or press {keys} to jump to one.', { keys: <><kbd>⌘</kbd> <kbd>P</kbd></> })}</p>
               <p className="muted small mono">{cwd.replace(/^\/Users\/[^/]+/, '~')}</p>
             </div>
           )}
@@ -735,7 +735,7 @@ function DiffView({ pane, filePath, onChanged, notes, onNote, onDrop }) {
     return () => window.removeEventListener('mouseup', up)
   }, [])
   const undoHunk = async (hunk) => {
-    if (!window.confirm('Undo this change? The lines go back to how they were at the last commit.')) return
+    if (!window.confirm(t('Undo this change? The lines go back to how they were at the last commit.'))) return
     setBusy(hunk)
     try { await api(`/agents/${enc(pane)}/discard`, { method: 'POST', body: { path: filePath, hunk } }); refresh(); onChanged?.() } catch (e) { window.alert(e.message) } finally { setBusy(null) }
   }
@@ -765,7 +765,7 @@ function DiffView({ pane, filePath, onChanged, notes, onNote, onDrop }) {
   if (error) return <div className="viewer-empty"><p>{error}</p></div>
   if (!data) return <div className="pad"><div className="skeleton-rows"><div /><div /></div></div>
   if (!data.diff && data.note === 'image file') return <div className="img-view"><img src={`${BASE}/api/agents/${enc(pane)}/raw?path=${enc(filePath)}`} alt={filePath} /></div>
-  if (!data.diff) return <div className="viewer-empty"><p>{data.note || 'No textual changes'}</p></div>
+  if (!data.diff) return <div className="viewer-empty"><p>{data.note || t('No textual changes')}</p></div>
   // Comments show under the last of their lines, when those lines are still in the diff.
   const at = new Map(lines.map((x, i) => [x.key, i]))
   const under = new Map()
@@ -787,7 +787,7 @@ function DiffView({ pane, filePath, onChanged, notes, onNote, onDrop }) {
           // Each change (hunk) can be undone on its own, except in a new file (undo the file instead).
           if (x.cls === 'hunk' && !data.untracked) {
             const n = ++hunkNo
-            return <div key={i} className="dl hunk hunk-row"><span className="dl-n" /><span>{x.l}</span><button className="hunk-undo" onClick={() => undoHunk(n)} disabled={busy != null}>{busy === n ? 'Undoing…' : 'Undo this change'}</button></div>
+            return <div key={i} className="dl hunk hunk-row"><span className="dl-n" /><span>{x.l}</span><button className="hunk-undo" onClick={() => undoHunk(n)} disabled={busy != null}>{busy === n ? t('Undoing…') : t('Undo this change')}</button></div>
           }
           const row = (
             <div key={i} className={`dl ${x.cls}${x.key && i >= lo && i <= hi ? ' pick' : ''}${noted.has(x.key) ? ' noted' : ''}`}
@@ -802,20 +802,20 @@ function DiffView({ pane, filePath, onChanged, notes, onNote, onDrop }) {
               {(under.get(i) || []).map((c) => (
                 <div key={c.id} className="rv-note">
                   <Icon name="chat" size={12} /><span>{c.text}</span>
-                  <button className="win-btn" onClick={() => onDrop(c.id)} title="Remove comment" aria-label="Remove comment"><Icon name="x" size={11} /></button>
+                  <button className="win-btn" onClick={() => onDrop(c.id)} title={t('Remove comment')} aria-label={t('Remove comment')}><Icon name="x" size={11} /></button>
                 </div>
               ))}
               {i === hi && !dragging && (
                 <div className="rv-box">
-                  <div className="rv-where">{draft.keys.length > 1 ? 'Lines' : 'Line'} {draft.where.slice(filePath.length + 1)}<span className="muted">{touchOnly() ? 'Tap another line to take in more' : 'Shift-click or drag line numbers for more'}</span></div>
-                  <textarea autoFocus rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="Your comment for the agent" aria-label="Comment"
+                  <div className="rv-where">{draft.keys.length > 1 ? t('Lines {where}', { where: draft.where.slice(filePath.length + 1) }) : t('Line {where}', { where: draft.where.slice(filePath.length + 1) })}<span className="muted">{touchOnly() ? t('Tap another line to take in more') : t('Shift-click or drag line numbers for more')}</span></div>
+                  <textarea autoFocus rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder={t('Your comment for the agent')} aria-label={t('Comment')}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); add() }
                       if (e.key === 'Escape') { e.stopPropagation(); setPick(null) }
                     }} />
                   <div className="rv-acts">
-                    <button className="btn small" onClick={() => setPick(null)}>Cancel</button>
-                    <button className="btn small primary" onClick={add} disabled={!text.trim()}>Add comment</button>
+                    <button className="btn small" onClick={() => setPick(null)}>{t('Cancel')}</button>
+                    <button className="btn small primary" onClick={add} disabled={!text.trim()}>{t('Add comment')}</button>
                   </div>
                 </div>
               )}
@@ -841,33 +841,35 @@ function ReviewTray({ notes, onDrop, onClear, onSend, onShow }) {
         <ul className="rv-list">
           {notes.map((c) => (
             <li key={c.id}>
-              <button className="rv-loc" onClick={() => onShow(c.path)} title="Show in the diff">{c.where}</button>
+              <button className="rv-loc" onClick={() => onShow(c.path)} title={t('Show in the diff')}>{c.where}</button>
               <span className="rv-text">{c.text}</span>
-              <button className="win-btn" onClick={() => onDrop(c.id)} title="Remove comment" aria-label="Remove comment"><Icon name="x" size={11} /></button>
+              <button className="win-btn" onClick={() => onDrop(c.id)} title={t('Remove comment')} aria-label={t('Remove comment')}><Icon name="x" size={11} /></button>
             </li>
           ))}
         </ul>
       )}
       <div className="rv-bar">
-        <button className="rv-count" onClick={() => setOpen(!open)} aria-expanded={open} title={open ? 'Hide comments' : 'Show comments'}>
-          <Icon name="chat" size={13} /> Review <b>{notes.length}</b><Icon name="chevron" size={10} className={open ? 'rot90' : 'rot-up'} />
+        <button className="rv-count" onClick={() => setOpen(!open)} aria-expanded={open} title={open ? t('Hide comments') : t('Show comments')}>
+          <Icon name="chat" size={13} /> {t('Review')} <b>{notes.length}</b><Icon name="chevron" size={10} className={open ? 'rot90' : 'rot-up'} />
         </button>
-        <span className="muted small rv-sub">{notes.length === 1 ? '1 comment' : `${notes.length} comments`}, sent as one message</span>
-        <button className="ghost-btn" onClick={() => { if (window.confirm(`Throw away ${notes.length === 1 ? 'this comment' : `these ${notes.length} comments`}?`)) onClear() }}>Clear</button>
-        <button className="btn small primary" onClick={send} disabled={sending}><Icon name="send" size={12} /> {sending ? 'Sending…' : 'Send review'}</button>
+        <span className="muted small rv-sub">{notes.length === 1 ? t('1 comment, sent as one message') : t('{n} comments, sent as one message', { n: notes.length })}</span>
+        <button className="ghost-btn" onClick={() => { if (window.confirm(notes.length === 1 ? t('Throw away this comment?') : t('Throw away these {n} comments?', { n: notes.length }))) onClear() }}>{t('Clear')}</button>
+        <button className="btn small primary" onClick={send} disabled={sending}><Icon name="send" size={12} /> {sending ? t('Sending…') : t('Send review')}</button>
       </div>
     </div>
   )
 }
 
 // ---------- Ship: push, and pull requests through gh ----------
-const PR_STATE = { OPEN: 'Open', MERGED: 'Merged', CLOSED: 'Closed' }
+// GitHub's state, in the words Meetings' work list uses (meetings/work.jsx), with a capital: Open.
+const PR_STATE = { OPEN: tx('open'), MERGED: tx('merged'), CLOSED: tx('closed') }
+const capital = (s) => s.charAt(0).toLocaleUpperCase() + s.slice(1)
 function checksLine(c) {
   const total = c ? c.pass + c.fail + c.pending : 0
   if (!total) return null
-  if (c.fail) return { cls: 'bad', text: `${c.fail} of ${total} checks failing` }
-  if (c.pending) return { cls: 'wait', text: `${c.pending} of ${total} checks running` }
-  return { cls: 'ok', text: total === 1 ? 'Check passed' : `${total} checks passed` }
+  if (c.fail) return { cls: 'bad', text: t('{n} of {total} checks failing', { n: c.fail, total }) }
+  if (c.pending) return { cls: 'wait', text: t('{n} of {total} checks running', { n: c.pending, total }) }
+  return { cls: 'ok', text: total === 1 ? t('Check passed') : t('{n} checks passed', { n: total }) }
 }
 
 function PrDialog({ pane, branch, base: base0, uncommitted, onClose, onDone }) {
@@ -894,27 +896,27 @@ function PrDialog({ pane, branch, base: base0, uncommitted, onClose, onDone }) {
   return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}>
       <form className="modal pr-dialog" onSubmit={submit} onKeyDown={(e) => { if (e.key === 'Escape' && !busy) { e.stopPropagation(); onClose() } }}>
-        <header className="modal-head"><Icon name="branch" size={15} /><h3>Open a pull request</h3></header>
-        <div className="pr-into small"><span className="mono">{branch}</span><span className="muted">into</span>
-          <input className="mono" value={f.base} onChange={edit('base')} aria-label="Base branch" spellCheck={false} />
-          <button type="button" className="link-btn" onClick={() => write(f.base, true)} disabled={info.writing || busy} title="Write the title and description again, for this base branch">Write again</button>
+        <header className="modal-head"><Icon name="branch" size={15} /><h3>{t('Open a pull request')}</h3></header>
+        <div className="pr-into small"><span className="mono">{branch}</span><span className="muted">{t('into')}</span>
+          <input className="mono" value={f.base} onChange={edit('base')} aria-label={t('Base branch')} spellCheck={false} />
+          <button type="button" className="link-btn" onClick={() => write(f.base, true)} disabled={info.writing || busy} title={t('Write the title and description again, for this base branch')}>{t('Write again')}</button>
         </div>
-        <label className="na-field"><span className="na-label">Title</span>
-          <input value={f.title} onChange={edit('title')} placeholder={info.writing ? 'Writing…' : 'What this pull request does'} autoFocus />
+        <label className="na-field"><span className="na-label">{t('Title')}</span>
+          <input value={f.title} onChange={edit('title')} placeholder={info.writing ? t('Writing…') : t('What this pull request does')} autoFocus />
         </label>
-        <label className="na-field"><span className="na-label">Description</span>
-          <textarea value={f.body} onChange={edit('body')} rows={9} placeholder={info.writing ? 'Writing from your commits…' : 'Optional'} />
+        <label className="na-field"><span className="na-label">{t('Description')}</span>
+          <textarea value={f.body} onChange={edit('body')} rows={9} placeholder={info.writing ? t('Writing from your commits…') : t('Optional')} />
         </label>
         <p className="small muted pr-info" role="status">
-          {info.writing ? <><Icon name="refresh" size={11} className="spin" /> Writing a title and description from your commits…</>
-            : info.err ? null : info.note || (info.via ? `Written by ${info.via}. Change anything you like.` : 'From your commit messages. Change anything you like.')}
+          {info.writing ? <><Icon name="refresh" size={11} className="spin" /> {t('Writing a title and description from your commits…')}</>
+            : info.err ? null : info.note || (info.via ? t('Written by {model}. Change anything you like.', { model: info.via }) : t('From your commit messages. Change anything you like.'))}
         </p>
-        {uncommitted > 0 && <p className="small na-warn">{uncommitted === 1 ? '1 uncommitted change isn\'t' : `${uncommitted} uncommitted changes aren't`} in it. Commit first to include {uncommitted === 1 ? 'it' : 'them'}.</p>}
+        {uncommitted > 0 && <p className="small na-warn">{uncommitted === 1 ? t('1 uncommitted change isn\'t in it. Commit first to include it.') : t('{n} uncommitted changes aren\'t in it. Commit first to include them.', { n: uncommitted })}</p>}
         {info.err && <p className="error-text small">{info.err}</p>}
         <div className="modal-foot">
-          <label className="pr-draft small muted"><input type="checkbox" checked={f.draft} onChange={edit('draft')} /> Draft</label>
-          <button type="button" className="btn small" onClick={onClose} disabled={busy}>Cancel</button>
-          <button type="submit" className="btn small primary" disabled={busy || !f.title.trim() || !f.base.trim()}>{busy ? 'Pushing and opening…' : 'Create pull request'}</button>
+          <label className="pr-draft small muted"><input type="checkbox" checked={f.draft} onChange={edit('draft')} /> {t('Draft')}</label>
+          <button type="button" className="btn small" onClick={onClose} disabled={busy}>{t('Cancel')}</button>
+          <button type="submit" className="btn small primary" disabled={busy || !f.title.trim() || !f.base.trim()}>{busy ? t('Pushing and opening…') : t('Create pull request')}</button>
         </div>
       </form>
     </div>,
@@ -934,7 +936,7 @@ export function ChangesView({ agent, onOpenFile, onSendReview }) {
   const prs = usePoll(data?.repo && data.remote && !data.detached ? `/agents/${enc(pane)}/pr` : null, 60000)
   const [notes, setNotes] = useReview(pane)
   const undoFile = async (f) => {
-    const what = f.status === 'untracked' || f.status === 'added' ? `Delete the new file ${f.path}?` : `Undo every change to ${f.path}? It goes back to how it was at the last commit.`
+    const what = f.status === 'untracked' || f.status === 'added' ? t('Delete the new file {path}?', { path: f.path }) : t('Undo every change to {path}? It goes back to how it was at the last commit.', { path: f.path })
     if (!window.confirm(what)) return
     try { await api(`/agents/${enc(pane)}/discard`, { method: 'POST', body: { path: f.path } }); if (sel === f.path) setSel(null); refresh() } catch (e) { window.alert(e.message) }
   }
@@ -947,13 +949,13 @@ export function ChangesView({ agent, onOpenFile, onSendReview }) {
       // The new list first, so a committed file isn't picked again from the old one.
       setMessage(''); await refresh(); setSel(null)
       const p = andPush ? await api(`/agents/${enc(pane)}/push`, { method: 'POST' }) : null
-      setNote({ ok: true, text: p ? `Committed ${hash} and pushed to ${p.remote}` : `Committed ${hash}` })
+      setNote({ ok: true, text: p ? t('Committed {hash} and pushed to {remote}', { hash, remote: p.remote }) : t('Committed {hash}', { hash }) })
       if (p) prs.refresh()
-    } catch (e) { setNote({ text: hash ? `Committed ${hash}, but the push didn't go through. ${e.message}` : e.message, code: e.code }) } finally { setCommitting(false); refresh() }
+    } catch (e) { setNote({ text: hash ? t('Committed {hash}, but the push didn\'t go through. {why}', { hash, why: e.message }) : e.message, code: e.code }) } finally { setCommitting(false); refresh() }
   }
   const push = async () => {
     setCommitting('push'); setNote(null)
-    try { const p = await api(`/agents/${enc(pane)}/push`, { method: 'POST' }); setNote({ ok: true, text: `Pushed ${p.branch} to ${p.remote}` }); prs.refresh() } catch (e) { setNote({ text: e.message, code: e.code }) } finally { setCommitting(false); refresh() }
+    try { const p = await api(`/agents/${enc(pane)}/push`, { method: 'POST' }); setNote({ ok: true, text: t('Pushed {branch} to {remote}', { branch: p.branch, remote: p.remote }) }); prs.refresh() } catch (e) { setNote({ text: e.message, code: e.code }) } finally { setCommitting(false); refresh() }
   }
   const [sel, setSel] = useState(null)
   const [listW, setListW] = usePersisted('cc-changes-w', 280)
@@ -964,9 +966,9 @@ export function ChangesView({ agent, onOpenFile, onSendReview }) {
   if (error) return <div className="viewer-empty"><p>{error}</p></div>
   if (!data) return <div className="pad"><div className="skeleton-rows"><div /><div /></div></div>
   if (!data.repo && data.noGit) {
-    return <div className="viewer-empty"><Icon name="branch" size={24} /><InstallFix what="xcode" label="Install developer tools" onCheck={refresh}><p>Changes needs git, which comes with Apple's command line developer tools. They aren't on this Mac yet.</p></InstallFix></div>
+    return <div className="viewer-empty"><Icon name="branch" size={24} /><InstallFix what="xcode" label={t('Install developer tools')} onCheck={refresh}><p>{t('Changes needs git, which comes with Apple\'s command line developer tools. They aren\'t on this Mac yet.')}</p></InstallFix></div>
   }
-  if (!data.repo) return <div className="viewer-empty"><Icon name="branch" size={24} /><p>This folder isn't a git repository.</p></div>
+  if (!data.repo) return <div className="viewer-empty"><Icon name="branch" size={24} /><p>{t('This folder isn\'t a git repository.')}</p></div>
   const adds = data.files.reduce((s, f) => s + (f.add || 0), 0)
   const dels = data.files.reduce((s, f) => s + (f.del || 0), 0)
   const pr = prs.data?.pr
@@ -987,16 +989,16 @@ export function ChangesView({ agent, onOpenFile, onSendReview }) {
             <span className="chg-count"><span className="plus">+{adds}</span> <span className="minus">−{dels}</span></span>
           </div>
           {pr && (
-            <a className={`pr-strip pr-${String(pr.state).toLowerCase()}`} href={pr.url} target="_blank" rel="noreferrer" title={`${pr.title}\nOpen on GitHub`}>
+            <a className={`pr-strip pr-${String(pr.state).toLowerCase()}`} href={pr.url} target="_blank" rel="noreferrer" title={`${pr.title}\n${t('Open on GitHub')}`}>
               <b>#{pr.number}</b>
-              <span className="pr-state">{pr.draft && pr.state === 'OPEN' ? 'Draft' : PR_STATE[pr.state] || pr.state}</span>
+              <span className="pr-state">{pr.draft && pr.state === 'OPEN' ? t('Draft') : PR_STATE[pr.state] ? capital(t(PR_STATE[pr.state])) : pr.state}</span>
               {checks && <span className={`pr-checks ${checks.cls}`}>{checks.text}</span>}
               <span className="pr-title">{pr.title}</span>
               <Icon name="external" size={11} />
             </a>
           )}
           <div className="tree-scroll">
-            {data.files.length === 0 && <p className="muted pad small">No uncommitted changes.{data.lastCommit ? ` Last commit ${data.lastCommit.hash}: ${data.lastCommit.subject} (${data.lastCommit.when}).` : ''}</p>}
+            {data.files.length === 0 && <p className="muted pad small">{data.lastCommit ? t('No uncommitted changes. Last commit {hash}: {subject} ({when}).', { hash: data.lastCommit.hash, subject: data.lastCommit.subject, when: data.lastCommit.when }) : t('No uncommitted changes.')}</p>}
             {data.files.map((f) => {
               const n = onSendReview ? fileNotes(f.path).length : 0
               return (
@@ -1004,9 +1006,9 @@ export function ChangesView({ agent, onOpenFile, onSendReview }) {
                   <span className={`chg-badge s-${STATUS[f.status]?.[1]}`}>{STATUS[f.status]?.[0] || '?'}</span>
                   <span className="tree-name">{f.path.split('/').pop()}</span>
                   <span className="chg-dir">{parentOf(f.path)}</span>
-                  {n > 0 && <span className="chg-notes" title={`${n} review comment${n > 1 ? 's' : ''}`}><Icon name="chat" size={10} />{n}</span>}
+                  {n > 0 && <span className="chg-notes" title={n > 1 ? t('{n} review comments', { n }) : t('1 review comment')}><Icon name="chat" size={10} />{n}</span>}
                   {(f.add || f.del) ? <span className="chg-n"><span className="plus">+{f.add}</span><span className="minus">−{f.del}</span></span> : null}
-                  <span role="button" tabIndex={0} className="chg-undo" title={f.status === 'untracked' ? 'Delete this new file' : 'Undo every change to this file'} aria-label={`Undo changes to ${f.path}`}
+                  <span role="button" tabIndex={0} className="chg-undo" title={f.status === 'untracked' ? t('Delete this new file') : t('Undo every change to this file')} aria-label={t('Undo changes to {path}', { path: f.path })}
                     onClick={(e) => { e.stopPropagation(); undoFile(f) }} onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); undoFile(f) } }}><Icon name="x" size={11} /></span>
                 </button>
               )
@@ -1014,12 +1016,12 @@ export function ChangesView({ agent, onOpenFile, onSendReview }) {
           </div>
           {data.files.length > 0 && (
             <form className="commit-box" onSubmit={(e) => { e.preventDefault(); commit(null) }}>
-              <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Commit message" rows={2} aria-label="Commit message"
+              <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder={t('Commit message')} rows={2} aria-label={t('Commit message')}
                 onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(null) } }} />
               <div className="commit-acts">
-                {sel && <button type="button" className="btn small" disabled={!message.trim() || !!committing} onClick={() => commit([sel])} title={`Commit only ${sel}`}>This file</button>}
-                <button type="submit" className="btn small primary" disabled={!message.trim() || !!committing}>{committing === 'commit' ? 'Committing…' : `Commit all ${data.files.length}`}</button>
-                {data.remote && !data.detached && <button type="button" className="btn small" disabled={!message.trim() || !!committing} onClick={() => commit(null, true)} title={`Commit all, then push ${data.branch} to ${data.remote}`}>{committing === 'commit+push' ? 'Pushing…' : 'Commit & push'}</button>}
+                {sel && <button type="button" className="btn small" disabled={!message.trim() || !!committing} onClick={() => commit([sel])} title={t('Commit only {path}', { path: sel })}>{t('This file')}</button>}
+                <button type="submit" className="btn small primary" disabled={!message.trim() || !!committing}>{committing === 'commit' ? t('Committing…') : t('Commit all {n}', { n: data.files.length })}</button>
+                {data.remote && !data.detached && <button type="button" className="btn small" disabled={!message.trim() || !!committing} onClick={() => commit(null, true)} title={t('Commit all, then push {branch} to {remote}', { branch: data.branch, remote: data.remote })}>{committing === 'commit+push' ? t('Pushing…') : t('Commit & push')}</button>}
               </div>
             </form>
           )}
@@ -1027,28 +1029,28 @@ export function ChangesView({ agent, onOpenFile, onSendReview }) {
             <div className="ship-box">
               {(canPush || canPr) && (
                 <div className="ship-row">
-                  <span className="muted small">{!canPush ? `Up to date with ${data.upstream}` : !data.upstream ? `Not on ${data.remote} yet` : `${data.ahead} commit${data.ahead > 1 ? 's' : ''} to push`}</span>
-                  {canPush && <button className="btn small" onClick={push} disabled={!!committing}>{committing === 'push' ? 'Pushing…' : 'Push'}</button>}
-                  {canPr && <button className="btn small" onClick={() => setPrOpen(true)} disabled={!!committing} title={`Open a pull request for ${data.branch} on GitHub`}>Pull request</button>}
+                  <span className="muted small">{!canPush ? t('Up to date with {branch}', { branch: data.upstream }) : !data.upstream ? t('Not on {remote} yet', { remote: data.remote }) : data.ahead > 1 ? t('{n} commits to push', { n: data.ahead }) : t('1 commit to push')}</span>
+                  {canPush && <button className="btn small" onClick={push} disabled={!!committing}>{committing === 'push' ? t('Pushing…') : t('Push')}</button>}
+                  {canPr && <button className="btn small" onClick={() => setPrOpen(true)} disabled={!!committing} title={t('Open a pull request for {branch} on GitHub', { branch: data.branch })}>{t('Pull request')}</button>}
                 </div>
               )}
               {prs.data?.error && !prs.data.signIn && <p className="small muted">{prs.data.error}</p>}
               {note && <p className={`small ${note.ok ? 'ok-text' : 'error-text'}`} role="status">{note.text}</p>}
-              {ghFix === 'gh' && <InstallFix what="gh" label="Install GitHub CLI" compact onCheck={() => prs.refresh('?refresh=1')}><p>Pull requests go through GitHub's gh tool, which isn't installed.</p></InstallFix>}
-              {ghFix === 'gh-login' && <InstallFix what="gh-login" label="Sign in to GitHub" icon="users" compact onCheck={() => prs.refresh('?refresh=1')}><p>gh isn't signed in to GitHub yet.</p></InstallFix>}
+              {ghFix === 'gh' && <InstallFix what="gh" label={t('Install GitHub CLI')} compact onCheck={() => prs.refresh('?refresh=1')}><p>{t('Pull requests go through GitHub\'s gh tool, which isn\'t installed.')}</p></InstallFix>}
+              {ghFix === 'gh-login' && <InstallFix what="gh-login" label={t('Sign in to GitHub')} icon="users" compact onCheck={() => prs.refresh('?refresh=1')}><p>{t('gh isn\'t signed in to GitHub yet.')}</p></InstallFix>}
             </div>
           )}
           {data.lastCommit && data.files.length > 0 && <div className="tree-foot muted small">HEAD {data.lastCommit.hash} · {data.lastCommit.when}</div>}
         </aside>
-        {!narrow && <Handle axis="x" size={listW} min={180} max={520} onSize={setListW} label="Resize changes list" />}
+        {!narrow && <Handle axis="x" size={listW} min={180} max={520} onSize={setListW} label={t('Resize changes list')} />}
         <section className="viewer-wrap" hidden={narrow && !sel}>
           {sel ? (
             <div className="viewer">
               <div className="viewer-head">
-                {narrow && <button className="win-btn narrow-back" onClick={() => setSel(null)} aria-label="Back to changes"><Icon name="chevron" size={15} className="flip" /></button>}
+                {narrow && <button className="win-btn narrow-back" onClick={() => setSel(null)} aria-label={t('Back to changes')}><Icon name="chevron" size={15} className="flip" /></button>}
                 <div className="crumbs"><b>{sel}</b></div>
                 <div className="viewer-tools">
-                  <button className="ghost-btn" onClick={() => onOpenFile(sel)}><Icon name="file" size={12} /> Open file</button>
+                  <button className="ghost-btn" onClick={() => onOpenFile(sel)}><Icon name="file" size={12} /> {t('Open file')}</button>
                 </div>
               </div>
               <div className="viewer-body">
@@ -1056,7 +1058,7 @@ export function ChangesView({ agent, onOpenFile, onSendReview }) {
                   onNote={onSendReview ? (c) => setNotes((l) => [...l, c]) : null} onDrop={(id) => setNotes((l) => l.filter((c) => c.id !== id))} />
               </div>
             </div>
-          ) : <div className="viewer-empty"><p>{!data.files.length ? 'Nothing to review' : onSendReview ? 'Select a changed file. Click a line in its diff to comment on it for the agent.' : 'Select a changed file'}</p></div>}
+          ) : <div className="viewer-empty"><p>{!data.files.length ? t('Nothing to review') : onSendReview ? t('Select a changed file. Click a line in its diff to comment on it for the agent.') : t('Select a changed file')}</p></div>}
         </section>
       </div>
       {onSendReview && notes.length > 0 && (
@@ -1064,7 +1066,7 @@ export function ChangesView({ agent, onOpenFile, onSendReview }) {
       )}
       {prOpen && (
         <PrDialog pane={pane} branch={data.branch} base={prs.data?.base} uncommitted={data.files.length} onClose={() => setPrOpen(false)}
-          onDone={(r) => { setNote({ ok: true, text: r.number ? `Opened pull request #${r.number}` : 'Opened the pull request' }); prs.refresh(); refresh() }} />
+          onDone={(r) => { setNote({ ok: true, text: r.number ? t('Opened pull request #{n}', { n: r.number }) : t('Opened the pull request') }); prs.refresh(); refresh() }} />
       )}
     </div>
   )

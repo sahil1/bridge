@@ -4,7 +4,7 @@ import { copyText } from '../../copy.js'
 import Lightbox from '../Lightbox.jsx'
 import { Menu } from '../Rail.jsx'
 import { api, usePoll, onThisComputer, refetch } from '../../api.js'
-import { t, tx, locale } from '../../i18n/index.js'
+import { t, tx, locale, tn } from '../../i18n/index.js'
 import { usePersisted, Handle, PaneHeader, useMedia } from '../layout.jsx'
 import { useMeetings, clock, length, ScreenButton, SectionButton } from './recording.jsx'
 import { byDay, timeOf, useSelection, BulkBar } from './bulk.jsx'
@@ -1040,7 +1040,9 @@ export function MeetingPage({ id, onBack }) {
       {data.summaryError && !data.summarizing && (
         <div className="mt-sumerr" role="status">
           <p className="small"><b>{!data.summaryTried?.length ? t("The summary couldn't be written:") : data.summaryTried.length === 1 ? t("The summary couldn't be written with {model}:", { model: modelName(models, data.summaryTried[0]) }) : data.summaryTried.length === 2 ? t("The summary couldn't be written with {model} or the {n} other model you have:", { model: modelName(models, data.summaryTried[0]), n: data.summaryTried.length - 1 }) : t("The summary couldn't be written with {model} or the {n} other models you have:", { model: modelName(models, data.summaryTried[0]), n: data.summaryTried.length - 1 })}</b> {data.summaryError}</p>
-          <p className="muted small">{data.saved ? t('Your notes and the transcript are kept and saved.') : t('Your notes and the transcript are kept.')} {data.summaryRetryAt ? `It tries again by itself at ${new Date(data.summaryRetryAt).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })}, or ` : ''}<button type="button" className="link-btn" onClick={summarize}>{data.summaryRetryAt ? 'try now' : 'Try again'}</button>, or pick another model above.</p>
+          <p className="muted small">{data.saved ? t('Your notes and the transcript are kept and saved.') : t('Your notes and the transcript are kept.')} {data.summaryRetryAt
+            ? tn('It tries again by itself at {time}, or {now}, or pick another model above.', { time: new Date(data.summaryRetryAt).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }), now: <button type="button" className="link-btn" onClick={summarize}>{t('try now')}</button> })
+            : tn('{again}, or pick another model above.', { again: <button type="button" className="link-btn" onClick={summarize}>{t('Try again')}</button> })}</p>
         </div>
       )}
       {data.summary && data.summaryNote && !data.summarizing && <p className="muted small">{data.summaryNote.replace(/[a-z]+:[\w./:-]+/gi, (x) => modelName(models, x))}</p>}

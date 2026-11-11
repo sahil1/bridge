@@ -17,7 +17,10 @@
 //   claude --session-id <id> "busy <s> [<s>...] [bg <s>]"  a conversation that takes messages: it
 //                                           works on each for the next of those seconds (the last
 //                                           for every one after; the first is the message it was
-//                                           started with), its working line up, a subagent
+//                                           started with; "hold" instead of seconds: until
+//                                           ~/claude-go-<id> is there, which a test writes once it
+//                                           has looked at what it wanted to while it works), its
+//                                           working line up, a subagent
 //                                           ("Check the invoices") at work for the first part of it;
 //                                           with bg, one more sent off in the background on its
 //                                           first turn ("Watch the build"), which works on for that
@@ -167,10 +170,12 @@ function firstRunSignIn() {
   const screen = (rows) => process.stdout.write(`\x1b[2J\x1b[H${rows.join('\r\n')}`)
   let at = 'login'
   let typed = ''
-  screen([' Claude Code can be used with your Claude subscription or billed based on API usage through your Console account.', '', ' Select login method:', '',
-    ' ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise', '   2. Anthropic Console account · API usage billing', '   3. 3rd-party platform · Amazon Bedrock, Microsoft Foundry, Google Vertex AI', ''])
+  // Keys a key at a time before its screen is up: Enter pressed the moment it shows, while the
+  // terminal still read whole lines, came as a new line, which isn't Enter here (once in CI).
   if (process.stdin.isTTY) process.stdin.setRawMode(true)
   process.stdin.setEncoding('utf8')
+  screen([' Claude Code can be used with your Claude subscription or billed based on API usage through your Console account.', '', ' Select login method:', '',
+    ' ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise', '   2. Anthropic Console account · API usage billing', '   3. 3rd-party platform · Amazon Bedrock, Microsoft Foundry, Google Vertex AI', ''])
   process.stdin.on('data', (d) => {
     if (at === 'login' && d.includes('\r')) {
       at = 'browser'
@@ -343,9 +348,9 @@ fs.closeSync(log)
 // "busy": a conversation that takes messages, works on each a while with a subagent, and queues
 // what's typed meanwhile the way Claude Code does (see the top).
 function busy() {
-  const m = /^busy((?:\s+\d+)+)(?:\s+bg\s+(\d+))?(\s+blink)?/.exec(message) || []
+  const m = /^busy((?:\s+(?:\d+|hold))+)(?:\s+bg\s+(\d+))?(\s+blink)?/.exec(message) || []
   const BLINK = !!m[3]
-  const TURNS = (m[1] || '6').trim().split(/\s+/).map((x) => Number(x) * 1000)
+  const TURNS = (m[1] || '6').trim().split(/\s+/).map((x) => (x === 'hold' ? Infinity : Number(x) * 1000))
   const BG = m[2] ? Number(m[2]) * 1000 : 0
   const subDir = path.join(project, id, 'subagents')
   fs.mkdirSync(subDir, { recursive: true })
@@ -403,22 +408,29 @@ function busy() {
     startSub(fg, `Check the invoices ${n}`, false)
     if (BG && n === 1) { startSub('b1', 'Watch the build', true); setTimeout(() => endSub('b1'), TURN + BG) }
     // The subagent back: what was typed meanwhile is taken in, all of it at once.
-    later(Math.round(TURN * 0.6), () => {
+    const back = () => {
       endSub(fg)
       if (!queued.length) return
       w({ type: 'queue-operation', operation: 'remove' }, true)
       const t = joined()
       got(t, 'mid')
       w({ type: 'attachment', attachment: { type: 'queued_command', prompt: t, commandMode: 'prompt', origin: { kind: 'human' } } })
-    })
-    later(TURN, () => {
+    }
+    const end = () => {
       said = `Done with turn ${n}.`
       w({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: said }] } })
       working = false
       // What's left goes in as one message.
       if (queued.length) { w({ type: 'queue-operation', operation: 'dequeue' }, true); begin(joined(), 'turn') }
       draw()
-    })
+    }
+    if (Number.isFinite(TURN)) { later(Math.round(TURN * 0.6), back); later(TURN, end) } else {
+      // Held: the subagent is back in two seconds, and the turn ends once the test lets it.
+      later(2000, back)
+      const go = path.join(os.homedir(), `claude-go-${id}`)
+      const look = setInterval(() => { if (fs.existsSync(go)) { clearInterval(look); fs.rmSync(go, { force: true }); end() } }, 100)
+      timers.push(look)
+    }
     draw()
   }
   const stop = () => {

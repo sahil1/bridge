@@ -37,6 +37,9 @@ const signInTabs = async (k) => ((await k.api('/fleet')).tabs || []).filter((x) 
 // What a sign-in's tab shows last (when it didn't close as it should have).
 // eslint-disable-next-line no-control-regex
 const tabsSay = async (k) => Promise.all((await signInTabs(k)).map(async (x) => (await k.api(`/agents/${encodeURIComponent(x.panes?.[0]?.paneId)}/screen?lines=12`).catch(() => ({}))).ansi?.replace(/\x1b\][^\x07]*\x07|\x1b\[[0-9;?]*[A-Za-z]/g, '').split(/\r?\n/).filter((l) => l.trim()).slice(-6)))
+// And an agent's terminal (when its first run in Chat didn't move on).
+// eslint-disable-next-line no-control-regex
+const screenOf = (k, pane) => k.api(`/agents/${encodeURIComponent(pane)}/screen?lines=12`).then((s) => s.ansi?.replace(/\x1b\][^\x07]*\x07|\x1b\[[0-9;?]*[A-Za-z]/g, '').split(/\r?\n/).filter((l) => l.trim()).slice(-8), (e) => e.message)
 
 // A stand-in nodejs.org: one long-term-support release, built for this computer, as nodejs.org
 // packs it: a .tar.gz with bin/node on macOS and Linux, whose "node" only says its version; a .zip
@@ -500,7 +503,7 @@ try {
         await card.locator('button', { hasText: 'Sign in with Claude account' }).click({ timeout: 15000 })
         const x = await until(async () => { const s = await card.innerText().catch(() => ''); return /can't connect to localhost/.test(s) && s }, 15000)
         const href = await card.locator('a', { hasText: 'Sign in with a code' }).getAttribute('href').catch(() => null)
-        ok(!!x && /Your browser opened to sign in/.test(x) && /^https:\/\/claude\.com\/cai\/oauth\/authorize\?/.test(href || ''), `${t}: a new Claude Code's sign-in in Chat: the browser opened, and a code instead when it can't come back`, { x, href })
+        ok(!!x && /Your browser opened to sign in/.test(x) && /^https:\/\/claude\.com\/cai\/oauth\/authorize\?/.test(href || ''), `${t}: a new Claude Code's sign-in in Chat: the browser opened, and a code instead when it can't come back`, x ? { x, href } : { href, card: await card.innerText().catch(() => ''), step: await step(c), screen: await screenOf(k, c.paneId) })
         await shot(q, `${tag}new-${t}-firstrun-claude`)
         await card.locator('a', { hasText: 'Sign in with a code' }).click()
         await card.locator('input[aria-label="Sign-in code"]').fill(`good-${t}`)

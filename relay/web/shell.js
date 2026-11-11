@@ -444,19 +444,21 @@ function reconnect() {
 // network) and the browser may take minutes to notice, while every request waits on it. So when
 // Bridge AI is back on the screen or the network changes, every so often while it's open, and when an
 // answer is slow, this pings the relay, which answers at once. No answer: a new connection, now.
-// Back on the screen or on the network (`now`) with no connection: one straight away, not at the next try.
+// Back on the screen or on the network (`now`) with no connection: one straight away, not at the next
+// try. Back on the network ('online') with one still on its way: it began without a network, so
+// another straight away too (that one failing a moment later had the next try wait up to 10 s).
 const PROBE_MS = 5000
 function check(now) {
   if (!started || adding || !relay || limited.until > Date.now()) return
-  if (!ws || ws.readyState >= 2) { if (now === true) { backoff = FIRST_TRY; connect() } return }
-  if (ws.readyState === 0) { if (Date.now() - since > PROBE_MS) reconnect(); return }
+  if (!ws || ws.readyState >= 2) { if (now) { backoff = FIRST_TRY; connect() } return }
+  if (ws.readyState === 0) { if (now === 'online' || Date.now() - since > PROBE_MS) reconnect(); else if (now) backoff = FIRST_TRY; return }
   if (!pongs || probe) return
   const sock = ws
   const at = Date.now()
   try { sock.send('ping') } catch { reconnect(); return }
   probe = setTimeout(() => { probe = null; if (ws === sock && heard < at) reconnect() }, PROBE_MS)
 }
-addEventListener('online', () => check(true))
+addEventListener('online', () => check('online'))
 addEventListener('pageshow', (e) => { if (e.persisted) check(true) })
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { check(true); if (Date.now() - fromComputer > 2000) askComputer() } })
 setInterval(() => { if (document.visibilityState === 'visible') check() }, 20000)

@@ -3461,6 +3461,7 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .rmc-more { justify-self: start; margin: 1px 0 3px 22px; }
 
 .ask-banner { display: grid; gap: 6px; margin: 0 12px 8px; padding: 9px 12px; border-radius: 10px; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+.ask-banner.arriving .ask-btns { pointer-events: none; }
 .ask-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--ink); }
 .ask-row > span:first-of-type { flex: 1 1 260px; min-width: 0; }
 .ask-btns { display: flex; gap: 6px; }

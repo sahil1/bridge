@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
 import { api, hostApi, machineId, machineUrl, apart, relayComputers, phoneApp, viaRelay } from '../api.js'
 import { passOn } from '../passed.js'
-import { t, tx, locale } from '../i18n/index.js'
+import { t, tx, locale, tn } from '../i18n/index.js'
 
 // Your other devices (server/machines.js): Macs, Windows and Linux computers running Bridge AI,
 // linked to this one. The top bar's machine menu switches the window to one (its own Bridge AI,
@@ -299,18 +299,48 @@ export function RailMachines({ compact = false }) {
 // And, on the computer itself, a phone or computer that just paired with Pair a device's code:
 // Keep (it's yours) or Remove, without stopping anything meanwhile. A computer you keep meets your
 // other computers then (server/machines.js).
+// It sits above the page, so it comes with the page's first draw (useAsksIn): coming after it, it
+// pushed everything down under your finger, and a tap meant for what was there landed on it.
+let asksAtStart = null
+let asksTaken = false // the banner has had that first answer: later ones ask afresh
+const firstAsks = () => (asksAtStart ||= api('/machines').catch(() => null))
+// Whether the banner's first answer is in (or it's been a while): App.jsx shows the page then.
+export function useAsksIn(ms = 3000) {
+  const [inn, setIn] = useState(false)
+  useEffect(() => {
+    let on = true
+    const done = () => { if (on) setIn(true) }
+    const t = setTimeout(done, ms)
+    firstAsks().finally(() => { clearTimeout(t); done() })
+    return () => { on = false; clearTimeout(t) }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  return inn
+}
+// A banner that comes (or changes) while you're using the page still moves what's under it, so its
+// buttons take no tap for a moment: one meant for what was there doesn't Keep, Remove or Allow.
+const ARRIVING_MS = 600
 export function AskBanner() {
   const [asks, setAsks] = useState([])
   const [fresh, setFresh] = useState([])
   const [err, setErr] = useState(null)
+  const [seen, setSeen] = useState('')
   const own = !machineId && !viaRelay
   useEffect(() => {
-    const load = () => api('/machines').then((d) => { setAsks(d.asks || []); setFresh(own ? d.newDevices || [] : []) }).catch(() => {})
-    load()
+    let on = true
+    const got = (d) => { if (on && d) { setAsks(d.asks || []); setFresh(own ? d.newDevices || [] : []) } }
+    const load = () => api('/machines').then(got).catch(() => {})
+    if (asksTaken) load()
+    else { asksTaken = true; firstAsks().then(got) }
     const t = setInterval(() => { if (!document.hidden) load() }, 5000)
     window.addEventListener('bridge-machines', load)
-    return () => { clearInterval(t); window.removeEventListener('bridge-machines', load) }
+    return () => { on = false; clearInterval(t); window.removeEventListener('bridge-machines', load) }
   }, [own])
+  const rows = [...fresh.map((d) => d.id), ...asks.map((a) => a.id)].join()
+  useEffect(() => {
+    if (rows === seen) return
+    const t = setTimeout(() => setSeen(rows), ARRIVING_MS)
+    return () => clearTimeout(t)
+  }, [rows, seen])
   if (!asks.length && !fresh.length) return relayComputers ? <LinkOffer /> : null
   const answer = async (id, allow) => {
     setErr(null)
@@ -328,7 +358,7 @@ export function AskBanner() {
     } catch (e) { setErr(e.message) }
   }
   return (
-    <div className="ask-banner" role="alert">
+    <div className={`ask-banner ${rows !== seen ? 'arriving' : ''}`} role="alert">
       {fresh.map((d) => (
         <div key={d.id} className="ask-row new-device">
           <Icon name={d.kind === 'computer' ? 'laptop' : 'phone'} size={14} />
@@ -342,7 +372,7 @@ export function AskBanner() {
       {asks.map((a) => (
         <div key={a.id} className="ask-row">
           <Icon name="link" size={14} />
-          <span><b>{a.name}</b> asks to link with this device. Allow it only if {a.name} shows <b className="ask-code">{a.code}</b>.</span>
+          <span>{tn('{who} asks to link with this device. Allow it only if {name} shows {code}.', { who: <b>{a.name}</b>, name: a.name, code: <b className="ask-code">{a.code}</b> })}</span>
           <span className="ask-btns">
             <button type="button" className="btn small primary" onClick={() => answer(a.id, true)}>{t('Allow')}</button>
             <button type="button" className="btn small" onClick={() => answer(a.id, false)}>{t('Turn down')}</button>
@@ -549,7 +579,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
                         : m.state === 'denied' ? t('Turned down there')
                           : m.state === 'removed' ? t('It unlinked this device') : m.state === 'changed' ? t('Its key changed') : m.state === 'expired' ? t('The ask expired') : t('Linking…')].filter(Boolean).join(' · ')}
                 </small>
-                {m.state === 'asking' && m.code && <small>On {m.name}, allow it if it shows <b className="ask-code">{m.code}</b>.</small>}
+                {m.state === 'asking' && m.code && <small>{tn('On {name}, allow it if it shows {code}.', { name: m.name, code: <b className="ask-code">{m.code}</b> })}</small>}
                 {m.error && m.state === 'linked' && !m.online && !fixes[m.id] && <small className="muted">{m.error}</small>}
                 {m.state === 'changed' && <small className="muted">{t('{name} doesn\'t have the key it was linked with: it was set up again, or something is in between. On {name}, choose Pair a device and paste its link in Link a device below, to check it\'s really {name}.', { name: m.name })}</small>}
                 {m.state === 'removed' && <small className="muted">{t('{name} forgot this device. Link again asks it; allow it there after checking both show the same six digits.', { name: m.name })}</small>}

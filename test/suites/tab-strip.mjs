@@ -148,12 +148,22 @@ try {
   await part('closing', async () => {
     const tabs = [...VIEWS.slice(0, 6), A.checkout, A.weekly]
     const { ctx, p, errors } = await open({ mode: 'light', theme: 'sky' }, ws(tabs, 'view:meetings'))
+    // The pointer on the third tab until its × shows, as it does under the pointer; the strip as it
+    // is then. One that never shows says what the pointer is over.
+    const id3 = (await geo(p)).tabs[2].id
+    const tab3 = p.locator(`.ws-tab[data-pane="${id3}"]`)
+    const x = tab3.locator('.ws-tab-x')
+    const bx = await until(async () => { await tab3.hover(); return x.boundingBox() }, 5000, 200)
+    if (!bx) {
+      throw new Error(`the third tab's × doesn't show under the pointer: ${JSON.stringify(await tab3.evaluate((e) => {
+        const r = e.getBoundingClientRect()
+        const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+        return { tab: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)], strip: document.querySelector('.ws-tabs-scroll')?.className, over: [at, at?.parentElement, at?.parentElement?.parentElement].map((n) => n && `${n.tagName}.${String(n.className).slice(0, 40)}`), hovered: [...document.querySelectorAll(':hover')].slice(-2).map((n) => `${n.tagName}.${String(n.className).slice(0, 40)}`) }
+      }))}`)
+    }
     const before = await geo(p)
-    const third = before.tabs[2], fourth = before.tabs[3]
+    const third = before.tabs.find((y) => y.id === id3), fourth = before.tabs[before.tabs.indexOf(third) + 1]
     ok(third.w < 220, 'eight tabs share the strip, each narrower than its widest', third.w)
-    await p.locator(`.ws-tab[data-pane="${third.id}"]`).hover()
-    const x = p.locator(`.ws-tab[data-pane="${third.id}"] .ws-tab-x`)
-    const bx = await x.boundingBox()
     await p.mouse.click(bx.x + bx.width / 2, bx.y + bx.height / 2)
     await until(async () => !(await p.locator(`.ws-tab[data-pane="${third.id}"]`).count()), 3000)
     await p.waitForTimeout(150)

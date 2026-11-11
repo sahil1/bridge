@@ -13,7 +13,7 @@ import { Quiet } from './ErrorBoundary.jsx'
 import { openMeeting, useMeetings } from './meetings/recording.jsx'
 import { Dialog } from './meetings/tools.jsx'
 import { whiteboards } from './whiteboard/links.js'
-import { t, tx } from '../i18n/index.js'
+import { t, tn, tx } from '../i18n/index.js'
 import { useTrial } from '../trials.js'
 
 // Mirrors herdr's sidebar: numbered workspaces, each with its tabs. Spaces fold,
@@ -414,7 +414,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
           {recAsk && meet?.rec && (
             <Dialog title={t('Record a new meeting?')} onClose={() => setRecAsk(false)}>
               <div className="mt-fix">
-                <p><b>{meet.rec.title}</b> is recording. {t('Stop it and record a new one? It keeps everything recorded so far, and its notes are written as usual.')}</p>
+                <p>{tn('{title} is recording.', { title: <b>{meet.rec.title}</b> })} {t('Stop it and record a new one? It keeps everything recorded so far, and its notes are written as usual.')}</p>
                 <div className="mt-dialog-acts">
                   <button type="button" className="ghost-btn" onClick={() => setRecAsk(false)}>{t('Cancel')}</button>
                   <button type="button" className="btn small" onClick={() => { setRecAsk(false); openMeeting(meet.rec.id) }}>{t('Open it')}</button>

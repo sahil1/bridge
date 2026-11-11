@@ -63,17 +63,34 @@ try {
   pages.push(w)
   const p = w.p
   await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
-  const open = async (rel, sel) => until(async () => { await p.evaluate(({ root, rel }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: rel } })), { root, rel }); return p.locator(sel).first().waitFor({ timeout: 2500 }).then(() => true, () => false) }, 25000, 300)
+  const open = async (rel, sel) => {
+    const shown = await until(async () => { await p.evaluate(({ root, rel }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: rel } })), { root, rel }); return p.locator(sel).first().waitFor({ timeout: 2500 }).then(() => true, () => false) }, 25000, 300)
+    // The editor as it opened, to tell it from one loaded again since (seen, below).
+    await p.evaluate(() => { const ed = (document.querySelector('.sd-w') || document.querySelector('.sd-page .ProseMirror'))?.editor; if (ed) ed.opened = true })
+    return shown
+  }
   // The editor itself, for where the cursor goes and what a paragraph is.
   const E = (fn, arg) => p.evaluate(({ fn, arg }) => { const ed = (document.querySelector('.sd-w') || document.querySelector('.sd-page .ProseMirror')).editor; return new Function('ed', 'arg', `return (${fn})(ed, arg)`)(ed, arg) }, { fn: String(fn), arg })
+  // What the page shows, for a failure to say: the editor as it opened or loaded again since, the
+  // document's last paragraphs, Studio's note and status line, a dialog or menu open, and focus.
+  const seen = () => p.evaluate(() => {
+    const ed = (document.querySelector('.sd-w') || document.querySelector('.sd-page .ProseMirror'))?.editor
+    const last = []
+    ed?.state.doc.forEach((n) => last.push(n.textContent.slice(0, 60)))
+    const text = (s) => document.querySelector(s)?.innerText.slice(0, 200) ?? null
+    return { editor: !ed ? 'none' : ed.opened ? 'as it opened' : 'loaded again', last: last.slice(-4), note: text('.sd-note-bar'), conflict: text('.sd-conflict'), status: text('.sd-status .sd-state'), dialog: document.querySelector('.sd-modal')?.getAttribute('aria-label') ?? null, menu: document.querySelector('.sd-drop')?.getAttribute('aria-label') ?? null, focus: `${document.activeElement?.tagName}.${String(document.activeElement?.className).slice(0, 40)}` }
+  })
   // A new line at the end, out of any list.
   const atEnd = async () => {
     await E((ed) => { ed.view.focus(); ed.commands.focus('end') })
     await p.keyboard.press('Enter')
     if (await E((ed) => { const $f = ed.state.selection.$from; const a = $f.parent.attrs; return (a.num != null && a.num !== 0) || /item$/i.test($f.node(-1)?.type.name || '') })) await p.keyboard.press('Enter')
   }
-  const caret = (text, at = 'end') => E((ed, a) => { let r = null; ed.state.doc.descendants((n, pos) => { if (r == null && n.isTextblock && n.textContent.includes(a.text)) r = a.at === 'end' ? pos + n.nodeSize - 1 : pos + 1 + n.textContent.indexOf(a.text) + a.at; return r == null }); ed.view.focus(); ed.commands.setTextSelection(r) }, { text, at })
-  const pick = (text) => E((ed, t) => { let r = null; ed.state.doc.descendants((n, pos) => { if (!r && n.isTextblock && n.textContent.includes(t)) { const i = n.textContent.indexOf(t); r = { from: pos + 1 + i, to: pos + 1 + i + t.length } } return !r }); ed.view.focus(); ed.commands.setTextSelection(r) }, text)
+  // The cursor in the paragraph with these words (at its end, or so far into them), or the words
+  // picked; words that aren't there say what the page shows.
+  const notThere = async (text) => { throw new Error(`"${text}" isn't in the document: ${JSON.stringify(await seen())}`) }
+  const caret = async (text, at = 'end') => (await E((ed, a) => { let r = null; ed.state.doc.descendants((n, pos) => { if (r == null && n.isTextblock && n.textContent.includes(a.text)) r = a.at === 'end' ? pos + n.nodeSize - 1 : pos + 1 + n.textContent.indexOf(a.text) + a.at; return r == null }); if (r == null) return false; ed.view.focus(); ed.commands.setTextSelection(r); return true }, { text, at })) || notThere(text)
+  const pick = async (text) => (await E((ed, t) => { let r = null; ed.state.doc.descendants((n, pos) => { if (!r && n.isTextblock && n.textContent.includes(t)) { const i = n.textContent.indexOf(t); r = { from: pos + 1 + i, to: pos + 1 + i + t.length } } return !r }); if (!r) return false; ed.view.focus(); ed.commands.setTextSelection(r); return true }, text)) || notThere(text)
   // A paragraph with some words in it: its style, list and level, its marks, and its bullet or number as drawn.
   const para = async (text) => { await sleep(60); return E((ed, t) => { let r = null; ed.state.doc.descendants((n) => { if (!r && n.isTextblock && n.textContent.includes(t)) r = { text: n.textContent, s: n.attrs.s ?? null, num: n.attrs.num ?? null, lvl: n.attrs.lvl ?? null, marks: [...new Set(n.content.content.flatMap((c) => c.marks.map((m) => m.type.name)))] }; return !r }); if (r) r.mk = [...document.querySelectorAll('.sd-w [data-mk]')].find((x) => x.textContent.includes(t))?.getAttribute('data-mk') ?? null; return r }, text) }
   const images = () => E((ed) => { const r = []; ed.state.doc.descendants((n) => { if (n.type.name === 'image') r.push(n.attrs.src.slice(0, 40)) }); return r })
@@ -201,7 +218,7 @@ try {
   await pick('our roadmap')
   await p.keyboard.press(`${MOD}+k`)
   await p.locator('.sd-linkbar input').fill('example.com/roadmap')
-  await p.keyboard.press('Enter')
+  await p.locator('.sd-linkbar input').press('Enter')
   await caret('See our roadmap here', 6)
   const bubble = p.locator('.sd-link-pop')
   ok(!!(await until(async () => /example\.com\/roadmap/.test(await bubble.innerText().catch(() => '')), 3000, 100)) && (await bubble.locator('a').getAttribute('href')) === 'https://example.com/roadmap' && (await bubble.locator('button').evaluateAll((x) => x.map((e) => e.getAttribute('aria-label')))).join() === 'Copy the address,Change the link,Remove the link', 'the cursor in a link: its address (to open), with Copy, Change and Remove', await bubble.innerText().catch(() => ''))
@@ -281,7 +298,9 @@ try {
   const sheetW = () => p.locator('.sd-sheet').evaluate((e) => e.getBoundingClientRect().width / (parseFloat(e.style.zoom) || 1))
   const w0 = await sheetW()
   await tb.locator('button[aria-label="File"]').click()
-  await p.locator('.sd-drop .sd-item', { hasText: 'Page setup' }).click()
+  const pageSetup = p.locator('.sd-drop .sd-item', { hasText: 'Page setup' })
+  if (!(await pageSetup.waitFor({ timeout: 10000 }).then(() => true, () => false))) throw new Error(`File's menu didn't open: ${JSON.stringify({ ...await seen(), file: await tb.locator('button[aria-label="File"]').getAttribute('aria-expanded') })}`)
+  await pageSetup.click()
   const setup = p.locator('.sd-page-setup')
   await setup.locator('input[value="landscape"]').check()
   await setup.locator('select').selectOption('A4')

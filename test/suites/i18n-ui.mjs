@@ -7,7 +7,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { startKit, checks, until, browser, page, shot, ROOT } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, noServiceWorker, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('i18n-ui')
 const I18N = path.join(ROOT, 'src', 'i18n')
@@ -48,6 +48,10 @@ try {
     ok((await p.evaluate(() => document.documentElement.lang)) === l, `${l}: the page says it's in ${l}`)
     const nav = (await p.locator('.rail-nav-btn').allInnerTexts()).map((x) => x.trim())
     ok(['New', 'Chief of Staff', 'Meetings'].every((en) => nav.some((x) => x.includes(say(l, en)))), `${l}: the sidebar is in its words`, nav)
+    // New: the line under its title too (a browser can't pick a folder, so it says where to start one).
+    await p.locator('.rail-nav-btn[data-tour="new-agent"]').click()
+    const sub = say(l, 'Start an agent in a folder from More options, or just start a chat below.')
+    ok(!!(await until(async () => (await p.locator('.home-sub').innerText()).trim() === sub, 8000)), `${l}: and New`, await p.locator('.home-sub').innerText().catch(() => ''))
     // Asked again until it opens: on a busy machine the first can come before the page listens.
     const opened = await until(async () => {
       if (await p.locator('.st-nav-item').count()) return true
@@ -60,6 +64,21 @@ try {
     ok(!!(await until(async () => (await p.locator('.appearance h4').allInnerTexts()).includes(say(l, 'Language')), 5000)), `${l}: and Appearance, with Language`)
     ok((await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1, `${l}: nothing wider than the window`)
     await shot(p, `${tag}i18n-${l}`)
+    // Settings › General with no agent installed: the sentence around Install one, its link in place.
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'general' } })))
+    const none = say(l, 'No agents installed yet. {install} to get started, or chat with any model through an API key: New chat, then Any model.').replace('{install}', say(l, 'Install one'))
+    const warn = p.locator('[data-setting="default-agent"] .st-note.warn')
+    const reads = () => warn.evaluate((e) => e.textContent.replace(/\s+/g, ' ').trim())
+    ok(!!(await until(async () => (await reads()) === none, 8000)) && (await warn.locator('button').innerText()) === say(l, 'Install one'), `${l}: Settings › General, a sentence with a link in it`, await reads().catch(() => ''))
+    // The link sits in the sentence: what follows it goes on from beside it, not on a line of its own.
+    const inline = await warn.evaluate((e) => {
+      const b = e.querySelector('button'), after = b.nextSibling
+      if (!after?.textContent.trim()) return true
+      const r = document.createRange(); r.setStart(after, 0); r.setEnd(after, 1)
+      const a = r.getClientRects()[0], q = b.getBoundingClientRect()
+      return { ok: !!a && Math.abs((a.top + a.bottom) / 2 - (q.top + q.bottom) / 2) < 8 && a.left >= q.right - 1, a: a && [a.left, a.top], q: [q.right, q.top] }
+    })
+    ok(inline === true || inline.ok, `${l}: and its link in the line`, inline)
     if (phone) {
       const ph = await page(b, kit.url, { ...look, phone: true, store: { 'cc-lang': l } })
       await ph.p.waitForSelector('.tabbar button', { timeout: 15000 })
@@ -71,6 +90,31 @@ try {
     }
     ok(errors.length === 0, `${l}: no page errors`, errors)
     await ctx.close()
+  }
+
+  // The floating meeting card open while a meeting records, made as narrow as it goes (260 px), in
+  // each language: its links each on one line (Japanese and Chinese break between any two
+  // characters), and nothing past its edge.
+  const A = await kit.api('/meetings', { title: 'Quarterly plan', call: false })
+  const recording = { watching: true, calls: [], detect: true, float: 'meetings', floatHover: true, prompt: null, recording: { id: A.id, title: 'Quarterly plan', status: 'recording', startedAt: new Date(Date.now() - 60000).toISOString(), seconds: 60, callApps: [], callEnded: null, callEndedApp: null, stopsAt: null } }
+  for (const l of LANGS) {
+    const fl = await page(b, kit.url, { store: { 'cc-lang': l, 'cc-float-size': { w: 260 } }, before: async (c) => { await noServiceWorker(c); await c.route(/\/api\/calls(\?|$)/, (r) => r.fulfill({ json: recording })) } })
+    const card = await fl.ctx.newPage()
+    await card.setViewportSize({ width: 360, height: 520 })
+    await card.goto(`${kit.url}/?float=1`)
+    await card.waitForSelector('.float-card .fc-head', { timeout: 10000 }).catch(() => {})
+    await card.hover('.float-card .fc-head').catch(() => {})
+    const fit = await until(() => card.evaluate(() => {
+      const c = document.querySelector('.float-card')?.getBoundingClientRect()
+      const links = [...document.querySelectorAll('.float-card .fc-link')]
+      if (!c || !links.length) return null
+      // Lines of text in each: the distinct tops of its words' boxes.
+      const lines = (e) => { const r = document.createRange(); r.selectNodeContents(e); return new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size }
+      return { lines: links.map(lines), past: [...document.querySelectorAll('.float-card .fc-links > *')].filter((e) => e.getBoundingClientRect().right > c.right + 1).length }
+    }), 8000)
+    ok(!!fit && fit.lines.every((n) => n === 1) && fit.past === 0, `${l}: the meeting card's links each on one line, all inside it`, fit)
+    if (l === 'ja') await shot(card, `${tag}i18n-ja-card`)
+    await fl.ctx.close()
   }
 
   // Match this computer: the browser's language, here French.

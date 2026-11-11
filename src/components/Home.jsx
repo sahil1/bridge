@@ -6,7 +6,7 @@ import { api, usePoll } from '../api.js'
 import { openSettings } from './SignIn.jsx'
 import { EffortChip, launchEffort } from './Recommended.jsx'
 import { useTrial } from '../trials.js'
-import { t, tx } from '../i18n/index.js'
+import { t, tn, tx } from '../i18n/index.js'
 import './home.css'
 
 // Home: "What should we build in <project>?" and one message box, like starting a thread in T3
@@ -105,11 +105,12 @@ export default function Home({ fleet, onLaunched, onMore, autoFocus = true }) {
   }
 
   const name = project?.name?.split('/').pop()
+  const addKey = <button type="button" className="link-btn" onClick={() => openSettings('providers')}>{t('add an API key')}</button>
   return (
     <section className="pane home" aria-label={t('Start something new')}>
       <div className="home-center">
         <h1 className="home-title">
-          {project ? <>What should we build in{' '}
+          {project ? tn('What should we build in {project}?', { project: (
             <span className="home-proj">
               <button type="button" className="home-proj-btn" onClick={() => setOpen(open === 'project' ? null : 'project')} aria-haspopup="menu" aria-expanded={open === 'project'} title={project.short}>{name}</button>
               <Pop open={open === 'project'} onClose={() => setOpen(null)} className="home-pop-proj">
@@ -120,14 +121,15 @@ export default function Home({ fleet, onLaunched, onMore, autoFocus = true }) {
                 ))}
                 {pickFolder && <button type="button" onClick={async () => { setOpen(null); const d = await pickFolder().catch(() => null); if (d) addProject(d) }}><Icon name="plus" size={13} /><span className="home-pop-main"><b>{t('Add a project…')}</b></span></button>}
               </Pop>
-            </span>?</>
+            </span>
+          ) })
             : !pj && !noProject ? '\u00a0' : projects.length || noProject ? t('What should we work on?') : t('Add a project to start')}
         </h1>
         {project
           ? <button type="button" className="link-btn home-sub" onClick={() => setNoProject(true)}>{t('or start without a project')}</button>
           : noProject && projects.length > 0
             ? <button type="button" className="link-btn home-sub" onClick={() => setNoProject(false)}>{t('or work in a project')}</button>
-            : pj && !projects.length && <p className="muted small home-sub">{pickFolder ? <button type="button" className="link-btn" onClick={async () => { const d = await pickFolder().catch(() => null); if (d) addProject(d) }}>Choose a folder</button> : 'Start an agent in a folder from More options'}, or just start a chat below.</p>}
+            : pj && !projects.length && <p className="muted small home-sub">{pickFolder ? tn('{choose}, or just start a chat below.', { choose: <button type="button" className="link-btn" onClick={async () => { const d = await pickFolder().catch(() => null); if (d) addProject(d) }}>{t('Choose a folder')}</button> }) : t('Start an agent in a folder from More options, or just start a chat below.')}</p>}
 
         <form className="home-box" onSubmit={go}>
           <textarea ref={box} rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder={project ? t('Ask for a change, a fix, a plan, anything') : t('Ask anything')}
@@ -143,7 +145,7 @@ export default function Home({ fleet, onLaunched, onMore, autoFocus = true }) {
                     <AgentMark kind={k.kind} label={k.label} size={16} /><span className="home-pop-main"><b>{k.label}</b></span>
                   </button>
                 ))}
-                {kinds && !kinds.length && <p className="muted small home-pop-note">{t('No agents installed yet.')} <button type="button" className="link-btn" onClick={() => openSettings('agents')}>Install one</button>, or use any model below.</p>}
+                {kinds && !kinds.length && <p className="muted small home-pop-note">{t('No agents installed yet.')} {tn('{install}, or use any model below.', { install: <button type="button" className="link-btn" onClick={() => openSettings('agents')}>{t('Install one')}</button> })}</p>}
                 <div className="home-pop-sep">{t('Any model')}</div>
                 {models === null && kind !== 'chat' && <button type="button" onClick={() => api('/chat/models').then((r) => setModels(r.models || [])).catch(() => setModels([]))}><Icon name="chat" size={13} /><span className="home-pop-main"><b>{t('Show models…')}</b></span></button>}
                 {usable.map((m) => (
@@ -151,7 +153,7 @@ export default function Home({ fleet, onLaunched, onMore, autoFocus = true }) {
                     <Icon name="chat" size={13} /><span className="home-pop-main"><b>{m.label}</b><small>{m.provider}</small></span>
                   </button>
                 ))}
-                {models && !usable.length && <p className="muted small home-pop-note">No model {project ? 'that can work on files ' : ''}yet: <button type="button" className="link-btn" onClick={() => openSettings('providers')}>add an API key</button> or start Ollama or LM Studio.</p>}
+                {models && !usable.length && <p className="muted small home-pop-note">{project ? tn('No model that can work on files yet: {add} or start Ollama or LM Studio.', { add: addKey }) : tn('No model yet: {add} or start Ollama or LM Studio.', { add: addKey })}</p>}
               </Pop>
             </span>
             {project && (

@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { store } from './components/layout.jsx'
+import { tx } from './i18n/index.js'
 
 // Appearance, Slack style: a color mode, a theme that tints the window frame (top bar, sidebar,
 // tab strip) and sets the accent, plus text size, density and font. Saved per browser.
@@ -22,18 +23,22 @@ export const THEMES = [
   { id: 'mint', name: 'Mint', chrome: ['#d9f0e6', '#1c3129'], accent: ['#0f8a5f', '#3cc48d'] },
   { id: 'sky', name: 'Sky', chrome: ['#dbe9fb', '#1a2638'], accent: ['#2563eb', '#5b8ff5'] },
 ]
+// The themes' names, for the translation packs (Settings › Appearance shows each with t()). They stay
+// plain in THEMES, where the contrast check (test/suites/app-ui.mjs) reads each theme.
+export const THEME_NAMES = [tx('Default'), tx('Aubergine'), tx('Midnight'), tx('Ocean'), tx('Forest'), tx('Indigo'), tx('Berry'), tx('Ember'), tx('Graphite'), tx('Sand'), tx('Mint'), tx('Sky')]
 
 export const TEXT_SIZES = [
-  { id: 's', name: 'Small', body: 12.5, chat: 13, input: 13.5, term: 12 },
-  { id: 'm', name: 'Default', body: 13.5, chat: 14, input: 14.5, term: 13 },
-  { id: 'l', name: 'Large', body: 14.5, chat: 15.5, input: 16, term: 14 },
-  { id: 'xl', name: 'Larger', body: 15.5, chat: 17, input: 17, term: 15 },
+  { id: 's', name: tx('Small'), body: 12.5, chat: 13, input: 13.5, term: 12 },
+  { id: 'm', name: tx('Default'), body: 13.5, chat: 14, input: 14.5, term: 13 },
+  { id: 'l', name: tx('Large'), body: 14.5, chat: 15.5, input: 16, term: 14 },
+  { id: 'xl', name: tx('Larger'), body: 15.5, chat: 17, input: 17, term: 15 },
 ]
 
+// Geist is the font's own name; System and Rounded say what they are, so they're translated.
 export const FONTS = [
   { id: 'geist', name: 'Geist', css: '"Geist Variable", Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' },
-  { id: 'system', name: 'System', css: 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' },
-  { id: 'rounded', name: 'Rounded', css: 'ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, sans-serif' },
+  { id: 'system', name: tx('System'), css: 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' },
+  { id: 'rounded', name: tx('Rounded'), css: 'ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, sans-serif' },
 ]
 
 // Older builds kept only the color mode, under cc-theme.

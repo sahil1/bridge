@@ -79,8 +79,15 @@ const firstUse = async (c, got) => {
 // WebKit counts a request a reload cuts off (the presence ping, the live feed) as a page error.
 const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks/.test(e))
 // Listening: the mic's sound has come, and ✓ can stop it. Nothing before that is recorded, and on a
-// busy computer it can come a while after the press, so a hold here is timed from then.
-const listens = (pg) => until(() => pg.locator('.rec-stop:enabled, .dp-ok:enabled').count(), 5000, 50)
+// busy computer it can come a while after the press, so a hold here is timed from then. Not
+// listening by 15 s after the press: a failure saying what was shown, rather than going on with a
+// let go that comes before the mic is on, which keeps it listening hands-free with nothing heard.
+const listens = async (pg) => {
+  const t0 = Date.now()
+  const on = await until(() => pg.locator('.rec-stop:enabled, .dp-ok:enabled').count(), 15000, 50)
+  if (!on) ok(false, 'listening, once the key or the mic is pressed (✓ on)', { after: Date.now() - t0, shown: await pg.locator('.hud, .dict-dock, .composer').first().innerText().catch(() => '') })
+  return on
+}
 const before = async (ctx) => {
   await noServiceWorker(ctx)
   // What the page sends to be transcribed, read in the page (WebKit doesn't hand a test the body).
@@ -640,6 +647,9 @@ try {
   // ---------- The dictation window (?dictate=1) ----------
   // late: ms before the recording's sound starts coming, as when the audio starts up slowly on a busy
   // computer or a Bluetooth headset switches over to its mic (its audio context held suspended).
+  // Nothing the recording sends before then reaches the page, even should the context run a moment
+  // before its suspend takes hold; window.__late says, for the last recording, when it was made, when
+  // its sound came, when the page first heard it, and how much was held back.
   const hudPage = (pending = null, late = 0, mode = 'light') => page(b, `${kit.url}/?dictate=1`, { mode, store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
     await before(c)
     if (late) {
@@ -650,10 +660,27 @@ try {
             super(o)
             if (o?.sampleRate !== 16000) return
             const resume = Real.prototype.resume.bind(this)
-            let started = false
+            const late = { made: Math.round(performance.now()), on: null, heard: null, held: 0 }
+            this.late = late
+            window.__late = late
             this.suspend()
-            setTimeout(() => { started = true; resume().catch(() => {}) }, ms)
-            this.resume = () => (started ? resume() : Promise.resolve())
+            setTimeout(() => { late.on = Math.round(performance.now()); resume().catch(() => {}) }, ms)
+            this.resume = () => (late.on != null ? resume() : Promise.resolve())
+          }
+        }
+        const Node = window.AudioWorkletNode
+        const handler = Object.getOwnPropertyDescriptor(MessagePort.prototype, 'onmessage')
+        window.AudioWorkletNode = class extends Node {
+          constructor(ctx, ...rest) {
+            super(ctx, ...rest)
+            const late = ctx.late
+            if (!late) return
+            const port = this.port
+            Object.defineProperty(port, 'onmessage', { configurable: true, get: () => handler.get.call(port), set: (f) => handler.set.call(port, (e) => {
+              if (late.on == null && !e.data?.flushed) { late.held++; return }
+              if (late.heard == null) late.heard = Math.round(performance.now())
+              f(e)
+            }) })
           }
         }
       }, late)
@@ -845,9 +872,20 @@ try {
     await sleep(800)
     await key(h, 'down')
     ok(waiting && free && !!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Heard in the end.', 8000, 100)), 'the mic\'s sound coming late: not listening till it comes, a let go before then keeps it listening hands-free, and pressed again, the words', { waiting, free, hud: await h.locator('.hud').innerText().catch(() => '') })
+    // Held from when it hears you, as you'd see it: ✓ on and the bars up. (With no sound after 3 s
+    // it listens all the same, ✓ on and the bars flat, and on a busy computer the late sound can
+    // come after that.)
+    said.splice(0)
     said.push('held from when it listened')
-    await key(h, 'down'); await listens(h); await sleep(1300); await key(h, 'up')
-    ok(!!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Held from when it listened.', 8000, 100)) && real(he).length === 0, 'and held from when it listens: the words, not "Recording too short"', [await h.locator('.hud').innerText().catch(() => ''), he])
+    const t0 = Date.now()
+    await key(h, 'down')
+    const hearing = await until(() => h.locator('.hud .dp-listening').evaluate((el) => !!el.querySelector('.dp-ok:enabled') && parseFloat(/scaleY\(([\d.]+)\)/.exec(el.querySelector('.dp-wave i:last-child')?.style.transform || '')?.[1] || '0') > 0.5).catch(() => false), 15000, 50)
+    const after = Date.now() - t0
+    await sleep(1300); await key(h, 'up')
+    const words = !!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Held from when it listened.', 8000, 100))
+    ok(!!hearing && words && real(he).length === 0, 'and held from when it listens: the words, not "Recording too short"', [await h.locator('.hud').innerText().catch(() => ''), { hearing: !!hearing, after, late: await h.evaluate(() => window.__late).catch(() => null) }, he])
+    // Never heard (when that fails): not left for the next dictation to be answered with.
+    said.splice(0)
     await hc.close()
   }
   {
@@ -998,12 +1036,23 @@ try {
     await press(h, 'up')
     const why = !!(await until(async () => /Pasting needs Accessibility/.test(await hudText(h)) && (await h.locator('.hud-text').innerText().catch(() => '')) === 'Not allowed yet.', 8000, 100)) && await h.evaluate(() => window.__hud.pasted.length) === 0 && await h.locator('.hud button', { hasText: 'Copy' }).isVisible()
     const shown = await hudText(h)
-    await h.locator('.hud button', { hasText: 'Copy' }).click({ timeout: 5000 }).catch(() => {})
-    const loads = await h.evaluate(() => performance.getEntriesByType('navigation').length + (window.__reloads || 0)).catch(() => null)
-    const noOffer = !!(await until(async () => /Copied/.test(await hudText(h)), 3000, 100)) && await h.locator('.hud-offer').count() === 0
-    // (Not so on CI's Mac in 3.15.0: what the window showed after Copy, and whether the page loaded again.)
-    if (!noOffer) console.log('after Copy:', JSON.stringify({ text: await hudText(h), offer: await h.locator('.hud-offer').count(), url: h.url(), loads, hud: await h.evaluate(() => window.__hud).catch(() => null) }))
-    ok(chip && why && noOffer, 'no Accessibility yet: not even tried; while you talk, the agent to send it to as before, then the text to copy with one line, pasting needs Accessibility (and Copy asks nothing more: it\'s picked already)', { chip, why, noOffer, shown })
+    // What the window shows once Copy is clicked, watched in the page: "Copied" is up for two
+    // seconds and then the window goes, which a slow look from here can miss.
+    await h.evaluate(() => {
+      const seen = window.__seen = { copied: false, offer: false }
+      new MutationObserver(() => {
+        if (/Copied/.test(document.querySelector('.hud')?.innerText || '')) seen.copied = true
+        if (document.querySelector('.hud-offer')) seen.offer = true
+      }).observe(document.body, { subtree: true, childList: true, characterData: true })
+    })
+    let clicked = true
+    await h.locator('.hud button', { hasText: 'Copy' }).click({ timeout: 5000 }).catch((e) => { clicked = e.message.split('\n')[0] })
+    const seen = await until(() => h.evaluate(() => window.__seen.copied && window.__seen), 3000, 100)
+    // (Not so on CI's Mac in 3.15.0: whether the page loaded again, which leaves no window.__seen,
+    // and whether that was the app's own reload on a 401 for its key, which it notes: src/api.js.)
+    const loads = await h.evaluate(() => ({ navigations: performance.getEntriesByType('navigation').length, signedOut: sessionStorage.getItem('cc-signed-out') })).catch(() => null)
+    const noOffer = !!seen && !seen.offer
+    ok(chip && why && noOffer, 'no Accessibility yet: not even tried; while you talk, the agent to send it to as before, then the text to copy with one line, pasting needs Accessibility (and Copy asks nothing more: it\'s picked already)', { chip, why, noOffer, shown, clicked, loads, url: h.url(), after: await hudText(h).catch(() => null), seen: await h.evaluate(() => window.__seen).catch(() => null), copied: await h.evaluate(() => window.__hud.copied).catch(() => null), now: await hudText(h) })
     await hc.close()
   }
   {

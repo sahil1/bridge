@@ -64,10 +64,11 @@ if (fs.existsSync(path.join(os.homedir(), 'codex-first-run.json'))) {
   let pick = 0
   const picker = () => screen(['', '  Sign in with ChatGPT to use Codex as part of your paid plan', '  or connect an API key for usage-based billing', '',
     ...['Sign in with ChatGPT', 'Sign in with Device Code', 'Sign in another way'].map((o, i) => `${i === pick ? '› ' : '  '}${i + 1}. ${o}`), '', '  Press Enter to continue', ''])
-  openBrowser(authorize(1455))
-  browser()
+  // Keys a key at a time before its screen is up, as the Claude Code stand-in reads them.
   if (process.stdin.isTTY) process.stdin.setRawMode(true)
   process.stdin.setEncoding('utf8')
+  openBrowser(authorize(1455))
+  browser()
   // Each key on its own, however the terminal hands them over (down and Enter can come as one).
   process.stdin.on('data', (chunk) => {
     fs.appendFileSync(path.join(os.homedir(), 'codex-typed.log'), JSON.stringify(chunk) + '\n')

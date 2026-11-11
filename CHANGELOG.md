@@ -2,6 +2,31 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.15.1
+
+Fixes: the whole app in your language, every pack complete; and the bugs behind every test that failed now and then, from Settings jumping from under your click to a phone slow to reconnect.
+
+### Fixes
+
+- **The whole app is in your language**: Settings, New, an agent's tabs, sign-in, cloud agents and the meeting card no longer show English, and every language pack is complete.
+- **The meeting card's links stay on one line** in every language.
+- **Settings opened at one setting** (Accounts, say) is there as soon as it appears, instead of jumping there from under your click.
+- **A sign-in code typed from the email** while Send a new code is still answering stays, rather than being cleared.
+- **A window showing another computer no longer loses a file or an answer when the link drops.**
+- **The phone reconnects as soon as its network is back**, rather than up to 10 seconds later.
+- **Dictation reaches another computer's agent in a tab right away** after linking or starting Bridge AI.
+- **Words said with the mic button in another computer's tab stay there** when Ask out loud ends them, rather than going to its Chief of Staff.
+- **A subagent's step count in Chat's tray is right**: it no longer counts each step twice.
+- **Leaving a page while a whiteboard is still loading** no longer reports an error in Safari and the iPhone app.
+- **Sign this works when picked while a PDF is still opening.**
+- **Find in a chat keeps its match in view** when the chat gets shorter.
+- **Mail no longer shows "database is locked"** while Mail updates its index: it waits a moment, then says plainly if Mail stays busy.
+- **The inbox reads after Mail has quit on macOS 15**, rather than asking for Full Disk Access you'd already given.
+- **The banner asking to keep a device or allow a link** no longer moves the page under your finger.
+- **With Home on, a new window no longer takes you to Home** after you've already tapped somewhere.
+- **A dropdown made in a sheet is saved into Excel as its choices** (Yes, No), not as `["Yes","No"]`.
+- **The desktop build's minimatch security alert is cleared.**
+
 ## 3.15.0
 
 Better than Claude's new Whiteboards and Sheets: a sheet's AI Assist that answers in seconds, a whiteboard's AI Assist that suggests rather than changes, asks about what you pick, groups, plans and lists action items, and turns a board into a document or a deck, with versions to go back to; comments in Word files with @bridge; and Bridge AI as an MCP server for Claude Code, Claude Desktop, Cursor and Codex, with a key for its API.

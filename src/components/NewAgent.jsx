@@ -10,7 +10,7 @@ import { AccountPicker, nameOf } from './AccountMenu.jsx'
 import NewCloudAgent from './NewCloudAgent.jsx'
 import { EffortChip, launchEffort } from './Recommended.jsx'
 import { useTrial } from '../trials.js'
-import { t } from '../i18n/index.js'
+import { t, tn } from '../i18n/index.js'
 
 // Start any installed agent in a project folder (in an existing space or a new one), or as a
 // plain chat with no project, like talking to Claude or Codex directly. Optionally with a first message.
@@ -257,7 +257,7 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
           <div className="na-field">
             <span className="na-label">{t('In the sidebar')}</span>
             <div className="na-where">
-              <span>{space === '__new' ? <>A new space called <b>{spaceName || name || folderName}</b></> : <>In <b>{fleet?.workspaces?.find((w) => w.id === space)?.label || 'that space'}</b>, as <b>{name || folderName}</b></>}</span>
+              <span>{space === '__new' ? tn('A new space called {name}', { name: <b>{spaceName || name || folderName}</b> }) : tn('In {space}, as {name}', { space: <b>{fleet?.workspaces?.find((w) => w.id === space)?.label || t('that space')}</b>, name: <b>{name || folderName}</b> })}</span>
               <button type="button" className="link-btn" onClick={() => setPlaceOpen(true)}>{t('Change')}</button>
             </div>
           </div>

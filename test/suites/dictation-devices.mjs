@@ -1,6 +1,7 @@
 // Dictation into another of your computers shown in this one's window, in the browser named by
 // BRIDGE_TEST_BROWSER: two Bridge AIs, "Studio" (with its Chief of Staff) and "Desk" (where an agent
-// works), on relays of their own (stand-ins/relay.mjs), linked; speech to text stood in for
+// works), on relays of their own (stand-ins/relay.mjs), linked, Studio's page told where Desk's
+// pages are from the first; speech to text stood in for
 // (/api/transcribe answers what each check says was said).
 //   Desk's agent in a tab of Studio's window, split beside Studio's Chief of Staff: the key the
 //   desktop app hands the window in front (with the key from any app on, it hears the key itself),
@@ -13,7 +14,8 @@
 //   computer's microphone): put in Desk's agent's message box; a page with nowhere to put them says
 //   so, and they're kept. Desk's mic button held in its tab, and Ask out loud on Desk's Chief of
 //   Staff in a tab: Studio's page listens, and the words go into Desk's box, or to Desk's Chief of
-//   Staff, never Studio's. A window showing Desk in the desktop app (simulated: its page can't use
+//   Staff, never Studio's; the mic button tapped there and Ask out loud pressed while it listens:
+//   into the message box, not asked. A window showing Desk in the desktop app (simulated: its page can't use
 //   the microphone and leaves the key to the app): the mic button and Ask out loud say so and what to
 //   do instead, never "blocked", and its page doesn't take the key.
 //   The dictation window's "the agent I looked at last", when that was on Desk (a tab, then a window
@@ -104,6 +106,9 @@ try {
   await studio.api('/machines', { link: `${rd.url} ${pairing.code}` })
   const deskM = await until(async () => (await studio.api('/machines')).machines.find((m) => m.name === 'Desk' && m.online), 30000, 300)
   ok(!!deskM, 'Studio is linked with Desk')
+  // Told from the first where Desk's pages are (its port on Studio): a page told nothing took Desk's
+  // page in its tab for one beside it, and the words said for it went nowhere for a while.
+  ok(Number.isInteger(deskM?.port), 'and Studio\'s page is told where Desk\'s pages are, straight away', deskM && { port: deskM.port })
 
   // Studio's Chief of Staff, and an agent at work on Desk.
   await studio.api('/chief/launch', {})
@@ -259,6 +264,46 @@ try {
     ok(!prompts.slice(n0).some((x) => !x.url.includes('/m/')), 'never of Studio\'s', prompts.slice(n0))
     const askedK = await until(async () => (await studio.api('/dictations?limit=30')).items.find((x) => /^What's blocked/.test(x.text)), 5000, 200)
     ok(askedK?.how === 'sent' && askedK.agent?.chief === true, 'kept on Studio as sent to a Chief of Staff', askedK)
+    // Its mic button tapped, listening hands-free, then Ask out loud pressed there: as on this
+    // computer, that press ends the listening, and the words go where the mic button was for (its
+    // message box), never asked of the Chief of Staff.
+    const chiefBox = inside.locator('textarea[data-composer]')
+    await chiefBox.fill('Note')
+    const n1 = prompts.length
+    said.push('tapped then asked')
+    const mic = await inside.locator('.comp-btn.mic-btn').first().boundingBox()
+    await p.mouse.move(mic.x + mic.width / 2, mic.y + mic.height / 2)
+    await p.mouse.down()
+    await p.mouse.up()
+    const free = await until(async () => /when you're done/.test(await p.locator('.dict-dock .dp-listening').getAttribute('aria-label').catch(() => '')) && await p.locator('.dict-dock .dp-ok:enabled').count(), 8000, 50)
+    await sleep(1300)
+    const a2 = await ask.boundingBox()
+    await p.mouse.move(a2.x + a2.width / 2, a2.y + a2.height / 2)
+    await p.mouse.down()
+    await p.mouse.up()
+    ok(!!free && !!(await until(async () => (await chiefBox.inputValue().catch(() => '')) === 'Note Tapped then asked.', 8000)) && !prompts.slice(n1).length, 'the mic button tapped in Desk\'s Chief of Staff\'s tab, then Ask out loud pressed while it listens: the words go into its message box, not asked of it', { free: !!free, box: await chiefBox.inputValue().catch(() => ''), asked: prompts.slice(n1), note: await p.locator('.dict-dock').innerText().catch(() => '') })
+    // ...and tapped in Desk's agent's tab, which then shows Desk's Chief of Staff before Ask out loud
+    // ends it: the words are for a page the tab no longer shows, so they're shown and kept here,
+    // never asked of the Chief of Staff it shows now.
+    await p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: id } })), rid)
+    await deskBox.waitFor({ timeout: 45000 })
+    const n2 = prompts.length
+    said.push('said before switching')
+    const mic2 = await inside.locator('.comp-btn.mic-btn').first().boundingBox()
+    await p.mouse.move(mic2.x + mic2.width / 2, mic2.y + mic2.height / 2)
+    await p.mouse.down()
+    await p.mouse.up()
+    const free2 = await until(async () => /when you're done/.test(await p.locator('.dict-dock .dp-listening').getAttribute('aria-label').catch(() => '')) && await p.locator('.dict-dock .dp-ok:enabled').count(), 8000, 50)
+    await sleep(1300)
+    await p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: id } })), rchief)
+    await ask.waitFor({ timeout: 45000 })
+    const a3 = await ask.boundingBox()
+    await p.mouse.move(a3.x + a3.width / 2, a3.y + a3.height / 2)
+    await p.mouse.down()
+    await p.mouse.up()
+    const shown = await until(async () => { const x = await p.locator('.dict-dock').innerText().catch(() => ''); return /Said before switching\./.test(x) && x }, 8000, 100)
+    const keptS = await until(async () => (await studio.api('/dictations?limit=30')).items.find((x) => x.text === 'Said before switching.'), 5000, 200)
+    ok(!!free2 && !!shown && !!keptS && !prompts.slice(n2).length, 'tapped in Desk\'s agent\'s tab, and Ask out loud pressed once the tab shows its Chief of Staff: the words are shown and kept here, not asked of it', { free: !!free2, shown, kept: keptS, asked: prompts.slice(n2) })
     ok(real(s.errors).length === 0, 'no page errors', s.errors)
     await s.ctx.close()
   }

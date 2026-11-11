@@ -19,7 +19,7 @@ export default function ConfigFile() {
   if (!s) return <div className="skeleton-rows"><div /><div /><div /></div>
 
   let parseError = null
-  try { const o = JSON.parse(text); if (!o || typeof o !== 'object' || Array.isArray(o)) parseError = 'The file must hold a JSON object ({ ... })' } catch (e) { parseError = e.message }
+  try { const o = JSON.parse(text); if (!o || typeof o !== 'object' || Array.isArray(o)) parseError = t('The file must hold a JSON object ({ ... })') } catch (e) { parseError = e.message }
   const dirty = text !== s.raw
   const save = async () => {
     try { const r = await api('/settings/raw', { method: 'PUT', body: { text } }); setS(r.settings); setText(r.settings.raw); settingsChanged(); setNote(r.restart.length ? { restart: r.restart } : { saved: true }) } catch (e) { setNote({ error: e.message }) }
@@ -29,15 +29,15 @@ export default function ConfigFile() {
     <div className="st-sections" data-setting="config-file">
       <div className="st-row between">
         <code className="st-path" title={s.file}>{s.file}</code>
-        <CopyButton text={s.file} label="Copy path" />
+        <CopyButton text={s.file} label={t('Copy path')} />
       </div>
       <p className="muted small" title={t('Only what you set goes here; everything else comes from the defaults. Most changes apply right away; {keys} apply after a restart.', { keys: s.restartKeys.join(', ') })}>{t("Only what you set; the rest comes from the defaults. API keys don't belong here: add them under Model Providers.")}</p>
       <textarea className="st-code" value={text} onChange={(e) => { setText(e.target.value); setNote(null) }} spellCheck={false} rows={16} aria-label="config.json" />
       <div className="st-row between">
-        <span className={parseError ? 'error-text' : 'muted small'}>{parseError ? `Not valid yet: ${parseError}` : dirty ? 'Valid JSON, not saved' : 'Saved'}</span>
+        <span className={parseError ? 'error-text' : 'muted small'}>{parseError ? t('Not valid yet: {error}', { error: parseError }) : dirty ? t('Valid JSON, not saved') : t('Saved')}</span>
         <span className="st-row">
-          {dirty && <button type="button" className="ghost-btn" onClick={() => { setText(s.raw); setNote(null) }}>Discard changes</button>}
-          <button type="button" className="btn primary" disabled={!dirty || !!parseError} onClick={save}>Save</button>
+          {dirty && <button type="button" className="ghost-btn" onClick={() => { setText(s.raw); setNote(null) }}>{t('Discard changes')}</button>}
+          <button type="button" className="btn primary" disabled={!dirty || !!parseError} onClick={save}>{t('Save')}</button>
         </span>
       </div>
       <SaveNote note={note} />
@@ -45,8 +45,8 @@ export default function ConfigFile() {
         <section className="st-sec" data-setting="config-effective">
           <h4>{t('Effective Settings and Defaults')}</h4>
           <div className="seg ap-seg">
-            <button type="button" className={view === 'effective' ? 'on' : ''} onClick={() => setView(view === 'effective' ? null : 'effective')}>Effective settings</button>
-            <button type="button" className={view === 'defaults' ? 'on' : ''} onClick={() => setView(view === 'defaults' ? null : 'defaults')}>Defaults</button>
+            <button type="button" className={view === 'effective' ? 'on' : ''} onClick={() => setView(view === 'effective' ? null : 'effective')}>{t('Effective settings')}</button>
+            <button type="button" className={view === 'defaults' ? 'on' : ''} onClick={() => setView(view === 'defaults' ? null : 'defaults')}>{t('Defaults')}</button>
           </div>
           {view && <pre className="st-code ro">{JSON.stringify(view === 'effective' ? s.effective : s.defaults, null, 2)}</pre>}
         </section>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Icon from './Icon.jsx'
 import { usePersisted, useWidth } from './layout.jsx'
 import { api, usePoll, fmtTime } from '../api.js'
-import { locale } from '../i18n/index.js'
+import { t, locale } from '../i18n/index.js'
 
 const enc = encodeURIComponent
 const fmtPrice = (q) => {
@@ -12,10 +12,10 @@ const fmtPrice = (q) => {
 }
 const fmtVol = (n) => (n == null ? '—' : n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}K` : String(n))
 const pct = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}%`
-const ago = (t) => {
-  if (!t) return ''
-  const m = Math.round((Date.now() - t) / 60000)
-  return m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`
+const ago = (ts) => {
+  if (!ts) return ''
+  const m = Math.round((Date.now() - ts) / 60000)
+  return t('{time} ago', { time: m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d` })
 }
 const short = (s) => s.replace(/^\^/, '').replace(/-USD$/, '').replace(/=F$/, '')
 
@@ -28,11 +28,11 @@ function Spark({ values, up, w = 64, h = 22 }) {
 
 export const RANGES = [['1mo', '30D'], ['60d', '60D'], ['3mo', '3M'], ['6mo', '6M'], ['ytd', 'YTD'], ['1y', '1Y'], ['5y', '5Y'], ['max', 'Max']]
 const longRange = (data) => data.length > 1 && data.at(-1).t - data[0].t > 400 * 864e5
-const fmtDay = (t, long) => new Date(t).toLocaleDateString(locale(), long ? { month: 'short', year: 'numeric' } : { month: 'short', day: 'numeric' })
+const fmtDay = (ts, long) => new Date(ts).toLocaleDateString(locale(), long ? { month: 'short', year: 'numeric' } : { month: 'short', day: 'numeric' })
 
 export function RangePicker({ value, onChange, options = RANGES }) {
   return (
-    <div className="seg small-seg range-seg" role="tablist" aria-label="Time range">
+    <div className="seg small-seg range-seg" role="tablist" aria-label={t('Time range')}>
       {options.map(([v, l]) => <button key={v} role="tab" aria-selected={value === v} className={value === v ? 'on' : ''} onClick={() => onChange(v)}>{l}</button>)}
     </div>
   )
@@ -59,7 +59,7 @@ function PriceChart({ q, points, label }) {
   }
   return (
     <div className="pchart" ref={ref}>
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} onPointerMove={onMove} onPointerLeave={() => setHover(null)} className={up ? 'up' : 'down'} role="img" aria-label={`${q.symbol} ${label || 'last 3 months'}`}>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} onPointerMove={onMove} onPointerLeave={() => setHover(null)} className={up ? 'up' : 'down'} role="img" aria-label={`${q.symbol} ${label || t('last 3 months')}`}>
         <defs><linearGradient id={`g-${q.symbol}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopOpacity=".22" className="gstop" /><stop offset="1" stopOpacity="0" className="gstop" /></linearGradient></defs>
         {[min, (min + max) / 2, max].map((v) => (
           <g key={v}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className="grid" /><text x={W - R + 4} y={y(v) + 3} className="axis-label">{v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(2)}</text></g>
@@ -124,19 +124,19 @@ function Detail({ q }) {
     <div className="q-detail">
       <div className="q-range-row">
         <RangePicker value={range} onChange={setRange} />
-        {change != null && <span className={`q-range-chg ${change >= 0 ? 'pos' : 'neg'}`}>{pct(change)} <span className="muted">over {label}</span></span>}
+        {change != null && <span className={`q-range-chg ${change >= 0 ? 'pos' : 'neg'}`}>{pct(change)} <span className="muted">{t('over {range}', { range: label })}</span></span>}
       </div>
       <PriceChart q={q} points={points || (range === '3mo' ? q.history : null) || q.history} label={label} />
       <div className="q-stats">
-        <Range label="Day range" low={q.dayLow} high={q.dayHigh} value={q.price} />
-        <Range label="52-week range" low={q.yearLow} high={q.yearHigh} value={q.price} />
-        <div className="q-kv"><span className="muted">Volume</span><b>{fmtVol(q.volume)}</b></div>
-        {q.monthChangePercent != null && <div className="q-kv"><span className="muted">1 month</span><b className={q.monthChangePercent >= 0 ? 'pos' : 'neg'}>{pct(q.monthChangePercent)}</b></div>}
+        <Range label={t('Day range')} low={q.dayLow} high={q.dayHigh} value={q.price} />
+        <Range label={t('52-week range')} low={q.yearLow} high={q.yearHigh} value={q.price} />
+        <div className="q-kv"><span className="muted">{t('Volume')}</span><b>{fmtVol(q.volume)}</b></div>
+        {q.monthChangePercent != null && <div className="q-kv"><span className="muted">{t('1 month')}</span><b className={q.monthChangePercent >= 0 ? 'pos' : 'neg'}>{pct(q.monthChangePercent)}</b></div>}
       </div>
       <div className="q-links">
         {q.links.google && <a className="ghost-btn" href={q.links.google} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> Google Finance</a>}
         <a className="ghost-btn" href={q.links.yahoo} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> Yahoo</a>
-        <span className="muted small q-asof">{q.exchangeName}{q.asOf ? ` · as of ${fmtTime(q.asOf)}` : ''}</span>
+        <span className="muted small q-asof">{q.exchangeName}{q.asOf ? ` · ${t('as of {time}', { time: fmtTime(q.asOf) })}` : ''}</span>
       </div>
       {news.data?.items?.length > 0 && <NewsList items={news.data.items} limit={3} showTickers={false} />}
     </div>
@@ -147,8 +147,8 @@ function QuoteRow({ q, open, onToggle, edit, onRemove, onMove, first, last }) {
   if (q.error) {
     return (
       <li className="q-row err">
-        <div className="q-main"><span className="q-sym">{q.symbol}</span><span className="muted small">no data</span></div>
-        {edit && <button className="icon-btn" onClick={onRemove} aria-label={`Remove ${q.symbol}`}><Icon name="x" size={13} /></button>}
+        <div className="q-main"><span className="q-sym">{q.symbol}</span><span className="muted small">{t('no data')}</span></div>
+        {edit && <button className="icon-btn" onClick={onRemove} aria-label={t('Remove {name}', { name: q.symbol })}><Icon name="x" size={13} /></button>}
       </li>
     )
   }
@@ -163,12 +163,12 @@ function QuoteRow({ q, open, onToggle, edit, onRemove, onMove, first, last }) {
         </button>
         {edit ? (
           <span className="q-edit">
-            <button className="icon-btn" disabled={first} onClick={() => onMove('up')} aria-label="Move up"><Icon name="up" size={13} /></button>
-            <button className="icon-btn" disabled={last} onClick={() => onMove('down')} aria-label="Move down"><Icon name="down" size={13} /></button>
-            <button className="icon-btn danger" onClick={onRemove} aria-label={`Remove ${q.symbol}`}><Icon name="x" size={13} /></button>
+            <button className="icon-btn" disabled={first} onClick={() => onMove('up')} aria-label={t('Move up')}><Icon name="up" size={13} /></button>
+            <button className="icon-btn" disabled={last} onClick={() => onMove('down')} aria-label={t('Move down')}><Icon name="down" size={13} /></button>
+            <button className="icon-btn danger" onClick={onRemove} aria-label={t('Remove {name}', { name: q.symbol })}><Icon name="x" size={13} /></button>
           </span>
         ) : (
-          <a className="icon-btn q-ext" href={q.links.google || q.links.yahoo} target="_blank" rel="noreferrer" aria-label={`${q.symbol} on ${q.links.google ? 'Google Finance' : 'Yahoo Finance'}`} title={q.links.google ? 'Google Finance' : 'Yahoo Finance (no Google page for futures)'}><Icon name="external" size={12} /></a>
+          <a className="icon-btn q-ext" href={q.links.google || q.links.yahoo} target="_blank" rel="noreferrer" aria-label={t('{name} on {site}', { name: q.symbol, site: q.links.google ? 'Google Finance' : 'Yahoo Finance' })} title={q.links.google ? 'Google Finance' : t('Yahoo Finance (no Google page for futures)')}><Icon name="external" size={12} /></a>
         )}
       </div>
       {open && <Detail q={q} />}
@@ -183,8 +183,8 @@ function AddTicker({ onAdd }) {
   const [err, setErr] = useState(null)
   useEffect(() => {
     if (q.trim().length < 1) { setRes([]); return }
-    const t = setTimeout(() => api(`/market/search?q=${enc(q.trim())}`).then((r) => setRes(r.results.slice(0, 6))).catch(() => setRes([])), 200)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => api(`/market/search?q=${enc(q.trim())}`).then((r) => setRes(r.results.slice(0, 6))).catch(() => setRes([])), 200)
+    return () => clearTimeout(timer)
   }, [q])
   const add = async (symbol) => {
     setBusy(true); setErr(null)
@@ -195,7 +195,7 @@ function AddTicker({ onAdd }) {
       <div className="add-input">
         <Icon name="search" size={13} />
         <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && q.trim()) add(res[0]?.symbol || q.trim()) }}
-          placeholder="Add ticker or company (e.g. AAPL, Tesla, ETH)" autoCapitalize="characters" autoCorrect="off" spellCheck="false" disabled={busy} />
+          placeholder={t('Add ticker or company (e.g. AAPL, Tesla, ETH)')} autoCapitalize="characters" autoCorrect="off" spellCheck="false" disabled={busy} />
       </div>
       {res.length > 0 && (
         <ul className="add-results">
@@ -225,11 +225,11 @@ export default function Markets({ Card, Updated }) {
   const lead = data?.indices?.[0]
 
   return (
-    <Card icon="trend" title="Markets" summary={lead ? `${lead.name} ${pct(lead.changePercent)}` : ''}
+    <Card icon="trend" title={t('Markets')} summary={lead ? `${lead.name} ${pct(lead.changePercent)}` : ''}
       right={(
         <span className="mk-tools">
           <Updated data={data} onRefresh={() => refresh('?refresh=1')} />
-          <button className={`icon-btn ${edit ? 'on' : ''}`} onClick={() => setEdit(!edit)} aria-pressed={edit} title={edit ? 'Done editing' : 'Edit watchlist'} aria-label="Edit watchlist">
+          <button className={`icon-btn ${edit ? 'on' : ''}`} onClick={() => setEdit(!edit)} aria-pressed={edit} title={edit ? t('Done editing') : t('Edit watchlist')} aria-label={t('Edit watchlist')}>
             <Icon name={edit ? 'check' : 'edit'} size={13} />
           </button>
         </span>
@@ -241,7 +241,7 @@ export default function Markets({ Card, Updated }) {
           {data.indices.map((q) => {
             const up = q.changePercent >= 0
             return (
-              <a key={q.symbol} className="idx" href={q.links.google || q.links.yahoo} target="_blank" rel="noreferrer" title={`${q.name} on Google Finance`}>
+              <a key={q.symbol} className="idx" href={q.links.google || q.links.yahoo} target="_blank" rel="noreferrer" title={t('{name} on {site}', { name: q.name, site: 'Google Finance' })}>
                 <span className="idx-name">{q.name}</span>
                 <span className="idx-price num">{fmtPrice(q)}</span>
                 <span className={`delta ${up ? 'pos' : 'neg'}`}>{up ? '▲' : '▼'} {Math.abs(q.changePercent).toFixed(2)}%</span>
@@ -253,7 +253,7 @@ export default function Markets({ Card, Updated }) {
       )}
       {data && (
         <>
-          <div className="group-label wl-label">Watchlist <span className="muted">· tap for chart, ranges and news</span></div>
+          <div className="group-label wl-label">{t('Watchlist')} <span className="muted">· {t('tap for chart, ranges and news')}</span></div>
           {edit && <AddTicker onAdd={(s) => mutate(() => api('/market/watchlist', { method: 'POST', body: { symbol: s } }))} />}
           <ul className="q-list">
             {wl.map((q, i) => (
@@ -263,19 +263,19 @@ export default function Markets({ Card, Updated }) {
                 onMove={(dir) => mutate(() => api(`/market/watchlist/${enc(q.symbol)}/move`, { method: 'POST', body: { dir } }))} />
             ))}
           </ul>
-          {!wl.length && <p className="muted small">Your watchlist is empty. Tap the pencil to add tickers.</p>}
+          {!wl.length && <p className="muted small">{t('Your watchlist is empty. Tap the pencil to add tickers.')}</p>}
         </>
       )}
       {(news.data?.items?.length || 0) > 0 && (
         <div className="mk-news">
-          <div className="group-label">Headlines for your watchlist</div>
+          <div className="group-label">{t('Headlines for your watchlist')}</div>
           <div className="chips news-chips">
-            <button className={`fchip ${newsFilter === 'all' ? 'on' : ''}`} onClick={() => setNewsFilter('all')}>All</button>
+            <button className={`fchip ${newsFilter === 'all' ? 'on' : ''}`} onClick={() => setNewsFilter('all')}>{t('All')}</button>
             {withNews.map((s) => <button key={s} className={`fchip ${newsFilter === s ? 'on' : ''}`} onClick={() => setNewsFilter(s)}>{short(s)}</button>)}
           </div>
           <NewsList items={items} limit={newsLimit} />
-          {items.length > newsLimit && <button className="ghost-btn more" onClick={() => setNewsLimit(newsLimit + 10)}>Show more</button>}
-          <p className="muted small">News via Yahoo Finance.</p>
+          {items.length > newsLimit && <button className="ghost-btn more" onClick={() => setNewsLimit(newsLimit + 10)}>{t('Show more')}</button>}
+          <p className="muted small">{t('News via Yahoo Finance.')}</p>
         </div>
       )}
     </Card>

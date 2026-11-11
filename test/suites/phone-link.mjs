@@ -67,16 +67,26 @@ try {
     await p.goto(url, { waitUntil: 'commit' })
   }
   const app = () => p.frames().find((f) => f !== p.mainFrame() && f.url().startsWith(relay.url))
-  // When the app inside has its first answers (the settings and your agents), from the moment `t0`.
-  const answered = async (t0) => {
-    const at = await until(() => app()?.evaluate(() => {
+  // When the app inside has its first answers (the settings and your agents), in ms from `from` (a
+  // time on the page's own clock: when it began to load, or when Pair was tapped), and where the time
+  // went on the way, each from then: the app's page began to load in its frame (frame), came (page),
+  // the files it needed first had come (files), and it asked for them (asked). Measured in the browser,
+  // so what Playwright takes to open a page or find the button isn't counted as the phone's.
+  const answered = async (from) => {
+    const got = await until(() => app()?.evaluate(() => {
       const r = performance.getEntriesByType('resource')
-      const end = (u) => r.find((x) => x.name === location.origin + u)?.responseEnd
-      const t = Math.max(end('/api/config'), end('/api/fleet'))
-      return Number.isFinite(t) ? performance.timeOrigin + t : null
+      const e = (u) => r.find((x) => x.name === location.origin + u)
+      const t = Math.max(e('/api/config')?.responseEnd, e('/api/fleet')?.responseEnd)
+      if (!Number.isFinite(t)) return null
+      const asked = Math.min(e('/api/config').startTime, e('/api/fleet').startTime)
+      const files = r.filter((x) => x.name.startsWith(`${location.origin}/assets/`) && x.responseEnd <= asked).map((x) => x.responseEnd)
+      return { o: performance.timeOrigin, t, page: performance.getEntriesByType('navigation')[0]?.responseEnd || 0, files: files.length ? Math.max(...files) : 0, asked }
     }), 30000, 50)
-    return at ? Math.round(at - t0) : null
+    if (!got) return { ms: null, steps: null }
+    const at = (x) => Math.round(got.o + x - from)
+    return { ms: at(got.t), steps: { frame: at(0), page: at(got.page), files: at(got.files), asked: at(got.asked) } }
   }
+  const pageStart = () => p.evaluate(() => performance.timeOrigin)
   // A request from the app, through the link: whether it was answered (within `ms`). Each asks an
   // address of its own, so what the phone kept of the computer (offline.js) can't answer it.
   const asks = (u = '/api/version', ms = 4000) => app()?.evaluate(async ({ u, ms }) => {
@@ -89,16 +99,17 @@ try {
 
   // ---------- the first time: pairing, then Bridge AI ----------
   await test('count')
-  let t0 = Date.now()
   await open(pairing.link)
   // A pairing link asks first, with its code ready: one tap.
   const askedPair = await until(() => p.evaluate(() => (document.getElementById('pair')?.hidden === false ? `${document.querySelector('#pair h1').textContent} ${document.getElementById('code').value}` : null)), 15000, 20)
   ok(/^Pair with .+\? [A-Z2-9-]{24}$/.test(askedPair || '') && !/this computer/.test(askedPair) && askedPair.endsWith(pairing.code), 'a pairing link asks first, "Pair with <its name>?", with its code ready', askedPair)
+  // From the tap: until then the page waits on you, not you on it.
+  await p.evaluate(() => document.getElementById('pair-go').addEventListener('click', () => { window.__tapped = performance.timeOrigin + performance.now() }, { capture: true, once: true }))
   await p.locator('#pair-go').click()
-  const first = await answered(t0)
+  const { ms: first, steps: firstSteps } = await answered(await p.evaluate(() => window.__tapped))
   const firstBytes = (await test('state')).sent.downBytes
-  say(`first open: answers at ${first} ms, ${Math.round(firstBytes / 1024)} KB over the link`)
-  ok(first != null && first < limit(4000), `paired and opened: Bridge AI's first screen has its answers in ${s(first)} (${says(4000)})`, first)
+  say(`first open: answers ${first} ms after the tap, ${Math.round(firstBytes / 1024)} KB over the link`, firstSteps)
+  ok(first != null && first < limit(4000), `paired and opened: Bridge AI's first screen has its answers ${s(first)} after the tap (${says(4000)})`, { first, ...firstSteps })
   ok(firstBytes < 900 * 1024, `with ${Math.round(firstBytes / 1024)} KB over the link, its files compressed (limit 900 KB; 1.9 MB when they weren't)`, firstBytes)
   await app().locator('.tabbar button').first().waitFor({ timeout: 15000 }).catch(() => {})
   ok(await app().locator('.tabbar button').count() > 0, 'and the app works: its tabs are there')
@@ -114,17 +125,17 @@ try {
   await sleep(1500)
   await p.close()
   await test('count')
-  t0 = Date.now()
   await open(`${relay.url}/`)
-  const again = await answered(t0)
+  // From when the page began to load.
+  const { ms: again, steps: againSteps } = await answered(await pageStart())
   const pageBytes = (await test('state')).sent.page
   const order = await p.evaluate(() => {
     const r = performance.getEntriesByType('resource')
     const at = (f) => r.find((x) => x.name.endsWith(f))
     return { shellDone: at('/shell.js')?.responseEnd, linkAsked: at('/link.js')?.startTime, offlineAsked: at('/offline.js')?.startTime }
   })
-  say(`reopen: answers at ${again} ms, page files ${pageBytes} bytes`, order)
-  ok(again != null && again < limit(2500), `opened again: answers in ${s(again)} (${says(2500)})`, again)
+  say(`reopen: answers at ${again} ms, page files ${pageBytes} bytes`, order, againSteps)
+  ok(again != null && again < limit(2500), `opened again: answers in ${s(again)} (${says(2500)})`, { again, own: Math.round(order.shellDone || 0), ...againSteps })
   // (Playwright's WebKit keeps nothing in its cache from one page to the next; Safari does.)
   if (which === 'webkit') skip('the page\'s own files aren\'t downloaded again', 'Playwright\'s WebKit keeps no cache between pages')
   else ok(pageBytes < 20 * 1024, `the page's own files aren't downloaded again (${pageBytes} bytes; they were 210 KB each time)`, pageBytes)
@@ -142,7 +153,9 @@ try {
   const ten = await timed(10, true)
   say(`a request: ${one} ms; ten at once: ${ten} ms (network ${RTT} ms)`)
   ok(one < RTT + 250, `a request is answered in ${one} ms, the network itself ${RTT} (limit ${RTT + 250})`, one)
-  ok(ten < RTT * 2 + 300, `ten at once in ${ten} ms, not one after another (limit ${RTT * 2 + 300})`, ten)
+  // Side by side, ten take about as long as one; one after another, ten times as long. Less than half
+  // that says which, however quick this machine is just now.
+  ok(ten < (one * 10) / 2, `ten at once in ${ten} ms, not one after another (${one * 10} ms; limit half that)`, { one, ten })
 
   // ---------- live: typing in a terminal on the computer ----------
   const sh = await kit.api('/agents/launch', { kind: 'shell', cwd: kit.home, label: 'Terminal', newSpace: 'Terminals' })
@@ -218,7 +231,7 @@ try {
   await sleep(1500)
   const banner = () => p.evaluate(() => (document.getElementById('away')?.hidden === false ? document.getElementById('away-title').textContent : null))
   ok(!!(await until(async () => !(await banner()) && await asks(), 20000, 200)), 'before it goes: answering, with no banner', await banner())
-  t0 = Date.now()
+  let t0 = Date.now()
   await test('away')
   const noted = await until(banner, 30000, 100)
   const notedIn = noted ? Date.now() - t0 : null

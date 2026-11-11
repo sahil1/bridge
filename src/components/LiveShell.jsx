@@ -120,10 +120,10 @@ function Attached({ paneId }) {
       <div className="terminal-host" ref={hostRef} />
       <div className="term-hint">
         {error ? <span className="error-text">{error}</span>
-          : state === 'ended' ? <span>This terminal has ended. Close its tab, or open a new one.</span>
-          : state === 'lost' ? <span>Reconnecting…</span>
-          : state === 'connecting' ? <span>Connecting…</span>
-          : <span>Type here as you would in any terminal. ⌘C and ⌘V copy and paste.</span>}
+          : state === 'ended' ? <span>{t('This terminal has ended. Close its tab, or open a new one.')}</span>
+          : state === 'lost' ? <span>{t('Reconnecting…')}</span>
+          : state === 'connecting' ? <span>{t('Connecting…')}</span>
+          : <span>{t('Type here as you would in any terminal. ⌘C and ⌘V copy and paste.')}</span>}
       </div>
     </div>
   )

@@ -14,7 +14,7 @@
 // a phone: nothing past its edge, every target whole, fields iOS doesn't zoom into.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startRelay, startAccounts, checks, until, browser, page, shot, phoneFaults, advanced } from '../lib/harness.mjs'
+import { startKit, startRelay, startAccounts, checks, until, sleep, browser, page, shot, phoneFaults, advanced, noServiceWorker } from '../lib/harness.mjs'
 
 const { ok, done } = checks('account-ui')
 const kits = []
@@ -56,7 +56,8 @@ try {
   await until(async () => (await studio.api('/relay')).online && (await desk.api('/relay')).online, 20000)
   await desk.api('/machines', { link: (await studio.api('/relay/pair', {})).pairing.link })
   ok(!!(await until(async () => (await studio.api('/machines')).machines.find((m) => m.name === 'Desk')?.online && (await desk.api('/machines')).machines.find((m) => m.name === 'Studio')?.online, 30000)), 'Studio and Desk are linked, each reaching the other')
-  const s = await page(b, studio.url, { mode: 'light', theme: 'sky' })
+  // (No service worker: in WebKit what a page asks for once one has it skips the test's routes.)
+  const s = await page(b, studio.url, { mode: 'light', theme: 'sky', before: noServiceWorker })
   pages.push(s)
   s.p.on('dialog', (d) => d.accept())
   await s.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
@@ -87,10 +88,17 @@ try {
   ok(!!(await until(async () => /ran out \(a code lasts 10 minutes\)/.test(await problem.innerText().catch(() => '')), 8000)) && await problem.locator('button', { hasText: 'Send a new code' }).count() === 1, 'one that ran out: it says so, with Send a new code right there', await problem.innerText().catch(() => ''))
   await shot(s.p, `${tag}account-expired`)
   const sentBefore = (await acc.mail()).length
+  // Its answer held back a moment, as on a slow link: the email comes first, and the code is typed
+  // from it before the answer does.
+  await s.p.route('**/api/account/code', async (r) => { const res = await r.fetch(); await sleep(1500); await r.fulfill({ response: res }) })
   await problem.locator('button', { hasText: 'Send a new code' }).click()
   await until(async () => (await acc.mail()).length > sentBefore, 8000)
-  await code.fill(await acc.code('sam@example.com'))
-  await s.p.locator('.acct-form button', { hasText: 'Sign in' }).click()
+  const fresh = await acc.code('sam@example.com')
+  await code.fill(fresh)
+  const signInBtn = s.p.locator('.acct-form button', { hasText: 'Sign in' })
+  ok(!!(await until(() => signInBtn.isEnabled(), 8000)) && (await code.inputValue()) === fresh, 'a new code typed from the email before the answer came stays once it comes, ready to sign in', await code.inputValue())
+  await s.p.unroute('**/api/account/code')
+  await signInBtn.click()
   const who = s.p.locator('.acct-who')
   await who.waitFor({ timeout: 10000 })
   ok(/sam@example\.com/.test(await who.innerText()) && /Signed in/.test(await who.innerText()), 'the new code signs in: the account\'s email, signed in', await who.innerText())

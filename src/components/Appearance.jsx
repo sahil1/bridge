@@ -52,7 +52,7 @@ function Seg({ value, options, onChange, label }) {
   return (
     <div className="seg ap-seg" role="radiogroup" aria-label={label}>
       {options.map((o) => (
-        <button key={o.id} type="button" role="radio" aria-checked={value === o.id} className={value === o.id ? 'on' : ''} onClick={() => onChange(o.id)}>{o.name}</button>
+        <button key={o.id} type="button" role="radio" aria-checked={value === o.id} className={value === o.id ? 'on' : ''} onClick={() => onChange(o.id)}>{t(o.name)}</button>
       ))}
     </div>
   )
@@ -123,12 +123,12 @@ export default function Appearance() {
           <h4>{t('Theme')}</h4>
           <p className="muted small" title={t('Colors the window frame (top bar, sidebar and tabs) and the accent. Each theme has its own dark-mode shade.')}>{t('The window frame and the accent, light and dark.')}</p>
           <div className="ap-themes">
-            {THEMES.map((t) => {
-              const c = resolve({ ...a, theme: t.id }, dark)
+            {THEMES.map((th) => {
+              const c = resolve({ ...a, theme: th.id }, dark)
               return (
-                <button key={t.id} type="button" className={`ap-tile ${a.theme === t.id ? 'on' : ''}`} aria-pressed={a.theme === t.id} onClick={() => save({ theme: t.id })}>
+                <button key={th.id} type="button" className={`ap-tile ${a.theme === th.id ? 'on' : ''}`} aria-pressed={a.theme === th.id} onClick={() => save({ theme: th.id })}>
                   <Mini frame={c?.chrome} accent={c?.accent} dark={dark} />
-                  <span>{t.name}</span>
+                  <span>{t(th.name)}</span>
                 </button>
               )
             })}
@@ -163,7 +163,7 @@ export default function Appearance() {
           <section className="ap-sec ap-rows">
             <div className="ap-row" data-setting="density">
               <div><h4>{t('Density')}</h4><p className="muted small">{t('Compact fits more messages and sidebar rows.')}</p></div>
-              <Seg label={t('Density')} value={a.density} options={[{ id: 'comfortable', name: t('Comfortable') }, { id: 'compact', name: t('Compact') }]} onChange={(v) => save({ density: v })} />
+              <Seg label={t('Density')} value={a.density} options={[{ id: 'comfortable', name: tx('Comfortable') }, { id: 'compact', name: tx('Compact') }]} onChange={(v) => save({ density: v })} />
             </div>
             <div className="ap-row" data-setting="font">
               <div><h4>{t('Font')}</h4><p className="muted small">{t('Code and terminals stay monospace.')}</p></div>

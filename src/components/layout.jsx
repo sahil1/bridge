@@ -102,7 +102,7 @@ export function PaneHeader({ icon, title, subtitle, children, leading, minimized
           </button>
         )}
         {onClose && (
-          <button className="win-btn" onClick={onClose} aria-label="Close pane" title="Close">
+          <button className="win-btn" onClick={onClose} aria-label={t('Close pane')} title={t('Close')}>
             <Icon name="x" size={14} />
           </button>
         )}

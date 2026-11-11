@@ -356,7 +356,8 @@ try {
     ok(/^2\s*need you/.test((await pill.innerText()).trim()) && /1 more on another computer/.test(await pill.getAttribute('title')) && (await p.locator('.mc-chip .mc-needs').innerText().catch(() => '')).trim() === '1', "the top bar's chip counts this computer's two and says there's one more, the devices menu's chip Desk's one", [await pill.innerText(), await pill.getAttribute('title'), await p.locator('.mc-chip').innerText()])
     await awayLine.locator('.hm-away-line').click()
     const venue = awayLine.locator('.hm-task', { hasText: 'Book the venue' })
-    ok(await venue.isVisible() && await venue.locator('button', { hasText: 'Reply' }).isVisible() && /Open on Desk/.test(await venue.locator('.ny-acts').innerText()), "opened, Desk's task is there to answer in place, and its Open says it goes to Desk", await awayLine.innerText())
+    // (Waited for: on a busy computer it can be drawn a moment after the click.)
+    ok(!!(await until(async () => await venue.isVisible() && await venue.locator('button', { hasText: 'Reply' }).isVisible() && /Open on Desk/.test(await venue.locator('.ny-acts').innerText({ timeout: 1000 }).catch(() => '')), 5000)), "opened, Desk's task is there to answer in place, and its Open says it goes to Desk", await awayLine.innerText())
     await shot(p, `${tag}home-this-computer`)
     // Open on Desk: this window shows Desk and says so, and Back brings Studio's Home again.
     const deskAt = (await a.api('/machines')).machines.find((m) => m.name === 'Desk').id
@@ -1404,6 +1405,23 @@ try {
     await p.locator('.m-more-row', { hasText: 'Today' }).click()
     ok(!!(await until(() => p.locator('.m-more-view .m-today').isVisible(), 6000)), `phone ${width}: Today is in More`)
     ok(errors.length === 0, `phone ${width}: no page errors`, errors)
+    await ctx.close()
+  }
+  // A phone opened afresh, Agents tapped before its agents came (a slow start, here held back): it
+  // stays on Agents once they come, not taken to Home (it was, from wherever you'd gone).
+  {
+    let go = null
+    let came = false
+    const first = new Promise((r) => { go = r })
+    const { ctx, p, errors } = await pageAt(b, a.url, { phone: true, before: async (c2) => { await desk(c2); await c2.route(/\/api\/(fleet|events)(\?|$)/, async (r) => { await first; await r.continue().catch(() => {}); came = true }) } })
+    await p.locator('.tabbar button', { hasText: 'Agents' }).click({ timeout: 20000 })
+    go()
+    // The page has its agents and its settings: what it does with them is done in a moment.
+    await until(async () => came && (await p.locator('.tabbar button').allInnerTexts())[0]?.includes('Home'), 15000)
+    await p.waitForTimeout(1500)
+    const on = await p.locator('.tabbar button[aria-current="true"]').innerText().catch(() => '')
+    ok(/Agents/.test(on) && !(await p.locator('.hm').isVisible()), 'a phone opened afresh, Agents tapped before its first answers came: it stays on Agents, not taken to Home', on)
+    ok(errors.length === 0, 'and no page errors', errors)
     await ctx.close()
   }
 

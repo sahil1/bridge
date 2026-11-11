@@ -42,9 +42,11 @@ const SUITES = [
   { name: 'settings-ui', build: 'dist', browser: true, covers: [/^src\/components\/settings\//, /^src\/components\/(Settings|Appearance|Palette|Machines)\.jsx$/, /^src\/(dictation|voice)\/[\w.]+\.css$/, /^src\/styles\.css$/] },
   { name: 'app-ui', build: 'dist', browser: true, covers: [/^src\//, /^index\.html$/, /^public\//, /^vite\.config\.js$/, /^server\/(index|attach|terminal|settings)\.js$/, /^server\/runtime\//] },
   // Every button and link you can see on the main views (Home, an agent's Chat, Terminal and Files,
-  // Files, Studio, Meetings, Calendar, Settings' sections, the top bar and its menus, the sidebar,
-  // the tabs and the board), pressed in the desktop app and in a browser: each has to do something.
-  { name: 'dead-clicks', minutes: 10, build: 'dist', browser: true, covers: [/^src\//, /^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/] },
+  // Files, Studio, Meetings, Calendar, the top bar and its menus, the sidebar, the tabs and the
+  // board), and in Settings' sections (a test of their own), pressed in the desktop app and in a
+  // browser: each has to do something.
+  { name: 'dead-clicks', build: 'dist', browser: true, covers: [/^src\//, /^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/] },
+  { name: 'dead-clicks-settings', build: 'dist', browser: true, covers: [/^src\//, /^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/, /^test\/suites\/dead-clicks\.mjs$/] },
   { name: 'back-forward', build: 'dist', browser: true, covers: [/^src\/backForward\.js$/, /^src\/components\/(BackForward|Console|Settings|files\/Explorer|meetings\/Meetings)\.jsx$/, /^src\/components\/backforward\.css$/, /^src\/(App\.jsx|pwa\.js|trials\.js)$/, /^server\/(index|paths)\.js$/, /^config\.example\.json$/, /^desktop\/main\.js$/] },
   { name: 'tab-strip', build: 'dist', browser: true, covers: [/^src\/components\/(TabStrip|Rail|Icon|NewAgent)\.jsx$/, /^src\/components\/tabstrip\.css$/, /^src\/(App\.jsx|styles\.css|trials\.js)$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'recommended-settings', build: 'dist', browser: true, covers: [/^src\/recommended\.js$/, /^src\/components\/(Recommended|Home|NewAgent|ModelChip|Onboarding)\.jsx$/, /^src\/components\/settings\/Agents\.jsx$/, /^src\/components\/recommended\.css$/, /^server\/(index|accounts|agents)\.js$/, /^server\/runtime\/(builtin|herdr)\.js$/, /^chief\/bin\/bridge$/, /^src\/trials\.js$/, /^test\/stand-ins\/claude\.cjs$/] },
@@ -67,7 +69,9 @@ const SUITES = [
   { name: 'home', build: 'dist', browser: true, covers: [/^server\/(home|needsyou|chieftasks|machines|boards|meetwork|index|engaged)\.js$/, /^shared\/(focus|homelayout)\.js$/, /^src\/components\/(NeedsHome|NeedsYou|Rail|AgentMap)\.jsx$/, /^src\/components\/needshome\.css$/, /^src\/(App\.jsx|trials\.js)$/, /^test\/stand-ins\/(claude\.cjs|relay\.mjs)$/] },
   { name: 'agent-map', build: 'dist', browser: true, covers: [/^server\/(agentmap|machines|needsyou|subagents|index)\.js$/, /^shared\/cloud\/follow\.js$/, /^src\/components\/(AgentMap|Machines|Board)\.jsx$/, /^src\/components\/agentmap\.css$/, /^src\/App\.jsx$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'devices-ui', build: 'dist', browser: true, covers: [/^src\/components\/(Machines|OnboardingPhone)\.jsx$/, /^src\/components\/settings\/(Relay|Phone)\.jsx$/, /^server\/(machines|relay)\.js$/, /^test\/stand-ins\/relay\.mjs$/] },
-  { name: 'phone-link', build: 'dist', browser: true, covers: [/^relay\//, /^server\/relay\.js$/, /^test\/stand-ins\/relay\.mjs$/] },
+  // How long the phone takes to open Bridge AI and get back to it: alone, as perf, so what it measures
+  // is the phone page, the link and the computer, not a test beside it busy with a browser of its own.
+  { name: 'phone-link', build: 'dist', browser: true, alone: true, covers: [/^relay\//, /^server\/relay\.js$/, /^test\/stand-ins\/relay\.mjs$/] },
   { name: 'mail', build: null, covers: [/^server\/(mail|mailparse|openin)\.js$/, /^test\/stand-ins\/mailbox\.mjs$/] },
   { name: 'mail-ui', build: 'dist', browser: true, covers: [/^src\/components\/(MailView|Inbox|Dock|Settings|Palette|Agenda)\.jsx$/, /^src\/components\/mail\//, /^src\/components\/settings\/Mail\.jsx$/, /^src\/components\/(today|openin)\.js$/, /^src\/App\.jsx$/, /^server\/(mail|mailparse|mailassist|freetimes|openin|index)\.js$/, /^test\/stand-ins\/(model|mailbox)\.mjs$/] },
   { name: 'mail-assist', build: null, covers: [/^server\/(mail|mailparse|mailassist|freetimes|calendar|usagelog|openin)\.js$/, /^test\/stand-ins\/(model|mailbox)\.mjs$/] },
@@ -173,8 +177,9 @@ const runOne = (j, attempt) => new Promise((resolve) => {
   const p = spawn(process.execPath, [path.join(ROOT, 'test', 'suites', `${j.name}.mjs`)], { cwd: ROOT, env: { ...process.env, BRIDGE_TEST_BROWSER: j.engine || '' }, stdio: ['ignore', out, out] })
   // Too long: stopped with everything it started (its server, its browser). Playwright catches a
   // plain stop to close its browser first, and a test stuck waiting would then never end.
-  // Five minutes, or a suite's own (minutes): dead-clicks presses every button on every view, in two
-  // shapes at once, which on CI's macOS WebKit runner took longer than five once 3.15.0 added more.
+  // Five minutes, or a suite's own (minutes). dead-clicks, which presses every button on every view in
+  // two shapes at once, took longer than five on CI's macOS WebKit runner, so Settings' sections are a
+  // test of their own (dead-clicks-settings) and each half has the five.
   const mins = j.minutes || 5
   const limit = setTimeout(() => { fs.appendFileSync(log, `\nFAIL took more than ${mins} minutes, so it was stopped\n`); stopTree(p) }, mins * 60_000)
   p.on('exit', (code, signal) => {

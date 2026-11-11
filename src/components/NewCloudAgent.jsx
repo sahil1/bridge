@@ -5,6 +5,7 @@ import Icon from './Icon.jsx'
 import { usePersisted } from './layout.jsx'
 import { api, cloudOnly } from '../api.js'
 import { CloudMark } from './cloudBits.jsx'
+import { t } from '../i18n/index.js'
 
 // A text box with suggestions under it (typed text always counts, so any repo or branch works).
 function Pick({ value, onChange, options, placeholder, label, note, onOpen }) {
@@ -66,8 +67,8 @@ export default function NewCloudAgent({ onLaunched, onClose, onSettings }) {
   useEffect(() => { if (p) { asked.current = {}; loadRepos() } }, [p?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!p || !/^[\w.-]+\/[\w.-]+$|^https?:\/\//.test(repo.trim())) { setBranches([]); return }
-    const t = setTimeout(() => api(`/cloud/${p.id}/branches?repo=${encodeURIComponent(repo.trim())}`).then((r) => setBranches(r.branches || []), () => setBranches([])), 350)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => api(`/cloud/${p.id}/branches?repo=${encodeURIComponent(repo.trim())}`).then((r) => setBranches(r.branches || []), () => setBranches([])), 350)
+    return () => clearTimeout(timer)
   }, [p?.id, repo])
   const loadModels = () => { if (p?.models && !models.length) api(`/cloud/${p.id}/models`).then((r) => setModels(r.models || []), () => {}) }
 
@@ -88,72 +89,72 @@ export default function NewCloudAgent({ onLaunched, onClose, onSettings }) {
     return (
       <>
         <div className="na-cloud-empty">
-          <p>Run an agent on Cursor, GitHub Copilot, Jules or Claude's computers, on a repo they host. {cloudOnly ? 'You follow it here, with no computer of yours on.' : 'It keeps going while this computer sleeps, and you follow it here and on your phone.'}</p>
-          <p>Add your key for one of them first. It stays on this {cloudOnly ? 'phone' : 'computer'}.</p>
-          <button type="button" className="btn primary" onClick={onSettings}><Icon name="settings" size={13} /> Set up cloud agents</button>
+          <p>{t("Run an agent on Cursor, GitHub Copilot, Jules or Claude's computers, on a repo they host.")} {cloudOnly ? t('You follow it here, with no computer of yours on.') : t('It keeps going while this computer sleeps, and you follow it here and on your phone.')}</p>
+          <p>{cloudOnly ? t('Add your key for one of them first. It stays on this phone.') : t('Add your key for one of them first. It stays on this computer.')}</p>
+          <button type="button" className="btn primary" onClick={onSettings}><Icon name="settings" size={13} /> {t('Set up cloud agents')}</button>
         </div>
         {error && <p className="error-text">{error}</p>}
-        <footer className="modal-foot"><button type="button" className="btn" onClick={onClose}>Cancel</button></footer>
+        <footer className="modal-foot"><button type="button" className="btn" onClick={onClose}>{t('Cancel')}</button></footer>
       </>
     )
   }
 
   const repoOptions = [...new Set([...(recent[p.id] || []), ...repos.list.map((r) => r.name)])].map((name) => {
     const r = repos.list.find((x) => x.name === name)
-    return { value: name, note: r ? [r.private ? 'private' : '', r.defaultBranch || ''].filter(Boolean).join(' · ') : 'recent' }
+    return { value: name, note: r ? [r.private ? t('private') : '', r.defaultBranch || ''].filter(Boolean).join(' · ') : t('recent') }
   })
   const defBranch = repos.list.find((x) => x.name === repo.trim())?.defaultBranch
   return (
     <>
       <div className="na-field">
-        <span className="na-label">Provider</span>
+        <span className="na-label">{t('Provider')}</span>
         <div className="na-kinds">
           {ready.map((x) => (
             <button type="button" key={x.id} className={`na-kind ${p.id === x.id ? 'on' : ''}`} aria-pressed={p.id === x.id} onClick={() => setPick(x.id)}>
               <CloudMark provider={x.id} label={x.name} size={20} />{x.name}
             </button>
           ))}
-          <button type="button" className="na-kind" onClick={onSettings} title="Add or change keys in Settings"><Icon name="plus" size={14} /> Add</button>
+          <button type="button" className="na-kind" onClick={onSettings} title={t('Add or change keys in Settings')}><Icon name="plus" size={14} /> {t('Add')}</button>
         </div>
-        <span className={`na-cost ${p.perUse ? 'per-use' : ''}`}>{p.perUse && <b>Pay per use. </b>}{p.cost}</span>
+        <span className={`na-cost ${p.perUse ? 'per-use' : ''}`}>{p.perUse && <b>{t('Pay per use.')} </b>}{p.cost}</span>
       </div>
 
       <div className="na-row na-cloud-row">
         <label className="na-field">
-          <span className="na-label">Repository</span>
-          <Pick value={repo} onChange={setRepo} options={repoOptions} placeholder={p.repoPlaceholder || 'owner/repo'} label="Repository" onOpen={loadRepos}
-            note={repos.loading ? 'Loading your repos…' : repos.error ? `Couldn't list repos (${repos.error}). Type one.` : p.hosts ? `On ${p.hosts}` : null} />
+          <span className="na-label">{t('Repository')}</span>
+          <Pick value={repo} onChange={setRepo} options={repoOptions} placeholder={p.repoPlaceholder || 'owner/repo'} label={t('Repository')} onOpen={loadRepos}
+            note={repos.loading ? t('Loading your repos…') : repos.error ? t("Couldn't list repos ({error}). Type one.", { error: repos.error }) : p.hosts ? t('On {name}', { name: p.hosts }) : null} />
         </label>
         <label className="na-field">
-          <span className="na-label">Branch <i>optional</i></span>
-          <Pick value={branch} onChange={setBranch} options={branches.map((b) => ({ value: b, note: b === defBranch ? 'default' : '' }))} placeholder={defBranch || branches[0] || 'default branch'} label="Branch" />
+          <span className="na-label">{t('Branch')} <i>{t('optional')}</i></span>
+          <Pick value={branch} onChange={setBranch} options={branches.map((b) => ({ value: b, note: b === defBranch ? t('default') : '' }))} placeholder={defBranch || branches[0] || t('default branch')} label={t('Branch')} />
         </label>
       </div>
 
       {p.models && (
         <label className="na-field">
-          <span className="na-label">Model <i>optional</i></span>
-          <Pick value={model} onChange={setModel} options={models.map((m) => ({ value: m.id, note: m.label !== m.id ? m.label : '' }))} placeholder="The provider's default" label="Model" onOpen={loadModels} />
+          <span className="na-label">{t('Model')} <i>{t('optional')}</i></span>
+          <Pick value={model} onChange={setModel} options={models.map((m) => ({ value: m.id, note: m.label !== m.id ? m.label : '' }))} placeholder={t("The provider's default")} label={t('Model')} onOpen={loadModels} />
         </label>
       )}
 
       <label className="na-field">
-        <span className="na-label">What should it do?</span>
-        <textarea rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g. Add tests for the login flow and fix anything they catch"
+        <span className="na-label">{t('What should it do?')}</span>
+        <textarea rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('e.g. Add tests for the login flow and fix anything they catch')}
           onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); launch() } }} />
       </label>
 
       {p.id === 'jules' && (
-        <label className="na-check"><input type="checkbox" checked={planFirst} onChange={(e) => setPlanFirst(e.target.checked)} /><span>Show me the plan first <span className="muted">Jules waits for your OK before it starts</span></span></label>
+        <label className="na-check"><input type="checkbox" checked={planFirst} onChange={(e) => setPlanFirst(e.target.checked)} /><span>{t('Show me the plan first')} <span className="muted">{t('Jules waits for your OK before it starts')}</span></span></label>
       )}
-      {p.id === 'copilot' && <p className="muted small na-hint">Bridge AI opens an issue in the repo with this task and assigns it to Copilot, which works in a draft pull request.</p>}
-      {p.id === 'claude' && !p.github?.set && <p className="muted small na-hint">Without a GitHub token Claude can only read public repos, and can't push its branch. <button type="button" className="link-btn" onClick={onSettings}>Add one in Settings</button></p>}
+      {p.id === 'copilot' && <p className="muted small na-hint">{t('Bridge AI opens an issue in the repo with this task and assigns it to Copilot, which works in a draft pull request.')}</p>}
+      {p.id === 'claude' && !p.github?.set && <p className="muted small na-hint">{t("Without a GitHub token Claude can only read public repos, and can't push its branch.")} <button type="button" className="link-btn" onClick={onSettings}>{t('Add one in Settings')}</button></p>}
 
       {error && <p className="error-text">{error}</p>}
       <footer className="modal-foot">
-        <span className="muted small hide-touch">⌘⏎ to start</span>
-        <button type="button" className="btn" onClick={onClose}>Cancel</button>
-        <button type="button" className="btn primary" onClick={launch} disabled={busy || !prompt.trim() || !repo.trim()}>{busy ? 'Starting…' : `Start on ${p.name}`}</button>
+        <span className="muted small hide-touch">{t('⌘⏎ to start')}</span>
+        <button type="button" className="btn" onClick={onClose}>{t('Cancel')}</button>
+        <button type="button" className="btn primary" onClick={launch} disabled={busy || !prompt.trim() || !repo.trim()}>{busy ? t('Starting…') : t('Start on {name}', { name: p.name })}</button>
       </footer>
     </>
   )

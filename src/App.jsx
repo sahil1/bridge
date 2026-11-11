@@ -39,7 +39,7 @@ import { takeReturn } from './permissions.js'
 import { takeEarlyLink } from './earlyLink.js'
 import CloudHome from './components/CloudHome.jsx'
 import SessionSwitcher from './components/Sessions.jsx'
-import { MachineMenu, AskBanner, SwitchedHere, useMachines, goMachine, isRemote, remoteOf, openRemote } from './components/Machines.jsx'
+import { MachineMenu, AskBanner, SwitchedHere, useMachines, goMachine, isRemote, remoteOf, openRemote, useAsksIn } from './components/Machines.jsx'
 import { useNeedsYou, NeedsYouChip, NeedsYouPanel, waitingOn, quietPanes } from './components/NeedsYou.jsx'
 import { isQuiet } from '../shared/focus.js'
 import AgentMap from './components/AgentMap.jsx'
@@ -49,7 +49,7 @@ import RemoteAgent from './components/RemoteAgent.jsx'
 import Dictation from './dictation/Dictation.jsx'
 import BackForward from './components/BackForward.jsx'
 import { start as navStart, stop as navStop, seen as navSeen, recheck as navRecheck, usePlaces, placeOf, placeLabel, showPlaceIn, replacedWith, renamedTab, slotOf } from './backForward.js'
-import { t, tx } from './i18n/index.js'
+import { t, tn, tx } from './i18n/index.js'
 
 const MIN_PANE = 420
 const TOUR_ON_START = false
@@ -211,6 +211,10 @@ function App() {
   const { fleet, live } = useFleet()
   // The phone's Cloud agents keep the phone layout on any screen.
   const wide = useMedia('(min-width: 900px)') && !cloudOnly
+  // The page under the banner asking to keep a new device or allow a link is shown once that banner
+  // has its first answer, so the two come together and nothing moves under your finger after.
+  const asksIn = useAsksIn()
+  const untilAsks = asksIn ? undefined : { visibility: 'hidden' }
   const [savedView, setView] = usePersisted('cc-view', 'command')
   // The live herdr view exists only when herdr is the runtime (see server/runtime).
   const confPoll = usePoll('/config', 10 * 60 * 1000)
@@ -596,12 +600,20 @@ function App() {
   // Home on: a new window opens there (an agent a link names still comes after). A reload, or this
   // window switched to another of your computers and back, opens what you were on there instead:
   // each computer keeps its own tabs, layout and phone tab (layout.jsx), so Home only when there's
-  // nothing to go back to.
+  // nothing to go back to. Nor once you've tapped, clicked or pressed a key here before the page's
+  // first answers came: you've picked where you are (it used to take you to Home from there).
   const homed = useRef(false)
+  const picked = useRef(false)
+  useEffect(() => {
+    const on = (e) => { if (e.isTrusted) picked.current = true }
+    window.addEventListener('pointerdown', on, true)
+    window.addEventListener('keydown', on, true)
+    return () => { window.removeEventListener('pointerdown', on, true); window.removeEventListener('keydown', on, true) }
+  }, [])
   useEffect(() => {
     if (homed.current || !fleet || !conf || cloudOnly) return
     homed.current = true
-    if (!homeOn) return
+    if (!homeOn || picked.current) return
     const back = openedBefore && (wide ? !!W.active && (isView(W.active) || isRemote(W.active) || !!byId[W.active]) : store.get('cc-mtab', null) != null)
     if (back) return
     if (wide) { setW((w) => ({ ...w, tabs: w.tabs.includes('view:home') ? w.tabs : ['view:home', ...w.tabs], active: 'view:home', group: 'main' })); set({ max: 'main' }) }
@@ -1060,7 +1072,7 @@ function App() {
         <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
         <Quiet name="Link requests"><AskBanner /></Quiet>
         <Quiet name="Switched computer"><SwitchedHere /></Quiet>
-        <main className="m-body">
+        <main className="m-body" style={untilAsks}>
           {mtab === 'home' && homeOn && viewFor(homeView === 'everything' ? 'view:everything' : 'view:home')}
           {mtab === 'mate' && (mateShown ? <Console key={mateShown.paneId} agent={mateShown} variant="mobile" queued={queuedFor(mateShown.paneId)} delivered={deliveredFor(mateShown.paneId)} agents={agents} onThread={(id) => setMateId(id)} /> : <MateEmpty onLaunch={mateLaunch.launch} {...mateLaunch} />)}
           {mtab === 'agents' && (mAgent
@@ -1143,7 +1155,7 @@ function App() {
       if (!fleet?.down) return <Home fleet={fleet} onLaunched={fromHome} onMore={(init) => setNewAgent(init)} autoFocus={false} />
       return (
         <section className="pane empty-pane">
-          <div className="viewer-empty"><Icon name="terminal" size={24} /><p>{fleet.session ? <>The herdr session <b>{fleet.session}</b> isn't running. {t('Start it from the sidebar.')}</> : t('No herdr session is running.')}</p></div>
+          <div className="viewer-empty"><Icon name="terminal" size={24} /><p>{fleet.session ? <>{tn('The herdr session {name} isn\'t running.', { name: <b>{fleet.session}</b> })} {t('Start it from the sidebar.')}</> : t('No herdr session is running.')}</p></div>
         </section>
       )
     }
@@ -1165,7 +1177,7 @@ function App() {
               <section className="pane popped-pane">
                 <div className="viewer-empty">
                   <Icon name="popout" size={26} />
-                  <p><b>{nameOf(a)}</b> is open in its own window.</p>
+                  <p>{tn('{name} is open in its own window.', { name: <b>{nameOf(a)}</b> })}</p>
                   <div className="popped-acts">
                     <button className="btn small" onClick={() => showPopped(a.paneId)}>{t('Show window')}</button>
                     <button className="btn small primary" onClick={() => bringBack(a.paneId)}>{t('Bring back here')}</button>
@@ -1230,7 +1242,7 @@ function App() {
       <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
       <Quiet name="Link requests"><AskBanner /></Quiet>
       <Quiet name="Switched computer"><SwitchedHere /></Quiet>
-      <div className="views">
+      <div className="views" style={untilAsks}>
         <main className="cmd" hidden={view !== 'command'} ref={cmdRef}>
           <div className="slot rail-slot" style={{ width: railOpen ? L.railW : 52 }}>
             <Rail fleet={fleet} live={live} collapsed={!railOpen} onToggle={() => set({ railOpen: !L.railOpen })}

@@ -17,7 +17,7 @@ export const canSignIn = (kind) => OWN_LOGIN.has(kind) || LOGIN.has(kind)
 export const openSettings = (section) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section } }))
 const pause = (ms) => new Promise((r) => setTimeout(r, ms))
 
-export default function SignInButton({ kind, label = 'Sign in', account, onCheck, className = 'btn small primary', terminalLink = true, title, auto = false }) {
+export default function SignInButton({ kind, label = t('Sign in'), account, onCheck, className = 'btn small primary', terminalLink = true, title, auto = false }) {
   const [state, setState] = useState(null) // { busy } | { openId, paneId, tabId, device } | { renewed } | { error, code }
   useRecheck(() => onCheck?.(), state?.openId ? 8000 : 0, !!onCheck)
   const going = useRef(false)
@@ -39,7 +39,7 @@ export default function SignInButton({ kind, label = 'Sign in', account, onCheck
   useEffect(() => { if (auto) go() }, [auto]) // eslint-disable-line react-hooks/exhaustive-deps
   // Not installed here: install it first, and the sign-in starts by itself once it's in.
   const installedNow = useRef(false)
-  if (state?.code?.startsWith('install:')) return <InstallAgentButton kind={kind} label={`Install ${state.error.replace(/ isn.t installed.*/, '')}`} onCheck={() => api('/agent-kinds').then((ks) => { if (ks.some((k) => k.kind === kind) && !installedNow.current) { installedNow.current = true; onCheck?.(); go() } }).catch(() => {})} />
+  if (state?.code?.startsWith('install:')) return <InstallAgentButton kind={kind} label={t('Install {name}', { name: state.error.replace(/ isn.t installed.*/, '') })} onCheck={() => api('/agent-kinds').then((ks) => { if (ks.some((k) => k.kind === kind) && !installedNow.current) { installedNow.current = true; onCheck?.(); go() } }).catch(() => {})} />
   const show = () => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: state.openId } }))
   if (state?.paneId) {
     return (
@@ -174,14 +174,14 @@ export function InstallNode({ onDone, why, forAgent = false }) {
   useEffect(() => { api('/tools/node').then(setSt).catch(() => {}) }, [])
   useEffect(() => {
     if (!going) return
-    const t = setInterval(() => api('/tools/node').then((s) => {
+    const timer = setInterval(() => api('/tools/node').then((s) => {
       setSt(s)
       if (s.job) return
-      clearInterval(t)
+      clearInterval(timer)
       if (s.have) onDone?.()
-      else setErr('Node.js is installed, but Bridge AI can\'t find it. Restart Bridge AI and try again.')
+      else setErr(t('Node.js is installed, but Bridge AI can\'t find it. Restart Bridge AI and try again.'))
     }).catch(() => {}), 1000)
-    return () => clearInterval(t)
+    return () => clearInterval(timer)
   }, [going]) // eslint-disable-line react-hooks/exhaustive-deps
   const go = async () => {
     setErr(null)
@@ -190,8 +190,8 @@ export function InstallNode({ onDone, why, forAgent = false }) {
   if (st && !st.canInstall) {
     return (
       <span className="signin">
-        <a className="btn small" href={NODE_PAGE} target="_blank" rel="noreferrer"><Icon name="download" size={12} /> Get Node.js</a>
-        <span className="muted small">{why ? `${why} ` : ''}Install it from nodejs.org, then come back and try again.</span>
+        <a className="btn small" href={NODE_PAGE} target="_blank" rel="noreferrer"><Icon name="download" size={12} /> {t('Get Node.js')}</a>
+        <span className="muted small">{why ? `${why} ` : ''}{t('Install it from nodejs.org, then come back and try again.')}</span>
       </span>
     )
   }
@@ -209,9 +209,9 @@ export function InstallNode({ onDone, why, forAgent = false }) {
   return (
     <span className="signin node-install">
       <button type="button" className="btn small primary" disabled={going || !st} onClick={go}>
-        {going ? <><Icon name="refresh" size={12} className="spin" /> {j.step === 'download' ? `Downloading Node.js${j.percent ? ` ${j.percent}%` : '…'}` : j.step === 'check' ? 'Checking it…' : 'Setting it up…'}</> : <><Icon name="download" size={12} /> Install Node.js</>}
+        {going ? <><Icon name="refresh" size={12} className="spin" /> {j.step === 'download' ? (j.percent ? t('Downloading Node.js {n}%', { n: j.percent }) : t('Downloading Node.js…')) : j.step === 'check' ? t('Checking it…') : t('Setting it up…')}</> : <><Icon name="download" size={12} /> {t('Install Node.js')}</>}
       </button>
-      {!going && <span className="muted small">{why ? `${why} ` : ''}One click: the official version from nodejs.org, just for Bridge AI. No password needed.</span>}
+      {!going && <span className="muted small">{why ? `${why} ` : ''}{t('One click: the official version from nodejs.org, just for Bridge AI. No password needed.')}</span>}
       {(err || j?.error) && <span className="error-text">{err || j.error}</span>}
     </span>
   )
@@ -222,7 +222,7 @@ export function InstallNode({ onDone, why, forAgent = false }) {
 // while that goes and when you come back. needs: what the install needs first (Node.js), from the
 // agent catalog; then Node.js comes first, and the agent's Install once it's there. onStart: the
 // install is under way (setup then signs in by itself once it's in). signIn: it says that's next.
-export function InstallAgentButton({ kind, label = 'Install', onCheck, onStart, needs, showLink = true, signIn = false }) {
+export function InstallAgentButton({ kind, label = t('Install'), onCheck, onStart, needs, showLink = true, signIn = false }) {
   const [state, setState] = useState(null) // { openId, paneId } | { error, code }
   useRecheck(() => onCheck?.(), state?.openId ? 5000 : 0, !!onCheck && !!state?.openId)
   const { data: screen } = usePoll(state?.paneId ? `/agents/${encodeURIComponent(state.paneId)}/screen?lines=40` : null, 1500)
@@ -232,12 +232,12 @@ export function InstallAgentButton({ kind, label = 'Install', onCheck, onStart, 
   }
   const show = () => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: state.openId } }))
   const need = needs || (state?.code === 'needs:node' ? 'Node.js' : null)
-  if (need) return <InstallNode why="It needs Node.js first." forAgent onDone={() => { setState(null); onCheck?.() }} />
+  if (need) return <InstallNode why={t('It needs Node.js first.')} forAgent onDone={() => { setState(null); onCheck?.() }} />
   // eslint-disable-next-line no-control-regex
   const tail = String(screen?.ansi || '').replace(/\x1b\][^\x07]*\x07/g, '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r/g, '').split('\n').map((l) => l.trimEnd()).filter(Boolean).slice(-3)
   return (
     <span className="signin">
-      <button type="button" className="btn small primary" disabled={!!state?.openId} onClick={go}>{state?.openId ? <><Icon name="refresh" size={12} className="spin" /> Installing…</> : <><Icon name="download" size={12} /> {label}</>}</button>
+      <button type="button" className="btn small primary" disabled={!!state?.openId} onClick={go}>{state?.openId ? <><Icon name="refresh" size={12} className="spin" /> {t('Installing…')}</> : <><Icon name="download" size={12} /> {label}</>}</button>
       {state?.openId && <span className="muted small">{signIn ? t('Usually a minute or two. Then the sign-in starts by itself: your browser opens for it.') : t('Usually a minute or two; this moves on by itself when it\'s done.')}{showLink && <> <button type="button" className="link-btn" onClick={show}>{t('Show the terminal')}</button></>}</span>}
       {state?.openId && tail.length > 0 && <pre className="inst-log" aria-live="polite">{tail.join('\n')}</pre>}
       {state?.error && <span className="error-text">{state.error}</span>}
