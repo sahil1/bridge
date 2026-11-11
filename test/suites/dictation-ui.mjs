@@ -79,8 +79,15 @@ const firstUse = async (c, got) => {
 // WebKit counts a request a reload cuts off (the presence ping, the live feed) as a page error.
 const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks/.test(e))
 // Listening: the mic's sound has come, and ✓ can stop it. Nothing before that is recorded, and on a
-// busy computer it can come a while after the press, so a hold here is timed from then.
-const listens = (pg) => until(() => pg.locator('.rec-stop:enabled, .dp-ok:enabled').count(), 5000, 50)
+// busy computer it can come a while after the press, so a hold here is timed from then. Not
+// listening by 15 s after the press: a failure saying what was shown, rather than going on with a
+// let go that comes before the mic is on, which keeps it listening hands-free with nothing heard.
+const listens = async (pg) => {
+  const t0 = Date.now()
+  const on = await until(() => pg.locator('.rec-stop:enabled, .dp-ok:enabled').count(), 15000, 50)
+  if (!on) ok(false, 'listening, once the key or the mic is pressed (✓ on)', { after: Date.now() - t0, shown: await pg.locator('.hud, .dict-dock, .composer').first().innerText().catch(() => '') })
+  return on
+}
 const before = async (ctx) => {
   await noServiceWorker(ctx)
   // What the page sends to be transcribed, read in the page (WebKit doesn't hand a test the body).
@@ -1029,9 +1036,20 @@ try {
     await press(h, 'up')
     const why = !!(await until(async () => /Pasting needs Accessibility/.test(await hudText(h)) && (await h.locator('.hud-text').innerText().catch(() => '')) === 'Not allowed yet.', 8000, 100)) && await h.evaluate(() => window.__hud.pasted.length) === 0 && await h.locator('.hud button', { hasText: 'Copy' }).isVisible()
     const shown = await hudText(h)
-    await h.locator('.hud button', { hasText: 'Copy' }).click({ timeout: 5000 }).catch(() => {})
-    const noOffer = !!(await until(async () => /Copied/.test(await hudText(h)), 3000, 100)) && await h.locator('.hud-offer').count() === 0
-    ok(chip && why && noOffer, 'no Accessibility yet: not even tried; while you talk, the agent to send it to as before, then the text to copy with one line, pasting needs Accessibility (and Copy asks nothing more: it\'s picked already)', { chip, why, noOffer, shown })
+    // What the window shows once Copy is clicked, watched in the page: "Copied" is up for two
+    // seconds and then the window goes, which a slow look from here can miss.
+    await h.evaluate(() => {
+      const seen = window.__seen = { copied: false, offer: false }
+      new MutationObserver(() => {
+        if (/Copied/.test(document.querySelector('.hud')?.innerText || '')) seen.copied = true
+        if (document.querySelector('.hud-offer')) seen.offer = true
+      }).observe(document.body, { subtree: true, childList: true, characterData: true })
+    })
+    let clicked = true
+    await h.locator('.hud button', { hasText: 'Copy' }).click({ timeout: 5000 }).catch((e) => { clicked = e.message.split('\n')[0] })
+    const seen = await until(() => h.evaluate(() => window.__seen.copied && window.__seen), 3000, 100)
+    const noOffer = !!seen && !seen.offer
+    ok(chip && why && noOffer, 'no Accessibility yet: not even tried; while you talk, the agent to send it to as before, then the text to copy with one line, pasting needs Accessibility (and Copy asks nothing more: it\'s picked already)', { chip, why, noOffer, shown, clicked, seen: await h.evaluate(() => window.__seen).catch(() => null), copied: await h.evaluate(() => window.__hud.copied).catch(() => null), now: await hudText(h) })
     await hc.close()
   }
   {
