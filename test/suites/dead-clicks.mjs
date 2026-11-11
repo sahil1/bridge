@@ -13,7 +13,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { startKit, checks, browser, page, sleep, shot, changeAnswer, noServiceWorker, withoutCutOff, TEST, ROOT } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, sleep, shot, changeAnswer, noServiceWorker, withoutCutOff, TEST, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('dead-clicks')
 const require = createRequire(import.meta.url)
@@ -361,7 +361,8 @@ async function walk(shape) {
     const label = await link.getAttribute('aria-label').catch(() => null)
     const was = { links: (await p.evaluate(() => window.__dc.links.length)), popups: st.popups }
     await link.click().catch(() => {})
-    await sleep(500)
+    // The new tab, or the address handed to the app, waited for: a busy browser opens a tab a while after the click.
+    await until(async () => (desktop ? (await p.evaluate(() => window.__dc.links.length)) > was.links : st.popups > was.popups), 10000, 100)
     const went = desktop ? (await p.evaluate(() => window.__dc.links)).slice(was.links) : []
     ok(desktop ? label === 'Open in your browser' && went.length === 1 && pages.opens(went[0], `${kit.url}/`) === 'browser' && /\/raw\?path=dot\.png/.test(went[0]) : label === 'Open in a new tab' && st.popups > was.popups,
       desktop ? 'in the desktop app, a picture\'s Open in your browser hands the app its address, which opens it in the browser' : 'in a browser, a picture\'s Open in a new tab opens one', { label, went, popups: st.popups - was.popups })
@@ -410,7 +411,7 @@ try {
     await p.keyboard.press('Escape')
     const n = dialogs.length
     await p.locator('.console button[aria-label="Open in its own window"]').first().click({ timeout: 5000 }).catch(() => {})
-    await sleep(500)
+    await until(() => dialogs.slice(n).length, 5000, 100)
     ok(dialogs.slice(n).some((m) => /blocked the new window/.test(m)), 'opened in its own window with pop-ups blocked: it says the browser blocked it, and what to do', dialogs.slice(n))
     ok(!withoutCutOff(errors).length, 'and no page errors', errors)
     await ctx.close()
