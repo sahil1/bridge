@@ -32,7 +32,10 @@ export function makeMailbox(kit) {
   const V = path.join(kit.home, 'Library', 'Mail', 'V10')
   fs.mkdirSync(path.join(V, 'MailData'), { recursive: true })
   const INDEX = path.join(V, 'MailData', 'Envelope Index')
-  const sqlite = (q) => { const r = spawnSync(SQLITE, [INDEX], { input: q, encoding: 'utf8' }); if (r.status) throw new Error(r.stderr); return r.stdout }
+  // A test writes the index while the server reads it, as Mail does: it has a write-ahead log, as
+  // Mail's has (made so below), so a read never holds up a write (with SQLite's default journal, a
+  // write during a read failed with "database is locked"), and a write waits for a lock as Mail's do.
+  const sqlite = (q) => { const r = spawnSync(SQLITE, ['-cmd', '.timeout 5000', INDEX], { input: q, encoding: 'utf8' }); if (r.status) throw new Error(r.stderr); return r.stdout }
   const who = (n) => `${PEOPLE[n][1]} <${PEOPLE[n][0]}>`
   // A message's file where Mail keeps it, as .emlx: its length, the message, Mail's plist after it.
   const emlx = (folder, id, { from, to, cc, subject, date, body }) => {
@@ -43,6 +46,7 @@ export function makeMailbox(kit) {
     fs.writeFileSync(path.join(d, `${id}.emlx`), `${Buffer.byteLength(raw)}\n${raw}<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict/></plist>\n`)
   }
   let text = `
+PRAGMA journal_mode=WAL;
 CREATE TABLE mailboxes (ROWID INTEGER PRIMARY KEY, url TEXT);
 CREATE TABLE addresses (ROWID INTEGER PRIMARY KEY, address TEXT, comment TEXT);
 CREATE TABLE subjects (ROWID INTEGER PRIMARY KEY, subject TEXT);

@@ -273,9 +273,11 @@ INSERT INTO messages VALUES (141, 0, 0, 0, ${t2 + 6}, ${t2 + 1}, 1, 1, 91, 141, 
   ok(v.profile === null && !v.examples.length && !fs.existsSync(path.join(kit.data, 'mail', 'voice.json')), 'cleared: nothing kept', v)
 
   // ---------- No write path anywhere ----------
+  // Every file of Mail's, but for its index's shared memory (-shm), which SQLite has every reader of
+  // an index with a write-ahead log write to, as it reads.
   const snap = () => {
     const out = []
-    const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else { const s = fs.statSync(p); out.push(`${path.relative(V, p)} ${s.size} ${s.mtimeMs} ${crypto.createHash('sha1').update(fs.readFileSync(p)).digest('hex')}`) } } }
+    const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (!e.name.endsWith('-shm')) { const s = fs.statSync(p); out.push(`${path.relative(V, p)} ${s.size} ${s.mtimeMs} ${crypto.createHash('sha1').update(fs.readFileSync(p)).digest('hex')}`) } } }
     walk(path.join(kit.home, 'Library', 'Mail'))
     return out.sort().join('\n')
   }
