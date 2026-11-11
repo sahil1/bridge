@@ -416,7 +416,9 @@ try {
       // Claude Code gives up waiting for the browser.
       await claude.locator('button', { hasText: 'Sign in' }).click()
       let x = await says(claude, /The sign-in ended before you signed in/)
-      ok(/timed out waiting for the browser/.test(x || '') && await claude.locator('button', { hasText: 'Try again' }).count() === 1, 'the sign-in ending without signing in says so, and why, with Try again', x || (await claude.innerText()))
+      // (Not said: what the sign-in's terminal showed, and how the server read it.)
+      const seen = async () => { const out = []; for (const t of await signInTabs(k)) { const pane = t.panes?.[0]?.paneId; if (!pane) continue; out.push({ read: await k.api(`/signins/${encodeURIComponent(pane)}`).catch((e) => e.message), screen: String((await k.api(`/agents/${encodeURIComponent(pane)}/screen?lines=40`).catch(() => ({})))?.ansi || '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').split('\n').slice(-14) }) } return out }
+      if (!ok(/timed out waiting for the browser/.test(x || '') && await claude.locator('button', { hasText: 'Try again' }).count() === 1, 'the sign-in ending without signing in says so, and why, with Try again', x || (await claude.innerText()))) console.log('the sign-in tabs then:', JSON.stringify(await seen(), null, 1))
       await shot(p, `${tag}new-signin-ended`)
       fs.writeFileSync(path.join(k.home, 'claude-login.json'), '{}')
       await claude.locator('button', { hasText: 'Try again' }).click()
