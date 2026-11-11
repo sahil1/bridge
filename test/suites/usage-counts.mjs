@@ -94,7 +94,18 @@ try {
     await fresh.api('/counts/window', { language: 'de', appearance: 'dark', theme: 'ocean', secret: ['', 'Users', 'priya'].join('/') })
     const pw = (await fresh.api('/counts/preview')).report.features
     ok(pw.language === 'de' && pw.appearance === 'dark' && pw.theme === 'ocean' && !JSON.stringify(pw).includes('priya'), 'a window says its language and look, and nothing else it might send is kept', pw)
+    // A new install says so once, the day it happens: a day's report only goes the day after.
+    const firstGot = await until(() => got.find((g) => g.path === '/v1/first'), 5000)
+    const fr = firstGot ? JSON.parse(firstGot.body) : null
+    const kept = path.join(fresh.data, 'telemetry', 'sent', 'first.json')
+    ok(!!fr && Object.keys(fr).join() === Object.keys(SCHEMA.firstReport.report).join() && fr.day === new Date().toLocaleDateString('sv') && fr.app && ['arm64', 'x64'].includes(fr.arch) && /^[0-9a-f]{24}$/.test(fr.nonce), 'a new install sends a first report soon after it starts: the day, its version, system and chip, nothing else', fr)
+    ok(fs.existsSync(kept) && JSON.parse(fs.readFileSync(kept, 'utf8')).nonce === fr?.nonce, 'and keeps a copy with the reports sent', kept)
     fresh.stop()
+    const again = await kitWith('default-again', { BRIDGE_COUNTS_URL: URL_, BRIDGE_HOME: fresh.data })
+    await new Promise((r) => setTimeout(r, 1500))
+    ok(got.filter((g) => g.path === '/v1/first').length === 1, 'started again: the first report isn\'t sent twice', got.map((g) => g.path))
+    again.stop()
+    got.length = 0
   }
 
   // Turned off: nothing at all.

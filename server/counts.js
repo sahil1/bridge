@@ -17,6 +17,10 @@
 //   one before it, the day it updated), its channel, bucket and tester as the week's has them, the
 //   OS and how it's installed, how many times it started, and whether it crashed, so each version's
 //   adoption and crash-free days can be seen, on each channel and at each step of a rollout.
+// - a first one (telemetry/sent/first.json), once: a couple of minutes after Bridge AI first runs on
+//   a computer, that there's a new install, the day it was installed, and its version, channel,
+//   system, chip and how it's installed, so a new install is counted the day it happens (a day's
+//   report only goes the day after, and only if Bridge AI runs again).
 // A copy of each report sent stays in telemetry/sent. Neither ever has a name (an early-access
 // code's is the one the project gave its tester), a path, a repo or branch, a prompt, a transcript,
 // what an agent wrote, an email, a host, an account, an exact time, or an ID for you or this
@@ -333,6 +337,33 @@ async function sendDays() {
   return out
 }
 
+// The first report: once for an install, while it's in its first week (one that's older was here
+// before there was such a report, and isn't new). It can't go (offline, the server down): tried
+// again each time a week's is looked for, until the week is out.
+const FIRST = path.join(SENT, 'first.json')
+const firstEndpoint = () => { const w = endpoint(); try { return /\/v1\/week$/.test(w) ? w.replace(/\/v1\/week$/, '/v1/first') : new URL('/v1/first', w).href } catch { return null } }
+// A first report, exactly as it's sent.
+export function firstReport(born, c = {}) {
+  return { schema: SCHEMA.schema, day: dayOf(new Date(born)), app: c.app || null, channel: channelOf(c).channel, os: c.os, arch: c.arch, install: c.install, nonce: crypto.randomBytes(12).toString('hex') }
+}
+export async function sendFirst() {
+  if (!sharing() || !firstEndpoint()) return { sent: false }
+  if (await fs.promises.access(FIRST).then(() => true, () => false)) return { sent: false }
+  const keep = (what) => fs.promises.mkdir(SENT, { recursive: true }).then(() => fs.promises.writeFile(FIRST, JSON.stringify(what, null, 2)))
+  const st = await fs.promises.stat(DATA).catch(() => null)
+  const born = st && (st.birthtimeMs > 0 ? st.birthtimeMs : st.ctimeMs)
+  if (!born || now() - born > 7 * 864e5) { await keep({ sent: false, why: 'Bridge AI was on this computer before first reports began, or for more than a week.' }); return { sent: false } }
+  const body = firstReport(born, await context())
+  let r
+  try { r = await fetch(firstEndpoint(), { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': 'bridge-ai' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) }) } catch { return { sent: false } }
+  const said = await r.json().catch(() => ({}))
+  if (said?.stop) { saveSettings({ counts: { share: false, stopped: String(said.why || 'The project stopped collecting usage stats.').slice(0, 300) } }); await setShareOffQuietly(); return { sent: false } }
+  // A server from before first reports (a fork's, not updated) says 404: there's nobody to tell.
+  if (!r.ok && r.status !== 404) return { sent: false }
+  await keep(r.ok ? body : { sent: false, why: 'The usage stats server takes no first reports.' })
+  return { sent: r.ok }
+}
+
 // A minute of Bridge AI in use, said by a window of it (POST /api/counts/active): counted once a
 // minute, however many windows and phones say so.
 let lastActive = -1
@@ -360,12 +391,12 @@ async function running() {
   if (day?.day !== dayOf()) { await currentDay(); await writeDay() }
 }
 
-// Looks for a week to send a minute after the server starts, then every six hours; and counts the
-// minutes it runs.
+// Looks for a week to send two minutes after the server starts (and sends an install's first
+// report then), then every six hours; and counts the minutes it runs.
 export function start() {
   launched().catch(() => {})
-  const tick = () => send().catch(() => {})
-  setTimeout(tick, Number(process.env.BRIDGE_COUNTS_FIRST_MS || 60000)).unref?.()
+  const tick = () => send().catch(() => {}).then(() => sendFirst().catch(() => {}))
+  setTimeout(tick, Number(process.env.BRIDGE_COUNTS_FIRST_MS || 120000)).unref?.()
   setInterval(tick, 6 * 3600 * 1000).unref?.()
   setInterval(() => running().catch(() => {}), MINUTE_MS).unref?.()
 }

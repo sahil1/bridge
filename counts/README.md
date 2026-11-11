@@ -47,6 +47,12 @@ made-up weeks. That's the cost of having no IDs. A Cloudflare rate limiting rule
   starts, n) and `daily_updates` (day, version, the version it came from, n): installs on each
   version each day, crash-free days, and adoption of each release. Counted once by its nonce, as
   the week's.
+- **The chip, each day** (`daily_chips`: day, OS, chip, n), kept apart from the rest of the day's
+  report, so Intel and Apple-silicon Macs can be told apart the next day, not a week on.
+- **A first report** (`POST /v1/first`): `firsts` (day, version, OS, chip, how it's installed,
+  channel, n): new installs by the day they were installed. Bridge AI sends it once, a couple of
+  minutes after it first runs on a computer; a day's report only comes the day after, and only if
+  Bridge AI runs again, so an install tried once would never be seen. Counted once by its nonce.
 - **The update channel**, with the version and nothing else: `channels` (week, version, channel,
   tester, bucket, n) and `daily_channels` (day, version, channel, tester, bucket, crashed, n).
   The channel is `stable` or `early` (Early Access, the pre-releases), the tester is who an

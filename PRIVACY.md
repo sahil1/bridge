@@ -219,6 +219,9 @@ Two reports go to the project's server, `counts.boldbridge.ai`, run on Cloudflar
 - **Once a day**, after the day is over: the version it ran, the one it updated from that day if it
   did, its update channel, rollout bucket and early-access tester as above, the operating system and
   how it's installed, how many times it started (a range), and whether something crashed.
+- **Once, a couple of minutes after Bridge AI first runs on a computer**: that there's a new
+  install, the day it was installed, its version and update channel, the operating system, the
+  chip and how it's installed. Turn usage stats off before then and it never goes.
 
 Neither has your name (on Early Access, the tester's name is the one the project chose for the
 code it gave them), an ID for you or your computer (a random number new with each report lets the

@@ -339,5 +339,18 @@
       "crashed": "true if its server, window or graphics stopped by itself that day",
       "nonce": "random, new for each report"
     }
+  },
+  "firstReport": {
+    "about": "Sent once, a couple of minutes after Bridge AI first runs on a computer (or the next time it runs, for a week, if it couldn't go), to the same server (/v1/first): that there's a new install, the day it was installed, its version, update channel, OS, chip and how it's installed. With no ID, so new installs can be counted the day they happen, never followed. Turning usage stats off before then means it never goes.",
+    "report": {
+      "schema": "this file's schema number",
+      "day": "the day Bridge AI was installed, on the computer's calendar, e.g. 2026-11-04",
+      "app": "Bridge AI's version",
+      "channel": "the update channel: stable or early",
+      "os": "mac, windows or linux",
+      "arch": "arm64 or x64",
+      "install": "desktop, source or docker",
+      "nonce": "random, new for each report"
+    }
   }
 }
