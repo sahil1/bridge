@@ -395,6 +395,16 @@ try {
   const rn3 = await readBook(out.bytes, 'new.xlsx')
   ok(rn3.data.sheets[rn3.data.sheetOrder[0]].cellData[1][1].f === '=B1*2', 'and filled in and saved', rn3.data.sheets[rn3.data.sheetOrder[0]].cellData)
 
+  // ---------- A dropdown's choices as Univer keeps them ----------
+  const r0 = await readBook(orig, 'budget.xlsx')
+  const d0 = clone(r0.data)
+  const dvs = res(d0, 'SHEET_DATA_VALIDATION_PLUGIN')
+  dvs[sheetId(d0, 'Budget')][0].formula1 = '["Yes","No","Maybe later"]'
+  setRes(d0, 'SHEET_DATA_VALIDATION_PLUGIN', dvs)
+  out = await writeBook(orig, r0.keep, d0)
+  const dvXmlOut = await xmlOf(out.bytes, 'xl/worksheets/sheet1.xml')
+  ok(/<formula1>(?:"|&quot;)Yes,No,Maybe later(?:"|&quot;)<\/formula1>/.test(dvXmlOut), 'a dropdown\'s choices as Univer 1.x keeps them (a JSON list) written as Excel\'s: "Yes,No,Maybe later"', /<dataValidation [\s\S]*?<\/dataValidation>/.exec(dvXmlOut)?.[0])
+
   // ---------- A big one ----------
   const big = new ExcelJS.Workbook()
   const bw = big.addWorksheet('Data')
