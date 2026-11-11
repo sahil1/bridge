@@ -1311,7 +1311,8 @@ function dvValue(type, f) {
   if (f == null || f === '') return null
   const s = String(f)
   if (s.startsWith('=')) return s.slice(1)
-  if (type === 'list' || type === 'listMultiple') return qs(s)
+  // A list's choices, as Univer 1.x keeps them (a JSON list) or as Excel does ("a,b").
+  if (type === 'list' || type === 'listMultiple') { let l = null; try { l = JSON.parse(s) } catch { l = null } return qs(Array.isArray(l) && l.every((x) => typeof x === 'string') ? l.filter(Boolean).join(',') : s) }
   if ((type === 'date' || type === 'time') && !isNum(s)) {
     const d = Date.parse(/T|\d:\d/.test(s) && type === 'date' ? s : type === 'time' ? `1970-01-01T${s}Z` : `${s}T00:00:00Z`)
     if (Number.isFinite(d)) return String(type === 'time' ? (d / 86400000) % 1 : d / 86400000 + 25569)
