@@ -3,7 +3,7 @@ import Icon from './Icon.jsx'
 import { usePersisted, useWidth } from './layout.jsx'
 import { Market, Mortgage, Updated } from './Trackers.jsx'
 import { usePoll, fmtRelative } from '../api.js'
-import { locale } from '../i18n/index.js'
+import { t, tn, locale } from '../i18n/index.js'
 
 // Markets & news: the rates that drive money decisions, your watchlist, mortgage, and headlines.
 const pct = (v, d = 2) => (v == null ? '–' : `${v.toFixed(d)}%`)
@@ -33,7 +33,7 @@ function Line({ points, fmt = (v) => pct(v), w = 220, h = 44 }) {
         {hp && <line x1={x(hover)} x2={x(hover)} y1="0" y2={h} stroke="var(--line-2)" vectorEffect="non-scaling-stroke" />}
         {hp && <circle cx={x(hover)} cy={y(hp.v)} r="3" fill="var(--accent)" stroke="var(--pane-2)" strokeWidth="2" vectorEffect="non-scaling-stroke" />}
       </svg>
-      <span className="rate-line-read">{hp ? `${shortDate(hp.date)} ${hp.date.slice(0, 4)} · ${fmt(hp.v)}` : `${monthYear(points[0].date)} – now`}</span>
+      <span className="rate-line-read">{hp ? `${shortDate(hp.date)} ${hp.date.slice(0, 4)} · ${fmt(hp.v)}` : t('{date} – now', { date: monthYear(points[0].date) })}</span>
     </div>
   )
 }
@@ -41,7 +41,7 @@ function Line({ points, fmt = (v) => pct(v), w = 220, h = 44 }) {
 function Delta({ now, before, unit = 'pt', invert = false, neutral = false, label }) {
   if (now == null || before == null) return null
   const d = +(now - before).toFixed(2)
-  if (!d) return <span className="rate-delta">unchanged {label}</span>
+  if (!d) return <span className="rate-delta">{t('unchanged {label}', { label })}</span>
   const up = d > 0
   const good = invert ? !up : up
   return <span className={`rate-delta ${neutral ? '' : good ? 'pos' : 'neg'}`}>{up ? '▲' : '▼'} {Math.abs(d).toFixed(2)}{unit} {label}</span>
@@ -50,7 +50,7 @@ function Delta({ now, before, unit = 'pt', invert = false, neutral = false, labe
 function Tile({ title, value, sub, children, href }) {
   return (
     <div className="rate-tile">
-      <div className="rate-head"><span>{title}</span>{href && <a href={href} target="_blank" rel="noreferrer" className="icon-btn" aria-label={`${title} source`}><Icon name="external" size={11} /></a>}</div>
+      <div className="rate-head"><span>{title}</span>{href && <a href={href} target="_blank" rel="noreferrer" className="icon-btn" aria-label={t('{title} source', { title })}><Icon name="external" size={11} /></a>}</div>
       <div className="rate-val num">{value}</div>
       <div className="rate-sub">{sub}</div>
       {children}
@@ -63,44 +63,44 @@ function Rates() {
   const mort = usePoll('/mortgage', 60 * 60 * 1000)
   const days = (iso) => Math.max(0, Math.ceil((new Date(`${iso}T14:00:00`) - Date.now()) / 864e5))
   const f = data?.fed
-  const t = data?.treasury
+  const tr = data?.treasury
   const m = mort.data
   return (
     <section className="rates">
       <div className="rates-head">
-        <h3><Icon name="trend" size={14} /> Rates & economy</h3>
+        <h3><Icon name="trend" size={14} /> {t('Rates & economy')}</h3>
         <Updated data={data} onRefresh={() => refresh('?refresh=1')} />
       </div>
       {error && <p className="error-text">{error}</p>}
       {!data && !error && <div className="skeleton-rows"><div /><div /></div>}
       {data && (
         <div className="rate-grid">
-          <Tile title="Fed funds target" value={f.lower != null ? `${f.lower.toFixed(2)}–${f.upper.toFixed(2)}%` : '–'} href="https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
-            sub={<>Effective {pct(f.effective)}{f.lastMove && <> · last move <b className={f.lastMove.bps > 0 ? 'neg' : 'pos'}>{f.lastMove.bps > 0 ? '+' : ''}{f.lastMove.bps} bp</b> {shortDate(f.lastMove.date)}</>}</>}>
-            {f.next && <div className="fomc-next"><Icon name="calendar" size={11} /> Next FOMC <b>{f.next.label}</b> · {days(f.next.date) === 0 ? 'today' : `in ${days(f.next.date)} days`}{f.next.projections ? ' · with projections' : ''}</div>}
+          <Tile title={t('Fed funds target')} value={f.lower != null ? `${f.lower.toFixed(2)}–${f.upper.toFixed(2)}%` : '–'} href="https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+            sub={<>{t('Effective {rate}', { rate: pct(f.effective) })}{f.lastMove && <> · {tn('last move {change} {date}', { change: <b className={f.lastMove.bps > 0 ? 'neg' : 'pos'}>{f.lastMove.bps > 0 ? '+' : ''}{f.lastMove.bps} bp</b>, date: shortDate(f.lastMove.date) })}</>}</>}>
+            {f.next && <div className="fomc-next"><Icon name="calendar" size={11} /> <span>{tn('Next FOMC {meeting}', { meeting: <b>{f.next.label}</b> })}</span> · {days(f.next.date) === 0 ? t('today') : days(f.next.date) === 1 ? t('in {n} day', { n: 1 }) : t('in {n} days', { n: days(f.next.date) })}{f.next.projections ? ` · ${t('with projections')}` : ''}</div>}
             <Line points={f.history} />
           </Tile>
-          <Tile title="10-yr Treasury" value={pct(t.t10)} href="https://fred.stlouisfed.org/series/DGS10"
-            sub={<><Delta now={t.t10} before={t.t10WeekAgo} label="vs last week" neutral /> · 2-yr {pct(t.t2)} · spread {t.spread > 0 ? '+' : ''}{t.spread?.toFixed(2)}</>}>
-            <Line points={t.history10} />
+          <Tile title={t('10-yr Treasury')} value={pct(tr.t10)} href="https://fred.stlouisfed.org/series/DGS10"
+            sub={<><Delta now={tr.t10} before={tr.t10WeekAgo} label={t('vs last week')} neutral /> · {t('2-yr {rate}', { rate: pct(tr.t2) })} · {t('spread {n}', { n: `${tr.spread > 0 ? '+' : ''}${tr.spread?.toFixed(2) ?? ''}` })}</>}>
+            <Line points={tr.history10} />
           </Tile>
           {m && (
-            <Tile title="30-yr mortgage" value={pct(m.latest.fixed30)} href="https://fred.stlouisfed.org/series/MORTGAGE30US"
-              sub={<><Delta now={m.latest.fixed30} before={m.yearAgo?.fixed30} label="vs last year" invert /> · 15-yr {pct(m.latest.fixed15)}</>}>
+            <Tile title={t('30-yr mortgage')} value={pct(m.latest.fixed30)} href="https://fred.stlouisfed.org/series/MORTGAGE30US"
+              sub={<><Delta now={m.latest.fixed30} before={m.yearAgo?.fixed30} label={t('vs last year')} invert /> · {t('15-yr {rate}', { rate: pct(m.latest.fixed15) })}</>}>
               <Line points={m.history.slice(-104).map((r) => ({ date: r.date, v: r.fixed30 }))} />
             </Tile>
           )}
-          <Tile title="Inflation (CPI, yearly)" value={pct(data.inflation.yoy, 1)} href="https://fred.stlouisfed.org/series/CPIAUCSL"
-            sub={<><Delta now={data.inflation.yoy} before={data.inflation.prior} label="vs prior month" invert /> · {monthYear(data.inflation.asOf)}</>}>
+          <Tile title={t('Inflation (CPI, yearly)')} value={pct(data.inflation.yoy, 1)} href="https://fred.stlouisfed.org/series/CPIAUCSL"
+            sub={<><Delta now={data.inflation.yoy} before={data.inflation.prior} label={t('vs prior month')} invert /> · {monthYear(data.inflation.asOf)}</>}>
             <Line points={data.inflation.history} fmt={(v) => pct(v, 1)} />
           </Tile>
-          <Tile title="Unemployment" value={pct(data.jobs.unemployment, 1)} href="https://fred.stlouisfed.org/series/UNRATE"
-            sub={<><Delta now={data.jobs.unemployment} before={data.jobs.prior} label="vs prior month" invert /> · {monthYear(data.jobs.asOf)}</>}>
+          <Tile title={t('Unemployment')} value={pct(data.jobs.unemployment, 1)} href="https://fred.stlouisfed.org/series/UNRATE"
+            sub={<><Delta now={data.jobs.unemployment} before={data.jobs.prior} label={t('vs prior month')} invert /> · {monthYear(data.jobs.asOf)}</>}>
             <Line points={data.jobs.history} fmt={(v) => pct(v, 1)} />
           </Tile>
         </div>
       )}
-      {data && <p className="muted small rates-src">Source: {data.source}. Treasury and Fed rates as of {shortDate(t.asOf)}.</p>}
+      {data && <p className="muted small rates-src">{t('Source: {source}. Treasury and Fed rates as of {date}.', { source: data.source, date: shortDate(tr.asOf) })}</p>}
     </section>
   )
 }
@@ -113,7 +113,7 @@ function News() {
   return (
     <section className="newsv card-like">
       <div className="rates-head">
-        <h3><Icon name="sparkle" size={14} /> Headlines</h3>
+        <h3><Icon name="sparkle" size={14} /> {t('Headlines')}</h3>
         <Updated data={data} onRefresh={() => refresh('?refresh=1')} />
       </div>
       <div className="chips news-chips">
@@ -134,12 +134,12 @@ function News() {
                     {n.points != null && <span>{n.points} pts</span>}
                   </span>
                 </a>
-                {n.discussion && <a className="hl-disc" href={n.discussion} target="_blank" rel="noreferrer" title="Hacker News discussion">{n.comments ?? 0} comments</a>}
+                {n.discussion && <a className="hl-disc" href={n.discussion} target="_blank" rel="noreferrer" title={t('Hacker News discussion')}>{n.comments === 1 ? t('{n} comment', { n: 1 }) : t('{n} comments', { n: n.comments ?? 0 })}</a>}
               </li>
             ))}
           </ul>
-          {section.items.length > limit && <button className="ghost-btn idea-more" onClick={() => setLimit(limit + 15)}>Show more</button>}
-          <p className="muted small">From {section.sources.join(', ')}{section.failed.length ? `. Unreachable now: ${section.failed.join(', ')}` : ''}.</p>
+          {section.items.length > limit && <button className="ghost-btn idea-more" onClick={() => setLimit(limit + 15)}>{t('Show more')}</button>}
+          <p className="muted small">{section.failed.length ? t('From {sources}. Unreachable now: {failed}.', { sources: section.sources.join(', '), failed: section.failed.join(', ') }) : t('From {sources}.', { sources: section.sources.join(', ') })}</p>
         </>
       )}
     </section>
