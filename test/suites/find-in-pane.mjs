@@ -312,9 +312,10 @@ try {
   ok(!!(await until(() => pbar.isVisible(), 3000)) && await ph.p.evaluate(() => document.activeElement?.matches('.find-bar input')), 'phone: the ⋯ menu\'s Find in this chat opens the bar, its field focused')
   await ph.p.keyboard.type('ledger')
   ok(!!(await until(async () => /of [56]$/.test(await pbar.locator('.find-count').innerText().catch(() => '')), 5000)), 'phone: and finds', await pbar.locator('.find-count').innerText().catch(() => ''))
-  await ph.p.waitForTimeout(300)
-  const pm = await marks(ph.p)
-  ok(!pm || (pm.now && pm.shown), 'phone: the current match is shown, clear of the bar', pm)
+  // (Shown once the chat is laid out: what opens under it as the agent's page fills in makes it
+  // shorter, and the match is brought back into view as it's drawn.)
+  const pm = await until(async () => { const m = await marks(ph.p); return !m ? 'unmarked' : m.now && m.shown && m }, 3000, 100)
+  ok(!!pm, 'phone: the current match is shown, clear of the bar', pm || await marks(ph.p))
   let f = await phoneFaults(ph.p, '.find-bar')
   ok(!Object.keys(f).length, 'phone: the bar fits (each target 40 px and uncovered, the field 16 px, nothing past the edge)', f)
   await shot(ph.p, `${tag}find-phone-chat`)
