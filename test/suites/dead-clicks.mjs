@@ -256,9 +256,11 @@ async function walk(shape) {
   const goTo = async (pl, fresh = false) => {
     const tg = Date.now()
     if (DEBUG) console.log(`  ${shape} ${pl.name}: opened again${fresh ? ' (loaded)' : ''}`)
-    // Not there in a moment (something a press left over it): the page loaded again, once.
+    // Not there in a moment (something a press left over it): the page loaded again, once. (Waited
+    // for until the sidebar is there, not until every file the page asks for has come, which a busy
+    // computer can take longer than a page load is given.)
     for (let tries = 0; tries < 2; tries++) {
-      if (fresh || tries || p.url() !== `${kit.url}/`) { await p.goto(kit.url); await p.waitForSelector('.rail', { timeout: 30000 }) }
+      if (fresh || tries || p.url() !== `${kit.url}/`) { await p.goto(kit.url, { waitUntil: 'domcontentloaded' }); await p.waitForSelector('.rail', { timeout: 30000 }) }
       for (let i = 0; i < 3 && overOf(await p.evaluate(WHERE, pl.scope)) > (pl.over || 0); i++) { await p.keyboard.press('Escape'); await sleep(120) }
       await pl.open(p)
       if (!pl.ready || await p.locator(pl.ready).first().waitFor({ timeout: 6000 }).then(() => true, () => false)) break
