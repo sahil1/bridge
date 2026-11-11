@@ -582,6 +582,7 @@ try {
     await assist(p, 'A timeline')
     const steps = await until(() => { const now = live(readBoard(id)); const s = ['Design review · Dan · 3 Nov', 'Beta ships · Priya · 10 Nov', 'Launch · You · 1 Dec'].map((t) => byLabel(now, t)); return s.every(Boolean) && s }, 20000)
     ok(!!steps && steps[0].x < steps[1].x && steps[1].x < steps[2].x, 'A timeline: each step with its owner and date, left to right in order', steps && steps.map((e) => Math.round(e.x)))
+    ok(await p.evaluate(() => JSON.parse(localStorage.getItem('cc-board-kind') || '"auto"')) !== 'timeline', 'and the kind of diagram remembered for the next drawing is left as it was', await p.evaluate(() => localStorage.getItem('cc-board-kind')))
     const asked = model.asked().slice(n0).find((q) => /Make it a timeline/.test(q)) || ''
     ok(/What's on the whiteboard now/.test(asked) && /- Login bug/.test(asked) && /- Hire a designer/.test(asked), 'drawn from the notes on the board', asked.slice(0, 500))
     // Action items for each person, then onto the task list with a click.

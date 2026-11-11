@@ -443,9 +443,10 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
     setMode(modeOf(w))
     if (w === 'themes') { themes(); return }
     if (w !== 'timeline' && w !== 'actions') return
-    setKind(w)
+    // The kind picked here is remembered for the next drawing (Whiteboards' own box too), so it's
+    // set only when there's a meeting to pick before drawing.
     const all = board.api?.getSceneElements() || []
-    if (all.length) { setFrom('board'); draw({ prompt: '', kind: w, from: { board: describe(all) } }) } else setFrom('meeting')
+    if (all.length) { setFrom('board'); draw({ prompt: '', kind: w, from: { board: describe(all) } }) } else { setKind(w); setFrom('meeting') }
   }, [want?.n]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const go = (e) => { e?.preventDefault(); if (!busy) (mode === 'draw' ? draw() : mode === 'ask' ? ask() : change()) }
