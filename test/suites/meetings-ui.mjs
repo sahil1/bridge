@@ -113,8 +113,9 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
     ok(!!(await until(async () => (await p.locator('.ws-tab, .tab-row').filter({ hasText: rec1?.title || '' }).count()) > 0, 5000)), 'its tab has its name straight away')
     // While it records: My notes beside the transcript, the cursor in it, and what it's for.
     const box = p.locator('.mt-cols.pinned .mt-mynotes .mt-mine')
-    const sideBySide = async () => { const a = await box.boundingBox(), t = await p.locator('.mt-cols.pinned .mt-transcript').boundingBox(); return !!a && !!t && a.x + a.width <= t.x && a.height > 300 }
-    ok(!!(await until(() => box.isVisible(), 8000)) && await sideBySide(), 'while it records, My notes is beside the transcript, the height of the page', await p.locator('.mt-cols').getAttribute('class').catch(() => null))
+    const sideBySide = async () => { const a = await box.boundingBox({ timeout: 1000 }).catch(() => null), t = await p.locator('.mt-cols.pinned .mt-transcript').boundingBox({ timeout: 1000 }).catch(() => null); return !!a && !!t && a.x + a.width <= t.x && a.height > 300 }
+    // (Once the page has settled: what comes in above it as the recording starts makes it shorter for a moment.)
+    ok(!!(await until(async () => await box.isVisible() && await sideBySide(), 8000)), 'while it records, My notes is beside the transcript, the height of the page', { cols: await p.locator('.mt-cols').getAttribute('class', { timeout: 1000 }).catch(() => null), mine: await box.boundingBox({ timeout: 1000 }).catch(() => null), transcript: await p.locator('.mt-cols.pinned .mt-transcript').boundingBox({ timeout: 1000 }).catch(() => null) })
     ok(!!(await until(() => p.evaluate(() => !!document.activeElement?.classList.contains('mt-mine')), 4000)), 'with the cursor in it, ready to write', await p.evaluate(() => document.activeElement?.outerHTML?.slice(0, 120)))
     ok(/^What you write here(, the slides it sees)? and the meeting's files shape the summary\.$/.test(await p.locator('.mt-mynotes .mt-shapes').innerText().catch(() => '')) && (await p.locator('.seg button[data-view="mine"]').count()) === 0, 'it says what shapes the summary, and needs no tab of its own while it records', await p.locator('.mt-mynotes').innerText().catch(() => ''))
     await p.keyboard.type('tiers ok?')
