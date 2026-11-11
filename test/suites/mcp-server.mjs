@@ -305,6 +305,9 @@ try {
     await card.locator('.mcp-calls li').first().waitFor({ timeout: 15000 })
     const words = await card.innerText()
     ok(/Bridge AI as an MCP Server/.test(words) && /Beta/i.test(words) && /Never/.test(words) && /transcripts/.test(words) && /Anthropic/.test(words), `the card (${mode}): what other apps get and never get, and where it goes`, words.slice(0, 400))
+    // Each line one sentence, its verb in bold (in a language's own order once translated).
+    const lines = await card.locator('.mcp-shared li').evaluateAll((ls) => ls.map((l) => ({ b: l.querySelector('b')?.innerText.trim(), text: l.innerText.trim() })))
+    ok(JSON.stringify(lines.map((l) => l.b)) === '["Read","Make","Suggest","Never"]' && lines.every((l) => l.text.startsWith(`${l.b} `) && !l.text.includes('*')), `(${mode}) each thing they can do starts with its verb in bold`, lines)
     ok(['Claude Code', 'Claude Desktop', 'Cursor', 'Codex'].every((n) => words.includes(n)) && (await card.locator('.mcp-apps .mcp-tag.good').count()) === 4, 'each app here, shown added', words)
     ok(/Let them send work to your agents/.test(words) && await card.getByRole('checkbox', { name: /Let them send work/ }).isChecked(), 'sending to agents: on, with what it means')
     ok((await card.locator('.mcp-calls li').count()) > 0 && /Test Client|HTTP Client|Old HTTP/.test(words), 'the recent calls: which app and what')

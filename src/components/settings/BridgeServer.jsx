@@ -11,6 +11,10 @@ import { t } from '../../i18n/index.js'
 // here in one click (server/mcp.js bridgeMcp), shows how to add it by hand, the switch for sending
 // work to agents (each message then waits in Needs You), and the latest calls, which app and what.
 // Only on the computer it runs on: another computer's window or a phone shows it read-only.
+// What other apps can do, a sentence each, its verb marked **so** and shown in bold: each language
+// puts the verb where its grammar needs it, which a bold word and the rest side by side couldn't.
+const lead = (s) => s.split('**').map((part, i) => (i % 2 ? <b key={i}>{part}</b> : part))
+
 export default function BridgeServer({ here = true }) {
   const [d, setD] = useState(null)
   const [error, setError] = useState(null)
@@ -53,10 +57,10 @@ export default function BridgeServer({ here = true }) {
           <div className="mcp-self-block">
             <h5>{t('What They Can Do')}</h5>
             <ul className="mcp-shared">
-              <li><Icon name="eye" size={13} /><span><b>{t('Read')}</b> {t('your whiteboards, the Studio files in your Places, and your meetings\' summaries.')}</span></li>
-              <li><Icon name="plus" size={13} /><span><b>{t('Make')}</b> {t('new whiteboards and files, and tasks on your list.')}</span></li>
-              <li><Icon name="edit" size={13} /><span><b>{t('Suggest')}</b> {t('changes to a board or a file that exists, which wait for you to keep or discard in Needs You.')}</span></li>
-              <li className="no"><Icon name="blocked" size={13} /><span><b>{t('Never')}</b> {t('your meetings\' transcripts, your agents\' conversations, your mail or your calendar.')}</span></li>
+              <li><Icon name="eye" size={13} /><span>{lead(t('**Read** your whiteboards, the Studio files in your Places, and your meetings\' summaries.'))}</span></li>
+              <li><Icon name="plus" size={13} /><span>{lead(t('**Make** new whiteboards and files, and tasks on your list.'))}</span></li>
+              <li><Icon name="edit" size={13} /><span>{lead(t('**Suggest** changes to a board or a file that exists, which wait for you to keep or discard in Needs You.'))}</span></li>
+              <li className="no"><Icon name="blocked" size={13} /><span>{lead(t('**Never** your meetings\' transcripts, your agents\' conversations, your mail or your calendar.'))}</span></li>
             </ul>
             <p className="muted small">{t('What Bridge AI gives an app goes to the model that app uses: for Claude Code and Claude Desktop, Anthropic\'s.')}</p>
           </div>
