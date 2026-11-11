@@ -14,7 +14,7 @@
 // a phone: nothing past its edge, every target whole, fields iOS doesn't zoom into.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startRelay, startAccounts, checks, until, sleep, browser, page, shot, phoneFaults, advanced } from '../lib/harness.mjs'
+import { startKit, startRelay, startAccounts, checks, until, sleep, browser, page, shot, phoneFaults, advanced, noServiceWorker } from '../lib/harness.mjs'
 
 const { ok, done } = checks('account-ui')
 const kits = []
@@ -56,7 +56,8 @@ try {
   await until(async () => (await studio.api('/relay')).online && (await desk.api('/relay')).online, 20000)
   await desk.api('/machines', { link: (await studio.api('/relay/pair', {})).pairing.link })
   ok(!!(await until(async () => (await studio.api('/machines')).machines.find((m) => m.name === 'Desk')?.online && (await desk.api('/machines')).machines.find((m) => m.name === 'Studio')?.online, 30000)), 'Studio and Desk are linked, each reaching the other')
-  const s = await page(b, studio.url, { mode: 'light', theme: 'sky' })
+  // (No service worker: in WebKit what a page asks for once one has it skips the test's routes.)
+  const s = await page(b, studio.url, { mode: 'light', theme: 'sky', before: noServiceWorker })
   pages.push(s)
   s.p.on('dialog', (d) => d.accept())
   await s.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
