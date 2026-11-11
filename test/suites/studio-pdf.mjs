@@ -57,10 +57,13 @@ async function drawn(file, n) {
   const refs = c instanceof PDFArray ? c.asArray() : [c]
   return refs.map((r) => { const s = doc.context.lookup(r); return s instanceof PDFRawStream ? Buffer.from(decodePDFRawStream(s).decode()).toString('latin1') : Buffer.from(s.getContents?.() || []).toString('latin1') }).join('\n')
 }
-// A file opened in Studio, sent again until it shows (a page can take it before the app listens).
+// A file opened in Studio, sent again until it shows (a page can take it before the app listens):
+// its name in the header and its pages drawn, not the pages of the file shown before it, which are
+// still there for a moment after it's asked for.
 const openIn = (pg, root, name) => until(async () => {
-  if (!(await pg.locator('.sd-file .pane-head h2', { hasText: name }).count())) await pg.evaluate(({ root, name }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: name } })), { root, name })
-  return pg.locator('.sd-pdf .pdfViewer .page canvas').first().waitFor({ timeout: 2000 }).then(() => true, () => false)
+  const head = pg.locator('.sd-file .pane-head h2', { hasText: name })
+  if (!(await head.count())) await pg.evaluate(({ root, name }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: name } })), { root, name })
+  return pg.locator('.sd-pdf .pdfViewer .page canvas').first().waitFor({ timeout: 2000 }).then(async () => (await head.count()) > 0, () => false)
 }, 25000, 300)
 const images = async (file, n) => { const doc = await PDFDocument.load(fs.readFileSync(file)); const xo = doc.getPage(n - 1).node.Resources()?.lookup(PDFName.of('XObject')); return xo ? xo.keys().length : 0 }
 
