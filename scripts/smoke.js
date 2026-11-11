@@ -148,12 +148,18 @@ try {
     let seen = ''
     ws.on('message', (d) => { seen += String(d) })
     await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject) })
-    await new Promise((r) => setTimeout(r, 1500)) // let the shell print its prompt
-    // The answer only appears if the shell ran the line (the typed line itself shows 6*7, not 42).
-    ws.send(process.platform === 'win32' ? 'echo ("bridge-" + 6*7 + "-ok")\r' : 'echo bridge-$((6*7))-ok\r')
-    for (let i = 0; i < 100 && !seen.includes('bridge-42-ok'); i++) await new Promise((r) => setTimeout(r, 100))
+    const shown = () => seen.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+    const until = async (test, ms) => { for (let t = 0; t < ms && !test(); t += 100) await new Promise((r) => setTimeout(r, 100)); return test() }
+    // The shell's prompt first: PowerShell starting in a profile it hasn't seen (a test's) takes a while.
+    const prompted = await until(() => /[$#%>] ?$/.test(shown().trimEnd().split('\n').pop() || ''), 30000)
+    await new Promise((r) => setTimeout(r, 300))
+    // The answer only appears if the shell ran the line (the typed line itself shows 6*7, not 42); typed
+    // again once if nothing came of it.
+    const line = process.platform === 'win32' ? 'echo ("bridge-" + 6*7 + "-ok")\r' : 'echo bridge-$((6*7))-ok\r'
+    ws.send(line)
+    if (!(await until(() => seen.includes('bridge-42-ok'), 15000))) { ws.send(line); await until(() => seen.includes('bridge-42-ok'), 15000) }
     ws.close()
-    if (!seen.includes('bridge-42-ok')) throw new Error(`no output; the terminal showed: ${JSON.stringify(seen.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').slice(-300))}`)
+    if (!seen.includes('bridge-42-ok')) throw new Error(`no output${prompted ? '' : ' (and no prompt in 30 s)'}; the terminal showed: ${JSON.stringify(shown().replace(/(\r?\n)+/g, '⏎').slice(-400))}`)
   })
 } finally {
   server.kill()
