@@ -58,13 +58,15 @@ jobs:
           npm run demo:build
 
       # The browsers' system packages (fonts, libraries) come from Ubuntu's servers, which GitHub's Linux
-      # machines sometimes can't reach for hours: tried three times, then the browsers alone, with a
-      # warning (the image has Chrome's libraries already, and macOS runs the same tests with every font).
+      # machines sometimes can't find for hours, and apt then takes half an hour to give up. Then the
+      # browsers alone, with a warning, so the tests still run in time (the image has Chrome's libraries
+      # already, and macOS runs the same tests with every font).
       - name: Browsers
         shell: bash
         run: |
           b="chromium ${{ matrix.browser != 'chromium' && 'webkit' || '' }}"
-          for i in 1 2 3; do npx playwright-core install --with-deps $b && exit 0; sleep 60; done
+          if [ "$RUNNER_OS" != Linux ]; then exec npx playwright-core install --with-deps $b; fi
+          if getent hosts azure.archive.ubuntu.com >/dev/null && timeout 300 npx playwright-core install --with-deps $b; then exit 0; fi
           echo "::warning::Ubuntu's packages couldn't be fetched, so the browsers run without them"
           npx playwright-core install $b
 
