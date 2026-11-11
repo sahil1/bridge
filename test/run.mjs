@@ -19,6 +19,8 @@ import { ROOT, OUT, stopTree } from './lib/harness.mjs'
 // alone: it measures how quick things are, so it runs with no other test beside it.
 const SUITES = [
   { name: 'server', build: null, covers: [/^server\//, /^shared\//, /^scripts\/(start|cli)\.js$/] },
+  // The release's smoke test of each built app (scripts/smoke.js), against this checkout's server.
+  { name: 'smoke', build: 'dist', covers: [/^scripts\/smoke\.js$/, /^server\/(index|apiauth|apitoken|guard|setup|attach|terminal)\.js$/] },
   { name: 'relay-signin', build: null, covers: [/^server\/(relay|agents|nodejs|paths)\.js$/] },
   { name: 'meetings-api', build: null, covers: [/^server\/(meetings|meetwork|meetmemory|speech|calendar|doctext|index|pr|chieftasks|worktrees)\.js$/] },
   { name: 'studio', build: 'dist', browser: true, covers: [/^server\/(studio|studioapps|files|office|index)\.js$/, /^src\/components\/studio\//, /^src\/(App|lazy)\.jsx$/, /^src\/components\/(Files|Rail)\.jsx$/] },
