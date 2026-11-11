@@ -14,7 +14,7 @@
 // under another at phone width.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startRelay, checks, until, browser, page, shot, noServiceWorker, OUT, TEST } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, sleep, browser, page, shot, noServiceWorker, OUT, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('agent-map')
 
@@ -273,7 +273,11 @@ try {
   const total = big.devices.reduce((n, d) => n + d.agents.length, 0)
   ok(total >= 34, `the made-up map has ${total} agents on four computers and the cloud`)
   for (const [w, h, look, phone] of [[1440, 900, { mode: 'light', theme: 'sky' }], [1280, 800, { mode: 'dark', theme: 'midnight' }], [390, 844, { mode: 'dark', theme: 'midnight' }, true], [320, 700, { mode: 'light', theme: 'sky' }, true]]) {
-    const v = await page(b, a.url, { ...look, width: w, height: h, phone: !!phone, before: async (cx) => { await noServiceWorker(cx); await cx.route(/\/api\/agent-map(\?|$)/, (r) => r.fulfill({ json: big })) } })
+    // On a phone, the answer about your devices (the banner asking to keep Desk and Laptop, below)
+    // comes a while after the page's others, as on a busy computer.
+    const held = Date.now() + 2500
+    const slowDevices = (cx) => cx.route(/\/api\/machines$/, async (r) => { await sleep(held - Date.now()); await r.continue().catch(() => {}) })
+    const v = await page(b, a.url, { ...look, width: w, height: h, phone: !!phone, before: async (cx) => { await noServiceWorker(cx); await cx.route(/\/api\/agent-map(\?|$)/, (r) => r.fulfill({ json: big })); if (phone) await slowDevices(cx) } })
     if (phone) await v.p.setViewportSize({ width: w, height: h })
     await v.p.waitForSelector(phone ? '.tabbar' : '.rail-nav-btn', { timeout: 20000 })
     const m = v.p.locator('.am')
@@ -284,15 +288,27 @@ try {
       await v.p.waitForTimeout(300)
       await v.p.keyboard.press('Enter')
     } else {
-      // Studio hasn't kept Desk and Laptop yet, so a banner over the page asks to. It comes with an
-      // answer of its own, a moment after the page, and moves all under it down: Map tapped before it
-      // came was somewhere else by the time the tap landed (on the banner), and no map opened. So
-      // first the page as it settles, banner and all.
-      await v.p.locator('.ask-banner .new-device').first().waitFor({ timeout: 15000 })
+      // Studio hasn't kept Desk and Laptop yet, so a banner over the page asks to. It comes with the
+      // page, not after it: where Map is, from the moment you can see it, noted each frame.
+      await v.p.evaluate(() => {
+        window.__mapAt = []
+        const t0 = performance.now()
+        const look = () => {
+          const b = [...document.querySelectorAll('.m-acts button')].find((x) => /Map/.test(x.textContent))
+          const y = b && getComputedStyle(b).visibility === 'visible' ? Math.round(b.getBoundingClientRect().top) : null
+          if (y != null && window.__mapAt.at(-1) !== y) window.__mapAt.push(y)
+          if (window.__mapAt.length < 10 && performance.now() - t0 < 30000) requestAnimationFrame(look)
+        }
+        requestAnimationFrame(look)
+      })
       // From the phone's Agents tab, whose head has room for Map and New.
       await v.p.locator('.tabbar button', { hasText: 'Agents' }).click()
       const btn = v.p.locator('.m-acts button', { hasText: 'Map' })
       await btn.waitFor({ timeout: 10000 })
+      await v.p.locator('.ask-banner .new-device').first().waitFor({ timeout: 15000 })
+      await sleep(300)
+      const mapAt = await v.p.evaluate(() => window.__mapAt)
+      ok(mapAt.length === 1, `${w} px phone: the banner asking to keep Desk and Laptop comes with the page, and Map stays where it was first seen (it moved down under your finger as the banner came)`, mapAt)
       const head = await v.p.evaluate(() => { const h = document.querySelector('.board .pane-head'); return { over: h.scrollWidth - h.clientWidth, right: Math.max(...[...h.querySelectorAll('button')].map((x) => x.getBoundingClientRect().right)), vw: window.innerWidth } })
       ok(head.over <= 1 && head.right <= head.vw, `${w} px phone: the Agents tab's Map and New fit its head`, head)
       await btn.click()

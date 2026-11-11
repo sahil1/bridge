@@ -39,7 +39,7 @@ import { takeReturn } from './permissions.js'
 import { takeEarlyLink } from './earlyLink.js'
 import CloudHome from './components/CloudHome.jsx'
 import SessionSwitcher from './components/Sessions.jsx'
-import { MachineMenu, AskBanner, SwitchedHere, useMachines, goMachine, isRemote, remoteOf, openRemote } from './components/Machines.jsx'
+import { MachineMenu, AskBanner, SwitchedHere, useMachines, goMachine, isRemote, remoteOf, openRemote, useAsksIn } from './components/Machines.jsx'
 import { useNeedsYou, NeedsYouChip, NeedsYouPanel, waitingOn, quietPanes } from './components/NeedsYou.jsx'
 import { isQuiet } from '../shared/focus.js'
 import AgentMap from './components/AgentMap.jsx'
@@ -211,6 +211,10 @@ function App() {
   const { fleet, live } = useFleet()
   // The phone's Cloud agents keep the phone layout on any screen.
   const wide = useMedia('(min-width: 900px)') && !cloudOnly
+  // The page under the banner asking to keep a new device or allow a link is shown once that banner
+  // has its first answer, so the two come together and nothing moves under your finger after.
+  const asksIn = useAsksIn()
+  const untilAsks = asksIn ? undefined : { visibility: 'hidden' }
   const [savedView, setView] = usePersisted('cc-view', 'command')
   // The live herdr view exists only when herdr is the runtime (see server/runtime).
   const confPoll = usePoll('/config', 10 * 60 * 1000)
@@ -1060,7 +1064,7 @@ function App() {
         <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
         <Quiet name="Link requests"><AskBanner /></Quiet>
         <Quiet name="Switched computer"><SwitchedHere /></Quiet>
-        <main className="m-body">
+        <main className="m-body" style={untilAsks}>
           {mtab === 'home' && homeOn && viewFor(homeView === 'everything' ? 'view:everything' : 'view:home')}
           {mtab === 'mate' && (mateShown ? <Console key={mateShown.paneId} agent={mateShown} variant="mobile" queued={queuedFor(mateShown.paneId)} delivered={deliveredFor(mateShown.paneId)} agents={agents} onThread={(id) => setMateId(id)} /> : <MateEmpty onLaunch={mateLaunch.launch} {...mateLaunch} />)}
           {mtab === 'agents' && (mAgent
@@ -1230,7 +1234,7 @@ function App() {
       <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
       <Quiet name="Link requests"><AskBanner /></Quiet>
       <Quiet name="Switched computer"><SwitchedHere /></Quiet>
-      <div className="views">
+      <div className="views" style={untilAsks}>
         <main className="cmd" hidden={view !== 'command'} ref={cmdRef}>
           <div className="slot rail-slot" style={{ width: railOpen ? L.railW : 52 }}>
             <Rail fleet={fleet} live={live} collapsed={!railOpen} onToggle={() => set({ railOpen: !L.railOpen })}

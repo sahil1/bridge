@@ -299,18 +299,48 @@ export function RailMachines({ compact = false }) {
 // And, on the computer itself, a phone or computer that just paired with Pair a device's code:
 // Keep (it's yours) or Remove, without stopping anything meanwhile. A computer you keep meets your
 // other computers then (server/machines.js).
+// It sits above the page, so it comes with the page's first draw (useAsksIn): coming after it, it
+// pushed everything down under your finger, and a tap meant for what was there landed on it.
+let asksAtStart = null
+let asksTaken = false // the banner has had that first answer: later ones ask afresh
+const firstAsks = () => (asksAtStart ||= api('/machines').catch(() => null))
+// Whether the banner's first answer is in (or it's been a while): App.jsx shows the page then.
+export function useAsksIn(ms = 3000) {
+  const [inn, setIn] = useState(false)
+  useEffect(() => {
+    let on = true
+    const done = () => { if (on) setIn(true) }
+    const t = setTimeout(done, ms)
+    firstAsks().finally(() => { clearTimeout(t); done() })
+    return () => { on = false; clearTimeout(t) }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  return inn
+}
+// A banner that comes (or changes) while you're using the page still moves what's under it, so its
+// buttons take no tap for a moment: one meant for what was there doesn't Keep, Remove or Allow.
+const ARRIVING_MS = 600
 export function AskBanner() {
   const [asks, setAsks] = useState([])
   const [fresh, setFresh] = useState([])
   const [err, setErr] = useState(null)
+  const [seen, setSeen] = useState('')
   const own = !machineId && !viaRelay
   useEffect(() => {
-    const load = () => api('/machines').then((d) => { setAsks(d.asks || []); setFresh(own ? d.newDevices || [] : []) }).catch(() => {})
-    load()
+    let on = true
+    const got = (d) => { if (on && d) { setAsks(d.asks || []); setFresh(own ? d.newDevices || [] : []) } }
+    const load = () => api('/machines').then(got).catch(() => {})
+    if (asksTaken) load()
+    else { asksTaken = true; firstAsks().then(got) }
     const t = setInterval(() => { if (!document.hidden) load() }, 5000)
     window.addEventListener('bridge-machines', load)
-    return () => { clearInterval(t); window.removeEventListener('bridge-machines', load) }
+    return () => { on = false; clearInterval(t); window.removeEventListener('bridge-machines', load) }
   }, [own])
+  const rows = [...fresh.map((d) => d.id), ...asks.map((a) => a.id)].join()
+  useEffect(() => {
+    if (rows === seen) return
+    const t = setTimeout(() => setSeen(rows), ARRIVING_MS)
+    return () => clearTimeout(t)
+  }, [rows, seen])
   if (!asks.length && !fresh.length) return relayComputers ? <LinkOffer /> : null
   const answer = async (id, allow) => {
     setErr(null)
@@ -328,7 +358,7 @@ export function AskBanner() {
     } catch (e) { setErr(e.message) }
   }
   return (
-    <div className="ask-banner" role="alert">
+    <div className={`ask-banner ${rows !== seen ? 'arriving' : ''}`} role="alert">
       {fresh.map((d) => (
         <div key={d.id} className="ask-row new-device">
           <Icon name={d.kind === 'computer' ? 'laptop' : 'phone'} size={14} />
