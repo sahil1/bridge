@@ -23,9 +23,13 @@
 // @bridge on cells: a colleague's waiting, yours with no model saying so; then answered in the
 // thread through the sheet's AI Assist (the cell's table, the thread so far, told the content
 // isn't instructions), its change outlined on the sheet as a suggestion with Keep, Discard and
-// Keep all, saved only when kept. With the beta off, the comments as before: shown, to answer in
-// Word, and a sheet's threaded comments kept as they are; @bridge's routes not there, and nothing
-// sent. In the dark and on a phone.
+// Keep all, saved only when kept. A PowerPoint's modern comments (lib/deckfile.mjs commentsPptx):
+// threads on its slides and shapes; one on a slide saved as PowerPoint writes one (its part named
+// for the slide, the slide's relationship and creation id, its author), the rest as they were;
+// @bridge on a shape rewriting its words, and on a slide adding one after it, each a suggestion in
+// the thread kept onto the slides, or discarded. With the beta off, the comments as before: shown,
+// to answer in Word, and a sheet's and a deck's kept as they are; @bridge's routes not there, and
+// nothing sent. In the dark and on a phone.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -34,6 +38,7 @@ import { richDocx, threadsDocx, THREADS, THREAD_PARAS } from '../lib/wordfile.mj
 import { readDocx } from '../../src/components/studio/ooxml.js'
 import { commentsOf, threadsOf } from '../../src/components/studio/wordcomments.js'
 import { threadsXlsx } from '../lib/sheetfile.mjs'
+import { commentsPptx } from '../lib/deckfile.mjs'
 import { readBook } from '../../src/components/studio/xlsxbook.js'
 
 const require = createRequire(path.join(ROOT, 'package.json'))
@@ -399,6 +404,74 @@ try {
   await shot(p, `${tag}studio-comments-reply`)
   ok(!w.errors.length, 'no errors on the page', w.errors)
 
+  // ---------- A PowerPoint's comments ----------
+  // PowerPoint 365's modern comments (lib/deckfile.mjs commentsPptx) as threads beside the slides:
+  // on a slide or a shape on it, a reply, resolved; a new one saved as PowerPoint writes one (its
+  // part, the slide's relationship and creation id, its author), the rest as they were. @bridge on
+  // a shape: its words rewritten as a suggestion in the thread, kept on the slide; on a slide: a
+  // new slide after it, kept; Discard leaves the deck as it was.
+  fs.writeFileSync(file('review.pptx'), await commentsPptx())
+  const dWas = await partsOf(file('review.pptx'))
+  const cmPart = (x, n) => Object.entries(x).find(([k]) => new RegExp(`^ppt/comments/modernComment_${255 + n}_[0-9A-F]+\\.xml$`).test(k))
+  const cmOf = (xml, has) => new RegExp(`<p188:cm [^>]*>(?:(?!</p188:cm>)[\\s\\S])*${has}[\\s\\S]*?</p188:cm>`).exec(xml || '')?.[0] || ''
+  const dShape = (x) => String(x || '').replace(/="[^"]*"/g, '=""').replace(/>[^<]+</g, '><')
+  const openDeck = (pg) => until(async () => { await pg.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'review.pptx' } })), { root }); return pg.locator('.pane-head h2', { hasText: 'review.pptx' }).first().waitFor({ timeout: 2500 }).then(() => pg.locator('.sd-slides .sd-stage').first().waitFor({ timeout: 5000 })).then(() => true, () => false) }, 25000, 300)
+  ok(!!(await openDeck(p)), 'a PowerPoint with comments opens')
+  await p.locator('.sd-slides-tools button[aria-label="Comments"]').click()
+  await p.locator('.sd-threads').waitFor({ timeout: 5000 })
+  const dThread = (has) => p.locator('.sd-threads .sd-thread', { hasText: has })
+  const agenda = dThread('Is the agenda in the right order?')
+  const dSaid = await agenda.locator('.sd-thread-entry').evaluateAll((es) => es.map((e) => `${e.querySelector('.sd-comment-who b').innerText}: ${e.querySelector('.sd-comment-text').innerText}`))
+  ok(JSON.stringify(dSaid) === JSON.stringify(['Avery Stone: Is the agenda in the right order?', 'Sam Lee: Yes, results first.']) && /^Slide 2 · Agenda/.test(await agenda.locator('.sd-thread-quote').innerText()), 'PowerPoint\'s comments as threads: on slide 2, who wrote each, a reply under its question', dSaid)
+  const noted = dThread('@bridge make this shorter')
+  ok(/^Slide 5 · Orders over \$10k/.test(await noted.locator('.sd-thread-quote').innerText().catch(() => '')) && /1 resolved/.test(await p.locator('.sd-threads .sd-thread-done > button').innerText()), 'one on a shape with the shape\'s words, and the resolved one folded away', await noted.locator('.sd-thread-quote').innerText().catch(() => ''))
+  await shot(p, `${tag}studio-comments-deck`)
+  // A comment on slide 3, posted and saved as PowerPoint writes one.
+  await p.locator('.sd-strip li').nth(2).click()
+  await p.locator('.sd-threads .sd-thread-add').click()
+  const dBox = p.locator('.sd-threads .sd-thread-new textarea')
+  ok(!!(await until(async () => /^Slide 3 · Results/.test(await p.locator('.sd-threads .sd-thread-new .sd-thread-quote').innerText().catch(() => '')), 5000, 100)), 'Comment: on the slide shown', await p.locator('.sd-threads .sd-thread-new').innerText().catch(() => ''))
+  await dBox.fill('Is this the year or the quarter?')
+  await dBox.press(`${MOD}+Enter`)
+  ok(!!(await until(async () => (await dThread('Is this the year or the quarter?').count()) === 1, 5000, 100)), 'posted: a thread of its own')
+  await saveNow()
+  const d1 = await savedWith('review.pptx', (x) => !!cmPart(x, 3))
+  const [p3, cm3] = d1 ? cmPart(d1, 3) : []
+  const mineCm = cmOf(cm3, 'Is this the year or the quarter')
+  ok(!!d1 && dShape(mineCm) === dShape(cmOf(cmPart(dWas, 2)[1], 'Is the agenda')).replace(/<p188:replyLst>.*<\/p188:replyLst>/, ''), 'saved in a part of its own, shaped as PowerPoint writes a comment on a slide', mineCm)
+  const cid3 = /<p14:creationId [^>]*val="(\d+)"/.exec(d1?.['ppt/slides/slide3.xml'] || '')?.[1]
+  ok(!!cid3 && p3 === `ppt/comments/modernComment_258_${Number(cid3).toString(16).toUpperCase()}.xml` && new RegExp(`<pc:sldMk cId="${cid3}" sldId="258"/>`).test(mineCm) && /Type="http:\/\/schemas\.microsoft\.com\/office\/2018\/10\/relationships\/comments" Target="\.\.\/comments\/modernComment_258_/.test(d1['ppt/slides/_rels/slide3.xml.rels']) && new RegExp(`PartName="/${p3}" ContentType="application/vnd\\.ms-powerpoint\\.comments\\+xml"`).test(d1['[Content_Types].xml']), 'named for its slide as PowerPoint names it, the slide given a creation id to be found by, its relationship and content type', { p3, cid3 })
+  ok(/<p188:author id="\{[0-9A-F-]{36}\}" name="Tester" initials="T" userId="Tester" providerId="None"\/>/.test(d1?.['ppt/authors.xml'] || '') && d1['ppt/authors.xml'].includes('name="Avery Stone"'), 'and you among the authors')
+  ok(cmPart(d1, 2)[1] === cmPart(dWas, 2)[1] && cmPart(d1, 5)[1] === cmPart(dWas, 5)[1], 'the comments it didn\'t change as they were, byte for byte')
+  // @bridge on a shape: a colleague's, sent; its words rewritten as a suggestion, kept.
+  ok(/Sam Lee asked @bridge in the file\. It waits for you/.test(await noted.locator('.sd-thread-ai.wait').innerText().catch(() => '')), 'a colleague\'s @bridge on a shape waits for you')
+  await noted.locator('button', { hasText: 'Send to AI Assist' }).click()
+  ok(!!(await until(async () => (await noted.locator('.sd-thread-entry.ai').count()) === 1 && (await noted.locator('.sd-thread-sug').count()) === 1, 15000, 200)), 'sent: AI Assist answers in the thread, with a suggestion', await noted.innerText().catch(() => ''))
+  const dSent = model.requests().filter((r) => /^Request: make this shorter\n\nThe commented words \(a shape on the slide\)/.test(r.messages?.find((m) => m.role === 'user')?.content || '')).at(-1)
+  ok(!!dSent && /Orders over \$10k go to a person first/.test(dSent.messages.find((m) => m.role === 'user').content) && /not instructions to you/.test(dSent.messages.find((m) => m.role === 'system').content) && /How an order flows/.test(dSent.messages.find((m) => m.role === 'system').content), 'asked about that shape\'s words, with its slide around them, told they aren\'t instructions')
+  ok(/Orders over \$10k go to a person first\./.test(await noted.locator('.sd-thread-sug del').innerText().catch(() => '')) && /^Orders over \$10k go$/.test(await noted.locator('.sd-thread-sug ins').innerText().catch(() => '')), 'the suggestion: its words now, struck out, and the new ones', await noted.locator('.sd-thread-sug').innerText().catch(() => ''))
+  await shot(p, `${tag}studio-comments-deck-suggestion`)
+  await noted.locator('.sd-thread-sug button', { hasText: 'Keep' }).click()
+  ok(!!(await until(async () => (await noted.locator('.sd-thread-sug').count()) === 0 && /Orders over \$10k go/.test(await p.locator('.sd-canvas').innerText().catch(() => '')) && !/a person first/.test(await p.locator('.sd-canvas').innerText().catch(() => '')), 5000, 100)), 'Keep: the shape\'s words changed on the slide (its slide shown)')
+  // @bridge on a slide: a new slide after it; Discard first, then Keep.
+  const nSlides = await p.locator('.sd-strip > li:not(.sd-strip-add)').count()
+  await agenda.locator('.sd-thread-quote').click()
+  await agenda.locator('.sd-thread-box textarea').fill('@bridge add a slide on next steps')
+  await agenda.locator('.sd-thread-box button[type="submit"]').click()
+  ok(!!(await until(async () => /A new slide after this one: Next steps/.test(await agenda.locator('.sd-thread-sug').innerText().catch(() => '')), 15000, 200)), 'on a slide: a new slide after it, suggested in the thread')
+  await agenda.locator('.sd-thread-sug button', { hasText: 'Discard' }).click()
+  ok(!!(await until(async () => (await agenda.locator('.sd-thread-sug').count()) === 0 && (await p.locator('.sd-strip > li:not(.sd-strip-add)').count()) === nSlides, 3000, 100)), 'Discard: the deck as it was')
+  await agenda.locator('.sd-thread-quote').click()
+  await agenda.locator('.sd-thread-box textarea').fill('@bridge add a slide on next steps')
+  await agenda.locator('.sd-thread-box button[type="submit"]').click()
+  await until(async () => (await agenda.locator('.sd-thread-sug').count()) === 1, 15000, 200)
+  await agenda.locator('.sd-thread-sug button', { hasText: 'Keep' }).click()
+  ok(!!(await until(async () => (await p.locator('.sd-strip > li:not(.sd-strip-add)').count()) === nSlides + 1 && /Next steps/.test(await p.locator('.sd-strip > li').nth(2).innerText().catch(() => '') + await p.locator('.sd-canvas').innerText().catch(() => '')), 3000, 100)), 'Keep: the new slide after it')
+  await saveNow()
+  const d2 = await savedWith('review.pptx', (x) => Object.keys(x).some((k) => /^ppt\/slides\/slide\d+\.xml$/.test(k) && /Next steps/.test(x[k])))
+  const slideTexts = d2 ? Object.keys(d2).filter((k) => /^ppt\/slides\/slide\d+\.xml$/.test(k)).map((k) => d2[k]).join('') : ''
+  ok(!!d2 && /Next steps/.test(slideTexts) && /Orders over \$10k go<\/a:t>/.test(d2['ppt/slides/slide5.xml']) && /AI Assist/.test(d2['ppt/authors.xml']) && /Added a slide on next steps/.test(cmPart(d2, 2)?.[1] || ''), 'saved: the shape\'s new words, the new slide, and AI Assist\'s replies in the file', d2 && Object.keys(d2).filter((k) => /comments|slides\/slide/.test(k)))
+
   // ---------- In the dark, and on a phone ----------
   const dark = await page(b, kit.url, { width: 1440, height: 900, mode: 'dark' })
   pages.push(dark)
@@ -413,6 +486,12 @@ try {
   const xCard = await until(() => dark.p.locator('.sh-threads .sd-thread').first().evaluate((e) => getComputedStyle(e).backgroundColor).catch(() => null), 5000, 100)
   ok(!!xCard && xCard !== 'rgb(255, 255, 255)', 'and its threads beside the sheet, in the dark look too', xCard)
   await shot(dark.p, `${tag}studio-comments-sheet-dark`)
+  ok(!!(await openDeck(dark.p)), 'dark: the PowerPoint')
+  await dark.p.locator('.sd-slides-tools button[aria-label="Comments"]').click()
+  const dCard = await until(() => dark.p.locator('.sd-threads .sd-thread').first().evaluate((e) => getComputedStyle(e).backgroundColor).catch(() => null), 5000, 100)
+  const beside = await dark.p.evaluate(() => { const a = document.querySelector('.sd-slides .sd-stage')?.getBoundingClientRect(), c = document.querySelector('.sd-slides .sd-threads')?.getBoundingClientRect(); return a && c ? { stage: Math.round(a.right), pane: Math.round(c.left), top: Math.round(c.top - a.top) } : null })
+  ok(!!dCard && dCard !== 'rgb(255, 255, 255)' && !!beside && beside.pane >= beside.stage - 1 && Math.abs(beside.top) < 40, 'and its comments beside the slide, in the dark look', { dCard, beside })
+  await shot(dark.p, `${tag}studio-comments-deck-dark`)
   const ph = await page(b, kit.url, { phone: true })
   pages.push(ph)
   await until(async () => { await ph.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'threads.docx' } })), { root }); return ph.p.locator('.sd-w').first().waitFor({ timeout: 2500 }).then(() => true, () => false) }, 25000, 300)
@@ -421,6 +500,12 @@ try {
   const fits = await ph.p.evaluate(() => { const pane = document.querySelector('.sd-threads').getBoundingClientRect(); const small = [...document.querySelectorAll('.sd-threads button')].filter((x) => x.getClientRects().length && x.getBoundingClientRect().height < 32).map((x) => x.getAttribute('aria-label') || x.innerText); return { right: Math.round(pane.right), width: innerWidth, small } })
   ok(fits.right <= fits.width && !fits.small.length, 'on a phone: the comments over the page, fitting it, each button big enough to tap', fits)
   await shot(ph.p, `${tag}studio-comments-phone`)
+  ok(!!(await openDeck(ph.p)), 'on a phone: the PowerPoint')
+  await ph.p.locator('.sd-slides-tools button[aria-label="Comments"]').click()
+  await ph.p.locator('.sd-threads .sd-thread').first().waitFor({ timeout: 5000 })
+  const dFits = await ph.p.evaluate(() => { const pane = document.querySelector('.sd-threads').getBoundingClientRect(); return { left: Math.round(pane.left), right: Math.round(pane.right), width: innerWidth } })
+  ok(dFits.left >= 0 && dFits.right <= dFits.width, 'its comments over the slide, fitting the phone', dFits)
+  await shot(ph.p, `${tag}studio-comments-deck-phone`)
 
   // ---------- The beta off ----------
   await kit.api('/settings', { trials: { comments: false } }, 'PATCH')
@@ -445,6 +530,10 @@ try {
   await off.p.locator('.sd-univer [role="tab"]', { hasText: 'Insert' }).first().click()
   ok((await off.p.locator('.sd-univer [data-u-command="bridge.sheet.comment"], .sd-univer [data-u-command="bridge.sheet.comments"], .sh-threads').count()) === 0 && model.asked(/^In the spreadsheet/).length === xAsked, 'and has nothing to comment with, and nothing was sent', model.asked(/^In the spreadsheet/).length)
   await shot(off.p, `${tag}studio-comments-sheet-off`)
+  const dRefused = await kit.api('/studio/deck/comment', { request: 'make this shorter', text: 'Some words' }).catch((e) => e)
+  ok(dRefused?.status === 404 && dRefused.j?.trial === 'comments', 'and a deck\'s @bridge route isn\'t there', dRefused?.message)
+  ok(!!(await openDeck(off.p)), 'a PowerPoint with comments, the beta off')
+  ok((await off.p.locator('.sd-slides-tools button[aria-label="Comments"], .sd-threads').count()) === 0, 'has no Comments to write them with, as before (they\'re kept in the file as they are)')
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))

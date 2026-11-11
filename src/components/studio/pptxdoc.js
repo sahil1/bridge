@@ -525,6 +525,9 @@ export async function readPptx(buf) {
     return path && doc.text(path) ? slideOf(doc, path, { rid, sldId: s.attrs.id, key: `s${key++}` }) : null
   }).filter(Boolean)
   doc.nextKey = () => `s${key++}`
+  // Its comments: the authors, and each slide's (PowerPoint's modern ones).
+  doc.authors = authorsOf(doc)
+  for (const s of doc.slides) s.comments = slideComments(doc, s)
   return doc
 }
 
@@ -1222,7 +1225,9 @@ export function layoutsOf(doc) {
 // ---------- Saving ----------
 // The file's bytes, with the slides as they are now: those not changed as they were, byte for byte.
 // media: new pictures by their part's path ({ bytes, type }).
-export async function writePptx(doc, slides, { media = new Map() } = {}) {
+// threads: every slide's comments now (deckcomments.jsx's), written where they changed; left out,
+// the comments are kept as they were.
+export async function writePptx(doc, slides, { media = new Map(), threads = null } = {}) {
   const zip = doc.zip
   const out = new JSZip()
   const files = new Map()
@@ -1237,6 +1242,8 @@ export async function writePptx(doc, slides, { media = new Map() } = {}) {
     if (kept.has(s.path)) continue
     gone.add(s.path); gone.add(relsPath(s.path))
     if (s.notes.path) { gone.add(s.notes.path); gone.add(relsPath(s.notes.path)) }
+    // its comments go with it
+    if (s.comments?.path) { gone.add(s.comments.path); ct = ct.replace(new RegExp(`<Override PartName="/${s.comments.path.replace(/[.]/g, '\\.')}"[^>]*/>`), '') }
     if (s.rid) delete presRels[s.rid]
     ct = ct.replace(new RegExp(`<Override PartName="/${s.path.replace(/[.]/g, '\\.')}"[^>]*/>`), '')
     if (s.notes.path) ct = ct.replace(new RegExp(`<Override PartName="/${s.notes.path.replace(/[.]/g, '\\.')}"[^>]*/>`), '')
@@ -1283,6 +1290,8 @@ export async function writePptx(doc, slides, { media = new Map() } = {}) {
     // A copied slide's charts are its own; its notes are written below.
     if (s.isNew) for (const r of Object.values(rels)) if (!r.external && /^(chart|diagramData|diagramLayout|diagramQuickStyle|diagramColors|diagramDrawing|oleObject|package)$/.test(r.type)) r.target = copyPart(r.target)
     for (const r of Object.values(rels)) if (r.type === 'notesSlide') delete rels[r.id]
+    // A copied slide starts with no comments of its own (the original's stay with it).
+    if (s.isNew) for (const r of Object.values(rels)) if (r.typeUri === CM_REL) delete rels[r.id]
     // Its notes: kept, changed, made, or taken off when emptied.
     let notesPath = s.isNew ? null : s.notes.path
     const text = s.notes.text || ''
@@ -1297,6 +1306,8 @@ export async function writePptx(doc, slides, { media = new Map() } = {}) {
     put.set(path, `${s.hidden && !/<p:sld\b[^>]*\sshow="0"/.test(s.head) ? withHiddenHead(s.head, true) : !s.hidden && /<p:sld\b[^>]*\sshow="0"/.test(s.head) ? withHiddenHead(s.head, false) : s.head}${s.objs.join('')}${timingFor(s)}`)
     put.set(relsPath(path), relsXml(rels, path))
   }
+  // The comments, where they changed.
+  if (threads) ct = writeDeckComments(doc, placed, put, gone, ct, threads)
   // New pictures, and their kinds in the content types.
   for (const [path, m] of media) {
     put.set(path, m.bytes)
@@ -1361,3 +1372,160 @@ export function withPictureRel(slide, target) {
   return { slide: touch(slide, { rels: { ...slide.rels, [rid]: { id: rid, type: 'image', typeUri: `${REL}/image`, target } } }), rid }
 }
 export const slideNumberOf = (slides, slide) => slides.indexOf(slide) + 1
+
+// ---------- Comments (PowerPoint's modern ones) ----------
+// Each slide's comments are in their own part (ppt/comments/modernComment_<slide id>_<its
+// creation id, in hex>.xml), found by the slide's relationship: a comment (cm) on the slide (its
+// sldMk) or on a shape on it (deMkLst, the shape by its id), who wrote it (an id in the
+// presentation's authors part), when, its words (a txBody), resolved or not (status), and its
+// replies (replyLst). Read, each slide's are { path, list: [{ id, slide (its key), shape, author,
+// initials, date, text, parent, done, raw }] }; written (writePptx's threads), a comment Studio
+// didn't change is written as it was, and a part with nothing changed in it isn't written at all.
+const P188 = 'http://schemas.microsoft.com/office/powerpoint/2018/8/main'
+const PC = 'http://schemas.microsoft.com/office/powerpoint/2013/main/command'
+const AC = 'http://schemas.microsoft.com/office/drawing/2013/main/command'
+const DML = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+const CM_REL = 'http://schemas.microsoft.com/office/2018/10/relationships/comments'
+const AUTHORS_REL = 'http://schemas.microsoft.com/office/2018/10/relationships/authors'
+const CM_CT = 'application/vnd.ms-powerpoint.comments+xml'
+const AUTHORS_CT = 'application/vnd.ms-powerpoint.authors+xml'
+export const deckGuid = () => {
+  const u = globalThis.crypto?.randomUUID?.() || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => { const r = Math.floor(Math.random() * 16); return (ch === 'x' ? r : (r & 3) | 8).toString(16) })
+  return `{${u.toUpperCase()}}`
+}
+const local = (n) => String(n || '').slice(String(n || '').indexOf(':') + 1)
+const byLocal = (el, name) => (el?.kids || []).filter((k) => k.name && local(k.name) === name)
+const deepLocal = (el, name, out = []) => { for (const k of el?.kids || []) { if (k.name && local(k.name) === name) out.push(k); if (k.kids) deepLocal(k, name, out) } return out }
+const wordsOfBody = (tx) => byLocal(tx, 'p').map((p) => deepLocal(p, 't').map(textIn).join('')).join('\n')
+const initialsOf = (name) => String(name || '').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || '?'
+// Its time as PowerPoint writes it: UTC to the millisecond, no zone; read back as ISO.
+const cmDate = (d) => { const x = new Date(d || Date.now()); return (Number.isNaN(x.getTime()) ? new Date() : x).toISOString().replace(/Z$/, '') }
+const cmIso = (s) => { if (!s) return null; const x = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : `${s}Z`); return Number.isNaN(x.getTime()) ? null : x.toISOString() }
+// The presentation's authors: { path, xml, list: [{ id, name, initials }] }.
+function authorsOf(doc) {
+  const r = Object.values(doc.presRels).find((x) => x.typeUri === AUTHORS_REL)
+  const xml = r ? doc.text(r.target) : null
+  return { path: r?.target || null, rid: r?.id || null, xml, list: deepLocal(parseXml(xml || ''), 'author').map((a) => ({ id: String(a.attrs.id || '').toUpperCase(), name: a.attrs.name || '', initials: a.attrs.initials || '' })) }
+}
+// A slide's comments, as they are in its part.
+function slideComments(doc, s) {
+  const r = Object.values(s.rels).find((x) => x.typeUri === CM_REL)
+  const xml = r ? doc.text(r.target) : null
+  if (!xml) return { path: r?.target || null, rid: r?.id || null, list: [] }
+  const who = new Map(doc.authors.list.map((a) => [a.id, a]))
+  const list = []
+  for (const cm of deepLocal(parseXml(xml), 'cm')) {
+    const a = who.get(String(cm.attrs.authorId || '').toUpperCase())
+    const sp = deepLocal(cm, 'spMk')[0]
+    const id = String(cm.attrs.id || '').toUpperCase()
+    list.push({ id, slide: s.key, shape: sp ? String(sp.attrs.id) : null, author: a?.name || '', initials: a?.initials || initialsOf(a?.name), date: cmIso(cm.attrs.created), text: wordsOfBody(byLocal(cm, 'txBody')[0]), parent: null, done: cm.attrs.status === 'resolved' || cm.attrs.status === 'closed', raw: raw(xml, cm) })
+    for (const rp of deepLocal(byLocal(cm, 'replyLst')[0], 'reply')) {
+      const b = who.get(String(rp.attrs.authorId || '').toUpperCase())
+      list.push({ id: String(rp.attrs.id || '').toUpperCase(), slide: s.key, shape: null, author: b?.name || '', initials: b?.initials || initialsOf(b?.name), date: cmIso(rp.attrs.created), text: wordsOfBody(byLocal(rp, 'txBody')[0]), parent: id, done: cm.attrs.status === 'resolved' || cm.attrs.status === 'closed', raw: raw(xml, rp) })
+    }
+  }
+  return { path: r.target, rid: r.id, xml, list }
+}
+// Every slide's comments, in order: what the editor's threads start from.
+export const deckComments = (doc) => doc.slides.flatMap((s) => s.comments?.list || [])
+const cmBody = (text) => `<p188:txBody><a:bodyPr/><a:lstStyle/>${String(text || '').split('\n').map((l) => `<a:p>${l ? `<a:r><a:rPr lang="en-US"/><a:t>${esc(l)}</a:t></a:r>` : '<a:endParaRPr lang="en-US"/>'}</a:p>`).join('')}</p188:txBody>`
+// A slide's creation id (p14:creationId), which PowerPoint's comments name it by.
+const creationIdOf = (xml) => /<p14:creationId\b[^>]*\bval="(\d+)"/.exec(xml || '')?.[1] || null
+const shapeCreationOf = (objXml) => /<a16:creationId\b[^>]*\bid="(\{[^"]+\})"/.exec(objXml || '')?.[1] || null
+// One the slide doesn't have yet, the same each time it's asked for this slide.
+const stableId = (seed) => { let h = 2166136261; for (const ch of String(seed)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0 } return String((h % 4000000000) + 100000000) }
+function withCreationId(xml, cid) {
+  const ext = `<p:ext uri="{BB962C8B-B14F-4D97-AF65-F5344CB8AC3E}"><p14:creationId xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" val="${cid}"/></p:ext>`
+  const inCsld = /<p:extLst>((?:(?!<p:extLst>)[\s\S])*?)<\/p:extLst>(\s*)<\/p:cSld>/.exec(xml)
+  if (inCsld) return xml.replace(inCsld[0], `<p:extLst>${inCsld[1]}${ext}</p:extLst>${inCsld[2]}</p:cSld>`)
+  return xml.replace('</p:cSld>', `<p:extLst>${ext}</p:extLst></p:cSld>`)
+}
+const cmKey = (list) => JSON.stringify(list.map((x) => [x.id, x.text, x.parent || null, !!(!x.parent && x.done), x.shape || null]).sort((a, b) => (a[0] < b[0] ? -1 : 1)))
+
+// The comments written into the file being put together (writePptx's): each slide whose comments
+// changed gets its part (and its relationship, and a creation id if it had none), new authors go
+// in the authors part. placed: [{ s, path, sldId }]; put: the parts written; gone: those taken out;
+// ct: the content types, given back with what these need.
+function writeDeckComments(doc, placed, put, gone, ct, threads) {
+  const override = (path, type) => { if (!ct.includes(`PartName="/${path}"`)) ct = ct.replace('</Types>', `<Override PartName="/${path}" ContentType="${type}"/></Types>`) }
+  const authors = doc.authors.list.map((a) => ({ ...a }))
+  const added = []
+  const authorOf = (name) => {
+    const n = String(name || '').trim() || 'Someone'
+    const had = authors.find((a) => a.name === n)
+    if (had) return had.id
+    const a = { id: deckGuid(), name: n, initials: n === 'AI Assist' ? 'AI' : initialsOf(n) }
+    authors.push(a); added.push(a)
+    return a.id
+  }
+  for (const { s, path, sldId } of placed) {
+    const mine = threads.filter((x) => x.slide === s.key)
+    const was = s.isNew ? [] : (s.comments?.list || [])
+    if (!s.isNew && cmKey(was) === cmKey(mine)) continue
+    if (s.isNew && !mine.length) continue
+    const slideXml = put.get(path) ?? doc.text(path) ?? ''
+    let cid = creationIdOf(slideXml)
+    if (!cid) { cid = stableId(`${sldId}:${path}`); put.set(path, withCreationId(slideXml, cid)) }
+    const rels = relsOf(put.get(relsPath(path)) ?? doc.text(relsPath(path)), path)
+    const old = Object.values(rels).find((r) => r.typeUri === CM_REL)
+    const cmPath = (!s.isNew && s.comments?.path) || `ppt/comments/modernComment_${sldId}_${Number(cid).toString(16).toUpperCase()}.xml`
+    if (!mine.length) {
+      if (old) { delete rels[old.id]; put.set(relsPath(path), relsXml(rels, path)) }
+      if (!s.isNew && s.comments?.path) { gone.add(cmPath); ct = ct.replace(new RegExp(`<Override PartName="/${cmPath.replace(/[.]/g, '\\.')}"[^>]*/>`), '') }
+      continue
+    }
+    const sld = `<pc:sldMk cId="${cid}" sldId="${sldId}"/>`
+    const byId = new Map(was.map((x) => [x.id, x]))
+    const roots = mine.filter((x) => !x.parent)
+    const cms = roots.map((x) => {
+      const replies = mine.filter((y) => y.parent === x.id)
+      const o = byId.get(x.id)
+      const oReplies = was.filter((y) => y.parent === x.id)
+      const replyXml = (y) => { const r0 = oReplies.find((z) => z.id === y.id && z.text === y.text); return r0?.raw || `<p188:reply id="${esc(y.id)}" authorId="${authorOf(y.author)}" created="${cmDate(y.date)}">${cmBody(y.text)}</p188:reply>` }
+      // As it was in the file, but for whether it's resolved and its replies.
+      if (o?.raw && o.text === x.text && (o.shape || null) === (x.shape || null)) {
+        let out = !!o.done === !!x.done ? o.raw : withAttr(o.raw, 'status', x.done ? 'resolved' : null)
+        if (cmKey(oReplies) !== cmKey(replies)) {
+          const lst = /<(\w+:)?replyLst\b[^>]*>[\s\S]*?<\/\1replyLst>/.exec(out)
+          const next = replies.length ? `<p188:replyLst>${replies.map(replyXml).join('')}</p188:replyLst>` : ''
+          if (lst) out = out.replace(lst[0], next)
+          else out = out.replace(/<(\w+:)?txBody\b/, (m) => `${next}${m}`)
+        }
+        return out
+      }
+      const shapeXml = x.shape != null ? s.objs.find((ob) => new RegExp(`<p:cNvPr\\b[^>]*\\bid="${x.shape}"`).test(ob)) : null
+      const shapeCid = shapeCreationOf(shapeXml)
+      const anchor = x.shape != null && shapeCid
+        ? `<ac:deMkLst xmlns:ac="${AC}" xmlns:pc="${PC}"><pc:docMk/>${sld}<ac:spMk id="${x.shape}" creationId="${shapeCid}"/></ac:deMkLst>`
+        : `<pc:sldMkLst xmlns:pc="${PC}"><pc:docMk/>${sld}</pc:sldMkLst>`
+      const reps = replies.length ? `<p188:replyLst>${replies.map(replyXml).join('')}</p188:replyLst>` : ''
+      return `<p188:cm id="${esc(x.id)}" authorId="${o?.raw ? /\bauthorId="([^"]+)"/.exec(o.raw)?.[1] || authorOf(x.author) : authorOf(x.author)}" created="${cmDate(x.date)}"${x.done ? ' status="resolved"' : ''}>${anchor}${reps}${cmBody(x.text)}</p188:cm>`
+    }).join('')
+    const had = !s.isNew && s.comments?.xml
+    const xml = had
+      ? (() => { const tree = parseXml(had); const root = tree.kids.find((k) => k.name); const items = (root?.kids || []).filter((k) => k.name); const firstCm = items.find((k) => local(k.name) === 'cm'); const lastCm = [...items].reverse().find((k) => local(k.name) === 'cm'); return firstCm ? had.slice(0, firstCm.s) + cms + had.slice(lastCm.e) : had.replace(/<\/p188:cmLst>\s*$/, `${cms}</p188:cmLst>`) })()
+      : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p188:cmLst xmlns:a="${DML}" xmlns:r="${REL}" xmlns:p188="${P188}" xmlns:pc="${PC}">${cms}</p188:cmLst>`
+    put.set(cmPath, xml)
+    override(cmPath, CM_CT)
+    if (!old || old.target !== cmPath) {
+      if (old) delete rels[old.id]
+      const id = freeRid(rels)
+      rels[id] = { id, type: 'comments', typeUri: CM_REL, target: cmPath }
+      put.set(relsPath(path), relsXml(rels, path))
+    }
+  }
+  if (added.length) {
+    const rows = added.map((a) => `<p188:author id="${a.id}" name="${esc(a.name)}" initials="${esc(a.initials)}" userId="${esc(a.name)}" providerId="None"/>`).join('')
+    if (doc.authors.xml) put.set(doc.authors.path, doc.authors.xml.replace(/<\/p188:authorLst>\s*$/, `${rows}</p188:authorLst>`))
+    else {
+      const path = 'ppt/authors.xml'
+      put.set(path, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<p188:authorLst xmlns:a="${DML}" xmlns:r="${REL}" xmlns:p188="${P188}">${rows}</p188:authorLst>`)
+      override(path, AUTHORS_CT)
+      const presRels = relsOf(put.get(relsPath(doc.presPath)) ?? doc.text(relsPath(doc.presPath)), doc.presPath)
+      const id = freeRid(presRels)
+      presRels[id] = { id, type: 'authors', typeUri: AUTHORS_REL, target: path }
+      put.set(relsPath(doc.presPath), relsXml(presRels, doc.presPath))
+    }
+  }
+  return ct
+}

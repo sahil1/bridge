@@ -633,6 +633,16 @@ app.post('/api/studio/comment-assist', trialOff('comments', 'Comments and @bridg
     res.json({ ...out, model, by: d?.label || model })
   } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
 })
+// @bridge in a comment on a PowerPoint's slide, or a shape on it (Comments and @bridge): a reply,
+// and the shape's words or the slide rewritten, or a new slide after it, to keep or discard.
+app.post('/api/studio/deck/comment', trialOff('comments', 'Comments and @bridge'), async (req, res) => {
+  try {
+    const model = String(req.body?.model || '') || await studioModel()
+    const out = await commentAssist.deckAssist({ ...req.body, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
+    const d = (await chatModels.models().catch(() => [])).find((x) => x.id === model)
+    res.json({ ...out, model, by: d?.label || model })
+  } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
+})
 // The change an agent asked in place wrote beside the file, taken once (studio.takeProposal).
 app.get('/api/studio/proposal', wrap(async (req) => { const q = sq(req); return studio.takeProposal(await rootOf(q.root), q.path) }))
 // Decks written by a model (the one meeting notes use, unless one's picked): a whole deck from what

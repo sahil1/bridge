@@ -188,3 +188,50 @@ export async function deckPptx({ slides = boardSlides(), theme = {} } = {}) {
   z.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="png" ContentType="image/png"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${types.join('')}</Types>`)
   return new Uint8Array(await z.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }))
 }
+
+// ---------- Comments, as PowerPoint 365 writes them ----------
+// The board review's first five slides with modern comments: the presentation's authors
+// (ppt/authors.xml), each commented slide's part (ppt/comments/modernComment_<slide id>_<its
+// creation id in hex>.xml, found by the slide's relationship), each slide with its p14:creationId
+// and a commented shape with its a16:creationId, as PowerPoint gives them. On the agenda, Avery asks
+// whether it's in order and Sam answers, and Avery's ask for a date is resolved; on the flow, Sam
+// asks @bridge to make the note on it shorter (it came in the file, so it isn't yours to send).
+export const DECK_PEOPLE = { avery: { id: '{1A2B3C4D-0000-4000-8000-00000000000A}', name: 'Avery Stone', initials: 'AS' }, sam: { id: '{1A2B3C4D-0000-4000-8000-00000000000B}', name: 'Sam Lee', initials: 'SL' } }
+export const DECK_COMMENTS = [
+  { id: '{C1000000-0000-4000-8000-000000000001}', slide: 2, who: 'avery', at: '2026-10-01T10:00:00.000', text: 'Is the agenda in the right order?', replies: [{ id: '{C1000000-0000-4000-8000-000000000002}', who: 'sam', at: '2026-10-01T11:30:00.000', text: 'Yes, results first.' }] },
+  { id: '{C1000000-0000-4000-8000-000000000003}', slide: 2, who: 'avery', at: '2026-10-02T09:00:00.000', text: 'Add the date.', done: true },
+  { id: '{C1000000-0000-4000-8000-000000000004}', slide: 5, who: 'sam', at: '2026-10-03T08:00:00.000', text: '@bridge make this shorter', shape: 'Note' },
+]
+const P188 = 'http://schemas.microsoft.com/office/powerpoint/2018/8/main'
+export async function commentsPptx() {
+  const z = await JSZip.loadAsync(await deckPptx({ slides: boardSlides(5) }))
+  const cids = { 2: '1832044231', 5: '3402761905' }
+  const shapeIds = {}
+  for (const n of [2, 5]) {
+    let x = await z.file(`ppt/slides/slide${n}.xml`).async('string')
+    x = x.replace('</p:spTree></p:cSld>', `</p:spTree><p:extLst><p:ext uri="{BB962C8B-B14F-4D97-AF65-F5344CB8AC3E}"><p14:creationId xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" val="${cids[n]}"/></p:ext></p:extLst></p:cSld>`)
+    x = x.replace(/<p:cNvPr id="(\d+)" name="Note"\/>/, (m, id) => { shapeIds.Note = id; return `<p:cNvPr id="${id}" name="Note"><a:extLst><a:ext uri="{FF2B5EF4-FFF2-40B4-BE49-F238E27FC236}"><a16:creationId xmlns:a16="http://schemas.microsoft.com/office/drawing/2014/main" id="{5E6F7A8B-0000-4000-8000-0000000000AA}"/></a:ext></a:extLst></p:cNvPr>` })
+    z.file(`ppt/slides/slide${n}.xml`, x)
+  }
+  const body = (text) => `<p188:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US"/><a:t>${esc(text)}</a:t></a:r></a:p></p188:txBody>`
+  const sldMk = (n) => `<pc:sldMk cId="${cids[n]}" sldId="${255 + n}"/>`
+  let ct = await z.file('[Content_Types].xml').async('string')
+  for (const n of [2, 5]) {
+    const cms = DECK_COMMENTS.filter((c) => c.slide === n).map((c) => {
+      const anchor = c.shape ? `<ac:deMkLst xmlns:ac="http://schemas.microsoft.com/office/drawing/2013/main/command"><pc:docMk/>${sldMk(n)}<ac:spMk id="${shapeIds[c.shape]}" creationId="{5E6F7A8B-0000-4000-8000-0000000000AA}"/></ac:deMkLst>` : `<pc:sldMkLst xmlns:pc="http://schemas.microsoft.com/office/powerpoint/2013/main/command"><pc:docMk/>${sldMk(n)}</pc:sldMkLst>`
+      const replies = c.replies?.length ? `<p188:replyLst>${c.replies.map((r) => `<p188:reply id="${r.id}" authorId="${DECK_PEOPLE[r.who].id}" created="${r.at}">${body(r.text)}</p188:reply>`).join('')}</p188:replyLst>` : ''
+      return `<p188:cm id="${c.id}" authorId="${DECK_PEOPLE[c.who].id}" created="${c.at}"${c.done ? ' status="resolved"' : ''}>${anchor}${replies}${body(c.text)}</p188:cm>`
+    }).join('')
+    const part = `ppt/comments/modernComment_${255 + n}_${Number(cids[n]).toString(16).toUpperCase()}.xml`
+    z.file(part, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n<p188:cmLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="${REL}" xmlns:p188="${P188}" xmlns:pc="http://schemas.microsoft.com/office/powerpoint/2013/main/command">${cms}</p188:cmLst>`)
+    const relsPath = `ppt/slides/_rels/slide${n}.xml.rels`
+    z.file(relsPath, (await z.file(relsPath).async('string')).replace('</Relationships>', `<Relationship Id="rIdCm" Type="http://schemas.microsoft.com/office/2018/10/relationships/comments" Target="../comments/${part.split('/').pop()}"/></Relationships>`))
+    ct = ct.replace('</Types>', `<Override PartName="/${part}" ContentType="application/vnd.ms-powerpoint.comments+xml"/></Types>`)
+  }
+  z.file('ppt/authors.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n<p188:authorLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="${REL}" xmlns:p188="${P188}">${Object.values(DECK_PEOPLE).map((p) => `<p188:author id="${p.id}" name="${p.name}" initials="${p.initials}" userId="${p.name.toLowerCase().replace(' ', '.')}@example.com" providerId="AD"/>`).join('')}</p188:authorLst>`)
+  ct = ct.replace('</Types>', '<Override PartName="/ppt/authors.xml" ContentType="application/vnd.ms-powerpoint.authors+xml"/></Types>')
+  z.file('[Content_Types].xml', ct)
+  const pr = 'ppt/_rels/presentation.xml.rels'
+  z.file(pr, (await z.file(pr).async('string')).replace('</Relationships>', '<Relationship Id="rId99" Type="http://schemas.microsoft.com/office/2018/10/relationships/authors" Target="authors.xml"/></Relationships>'))
+  return new Uint8Array(await z.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }))
+}

@@ -88,5 +88,13 @@
 .sd-thread-cells li { display: flex; gap: 8px; min-width: 0; }
 .sd-thread-cells code { flex: none; min-width: 34px; color: var(--ink-2); font-size: 11.5px; }
 .sd-thread-cells ins { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* On a PowerPoint's slides: the comments a column of their own beside the slide (before AI Assist's,
+   when it's open too); on a phone, over the slide, as a document's. */
+.sd-deck2.with-comments .sd-deck-body { grid-template-columns: 208px minmax(0, 1fr) 300px; }
+.sd-deck2.with-comments.with-ai .sd-deck-body { grid-template-columns: 208px minmax(0, 1fr) 280px 320px; }
+.sd-deck2.with-comments .sd-deck-body > .sd-comments-pane { min-height: 0; }
+@media (max-width: 700px) {
+  .sd-deck2.with-comments .sd-deck-body, .sd-deck2.with-comments.with-ai .sd-deck-body { grid-template-columns: minmax(0, 1fr); }
+}
 .app.narrow .sd-thread-ai .btn.small, .app.narrow .sd-thread-ai .ghost-btn, .app.narrow .sd-thread-sug .btn.small, .app.narrow .sd-thread-sugbar .btn.small, .app.narrow .sd-mention { height: 40px; }
 .app.narrow .sd-thread-quote { min-height: 40px; }

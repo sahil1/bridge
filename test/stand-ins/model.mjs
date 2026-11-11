@@ -40,7 +40,8 @@
 //   @bridge in a document's comment ("Request: …" and the commented words): a question answered
 //   with no change; "shorter" cut to the words before the first colon or full stop (or without its
 //   last word), saying why, in a JSON code fence; anything else the words with "teh" spelled
-//   right. "slowly" answers after 2.5 s.
+//   right. "slowly" answers after 2.5 s. On a slide or a shape on it: "add a slide" a new slide of
+//   next steps, "shorter" the shape's first four words, a question answered with no change.
 //   Ollama's own API (a model server on this computer, when OLLAMA_HOST points here): its models
 //   (llama3.1:8b, and llama3.2-vision:11b, which can see), what each can do, none running, and
 //   /api/chat answering as Ollama does (its message, pictures as base64 in `images`) with the same
@@ -198,6 +199,14 @@ function answer(b) {
     if (asked === 'read_file') return call(`e${m.length}`, 'edit_file', { path: file, old_text: 'hello', new_text: 'hello world' })
     if (asked === 'edit_file') return call(`x${m.length}`, 'run_command', { command: `cat ${file}` })
     if (asked === 'run_command') return say(`All done: ${tail.content.replace(/\n/g, ' | ')}`)
+  }
+  const onSlide = /^Request: ([^\n]*)\n\nThe commented (?:words \(a shape on the slide\)|slide, in Markdown):\n"""\n([\s\S]*?)\n"""/.exec(last)
+  if (onSlide) {
+    const [, req, w] = onSlide
+    if (/\?\s*$/.test(req)) return say(JSON.stringify({ reply: `It's about ${w.split(/\s+/).length} words.`, change: null, slide: null }))
+    if (/\b(add|new)\b[^\n]*\bslide\b/i.test(req)) return say(JSON.stringify({ reply: 'Added a slide on next steps after this one.', change: null, slide: '# Next steps\n\n- Ship it\n- Tell customers' }))
+    if (/shorter/i.test(req)) return say(JSON.stringify({ reply: 'Cut it to its first words.', change: w.split(/\s+/).slice(0, 4).join(' '), slide: null }))
+    return say(JSON.stringify({ reply: 'Fixed the spelling.', change: w.replace(/\bteh\b/g, 'the'), slide: null }))
   }
   const asked = /^Request: ([^\n]*)\n\nThe commented words:\n"""\n([\s\S]*?)\n"""/.exec(last)
   if (asked) {
