@@ -3,7 +3,7 @@ import Icon from '../Icon.jsx'
 import AgentMark from './agentMark.jsx'
 import LocationPicker from './LocationPicker.jsx'
 import { USAGE_OFF_WHY } from '../Usage.jsx'
-import { t, tx } from '../../i18n/index.js'
+import { t, tn, tx } from '../../i18n/index.js'
 import { api, settingsChanged, refetch } from '../../api.js'
 import { useTrial } from '../../trials.js'
 import { askRestart, useRecheck } from '../PermissionFix.jsx'
@@ -36,11 +36,11 @@ export function SaveNote({ note }) {
   if (note.error) return <p className="st-note bad"><Icon name="alert" size={13} /> {note.error}</p>
   if (note.restart) {
     return (
-      <p className="st-note warn"><Icon name="refresh" size={13} /> Saved. {note.restart.join(', ')} take{note.restart.length === 1 ? 's' : ''} effect when Bridge AI restarts.
-        <button type="button" className="link-btn" onClick={() => { refetch('/fix'); setTimeout(askRestart, 300) }}>Restart to apply…</button></p>
+      <p className="st-note warn"><Icon name="refresh" size={13} /> {note.restart.length === 1 ? t('Saved. {what} takes effect when Bridge AI restarts.', { what: note.restart[0] }) : t('Saved. {what} take effect when Bridge AI restarts.', { what: note.restart.join(', ') })}
+        <button type="button" className="link-btn" onClick={() => { refetch('/fix'); setTimeout(askRestart, 300) }}>{t('Restart to apply…')}</button></p>
     )
   }
-  return <p className="st-note ok"><Icon name="check" size={13} /> Saved</p>
+  return <p className="st-note ok"><Icon name="check" size={13} /> {t('Saved')}</p>
 }
 
 export default function General({ onGo, onOpenAgent }) {
@@ -71,14 +71,14 @@ export default function General({ onGo, onOpenAgent }) {
       <section className="st-sec" data-setting="name">
         <Line label={t('Your name')} hint={t('What the Chief of Staff and the morning brief call you.')}>
           <input className="st-input" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name !== (eff.name || '') && save({ name: name.trim() })}
-            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} placeholder="First name" aria-label={t('Your name')} maxLength={60} />
+            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} placeholder={t('First name')} aria-label={t('Your name')} maxLength={60} />
         </Line>
       </section>
 
       <section className="st-sec" data-setting="default-agent">
         <h4>{t('Default agent')}</h4>
         <p className="muted small">{t('New agents, chats, routines and mail tasks start with it unless you pick another.')}</p>
-        {agents && !installed.length && <p className="st-note warn">No agents installed yet. <button className="link-btn" onClick={() => onGo('agents')}>Install one</button> to get started, or chat with any model through an API key: New chat, then Any model.</p>}
+        {agents && !installed.length && <p className="st-note warn">{tn('No agents installed yet. {install} to get started, or chat with any model through an API key: New chat, then Any model.', { install: <button className="link-btn" onClick={() => onGo('agents')}>{t('Install one')}</button> })}</p>}
         <div className="st-agent-grid">
           {installed.map((a) => (
             <button key={a.kind} type="button" className={`st-agent ${def === a.kind ? 'on' : ''}`} aria-pressed={def === a.kind} onClick={() => save({ defaultAgent: a.kind })}>
@@ -87,7 +87,7 @@ export default function General({ onGo, onOpenAgent }) {
               {def === a.kind && <Icon name="check" size={13} className="st-agent-check" />}
             </button>
           ))}
-          <button type="button" className="st-agent ghost" onClick={() => onGo('agents')}><Icon name="plus" size={14} /><span>More agents</span></button>
+          <button type="button" className="st-agent ghost" onClick={() => onGo('agents')}><Icon name="plus" size={14} /><span>{t('More agents')}</span></button>
         </div>
         {defAgent && (defAgent.modelFlag
           ? <Line setting="default-model" label={t('Default model for {agent}', { agent: defAgent.label })} hint={t("Empty: {agent}'s own default.", { agent: defAgent.label })}
@@ -124,7 +124,7 @@ export default function General({ onGo, onOpenAgent }) {
         <section className="st-sec" data-setting="chief">
           <Line label={t('Chief of Staff runs on')} hint={t('One with a chat view (Claude Code or Codex) works best.')} title={t('The agent you talk to, which hands work to the others.')}>
             <select className="st-input" value={eff.chief?.kind || 'claude'} onChange={(e) => save({ chief: { kind: e.target.value } })} aria-label={t('Chief of Staff runs on')}>
-              {installed.map((a) => <option key={a.kind} value={a.kind}>{a.label}{a.caps?.chat ? '' : ' (terminal only)'}</option>)}
+              {installed.map((a) => <option key={a.kind} value={a.kind}>{a.label}{a.caps?.chat ? '' : ` ${t('(terminal only)')}`}</option>)}
             </select>
           </Line>
         </section>
@@ -167,20 +167,20 @@ function HerdrSession({ value, onSave }) {
   if (!d) return null
   if (!d.installed) {
     return (
-      <p className="st-note warn"><Icon name="alert" size={13} /> herdr isn't installed, or isn't running. Install it from <a href="https://herdr.dev" target="_blank" rel="noreferrer">herdr.dev</a> and start it once, or choose Built in above.
-        <button type="button" className="link-btn" onClick={load}>Check again</button></p>
+      <p className="st-note warn"><Icon name="alert" size={13} /> {tn("herdr isn't installed, or isn't running. Install it from {site} and start it once, or choose Built in above.", { site: <a href="https://herdr.dev" target="_blank" rel="noreferrer">herdr.dev</a> })}
+        <button type="button" className="link-btn" onClick={load}>{t('Check again')}</button></p>
     )
   }
   const names = d.sessions.map((s) => s.name)
   if (value && !names.includes(value)) names.push(value)
   return (
     <div className="st-row">
-      <label className="small" htmlFor="st-herdr-session">Session</label>
+      <label className="small" htmlFor="st-herdr-session">{t('Session')}</label>
       <select id="st-herdr-session" className="st-input" value={value} onChange={(e) => onSave(e.target.value)}>
-        <option value="">Automatic{d.current && !value ? ` (now ${d.current})` : ''}: main, else the latest one running</option>
-        {names.map((n) => { const s = d.sessions.find((x) => x.name === n); return <option key={n} value={n}>{n}{s ? (s.running ? ' · running' : ' · stopped') : ' · not found'}</option> })}
+        <option value="">{d.current && !value ? t('Automatic (now {name}): main, else the latest one running', { name: d.current }) : t('Automatic: main, else the latest one running')}</option>
+        {names.map((n) => { const s = d.sessions.find((x) => x.name === n); return <option key={n} value={n}>{n} · {s ? (s.running ? t('running') : t('stopped')) : t('not found')}</option> })}
       </select>
-      <p className="muted small" style={{ flexBasis: '100%', margin: 0 }}>Switches at once. The session menu at the top of the sidebar also starts, stops and opens sessions.</p>
+      <p className="muted small" style={{ flexBasis: '100%', margin: 0 }}>{t('Switches at once. The session menu at the top of the sidebar also starts, stops and opens sessions.')}</p>
     </div>
   )
 }
@@ -190,10 +190,10 @@ function ModelField({ value, models, onSave }) {
   const id = 'st-models'
   return (
     <div className="st-row">
-      <input className="st-input mono" list={id} value={v} onChange={(e) => setV(e.target.value)} placeholder={models[0] ? `e.g. ${models[0]}` : 'model name'}
+      <input className="st-input mono" list={id} value={v} onChange={(e) => setV(e.target.value)} placeholder={models[0] ? t('e.g. {model}', { model: models[0] }) : t('model name')}
         onBlur={() => v.trim() !== value && onSave(v.trim())} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} spellCheck={false} />
       <datalist id={id}>{models.map((m) => <option key={m} value={m} />)}</datalist>
-      {value && <button type="button" className="ghost-btn" onClick={() => { setV(''); onSave('') }}>Use agent default</button>}
+      {value && <button type="button" className="ghost-btn" onClick={() => { setV(''); onSave('') }}>{t('Use agent default')}</button>}
     </div>
   )
 }
@@ -207,7 +207,7 @@ function TerminalApp({ value, onSave }) {
     <section className="st-sec" data-setting="terminal">
       <Line label={t('Terminal app')} hint={t('For "Open in terminal" on an agent.')} title={t('If you installed Bridge AI with npm, bridge-ai attach in any terminal works too; Ctrl+] leaves.')}>
         <select className="st-input" value={value} onChange={(e) => onSave(e.target.value)} aria-label={t('Terminal app')}>
-          <option value="auto">Automatic{auto ? ` (${auto.name})` : ''}</option>
+          <option value="auto">{auto ? t('Automatic ({name})', { name: auto.name }) : t('Automatic')}</option>
           {(found || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
         </select>
       </Line>

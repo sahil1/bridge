@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// The words to translate, and how each language's pack stands. Every t('…') and tx('…') in src is a
-// string to translate, keyed by its English (src/i18n/index.js). The app is written in English; a
-// pack catches up whenever it's updated (CONTRIBUTING.md › Translations).
+// The words to translate, and how each language's pack stands. Every t('…'), tn('…') and tx('…') in
+// src is a string to translate, keyed by its English (src/i18n/index.js). The app is written in
+// English; a pack catches up whenever it's updated (CONTRIBUTING.md › Translations).
 //   node scripts/i18n.js check              each pack: how much is translated, strings no longer used,
 //                                           and a translation that drops or adds a {placeholder} (an error)
 //   node scripts/i18n.js todo <lang> [file] what <lang> doesn't have yet, with where each shows, as JSON
@@ -18,7 +18,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SRC = path.join(ROOT, 'src')
 const I18N = path.join(SRC, 'i18n')
 const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : /\.(jsx?|mjs)$/.test(e.name) ? [path.join(d, e.name)] : []))
-const CALL = /(?<![\w.$])tx?\(\s*('(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\$]|\\.)*`)/g
+const CALL = /(?<![\w.$])t[xn]?\(\s*('(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\$]|\\.)*`)/g
 const literal = (s) => (s[0] === '`' ? s.slice(1, -1).replace(/\\(.)/g, '$1') : JSON.parse(s[0] === "'" ? `"${s.slice(1, -1).replace(/\\'/g, "'").replace(/"/g, '\\"').replace(/\\\\"/g, '\\"')}"` : s))
 
 // Each string and the files it shows in (src/components/Rail.jsx is "components/Rail.jsx").

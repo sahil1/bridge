@@ -59,8 +59,8 @@ export default function Solo({ paneId }) {
     setTimeout(() => window.close(), 50)
   }
   const back = (
-    <button className="btn small" onClick={bringBack} title="Close this window and show the agent in Bridge AI again">
-      <Icon name="popout" size={13} /> Bring back
+    <button className="btn small" onClick={bringBack} title={t('Close this window and show the agent in Bridge AI again')}>
+      <Icon name="popout" size={13} /> {t('Bring back')}
     </button>
   )
 
@@ -73,8 +73,8 @@ export default function Solo({ paneId }) {
           : (
             <div className="viewer-empty">
               <Icon name="x" size={22} />
-              <p>{away ? `This agent is in the herdr session ${home.current}. Switch back to it to see it here.` : "This agent isn't running any more."}</p>
-              {!embedded && <button className="btn small" onClick={() => window.close()}>Close this window</button>}
+              <p>{away ? t('This agent is in the herdr session {name}. Switch back to it to see it here.', { name: home.current }) : t("This agent isn't running any more.")}</p>
+              {!embedded && <button className="btn small" onClick={() => window.close()}>{t('Close this window')}</button>}
             </div>
           )}
     </div>

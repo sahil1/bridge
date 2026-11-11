@@ -48,6 +48,10 @@ try {
     ok((await p.evaluate(() => document.documentElement.lang)) === l, `${l}: the page says it's in ${l}`)
     const nav = (await p.locator('.rail-nav-btn').allInnerTexts()).map((x) => x.trim())
     ok(['New', 'Chief of Staff', 'Meetings'].every((en) => nav.some((x) => x.includes(say(l, en)))), `${l}: the sidebar is in its words`, nav)
+    // New: the line under its title too (a browser can't pick a folder, so it says where to start one).
+    await p.locator('.rail-nav-btn[data-tour="new-agent"]').click()
+    const sub = say(l, 'Start an agent in a folder from More options, or just start a chat below.')
+    ok(!!(await until(async () => (await p.locator('.home-sub').innerText()).trim() === sub, 8000)), `${l}: and New`, await p.locator('.home-sub').innerText().catch(() => ''))
     // Asked again until it opens: on a busy machine the first can come before the page listens.
     const opened = await until(async () => {
       if (await p.locator('.st-nav-item').count()) return true
@@ -60,6 +64,12 @@ try {
     ok(!!(await until(async () => (await p.locator('.appearance h4').allInnerTexts()).includes(say(l, 'Language')), 5000)), `${l}: and Appearance, with Language`)
     ok((await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1, `${l}: nothing wider than the window`)
     await shot(p, `${tag}i18n-${l}`)
+    // Settings › General with no agent installed: the sentence around Install one, its link in place.
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'general' } })))
+    const none = say(l, 'No agents installed yet. {install} to get started, or chat with any model through an API key: New chat, then Any model.').replace('{install}', say(l, 'Install one'))
+    const warn = p.locator('[data-setting="default-agent"] .st-note.warn')
+    const reads = () => warn.evaluate((e) => e.textContent.replace(/\s+/g, ' ').trim())
+    ok(!!(await until(async () => (await reads()) === none, 8000)) && (await warn.locator('button').innerText()) === say(l, 'Install one'), `${l}: Settings › General, a sentence with a link in it`, await reads().catch(() => ''))
     if (phone) {
       const ph = await page(b, kit.url, { ...look, phone: true, store: { 'cc-lang': l } })
       await ph.p.waitForSelector('.tabbar button', { timeout: 15000 })

@@ -6,7 +6,7 @@ import { api, usePoll, fmtRelative, refetch, BASE } from '../api.js'
 import { useTrial } from '../trials.js'
 import { parse, tidy, toText, describe, next, EXAMPLE } from '../../shared/schedule.js'
 import { makeRoutine, nameFrom, shortDir } from './routineDraft.js'
-import { t, tx, locale } from '../i18n/index.js'
+import { t, tx, locale, tn } from '../i18n/index.js'
 
 const EVERY = [['day', tx('Daily')], ['weekday', tx('Weekdays')], ['2d', tx('Every 2 days')], ['3d', tx('Every 3 days')], ['week', tx('Weekly')], ['2w', tx('Every 2 weeks')], ['month', tx('Monthly')]]
 const everyLabel = (e) => {
@@ -613,7 +613,7 @@ export function Ideas() {
       </ul>
       {shown.length > 8 && <button className="ghost-btn idea-more" onClick={() => setAll(!all)}>{all ? t('Show fewer') : t('Show {n} more', { n: shown.length - 8 })}</button>}
       {data && !shown.length && <p className="muted small">{filter === 'done' ? t('Nothing finished yet.') : t('No ideas here yet.')}</p>}
-      {data?.file && <p className="muted small idea-file">Saved in <code>{data.file.replace(/^\/Users\/[^/]+/, '~')}</code>, editable in any editor.</p>}
+      {data?.file && <p className="muted small idea-file">{tn('Saved in {file}, editable in any editor.', { file: <code>{data.file.replace(/^\/Users\/[^/]+/, '~')}</code> })}</p>}
     </Card>
   )
 }

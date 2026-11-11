@@ -6,7 +6,7 @@ import { KIND, setAssist, markAssist } from './assist.jsx'
 import { PrepGlance } from './prep.jsx'
 import { useScreenAccess, useAllowCall, allowSteps } from './allowcall.jsx'
 import { joined } from '../Agenda.jsx'
-import { t, locale } from '../../i18n/index.js'
+import { t, locale, tn } from '../../i18n/index.js'
 import './meetings.css'
 
 // The floating card (desktop app, ?float=1): a small window over your other windows. While a
@@ -356,7 +356,7 @@ export default function FloatCard() {
           <span className="fc-badge"><Icon name="mic" size={15} /></span>
           <span className="fc-ask-text">
             <b className="fc-title">{what}</b>
-            <span className="fc-sub" title={ev?.title || undefined}>{ev ? <>Take notes for <b>{ev.title}</b>?</> : `${t('Take notes?')} ${t('Your mic and the call, transcribed as you go.')}`}</span>
+            <span className="fc-sub" title={ev?.title || undefined}>{ev ? tn('Take notes for {event}?', { event: <b>{ev.title}</b> }) : `${t('Take notes?')} ${t('Your mic and the call, transcribed as you go.')}`}</span>
           </span>
           {hide}
         </div>

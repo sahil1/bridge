@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
 import { api, hostApi, machineId, machineUrl, apart, relayComputers, phoneApp, viaRelay } from '../api.js'
 import { passOn } from '../passed.js'
-import { t, tx, locale } from '../i18n/index.js'
+import { t, tx, locale, tn } from '../i18n/index.js'
 
 // Your other devices (server/machines.js): Macs, Windows and Linux computers running Bridge AI,
 // linked to this one. The top bar's machine menu switches the window to one (its own Bridge AI,
@@ -342,7 +342,7 @@ export function AskBanner() {
       {asks.map((a) => (
         <div key={a.id} className="ask-row">
           <Icon name="link" size={14} />
-          <span><b>{a.name}</b> asks to link with this device. Allow it only if {a.name} shows <b className="ask-code">{a.code}</b>.</span>
+          <span>{tn('{who} asks to link with this device. Allow it only if {name} shows {code}.', { who: <b>{a.name}</b>, name: a.name, code: <b className="ask-code">{a.code}</b> })}</span>
           <span className="ask-btns">
             <button type="button" className="btn small primary" onClick={() => answer(a.id, true)}>{t('Allow')}</button>
             <button type="button" className="btn small" onClick={() => answer(a.id, false)}>{t('Turn down')}</button>
@@ -549,7 +549,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
                         : m.state === 'denied' ? t('Turned down there')
                           : m.state === 'removed' ? t('It unlinked this device') : m.state === 'changed' ? t('Its key changed') : m.state === 'expired' ? t('The ask expired') : t('Linking…')].filter(Boolean).join(' · ')}
                 </small>
-                {m.state === 'asking' && m.code && <small>On {m.name}, allow it if it shows <b className="ask-code">{m.code}</b>.</small>}
+                {m.state === 'asking' && m.code && <small>{tn('On {name}, allow it if it shows {code}.', { name: m.name, code: <b className="ask-code">{m.code}</b> })}</small>}
                 {m.error && m.state === 'linked' && !m.online && !fixes[m.id] && <small className="muted">{m.error}</small>}
                 {m.state === 'changed' && <small className="muted">{t('{name} doesn\'t have the key it was linked with: it was set up again, or something is in between. On {name}, choose Pair a device and paste its link in Link a device below, to check it\'s really {name}.', { name: m.name })}</small>}
                 {m.state === 'removed' && <small className="muted">{t('{name} forgot this device. Link again asks it; allow it there after checking both show the same six digits.', { name: m.name })}</small>}

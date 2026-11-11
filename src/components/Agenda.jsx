@@ -5,7 +5,7 @@ import { api, refetch, usePoll, viaRelay } from '../api.js'
 import PermissionFix, { useFix, useRecheck } from './PermissionFix.jsx'
 import { openToday } from './today.js'
 import { Guests } from './meetings/invite.jsx'
-import { t, locale } from '../i18n/index.js'
+import { t, locale, tn } from '../i18n/index.js'
 
 // Why the calendar can't be read yet, and one button that fixes it: install icalBuddy in a terminal
 // tab you can watch (and Homebrew first, when the Mac has none), or allow Bridge AI to see your
@@ -35,7 +35,7 @@ export function CalendarSetup({ error, code, onCheck }) {
   return (
     <div className="perm-fix">
       <p>{noBrew
-        ? <>{t('The calendar reads macOS Calendar through icalBuddy, a small free tool.')} It comes from Homebrew, which isn't on this Mac yet (<a href="https://brew.sh" target="_blank" rel="noreferrer">brew.sh</a>).</>
+        ? <>{t('The calendar reads macOS Calendar through icalBuddy, a small free tool.')} {tn("It comes from Homebrew, which isn't on this Mac yet ({site}).", { site: <a href="https://brew.sh" target="_blank" rel="noreferrer">brew.sh</a> })}</>
         : t('The calendar reads macOS Calendar through icalBuddy, a small free tool from Homebrew.')}</p>
       {viaRelay ? <p className="muted small">{t('Install it on your computer: open the calendar there and click Install.')}</p> : (
         <div className="perm-acts">
