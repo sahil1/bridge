@@ -285,7 +285,7 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
         return { text: gridText(sheet, range), where: t('{range} on {sheet}', { range: range.getA1Notation(), sheet: sheet.getSheetName() }) }
       } catch { return null }
     },
-    ask: () => setPanel('ask'),
+    ask: () => { setPreset({ agent: true, n: Date.now() }); setPanel('ask') },
     assist: () => [
       ...QUICK.map((q) => ({ label: t(q.verb), hint: t(q.hint), run: () => { setPreset({ q, n: Date.now() }); setPanel('ask') } })),
       { label: t('Ask about these cells'), hint: t('Anything: "a column for the total of each row", "which month spent most?"'), on: panel === 'ask', run: () => setPanel(panel === 'ask' ? null : 'ask') },
@@ -368,11 +368,14 @@ function CsvBar({ csv, ext, onPick }) {
 }
 
 // ---------- AI Assist ----------
-// The cells picked, what to do with them (a formula, a cleaned-up column, a summary, a chart, or
-// anything said), to the agent working in the file's folder, another there, or a new one. Its
-// answer comes back as a change (studio.takeProposal), shown on the sheet marked out, to keep or
-// discard; an answer to a question is shown here. preset: what AI Assist's menu picked, put in to
-// finish or send.
+// The cells picked and what to do with them (a formula, a cleaned-up column, a summary, a chart, or
+// anything said), answered by AI Assist's model in seconds (Studio's model: the one picked for it,
+// else the one the app reaches first). Its change is a suggestion: put on the sheet outlined, what
+// was there kept to put back, and kept or discarded, each on its own or all at once. Several can
+// wait at once. An answer to a question is shown here, to copy. A bigger job is handed to the
+// agent working in the file's folder, another there, or a new one, which writes the same change
+// beside the file (studio.takeProposal), looked for every two seconds for twenty minutes. preset:
+// what AI Assist's menu picked, put in to finish or send ({ q }), or Ask an agent ({ agent }).
 const QUICK = [
   { id: 'formula', icon: 'braces', label: tx('Write a formula'), verb: tx('Write a formula'), hint: tx('For the cells you pick'), text: tx('Write a formula for the cells I picked that ') },
   { id: 'clean', icon: 'check', label: tx('Clean this column'), verb: tx('Clean this column'), hint: tx('Spaces, spellings and formats made the same'), text: tx('Clean up the values in the column I picked: trim spaces, write the same thing the same way, fix obvious typos and formats, and keep what each one means.') },
@@ -380,6 +383,8 @@ const QUICK = [
   { id: 'chart', icon: 'trend', label: tx('Chart this'), verb: tx('Make a chart'), hint: tx('Of the cells you pick, shown before it\'s added'), text: tx('Make a chart of the cells I picked that shows them best.') },
 ]
 const WAIT_MS = 20 * 60_000
+const MARK = { stroke: '#7c5cff', fill: 'rgba(124, 92, 255, 0.16)', strokeWidth: 2 }
+const openProviders = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))
 function AskPanel({ hidden, preset, onShow, file, univer, sel, dark, onDirty, onChart, onClose }) {
   const { fleet } = useFleet()
   const here = fleet?.agents?.find((a) => a.paneId === file.root)
@@ -387,40 +392,79 @@ function AskPanel({ hidden, preset, onShow, file, univer, sel, dark, onDirty, on
   const [pick, setTo] = useState(null)
   const to = pick ?? (here && here.kind !== 'chat' ? here.paneId : agents[0]?.paneId || 'new')
   const [text, setText] = useState('')
-  const [state, setState] = useState({ step: 'idle' }) // idle, sending, waiting, late, shown, kept, error
+  const [busy, setBusy] = useState(false) // AI Assist's model is answering
+  const [hand, setHand] = useState(false) // Hand to an agent is open
+  const [agent, setAgent] = useState({ step: 'idle' }) // the agent asked: idle, sending, waiting, late
+  const [err, setErr] = useState(null) // { message, noModel }
+  const [list, setList] = useState([]) // suggestions on the sheet: { id, by, proposal, before, chart, sheetId }
+  const [answer, setAnswer] = useState(null) // { by, summary, text }: an answer to a question
+  const [note, setNote] = useState(null) // what was kept, and what's next
+  const [writer, setWriter] = useState(null) // Studio's model, and the others to pick from
   const box = useRef(null)
-  const lit = useRef(null)
+  const lit = useRef(new Map()) // each suggestion's marks on the sheet
   const live = useRef(true)
-  useEffect(() => () => { live.current = false; try { lit.current?.dispose() } catch { /* gone */ } }, [])
+  useEffect(() => () => { live.current = false; for (const l of lit.current.values()) { try { l.dispose() } catch { /* gone */ } } }, [])
+  // Looked at each time the panel shows: a model added in Settings meanwhile is the one it uses.
+  useEffect(() => { if (!hidden) call('/studio/writer').then((w) => live.current && setWriter(w), () => live.current && setWriter((w) => w || { model: null, models: [] })) }, [hidden])
+  const pickModel = async (id) => {
+    setWriter((w) => ({ ...w, model: w.models.find((m) => m.id === id) || null }))
+    await call('/settings', { method: 'PATCH', body: { studio: { model: id } } }).catch(() => {})
+  }
+  const model = writer?.model && !writer.model.missing ? writer.models.find((m) => m.id === writer.model.id) || writer.model : null
+  const noModel = !!writer && !model && !writer.models.length
   const f = { root: file.root, path: file.path }
-
-  const send = async (e) => {
-    e?.preventDefault()
-    if (!fleet || !text.trim() || state.step === 'sending' || state.step === 'waiting') return
-    const sheet = univer.current?.getActiveWorkbook()?.getActiveSheet()
+  // The cells picked, as the model or the agent reads them.
+  const picked = () => {
+    const wb = univer.current?.getActiveWorkbook()
+    const sheet = wb?.getActiveSheet()
     const range = sheet?.getSelection()?.getActiveRange()
-    setState({ step: 'sending' })
-    try {
-      const where = range ? t('{range} on {sheet}', { range: range.getA1Notation(), sheet: sheet.getSheetName() }) : null
-      const r = await call('/studio/ask', { method: 'POST', body: { ...f, kind: 'sheet', propose: true, instruction: text, selection: range ? gridText(sheet, range) : null, where, ...(to !== 'new' ? { pane: to } : {}) } })
-      if (live.current) setState({ step: 'waiting', name: r.name, since: Date.now(), sheet: sheet?.getSheetName() })
-    } catch (x) { if (live.current) setState({ step: 'error', message: t("Couldn't send it: {error}", { error: x.message }) }) }
+    const rows = (sheet?.getLastRow() ?? -1) + 1, cols = (sheet?.getLastColumn() ?? -1) + 1
+    return {
+      name: sheet?.getSheetName(), sheets: wb?.getSheets().map((s) => s.getSheetName()) || [],
+      used: rows > 0 && cols > 0 ? `A1:${colName(cols - 1)}${rows}` : null,
+      selection: range ? gridText(sheet, range) : null,
+      where: range ? t('{range} on {sheet}', { range: range.getA1Notation(), sheet: sheet.getSheetName() }) : null,
+    }
   }
 
+  // Asked of AI Assist's model: its change on the sheet in seconds, to keep or not.
+  const ask = async (e) => {
+    e?.preventDefault()
+    if (!text.trim() || busy || noModel) return
+    const p = picked()
+    setBusy(true); setErr(null); setNote(null)
+    try {
+      const r = await call('/studio/sheet/ai', { method: 'POST', body: { ...f, instruction: text, selection: p.selection, where: p.where, sheet: p.name, sheets: p.sheets, used: p.used } })
+      if (!live.current) return
+      if (show(r.proposal, { name: r.by, sheet: p.name })) setText('')
+    } catch (x) { if (live.current) setErr({ message: x.message, noModel: x.code === 'noModel' }) } finally { if (live.current) setBusy(false) }
+  }
+
+  // Handed to an agent: it writes the change beside the file, which is looked for here.
+  const send = async (e) => {
+    e?.preventDefault()
+    if (!fleet || !text.trim() || agent.step === 'sending' || agent.step === 'waiting') return
+    const p = picked()
+    setAgent({ step: 'sending' }); setErr(null); setNote(null)
+    try {
+      const r = await call('/studio/ask', { method: 'POST', body: { ...f, kind: 'sheet', propose: true, instruction: text, selection: p.selection, where: p.where, ...(to !== 'new' ? { pane: to } : {}) } })
+      if (live.current) setAgent({ step: 'waiting', name: r.name, since: Date.now(), sheet: p.name })
+    } catch (x) { if (live.current) { setAgent({ step: 'idle' }); setErr({ message: t("Couldn't send it: {error}", { error: x.message }) }) } }
+  }
   // Waiting: the agent's change is looked for every two seconds, for twenty minutes.
   useEffect(() => {
-    if (state.step !== 'waiting') return undefined
+    if (agent.step !== 'waiting') return undefined
     const id = setInterval(async () => {
-      if (Date.now() - state.since > WAIT_MS) { setState((s) => ({ ...s, step: 'late' })); return }
+      if (Date.now() - agent.since > WAIT_MS) { setAgent((s) => ({ ...s, step: 'late' })); return }
       const r = await call(`/studio/proposal?root=${encodeURIComponent(f.root)}&path=${encodeURIComponent(f.path)}`).catch(() => null)
       if (!live.current || !r) return
-      if (r.error) setState({ step: 'error', message: r.error })
-      else if (r.proposal) show(r.proposal, state)
+      if (r.error) { setAgent({ step: 'idle' }); setErr({ message: r.error }) } else if (r.proposal) { setAgent({ step: 'idle' }); if (show(r.proposal, agent)) setText('') }
     }, 2000)
     return () => clearInterval(id)
-  }, [state]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [agent]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Shown: put on the sheet, what was there kept to put back, and marked out.
+  // A change shown: put on the sheet, what was there kept to put back, and outlined. An answer
+  // alone is said here instead. False when it can't be shown, and why.
   const show = (p, asked) => {
     try {
       if (!p || typeof p !== 'object') throw new Error(t('it isn\'t a change'))
@@ -431,6 +475,12 @@ function AskPanel({ hidden, preset, onShow, file, univer, sel, dark, onDirty, on
       const bad = cells.find(([ref]) => !/^\$?[A-Z]{1,3}\$?[1-9]\d{0,6}$/i.test(ref))
       if (bad) throw new Error(t('"{ref}" isn\'t a cell', { ref: bad[0] }))
       const chart = p.chart && typeof p.chart === 'object' && p.chart.range ? chartFrom(sheet, p.chart) : null
+      if (!cells.length && !chart) {
+        if (!p.answer) throw new Error(t('it has nothing to show'))
+        setAnswer({ by: asked.name, summary: p.summary ? String(p.summary) : null, text: String(p.answer) })
+        onShow()
+        return true
+      }
       if (wb.getActiveSheet().getSheetId() !== sheet.getSheetId()) wb.setActiveSheet(sheet)
       const before = []
       for (const [ref, val] of cells) {
@@ -440,84 +490,134 @@ function AskPanel({ hidden, preset, onShow, file, univer, sel, dark, onDirty, on
         before.push({ ref: at, f: was.f || null, v: was.v ?? null })
         setCell(r, val)
       }
+      const id = `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
       if (before.length) {
-        try { lit.current = sheet.highlightRanges(before.map((b) => sheet.getRange(b.ref)), { stroke: '#7c5cff', fill: 'rgba(124, 92, 255, 0.16)', strokeWidth: 2 }) } catch { /* shown without the marks */ }
+        try { lit.current.set(id, sheet.highlightRanges(before.map((b) => sheet.getRange(b.ref)), MARK)) } catch { /* shown without the marks */ }
         onDirty(true)
       }
-      setState({ step: 'shown', proposal: p, before, chart, sheetId: sheet.getSheetId(), name: asked.name })
+      setList((l) => [...l, { id, by: asked.name, proposal: p, before, chart, sheetId: sheet.getSheetId() }])
       onShow()
-    } catch (x) { setState({ step: 'error', message: t("Couldn't show {name}'s change: {error}", { name: asked.name, error: x.message }) }) }
+      return true
+    } catch (x) { setErr({ message: t("Couldn't show {name}'s change: {error}", { name: asked.name, error: x.message }) }); return false }
   }
-  const unmark = () => { try { lit.current?.dispose() } catch { /* gone */ } lit.current = null }
-  const keep = () => {
-    unmark()
-    if (state.chart) { onChart(state.chart.spec); onDirty(true) }
-    setState({ step: 'kept', chart: !!state.chart })
+  const unmark = (s) => { try { lit.current.get(s.id)?.dispose() } catch { /* gone */ } lit.current.delete(s.id) }
+  const keep = (s) => {
+    unmark(s)
+    if (s.chart) { onChart(s.chart.spec); onDirty(true) }
+    setList((l) => l.filter((x) => x.id !== s.id))
+    return !!s.chart
   }
-  const putBack = () => {
-    unmark()
+  const putBack = (s) => {
+    unmark(s)
     try {
-      const sheet = univer.current.getActiveWorkbook().getSheetBySheetId(state.sheetId)
-      for (const b of [...state.before].reverse()) {
+      const sheet = univer.current.getActiveWorkbook().getSheetBySheetId(s.sheetId)
+      for (const b of [...s.before].reverse()) {
         const r = sheet.getRange(b.ref)
         if (b.f) r.setFormula(b.f)
         else if (b.v != null && b.v !== '') r.setValue(b.v)
         else r.clearContent()
       }
     } catch { /* the sheet's gone: nothing to put back */ }
-    setState({ step: 'idle' })
+    setList((l) => l.filter((x) => x.id !== s.id))
   }
+  const kept = (charts) => setNote(charts ? t('Kept, with its chart (in Charts). Save to write it to the file.') : t('Kept. Save to write it to the file; undo takes it back.'))
+  const keepOne = (s) => kept(keep(s))
+  const keepAll = () => kept(list.map(keep).some(Boolean))
+  // The newest first, so each puts back what was there before it.
+  const discardAll = () => { for (const s of [...list].reverse()) putBack(s) }
   const quick = (q) => { setText(t(q.text)); setTimeout(() => { box.current?.focus(); const n = box.current?.value.length || 0; box.current?.setSelectionRange(n, n) }, 0) }
-  useEffect(() => { if (preset && state.step !== 'sending' && state.step !== 'waiting') quick(preset.q) }, [preset?.n]) // eslint-disable-line react-hooks/exhaustive-deps
-  const busy = state.step === 'sending' || state.step === 'waiting'
-  const p = state.proposal
+  useEffect(() => {
+    if (!preset) return
+    if (preset.agent) setHand(true)
+    if (preset.q && !busy && agent.step !== 'sending' && agent.step !== 'waiting') quick(preset.q)
+  }, [preset?.n]) // eslint-disable-line react-hooks/exhaustive-deps
+  const waiting = agent.step === 'sending' || agent.step === 'waiting'
+  const goes = !model ? '' : model.via === 'local' ? t('The cells picked and your words stay on this computer ({model}).', { model: model.label }) : t('The cells picked and your words go to {model} ({provider}). Nothing else leaves this computer.', { model: model.label, provider: model.provider || model.label })
   return (
     <aside className="sh-side sh-ask" aria-label={t('AI Assist')} hidden={hidden}>
-      <AssistHead className="sd-panel-head" what={t('Ask about these cells')} onClose={() => { if (state.step === 'shown') putBack(); onClose() }} />
+      <AssistHead className="sd-panel-head" what={t('Ask about these cells')} onClose={() => { discardAll(); onClose() }} />
       <div className="sh-side-body">
         <p className="sh-picked">{sel ? <><b>{sel.a1}</b> <span className="muted">{t('on {sheet}', { sheet: sel.sheet })} · {sel.rows * sel.cols === 1 ? t('1 cell') : t('{n} cells', { n: (sel.rows * sel.cols).toLocaleString() })}</span></> : <span className="muted">{t('Pick the cells to ask about, or ask about the whole sheet.')}</span>}</p>
-        {state.step !== 'shown' && <>
-          <div className="sh-quick">
-            {QUICK.map((q) => <button key={q.id} type="button" className="sh-chip" onClick={() => quick(q)} disabled={busy}><Icon name={q.icon} size={12} /> {t(q.label)}</button>)}
+        <div className="sh-quick">
+          {QUICK.map((q) => <button key={q.id} type="button" className="sh-chip" onClick={() => quick(q)} disabled={busy || waiting}><Icon name={q.icon} size={12} /> {t(q.label)}</button>)}
+        </div>
+        <form onSubmit={ask} className="sh-ask-form">
+          <textarea ref={box} value={text} onChange={(e) => setText(e.target.value)} rows={4} disabled={busy || waiting} placeholder={t('What to do with them: "a column for the total of each row", "which month spent most?"')} onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) (noModel ? send(e) : ask(e)) }} aria-label={t('What to do with them')} />
+          <div className="sh-ask-foot">
+            {writer?.models?.length > 1
+              ? <select className="sh-model" value={model?.id || ''} onChange={(e) => pickModel(e.target.value)} aria-label={t('Model')} title={t('The model AI Assist answers with')} disabled={busy}>
+                  {!model && <option value="">—</option>}
+                  {writer.models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                </select>
+              : model && <span className="muted small sh-model-one">{model.label}</span>}
+            <span className="sd-grow" />
+            <button type="submit" className="btn small primary sh-send" disabled={busy || waiting || noModel || !text.trim()} title={withKeys(t('Ask'), 'mod', 'enter')}>
+              <Icon name={busy ? 'refresh' : 'wand'} size={12} className={busy ? 'spin' : ''} /> {busy ? t('Asking…') : t('Ask')}
+            </button>
           </div>
-          <form onSubmit={send} className="sh-ask-form">
-            <textarea ref={box} value={text} onChange={(e) => setText(e.target.value)} rows={4} disabled={busy} placeholder={t('What to do with them: "a column for the total of each row", "which month spent most?"')} onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(e) }} aria-label={t('What to do with them')} />
-            <label className="sh-to">{t('To')}
-              <select value={to} onChange={(e) => setTo(e.target.value)} disabled={busy}>
-                {agents.map((a) => <option key={a.paneId} value={a.paneId}>{a.title || a.kindLabel} · {a.kindLabel}{a.status === 'working' ? ` (${t('working')})` : ''}</option>)}
-                <option value="new">{t('A new agent in this folder')}</option>
-              </select>
-            </label>
-            <button type="submit" className="btn small primary sh-send" disabled={busy || !text.trim() || !fleet} title={withKeys(t('Ask'), 'mod', 'enter')}><Icon name="send" size={12} /> {state.step === 'sending' ? t('Sending…') : t('Ask')}</button>
-          </form>
-        </>}
-        {state.step === 'waiting' && <div className="sh-wait" role="status"><Icon name="refresh" size={13} className="spin" /><span>{t('Asked {name}. Its change shows here, to keep or not, before anything in the file changes.', { name: state.name })}</span><button type="button" className="link-btn" onClick={() => setState({ step: 'idle' })}>{t('Stop waiting')}</button></div>}
-        {state.step === 'late' && <div className="sh-wait bad" role="alert"><Icon name="alert" size={13} /><span>{t('No answer from {name} in 20 minutes. It may still be working, or waiting for you: look at its chat.', { name: state.name })}</span><button type="button" className="link-btn" onClick={() => setState({ ...state, step: 'waiting', since: Date.now() })}>{t('Keep waiting')}</button></div>}
-        {state.step === 'error' && <div className="sh-wait bad" role="alert"><Icon name="alert" size={13} /><span>{state.message}</span><button type="button" className="link-btn" onClick={() => setState({ step: 'idle' })}>{t('OK')}</button></div>}
-        {state.step === 'kept' && <div className="sh-wait ok" role="status"><Icon name="check" size={13} /><span>{state.chart ? t('Kept, with its chart (in Charts). Save to write it to the file.') : t('Kept. Save to write it to the file; undo takes it back.')}</span></div>}
-        {state.step === 'shown' && (
-          <div className="sh-change">
-            <small className="muted">{t('{name}\'s change, not made yet', { name: state.name })}</small>
-            {p.summary && <b className="sh-sum">{String(p.summary)}</b>}
-            {p.answer && <p className="sh-answer">{String(p.answer)}</p>}
-            {state.before.length > 0 && (
-              <div className="sh-cells">
-                <small className="muted">{state.before.length === 1 ? t('1 cell, marked on the sheet') : t('{n} cells, marked on the sheet', { n: state.before.length })}</small>
-                <ul>{Object.entries(p.cells || {}).slice(0, 8).map(([ref, v]) => <li key={ref}><code>{ref.toUpperCase()}</code> <span>{String(v)}</span></li>)}</ul>
-                {state.before.length > 8 && <small className="muted">{t('and {n} more', { n: state.before.length - 8 })}</small>}
-              </div>
-            )}
-            {state.chart && <figure className="sh-fig"><figcaption>{state.chart.spec.title || t('Chart')}</figcaption><SheetChart chart={state.chart.view} dark={dark} /></figure>}
-            {p.answer && !state.before.length && !state.chart
-              ? <div className="sh-acts"><CopyButton text={String(p.answer)} className="btn small" /><button type="button" className="ghost-btn" onClick={() => setState({ step: 'idle' })}>{t('Done')}</button></div>
-              : <div className="sh-acts"><button type="button" className="btn small primary" onClick={keep}><Icon name="check" size={12} /> {t('Keep')}</button><button type="button" className="btn small" onClick={putBack}>{t('Discard')}</button></div>}
+        </form>
+        {noModel
+          ? <p className="small sh-goes" role="note">{t('No model to answer with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers. Hand to an agent works without one.')} <button type="button" className="link-btn" onClick={openProviders}>{t('Model Providers')}</button></p>
+          : goes && <p className="muted small sh-goes">{goes}</p>}
+        <div className={`sh-hand${hand ? ' open' : ''}`}>
+          <button type="button" className="link-btn sh-hand-toggle" onClick={() => setHand(!hand)} aria-expanded={hand}><Icon name="chevron" size={11} /> {t('Hand to an agent, for a bigger job')}</button>
+          {hand && (
+            <form onSubmit={send} className="sh-hand-form">
+              <label className="sh-to">{t('To')}
+                <select value={to} onChange={(e) => setTo(e.target.value)} disabled={waiting}>
+                  {agents.map((a) => <option key={a.paneId} value={a.paneId}>{a.title || a.kindLabel} · {a.kindLabel}{a.status === 'working' ? ` (${t('working')})` : ''}</option>)}
+                  <option value="new">{t('A new agent in this folder')}</option>
+                </select>
+              </label>
+              <button type="submit" className="btn small sh-hand-send" disabled={waiting || busy || !text.trim() || !fleet}><Icon name="send" size={12} /> {agent.step === 'sending' ? t('Sending…') : t('Send to the agent')}</button>
+              <small className="muted">{t('It reads the whole file and can take minutes. Its change shows here too, to keep or not.')}</small>
+            </form>
+          )}
+        </div>
+        {agent.step === 'waiting' && <div className="sh-wait" role="status"><Icon name="refresh" size={13} className="spin" /><span>{t('Asked {name}. Its change shows here, to keep or not, before anything in the file changes.', { name: agent.name })}</span><button type="button" className="link-btn" onClick={() => setAgent({ step: 'idle' })}>{t('Stop waiting')}</button></div>}
+        {agent.step === 'late' && <div className="sh-wait bad" role="alert"><Icon name="alert" size={13} /><span>{t('No answer from {name} in 20 minutes. It may still be working, or waiting for you: look at its chat.', { name: agent.name })}</span><button type="button" className="link-btn" onClick={() => setAgent({ ...agent, step: 'waiting', since: Date.now() })}>{t('Keep waiting')}</button></div>}
+        {busy && <div className="sh-wait" role="status"><Icon name="refresh" size={13} className="spin" /><span>{t('Asking {model}…', { model: model?.label || t('the model') })}</span></div>}
+        {err && <div className="sh-wait bad" role="alert"><Icon name="alert" size={13} /><span>{err.message}{err.noModel && <> <button type="button" className="link-btn" onClick={openProviders}>{t('Model Providers')}</button></>}</span><button type="button" className="link-btn" onClick={() => setErr(null)}>{t('OK')}</button></div>}
+        {note && !list.length && <div className="sh-wait ok" role="status"><Icon name="check" size={13} /><span>{note}</span></div>}
+        {answer && (
+          <div className="sh-change sh-answer-card">
+            <small className="muted sh-by"><Icon name="wand" size={11} /> {t('By {name}', { name: answer.by })}</small>
+            {answer.summary && <b className="sh-sum">{answer.summary}</b>}
+            <p className="sh-answer">{answer.text}</p>
+            <div className="sh-acts"><CopyButton text={answer.text} className="btn small" /><button type="button" className="ghost-btn" onClick={() => setAnswer(null)}>{t('Done')}</button></div>
           </div>
         )}
+        {list.length > 1 && (
+          <div className="sh-all" role="group" aria-label={t('Suggestions')}>
+            <span className="small">{t('{n} suggestions, outlined on the sheet', { n: list.length })}</span>
+            <button type="button" className="btn small primary" onClick={keepAll}><Icon name="check" size={12} /> {t('Keep all')}</button>
+            <button type="button" className="btn small" onClick={discardAll}>{t('Discard all')}</button>
+          </div>
+        )}
+        {list.map((s) => {
+          const p = s.proposal
+          return (
+            <div key={s.id} className="sh-change sh-suggestion">
+              <small className="muted sh-by"><Icon name="wand" size={11} /> {t('Suggested by {name}, not kept yet', { name: s.by })}</small>
+              {p.summary && <b className="sh-sum">{String(p.summary)}</b>}
+              {p.answer && <p className="sh-answer">{String(p.answer)}</p>}
+              {s.before.length > 0 && (
+                <div className="sh-cells">
+                  <small className="muted">{s.before.length === 1 ? t('1 cell, outlined on the sheet') : t('{n} cells, outlined on the sheet', { n: s.before.length })}</small>
+                  <ul>{Object.entries(p.cells || {}).slice(0, 8).map(([ref, v]) => <li key={ref}><code>{ref.toUpperCase()}</code> <span>{String(v)}</span></li>)}</ul>
+                  {s.before.length > 8 && <small className="muted">{t('and {n} more', { n: s.before.length - 8 })}</small>}
+                </div>
+              )}
+              {s.chart && <figure className="sh-fig"><figcaption>{s.chart.spec.title || t('Chart')}</figcaption><SheetChart chart={s.chart.view} dark={dark} /></figure>}
+              <div className="sh-acts"><button type="button" className="btn small primary" onClick={() => keepOne(s)}><Icon name="check" size={12} /> {t('Keep')}</button><button type="button" className="btn small" onClick={() => putBack(s)}>{t('Discard')}</button></div>
+            </div>
+          )
+        })}
       </div>
     </aside>
   )
 }
-// A value the agent gave: a formula, a number, true or false, words, or "" to empty the cell.
+// A value the model or the agent gave: a formula, a number, true or false, words, or "" to empty the cell.
 function setCell(range, val) {
   if (val == null || val === '') return range.clearContent()
   if (typeof val === 'string' && val.startsWith('=')) return range.setFormula(val)

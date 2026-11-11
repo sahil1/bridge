@@ -75,6 +75,12 @@ export const apiOn = (machine, path, opts) => call(`${machine ? `/m/${machine}` 
 // asked first. Where nothing waits, it changes nothing. There, in the page's first moments, they
 // wait until what's on screen has been asked for.
 const LATER = /\/api\/(updates|crashes|insights|ideas|routines|previews|chat\/models|setup\/plan|fix|presence|agent-kinds)(\/|\?|$)/
+// (At most once a minute: where loading again can't show that page, the hot-reloading UI of
+// `npm start -- dev`, the calls just fail.)
+const signedOut = () => {
+  try { if (Date.now() - Number(sessionStorage.getItem('cc-signed-out') || 0) < 60_000) return; sessionStorage.setItem('cc-signed-out', String(Date.now())) } catch { return }
+  location.reload()
+}
 const SETTLE = 1500
 async function call(url, opts = {}) {
   const later = LATER.test(url)
@@ -86,6 +92,9 @@ async function call(url, opts = {}) {
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   })
   const data = await res.json().catch(() => ({}))
+  // This browser isn't let in any more (its cookie was cleared, or Bridge AI's key changed): loaded
+  // again, once, the server says how to get back in (server/apiauth.js).
+  if (res.status === 401 && data.code === 'apiKey') signedOut()
   // code: set when the app can offer a fix (EPERM, noBrew, calendarAccess...). status: there was an
   // answer (a failed fetch has none). data: all of it (what came with it: the account's devices...).
   if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status, data }, data.code ? { code: data.code } : {})

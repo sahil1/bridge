@@ -46,6 +46,7 @@ import { loginPath, which } from './agents.js'
 import { bundle } from '../relay/build.js'
 import { computerWelcome, newPairCode, splitCode, formatCode, plainFrame, readPlain, b64u, boxId, K, pack, unpack, json, utf8, CHUNK, moreOf } from '../relay/web/link.js'
 import * as inbox from './inbox.js'
+import { authHeaders, localKey } from './apitoken.js'
 
 const FILE = dataFile('relay.json')
 const WRANGLER = 'wrangler@4.149.0'
@@ -561,9 +562,12 @@ class Conn {
     }
     s.run = async () => {
       try {
-        // Its own x-bridge-relay goes, in any capitals: fetch would join it to the real one below.
-        const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$)/i.test(k)))
+        // Its own x-bridge-relay and Authorization go, in any capitals: fetch would join them to the
+        // real ones below. It's run here as you, with this server's key (apiauth.js): the device has
+        // shown its own key to get this far.
+        const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$|authorization$)/i.test(k)))
         headers['x-bridge-relay'] = this.device.id
+        Object.assign(headers, authHeaders(localKey()))
         const res = await fetch(target, { method: m || 'GET', headers, body: s.body ? Buffer.concat(s.body) : undefined, signal: abort.signal, redirect: 'manual' })
         // The app's own files (dist/assets, the same for everyone with this version) go compressed
         // when the phone asks: a third of the size, and the first screen sooner. Nothing else does:
@@ -604,7 +608,7 @@ class Conn {
     if (this.removed()) return this.send(K.WS_CLOSE, sid, { c: 1008, r: 'This device was removed from this computer' })
     const target = new URL(String(u || '/'), base)
     if (target.origin !== new URL(base).origin) return this.send(K.WS_CLOSE, sid, { c: 1008, r: 'Not allowed' })
-    const ws = new WebSocket(target.href.replace(/^http/, 'ws'), { headers: { 'x-bridge-relay': this.device.id } })
+    const ws = new WebSocket(target.href.replace(/^http/, 'ws'), { headers: { 'x-bridge-relay': this.device.id, ...authHeaders(localKey()) } })
     this.streams.set(sid, { ws })
     ws.on('open', () => this.send(K.WS_OPENED, sid))
     ws.on('message', (data, isBinary) => {

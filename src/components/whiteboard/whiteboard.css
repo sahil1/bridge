@@ -95,6 +95,61 @@
 .wb-why ul { margin: 0; padding-left: 16px; display: grid; gap: 2px; }
 .wb-put { justify-self: start; }
 
+/* AI Assist's suggestions on the board: a dashed outline in its colour around each, with the wand,
+   who made it, Keep and Discard above it; and how many at the foot of the board, with Keep all. The
+   layer lets the board have the pointer everywhere but on its buttons. */
+.wb-sugs { position: absolute; inset: 0; z-index: 4; overflow: hidden; pointer-events: none; }
+.wb-sug { position: absolute; border: 1.5px dashed var(--ai); border-radius: 10px; background: color-mix(in srgb, var(--ai) 4%, transparent); box-sizing: border-box; }
+.wb-sug-tag { position: absolute; display: inline-flex; align-items: center; gap: 6px; max-width: 360px; padding: 2px 3px 2px 8px; border-radius: 999px; background: var(--pane); border: 1px solid color-mix(in srgb, var(--ai) 45%, var(--line)); box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, .12)); font-size: 11.5px; color: var(--ink-2); white-space: nowrap; pointer-events: auto; }
+.wb-sug-tag > svg { flex: none; color: var(--ai); }
+.wb-sug-by { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wb-sug-btn { all: unset; cursor: pointer; padding: 2px 8px; border-radius: 999px; font-weight: 600; color: var(--ink); }
+.wb-sug-btn:hover { background: var(--pane-2); }
+.wb-sug-btn:focus-visible { outline: 2px solid var(--accent); }
+.wb-sug-btn.keep { background: var(--accent-fill); color: var(--on-accent); }
+.wb-sug-btn.keep:hover { background: color-mix(in srgb, var(--accent-fill) 88%, #000); }
+.wb-sug-bar { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; max-width: calc(100% - 24px); padding: 6px 6px 6px 12px; border-radius: 12px; background: var(--pane); border: 1px dashed color-mix(in srgb, var(--ai) 60%, var(--line)); box-shadow: var(--shadow-lg); font-size: 12.5px; color: var(--ink); pointer-events: auto; }
+.wb-sug-bar > svg { flex: none; color: var(--ai); }
+.wb-sug-bar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-sug-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* A board's Versions: each as the picture it had (a click shows it larger), who or what came
+   after it, and Put back. */
+.wb-vers { width: 100%; box-sizing: border-box; }
+.wb-vers .wb-draw-head { display: flex; align-items: center; gap: 8px; }
+.wb-vers-none { color: var(--ink-2); }
+.wb-vers-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.wb-vers-list li { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px; border-radius: 9px; border: 1px solid var(--line); background: var(--pane-2); }
+.wb-vers-list li.open { grid-template-columns: minmax(0, 1fr) auto; }
+.wb-vers-list li.open .wb-vers-pic { grid-column: 1 / -1; height: auto; max-height: 260px; }
+.wb-vers-pic { all: unset; box-sizing: border-box; width: 100%; height: 48px; display: grid; place-items: center; overflow: hidden; border-radius: 6px; background: #fff; border: 1px solid var(--line); cursor: zoom-in; color: var(--ink-3); }
+.wb-vers-list li.open .wb-vers-pic { cursor: zoom-out; }
+.wb-vers-pic:disabled { cursor: default; background: var(--pane); }
+.wb-vers-pic:focus-visible { outline: 2px solid var(--accent); }
+.wb-vers-pic img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+.wb-vers-who { display: grid; min-width: 0; font-size: 12.5px; }
+.wb-vers-who b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-vers.dark .wb-vers-pic { background: #121212; }
+.wb-vers.dark .wb-vers-pic img { filter: invert(93%) hue-rotate(180deg); }
+.app.narrow .wb-vers-list .btn { height: 40px; }
+/* The meeting moves: Group by theme under Change it; action items drawn, to add to Tasks. */
+.wb-moves { display: flex; flex-wrap: wrap; gap: 4px; }
+.wb-moves .chip { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; border: 1px solid color-mix(in srgb, var(--ai) 35%, transparent); }
+.wb-moves .chip:hover:not(:disabled) { background: var(--accent-soft); }
+.wb-moves .chip > svg { color: var(--ai); }
+.wb-tasks { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 9px; background: var(--pane-2); border: 1px solid var(--line); }
+.wb-tasks > span:first-child { flex: 1; min-width: 0; }
+.wb-tasks .error-text { flex-basis: 100%; margin: 0; }
+/* Ask's answer, under the box: who answered and from what, the answer, the shapes it names. */
+.wb-answer { display: grid; gap: 6px; padding: 8px 10px; border-radius: 9px; background: color-mix(in srgb, var(--ai) 6%, var(--pane-2)); border: 1px solid color-mix(in srgb, var(--ai) 30%, var(--line)); }
+.wb-answer-by { display: inline-flex; align-items: center; gap: 4px; }
+.wb-answer-by > svg { color: var(--ai); }
+.wb-answer-text { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+.wb-answer-shapes { display: flex; flex-wrap: wrap; gap: 4px; }
+.wb-answer-shapes .chip { cursor: pointer; border: 1px solid color-mix(in srgb, var(--ai) 35%, transparent); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-answer-shapes .chip:hover { background: var(--accent-soft); }
+.app.narrow .wb-sug-btn { padding: 8px 12px; }
+.app.narrow .wb-sug-bar .btn { height: 40px; }
+
 /* The board's name: click to change it, in the header and the list. */
 .wb-name { all: unset; display: inline-flex; align-items: center; gap: 6px; max-width: 100%; cursor: text; border-radius: 6px; padding: 1px 4px; margin-left: -4px; }
 .wb-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -194,4 +249,6 @@
   .wb-home { padding: 14px 12px 22px; }
   .wb-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
   .wb-model { max-width: 160px; }
+  /* Above Excalidraw's own tools, at the foot of a phone's board. */
+  .wb-sug-bar { bottom: 72px; }
 }

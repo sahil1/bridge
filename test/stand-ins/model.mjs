@@ -25,11 +25,20 @@
 //   model asked for "local" answers wrong the first time (no nodes), right when told why.
 //   Refine ("You drew a diagram for"): labels the first arrow without a label, saying so, and says
 //   {"ok":true} once every arrow has one. "Change it": Start renamed Begin, Ship coloured red, a
-//   Cache box beside the first shape with an arrow to it; its review says ok.
+//   Cache box beside the first shape with an arrow to it; its review says ok. Ask about these
+//   ("A question about …"): the shapes it was sent, named in quotes, and whether it saw a picture.
+//   The meeting moves: a timeline (Dan's design review, Priya's beta, your launch), Priya's and
+//   your action items, and notes grouped by theme (Pricing, Sign-in, and Team for the rest). A
+//   board written up as a document: its name, what it was sent, and a next step.
 //   AI Assist's Sign this, "Explain this document": a mutual NDA between Northwind Labs and Contoso
 //   Ltd, a fee, a renewal worth a look on page 1 ("renews automatically").
+//   A sheet's AI Assist ("In the spreadsheet …"): the change asked for, as JSON (sheetChange).
 //   Studio's decks: a deck of four slides (its title from what it's about, or the document's first
 //   line), a slide rewritten as big numbers ("Rewritten"), a new slide of next steps.
+//   @bridge in a document's comment ("Request: …" and the commented words): a question answered
+//   with no change; "shorter" cut to the words before the first colon or full stop (or without its
+//   last word), saying why, in a JSON code fence; anything else the words with "teh" spelled
+//   right. "slowly" answers after 2.5 s.
 //   Ollama's own API (a model server on this computer, when OLLAMA_HOST points here): its models
 //   (llama3.1:8b, and llama3.2-vision:11b, which can see), what each can do, none running, and
 //   /api/chat answering as Ollama does (its message, pictures as base64 in `images`) with the same
@@ -60,11 +69,45 @@ const ARCH = { direction: 'LR', groups: [{ id: 'aws', label: 'AWS us-east-1', ki
 const NET = { direction: 'TB', groups: [{ id: 'lan', label: 'Office LAN', kind: 'vpc' }], nodes: [{ id: 'inet', label: 'Internet', shape: 'internet' }, { id: 'fw', label: 'Firewall', shape: 'firewall' }, { id: 'sw', label: 'Switch', shape: 'switch', group: 'lan' }, { id: 'srv', label: 'File server', shape: 'server', group: 'lan' }, { id: 'pc', label: 'Desktops', shape: 'client', group: 'lan' }],
   edges: [{ from: 'inet', to: 'fw', label: 'WAN' }, { from: 'fw', to: 'sw', label: '1 Gbps' }, { from: 'sw', to: 'srv', label: 'LAN' }, { from: 'sw', to: 'pc', label: 'LAN' }] }
 
+// The meeting moves: a timeline of three steps with owners and dates, and two people's action items.
+const TIMELINE = { direction: 'LR', groups: [], nodes: [{ id: 't1', label: 'Design review · Dan · 3 Nov', shape: 'process' }, { id: 't2', label: 'Beta ships · Priya · 10 Nov', shape: 'process' }, { id: 't3', label: 'Launch · You · 1 Dec', shape: 'start' }], edges: [{ from: 't1', to: 't2' }, { from: 't2', to: 't3' }] }
+const ACTIONS = { direction: 'LR', groups: [{ id: 'priya', label: 'Priya', kind: 'group' }, { id: 'you', label: 'You', kind: 'group' }], nodes: [{ id: 'a1', label: 'Fix the login bug · Friday', shape: 'note', group: 'priya' }, { id: 'a2', label: 'Send the budget to finance · Friday', shape: 'note', group: 'you' }], edges: [] }
+
 // AI Assist's suggestion for a folder, from the names it was sent.
 function filesPlan(text) {
   const names = [...text.matchAll(/^(\S[^\n]*?)  \d/gm)].map((x) => x[1])
   const shot = names.find((n) => /screenshot/i.test(n)) || names[0] || ''
   return `\`\`\`json\n${JSON.stringify({ summary: 'Put the screenshots in a folder of their own and clear out the installers.', folders: [{ name: 'Screenshots', holds: 'Every screenshot, by year', examples: [shot] }, { name: 'Installers', holds: 'Apps to install, until they are', examples: [] }], steps: ['Make a Screenshots folder and move the screenshots in.', 'Delete the installers of apps you have installed.'] })}\n\`\`\``
+}
+
+// A sheet's AI Assist, from the cells it was sent (a row of column letters, then each row's number
+// and values): a formula doubling column B into the column after them for each row (C at least),
+// the first column's words trimmed
+// and capitalised, a summary of the numbers, a column chart of the cells picked; "not a change"
+// answers in words, which isn't the JSON asked for.
+function sheetChange(text) {
+  const grid = /"""\n([\s\S]*?)\n"""/.exec(text)?.[1] || ''
+  const [head, ...rows] = grid.split('\n').filter((l) => /^\d*\t/.test(l))
+  const cols = (head || '').split('\t').slice(1)
+  const cells = rows.map((l) => { const [r, ...v] = l.split('\t'); return { r: Number(r), v } })
+  const sheet = /on the sheet "([^"]+)"/.exec(text)?.[1]
+  const where = /The cells I picked \(([A-Z]+\d+(?::[A-Z]+\d+)?) on /.exec(text)?.[1] || 'A1:B3'
+  const json = (o) => `\`\`\`json\n${JSON.stringify(o)}\n\`\`\``
+  if (/not a change/i.test(text)) return 'I would double the costs, I think.'
+  if (/Write a formula/.test(text)) {
+    const to = String.fromCharCode(Math.max(66, (cols.at(-1) || 'A').charCodeAt(0)) + 1)
+    return json({ summary: `Doubled each cost in column ${to}`, sheet, cells: Object.fromEntries([[`${to}1`, 'Doubled'], ...cells.filter((c) => c.r > 1).map((c) => [`${to}${c.r}`, `=B${c.r}*2`])]) })
+  }
+  if (/Clean up the values/.test(text)) {
+    const fixed = cells.filter((c) => c.r > 1).map((c) => [`${cols[0]}${c.r}`, c.v[0], c.v[0].trim().replace(/\s+/g, ' ').replace(/^./, (x) => x.toUpperCase())]).filter((x) => x[1] !== x[2])
+    return json({ summary: `Trimmed and capitalised ${fixed.length} names`, sheet, cells: Object.fromEntries(fixed.map((x) => [x[0], x[2]])) })
+  }
+  if (/^Summarise the cells/m.test(text) || /Summarise the cells I picked/.test(text)) {
+    const nums = cells.flatMap((c) => c.v.map(Number).filter((n) => Number.isFinite(n) && n !== 0))
+    return json({ summary: 'A summary of the cells picked', answer: `${nums.length} numbers come to ${nums.reduce((a, n) => a + n, 0)}; the highest is ${Math.max(...nums)}.` })
+  }
+  if (/Make a chart/.test(text)) return json({ summary: 'A column chart of the costs', chart: { type: 'column', title: 'Costs', range: where } })
+  return json({ summary: 'Nothing to do', answer: 'echo' })
 }
 
 function answer(b) {
@@ -75,6 +118,21 @@ function answer(b) {
     if (/\blocal\b/i.test(first) && m.filter((x) => x.role === 'user').length === 1) return say('{"nodes": "a load balancer and a server"}')
     if (/aws|3-tier|\blocal\b/i.test(first)) return say(`\`\`\`json\n${JSON.stringify(ARCH)}\n\`\`\``)
     if (/office network/i.test(first)) return say(JSON.stringify(NET))
+    if (/Make it a timeline/.test(first)) return say(JSON.stringify(TIMELINE))
+    if (/Make it the action items for each person/.test(first)) return say(JSON.stringify(ACTIONS))
+  }
+  // A board written up as a document: its name as the title, what it was sent, and a next step.
+  const board = /^Write a document from the whiteboard "([^"]+)"/.exec(first)
+  if (board) {
+    const lines = (/"""\n([\s\S]*?)\n"""/.exec(first)?.[1] || '').split('\n')
+    return say(['```markdown', `# ${board[1]}`, '', '## What the board shows', '', ...lines, '', '## Next', '', '- **Priya** fixes the login bug by Friday.', '```'].join('\n'))
+  }
+  // Group by theme: pricing notes, sign-in notes, and the rest as the team's.
+  if (/^Group these notes from a whiteboard by theme/.test(first)) {
+    const notes = JSON.parse(/The notes, as JSON:\n(\[.*\])\n/.exec(first)?.[1] || '[]')
+    const of = (re) => notes.filter((x) => re.test(x.text)).map((x) => x.id)
+    const pricing = of(/pric|plan|cheap/i), signin = of(/login|sign-in/i)
+    return say(JSON.stringify({ groups: [{ theme: 'Pricing', ids: pricing }, { theme: 'Sign-in', ids: signin }, { theme: 'Team', ids: notes.map((x) => x.id).filter((id) => !pricing.includes(id) && !signin.includes(id)) }] }))
   }
   if (/^You drew a diagram for:/.test(first)) {
     const spec = JSON.parse(/Your diagram, as JSON:\n(\{.*\})\n/.exec(first)?.[1] || '{}')
@@ -85,11 +143,19 @@ function answer(b) {
     return say(JSON.stringify({ ok: false, ...spec, changes: [`Labelled the arrow from ${name(bare.from)} to ${name(bare.to)} with HTTP, so it says what goes along it.`] }))
   }
   if (/^You changed this diagram as asked:/.test(first)) return say('{"ok":true}')
+  // Ask about these: the shapes it was sent, named in quotes, and whether it had a picture.
+  if (/^A question about /.test(first)) {
+    const scene = JSON.parse(/as JSON[^\n]*:\n(\{.*\})\n/.exec(first)?.[1] || '{}')
+    const shapes = (scene.shapes || []).filter((s) => s.text)
+    const saw = m.find((x) => x.role === 'user' && Array.isArray(x.content) && x.content.some((p) => p.image_url))
+    return say(JSON.stringify({ answer: `${shapes.length === 1 ? 'One shape' : `${shapes.length} shapes`}: ${shapes.map((s) => `"${s.text}"`).join(', ')}. Nothing between them is missing.${saw ? ' I looked at the picture too.' : ''}`, shapes: shapes.map((s) => s.id) }))
+  }
   // AI Assist's Sign this, "What you're signing": a mutual NDA, in the shape it asks for.
   if (/^Explain this document, which I have been asked to sign\./.test(first)) {
     return say(`\`\`\`json\n${JSON.stringify({ kind: 'Mutual NDA', what: 'Two companies agree to keep what they share with each other secret for two years.', parties: [{ name: 'Northwind Labs', role: 'shares and receives' }, { name: 'Contoso Ltd', role: 'shares and receives' }], money: ['A fee of $1,200 a year, paid by Contoso Ltd'], dates: ['Starts on signing; lasts two years'], obligations: ['Keep the other side\'s information secret', 'Return or destroy it when asked'], renewal: 'It renews by itself every year unless either side says no 30 days before.', termination: 'Either side can end it with 30 days\' notice.', watch: [{ what: 'It renews by itself unless you say no in time.', page: 1, quote: 'renews automatically' }] })}\n\`\`\``)
   }
   if (/^Suggest how to organize this folder\./.test(first)) return say(filesPlan(first))
+  if (/^In the spreadsheet /.test(first)) return say(sheetChange(first))
   const tail = m.at(-1)
   const file = /EDIT (\S+)/.exec(last)?.[1]
   if (b.tools && file && tail.role === 'user') return call(`r${m.length}`, 'read_file', { path: file })
@@ -99,6 +165,14 @@ function answer(b) {
     if (asked === 'read_file') return call(`e${m.length}`, 'edit_file', { path: file, old_text: 'hello', new_text: 'hello world' })
     if (asked === 'edit_file') return call(`x${m.length}`, 'run_command', { command: `cat ${file}` })
     if (asked === 'run_command') return say(`All done: ${tail.content.replace(/\n/g, ' | ')}`)
+  }
+  const asked = /^Request: ([^\n]*)\n\nThe commented words:\n"""\n([\s\S]*?)\n"""/.exec(last)
+  if (asked) {
+    const [, req, w] = asked
+    if (/\?\s*$/.test(req)) return say(JSON.stringify({ reply: `It's about ${w.split(/\s+/).length} words on what the team worked on.`, change: null }))
+    const cut = w.split(/[:.]/)[0].trim()
+    if (/shorter|shorten/i.test(req)) return say('```json\n' + JSON.stringify({ reply: 'Cut it to its first part: what comes after repeats what the paragraph already says.', change: cut === w.trim() ? cut.split(/\s+/).slice(0, -1).join(' ') : `${cut}.` }) + '\n```')
+    return say(JSON.stringify({ reply: 'Fixed the spelling.', change: w.replace(/\bteh\b/g, 'the') }))
   }
   const edit = /^Instruction: [\s\S]*?\n\nText:\n([\s\S]*)$/.exec(last)
   if (edit) { const t = edit[1].replace(/\bteh\b/g, 'the'); return say('```\n"' + t.charAt(0).toUpperCase() + t.slice(1) + '"\n```') }
@@ -154,7 +228,7 @@ function answer(b) {
   // Studio's decks: a deck (from what it's about, or a document's words: its first line becomes the
   // title), slide n rewritten as big numbers, a new slide of next steps.
   if (/^Write a slide deck(: | from the document)/m.test(last)) {
-    const doc = /The document \([^)]*\), to make it from:\n"""\n([^\n]+)/.exec(last)?.[1]
+    const doc = /The document \([^)]*\), to make it from:\n"""\n(?:- )?([^\n]+)/.exec(last)?.[1]
     const title = (doc || /^Write a slide deck: (.+?)\.?$/m.exec(last)?.[1] || 'A deck').slice(0, 40)
     return say(['```markdown', '<!-- _class: title -->', '', `# ${title}`, '', '## Written for the test', '', '---', '', '# Why now', '', '- Customers asked', '- It is ready', '', '<!-- Say why -->', '', '---', '', '<!-- _class: stats -->', '', '# What changed', '', '- **42%** of trials convert', '- **3x** more seats', '', '---', '', '<!-- _class: section -->', '', '# Next', '```'].join('\n'))
   }
@@ -243,7 +317,8 @@ http.createServer((req, res) => {
       log({ model: b.model, tools: (b.tools || []).map((t) => t.function.name), messages: b.messages, ...(b.response_format ? { format: b.response_format.type } : {}) })
       const said = dictated(words([...(b.messages || [])].reverse().find((x) => x.role === 'user')?.content)) || ''
       if (/fail on purpose/i.test(said)) return j(500, { error: { message: 'The server had an error while processing your request.' } })
-      return setTimeout(() => j(200, answer(b)), /take your time/i.test(said) ? 8000 : 300)
+      const slow = /^Request: [^\n]*\bslowly\b/.test(words([...(b.messages || [])].reverse().find((x) => x.role === 'user')?.content))
+      return setTimeout(() => j(200, answer(b)), /take your time/i.test(said) ? 8000 : slow ? 2500 : 300)
     }
     j(404, { error: { message: 'not found' } })
   })

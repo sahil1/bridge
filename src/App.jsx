@@ -322,7 +322,8 @@ function App() {
   const toReview = (ny.data?.items || []).filter((i) => (i.type === 'review' || i.type === 'failed') && i.online && (i.machine || null) === (machineId || null) && !isQuiet(i)).length
   const homeCount = useHome(homeOn && !cloudOnly, 12000)
   const homeNeeds = homeOn && homeCount.data ? needCount(homeCount.data) : null
-  const needN = homeNeeds ? homeNeeds.here : needsYou.length
+  // And what other apps ask of you here (Bridge AI as an MCP Server), on this computer's window.
+  const needN = homeNeeds ? homeNeeds.here : needsYou.length + (machineId ? 0 : ny.data?.outside?.length || 0)
   const needElse = homeNeeds ? homeNeeds.elsewhere : waiting - needsYou.length
 
   // herdr sessions each have their own agents (and number panes alike), so each keeps its own open

@@ -2,10 +2,10 @@
 // editors open) in ~/.bridge-ai/boards, one file per board, named as the board is. The page draws
 // them (src/components/whiteboard); this keeps the files and asks a model to draw or change one.
 //
-// A model is only asked when you press Draw or Change (and for each round of Refine), and it's the
-// one you picked or the one meeting notes use (your sign-in to an agent, a key, a model on this
+// A model is only asked when you press Draw, Change or Ask (and for each round of Refine), and it's
+// the one you picked or the one meeting notes use (your sign-in to an agent, a key, a model on this
 // computer): what's sent is your words, the shapes and words on the board (and a picture of it,
-// for Refine with a model that can see), the meeting, project or agent's work you chose to draw
+// for Refine and Ask with a model that can see), the meeting, project or agent's work you chose to draw
 // from, and what the whiteboard has learnt you like (preferences.json). Nothing else leaves the
 // computer.
 //
@@ -30,6 +30,7 @@ import * as meetings from './meetings.js'
 import * as projects from './projects.js'
 import { gitReady } from './gitready.js'
 import { readSpec, SCHEMA } from '../shared/whiteboard/spec.js'
+import { deckAsk, deckAnswer } from './studio.js'
 import { SETS, ITEMS, shapesFor, CONTAINER_KINDS } from '../shared/whiteboard/catalog.js'
 
 const EXT = '.excalidraw'
@@ -95,6 +96,9 @@ function sourceOf(s) {
   }
   return { kind, text }
 }
+// Whether a diagram can be handed over, before it's kept for later (an outside app's suggestion,
+// mcptools.js): throws why not.
+export const checkSource = sourceOf
 
 // ---------- The boards ----------
 export async function list() {
@@ -145,8 +149,10 @@ export async function create({ title, source } = {}) {
 
 // Saved from the page: the whole file, and the small picture the list shows. mtime is what the page
 // loaded or last saved; a different one on disk means something else (an agent, the chief of staff,
-// another window) wrote it since, and the page asks before overwriting (force).
-export async function save(id, { text, mtime, force = false, preview } = {}) {
+// another window) wrote it since, and the page asks before overwriting (force). What was there is
+// kept as a version first when it's from before a break, or when this save is an AI Assist change
+// (version: { by: 'ai', label }).
+export async function save(id, { text, mtime, force = false, preview, version } = {}) {
   const file = fileOf(id)
   if (typeof text !== 'string') throw new Error('Expected the drawing')
   if (Buffer.byteLength(text) > MAX_BOARD) throw new Error('This whiteboard is too big to save (40 MB at most): take a picture or two out')
@@ -156,6 +162,8 @@ export async function save(id, { text, mtime, force = false, preview } = {}) {
   const st = await fsp.stat(file).catch(() => null)
   if (!st) throw Object.assign(new Error('No such whiteboard'), { status: 404 })
   if (!force && mtime != null && Math.abs(st.mtimeMs - Number(mtime)) > 1) throw Object.assign(new Error('This whiteboard was changed somewhere else since you opened it'), { status: 409, conflict: true })
+  const ai = version?.by === 'ai'
+  if (ai || Date.now() - st.mtimeMs >= BREAK_MS) await keepVersion(id, ai ? { by: 'ai', label: version.label } : { by: 'you' }).catch(() => {})
   await writeWhole(file, text)
   if (typeof preview === 'string' && /^data:image\/png;base64,/.test(preview) && preview.length < 3_000_000) {
     await writeWhole(path.join(previews(), `${id}.png`), Buffer.from(preview.split(',')[1], 'base64')).catch(() => {})
@@ -163,9 +171,78 @@ export async function save(id, { text, mtime, force = false, preview } = {}) {
   return stat(id)
 }
 
-// The same file under its new name, with its picture and its rounds of Refine. A change of capitals
-// only ("roadmap" to "Roadmap") is the same name to macOS and Windows, so it isn't taken as one in
-// use.
+// ---------- Versions ----------
+// A board's earlier states, to look at (as the small picture it had) and put back, as Studio keeps
+// a file's: the board as you left it, kept when you come back to it after a break (a save more
+// than BREAK_MS after the last); as it was before each AI Assist change, named for the change; and
+// as it was before a version was put back. Each a copy of the file and its picture, in
+// .versions/<board> beside the boards, newest first, KEEP_VERSIONS at most.
+const BREAK_MS = 5 * 60_000
+const KEEP_VERSIONS = 40
+const versionsDir = (id) => path.join(folder(), '.versions', id)
+const inVersions = new Map() // a board -> its last change to its versions, so they go one at a time
+const oneAtATime = (id, fn) => {
+  const run = (inVersions.get(id) || Promise.resolve()).then(fn)
+  const tail = run.catch(() => {})
+  inVersions.set(id, tail)
+  tail.then(() => { if (inVersions.get(id) === tail) inVersions.delete(id) })
+  return run
+}
+async function readVersions(id) {
+  try { return JSON.parse(await fsp.readFile(path.join(versionsDir(id), 'index.json'), 'utf8')).versions || [] } catch { return [] }
+}
+// The board as it is on disk now, kept as a version: not an empty one, nor the same file as the
+// newest (by its time and size).
+function keepVersion(id, { by = 'you', label = null } = {}) {
+  return oneAtATime(id, async () => {
+    const file = fileOf(id)
+    const st = await fsp.stat(file).catch(() => null)
+    if (!st || st.size < 400) return null
+    const list = await readVersions(id)
+    if (list[0] && list[0].from === st.mtimeMs && list[0].size === st.size) return list[0]
+    const dir = versionsDir(id)
+    await fsp.mkdir(dir, { recursive: true })
+    const vid = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+    await fsp.copyFile(file, path.join(dir, `${vid}${EXT}`))
+    const picture = await fsp.copyFile(path.join(previews(), `${id}.png`), path.join(dir, `${vid}.png`)).then(() => true, () => false)
+    const v = { id: vid, at: new Date(st.mtimeMs).toISOString(), by, ...(label ? { label: String(label).slice(0, 120) } : {}), size: st.size, from: st.mtimeMs, picture }
+    const next = [v, ...list]
+    const gone = next.splice(KEEP_VERSIONS)
+    await writeWhole(path.join(dir, 'index.json'), JSON.stringify({ versions: next }, null, 1))
+    for (const o of gone) for (const f of [`${o.id}${EXT}`, `${o.id}.png`]) await fsp.rm(path.join(dir, f), { force: true }).catch(() => {})
+    return v
+  })
+}
+export async function versions(id) {
+  fileOf(id)
+  return { versions: (await readVersions(id)).map(({ id: vid, at, by, label, size, picture }) => ({ id: vid, at, by, label: label || null, size, picture: !!picture })) }
+}
+const versionOf = async (id, vid) => {
+  fileOf(id)
+  const v = (await readVersions(id)).find((x) => x.id === String(vid))
+  if (!v) throw Object.assign(new Error('No such version of this whiteboard'), { status: 404 })
+  return v
+}
+export async function versionPicture(id, vid) {
+  const v = await versionOf(id, vid)
+  const p = path.join(versionsDir(id), `${v.id}.png`)
+  if (!(await exists(p))) throw Object.assign(new Error('No picture of that version'), { status: 404 })
+  return p
+}
+// A version put back: the board as it is now kept first (so this can be undone too), then the
+// version's file and picture in its place.
+export async function restoreVersion(id, vid) {
+  const v = await versionOf(id, vid)
+  const text = await fsp.readFile(path.join(versionsDir(id), `${v.id}${EXT}`), 'utf8')
+  await keepVersion(id, { by: 'restored' })
+  await writeWhole(fileOf(id), text)
+  await fsp.copyFile(path.join(versionsDir(id), `${v.id}.png`), path.join(previews(), `${id}.png`)).catch(() => {})
+  return stat(id)
+}
+
+// The same file under its new name, with its picture, its rounds of Refine and its versions. A
+// change of capitals only ("roadmap" to "Roadmap") is the same name to macOS and Windows, so it
+// isn't taken as one in use.
 export async function rename(id, title) {
   const from = fileOf(id)
   if (!(await exists(from))) throw Object.assign(new Error('No such whiteboard'), { status: 404 })
@@ -181,11 +258,12 @@ export async function rename(id, title) {
   await move(from, fileOf(to))
   await move(path.join(previews(), `${id}.png`), path.join(previews(), `${to}.png`)).catch(() => {})
   await move(path.join(roundsDir(), `${id}.json`), path.join(roundsDir(), `${to}.json`)).catch(() => {})
+  await move(versionsDir(id), versionsDir(to)).catch(() => {})
   return stat(to)
 }
 
 // Out of the list, into .trash in the same folder (with the time, so two of the same name both
-// stay), where it can be found again.
+// stay), where it can be found again. Its versions go, so a new board of its name starts afresh.
 export async function remove(id) {
   const from = fileOf(id)
   if (!(await exists(from))) throw Object.assign(new Error('No such whiteboard'), { status: 404 })
@@ -193,6 +271,7 @@ export async function remove(id) {
   await fsp.rename(from, path.join(trash(), `${id} ${new Date().toISOString().replace(/[:.]/g, '-')}${EXT}`))
   await fsp.rm(path.join(previews(), `${id}.png`), { force: true })
   await fsp.rm(path.join(roundsDir(), `${id}.json`), { force: true })
+  await fsp.rm(versionsDir(id), { recursive: true, force: true })
   return { ok: true }
 }
 
@@ -202,6 +281,7 @@ export async function update(id, { source, mode = 'replace' } = {}) {
   const src = sourceOf(source)
   if (!src) throw new Error('Give the diagram as Mermaid, draw.io or Excalidraw')
   const b = await readBoard(id)
+  await keepVersion(id, { by: 'agent' }).catch(() => {})
   const data = src.kind === 'excalidraw' && mode === 'replace' ? src.data
     : { ...b.data, bridge: { ...(b.data.bridge || {}), pending: { kind: src.kind, mode: mode === 'add' ? 'add' : 'replace', at: new Date().toISOString(), ...(src.kind === 'excalidraw' ? { elements: src.data.elements, files: src.data.files || {} } : { text: src.text }) } } }
   await writeWhole(fileOf(id), JSON.stringify(data))
@@ -304,6 +384,8 @@ const KIND_ASK = {
   sequence: 'Make it a sequence diagram (sequenceDiagram): who sends what to whom, in order.',
   org: 'Make it an org chart, top to bottom: one box per person or team, "Name, role" when there is a role, managers above the people they lead.',
   mindmap: 'Make it a mind map, left to right: the main idea first, its branches after it.',
+  timeline: 'Make it a timeline, left to right ("direction": "LR"): one node per milestone or step, in date order, each joined to the next by an edge. Label each node "What · who · when", with the owner and the date as they were given; leave out either one when it isn\'t known. Groups only for phases, when there are clear ones.',
+  actions: 'Make it the action items for each person: one group per person (kind "group", labelled with their name), and in each one node per thing they are to do (shape "note"), labelled "What to do · when", leaving the date out when none was given. No edges. Only real action items, who does what, from what you were given; none made up.',
 }
 const RULES = [
   'Answer with one Mermaid diagram in a ```mermaid block and nothing else.',
@@ -318,7 +400,7 @@ const clip = (s, n) => { s = String(s || ''); return s.length > n ? `${s.slice(0
 // The shape sets a drawing needs: boxes for a flowchart, icons and containers for an
 // architecture or a network, and a cloud's own when it's named (or the user prefers it).
 export function setsFor(kind, words = '', prefer = null) {
-  const sets = kind === 'flowchart' || kind === 'org' || kind === 'mindmap' ? ['flowchart'] : kind === 'architecture' || kind === 'network' ? ['network', 'containers'] : ['flowchart', 'network', 'containers']
+  const sets = kind === 'flowchart' || kind === 'org' || kind === 'mindmap' ? ['flowchart'] : kind === 'architecture' || kind === 'network' ? ['network', 'containers'] : kind === 'timeline' || kind === 'actions' ? ['flowchart', 'containers'] : ['flowchart', 'network', 'containers']
   const w = String(words || '')
   if (/\baws\b|amazon|\bec2\b|\bs3\b|lambda|\brds\b|dynamo|cloudfront|route ?53/i.test(w) || prefer === 'aws') sets.push('aws')
   if (/azure|microsoft cloud|\baks\b|cosmos ?db/i.test(w) || prefer === 'azure') sets.push('azure')
@@ -329,6 +411,19 @@ export function setsFor(kind, words = '', prefer = null) {
 // What the diagram is drawn from, besides your words. Each says what it is, for the prompt. n: how
 // much of it to send at most (shareFor).
 async function context(from = {}, n = 1) {
+  // The board itself (a timeline or the action items from its notes): its words, as the page sent
+  // them (src/components/whiteboard/convert.js describe).
+  if (from.board) {
+    const s = sceneOf(from.board, n < 1)
+    const name = new Map(s.shapes.map((x) => [x.id, String(x.text || '')]))
+    const lines = [
+      ...s.shapes.filter((x) => x.text).map((x) => `- ${x.text}`),
+      ...s.texts.filter((x) => x.text).map((x) => `- ${x.text}`),
+      ...s.arrows.filter((a) => name.get(a.from) && name.get(a.to)).map((a) => `- ${name.get(a.from)} -> ${name.get(a.to)}${a.text ? ` (${a.text})` : ''}`),
+    ]
+    if (!lines.length) throw new Error('There\'s nothing written on this board to draw from yet')
+    return { label: 'the notes on the whiteboard', text: `What's on the whiteboard now: its notes and shapes, and the arrows between them.\n${clip(lines.join('\n'), 30_000 * n)}` }
+  }
   if (from.meeting) {
     const m = meetings.get(String(from.meeting))
     const body = m.summary?.trim() ? `Its notes:\n${clip(m.summary, 20_000 * n)}` : `What was said:\n${clip(meetings.transcriptText(m.id), 30_000 * n)}`
@@ -492,6 +587,121 @@ export async function change({ prompt, scene, model, selected = false } = {}) {
   return { ops: r.got.ops, model: r.model, calls: r.calls }
 }
 
+// ---------- Ask about these ----------
+// A question about the shapes selected (or the whole board), answered in a few sentences that name
+// the shapes it's about by their words, with their ids for the page to point at. A model that can
+// see gets a picture of them too. Nothing on the board changes.
+const ASK_SCHEMA = { type: 'object', properties: { answer: { type: 'string' }, shapes: { type: 'array', items: { type: 'string' } } }, required: ['answer'] }
+export async function askAbout({ prompt, scene, selected = false, image, model } = {}) {
+  const words = String(prompt || '').trim()
+  if (!words) throw new Error('Say what to ask')
+  const use = model || await helpers.pickModel?.()
+  if (!use) throw Object.assign(new Error('No model to ask yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers'), { code: 'noModel' })
+  const s = sceneOf(scene, (await shareFor(use)).small)
+  if (!s.shapes.length && !s.arrows.length && !s.texts.length) throw new Error('There\'s nothing there to ask about: select some shapes first')
+  const sees = typeof image === 'string' && /^data:image\/png;base64,/.test(image) && image.length < 8_000_000 && await helpers.canSee(use).catch(() => false)
+  const text = [
+    `A question about ${selected ? 'part of a diagram on a whiteboard (the shapes selected)' : 'a diagram on a whiteboard'}: ${words.slice(0, 4000)}`,
+    '',
+    `The ${selected ? 'shapes selected' : 'diagram'}, as JSON (each shape with its id and its words; each arrow with the ids it joins):`,
+    JSON.stringify(s),
+    sees ? 'A picture of it as drawn is attached.' : '',
+    '',
+    'Answer from what is there, in a few short sentences, naming each shape you mean by its words in quotes. Say so when the answer isn\'t on the board.',
+    'Answer with JSON only: {"answer": "your answer", "shapes": ["the id of each shape your answer names"]}',
+  ].filter((x) => x !== null).join('\n').replace(/\n{3,}/g, '\n\n')
+  const ids = new Set([...s.shapes, ...s.arrows, ...s.texts].map((x) => String(x.id)))
+  // An answer in plain words, not the JSON asked for, is still an answer.
+  const read = (t) => {
+    const j = jsonIn(t)
+    if (j && typeof j.answer === 'string' && j.answer.trim()) return { answer: j.answer.trim(), shapes: arr(j.shapes).map(String).filter((id) => ids.has(id)).slice(0, 20) }
+    const plain = String(t || '').replace(/```[\s\S]*?```/g, '').trim()
+    return plain ? { answer: plain, shapes: [] } : { error: 'The answer was empty.' }
+  }
+  const r = await askChecked(use, text, 'You answer questions about diagrams on a whiteboard, briefly, from what is on it.', read, { json: ASK_SCHEMA, images: sees ? [image] : null })
+  return { answer: r.got.answer.slice(0, 4000), shapes: r.got.shapes, model: r.model, calls: r.calls, saw: sees ? 'picture' : 'words' }
+}
+
+// ---------- Group these notes by theme ----------
+// Which theme each note on the board (or each one selected) belongs to, for the page to gather
+// them in a box per theme (src/components/whiteboard/convert.js groupBy). Only the notes it was
+// sent, each in one group.
+const THEMES = { type: 'object', properties: { groups: { type: 'array', items: { type: 'object', properties: { theme: { type: 'string' }, ids: { type: 'array', items: { type: 'string' } } }, required: ['theme', 'ids'] } } }, required: ['groups'] }
+export async function themes({ scene, selected = false, model } = {}) {
+  const use = model || await helpers.pickModel?.()
+  if (!use) throw Object.assign(new Error('No model to group with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers'), { code: 'noModel' })
+  const s = sceneOf(scene, (await shareFor(use)).small)
+  const notes = [...s.shapes, ...s.texts].filter((x) => String(x.text || '').trim()).map((x) => ({ id: String(x.id), text: String(x.text).slice(0, 300) }))
+  if (notes.length < 2) throw new Error('Group by theme needs two notes or more with words on them')
+  const prompt = [
+    `Group these notes from a whiteboard by theme${selected ? ' (the ones selected)' : ''}.`,
+    'The notes, as JSON:',
+    JSON.stringify(notes),
+    '',
+    'Put each note in exactly one group: 2 to 8 groups, each with a short theme of a few words. Use only the ids above.',
+    'Answer with JSON only: {"groups": [{"theme": "the theme", "ids": ["the ids of its notes"]}]}',
+  ].join('\n')
+  const ids = new Set(notes.map((x) => x.id))
+  const read = (t) => {
+    const j = jsonIn(t)
+    const seen = new Set()
+    const take = (id) => ids.has(id) && !seen.has(id) && !!seen.add(id)
+    const groups = arr(j?.groups).map((g) => ({ theme: String(g?.theme || '').trim().slice(0, 60), ids: arr(g?.ids).map(String).filter(take) })).filter((g) => g.theme && g.ids.length).slice(0, 8)
+    return groups.length ? { groups } : { error: 'It had no groups of the notes it was sent.' }
+  }
+  const r = await askChecked(use, prompt, 'You sort notes from a whiteboard into themes, as JSON.', read, { json: THEMES })
+  return { groups: r.got.groups, model: r.model, calls: r.calls }
+}
+
+// ---------- A board written up ----------
+// Make a document or Make a deck: the board's words (wordsOf) written up by the board's model, as a
+// document in Markdown or a deck as Studio makes them (studio.js deckAsk), for the page to put in
+// Studio's own folder with a link back to the board. Only what's on the board.
+// What's on a board in words: each box with what's in it, the rest, and the arrows between them.
+// What a suggestion takes away (src/components/whiteboard/suggest.js) is left out.
+export function wordsOf(b) {
+  const d = describe((b.data.elements || []).filter((e) => e?.customData?.bridge?.suggestion?.kind !== 'remove'))
+  const name = new Map(d.shapes.map((s) => [s.id, s.text]))
+  const within = (s, c) => s.x >= c.x - 1 && s.y >= c.y - 1 && s.x + s.w <= c.x + c.w + 1 && s.y + s.h <= c.y + c.h + 1
+  const boxes = d.shapes.filter((s) => s.shape === 'container')
+  const held = new Set()
+  const lines = []
+  for (const c of boxes) {
+    const has = d.shapes.filter((s) => s.shape !== 'container' && s.text && within(s, c))
+    has.forEach((s) => held.add(s.id))
+    if (c.text || has.length) lines.push(`- ${c.text || 'A box'}: ${has.map((s) => s.text).join('; ') || '(nothing in it)'}`)
+  }
+  for (const s of d.shapes) if (s.shape !== 'container' && s.text && !held.has(s.id)) lines.push(`- ${s.text}`)
+  for (const t of d.texts) if (t.text) lines.push(`- ${t.text}`)
+  for (const a of d.arrows) if (name.get(a.from) && name.get(a.to)) lines.push(`- ${name.get(a.from)} -> ${name.get(a.to)}${a.text ? ` ("${a.text}")` : ''}`)
+  return lines.join('\n')
+}
+const DOC_SYSTEM = 'You turn whiteboards into clear, well-structured documents in Markdown. You answer with the Markdown and nothing else.'
+export async function writeUp(id, { as = 'doc', model } = {}) {
+  const b = await readBoard(id)
+  const use = model || await helpers.pickModel?.()
+  if (!use) throw Object.assign(new Error('No model to write with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers'), { code: 'noModel' })
+  const words = wordsOf(b)
+  if (!words) throw new Error('There\'s nothing written on this board to make it from yet')
+  const source = clip(words, Math.round(30_000 * (await shareFor(use)).n))
+  if (as === 'deck') {
+    const q = deckAsk({ mode: 'deck', prompt: `the whiteboard "${b.title}"`, source, sourceName: `the whiteboard "${b.title}"` })
+    const r = await ask(use, [{ role: 'user', text: q.prompt }], q.system)
+    return { title: b.title, slides: deckAnswer(r.text).slides, model: r.model }
+  }
+  const prompt = [
+    `Write a document from the whiteboard "${b.title}". What's on it (each box with what's in it, then the rest, then the arrows between them):`,
+    `"""\n${source}\n"""`,
+    '',
+    'A title as "# …", then sections as "## …", with short paragraphs and bullet lists: what the board is about, its parts and how they connect, what was decided, and who does what and by when where the board says. Only what\'s on the board; nothing made up. Answer with the Markdown only.',
+  ].join('\n')
+  const r = await ask(use, [{ role: 'user', text: prompt }], DOC_SYSTEM)
+  let md = r.text.replace(/^```(?:markdown|md)?[ \t]*\n([\s\S]*?)\n```$/, '$1').trim()
+  if (!md) throw new Error('The model sent back nothing. Try again, or pick another model.')
+  if (!/^#\s/.test(md)) md = `# ${b.title}\n\n${md}`
+  return { title: b.title, markdown: md, model: r.model }
+}
+
 // ---------- Refine ----------
 // One round of a model looking over what it drew and making it better. The page draws the result
 // and checks it (src/components/whiteboard/review.js), and sends what the check found, and a
@@ -645,6 +855,8 @@ export function routes(app, { wrap, onComputer, counted }) {
   app.post('/api/boards/draw', route((req) => { counted?.('whiteboards.drawn'); return draw(req.body || {}) }))
   app.post('/api/boards/change', route((req) => change(req.body || {})))
   app.post('/api/boards/review', route((req) => review(req.body || {})))
+  app.post('/api/boards/ask', route((req) => askAbout(req.body || {})))
+  app.post('/api/boards/themes', route((req) => themes(req.body || {})))
   app.get('/api/boards/shapes', wrap(() => ({ text: shapesText() })))
   // Whether the model can look at a picture of the board (Refine sends one only then).
   app.get('/api/boards/sees', wrap(async (req) => ({ sees: !!(await helpers.canSee(String(req.query.model || '') || await helpers.pickModel?.()).catch(() => false)) })))
@@ -657,6 +869,10 @@ export function routes(app, { wrap, onComputer, counted }) {
   app.get('/api/boards/:id/text', route(async (req) => ({ text: sayBoard(await read(req.params.id)) })))
   app.get('/api/boards/:id/rounds', route((req) => rounds(req.params.id)))
   app.put('/api/boards/:id/rounds', route((req) => saveRounds(req.params.id, req.body || {})))
+  app.post('/api/boards/:id/write', route((req) => writeUp(req.params.id, req.body || {})))
+  app.get('/api/boards/:id/versions', route((req) => versions(req.params.id)))
+  app.get('/api/boards/:id/versions/:vid/picture', async (req, res) => { try { res.set('Cache-Control', 'no-cache'); res.sendFile(await versionPicture(req.params.id, req.params.vid), { dotfiles: 'allow' }) } catch (e) { fail(res, e) } })
+  app.post('/api/boards/:id/versions/:vid/restore', route((req) => restoreVersion(req.params.id, req.params.vid)))
   // dotfiles: the boards live in a dot folder (~/.bridge-ai), which sendFile otherwise won't serve from.
   app.get('/api/boards/:id/preview', async (req, res) => { try { res.set('Cache-Control', 'no-cache'); res.sendFile(await previewFile(req.params.id), { dotfiles: 'allow' }) } catch (e) { fail(res, e) } })
   app.put('/api/boards/:id', route((req) => save(req.params.id, req.body || {})))

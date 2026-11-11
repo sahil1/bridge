@@ -139,10 +139,12 @@ const kitWith = async (name, rel) => {
   return k
 }
 // A request to Studio's server as a browser would make it: at port (Studio's own, or a computer's
-// there), the rest of the headers as given. { status, headers, body }.
+// there), with Studio's cookie (as a window of Studio's, or a browser let in, has it), the rest of
+// the headers as given. { status, headers, body }.
 const ask = (k, p, { method = 'GET', port: at = null, headers = {}, body = null } = {}) => new Promise((resolve, reject) => {
   const to = at || new URL(k.url).port
-  const r = http.request({ host: '127.0.0.1', port: to, path: p, method, headers: { host: `127.0.0.1:${to}`, ...(body ? { 'content-type': 'application/json' } : {}), ...headers } }, (res) => {
+  const c = k.cookie
+  const r = http.request({ host: '127.0.0.1', port: to, path: p, method, headers: { host: `127.0.0.1:${to}`, cookie: `${c.name}=${c.value}`, ...(body ? { 'content-type': 'application/json' } : {}), ...headers } }, (res) => {
     let s = ''
     res.on('data', (c) => { s += c })
     res.on('end', () => { let j = null; try { j = JSON.parse(s) } catch { /* not JSON */ } resolve({ status: res.statusCode, headers: res.headers, body: j, text: s }) })
@@ -268,7 +270,7 @@ try {
     const site = await ask(studio, `/m/${deskM.id}/api/config`, { headers: { 'sec-fetch-site': 'cross-site' } })
     ok(site.status === 403, 'another site can\'t reach Desk\'s API through Studio', site.body)
     const ws = (at, p) => new Promise((resolve) => {
-      const s = new WebSocket(`ws://127.0.0.1:${at}${p}`, { headers: { origin: `http://127.0.0.1:${at}` } })
+      const s = new WebSocket(`ws://127.0.0.1:${at}${p}`, { headers: { origin: `http://127.0.0.1:${at}`, cookie: `${studio.cookie.name}=${studio.cookie.value}` } })
       s.on('open', () => { s.close(); resolve('open') })
       s.on('unexpected-response', (_q, r) => resolve(r.statusCode))
       s.on('error', () => resolve('error'))

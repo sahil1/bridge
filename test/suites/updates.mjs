@@ -919,7 +919,13 @@ try {
       const ctx = await cold.newContext({ viewport: { width: 1440, height: 900 } })
       const p = await ctx.newPage()
       await p.goto(`${fresh.url}/?early=${encodeURIComponent(kim)}`)
-      const filled = await until(async () => (await early(p).locator('input').inputValue().catch(() => '')) === kim, 15000)
+      // A browser never let in says how to get in (server/apiauth.js); let in by the app's one-time
+      // link in a tab of its own (View › Open in Browser), it opens the tester's link by itself.
+      ok(/Open Bridge AI from the app/.test(await p.locator('body').innerText().catch(() => '')), 'a browser never let in: the tester\'s link says how to get in first')
+      const tab = await ctx.newPage()
+      await tab.goto((await fresh.api('/browser-link', {})).url)
+      await tab.close()
+      const filled = await until(async () => (await early(p).locator('input').inputValue().catch(() => '')) === kim, 20000)
       ok(!!filled && (await p.locator('.wiz').count()) === 1 && !/early=/.test(await p.evaluate(() => location.href)), 'a cold first load from a tester\'s link, before setup: the code kept and filled in, and taken off the address', { filled: !!filled, wizard: await p.locator('.wiz').count(), at: await p.evaluate(() => location.href) })
       await cold.close()
     }

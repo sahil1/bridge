@@ -2,12 +2,14 @@ import express from 'express'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { randomInt } from 'node:crypto'
+import { randomInt, randomUUID } from 'node:crypto'
 import { transcript, earlier, replyDiffs, markUndone, preview, locate, imageFrom } from './transcripts.js'
 import { listSubagents, runningFor, forgetExcept } from './subagents.js'
 import { ttyHandler } from './tty.js'
 import { attachHandler } from './attach.js'
 import { makeGuard } from './guard.js'
+import { makeAuth } from './apiauth.js'
+import { localKey } from './apitoken.js'
 import * as machinePages from './machinepages.js'
 import { usage } from './usage.js'
 import { usageStats } from './usagestats.js'
@@ -83,11 +85,15 @@ import * as studio from './studio.js'
 import * as signing from './signing.js'
 import * as doctext from './doctext.js'
 import * as studioFound from './studiofound.js'
+import * as commentAssist from './commentassist.js'
 import * as explorer from './explorer.js'
 import * as studioApps from './studioapps.js'
 import * as openIn from './openin.js'
 import { terminals, autoTerminal, openAttach, openCommand, opened as terminalOpened } from './terminal.js'
-import { mcpRoutes } from './mcp.js'
+import { mcpRoutes, bridgeMcp } from './mcp.js'
+import { make as makeMcpTools } from './mcptools.js'
+import { make as makeOutside } from './outside.js'
+import { makeMcp, connection, MODERN, LEGACY } from './mcpproto.js'
 import * as notify from './notify.js'
 import * as push from './push.js'
 import * as phone from './phone.js'
@@ -149,6 +155,12 @@ const macro = makeMacro()
 const news = makeNews(cfg)
 
 const guard = makeGuard(cfg, { tailnetOwner: phone.tailnetOwner })
+// The key every request needs besides (apiauth.js): in the data folder, made the first time. Through
+// Tailscale, you still get in without it while Tailscale publishes this server (Use on your phone),
+// as you did; the tests stand Tailscale in with BRIDGE_TAILNET_OWNER.
+localKey()
+let tailnetServed = !!process.env.BRIDGE_TAILNET_OWNER
+const auth = makeAuth({ port: cfg.port, token: localKey, ui: () => UI_DIR, viaTailnet: guard.viaTailnet, tailnetServed: () => tailnetServed })
 // Another of your computers' pages, each at a port of its own here, and what they may ask of this one.
 const pages = machinePages.make({
   port: cfg.port, host: cfg.host, thisName: () => relay.thisName(), linked: () => machines.list().filter((m) => m.state === 'linked'),
@@ -156,6 +168,7 @@ const pages = machinePages.make({
 })
 const app = express()
 app.use(guard.http)
+app.use(auth.http)
 app.use(pages.http)
 // Each request timed, for how Bridge AI itself is doing (perf.js).
 app.use(perf.timing)
@@ -172,6 +185,8 @@ const jsonBoard = express.json({ limit: '45mb' })
 const jsonStudio = express.json({ limit: '30mb' })
 const jsonDeckAi = express.json({ limit: '40mb' })
 const jsonFor = (req) => (req.method === 'PUT' && /^\/api\/agents\/[^/]+\/file$/.test(req.path) ? jsonFile
+  // An outside app's new file or suggestion, through MCP (mcptools.js takes up to 2 MB of text).
+  : /^\/(mcp|api\/mcp-server\/call)$/.test(req.path) ? jsonFile
   : /^\/api\/boards(\/|$)/.test(req.path) ? jsonBoard
   : req.method === 'POST' && /^\/api\/studio\/(new|picture)$/.test(req.path) ? jsonStudio
   : req.method === 'POST' && req.path === '/api/studio/deck/ai' ? jsonDeckAi
@@ -430,7 +445,7 @@ const rootOf = async (pane) => {
 // One that's no longer a beta stays in older configs, read by nothing (memory: Memory, now a page
 // for everyone). One can be on to start with (config.example.json's trials: Back and Forward), until
 // it's turned off.
-const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings']
+const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings', 'comments', 'mcp-server']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 const FILES_OFF = 'Files is a beta feature. Turn it on in Settings › About & Updates › Beta Features.'
@@ -608,6 +623,16 @@ app.post('/api/studio/rewrite', async (req, res) => {
     res.json({ ...out, model, by: d?.label || model })
   } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
 })
+// @bridge in a document's comment (Comments and @bridge, a beta feature): AI Assist's reply for
+// the thread and, when asked for, the words rewritten, by the model AI Assist uses for documents.
+app.post('/api/studio/comment-assist', trialOff('comments', 'Comments and @bridge'), async (req, res) => {
+  try {
+    const model = String(req.body?.model || '') || await studioModel()
+    const out = await commentAssist.assist({ ...req.body, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
+    const d = (await chatModels.models().catch(() => [])).find((x) => x.id === model)
+    res.json({ ...out, model, by: d?.label || model })
+  } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
+})
 // The change an agent asked in place wrote beside the file, taken once (studio.takeProposal).
 app.get('/api/studio/proposal', wrap(async (req) => { const q = sq(req); return studio.takeProposal(await rootOf(q.root), q.path) }))
 // Decks written by a model (the one meeting notes use, unless one's picked): a whole deck from what
@@ -623,6 +648,18 @@ app.post('/api/studio/deck/ai', wrap(async (req) => {
   const ask = studio.deckAsk({ mode, prompt: b.prompt, slides: Array.isArray(b.slides) ? b.slides.map(String) : [], at: b.at, source: source?.text, sourceName: source?.name, count: b.count })
   const r = await chatModels.reply(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, feature: 'studio' })
   return { ...studio.deckAnswer(r?.text), model: use }
+}))
+// A sheet's AI Assist (studio.sheetAsk): the cells picked and what to do with them, answered by
+// Studio's model (the one picked for it, else the one the app reaches first) as a change the page
+// shows on the sheet to keep or discard.
+app.post('/api/studio/sheet/ai', wrap(async (req) => {
+  const b = req.body || {}
+  const use = String(b.model || '') || await studioModel()
+  if (!use) throw Object.assign(new Error('No model to answer with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers.'), { code: 'noModel' })
+  const ask = studio.sheetAsk({ rel: sq(req).path, instruction: b.instruction, selection: b.selection, where: b.where, sheet: b.sheet, sheets: b.sheets, used: b.used })
+  const r = await chatModels.reply(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, json: studio.SHEET_SCHEMA, feature: 'studio' })
+  const d = (await chatModels.models().catch(() => [])).find((x) => x.id === use)
+  return { ...studio.sheetAnswer(r?.text), model: use, by: d?.label || String(use).split(':').slice(1).join(':') || use }
 }))
 // A picture put on a slide, saved beside the deck.
 app.post('/api/studio/picture', wrap(async (req) => { const q = sq(req); return studio.savePicture(await rootOf(q.root), q.path, req.body?.name, Buffer.from(String(req.body?.data || ''), 'base64')) }))
@@ -2428,7 +2465,7 @@ app.post('/api/system/stopping', wrap((req) => {
   return { ok: true }
 }))
 // Whether Tailscale publishes this computer decides, with the relay's phones, whether it stays awake.
-const tailnetSaid = (st) => { relay.setTailnet(!!st?.enabled); return st }
+const tailnetSaid = (st) => { relay.setTailnet(!!st?.enabled); tailnetServed = !!st?.enabled || !!process.env.BRIDGE_TAILNET_OWNER; return st }
 app.get('/api/phone', wrap(() => phone.status(cfg.port).then(tailnetSaid)))
 app.post('/api/phone', wrap((req) => (req.body?.enabled ? phone.enable(cfg.port) : phone.disable(cfg.port)).then(tailnetSaid)))
 // Your own relay (relay.js). Set up from the computer only: a phone using the relay can see it,
@@ -2529,8 +2566,19 @@ app.get('/api/needs-you', wrap(async (req) => {
   return {
     items: needsYou.order([...here, ...there]),
     devices: [{ id: null, name, online: true }, ...linked.map((m) => ({ id: m.id, name: m.name, online: !!m.online, lastSeen: m.lastSeen, at: m.at }))],
+    // What other apps ask of you through Bridge AI's MCP server, here: a change to keep or discard,
+    // a message for an agent to send or not (outside.js).
+    outside: outside.waiting().map((x) => ({ ...x, change: outsideView(x) })),
   }
 }))
+// What Needs You shows of an ask: the change itself, cut to what fits on its card.
+const outsideView = (x) => {
+  const c = x.change || {}
+  if (x.kind === 'send') return { message: String(c.message || '').slice(0, 4000) }
+  if (c.source) return { mode: c.mode, format: c.source.kind, diagram: String(c.source.text || '').slice(0, 4000) }
+  if (c.edits) return { edits: c.edits.slice(0, 20).map((e) => ({ find: String(e.find).slice(0, 1500), replace: String(e.replace).slice(0, 1500) })), more: Math.max(0, c.edits.length - 20) }
+  return { text: String(c.text || '').slice(0, 4000), cut: String(c.text || '').length > 4000 }
+}
 app.post('/api/needs-you/answer', wrap(async (req) => {
   const r = await waiting.answer(req.body || {})
   if (r.ok) { pushFleet(); touched(String(req.body?.paneId || '')) }
@@ -2560,6 +2608,8 @@ app.get('/api/home', trialOff('home', 'Home'), wrap(async (req) => {
     devices: [{ id: null, name, os: machines.OS, online: true, here: true }, ...linked.map((m) => ({ id: m.id, name: m.name, os: m.os, online: !!m.online, lastSeen: m.lastSeen, at: m.at, partial: !Array.isArray(m.home) }))],
     pins: homeList.pins(),
     layouts: homeList.layouts(),
+    // What other apps ask of you here, as in Needs You.
+    outside: outside.waiting().map((x) => ({ ...x, change: outsideView(x) })),
   }
 }))
 // Pin one to the top of Home, or unpin it: kept here, for every page and phone this computer serves.
@@ -2860,6 +2910,18 @@ async function servedUi() {
   Object.assign(uiNow, { at: Date.now(), id: entryOf(html) })
   return uiNow.id
 }
+// That Bridge AI is here, and which version: public, for a program to check before it has the key
+// (apiauth.js), or one with a key that's wrong.
+// in: this browser or program is let in (the page saying how to get in looks, to open by itself).
+app.get('/api/health', (req, res) => res.json({ ok: true, app: 'Bridge AI', version: VERSION, in: auth.allowed(req) }))
+// A one-time link that lets a browser on this computer in (apiauth.js): View › Open in Browser in
+// the desktop app, and `bridge-ai open`. to: where it lands ("/", "/?window=…").
+app.post('/api/browser-link', (req, res) => {
+  if (!fromHere(req)) return res.status(403).json({ error: 'Open Bridge AI in a browser from Bridge AI on your computer' })
+  res.json(auth.link({ to: req.body?.to, base: `http://127.0.0.1:${cfg.port}` }))
+})
+// The key an HTML preview's files load with from its sandbox (apiauth.js, Files.jsx).
+app.get('/api/agents/:pane/site-key', (req, res) => res.json({ key: auth.siteKey(req.params.pane) }))
 app.get('/api/version', async (req, res) => res.json({ version: VERSION, build: BUILD, bundled: !!process.versions.electron, pid: process.pid, ui: await servedUi(), computer: relay.thisName() }))
 
 app.get('/api/config', (req, res) => res.json({
@@ -3412,6 +3474,101 @@ app.delete('/api/llm', wrap(async () => { await llm.removeModel(); return llm.st
 providerRoutes(app, { cfg, installed })
 mcpRoutes(app, { cfg, installed })
 
+// ---------- Bridge AI as an MCP server (a beta feature) ----------
+// Other apps (Claude Code, Claude Desktop, Cursor, Codex) reach your boards, Studio files in your
+// Places and meeting summaries, through `bridge-ai mcp` (scripts/mcp.js), which asks here, or /mcp.
+// What they may do is decided here (mcptools.js); what they ask of you waits in Needs You
+// (outside.js). Sending to an agent only while you turn it on (mcpServer.sendToAgents).
+const mcpOn = () => trialOn('mcp-server')
+const outside = makeOutside({ apply: (it) => mcpTools.apply(it) })
+const mcpTools = makeMcpTools({
+  on: mcpOn, sendOn: () => cfg.mcpServer?.sendToAgents === true, boards, meetings, places, files, studio, doctext, tasks: chiefTasks, outside,
+  agents: async () => ((await fleetView().catch(() => null))?.agents || []).filter((a) => a.paneId && !a.shellTab && a.kind !== 'shell' && !a.cloud)
+    .map((a) => ({ paneId: a.paneId, name: needsYou.nameOf(a), kind: a.kindLabel || a.kind, status: a.status, folder: a.cwd ? path.basename(a.cwd) : null })),
+  // As a message from the app is: typed in now, or held until the agent is free.
+  deliver: (pane, text) => onPane(pane, async () => {
+    const agent = await findAgent(pane)
+    if (holdFor(pane, agent, text)) { queue.add(pane, text, {}); pushFleet(); return { queued: true } }
+    return sendPrompt(pane, text, agent)
+  }),
+})
+// Who's calling, as it says (shown, never trusted for anything).
+const mcpClient = (c, via) => ({ name: String(c?.name || 'an MCP client').slice(0, 80), version: String(c?.version || '').slice(0, 40), via })
+const mcpHere = (req, res, next) => (fromHere(req) ? next() : res.status(403).json({ error: 'Only on the computer Bridge AI runs on' }))
+app.get('/api/mcp-server/state', mcpHere, (req, res) => res.json(mcpTools.state()))
+app.post('/api/mcp-server/call', mcpHere, wrap(async (req) => ({ result: await mcpTools.call(String(req.body?.name || ''), req.body?.args || {}, mcpClient(req.body?.client, 'stdio')) })))
+app.get('/api/mcp-server/resources', mcpHere, wrap(async () => ({ resources: await mcpTools.resources() })))
+app.post('/api/mcp-server/read', mcpHere, async (req, res) => {
+  try {
+    const r = await mcpTools.read(String(req.body?.uri || ''), mcpClient(req.body?.client, 'stdio'))
+    if (!r) return res.status(404).json({ error: 'Resource not found' })
+    res.json(r)
+  } catch (e) { res.status(502).json({ error: e.message }) }
+})
+// For Settings › MCP Servers: on or off, sending to agents, the apps it can be added to (and
+// whether it is), how to add it by hand, and the latest calls.
+app.get('/api/mcp-server', wrap(async () => ({
+  ...mcpTools.state(), sendToAgents: cfg.mcpServer?.sendToAgents === true,
+  apps: await bridgeMcp.apps(installed), command: bridgeMcp.command(), http: `http://127.0.0.1:${cfg.port}/mcp`,
+  calls: outside.recent(25), clients: outside.clients(), waiting: outside.waiting().length,
+})))
+app.post('/api/mcp-server/add', wrap((req) => { onComputer(req); return bridgeMcp.add(String(req.body?.app || ''), installed) }))
+// What other apps asked of you, answered from Needs You: keep or send (yes), discard or don't (no).
+app.post('/api/outside/:id', async (req, res) => {
+  try { res.json(await outside.decide(req.params.id, req.body?.yes === true)) } catch (e) { res.status(e.status >= 400 && e.status < 500 ? e.status : 502).json({ error: e.message }) }
+})
+// /mcp: the same over HTTP, for an app that takes an address (Streamable HTTP, a JSON answer per
+// request). Only with Bridge AI's key as a bearer token, only at this computer's own address, never
+// from a page (any Origin is refused, as the protocol asks against DNS rebinding) nor through a
+// phone; and only while it's on.
+const mcpHttp = makeMcp({ version: VERSION, backend: {
+  state: async () => mcpTools.state(),
+  call: (name, args, client) => mcpTools.call(name, args, client),
+  resources: () => mcpTools.resources(),
+  read: (uri, client) => mcpTools.read(uri, client),
+} })
+const legacyHttp = new Map() // Mcp-Session-Id -> the client an initialize named (2025 clients)
+app.all('/mcp', async (req, res) => {
+  const no = (status, code, message, data) => res.status(status).json({ jsonrpc: '2.0', id: req.body?.id ?? null, error: { code, message, ...(data ? { data } : {}) } })
+  if (req.headers.origin) return no(403, -32600, 'Not from a web page')
+  if (!/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(req.headers.host || '') || req.headers['x-bridge-relay']) return no(403, -32600, 'Only at this computer\'s own address')
+  if (!/^Bearer\s+\S+/i.test(req.headers.authorization || '')) return res.status(401).set('WWW-Authenticate', 'Bearer').json({ error: 'Send Bridge AI\'s key as Authorization: Bearer <key> (it\'s in api-token in Bridge AI\'s data folder)' })
+  if (!mcpOn()) return no(404, -32600, 'Bridge AI as an MCP server is turned off (Settings › MCP Servers)')
+  if (req.method !== 'POST') return res.status(405).set('Allow', 'POST').json({ error: 'POST one JSON-RPC message' })
+  const msg = req.body
+  const asked = String(req.headers['mcp-protocol-version'] || '')
+  const inBody = msg?.params?._meta?.['io.modelcontextprotocol/protocolVersion']
+  const conn = connection({ via: 'http' })
+  // A 2025 client: initialize, then its version in the header; who it is from its initialize, by
+  // the session that answered (that era's only state).
+  if (msg?.method === 'initialize' || (LEGACY.includes(asked) && inBody === undefined)) {
+    conn.legacy = LEGACY.includes(asked) ? asked : null
+    conn.client = legacyHttp.get(String(req.headers['mcp-session-id'] || '')) || mcpClient(null, 'http')
+  } else {
+    // The new era: the version, the method and what it's for in headers too, agreeing with the
+    // message (so what passes it on can read them).
+    if (!asked) return no(400, -32020, 'Send the MCP-Protocol-Version header')
+    if (asked !== MODERN) return no(400, -32022, 'Unsupported protocol version', { supported: [MODERN, ...LEGACY], requested: asked })
+    if (inBody !== undefined && inBody !== asked) return no(400, -32020, 'MCP-Protocol-Version doesn\'t match the message')
+    if (msg?.id !== undefined) {
+      const header = (h) => { const v = String(req.headers[h] ?? ''); const b = /^=\?base64\?(.*)\?=$/.exec(v); return b ? Buffer.from(b[1], 'base64').toString('utf8') : v }
+      if (header('mcp-method') !== msg?.method) return no(400, -32020, 'Mcp-Method doesn\'t match the message')
+      const named = msg.method === 'tools/call' ? msg.params?.name : msg.method === 'resources/read' ? msg.params?.uri : undefined
+      if (named !== undefined && header('mcp-name') !== String(named)) return no(400, -32020, 'Mcp-Name doesn\'t match the message')
+    }
+  }
+  const out = await mcpHttp.handle(msg, conn)
+  if (msg?.method === 'initialize' && out?.result) {
+    const id = randomUUID()
+    legacyHttp.set(id, { ...conn.client, via: 'http' })
+    if (legacyHttp.size > 50) legacyHttp.delete(legacyHttp.keys().next().value)
+    res.set('Mcp-Session-Id', id)
+  }
+  if (!out) return res.status(202).end()
+  const c = out.error?.code
+  res.status(c === -32601 ? 404 : c === -32022 || (c === -32602 && /_meta|protocol version/i.test(out.error.message)) || c === -32600 ? 400 : 200).json(out)
+})
+
 // ---------- Whiteboards (boards.js) ----------
 // Home: a whiteboard you opened, saved, made or renamed here is yours as it is; one an agent drew or
 // changed since is news there (home.js).
@@ -3476,6 +3633,7 @@ const upgrades = [
 ]
 const onUpgrade = async (req, socket, head) => {
   if (!(await guard.upgrade(req)) || !pages.upgrade(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy() }
+  if (!auth.upgrade(req)) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy() }
   if (machines.isMachinePath(req.url)) return machines.upgrade(req, socket, head) // a terminal on another of your devices
   const hit = upgrades.find(([prefix]) => req.url.startsWith(prefix))
   if (!hit) return socket.destroy()
@@ -3484,6 +3642,9 @@ const onUpgrade = async (req, socket, head) => {
 server.on('upgrade', onUpgrade)
 server.listen(cfg.port, cfg.host, () => {
   console.log(`Bridge AI on http://${cfg.host}:${cfg.port} (runtime: ${rt.name}, data: ${DATA})`)
+  // Started in a terminal (npm start): a link that lets your browser in, once, for ten minutes
+  // (apiauth.js); a browser not let in says how to get one later.
+  if (process.stdout.isTTY && !process.versions.electron) console.log(`Open it in your browser with this link (it works once, for ten minutes): ${auth.link({ base: `http://127.0.0.1:${cfg.port}`, ms: 10 * 60_000 }).url}\nLater, or in another browser: bridge-ai open`)
   if (!/^(127\.0\.0\.1|localhost|::1)$/.test(cfg.host)) console.log(`Listening on ${cfg.host}, not 127.0.0.1: anyone who can reach port ${cfg.port} can drive your agents. In Docker, publish it as 127.0.0.1:${cfg.port}:${cfg.port} only.`)
   // Start the slow lookups the first screen needs (which agents you have, their sign-ins, usage
   // quotas) now, so they're ready or nearly ready when the page asks.
@@ -3494,6 +3655,7 @@ server.listen(cfg.port, cfg.host, () => {
   account.start()
   phone.status(cfg.port).then(tailnetSaid).catch(() => {})
   machines.start()
+  if (mcpOn()) bridgeMcp.command() // where Bridge AI is now, for the apps it was added to (mcp.js)
   pages.start(app, onUpgrade) // each linked computer's port, for its pages
   transfers.resume() // copies that were going carry on
   counts.start()

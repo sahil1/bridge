@@ -1,0 +1,77 @@
+/* Comments as threads beside a document (doccomments.jsx): each thread a card with the words it's
+   on, who said what, its reply box when it's picked, and Resolve and Delete; AI Assist's replies
+   signed with the wand. The pane is the document's comments pane (doc.css), on a phone over the
+   page. */
+.sd-threads { padding-bottom: 8px; }
+.sd-threads .sd-pane-head { gap: 6px; }
+.sd-thread-add { height: 26px; padding: 0 8px; gap: 4px; }
+.sd-thread-list { list-style: none; margin: 0; padding: 0 8px 4px; display: grid; gap: 8px; }
+.sd-thread { display: grid; gap: 8px; padding: 10px 10px 8px; border-radius: 10px; background: var(--pane); box-shadow: inset 0 0 0 1px var(--line); cursor: default; }
+.sd-thread:not(.on):hover { background: var(--pane-2); }
+.sd-thread.on { box-shadow: inset 0 0 0 1.5px var(--accent), 0 4px 14px rgb(0 0 0 / .08); }
+.sd-thread.done { opacity: .78; }
+.sd-thread-new { margin: 0 8px 8px; }
+.sd-thread-top { display: flex; align-items: flex-start; gap: 2px; }
+.sd-thread-top .win-btn { flex: none; width: 26px; height: 26px; margin-top: -3px; color: var(--ink-3, var(--ink-2)); }
+.sd-thread-top .win-btn:hover { color: var(--ink); }
+.sd-thread-top .win-btn:first-of-type { margin-left: 4px; }
+.sd-thread-quote { flex: 1; min-width: 0; display: flex; align-items: center; padding: 0 0 0 8px; border-left: 3px solid rgb(244 180 0 / .8); color: var(--ink-2); font: 12px/1.4 var(--font); text-align: left; }
+.sd-thread-quote > span { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.sd-thread.done .sd-thread-quote { border-left-color: var(--line-2, var(--line)); }
+.sd-thread-entry { display: grid; gap: 3px; }
+.sd-thread-entry + .sd-thread-entry { padding-top: 8px; border-top: 1px solid var(--line); }
+.sd-thread .sd-comment-who { min-height: 22px; }
+.sd-thread .sd-comment-who small { margin-left: 0; }
+.sd-thread .sd-comment-who .sd-thread-x { margin-left: auto; width: 22px; height: 22px; opacity: 0; }
+.sd-thread-entry:hover .sd-thread-x, .sd-thread-x:focus-visible { opacity: 1; }
+.sd-comment-who .sd-who-ai { background: var(--ai-soft); color: var(--ai); }
+.sd-thread-entry.ai .sd-comment-who b { color: var(--ai); }
+.sd-thread .sd-comment-text { color: var(--ink); overflow-wrap: anywhere; }
+.sd-thread-acts { display: flex; align-items: center; gap: 6px; }
+.sd-thread-box { display: grid; gap: 6px; }
+.sd-thread-box textarea { width: 100%; min-height: 32px; padding: 6px 9px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink); font: 13px/1.45 var(--font); resize: vertical; }
+.sd-thread-box textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.sd-thread-box-acts { display: flex; align-items: center; gap: 6px; }
+.sd-thread-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px; border-radius: 8px; background: color-mix(in srgb, var(--critical) 8%, transparent); font-size: 12.5px; }
+.sd-thread-confirm span { flex: 1 1 100%; }
+.sd-thread-confirm .btn.danger { background: var(--critical-fill); border-color: transparent; color: #fff; }
+.sd-thread-said { color: var(--ink-2); }
+.sd-thread-done { display: grid; gap: 6px; padding: 4px 8px 0; }
+.sd-thread-done > .link-btn { justify-self: start; display: inline-flex; align-items: center; gap: 5px; padding: 4px 6px; }
+.sd-thread-done .sd-thread-list { padding: 0 0 4px; }
+.sd-thread-foot { padding-top: 12px; }
+/* The bubble by the words picked: Comment beside AI Assist. */
+.sd-bubble-cmt { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 7px; color: var(--ink-2); font: 600 12.5px var(--font); }
+.sd-bubble-cmt:hover { background: var(--pane-2); color: var(--ink); }
+.sd-w .sd-cmt.draft { background: rgb(244 180 0 / .35); }
+.sd-w .sd-x-cr.sd-cr-hid { display: none; }
+.app.narrow .sd-thread-top .win-btn, .app.narrow .sd-thread-x { width: 40px; height: 40px; opacity: 1; }
+.app.narrow .sd-thread-box textarea { min-height: 40px; font-size: 16px; }
+.app.narrow .sd-thread-box .btn.small, .app.narrow .sd-thread-box .ghost-btn, .app.narrow .sd-thread-add, .app.narrow .sd-bubble-cmt { height: 40px; }
+.app.narrow .sd-thread-done > .link-btn, .app.narrow .sd-thread-acts .link-btn { min-height: 40px; }
+/* @bridge: AI Assist in a thread. At work (the words it's on pulse), what went wrong, a request
+   from the file waiting to be sent, and its suggestion to keep or discard. */
+.sd-thread-wand { color: var(--ai); flex: none; margin-top: 2px; }
+.sd-thread-by { display: block; margin-top: 4px; font-size: 11.5px; }
+.sd-thread-ai { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 7px; padding: 8px 9px; border-radius: 8px; background: var(--ai-soft); color: var(--ink); font-size: 12.5px; line-height: 1.45; }
+.sd-thread-ai > span { flex: 1; min-width: 0; }
+.sd-thread-ai.busy { align-items: center; }
+.sd-thread-ai.busy .sd-thread-wand { animation: sd-wand 1.2s ease-in-out infinite; }
+.sd-thread-ai.bad { background: color-mix(in srgb, var(--critical) 8%, transparent); }
+.sd-thread-ai.bad .sd-thread-wand { color: var(--critical); }
+.sd-thread-ai-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1 1 100%; }
+.sd-thread-sug { display: grid; gap: 8px; padding: 8px 9px; border-radius: 8px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ai) 30%, transparent); }
+.sd-thread-sug-text { font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; max-height: 120px; overflow: auto; }
+.sd-thread-sug-text del { color: var(--critical); text-decoration: line-through; }
+.sd-thread-sug-text ins { color: #0b7a4b; text-decoration: none; background: color-mix(in srgb, #30a46c 16%, transparent); border-radius: 2px; }
+.sd-thread-sugbar { display: flex; align-items: center; gap: 7px; margin: 0 8px 8px; padding: 6px 6px 6px 10px; border-radius: 8px; background: var(--ai-soft); font-size: 12.5px; }
+.sd-mention { justify-self: start; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 7px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 4px 12px rgb(0 0 0 / .1); color: var(--ink); font: 12.5px var(--font); }
+.sd-mention .icon { color: var(--ai); }
+.sd-mention span { color: var(--ink-3, var(--ink-2)); }
+.sd-mention:hover { background: var(--ai-soft); }
+.sd-w .sd-cmt.busy { animation: sd-cmt-busy 1.4s ease-in-out infinite; }
+@keyframes sd-cmt-busy { 50% { background: rgb(124 77 255 / .22); } }
+@keyframes sd-wand { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .sd-w .sd-cmt.busy, .sd-thread-ai.busy .sd-thread-wand { animation: none; } }
+.app.narrow .sd-thread-ai .btn.small, .app.narrow .sd-thread-ai .ghost-btn, .app.narrow .sd-thread-sug .btn.small, .app.narrow .sd-thread-sugbar .btn.small, .app.narrow .sd-mention { height: 40px; }
+.app.narrow .sd-thread-quote { min-height: 40px; }

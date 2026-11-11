@@ -51,7 +51,7 @@ setInterval(() => { try { process.kill(parent, 0) } catch { process.exit(0) } },
   fs.writeFileSync(shareBin, `#!/bin/sh\nexec "${process.execPath}" "${shareBin}.cjs" "$@"\n`, { mode: 0o755 })
 }
 const sharing = (v) => fs.writeFileSync(path.join(kit.bin, 'sharing.json'), JSON.stringify({ sharing: v }))
-const env = { ...process.env, KIT_URL: kit.url, ...(shareBin ? { BRIDGE_CALLWATCH: shareBin } : {}), ...(screenOk.DISPLAY ? { DISPLAY: screenOk.DISPLAY } : {}) }
+const env = { ...process.env, KIT_URL: kit.url, KIT_DATA: kit.data, ...(shareBin ? { BRIDGE_CALLWATCH: shareBin } : {}), ...(screenOk.DISPLAY ? { DISPLAY: screenOk.DISPLAY } : {}) }
 delete env.ELECTRON_RUN_AS_NODE
 let el = null
 try {

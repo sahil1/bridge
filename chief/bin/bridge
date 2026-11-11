@@ -14,10 +14,15 @@ const HOME = os.homedir()
 const tilde = (p) => (p && p.startsWith(HOME) ? `~${p.slice(HOME.length)}` : p || '')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+// Bridge AI's key for its API, in its data folder (bridge.json says where; readable only by you).
+const KEY_FILE = SETTINGS.key || path.join(process.env.BRIDGE_HOME || path.join(HOME, '.bridge-ai'), 'api-token')
+const key = () => { try { return fs.readFileSync(KEY_FILE, 'utf8').trim() } catch { return '' } }
+
 async function api(path, { method = 'GET', body } = {}) {
   let res
   try {
-    res = await fetch(`${BASE}/api${path}`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined })
+    const k = key()
+    res = await fetch(`${BASE}/api${path}`, { method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(k ? { Authorization: `Bearer ${k}` } : {}) }, body: body ? JSON.stringify(body) : undefined })
   } catch {
     throw new Error(`Bridge isn't reachable at ${BASE}. Is the server running?`)
   }

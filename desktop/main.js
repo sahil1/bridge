@@ -14,6 +14,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const crashes = require('./crashes.js')
+const apiToken = require('./apitoken.js')
 const { floatWindow, zoomOf, floatResizer, fitWhileResizing } = require('./floatfit.js')
 
 // Where Bridge AI's code is: inside the app when built, the repo next to this folder from source.
@@ -31,6 +32,19 @@ const DEV = process.env.BRIDGE_DEV === '1'
 const PID = path.join(DATA, 'cache', 'server.pid')
 const PORT = (Number(process.env.BRIDGE_PORT) || CONFIG.port || 7420) + (DEV ? 1 : 0)
 const URL_BASE = `http://127.0.0.1:${PORT}`
+// The server's own port (in dev the window shows the next one, whose hot-reloading UI passes its
+// requests on to this).
+const SERVER_PORT = PORT - (DEV ? 1 : 0)
+// Bridge AI's key for its API (apitoken.js): sent with the app's own requests to its server, at this
+// computer's address and the server's ports only, never another program's; and its cookie, given to
+// the app's windows before any of them opens (whenReady below), so each one's page is let in
+// without ever holding either.
+const apiKey = () => apiToken.read(DATA) || apiToken.ensure(DATA)
+const ownServer = (u) => { try { const x = new URL(String(u)); return x.protocol === 'http:' && x.hostname === '127.0.0.1' && [PORT, SERVER_PORT].includes(Number(x.port)) } catch { return false } }
+const fetch = (u, o = {}) => globalThis.fetch(u, ownServer(u) ? { ...o, headers: { ...(o.headers || {}), authorization: `Bearer ${apiKey()}` } } : o)
+async function letInWindows() {
+  try { await apiToken.letIn(session.defaultSession, { port: SERVER_PORT, token: apiKey() }) } catch (e) { console.warn(`Couldn't give the windows Bridge AI's key: ${e.message}`) }
+}
 const SHORTCUT = CONFIG.desktop?.shortcut || 'Alt+CommandOrControl+A'
 const IS_MAC = process.platform === 'darwin'
 
@@ -95,7 +109,7 @@ async function startServer() {
   // Same pid file as `npm start`, so `npm run stop` and "Quit and Stop Agents" both find it.
   if (BUNDLED) try { fs.mkdirSync(path.dirname(PID), { recursive: true }); fs.writeFileSync(PID, String(child.pid)) } catch { /* not fatal */ }
   // Ended without being asked to, while this app runs: written down, to offer a report once it's back.
-  child.on('exit', (code, signal) => { if (!stoppingServer) crashes.note(crashes.fromServerExit(code, signal), { base: URL_BASE, data: DATA, version: app.getVersion() }).catch(() => {}) })
+  child.on('exit', (code, signal) => { if (!stoppingServer) crashes.note(crashes.fromServerExit(code, signal), { base: URL_BASE, data: DATA, version: app.getVersion(), fetch }).catch(() => {}) })
   child.unref()
   startedServer = true
 }
@@ -196,7 +210,7 @@ async function createWindow() {
   win.webContents.on('render-process-gone', (_e, d) => {
     const c = crashes.fromWindowGone(d)
     if (!c || quitting) return
-    crashes.note(c, { base: URL_BASE, data: DATA, version: app.getVersion() }).catch(() => {})
+    crashes.note(c, { base: URL_BASE, data: DATA, version: app.getVersion(), fetch }).catch(() => {})
     if (Date.now() - reopened > 60000) { reopened = Date.now(); setTimeout(() => { if (self && !self.isDestroyed()) self.webContents.reload() }, 1000) }
   })
 
@@ -778,6 +792,12 @@ async function whileAway() {
   })
 }
 const local = (p, body) => fetch(`${URL_BASE}/api${p}`, { ...(body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(30000) }).then((r) => (r.ok ? r.json() : null))
+// This computer's Bridge AI in your browser, let in by a one-time link (server/apiauth.js): a browser
+// it hasn't let in yet would otherwise say how to get in.
+async function openInBrowser() {
+  const r = await local('/browser-link', {}).catch(() => null)
+  shell.openExternal(r?.url || URL_BASE)
+}
 let updating = false
 async function updateWhileAway() {
   if (updating) return
@@ -821,7 +841,7 @@ function buildMenu() {
     { label: 'View', submenu: [
       { label: 'Reload', accelerator: 'CmdOrCtrl+R', click: () => win?.webContents.reload() },
       { label: 'Reset This Window\'s Layout', click: resetLayout },
-      { label: 'Open in Browser', click: () => shell.openExternal(URL_BASE) },
+      { label: 'Open in Browser', click: () => { openInBrowser().catch(() => shell.openExternal(URL_BASE)) } },
       { type: 'separator' },
       { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
       { type: 'separator' },
@@ -1051,7 +1071,7 @@ ipc.handle('bridge:recording', (e, on) => { if (fromApp(e) && e.sender === win?.
 
 app.on('before-quit', () => { quitting = true })
 // The graphics process went away (Chromium starts it again): written down, to offer a report.
-app.on('child-process-gone', (_e, d) => { if (!quitting) crashes.note(crashes.fromChildGone(d), { base: URL_BASE, data: DATA, version: app.getVersion() }).catch(() => {}) })
+app.on('child-process-gone', (_e, d) => { if (!quitting) crashes.note(crashes.fromChildGone(d), { base: URL_BASE, data: DATA, version: app.getVersion(), fetch }).catch(() => {}) })
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus() } })
 app.on('activate', () => { if (!win) createWindow(); else win.show() })
 app.on('window-all-closed', () => { win = null })
@@ -1064,7 +1084,7 @@ function shuttingDown() {
   fetch(`${URL_BASE}/api/system/stopping`, { method: 'POST', signal: AbortSignal.timeout(2000) }).catch(() => {})
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   powerMonitor.on('shutdown', shuttingDown) // macOS, Linux
   // Voice notes need the mic; allow it for the app's own page only, asked by the page itself and not
   // by a frame in it (a project's app in Preview, another device's agent) nor a window showing another
@@ -1085,6 +1105,7 @@ app.whenReady().then(() => {
   contextMenu.attach({ app, Menu, clipboard: electron.clipboard, session })
   buildMenu()
   globalShortcut.register(SHORTCUT, toggleWindow)
+  await letInWindows()
   createWindow()
   watchFleet()
   watchCalls()
