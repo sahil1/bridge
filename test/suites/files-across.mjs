@@ -23,7 +23,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { pathToFileURL } from 'node:url'
-import { startKit, startRelay, checks, until, browser, sleep, shot, ROOT, TEST, IS_WIN, IS_MAC } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, sleep, shot, ROOT, TEST, IS_WIN, IS_MAC, browserNotice } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('files-across')
 const { b, which } = await browser()
@@ -214,7 +214,7 @@ try {
   const errors = []
   const pg = await ctx.newPage()
   // (WebKit reports a request cut off by going to another page as an error of the page's.)
-  pg.on('pageerror', (e) => { if (!/due to access control checks/.test(e.message)) errors.push(e.message) })
+  pg.on('pageerror', (e) => { if (!/due to access control checks/.test(e.message) && !browserNotice(e.message)) errors.push(e.message) })
   // The agent's Files (at a file), asked again until it's there: the page may still be loading its agents.
   const filesAt = async (pgOrFrame, paneId, file) => {
     await pgOrFrame.waitForFunction(() => !!document.querySelector('.app'), null, { timeout: 30000 }).catch(() => {})
@@ -345,7 +345,7 @@ try {
     const pctx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: which === 'chromium', hasTouch: true, deviceScaleFactor: 2 })
     await pctx.addInitScript(() => { try { localStorage.setItem('cc-toured', JSON.stringify({ desktop: true, phone: true })); localStorage.setItem('cc-appearance', JSON.stringify({ mode: 'light', theme: 'sky', text: 'm' })) } catch { /* no storage */ } })
     const phone = await pctx.newPage()
-    phone.on('pageerror', (e) => errors.push(e.message))
+    phone.on('pageerror', (e) => { if (!browserNotice(e.message)) errors.push(e.message) })
     await phone.goto(`${ra.url}/#pair=${code}`, { waitUntil: 'commit' })
     await phone.locator('#pair-go').click({ timeout: 15000 }) // a pairing link asks first: one tap
     const app = () => phone.frames().find((f) => f !== phone.mainFrame() && f.url().startsWith(ra.url))

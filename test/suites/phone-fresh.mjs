@@ -19,7 +19,7 @@
 //   A UI that keeps itself up to date does it through the relay too.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startRelay, checks, until, browser, page, sleep, shot, noServiceWorker, OUT, ROOT } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, page, sleep, shot, noServiceWorker, OUT, ROOT, browserNotice } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('phone-fresh')
 const COMPUTER = 'Studio Mac'
@@ -56,7 +56,7 @@ const screen = (p, on) => p.evaluate((on) => { window.__hidden = !on; document.d
 const entryOf = (f) => f.evaluate(() => [...document.querySelectorAll('script[type="module"][src]')].map((s) => s.getAttribute('src')).find((x) => /assets\//.test(x))?.split('/').pop()).catch(() => null)
 // A reload cuts off the page's requests, which WebKit reports as errors (and the link dropping on
 // cue, the phone page's waiting ones).
-const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks|^Error: (Reconnecting to your computer|Connection lost)/.test(e))
+const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks|^Error: (Reconnecting to your computer|Connection lost)/.test(e) && !browserNotice(e))
 const fits = (p, sel) => p.evaluate((sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { h: Math.round(r.height), inside: r.left >= 0 && r.right <= window.innerWidth } }, sel)
 
 const { b, which } = await browser()

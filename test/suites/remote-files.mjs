@@ -20,7 +20,7 @@ import path from 'node:path'
 import http from 'node:http'
 import crypto from 'node:crypto'
 import zlib from 'node:zlib'
-import { startKit, startRelay, checks, until, browser, sleep, shot, TEST } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, sleep, shot, TEST, browserNotice } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('remote-files')
 const { b, which } = await browser()
@@ -152,7 +152,7 @@ try {
   await ctx.addInitScript(() => { try { localStorage.setItem('cc-toured', JSON.stringify({ desktop: true, phone: true })); localStorage.setItem('cc-appearance', JSON.stringify({ mode: 'light', theme: 'sky', text: 'm' })) } catch { /* no storage */ } })
   const phone = await ctx.newPage()
   const errors = []
-  phone.on('pageerror', (e) => errors.push(e.message))
+  phone.on('pageerror', (e) => { if (!browserNotice(e.message)) errors.push(e.message) })
   await phone.goto(`${ra.url}/#pair=${code}`, { waitUntil: 'commit' })
   await phone.locator('#pair-go').click({ timeout: 15000 }) // a pairing link asks first: one tap
   const app = () => phone.frames().find((f) => f !== phone.mainFrame() && f.url().startsWith(ra.url))
@@ -350,7 +350,7 @@ try {
     }
   })
   const lp = await desk.newPage()
-  lp.on('pageerror', (e) => errors.push(e.message))
+  lp.on('pageerror', (e) => { if (!browserNotice(e.message)) errors.push(e.message) })
   await lp.goto(`${M}/`)
   await viewer(lp.mainFrame(), 'on Laptop', 'remote-files-laptop')
   // Download to this device, with its progress.

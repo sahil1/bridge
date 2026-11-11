@@ -399,6 +399,9 @@ export async function browser() {
   }
   return { b, which }
 }
+// A ResizeObserver that couldn't hand over every change in one frame is reported as a page error
+// (by WebKit, now and then). It's the browser's notice, not a fault in the page.
+export const browserNotice = (message) => message === 'ResizeObserver loop completed with undelivered notifications.'
 // A page with Bridge AI's tour done and a look picked: { mode, theme }; phone: a phone's screen and
 // touch. store: more of the page's saved state, there before it opens (a reload to change it would
 // cut off its requests, which WebKit reports as page errors). before(ctx): routes of the test's own,
@@ -418,9 +421,7 @@ export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440
   if (before) await before(ctx)
   const p = await ctx.newPage()
   const errors = []
-  // A ResizeObserver that couldn't hand over every change in one frame is reported as a page error
-  // (by WebKit, now and then). It's the browser's notice, not a fault in the page.
-  p.on('pageerror', (e) => { if (e.message !== 'ResizeObserver loop completed with undelivered notifications.') errors.push(e.message) })
+  p.on('pageerror', (e) => { if (!browserNotice(e.message)) errors.push(e.message) })
   // A page whose process crashed is closed, and every call on it fails as "Target page, context or
   // browser has been closed" (dictation-cleanup in WebKit, once in CI): the log says so, and where.
   p.on('crash', () => console.log(`the page crashed (${b.browserType().name()}): ${p.url()}`))
