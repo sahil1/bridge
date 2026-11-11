@@ -17,7 +17,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, solid, noServiceWorker, changeAnswer, TEST, IS_MAC, advanced } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, solid, noServiceWorker, changeAnswer, withoutCutOff, TEST, IS_MAC, advanced } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('meetings-ui')
 // On a Mac, tccutil stood in for (bin/tcc.log), for Reset and ask again on the call's sound.
@@ -770,7 +770,8 @@ process.exit(1)`)
     await side.close()
   }
   await api(`/meetings/${A.id}/assist`, { on: false })
-  ok(fl.errors.length === 0, 'card: no page errors', fl.errors)
+  // (Bridge AI restarting under the card cuts off what it was asking, which WebKit reports.)
+  ok(withoutCutOff(fl.errors).length === 0, 'card: no page errors', fl.errors)
   await fl.ctx.close()
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
