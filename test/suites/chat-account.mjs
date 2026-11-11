@@ -7,7 +7,7 @@
 // to carry on.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, solid, TEST } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('chat-account')
 const kit = await startKit('chat-account')
@@ -126,12 +126,14 @@ try {
 
   // Your usual login taken off the list while an agent is still on it: the agent goes by the
   // account it's signed in as when that's one you listed (Work here), else by its email, never
-  // "Your usual login". The quota feed's answer is laid over, as plan usage reads real accounts.
+  // "Your usual login". The quota feed's answer is laid over, as plan usage reads real accounts
+  // (with no service worker: in WebKit what a page asks for once one has it skips the test's route).
   {
     const usualOn = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Usual', newSpace: 'Usual', prompt: 'idle', account: 'claude-default' })
     await until(() => agentOf((a) => a.paneId === usualOn.paneId && a.sessionId && a.status !== 'working' && a.status !== 'unknown'), 60000, 1000)
     const chipFor = async (same) => {
       const { ctx: c2, p: p2 } = await page(b, kit.url, { before: async (c) => {
+        await noServiceWorker(c)
         await c.route(/\/api\/quota(\?|$)/, async (route) => {
           const r = await route.fetch()
           const j = await r.json()
