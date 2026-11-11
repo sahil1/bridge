@@ -1,7 +1,7 @@
 {
   "name": "bridge-ai-desktop",
   "productName": "Bridge AI",
-  "version": "3.15.0",
+  "version": "3.15.1",
   "description": "Bridge AI as a desktop app for macOS, Windows and Linux",
   "license": "Apache-2.0",
   "author": "Bold Bridge",
