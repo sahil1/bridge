@@ -249,7 +249,11 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
   await p.waitForSelector('.mt-places', { timeout: 6000 }).catch(() => {})
   ok((await p.locator('.mt-places button').allInnerTexts()).map((x) => x.trim()).join('|') === 'All|Planning|Archived · 1', 'Meetings: All, each folder, Archived', await p.locator('.mt-places button').allInnerTexts())
   await p.locator('.mt-places button', { hasText: 'Archived' }).click()
-  ok(!!(await until(async () => (await p.locator('.mt-row').count()) === 1, 4000)), 'Archived lists the archived one')
+  const archivedOne = !!(await until(async () => (await p.locator('.mt-row').count()) === 1, 4000))
+  // Otherwise, what showed and what's saved: read from the meetings' files, as asking the server
+  // for its list can turn Meeting Insights on by itself, which changes what comes after.
+  const savedMeetings = () => fs.readdirSync(path.join(kit.data, 'meetings')).map((id) => { try { const x = JSON.parse(fs.readFileSync(path.join(kit.data, 'meetings', id, 'meeting.json'), 'utf8')); return `${x.title}${x.folder ? ` in ${x.folder}` : ''}${x.archived ? ', archived' : ''}` } catch { return null } }).filter(Boolean)
+  ok(archivedOne, 'Archived lists the archived one', archivedOne ? undefined : { tab: await p.locator('.mt-view .seg [aria-selected="true"]').allInnerTexts(), places: await p.locator('.mt-places button').allInnerTexts(), on: await p.locator('.mt-places button.on').allInnerTexts(), rows: await p.locator('.mt-row').allInnerTexts(), saved: savedMeetings() })
   await p.locator('.mt-row-open', { hasText: 'Vendor call' }).click({ button: 'right' })
   await p.locator('.ctx-menu button', { hasText: 'Unarchive' }).click()
   ok(!!(await until(async () => (await p.locator('.mt-places button').allInnerTexts()).map((x) => x.trim()).join('|') === 'All|Planning|Vendors', 6000)), 'taken out of the archive from its menu')
