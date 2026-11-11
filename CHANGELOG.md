@@ -4,10 +4,25 @@ Each version's section here becomes its GitHub release notes (`npm run release`)
 
 ## 3.15.1
 
-Fixes: the whole app in your language, every pack complete; and the bugs behind every test that failed now and then, from Settings jumping from under your click to a phone slow to reconnect.
+Better than Claude's new Whiteboards and Sheets: a sheet's AI Assist that answers in seconds, a whiteboard's AI Assist that suggests rather than changes and turns a board into a document or a deck, comments in Word files with @bridge, and Bridge AI as an MCP server for Claude Code, Claude Desktop, Cursor and Codex, with a key for its API. And fixes: the whole app in your language, and the inbox once Mail has quit on macOS 15.
+
+### What's new
+
+- **A sheet's AI Assist answers in seconds**: Write a formula, Clean this column, Summarise, Chart this and your own words go to Studio's model rather than waiting on an agent. The change shows outlined on the sheet as a suggestion to keep or discard, one at a time or with Keep all, and Hand to an agent stays for a bigger job.
+- **What AI Assist draws or changes on a whiteboard is a suggestion**: dashed and outlined with the wand and the model that made it, to keep or discard on the board or in AI Assist, or all at once. Discard puts back what it changed, and the board remembers its suggestions when opened again.
+- **Ask about part of a whiteboard**: select shapes and AI Assist answers a question about them in its panel, naming each shape; a model that can see gets a picture of them.
+- **Meeting moves on a whiteboard**: Group by theme, A timeline with owners and dates, and Action items for each person, which go onto the Chief of Staff's task list with one click.
+- **Turn a whiteboard into a document or a deck**: AI Assist's Make a document and Make a deck write a Word file or a Studio deck in Studio's own folder, linked back to the board.
+- **Versions of a whiteboard**: kept when you come back after a break and before each AI Assist change, each shown as its picture and put back from Versions in the board's header.
+- **Comments in Word files** (Beta Features: Comments and @bridge): add a comment on the words you pick, reply, resolve and delete in Studio, saved into the file itself so Word shows them as you left them.
+- **@bridge in a comment** asks AI Assist about those words: its reply goes in the thread, its change is a suggestion you keep or discard, and an @bridge that came in someone else's file waits for you to send it.
+- **Bridge AI as an MCP Server** (Beta Features): Claude Code, Claude Desktop, Cursor and Codex can read your whiteboards, the Studio files in your Places and your meetings' summaries, and make new boards, files and tasks. Transcripts, agents' conversations, mail and calendar are never shared.
+- **Changes other apps suggest wait for you in Needs You**, to keep or discard, and sending work to an agent is off until you turn it on, then each message waits for your approval.
+- **Add Bridge AI to Claude Code, Claude Desktop, Cursor or Codex in one click** from Settings › MCP Servers, which also lists every call they make.
 
 ### Fixes
 
+- **Bridge AI's API answers only Bridge AI**: other programs and other accounts on the computer need its key, kept in `~/.bridge-ai/api-token`. The app's windows, `bridge-ai` and the Chief of Staff carry on as before, and a browser is let in once with View › Open in Browser or `bridge-ai open`.
 - **The whole app is in your language**: Settings, New, an agent's tabs, sign-in, cloud agents and the meeting card no longer show English, and every language pack is complete.
 - **The meeting card's links stay on one line** in every language.
 - **Settings opened at one setting** (Accounts, say) is there as soon as it appears, instead of jumping there from under your click.
@@ -31,7 +46,7 @@ Fixes: the whole app in your language, every pack complete; and the bugs behind 
 
 Better than Claude's new Whiteboards and Sheets: a sheet's AI Assist that answers in seconds, a whiteboard's AI Assist that suggests rather than changes, asks about what you pick, groups, plans and lists action items, and turns a board into a document or a deck, with versions to go back to; comments in Word files with @bridge; and Bridge AI as an MCP server for Claude Code, Claude Desktop, Cursor and Codex, with a key for its API.
 
-<!-- rollout: 10 -->
+Not released on its own (its builds' smoke test didn't yet send the API's new key): all of it came to everyone in 3.15.1.
 
 ### What's new
 
