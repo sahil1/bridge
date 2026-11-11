@@ -143,10 +143,18 @@ async function brief(file) {
   return b
 }
 
-async function toolCount(file, size) {
+// Its steps so far, counted as its log grows. One read at a time per file, as in scan: the fleet's
+// look and the tray's can ask together, and two reads from the same place counted each step twice.
+async function toolCount(file) {
+  for (let b; (b = counts.get(file)?.busy);) await b.catch(() => {})
+  const { size } = await fs.promises.stat(file)
   let st = counts.get(file)
-  if (!st || size < st.offset) { st = { offset: 0, carry: Buffer.alloc(0), n: 0 }; counts.set(file, st) }
-  if (size > st.offset) await readAdded(st, file, size, (text) => { st.n += (text.match(/"type":"tool_use"/g) || []).length })
+  if (st?.busy) return toolCount(file)
+  if (!st || size < st.offset) { st = { offset: 0, carry: Buffer.alloc(0), n: 0, busy: null }; counts.set(file, st) }
+  if (size > st.offset) {
+    st.busy = readAdded(st, file, size, (text) => { st.n += (text.match(/"type":"tool_use"/g) || []).length }).finally(() => { st.busy = null })
+    await st.busy
+  }
   return st.n
 }
 
@@ -188,7 +196,7 @@ async function subagents(mainFile, ends, now) {
       status,
       startedAt: b.ts,
       updatedAt: new Date(st.mtimeMs).toISOString(),
-      tools: await toolCount(file, st.size),
+      tools: await toolCount(file),
       brief: b.text,
       steps: recent.slice(-12).map((s) => (s.kind === 'text' ? { ...s, text: s.text.slice(0, 600) } : s)),
       result: result && result.slice(0, 4000),
