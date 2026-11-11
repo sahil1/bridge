@@ -2,6 +2,30 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.14.0
+
+The meeting reminder snoozes, turns off and keeps out of the way of a screen you share; the recording card goes to the menu bar while you share; who's invited and the whole invite in the calendar; Back and Forward, as in a browser; and Recommended Settings, the model and effort that suit your plan.
+
+<!-- rollout: 10 -->
+
+### What's new
+
+- **Back and Forward, as in a browser** (Beta Features, on to start with): ‹ and › at the start of the top bar go back to where you were and forward again: each view and tab and what it showed (an agent's Chat or Terminal, a meeting, a folder in Files, Calendar, a section of Settings), as it was. ⌘[ and ⌘] (Alt+← and Alt+→ on Windows and Linux), the mouse's back and forward buttons, the browser's own and, in the desktop app, a swipe do the same; hold or right-click ‹ or › to pick a place. A tab you closed is passed over.
+- **Put off or turn off the meeting reminder from the card**: a small menu by its × has Remind me 1 min before (it comes back then, for that meeting, even after a restart), Hide until the next meeting, and Turn off meeting reminders, which asks first and says where to turn them back on: Settings › Meetings › Remind me before meetings.
+- **An event in the calendar shows who's invited, as Google Calendar does**: everyone on the invite with their address (copy one, or all at once), whether they organised it or are optional, and their reply, with how many said yes, no or maybe and how many haven't replied. A long list shows its first few with Show all, and someone you've met opens their page in Meetings › People.
+- **An event shows its whole invite**: its own words with their links, its files, and its call with the link to copy, rather than a line or two of agenda. Teams' join details and passcode stay out, as Join stands for them.
+- **"7 invited" opens to who they are**: on the meeting card before a meeting, in Home's Coming Up and in Today's Schedule, with their replies.
+- **Recommended Settings** (Beta Features): once Claude Code is signed in, setup and Settings › Agents say the model and effort that suit your plan (Pro: Sonnet at high effort; Max: Opus at high; Team and Enterprise: Opus at high; an API key: Sonnet at medium), with why, Use these and Keep Claude Code's defaults. Bridge AI starts Claude Code with them for that session only, never changing its own settings; what it starts with is shown and changed in Settings › Agents.
+- **An effort for each task** (Beta Features, with Recommended Settings): New and Home's box suggest an effort from what you type ("High effort: a refactor across many files"), as a chip you can change; agents Chief of Staff starts get one from its brief, and an agent's model menu says the effort it started with.
+
+### Fixes
+
+- **The meeting reminder no longer pops up over a screen you share**: on a Mac, while you share or record your screen, the reminder before a meeting and what needs you wait, and show once sharing stops; a call that starts meanwhile offers Take notes in the menu bar.
+- **The meeting card gets out of the way while you share your screen**: on a Mac, the card of the meeting being recorded goes to the menu bar (its time, with Pause and Stop) while you share or record your screen, and comes back as it was when you stop. Settings › Meetings › Hide it from screen sharing now says what macOS still allows, as macOS 15 and later lets most screen sharing show a window that asks to be left out.
+- **Screen Recording and a call's sound stop asking when they're already on**: after Open it, the meeting, the floating card and Settings › Meetings say macOS applies it once Bridge AI restarts, with Restart Bridge AI, and Reset and ask again if it's still off after. The no-sound banner now says it's System Audio Recording Only, the second list on that page, which the Screen Recording switch doesn't cover.
+- **The meeting reminder says By Bridge AI**: the floating card's prep, Home's Coming Up, the calendar's prep and Mail's reply drafts said the model's name; they now say Bridge AI, with the model it was written with on hover.
+- **Join in a calendar event is a whole tap target on a phone.**
+
 ## 3.13.4
 
 Fixes: the meeting card is whole when the app is zoomed, shows AI Assist's Ideas in full, and resizes as any window does; an agent's terminal scrolls back through all it keeps, and opens in your terminal app; no button that does nothing; a PowerPoint shows its own background in Studio; the tabs all stay on screen, as in Chrome; the sidebar folds and scrolls as one; scroll bars only when you need them; Studio takes a phone's photo; a setting found in Settings stays where it shows; and what can't load in Settings › Model Providers can be tried again.
