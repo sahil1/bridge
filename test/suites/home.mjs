@@ -356,7 +356,8 @@ try {
     ok(/^2\s*need you/.test((await pill.innerText()).trim()) && /1 more on another computer/.test(await pill.getAttribute('title')) && (await p.locator('.mc-chip .mc-needs').innerText().catch(() => '')).trim() === '1', "the top bar's chip counts this computer's two and says there's one more, the devices menu's chip Desk's one", [await pill.innerText(), await pill.getAttribute('title'), await p.locator('.mc-chip').innerText()])
     await awayLine.locator('.hm-away-line').click()
     const venue = awayLine.locator('.hm-task', { hasText: 'Book the venue' })
-    ok(await venue.isVisible() && await venue.locator('button', { hasText: 'Reply' }).isVisible() && /Open on Desk/.test(await venue.locator('.ny-acts').innerText()), "opened, Desk's task is there to answer in place, and its Open says it goes to Desk", await awayLine.innerText())
+    // (Waited for: on a busy computer it can be drawn a moment after the click.)
+    ok(!!(await until(async () => await venue.isVisible() && await venue.locator('button', { hasText: 'Reply' }).isVisible() && /Open on Desk/.test(await venue.locator('.ny-acts').innerText({ timeout: 1000 }).catch(() => '')), 5000)), "opened, Desk's task is there to answer in place, and its Open says it goes to Desk", await awayLine.innerText())
     await shot(p, `${tag}home-this-computer`)
     // Open on Desk: this window shows Desk and says so, and Back brings Studio's Home again.
     const deskAt = (await a.api('/machines')).machines.find((m) => m.name === 'Desk').id
