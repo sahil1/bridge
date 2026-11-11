@@ -7,6 +7,7 @@ import Canvas, { useDarkMode } from './Canvas.jsx'
 import DrawPanel, { KINDS, useBoardModels } from './DrawPanel.jsx'
 import ShapePanel, { DRAG_TYPE } from './ShapePanel.jsx'
 import BoardSettings from './BoardSettings.jsx'
+import Suggestions from './Suggestions.jsx'
 import { loadExcalidraw } from './excalidraw.js'
 import { fromText, fromPending, kindOfFile, placeBeside } from './convert.js'
 import { layoutBoard, reroute } from './layout.js'
@@ -26,7 +27,8 @@ import './whiteboard.css'
 // agent's Files tab drawn as a board (FileDrawing). The boards are files in ~/.bridge-ai/boards
 // (server/boards.js); a board saves itself a moment after each change. Around the drawing (Canvas,
 // Excalidraw in Bridge AI's look) are Bridge AI's own parts: the Shapes panel, AI Assist (Draw this
-// and Change it, with Refine), Auto-layout, Export (PNG, SVG, PDF) and the whiteboard's settings.
+// and Change it, with Refine; what it draws is a suggestion to keep, Suggestions.jsx), Auto-layout,
+// Export (PNG, SVG, PDF) and the whiteboard's settings.
 
 const enc = encodeURIComponent
 // What AI Assist offers on a board: its panel, to draw something new or change what's there.
@@ -475,6 +477,7 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
           {d.error ? <div className="wb-wait"><p className="error-text small" role="alert">{d.error}</p></div>
             : d.ready ? <Canvas key={id} initial={d.ready.initial} onApi={d.onApi} onChange={d.onChange} onSave={() => d.flush(true)} name={id} look={boardLook} />
               : <div className="wb-wait" aria-busy="true"><span className="muted small">{t('Opening the whiteboard…')}</span></div>}
+          {d.board.api && <Suggestions board={d.board} bar={panel !== 'draw'} />}
           {d.board.api && !count.n && !panel && (
             <div className="wb-empty-board">
               <p>{t('An empty whiteboard')}</p>
@@ -672,6 +675,7 @@ export function FileDrawing({ pane, f, onSaved, onOpenPath }) {
         {d.error ? <div className="wb-wait"><p className="error-text small" role="alert">{d.error}</p></div>
           : d.ready ? <Canvas key={version} initial={d.ready.initial} onApi={d.onApi} onChange={d.onChange} onSave={() => d.flush(true)} name={base} look={d.ready.look} />
             : <div className="wb-wait" aria-busy="true"><span className="muted small">{t('Opening the whiteboard…')}</span></div>}
+        {d.board.api && <Suggestions board={d.board} bar={!panel} />}
         {panel && d.board.api && <div className="wb-draw-wrap"><DrawPanel board={d.board} want={want} onClose={() => setPanel(false)} compact look={d.ready?.look} /></div>}
       </div>
     </div>

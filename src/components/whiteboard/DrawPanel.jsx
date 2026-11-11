@@ -10,10 +10,12 @@ import { fromSpec } from './spec.js'
 import { reroute, layoutBoard, fitInView } from './layout.js'
 import { review } from './review.js'
 import { solidBackground, fontsReady } from './look.js'
+import { before, mark, markOne, keep as keepIt, discard as discardIt } from './suggest.js'
 
 // "Draw this" and "Change it": words (typed, or said with the dictation key) to a model, and back
-// as shapes on the board, which ⌘Z takes back. Drawing can also start from a meeting, a project or
-// an agent's work. The model is yours (models()): what it's sent is said under the button.
+// as shapes on the board: a suggestion, marked on the board (suggest.js) to keep or discard there
+// or here, which ⌘Z takes back too. Drawing can also start from a meeting, a project or an agent's
+// work. The model is yours (models()): what it's sent is said under the button.
 //   Refine: after the first drawing the model looks over its own work and improves it, up to the
 // number of rounds picked. Each round the board is checked here (review.js: overlaps, crossings,
 // arrows with no words…), and a model that can see gets a picture of it too. It stops early once
@@ -86,9 +88,19 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
   const form = useRef(null)
   const ran = useRef(false)
   // How much is on the board and how much is selected, kept up as you draw.
-  const count = (elements, appState) => ({ n: elements.filter((e) => !e.isDeleted).length, sel: Object.values(appState?.selectedElementIds || {}).filter(Boolean).length })
+  // And whether the last suggestion is still waiting on the board, to keep or discard.
+  const [sug, setSug] = useState(null) // the last one made here: { id, by }
+  const sugRef = useRef(null)
+  sugRef.current = sug
+  // And how many suggestions wait on the board in all, for Keep all (the board's own bar is under
+  // this panel while it's open).
+  const count = (elements, appState) => {
+    const ids = new Set(elements.filter((e) => !e.isDeleted && e.customData?.bridge?.suggestion?.id).map((e) => e.customData.bridge.suggestion.id))
+    return { n: elements.filter((e) => !e.isDeleted).length, sel: Object.values(appState?.selectedElementIds || {}).filter(Boolean).length, waits: !!sugRef.current && ids.has(sugRef.current.id), sugs: ids.size }
+  }
   const [scene, setScene] = useState(() => count(els, board.api?.getAppState()))
-  useEffect(() => board.api?.onChange((elements, appState) => { const c = count(elements, appState); setScene((x) => (x.n === c.n && x.sel === c.sel ? x : c)) }), [board.api])
+  useEffect(() => board.api?.onChange((elements, appState) => { const c = count(elements, appState); setScene((x) => (x.n === c.n && x.sel === c.sel && x.waits === c.waits && x.sugs === c.sugs ? x : c)) }), [board.api])
+  useEffect(() => { const ex = board.api; if (ex) setScene(count(ex.getSceneElements(), ex.getAppState())) }, [sug]) // eslint-disable-line react-hooks/exhaustive-deps
   const sel = scene.sel
   // Dictation's key (Settings › Voice), to say what to draw.
   const dict = usePoll('/config', 10 * 60 * 1000).data?.dictation
@@ -132,8 +144,8 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
   }, [])
 
   // A model's diagram on the board: where the last one was (a round of Refine), else beside what's
-  // there or where you're looking. Returns the ids put there.
-  const put = (got, replace = null) => {
+  // there or where you're looking, marked as suggestion s ({ id, by }). Returns the ids put there.
+  const put = (got, replace = null, s = null) => {
     const { X, api: ex } = board
     const { width, height, scrollX, scrollY, zoom } = ex.getAppState()
     const view = { x: -scrollX + width / 2 / zoom.value, y: -scrollY + height / 2 / zoom.value }
@@ -146,6 +158,7 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
       placed = got.elements.map((e) => X.newElementWith(e, { x: e.x + x1 - gx, y: e.y + y1 - gy }))
       all = all.map((e) => (replace.has(e.id) ? X.newElementWith(e, { isDeleted: true }) : e))
     } else placed = placeBeside(X, got.elements, ex.getSceneElements(), view)
+    if (s) placed = placed.map((e) => markOne(X, e, s))
     if (Object.keys(got.files || {}).length) ex.addFiles(Object.values(got.files))
     ex.updateScene({
       elements: [...all, ...placed],
@@ -181,7 +194,8 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
         }
       }
       if (!got.elements.length) throw new Error(t('The model sent back an empty diagram. Try again, or say it another way.'))
-      let ids = put(got)
+      const s = newSuggestion(labelOf(m, r.model))
+      let ids = put(got, null, s)
       drawnIds.current = ids
       const versions = [{ label: t('Draft'), scene: keep(), changes: [], issues: [], spec: r.spec || null }]
       setRun({ rounds: versions.slice(), at: 0, calls, status: 'running', step: 'review', round: 1, of: want })
@@ -200,7 +214,7 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
         if (stopRef.current) { stopped = 'you'; break }
         if (rv.done) { stopped = 'fine'; setRun((x) => ({ ...x, calls })); break }
         spec = rv.spec
-        ids = put(fromSpec(X, spec, drawOpts), ids)
+        ids = put(fromSpec(X, spec, drawOpts), ids, s)
         drawnIds.current = ids
         versions.push({ label: t('Round {n}', { n: i }), scene: keep(), changes: rv.changes || [], issues: found.map((x) => x.text), found: say(found), saw: rv.saw, spec })
         setRun((x) => ({ ...x, rounds: versions.slice(), at: versions.length - 1, calls }))
@@ -210,7 +224,8 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
       if (want && r.spec) saveRounds({ prompt, mode: 'draw', model: r.model, calls, stopped, rounds: versions.map((v, n) => ({ n, changes: v.changes, issues: v.issues, saw: v.saw, spec: v.spec })) })
       if (versions.length > 1) fit(ex.getSceneElements().filter((e) => ids.has(e.id)))
       onDrawn?.({ ids, direction: spec?.direction || drawOpts.dir || 'LR' })
-      setNote(t('Drawn by {model}. {undo} takes it back.', { model: labelOf(m, r.model), undo }))
+      setSug(s)
+      setNote(t('Drawn by {model}, as a suggestion: keep it or discard it, here or on the board.', { model: labelOf(m, r.model) }))
       setText('')
     } catch (e) { setErr(e.message); setRun((x) => (x && x.rounds.length ? { ...x, status: 'done', stop: 'error' } : null)) } finally { setBusy(false) }
   }
@@ -224,11 +239,14 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
       const picked = new Set(Object.entries(ex.getAppState().selectedElementIds || {}).filter(([, on]) => on).map(([id]) => id))
       const versions = [{ label: t('Before'), scene: keep(), changes: [], issues: [] }]
       setRun(rounds ? { rounds: [], at: 0, calls: 0, status: 'running', step: 'change', round: 0, of: rounds } : null)
+      const base = before(ex.getSceneElementsIncludingDeleted())
       const r = await api('/boards/change', { method: 'POST', body: { prompt, scene: describe(ex.getSceneElements(), picked.size ? picked : null), selected: picked.size > 0, model: m.id || undefined } })
       let calls = r.calls || 1
+      const s = newSuggestion(labelOf(m, r.model))
+      // Each round's steps marked as one suggestion, against the board as it was before them.
       const doOps = (ops) => {
         const { elements, touched } = applyOps(X, ex.getSceneElementsIncludingDeleted(), ops, look)
-        ex.updateScene({ elements, appState: { selectedElementIds: Object.fromEntries(touched.map((id) => [id, true])) }, captureUpdate: X.CaptureUpdateAction.IMMEDIATELY })
+        ex.updateScene({ elements: mark(X, base, elements, s), appState: { selectedElementIds: Object.fromEntries(touched.map((id) => [id, true])) }, captureUpdate: X.CaptureUpdateAction.IMMEDIATELY })
         reroute(X, ex, elements.filter((e) => e.elbowed && touched.includes(e.id)).map((e) => e.id))
         if (ops.layout) layoutBoard(X, ex, { dir: ops.layout, spacing: drawOpts.spacing })
         return touched
@@ -261,7 +279,8 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
         saveRounds({ prompt, mode: 'change', model: r.model, calls, stopped, rounds: versions.slice(1).map((v, k) => ({ n: k, changes: v.changes, issues: v.issues, saw: v.saw })) })
       }
       onDrawn?.({ ids: new Set(touched), direction: r.ops.layout || null })
-      setNote(t('Changed by {model}. {undo} takes it back.', { model: labelOf(m, r.model), undo }))
+      setSug(s)
+      setNote(t('Changed by {model}, as a suggestion: keep it or discard it, here or on the board.', { model: labelOf(m, r.model) }))
       setText('')
     } catch (e) { setErr(e.message); setRun((x) => (x && x.rounds.length ? { ...x, status: 'done', stop: 'error' } : null)) } finally { setBusy(false) }
   }
@@ -286,9 +305,19 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
     const spec = past?.rounds[past.pick]?.spec
     if (!spec || busy) return
     await fontsReady(look)
-    const ids = put(fromSpec(board.X, spec, drawOpts))
+    const s = newSuggestion(past.model ? labelOf(m, past.model) : '')
+    const ids = put(fromSpec(board.X, spec, drawOpts), null, s)
     drawnIds.current = ids
+    setSug(s)
     onDrawn?.({ ids, direction: spec.direction || drawOpts.dir || 'LR' })
+  }
+  // The last suggestion (or all of them) kept or discarded from here, as from the board.
+  const settle = (fn, all = false) => {
+    const { X, api: ex } = board
+    if ((!sug && !all) || !ex) return
+    ex.updateScene({ elements: fn(X, ex.getSceneElementsIncludingDeleted(), all ? null : sug.id), captureUpdate: X.CaptureUpdateAction.IMMEDIATELY })
+    setNote(fn === keepIt ? t('Kept.') : t('Discarded.'))
+    setSug(null)
   }
 
   // Asked for before the board opened (from the list): drawn once the board is up.
@@ -389,7 +418,23 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
       )}
       {err && <p className="error-text small" role="alert">{err}</p>}
       {note && <p className="muted small wb-note" role="status">{note}</p>}
+      {scene.sugs > 0 && !busy && (sug && scene.waits ? (
+        <div className="wb-sug-acts">
+          <button type="button" className="btn small primary" onClick={() => settle(keepIt)}><Icon name="check" size={12} /> {t('Keep')}</button>
+          <button type="button" className="btn small" onClick={() => settle(discardIt)}>{t('Discard')}</button>
+          {scene.sugs > 1 && <button type="button" className="btn small" onClick={() => settle(keepIt, true)}>{t('Keep all {n}', { n: scene.sugs })}</button>}
+          <span className="muted small">{t('{undo} takes it back too.', { undo })}</span>
+        </div>
+      ) : (
+        <div className="wb-sug-acts">
+          <span className="muted small">{scene.sugs === 1 ? t('A suggestion waits on the board.') : t('{n} suggestions wait on the board.', { n: scene.sugs })}</span>
+          <button type="button" className="btn small primary" onClick={() => settle(keepIt, true)}><Icon name="check" size={12} /> {scene.sugs === 1 ? t('Keep') : t('Keep all')}</button>
+          <button type="button" className="btn small" onClick={() => settle(discardIt, true)}>{scene.sugs === 1 ? t('Discard') : t('Discard all')}</button>
+        </div>
+      ))}
     </form>
   )
 }
 const labelOf = (m, id) => m.models.find((x) => x.id === id)?.label || id
+// A new suggestion's mark: which it is, and the model that made it, by name.
+function newSuggestion(by) { return { id: `ai-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, by: by || '' } }

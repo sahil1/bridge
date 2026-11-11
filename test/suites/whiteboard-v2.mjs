@@ -407,6 +407,12 @@ try {
     ok(await until(() => bare(readBoard(board)) === 2, 8000), 'stepping back to the draft puts it back on the board (two arrows with no label)', bare(readBoard(board)))
     await p.locator('.wb-versions .chip', { hasText: 'Round 2' }).click()
     ok(await until(() => bare(readBoard(board)) === 0, 8000), 'and forward to the last round again', bare(readBoard(board)))
+    // All its rounds are one suggestion, still waiting, its icons and containers outlined too.
+    const ids = new Set(live(readBoard(board)).map((e) => e.customData?.bridge?.suggestion?.id).filter(Boolean))
+    const all = live(readBoard(board)).filter((e) => e.type !== 'text')
+    ok(ids.size === 1 && all.every((e) => e.customData?.bridge?.suggestion) && (await p.locator('.wb-sug').count()) === 1, 'Refine\'s rounds are one suggestion, every shape of it marked, outlined once on the board', { ids: [...ids], unmarked: all.filter((e) => !e.customData?.bridge?.suggestion).map((e) => e.type) })
+    await p.locator('.wb-draw .wb-sug-acts button', { hasText: 'Keep' }).first().click()
+    ok(await until(() => !live(readBoard(board)).some((e) => e.customData?.bridge?.suggestion) && live(readBoard(board)).some((e) => holder(e) === 'region' && e.strokeStyle === 'dashed') && live(readBoard(board)).some((e) => holder(e) === 'vpc' && e.strokeStyle === 'solid'), 8000), 'kept: no marks left, and each container with its own lines again (a region\'s dashed, a VPC\'s solid)', live(readBoard(board)).filter((e) => holder(e)).map((e) => [holder(e), e.strokeStyle]))
   })
 
   await part('PDF export', async () => {

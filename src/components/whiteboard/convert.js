@@ -248,7 +248,8 @@ export function describe(elements, only = null) {
   const l = live(elements)
   const byId = new Map(l.map((e) => [e.id, e]))
   const textOf = (e) => String(((e.boundElements || []).map((b) => byId.get(b.id)).find((x) => x?.type === 'text')?.originalText) ?? e.name ?? '').trim()
-  const pick = (only?.size ? l.filter((e) => only.has(e.id) || (e.containerId && only.has(e.containerId))) : l).filter((e) => !e.customData?.bridge?.icon)
+  // What a suggestion takes away (suggest.js) is as good as gone.
+  const pick = (only?.size ? l.filter((e) => only.has(e.id) || (e.containerId && only.has(e.containerId))) : l).filter((e) => !e.customData?.bridge?.icon && e.customData?.bridge?.suggestion?.kind !== 'remove')
   const hex = (c) => (c && c !== 'transparent' ? c : undefined)
   const kindOf = (e) => { const it = ITEMS.get(e.customData?.bridge?.item); return it?.kind === 'container' ? 'container' : it?.kind === 'icon' ? 'icon' : e.type }
   return {
