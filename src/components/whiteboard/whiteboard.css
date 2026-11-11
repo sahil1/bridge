@@ -112,6 +112,25 @@
 .wb-sug-bar > svg { flex: none; color: var(--ai); }
 .wb-sug-bar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-sug-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* A board's Versions: each as the picture it had (a click shows it larger), who or what came
+   after it, and Put back. */
+.wb-vers { width: 100%; box-sizing: border-box; }
+.wb-vers .wb-draw-head { display: flex; align-items: center; gap: 8px; }
+.wb-vers-none { color: var(--ink-2); }
+.wb-vers-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.wb-vers-list li { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px; border-radius: 9px; border: 1px solid var(--line); background: var(--pane-2); }
+.wb-vers-list li.open { grid-template-columns: minmax(0, 1fr) auto; }
+.wb-vers-list li.open .wb-vers-pic { grid-column: 1 / -1; height: auto; max-height: 260px; }
+.wb-vers-pic { all: unset; box-sizing: border-box; width: 100%; height: 48px; display: grid; place-items: center; overflow: hidden; border-radius: 6px; background: #fff; border: 1px solid var(--line); cursor: zoom-in; color: var(--ink-3); }
+.wb-vers-list li.open .wb-vers-pic { cursor: zoom-out; }
+.wb-vers-pic:disabled { cursor: default; background: var(--pane); }
+.wb-vers-pic:focus-visible { outline: 2px solid var(--accent); }
+.wb-vers-pic img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+.wb-vers-who { display: grid; min-width: 0; font-size: 12.5px; }
+.wb-vers-who b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-vers.dark .wb-vers-pic { background: #121212; }
+.wb-vers.dark .wb-vers-pic img { filter: invert(93%) hue-rotate(180deg); }
+.app.narrow .wb-vers-list .btn { height: 40px; }
 /* The meeting moves: Group by theme under Change it; action items drawn, to add to Tasks. */
 .wb-moves { display: flex; flex-wrap: wrap; gap: 4px; }
 .wb-moves .chip { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; border: 1px solid color-mix(in srgb, var(--ai) 35%, transparent); }

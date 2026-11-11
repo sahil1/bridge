@@ -631,6 +631,56 @@ try {
     await night.ctx.close()
   })
 
+  await part('versions of a board', async () => {
+    // On the server: kept after a break, before an AI Assist change, and before one is put back.
+    const box = (id, x) => ({ id, type: 'rectangle', x, y: 100, width: 200, height: 100, angle: 0, strokeColor: '#1e1e1e', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 1, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1, link: null, locked: false })
+    const doc = (n) => JSON.stringify({ type: 'excalidraw', version: 2, source: 'test', elements: Array.from({ length: n }, (_, i) => box(`r${i}`, i * 260)), appState: { viewBackgroundColor: 'transparent' }, files: {} })
+    const { id } = await api('/boards', { title: 'Kept' })
+    let at = await api(`/boards/${enc(id)}`, { text: doc(1), mtime: (await api(`/boards/${enc(id)}/stat`)).mtime }, 'PUT')
+    at = await api(`/boards/${enc(id)}`, { text: doc(2), mtime: at.mtime }, 'PUT')
+    ok(!(await api(`/boards/${enc(id)}/versions`)).versions.length, 'saves close together keep no version')
+    const back = new Date(Date.now() - 10 * 60_000)
+    fs.utimesSync(file(id), back, back)
+    at = await api(`/boards/${enc(id)}`, { text: doc(3), mtime: fs.statSync(file(id)).mtimeMs }, 'PUT')
+    at = await api(`/boards/${enc(id)}`, { text: doc(4), mtime: at.mtime, version: { by: 'ai', label: 'Drawn by gpt-5' } }, 'PUT')
+    const vs = (await api(`/boards/${enc(id)}/versions`)).versions
+    const rects = (vid) => (JSON.parse(fs.readFileSync(path.join(BOARDS, '.versions', id, `${vid}.excalidraw`), 'utf8')).elements || []).length
+    ok(vs.length === 2 && vs[0].by === 'ai' && vs[0].label === 'Drawn by gpt-5' && rects(vs[0].id) === 3 && vs[1].by === 'you' && rects(vs[1].id) === 2, 'the board as you left it, kept when you come back after a break; and as it was before an AI Assist change, named for it', vs)
+    // In the app: Versions in the board's header, each as its picture, and Put back.
+    await openBoard(id)
+    await p.locator('.wb-view .pane-head button[aria-label="Versions"]').click()
+    const panel = p.locator('.wb-vers')
+    ok(await until(async () => (await panel.locator('.wb-vers-list li').count()) === 2, 8000) && /Before AI Assist: Drawn by gpt-5/.test(await panel.innerText()) && /As you left it/.test(await panel.innerText()), 'Versions, from the board\'s header: what each was before, newest first', await panel.innerText().catch(() => ''))
+    await shot(p, `${tag}whiteboard-v2-versions`)
+    await panel.locator('.wb-vers-list li', { hasText: 'As you left it' }).getByRole('button', { name: 'Put back' }).click()
+    ok(await until(() => live(readBoard(id)).length === 2, 8000) && await until(async () => (await panel.locator('.wb-vers-list li').count()) === 3, 5000), 'Put back: the board as it was, drawn and saved, and what was there kept as a version first', { rects: live(readBoard(id)).length, list: await panel.innerText().catch(() => '') })
+    ok(/Before a version was put back/.test(await panel.innerText()), 'named for it', await panel.innerText())
+    // An AI Assist change made in the app keeps the board as it was before it.
+    const launch = (await api(`/boards/${enc('Launch sync')}/versions`)).versions
+    ok(launch.some((v) => v.by === 'ai' && /^Grouped by theme by gpt-5$/.test(v.label || '')) && launch.some((v) => v.by === 'ai' && /^Drawn by gpt-5$/.test(v.label || '')), 'each AI Assist change in the app keeps the board as it was before it, named for the change', launch.map((v) => [v.by, v.label]))
+    await openBoard('Launch sync')
+    if (!(await p.locator('.wb-vers').count())) await p.locator('.wb-view .pane-head button[aria-label="Versions"]').click()
+    const pics = () => p.locator('.wb-vers-list img').evaluateAll((imgs) => imgs.filter((i) => i.complete && i.naturalWidth > 0).length)
+    ok(await until(async () => (await pics()) > 0, 8000), 'each version looked at as the picture the board had then', await pics())
+    await p.locator('.wb-vers-list .wb-vers-pic').first().click()
+    await shot(p, `${tag}whiteboard-v2-versions-pictures`)
+    await p.locator('.wb-vers button[aria-label="Close"]').click()
+    await openBoard(id)
+    // A rename takes them along; a delete takes them away.
+    await api(`/boards/${enc(id)}`, { title: 'Kept too' }, 'PATCH')
+    ok((await api(`/boards/${enc('Kept too')}/versions`)).versions.length === 3, 'renamed, the board keeps its versions')
+    await p.locator('.wb-vers button[aria-label="Close"]').click({ timeout: 2000 }).catch(() => {})
+    // Dark.
+    const night = await page(b, kit.url, { mode: 'dark', store: { 'cc-ws': { tabs: ['view:whiteboard:Kept too'], active: 'view:whiteboard:Kept too', side: null, split: false, group: 'main' } }, before: async (c) => watch(c) })
+    await night.p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
+    await night.p.locator('.wb-view .pane-head button[aria-label="Versions"]').click()
+    ok(await until(() => night.p.locator('.wb-vers .wb-vers-list li').count(), 8000), 'dark: Versions')
+    await shot(night.p, `${tag}whiteboard-v2-versions-dark`)
+    await night.ctx.close()
+    await api(`/boards/${enc('Kept too')}`, null, 'DELETE')
+    ok(!fs.existsSync(path.join(BOARDS, '.versions', 'Kept too')), 'deleted, its versions go too')
+  })
+
   await part('the credit in About', async () => {
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'license' } })))
     const credit = p.getByText('Whiteboards are drawn with Excalidraw (MIT License).').first()

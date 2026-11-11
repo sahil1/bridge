@@ -7,6 +7,7 @@ import Canvas, { useDarkMode } from './Canvas.jsx'
 import DrawPanel, { KINDS, useBoardModels } from './DrawPanel.jsx'
 import ShapePanel, { DRAG_TYPE } from './ShapePanel.jsx'
 import BoardSettings from './BoardSettings.jsx'
+import BoardVersions from './BoardVersions.jsx'
 import Suggestions from './Suggestions.jsx'
 import { loadExcalidraw } from './excalidraw.js'
 import { fromText, fromPending, kindOfFile, placeBeside } from './convert.js'
@@ -325,12 +326,17 @@ async function addShape(X, ex, item, { at, look, scheme }) {
 // In Studio's Preview (Studio.jsx): tabs, its Files and Preview, go first in the header; renamed,
 // onRenamed(new name) keeps it in Studio's tab, and deleted, onGone goes back to Studio's Files.
 export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRenamed = null, onGone = null }) {
+  // An AI Assist change about to go on the board (what it is, in words): the save that follows
+  // keeps the board as it was before it as a version (server/boards.js).
+  const aiNext = useRef(null)
   const store = useMemo(() => ({
     load: async () => { const b = await api(`/boards/${enc(id)}`); return { mtime: b.mtime, elements: b.data.elements || [], appState: b.data.appState || {}, files: b.data.files || {}, pending: b.data.bridge?.pending || null } },
     save: async ({ X, elements, appState, files, mtime, force }) => {
       const text = X.serializeAsJSON(elements, appState, files, 'local')
       const preview = elements.length ? await previewOf(X, elements, appState, files).catch(() => null) : null
-      return send(`/boards/${enc(id)}`, { text, mtime, force, preview }, 'PUT')
+      const ai = aiNext.current
+      aiNext.current = null
+      return send(`/boards/${enc(id)}`, { text, mtime, force, preview, ...(ai ? { version: { by: 'ai', label: ai } } : {}) }, 'PUT')
     },
     stat: () => api(`/boards/${enc(id)}/stat`),
   }), [id])
@@ -393,6 +399,14 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
     await api(`/boards/${enc(id)}`, { method: 'DELETE' })
     refetch('/boards')
     if (onGone) onGone(); else openBoards({ replace: `view:whiteboard:${id}` })
+  }
+  // A version put back: what's drawn saved first (the server keeps it as a version), then the
+  // version drawn in its place (⌘Z takes that back too).
+  const putBack = async (v) => {
+    await d.flush()
+    await api(`/boards/${enc(id)}/versions/${enc(v.id)}/restore`, { method: 'POST' })
+    await d.takeTheirs()
+    refetch('/boards')
   }
   const [naming, setNaming] = useState(false)
   const [only, setOnly] = useState(false)
@@ -467,12 +481,14 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
             </div>
           )} />}
         </span>}
+        {wide && <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-label={t('Versions')} title={t('Versions: as you left it, and before each AI Assist change')} aria-pressed={panel === 'versions'}><Icon name="clock" size={14} /></button>}
         <button type="button" className={`win-btn${panel === 'settings' ? ' on' : ''}`} onClick={() => setPanel(panel === 'settings' ? null : 'settings')} aria-label={t('Whiteboard Settings')} title={t('Whiteboard Settings')} aria-pressed={panel === 'settings'}><Icon name="settings" size={14} /></button>
         <AiAssist className="btn small wb-ai-btn" compact={!wide} on={panel === 'draw'} disabled={!d.board.api} items={() => drawAssist(panel === 'draw', !!count.n, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel('draw') } else setPanel(null) }, count.sel, studio)} />
         <span className="menu-anchor">
           <button type="button" className="win-btn" onClick={() => setMenu(menu === 'more' ? null : 'more')} aria-label={t('More')} title={t('More')}><Icon name="more" size={14} /></button>
           {menu === 'more' && <Menu onClose={() => setMenu(null)} items={[
             { label: t('Rename…'), icon: 'edit', run: () => setNaming(true) },
+            !wide && { label: t('Versions'), icon: 'clock', run: () => setPanel('versions') },
             !wide && d.board.api && { label: t('Lay out left to right'), icon: 'split', run: () => layout('LR') },
             !wide && d.board.api && { label: t('Lay out top to bottom'), icon: 'layers', run: () => layout('TB') },
             !wide && d.board.api && { label: t('Export as PNG'), icon: 'image', run: () => exp('png') },
@@ -504,8 +520,9 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
               </div>
             </div>
           )}
-          {panel === 'draw' && d.board.api && <div className="wb-draw-wrap"><DrawPanel board={d.board} start={start} want={want} onStarted={() => setStart(null)} onClose={() => setPanel(null)} compact={!wide} boardId={id} look={boardLook} prefs={prefs} onDrawn={drawn} onSave={() => d.flush()} /></div>}
+          {panel === 'draw' && d.board.api && <div className="wb-draw-wrap"><DrawPanel board={d.board} start={start} want={want} onStarted={() => setStart(null)} onClose={() => setPanel(null)} compact={!wide} boardId={id} look={boardLook} prefs={prefs} onDrawn={drawn} onSave={() => d.flush()} onAi={(what) => { aiNext.current = what }} /></div>}
           {panel === 'settings' && <div className="wb-draw-wrap"><BoardSettings look={boardLook} onLook={pickLook} prefs={prefs} onPrefs={setPrefs} onClose={() => setPanel(null)} /></div>}
+          {panel === 'versions' && <div className="wb-draw-wrap"><BoardVersions id={id} onRestore={putBack} onClose={() => setPanel(null)} dark={dark} /></div>}
         </div>
       </div>
     </div>

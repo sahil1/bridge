@@ -146,8 +146,10 @@ export async function create({ title, source } = {}) {
 
 // Saved from the page: the whole file, and the small picture the list shows. mtime is what the page
 // loaded or last saved; a different one on disk means something else (an agent, the chief of staff,
-// another window) wrote it since, and the page asks before overwriting (force).
-export async function save(id, { text, mtime, force = false, preview } = {}) {
+// another window) wrote it since, and the page asks before overwriting (force). What was there is
+// kept as a version first when it's from before a break, or when this save is an AI Assist change
+// (version: { by: 'ai', label }).
+export async function save(id, { text, mtime, force = false, preview, version } = {}) {
   const file = fileOf(id)
   if (typeof text !== 'string') throw new Error('Expected the drawing')
   if (Buffer.byteLength(text) > MAX_BOARD) throw new Error('This whiteboard is too big to save (40 MB at most): take a picture or two out')
@@ -157,6 +159,8 @@ export async function save(id, { text, mtime, force = false, preview } = {}) {
   const st = await fsp.stat(file).catch(() => null)
   if (!st) throw Object.assign(new Error('No such whiteboard'), { status: 404 })
   if (!force && mtime != null && Math.abs(st.mtimeMs - Number(mtime)) > 1) throw Object.assign(new Error('This whiteboard was changed somewhere else since you opened it'), { status: 409, conflict: true })
+  const ai = version?.by === 'ai'
+  if (ai || Date.now() - st.mtimeMs >= BREAK_MS) await keepVersion(id, ai ? { by: 'ai', label: version.label } : { by: 'you' }).catch(() => {})
   await writeWhole(file, text)
   if (typeof preview === 'string' && /^data:image\/png;base64,/.test(preview) && preview.length < 3_000_000) {
     await writeWhole(path.join(previews(), `${id}.png`), Buffer.from(preview.split(',')[1], 'base64')).catch(() => {})
@@ -164,9 +168,78 @@ export async function save(id, { text, mtime, force = false, preview } = {}) {
   return stat(id)
 }
 
-// The same file under its new name, with its picture and its rounds of Refine. A change of capitals
-// only ("roadmap" to "Roadmap") is the same name to macOS and Windows, so it isn't taken as one in
-// use.
+// ---------- Versions ----------
+// A board's earlier states, to look at (as the small picture it had) and put back, as Studio keeps
+// a file's: the board as you left it, kept when you come back to it after a break (a save more
+// than BREAK_MS after the last); as it was before each AI Assist change, named for the change; and
+// as it was before a version was put back. Each a copy of the file and its picture, in
+// .versions/<board> beside the boards, newest first, KEEP_VERSIONS at most.
+const BREAK_MS = 5 * 60_000
+const KEEP_VERSIONS = 40
+const versionsDir = (id) => path.join(folder(), '.versions', id)
+const inVersions = new Map() // a board -> its last change to its versions, so they go one at a time
+const oneAtATime = (id, fn) => {
+  const run = (inVersions.get(id) || Promise.resolve()).then(fn)
+  const tail = run.catch(() => {})
+  inVersions.set(id, tail)
+  tail.then(() => { if (inVersions.get(id) === tail) inVersions.delete(id) })
+  return run
+}
+async function readVersions(id) {
+  try { return JSON.parse(await fsp.readFile(path.join(versionsDir(id), 'index.json'), 'utf8')).versions || [] } catch { return [] }
+}
+// The board as it is on disk now, kept as a version: not an empty one, nor the same file as the
+// newest (by its time and size).
+function keepVersion(id, { by = 'you', label = null } = {}) {
+  return oneAtATime(id, async () => {
+    const file = fileOf(id)
+    const st = await fsp.stat(file).catch(() => null)
+    if (!st || st.size < 400) return null
+    const list = await readVersions(id)
+    if (list[0] && list[0].from === st.mtimeMs && list[0].size === st.size) return list[0]
+    const dir = versionsDir(id)
+    await fsp.mkdir(dir, { recursive: true })
+    const vid = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+    await fsp.copyFile(file, path.join(dir, `${vid}${EXT}`))
+    const picture = await fsp.copyFile(path.join(previews(), `${id}.png`), path.join(dir, `${vid}.png`)).then(() => true, () => false)
+    const v = { id: vid, at: new Date(st.mtimeMs).toISOString(), by, ...(label ? { label: String(label).slice(0, 120) } : {}), size: st.size, from: st.mtimeMs, picture }
+    const next = [v, ...list]
+    const gone = next.splice(KEEP_VERSIONS)
+    await writeWhole(path.join(dir, 'index.json'), JSON.stringify({ versions: next }, null, 1))
+    for (const o of gone) for (const f of [`${o.id}${EXT}`, `${o.id}.png`]) await fsp.rm(path.join(dir, f), { force: true }).catch(() => {})
+    return v
+  })
+}
+export async function versions(id) {
+  fileOf(id)
+  return { versions: (await readVersions(id)).map(({ id: vid, at, by, label, size, picture }) => ({ id: vid, at, by, label: label || null, size, picture: !!picture })) }
+}
+const versionOf = async (id, vid) => {
+  fileOf(id)
+  const v = (await readVersions(id)).find((x) => x.id === String(vid))
+  if (!v) throw Object.assign(new Error('No such version of this whiteboard'), { status: 404 })
+  return v
+}
+export async function versionPicture(id, vid) {
+  const v = await versionOf(id, vid)
+  const p = path.join(versionsDir(id), `${v.id}.png`)
+  if (!(await exists(p))) throw Object.assign(new Error('No picture of that version'), { status: 404 })
+  return p
+}
+// A version put back: the board as it is now kept first (so this can be undone too), then the
+// version's file and picture in its place.
+export async function restoreVersion(id, vid) {
+  const v = await versionOf(id, vid)
+  const text = await fsp.readFile(path.join(versionsDir(id), `${v.id}${EXT}`), 'utf8')
+  await keepVersion(id, { by: 'restored' })
+  await writeWhole(fileOf(id), text)
+  await fsp.copyFile(path.join(versionsDir(id), `${v.id}.png`), path.join(previews(), `${id}.png`)).catch(() => {})
+  return stat(id)
+}
+
+// The same file under its new name, with its picture, its rounds of Refine and its versions. A
+// change of capitals only ("roadmap" to "Roadmap") is the same name to macOS and Windows, so it
+// isn't taken as one in use.
 export async function rename(id, title) {
   const from = fileOf(id)
   if (!(await exists(from))) throw Object.assign(new Error('No such whiteboard'), { status: 404 })
@@ -182,11 +255,12 @@ export async function rename(id, title) {
   await move(from, fileOf(to))
   await move(path.join(previews(), `${id}.png`), path.join(previews(), `${to}.png`)).catch(() => {})
   await move(path.join(roundsDir(), `${id}.json`), path.join(roundsDir(), `${to}.json`)).catch(() => {})
+  await move(versionsDir(id), versionsDir(to)).catch(() => {})
   return stat(to)
 }
 
 // Out of the list, into .trash in the same folder (with the time, so two of the same name both
-// stay), where it can be found again.
+// stay), where it can be found again. Its versions go, so a new board of its name starts afresh.
 export async function remove(id) {
   const from = fileOf(id)
   if (!(await exists(from))) throw Object.assign(new Error('No such whiteboard'), { status: 404 })
@@ -194,6 +268,7 @@ export async function remove(id) {
   await fsp.rename(from, path.join(trash(), `${id} ${new Date().toISOString().replace(/[:.]/g, '-')}${EXT}`))
   await fsp.rm(path.join(previews(), `${id}.png`), { force: true })
   await fsp.rm(path.join(roundsDir(), `${id}.json`), { force: true })
+  await fsp.rm(versionsDir(id), { recursive: true, force: true })
   return { ok: true }
 }
 
@@ -203,6 +278,7 @@ export async function update(id, { source, mode = 'replace' } = {}) {
   const src = sourceOf(source)
   if (!src) throw new Error('Give the diagram as Mermaid, draw.io or Excalidraw')
   const b = await readBoard(id)
+  await keepVersion(id, { by: 'agent' }).catch(() => {})
   const data = src.kind === 'excalidraw' && mode === 'replace' ? src.data
     : { ...b.data, bridge: { ...(b.data.bridge || {}), pending: { kind: src.kind, mode: mode === 'add' ? 'add' : 'replace', at: new Date().toISOString(), ...(src.kind === 'excalidraw' ? { elements: src.data.elements, files: src.data.files || {} } : { text: src.text }) } } }
   await writeWhole(fileOf(id), JSON.stringify(data))
@@ -791,6 +867,9 @@ export function routes(app, { wrap, onComputer, counted }) {
   app.get('/api/boards/:id/rounds', route((req) => rounds(req.params.id)))
   app.put('/api/boards/:id/rounds', route((req) => saveRounds(req.params.id, req.body || {})))
   app.post('/api/boards/:id/write', route((req) => writeUp(req.params.id, req.body || {})))
+  app.get('/api/boards/:id/versions', route((req) => versions(req.params.id)))
+  app.get('/api/boards/:id/versions/:vid/picture', async (req, res) => { try { res.set('Cache-Control', 'no-cache'); res.sendFile(await versionPicture(req.params.id, req.params.vid), { dotfiles: 'allow' }) } catch (e) { fail(res, e) } })
+  app.post('/api/boards/:id/versions/:vid/restore', route((req) => restoreVersion(req.params.id, req.params.vid)))
   // dotfiles: the boards live in a dot folder (~/.bridge-ai), which sendFile otherwise won't serve from.
   app.get('/api/boards/:id/preview', async (req, res) => { try { res.set('Cache-Control', 'no-cache'); res.sendFile(await previewFile(req.params.id), { dotfiles: 'allow' }) } catch (e) { fail(res, e) } })
   app.put('/api/boards/:id', route((req) => save(req.params.id, req.body || {})))

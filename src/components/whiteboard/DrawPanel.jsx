@@ -15,10 +15,10 @@ import { holderOf, contents } from './holders.js'
 import CopyButton from '../CopyButton.jsx'
 
 // "Draw this", "Change it" and "Ask" (about the shapes selected, answered here and changing
-// nothing): words (typed, or said with the dictation key) to a model, and back
-// as shapes on the board: a suggestion, marked on the board (suggest.js) to keep or discard there
-// or here, which ⌘Z takes back too. Drawing can also start from a meeting, a project or an agent's
-// work. The model is yours (models()): what it's sent is said under the button.
+// nothing): words (typed, or said with the dictation key) to a model, and back as shapes on the
+// board: a suggestion, marked on the board (suggest.js) to keep or discard there or here, which ⌘Z
+// takes back too. Drawing can also start from a meeting, a project, an agent's work or what's on
+// the board. The model is yours (models()): what it's sent is said under the button.
 //   Refine: after the first drawing the model looks over its own work and improves it, up to the
 // number of rounds picked. Each round the board is checked here (review.js: overlaps, crossings,
 // arrows with no words…), and a model that can see gets a picture of it too. It stops early once
@@ -78,13 +78,14 @@ const say = (issues) => issues.map((x) => t(ISSUE[x.kind] || x.kind, { n: x.n })
 // board: { X, api } of the drawing on screen. start: a drawing asked for before the board opened
 // ({ prompt, kind, from, model, refine }), drawn straight away. boardId: the board's name, to keep
 // its rounds by. look: the board's look. prefs: what the whiteboard has learnt (colours, spacing,
-// direction). onSave(): the board saved now (before it's written up). onDrawn({ ids, direction }):
-// after a model has drawn, for learning from the edits
-// that follow. want: { mode, n }, the way AI Assist's menu asked for (Draw this, Change it or Ask),
-// or a meeting move to make straight away (themes, timeline, actions), or the board written up as
-// a document or a deck (doc, deck), which keeps the panel as it was.
+// direction). onSave(): the board saved now (before it's written up). onAi(what): an AI Assist
+// change about to go on the board, in words, so the board as it was is kept as a version (its
+// Versions, BoardVersions.jsx). onDrawn({ ids, direction }): after a model has drawn, for learning
+// from the edits that follow. want: { mode, n }, the way AI Assist's menu asked for (Draw this,
+// Change it or Ask), or a meeting move to make straight away (themes, timeline, actions), or the
+// board written up as a document or a deck (doc, deck), which keeps the panel as it was.
 const modeOf = (w) => (w === 'themes' ? 'change' : w === 'timeline' || w === 'actions' ? 'draw' : w === 'doc' || w === 'deck' ? null : w)
-export default function DrawPanel({ board, start, want = null, onStarted, onClose, compact = false, boardId = null, look = 'clean', prefs = null, onDrawn, onSave }) {
+export default function DrawPanel({ board, start, want = null, onStarted, onClose, compact = false, boardId = null, look = 'clean', prefs = null, onDrawn, onSave, onAi }) {
   const els = board.api?.getSceneElements() || []
   const [mode, setMode] = useState(start ? 'draw' : modeOf(want?.mode) || (els.length ? 'change' : 'draw'))
   const [text, setText] = useState(start?.prompt || '')
@@ -212,6 +213,7 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
       }
       if (!got.elements.length) throw new Error(t('The model sent back an empty diagram. Try again, or say it another way.'))
       const s = newSuggestion(labelOf(m, r.model))
+      onAi?.(t('Drawn by {model}', { model: labelOf(m, r.model) }))
       let ids = put(got, null, s)
       drawnIds.current = ids
       const versions = [{ label: t('Draft'), scene: keep(), changes: [], issues: [], spec: r.spec || null }]
@@ -293,6 +295,7 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
       const r = await api('/boards/themes', { method: 'POST', body: { scene: describe(all, picked.size ? picked : null), selected: picked.size > 0, model: m.id || undefined } })
       await fontsReady(look)
       const s = newSuggestion(labelOf(m, r.model))
+      onAi?.(t('Grouped by theme by {model}', { model: labelOf(m, r.model) }))
       const { elements, touched } = groupBy(X, ex.getSceneElementsIncludingDeleted(), r.groups, look)
       ex.updateScene({ elements: mark(X, base, elements, s), appState: { selectedElementIds: {} }, captureUpdate: X.CaptureUpdateAction.IMMEDIATELY })
       fit(ex.getSceneElements().filter((e) => touched.includes(e.id)))
@@ -325,6 +328,7 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
       const n = r.ops.update.length + r.ops.add.length + r.ops.connect.length + r.ops.remove.length + (r.ops.layout ? 1 : 0)
       if (!n) { setNote(t('{model} found nothing to change.', { model: labelOf(m, r.model) })); setRun(null); return }
       await fontsReady(look)
+      onAi?.(t('Changed by {model}', { model: labelOf(m, r.model) }))
       let touched = doOps(r.ops)
       versions.push({ label: t('Change'), scene: keep(), changes: [], issues: [] })
       setRun(rounds ? { rounds: versions.slice(), at: 1, calls, status: 'running', step: 'review', round: 1, of: rounds } : null)
@@ -406,6 +410,7 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
     if (!spec || busy) return
     await fontsReady(look)
     const s = newSuggestion(past.model ? labelOf(m, past.model) : '')
+    onAi?.(t('A version of the last Refine put on'))
     const ids = put(fromSpec(board.X, spec, drawOpts), null, s)
     drawnIds.current = ids
     setSug(s)
