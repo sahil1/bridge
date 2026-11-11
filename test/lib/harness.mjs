@@ -405,7 +405,9 @@ export async function browser() {
 // in place before it opens (WebKit doesn't apply ones added after). Calls that would reach the
 // internet (news, markets, weather, mail) are turned away. Terminals are drawn as page elements
 // (cc-term-dom), so a test can read their rows as text; store { 'cc-term-dom': false } for the GPU.
-export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440, height = 900, phone = false, mic = true, store = {}, before, locale } = {}) {
+// waitUntil: how far the page has got when it's handed back ('load' unless said: a test that holds
+// one of the app's files back says 'domcontentloaded', as the app may fetch it before 'load').
+export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440, height = 900, phone = false, mic = true, store = {}, before, locale, waitUntil = 'load' } = {}) {
   const ctx = await b.newContext({ viewport: phone ? { width: 390, height: 844 } : { width, height }, ...(phone ? { isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : {}), colorScheme: mode, ...(locale ? { locale } : {}), ...(mic && b.browserType().name() === 'chromium' ? { permissions: ['microphone'] } : {}) })
   await ctx.addInitScript(({ look, more }) => { try { localStorage.setItem('cc-toured', JSON.stringify({ desktop: true, phone: true })); localStorage.setItem('cc-appearance', JSON.stringify({ ...look, text: 'm' })); for (const [k, v] of Object.entries(more)) localStorage.setItem(k, JSON.stringify(v)) } catch { /* no storage */ } }, { look: { mode, theme }, more: { 'cc-term-dom': true, ...store } })
   // Playwright's own WebKit build freezes the whole page on pushManager.getSubscription() (Settings ›
@@ -422,7 +424,7 @@ export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440
   // A page whose process crashed is closed, and every call on it fails as "Target page, context or
   // browser has been closed" (dictation-cleanup in WebKit, once in CI): the log says so, and where.
   p.on('crash', () => console.log(`the page crashed (${b.browserType().name()}): ${p.url()}`))
-  await p.goto(url)
+  await p.goto(url, { waitUntil })
   return { ctx, p, errors }
 }
 // A page's errors besides what WebKit reports for requests it couldn't make (offline, a reload, the
