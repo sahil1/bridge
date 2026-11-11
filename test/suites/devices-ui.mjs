@@ -207,9 +207,26 @@ try {
 
   // ---------- Details, and a new name ----------
   const deskRow = s.p.locator('#st-machines .mch-row', { hasText: 'Desk' })
+  // What the window showed if Desk's details don't open (once, on CI's macOS WebKit runner, they
+  // didn't in 10 seconds; here they show in well under a second): whether Settings › Devices is
+  // still open, Desk's row and whether its Details says it's open, a section that broke, and what
+  // the window wrote down or threw.
+  const detailsShown = async () => ({
+    ...(await s.p.evaluate(() => {
+      const row = [...document.querySelectorAll('#st-machines .mch-row')].find((r) => r.innerText.includes('Desk'))
+      const btn = row && [...row.querySelectorAll('button')].find((x) => x.innerText.includes('Details'))
+      return { settings: !!document.querySelector('.modal.settings'), devices: !!document.querySelector('#st-machines'), desk: row ? row.innerText.replace(/\s+/g, ' ').slice(0, 200) : null,
+        expanded: btn?.getAttribute('aria-expanded') ?? null, about: !!row?.querySelector('.mch-about'), broke: document.querySelector('.modal.settings .crash, .crash-screen')?.innerText.slice(0, 200) ?? null }
+    }).catch((e) => ({ page: e.message }))),
+    uiErrors: fs.existsSync(uiLog) ? fs.readFileSync(uiLog, 'utf8').split('\n').filter((l) => /^\d{4}-\d\d-\d\dT/.test(l)).slice(-3) : [],
+    pageErrors: s.errors.slice(-3),
+  })
   await deskRow.locator('button', { hasText: 'Details' }).click()
   const about = deskRow.locator('.mch-about')
-  await about.locator('.mch-facts').waitFor({ timeout: 10000 })
+  await about.locator('.mch-facts').waitFor({ timeout: 10000 }).catch(async (e) => {
+    await shot(s.p, `${tag}devices-details-missing`)
+    throw new Error(`Desk's Details didn't open: ${JSON.stringify(await detailsShown())}`, { cause: e })
+  })
   const facts = await about.innerText()
   const deskSelf = (await c.api('/machines')).here
   ok(['System', 'Memory', 'Bridge AI', 'Relay', 'Linked', 'Security code'].every((x) => facts.includes(x)), 'Details: what Desk is, how it\'s reached and since when', facts)
