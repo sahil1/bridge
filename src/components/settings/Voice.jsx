@@ -4,7 +4,7 @@ import { api, usePoll, viaRelay } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
 import Dictation from './Dictation.jsx'
 import SpokenAnswers from '../../voice/SpokenAnswers.jsx'
-import { t } from '../../i18n/index.js'
+import { t, tx } from '../../i18n/index.js'
 import '../meetings/meetings.css'
 
 // Settings › Voice: the speech models this computer can run (the ones it can't aren't listed), the
@@ -14,6 +14,9 @@ import '../meetings/meetings.css'
 // that reads the Chief of Staff's answers aloud (voice/SpokenAnswers.jsx), where a robotic one is
 // swapped for a natural one, so it isn't under Advanced.
 const size = (mb) => (mb >= 1000 ? t('{n} GB', { n: (mb / 1000).toFixed(1) }) : t('{n} MB', { n: mb }))
+// What the server says of each speech model (server/speech.js), marked here so it's translated.
+tx('Accurate and quick on any computer. English and 24 more European languages, which it tells apart itself.'); tx('The best at tool names and jargon (worktree, Claude Code).')
+tx("For the languages Parakeet doesn't hear. Accurate and still quick."); tx('Light and quick.'); tx('The lightest that does the job.'); tx('The most accurate Whisper, and the slowest.')
 const heard = (l) => (l === 'auto' ? t('about 100 languages') : l?.length === 1 ? t('English only') : t('{n} languages', { n: l?.length || 0 }))
 
 export default function Voice() {
@@ -43,7 +46,7 @@ export default function Voice() {
       <li className={on ? 'on' : ''} data-model={x.id}>
         <span className="mt-model-main">
           <b>{x.label}{x.best && <span className="best-tag">{t('recommended')}</span>}</b>
-          <small>{x.note} {t('{size}, {languages}. {license}, by {by}.', { size: size(x.mb), languages: heard(x.languages), license: x.license, by: x.by })}</small>
+          <small>{x.note ? t(x.note) : ''} {t('{size}, {languages}. {license}, by {by}.', { size: size(x.mb), languages: heard(x.languages), license: x.license, by: x.by })}</small>
           {dl && !dl.error && <span className="vs-bar" role="progressbar" aria-valuenow={dl.percent} aria-valuemin={0} aria-valuemax={100} aria-label={t('Downloading {model}', { model: x.label })}><span style={{ width: `${dl.percent}%` }} /></span>}
           {dl?.error && <span className="error-text small">{dl.error}</span>}
           {x.runtime === 'whisper' && !x.usable && <span className="muted small">{t('Needs whisper.cpp, a free program, on this computer.')}</span>}

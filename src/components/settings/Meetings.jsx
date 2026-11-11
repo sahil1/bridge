@@ -177,7 +177,7 @@ export default function Meetings({ onOpenAgent }) {
   const service = (x) => (
     <label key={x.id} className={`mt-engine ${d.engine === x.id ? 'on' : ''}`}>
       <input type="radio" name="engine" checked={d.engine === x.id} onChange={() => set({ engine: x.id })} />
-      <span className="mt-engine-main"><b>{x.label}</b><small>{x.custom ? t('Its address, key and model, in Settings › Model Providers') : x.price[x.model] ? t('{model}, {price} an hour', { model: x.model, price: x.price[x.model] }) : x.model}</small></span>
+      <span className="mt-engine-main"><b>{x.custom ? t('Another OpenAI-style service') : x.label}</b><small>{x.custom ? t('Its address, key and model, in Settings › Model Providers') : x.price[x.model] ? t('{model}, {price} an hour', { model: x.model, price: x.price[x.model] }) : x.model}</small></span>
       {x.ready ? <span className="mt-state good">{t('Key saved')}</span> : <button type="button" className="link-btn" onClick={(e) => { e.preventDefault(); openSpeechKeys() }}>{x.custom ? t('Set it up') : t('Add a key')}</button>}
     </label>
   )
