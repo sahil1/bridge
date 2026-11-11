@@ -7,7 +7,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { startKit, checks, until, browser, page, shot, ROOT } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, noServiceWorker, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('i18n-ui')
 const I18N = path.join(ROOT, 'src', 'i18n')
@@ -90,6 +90,31 @@ try {
     }
     ok(errors.length === 0, `${l}: no page errors`, errors)
     await ctx.close()
+  }
+
+  // The floating meeting card open while a meeting records, made as narrow as it goes (260 px), in
+  // each language: its links each on one line (Japanese and Chinese break between any two
+  // characters), and nothing past its edge.
+  const A = await kit.api('/meetings', { title: 'Quarterly plan', call: false })
+  const recording = { watching: true, calls: [], detect: true, float: 'meetings', floatHover: true, prompt: null, recording: { id: A.id, title: 'Quarterly plan', status: 'recording', startedAt: new Date(Date.now() - 60000).toISOString(), seconds: 60, callApps: [], callEnded: null, callEndedApp: null, stopsAt: null } }
+  for (const l of LANGS) {
+    const fl = await page(b, kit.url, { store: { 'cc-lang': l, 'cc-float-size': { w: 260 } }, before: async (c) => { await noServiceWorker(c); await c.route(/\/api\/calls(\?|$)/, (r) => r.fulfill({ json: recording })) } })
+    const card = await fl.ctx.newPage()
+    await card.setViewportSize({ width: 360, height: 520 })
+    await card.goto(`${kit.url}/?float=1`)
+    await card.waitForSelector('.float-card .fc-head', { timeout: 10000 }).catch(() => {})
+    await card.hover('.float-card .fc-head').catch(() => {})
+    const fit = await until(() => card.evaluate(() => {
+      const c = document.querySelector('.float-card')?.getBoundingClientRect()
+      const links = [...document.querySelectorAll('.float-card .fc-link')]
+      if (!c || !links.length) return null
+      // Lines of text in each: the distinct tops of its words' boxes.
+      const lines = (e) => { const r = document.createRange(); r.selectNodeContents(e); return new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size }
+      return { lines: links.map(lines), past: [...document.querySelectorAll('.float-card .fc-links > *')].filter((e) => e.getBoundingClientRect().right > c.right + 1).length }
+    }), 8000)
+    ok(!!fit && fit.lines.every((n) => n === 1) && fit.past === 0, `${l}: the meeting card's links each on one line, all inside it`, fit)
+    if (l === 'ja') await shot(card, `${tag}i18n-ja-card`)
+    await fl.ctx.close()
   }
 
   // Match this computer: the browser's language, here French.

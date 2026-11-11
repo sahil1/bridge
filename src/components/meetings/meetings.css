@@ -349,8 +349,8 @@ html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box
 .float-card .fc-stop:hover { filter: brightness(1.06); }
 
 /* The way out: to the meeting or every meeting, and the card's own pin and menu bar buttons. */
-.fc-links { display: flex; align-items: center; gap: 14px; margin-right: -6px; padding-top: 8px; border-top: 1px solid var(--line); }
-.fc-link { display: inline-flex; align-items: center; gap: 3px; height: 24px; font-size: 12px; font-weight: 500; color: var(--accent); }
+.fc-links { display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; margin-right: -6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.fc-link { display: inline-flex; align-items: center; gap: 3px; height: 24px; font-size: 12px; font-weight: 500; color: var(--accent); white-space: nowrap; }
 .fc-link:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 /* Between meetings, what needs you. */
