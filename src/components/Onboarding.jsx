@@ -6,6 +6,7 @@ import SignInButton, { InstallAgentButton, canSignIn } from './SignIn.jsx'
 import { SetupList, useSetupPlan, alreadyLine } from './SetupAll.jsx'
 import { usePhoneOffer, PhonePick } from './OnboardingPhone.jsx'
 import { runProgress } from '../setupPlan.js'
+import { RecommendCard, useRecommended } from './Recommended.jsx'
 import { t, tx } from '../i18n/index.js'
 
 // First run, in three short steps: how much Bridge AI sets up by itself (just Node.js for the agents,
@@ -14,7 +15,8 @@ import { t, tx } from '../i18n/index.js'
 // up your phone (Settings › Devices, once Bridge AI's relay exists: setup asks for nothing) and
 // whether it stays awake for your phone, your AI
 // (any plan you sign in with, what's on this computer signed in or not, with Install and Sign in
-// right there; or an API key, or a model running on this computer: any one is enough), then your
+// right there; or an API key, or a model running on this computer: any one is enough; with
+// Recommended Settings on, the model and effort that suit a signed-in Claude Code's plan), then your
 // projects (the folders your agents already worked in, the likely ones ticked). Nothing has to be
 // done to go on, and it can be closed at any step: name, weather and your phone keep their guessed
 // defaults and live in Settings. It ends on Home, in your first project.
@@ -125,10 +127,15 @@ export default function Onboarding({ onDone }) {
   const [installing, setInstalling] = useState(() => new Set()) // agents installed from here: once in, their sign-in starts by itself
   const phone = usePhoneOffer() // where to set up your phone, when Bridge AI's relay is offered
   const setup = useSetupPlan()
+  // Recommended Settings (a beta feature): once Claude Code is signed in, what suits its plan.
+  const rec = useRecommended()
   const load = () => api('/setup').then(setD).catch((e) => setErr(e.message))
-  const recheck = () => api('/subscriptions?refresh=1').then((list) => setD((x) => x && ({
-    ...x, usable: x.usable.map((a) => ({ ...a, signedIn: list.find((s) => s.kind === a.kind)?.signedIn ?? a.signedIn })),
-  }))).catch(() => {})
+  const recheck = () => {
+    if (rec.on) rec.reload(true)
+    return api('/subscriptions?refresh=1').then((list) => setD((x) => x && ({
+      ...x, usable: x.usable.map((a) => ({ ...a, signedIn: list.find((s) => s.kind === a.kind)?.signedIn ?? a.signedIn })),
+    }))).catch(() => {})
+  }
   useEffect(() => { load() }, [])
   useEffect(() => { if (!viaRelay) api('/relay').then((r) => setAwake({ can: !!r.canAwake, on: r.awake !== false })).catch(() => {}) }, [])
   // The scan starts at once, so step 2 is ready when you get there.
@@ -261,6 +268,7 @@ export default function Onboarding({ onDone }) {
                       {here && !out && <span className="wiz-ready"><Icon name="check" size={12} /> {t('Ready')}</span>}
                       {here && out && canSignIn(c.kind) && <SignInButton kind={c.kind} onCheck={recheck} terminalLink={false} className="btn small" auto={next} />}
                       {!here && <InstallAgentButton kind={c.kind} needs={c.a.needs} onCheck={load} onStart={() => setInstalling((s) => new Set(s).add(c.kind))} showLink={false} signIn={canSignIn(c.kind)} />}
+                      {here && !out && <RecommendCard r={rec.data?.agents.find((r) => r.kind === c.kind)} onAnswer={rec.answer} compact />}
                     </li>
                   )
                 })}

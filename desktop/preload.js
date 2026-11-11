@@ -79,6 +79,8 @@ if (!own) {
   // in its own pixels.
   zoom: () => { try { return webFrame.getZoomFactor() } catch { return 1 } },
   floatHide: () => ipcRenderer.invoke('bridge:float-hide'),
+  // What it shows changed on the server (a reminder put off or turned off): the app looks again now.
+  floatLook: () => ipcRenderer.invoke('bridge:float-look'),
   floatStart: (o) => ipcRenderer.invoke('bridge:float-start', o),
   floatOpen: (o) => ipcRenderer.invoke('bridge:float-open', o),
   // The card is dragged from anywhere on it, and asks the main window to watch a screen.

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { OpenSettings } from '../PermissionFix.jsx'
-import { api, usePoll, onThisComputer } from '../../api.js'
+import { useMeetings } from '../meetings/recording.jsx'
+import { useScreenAccess, useAllowCall, allowSteps } from '../meetings/allowcall.jsx'
+import { api, usePoll } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
 import { useTrial } from '../../trials.js'
 import { openMemory } from '../meetings/tools.jsx'
@@ -13,7 +14,8 @@ import '../meetings/meetings.css'
 // Settings › Meetings: which engine turns speech into text (on this computer, or a service you have
 // a key for), the language, names and terms, the model that writes the notes and what it does by
 // itself (the summary, cleaning up, naming who spoke, preparing: on unless turned off, and what each
-// reads goes to that model, so which and where it runs is said there), calls and their sound, and
+// reads goes to that model, so which and where it runs is said there), calls and their sound (and, in
+// the desktop app, the floating card's reminder before a meeting), and
 // saving them as Markdown. Under Advanced: the other speech services, suggesting what to ask, who
 // spoke, the key that mentions a meeting in a message, the floating card, and where and how notes
 // are saved. Server: speech.js, meetings.js.
@@ -83,21 +85,26 @@ function SaveNotes({ set, pickFolder }) {
   )
 }
 // Names from the call's window: Screen Recording, with why, and Allow (macOS asks once; after that
-// it's turned on in System Settings). Only on the computer it's for, where it can be asked.
+// it's turned on in System Settings, and applies once Bridge AI restarts: Restart, and Reset and ask
+// again if it's still off after, as on a meeting: meetings/allowcall.jsx). Only on the computer it's
+// for, where it can be asked. Looked at again whenever you come back to the window.
 function ScreenNames() {
-  const here = onThisComputer()
-  const { data, refresh } = usePoll(here ? '/calls/screen' : null, 10_000)
+  const { data, refresh, here } = useScreenAccess()
+  const rec = !!useMeetings()?.rec
   const [asked, setAsked] = useState(false)
   const [err, setErr] = useState(null) // macOS couldn't be asked, and why
+  const a = useAllowCall('screen', { recording: rec, started: data?.started, onAsked: refresh })
   if (!here || data?.allowed == null) return null
+  const steps = !data.allowed && (asked || a.stage !== 'off')
+  const s = allowSteps('screen', a)
   return (
     <div className="st-row st-screen-names">
       <span><b>{t('Names from the call')}</b> <span className="muted small">{data.allowed
         ? t('Screen Recording is on: the names your call shows go on the transcript. Only the words are kept, never the picture.')
-        : asked ? t('Turn on Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in Screen Recording.')
-          : t('Screen Recording puts the names your call shows on the transcript. Only the words are kept, never the picture.')}</span>{err && <span className="error-text small"> {err}</span>}</span>
-      {!data.allowed && (asked
-        ? <OpenSettings pane="audio">{t('Open it')}</OpenSettings>
+        : steps ? t('Turn on Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in Screen Recording.')
+          : t('Screen Recording puts the names your call shows on the transcript. Only the words are kept, never the picture.')}{steps && s.say}</span>{err && <span className="error-text small"> {err}</span>}</span>
+      {!data.allowed && (steps
+        ? <span className="st-screen-acts">{s.acts}</span>
         : <button type="button" className="btn small" onClick={async () => { setErr(null); try { await api('/calls/screen', { method: 'POST' }); setAsked(true) } catch (e) { setErr(t("Couldn't ask macOS: {error}", { error: e.message })) } refresh() }}>{t('Allow')}</button>)}
     </div>
   )
@@ -159,6 +166,9 @@ export default function Meetings({ onOpenAgent }) {
   const win = window.bridgeApp?.platform === 'win32'
   const hide = ['sharing', 'always', 'never'].includes(m.floatHide) ? m.floatHide : 'sharing'
   const card = !['off', 'menubar'].includes(m.floatCard) || (m.floatCard === 'menubar' && !mac)
+  // Reminded before meetings, unless turned off: before there was a switch of its own, Prepare for
+  // each meeting off meant none (server/meetprep.js reminds).
+  const remind = typeof m.remind === 'boolean' ? m.remind : m.prep !== false
   const model = d.local.models.find((x) => x.id === d.local.model)
   const pickFolder = window.bridgeApp?.pickFolder
   // A speech service: first when it's the one picked or its key is saved, else under Advanced.
@@ -270,6 +280,17 @@ export default function Meetings({ onOpenAgent }) {
 
       <section className="st-sec" data-setting="calls">
         <h4>Calls</h4>
+        {/* The floating card's reminder before a meeting (desktop/main.js): only in the desktop app,
+            with a calendar, and only while there's a card to show it on. The card's own menu turns
+            it off too, and says it's turned back on here. */}
+        {calendar && window.bridgeApp?.desktop && (
+          <label className="st-check" data-setting="meeting-remind">
+            <input type="checkbox" checked={remind} onChange={(e) => set({ remind: e.target.checked })} disabled={!card} />
+            <span title={t('Ten minutes before a meeting with other people, the floating card shows it with Join and what to go in with. Its menu puts it off until a minute before, hides it until the next meeting or turns these reminders off. Never over a screen you share.')}><b>{t('Remind me before meetings')}</b> <span className="muted small">{card
+              ? t('The floating card, ten minutes before a meeting with other people, with Join.')
+              : t('The floating card is off, under Advanced, so there\'s nothing to remind you with.')}</span></span>
+          </label>
+        )}
         <label className="st-check" data-setting="call-audio">
           <input type="checkbox" checked={m.callAudio !== false} onChange={(e) => set({ callAudio: e.target.checked })} disabled={!d.canRecordCall} />
           <span><b>Record the other side of calls</b> <span className="muted small">{d.canRecordCall ? t('What your Mac plays (Zoom, Meet, Teams), so the transcript says You or Them. macOS asks once.') : 'On a Mac with macOS 14.2 or later. Here your mic records the meeting, which still hears a call on speakers.'}</span></span>
@@ -343,13 +364,16 @@ export default function Meetings({ onOpenAgent }) {
                 <span><b>Open it when I point at it</b> <span className="muted small">Otherwise it stays a slim bar until you click it.</span></span>
               </label>
             )}
-            {/* Kept out of pictures of the screen (desktop/main.js): on a Mac, only while something
-                shares or records it, so a call doesn't see it and your screenshots do; elsewhere the
-                app can't tell, so it's on or off. Linux can't keep a window out of them at all. */}
+            {/* Out of a screen you share (desktop/floatshare.js). On a Mac, asking for a window to be
+                left out of pictures of the screen no longer holds (macOS 15 and later lets most calls'
+                screen sharing take it), so while something shares or records the screen the card
+                goes to the menu bar and comes back after; Never leaves it where it is. Only what
+                still holds is said. Windows keeps a window out of a share as asked, but can't tell
+                when the screen is shared, so it's on or off. Linux can't keep a window out at all. */}
             {card && mac && (
-              <Line label={t('Hide it from screen sharing')} hint={hide === 'sharing'
-                ? t('While you share or record your screen, a call or a recording never sees it. Your screenshots do.')
-                : hide === 'always' ? t('Never in a share, a recording or a screenshot.') : t('Anyone you share your screen with sees it.')}>
+              <Line label={t('Hide it from screen sharing')} title={t("macOS 15 and later can show a call you share your screen on a window that asks to be left out, so while you share, the card goes to the menu bar instead. A reminder before a meeting waits until you stop sharing, whatever this says.")} hint={hide === 'sharing'
+                ? t('While you share or record your screen, it goes to the menu bar and comes back after. Your screenshots show it.')
+                : hide === 'always' ? t("It goes to the menu bar while you share, and asks to be left out of your screenshots too, where macOS still keeps to that.") : t('It stays on the screen while you share, so anyone you share your screen with may see it.')}>
                 <select className="st-input" value={hide} onChange={(e) => set({ floatHide: e.target.value })} aria-label={t('Hide it from screen sharing')}>
                   <option value="sharing">{t('While I share my screen')}</option>
                   <option value="always">{t('Always, screenshots too')}</option>

@@ -7,10 +7,30 @@ const path = require('node:path')
 const { app, BrowserWindow, ipcMain, screen } = require('electron')
 const desktop = path.join(__dirname, '..', '..', 'desktop')
 const { floatWindow, floatResizer, fitWhileResizing } = require(path.join(desktop, 'floatfit.js'))
+const { make, place } = require(path.join(desktop, 'floatshare.js'))
 const URL_BASE = process.env.KIT_URL
 const preload = path.join(desktop, 'preload.js')
 let float = null
 let resizer = null
+// Shown or not as desktop/main.js places it (floatshare.js place), for what /api/calls says (c):
+// whether the screen is shared from a stand-in for native/callwatch (BRIDGE_CALLWATCH), placed again
+// as soon as that changes. As on a Mac, wherever it runs. globalThis.own: Bridge AI's own looks at
+// the screen ({ watching, capturing }), as desktop/main.js hears of them.
+let calls = null
+let moved = false
+globalThis.own = { watching: false, capturing: false }
+const share = make({ bin: process.env.BRIDGE_CALLWATCH || null, mac: true, onChange: () => setImmediate(() => { if (calls) globalThis.placeCard(calls) }) })
+globalThis.placeCard = (c) => {
+  calls = c
+  const p = place(c, { mac: true, share, moved, ...globalThis.own })
+  moved = p.moved
+  if (float && !float.isDestroyed()) {
+    if (p.show && !float.isVisible()) float.showInactive()
+    else if (!p.show && float.isVisible()) float.hide()
+  }
+  return p
+}
+app.on('will-quit', () => share.stop())
 // Where the test puts the pointer on the screen while it resizes the card (the real one stays put).
 globalThis.cursor = null
 app.whenReady().then(() => {
@@ -31,4 +51,8 @@ app.whenReady().then(() => {
   const ours = (e) => float && !float.isDestroyed() && e.sender === float.webContents
   ipcMain.on('bridge:float-size', (e, w, h, low) => { if (ours(e)) fitWhileResizing(float, screen, resizer, w, h, low) })
   ipcMain.on('bridge:float-resize', (e, edge) => { if (ours(e)) resizer.set(edge) })
+  // Looked at again now (a reminder put off or turned off), and hidden by its ×: counted.
+  globalThis.asked = { look: 0, hide: 0 }
+  ipcMain.handle('bridge:float-look', (e) => { if (ours(e)) globalThis.asked.look++; return true })
+  ipcMain.handle('bridge:float-hide', (e) => { if (ours(e)) globalThis.asked.hide++; return true })
 })

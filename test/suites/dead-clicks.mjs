@@ -1,6 +1,6 @@
 // No button that does nothing. The main views (Home, an agent's Chat, Terminal and Files, Files,
-// Studio, Meetings, Calendar, each section of Settings, the top bar and its menus, the sidebar, the
-// tabs and the Agents board) are opened in the desktop app (a stand-in for what it gives the page,
+// Studio, Meetings, Calendar, each section of Settings, the top bar and its menus, ‹ and › with
+// somewhere to go, the sidebar, the tabs and the Agents board) are opened in the desktop app (a stand-in for what it gives the page,
 // window.bridgeApp, and for where it opens a link in a new window, desktop/senders.js opens) and in
 // a plain browser, side by side. Each button and link you can see and press there is pressed, and
 // something has to come of it: the page changes or scrolls, it asks the server, the focus or the
@@ -46,7 +46,7 @@ const QUIET = [
 ]
 
 // ---------- a Bridge AI with something in each view ----------
-const kit = await startKit('dead-clicks', { config: { trials: { studio: true, home: true, files: true, routines: true, 'meeting-insights': true, 'tab-groups': true, 'usage-everywhere': true, 'signature-assist': true } } })
+const kit = await startKit('dead-clicks', { config: { trials: { studio: true, home: true, files: true, routines: true, 'meeting-insights': true, 'tab-groups': true, 'usage-everywhere': true, 'signature-assist': true, 'recommended-settings': true } } })
 // macOS's open, osascript (Finder, Terminal) and xdg-open: written down, never run.
 const NOTE = "require('fs').appendFileSync(require('path').join(__dirname, 'opened.log'), JSON.stringify(process.argv.slice(1)) + '\\n')\n"
 for (const n of ['open', 'osascript', 'xdg-open']) kit.program(n, NOTE)
@@ -156,6 +156,18 @@ const PLACES = [
     prep: (p) => p.evaluate(() => document.querySelectorAll('.modal.settings details').forEach((d) => { d.open = true })),
   })),
   { name: 'the top bar', open: async () => {}, scope: '.topbar', drill: true },
+  // ‹ and › (Back and Forward, on to start with) with somewhere to go each way: after a key (so
+  // what follows is yours, not the window opening), Meetings, then Files, then ‹ back to Meetings.
+  {
+    name: 'Back and Forward', scope: '.topbar .nav-arrows', ready: '.topbar .nav-btn[data-dir="forward"]:not([disabled])',
+    open: async (p) => {
+      await p.locator('.topbar .nav-btn').first().waitFor({ timeout: 10000 }).catch(() => {})
+      await p.keyboard.press('Shift')
+      await send(p, { paneId: 'view:meetings' }); await sleep(400)
+      await send(p, { paneId: 'view:files' }); await sleep(400)
+      await p.locator('.topbar .nav-btn[data-dir="back"]').click({ timeout: 3000 }).catch(() => {})
+    },
+  },
   { name: 'the sidebar', open: async () => {}, scope: '.cmd .rail-slot' },
   { name: 'the tabs and the Agents board', open: agentView('chat'), scope: '.cmd .ws-tabs, .cmd .ws-tab-tools, .cmd .board' },
 ]

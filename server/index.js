@@ -105,6 +105,8 @@ import * as earlyAccess from './earlyaccess.js'
 import * as crashes from './crashes.js'
 import * as cloud from './cloud.js'
 import { makeModels, forLaunch } from './models.js'
+// Recommended Settings (a beta feature): the table by plan and the effort for a task, shared with the UI.
+import { planOf, recommend, suggestEffort, isEffort } from '../src/recommended.js'
 import { makeHandoff } from './handoff.js'
 import * as asks from './asks.js'
 import * as needsYou from './needsyou.js'
@@ -198,8 +200,21 @@ const modelFor = (kind) => cfg.agents?.[kind]?.model || null
 const launchAgent = (o) => {
   const kind = o.kind || cfg.defaultAgent || 'claude'
   const picked = o.account === 'auto' || accounts.has(kind, o.account) ? o.account : accounts.accountOf(kind, null, o.resume || o.fork)
-  return rt.launch({ ...o, model: o.model === 'default' ? null : o.model || modelFor(kind), account: accounts.resolve(kind, picked) || accounts.activeId(kind) })
+  return rt.launch({ ...o, model: o.model === 'default' ? null : o.model || modelFor(kind), effort: effortFor(kind, o) || undefined, account: accounts.resolve(kind, picked) || accounts.activeId(kind) })
     .then((out) => { insights.noteLaunch(out?.paneId, o.prompt); if (kind !== 'shell') counts.started(kind); return out })
+}
+
+// How hard it thinks, with Recommended Settings on (a beta feature): the level a task's effort chip
+// picked (New, Home's box), or for 'suggest' (Chief of Staff's hand-off, bridge new) one from what
+// it's asked (src/recommended.js), else your setting for that agent (Settings › Agents), else its
+// own. Off: none is given, as before, whatever the setting says.
+function effortFor(kind, o) {
+  if (!trialOn('recommended-settings') || !adapter(kind).effort) return null
+  if (isEffort(o.effort)) return o.effort
+  const asked = o.effort === 'suggest' ? suggestEffort(o.prompt) : null
+  if (asked) return asked.effort
+  const set = cfg.agents?.[kind]?.effort
+  return isEffort(set) ? set : null
 }
 
 // Cloud agents (cloud.js) answer the agent routes below for their own panes, so they go first.
@@ -413,8 +428,9 @@ const rootOf = async (pane) => {
 // Still being finished, so hidden until turned on in Settings › About & Updates › Beta Features
 // (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
 // One that's no longer a beta stays in older configs, read by nothing (memory: Memory, now a page
-// for everyone).
-const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files']
+// for everyone). One can be on to start with (config.example.json's trials: Back and Forward), until
+// it's turned off.
+const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 const FILES_OFF = 'Files is a beta feature. Turn it on in Settings › About & Updates › Beta Features.'
@@ -1042,7 +1058,7 @@ app.post('/api/agents/launch', wrap(async (req) => {
 // New agent's choices (also a meeting's action item, meetwork.js): which agent, in which folder,
 // where in the sidebar, on its own branch or not, and its first message.
 async function launchFrom(body) {
-  const { kind = cfg.defaultAgent || 'claude', cwd, workspaceId, newSpace, label, prompt, account, alsoKind, ownBranch, branch, base, setup, remember, model, access } = body
+  const { kind = cfg.defaultAgent || 'claude', cwd, workspaceId, newSpace, label, prompt, account, alsoKind, ownBranch, branch, base, setup, remember, model, access, effort } = body
   if (kind !== 'shell' && kind !== 'chat' && !(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
   // Any model, on the one picked (its agent started on it, so the model button names it before its
   // first reply), and allowed what the access chip says.
@@ -1061,7 +1077,8 @@ async function launchFrom(body) {
   const start = (o, tree) => launchAgent({ ...o, access: level, cwd: tree?.cwd || dir, setup: tree?.setup || undefined }).catch(async (e) => { if (tree) await worktrees.tidy(tree.folder); throw e })
   // New space: the workspace takes the space name and its first tab the agent's name.
   if (kind !== 'shell' && dir !== path.join(DATA, 'chats')) projects.used(dir).catch(() => {})
-  const out = await start({ kind, label: name, workspaceId: space ? null : workspaceId || null, newSpace: space || (workspaceId ? undefined : name), prompt: String(prompt || '').trim() || undefined, account: account ? String(account) : undefined, ...chatEnv }, own)
+  // effort: the task's effort chip, or 'suggest' (launchAgent's effortFor).
+  const out = await start({ kind, label: name, workspaceId: space ? null : workspaceId || null, newSpace: space || (workspaceId ? undefined : name), prompt: String(prompt || '').trim() || undefined, account: account ? String(account) : undefined, effort: typeof effort === 'string' ? effort : undefined, ...chatEnv }, own)
   if (own) { out.worktree = { branch: own.branch, base: own.base, folder: own.folder, copied: own.copied }; counts.add('agents.ownBranch') }
   // Compare: the same first message to a second kind of agent, in the same space (with a branch of its own too).
   if (alsoKind && alsoKind !== kind && String(prompt || '').trim() && (await installed()).some((k) => k.kind === alsoKind)) {
@@ -1069,7 +1086,7 @@ async function launchFrom(body) {
     try {
       const two = `${name} (${adapter(alsoKind).label})`.slice(0, 60)
       const own2 = ownBranch ? await worktrees.create(dir, { base, label: two }) : null
-      out.alsoPaneId = (await start({ kind: alsoKind, label: two, workspaceId: ws || null, newSpace: ws ? undefined : space || name, prompt: String(prompt).trim() }, own2)).paneId
+      out.alsoPaneId = (await start({ kind: alsoKind, label: two, workspaceId: ws || null, newSpace: ws ? undefined : space || name, prompt: String(prompt).trim(), effort: typeof effort === 'string' ? effort : undefined }, own2)).paneId
       counts.add('agents.compared')
     } catch (e) { out.alsoError = e.message }
   }
@@ -1200,7 +1217,7 @@ app.post('/api/agents/:pane/fork', wrap(async (req) => {
   const a = await findAgent(req.params.pane)
   if (!adapter(a.kind).fork || !a.sessionId) throw new Error(`Forking isn't available for ${adapter(a.kind).label}${a.sessionId ? '' : ' until it has a conversation'}`)
   const name = a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title || adapter(a.kind).label
-  const out = await launchAgent({ kind: a.kind, cwd: a.cwd, label: `${name} (fork)`.slice(0, 60), workspaceId: a.workspaceId, fork: a.sessionId, account: a.accountId || undefined })
+  const out = await launchAgent({ kind: a.kind, cwd: a.cwd, label: `${name} (fork)`.slice(0, 60), workspaceId: a.workspaceId, fork: a.sessionId, account: a.accountId || undefined, effort: a.effort || undefined })
   pushFleet()
   return out
 }))
@@ -1225,7 +1242,7 @@ app.post('/api/agents/:pane/continue', wrap(async (req) => {
   // Its space goes with its last tab; open a new one by the same name then.
   const still = (await rt.fleet()).workspaces.some((w) => w.id === a.workspaceId)
   const model = forLaunch(a.kind, a.sessionId) || a.model || undefined // on the same model
-  const out = await launchAgent({ kind: a.kind, cwd: a.cwd, label: name.slice(0, 60), workspaceId: still ? a.workspaceId : null, newSpace: still ? undefined : a.workspace, resume: a.sessionId, account: id, model, pinModel: !!model })
+  const out = await launchAgent({ kind: a.kind, cwd: a.cwd, label: name.slice(0, 60), workspaceId: still ? a.workspaceId : null, newSpace: still ? undefined : a.workspace, resume: a.sessionId, account: id, model, pinModel: !!model, effort: a.effort || undefined })
   archive.removeSession(a.sessionId)
   // Stopped by a usage limit: tell it to carry on, once it's ready on the new account.
   if (req.body?.nudge && out?.paneId) queue.add(out.paneId, 'Continue from where you stopped.')
@@ -1515,7 +1532,7 @@ app.get('/api/fix/list', wrap(() => fixes.list({ callSound: !!meetings.tapBin() 
 app.get('/api/fix/check', wrap((req) => fixes.check(String(req.query.pane || ''), { folder: String(req.query.folder || '') })))
 app.post('/api/fix/claim', wrap((req) => fixes.claim(String(req.body?.pane || ''))))
 app.post('/api/fix/settings', wrap((req) => { onComputer(req); return fixes.openSettings(String(req.body?.pane || '')) }))
-app.post('/api/fix/reset', wrap((req) => { onComputer(req); return fixes.reset(String(req.body?.pane || ''), { folder: String(req.body?.folder || '') }) }))
+app.post('/api/fix/reset', wrap((req) => { onComputer(req); return fixes.reset(String(req.body?.pane || ''), { folder: String(req.body?.folder || ''), service: String(req.body?.service || '') }) }))
 // What the desktop app on this computer is allowed (desktop/main.js, now and then).
 app.post('/api/fix/desktop', wrap((req) => { onComputer(req); return fixes.appReport(req.body || {}) }))
 // Another of your devices, or your phone, asking this computer to show macOS's question: the one
@@ -1822,15 +1839,20 @@ app.get('/api/calls', wrap(() => {
   const soon = rec || prompt ? null : meetPrep.soon()
   return {
     soon,
+    // Bridge AI looking at the call's window for its names now (calls.js shot): not a share.
+    capturing: calls.capturing(),
     ...calls.now(), detect: cfg.meetings?.detect !== false, float: cfg.meetings?.floatCard || 'meetings', floatHover: cfg.meetings?.floatHover !== false, floatHide: ['always', 'never'].includes(cfg.meetings?.floatHide) ? cfg.meetings.floatHide : 'sharing',
     prompt: rec ? null : prompt,
     recording: rec && { id: rec.id, title: rec.title, status: rec.status, startedAt: rec.startedAt, seconds: Math.round(meetings.elapsed(rec.id) || 0), talking: meetings.talking(rec.id), callApps: rec.callApps || [], callEnded: rec.callEnded || null, callEndedApp: rec.callEndedApp || null, endWhy: rec.endWhy || (rec.callEnded ? 'call' : null), stopsAt: rec.stopsAt || null, callQuiet: meetings.callQuiet(rec.id) },
   }
 }))
 app.post('/api/calls/dismiss', wrap(() => { prompt = null; return { ok: true } }))
+// The floating card's reminder before a meeting, put off until it's about to start (meetprep.js).
+app.post('/api/calls/snooze', wrap((req) => meetPrep.snooze(String(req.body?.id || '').slice(0, 400))))
 // Screen Recording, for the names a call shows as people talk: whether it's allowed, and Allow
 // (macOS's own window the first time; after that, System Settings is where it's turned on).
-app.get('/api/calls/screen', wrap(async () => ({ allowed: await calls.screen() })))
+// fresh=1: looked at now, not what was kept from a moment ago. started: when this server started.
+app.get('/api/calls/screen', wrap(async (req) => ({ allowed: await calls.screen({ fresh: req.query.fresh === '1' }), started: calls.started })))
 app.post('/api/calls/screen', wrap(async (req) => { hereOnly(req, 'Allow Screen Recording'); return { allowed: await calls.screenAsk() } }))
 // The calendar event to take notes for (callevent.js): the one the call on app is for (or the call
 // on now), by its window's title, a Join in Bridge AI or when it started; with no call, the one
@@ -2850,6 +2872,9 @@ app.get('/api/config', (req, res) => res.json({
   alertSounds: cfg.alertSounds !== false, // the speaker in the top bar
   meetingKey: MEETING_KEYS.includes(cfg.meetings?.mentionKey) ? cfg.meetings.mentionKey : '@', // Settings › Meetings
   trials: Object.fromEntries(TRIALS.map((id) => [id, trialOn(id)])), // Settings › About & Updates › Beta Features
+  // The effort each agent starts with (Settings › Agents), for a task's effort chip to say: only
+  // with Recommended Settings on, as it's only passed then.
+  efforts: trialOn('recommended-settings') ? Object.fromEntries(AGENTS.filter((a) => a.effort && isEffort(cfg.agents?.[a.kind]?.effort)).map((a) => [a.kind, cfg.agents[a.kind].effort])) : {},
   trialsAuto: trialOn('meeting-insights') && meetInsights.autoOn() ? { 'meeting-insights': meetInsights.autoOn().at } : {}, // the ones that turned themselves on, when
 }))
 // The speaker in the top bar: notifications (this computer's, a browser's, your phones') come with a
@@ -2906,6 +2931,40 @@ app.put('/api/settings/raw', async (req, res) => {
 })
 app.get('/api/settings/geocode', wrap((req) => settings.geocode(req.query.q)))
 app.get('/api/agents/catalog', wrap(async () => { clearInstalledCache(); return agentCatalog() }))
+
+// ---------- Recommended Settings (a beta feature) ----------
+// For each agent that takes an effort (Claude Code): the plan its sign-in says (claude auth status,
+// on this computer), what's recommended for it (src/recommended.js), whether you answered for that
+// plan (asked again when the plan changes), and what it starts with now. Use these puts the model
+// and effort in Bridge AI's own settings (agents.<kind>), which it passes when it starts the agent;
+// nothing is written to the agent's own settings files. Keep leaves things as they are.
+app.use('/api/recommended', trialOff('recommended-settings', 'Recommended Settings'))
+async function recommendedFor(kind, { fresh = false } = {}) {
+  const s = await accounts.signInOf(kind, { fresh }).catch(() => null)
+  const plan = planOf(kind, s)
+  const set = cfg.agents?.[kind] || {}
+  return {
+    kind, label: adapter(kind).label, signedIn: s?.signedIn ?? null, plan, rec: recommend(kind, plan),
+    answered: set.recommended?.plan === plan ? set.recommended.choice : null,
+    model: set.model || null, effort: isEffort(set.effort) ? set.effort : null, models: adapter(kind).models || [],
+  }
+}
+app.get('/api/recommended', wrap(async (req) => {
+  const kinds = (await installed()).filter((a) => adapter(a.kind).effort)
+  return { runtime: rt.name, agents: await Promise.all(kinds.map((a) => recommendedFor(a.kind, { fresh: !!req.query.fresh }))) }
+}))
+app.post('/api/recommended/:kind', wrap(async (req) => {
+  const kind = req.params.kind
+  const choice = req.body?.choice
+  if (!adapter(kind).effort || !(await installed()).some((a) => a.kind === kind)) throw new Error(`No recommended settings for ${adapter(kind).label}`)
+  if (!['use', 'keep'].includes(choice)) throw new Error('Pick Use these or Keep')
+  const now = await recommendedFor(kind, { fresh: true })
+  if (choice === 'use' && (!now.rec || now.rec.none)) throw new Error(now.signedIn === false ? `Sign in to ${now.label} first: the recommendation is for your plan.` : `No recommendation for this ${now.label} sign-in, so nothing changed.`)
+  const was = cfg.agents?.[kind] || {}
+  const next = { ...was, recommended: { plan: now.plan, choice, at: new Date().toISOString() }, ...(choice === 'use' ? { model: now.rec.model, effort: now.rec.effort } : {}) }
+  afterChange(settings.patch({ agents: { ...(cfg.agents || {}), [kind]: next } }))
+  return recommendedFor(kind)
+}))
 
 // What's already on this device, so setup can be one click.
 app.get('/api/setup', wrap(async () => {
@@ -3270,7 +3329,7 @@ app.post('/api/chats', wrap(async (req) => {
   const f = await rt.fleet()
   const ws = f.workspaces.find((w) => w.label === 'Chats')
   const title = String(req.body?.title || req.body?.prompt || 'New chat').replace(/\s+/g, ' ').trim().slice(0, 40) || 'New chat'
-  const out = await launchAgent({ kind, model: model || undefined, cwd: dir, label: title, workspaceId: ws?.id, newSpace: ws ? undefined : 'Chats', prompt: String(req.body?.prompt || '').trim() || undefined, account: req.body?.account ? String(req.body.account) : undefined, ...(kind === 'chat' && model ? { env: { BRIDGE_CHAT_MODEL: model } } : {}) })
+  const out = await launchAgent({ kind, model: model || undefined, cwd: dir, label: title, workspaceId: ws?.id, newSpace: ws ? undefined : 'Chats', prompt: String(req.body?.prompt || '').trim() || undefined, account: req.body?.account ? String(req.body.account) : undefined, effort: typeof req.body?.effort === 'string' ? req.body.effort : undefined, ...(kind === 'chat' && model ? { env: { BRIDGE_CHAT_MODEL: model } } : {}) })
   pushFleet()
   if (req.body?.typed && req.body?.prompt) noteTyped({ typed: req.body.typed, text: req.body.prompt }, { kind, title, plainChat: true, paneId: out?.paneId })
   return out

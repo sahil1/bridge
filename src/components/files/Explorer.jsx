@@ -22,6 +22,7 @@ import Info from './Info.jsx'
 import Assist, { folderAssist } from './Assist.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { baseOf, getJson, postJson, useFolder, sorted, enc, joinFull, parentOf, nameOf, kindName, fmtSize, fmtWhen, WHERE_KEY } from './fsapi.js'
+import { sayPlace, takePlace, onPlaceShow, useNav, keyDir } from '../../backForward.js'
 import './explorer.css'
 
 const HOME = { machine: null, root: 'home', path: '' }
@@ -30,6 +31,8 @@ const ASKED_ABOUT = ['Desktop', 'Documents', 'Downloads']
 const SOON = () => t('Read-only for now: renaming, moving and deleting are coming.')
 const readWhere = () => { try { const w = JSON.parse(localStorage.getItem(WHERE_KEY)); return w?.root ? { machine: w.machine || null, root: String(w.root), path: String(w.path || '') } : HOME } catch { return HOME } }
 const keepWhere = (w) => { try { localStorage.setItem(WHERE_KEY, JSON.stringify({ machine: w.machine, root: w.root, path: w.path })) } catch { /* not kept */ } }
+// A folder Back or Forward goes to (src/backForward.js), as kept.
+const placeWhere = (w) => (w?.root ? { machine: w.machine || null, root: String(w.root), path: String(w.path || '') } : null)
 const typingIn = (el) => !!el?.closest?.('input, textarea, select, [contenteditable="true"], .fx-ql, .fx-info, .fx-assist')
 
 // The sidebar's list, for the computer shown, looked at again now and then.
@@ -72,9 +75,11 @@ function useSearch(base, root, path, q, hidden) {
 
 export default function Explorer() {
   const studioOn = useTrial('studio')
-  const [loc, setLocState] = useState(readWhere)
+  // Where it was, or the folder Back or Forward opens it at.
+  const [loc, setLocState] = useState(() => placeWhere(takePlace('view:files')) || readWhere())
   const setLoc = (w) => { setLocState(w); keepWhere(w) }
   const [hist, setHist] = useState({ back: [], fwd: [] })
+  const appNav = useNav()
   const [view, setView] = usePersisted('cc-fx-view', 'list')
   const [sort, setSort] = usePersisted('cc-fx-sort', { by: 'name', desc: false })
   const [hidden, setHidden] = usePersisted('cc-fx-hidden', false)
@@ -141,6 +146,8 @@ export default function Explorer() {
     setHist((h) => ({ back: [...h.back, loc].slice(-60), fwd: h.fwd.slice(1) }))
     setLoc(next); setSel(null); setQl(false); setQ('')
   }
+  // Back and Forward (src/backForward.js): each folder is a place of Files', gone to again as any is.
+  useEffect(() => onPlaceShow('view:files', (w) => { if (placeWhere(w)) go(placeWhere(w)) }), [go])
   // The folder it's in, with this one picked (as Finder does).
   const up = () => { if (loc.path) go({ ...loc, path: parentOf(loc.path) }, { select: loc.path }) }
   const toComputer = (id) => { go({ machine: id, root: 'home', path: '' }); setSel(null) }
@@ -229,6 +236,8 @@ export default function Explorer() {
     // On a button or a link, Space and Enter press it, as anywhere.
     if ((k === ' ' || k === 'Enter') && e.target.closest?.('button, a')) return
     const hit = (fn) => { e.preventDefault(); e.stopPropagation(); fn() }
+    // While the app has Back and Forward, their keys are its (src/backForward.js): each folder is a place.
+    if (appNav.on && keyDir(e)) return
     if ((mod && k === '[') || (e.altKey && k === 'ArrowLeft')) return hit(back)
     if ((mod && k === ']') || (e.altKey && k === 'ArrowRight')) return hit(forward)
     if (mod && k === 'ArrowUp') return hit(up)
@@ -252,6 +261,7 @@ export default function Explorer() {
   const guard = folder.guard || loc.hint?.guard || null
   const asking = !!guard && loc.hint?.asked !== true
   const folderName = parts.length ? parts.at(-1) : named(rootLabel)
+  useEffect(() => { sayPlace('view:files', { machine: loc.machine || null, root: loc.root, path: loc.path }, folderName) }, [loc.machine, loc.root, loc.path, folderName])
   const retry = () => setVer((v) => v + 1)
   const problem = (st) => {
     const g = st.guard || guard

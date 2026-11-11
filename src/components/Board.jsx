@@ -2,6 +2,7 @@ import Icon, { StatusDot } from './Icon.jsx'
 import { PaneHeader, usePersisted } from './layout.jsx'
 import { usePoll, fmtRelative } from '../api.js'
 import { t, tx } from '../i18n/index.js'
+import { ownTitle } from '../agentTitle.js'
 
 const FILTERS = [
   ['all', tx('All')],
@@ -46,7 +47,7 @@ function Tile({ a, p, selected, onOpen, onOpenInHerdr, onOpenSide }) {
       <button className="tile-main" onClick={() => onOpen(a.paneId)}>
         <div className="tile-top">
           <StatusDot status={a.status} />
-          <span className="tile-title">{a.title || a.tab || t('Untitled')}</span>
+          <span className="tile-title">{ownTitle(a) || a.tab || t('Untitled')}</span>
         </div>
         <div className="tile-meta">
           <span>{a.workspace}</span>

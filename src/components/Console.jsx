@@ -17,6 +17,7 @@ import { leftOf, nameOf } from './AccountMenu.jsx'
 import CloudConsole from './CloudConsole.jsx'
 import { PaneHeader } from './layout.jsx'
 import { tildePath, Menu } from './Rail.jsx'
+import { ownTitle } from '../agentTitle.js'
 import { api, usePoll, useLive, fmtTime, openInTerminal, useOutbox, relayOutbox, BASE } from '../api.js'
 import { send as sendMessage, useSending, landed } from '../sendbox.js'
 import AskOutLoud from '../voice/AskOutLoud.jsx'
@@ -26,6 +27,7 @@ import { t, tx } from '../i18n/index.js'
 import { whiteboards, isMermaid, boardFromMermaid } from './whiteboard/links.js'
 import { useTrial } from '../trials.js'
 import { makeRoutine, fromMessage } from './routineDraft.js'
+import { sayPlace } from '../backForward.js'
 
 const KEYS = [
   ['1', '1'], ['2', '2'], ['3', '3'], ['enter', '⏎ Enter'], ['esc', 'Esc'],
@@ -692,6 +694,8 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
     const saved = agent && readViews()[agent.paneId]
     setViewRaw(saved || (agent?.caps?.chat ? 'chat' : 'terminal'))
   }, [agent?.paneId, agent?.kind])
+  // Which view, for Back and Forward (src/backForward.js): each is a place of the agent's tab.
+  useEffect(() => { if (agent?.paneId) sayPlace(agent.paneId, view, t(VIEWS.find(([v]) => v === view)?.[2] || '')) }, [agent?.paneId, view])
   useEffect(() => { if (!flash) return; const t = setTimeout(() => setFlash(null), flash.length > 60 ? 8000 : 3000); return () => clearTimeout(t) }, [flash])
   // Its first-run screens have their own card (FirstRun.jsx), so no raw keys for those.
   const firstRunNow = showsFirstRun(agent)
@@ -849,7 +853,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
     } catch (e) { setFlash(e.message) }
   }
 
-  const title = agent.chief ? t('Chief of Staff') : agent.title || agent.tab || agent.workspace
+  const title = agent.chief ? t('Chief of Staff') : ownTitle(agent) || agent.tab || agent.workspace
   const kindName = agent.kindLabel || agent.kind
   // Named by you (Rename): the name is its title, so the tab's name isn't said twice.
   const where = agent.chief ? (agent.thread && !agent.thread.main ? t('{name} thread · {kind}', { name: agent.thread.name, kind: kindName }) : t('{kind} · sends work to your agents', { kind: kindName })) : `${agent.workspace}${agent.tab && !agent.named && !/^\d+$/.test(agent.tab) ? ` › ${agent.tab}` : ''} · ${kindName}`

@@ -7,7 +7,12 @@
 // languages. And on a short screen, opened, it's no taller than the screen, zoomed or not. Resized
 // by its edges and corners as any window (a stand-in pointer, so the real one stays put): the edge
 // follows the pointer and the other stays, the card fills its window, taller shows more of what's
-// been said, the size is kept, and a double-click puts it back.
+// been said, the size is kept, and a double-click puts it back. While the screen is shared (a
+// stand-in for native/callwatch): a meeting about to start and what needs you aren't shown, and
+// come back by themselves once it stops; the meeting being recorded's card goes to the menu bar and
+// comes back as it was, where it was (not for Bridge AI's own look at the screen). A reminder's menu by its
+// ×, whole in the window: Remind me 1 min before (put off, and the app told to look again now), Hide
+// until the next meeting, and Turn off meeting reminders, asked first, saying where they come back.
 // 3.13.2's card at 110% (⌘+ once): its window stayed the card's size at 100%, which cut it off on
 // the right and at the bottom.
 import fs from 'node:fs'
@@ -34,7 +39,19 @@ if (!electron || !screenOk) {
 
 const kit = await startKit('float-card-window')
 const { _electron } = await import('playwright-core')
-const env = { ...process.env, KIT_URL: kit.url, ...(screenOk.DISPLAY ? { DISPLAY: screenOk.DISPLAY } : {}) }
+// Whether the screen is shared: a stand-in for native/callwatch sharing, saying what bin/sharing.json
+// says, a line each time it changes, as the helper does (not on Windows, which can't tell).
+const shareBin = process.platform === 'win32' ? null : path.join(kit.bin, 'callwatch')
+if (shareBin) {
+  fs.writeFileSync(`${shareBin}.cjs`, `const fs = require('node:fs'), path = require('node:path'), parent = process.ppid
+let last = ''
+const look = () => { let v = false; try { v = JSON.parse(fs.readFileSync(path.join(__dirname, 'sharing.json'), 'utf8')).sharing } catch {} const line = JSON.stringify({ sharing: v }); if (line !== last) { last = line; process.stdout.write(line + '\\n') } }
+look(); setInterval(look, 100)
+setInterval(() => { try { process.kill(parent, 0) } catch { process.exit(0) } }, 500)`)
+  fs.writeFileSync(shareBin, `#!/bin/sh\nexec "${process.execPath}" "${shareBin}.cjs" "$@"\n`, { mode: 0o755 })
+}
+const sharing = (v) => fs.writeFileSync(path.join(kit.bin, 'sharing.json'), JSON.stringify({ sharing: v }))
+const env = { ...process.env, KIT_URL: kit.url, ...(shareBin ? { BRIDGE_CALLWATCH: shareBin } : {}), ...(screenOk.DISPLAY ? { DISPLAY: screenOk.DISPLAY } : {}) }
 delete env.ELECTRON_RUN_AS_NODE
 let el = null
 try {
@@ -249,6 +266,132 @@ try {
     ok(!bad.length, `${lang}: every kind of card whole, nothing past its edge or cut off`, bad.slice(0, 3))
   }
   await card.evaluate(() => localStorage.setItem('cc-lang', JSON.stringify('en')))
+
+  // ---------- While the screen is shared ----------
+  // Placed as desktop/main.js places it (floatshare.js), with the stand-in saying when the screen is
+  // shared: a meeting about to start, or what needs you, isn't shown while it is, and comes back by
+  // itself once it stops; the meeting being recorded's goes to the menu bar and comes back after.
+  if (shareBin) {
+    const visible = () => el.evaluate(() => globalThis.floatWin.isVisible())
+    const placed = (c) => el.evaluate((_e, c) => globalThis.placeCard(c), c)
+    const soonK = KINDS.find((x) => x.name === 'a meeting about to start')
+    sharing(false)
+    await show(soonK)
+    const p0 = await until(async () => { const p = await placed(soonK.calls); return p.show && await visible() && p }, 5000, 100)
+    ok(!!p0, 'nothing shared: the reminder shows', p0)
+    sharing(true)
+    ok(!!(await until(async () => !(await visible()), 5000, 100)), 'a call starts sharing the screen: the reminder goes, by itself', await placed(soonK.calls))
+    const held = await placed(soonK.calls)
+    ok(held.held && !held.show && !(await visible()), 'and stays gone while it shares (looked at again)', held)
+    const needs = KINDS.find((x) => x.name === 'what needs you')
+    const pn = await placed(needs.calls)
+    ok(pn.held && !(await visible()), 'what needs you waits too', pn)
+    await show(soonK)
+    await placed(soonK.calls)
+    sharing(false)
+    ok(!!(await until(() => visible(), 5000, 100)), 'the share ends: the reminder comes back by itself, still wanted')
+    await capture('float-reminder-after-sharing')
+
+    // The meeting being recorded: to the menu bar while the screen is shared, and back after as it
+    // was (slim, or pinned open) and where it was. Bridge AI's own looks at the screen (stood in for)
+    // aren't a share: watching a screen keeps the card; a look at the call's window doesn't move it.
+    const own = (o) => el.evaluate((_e, o) => { globalThis.own = o }, { watching: false, capturing: false, ...o })
+    const bounds = () => el.evaluate(() => globalThis.floatWin.getBounds())
+    const opened = () => card.evaluate(() => !document.querySelector('.float-card')?.classList.contains('slim'))
+    for (const pin of [false, true]) {
+      const recK = KINDS[0]
+      calls = recK.calls
+      await card.reload()
+      await card.waitForSelector('.float-card .fc-time', { timeout: 15000 })
+      await until(async () => (await placed(recK.calls)).show && await visible(), 5000, 100)
+      if (pin) {
+        await card.hover('.float-card .fc-head')
+        await card.click('.float-card .fc-links button[aria-label="Pin it open"]')
+      }
+      await card.mouse.move(1, 1)
+      const was = await until(async () => ((await opened()) === pin ? 'yes' : null), 5000, 100)
+      ok(!!was, pin ? 'the meeting\'s card pinned open' : 'the meeting\'s card slim', await opened())
+      const at0 = await bounds()
+      sharing(true)
+      ok(!!(await until(async () => !(await visible()), 5000, 100)), `${pin ? 'pinned open' : 'slim'}: a call starts sharing the screen, and the meeting's card goes, by itself`)
+      const pr = await placed(recK.calls)
+      ok(pr.bar && pr.moved && !pr.show, 'to the menu bar (its time, Pause, Stop and the rest in its menu)', pr)
+      if (!pin) {
+        await own({ watching: true })
+        const pw = await placed(recK.calls)
+        ok(pw.show && !pw.bar && !!(await until(() => visible(), 3000, 100)), "the meeting watches a screen: a share can't be told from that, so the card stays, with Capture on it", pw)
+        await own({})
+        const pg = await placed(recK.calls)
+        ok(!pg.show && pg.moved && !!(await until(async () => !(await visible()), 3000, 100)), 'it stops watching, the screen still shared: the card goes again', pg)
+        await own({ capturing: true })
+        const pc = await placed(recK.calls)
+        ok(!pc.show && !(await visible()), "a look at the call's window during the share doesn't bring it back", pc)
+        await own({})
+      }
+      sharing(false)
+      ok(!!(await until(async () => await visible() && (await opened()) === pin, 5000, 100)) && JSON.stringify(await bounds()) === JSON.stringify(at0), `sharing stops: it comes back by itself, ${pin ? 'pinned open' : 'slim'} as it was, where it was`, { at0, now: await bounds(), open: await opened() })
+      if (pin) await capture('float-recording-after-sharing')
+    }
+    await card.evaluate(() => localStorage.setItem('cc-float-pin', '0'))
+    // A look at the call's window for its names alone, nothing shared: macOS counts it as recording
+    // the screen, and the card stays.
+    await own({ capturing: true })
+    sharing(true)
+    await new Promise((r) => setTimeout(r, 600))
+    const pl = await placed(KINDS[0].calls)
+    ok(pl.show && await visible(), "a look at the call's window, nothing shared: the card stays", pl)
+    await own({})
+    sharing(false)
+    await until(async () => (await placed(KINDS[0].calls)).show, 3000, 100)
+  }
+
+  // ---------- The reminder's menu ----------
+  // By its ×: Remind me 1 min before (put off on the server, and the app told to look again now),
+  // Hide until the next meeting, and Turn off meeting reminders, which asks first and says where
+  // they're turned back on. The menu fits in the window, however short the card.
+  {
+    const soonK = KINDS.find((x) => x.name === 'a meeting about to start')
+    const sent = []
+    await ctx.route(/\/api\/calls\/snooze(\?|$)/, (r) => { sent.push(['snooze', r.request().postDataJSON()]); return r.fulfill({ json: { until: new Date(Date.parse(soonK.calls.soon.start) - 60e3).toISOString() } }) })
+    await ctx.route(/\/api\/settings(\?|$)/, (r) => { if (r.request().method() !== 'PATCH') return r.continue(); sent.push(['settings', r.request().postDataJSON()]); return r.fulfill({ json: { ok: true } }) })
+    const asked = () => el.evaluate(() => ({ ...globalThis.asked }))
+    await card.reload()
+    await card.waitForSelector('.float-card', { timeout: 15000 })
+    await show(soonK)
+    await card.click('.float-card .fc-opts')
+    const menu = card.locator('.float-card .fc-menu')
+    await menu.waitFor({ timeout: 5000 }).catch(() => {})
+    const items = (await menu.locator('.menu-item').allInnerTexts()).map((x) => x.replace(/\s+/g, ' ').trim())
+    const at = new Date(Date.parse(soonK.calls.soon.start) - 60e3).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(/\s+/g, ' ')
+    ok(items.length === 3 && items[0] === `Remind me 1 min before ${at}` && items[1] === 'Hide until the next meeting' && items[2] === 'Turn off meeting reminders…', 'the menu by its ×: Remind me 1 min before (at what time), Hide until the next meeting, Turn off meeting reminders…', items)
+    const fits = await until(async () => { const b = await card.evaluate(() => { const m = document.querySelector('.fc-menu').getBoundingClientRect(); return { bottom: m.bottom, right: m.right, left: m.left, w: innerWidth, h: innerHeight } }); return b.bottom <= b.h && b.right <= b.w && b.left >= 0 ? b : null }, 4000, 100)
+    ok(!!fits, 'and it fits in the window', fits)
+    await capture('float-reminder-menu')
+    const was = await asked()
+    await menu.locator('.fc-later').click()
+    ok(!!(await until(async () => sent.some(([k, b]) => k === 'snooze' && b.id === soonK.calls.soon.id) && (await asked()).look > was.look, 4000, 100)) && !(await card.$('.fc-menu')), 'Remind me 1 min before: put off on the server for this meeting, the app told to look again at once, the menu closed', { sent, asked: await asked() })
+    // Turn off: asked first, saying where they come back; Cancel leaves them on.
+    await card.click('.float-card .fc-opts')
+    await card.locator('.fc-menu .fc-off').click()
+    const confirm = card.locator('.float-card .fc-confirm')
+    const said = await until(async () => { const x = await confirm.innerText().catch(() => ''); return /Turn off meeting reminders\?/.test(x) && x }, 4000, 100)
+    ok(!!said && /Settings › Meetings › Remind me before meetings/.test(said), 'Turn off meeting reminders… asks first, saying where to turn them back on', said)
+    const l = await until(async () => { const x = await look(); return whole(x) && !x.past.length && !x.cut.length ? x : null }, 4000, 100)
+    ok(!!l, 'whole in its window, nothing past its edge or cut off', await look())
+    await capture('float-reminder-turn-off')
+    await confirm.locator('button', { hasText: 'Cancel' }).click()
+    ok(!(await confirm.count()) && !sent.some(([k]) => k === 'settings'), 'Cancel: still on, nothing changed')
+    await card.click('.float-card .fc-opts')
+    await card.locator('.fc-menu .fc-off').click()
+    const before = await asked()
+    await confirm.locator('button', { hasText: 'Turn off' }).click()
+    ok(!!(await until(async () => sent.some(([k, b]) => k === 'settings' && b?.meetings?.remind === false) && (await asked()).look > before.look, 4000, 100)), 'Turn off: Remind me before meetings off, and the app told to look again at once', sent)
+    await card.click('.float-card .fc-opts')
+    await card.locator('.fc-menu .fc-hide').click()
+    ok(!!(await until(async () => (await asked()).hide === before.hide + 1, 4000, 100)), 'Hide until the next meeting: hidden as its × does')
+    await ctx.unroute(/\/api\/calls\/snooze(\?|$)/)
+    await ctx.unroute(/\/api\/settings(\?|$)/)
+  }
 
   // ---------- A short screen ----------
   // Opened, as tall as it gets (the call ended with no sound, AI Assist's suggestion), and a meeting

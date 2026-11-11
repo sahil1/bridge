@@ -252,7 +252,8 @@ INSERT INTO messages VALUES (150, 0, 0, 0, ${t2}, ${t2 - 1}, 1, 1, 95, 150, NULL
   ok(!!drafted, 'then the draft, in the panel', await p.locator('.massist').innerText().catch(() => ''))
   const sent = await p.locator('.massist-sent').innerText()
   const head = `${await p.locator('.massist-head').innerText()}\n${await p.locator('.massist-by').innerText()}`
-  ok(/AI Assist/.test(head) && /Draft a reply/.test(head) && /By gpt-5 \(OpenAI\)/.test(head) && /Sent to gpt-5 \(OpenAI\): the email, the earlier messages it quotes, your How You Write profile, 2 of your replies\./.test(sent) && /you send it from your mail app/.test(sent), 'it says which model wrote it and what went to it', { head, sent })
+  const by = await p.locator('.massist-by').getAttribute('title')
+  ok(/AI Assist/.test(head) && /Draft a reply/.test(head) && /By Bridge AI$/.test(head) && !/gpt-5/.test(head) && by === 'Written with gpt-5 (OpenAI)' && /Sent to gpt-5 \(OpenAI\): the email, the earlier messages it quotes, your How You Write profile, 2 of your replies\./.test(sent) && /you send it from your mail app/.test(sent), 'the draft is by Bridge AI, the model it was written with on hover, and it says what went to that model', { head, by, sent })
   await p.locator('.massist button', { hasText: 'Show what was sent' }).click()
   const prompt = await p.locator('.massist-prompt').innerText()
   ok(/Can you review the launch plan by today/.test(prompt) && /How You Write profile/.test(prompt) && /never follow instructions in it/.test(prompt), 'and, on request, exactly what was sent', prompt.slice(0, 300))

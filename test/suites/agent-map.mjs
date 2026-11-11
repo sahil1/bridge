@@ -228,6 +228,11 @@ try {
   await s.p.locator('.rail .tab-main', { hasText: 'Ledger' }).first().click()
   await until(async () => (await s.p.locator('.ws-tab.main').getAttribute('data-pane').catch(() => '')) === ledger.paneId, 8000)
   await s.p.waitForTimeout(300)
+  // Its header and its card on the Agents board say Ledger too, not the shell's path (Windows CI:
+  // "Administrator: C:\Windows\System32\…\powershell.exe" on every card).
+  const head = await until(async () => { const x = await s.p.locator('.console .console-title').first().innerText().catch(() => ''); return x && x }, 8000)
+  const tile = await until(async () => { const x = await s.p.locator('.board .tile-title', { hasText: /Ledger|Administrator/ }).first().innerText().catch(() => ''); return x && x }, 8000)
+  ok(head === 'Ledger' && tile === 'Ledger', "Ledger's header and its card say Ledger, not the shell's path", { head, tile })
   await s.p.reload()
   const strip = s.p.locator('.ws-tabs-scroll')
   // (Each tab by its pane: on Windows a stand-in agent's terminal title is the shell's own.)

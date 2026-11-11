@@ -59,11 +59,15 @@
 //   claude auth status --json | login | logout
 //                                           the sign-in of the config folder it's run for
 //                                           (CLAUDE_CONFIG_DIR, else ~/.claude): signed in until
-//                                           logged out. Each is noted in ~/claude-auth.log, with
-//                                           CLAUDE_CONFIG_DIR as it was given (null: not given).
+//                                           logged out, on Max, or on what stand-in-plan.json in
+//                                           that folder says ({ subscriptionType, authMethod,
+//                                           apiProvider, rateLimitTier }, laid over Max's). Each is
+//                                           noted in ~/claude-auth.log, with CLAUDE_CONFIG_DIR as
+//                                           it was given (null: not given).
 //                                           login signs in at once; with ~/claude-login.json there,
 //                                           as Claude Code 2.1.311 does it (signIn below)
 //   claude, with ~/claude-first-run.json there  a new Claude Code at its sign-in (firstRunSignIn)
+//   --model <m>, --effort <level>, --permission-mode <mode>  taken, as Claude Code takes them
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -131,7 +135,9 @@ if (args[0] === 'auth') {
   if (args[1] === 'login' && how) return signIn(dir, how)
   if (args[1] === 'login') { fs.rmSync(out, { force: true }); console.log('Login successful.'); process.exit(0) }
   const signedIn = !fs.existsSync(out)
-  console.log(JSON.stringify({ loggedIn: signedIn, authMethod: signedIn ? 'claude.ai' : 'none', subscriptionType: signedIn ? 'max' : null }))
+  let plan = {}
+  try { plan = JSON.parse(fs.readFileSync(path.join(dir, 'stand-in-plan.json'), 'utf8')) } catch { /* Max */ }
+  console.log(JSON.stringify(signedIn ? { loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: 'max', ...plan } : { loggedIn: false, authMethod: 'none', subscriptionType: null }))
   process.exit(signedIn ? 0 : 1)
 }
 if (args.includes('-p')) {
@@ -185,7 +191,7 @@ function firstRunSignIn() {
   })
   setInterval(() => {}, 1 << 30)
 }
-const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode'])
+const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode', '--effort'])
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null }
 const message = args.find((a, i) => !a.startsWith('--') && !WITH_VALUE.has(args[i - 1])) || ''
 const resumed = opt('--resume')

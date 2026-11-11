@@ -161,7 +161,8 @@ export function ReplyAssist({ id, data, nudge, times = false, onClose, beside })
   return (
     <aside className={`massist ${beside ? 'beside' : ''}`} aria-label={t('AI Assist')} data-esc>
       <AssistHead className="massist-head" what={nudge ? t('Draft a nudge') : times && !res ? t('Find a time') : t('Draft a reply')} onClose={onClose} />
-      {(res || v?.now) && <p className="muted small massist-by" title={res?.modelLabel || v?.now?.label || undefined}>{res ? t('By {model}', { model: res.modelLabel }) : t('Uses {model}, the model for your meeting notes', { model: v.now.label })}</p>}
+      {/* A draft is Bridge AI's, with the model it was written with on hover; before one, which model it will use. */}
+      {(res || v?.now) && <p className="muted small massist-by" title={res ? (res.modelLabel ? t('Written with {model}', { model: res.modelLabel }) : undefined) : v.now.label}>{res ? t('By Bridge AI') : t('Uses {model}, the model for your meeting notes', { model: v.now.label })}</p>}
 
       {intro && (
         <div className="massist-intro">

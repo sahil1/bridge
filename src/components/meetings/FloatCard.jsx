@@ -4,6 +4,7 @@ import { api, usePoll, useFleet } from '../../api.js'
 import { MEETINGS_CHANNEL, clock, useCallEvent, QuickNote, endedWords } from './recording.jsx'
 import { KIND, setAssist, markAssist } from './assist.jsx'
 import { PrepGlance } from './prep.jsx'
+import { useScreenAccess, useAllowCall, allowSteps } from './allowcall.jsx'
 import { joined } from '../Agenda.jsx'
 import { t, locale } from '../../i18n/index.js'
 import './meetings.css'
@@ -19,7 +20,11 @@ import './meetings.css'
 // When it ends: Stop or keep recording. Otherwise (Settings › Meetings › Always): what needs you.
 // With AI Assist's Suggest what to ask on, its newest suggestion shows under the bar, open or not,
 // since you're looking at the call: ✓ puts it in your notes, ✕ dismisses it. Ten minutes before a
-// meeting with other people: Join, and what to go in with at a glance (prep.jsx's PrepGlance).
+// meeting with other people: Join, and what to go in with at a glance (prep.jsx's PrepGlance), with
+// a small menu by its ×: remind me again when it's about to start, hide it until the next meeting,
+// or turn these reminders off (Settings › Meetings › Remind me before meetings turns them back on).
+// While you share or record your screen on a Mac it isn't there: the meeting being recorded's card goes
+// to the menu bar by itself and comes back as it was after, and any other waits (desktop/floatshare.js).
 // Drag it from anywhere that isn't a button. Resize it by its edges and corners, as any window: its
 // width for every card, and open while recording its height too, which shows more of what's been
 // said; double-click an edge for its usual size. Kept on this computer.
@@ -42,6 +47,41 @@ function talkShare(lines) {
   for (const l of lines) { const d = Math.max(0, (l.t1 ?? l.t0) - l.t0); if (l.src === 'them') b += d; else a += d }
   return a + b > 0 ? Math.round((a / (a + b)) * 100) : null
 }
+// A call that's silent while it records: the list to turn Bridge AI on in (the second on System
+// Settings' page: Screen Recording, above it, doesn't cover the sound), then Restart Bridge AI, and
+// Reset and ask again if it's still quiet after (allowcall.jsx).
+function QuietBanner() {
+  const { data } = useScreenAccess()
+  const a = useAllowCall('sound', { recording: true, started: data?.started })
+  const s = allowSteps('sound', a)
+  return (
+    <div className="fc-banner fc-quiet" role="status">
+      <p><b>{t('No sound from the call.')}</b> {t('If people are talking, turn on Bridge AI in System Audio Recording Only, the second list under System Settings › Privacy & Security › Screen & System Audio Recording. Screen Recording, above it, doesn\'t cover the sound.')}{s.say}</p>
+      <span className="fc-banner-acts">{s.acts}</span>
+    </div>
+  )
+}
+// A small menu under a button on the card ({ icon, label, hint, run, cls } or '-'), as a Mac app's:
+// closed by a click outside it (not its own button, which toggles it) or Esc.
+function FcMenu({ items, onClose }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const down = (e) => { if (!ref.current?.parentElement?.contains(e.target)) onClose() }
+    const key = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('mousedown', down)
+    document.addEventListener('keydown', key)
+    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key) }
+  }, [onClose])
+  return (
+    <div className="menu fc-menu" ref={ref} role="menu">
+      {items.map((it, i) => (it === '-' ? <div key={i} className="menu-sep" role="separator" /> : (
+        <button key={it.label} type="button" role="menuitem" className={`menu-item ${it.cls || ''}`} onClick={() => { onClose(); it.run() }}>
+          <Icon name={it.icon} size={13} /><span className="fc-menu-label">{it.label}</span>{it.hint && <small className="fc-menu-hint">{it.hint}</small>}
+        </button>
+      )))}
+    </div>
+  )
+}
 const Level = ({ v = 0, label }) => {
   const on = Math.min(5, Math.round(Math.sqrt(v) * 5 * 1.4))
   return <span className="fc-level" role="img" aria-label={t('{label} level', { label })}>{Array.from({ length: 5 }, (_, i) => <i key={i} className={i < on ? 'on' : ''} />)}</span>
@@ -55,10 +95,12 @@ export default function FloatCard() {
   const [pinned, setPinned] = useState(pinned0)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
+  const [opts, setOpts] = useState(null) // a meeting's reminder: its menu open ('menu'), or asking to turn reminders off ('off')
   const chan = useRef(null)
   const card = useRef(null)
   const leave = useRef(null)
   const r = c?.recording
+  useEffect(() => { setOpts(null) }, [c?.soon?.id])
   const onHover = c?.floatHover !== false
   // Low on the screen, the desktop app's window grows upward (desktop/floatfit.js), so the rest opens
   // above the bar. In a browser tab the page doesn't move. Set below, once it's known if it's open.
@@ -123,6 +165,17 @@ export default function FloatCard() {
   // allowance for the rest asked for more than the screen when the suggestion took three lines,
   // and zoomed, and the window was cut off at the bottom. However little room is left, it scrolls
   // rather than run past the screen.
+  // A reminder's menu, open over a card shorter than it (its prep still coming): the card at least
+  // as tall as the menu reaches, so the window has room for it.
+  useLayoutEffect(() => {
+    const el = card.current
+    const menu = el?.querySelector('.fc-menu')
+    if (!el) return
+    el.style.minHeight = ''
+    if (!menu) return
+    const need = Math.ceil(menu.getBoundingClientRect().bottom - el.getBoundingClientRect().top + 10)
+    if (need > el.getBoundingClientRect().height) el.style.minHeight = `${need}px`
+  }, [opts])
   useLayoutEffect(() => {
     const el = card.current
     if (!el) return
@@ -144,10 +197,14 @@ export default function FloatCard() {
   const saidBox = useRef(null)
   const saidCount = m?.transcript?.length || 0
   useLayoutEffect(() => { const el = saidBox.current; if (el && size.h) el.scrollTop = el.scrollHeight }, [saidCount, size.h, hover])
-  // Hidden (the window, or what it shows changed): no longer under the pointer.
+  // Hidden (the window, or what it shows changed): no longer under the pointer. Set to open on a
+  // click, it stays as it was while its window is hidden (gone to the menu bar for a share), and
+  // comes back so.
   useEffect(() => { setHover(false) }, [r?.id, c?.prompt?.at])
+  const hoverOpens = useRef(onHover)
+  hoverOpens.current = onHover
   useEffect(() => {
-    const v = () => { if (document.hidden) setHover(false) }
+    const v = () => { if (document.hidden && hoverOpens.current) setHover(false) }
     document.addEventListener('visibilitychange', v)
     return () => document.removeEventListener('visibilitychange', v)
   }, [])
@@ -158,7 +215,7 @@ export default function FloatCard() {
   const drag = useRef(null)
   const [dragging, setDragging] = useState(false)
   const down = (e) => {
-    if (e.button !== 0 || e.target.closest('button, input, select, textarea, a, summary, label, .fc-grip')) return
+    if (e.button !== 0 || e.target.closest('button, input, select, textarea, a, summary, label, .fc-grip, .fc-menu')) return
     drag.current = { x: e.screenX, y: e.screenY, wx: window.screenX, wy: window.screenY, moved: false, head: !!e.target.closest('.fc-head'), frame: 0 }
     if (app().floatMove) try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* a pointer that can't be captured: moves still come while it's over the card */ }
   }
@@ -223,7 +280,7 @@ export default function FloatCard() {
           <span className={`fc-dot${paused ? ' paused' : ''}`}><span className="rec-dot" aria-hidden="true" /></span>
           <b className="fc-time">{clock(secs)}</b>
           <span className="fc-title" title={r.title}>{r.title}</span>
-          {r.callQuiet && !paused && <button type="button" className="fc-x fc-warn" onClick={allowCall} aria-label={t('No sound from the call')} title={t("No sound from the call. If people are talking, Bridge AI isn't allowed to hear it yet: click to open the setting")}><Icon name="alert" size={13} /></button>}
+          {r.callQuiet && !paused && <button type="button" className="fc-x fc-warn" onClick={allowCall} aria-label={t('No sound from the call')} title={t('No sound from the call. If people are talking, turn on Bridge AI in System Audio Recording Only, the second list on that page of System Settings: click to open it')}><Icon name="alert" size={13} /></button>}
           {!r.callEnded && (paused
             ? <button type="button" className="fc-x fc-play" onClick={() => op('resume')} aria-label={t('Resume')} title={t('Resume recording')}><Icon name="play" size={13} /></button>
             : <button type="button" className="fc-x" onClick={() => op('pause')} aria-label={t('Pause')} title={t('Pause recording')}><Icon name="pause" size={13} /></button>)}
@@ -247,12 +304,7 @@ export default function FloatCard() {
                 <button type="button" className="btn small" disabled={busy} onClick={() => act(() => api(`/meetings/${r.id}/keep`, { method: 'POST' }))}>{t('Keep recording')}</button>
               </div>
             )}
-            {r.callQuiet && !paused && (
-              <div className="fc-banner fc-quiet" role="status">
-                <p><b>{t('No sound from the call.')}</b> {t('If people are talking, allow Bridge AI under System Settings › Privacy & Security › Screen & System Audio Recording, in System Audio Recording Only.')}</p>
-                <button type="button" className="btn small" onClick={allowCall}>{t('Open it')}</button>
-              </div>
-            )}
+            {r.callQuiet && !paused && <QuietBanner />}
             <div className="fc-live">
               {info && <p className="fc-info" title={info}>{info}</p>}
               <div className="fc-said" ref={saidBox}>
@@ -317,9 +369,27 @@ export default function FloatCard() {
     )
   } else if (c?.soon) {
     const e = c.soon
-    const mins = Math.max(1, Math.round((Date.parse(e.start) - Date.now()) / 60000))
-    const at = new Date(e.start).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })
+    const left = Date.parse(e.start) - Date.now()
+    const mins = Math.max(1, Math.round(left / 60000))
+    const ago = Math.max(1, Math.round(-left / 60000))
+    const clockAt = (d) => new Date(d).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })
+    const at = clockAt(e.start)
     const day = new Date(e.start).toLocaleDateString('en-CA')
+    // Put off until it's about to start, it can come back as it starts, or just after.
+    const when = left > 30e3 ? [t('In {n} min · {time}', { n: mins, time: at }), mins === 1 ? t('Starts in 1 min, at {time}', { time: at }) : t('Starts in {n} min, at {time}', { n: mins, time: at })]
+      : left > -60e3 ? [t('Now · {time}', { time: at }), t('Starts now, at {time}', { time: at })]
+        : [t('Started {n} min ago · {time}', { n: ago, time: at }), t('Started {n} min ago, at {time}', { n: ago, time: at })]
+    // Its three choices, in a small menu by its ×: remind me again when it's about to start (a minute
+    // before, or at its start once that minute has begun: the server decides), hide it until the
+    // next meeting (its ×), and turn these reminders off, saying first where they're turned back on.
+    const snooze = () => act(async () => { await api('/calls/snooze', { method: 'POST', body: { id: e.id } }); await app().floatLook?.() })
+    const stop = () => act(async () => { await api('/settings', { method: 'PATCH', body: { meetings: { remind: false } } }); setOpts(null); await app().floatLook?.() })
+    const items = [
+      left > 0 && { icon: 'clock', label: left > 60e3 ? t('Remind me 1 min before') : t('Remind me when it starts'), hint: clockAt(left > 60e3 ? Date.parse(e.start) - 60e3 : e.start), run: snooze, cls: 'fc-later' },
+      app().floatHide && { icon: 'x', label: t('Hide until the next meeting'), run: () => app().floatHide(), cls: 'fc-hide' },
+      '-',
+      { icon: 'bell-off', label: t('Turn off meeting reminders…'), run: () => setOpts('off'), cls: 'fc-off' },
+    ].filter(Boolean)
     body = (
       <>
         <div className="fc-head fc-ask">
@@ -327,12 +397,25 @@ export default function FloatCard() {
           <span className="fc-ask-text">
             <b className="fc-title" title={e.title}>{e.title}</b>
             <span className="fc-sub-row">
-              <span className="fc-sub" title={mins === 1 ? t('Starts in 1 min, at {time}', { time: at }) : t('Starts in {n} min, at {time}', { n: mins, time: at })}>{t('In {n} min · {time}', { n: mins, time: at })}</span>
+              <span className="fc-sub" title={when[1]}>{when[0]}</span>
               {e.join && <a className="btn small primary fc-join" href={e.join} target="_blank" rel="noreferrer" onClick={() => joined(e)}><Icon name="video" size={12} /> {t('Join')}</a>}
             </span>
           </span>
-          {hide}
+          <span className="menu-anchor fc-opts-at">
+            <button type="button" className={`fc-x fc-opts${opts === 'menu' ? ' on' : ''}`} onClick={() => setOpts((v) => (v === 'menu' ? null : 'menu'))} aria-haspopup="menu" aria-expanded={opts === 'menu'} aria-label={t('Reminder options')} title={t('Remind me later, hide it, or turn off these reminders')}><Icon name="more" size={13} /></button>
+            {opts === 'menu' && <FcMenu items={items} onClose={() => setOpts(null)} />}
+          </span>
+          <button type="button" className="fc-x" onClick={() => app().floatHide?.()} aria-label={t('Hide the card')} title={t('Hide until the next meeting')}><Icon name="x" size={12} /></button>
         </div>
+        {opts === 'off' && (
+          <div className="fc-banner fc-confirm" role="alertdialog" aria-label={t('Turn off meeting reminders?')}>
+            <p><b>{t('Turn off meeting reminders?')}</b> {t("The card won't show before your meetings. Turn them back on in Settings › Meetings › Remind me before meetings.")}</p>
+            <span className="fc-banner-acts">
+              <button type="button" className="btn small" onClick={() => setOpts(null)}>{t('Cancel')}</button>
+              <button type="button" className="btn small primary" disabled={busy} onClick={stop}><Icon name="bell-off" size={12} /> {t('Turn off')}</button>
+            </span>
+          </div>
+        )}
         <div className="fc-scroll"><PrepGlance e={e} onOpenEvent={app().floatOpen ? () => app().floatOpen({ event: { date: day, id: e.id } }) : null} /></div>
       </>
     )

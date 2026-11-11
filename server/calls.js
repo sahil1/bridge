@@ -129,8 +129,13 @@ export function windowTitles(app) {
 
 // Screen Recording, which lets Bridge AI look at the call's window as people talk and read the
 // names it shows (who's talking, captions), to put names on the transcript. screen(): whether
-// macOS allows it, never asking (null off a Mac, or with no callwatch). screenAsk(): the same,
-// asking macOS the first time (its own window), for Allow on a meeting.
+// macOS allows it, never asking (null off a Mac, or with no callwatch), kept for a moment as each
+// look asks; fresh: looked at now (you came back to the window, from System Settings). macOS
+// applies a switch turned on there once Bridge AI restarts, which restarts this server too, so
+// its first look after one is always its own. screenAsk(): the same, asking macOS the first time
+// (its own window), for Allow on a meeting. started: when this server started, so a page can tell
+// whether Bridge AI has restarted since it asked for that.
+export const started = new Date().toISOString()
 const once = (args, ms = 5000) => new Promise((resolve) => {
   const bin = watchBin()
   if (!bin) return resolve(null)
@@ -140,8 +145,8 @@ const once = (args, ms = 5000) => new Promise((resolve) => {
 })
 let screenSaid = { at: 0, allowed: null }
 const SCREEN_RECHECK_MS = Number(process.env.BRIDGE_SCREEN_RECHECK_MS || 30_000)
-export async function screen() {
-  if (Date.now() - screenSaid.at < SCREEN_RECHECK_MS) return screenSaid.allowed
+export async function screen({ fresh = false } = {}) {
+  if (!fresh && Date.now() - screenSaid.at < SCREEN_RECHECK_MS) return screenSaid.allowed
   const r = await once(['screen'])
   screenSaid = { at: Date.now(), allowed: typeof r?.allowed === 'boolean' ? r.allowed : null }
   return screenSaid.allowed
@@ -152,11 +157,20 @@ export async function screenAsk() {
   return screenSaid.allowed
 }
 // A picture of the call app's window, as a PNG buffer, or null (not allowed, no window on screen).
+// capturing(): one is being taken, or was a moment ago. macOS counts it as the screen being
+// recorded, as a share is, so the desktop app (which moves the floating card out of a share) is told
+// it's Bridge AI's own (/api/calls); callwatch sharing's word trails it by a second and a half.
+let shooting = 0
+let shotAt = 0
+const SHOT_TAIL_MS = 3000
+export const capturing = () => shooting > 0 || Date.now() - shotAt < SHOT_TAIL_MS
 export async function shot(app) {
   const ids = APPS.filter(([, a]) => a === app).map(([id]) => id)
   if (!ids.length || !watchBin()) return null
   const file = path.join(os.tmpdir(), `bridge-call-${process.pid}-${Date.now()}.png`)
-  const r = await once(['shot', file, ...ids], 10_000)
+  shooting++
+  let r
+  try { r = await once(['shot', file, ...ids], 10_000) } finally { shooting--; shotAt = Date.now() }
   if (r?.error === 'not-allowed') screenSaid = { at: Date.now(), allowed: false }
   try { return r?.ok ? await fs.promises.readFile(file) : null } catch { return null } finally { fs.promises.rm(file, { force: true }).catch(() => {}) }
 }

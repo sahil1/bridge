@@ -19,6 +19,7 @@ import { SettingsAt } from './settings/where.js'
 import { AdvancedFrame, reveal } from './settings/Advanced.jsx'
 import { SETTINGS } from './settings/search.js'
 import { cloudOnly, usePoll } from '../api.js'
+import { sayPlace } from '../backForward.js'
 import { t, tx } from '../i18n/index.js'
 
 // One Settings window, Slack style: sections down the left, one scrolling panel on the right.
@@ -89,6 +90,9 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
   const cur = sections.find((s) => s.id === at)
+  // Which section, for Back and Forward (src/backForward.js): each is a place.
+  useEffect(() => { sayPlace('settings', at, `${t('Settings')} › ${t(cur?.label || '')}`) }, [at, cur?.label])
+  useEffect(() => () => sayPlace('settings', null), [])
   const showList = phone && list
   // From the list to a section and back, the focus goes along: to ‹ Settings, then to the row left.
   const sheet = useRef(null)
