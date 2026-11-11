@@ -23,6 +23,8 @@ import { NameDialog } from '../FileExtras.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { useBusy } from '../../busy.js'
 import { useTrial } from '../../trials.js'
+import { Threads, SAY, useAuthor } from '../studio/doccomments.jsx'
+import { useBoardThreads } from './boardcomments.jsx'
 import './whiteboard.css'
 
 // Whiteboards: the list (WhiteboardsHome), one board (WhiteboardPage), and a diagram file in an
@@ -362,6 +364,12 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
   // Make a document or a deck writes into Studio, a beta feature (src/trials.js).
   const studio = useTrial('studio')
   const boardLook = look || d.ready?.look || 'clean'
+  // Comments on the shapes or a place on the board, kept in its file (Comments and @bridge, a
+  // beta feature): a pin picked on the board opens its thread (boardcomments.jsx).
+  const commenting = useTrial('comments')
+  const author = useAuthor()
+  const threads = useBoardThreads({ board: d.board, on: commenting, author, look: boardLook, onOpen: () => setPanel('comments') })
+  const comment = () => { setPanel('comments'); threads.start() }
   const scheme = prefs?.on ? prefs.prefs?.colours?.value || 'soft' : 'soft'
   // How much is on the board and selected, for the empty board's hint and the menus.
   const [count, setCount] = useState({ n: 0, sel: 0 })
@@ -482,6 +490,7 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
           )} />}
         </span>}
         {wide && <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-label={t('Versions')} title={t('Versions: as you left it, and before each AI Assist change')} aria-pressed={panel === 'versions'}><Icon name="clock" size={14} /></button>}
+        {commenting && <button type="button" className={`win-btn wb-comments-btn${panel === 'comments' ? ' on' : ''}`} onClick={() => setPanel(panel === 'comments' ? null : 'comments')} aria-label={t('Comments')} title={t('Comments on the shapes picked, or a place on the board, kept in its file. @bridge in one asks AI Assist.')} aria-pressed={panel === 'comments'}><Icon name="chat" size={14} />{threads.count > 0 && <span className="wb-comments-n">{threads.count}</span>}</button>}
         <button type="button" className={`win-btn${panel === 'settings' ? ' on' : ''}`} onClick={() => setPanel(panel === 'settings' ? null : 'settings')} aria-label={t('Whiteboard Settings')} title={t('Whiteboard Settings')} aria-pressed={panel === 'settings'}><Icon name="settings" size={14} /></button>
         <AiAssist className="btn small wb-ai-btn" compact={!wide} on={panel === 'draw'} disabled={!d.board.api} items={() => drawAssist(panel === 'draw', !!count.n, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel('draw') } else setPanel(null) }, count.sel, studio)} />
         <span className="menu-anchor">
@@ -521,6 +530,7 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
             </div>
           )}
           {panel === 'draw' && d.board.api && <div className="wb-draw-wrap"><DrawPanel board={d.board} start={start} want={want} onStarted={() => setStart(null)} onClose={() => setPanel(null)} compact={!wide} boardId={id} look={boardLook} prefs={prefs} onDrawn={drawn} onSave={() => d.flush()} onAi={(what) => { aiNext.current = what }} /></div>}
+          {panel === 'comments' && commenting && d.board.api && <div className="wb-draw-wrap"><Threads threads={threads} say={SAY.board} className="wb-draw wb-comments" onComment={comment} onClose={() => setPanel(null)} /></div>}
           {panel === 'settings' && <div className="wb-draw-wrap"><BoardSettings look={boardLook} onLook={pickLook} prefs={prefs} onPrefs={setPrefs} onClose={() => setPanel(null)} /></div>}
           {panel === 'versions' && <div className="wb-draw-wrap"><BoardVersions id={id} onRestore={putBack} onClose={() => setPanel(null)} dark={dark} /></div>}
         </div>

@@ -3603,6 +3603,10 @@ boards.setHelpers({
   reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: () => chatModels.models(), canSee: (id) => chatModels.canSee(id),
   contextOf: (id) => chatModels.contextOf(id), agentWork: async (pane) => transcript(await findAgent(pane)),
 })
+// @bridge in a comment on a board (Comments and @bridge): Change it on what the comment is on.
+app.post('/api/boards/comment', trialOff('comments', 'Comments and @bridge'), async (req, res) => {
+  try { res.json(await boards.comment(req.body || {})) } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
+})
 boards.routes(app, { wrap, onComputer, counted: (name) => counts.add(name) })
 
 // ---------- Static UI ----------

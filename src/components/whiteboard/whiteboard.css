@@ -252,3 +252,8 @@
   /* Above Excalidraw's own tools, at the foot of a phone's board. */
   .wb-sug-bar { bottom: 72px; }
 }
+
+/* Comments (Comments and @bridge): the header's button with how many are open, and their card over
+   the board in AI Assist's place (the pane itself: studio/threads.css). */
+.wb-comments-btn { position: relative; }
+.wb-comments-n { position: absolute; top: 1px; right: 0; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: var(--ai); color: #fff; font: 600 9.5px/15px var(--font); text-align: center; }

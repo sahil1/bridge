@@ -178,6 +178,9 @@ try {
     await p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id } })), id)
     return until(() => { const j = readBoard(id); return !j?.bridge && texts(j).includes(word) && j }, 20000)
   }
+  // Comments and @bridge off (as it starts): a board has no Comments, and @bridge's route isn't there.
+  const commentOff = await api('/boards/comment', { request: 'add a cache', scene: {} }).catch((e) => e)
+  ok(commentOff?.status === 404 && commentOff.j?.trial === 'comments' && (await p.locator('.wb-view .pane-extras button[aria-label="Comments"]').count()) === 0, 'with Comments and @bridge off, a board has no Comments, and its @bridge route isn\'t there', commentOff?.message)
   const word = (j, w) => live(j).find((e) => e.type === 'text' && (e.originalText ?? e.text) === w)
   const holding = (j, w) => { const t = word(j, w); return t && live(j).find((e) => e.id === t.containerId) }
   const end = (a, i) => { const q = a.points.at(i); return { x: a.x + q[0], y: a.y + q[1] } }

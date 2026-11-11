@@ -250,6 +250,8 @@ try {
   await xBox.press(`${MOD}+Enter`)
   const doubled = xThread('@bridge double these costs')
   ok(!!(await until(async () => /no model to answer with yet[\s\S]*Model Providers/i.test(await doubled.locator('.sd-thread-ai.bad').innerText().catch(() => '')) && (await doubled.locator('button', { hasText: 'Open Model Providers' }).count()) === 1, 10000, 200)), 'your own @bridge with no model: the thread says so, with Open Model Providers', await doubled.innerText().catch(() => ''))
+  const bNoModel = await kit.api('/boards/comment', { request: 'add a cache', scene: { shapes: [] } }).catch((e) => e)
+  ok(bNoModel?.status === 409 && bNoModel.j?.code === 'no-model' && /no model for AI Assist to answer with/.test(bNoModel.message), 'and on a whiteboard, @bridge with no model says so too (its thread shows it as these do)', bNoModel?.message)
   await saveNow()
   await xSaved((x) => /double these costs/.test(tcIn(x)))
 
