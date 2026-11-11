@@ -157,26 +157,40 @@ export function listPlugin(m, info) {
 }
 
 // ---------- Comments ----------
-// What a comment is about, marked from its start to its end; the one picked, more strongly.
+// What a comment is about, marked from its start to its end; the one picked, more strongly. With
+// threads (doccomments.jsx): skip(id) for a reply's marks (its words are its thread's) and a
+// resolved thread's; busy(id) for one AI Assist is answering; and the words picked for a comment
+// being written (draft: { from, to }), marked while its box has the focus.
 export const commentKey = new PluginKey('sd-comments')
-export function commentPlugin() {
-  const build = (doc, on) => {
+export function commentPlugin({ skip = () => false, busy = () => false } = {}) {
+  const build = (doc, on, draft) => {
     const starts = new Map()
     const decos = []
     doc.descendants((node, pos) => {
       if (node.type.name !== 'xin') return true
       const { k, id } = node.attrs
       if (k === 'cs') starts.set(id, pos)
-      else if (k === 'ce' && starts.has(id)) { decos.push(Decoration.inline(starts.get(id), pos, { class: `sd-cmt${id === on ? ' on' : ''}`, 'data-cid': id })); starts.delete(id) }
+      // A reply's mark (and a resolved thread's) isn't shown: its thread's is.
+      else if (k === 'cr' && skip(String(id))) decos.push(Decoration.node(pos, pos + node.nodeSize, { class: 'sd-cr-hid' }))
+      else if (k === 'ce' && starts.has(id)) {
+        if (!skip(String(id))) decos.push(Decoration.inline(starts.get(id) + 1, pos, { class: `sd-cmt${id === on ? ' on' : ''}${busy(String(id)) ? ' busy' : ''}`, 'data-cid': id }))
+        starts.delete(id)
+      }
       return false
     })
+    if (draft && draft.to > draft.from && draft.to <= doc.content.size) decos.push(Decoration.inline(draft.from, draft.to, { class: 'sd-cmt on draft' }))
     return DecorationSet.create(doc, decos)
   }
   return new Plugin({
     key: commentKey,
     state: {
-      init: (_, s) => ({ on: null, set: build(s.doc, null) }),
-      apply: (tr, old) => { const on = tr.getMeta(commentKey)?.on ?? old.on; return tr.docChanged || on !== old.on ? { on, set: build(tr.doc, on) } : old },
+      init: (_, s) => ({ on: null, draft: null, set: build(s.doc, null, null) }),
+      apply: (tr, old) => {
+        const meta = tr.getMeta(commentKey)
+        const on = meta && 'on' in meta ? meta.on : old.on
+        const draft = meta && 'draft' in meta ? meta.draft : old.draft && tr.docChanged ? { from: tr.mapping.map(old.draft.from), to: tr.mapping.map(old.draft.to) } : old.draft
+        return tr.docChanged || meta ? { on, draft, set: build(tr.doc, on, draft) } : old
+      },
     },
     props: { decorations: (s) => commentKey.getState(s).set },
   })
