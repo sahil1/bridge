@@ -26,6 +26,7 @@ import { t, tx } from '../i18n/index.js'
 import { whiteboards, isMermaid, boardFromMermaid } from './whiteboard/links.js'
 import { useTrial } from '../trials.js'
 import { makeRoutine, fromMessage } from './routineDraft.js'
+import { sayPlace } from '../backForward.js'
 
 const KEYS = [
   ['1', '1'], ['2', '2'], ['3', '3'], ['enter', '⏎ Enter'], ['esc', 'Esc'],
@@ -692,6 +693,8 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
     const saved = agent && readViews()[agent.paneId]
     setViewRaw(saved || (agent?.caps?.chat ? 'chat' : 'terminal'))
   }, [agent?.paneId, agent?.kind])
+  // Which view, for Back and Forward (src/backForward.js): each is a place of the agent's tab.
+  useEffect(() => { if (agent?.paneId) sayPlace(agent.paneId, view, t(VIEWS.find(([v]) => v === view)?.[2] || '')) }, [agent?.paneId, view])
   useEffect(() => { if (!flash) return; const t = setTimeout(() => setFlash(null), flash.length > 60 ? 8000 : 3000); return () => clearTimeout(t) }, [flash])
   // Its first-run screens have their own card (FirstRun.jsx), so no raw keys for those.
   const firstRunNow = showsFirstRun(agent)

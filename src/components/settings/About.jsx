@@ -250,6 +250,7 @@ const SHORT = {
   'usage-everywhere': tx('The tokens each provider and model used, in Today › Usage. It stays on this computer.'),
   'meeting-insights': tx('Your meetings added up, and the people you meet. It turns on by itself once 5 meetings are recorded here.'),
   'tab-groups': tx('The tabs above your agents, grouped as the sidebar has them.'),
+  'back-forward': tx('‹ and › in the top bar, as in a browser: back to where you were, and forward again. On to start with.'),
   routines: tx('Routines that run by themselves at the time you set, and History › Commands.'),
   files: tx('Every folder on this computer and your others, as Finder shows them. Read-only for now.'),
   'signature-assist': tx('In Studio, AI Assist\'s Sign this on a PDF you\'re asked to sign.'),

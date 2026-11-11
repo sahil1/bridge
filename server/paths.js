@@ -71,7 +71,11 @@ export function loadConfig() {
   const yours = { ...readJSON(dataFile('config.json')), ...readJSON(path.join(ROOT, 'config.local.json')) }
   // Show more models was saved as chinaModels before 3.0.1: one saved that way still counts.
   if (yours.moreModels === undefined && yours.chinaModels !== undefined) yours.moreModels = yours.chinaModels
-  const merged = { ...readJSON(path.join(ROOT, 'config.example.json')), ...yours }
+  const example = readJSON(path.join(ROOT, 'config.example.json'))
+  const merged = { ...example, ...yours }
+  // Beta features on to start with (Back and Forward) stay on beside the ones you turned on, until
+  // you turn them off.
+  if (example.trials && yours.trials && typeof yours.trials === 'object') merged.trials = { ...example.trials, ...yours.trials }
   if (process.env.BRIDGE_PORT) merged.port = Number(process.env.BRIDGE_PORT)
   // Only for a container whose port is published to 127.0.0.1 on its machine (docker-compose.yml):
   // there the server has to listen on the container's own network to be reached at all.
