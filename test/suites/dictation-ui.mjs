@@ -999,7 +999,10 @@ try {
     const why = !!(await until(async () => /Pasting needs Accessibility/.test(await hudText(h)) && (await h.locator('.hud-text').innerText().catch(() => '')) === 'Not allowed yet.', 8000, 100)) && await h.evaluate(() => window.__hud.pasted.length) === 0 && await h.locator('.hud button', { hasText: 'Copy' }).isVisible()
     const shown = await hudText(h)
     await h.locator('.hud button', { hasText: 'Copy' }).click({ timeout: 5000 }).catch(() => {})
+    const loads = await h.evaluate(() => performance.getEntriesByType('navigation').length + (window.__reloads || 0)).catch(() => null)
     const noOffer = !!(await until(async () => /Copied/.test(await hudText(h)), 3000, 100)) && await h.locator('.hud-offer').count() === 0
+    // (Not so on CI's Mac in 3.15.0: what the window showed after Copy, and whether the page loaded again.)
+    if (!noOffer) console.log('after Copy:', JSON.stringify({ text: await hudText(h), offer: await h.locator('.hud-offer').count(), url: h.url(), loads, hud: await h.evaluate(() => window.__hud).catch(() => null) }))
     ok(chip && why && noOffer, 'no Accessibility yet: not even tried; while you talk, the agent to send it to as before, then the text to copy with one line, pasting needs Accessibility (and Copy asks nothing more: it\'s picked already)', { chip, why, noOffer, shown })
     await hc.close()
   }
