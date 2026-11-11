@@ -1,6 +1,7 @@
 // Dictation into another of your computers shown in this one's window, in the browser named by
 // BRIDGE_TEST_BROWSER: two Bridge AIs, "Studio" (with its Chief of Staff) and "Desk" (where an agent
-// works), on relays of their own (stand-ins/relay.mjs), linked; speech to text stood in for
+// works), on relays of their own (stand-ins/relay.mjs), linked, Studio's page told where Desk's
+// pages are from the first; speech to text stood in for
 // (/api/transcribe answers what each check says was said).
 //   Desk's agent in a tab of Studio's window, split beside Studio's Chief of Staff: the key the
 //   desktop app hands the window in front (with the key from any app on, it hears the key itself),
@@ -104,6 +105,9 @@ try {
   await studio.api('/machines', { link: `${rd.url} ${pairing.code}` })
   const deskM = await until(async () => (await studio.api('/machines')).machines.find((m) => m.name === 'Desk' && m.online), 30000, 300)
   ok(!!deskM, 'Studio is linked with Desk')
+  // Told from the first where Desk's pages are (its port on Studio): a page told nothing took Desk's
+  // page in its tab for one beside it, and the words said for it went nowhere for a while.
+  ok(Number.isInteger(deskM?.port), 'and Studio\'s page is told where Desk\'s pages are, straight away', deskM && { port: deskM.port })
 
   // Studio's Chief of Staff, and an agent at work on Desk.
   await studio.api('/chief/launch', {})

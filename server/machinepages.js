@@ -117,7 +117,14 @@ export function make({ port: mainPort, host, thisName, linked, nameOf, portOf, k
   // What may put that computer's page in a frame: this computer's own page (its tabs), and itself.
   const frames = () => `frame-ancestors 'self' http://127.0.0.1:${mainPort} http://localhost:${mainPort}`
   // For /api/machines: where each computer's pages are for the page asking (null: beside it, at
-  // /m/<id>/), and whether it's one of theirs at its port.
-  const portFor = (req, id) => (splits(req) || at(req) ? servers.get(id)?.port || null : null)
+  // /m/<id>/), and whether it's one of theirs at its port. A linked computer's port is opened first
+  // when it isn't yet (just linked, or this computer just started): told null, the page took that
+  // computer's page in its tab for one beside it, and heard nothing it said for a while, though
+  // asking for that page sends it to the port all the same.
+  const portFor = async (req, id) => {
+    if (!splits(req) && !at(req)) return null
+    if (!servers.has(id) && app && linked().some((x) => x.id === id)) await ensure(id).catch(() => {})
+    return servers.get(id)?.port || null
+  }
   return { http: http_, upgrade, frames, start, sync, portFor, at }
 }
