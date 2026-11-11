@@ -70,7 +70,7 @@ function save() {
   // version and at: whether what ends up reopening them was an update or the computer restarting.
   const out = {
     nextId, spaces, tabs, version: VERSION, at: Date.now(),
-    panes: [...panes.values(), ...[...reopening.values()].filter((p) => !panes.has(p.paneId))].map((p) => ({ paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId, kind: p.kind, cwd: p.cwd, model: p.model, sessionId: p.sessionId, account: p.account, ...(p.env ? { env: p.env } : {}), ...(p.midTask ? { midTask: true } : {}), ...(p.continuedAt ? { continuedAt: p.continuedAt } : {}) })),
+    panes: [...panes.values(), ...[...reopening.values()].filter((p) => !panes.has(p.paneId))].map((p) => ({ paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId, kind: p.kind, cwd: p.cwd, model: p.model, ...(p.effort ? { effort: p.effort } : {}), sessionId: p.sessionId, account: p.account, ...(p.env ? { env: p.env } : {}), ...(p.midTask ? { midTask: true } : {}), ...(p.continuedAt ? { continuedAt: p.continuedAt } : {}) })),
   }
   // Whole or not at all: which agents to reopen, and which were mid-task, survive a crash mid-save.
   try { writeFileAtomic(STATE, JSON.stringify(out, null, 2)) } catch { /* read-only disk: keep going */ }
@@ -78,7 +78,8 @@ function save() {
 
 // env: extra variables for the agent (a chief of staff thread's id), kept for when it starts again.
 // continuedAt: when it was last told to carry on after an interruption (carryOn).
-async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, resume, fork, opening, model, access, account, setup, env, continuedAt }) {
+// effort: how hard it thinks (agents.js effort()), kept so it starts again the same.
+async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, resume, fork, opening, model, effort, access, account, setup, env, continuedAt }) {
   const a = adapter(kind)
   const PATH = await loginPath()
   let bin = null
@@ -99,6 +100,7 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
       args = a.start({ sessionId: a.sessionId === 'assign' ? sessionId : undefined, prompt: a.promptArg ? opening : undefined })
     }
     if (model && a.model) args = [...a.model(model), ...args]
+    if (effort && a.effort) args = [...a.effort(effort), ...args]
     if (access && a.access) args = [...a.access(access), ...args]
   }
   const [file, argv] = shellCommand(bin, args, setup, cwd)
@@ -106,10 +108,10 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
   // permission prompt, and the rest of Bridge AI shouldn't wait for that.
   const there = await fs.promises.access(cwd).then(() => true, () => false)
   // What a later server needs to show it, should it find the terminal before the saved layout does.
-  const meta = { tabId, workspaceId, kind, cwd, model: model || null, access: access || null, sessionId: sessionId || null, account: account || null, env: env || null, tab: tabs.find((t) => t.tabId === tabId)?.label, space: spaces.find((w) => w.id === workspaceId)?.label }
+  const meta = { tabId, workspaceId, kind, cwd, model: model || null, effort: effort || null, access: access || null, sessionId: sessionId || null, account: account || null, env: env || null, tab: tabs.find((t) => t.tabId === tabId)?.label, space: spaces.find((w) => w.id === workspaceId)?.label }
   const { proc, remote } = await openTerm(paneId, file, argv, { cols: COLS, rows: ROWS, cwd: there ? cwd : process.env.HOME, env: agentEnv(PATH, { ...providerEnv(), ...accounts.envFor(kind, account), ...env }) }, meta)
   const p = {
-    paneId, tabId, workspaceId, kind, cwd, model: model || null, sessionId: sessionId || null, account: account || null, env: env || null, proc, remote, term: null,
+    paneId, tabId, workspaceId, kind, cwd, model: model || null, effort: effort || null, sessionId: sessionId || null, account: account || null, env: env || null, proc, remote, term: null,
     title: '', status: kind === 'shell' ? null : 'idle', seq: 0, seen: true, setupPending: !!setup && !IS_WIN,
     startedAt: Date.now(), lastOutput: 0, lastInput: 0, clients: new Set(),
     reopened, continuedAt: continuedAt || null,
@@ -197,7 +199,7 @@ async function adopt(t, s) {
   proc.pid = t.pid
   const kind = s.kind || 'shell'
   const p = {
-    paneId: t.id, tabId: s.tabId, workspaceId: s.workspaceId, kind, cwd: s.cwd, model: s.model || null, sessionId: s.sessionId || null, account: s.account || null, env: s.env || null, proc, remote: true, term: null,
+    paneId: t.id, tabId: s.tabId, workspaceId: s.workspaceId, kind, cwd: s.cwd, model: s.model || null, effort: s.effort || null, sessionId: s.sessionId || null, account: s.account || null, env: s.env || null, proc, remote: true, term: null,
     title: t.title || '', status: kind === 'shell' ? null : 'idle', seq: 0, seen: true, setupPending: false,
     startedAt: t.startedAt || Date.now(), lastOutput: t.lastOutput || 0, lastInput: 0, clients: new Set(),
   }
@@ -375,7 +377,7 @@ export async function fleet() {
     paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId,
     workspace: wsLabel(p.workspaceId), tab: tabOf(p.tabId)?.label || '',
     kind: p.kind, status: statusOf(p), title: p.title, cwd: p.cwd, account: accounts.labelOf(p.account), accountId: p.account, accountSure: !!p.account,
-    sessionId: p.sessionId, model: p.model, focused: false, seq: p.seq,
+    sessionId: p.sessionId, model: p.model, effort: p.effort || null, focused: false, seq: p.seq,
     setup: p.setup?.step || null, setupUrl: p.setup?.url || null, setupKeys: p.setup?.keys || null,
   }))
   const tabList = tabs.map((t) => ({
@@ -542,7 +544,7 @@ export async function moveTab(tabId, index) {
 
 // resume: a session id to open again; fork: a session id to copy into a new conversation.
 // setup: { command, cwd } run in the terminal before the agent starts (a new worktree's `npm install`).
-export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, access, account, resume, fork, setup, env }) {
+export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, effort, access, account, resume, fork, setup, env }) {
   const space = String(newSpace || '').trim()
   let ws = !space && workspaceId ? spaces.find((w) => w.id === workspaceId) : null
   if (!ws) { ws = { id: `w${id()}`, label: (space || label || 'Space').slice(0, 80) }; spaces.push(ws) }
@@ -551,7 +553,7 @@ export async function launch({ kind = 'claude', cwd, label, workspaceId, newSpac
   tabs.push(tab)
   const paneId = `${ws.id}:p${id()}`
   try {
-    await spawnPane({ paneId, tabId: tab.tabId, workspaceId: ws.id, kind, cwd, opening, model, access, account, sessionId: resume || undefined, resume: !!resume, fork, setup, env })
+    await spawnPane({ paneId, tabId: tab.tabId, workspaceId: ws.id, kind, cwd, opening, model, effort, access, account, sessionId: resume || undefined, resume: !!resume, fork, setup, env })
   } catch (e) {
     // Don't leave an empty tab (or space) behind.
     tabs = tabs.filter((t) => t !== tab)

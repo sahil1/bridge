@@ -8,11 +8,15 @@ import { InstallAgentButton, openSettings } from './SignIn.jsx'
 import AgentMark from './settings/agentMark.jsx'
 import { AccountPicker, nameOf } from './AccountMenu.jsx'
 import NewCloudAgent from './NewCloudAgent.jsx'
+import { EffortChip, launchEffort } from './Recommended.jsx'
+import { useTrial } from '../trials.js'
 import { t } from '../i18n/index.js'
 
 // Start any installed agent in a project folder (in an existing space or a new one), or as a
 // plain chat with no project, like talking to Claude or Codex directly. Optionally with a first message.
 // Or in the cloud: on Cursor, Copilot, Jules or Claude's computers, with your key (NewCloudAgent).
+// With Recommended Settings on (a beta feature), the first message has an effort chip, suggested
+// from what it says (Recommended.jsx).
 export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onAddAccount, onCloudSettings }) {
   const [kinds, setKinds] = useState(null)
   const [recent, setRecent] = usePersisted('cc-recent-dirs', [])
@@ -26,6 +30,7 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
   const [spaceName, setSpaceName] = useState('')
   const [name, setName] = useState('')
   const [prompt, setPrompt] = useState('')
+  const [effort, setEffort] = useState(null) // the effort chip's pick (null: as suggested from the first message)
   // Compare: the same first message to a second agent, side by side.
   const [also, setAlso] = useState('')
   const [dirs, setDirs] = useState({ dirs: [], exists: true })
@@ -74,6 +79,9 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
   const modelList = (chatModels?.models || []).filter((m) => mode === 'chat' || m.via !== 'sign-in')
   const pickedModel = modelList.some((m) => m.id === chatModel) ? chatModel : modelList[0]?.id || ''
   const anyBlocked = kind === 'chat' && (!chatModels || !modelList.length)
+  const kindInfo = (kinds || []).find((k) => k.kind === kind)
+  const effortOn = useTrial('recommended-settings') && !!kindInfo?.effort
+  const withEffort = (text) => (effortOn ? { effort: launchEffort(text, effort) } : {})
   const reloadKinds = () => api('/agent-kinds').then((ks) => { setKinds(ks); if (ks.length && !ks.some((k) => k.kind === kind)) setKind(ks[0].kind) }).catch(() => {})
   const group = accts.find((k) => k.kind === kind)
   const kindAccts = group?.accounts || []
@@ -125,11 +133,11 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
     setError(null)
     try {
       if (mode === 'chat') {
-        onLaunched(await api('/chats', { method: 'POST', body: kind === 'chat' ? { kind, prompt, model: pickedModel, typed: 'new' } : { kind, prompt, account: pickedAccount, typed: 'new' } }))
+        onLaunched(await api('/chats', { method: 'POST', body: kind === 'chat' ? { kind, prompt, model: pickedModel, typed: 'new' } : { kind, prompt, account: pickedAccount, typed: 'new', ...withEffort(prompt) } }))
         return
       }
       const out = await api('/agents/launch', { method: 'POST', body: {
-        kind, cwd, label: name || folderName, prompt, typed: 'new', account: pickedAccount, ...(kind === 'chat' ? { model: pickedModel } : {}),
+        kind, cwd, label: name || folderName, prompt, typed: 'new', account: pickedAccount, ...(kind === 'chat' ? { model: pickedModel } : {}), ...withEffort(prompt),
         workspaceId: space === '__new' ? null : space,
         newSpace: space === '__new' ? (spaceName || name || folderName) : null,
         alsoKind: also && prompt.trim() ? also : undefined,
@@ -308,6 +316,7 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
           <textarea rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={mode === 'chat' ? t('What do you want to talk about?') : t('e.g. /review, or describe the task')}
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) launch(e) }} />
         </label>
+        {effortOn && <div className="na-effort"><EffortChip kind={kind} label={kindInfo.label} text={prompt} value={effort} onPick={setEffort} className="boxed" up /></div>}
 
         {mode === 'project' && (kinds || []).length > 1 && (
           <label className="na-field na-also">

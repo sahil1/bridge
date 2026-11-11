@@ -186,15 +186,19 @@ const cmds = {
     const opt = (k) => { const i = args.indexOf(k); if (i < 0) return null; const v = args[i + 1]; args.splice(i, 2); return v }
     const flag = (k) => { const i = args.indexOf(k); if (i >= 0) args.splice(i, 1); return i >= 0 }
     const space = opt('--space'), cwd = opt('--cwd'), name = opt('--name'), kind = opt('--kind') || undefined
+    // How hard it thinks (Claude Code: low … max); left out, Bridge AI picks one from the brief when
+    // Recommended Settings is on (Beta Features), else it starts as set in Settings › Agents.
+    const effort = opt('--effort')
+    if (effort && !['low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) throw new Error('--effort is one of low, medium, high, xhigh, max')
     // Own branch: a new git worktree on a new branch (--branch, or bridge/<name>) from --base.
     const branch = opt('--branch'), base = opt('--base'), own = flag('--own-branch') || !!branch
     let prompt = args.join(' ')
     if (prompt === '-' || (!prompt && !process.stdin.isTTY)) prompt = fs.readFileSync(0, 'utf8')
-    if (!cwd || !prompt.trim()) throw new Error('Usage: bridge new --cwd <folder> [--space "Name"] [--name "tab name"] [--kind claude|codex|gemini|...] [--own-branch [--branch name] [--base branch]] "brief"')
+    if (!cwd || !prompt.trim()) throw new Error('Usage: bridge new --cwd <folder> [--space "Name"] [--name "tab name"] [--kind claude|codex|gemini|...] [--effort low|medium|high|xhigh|max] [--own-branch [--branch name] [--base branch]] "brief"')
     const f = await fleet()
     // An existing space by that name gets a new tab; otherwise a new space is made.
     const ws = space && (f.workspaces || []).find((w) => w.label.toLowerCase() === space.toLowerCase())
-    const out = await api('/agents/launch', { method: 'POST', body: { kind, cwd, label: name || undefined, workspaceId: ws?.id, newSpace: ws ? undefined : space || undefined, prompt: `${prompt.trim()}\n\n(Started by ${WHO} chief of staff.)`, ...(own ? { ownBranch: true, branch: branch || undefined, base: base || undefined } : {}) } })
+    const out = await api('/agents/launch', { method: 'POST', body: { kind, cwd, label: name || undefined, workspaceId: ws?.id, newSpace: ws ? undefined : space || undefined, prompt: `${prompt.trim()}\n\n(Started by ${WHO} chief of staff.)`, effort: effort || 'suggest', ...(own ? { ownBranch: true, branch: branch || undefined, base: base || undefined } : {}) } })
     await link(out.paneId)
     console.log(`Started ${kind || 'the default agent'} in ${out.paneId}${space ? ` (space "${ws ? ws.label : space}"${ws ? '' : ', new'})` : ''}, folder ${cwd}.`)
     if (out.worktree) console.log(`It works on its own branch, ${out.worktree.branch} (from ${out.worktree.base}), in ${tilde(out.worktree.folder)}. The repo's checkout is untouched.`)
@@ -359,7 +363,7 @@ const cmds = {
   bridge handoff <pane> <kind> [--model m] [--account name] [--keep]
                                     move its work to another kind of agent (codex, claude, gemini...): it starts in
                                     the same folder with a summary of the conversation; the old one goes to Closed agents
-  bridge new --cwd <folder> [--space "Name"] [--name "tab"] [--kind claude|codex|...] "brief"
+  bridge new --cwd <folder> [--space "Name"] [--name "tab"] [--kind claude|codex|...] [--effort high] "brief"
                                     start a new agent; an existing space name adds a tab there (- reads stdin)
       [--own-branch [--branch name] [--base branch]]
                                     ...on its own git branch, in its own worktree, so it can't clash with

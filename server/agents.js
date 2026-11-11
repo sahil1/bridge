@@ -22,6 +22,8 @@
 //               command typed into it; dflt: the name that goes back to its default }. Without it,
 //               an agent with model() and resume() restarts on the new model, same conversation.
 //   install     how to install it ({ npm } package, or a { unix, win } shell command)
+//   effort(lvl) arguments that set how hard it thinks, for that session only (low … max, as
+//               src/recommended.js lists them); Recommended Settings, a beta feature, passes them
 //   access(lvl) arguments for how much it may do without asking: 'ask' (its default: before edits
 //               and commands), 'edits' (changes files freely, asks before commands), 'full' (nothing
 //               asked). Only flags from each CLI's docs; agents without it always ask.
@@ -47,6 +49,8 @@ const CLAUDE_BUSY = new RegExp(`${ESC_INTERRUPT.source}|^\\s*[✻✳✶✢✽·*
 export const AGENTS = [
   {
     kind: 'claude', label: 'Claude Code', model: (m) => ['--model', m], models: ['opus', 'sonnet', 'haiku', 'claude-fable-5-1'],
+    // --effort is for that session only: unlike /effort typed in it, it's never kept in Claude Code's settings.
+    effort: (lvl) => ['--effort', lvl],
     // Its own /model (code.claude.com/docs/en/model-config): "default" clears the override.
     switchModel: { command: (m) => `/model ${m}`, dflt: 'default' }, install: { unix: 'curl -fsSL https://claude.ai/install.sh | bash', win: 'powershell -ExecutionPolicy ByPass -c "irm https://claude.ai/install.ps1 | iex"', npm: '@anthropic-ai/claude-code', brew: '--cask claude-code' }, bin: ['claude'], herdr: 'claude', usage: 'claude',
     sessionId: 'assign',
@@ -184,7 +188,7 @@ export function installed() {
 async function findInstalled(round) {
   const PATH = await loginPath()
   const found = await Promise.all(AGENTS.map(async (a) => {
-    for (const b of a.bin) { const p = await which(b, PATH); if (p) return { kind: a.kind, label: a.label, path: p, caps: a.caps, access: !!a.access, models: a.models || [] } }
+    for (const b of a.bin) { const p = await which(b, PATH); if (p) return { kind: a.kind, label: a.label, path: p, caps: a.caps, access: !!a.access, effort: !!a.effort, models: a.models || [] } }
     return null
   }))
   const list = found.filter(Boolean)
@@ -251,7 +255,7 @@ export async function catalog() {
   const have = new Map(list.map((x) => [x.kind, x]))
   return AGENTS.filter((a) => !hiddenAgent(a.kind)).map((a) => ({
     kind: a.kind, label: a.label, installed: have.has(a.kind), path: have.get(a.kind)?.path || null,
-    caps: a.caps || {}, install: installCommand(a.kind, tools), needs: installNeeds(a.kind, tools), modelFlag: !!a.model, models: a.models || [], access: !!a.access,
+    caps: a.caps || {}, install: installCommand(a.kind, tools), needs: installNeeds(a.kind, tools), modelFlag: !!a.model, models: a.models || [], access: !!a.access, effort: !!a.effort,
   }))
 }
 // Look again (an agent was just installed): a look already under way may have missed it.

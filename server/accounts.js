@@ -44,7 +44,9 @@ const KINDS = {
       const r = await run(bin, ['auth', 'status', '--json'], env)
       try {
         const j = JSON.parse(r.out.slice(r.out.indexOf('{'), r.out.lastIndexOf('}') + 1))
-        return { signedIn: !!j.loggedIn, plan: plan(j.subscriptionType) || (j.authMethod && j.authMethod !== 'none' && j.authMethod !== 'claude.ai' ? String(j.authMethod) : null) }
+        // And as it says them, for the settings recommended for a plan (src/recommended.js planOf).
+        const said = { sub: j.subscriptionType || null, tier: j.rateLimitTier || null, method: j.authMethod || null, provider: j.apiProvider || null }
+        return { signedIn: !!j.loggedIn, plan: plan(j.subscriptionType) || (j.authMethod && j.authMethod !== 'none' && j.authMethod !== 'claude.ai' ? String(j.authMethod) : null), said }
       } catch { return { signedIn: r.code === 0 ? null : false, plan: null } }
     },
   },
@@ -488,6 +490,19 @@ export async function list({ refresh = false } = {}) {
     }))
     return { kind, label: adapter(kind).label, installed: !!bin, setting, pick, usualHidden: hiddenUsual(kind, d), accounts }
   }))
+}
+
+// The sign-in new agents of a kind start with (your default account, or Auto's pick), as its own
+// check says it: { signedIn, sub, tier, method, provider } (accounts' status), for the settings
+// recommended for its plan. fresh: asked again now rather than from the last half minute.
+export async function signInOf(kind, { fresh = false } = {}) {
+  if (!KINDS[kind]) return null
+  const id = activeId(kind) || defaultId(kind)
+  if (fresh) statusCache.delete(id)
+  const bin = (await installed().catch(() => [])).find((x) => x.kind === kind)?.path || null
+  if (!bin) return null
+  const s = await statusOf(kind, id, bin, await loginPath())
+  return { signedIn: s.signedIn, ...(s.said || {}) }
 }
 
 // One account's sign-in, checked now rather than from the cache: the add-account dialog asks

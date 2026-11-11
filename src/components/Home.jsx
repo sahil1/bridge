@@ -4,6 +4,8 @@ import AgentMark from './settings/agentMark.jsx'
 import { usePersisted } from './layout.jsx'
 import { api, usePoll } from '../api.js'
 import { openSettings } from './SignIn.jsx'
+import { EffortChip, launchEffort } from './Recommended.jsx'
+import { useTrial } from '../trials.js'
 import { t, tx } from '../i18n/index.js'
 import './home.css'
 
@@ -11,7 +13,8 @@ import './home.css'
 // Code. The project's name is the picker; the agent (or any model), how much it may do without
 // asking, and where it works are small chips on the box; Enter starts it in that project and opens
 // it. With no project, it's a chat. The full New agent dialog (cloud agents, comparing two agents,
-// an account, the space it goes in) is under More options.
+// an account, the space it goes in) is under More options. With Recommended Settings on (a beta
+// feature), an effort chip too, suggested from what you type (Recommended.jsx).
 
 // How much it may do without asking (server: agents.js access()).
 const ACCESS = [
@@ -49,6 +52,7 @@ export default function Home({ fleet, onLaunched, onMore, autoFocus = true }) {
   const [models, setModels] = useState(null)
   const [repo, setRepo] = useState(null)
   const [own, setOwn] = useState(false)
+  const [effort, setEffort] = useState(null) // the effort chip's pick for this message (null: as suggested)
   const box = useRef(null)
   const pickFolder = window.bridgeApp?.pickFolder
 
@@ -57,6 +61,7 @@ export default function Home({ fleet, onLaunched, onMore, autoFocus = true }) {
   const choices = [...(kinds || []), ANY]
   const kind = choices.find((k) => k.kind === pref.kind)?.kind || kinds?.find((k) => k.kind === 'claude')?.kind || kinds?.[0]?.kind || 'chat'
   const agent = choices.find((k) => k.kind === kind) || ANY
+  const effortOn = useTrial('recommended-settings') && !!agent.effort
   // Any model: in a project it needs a model that can use tools (not a sign-in's one-shot mode).
   useEffect(() => { if (kind === 'chat' && !models) api('/chat/models').then((r) => setModels(r.models || [])).catch(() => setModels([])) }, [kind, models])
   const usable = (models || []).filter((m) => noProject || !project || m.via !== 'sign-in')
@@ -88,12 +93,13 @@ export default function Home({ fleet, onLaunched, onMore, autoFocus = true }) {
     try {
       const out = project
         ? await api('/agents/launch', { method: 'POST', body: {
-          kind, cwd: project.path, prompt, typed: 'new', access: access.id, ...(kind === 'chat' ? { model } : {}),
+          kind, cwd: project.path, prompt, typed: 'new', access: access.id, ...(kind === 'chat' ? { model } : {}), ...(effortOn ? { effort: launchEffort(prompt, effort) } : {}),
           workspaceId: space, newSpace: space ? null : project.name.split('/').pop(), label: prompt.replace(/\s+/g, ' ').slice(0, 40),
           ...(repo ? { remember: true, ownBranch: own } : {}),
         } })
-        : await api('/chats', { method: 'POST', body: kind === 'chat' ? { kind, prompt, model, typed: 'new' } : { kind, prompt, typed: 'new' } })
+        : await api('/chats', { method: 'POST', body: kind === 'chat' ? { kind, prompt, model, typed: 'new' } : { kind, prompt, typed: 'new', ...(effortOn ? { effort: launchEffort(prompt, effort) } : {}) } })
       setText('')
+      setEffort(null)
       onLaunched?.(out)
     } catch (x) { setErr(x.message) } finally { setBusy(false) }
   }
@@ -162,6 +168,7 @@ export default function Home({ fleet, onLaunched, onMore, autoFocus = true }) {
                 </Pop>
               </span>
             )}
+            {effortOn && <EffortChip kind={kind} label={agent.label} text={text} value={effort} onPick={setEffort} className="home-chip" />}
             <span className="home-grow" />
             <button type="submit" className="home-send" disabled={!text.trim() || busy} aria-label={t('Start')}><Icon name={busy ? 'refresh' : 'up'} size={15} className={busy ? 'spin' : ''} /></button>
           </div>

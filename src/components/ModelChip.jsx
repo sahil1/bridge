@@ -4,6 +4,8 @@ import { AgentIcon } from './settings/ProviderIcon.jsx'
 import { api, usePoll } from '../api.js'
 import { HandoffSection, HandoffPanel, useHandoff, useHandedNote } from './Handoff.jsx'
 import { AcctName, Left, nameOf, slotsOf } from './AccountMenu.jsx'
+import { useTrial } from '../trials.js'
+import { EFFORT_LABEL } from '../recommended.js'
 import { t, tx } from '../i18n/index.js'
 
 // Why a message is held (server/promptsafe.js says it in English), in your language.
@@ -22,7 +24,8 @@ export function heldWhy(reason) {
 // (Handoff.jsx). Claude Code switches model in place (its own
 // /model, sent like a message); agents that can't, like Codex, restart on the new model with the
 // same conversation. The server does the work (server/models.js, server/handoff.js); this shows
-// it and says how it went.
+// it and says how it went. With Recommended Settings on (a beta feature), the menu also says the
+// effort it started with.
 
 // Short names: "Opus 5.5", "Sonnet", "Sonnet 1M"; anything else as the CLI names it.
 const ALIAS = { opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku', fable: 'Fable', best: 'Best', opusplan: 'Opus Plan', default: 'Default' }
@@ -204,6 +207,9 @@ function ModelMenu({ data, agent, anchor, onPick, onClose, account = null, onAcc
   const current = !restart && data.current && !models.includes(data.current) && data.current !== data.checked ? data.current : null
   const typed = (other || '').trim()
   const okName = VALID.test(typed)
+  // The effort it started with (--effort): said, not changed here, as /effort typed into it would
+  // also change your default in Claude Code's own settings.
+  const effort = useTrial('recommended-settings') && EFFORT_LABEL[agent.effort] ? agent.effort : null
   const switches = data.mode === 'switch' || data.mode === 'restart'
   return (
     <div className="acct-pop model-pop" ref={ref} role="menu" tabIndex={-1} aria-label={switches ? t('{agent} model', { agent: data.label }) : data.label} onKeyDown={onKeyDown}>
@@ -235,8 +241,14 @@ function ModelMenu({ data, agent, anchor, onPick, onClose, account = null, onAcc
         : data.kind === 'claude' ? t('Sent as /model, like typing it in the terminal. Claude Code also keeps it as your default for new sessions.')
         : data.kind === 'aider' ? t('Sent as /model, like typing it in the terminal.') : t('Sent as its switch command, like typing it in the terminal.')}</p>
       </>}
-      {account && <>
+      {effort && <>
         {(switches || data.mode === 'fixed') && <div className="acct-sep" role="separator" />}
+        <div className="acct-sec" aria-hidden="true">{t('{agent} effort', { agent: data.label })}</div>
+        <p className="model-note mc-effort">{t('{effort} effort, set when it started.', { effort: t(EFFORT_LABEL[effort]) })}</p>
+        <p className="model-note muted">{t('To change it while it runs, use /effort in its Terminal tab: press s there to keep it to this session.')}</p>
+      </>}
+      {account && <>
+        {(switches || data.mode === 'fixed' || effort) && <div className="acct-sep" role="separator" />}
         <div className="acct-sec" aria-hidden="true">{t('{agent} account', { agent: data.label })}</div>
         {/* Stopped at its limit, it's done for now, though its screen can still show it working. */}
         {agent.status === 'working' && !account.atLimit && <p className="model-note">{t("It's working. Another account can pick it up once it's done (or press Stop).")}</p>}
