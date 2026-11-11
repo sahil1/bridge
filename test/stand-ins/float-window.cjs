@@ -8,6 +8,7 @@ const { app, BrowserWindow, ipcMain, screen } = require('electron')
 const desktop = path.join(__dirname, '..', '..', 'desktop')
 const { floatWindow, floatResizer, fitWhileResizing } = require(path.join(desktop, 'floatfit.js'))
 const { make, place } = require(path.join(desktop, 'floatshare.js'))
+const apiToken = require(path.join(desktop, 'apitoken.js'))
 const URL_BASE = process.env.KIT_URL
 const preload = path.join(desktop, 'preload.js')
 let float = null
@@ -33,7 +34,9 @@ globalThis.placeCard = (c) => {
 app.on('will-quit', () => share.stop())
 // Where the test puts the pointer on the screen while it resizes the card (the real one stays put).
 globalThis.cursor = null
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Let in with the kit's key, as desktop/main.js lets its windows in (KIT_DATA: its data folder).
+  await apiToken.letIn(require('electron').session.defaultSession, { port: new URL(URL_BASE).port, token: apiToken.read(process.env.KIT_DATA) })
   // Hidden, as when you've closed it: its timers run as they do in the app's.
   globalThis.mainWin = new BrowserWindow({ width: 1000, height: 700, show: false, webPreferences: { preload, contextIsolation: true, sandbox: true, backgroundThrottling: false } })
   globalThis.mainWin.loadURL(URL_BASE)

@@ -49,7 +49,7 @@ const labelOf = (els, e) => els.find((t) => t.type === 'text' && t.containerId =
 const byLabel = (els, text) => els.find((e) => e.type !== 'text' && labelOf(els, e) === text)
 const holder = (e) => e?.customData?.bridge?.holder
 const inside = (a, c) => a.x >= c.x - 1 && a.y >= c.y - 1 && a.x + a.width <= c.x + c.width + 1 && a.y + a.height <= c.y + c.height + 1
-const chief = (args, input) => spawnSync(process.execPath, [path.join(ROOT, 'chief', 'bin', 'bridge'), 'board', ...args], { input, encoding: 'utf8', env: { ...process.env, BRIDGE_URL: kit.url } })
+const chief = (args, input) => spawnSync(process.execPath, [path.join(ROOT, 'chief', 'bin', 'bridge'), 'board', ...args], { input, encoding: 'utf8', env: { ...process.env, BRIDGE_URL: kit.url, BRIDGE_HOME: kit.data } })
 // The words in a PDF: its text, in its streams (compressed or not).
 function pdfWords(buf) {
   const raw = buf.toString('latin1')

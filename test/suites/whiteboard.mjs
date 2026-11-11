@@ -52,7 +52,7 @@ const file = (name) => path.join(BOARDS, `${name}.excalidraw`)
 const readBoard = (name) => { try { return JSON.parse(fs.readFileSync(file(name), 'utf8')) } catch { return null } }
 const live = (j) => (j?.elements || []).filter((e) => !e.isDeleted)
 const texts = (j) => live(j).filter((e) => e.type === 'text').map((e) => e.originalText ?? e.text)
-const chief = (args, input) => spawnSync(process.execPath, [path.join(ROOT, 'chief', 'bin', 'bridge'), 'board', ...args], { input, encoding: 'utf8', env: { ...process.env, BRIDGE_URL: kit.url } })
+const chief = (args, input) => spawnSync(process.execPath, [path.join(ROOT, 'chief', 'bin', 'bridge'), 'board', ...args], { input, encoding: 'utf8', env: { ...process.env, BRIDGE_URL: kit.url, BRIDGE_HOME: kit.data } })
 const enc = encodeURIComponent
 
 // A project with an agent's diagrams in it.

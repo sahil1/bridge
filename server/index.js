@@ -8,6 +8,8 @@ import { listSubagents, runningFor, forgetExcept } from './subagents.js'
 import { ttyHandler } from './tty.js'
 import { attachHandler } from './attach.js'
 import { makeGuard } from './guard.js'
+import { makeAuth } from './apiauth.js'
+import { localKey } from './apitoken.js'
 import * as machinePages from './machinepages.js'
 import { usage } from './usage.js'
 import { usageStats } from './usagestats.js'
@@ -148,6 +150,12 @@ const macro = makeMacro()
 const news = makeNews(cfg)
 
 const guard = makeGuard(cfg, { tailnetOwner: phone.tailnetOwner })
+// The key every request needs besides (apiauth.js): in the data folder, made the first time. Through
+// Tailscale, you still get in without it while Tailscale publishes this server (Use on your phone),
+// as you did; the tests stand Tailscale in with BRIDGE_TAILNET_OWNER.
+localKey()
+let tailnetServed = !!process.env.BRIDGE_TAILNET_OWNER
+const auth = makeAuth({ port: cfg.port, token: localKey, ui: () => UI_DIR, viaTailnet: guard.viaTailnet, tailnetServed: () => tailnetServed })
 // Another of your computers' pages, each at a port of its own here, and what they may ask of this one.
 const pages = machinePages.make({
   port: cfg.port, host: cfg.host, thisName: () => relay.thisName(), linked: () => machines.list().filter((m) => m.state === 'linked'),
@@ -155,6 +163,7 @@ const pages = machinePages.make({
 })
 const app = express()
 app.use(guard.http)
+app.use(auth.http)
 app.use(pages.http)
 // Each request timed, for how Bridge AI itself is doing (perf.js).
 app.use(perf.timing)
@@ -2427,7 +2436,7 @@ app.post('/api/system/stopping', wrap((req) => {
   return { ok: true }
 }))
 // Whether Tailscale publishes this computer decides, with the relay's phones, whether it stays awake.
-const tailnetSaid = (st) => { relay.setTailnet(!!st?.enabled); return st }
+const tailnetSaid = (st) => { relay.setTailnet(!!st?.enabled); tailnetServed = !!st?.enabled || !!process.env.BRIDGE_TAILNET_OWNER; return st }
 app.get('/api/phone', wrap(() => phone.status(cfg.port).then(tailnetSaid)))
 app.post('/api/phone', wrap((req) => (req.body?.enabled ? phone.enable(cfg.port) : phone.disable(cfg.port)).then(tailnetSaid)))
 // Your own relay (relay.js). Set up from the computer only: a phone using the relay can see it,
@@ -2859,6 +2868,18 @@ async function servedUi() {
   Object.assign(uiNow, { at: Date.now(), id: entryOf(html) })
   return uiNow.id
 }
+// That Bridge AI is here, and which version: public, for a program to check before it has the key
+// (apiauth.js), or one with a key that's wrong.
+// in: this browser or program is let in (the page saying how to get in looks, to open by itself).
+app.get('/api/health', (req, res) => res.json({ ok: true, app: 'Bridge AI', version: VERSION, in: auth.allowed(req) }))
+// A one-time link that lets a browser on this computer in (apiauth.js): View › Open in Browser in
+// the desktop app, and `bridge-ai open`. to: where it lands ("/", "/?window=…").
+app.post('/api/browser-link', (req, res) => {
+  if (!fromHere(req)) return res.status(403).json({ error: 'Open Bridge AI in a browser from Bridge AI on your computer' })
+  res.json(auth.link({ to: req.body?.to, base: `http://127.0.0.1:${cfg.port}` }))
+})
+// The key an HTML preview's files load with from its sandbox (apiauth.js, Files.jsx).
+app.get('/api/agents/:pane/site-key', (req, res) => res.json({ key: auth.siteKey(req.params.pane) }))
 app.get('/api/version', async (req, res) => res.json({ version: VERSION, build: BUILD, bundled: !!process.versions.electron, pid: process.pid, ui: await servedUi(), computer: relay.thisName() }))
 
 app.get('/api/config', (req, res) => res.json({
@@ -3439,6 +3460,7 @@ const upgrades = [
 ]
 const onUpgrade = async (req, socket, head) => {
   if (!(await guard.upgrade(req)) || !pages.upgrade(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy() }
+  if (!auth.upgrade(req)) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy() }
   if (machines.isMachinePath(req.url)) return machines.upgrade(req, socket, head) // a terminal on another of your devices
   const hit = upgrades.find(([prefix]) => req.url.startsWith(prefix))
   if (!hit) return socket.destroy()

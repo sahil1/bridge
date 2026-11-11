@@ -2,7 +2,7 @@
 // bridge-ai: Bridge AI from your terminal. Run `npm link` once in the repo to put it on your PATH.
 //   bridge-ai start [dev|phone]     start the server (same as npm start)
 //   bridge-ai stop [agents]         stop it (agents keep running; with "agents", them too)
-//   bridge-ai open                  open the app in your browser
+//   bridge-ai open [--print]        open the app in your browser, let in (or print the one-time link)
 //   bridge-ai list                  every agent and shell, numbered
 //   bridge-ai attach [target]       work in an agent from this terminal; Ctrl+] to detach.
 //                                   target: a number from `list`, a pane id (w1:p3), or a tab name.
@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url'
 import { loadConfig, IS_WIN, IS_MAC } from '../server/paths.js'
 import { hostedBase } from '../server/hosted.js'
 import { accountsBase } from '../server/account.js'
+import { authHeaders, readToken } from '../server/apitoken.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const cfg = loadConfig()
@@ -32,7 +33,8 @@ const DIM = (s) => (process.stdout.isTTY ? `\x1b[2m${s}\x1b[0m` : s)
 async function api(p, opts = {}) {
   let res
   try {
-    res = await fetch(`${BASE}/api${p}`, { method: opts.method || 'GET', headers: opts.body ? { 'Content-Type': 'application/json' } : {}, body: opts.body ? JSON.stringify(opts.body) : undefined })
+    // With Bridge AI's key from its data folder (server/apitoken.js).
+    res = await fetch(`${BASE}/api${p}`, { method: opts.method || 'GET', headers: { ...(opts.body ? { 'Content-Type': 'application/json' } : {}), ...authHeaders(readToken()) }, body: opts.body ? JSON.stringify(opts.body) : undefined })
   } catch { throw new Error(`Bridge AI isn't running at ${BASE}. Start it with: bridge-ai start`) }
   const data = await res.json().catch(() => ({}))
   // code: what the server says it was (hostedFull…), for a way on to offer.
@@ -104,7 +106,7 @@ async function attach(q) {
   const rows = process.stdout.rows || 40
   const url = `${BASE.replace(/^http/, 'ws')}/api/panes/${encodeURIComponent(t.paneId)}/attach?cols=${cols}&rows=${rows}`
   console.log(DIM(`Attaching to ${t.label}. Ctrl+] to detach; the agent keeps running in Bridge AI.`))
-  const ws = new WebSocket(url)
+  const ws = new WebSocket(url, { headers: authHeaders(readToken()) })
   let done = false
   let attached = false
   // code: 1 when it went wrong, so a window opened for this stays open to say why.
@@ -381,14 +383,25 @@ async function phonesCmd(args) {
 
 function openUrl(url) {
   const [cmd, args] = IS_MAC ? ['open', [url]] : IS_WIN ? ['cmd', ['/c', 'start', '', url]] : ['xdg-open', [url]]
-  spawn(cmd, args, { stdio: 'ignore', detached: true }).unref()
+  return new Promise((resolve) => {
+    const c = spawn(cmd, args, { stdio: 'ignore', detached: true })
+    c.on('error', () => resolve(false))
+    c.on('spawn', () => { c.unref(); resolve(true) })
+  })
+}
+// Open the app in the browser, let in: a one-time link from the server (server/apiauth.js), good
+// for two minutes; printed too, for a computer with no browser to open it in (--print: only that).
+async function openCmd(args) {
+  const { url } = await api('/browser-link', { method: 'POST', body: {} })
+  if (!flag(args, 'print') && await openUrl(url)) return console.log(`Opened Bridge AI in your browser. ${DIM(`(If it didn't open: ${url}, which works once, in the next two minutes.)`)}`)
+  console.log(`Open this in a browser on this computer, within two minutes (it works once):\n${url}`)
 }
 
 const [cmd = 'help', ...args] = process.argv.slice(2)
 const run = {
   start: () => { spawn(process.execPath, [path.join(HERE, 'start.js'), ...args], { stdio: 'inherit' }).on('exit', (c) => process.exit(c ?? 0)) },
   stop: () => { spawn(process.execPath, [path.join(HERE, 'stop.js'), ...args], { stdio: 'inherit' }).on('exit', (c) => process.exit(c ?? 0)) },
-  open: () => openUrl(BASE),
+  open: () => openCmd(args),
   list: async () => printList(await targets()),
   ls: async () => printList(await targets()),
   attach: () => attach(args.join(' ').trim()),
@@ -403,7 +416,7 @@ const run = {
 
   bridge-ai start [dev|phone]   start the server
   bridge-ai stop [agents]       stop it; agents keep running unless you add "agents"
-  bridge-ai open                open the app in your browser (${BASE})
+  bridge-ai open [--print]      open the app in your browser (${BASE}), let in with a one-time link
   bridge-ai list                every agent and shell, numbered
   bridge-ai attach [target]     work in an agent from this terminal (Ctrl+] detaches)
                                 target: a number from list, a pane id like w1:p3, or a tab name
