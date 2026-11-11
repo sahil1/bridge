@@ -68,19 +68,37 @@ export function Advanced({ order = 50, children }) {
 // what comes above it never moves it, not even for a moment for a click; room coming below takes it
 // up to the top, where it was meant to be. Kept until you act (20 seconds at most), not just a
 // moment: on a busy computer the rest can take seconds.
+// Looked for as each change is made too, so it's at the top as it's drawn: looked for only every
+// tenth of a second (longer on a busy computer), it showed further down and moved up a moment
+// later, from under a click already on its way. And not at all once you act in Settings before it
+// comes (you're busy with something else there, which it would move).
+const ACTS = ['wheel', 'touchstart', 'pointerdown', 'keydown']
 let keeping = null
 export function reveal(id, near = null) {
   return new Promise((done) => {
     const started = Date.now()
     let nearSince = 0
+    let again = null
     const find = (x) => x && document.querySelector(`.modal.settings [data-setting~="${CSS.escape(x)}"]`)
+    const coming = new MutationObserver(() => look())
+    const acted = (e) => { if (e.target?.closest?.('.modal.settings')) { waited(); done(false) } }
+    // (A tick later: what opened Settings, a key or a click in it, is still going on now.)
+    const listening = setTimeout(() => { for (const ev of ACTS) document.addEventListener(ev, acted, true) }, 0)
+    const waited = () => {
+      coming.disconnect()
+      clearTimeout(again)
+      clearTimeout(listening)
+      for (const ev of ACTS) document.removeEventListener(ev, acted, true)
+    }
     const look = () => {
       let el = find(id)
       if (!el && find(near)) {
         nearSince = nearSince || Date.now()
         if (Date.now() - nearSince > 1500) el = find(near)
       }
-      if (!el) { if (Date.now() - started < 8000) setTimeout(look, 100); else done(false); return }
+      clearTimeout(again)
+      if (!el) { if (Date.now() - started < 8000) again = setTimeout(look, 100); else { waited(); done(false) } return }
+      waited()
       for (let d = el.closest('details'); d; d = d.parentElement?.closest('details')) d.open = true
       const box = el.closest('.st-scroll')
       keeping?.()
@@ -100,20 +118,20 @@ export function reveal(id, near = null) {
         const ro = window.ResizeObserver ? new ResizeObserver(keep) : null
         for (const c of box.children) ro?.observe(c)
         // You acting there: scrolling (a scroll bar too, which a press on starts), a tap or a key.
-        const evs = ['wheel', 'touchstart', 'pointerdown', 'keydown']
         const stop = () => {
           mo.disconnect()
           ro?.disconnect()
           clearTimeout(timer)
-          for (const ev of evs) box.removeEventListener(ev, stop)
+          for (const ev of ACTS) box.removeEventListener(ev, stop)
           if (keeping === stop) keeping = null
         }
         const timer = setTimeout(stop, 20000)
-        for (const ev of evs) box.addEventListener(ev, stop)
+        for (const ev of ACTS) box.addEventListener(ev, stop)
         keeping = stop
       }
       done(true)
     }
+    coming.observe(document.body, { childList: true, subtree: true })
     look()
   })
 }
