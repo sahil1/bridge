@@ -4,7 +4,7 @@ import CopyButton from '../CopyButton.jsx'
 import { InstallNode, openSettings } from '../SignIn.jsx'
 import { RelayUse } from './Account.jsx'
 import { api, viaRelay, relayComputers } from '../../api.js'
-import { t, tx, locale } from '../../i18n/index.js'
+import { t, tn, tx, locale } from '../../i18n/index.js'
 import { Advanced } from './Advanced.jsx'
 
 // Settings › Devices › "From anywhere": your own relay on your Cloudflare account
@@ -65,7 +65,7 @@ export default function Relay({ way, setWay, onOffer }) {
     try { const r = await api(path, { method: 'POST', body }); setSt(r); return r } catch (e) { setErr(e.code === 'hostedFull' ? null : e.message); load() }
   }
   const deploy = async (account) => {
-    if (st.hosted && !account && !window.confirm('Move to a relay on your own Cloudflare account? Your phones pair again with it afterwards.')) return
+    if (st.hosted && !account && !window.confirm(t('Move to a relay on your own Cloudflare account? Your phones pair again with it afterwards.'))) return
     setWorking(true)
     const r = await run('/relay/deploy', { method: mode === 'token' ? 'token' : 'browser', token: mode === 'token' ? token.trim() : undefined, account })
     setWorking(false)
@@ -73,7 +73,7 @@ export default function Relay({ way, setWay, onOffer }) {
     else if (r) { setAccounts(null); setMode(null); setToken(''); setChanging(false); setWay?.(null) }
   }
   const useHosted = async () => {
-    if (st.configured && !st.hosted && !window.confirm('Move to Bridge AI\'s relay? Your phones pair again with it afterwards.')) return
+    if (st.configured && !st.hosted && !window.confirm(t('Move to Bridge AI\'s relay? Your phones pair again with it afterwards.'))) return
     setWorking(true)
     const r = await run('/relay/deploy', { method: 'hosted' })
     setWorking(false)
@@ -81,13 +81,13 @@ export default function Relay({ way, setWay, onOffer }) {
     else { setWay?.((w) => w || 'hosted'); api('/account').then(setAcct).catch(() => {}) } // turned away: it stays picked, saying why
   }
 
-  if (!st) return <section className="st-sec" data-setting="relay"><h4>From anywhere</h4><div className="skeleton-rows"><div /></div></section>
+  if (!st) return <section className="st-sec" data-setting="relay"><h4>{t('From anywhere')}</h4><div className="skeleton-rows"><div /></div></section>
 
   if (viaRelay) {
     return (
       <section className="st-sec" data-setting="relay">
-        <h4>From anywhere</h4>
-        <p className="muted small"><Icon name="check" size={12} /> This phone is connected to your computer through {st.hosted ? 'Bridge AI\'s relay' : 'your own relay'}, end-to-end encrypted. To add or remove phones, use Bridge AI on the computer.</p>
+        <h4>{t('From anywhere')}</h4>
+        <p className="muted small"><Icon name="check" size={12} /> {st.hosted ? t('This phone is connected to your computer through Bridge AI\'s relay, end-to-end encrypted. To add or remove phones, use Bridge AI on the computer.') : t('This phone is connected to your computer through your own relay, end-to-end encrypted. To add or remove phones, use Bridge AI on the computer.')}</p>
         {relayComputers && <Computers />}
       </section>
     )
@@ -96,33 +96,33 @@ export default function Relay({ way, setWay, onOffer }) {
   const busy = working || !!st.busy
   const cloudflare = accounts ? (
     <div className="relay-box">
-      <p className="small"><b>Which Cloudflare account should the relay go on?</b></p>
+      <p className="small"><b>{t('Which Cloudflare account should the relay go on?')}</b></p>
       <div className="st-row">
         {accounts.map((a) => <button key={a.id} type="button" className="btn small" disabled={busy} onClick={() => deploy(a.id)}>{a.name}</button>)}
-        <button type="button" className="ghost-btn" onClick={() => setAccounts(null)}>Cancel</button>
+        <button type="button" className="ghost-btn" onClick={() => setAccounts(null)}>{t('Cancel')}</button>
       </div>
     </div>
   ) : busy ? (
-    <p className="st-note"><Icon name="refresh" size={13} className="spin" /> {st.busy || 'Working…'} {st.loginUrl && <a href={st.loginUrl} target="_blank" rel="noreferrer">Open the sign-in page</a>}</p>
+    <p className="st-note"><Icon name="refresh" size={13} className="spin" /> {st.busy || t('Working…')} {st.loginUrl && <a href={st.loginUrl} target="_blank" rel="noreferrer">{t('Open the sign-in page')}</a>}</p>
   ) : mode === 'token' ? (
     <form className="relay-box" onSubmit={(e) => { e.preventDefault(); deploy() }}>
-      <p className="small">In Cloudflare, go to <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer">My Profile › API Tokens</a>, click <b>Create Token</b>, use the <b>Edit Cloudflare Workers</b> template, and paste the token here. It stays on this computer, for updating the relay.</p>
-      <input className="st-input mono" type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Cloudflare API token" autoComplete="off" spellCheck={false} aria-label="Cloudflare API token" />
+      <p className="small">{tn('In Cloudflare, go to {page}, click {create}, use the {template} template, and paste the token here. It stays on this computer, for updating the relay.', { page: <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer">My Profile › API Tokens</a>, create: <b>Create Token</b>, template: <b>Edit Cloudflare Workers</b> })}</p>
+      <input className="st-input mono" type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={t('Cloudflare API token')} autoComplete="off" spellCheck={false} aria-label={t('Cloudflare API token')} />
       <div className="st-row">
-        <button type="submit" className="btn primary small" disabled={token.trim().length < 20}>Deploy the relay</button>
-        <button type="button" className="ghost-btn" onClick={() => setMode(null)}>Cancel</button>
+        <button type="submit" className="btn primary small" disabled={token.trim().length < 20}>{t('Deploy the relay')}</button>
+        <button type="button" className="ghost-btn" onClick={() => setMode(null)}>{t('Cancel')}</button>
       </div>
     </form>
   ) : (
     <div className="st-row">
-      <button type="button" className="btn primary" onClick={() => deploy()}><Icon name="external" size={13} /> Sign in with Cloudflare</button>
-      <button type="button" className="ghost-btn" onClick={() => setMode('token')}>Use an API token instead</button>
-      <span className="muted small" title="Bridge AI keeps this sign-in to itself, apart from any other Cloudflare tools you use.">Free. Opens Cloudflare in your browser; Bridge AI then sets up the relay.</span>
+      <button type="button" className="btn primary" onClick={() => deploy()}><Icon name="external" size={13} /> {t('Sign in with Cloudflare')}</button>
+      <button type="button" className="ghost-btn" onClick={() => setMode('token')}>{t('Use an API token instead')}</button>
+      <span className="muted small" title={t('Bridge AI keeps this sign-in to itself, apart from any other Cloudflare tools you use.')}>{t('Free. Opens Cloudflare in your browser; Bridge AI then sets up the relay.')}</span>
     </div>
   )
   // Signing in with the browser needs Node.js, and there's none: install it, then sign in.
   const problem = (err || st.error) && !busy && (st.needs === 'node'
-    ? <div className="relay-box"><p className="small">Signing in with the browser needs Node.js, which this computer doesn't have yet. Install it here and Bridge AI signs you in right after, or use an API token instead.</p><InstallNode onDone={() => deploy()} /></div>
+    ? <div className="relay-box"><p className="small">{t('Signing in with the browser needs Node.js, which this computer doesn\'t have yet. Install it here and Bridge AI signs you in right after, or use an API token instead.')}</p><InstallNode onDone={() => deploy()} /></div>
     : <p className="st-note bad"><Icon name="alert" size={13} /> {err || st.error}</p>)
 
   // Bridge AI's relay is full for now: the other ways, a click away.
@@ -135,12 +135,12 @@ export default function Relay({ way, setWay, onOffer }) {
     const current = st.configured ? (st.hosted ? 'hosted' : 'cloudflare') : null
     return (
       <section className="st-sec" data-setting="relay">
-        <h4>Use Bridge AI on your phone</h4>
-        <p className="muted small">Pick how your phone reaches this computer when you're away from it.{st.configured ? ' Moving to another relay means pairing your phones again.' : ''}</p>
-        <div className="ph-ways" role="radiogroup" aria-label="How your phone reaches this computer">
+        <h4>{t('Use Bridge AI on your phone')}</h4>
+        <p className="muted small">{st.configured ? t('Pick how your phone reaches this computer when you\'re away from it. Moving to another relay means pairing your phones again.') : t('Pick how your phone reaches this computer when you\'re away from it.')}</p>
+        <div className="ph-ways" role="radiogroup" aria-label={t('How your phone reaches this computer')}>
           {WAYS.map((w) => (
             <button key={w.id} type="button" role="radio" aria-checked={pick === w.id} className={`ph-way ${pick === w.id ? 'on' : ''}`} onClick={() => setWay?.(w.id)}>
-              <span className="ph-way-head"><b>{t(w.title)}</b>{current === w.id ? <span className="st-chip">In use</span> : w.id === 'hosted' && st.hostedFull ? <span className="st-chip warn">{t('Full for now')}</span> : w.tag && !current && <span className="st-chip good">{t(w.tag)}</span>}</span>
+              <span className="ph-way-head"><b>{t(w.title)}</b>{current === w.id ? <span className="st-chip">{t('In use')}</span> : w.id === 'hosted' && st.hostedFull ? <span className="st-chip warn">{t('Full for now')}</span> : w.tag && !current && <span className="st-chip good">{t(w.tag)}</span>}</span>
               <span className="muted small">{t(w.text)}</span>
             </button>
           ))}
@@ -151,21 +151,21 @@ export default function Relay({ way, setWay, onOffer }) {
             <ul className="ph-facts">
               <li><b>{t('What it can see:')}</b> {t('the IP addresses of your phone and this computer, and when and how much data passes. With the iPhone or Android app, never what you do: everything between them is end-to-end encrypted by code the app carries. In a phone\'s browser, that code comes from the relay.')}</li>
               <li><b>{t('Fair use:')}</b> {t('your account has an allowance every 8 hours and each week, across its computers, plenty for normal use. Settings › Account shows it.')}</li>
-              <li><b>Open source:</b> the relay's code is <a href={CODE} target="_blank" rel="noreferrer">on GitHub</a>. If you'd rather not use the project's, pick your own Cloudflare instead.</li>
+              <li><b>{t('Open source:')}</b> {tn('the relay\'s code is {github}. If you\'d rather not use the project\'s, pick your own Cloudflare instead.', { github: <a href={CODE} target="_blank" rel="noreferrer">{t('on GitHub')}</a> })}</li>
             </ul>
-            {current === 'hosted' ? <p className="muted small"><Icon name="check" size={12} /> This is how your phone connects now.</p>
-              : busy ? <p className="st-note"><Icon name="refresh" size={13} className="spin" /> {st.busy || 'Working…'}</p>
-              : <Needs acct={acct} asking={asking} onAsk={askRelay}>{full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="phone" size={14} /> Use Bridge AI's relay</button></div>}</Needs>}
+            {current === 'hosted' ? <p className="muted small"><Icon name="check" size={12} /> {t('This is how your phone connects now.')}</p>
+              : busy ? <p className="st-note"><Icon name="refresh" size={13} className="spin" /> {st.busy || t('Working…')}</p>
+              : <Needs acct={acct} asking={asking} onAsk={askRelay}>{full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="phone" size={14} /> {t('Use Bridge AI\'s relay')}</button></div>}</Needs>}
           </div>
         )}
         {pick === 'cloudflare' && (
           <>
-            <p className="muted small" title="A small relay on your own free Cloudflare account: everything stays on your account, with no limits beyond Cloudflare's free plan. Bridge AI puts it there for you and keeps it up to date. Everything between phone and computer is end-to-end encrypted, so neither the relay nor Cloudflare can read it.">A small relay on your own free Cloudflare account, end-to-end encrypted: neither the relay nor Cloudflare can read it.</p>
-            {current === 'cloudflare' ? <p className="muted small"><Icon name="check" size={12} /> This is how your phone connects now.</p> : cloudflare}
+            <p className="muted small" title={t('A small relay on your own free Cloudflare account: everything stays on your account, with no limits beyond Cloudflare\'s free plan. Bridge AI puts it there for you and keeps it up to date. Everything between phone and computer is end-to-end encrypted, so neither the relay nor Cloudflare can read it.')}>{t('A small relay on your own free Cloudflare account, end-to-end encrypted: neither the relay nor Cloudflare can read it.')}</p>
+            {current === 'cloudflare' ? <p className="muted small"><Icon name="check" size={12} /> {t('This is how your phone connects now.')}</p> : cloudflare}
           </>
         )}
-        {pick === 'tailscale' && <p className="muted small">No relay at all: your phone reaches this computer over your own private Tailscale network. Tailscale has to be installed and connected on both. Its steps are just below.{current ? ' The relay keeps working alongside it until you stop using it.' : ''}</p>}
-        {changing && <div><button type="button" className="ghost-btn" onClick={() => { setChanging(false); setWay?.(null) }}>Cancel</button></div>}
+        {pick === 'tailscale' && <p className="muted small">{current ? t('No relay at all: your phone reaches this computer over your own private Tailscale network. Tailscale has to be installed and connected on both. Its steps are just below. The relay keeps working alongside it until you stop using it.') : t('No relay at all: your phone reaches this computer over your own private Tailscale network. Tailscale has to be installed and connected on both. Its steps are just below.')}</p>}
+        {changing && <div><button type="button" className="ghost-btn" onClick={() => { setChanging(false); setWay?.(null) }}>{t('Cancel')}</button></div>}
         {problem}
       </section>
     )
@@ -189,25 +189,25 @@ export default function Relay({ way, setWay, onOffer }) {
   const phones = (st.devices || []).filter((d) => d.kind !== 'computer')
   return (
     <section className="st-sec" data-setting="relay">
-      <h4>{st.hosted ? 'From anywhere, through Bridge AI\'s relay' : 'From anywhere, through your own relay'}</h4>
+      <h4>{st.hosted ? t('From anywhere, through Bridge AI\'s relay') : t('From anywhere, through your own relay')}</h4>
       {st.hosted
         ? <p className="muted small" title={t('Your phone reaches this computer through a relay run by Bold Bridge, for your Bold Bridge account. Everything between them is end-to-end encrypted: the relay sees IP addresses, and when and how much data passes. With the iPhone or Android app it can\'t read the rest, since the app carries the code that does the encrypting; in a phone\'s browser that code comes from the relay. Your account has a fair-use allowance every 8 hours and each week.')}>{t('End-to-end encrypted: the relay sees IP addresses and how much data passes. With the phone apps, never what you do; in a browser, the page\'s code comes from the relay.')}</p>
-        : <p className="muted small" title="Your phone reaches this computer through a small relay on your own free Cloudflare account. No VPN and no app to keep running: Bridge AI connects to it whenever it's open. Everything between phone and computer is end-to-end encrypted, so neither the relay nor Cloudflare can read it.">On your own free Cloudflare account, end-to-end encrypted: neither the relay nor Cloudflare can read it.</p>}
+        : <p className="muted small" title={t('Your phone reaches this computer through a small relay on your own free Cloudflare account. No VPN and no app to keep running: Bridge AI connects to it whenever it\'s open. Everything between phone and computer is end-to-end encrypted, so neither the relay nor Cloudflare can read it.')}>{t('On your own free Cloudflare account, end-to-end encrypted: neither the relay nor Cloudflare can read it.')}</p>}
 
       {!st.configured ? cloudflare : (
         <>
           <div className="st-row">
             {st.online
-              ? <span className="st-chip good"><Icon name="check" size={11} /> Connected</span>
-              : <span className="st-chip warn">Connecting…</span>}
+              ? <span className="st-chip good"><Icon name="check" size={11} /> {t('Connected')}</span>
+              : <span className="st-chip warn">{t('Connecting…')}</span>}
             <code className="small">{st.url.replace(/^https:\/\//, '')}</code>
-            {st.account && <span className="muted small">on {st.account}</span>}
+            {st.account && <span className="muted small">{t('on {account}', { account: st.account })}</span>}
           </div>
           {use && <RelayUse used={used} limits={useLimits} />}
           {st.busy && <p className="st-note"><Icon name="refresh" size={13} className="spin" /> {st.busy}</p>}
           {limitText && <p className="st-note warn"><Icon name="alert" size={13} /> {limitText} {['window', 'week', 'all', 'suspended', 'relay', 'deleted'].includes(st.limit.why) && <button type="button" className="link-btn" onClick={() => { setChanging(true); setWay?.('cloudflare') }}>{t('Use your own Cloudflare')}</button>}{st.limit.why === 'token' && <button type="button" className="link-btn" onClick={() => openSettings('account')}>{t('Open Settings › Account')}</button>}</p>}
-          {st.limit?.why === 'gone' && !busy && (full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="refresh" size={13} /> Set up Bridge AI's relay again</button><span className="muted small">Phones you paired pair again afterwards.</span></div>)}
-          {st.needsUpdate && !st.busy && <p className="st-note warn"><Icon name="alert" size={13} /> Your relay is older than this Bridge AI. <button type="button" className="link-btn" onClick={() => run('/relay/update')}>Update it</button></p>}
+          {st.limit?.why === 'gone' && !busy && (full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="refresh" size={13} /> {t('Set up Bridge AI\'s relay again')}</button><span className="muted small">{t('Phones you paired pair again afterwards.')}</span></div>)}
+          {st.needsUpdate && !st.busy && <p className="st-note warn"><Icon name="alert" size={13} /> {t('Your relay is older than this Bridge AI.')} <button type="button" className="link-btn" onClick={() => run('/relay/update')}>{t('Update it')}</button></p>}
           {st.hosted && <PageCheck onOwn={() => { setChanging(true); setWay?.('cloudflare') }} />}
 
           {/* A code pairs one device: once it has, its QR code goes, and another is a click away. */}
@@ -215,7 +215,7 @@ export default function Relay({ way, setWay, onOffer }) {
             <div className="st-row">
               {st.paired && <span className="st-chip good" role="status"><Icon name="check" size={11} /> {t('{name} paired', { name: st.paired.name })}</span>}
               <button type="button" className={st.paired ? 'btn' : 'btn primary'} disabled={!st.online} onClick={() => run('/relay/pair')}><Icon name={st.paired ? 'plus' : 'link'} size={14} /> {st.paired ? t('Add another device') : t('Pair a device')}</button>
-              {!st.online && <span className="muted small">Waiting for the relay to connect.</span>}
+              {!st.online && <span className="muted small">{t('Waiting for the relay to connect.')}</span>}
             </div>
           )}
 
@@ -225,10 +225,10 @@ export default function Relay({ way, setWay, onOffer }) {
                 <li key={d.id}>
                   <Icon name="phone" size={14} /><span>{d.name}</span>
                   {d.fresh && <span className="st-chip">{t('New')}</span>}
-                  <span className="muted small">{d.connected ? 'connected now' : d.lastSeen ? `last used ${new Date(d.lastSeen).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}</span>
+                  <span className="muted small">{d.connected ? t('connected now') : d.lastSeen ? t('last used {when}', { when: new Date(d.lastSeen).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) }) : ''}</span>
                   {/* Just paired: Keep it (yours), as the app's notice offers too. */}
                   {d.fresh && <button type="button" className="ghost-btn" onClick={async () => { setErr(null); try { setSt(await api(`/relay/devices/${encodeURIComponent(d.id)}/keep`, { method: 'POST' })); window.dispatchEvent(new Event('bridge-machines')) } catch (e) { setErr(e.message) } }}>{t('Keep')}</button>}
-                  <button type="button" className="ghost-btn" onClick={async () => { if (window.confirm(`Remove ${d.name}? It won't be able to reach this computer until you pair it again.`)) { setErr(null); try { setSt(await api(`/relay/devices/${encodeURIComponent(d.id)}`, { method: 'DELETE' })) } catch (e) { setErr(e.message) } } }}>Remove</button>
+                  <button type="button" className="ghost-btn" onClick={async () => { if (window.confirm(t('Remove {name}? It won\'t be able to reach this computer until you pair it again.', { name: d.name }))) { setErr(null); try { setSt(await api(`/relay/devices/${encodeURIComponent(d.id)}`, { method: 'DELETE' })) } catch (e) { setErr(e.message) } } }}>{t('Remove')}</button>
                 </li>
               ))}
             </ul>
@@ -236,8 +236,8 @@ export default function Relay({ way, setWay, onOffer }) {
 
           <Advanced order={20}><KeepAwake st={st} onChange={setSt} /></Advanced>
           <div className={offer ? 'st-row' : undefined}>
-            {offer && <button type="button" className="ghost-btn" onClick={() => { setChanging(true); setWay?.(null) }}>Change how your phone connects</button>}
-            <button type="button" className="ghost-btn" onClick={() => { if (window.confirm(st.hosted ? 'Stop using Bridge AI\'s relay? Paired phones are forgotten, and this computer\'s address on the relay is removed.' : 'Stop using this relay? Paired phones are forgotten and Bridge AI signs out of Cloudflare. The relay stays on your Cloudflare account; delete it there if you like.')) run('/relay/forget') }}>Stop using the relay</button>
+            {offer && <button type="button" className="ghost-btn" onClick={() => { setChanging(true); setWay?.(null) }}>{t('Change how your phone connects')}</button>}
+            <button type="button" className="ghost-btn" onClick={() => { if (window.confirm(st.hosted ? t('Stop using Bridge AI\'s relay? Paired phones are forgotten, and this computer\'s address on the relay is removed.') : t('Stop using this relay? Paired phones are forgotten and Bridge AI signs out of Cloudflare. The relay stays on your Cloudflare account; delete it there if you like.'))) run('/relay/forget') }}>{t('Stop using the relay')}</button>
           </div>
         </>
       )}
@@ -352,26 +352,26 @@ export function KeepAwake({ st: given = null, onChange }) {
 function Computers() {
   const [list, setList] = useState(() => relayComputers.list())
   const forget = async (c) => {
-    const msg = c.current ? `Forget ${c.name} on this phone? It's removed from this computer's paired phones too, and you'd need a new code to pair again.` : `Forget ${c.name} on this phone? To remove this phone there too, use Bridge AI on that computer.`
+    const msg = c.current ? t('Forget {name} on this phone? It\'s removed from this computer\'s paired phones too, and you\'d need a new code to pair again.', { name: c.name }) : t('Forget {name} on this phone? To remove this phone there too, use Bridge AI on that computer.', { name: c.name })
     if (!window.confirm(msg)) return
     await relayComputers.forget(c.relay)
     setList(relayComputers.list())
   }
   return (
     <>
-      <h4>Your Computers</h4>
+      <h4>{t('Your Computers')}</h4>
       <ul className="ph-devices">
         {list.map((c) => (
           <li key={c.relay}>
             <Icon name="laptop" size={14} /><span>{c.name}</span>
-            <span className="muted small">{c.current ? 'showing now' : ''}</span>
-            {!c.current && <button type="button" className="ghost-btn" onClick={() => relayComputers.open(c.relay)}>Open</button>}
-            <button type="button" className="ghost-btn" onClick={() => forget(c)}>Forget</button>
+            <span className="muted small">{c.current ? t('showing now') : ''}</span>
+            {!c.current && <button type="button" className="ghost-btn" onClick={() => relayComputers.open(c.relay)}>{t('Open')}</button>}
+            <button type="button" className="ghost-btn" onClick={() => forget(c)}>{t('Forget')}</button>
           </li>
         ))}
       </ul>
       <p className="muted small">{t('Bridge AI on another computer? On it, open Settings › Devices and choose Pair a device, then add it here.')}</p>
-      <div><button type="button" className="ghost-btn" onClick={() => relayComputers.add()}><Icon name="plus" size={12} /> Add a computer</button></div>
+      <div><button type="button" className="ghost-btn" onClick={() => relayComputers.add()}><Icon name="plus" size={12} /> {t('Add a computer')}</button></div>
     </>
   )
 }
