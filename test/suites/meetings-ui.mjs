@@ -714,7 +714,8 @@ process.exit(1)`)
     ok(!!(await until(async () => /Still no sound since Bridge AI restarted/.test(await qt()) && await quiet.locator('button', { hasText: 'Reset and ask again' }).count() === 1, 10000)), 'restarted and still quiet: why, and Reset and ask again', await qt())
     await quiet.locator('button', { hasText: 'Reset and ask again' }).click()
     const tcc = () => { try { return fs.readFileSync(path.join(kit.bin, 'tcc.log'), 'utf8').trim() } catch { return '' } }
-    ok(!!(await until(async () => /macOS asks again the next time a call is recorded/.test(await qt()) && tcc() === 'reset AudioCapture dev.bridge-ai.test', 5000)), "Reset forgets macOS's answer for the call's sound only (not Screen Recording)", { text: await qt(), tcc: tcc() })
+    // (Kept open: the card closes once the pointer has left it, as on a busy machine it can.)
+    ok(!!(await until(async () => { await card.hover('.float-card .fc-head').catch(() => {}); return /macOS asks again the next time a call is recorded/.test(await qt()) && tcc() === 'reset AudioCapture dev.bridge-ai.test' }, 8000)), "Reset forgets macOS's answer for the call's sound only (not Screen Recording)", { text: await qt(), tcc: tcc() })
   }
   // Open, with AI Assist's suggestion under the bar, on a short screen: the card asks for no more
   // than the screen's height, and what's under the bar scrolls, down to its last button.
