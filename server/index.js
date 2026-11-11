@@ -3582,6 +3582,9 @@ const onUpgrade = async (req, socket, head) => {
 server.on('upgrade', onUpgrade)
 server.listen(cfg.port, cfg.host, () => {
   console.log(`Bridge AI on http://${cfg.host}:${cfg.port} (runtime: ${rt.name}, data: ${DATA})`)
+  // Started in a terminal (npm start): a link that lets your browser in, once, for ten minutes
+  // (apiauth.js); a browser not let in says how to get one later.
+  if (process.stdout.isTTY && !process.versions.electron) console.log(`Open it in your browser with this link (it works once, for ten minutes): ${auth.link({ base: `http://127.0.0.1:${cfg.port}`, ms: 10 * 60_000 }).url}\nLater, or in another browser: bridge-ai open`)
   if (!/^(127\.0\.0\.1|localhost|::1)$/.test(cfg.host)) console.log(`Listening on ${cfg.host}, not 127.0.0.1: anyone who can reach port ${cfg.port} can drive your agents. In Docker, publish it as 127.0.0.1:${cfg.port}:${cfg.port} only.`)
   // Start the slow lookups the first screen needs (which agents you have, their sign-ins, usage
   // quotas) now, so they're ready or nearly ready when the page asks.

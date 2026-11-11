@@ -71,14 +71,15 @@ export function makeAuth({ port, token, ui, viaTailnet = () => false, tailnetSer
 
   // A one-time link: the code, kept until it's used or two minutes are up. to: where it lands, a
   // path of this server's ("/?window=w1"), "/" if not.
-  function link({ to = '/', base } = {}) {
+  // ms: how long it works (two minutes; the one `npm start` prints, longer).
+  function link({ to = '/', base, ms = CODE_MS } = {}) {
     const now = Date.now()
     for (const [c, v] of codes) if (v.until < now) codes.delete(c)
     if (codes.size > 50) codes.delete(codes.keys().next().value)
     const code = crypto.randomBytes(24).toString('base64url')
     const where = typeof to === 'string' && /^\/(?![/\\])/.test(to) ? to : '/'
-    codes.set(code, { until: now + CODE_MS, to: where })
-    return { url: `${base}/?open=${code}`, expires: new Date(now + CODE_MS).toISOString() }
+    codes.set(code, { until: now + ms, to: where })
+    return { url: `${base}/?open=${code}`, expires: new Date(now + ms).toISOString() }
   }
   const take = (code) => {
     const v = codes.get(String(code || ''))
