@@ -2,6 +2,21 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.16.0
+
+A live whiteboard of a meeting while it records; comments with @bridge on an Excel file's cells, a PowerPoint's slides and a whiteboard's shapes, as on a Word file's words; and a new sheet written from what you say it's for. Each is in Beta Features, off to start.
+
+<!-- rollout: 10 -->
+
+### What's new
+
+- **Live Meeting Board** (Beta Features): while a meeting records, in any call app or a room, AI Assist keeps a whiteboard of it from what's said, a minute or so at a time, with the model that writes your notes (a local one too): what's decided, a timeline with owners and dates, who does what and the questions still open. Each is a suggestion to keep or discard on the meeting's Board or on the board itself. It only adds, and never says the same thing twice. The board stays after the meeting, and its action items go onto the Chief of Staff's task list with one click.
+- **Comments in Excel files** (Beta Features: Comments and @bridge): comment on the cells you pick (Insert › Comment, a right-click or ⌥⌘M), reply, resolve and delete, beside the sheet, with each commented cell marked in its corner. They're saved into the file as Excel 365 writes them, with a note for older versions of Excel, and move with their rows and columns.
+- **Comments on a PowerPoint's slides** (Beta Features: Comments and @bridge): on a slide or a shape on it, beside the slides (Comments in the toolbar), saved into the file as PowerPoint writes them.
+- **Comments on a whiteboard** (Beta Features: Comments and @bridge): a comment on the shapes you pick, or on a place on the board, is a pin holding its thread, kept in the board's own file (Comments in the header).
+- **@bridge in any of these comments** asks AI Assist: its reply goes in the thread, signed AI Assist with the model that wrote it, and its change is a suggestion to keep or discard: cells outlined on the sheet; a shape's words, a slide rewritten or a new slide after it; shapes on the board changed as Change it does.
+- **Make a Sheet** (Beta Features): say what a new sheet is for ("a budget for a team of five") in New › Sheet or on an empty sheet, and AI Assist's model writes the whole workbook: its sheets, formulas, formats and dropdowns, with the heading row frozen. It's shown outlined to keep, then saved as an Excel file, or discard.
+
 ## 3.15.1
 
 Better than Claude's new Whiteboards and Sheets: a sheet's AI Assist that answers in seconds, a whiteboard's AI Assist that suggests rather than changes and turns a board into a document or a deck, comments in Word files with @bridge, and Bridge AI as an MCP server for Claude Code, Claude Desktop, Cursor and Codex, with a key for its API. And fixes: the whole app in your language, and the inbox once Mail has quit on macOS 15.
