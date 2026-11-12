@@ -1058,10 +1058,12 @@ ipc.handle('bridge:float-start', async (e, { app: callApp } = {}) => {
   await tellMain(`window.dispatchEvent(new CustomEvent('bridge-meeting-start', { detail: { app: ${JSON.stringify(callApp)} } }))`, false)
   return true
 })
-// event: a calendar event's day and id, to open it in Today › Calendar with its prep.
-ipc.handle('bridge:float-open', async (e, { meeting, meetings, paneId, event } = {}) => {
+// event: a calendar event's day and id, to open it in Today › Calendar with its prep. board: a
+// meeting's live board, by its name (sent with the meeting, which an older app opens instead).
+ipc.handle('bridge:float-open', async (e, { meeting, meetings, paneId, event, board } = {}) => {
   if (!fromFloat(e)) return false
-  if (event && typeof event.date === 'string' && /^\d{4}-\d\d-\d\d$/.test(event.date) && typeof event.id === 'string' && event.id.length < 400) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-event', { detail: ${JSON.stringify({ date: event.date, id: event.id })} }))`, true)
+  if (typeof board === 'string' && board && board.length <= 120 && !/[\\/]/.test(board)) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id: ${JSON.stringify(board)} } }))`, true)
+  else if (event && typeof event.date === 'string' && /^\d{4}-\d\d-\d\d$/.test(event.date) && typeof event.id === 'string' && event.id.length < 400) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-event', { detail: ${JSON.stringify({ date: event.date, id: event.id })} }))`, true)
   else if (meetings === true) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { list: true } }))`, true)
   else if (typeof meeting === 'string' && /^[\w-]{1,80}$/.test(meeting)) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: ${JSON.stringify(meeting)} } }))`, true)
   else if (typeof paneId === 'string' && paneId.length < 200) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: ${JSON.stringify(paneId)}, view: 'chat' } }))`, true)

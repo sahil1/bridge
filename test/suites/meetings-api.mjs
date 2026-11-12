@@ -3,9 +3,10 @@
 // from (your notes, the screen, the files, the invite); folders and the archive;
 // search and questions; saved Markdown; looks at the screen while the call talks (read by a
 // stand-in for native/bridgeocr, which isn't run on Windows); action items turned into agents and
-// Chief of Staff's tasks, and since last time; whether the floating card shows in screenshots. The calendar is macOS Calendar, and
-// the call's sound is recorded on a Mac (a stand-in for native/calltap there), so their parts are
-// Mac-only.
+// Chief of Staff's tasks, and since last time; whether the floating card shows in screenshots;
+// AI Assist's live board (a beta feature), filling in a batch at a time as lines come. The
+// calendar is macOS Calendar, and the call's sound is recorded on a Mac (a stand-in for
+// native/calltap there), so their parts are Mac-only.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -20,7 +21,8 @@ try { process.stdout.write(fs.readFileSync(path.join(__dirname, 'ocr.txt'), 'utf
   fs.writeFileSync(path.join(bin, 'bridgeocr'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'ocr.cjs')}" "$@"\n`, { mode: 0o755 })
   return path.join(bin, 'bridgeocr')
 }
-const kit = await startKit('meetings-api', { env: ({ bin }) => ({ BRIDGE_CALL_QUIET_MS: '2500', ...(IS_WIN ? {} : { BRIDGE_OCR: ocr(bin) }) }) })
+// BRIDGE_BOARD_MS: the live board's minute, 2 s here.
+const kit = await startKit('meetings-api', { env: ({ bin }) => ({ BRIDGE_CALL_QUIET_MS: '2500', BRIDGE_BOARD_MS: '2000', ...(IS_WIN ? {} : { BRIDGE_OCR: ocr(bin) }) }) })
 const model = await startModel('meetings-api')
 const RATE = 16000
 // Seconds of audio: a tone where say is true (loud enough to count as speech), else silence.
@@ -277,6 +279,153 @@ try {
   await kit.api(`/meetings/${J.id}/stop`, {})
   await kit.api(`/meetings/${J.id}/assist`, { on: false })
   ok((await kit.api('/settings')).user?.meetings?.assist === false, 'and off again')
+
+  // ---------- AI Assist's live board (a beta feature) ----------
+  // Off as a beta feature: its routes say so, and a meeting with it on sends nothing. On: as lines
+  // come in, a batch at a time (a minute, here BRIDGE_BOARD_MS's 2 s, and longer at AI Assist's Low),
+  // the model that writes the notes is asked what's new and it goes on a whiteboard of the meeting's
+  // own, each in its part's column as a suggestion. What's on the board (yours too) and what was
+  // taken off it aren't added again, and nothing on it is moved or taken away. Kept and discarded
+  // from the meeting; its action items onto Chief of Staff's task list once; a last look when it
+  // stops; and with a model on this computer, its looks stay here.
+  const boardAsks = () => model.asked(/^Keep a live board of a meeting/)
+  const boardFile = (name) => path.join(kit.data, 'boards', `${name}.excalidraw`)
+  const boardEls = (name) => { try { return JSON.parse(fs.readFileSync(boardFile(name), 'utf8')).elements || [] } catch { return [] } }
+  const noteOf = (els, key) => els.find((e) => e.type === 'rectangle' && e.customData?.bridge?.meeting?.key === key)
+  const WORDS = 'The team went through the plan for the next two weeks in some detail, step by step, so that everyone knows where things stand.'
+  const LB0 = await kit.api('/meetings', { title: 'Launch sync', call: false })
+  ok(/beta feature/.test(await err(`/meetings/${LB0.id}/board`, { on: true }) || '') && !('liveBoard' in await kit.api(`/meetings/${LB0.id}`)), 'off as a beta feature: the board says so, and a meeting has none')
+  await kit.api(`/meetings/${LB0.id}/stop`, {})
+  await kit.api('/settings', { meetings: { board: true } }, 'PATCH')
+  const LB1 = await kit.api('/meetings', { title: 'Launch sync', call: false })
+  ok(LB1.board === true, '(a meeting starts with its board on when every meeting has one)')
+  let b0 = boardAsks().length
+  said(LB1.id, [['them', 2, `We decided to ship the beta to ten customers first. ${WORDS}`]])
+  await send(LB1.id, Buffer.concat([pcm(2, true), pcm(1.5)]))
+  ok(!await until(() => boardAsks().length > b0, 4000) && !fs.existsSync(path.join(dirOf(LB1.id), 'board.json')), 'with the beta feature off, nothing is sent and no board is made, though the meeting has it on')
+  await kit.api(`/meetings/${LB1.id}/stop`, {})
+  await kit.api('/settings', { trials: { 'meeting-board': true }, meetings: { board: false } }, 'PATCH')
+
+  const LB = await kit.api('/meetings', { title: 'Launch sync', call: false })
+  ok((await kit.api(`/meetings/${LB.id}`)).liveBoard?.on === false, 'on as a beta feature, a meeting\'s board starts off unless every meeting has one')
+  r = await kit.api(`/meetings/${LB.id}/board`, { on: true })
+  ok(r.on === true && (await kit.api('/settings')).user?.meetings?.board === true, 'turned on for a meeting, and remembered for the next ones', r)
+  ok((await kit.api(`/meetings/${LB.id}`)).liveBoard?.id === null && !boardAsks().slice(b0).length, 'no board until there\'s something to put on it')
+  // The board fills in as lines come: a decision, a step with its owner and date, an action item
+  // and an open question, each in its column, dashed as a suggestion with the model's name.
+  said(LB.id, [['them', 2, `We decided to ship the beta to ten customers first. Priya will send the pricing deck by Friday. ${WORDS}`], ['you', 9, "Priya's beta ships on 24 Nov. Who owns the migration?"]])
+  await send(LB.id, Buffer.concat([pcm(2, true), pcm(1.5)]))
+  ok(!!(await until(async () => (await kit.api(`/meetings/${LB.id}`)).liveBoard?.items?.length === 4, 10000)), 'as lines come in, the board fills in by itself', (await kit.api(`/meetings/${LB.id}`)).liveBoard)
+  let lb = (await kit.api(`/meetings/${LB.id}`)).liveBoard
+  const ask1 = boardAsks().slice(b0)
+  ok(ask1.length === 1 && /Said since the board was last updated:\n[\s\S]*ship the beta to ten customers[\s\S]*Who owns the migration\?/.test(ask1[0]) && /The board is empty so far/.test(ask1[0]), 'it was asked once, with what was said since', ask1.map((x) => x.slice(0, 300)))
+  const byPart = Object.fromEntries(lb.items.map((x) => [x.part, x]))
+  ok(byPart.decision?.label === 'Ship the beta to ten customers first' && byPart.step?.label === 'Beta ships · Priya · 24 Nov' && byPart.action?.label === 'Priya: Send the pricing deck · Friday' && byPart.question?.label === 'Who owns the migration?' && lb.items.every((x) => x.state === 'suggested'), 'what was decided, the timeline with its owner and date, who does what, and the open question, each a suggestion', lb.items)
+  let els = boardEls(lb.id)
+  const heads = els.filter((e) => e.customData?.bridge?.meeting?.heading).map((e) => [e.text, e.x])
+  ok(fs.existsSync(boardFile(lb.id)) && /^Launch sync, /.test(lb.id) && JSON.stringify(heads) === JSON.stringify([['Decisions', 0], ['Timeline', 300], ['Who does what', 600], ['Open questions', 900]]), 'a whiteboard of its own, named after the meeting, with a column for each part', { id: lb.id, heads })
+  ok(lb.items.every((x) => { const n = noteOf(els, x.key); return n && n.strokeStyle === 'dashed' && n.customData.bridge.suggestion?.by === 'gpt-5' && n.x === { decision: 0, step: 300, action: 600, question: 900 }[x.part] }), 'each note in its column, dashed and marked as a suggestion from the model, by name', els.filter((e) => e.type === 'rectangle').map((e) => [e.x, e.strokeStyle, e.customData?.bridge?.suggestion?.by]))
+  ok((await kit.api(`/meetings/${LB.id}`)).boardId === lb.id, 'and the meeting links to it')
+
+  // Batching: lines that come within its minute (2 s here) wait, then go in one look, with only
+  // what was said since; what's on the board, yours too, is sent so it isn't said again; and the
+  // model saying something that's there already doesn't put it there twice.
+  const mine = { type: 'text', id: 'by-hand', x: 0, y: 900, width: 200, height: 20, text: 'Pricing page copy by Monday', originalText: 'Pricing page copy by Monday', fontSize: 16, fontFamily: 6, version: 3 }
+  const moved = { ...noteOf(els, byPart.question.key), x: 960, y: 420, version: 9 }
+  await kit.api(`/boards/${encodeURIComponent(lb.id)}`, { text: JSON.stringify({ type: 'excalidraw', version: 2, elements: [...els.map((e) => (e.id === moved.id ? moved : e)), mine], appState: {}, files: {} }), force: true }, 'PUT')
+  const before = new Map(boardEls(lb.id).map((e) => [e.id, JSON.stringify(e)]))
+  const lookedAt = () => Date.parse(JSON.parse(fs.readFileSync(path.join(dirOf(LB.id), 'board.json'), 'utf8')).at)
+  const at1 = lookedAt()
+  b0 = boardAsks().length
+  said(LB.id, [['them', 20, `Dan will write the migration plan by Monday. ${WORDS}`]])
+  await send(LB.id, Buffer.concat([pcm(2, true), pcm(1.5)]))
+  said(LB.id, [['you', 40, `We agreed to keep the old pricing for existing customers. ${WORDS}`]])
+  await send(LB.id, Buffer.concat([pcm(2, true), pcm(1.5)]))
+  ok(!!(await until(() => boardAsks().length > b0, 8000)) && !await until(() => boardAsks().length > b0 + 1, 2500), 'lines that come close together go in one look, not one each', boardAsks().length - b0)
+  const at2 = lookedAt()
+  ok(at2 - at1 >= 2000, 'and not before its minute (2 s here) since the last look', at2 - at1)
+  const ask2 = boardAsks()[b0] || ''
+  const since2 = ask2.split('Said since the board was last updated:')[1] || ''
+  ok(/migration plan/.test(since2) && /old pricing/.test(since2) && !/ten customers/.test(since2) && /Said before \(already looked at, for context\):[\s\S]*ten customers/.test(ask2), 'that look has what was said since the last, and the lines before only as context', ask2.slice(-900))
+  ok(/On the board already[^\n]*:\n- Decision: Ship the beta to ten customers first\n[\s\S]*- Written on the board: Pricing page copy by Monday/.test(ask2), 'it knows what\'s on the board already, yours too', ask2.slice(0, 900))
+  lb = await until(async () => { const x = (await kit.api(`/meetings/${LB.id}`)).liveBoard; return x.items.length === 6 && x }, 6000)
+  ok(!!lb && lb.items.filter((x) => /ten customers/.test(x.label)).length === 1 && lb.items.some((x) => x.label === 'Dan: Write the migration plan · Monday') && lb.items.some((x) => x.label === 'Keep the old pricing for existing customers'), 'what\'s new is added; the model saying again what\'s there doesn\'t put it there twice', (lb || {}).items)
+  els = boardEls(lb.id)
+  const changed = [...before].filter(([id, was]) => { const now = els.find((e) => e.id === id); return !now || JSON.stringify(now) !== was })
+  ok(!changed.length && noteOf(els, byPart.question.key).x === 960, 'nothing on the board is moved, changed or taken away: a note you moved and words you wrote stay as they are', changed.map(([id]) => id))
+  const dan = noteOf(els, lb.items.find((x) => /Dan/.test(x.label)).key)
+  const priya = noteOf(els, byPart.action.key)
+  ok(dan.x === 600 && dan.y > priya.y + priya.height, 'a new note goes under the last in its column', { dan: [dan.x, dan.y], priya: [priya.x, priya.y, priya.height] })
+
+  // How often: never more than AI Assist's level has it look. At Low, three times the wait.
+  await kit.api(`/meetings/${LB.id}/assist`, { level: 'low' })
+  b0 = boardAsks().length
+  said(LB.id, [['them', 60, `What about the support rota over the holidays? ${WORDS}`]])
+  await send(LB.id, Buffer.concat([pcm(2, true), pcm(1.5)]))
+  const at3 = await until(() => { const x = lookedAt(); return x > at2 && x }, 12000)
+  ok(!!at3 && at3 - at2 >= 6000, 'at AI Assist\'s Low, three times its minute after the last look', at3 - at2)
+  await kit.api(`/meetings/${LB.id}/assist`, { level: 'medium' })
+
+  // Keep and Discard from the meeting: kept, its own line back and no mark; discarded, off the
+  // board with its words, and not suggested again, though the model says it again.
+  lb = (await kit.api(`/meetings/${LB.id}`)).liveBoard
+  const keepIt = lb.items.find((x) => x.part === 'decision' && /ten customers/.test(x.label))
+  const dropIt = lb.items.find((x) => x.part === 'question' && /migration/.test(x.label))
+  await kit.api(`/meetings/${LB.id}/board/${keepIt.key}`, { state: 'kept' }, 'PATCH')
+  await kit.api(`/meetings/${LB.id}/board/${dropIt.key}`, { state: 'dismissed' }, 'PATCH')
+  els = boardEls(lb.id)
+  const keptNote = noteOf(els, keepIt.key)
+  ok(keptNote && keptNote.strokeStyle === 'solid' && !keptNote.customData.bridge.suggestion && !els.some((e) => e.containerId === keptNote.id && e.customData?.bridge?.suggestion), 'Keep: its mark comes off, and its own line is back', keptNote)
+  ok(!noteOf(els, dropIt.key) && !els.some((e) => /Who owns the migration/.test(e.text || '')), 'Discard: it\'s off the board, with its words')
+  lb = (await kit.api(`/meetings/${LB.id}`)).liveBoard
+  ok(lb.items.find((x) => x.key === keepIt.key)?.state === 'kept' && !lb.items.some((x) => x.key === dropIt.key), 'the meeting says so too')
+  b0 = boardAsks().length
+  said(LB.id, [['you', 80, `I'll book the launch review by Thursday. ${WORDS}`]])
+  await kit.api(`/meetings/${LB.id}/board`, {})
+  const ask3 = boardAsks()[b0] || ''
+  ok(/Taken off the board by the user[^\n]*:\n- Open question: Who owns the migration\?/.test(ask3), 'Update now looks straight away, and is told what was taken off', ask3.slice(0, 1200))
+  lb = (await kit.api(`/meetings/${LB.id}`)).liveBoard
+  ok(!lb.items.some((x) => /Who owns the migration/.test(x.label)) && lb.items.some((x) => /^You: Book the launch review/.test(x.label)), 'what was taken off isn\'t put back, though the model says it again', lb.items.map((x) => x.label))
+  await kit.api(`/meetings/${LB.id}/board`, { state: 'kept' }, 'PATCH')
+  ok(!boardEls(lb.id).some((e) => e.customData?.bridge?.suggestion) && (await kit.api(`/meetings/${LB.id}`)).liveBoard.items.every((x) => x.state === 'kept'), 'Keep all: none waits any more')
+  ok(/That isn't on the board any more/.test(await err(`/meetings/${LB.id}/board/${dropIt.key}`, { state: 'kept' }, 'PATCH') || ''), 'one that\'s gone says so')
+
+  // Its action items onto Chief of Staff's task list, once.
+  r = await kit.api(`/meetings/${LB.id}/board/tasks`, {})
+  const titles = ((await kit.api('/chief/tasks')).items || []).map((x) => x.title)
+  ok(r.added === 3 && titles.includes('Priya: Send the pricing deck · Friday') && titles.includes('Dan: Write the migration plan · Monday'), 'its action items go onto Chief of Staff\'s task list with one click', { r, titles })
+  ok(/on the task list already/.test(await err(`/meetings/${LB.id}/board/tasks`, {}) || '') && (await kit.api(`/meetings/${LB.id}`)).liveBoard.items.filter((x) => x.part === 'action').every((x) => x.tasked), 'and only once')
+
+  // A last look once it stops, at what was said since.
+  b0 = boardAsks().length
+  said(LB.id, [['them', 100, `Mia will update the status page by Friday. ${WORDS}`]])
+  await kit.api(`/meetings/${LB.id}/stop`, {})
+  ok(!!(await until(() => boardAsks().length > b0, 8000)) && /that has just ended/.test(boardAsks()[b0] || ''), 'once it stops, one last look takes in the last of what was said')
+  ok(!!(await until(async () => (await kit.api(`/meetings/${LB.id}`)).liveBoard.items.some((x) => /^Mia: Update the status page/.test(x.label)), 5000)), 'and it stays on the board after the meeting')
+
+  // Off for a meeting: nothing is sent.
+  const LB2 = await kit.api('/meetings', { title: 'Hiring sync', call: false })
+  await kit.api(`/meetings/${LB2.id}/board`, { on: false })
+  ok((await kit.api('/settings')).user?.meetings?.board === false, '(off, for the next meetings too)')
+  b0 = boardAsks().length
+  said(LB2.id, [['them', 2, `We decided to open two roles in January. ${WORDS}`]])
+  await send(LB2.id, Buffer.concat([pcm(2, true), pcm(1.5)]))
+  ok(!await until(() => boardAsks().length > b0, 4000) && (await kit.api(`/meetings/${LB2.id}`)).liveBoard.id === null, 'off for a meeting, nothing is sent and there\'s no board')
+  await kit.api(`/meetings/${LB2.id}/stop`, {})
+
+  // With a model on this computer (Ollama, the stand-in's): it's asked there, and the meeting says so.
+  await kit.api('/providers/ollama', { values: { OLLAMA_HOST: model.url } }, 'PUT')
+  await kit.api('/settings', { meetings: { model: 'ollama:llama3.1:8b' } }, 'PATCH')
+  const LL = await kit.api('/meetings', { title: 'Offsite plan', call: false })
+  await kit.api(`/meetings/${LL.id}/board`, { on: true })
+  said(LL.id, [['them', 2, `We decided to hold the offsite in Lisbon. ${WORDS}`]])
+  const asked0 = model.requests().length
+  await kit.api(`/meetings/${LL.id}/board`, {})
+  const onHere = model.requests().slice(asked0).filter((x) => JSON.stringify(x.messages).includes('Keep a live board'))
+  const ll = (await kit.api(`/meetings/${LL.id}`)).liveBoard
+  ok(onHere.length >= 1 && onHere.every((x) => x.path === '/api/chat' && x.model === 'llama3.1:8b') && ll.use === 'ollama:llama3.1:8b' && ll.items.some((x) => /Lisbon/.test(x.label)), 'a model on this computer keeps the board, asked on this computer', { asked: onHere.map((x) => [x.path, x.model]), use: ll.use, items: ll.items })
+  await kit.api(`/meetings/${LL.id}/stop`, {})
+  await kit.api('/settings', { meetings: { model: 'openai:gpt-5', board: false }, trials: { 'meeting-board': false } }, 'PATCH')
 
   // ---------- Files you got lately ----------
   // In Downloads or on the Desktop, from around when it was: one named after someone in it, a

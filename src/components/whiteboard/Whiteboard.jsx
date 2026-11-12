@@ -11,7 +11,7 @@ import BoardVersions from './BoardVersions.jsx'
 import Suggestions from './Suggestions.jsx'
 import { loadExcalidraw } from './excalidraw.js'
 import { fromText, fromPending, kindOfFile, placeBeside } from './convert.js'
-import { layoutBoard, reroute } from './layout.js'
+import { layoutBoard, reroute, fitInView } from './layout.js'
 import { restyle, lookOfElements, solidBackground, fontsReady, remeasure } from './look.js'
 import { makeItem } from './shapes/make.js'
 import { nameOf, laneName } from './shapes/library.js'
@@ -121,6 +121,9 @@ async function exportBoard(X, ex, { kind, name, dark, only }) {
   download(blob, `${name}.${kind}`)
 }
 
+// A meeting's live board (server/meetboard.js): its elements say which meeting.
+const liveBoard = (elements) => elements.some((e) => e.customData?.bridge?.meeting)
+
 // What an agent or the chief of staff handed over, drawn in: in place of what's there, or beside it.
 async function withPending(X, b, look) {
   if (!b.pending) return { elements: b.elements, files: b.files, changed: false }
@@ -222,6 +225,31 @@ function useDrawing(key, store, look = null) {
     if (got.changed) { reroute(s.X, s.api); remeasure(s.X, s.api).catch(() => {}) }
   }, [])
 
+  // A meeting's live board (server/meetboard.js) the meeting added to while there's an edit here
+  // not saved yet: what it added comes in beside what's on screen, and a note of its kept or
+  // discarded from the meeting's Board is kept or taken off here too, without asking; everything
+  // else stays as it is here, and is saved.
+  const mergeTheirs = useCallback(async () => {
+    const s = st.current
+    if (!s.X || !s.api) return
+    const b = await s.store.load(s.X)
+    const mine = s.api.getSceneElementsIncludingDeleted()
+    const here = new Set(mine.map((e) => e.id))
+    const there = new Map((b.elements || []).map((e) => [e.id, e]))
+    const fromMeeting = (e) => String(e.customData?.bridge?.suggestion?.id || '').startsWith('mb-')
+    const out = mine.map((e) => {
+      if (e.isDeleted || !fromMeeting(e)) return e
+      const o = there.get(e.id)
+      if (!o) return s.X.newElementWith(e, { isDeleted: true })
+      return o.customData?.bridge?.suggestion ? e : s.X.restoreElements([o], null)[0] || e
+    })
+    const fresh = s.X.restoreElements((b.elements || []).filter((e) => !here.has(e.id)), null)
+    s.mtime = b.mtime
+    s.api.updateScene({ elements: [...out, ...fresh], captureUpdate: s.X.CaptureUpdateAction.IMMEDIATELY })
+    s.dirty = true
+    flush()
+  }, [flush])
+
   useEffect(() => {
     if (!ready || !store.stat) return
     const tick = async () => {
@@ -232,7 +260,8 @@ function useDrawing(key, store, look = null) {
       // Saved here meanwhile: what this look saw may be that save, not someone else's. The next looks again.
       if (s.busy || s.saves !== n) return
       if (!now || s.mtime == null || Math.abs(now.mtime - s.mtime) <= 1) return
-      if (s.dirty) setConflict(true)
+      if (s.dirty && liveBoard(s.api.getSceneElements())) mergeTheirs().catch(() => setConflict(true))
+      else if (s.dirty) setConflict(true)
       else takeTheirs().catch(() => {})
     }
     const id = setInterval(tick, 2500)
@@ -363,6 +392,16 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
   const studio = useTrial('studio')
   const boardLook = look || d.ready?.look || 'clean'
   const scheme = prefs?.on ? prefs.prefs?.colours?.value || 'soft' : 'soft'
+  // A meeting's live board (server/meetboard.js): the meeting it's kept from, a click away.
+  const meeting = useMemo(() => (d.ready?.initial?.elements || []).find((e) => e.customData?.bridge?.meeting?.id)?.customData.bridge.meeting.id || null, [d.ready])
+  // It opens with its four columns in view, as far as they fit.
+  const fitted = useRef(null)
+  useEffect(() => {
+    const { X, api: ex } = d.board
+    if (!ex || !meeting || fitted.current === id) return
+    const timer = setTimeout(() => { fitted.current = id; fitInView(X, ex, ex.getSceneElements()) }, 60)
+    return () => clearTimeout(timer)
+  }, [d.board.api, meeting, id]) // eslint-disable-line react-hooks/exhaustive-deps
   // How much is on the board and selected, for the empty board's hint and the menus.
   const [count, setCount] = useState({ n: 0, sel: 0 })
   useEffect(() => d.board.api?.onChange((els, st) => {
@@ -453,7 +492,7 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
 
   return (
     <div className="wb-view">
-      <PaneHeader icon="shapes" title={<EditableName name={id} onRename={rename} label={t('Name this whiteboard')} />} subtitle={<SaveState status={d.status} />}
+      <PaneHeader icon="shapes" title={<EditableName name={id} onRename={rename} label={t('Name this whiteboard')} />} subtitle={<><SaveState status={d.status} />{meeting && <button type="button" className="link-btn small wb-meeting" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: meeting } }))} title={t('The meeting this board was kept from')}><Icon name="mic" size={11} /> {t('From the meeting')}</button>}</>}
         leading={onBack ? <button type="button" className="win-btn" onClick={onBack} aria-label={backLabel || t('All whiteboards')} title={backLabel || t('All whiteboards')}><Icon name="back" size={15} /></button> : null}>
         {tabs}
         <button type="button" className={`btn small${shapes ? ' on' : ''}`} onClick={() => setShapes(!shapes)} aria-pressed={!!shapes} disabled={!d.board.api} title={t('Shapes')}><Icon name="shapes" size={12} /> {wide ? t('Shapes') : ''}</button>

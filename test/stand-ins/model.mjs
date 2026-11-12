@@ -30,6 +30,9 @@
 //   The meeting moves: a timeline (Dan's design review, Priya's beta, your launch), Priya's and
 //   your action items, and notes grouped by theme (Pricing, Sign-in, and Team for the rest). A
 //   board written up as a document: its name, what it was sent, and a next step.
+//   AI Assist's live board of a meeting ("Keep a live board…"): a decision, an action, a step on the
+//   timeline or a question for each line it was sent that says one, and, as a model can, the first
+//   thing on the board and the first taken off it again.
 //   AI Assist's Sign this, "Explain this document": a mutual NDA between Northwind Labs and Contoso
 //   Ltd, a fee, a renewal worth a look on page 1 ("renews automatically").
 //   A sheet's AI Assist ("In the spreadsheet …"): the change asked for, as JSON (sheetChange).
@@ -193,6 +196,31 @@ function answer(b) {
       if (/^thanks for watching|drop me please/i.test(text)) drop.push(Number(n))
     }
     return say(JSON.stringify({ fix, drop }))
+  }
+  // AI Assist's live board: from what was said since it was last updated, a decision for "we
+  // decided / agreed …", an action for "<Name> will …" or "I'll …" (by when, where said), a step on
+  // the timeline for what ships, launches or starts on a date (its owner when it's "<Name>'s …"),
+  // and a question for one asked. Like a model can, it also says again the first thing on the board
+  // already and the first thing taken off it, which the board should leave out.
+  if (/^Keep a live board of a meeting/.test(last)) {
+    const fresh = /Said since the board was last updated:\n([\s\S]*)$/.exec(last)?.[1] || ''
+    const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1)
+    const out = { decisions: [], timeline: [], actions: [], questions: [] }
+    for (const [, who, text] of fresh.matchAll(/^\[[^\]]+\] ([^:\n]+): (.*)$/gm)) {
+      for (const s of text.split(/(?<=[.?!])\s+/).map((x) => x.trim()).filter(Boolean)) {
+        let x
+        if ((x = /\b(?:we decided|we agreed|let's go with)\b,? (?:to |that )?(.+?)[.!]?$/i.exec(s))) out.decisions.push({ text: cap(x[1]) })
+        else if ((x = /^(?:I'll|I will) (.+?)(?: by (\w+))?[.!]?$/.exec(s))) out.actions.push({ who: who === 'Them' ? 'Them' : 'You', text: cap(x[1]), ...(x[2] ? { when: x[2] } : {}) })
+        else if ((x = /^([A-Z][a-z]+) will (.+?)(?: by (\w+))?[.!]?$/.exec(s))) out.actions.push({ who: x[1], text: cap(x[2]), ...(x[3] ? { when: x[3] } : {}) })
+        else if ((x = /^(?:The )?(?:([A-Z][a-z]+)'s )?(.+?) (ships|launches|starts|goes live) (?:on|by|in) ([^.!?]+)[.!]?$/.exec(s))) out.timeline.push({ text: `${cap(x[2])} ${x[3]}`, when: x[4], ...(x[1] ? { who: x[1] } : {}) })
+        else if (/\?$/.test(s)) out.questions.push({ text: s })
+      }
+    }
+    const again = /On the board already[^\n]*:\n- [^:\n]+: ([^\n]+)/.exec(last)?.[1]
+    if (again) out.decisions.push({ text: again })
+    const off = /Taken off the board[^\n]*:\n- [^:\n]+: ([^\n]+)/.exec(last)?.[1]
+    if (off) out.decisions.push({ text: off })
+    return say(JSON.stringify(out))
   }
   if (/This meeting is going on now/.test(last)) {
     const file = /### ([^\n]+)\n([^\n]+)/.exec(last)

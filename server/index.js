@@ -69,6 +69,7 @@ import * as chatModels from './chatmodels.js'
 import * as llm from './llm.js'
 import * as meetings from './meetings.js'
 import * as boards from './boards.js'
+import * as meetBoard from './meetboard.js'
 import * as labs from './labs.js'
 import * as meetMemory from './meetmemory.js'
 import * as memoryView from './memoryview.js'
@@ -445,7 +446,7 @@ const rootOf = async (pane) => {
 // One that's no longer a beta stays in older configs, read by nothing (memory: Memory, now a page
 // for everyone). One can be on to start with (config.example.json's trials: Back and Forward), until
 // it's turned off.
-const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings', 'comments', 'mcp-server']
+const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings', 'comments', 'mcp-server', 'meeting-board']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 const FILES_OFF = 'Files is a beta feature. Turn it on in Settings › About & Updates › Beta Features.'
@@ -1963,7 +1964,12 @@ app.post('/api/meetings/:id/for-agents', wrap(async (req) => {
   if (typeof r.j?.text !== 'string') throw update()
   return { ...(await meetings.keepCopy({ machine: m.id, id: req.params.id, title: r.j.title, text: r.j.text })), device: m.name }
 }))
-app.get('/api/meetings/:id', wrap((req) => meetings.get(req.params.id)))
+// With the live board on (a beta feature): what's on the meeting's board, kept or still suggested,
+// and how it's getting on (liveBoard), for the meeting's Board, its summary and the floating card.
+app.get('/api/meetings/:id', wrap(async (req) => {
+  const m = meetings.get(req.params.id)
+  return trialOn('meeting-board') ? { ...m, liveBoard: await liveBoard(m) } : m
+}))
 app.post('/api/meetings/:id/audio', express.raw({ type: () => true, limit: '4mb' }), wrap((req) => meetings.audio(req.params.id, String(req.query.src || ''), req.body, req.query.seq)))
 app.post('/api/meetings/:id/pause', wrap((req) => meetings.pause(req.params.id)))
 app.post('/api/meetings/:id/resume', wrap((req) => meetings.resume(req.params.id)))
@@ -2021,6 +2027,47 @@ app.post('/api/meetings/:id/assist', wrap(async (req) => {
   return meetings.assist(req.params.id, { now: true, model: req.body?.model })
 }))
 app.patch('/api/meetings/:id/assist/:aid', wrap((req) => meetings.markAssist(req.params.id, req.params.aid, String(req.body?.state || ''))))
+// AI Assist's live board (meetings.js boardLook, meetboard.js), a beta feature: on or off for this
+// meeting (and so for the meetings after), Update now, an item kept or discarded (or every one
+// still suggested), and its action items onto Chief of Staff's task list.
+app.use('/api/meetings/:id/board', trialOff('meeting-board', 'Live Meeting Board'))
+const liveBoard = async (m) => {
+  const b = meetings.boardOf(m.id)
+  const on = await meetBoard.brief(m.id, b.board || m.boardId || null).catch(() => ({ id: null, items: [], other: 0, counts: {} }))
+  const tasked = new Set(b.tasked || [])
+  return { on: !!m.board, ...on, items: on.items.map((x) => (tasked.has(x.key) ? { ...x, tasked: true } : x)), at: b.at || null, error: b.error || null, looks: b.looks || 0, busy: meetings.boardBusy(m.id), model: b.model || null, use: await meetings.boardModel(m).catch(() => null) }
+}
+const boardOfMeeting = async (id) => {
+  const b = meetings.boardOf(id)
+  const board = await meetBoard.find(id, b.board || meetings.get(id).boardId || null)
+  if (!board) throw Object.assign(new Error('There\'s no board for this meeting yet'), { status: 404 })
+  return board
+}
+app.post('/api/meetings/:id/board', wrap(async (req) => {
+  if (typeof req.body?.on === 'boolean') {
+    const r = meetings.setBoard(req.params.id, req.body.on)
+    afterChange(settings.patch({ meetings: { board: req.body.on } }))
+    return r
+  }
+  return meetings.boardLook(req.params.id, { now: true, model: req.body?.model })
+}))
+app.patch('/api/meetings/:id/board', wrap(async (req) => meetBoard.settle(req.params.id, await boardOfMeeting(req.params.id), null, String(req.body?.state || ''))))
+app.patch('/api/meetings/:id/board/:key', wrap(async (req) => meetBoard.settle(req.params.id, await boardOfMeeting(req.params.id), String(req.params.key), String(req.body?.state || ''))))
+// Each action item on the board once, as the board's own Action items puts them on the list
+// ("Priya: Send the deck · Friday"); one on the list already and not done, word for word, isn't
+// added again.
+app.post('/api/meetings/:id/board/tasks', wrap(async (req) => {
+  const m = meetings.get(req.params.id)
+  const b = await meetBoard.brief(m.id, meetings.boardOf(m.id).board || m.boardId || null)
+  const sent = new Set(meetings.boardOf(m.id).tasked || [])
+  const todo = b.items.filter((x) => x.part === 'action' && !sent.has(x.key))
+  if (!todo.length) throw new Error(b.items.some((x) => x.part === 'action') ? 'Every action item on the board is on the task list already' : 'No action items on the board yet')
+  const same = (s) => String(s).replace(/\s+/g, ' ').trim().toLowerCase()
+  const open = new Map(chiefTasks.list().items.filter((x) => x.status !== 'done').map((x) => [same(x.title), x]))
+  const added = todo.map((x) => open.get(same(x.label.slice(0, 200))) || chiefTasks.add(x.label.slice(0, 300), { from: 'meeting', link: m.saved || null }))
+  meetings.boardTasked(m.id, todo.map((x) => x.key))
+  return { added: added.length }
+}))
 // A look at the screen being watched while someone on the call talks: its text is kept, not the
 // picture, to tell who said what.
 app.post('/api/meetings/:id/glances', express.raw({ type: () => true, limit: '16mb' }), wrap((req) => meetings.glance(req.params.id, req.body)))
@@ -3587,6 +3634,16 @@ boards.setHelpers({
   contextOf: (id) => chatModels.contextOf(id), agentWork: async (pane) => transcript(await findAgent(pane)),
 })
 boards.routes(app, { wrap, onComputer, counted: (name) => counts.add(name) })
+// A meeting's live board (meetboard.js), from meetings.js: what's on it, new notes for it, and the
+// model's name for each one's tag.
+meetings.setHelpers({
+  board: {
+    scene: async (m, hint) => { const id = await meetBoard.find(m.id, hint || m.boardId || null); return id ? meetBoard.itemsOf((await boards.read(id)).data, m.id) : { items: [], other: [] } },
+    add: (m, items, o) => meetBoard.add(m, items, o),
+    labelOf: meetBoard.labelOf,
+    nameOf: async (id) => (await chatModels.models().catch(() => [])).find((x) => x.id === id)?.label || id,
+  },
+})
 
 // ---------- Static UI ----------
 
