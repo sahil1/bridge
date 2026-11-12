@@ -446,7 +446,7 @@ const rootOf = async (pane) => {
 // One that's no longer a beta stays in older configs, read by nothing (memory: Memory, now a page
 // for everyone). One can be on to start with (config.example.json's trials: Back and Forward), until
 // it's turned off.
-const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings', 'comments', 'mcp-server', 'meeting-board']
+const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings', 'comments', 'mcp-server', 'meeting-board', 'make-sheet']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 const FILES_OFF = 'Files is a beta feature. Turn it on in Settings › About & Updates › Beta Features.'
@@ -634,6 +634,16 @@ app.post('/api/studio/comment-assist', trialOff('comments', 'Comments and @bridg
     res.json({ ...out, model, by: d?.label || model })
   } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
 })
+// @bridge in a comment on a PowerPoint's slide, or a shape on it (Comments and @bridge): a reply,
+// and the shape's words or the slide rewritten, or a new slide after it, to keep or discard.
+app.post('/api/studio/deck/comment', trialOff('comments', 'Comments and @bridge'), async (req, res) => {
+  try {
+    const model = String(req.body?.model || '') || await studioModel()
+    const out = await commentAssist.deckAssist({ ...req.body, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
+    const d = (await chatModels.models().catch(() => [])).find((x) => x.id === model)
+    res.json({ ...out, model, by: d?.label || model })
+  } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
+})
 // The change an agent asked in place wrote beside the file, taken once (studio.takeProposal).
 app.get('/api/studio/proposal', wrap(async (req) => { const q = sq(req); return studio.takeProposal(await rootOf(q.root), q.path) }))
 // Decks written by a model (the one meeting notes use, unless one's picked): a whole deck from what
@@ -653,15 +663,22 @@ app.post('/api/studio/deck/ai', wrap(async (req) => {
 // A sheet's AI Assist (studio.sheetAsk): the cells picked and what to do with them, answered by
 // Studio's model (the one picked for it, else the one the app reaches first) as a change the page
 // shows on the sheet to keep or discard.
-app.post('/api/studio/sheet/ai', wrap(async (req) => {
+// mode: 'book', a whole workbook made from what it's for (an empty sheet's Make a sheet).
+const sheetAi = async (req, thread = null) => {
   const b = req.body || {}
   const use = String(b.model || '') || await studioModel()
   if (!use) throw Object.assign(new Error('No model to answer with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers.'), { code: 'noModel' })
-  const ask = studio.sheetAsk({ rel: sq(req).path, instruction: b.instruction, selection: b.selection, where: b.where, sheet: b.sheet, sheets: b.sheets, used: b.used })
-  const r = await chatModels.reply(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, json: studio.SHEET_SCHEMA, feature: 'studio' })
+  const book = b.mode === 'book' && !thread
+  const ask = book ? studio.bookAsk({ instruction: b.instruction, rel: sq(req).path }) : studio.sheetAsk({ rel: sq(req).path, instruction: b.instruction, selection: b.selection, where: b.where, sheet: b.sheet, sheets: b.sheets, used: b.used, thread })
+  const r = await chatModels.reply(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, json: book ? studio.BOOK_SCHEMA : studio.SHEET_SCHEMA, feature: 'studio' })
   const d = (await chatModels.models().catch(() => [])).find((x) => x.id === use)
-  return { ...studio.sheetAnswer(r?.text), model: use, by: d?.label || String(use).split(':').slice(1).join(':') || use }
-}))
+  return { ...(book ? studio.bookAnswer(r?.text) : studio.sheetAnswer(r?.text)), model: use, by: d?.label || String(use).split(':').slice(1).join(':') || use }
+}
+// Make a sheet (mode: 'book') is a beta feature of its own, Make a Sheet.
+app.post('/api/studio/sheet/ai', (req, res, next) => (req.body?.mode === 'book' ? trialOff('make-sheet', 'Make a Sheet')(req, res, next) : next()), wrap((req) => sheetAi(req)))
+// @bridge in a comment on a sheet's cells (Comments and @bridge, a beta feature): the same fast
+// path, with the thread so far, given as what to work on.
+app.post('/api/studio/sheet/comment', trialOff('comments', 'Comments and @bridge'), wrap((req) => sheetAi(req, Array.isArray(req.body?.thread) ? req.body.thread : [])))
 // A picture put on a slide, saved beside the deck.
 app.post('/api/studio/picture', wrap(async (req) => { const q = sq(req); return studio.savePicture(await rootOf(q.root), q.path, req.body?.name, Buffer.from(String(req.body?.data || ''), 'base64')) }))
 app.get('/api/agents/:pane/files', wrap(async (req) => files.listDir(await rootOf(req.params.pane), String(req.query.path || ''), { showHidden: req.query.hidden === '1' })))
@@ -3632,6 +3649,10 @@ app.use('/api/boards', (req, res, next) => {
 boards.setHelpers({
   reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: () => chatModels.models(), canSee: (id) => chatModels.canSee(id),
   contextOf: (id) => chatModels.contextOf(id), agentWork: async (pane) => transcript(await findAgent(pane)),
+})
+// @bridge in a comment on a board (Comments and @bridge): Change it on what the comment is on.
+app.post('/api/boards/comment', trialOff('comments', 'Comments and @bridge'), async (req, res) => {
+  try { res.json(await boards.comment(req.body || {})) } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
 })
 boards.routes(app, { wrap, onComputer, counted: (name) => counts.add(name) })
 // A meeting's live board (meetboard.js), from meetings.js: what's on it, new notes for it, and the

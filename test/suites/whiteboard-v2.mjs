@@ -24,8 +24,11 @@
 //   kept with each container's own lines back; the meeting moves (a meeting's notes grouped by
 //   theme and discarded back into place, a timeline and the action items drawn from the board, the
 //   action items onto the Chief of Staff's task list); the board made a Word document and a deck in
-//   Studio's own folder, each linking back to it, and opened there; the credit in About; on a
-//   phone, the panels fit.
+//   Studio's own folder, each linking back to it, and opened there; comments (Comments and
+//   @bridge): a colleague's from the board's file, on its shape, waiting until sent; one on the
+//   board posted as a pin of its own in the file; @bridge's change a suggestion, dashed, discarded
+//   and kept from the thread; resolved and deleted, in the file; dark and a phone; the credit in
+//   About; on a phone, the panels fit.
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
@@ -680,6 +683,86 @@ try {
     await night.ctx.close()
     await api(`/boards/${enc('Kept too')}`, null, 'DELETE')
     ok(!fs.existsSync(path.join(BOARDS, '.versions', 'Kept too')), 'deleted, its versions go too')
+  })
+
+  await part('comments and @bridge', async () => {
+    // A board with Start and Ship, and Sam's comment on Ship (a pin, its thread in customData.bridge,
+    // as the board's own file keeps one): with the beta on, threads beside the board; one on the
+    // board posted, saved as a pin of its own; @bridge changing it as a suggestion (dashed, Keep and
+    // Discard on the board and in the thread); Sam's waiting until sent; no model said; resolved
+    // and deleted, in the file.
+    await api('/settings', { trials: { comments: true } }, 'PATCH')
+    const base = { angle: 0, strokeColor: '#1f2733', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 1, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted: false, updated: 1, link: null, locked: false }
+    const box = (id, text, x) => [{ ...base, id, type: 'rectangle', x, y: 0, width: 160, height: 70, boundElements: [{ type: 'text', id: `${id}t` }] },
+      { ...base, id: `${id}t`, type: 'text', x: x + 50, y: 22, width: 60, height: 25, boundElements: null, text, originalText: text, fontSize: 20, fontFamily: 5, textAlign: 'center', verticalAlign: 'middle', containerId: id, autoResize: true, lineHeight: 1.25 }]
+    const sam = { id: 'th-sam', on: ['ship'], at: { x: 547, y: -13 }, done: false, items: [{ id: 'c-sam', author: 'Sam Lee', date: '2026-10-03T08:00:00.000Z', text: '@bridge make this stand out', parent: null }] }
+    const pin = { ...base, id: 'pin-sam', type: 'ellipse', x: 547, y: -13, width: 26, height: 26, strokeColor: '#7048e8', backgroundColor: '#e5dbff', strokeWidth: 2, boundElements: null, customData: { bridge: { thread: sam } } }
+    await api('/boards', { title: 'Commented', source: { kind: 'excalidraw', text: JSON.stringify({ type: 'excalidraw', version: 2, elements: [...box('start', 'Start', 0), ...box('ship', 'Ship', 400), pin], appState: {}, files: {} }) } })
+    const pins = (j) => live(j).filter((e) => e.customData?.bridge?.thread)
+    const threadOf = (j, has) => pins(j).map((e) => e.customData.bridge.thread).find((x) => x.items.some((c) => c.text.includes(has)))
+    const marked = (j) => live(j).filter((e) => e.customData?.bridge?.suggestion)
+    try {
+      await openBoard('Commented')
+      await p.locator('.wb-view .pane-extras button[aria-label="Comments"]').click()
+      const pane = p.locator('.wb-comments')
+      await pane.waitFor({ timeout: 5000 })
+      const samTh = pane.locator('.sd-thread', { hasText: 'make this stand out' })
+      ok(/^Ship/.test(await samTh.locator('.sd-thread-quote').innerText().catch(() => '')) && /Sam Lee asked @bridge in the file\. It waits for you/.test(await samTh.locator('.sd-thread-ai.wait').innerText().catch(() => '')) && !model.asked(/^Change this diagram: make this stand out/).length, 'Comments: a thread from the board\'s file, on the shape it\'s on (Ship); a colleague\'s @bridge waiting, nothing sent', await samTh.innerText().catch(() => ''))
+      // On the board where you're looking (nothing picked).
+      await pane.locator('.sd-thread-add').click()
+      ok(/The board, here/.test(await pane.locator('.sd-thread-new .sd-thread-quote').innerText().catch(() => '')), 'Comment with nothing picked: on the board, where you\'re looking')
+      await pane.locator('.sd-thread-new textarea').fill('@bridge add a cache')
+      await pane.locator('.sd-thread-new textarea').press('ControlOrMeta+Enter')
+      const mine = pane.locator('.sd-thread', { hasText: 'add a cache' })
+      ok(!!(await until(async () => (await mine.locator('.sd-thread-entry.ai').count()) === 1 && (await mine.locator('.sd-thread-sug').count()) === 1, 20000, 200)), 'yours sent at once: AI Assist answers in the thread, with a suggestion', await mine.innerText().catch(() => ''))
+      const ai = await mine.locator('.sd-thread-entry.ai').evaluate((e) => ({ who: e.querySelector('.sd-comment-who b')?.innerText, wand: !!e.querySelector('.sd-who-ai .icon'), text: e.querySelector('.sd-comment-text')?.innerText }))
+      ok(ai.who === 'AI Assist' && ai.wand && /Made \d+ changes here, as a suggestion/.test(ai.text) && /AI Assist · .*gpt-5/.test(ai.text), 'signed AI Assist with the wand and the model, saying what it did', ai)
+      ok(/^Change this diagram: add a cache/.test(model.asked(/^Change this diagram: add a cache/).at(-1) || '') && (await p.locator('.wb-sug-tag').count()) > 0, 'asked as Change it is, and drawn on the board as a suggestion, dashed with Keep and Discard there too')
+      await shot(p, `${tag}whiteboard-v2-comments`)
+      const s1 = await until(() => { const j = readBoard('Commented'); const th = j && threadOf(j, 'add a cache'); return th && th.items.length === 2 && marked(j).length && j }, 10000)
+      ok(!!s1 && threadOf(s1, 'add a cache').items[1].author === 'AI Assist' && !!threadOf(s1, 'add a cache').items[1].sug && pins(s1).length === 2 && texts(s1).includes('Cache'), 'saved in the board\'s file: a pin of its own holding the thread (and which suggestion is its), the suggestion marked on its shapes', s1 && threadOf(s1, 'add a cache'))
+      await mine.locator('.sd-thread-sug button', { hasText: 'Discard' }).click()
+      ok(!!(await until(async () => (await mine.locator('.sd-thread-sug').count()) === 0 && (await p.locator('.wb-sug-tag').count()) === 0, 5000, 100)), 'Discard in the thread: the suggestion off the board, the reply kept')
+      const s2 = await until(() => { const j = readBoard('Commented'); return j && !marked(j).length && !texts(j).includes('Cache') && j }, 10000)
+      ok(!!s2 && texts(s2).includes('Start'), 'saved: the board as it was')
+      // Sam's, sent: kept from the thread.
+      await samTh.locator('button', { hasText: 'Send to AI Assist' }).click()
+      ok(!!(await until(async () => (await samTh.locator('.sd-thread-entry.ai').count()) === 1 && (await samTh.locator('.sd-thread-sug').count()) === 1, 20000, 200)), 'Send to AI Assist: the colleague\'s answered once you send it')
+      const sent = model.asked(/^Change this diagram: make this stand out/).at(-1) || ''
+      ok(/only the part selected/.test(sent) && /"text":"Ship"/.test(sent) && !/"text":"Start"/.test(sent), 'asked about the shape the comment is on, and only that', sent.slice(0, 300))
+      await samTh.locator('.sd-thread-sug button', { hasText: 'Keep' }).click()
+      const s3 = await until(() => { const j = readBoard('Commented'); return j && !marked(j).length && texts(j).includes('Cache') && j }, 10000)
+      ok(!!s3 && live(s3).find((e) => e.id === 'ship')?.backgroundColor === '#ffc9c9', 'Keep: the change on the board, no longer a suggestion, saved', s3 && live(s3).find((e) => e.id === 'ship'))
+      // Resolved, and deleted.
+      await samTh.locator('button[aria-label="Resolve"]').click()
+      ok(!!(await until(() => { const j = readBoard('Commented'); return j && threadOf(j, 'stand out')?.done === true }, 10000)), 'Resolve: saved done in its pin')
+      await mine.locator('button[aria-label="Delete the comment"]').click()
+      await mine.locator('.sd-thread-confirm button', { hasText: 'Delete' }).click()
+      ok(!!(await until(() => { const j = readBoard('Commented'); return j && pins(j).length === 1 && !threadOf(j, 'add a cache') }, 10000)), 'a thread deleted: its pin gone from the board')
+      ok(!errors.length, 'no page errors', errors)
+      // Dark.
+      const night = await page(b, kit.url, { width: 1440, height: 900, mode: 'dark' })
+      await night.p.waitForSelector('.rail-nav-btn', { timeout: 30000 })
+      await until(async () => { if (await night.p.locator('.excalidraw canvas').count()) return true; await night.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id: 'Commented' } }))); return false }, 30000, 1000)
+      await night.p.locator('.wb-view .pane-extras button[aria-label="Comments"]').click()
+      await night.p.locator('.wb-comments .sd-thread-done > button').click()
+      const card = await until(() => night.p.locator('.wb-comments .sd-thread').first().evaluate((e) => getComputedStyle(e).backgroundColor).catch(() => null), 5000, 100)
+      ok(!!card && card !== 'rgb(255, 255, 255)', 'dark: the comments in the dark look', card)
+      await shot(night.p, `${tag}whiteboard-v2-comments-dark`)
+      await night.ctx.close()
+      // A phone: the comments over the board, fitting it.
+      const ph = await page(b, kit.url, { phone: true })
+      await until(async () => { if (await ph.p.locator('.excalidraw canvas').count()) return true; await ph.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id: 'Commented' } }))); return false }, 30000, 1000)
+      await ph.p.locator('.wb-view .pane-extras button[aria-label="Comments"]').click()
+      await ph.p.locator('.wb-comments').waitFor({ timeout: 5000 })
+      const fitsPh = await ph.p.evaluate(() => { const r = document.querySelector('.wb-comments').getBoundingClientRect(); return { left: Math.round(r.left), right: Math.round(r.right), width: innerWidth, wide: document.documentElement.scrollWidth <= innerWidth + 1 } })
+      ok(fitsPh.left >= 0 && fitsPh.right <= fitsPh.width && fitsPh.wide, 'on a phone: the comments over the board, fitting it', fitsPh)
+      await shot(ph.p, `${tag}whiteboard-v2-comments-phone`)
+      await ph.ctx.close()
+    } finally {
+      await api('/settings', { trials: { comments: false } }, 'PATCH').catch(() => {})
+      await openBoard(board).catch(() => {})
+    }
   })
 
   await part('the credit in About', async () => {

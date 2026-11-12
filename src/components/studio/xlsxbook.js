@@ -3,7 +3,8 @@
 // change (charts, pivot tables, pictures, macros, page setup, parts newer than this code) stays
 // exactly as it was, byte for byte. Only what changed is rewritten: an edited cell (a new style is
 // derived from the one it had, so its borders and protection survive), a sheet's merges, sizes,
-// freeze, filter, conditional formats, validation, links and notes, and the workbook's sheets.
+// freeze, filter, conditional formats, validation, links, notes and threaded comments, and the
+// workbook's sheets.
 // Rows and columns added, removed or moved shift what points at them (pictures and charts, notes,
 // names, tables). What can't be kept exactly is said (notKept), never dropped quietly.
 // Plain JS with JSZip and string matching, so it runs in the page and in Node (the tests).
@@ -709,7 +710,7 @@ const pxOfPt = (pt) => Math.round((pt * 4) / 3)
 
 // The whole file, read once: the workbook Univer shows (data), and for the writer each sheet's
 // rows and cells as written, its rules and links with the XML they came from.
-async function parseBook(bytes) {
+async function parseBook(bytes, opts = {}) {
   let zip
   try { zip = await JSZip.loadAsync(bytes) } catch { throw new Error("This isn't an Excel workbook (.xlsx), or it's damaged") }
   const rootRels = parseRels(await text(zip, '_rels/.rels'), '')
@@ -739,7 +740,11 @@ async function parseBook(bytes) {
   const wbPr = attrs(one(wbXml, 'workbookPr')?.open || '')
   const entries = each(one(wbXml, 'sheets')?.inner || '', 'sheet').map((e) => { const a = attrs(e.open); return { ...a, rid: rIdOf(a), open: e.open } })
   const names = each(one(wbXml, 'definedNames')?.inner || '', 'definedName').map((e) => ({ ...attrs(e.open), text: unx(e.inner), xml: e.xml }))
-  const book = { zip, wbPath, wbXml, wbRels, stylesPath, st, ctx, sst, entries, names, sheets: [], lost: new Set(), charts: [], date1904: wbPr.date1904 === '1' || wbPr.date1904 === 'true' }
+  const book = { zip, wbPath, wbXml, wbRels, stylesPath, st, ctx, sst, entries, names, sheets: [], lost: new Set(), charts: [], date1904: wbPr.date1904 === '1' || wbPr.date1904 === 'true', threadsOn: !!opts.threads }
+  // Who wrote the threaded comments (Excel 365's persons part, the workbook's).
+  const pRel = wbRels.find((r) => r.type === '/person')
+  const px = pRel?.path ? await text(zip, pRel.path) : null
+  book.persons = { rel: pRel || null, xml: px, list: each(px || '', 'person').map((e) => { const a = attrs(e.open); return { id: String(a.id || '').toUpperCase(), name: a.displayName || a.userId || '' } }) }
   if (zip.file(/vbaProject\.bin$/i).length) book.lost.add('macros')
   if (zip.file(/^xl\/slicers\//).length || zip.file(/^xl\/slicerCaches\//).length) book.lost.add('slicers')
   if (zip.file(/^xl\/externalLinks\//).length) book.lost.add('links to other workbooks')
@@ -932,19 +937,30 @@ async function parseSheet(book, entry, xml, id) {
     if (cc.v == null) { cc.v = t0; cc.t = 1 }
     cc.p = docOf(t0, cc.p?.body?.textRuns, { id: linkId(r, c), url: target ?? `#internal:${a.location}` })
   }
-  // Notes: Excel's comments, from their part
+  // Threaded comments (Excel 365's), from their part: read for the writer always (they move with
+  // rows and columns), shown as threads only when asked for (book.threadsOn).
+  const tcRel = rels.find((r) => r.type === '/threadedComment')
+  if (tcRel) {
+    const tx = (await text(zip, tcRel.path)) || ''
+    sh.threads = { rel: tcRel, xml: tx, list: threadsIn(tx) }
+    if (!book.threadsOn) book.lost.add('threaded comments')
+  }
+  // Notes: Excel's comments, from their part. Each thread has one there too, its placeholder for
+  // older Excels (written by tc={the thread's id}): with threads shown, that's the thread's, not a note.
   const cm = rels.find((r) => r.type === '/comments')
   if (cm) {
     const cx = await text(zip, cm.path)
     const vml = rels.find((r) => r.type === '/vmlDrawing')
-    sh.notes = { rel: cm, xml: cx, vml, list: [] }
+    const authors = each(one(cx || '', 'authors')?.inner || '', 'author').map((e) => unx(e.inner))
+    sh.notes = { rel: cm, xml: cx, vml, list: [], tc: [] }
     for (const e of each(one(cx || '', 'commentList')?.inner || '', 'comment')) {
       const a = attrs(e.open)
       const at = cellAt(a.ref || '')
       if (!at) continue
+      const tc = TC_AUTHOR.exec(authors[Number(a.authorId)] || '')
+      if (tc && sh.threads && book.threadsOn) { sh.notes.tc.push({ r: at.r, c: at.c, id: tc[1].toUpperCase(), text: textOf(one(e.inner, 'text')?.inner || ''), xml: e.xml }); continue }
       sh.notes.list.push({ r: at.r, c: at.c, text: textOf(one(e.inner, 'text')?.inner || ''), xml: e.xml })
     }
-    if (rels.some((r) => r.type === '/threadedComment')) book.lost.add('threaded comments')
   }
   // What's kept but not shown: pictures and charts, tables, pivot tables, sparklines, controls
   for (const d of rels.filter((r) => r.type === '/drawing')) {
@@ -1047,11 +1063,18 @@ function internalUrl(book, location) {
 const clone = (x) => (x == null ? x : JSON.parse(JSON.stringify(x)))
 const resourceOf = (data, name) => { const r = (data.resources || []).find((x) => x.name === name); if (!r?.data) return {}; try { return typeof r.data === 'string' ? JSON.parse(r.data) || {} : r.data } catch { return {} } }
 
-export async function readBook(bytes, name = '') {
-  const book = await parseBook(bytes)
+// opts.threads: the threaded comments read as threads (Comments and @bridge), each sheet's list in
+// `threads` by its id; else they're kept in the file as they are, their placeholders shown as notes.
+export async function readBook(bytes, name = '', opts = {}) {
+  const book = await parseBook(bytes, opts)
   book.data.name = String(name || '').replace(/\.\w+$/, '')
   const data = clone(book.data)
-  return { data, lost: [...book.lost], keep: { book }, charts: book.charts }
+  const threads = {}
+  if (book.threadsOn) {
+    const who = new Map(book.persons.list.map((p) => [p.id, p.name]))
+    for (const sh of book.sheets) if (sh.threads?.list.length) threads[sh.id] = sh.threads.list.map((x) => ({ id: x.id, r: x.r, c: x.c, author: who.get(x.personId) || '', date: x.date, text: x.text, parent: x.parent, done: x.done }))
+  }
+  return { data, lost: [...book.lost], keep: { book }, charts: book.charts, threads }
 }
 
 // ---------- Writing styles ----------
@@ -1368,6 +1391,45 @@ function shiftVml(xml, rows, cols) {
       .replace(/<x:Anchor>([^<]*)<\/x:Anchor>/, (m, a) => { const v = a.split(',').map((x) => Number(x.trim())); if (v.length !== 8) return m; const C = (i) => (cols ? cols(v[i]) ?? v[i] : v[i]), R = (i) => (rows ? rows(v[i]) ?? v[i] : v[i]); return `<x:Anchor>${[C(0), v[1], R(2), v[3], C(4), v[5], R(6), v[7]].join(', ')}</x:Anchor>` })
   })
 }
+// ---------- Threaded comments (Excel 365's) ----------
+// Each sheet's threads are in their own part (xl/threadedComments/threadedComment<n>.xml): a
+// comment on a cell (ref), when (dT), by whom (personId, from the workbook's persons part), its
+// words, the one it answers (parentId) and, on a thread's first, whether it's resolved (done). For
+// Excels before 365 each thread also has a note, its placeholder: by tc={the thread's id}, saying
+// what the thread says, in the sheet's comments part with its box in the VML, as Excel writes them.
+const TC_NS = 'http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments'
+const MAIN_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+const XR_NS = 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision'
+const MC_NS = 'http://schemas.openxmlformats.org/markup-compatibility/2006'
+const TC_REL = 'http://schemas.microsoft.com/office/2017/10/relationships/threadedComment'
+const PERSON_REL = 'http://schemas.microsoft.com/office/2017/10/relationships/person'
+const TC_AUTHOR = /^tc=(\{[0-9A-Fa-f-]+\})$/
+const TC_SAY = '[Threaded comment]\n\nYour version of Excel allows you to read this threaded comment; however, any edits to it will get removed if the file is opened in a newer version of Excel. Learn more: https://go.microsoft.com/fwlink/?linkid=870924\n\nComment:\n    '
+// An id as Excel gives one: a GUID in braces, in capitals.
+export const guid = () => {
+  const u = globalThis.crypto?.randomUUID?.() || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => { const r = Math.floor(Math.random() * 16); return (ch === 'x' ? r : (r & 3) | 8).toString(16) })
+  return `{${u.toUpperCase()}}`
+}
+// Its time as Excel writes it (UTC, to the hundredth of a second, no zone), and read back as ISO.
+const tcDate = (d) => { const x = new Date(d || Date.now()); return (Number.isNaN(x.getTime()) ? new Date() : x).toISOString().replace(/(\.\d\d)\dZ$/, '$1') }
+const isoOf = (dT) => { if (!dT) return null; const x = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(dT) ? dT : `${dT}Z`); return Number.isNaN(x.getTime()) ? null : x.toISOString() }
+function threadsIn(xml) {
+  return each(xml || '', 'threadedComment').map((e) => {
+    const a = attrs(e.open)
+    const at = cellAt(String(a.ref || '').split(':')[0]) || { r: 0, c: 0 }
+    const tx = one(e.inner, 'text')
+    return { id: String(a.id || '').toUpperCase(), r: at.r, c: at.c, date: isoOf(a.dT), personId: String(a.personId || '').toUpperCase(), parent: a.parentId ? String(a.parentId).toUpperCase() : null, done: a.done === '1' || a.done === 'true', text: tx ? unxl(unx(tx.inner)).replace(/\r\n?/g, '\n') : '', xml: e.xml }
+  })
+}
+// The note older Excels show for a thread: Excel's own words, then each comment in turn.
+const placeholderOf = (items) => TC_SAY + items.map((x, i) => `${i ? 'Reply:\n    ' : ''}${String(x.text || '').replace(/\n/g, '\n    ')}`).join('\n')
+const threadXml = (x, personId) => `<threadedComment ref="${a1(x.r, x.c)}" dT="${tcDate(x.date)}" personId="${esc(personId)}" id="${esc(x.id)}"${x.parent ? ` parentId="${esc(x.parent)}"` : ''}${!x.parent && x.done ? ' done="1"' : ''}><text>${escText(x.text)}</text></threadedComment>`
+const threadKey = (list) => canon(list.map((x) => [x.id, x.r, x.c, x.text, x.parent || null, !!(!x.parent && x.done)]).sort((a, b) => (a[0] < b[0] ? -1 : 1)))
+// Threads' cells moved with rows and columns.
+function shiftThreads(xml, rows, cols) {
+  return xml.replace(/(<(?:[\w.-]+:)?threadedComment\b[^>]*?\sref=")([^"]+)(")/g, (m, a, ref, b) => { const g = rangeOf(ref); const s = g && shiftRange(g, rows, cols); return s ? `${a}${refOf(s)}${b}` : m })
+}
+
 // Pictures and charts anchored to cells: their corners move with rows and columns.
 function shiftAnchors(xml, rows, cols) {
   return xml.replace(/<((?:[\w.-]+:)?)(from|to)>([\s\S]*?)<\/\1\2>/g, (m, p, tag, inner) => {
@@ -1382,6 +1444,8 @@ function shiftAnchors(xml, rows, cols) {
 const CT = {
   sheet: 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml',
   comments: 'application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml',
+  threads: 'application/vnd.ms-excel.threadedcomments+xml',
+  persons: 'application/vnd.ms-excel.person+xml',
   vml: 'application/vnd.openxmlformats-officedocument.vmlDrawing',
   drawing: 'application/vnd.openxmlformats-officedocument.drawing+xml',
   chart: 'application/vnd.openxmlformats-officedocument.drawingml.chart+xml',
@@ -1648,8 +1712,8 @@ function patchSheet(W, sh, now) {
   patchDv(W, sh, S, P, rows, cols, moved, fixIn, why)
   // ---------- Links ----------
   patchLinks(W, sh, now, S, P, rows, cols, moved, fixIn)
-  // ---------- Notes ----------
-  patchNotes(W, sh, S, P, rows, cols)
+  // ---------- Notes, and threaded comments with their placeholders ----------
+  patchNotes(W, sh, S, P, rows, cols, patchThreads(W, sh, rows, cols))
   // ---------- Rows and columns moved: the rest of the sheet that names cells ----------
   if (rows || cols) {
     for (const n of ['ignoredErrors', 'protectedRanges']) {
@@ -1835,26 +1899,112 @@ function patchLinks(W, sh, now, S, P, rows, cols, moved, fixIn) {
   place(S, 'hyperlinks', out.length ? `<${P}hyperlinks>${out.join('')}</${P}hyperlinks>` : null, WS_ORDER)
 }
 
-function patchNotes(W, sh, S, P, rows, cols) {
+// A sheet's threaded comments: as they were (moved with rows and columns) unless they changed, then
+// written from the list given (W.threads, by the sheet's id), each one Studio didn't change as Excel
+// had it. A thread whose cell was removed goes, with its replies, as in Excel. Gives the
+// placeholders the threads need now ({ r, c, id, text }), or null when they're notes, as before.
+function patchThreads(W, sh, rows, cols) {
+  const on = W.book.threadsOn
+  const was = (sh.threads?.list || []).map((x) => ({ ...x, r: rows ? rows(x.r) : x.r, c: cols ? cols(x.c) : x.c }))
+  const lost = new Set(was.filter((x) => x.r == null || x.c == null).map((x) => x.id))
+  const base = was.filter((x) => !lost.has(x.id) && !lost.has(x.parent))
+  const given = on && W.threads ? (W.threads[sh.id] || []).filter((x) => x && x.id && Number.isInteger(x.r) && Number.isInteger(x.c) && x.r >= 0 && x.c >= 0) : null
+  const now = given || base
+  const holders = (list) => (on ? list.filter((x) => !x.parent).map((x) => ({ r: x.r, c: x.c, id: x.id, text: placeholderOf([x, ...list.filter((y) => y.parent === x.id)]) })) : null)
+  if (threadKey(base) === threadKey(now) && base.length === was.length) {
+    if ((rows || cols) && sh.threads) W.put(sh.threads.rel.path, shiftThreads(sh.threads.xml, rows, cols))
+    return holders(now)
+  }
+  const rels = W.relsOf(sh)
+  if (!now.length) {
+    if (sh.threads) { W.drop(sh.threads.rel.path); rels.list = rels.list.filter((r) => r.id !== sh.threads.rel.id); rels.dirty = true }
+    return holders(now)
+  }
+  const old = new Map((sh.threads?.list || []).map((x) => [x.id, x]))
+  const items = now.map((x) => {
+    const o = old.get(x.id)
+    if (o && o.text === x.text && (o.parent || null) === (x.parent || null)) {
+      return o.xml.replace(/^<[^>]*>/, (t) => { const s = setAttr(t, 'ref', a1(x.r, x.c)); return x.parent ? s : setAttr(s, 'done', x.done ? '1' : /\sdone=/.test(t) ? '0' : null) })
+    }
+    return threadXml(x, o?.personId || W.personOf(x.author))
+  }).join('')
+  if (sh.threads) {
+    const S = split(sh.threads.xml)
+    W.put(sh.threads.rel.path, `${S.head}${items}${S.items.filter((x) => x.name !== 'threadedComment').map((x) => x.pre + x.xml).join('')}${S.end}${S.tail}`)
+  } else {
+    const path = W.newPath('xl/threadedComments/threadedComment', '.xml')
+    W.put(path, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<ThreadedComments xmlns="${TC_NS}" xmlns:x="${MAIN_NS}">${items}</ThreadedComments>`)
+    W.ct.override(path, CT.threads)
+    const id = nextRelId(rels.list)
+    rels.list.push({ id, type: '/threadedComment', path, xml: relXml(id, TC_REL, relTarget(sh.part, path)) })
+    rels.dirty = true
+  }
+  return holders(now)
+}
+// Who wrote a thread written here, by name: their id in the persons part, each new one added as
+// Excel adds them. Gives what writes the part, once every sheet is done.
+function personsOf(W) {
+  const ps = W.book.persons
+  const list = ps.list.map((p) => ({ ...p }))
+  const added = []
+  W.personOf = (name) => {
+    const n = String(name || '').trim() || 'Someone'
+    const had = list.find((p) => p.name === n)
+    if (had) return had.id
+    const p = { id: guid(), name: n }
+    list.push(p); added.push(p)
+    return p.id
+  }
+  return () => {
+    if (!added.length) return
+    const rows = added.map((p) => `<person displayName="${esc(p.name)}" id="${p.id}" userId="${esc(p.name)}" providerId="None"/>`).join('')
+    if (ps.xml && ps.rel?.path) {
+      const S = split(ps.xml)
+      W.put(ps.rel.path, `${S.head}${S.items.map((x) => x.pre + x.xml).join('')}${rows}${S.end}${S.tail}`)
+      return
+    }
+    const path = W.zip.file('xl/persons/person.xml') || W.written.has('xl/persons/person.xml') ? W.newPath('xl/persons/person', '.xml') : 'xl/persons/person.xml'
+    W.put(path, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<personList xmlns="${TC_NS}" xmlns:x="${MAIN_NS}">${rows}</personList>`)
+    W.ct.override(path, CT.persons)
+    W.wbRels ||= W.book.wbRels.map((r) => ({ ...r }))
+    const id = nextRelId(W.wbRels)
+    W.wbRels.push({ id, type: '/person', path, xml: relXml(id, PERSON_REL, relTarget(W.book.wbPath, path)) })
+  }
+}
+
+// The sheet's comments part: its notes (Univer's, when it had them) and, with threads shown, each
+// thread's placeholder (tc, from patchThreads), with a box in the VML for each, as Excel draws them.
+function patchNotes(W, sh, S, P, rows, cols, tc) {
   const managed = W.has.notes
   const all = (sh.notes?.list || []).map((n) => ({ ...n, r: rows ? rows(n.r) : n.r, c: cols ? cols(n.c) : n.c }))
   const base = all.filter((n) => n.r != null && n.c != null)
   const now = managed ? notesIn(W.res.notes, sh.id) : base
-  if (noteKey(base) === noteKey(now) && base.length === all.length) {
+  const tcAll = (sh.notes?.tc || []).map((n) => ({ ...n, r: rows ? rows(n.r) : n.r, c: cols ? cols(n.c) : n.c }))
+  const tcBase = tcAll.filter((n) => n.r != null && n.c != null)
+  const tcNow = tc || tcBase
+  const tcKey = (l) => canon(l.map((n) => [n.id, n.r, n.c, n.text]).sort((a, b) => (a[0] < b[0] ? -1 : 1)))
+  if (noteKey(base) === noteKey(now) && base.length === all.length && tcKey(tcBase) === tcKey(tcNow) && tcBase.length === tcAll.length) {
     if ((rows || cols) && sh.notes) {
       W.put(sh.notes.rel.path, shiftComments(sh.notes.xml, rows, cols))
       if (sh.notes.vml) W.edit(sh.notes.vml.path, (x) => shiftVml(x, rows, cols))
     }
     return
   }
-  if (sh.rels.some((r) => r.type === '/threadedComment')) W.why(`threaded comments on ${sh.name} are kept as Excel had them, not as changed here`)
+  if (!W.book.threadsOn && sh.rels.some((r) => r.type === '/threadedComment')) W.why(`threaded comments on ${sh.name} are kept as Excel had them, not as changed here`)
   const rels = W.relsOf(sh)
   const ns = sh.notes
   const cPath = ns?.rel.path || W.newPath('xl/comments', '.xml')
   let vPath = ns?.vml?.path || rels.list.find((r) => r.type === '/vmlDrawing')?.path || null
-  const cx = ns?.xml || `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors><author></author></authors><commentList></commentList></comments>`
+  let cx = ns?.xml || `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors><author></author></authors><commentList></commentList></comments>`
   const CP = split(cx).prefix
-  const entries = now.sort((x, y) => x.r - y.r || x.c - y.c).map((n) => { const was = base.find((x) => x.r === n.r && x.c === n.c && x.text === n.text); return was ? was.xml.replace(/^<[^>]*>/, (o) => setAttr(o, 'ref', a1(n.r, n.c))) : commentXml(n, CP) })
+  // A placeholder is written by tc={its thread}, one of the authors as Excel lists them.
+  const authors = each(one(cx, 'authors')?.inner || '', 'author').map((e) => unx(e.inner))
+  const addAuthors = []
+  const authorOf = (name) => { let i = authors.indexOf(name); if (i < 0) { i = authors.length; authors.push(name); addAuthors.push(name) } return i }
+  const holderXml = (n) => `<${CP}comment ref="${a1(n.r, n.c)}" authorId="${authorOf(`tc=${n.id}`)}" shapeId="0" xr:uid="${esc(n.id)}"><${CP}text><${CP}t>${escText(n.text)}</${CP}t></${CP}text></${CP}comment>`
+  const notes = now.map((n) => { const was = base.find((x) => x.r === n.r && x.c === n.c && x.text === n.text); return { r: n.r, c: n.c, xml: was ? was.xml.replace(/^<[^>]*>/, (o) => setAttr(o, 'ref', a1(n.r, n.c))) : commentXml(n, CP) } })
+  const holders = tcNow.map((n) => { const was = tcBase.find((x) => x.id === n.id && x.text === n.text); return { r: n.r, c: n.c, xml: was ? was.xml.replace(/^<[^>]*>/, (o) => setAttr(o, 'ref', a1(n.r, n.c))) : holderXml(n) } })
+  const entries = [...notes, ...holders].sort((x, y) => x.r - y.r || x.c - y.c)
   const index = W.book.sheets.indexOf(sh) + 1 || W.data.sheetOrder.indexOf(sh.id) + 1
   if (!entries.length) {
     // no notes left: their parts go
@@ -1862,10 +2012,27 @@ function patchNotes(W, sh, S, P, rows, cols) {
     if (vPath) W.edit(vPath, (x) => vmlWith(x, [], index))
     return
   }
+  if (addAuthors.length) {
+    const au = one(cx, 'authors')
+    const more = addAuthors.map((a) => `<${CP}author>${esc(a)}</${CP}author>`).join('')
+    if (au) cx = cx.slice(0, au.i) + (au.open.endsWith('/>') ? `${au.open.replace(/\s*\/>$/, '>')}${more}</${CP}authors>` : `${au.xml.slice(0, au.xml.lastIndexOf('</'))}${more}${au.xml.slice(au.xml.lastIndexOf('</'))}`) + cx.slice(au.j)
+  }
+  // xr:uid, as Excel marks a placeholder, needs its namespace on the root.
+  if (holders.some((h) => /\sxr:uid=/.test(h.xml))) {
+    cx = cx.replace(/<((?:[\w.-]+:)?comments)\b([^>]*?)(\/?)>/, (m, q, a, slash) => {
+      let x = a
+      if (!/\sxmlns:xr=/.test(x)) x += ` xmlns:xr="${XR_NS}"`
+      if (!/\sxmlns:mc=/.test(x)) x += ` xmlns:mc="${MC_NS}"`
+      const ig = /\smc:Ignorable="([^"]*)"/.exec(x)
+      if (!ig) x += ' mc:Ignorable="xr"'
+      else if (!ig[1].split(/\s+/).includes('xr')) x = x.replace(ig[0], ` mc:Ignorable="${`${ig[1]} xr`.trim()}"`)
+      return `<${q}${x}${slash}>`
+    })
+  }
   const list = one(cx, 'commentList')
-  const newCx = list ? cx.slice(0, list.i) + `${list.open.replace(/\s*\/>$/, '>')}${entries.join('')}</${CP}commentList>` + cx.slice(list.j) : cx
+  const newCx = list ? cx.slice(0, list.i) + `${list.open.replace(/\s*\/>$/, '>')}${entries.map((e) => e.xml).join('')}</${CP}commentList>` + cx.slice(list.j) : cx
   W.put(cPath, newCx)
-  W.ct.override(cPath, CT.comments)
+  if (!W.ct.has(cPath)) W.ct.override(cPath, CT.comments)
   if (!ns) { const id = nextRelId(rels.list); rels.list.push({ id, type: '/comments', path: cPath, xml: relXml(id, RT('comments'), relTarget(sh.part, cPath)) }); rels.dirty = true }
   if (!vPath) {
     vPath = W.newPath('xl/drawings/vmlDrawing', '.vml')
@@ -1875,8 +2042,8 @@ function patchNotes(W, sh, S, P, rows, cols) {
     W.ct.def('vml', CT.vml)
     if (!rPrefix(S.head)) S.head = S.head.replace(/>$/, ` xmlns:r="${REL_NS}">`)
     place(S, 'legacyDrawing', `<${P}legacyDrawing ${rPrefix(S.head)}:id="${id}"/>`, WS_ORDER)
-    W.put(vPath, vmlWith(null, now, index))
-  } else W.edit(vPath, (x) => vmlWith(x, now, index))
+    W.put(vPath, vmlWith(null, entries, index))
+  } else W.edit(vPath, (x) => vmlWith(x, entries, index))
 }
 
 // ---------- The workbook ----------
@@ -1892,14 +2059,16 @@ function blankSheet(now, path) {
   }
 }
 
-export async function writeBook(original, keep, data, { ops = [], charts = [] } = {}) {
+// threads: each sheet's threaded comments now, by its id, for a book read with them (readBook's
+// opts.threads); left out, they're kept as they were.
+export async function writeBook(original, keep, data, { ops = [], charts = [], threads = null } = {}) {
   const book = keep?.book || await parseBook(original)
   const zip = await JSZip.loadAsync(original)
   data = clone(data)
   for (const s of Object.values(data.sheets || {})) expandShared(s)
   const notKept = []
   const W = {
-    book, data, ops: ops.filter((o) => o && o.sheet && o.op && (o.count > 0)), zip,
+    book, data, ops: ops.filter((o) => o && o.sheet && o.op && (o.count > 0)), zip, threads,
     res: { cf: resourceOf(data, 'SHEET_CONDITIONAL_FORMATTING_PLUGIN'), dv: resourceOf(data, 'SHEET_DATA_VALIDATION_PLUGIN'), filter: resourceOf(data, 'SHEET_FILTER_PLUGIN'), notes: resourceOf(data, 'SHEET_NOTE_PLUGIN') },
     // a plugin Univer didn't have leaves its rules as they were
     has: Object.fromEntries([['cf', 'SHEET_CONDITIONAL_FORMATTING_PLUGIN'], ['dv', 'SHEET_DATA_VALIDATION_PLUGIN'], ['filter', 'SHEET_FILTER_PLUGIN'], ['notes', 'SHEET_NOTE_PLUGIN']].map(([k, n]) => [k, (data.resources || []).some((r) => r.name === n)])),
@@ -1951,6 +2120,7 @@ export async function writeBook(original, keep, data, { ops = [], charts = [] } 
     W.filterRows.set(id, { scope, hide: new Set((now?.cachedFilteredOut || []).map(Number)) })
   }
   // Each sheet's XML
+  const persons = personsOf(W)
   const out = []
   for (const id of nowIds) {
     const now = data.sheets[id]
@@ -1964,6 +2134,7 @@ export async function writeBook(original, keep, data, { ops = [], charts = [] } 
     if (xml != null || sh.isNew) W.put(sh.part, xml ?? sh.xml)
     out.push(sh)
   }
+  persons()
   // Sheets gone, with what was theirs alone
   for (const sh of gone) await dropSheet(W, sh)
   // Rows and columns moved: pictures, charts' anchors, tables and pivot tables on those sheets
