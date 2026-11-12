@@ -446,7 +446,7 @@ const rootOf = async (pane) => {
 // One that's no longer a beta stays in older configs, read by nothing (memory: Memory, now a page
 // for everyone). One can be on to start with (config.example.json's trials: Back and Forward), until
 // it's turned off.
-const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings', 'comments', 'mcp-server', 'meeting-board', 'make-sheet']
+const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings', 'comments', 'mcp-server', 'meeting-board', 'make-sheet', 'assist-answers']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 const FILES_OFF = 'Files is a beta feature. Turn it on in Settings › About & Updates › Beta Features.'
@@ -2027,7 +2027,8 @@ app.post('/api/meetings/:id/cleanup', wrap((req) => meetings.cleanup(req.params.
 app.post('/api/meetings/:id/cleanup/undo', wrap((req) => meetings.uncleanLine(req.params.id, req.body?.key == null ? null : String(req.body.key))))
 // AI Assist while it records: on or off (and so for the meetings after), how often it suggests
 // (low, medium or high, for every meeting), Suggest now, and a suggestion kept (into your notes) or
-// dismissed.
+// dismissed. With Answers in AI Assist on (a beta feature), its answers to questions raised come
+// with the suggestions, and are kept or dismissed the same way.
 app.post('/api/meetings/:id/assist', wrap(async (req) => {
   if (req.body?.level != null) {
     const level = String(req.body.level)

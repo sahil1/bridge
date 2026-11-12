@@ -186,6 +186,17 @@ writes your meeting notes, as your meeting notes do: a model on your computer ke
 other gets it. What it suggests is kept in `~/.bridge-ai/cache/meeting-prep.json` until two days
 after the meeting.
 
+With Answers in AI Assist on (a beta feature, off until you turn it on), while a meeting records
+with AI Assist on, the questions asked since AI Assist last looked go to the model that writes your
+meeting notes, with what AI Assist reads already and parts of the past meetings they may be about
+(their summaries and your notes, or the lines of their transcripts with the question's words): a
+model on your computer keeps them there; any other gets them. Only once you've saved a Perplexity
+key in Settings › Model Providers is a question looked up on the web, and only one the model
+answered from its own knowledge and says depends on facts that change: the question alone, in a
+sentence of its own, goes to Perplexity, never the transcript, your notes, your files or the
+meeting's name. The answers are kept in the meeting's folder (`assist.json`), and one you keep goes
+in your notes.
+
 If you run Bridge AI on a server or in Docker, all of this applies to that machine instead of your
 computer.
 

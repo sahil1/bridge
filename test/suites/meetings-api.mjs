@@ -4,7 +4,9 @@
 // search and questions; saved Markdown; looks at the screen while the call talks (read by a
 // stand-in for native/bridgeocr, which isn't run on Windows); action items turned into agents and
 // Chief of Staff's tasks, and since last time; whether the floating card shows in screenshots;
-// AI Assist's live board (a beta feature), filling in a batch at a time as lines come. The
+// AI Assist's live board (a beta feature), filling in a batch at a time as lines come; Answers in
+// AI Assist (a beta feature), from past meetings, the model's own knowledge and a stand-in for
+// Perplexity's web search. The
 // calendar is macOS Calendar, and the call's sound is recorded on a Mac (a stand-in for
 // native/calltap there), so their parts are Mac-only.
 import fs from 'node:fs'
@@ -21,9 +23,10 @@ try { process.stdout.write(fs.readFileSync(path.join(__dirname, 'ocr.txt'), 'utf
   fs.writeFileSync(path.join(bin, 'bridgeocr'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'ocr.cjs')}" "$@"\n`, { mode: 0o755 })
   return path.join(bin, 'bridgeocr')
 }
-// BRIDGE_BOARD_MS: the live board's minute, 2 s here.
-const kit = await startKit('meetings-api', { env: ({ bin }) => ({ BRIDGE_CALL_QUIET_MS: '2500', BRIDGE_BOARD_MS: '2000', ...(IS_WIN ? {} : { BRIDGE_OCR: ocr(bin) }) }) })
+// BRIDGE_BOARD_MS: the live board's minute, 2 s here. BRIDGE_PERPLEXITY_URL: the stand-in model,
+// answering as Perplexity's Sonar does.
 const model = await startModel('meetings-api')
+const kit = await startKit('meetings-api', { env: ({ bin }) => ({ BRIDGE_CALL_QUIET_MS: '2500', BRIDGE_BOARD_MS: '2000', BRIDGE_PERPLEXITY_URL: `${model.url}/v1`, ...(IS_WIN ? {} : { BRIDGE_OCR: ocr(bin) }) }) })
 const RATE = 16000
 // Seconds of audio: a tone where say is true (loud enough to count as speech), else silence.
 const pcm = (seconds, say) => {
@@ -280,6 +283,95 @@ try {
   await kit.api(`/meetings/${J.id}/assist`, { on: false })
   ok((await kit.api('/settings')).user?.meetings?.assist === false, 'and off again')
 
+  // ---------- Answers in AI Assist (a beta feature) ----------
+  // Off as a beta feature: a question raised gets no answer, and none is asked for. On, with AI
+  // Assist on for the meeting: the questions asked since the last look go to the model in the same
+  // look, numbered, with the past meetings they may be about. A general one is answered from the
+  // model's own knowledge, said to be; one about a past meeting from it, naming it; not one put to a
+  // person. Kept, it goes in your notes when it was asked; one answered already isn't again. One that
+  // needs current facts: without a way to search, the card says how to add one; with a Perplexity key
+  // (a stand-in), it's looked up with the question alone; a lookup that fails says why.
+  const answersAsked = () => model.asked(/^Questions asked since you last looked/m)
+  const answersOf = async (id) => (await kit.api(`/meetings/${id}`)).assistItems.filter((x) => x.kind === 'answer')
+  const allAnswers = (id) => JSON.parse(fs.readFileSync(path.join(dirOf(id), 'assist.json'), 'utf8')).items.filter((x) => x.kind === 'answer')
+  const PA = await kit.api('/meetings', { title: 'Northwind pricing call', call: false })
+  await kit.api(`/meetings/${PA.id}/stop`, {})
+  fs.writeFileSync(path.join(dirOf(PA.id), 'summary.md'), '## Summary\n- Pricing for Northwind Traders settled.\n\n## Decisions\n- Northwind Traders gets 20% off the Team plan for two years.\n')
+  const QA = await kit.api('/meetings', { title: 'Vendor review', call: false })
+  await kit.api(`/meetings/${QA.id}/assist`, { on: true })
+  said(QA.id, [['them', 2, "What's the difference between SOC 2 Type 1 and Type 2?"]])
+  let qn = answersAsked().length
+  await kit.api(`/meetings/${QA.id}/assist`, {})
+  ok((await kit.api('/config')).trials?.['assist-answers'] === false && answersAsked().length === qn && !(await answersOf(QA.id)).length && model.asked(/This meeting is going on now/).length > 0, 'off as a beta feature to start with: a question raised gets no answer, and none is asked for')
+  await kit.api('/settings', { trials: { 'assist-answers': true } }, 'PATCH')
+  await kit.api(`/meetings/${QA.id}/assist`, { on: false })
+  said(QA.id, [['them', 5, 'What does SOC 2 cover for a vendor like us?']])
+  qn = answersAsked().length
+  await kit.api(`/meetings/${QA.id}/assist`, {})
+  ok(answersAsked().length === qn && !(await answersOf(QA.id)).length, 'on, with AI Assist off for the meeting: no answers either, even with Suggest now')
+  await kit.api(`/meetings/${QA.id}/assist`, { on: true })
+  said(QA.id, [
+    ['them', 10, "What's the difference between SOC 2 Type 1 and Type 2?"],
+    ['you', 16, 'And what did we agree on pricing with Northwind Traders last time?'],
+    ['them', 22, 'How are you finding the new office?'],
+    ['you', 26, 'Fine, thanks, it is close to the station.'],
+  ])
+  qn = answersAsked().length
+  await kit.api(`/meetings/${QA.id}/assist`, {})
+  const qask = answersAsked().slice(qn)[0] || ''
+  const qsec = qask.slice(qask.indexOf('Questions asked'), qask.indexOf('Questions asked') + 900)
+  ok(/^Q1\. \[0:10\] Them: What's the difference between SOC 2/m.test(qask) && /^Q2\. \[0:16\] You: And what did we agree/m.test(qask) && /^Q3\. \[0:22\] Them: How are you/m.test(qask) && !/^Q\d+\. \[0:0[25]\]/m.test(qask) && !/^Q\d+\. [^\n]*close to the station/m.test(qask), 'on: the questions asked since the last look go to the model, numbered (not lines it looked at before, nor ones that ask nothing)', qsec)
+  ok(/past meetings these may be about[^\n]*:\n\[1\] "Northwind pricing call", [^\n]*\n[\s\S]*20% off the Team plan/.test(qask), 'with the past meeting the pricing question is about, numbered, for the model to answer from', qsec)
+  let qa = await answersOf(QA.id)
+  const soc = qa.find((x) => /SOC 2/.test(x.q))
+  const price = qa.find((x) => /pricing/.test(x.q))
+  ok(qa.length === 2 && !qa.some((x) => /How are you/.test(x.q)), 'two answers, and none to the question put to a person', qa.map((x) => x.q))
+  ok(!!soc && soc.t === 10 && soc.asked?.who === 'Them' && /SOC 2 Type 1/.test(soc.asked.text) && soc.sources.length === 1 && soc.sources[0].kind === 'general' && soc.model === 'openai:gpt-5' && soc.web === null && soc.state === 'new', "a general question: answered from the model's own knowledge, said to be, with who asked it and when", soc)
+  ok(!!price && price.sources[0]?.kind === 'meeting' && price.sources[0].id === PA.id && price.sources[0].title === 'Northwind pricing call' && price.sources[0].startedAt === PA.startedAt && /20% off the Team plan/.test(price.text) && price.web === null, 'one about what was agreed last time: answered from that meeting, naming it and its day', price)
+  ok((await kit.api(`/meetings/${QA.id}`)).assistItems.some((x) => x.kind !== 'answer'), '(the suggestions come in the same look)')
+  await kit.api(`/meetings/${QA.id}/assist/${price.id}`, { state: 'kept' }, 'PATCH')
+  ok(/^- \[0:16\] Answer: And what did we agree on pricing with Northwind Traders last time\? Last time you agreed: Northwind Traders gets 20% off the Team plan for two years\. \(From "Northwind pricing call", [^)]+\.\)$/m.test(notes(QA.id)), 'kept: in your notes at the time it was asked, the question, the answer and where it\'s from', notes(QA.id))
+  await kit.api(`/meetings/${QA.id}/assist/${soc.id}`, { state: 'dismissed' }, 'PATCH')
+  ok(!(await answersOf(QA.id)).some((x) => x.id === soc.id), 'dismissed: gone')
+  // Asked again in other words: told it was answered, and the model answering it anyway, it isn't.
+  said(QA.id, [['them', 30, "So what's the difference between SOC 2 Type 1 and Type 2 again?"]])
+  qn = answersAsked().length
+  await kit.api(`/meetings/${QA.id}/assist`, {})
+  const askedAgain = answersAsked().slice(qn)[0] || ''
+  ok(/Answered already[^\n]*:\n- What's the difference between SOC 2 Type 1 and Type 2\?\n- And what did we agree/.test(askedAgain) && allAnswers(QA.id).filter((x) => /SOC 2/.test(x.q)).length === 1, 'a question answered already (and dismissed) isn\'t answered again', allAnswers(QA.id).map((x) => x.q))
+  // Facts that change, with no way to search: from what the model knows, and how to add a search.
+  said(QA.id, [['you', 40, 'When does the EU AI Act start applying?']])
+  await kit.api(`/meetings/${QA.id}/assist`, {})
+  const eu = (await answersOf(QA.id)).find((x) => /EU AI Act/.test(x.q))
+  ok(!!eu && eu.current === true && eu.sources[0].kind === 'general' && eu.web?.state === 'off' && !model.requests().some((x) => /^sonar/.test(x.model)), 'one that needs current facts, with no web search set up: from the model\'s own knowledge, and the card says how to add one; nothing goes to a search service', eu)
+  // With a Perplexity key: looked up on the web, sending the question alone.
+  await kit.api('/providers/perplexity', { values: { PERPLEXITY_API_KEY: 'pplx-test' } }, 'PUT')
+  said(QA.id, [['them', 50, 'And what is the latest guidance on the AI Act for providers?']])
+  const s0 = model.requests().length
+  await kit.api(`/meetings/${QA.id}/assist`, {})
+  const webbed = await until(async () => { const x = (await answersOf(QA.id)).find((y) => /latest guidance/.test(y.q)); return x?.web?.state === 'done' && x }, 8000)
+  const webSrc = webbed?.sources?.find((s) => s.kind === 'web')
+  ok(!!webbed && /^On the web: /.test(webbed.text) && /A third sentence\.$/.test(webbed.text) && !/fourth/.test(webbed.text) && /^A general answer/.test(webbed.general || '') && webSrc?.via === 'Perplexity' && webSrc.links.length === 2 && webSrc.links[0].url === 'https://example.com/eu-ai-act' && webSrc.links[0].title === 'EU AI Act: the timeline' && !webbed.sources.some((s) => s.kind === 'general'), "with a Perplexity key, it's looked up on the web: the web's answer, three sentences at most, with its pages (none that isn't a web address) in place of the model's", webbed)
+  const sent = model.requests().slice(s0).filter((x) => /^sonar/.test(x.model))
+  const sentText = JSON.stringify(sent.map((x) => x.messages))
+  ok(sent.length === 1 && /: And what is the latest guidance on the AI Act for providers\?"/.test(sentText) && !/SOC 2|Northwind|Vendor review|EU AI Act start|station/.test(sentText), 'only the question went to the search service: nothing said before it, no notes, no meeting', sentText)
+  // A lookup that fails says why, and the model's own answer stays.
+  await kit.api('/providers/perplexity', { values: { PERPLEXITY_API_KEY: 'sk-bad' } }, 'PUT')
+  said(QA.id, [['them', 60, 'When does the new data law come into force?']])
+  await kit.api(`/meetings/${QA.id}/assist`, {})
+  const failed = await until(async () => { const x = (await answersOf(QA.id)).find((y) => /data law/.test(y.q)); return x?.web?.state === 'failed' && x }, 8000)
+  ok(!!failed && failed.web.error === 'Perplexity API (sonar-pro): Incorrect API key provided.' && failed.sources.length === 1 && failed.sources[0].kind === 'general' && /^A general answer/.test(failed.text), 'a lookup that fails says why on the card, and the model\'s own answer stays', failed)
+  await kit.api('/providers/perplexity', { values: { PERPLEXITY_API_KEY: '' } }, 'PUT')
+  // Three asked at once, the model answering each: two of them, besides the suggestions.
+  said(QA.id, [['them', 70, 'What is ISO 27001?'], ['you', 74, 'What does GDPR stand for?'], ['them', 78, 'What is a data processing agreement?']])
+  const had = allAnswers(QA.id).length
+  await kit.api(`/meetings/${QA.id}/assist`, {})
+  const three = allAnswers(QA.id).slice(had)
+  ok(had === 5 && three.length === 2 && /ISO 27001/.test(three[0].q) && /GDPR/.test(three[1].q) && allAnswers(QA.id).every((x, i, all) => all.findIndex((y) => y.q === x.q) === i), 'at most two answers a look, besides the suggestions; each question once', allAnswers(QA.id).map((x) => x.q))
+  await kit.api(`/meetings/${QA.id}/stop`, {})
+  await kit.api(`/meetings/${QA.id}/assist`, { on: false })
+  await kit.api('/settings', { trials: { 'assist-answers': false } }, 'PATCH')
+
   // ---------- AI Assist's live board (a beta feature) ----------
   // Off as a beta feature: its routes say so, and a meeting with it on sends nothing. On: as lines
   // come in, a batch at a time (a minute, here BRIDGE_BOARD_MS's 2 s, and longer at AI Assist's Low),
@@ -425,7 +517,20 @@ try {
   const ll = (await kit.api(`/meetings/${LL.id}`)).liveBoard
   ok(onHere.length >= 1 && onHere.every((x) => x.path === '/api/chat' && x.model === 'llama3.1:8b') && ll.use === 'ollama:llama3.1:8b' && ll.items.some((x) => /Lisbon/.test(x.label)), 'a model on this computer keeps the board, asked on this computer', { asked: onHere.map((x) => [x.path, x.model]), use: ll.use, items: ll.items })
   await kit.api(`/meetings/${LL.id}/stop`, {})
-  await kit.api('/settings', { meetings: { model: 'openai:gpt-5', board: false }, trials: { 'meeting-board': false } }, 'PATCH')
+  // Answers in AI Assist with a model on this computer: asked there, held to the schema from the
+  // start (the answers in it too), and it answers.
+  await kit.api('/settings', { trials: { 'assist-answers': true } }, 'PATCH')
+  const LA = await kit.api('/meetings', { title: 'Offsite logistics', call: false })
+  await kit.api(`/meetings/${LA.id}/assist`, { on: true })
+  said(LA.id, [['them', 3, 'What is the time difference between Lisbon and London?']])
+  const la0 = model.requests().length
+  await kit.api(`/meetings/${LA.id}/assist`, {})
+  const laAsked = model.requests().slice(la0).filter((x) => JSON.stringify(x.messages).includes('Questions asked since you last looked'))
+  const la = (await kit.api(`/meetings/${LA.id}`)).assistItems.filter((x) => x.kind === 'answer')
+  ok(laAsked.length === 1 && laAsked[0].path === '/api/chat' && laAsked[0].model === 'llama3.1:8b' && laAsked[0].format === 'json_schema' && la.length === 1 && la[0].model === 'ollama:llama3.1:8b' && /time difference between Lisbon and London/.test(la[0].q), 'answers with a model on this computer: asked there, held to the schema, and it answers', { asked: laAsked.map((x) => [x.path, x.model, x.format]), la })
+  await kit.api(`/meetings/${LA.id}/stop`, {})
+  await kit.api(`/meetings/${LA.id}/assist`, { on: false })
+  await kit.api('/settings', { meetings: { model: 'openai:gpt-5', board: false }, trials: { 'meeting-board': false, 'assist-answers': false } }, 'PATCH')
 
   // ---------- Files you got lately ----------
   // In Downloads or on the Desktop, from around when it was: one named after someone in it, a

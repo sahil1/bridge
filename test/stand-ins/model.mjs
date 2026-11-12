@@ -10,8 +10,14 @@
 //   "bridge ay eye" to "Bridge AI", rewrites a line that says "rewrite me" (which meetings.js
 //   turns down), and leaves out "Thanks for watching" and "drop me please"; Assist suggests a
 //   question about what the files say (or the invite, without them) and a check of the last thing
-//   said. AI Assist's meeting prep, before a meeting: a goal from the invite, a follow-up on what's still open
-//   and a question about the newest email, from what it was sent.
+//   said. With answers asked for too (Answers in AI Assist), one for each numbered question but
+//   one put to a person ("how are you", "can you"): what was agreed in a past meeting it was given
+//   (its line with a percentage) for one about what was agreed, else from its own knowledge, saying
+//   it depends on facts that change for a law ("Act"), "the latest" or "when does". Perplexity's
+//   Sonar (a model named sonar…): an answer with the pages it's from, as citations and
+//   search_results, one of them not a web address. AI Assist's meeting prep, before a meeting: a
+//   goal from the invite, a follow-up on what's still open and a question about the newest email,
+//   from what it was sent.
 //   Edit by voice ("Instruction: … Text: …"): the text with "teh" spelled right and its first letter a
 //   capital, in quotes and a code fence (which Bridge AI takes off).
 //   Dictation to tidy ("<dictation>…</dictation>"): "you know" taken out, in quotes; a model that
@@ -150,6 +156,10 @@ function answer(b) {
   const m = b.messages || []
   const last = words([...m].reverse().find((x) => x.role === 'user')?.content)
   const first = words(m.find((x) => x.role === 'user')?.content)
+  if (/^sonar/.test(b.model || '')) {
+    const q = /: ([^\n]*)$/.exec(last)?.[1] || last
+    return { ...say(`**On the web**: ${q.replace(/\?\s*$/, '')}, says the official text.[1] The guidance has the dates.[2] A third sentence. A fourth one, left out.`), citations: ['https://example.com/eu-ai-act', 'https://example.org/guidance'], search_results: [{ title: 'EU AI Act: the timeline', url: 'https://example.com/eu-ai-act' }, { title: 'Guidance', url: 'https://example.org/guidance' }, { title: 'Not a page', url: 'javascript:alert(1)' }] }
+  }
   if (/^Draw this as a diagram:/.test(first) && /Answer with JSON only, in this shape \(an example\)/.test(first)) {
     if (/\blocal\b/i.test(first) && m.filter((x) => x.role === 'user').length === 1) return say('{"nodes": "a load balancer and a server"}')
     if (/aws|3-tier|\blocal\b/i.test(first)) return say(`\`\`\`json\n${JSON.stringify(ARCH)}\n\`\`\``)
@@ -269,7 +279,16 @@ function answer(b) {
     const lastSaid = [...last.matchAll(/^\[[^\]]+\] [^:]+: (.*)$/gm)].at(-1)?.[1]
     const items = [{ kind: 'question', text: file ? `Ask about "${file[2].slice(0, 40)}"` : 'Ask what they hope to get out of this', why: file ? `${file[1]}` : 'The invite' }]
     if (lastSaid) items.push({ kind: 'check', text: `Check: "${lastSaid.slice(0, 40)}"`, why: 'Just said' })
-    return say(JSON.stringify({ items }))
+    if (!/^Questions asked since you last looked/m.test(last)) return say(JSON.stringify({ items }))
+    const past = /^The user's past meetings[^\n]*:\n([\s\S]*?)(?=\n\n(?:Answered already|Also answer))/m.exec(last)?.[1] || ''
+    const answers = []
+    for (const [, n, q] of last.matchAll(/^Q(\d+)\. \[[^\]]+\] [^:\n]+: (.*)$/gm)) {
+      if (/how are you|can you|could you|what do you think/i.test(q)) continue
+      const agreed = /\bagree/i.test(q) && /^\[(\d+)\] "[^"]+"[^\n]*\n[\s\S]*?^- ([^\n]*\d+%[^\n]*)$/m.exec(past)
+      if (agreed) answers.push({ line: Number(n), question: q, answer: `Last time you agreed: ${agreed[2]}`, from: [agreed[1]], current: false })
+      else answers.push({ line: Number(n), question: q, answer: `A general answer to "${q}".`, from: ['general'], current: /\b(act|law|latest|when does)\b/i.test(q) })
+    }
+    return say(JSON.stringify({ items, answers }))
   }
   // AI Assist's meeting prep, before a meeting: a goal from the invite, a follow-up on what's still open from last
   // time (theirs first), and a question about the newest email with them, each from what it was sent.

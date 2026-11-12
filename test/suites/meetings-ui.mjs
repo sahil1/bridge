@@ -16,6 +16,8 @@
 // Settings' Voices in a room, and neither where voices can't be told apart. AI Assist's live board (a
 // beta feature): the meeting's Board filling in, kept and discarded there and on the board itself,
 // the floating card's line, the summary's link, its action items onto the task list and Settings.
+// Answers in AI Assist (a beta feature): each answer's card in Suggestions and on the floating card,
+// and what Settings › Meetings says goes where.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -539,6 +541,72 @@ process.exit(1)`)
   ok(!!(await until(async () => ((await api(`/meetings/${I.id}`)).links || []).some((l) => /Mara_Lind_Resume\.pdf$/.test(l.path || '')), 5000)), 'Add links it to the meeting')
   await api(`/meetings/${I.id}/assist`, { on: false })
   await api(`/meetings/${I.id}/stop`, {})
+
+  // ---------- Answers in AI Assist (a beta feature) ----------
+  // An answer to a question raised, in Suggestions on a card of its own: the question as asked, who
+  // asked it and when, the answer, and where it's from: a past meeting (a click opens it), the
+  // model's own knowledge (which may be out of date; for one that needs current facts, how to add a
+  // web search), the web with its pages, or a lookup that failed, saying why. ✓ puts it in your
+  // notes, × waves it away. The floating card shows the newest, with its question and source.
+  // Settings › Meetings says what it answers from and what goes where.
+  await api('/settings', { trials: { 'assist-answers': true } }, 'PATCH')
+  const PM = await api('/meetings', { title: 'Northwind pricing call', call: false })
+  await api(`/meetings/${PM.id}/stop`, {})
+  const VR = await api('/meetings', { title: 'Vendor review', call: false })
+  await api(`/meetings/${VR.id}/assist`, { on: true })
+  const ans = (o) => ({ kind: 'answer', state: 'new', why: '', model: 'openai:gpt-5', current: false, web: null, sources: [{ kind: 'general' }], ...o })
+  fs.writeFileSync(path.join(kit.data, 'meetings', VR.id, 'assist.json'), JSON.stringify({ at: new Date().toISOString(), upTo: 0, error: null, items: [
+    ans({ id: 'an1', t: 70, q: 'What did we agree on pricing with Northwind Traders last time?', asked: { who: 'You', text: 'And what did we agree on pricing with Northwind Traders last time?' }, text: 'Northwind Traders gets 20% off the Team plan for two years.', sources: [{ kind: 'meeting', id: PM.id, title: 'Northwind pricing call', startedAt: PM.startedAt }] }),
+    ans({ id: 'an2', t: 130, q: "What's the difference between SOC 2 Type 1 and Type 2?", asked: { who: 'Them', text: "So what's the difference between SOC 2 Type 1 and Type 2?" }, text: 'Type 1 checks the controls at one point in time; Type 2 checks they worked over several months.' }),
+    ans({ id: 'an3', t: 190, q: 'When does the EU AI Act start applying?', asked: { who: 'Them', text: 'When does the EU AI Act start applying?' }, text: 'Most of it applies from August 2026.', current: true, web: { state: 'off' } }),
+    ans({ id: 'an4', t: 250, q: 'When does the new data law come into force?', asked: { who: 'Them', text: 'When does the new data law come into force?' }, text: 'Next spring, as far as the model knows.', current: true, web: { state: 'failed', via: 'Perplexity', error: 'Perplexity API (sonar-pro): Incorrect API key provided.' } }),
+    ans({ id: 'an5', t: 310, q: 'What is the latest AI Act guidance for providers?', asked: { who: 'Priya Shah', text: 'What is the latest AI Act guidance for providers?' }, text: 'The guidance came out in July.[1]', general: 'Guidance was due.', current: true, sources: [{ kind: 'web', via: 'Perplexity', model: 'sonar-pro', links: [{ url: 'https://example.com/eu-ai-act', title: 'EU AI Act: the timeline' }] }], web: { state: 'done', via: 'Perplexity' } }),
+  ] }))
+  await openMeeting('Vendor review')
+  await p.locator('.seg button[data-view="assist"]').click({ timeout: 5000 }).catch(() => {})
+  const aCard = (q) => p.locator('.mt-assist .mt-tip.k-answer', { hasText: q })
+  const cardText = (q) => aCard(q).innerText({ timeout: 1000 }).catch(() => '')
+  ok(!!(await until(async () => (await p.locator('.mt-assist .mt-tip.k-answer').count()) === 5, 8000)), 'answers show in Suggestions, each on a card of its own', await p.locator('.mt-assist').innerText().catch(() => ''))
+  const priceT = await cardText('agree on pricing')
+  ok(/^answered/i.test(priceT.trim()) && /You asked/.test(priceT) && /What did we agree on pricing with Northwind Traders last time\?/.test(priceT) && /20% off the Team plan/.test(priceT) && /\b1:10\b/.test(priceT) && /Sources/.test(priceT) && /Northwind pricing call ·/.test(priceT), 'one from a past meeting: the question as asked, who asked it and when, the answer, and the meeting it\'s from', priceT)
+  const socT = await cardText('SOC 2')
+  ok(/Them asked/.test(socT) && /gpt-5's own knowledge, which may be out of date/.test(socT) && !/Perplexity|Model Providers/.test(socT), "a general one: from the model's own knowledge, said plainly, which may be out of date", socT)
+  const euT = await cardText('EU AI Act start')
+  ok(/add a Perplexity key in Settings › Model Providers/.test(euT) && await aCard('EU AI Act start').locator('button', { hasText: 'Open Model Providers' }).count() === 1, 'one that needs current facts, with no web search set up: says how to add one', euT)
+  const webT = await cardText('latest AI Act guidance')
+  const link = aCard('latest AI Act guidance').locator('a.mt-source')
+  ok(/Priya Shah asked/.test(webT) && /The web, via Perplexity/.test(webT) && !/own knowledge/.test(webT) && await link.count() === 1 && await link.getAttribute('href') === 'https://example.com/eu-ai-act' && await link.getAttribute('target') === '_blank' && /noopener/.test(await link.getAttribute('rel') || '') && /EU AI Act: the timeline/.test(await link.innerText()), 'one looked up on the web: says so, with its page as a link that opens on its own', webT)
+  ok(/Couldn't look it up on the web: Perplexity API \(sonar-pro\): Incorrect API key provided\./.test(await cardText('data law')), 'a lookup that failed says why', await cardText('data law'))
+  await shot(p, `${tag}meeting-assist-answers`)
+  await aCard('agree on pricing').scrollIntoViewIfNeeded().catch(() => {})
+  await shot(p, `${tag}meeting-assist-answers-more`)
+  await aCard('SOC 2').locator('button[aria-label="Add to my notes"]').click({ timeout: 5000 })
+  ok(!!(await until(async () => /In your notes/.test(await cardText('SOC 2')), 5000)) && /^- \[2:10\] Answer: What's the difference between SOC 2 Type 1 and Type 2\? Type 1 checks/m.test((await api(`/meetings/${VR.id}`)).notes || ''), '✓ puts the answer in your notes, at the time it was asked, with its question', (await api(`/meetings/${VR.id}`)).notes)
+  await aCard('latest AI Act guidance').locator('button[aria-label="Dismiss"]').click({ timeout: 5000 })
+  ok(!!(await until(async () => (await aCard('latest AI Act guidance').count()) === 0, 5000)), '× waves it away')
+  // The floating card: the newest still waiting, with its question and why it couldn't be looked up.
+  const vrCalls = { watching: true, calls: [], detect: true, float: 'meetings', floatHover: true, prompt: null, recording: { id: VR.id, title: 'Vendor review', status: 'recording', startedAt: new Date(Date.now() - 60000).toISOString(), seconds: 60, callApps: [], callEnded: null, callEndedApp: null, stopsAt: null, callQuiet: false } }
+  const fa = await page(b, kit.url, { before: async (c) => { await noServiceWorker(c); await c.route(/\/api\/calls(\?|$)/, (r) => r.fulfill({ json: vrCalls })) } })
+  const acard = await fa.ctx.newPage()
+  await acard.setViewportSize({ width: 360, height: 520 })
+  await acard.goto(`${kit.url}/?float=1`)
+  const atip = acard.locator('.float-card .fc-tip.k-answer')
+  ok(!!(await until(async () => /data law/.test(await atip.locator('.fc-tip-q').innerText({ timeout: 1000 }).catch(() => '')), 8000)) && /Next spring/.test(await atip.locator('.fc-tip-text').innerText()) && /Couldn't look it up on the web/.test(await atip.locator('.fc-tip-from').innerText()), 'the floating card: the newest answer, under its question, and why it couldn\'t be looked up', await atip.innerText().catch(() => ''))
+  await shot(acard, `${tag}meeting-answer-float`)
+  await fa.ctx.close()
+  // A click on the meeting it's from opens that meeting.
+  await aCard('agree on pricing').locator('button.mt-source', { hasText: 'Northwind pricing call' }).click({ timeout: 5000 })
+  ok(!!(await until(async () => (await p.locator('.mt-title').inputValue({ timeout: 1000 }).catch(() => '')) === 'Northwind pricing call', 5000)), 'a click on the meeting an answer is from opens it')
+  // Settings › Meetings: what it answers from, what goes where, and how to add a web search.
+  await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meetings' } })))
+  const st = p.locator('.st-meet [data-setting="assist-answers"]')
+  ok(!!(await until(async () => /Answers in AI Assist/i.test(await st.innerText({ timeout: 1000 }).catch(() => '')) && /past meetings that may answer them, go to gpt-5 \(OpenAI\)/.test(await st.innerText().catch(() => '')) && /add a Perplexity key\. Only the question would go to Perplexity, never the transcript/.test(await st.innerText().catch(() => '')), 8000)), 'Settings › Meetings: what it answers from, what goes to the model, and that only the question would go to a web search', await st.innerText().catch(() => ''))
+  await st.scrollIntoViewIfNeeded().catch(() => {})
+  await shot(p, `${tag}meeting-answers-settings`)
+  await p.keyboard.press('Escape')
+  await api(`/meetings/${VR.id}/assist`, { on: false })
+  await api(`/meetings/${VR.id}/stop`, {})
+  await api('/settings', { trials: { 'assist-answers': false } }, 'PATCH')
 
   // ---------- AI Assist's live board (a beta feature) ----------
   // With it on in Beta Features, a recording meeting has a Board: off, it says what it does; its
