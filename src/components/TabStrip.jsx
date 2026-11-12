@@ -14,15 +14,23 @@ import './tabstrip.css'
 // it. A moment's hover shows a card with the tab's whole name and where it is. Drag a tab to reorder;
 // Ctrl+Shift+←/→ moves the focused one.
 //
+// A right-click on a tab (or Shift+F10, or the menu key, on the focused one) has what Chrome's tab
+// menu has that fits here: a new agent in its space, open it beside the tab on screen, its color, then
+// Close, Close other tabs and Close tabs to the right. Its color is a line under it, in one of
+// Chrome's group colors (No color takes it off); a tab in a group with a chip colors its group, as in
+// Chrome. The colors are kept with the window's tabs, so a reload keeps them. The menu opens where the
+// pointer is, turned to fit in the window near its right or bottom edge; ↑↓ go through it, ←→ along
+// the colors, and Esc closes it with the focus back on the tab.
+//
 // Tab Groups (a beta feature): the tabs kept together as the sidebar has them. Home and the other
 // views first, then each space of this computer in the sidebar's order, then each of your other
 // computers under its name, so what's from elsewhere is out of the way of what you're doing here. Each
-// group starts with a chip in its color (the space's, else one of a fixed few by its place in the
-// sidebar; your other computers grey), and a line in that color runs under its tabs. A click on the
-// chip folds the group to it, how many it holds and the most urgent dot among them (the tab on screen
-// stays out); a right-click has the rest. With only one group there are no chips, nor for a space
-// whose one tab is named as it is (the Chief of Staff's). Each tab's place in its group is yours, as
-// before (drag, or Ctrl+Shift+←/→).
+// group starts with a chip in its color (the one picked in its menu, else the space's, else one of a
+// fixed few by its place in the sidebar; your other computers grey), and a line in that color runs
+// under its tabs. A click on the chip folds the group to it, how many it holds and the most urgent dot
+// among them (the tab on screen stays out); a right-click has the rest, its color too. With only one
+// group there are no chips, nor for a space whose one tab is named as it is (the Chief of Staff's).
+// Each tab's place in its group is yours, as before (drag, or Ctrl+Shift+←/→).
 
 // How wide a tab is, as tabstrip.css has it: 224px at most; the others down to 72 with a few letters
 // of their name (then down to 52 with fewer, then their icon alone), the one on screen 124 at least,
@@ -32,10 +40,18 @@ const NAMED = 52
 const ON = 124
 const GAP = 2
 const COLORS = ['blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange']
+// The colors a tab's or a group's menu offers: Chrome's tab groups' own, in its order.
+const PICK = ['grey', ...COLORS]
+const NAMES = { grey: tx('Grey'), blue: tx('Blue'), red: tx('Red'), yellow: tx('Yellow'), green: tx('Green'), pink: tx('Pink'), purple: tx('Purple'), cyan: tx('Cyan'), orange: tx('Orange') }
+// A color as the tab, its line, its chip and their swatches use it.
+const paint = (c) => (c ? { '--gc': `var(--tg-${c})`, '--gc-on': `var(--tg-${c}-on, var(--tg-on))` } : null)
+// Shift+F10, or the menu key: a right-click from the keyboard.
+const menuKey = (e) => e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')
 const URGENT = { blocked: 0, working: 1, done: 2, idle: 3 }
 const SAYS = { blocked: tx('Needs you'), working: tx('Working'), done: tx('Done'), idle: tx('Idle'), unknown: tx('Unknown') }
 const worstOf = (ids, byId) => ids.map((id) => byId[id]?.status).filter((x) => x in URGENT).sort((x, y) => URGENT[x] - URGENT[y])[0] || 'unknown'
-// A space's color: its own (a palette name, or 1 to 8), else by its place in the sidebar.
+// A space's color: its own (a palette name, or 1 to 8), else by its place in the sidebar. One picked
+// in its group's menu comes first (TabStrip's chosen).
 const colorOf = (space, i, label) => {
   const own = space?.color
   if (COLORS.includes(own)) return own
@@ -60,13 +76,16 @@ function whereOf(a) {
   return { text: a.shellTab ? `${a.workspace} › ${a.label}` : a.workspace || t('Space'), path: a.cwd ? tildePath(a.cwd) : null }
 }
 
-export default function TabStrip({ ids, byId, active, side, focus, folded: foldedKeys, grouping, spaces = [], onOpen, onClose, onMove, onNudge, onFold, onNewAgent, children }) {
+// colors: what was picked in the menus, { key: color }, a group by its key and a tab by its id
+// (App.jsx keeps them with the window's tabs); onColor(key, color or null) picks one; onSide(id) opens
+// a tab beside the one on screen, when the window has room to split.
+export default function TabStrip({ ids, byId, active, side, focus, folded: foldedKeys, colors, grouping, spaces = [], onOpen, onClose, onMove, onNudge, onFold, onColor, onSide, onNewAgent, children }) {
   const [drag, setDrag] = useState(null) // { id, over, after }
   const [kept, setKept] = useState(null) // each tab's width, kept after a close with the pointer: { id: px }
   const [fit, setFit] = useState('roomy') // 'roomy' | 'tight' (the others narrower) | 'icons' (the others their icon)
   const [out, setOut] = useState({ left: 0, right: 0 }) // tabs out of sight on each side
   const [card, setCard] = useState(null) // the hover card: { id, rect }
-  const [menu, setMenu] = useState(null) // a group's right-click menu: { key, x, y }
+  const [menu, setMenu] = useState(null) // a right-click menu, a tab's ({ id }) or a group's ({ key }): with { x, y, back }, back what it was opened on
   const [search, setSearch] = useState(false)
   const scroller = useRef(null)
   const searchBtn = useRef(null)
@@ -75,13 +94,18 @@ export default function TabStrip({ ids, byId, active, side, focus, folded: folde
 
   // ---------- groups ----------
   const open = ids.filter((id) => byId[id])
+  const chosen = (key) => (PICK.includes(colors?.[key]) ? colors[key] : null)
   const groupOf = (id) => {
     const a = byId[id]
     if (a.view) return { key: 'views', at: -1 }
-    if (a.remote) return { key: `dev:${a.remote.machine || 'here'}`, at: 1e6, label: a.device || t('Another computer'), device: true, color: 'grey' }
+    if (a.remote) {
+      const key = `dev:${a.remote.machine || 'here'}`
+      return { key, at: 1e6, label: a.device || t('Another computer'), device: true, color: chosen(key) || 'grey' }
+    }
     const i = spaces.findIndex((w) => w.id === a.workspaceId)
     const label = spaces[i]?.label || a.workspace || t('Space')
-    return { key: `ws:${a.workspaceId || ''}`, at: i < 0 ? 1e5 : i, label, color: colorOf(spaces[i], i, label), space: a.workspaceId }
+    const key = `ws:${a.workspaceId || ''}`
+    return { key, at: i < 0 ? 1e5 : i, label, color: chosen(key) || colorOf(spaces[i], i, label), space: a.workspaceId }
   }
   const groups = !grouping ? [{ key: 'all', ids: open }] : [...open.reduce((m, id, n) => {
     const g = groupOf(id)
@@ -180,13 +204,25 @@ export default function TabStrip({ ids, byId, active, side, focus, folded: folde
   const groupFor = Object.fromEntries(shown.flatMap((g) => g.ids.map((id) => [id, g])))
   const cardA = card && byId[card.id]
   const cardWhere = cardA && whereOf(cardA)
-  const groupStyle = (g) => (g.head ? { '--gc': `var(--tg-${g.color})`, '--gc-on': `var(--tg-${g.color}-on, var(--tg-on))` } : null)
+  const groupStyle = (g) => (g.head ? paint(g.color) : null)
+  // A tab's color: its group's when the group has a chip, else its own (if one was picked).
+  const tintOf = (id) => (groupFor[id]?.head ? groupFor[id].color : chosen(id))
   const description = (a) => [tabName(a), whereOf(a)?.text, a.view ? null : t(SAYS[a.status] || SAYS.unknown)].filter(Boolean).join(', ')
+
+  // ---------- the right-click menu ----------
+  // Where the pointer is; from the keyboard, under what it's for.
+  const openMenu = (e, which) => {
+    e.preventDefault()
+    hideCard()
+    const r = e.currentTarget.getBoundingClientRect()
+    const keyed = e.type === 'keydown' || (!e.clientX && !e.clientY)
+    setMenu({ ...which, x: keyed ? r.left : e.clientX, y: keyed ? r.bottom : e.clientY, back: e.currentTarget })
+  }
 
   const groupHead = (g) => (
     <button type="button" className={`ws-group ${g.folded ? 'folded' : ''} ${g.device ? 'device' : ''} ${g.shown.length ? '' : 'alone'}`} style={groupStyle(g)}
       onClick={() => onFold(g.key)} aria-expanded={!g.folded}
-      onContextMenu={(e) => { e.preventDefault(); hideCard(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ key: g.key, x: e.clientX || r.left, y: e.clientY || r.bottom }) }}
+      onContextMenu={(e) => openMenu(e, { key: g.key })} onKeyDown={(e) => { if (menuKey(e)) openMenu(e, { key: g.key }) }}
       title={g.folded ? (g.ids.length === 1 ? t('{name}: 1 tab. Show it', { name: g.label }) : t('{name}: {n} tabs. Show them', { name: g.label, n: g.ids.length })) : t('{name}: fold its tabs away', { name: g.label })}>
       {g.device && <Icon name="laptop" size={11} />}
       {g.folded && <span className="ws-group-dot"><StatusDot status={worstOf(g.ids, byId)} size={6} /></span>}
@@ -194,8 +230,40 @@ export default function TabStrip({ ids, byId, active, side, focus, folded: folde
       {g.folded && <span className="ws-group-n">{g.ids.length}</span>}
     </button>
   )
-  const menuGroup = menu && shown.find((g) => g.key === menu.key)
   const firstCwd = (g) => g.ids.map((id) => byId[id]?.cwd).find(Boolean)
+  // The row of colors: a group's (always one of them), or a tab's own, which can be none.
+  const colorRow = (key, value, name, none = false) => onColor && { colors: { value, name, none, pick: (c) => onColor(key, c) } }
+  const groupItems = (g) => [
+    g.folded
+      ? { icon: 'unfold-all', label: g.ids.length === 1 ? t('Show its tab') : t('Show its {n} tabs', { n: g.ids.length }), run: () => onFold(g.key) }
+      : { icon: 'fold-all', label: t('Fold its tabs away'), run: () => onFold(g.key) },
+    g.space && onNewAgent && { icon: 'plus', label: t('New agent in {name}', { name: g.label }), run: () => onNewAgent({ workspaceId: g.space, cwd: firstCwd(g) }) },
+    '-',
+    colorRow(g.key, g.color, g.label),
+    '-',
+    { icon: 'x', danger: true, label: g.ids.length === 1 ? t('Close its tab') : t('Close its {n} tabs', { n: g.ids.length }), run: () => { for (const id of g.ids) onClose(id) } },
+  ]
+  // A tab's: what Chrome's tab menu has that fits here. Close other tabs and Close tabs to the right
+  // count a folded group's tabs too, in the strip's order, and show the tab the menu is for.
+  const tabItems = (id) => {
+    const a = byId[id]
+    const g = groupFor[id]
+    const all = shown.flatMap((x) => x.ids)
+    const right = all.slice(all.indexOf(id) + 1)
+    const home = !a.view && !a.remote && a.workspaceId ? groupOf(id) : null
+    return [
+      home && onNewAgent && { icon: 'plus', label: t('New agent in {name}', { name: home.label }), run: () => onNewAgent({ workspaceId: a.workspaceId, cwd: a.cwd }) },
+      onSide && id !== active && id !== side && { icon: 'split', label: t('Open beside the current tab'), run: () => onSide(id) },
+      '-',
+      g?.head ? colorRow(g.key, g.color, g.label) : colorRow(id, chosen(id), tabName(a), true),
+      '-',
+      { icon: 'x', label: t('Close'), run: () => close(id) },
+      all.length > 1 && { label: t('Close other tabs'), run: () => { for (const x of all) if (x !== id) onClose(x, id) } },
+      right.length > 0 && { label: t('Close tabs to the right'), run: () => { for (const x of right) onClose(x, id) } },
+    ]
+  }
+  const menuTab = menu?.id && order.includes(menu.id) ? menu.id : null
+  const menuGroup = !menuTab && menu?.key ? shown.find((g) => g.key === menu.key) : null
 
   return (
     <div className="ws-tabs" role="tablist" aria-label={t('Open agents')} onMouseLeave={() => { setKept(null); hideCard() }}>
@@ -210,14 +278,15 @@ export default function TabStrip({ ids, byId, active, side, focus, folded: folde
               const inMain = id === active
               const inSide = id === side
               const name = tabName(a)
+              const tint = tintOf(id)
               return (
                 <div key={id} role="tab" data-pane={id} aria-selected={inMain || inSide} tabIndex={0} draggable
-                  className={`ws-tab ${inMain ? 'main' : ''} ${inSide ? 'side' : ''} ${(inMain && focus === 'main') || (inSide && focus === 'side') ? 'focus' : ''} ${g.head ? 'grouped' : ''} ${g.head && n === g.shown.length - 1 ? 'group-end' : ''} ${drag?.id === id ? 'dragging' : ''} ${drag?.over === id && drag.id !== id ? (drag.after ? 'drop-after' : 'drop-before') : ''}`}
-                  style={{ ...groupStyle(g), ...(kept?.[id] ? { flex: `0 0 ${kept[id]}px`, minWidth: 0, maxWidth: 'none' } : null) }}
+                  className={`ws-tab ${inMain ? 'main' : ''} ${inSide ? 'side' : ''} ${(inMain && focus === 'main') || (inSide && focus === 'side') ? 'focus' : ''} ${g.head ? 'grouped' : tint ? 'tinted' : ''} ${g.head && n === g.shown.length - 1 ? 'group-end' : ''} ${drag?.id === id ? 'dragging' : ''} ${drag?.over === id && drag.id !== id ? (drag.after ? 'drop-after' : 'drop-before') : ''}`}
+                  style={{ ...paint(tint), ...(kept?.[id] ? { flex: `0 0 ${kept[id]}px`, minWidth: 0, maxWidth: 'none' } : null) }}
                   aria-description={description(a)} aria-describedby={card?.id === id ? 'ws-tab-card' : undefined}
-                  onMouseEnter={(e) => { if (!drag) hover(id, e.currentTarget) }} onMouseLeave={() => { clearTimeout(cardTimer.current); cardTimer.current = setTimeout(hideCard, 80) }}
+                  onMouseEnter={(e) => { if (!drag && !menu) hover(id, e.currentTarget) }} onMouseLeave={() => { clearTimeout(cardTimer.current); cardTimer.current = setTimeout(hideCard, 80) }}
                   onFocus={(e) => { if (e.target === e.currentTarget && e.currentTarget.matches(':focus-visible')) hover(id, e.currentTarget) }} onBlur={hideCard}
-                  onClick={() => onOpen(id)} onAuxClick={(e) => { if (e.button === 1) close(id, e) }}
+                  onClick={() => onOpen(id)} onAuxClick={(e) => { if (e.button === 1) close(id, e) }} onContextMenu={(e) => openMenu(e, { id })}
                   onDragStart={(e) => { hideCard(); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-bridge-tab', id); setDrag({ id }) }}
                   onDragOver={(e) => {
                     if (!drag) return
@@ -231,13 +300,14 @@ export default function TabStrip({ ids, byId, active, side, focus, folded: folde
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') onOpen(id)
                     if (e.ctrlKey && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); onNudge(id, e.key === 'ArrowLeft' ? -1 : 1) }
+                    if (menuKey(e)) openMenu(e, { id })
                   }}>
                   {a.view ? <Icon name={a.icon} size={12} className="muted" /> : a.chief ? <Icon name="helm" size={13} className="tab-ship" /> : a.shellTab ? <Icon name="terminal" size={12} className="muted" /> : <StatusDot status={a.status} size={7} />}
                   <span className="ws-tab-name">{name}</span>
                   {a.remote && a.device && !named && <span className="ws-tab-where">{a.device}</span>}
                   {a.chief && <StatusDot status={a.status} size={6} />}
                   <button className="ws-tab-x" aria-label={t('Close {name}', { name })} onClick={(e) => { e.stopPropagation(); close(id, e) }}><Icon name="x" size={11} /></button>
-                  {g.head && <span className="ws-tab-line" aria-hidden="true" />}
+                  {tint && <span className="ws-tab-line" aria-hidden="true" />}
                 </div>
               )
             })}
@@ -258,7 +328,7 @@ export default function TabStrip({ ids, byId, active, side, focus, folded: folde
           style={{ top: card.rect.bottom + 6, left: Math.max(8, Math.min(card.rect.left, window.innerWidth - 328)) }}>
           {cardWhere && (
             <div className="hc-crumb">
-              {groupFor[card.id]?.head && <i className="tab-card-swatch" style={groupStyle(groupFor[card.id])} />}
+              {tintOf(card.id) && <i className="tab-card-swatch" style={paint(tintOf(card.id))} />}
               {cardWhere.text}
             </div>
           )}
@@ -266,51 +336,96 @@ export default function TabStrip({ ids, byId, active, side, focus, folded: folde
           {!cardA.view && <div className="hc-meta"><span><StatusDot status={cardA.status} size={7} /> {t(SAYS[cardA.status] || SAYS.unknown)}</span>{cardA.kindLabel && <span>{cardA.kindLabel}</span>}</div>}
           {cardWhere?.path && <div className="hc-path"><Icon name="folder" size={11} /> <span>{cardWhere.path}</span></div>}
         </div>, document.body)}
-      {menuGroup && (
-        <GroupMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
-          menuGroup.folded
-            ? { icon: 'unfold-all', label: menuGroup.ids.length === 1 ? t('Show its tab') : t('Show its {n} tabs', { n: menuGroup.ids.length }), run: () => onFold(menuGroup.key) }
-            : { icon: 'fold-all', label: t('Fold its tabs away'), run: () => onFold(menuGroup.key) },
-          menuGroup.space && onNewAgent && { icon: 'plus', label: t('New agent in {name}', { name: menuGroup.label }), run: () => onNewAgent({ workspaceId: menuGroup.space, cwd: firstCwd(menuGroup) }) },
-          '-',
-          { icon: 'x', danger: true, label: menuGroup.ids.length === 1 ? t('Close its tab') : t('Close its {n} tabs', { n: menuGroup.ids.length }), run: () => { for (const id of menuGroup.ids) onClose(id) } },
-        ]} />
+      {(menuTab || menuGroup) && (
+        <TabMenu key={menuTab || menuGroup.key} x={menu.x} y={menu.y} back={menu.back} onClose={() => setMenu(null)} className={menuGroup ? 'tab-group-menu' : ''}
+          label={menuTab ? tabName(byId[menuTab]) : menuGroup.label} items={menuTab ? tabItems(menuTab) : groupItems(menuGroup)} />
       )}
       {search && (
         <TabSearch anchor={searchBtn.current} active={[active, side].filter(Boolean)} onClose={() => setSearch(false)} onOpen={onOpen} onCloseTab={(id) => close(id)}
-          rows={shown.flatMap((g) => g.ids)} byId={byId} name={tabName} groupFor={groupFor} groupStyle={groupStyle} />
+          rows={shown.flatMap((g) => g.ids)} byId={byId} name={tabName} tint={(id) => paint(tintOf(id))} />
       )}
     </div>
   )
 }
 
-// A group's right-click menu, where the pointer is (Rail's Menu, placed on the page itself: the
-// strip scrolls sideways, which would cut a menu inside it off).
-function GroupMenu({ x, y, items, onClose }) {
+// Items with no separator first, last or two in a row (one whose items around it aren't offered).
+const tidy = (items) => items.filter(Boolean).filter((it, i, a) => it !== '-' || (i > 0 && i < a.length - 1 && a[i - 1] !== '-'))
+// Into a stop of the menu: an item, or the colors' row at the color it has (else the first).
+const into = (s) => (s?.matches('.tab-menu-colors') ? s.querySelector('[aria-checked="true"]') || s.querySelector('button') : s)?.focus({ preventScroll: true })
+
+// A tab's or a group's right-click menu (Rail's Menu, placed on the page itself: the strip scrolls
+// sideways, which would cut a menu inside it off). At the pointer, or to its left or above it where
+// the window's edge would cut it off; as wide as what it says. ↑↓ go from one item to the next (the
+// colors are one), ←→ along the colors, Home and End to the first and last; Esc or Tab closes it,
+// and from the keyboard the focus goes back to what it was opened on. A color picked leaves it open,
+// to see it and try another.
+function TabMenu({ x, y, label, items, back, className, onClose }) {
   const ref = useRef(null)
+  const [at, setAt] = useState({ left: x, top: y })
   const closeRef = useRef(onClose)
   closeRef.current = onClose
+  const shut = (keyed) => { closeRef.current(); if (keyed && back?.isConnected) back.focus({ preventScroll: true }) }
+  const shutRef = useRef(shut)
+  shutRef.current = shut
+  useLayoutEffect(() => {
+    const r = ref.current.getBoundingClientRect()
+    setAt({
+      left: x + r.width > window.innerWidth - 8 ? Math.max(8, x - r.width) : x,
+      top: y + r.height > window.innerHeight - 8 ? Math.max(8, y - r.height) : y,
+    })
+  }, [x, y])
   useEffect(() => {
     const down = (e) => { if (!ref.current?.contains(e.target)) closeRef.current() }
-    const key = (e) => { if (e.key === 'Escape') closeRef.current() }
-    document.addEventListener('mousedown', down)
-    document.addEventListener('keydown', key)
-    ref.current?.querySelector('button')?.focus()
-    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key) }
+    const key = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); shutRef.current(true) } }
+    const gone = () => closeRef.current()
+    document.addEventListener('mousedown', down, true)
+    window.addEventListener('keydown', key, true)
+    window.addEventListener('resize', gone)
+    into(ref.current?.querySelector('.menu-item, .tab-menu-colors'))
+    return () => { document.removeEventListener('mousedown', down, true); window.removeEventListener('keydown', key, true); window.removeEventListener('resize', gone) }
   }, [])
+  const onKey = (e) => {
+    const stops = [...ref.current.querySelectorAll('.menu-item, .tab-menu-colors')]
+    const colors = [...ref.current.querySelectorAll('.tab-menu-color')]
+    const i = stops.findIndex((s) => s.contains(document.activeElement))
+    const j = colors.indexOf(document.activeElement)
+    const step = (list, k, by) => list[k < 0 ? (by > 0 ? 0 : list.length - 1) : (k + by + list.length) % list.length]
+    let to
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') to = step(stops, i, e.key === 'ArrowDown' ? 1 : -1)
+    else if (e.key === 'Home' || e.key === 'End') to = stops[e.key === 'Home' ? 0 : stops.length - 1]
+    else if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && j >= 0) to = step(colors, j, e.key === 'ArrowRight' ? 1 : -1)
+    else if (e.key === 'Tab') { e.preventDefault(); shut(true); return }
+    else return
+    e.preventDefault()
+    into(to)
+  }
   return createPortal(
-    <div className="menu tab-group-menu" ref={ref} role="menu" style={{ top: Math.min(y + 4, window.innerHeight - 160), left: Math.min(x, window.innerWidth - 240) }}>
-      {items.filter(Boolean).map((it, i) => (it === '-' ? <div key={i} className="menu-sep" /> : (
-        <button key={it.label} type="button" role="menuitem" className={`menu-item ${it.danger ? 'danger' : ''}`} onClick={() => { onClose(); it.run() }}>
-          <Icon name={it.icon} size={13} /> {it.label}
+    <div className={`menu tab-menu ${className}`} ref={ref} role="menu" aria-label={label} data-esc style={at} onKeyDown={onKey} onContextMenu={(e) => e.preventDefault()}>
+      {tidy(items).map((it, i) => (it === '-' ? <div key={i} className="menu-sep" role="separator" /> : it.colors ? <Colors key="colors" {...it.colors} /> : (
+        <button key={it.label} type="button" role="menuitem" className={`menu-item ${it.danger ? 'danger' : ''}`} onClick={(e) => { shut(e.detail === 0); it.run() }}>
+          {it.icon ? <Icon name={it.icon} size={13} /> : <span className="tab-menu-gap" />} {it.label}
         </button>
       )))}
     </div>, document.body)
 }
 
+// The colors to pick from, the one it has ticked; none: No color first (a tab's own color).
+function Colors({ value, name, none, pick }) {
+  return (
+    <div className="tab-menu-colors" role="group" aria-label={t('Color for {name}', { name })}>
+      {none && <button type="button" role="menuitemradio" aria-checked={!value} className="tab-menu-color tab-menu-none" aria-label={t('No color')} title={t('No color')} onClick={() => pick(null)} />}
+      {PICK.map((c) => (
+        <button key={c} type="button" role="menuitemradio" aria-checked={value === c} data-color={c} className="tab-menu-color" style={paint(c)} aria-label={t(NAMES[c])} title={t(NAMES[c])} onClick={() => pick(c)}>
+          {value === c && <Icon name="check" size={11} />}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // Search tabs: every open tab (those in a folded group too), to find by typing its name or where it
 // is. ↑↓ to pick, Enter to open, Esc to close.
-function TabSearch({ anchor, rows, byId, name, active, groupFor, groupStyle, onOpen, onCloseTab, onClose }) {
+function TabSearch({ anchor, rows, byId, name, active, tint, onOpen, onCloseTab, onClose }) {
   const [q, setQ] = useState('')
   const [at, setAt] = useState(0)
   const ref = useRef(null)
@@ -347,7 +462,7 @@ function TabSearch({ anchor, rows, byId, name, active, groupFor, groupStyle, onO
               <span className="tab-search-icon">{x.a.view ? <Icon name={x.a.icon} size={13} /> : x.a.chief ? <Icon name="helm" size={13} className="tab-ship" /> : x.a.shellTab ? <Icon name="terminal" size={13} /> : <StatusDot status={x.a.status} size={8} />}</span>
               <span className="tab-search-text">
                 <b>{x.name}</b>
-                {x.where && <small>{groupFor[x.id]?.head && <i className="tab-card-swatch" style={groupStyle(groupFor[x.id])} />}{x.where.text}</small>}
+                {x.where && <small>{tint(x.id) && <i className="tab-card-swatch" style={tint(x.id)} />}{x.where.text}</small>}
               </span>
               {active.includes(x.id) && <span className="tab-search-on">{t('On screen')}</span>}
               <button type="button" className="tab-search-x" aria-label={t('Close {name}', { name: x.name })} onClick={(e) => { e.stopPropagation(); onCloseTab(x.id) }}><Icon name="x" size={11} /></button>

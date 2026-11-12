@@ -1,18 +1,18 @@
 /* ============ The tabs above the agents (TabStrip.jsx) ============ */
 /* Tab Groups' colors, as Chrome's: deep enough for white words on them in a light look (yellow's are
    dark), light enough for dark ones in a dark look (4.5:1 each way). Your other computers' groups
-   are grey. */
-.ws-tabs, .tab-search, .tab-card {
+   are grey. A tab's own color, picked in its menu, is one of them too. */
+.ws-tabs, .tab-search, .tab-card, .tab-menu {
   --tg-on: #fff; --tg-grey: #5f6368; --tg-blue: #1967d2; --tg-red: #d93025; --tg-yellow: #f9ab00; --tg-yellow-on: #202124; --tg-green: #188038;
   --tg-pink: #c5157a; --tg-purple: #8430ce; --tg-cyan: #007b83; --tg-orange: #c2410c;
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) :is(.ws-tabs, .tab-search, .tab-card) {
+  :root:not([data-theme="light"]) :is(.ws-tabs, .tab-search, .tab-card, .tab-menu) {
     --tg-on: #202124; --tg-grey: #bdc1c6; --tg-blue: #8ab4f8; --tg-red: #f28b82; --tg-yellow: #fdd663; --tg-green: #81c995;
     --tg-pink: #ff8bcb; --tg-purple: #d7aefb; --tg-cyan: #78d9ec; --tg-orange: #fcad70;
   }
 }
-:root[data-theme="dark"] :is(.ws-tabs, .tab-search, .tab-card) {
+:root[data-theme="dark"] :is(.ws-tabs, .tab-search, .tab-card, .tab-menu) {
   --tg-on: #202124; --tg-grey: #bdc1c6; --tg-blue: #8ab4f8; --tg-red: #f28b82; --tg-yellow: #fdd663; --tg-green: #81c995;
   --tg-pink: #ff8bcb; --tg-purple: #d7aefb; --tg-cyan: #78d9ec; --tg-orange: #fcad70;
 }
@@ -79,6 +79,23 @@
 .ws-group-dot .sdot { pointer-events: none; }
 .ws-tab-line { position: absolute; left: -1px; right: -3px; bottom: 0; height: 2px; background: var(--gc); pointer-events: none; }
 .ws-tab.group-end .ws-tab-line { right: -1px; border-radius: 0 2px 2px 0; }
+/* A tab's own color (no group with a chip): the same line, under it alone. */
+.ws-tab.tinted .ws-tab-line { left: 4px; right: 4px; border-radius: 2px; }
+
+/* A tab's or a group's right-click menu: Rail's menu, on the page itself, as wide as what it says
+   (the menu's own right edge would stretch it to the window's), placed by TabMenu to fit. */
+.menu.tab-menu { position: fixed; z-index: 220; right: auto; width: max-content; max-width: calc(100vw - 16px); }
+.tab-menu .menu-item { white-space: nowrap; }
+.tab-menu-gap { flex: none; width: 13px; }
+/* Its colors, round as Chrome's are, the one it has ticked and ringed. */
+.tab-menu-colors { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 9px; }
+.tab-menu-color { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--gc); color: var(--gc-on); }
+.tab-menu-color:hover { box-shadow: 0 0 0 2px var(--pane), 0 0 0 4px var(--line-2); }
+.tab-menu-color[aria-checked="true"] { box-shadow: 0 0 0 2px var(--pane), 0 0 0 4px var(--gc); }
+.tab-menu-color:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.tab-menu-none { background: linear-gradient(135deg, transparent calc(50% - .75px), var(--ink-3) calc(50% - .75px) calc(50% + .75px), transparent calc(50% + .75px)); box-shadow: inset 0 0 0 1px var(--line-2); }
+.tab-menu-none:hover { box-shadow: inset 0 0 0 1px var(--line-2), 0 0 0 2px var(--pane), 0 0 0 4px var(--line-2); }
+.tab-menu-none[aria-checked="true"] { box-shadow: inset 0 0 0 1px var(--line-2), 0 0 0 2px var(--pane), 0 0 0 4px var(--ink-3); }
 
 /* Search tabs, at the end of the strip, with how many are out of sight; and Split. */
 .ws-tab-tools { flex: none; display: flex; align-items: center; gap: 2px; padding-bottom: 4px; }
