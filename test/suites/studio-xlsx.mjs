@@ -7,11 +7,15 @@
 // changed: every part exactly as it was. One cell changed: only that cell. A style changed: a new
 // format, derived. Reopened (here and by ExcelJS): the same but for the edit. Rows and columns added,
 // removed and moved: what points at them moves too. Sheets added, renamed, moved and deleted. A
-// new workbook. And quick on a big one.
+// new workbook. Threaded comments as Excel 365 writes them (lib/sheetfile.mjs): kept as they are
+// unless asked for, then read as threads and written back as Excel writes them (a new thread and
+// reply shaped as its own, the persons, each thread's placeholder note), moving with their rows.
+// And quick on a big one.
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { checks, ROOT } from '../lib/harness.mjs'
 import { readBook, writeBook, newBook, wellFormed } from '../../src/components/studio/xlsxbook.js'
+import { threadsXlsx, SHEET_THREADS, PEOPLE } from '../lib/sheetfile.mjs'
 
 const require = createRequire(path.join(ROOT, 'package.json'))
 const ExcelJS = require('exceljs')
@@ -404,6 +408,60 @@ try {
   out = await writeBook(orig, r0.keep, d0)
   const dvXmlOut = await xmlOf(out.bytes, 'xl/worksheets/sheet1.xml')
   ok(/<formula1>(?:"|&quot;)Yes,No,Maybe later(?:"|&quot;)<\/formula1>/.test(dvXmlOut), 'a dropdown\'s choices as Univer 1.x keeps them (a JSON list) written as Excel\'s: "Yes,No,Maybe later"', /<dataValidation [\s\S]*?<\/dataValidation>/.exec(dvXmlOut)?.[0])
+
+  // ---------- Threaded comments, as Excel 365 writes them ----------
+  const tx = await threadsXlsx()
+  const txParts = await entries(tx)
+  const off = await readBook(tx, 'threads.xlsx')
+  ok(off.lost.includes('threaded comments') && Object.keys(res(off.data, 'SHEET_NOTE_PLUGIN').sheet1 || {}).length === 3 && !Object.keys(off.threads).length, 'read without threads (Comments and @bridge off): kept in the file and said so, their placeholders shown as notes, as before', off.lost)
+  const on = await readBook(tx, 'threads.xlsx', { threads: true })
+  const ts = on.threads.sheet1 || []
+  ok(!on.lost.includes('threaded comments') && JSON.stringify(ts.map((x) => [x.r, x.c, x.author, x.text, !!x.parent, x.done])) === JSON.stringify(SHEET_THREADS.map((x) => [Number(x.ref.slice(1)) - 1, 1, PEOPLE[x.who].name, x.text, !!x.parent, !!x.done])), 'read with threads: each comment\'s cell, who wrote it (from the persons part), its words, which it answers and which are resolved', ts)
+  const notesOn = res(on.data, 'SHEET_NOTE_PLUGIN').sheet1 || {}
+  ok(Object.keys(notesOn).length === 1 && /Ask finance/.test(notesOn[1]?.[0]?.note), 'and the plain note a note still, the threads\' placeholders not', notesOn)
+  out = await writeBook(tx, on.keep, clone(on.data), { threads: { sheet1: ts } })
+  ok(!diffParts(txParts, await entries(out.bytes)).length, 'saved with nothing changed: every part exactly as it was')
+  const mine = { id: '{C0000001-0000-4000-8000-00000000000A}', r: 1, c: 2, author: 'Tester', date: '2026-11-10T09:30:00.000Z', text: 'Where is the\nyearly cost?', parent: null, done: false }
+  const reply = { id: '{C0000001-0000-4000-8000-00000000000B}', r: 1, c: 2, author: 'AI Assist', date: '2026-11-10T09:31:00.000Z', text: 'In row 7.', parent: mine.id, done: false }
+  out = await writeBook(tx, on.keep, clone(on.data), { threads: { sheet1: [...ts.map((x) => (x.id === SHEET_THREADS[0].id ? { ...x, done: true } : x)), mine, reply] } })
+  const tp = await entries(out.bytes)
+  const tc = tp['xl/threadedComments/threadedComment1.xml'].toString()
+  const shapeOf = (x) => String(x || '').replace(/="[^"]*"/g, '=""').replace(/>[^<]+</g, '><')
+  const tcOf = (xml, id) => new RegExp(`<threadedComment [^>]*id="${id.replace(/[{}]/g, '\\$&')}"[\\s\\S]*?</threadedComment>`).exec(xml)?.[0] || ''
+  const theirs = txParts['xl/threadedComments/threadedComment1.xml'].toString()
+  ok(shapeOf(tcOf(tc, mine.id)) === shapeOf(tcOf(theirs, SHEET_THREADS[0].id)) && shapeOf(tcOf(tc, reply.id)) === shapeOf(tcOf(theirs, SHEET_THREADS[1].id)), 'a new thread and its reply, each shaped as Excel writes one (cell, time, person, id, the one it answers)', [tcOf(tc, mine.id), tcOf(tc, reply.id)])
+  ok(/ref="C2" dT="2026-11-10T09:30:00\.00" personId="\{[0-9A-F-]{36}\}"/.test(tcOf(tc, mine.id)) && /<text>Where is the\nyearly cost\?<\/text>/.test(tcOf(tc, mine.id)), 'on its cell, at its time in Excel\'s form, its lines kept', tcOf(tc, mine.id))
+  ok(SHEET_THREADS.slice(1).every((x) => tc.includes(tcOf(theirs, x.id))) && /id="\{A0000001-0000-4000-8000-000000000001\}" done="1"/.test(tc), 'every comment it didn\'t change written as Excel had it, and the one resolved marked done', tc.slice(0, 600))
+  const ppl = tp['xl/persons/person.xml'].toString()
+  ok(/<person displayName="Tester" id="\{[0-9A-F-]{36}\}" userId="Tester" providerId="None"\/>/.test(ppl) && /<person displayName="AI Assist" id="\{[0-9A-F-]{36}\}" userId="AI Assist" providerId="None"\/>/.test(ppl) && ppl.includes('displayName="Avery Stone"'), 'you and AI Assist added to the persons, as Excel adds a person', ppl)
+  const cm = tp['xl/comments1.xml'].toString()
+  const holder = /<comment ref="C2" authorId="(\d+)" shapeId="0" xr:uid="\{C0000001-0000-4000-8000-00000000000A\}"><text><t>([\s\S]*?)<\/t><\/text><\/comment>/.exec(cm)
+  const authorsOf = (x) => [...x.matchAll(/<author>([^<]*)<\/author>/g)].map((m) => m[1])
+  ok(!!holder && authorsOf(cm)[Number(holder[1])] === `tc=${mine.id}` && holder[2].startsWith('[Threaded comment]\n\nYour version of Excel allows you to read this threaded comment;') && /Comment:\n {4}Where is the\n {4}yearly cost\?\nReply:\n {4}In row 7\.$/.test(holder[2]), 'its placeholder for older Excels in the comments part: written by tc={its id}, in Excel\'s words, the comment and its reply', holder?.[0])
+  ok(cm.includes(txParts['xl/comments1.xml'].toString().match(/<comment ref="A2"[\s\S]*?<\/comment>/)[0]) && cm.includes(txParts['xl/comments1.xml'].toString().match(/<comment ref="B6"[\s\S]*?<\/comment>/)[0]), 'the plain note and the placeholders it didn\'t change as they were')
+  ok((tp['xl/drawings/vmlDrawing1.vml'].toString().match(/ObjectType="Note"/g) || []).length === 5 && /<x:Row>1<\/x:Row><x:Column>2<\/x:Column>/.test(tp['xl/drawings/vmlDrawing1.vml'].toString()), 'a box in the VML for each, the new one\'s on its cell')
+  ok(JSON.stringify(diffParts(txParts, tp)) === JSON.stringify(['xl/comments1.xml', 'xl/drawings/vmlDrawing1.vml', 'xl/persons/person.xml', 'xl/threadedComments/threadedComment1.xml']), 'and nothing else changed', diffParts(txParts, tp))
+  const back = await readBook(out.bytes, 'threads.xlsx', { threads: true })
+  ok(JSON.stringify(back.threads.sheet1.map((x) => [x.id, x.r, x.c, x.author, x.text, x.parent, x.done])) === JSON.stringify([...ts.map((x) => (x.id === SHEET_THREADS[0].id ? { ...x, done: true } : x)), mine, reply].map((x) => [x.id, x.r, x.c, x.author, x.text, x.parent, x.done])), 'read back: the same threads, replies and resolved one', back.threads.sheet1)
+  const ejt = new ExcelJS.Workbook()
+  let lt = true
+  try { await ejt.xlsx.load(Buffer.from(out.bytes)) } catch (e) { lt = e.message }
+  ok(lt === true && ejt.getWorksheet('Budget').getCell('B7').value?.formula === 'SUM(B2:B6)', 'ExcelJS opens it', lt)
+  // A file with no threads: given its parts, as Excel adds them.
+  const plain = await readBook(orig, 'budget.xlsx', { threads: true })
+  out = await writeBook(orig, plain.keep, clone(plain.data), { threads: { [sheetId(plain.data, 'Budget')]: [{ ...mine, author: 'Tester' }] } })
+  const pp = await entries(out.bytes)
+  const tcPath = Object.keys(pp).find((k) => /^xl\/threadedComments\/threadedComment\d+\.xml$/.test(k))
+  ok(!!tcPath && !!pp['xl/persons/person.xml'] && /Type="http:\/\/schemas\.microsoft\.com\/office\/2017\/10\/relationships\/person" Target="persons\/person\.xml"/.test(pp['xl/_rels/workbook.xml.rels'].toString()) && /Type="http:\/\/schemas\.microsoft\.com\/office\/2017\/10\/relationships\/threadedComment" Target="\.\.\/threadedComments\/threadedComment\d+\.xml"/.test(pp['xl/worksheets/_rels/sheet1.xml.rels'].toString()) && /PartName="\/xl\/persons\/person\.xml" ContentType="application\/vnd\.ms-excel\.person\+xml"/.test(pp['[Content_Types].xml'].toString()) && new RegExp(`PartName="/${tcPath}" ContentType="application/vnd\\.ms-excel\\.threadedcomments\\+xml"`).test(pp['[Content_Types].xml'].toString()), 'a file without threads given the parts as Excel adds them: the thread\'s, the persons\', their relationships and content types', tcPath)
+  ok(/mc:Ignorable="[^"]*\bxr\b/.test(Object.entries(pp).find(([k]) => /^xl\/comments\d*\.xml$/.test(k))?.[1].toString() || ''), 'and xr:uid\'s namespace on its comments part, as Excel marks it')
+  // Rows added and removed: each comment moves with its cell; one on a row removed goes with it.
+  const tops = { sheet: 'sheet1' }
+  const shifted = clone(on.data)
+  setRes(shifted, 'SHEET_NOTE_PLUGIN', { sheet1: { 3: { 0: { ...notesOn[1][0], row: 3 } } } }) // the note, moved by Univer
+  out = await writeBook(tx, on.keep, shifted, { ops: [{ ...tops, op: 'insert-rows', start: 1, count: 2 }, { ...tops, op: 'remove-rows', start: 7, count: 1 }] })
+  const mp = await entries(out.bytes)
+  const refs = (x) => (x.match(/<(?:threadedComment|comment) ref="([A-Z]+\d+)"/g) || []).map((m) => /"([^"]+)"/.exec(m)[1])
+  ok(JSON.stringify(refs(mp['xl/threadedComments/threadedComment1.xml'].toString())) === '["B4","B4","B5"]' && JSON.stringify(refs(mp['xl/comments1.xml'].toString())) === '["A4","B4","B5"]', 'rows added above: the threads and their placeholders move with their cells; Travel\'s row removed: its thread goes with it', { threads: refs(mp['xl/threadedComments/threadedComment1.xml'].toString()), comments: refs(mp['xl/comments1.xml'].toString()) })
 
   // ---------- A big one ----------
   const big = new ExcelJS.Workbook()

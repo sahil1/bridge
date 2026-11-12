@@ -45,11 +45,11 @@ const sameAnchors = (a, b) => a.size === b.size && [...a].every(([id, x]) => { c
 // @bridge, as a word of its own; what's asked is the rest of the comment.
 const MENTION = /(^|[^\w@.])@bridge\b/i
 export const mentions = (text) => MENTION.test(String(text || ''))
-const requestOf = (text) => String(text || '').replace(/(^|[^\w@.])@bridge\b[,:]?/gi, '$1').replace(/\s{2,}/g, ' ').trim()
+export const requestOf = (text) => String(text || '').replace(/(^|[^\w@.])@bridge\b[,:]?/gi, '$1').replace(/\s{2,}/g, ' ').trim()
 const isAi = (c) => c.author === AI_AUTHOR
 // The comment in a thread AI Assist hasn't answered yet: the last one mentioning @bridge with no
 // reply from AI Assist after it.
-function askOf(items) {
+export function askOf(items) {
   let ask = null
   for (const c of items) { if (isAi(c)) ask = null; else if (mentions(c.text)) ask = c }
   return ask
@@ -393,12 +393,20 @@ function Assist({ th, threads }) {
 }
 
 // AI Assist's change on a thread's words, to keep or discard: what goes, struck out, and what comes.
+// On a sheet, the cells it changes (outlined there); on a slide or a board, what it does, in words.
 function Suggestion({ th, threads }) {
   const sg = threads.suggestion(th.id)
   if (!sg) return null
   return (
     <div className="sd-thread-sug" onClick={(e) => e.stopPropagation()}>
-      <div className="sd-thread-sug-text" aria-label={t('The suggested change')}>{sg.del && <del>{sg.del}</del>}{sg.del && sg.ins && ' '}{sg.ins && <ins>{sg.ins}</ins>}</div>
+      {sg.cells ? (
+        <div className="sd-thread-sug-text" aria-label={t('The suggested change')}>
+          <small className="muted">{sg.n === 1 ? t('1 cell, outlined on the sheet') : sg.n ? t('{n} cells, outlined on the sheet', { n: sg.n }) : ''}{sg.chart ? `${sg.n ? ' · ' : ''}${t('A chart: {title}', { title: sg.chart })}` : ''}</small>
+          {sg.cells.length > 0 && <ul className="sd-thread-cells">{sg.cells.map(([ref, v]) => <li key={ref}><code>{ref}</code> <ins>{v}</ins></li>)}</ul>}
+        </div>
+      ) : sg.note ? (
+        <div className="sd-thread-sug-text" aria-label={t('The suggested change')}>{sg.del && <del>{sg.del}</del>}{sg.del && ' '}<ins>{sg.note}</ins></div>
+      ) : <div className="sd-thread-sug-text" aria-label={t('The suggested change')}>{sg.del && <del>{sg.del}</del>}{sg.del && sg.ins && ' '}{sg.ins && <ins>{sg.ins}</ins>}</div>}
       <div className="sd-thread-ai-acts">
         <button type="button" className="btn small primary" onClick={() => threads.settle(th.id, true)}><Icon name="check" size={12} /> {t('Keep')}</button>
         <button type="button" className="btn small" onClick={() => threads.settle(th.id, false)}>{t('Discard')}</button>
@@ -407,15 +415,15 @@ function Suggestion({ th, threads }) {
   )
 }
 
-function Thread({ th, threads, on, readOnly }) {
+function Thread({ th, threads, on, readOnly, say }) {
   const [confirm, setConfirm] = useState(false)
   const words = threads.wordsOf(th.id)
   const picked = threads.picked === th.id
   return (
     <li className={`sd-thread${picked ? ' on' : ''}${th.done ? ' done' : ''}`} onClick={() => !picked && threads.pick(th.id)}>
       <div className="sd-thread-top">
-        <button type="button" className="sd-thread-quote" onClick={(e) => { e.stopPropagation(); threads.pick(th.id) }} title={t('Show the words it\'s on')}>
-          {words ? <span>{words}</span> : <span className="muted">{t('The words it was on aren\'t in the document any more.')}</span>}
+        <button type="button" className="sd-thread-quote" onClick={(e) => { e.stopPropagation(); threads.pick(th.id) }} title={say.show()}>
+          {words ? <span>{words}</span> : <span className="muted">{say.gone()}</span>}
         </button>
         {on && !readOnly && (<>
           <button type="button" className="win-btn" onClick={(e) => { e.stopPropagation(); threads.resolve(th.id, !th.done) }} aria-label={th.done ? t('Open it again') : t('Resolve')} title={th.done ? t('Open it again') : t('Resolve: done with, kept in the file')}><Icon name={th.done ? 'undo' : 'check'} size={13} /></button>
@@ -444,18 +452,39 @@ function Thread({ th, threads, on, readOnly }) {
   )
 }
 
+// What the pane says for each kind of file: what a comment is on, and where it's kept.
+export const SAY = {
+  doc: {
+    show: () => t('Show the words it\'s on'), gone: () => t('The words it was on aren\'t in the document any more.'), add: () => t('Comment on the words picked'),
+    none: () => t('No comments yet. Pick some words, then Comment ({keys}).', { keys: keys('mod', 'alt', 'm') }), foot: () => t('Kept in the Word file itself, so Word shows them too.'),
+  },
+  sheet: {
+    show: () => t('Pick the cells it\'s on'), gone: () => t('The cell it was on isn\'t on the sheet any more.'), add: () => t('Comment on the cells picked'),
+    none: () => t('No comments yet. Pick a cell, then Comment ({keys}).', { keys: keys('mod', 'alt', 'm') }), foot: () => t('Kept in the Excel file itself, so Excel shows them too.'),
+  },
+  deck: {
+    show: () => t('Show the slide it\'s on'), gone: () => t('The slide it was on isn\'t in the deck any more.'), add: () => t('Comment on the slide, or the shape picked'),
+    none: () => t('No comments yet. Pick a slide, or a shape on it, then Comment.'), foot: () => t('Kept in the PowerPoint file itself, so PowerPoint shows them too.'),
+  },
+  board: {
+    show: () => t('Show the shapes it\'s on'), gone: () => t('The shapes it was on aren\'t on the board any more.'), add: () => t('Comment on the shapes picked, or the board'),
+    none: () => t('No comments yet. Pick shapes, or nothing for the whole board, then Comment.'), foot: () => t('Kept in the board\'s own file.'),
+  },
+}
+
 // The comments beside the page: a new one's box (for the words picked), the open threads in the
-// order their words come, and the resolved ones under them.
-export function Threads({ threads, readOnly, onComment, onClose }) {
+// order their words come, and the resolved ones under them. say: SAY's words for the kind of file;
+// className: the pane's own look, where it isn't a document's.
+export function Threads({ threads, readOnly, onComment, onClose, say = SAY.doc, className = 'sd-comments-pane' }) {
   const open = threads.threads.filter((x) => !x.done)
   const done = threads.threads.filter((x) => x.done)
   const [showDone, setShowDone] = useState(false)
   const on = threads.on
   const sugs = threads.suggestions()
   return (
-    <aside className="sd-comments-pane sd-threads" aria-label={t('Comments')}>
+    <aside className={`${className} sd-threads`} aria-label={t('Comments')}>
       <div className="sd-pane-head"><b>{t('Comments')}</b><span className="muted small">{open.length}</span><span className="sd-grow" />
-        {on && !readOnly && <button type="button" className="btn small sd-thread-add" onMouseDown={(e) => e.preventDefault()} onClick={onComment} title={`${t('Comment on the words picked')} (${keys('mod', 'alt', 'm')})`}><Icon name="plus" size={12} /> {t('Comment')}</button>}
+        {on && !readOnly && <button type="button" className="btn small sd-thread-add" onMouseDown={(e) => e.preventDefault()} onClick={onComment} title={`${say.add()} (${keys('mod', 'alt', 'm')})`}><Icon name="plus" size={12} /> {t('Comment')}</button>}
         <button type="button" className="win-btn" onClick={onClose} aria-label={t('Close the comments')} title={t('Close the comments')}><Icon name="x" size={13} /></button>
       </div>
       {threads.said && <p className="sd-pane-none small sd-thread-said" role="status">{threads.said}</p>}
@@ -471,15 +500,15 @@ export function Threads({ threads, readOnly, onComment, onClose }) {
           <Box label={t('Comment')} placeholder={t('Comment, or @bridge to ask AI Assist…')} cta={t('Comment')} autoFocus send={(s) => !!threads.post(s)} onCancel={threads.cancel} />
         </div>
       )}
-      {!threads.threads.length && !threads.draft && !threads.said && <p className="muted small sd-pane-none">{on && !readOnly ? t('No comments yet. Pick some words, then Comment ({keys}).', { keys: keys('mod', 'alt', 'm') }) : t('No comments.')}</p>}
-      <ol className="sd-thread-list">{open.map((th) => <Thread key={th.id} th={th} threads={threads} on={on} readOnly={readOnly} />)}</ol>
+      {!threads.threads.length && !threads.draft && !threads.said && <p className="muted small sd-pane-none">{on && !readOnly ? say.none() : t('No comments.')}</p>}
+      <ol className="sd-thread-list">{open.map((th) => <Thread key={th.id} th={th} threads={threads} on={on} readOnly={readOnly} say={say} />)}</ol>
       {done.length > 0 && (
         <div className="sd-thread-done">
           <button type="button" className="link-btn small" onClick={() => setShowDone((x) => !x)} aria-expanded={showDone}><Icon name="check" size={12} /> {done.length === 1 ? t('1 resolved') : t('{n} resolved', { n: done.length })}</button>
-          {showDone && <ol className="sd-thread-list">{done.map((th) => <Thread key={th.id} th={th} threads={threads} on={on} readOnly={readOnly} />)}</ol>}
+          {showDone && <ol className="sd-thread-list">{done.map((th) => <Thread key={th.id} th={th} threads={threads} on={on} readOnly={readOnly} say={say} />)}</ol>}
         </div>
       )}
-      <p className="muted small sd-pane-none sd-thread-foot">{t('Kept in the Word file itself, so Word shows them too.')}</p>
+      <p className="muted small sd-pane-none sd-thread-foot">{say.foot()}</p>
     </aside>
   )
 }

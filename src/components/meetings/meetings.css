@@ -341,6 +341,11 @@ html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box
 .fc-chip.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); background: var(--accent-soft); }
 .fc-chip.fc-ai > .icon { color: var(--ai); }
 .fc-chip.fc-ai.on { color: var(--ai); border-color: color-mix(in srgb, var(--ai) 35%, transparent); background: var(--ai-soft); }
+/* The live board, in a line: what's on it, opening the board. */
+.fc-board { display: flex; align-items: center; gap: 6px; min-width: 0; height: 22px; padding: 0; border: 0; background: none; color: var(--ink-2); font: 500 12px var(--font); cursor: pointer; }
+.fc-board > .icon { flex: none; color: var(--ai); }
+.fc-board > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fc-board:hover { color: var(--ink); }
 
 .fc-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .fc-acts.fc-end { justify-content: flex-end; }
@@ -648,6 +653,27 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 /* AI Assist's switch keeps its room on a phone: what it's doing wraps under it. */
 .mt-assist > .mt-phead { display: flex; flex-wrap: wrap; }
 .mt-assist-on { flex: none; }
+
+/* AI Assist's live board (board.jsx): its four lists side by side where there's room, one under the
+   other on a phone; a suggestion dashed in AI Assist's colour with the wand, as on the board. */
+.mt-board-where { margin: -4px 0 0; }
+.mt-board-parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; align-items: start; }
+.mt-bpart { display: grid; gap: 6px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane-2); min-width: 0; }
+.mt-bpart h5 { margin: 0 0 2px; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--ink-2); }
+.mt-bpart > p { margin: 0; }
+.mt-bperson { display: grid; gap: 6px; }
+.mt-bperson > b { margin-top: 2px; color: var(--ink-2); }
+.mt-bitem { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: start; gap: 4px 8px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--pane); }
+.mt-bitem.sug { border: 1.5px dashed color-mix(in srgb, var(--ai) 70%, var(--line)); background: color-mix(in srgb, var(--ai) 5%, var(--pane)); }
+.mt-bitem-mark { margin-top: 3px; color: var(--ai); }
+.mt-bitem-mark.kept { color: var(--ink-3); }
+.mt-bitem-text { font-size: 13px; line-height: 1.45; min-width: 0; overflow-wrap: anywhere; }
+.mt-bitem .mt-t { padding-top: 2px; }
+.mt-bitem-kept { padding-top: 2px; }
+.mt-board-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.mt-board-link { margin-top: 8px; }
+.mt-board-link > .small { flex: 1 1 160px; min-width: 0; }
+.app.narrow .mt-bitem .ghost-btn { height: 40px; min-width: 40px; }
 
 /* Under the summary's action items: sending them to the Chief of Staff, and what it does with them. */
 .mt-chief { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0 0 4px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane-2); }
