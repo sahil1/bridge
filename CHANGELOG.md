@@ -4,7 +4,7 @@ Each version's section here becomes its GitHub release notes (`npm run release`)
 
 ## 3.15.1
 
-Better than Claude's new Whiteboards and Sheets: a sheet's AI Assist that answers in seconds, a whiteboard's AI Assist that suggests rather than changes and turns a board into a document or a deck, comments in Word files with @bridge, and Bridge AI as an MCP server for Claude Code, Claude Desktop, Cursor and Codex, with a key for its API. And fixes: the whole app in your language, and the inbox once Mail has quit on macOS 15.
+A sheet's AI Assist that answers in seconds, a whiteboard's AI Assist that suggests rather than changes and turns a board into a document or a deck, comments in Word files with @bridge, and Bridge AI as an MCP server for Claude Code, Claude Desktop, Cursor and Codex, with a key for its API. Fixes: the whole app in your language, and the inbox once Mail has quit on macOS 15.
 
 ### What's new
 
@@ -44,7 +44,7 @@ Better than Claude's new Whiteboards and Sheets: a sheet's AI Assist that answer
 
 ## 3.15.0
 
-Better than Claude's new Whiteboards and Sheets: a sheet's AI Assist that answers in seconds, a whiteboard's AI Assist that suggests rather than changes, asks about what you pick, groups, plans and lists action items, and turns a board into a document or a deck, with versions to go back to; comments in Word files with @bridge; and Bridge AI as an MCP server for Claude Code, Claude Desktop, Cursor and Codex, with a key for its API.
+A sheet's AI Assist that answers in seconds, a whiteboard's AI Assist that suggests rather than changes, asks about what you pick, groups, plans and lists action items, and turns a board into a document or a deck, with versions to go back to; comments in Word files with @bridge; and Bridge AI as an MCP server for Claude Code, Claude Desktop, Cursor and Codex, with a key for its API.
 
 Not released on its own (its builds' smoke test didn't yet send the API's new key): all of it came to everyone in 3.15.1.
 
