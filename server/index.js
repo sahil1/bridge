@@ -1898,7 +1898,7 @@ app.get('/api/calls', wrap(() => {
     capturing: calls.capturing(),
     ...calls.now(), detect: cfg.meetings?.detect !== false, float: cfg.meetings?.floatCard || 'meetings', floatHover: cfg.meetings?.floatHover !== false, floatHide: ['always', 'never'].includes(cfg.meetings?.floatHide) ? cfg.meetings.floatHide : 'sharing',
     prompt: rec ? null : prompt,
-    recording: rec && { id: rec.id, title: rec.title, status: rec.status, startedAt: rec.startedAt, seconds: Math.round(meetings.elapsed(rec.id) || 0), talking: meetings.talking(rec.id), callApps: rec.callApps || [], callEnded: rec.callEnded || null, callEndedApp: rec.callEndedApp || null, endWhy: rec.endWhy || (rec.callEnded ? 'call' : null), stopsAt: rec.stopsAt || null, callQuiet: meetings.callQuiet(rec.id) },
+    recording: rec && { id: rec.id, title: rec.title, status: rec.status, startedAt: rec.startedAt, seconds: Math.round(meetings.elapsed(rec.id) || 0), talking: meetings.talking(rec.id), callApps: rec.callApps || [], callEnded: rec.callEnded || null, callEndedApp: rec.callEndedApp || null, endWhy: rec.endWhy || (rec.callEnded ? 'call' : null), stopsAt: rec.stopsAt || null, callQuiet: meetings.callQuiet(rec.id), callAccess: meetings.callAccess(rec.id) },
   }
 }))
 app.post('/api/calls/dismiss', wrap(() => { prompt = null; return { ok: true } }))

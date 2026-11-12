@@ -5,7 +5,7 @@ import { MEETINGS_CHANNEL, clock, useCallEvent, QuickNote, endedWords } from './
 import { KIND, setAssist, markAssist } from './assist.jsx'
 import { boardWords } from './board.jsx'
 import { PrepGlance } from './prep.jsx'
-import { useScreenAccess, useAllowCall, allowSteps } from './allowcall.jsx'
+import { useScreenAccess, useAllowCall, allowSteps, noteOpened } from './allowcall.jsx'
 import { joined } from '../Agenda.jsx'
 import { t, locale, tn } from '../../i18n/index.js'
 import './meetings.css'
@@ -51,11 +51,13 @@ function talkShare(lines) {
 }
 // A call that's silent while it records: the list to turn Bridge AI on in (the second on System
 // Settings' page: Screen Recording, above it, doesn't cover the sound), then Restart Bridge AI, and
-// Reset and ask again if it's still quiet after (allowcall.jsx).
-function QuietBanner() {
+// Reset and ask again if it's still quiet after (allowcall.jsx). access: what macOS says (the
+// server's); when it lets Bridge AI hear the call, the silence is the call's own, and that's said.
+function QuietBanner({ access }) {
   const { data } = useScreenAccess()
-  const a = useAllowCall('sound', { recording: true, started: data?.started })
+  const a = useAllowCall('sound', { recording: true, started: data?.started, access })
   const s = allowSteps('sound', a)
+  if (access === 'allowed') return <div className="fc-banner fc-quiet" role="status"><p><b>{t('No sound from the call.')}</b> {t('macOS lets Bridge AI hear it, so nothing has played yet. If people are talking, check the call\'s sound plays on this Mac.')}</p></div>
   return (
     <div className="fc-banner fc-quiet" role="status">
       <p><b>{t('No sound from the call.')}</b> {t('If people are talking, turn on Bridge AI in System Audio Recording Only, the second list under System Settings › Privacy & Security › Screen & System Audio Recording. Screen Recording, above it, doesn\'t cover the sound.')}{s.say}</p>
@@ -245,7 +247,7 @@ export default function FloatCard() {
   const out = () => { clearTimeout(leave.current); if (onHover && !drag.current?.moved && !edgeNow.current) leave.current = setTimeout(() => { if (!writing()) setHover(false) }, 500) }
   // macOS lets Bridge AI hear a call only once it's allowed (System Audio Recording): until then a
   // call's sound is silence. Opens the settings page to allow it.
-  const allowCall = () => api('/fix/settings', { method: 'POST', body: { pane: 'audio' } }).catch((e) => setErr(e.message))
+  const allowCall = () => api('/fix/settings', { method: 'POST', body: { pane: 'audio' } }).then(() => noteOpened('sound'), (e) => setErr(e.message))
 
   const act = async (fn) => { setBusy(true); setErr(null); try { await fn() } catch (e) { setErr(e.message) } finally { setBusy(false); refresh() } }
   // Pause, Resume, Stop and New section go to the main window when it's the one recording (it has the mic);
@@ -282,7 +284,7 @@ export default function FloatCard() {
           <span className={`fc-dot${paused ? ' paused' : ''}`}><span className="rec-dot" aria-hidden="true" /></span>
           <b className="fc-time">{clock(secs)}</b>
           <span className="fc-title" title={r.title}>{r.title}</span>
-          {r.callQuiet && !paused && <button type="button" className="fc-x fc-warn" onClick={allowCall} aria-label={t('No sound from the call')} title={t('No sound from the call. If people are talking, turn on Bridge AI in System Audio Recording Only, the second list on that page of System Settings: click to open it')}><Icon name="alert" size={13} /></button>}
+          {r.callQuiet && !paused && <button type="button" className="fc-x fc-warn" onClick={r.callAccess === 'allowed' ? () => setHover(true) : allowCall} aria-label={t('No sound from the call')} title={r.callAccess === 'allowed' ? t('No sound from the call') : t('No sound from the call. If people are talking, turn on Bridge AI in System Audio Recording Only, the second list on that page of System Settings: click to open it')}><Icon name="alert" size={13} /></button>}
           {!r.callEnded && (paused
             ? <button type="button" className="fc-x fc-play" onClick={() => op('resume')} aria-label={t('Resume')} title={t('Resume recording')}><Icon name="play" size={13} /></button>
             : <button type="button" className="fc-x" onClick={() => op('pause')} aria-label={t('Pause')} title={t('Pause recording')}><Icon name="pause" size={13} /></button>)}
@@ -306,7 +308,7 @@ export default function FloatCard() {
                 <button type="button" className="btn small" disabled={busy} onClick={() => act(() => api(`/meetings/${r.id}/keep`, { method: 'POST' }))}>{t('Keep recording')}</button>
               </div>
             )}
-            {r.callQuiet && !paused && <QuietBanner />}
+            {r.callQuiet && !paused && <QuietBanner access={r.callAccess} />}
             <div className="fc-live">
               {info && <p className="fc-info" title={info}>{info}</p>}
               <div className="fc-said" ref={saidBox}>

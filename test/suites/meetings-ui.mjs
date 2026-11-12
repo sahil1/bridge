@@ -829,7 +829,7 @@ process.exit(1)`)
   // (a shadow cut off at the window's edge made a hard dark line), only a hairline ring and a
   // shadow that fits the 12px around it. A recording whose call has been silent (macOS gives
   // silence until Bridge AI may hear it): a warning on the bar, and what to do when it opens.
-  const recCalls = { watching: true, calls: [], detect: true, float: 'meetings', floatHover: true, prompt: null, recording: { id: A.id, title: 'Quarterly plan', status: 'recording', startedAt: new Date(Date.now() - 60000).toISOString(), seconds: 60, callApps: [], callEnded: null, callEndedApp: null, stopsAt: null, callQuiet: true } }
+  const recCalls = { watching: true, calls: [], detect: true, float: 'meetings', floatHover: true, prompt: null, recording: { id: A.id, title: 'Quarterly plan', status: 'recording', startedAt: new Date(Date.now() - 60000).toISOString(), seconds: 60, callApps: [], callEnded: null, callEndedApp: null, stopsAt: null, callQuiet: true, callAccess: 'denied' } }
   const fl = await page(b, kit.url, { mode: 'light', theme: 'sky', before: async (c) => {
     await noServiceWorker(c)
     await c.route(/\/api\/calls(\?|$)/, (r) => r.fulfill({ json: recCalls }))
@@ -854,14 +854,22 @@ process.exit(1)`)
   ok(!!(await until(async () => (await card.evaluate(() => document.documentElement.getAttribute('data-theme'))) === 'dark' && (await bg()) < 200, 5000)), 'switched to dark in the main window: the open card follows', { theme: await card.evaluate(() => document.documentElement.getAttribute('data-theme')), bg: await bg() })
   await sleep(400) // its buttons' colours fade over
   await shot(card, `${tag}float-quiet-dark`)
-  // On there and still quiet: macOS applies it once Bridge AI restarts, which stops the recording,
-  // so it says so first. Restarted and still quiet: Reset, for the call's sound alone.
+  // On there and still quiet: the call's sound comes in once macOS lets it, else Restart Bridge AI
+  // (quitting leaves the part that records running), which stops the recording, so it says so
+  // first. Restarted and still quiet: Reset, for the call's sound alone.
   const qt = () => quiet.innerText().catch(() => '')
   // (macOS's lists: elsewhere a call's sound needs no allowing.)
   if (!IS_MAC) skip('once it\'s open there: already on there? macOS applies it once Bridge AI restarts, with Restart Bridge AI', 'System Audio Recording is macOS\'s')
   else {
   await quiet.locator('button', { hasText: 'Open it' }).click()
-  ok(!!(await until(async () => /Already on there\? macOS applies it once Bridge AI restarts\./.test(await qt()) && await quiet.locator('button', { hasText: 'Restart Bridge AI' }).count() === 1, 5000)), 'once it\'s open there: already on there? macOS applies it once Bridge AI restarts, with Restart Bridge AI', await qt())
+  const onThere = async () => /Already on there\? The call's sound comes in as soon as macOS lets it\. Still quiet\? Restart Bridge AI here: quitting leaves the part that records running\./.test(await qt()) && await quiet.locator('button', { hasText: 'Restart Bridge AI' }).count() === 1
+  ok(!!(await until(onThere, 5000)), 'once it\'s open there: already on there? it comes in once macOS lets it, else Restart Bridge AI, as quitting leaves the part that records running', await qt())
+  // Quit and opened again (macOS's own Quit & Reopen), which leaves the server as it was: still
+  // that step, not back to Open it.
+  await card.reload()
+  await card.waitForSelector('.float-card', { timeout: 10000 }).catch(() => {})
+  await card.hover('.float-card .fc-head')
+  ok(!!(await until(onThere, 8000)) && !(await quiet.locator('button', { hasText: 'Open it' }).count()), 'the card opened again with the server not restarted: still Restart Bridge AI, not Open it again', await qt())
   await quiet.locator('button', { hasText: 'Restart Bridge AI' }).click()
   ok(!!(await until(async () => /Restarting stops this recording/.test(await qt()) && await quiet.locator('button', { hasText: 'Restart now' }).count() === 1, 4000)) && !(await card.evaluate(() => window.__restarts)), 'a meeting records: it says a restart stops it, before restarting', await qt())
   await shot(card, `${tag}float-quiet-restart`)
@@ -877,8 +885,15 @@ process.exit(1)`)
     await quiet.locator('button', { hasText: 'Reset and ask again' }).click()
     const tcc = () => { try { return fs.readFileSync(path.join(kit.bin, 'tcc.log'), 'utf8').trim() } catch { return '' } }
     // (Kept open: the card closes once the pointer has left it, as on a busy machine it can.)
-    ok(!!(await until(async () => { await card.hover('.float-card .fc-head').catch(() => {}); return /macOS asks again the next time a call is recorded/.test(await qt()) && tcc() === 'reset AudioCapture dev.bridge-ai.test' }, 8000)), "Reset forgets macOS's answer for the call's sound only (not Screen Recording)", { text: await qt(), tcc: tcc() })
+    ok(!!(await until(async () => { await card.hover('.float-card .fc-head').catch(() => {}); return /macOS asks again in a moment: answer its window, and the call's sound comes in\./.test(await qt()) && tcc() === 'reset AudioCapture dev.bridge-ai.test' }, 8000)), "Reset forgets macOS's answer for the call's sound only (not Screen Recording), and macOS asks again while it records", { text: await qt(), tcc: tcc() })
   }
+  // macOS lets Bridge AI hear the call, and it's silent: that's said, with nothing to turn on.
+  recCalls.recording.callAccess = 'allowed'
+  await card.reload()
+  await card.waitForSelector('.float-card', { timeout: 10000 }).catch(() => {})
+  await card.hover('.float-card .fc-head')
+  ok(!!(await until(async () => /macOS lets Bridge AI hear it, so nothing has played yet\. If people are talking, check the call's sound plays on this Mac\./.test(await qt()) && !(await quiet.locator('button').count()), 5000)) && (await warn.getAttribute('title')) === 'No sound from the call', "macOS lets Bridge AI hear it: the silence is the call's own, said, with nothing to turn on", await qt())
+  recCalls.recording.callAccess = 'denied'
   // Open, with AI Assist's suggestion under the bar, on a short screen: the card asks for no more
   // than the screen's height, and what's under the bar scrolls, down to its last button.
   await api(`/meetings/${A.id}/assist`, { on: true })
