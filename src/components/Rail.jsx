@@ -97,10 +97,12 @@ export function Menu({ items, onClose, align = 'right' }) {
   )
 }
 
-function InlineRename({ value, onDone }) {
+// A name edited where it shows: Enter keeps it (null when it's empty or the same), Esc or a click
+// elsewhere puts it back. The tabs above the agents (TabStrip.jsx) rename a tab with it too.
+export function InlineRename({ value, onDone, className = 'rail-rename' }) {
   const [v, setV] = useState(value)
   return (
-    <input className="rail-rename" autoFocus value={v} onChange={(e) => setV(e.target.value)} onFocus={(e) => e.target.select()}
+    <input className={className} autoFocus value={v} onChange={(e) => setV(e.target.value)} onFocus={(e) => e.target.select()}
       onKeyDown={(e) => { if (e.key === 'Enter') onDone(v.trim() && v.trim() !== value ? v.trim() : null); if (e.key === 'Escape') onDone(null) }}
       onBlur={() => onDone(null)} aria-label={t('New name')} />
   )

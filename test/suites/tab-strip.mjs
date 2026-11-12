@@ -20,9 +20,22 @@
 // folds it, starts an agent in that space, has Chrome's nine colors and closes its tabs; a color
 // picked there, or in one of its tabs' menus, colors its chip and its line, still after a reload;
 // another computer's group is grey, at the end.
+// Your own groups, as Chrome's: Add tab to new group puts a chip before the tab, in a color, and opens
+// the group's editor under it (a dialog: its name focused, the chip showing it as it's typed, then a
+// menu of the nine colors and New agent in group, Ungroup, Close group); ↓ → ↑ get round it, Enter or
+// a click elsewhere closes it. Add tab to group › opens its own menu (New group and the groups there
+// are), beside the menu or on its left by the window's edge, from the pointer or →, ← and Esc back.
+// Remove from group, dropping a tab between two of a group's tabs (in) or dragging it out (out),
+// Ctrl+Shift+←/→ at a group's edge (out, then back in), a click on the chip (folds it), a reload (all
+// kept), Ungroup, a group with no name, Close group, and the group gone with its last tab. With Tab
+// Groups on, a group of yours holds tabs of two spaces, the others still by space, and a space's chip
+// keeps its own menu. Pin tab: to the start, its icon and dot alone, no ×; Close other tabs and Close
+// tabs to the right leave pinned tabs; a reload keeps them. Rename…: in the tab, Enter keeps it (the
+// sidebar has it too), Esc puts it back, one that doesn't take says why; a view has no Rename. Every
+// menu and editor is as wide as what it says (320px at most), inside the window.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, withoutCutOff, TEST } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, withoutCutOff, noServiceWorker, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('tab-strip')
 const kit = await startKit('tab-strip')
@@ -95,9 +108,48 @@ try {
     const most = Math.max(...[...e.querySelectorAll('.menu-item, .tab-menu-colors')].map((x) => { const g = document.createRange(); g.selectNodeContents(x); return g.getBoundingClientRect().width }))
     return { left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width), most: Math.round(most), width: innerWidth, height: innerHeight }
   })
-  const focused = (p) => p.evaluate(() => { const e = document.activeElement; return e?.closest('.tab-menu') ? (e.getAttribute('aria-label') || e.textContent.trim()) : e?.dataset?.pane || e?.tagName })
+  // As wide as what it says (and never wider than a menu needs: the menu's own right edge in
+  // styles.css once stretched it to the window's), inside the window.
+  const compact = (m) => !!m && m.w <= m.most + 40 && m.w <= 320 && m.left >= 0 && m.top >= 0 && m.right <= m.width && m.bottom <= m.height
+  const focused = (p) => p.evaluate(() => { const e = document.activeElement; return e?.closest('.tab-menu') ? (e.getAttribute('aria-label') || e.textContent.trim()) : e?.dataset?.pane || (e?.classList.contains('ws-group') ? `chip:${e.innerText.trim()}` : e?.tagName) })
   // Chrome's colors in each look (tabstrip.css), as the browser gives them.
   const RED = { light: 'rgb(217, 48, 37)', dark: 'rgb(242, 139, 130)' }
+  const L = { mode: 'light', theme: 'sky' }
+  // The strip from left to right, each tab by a short name: a group's chip as [its name, and how
+  // many when folded], a tab in a group with a chip *, a pinned one ^.
+  const NICK = { ...Object.fromEntries(Object.entries(A).map(([k, v]) => [v, k])), 'view:meetings': 'meetings', 'view:map': 'map' }
+  const lay = (p) => p.locator('.ws-tabs-scroll').evaluate((s, nick) => [...s.children].map((x) => (x.classList.contains('ws-group')
+    ? `[${x.querySelector('.ws-group-name')?.textContent || ''}${x.querySelector('.ws-group-n') ? ` ${x.querySelector('.ws-group-n').textContent}` : ''}]`
+    : `${nick[x.dataset.pane] || x.dataset.pane}${x.classList.contains('grouped') ? '*' : ''}${x.classList.contains('pinned') ? '^' : ''}`)).join(' '), NICK).catch((e) => e.message)
+  const untilLay = async (p, want, ms = 3000) => !!(await until(async () => (await lay(p)) === want, ms, 100))
+  // A tab's menu; an item in it, by its words exactly; a group of yours from Add tab to group ›.
+  const exact = (w) => new RegExp(`^\\s*${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`)
+  const menuOf = async (p, id) => {
+    await p.locator(`.ws-tab[data-pane="${id}"]`).click({ button: 'right' })
+    const m = p.locator('.tab-menu')
+    await m.waitFor({ timeout: 3000 }).catch(() => {})
+    return m
+  }
+  const pick = async (p, id, label) => (await menuOf(p, id)).locator('.menu-item', { hasText: exact(label) }).first().click({ timeout: 3000 })
+  const addTo = async (p, id, group) => {
+    await (await menuOf(p, id)).locator('[aria-haspopup="menu"]').hover({ timeout: 3000 })
+    await p.locator('.tab-submenu .menu-item', { hasText: exact(group) }).click({ timeout: 3000 })
+  }
+  const itemsOf = async (m) => (await m.locator('.menu-item').allInnerTexts().catch(() => [])).map((x) => x.trim())
+  // Dragged onto the right (or left) half of another tab, as a person drags it, the pointer settling
+  // there a moment (WebKit drops only after a move over where it's marked).
+  const dragOnto = async (p, from, onto, after) => {
+    const fb = await p.locator(`.ws-tab[data-pane="${from}"]`).boundingBox(), ob = await p.locator(`.ws-tab[data-pane="${onto}"]`).boundingBox()
+    const x = after ? ob.x + ob.width - 12 : ob.x + 12
+    await p.mouse.move(fb.x + 20, fb.y + 14)
+    await p.mouse.down()
+    await p.mouse.move(fb.x + 40, fb.y + 14, { steps: 4 })
+    await p.mouse.move(x, ob.y + 14, { steps: 8 })
+    await p.mouse.move(x + (after ? -2 : 2), ob.y + 14, { steps: 2 })
+    await p.mouse.up()
+  }
+  // Somewhere to click that does nothing itself (no button, link, field or tab under it).
+  const quiet = (p) => p.evaluate(() => [[700, 860], [1000, 860], [700, 560], [300, 860], [1100, 500]].find(([x, y]) => { const e = document.elementFromPoint(x, y); return e && !e.closest('button, a, input, textarea, select, [role="button"], [role="tab"], [tabindex], [contenteditable], .xterm, .tab-menu') }) || [5, 895])
 
   for (const look of [{ mode: 'light', theme: 'sky' }, { mode: 'dark', theme: 'midnight' }]) {
     const t = look.mode
@@ -145,9 +197,9 @@ try {
       await weekly.click({ button: 'right' })
       await menu.waitFor({ timeout: 5000 }).catch(() => {})
       const items = (await menu.locator('.menu-item').allInnerTexts().catch(() => [])).map((x) => x.trim())
-      ok(items.join('|') === 'New agent in Reporting|Open beside the current tab|Close|Close other tabs|Close tabs to the right', `${t}: a right-click on a tab opens its menu: a new agent in its space, open it beside, close it, the others, those to its right`, items)
+      ok(items.join('|') === 'New agent in Reporting|Open beside the current tab|Add tab to new group|Rename…|Pin tab|Close|Close other tabs|Close tabs to the right', `${t}: a right-click on a tab opens its menu: a new agent in its space, open it beside, a new group, rename, pin, close it, the others, those to its right`, items)
       const mb = await menuBox(menu)
-      ok(mb.w <= mb.most + 40 && mb.right <= mb.width && mb.bottom <= mb.height, `${t}: the menu is as wide as what it says, inside the window`, mb)
+      ok(compact(mb), `${t}: the menu is as wide as what it says, inside the window`, mb)
       const swatches = await menu.locator('.tab-menu-color').evaluateAll((es) => es.map((e) => ({ name: e.getAttribute('aria-label'), color: e.dataset.color || null, bg: getComputedStyle(e).backgroundColor, on: e.getAttribute('aria-checked') })))
       const filled = swatches.filter((x) => x.color)
       ok(swatches.length === 10 && swatches[0].name === 'No color' && swatches[0].on === 'true' && filled.length === 9 && new Set(filled.map((x) => x.bg)).size === 9 && filled.every((x) => clear(x.bg)) && filled.find((x) => x.color === 'red')?.bg === RED[t], `${t}: its colors: No color (ticked), then Chrome's nine, each in this look's own`, swatches)
@@ -281,8 +333,8 @@ try {
     await p.keyboard.press('Shift+F10')
     await menu.waitFor({ timeout: 3000 }).catch(() => {})
     const walk = [await focused(p)]
-    for (const k of ['ArrowDown', 'ArrowDown', 'ArrowRight', 'ArrowRight']) { await p.keyboard.press(k); walk.push(await focused(p)) }
-    ok(walk.join('|') === 'New agent in shop|Open beside the current tab|No color|Grey|Blue', 'Shift+F10 on a tab opens its menu at its first item; ↓ moves down it, to its colors, → along them', walk)
+    for (const k of ['ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowRight', 'ArrowRight']) { await p.keyboard.press(k); walk.push(await focused(p)) }
+    ok(walk.join('|') === 'New agent in shop|Open beside the current tab|Add tab to new group|Rename…|Pin tab|No color|Grey|Blue', 'Shift+F10 on a tab opens its menu at its first item; ↓ moves down it, to its colors, → along them', walk)
     await p.keyboard.press('Escape')
     ok(!!(await until(async () => !(await menu.count()), 2000)) && (await focused(p)) === A.deploy, 'Esc closes it, the focus back on the tab', await focused(p))
     await p.keyboard.press('ContextMenu')
@@ -292,12 +344,12 @@ try {
     const at = await deploy.evaluate((e) => { const x = innerWidth - 12, y = innerHeight - 12; e.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 })); return { x, y } })
     await menu.waitFor({ timeout: 3000 }).catch(() => {})
     const mb = await menuBox(menu)
-    ok(mb.right <= at.x + 1 && mb.bottom <= at.y + 1 && mb.left >= 0 && mb.top >= 0 && mb.w <= mb.most + 40, 'near the window\'s right and bottom edges it opens to the pointer\'s left and above it', { mb, at })
+    ok(mb.right <= at.x + 1 && mb.bottom <= at.y + 1 && mb.left >= 0 && mb.top >= 0 && compact(mb), 'near the window\'s right and bottom edges it opens to the pointer\'s left and above it', { mb, at })
     await p.keyboard.press('Escape')
     // A view on screen: no new agent, and nothing to open beside it.
     await p.locator('.ws-tab[data-pane="view:meetings"]').click({ button: 'right' })
     const view = (await menu.locator('.menu-item').allInnerTexts().catch(() => [])).map((x) => x.trim())
-    ok(view.join('|') === 'Close|Close other tabs|Close tabs to the right', 'the tab on screen, a view: Close, Close other tabs, Close tabs to the right', view)
+    ok(view.join('|') === 'Add tab to new group|Pin tab|Close|Close other tabs|Close tabs to the right', 'the tab on screen, a view: no new agent, nothing to open beside it, no Rename', view)
     await p.keyboard.press('Escape')
     // Close tabs to the right, then Close other tabs.
     await deploy.click({ button: 'right' })
@@ -310,9 +362,259 @@ try {
     ok(/Weekly numbers/.test(await p.locator('.rail').innerText()), 'the agents whose tabs closed are still in the sidebar')
     await p.locator(`.ws-tab[data-pane="${A.checkout}"]`).click({ button: 'right' })
     const lone = (await menu.locator('.menu-item').allInnerTexts().catch(() => [])).map((x) => x.trim())
-    ok(lone.join('|') === 'New agent in shop|Close', 'a tab alone has nothing else to close', lone)
+    ok(lone.join('|') === 'New agent in shop|Add tab to new group|Rename…|Pin tab|Close', 'a tab alone has nothing else to close', lone)
     await p.keyboard.press('Escape')
     ok(errors.length === 0, 'tab menu: no page errors', errors)
+    await ctx.close()
+  })
+
+  // ---------- Your own groups, as Chrome's (Tab Groups off) ----------
+  await part('your own groups', async () => {
+    const { ctx, p, errors } = await seeded(L, ws(['view:meetings', A.checkout, A.deploy, A.weekly, A.board, 'view:map'], 'view:meetings'))
+    const s = p.locator('.ws-tabs-scroll')
+    const chip = s.locator('.ws-group').first()
+    const editor = p.locator('.tab-group-editor')
+    const lineOf = (id) => s.locator(`.ws-tab[data-pane="${id}"]`).evaluate((e) => { const l = e.querySelector('.ws-tab-line'); return l ? getComputedStyle(l).backgroundColor : null }).catch(() => null)
+    const chipBg = () => chip.evaluate((e) => getComputedStyle(e).backgroundColor).catch(() => null)
+    const gone = (x) => until(async () => !(await x.count()), 2000, 100)
+    // Add tab to new group: a chip before the tab, in a color, a line in it under the tab, and the
+    // group's editor by the chip with its name ready to type.
+    await pick(p, A.weekly, 'Add tab to new group')
+    await editor.waitFor({ timeout: 3000 }).catch(() => {})
+    ok(await untilLay(p, 'meetings checkout deploy [] weekly* board map'), 'Add tab to new group puts the tab in a group of its own, its chip before it', await lay(p))
+    const at = await p.evaluate(() => { const c = document.querySelector('.ws-group')?.getBoundingClientRect(), e = document.querySelector('.tab-group-editor')?.getBoundingClientRect(); return c && e && { chip: [Math.round(c.left), Math.round(c.bottom)], editor: [Math.round(e.left), Math.round(e.top)], field: !!document.activeElement?.matches('.tab-group-name') } })
+    ok(!!at?.field && Math.abs(at.editor[0] - at.chip[0]) <= 2 && at.editor[1] >= at.chip[1] && at.editor[1] - at.chip[1] <= 12, 'its editor opens under the chip, its name field focused', at)
+    const eb = await menuBox(editor)
+    ok(compact(eb), 'the editor is as wide as what it says, inside the window', eb)
+    const roles = await editor.evaluate((e) => ({ role: e.getAttribute('role'), menu: !!e.querySelector('[role="menu"]'), radios: e.querySelectorAll('[role="menu"] [role="menuitemradio"]').length, items: [...e.querySelectorAll('[role="menu"] [role="menuitem"]')].map((x) => x.textContent.trim()), field: e.querySelector('input')?.getAttribute('aria-label') })).catch((e) => e.message)
+    ok(roles?.role === 'dialog' && roles.menu && roles.radios === 9 && roles.items?.join('|') === 'New agent in group|Ungroup|Close group' && roles.field === 'Group name', 'the editor: its name, then a menu of the nine colors (menuitemradio) and New agent in group, Ungroup and Close group (menuitem)', roles)
+    ok(clear(await chipBg()) && (await lineOf(A.weekly)) === (await chipBg()), 'the chip has a color, and a line in it runs under the tab', { chip: await chipBg(), line: await lineOf(A.weekly) })
+    await shot(p, `${tag}tab-strip-group-editor`, { clip: { x: 0, y: 0, width: 1440, height: 320 } })
+    await p.keyboard.type('Numbers')
+    ok(!!(await until(async () => (await lay(p)) === 'meetings checkout deploy [Numbers] weekly* board map', 2000, 100)), 'the chip shows the name as it is typed', await lay(p))
+    // ↓ to its colors, at its own; → along them; ↑ back to the name; Enter closes it, the focus on the chip.
+    const own = await editor.locator('[aria-checked="true"]').getAttribute('aria-label').catch(() => null)
+    const keys = []
+    for (const k of ['ArrowDown', 'ArrowRight', 'ArrowUp']) { await p.keyboard.press(k); keys.push(await p.evaluate(() => (document.activeElement?.matches('.tab-group-name') ? 'name' : document.activeElement?.getAttribute('aria-label')))) }
+    ok(!!own && keys[0] === own && keys[1] && keys[1] !== own && keys[2] === 'name', '↓ goes to its colors at its own, → along them, ↑ back to its name', { own, keys })
+    await p.keyboard.press('Enter')
+    ok(!!(await gone(editor)) && (await focused(p)) === 'chip:Numbers', 'Enter closes it, the focus on the chip', await focused(p))
+    // A right-click on the chip: the same editor. Green colors the chip and the line; a click elsewhere closes it.
+    await chip.click({ button: 'right' })
+    await editor.waitFor({ timeout: 3000 }).catch(() => {})
+    ok((await editor.locator('input').inputValue().catch(() => '')) === 'Numbers', 'a right-click on the chip opens its editor, with its name', await editor.locator('input').inputValue().catch((e) => e.message))
+    const green = await editor.locator('[data-color="green"]').evaluate((e) => getComputedStyle(e).backgroundColor).catch(() => null)
+    await editor.locator('[data-color="green"]').click({ timeout: 3000 })
+    ok(clear(green) && !!(await until(async () => (await chipBg()) === green && (await lineOf(A.weekly)) === green, 2000, 100)) && (await editor.count()) === 1, 'Green colors the chip and the line under its tab, the editor still open', { green, chip: await chipBg() })
+    const [qx, qy] = await quiet(p)
+    await p.mouse.click(qx, qy)
+    ok(!!(await gone(editor)), 'a click elsewhere closes it', [qx, qy])
+    // Add tab to group ›: its own menu, under the pointer, with New group and the groups there are.
+    const m = await menuOf(p, A.board)
+    const more = m.locator('[aria-haspopup="menu"]')
+    ok((await more.innerText().catch(() => '')).trim() === 'Add tab to group', 'with a group there, a tab\'s menu has Add tab to group, with its own menu', await itemsOf(m))
+    await more.hover({ timeout: 3000 }).catch(() => {})
+    const sub = p.locator('.tab-submenu')
+    await sub.waitFor({ timeout: 3000 }).catch(() => {})
+    const sb = await menuBox(sub), pb = await menuBox(m)
+    ok((await itemsOf(sub)).join('|') === 'New group|Numbers' && (await more.getAttribute('aria-expanded')) === 'true' && compact(sb) && (sb.left >= pb.right - 6 || sb.right <= pb.left + 6), 'under the pointer it opens its own menu beside it: New group, and Numbers', { items: await itemsOf(sub), sb, pb })
+    await shot(p, `${tag}tab-strip-add-to-group`, { clip: { x: 0, y: 0, width: 1440, height: 420 } })
+    await sub.locator('.menu-item', { hasText: 'Numbers' }).click({ timeout: 3000 })
+    ok(await untilLay(p, 'meetings checkout deploy [Numbers] weekly* board* map'), 'picked, the tab joins that group', await lay(p))
+    // From the keyboard: → opens it at its first item, ↓ the next, ← back to the item; Esc closes it
+    // and then the menu, the focus back on the tab.
+    await p.locator(`.ws-tab[data-pane="${A.checkout}"]`).focus()
+    await p.keyboard.press('Shift+F10')
+    await p.locator('.tab-menu').waitFor({ timeout: 3000 }).catch(() => {})
+    const walk = []
+    for (const k of ['ArrowDown', 'ArrowDown', 'ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape']) { await p.keyboard.press(k); walk.push(await focused(p)) }
+    ok(walk.join('|') === 'Open beside the current tab|Add tab to group|New group|Numbers|Add tab to group|New group|Add tab to group' && (await p.locator('.tab-menu').count()) === 1, '→ opens Add tab to group\'s menu at its first item, ↓ moves in it, ← or Esc goes back to the item', walk)
+    await p.keyboard.press('Escape')
+    ok(!!(await gone(p.locator('.tab-menu'))) && (await focused(p)) === A.checkout, 'Esc again closes the menu, the focus back on the tab', await focused(p))
+    // Remove from group: out of it, where it is.
+    await pick(p, A.board, 'Remove from group')
+    ok(await untilLay(p, 'meetings checkout deploy [Numbers] weekly* board map'), 'Remove from group takes the tab out of the group, where it was', await lay(p))
+    await addTo(p, A.checkout, 'Numbers')
+    ok(await untilLay(p, 'meetings deploy [Numbers] weekly* checkout* board map'), 'Add tab to group › Numbers puts the tab at the group\'s end', await lay(p))
+    // Dragged between two of its tabs, a tab joins the group; dragged out, it leaves it.
+    await dragOnto(p, A.deploy, A.weekly, true)
+    ok(await untilLay(p, 'meetings [Numbers] weekly* deploy* checkout* board map'), 'a tab dropped between two of a group\'s tabs joins the group', await lay(p))
+    await dragOnto(p, A.deploy, 'view:map', true)
+    ok(await untilLay(p, 'meetings [Numbers] weekly* checkout* board map deploy'), 'dragged out of the group, it leaves it', await lay(p))
+    await dragOnto(p, A.deploy, A.weekly, false)
+    ok(await untilLay(p, 'meetings [Numbers] deploy* weekly* checkout* board map'), 'dropped just after the chip (before the group\'s first tab), a tab joins the group', await lay(p))
+    await dragOnto(p, A.deploy, 'view:map', true)
+    await untilLay(p, 'meetings [Numbers] weekly* checkout* board map deploy')
+    // Ctrl+Shift+→ at the group's edge: out of it first, where it is; Ctrl+Shift+← beside it: back in.
+    await p.locator(`.ws-tab[data-pane="${A.checkout}"]`).focus()
+    await p.keyboard.press('Control+Shift+ArrowRight')
+    ok(await untilLay(p, 'meetings [Numbers] weekly* checkout board map deploy') && (await focused(p)) === A.checkout, 'Ctrl+Shift+→ at the group\'s edge takes the tab out of it first, the focus still on it', { lay: await lay(p), focus: await focused(p) })
+    await p.keyboard.press('Control+Shift+ArrowLeft')
+    ok(await untilLay(p, 'meetings [Numbers] weekly* checkout* board map deploy') && (await focused(p)) === A.checkout, 'Ctrl+Shift+← beside the group puts it back in', { lay: await lay(p), focus: await focused(p) })
+    // A click on the chip folds the group, another unfolds it.
+    await chip.click()
+    ok(await untilLay(p, 'meetings [Numbers 2] board map deploy'), 'a click on the chip folds the group to it, with how many', await lay(p))
+    await chip.click()
+    ok(await untilLay(p, 'meetings [Numbers] weekly* checkout* board map deploy'), 'another unfolds it', await lay(p))
+    // Kept with the window's tabs: after a reload, the same, still green.
+    await until(async () => /"Numbers"/.test(await p.evaluate(() => localStorage.getItem('cc-ws'))), 3000, 100)
+    await p.reload()
+    await p.waitForSelector('.ws-group', { timeout: 20000 }).catch(() => {})
+    ok(await untilLay(p, 'meetings [Numbers] weekly* checkout* board map deploy', 8000) && (await chipBg()) === green, 'after a reload the group is there, named, green, with its tabs', { lay: await lay(p), chip: await chipBg() })
+    // Ungroup: the chip goes, the tabs stay where they are.
+    await chip.click({ button: 'right' })
+    await editor.locator('.menu-item', { hasText: 'Ungroup' }).click({ timeout: 3000 })
+    ok(await untilLay(p, 'meetings weekly checkout board map deploy'), 'Ungroup: the chip goes, its tabs stay where they are', await lay(p))
+    // A group with no name: its chip its color alone, "Unnamed group" to a screen reader and in the
+    // menus. Close group closes its tabs, and the chip goes; the agents are still in the sidebar.
+    await pick(p, A.weekly, 'Add tab to new group')
+    await editor.waitFor({ timeout: 3000 }).catch(() => {})
+    await p.keyboard.press('Escape')
+    ok(!!(await gone(editor)) && (await focused(p)) === 'chip:', 'Esc closes the editor, the focus on the chip', await focused(p))
+    await addTo(p, A.checkout, 'Unnamed group')
+    const cw = await chip.evaluate((e) => Math.round(e.getBoundingClientRect().width)).catch(() => 0)
+    ok(await untilLay(p, 'meetings [] weekly* checkout* board map deploy') && (await chip.getAttribute('aria-label')) === 'Unnamed group' && cw > 0 && cw <= 16, 'a group with no name: its chip its color alone, Unnamed group to a screen reader and in the menus', { lay: await lay(p), cw })
+    await chip.click({ button: 'right' })
+    await editor.locator('.menu-item', { hasText: 'Close group' }).click({ timeout: 3000 })
+    ok(await untilLay(p, 'meetings board map deploy'), 'Close group closes its tabs, and its chip goes', await lay(p))
+    ok(/Weekly numbers/.test(await p.locator('.rail').innerText()), 'its agents are still in the sidebar')
+    // The last tab of a group closed: the group goes, its color too.
+    await pick(p, A.board, 'Add tab to new group')
+    await editor.waitFor({ timeout: 3000 }).catch(() => {})
+    await p.keyboard.type('Solo')
+    await p.keyboard.press('Enter')
+    ok(await untilLay(p, 'meetings [Solo] board* map deploy'), 'a group of one', await lay(p))
+    const board = p.locator(`.ws-tab[data-pane="${A.board}"]`)
+    await board.hover()
+    await board.locator('.ws-tab-x').click({ timeout: 3000 })
+    const kept = await until(async () => { const w = JSON.parse(await p.evaluate(() => localStorage.getItem('cc-ws'))); return !Object.keys(w.tabGroups || {}).length && !Object.keys(w.colors || {}).some((k) => k.startsWith('g:')) && w }, 3000, 100)
+    ok(await untilLay(p, 'meetings map deploy') && !!kept, 'its last tab closed, the group goes, its color too', { lay: await lay(p), saved: await p.evaluate(() => localStorage.getItem('cc-ws')) })
+    // New agent in group: New agent, in the group's space; the agent it starts opens in the group.
+    await pick(p, A.deploy, 'Add tab to new group')
+    await editor.waitFor({ timeout: 3000 }).catch(() => {})
+    await editor.locator('.menu-item', { hasText: 'New agent in group' }).click({ timeout: 3000 })
+    const dialog = p.locator('.modal').first()
+    await dialog.waitFor({ timeout: 5000 }).catch(() => {})
+    ok(/In shop/.test(await dialog.innerText().catch(() => '')), 'New agent in group opens New agent, in the group\'s space', await dialog.innerText().catch(() => 'no dialog'))
+    // (Its folder as the test's server has it: the dialog shows it from ~, which here is the test's own home.)
+    await dialog.locator('input.mono').fill(path.join(kit.home, 'code', 'shop')).catch(() => {})
+    const start = dialog.locator('button[type="submit"]')
+    await until(() => start.isEnabled(), 5000, 100)
+    await start.click({ timeout: 3000 }).catch(() => {})
+    const joined = await until(async () => { const x = await lay(p); return /^meetings map \[\] deploy\* \S+\*$/.test(x) && x }, 20000, 200)
+    ok(!!joined, 'the agent it starts opens in the group', await lay(p))
+    ok(withoutCutOff(errors).length === 0, 'your own groups: no page errors', errors)
+    await ctx.close()
+  })
+
+  // ---------- Near the window's right edge: a group's editor, and Add tab to group's own menu ----------
+  await part('group menus near the right edge', async () => {
+    const tabs = [...VIEWS.slice(4, 18), A.weekly, A.board]
+    const { ctx, p, errors } = await open(L, ws(tabs, VIEWS[4], { tabGroups: { 'g:edge': { name: 'Quarterly review', tabs: [A.weekly, A.board] }, 'g:two': { name: 'Two', tabs: [VIEWS[5]] } }, colors: { 'g:edge': 'blue', 'g:two': 'red' } }), 900)
+    const chip = p.locator('.ws-group[data-group="g:edge"]')
+    await chip.click({ button: 'right' })
+    const editor = p.locator('.tab-group-editor')
+    await editor.waitFor({ timeout: 3000 }).catch(() => {})
+    const eb = await menuBox(editor)
+    const cb = await chip.boundingBox()
+    ok(compact(eb) && eb.right <= eb.width - 7 && (Math.abs(eb.left - cb.x) <= 2 || eb.right >= eb.width - 9), 'near the right edge a group\'s editor stays inside the window, under its chip or moved left as far as it must be', { eb, chip: cb })
+    await p.keyboard.press('Escape')
+    await p.locator(`.ws-tab[data-pane="${A.board}"]`).evaluate((e) => e.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: innerWidth - 12, clientY: e.getBoundingClientRect().bottom - 6, button: 2 })))
+    const menu = p.locator('.tab-menu')
+    await menu.waitFor({ timeout: 3000 }).catch(() => {})
+    await menu.locator('[aria-haspopup="menu"]').hover({ timeout: 3000 }).catch(() => {})
+    const sub = p.locator('.tab-submenu')
+    await sub.waitFor({ timeout: 3000 }).catch(() => {})
+    const mb = await menuBox(menu), sb = await menuBox(sub)
+    ok(compact(mb) && compact(sb) && sb.right <= mb.left + 6, 'by the right edge a tab\'s menu and Add tab to group\'s own menu stay inside the window, that one on its left', { mb, sb })
+    await shot(p, `${tag}tab-strip-menus-edge`, { clip: { x: 0, y: 0, width: 900, height: 460 } })
+    await p.keyboard.press('Escape')
+    ok(withoutCutOff(errors).length === 0, 'menus near the edge: no page errors', errors)
+    await ctx.close()
+  })
+
+  // ---------- Pinned tabs ----------
+  await part('pinned tabs', async () => {
+    const { ctx, p, errors } = await seeded(L, ws(['view:meetings', A.checkout, A.deploy, A.weekly, A.board], 'view:meetings'))
+    const tab = (id) => p.locator(`.ws-tab[data-pane="${id}"]`)
+    await pick(p, A.weekly, 'Pin tab')
+    ok(await untilLay(p, 'weekly^ meetings checkout deploy board'), 'Pin tab takes the tab to the start', await lay(p))
+    const look = await tab(A.weekly).evaluate((e) => ({ w: Math.round(e.getBoundingClientRect().width), name: Math.round(e.querySelector('.ws-tab-name')?.getBoundingClientRect().width || 0), x: !!e.querySelector('.ws-tab-x'), dot: !!e.querySelector('.sdot'), text: e.textContent, says: e.getAttribute('aria-description') })).catch((e) => e.message)
+    ok(look.w <= 48 && look.name <= 1 && !look.x && look.dot && /Weekly numbers/.test(look.text) && /Pinned tab/.test(look.says), 'a pinned tab is its icon and dot alone, with no ×; its name still there for a screen reader', look)
+    await tab(A.weekly).hover()
+    ok(!!(await until(async () => /Weekly numbers/.test(await p.locator('.tab-card').innerText().catch(() => '')), 3000, 100)), 'its card has its name')
+    await p.mouse.move(700, 600)
+    const pm = await menuOf(p, A.weekly)
+    ok((await itemsOf(pm)).includes('Unpin tab') && !(await itemsOf(pm)).includes('Pin tab'), 'its menu has Unpin tab', await itemsOf(pm))
+    await p.keyboard.press('Escape')
+    await pick(p, A.board, 'Pin tab')
+    ok(await untilLay(p, 'weekly^ board^ meetings checkout deploy'), 'another pinned goes after it', await lay(p))
+    await strip(p, `${tag}tab-strip-pinned`)
+    await pick(p, A.checkout, 'Close other tabs')
+    ok(await untilLay(p, 'weekly^ board^ checkout'), 'Close other tabs leaves the pinned tabs', await lay(p))
+    await until(async () => /"pinned":\[[^\]]+\]/.test(await p.evaluate(() => localStorage.getItem('cc-ws'))), 3000, 100)
+    await p.reload()
+    await p.waitForSelector('.ws-tab', { timeout: 20000 }).catch(() => {})
+    ok(await untilLay(p, 'weekly^ board^ checkout', 8000), 'after a reload they are still pinned', await lay(p))
+    await pick(p, A.weekly, 'Close tabs to the right')
+    ok(await untilLay(p, 'weekly^ board^'), 'Close tabs to the right leaves the pinned tabs too', await lay(p))
+    await pick(p, A.board, 'Unpin tab')
+    ok(await untilLay(p, 'weekly^ board') && (await tab(A.board).locator('.ws-tab-x').count()) === 1, 'Unpin tab: a tab again, after the pinned ones, with its ×', await lay(p))
+    ok(withoutCutOff(errors).length === 0, 'pinned tabs: no page errors', errors)
+    await ctx.close()
+  })
+
+  // ---------- Rename… ----------
+  await part('rename', async () => {
+    // A rename that doesn't take (herdr down, say), when the test says so: its route is there before
+    // the page opens, and no service worker answers in its place, as WebKit needs.
+    let refuse = false
+    const store = ws([A.checkout, A.deploy, 'view:map'], A.checkout)
+    const { ctx, p, errors } = await page(b, kit.url, { ...L, width: 1440, height: 900, store, before: async (c) => { await noServiceWorker(c); await c.route(/\/api\/tabs\/[^/]+\/rename$/, (r) => (refuse ? r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'herdr is not running' }) }) : r.continue())) } })
+    await until(async () => (await p.locator('.ws-tab').count()) === store['cc-ws'].tabs.length, 20000)
+    const tab = p.locator(`.ws-tab[data-pane="${A.deploy}"]`)
+    const field = tab.locator('input.ws-tab-rename')
+    const nameOf = () => tab.locator('.ws-tab-name').innerText().then((x) => x.trim()).catch(() => '')
+    const rail = () => p.locator('.rail').innerText().catch(() => '')
+    await pick(p, A.deploy, 'Rename…')
+    await field.waitFor({ timeout: 3000 }).catch(() => {})
+    ok((await field.inputValue().catch(() => '')) === 'Deploy' && !!(await field.evaluate((e) => e === document.activeElement).catch(() => false)), 'Rename… edits the name in the tab itself, focused', await field.inputValue().catch((e) => e.message))
+    await shot(p, `${tag}tab-strip-rename`, { clip: { x: 0, y: 0, width: 1440, height: 160 } })
+    await p.keyboard.type('Ship it')
+    await p.keyboard.press('Enter')
+    ok(!!(await until(async () => !(await field.count()) && (await nameOf()) === 'Ship it', 3000, 100)) && (await focused(p)) === A.deploy, 'Enter keeps the new name, the focus back on the tab', { name: await nameOf(), focus: await focused(p) })
+    ok(!!(await until(async () => /Ship it/.test(await rail()), 5000, 100)), 'the sidebar has the new name too (renamed as its ⋯ menu renames)')
+    // From the keyboard: its menu, down to Rename…, Enter; Esc puts the name back.
+    await tab.focus()
+    await p.keyboard.press('Shift+F10')
+    await p.locator('.tab-menu').waitFor({ timeout: 3000 }).catch(() => {})
+    for (let i = 0; i < 6 && (await focused(p)) !== 'Rename…'; i++) await p.keyboard.press('ArrowDown')
+    await p.keyboard.press('Enter')
+    await field.waitFor({ timeout: 3000 }).catch(() => {})
+    await p.keyboard.type('Nope')
+    await p.keyboard.press('Escape')
+    ok(!!(await until(async () => !(await field.count()), 2000, 100)) && (await nameOf()) === 'Ship it' && (await focused(p)) === A.deploy, 'Esc puts the name back, the focus on the tab', { name: await nameOf(), focus: await focused(p) })
+    await p.waitForTimeout(300)
+    ok(!/Nope/.test(await rail()), 'and nothing is renamed')
+    // One that doesn't take: the old name back, and why, under the tab.
+    refuse = true
+    await pick(p, A.deploy, 'Rename…')
+    await field.waitFor({ timeout: 3000 }).catch(() => {})
+    await p.keyboard.type('Lost')
+    await p.keyboard.press('Enter')
+    const note = p.locator('.tab-note[role="alert"]')
+    ok(!!(await until(async () => /Couldn't rename it: herdr is not running/.test(await note.innerText().catch(() => '')) && (await nameOf()) === 'Ship it', 3000, 100)), 'a rename that doesn\'t take says why, under the tab, the old name back', { note: await note.innerText().catch(() => 'no note'), name: await nameOf() })
+    refuse = false
+    // A view isn't renamed here (the sidebar has no Rename for it either).
+    const mv = await menuOf(p, 'view:map')
+    ok(!(await itemsOf(mv)).includes('Rename…'), 'a view\'s menu has no Rename…', await itemsOf(mv))
+    await p.keyboard.press('Escape')
+    await pick(p, A.deploy, 'Rename…')
+    await field.waitFor({ timeout: 3000 }).catch(() => {})
+    await p.keyboard.type('Deploy')
+    await p.keyboard.press('Enter')
+    ok(!!(await until(async () => (await nameOf()) === 'Deploy' && /Deploy/.test(await rail()), 5000, 100)), 'renamed back', await nameOf())
+    ok(withoutCutOff(errors).length === 0, 'rename: no page errors', errors)
     await ctx.close()
   })
 
@@ -357,7 +659,7 @@ try {
       ok(/Fold its tabs away/.test(said) && /New agent in Reporting/.test(said) && /Close its 2 tabs/.test(said), `${t}: its right-click menu folds it, starts an agent in its space and closes its tabs`, said)
       // As wide as what it says: the menu's own right edge (styles.css) once stretched it to the window's.
       const gm = await menuBox(menu)
-      ok(gm.w <= gm.most + 40 && gm.right < gm.width - 40, `${t}: the group's menu is as wide as what it says, not stretched to the window's edge`, gm)
+      ok(compact(gm) && gm.right < gm.width - 40, `${t}: the group's menu is as wide as what it says, not stretched to the window's edge`, gm)
       const own = await menu.locator('.tab-menu-color').evaluateAll((es) => es.map((e) => ({ color: e.dataset.color || null, bg: getComputedStyle(e).backgroundColor, on: e.getAttribute('aria-checked') })))
       ok(own.length === 9 && own.every((x) => x.color) && own.filter((x) => x.on === 'true').length === 1 && own.find((x) => x.on === 'true').bg === items[rep].bg, `${t}: and Chrome's nine colors, the group's own ticked`, own)
       await shot(p, `${tag}tab-strip-group-menu-${t}`, { clip: { x: 0, y: 0, width: 1440, height: 320 } })
@@ -399,6 +701,41 @@ try {
       await ctx.close()
     })
   }
+  // ---------- Your own groups with Tab Groups on ----------
+  await part('your own groups with Tab Groups on', async () => {
+    const { ctx, p, errors } = await seeded(L, ws(['view:meetings', A.checkout, A.deploy, A.weekly, A.board, A.rounding], 'view:meetings'))
+    const editor = p.locator('.tab-group-editor')
+    await until(async () => (await p.locator('.ws-group').count()) >= 3, 10000)
+    ok(await untilLay(p, 'meetings [shop] checkout* deploy* [Reporting] weekly* board* [billing-api] rounding*'), 'with Tab Groups on, the tabs by space', await lay(p))
+    await pick(p, A.deploy, 'Add tab to new group')
+    await editor.waitFor({ timeout: 3000 }).catch(() => {})
+    const eb = await menuBox(editor)
+    await p.keyboard.type('Ship')
+    await p.keyboard.press('Enter')
+    await addTo(p, A.weekly, 'Ship')
+    ok(await untilLay(p, 'meetings [shop] checkout* [Ship] deploy* weekly* [Reporting] board* [billing-api] rounding*'), 'a group of yours holds tabs of two spaces, after the space of its first; the other tabs still by space', await lay(p))
+    const bgs = await p.locator('.ws-group').evaluateAll((es) => es.map((e) => getComputedStyle(e).backgroundColor))
+    ok(new Set(bgs).size === bgs.length, 'a new group takes a color no other chip has', bgs)
+    ok(compact(eb), 'its editor is as wide as what it says, inside the window', eb)
+    const tm = await menuOf(p, A.rounding)
+    const tb = await menuBox(tm)
+    ok(compact(tb) && (await itemsOf(tm)).includes('Add tab to group'), 'a tab\'s menu, Tab Groups on: as wide as what it says, with Add tab to group', { tb, items: await itemsOf(tm) })
+    await p.keyboard.press('Escape')
+    await p.locator('.ws-group', { hasText: 'shop' }).click({ button: 'right' })
+    const sm = p.locator('.tab-group-menu')
+    await sm.waitFor({ timeout: 3000 }).catch(() => {})
+    const smb = await menuBox(sm)
+    ok(compact(smb) && !(await sm.locator('input').count()) && /Fold its tabs away/.test(await sm.innerText().catch(() => '')), 'a space\'s chip keeps its own menu, as wide as what it says', smb)
+    await p.keyboard.press('Escape')
+    await until(async () => /"Ship"/.test(await p.evaluate(() => localStorage.getItem('cc-ws'))), 3000, 100)
+    await p.reload()
+    await p.waitForSelector('.ws-group', { timeout: 20000 }).catch(() => {})
+    ok(await untilLay(p, 'meetings [shop] checkout* [Ship] deploy* weekly* [Reporting] board* [billing-api] rounding*', 8000), 'after a reload, the same', await lay(p))
+    await pick(p, A.weekly, 'Remove from group')
+    ok(await untilLay(p, 'meetings [shop] checkout* [Ship] deploy* [Reporting] weekly* board* [billing-api] rounding*'), 'Remove from group: back in its space\'s group', await lay(p))
+    ok(withoutCutOff(errors).length === 0, 'your own groups, Tab Groups on: no page errors', errors)
+    await ctx.close()
+  })
   await trial(false)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
