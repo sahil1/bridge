@@ -1208,12 +1208,20 @@ function App() {
     return { ...w, tabs }
   })
 
-  // The tabs above the agents (TabStrip.jsx), with Tab Groups when that beta feature is on.
+  // The tabs above the agents (TabStrip.jsx), with Tab Groups when that beta feature is on. A color
+  // picked in a tab's or a group's right-click menu is kept with them as a folded group is: a group's
+  // by its key, a tab's by its id; none takes it off.
   const grouping = conf?.trials?.['tab-groups'] === true
   const foldGroup = (key) => setW((w) => ({ ...w, folded: { ...(w.folded || {}), [key]: !w.folded?.[key] } }))
+  const colorTab = (key, color) => setW((w) => {
+    const colors = { ...(w.colors || {}) }
+    if (color) colors[key] = color
+    else delete colors[key]
+    return { ...w, colors }
+  })
   const tabStrip = (
-    <TabStrip ids={W.tabs} byId={byId} active={W.active} side={split ? W.side : null} focus={W.group} folded={W.folded} grouping={grouping} spaces={fleet?.workspaces}
-      onOpen={openAgent} onClose={closeTab} onMove={moveTab} onNudge={nudgeTab} onFold={foldGroup} onNewAgent={(init) => setNewAgent(init)}>
+    <TabStrip ids={W.tabs} byId={byId} active={W.active} side={split ? W.side : null} focus={W.group} folded={W.folded} colors={W.colors} grouping={grouping} spaces={fleet?.workspaces}
+      onOpen={openAgent} onClose={closeTab} onMove={moveTab} onNudge={nudgeTab} onFold={foldGroup} onColor={colorTab} onSide={canSplit ? (id) => openAgent(id, { toSide: true }) : null} onNewAgent={(init) => setNewAgent(init)}>
       <button className={`win-btn ${split ? 'on' : ''}`} onClick={toggleSplit} disabled={!canSplit || W.tabs.length < 2}
         title={!canSplit ? t('Not enough room to split') : W.tabs.length < 2 ? t('Open a second agent to split') : split ? t('Unsplit') : t('Split side by side')} aria-label={t('Split')}>
         <Icon name="split" size={15} />

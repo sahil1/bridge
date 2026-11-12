@@ -6,8 +6,12 @@
 // hear as it is. Apple's converter brings the tap's own rate (often 48 kHz) down to the one asked for.
 //
 // Stops on SIGTERM, SIGINT or SIGHUP, when whatever reads stdout goes away, or when the process that
-// started it does; the tap and its device go with it. Lines on stderr: "ready <rate>" once it
-// records, "error: ..." when it can't (exit 3: macOS too old).
+// started it does; the tap and its device go with it. Lines on stderr: "access <answer>" first (what
+// macOS says, below), "ready <rate>" once it records, "error: ..." when it can't (exit 3: macOS too
+// old). Without System Audio Recording, macOS gives the tap silence rather than an error, so the
+// answer is the only way to tell that from a call nobody's talking on.
+//   --check: only the answer, on stdout, and no tap. A program started now gets today's answer, so
+//   Bridge AI asks this way again while a call is silent, to start listening once you've allowed it.
 //
 // Build: swiftc -O -target arm64-apple-macos14.2 native/calltap.swift -o calltap (and x86_64, then lipo).
 import AVFoundation
@@ -23,14 +27,33 @@ func fail(_ s: String, _ code: Int32 = 1) -> Never { say("error: \(s)"); exit(co
 
 var rate = 16000.0
 var excluded: [pid_t] = []
+var checkOnly = false
 var argv = CommandLine.arguments.dropFirst().makeIterator()
 while let a = argv.next() {
   switch a {
   case "--rate": rate = Double(argv.next() ?? "") ?? 16000
   case "--exclude": excluded += (argv.next() ?? "").split(separator: ",").compactMap { pid_t($0) }
+  case "--check": checkOnly = true
   default: fail("unknown argument \(a)", 2)
   }
 }
+
+// What macOS says about recording what this Mac plays, for the app that started this one (macOS
+// counts that app, Bridge AI, not this program): "allowed", "denied", or "unknown" (not asked yet,
+// or a macOS that doesn't say). There's no public way to ask; TCC's own preflight is the answer the
+// tap gets, and it never puts up a question. Looked up as it runs, so without it the answer is
+// "unknown" rather than a crash.
+func access() -> String {
+  typealias Preflight = @convention(c) (CFString, CFDictionary?) -> Int32
+  guard let tcc = dlopen("/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC", RTLD_NOW),
+        let f = dlsym(tcc, "TCCAccessPreflight") else { return "unknown" }
+  switch unsafeBitCast(f, to: Preflight.self)("kTCCServiceAudioCapture" as CFString, nil) {
+  case 0: return "allowed"
+  case 1: return "denied"
+  default: return "unknown"
+  }
+}
+if checkOnly { print(access()); exit(0) }
 
 // Core Audio's object for a running process, to leave it out of the tap.
 func processObject(_ pid: pid_t) -> AudioObjectID? {
@@ -129,6 +152,7 @@ struct Failure: Error, CustomStringConvertible {
 }
 
 guard #available(macOS 14.2, *) else { fail("recording a call's sound needs macOS 14.2 or later", 3) }
+say("access \(access())")
 let recorder = CallTap(rate: rate)
 do {
   let from = try recorder.start(excluding: excluded)

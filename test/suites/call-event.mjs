@@ -74,7 +74,7 @@ try { process.stdout.write(fs.readFileSync(path.join(__dirname, 'ocr.txt'), 'utf
   return path.join(bin, 'bridgeocr')
 }
 const kit = await startKit('call-event', {
-  env: ({ bin }) => ({ BRIDGE_CALL_QUIET_MS: '1500', BRIDGE_SCREEN_RECHECK_MS: '300', ...(IS_WIN ? {} : { BRIDGE_OCR: ocr(bin) }), BRIDGE_CALL_START_MS: '300', BRIDGE_CALL_END_MS: '600', BRIDGE_QUIET_OVER_MS: '1500', BRIDGE_QUIET_END_MS: '4000', BRIDGE_QUIET_REMIND_MS: '1500', BRIDGE_QUIET_LONG_MS: '4000', BRIDGE_QUIET_CHECK_MS: '300', BRIDGE_AUTO_STOP_MS: '2000', ...(IS_WIN ? {} : { BRIDGE_CALLWATCH: callwatch(bin) }) }),
+  env: ({ bin }) => ({ BRIDGE_CALL_QUIET_MS: '1500', BRIDGE_SCREEN_RECHECK_MS: '300', BRIDGE_TAP_RECHECK_MS: '300', ...(IS_WIN ? {} : { BRIDGE_OCR: ocr(bin) }), BRIDGE_CALL_START_MS: '300', BRIDGE_CALL_END_MS: '600', BRIDGE_QUIET_OVER_MS: '1500', BRIDGE_QUIET_END_MS: '4000', BRIDGE_QUIET_REMIND_MS: '1500', BRIDGE_QUIET_LONG_MS: '4000', BRIDGE_QUIET_CHECK_MS: '300', BRIDGE_AUTO_STOP_MS: '2000', ...(IS_WIN ? {} : { BRIDGE_CALLWATCH: callwatch(bin) }) }),
 })
 const model = await startModel('call-event')
 const browsers = []
@@ -151,13 +151,21 @@ try {
     ok((await api('/calls/screen')).allowed === false, "Screen Recording not allowed yet: the app can say so, to ask")
     const askedNow = await api('/calls/screen', {})
     ok(askedNow.allowed === false && fs.existsSync(path.join(kit.bin, 'screen-asked')), "Allow asks macOS (its own window), and says it isn't on yet", askedNow)
+    // On a call (Teams has the mic) whose sound is a few steps off silence, and macOS hasn't let
+    // Bridge AI hear it: both said, on the meeting and on the floating card.
+    const taps = () => { try { return fs.readFileSync(path.join(kit.bin, 'calltap.log'), 'utf8').split('\n').filter(Boolean) } catch { return [] } }
+    const before = taps().length
+    fs.writeFileSync(path.join(kit.bin, 'calltap.json'), JSON.stringify({ level: 3, access: 'denied' }))
     const L = await api('/meetings', { title: 'Pricing sync' })
-    // On a call (Teams has the mic) whose sound is a few steps off silence: said, on the meeting and
-    // on the floating card, and not once the call is heard.
-    fs.writeFileSync(path.join(kit.bin, 'calltap.json'), JSON.stringify({ level: 3 }))
-    ok(!!(await until(async () => (await api(`/meetings/${L.id}`)).callQuiet, 10000)) && (await api('/calls')).recording?.callQuiet === true, 'on a call whose sound is silent, that\'s said, on the meeting and the floating card')
-    fs.writeFileSync(path.join(kit.bin, 'calltap.json'), JSON.stringify({ level: 3000 }))
-    ok(!!(await until(async () => (await api(`/meetings/${L.id}`)).callQuiet === false, 10000)), 'once the call is heard, not any more')
+    const quiet = await until(async () => { const m = await api(`/meetings/${L.id}`); const r = (await api('/calls')).recording; return m.callQuiet && r?.callQuiet === true && { m: m.callAccess, r: r.callAccess } }, 10000)
+    ok(!!quiet && quiet.m === 'denied' && quiet.r === 'denied', 'on a call whose sound is silent, that\'s said, with macOS\'s no, on the meeting and the floating card', quiet)
+    await sleep(1200) // asked again meanwhile, still no: the same tap
+    ok(taps().length === before + 1, '(while macOS says no, the tap is left as it is)', taps().slice(before))
+    // Allowed in System Settings meanwhile: asked again, the tap starts again by itself, with no
+    // restart and the recording going on, and the call is heard.
+    fs.writeFileSync(path.join(kit.bin, 'calltap.json'), JSON.stringify({ level: 3000, access: 'allowed' }))
+    ok(!!(await until(async () => (await api(`/meetings/${L.id}`)).callQuiet === false, 10000)), 'macOS says yes while it records: the call is heard, without a restart')
+    ok(taps().slice(before).join() === 'start denied,start allowed' && (await api(`/meetings/${L.id}`)).status === 'recording' && (await api('/calls')).recording?.callAccess === 'allowed', 'by starting its tap again, once, and the meeting still recording', taps().slice(before))
     await sleep(3000)
     ok(!shots().length, 'not allowed: no look at the call, someone talking or not', shots())
     call({ input: ['com.microsoft.teams2'], screen: true })

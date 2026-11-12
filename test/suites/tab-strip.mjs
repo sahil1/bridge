@@ -8,13 +8,21 @@
 // were until the pointer leaves the strip, so the next tab's × is under it; closing the tab on screen
 // shows the one after it; Ctrl+Shift+→ and dragging move a tab; side by side, both tabs on screen
 // keep their names and ×.
+// A right-click on a tab opens its menu, as wide as what it says: a new agent in its space, open it
+// beside, its colors (No color and Chrome's nine, each in the look's own), Close, Close other tabs
+// and Close tabs to the right. Red puts a red line under the tab, still there after a reload. From
+// the keyboard: Shift+F10 or the menu key opens it, ↓ and → move through it, Esc closes it with the
+// focus back on the tab; near the window's right and bottom edges it opens to the pointer's left and
+// above it. Close tabs to the right and Close other tabs close those, the agents still in the sidebar.
 // With Tab Groups on (a beta feature): each space's chip in its own color, before its tabs, a line in
 // that color under them; a click folds the group to its chip (how many, the most urgent dot), another
-// unfolds it; its right-click menu folds it, starts an agent in that space and closes its tabs;
+// unfolds it; its right-click menu, as wide as what it says (not stretched to the window's edge),
+// folds it, starts an agent in that space, has Chrome's nine colors and closes its tabs; a color
+// picked there, or in one of its tabs' menus, colors its chip and its line, still after a reload;
 // another computer's group is grey, at the end.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, TEST } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, withoutCutOff, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('tab-strip')
 const kit = await startKit('tab-strip')
@@ -71,6 +79,25 @@ try {
     return pg
   }
   const strip = (p, name) => p.locator('.ws-tabs').boundingBox().then((bx) => shot(p, name, { clip: { x: 0, y: 0, width: p.viewportSize().width, height: Math.round((bx?.y || 60) + (bx?.height || 40) + 12) } }))
+  // A page whose tabs are put in once, before it first opens, so a reload shows what it saved itself
+  // (open's store is put back on every load).
+  const seeded = async (look, w, more = {}) => {
+    const pg = await page(b, kit.url, { ...look, width: 1440, height: 900, store: more, before: (ctx) => ctx.addInitScript((x) => { try { if (!sessionStorage.getItem('seeded')) { sessionStorage.setItem('seeded', '1'); localStorage.setItem('cc-ws', JSON.stringify(x)) } } catch { /* no storage */ } }, w['cc-ws']) })
+    await pg.p.waitForSelector('.ws-tab', { timeout: 20000 }).catch(() => {})
+    await until(async () => (await pg.p.locator('.ws-tab').count()) === w['cc-ws'].tabs.length, 15000)
+    await pg.p.waitForTimeout(400)
+    return pg
+  }
+  const clear = (c) => !!c && !/^(transparent|rgba\(\d+, \d+, \d+, 0\))$/.test(c)
+  // A menu's edges, and how wide what it says is (each item's, the colors' row's).
+  const menuBox = (m) => m.evaluate((e) => {
+    const r = e.getBoundingClientRect()
+    const most = Math.max(...[...e.querySelectorAll('.menu-item, .tab-menu-colors')].map((x) => { const g = document.createRange(); g.selectNodeContents(x); return g.getBoundingClientRect().width }))
+    return { left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width), most: Math.round(most), width: innerWidth, height: innerHeight }
+  })
+  const focused = (p) => p.evaluate(() => { const e = document.activeElement; return e?.closest('.tab-menu') ? (e.getAttribute('aria-label') || e.textContent.trim()) : e?.dataset?.pane || e?.tagName })
+  // Chrome's colors in each look (tabstrip.css), as the browser gives them.
+  const RED = { light: 'rgb(217, 48, 37)', dark: 'rgb(242, 139, 130)' }
 
   for (const look of [{ mode: 'light', theme: 'sky' }, { mode: 'dark', theme: 'midnight' }]) {
     const t = look.mode
@@ -107,6 +134,43 @@ try {
       await p.mouse.move(700, 600)
       ok(!!(await until(async () => !(await card.count()), 2000)), `${t}: and leaving the strip hides it`)
       ok(errors.length === 0, `${t}: hover card: no page errors`, errors)
+      await ctx.close()
+    })
+
+    // ---------- A right-click on a tab: its menu, and its color ----------
+    await part(`${t}: tab menu`, async () => {
+      const { ctx, p, errors } = await seeded(look, ws(['view:meetings', A.checkout, A.weekly, A.board, 'view:map'], 'view:meetings'))
+      const weekly = p.locator(`.ws-tab[data-pane="${A.weekly}"]`)
+      const menu = p.locator('.tab-menu')
+      await weekly.click({ button: 'right' })
+      await menu.waitFor({ timeout: 5000 }).catch(() => {})
+      const items = (await menu.locator('.menu-item').allInnerTexts().catch(() => [])).map((x) => x.trim())
+      ok(items.join('|') === 'New agent in Reporting|Open beside the current tab|Close|Close other tabs|Close tabs to the right', `${t}: a right-click on a tab opens its menu: a new agent in its space, open it beside, close it, the others, those to its right`, items)
+      const mb = await menuBox(menu)
+      ok(mb.w <= mb.most + 40 && mb.right <= mb.width && mb.bottom <= mb.height, `${t}: the menu is as wide as what it says, inside the window`, mb)
+      const swatches = await menu.locator('.tab-menu-color').evaluateAll((es) => es.map((e) => ({ name: e.getAttribute('aria-label'), color: e.dataset.color || null, bg: getComputedStyle(e).backgroundColor, on: e.getAttribute('aria-checked') })))
+      const filled = swatches.filter((x) => x.color)
+      ok(swatches.length === 10 && swatches[0].name === 'No color' && swatches[0].on === 'true' && filled.length === 9 && new Set(filled.map((x) => x.bg)).size === 9 && filled.every((x) => clear(x.bg)) && filled.find((x) => x.color === 'red')?.bg === RED[t], `${t}: its colors: No color (ticked), then Chrome's nine, each in this look's own`, swatches)
+      await shot(p, `${tag}tab-strip-tab-menu-${t}`, { clip: { x: 0, y: 0, width: 1440, height: 420 } })
+      // The line under it, if there is one (asked of the tab, so none doesn't wait for one to come).
+      const line = () => weekly.evaluate((e) => { const l = e.querySelector('.ws-tab-line'); return l ? getComputedStyle(l).backgroundColor : null }).catch(() => null)
+      ok(!(await line()), `${t}: no line under it before a color is picked`)
+      await menu.locator('[data-color="red"]').click()
+      ok(!!(await until(async () => (await line()) === RED[t], 3000)) && (await menu.locator('[data-color="red"]').getAttribute('aria-checked')) === 'true', `${t}: Red puts a red line under the tab, the menu still open with Red ticked`, await line())
+      ok((await p.locator('.ws-tab .ws-tab-line').count()) === 1, `${t}: the other tabs have no line`)
+      await p.keyboard.press('Escape')
+      ok(!!(await until(async () => !(await menu.count()), 2000)), `${t}: Esc closes the menu`)
+      // Kept with the window's tabs: after a reload, still red.
+      await until(async () => /"red"/.test(await p.evaluate(() => localStorage.getItem('cc-ws'))), 3000)
+      await p.reload()
+      await p.waitForSelector(`.ws-tab[data-pane="${A.weekly}"]`, { timeout: 20000 }).catch(() => {})
+      ok(!!(await until(async () => (await line()) === RED[t], 8000)), `${t}: after a reload the tab's line is still red`, await line())
+      // No color takes it off.
+      await weekly.click({ button: 'right' })
+      await menu.locator('.tab-menu-none').click()
+      ok(!!(await until(async () => !(await line()), 3000)), `${t}: No color takes the line off`, await line())
+      await p.keyboard.press('Escape')
+      ok(withoutCutOff(errors).length === 0, `${t}: tab menu: no page errors`, errors)
       await ctx.close()
     })
 
@@ -205,6 +269,53 @@ try {
     await ctx.close()
   })
 
+  // ---------- The tab menu from the keyboard, near the window's edge, and closing from it ----------
+  await part('tab menu: keys and closing', async () => {
+    const { ctx, p, errors } = await open({ mode: 'light', theme: 'sky' }, ws(['view:meetings', A.checkout, A.deploy, A.weekly, A.board, 'view:map'], 'view:meetings'))
+    const menu = p.locator('.tab-menu')
+    const deploy = p.locator(`.ws-tab[data-pane="${A.deploy}"]`)
+    const ids = async () => (await geo(p)).tabs.map((y) => y.id)
+    // Shift+F10 on the focused tab: its menu, the focus on its first item; ↓ the next, ↓ again its
+    // colors (at the one it has, No color), → along them; Esc closes it, the focus back on the tab.
+    await deploy.focus()
+    await p.keyboard.press('Shift+F10')
+    await menu.waitFor({ timeout: 3000 }).catch(() => {})
+    const walk = [await focused(p)]
+    for (const k of ['ArrowDown', 'ArrowDown', 'ArrowRight', 'ArrowRight']) { await p.keyboard.press(k); walk.push(await focused(p)) }
+    ok(walk.join('|') === 'New agent in shop|Open beside the current tab|No color|Grey|Blue', 'Shift+F10 on a tab opens its menu at its first item; ↓ moves down it, to its colors, → along them', walk)
+    await p.keyboard.press('Escape')
+    ok(!!(await until(async () => !(await menu.count()), 2000)) && (await focused(p)) === A.deploy, 'Esc closes it, the focus back on the tab', await focused(p))
+    await p.keyboard.press('ContextMenu')
+    ok(!!(await until(() => menu.isVisible(), 2000)) && (await focused(p)) === 'New agent in shop', 'the menu key opens it too', await focused(p))
+    await p.keyboard.press('Escape')
+    // Near the window's right and bottom edges: to the pointer's left and above it, inside the window.
+    const at = await deploy.evaluate((e) => { const x = innerWidth - 12, y = innerHeight - 12; e.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 })); return { x, y } })
+    await menu.waitFor({ timeout: 3000 }).catch(() => {})
+    const mb = await menuBox(menu)
+    ok(mb.right <= at.x + 1 && mb.bottom <= at.y + 1 && mb.left >= 0 && mb.top >= 0 && mb.w <= mb.most + 40, 'near the window\'s right and bottom edges it opens to the pointer\'s left and above it', { mb, at })
+    await p.keyboard.press('Escape')
+    // A view on screen: no new agent, and nothing to open beside it.
+    await p.locator('.ws-tab[data-pane="view:meetings"]').click({ button: 'right' })
+    const view = (await menu.locator('.menu-item').allInnerTexts().catch(() => [])).map((x) => x.trim())
+    ok(view.join('|') === 'Close|Close other tabs|Close tabs to the right', 'the tab on screen, a view: Close, Close other tabs, Close tabs to the right', view)
+    await p.keyboard.press('Escape')
+    // Close tabs to the right, then Close other tabs.
+    await deploy.click({ button: 'right' })
+    await menu.locator('.menu-item', { hasText: 'Close tabs to the right' }).click()
+    ok(!!(await until(async () => (await ids()).join() === ['view:meetings', A.checkout, A.deploy].join(), 3000)), 'Close tabs to the right closes those after it', await ids())
+    await p.locator(`.ws-tab[data-pane="${A.checkout}"]`).click({ button: 'right' })
+    await menu.locator('.menu-item', { hasText: 'Close other tabs' }).click()
+    const alone = await until(async () => { const g = await geo(p); return g.tabs.length === 1 && g.tabs[0].id === A.checkout && g.tabs[0].main && g }, 3000)
+    ok(!!alone, 'Close other tabs leaves it alone, on screen', (await geo(p)).tabs)
+    ok(/Weekly numbers/.test(await p.locator('.rail').innerText()), 'the agents whose tabs closed are still in the sidebar')
+    await p.locator(`.ws-tab[data-pane="${A.checkout}"]`).click({ button: 'right' })
+    const lone = (await menu.locator('.menu-item').allInnerTexts().catch(() => [])).map((x) => x.trim())
+    ok(lone.join('|') === 'New agent in shop|Close', 'a tab alone has nothing else to close', lone)
+    await p.keyboard.press('Escape')
+    ok(errors.length === 0, 'tab menu: no page errors', errors)
+    await ctx.close()
+  })
+
   // ---------- Tab Groups ----------
   await trial(true)
   for (const look of [{ mode: 'light', theme: 'sky' }, { mode: 'dark', theme: 'midnight' }]) {
@@ -212,7 +323,7 @@ try {
     await part(`${t}: Tab Groups`, async () => {
       const remote = 'remote:desk1:p9'
       const tabs = ['view:meetings', 'view:map', A.checkout, A.deploy, A.weekly, A.board, A.rounding, remote]
-      const { ctx, p, errors } = await open(look, { ...ws(tabs, 'view:meetings'), 'cc-remote-tabs': { [remote]: { title: 'Nightly export', device: 'Desk' } } })
+      const { ctx, p, errors } = await seeded(look, ws(tabs, 'view:meetings'), { 'cc-remote-tabs': { [remote]: { title: 'Nightly export', device: 'Desk' } } })
       const s = p.locator('.ws-tabs-scroll')
       await until(async () => (await s.locator('.ws-group').count()) >= 4, 10000)
       const items = await s.evaluate((e) => [...e.children].map((x) => {
@@ -224,7 +335,6 @@ try {
       const chip = (name) => items.findIndex((x) => x.chip && x.text === name)
       const rep = chip('Reporting'), sh = chip('shop'), desk = chip('Desk')
       ok(rep >= 0 && items[rep + 1]?.id === A.weekly && items[rep + 2]?.id === A.board && items[rep].right <= items[rep + 1].left, `${t}: Reporting's chip is before its tabs`, items.map((x) => (x.chip ? `[${x.text}]` : x.id)))
-      const clear = (c) => !/^(transparent|rgba\(\d+, \d+, \d+, 0\))$/.test(c)
       ok(clear(items[rep].bg) && items[rep + 1].line === items[rep].bg && items[rep + 2].line === items[rep].bg && items[rep + 1].lineBottom === items[rep + 1].bottom, `${t}: the chip is filled in its color, and a line in that color runs under its tabs`, items.slice(rep, rep + 3))
       ok(sh >= 0 && clear(items[sh].bg) && items[sh].bg !== items[rep].bg, `${t}: each space has its own color`, [items[sh]?.bg, items[rep].bg])
       ok(desk === items.length - 2 && items.at(-1).id === remote && /^rgb\((9[0-9]|1[0-9]{2}|[5-9][0-9]), /.test(items[desk].bg), `${t}: another computer's group at the end, grey`, items[desk])
@@ -245,7 +355,12 @@ try {
       const menu = p.locator('.tab-group-menu')
       const said = (await menu.innerText().catch(() => '')).replace(/\s+/g, ' ')
       ok(/Fold its tabs away/.test(said) && /New agent in Reporting/.test(said) && /Close its 2 tabs/.test(said), `${t}: its right-click menu folds it, starts an agent in its space and closes its tabs`, said)
-      await shot(p, `${tag}tab-strip-group-menu-${t}`, { clip: { x: 0, y: 0, width: 1440, height: 260 } })
+      // As wide as what it says: the menu's own right edge (styles.css) once stretched it to the window's.
+      const gm = await menuBox(menu)
+      ok(gm.w <= gm.most + 40 && gm.right < gm.width - 40, `${t}: the group's menu is as wide as what it says, not stretched to the window's edge`, gm)
+      const own = await menu.locator('.tab-menu-color').evaluateAll((es) => es.map((e) => ({ color: e.dataset.color || null, bg: getComputedStyle(e).backgroundColor, on: e.getAttribute('aria-checked') })))
+      ok(own.length === 9 && own.every((x) => x.color) && own.filter((x) => x.on === 'true').length === 1 && own.find((x) => x.on === 'true').bg === items[rep].bg, `${t}: and Chrome's nine colors, the group's own ticked`, own)
+      await shot(p, `${tag}tab-strip-group-menu-${t}`, { clip: { x: 0, y: 0, width: 1440, height: 320 } })
       if (t === 'light') {
         await menu.locator('.menu-item', { hasText: 'New agent in Reporting' }).click()
         ok(!!(await until(() => p.locator('.modal').first().isVisible(), 5000)), `${t}: New agent in Reporting opens New agent`)
@@ -256,7 +371,31 @@ try {
         ok(!!(await until(async () => !(await s.locator(`.ws-tab[data-pane="${A.weekly}"], .ws-tab[data-pane="${A.board}"]`).count()) && !(await s.locator('.ws-group', { hasText: 'Reporting' }).count()), 3000)), `${t}: Close its 2 tabs closes them, and its chip goes`)
         ok(/Weekly numbers/.test(await p.locator('.rail').innerText()), `${t}: its agents are still in the sidebar`)
       }
-      ok(errors.length === 0, `${t}: groups: no page errors`, errors)
+      // A color for shop's group from its chip's menu: its chip, and the line under each of its tabs.
+      const shopIs = () => s.evaluate((e, ids) => {
+        const chip = [...e.querySelectorAll('.ws-group')].find((x) => x.innerText.trim() === 'shop')
+        return { chip: chip && getComputedStyle(chip).backgroundColor, lines: ids.map((id) => { const l = e.querySelector(`.ws-tab[data-pane="${id}"] .ws-tab-line`); return l && getComputedStyle(l).backgroundColor }) }
+      }, [A.checkout, A.deploy])
+      const paints = (x, c) => x.chip === c && x.lines.every((l) => l === c)
+      const tm = p.locator('.tab-menu')
+      await s.locator('.ws-group', { hasText: 'shop' }).click({ button: 'right' })
+      const purple = await tm.locator('[data-color="purple"]').evaluate((e) => getComputedStyle(e).backgroundColor).catch(() => null)
+      await tm.locator('[data-color="purple"]').click()
+      ok(clear(purple) && !!(await until(async () => paints(await shopIs(), purple), 3000)), `${t}: Purple in the chip's menu colors its chip and the line under its tabs`, { purple, now: await shopIs() })
+      await p.keyboard.press('Escape')
+      // A tab in it: its menu has the group's color ticked (and no No color), and colors the group.
+      await s.locator(`.ws-tab[data-pane="${A.deploy}"]`).click({ button: 'right' })
+      const ticked = await tm.locator('.tab-menu-color[aria-checked="true"]').getAttribute('data-color').catch(() => null)
+      const cyan = await tm.locator('[data-color="cyan"]').evaluate((e) => getComputedStyle(e).backgroundColor).catch(() => null)
+      ok(ticked === 'purple' && !(await tm.locator('.tab-menu-none').count()), `${t}: a grouped tab's menu has its group's color ticked`, ticked)
+      await tm.locator('[data-color="cyan"]').click()
+      ok(clear(cyan) && !!(await until(async () => paints(await shopIs(), cyan), 3000)), `${t}: Cyan in one of its tabs' menus colors the whole group`, { cyan, now: await shopIs() })
+      await p.keyboard.press('Escape')
+      // Kept with the window's tabs.
+      await until(async () => /"cyan"/.test(await p.evaluate(() => localStorage.getItem('cc-ws'))), 3000)
+      await p.reload()
+      ok(!!(await until(async () => paints(await shopIs().catch(() => ({ lines: [] })), cyan), 15000)), `${t}: after a reload the group is still cyan`, await shopIs().catch((e) => e.message))
+      ok(withoutCutOff(errors).length === 0, `${t}: groups: no page errors`, errors)
       await ctx.close()
     })
   }

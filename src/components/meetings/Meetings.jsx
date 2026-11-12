@@ -85,11 +85,13 @@ function AskScreen() {
   )
 }
 // A call that's silent while it records: what to turn on (the second list on System Settings' page,
-// which the top one doesn't cover), then Restart and Reset as for the screen (allowcall.jsx).
-function QuietCall() {
+// which the top one doesn't cover), then Restart and Reset as for the screen (allowcall.jsx). Unless
+// macOS lets Bridge AI hear it (access, the server's): then the silence is the call's own.
+function QuietCall({ access }) {
   const { data } = useScreenAccess()
-  const a = useAllowCall('sound', { recording: true, started: data?.started })
+  const a = useAllowCall('sound', { recording: true, started: data?.started, access })
   const s = allowSteps('sound', a, { link: true })
+  if (access === 'allowed') return <p className="mt-hint-call mt-quiet-call muted small" role="status">{t('No sound from the call.')} {t('macOS lets Bridge AI hear it, so nothing has played yet. If people are talking, check the call\'s sound plays on this Mac.')}</p>
   return (
     <p className="mt-hint-call mt-quiet-call muted small" role="status">
       {t('No sound from the call yet. If one is playing and this stays quiet, turn on Bridge AI in System Audio Recording Only: the second list under System Settings › Privacy & Security › Screen & System Audio Recording. Bridge AI on in Screen Recording, the list above it, doesn\'t cover the sound.')}{s.say} {s.acts}
@@ -127,7 +129,7 @@ function RecordingBar({ id, data }) {
       {phone && !r.missed && <p className="mt-hint-call muted small">{t('Keep Bridge AI in front while it records: a phone stops the mic of an app in the background.')}</p>}
       {data?.callError && <p className="mt-trouble small" role="status">{data.callError} {t('Your mic still records.')}</p>}
       {call === 'on' && !m.screen && <AskScreen />}
-      {call === 'on' && data?.callQuiet && <QuietCall />}
+      {call === 'on' && data?.callQuiet && <QuietCall access={data.callAccess} />}
     </div>
   )
 }

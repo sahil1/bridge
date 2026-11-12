@@ -307,24 +307,48 @@ export function wav(pcm) {
 // "them" source. Elsewhere, or without it, a meeting records your mic only (which still hears a
 // call on speakers).
 const taps = new Map() // id -> process
+// What macOS says about the call's sound, by meeting: 'allowed', 'denied' or 'unknown' (not asked
+// yet, or a macOS that doesn't say), as the tap was told when it started, then as calltap --check is
+// told while it isn't 'allowed'. Without System Audio Recording a tap gets silence, not an error, so
+// this is what tells a call nobody's talking on from one macOS won't let Bridge AI hear. And since a
+// program started now gets today's answer, the tap is started again as soon as that answer changes
+// (allowed, or forgotten by Reset and ask again, so macOS asks): no restart, and the recording goes
+// on. BRIDGE_TAP_RECHECK_MS: how often it asks again.
+const access = new Map()
+const rechecks = new Map() // id -> timer
+const RECHECK = Number(process.env.BRIDGE_TAP_RECHECK_MS) || 5000
 // BRIDGE_CALLTAP: another program in its place (tests use a stand-in, so nothing asks macOS).
 export const tapBin = () => { const f = process.env.BRIDGE_CALLTAP || path.join(ROOT, 'native', 'bin', 'calltap'); return (IS_MAC || process.env.BRIDGE_CALLTAP) && fs.existsSync(f) ? f : null }
-function listen(id) {
+// gapFrom: started again during the recording, when the one before stopped; that moment is put in
+// as silence, so what the call says after stays in step with your mic.
+function listen(id, { gapFrom = 0 } = {}) {
   const bin = tapBin()
   if (!bin) return IS_MAC ? 'This copy of Bridge AI can\'t record a call\'s sound, so your mic records the meeting.' : 'Recording a call\'s sound is on the Mac for now, so your mic records the meeting.'
   const p = spawn(bin, ['--rate', String(RATE)], { stdio: ['ignore', 'pipe', 'pipe'] })
   taps.set(id, p)
   let rest = null
+  let gap = gapFrom
   p.stdout.on('data', (b) => {
+    if (gap) {
+      const ms = Math.min(10_000, Date.now() - gap - (b.length / 2 / RATE) * 1000)
+      gap = 0
+      if (ms > 0) audio(id, 'them', Buffer.alloc(Math.round((ms * RATE) / 1000) * 2)).catch(() => {})
+    }
     const buf = rest ? Buffer.concat([rest, b]) : b
     const even = buf.length - (buf.length % 2)
     rest = even < buf.length ? buf.subarray(even) : null
     if (even) audio(id, 'them', buf.subarray(0, even)).catch(() => {})
   })
   let err = ''
-  p.stderr.on('data', (b) => { err = (err + b).slice(-1000) })
+  let told = false
+  p.stderr.on('data', (b) => {
+    err = (err + b).slice(-1000)
+    const said = !told && /^access (allowed|denied|unknown)$/m.exec(err)?.[1]
+    if (said && taps.get(id) === p) { told = true; access.set(id, said); recheck(id) }
+  })
   p.on('error', () => {})
   p.on('exit', (code) => {
+    if (taps.get(id) !== p) return // started again in its place
     taps.delete(id)
     const m = readJSON(path.join(DIR, id, 'meeting.json'))
     const said = err.match(/error: (.+)/)?.[1]
@@ -332,7 +356,35 @@ function listen(id) {
   })
   return null
 }
-function unlisten(id) { const p = taps.get(id); taps.delete(id); if (p) try { p.kill('SIGTERM') } catch { /* gone */ } }
+// While macOS hasn't said yes: ask again in a while, and start the tap again once the answer is
+// anything but no.
+function recheck(id) {
+  clearTimeout(rechecks.get(id))
+  rechecks.delete(id)
+  const bin = tapBin()
+  if (!bin || !taps.has(id) || access.get(id) === 'allowed') return
+  rechecks.set(id, setTimeout(() => {
+    rechecks.delete(id)
+    execFile(bin, ['--check'], { timeout: 5000 }, (_e, out) => {
+      if (!taps.has(id)) return
+      const now = /^(allowed|denied|unknown)\b/.exec(String(out || '').trim())?.[1]
+      if (now && now !== access.get(id) && now !== 'denied') {
+        const old = taps.get(id)
+        taps.delete(id)
+        access.delete(id)
+        try { old.kill('SIGTERM') } catch { /* gone */ }
+        listen(id, { gapFrom: Date.now() })
+        return
+      }
+      if (now) access.set(id, now)
+      recheck(id)
+    })
+  }, RECHECK))
+}
+// What macOS says about this meeting's call sound ('allowed', 'denied', 'unknown'), or null without
+// a tap that said.
+export const callAccess = (id) => access.get(id) || null
+function unlisten(id) { const p = taps.get(id); taps.delete(id); access.delete(id); clearTimeout(rechecks.get(id)); rechecks.delete(id); if (p) try { p.kill('SIGTERM') } catch { /* gone */ } }
 
 // ---------- Transcribing, one stretch at a time ----------
 // A queue for every meeting: local engines take one stretch at a time (two at once would only
@@ -756,7 +808,7 @@ export function get(id) {
   // me: your name (Settings › General), for your lines.
   // In a room: how many voices, and telling them apart while it's going (the model downloading).
   const room = voices.of(id)
-  return { ...m, voices: room ? { src: room.src || 'you', speakers: room.speakers, names: room.names || {}, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assistAt: help.at || null, assisting: assisting.has(id), assistLevel: assistLevel() }
+  return { ...m, voices: room ? { src: room.src || 'you', speakers: room.speakers, names: room.names || {}, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, callAccess: callAccess(id), partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assistAt: help.at || null, assisting: assisting.has(id), assistLevel: assistLevel() }
 }
 
 export function setKind(id, kind) { return patchMeta(id, { kind: KINDS[kind] ? kind : 'general', kindPicked: true }) }
