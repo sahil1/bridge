@@ -2,6 +2,24 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.16.1
+
+A right-click menu on tabs, with colors for tabs and tab groups. Fixes: a call's sound comes in as soon as macOS allows it, and the steps to allow it no longer get stuck after quitting Bridge AI.
+
+<!-- rollout: 10 -->
+
+### What's new
+
+- **A right-click menu on every tab**: New agent in its space, Open beside the current tab, its color, Close, Close other tabs and Close tabs to the right. Shift+F10 or the menu key opens it on the focused tab, the arrow keys move through it and Esc closes it.
+- **Tab colors**: pick one of nine colors in a tab's menu and a line in that color runs under the tab (No color takes it off). With Tab Groups on, a tab in a group colors the whole group, and a group's chip menu has the same colors. A reload keeps them.
+
+### Fixes
+
+- **A call's sound comes in as soon as macOS allows it**: while a call is silent because Bridge AI isn't on in System Audio Recording Only, Bridge AI asks macOS again every few seconds and starts hearing the call once it's turned on, with no restart and the recording going on.
+- **"No sound from the call" no longer gets stuck after quitting Bridge AI**: quitting, and macOS's own Quit & Reopen, leave Bridge AI's server running. The warning now counts any restart since System Settings was opened, keeps its step when the window opens again, and says to restart Bridge AI from there; Reset and ask again follows if a restart hasn't helped.
+- **When macOS lets Bridge AI hear the call and it's silent, the warning says so**, with nothing to turn on.
+- **A Tab Groups chip's right-click menu is as wide as what it says**: it stretched from the pointer to the right edge of the window. It now opens to the left of or above the pointer when it would go past the window's edge.
+
 ## 3.16.0
 
 A live whiteboard of a meeting while it records; comments with @bridge on an Excel file's cells, a PowerPoint's slides and a whiteboard's shapes, as on a Word file's words; and a new sheet written from what you say it's for. Each is in Beta Features, off to start.
