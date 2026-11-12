@@ -412,6 +412,8 @@ try {
   {
     const { p, errors } = await open({ store: { 'cc-today-tab': 'overview' } })
     const row = p.locator('.agenda .ev', { hasText: SOON.title })
+    // Run just before midnight, it starts tomorrow: under Tomorrow, folded.
+    if (ymd(SOON.start) !== ymd(NOW)) await p.locator('.ag-tomorrow button').click()
     await until(() => row.count(), 15000)
     await row.locator('.ev-main').click()
     const gu = row.locator('.ev-more .gu')
