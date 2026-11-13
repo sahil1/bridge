@@ -6,8 +6,8 @@ import { Menu } from '../Rail.jsx'
 import { api, usePoll, onThisComputer, refetch } from '../../api.js'
 import { t, tx, locale, tn } from '../../i18n/index.js'
 import { usePersisted, Handle, PaneHeader, useMedia } from '../layout.jsx'
-import { useMeetings, clock, length, ScreenButton, SectionButton } from './recording.jsx'
-import { byDay, timeOf, useSelection, BulkBar } from './bulk.jsx'
+import { useMeetings, clock, length, ScreenButton, SectionButton, openMeeting } from './recording.jsx'
+import { byDay, day, timeOf, useSelection, BulkBar } from './bulk.jsx'
 import { useMeetingMenu, foldersOf, ConfirmDelete, FolderPick, chiefSaid } from './actions.jsx'
 import { AskPanel, md } from './ask.jsx'
 import { FixWord, TranscribeAgain, useChatModels, NOTE_LANGS, Dialog, openMemory } from './tools.jsx'
@@ -326,25 +326,28 @@ export function MeetingsHome({ onOpen }) {
           <h3>{g.d}</h3>
           {g.items.map((x) => {
             const hit = q.trim() && hits?.results.get(x.id)
+            // The combined meeting it's part of: a tag that opens it.
+            const whole = x.partOf ? all.find((y) => y.id === x.partOf && y.parts?.includes(x.id)) : null
             return (
               <div key={x.id} className={`mt-row${sel.has(x.id) ? ' picked' : ''}`}>
                 <label className="mt-tick-hit"><input type="checkbox" className="mt-pick" checked={sel.has(x.id)} onChange={(e) => toggle(x.id, { range: e.nativeEvent.shiftKey })} aria-label={t('Pick {title}', { title: x.title })} /></label>
                 <button type="button" className="mt-row-open" onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) { toggle(x.id, { range: e.shiftKey }); return } onOpen?.(x.id) }} onContextMenu={(e) => menu.open(e, x)}>
                   <span className="mt-row-main">
                     <b>{hit?.where === 'title' ? <Marked text={x.title} terms={hits.terms} /> : x.title}</b>
-                    <span className="muted small">{timeOf(x.startedAt)} · {x.status === 'recording' ? t('recording') : x.status === 'paused' ? t('paused') : length(x.seconds)}{x.event?.attendees?.length ? ` · ${t('{n} people', { n: x.event.attendees.length })}` : ''}{!place && x.folder ? <span className="mt-in"> · <Icon name="folder" size={10} /> {x.folder}</span> : null}</span>
+                    <span className="muted small">{timeOf(x.startedAt)} · {x.status === 'recording' ? t('recording') : x.status === 'paused' ? t('paused') : length(x.seconds)}{x.event?.attendees?.length ? ` · ${t('{n} people', { n: x.event.attendees.length })}` : ''}{!place && x.folder ? <span className="mt-in"> · <Icon name="folder" size={10} /> {x.folder}</span> : null}{x.parts ? <span className="mt-in mt-nparts"> · <Icon name="layers" size={10} /> {t('{n} parts', { n: x.parts.length })}</span> : null}</span>
                     {hit?.snippet && <span className="mt-hit small"><b>{hit.where === 'transcript' ? `${hit.who} ${hit.t}` : t(WHERE[hit.where])}</b> <Marked text={hit.snippet} terms={hits.terms} /></span>}
                   </span>
                   {x.status === 'recording' && <span className="rec-dot" aria-label={t('Recording')} />}
                   {x.status === 'transcribing' && <span className="muted small">{t('finishing…')}</span>}
                   {x.hasSummary && <Icon name="sparkle" size={13} className="muted" />}
                 </button>
+                {whole && <button type="button" className="mt-partof" onClick={() => onOpen?.(whole.id)} title={t('Part of "{title}", a combined meeting. Click to open it.', { title: whole.title })}><Icon name="layers" size={10} /> <span>{whole.title}</span></button>}
               </div>
             )
           })}
         </section>
       ))}
-      <BulkBar selection={selection} list={all} />
+      <BulkBar selection={selection} list={all} onOpen={onOpen} />
       {menu.msg && <p className={`small ${menu.msg.error ? 'error-text' : 'muted'}`} role="status">{menu.msg.text}</p>}
       {menu.node}
       </>}
@@ -504,9 +507,9 @@ function WrittenFrom({ from, onView }) {
     from.pictures > 0 && { key: 'pictures', label: `${t('Pictures')} · ${from.pictures}`, view: 'files' },
     from.files > 0 && { key: 'files', label: `${t('Files')} · ${from.files}`, view: 'files' },
     from.invite && { key: 'invite', label: t('The invite') },
-    { key: 'transcript', label: t('Transcript'), view: 'transcript' },
+    from.parts ? { key: 'parts', label: `${t('Meetings')} · ${from.parts}`, view: 'parts' } : { key: 'transcript', label: t('Transcript'), view: 'transcript' },
   ].filter(Boolean)
-  if (chips.length < 2) return null // the transcript alone: nothing to point out
+  if (chips.length < 2 && !from.parts) return null // the transcript alone: nothing to point out
   return (
     <p className="mt-from small" data-from={chips.map((c) => c.key).join(' ')}>
       <span className="muted">{t('Written from')}</span>
@@ -523,7 +526,8 @@ function WrittenFrom({ from, onView }) {
 // beside the first three on a wide screen. Each has its own Copy. While it records, your notes stay
 // in view whatever else you look at: beside it on a wide screen, above it on a phone.
 // Board: AI Assist's live board, a beta feature (board.jsx), there once the server says how it is.
-const VIEWS = [['summary', 'sparkle', tx('Summary')], ['assist', 'bulb', tx('Suggestions')], ['board', 'shapes', tx('Board')], ['mine', 'edit', tx('My notes')], ['transcript', 'chat', tx('Transcript')], ['files', 'paperclip', tx('Files')]]
+// A combined meeting (several as one) has its summary, your notes on it and the meetings in it.
+const VIEWS = [['summary', 'sparkle', tx('Summary')], ['assist', 'bulb', tx('Suggestions')], ['board', 'shapes', tx('Board')], ['mine', 'edit', tx('My notes')], ['transcript', 'chat', tx('Transcript')], ['parts', 'layers', tx('Meetings')], ['files', 'paperclip', tx('Files')]]
 // Resume recording is offered in the header for this long after a meeting ended (stopped by
 // mistake, or by itself); after, it's in ⋯.
 const RESUME_MS = 4 * 3600e3
@@ -562,7 +566,7 @@ export function MeetingPage({ id, onBack }) {
   const [menu, setMenu] = useState(false)
   const [fix, setFix] = useState(null) // { from } while fixing a word
   const [sel, setSel] = useState(null) // { text, top, left }: words picked in the transcript
-  const [dialog, setDialog] = useState(null) // 'again' | 'calendar' | 'delete' | 'folder'
+  const [dialog, setDialog] = useState(null) // 'again' | 'calendar' | 'delete' | 'folder' | 'add'
   const [micErr, setMicErr] = useState(null) // Resume recording, and macOS is blocking the mic
   const [whoAt, setWhoAt] = useState(null) // { x, y, l }: the menu for who said a line
   const [naming, setNaming] = useState(null) // { l, name }: a name typed for a line
@@ -628,7 +632,7 @@ export function MeetingPage({ id, onBack }) {
   // Recorded without the calendar event it was for: the events around then, to take its people from.
   // Named after one while another was on too (back to back, or double-booked): the others, to say
   // it was one of those instead.
-  const noPeople = !!data && !(data.event?.attendees || []).length
+  const noPeople = !!data && !data.parts && !(data.event?.attendees || []).length
   const ofEvent = data?.event?.title ? `${data.event.title}|${data.event.start || ''}` : null
   // When the calendar can't be read (Bridge AI isn't allowed to yet), that's said, with Allow access.
   useEffect(() => {
@@ -698,6 +702,16 @@ export function MeetingPage({ id, onBack }) {
   const resumeRec = async () => {
     setBusy('resume'); setMsg(null); setMicErr(null)
     try { await m.recordAgain(id); refresh() } catch (e) { if (e.code === 'mic') setMicErr(e); else setMsg({ error: true, text: e.message }) } finally { setBusy(null) }
+  }
+  // A combined meeting's meetings: one more, or one taken out (it stays as it is, on its own).
+  const addPart = (pid) => act('parts', async () => { await api(`/meetings/${encodeURIComponent(id)}/parts`, { method: 'POST', body: { id: pid } }); refetch('/meetings') })
+  const takeOut = (p) => {
+    if (data.partList.length <= 2 && !window.confirm(t('With one meeting left, this combined meeting is separated: its combined summary and your notes on it go, and the meetings stay as they are. Take it out?'))) return
+    act('parts', async () => {
+      const r = await api(`/meetings/${encodeURIComponent(id)}/parts/${encodeURIComponent(p.id)}`, { method: 'DELETE' })
+      refetch('/meetings')
+      if (r.separated) onBack?.()
+    })
   }
   const archive = (on) => act('archive', async () => { await api(`/meetings/${encodeURIComponent(id)}`, { method: 'PATCH', body: { archived: on } }); setMsg({ text: on ? t("Archived. It's under Archived in the list, and left out of search.") : t('Back in the list.') }) })
   // Who said a line: a name (null: back to You or Them). The first one named offers the same name
@@ -784,14 +798,18 @@ export function MeetingPage({ id, onBack }) {
   if (!data) return <div className="mt-view"><div className="mt-page"><p className="muted small mt-loading">{t('Loading…')}</p></div></div>
   const done = data.status === 'done'
   const recording = isRecording
+  const combined = !!data.parts
+  const partList = data.partList || []
+  // What's beside the summary and your notes: the transcript, or a combined meeting's meetings.
+  const side = combined ? 'parts' : 'transcript'
   // While it records, your notes are always shown, so the views are what goes with them: the
   // transcript, or AI Assist's suggestions when they're on. After, the summary once it's being written.
   // With the live board on (and Suggest what to ask off), its Board.
   const lb = data.liveBoard || null
   const showing = recording
     ? (view && view !== 'mine' ? view : data.assist ? 'assist' : lb?.on ? 'board' : 'transcript')
-    : view || (data.summary || data.summarizing || data.summaryError ? 'summary' : 'mine')
-  const views = VIEWS.filter(([v]) => (v !== 'assist' || recording || data.assist || data.assistItems?.length) && (v !== 'board' || (!!lb && (recording || lb.on || !!lb.id))) && (v !== 'mine' || !recording))
+    : view || (combined || data.summary || data.summarizing || data.summaryError ? 'summary' : 'mine')
+  const views = VIEWS.filter(([v]) => (combined ? ['summary', 'mine', 'parts'].includes(v) : v !== 'parts') && (v !== 'assist' || recording || data.assist || data.assistItems?.length) && (v !== 'board' || (!!lb && (recording || lb.on || !!lb.id))) && (v !== 'mine' || !recording))
   // The lines the cleanup left out are kept, and shown on request (Put back on one keeps it).
   const all = data.transcript || []
   const lines = all.filter((l) => !l.dropped)
@@ -812,7 +830,7 @@ export function MeetingPage({ id, onBack }) {
   const pics = [...shots, ...caps.filter((c) => c.kind === 'paste')].map((c) => ({ c, src: pictureUrl(id, c), name: c.note ? t('{name} at {time}', { name: c.note, time: clock(c.t) }) : c.kind === 'paste' ? t('Picture at {time}', { time: clock(c.t) }) : t('The screen at {time}', { time: clock(c.t) }) }))
   const openPic = (c) => setBig(Math.max(0, pics.findIndex((p) => p.c.id === c.id)))
   // The transcript beside the view (wide); while it records, what's picked beside your notes.
-  const beside = !recording && wide && split && showing !== 'transcript'
+  const beside = !recording && wide && split && showing !== side
   const two = recording ? wide : beside
   // As text: who said what, and a heading where each section starts.
   const said = () => {
@@ -867,7 +885,7 @@ export function MeetingPage({ id, onBack }) {
     recording && { label: t('Suggest what to ask'), hint: t('While it records: what to ask, raise or check next, from what\'s said, the invite and the files'), on: !!data.assist, run: suggesting },
     recording && lb && { label: t('Keep a live board'), hint: t('While it records: what\'s decided, a timeline, who does what and open questions, on a whiteboard of its own'), on: !!lb.on, run: boarding },
     !recording && lb?.id && { label: t('Open the board'), hint: t('The whiteboard AI Assist kept of this meeting'), run: () => openBoard(lb.id) },
-    !recording && lines.length > 0 && { label: data.summary ? t('Write the summary again') : t('Write the summary'), hint: t('With the language, model and template under Summary'), disabled: busy === 'summary' || data.summarizing, run: summarize },
+    !recording && (lines.length > 0 || combined) && { label: data.summary ? t('Write the summary again') : t('Write the summary'), hint: combined ? t('An overview across its meetings, from their summaries and notes') : t('With the language, model and template under Summary'), disabled: busy === 'summary' || data.summarizing, run: summarize },
     done && lines.length > 0 && { label: data.cleanedAt ? t('Clean up the transcript again') : t('Clean up the transcript'), hint: t('Misheard words and names fixed, and what nobody said left out'), disabled: busy === 'clean', run: cleanUp },
     heard && { label: t('Work out who said each line'), hint: t('From names said, the screen and who was invited'), disabled: busy === 'who', run: nameAll },
     canTell && voiced && { label: t('Work out who each voice is'), hint: t('From names said and who was invited'), disabled: busy === 'who' || !!working, run: nameAll },
@@ -881,10 +899,12 @@ export function MeetingPage({ id, onBack }) {
     <>
       {when != null
         ? <input className="mt-inline" type="datetime-local" value={when} autoFocus onChange={(e) => setWhen(e.target.value)} onBlur={saveWhen} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setWhen(null) }} aria-label={t('When the meeting was')} />
-        : <button type="button" className="sub-where mt-when" onClick={() => setWhen(localInput(data.startedAt))} title={t('When it was. Click to change')}>
+        : <button type="button" className="sub-where mt-when" disabled={combined} onClick={() => setWhen(localInput(data.startedAt))} title={combined ? t('From its first meeting; how long they were together') : t('When it was. Click to change')}>
           {new Date(data.startedAt).toLocaleString(locale(), { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{done || data.seconds ? ` · ${length(data.seconds)}` : ''}
         </button>}
-      {people != null
+      {combined && <button type="button" className="path-chip mt-nparts" onClick={() => setView('parts')} title={t('The meetings combined in this one')}><Icon name="layers" size={10} /> <span>{t('{n} parts', { n: partList.length })}</span></button>}
+      {data.combined && <button type="button" className="path-chip mt-partof-chip" onClick={() => openMeeting(data.combined.id)} title={t('Part of "{title}", a combined meeting. Click to open it.', { title: data.combined.title })}><Icon name="layers" size={10} /> <span>{data.combined.title}</span></button>}
+      {combined ? null : people != null
         ? <input className="mt-inline mt-people-in" value={people} autoFocus placeholder={t('Names, with commas')} onChange={(e) => setPeople(e.target.value)} onBlur={savePeople} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setPeople(null) }} aria-label={t('Who was there')} />
         : <button type="button" className="path-chip mt-people" onClick={() => setPeople(who.join(', '))} title={who.length ? `${who.join(', ')}\n${t('Click to change')}` : t('Who was there? Click to add them')}><Icon name="users" size={10} /> <span>{who.length ? `${who.slice(0, 3).join(', ')}${who.length > 3 ? ` +${who.length - 3}` : ''}` : t('Add people')}</span></button>}
       {people == null && !who.length && calWhy === 'calendarAccess' && (
@@ -912,10 +932,13 @@ export function MeetingPage({ id, onBack }) {
       </button>
     </>
   )
-  // Resume recording: on a meeting that has ended.
-  const canResume = done && !!m?.recordAgain
+  // Resume recording: on a meeting that has ended, not a combined one (it has no recording).
+  const canResume = done && !combined && !!m?.recordAgain
   const recent = Date.now() - Date.parse(data.endedAt || data.startedAt) < RESUME_MS
   const resumeBtn = <button type="button" className="btn small mt-resume" onClick={resumeRec} disabled={busy === 'resume'} title={t('Carry on recording this meeting from where it stopped. Nothing recorded is lost, and the summary is written again when it ends.')}><Icon name="mic" size={12} /> {busy === 'resume' ? t('Starting…') : t('Resume recording')}</button>
+  // The meetings that can join a combined one: not recording, archived, combined or in one already.
+  const every = list?.meetings || []
+  const addable = combined ? every.filter((x) => x.id !== id && !x.parts && !x.archived && x.status !== 'recording' && x.status !== 'paused' && !every.some((y) => y.id === x.partOf && y.parts?.includes(x.id))) : []
   const head = (
     <PaneHeader icon="mic" title={<input className="mt-title" value={title ?? data.title} onChange={(e) => setTitle(e.target.value)} onBlur={saveTitle} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setTitle(null); e.currentTarget.blur() } }} aria-label={t('Meeting title')} title={t('Click to rename')} />}
       leading={onBack && <><button type="button" className="win-btn back" onClick={onBack} aria-label={t('All meetings')} title={t('All meetings')}><Icon name="chevron" size={16} className="flip" /></button><span className="pane-icon"><Icon name="mic" size={15} /></span></>}
@@ -926,12 +949,12 @@ export function MeetingPage({ id, onBack }) {
       <div className="seg" role="tablist" aria-label={t('Show')}>
         {views.map(([v, icon, label]) => (
           <button key={v} type="button" role="tab" data-view={v} aria-selected={showing === v} className={showing === v ? 'on' : ''} onClick={() => { setView(v); setSel(null) }}
-            title={v === 'transcript' ? (lines.length === 1 ? t('{n} line', { n: lines.length }) : t('{n} lines', { n: lines.length })) : v === 'files' ? t('{n} files and links, {pictures} pictures', { n: (data.links || []).length, pictures: shots.length }) : t(label)}>
+            title={v === 'transcript' ? (lines.length === 1 ? t('{n} line', { n: lines.length }) : t('{n} lines', { n: lines.length })) : v === 'parts' ? t('{n} meetings combined', { n: partList.length }) : v === 'files' ? t('{n} files and links, {pictures} pictures', { n: (data.links || []).length, pictures: shots.length }) : t(label)}>
             <Icon name={icon} size={14} /><span>{t(label)}</span>
           </button>
         ))}
       </div>
-      {wide && !recording && showing !== 'transcript' && <button type="button" className={`win-btn${split ? ' on' : ''}`} onClick={() => setSplit(!split)} aria-pressed={split} aria-label={split ? t('Hide the transcript beside it') : t('Show the transcript beside it')} title={split ? t('Hide the transcript beside it') : t('Show the transcript beside it')}><Icon name="panel-right" size={14} /></button>}
+      {wide && !recording && showing !== side && <button type="button" className={`win-btn${split ? ' on' : ''}`} onClick={() => setSplit(!split)} aria-pressed={split} aria-label={combined ? (split ? t('Hide the meetings beside it') : t('Show the meetings beside it')) : split ? t('Hide the transcript beside it') : t('Show the transcript beside it')} title={combined ? (split ? t('Hide the meetings beside it') : t('Show the meetings beside it')) : split ? t('Hide the transcript beside it') : t('Show the transcript beside it')}><Icon name="panel-right" size={14} /></button>}
       <button type="button" className="win-btn mt-hb" onClick={save} disabled={busy === 'save'} aria-label={t('Save')} title={t('Save as Markdown in your notes folder')}><Icon name="download" size={14} /></button>
       <AiAssist className="btn small mt-ai-btn" compact={phone} on={recording && (!!data.assist || !!lb?.on)} items={assists} />
       <span className="menu-anchor">
@@ -942,8 +965,9 @@ export function MeetingPage({ id, onBack }) {
           atActions(data.summary) && { icon: 'helm', label: t('Send action items to Chief of Staff'), run: toChief },
           '-',
           canResume && { icon: 'mic', label: t('Resume recording'), run: resumeRec },
-          { icon: 'edit', label: t('Fix a word everywhere'), run: () => setFix({ from: '' }) },
-          done && { icon: 'refresh', label: t('Transcribe again…'), run: () => setDialog('again') },
+          combined && { icon: 'plus', label: t('Add a meeting…'), run: () => setDialog('add') },
+          !combined && { icon: 'edit', label: t('Fix a word everywhere'), run: () => setFix({ from: '' }) },
+          done && !combined && { icon: 'refresh', label: t('Transcribe again…'), run: () => setDialog('again') },
           done && data.cleanedAt && { icon: 'undo', label: t('Undo the cleanup'), run: uncleanAll },
           data.pending > 0 && { icon: 'refresh', label: t('Transcribe the missed parts again'), run: () => act('retry', () => api(`/meetings/${encodeURIComponent(id)}/retry`, { method: 'POST' })) },
           { icon: 'book', label: t('Open Memory'), run: openMemory },
@@ -953,13 +977,36 @@ export function MeetingPage({ id, onBack }) {
           !live && data.status !== 'recording' && data.status !== 'paused' && (data.archived
             ? { icon: 'archive', label: t('Unarchive'), run: () => archive(false) }
             : { icon: 'archive', label: t('Archive'), run: () => archive(true) }),
-          { icon: 'trash', label: t('Delete meeting…'), danger: true, run: remove },
+          combined ? { icon: 'split', label: t('Separate…'), danger: true, run: remove } : { icon: 'trash', label: t('Delete meeting…'), danger: true, run: remove },
         ]} />}
       </span>
     </PaneHeader>
   )
 
-  const transcriptPane = (
+  // A combined meeting's meetings, where a meeting has its transcript: each opens, or is taken out.
+  const partsPane = combined && (
+    <section className={`mt-transcript mt-parts${beside || showing === 'parts' ? '' : ' off'}`} aria-label={t('Meetings in it')}>
+      <div className="mt-thead mt-phead">
+        <span className="muted small">{t('{n} meetings, {time} together', { n: partList.length, time: length(data.seconds) })}</span>
+        <span className="mt-grow" />
+        <button type="button" className="ghost-btn" onClick={() => setDialog('add')} disabled={busy === 'parts'} title={t('Add another meeting to this combined one')}><Icon name="plus" size={12} /><span className="lbl"> {t('Add a meeting')}</span></button>
+        {beside && <button type="button" className="ghost-btn mt-thide" onClick={() => setSplit(false)} aria-label={t('Hide the meetings')} title={t('Hide the meetings (the view gets the room)')}><Icon name="panel-right" size={14} /></button>}
+      </div>
+      <div className="mt-lines mt-part-list">
+        {partList.map((p) => (
+          <div key={p.id} className="mt-part">
+            <button type="button" className="mt-part-open" onClick={() => openMeeting(p.id)} title={t('Open this meeting: its transcript, notes and summary')}>
+              <b>{p.title}</b>
+              <span className="muted small">{day(p.startedAt)}, {timeOf(p.startedAt)} · {p.status === 'recording' ? t('recording') : p.status === 'paused' ? t('paused') : length(p.seconds)}{p.hasSummary ? '' : ` · ${t('no summary yet')}`}</span>
+            </button>
+            <button type="button" className="ghost-btn" onClick={() => takeOut(p)} disabled={busy === 'parts'} aria-label={t('Take {title} out', { title: p.title })} title={t('Take it out of this combined meeting. It stays as it is, on its own.')}><Icon name="x" size={12} /></button>
+          </div>
+        ))}
+        <p className="muted small mt-hint">{t('Each meeting keeps its own transcript, notes and summary: open one to read or change them. The summary here is an overview across them.')}</p>
+      </div>
+    </section>
+  )
+  const transcriptPane = combined ? partsPane : (
     <section ref={tRef} className={`mt-transcript${beside || showing === 'transcript' ? '' : ' off'}`} aria-label={t('Transcript')}>
       <div className="mt-thead mt-phead">
         <span className="muted small">{again ? (data.progress != null ? t('Transcribing again: {n}%', { n: data.progress }) : t('Transcribing again…')) : lines.length ? `${lines.length === 1 ? t('{n} line', { n: lines.length }) : t('{n} lines', { n: lines.length })}${shots.length ? `, ${shots.length === 1 ? t('{n} picture', { n: shots.length }) : t('{n} pictures', { n: shots.length })}` : ''}` : t('Transcript')}</span>
@@ -1033,17 +1080,17 @@ export function MeetingPage({ id, onBack }) {
                 {(models || []).map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
               </select>
             </label>
-            <label className="mt-tool" title={t('What kind of meeting it was, for what the notes look for')}><small>{t('Template')}</small>
+            {!combined && <label className="mt-tool" title={t('What kind of meeting it was, for what the notes look for')}><small>{t('Template')}</small>
               <select value={o.kind} onChange={(e) => setOpts({ ...o, kind: e.target.value })} aria-label={t('Template')}>{kinds.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}</select>
-            </label>
+            </label>}
           </div>
         )}
         <span className="mt-grow" />
         {data.summary && <button type="button" className="ghost-btn" onClick={() => copy(data.summary, t('Copied the summary.'))} title={t('Copy the summary')}><Icon name="copy" size={12} /> {t('Copy')}</button>}
       </div>
-      {/* Written before more was recorded (Resume recording). */}
+      {/* Written before more was recorded (Resume recording), or before a combined meeting's meetings changed. */}
       {data.summary && data.summaryStale && !data.summarizing && (
-        <p className="mt-stale small" role="status"><Icon name="alert" size={12} /> <span>{t('This summary is out of date: more was recorded since it was written.')}</span> <button type="button" className="link-btn" onClick={summarize} disabled={busy === 'summary'}>{t('Regenerate')}</button></p>
+        <p className="mt-stale small" role="status"><Icon name="alert" size={12} /> <span>{data.summaryStale === 'parts' ? t('This summary is out of date: a meeting in it was added, taken out or summarized again since it was written.') : t('This summary is out of date: more was recorded since it was written.')}</span> <button type="button" className="link-btn" onClick={summarize} disabled={busy === 'summary'}>{t('Regenerate')}</button></p>
       )}
       {data.summary ? (todo ? (
         <>
@@ -1058,7 +1105,7 @@ export function MeetingPage({ id, onBack }) {
           {todo.tail.trim() && <div className="mt-summary md" dangerouslySetInnerHTML={{ __html: md(todo.tail) }} />}
         </>
       ) : <div className="mt-summary md" dangerouslySetInnerHTML={{ __html: md(data.summary) }} />)
-        : !data.summarizing && !data.summaryError && <p className="muted small mt-hint">{done ? t('No summary yet. Summarize writes one from the transcript, your notes, the screen and the files.') : t('The summary is written when the meeting ends. Meanwhile, My notes is yours to write in.')}</p>}
+        : !data.summarizing && !data.summaryError && <p className="muted small mt-hint">{combined ? t('No summary yet. Summarize writes an overview across its meetings, from their summaries and notes.') : done ? t('No summary yet. Summarize writes one from the transcript, your notes, the screen and the files.') : t('The summary is written when the meeting ends. Meanwhile, My notes is yours to write in.')}</p>}
       {data.summary && data.summaryFrom && !data.summarizing && <WrittenFrom from={data.summaryFrom} onView={(v) => { setView(v); if (v === 'transcript') setSel(null) }} />}
       {lb?.id && <BoardLink b={lb} onView={() => setView('board')} />}
       {shots.length > 0 && data.summary && (
@@ -1092,7 +1139,7 @@ export function MeetingPage({ id, onBack }) {
       <div ref={pageRef} className={`mt-page${dropping ? ' dropping' : ''}${flow ? ' flow' : ''}`} onDragOver={(e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); setDropping(true) } }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropping(false) }} onDrop={onDrop}>
         {phone && <div className="mt-meta">{meta}</div>}
         <RecordingBar id={id} data={data} />
-        {(recording || Date.now() - Date.parse(data.startedAt) < 36 * 3600e3) && <SinceLastTime path={`/meetings/${encodeURIComponent(id)}/since`} onOpen={(mid) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: mid } }))} />}
+        {!combined && (recording || Date.now() - Date.parse(data.startedAt) < 36 * 3600e3) && <SinceLastTime path={`/meetings/${encodeURIComponent(id)}/since`} onOpen={(mid) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: mid } }))} />}
         {(data.status === 'recording' || data.status === 'paused') && <SpeechSetup recording />}
         {!live && (data.status === 'recording' || data.status === 'paused') && <p className="muted small">{t('This meeting is recording in another window.')}</p>}
         {canResume && recent && phone && <div className="mt-resume-row">{resumeBtn}</div>}
@@ -1104,7 +1151,7 @@ export function MeetingPage({ id, onBack }) {
           {recording && main}
           {transcriptPane}
         </div>
-        {(lines.length > 0 || data.summary) && <AskPanel key={id} path={`/meetings/${encodeURIComponent(id)}/ask`} placeholder={t('Ask about this meeting')} suggestions={done ? ASK_ONE : []} />}
+        {(lines.length > 0 || data.summary || combined) && <AskPanel key={id} path={`/meetings/${encodeURIComponent(id)}/ask`} placeholder={combined ? t('Ask about these meetings') : t('Ask about this meeting')} suggestions={done ? ASK_ONE : []} />}
         {fix && <FixWord id={id} from={fix.from} onClose={() => setFix(null)} onDone={(t) => { setMsg({ text: t }); refresh() }} />}
         {dialog === 'again' && <TranscribeAgain ids={[id]} onClose={() => setDialog(null)} onDone={(t) => { setMsg({ text: t }); refresh() }} />}
         {dialog === 'calendar' && (
@@ -1113,6 +1160,18 @@ export function MeetingPage({ id, onBack }) {
           </Dialog>
         )}
         {dialog === 'delete' && <ConfirmDelete items={[data]} onClose={() => setDialog(null)} onDone={(action) => { if (action === 'delete') onBack?.(); else { refresh(); setMsg({ text: t("Archived. It's under Archived in the list, and left out of search.") }) } }} />}
+        {dialog === 'add' && (
+          <Dialog title={t('Add a meeting')} onClose={() => setDialog(null)}>
+            <div className="mt-fix mt-add-part">
+              {addable.length ? (
+                <div className="mt-pick-list" role="menu" aria-label={t('Add a meeting')}>
+                  {addable.slice(0, 60).map((x) => <button key={x.id} type="button" role="menuitem" className="mt-pick-opt" onClick={() => { setDialog(null); addPart(x.id) }}><Icon name="mic" size={16} /><span>{x.title} <small className="muted">{day(x.startedAt)}, {timeOf(x.startedAt)} · {length(x.seconds)}</small></span></button>)}
+                </div>
+              ) : <p className="muted small">{t('No other meeting can be added: each one is recording, archived, or part of a combined meeting already.')}</p>}
+              <div className="mt-dialog-acts"><button type="button" className="ghost-btn" onClick={() => setDialog(null)}>{t('Cancel')}</button></div>
+            </div>
+          </Dialog>
+        )}
         {dialog === 'folder' && <FolderPick items={[data]} folders={foldersOf(list?.meetings)} onClose={() => setDialog(null)} onDone={(t) => { setMsg({ text: t }); refresh() }} />}
         {whoAt && (sheet
           ? <PickSheet title={t('Who said it?')} items={whoItems(whoAt.l)} onClose={() => setWhoAt(null)} />

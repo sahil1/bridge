@@ -60,7 +60,7 @@ function said(action, r) {
 
 // The actions for the picked meetings, in a bar under the list. list: every meeting (the picked
 // ones, and the folders in use).
-export function BulkBar({ selection, compact = false, onDeleted, list = [] }) {
+export function BulkBar({ selection, compact = false, onDeleted, onOpen, list = [] }) {
   const { sel, clear } = selection
   const [busy, setBusy] = useState(null)
   const [msg, setMsg] = useState(null)
@@ -80,6 +80,18 @@ export function BulkBar({ selection, compact = false, onDeleted, list = [] }) {
       if (action === 'archive' || action === 'unarchive') clear()
     } catch (e) { setMsg({ text: e.message, error: true }) } finally { setBusy(null) }
   }
+  // Combine: the picked meetings as one, with a summary across them. Each stays as it is.
+  const combine = async () => {
+    const ids = [...sel]
+    setBusy('combine'); setMsg(null)
+    try {
+      const r = await api('/meetings/combine', { method: 'POST', body: { ids } })
+      refetch('/meetings')
+      clear()
+      setMsg({ text: t('Combined {n} meetings into "{title}". Each one stays as it is.', { n: ids.length, title: r.title }) })
+      onOpen?.(r.id)
+    } catch (e) { setMsg({ text: e.message, error: true }) } finally { setBusy(null) }
+  }
   const btn = (action, icon, label) => (
     <button type="button" className={compact ? 'ghost-btn' : 'btn small'} onClick={() => run(action)} disabled={!!busy || !n} title={label} aria-label={label}>
       <Icon name={busy === action ? 'refresh' : icon} size={12} className={busy === action ? 'spin' : ''} />{!compact && ` ${label}`}
@@ -92,6 +104,7 @@ export function BulkBar({ selection, compact = false, onDeleted, list = [] }) {
         {btn('save', 'download', t('Save as notes'))}
         {btn('chief', 'helm', t('Send action items to Chief of Staff'))}
         {btn('summarize', 'wand', t('Summarize again'))}
+        {n > 1 && <button type="button" className={`${compact ? 'ghost-btn' : 'btn small'} mt-combine`} onClick={combine} disabled={!!busy} title={t('Combine them into one meeting with a summary across them. Each one stays as it is.')} aria-label={t('Combine')}><Icon name={busy === 'combine' ? 'refresh' : 'layers'} size={12} className={busy === 'combine' ? 'spin' : ''} />{!compact && ` ${t('Combine')}`}</button>}
         <button type="button" className={compact ? 'ghost-btn' : 'btn small'} onClick={() => setAgain(true)} disabled={!!busy || !n} title={t('Transcribe again')} aria-label={t('Transcribe again')}><Icon name="refresh" size={12} />{!compact && ` ${t('Transcribe again')}`}</button>
         <button type="button" className={compact ? 'ghost-btn' : 'btn small'} onClick={() => setDialog('folder')} disabled={!!busy || !n} title={t('Move to a folder')} aria-label={t('Move to a folder')}><Icon name="folder" size={12} />{!compact && ` ${t('Folder')}`}</button>
         {allArchived ? btn('unarchive', 'archive', t('Unarchive')) : btn('archive', 'archive', t('Archive'))}
