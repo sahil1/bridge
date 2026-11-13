@@ -1,0 +1,42 @@
+# Bridge AI on a computer set up for other people to try: an app store's reviewers, who need a
+# pairing code that still works when they get to it. As docker-compose.yml, but built from this
+# folder and started with BRIDGE_REVIEW_PAIRING=1, which lets `bridge-ai pair --review` make a code
+# that lasts days and pairs several phones (server/relay.js). See "A computer for App Review" in
+# mobile/README.md.
+#
+#   docker compose -f docker-compose.review.yml up -d --build
+#   docker compose -f docker-compose.review.yml exec bridge bridge-ai relay setup    # once, with a Cloudflare API token
+#   docker compose -f docker-compose.review.yml exec bridge git clone --depth 1 https://github.com/sahil1/bridge code/bridge
+#   docker compose -f docker-compose.review.yml exec bridge bridge-ai pair --review --png /home/bridge/review-qr.png
+#   docker compose -f docker-compose.review.yml cp bridge:/home/bridge/review-qr.png .
+#
+# Anyone with the code can use this Bridge AI, its terminals included: keep nothing of yours in it
+# (no sign-ins to your own accounts, no SSH keys, no private repos), and run it where reaching the
+# network around it does no harm (a small cloud server, not your home network).
+services:
+  bridge:
+    build:
+      context: .
+      args:
+        AGENTS: "@anthropic-ai/claude-code"
+    restart: unless-stopped
+    hostname: bridge-demo
+    environment:
+      TZ: Etc/UTC
+      BRIDGE_REVIEW_PAIRING: "1"
+      BRIDGE_COMPUTER_NAME: Bridge AI demo computer   # what the phone shows: "Pair with …?"
+      BRIDGE_TELEMETRY: "0"                           # not one of the installs counted
+      # A key made for this alone, with a low spending limit, so an agent here can answer. From a
+      # .env file beside this one (ANTHROPIC_API_KEY=…) or the shell; without it agents start and
+      # ask to sign in.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - home:/home/bridge
+      - data:/home/bridge/.bridge-ai
+      - code:/home/bridge/code
+    # No ports, as docker-compose.yml: phones come in through the relay.
+
+volumes:
+  home:
+  data:
+  code:

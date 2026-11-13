@@ -389,6 +389,42 @@ one themselves.
   services you use with your own account, through their public APIs.
 - **Encryption**: the export compliance answers above.
 
+## A computer for App Review
+
+App Review can't pair with a computer of its own, and Pair a device's code works once, for 15
+minutes, so a picture of one is no use to a reviewer. For them there's a review code: it lasts 14
+days and pairs 25 phones (`--days` up to 30, `--uses` up to 100), is kept through restarts, and
+exists only on a Bridge AI started with `BRIDGE_REVIEW_PAIRING=1` (`server/relay.js`; elsewhere
+`bridge-ai pair --review` is refused, and one copied into another computer's `relay.json` doesn't
+work). The phones it pairs show in Settings › Devices as any phone paired with a code does, to
+keep or remove.
+
+Run it in Docker on a computer with nothing of yours on it, ideally a small cloud server: anyone
+with the code can use that Bridge AI, its terminals included, so a reviewer has a shell in the
+container and the network around it. From a clone of this repo
+([docker-compose.review.yml](../docker-compose.review.yml)):
+
+```bash
+docker compose -f docker-compose.review.yml up -d --build
+docker compose -f docker-compose.review.yml exec bridge bridge-ai relay setup   # once: a Cloudflare API token (README, "Run it on an always-on machine")
+docker compose -f docker-compose.review.yml exec bridge git clone --depth 1 https://github.com/sahil1/bridge code/bridge   # a project to look at
+docker compose -f docker-compose.review.yml exec bridge bridge-ai pair --review --png /home/bridge/review-qr.png
+docker compose -f docker-compose.review.yml cp bridge:/home/bridge/review-qr.png .
+```
+
+`review-qr.png` is the QR code for App Review Information (attach it, and put the link the command
+prints in the notes). For an agent that answers, put `ANTHROPIC_API_KEY=…` in a `.env` file beside
+the compose file before `up`: a key made for this alone, with a low spending limit. Then pair a
+phone of your own with the same code and start an agent or two in `~/code/bridge`, so a reviewer
+finds something running.
+
+- `bridge-ai pair --review` shows the code again, how long it has and how many phones it has
+  paired; `bridge-ai status` shows it too.
+- `bridge-ai pair --review --new` makes another, and the one before stops working; `--stop` ends
+  it. Phones already paired stay until removed (`bridge-ai phones remove <name>`).
+- When the review is over: `docker compose -f docker-compose.review.yml down -v`, and delete the
+  key and the Worker (Cloudflare › Workers & Pages).
+
 ## App Store privacy
 
 What to answer in App Store Connect › App Privacy, true to the code (and to the app's privacy
