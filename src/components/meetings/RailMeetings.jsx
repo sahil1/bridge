@@ -95,16 +95,20 @@ export default function RailMeetings({ selected, onOpen }) {
   const row = (x, when = timeOf(x.startedAt)) => {
     const on = selected === `view:meeting:${x.id}`
     const live = x.status === 'recording' || x.status === 'paused'
+    // A combined meeting says how many are in it; one of those, which it's part of (its menu opens it).
+    const whole = x.partOf ? all.find((y) => y.id === x.partOf && y.parts?.includes(x.id)) : null
     return (
       <button type="button" key={x.id} className={`rm-row${on ? ' on' : ''}${sel.has(x.id) ? ' picked' : ''}`} aria-pressed={sel.has(x.id) || undefined}
-        title={`${x.title}\n${shortDate(x.startedAt)} ${timeOf(x.startedAt)}${x.seconds ? ` · ${length(x.seconds)}` : ''}\n${t('⌘-click to pick several, right-click for more')}`}
+        title={`${x.title}\n${shortDate(x.startedAt)} ${timeOf(x.startedAt)}${x.seconds ? ` · ${length(x.seconds)}` : ''}${x.parts ? `\n${t('{n} meetings combined', { n: x.parts.length })}` : ''}${whole ? `\n${t('Part of {title}', { title: whole.title })}` : ''}\n${t('⌘-click to pick several, right-click for more')}`}
         onClick={(e) => {
           if (e.metaKey || e.ctrlKey || e.shiftKey) { e.preventDefault(); toggle(x.id, { range: e.shiftKey }); return }
           clear(); onOpen(x.id)
         }}
         onContextMenu={(e) => menu.open(e, x)}>
-        {live ? <span className={`rec-dot${x.status === 'paused' ? ' paused' : ''}`} aria-label={x.status === 'paused' ? t('paused') : t('recording')} /> : <Icon name={sel.has(x.id) ? 'check' : x.hasSummary ? 'sparkle' : 'mic'} size={11} className="muted" />}
+        {live ? <span className={`rec-dot${x.status === 'paused' ? ' paused' : ''}`} aria-label={x.status === 'paused' ? t('paused') : t('recording')} /> : <Icon name={sel.has(x.id) ? 'check' : x.parts ? 'layers' : x.hasSummary ? 'sparkle' : 'mic'} size={11} className="muted" />}
         <span className="rm-title">{x.title}</span>
+        {x.parts && <span className="rm-parts muted">{t('{n} parts', { n: x.parts.length })}</span>}
+        {whole && <Icon name="layers" size={10} className="rm-partof muted" />}
         <span className="rm-time muted">{when}</span>
       </button>
     )
@@ -168,7 +172,7 @@ export default function RailMeetings({ selected, onOpen }) {
         {archived.length > 0 && group(':archived', 'archive', t('Archived'), archived)}
       </div>
       {menu.msg && <p className={`small rm-msg ${menu.msg.error ? 'error-text' : 'muted'}`} role="status">{menu.msg.text}</p>}
-      <BulkBar selection={selection} compact list={all} />
+      <BulkBar selection={selection} compact list={all} onOpen={onOpen} />
       {menu.node}
     </div>
   )

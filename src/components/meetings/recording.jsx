@@ -76,24 +76,24 @@ export function MeetingsProvider({ children }) {
 
   // event: the calendar event it's for. Asks for the mic first: no meeting is made until you can
   // record. The call's sound is a bonus: without it, the mic still hears the room.
-  const start = async ({ title, event, kind } = {}) => {
-    if (handle.current) { openMeeting(rec.id); return rec.id }
+  const openMic = async () => {
     // The demo has no computer behind it: say so before asking for the mic.
     if (import.meta.env.MODE === 'demo') throw new Error(t('Recording a meeting needs Bridge AI on your computer.'))
     if (!navigator.mediaDevices?.getUserMedia) throw new Error(window.bridgeNative || window.bridgeAndroid || matchMedia('(pointer: coarse)').matches
       ? t('Recording from your phone needs a secure connection: open your computer through your relay (Settings › Devices on the computer), not its plain Tailscale address.')
       : t('Recording needs the desktop app, or this page over HTTPS.'))
-    let mic
     room.current = inRoom()
-    try { mic = await micWithin(() => microphone(undefined, { room: room.current })) } catch (e) {
+    try { return await micWithin(() => microphone(undefined, { room: room.current })) } catch (e) {
       if (!e.name) throw e // it never answered
       // In the desktop app on a Mac: the way to allow it (or reset it) there (Meetings.jsx shows it).
       const fix = await micRefused(e)
       if (fix) throw Object.assign(new Error(t('macOS is blocking the microphone for Bridge AI.')), { code: 'mic', stale: fix.stale })
       throw new Error(e.name === 'NotAllowedError' ? micBlocked() : e.message)
     }
-    // The call's sound is recorded by the server (on a Mac); this page records your mic.
-    const m = await api('/meetings', { method: 'POST', body: { title: title || `Meeting, ${when()}`, event, kind } })
+  }
+  // m: the meeting as the server made it (or took up again). from: how far in it is already, in
+  // seconds, so the time carries on. at: when this window took it up, whatever its time says.
+  const recordIt = async (m, mic, from = 0) => {
     refetch('/meetings') // its name on its tab and in the sidebar now, not at the next look
     handle.current = await record(m.id, { you: mic }, {
       onLevel: setLevels,
@@ -101,9 +101,29 @@ export function MeetingsProvider({ children }) {
       reopen: { you: () => microphone(undefined, { room: room.current }) },
       onGap: (ms) => setRec((r) => (r ? { ...r, missed: (r.missed || 0) + ms, missedAt: Date.now() } : r)),
     })
-    setRec({ id: m.id, title: m.title, startedAt: Date.now(), paused: false, pausedMs: 0, call: m.call === 'on' ? 'on' : m.callWhy || null })
+    setNow(Date.now()) // its time is right from the start, not at the clock's next second
+    setRec({ id: m.id, title: m.title, startedAt: Date.now() - from * 1000, at: Date.now(), paused: false, pausedMs: 0, call: m.call === 'on' ? 'on' : m.callWhy || null })
     openMeeting(m.id)
     return m.id
+  }
+  const start = async ({ title, event, kind } = {}) => {
+    if (handle.current) { openMeeting(rec.id); return rec.id }
+    const mic = await openMic()
+    // The call's sound is recorded by the server (on a Mac); this page records your mic.
+    const m = await api('/meetings', { method: 'POST', body: { title: title || `Meeting, ${when()}`, event, kind } })
+    return recordIt(m, mic)
+  }
+  // Resume recording: a meeting that ended (stopped by mistake, or by itself) records again, the
+  // same meeting from where it had got to. Not while another one records.
+  const recordAgain = async (id) => {
+    if (handle.current && rec.id === id) return id
+    const other = handle.current ? rec : calls?.recording && calls.recording.id !== id ? calls.recording : null
+    if (other) throw new Error(t('"{title}" is recording. Stop it first.', { title: other.title }))
+    const mic = await openMic()
+    let m
+    try { m = await api(`/meetings/${encodeURIComponent(id)}/reopen`, { method: 'POST' }) } catch (e) { mic.getTracks().forEach((x) => x.stop()); throw e }
+    refreshCalls()
+    return recordIt(m, mic, m.seconds || 0)
   }
   const changedAt = useRef(0) // when Pause or Resume was last pressed here
   const pauseHere = () => { handle.current.pause(); setRec((r) => ({ ...r, paused: true, pausedAt: Date.now() })) }
@@ -201,7 +221,7 @@ export function MeetingsProvider({ children }) {
   // Stopped somewhere else (by itself after the call ended, or the desktop app's floating card when
   // this is a browser tab): stop the mic here. Paused or resumed there: follow.
   useEffect(() => {
-    if (!handle.current || !rec || !calls || callsAt.current - rec.startedAt < 4000) return
+    if (!handle.current || !rec || !calls || callsAt.current - rec.at < 4000) return
     if (calls.recording?.id !== rec.id) { stop(); return }
     const paused = calls.recording.status === 'paused'
     if (paused !== rec.paused && callsAt.current - changedAt.current > 4000) (paused ? pauseHere : resumeHere)()
@@ -224,7 +244,7 @@ export function MeetingsProvider({ children }) {
   }, [calls, listed]) // eslint-disable-line react-hooks/exhaustive-deps
   // The floating card: what's recording, and Pause, Resume and Stop from it.
   const fns = useRef(null)
-  fns.current = { pause, resume, stop, start, startForCall, section, watchScreen, capture, unwatch, mine: (id) => !!handle.current && rec?.id === id }
+  fns.current = { pause, resume, stop, start, recordAgain, startForCall, section, watchScreen, capture, unwatch, mine: (id) => !!handle.current && rec?.id === id }
   const chan = useRef(null)
   useEffect(() => {
     const ch = new BroadcastChannel(MEETINGS_CHANNEL)
@@ -277,7 +297,7 @@ export function MeetingsProvider({ children }) {
 
   const elapsed = rec ? Math.max(0, (rec.paused ? rec.pausedAt : now) - rec.startedAt - rec.pausedMs) / 1000 : 0
   useEffect(() => { chan.current?.postMessage({ type: 'state', rec: rec && { id: rec.id, title: rec.title, paused: rec.paused, section: rec.section || null }, elapsed, you: levels.you || 0, screen, canWatch: !!navigator.mediaDevices?.getDisplayMedia }) }, [rec, elapsed, levels, screen])
-  const value = useMemo(() => ({ rec, levels, elapsed, start, startNow, pause, resume, stop, section, calls, refreshCalls, startForCall, retitle, screen, watchScreen, capture, unwatch }), [rec, levels, elapsed, calls, screen]) // eslint-disable-line react-hooks/exhaustive-deps
+  const value = useMemo(() => ({ rec, levels, elapsed, start, recordAgain, startNow, pause, resume, stop, section, calls, refreshCalls, startForCall, retitle, screen, watchScreen, capture, unwatch }), [rec, levels, elapsed, calls, screen]) // eslint-disable-line react-hooks/exhaustive-deps
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 

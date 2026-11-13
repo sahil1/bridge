@@ -144,7 +144,7 @@ export function make({ waiting, tasks, meetings, unsent, boards, chief, engaged 
   function meetingItems() {
     let list = []
     try { list = meetings.list() } catch { return [] }
-    return list.filter((m) => !m.archived && within(m.startedAt, 7 * DAY)).slice(0, 12).map((m) => {
+    return list.filter((m) => !m.archived && !m.parts && within(m.startedAt, 7 * DAY)).slice(0, 12).map((m) => {
       const rec = m.status === 'recording' || m.status === 'paused'
       let left = []
       if (m.hasSummary && !rec) { try { left = unsent(m.id) || [] } catch { left = [] } }

@@ -637,6 +637,10 @@ export function createDemo({ everything = true } = {}) {
   on('POST', '/meetings/:id/work/:key/done', () => needs('Ticking an action item'))
   on('GET', '/meetings/:id', ({ p }) => S.meetings.find((m) => m.id === p.id) || fail('No such meeting', 404))
   on('POST', '/meetings', () => needs('Recording a meeting'))
+  on('POST', '/meetings/:id/reopen', () => needs('Recording a meeting'))
+  on('POST', '/meetings/combine', () => needs('Combining meetings'))
+  on('POST', '/meetings/:id/parts', () => needs('Combining meetings'))
+  on('DELETE', '/meetings/:id/parts/:pid', () => needs('Combining meetings'))
   on('PUT', '/meetings/:id/notes', () => ok)
   on('PATCH', '/meetings/:id', ({ p, body }) => {
     const m = S.meetings.find((x) => x.id === p.id)

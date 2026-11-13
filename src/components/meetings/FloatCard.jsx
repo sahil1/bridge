@@ -283,7 +283,8 @@ export default function FloatCard() {
   let open = true
   if (r) {
     const paused = live?.rec?.id === r.id ? live.rec.paused : r.status === 'paused'
-    const secs = live?.rec?.id === r.id ? live.elapsed : (Date.now() - new Date(r.startedAt).getTime()) / 1000
+    // Recorded again after it ended (Resume recording): its time carries on from where it had got to.
+    const secs = live?.rec?.id === r.id ? live.elapsed : r.resumedAt ? r.resumedFrom + (Date.now() - new Date(r.resumedAt).getTime()) / 1000 : (Date.now() - new Date(r.startedAt).getTime()) / 1000
     open = hover || (onHover && pinned) || !!r.callEnded
     const tall = open && !!size.h
     const said = (m?.transcript || []).filter((l) => l.text)

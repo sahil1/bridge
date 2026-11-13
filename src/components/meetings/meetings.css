@@ -595,6 +595,22 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .mt-quote { font-style: italic; }
 .mt-fromcal { color: var(--accent); }
 .mt-archived { cursor: pointer; }
+/* Combined meetings: "N parts" on one, a tag naming it on each of its meetings, and its page's list. */
+.mt-partof { display: inline-flex; flex: none; align-items: center; gap: 4px; max-width: 34%; height: 22px; margin-right: 8px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink-2); font: 500 11.5px var(--font); cursor: pointer; }
+.mt-partof > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-partof:hover { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 40%, var(--line-2)); }
+.mt-when:disabled { cursor: default; }
+.mt-part { display: flex; align-items: center; gap: 6px; border-radius: 9px; border: 1px solid var(--line); }
+.mt-part:hover, .mt-part:focus-within { background: var(--pane-2); }
+.mt-part-open { display: grid; flex: 1; min-width: 0; gap: 2px; padding: 8px 10px; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+.mt-part-open b { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-part > .ghost-btn { flex: none; margin-right: 6px; }
+.mt-stale { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 7px 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warning, #b7791f) 35%, var(--line-2)); background: color-mix(in srgb, var(--warning, #b7791f) 6%, var(--pane)); }
+.mt-stale svg { flex: none; color: var(--warning, #b7791f); }
+.mt-resume-row { display: flex; }
+.rm-parts { flex: none; font-size: 11px; }
+.rm-partof { flex: none; }
+.app.narrow .mt-view .mt-partof { height: auto; min-height: 32px; max-width: 40%; }
 .mt-archived svg { margin-right: 2px; }
 .mt-in svg { vertical-align: -1px; }
 .mt-places { display: flex; flex-wrap: wrap; gap: 6px; }

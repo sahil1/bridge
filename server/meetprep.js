@@ -343,7 +343,7 @@ export async function tick(now = Date.now()) {
 // (from ten minutes before). { [event id]: { id, summary } }.
 let recs = { at: 0, list: [] }
 export function recorded(events) {
-  if (Date.now() - recs.at > 30e3) { try { recs = { at: Date.now(), list: meetings.list().filter((m) => !m.archived) } } catch { recs = { at: Date.now(), list: [] } } }
+  if (Date.now() - recs.at > 30e3) { try { recs = { at: Date.now(), list: meetings.list().filter((m) => !m.archived && !m.parts) } } catch { recs = { at: Date.now(), list: [] } } }
   const out = {}
   const used = new Set()
   for (const e of events.filter((x) => !x.allDay)) {

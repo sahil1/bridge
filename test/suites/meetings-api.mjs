@@ -875,6 +875,136 @@ process.exit(1)`)
   since = await tryApi(`/meetings/since?${new URLSearchParams({ title: 'Meeting', people: '' })}`)
   ok(since.last === null, 'a meeting with only a plain name and nobody listed follows on from nothing', since)
 
+  // ---------- Resume recording ----------
+  // A meeting that ended records again: the same one, its time carrying on past what it had, its
+  // audio in a new part whose start is kept (so Transcribe again puts its lines where they were),
+  // and its summary said to be out of date, or written again when summaries are written by
+  // themselves. Not while another one records, or it's recording already.
+  { // names of its own, apart from the ones above
+  await kit.api('/settings', { meetings: { autoSummary: false, cleanup: false } }, 'PATCH')
+  const meetingJson = (id) => JSON.parse(fs.readFileSync(path.join(dirOf(id), 'meeting.json'), 'utf8'))
+  const RR = await kit.api('/meetings', { title: 'Vendor review', call: false })
+  // The call's lines are said well away from the mic's (a line of yours beside one of theirs with
+  // the same words is taken for the call heard by your mic), and its first part is the shorter.
+  await send(RR.id, Buffer.concat([pcm(9), pcm(2, true), pcm(1)]))
+  await send(RR.id, Buffer.concat([pcm(0.2), pcm(1, true), pcm(0.3)]), 'them')
+  await kit.api(`/meetings/${RR.id}/stop`, {})
+  const r1 = await until(async () => { const m = await kit.api(`/meetings/${RR.id}`); return m.status === 'done' && m.transcript.length >= 2 && m }, 20000)
+  ok(!!r1 && r1.seconds === 12, 'a meeting of 12 s ends', r1 && [r1.status, r1.seconds, r1.transcript.length])
+  await kit.api(`/meetings/${RR.id}/summary`, {})
+  await until(async () => { const m = await kit.api(`/meetings/${RR.id}`); return !m.summarizing && m.summary }, 15000)
+  const OO = await kit.api('/meetings', { title: 'Another one', call: false })
+  ok(/"Another one" is recording\. Stop it first\./.test(await err(`/meetings/${RR.id}/reopen`, {}) || ''), 'Resume recording says no while another meeting records, and which')
+  await kit.api(`/meetings/${OO.id}/stop`, {})
+  await until(async () => (await kit.api(`/meetings/${OO.id}`)).status === 'done', 10000)
+  r = await tryApi(`/meetings/${RR.id}/reopen`, {})
+  ok(r.id === RR.id && r.status === 'recording' && r.endedAt === null && r.resumedFrom === 12 && !!r.resumedAt, 'Resume recording: the same meeting records again, from where it had got to', r)
+  ok(/recording already/.test(await err(`/meetings/${RR.id}/reopen`, {}) || ''), 'not twice')
+  await kit.api(`/meetings/${RR.id}/note`, { text: 'back after the break' })
+  ok(/- \[0:1[2-6]\] back after the break/.test(notes(RR.id)), 'a quick note is at the meeting\'s time, carried on', notes(RR.id))
+  ok((await kit.api('/calls')).recording?.resumedFrom === 12, 'the floating card is told where it carried on from')
+  await send(RR.id, Buffer.concat([pcm(0.5), pcm(2, true), pcm(1.5)]))
+  await send(RR.id, Buffer.concat([pcm(10), pcm(1.5, true), pcm(0.5)]), 'them')
+  await kit.api(`/meetings/${RR.id}/stop`, {})
+  const r2 = await until(async () => { const m = await kit.api(`/meetings/${RR.id}`); return m.status === 'done' && m.transcript.length >= 4 && m }, 20000)
+  const keys1 = (r1?.transcript || []).map((l) => l.key)
+  const fresh = (r2?.transcript || []).filter((l) => !keys1.includes(l.key))
+  ok(!!r2 && keys1.every((k) => r2.transcript.some((l) => l.key === k)) && fresh.length === 2 && fresh.every((l) => l.t0 >= 12) && r2.seconds === 24, 'what was recorded before is kept, and the new lines come after it', r2 && { seconds: r2.seconds, lines: r2.transcript.map((l) => [l.src, l.t0, l.t1]) })
+  const parts2 = fs.readdirSync(dirOf(RR.id)).filter((f) => /^audio-/.test(f)).sort()
+  ok(parts2.length === 4 && parts2.some((f) => /^audio-you-2\.(ogg|wav)$/.test(f)) && parts2.some((f) => /^audio-them\.(ogg|wav)$/.test(f)) && meetingJson(RR.id).audioFrom?.['audio-them-2'] === 12 && meetingJson(RR.id).audioFrom?.['audio-you-2'] === 12, 'its audio is a new part beside the first, with where it starts', [parts2, meetingJson(RR.id).audioFrom])
+  ok(r2?.summaryStale === 'recorded' && /beta ships/.test(r2.summary), 'with summaries not written by themselves, the one it has says it\'s out of date', r2.summaryStale)
+  // Transcribe again: the call's second part starts at 12 s, where it was recorded, not at 1.5 s
+  // where its first part ends.
+  r = await tryApi(`/meetings/${RR.id}/transcribe`, {})
+  const r3 = await until(async () => { const m = await kit.api(`/meetings/${RR.id}`); return m.status === 'done' && m.again?.done && m.transcript.length >= 4 && m }, 30000)
+  const them3 = (r3?.transcript || []).filter((l) => l.src === 'them').map((l) => l.t0)
+  ok(them3.length === 2 && them3[0] < 1.5 && them3[1] >= 21 && them3[1] < 23, 'transcribed again, each part\'s lines are where they were said', r3 ? r3.transcript.map((l) => [l.src, l.t0]) : r)
+  // Summaries written by themselves: resumed and ended again, it's written again, not left.
+  await kit.api('/settings', { meetings: { autoSummary: true } }, 'PATCH')
+  const s0 = model.asked(/Write meeting notes in Markdown/).length
+  await kit.api(`/meetings/${RR.id}/reopen`, {})
+  await send(RR.id, Buffer.concat([pcm(6), pcm(2, true), pcm(1)]))
+  await kit.api(`/meetings/${RR.id}/stop`, {})
+  const r4 = await until(async () => { const m = await kit.api(`/meetings/${RR.id}`); return m.status === 'done' && !m.summarizing && !m.summaryStale && model.asked(/Write meeting notes in Markdown/).length > s0 && m }, 20000)
+  ok(!!r4 && r4.seconds === 33 && r4.transcript.filter((l) => l.t0 >= 29).length === 1, 'ended again, its summary is written again from all of it', r4 ? [r4.seconds, r4.summaryStale, r4.transcript.map((l) => [l.src, l.t0])] : (await kit.api(`/meetings/${RR.id}`)).summaryStale)
+  await kit.api('/settings', { meetings: { autoSummary: false } }, 'PATCH')
+
+  // ---------- Combined meetings ----------
+  // Two or more as one: a meeting of its own with no recording, from the earliest, as long as them
+  // together; they stay as they are, each saying what it's part of. Its summary is written from
+  // their summaries and notes (a transcript for one without a summary), says it's out of date when
+  // one of theirs is written again or they change, and is left out of the totals its meetings are
+  // in already. Separated, only it goes; one of them deleted leaves it, and the last but one
+  // separates it.
+  const mk = async (title, text, at) => {
+    const x = await kit.api('/meetings', { title, call: false })
+    await kit.api(`/meetings/${x.id}/stop`, {})
+    await until(async () => (await kit.api(`/meetings/${x.id}`)).status === 'done', 10000)
+    said(x.id, [['you', 1, text]])
+    fs.writeFileSync(path.join(dirOf(x.id), 'meeting.json'), JSON.stringify({ ...meetingJson(x.id), startedAt: new Date(at).toISOString(), endedAt: new Date(at + 600e3).toISOString(), seconds: 600 }))
+    return x.id
+  }
+  const day0 = new Date(); day0.setHours(9, 0, 0, 0)
+  const [M1, M2, M3] = [await mk('Offsite', 'Morning: we agreed the roadmap themes.', day0.getTime()), await mk('Offsite', 'Afternoon: zebra hiring for the platform team.', day0.getTime() + 4 * 3600e3), await mk('Offsite wrap-up', 'Evening: retro on the day.', day0.getTime() + 8 * 3600e3)]
+  fs.writeFileSync(path.join(dirOf(M1), 'summary.md'), '## Summary\n- Roadmap themes agreed for the morning session.\n')
+  fs.writeFileSync(path.join(dirOf(M1), 'notes.md'), 'theme three needs an owner\n')
+  ok(/Pick two or more/.test(await err('/meetings/combine', { ids: [M1] }) || ''), 'one meeting alone isn\'t combined')
+  const before = (await kit.api('/meetings')).meetings.length
+  const c0 = model.asked(/This is a combined meeting/).length
+  await kit.api('/settings', { meetings: { autoSummary: true } }, 'PATCH')
+  let W2 = await tryApi('/meetings/combine', { ids: [M2, M1] })
+  await kit.api('/settings', { meetings: { autoSummary: false } }, 'PATCH')
+  ok(W2.title === 'Offsite' && W2.status === 'done' && W2.seconds === 1200 && W2.startedAt === meetingJson(M1).startedAt && W2.parts?.join() === [M1, M2].join() && W2.partList?.[1]?.title === 'Offsite' && W2.transcript.length === 0, 'two combined: a meeting named as they are, from the earliest, as long as both, in the order they were', W2)
+  ok((await kit.api('/meetings')).meetings.length === before + 1 && (await kit.api(`/meetings/${M1}`)).combined?.id === W2.id && (await kit.api(`/meetings/${M1}`)).transcript.length === 1 && /Roadmap themes/.test((await kit.api(`/meetings/${M1}`)).summary), 'they stay as they are, each saying what it\'s part of')
+  const wask = (await until(() => model.asked(/This is a combined meeting/).slice(c0)[0], 15000)) || ''
+  ok(/2 meetings recorded separately/.test(wask) && /# Meeting 1 of 2: "Offsite"[^\n]*\n\n## Summary\n- Roadmap themes agreed for the morning session\.\n\nMy notes:\ntheme three needs an owner/.test(wask) && /# Meeting 2 of 2: "Offsite"[^\n]*\n\nTranscript[^\n]*\n\[0:01\] You: Afternoon: zebra hiring/.test(wask) && !/Morning: we agreed/.test(wask), 'its summary is written when combined, from each one\'s summary and notes, or its transcript when it has no summary', wask.slice(wask.indexOf('The meetings:')))
+  W2 = await until(async () => { const m = await kit.api(`/meetings/${W2.id}`); return !m.summarizing && m.summary && m }, 15000)
+  ok(!!W2 && W2.summaryFrom?.parts === 2 && !W2.summaryStale, 'and says it was written from 2 meetings', W2?.summaryFrom)
+  ok(/is part of "Offsite" already/.test(await err('/meetings/combine', { ids: [M1, M3] }) || '') && /combined meeting already/.test(await err('/meetings/combine', { ids: [W2.id, M3] }) || ''), 'a meeting is in one combined meeting, and a combined one isn\'t part of another: both say so')
+  ok(/no recording of its own/.test(await err(`/meetings/${W2.id}/reopen`, {}) || '') && /no audio/.test(await err(`/meetings/${W2.id}/transcribe`, {}) || '') && /Change theirs/.test(await err(`/meetings/${W2.id}`, { startedAt: new Date().toISOString() }, 'PATCH') || ''), 'it has no recording to resume or transcribe again, and its time is its meetings\'')
+  // A part's summary written again: the combined one says it's out of date, and isn't written by itself.
+  const c1n = model.asked(/This is a combined meeting/).length
+  await kit.api(`/meetings/${M2}/summary`, {})
+  r = await until(async () => { const m = await kit.api(`/meetings/${W2.id}`); return m.summaryStale && m }, 15000)
+  await sleep(1000)
+  ok(r?.summaryStale === 'parts' && model.asked(/This is a combined meeting/).length === c1n, 'one of its meetings summarized again: its summary says it\'s out of date, and no model is asked by itself', r?.summaryStale)
+  await kit.api(`/meetings/${W2.id}/summary`, {})
+  r = await until(async () => { const m = await kit.api(`/meetings/${W2.id}`); return !m.summarizing && !m.summaryStale && m }, 15000)
+  ok(!!r && model.asked(/This is a combined meeting/).length === c1n + 1, 'Regenerate writes it again, and it\'s up to date')
+  // One more, one taken out.
+  r = await tryApi(`/meetings/${W2.id}/parts`, { id: M3 })
+  ok(r.parts?.length === 3 && r.seconds === 1800 && r.summaryStale === 'parts' && r.partList?.[2]?.id === M3, 'Add a meeting: three in it, as long as all three, the summary out of date', r)
+  r = await tryApi(`/meetings/${W2.id}/parts/${M3}`, null, 'DELETE')
+  ok(r.parts?.length === 2 && r.seconds === 1200 && !(await kit.api(`/meetings/${M3}`)).combined, 'taken out, it\'s on its own again', r)
+  // Search, questions and totals don't count it on top of its meetings.
+  r = await kit.api(`/meetings/search?q=${encodeURIComponent('zebra hiring')}`)
+  ok(r.results.length === 1 && r.results[0].id === M2, 'search finds what was said in the meeting it was said in, once', r.results)
+  // (Its own notes have the question's words too, so it would be among the likeliest.)
+  await kit.api(`/meetings/${W2.id}/notes`, { text: 'zebra roadmap across the day' }, 'PUT')
+  const q0 = model.asked(/Answer from these meetings only/).length
+  await kit.api('/meetings/ask', { question: 'What about the roadmap themes and the zebra hiring?' })
+  const asked = model.asked(/Answer from these meetings only/).slice(q0)[0] || ''
+  ok((asked.match(/"Offsite"/g) || []).length === 2 && /Roadmap themes agreed/.test(asked) && /zebra hiring/.test(asked) && !/zebra roadmap across the day/.test(asked), 'a question about your meetings reads its meetings, not it as well', asked.slice(0, 600))
+  await kit.api(`/meetings/${W2.id}/ask`, { question: 'What was the afternoon about?' })
+  ok(/# Meeting 2 of 2: "Offsite"[^\n]*\n\n\[0:01\] You: Afternoon: zebra hiring/.test(model.asked(/Answer from the meeting only/).at(-1) || ''), 'a question on the combined meeting reads its meetings\' transcripts')
+  await kit.api('/settings', { trials: { 'meeting-insights': true } }, 'PATCH')
+  const ins = await tryApi('/meetings/insights?days=all')
+  const listed = (await kit.api('/meetings')).meetings.filter((x) => !x.archived && !x.parts && !['recording', 'paused'].includes(x.status)).length
+  ok(ins.total === listed, 'Meeting Insights counts its meetings, not it on top', { listed, total: ins.total, error: ins.error })
+  r = await tryApi(`/meetings/${W2.id}/save`, {})
+  const savedText = r.file ? fs.readFileSync(r.file, 'utf8') : ''
+  ok(r.files?.length === 1 && /## Meetings\n\n- (\[\[[^\]]+\]\] )?Offsite, /.test(savedText) && !/Transcript/.test(savedText), 'saved, it\'s one note with its summary and the meetings in it, and no transcript', r.error || savedText.slice(-300))
+  // Deleting one of two separates it; separating leaves the meetings.
+  const W3 = await tryApi('/meetings/combine', { ids: [M3, M2], title: 'Second half' })
+  ok(/is part of "Offsite" already/.test(W3.error || ''), 'still in one: not combined again', W3)
+  r = await kit.api('/meetings/bulk', { ids: [W2.id], action: 'delete' })
+  ok(r.done.length === 1 && (await tryApi(`/meetings/${W2.id}`)).error && !(await kit.api(`/meetings/${M1}`)).combined && !meetingJson(M2).partOf && (await kit.api(`/meetings/${M2}`)).transcript.length === 1, 'Separate: the combined meeting goes, and its meetings are as they were')
+  const W4 = await tryApi('/meetings/combine', { ids: [M3, M2], title: 'Second half' })
+  ok(W4.title === 'Second half' && W4.parts?.join() === [M2, M3].join(), 'combined again under a name of your own', W4)
+  await kit.api(`/meetings/${M3}`, null, 'DELETE')
+  ok((await tryApi(`/meetings/${W4.id}`)).error && !(await kit.api(`/meetings/${M2}`)).combined && !meetingJson(M2).partOf, 'one of its two deleted: it\'s separated by itself, and the other stays')
+  }
+
   // ---------- The calendar (macOS Calendar, through icalBuddy) ----------
   if (IS_MAC) {
     kit.program('icalBuddy', `const d = new Date(), p = (n) => String(n).padStart(2, '0'), hm = (t) => p(t.getHours()) + ':' + p(t.getMinutes())
