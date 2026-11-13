@@ -5,6 +5,7 @@ import { record, microphone } from './recorder.js'
 import { micRefused, micBlocked } from '../../audio/pcm.js'
 import { watch as watchShare, sendPicture, sendGlance } from './screen.js'
 import { t, locale } from '../../i18n/index.js'
+import { Among, useCallEvents, MeetingName } from './cardparts.jsx'
 import './meetings.css'
 
 // The top bar's pill says a long title in short, not cut off by the pill (the whole is in its tooltip).
@@ -178,9 +179,10 @@ export function MeetingsProvider({ children }) {
     refetch('/meetings') // the lists show it stopped now (its menu offers Archive and Delete again)
     refreshCalls()
   }
-  // Notes for a call that just started: named after the calendar event on now, if there is one.
-  const startForCall = async (app) => {
-    const event = await eventNow(app)
+  // Notes for a call that just started: named after the calendar event on now, if there is one
+  // (picked: the one chosen in its prompt, with more than one on).
+  const startForCall = async (app, picked) => {
+    const event = picked?.title ? picked : await eventNow(app)
     return start({ title: event?.title || `${app} call, ${when()}`, event })
   }
   // Recording now, from the sidebar: for the calendar event on now (its name and people), if there
@@ -210,6 +212,16 @@ export function MeetingsProvider({ children }) {
     room.current = inRoom()
     handle.current.swap('you')
   }, [calls]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Renamed (here, on the floating card, on its page, on another device) or named after another
+  // calendar event: its name here follows. Away from the computer, from the list of meetings.
+  const retitledAt = useRef(0)
+  const retitle = (title) => { retitledAt.current = Date.now(); setRec((r) => (r && title ? { ...r, title } : r)) }
+  const { data: listed } = usePoll(rec && !here() ? '/meetings' : null, 8000)
+  useEffect(() => {
+    if (!rec || Date.now() - retitledAt.current < 4000) return
+    const title = calls?.recording?.id === rec.id ? calls.recording.title : listed?.meetings?.find((x) => x.id === rec.id)?.title
+    if (title && title !== rec.title) setRec((r) => (r ? { ...r, title } : r))
+  }, [calls, listed]) // eslint-disable-line react-hooks/exhaustive-deps
   // The floating card: what's recording, and Pause, Resume and Stop from it.
   const fns = useRef(null)
   fns.current = { pause, resume, stop, start, startForCall, section, watchScreen, capture, unwatch, mine: (id) => !!handle.current && rec?.id === id }
@@ -222,7 +234,7 @@ export function MeetingsProvider({ children }) {
       if (d.type === 'op' && handle.current && fns.current[d.op] && ['pause', 'resume', 'stop', 'section', 'capture', 'watchScreen', 'unwatch'].includes(d.op)) Promise.resolve().then(() => fns.current[d.op]()).catch((err) => ch.postMessage({ type: 'error', text: err.message }))
       if (d.type === 'hello') ch.postMessage({ type: 'hello-back' })
     }
-    const onStart = (e) => { const d = e.detail || {}; (d.app ? fns.current.startForCall(d.app) : fns.current.start(d)).catch((err) => ch.postMessage({ type: 'error', text: err.message })) }
+    const onStart = (e) => { const d = e.detail || {}; (d.app ? fns.current.startForCall(d.app, d.event) : fns.current.start(d)).catch((err) => ch.postMessage({ type: 'error', text: err.message })) }
     const onWatch = () => { fns.current.watchScreen().catch((err) => ch.postMessage({ type: 'error', text: err.message })) }
     // From the menu bar: done here when this window is recording that meeting, otherwise on the
     // server (a browser tab recording it stops its mic when it sees so).
@@ -265,7 +277,7 @@ export function MeetingsProvider({ children }) {
 
   const elapsed = rec ? Math.max(0, (rec.paused ? rec.pausedAt : now) - rec.startedAt - rec.pausedMs) / 1000 : 0
   useEffect(() => { chan.current?.postMessage({ type: 'state', rec: rec && { id: rec.id, title: rec.title, paused: rec.paused, section: rec.section || null }, elapsed, you: levels.you || 0, screen, canWatch: !!navigator.mediaDevices?.getDisplayMedia }) }, [rec, elapsed, levels, screen])
-  const value = useMemo(() => ({ rec, levels, elapsed, start, startNow, pause, resume, stop, section, calls, refreshCalls, startForCall, screen, watchScreen, capture, unwatch }), [rec, levels, elapsed, calls, screen]) // eslint-disable-line react-hooks/exhaustive-deps
+  const value = useMemo(() => ({ rec, levels, elapsed, start, startNow, pause, resume, stop, section, calls, refreshCalls, startForCall, retitle, screen, watchScreen, capture, unwatch }), [rec, levels, elapsed, calls, screen]) // eslint-disable-line react-hooks/exhaustive-deps
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 
@@ -298,18 +310,22 @@ export function QuickNote({ id, className = '', autoFocus = false, onAdded }) {
 }
 
 // In the top bar while recording: how long and what. Click opens the meeting; hover (or focus)
-// shows Pause, Stop, New section, a quick note and the way to every meeting. Once clicked, the menu stays shut
+// shows Pause, Stop, New section, a quick note and the way to every meeting, with its name to
+// change there (the pencil by it). Once clicked, the menu stays shut
 // until the mouse has left: the meeting page has the same buttons, and the menu would sit over them.
 export function RecordingPill() {
   const m = useMeetings()
   const [open, setOpen] = useState(false)
+  const [err, setErr] = useState(null)
   const timer = useRef(null)
   const shut = useRef(false)
+  const wrap = useRef(null)
   if (!m?.rec) return null
   const show = () => { if (shut.current) return; clearTimeout(timer.current); setOpen(true) }
-  const hide = (ms = 300) => { clearTimeout(timer.current); timer.current = setTimeout(() => setOpen(false), ms) }
+  // Open while its name is being typed, wherever the pointer goes.
+  const hide = (ms = 300) => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!wrap.current?.querySelector('.mt-rename')) setOpen(false) }, ms) }
   return (
-    <div className="rec-wrap" onMouseEnter={show} onMouseLeave={() => { shut.current = false; hide() }} onFocus={show} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) hide(0) }}>
+    <div className="rec-wrap" ref={wrap} onMouseEnter={show} onMouseLeave={() => { shut.current = false; hide() }} onFocus={show} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget) && !e.currentTarget.matches(':hover')) hide(0) }}>
       <button type="button" className={`rec-pill${m.rec.paused ? ' paused' : ''}`} onClick={() => { shut.current = true; clearTimeout(timer.current); setOpen(false); openMeeting(m.rec.id) }} aria-haspopup="true" aria-expanded={open} title={m.rec.paused ? t('{title}: paused. Click to open it.', { title: m.rec.title }) : t('{title}: recording. Click to open it.', { title: m.rec.title })}>
         <span className="rec-dot" aria-hidden="true" />
         <span className="rec-time">{clock(m.elapsed)}</span>
@@ -317,7 +333,7 @@ export function RecordingPill() {
       </button>
       {open && (
         <div className="rec-menu" role="dialog" aria-label={t('Recording')}>
-          <div className="rec-menu-head"><b title={m.rec.title}>{m.rec.title}</b><span className="muted small">{m.rec.paused ? t('Paused') : t('Recording')} · {clock(m.elapsed)}{m.rec.section ? ` · ${m.rec.section}` : ''}</span></div>
+          <div className="rec-menu-head"><span className="rec-menu-name"><MeetingName id={m.rec.id} title={m.rec.title} className="rec-menu-title" onRenamed={(v) => { setErr(null); m.retitle(v) }} onError={setErr} /></span>{err && <span className="error-text small" role="alert">{err}</span>}<span className="muted small">{m.rec.paused ? t('Paused') : t('Recording')} · {clock(m.elapsed)}{m.rec.section ? ` · ${m.rec.section}` : ''}</span></div>
           <div className="rec-menu-acts">
             {m.rec.paused
               ? <button type="button" className="btn small" onClick={m.resume}><Icon name="mic" size={12} /> {t('Resume')}</button>
@@ -377,20 +393,6 @@ export function ScreenButton({ m, small = true }) {
   )
 }
 
-// The calendar event a call on app that started at `at` is for (named in the prompt), the one
-// Take notes names it after.
-export function useCallEvent(at, app) {
-  const [ev, setEv] = useState(null)
-  useEffect(() => {
-    setEv(null)
-    if (!at) return
-    let on = true
-    eventNow(app).then((e) => on && setEv(e)).catch(() => {})
-    return () => { on = false }
-  }, [at, app])
-  return ev
-}
-
 // Why a recording seems to be over: its call ended, its time on the calendar is up and it's gone
 // quiet, or nobody's said anything for a long while.
 export const endedWords = (r) => (r.endWhy === 'over' ? t("Its time on your calendar is up, and it's gone quiet.") : r.endWhy === 'quiet' ? t('Nobody has said anything for a while.') : r.callEndedApp ? t('The {app} call ended.', { app: r.callEndedApp }) : t('The call ended.'))
@@ -406,7 +408,8 @@ export function CallPrompt() {
   const [gone, setGone] = useState(null) // the call (its start) Not now was pressed for
   const goneRef = useRef(null) // the same, for a Take notes still starting
   const c = m?.calls
-  const ev = useCallEvent(c?.prompt && !m?.rec ? c.prompt.at : null, c?.prompt?.app)
+  const evs = useCallEvents(c?.prompt && !m?.rec ? c.prompt.at : null, c?.prompt?.app)
+  const ev = evs.ev
   if (!c) return null
   const r = c.recording
   const act = async (fn) => { setBusy(true); setErr(null); try { await fn() } catch (e) { setErr(e.message) } finally { setBusy(false); m.refreshCalls() } }
@@ -418,7 +421,7 @@ export function CallPrompt() {
   }
   const takeNotes = () => act(async () => {
     const at = c.prompt.at
-    const id = await m.startForCall(c.prompt.app)
+    const id = await m.startForCall(c.prompt.app, evs.n > 1 ? ev : null)
     if (goneRef.current === at) { await m.stop(); return }
     if (id) openMeeting(id)
   })
@@ -440,6 +443,8 @@ export function CallPrompt() {
       <div className="call-prompt" role="alertdialog" aria-label={t('A call started')}>
         <Icon name="mic" size={15} />
         <span className="call-prompt-main"><b>{what}</b><small>{ev ? t('Take notes for "{title}"?', { title: ev.title }) : t('Take notes?')} {t('Your mic and the call, transcribed as you go.')}</small></span>
+        {/* More than one meeting on: which one the notes are for. */}
+        <Among n={evs.n} i={evs.i} onStep={evs.step} disabled={busy} what={ev ? t('These notes are for {event}', { event: ev.title }) : null} />
         <button type="button" className="btn small primary" disabled={busy} onClick={takeNotes}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Take notes')}</button>
         <button type="button" className="ghost-btn" onClick={notNow}>{t('Not now')}</button>
         {err && <span className="error-text small">{err}</span>}
