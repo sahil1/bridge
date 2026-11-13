@@ -64,12 +64,12 @@ try {
     const titled = (x) => x.split(/\s+/).every((w, i) => (i > 0 && /^(a|an|and|as|at|by|for|in|of|on|or|the|to|&)$/.test(w)) || !/^\p{Ll}/u.test(w))
     ok(navs.length > 5 && navs.every(titled), `${t}: Settings' section names are in Title Case`, navs)
     // README.md's table of Settings has a row for each of them (Mail's row says it's a Mac's), and
-    // none for a section that isn't there (Account, until Bold Bridge accounts are switched on).
+    // none for a section that isn't there (Account's is: the tests run without Bold Bridge accounts).
     // (Windows' checkout writes its lines with \r\n: read as \n, so the table ends at its blank line.)
     const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8').replace(/\r\n/g, '\n')
     const table = readme.slice(readme.indexOf('| Section | What\'s there |'))
     const rows = [...table.slice(0, table.search(/\n\n/)).matchAll(/^\| ([^|]+?) \|/gm)].map((m) => m[1]).filter((x) => !/^(Section|-+)$/.test(x))
-    ok(navs.every((x) => rows.includes(x)) && rows.every((x) => navs.includes(x) || x === 'Mail'), `${t}: README.md's Settings table has a row for each section, and only those`, { rows, navs })
+    ok(navs.every((x) => rows.includes(x)) && rows.every((x) => navs.includes(x) || x === 'Mail' || x === 'Account'), `${t}: README.md's Settings table has a row for each section, and only those`, { rows, navs })
     await p.locator('.st-nav-item', { hasText: 'Devices' }).click()
     // (Once the relay's own heading is in: Tailscale, when it isn't the way picked, is under Advanced at the end.)
     const at = (re, h = heads) => (h || []).findIndex((x) => re.test(x))

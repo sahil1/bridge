@@ -1,10 +1,13 @@
 # Privacy
 
 Bridge AI is an open-source app (https://github.com/sahil1/bridge) made of three parts: the app on
-your computer, a relay on your own Cloudflare account, and the phone apps for iPhone and Android.
-The app on your computer sends the project anonymous usage stats and crash reports (below), which
-you can turn off in Settings › About & Updates; nothing else goes to the project or its author. The
-relay and the phone apps send the project nothing. There is no account and no ads.
+your computer, a relay (on your own Cloudflare account, or Bridge AI's relay, run by the project),
+and the phone apps for iPhone and Android. The app on your computer sends the project anonymous
+usage stats and crash reports (below), which you can turn off in Settings › About & Updates. If you
+choose Bridge AI's relay, your phone and computer talk through it, end-to-end encrypted, and it
+keeps only what it needs to work (below). Nothing else goes to the project or its author. A relay of
+your own and the phone apps send the project nothing. There are no ads, and there's no account unless you want Early Access or Bridge AI's relay, which
+come with a Bold Bridge account (below).
 
 Last updated: November 2026.
 
@@ -212,14 +215,16 @@ Bridge AI on your computer sends the project anonymous usage stats, to see what 
 and which versions are out there. They're on unless you turn them off: **Share anonymous usage
 counts** in Settings › About & Updates, beside **Send crash reports by themselves**. `DO_NOT_TRACK=1` or `BRIDGE_TELEMETRY=0` in the
 environment keeps them off, and turning them off stops them at once and forgets what was counted
-and not yet sent. The phone apps and the relay send nothing of the kind.
+and not yet sent. The phone apps and a relay of your own send nothing of the kind; Bridge AI's relay counts its own
+use (below).
 
 Two reports go to the project's server, `counts.boldbridge.ai`, run on Cloudflare; its code is
 [counts/worker.js](counts/worker.js) in this repo:
 
 - **Once a week**, after the week is over: Bridge AI's version; its update channel (Stable, or
   Early Access for testers) and, on Early Access, who the code is for: the first name or nickname
-  the project gave that tester when it made the code; its rollout bucket, a number from 0 to 99
+the project gave that tester when it made the code, or, with Early Access from your Bold Bridge
+account, that account's id (below); its rollout bucket, a number from 0 to 99
   picked at random once and kept in your settings, which decides how soon a release that goes out
   a few computers at a time reaches yours; your operating system and its
   version (macOS 15.1, Windows 11, Ubuntu 24.04); your chip's family (Apple M2 Pro, Intel Core i7,
@@ -238,7 +243,7 @@ Two reports go to the project's server, `counts.boldbridge.ai`, run on Cloudflar
   how it's installed, how many times it started (a range), and whether something crashed.
 
 Neither has your name (on Early Access, the tester's name is the one the project chose for the
-code it gave them), an ID for you or your computer (a random number new with each report lets the
+code it gave them, or your Bold Bridge account's id), an ID for your computer (a random number new with each report lets the
 server count a report once; the rollout bucket is shared with about one computer in a hundred), a
 file, folder, project, repo or branch name, anything you typed or said, anything from your agents,
 an email address, a host name, or an exact time. The full list of
@@ -266,7 +271,7 @@ token once, when you click it.
 
 When something in Bridge AI crashes, its report (the same text **Report on GitHub** shows you: what
 crashed, the error and where in Bridge AI's code, its version and update channel (on Early Access,
-with the tester's name the project chose), your system, the settings that change how it runs, and
+with the tester's name the project chose, or your Bold Bridge account's id), your system, the settings that change how it runs, and
 the last lines of its log, with your name, your projects' and computers' names,
 folders, emails, keys and network addresses taken out on your computer) can go to the project, to
 help fix it. That happens by itself unless you turn off **Send crash reports by themselves** in
@@ -282,6 +287,36 @@ same crash. It doesn't read or store your IP address, and its logs are off. A re
 you or your computer, so one already sent can't be found again to delete. A copy of each report sent
 is kept in `~/.bridge-ai/telemetry/crashes`, and Settings lists them. If the project stops
 collecting, Bridge AI turns crash reports off and says so.
+
+## Your Bold Bridge account (optional)
+
+Early Access and Bridge AI's relay come with a Bold Bridge account. Nothing else needs one, and
+Bridge AI never asks you to make one. You sign in in Settings › Account (or in Settings › Devices,
+for the relay) with your email and a 6-digit code it's sent (there's no password), at `accounts.boldbridge.ai`, run by the project on
+Cloudflare; its code is [account/worker.js](account/worker.js) in this repo.
+
+**What it keeps**: your email; your devices (five at most): the name each was given (your
+computer's name in Bridge AI), whether it's a computer or a phone, its system, when it was added
+and last used, and a hash of its sign-in token; whether you asked for or have Early Access and the
+relay, and whether the account is suspended; your requests and their notes; what was changed on
+the account and by whom; and, if you use Bridge AI's relay, its counts for your account (messages
+in each 8-hour window and each week, and each day's total, kept 90 days). To limit codes, it keeps
+for an hour how many were sent to each email and from each network, and for a day the wrong codes
+entered for each email, under a hash of each. Never
+anything from your computer: your agents, meetings, mail, files and what you type stay there.
+
+**What goes with it**: your email, when you sign in or ask for something; the codes and notices
+emailed to you, sent with Cloudflare's Email Service; and, on Early Access, your account's id in the
+usage stats and crash reports (above), so the project can tell testers' reports apart.
+
+**Your other computers**: once one of your computers is signed in, it can sign in the others linked
+to it (Settings › Account), over the end-to-end encrypted link between them. One that would rather
+not says so, and is left alone.
+
+**Leaving**: Sign out, or remove a device, in Settings › Account. Delete account there deletes the
+account, its devices, requests, history and counts at once (Bridge AI's relay forgets its own within
+a day). Bold Bridge's admins see what's kept, to answer requests, and can suspend an account that
+misuses Early Access or the relay.
 
 ## The website
 
@@ -317,6 +352,59 @@ and Cloudflare's privacy policy, not the project's. The project never sees it.
 
 If you use Tailscale instead, your phone reaches your computer over your own tailnet, under
 Tailscale's privacy policy.
+
+## Bridge AI's relay (optional)
+
+If you'd rather not set up a relay of your own, you can choose Bridge AI's relay in Settings ›
+Devices. It comes with a Bold Bridge account (above), by request. It's the same relay
+([relay/worker.js](relay/worker.js)), run by the project on its own Cloudflare account at
+`boldbridge.app`, so the project's Cloudflare account carries your traffic instead of yours. Cloudflare
+processes it for the project.
+
+**What it can read: nothing past the handshake.** Everything between your phone and your computer
+is end-to-end encrypted, so the relay passes on bytes it can't read. That holds as long as the page
+doing the encrypting is the one Bridge AI wrote: the iPhone and Android apps have it built in, and
+a pairing link opens them when they're installed, but in a phone's browser the page comes from the
+relay, so whoever runs the relay could change it (the page says so before pairing). On a relay
+that isn't yours, use the iPhone or Android app. Your computer checks the page the relay serves
+once a day, and when you open Settings › Devices, against Bridge AI's own for the version the
+relay says it runs (its own copy, or that release's from GitHub), and Settings › Devices says so
+if they differ; nothing is sent but those requests. What it sees, as any server does: the IP
+addresses of your phone and computer, when they connect, and how much they send.
+
+**What it keeps for your computer**: a random id (its address there), a hash of the token your
+computer uses to connect (never the token), your account's and this device's ids, the Bridge AI
+version it was set up with, when it registered and last connected, today's message and data counts,
+and, as any relay does, your paired phones as ids made from their keys (and which of them connected
+this week), and messages from your phone waiting for your computer, sealed so it can't read them,
+for 7 days at most. **For your account**: its messages in each 8-hour window and each week, across
+your computers (for its limits), which it reports to your Bold Bridge account every few minutes
+while you use it. And because it takes a limited number of accounts at once, it keeps a list of the
+computers on it, by their random ids and their accounts' ids, with when each was set up and last
+used.
+
+**What it counts, for the project**: when a computer registers and connects (with its Bridge AI
+version), how many paired phones connect each week, how much data passes, when a limit is reached,
+and each day's totals with the day's busiest computers' use, kept 35 days. Each is by your
+computer's random id only: no IP addresses, no content, no names. The full list is in
+[relay/HOSTED.md](relay/HOSTED.md).
+
+**Its limits**: it's free, with an allowance for each account, across its computers: so many
+messages in each 8-hour window and each week, like Claude's (Settings › Account and Settings ›
+Devices show them), and limits that stop floods (how big one message can be, how many come at
+once, how many phones and tabs are connected at once). It takes a limited number of accounts, and
+when it's full, Bridge AI says so and offers the other ways (a relay of your own, or Tailscale). It
+also has a daily limit for all the computers on it together; if that's reached, it stops for
+everyone until 00:00 UTC. When a limit is reached, your phone and Settings › Devices say which, and
+when it ends. The limits may change, and paid plans with higher ones may come; anything a paid plan
+would keep or send elsewhere (to take payment) will be said here first.
+
+**Stop using it** (Settings › Devices › Stop using the relay) and your computer's data there is
+deleted at once (should that message not arrive, its id leaves the list of computers within a few
+days). A computer that hasn't connected for 90 days is deleted the same way, and deleting your Bold
+Bridge account deletes your account's counts and its computers there within a day. Everything else
+in this policy, including what Cloudflare sees, applies to it as to a relay of your own, except
+that it's the project's Cloudflare account.
 
 ## The phone apps
 

@@ -1,13 +1,13 @@
 // Bridge AI's hosted relay (relay/HOSTED.md): a relay the project runs, so a phone can reach this
-// computer without a Cloudflare account of your own. Until it exists this stays empty, and while
-// it's empty the option shows nowhere (Settings, first-run setup, the command line).
+// computer without a Cloudflare account of your own. Empty, the option shows nowhere (Settings,
+// first-run setup, the command line).
 //
-// The one place to switch it on: its address below, e.g. 'https://example.com'. One computer can
+// The one place it's switched on: its address below (a fork's own, or '' for none). One computer can
 // also point at another with "relay": { "hostedUrl": "https://…" } in its config.json, and
 // BRIDGE_HOSTED_URL stands in for this one (the tests set it empty, so none reaches the project's).
 import { loadConfig } from './paths.js'
 
-export const HOSTED_URL = ''
+export const HOSTED_URL = 'https://boldbridge.app'
 
 // Its address, or null when there's none. https only (plain http just for a test relay on this
 // computer).
