@@ -19,7 +19,7 @@ routes = [
 [[d1_databases]]
 binding = "DB"
 database_name = "bridge-accounts"
-database_id = "put-the-id-from-d1-create-here"
+database_id = "c92a60f8-7bd4-4f01-8115-14c99d694a3f"
 
 # Cloudflare's Email Service, for codes and notices (README.md: the sending domain is onboarded first).
 [[send_email]]
