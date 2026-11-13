@@ -356,7 +356,7 @@ try {
     const rows = (await menu.locator('.mc-item').allInnerTexts().catch(() => [])).map((x) => x.replace(/\s+/g, ' ').trim())
     ok(rows.length === 4 && /this one/.test(rows[0]) && /^Studio Mac Mac · 1 needs you$/.test(rows[1]) && /^Windows PC Windows · Offline, seen/.test(rows[2]) && /^Linux box Paired on this phone$/.test(rows[3]), 'phone app: the devices menu lists this computer, the others with whether they\'re online, and one paired on the phone alone', rows)
     const items = (await menu.locator('.menu-item').allInnerTexts().catch(() => [])).map((x) => x.trim())
-    ok(/On this phone/i.test(await menu.innerText().catch(() => '')) && ['Cloud Agents', 'Start screen'].every((x) => items.includes(x)), 'and On this phone: Cloud Agents and the start screen', items)
+    ok(/On this phone/i.test(await menu.innerText().catch(() => '')) && ['Add a computer', 'Cloud Agents', 'Start screen'].every((x) => items.includes(x)), 'and On this phone: Add a computer, Cloud Agents and the start screen', items)
     const sizes = await menu.evaluate((m) => [...m.querySelectorAll('.mc-item, .menu-item')].map((e) => { const r = e.getBoundingClientRect(); return { h: Math.round(r.height), out: r.left < 0 || r.right > window.innerWidth } }))
     ok(sizes.length > 0 && sizes.every((x) => x.h >= 40 && !x.out), 'every row in it on screen and at least 40px tall', sizes)
     await shot(ph.p, `${tag}phone-app-devices`)
@@ -372,6 +372,9 @@ try {
     await menu.locator('.menu-item', { hasText: 'Start screen' }).tap()
     ok(await ph.p.evaluate(() => window.started) === 1, 'Start screen goes to the app\'s screen for pairing or opening a computer')
     await openMenu()
+    await menu.locator('.menu-item', { hasText: 'Add a computer' }).tap()
+    ok(await ph.p.evaluate(() => window.started) === 2, 'Add a computer goes to the app\'s pairing screen, to scan another computer\'s code')
+    await openMenu()
     await menu.locator('.mc-item', { hasText: 'Windows PC' }).tap()
     ok(!!(await until(() => ph.p.frames().some((f) => /\/m\/test-win\/$/.test(f.url())), 8000)), 'one linked to this computer only is shown through it', ph.p.frames().map((f) => f.url()))
     await ph.ctx.close()
@@ -385,7 +388,7 @@ try {
     const menu = p.locator('.mc-menu')
     await menu.waitFor({ timeout: 5000 }).catch(() => {})
     const text = await menu.innerText().catch(() => '')
-    ok(/Studio Mac/.test(text) && /Windows PC/.test(text) && !/On this phone|Cloud Agents|Start screen|Linux box/i.test(text), 'phone browser: the devices menu has your devices, and nothing that needs the app', text)
+    ok(/Studio Mac/.test(text) && /Windows PC/.test(text) && !/On this phone|Add a computer|Cloud Agents|Start screen|Linux box/i.test(text), 'phone browser: the devices menu has your devices, and nothing that needs the app', text)
     await ctx.close()
   }
 
