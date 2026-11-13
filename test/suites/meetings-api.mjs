@@ -868,6 +868,61 @@ process.exit(1)`)
   since = await tryApi(`/meetings/since?${new URLSearchParams({ title: 'Meeting', people: '' })}`)
   ok(since.last === null, 'a meeting with only a plain name and nobody listed follows on from nothing', since)
 
+  // ---------- Resume recording ----------
+  // A meeting that ended records again: the same one, its time carrying on past what it had, its
+  // audio in a new part whose start is kept (so Transcribe again puts its lines where they were),
+  // and its summary said to be out of date, or written again when summaries are written by
+  // themselves. Not while another one records, or it's recording already.
+  { // names of its own, apart from the ones above
+  await kit.api('/settings', { meetings: { autoSummary: false, cleanup: false } }, 'PATCH')
+  const meetingJson = (id) => JSON.parse(fs.readFileSync(path.join(dirOf(id), 'meeting.json'), 'utf8'))
+  const RR = await kit.api('/meetings', { title: 'Vendor review', call: false })
+  // The call's lines are said well away from the mic's (a line of yours beside one of theirs with
+  // the same words is taken for the call heard by your mic), and its first part is the shorter.
+  await send(RR.id, Buffer.concat([pcm(9), pcm(2, true), pcm(1)]))
+  await send(RR.id, Buffer.concat([pcm(0.2), pcm(1, true), pcm(0.3)]), 'them')
+  await kit.api(`/meetings/${RR.id}/stop`, {})
+  const r1 = await until(async () => { const m = await kit.api(`/meetings/${RR.id}`); return m.status === 'done' && m.transcript.length >= 2 && m }, 20000)
+  ok(!!r1 && r1.seconds === 12, 'a meeting of 12 s ends', r1 && [r1.status, r1.seconds, r1.transcript.length])
+  await kit.api(`/meetings/${RR.id}/summary`, {})
+  await until(async () => { const m = await kit.api(`/meetings/${RR.id}`); return !m.summarizing && m.summary }, 15000)
+  const OO = await kit.api('/meetings', { title: 'Another one', call: false })
+  ok(/"Another one" is recording\. Stop it first\./.test(await err(`/meetings/${RR.id}/reopen`, {}) || ''), 'Resume recording says no while another meeting records, and which')
+  await kit.api(`/meetings/${OO.id}/stop`, {})
+  await until(async () => (await kit.api(`/meetings/${OO.id}`)).status === 'done', 10000)
+  r = await tryApi(`/meetings/${RR.id}/reopen`, {})
+  ok(r.id === RR.id && r.status === 'recording' && r.endedAt === null && r.resumedFrom === 12 && !!r.resumedAt, 'Resume recording: the same meeting records again, from where it had got to', r)
+  ok(/recording already/.test(await err(`/meetings/${RR.id}/reopen`, {}) || ''), 'not twice')
+  await kit.api(`/meetings/${RR.id}/note`, { text: 'back after the break' })
+  ok(/- \[0:1[2-6]\] back after the break/.test(notes(RR.id)), 'a quick note is at the meeting\'s time, carried on', notes(RR.id))
+  ok((await kit.api('/calls')).recording?.resumedFrom === 12, 'the floating card is told where it carried on from')
+  await send(RR.id, Buffer.concat([pcm(0.5), pcm(2, true), pcm(1.5)]))
+  await send(RR.id, Buffer.concat([pcm(10), pcm(1.5, true), pcm(0.5)]), 'them')
+  await kit.api(`/meetings/${RR.id}/stop`, {})
+  const r2 = await until(async () => { const m = await kit.api(`/meetings/${RR.id}`); return m.status === 'done' && m.transcript.length >= 4 && m }, 20000)
+  const keys1 = (r1?.transcript || []).map((l) => l.key)
+  const fresh = (r2?.transcript || []).filter((l) => !keys1.includes(l.key))
+  ok(!!r2 && keys1.every((k) => r2.transcript.some((l) => l.key === k)) && fresh.length === 2 && fresh.every((l) => l.t0 >= 12) && r2.seconds === 24, 'what was recorded before is kept, and the new lines come after it', r2 && { seconds: r2.seconds, lines: r2.transcript.map((l) => [l.src, l.t0, l.t1]) })
+  const parts2 = fs.readdirSync(dirOf(RR.id)).filter((f) => /^audio-/.test(f)).sort()
+  ok(parts2.length === 4 && parts2.some((f) => /^audio-you-2\.(ogg|wav)$/.test(f)) && parts2.some((f) => /^audio-them\.(ogg|wav)$/.test(f)) && meetingJson(RR.id).audioFrom?.['audio-them-2'] === 12 && meetingJson(RR.id).audioFrom?.['audio-you-2'] === 12, 'its audio is a new part beside the first, with where it starts', [parts2, meetingJson(RR.id).audioFrom])
+  ok(r2?.summaryStale === 'recorded' && /beta ships/.test(r2.summary), 'with summaries not written by themselves, the one it has says it\'s out of date', r2.summaryStale)
+  // Transcribe again: the call's second part starts at 12 s, where it was recorded, not at 1.5 s
+  // where its first part ends.
+  r = await tryApi(`/meetings/${RR.id}/transcribe`, {})
+  const r3 = await until(async () => { const m = await kit.api(`/meetings/${RR.id}`); return m.status === 'done' && m.again?.done && m.transcript.length >= 4 && m }, 30000)
+  const them3 = (r3?.transcript || []).filter((l) => l.src === 'them').map((l) => l.t0)
+  ok(them3.length === 2 && them3[0] < 1.5 && them3[1] >= 21 && them3[1] < 23, 'transcribed again, each part\'s lines are where they were said', r3 ? r3.transcript.map((l) => [l.src, l.t0]) : r)
+  // Summaries written by themselves: resumed and ended again, it's written again, not left.
+  await kit.api('/settings', { meetings: { autoSummary: true } }, 'PATCH')
+  const s0 = model.asked(/Write meeting notes in Markdown/).length
+  await kit.api(`/meetings/${RR.id}/reopen`, {})
+  await send(RR.id, Buffer.concat([pcm(6), pcm(2, true), pcm(1)]))
+  await kit.api(`/meetings/${RR.id}/stop`, {})
+  const r4 = await until(async () => { const m = await kit.api(`/meetings/${RR.id}`); return m.status === 'done' && !m.summarizing && !m.summaryStale && model.asked(/Write meeting notes in Markdown/).length > s0 && m }, 20000)
+  ok(!!r4 && r4.seconds === 33 && r4.transcript.filter((l) => l.t0 >= 29).length === 1, 'ended again, its summary is written again from all of it', r4 ? [r4.seconds, r4.summaryStale, r4.transcript.map((l) => [l.src, l.t0])] : (await kit.api(`/meetings/${RR.id}`)).summaryStale)
+  await kit.api('/settings', { meetings: { autoSummary: false } }, 'PATCH')
+  }
+
   // ---------- The calendar (macOS Calendar, through icalBuddy) ----------
   if (IS_MAC) {
     kit.program('icalBuddy', `const d = new Date(), p = (n) => String(n).padStart(2, '0'), hm = (t) => p(t.getHours()) + ':' + p(t.getMinutes())

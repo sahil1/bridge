@@ -217,7 +217,7 @@ const live = new Map() // id -> { sources: { you: Source, them: Source }, seq }
 // at 25 s so the transcript keeps up in a long monologue (cut at its quietest frame near the end).
 const FRAME = 480
 class Finder {
-  constructor(onStretch) { this.on = onStretch; this.frames = []; this.at = 0; this.floor = 0.003; this.voiced = 0; this.quiet = 0; this.pre = []; this.rest = null }
+  constructor(onStretch, at = 0) { this.on = onStretch; this.frames = []; this.at = at; this.floor = 0.003; this.voiced = 0; this.quiet = 0; this.pre = []; this.rest = null }
   // Pieces come in any size: the call's sound about 10 ms at a time (one Core Audio callback, less
   // than a frame), so what doesn't fill a frame waits for the next piece instead of being dropped.
   push(samples) {
@@ -274,13 +274,16 @@ class Finder {
 }
 
 // The recording itself, kept as Opus when ffmpeg is here (it encodes as it goes, using next to
-// nothing), else as raw samples turned into a WAV at the end.
-async function writer(id, src) {
-  const ff = await tool('ffmpeg')
+// nothing), else as raw samples turned into a WAV at the end. Never over what's there: a meeting
+// recorded again (reopen) gets its next part, audio-you-2.
+function partFile(id, src) {
   const base = path.join(dirOf(id), `audio-${src}`)
   let n = 1
   while (fs.existsSync(`${base}${n > 1 ? `-${n}` : ''}.ogg`) || fs.existsSync(`${base}${n > 1 ? `-${n}` : ''}.wav`)) n++
-  const file = `${base}${n > 1 ? `-${n}` : ''}`
+  return `${base}${n > 1 ? `-${n}` : ''}`
+}
+async function writer(file) {
+  const ff = await tool('ffmpeg')
   if (ff) {
     const p = spawn(ff, ['-hide_banner', '-loglevel', 'error', '-f', 's16le', '-ar', String(RATE), '-ac', '1', '-i', 'pipe:0', '-c:a', 'libopus', '-b:a', '24k', '-application', 'voip', `${file}.ogg`], { stdio: ['pipe', 'ignore', 'ignore'] })
     p.on('error', () => {})
@@ -465,11 +468,15 @@ function settle(id) {
   const room = voices.wanted(ls, { guests: m.event?.attendees ? guests(m).length : null })
   const learn = voices.sideOf(ls) === 'them' && cfg.meetings?.learnVoice !== false
   if (!clean && !sum && !room && !learn) { resave(id); return }
+  // Recorded again meanwhile (reopen): the rest waits for it to end again.
+  const still = () => readJSON(path.join(DIR, id, 'meeting.json'))?.status === 'done'
   ;(async () => {
     if (room) await voices.tell(id, ls).then(() => voices.wait(id)).catch(() => {})
-    if (learn) await voices.learnMe(id, transcript(id, { raw: true })).catch(() => {})
-    if (clean) await cleanup(id).catch(() => {})
-    if (sum && transcriptText(id)) await summarize(id).catch(() => {})
+    if (learn && still()) await voices.learnMe(id, transcript(id, { raw: true })).catch(() => {})
+    if (clean && still()) await cleanup(id).catch(() => {})
+    // A summary still being written is of what there was before it was recorded again: this one waits.
+    await summarizing.get(id)?.catch(() => {})
+    if (sum && still() && transcriptText(id)) await summarize(id).catch(() => {})
     // Saved by itself (Settings › Meetings) with its summary, or without one when it couldn't be
     // written: the transcript and your notes, and the summary once it is.
     resave(id)
@@ -534,8 +541,13 @@ export async function audio(id, src, buf, seq) {
   if (!l) live.set(id, (l = { sources: {} }))
   let s = l.sources[src]
   if (!s) {
-    s = l.sources[src] = { seq: -1, samples: 0, out: null, finder: new Finder((st) => enqueue({ id, src, ...st })), partial: null }
-    s.out = writer(id, src)
+    // Recording again (reopen): its time carries on from where the meeting had got to, and where
+    // this part of the audio starts is kept for Transcribe again.
+    const from = Math.round((m.resumedFrom || 0) * RATE)
+    s = l.sources[src] = { seq: -1, samples: from, out: null, finder: new Finder((st) => enqueue({ id, src, ...st }), from), partial: null }
+    const file = partFile(id, src)
+    if (from) patchMeta(id, { audioFrom: { ...(m.audioFrom || {}), [path.basename(file)]: m.resumedFrom } })
+    s.out = writer(file)
   }
   if (seq != null && Number(seq) <= s.seq) return { status: m.status, dup: true }
   if (seq != null) s.seq = Number(seq)
@@ -586,8 +598,9 @@ const soFar = (id) => {
 // Real sound, about -60 dB and up: a call's sound macOS hasn't let Bridge AI hear isn't always
 // all zeros (one was a few steps off zero for a whole 2-hour call), and that isn't a call.
 const HEARD = 33
-// The call has been silent since it started, while it records: nothing played, or macOS hasn't let
-// Bridge AI hear it yet (System Audio Recording). BRIDGE_CALL_QUIET_MS: how long before it says so.
+// The call has been silent since it started (or since it was recorded again), while it records:
+// nothing played, or macOS hasn't let Bridge AI hear it yet (System Audio Recording).
+// BRIDGE_CALL_QUIET_MS: how long before it says so.
 const QUIET_AFTER = Number(process.env.BRIDGE_CALL_QUIET_MS) || 30_000
 // Someone on the call is talking now, while it records: the stretch of speech in its sound (where it
 // started, a new number when someone starts again), or null.
@@ -599,7 +612,7 @@ const onCall = (m) => (m.callApps || []).length > 0 && !m.callEnded
 export function callQuiet(id) {
   const l = live.get(id)
   const m = readJSON(path.join(DIR, id, 'meeting.json'))
-  return !!l && !!m && m.call === 'on' && onCall(m) && Date.now() - Date.parse(m.startedAt) > QUIET_AFTER && !l.sources.them?.heard
+  return !!l && !!m && m.call === 'on' && onCall(m) && Date.now() - Date.parse(m.resumedAt || m.startedAt) > QUIET_AFTER && !l.sources.them?.heard
 }
 
 export function pause(id) { return patchMeta(id, { status: meta(id).status === 'recording' ? 'paused' : meta(id).status }) }
@@ -615,10 +628,38 @@ export async function stop(id) {
   const l = live.get(id)
   live.delete(id)
   const seconds = l ? Math.max(0, ...Object.values(l.sources).map((x) => x.samples)) / RATE : m.seconds
-  saveMeta({ ...m, status: 'transcribing', endedAt: new Date().toISOString(), seconds: Math.round(seconds || 0) })
+  // More was recorded since its summary was written (reopen): it says so until it's written again.
+  saveMeta({ ...m, status: 'transcribing', endedAt: new Date().toISOString(), seconds: Math.round(seconds || 0), ...(m.resumedAt && fs.existsSync(path.join(dirOf(id), 'summary.md')) ? { summaryStale: 'recorded' } : {}) })
   for (const s of Object.values(l?.sources || {})) { s.finder.flush(); (await s.out).end().catch(() => {}) }
   settle(id)
   return meta(id)
+}
+
+// ---------- Recording again ----------
+// A meeting that ended (stopped by mistake, or by itself when its call ended or it went quiet)
+// records again: the same meeting, from where it had got to, so nothing recorded is lost and a new
+// line's time is never an old one's. Its audio goes in a new part (partFile); the summary is written
+// again when it ends again. Not while its last words are still being transcribed, or it's being
+// transcribed again: those lines would land among the new ones.
+export function reopen(id, { call = true, callApps = [] } = {}) {
+  const m = meta(id)
+  if (m.status === 'recording' || m.status === 'paused') throw new Error('It\'s recording already')
+  if (decoding.has(id) || (m.status === 'transcribing' && m.again && !m.again.done)) throw new Error('It\'s being transcribed again. Resume recording once that\'s done.')
+  if (m.status === 'transcribing' || waiting(id)) throw new Error('Its last words are still being transcribed. Resume recording in a moment.')
+  const other = recordingNow().find((x) => x.id !== id)
+  if (other) throw new Error(`"${other.title}" is recording. Stop it first.`)
+  clearTimeout(later.get(id)); later.delete(id)
+  // Past its last line too: the length kept is to the second.
+  const from = Math.max(m.seconds || 0, Math.ceil(Math.max(0, ...lines(id).map((l) => l.t1 || 0))))
+  const now = new Date().toISOString()
+  saveMeta({
+    ...m, status: 'recording', endedAt: null, seconds: from, resumedAt: now, resumedFrom: from, keptAt: now, archived: false, archivedAt: null,
+    callEnded: null, callEndedApp: null, endWhy: null, stopsAt: null, call: 'off', callWhy: null, callError: null, summaryRetryAt: null,
+    callApps: [...new Set([].concat(callApps || []).map(String))].slice(0, 5),
+  })
+  const why = call && cfg.meetings?.callAudio !== false ? listen(id) : 'Recording the call\'s sound is off (Settings › Meetings).'
+  speech.prepare(cfg)
+  return patchMeta(id, why ? { call: 'off', callWhy: why } : { call: 'on' })
 }
 
 // The call a meeting is on (calls.js), noted when it starts recording or when one starts during it.
@@ -756,8 +797,13 @@ export async function retranscribe(id, { engine, localModel, language } = {}) {
   ;(async () => {
     try {
       for (const src of sources) {
+        // Each part starts where the ones before it end, or where it's known to (a meeting recorded
+        // again: audioFrom).
         let offset = 0
-        for (const f of files.filter((x) => x.startsWith(`audio-${src}`))) offset += await feed(id, src, path.join(d, f), offset, { cfg: c, language })
+        for (const f of files.filter((x) => x.startsWith(`audio-${src}`))) {
+          offset = m.audioFrom?.[f.replace(/\.\w+$/, '')] ?? offset
+          offset += await feed(id, src, path.join(d, f), offset, { cfg: c, language })
+        }
       }
     } catch (e) { try { patchMeta(id, { error: e.message }) } catch { /* gone */ } } finally { decoding.delete(id); settle(id) }
   })()
@@ -869,7 +915,7 @@ export function setNotes(id, text, base) {
 function nowIn(id, m) {
   if (m.status !== 'recording' && m.status !== 'paused') return null
   const l = live.get(id)
-  return l ? Math.max(0, ...Object.values(l.sources).map((x) => x.samples)) / RATE : (Date.now() - Date.parse(m.startedAt)) / 1000
+  return l ? Math.max(0, ...Object.values(l.sources).map((x) => x.samples)) / RATE : (m.resumedFrom || 0) + (Date.now() - Date.parse(m.resumedAt || m.startedAt)) / 1000
 }
 // How far into the meeting that's recording, for the menu bar (desktop/main.js).
 export const elapsed = (id) => { try { const m = meta(id); return nowIn(id, m) ?? m.seconds ?? 0 } catch { return null } }
@@ -1974,7 +2020,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
       const e = await helpers.estimate?.(r.model, '', 0).catch(() => null)
       if ((e?.billions || 0) >= 7) said.push(`It took ${Math.round(took / 60)} minutes on this computer${e.gpu === false ? '\'s processor' : ''}. A smaller model (2 to 4B, like Gemma 4 E2B or Qwen3.5 4B) would write them sooner.`)
     }
-    patchMeta(id, { summarizing: false, summaryProgress: null, summarizedAt: new Date().toISOString(), summaryModel: r.model, summaryNote: said.filter(Boolean).join(' ') || null, summaryTries: 0, summaryRetryAt: null, summaryFrom: from })
+    patchMeta(id, { summarizing: false, summaryProgress: null, summarizedAt: new Date().toISOString(), summaryModel: r.model, summaryNote: said.filter(Boolean).join(' ') || null, summaryTries: 0, summaryRetryAt: null, summaryFrom: from, summaryStale: null })
     resave(id)
     return { summary: out, model: r.model, parts }
   })().catch((e) => { try { patchMeta(id, { summarizing: false, summaryProgress: null, summaryError: e.message, summaryTried: e.tried || null }); tryLater(id, e) } catch { /* gone */ } throw e }).finally(() => summarizing.delete(id))

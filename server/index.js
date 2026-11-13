@@ -1902,7 +1902,7 @@ app.get('/api/calls', wrap(() => {
     capturing: calls.capturing(),
     ...calls.now(), detect: cfg.meetings?.detect !== false, float: cfg.meetings?.floatCard || 'meetings', floatHover: cfg.meetings?.floatHover !== false, floatHide: ['always', 'never'].includes(cfg.meetings?.floatHide) ? cfg.meetings.floatHide : 'sharing',
     prompt: rec ? null : prompt,
-    recording: rec && { id: rec.id, title: rec.title, status: rec.status, startedAt: rec.startedAt, seconds: Math.round(meetings.elapsed(rec.id) || 0), talking: meetings.talking(rec.id), callApps: rec.callApps || [], callEnded: rec.callEnded || null, callEndedApp: rec.callEndedApp || null, endWhy: rec.endWhy || (rec.callEnded ? 'call' : null), stopsAt: rec.stopsAt || null, callQuiet: meetings.callQuiet(rec.id), callAccess: meetings.callAccess(rec.id) },
+    recording: rec && { id: rec.id, title: rec.title, status: rec.status, startedAt: rec.startedAt, resumedAt: rec.resumedAt || null, resumedFrom: rec.resumedFrom || 0, seconds: Math.round(meetings.elapsed(rec.id) || 0), talking: meetings.talking(rec.id), callApps: rec.callApps || [], callEnded: rec.callEnded || null, callEndedApp: rec.callEndedApp || null, endWhy: rec.endWhy || (rec.callEnded ? 'call' : null), stopsAt: rec.stopsAt || null, callQuiet: meetings.callQuiet(rec.id), callAccess: meetings.callAccess(rec.id) },
   }
 }))
 app.post('/api/calls/dismiss', wrap(() => { prompt = null; return { ok: true } }))
@@ -1995,6 +1995,9 @@ app.post('/api/meetings/:id/audio', express.raw({ type: () => true, limit: '4mb'
 app.post('/api/meetings/:id/pause', wrap((req) => meetings.pause(req.params.id)))
 app.post('/api/meetings/:id/resume', wrap((req) => meetings.resume(req.params.id)))
 app.post('/api/meetings/:id/stop', wrap((req) => meetings.stop(req.params.id)))
+// Resume recording: a meeting that ended records again, from where it had got to (meetings.js
+// reopen). As a new one does, it answers a call's "Take notes?" and notes the calls on now.
+app.post('/api/meetings/:id/reopen', wrap((req) => { const m = meetings.reopen(req.params.id, { callApps: calls.now().calls.map((c) => c.app) }); prompt = null; return m }))
 app.patch('/api/meetings/:id', wrap((req) => {
   if (req.body?.archived != null) meetings.archive(req.params.id, !!req.body.archived)
   if (req.body?.folder !== undefined) meetings.setFolder(req.params.id, req.body.folder)
