@@ -4,12 +4,18 @@ Each version's section here becomes its GitHub release notes (`npm run release`)
 
 ## 3.18.0
 
-Add a computer leads the phone's devices menu, and Windows and Linux no longer show a calendar they can't read. A new install is counted the day it happens. Fixes: updating on a Mac opens the new version every time, and the document editor, sheets, Word files and Markdown are on their newest versions.
+Bridge AI's relay: your phone reaches your computer with your email and a code, and no Cloudflare account of your own. A meeting that ended can record again, several meetings combine into one with its own summary, and the meeting card switches between meetings at the same time and renames the recording. Add a computer leads the phone's devices menu, and Windows and Linux no longer show a calendar they can't read. A new install is counted the day it happens. Fixes: updating on a Mac opens the new version every time, and the document editor, sheets, Word files and Markdown are on their newest versions.
 
 <!-- rollout: 10 -->
 
 ### What's new
 
+- **Bridge AI's relay**: in Settings › Devices, a relay run by Bold Bridge at boldbridge.app is the first of three ways for your phone to reach this computer, beside a relay on your own Cloudflare account and Tailscale. Type your email and the 6-digit code it's sent, and the relay is asked for; it's by request. Bold Bridge emails you when it's on. With Settings › Devices open then, the relay is set up and the pairing code shows; otherwise it's one click on Use Bridge AI's relay. Everything between phone and computer is end-to-end encrypted. The relay sees IP addresses, and when and how much data passes; each account has an allowance of messages every 8 hours and each week, and the relay takes a limited number of accounts.
+- **Bold Bridge accounts**: Settings › Account, for Bridge AI's relay and Early Access. Sign in with your email and a code, with no password; see your devices and the relay's use; sign out or delete the account. Bridge AI works the same without one. PRIVACY.md and TERMS.md say what an account and the relay keep.
+- **Resume recording**: a meeting that ended, by hand or by itself, records again as the same meeting. The button is by the meeting's state for four hours after it ended, and always in its ⋯ menu. Its clock, transcript and notes carry on, and the summary is written again when it ends.
+- **Combine meetings**: pick two or more in the list and Combine. The combined meeting has an overview summary written from each one's summary and notes, and lists the meetings in it; they stay as they are. Separate leaves them.
+- **Meetings at the same time**: the reminder card has ‹ 1 of 2 › to switch between meetings that are due together, × hides the one showing, and the same arrows pick which meeting a call's notes are for, before and while recording.
+- **Rename a recording in the card**: a pencil by the title on the floating card and in the top bar's recording menu. A name you gave stays when another calendar event is picked for the recording.
 - **Add a computer on the phone**: pairing the phone with another computer is the first thing under On this phone in the devices menu, and the main button of Your Computers in Settings › Devices.
 - **No calendar where it can't work**: on Windows, Linux and a server, there's no Calendar tab, Schedule card or Open calendar in the palette, on the computer and on a phone showing it, as with Mail. The calendar reads macOS Calendar.
 - **A new install is counted the day it happens**, with usage stats on: once, two minutes after Bridge AI first runs on a computer, a report with the day it was installed, its version, channel, system, chip and how it was installed, and no ID. A copy stays in `telemetry/sent/first.json`. It isn't sent with usage stats off or `DO_NOT_TRACK` set.
@@ -18,6 +24,8 @@ Add a computer leads the phone's devices menu, and Windows and Linux no longer s
 ### Fixes
 
 - **Updating on a Mac opens the new version every time**: the installer closed the running app and waited a second before opening the new one; opened while the old copy was still quitting, nothing started. It now waits until the old copy has quit.
+- **The top bar's recording name follows a rename**: it kept the name the recording started with.
+- **`bridge-ai relay setup --hosted` asks the account first**, so a request approved since goes through.
 - **The libraries Bridge AI is built on are up to date**: the document editor (Tiptap 3.32.1), sheets (Univer 1.3.1), Word files (docx 9.15.0) and Markdown (marked 18.1.2), with no known issues.
 
 ## 3.17.1
