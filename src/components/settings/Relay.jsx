@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import CopyButton from '../CopyButton.jsx'
 import { InstallNode, openSettings } from '../SignIn.jsx'
-import { RelayUse } from './Account.jsx'
+import { RelayUse, SignIn } from './Account.jsx'
 import { api, viaRelay, relayComputers } from '../../api.js'
 import { t, tn, tx, locale } from '../../i18n/index.js'
 import { Advanced } from './Advanced.jsx'
@@ -13,14 +13,16 @@ import { Advanced } from './Advanced.jsx'
 // Once Bridge AI's own relay exists (server/hosted.js) with Bold Bridge accounts (server/account.js),
 // it's offered too, as the easiest of three ways, and this starts with a choice (the way picked is
 // kept by Phone.jsx, which shows Tailscale's section). It needs your account signed in here and
-// allowed the relay: what's missing is said, with the button that fixes it (sign in, ask for it).
-// Until then it's exactly the relay section it always was.
+// allowed the relay, and it's one path, here: your email and the code it's sent, and the relay is
+// asked for by itself; once Bold Bridge has said yes it's set up and the pairing code shows, with
+// nothing more to click while this is open. Until it's offered this is exactly the relay section it
+// always was.
 //
 // What Bridge AI's relay can see is said as it is: with the iPhone or Android app, never what you
 // do, since the app carries the code that does the encrypting; in a phone's browser that code comes
 // from the relay (relay/web/shell.js says so there too).
 const WAYS = [
-  { id: 'hosted', title: tx('Bridge AI\'s relay'), text: tx('Easiest, with the iPhone or Android app. One click with your Bold Bridge account.'), tag: tx('Recommended') },
+  { id: 'hosted', title: tx('Bridge AI\'s relay'), text: tx('Easiest, with the iPhone or Android app. Your email is all it takes; it\'s by request.'), tag: tx('Recommended') },
   { id: 'cloudflare', title: tx('Your own Cloudflare'), text: tx('Everything on your own free account.') },
   { id: 'tailscale', title: tx('Tailscale'), text: tx('If you already use it.') },
 ]
@@ -44,10 +46,29 @@ export default function Relay({ way, setWay, onOffer }) {
   const [acct, setAcct] = useState(null)
   const [asking, setAsking] = useState(false)
   useEffect(() => { if (offer) api('/account?fresh=1').then(setAcct).catch(() => setAcct(null)) }, [offer, st?.hosted])
+  const relay = acct?.signedIn ? acct.account?.relay : null
+  // Going through it now (signed in here, asked, or seen waiting): given the relay, it's set up
+  // without another click, and so is the pairing code after.
+  const going = useRef(false)
+  const pairNext = useRef(false)
   const askRelay = async () => {
-    setAsking(true); setErr(null)
+    setAsking(true); setErr(null); going.current = true
     try { setAcct(await api('/account/request', { method: 'POST', body: { kind: 'relay' } })) } catch (e) { setErr(e.message) } finally { setAsking(false) }
   }
+  // Signed in, here: the relay is asked for at once, unless the account has an answer already.
+  const signedIn = (s) => {
+    setAcct(s); going.current = true
+    if (s?.signedIn && s.account?.status !== 'suspended' && !['requested', 'approved', 'declined'].includes(s.account?.relay)) askRelay()
+  }
+  // Waiting for Bold Bridge's answer: asked again every so often, and as the window comes back.
+  useEffect(() => {
+    if (!offer || relay !== 'requested') return
+    going.current = true
+    const ask = () => api('/account?fresh=1').then(setAcct).catch(() => {})
+    const id = setInterval(ask, 20000)
+    window.addEventListener('focus', ask)
+    return () => { clearInterval(id); window.removeEventListener('focus', ask) }
+  }, [offer, relay])
   // While deploying, while the relay is still connecting (so Pair a device turns on by itself), and
   // while a code is shown (to see the phone arrive), keep the status fresh.
   const waiting = !!(st?.configured && !st?.online)
@@ -77,9 +98,21 @@ export default function Relay({ way, setWay, onOffer }) {
     setWorking(true)
     const r = await run('/relay/deploy', { method: 'hosted' })
     setWorking(false)
-    if (r) { setChanging(false); setWay?.(null) }
+    if (r) { setChanging(false); setWay?.(null); pairNext.current = true }
     else { setWay?.((w) => w || 'hosted'); api('/account').then(setAcct).catch(() => {}) } // turned away: it stays picked, saying why
   }
+  // ...given the relay on the way through: set up (with no other relay to move from, so nothing to
+  // confirm), and the pairing code shown once it's connected.
+  useEffect(() => {
+    if (!going.current || relay !== 'approved' || !st || st.configured || st.hostedFull || working || st.busy) return
+    going.current = false
+    useHosted()
+  }, [relay, !!st, st?.configured]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!pairNext.current || !st?.hosted || !st.online) return
+    pairNext.current = false
+    if (!st.pairing) run('/relay/pair')
+  }, [st?.hosted, st?.online]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!st) return <section className="st-sec" data-setting="relay"><h4>{t('From anywhere')}</h4><div className="skeleton-rows"><div /></div></section>
 
@@ -155,7 +188,7 @@ export default function Relay({ way, setWay, onOffer }) {
             </ul>
             {current === 'hosted' ? <p className="muted small"><Icon name="check" size={12} /> {t('This is how your phone connects now.')}</p>
               : busy ? <p className="st-note"><Icon name="refresh" size={13} className="spin" /> {st.busy || t('Working…')}</p>
-              : <Needs acct={acct} asking={asking} onAsk={askRelay}>{full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="phone" size={14} /> {t('Use Bridge AI\'s relay')}</button></div>}</Needs>}
+              : <Needs acct={acct} asking={asking} onAsk={askRelay} onIn={signedIn}>{full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="phone" size={14} /> {t('Use Bridge AI\'s relay')}</button></div>}</Needs>}
           </div>
         )}
         {pick === 'cloudflare' && (
@@ -247,15 +280,17 @@ export default function Relay({ way, setWay, onOffer }) {
 }
 
 // What Bridge AI's relay needs before this computer can use it: your Bold Bridge account signed in
-// here, and allowed the relay. What's missing is said, with the button that fixes it (sign in, ask
-// for it); asked, it says so; given, what's inside (Use Bridge AI's relay) shows.
-function Needs({ acct, asking, onAsk, children }) {
+// here, and allowed the relay. Signed out, it's signed in right here (your email, then its code),
+// and asked for; an account that never asked has the button; asked, it says so; given, what's
+// inside (Use Bridge AI's relay) shows.
+function Needs({ acct, asking, onAsk, onIn, children }) {
   if (!acct) return <div className="skeleton-rows"><div /></div>
   const a = acct.signedIn ? acct.account : null
   const say = (text, button) => <div className="st-note relay-needs" role="status"><Icon name="info" size={13} /> <span>{text}</span>{button}</div>
-  if (!a) return say(t('Bridge AI\'s relay comes with a Bold Bridge account: sign in with your email, then ask for it.'), <button type="button" className="btn small primary" onClick={() => openSettings('account')}><Icon name="user" size={13} /> {t('Sign in')}</button>)
+  if (!a) return <div className="relay-needs k-signin acct"><SignIn st={acct} onIn={onIn} inline /></div>
+  if (asking && a.relay !== 'declined' && a.relay !== 'requested') return say(t('Asking for Bridge AI\'s relay…'))
   if (a.status === 'suspended') return say(t('Your Bold Bridge account is suspended, so it can\'t use Bridge AI\'s relay for now. Your own Cloudflare or Tailscale still work.'))
-  if (a.relay === 'requested') return say(t('You asked for Bridge AI\'s relay ({email}). Bold Bridge emails you when it\'s on, and then it\'s one click here.', { email: a.email }))
+  if (a.relay === 'requested') return say(t('You asked for Bridge AI\'s relay ({email}). Bold Bridge emails you when it\'s on. If this is open then, it sets itself up; if not, it\'s one click here.', { email: a.email }))
   if (a.relay !== 'approved') return say(a.relay === 'declined' ? t('Your request for Bridge AI\'s relay was declined. You can ask again, or use your own Cloudflare or Tailscale.') : t('Your Bold Bridge account ({email}) doesn\'t have Bridge AI\'s relay yet. It\'s by request.', { email: a.email }), <button type="button" className="btn small primary" disabled={asking} onClick={onAsk}>{asking ? t('Asking…') : a.relay === 'declined' ? t('Ask again') : t('Request access')}</button>)
   return children
 }

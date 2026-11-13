@@ -1044,6 +1044,9 @@ async function useHosted() {
   const where = hostedBase()
   if (!where || !accountsOn()) throw new Error('Bridge AI\'s relay isn\'t available yet. Use your own Cloudflare account, or Tailscale.')
   if (conf.hosted && conf.url && limit?.why !== 'gone') return status() // (gone: it forgot this computer, so again)
+  // (Asked for and not given when last heard: the account is asked again first, so one approved
+  // since goes through, from the command line too.)
+  if (acct.relayState().signedIn && acct.relayState().relay !== 'approved') await acct.refresh()
   needsAccount(acct.relayState())
   busy = 'Setting up Bridge AI\'s relay…'
   try {
