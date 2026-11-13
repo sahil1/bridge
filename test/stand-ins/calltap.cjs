@@ -4,7 +4,9 @@
 // before you allow System Audio Recording), a few steps is the near-silence one Mac gave for a
 // whole call, a few thousand is a call talking. What macOS says ({ "access": "allowed" | "denied" |
 // "unknown" }, none: an older calltap that doesn't say): on stderr as it starts, and alone on stdout
-// for --check, as native/calltap.swift does. Each start is a line in calltap.log beside it.
+// for --check, as native/calltap.swift does. Each start is a line in calltap.log beside it. Started
+// while macOS says no, it stays as loud as it started (as a real tap does, allowed or not since):
+// only a new start hears the call.
 const fs = require('node:fs')
 const path = require('node:path')
 const args = process.argv.slice(2)
@@ -16,11 +18,12 @@ const access = read().access
 if (args.includes('--check')) { process.stdout.write(`${access || 'unknown'}\n`); process.exit(0) }
 fs.appendFileSync(path.join(__dirname, 'calltap.log'), `start ${access || ''}\n`)
 if (access) process.stderr.write(`access ${access}\n`)
+const denied = access === 'denied' ? level() : null
 let t = 0
 const tick = () => {
   const n = Math.round(rate / 10)
   const b = Buffer.alloc(n * 2)
-  const v = level()
+  const v = denied ?? level()
   if (v) for (let i = 0; i < n; i++, t++) b.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 330 * t) / rate) * v), i * 2)
   if (!process.stdout.write(b)) process.stdout.once('drain', () => {})
 }
