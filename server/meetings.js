@@ -852,7 +852,7 @@ export function revealSaved(id) {
   if (process.env.BRIDGE_FIX_DRYRUN) return { ok: true, dry: [bin, ...args] }
   return new Promise((resolve) => { execFile(bin, args, { timeout: 10000 }, () => resolve({ ok: true })) })
 }
-export function rename(id, title) { const was = meta(id); const name = String(title || '').trim().slice(0, 200) || was.title; const m = patchMeta(id, { title: name, ...guessKind(was, name) }); resave(id, 500); return m }
+export function rename(id, title) { const was = meta(id); const name = String(title || '').trim().slice(0, 200) || was.title; const m = patchMeta(id, { title: name, ...(name !== was.title ? { renamed: true } : {}), ...guessKind(was, name) }); resave(id, 500); return m }
 // base: the notes the page last had. A note added meanwhile somewhere else (the floating card, the
 // top bar) is kept: it's added to the end of what the page sends.
 export function setNotes(id, text, base) {
@@ -1210,13 +1210,14 @@ export function uncleanLine(id, key) {
 
 // The calendar event a meeting was for, picked afterwards (when it was recorded without one, or
 // with another that was on then): its people, its time and its links, in place of the other's. The
-// name too, while it's still the one it started with or the other event's. Who said what is worked
+// name too, while it's still the one it started with or the other event's (not one you gave it:
+// rename). Who said what is worked
 // out again with its people, at the next summary.
 export function setEvent(id, event) {
   const m = meta(id)
   if (!event?.title) throw new Error('No event')
   const ev = eventOf(event)
-  const plain = /^(Meeting|.+ call), /.test(m.title) || m.title === 'Meeting' || (!!m.event?.title && m.title === m.event.title)
+  const plain = !m.renamed && (/^(Meeting|.+ call), /.test(m.title) || m.title === 'Meeting' || (!!m.event?.title && m.title === m.event.title))
   const kept = (m.links || []).filter((l) => !(m.event && l.from === 'invite'))
   const have = new Set(kept.map((l) => l.url || l.path))
   const p = patchMeta(id, { event: ev, namedAt: null, ...(plain ? { title: ev.title } : {}), ...(m.event && !m.kindPicked ? { kind: kindOf(`${plain ? ev.title : m.title} ${ev.title}`) } : guessKind(m, `${plain ? ev.title : m.title} ${ev.title}`)), links: [...kept, ...inviteLinks(event).filter((l) => !have.has(l.url || l.path))] })

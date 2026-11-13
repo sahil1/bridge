@@ -238,6 +238,13 @@ try {
   const D = await kit.api('/meetings', { title: 'Teams call, Thu 9:00', call: false })
   await kit.api(`/meetings/${D.id}/event`, { event: { title: 'Team standup', attendees: ['Priya Shah', 'Tester'] } })
   ok((await kit.api(`/meetings/${D.id}`)).kind === 'standup', 'and its invite can say what kind it is')
+  // Named after the invite by default. A name you give it after (its page, the floating card, the
+  // top bar) stays when another invite is picked for it, even one that reads like a call's own.
+  const D1 = await kit.api(`/meetings/${D.id}`)
+  await kit.api(`/meetings/${D.id}`, { title: 'Zoom call, the one about hiring' }, 'PATCH')
+  await kit.api(`/meetings/${D.id}/event`, { event: { title: 'Hiring sync', attendees: ['Dan Ruiz', 'Tester'] } })
+  const D2 = await kit.api(`/meetings/${D.id}`)
+  ok(D1.title === 'Team standup' && D2.title === 'Zoom call, the one about hiring' && D2.event.title === 'Hiring sync' && D2.event.attendees.includes('Dan Ruiz'), "a meeting takes its invite's name until you rename it; then another invite changes its people, not its name", { was: D1.title, title: D2.title, event: D2.event })
   await kit.api(`/meetings/${D.id}/stop`, {})
   await kit.api(`/meetings/${I.id}/stop`, {})
 

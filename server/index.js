@@ -1908,6 +1908,8 @@ app.get('/api/calls', wrap(() => {
 app.post('/api/calls/dismiss', wrap(() => { prompt = null; return { ok: true } }))
 // The floating card's reminder before a meeting, put off until it's about to start (meetprep.js).
 app.post('/api/calls/snooze', wrap((req) => meetPrep.snooze(String(req.body?.id || '').slice(0, 400))))
+// Its ×: that meeting's reminder isn't shown again; another due at the same time still is.
+app.post('/api/calls/hide', wrap((req) => meetPrep.hide(String(req.body?.id || '').slice(0, 400))))
 // Screen Recording, for the names a call shows as people talk: whether it's allowed, and Allow
 // (macOS's own window the first time; after that, System Settings is where it's turned on).
 // fresh=1: looked at now, not what was kept from a moment ago. started: when this server started.
@@ -1915,7 +1917,7 @@ app.get('/api/calls/screen', wrap(async (req) => ({ allowed: await calls.screen(
 app.post('/api/calls/screen', wrap(async (req) => { hereOnly(req, 'Allow Screen Recording'); return { allowed: await calls.screenAsk() } }))
 // The calendar event to take notes for (callevent.js): the one the call on app is for (or the call
 // on now), by its window's title, a Join in Bridge AI or when it started; with no call, the one
-// under way. others: the rest that were on, for the meeting's page to offer instead.
+// under way. others: the rest that were on, for the call's prompt to offer instead before it starts.
 app.get('/api/calls/event', wrap(async (req) => {
   const d = await calendar().catch(() => null)
   const events = [...(d?.today || []), ...(d?.tomorrow || [])]
