@@ -175,6 +175,19 @@ export async function shot(app) {
   try { return r?.ok ? await fs.promises.readFile(file) : null } catch { return null } finally { fs.promises.rm(file, { force: true }).catch(() => {}) }
 }
 
+// The faces on the call's video and how each mouth moved, over a burst of pictures of its window
+// (sights.js): what callwatch faces says, or null (not allowed, no window). Taken and read in its own
+// process, and no picture is written. Counted as capturing, as a picture is.
+export async function faces(app, { frames = 6, gap = 160 } = {}) {
+  const ids = APPS.filter(([, a]) => a === app).map(([id]) => id)
+  if (!ids.length || !watchBin()) return null
+  shooting++
+  let r
+  try { r = await once(['faces', String(frames), String(gap), ...ids], 15_000) } finally { shooting--; shotAt = Date.now() }
+  if (r?.error === 'not-allowed') screenSaid = { at: Date.now(), allowed: false }
+  return r?.ok ? r : null
+}
+
 // What's going on now: { watching, calls: [{ app, since, browser }] }.
 export function now() {
   return { watching: !!proc, calls: [...calls].map(([app, since]) => ({ app, since: new Date(since).toISOString(), browser: BROWSERS.has(app) })) }

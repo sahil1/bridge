@@ -74,6 +74,7 @@ import * as labs from './labs.js'
 import * as meetMemory from './meetmemory.js'
 import * as memoryView from './memoryview.js'
 import * as voices from './voices.js'
+import * as sights from './sights.js'
 import * as meetWork from './meetwork.js'
 import * as meetInsights from './meetinsights.js'
 import * as meetPrep from './meetprep.js'
@@ -446,7 +447,7 @@ const rootOf = async (pane) => {
 // One that's no longer a beta stays in older configs, read by nothing (memory: Memory, now a page
 // for everyone). One can be on to start with (config.example.json's trials: Back and Forward), until
 // it's turned off.
-const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings', 'comments', 'mcp-server', 'meeting-board', 'make-sheet', 'assist-answers']
+const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings', 'comments', 'mcp-server', 'meeting-board', 'make-sheet', 'assist-answers', 'call-video']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 const FILES_OFF = 'Files is a beta feature. Turn it on in Settings › About & Updates › Beta Features.'
@@ -1720,6 +1721,7 @@ meetings.configure(cfg)
 memoryView.configure(cfg, { chief: CHIEF_DIR })
 memoryView.keepFresh()
 voices.configure(cfg)
+sights.configure(cfg)
 // Used once, Who spoke in a room turns telling voices apart on for the meetings after.
 voices.setSaver(async (p) => afterChange(settings.patch({ meetings: p })))
 meetings.recover()
@@ -1738,6 +1740,8 @@ meetings.setHelpers({
   context: (id) => chatModels.contextOf(id), tokens: chatModels.tokensOf, estimate: (id, text, out) => chatModels.estimate(id, text, out),
   // A look at the call's window, when Screen Recording allows it (calls.js).
   canLook: () => calls.screen(), look: (app) => calls.shot(app),
+  // Whose mouth moves on the call's video (calls.js faces; sights.js says who that is).
+  faces: (app) => calls.faces(app),
 })
 // A meeting's action items as agents and Chief of Staff's tasks (meetwork.js).
 meetWork.configure(cfg)
