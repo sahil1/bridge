@@ -13,7 +13,10 @@
 //   voices: nothing kept until it's on, then a named voice known again by itself next time, and
 //   Forget voices. A download that fails its checksum is said, and Try again works. A call: the
 //   voices on it told apart by themselves and named from who was invited, and your voice learned
-//   from your mic on it, so the next room knows which voice is you.
+//   from your mic on it, so the next room knows which voice is you. A room on a call (people beside
+//   you on your mic): both sides told apart, your voice not learned from a mic with others on it
+//   unless one already sounds like you, and the call's video (sights.js) splitting a voice seen as
+//   two people and joining two seen as one, with the model naming them told who was seen talking.
 // BRIDGE_REAL_VOICES=1: also the real thing, once, by hand (macOS): the real ERes2Net model downloaded
 // from Hugging Face (kept in test/.out/real-models for next time) and run by the real sherpa-onnx
 // on two voices made with `say`.
@@ -66,6 +69,30 @@ ok(g.line['you:9'] == null && g.line['you:10'] == null && g.speakers === 2, 'a s
 g = voices.group([...lines, { key: 'you:11', v: vec(12), s: 3.5, t0: 100 }])
 ok(g.line['you:11'] === 3 && g.speakers === 3, 'one line of three seconds and more in a voice of its own is a speaker', g.line)
 
+// ---------- Who's seen talking, from the call's video (sights.js) ----------
+// test/fixtures/call-faces.json: what the real callwatch read off six pictures of a made-up call's
+// window (callwatch faces-files): six tiles with a name under each, a room's camera with four
+// people, and another with two, the one on its left talking.
+const sights = await import('../../server/sights.js').catch(() => null)
+const pic = JSON.parse(fs.readFileSync(new URL('../fixtures/call-faces.json', import.meta.url), 'utf8'))
+const placed = sights ? sights.place(pic.faces, pic.labels) : []
+const at = (label, where) => placed.find((f) => f.label === label && (f.where || null) === where)
+ok(['Priya Shah', 'Tom Becker', 'Ana Lima'].every((n) => at(n, null)) && at('Huddle Room (You)', 'on the left') && at('Huddle Room (You)', 'on the right') && ['1st', '2nd', '3rd', '4th'].every((n) => at('Conference Room 4', `${n} from the left`)) && placed.length === 9, 'each face with the name under its tile, and where it is in a room\'s camera', placed.map((f) => [f.label, f.where]))
+let who = sights?.talker(placed)
+ok(who?.label === 'Huddle Room (You)' && who.where === 'on the left', 'the one talking: the person on the left in the room\'s camera, the only mouth moving', who)
+ok(sights?.talker(placed.map((f) => (f.label === 'Priya Shah' ? { ...f, m: 0.07 } : f))) === null && sights?.talker(placed.map((f) => ({ ...f, m: 0.004 }))) === null, 'two mouths moving as much, or none: nobody')
+ok(sights?.place([{ x: 0.4, y: 0.2, w: 0.2, h: 0.3, open: [0.01, 0.08, 0.02] }], [{ x: 0.3, y: 0.9, w: 0.1, h: 0.03, text: 'Mute' }, { x: 0.02, y: 0.6, w: 0.1, h: 0.03, text: '• Dan Ruiz' }])[0]?.label === 'Dan Ruiz', "the call's own buttons aren't names, and the dots round a name go")
+{
+  const { DATA } = await import('../../server/paths.js')
+  fs.rmSync(path.join(DATA, 'meetings', 'seen-1'), { recursive: true, force: true })
+  fs.mkdirSync(path.join(DATA, 'meetings', 'seen-1'), { recursive: true })
+  for (const t of [10.5, 12, 30]) sights?.keep('seen-1', t, pic)
+  sights?.keep('seen-1', 31, { faces: [], labels: [] })
+  const seen = sights ? sights.seen('seen-1', [{ src: 'you', t0: 10, t1: 13, text: 'a' }, { src: 'them', t0: 20, t1: 24, text: 'b' }]) : new Map()
+  ok(seen.get('you:10')?.who === 'Huddle Room (You)|on the left' && !seen.has('them:20') && sights.of('seen-1').length === 3, 'a line said while two looks saw someone talking: who that was; one said with no look: nothing; a look with no faces isn\'t kept', [...seen])
+  ok(sights?.hint(seen.get('you:10')) === 'the person on the left in "Huddle Room (You)"', 'and how a model is told it')
+}
+
 // ---------- The model, served from this computer ----------
 const fake = Buffer.alloc(400_000, 7)
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex')
@@ -108,6 +135,16 @@ const setup = async (kit) => {
   await kit.api('/settings', { meetings: { engine: 'openai', model: 'openai:gpt-5', autoSummary: false, cleanup: false } }, 'PATCH')
 }
 const tryApi = (kit, p, body, method) => kit.api(p, body, method).catch((e) => ({ error: e.message }))
+// A room on a call: the call's lines (each a tone of 2.5 s) and then your mic's (3.6 s, long enough
+// to learn a voice from), each with a pause after; hz: who says each, in order.
+async function onCall(kit, title, call, mic, event) {
+  const m = await kit.api('/meetings', { title, call: false, ...(event ? { event } : {}) })
+  const them = Buffer.concat(call.flatMap((h) => [tone(2.5, h), tone(1.6)]))
+  const you = Buffer.concat([tone(them.length / 2 / RATE + 8), ...mic.flatMap((h) => [tone(3.6, h), tone(1.6)])])
+  for (const [src, buf] of [['them', them], ['you', you]]) { let q = 0; for (let o = 0; o < buf.length; o += RATE * 2) await fetch(`${kit.url}/api/meetings/${m.id}/audio?src=${src}&seq=${q++}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: buf.subarray(o, o + RATE * 2) }) }
+  await kit.api(`/meetings/${m.id}/stop`, {})
+  return m
+}
 
 try {
   const kit = await startKit('room-voices', { env: env() })
@@ -167,6 +204,19 @@ try {
   await kit.api(`/meetings/${R2.id}/stop`, {})
   ok((await tryApi(kit, '/meetings/voices/forget', {})).ok && !fs.existsSync(path.join(kit.data, 'meetings', 'voices.json')) && (await tryApi(kit, '/meetings/voices')).known === 0, 'Forget voices: none kept')
 
+  // A room on a call, with rooms on: Priya (500 Hz) and Dan (700) on the call; you (220) and Ana
+  // (1000) beside you on your mic, after the call's lines so none is taken for its echo. Your voice
+  // isn't known yet. (The stand-in hears pitches a little low: 440 Hz would sound like a voice at
+  // 300 on the call, and be taken for the call through your speakers.)
+  const H = await onCall(kit, 'Hybrid review', [500, 700, 500, 700], [220, 1000, 220, 1000, 220, 1000])
+  const hy = await until(async () => { const m = await kit.api(`/meetings/${H.id}`); return m.status === 'done' && m.transcript.filter((l) => l.text).length === 10 && m.voices?.src === 'both' && m.voices.speakers === 4 && !m.voicesWork && m }, 30000)
+  const sides = (m, src) => m.transcript.filter((l) => l.src === src && l.text).map((l) => l.voice || 0)
+  const alternating = (v) => v.length >= 4 && v.every((x, i) => x && x === v[i % 2]) && v[0] !== v[1]
+  ok(!!hy && alternating(sides(hy, 'them')) && alternating(sides(hy, 'you')) && new Set([...sides(hy, 'them'), ...sides(hy, 'you')]).size === 4, "a room on a call: the call's voices and your mic's each told apart, four speakers numbered together", hy && { them: sides(hy, 'them'), you: sides(hy, 'you'), side: hy.voices.side })
+  ok(!!hy && hy.transcript.filter((l) => l.src === 'you' && l.text).every((l) => !l.me) && Object.values(hy.voices.side || {}).filter((x) => x === 'you').length === 2, 'none known to be you yet, and each says which side it was on', hy?.voices)
+  await sleep(1500)
+  ok((await tryApi(kit, '/meetings/voices')).mine === false, 'your voice isn\'t learned from a mic with someone else on it, when none of it sounds like you already')
+
   // A call: the voices on it told apart by themselves once it ends (two people invited besides
   // you), named from who was invited, and your voice learned from your mic, so a room knows you.
   // Priya at 300 Hz and Dan at 500 on the call; you at 220 on your mic, as in the rooms before.
@@ -190,6 +240,33 @@ try {
   const R4 = await record(kit, 'Whiteboard', [1, 2, 1, 2])
   const knownMe = await until(async () => { const tr = (await kit.api(`/meetings/${R4.id}`)).transcript.filter((l) => l.text); return tr.length === 4 && tr.filter((_, i) => i % 2 === 0).every((l) => l.me && l.byVoice) && tr.filter((_, i) => i % 2 === 1).every((l) => !l.me) && tr }, 30000)
   ok(!!knownMe, 'a room after: your lines are yours, known by your voice, with nobody naming it', await kit.api(`/meetings/${R4.id}`).then((m) => ({ lines: m.transcript.map((l) => [l.voice, l.me, l.byVoice]), voices: m.voices, work: m.voicesWork, status: m.status })))
+
+  // A room on a call, your voice known: Priya (500) on the call and Dan, who sounds two ways (700
+  // and 850); you (220) and Ana (1000) on your mic.
+  const H2 = await onCall(kit, 'Hybrid planning', [500, 700, 850, 500, 700, 850, 500, 700, 850], [220, 1000, 1000, 220, 1000, 1000, 220, 1000, 1000], { title: 'Hybrid planning', attendees: ['Priya Shah', 'Dan Ruiz', 'Ana Lima', 'Tester'] })
+  let h2 = await until(async () => { const m = await kit.api(`/meetings/${H2.id}`); return m.status === 'done' && m.transcript.filter((l) => l.text).length === 18 && m.voices?.src === 'both' && m.voices.speakers === 5 && !m.voicesWork && m }, 40000)
+  const hz = (m, src, n) => m.transcript.filter((l) => l.src === src && l.text).filter((_, i) => i % 3 === n)
+  ok(!!h2 && hz(h2, 'you', 0).every((l) => l.me && l.byVoice) && hz(h2, 'you', 1).concat(hz(h2, 'you', 2)).every((l) => l.voice && !l.me), 'your voice known on your mic, beside Ana: five speakers, the call\'s three and your mic\'s two', h2 && h2.transcript.filter((l) => l.text).map((l) => [l.src, l.voice, l.me]))
+  // What the call's video showed: Dan's two sounds both under his tile; Ana's lines, the first
+  // three at the left of your room's camera and the last three at its right (two people after all).
+  const look = (t, label, where) => JSON.stringify({ t, faces: [{ x: 0.3, y: 0.2, w: 0.1, h: 0.15, m: 0.08, label, where }, { x: 0.6, y: 0.2, w: 0.1, h: 0.15, m: 0.002, label: 'Tom Becker', where: null }] })
+  const theirs = h2 ? h2.transcript.filter((l) => l.src === 'them' && l.text) : []
+  const ana = h2 ? h2.transcript.filter((l) => l.src === 'you' && l.text && !l.me) : []
+  const looks = [...theirs.filter((_, i) => i % 3 !== 0).map((l) => look((l.t0 + l.t1) / 2, 'Dan Ruiz', null)), ...theirs.filter((_, i) => i % 3 === 0).map((l) => look((l.t0 + l.t1) / 2, 'Priya Shah', null)),
+    ...ana.map((l, i) => look((l.t0 + l.t1) / 2, 'Huddle Room (You)', i < 3 ? 'on the left' : 'on the right'))]
+  fs.writeFileSync(path.join(kit.data, 'meetings', H2.id, 'sights.jsonl'), `${looks.join('\n')}\n`)
+  await tryApi(kit, `/meetings/${H2.id}/voices`, {})
+  h2 = await until(async () => {
+    const m = await kit.api(`/meetings/${H2.id}`)
+    const th = m.transcript.filter((l) => l.src === 'them' && l.text), an = m.transcript.filter((l) => l.src === 'you' && l.text && !l.me)
+    const dan = th.filter((_, i) => i % 3 !== 0).map((l) => l.voice)
+    return !m.voicesWork && new Set(dan).size === 1 && dan[0] !== th[0].voice && an.length === 6 && new Set(an.slice(0, 3).map((l) => l.voice)).size === 1 && new Set(an.slice(3).map((l) => l.voice)).size === 1 && an[0].voice !== an[3].voice && m
+  }, 20000)
+  ok(!!h2, "with the call's video: Dan's two sounds, seen as him, are one speaker, and the voice seen as two people in your room's camera is two", (await kit.api(`/meetings/${H2.id}`)).transcript.filter((l) => l.text).map((l) => [l.src, l.voice, l.me]))
+  const asked = await until(() => model.asked(/This call had people on it and people in the room/).slice(-1)[0], 10000)
+  ok(!!asked && /seen talking: "Dan Ruiz"/.test(asked) && /seen talking: the person on the left in "Huddle Room \(You\)"/.test(asked) && /In the room, on Your microphone: Speaker/.test(asked), "and the model naming who's who is told which voices were in the room, and who was seen talking as each line was said", asked?.slice(0, 600))
+  st = await tryApi(kit, '/meetings/voices')
+  ok(st.mine === true, 'your voice still known: learned only from the voice on your mic that already sounded like you', st)
   await kit.api('/settings', { meetings: { learnVoice: false } }, 'PATCH')
   ok((await tryApi(kit, '/meetings/voices')).learn === false, 'Learn my voice can be turned off')
   await kit.api('/settings', { meetings: { learnVoice: true } }, 'PATCH')

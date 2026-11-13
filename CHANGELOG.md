@@ -2,6 +2,26 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.17.0
+
+Your own tab groups, pinned tabs and Rename in a tab's menu. In a room that's on a call, the people beside you are told apart by voice. In Beta Features: AI Assist answers questions asked in a meeting, and on a Mac the call's video shows who's talking.
+
+<!-- rollout: 10 -->
+
+### What's new
+
+- **Your own tab groups**: in a tab's right-click menu, Add tab to new group makes a group with a name you type and a color; Add tab to group moves a tab into one, and Remove from group takes it out. A click on a group's chip folds it; a right-click edits its name and color, starts a new agent in it, ungroups it or closes its tabs. Drop a tab between a group's tabs to join it, or drag it out to leave. They work with Tab Groups on or off, and a reload keeps them.
+- **Pinned tabs**: Pin tab puts a tab at the start as its icon and status dot, with no ×. Close other tabs and Close tabs to the right leave it open, and a reload keeps it.
+- **Rename a tab** in place from its right-click menu, for agents and terminals: Enter saves, Esc cancels.
+- **Voices in a room on a call**: with Tell voices apart in a room on (Settings › Meetings), the people beside you on your mic are told apart on a call too, as Speaker 1, Speaker 2 and so on beside the call's voices, and named from what's said and who was invited. That's me works on any voice on your mic.
+- **Answers in AI Assist** (Beta Features): while a meeting records with AI Assist on, a question asked in the meeting that has a factual answer gets one in one to three sentences, with where it's from: your past meetings (a click opens the meeting), your notes, the meeting's files and meeting memory, the model's own knowledge (marked as possibly out of date), or the web with links when a Perplexity key is saved. Only the question goes to Perplexity. At most two answers each time it looks, never the same question twice, and Keep puts an answer in your notes.
+- **Speakers From the Call's Video** (Beta Features, on a Mac): while a call records and someone talks, a few pictures of the call's window are read on your Mac for whose mouth is moving and the name under that face, people sharing a room's camera too. A voice seen as two people becomes two speakers, two voices seen as one person become one, and the model naming who said what is told who was seen talking. The pictures are never saved: only who was seen talking, and when. It needs Screen Recording (Settings › Meetings).
+
+### Fixes
+
+- **Learn my voice learns only your voice**: on a call with other people in the room on your mic, it learns from the voice that already sounds like you, and from none when none does.
+- **A suggestion you keep while AI Assist is looking stays kept**: it went back to new when that look finished.
+
 ## 3.16.1
 
 A right-click menu on tabs, with colors for tabs and tab groups. Fixes: a call's sound comes in as soon as macOS allows it, and the steps to allow it no longer get stuck after quitting Bridge AI.

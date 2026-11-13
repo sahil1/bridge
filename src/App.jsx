@@ -57,6 +57,58 @@ const MIN_WORK = 620
 const LAYOUT = { railW: 232, railOpen: true, dockW: 380, dockMin: false, boardH: 280, boardMin: false, sideW: 560, max: null }
 const WS = { tabs: [], active: null, side: null, split: false, group: 'main' }
 
+// Your own tab groups and pinned tabs (TabStrip.jsx), kept with the window's tabs as their colors
+// are: tabGroups is { key: { name, tabs } }, a group's color and whether it's folded kept by its key
+// (colors, folded) as a space's are; pinned is the pinned tabs' ids. A group goes with its last tab
+// (its color and fold too), and a tab closed is no longer pinned.
+function tidyTabs(w) {
+  const open = new Set(w.tabs)
+  const was = w.tabGroups || {}
+  const tabGroups = {}
+  for (const [k, g] of Object.entries(was)) {
+    const tabs = (g?.tabs || []).filter((id) => open.has(id))
+    if (tabs.length) tabGroups[k] = tabs.length === g.tabs.length ? g : { ...g, tabs }
+  }
+  const pinned = (w.pinned || []).filter((id) => open.has(id))
+  const gone = Object.keys(was).filter((k) => !tabGroups[k])
+  if (!gone.length && Object.keys(tabGroups).every((k) => tabGroups[k] === was[k]) && pinned.length === (w.pinned || []).length) return w
+  const colors = { ...(w.colors || {}) }, folded = { ...(w.folded || {}) }
+  for (const k of gone) { delete colors[k]; delete folded[k] }
+  return { ...w, tabGroups, pinned, colors, folded }
+}
+const outOfGroups = (groups, id) => Object.fromEntries(Object.entries(groups || {}).map(([k, g]) => [k, g?.tabs?.includes(id) ? { ...g, tabs: g.tabs.filter((x) => x !== id) } : g]))
+// A tab into one of your groups (made, if it's a new one), at its end as in Chrome, or where it is
+// (keep: dropped there); or, key null, out of its group. A pinned tab is unpinned.
+function inGroup(w, id, key, keep = false) {
+  if (!w.tabs.includes(id)) return w
+  const tabGroups = outOfGroups(w.tabGroups, id)
+  const tabs = [...w.tabs]
+  if (key) {
+    const g = { name: '', ...tabGroups[key], tabs: tabGroups[key]?.tabs || [] }
+    const last = tabs.filter((x) => g.tabs.includes(x)).pop()
+    if (last && !keep) { tabs.splice(tabs.indexOf(id), 1); tabs.splice(tabs.indexOf(last) + 1, 0, id) }
+    tabGroups[key] = { ...g, tabs: [...g.tabs, id] }
+  }
+  return tidyTabs({ ...w, tabs, tabGroups, pinned: (w.pinned || []).filter((x) => x !== id) })
+}
+// Pinned: to the end of the pinned tabs, out of its group; unpinned, to just after them (Chrome's way).
+function pinTab(w, id, on) {
+  if (!w.tabs.includes(id)) return w
+  const pinned = (w.pinned || []).filter((x) => x !== id && w.tabs.includes(x))
+  const tabs = w.tabs.filter((x) => x !== id)
+  tabs.splice(tabs.reduce((n, x, i) => (pinned.includes(x) ? i + 1 : n), 0), 0, id)
+  return tidyTabs({ ...w, tabs, pinned: on ? [...pinned, id] : pinned, tabGroups: on ? outOfGroups(w.tabGroups, id) : w.tabGroups })
+}
+// One tab taking another's place (a meeting in Meetings' tab, a whiteboard renamed): it's the same
+// tab, so it stays in its group, pinned and in its color.
+function follow(w, from, to) {
+  if (!w.tabGroups && !w.pinned && !w.colors?.[from]) return w
+  const colors = { ...(w.colors || {}) }
+  if (from in colors) { colors[to] = colors[from]; delete colors[from] }
+  const swap = (x) => (x === from ? to : x)
+  return { ...w, colors, pinned: (w.pinned || []).map(swap), tabGroups: Object.fromEntries(Object.entries(w.tabGroups || {}).map(([k, g]) => [k, g?.tabs?.includes(from) ? { ...g, tabs: g.tabs.map(swap) } : g])) }
+}
+
 function useRuntimeTheme() {
   useEffect(() => {
     api('/runtime-theme').then((t) => {
@@ -353,10 +405,10 @@ function App() {
     setW((w) => {
       const open = (id) => isView(id) || isRemote(id) || !!byId[id]
       const tabs = w.tabs.filter(open)
-      if (!tabs.length && mate) return { ...w, tabs: [mate.paneId], active: mate.paneId, side: null, split: false }
+      if (!tabs.length && mate) return tidyTabs({ ...w, tabs: [mate.paneId], active: mate.paneId, side: null, split: false })
       const active = open(w.active) ? w.active : tabs[0] || null
       const side = open(w.side) ? w.side : null
-      return tabs.length === w.tabs.length && active === w.active && side === w.side ? w : { ...w, tabs, active, side }
+      return tabs.length === w.tabs.length && active === w.active && side === w.side ? w : tidyTabs({ ...w, tabs, active, side })
     })
   }, [fleet]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -431,6 +483,7 @@ function App() {
       // opened from Dictations' Memory while Meetings waits in a tab), to the front as any tab opened is.
       if (replace && w.tabs.includes(replace) && !w.tabs.includes(paneId)) {
         const tabs = w.tabs.map((t) => (t === replace ? paneId : t))
+        w = follow(w, replace, paneId)
         if (w.active === replace || w.side === replace) return { ...w, tabs, active: w.active === replace ? paneId : w.active, side: w.side === replace ? paneId : w.side }
         w = { ...w, tabs }
       }
@@ -521,7 +574,7 @@ function App() {
       else if (d.renamed) {
         const from = `${BOARD}${d.renamed.from}`, to = `${BOARD}${d.renamed.to}`
         renamedTab(from, to)
-        setW((w) => (!w.tabs.includes(from) || w.tabs.includes(to) ? w : { ...w, tabs: w.tabs.map((x) => (x === from ? to : x)), active: w.active === from ? to : w.active, side: w.side === from ? to : w.side }))
+        setW((w) => (!w.tabs.includes(from) || w.tabs.includes(to) ? w : { ...follow(w, from, to), tabs: w.tabs.map((x) => (x === from ? to : x)), active: w.active === from ? to : w.active, side: w.side === from ? to : w.side }))
       }
     }
     window.addEventListener('bridge-open-board', on)
@@ -632,7 +685,7 @@ function App() {
     let active = next(w.active)
     let side = next(w.side)
     if (!active && side) { active = side; side = null }
-    return { ...w, tabs, active, side, split: w.split && !!side }
+    return tidyTabs({ ...w, tabs, active, side, split: w.split && !!side })
   })
 
   const toggleSplit = () => setW((w) => {
@@ -683,7 +736,12 @@ function App() {
   }
   openFilesRef.current = openFiles
   // A compare launch opens the second agent beside the first.
-  const onLaunched = (out) => { setNewAgent(null); if (out?.paneId) setTimeout(() => { openAgent(out.paneId); if (out.alsoPaneId) openAgent(out.alsoPaneId, { toSide: true }) }, 1200) }
+  // One started from a tab group's menu (New agent in group) goes in that group, while it's there.
+  const onLaunched = (out) => {
+    const into = newAgent?.group
+    setNewAgent(null)
+    if (out?.paneId) setTimeout(() => { openAgent(out.paneId); if (into) setW((w) => (w.tabGroups?.[into] ? inGroup(w, out.paneId, into) : w)); if (out.alsoPaneId) openAgent(out.alsoPaneId, { toSide: true }) }, 1200)
+  }
   // Started from Home: the agent takes Home's tab, as the thread takes the new-thread page in T3.
   const fromHome = (out) => { if (out?.paneId) setTimeout(() => { if (wide) openAgent(out.paneId, { replace: 'view:new' }); else openAgent(out.paneId) }, 1200) }
   const openNew = () => openAgent('view:new')
@@ -1001,7 +1059,7 @@ function App() {
     setW((w) => {
       const tabs = w.tabs.map((x) => (x === slot ? pl.tab : x))
       const side = pl.side && pl.side !== pl.tab && tabs.includes(pl.side) ? pl.side : null
-      return { ...w, tabs, active: pl.tab, side, split: !!side, group: 'main' }
+      return { ...(slot === pl.tab || w.tabs.includes(pl.tab) ? w : follow(w, slot, pl.tab)), tabs, active: pl.tab, side, split: !!side, group: 'main' }
     })
   }
   const TODAY_NAMES = { overview: [tx('Today'), 'today'], calendar: [tx('Calendar'), 'calendar'], mail: [tx('Mail'), 'mail'], markets: [tx('Markets & News'), 'trend'], usage: [tx('Usage'), 'gauge'] }
@@ -1191,7 +1249,8 @@ function App() {
     )
   }
 
-  // Drag a tab to reorder; Ctrl+Shift+←/→ moves the focused tab. The order is saved with the layout.
+  // Drag a tab to reorder, or Ctrl+Shift+←/→ on the focused one (TabStrip works out where, by what it
+  // shows). The order is saved with the layout.
   const moveTab = (id, target, after) => setW((w) => {
     if (id === target) return w
     const rest = w.tabs.filter((t) => t !== id)
@@ -1200,17 +1259,11 @@ function App() {
     rest.splice(after ? i + 1 : i, 0, id)
     return { ...w, tabs: rest }
   })
-  const nudgeTab = (id, dir) => setW((w) => {
-    const tabs = [...w.tabs]
-    const i = tabs.indexOf(id), j = i + dir
-    if (i < 0 || j < 0 || j >= tabs.length) return w
-    ;[tabs[i], tabs[j]] = [tabs[j], tabs[i]]
-    return { ...w, tabs }
-  })
 
   // The tabs above the agents (TabStrip.jsx), with Tab Groups when that beta feature is on. A color
   // picked in a tab's or a group's right-click menu is kept with them as a folded group is: a group's
-  // by its key, a tab's by its id; none takes it off.
+  // by its key, a tab's by its id; none takes it off. Your own groups and pinned tabs are kept the
+  // same way (tidyTabs, above).
   const grouping = conf?.trials?.['tab-groups'] === true
   const foldGroup = (key) => setW((w) => ({ ...w, folded: { ...(w.folded || {}), [key]: !w.folded?.[key] } }))
   const colorTab = (key, color) => setW((w) => {
@@ -1219,9 +1272,13 @@ function App() {
     else delete colors[key]
     return { ...w, colors }
   })
+  const nameGroup = (key, name) => setW((w) => (w.tabGroups?.[key] ? { ...w, tabGroups: { ...w.tabGroups, [key]: { ...w.tabGroups[key], name } } } : w))
+  // Ungroup: the group goes, its tabs stay where they are.
+  const ungroup = (key) => setW((w) => tidyTabs({ ...w, tabGroups: { ...(w.tabGroups || {}), [key]: { tabs: [] } } }))
   const tabStrip = (
-    <TabStrip ids={W.tabs} byId={byId} active={W.active} side={split ? W.side : null} focus={W.group} folded={W.folded} colors={W.colors} grouping={grouping} spaces={fleet?.workspaces}
-      onOpen={openAgent} onClose={closeTab} onMove={moveTab} onNudge={nudgeTab} onFold={foldGroup} onColor={colorTab} onSide={canSplit ? (id) => openAgent(id, { toSide: true }) : null} onNewAgent={(init) => setNewAgent(init)}>
+    <TabStrip ids={W.tabs} byId={byId} active={W.active} side={split ? W.side : null} focus={W.group} folded={W.folded} colors={W.colors} own={W.tabGroups} pinned={W.pinned} grouping={grouping} spaces={fleet?.workspaces}
+      onOpen={openAgent} onClose={closeTab} onMove={moveTab} onFold={foldGroup} onColor={colorTab} onSide={canSplit ? (id) => openAgent(id, { toSide: true }) : null} onNewAgent={(init) => setNewAgent(init)}
+      onGroup={(id, key, keep) => setW((w) => inGroup(w, id, key, keep))} onName={nameGroup} onUngroup={ungroup} onPin={(id, on) => setW((w) => pinTab(w, id, on))}>
       <button className={`win-btn ${split ? 'on' : ''}`} onClick={toggleSplit} disabled={!canSplit || W.tabs.length < 2}
         title={!canSplit ? t('Not enough room to split') : W.tabs.length < 2 ? t('Open a second agent to split') : split ? t('Unsplit') : t('Split side by side')} aria-label={t('Split')}>
         <Icon name="split" size={15} />

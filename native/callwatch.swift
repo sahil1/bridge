@@ -22,6 +22,10 @@
 //   callwatch shot <out.png> <bundle id>...   a picture of the biggest window those apps have on
 //                                      screen (the call's), for the names it shows as people talk.
 //                                      Never asks: {"ok":true} or {"error":"not-allowed"|"no-window"}
+//   callwatch faces <n> <gap ms> <bundle id>...   n pictures of that window, gap ms apart, read
+//                                      on this Mac for the faces on them and how open each mouth
+//                                      is, and the names on the tiles (faces(), below). Never asks.
+//   callwatch faces-files <png>...     the same for pictures already taken, to check it by.
 //
 //   callwatch sharing                  whether something is sharing or recording the screen now (a
 //                                      call you share it on, a recording app), as the window server
@@ -40,6 +44,7 @@ import Foundation
 import ImageIO
 import ScreenCaptureKit
 import UniformTypeIdentifiers
+import Vision
 
 func address(_ sel: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
   AudioObjectPropertyAddress(mSelector: sel, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
@@ -138,12 +143,98 @@ func shot(_ out: String, _ bundles: [String]) -> String {
   return said
 }
 
+// Whose mouth moves on the call's video: `frames` pictures of the call's window, `gap` ms apart, each
+// read by Vision for the faces on it and how open each mouth is (the inner lips' height, as a share
+// of the face's), and the first for the words on it and where (the names on the tiles). A face is
+// followed from picture to picture by where it is: tiles stay put for a second. Everything stays in
+// memory, nothing is written, and only the numbers and words come out:
+//   {"ok":true,"faces":[{"x":0.1,"y":0.2,"w":0.08,"h":0.12,"open":[0.01,0.06,...]}],"labels":[{"x":...,"text":"Priya Shah"}]}
+// x, y, w and h are shares of the window's width and height, from its top left.
+func faces(_ frames: Int, _ gap: Int, _ bundles: [String]) -> String {
+  if !CGPreflightScreenCaptureAccess() { return "{\"error\":\"not-allowed\"}" }
+  let done = DispatchSemaphore(value: 0)
+  var shots: [CGImage] = []
+  Task.detached {
+    defer { done.signal() }
+    guard let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true) else { return }
+    let wins = content.windows.filter { w in bundles.contains(w.owningApplication?.bundleIdentifier ?? "") && w.windowLayer == 0 && w.frame.width >= 320 && w.frame.height >= 200 }
+    guard let w = wins.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) else { return }
+    let cfg = SCStreamConfiguration()
+    // Faces in a room's camera are small: up to twice the window's points, and 2400 wide.
+    let scale = min(2.0, 2400.0 / max(1.0, Double(w.frame.width)))
+    cfg.width = Int(Double(w.frame.width) * scale)
+    cfg.height = Int(Double(w.frame.height) * scale)
+    cfg.showsCursor = false
+    let filter = SCContentFilter(desktopIndependentWindow: w)
+    for i in 0..<frames {
+      if i > 0 { try? await Task.sleep(nanoseconds: UInt64(gap) * 1_000_000) }
+      if let img = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg) { shots.append(img) }
+    }
+  }
+  _ = done.wait(timeout: .now() + .milliseconds(frames * (gap + 1500) + 2000))
+  return shots.isEmpty ? "{\"error\":\"no-window\"}" : facesIn(shots)
+}
+
+func facesIn(_ shots: [CGImage]) -> String {
+  struct Face { var x, y, w, h: Double; var open: [Double] }
+  var tracked: [Face] = []
+  for img in shots {
+    let req = VNDetectFaceLandmarksRequest()
+    try? VNImageRequestHandler(cgImage: img, options: [:]).perform([req])
+    for o in req.results ?? [] {
+      let b = o.boundingBox // Vision's: from the bottom left
+      let f = Face(x: b.minX, y: 1 - b.maxY, w: b.width, h: b.height, open: [])
+      guard let lips = o.landmarks?.innerLips?.normalizedPoints, lips.count >= 4 else { continue }
+      let ys = lips.map { Double($0.y) }
+      let open = (ys.max()! - ys.min()!)
+      let cx = f.x + f.w / 2, cy = f.y + f.h / 2
+      if let i = tracked.firstIndex(where: { t in abs(t.x + t.w / 2 - cx) < max(t.w, f.w) / 2 && abs(t.y + t.h / 2 - cy) < max(t.h, f.h) / 2 }) {
+        tracked[i].open.append(open)
+      } else {
+        var n = f
+        n.open = [open]
+        tracked.append(n)
+      }
+    }
+  }
+  let text = VNRecognizeTextRequest()
+  text.recognitionLevel = .accurate
+  text.usesLanguageCorrection = false
+  try? VNImageRequestHandler(cgImage: shots[0], options: [:]).perform([text])
+  let labels: [[String: Any]] = (text.results ?? []).prefix(200).compactMap { o in
+    guard let s = o.topCandidates(1).first, s.confidence >= 0.3 else { return nil }
+    let b = o.boundingBox
+    return ["x": b.minX, "y": 1 - b.maxY, "w": b.width, "h": b.height, "text": String(s.string.prefix(60))]
+  }
+  let round = { (v: Double) in (v * 10000).rounded() / 10000 }
+  let out: [String: Any] = [
+    "ok": true, "frames": shots.count,
+    "faces": tracked.prefix(40).map { ["x": round($0.x), "y": round($0.y), "w": round($0.w), "h": round($0.h), "open": $0.open.map(round)] },
+    "labels": labels,
+  ]
+  guard let data = try? JSONSerialization.data(withJSONObject: out), let s = String(data: data, encoding: .utf8) else { return "{\"error\":\"unreadable\"}" }
+  return s
+}
+
 signal(SIGPIPE, SIG_DFL) // stdout closed: the server has gone, so do we
 let args = CommandLine.arguments.dropFirst()
 if args.first == "screen" { print("{\"allowed\":\(CGPreflightScreenCaptureAccess())}"); exit(0) }
 if args.first == "screen-ask" { print("{\"allowed\":\(CGRequestScreenCaptureAccess())}"); exit(0) }
 if args.first == "shot", args.count >= 3 {
   print(shot(Array(args)[1], Array(args.dropFirst(2))))
+  exit(0)
+}
+if args.first == "faces", args.count >= 4 {
+  let a = Array(args)
+  print(faces(max(1, min(12, Int(a[1]) ?? 6)), max(0, min(1000, Int(a[2]) ?? 160)), Array(a.dropFirst(3))))
+  exit(0)
+}
+if args.first == "faces-files", args.count >= 2 {
+  let imgs = args.dropFirst().compactMap { f -> CGImage? in
+    guard let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: f) as CFURL, nil) else { return nil }
+    return CGImageSourceCreateImageAtIndex(src, 0, nil)
+  }
+  print(imgs.isEmpty ? "{\"error\":\"unreadable\"}" : facesIn(imgs))
   exit(0)
 }
 if args.first == "windows" {

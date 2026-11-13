@@ -60,6 +60,12 @@ if (process.argv[2] === 'shot') {
   fs.appendFileSync(path.join(__dirname, 'shots.log'), process.argv.slice(4).join(' ') + '\\n')
   say({ ok: true })
 }
+// A burst of looks for faces: what callwatch.json says the call's video showed ({ faces }).
+if (process.argv[2] === 'faces') {
+  if (!read().screen) say({ error: 'not-allowed' })
+  fs.appendFileSync(path.join(__dirname, 'faces.log'), process.argv.slice(3).join(' ') + '\\n')
+  say(read().faces || { ok: true, faces: [], labels: [] })
+}
 if (process.argv[2] === 'windows') { process.stdout.write(JSON.stringify({ by: 'accessibility', windows: (read().titles || []).map((title) => ({ bundle: 'com.microsoft.teams2', title })) }) + '\\n'); process.exit(0) }
 let last = ''
 setInterval(() => { const line = JSON.stringify({ input: (read().input || []).map((bundle, i) => ({ pid: 100 + i, bundle })) }); if (line !== last) { last = line; process.stdout.write(line + '\\n') } }, 150)`)
@@ -74,7 +80,7 @@ try { process.stdout.write(fs.readFileSync(path.join(__dirname, 'ocr.txt'), 'utf
   return path.join(bin, 'bridgeocr')
 }
 const kit = await startKit('call-event', {
-  env: ({ bin }) => ({ BRIDGE_CALL_QUIET_MS: '1500', BRIDGE_SCREEN_RECHECK_MS: '300', BRIDGE_TAP_RECHECK_MS: '300', ...(IS_WIN ? {} : { BRIDGE_OCR: ocr(bin) }), BRIDGE_CALL_START_MS: '300', BRIDGE_CALL_END_MS: '600', BRIDGE_QUIET_OVER_MS: '1500', BRIDGE_QUIET_END_MS: '4000', BRIDGE_QUIET_REMIND_MS: '1500', BRIDGE_QUIET_LONG_MS: '4000', BRIDGE_QUIET_CHECK_MS: '300', BRIDGE_AUTO_STOP_MS: '2000', ...(IS_WIN ? {} : { BRIDGE_CALLWATCH: callwatch(bin) }) }),
+  env: ({ bin }) => ({ BRIDGE_CALL_QUIET_MS: '1500', BRIDGE_SCREEN_RECHECK_MS: '300', BRIDGE_TAP_RECHECK_MS: '300', ...(IS_WIN ? {} : { BRIDGE_OCR: ocr(bin) }), BRIDGE_CALL_START_MS: '300', BRIDGE_SIGHT_EVERY_MS: '500', BRIDGE_CALL_END_MS: '600', BRIDGE_QUIET_OVER_MS: '1500', BRIDGE_QUIET_END_MS: '4000', BRIDGE_QUIET_REMIND_MS: '1500', BRIDGE_QUIET_LONG_MS: '4000', BRIDGE_QUIET_CHECK_MS: '300', BRIDGE_AUTO_STOP_MS: '2000', ...(IS_WIN ? {} : { BRIDGE_CALLWATCH: callwatch(bin) }) }),
 })
 const model = await startModel('call-event')
 const browsers = []
@@ -171,6 +177,20 @@ try {
     call({ input: ['com.microsoft.teams2'], screen: true })
     const got = await until(async () => { try { return fs.readFileSync(path.join(kit.data, 'meetings', L.id, 'glances.jsonl'), 'utf8').includes('Dan Ruiz') } catch { return false } }, 15000)
     ok(!!got && shots()[0] === 'com.microsoft.teams2 com.microsoft.teams', "allowed: as someone on the call talks, a look at Teams' window by itself, its names read and kept as words", shots())
+    // Speakers from the call's video (a beta feature): off, no bursts; on, a burst of looks at the
+    // call's window as someone talks, whose mouth moved kept and no picture. The faces are what the
+    // real callwatch read off a made-up call (test/fixtures/call-faces.json): the person on the left
+    // of a room's camera talking.
+    const bursts = () => { try { return fs.readFileSync(path.join(kit.bin, 'faces.log'), 'utf8').split('\n').filter(Boolean) } catch { return [] } }
+    ok(!bursts().length, "Speakers from the call's video off: no looks for faces", bursts())
+    call({ input: ['com.microsoft.teams2'], screen: true, faces: { ok: true, ...JSON.parse(fs.readFileSync(new URL('../fixtures/call-faces.json', import.meta.url), 'utf8')) } })
+    await api('/settings', { trials: { 'call-video': true } }, 'PATCH')
+    const sightsFile = path.join(kit.data, 'meetings', L.id, 'sights.jsonl')
+    const sight = await until(() => { try { return JSON.parse(fs.readFileSync(sightsFile, 'utf8').split('\n')[0]) } catch { return null } }, 10000)
+    const talking = sight?.faces?.filter((f) => f.m >= 0.03)
+    ok(!!sight && bursts()[0] === '6 160 com.microsoft.teams2 com.microsoft.teams' && talking?.length === 1 && talking[0].label === 'Huddle Room (You)' && talking[0].where === 'on the left' && sight.faces.length === 9, "on: as someone talks, six looks at Teams' window a sixth of a second apart, each face kept with the name under it and how much its mouth moved", { sight, bursts: bursts() })
+    ok(fs.readdirSync(path.join(kit.data, 'meetings', L.id)).every((f) => !/\.(png|jpe?g)$/i.test(f)), 'and no picture kept')
+    await api('/settings', { trials: { 'call-video': false } }, 'PATCH')
     fs.writeFileSync(path.join(kit.bin, 'calltap.json'), JSON.stringify({ level: 0 }))
     await api(`/meetings/${L.id}/stop`, {})
     call({})

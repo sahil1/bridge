@@ -816,16 +816,16 @@ export function MeetingPage({ id, onBack }) {
   }
   const heard = lines.some((l) => l.src === 'them' && l.text)
   // A room: your mic only. Its voices can be told apart where that runs (vst.offered), and on a
-  // call the voices on it (onCall: you're on your mic, so none of them is you).
+  // call the voices on it, and your mic's too with a room on the call: only a voice on your mic can
+  // be you.
   const room = !heard && lines.some((l) => l.src === 'you' && l.text)
-  const onCall = heard && data.voices?.src === 'them'
   const voiced = (room || heard) && data.voices?.speakers >= 2
   const canTell = (room || heard) && done && !!vst?.offered
   const working = data.voicesWork
   const names = [...new Set([...(data.event?.attendees || []), ...lines.map((l) => l.name).filter(Boolean)])]
   const voiceItems = (l) => [
     ...names.filter((x) => x !== l.name && x !== data.me).slice(0, 12).map((x) => ({ icon: 'users', label: x, run: () => nameVoice(l.voice, { name: x }) })),
-    !l.me && !onCall && { icon: 'mic', label: t("That's me"), run: () => nameVoice(l.voice, { me: true }) },
+    !l.me && l.src === 'you' && { icon: 'mic', label: t("That's me"), run: () => nameVoice(l.voice, { me: true }) },
     { icon: 'edit', label: t('Someone else…'), run: () => setNaming({ l, name: '', voice: l.voice }) },
     'sep',
     { icon: 'edit', label: t('Only this line…'), run: () => setNaming({ l, name: '' }) },

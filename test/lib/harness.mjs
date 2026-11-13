@@ -194,6 +194,9 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     // Nor a speech model (huggingface.co): downloads go nowhere, and fail at once. And what runs
     // Parakeet is a stand-in for sherpa-onnx's addon (stand-ins/sherpa.cjs), so no test loads one.
     BRIDGE_MODELS_URL: 'http://127.0.0.1:9',
+    // Nor Perplexity's API, which AI Assist's answers look things up with: a test gives a stand-in
+    // (stand-ins/model.mjs answers as Sonar does), or a key saved in a test reaches nothing.
+    BRIDGE_PERPLEXITY_URL: 'http://127.0.0.1:9',
     BRIDGE_SHERPA: path.join(TEST, 'stand-ins', 'sherpa.cjs'),
     // Nor the computer's own apps, which Studio offers to open a file in (server/studioapps.js): a
     // Mac's Applications folder is one of the kit's, and Windows' registry a stand-in that knows

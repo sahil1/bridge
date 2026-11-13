@@ -56,11 +56,21 @@
 
 /* Less room: the others narrower than 72, the tab on screen keeping its name and ×; less still, the
    others their icon alone (and their × only by the middle button, as in Chrome). */
-.ws-tabs-scroll.tight .ws-tab:not(.main, .side) { min-width: 38px; max-width: 72px; padding: 0 4px 0 10px; }
-.ws-tabs-scroll.icons .ws-tab:not(.main, .side) { justify-content: center; gap: 0; padding: 0; }
-.ws-tabs-scroll.icons .ws-tab:not(.main, .side) :is(.ws-tab-name, .ws-tab-where, .ws-tab-x) { display: none; }
-.ws-tabs-scroll.icons .ws-tab:not(.main, .side) > .sdot:not(:first-child):not(.sdot-blocked) { display: none; }
-.ws-tabs-scroll.icons .ws-tab:not(.main, .side):has(> .sdot-blocked:not(:first-child)) > .tab-ship { display: none; }
+.ws-tabs-scroll.tight .ws-tab:not(.main, .side, .pinned, .renaming) { min-width: 38px; max-width: 72px; padding: 0 4px 0 10px; }
+.ws-tabs-scroll.icons .ws-tab:not(.main, .side, .pinned, .renaming) { justify-content: center; gap: 0; padding: 0; }
+.ws-tabs-scroll.icons .ws-tab:not(.main, .side, .pinned, .renaming) :is(.ws-tab-name, .ws-tab-where, .ws-tab-x) { display: none; }
+.ws-tabs-scroll.icons .ws-tab:not(.main, .side, .pinned) > .sdot:not(:first-child):not(.sdot-blocked) { display: none; }
+.ws-tabs-scroll.icons .ws-tab:not(.main, .side, .pinned):has(> .sdot-blocked:not(:first-child)) > .tab-ship { display: none; }
+
+/* Pinned: at the start, the tab's icon and its dot alone, as wide as they need (its name is on its
+   card, and still its name to a screen reader), with no ×. */
+.ws-tab.pinned { flex: none; min-width: 40px; max-width: none; justify-content: center; gap: 4px; padding: 0 12px; }
+.ws-tab.pinned .ws-tab-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Its name being edited (Rename…): room for it, pinned or not. */
+.ws-tab.renaming { min-width: 168px; }
+.ws-tab.pinned.renaming { justify-content: flex-start; padding: 0 5px 0 11px; }
+.ws-tab.renaming .ws-tab-name { position: static; width: auto; height: auto; clip-path: none; display: flex; }
+.ws-tab-rename { flex: 1; min-width: 0; height: 22px; padding: 0 6px; border-radius: 6px; border: 1px solid var(--accent); background: var(--pane); color: var(--ink); font: 500 12.5px var(--font); outline: none; }
 
 /* Tab Groups: the group's chip in its color, where its tabs start, and its line under them. */
 .ws-group {
@@ -73,6 +83,10 @@
 .ws-group::after { content: ""; position: absolute; left: 4px; right: -4px; bottom: -5px; height: 2px; border-radius: 2px 0 0 2px; background: var(--gc, var(--tg-grey)); }
 .ws-group.alone::after { right: 4px; border-radius: 2px; }
 .ws-group-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A group of yours with no name: its color alone, as Chrome's. */
+.ws-group.unnamed:not(.folded) { width: 14px; padding: 0; }
+/* A tab dragged onto a group's chip goes into it. */
+.ws-group.drop-in { box-shadow: 0 0 0 2px var(--pane), 0 0 0 4px var(--accent-fill); }
 .ws-group-n { font-variant-numeric: tabular-nums; opacity: .85; }
 /* Folded, its most urgent dot, on a disc of the pane so it reads on any color. */
 .ws-group-dot { display: inline-grid; place-items: center; flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--pane); }
@@ -96,6 +110,17 @@
 .tab-menu-none { background: linear-gradient(135deg, transparent calc(50% - .75px), var(--ink-3) calc(50% - .75px) calc(50% + .75px), transparent calc(50% + .75px)); box-shadow: inset 0 0 0 1px var(--line-2); }
 .tab-menu-none:hover { box-shadow: inset 0 0 0 1px var(--line-2), 0 0 0 2px var(--pane), 0 0 0 4px var(--line-2); }
 .tab-menu-none[aria-checked="true"] { box-shadow: inset 0 0 0 1px var(--line-2), 0 0 0 2px var(--pane), 0 0 0 4px var(--ink-3); }
+/* An item with its own menu (Add tab to group ›), and that menu beside it: each of your groups by
+   its color. */
+.tab-menu-more { margin-left: auto; padding-left: 14px; box-sizing: content-box; color: var(--ink-3); }
+.menu.tab-submenu { position: fixed; z-index: 221; right: auto; min-width: 0; width: max-content; max-width: calc(100vw - 16px); }
+.tab-submenu .menu-item { white-space: nowrap; }
+.tab-menu-dot { flex: none; width: 10px; height: 10px; margin: 0 1.5px; border-radius: 50%; background: var(--gc); }
+/* A group of yours: its editor, its name above its menu. */
+.tab-group-editor { padding-top: 8px; }
+.tab-group-name { display: block; box-sizing: border-box; width: calc(100% - 12px); height: 30px; margin: 0 6px 6px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: 500 12.5px var(--font); outline: none; }
+.tab-group-name:focus { border-color: var(--accent); }
+.tab-group-name::placeholder { color: var(--ink-3); }
 
 /* Search tabs, at the end of the strip, with how many are out of sight; and Split. */
 .ws-tab-tools { flex: none; display: flex; align-items: center; gap: 2px; padding-bottom: 4px; }
@@ -111,6 +136,8 @@
 .tab-card .hc-meta span { display: inline-flex; align-items: center; gap: 6px; }
 .tab-card-swatch { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 3px; margin-right: 6px; background: var(--gc); }
 .tab-card .tab-card-swatch { margin-right: 0; }
+/* A rename that didn't take, and why, under the tab for a few seconds. */
+.hover-card.tab-note { color: var(--critical); font-size: 12.5px; }
 
 /* Search tabs' list. */
 .tab-search { position: fixed; z-index: 90; width: 360px; max-width: calc(100vw - 24px); max-height: min(70vh, 560px); display: flex; flex-direction: column; padding: 6px; border-radius: 12px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: 0 12px 32px rgb(0 0 0 / .16), 0 2px 6px rgb(0 0 0 / .06); color: var(--ink); animation: fade-in .1s ease; }

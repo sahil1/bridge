@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../Icon.jsx'
 import { api, usePoll, useFleet } from '../../api.js'
 import { MEETINGS_CHANNEL, clock, useCallEvent, QuickNote, endedWords } from './recording.jsx'
-import { KIND, setAssist, markAssist } from './assist.jsx'
+import { KIND, setAssist, markAssist, fromWords, webWords } from './assist.jsx'
 import { boardWords } from './board.jsx'
 import { PrepGlance } from './prep.jsx'
 import { useScreenAccess, useAllowCall, allowSteps, noteOpened } from './allowcall.jsx'
@@ -293,7 +293,14 @@ export default function FloatCard() {
         {tip && (
           <div className={`fc-tip k-${tip.kind}`} role="status">
             <span className="fc-tip-kind"><Icon name="wand" size={11} /> {t(KIND[tip.kind] || KIND.idea)}</span>
+            {/* An answer: the question it's to, the answer, and where it's from (or how its lookup on the web went). */}
+            {tip.kind === 'answer' && <q className="fc-tip-q" title={tip.q}>{tip.q}</q>}
             <span className="fc-tip-text" title={tip.why || ''}>{tip.text}</span>
+            {tip.kind === 'answer' && (() => {
+              const from = (tip.sources || []).map((s) => fromWords(s, tip)).filter(Boolean).join(' · ')
+              const web = webWords(tip)
+              return <span className={`fc-tip-from${tip.web?.state === 'failed' ? ' fail' : ''}`} title={[from, web].filter(Boolean).join('\n')}>{tip.web?.state === 'looking' || tip.web?.state === 'failed' ? web : from}</span>
+            })()}
             <span className="fc-tip-acts">
               <button type="button" className="fc-x" onClick={() => act(() => markAssist(r.id, tip.id, 'kept'))} aria-label={t('Add to my notes')} title={t('Add to my notes')}><Icon name="check" size={12} /></button>
               <button type="button" className="fc-x" onClick={() => act(() => markAssist(r.id, tip.id, 'dismissed'))} aria-label={t('Dismiss')} title={t('Dismiss')}><Icon name="x" size={12} /></button>

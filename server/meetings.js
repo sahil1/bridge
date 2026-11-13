@@ -24,11 +24,12 @@ import * as livewords from './livewords.js'
 import * as memory from './meetmemory.js'
 import { notPerson } from './notpeople.js'
 import * as voices from './voices.js'
+import * as sights from './sights.js'
 import * as doctext from './doctext.js'
 import { DECK_RULES } from './studio.js'
 import { canOpen } from './files.js'
 import { mayLook, noteAsked } from './projects.js'
-import { isLimit } from './consult.js'
+import { isLimit, search as searchWeb, searchVia } from './consult.js'
 
 const DIR = path.join(DATA, 'meetings')
 const RATE = 16000
@@ -146,10 +147,11 @@ export function transcript(id, { raw = false, clean = true, dropped = false } = 
   let one = null
   try { one = onlyGuest(meta(id)) } catch { /* gone */ }
   // Each line's voice (voices.js), on the side told apart: your mic's in a room, the call's on a
-  // call. Speaker n, or the name given to that voice, or you. A name you gave the line comes first.
+  // call, both with a room on the call. Speaker n, or the name given to that voice, or you. A name
+  // you gave the line comes first.
   const room = voices.of(id)
   const voiceOf = (l, k) => {
-    const n = l.src === (room?.src || 'you') && room?.speakers >= 2 ? room.line?.[k] : null
+    const n = room?.speakers >= 2 && (room.src === 'both' || l.src === (room.src || 'you')) ? room.line?.[k] : null
     if (!n) return {}
     const v = room.names?.[n]
     return v?.me ? { voice: n, me: true, ...(v.byVoice ? { byVoice: true } : {}) } : v?.name ? { voice: n, name: v.name, guess: !!v.guess, ...(v.byVoice ? { byVoice: true } : {}) } : { voice: n }
@@ -805,10 +807,12 @@ export function get(id) {
   const progress = dec ? Math.min(99, Math.round((dec.done / dec.total) * 100)) : null
   const links = (m.links || []).map((l) => (l.kind === 'file' ? { ...l, exists: fs.existsSync(l.path), readable: doctext.readable(l.path) } : l))
   const help = assistOf(id)
+  // An answer still being looked up on the web when Bridge AI closed never will be: it says so.
+  const stale = (x) => (x.web?.state === 'looking' && !lookingUp.has(`${id}:${x.id}`) ? { ...x, web: { ...x.web, state: 'failed', error: 'Bridge AI closed before it was looked up.' } } : x)
   // me: your name (Settings › General), for your lines.
   // In a room: how many voices, and telling them apart while it's going (the model downloading).
   const room = voices.of(id)
-  return { ...m, voices: room ? { src: room.src || 'you', speakers: room.speakers, names: room.names || {}, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, callAccess: callAccess(id), partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assistAt: help.at || null, assisting: assisting.has(id), assistLevel: assistLevel() }
+  return { ...m, voices: room ? { src: room.src || 'you', speakers: room.speakers, names: room.names || {}, side: room.side || null, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, callAccess: callAccess(id), partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20).map(stale), assistError: help.error || null, assistAt: help.at || null, assisting: assisting.has(id), assistLevel: assistLevel() }
 }
 
 export function setKind(id, kind) { return patchMeta(id, { kind: KINDS[kind] ? kind : 'general', kindPicked: true }) }
@@ -984,18 +988,28 @@ export const sameName = (a, b) => {
 const guests = (m) => { const me = String(cfg.name || '').trim(); return (m.event?.attendees || []).filter((p) => (!me || !sameName(p, me)) && !notPerson(p)) }
 const asWritten = (p) => (/^[a-z0-9._-]+$/.test(p) && /[._-]/.test(p) ? nameParts(p).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ') : p)
 function onlyGuest(m) { const g = guests(m); return g.length === 1 ? asWritten(g[0]) : null }
+// Who the call's video showed talking as each line was said (sights.js), for a model: saw(line) is
+// " (seen talking: ...)" or nothing, and saw.any whether any line has it.
+function seenSaid(id, said) {
+  const seen = sights.seen(id, said)
+  const saw = (l) => { const x = seen.get(l.key || `${l.src}:${l.t0}`); return x ? ` (seen talking: ${sights.hint(x)})` : '' }
+  saw.any = seen.size > 0
+  return saw
+}
+const SEEN_SAYS = 'A line may say who the call\'s video showed talking while it was said: "seen talking" and the name under the face whose mouth was moving, or where that face was in a room\'s camera (the person on the left in "Huddle Room"). It\'s good evidence for who said it, but the name under a face can be a room\'s or a computer\'s rather than a person\'s, and two people can talk at once.'
 // The call is one sound for everyone on it, so who said each of Them's lines is worked out by a
 // model: from what's said (names used, a question put to someone and answered, who presents what),
 // the words on the screen at the time (a video call shows names on its tiles, and a look at it
-// while someone on the call talked shows who that was: glance) and who was invited. A line it
-// can't place stays Them; the ones you named yourself are left as they are.
+// while someone on the call talked shows who that was: glance; and, from its video, whose mouth was
+// moving as each line was said: sights.js) and who was invited. A line it can't place stays Them;
+// the ones you named yourself are left as they are.
 export async function nameSpeakers(id, { model } = {}) {
   const m = meta(id)
   const use = model || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
   if (!use) throw noModel()
   const told = voices.of(id)
   if (told?.speakers >= 2 && (told.src || 'you') === 'you' && !transcript(id).some((l) => l.src === 'them' && l.text)) return nameVoices(id, use)
-  if (told?.speakers >= 2 && told.src === 'them') return nameVoices(id, use, { call: true })
+  if ((told?.src === 'them' || told?.src === 'both') && told.speakers >= 2) return nameVoices(id, use, { call: true })
   const said = transcript(id).filter((l) => l.text)
   if (!said.some((l) => l.src === 'them')) throw new Error('Nobody on the call was heard in this meeting')
   const me = String(cfg.name || '').trim()
@@ -1003,17 +1017,19 @@ export async function nameSpeakers(id, { model } = {}) {
   const screens = [...(m.captures || []).filter((c) => c.text).map((c) => ({ t: c.t, screen: c.text.replace(/\s+/g, ' ').slice(0, 300) })),
     ...glances(id).map((g) => ({ t: g.t, screen: g.text.slice(0, 500), talking: true }))]
   const byN = new Map()
+  const saw = seenSaid(id, said)
   const rows = [...said, ...screens].sort((a, b) => (a.t0 ?? a.t) - (b.t0 ?? b.t)).map((x) => {
     if (x.screen) return `    [${clock(x.t)}] On the screen${x.talking ? ' as Them talked' : ''}: ${x.screen}`
-    if (x.src !== 'them') return `    [${clock(x.t0)}] You: ${x.text}`
+    if (x.src !== 'them') return `    [${clock(x.t0)}] You: ${x.text}${saw(x)}`
     byN.set(byN.size + 1, x.key)
-    return `${byN.size}. [${clock(x.t0)}] Them: ${x.text}`
+    return `${byN.size}. [${clock(x.t0)}] Them: ${x.text}${saw(x)}`
   })
   const mem = memory.about(`${m.title}\n${people.join('\n')}\n${said.map((l) => l.text).join('\n')}`)
   const about = [`Meeting: ${m.title}`, people.length ? `Invited, besides You: ${people.join(', ')}` : 'There is no list of who was invited, but the meeting\'s name may say who it was with.', me ? `"You" is ${me}, who recorded it.` : '"You" is the person who recorded it.'].join('\n')
   const ask = [about, mem ? `\n${mem}` : '', '',
     '"Them" is everyone else on the call: they share one sound, so the transcript doesn\'t say which of them spoke. Say who said each numbered Them line, from what was said (names used, introductions, a question put to someone and their answer, who presents what), the words on the screen at the time and who was invited.',
     'The screen is the call\'s window, read as text. Video calls show names on their tiles; the one talking is often the big tile, or named in a label like "Talking: Priya Shah" or "Priya Shah is presenting"; captions show who said what ("Priya Shah" and then their words). Match those words and names to the lines said at that time.',
+    saw.any ? SEEN_SAYS : '',
     'Use names the way they were invited or said. When you can\'t tell, use null: a wrong name is worse than none. Never name You.',
     'Answer with one JSON object and nothing else, from line number to name, like {"1": "Priya Shah", "2": null}.'].join('\n')
   const got = {}
@@ -1042,23 +1058,29 @@ export async function nameSpeakers(id, { model } = {}) {
 
 // The same for told-apart voices: each Speaker n named from what's said ("Thanks, Priya"), who was
 // invited and, in a room, which of them is you; on a call, also from the names its window showed as
-// they talked (glances). A voice you named yourself is left as it is; one it can't place stays
-// Speaker n.
+// they talked (glances) and whose mouth moved on its video (sights.js). A room on a call (src both)
+// has the call's voices and your mic's, and one of your mic's is you. A voice you named yourself is
+// left as it is; one it can't place stays Speaker n.
 async function nameVoices(id, use, { call = false } = {}) {
   const m = meta(id)
   const said = transcript(id).filter((l) => l.text)
   const room = voices.of(id)
+  const both = room.src === 'both'
+  const sideOf = (n) => room.side?.[n] || room.src
+  const nums = (src) => Array.from({ length: room.speakers }, (_, i) => i + 1).filter((n) => sideOf(n) === src)
   const me = String(cfg.name || '').trim()
   const people = guests(m)
   const screens = call ? [...(m.captures || []).filter((c) => c.text).map((c) => ({ t: c.t, screen: c.text.replace(/\s+/g, ' ').slice(0, 300) })), ...glances(id).map((g) => ({ t: g.t, screen: g.text.slice(0, 500), talking: true }))] : []
+  const saw = seenSaid(id, said)
   const rows = [...said, ...screens].sort((a, b) => (a.t0 ?? a.t) - (b.t0 ?? b.t)).map((l) => (l.screen ? `    [${clock(l.t)}] On the screen${l.talking ? ' as someone on the call talked' : ''}: ${l.screen}`
-    : `[${clock(l.t0)}] ${l.voice ? `Speaker ${l.voice}` : call && l.src === 'them' ? 'Someone on the call' : me || 'You'}: ${l.text}`))
+    : `[${clock(l.t0)}] ${l.voice ? `Speaker ${l.voice}` : call && l.src === 'them' ? 'Someone on the call' : me || 'You'}: ${l.text}${saw(l)}`))
   const mem = memory.about(`${m.title}\n${people.join('\n')}\n${said.map((l) => l.text).join('\n')}`)
   const ask = call
     ? [`Meeting: ${m.title}`, people.length ? `Invited, besides You: ${people.join(', ')}` : 'There is no list of who was invited, but the meeting\'s name may say who it was with.', me ? `"You" is ${me}, who recorded it, on their own microphone.` : '"You" is the person who recorded it, on their own microphone.', mem ? `\n${mem}` : '', '',
-      `Everyone else on this call shares one sound, and their voices were told apart by how they sound: Speaker 1 to Speaker ${room.speakers}. Say who each voice on the call is, from what was said (names used, introductions, a question put to someone and their answer), the words on the screen at the time (a call's window shows names on its tiles, "Talking: ..." labels and captions with who said them), who was invited and the meeting's name. None of them is You.`,
+      both ? `This call had people on it and people in the room with You, and each side's voices were told apart by how they sound. On the call (sharing one sound): ${nums('them').map((n) => `Speaker ${n}`).join(', ') || 'none told apart'}. In the room, on Your microphone: ${nums('you').map((n) => `Speaker ${n}`).join(', ')}; one of those is usually You: say "me" for that one. Say who each is, from what was said (names used, introductions, a question put to someone and their answer), the words on the screen at the time (a call's window shows names on its tiles, "Talking: ..." labels and captions with who said them), who was invited and the meeting's name.` : `Everyone else on this call shares one sound, and their voices were told apart by how they sound: Speaker 1 to Speaker ${room.speakers}. Say who each voice on the call is, from what was said (names used, introductions, a question put to someone and their answer), the words on the screen at the time (a call's window shows names on its tiles, "Talking: ..." labels and captions with who said them), who was invited and the meeting's name. None of them is You.`,
+      saw.any ? SEEN_SAYS : '',
       'Use names the way they were invited or said. When you can\'t tell, use null: a wrong name is worse than none.',
-      'Answer with one JSON object and nothing else, from speaker number to name, like {"1": "Priya Shah", "2": null}.'].join('\n')
+      both ? 'Answer with one JSON object and nothing else, from speaker number to name, like {"1": "Priya Shah", "2": "me", "3": null}.' : 'Answer with one JSON object and nothing else, from speaker number to name, like {"1": "Priya Shah", "2": null}.'].filter(Boolean).join('\n')
     : [`Meeting: ${m.title}`, people.length ? `Invited, besides the person recording: ${people.join(', ')}` : 'There is no list of who was invited, but the meeting\'s name may say who it was with.', me ? `The person recording it is ${me}.` : '', mem ? `\n${mem}` : '', '',
       `This meeting was in a room with one microphone, and the voices were told apart by how they sound: Speaker 1 to Speaker ${room.speakers}. Say who each speaker is, from what was said (names used, introductions, a question put to someone and their answer), who was invited and the meeting's name. One of them is usually the person recording it: say "me" for that one.`,
       'Use names the way they were invited or said. When you can\'t tell, use null: a wrong name is worse than none.',
@@ -1079,7 +1101,7 @@ async function nameVoices(id, use, { call = false } = {}) {
     if (!(s >= 1 && s <= room.speakers) || (was && !was.guess && !was.byVoice) || typeof name !== 'string') continue
     const v = clean(name, 80)
     const isMe = /^(me|you|myself)$/i.test(v) || (me && sameName(v, me))
-    if (!v || /^(null|unknown|speaker \d+|them)$/i.test(v) || (!isMe && notPerson(v)) || taken.has(isMe ? ':me' : v) || (call && isMe)) continue
+    if (!v || /^(null|unknown|speaker \d+|them)$/i.test(v) || (!isMe && notPerson(v)) || taken.has(isMe ? ':me' : v) || (call && isMe && sideOf(s) !== 'you')) continue
     await voices.name(id, s, isMe ? { me: true, guess: true } : { name: v, guess: true })
     taken.add(isMe ? ':me' : v)
     n++
@@ -1414,6 +1436,37 @@ export async function lookAround(now = Date.now()) {
   } finally { lookingNow = false }
 }
 setInterval(() => { lookAround().catch(() => {}) }, Number(process.env.BRIDGE_LOOK_EVERY_MS || 1000)).unref?.()
+
+// ---------- Who's seen talking, on the call's video (sights.js) ----------
+// With it on (a beta feature) and Screen Recording allowed, while a call records and someone talks,
+// on the call or on your mic (a room on the call), a burst of pictures of the call's window every
+// SIGHT_MS, read on this Mac for whose mouth moves. Three bursts in a row with no faces (cameras off,
+// a shared screen filling the window): once a minute until there are some. One burst at a time.
+const SIGHT_MS = Number(process.env.BRIDGE_SIGHT_EVERY_MS || 5000)
+const SIGHT_IDLE_MS = 60_000
+const SIGHTS = 1500
+const sighted = new Map() // id -> { at, empty, n }
+let seeing = false
+// Someone talking now, on the call or on your mic.
+const speaking = (id) => Object.values(live.get(id)?.sources || {}).some((s) => Date.now() - (s.talkingAt || 0) < 2000)
+export async function seeAround(now = Date.now()) {
+  if (seeing || !sights.on() || !helpers.faces) return
+  seeing = true
+  try {
+    for (const m of recordingNow()) {
+      if (m.status !== 'recording' || m.call !== 'on' || !(m.callApps || []).length || !speaking(m.id)) continue
+      const k = sighted.get(m.id) || { at: 0, empty: 0, n: 0 }
+      if (k.n >= SIGHTS || now - k.at < (k.empty >= 3 ? SIGHT_IDLE_MS : SIGHT_MS)) continue
+      if (!(await helpers.canLook?.())) return
+      const t = nowIn(m.id, m) ?? 0
+      sighted.set(m.id, { ...k, at: now })
+      const raw = await helpers.faces(m.callApps[0]).catch(() => null)
+      const r = raw ? sights.keep(m.id, t, raw) : { faces: 0 }
+      sighted.set(m.id, { at: now, empty: r.faces ? 0 : k.empty + 1, n: k.n + 1 })
+    }
+  } finally { seeing = false }
+}
+setInterval(() => { seeAround().catch(() => {}) }, Number(process.env.BRIDGE_LOOK_EVERY_MS || 1000)).unref?.()
 
 // ---------- Files and links ----------
 // What goes with a meeting: files on this computer (a deck, the SOW), links (a SharePoint deck from
@@ -1783,6 +1836,10 @@ const CLEANUP_SCHEMA = { type: 'object', properties: { fix: { type: 'object', ad
 const cleanupOk = (v) => (v.fix == null || (typeof v.fix === 'object' && !Array.isArray(v.fix))) && (v.drop == null || Array.isArray(v.drop)) && (v.fix != null || v.drop != null)
 const ASSIST_SCHEMA = { type: 'object', properties: { items: { type: 'array', maxItems: 3, items: { type: 'object', properties: { kind: { type: 'string', enum: ['question', 'point', 'check', 'idea'] }, text: { type: 'string' }, why: { type: 'string' } }, required: ['kind', 'text', 'why'] } } }, required: ['items'] }
 const assistOk = (v) => Array.isArray(v.items)
+// With Answers in AI Assist: answers too, each to a numbered question, saying what it's from (from:
+// the past meetings' numbers and what else the model was given).
+const answersSchema = (from) => ({ type: 'array', maxItems: ANSWERS_MOST, items: { type: 'object', properties: { line: { type: 'integer' }, question: { type: 'string' }, answer: { type: 'string' }, from: { type: 'array', items: { type: 'string', enum: from } }, current: { type: 'boolean' } }, required: ['line', 'question', 'answer', 'from', 'current'] } })
+const answersOk = (v) => (Array.isArray(v.items) || Array.isArray(v.answers)) && (v.items == null || Array.isArray(v.items)) && (v.answers == null || Array.isArray(v.answers))
 function pieces(text, size) {
   const out = []
   let cur = ''
@@ -1952,8 +2009,24 @@ export async function ask(id, question, { model } = {}) {
 // candidate's resume, the deck) and your notes. Each says what it's based on, so you can tell a
 // good one at a glance. Meeting memory is only background, used when today's meeting touches it.
 // It's asked after a new line comes in, at most every ASSIST_MS and only once enough more has been
-// said (both by the level you pick: ASSIST_LEVELS); Suggest now asks straight away. Kept in assist.json: { items: [{ id, t, kind, text, why,
-// state: new | kept | dismissed }], at, upTo, error }.
+// said (both by the level you pick: ASSIST_LEVELS); Suggest now asks straight away.
+// With Answers in AI Assist on too (a Beta Feature, src/trials.js), the same look answers questions
+// raised since the last one that have a general or factual answer ("what's the difference between
+// SOC 2 Type 1 and Type 2?", "what did we agree on pricing with them last time?"), not ones put to
+// someone about themselves or their plans ("how are you?"). The lines that ask something (ASKS) go
+// to the model numbered, with the past meetings they may be about (pastFor, picked the way askAll
+// picks them), and in that one call it answers at most two (ANSWERS_MOST, besides the level's
+// suggestions): from your past meetings, notes, files and meeting memory first, else from what it
+// knows itself, which may be out of date, and it says which. One it answers from what it knows alone
+// and says depends on facts that change is then looked up on the web, when a route that searches is
+// set up (consult.js search: Perplexity, with your key). Only the question goes there, never the
+// transcript; the web's answer and its links take the place of the model's, and a lookup that fails
+// says so on the card. A question answered before (or waved away) isn't answered again.
+// Kept in assist.json: { items: [{ id, t, kind, text, why, state: new | kept | dismissed }], at,
+// upTo, error }. An answer is an item of kind 'answer', t when it was asked, with q (the question),
+// asked ({ who, text }: the line it was in), sources ([{ kind: meeting | notes | files | memory |
+// general | web, ... }], yours first) and web (null, or { state: looking | done | failed | off, via,
+// error }).
 const ASSIST_MS = Number(process.env.BRIDGE_ASSIST_MS || 60_000)
 // How often it looks and how much it says, by the level picked in Settings › Meetings or on Assist
 // while it records: every (times ASSIST_MS), once this many words were said since it last looked,
@@ -1968,11 +2041,60 @@ const ASSIST_KINDS = {
   brainstorm: 'You\'re helping in a brainstorm. Suggest an angle not explored yet, an idea worth building on, and a question that sharpens the problem.',
   general: 'Suggest a question that would clear something up, a decision that has no owner or date yet, a risk or a point worth raising, or a useful idea.',
 }
-const KIND_WORD = { question: 'Ask', point: 'Raise', check: 'Check', idea: 'Idea' }
+const KIND_WORD = { question: 'Ask', point: 'Raise', check: 'Check', idea: 'Idea', answer: 'Answer' }
 const assistFile = (id) => path.join(dirOf(id), 'assist.json')
 export const assistOf = (id) => readJSON(assistFile(id), null) || { items: [], at: null, upTo: 0, error: null }
 const assisting = new Map() // id -> promise
 const assistLater = new Map() // id -> timer
+// Answers in AI Assist (a Beta Feature): on in Settings › About & Updates › Beta Features.
+export const answersOn = () => cfg.trials?.['assist-answers'] === true
+const ANSWERS_MOST = 2
+// A line that may ask something: a question mark, the words a question starts with ("so what's …",
+// "when does …"), or "I wonder", "do you know". Only these are numbered for the model to answer.
+const ASKS = /[?？¿]|^\W*(?:(?:so|and|but|okay|ok|um|uh|well|right|also|then|hey)\b\W*)*(?:what|when|where|which|who|whose|why|how|is|are|was|were|do|does|did|can|could|should|would|will|has|have|had)\b|\b(?:i wonder|wondering|any idea|do you know|does anyone know)\b/i
+// The past meetings the questions just asked may be about, as numbered excerpts for the model within
+// room characters (each its summary and your notes, or its transcript, cut to the lines with the
+// question's words when it's longer): likely's picks for each question that have at least two of its
+// words (or its one), the best three in all. { text, sources: [{ id, title, startedAt }] }.
+function pastFor(id, asked, room) {
+  const best = new Map() // meeting id -> { m, s, ws }
+  for (const l of asked) {
+    const ws = keyWords(l.text)
+    const need = Math.min(2, ws.length)
+    if (!need) continue
+    for (const x of likely(l.text, { not: id }).slice(0, 3)) {
+      if (x.s < need) break
+      const had = best.get(x.m.id)
+      if (!had || had.s < x.s) best.set(x.m.id, { m: x.m, s: x.s, ws: [...new Set([...(had?.ws || []), ...ws])] })
+    }
+  }
+  const picked = [...best.values()].sort((a, b) => b.s - a.s).slice(0, 3)
+  const parts = []
+  const sources = []
+  const each = Math.floor(room / Math.max(1, picked.length))
+  for (const { m, ws } of picked) {
+    const t = textOf(m)
+    const body = bodyOf(m, t)
+    if (!body) continue
+    const rows = body.split('\n')
+    const hit = rows.filter((r) => /^#/.test(r) || ws.some((w) => r.toLowerCase().includes(w)))
+    const cut = body.length <= each ? body : (hit.some((r) => !/^#/.test(r)) ? hit : rows).join('\n')
+    parts.push(`${headOf(m, sources.length + 1)}\n${cut.length > each ? `${cut.slice(0, each)}…` : cut}`)
+    sources.push({ id: m.id, title: m.title, startedAt: m.startedAt })
+  }
+  return { text: parts.join('\n\n'), sources }
+}
+// Where an answer is from, as the model said ("1": a past meeting it was given; "notes", "files",
+// "memory"; "general": what it knows itself), yours first. Its own knowledge when it named none it had.
+function sourcesOf(from, past, has) {
+  const said = new Set([].concat(from || []).map((x) => String(x).toLowerCase().replace(/[[\]\s"]/g, '')))
+  const out = past.filter((s, i) => said.has(String(i + 1))).map((s) => ({ kind: 'meeting', ...s }))
+  for (const k of ['notes', 'files', 'memory']) if (said.has(k) && has[k]) out.push({ kind: k })
+  if (said.has('general') || !out.length) out.push({ kind: 'general' })
+  return out
+}
+// An answer short enough to read at a glance: its first three sentences, without Markdown's marks.
+const short = (s) => clean(String(s || '').replace(/\*\*|__|`/g, '').replace(/^#+\s*/gm, '').split(/(?<=[.!?](?:\[\d+\])*)\s+/).slice(0, 3).join(' '), 600)
 // Called as each line comes in: ask once it's time, if it's on.
 function assistSoon(id) {
   let m
@@ -1993,6 +2115,9 @@ export function assistLevelChanged(id) {
   assistLater.delete(id)
   assistSoon(id)
 }
+// assist.json as it is now, with what a look found or what went wrong. What's there is read again
+// first, so a suggestion kept or an answer looked up while the model was asked isn't lost.
+const assistSave = (id, fn) => { const out = fn(assistOf(id)); writeFileAtomic(assistFile(id), JSON.stringify(out, null, 1)); return out }
 // now: Suggest now (whatever was said since). Resolves with assist.json as it is then.
 export function assist(id, { now = false, model } = {}) {
   if (assisting.has(id)) return assisting.get(id)
@@ -2014,14 +2139,25 @@ export function assist(id, { now = false, model } = {}) {
     // A model on this computer: the files and the latest lines within what its context holds, and
     // no examples to copy (it's held to a schema instead).
     const local = isLocal(use)
-    try { await roomy(use, 'suggestions while it records') } catch (e) { writeFileAtomic(assistFile(id), JSON.stringify({ ...a, at: new Date().toISOString(), error: e.message }, null, 1)); throw e }
+    try { await roomy(use, 'suggestions while it records') } catch (e) { assistSave(id, (x) => ({ ...x, at: new Date().toISOString(), error: e.message })); throw e }
     const size = local ? await budget(use, text, { answer: 1024 }) : null
     const { text: notes, shown } = notesFor(filled(readText(path.join(dirOf(id), 'notes.md')), m.sections), m.captures || [])
     const more = await extras(id, { ...m, captures: (m.captures || []).slice(-6) }, local ? Math.min(24_000, Math.floor(size / 4)) : 24_000, { shown })
-    const keep = local ? Math.max(1500, Math.min(14_000, size - more.length - notes.length - 4000)) : 14_000
+    // Answers, with AI Assist on for the meeting: the questions asked since the last look (the
+    // latest six), and the past meetings they may be about, which on a model on this computer come
+    // out of the transcript's room. (Suggest now with it off suggests, and answers nothing.)
+    const asked = answersOn() && m.assist ? fresh.filter((l) => ASKS.test(l.text)).slice(-6) : []
+    let past = { text: '', sources: [] }
+    try { if (asked.length) past = pastFor(id, asked, local ? Math.min(3000, Math.floor(size / 6)) : 9000) } catch { /* a meeting that can't be read: answered without, and the card says from what */ }
+    const keep = local ? Math.max(1500, Math.min(14_000, size - more.length - notes.length - past.text.length - 4000)) : 14_000
     const recent = text.length > keep ? `(earlier lines left out)\n${text.slice(-keep)}` : text
     const mem = memory.about(`${m.title}\n${people.join('\n')}\n${recent.slice(-4000)}`, 12)
-    const before = a.items.slice(-12).map((x) => `- ${x.text}${x.state === 'dismissed' ? ' (not useful)' : ''}`).join('\n')
+    const before = a.items.filter((x) => x.kind !== 'answer').slice(-12).map((x) => `- ${x.text}${x.state === 'dismissed' ? ' (not useful)' : ''}`).join('\n')
+    const answered = a.items.filter((x) => x.kind === 'answer').slice(-12).map((x) => `- ${x.q}`).join('\n')
+    // What an answer may say it's from: only what the model was given.
+    const has = { notes: !!notes, files: !!more, memory: !!mem }
+    const from = [...past.sources.map((s, i) => String(i + 1)), ...Object.keys(has).filter((k) => has[k]), 'general']
+    const fromSay = [past.sources.length && `${past.sources.map((s, i) => `"${i + 1}"`).join(' or ')} for a past meeting above`, has.notes && '"notes" for the user\'s notes', has.files && '"files" for the files, links and emails', has.memory && '"memory" for the background from earlier meetings', '"general" for your own knowledge'].filter(Boolean).join(', ')
     const ask = [
       `Meeting: ${m.title}`, people.length ? `Invited, besides You: ${people.join(', ')}` : '', m.event?.agenda ? `The invite says: ${m.event.agenda}` : '', me ? `"You" is ${me}, who you're helping.` : '"You" is the person you\'re helping.',
       `It's ${clock(secs)} in${end != null ? (end >= 0 ? `, with ${end} minutes left` : `, ${-end} minutes past its end`) : ''}.`,
@@ -2032,36 +2168,83 @@ export function assist(id, { now = false, model } = {}) {
       lv.most === 1 ? 'At most one suggestion, a sentence or two to read at a glance mid-conversation, and only when something clearly stands out. None is usually right.' : 'At most three suggestions, each a sentence or two to read at a glance mid-conversation. Fewer is better, and none is right when nothing stands out.',
       `Base each one on something specific: what was just said, the invite, a file or the notes, and say which in "why", briefly${local ? ' (the file or the time, and what it says)' : ' ("Resume: moved the fleet to electric vans at Northwind", "At 12:04 they said the launch slipped a month")'}. Never make up facts.`,
       'kind: "question" (to ask), "point" (to raise or say), "check" (a claim or number that doesn\'t add up, or worth checking), "idea".',
-      'Answer with one JSON object and nothing else: {"items": [{"kind": "question", "text": "...", "why": "..."}]}, or {"items": []}.',
+      ...(asked.length ? [
+        `\nQuestions asked since you last looked, numbered:\n${asked.map((l, i) => `Q${i + 1}. [${clock(l.t0)}] ${speaker(l)}: ${clean(l.text, 400)}`).join('\n')}`,
+        past.text ? `\nThe user's past meetings these may be about, each with a number (what they say may have changed since):\n${past.text}` : '',
+        answered ? `\nAnswered already (don't answer these again):\n${answered}` : '',
+        `\nAlso answer, in "answers", at most ${ANSWERS_MOST} of these questions: only ones with a general or factual answer (what something is or means, a fact, a date, a number, or what was said or agreed in the user's past meetings). Not a question put to someone about themselves, their views or their plans ("how are you?", "can you send that?", "what do you think?"), and not one answered in the meeting already. None is often right.`,
+        `For each: "line" (its Q number), "question" (the question alone, as a short sentence of its own), "answer" (one to three sentences), "from" (where the answer comes from: ${fromSay}), "current" (true only when it's a public fact that changes, such as a law coming into force, a price, a version or news, and you answered from your own knowledge).`,
+        'Answer from the past meetings, the notes, the files and the background first when they answer it, and from your own knowledge only for what they don\'t. Never make up what was said or agreed.',
+        'Answer with one JSON object and nothing else: {"items": [{"kind": "question", "text": "...", "why": "..."}], "answers": [{"line": 1, "question": "...", "answer": "...", "from": ["general"], "current": false}]}, with an empty list for either when there\'s nothing.',
+      ] : ['Answer with one JSON object and nothing else: {"items": [{"kind": "question", "text": "...", "why": "..."}]}, or {"items": []}.']),
     ].filter((x) => x !== '').join('\n')
+    const schema = asked.length ? { ...ASSIST_SCHEMA, properties: { ...ASSIST_SCHEMA.properties, answers: answersSchema(from) }, required: ['items', 'answers'] } : ASSIST_SCHEMA
+    let r
     try {
-      const r = await jsonReply(use, [{ role: 'user', text: `${ask}\n\nTranscript so far:\n${recent || '(nothing yet)'}` }], { system: 'You quietly help someone during a live meeting with a few sharp, specific suggestions. You are brief and never make things up.', feature: 'assist' }, { schema: ASSIST_SCHEMA, check: assistOk, schemaFirst: true })
-      const items = [].concat(r.value?.items || [])
-      const was = new Set(a.items.map((x) => x.text.toLowerCase()))
-      const add = items.filter((x) => x && typeof x.text === 'string' && x.text.trim() && !was.has(x.text.trim().toLowerCase())).slice(0, lv.most)
-        .map((x) => ({ id: crypto.randomBytes(4).toString('hex'), t: Math.round(secs), kind: KIND_WORD[x.kind] ? x.kind : 'idea', text: clean(x.text, 300), why: clean(x.why, 200), state: 'new', model: r.model }))
-      // An answer it can't read (not the JSON asked for, twice): said, so it never looks as if it
-      // read along and found nothing. It looks again with the next lines.
-      const error = r.value ? null : `${r.model} answered, but not in a form Assist can read. It tries again in a minute.`
-      const out = { items: [...a.items, ...add].slice(-60), at: new Date().toISOString(), upTo: said.length ? said[said.length - 1].t1 : 0, error, looks: (a.looks || 0) + 1 }
-      writeFileAtomic(assistFile(id), JSON.stringify(out, null, 1))
-      return out
+      r = await jsonReply(use, [{ role: 'user', text: `${ask}\n\nTranscript so far:\n${recent || '(nothing yet)'}` }], { system: `You quietly help someone during a live meeting with a few sharp, specific suggestions${asked.length ? ', and short answers to questions raised in it' : ''}. You are brief and never make things up.`, feature: 'assist' }, { schema, check: asked.length ? answersOk : assistOk, schemaFirst: true })
     } catch (e) {
-      const out = { ...a, at: new Date().toISOString(), error: e.message }
-      writeFileAtomic(assistFile(id), JSON.stringify(out, null, 1))
+      assistSave(id, (x) => ({ ...x, at: new Date().toISOString(), error: e.message }))
       throw e
     }
+    const items = [].concat(r.value?.items || [])
+    const was = new Set(a.items.map((x) => x.text.toLowerCase()))
+    const add = items.filter((x) => x && typeof x.text === 'string' && x.text.trim() && !was.has(x.text.trim().toLowerCase())).slice(0, lv.most)
+      .map((x) => ({ id: crypto.randomBytes(4).toString('hex'), t: Math.round(secs), kind: KIND_WORD[x.kind] && x.kind !== 'answer' ? x.kind : 'idea', text: clean(x.text, 300), why: clean(x.why, 200), state: 'new', model: r.model }))
+    // The answers: each to a question it was given, not one answered before (in other words too),
+    // at most ANSWERS_MOST. One from what it knows alone, of facts that change, goes to the web next,
+    // when there's a route that searches; without one, the card says how to add one.
+    const answers = []
+    const done = a.items.filter((x) => x.kind === 'answer').map((x) => x.q)
+    const web = searchVia()
+    for (const x of asked.length ? [].concat(r.value?.answers || []) : []) {
+      const l = asked[Number(x?.line) - 1]
+      const q = clean(x?.question, 300) || (l && clean(l.text, 300))
+      const say = short(x?.answer)
+      if (!l || !q || !say || [...done, ...answers.map((y) => y.q)].some((y) => sameThing(y, q))) continue
+      const sources = sourcesOf(x.from, past.sources, has)
+      const general = sources.every((s) => s.kind === 'general')
+      answers.push({ id: crypto.randomBytes(4).toString('hex'), t: Math.round(l.t0), kind: 'answer', q, asked: { who: speaker(l), text: clean(l.text, 300) }, text: say, why: '', sources, current: x.current === true, web: x.current === true && general ? (web ? { state: 'looking', via: web } : { state: 'off' }) : null, state: 'new', model: r.model })
+      if (answers.length >= ANSWERS_MOST) break
+    }
+    // An answer it can't read (not the JSON asked for, twice): said, so it never looks as if it
+    // read along and found nothing. It looks again with the next lines.
+    const error = r.value ? null : `${r.model} answered, but not in a form Assist can read. It tries again in a minute.`
+    const out = assistSave(id, (x) => ({ ...x, items: [...x.items, ...add, ...answers].slice(-60), at: new Date().toISOString(), upTo: said.length ? said[said.length - 1].t1 : 0, error, looks: (x.looks || 0) + 1 }))
+    for (const x of answers) if (x.web?.state === 'looking') lookUp(id, x)
+    return out
   })().finally(() => assisting.delete(id))
   assisting.set(id, p)
   return p
 }
-// A suggestion kept (it goes in your notes, "- [12:04] Ask: ...") or waved away.
+// An answer looked up on the web (consult.js search): the question alone goes. The web's answer and
+// its links take the place of the model's (kept as general); one that fails says why on the card.
+const lookingUp = new Set() // `${id}:${aid}`
+function lookUp(id, x) {
+  const key = `${id}:${x.id}`
+  if (lookingUp.has(key)) return
+  lookingUp.add(key)
+  const put = (fn) => { try { assistSave(id, (a) => ({ ...a, items: a.items.map((y) => (y.id === x.id ? fn(y) : y)) })) } catch { /* the meeting is gone */ } }
+  searchWeb(x.q)
+    .then((r) => put((y) => ({ ...y, general: y.text, text: short(r.text) || y.text, sources: [...(y.sources || []).filter((s) => s.kind !== 'general'), { kind: 'web', via: r.via, model: r.model, links: r.links }], web: { state: 'done', via: r.via } })),
+      (e) => put((y) => ({ ...y, web: { state: 'failed', via: y.web?.via || null, error: clean(e.message, 300) } })))
+    .finally(() => lookingUp.delete(key))
+}
+// An answer as it goes in your notes: the question, the answer and where it's from.
+const FROM_NOTE = { notes: 'your notes', files: 'this meeting\'s files', memory: 'meeting memory' }
+function answerNote(x) {
+  const from = (x.sources || []).map((s) => (s.kind === 'meeting' ? `"${s.title}", ${new Date(s.startedAt).toDateString()}`
+    : s.kind === 'web' ? `the web, via ${s.via}${s.links?.length ? `: ${s.links.slice(0, 3).map((l) => l.url).join(', ')}` : ''}`
+      : s.kind === 'general' ? `${x.model ? `${String(x.model).replace(/^\w+:/, '')}'s` : 'the model\'s'} own knowledge, which may be out of date` : FROM_NOTE[s.kind])).filter(Boolean)
+  return `Answer: ${x.q} ${x.text}${from.length ? ` (From ${from.join('; ')}.)` : ''}`
+}
+// A suggestion kept (it goes in your notes, "- [12:04] Ask: ...") or waved away. A kept answer goes
+// in at the time it was asked: "- [12:04] Answer: the question, the answer (From …)".
 export function markAssist(id, aid, state) {
   const a = assistOf(id)
   const x = a.items.find((i) => i.id === String(aid))
   if (!x) throw new Error('No such suggestion')
   if (!['kept', 'dismissed', 'new'].includes(state)) throw new Error('Keep it or dismiss it')
-  if (state === 'kept' && x.state !== 'kept') quickNote(id, `${KIND_WORD[x.kind] || 'Idea'}: ${x.text}`)
+  if (state === 'kept' && x.state !== 'kept') quickNote(id, x.kind === 'answer' ? answerNote(x) : `${KIND_WORD[x.kind] || 'Idea'}: ${x.text}`, x.kind === 'answer' ? x.t : null)
   x.state = state
   writeFileAtomic(assistFile(id), JSON.stringify(a, null, 1))
   return a
@@ -2293,11 +2476,32 @@ function stretch(q) {
   if (/\bthis month\b/.test(s)) return [new Date(day.getFullYear(), day.getMonth(), 1), null]
   return null
 }
-const SMALL = new Set('a an and are about any did do does for from had has have how i in is it me my of on or our that the their them they this to was we were what when where which who why will with you your all last week weeks today yesterday month meeting meetings said say'.split(' '))
+// Words that don't tell one meeting from another, in a question typed or said.
+const SMALL = new Set(('a an and are about any did do does for from had has have how i in is it me my of on or our that the their them they this to was we were what when where which who why will with you your all last week weeks today yesterday month meeting meetings said say'
+  + ' so okay just like know think can could should would there then than been being into also very really going get got again yeah yes not but out some something anything thing things time').split(' '))
+// The words of a question that tell meetings apart, up to eight ("Northwind's" is "northwind").
+const keyWords = (q) => [...new Set((String(q || '').toLowerCase().match(/[\p{L}\p{N}']+/gu) || []).map((w) => w.replace(/n't$/, '').replace(/'\p{L}*$/u, '')))].filter((w) => w.length > 2 && !SMALL.has(w)).slice(0, 8)
+
+// The meetings a question is most likely about, archived ones left out (and not: the meeting it's
+// asked in): those in the stretch it names ("this week"), with the most of its words, then the
+// newest. [{ m, s }], s: how many of its words a meeting has, and one more when its name has one.
+function likely(q, { not = null } = {}) {
+  let pool = list().filter((m) => !m.archived && m.id !== not)
+  const span = stretch(q)
+  if (span) pool = pool.filter((m) => { const t = Date.parse(m.startedAt); return t >= span[0].getTime() && (!span[1] || t < span[1].getTime()) })
+  const ws = keyWords(q)
+  const score = (m) => { const t = textOf(m); const all = [m.title, (m.event?.attendees || []).join(' '), t.summary, t.notes, t.lines.map((l) => l.text).join(' ')].join('\n').toLowerCase(); return ws.filter((w) => all.includes(w)).length + (ws.some((w) => m.title.toLowerCase().includes(w)) ? 1 : 0) }
+  return pool.map((m, i) => ({ m, s: score(m), i })).sort((a, b) => b.s - a.s || a.i - b.i)
+}
+// A meeting for a model: [n], its name, day, length and people; then its summary and your notes, or
+// your notes and its transcript when it has no summary.
+const headOf = (m, n) => `[${n}] "${m.title}", ${new Date(m.startedAt).toDateString()}${m.seconds ? `, ${clock(m.seconds)}` : ''}${m.event?.attendees?.length ? `, with ${m.event.attendees.slice(0, 8).join(', ')}` : ''}`
+const bodyOf = (m, t) => (t.summary
+  ? `${t.summary}${t.notes ? `\n\nMy notes:\n${t.notes}` : ''}`
+  : [t.notes && `My notes:\n${t.notes}`, t.lines.length && `Transcript ("You" is me, "Them" the others):\n${transcriptText(m.id)}`].filter(Boolean).join('\n\n'))
 
 // A question about several meetings: the ones picked (ids), or else the ones it's most likely
-// about (archived ones left out): those in the stretch it names ("this week"), with the most of its
-// words, then the newest.
+// about (likely).
 // Each goes in as its summary and your notes, or its transcript when it has no summary. The
 // answer cites them as [1], [2], and sources says which meeting each number is.
 export async function askAll(question, { ids, model } = {}) {
@@ -2306,14 +2510,7 @@ export async function askAll(question, { ids, model } = {}) {
   const use = model || cfg.meetings?.model || await helpers.pickModel()
   if (!use) throw noModel()
   let pool = list()
-  if (ids?.length) { const want = new Set(ids.map(String)); pool = pool.filter((m) => want.has(m.id)) } else {
-    pool = pool.filter((m) => !m.archived)
-    const span = stretch(q)
-    if (span) pool = pool.filter((m) => { const t = Date.parse(m.startedAt); return t >= span[0].getTime() && (!span[1] || t < span[1].getTime()) })
-    const ws = termsOf(q).filter((w) => !SMALL.has(w) && w.length > 2)
-    const score = (m) => { const t = textOf(m); const all = [m.title, (m.event?.attendees || []).join(' '), t.summary, t.notes, t.lines.map((l) => l.text).join(' ')].join('\n').toLowerCase(); return ws.filter((w) => all.includes(w)).length + (ws.some((w) => m.title.toLowerCase().includes(w)) ? 1 : 0) }
-    pool = pool.map((m, i) => ({ m, s: score(m), i })).sort((a, b) => b.s - a.s || a.i - b.i).map((x) => x.m)
-  }
+  if (ids?.length) { const want = new Set(ids.map(String)); pool = pool.filter((m) => want.has(m.id)) } else pool = likely(q).map((x) => x.m)
   if (!pool.length) throw new Error(ids?.length ? 'Those meetings are gone' : 'No meetings from then')
   await roomy(use, 'questions about meetings')
   const room = (await budget(use)) - (isLocal(use) ? q.length + 1500 : 0)
@@ -2323,12 +2520,10 @@ export async function askAll(question, { ids, model } = {}) {
   for (const m of pool.slice(0, 20)) {
     const t = textOf(m)
     if (!t.summary && !t.notes && !t.lines.length) continue
-    const head = `[${sources.length + 1}] "${m.title}", ${new Date(m.startedAt).toDateString()}${m.seconds ? `, ${clock(m.seconds)}` : ''}${m.event?.attendees?.length ? `, with ${m.event.attendees.slice(0, 8).join(', ')}` : ''}`
+    const head = headOf(m, sources.length + 1)
     const left = room - used - head.length
     if (left < 400 && parts.length) break
-    const body = t.summary
-      ? `${t.summary}${t.notes ? `\n\nMy notes:\n${t.notes}` : ''}`
-      : [t.notes && `My notes:\n${t.notes}`, t.lines.length && `Transcript ("You" is me, "Them" the others):\n${transcriptText(m.id)}`].filter(Boolean).join('\n\n')
+    const body = bodyOf(m, t)
     const piece = `${head}\n${body.slice(0, Math.max(400, Math.min(left, 40_000)))}`
     parts.push(piece)
     used += piece.length
