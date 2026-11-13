@@ -1764,6 +1764,9 @@ app.get('/api/meetings', wrap(() => {
   return { meetings: list.map(({ captures, links, ...m }) => ({ ...m, pictures: captures?.length || 0, files: links?.length || 0 })), folder: meetings.folder(), kinds: Object.entries(meetings.KINDS).map(([id, k]) => ({ id, label: k.label })), ...(auto && !auto.said ? { insightsOn: { at: auto.at, meetings: auto.meetings } } : {}) }
 }))
 app.post('/api/meetings', wrap(async (req) => { prompt = null; const m = await meetings.start({ ...(req.body || {}), callApps: calls.now().calls.map((c) => c.app) }); counts.add('meetings.recorded'); return m }))
+// Several meetings as one (meetings.js combine): a combined meeting with an overview across them;
+// they stay as they are.
+app.post('/api/meetings/combine', wrap((req) => meetings.combine([].concat(req.body?.ids || []).map(String).slice(0, 100), { title: req.body?.title })))
 // Several at once, from the list: delete, save as notes, write the summary again, archive, put in a
 // folder, or the action items of all of them to the chief in one go. A meeting still recording is
 // left alone.
@@ -1785,6 +1788,10 @@ app.post('/api/meetings/bulk', wrap(async (req) => {
     const text = ['From my meetings, these action items are on your task list:', ...[...by.values()].flatMap(({ m, tasks }) => [`"${m.title}" (${new Date(m.startedAt).toDateString()}):`, ...tasks.map((t) => `- ${t.id}: ${t.title}`)]), '', 'Take the ones that are mine to hand off: start or brief the right agent for each, and keep the tasks current with `node bin/bridge task`. For the ones that belong to other people, draft the follow-up for me to send; don\'t message anyone yourself.'].join('\n')
     return { ...out, added: added.length, ...(await tellChief(text)) }
   }
+  // A combined meeting goes before the meetings in it: deleting those first would separate it, and
+  // it would then be said not to be there.
+  const whole = (id) => { try { return meetings.get(id).parts ? 1 : 0 } catch { return 0 } }
+  if (action === 'delete') ids.sort((a, b) => whole(b) - whole(a))
   for (const id of ids) {
     try {
       if (action === 'delete') { if (busy(id)) throw new Error('Still recording'); meetings.remove(id) }
@@ -1856,7 +1863,7 @@ app.get('/api/meetings/memory', wrap(() => {
   // A series: the same name three times or more, as Meeting Insights has it.
   const key = (m) => meetWork.seriesOf(m.title) || meetWork.seriesOf(m.event?.title)
   const n = new Map()
-  for (const m of all) { const k = key(m); if (k) n.set(k, (n.get(k) || 0) + 1) }
+  for (const m of all.filter((x) => !x.parts)) { const k = key(m); if (k) n.set(k, (n.get(k) || 0) + 1) }
   const seen = all.filter((m) => ids.has(m.id)).map((m) => [m.id, { title: m.title, startedAt: m.startedAt, series: n.get(key(m)) >= 3 ? key(m) : null }])
   return { terms, meetings: Object.fromEntries(seen) }
 }))
@@ -1998,6 +2005,9 @@ app.post('/api/meetings/:id/stop', wrap((req) => meetings.stop(req.params.id)))
 // Resume recording: a meeting that ended records again, from where it had got to (meetings.js
 // reopen). As a new one does, it answers a call's "Take notes?" and notes the calls on now.
 app.post('/api/meetings/:id/reopen', wrap((req) => { const m = meetings.reopen(req.params.id, { callApps: calls.now().calls.map((c) => c.app) }); prompt = null; return m }))
+// A combined meeting's meetings: one more, or one taken out (the last but one separates it).
+app.post('/api/meetings/:id/parts', wrap((req) => meetings.addPart(req.params.id, String(req.body?.id || ''))))
+app.delete('/api/meetings/:id/parts/:pid', wrap((req) => meetings.removePart(req.params.id, req.params.pid)))
 app.patch('/api/meetings/:id', wrap((req) => {
   if (req.body?.archived != null) meetings.archive(req.params.id, !!req.body.archived)
   if (req.body?.folder !== undefined) meetings.setFolder(req.params.id, req.body.folder)

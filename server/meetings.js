@@ -190,6 +190,9 @@ function bySection(said, sections = []) {
 // where each section starts. marks: more lines for a model at their times ({ t, text }), such as a
 // note you wrote then or the screen changing, so they're read with what was being said.
 export function transcriptText(id, marks = []) {
+  // A combined meeting: its meetings' transcripts, one after another, each under its name.
+  const whole = meta(id).parts ? partsOf(meta(id)) : null
+  if (whole) return whole.map((p, i) => [`# ${partHead(p, i, whole.length)}`, transcriptText(p.id)].filter(Boolean).join('\n\n')).join('\n\n').trim()
   const said = transcript(id).filter((x) => x.text)
   const all = marks.length ? [...said, ...marks.map((x) => ({ t0: x.t, t1: x.t, mark: x.text }))].sort((a, b) => a.t0 - b.t0) : said
   const out = []
@@ -631,6 +634,7 @@ export async function stop(id) {
   // More was recorded since its summary was written (reopen): it says so until it's written again.
   saveMeta({ ...m, status: 'transcribing', endedAt: new Date().toISOString(), seconds: Math.round(seconds || 0), ...(m.resumedAt && fs.existsSync(path.join(dirOf(id), 'summary.md')) ? { summaryStale: 'recorded' } : {}) })
   for (const s of Object.values(l?.sources || {})) { s.finder.flush(); (await s.out).end().catch(() => {}) }
+  if (m.partOf) recount(m.partOf)
   settle(id)
   return meta(id)
 }
@@ -643,6 +647,7 @@ export async function stop(id) {
 // transcribed again: those lines would land among the new ones.
 export function reopen(id, { call = true, callApps = [] } = {}) {
   const m = meta(id)
+  if (m.parts) throw new Error('A combined meeting has no recording of its own. Resume one of its meetings.')
   if (m.status === 'recording' || m.status === 'paused') throw new Error('It\'s recording already')
   if (decoding.has(id) || (m.status === 'transcribing' && m.again && !m.again.done)) throw new Error('It\'s being transcribed again. Resume recording once that\'s done.')
   if (m.status === 'transcribing' || waiting(id)) throw new Error('Its last words are still being transcribed. Resume recording in a moment.')
@@ -858,7 +863,10 @@ export function get(id) {
   // me: your name (Settings › General), for your lines.
   // In a room: how many voices, and telling them apart while it's going (the model downloading).
   const room = voices.of(id)
-  return { ...m, voices: room ? { src: room.src || 'you', speakers: room.speakers, names: room.names || {}, side: room.side || null, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, callAccess: callAccess(id), partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20).map(stale), assistError: help.error || null, assistAt: help.at || null, assisting: assisting.has(id), assistLevel: assistLevel() }
+  // A combined meeting's meetings, in order (partList); and for one of them, what it's part of.
+  const whole = m.parts ? { partList: partsOf(m).map((p) => ({ id: p.id, title: p.title, startedAt: p.startedAt, seconds: p.seconds || 0, status: p.status, hasSummary: fs.existsSync(path.join(DIR, p.id, 'summary.md')) })) } : {}
+  const inOne = combinedOf(m)
+  return { ...m, ...whole, combined: inOne ? { id: inOne.id, title: inOne.title } : null, voices: room ? { src: room.src || 'you', speakers: room.speakers, names: room.names || {}, side: room.side || null, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, callAccess: callAccess(id), partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20).map(stale), assistError: help.error || null, assistAt: help.at || null, assisting: assisting.has(id), assistLevel: assistLevel() }
 }
 
 export function setKind(id, kind) { return patchMeta(id, { kind: KINDS[kind] ? kind : 'general', kindPicked: true }) }
@@ -866,11 +874,13 @@ export function setKind(id, kind) { return patchMeta(id, { kind: KINDS[kind] ? k
 // notes move to the folder for the new date.
 export function setStart(id, when) {
   const m = meta(id)
+  if (m.parts) throw new Error('A combined meeting is when its meetings were. Change theirs.')
   const t = Date.parse(when)
   if (!Number.isFinite(t) || t < Date.parse('2000-01-01') || t > Date.now() + 366 * 86400e3) throw new Error('That isn\'t a date and time')
   const shift = t - Date.parse(m.startedAt)
   const p = patchMeta(id, { startedAt: new Date(t).toISOString(), ...(m.endedAt ? { endedAt: new Date(Date.parse(m.endedAt) + shift).toISOString() } : {}) })
   resave(id, 500)
+  if (m.partOf) recount(m.partOf)
   return p
 }
 // Who was there (or invited): names, as you'd write them. Who said what is worked out again with
@@ -1001,6 +1011,71 @@ export function archive(id, on = true) {
   const m = meta(id)
   if (on && (m.status === 'recording' || m.status === 'paused')) throw new Error('Still recording')
   return patchMeta(id, { archived: !!on, archivedAt: on ? new Date().toISOString() : null })
+}
+
+// ---------- Combined meetings ----------
+// Several meetings as one (a day's sessions, a workshop over a week): a meeting of its own with no
+// recording, whose meetings (meeting.json's parts: their ids, in the order they were recorded) stay
+// as they are, each saying which one it's part of (partOf). When it was and how long are theirs,
+// added up. Its summary is an overview across them, from their summaries and notes (summarize);
+// when one of theirs is written again, or meetings come and go, it says it's out of date
+// (summaryStale) until you have it written again. A meeting is in one combined meeting at most, and
+// a combined meeting isn't part of another.
+const partsOf = (m) => (m.parts || []).map((id) => readJSON(path.join(DIR, id, 'meeting.json'))).filter((p) => p && !p.parts).sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt)))
+const partHead = (p, i, n) => `Meeting ${i + 1} of ${n}: "${p.title}", ${new Date(p.startedAt).toDateString()} ${new Date(p.startedAt).toTimeString().slice(0, 5)}${p.seconds ? `, ${clock(p.seconds)} long` : ''}`
+// The combined meeting a meeting is part of, while that still has it.
+const combinedOf = (m) => { const c = m.partOf ? readJSON(path.join(DIR, m.partOf, 'meeting.json')) : null; return c?.parts?.includes(m.id) ? c : null }
+const spanOf = (ps) => ({ parts: ps.map((p) => p.id), startedAt: ps[0].startedAt, endedAt: ps.map((p) => p.endedAt || p.startedAt).sort().at(-1), seconds: ps.reduce((n, p) => n + (p.seconds || 0), 0) })
+// Its meetings as they are now: one deleted is out, and with fewer than two left it's separated.
+// stale: its summary was written from what they were before.
+function recount(cid, { stale = false } = {}) {
+  const c = readJSON(path.join(DIR, cid, 'meeting.json'))
+  if (!c?.parts) return null
+  const ps = partsOf(c)
+  if (ps.length < 2) { remove(cid); return null }
+  const m = saveMeta({ ...c, ...spanOf(ps), ...(stale && fs.existsSync(path.join(DIR, cid, 'summary.md')) ? { summaryStale: 'parts' } : {}) })
+  resave(cid, 2000)
+  return m
+}
+function canJoin(p) {
+  if (p.parts) throw new Error(`"${p.title}" is a combined meeting already. A combined meeting can't be part of another: add meetings to it on its page.`)
+  const c = combinedOf(p)
+  if (c) throw new Error(`"${p.title}" is part of "${c.title}" already. A meeting can be in one combined meeting: take it out of that one first.`)
+  if (p.status === 'recording' || p.status === 'paused') throw new Error(`"${p.title}" is still recording`)
+}
+// title: its name; else the one they share, or the first one's.
+export function combine(ids, { title } = {}) {
+  const ps = [...new Set([].concat(ids || []).map(String))].map((id) => meta(id)).sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt)))
+  if (ps.length < 2) throw new Error('Pick two or more meetings to combine')
+  ps.forEach(canJoin)
+  const id = `${String(ps[0].startedAt).slice(0, 10)}-${crypto.randomBytes(3).toString('hex')}`
+  const same = (f) => (ps.every((p) => (p[f] || null) === (ps[0][f] || null)) ? ps[0][f] || null : null)
+  saveMeta({ id, title: clean(title, 200) || ps[0].title, event: null, links: [], status: 'done', kind: 'general', folder: same('folder'), combinedAt: new Date().toISOString(), ...spanOf(ps) })
+  for (const p of ps) patchMeta(p.id, { partOf: id })
+  // Its overview, written now unless summaries wait until you ask (Settings › Meetings).
+  if (cfg.meetings?.autoSummary !== false) summarize(id).catch(() => {})
+  else resave(id)
+  return get(id)
+}
+export function addPart(id, pid) {
+  const c = meta(id)
+  if (!c.parts) throw new Error('That isn\'t a combined meeting')
+  const p = meta(String(pid || ''))
+  if (c.parts.includes(p.id)) return get(id)
+  canJoin(p)
+  patchMeta(p.id, { partOf: id })
+  saveMeta({ ...c, parts: [...c.parts, p.id] })
+  recount(id, { stale: true })
+  return get(id)
+}
+// One taken out stays as it is, on its own. With one left, the combined meeting is separated
+// ({ separated: true }).
+export function removePart(id, pid) {
+  const c = meta(id)
+  if (!c.parts?.includes(String(pid))) throw new Error('That meeting isn\'t part of this one')
+  try { patchMeta(String(pid), { partOf: null }) } catch { /* gone */ }
+  saveMeta({ ...c, parts: c.parts.filter((x) => x !== String(pid)) })
+  return recount(id, { stale: true }) ? get(id) : { separated: true }
 }
 
 // ---------- Who said it ----------
@@ -1320,7 +1395,16 @@ export function replaceWords(id, find, to, { remember = false } = {}) {
   if (remember) for (const x of list()) if (x.id !== id && x.saved && wordRe(from).test(readText(path.join(DIR, x.id, 'transcript.jsonl')))) resave(x.id, 3000)
   return { changed, remembered: !!remember }
 }
-export function remove(id) { meta(id); unlisten(id); live.delete(id); texts.delete(id); fs.rmSync(dirOf(id), { recursive: true, force: true }); return { ok: true } }
+// A combined meeting goes alone (Separate): its meetings stay as they are, on their own again. One
+// that's part of a combined meeting leaves it.
+export function remove(id) {
+  const m = meta(id)
+  unlisten(id); live.delete(id); texts.delete(id)
+  fs.rmSync(dirOf(id), { recursive: true, force: true })
+  for (const p of partsOf(m)) if (p.partOf === id) saveMeta({ ...p, partOf: null })
+  if (m.partOf) recount(m.partOf, { stale: true })
+  return { ok: true }
+}
 
 // Try again: the stretches that failed (pending/), with the engine you have now.
 export function retry(id) {
@@ -1921,7 +2005,9 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     const m = meta(id)
     const use = model || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
     if (!use) throw noModel()
-    const k = KINDS[kind || m.kind || 'general'] || KINDS.general
+    // A combined meeting: an overview across its meetings, from their notes rather than a transcript.
+    const whole = m.parts ? partsOf(m) : null
+    const k = whole ? { ask: 'Summarize these meetings as one.' } : KINDS[kind || m.kind || 'general'] || KINDS.general
     const lang = SUMMARY_LANGS[language ?? m.summaryLanguage ?? 'auto'] || null
     patchMeta(id, { summarizing: true, summaryError: null, summaryRetryAt: null, kind: kind || m.kind || 'general', ...(model ? { summaryModelPick: model } : {}), ...(language ? { summaryLanguage: language } : {}), ...(again ? {} : { summaryTries: 0 }) })
     // Who said what on the call, worked out once before the first summary (Settings › Meetings can
@@ -1938,7 +2024,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     // screen changing, so it's read with what was said and shown then.
     const mine = filled(readText(path.join(dirOf(id), 'notes.md')), m.sections)
     const { text: notes, shown } = notesFor(mine, caps)
-    const text = transcriptText(id, marksFor(mine, caps))
+    const text = whole ? wholeText(whole) : transcriptText(id, marksFor(mine, caps))
     if (!text && !notes && !caps.some((c) => c.text)) throw new Error('Nothing was transcribed yet')
     const parts0 = (m.sections || []).length > 1 ? m.sections : null
     const named = transcript(id).some((l) => l.name)
@@ -1955,8 +2041,9 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
       'Last, add "## From your notes": one bullet for each of their points you expanded, in their words, then in a few words what you added and where it came from (the transcript at a time, a slide, a file or the invite).',
     ].join('\n') : ''
     const split = parts0 ? `\nThe person recording split the meeting into sections, each starting with a "## <name> (from m:ss)" heading in the transcript: ${parts0.map((x) => `"${x.title}"`).join(', ')}. Under ## Notes, give each section its own "### <name>" heading, in that order, with its points under it. Summary, Decisions and Action items are for the whole meeting; say which section one came from when that helps.` : ''
+    const together = whole ? `\nThis is a combined meeting: ${whole.length} meetings recorded separately, given below in order, each as its own notes and the user's notes on it (or its transcript, when it has no notes yet). Write one set of notes across all of them: what they came to together, not each one's notes again. Say which meeting a decision or an action item is from when that helps, and where a later meeting changed what an earlier one decided, say what stands now.` : ''
     const whoSaid = named ? '\nSome Them lines carry a name instead of "Them": who said it, named by the user or worked out from the meeting. Use those names for who said or agreed to what.' : ''
-    const head = (files) => [about, mem ? `\n${mem}` : '', '', k.ask, '', summaryRules(local), split, whoSaid, lang ? `\nWrite the notes in ${lang}.` : '', cfg.meetings?.instructions ? `\nAlso: ${cfg.meetings.instructions}` : '', backbone, notes ? `\nThe user's own notes:\n${notes}` : '', files ? `\n${files}` : ''].join('\n')
+    const head = (files) => [about, mem ? `\n${mem}` : '', '', k.ask, '', summaryRules(local), split, together, whoSaid, lang ? `\nWrite the notes in ${lang}.` : '', cfg.meetings?.instructions ? `\nAlso: ${cfg.meetings.instructions}` : '', backbone, notes ? `\nThe user's own notes:\n${notes}` : '', files ? `\n${files}` : ''].join('\n')
     // What's left for the transcript once the instructions, your notes and the files are in: on a
     // model on this computer, the files give way first when there isn't room for both.
     let files = more
@@ -1968,7 +2055,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     const t0 = Date.now()
     if (text.length > room) {
       // Long meeting: the main points of each part, in order, then the notes from those.
-      const partAsk = (i, n) => `${about}\n\nThis is part ${i + 1} of ${n} of a meeting transcript. List its key points, decisions, action items (who and what) and open questions as short bullets. Only what is said.${parts0 ? ' Keep its section headings (## ...), with the points from each under it.' : ''}${mem ? `\n\n${mem}` : ''}\n\n`
+      const partAsk = (i, n) => `${about}\n\nThis is part ${i + 1} of ${n} of ${whole ? 'the notes of several meetings combined into one' : 'a meeting transcript'}. List its key points, decisions, action items (who and what) and open questions as short bullets. Only what is said.${parts0 ? ' Keep its section headings (## ...), with the points from each under it.' : ''}${mem ? `\n\n${mem}` : ''}\n\n`
       let got = []
       await inPieces(text, size - partAsk(99, 99).length, async (part, i, n) => {
         await progress(id, used, i + 1, n + 1, `${partAsk(i, n)}${part}`)
@@ -1989,7 +2076,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
       }
       body = `(The transcript was long, so here are the key points of each part, in order.)\n\n${got.map((g, i) => `### Part ${i + 1}\n${g}`).join('\n\n')}`
     }
-    const prompt = `${head(files)}\n\nTranscript:\n${body}`
+    const prompt = `${head(files)}\n\n${whole ? 'The meetings' : 'Transcript'}:\n${body}`
     await progress(id, used, parts > 1 ? parts + 1 : 1, parts > 1 ? parts + 1 : 1, prompt)
     const r = await replyAny(used, [{ role: 'user', text: prompt }], { system: 'You take accurate, useful meeting notes.' })
     let out = String(r.text || '').trim()
@@ -2010,6 +2097,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
       pictures: caps.filter((c) => c.kind === 'paste' && (c.text || c.note)).length,
       files: (m.links || []).length,
       invite: !!(ev.attendees?.length || ev.agenda),
+      ...(whole ? { parts: whole.length } : {}),
     }
     // Said under the notes: another model stepped in; a model on this computer read it in parts
     // (its context is short); or took minutes, when a smaller one would be quicker.
@@ -2022,6 +2110,9 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     }
     patchMeta(id, { summarizing: false, summaryProgress: null, summarizedAt: new Date().toISOString(), summaryModel: r.model, summaryNote: said.filter(Boolean).join(' ') || null, summaryTries: 0, summaryRetryAt: null, summaryFrom: from, summaryStale: null })
     resave(id)
+    // The combined meeting it's part of was written from its summary before this one.
+    const inOne = meta(id).partOf
+    if (inOne) recount(inOne, { stale: true })
     return { summary: out, model: r.model, parts }
   })().catch((e) => { try { patchMeta(id, { summarizing: false, summaryProgress: null, summaryError: e.message, summaryTried: e.tried || null }); tryLater(id, e) } catch { /* gone */ } throw e }).finally(() => summarizing.delete(id))
   summarizing.set(id, p)
@@ -2532,7 +2623,8 @@ const keyWords = (q) => [...new Set((String(q || '').toLowerCase().match(/[\p{L}
 // asked in): those in the stretch it names ("this week"), with the most of its words, then the
 // newest. [{ m, s }], s: how many of its words a meeting has, and one more when its name has one.
 function likely(q, { not = null } = {}) {
-  let pool = list().filter((m) => !m.archived && m.id !== not)
+  // Not a combined meeting: its meetings are there themselves.
+  let pool = list().filter((m) => !m.archived && !m.parts && m.id !== not)
   const span = stretch(q)
   if (span) pool = pool.filter((m) => { const t = Date.parse(m.startedAt); return t >= span[0].getTime() && (!span[1] || t < span[1].getTime()) })
   const ws = keyWords(q)
@@ -2545,6 +2637,8 @@ const headOf = (m, n) => `[${n}] "${m.title}", ${new Date(m.startedAt).toDateStr
 const bodyOf = (m, t) => (t.summary
   ? `${t.summary}${t.notes ? `\n\nMy notes:\n${t.notes}` : ''}`
   : [t.notes && `My notes:\n${t.notes}`, t.lines.length && `Transcript ("You" is me, "Them" the others):\n${transcriptText(m.id)}`].filter(Boolean).join('\n\n'))
+// A combined meeting for a model: each of its meetings in order, the same way.
+const wholeText = (ps) => ps.map((p, i) => { const body = bodyOf(p, textOf(p)); return body ? `# ${partHead(p, i, ps.length)}\n\n${body}` : '' }).filter(Boolean).join('\n\n')
 
 // A question about several meetings: the ones picked (ids), or else the ones it's most likely
 // about (likely).
@@ -2713,6 +2807,8 @@ async function pruneCopies() {
 
 // Where a meeting's notes go with Settings as they are.
 export function target(m, o = saving()) {
+  // A combined meeting has no transcript of its own: its note only.
+  if (m.parts) return { note: o.what === 'transcript' ? null : path.join(o.folder, fill(o.noteSub, m, { dir: true }), `${fill(o.noteName, m)}.md`), transcript: null }
   const note = o.what === 'transcript' ? null : path.join(o.folder, fill(o.noteSub, m, { dir: true }), `${fill(o.noteName, m)}.md`)
   const tr = o.what === 'both' || o.what === 'transcript' ? path.join(o.transcriptFolder, fill(o.transcriptSub, m, { dir: true }), `${fill(o.transcriptName, m)}.md`) : null
   return { note, transcript: tr === note ? null : tr }
@@ -2756,6 +2852,7 @@ async function writeNotes(id, { auto = false } = {}) {
   const m = meta(id)
   const o = saving()
   const { note, transcript: tfile } = target(m, o)
+  if (!note && !tfile) throw new Error('A combined meeting has no transcript of its own, and only transcripts are saved (Settings › Meetings). Its meetings are saved one by one.')
   const at = new Date(m.startedAt)
   const day = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
   const vault = await vaultOf(path.dirname(note || tfile))
@@ -2780,8 +2877,10 @@ async function writeNotes(id, { auto = false } = {}) {
   const screen = shots.length ? `## From the screen\n\n${shots.map((c) => `![${clock(c.t)}${c.note ? ` ${c.note.replace(/[[\]]/g, '')}` : ''}](attachments/${path.basename(c.file)})${c.note ? `\n${c.note}` : ''}`).join('\n\n')}` : ''
   const linkLine = (l) => (l.kind === 'url' ? `- [${l.name.replace(/[[\]]/g, '')}](${l.url})` : l.kind === 'mail' ? `- Email: ${l.name}${l.mail.from ? `, from ${l.mail.from}` : ''}${l.mail.mid ? ` ([open in Mail](message://${encodeURIComponent(`<${l.mail.mid.replace(/^<|>$/g, '')}>`)}))` : ''}` : `- [${l.name.replace(/[[\]]/g, '')}](<file://${l.path}>)`)
   const linked = (m.links || []).length ? `## Files and links\n\n${m.links.map(linkLine).join('\n')}` : ''
+  // A combined meeting: the meetings in it, each with the note it's saved as.
+  const whole = m.parts ? `## Meetings\n\n${partsOf(m).map((p) => `- ${p.saved ? `${link(p.saved)} ` : ''}${p.title}, ${new Date(p.startedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}, ${clock(p.seconds || 0)}`).join('\n')}` : ''
   if (note) {
-    files.push([note, [fm('note', tfile ? [`transcript: ${JSON.stringify(link(tfile))}`] : []), `# ${m.title}`, summary, mine ? `## My notes\n\n${mine}` : '', screen, linked,
+    files.push([note, [fm('note', tfile ? [`transcript: ${JSON.stringify(link(tfile))}`] : []), `# ${m.title}`, summary, mine ? `## My notes\n\n${mine}` : '', whole, screen, linked,
       tfile ? `Transcript: ${link(tfile)}` : o.what === 'one' && said.length ? `## Transcript\n\n${bySection(said, m.sections).map((l) => (l.head ? `### ${l.head.title}` : `[${clock(l.t0)}] ${speaker(l, label)}: ${l.text}`)).join('\n\n')}` : ''].filter(Boolean).join('\n\n')])
   }
   // The transcript as Granola writes it: a heading per stretch, with who and the time of day (and
@@ -2826,6 +2925,7 @@ function resave(id, ms = 0) {
   if (!m.saved && !(cfg.meetings?.autoSave !== false && (m.summarizedAt || (m.status === 'done' && !m.summarizing)))) return
   // "Keep saved notes up to date" off: a meeting saved once isn't written again by itself.
   if (m.saved && cfg.meetings?.keepSaved === false) return
+  if (m.parts && !target(m).note) return
   clearTimeout(resaving.get(id))
   resaving.set(id, setTimeout(() => { resaving.delete(id); save(id, { auto: true }).catch(() => {}) }, ms))
 }
