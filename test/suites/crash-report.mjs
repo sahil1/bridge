@@ -243,7 +243,11 @@ try {
     const open = async (slow) => {
       const held = []
       const failing = { on: false, asked: 0 } // once on, Meetings' code fails each time it's asked for
+      // Handed back once the page is parsed, not once it has loaded: without requestIdleCallback
+      // (WebKit) the app fetches its views ahead 1.2 s after it starts, and on a busy Mac that can come
+      // before 'load', which then waits for Meetings' code held here.
       const s = await page(b, kit.url, {
+        waitUntil: 'domcontentloaded',
         before: async (c) => {
           // The app's service worker kept out: in WebKit, once it has the page, what it fetches isn't
           // routed, and Meetings' code would come as on a fast network.

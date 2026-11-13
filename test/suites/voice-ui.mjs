@@ -108,7 +108,9 @@ try {
     const mic = p.locator('button[aria-label="Dictate"]').first()
     await mic.waitFor({ timeout: 15000 })
     await mic.click()
-    ok(!!(await until(() => p.locator('button[aria-label="Stop and transcribe"]').isVisible(), 8000)), 'the mic records, with no model yet')
+    // Recording once the mic's sound has come (✓ on): nothing before that is kept, and on a busy
+    // computer it can come a second after the click, so the talking is timed from then.
+    ok(!!(await until(() => p.locator('button[aria-label="Stop and transcribe"]:enabled').isVisible(), 8000)), 'the mic records, with no model yet')
     await p.waitForTimeout(1600)
     await p.locator('button[aria-label="Stop and transcribe"]').click()
     const panel = p.locator('.voice-setup')

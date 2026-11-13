@@ -3,7 +3,8 @@
 // it and its subagent left running (and their output), a monitor and its news, padded so the log
 // is read in several pieces; a notice quoted in tool output, which isn't one; the terminal's
 // footer settling which shells are still running; and, when the log has none, the subagents the
-// footer shows. An image pasted far into the log is served back. Then the tray itself, in the
+// footer shows. A subagent's steps asked for by several at once are each counted once. An image
+// pasted far into the log is served back. Then the tray itself, in the
 // browser named by BRIDGE_TEST_BROWSER, in a light and a dark theme; and on a phone, the tray's
 // head (its summary cut short, not drawn under what's beside it) and a reply's wide table (words
 // kept whole, scrolling sideways, not one letter a line).
@@ -46,6 +47,24 @@ try {
     const m = task('bmon1')
     ok(m.kind === 'monitor' && m.status === 'running' && /deploy 2 of 3 healthy$/.test(m.event || ''), 'a monitor: running, with its latest news', m)
     ok(r.running === 4, "running: the subagent, two shells (the footer's count) and the monitor", r.running)
+  }
+
+  // A subagent's steps asked for by several at once (the fleet's look and the tray's, here on the
+  // server's own reading of the logs), while its log grows: each step counted once.
+  {
+    const sub = await import('../../server/subagents.js')
+    const dir = path.join(kit.home, 'counted')
+    const log = path.join(dir, 's1', 'subagents', 'agent-c1.jsonl')
+    fs.mkdirSync(path.dirname(log), { recursive: true })
+    fs.writeFileSync(path.join(dir, 's1.jsonl'), `${JSON.stringify({ type: 'user', message: { content: 'Count the steps' } })}\n`)
+    fs.writeFileSync(path.join(dir, 's1', 'subagents', 'agent-c1.meta.json'), JSON.stringify({ description: 'Count', agentType: 'Explore' }))
+    const step = (i) => `${JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(), message: { content: [{ type: 'tool_use', id: `toolu_c${i}`, name: 'Grep', input: { pattern: `p${i}` } }] } })}\n`
+    const counts = () => Promise.all([1, 2, 3].map(() => sub.listSubagents(path.join(dir, 's1.jsonl')).then((x) => x.items[0]?.tools)))
+    fs.writeFileSync(log, `${JSON.stringify({ type: 'user', message: { content: 'Find them' } })}\n${step(1)}${step(2)}${step(3)}`)
+    const first = await counts()
+    fs.appendFileSync(log, step(4) + step(5))
+    const then = await counts()
+    ok(first.every((n) => n === 3) && then.every((n) => n === 5), 'a subagent\'s steps asked for by three at once, as its log grows: each counted once', { first, then })
   }
 
   // An image you pasted, read back out of the log (Chat shows it in your message).

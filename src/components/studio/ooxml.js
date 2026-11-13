@@ -78,11 +78,11 @@ function find(n, name) {
   for (const k of n?.kids || []) { if (!k.name) continue; if (k.name === name) return k; const f = find(k, name); if (f) return f }
   return null
 }
-function findAll(n, name, out = []) {
+export function findAll(n, name, out = []) {
   for (const k of n?.kids || []) { if (!k.name) continue; if (k.name === name) out.push(k); findAll(k, name, out) }
   return out
 }
-const textIn = (n) => (n.text != null ? n.text : n.kids.map(textIn).join(''))
+export const textIn = (n) => (n.text != null ? n.text : n.kids.map(textIn).join(''))
 const av = (n, a = 'w:val') => n?.attrs?.[a] ?? null
 const on = (n) => !!n && !['0', 'false', 'off'].includes(av(n) ?? '')
 const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v))
@@ -577,7 +577,14 @@ export async function readDocx(buf, { urlOf = () => '' } = {}) {
   const stylesPath = partPath('styles'), numberingPath = partPath('numbering')
   const styles = stylesOf(await str(stylesPath), theme)
   const numbering = numberingOf(await str(numberingPath))
-  const comments = notesOf(await str(partPath('comments')), 'w:comment')
+  // The comment parts as written (wordcomments.js reads them as threads, and writes them back).
+  const cparts = {}
+  for (const [k, type] of [['comments', 'comments'], ['ext', 'commentsExtended'], ['ids', 'commentsIds'], ['cex', 'commentsExtensible'], ['people', 'people']]) {
+    const p = partPath(type)
+    const x = p ? await str(p) : null
+    if (x) cparts[k] = { path: p, xml: x }
+  }
+  const comments = notesOf(cparts.comments?.xml || null, 'w:comment')
   const footnotes = notesOf(await str(partPath('footnotes')), 'w:footnote')
   const endnotes = notesOf(await str(partPath('endnotes')), 'w:endnote')
   // Each part's pictures, read before the part is: by relationship id, { path, url }.
@@ -626,7 +633,7 @@ export async function readDocx(buf, { urlOf = () => '' } = {}) {
   const maxDocPr = Math.max(0, ...[...xml.matchAll(/<wp:docPr\b[^>]*?\sid="(\d+)"/g)].map((m) => Number(m[1])))
   return {
     zip, docPath, relsXml, rels: relsCache, main, hf, json: { type: 'doc', content: content.length ? content : [{ type: 'paragraph', attrs: { x: null, pa: '', ppr: '' } }] },
-    styles, numbering, theme, comments, footnotes, endnotes, page: pageOf(sect), stylesPath, numberingPath, ns,
+    styles, numbering, theme, comments, cparts, footnotes, endnotes, page: pageOf(sect), stylesPath, numberingPath, ns,
     added: { rels: new Map(), media: new Map(), styles: new Map(), abs: [], nums: [], next: { rid: maxRid, docPr: maxDocPr, abs: numbering.maxAbs, num: numbering.maxNum } },
   }
 }
@@ -670,12 +677,14 @@ export class Writer {
   // A new picture's id counts on from the file's own, the same way each save, so a file saved again
   // as it is comes out the same.
   constructor(model) { this.m = model; this.scope = { ...NS, ...model.ns }; this.docPr = model.added.next.docPr }
+  // type: one of the package's own (image, header…), or a relationship's whole name (Word's own
+  // since 2010, like commentsExtended).
   relsAdd(from, type, target, external = false) {
     const key = `${from}\n${type}\n${target}`
     const a = this.m.added.rels
     if (a.has(key)) return a.get(key).id
     const id = `rId${++this.m.added.next.rid + 1000}`
-    a.set(key, { from, id, type: `${REL}/${type}`, target, external })
+    a.set(key, { from, id, type: /^https?:/.test(type) ? type : `${REL}/${type}`, target, external })
     return id
   }
   // A run's properties: as written, with what the marks change.
@@ -899,6 +908,9 @@ export const BUILTIN = {
   Quote: '<w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="29"/><w:qFormat/><w:pPr><w:spacing w:before="160"/><w:jc w:val="center"/></w:pPr><w:rPr><w:i/><w:iCs/><w:color w:val="404040"/></w:rPr></w:style>',
   ListParagraph: '<w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/><w:basedOn w:val="Normal"/><w:uiPriority w:val="34"/><w:qFormat/><w:pPr><w:ind w:left="720"/><w:contextualSpacing/></w:pPr></w:style>',
   NoSpacing: '<w:style w:type="paragraph" w:styleId="NoSpacing"><w:name w:val="No Spacing"/><w:uiPriority w:val="1"/><w:qFormat/><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:style>',
+  // A comment's words and its mark in the text, as Word has them.
+  CommentText: '<w:style w:type="paragraph" w:styleId="CommentText"><w:name w:val="annotation text"/><w:basedOn w:val="Normal"/><w:uiPriority w:val="99"/><w:unhideWhenUsed/><w:pPr><w:spacing w:line="240" w:lineRule="auto"/></w:pPr><w:rPr><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:style>',
+  CommentReference: '<w:style w:type="character" w:styleId="CommentReference"><w:name w:val="annotation reference"/><w:basedOn w:val="DefaultParagraphFont"/><w:uiPriority w:val="99"/><w:semiHidden/><w:unhideWhenUsed/><w:rPr><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr></w:style>',
   TableGrid: '<w:style w:type="table" w:styleId="TableGrid"><w:name w:val="Table Grid"/><w:basedOn w:val="TableNormal"/><w:uiPriority w:val="39"/><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:tblPr><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="auto"/></w:tblBorders></w:tblPr></w:style>',
 }
 // The looks of those styles, for the editor before the file has them.
@@ -978,8 +990,9 @@ function withPage(x, p, scope) {
 
 // The Word file again: the body (and any header or footer changed) written, every other part as it
 // was. hf: { [part path]: json } the headers and footers edited; make: { header, footer } JSON of
-// ones made new; page: the page's size and margins, set in Page setup. Bytes back.
-export async function writeDocx(m, json, { hf = {}, make = {}, page = null } = {}) {
+// ones made new; page: the page's size and margins, set in Page setup; more(w, put): other parts
+// written too (the comments: wordcomments.js), with the relationships and types they add. Bytes back.
+export async function writeDocx(m, json, { hf = {}, make = {}, page = null, more = null } = {}) {
   const w = new Writer(m)
   const zip = m.zip
   const write = (part, body, sect = null) => {
@@ -1020,6 +1033,7 @@ export async function writeDocx(m, json, { hf = {}, make = {}, page = null } = {
     const h = [...Object.values(m.hf.header), ...Object.values(m.hf.footer)].find((x) => x.path === path)
     if (h) put(path, write(h.part, w.blocks(j.content || [], h.part)), h.part.xml)
   }
+  if (more) more(w, put)
   // Lists the document now uses, when it had no numbering part.
   if (m.added.abs.length && !(m.numberingPath && zip.file(m.numberingPath))) {
     m.numberingPath = resolve(m.docPath, 'numbering.xml')
@@ -1068,6 +1082,6 @@ async function contentTypes(m, zip) {
   if (!was) return
   let x = was
   for (const md of m.added.media.values()) if (!new RegExp(`Extension="${md.ext}"`, 'i').test(x)) x = x.replace(/<\/Types>\s*$/, `<Default Extension="${md.ext}" ContentType="${md.mime}"/></Types>`)
-  for (const [path, kind] of Object.entries(m.added.parts || {})) if (!x.includes(`PartName="/${path}"`)) x = x.replace(/<\/Types>\s*$/, `<Override PartName="/${path}" ContentType="${CT[kind]}"/></Types>`)
+  for (const [path, kind] of Object.entries(m.added.parts || {})) if (!x.includes(`PartName="/${path}"`)) x = x.replace(/<\/Types>\s*$/, `<Override PartName="/${path}" ContentType="${CT[kind] || kind}"/></Types>`)
   if (x !== was) zip.file('[Content_Types].xml', x)
 }

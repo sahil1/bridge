@@ -7,7 +7,7 @@ import { SetupList, useSetupPlan, alreadyLine } from './SetupAll.jsx'
 import { usePhoneOffer, PhonePick } from './OnboardingPhone.jsx'
 import { runProgress } from '../setupPlan.js'
 import { RecommendCard, useRecommended } from './Recommended.jsx'
-import { t, tx } from '../i18n/index.js'
+import { t, tn, tx } from '../i18n/index.js'
 
 // First run, in three short steps: how much Bridge AI sets up by itself (just Node.js for the agents,
 // which asks for no password and nothing to allow; everything it uses, in the background while you
@@ -275,12 +275,12 @@ export default function Onboarding({ onDone }) {
               </ul>
               <KeyQuick />
               {usable.length > 0 && (
-                <p className="muted small wiz-note"><Icon name="helm" size={12} /> Your chief of staff, the one you talk to, runs on{' '}
+                <p className="muted small wiz-note"><Icon name="helm" size={12} /> <span>{tn('Your chief of staff, the one you talk to, runs on {agent}.', { agent: (
                   <select className="wiz-select" value={chiefKind || ''} onChange={(e) => setChief(e.target.value || null)} aria-label={t('Chief of Staff')}>
                     {usable.map((a) => <option key={a.kind} value={a.kind}>{a.label}</option>)}
                     <option value="">{t('nothing for now')}</option>
-                  </select>.
-                </p>
+                  </select>
+                ) })}</span></p>
               )}
             </div>
           ) : (

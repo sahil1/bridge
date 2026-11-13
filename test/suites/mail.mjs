@@ -11,8 +11,8 @@
 // to open in.
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
-import { startKit, checks } from '../lib/harness.mjs'
+import { spawn, spawnSync } from 'node:child_process'
+import { startKit, checks, until } from '../lib/harness.mjs'
 import { openStandIn } from '../stand-ins/mailbox.mjs'
 
 const { ok, done } = checks('mail')
@@ -76,6 +76,45 @@ try {
     ok(subjects.includes('Can you review the launch plan by today?') && subjects.length === 2, `${which}: and lists the messages`, subjects)
     const opened = await k.api('/mail/message/1').catch((e) => ({ error: e.message }))
     ok(!opened.error && opened.id === 1, `${which}: a message opens`, opened.error)
+
+    // ---------- Mail busy with its index ----------
+    // Mail keeps its index with a write-ahead log, and as Mail opens or quits it (quitting folds the
+    // log into the index and takes it away) it's locked for a moment: a read just then failed with
+    // "database is locked". Reads wait for Mail now; held for longer than that, the inbox says Mail
+    // is busy.
+    if (newer) {
+      const INDEX = path.join(dir, 'Envelope Index')
+      spawnSync('sqlite3', [INDEX, 'PRAGMA journal_mode=WAL'])
+      // Mail has quit: it folded its log into the index, and macOS 15's SQLite took the log away
+      // (this Mac's may keep it, so it's taken away here). A read-only reader can't open that.
+      for (const f of ['-wal', '-shm']) fs.rmSync(INDEX + f, { force: true })
+      const quit = await k.api('/mail?refresh=1').catch((e) => ({ error: e.message }))
+      ok(!quit.error && quit.available !== false && quit.messages?.length === 2, `${which}: Mail has quit and its index's log is gone: the inbox reads, rather than asking for Full Disk Access`, quit.error || quit.reason)
+      ok(!fs.readdirSync(dir).some((f) => /-(wal|shm)$/.test(f)), `${which}: and nothing is written beside Mail's index`, fs.readdirSync(dir))
+      let writing = true
+      // Mail opening, writing and quitting, over and over: each sqlite3 is one of those.
+      const mail = (async () => { while (writing) await new Promise((res) => spawn('sqlite3', [INDEX, 'UPDATE messages SET read = read WHERE ROWID = 2']).on('close', res)) })()
+      const failed = []
+      for (let i = 0; i < 30; i++) {
+        const r = await k.api(i % 3 ? '/mail?refresh=1' : `/mail/message/${1 + (i % 2)}`).catch((e) => ({ error: e.message }))
+        if (r.error || r.available === false) failed.push(r.error || r.reason)
+      }
+      writing = false
+      await mail
+      ok(!failed.length, `${which}: read 30 times while Mail opens, writes and quits its index, each waits for it rather than failing`, failed)
+      // Held by Mail for longer than a read waits (an exclusive lock, kept until it's let go).
+      const hold = spawn('sqlite3', [INDEX], { stdio: ['pipe', 'pipe', 'ignore'] })
+      let held = ''
+      hold.stdout.on('data', (d) => { held += d })
+      hold.stdin.write("PRAGMA locking_mode=EXCLUSIVE; UPDATE messages SET read = read WHERE ROWID = 2; SELECT 'held';\n")
+      await until(() => /held/.test(held), 5000, 20)
+      const busy = await k.api('/mail?refresh=1').catch((e) => ({ error: e.message }))
+      hold.stdin.end()
+      await new Promise((res) => hold.on('close', res))
+      ok(/^Mail is busy updating its index/.test(busy.error || ''), `${which}: Mail holding its index longer than that: the inbox says Mail is busy, not "database is locked"`, busy.error || busy)
+      const back = await k.api('/mail?refresh=1').catch((e) => ({ error: e.message }))
+      ok(!back.error && back.messages?.length === 2, `${which}: and reads again once Mail lets go`, back.error)
+    }
 
     // ---------- Open in Mail ----------
     ok((await k.api('/mail/message/1')).mid === mid, `${which}: an opened message says the Message-ID Mail finds it by (${newer ? "the index's" : 'from its file'})`, (await k.api('/mail/message/1')).mid)

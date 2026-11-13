@@ -17,7 +17,7 @@ import path from 'node:path'
 import zlib from 'node:zlib'
 import crypto from 'node:crypto'
 import { createRequire } from 'node:module'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, ROOT } from '../lib/harness.mjs'
 
 const require = createRequire(path.join(ROOT, 'package.json'))
 const { PDFDocument, StandardFonts, PDFName, PDFString, PDFSignature, PDFTextField, PDFRawStream, decodePDFRawStream, PDFArray } = require('pdf-lib')
@@ -57,10 +57,13 @@ async function drawn(file, n) {
   const refs = c instanceof PDFArray ? c.asArray() : [c]
   return refs.map((r) => { const s = doc.context.lookup(r); return s instanceof PDFRawStream ? Buffer.from(decodePDFRawStream(s).decode()).toString('latin1') : Buffer.from(s.getContents?.() || []).toString('latin1') }).join('\n')
 }
-// A file opened in Studio, sent again until it shows (a page can take it before the app listens).
+// A file opened in Studio, sent again until it shows (a page can take it before the app listens):
+// its name in the header and its pages drawn, not the pages of the file shown before it, which are
+// still there for a moment after it's asked for.
 const openIn = (pg, root, name) => until(async () => {
-  if (!(await pg.locator('.sd-file .pane-head h2', { hasText: name }).count())) await pg.evaluate(({ root, name }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: name } })), { root, name })
-  return pg.locator('.sd-pdf .pdfViewer .page canvas').first().waitFor({ timeout: 2000 }).then(() => true, () => false)
+  const head = pg.locator('.sd-file .pane-head h2', { hasText: name })
+  if (!(await head.count())) await pg.evaluate(({ root, name }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: name } })), { root, name })
+  return pg.locator('.sd-pdf .pdfViewer .page canvas').first().waitFor({ timeout: 2000 }).then(async () => (await head.count()) > 0, () => false)
 }, 25000, 300)
 const images = async (file, n) => { const doc = await PDFDocument.load(fs.readFileSync(file)); const xo = doc.getPage(n - 1).node.Resources()?.lookup(PDFName.of('XObject')); return xo ? xo.keys().length : 0 }
 
@@ -288,12 +291,23 @@ try {
   ok(!!(await until(async () => !(await trial('Sign PDFs').locator('input').isDisabled()) && await trial('Sign PDFs').locator('input').isChecked(), 5000)), 'and back on with it')
   await p.locator('button[aria-label="Close settings"]').click()
   ok(w.errors.length === 0, 'no page errors', w.errors)
-  // Dark.
-  const dk = await page(b, kit.url, { width: 1440, height: 900, mode: 'dark' })
+  // Dark, and Sign this picked while the PDF is still opening (its reader held back here): signing
+  // starts once it's open.
+  let readerGo
+  const reader = new Promise((r) => { readerGo = r })
+  const dk = await page(b, kit.url, { width: 1440, height: 900, mode: 'dark', before: async (ctx) => { await noServiceWorker(ctx); await ctx.route(/\/assets\/pdf_viewer-[\w-]+\.js$/, async (r) => { await reader; await r.continue().catch(() => {}) }) } })
   pages.push(dk)
   await dk.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
-  ok(!!(await openIn(dk.p, root, 'letter.pdf')), 'dark: the PDF is drawn', { errors: dk.errors })
-  await signThis(dk.p)
+  const opening = await until(async () => {
+    if (!(await dk.p.locator('.sd-file .pane-head h2', { hasText: 'letter.pdf' }).count())) await dk.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'letter.pdf' } })), { root })
+    return dk.p.locator('.sd-pdf .sd-pdf-cover.sd-loading').waitFor({ timeout: 2000 }).then(() => true, () => false)
+  }, 25000, 300)
+  await dk.p.locator('.sd-file .pane-head button[aria-label="AI Assist"]').click()
+  const early = dk.p.locator('.ai-menu button', { hasText: 'Sign this' })
+  const pickable = await early.isEnabled({ timeout: 5000 }).catch(() => false)
+  if (pickable) await early.click()
+  readerGo()
+  ok(!!opening && pickable && await dk.p.locator('.sd-sign').waitFor({ timeout: 15000 }).then(() => true, () => false) && await dk.p.locator('.sd-pdf .pdfViewer .page canvas').first().waitFor({ timeout: 15000 }).then(() => true, () => false), 'dark: Sign this, picked while the PDF is still opening, starts signing once it\'s open', { opening, pickable, errors: dk.errors })
   await dk.p.locator('.sd-step-head', { hasText: 'Where to sign' }).click()
   await until(async () => (await dk.p.locator('.sd-mark').count()) === 2, 15000)
   await sleep(400)

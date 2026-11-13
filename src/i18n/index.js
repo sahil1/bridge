@@ -3,10 +3,14 @@
 // doesn't have yet shows in English, so the app is written in English and packs catch up later
 // (CONTRIBUTING.md › Translations). {name} in a string is filled from the values given:
 //   t('Continue on {name}', { name: 'Work' })
+// A sentence with a link or a button in it is one string too, the element a {placeholder} filled by
+// tn(), so each language puts it where its grammar needs:
+//   tn('{install} to get started.', { install: <button>{t('Install one')}</button> })
 // English kept in a list (Settings' sections, say) is marked with tx(), which changes nothing, so
 // scripts/i18n.js finds it too; it's translated with t() where it's shown, as the pack is only
 // loaded once the app starts. The language is per browser, like the look (Settings › Appearance):
 // English unless you pick another, or Match this computer.
+import { createElement, Fragment } from 'react'
 
 // Every pack in this folder is a language: add ko.json and Korean is in the list, named in its own
 // words. Each is loaded only when it's picked.
@@ -73,5 +77,13 @@ export function t(s, vars) {
   return fill((words && words[s]) || s, vars)
 }
 export const tx = (s) => s
+// t() for a sentence with elements in it (a link, a button): its pieces, each {name} the element (or
+// text) given, for React to show in place.
+export function tn(s, vars = {}) {
+  return ((words && words[s]) || s).split(/(\{\w+\})/).filter((x) => x !== '').map((x, i) => {
+    const k = /^\{(\w+)\}$/.exec(x)?.[1]
+    return k && k in vars ? createElement(Fragment, { key: i }, vars[k]) : x
+  })
+}
 // A word put in the middle of a sentence ("average cost"): lower case, but German keeps its nouns' capitals.
 export const midSentence = (s) => (lang === 'de' ? String(s) : String(s).toLowerCase())

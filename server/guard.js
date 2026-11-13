@@ -12,6 +12,8 @@
 //   - through Tailscale (a *.ts.net name), only you: Tailscale says who's asking (Tailscale-User-Login,
 //     which it sets itself), and it has to be who this computer belongs to. Someone else on the
 //     tailnet, a shared or tagged device, or a visitor through Funnel isn't.
+// What gets past this still needs the key (apiauth.js), which keeps out the other programs on this
+// computer: they send no Origin, as Bridge AI's own programs don't.
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 const DEFAULT_PORT = { 'http:': '80', 'https:': '443' }
@@ -33,7 +35,7 @@ export function makeGuard(cfg = {}, { tailnetOwner = async () => null } = {}) {
     return d && h.endsWith(`:${d}`) ? h.slice(0, -d.length - 1) : h
   }
   const originOk = (origin, host) => {
-    if (!origin) return true // not a browser (curl, the bridge CLI, the Mac app's own fetches)
+    if (!origin) return true // not a browser (curl, the bridge CLI, the Mac app's own fetches): apiauth.js asks those for the key
     if (origin === 'null') return false
     try {
       const o = new URL(origin)
@@ -59,5 +61,8 @@ export function makeGuard(cfg = {}, { tailnetOwner = async () => null } = {}) {
   // WebSockets: a browser always sends Origin, so a page from another site or port is refused. No
   // Origin means a program on this device (the `bridge-ai attach` terminal client), which is allowed.
   const upgrade = async (req) => hostOk(req.headers.host) && originOk(req.headers.origin, req.headers.host) && !elsewhere(req) && await you(req)
-  return { http, upgrade }
+  // Through Tailscale (a *.ts.net name): after http or upgrade above, that's you (apiauth.js lets it
+  // in without the key while Tailscale publishes this server, as before).
+  const viaTailnet = (req) => tailnetName(req.headers.host) || tailnetName(req.headers['x-forwarded-host'])
+  return { http, upgrade, viaTailnet }
 }

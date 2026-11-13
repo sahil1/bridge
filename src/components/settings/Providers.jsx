@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, refetch, settingsChanged } from '../../api.js'
 import Icon from '../Icon.jsx'
 import { AllowKeychain, Left, nameOf, makeDefault, removeAccount, signOut, DefaultTag, weekResets, slotsOf, ColorPick } from '../AccountMenu.jsx'
-import { t } from '../../i18n/index.js'
+import { t, tn } from '../../i18n/index.js'
 import { addAccount } from '../AddAccount.jsx'
 import ProviderIcon, { AgentIcon } from './ProviderIcon.jsx'
 import { GROUPS, AGENT_LABEL, providerChip, agentChip } from './providerCatalog.js'
@@ -23,17 +23,17 @@ function Chip({ tone, children, title }) {
 
 function AgentsStrip({ subs, error, onRefresh, refreshing }) {
   const [showAll, setShowAll] = useState(false)
-  if (error) return <p className="pv-note pv-err">Couldn't check agent sign-ins: {error} <button type="button" className="ghost-btn" onClick={onRefresh} disabled={refreshing}>Retry</button></p>
+  if (error) return <p className="pv-note pv-err">{t("Couldn't check agent sign-ins: {error}", { error })} <button type="button" className="ghost-btn" onClick={onRefresh} disabled={refreshing}>{t('Retry')}</button></p>
   if (!subs) return <div className="pv-agents pv-loading" aria-busy="true"><span className="pv-skel" /><span className="pv-skel" /><span className="pv-skel" /></div>
   const inst = subs.filter((s) => s.installed)
   const list = showAll ? subs : inst
   return (
     <section className="pv-sec">
       <div className="pv-head">
-        <h4>Your agents</h4>
-        <span className="muted small">{inst.length ? `${inst.filter((s) => s.signedIn).length} of ${inst.length} installed signed in` : 'No agent CLIs found on your PATH'}</span>
-        <button type="button" className="ghost-btn pv-head-btn" onClick={onRefresh} disabled={refreshing} aria-label="Check sign-ins again">
-          <Icon name="refresh" size={12} className={refreshing ? 'spin' : ''} />Recheck
+        <h4>{t('Your agents')}</h4>
+        <span className="muted small">{inst.length ? t('{n} of {total} installed signed in', { n: inst.filter((s) => s.signedIn).length, total: inst.length }) : t('No agent CLIs found on your PATH')}</span>
+        <button type="button" className="ghost-btn pv-head-btn" onClick={onRefresh} disabled={refreshing} aria-label={t('Check sign-ins again')}>
+          <Icon name="refresh" size={12} className={refreshing ? 'spin' : ''} />{t('Recheck')}
         </button>
       </div>
       <ul className="pv-agents">
@@ -45,8 +45,8 @@ function AgentsStrip({ subs, error, onRefresh, refreshing }) {
               <div className="pv-agent-text">
                 <span className="pv-agent-name">{s.label}</span>
                 {s.installed
-                  ? <Chip tone={c.tone} title={s.signedIn === null ? "Bridge AI couldn't tell from this computer's files" : undefined}>{c.text}</Chip>
-                  : <span className="muted small">Not installed</span>}
+                  ? <Chip tone={c.tone} title={s.signedIn === null ? t("Bridge AI couldn't tell from this computer's files") : undefined}>{c.text}</Chip>
+                  : <span className="muted small">{t('Not installed')}</span>}
                 {s.installed && s.signedIn !== true && s.hint && <span className="pv-hint">{s.hint}</span>}
               </div>
             </li>
@@ -55,7 +55,7 @@ function AgentsStrip({ subs, error, onRefresh, refreshing }) {
       </ul>
       {subs.length > inst.length && (
         <button type="button" className="ghost-btn pv-more" onClick={() => setShowAll((v) => !v)}>
-          {showAll ? 'Show installed only' : `Show all ${subs.length} agents`}
+          {showAll ? t('Show installed only') : t('Show all {n} agents', { n: subs.length })}
         </button>
       )}
     </section>
@@ -182,7 +182,7 @@ function AccountsSection({ shown = true }) {
     try { await api(`/accounts/order/${k.kind}`, { method: 'POST', body: { ids } }); refetch('/quota') } catch (e) { setShowErr(e.message); load(true) }
   }
   if (!shown) return null
-  if (err) return <p className="pv-note pv-err">Couldn't load accounts: {err} <button type="button" className="ghost-btn" onClick={() => load(true)}>Retry</button></p>
+  if (err) return <p className="pv-note pv-err">{t("Couldn't load accounts: {error}", { error: err })} <button type="button" className="ghost-btn" onClick={() => load(true)}>{t('Retry')}</button></p>
   const list = (kinds || []).filter((k) => k.installed)
   if (!list.length) return null
   return (
@@ -215,12 +215,12 @@ function AccountsSection({ shown = true }) {
 function SecretInput({ field, value, onChange, id }) {
   const [show, setShow] = useState(false)
   const saved = field.saved?.set
-  const placeholder = saved ? (field.saved.last4 ? `Saved, ends in ${field.saved.last4}` : 'Saved') : field.environment ? 'Set in the environment' : (field.placeholder || 'Paste key')
+  const placeholder = saved ? (field.saved.last4 ? t('Saved, ends in {last4}', { last4: field.saved.last4 }) : t('Saved')) : field.environment ? t('Set in the environment') : (field.placeholder || t('Paste key'))
   return (
     <div className="pv-secret">
       <input id={id} type={show ? 'text' : 'password'} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
         autoComplete="off" spellCheck={false} data-1p-ignore data-lpignore="true" />
-      <button type="button" className="pv-eye" onClick={() => setShow((v) => !v)} aria-label={show ? 'Hide' : 'Show'} title={show ? 'Hide' : 'Show'}>
+      <button type="button" className="pv-eye" onClick={() => setShow((v) => !v)} aria-label={show ? t('Hide') : t('Show')} title={show ? t('Hide') : t('Show')}>
         <Icon name={show ? 'eye-off' : 'eye'} size={14} />
       </button>
     </div>
@@ -248,10 +248,10 @@ function Editor({ p, labels, installedSet, onSaved }) {
       if (kind === 'save') {
         const next = await api(`/providers/${p.id}`, { method: 'PUT', body: { values: changes } })
         onSaved(next)
-        setMsg(!next.test ? { ok: true, text: 'Saved' } : next.test.ok ? { ok: true, text: 'Saved. The key works.' } : { ok: false, text: `Saved, but ${p.name} turned it down: ${next.test.message}` })
+        setMsg(!next.test ? { ok: true, text: t('Saved') } : next.test.ok ? { ok: true, text: t('Saved. The key works.') } : { ok: false, text: t('Saved, but {name} turned it down: {message}', { name: p.name, message: next.test.message }) })
       } else if (kind === 'remove') {
         const next = await api(`/providers/${p.id}`, { method: 'DELETE' })
-        onSaved(next); setMsg({ ok: true, text: 'Removed from Bridge AI' })
+        onSaved(next); setMsg({ ok: true, text: t('Removed from Bridge AI') })
       } else {
         if (dirty) { const next = await api(`/providers/${p.id}`, { method: 'PUT', body: { values: changes } }); onSaved(next) }
         const r = await api(`/providers/${p.id}/test`, { method: 'POST' })
@@ -277,20 +277,20 @@ function Editor({ p, labels, installedSet, onSaved }) {
                 <input type="checkbox" checked={!!draft[f.env]} onChange={(e) => setDraft((d) => ({ ...d, [f.env]: e.target.checked }))} />
                 <span>{f.label}</span>
                 <code>{f.env}=1</code>
-                {f.environment && !f.saved && <span className="muted small">set in the environment</span>}
+                {f.environment && !f.saved && <span className="muted small">{t('set in the environment')}</span>}
               </label>
             )
           }
           return (
             <div key={f.env} className="pv-field">
               <label htmlFor={id}>
-                <span>{f.label}{f.optional && <span className="muted"> (optional)</span>}</span>
+                <span>{f.label}{f.optional && <span className="muted"> {t('(optional)')}</span>}</span>
                 <code>{f.env}</code>
               </label>
               {f.type === 'secret'
                 ? <SecretInput id={id} field={f} value={draft[f.env]} onChange={(v) => setDraft((d) => ({ ...d, [f.env]: v }))} />
                 : <input id={id} value={draft[f.env]} onChange={(e) => setDraft((d) => ({ ...d, [f.env]: e.target.value }))}
-                    placeholder={f.environment && !f.saved ? 'Set in the environment' : f.placeholder} spellCheck={false} autoComplete="off" />}
+                    placeholder={f.environment && !f.saved ? t('Set in the environment') : f.placeholder} spellCheck={false} autoComplete="off" />}
             </div>
           )
         })}
@@ -298,28 +298,28 @@ function Editor({ p, labels, installedSet, onSaved }) {
 
       {p.models?.length > 0 && (
         <div className="pv-models">
-          <span className="muted small">Models</span>
-          <div>{p.models.slice(0, 12).map((m) => <code key={m}>{m}</code>)}{p.models.length > 12 && <span className="muted small"> and {p.models.length - 12} others</span>}</div>
+          <span className="muted small">{t('Models')}</span>
+          <div>{p.models.slice(0, 12).map((m) => <code key={m}>{m}</code>)}{p.models.length > 12 && <span className="muted small"> {t('and {n} others', { n: p.models.length - 12 })}</span>}</div>
         </div>
       )}
 
       <div className="pv-actions">
         {p.keyUrl && <a className="ghost-btn strong" href={p.keyUrl} target="_blank" rel="noreferrer">
-          <Icon name="external" size={12} />{p.local ? 'Download' : p.group === 'clouds' ? 'Open console' : 'Get a key'}
+          <Icon name="external" size={12} />{p.local ? t('Download') : p.group === 'clouds' ? t('Open console') : t('Get a key')}
         </a>}
         <span className="pv-spacer" />
         {msg && <span className={`pv-msg ${msg.ok ? 'ok' : 'bad'}`} role="status"><Icon name={msg.ok ? 'check' : 'alert'} size={12} />{msg.text}</span>}
-        {anySaved && <button type="button" className="btn small" onClick={() => act('remove')} disabled={!!busy}>{busy === 'remove' ? 'Removing…' : 'Remove'}</button>}
-        {p.testable && <button type="button" className="btn small" onClick={() => act('test')} disabled={!!busy}>{busy === 'test' ? 'Testing…' : 'Test'}</button>}
-        <button type="submit" className="btn small primary" disabled={!dirty || !!busy}>{busy === 'save' ? 'Saving…' : 'Save'}</button>
+        {anySaved && <button type="button" className="btn small" onClick={() => act('remove')} disabled={!!busy}>{busy === 'remove' ? t('Removing…') : t('Remove')}</button>}
+        {p.testable && <button type="button" className="btn small" onClick={() => act('test')} disabled={!!busy}>{busy === 'test' ? t('Testing…') : t('Test')}</button>}
+        <button type="submit" className="btn small primary" disabled={!dirty || !!busy}>{busy === 'save' ? t('Saving…') : t('Save')}</button>
       </div>
 
       <p className="pv-note">
-        {p.chat && <><b>Chat with it now:</b> New chat, then Any model. </>}
+        {p.chat && <><b>{t('Chat with it now:')}</b> {t('New chat, then Any model.')} </>}
         {can.length
-          ? <>Your <b>{can.map(name).join(', ')}</b> can use it too{other.length ? <span className="muted">; so can {other.map(name).join(', ')} if you install them</span> : null}.</>
-          : p.agents.length ? <>Agents that can use it: {p.agents.map(name).join(', ')} (none installed yet).</> : null}
-        {!p.local && <> Keys saved here reach the agents Bridge AI starts; agents you start in your own terminal won't see them.</>}
+          ? tn('Your {agents} can use it too{others}.', { agents: <b>{can.map(name).join(', ')}</b>, others: other.length ? <span className="muted">{t('; so can {agents} if you install them', { agents: other.map(name).join(', ') })}</span> : null })
+          : p.agents.length ? t('Agents that can use it: {agents} (none installed yet).', { agents: p.agents.map(name).join(', ') }) : null}
+        {!p.local && <> {t("Keys saved here reach the agents Bridge AI starts; agents you start in your own terminal won't see them.")}</>}
       </p>
     </form>
   )
@@ -487,12 +487,12 @@ export default function Providers() {
       <AccountsSection shown={!!subs || !!subsErr} />
       <Advanced order={30}><CloudKeys /></Advanced>
 
-      {err && <p className="pv-note pv-err">Couldn't load providers: {err} <button type="button" className="ghost-btn" onClick={loadProviders}>Retry</button></p>}
+      {err && <p className="pv-note pv-err">{t("Couldn't load providers: {error}", { error: err })} <button type="button" className="ghost-btn" onClick={loadProviders}>{t('Retry')}</button></p>}
       {!providers && !err && <div className="pv-grid" aria-busy="true">{[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="pv-card pv-skel-card" />)}</div>}
 
       {providers && (
         <>
-          <p className="pv-count muted small">{connected} of {providers.length} providers connected</p>
+          <p className="pv-count muted small">{t('{n} of {total} providers connected', { n: connected, total: providers.length })}</p>
           {GROUPS.map((g) => {
             const items = providers.filter((p) => p.group === g.id)
             if (!items.length) return null

@@ -2,6 +2,123 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.17.0
+
+Your own tab groups, pinned tabs and Rename in a tab's menu. In a room that's on a call, the people beside you are told apart by voice. In Beta Features: AI Assist answers questions asked in a meeting, and on a Mac the call's video shows who's talking.
+
+<!-- rollout: 10 -->
+
+### What's new
+
+- **Your own tab groups**: in a tab's right-click menu, Add tab to new group makes a group with a name you type and a color; Add tab to group moves a tab into one, and Remove from group takes it out. A click on a group's chip folds it; a right-click edits its name and color, starts a new agent in it, ungroups it or closes its tabs. Drop a tab between a group's tabs to join it, or drag it out to leave. They work with Tab Groups on or off, and a reload keeps them.
+- **Pinned tabs**: Pin tab puts a tab at the start as its icon and status dot, with no ×. Close other tabs and Close tabs to the right leave it open, and a reload keeps it.
+- **Rename a tab** in place from its right-click menu, for agents and terminals: Enter saves, Esc cancels.
+- **Voices in a room on a call**: with Tell voices apart in a room on (Settings › Meetings), the people beside you on your mic are told apart on a call too, as Speaker 1, Speaker 2 and so on beside the call's voices, and named from what's said and who was invited. That's me works on any voice on your mic.
+- **Answers in AI Assist** (Beta Features): while a meeting records with AI Assist on, a question asked in the meeting that has a factual answer gets one in one to three sentences, with where it's from: your past meetings (a click opens the meeting), your notes, the meeting's files and meeting memory, the model's own knowledge (marked as possibly out of date), or the web with links when a Perplexity key is saved. Only the question goes to Perplexity. At most two answers each time it looks, never the same question twice, and Keep puts an answer in your notes.
+- **Speakers From the Call's Video** (Beta Features, on a Mac): while a call records and someone talks, a few pictures of the call's window are read on your Mac for whose mouth is moving and the name under that face, people sharing a room's camera too. A voice seen as two people becomes two speakers, two voices seen as one person become one, and the model naming who said what is told who was seen talking. The pictures are never saved: only who was seen talking, and when. It needs Screen Recording (Settings › Meetings).
+
+### Fixes
+
+- **Learn my voice learns only your voice**: on a call with other people in the room on your mic, it learns from the voice that already sounds like you, and from none when none does.
+- **A suggestion you keep while AI Assist is looking stays kept**: it went back to new when that look finished.
+
+## 3.16.1
+
+A right-click menu on tabs, with colors for tabs and tab groups. Fixes: a call's sound comes in as soon as macOS allows it, and the steps to allow it no longer get stuck after quitting Bridge AI.
+
+<!-- rollout: 10 -->
+
+### What's new
+
+- **A right-click menu on every tab**: New agent in its space, Open beside the current tab, its color, Close, Close other tabs and Close tabs to the right. Shift+F10 or the menu key opens it on the focused tab, the arrow keys move through it and Esc closes it.
+- **Tab colors**: pick one of nine colors in a tab's menu and a line in that color runs under the tab (No color takes it off). With Tab Groups on, a tab in a group colors the whole group, and a group's chip menu has the same colors. A reload keeps them.
+
+### Fixes
+
+- **A call's sound comes in as soon as macOS allows it**: while a call is silent because Bridge AI isn't on in System Audio Recording Only, Bridge AI asks macOS again every few seconds and starts hearing the call once it's turned on, with no restart and the recording going on.
+- **"No sound from the call" no longer gets stuck after quitting Bridge AI**: quitting, and macOS's own Quit & Reopen, leave Bridge AI's server running. The warning now counts any restart since System Settings was opened, keeps its step when the window opens again, and says to restart Bridge AI from there; Reset and ask again follows if a restart hasn't helped.
+- **When macOS lets Bridge AI hear the call and it's silent, the warning says so**, with nothing to turn on.
+- **A Tab Groups chip's right-click menu is as wide as what it says**: it stretched from the pointer to the right edge of the window. It now opens to the left of or above the pointer when it would go past the window's edge.
+
+## 3.16.0
+
+A live whiteboard of a meeting while it records; comments with @bridge on an Excel file's cells, a PowerPoint's slides and a whiteboard's shapes, as on a Word file's words; and a new sheet written from what you say it's for. Each is in Beta Features, off to start.
+
+<!-- rollout: 10 -->
+
+### What's new
+
+- **Live Meeting Board** (Beta Features): while a meeting records, in any call app or a room, AI Assist keeps a whiteboard of it from what's said, a minute or so at a time, with the model that writes your notes (a local one too): what's decided, a timeline with owners and dates, who does what and the questions still open. Each is a suggestion to keep or discard on the meeting's Board or on the board itself. It only adds, and never says the same thing twice. The board stays after the meeting, and its action items go onto the Chief of Staff's task list with one click.
+- **Comments in Excel files** (Beta Features: Comments and @bridge): comment on the cells you pick (Insert › Comment, a right-click or ⌥⌘M), reply, resolve and delete, beside the sheet, with each commented cell marked in its corner. They're saved into the file as Excel 365 writes them, with a note for older versions of Excel, and move with their rows and columns.
+- **Comments on a PowerPoint's slides** (Beta Features: Comments and @bridge): on a slide or a shape on it, beside the slides (Comments in the toolbar), saved into the file as PowerPoint writes them.
+- **Comments on a whiteboard** (Beta Features: Comments and @bridge): a comment on the shapes you pick, or on a place on the board, is a pin holding its thread, kept in the board's own file (Comments in the header).
+- **@bridge in any of these comments** asks AI Assist: its reply goes in the thread, signed AI Assist with the model that wrote it, and its change is a suggestion to keep or discard: cells outlined on the sheet; a shape's words, a slide rewritten or a new slide after it; shapes on the board changed as Change it does.
+- **Make a Sheet** (Beta Features): say what a new sheet is for ("a budget for a team of five") in New › Sheet or on an empty sheet, and AI Assist's model writes the whole workbook: its sheets, formulas, formats and dropdowns, with the heading row frozen. It's shown outlined to keep, then saved as an Excel file, or discard.
+
+## 3.15.1
+
+A sheet's AI Assist that answers in seconds, a whiteboard's AI Assist that suggests rather than changes and turns a board into a document or a deck, comments in Word files with @bridge, and Bridge AI as an MCP server for Claude Code, Claude Desktop, Cursor and Codex, with a key for its API. Fixes: the whole app in your language, and the inbox once Mail has quit on macOS 15.
+
+### What's new
+
+- **A sheet's AI Assist answers in seconds**: Write a formula, Clean this column, Summarise, Chart this and your own words go to Studio's model rather than waiting on an agent. The change shows outlined on the sheet as a suggestion to keep or discard, one at a time or with Keep all, and Hand to an agent stays for a bigger job.
+- **What AI Assist draws or changes on a whiteboard is a suggestion**: dashed and outlined with the wand and the model that made it, to keep or discard on the board or in AI Assist, or all at once. Discard puts back what it changed, and the board remembers its suggestions when opened again.
+- **Ask about part of a whiteboard**: select shapes and AI Assist answers a question about them in its panel, naming each shape; a model that can see gets a picture of them.
+- **Meeting moves on a whiteboard**: Group by theme, A timeline with owners and dates, and Action items for each person, which go onto the Chief of Staff's task list with one click.
+- **Turn a whiteboard into a document or a deck**: AI Assist's Make a document and Make a deck write a Word file or a Studio deck in Studio's own folder, linked back to the board.
+- **Versions of a whiteboard**: kept when you come back after a break and before each AI Assist change, each shown as its picture and put back from Versions in the board's header.
+- **Comments in Word files** (Beta Features: Comments and @bridge): add a comment on the words you pick, reply, resolve and delete in Studio, saved into the file itself so Word shows them as you left them.
+- **@bridge in a comment** asks AI Assist about those words: its reply goes in the thread, its change is a suggestion you keep or discard, and an @bridge that came in someone else's file waits for you to send it.
+- **Bridge AI as an MCP Server** (Beta Features): Claude Code, Claude Desktop, Cursor and Codex can read your whiteboards, the Studio files in your Places and your meetings' summaries, and make new boards, files and tasks. Transcripts, agents' conversations, mail and calendar are never shared.
+- **Changes other apps suggest wait for you in Needs You**, to keep or discard, and sending work to an agent is off until you turn it on, then each message waits for your approval.
+- **Add Bridge AI to Claude Code, Claude Desktop, Cursor or Codex in one click** from Settings › MCP Servers, which also lists every call they make.
+
+### Fixes
+
+- **Bridge AI's API answers only Bridge AI**: other programs and other accounts on the computer need its key, kept in `~/.bridge-ai/api-token`. The app's windows, `bridge-ai` and the Chief of Staff carry on as before, and a browser is let in once with View › Open in Browser or `bridge-ai open`.
+- **The whole app is in your language**: Settings, New, an agent's tabs, sign-in, cloud agents and the meeting card no longer show English, and every language pack is complete.
+- **The meeting card's links stay on one line** in every language.
+- **Settings opened at one setting** (Accounts, say) is there as soon as it appears, instead of jumping there from under your click.
+- **A sign-in code typed from the email** while Send a new code is still answering stays, rather than being cleared.
+- **A window showing another computer no longer loses a file or an answer when the link drops.**
+- **The phone reconnects as soon as its network is back**, rather than up to 10 seconds later.
+- **Dictation reaches another computer's agent in a tab right away** after linking or starting Bridge AI.
+- **Words said with the mic button in another computer's tab stay there** when Ask out loud ends them, rather than going to its Chief of Staff.
+- **A subagent's step count in Chat's tray is right**: it no longer counts each step twice.
+- **Leaving a page while a whiteboard is still loading** no longer reports an error in Safari and the iPhone app.
+- **Sign this works when picked while a PDF is still opening.**
+- **Find in a chat keeps its match in view** when the chat gets shorter.
+- **Mail no longer shows "database is locked"** while Mail updates its index: it waits a moment, then says plainly if Mail stays busy.
+- **The inbox reads after Mail has quit on macOS 15**, rather than asking for Full Disk Access you'd already given.
+- **The banner asking to keep a device or allow a link** no longer moves the page under your finger.
+- **With Home on, a new window no longer takes you to Home** after you've already tapped somewhere.
+- **A dropdown made in a sheet is saved into Excel as its choices** (Yes, No), not as `["Yes","No"]`.
+- **The desktop build's minimatch security alert is cleared.**
+
+## 3.15.0
+
+A sheet's AI Assist that answers in seconds, a whiteboard's AI Assist that suggests rather than changes, asks about what you pick, groups, plans and lists action items, and turns a board into a document or a deck, with versions to go back to; comments in Word files with @bridge; and Bridge AI as an MCP server for Claude Code, Claude Desktop, Cursor and Codex, with a key for its API.
+
+Not released on its own (its builds' smoke test didn't yet send the API's new key): all of it came to everyone in 3.15.1.
+
+### What's new
+
+- **A sheet's AI Assist answers in seconds**: Write a formula, Clean this column, Summarise, Chart this and your own words go to Studio's model rather than waiting on an agent. The change shows outlined on the sheet as a suggestion to keep or discard, one at a time or with Keep all, and Hand to an agent stays for a bigger job.
+- **What AI Assist draws or changes on a whiteboard is a suggestion**: dashed and outlined with the wand and the model that made it, to keep or discard on the board or in AI Assist, or all at once. Discard puts back what it changed, and the board remembers its suggestions when opened again.
+- **Ask about part of a whiteboard**: select shapes and AI Assist answers a question about them in its panel, naming each shape; a model that can see gets a picture of them.
+- **Meeting moves on a whiteboard**: Group by theme, A timeline with owners and dates, and Action items for each person, which go onto the Chief of Staff's task list with one click.
+- **Turn a whiteboard into a document or a deck**: AI Assist's Make a document and Make a deck write a Word file or a Studio deck in Studio's own folder, linked back to the board.
+- **Versions of a whiteboard**: kept when you come back after a break and before each AI Assist change, each shown as its picture and put back from Versions in the board's header.
+- **Comments in Word files** (Beta Features: Comments and @bridge): add a comment on the words you pick, reply, resolve and delete in Studio, saved into the file itself so Word shows them as you left them.
+- **@bridge in a comment** asks AI Assist about those words: its reply goes in the thread, its change is a suggestion you keep or discard, and an @bridge that came in someone else's file waits for you to send it.
+- **Bridge AI as an MCP Server** (Beta Features): Claude Code, Claude Desktop, Cursor and Codex can read your whiteboards, the Studio files in your Places and your meetings' summaries, and make new boards, files and tasks. Transcripts, agents' conversations, mail and calendar are never shared.
+- **Changes other apps suggest wait for you in Needs You**, to keep or discard, and sending work to an agent is off until you turn it on, then each message waits for your approval.
+- **Add Bridge AI to Claude Code, Claude Desktop, Cursor or Codex in one click** from Settings › MCP Servers, which also lists every call they make.
+
+### Fixes
+
+- **Bridge AI's API answers only Bridge AI**: other programs and other accounts on the computer need its key, kept in `~/.bridge-ai/api-token`. The app's windows, `bridge-ai` and the Chief of Staff carry on as before, and a browser is let in once with View › Open in Browser or `bridge-ai open`.
+
 ## 3.14.0
 
 The meeting reminder snoozes, turns off and keeps out of the way of a screen you share; the recording card goes to the menu bar while you share; who's invited and the whole invite in the calendar; Back and Forward, as in a browser; and Recommended Settings, the model and effort that suit your plan.

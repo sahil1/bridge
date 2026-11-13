@@ -275,5 +275,8 @@ export function pageFinder({ root, scroller, history }) {
   }
   // There's a match being looked at: the chat holds still for it rather than scroll to the newest.
   f.holding = () => !!q && cur >= 0
+  // What scrolls got shorter (what the agent runs opening under it, a phone's keyboard): the match
+  // being looked at brought back into view, if that hid it.
+  f.keep = () => { if (q && cur >= 0) reveal() }
   return f
 }

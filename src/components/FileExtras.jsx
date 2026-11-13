@@ -5,14 +5,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { api, BASE } from '../api.js'
-import { t } from '../i18n/index.js'
+import { t, tn, tx } from '../i18n/index.js'
 
 const enc = encodeURIComponent
 const LOOPBACK = /^(localhost|127\.0\.0\.1|\[::1\])$/
 // Show in Finder and Open act on the computer running Bridge AI, so they're only offered there.
 export const onComputer = typeof location !== 'undefined' && LOOPBACK.test(location.hostname)
 const platform = typeof navigator !== 'undefined' ? navigator.userAgent : ''
-export const REVEAL = /Mac/.test(platform) ? 'Reveal in Finder' : /Windows/.test(platform) ? 'Show in Explorer' : 'Show in file manager'
+export const REVEAL = /Mac/.test(platform) ? tx('Reveal in Finder') : /Windows/.test(platform) ? tx('Show in Explorer') : tx('Show in file manager')
 export const OPENABLE = /\.(pdf|docx?|odt|rtf|pptx?|odp|key|xlsx|xlsm|xls|ods|numbers|pages|csv|tsv|txt|md|png|jpe?g|gif|webp|svg|heic|tiff?|bmp|mp4|mov|m4v|webm|mp3|m4a|wav|aac|flac|zip|epub)$/i
 const APP = { document: 'Word', slides: 'PowerPoint', sheet: 'Excel' }
 
@@ -40,11 +40,11 @@ function DocView({ pane, f, base }) {
     }).catch((e) => live && setSt({ error: e.message }))
     return () => { live = false }
   }, [url])
-  if (st.busy) return <div className="viewer-empty"><Icon name="refresh" size={20} className="spin" /><p className="muted small">Getting {f.name} ready…</p></div>
+  if (st.busy) return <div className="viewer-empty"><Icon name="refresh" size={20} className="spin" /><p className="muted small">{t('Getting {name} ready…', { name: f.name })}</p></div>
   if (st.pdf) return <iframe className="pdf-view" src={url} title={f.name} />
   return <Outline pane={pane} f={f} base={base} note={st.needs === 'libreoffice'
-    ? <>This is the text in the file. To see it laid out as in {APP[f.office]}, install <a href="https://www.libreoffice.org/download/download/" target="_blank" rel="noreferrer">LibreOffice</a> (free); Bridge AI uses it in the background.</>
-    : <>Couldn't lay this file out ({st.error}). Here's the text in it.</>} />
+    ? tn('This is the text in the file. To see it laid out as in {app}, install {libreoffice} (free); Bridge AI uses it in the background.', { app: APP[f.office], libreoffice: <a href="https://www.libreoffice.org/download/download/" target="_blank" rel="noreferrer">LibreOffice</a> })
+    : t('Couldn\'t lay this file out ({why}). Here\'s the text in it.', { why: st.error })} />
 }
 
 function Outline({ pane, f, note, base }) {
@@ -60,7 +60,7 @@ function Outline({ pane, f, note, base }) {
           {s.blocks.map((b, k) => (s.title && k === 0 ? <h3 key={k}>{b.text}</h3>
             : b.level ? <div key={k} className={`doc-h doc-h${b.level}`}>{b.text}</div>
             : <p key={k} className={b.list ? 'doc-li' : ''}>{b.text}</p>))}
-          {s.notes && <div className="slide-notes small"><b>Notes</b> {s.notes}</div>}
+          {s.notes && <div className="slide-notes small"><b>{t('Notes')}</b> {s.notes}</div>}
         </section>
       ))}
     </div>
@@ -74,13 +74,13 @@ function SheetView({ pane, f, base }) {
   const [d, setD] = useState(null)
   const [at, setAt] = useState(0)
   useEffect(() => { setD(null); getAt(base, `/agents/${enc(pane)}/office/sheet?path=${enc(f.path)}`).then(setD).catch((e) => setD({ error: e.message })) }, [pane, f.path, f.mtime, base])
-  if (!d) return <div className="viewer-empty"><Icon name="refresh" size={20} className="spin" /><p className="muted small">Reading {f.name}…</p></div>
+  if (!d) return <div className="viewer-empty"><Icon name="refresh" size={20} className="spin" /><p className="muted small">{t('Reading {name}…', { name: f.name })}</p></div>
   if (d.error) return <div className="viewer-empty"><Icon name="alert" size={22} /><p>{d.error}</p></div>
   const s = d.sheets[Math.min(at, d.sheets.length - 1)]
   return (
     <div className="sheet-view">
       <div className="sheet-scroll">
-        {!s?.rows.length ? <p className="muted pad">This sheet is empty.</p> : (
+        {!s?.rows.length ? <p className="muted pad">{t('This sheet is empty.')}</p> : (
           <table className="sheet">
             <thead><tr><th className="corner" />{Array.from({ length: s.cols }, (_, i) => <th key={i}>{colName(i)}</th>)}</tr></thead>
             <tbody>
@@ -90,7 +90,7 @@ function SheetView({ pane, f, base }) {
             </tbody>
           </table>
         )}
-        {s?.truncated && <p className="muted small pad">Showing the first 2,000 rows and 80 columns.</p>}
+        {s?.truncated && <p className="muted small pad">{t('Showing the first 2,000 rows and 80 columns.')}</p>}
       </div>
       {d.sheets.length > 1 && (
         <div className="sheet-tabs" role="tablist">
@@ -149,23 +149,23 @@ export function menuItems(entry, act, { onMention, send = false, copyHere = null
   return [
     dir && assist && { label: t('Look over this folder'), icon: 'wand', title: t('AI Assist'), run: () => assist(entry) },
     dir && assist && 'sep',
-    dir && { label: 'New file…', icon: 'file', run: () => act('newFile', entry) },
-    dir && { label: 'New folder…', icon: 'folder', run: () => act('newFolder', entry) },
+    dir && { label: t('New file…'), icon: 'file', run: () => act('newFile', entry) },
+    dir && { label: t('New folder…'), icon: 'folder', run: () => act('newFolder', entry) },
     dir && { label: t('Send files from this device…'), icon: 'upload', run: () => act('upload', entry) },
     dir && 'sep',
-    !dir && onComputer && OPENABLE.test(entry.name) && { label: 'Open in its app', icon: 'external', run: () => act('open', entry) },
-    onComputer && { label: REVEAL, icon: 'folder-open', run: () => act('reveal', entry) },
-    onMention && !root && { label: 'Mention to the agent', icon: 'chat', run: () => onMention(entry.path) },
+    !dir && onComputer && OPENABLE.test(entry.name) && { label: t('Open in its app'), icon: 'external', run: () => act('open', entry) },
+    onComputer && { label: t(REVEAL), icon: 'folder-open', run: () => act('reveal', entry) },
+    onMention && !root && { label: t('Mention to the agent'), icon: 'chat', run: () => onMention(entry.path) },
     'sep',
     copyHere && { label: copyHere, icon: 'download', run: () => act('copyHere', entry) },
     send && { label: t('Send to…'), icon: 'send', run: () => act('send', entry) },
     (copyHere || send) && 'sep',
-    { label: 'Copy path', icon: 'copy', run: () => act('copyPath', entry) },
-    !root && { label: 'Copy relative path', icon: 'copy', run: () => act('copyRel', entry) },
+    { label: t('Copy path'), icon: 'copy', run: () => act('copyPath', entry) },
+    !root && { label: t('Copy relative path'), icon: 'copy', run: () => act('copyRel', entry) },
     !root && 'sep',
-    !root && { label: 'Duplicate', icon: 'layers', run: () => act('duplicate', entry) },
-    !root && { label: 'Rename…', icon: 'edit', run: () => act('rename', entry) },
-    !root && { label: 'Move to Trash', icon: 'trash', danger: true, run: () => act('trash', entry) },
+    !root && { label: t('Duplicate'), icon: 'layers', run: () => act('duplicate', entry) },
+    !root && { label: t('Rename…'), icon: 'edit', run: () => act('rename', entry) },
+    !root && { label: t('Move to Trash'), icon: 'trash', danger: true, run: () => act('trash', entry) },
   ].filter(Boolean).filter((it, i, a) => it !== 'sep' || (i > 0 && a[i - 1] !== 'sep' && i < a.length - 1))
 }
 
@@ -192,10 +192,10 @@ export function NameDialog({ title, initial = '', action, onSubmit, onClose }) {
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <form className="modal name-dialog" onSubmit={submit} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}>
         <header className="modal-head"><h3>{title}</h3></header>
-        <input ref={ref} className="input" value={v} onChange={(e) => setV(e.target.value)} spellCheck={false} aria-label="Name" />
+        <input ref={ref} className="input" value={v} onChange={(e) => setV(e.target.value)} spellCheck={false} aria-label={t('Name')} />
         {err && <p className="error-text small">{err}</p>}
         <div className="modal-foot">
-          <button type="button" className="btn small" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn small" onClick={onClose}>{t('Cancel')}</button>
           <button type="submit" className="btn small primary" disabled={busy || !v.trim()}>{action}</button>
         </div>
       </form>

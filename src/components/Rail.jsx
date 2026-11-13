@@ -13,7 +13,7 @@ import { Quiet } from './ErrorBoundary.jsx'
 import { openMeeting, useMeetings } from './meetings/recording.jsx'
 import { Dialog } from './meetings/tools.jsx'
 import { whiteboards } from './whiteboard/links.js'
-import { t, tx } from '../i18n/index.js'
+import { t, tn, tx } from '../i18n/index.js'
 import { useTrial } from '../trials.js'
 
 // Mirrors herdr's sidebar: numbered workspaces, each with its tabs. Spaces fold,
@@ -97,10 +97,12 @@ export function Menu({ items, onClose, align = 'right' }) {
   )
 }
 
-function InlineRename({ value, onDone }) {
+// A name edited where it shows: Enter keeps it (null when it's empty or the same), Esc or a click
+// elsewhere puts it back. The tabs above the agents (TabStrip.jsx) rename a tab with it too.
+export function InlineRename({ value, onDone, className = 'rail-rename' }) {
   const [v, setV] = useState(value)
   return (
-    <input className="rail-rename" autoFocus value={v} onChange={(e) => setV(e.target.value)} onFocus={(e) => e.target.select()}
+    <input className={className} autoFocus value={v} onChange={(e) => setV(e.target.value)} onFocus={(e) => e.target.select()}
       onKeyDown={(e) => { if (e.key === 'Enter') onDone(v.trim() && v.trim() !== value ? v.trim() : null); if (e.key === 'Escape') onDone(null) }}
       onBlur={() => onDone(null)} aria-label={t('New name')} />
   )
@@ -414,7 +416,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
           {recAsk && meet?.rec && (
             <Dialog title={t('Record a new meeting?')} onClose={() => setRecAsk(false)}>
               <div className="mt-fix">
-                <p><b>{meet.rec.title}</b> is recording. {t('Stop it and record a new one? It keeps everything recorded so far, and its notes are written as usual.')}</p>
+                <p>{tn('{title} is recording.', { title: <b>{meet.rec.title}</b> })} {t('Stop it and record a new one? It keeps everything recorded so far, and its notes are written as usual.')}</p>
                 <div className="mt-dialog-acts">
                   <button type="button" className="ghost-btn" onClick={() => setRecAsk(false)}>{t('Cancel')}</button>
                   <button type="button" className="btn small" onClick={() => { setRecAsk(false); openMeeting(meet.rec.id) }}>{t('Open it')}</button>

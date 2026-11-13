@@ -586,11 +586,11 @@ try {
   // computer, as the relay's do): the apps are this computer's, so Open in Word says it opens here,
   // on the file's computer, and nothing opens.
   const there = await page(b, `${kit.url}/m/far/`, {
+    // A request still on its way when the window closes is let go.
     width: 1440, height: 900, before: async (ctx) => { await noServiceWorker(ctx); await ctx.route(/\/m\/far\//, async (r) => {
-      if (r.request().headers().accept === 'text/event-stream') return r.abort()
+      if (r.request().headers().accept === 'text/event-stream') return r.abort().catch(() => {})
       const u = new URL(r.request().url())
-      const res = await r.fetch({ url: `${kit.url}${u.pathname.slice('/m/far'.length)}${u.search}`, headers: { ...r.request().headers(), 'x-bridge-relay': 'far' } })
-      return r.fulfill({ response: res })
+      try { return await r.fulfill({ response: await r.fetch({ url: `${kit.url}${u.pathname.slice('/m/far'.length)}${u.search}`, headers: { ...r.request().headers(), 'x-bridge-relay': 'far' } }) }) } catch { /* closed */ }
     }) },
   })
   pages.push(there)
@@ -603,6 +603,8 @@ try {
   await sleep(500)
   ok(logs() === logsThen, 'and nothing opens, there or here')
   await shot(there.p, `${tag}studio-docs-open-in-elsewhere`)
+  await there.ctx.unrouteAll({ behavior: 'ignoreErrors' })
+  await pages.splice(pages.indexOf(there), 1)[0].ctx.close()
 
   // ---------- Dark ----------
   const dark = await page(b, kit.url, { width: 1440, height: 900, mode: 'dark' })

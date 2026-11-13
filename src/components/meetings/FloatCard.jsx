@@ -2,11 +2,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../Icon.jsx'
 import { api, usePoll, useFleet } from '../../api.js'
 import { MEETINGS_CHANNEL, clock, useCallEvent, QuickNote, endedWords } from './recording.jsx'
-import { KIND, setAssist, markAssist } from './assist.jsx'
+import { KIND, setAssist, markAssist, fromWords, webWords } from './assist.jsx'
+import { boardWords } from './board.jsx'
 import { PrepGlance } from './prep.jsx'
-import { useScreenAccess, useAllowCall, allowSteps } from './allowcall.jsx'
+import { useScreenAccess, useAllowCall, allowSteps, noteOpened } from './allowcall.jsx'
 import { joined } from '../Agenda.jsx'
-import { t, locale } from '../../i18n/index.js'
+import { t, locale, tn } from '../../i18n/index.js'
 import './meetings.css'
 
 // The floating card (desktop app, ?float=1): a small window over your other windows. While a
@@ -18,6 +19,7 @@ import './meetings.css'
 // instead (Settings › Meetings), a click on the bar opens and closes it. On a Mac it can move to the
 // menu bar for the meeting, out of the way of a screen you share. When a call starts: Take notes.
 // When it ends: Stop or keep recording. Otherwise (Settings › Meetings › Always): what needs you.
+// With AI Assist's live board on (a beta feature), a line says what's on it and opens it.
 // With AI Assist's Suggest what to ask on, its newest suggestion shows under the bar, open or not,
 // since you're looking at the call: ✓ puts it in your notes, ✕ dismisses it. Ten minutes before a
 // meeting with other people: Join, and what to go in with at a glance (prep.jsx's PrepGlance), with
@@ -49,11 +51,13 @@ function talkShare(lines) {
 }
 // A call that's silent while it records: the list to turn Bridge AI on in (the second on System
 // Settings' page: Screen Recording, above it, doesn't cover the sound), then Restart Bridge AI, and
-// Reset and ask again if it's still quiet after (allowcall.jsx).
-function QuietBanner() {
+// Reset and ask again if it's still quiet after (allowcall.jsx). access: what macOS says (the
+// server's); when it lets Bridge AI hear the call, the silence is the call's own, and that's said.
+function QuietBanner({ access }) {
   const { data } = useScreenAccess()
-  const a = useAllowCall('sound', { recording: true, started: data?.started })
+  const a = useAllowCall('sound', { recording: true, started: data?.started, access })
   const s = allowSteps('sound', a)
+  if (access === 'allowed') return <div className="fc-banner fc-quiet" role="status"><p><b>{t('No sound from the call.')}</b> {t('macOS lets Bridge AI hear it, so nothing has played yet. If people are talking, check the call\'s sound plays on this Mac.')}</p></div>
   return (
     <div className="fc-banner fc-quiet" role="status">
       <p><b>{t('No sound from the call.')}</b> {t('If people are talking, turn on Bridge AI in System Audio Recording Only, the second list under System Settings › Privacy & Security › Screen & System Audio Recording. Screen Recording, above it, doesn\'t cover the sound.')}{s.say}</p>
@@ -243,7 +247,7 @@ export default function FloatCard() {
   const out = () => { clearTimeout(leave.current); if (onHover && !drag.current?.moved && !edgeNow.current) leave.current = setTimeout(() => { if (!writing()) setHover(false) }, 500) }
   // macOS lets Bridge AI hear a call only once it's allowed (System Audio Recording): until then a
   // call's sound is silence. Opens the settings page to allow it.
-  const allowCall = () => api('/fix/settings', { method: 'POST', body: { pane: 'audio' } }).catch((e) => setErr(e.message))
+  const allowCall = () => api('/fix/settings', { method: 'POST', body: { pane: 'audio' } }).then(() => noteOpened('sound'), (e) => setErr(e.message))
 
   const act = async (fn) => { setBusy(true); setErr(null); try { await fn() } catch (e) { setErr(e.message) } finally { setBusy(false); refresh() } }
   // Pause, Resume, Stop and New section go to the main window when it's the one recording (it has the mic);
@@ -280,7 +284,7 @@ export default function FloatCard() {
           <span className={`fc-dot${paused ? ' paused' : ''}`}><span className="rec-dot" aria-hidden="true" /></span>
           <b className="fc-time">{clock(secs)}</b>
           <span className="fc-title" title={r.title}>{r.title}</span>
-          {r.callQuiet && !paused && <button type="button" className="fc-x fc-warn" onClick={allowCall} aria-label={t('No sound from the call')} title={t('No sound from the call. If people are talking, turn on Bridge AI in System Audio Recording Only, the second list on that page of System Settings: click to open it')}><Icon name="alert" size={13} /></button>}
+          {r.callQuiet && !paused && <button type="button" className="fc-x fc-warn" onClick={r.callAccess === 'allowed' ? () => setHover(true) : allowCall} aria-label={t('No sound from the call')} title={r.callAccess === 'allowed' ? t('No sound from the call') : t('No sound from the call. If people are talking, turn on Bridge AI in System Audio Recording Only, the second list on that page of System Settings: click to open it')}><Icon name="alert" size={13} /></button>}
           {!r.callEnded && (paused
             ? <button type="button" className="fc-x fc-play" onClick={() => op('resume')} aria-label={t('Resume')} title={t('Resume recording')}><Icon name="play" size={13} /></button>
             : <button type="button" className="fc-x" onClick={() => op('pause')} aria-label={t('Pause')} title={t('Pause recording')}><Icon name="pause" size={13} /></button>)}
@@ -289,7 +293,14 @@ export default function FloatCard() {
         {tip && (
           <div className={`fc-tip k-${tip.kind}`} role="status">
             <span className="fc-tip-kind"><Icon name="wand" size={11} /> {t(KIND[tip.kind] || KIND.idea)}</span>
+            {/* An answer: the question it's to, the answer, and where it's from (or how its lookup on the web went). */}
+            {tip.kind === 'answer' && <q className="fc-tip-q" title={tip.q}>{tip.q}</q>}
             <span className="fc-tip-text" title={tip.why || ''}>{tip.text}</span>
+            {tip.kind === 'answer' && (() => {
+              const from = (tip.sources || []).map((s) => fromWords(s, tip)).filter(Boolean).join(' · ')
+              const web = webWords(tip)
+              return <span className={`fc-tip-from${tip.web?.state === 'failed' ? ' fail' : ''}`} title={[from, web].filter(Boolean).join('\n')}>{tip.web?.state === 'looking' || tip.web?.state === 'failed' ? web : from}</span>
+            })()}
             <span className="fc-tip-acts">
               <button type="button" className="fc-x" onClick={() => act(() => markAssist(r.id, tip.id, 'kept'))} aria-label={t('Add to my notes')} title={t('Add to my notes')}><Icon name="check" size={12} /></button>
               <button type="button" className="fc-x" onClick={() => act(() => markAssist(r.id, tip.id, 'dismissed'))} aria-label={t('Dismiss')} title={t('Dismiss')}><Icon name="x" size={12} /></button>
@@ -304,7 +315,7 @@ export default function FloatCard() {
                 <button type="button" className="btn small" disabled={busy} onClick={() => act(() => api(`/meetings/${r.id}/keep`, { method: 'POST' }))}>{t('Keep recording')}</button>
               </div>
             )}
-            {r.callQuiet && !paused && <QuietBanner />}
+            {r.callQuiet && !paused && <QuietBanner access={r.callAccess} />}
             <div className="fc-live">
               {info && <p className="fc-info" title={info}>{info}</p>}
               <div className="fc-said" ref={saidBox}>
@@ -332,6 +343,8 @@ export default function FloatCard() {
                 </>
                 : live.canWatch && app().floatWatch && <button type="button" className="fc-chip" onClick={() => app().floatWatch()} title={t('Pick the window or screen being shared. A picture is kept each time it changes.')}><Icon name="screen" size={12} /> {t('Watch screen')}</button>)}
             </div>
+            {/* AI Assist's live board (a beta feature): how much is on it, a click from opening it. */}
+            {m?.liveBoard?.id && <button type="button" className="fc-board" onClick={() => app().floatOpen?.({ meeting: r.id, board: m.liveBoard.id })} title={t('Open "{name}", the whiteboard of this meeting', { name: m.liveBoard.id })}><Icon name="shapes" size={12} /><span>{boardWords(m.liveBoard) ? t('Board: {what}', { what: boardWords(m.liveBoard) }) : t('Board')}</span></button>}
             <div className="fc-acts">
               <button type="button" className="btn small" onClick={() => op('section')} title={t('Start the next part of the meeting here, like a lap. The transcript, your notes and the summary get a heading for each part.')}><Icon name="flag" size={12} /> {t('New section')}</button>
               <span className="fc-grow" />
@@ -356,7 +369,7 @@ export default function FloatCard() {
           <span className="fc-badge"><Icon name="mic" size={15} /></span>
           <span className="fc-ask-text">
             <b className="fc-title">{what}</b>
-            <span className="fc-sub" title={ev?.title || undefined}>{ev ? <>Take notes for <b>{ev.title}</b>?</> : `${t('Take notes?')} ${t('Your mic and the call, transcribed as you go.')}`}</span>
+            <span className="fc-sub" title={ev?.title || undefined}>{ev ? tn('Take notes for {event}?', { event: <b>{ev.title}</b> }) : `${t('Take notes?')} ${t('Your mic and the call, transcribed as you go.')}`}</span>
           </span>
           {hide}
         </div>

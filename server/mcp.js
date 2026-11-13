@@ -25,7 +25,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 import { loginPath, adapter } from './agents.js'
-import { writeFileAtomic } from './paths.js'
+import { writeFileAtomic, DATA, ROOT, NODE } from './paths.js'
 import { MCP_CATALOG } from '../src/components/settings/mcpCatalog.js'
 
 const TEST_HOME = process.env.BRIDGE_MCP_HOME ? path.resolve(process.env.BRIDGE_MCP_HOME) : null
@@ -452,6 +452,72 @@ async function forEachAgent(installed, kinds, fn) {
     catch (e) { results.push({ kind, label: agent.label, ok: false, error: e.message }) }
   }
   return results
+}
+
+// ---------- Bridge AI itself, as a server for other apps ----------
+// Settings › MCP Servers' "Bridge AI as an MCP Server": `bridge-ai mcp` added, in one click, to the
+// apps that take it, each as its own docs say (read November 2026):
+//   Claude Code     ~/.claude.json mcpServers (user scope): `claude mcp add --scope user bridge-ai -- <command>`,
+//                   or the file, { type: "stdio", command, args, env } (code.claude.com/docs/en/mcp)
+//   Claude Desktop  claude_desktop_config.json mcpServers: { command, args, env }, an absolute command;
+//                   ~/Library/Application Support/Claude (macOS), %APPDATA%\Claude (Windows),
+//                   ~/.config/Claude (Linux); read when it starts (modelcontextprotocol.io, connect local servers)
+//   Cursor          ~/.cursor/mcp.json mcpServers: { type: "stdio", command, args, env } (cursor.com/docs/mcp)
+//   Codex           ~/.codex/config.toml [mcp_servers.bridge-ai] command, args, env: `codex mcp add bridge-ai -- <command>`
+// The command they're given: on a Mac and Linux a small script in Bridge AI's data folder (bin/
+// bridge-ai-mcp), written again each time Bridge AI starts with where its Node and code are now, so
+// an update or a move doesn't leave them pointing at nothing; on Windows, the app's own Node with
+// the script (Windows apps start a .cmd only through cmd).
+const BRIDGE = 'bridge-ai'
+const sh = (s) => `'${String(s).replace(/'/g, "'\\''")}'`
+export function bridgeCommand({ data = DATA } = {}) {
+  const env = { ...NODE.env, ...(process.env.BRIDGE_HOME ? { BRIDGE_HOME: data } : {}), ...(process.env.BRIDGE_PORT ? { BRIDGE_PORT: process.env.BRIDGE_PORT } : {}) }
+  const cli = path.join(ROOT, 'scripts', 'cli.js')
+  if (process.platform === 'win32') return { command: NODE.bin, args: [cli, 'mcp'], env }
+  const file = path.join(data, 'bin', 'bridge-ai-mcp')
+  const text = `#!/bin/sh\n# Bridge AI as an MCP server (bridge-ai mcp), for the apps Settings › MCP Servers added it to.\n# Bridge AI writes this again each time it starts, with where it is now.\n${Object.entries(env).map(([k, v]) => `${k}=${sh(v)} `).join('')}exec ${sh(NODE.bin)} ${sh(cli)} mcp "$@"\n`
+  try { if (readText(file) !== text) { fs.mkdirSync(path.dirname(file), { recursive: true }); writeFileAtomic(file, text, { mode: 0o700 }) } } catch { /* said when it's added */ }
+  return { command: file, args: [], env: {} }
+}
+const appSupport = () => (process.platform === 'darwin' ? path.join(HOME, 'Library', 'Application Support')
+  : process.platform === 'win32' ? (!TEST_HOME && process.env.APPDATA) || path.join(HOME, 'AppData', 'Roaming') : XDG())
+const desktopSpec = { file: () => path.join(appSupport(), 'Claude', 'claude_desktop_config.json'), format: 'json', key: 'mcpServers', read: readStd, transports: ['stdio'], entry: (s) => stdEntry(s, { typed: false }) }
+// Whether the app is on this computer: its config folder, or (not in tests) the app itself.
+const appThere = (dir, apps = []) => fs.existsSync(dir) || (!TEST_HOME && process.platform === 'darwin' && apps.some((a) => fs.existsSync(path.join('/Applications', a))))
+const BRIDGE_APPS = [
+  { id: 'claude-code', label: 'Claude Code', kind: 'claude', restart: 'Start a new Claude Code session to use it.' },
+  { id: 'claude-desktop', label: 'Claude Desktop', spec: desktopSpec, there: () => appThere(path.dirname(desktopSpec.file()), ['Claude.app']), restart: 'Quit Claude Desktop completely and open it again to use it.' },
+  { id: 'cursor', label: 'Cursor', kind: 'cursor', there: () => appThere(path.join(HOME, '.cursor'), ['Cursor.app']), restart: 'Restart Cursor to use it.' },
+  { id: 'codex', label: 'Codex', kind: 'codex', restart: 'Start Codex again to use it.' },
+]
+const hasBridge = (spec) => { try { const { data } = readConfig(spec.file(), spec.format); return !!data?.[spec.key]?.[BRIDGE] } catch { return false } }
+export const bridgeMcp = {
+  command: () => bridgeCommand(),
+  // Each app: whether it's on this computer, and whether Bridge AI is added to it already.
+  async apps(installed) {
+    const agents = await agentsWithMcp(installed).catch(() => [])
+    return BRIDGE_APPS.map((a) => {
+      const spec = a.spec || SPECS[a.kind]
+      const there = a.kind ? agents.some((x) => x.kind === a.kind) || (a.there?.() ?? false) : a.there()
+      return { id: a.id, label: a.label, there, added: hasBridge(spec), file: short(spec.file()) }
+    })
+  },
+  async add(id, installed) {
+    const a = BRIDGE_APPS.find((x) => x.id === id)
+    if (!a) throw new Error('Bridge AI can be added to Claude Code, Claude Desktop, Cursor and Codex')
+    const spec = a.spec || SPECS[a.kind]
+    if (hasBridge(spec)) return { ok: true, already: true, note: `${a.label} has Bridge AI already. ${a.restart}` }
+    const s = { name: BRIDGE, transport: 'stdio', ...bridgeCommand() }
+    if (a.kind) {
+      const agent = (await agentsWithMcp(installed)).find((x) => x.kind === a.kind) || (a.there?.() ? { kind: a.kind, label: a.label, path: null } : null)
+      if (!agent) throw new Error(`${a.label} isn't on this computer`)
+      await addTo(agent, s)
+    } else {
+      if (!a.there()) throw new Error(`${a.label} isn't on this computer`)
+      await editJson(spec.file(), spec.format, spec.key, (map) => { map[BRIDGE] = spec.entry(s) })
+    }
+    return { ok: true, note: `Added to ${a.label} (${short(spec.file())}). ${a.restart}` }
+  },
 }
 
 // ---------- Routes ----------

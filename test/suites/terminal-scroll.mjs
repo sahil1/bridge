@@ -194,9 +194,15 @@ try {
   const busySeen = await watched(p)
   const busyBad = jumps(busySeen, page1)
   ok(busyBad.length === 0, 'with new lines coming in while the rest is read in, the lines you\'re reading stay put: no frame jumps', { frames: busySeen.frames.length, bad: busyBad.slice(0, 5) })
+  // Where the keys took it, once it's drawn: a busy computer can draw the last Page Up's page a frame
+  // after the loop above has looked (in CI, the view then went up one more page "by itself").
+  await p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  // (Should it move, what else changed says why: the rows shown and their size, and the line under it.)
+  const shape = () => p.evaluate((sel) => { const r = [...document.querySelectorAll(`${sel} .xterm-rows`)].find((e) => e.offsetParent); return r ? `${r.children.length} rows at ${getComputedStyle(r).fontSize}` : null }, TERM)
   const still = await top(p)
+  const shapeWas = await shape()
   await p.waitForTimeout(2500)
-  ok((await top(p)) === still, 'reading back, the view holds still while the agent prints', { before: still, after: await top(p) })
+  ok((await top(p)) === still, 'reading back, the view holds still while the agent prints', { before: still, after: await top(p), shape: [shapeWas, await shape()], hint: await hint(p) })
   ok(await p.locator(`${TERM} .term-jump`).first().isVisible(), 'and offers New output · jump to latest')
   await p.locator(`${TERM} .term-jump`).first().click()
   ok(!!(await until(async () => !(await p.locator(`${TERM} .term-jump`).first().isVisible()) && /line 8\d\d\d of/.test(await p.locator(`${TERM} .xterm-rows`).filter({ visible: true }).first().innerText().catch(() => '')), 5000)), 'which shows the latest lines')

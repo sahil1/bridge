@@ -60,6 +60,12 @@ voices you name (Settings › Meetings, off to start with), the voices you name 
 numbers each, with the name you gave, in `~/.bridge-ai/meetings/voices.json`, readable by you only;
 they're never sent anywhere, not to your other devices either, and Forget voices deletes them.
 
+Speakers from the call's video (a beta feature, on a Mac, off until you turn it on) takes a few
+pictures of the call's window while someone talks, as your Screen Recording permission allows, and
+reads them on your Mac with Apple's Vision: where the faces are, how much each mouth moved and the
+names under them. The pictures stay in memory and are never written to disk; only those numbers and
+names are kept, in that meeting's folder (`sights.jsonl`), and they go with it when it's deleted.
+
 Dictation and voice notes are turned into text on your computer, and the recording isn't kept
 (unless you ask for it, below). With "Show the words as you talk" (Settings › Voice, on where your
 computer keeps up), the sound goes to your computer as you talk, a moment at a time, rather than all
@@ -185,6 +191,17 @@ minutes before, unless you turn that off in Settings › Meetings), all of that 
 writes your meeting notes, as your meeting notes do: a model on your computer keeps it there; any
 other gets it. What it suggests is kept in `~/.bridge-ai/cache/meeting-prep.json` until two days
 after the meeting.
+
+With Answers in AI Assist on (a beta feature, off until you turn it on), while a meeting records
+with AI Assist on, the questions asked since AI Assist last looked go to the model that writes your
+meeting notes, with what AI Assist reads already and parts of the past meetings they may be about
+(their summaries and your notes, or the lines of their transcripts with the question's words): a
+model on your computer keeps them there; any other gets them. Only once you've saved a Perplexity
+key in Settings › Model Providers is a question looked up on the web, and only one the model
+answered from its own knowledge and says depends on facts that change: the question alone, in a
+sentence of its own, goes to Perplexity, never the transcript, your notes, your files or the
+meeting's name. The answers are kept in the meeting's folder (`assist.json`), and one you keep goes
+in your notes.
 
 If you run Bridge AI on a server or in Docker, all of this applies to that machine instead of your
 computer.

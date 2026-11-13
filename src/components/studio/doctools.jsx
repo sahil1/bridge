@@ -362,8 +362,9 @@ export const askItems = (hook) => {
 
 // selection(): { from, to, text, before, after } what's picked and around it; apply(range, text):
 // the new words put in. Shown over the page, by the words picked. hook: a ref given { ask, picked }
-// for AI Assist in the page's header.
-export function AskInPlace({ editor, file, selection, apply, scroller, hook }) {
+// for AI Assist in the page's header. onComment: a comment on the words picked, beside AI Assist
+// (a Word file, with Comments on).
+export function AskInPlace({ editor, file, selection, apply, scroller, hook, onComment }) {
   const [box, setBox] = useState(null) // where it's drawn: { left, top, bottom }
   const [menu, setMenu] = useState(false)
   const [own, setOwn] = useState('')
@@ -436,6 +437,7 @@ export function AskInPlace({ editor, file, selection, apply, scroller, hook }) {
       {!job && (
         <div className="sd-bubble" role="toolbar" aria-label={t('Picked words')}>
           <button type="button" className={`sd-bubble-ai${menu ? ' on' : ''}`} onClick={() => setMenu((x) => !x)} aria-expanded={menu} aria-haspopup="menu" title={t('AI Assist: change the words you picked')}><Icon name="wand" size={13} /> {t('AI Assist')}<Glyph name="chevron-down" size={11} /></button>
+          {onComment && <button type="button" className="sd-bubble-cmt" onClick={() => { setMenu(false); onComment() }} title={withKeys(t('Comment on the words you picked'), 'mod', 'alt', 'm')} aria-label={t('Comment')}><Glyph name="comment" size={13} /> {t('Comment')}</button>}
           {menu && (
             <div className="sd-drop sd-ask-menu" role="menu" aria-label={t('AI Assist')}>
               {ASKS.map((a) => <Item key={a.id} label={t(a.label)} run={() => ask(a.text, t(a.label))} />)}

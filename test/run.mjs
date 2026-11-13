@@ -19,13 +19,16 @@ import { ROOT, OUT, stopTree } from './lib/harness.mjs'
 // alone: it measures how quick things are, so it runs with no other test beside it.
 const SUITES = [
   { name: 'server', build: null, covers: [/^server\//, /^shared\//, /^scripts\/(start|cli)\.js$/] },
+  // The release's smoke test of each built app (scripts/smoke.js), against this checkout's server.
+  { name: 'smoke', build: 'dist', covers: [/^scripts\/smoke\.js$/, /^server\/(index|apiauth|apitoken|guard|setup|attach|terminal)\.js$/] },
   { name: 'relay-signin', build: null, covers: [/^server\/(relay|agents|nodejs|paths)\.js$/] },
   { name: 'meetings-api', build: null, covers: [/^server\/(meetings|meetwork|meetmemory|speech|calendar|doctext|index|pr|chieftasks|worktrees)\.js$/] },
   { name: 'studio', build: 'dist', browser: true, covers: [/^server\/(studio|studioapps|files|office|index)\.js$/, /^src\/components\/studio\//, /^src\/(App|lazy)\.jsx$/, /^src\/components\/(Files|Rail)\.jsx$/] },
   { name: 'studio-pdf', build: 'dist', browser: true, covers: [/^server\/(signing|studio|files|index)\.js$/, /^shared\/signmarks\.js$/, /^src\/components\/studio\/(pdf\/|Studio\.jsx$|focus\.js$)/, /^src\/components\/settings\/About\.jsx$/, /^src\/trials\.js$/, /^test\/stand-ins\/model\.mjs$/] },
   { name: 'studio-docs', build: 'dist', browser: true, covers: [/^server\/(studio|studiofound|studioapps|files|index|chatmodels)\.js$/, /^src\/components\/studio\/(Studio|HomeFiles|ooxml|wordschema|docview|doctools|search|keys|files|focus)\.jsx?$/, /^src\/components\/studio\/(doc|home|studio)\.css$/, /^src\/components\/studio\/editors\/DocEditor\.jsx$/, /^test\/lib\/wordfile\.mjs$/] },
+  { name: 'studio-comments', build: 'dist', browser: true, covers: [/^server\/(studio|index|commentassist)\.js$/, /^src\/components\/studio\/(ooxml|wordschema|docview|doctools|wordcomments|doccomments|sheetcomments|deckcomments|xlsxbook|pptxdoc)\.jsx?$/, /^src\/components\/studio\/(doc|threads)\.css$/, /^src\/components\/studio\/editors\/(DocEditor|SheetEditor|SlidesEditor)\.jsx$/, /^src\/trials\.js$/, /^test\/lib\/(wordfile|sheetfile|deckfile)\.mjs$/, /^test\/stand-ins\/model\.mjs$/] },
   { name: 'studio-writing', build: 'dist', browser: true, covers: [/^server\/studio\.js$/, /^src\/components\/studio\/(Studio|ooxml|wordschema|docview|doctools|search|keys|files|paste|docx|focus)\.jsx?$/, /^src\/components\/studio\/doc\.css$/, /^src\/components\/studio\/editors\/DocEditor\.jsx$/, /^test\/lib\/wordfile\.mjs$/] },
-  { name: 'studio-xlsx', build: null, covers: [/^src\/components\/studio\/(xlsxbook|xlsx)\.js$/] },
+  { name: 'studio-xlsx', build: null, covers: [/^src\/components\/studio\/(xlsxbook|xlsx)\.js$/, /^test\/lib\/sheetfile\.mjs$/] },
   { name: 'studio-sheets', build: 'dist', browser: true, covers: [/^src\/components\/studio\/(xlsx|csv|sheetkeys|sheetcells|focus)\.js$/, /^src\/components\/studio\/(sheetchart\.jsx|sheet\.css|editors\/SheetEditor\.jsx)$/, /^src\/App\.jsx$/] },
   { name: 'studio-deck', build: 'dist', browser: true, covers: [/^server\/(studio|index)\.js$/, /^src\/components\/studio\/(deck\.js|deck\.css|pptx\.js|pptxdoc\.js|pptxdraw\.js|pptxtext\.js|packs\.jsx|doctools\.jsx|doc\.css|Studio\.jsx|focus\.js)$/, /^src\/components\/studio\/editors\/(Deck|Slides)/, /^test\/lib\/deckfile\.mjs$/, /^test\/stand-ins\/model\.mjs$/] },
   { name: 'studio-deck-looks', build: 'dist', browser: true, covers: [/^src\/components\/studio\/(deck\.js|deck\.css|pptx\.js|pptxdoc\.js|pptxdraw\.js|Studio\.jsx)$/, /^src\/components\/studio\/editors\/(Deck|Slides)/, /^test\/lib\/bgdecks\.mjs$/] },
@@ -41,9 +44,11 @@ const SUITES = [
   { name: 'settings-ui', build: 'dist', browser: true, covers: [/^src\/components\/settings\//, /^src\/components\/(Settings|Appearance|Palette|Machines)\.jsx$/, /^src\/(dictation|voice)\/[\w.]+\.css$/, /^src\/styles\.css$/] },
   { name: 'app-ui', build: 'dist', browser: true, covers: [/^src\//, /^index\.html$/, /^public\//, /^vite\.config\.js$/, /^server\/(index|attach|terminal|settings)\.js$/, /^server\/runtime\//] },
   // Every button and link you can see on the main views (Home, an agent's Chat, Terminal and Files,
-  // Files, Studio, Meetings, Calendar, Settings' sections, the top bar and its menus, the sidebar,
-  // the tabs and the board), pressed in the desktop app and in a browser: each has to do something.
+  // Files, Studio, Meetings, Calendar, the top bar and its menus, the sidebar, the tabs and the
+  // board), and in Settings' sections (a test of their own), pressed in the desktop app and in a
+  // browser: each has to do something.
   { name: 'dead-clicks', build: 'dist', browser: true, covers: [/^src\//, /^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/] },
+  { name: 'dead-clicks-settings', build: 'dist', browser: true, covers: [/^src\//, /^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/, /^test\/suites\/dead-clicks\.mjs$/] },
   { name: 'back-forward', build: 'dist', browser: true, covers: [/^src\/backForward\.js$/, /^src\/components\/(BackForward|Console|Settings|files\/Explorer|meetings\/Meetings)\.jsx$/, /^src\/components\/backforward\.css$/, /^src\/(App\.jsx|pwa\.js|trials\.js)$/, /^server\/(index|paths)\.js$/, /^config\.example\.json$/, /^desktop\/main\.js$/] },
   { name: 'tab-strip', build: 'dist', browser: true, covers: [/^src\/components\/(TabStrip|Rail|Icon|NewAgent)\.jsx$/, /^src\/components\/tabstrip\.css$/, /^src\/(App\.jsx|styles\.css|trials\.js)$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'recommended-settings', build: 'dist', browser: true, covers: [/^src\/recommended\.js$/, /^src\/components\/(Recommended|Home|NewAgent|ModelChip|Onboarding)\.jsx$/, /^src\/components\/settings\/Agents\.jsx$/, /^src\/components\/recommended\.css$/, /^server\/(index|accounts|agents)\.js$/, /^server\/runtime\/(builtin|herdr)\.js$/, /^chief\/bin\/bridge$/, /^src\/trials\.js$/, /^test\/stand-ins\/claude\.cjs$/] },
@@ -66,7 +71,9 @@ const SUITES = [
   { name: 'home', build: 'dist', browser: true, covers: [/^server\/(home|needsyou|chieftasks|machines|boards|meetwork|index|engaged)\.js$/, /^shared\/(focus|homelayout)\.js$/, /^src\/components\/(NeedsHome|NeedsYou|Rail|AgentMap)\.jsx$/, /^src\/components\/needshome\.css$/, /^src\/(App\.jsx|trials\.js)$/, /^test\/stand-ins\/(claude\.cjs|relay\.mjs)$/] },
   { name: 'agent-map', build: 'dist', browser: true, covers: [/^server\/(agentmap|machines|needsyou|subagents|index)\.js$/, /^shared\/cloud\/follow\.js$/, /^src\/components\/(AgentMap|Machines|Board)\.jsx$/, /^src\/components\/agentmap\.css$/, /^src\/App\.jsx$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'devices-ui', build: 'dist', browser: true, covers: [/^src\/components\/(Machines|OnboardingPhone)\.jsx$/, /^src\/components\/settings\/(Relay|Phone)\.jsx$/, /^server\/(machines|relay)\.js$/, /^test\/stand-ins\/relay\.mjs$/] },
-  { name: 'phone-link', build: 'dist', browser: true, covers: [/^relay\//, /^server\/relay\.js$/, /^test\/stand-ins\/relay\.mjs$/] },
+  // How long the phone takes to open Bridge AI and get back to it: alone, as perf, so what it measures
+  // is the phone page, the link and the computer, not a test beside it busy with a browser of its own.
+  { name: 'phone-link', build: 'dist', browser: true, alone: true, covers: [/^relay\//, /^server\/relay\.js$/, /^test\/stand-ins\/relay\.mjs$/] },
   { name: 'mail', build: null, covers: [/^server\/(mail|mailparse|openin)\.js$/, /^test\/stand-ins\/mailbox\.mjs$/] },
   { name: 'mail-ui', build: 'dist', browser: true, covers: [/^src\/components\/(MailView|Inbox|Dock|Settings|Palette|Agenda)\.jsx$/, /^src\/components\/mail\//, /^src\/components\/settings\/Mail\.jsx$/, /^src\/components\/(today|openin)\.js$/, /^src\/App\.jsx$/, /^server\/(mail|mailparse|mailassist|freetimes|openin|index)\.js$/, /^test\/stand-ins\/(model|mailbox)\.mjs$/] },
   { name: 'mail-assist', build: null, covers: [/^server\/(mail|mailparse|mailassist|freetimes|calendar|usagelog|openin)\.js$/, /^test\/stand-ins\/(model|mailbox)\.mjs$/] },
@@ -97,6 +104,8 @@ const SUITES = [
   { name: 'dictation', build: null, covers: [/^shared\/dictation\//, /^desktop\/(dictation|preload)\.js$/, /^desktop\/package(-lock)?\.json$/, /^install\.sh$/, /^native\/bridgekeys\.swift$/, /^scripts\/calltap\.js$/, /^server\/(dictation|meetmemory|index)\.js$/] },
   { name: 'dictation-ui', build: 'dist', browser: true, covers: [/^src\/(dictation|audio)\//, /^shared\/dictation\//, /^src\/components\/(Composer|Terminal|LiveShell|Settings|Solo)\.jsx$/, /^src\/components\/settings\/(Voice|Dictation)\.jsx$/, /^src\/(App|main|api)\.jsx?$/, /^server\/(dictation|index)\.js$/] },
   { name: 'dictation-devices', build: 'dist', browser: true, covers: [/^src\/dictation\//, /^src\/components\/(RemoteAgent|Solo|Composer)\.jsx$/, /^src\/(App|api|passed)\.jsx?$/, /^server\/(machines|machinepages|relay)\.js$/] },
+  { name: 'mcp-server', build: 'dist', browser: true, covers: [/^server\/(mcpproto|mcpdefs|mcptools|outside|mcp|boards|places|files|studio|apiauth|index)\.js$/, /^scripts\/(cli|mcp|localapi)\.js$/, /^src\/components\/settings\/(BridgeServer|Mcp)\.jsx$/, /^src\/components\/settings\/mcp\.css$/, /^src\/components\/(NeedsYou\.jsx|needsyou\.css)$/, /^src\/trials\.js$/] },
+  { name: 'api-key', build: 'dist', browser: true, covers: [/^server\/(apiauth|apitoken|guard|chief|relay|inbox|index)\.js$/, /^desktop\/(apitoken|main|preload)\.js$/, /^scripts\/cli\.js$/, /^chief\/bin\/bridge$/, /^src\/components\/Files\.jsx$/, /^test\/stand-ins\/desktop-windows\.cjs$/] },
   { name: 'device-isolation', build: 'dist', browser: true, covers: [/^desktop\/(senders|main|preload|dictation)\.js$/, /^server\/(machinepages|guard|machines|index)\.js$/, /^src\/(api|passed)\.js$/, /^src\/components\/(RemoteAgent|Machines)\.jsx$/, /^src\/dictation\/controller\.js$/] },
   { name: 'remote-files', build: 'dist', browser: true, covers: [/^src\/components\/(Files|FileMedia|FileExtras)\.jsx$/, /^server\/(files|machines|relay|index)\.js$/, /^relay\/web\//, /^test\/fixtures\//] },
   { name: 'files-ui', build: 'dist', browser: true, covers: [/^src\/components\/files\//, /^server\/(explorer|files|transfers|projects|index)\.js$/, /^src\/components\/(Files|FileMedia|FileExtras|Rail|Icon)\.jsx$/, /^src\/components\/studio\/pdf\/pdfjs\.js$/, /^src\/(App|lazy)\.jsx$/, /^src\/trials\.js$/, /^scripts\/tcc-sim\.mjs$/] },
@@ -170,7 +179,11 @@ const runOne = (j, attempt) => new Promise((resolve) => {
   const p = spawn(process.execPath, [path.join(ROOT, 'test', 'suites', `${j.name}.mjs`)], { cwd: ROOT, env: { ...process.env, BRIDGE_TEST_BROWSER: j.engine || '' }, stdio: ['ignore', out, out] })
   // Too long: stopped with everything it started (its server, its browser). Playwright catches a
   // plain stop to close its browser first, and a test stuck waiting would then never end.
-  const limit = setTimeout(() => { fs.appendFileSync(log, '\nFAIL took more than 5 minutes, so it was stopped\n'); stopTree(p) }, 5 * 60_000)
+  // Five minutes, or a suite's own (minutes). dead-clicks, which presses every button on every view in
+  // two shapes at once, took longer than five on CI's macOS WebKit runner, so Settings' sections are a
+  // test of their own (dead-clicks-settings) and each half has the five.
+  const mins = j.minutes || 5
+  const limit = setTimeout(() => { fs.appendFileSync(log, `\nFAIL took more than ${mins} minutes, so it was stopped\n`); stopTree(p) }, mins * 60_000)
   p.on('exit', (code, signal) => {
     clearTimeout(limit)
     const text = fs.readFileSync(log, 'utf8')

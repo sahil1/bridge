@@ -78,18 +78,21 @@ function topicsIn(summary) {
 }
 
 // Who said a line: 'me', a name, OTHER (someone else, not named), or UNKNOWN (can't be told). On a
-// call your mic is you and the call's sound everyone else; in a room the voices are told apart,
-// and one of them is you once it's known.
+// call your mic is you and the call's sound everyone else, unless your mic's voices were told apart
+// too (a room on the call): then one of them is you once it's known; in a room the voices are told
+// apart, and one of them is you once it's known.
 const OTHER = ':other', UNKNOWN = ':unknown'
 function digest(m) {
   const said = meetings.transcript(m.id).filter((l) => l.text && l.t1 > l.t0)
   const call = said.some((l) => l.src === 'them')
   const voiced = !call && said.some((l) => l.voice)
+  // A room on the call whose voice for you is known: your mic's other voices are other people.
+  const roomOnCall = call && said.some((l) => l.src === 'you' && l.me)
   const told = call ? 'call' : voiced ? (said.some((l) => l.me) ? 'voices' : 'noyou') : said.length ? 'room' : 'silent'
   const whoOf = (l) => {
     if (l.me) return 'me'
     if (l.name) return isMe(l.name) ? 'me' : l.name
-    if (call) return l.src === 'you' ? 'me' : OTHER
+    if (call) return l.src !== 'you' ? OTHER : !l.voice ? 'me' : roomOnCall ? OTHER : UNKNOWN
     return voiced && l.voice ? OTHER : UNKNOWN
   }
   const you = { s: 0, w: 0, q: 0, run: 0 }, others = { s: 0, w: 0 }, unknown = { s: 0, w: 0 }

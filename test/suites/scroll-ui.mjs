@@ -172,7 +172,11 @@ try {
         const found = await nested(p)
         if (found.length) twice.push({ name, found })
         if (name === 'a meeting') await shot(p, `${tag}scroll-meeting-${width}`)
-      } catch (e) { twice.push({ name, failed: e.message.split('\n')[0] }) }
+      } catch (e) {
+        // What showed instead: the tab, Today's tab, and a view that broke saying why.
+        const saw = await p.evaluate(() => ({ tab: document.querySelector('.ws-tab[aria-selected="true"]')?.textContent || null, today: document.querySelector('.today-tabs [aria-selected="true"]')?.textContent || null, broke: document.querySelector('.crash, .crash-screen')?.textContent?.slice(0, 200) || null })).catch(() => null)
+        twice.push({ name, failed: e.message.split('\n')[0], saw })
+      }
     }
     ok(!twice.length, `${width}x${height}: Home, Meetings, a meeting, Studio's home and a document, sheet and page in it, Files, Whiteboards, Agent Map, Dictations, Usage and Settings each scroll in one place, none with a scroll area inside another`, twice)
     ok(withoutCutOff(errors).filter((e) => !/sandboxed and lacks the 'allow-same-origin'/.test(e)).length === 0, `${width}x${height}: no page errors`, errors)

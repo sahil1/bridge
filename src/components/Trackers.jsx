@@ -9,7 +9,7 @@ import Markets, { RangePicker } from './Markets.jsx'
 import { api, usePoll, fmtTime, refetch, settingsChanged } from '../api.js'
 import LocationPicker from './settings/LocationPicker.jsx'
 import SignInButton from './SignIn.jsx'
-import { t, locale } from '../i18n/index.js'
+import { t, tn, locale } from '../i18n/index.js'
 
 // Collapsible section; open/closed is remembered per card. `summary` shows when collapsed.
 export function Card({ icon, title, right, summary, children, className = '' }) {
@@ -265,8 +265,8 @@ export function Mortgage() {
           {mine && (
             <p className="small">
               {mine.refiWorthChecking
-                ? <>A 30-yr refi at today's average saves about <b>${mine.monthlySavings.toLocaleString()}/mo</b>; breakeven in {mine.breakevenMonths} months on ${mine.closingCosts.toLocaleString()} closing costs.</>
-                : <>Your rate is <b>{Math.abs(mine.spread).toFixed(2)} points below</b> today's average. No refi case until rates drop under {mine.rate.toFixed(2)}%.</>}
+                ? tn("A 30-yr refi at today's average saves about {savings}; breakeven in {months} months on {costs} closing costs.", { savings: <b>${mine.monthlySavings.toLocaleString()}/mo</b>, months: mine.breakevenMonths, costs: `$${mine.closingCosts.toLocaleString()}` })
+                : tn("Your rate is {below} today's average. No refi case until rates drop under {rate}%.", { below: <b>{t('{n} points below', { n: Math.abs(mine.spread).toFixed(2) })}</b>, rate: mine.rate.toFixed(2) })}
             </p>
           )}
           <p className="muted small">{t('Source: {source}, week of {date}. National averages; jumbo quotes differ.', { source: data.source, date: data.latest.date })}</p>

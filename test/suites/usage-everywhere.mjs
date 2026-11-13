@@ -123,14 +123,23 @@ const notes = async (model) => {
   return until(async () => { const m = await kit.api(`/meetings/${id}`); return !m.summarizing && (m.summary || m.summaryError) && m }, 30000)
 }
 // Today's Usage card, then its Usage tab (Stats, patterns and history), on a computer or a phone.
+// The card filled in first: its usage, and the last week across every provider while that's on.
+// Pressed as they came in, Stats moved down from under the press, and the click went to the card.
 const usageCard = async (pg) => {
   await pg.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-card', { detail: { id: 'gauge' } })))
-  await pg.locator('.usage-card').first().waitFor({ timeout: 15000 })
+  const card = pg.locator('.usage-card').first()
+  await card.waitFor({ timeout: 15000 })
+  const brief = (await kit.api('/config')).trials?.['usage-everywhere'] === true
+  await until(async () => !(await card.locator('.skeleton-rows').count()) && (await card.locator('.ue-brief').count() > 0) === brief, 15000)
 }
 const usageTab = async (pg) => {
   await usageCard(pg)
   await pg.locator('.usage-card button', { hasText: 'Stats, patterns and history' }).first().click()
-  await pg.locator('.ustats').first().waitFor({ timeout: 15000 })
+  // (If it never comes: what the window shows then.)
+  await pg.locator('.ustats').first().waitFor({ timeout: 15000 }).catch(async (e) => {
+    const seen = await pg.evaluate(() => (document.querySelector('.dock, .m-today, .m-more, main')?.innerText || '').replace(/\s+/g, ' ').slice(0, 300)).catch((x) => x.message)
+    throw new Error(`${e.message.split('\n')[0]} (the window then: ${seen})`)
+  })
 }
 const pages = []
 const { b, which } = await browser()

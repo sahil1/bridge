@@ -5,6 +5,7 @@ import Icon, { StatusDot } from './Icon.jsx'
 import { usePersisted } from './layout.jsx'
 import { api, usePoll } from '../api.js'
 import disposeTerm from '../disposeTerm.js'
+import { t } from '../i18n/index.js'
 
 // Phone terminal view. Reads and types into herdr panes through the CLI only,
 // so it never attaches a herdr client and never resizes your session.
@@ -68,25 +69,25 @@ function PaneScreen({ pane, onBack, onChat }) {
   return (
     <section className="pane-screen">
       <header className="ps-head">
-        <button className="win-btn" onClick={onBack} aria-label="Back to terminals"><Icon name="chevron" size={16} className="flip" /></button>
+        <button className="win-btn" onClick={onBack} aria-label={t('Back to terminals')}><Icon name="chevron" size={16} className="flip" /></button>
         <div className="ps-title">
-          <b>{pane.agent ? pane.title || pane.tab : pane.tab || pane.title || 'shell'}</b>
+          <b>{pane.agent ? pane.title || pane.tab : pane.tab || pane.title || t('shell')}</b>
           <span className="muted small">{pane.workspace} · {cols}×{rows}</span>
         </div>
         <div className="seg small-seg">
-          <button className={mode === 'fit' ? 'on' : ''} onClick={() => setMode('fit')}>Fit</button>
-          <button className={mode === 'read' ? 'on' : ''} onClick={() => setMode('read')}>Readable</button>
+          <button className={mode === 'fit' ? 'on' : ''} onClick={() => setMode('fit')}>{t('Fit')}</button>
+          <button className={mode === 'read' ? 'on' : ''} onClick={() => setMode('read')}>{t('Readable')}</button>
         </div>
-        {pane.agent && <button className="win-btn" onClick={() => onChat(pane.paneId)} aria-label="Open chat" title="Chat"><Icon name="chat" size={15} /></button>}
+        {pane.agent && <button className="win-btn" onClick={() => onChat(pane.paneId)} aria-label={t('Open chat')} title={t('Chat')}><Icon name="chat" size={15} /></button>}
       </header>
       <div className="ps-body"><div ref={hostRef} className="ps-term" /></div>
       <div className="ps-keys">{KEYS.map(([l, k]) => <button key={k} className="key" onClick={() => key(k)}>{l}</button>)}</div>
       {flash && <div className="comp-note">{flash}</div>}
       <div className="ps-input">
         <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); send() } }}
-          placeholder="Type into this pane…" autoCapitalize="off" autoCorrect="off" spellCheck="false" />
-        <button className={`ps-enter ${withEnter ? 'on' : ''}`} onClick={() => setWithEnter(!withEnter)} title="Press Enter after sending">⏎</button>
-        <button className="send" onClick={send} aria-label="Send to pane"><Icon name="send" size={15} /></button>
+          placeholder={t('Type into this pane…')} autoCapitalize="off" autoCorrect="off" spellCheck="false" />
+        <button className={`ps-enter ${withEnter ? 'on' : ''}`} onClick={() => setWithEnter(!withEnter)} title={t('Press Enter after sending')}>⏎</button>
+        <button className="send" onClick={send} aria-label={t('Send to pane')}><Icon name="send" size={15} /></button>
       </div>
     </section>
   )
@@ -106,7 +107,7 @@ export default function Terminals({ onChat }) {
   }
   return (
     <div className="m-stack terms">
-      <p className="muted small term-note">Every agent's terminal, live. Looking here doesn't change anything on your computer.</p>
+      <p className="muted small term-note">{t('Every agent\'s terminal, live. Looking here doesn\'t change anything on your computer.')}</p>
       {error && <p className="error-text">{error}</p>}
       {!data && !error && <div className="skeleton-rows"><div /><div /><div /></div>}
       {groups.map((g) => (
@@ -116,8 +117,8 @@ export default function Terminals({ onChat }) {
             <button key={p.paneId} className="term-row" onClick={() => setOpenId(p.paneId)}>
               {p.agent ? <StatusDot status={p.status || 'unknown'} /> : <Icon name="terminal" size={14} className="muted" />}
               <span className="term-main">
-                <b>{p.agent ? p.title || p.tab : p.tab && !/^\d+$/.test(p.tab) ? p.tab : p.title || 'shell'}</b>
-                <span className="muted small mono">{p.agent || 'shell'} · {(p.cwd || '').replace(/^\/Users\/[^/]+/, '~')}</span>
+                <b>{p.agent ? p.title || p.tab : p.tab && !/^\d+$/.test(p.tab) ? p.tab : p.title || t('shell')}</b>
+                <span className="muted small mono">{p.agent || t('shell')} ·{(p.cwd || '').replace(/^\/Users\/[^/]+/, '~')}</span>
               </span>
               <Icon name="chevron" size={13} className="muted" />
             </button>

@@ -1,6 +1,7 @@
 // No button that does nothing. The main views (Home, an agent's Chat, Terminal and Files, Files,
-// Studio, Meetings, Calendar, each section of Settings, the top bar and its menus, ‹ and › with
-// somewhere to go, the sidebar, the tabs and the Agents board) are opened in the desktop app (a stand-in for what it gives the page,
+// Studio, Meetings, Calendar, the top bar and its menus, ‹ and › with somewhere to go, the sidebar,
+// the tabs and the Agents board) and, in dead-clicks-settings (this file again), each section of
+// Settings are opened in the desktop app (a stand-in for what it gives the page,
 // window.bridgeApp, and for where it opens a link in a new window, desktop/senders.js opens) and in
 // a plain browser, side by side. Each button and link you can see and press there is pressed, and
 // something has to come of it: the page changes or scrolls, it asks the server, the focus or the
@@ -13,9 +14,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { startKit, checks, browser, page, sleep, shot, changeAnswer, noServiceWorker, withoutCutOff, TEST, ROOT } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, sleep, shot, changeAnswer, noServiceWorker, withoutCutOff, TEST, ROOT } from '../lib/harness.mjs'
 
-const { ok, done } = checks('dead-clicks')
+// Settings' sections are pressed by a test of their own, dead-clicks-settings, which runs this file:
+// each half takes well under the five minutes a test is given, where the two together came close.
+const SETTINGS = path.basename(process.argv[1] || '', '.mjs') === 'dead-clicks-settings'
+const NAME = SETTINGS ? 'dead-clicks-settings' : 'dead-clicks'
+const { ok, done } = checks(NAME)
 const require = createRequire(import.meta.url)
 const senders = require('../../desktop/senders.js')
 const { b, which } = await browser()
@@ -46,7 +51,7 @@ const QUIET = [
 ]
 
 // ---------- a Bridge AI with something in each view ----------
-const kit = await startKit('dead-clicks', { config: { trials: { studio: true, home: true, files: true, routines: true, 'meeting-insights': true, 'tab-groups': true, 'usage-everywhere': true, 'signature-assist': true, 'recommended-settings': true } } })
+const kit = await startKit(NAME, { config: { trials: { studio: true, home: true, files: true, routines: true, 'meeting-insights': true, 'tab-groups': true, 'usage-everywhere': true, 'signature-assist': true, 'recommended-settings': true, comments: true } } })
 // macOS's open, osascript (Finder, Terminal) and xdg-open: written down, never run.
 const NOTE = "require('fs').appendFileSync(require('path').join(__dirname, 'opened.log'), JSON.stringify(process.argv.slice(1)) + '\\n')\n"
 for (const n of ['open', 'osascript', 'xdg-open']) kit.program(n, NOTE)
@@ -251,9 +256,11 @@ async function walk(shape) {
   const goTo = async (pl, fresh = false) => {
     const tg = Date.now()
     if (DEBUG) console.log(`  ${shape} ${pl.name}: opened again${fresh ? ' (loaded)' : ''}`)
-    // Not there in a moment (something a press left over it): the page loaded again, once.
+    // Not there in a moment (something a press left over it): the page loaded again, once. (Waited
+    // for until the sidebar is there, not until every file the page asks for has come, which a busy
+    // computer can take longer than a page load is given.)
     for (let tries = 0; tries < 2; tries++) {
-      if (fresh || tries || p.url() !== `${kit.url}/`) { await p.goto(kit.url); await p.waitForSelector('.rail', { timeout: 30000 }) }
+      if (fresh || tries || p.url() !== `${kit.url}/`) { await p.goto(kit.url, { waitUntil: 'domcontentloaded' }); await p.waitForSelector('.rail', { timeout: 30000 }) }
       for (let i = 0; i < 3 && overOf(await p.evaluate(WHERE, pl.scope)) > (pl.over || 0); i++) { await p.keyboard.press('Escape'); await sleep(120) }
       await pl.open(p)
       if (!pl.ready || await p.locator(pl.ready).first().waitFor({ timeout: 6000 }).then(() => true, () => false)) break
@@ -273,15 +280,16 @@ async function walk(shape) {
     if (DEBUG) console.log(`  ${shape} ${pl.name}: open in ${Date.now() - tg} ms`)
     return p.evaluate(WHERE, pl.scope)
   }
-  // One press, and what came of it (null: nothing).
-  const press = async (pl, it) => {
+  // One press, and what came of it (null: nothing). Patient: a second try, given longer to hover and
+  // click (a busy computer).
+  const press = async (pl, it, patient = false) => {
     if (!(await p.evaluate(MARK, { scope: pl.scope, name: it.name, nth: it.nth }))) return { gone: true }
     const el = p.locator('[data-dc="1"]')
-    if (!(await el.hover({ timeout: 600 }).then(() => true, () => false))) return { covered: true }
+    if (!(await el.hover({ timeout: patient ? 3000 : 600 }).then(() => true, () => false))) return { covered: true }
     await sleep(60)
     const was = await p.evaluate(() => { const dc = window.__dc; Object.assign(dc, { muts: 0, where: [], scrolls: 0, sounds: 0, calls: 0, asked: [], links: [] }); return document.activeElement?.outerHTML?.slice(0, 80) || '' })
     const n0 = { reqs: st.reqs.length, popups: st.popups, dialogs: st.dialogs, downloads: st.downloads, choosers: st.choosers, url: p.url() }
-    if (!(await el.click({ timeout: 800, noWaitAfter: true }).then(() => true, () => false))) return { covered: true }
+    if (!(await el.click({ timeout: patient ? 3000 : 800, noWaitAfter: true }).then(() => true, () => false))) return { covered: true }
     pressed++
     let what = null
     for (let waited = 0; waited < 1000 && !what; waited += 50) {
@@ -312,8 +320,9 @@ async function walk(shape) {
       if (q) { quiet.push(`${pl.name} · ${it.name}: ${q.what}`); continue }
       const tp = Date.now()
       let r = await press(pl, it).catch((e) => ({ failed: e.message.split('\n')[0] }))
-      // Not there now (a press before it went somewhere else in the place): the place again, once.
-      if (r.gone && pl.open) { base = await goTo(pl); r = await press(pl, it).catch((e) => ({ failed: e.message.split('\n')[0] })) }
+      // Not there now (a press before it went somewhere else in the place), or under something a press
+      // before it left open (or not ready in time, on a busy computer): the place again, once.
+      if ((r.gone || r.covered) && pl.open) { base = await goTo(pl); r = await press(pl, it, true).catch((e) => ({ failed: e.message.split('\n')[0] })) }
       // Nothing came of it: once more, from the page loaded again (what changed by itself then may not now).
       if (!r.gone && !r.covered && !r.failed && !r.what) { base = await goTo(pl, true); r = await press(pl, it).catch((e) => ({ failed: e.message.split('\n')[0] })) }
       if (DEBUG) console.log(`  ${shape} ${pl.name} · ${it.name}: ${r.gone ? '(gone)' : r.covered ? '(covered)' : r.failed ? `(${r.failed})` : r.what || 'NOTHING'} ${Date.now() - tp} ms`)
@@ -343,7 +352,7 @@ async function walk(shape) {
   // folds, is off saying why with nothing open, and on once a folder is. A file's Open in a new tab,
   // which did nothing in the desktop app: there it opens the file in the browser, and says so. And
   // Full size's way back no longer looks the same as it (its arrows point in).
-  if (!ONLY) {
+  if (!ONLY && !SETTINGS) {
     const there = desktop ? 'in the desktop app' : 'in a browser'
     await goTo(PLACES.find((x) => x.name === 'an agent\'s Files'), true)
     const fold = p.locator('.tree-head button[aria-label="Collapse all"]')
@@ -361,7 +370,8 @@ async function walk(shape) {
     const label = await link.getAttribute('aria-label').catch(() => null)
     const was = { links: (await p.evaluate(() => window.__dc.links.length)), popups: st.popups }
     await link.click().catch(() => {})
-    await sleep(500)
+    // The new tab, or the address handed to the app, waited for: a busy browser opens a tab a while after the click.
+    await until(async () => (desktop ? (await p.evaluate(() => window.__dc.links.length)) > was.links : st.popups > was.popups), 10000, 100)
     const went = desktop ? (await p.evaluate(() => window.__dc.links)).slice(was.links) : []
     ok(desktop ? label === 'Open in your browser' && went.length === 1 && pages.opens(went[0], `${kit.url}/`) === 'browser' && /\/raw\?path=dot\.png/.test(went[0]) : label === 'Open in a new tab' && st.popups > was.popups,
       desktop ? 'in the desktop app, a picture\'s Open in your browser hands the app its address, which opens it in the browser' : 'in a browser, a picture\'s Open in a new tab opens one', { label, went, popups: st.popups - was.popups })
@@ -374,7 +384,7 @@ async function walk(shape) {
     await back.click().catch(() => {})
   }
 
-  for (const pl of PLACES.filter((x) => !ONLY || ONLY.test(x.name))) {
+  for (const pl of PLACES.filter((x) => x.name.startsWith('Settings ›') === SETTINGS && (!ONLY || ONLY.test(x.name)))) {
     const tp = Date.now()
     const base = await goTo(pl, true)
     const items = await p.evaluate(LIST, pl.scope)
@@ -382,13 +392,13 @@ async function walk(shape) {
     await pressAll(pl, items, base)
     if (DEBUG) console.log(`${shape} ${pl.name}: ${items.length} in ${Date.now() - tp} ms`)
   }
-  await shot(p, `${tag}dead-clicks-${shape}`)
+  await shot(p, `${tag}${NAME}-${shape}`)
   await ctx.close()
   return { dead, skipped, quiet, pressed, missed, errors }
 }
 
 try {
-  if (pane) {
+  if (pane && !SETTINGS) {
     // ---------- what fails says why ----------
     // A click whose request fails (here, refused by a route) shows why, where it was silent: deleting
     // a saved prompt; and opening an agent in its own window when the browser blocks pop-ups.
@@ -410,13 +420,15 @@ try {
     await p.keyboard.press('Escape')
     const n = dialogs.length
     await p.locator('.console button[aria-label="Open in its own window"]').first().click({ timeout: 5000 }).catch(() => {})
-    await sleep(500)
+    await until(() => dialogs.slice(n).length, 5000, 100)
     ok(dialogs.slice(n).some((m) => /blocked the new window/.test(m)), 'opened in its own window with pop-ups blocked: it says the browser blocked it, and what to do', dialogs.slice(n))
     ok(!withoutCutOff(errors).length, 'and no page errors', errors)
     await ctx.close()
+  }
+  if (pane) {
     const [desk, web] = await Promise.all([walk('desktop'), walk('browser')])
     for (const [shape, r] of [['the desktop app', desk], ['a browser', web]]) {
-      ok(r.pressed > 150, `in ${shape}, the main views' buttons and links are pressed (${r.pressed}; ${r.missed} gone or covered by then, ${r.skipped.length} skipped)`, r.pressed)
+      ok(r.pressed > (SETTINGS ? 90 : 110), `in ${shape}, ${SETTINGS ? 'the sections of Settings' : 'the main views'}' buttons and links are pressed (${r.pressed}; ${r.missed} gone or covered by then, ${r.skipped.length} skipped)`, r.pressed)
       ok(!r.dead.length, `in ${shape}, each one pressed does something you can see`, r.dead.map((d) => `${d.place} · "${d.name}" ${d.html}`))
       ok(!withoutCutOff(r.errors).length, `in ${shape}, no page errors`, withoutCutOff(r.errors).slice(0, 3))
       if (DEBUG) console.log(`${shape} skipped:\n  ${[...r.skipped, ...r.quiet].join('\n  ')}`)

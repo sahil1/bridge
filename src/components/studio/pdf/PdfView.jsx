@@ -132,10 +132,13 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
 
   useEffect(() => { onStats?.({ text: pages === 1 ? t('1 page') : t('{n} pages', { n: pages }) }) }, [pages, onStats])
 
-  // What you selected, for Ask an agent, with the page it's on; and AI Assist's Sign this.
+  // What you selected, for Ask an agent, with the page it's on; and AI Assist's Sign this. Picked
+  // while the PDF is still opening, signing starts as soon as it's open (AI Assist's menu doesn't
+  // change while it's open, so an item greyed out then stayed so); only a PDF that can't be shown,
+  // or waits for its password, can't be signed.
   handle.current = {
     save: null,
-    assist: () => (signOn ? [{ label: t('Sign this'), hint: t('What you\'re signing in plain words, then your signature where it goes, in a signed copy'), on: signing, disabled: state.phase !== 'ready', run: () => { setSigning(!signing); if (signing) setPicked(null) } }] : []),
+    assist: () => (signOn ? [{ label: t('Sign this'), hint: t('What you\'re signing in plain words, then your signature where it goes, in a signed copy'), on: signing, disabled: state.phase === 'error' || state.phase === 'password', run: () => { setSigning(!signing); if (signing) setPicked(null) } }] : []),
     selection: () => {
       const s = window.getSelection?.()
       const text = String(s || '').trim()

@@ -2,13 +2,20 @@
 // 16-bit mono PCM on stdout at --rate, a tenth of a second at a time, until it's stopped. How loud,
 // from calltap.json beside it ({ "level": n }, read each time): 0 is silence (what macOS gives
 // before you allow System Audio Recording), a few steps is the near-silence one Mac gave for a
-// whole call, a few thousand is a call talking.
+// whole call, a few thousand is a call talking. What macOS says ({ "access": "allowed" | "denied" |
+// "unknown" }, none: an older calltap that doesn't say): on stderr as it starts, and alone on stdout
+// for --check, as native/calltap.swift does. Each start is a line in calltap.log beside it.
 const fs = require('node:fs')
 const path = require('node:path')
 const args = process.argv.slice(2)
 const rate = Number(args[args.indexOf('--rate') + 1]) || 16000
 const ctl = path.join(__dirname, 'calltap.json')
-const level = () => { try { return Number(JSON.parse(fs.readFileSync(ctl, 'utf8')).level) || 0 } catch { return 0 } }
+const read = () => { try { return JSON.parse(fs.readFileSync(ctl, 'utf8')) || {} } catch { return {} } }
+const level = () => Number(read().level) || 0
+const access = read().access
+if (args.includes('--check')) { process.stdout.write(`${access || 'unknown'}\n`); process.exit(0) }
+fs.appendFileSync(path.join(__dirname, 'calltap.log'), `start ${access || ''}\n`)
+if (access) process.stderr.write(`access ${access}\n`)
 let t = 0
 const tick = () => {
   const n = Math.round(rate / 10)

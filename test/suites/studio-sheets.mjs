@@ -9,18 +9,25 @@
 // what's typed keeps no colour of its own, and a word added to a cell keeps it plain text; a
 // formula's error says why when its cell is picked; Insert › Chart of the cells picked, its kind and title
 // changed beside the sheet, saved as Excel's own chart; the status line counting a sheet added;
-// Focus keeping the sheet's keys (Esc ends a cell's typing first, ⌘K still its link); light and
-// dark; no page errors.
+// Focus keeping the sheet's keys (Esc ends a cell's typing first, ⌘K still its link); AI Assist
+// answered by its model (the stand-in) in seconds: saying how to add one when there's none, Write a
+// formula and Clean this column as suggestions outlined on the sheet, discarded or kept (Keep all),
+// Summarise said beside it, Chart this drawn first, an answer that isn't a change said, and Hand to
+// an agent still there; Make a sheet (Make a Sheet, a beta feature): New › Sheet said what it's for
+// (or the empty sheet's Make a sheet) gives a whole workbook shown first, Discard emptying it again,
+// Keep saving it as an Excel file with its sheets, formulas, formats, a dropdown and the heading
+// row frozen, and no model said; with the beta off, nothing new; light and dark; no page errors.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { startKit, checks, until, sleep, browser, page, shot, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, ROOT } from '../lib/harness.mjs'
 
 const require = createRequire(path.join(ROOT, 'package.json'))
 const ExcelJS = require('exceljs')
 const JSZip = require('jszip')
 const { ok, skip, done } = checks('studio-sheets')
 const kit = await startKit('studio-sheets')
+const model = await startModel('studio-sheets')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control'
@@ -52,6 +59,11 @@ try {
   ss.getCell('A7').value = 'Total'; ss.getCell('B7').value = { formula: 'SUM(B2:B6)', result: 1975 }
   small.addWorksheet('Notes').getCell('A1').value = 'Second sheet'
   await small.xlsx.writeFile(path.join(dir, 'budget.xlsx'))
+  // For AI Assist: costs whose names want cleaning up.
+  const costs = new ExcelJS.Workbook()
+  const cs = costs.addWorksheet('Costs')
+  for (const r of [['Item', 'Cost', 'Qty'], ['  hosting', 120, 1], ['design ', 900, 2], ['Fonts', 45, 3], ['legal', 610, 1], ['Travel', 300, 4]]) cs.addRow(r)
+  await costs.xlsx.writeFile(path.join(dir, 'costs.xlsx'))
   const quirks = 'Code,When,Price,Pct\n007,2026-01-05,1200,10%\n0042,05/01/2026,"1,200.50",3.5%\n'
   fs.writeFileSync(path.join(dir, 'quirks.csv'), quirks)
   const root = `place:${(await kit.api('/places', { path: dir })).place.id}`
@@ -262,6 +274,151 @@ try {
   const chartPart = Object.keys(zip.files).find((n) => /^xl\/charts\/chart\d*\.xml$/.test(n))
   const chartXml = chartPart ? await zip.file(chartPart).async('string') : ''
   ok(/<c:pieChart>/.test(chartXml) && /<a:t>Costs<\/a:t>/.test(chartXml) && /Budget!\$B\$2:\$B\$6/.test(chartXml) && back.worksheets.length === 3, 'saved as Excel\'s own pie chart of B2:B6, titled Costs, with the sheet added', { chartPart, xml: chartXml.slice(0, 300), sheets: back.worksheets.map((x) => x.name) })
+
+  // ---------- AI Assist ----------
+  // Answered by AI Assist's model in seconds, not by an agent: its change outlined on the sheet as
+  // a suggestion, kept or discarded, one or all at once. With no model it says how to add one.
+  await open('costs.xlsx')
+  const askAi = p.locator('.sh-ask')
+  // A verb from AI Assist's menu: its panel, with the ask started (once the panel has put it in).
+  const assist = async (verb) => {
+    await p.locator('.pane-head button[aria-label="AI Assist"]').click()
+    await p.locator('.ai-menu button', { hasText: verb }).click()
+    await askAi.waitFor({ timeout: 5000 })
+    await until(async () => (await askAi.locator('textarea').inputValue()).startsWith(verb), 3000, 50)
+  }
+  const costCell = async (a1) => { const x = new ExcelJS.Workbook(); await x.xlsx.readFile(path.join(dir, 'costs.xlsx')); return x.getWorksheet('Costs').getCell(a1).value }
+  await goTo('A1:C6')
+  await assist('Write a formula')
+  const noModel = await until(async () => /No model to answer with yet: sign in to an agent \(Claude Code, Codex…\) or add a key in Settings › Model Providers/.test(await askAi.innerText()), 8000)
+  ok(!!noModel && await askAi.locator('.sh-send').isDisabled() && (await askAi.locator('.sh-goes button', { hasText: 'Model Providers' }).count()) === 1 && (await askAi.locator('.sh-hand-toggle', { hasText: 'Hand to an agent' }).count()) === 1, 'with no model, AI Assist on a sheet says how to add one, with Model Providers a click away, and Hand to an agent still there', await askAi.innerText())
+  await shot(p, `${tag}studio-sheets-ai-no-model`)
+  await askAi.locator('button[aria-label="Close AI Assist"]').click()
+  await kit.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
+  await assist('Write a formula')
+  ok(!!(await until(async () => /go to gpt-5 \(OpenAI\)\. Nothing else leaves this computer/.test(await askAi.innerText()) && await askAi.locator('.sh-model-one, .sh-model').count() === 1, 8000)), 'a model added: the panel says which answers, and where the cells go', await askAi.innerText())
+  await askAi.locator('textarea').press('End')
+  await askAi.locator('textarea').pressSequentially('doubles the cost in a new column')
+  const asked0 = Date.now()
+  await askAi.locator('.sh-send').click()
+  const card = askAi.locator('.sh-suggestion')
+  const formula = await until(async () => /Doubled each cost in column D/.test(await card.first().innerText().catch(() => '')) && /6 cells, outlined on the sheet/.test(await card.first().innerText()), 15000, 100)
+  const took = Date.now() - asked0
+  ok(!!formula && took < 10000 && /Suggested by gpt-5/.test(await card.first().innerText()), `Write a formula: AI Assist's model answers in seconds (${took} ms), its change a suggestion outlined on the sheet, by the model named`, await askAi.innerText())
+  const sent = model.asked(/^In the spreadsheet costs\.xlsx/).at(-1) || ''
+  ok(/on the sheet "Costs": Write a formula for the cells I picked that doubles the cost in a new column/.test(sent) && /A1:C6 on Costs/.test(sent) && /hosting/.test(sent) && /"cells"/.test(sent), 'the model is sent what was asked, the cells picked with their values, and the change\'s shape', sent.slice(0, 600))
+  ok(/Unsaved changes/.test(await p.locator('.sd-status').innerText()) && (await costCell('D2')) == null, 'and the file isn\'t changed until it\'s kept and saved', await p.locator('.sd-status').innerText())
+  await card.first().locator('button', { hasText: 'Discard' }).click()
+  ok(!!(await until(async () => !(await card.count()), 3000)), 'Discard takes the suggestion off the sheet')
+  ok(await save(), 'saved', unsaved)
+  ok((await costCell('D2')) == null && (await costCell('D1')) == null, 'discarded: nothing of it is in the file', [await costCell('D1'), await costCell('D2')])
+  // Two at once: Keep all keeps both.
+  await assist('Write a formula')
+  await askAi.locator('textarea').press('End')
+  await askAi.locator('textarea').pressSequentially('doubles the cost in a new column')
+  await askAi.locator('.sh-send').click()
+  await until(async () => (await card.count()) === 1, 15000, 100)
+  await goTo('A1:A6')
+  await askAi.locator('.sh-chip', { hasText: 'Clean this column' }).click()
+  await askAi.locator('.sh-send').click()
+  const two = await until(async () => (await card.count()) === 2 && /Trimmed and capitalised 3 names/.test(await askAi.innerText()), 15000, 100)
+  ok(!!two && /2 suggestions, outlined on the sheet/.test(await askAi.locator('.sh-all').innerText().catch(() => '')) && (await askAi.locator('.sh-all button', { hasText: 'Keep all' }).count()) === 1, 'Clean this column while the formula waits: two suggestions, each with Keep and Discard, and Keep all for both', await askAi.innerText())
+  await shot(p, `${tag}studio-sheets-ai-suggestions`)
+  await askAi.locator('.sh-all button', { hasText: 'Keep all' }).click()
+  ok(!!(await until(async () => !(await card.count()) && /Kept\. Save to write it to the file/.test(await askAi.innerText()), 3000)), 'Keep all keeps both, and says to save')
+  ok(await save(), 'saved', unsaved)
+  const c2 = await costCell('D2'), a2 = await costCell('A2'), a3 = await costCell('A3'), a4 = await costCell('A4')
+  ok(c2?.formula === 'B2*2' && c2.result === 240 && a2 === 'Hosting' && a3 === 'Design' && a4 === 'Fonts', 'kept and saved: the formulas in the file with their results, and the names cleaned up', { c2, a2, a3, a4 })
+  // Summarise: an answer, said beside the sheet; nothing to keep.
+  await goTo('B2:B6')
+  await askAi.locator('.sh-chip', { hasText: 'Summarise' }).click()
+  await askAi.locator('.sh-send').click()
+  ok(!!(await until(async () => /5 numbers come to 1975; the highest is 900/.test(await askAi.locator('.sh-answer-card').innerText().catch(() => '')) && (await askAi.locator('.sh-answer-card button', { hasText: 'Copy' }).count()) === 1, 15000, 100)), 'Summarise: the answer beside the sheet, to copy, with nothing to keep', await askAi.innerText())
+  await askAi.locator('.sh-answer-card button', { hasText: 'Done' }).click()
+  // Chart this: drawn from the cells before it's added.
+  await goTo('A1:B4')
+  await askAi.locator('.sh-chip', { hasText: 'Chart this' }).click()
+  await askAi.locator('.sh-send').click()
+  ok(!!(await until(async () => (await card.locator('svg .sc-bar').count()) === 3, 15000, 100)), 'Chart this: the chart drawn from the cells, before it\'s added', await askAi.innerText())
+  await card.first().locator('button', { hasText: 'Keep' }).click()
+  ok(!!(await until(async () => /Kept, with its chart \(in Charts\)/.test(await askAi.innerText()), 3000)), 'kept: it goes in Charts')
+  // An answer that isn't a change, and nothing found to change: each said, nothing put on the sheet.
+  await askAi.locator('textarea').fill('This is not a change')
+  await askAi.locator('.sh-send').click()
+  ok(!!(await until(async () => /The model's answer wasn't a change Studio can show/.test(await askAi.locator('.sh-wait.bad').innerText().catch(() => '')), 15000, 100)) && !(await card.count()), 'a model\'s answer that isn\'t a change: said so, and nothing is put on the sheet', await askAi.innerText())
+  await askAi.locator('.sh-wait.bad button', { hasText: 'OK' }).click()
+  await goTo('A1:A6')
+  await askAi.locator('.sh-chip', { hasText: 'Clean this column' }).click()
+  await askAi.locator('.sh-send').click()
+  ok(!!(await until(async () => /found nothing to change there/.test(await askAi.locator('.sh-wait.bad').innerText().catch(() => '')), 15000, 100)), 'a column already clean: the model found nothing to change, said so', await askAi.innerText())
+  await askAi.locator('.sh-wait.bad button', { hasText: 'OK' }).click()
+  // Hand to an agent stays, for a bigger job.
+  await askAi.locator('.sh-hand-toggle').click()
+  ok(await askAi.locator('.sh-to select').isVisible() && (await askAi.locator('.sh-to option').allInnerTexts()).includes('A new agent in this folder') && (await askAi.locator('.sh-hand-send', { hasText: 'Send to the agent' }).count()) === 1, 'Hand to an agent, for a bigger job: an agent there or a new one', await askAi.locator('.sh-hand').innerText())
+  await askAi.locator('.sh-hand-toggle').click()
+  await askAi.locator('button[aria-label="Close AI Assist"]').click()
+  ok(await save(), 'saved', unsaved)
+  ok(w.errors.length === 0, 'no page errors', w.errors)
+
+  // ---------- Make a sheet ----------
+  // With Make a Sheet on (a beta feature, off to start): an empty Excel sheet made from what it's for, by AI Assist's model
+  // on the sheet's fast path, from New › Sheet or the empty sheet itself; shown on the sheet
+  // before it's kept (Discard empties it again), then saved as an Excel file with its sheets,
+  // formulas, formats, dropdowns and frozen headings. With the beta off, the empty sheet as before.
+  const offBook = await kit.api('/studio/sheet/ai', { root, path: 'costs.xlsx', mode: 'book', instruction: 'A budget' }).catch((e) => e)
+  ok(offBook?.status === 404 && offBook.j?.trial === 'make-sheet' && /^Make a Sheet is a beta feature/.test(offBook.message), 'with Make a Sheet off (as it starts), its route isn\'t there', offBook?.message)
+  const studioHome = () => until(async () => { await p.locator('.rail-nav-btn', { hasText: 'Studio' }).click(); return p.locator('.sd-home').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 20000, 300)
+  const newSheet = async (name, forWhat) => {
+    await studioHome()
+    await p.locator('.sd-new-open').click()
+    await p.locator('.sd-new-menu [role="menuitem"]', { hasText: 'Sheet' }).first().click()
+    await p.locator('.sd-new-form input').first().fill(name)
+    if (forWhat != null) await p.locator('.sd-new-for input').fill(forWhat)
+    await p.locator('.sd-new-form select').selectOption(root)
+    await p.locator('.sd-new-form button', { hasText: 'Make it' }).click()
+  }
+  await studioHome()
+  await p.locator('.sd-new-open').click()
+  await p.locator('.sd-new-menu [role="menuitem"]', { hasText: 'Sheet' }).first().click()
+  ok((await p.locator('.sd-new-for').count()) === 0, 'and New › Sheet asks only its name and folder, as before')
+  await p.locator('.sd-new-form button', { hasText: 'Cancel' }).click()
+  await kit.api('/settings', { trials: { 'make-sheet': true } }, 'PATCH')
+  const booksAsked = model.asked(/^Make a spreadsheet: /).length
+  await newSheet('Team budget', 'A budget for a team of five')
+  const made = p.locator('.sh-make')
+  ok(!!(await until(async () => /Suggested by gpt-5, not kept yet/.test(await made.locator('.sh-made').innerText().catch(() => '')), 30000, 200)), 'New › Sheet, said what it\'s for: AI Assist makes it as it opens, shown as a suggestion, by the model named', await made.innerText().catch(() => ''))
+  const madeText = await made.locator('.sh-made').innerText()
+  const tabsOf = () => p.locator('.sd-univer [data-u-comp="slide-tab-item"], .sd-univer .univer-sheet-bar [data-id]').allInnerTexts().catch(() => [])
+  ok(/A monthly and yearly budget for a team of five/.test(madeText) && /2 sheets, \d+ cells, outlined/.test(madeText) && model.asked(/^Make a spreadsheet: A budget for a team of five\n/).length === booksAsked + 1, 'its two sheets and their cells, outlined on the sheet, with what it is; the model asked once, with what it\'s for', { madeText, tabs: await tabsOf() })
+  ok((await made.locator('.sh-made button', { hasText: 'Keep' }).count()) === 1 && (await made.locator('.sh-made button', { hasText: 'Discard' }).count()) === 1 && /Unsaved changes/.test(await p.locator('.sd-status').innerText()), 'with Keep and Discard; nothing written to the file yet')
+  await shot(p, `${tag}studio-sheets-make`)
+  const budgetFile = path.join(dir, 'Team budget.xlsx')
+  const booked = async () => { const x = new ExcelJS.Workbook(); await x.xlsx.readFile(budgetFile); return x }
+  await made.locator('.sh-made button', { hasText: 'Discard' }).click()
+  ok(!!(await until(async () => (await made.locator('.sh-made').count()) === 0 && /1 sheet\b/.test(await p.locator('.sd-status').innerText()), 5000, 100)), 'Discard: the sheet empty again, one sheet as it was', await p.locator('.sd-status').innerText())
+  await made.locator('button[aria-label="Close AI Assist"]').click()
+  ok(!!(await until(() => p.locator('.sh-start .sh-make-open').isVisible(), 5000, 100)), 'and the empty sheet offers Make a sheet')
+  // From the empty sheet: Make a sheet, then Keep and save.
+  await p.locator('.sh-start .sh-make-open').click()
+  await made.locator('textarea').fill('A budget for a team of five')
+  await made.locator('.sh-send').click()
+  ok(!!(await until(async () => (await made.locator('.sh-made').count()) === 1, 30000, 200)), 'Make a sheet from the empty sheet: the same, shown first')
+  await made.locator('.sh-made button', { hasText: 'Keep' }).click()
+  ok(!!(await until(async () => /Kept\. Save to write it to the file/.test(await made.innerText()), 3000, 100)), 'Keep: kept, and it says to save')
+  ok(await save(), 'saved', unsaved)
+  const bk = await booked()
+  const bs = bk.getWorksheet('Budget'), ts = bk.getWorksheet('Team')
+  const dv = bs?.getCell('D2').dataValidation
+  ok(!!bs && !!ts && bk.worksheets.length === 2 && bs.getCell('B2').value?.formula === 'SUM(Team!C2:C6)' && bs.getCell('C3').value?.formula === 'B3*12' && bs.getCell('B6').value?.formula === 'SUM(B2:B5)', 'saved as an Excel file: its two sheets, the totals and yearly figures as formulas, salaries summed from the Team sheet', { sheets: bk.worksheets.map((x) => x.name), B2: bs?.getCell('B2').value, C3: bs?.getCell('C3').value })
+  ok(/\$#,##0/.test(bs?.getCell('B3').numFmt || '') && bs?.getCell('A1').font?.bold && dv?.type === 'list' && /Approved,Pending/.test((dv.formulae || []).join()) && bs?.views?.[0]?.state === 'frozen' && bs.views[0].ySplit === 1 && ts.getCell('C2').value === 9000, 'with its money format, bold headings, a Status dropdown and the heading row frozen', { fmt: bs?.getCell('B3').numFmt, bold: bs?.getCell('A1').font, dv, views: bs?.views })
+  // No model: said, with Model Providers.
+  await kit.api('/providers/openai', {}, 'DELETE')
+  await newSheet('Reading log', null)
+  ok(!!(await until(() => p.locator('.sh-start .sh-make-open').isVisible(), 20000, 200)), 'a new sheet said nothing about: empty, offering Make a sheet')
+  await p.locator('.sh-start .sh-make-open').click()
+  ok(!!(await until(async () => /No model to answer with yet/.test(await made.innerText().catch(() => '')) && await made.locator('.sh-send').isDisabled() && (await made.locator('.sh-goes button', { hasText: 'Model Providers' }).count()) === 1, 8000, 200)), 'with no model, Make a sheet says how to add one', await made.innerText().catch(() => ''))
+  await made.locator('button[aria-label="Close AI Assist"]').click()
+  await kit.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
   ok(w.errors.length === 0, 'no page errors', w.errors)
 
   // ---------- Dark ----------
@@ -276,6 +433,17 @@ try {
   // Its five costs, $900.00 and 4500% among them, each a slice: the numbers, not as they show.
   ok((await night.p.locator('.sh-charts .sh-fig svg').count()) === 1 && (await night.p.locator('.sh-charts .sc-slice').count()) === 5, 'dark: the chart saved in the file, in Charts, a slice for each of its five costs however they\'re formatted', await night.p.locator('.sh-charts').innerText())
   await shot(night.p, `${tag}studio-sheets-dark`)
+  // AI Assist's suggestion, dark.
+  await night.p.locator('.pane-head button[aria-label="AI Assist"]').click()
+  await night.p.locator('.ai-menu button', { hasText: 'Write a formula' }).click()
+  const nightAsk = night.p.locator('.sh-ask')
+  await until(async () => (await nightAsk.locator('textarea').inputValue().catch(() => '')).startsWith('Write a formula'), 5000, 50)
+  await nightAsk.locator('textarea').press('End')
+  await nightAsk.locator('textarea').pressSequentially('doubles the cost in a new column')
+  await nightAsk.locator('.sh-send').click()
+  ok(!!(await until(async () => (await nightAsk.locator('.sh-suggestion').count()) === 1, 15000, 100)), 'dark: AI Assist\'s suggestion beside the sheet', await nightAsk.innerText().catch(() => ''))
+  await shot(night.p, `${tag}studio-sheets-ai-dark`)
+  await nightAsk.locator('.sh-suggestion button', { hasText: 'Discard' }).click()
   ok(night.errors.length === 0, 'dark: no page errors', night.errors)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
@@ -284,5 +452,6 @@ try {
   for (const w of pages) await w.ctx.close().catch(() => {})
   await b.close()
   kit.stop()
+  model.stop()
 }
 process.exit(done().fail ? 1 : 0)

@@ -12,7 +12,8 @@
 // kind, size and folder never cut off; the status line; each kind saying what it is and what it
 // can't do; on 375 and 430 px phones, Studio's home and a document fitting.
 // A sheet: Excel's ribbon, the name box and tabs; AI Assist at the right end of the header with a
-// sheet's verbs; its panel on the cells picked, the agent told to answer with the change, which is
+// sheet's verbs; its panel on the cells picked (AI Assist's model is studio-sheets'), handed to an
+// agent from Ask an agent, the agent told to answer with the change, which is
 // shown on the sheet before it's made, kept and saved, or discarded; a summary beside it; a chart
 // drawn first, then in Charts and saved as an
 // Excel chart; an answer that isn't JSON said. An Excel file with a chart, a note, a dropdown and
@@ -378,7 +379,7 @@ try {
   await p.locator('.pane-head button', { hasText: 'Ask an agent' }).click()
   const askAi = p.locator('.sh-ask')
   ok(!!(await until(async () => /B2/.test(await askAi.locator('.sh-picked').innerText().catch(() => '')) && /on Budget/.test(await askAi.innerText()) && /1 cell/.test(await askAi.innerText()), 5000)), 'Ask an agent on a sheet: AI Assist\'s panel beside it, about the cell picked (B2 on Budget)', await askAi.innerText().catch(() => ''))
-  ok(!!(await until(async () => (await askAi.locator('.sh-to select').inputValue()) === agent.paneId, 5000)), 'and it goes to the agent at work there unless you pick another', await askAi.locator('.sh-to select').inputValue().catch(() => ''))
+  ok(!!(await until(async () => (await askAi.locator('.sh-hand-toggle').getAttribute('aria-expanded')) === 'true' && (await askAi.locator('.sh-to select').inputValue()) === agent.paneId, 5000)), 'with Hand to an agent open, to the agent at work there unless you pick another', await askAi.locator('.sh-to select').inputValue().catch(() => ''))
   ok(JSON.stringify(await askAi.locator('.sh-chip').allInnerTexts()) === JSON.stringify(['Write a formula', 'Clean this column', 'Summarise', 'Chart this']) && !(await bare(p)).length, 'its quick asks: a formula, a cleaned-up column, a summary, a chart; no bare controls', { chips: await askAi.locator('.sh-chip').allInnerTexts(), bare: await bare(p) })
   await shot(p, `${tag}studio-sheet-ask`)
   // Asked in place: the agent is told to answer with the change, not to make it.
@@ -387,14 +388,14 @@ try {
   await askAi.locator('textarea').press('End')
   await askAi.locator('textarea').pressSequentially('doubles the cost in column C')
   ok(/^Write a formula for the cells I picked that doubles the cost in column C$/.test(await askAi.locator('textarea').inputValue()), 'Write a formula starts the ask, to finish in your words', await askAi.locator('textarea').inputValue())
-  await askAi.locator('.sh-send').click()
+  await askAi.locator('.sh-hand-send').click()
   const proposed = (x) => /In budget\.xlsx: Write a formula/.test(x) && /Don't change the file itself/.test(x) && /\.budget\.xlsx\.studio-change\.json/.test(x) && /B2 on Budget/.test(x) && /120/.test(x)
   const told = await until(async () => proposed(typed()) || Object.values((await api('/fleet')).queue || {}).flat().some((i) => proposed(i.text || '')), 20000)
   ok(!!told && /Asked/.test(await askAi.locator('.sh-wait').innerText().catch(() => '')), 'sent: the cell and its value, and to write the change beside the file rather than make it; AI Assist waits for it', { typed: typed().slice(-600), wait: await askAi.innerText().catch(() => '') })
   const change = path.join(dir, '.budget.xlsx.studio-change.json')
   fs.writeFileSync(change, JSON.stringify({ summary: 'Doubled each cost in column C', sheet: 'Budget', cells: { C1: 'Doubled', C2: '=B2*2', C3: '=B3*2' } }))
   const shown = p.locator('.sh-change')
-  ok(!!(await until(async () => /Doubled each cost/.test(await shown.innerText().catch(() => '')) && /3 cells, marked on the sheet/.test(await shown.innerText()), 10000)) && !fs.existsSync(change), "the agent's change: shown on the sheet before it's made, said in words, and taken from beside the file", await shown.innerText().catch(() => ''))
+  ok(!!(await until(async () => /Doubled each cost/.test(await shown.innerText().catch(() => '')) && /3 cells, outlined on the sheet/.test(await shown.innerText()), 10000)) && !fs.existsSync(change), "the agent's change: shown on the sheet before it's made, said in words, and taken from beside the file", await shown.innerText().catch(() => ''))
   ok(/Unsaved changes/.test(await p.locator('.sd-status').innerText()) && fs.readFileSync(path.join(dir, 'budget.xlsx')).length > 0 && (await sheetCell('budget.xlsx', 'Budget', 'C2')) == null, "and the file isn't changed until it's kept and saved", await p.locator('.sd-status').innerText())
   await shot(p, `${tag}studio-sheet-proposal`)
   await shown.locator('button', { hasText: 'Keep' }).click()
@@ -403,7 +404,7 @@ try {
   ok(c2?.formula === 'B2*2' && c2.result === 240 && (await sheetCell('budget.xlsx', 'Budget', 'C1')) === 'Doubled', 'kept and saved: the formulas in the file, with their results', c2)
   // Another, discarded: the cells as they were.
   await askAi.locator('textarea').fill('Rename the first column')
-  await askAi.locator('.sh-send').click()
+  await askAi.locator('.sh-hand-send').click()
   await until(async () => /Asked/.test(await askAi.locator('.sh-wait').innerText().catch(() => '')), 10000)
   fs.writeFileSync(change, JSON.stringify({ summary: 'Renamed it', cells: { A1: 'Thing' } }))
   await until(async () => (await shown.count()) > 0, 10000)
@@ -413,7 +414,7 @@ try {
   ok((await sheetCell('budget.xlsx', 'Budget', 'A1')) === 'Item', 'discarded: nothing of it is left in the file', await sheetCell('budget.xlsx', 'Budget', 'A1'))
   // Summarise: an answer, said beside the sheet; nothing to keep.
   await askAi.locator('.sh-chip', { hasText: 'Summarise' }).click()
-  await askAi.locator('.sh-send').click()
+  await askAi.locator('.sh-hand-send').click()
   await until(async () => /Asked/.test(await askAi.locator('.sh-wait').innerText().catch(() => '')), 10000)
   fs.writeFileSync(change, JSON.stringify({ answer: 'Two costs come to 1,020; design is most of it.' }))
   ok(!!(await until(async () => /Two costs come to 1,020/.test(await shown.innerText().catch(() => '')) && (await shown.locator('button', { hasText: 'Copy' }).count()) === 1, 10000)), 'Summarise: the answer beside the sheet, to copy', await shown.innerText().catch(() => ''))
@@ -421,7 +422,7 @@ try {
   // Chart this: drawn from the cells before it's added, then in Charts, and saved as an Excel chart.
   await goTo('A1:B3')
   await askAi.locator('.sh-chip', { hasText: 'Chart this' }).click()
-  await askAi.locator('.sh-send').click()
+  await askAi.locator('.sh-hand-send').click()
   await until(async () => /Asked/.test(await askAi.locator('.sh-wait').innerText().catch(() => '')), 10000)
   fs.writeFileSync(change, JSON.stringify({ summary: 'A column chart of the costs', chart: { type: 'column', title: 'Costs', range: 'A1:B3' } }))
   ok(!!(await until(async () => (await shown.locator('svg .sc-bar').count()) === 2 && /Costs/.test(await shown.innerText()), 10000)), 'Chart this: the chart drawn from the cells, before it\'s added', await shown.innerHTML().catch(() => ''))
@@ -447,8 +448,9 @@ try {
     await p.locator('.pane-head button[aria-label="AI Assist"]').click()
     await p.locator('.ai-menu button', { hasText: 'Ask about these cells' }).click()
   }
+  if (!(await askAi.locator('.sh-hand-send').isVisible())) await askAi.locator('.sh-hand-toggle').click()
   await askAi.locator('textarea').fill('Anything')
-  await askAi.locator('.sh-send').click()
+  await askAi.locator('.sh-hand-send').click()
   await until(async () => /Asked/.test(await askAi.locator('.sh-wait').innerText().catch(() => '')), 10000)
   fs.writeFileSync(change, '{ not json')
   ok(!!(await until(async () => /isn't JSON Studio can read/.test(await askAi.locator('.sh-wait.bad').innerText().catch(() => '')), 10000)), "an agent's change that isn't JSON: said so", await askAi.innerText().catch(() => ''))
@@ -716,7 +718,10 @@ try {
     await ph.p.locator('.sd-ask button', { hasText: 'Cancel' }).click()
     // A sheet: the grid with its tabs, and AI Assist's panel over it from the bottom, fitting.
     await ph.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'budget.xlsx' } })), { root })
-    ok(!!(await until(async () => (await ph.p.locator('.sd-univer canvas').count()) > 0 && /Budget/.test(await ph.p.locator('.sd-univer').innerText().catch(() => '')), 30000)), `phone ${width}: a sheet opens, with its tabs`)
+    const sheetOpen = await until(async () => (await ph.p.locator('.sd-univer canvas').count()) > 0 && /Budget/.test(await ph.p.locator('.sd-univer').innerText().catch(() => '')), 30000)
+    // (Else what the page shows: the file's name, a sheet drawn or not, its tabs, what it says.)
+    ok(!!sheetOpen, `phone ${width}: a sheet opens, with its tabs`, sheetOpen || await ph.p.evaluate(() => ({ head: document.querySelector('.sd-file .pane-head h2')?.innerText ?? null, sheet: !!document.querySelector('.sd-univer'), canvases: document.querySelectorAll('.sd-univer canvas').length, tabs: document.querySelector('.sd-univer')?.innerText.slice(0, 120) ?? null, says: document.querySelector('.sd-file')?.innerText.slice(0, 300) ?? null })))
+    if (!sheetOpen) throw new Error(`phone ${width}: the sheet didn't open`)
     await sleep(600)
     // (Its page as wide as the screen too, whatever its header holds: a name and its buttons once
     // made it wider, and AI Assist's panel with it.)

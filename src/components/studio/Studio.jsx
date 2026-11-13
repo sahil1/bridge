@@ -151,6 +151,8 @@ export function StudioHome({ onOpen }) {
   const [empty, setEmpty] = useState(false) // no files at all yet: New's cards, as the start
   const [making, setMaking] = useState(null) // the New kind being named
   const [name, setName] = useState('')
+  const [forWhat, setForWhat] = useState('') // what a new sheet is for, for AI Assist to make (Make a Sheet)
+  const makeSheets = useTrial('make-sheet')
   const [where, setWhere] = useState('')
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -163,7 +165,9 @@ export function StudioHome({ onOpen }) {
       const title = name.trim() || t(n.label)
       const file = `${title}${n.deck ? '.md' : n.ext}`
       const r = await api('/studio/new', { method: 'POST', body: { root: where, dir: '', name: file, ...(await startOf(n, title, packFor(packs.list))) } })
-      setMaking(null); setName('')
+      // A sheet said to be for something: AI Assist makes it as it opens, to keep or discard.
+      if (n.kind === 'sheet' && makeSheets && forWhat.trim()) (await import('./xlsx.js')).makeOnOpen(where, r.path, forWhat)
+      setMaking(null); setName(''); setForWhat('')
       onOpen({ root: where, path: r.path })
     } catch (x) { setErr(x.message) } finally { setBusy(false) }
   }
@@ -214,6 +218,11 @@ export function StudioHome({ onOpen }) {
               <label className="sd-field"><span className="muted small">{t('Name')}</span>
                 <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t(making.label)} maxLength={100} />
               </label>
+              {making.kind === 'sheet' && makeSheets && (
+                <label className="sd-field wide sd-new-for"><span className="muted small"><Icon name="wand" size={11} /> {t('What it\'s for, for AI Assist to make (or leave it empty)')}</span>
+                  <input value={forWhat} onChange={(e) => setForWhat(e.target.value)} placeholder={t('A budget for a team of five')} maxLength={400} />
+                </label>
+              )}
               <label className="sd-field wide"><span className="muted small">{t('Where')}</span>
                 <select value={where} onChange={(e) => setWhere(e.target.value)}>
                   {folders.map((f) => <option key={f.root} value={f.root}>{f.label} · {home(f.path)}</option>)}

@@ -20,7 +20,7 @@ import path from 'node:path'
 import http from 'node:http'
 import crypto from 'node:crypto'
 import zlib from 'node:zlib'
-import { startKit, startRelay, checks, until, browser, sleep, shot, TEST } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, sleep, shot, TEST, browserNotice, phoneNotes, phoneSaw } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('remote-files')
 const { b, which } = await browser()
@@ -132,7 +132,7 @@ try {
   // A reader that stops (a paused video): what Studio sends stops too, a little ahead of it.
   await relayTest(ra, 'count')
   const paused = await new Promise((resolve) => {
-    const req = http.get(raw(M, 'huge.bin'), (res) => {
+    const req = http.get(raw(M, 'huge.bin'), { headers: { authorization: `Bearer ${lap.key}` } }, (res) => {
       let got = 0
       res.on('data', (c) => { got += c.length; if (got > 128 * 1024) res.pause() })
       setTimeout(async () => { const st = await relayTest(ra, 'state'); res.destroy(); resolve({ s: res.statusCode, sent: st.sent.downBytes }) }, 4000)
@@ -150,16 +150,20 @@ try {
   const code = (await a.api('/relay/pair', {})).pairing.code
   const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: which === 'chromium', hasTouch: true, deviceScaleFactor: 2, acceptDownloads: true })
   await ctx.addInitScript(() => { try { localStorage.setItem('cc-toured', JSON.stringify({ desktop: true, phone: true })); localStorage.setItem('cc-appearance', JSON.stringify({ mode: 'light', theme: 'sky', text: 'm' })) } catch { /* no storage */ } })
+  await phoneNotes(ctx)
   const phone = await ctx.newPage()
   const errors = []
-  phone.on('pageerror', (e) => errors.push(e.message))
+  phone.on('pageerror', (e) => { if (!browserNotice(e.message)) errors.push(e.message) })
   await phone.goto(`${ra.url}/#pair=${code}`, { waitUntil: 'commit' })
   await phone.locator('#pair-go').click({ timeout: 15000 }) // a pairing link asks first: one tap
   const app = () => phone.frames().find((f) => f !== phone.mainFrame() && f.url().startsWith(ra.url))
-  // Not open: where its frames are, what the relay's page says instead (still pairing, offline,
-  // turned away) and what's in Bridge AI's frame, and the phone's part goes no further.
+  // Not open: where its frames are, how far the relay's page got (its service worker, its frame,
+  // what it says instead: still pairing, offline, turned away) and what's in Bridge AI's frame, and
+  // the phone's part goes no further.
   const opened = await until(() => app()?.evaluate(() => fetch('/api/version').then((r) => r.ok)), 30000, 200)
-  ok(!!opened, 'the phone is paired and Bridge AI is open in it', opened ? undefined : { frames: phone.frames().map((f) => f.url()), page: await phone.locator('body').innerText().catch((e) => e.message), app: await app()?.evaluate(() => ({ text: document.body?.innerText.slice(0, 120), controlled: !!navigator.serviceWorker?.controller })).catch((e) => e.message) })
+  const saw = opened ? null : { frames: phone.frames().map((f) => f.url()), app: await app()?.evaluate(() => ({ text: document.body?.innerText.slice(0, 120), controlled: !!navigator.serviceWorker?.controller })).catch((e) => e.message), page: await phoneSaw(phone) }
+  if (saw) console.log('the phone page, as far as it got:', JSON.stringify(saw))
+  ok(!!opened, 'the phone is paired and Bridge AI is open in it', saw || undefined)
   if (!opened) throw new Error('the phone didn\'t open Bridge AI')
   const fromPhone = (u, range) => app().evaluate(async ({ u, range }) => {
     const r = await fetch(u, { headers: range ? { range } : {} })
@@ -350,7 +354,7 @@ try {
     }
   })
   const lp = await desk.newPage()
-  lp.on('pageerror', (e) => errors.push(e.message))
+  lp.on('pageerror', (e) => { if (!browserNotice(e.message)) errors.push(e.message) })
   await lp.goto(`${M}/`)
   await viewer(lp.mainFrame(), 'on Laptop', 'remote-files-laptop')
   // Download to this device, with its progress.

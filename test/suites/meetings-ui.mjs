@@ -13,11 +13,15 @@
 // The meeting named after the calendar event on now is Mac-only (macOS Calendar). Watching a
 // screen (a canvas, as the picker's answer) and the looks at it while someone on the call talks.
 // Who said what in a room: Speaker 1 and 2, named once from who was invited or you; Who spoke and
-// Settings' Voices in a room, and neither where voices can't be told apart.
+// Settings' Voices in a room, and neither where voices can't be told apart. AI Assist's live board (a
+// beta feature): the meeting's Board filling in, kept and discarded there and on the board itself,
+// the floating card's line, the summary's link, its action items onto the task list and Settings.
+// Answers in AI Assist (a beta feature): each answer's card in Suggestions and on the floating card,
+// and what Settings › Meetings says goes where.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, solid, noServiceWorker, changeAnswer, TEST, IS_MAC, advanced } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, solid, noServiceWorker, changeAnswer, withoutCutOff, phoneFaults, TEST, IS_MAC, advanced } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('meetings-ui')
 // On a Mac, tccutil stood in for (bin/tcc.log), for Reset and ask again on the call's sound.
@@ -26,7 +30,8 @@ const tccutil = (bin) => {
   fs.writeFileSync(path.join(bin, 'tccutil'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'tccutil.cjs')}" "$@"\n`, { mode: 0o755 })
   return path.join(bin, 'tccutil')
 }
-const kit = await startKit('meetings-ui', { env: ({ bin }) => (IS_MAC ? { BRIDGE_TCCUTIL: tccutil(bin), BRIDGE_FIX_BUNDLE_ID: 'dev.bridge-ai.test' } : {}) })
+// BRIDGE_BOARD_MS: the live board's minute, 1.5 s here.
+const kit = await startKit('meetings-ui', { env: ({ bin }) => ({ BRIDGE_BOARD_MS: '1500', ...(IS_MAC ? { BRIDGE_TCCUTIL: tccutil(bin), BRIDGE_FIX_BUNDLE_ID: 'dev.bridge-ai.test' } : {}) }) })
 const model = await startModel('meetings-ui')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -113,8 +118,9 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
     ok(!!(await until(async () => (await p.locator('.ws-tab, .tab-row').filter({ hasText: rec1?.title || '' }).count()) > 0, 5000)), 'its tab has its name straight away')
     // While it records: My notes beside the transcript, the cursor in it, and what it's for.
     const box = p.locator('.mt-cols.pinned .mt-mynotes .mt-mine')
-    const sideBySide = async () => { const a = await box.boundingBox(), t = await p.locator('.mt-cols.pinned .mt-transcript').boundingBox(); return !!a && !!t && a.x + a.width <= t.x && a.height > 300 }
-    ok(!!(await until(() => box.isVisible(), 8000)) && await sideBySide(), 'while it records, My notes is beside the transcript, the height of the page', await p.locator('.mt-cols').getAttribute('class').catch(() => null))
+    const sideBySide = async () => { const a = await box.boundingBox({ timeout: 1000 }).catch(() => null), t = await p.locator('.mt-cols.pinned .mt-transcript').boundingBox({ timeout: 1000 }).catch(() => null); return !!a && !!t && a.x + a.width <= t.x && a.height > 300 }
+    // (Once the page has settled: what comes in above it as the recording starts makes it shorter for a moment.)
+    ok(!!(await until(async () => await box.isVisible() && await sideBySide(), 8000)), 'while it records, My notes is beside the transcript, the height of the page', { cols: await p.locator('.mt-cols').getAttribute('class', { timeout: 1000 }).catch(() => null), mine: await box.boundingBox({ timeout: 1000 }).catch(() => null), transcript: await p.locator('.mt-cols.pinned .mt-transcript').boundingBox({ timeout: 1000 }).catch(() => null) })
     ok(!!(await until(() => p.evaluate(() => !!document.activeElement?.classList.contains('mt-mine')), 4000)), 'with the cursor in it, ready to write', await p.evaluate(() => document.activeElement?.outerHTML?.slice(0, 120)))
     ok(/^What you write here(, the slides it sees)? and the meeting's files shape the summary\.$/.test(await p.locator('.mt-mynotes .mt-shapes').innerText().catch(() => '')) && (await p.locator('.seg button[data-view="mine"]').count()) === 0, 'it says what shapes the summary, and needs no tab of its own while it records', await p.locator('.mt-mynotes').innerText().catch(() => ''))
     await p.keyboard.type('tiers ok?')
@@ -248,7 +254,11 @@ process.stdout.write('@@EV@@Pricing review (Work)\\u00a6' + d.getFullYear() + '-
   await p.waitForSelector('.mt-places', { timeout: 6000 }).catch(() => {})
   ok((await p.locator('.mt-places button').allInnerTexts()).map((x) => x.trim()).join('|') === 'All|Planning|Archived · 1', 'Meetings: All, each folder, Archived', await p.locator('.mt-places button').allInnerTexts())
   await p.locator('.mt-places button', { hasText: 'Archived' }).click()
-  ok(!!(await until(async () => (await p.locator('.mt-row').count()) === 1, 4000)), 'Archived lists the archived one')
+  const archivedOne = !!(await until(async () => (await p.locator('.mt-row').count()) === 1, 4000))
+  // Otherwise, what showed and what's saved: read from the meetings' files, as asking the server
+  // for its list can turn Meeting Insights on by itself, which changes what comes after.
+  const savedMeetings = () => fs.readdirSync(path.join(kit.data, 'meetings')).map((id) => { try { const x = JSON.parse(fs.readFileSync(path.join(kit.data, 'meetings', id, 'meeting.json'), 'utf8')); return `${x.title}${x.folder ? ` in ${x.folder}` : ''}${x.archived ? ', archived' : ''}` } catch { return null } }).filter(Boolean)
+  ok(archivedOne, 'Archived lists the archived one', archivedOne ? undefined : { tab: await p.locator('.mt-view .seg [aria-selected="true"]').allInnerTexts(), places: await p.locator('.mt-places button').allInnerTexts(), on: await p.locator('.mt-places button.on').allInnerTexts(), rows: await p.locator('.mt-row').allInnerTexts(), saved: savedMeetings() })
   await p.locator('.mt-row-open', { hasText: 'Vendor call' }).click({ button: 'right' })
   await p.locator('.ctx-menu button', { hasText: 'Unarchive' }).click()
   ok(!!(await until(async () => (await p.locator('.mt-places button').allInnerTexts()).map((x) => x.trim()).join('|') === 'All|Planning|Vendors', 6000)), 'taken out of the archive from its menu')
@@ -532,6 +542,224 @@ process.exit(1)`)
   await api(`/meetings/${I.id}/assist`, { on: false })
   await api(`/meetings/${I.id}/stop`, {})
 
+  // ---------- Answers in AI Assist (a beta feature) ----------
+  // An answer to a question raised, in Suggestions on a card of its own: the question as asked, who
+  // asked it and when, the answer, and where it's from: a past meeting (a click opens it), the
+  // model's own knowledge (which may be out of date; for one that needs current facts, how to add a
+  // web search), the web with its pages, or a lookup that failed, saying why. ✓ puts it in your
+  // notes, × waves it away. The floating card shows the newest, with its question and source.
+  // Settings › Meetings says what it answers from and what goes where.
+  await api('/settings', { trials: { 'assist-answers': true } }, 'PATCH')
+  const PM = await api('/meetings', { title: 'Northwind pricing call', call: false })
+  await api(`/meetings/${PM.id}/stop`, {})
+  const VR = await api('/meetings', { title: 'Vendor review', call: false })
+  await api(`/meetings/${VR.id}/assist`, { on: true })
+  const ans = (o) => ({ kind: 'answer', state: 'new', why: '', model: 'openai:gpt-5', current: false, web: null, sources: [{ kind: 'general' }], ...o })
+  fs.writeFileSync(path.join(kit.data, 'meetings', VR.id, 'assist.json'), JSON.stringify({ at: new Date().toISOString(), upTo: 0, error: null, items: [
+    ans({ id: 'an1', t: 70, q: 'What did we agree on pricing with Northwind Traders last time?', asked: { who: 'You', text: 'And what did we agree on pricing with Northwind Traders last time?' }, text: 'Northwind Traders gets 20% off the Team plan for two years.', sources: [{ kind: 'meeting', id: PM.id, title: 'Northwind pricing call', startedAt: PM.startedAt }] }),
+    ans({ id: 'an2', t: 130, q: "What's the difference between SOC 2 Type 1 and Type 2?", asked: { who: 'Them', text: "So what's the difference between SOC 2 Type 1 and Type 2?" }, text: 'Type 1 checks the controls at one point in time; Type 2 checks they worked over several months.' }),
+    ans({ id: 'an3', t: 190, q: 'When does the EU AI Act start applying?', asked: { who: 'Them', text: 'When does the EU AI Act start applying?' }, text: 'Most of it applies from August 2026.', current: true, web: { state: 'off' } }),
+    ans({ id: 'an4', t: 250, q: 'When does the new data law come into force?', asked: { who: 'Them', text: 'When does the new data law come into force?' }, text: 'Next spring, as far as the model knows.', current: true, web: { state: 'failed', via: 'Perplexity', error: 'Perplexity API (sonar-pro): Incorrect API key provided.' } }),
+    ans({ id: 'an5', t: 310, q: 'What is the latest AI Act guidance for providers?', asked: { who: 'Priya Shah', text: 'What is the latest AI Act guidance for providers?' }, text: 'The guidance came out in July.[1]', general: 'Guidance was due.', current: true, sources: [{ kind: 'web', via: 'Perplexity', model: 'sonar-pro', links: [{ url: 'https://example.com/eu-ai-act', title: 'EU AI Act: the timeline' }] }], web: { state: 'done', via: 'Perplexity' } }),
+  ] }))
+  await openMeeting('Vendor review')
+  await p.locator('.seg button[data-view="assist"]').click({ timeout: 5000 }).catch(() => {})
+  const aCard = (q) => p.locator('.mt-assist .mt-tip.k-answer', { hasText: q })
+  const cardText = (q) => aCard(q).innerText({ timeout: 1000 }).catch(() => '')
+  ok(!!(await until(async () => (await p.locator('.mt-assist .mt-tip.k-answer').count()) === 5, 8000)), 'answers show in Suggestions, each on a card of its own', await p.locator('.mt-assist').innerText().catch(() => ''))
+  const priceT = await cardText('agree on pricing')
+  ok(/^answered/i.test(priceT.trim()) && /You asked/.test(priceT) && /What did we agree on pricing with Northwind Traders last time\?/.test(priceT) && /20% off the Team plan/.test(priceT) && /\b1:10\b/.test(priceT) && /Sources/.test(priceT) && /Northwind pricing call ·/.test(priceT), 'one from a past meeting: the question as asked, who asked it and when, the answer, and the meeting it\'s from', priceT)
+  const socT = await cardText('SOC 2')
+  ok(/Them asked/.test(socT) && /gpt-5's own knowledge, which may be out of date/.test(socT) && !/Perplexity|Model Providers/.test(socT), "a general one: from the model's own knowledge, said plainly, which may be out of date", socT)
+  const euT = await cardText('EU AI Act start')
+  ok(/add a Perplexity key in Settings › Model Providers/.test(euT) && await aCard('EU AI Act start').locator('button', { hasText: 'Open Model Providers' }).count() === 1, 'one that needs current facts, with no web search set up: says how to add one', euT)
+  const webT = await cardText('latest AI Act guidance')
+  const link = aCard('latest AI Act guidance').locator('a.mt-source')
+  ok(/Priya Shah asked/.test(webT) && /The web, via Perplexity/.test(webT) && !/own knowledge/.test(webT) && await link.count() === 1 && await link.getAttribute('href') === 'https://example.com/eu-ai-act' && await link.getAttribute('target') === '_blank' && /noopener/.test(await link.getAttribute('rel') || '') && /EU AI Act: the timeline/.test(await link.innerText()), 'one looked up on the web: says so, with its page as a link that opens on its own', webT)
+  ok(/Couldn't look it up on the web: Perplexity API \(sonar-pro\): Incorrect API key provided\./.test(await cardText('data law')), 'a lookup that failed says why', await cardText('data law'))
+  await shot(p, `${tag}meeting-assist-answers`)
+  await aCard('agree on pricing').scrollIntoViewIfNeeded().catch(() => {})
+  await shot(p, `${tag}meeting-assist-answers-more`)
+  await aCard('SOC 2').locator('button[aria-label="Add to my notes"]').click({ timeout: 5000 })
+  ok(!!(await until(async () => /In your notes/.test(await cardText('SOC 2')), 5000)) && /^- \[2:10\] Answer: What's the difference between SOC 2 Type 1 and Type 2\? Type 1 checks/m.test((await api(`/meetings/${VR.id}`)).notes || ''), '✓ puts the answer in your notes, at the time it was asked, with its question', (await api(`/meetings/${VR.id}`)).notes)
+  await aCard('latest AI Act guidance').locator('button[aria-label="Dismiss"]').click({ timeout: 5000 })
+  ok(!!(await until(async () => (await aCard('latest AI Act guidance').count()) === 0, 5000)), '× waves it away')
+  // The floating card: the newest still waiting, with its question and why it couldn't be looked up.
+  const vrCalls = { watching: true, calls: [], detect: true, float: 'meetings', floatHover: true, prompt: null, recording: { id: VR.id, title: 'Vendor review', status: 'recording', startedAt: new Date(Date.now() - 60000).toISOString(), seconds: 60, callApps: [], callEnded: null, callEndedApp: null, stopsAt: null, callQuiet: false } }
+  const fa = await page(b, kit.url, { before: async (c) => { await noServiceWorker(c); await c.route(/\/api\/calls(\?|$)/, (r) => r.fulfill({ json: vrCalls })) } })
+  const acard = await fa.ctx.newPage()
+  await acard.setViewportSize({ width: 360, height: 520 })
+  await acard.goto(`${kit.url}/?float=1`)
+  const atip = acard.locator('.float-card .fc-tip.k-answer')
+  ok(!!(await until(async () => /data law/.test(await atip.locator('.fc-tip-q').innerText({ timeout: 1000 }).catch(() => '')), 8000)) && /Next spring/.test(await atip.locator('.fc-tip-text').innerText()) && /Couldn't look it up on the web/.test(await atip.locator('.fc-tip-from').innerText()), 'the floating card: the newest answer, under its question, and why it couldn\'t be looked up', await atip.innerText().catch(() => ''))
+  await shot(acard, `${tag}meeting-answer-float`)
+  await fa.ctx.close()
+  // A click on the meeting it's from opens that meeting.
+  await aCard('agree on pricing').locator('button.mt-source', { hasText: 'Northwind pricing call' }).click({ timeout: 5000 })
+  ok(!!(await until(async () => (await p.locator('.mt-title').inputValue({ timeout: 1000 }).catch(() => '')) === 'Northwind pricing call', 5000)), 'a click on the meeting an answer is from opens it')
+  // Settings › Meetings: what it answers from, what goes where, and how to add a web search.
+  await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meetings' } })))
+  const st = p.locator('.st-meet [data-setting="assist-answers"]')
+  ok(!!(await until(async () => /Answers in AI Assist/i.test(await st.innerText({ timeout: 1000 }).catch(() => '')) && /past meetings that may answer them, go to gpt-5 \(OpenAI\)/.test(await st.innerText().catch(() => '')) && /add a Perplexity key\. Only the question would go to Perplexity, never the transcript/.test(await st.innerText().catch(() => '')), 8000)), 'Settings › Meetings: what it answers from, what goes to the model, and that only the question would go to a web search', await st.innerText().catch(() => ''))
+  await st.scrollIntoViewIfNeeded().catch(() => {})
+  await shot(p, `${tag}meeting-answers-settings`)
+  await p.keyboard.press('Escape')
+  await api(`/meetings/${VR.id}/assist`, { on: false })
+  await api(`/meetings/${VR.id}/stop`, {})
+  await api('/settings', { trials: { 'assist-answers': false } }, 'PATCH')
+
+  // ---------- AI Assist's live board (a beta feature) ----------
+  // With it on in Beta Features, a recording meeting has a Board: off, it says what it does; its
+  // switch turns it on and says plainly where what's said goes and who runs the model. Update now
+  // fills it in, each part in its list, dashed as a suggestion; what's said after comes in by itself
+  // (the board's minute is BRIDGE_BOARD_MS's 1.5 s here); Keep and Discard there, and on the board
+  // itself, with the way back to its meeting; the floating card's one line, which opens it; after
+  // the meeting, the summary's link and the action items onto the task list with a click; and
+  // Settings › Meetings saying what it sends where. In light, dark and on a phone.
+  await api('/settings', { trials: { 'meeting-board': true } }, 'PATCH')
+  const boardMarks = (name) => { try { return JSON.parse(fs.readFileSync(path.join(kit.data, 'boards', `${name}.excalidraw`), 'utf8')).elements.filter((e) => e.type === 'rectangle' && e.customData?.bridge?.suggestion).length } catch { return -1 } }
+  const boardText = (name) => { try { return JSON.parse(fs.readFileSync(path.join(kit.data, 'boards', `${name}.excalidraw`), 'utf8')).elements.map((e) => e.text || '').join('\n') } catch { return '' } }
+  const LB = await api('/meetings', { title: 'Launch sync', call: false, event: { title: 'Launch sync', attendees: ['Priya Shah', 'Dan Ruiz', 'Tester'] } })
+  said(LB.id, [['them', 2, 'We decided to ship the beta to ten customers first. Priya will send the pricing deck by Friday.'], ['you', 9, "Priya's beta ships on 24 Nov. Who owns the migration?"]])
+  await openMeeting('Launch sync')
+  const boardTab = p.locator('.seg button[data-view="board"]')
+  ok(!!(await until(() => boardTab.isVisible(), 8000)), 'with the beta feature on, a recording meeting has a Board')
+  await boardTab.click()
+  const bp = p.locator('.mt-board')
+  ok(!!(await until(async () => /AI Assist keeps a whiteboard of it from what's said/.test(await bp.innerText().catch(() => '')), 5000)) && !(await bp.locator('.mt-board-parts').count()), 'off, the Board says what it does, and there\'s no board', await bp.innerText().catch(() => ''))
+  await bp.locator('.mt-assist-on input').click()
+  ok(!!(await until(async () => (await api(`/meetings/${LB.id}`)).board === true && await bp.locator('.mt-assist-on input').isChecked(), 5000)), 'its switch turns the live board on for the meeting')
+  ok(!!(await until(async () => /It uses the model that writes your notes, gpt-5 \(OpenAI\): what's said goes there as it comes, a minute or so at a time, with what's on the board\./.test(await bp.innerText()), 5000)), 'and says plainly where what\'s said goes, and who runs the model', await bp.innerText())
+  await p.locator('.mt-view .pane-head button[aria-label="AI Assist"]').click()
+  ok(await p.locator('.ai-menu [aria-checked="true"]', { hasText: 'Keep a live board' }).count() === 1, 'AI Assist\'s menu has it too, ticked')
+  await p.keyboard.press('Escape')
+  await bp.locator('button', { hasText: 'Update now' }).click()
+  ok(!!(await until(async () => (await bp.locator('.mt-bitem.sug').count()) === 4, 10000)), 'Update now: the board fills in, each one a suggestion', await bp.innerText())
+  const partText = (part) => bp.locator(`.mt-bpart.p-${part}`).innerText().catch(() => '')
+  ok(/Ship the beta to ten customers first/.test(await partText('decision')) && /Beta ships · Priya · 24 Nov/.test(await partText('step')) && /Priya\s+Send the pricing deck · Friday/.test(await partText('action')) && /Who owns the migration\?/.test(await partText('question')), 'what was decided, the timeline with owner and date, who does what (by person) and the open question, each in its list', { d: await partText('decision'), s: await partText('step'), a: await partText('action'), q: await partText('question') })
+  await shot(p, `${tag}meeting-board`)
+  // What's said after comes in by itself: a line, the board's minute, and the page shows it.
+  said(LB.id, [['them', 30, 'Dan will write the migration plan by Monday. We agreed to keep the old pricing for existing customers. The team went through the plan for the next two weeks in some detail.']])
+  await send(LB.id, Buffer.concat([tone(2, true), tone(1.5)]))
+  ok(!!(await until(async () => /Write the migration plan · Monday/.test(await partText('action')) && /Keep the old pricing/.test(await partText('decision')), 15000)), 'as more is said, the board fills in by itself, here as it does', await bp.innerText())
+  const lbId = (await api(`/meetings/${LB.id}`)).liveBoard.id
+  const decision = bp.locator('.mt-bitem', { hasText: 'Ship the beta to ten customers first' })
+  await decision.locator('button[aria-label="Keep"]').click()
+  ok(!!(await until(async () => /Kept/.test(await decision.innerText().catch(() => '')) && !(await decision.evaluate((e) => e.classList.contains('sug')).catch(() => true)), 5000)) && boardMarks(lbId) === 5, 'Keep: kept here, and on the board its mark comes off', boardMarks(lbId))
+  const question = bp.locator('.mt-bitem', { hasText: 'Who owns the migration?' })
+  await question.locator('button[aria-label="Discard"]').click()
+  ok(!!(await until(async () => (await question.count()) === 0, 5000)) && !/Who owns the migration/.test(boardText(lbId)) && /No open questions yet/.test(await partText('question')), 'Discard: off the list, and off the board', boardText(lbId))
+  // The floating card: one line, what's on the board, that opens it.
+  const fcCalls = { watching: true, calls: [], detect: true, float: 'meetings', floatHover: true, prompt: null, recording: { id: LB.id, title: 'Launch sync', status: 'recording', startedAt: new Date(Date.now() - 60000).toISOString(), seconds: 60, callApps: [], callEnded: null, callEndedApp: null, stopsAt: null, callQuiet: false } }
+  const fb = await page(b, kit.url, { before: async (c) => { await noServiceWorker(c); await c.route(/\/api\/calls(\?|$)/, (r) => r.fulfill({ json: fcCalls })) } })
+  const fcard = await fb.ctx.newPage()
+  await fcard.addInitScript(() => { window.bridgeApp = { floatOpen: async (o) => { window.__opened = o; return true } } })
+  await fcard.setViewportSize({ width: 360, height: 520 })
+  await fcard.goto(`${kit.url}/?float=1`)
+  await fcard.waitForSelector('.float-card', { timeout: 10000 }).catch(() => {})
+  await fcard.hover('.float-card .fc-head')
+  const fline = fcard.locator('.float-card .fc-board')
+  ok(!!(await until(async () => /^Board: 2 decisions, 2 action items$/.test((await fline.innerText().catch(() => '')).trim()), 8000)), 'the floating card: one line, "Board: 2 decisions, 2 action items"', await fline.innerText().catch(() => ''))
+  await shot(fcard, `${tag}meeting-board-float`)
+  await fline.click()
+  ok((await fcard.evaluate(() => window.__opened))?.board === lbId, 'which opens the board', await fcard.evaluate(() => window.__opened))
+  await fb.ctx.close()
+  // The board itself: the same suggestions, dashed with Keep and Discard, and a link back.
+  await bp.locator('button', { hasText: 'Open the board' }).click()
+  const sugTags = p.locator('.wb-sug-tag')
+  ok(!!(await until(async () => (await sugTags.count()) === 4, 15000)), 'Open the board: the whiteboard, each suggestion outlined there with Keep and Discard', await sugTags.count())
+  ok(await p.locator('.wb-view .wb-meeting').isVisible(), 'with the way back to its meeting')
+  await sleep(800)
+  await shot(p, `${tag}meeting-board-whiteboard`)
+  await sugTags.first().locator('button', { hasText: 'Keep' }).click()
+  ok(!!(await until(() => boardMarks(lbId) === 3, 8000)), 'Keep on the board itself: saved', boardMarks(lbId))
+  await p.locator('.wb-view .wb-meeting').click()
+  await boardTab.click({ timeout: 5000 }).catch(() => {})
+  ok(!!(await until(async () => (await bp.locator('.mt-bitem.sug').count()) === 3, 8000)), 'and the meeting\'s Board says so', await bp.locator('.mt-bitem.sug').count())
+  // Dark, and on a phone.
+  for (const look of [{ mode: 'dark', theme: 'midnight' }, { phone: true }]) {
+    const x = await page(b, kit.url, look)
+    if (look.phone) {
+      await x.p.waitForSelector('.tabbar button', { timeout: 15000 })
+      await x.p.locator('.tabbar button', { hasText: 'Meetings' }).click()
+      await x.p.locator('.m-meetings .mt-row-open', { hasText: 'Launch sync' }).click()
+    } else await until(async () => { await x.p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id } })), LB.id); return x.p.locator('.mt-title').isVisible() }, 10000, 1000)
+    await x.p.locator('.seg button[data-view="board"]').click({ timeout: 8000 }).catch(() => {})
+    await x.p.locator('.mt-board .mt-bitem').first().waitFor({ timeout: 8000 }).catch(() => {})
+    if (look.phone) {
+      await x.p.locator('.mt-board .mt-bpart.p-action').scrollIntoViewIfNeeded().catch(() => {})
+      const faults = await phoneFaults(x.p, '.mt-board')
+      ok(!Object.values(faults).some((v) => (Array.isArray(v) ? v.length : v > 0)), 'on a phone: the Board fits, its buttons big enough to tap', faults)
+    } else ok(await x.p.locator('.mt-board .mt-bitem.sug').first().evaluate((e) => getComputedStyle(e).borderTopStyle === 'dashed').catch(() => false), 'dark: a suggestion is dashed here too')
+    await shot(x.p, `${tag}meeting-board-${look.phone ? 'phone' : 'dark'}`)
+    ok(x.errors.length === 0, `${look.phone ? 'phone' : 'dark'}: no page errors`, x.errors)
+    await x.ctx.close()
+  }
+  // After the meeting: the board stays; the summary links to it, and its action items go onto the
+  // task list with one click.
+  await api(`/meetings/${LB.id}/stop`, {})
+  await until(async () => !/Recording|Finishing/.test(await p.locator('.mt-view .mt-state').first().innerText({ timeout: 1000 }).catch(() => 'Recording')), 10000)
+  await p.locator('.seg button[data-view="summary"]').click({ timeout: 8000 }).catch(() => {})
+  const blink = p.locator('.mt-board-link')
+  ok(!!(await until(async () => /Live board: 2 decisions, 2 action items/.test(await blink.innerText().catch(() => '')), 8000)), 'after it, the summary links to the board, in a few words', await blink.innerText().catch(() => ''))
+  await blink.locator('button', { hasText: 'As lists' }).click()
+  const toTasks = bp.locator('button', { hasText: 'Add 2 action items to Tasks' })
+  ok(!!(await until(() => toTasks.isVisible(), 5000)), 'its action items, a click from the task list')
+  await toTasks.click()
+  ok(!!(await until(async () => { const tl = ((await api('/chief/tasks')).items || []).map((x) => x.title); return tl.includes('Priya: Send the pricing deck · Friday') && tl.includes('Dan: Write the migration plan · Monday') }, 5000)) && !!(await until(async () => (await bp.locator('.mt-bitem', { hasText: 'On the task list' }).count()) === 2, 5000)), 'Add to Tasks: on the Chief of Staff\'s task list, and each says so', await bp.innerText({ timeout: 1000 }).catch(() => ''))
+  // On a phone after it: the views (the summary, the board, your notes, the transcript, the files)
+  // still fit across, and the board stays.
+  const ap = await page(b, kit.url, { phone: true })
+  await ap.p.waitForSelector('.tabbar button', { timeout: 15000 })
+  await ap.p.locator('.tabbar button', { hasText: 'Meetings' }).click()
+  await ap.p.locator('.m-meetings .mt-row-open', { hasText: 'Launch sync' }).first().click()
+  await ap.p.locator('.seg button[data-view="board"]').click({ timeout: 8000 }).catch(() => {})
+  await ap.p.locator('.mt-board .mt-bitem').first().waitFor({ timeout: 8000 }).catch(() => {})
+  const headFaults = await phoneFaults(ap.p, '.mt-view .pane-head')
+  ok(!Object.keys(headFaults).length && await ap.p.locator('.mt-board .mt-bitem').count() === 5 && /Kept while the meeting recorded/.test(await ap.p.locator('.mt-board').innerText()), 'on a phone after it: the views still fit across, and the board is there', headFaults)
+  await shot(ap.p, `${tag}meeting-board-after-phone`)
+  await ap.ctx.close()
+  // Settings › Meetings: on for every meeting, and what it sends where.
+  await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meetings' } })))
+  const sb = p.locator('.st-meet [data-setting="meeting-board"]')
+  ok(!!(await until(async () => /Keep a live board, in every meeting/.test(await sb.innerText().catch(() => '')) && /what's been said since and what's on the board go to gpt-5 \(OpenAI\)/.test(await sb.innerText().catch(() => '')), 8000)), 'Settings › Meetings: Live Board, on for every meeting or not, and what it sends where', await sb.innerText().catch(() => ''))
+  await sb.scrollIntoViewIfNeeded().catch(() => {})
+  await shot(p, `${tag}meeting-board-settings`)
+  await p.keyboard.press('Escape')
+  // The board open while the meeting adds to it: what it adds comes in by itself; and with an edit
+  // of yours not saved yet (its save held back here), its new notes come in too, without asking
+  // which to keep, and once saved the board has both.
+  let holdSave = false
+  const wx = await page(b, kit.url, { before: async (c) => { await noServiceWorker(c); await c.route(/\/api\/boards\/[^/?]+(\?|$)/, (r) => (r.request().method() === 'PUT' && holdSave ? r.fulfill({ status: 503, json: { error: 'held back' } }) : r.continue())) } })
+  await until(async () => { if (await wx.p.locator('.excalidraw canvas.interactive').count()) return true; await wx.p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id } })), lbId); return false }, 30000, 1000)
+  // How many suggestions wait on it, in sight or not: the count at its foot.
+  const tagsNow = async () => Number(/^(\d+) suggestions/.exec((await wx.p.locator('.wb-sug-bar').innerText({ timeout: 1000 }).catch(() => '')).trim())?.[1] || 0)
+  const t0 = await until(async () => { const n = await tagsNow(); return n > 0 && n }, 10000)
+  said(LB.id, [['them', 120, 'Mia will update the status page by Friday. The team went through the plan for the next two weeks in some detail.']])
+  await api(`/meetings/${LB.id}/board`, {})
+  ok(!!t0 && !!(await until(async () => (await tagsNow()) === t0 + 1, 10000)), 'the board open while the meeting adds to it: what it adds comes in by itself', { t0, now: await tagsNow() })
+  const wbox = await wx.p.locator('.wb-canvas').boundingBox()
+  const wFrame = () => wx.p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  const drawBox = async (x, y) => {
+    await until(async () => { await wx.p.locator('[data-testid="toolbar-rectangle"]').click({ force: true }); return wx.p.locator('input[data-testid="toolbar-rectangle"]:checked').count() }, 5000, 200)
+    await wx.p.mouse.move(x, y); await wFrame(); await wx.p.mouse.down(); await wFrame()
+    for (let i = 1; i <= 4; i++) { await wx.p.mouse.move(x + i * 15, y + i * 8); await wFrame() }
+    await wx.p.mouse.up(); await wFrame(); await wx.p.keyboard.press('Escape')
+  }
+  const handDrawn = () => { try { return JSON.parse(fs.readFileSync(path.join(kit.data, 'boards', `${lbId}.excalidraw`), 'utf8')).elements.filter((e) => e.type === 'rectangle' && !e.customData?.bridge?.meeting).length } catch { return -1 } }
+  holdSave = true
+  await drawBox(wbox.x + 40, wbox.y + wbox.height - 140)
+  ok(!!(await until(() => wx.p.locator('.wb-state.bad').count(), 6000)), '(an edit on the board, its save held back)')
+  said(LB.id, [['them', 140, 'Leo will order the launch swag by Tuesday. The team went through the plan for the next two weeks in some detail.']])
+  await api(`/meetings/${LB.id}/board`, {})
+  ok(!!(await until(async () => (await tagsNow()) === t0 + 2, 10000)) && !(await wx.p.locator('.wb-conflict').count()), 'with an edit not saved yet, what the meeting adds comes in too, without asking which to keep', { now: await tagsNow(), asked: await wx.p.locator('.wb-conflict').count() })
+  holdSave = false
+  await drawBox(wbox.x + 140, wbox.y + wbox.height - 140)
+  ok(!!(await until(() => handDrawn() === 2 && /Leo: Order the launch swag/.test(boardText(lbId)), 10000)), 'and once it saves, the board has both: your edits and the meeting\'s notes', { handDrawn: handDrawn(), leo: /Leo/.test(boardText(lbId)) })
+  ok(wx.errors.length === 0, 'the open board: no page errors', wx.errors)
+  await wx.ctx.close()
+  await api('/settings', { trials: { 'meeting-board': false }, meetings: { board: false } }, 'PATCH')
+
   // ---------- Who said what in a room ----------
   // A meeting with your mic only, its voices told apart (voices.json, as voices.js writes it): each
   // line says Speaker 1 or 2; clicking one offers who was invited and you, and names every line of
@@ -547,7 +775,9 @@ process.exit(1)`)
   await p.locator('.seg button[data-view="transcript"]').click({ timeout: 5000 }).catch(() => {})
   const roomWhos = () => p.locator('.mt-transcript .mt-line .mt-who').allInnerTexts().catch(() => [])
   ok(!!(await until(async () => (await roomWhos()).join('|') === 'Speaker 1|Speaker 2|Speaker 1|Speaker 2', 8000)), 'a room meeting: each line says which voice, Speaker 1 or 2', await roomWhos())
-  const whoSpokeShown = await p.locator('.mt-transcript .mt-voices-btn').isVisible().catch(() => false)
+  // Who spoke waits for whether this computer can tell voices apart (/api/meetings/voices), which
+  // comes after the meeting on a busy machine.
+  const whoSpokeShown = !!(await until(() => p.locator('.mt-transcript .mt-voices-btn').isVisible(), 8000))
   ok(whoSpokeShown, 'and Who spoke is there for it')
   await p.locator('.mt-transcript .mt-line .mt-who', { hasText: 'Speaker 2' }).first().click({ timeout: 5000 }).catch(() => {})
   await p.waitForSelector('.ctx-menu', { timeout: 4000 }).catch(() => {})
@@ -667,7 +897,7 @@ process.exit(1)`)
   // (a shadow cut off at the window's edge made a hard dark line), only a hairline ring and a
   // shadow that fits the 12px around it. A recording whose call has been silent (macOS gives
   // silence until Bridge AI may hear it): a warning on the bar, and what to do when it opens.
-  const recCalls = { watching: true, calls: [], detect: true, float: 'meetings', floatHover: true, prompt: null, recording: { id: A.id, title: 'Quarterly plan', status: 'recording', startedAt: new Date(Date.now() - 60000).toISOString(), seconds: 60, callApps: [], callEnded: null, callEndedApp: null, stopsAt: null, callQuiet: true } }
+  const recCalls = { watching: true, calls: [], detect: true, float: 'meetings', floatHover: true, prompt: null, recording: { id: A.id, title: 'Quarterly plan', status: 'recording', startedAt: new Date(Date.now() - 60000).toISOString(), seconds: 60, callApps: [], callEnded: null, callEndedApp: null, stopsAt: null, callQuiet: true, callAccess: 'denied' } }
   const fl = await page(b, kit.url, { mode: 'light', theme: 'sky', before: async (c) => {
     await noServiceWorker(c)
     await c.route(/\/api\/calls(\?|$)/, (r) => r.fulfill({ json: recCalls }))
@@ -692,14 +922,22 @@ process.exit(1)`)
   ok(!!(await until(async () => (await card.evaluate(() => document.documentElement.getAttribute('data-theme'))) === 'dark' && (await bg()) < 200, 5000)), 'switched to dark in the main window: the open card follows', { theme: await card.evaluate(() => document.documentElement.getAttribute('data-theme')), bg: await bg() })
   await sleep(400) // its buttons' colours fade over
   await shot(card, `${tag}float-quiet-dark`)
-  // On there and still quiet: macOS applies it once Bridge AI restarts, which stops the recording,
-  // so it says so first. Restarted and still quiet: Reset, for the call's sound alone.
+  // On there and still quiet: the call's sound comes in once macOS lets it, else Restart Bridge AI
+  // (quitting leaves the part that records running), which stops the recording, so it says so
+  // first. Restarted and still quiet: Reset, for the call's sound alone.
   const qt = () => quiet.innerText().catch(() => '')
   // (macOS's lists: elsewhere a call's sound needs no allowing.)
   if (!IS_MAC) skip('once it\'s open there: already on there? macOS applies it once Bridge AI restarts, with Restart Bridge AI', 'System Audio Recording is macOS\'s')
   else {
   await quiet.locator('button', { hasText: 'Open it' }).click()
-  ok(!!(await until(async () => /Already on there\? macOS applies it once Bridge AI restarts\./.test(await qt()) && await quiet.locator('button', { hasText: 'Restart Bridge AI' }).count() === 1, 5000)), 'once it\'s open there: already on there? macOS applies it once Bridge AI restarts, with Restart Bridge AI', await qt())
+  const onThere = async () => /Already on there\? The call's sound comes in as soon as macOS lets it\. Still quiet\? Restart Bridge AI here: quitting leaves the part that records running\./.test(await qt()) && await quiet.locator('button', { hasText: 'Restart Bridge AI' }).count() === 1
+  ok(!!(await until(onThere, 5000)), 'once it\'s open there: already on there? it comes in once macOS lets it, else Restart Bridge AI, as quitting leaves the part that records running', await qt())
+  // Quit and opened again (macOS's own Quit & Reopen), which leaves the server as it was: still
+  // that step, not back to Open it.
+  await card.reload()
+  await card.waitForSelector('.float-card', { timeout: 10000 }).catch(() => {})
+  await card.hover('.float-card .fc-head')
+  ok(!!(await until(onThere, 8000)) && !(await quiet.locator('button', { hasText: 'Open it' }).count()), 'the card opened again with the server not restarted: still Restart Bridge AI, not Open it again', await qt())
   await quiet.locator('button', { hasText: 'Restart Bridge AI' }).click()
   ok(!!(await until(async () => /Restarting stops this recording/.test(await qt()) && await quiet.locator('button', { hasText: 'Restart now' }).count() === 1, 4000)) && !(await card.evaluate(() => window.__restarts)), 'a meeting records: it says a restart stops it, before restarting', await qt())
   await shot(card, `${tag}float-quiet-restart`)
@@ -715,8 +953,15 @@ process.exit(1)`)
     await quiet.locator('button', { hasText: 'Reset and ask again' }).click()
     const tcc = () => { try { return fs.readFileSync(path.join(kit.bin, 'tcc.log'), 'utf8').trim() } catch { return '' } }
     // (Kept open: the card closes once the pointer has left it, as on a busy machine it can.)
-    ok(!!(await until(async () => { await card.hover('.float-card .fc-head').catch(() => {}); return /macOS asks again the next time a call is recorded/.test(await qt()) && tcc() === 'reset AudioCapture dev.bridge-ai.test' }, 8000)), "Reset forgets macOS's answer for the call's sound only (not Screen Recording)", { text: await qt(), tcc: tcc() })
+    ok(!!(await until(async () => { await card.hover('.float-card .fc-head').catch(() => {}); return /macOS asks again in a moment: answer its window, and the call's sound comes in\./.test(await qt()) && tcc() === 'reset AudioCapture dev.bridge-ai.test' }, 8000)), "Reset forgets macOS's answer for the call's sound only (not Screen Recording), and macOS asks again while it records", { text: await qt(), tcc: tcc() })
   }
+  // macOS lets Bridge AI hear the call, and it's silent: that's said, with nothing to turn on.
+  recCalls.recording.callAccess = 'allowed'
+  await card.reload()
+  await card.waitForSelector('.float-card', { timeout: 10000 }).catch(() => {})
+  await card.hover('.float-card .fc-head')
+  ok(!!(await until(async () => /macOS lets Bridge AI hear it, so nothing has played yet\. If people are talking, check the call's sound plays on this Mac\./.test(await qt()) && !(await quiet.locator('button').count()), 5000)) && (await warn.getAttribute('title')) === 'No sound from the call', "macOS lets Bridge AI hear it: the silence is the call's own, said, with nothing to turn on", await qt())
+  recCalls.recording.callAccess = 'denied'
   // Open, with AI Assist's suggestion under the bar, on a short screen: the card asks for no more
   // than the screen's height, and what's under the bar scrolls, down to its last button.
   await api(`/meetings/${A.id}/assist`, { on: true })
@@ -767,7 +1012,8 @@ process.exit(1)`)
     await side.close()
   }
   await api(`/meetings/${A.id}/assist`, { on: false })
-  ok(fl.errors.length === 0, 'card: no page errors', fl.errors)
+  // (Bridge AI restarting under the card cuts off what it was asking, which WebKit reports.)
+  ok(withoutCutOff(fl.errors).length === 0, 'card: no page errors', fl.errors)
   await fl.ctx.close()
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

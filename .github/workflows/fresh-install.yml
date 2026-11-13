@@ -130,12 +130,16 @@ jobs:
 
       - name: It opens and its server answers
         run: &mac-opens |
+          # Its server answers only with its key, which it makes in its data folder as it starts
+          # (server/apiauth.js): as the app's own programs do. Without it, it's refused.
+          api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $(cat ~/.bridge-ai/api-token 2>/dev/null)" "$BASE$p" "$@"; }
           for i in $(seq 1 120); do
-            if curl -fsS "$BASE/api/version" -o "$OUT/version.json" 2>/dev/null; then break; fi
+            if api /api/version -o "$OUT/version.json" 2>/dev/null; then break; fi
             sleep 1
           done
           cat "$OUT/version.json" || { echo "No answer on $BASE after 2 minutes"; exit 1; }
           echo
+          [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/version")" = 401 ] || { echo "Without its key, its server answers other programs"; exit 1; }
           [ "$(jq -r .version "$OUT/version.json")" = "${TAG#v}" ] || { echo "That's not the version installed"; exit 1; }
           cmd="$(ps -o command= -p "$(jq -r .pid "$OUT/version.json")")"
           case "$cmd" in
@@ -145,9 +149,9 @@ jobs:
             *) echo "The server on $BASE isn't the installed app's: $cmd"; exit 1 ;;
           esac
           pgrep -f "Bridge AI.app/Contents/MacOS/Bridge AI" >/dev/null || { echo "The app isn't running"; exit 1; }
-          curl -fsS "$BASE/" | grep -q 'Bridge AI'
-          curl -fsS "$BASE/api/setup" -o "$OUT/setup.json"
-          curl -fsS "$BASE/api/config" | jq -c '{version, setupDone, simple, platform}'
+          api / | grep -q 'Bridge AI'
+          api /api/setup -o "$OUT/setup.json"
+          api /api/config | jq -c '{version, setupDone, simple, platform}'
           sleep 10 # the window draws, and anything it asks macOS for shows
           # (A screenshot can wait on a permission no one is there to give: 20 seconds at most.)
           screencapture -x "$OUT/opened.png" & s=$!; (sleep 20; kill $s 2>/dev/null) >/dev/null 2>&1 & wait $s || true
@@ -339,7 +343,7 @@ jobs:
           curl -fsSL "$INSTALLER/install.sh" | BRIDGE_VERSION="$TAG" sh 2>&1 | tee "$OUT/update.log"
           if grep -n -i -E 'error|warn|fail|denied|not permitted|not found|no such|cannot|can.t|damaged|usage:' "$OUT/update.log"; then exit 1; fi
           rm -f "$OUT/version.json"
-          for i in $(seq 1 120); do curl -fsS "$BASE/api/version" -o "$OUT/version.json" 2>/dev/null && break; sleep 1; done
+          for i in $(seq 1 120); do curl -fsS -H "Authorization: Bearer $(cat ~/.bridge-ai/api-token 2>/dev/null)" "$BASE/api/version" -o "$OUT/version.json" 2>/dev/null && break; sleep 1; done
           cmd="$(ps -o command= -p "$(jq -r .pid "$OUT/version.json")")"
           case "$cmd" in "$APP/Contents/"*) echo "Now in $APP" ;; *) echo "Still not the copy in Applications: $cmd"; exit 1 ;; esac
           if pgrep -f "/AppTranslocation/.*/Bridge AI.app/Contents/" >/dev/null; then echo "The temporary copy is still running"; exit 1; fi
@@ -413,18 +417,21 @@ jobs:
 
       - name: It opens and its server answers
         run: &linux-opens |
+          # With its key, as on a Mac (above).
+          api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $(cat ~/.bridge-ai/api-token 2>/dev/null)" "$BASE$p" "$@"; }
           for i in $(seq 1 120); do
-            if curl -fsS "$BASE/api/version" -o "$OUT/version.json" 2>/dev/null; then break; fi
+            if api /api/version -o "$OUT/version.json" 2>/dev/null; then break; fi
             sleep 1
           done
           cat "$OUT/version.json" || { echo "No answer on $BASE after 2 minutes"; ps aux | grep -i bridge; exit 1; }
           echo
+          [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/version")" = 401 ] || { echo "Without its key, its server answers other programs"; exit 1; }
           [ "$(jq -r .version "$OUT/version.json")" = "${TAG#v}" ] || { echo "That's not the version installed"; exit 1; }
           pid="$(jq -r .pid "$OUT/version.json")"
           readlink "/proc/$pid/exe" | grep -qF "$(dirname "$APPEXE")" || { echo "The server on $BASE isn't the installed app's"; ls -l "/proc/$pid/exe"; exit 1; }
-          curl -fsS "$BASE/" | grep -q 'Bridge AI'
-          curl -fsS "$BASE/api/setup" -o "$OUT/setup.json"
-          curl -fsS "$BASE/api/config" | jq -c '{version, setupDone, simple, platform}'
+          api / | grep -q 'Bridge AI'
+          api /api/setup -o "$OUT/setup.json"
+          api /api/config | jq -c '{version, setupDone, simple, platform}'
           sleep 10 # the window draws
           ffmpeg -loglevel error -y -f x11grab -video_size 1600x1000 -i "$DISPLAY" -frames:v 1 "$OUT/opened.png" || import -window root "$OUT/opened.png" || true
           # The window is up (a crashed renderer leaves only the server).
@@ -567,15 +574,18 @@ jobs:
       - name: It opens and its server answers
         if: matrix.opens
         run: |
+          # With its key, in that user's data folder (this step runs as root).
+          api() { p=$1; shift; curl -fsS -H "Authorization: Bearer $(cat "$HOMEDIR/.bridge-ai/api-token" 2>/dev/null)" "$BASE$p" "$@"; }
           for i in $(seq 1 120); do
-            if curl -fsS "$BASE/api/version" -o "$OUT/version.json" 2>/dev/null; then break; fi
+            if api /api/version -o "$OUT/version.json" 2>/dev/null; then break; fi
             sleep 1
           done
           cat "$OUT/version.json" || { echo "No answer on $BASE after 2 minutes"; ps aux; exit 1; }
           echo
+          [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/version")" = 401 ] || { echo "Without its key, its server answers other programs"; exit 1; }
           [ "$(jq -r .version "$OUT/version.json")" = "${TAG#v}" ]
-          curl -fsS "$BASE/" | grep -q 'Bridge AI'
-          curl -fsS "$BASE/api/setup" -o "$OUT/setup.json"
+          api / | grep -q 'Bridge AI'
+          api /api/setup -o "$OUT/setup.json"
           sleep 10
           pgrep -f -- '--type=renderer' >/dev/null || { echo "No window"; exit 1; }
           ss -Hltunp | tee "$OUT/listening.txt"
@@ -599,7 +609,7 @@ jobs:
           if grep -n -E '^(E|W|N): |[Ee]rror|[Ww]arning|[Ff]ail|denied|not found|[Nn]o such|[Cc]annot|can.t|damaged' "$OUT/install-again.log"; then exit 1; fi
           if ${{ matrix.opens }}; then
             rm -f "$OUT/version.json"
-            for i in $(seq 1 120); do curl -fsS "$BASE/api/version" -o "$OUT/version.json" 2>/dev/null && break; sleep 1; done
+            for i in $(seq 1 120); do curl -fsS -H "Authorization: Bearer $(cat "$HOMEDIR/.bridge-ai/api-token" 2>/dev/null)" "$BASE/api/version" -o "$OUT/version.json" 2>/dev/null && break; sleep 1; done
             cat "$OUT/version.json" || { echo "It didn't open again"; exit 1; }
           fi
 
@@ -669,18 +679,26 @@ jobs:
 
       - name: It opens and its server answers
         run: &win-opens |
+          # With its key, as on a Mac (above), in this user's data folder.
           $ver = $null
           for ($i = 0; $i -lt 120 -and -not $ver; $i++) {
-            try { $ver = Invoke-RestMethod "$env:BASE/api/version" -TimeoutSec 2 } catch { Start-Sleep 1 }
+            try {
+              $key = (Get-Content "$env:USERPROFILE\.bridge-ai\api-token" -ErrorAction Stop).Trim()
+              $h = @{ Authorization = "Bearer $key" }
+              $ver = Invoke-RestMethod "$env:BASE/api/version" -Headers $h -TimeoutSec 2
+            } catch { Start-Sleep 1 }
           }
           if (-not $ver) { Write-Host "No answer on $env:BASE after 2 minutes"; Get-Process | Where-Object Name -like '*Bridge*'; exit 1 }
           $ver | ConvertTo-Json -Compress
+          $without = 200
+          try { Invoke-WebRequest "$env:BASE/api/version" -UseBasicParsing -TimeoutSec 5 | Out-Null } catch { $without = [int]$_.Exception.Response.StatusCode }
+          if ($without -ne 401) { Write-Host "Without its key, its server answers other programs ($without)"; exit 1 }
           if ($ver.version -ne $env:TAG.TrimStart('v')) { Write-Host "That's not the version installed"; exit 1 }
           $exe = (Get-Process -Id $ver.pid).Path
           if ($exe -ne $env:APP) { Write-Host "The server on $env:BASE runs $exe, not the installed app"; exit 1 }
-          if (-not ((Invoke-WebRequest "$env:BASE/" -UseBasicParsing).Content -match 'Bridge AI')) { exit 1 }
-          Invoke-RestMethod "$env:BASE/api/config" | Select-Object version, setupDone, simple, platform | ConvertTo-Json -Compress
-          Invoke-WebRequest "$env:BASE/api/setup" -UseBasicParsing -OutFile "$env:OUT\setup.json"
+          if (-not ((Invoke-WebRequest "$env:BASE/" -Headers $h -UseBasicParsing).Content -match 'Bridge AI')) { exit 1 }
+          Invoke-RestMethod "$env:BASE/api/config" -Headers $h | Select-Object version, setupDone, simple, platform | ConvertTo-Json -Compress
+          Invoke-WebRequest "$env:BASE/api/setup" -Headers $h -UseBasicParsing -OutFile "$env:OUT\setup.json"
           Start-Sleep 10 # the window draws
           $w = Get-Process -Name 'Bridge AI' | Where-Object MainWindowHandle -ne 0
           if (-not $w) { Write-Host "No window"; exit 1 }

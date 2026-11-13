@@ -34,13 +34,13 @@ export function InstallFix({ what, label, icon = 'download', onCheck, children, 
   return (
     <div className={`perm-fix ${compact ? 'compact' : ''}`}>
       {children}
-      {viaRelay ? <p className="muted small">Do this in Bridge AI on your computer.</p> : (
+      {viaRelay ? <p className="muted small">{t('Do this in Bridge AI on your computer.')}</p> : (
         <div className="perm-acts">
           <button type="button" className="btn small primary" disabled={running} onClick={go}><Icon name={icon} size={12} /> {label}</button>
-          {onCheck && <button type="button" className="ghost-btn" onClick={onCheck}><Icon name="refresh" size={12} /> Check again</button>}
+          {onCheck && <button type="button" className="ghost-btn" onClick={onCheck}><Icon name="refresh" size={12} /> {t('Check again')}</button>}
         </div>
       )}
-      {running && <p className="muted small">Running in a terminal tab, in the Setup space. <button type="button" className="link-btn" onClick={show}>Show it</button></p>}
+      {running && <p className="muted small">{t('Running in a terminal tab, in the Setup space.')} <button type="button" className="link-btn" onClick={show}>{t('Show it')}</button></p>}
       {msg?.error && <p className="error-text">{msg.error}</p>}
     </div>
   )

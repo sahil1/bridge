@@ -4,7 +4,7 @@ import { copyText } from '../../copy.js'
 import Lightbox from '../Lightbox.jsx'
 import { Menu } from '../Rail.jsx'
 import { api, usePoll, onThisComputer, refetch } from '../../api.js'
-import { t, tx, locale } from '../../i18n/index.js'
+import { t, tx, locale, tn } from '../../i18n/index.js'
 import { usePersisted, Handle, PaneHeader, useMedia } from '../layout.jsx'
 import { useMeetings, clock, length, ScreenButton, SectionButton } from './recording.jsx'
 import { byDay, timeOf, useSelection, BulkBar } from './bulk.jsx'
@@ -14,6 +14,8 @@ import { FixWord, TranscribeAgain, useChatModels, NOTE_LANGS, Dialog, openMemory
 import { Menu as AtMenu } from '../FileExtras.jsx'
 import { FilesPane, linkFiles } from './context.jsx'
 import { AssistPane, setAssist } from './assist.jsx'
+import { BoardPane, BoardLink, setBoard } from './board.jsx'
+import { openBoard } from '../whiteboard/links.js'
 import AiAssist from '../AiAssist.jsx'
 import PermissionFix from '../PermissionFix.jsx'
 import { useScreenAccess, useAllowCall, allowSteps } from './allowcall.jsx'
@@ -83,11 +85,13 @@ function AskScreen() {
   )
 }
 // A call that's silent while it records: what to turn on (the second list on System Settings' page,
-// which the top one doesn't cover), then Restart and Reset as for the screen (allowcall.jsx).
-function QuietCall() {
+// which the top one doesn't cover), then Restart and Reset as for the screen (allowcall.jsx). Unless
+// macOS lets Bridge AI hear it (access, the server's): then the silence is the call's own.
+function QuietCall({ access }) {
   const { data } = useScreenAccess()
-  const a = useAllowCall('sound', { recording: true, started: data?.started })
+  const a = useAllowCall('sound', { recording: true, started: data?.started, access })
   const s = allowSteps('sound', a, { link: true })
+  if (access === 'allowed') return <p className="mt-hint-call mt-quiet-call muted small" role="status">{t('No sound from the call.')} {t('macOS lets Bridge AI hear it, so nothing has played yet. If people are talking, check the call\'s sound plays on this Mac.')}</p>
   return (
     <p className="mt-hint-call mt-quiet-call muted small" role="status">
       {t('No sound from the call yet. If one is playing and this stays quiet, turn on Bridge AI in System Audio Recording Only: the second list under System Settings › Privacy & Security › Screen & System Audio Recording. Bridge AI on in Screen Recording, the list above it, doesn\'t cover the sound.')}{s.say} {s.acts}
@@ -125,7 +129,7 @@ function RecordingBar({ id, data }) {
       {phone && !r.missed && <p className="mt-hint-call muted small">{t('Keep Bridge AI in front while it records: a phone stops the mic of an app in the background.')}</p>}
       {data?.callError && <p className="mt-trouble small" role="status">{data.callError} {t('Your mic still records.')}</p>}
       {call === 'on' && !m.screen && <AskScreen />}
-      {call === 'on' && data?.callQuiet && <QuietCall />}
+      {call === 'on' && data?.callQuiet && <QuietCall access={data.callAccess} />}
     </div>
   )
 }
@@ -518,7 +522,8 @@ function WrittenFrom({ from, onView }) {
 // ⋯), then the view: the summary, your notes, the transcript or its files, with the transcript
 // beside the first three on a wide screen. Each has its own Copy. While it records, your notes stay
 // in view whatever else you look at: beside it on a wide screen, above it on a phone.
-const VIEWS = [['summary', 'sparkle', tx('Summary')], ['assist', 'bulb', tx('Suggestions')], ['mine', 'edit', tx('My notes')], ['transcript', 'chat', tx('Transcript')], ['files', 'paperclip', tx('Files')]]
+// Board: AI Assist's live board, a beta feature (board.jsx), there once the server says how it is.
+const VIEWS = [['summary', 'sparkle', tx('Summary')], ['assist', 'bulb', tx('Suggestions')], ['board', 'shapes', tx('Board')], ['mine', 'edit', tx('My notes')], ['transcript', 'chat', tx('Transcript')], ['files', 'paperclip', tx('Files')]]
 const here = onThisComputer
 const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 // For <input type="datetime-local">: the time where you are.
@@ -539,7 +544,7 @@ export function MeetingPage({ id, onBack }) {
   const touch = useMedia('(pointer: coarse)')
   // A touch screen or a narrow one: who said a line is picked from a list, not a small menu.
   const sheet = touch || !wide
-  const [view, setView] = useState(null) // summary | assist | mine | transcript | files
+  const [view, setView] = useState(null) // summary | assist | board | mine | transcript | files
   const [showLeft, setShowLeft] = useState(false) // the lines the cleanup left out, shown
   const [calWhy, setCalWhy] = useState(null) // why the calendar couldn't be read: calendarAccess, ...
   const [calAgain, setCalAgain] = useState(0)
@@ -771,10 +776,12 @@ export function MeetingPage({ id, onBack }) {
   const recording = isRecording
   // While it records, your notes are always shown, so the views are what goes with them: the
   // transcript, or AI Assist's suggestions when they're on. After, the summary once it's being written.
+  // With the live board on (and Suggest what to ask off), its Board.
+  const lb = data.liveBoard || null
   const showing = recording
-    ? (view && view !== 'mine' ? view : data.assist ? 'assist' : 'transcript')
+    ? (view && view !== 'mine' ? view : data.assist ? 'assist' : lb?.on ? 'board' : 'transcript')
     : view || (data.summary || data.summarizing || data.summaryError ? 'summary' : 'mine')
-  const views = VIEWS.filter(([v]) => (v !== 'assist' || recording || data.assist || data.assistItems?.length) && (v !== 'mine' || !recording))
+  const views = VIEWS.filter(([v]) => (v !== 'assist' || recording || data.assist || data.assistItems?.length) && (v !== 'board' || (!!lb && (recording || lb.on || !!lb.id))) && (v !== 'mine' || !recording))
   // The lines the cleanup left out are kept, and shown on request (Put back on one keeps it).
   const all = data.transcript || []
   const lines = all.filter((l) => !l.dropped)
@@ -809,16 +816,16 @@ export function MeetingPage({ id, onBack }) {
   }
   const heard = lines.some((l) => l.src === 'them' && l.text)
   // A room: your mic only. Its voices can be told apart where that runs (vst.offered), and on a
-  // call the voices on it (onCall: you're on your mic, so none of them is you).
+  // call the voices on it, and your mic's too with a room on the call: only a voice on your mic can
+  // be you.
   const room = !heard && lines.some((l) => l.src === 'you' && l.text)
-  const onCall = heard && data.voices?.src === 'them'
   const voiced = (room || heard) && data.voices?.speakers >= 2
   const canTell = (room || heard) && done && !!vst?.offered
   const working = data.voicesWork
   const names = [...new Set([...(data.event?.attendees || []), ...lines.map((l) => l.name).filter(Boolean)])]
   const voiceItems = (l) => [
     ...names.filter((x) => x !== l.name && x !== data.me).slice(0, 12).map((x) => ({ icon: 'users', label: x, run: () => nameVoice(l.voice, { name: x }) })),
-    !l.me && !onCall && { icon: 'mic', label: t("That's me"), run: () => nameVoice(l.voice, { me: true }) },
+    !l.me && l.src === 'you' && { icon: 'mic', label: t("That's me"), run: () => nameVoice(l.voice, { me: true }) },
     { icon: 'edit', label: t('Someone else…'), run: () => setNaming({ l, name: '', voice: l.voice }) },
     'sep',
     { icon: 'edit', label: t('Only this line…'), run: () => setNaming({ l, name: '' }) },
@@ -845,8 +852,11 @@ export function MeetingPage({ id, onBack }) {
   // summary, the transcript's cleanup, who said what, a question about it and a deck of it.
   const asking = () => { const box = pageRef.current?.querySelector('.mt-askbox input'); box?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); box?.focus({ preventScroll: true }) }
   const suggesting = () => act('assist', async () => { const on = !data.assist; await setAssist(id, on); if (on) setView('assist') })
+  const boarding = () => act('board', async () => { const on = !lb?.on; await setBoard(id, on); if (on) setView('board') })
   const assists = () => [
     recording && { label: t('Suggest what to ask'), hint: t('While it records: what to ask, raise or check next, from what\'s said, the invite and the files'), on: !!data.assist, run: suggesting },
+    recording && lb && { label: t('Keep a live board'), hint: t('While it records: what\'s decided, a timeline, who does what and open questions, on a whiteboard of its own'), on: !!lb.on, run: boarding },
+    !recording && lb?.id && { label: t('Open the board'), hint: t('The whiteboard AI Assist kept of this meeting'), run: () => openBoard(lb.id) },
     !recording && lines.length > 0 && { label: data.summary ? t('Write the summary again') : t('Write the summary'), hint: t('With the language, model and template under Summary'), disabled: busy === 'summary' || data.summarizing, run: summarize },
     done && lines.length > 0 && { label: data.cleanedAt ? t('Clean up the transcript again') : t('Clean up the transcript'), hint: t('Misheard words and names fixed, and what nobody said left out'), disabled: busy === 'clean', run: cleanUp },
     heard && { label: t('Work out who said each line'), hint: t('From names said, the screen and who was invited'), disabled: busy === 'who', run: nameAll },
@@ -908,7 +918,7 @@ export function MeetingPage({ id, onBack }) {
       </div>
       {wide && !recording && showing !== 'transcript' && <button type="button" className={`win-btn${split ? ' on' : ''}`} onClick={() => setSplit(!split)} aria-pressed={split} aria-label={split ? t('Hide the transcript beside it') : t('Show the transcript beside it')} title={split ? t('Hide the transcript beside it') : t('Show the transcript beside it')}><Icon name="panel-right" size={14} /></button>}
       <button type="button" className="win-btn mt-hb" onClick={save} disabled={busy === 'save'} aria-label={t('Save')} title={t('Save as Markdown in your notes folder')}><Icon name="download" size={14} /></button>
-      <AiAssist className="btn small mt-ai-btn" compact={phone} on={recording && !!data.assist} items={assists} />
+      <AiAssist className="btn small mt-ai-btn" compact={phone} on={recording && (!!data.assist || !!lb?.on)} items={assists} />
       <span className="menu-anchor">
         <button type="button" className="win-btn" onClick={() => setMenu(!menu)} aria-label={t('More actions')} title={t('More')}><Icon name="more" size={14} /></button>
         {menu && <Menu onClose={() => setMenu(false)} items={[
@@ -1030,6 +1040,7 @@ export function MeetingPage({ id, onBack }) {
       ) : <div className="mt-summary md" dangerouslySetInnerHTML={{ __html: md(data.summary) }} />)
         : !data.summarizing && !data.summaryError && <p className="muted small mt-hint">{done ? t('No summary yet. Summarize writes one from the transcript, your notes, the screen and the files.') : t('The summary is written when the meeting ends. Meanwhile, My notes is yours to write in.')}</p>}
       {data.summary && data.summaryFrom && !data.summarizing && <WrittenFrom from={data.summaryFrom} onView={(v) => { setView(v); if (v === 'transcript') setSel(null) }} />}
+      {lb?.id && <BoardLink b={lb} onView={() => setView('board')} />}
       {shots.length > 0 && data.summary && (
         <div className="mt-gallery" aria-label={t('From the screen')}>
           <b className="mt-gallery-head">{t('From the screen')}</b>
@@ -1040,13 +1051,17 @@ export function MeetingPage({ id, onBack }) {
       {data.summaryError && !data.summarizing && (
         <div className="mt-sumerr" role="status">
           <p className="small"><b>{!data.summaryTried?.length ? t("The summary couldn't be written:") : data.summaryTried.length === 1 ? t("The summary couldn't be written with {model}:", { model: modelName(models, data.summaryTried[0]) }) : data.summaryTried.length === 2 ? t("The summary couldn't be written with {model} or the {n} other model you have:", { model: modelName(models, data.summaryTried[0]), n: data.summaryTried.length - 1 }) : t("The summary couldn't be written with {model} or the {n} other models you have:", { model: modelName(models, data.summaryTried[0]), n: data.summaryTried.length - 1 })}</b> {data.summaryError}</p>
-          <p className="muted small">{data.saved ? t('Your notes and the transcript are kept and saved.') : t('Your notes and the transcript are kept.')} {data.summaryRetryAt ? `It tries again by itself at ${new Date(data.summaryRetryAt).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })}, or ` : ''}<button type="button" className="link-btn" onClick={summarize}>{data.summaryRetryAt ? 'try now' : 'Try again'}</button>, or pick another model above.</p>
+          <p className="muted small">{data.saved ? t('Your notes and the transcript are kept and saved.') : t('Your notes and the transcript are kept.')} {data.summaryRetryAt
+            ? tn('It tries again by itself at {time}, or {now}, or pick another model above.', { time: new Date(data.summaryRetryAt).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }), now: <button type="button" className="link-btn" onClick={summarize}>{t('try now')}</button> })
+            : tn('{again}, or pick another model above.', { again: <button type="button" className="link-btn" onClick={summarize}>{t('Try again')}</button> })}</p>
         </div>
       )}
       {data.summary && data.summaryNote && !data.summarizing && <p className="muted small">{data.summaryNote.replace(/[a-z]+:[\w./:-]+/gi, (x) => modelName(models, x))}</p>}
     </section>
   ) : showing === 'mine' ? mine : showing === 'assist' ? (
     <section className="mt-notes" aria-label={t('Suggestions')}><AssistPane id={id} data={data} onChange={refresh} onMsg={setMsg} /></section>
+  ) : showing === 'board' && lb ? (
+    <section className="mt-notes" aria-label={t('Board')}><BoardPane id={id} data={data} onChange={refresh} onMsg={setMsg} models={models} /></section>
   ) : showing === 'files' ? (
     <section className="mt-notes" aria-label={t('Files')}><FilesPane id={id} data={data} onChange={refresh} onMsg={setMsg} shots={shots} pictureUrl={pictureUrl} onOpenPic={openPic} /></section>
   ) : null

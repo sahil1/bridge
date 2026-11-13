@@ -13,7 +13,7 @@ import { loadMermaid } from './excalidraw.js'
 import { restyle, lookOf, INK } from './look.js'
 import { sides, elbowPoints } from './layout.js'
 import { fromSpec } from './spec.js'
-import { makeItem } from './shapes/make.js'
+import { makeItem, skeletonOf } from './shapes/make.js'
 import { ITEMS, itemFor } from '../../../shared/whiteboard/catalog.js'
 
 // ---------- Mermaid ----------
@@ -248,7 +248,8 @@ export function describe(elements, only = null) {
   const l = live(elements)
   const byId = new Map(l.map((e) => [e.id, e]))
   const textOf = (e) => String(((e.boundElements || []).map((b) => byId.get(b.id)).find((x) => x?.type === 'text')?.originalText) ?? e.name ?? '').trim()
-  const pick = (only?.size ? l.filter((e) => only.has(e.id) || (e.containerId && only.has(e.containerId))) : l).filter((e) => !e.customData?.bridge?.icon)
+  // What a suggestion takes away (suggest.js) is as good as gone.
+  const pick = (only?.size ? l.filter((e) => only.has(e.id) || (e.containerId && only.has(e.containerId))) : l).filter((e) => !e.customData?.bridge?.icon && !e.customData?.bridge?.thread && e.customData?.bridge?.suggestion?.kind !== 'remove')
   const hex = (c) => (c && c !== 'transparent' ? c : undefined)
   const kindOf = (e) => { const it = ITEMS.get(e.customData?.bridge?.item); return it?.kind === 'container' ? 'container' : it?.kind === 'icon' ? 'icon' : e.type }
   return {
@@ -367,4 +368,38 @@ export function applyOps(X, elements, ops, look = 'clean') {
     touched.add(arrow.id)
   }
   return { elements: els, touched: [...touched].filter((id) => get(id) && !get(id).isDeleted) }
+}
+
+// ---------- "Group these notes by theme" ----------
+// The notes gathered in a box per theme (a Group container, named for it, behind them), side by
+// side from where the notes were, each box's notes down it in the order they had. groups:
+// [{ theme, ids }] (server/boards.js themes). Returns { elements, touched } (the boxes).
+export function groupBy(X, elements, groups, look = 'clean') {
+  const byId = new Map(live(elements).map((e) => [e.id, e]))
+  const all = groups.flatMap((g) => g.ids.map((id) => byId.get(id)).filter(Boolean))
+  if (!all.length) return { elements, touched: [] }
+  const b = bounds(X, all)
+  const PAD = 24, HEAD = 46, GAP = 16, BETWEEN = 48
+  const moved = new Map() // a note -> where it goes
+  const boxes = []
+  let x = b.x1
+  for (const g of groups) {
+    const notes = g.ids.map((id) => byId.get(id)).filter(Boolean).sort((p, q) => p.y - q.y || p.x - q.x)
+    if (!notes.length) continue
+    const w = Math.max(...notes.map((e) => e.width)) + PAD * 2
+    let y = b.y1 + HEAD
+    for (const e of notes) { moved.set(e.id, { x: x + PAD, y }); y += e.height + GAP }
+    boxes.push({ theme: g.theme, x, y: b.y1, w, h: y - GAP + PAD - b.y1 })
+    x += w + BETWEEN
+  }
+  // A note's words go with it.
+  const to = (e) => {
+    if (moved.has(e.id)) return moved.get(e.id)
+    const c = e.containerId && byId.get(e.containerId)
+    return c && moved.has(c.id) ? { x: e.x + moved.get(c.id).x - c.x, y: e.y + moved.get(c.id).y - c.y } : null
+  }
+  const out = elements.map((e) => { const p = !e.isDeleted && to(e); return p ? X.newElementWith(e, p) : e })
+  const item = ITEMS.get('group')
+  const made = boxes.flatMap((bx) => X.convertToExcalidrawElements(skeletonOf(item, { x: bx.x, y: bx.y, w: bx.w, h: bx.h, label: bx.theme, look }).skeleton))
+  return { elements: [...made, ...out], touched: made.filter((e) => !e.containerId).map((e) => e.id) }
 }

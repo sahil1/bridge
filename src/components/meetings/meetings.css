@@ -300,6 +300,11 @@ html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box
 .fc-tip-text { grid-column: 1; font-size: 12.5px; line-height: 1.4; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .fc-tip-acts { grid-column: 2; grid-row: 1 / span 2; display: inline-flex; align-self: start; margin-top: -3px; }
 .fc-tip .fc-x { width: 24px; height: 24px; }
+/* An answer: its question above it on one line, and where it's from below. */
+.fc-tip-q, .fc-tip-from { grid-column: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; line-height: 1.35; color: var(--ink-2); }
+.fc-tip-q { font-style: italic; }
+.fc-tip-from { color: var(--ink-3); }
+.fc-tip-from.fail { color: var(--critical); }
 .fc-tip .fc-x:hover { background: color-mix(in srgb, var(--ai) 12%, transparent); }
 
 /* A call that ended, or one with no sound: what happened, and what to do. */
@@ -341,6 +346,11 @@ html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box
 .fc-chip.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); background: var(--accent-soft); }
 .fc-chip.fc-ai > .icon { color: var(--ai); }
 .fc-chip.fc-ai.on { color: var(--ai); border-color: color-mix(in srgb, var(--ai) 35%, transparent); background: var(--ai-soft); }
+/* The live board, in a line: what's on it, opening the board. */
+.fc-board { display: flex; align-items: center; gap: 6px; min-width: 0; height: 22px; padding: 0; border: 0; background: none; color: var(--ink-2); font: 500 12px var(--font); cursor: pointer; }
+.fc-board > .icon { flex: none; color: var(--ai); }
+.fc-board > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fc-board:hover { color: var(--ink); }
 
 .fc-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .fc-acts.fc-end { justify-content: flex-end; }
@@ -349,8 +359,8 @@ html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box
 .float-card .fc-stop:hover { filter: brightness(1.06); }
 
 /* The way out: to the meeting or every meeting, and the card's own pin and menu bar buttons. */
-.fc-links { display: flex; align-items: center; gap: 14px; margin-right: -6px; padding-top: 8px; border-top: 1px solid var(--line); }
-.fc-link { display: inline-flex; align-items: center; gap: 3px; height: 24px; font-size: 12px; font-weight: 500; color: var(--accent); }
+.fc-links { display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; margin-right: -6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.fc-link { display: inline-flex; align-items: center; gap: 3px; height: 24px; font-size: 12px; font-weight: 500; color: var(--accent); white-space: nowrap; }
 .fc-link:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 /* Between meetings, what needs you. */
@@ -615,6 +625,17 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .mt-tip-text small { font-size: 11.5px; line-height: 1.35; }
 .mt-tip .mt-t { padding-top: 2px; }
 .mt-tip-acts { display: inline-flex; gap: 2px; }
+/* An answer to a question raised (Answers in AI Assist): the question as asked, the answer, and
+   where it's from, the model's own knowledge set apart from yours. */
+.mt-tip.k-answer .mt-tip-kind { color: var(--ai); }
+.mt-ans-q { color: var(--ink-2); font-size: 12.5px; line-height: 1.4; }
+.mt-ans-from { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; margin-top: 2px; }
+.mt-ans-web { display: contents; }
+.mt-ans-from .chip { height: 22px; }
+.mt-ans-src { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-2); }
+.mt-ans-src.k-general { font-style: italic; }
+.mt-ans-web-state .aa-spin { display: inline-block; width: 10px; height: 10px; margin: 0 5px 0 0; vertical-align: -1px; }
+.mt-ans-web-state .link-btn { font-size: inherit; }
 .mt-tip-acts .ghost-btn { height: 22px; padding: 0 6px; }
 .mt-assist-wand, .mt-ask-wand, .mt-tool.lead > .icon { flex: none; color: var(--ai); }
 
@@ -648,6 +669,27 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 /* AI Assist's switch keeps its room on a phone: what it's doing wraps under it. */
 .mt-assist > .mt-phead { display: flex; flex-wrap: wrap; }
 .mt-assist-on { flex: none; }
+
+/* AI Assist's live board (board.jsx): its four lists side by side where there's room, one under the
+   other on a phone; a suggestion dashed in AI Assist's colour with the wand, as on the board. */
+.mt-board-where { margin: -4px 0 0; }
+.mt-board-parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; align-items: start; }
+.mt-bpart { display: grid; gap: 6px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane-2); min-width: 0; }
+.mt-bpart h5 { margin: 0 0 2px; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--ink-2); }
+.mt-bpart > p { margin: 0; }
+.mt-bperson { display: grid; gap: 6px; }
+.mt-bperson > b { margin-top: 2px; color: var(--ink-2); }
+.mt-bitem { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: start; gap: 4px 8px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--pane); }
+.mt-bitem.sug { border: 1.5px dashed color-mix(in srgb, var(--ai) 70%, var(--line)); background: color-mix(in srgb, var(--ai) 5%, var(--pane)); }
+.mt-bitem-mark { margin-top: 3px; color: var(--ai); }
+.mt-bitem-mark.kept { color: var(--ink-3); }
+.mt-bitem-text { font-size: 13px; line-height: 1.45; min-width: 0; overflow-wrap: anywhere; }
+.mt-bitem .mt-t { padding-top: 2px; }
+.mt-bitem-kept { padding-top: 2px; }
+.mt-board-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.mt-board-link { margin-top: 8px; }
+.mt-board-link > .small { flex: 1 1 160px; min-width: 0; }
+.app.narrow .mt-bitem .ghost-btn { height: 40px; min-width: 40px; }
 
 /* Under the summary's action items: sending them to the Chief of Staff, and what it does with them. */
 .mt-chief { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0 0 4px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane-2); }

@@ -7,9 +7,11 @@ import Canvas, { useDarkMode } from './Canvas.jsx'
 import DrawPanel, { KINDS, useBoardModels } from './DrawPanel.jsx'
 import ShapePanel, { DRAG_TYPE } from './ShapePanel.jsx'
 import BoardSettings from './BoardSettings.jsx'
+import BoardVersions from './BoardVersions.jsx'
+import Suggestions from './Suggestions.jsx'
 import { loadExcalidraw } from './excalidraw.js'
 import { fromText, fromPending, kindOfFile, placeBeside } from './convert.js'
-import { layoutBoard, reroute } from './layout.js'
+import { layoutBoard, reroute, fitInView } from './layout.js'
 import { restyle, lookOfElements, solidBackground, fontsReady, remeasure } from './look.js'
 import { makeItem } from './shapes/make.js'
 import { nameOf, laneName } from './shapes/library.js'
@@ -20,23 +22,40 @@ import { openBoard, openBoards } from './links.js'
 import { NameDialog } from '../FileExtras.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { useBusy } from '../../busy.js'
+import { useTrial } from '../../trials.js'
+import { Threads, SAY, useAuthor } from '../studio/doccomments.jsx'
+import { useBoardThreads } from './boardcomments.jsx'
 import './whiteboard.css'
 
 // Whiteboards: the list (WhiteboardsHome), one board (WhiteboardPage), and a diagram file in an
 // agent's Files tab drawn as a board (FileDrawing). The boards are files in ~/.bridge-ai/boards
 // (server/boards.js); a board saves itself a moment after each change. Around the drawing (Canvas,
 // Excalidraw in Bridge AI's look) are Bridge AI's own parts: the Shapes panel, AI Assist (Draw this
-// and Change it, with Refine), Auto-layout, Export (PNG, SVG, PDF) and the whiteboard's settings.
+// and Change it, with Refine; what it draws is a suggestion to keep, Suggestions.jsx), Auto-layout,
+// Export (PNG, SVG, PDF) and the whiteboard's settings.
 
 const enc = encodeURIComponent
-// What AI Assist offers on a board: its panel, to draw something new or change what's there.
-// open: the panel is open; drawn: something's on the board; show(mode): opens the panel that way.
-const drawAssist = (open, drawn, show) => [
+// What AI Assist offers on a board: its panel, to draw something new, change what's there, or ask
+// about the shapes selected (or the whole board); and the meeting moves (DrawPanel.jsx KINDS),
+// made straight away. open: the panel is open; drawn: something's on the board; sel: how many
+// shapes are selected; show(mode): opens the panel that way.
+const drawAssist = (open, drawn, show, sel = 0, studio = false) => [
   { label: t('Draw this'), hint: t('A diagram from what you describe, a meeting or a document'), run: () => show('draw') },
   { label: t('Change it'), hint: drawn ? t('The whole board, or the shapes you select') : t('Once there\'s something on the board'), disabled: !drawn, run: () => show('change') },
+  { label: sel ? t('Ask about these') : t('Ask about the board'), hint: !drawn ? t('Once there\'s something on the board') : sel ? t('A question about the {n} selected, answered here', { n: sel }) : t('Select shapes to ask about only those'), disabled: !drawn, run: () => show('ask') },
+  'sep',
+  // After a meeting: its notes on the board sorted, put on a timeline, or turned into who does what.
+  { label: t('Group by theme'), hint: !drawn ? t('Once there\'s something on the board') : sel ? t('The {n} selected, gathered in a box per theme', { n: sel }) : t('The notes on the board, gathered in a box per theme'), disabled: !drawn, run: () => show('themes') },
+  { label: t('A timeline'), hint: drawn ? t('With owners and dates, from what\'s on the board') : t('With owners and dates, from a meeting'), run: () => show('timeline') },
+  { label: t('Action items'), hint: t('For each person, to put on your task list'), run: () => show('actions') },
+  // The board written up, into Studio (a beta feature: offered only once it's on).
+  studio && 'sep',
+  studio && { label: t('Make a document'), hint: drawn ? t('A Word document of this board, in Studio') : t('Once there\'s something on the board'), disabled: !drawn, run: () => show('doc') },
+  studio && { label: t('Make a deck'), hint: drawn ? t('Slides of this board, in Studio, to present or send as PowerPoint') : t('Once there\'s something on the board'), disabled: !drawn, run: () => show('deck') },
   open && 'sep',
   open && { label: t('Close AI Assist'), run: () => show(null) },
 ]
+const selected = (ex) => Object.values(ex?.getAppState().selectedElementIds || {}).filter(Boolean).length
 const fileOp = (pane, op, path, name) => api(`/agents/${enc(pane)}/fileop`, { method: 'POST', body: { op, path, name } })
 
 // A small menu under a button: a click outside or Escape closes it. title: a line above the
@@ -103,6 +122,9 @@ async function exportBoard(X, ex, { kind, name, dark, only }) {
   } else blob = await png()
   download(blob, `${name}.${kind}`)
 }
+
+// A meeting's live board (server/meetboard.js): its elements say which meeting.
+const liveBoard = (elements) => elements.some((e) => e.customData?.bridge?.meeting)
 
 // What an agent or the chief of staff handed over, drawn in: in place of what's there, or beside it.
 async function withPending(X, b, look) {
@@ -205,6 +227,31 @@ function useDrawing(key, store, look = null) {
     if (got.changed) { reroute(s.X, s.api); remeasure(s.X, s.api).catch(() => {}) }
   }, [])
 
+  // A meeting's live board (server/meetboard.js) the meeting added to while there's an edit here
+  // not saved yet: what it added comes in beside what's on screen, and a note of its kept or
+  // discarded from the meeting's Board is kept or taken off here too, without asking; everything
+  // else stays as it is here, and is saved.
+  const mergeTheirs = useCallback(async () => {
+    const s = st.current
+    if (!s.X || !s.api) return
+    const b = await s.store.load(s.X)
+    const mine = s.api.getSceneElementsIncludingDeleted()
+    const here = new Set(mine.map((e) => e.id))
+    const there = new Map((b.elements || []).map((e) => [e.id, e]))
+    const fromMeeting = (e) => String(e.customData?.bridge?.suggestion?.id || '').startsWith('mb-')
+    const out = mine.map((e) => {
+      if (e.isDeleted || !fromMeeting(e)) return e
+      const o = there.get(e.id)
+      if (!o) return s.X.newElementWith(e, { isDeleted: true })
+      return o.customData?.bridge?.suggestion ? e : s.X.restoreElements([o], null)[0] || e
+    })
+    const fresh = s.X.restoreElements((b.elements || []).filter((e) => !here.has(e.id)), null)
+    s.mtime = b.mtime
+    s.api.updateScene({ elements: [...out, ...fresh], captureUpdate: s.X.CaptureUpdateAction.IMMEDIATELY })
+    s.dirty = true
+    flush()
+  }, [flush])
+
   useEffect(() => {
     if (!ready || !store.stat) return
     const tick = async () => {
@@ -215,7 +262,8 @@ function useDrawing(key, store, look = null) {
       // Saved here meanwhile: what this look saw may be that save, not someone else's. The next looks again.
       if (s.busy || s.saves !== n) return
       if (!now || s.mtime == null || Math.abs(now.mtime - s.mtime) <= 1) return
-      if (s.dirty) setConflict(true)
+      if (s.dirty && liveBoard(s.api.getSceneElements())) mergeTheirs().catch(() => setConflict(true))
+      else if (s.dirty) setConflict(true)
       else takeTheirs().catch(() => {})
     }
     const id = setInterval(tick, 2500)
@@ -309,12 +357,17 @@ async function addShape(X, ex, item, { at, look, scheme }) {
 // In Studio's Preview (Studio.jsx): tabs, its Files and Preview, go first in the header; renamed,
 // onRenamed(new name) keeps it in Studio's tab, and deleted, onGone goes back to Studio's Files.
 export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRenamed = null, onGone = null }) {
+  // An AI Assist change about to go on the board (what it is, in words): the save that follows
+  // keeps the board as it was before it as a version (server/boards.js).
+  const aiNext = useRef(null)
   const store = useMemo(() => ({
     load: async () => { const b = await api(`/boards/${enc(id)}`); return { mtime: b.mtime, elements: b.data.elements || [], appState: b.data.appState || {}, files: b.data.files || {}, pending: b.data.bridge?.pending || null } },
     save: async ({ X, elements, appState, files, mtime, force }) => {
       const text = X.serializeAsJSON(elements, appState, files, 'local')
       const preview = elements.length ? await previewOf(X, elements, appState, files).catch(() => null) : null
-      return send(`/boards/${enc(id)}`, { text, mtime, force, preview }, 'PUT')
+      const ai = aiNext.current
+      aiNext.current = null
+      return send(`/boards/${enc(id)}`, { text, mtime, force, preview, ...(ai ? { version: { by: 'ai', label: ai } } : {}) }, 'PUT')
     },
     stat: () => api(`/boards/${enc(id)}/stat`),
   }), [id])
@@ -337,8 +390,26 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
   const dark = useDarkMode()
   // Whether this computer can show the folder (not in Docker, or on Linux with no desktop).
   const canOpen = !!usePoll('/boards', 10 * 60 * 1000).data?.canOpen
+  // Make a document or a deck writes into Studio, a beta feature (src/trials.js).
+  const studio = useTrial('studio')
   const boardLook = look || d.ready?.look || 'clean'
+  // Comments on the shapes or a place on the board, kept in its file (Comments and @bridge, a
+  // beta feature): a pin picked on the board opens its thread (boardcomments.jsx).
+  const commenting = useTrial('comments')
+  const author = useAuthor()
+  const threads = useBoardThreads({ board: d.board, on: commenting, author, look: boardLook, onOpen: () => setPanel('comments') })
+  const comment = () => { setPanel('comments'); threads.start() }
   const scheme = prefs?.on ? prefs.prefs?.colours?.value || 'soft' : 'soft'
+  // A meeting's live board (server/meetboard.js): the meeting it's kept from, a click away.
+  const meeting = useMemo(() => (d.ready?.initial?.elements || []).find((e) => e.customData?.bridge?.meeting?.id)?.customData.bridge.meeting.id || null, [d.ready])
+  // It opens with its four columns in view, as far as they fit.
+  const fitted = useRef(null)
+  useEffect(() => {
+    const { X, api: ex } = d.board
+    if (!ex || !meeting || fitted.current === id) return
+    const timer = setTimeout(() => { fitted.current = id; fitInView(X, ex, ex.getSceneElements()) }, 60)
+    return () => clearTimeout(timer)
+  }, [d.board.api, meeting, id]) // eslint-disable-line react-hooks/exhaustive-deps
   // How much is on the board and selected, for the empty board's hint and the menus.
   const [count, setCount] = useState({ n: 0, sel: 0 })
   useEffect(() => d.board.api?.onChange((els, st) => {
@@ -375,6 +446,14 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
     await api(`/boards/${enc(id)}`, { method: 'DELETE' })
     refetch('/boards')
     if (onGone) onGone(); else openBoards({ replace: `view:whiteboard:${id}` })
+  }
+  // A version put back: what's drawn saved first (the server keeps it as a version), then the
+  // version drawn in its place (⌘Z takes that back too).
+  const putBack = async (v) => {
+    await d.flush()
+    await api(`/boards/${enc(id)}/versions/${enc(v.id)}/restore`, { method: 'POST' })
+    await d.takeTheirs()
+    refetch('/boards')
   }
   const [naming, setNaming] = useState(false)
   const [only, setOnly] = useState(false)
@@ -421,7 +500,7 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
 
   return (
     <div className="wb-view">
-      <PaneHeader icon="shapes" title={<EditableName name={id} onRename={rename} label={t('Name this whiteboard')} />} subtitle={<SaveState status={d.status} />}
+      <PaneHeader icon="shapes" title={<EditableName name={id} onRename={rename} label={t('Name this whiteboard')} />} subtitle={<><SaveState status={d.status} />{meeting && <button type="button" className="link-btn small wb-meeting" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: meeting } }))} title={t('The meeting this board was kept from')}><Icon name="mic" size={11} /> {t('From the meeting')}</button>}</>}
         leading={onBack ? <button type="button" className="win-btn" onClick={onBack} aria-label={backLabel || t('All whiteboards')} title={backLabel || t('All whiteboards')}><Icon name="back" size={15} /></button> : null}>
         {tabs}
         <button type="button" className={`btn small${shapes ? ' on' : ''}`} onClick={() => setShapes(!shapes)} aria-pressed={!!shapes} disabled={!d.board.api} title={t('Shapes')}><Icon name="shapes" size={12} /> {wide ? t('Shapes') : ''}</button>
@@ -449,12 +528,15 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
             </div>
           )} />}
         </span>}
+        {wide && <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-label={t('Versions')} title={t('Versions: as you left it, and before each AI Assist change')} aria-pressed={panel === 'versions'}><Icon name="clock" size={14} /></button>}
+        {commenting && <button type="button" className={`win-btn wb-comments-btn${panel === 'comments' ? ' on' : ''}`} onClick={() => setPanel(panel === 'comments' ? null : 'comments')} aria-label={t('Comments')} title={t('Comments on the shapes picked, or a place on the board, kept in its file. @bridge in one asks AI Assist.')} aria-pressed={panel === 'comments'}><Icon name="chat" size={14} />{threads.count > 0 && <span className="wb-comments-n">{threads.count}</span>}</button>}
         <button type="button" className={`win-btn${panel === 'settings' ? ' on' : ''}`} onClick={() => setPanel(panel === 'settings' ? null : 'settings')} aria-label={t('Whiteboard Settings')} title={t('Whiteboard Settings')} aria-pressed={panel === 'settings'}><Icon name="settings" size={14} /></button>
-        <AiAssist className="btn small wb-ai-btn" compact={!wide} on={panel === 'draw'} disabled={!d.board.api} items={() => drawAssist(panel === 'draw', !!count.n, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel('draw') } else setPanel(null) })} />
+        <AiAssist className="btn small wb-ai-btn" compact={!wide} on={panel === 'draw'} disabled={!d.board.api} items={() => drawAssist(panel === 'draw', !!count.n, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel('draw') } else setPanel(null) }, count.sel, studio)} />
         <span className="menu-anchor">
           <button type="button" className="win-btn" onClick={() => setMenu(menu === 'more' ? null : 'more')} aria-label={t('More')} title={t('More')}><Icon name="more" size={14} /></button>
           {menu === 'more' && <Menu onClose={() => setMenu(null)} items={[
             { label: t('Rename…'), icon: 'edit', run: () => setNaming(true) },
+            !wide && { label: t('Versions'), icon: 'clock', run: () => setPanel('versions') },
             !wide && d.board.api && { label: t('Lay out left to right'), icon: 'split', run: () => layout('LR') },
             !wide && d.board.api && { label: t('Lay out top to bottom'), icon: 'layers', run: () => layout('TB') },
             !wide && d.board.api && { label: t('Export as PNG'), icon: 'image', run: () => exp('png') },
@@ -475,6 +557,7 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
           {d.error ? <div className="wb-wait"><p className="error-text small" role="alert">{d.error}</p></div>
             : d.ready ? <Canvas key={id} initial={d.ready.initial} onApi={d.onApi} onChange={d.onChange} onSave={() => d.flush(true)} name={id} look={boardLook} />
               : <div className="wb-wait" aria-busy="true"><span className="muted small">{t('Opening the whiteboard…')}</span></div>}
+          {d.board.api && <Suggestions board={d.board} bar={panel !== 'draw'} />}
           {d.board.api && !count.n && !panel && (
             <div className="wb-empty-board">
               <p>{t('An empty whiteboard')}</p>
@@ -485,8 +568,10 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
               </div>
             </div>
           )}
-          {panel === 'draw' && d.board.api && <div className="wb-draw-wrap"><DrawPanel board={d.board} start={start} want={want} onStarted={() => setStart(null)} onClose={() => setPanel(null)} compact={!wide} boardId={id} look={boardLook} prefs={prefs} onDrawn={drawn} /></div>}
+          {panel === 'draw' && d.board.api && <div className="wb-draw-wrap"><DrawPanel board={d.board} start={start} want={want} onStarted={() => setStart(null)} onClose={() => setPanel(null)} compact={!wide} boardId={id} look={boardLook} prefs={prefs} onDrawn={drawn} onSave={() => d.flush()} onAi={(what) => { aiNext.current = what }} /></div>}
+          {panel === 'comments' && commenting && d.board.api && <div className="wb-draw-wrap"><Threads threads={threads} say={SAY.board} className="wb-draw wb-comments" onComment={comment} onClose={() => setPanel(null)} /></div>}
           {panel === 'settings' && <div className="wb-draw-wrap"><BoardSettings look={boardLook} onLook={pickLook} prefs={prefs} onPrefs={setPrefs} onClose={() => setPanel(null)} /></div>}
+          {panel === 'versions' && <div className="wb-draw-wrap"><BoardVersions id={id} onRestore={putBack} onClose={() => setPanel(null)} dark={dark} /></div>}
         </div>
       </div>
     </div>
@@ -664,7 +749,7 @@ export function FileDrawing({ pane, f, onSaved, onOpenPath }) {
         <span className="wb-grow" />
         {!own && <button type="button" className="btn small" onClick={saveBeside} disabled={!d.board.api} title={t('Saves the drawing as {name} next to this file', { name: `${base}.excalidraw` })}>{t('Save as .excalidraw')}</button>}
         <button type="button" className="btn small" onClick={done ? () => openBoard(done) : toBoards} disabled={!d.board.api}><Icon name="shapes" size={12} /> {done ? t('Open in Whiteboards') : t('Add to Whiteboards')}</button>
-        <AiAssist className="btn small wb-ai-btn" on={panel} disabled={!d.board.api} items={() => drawAssist(panel, true, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel(true) } else setPanel(false) })} />
+        <AiAssist className="btn small wb-ai-btn" on={panel} disabled={!d.board.api} items={() => drawAssist(panel, true, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel(true) } else setPanel(false) }, selected(d.board.api))} />
       </div>
       {d.conflict && <Conflict onTheirs={() => d.takeTheirs().catch((e) => setErr(e.message))} onMine={() => d.flush(true)} />}
       {err && <p className="error-text small wb-err" role="alert">{err}</p>}
@@ -672,6 +757,7 @@ export function FileDrawing({ pane, f, onSaved, onOpenPath }) {
         {d.error ? <div className="wb-wait"><p className="error-text small" role="alert">{d.error}</p></div>
           : d.ready ? <Canvas key={version} initial={d.ready.initial} onApi={d.onApi} onChange={d.onChange} onSave={() => d.flush(true)} name={base} look={d.ready.look} />
             : <div className="wb-wait" aria-busy="true"><span className="muted small">{t('Opening the whiteboard…')}</span></div>}
+        {d.board.api && <Suggestions board={d.board} bar={!panel} />}
         {panel && d.board.api && <div className="wb-draw-wrap"><DrawPanel board={d.board} want={want} onClose={() => setPanel(false)} compact look={d.ready?.look} /></div>}
       </div>
     </div>

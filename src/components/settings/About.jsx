@@ -254,6 +254,9 @@ const SHORT = {
   routines: tx('Routines that run by themselves at the time you set, and History › Commands.'),
   files: tx('Every folder on this computer and your others, as Finder shows them. Read-only for now.'),
   'signature-assist': tx('In Studio, AI Assist\'s Sign this on a PDF you\'re asked to sign.'),
+  'make-sheet': tx('In Studio, a new sheet written by AI Assist from what it\'s for, shown to keep or discard.'),
+  'call-video': tx("On a call, whose mouth moves on its video names who said what. Read on this Mac; no pictures kept."),
+  'mcp-server': tx('Claude Code, Claude Desktop, Cursor and Codex read your boards, files and meeting summaries, and suggest changes you keep. Set up in Settings › MCP Servers.'),
 }
 function Trials() {
   const { s, save } = useSettings()
@@ -267,7 +270,7 @@ function Trials() {
     <section className="st-sec" data-setting="beta">
       <h4>{t('Beta Features')}</h4>
       <p className="muted small" title={t("New parts of Bridge AI, in beta. Each stays hidden until you turn it on here, and turning it off hides it again; what you made with it stays where it is.")}>{t('Each stays hidden until you turn it on here.')}</p>
-      {TRIALS.map((x) => {
+      {TRIALS.filter((x) => !x.mac || conf?.platform === 'darwin').map((x) => {
         // One that's part of another works only with that one on, and says so.
         const needs = x.needs && !on(x.needs) ? TRIALS.find((y) => y.id === x.needs) : null
         return (

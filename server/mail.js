@@ -25,6 +25,7 @@ const SETUP = {
   noAccess: 'Bridge AI needs Full Disk Access to read Mail\'s local index. Nothing leaves your Mac.',
   notMac: 'The inbox reads Apple Mail on macOS. It isn\'t available on this platform yet.',
   noMail: 'Mail has nothing on this Mac yet. Add your account to Mail and open it once, so it can sync.',
+  busy: 'Mail is busy updating its index, so your mail couldn\'t be read just now. Try again in a moment.',
 }
 
 function findIndex() {
@@ -38,13 +39,33 @@ function findIndex() {
   return { error: 'noMail' }
 }
 
-const sql = (file, query) => new Promise((resolve, reject) => {
-  // mode=ro: never writes; Mail keeps working on its own copy.
-  execFile('sqlite3', ['-readonly', '-json', `file:${file}?mode=ro`, query], { timeout: 20000, maxBuffer: 32 * 1024 * 1024 }, (err, out, errOut) => {
-    if (err) return reject(new Error((errOut || err.message).trim().split('\n')[0]))
+const read = (file, query, more = '') => new Promise((resolve, reject) => {
+  // mode=ro: never writes; Mail keeps working on its own copy. .timeout: a read that comes just as
+  // Mail opens, quits or writes its index waits for Mail to let go of it (for up to 5 seconds),
+  // rather than failing with "database is locked"; still locked after that, it says Mail is busy.
+  execFile('sqlite3', ['-readonly', '-json', '-cmd', '.timeout 5000', `file:${file}?mode=ro${more}`, query], { timeout: 20000, maxBuffer: 32 * 1024 * 1024 }, (err, out, errOut) => {
+    if (err) { const why = (errOut || err.message).trim().split('\n')[0]; return reject(new Error(/database is locked|database table is locked/i.test(why) ? SETUP.busy : why)) }
     try { resolve(out.trim() ? JSON.parse(out) : []) } catch (e) { reject(e) }
   })
 })
+
+// Mail's index has a write-ahead log, and a read-only reader can't open it while the log is gone
+// (Mail has quit, and macOS 15's SQLite takes the log away as it does) or just as Mail opens or
+// quits it: "unable to open database file". With nothing in the log everything is in the index,
+// so it's read as it stands (immutable); with something in it, Mail is busy with it, so the read
+// waits a moment for Mail and tries again, and is read as it stands after that.
+const sql = async (file, query) => {
+  for (let i = 0; ; i++) {
+    try {
+      return await read(file, query)
+    } catch (e) {
+      if (!/unable to open database file/i.test(e.message)) throw e
+      const log = await fs.promises.stat(`${file}-wal`).then((s) => s.size, () => 0)
+      if (log <= 32 || i >= 8) return read(file, query, '&immutable=1')
+      await new Promise((res) => setTimeout(res, 250))
+    }
+  }
+}
 
 // Mail's index isn't the same on every macOS: a column one has (message_id_header, Apple
 // Intelligence's summaries, automated_conversation) another doesn't, and asking for one that isn't

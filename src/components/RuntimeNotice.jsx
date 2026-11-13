@@ -2,10 +2,11 @@ import { useState } from 'react'
 import Icon from './Icon.jsx'
 import { api, refetch, settingsChanged, usePoll, viaRelay } from '../api.js'
 import { askRestart, useRecheck } from './PermissionFix.jsx'
+import { t, tn } from '../i18n/index.js'
 
 const HIDDEN = 'cc-herdr-hint-hidden'
 const readHidden = () => { try { return localStorage.getItem(HIDDEN) || '' } catch { return '' } }
-const and = (list) => (list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}` : list[0])
+const and = (list) => (list.length > 1 ? t('{list} and {last}', { list: list.slice(0, -1).join(', '), last: list[list.length - 1] }) : list[0])
 
 // herdr chosen to run agents, but not installed or not answering: nothing can start, so say so
 // under the top bar, with one click back to the built-in runtime (applied on restart). It goes away
@@ -32,9 +33,9 @@ export default function RuntimeNotice({ runtime, fellBack }) {
     return (
       <div className="rt-notice" role="status">
         <Icon name="alert" size={13} />
-        <span>{switched ? 'Agents stay in Bridge AI.' : <>Agents run in Bridge AI itself for now: {fellBack.why}. Update herdr (<code>herdr update</code>), then restart Bridge AI.</>}</span>
-        {!switched && !viaRelay && <button type="button" className="btn small" onClick={askRestart}>Restart</button>}
-        {!switched && <button type="button" className="btn small" onClick={() => builtin(false)}>Keep built-in</button>}
+        <span>{switched ? t('Agents stay in Bridge AI.') : tn('Agents run in Bridge AI itself for now: {why}. Update herdr ({command}), then restart Bridge AI.', { why: fellBack.why, command: <code>herdr update</code> })}</span>
+        {!switched && !viaRelay && <button type="button" className="btn small" onClick={askRestart}>{t('Restart')}</button>}
+        {!switched && <button type="button" className="btn small" onClick={() => builtin(false)}>{t('Keep built-in')}</button>}
         {err && <span className="error-text">{err}</span>}
       </div>
     )
@@ -44,8 +45,8 @@ export default function RuntimeNotice({ runtime, fellBack }) {
     return (
       <div className="rt-notice" role="status">
         <Icon name="alert" size={13} />
-        <span>{switched ? 'Bridge AI runs agents itself after a restart.' : <>Agents run in herdr, which isn't installed or isn't running. Start it, or use the built-in runtime (<a href="https://herdr.dev" target="_blank" rel="noreferrer">herdr.dev</a>).</>}</span>
-        {!switched && <button type="button" className="btn small" onClick={() => builtin()}>Use built-in</button>}
+        <span>{switched ? t('Bridge AI runs agents itself after a restart.') : tn('Agents run in herdr, which isn\'t installed or isn\'t running. Start it, or use the built-in runtime ({site}).', { site: <a href="https://herdr.dev" target="_blank" rel="noreferrer">herdr.dev</a> })}</span>
+        {!switched && <button type="button" className="btn small" onClick={() => builtin()}>{t('Use built-in')}</button>}
         {err && <span className="error-text">{err}</span>}
       </div>
     )
@@ -57,8 +58,10 @@ export default function RuntimeNotice({ runtime, fellBack }) {
   return (
     <div className="rt-notice" role="status">
       <Icon name="alert" size={13} />
-      <span>herdr's {and(old.map((o) => o.label))} integration{old.length > 1 ? 's are' : ' is'} out of date. Update {old.length > 1 ? 'them' : 'it'} in a terminal: <code>{old.map((o) => o.command).join(' && ')}</code></span>
-      <button type="button" className="btn small" onClick={hide}>Hide</button>
+      <span>{old.length > 1
+        ? tn('herdr\'s {names} integrations are out of date. Update them in a terminal: {command}', { names: and(old.map((o) => o.label)), command: <code>{old.map((o) => o.command).join(' && ')}</code> })
+        : tn('herdr\'s {name} integration is out of date. Update it in a terminal: {command}', { name: old[0].label, command: <code>{old[0].command}</code> })}</span>
+      <button type="button" className="btn small" onClick={hide}>{t('Hide')}</button>
     </div>
   )
 }

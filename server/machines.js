@@ -899,6 +899,12 @@ export async function proxy(req, res, { frames = null, ui = null } = {}) {
     else if (page) away(msg)
     else res.status(502).json({ error: msg })
   }
+  // An answer that says how long it is ends here as soon as that much has come, not when the link's
+  // word that it's over follows. The browser takes it as whole by then and sends its next request on
+  // the same connection, which waited here behind it, and was dropped with it when the link dropped
+  // in between (a window showing that device lost one of its files).
+  let left = null
+  const finish = () => { done = true; res.end() }
   const ask = () => {
     if (done) return
     const at = tries
@@ -911,13 +917,21 @@ export async function proxy(req, res, { frames = null, ui = null } = {}) {
           res.setHeader(k, k.toLowerCase() === 'location' && String(v).startsWith('/') ? `/m/${m.id}${v}` : v)
         }
         if (frames && !req.headers['x-bridge-relay'] && /text\/html/i.test(res.getHeader('content-type') || '')) res.setHeader('Content-Security-Policy', [res.getHeader('Content-Security-Policy'), frames(req)].flat().filter(Boolean))
+        const len = String(res.getHeader('content-length') ?? '')
+        left = req.method !== 'HEAD' && s !== 204 && s !== 304 && /^\d+$/.test(len) ? Number(len) : null
+        if (left === 0) finish()
       },
       onChunk: (c) => {
-        if (res.write(c)) return grant(c.byteLength)
-        if (!unread) res.once('drain', () => { const n = unread; unread = 0; grant(n) })
-        unread += c.byteLength
+        if (done) return
+        const whole = left != null && (left -= c.byteLength) <= 0
+        if (res.write(c) || whole) grant(c.byteLength)
+        else {
+          if (!unread) res.once('drain', () => { const n = unread; unread = 0; grant(n) })
+          unread += c.byteLength
+        }
+        if (whole) finish()
       },
-      onEnd: () => { done = true; res.end() },
+      onEnd: () => { if (!done) finish() },
       onError: (msg) => failed(msg, at),
     })
     r.started.catch((e) => failed(e.message, at))

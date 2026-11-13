@@ -56,11 +56,11 @@ export default function Agents({ onOpenAgent }) {
     <div className="st-sections">
       <div className="st-row between">
         <p className="muted small">{t("Bridge AI uses the agents' own sign-ins and subscriptions; it never sees your passwords or tokens.")}</p>
-        <button type="button" className="ghost-btn" onClick={() => { load(); if (rec.on) rec.reload(true) }}><Icon name="refresh" size={12} /> Refresh</button>
+        <button type="button" className="ghost-btn" onClick={() => { load(); if (rec.on) rec.reload(true) }}><Icon name="refresh" size={12} /> {t('Refresh')}</button>
       </div>
       {msg?.error && <p className="st-note bad"><Icon name="alert" size={13} /> {msg.error}</p>}
       {rec.error && <p className="st-note bad"><Icon name="alert" size={13} /> {t("Couldn't look up the settings recommended for your plan: {error}", { error: rec.error })}</p>}
-      {msg?.ok && <p className="st-note ok"><Icon name="terminal" size={13} /> {msg.ok} {msg.paneId && <button className="link-btn" onClick={() => onOpenAgent?.(msg.paneId)}>Open it</button>}</p>}
+      {msg?.ok && <p className="st-note ok"><Icon name="terminal" size={13} /> {msg.ok} {msg.paneId && <button className="link-btn" onClick={() => onOpenAgent?.(msg.paneId)}>{t('Open it')}</button>}</p>}
       {consult && consult.length > 0 && (
         <Advanced order={10}>
         <section className="st-consult" data-setting="consult">
@@ -79,7 +79,7 @@ export default function Agents({ onOpenAgent }) {
       <ul className="st-agents" data-setting="agent-list">
         {sorted.map((a) => {
           const sub = subs[a.kind]
-          const state = !a.installed ? { t: 'Not installed', c: '' } : sub?.signedIn === true ? { t: `Signed in${sub.method ? ` · ${sub.method}` : ''}${sub.account ? ` · ${sub.account}` : ''}`, c: 'good' } : sub?.signedIn === false ? { t: 'Installed, not signed in', c: 'warn' } : { t: 'Installed', c: 'good' }
+          const state = !a.installed ? { t: t('Not installed'), c: '' } : sub?.signedIn === true ? { t: [t('Signed in'), sub.method, sub.account].filter(Boolean).join(' · '), c: 'good' } : sub?.signedIn === false ? { t: t('Installed, not signed in'), c: 'warn' } : { t: t('Installed'), c: 'good' }
           const r = a.installed && rec.data?.agents.find((x) => x.kind === a.kind)
           return (
             <li key={a.kind} className={`st-agent-row ${a.installed ? '' : 'off'} ${r ? 'has-rec' : ''}`} data-setting={`agent-${a.kind}`}>
@@ -87,19 +87,19 @@ export default function Agents({ onOpenAgent }) {
               <div className="st-agent-text">
                 <b>{a.label}</b>
                 <span className={`st-chip ${state.c}`}>{state.t}</span>
-                {!a.installed && a.install && <code className="st-cmd" title="Install command">{a.install}</code>}
+                {!a.installed && a.install && <code className="st-cmd" title={t('Install command')}>{a.install}</code>}
                 {a.installed && sub?.signedIn === false && sub.hint && !canSignIn(a.kind) && <span className="muted small">{sub.hint}</span>}
-                <span className="st-caps muted small" title={[a.caps?.subagents && 'subagents', a.caps?.commands && 'slash commands'].filter(Boolean).join(' · ') || undefined}>{a.caps?.chat ? 'Chat and terminal' : 'Terminal'}</span>
+                <span className="st-caps muted small" title={[a.caps?.subagents && 'subagents', a.caps?.commands && 'slash commands'].filter(Boolean).join(' · ') || undefined}>{a.caps?.chat ? t('Chat and terminal') : t('Terminal')}</span>
               </div>
               <div className="st-agent-acts">
                 {a.installed && sub?.signedIn === false && canSignIn(a.kind)
                   ? <SignInButton kind={a.kind} onCheck={recheck} />
                   : a.installed
-                  ? <button type="button" className="btn" disabled={busy === a.kind} onClick={() => start(a)}>{sub?.signedIn === false ? 'Open to sign in' : 'New chat'}</button>
+                  ? <button type="button" className="btn" disabled={busy === a.kind} onClick={() => start(a)}>{sub?.signedIn === false ? t('Open to sign in') : t('New chat')}</button>
                   : a.install
                     ? <>
-                        <CopyButton text={a.install} label={null} title="Copy the command" />
-                        <button type="button" className="btn" disabled={busy === a.kind} onClick={() => install(a)}>{busy === a.kind ? 'Starting…' : 'Install'}</button>
+                        <CopyButton text={a.install} label={null} title={t('Copy the command')} />
+                        <button type="button" className="btn" disabled={busy === a.kind} onClick={() => install(a)}>{busy === a.kind ? t('Starting…') : t('Install')}</button>
                       </>
                     : null}
               </div>

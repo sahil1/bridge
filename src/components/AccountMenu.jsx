@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { api, refetch, viaRelay, useFleet } from '../api.js'
-import { t, tx, locale } from '../i18n/index.js'
+import { t, tx, locale, tn } from '../i18n/index.js'
 
 // The account switcher, like a model picker: Auto, then each agent's accounts with how much of
 // its usage window is left. In the top bar a pick is the account new agents of that kind start
@@ -480,7 +480,7 @@ export function AllowKeychain({ id, onDone }) {
   }
   return (
     <div className="allow-kc">
-      <span className="small">macOS asks once before Bridge AI can read this account's usage: click Allow, then choose <b>Always Allow</b> in the window on this computer.</span>
+      <span className="small">{tn("macOS asks once before Bridge AI can read this account's usage: click Allow, then choose {always} in the window on this computer.", { always: <b>{t('Always Allow')}</b> })}</span>
       <button type="button" className="btn small" onClick={allow} disabled={busy}>{busy ? t('Waiting for macOS…') : t('Allow')}</button>
       {err && <span className="error-text small">{err}</span>}
     </div>

@@ -19,7 +19,7 @@
 //   A UI that keeps itself up to date does it through the relay too.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startRelay, checks, until, browser, page, sleep, shot, noServiceWorker, OUT, ROOT } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, page, sleep, shot, noServiceWorker, OUT, ROOT, browserNotice, phoneNotes, phoneSaw } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('phone-fresh')
 const COMPUTER = 'Studio Mac'
@@ -56,7 +56,7 @@ const screen = (p, on) => p.evaluate((on) => { window.__hidden = !on; document.d
 const entryOf = (f) => f.evaluate(() => [...document.querySelectorAll('script[type="module"][src]')].map((s) => s.getAttribute('src')).find((x) => /assets\//.test(x))?.split('/').pop()).catch(() => null)
 // A reload cuts off the page's requests, which WebKit reports as errors (and the link dropping on
 // cue, the phone page's waiting ones).
-const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks|^Error: (Reconnecting to your computer|Connection lost)/.test(e))
+const real = (errors) => errors.filter((e) => !/\/api\/\S+ due to access control checks|^Error: (Reconnecting to your computer|Connection lost)/.test(e) && !browserNotice(e))
 const fits = (p, sel) => p.evaluate((sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { h: Math.round(r.height), inside: r.left >= 0 && r.right <= window.innerWidth } }, sel)
 
 const { b, which } = await browser()
@@ -217,13 +217,20 @@ try {
   const code = (await kit.api('/relay/pair', {})).pairing.code
   const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, ...(which === 'chromium' ? { isMobile: true } : {}), hasTouch: true, deviceScaleFactor: 2 })
   await ctx.addInitScript(() => { try { localStorage.setItem('cc-toured', JSON.stringify({ desktop: true, phone: true })) } catch { /* no storage */ } })
+  await phoneNotes(ctx)
   const p = await ctx.newPage()
   const errors = []
   p.on('pageerror', (e) => errors.push(e.message))
   await p.goto(`${relay.url}/#pair=${code}`)
   await p.locator('#pair-go').click({ timeout: 15000 }) // a pairing link asks first: one tap
   const frame = () => p.frames().find((f) => f !== p.mainFrame() && f.url().startsWith(relay.url))
-  ok(!!(await until(() => frame()?.locator('#old').count(), 30000)), 'paired: the phone page shows the computer\'s UI, an older one')
+  // Not open: how far the phone page got (its service worker, its frame, what it says instead), and
+  // the rest goes no further.
+  const opened = await until(() => frame()?.locator('#old').count(), 30000)
+  const saw = opened ? null : { frames: p.frames().map((f) => f.url()), page: await phoneSaw(p) }
+  if (saw) console.log('the phone page, as far as it got:', JSON.stringify(saw))
+  ok(!!opened, 'paired: the phone page shows the computer\'s UI, an older one', saw || undefined)
+  if (!opened) throw new Error('the phone page didn\'t open Bridge AI')
   await p.evaluate(() => { window.__same = true })
 
   // The computer updates and starts again (its link to the phone drops, and comes back).

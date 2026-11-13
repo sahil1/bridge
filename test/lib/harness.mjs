@@ -20,6 +20,39 @@ export const OUT = path.join(TEST, '.out')
 export const IS_WIN = process.platform === 'win32'
 export const IS_MAC = process.platform === 'darwin'
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// Each kit's server needs its key (server/apiauth.js), which it makes in its data folder as it starts.
+// Every test gets it without asking: fetch to a kit's address sends it (unless the call gives an
+// Authorization of its own), and each browser context has each kit's cookie, as the desktop app's
+// windows and a browser let in do. rawFetch: fetch with nothing added, to try a call without it.
+const KITS = new Map() // port -> { data, key }
+const keyOf = (port) => {
+  const k = KITS.get(Number(port))
+  if (!k) return null
+  if (!k.key) { try { k.key = fs.readFileSync(path.join(k.data, 'api-token'), 'utf8').trim() || null } catch { /* not made yet */ } }
+  return k.key
+}
+export const kitKey = keyOf
+// The cookie a browser let in keeps for a kit (server/apitoken.js makes the same).
+export const kitCookie = (port) => { const k = keyOf(port); return k ? { name: `bridge-ai-${port}`, value: crypto.createHmac('sha256', k).update('bridge-ai browser').digest('base64url') } : null }
+export const rawFetch = globalThis.fetch.bind(globalThis)
+globalThis.fetch = (input, init = {}) => {
+  try {
+    const u = new URL(typeof input === 'string' || input instanceof URL ? String(input) : input.url)
+    const key = /^(127\.0\.0\.1|localhost|\[::1\])$/.test(u.hostname) && keyOf(u.port)
+    if (key) {
+      const h = new Headers(init.headers || (input instanceof Request ? input.headers : undefined))
+      if (!h.has('authorization')) { h.set('authorization', `Bearer ${key}`); init = { ...init, headers: h } }
+    }
+  } catch { /* not an address */ }
+  return rawFetch(input, init)
+}
+const contexts = new Set()
+async function letIn(ctx) {
+  const all = []
+  for (const port of KITS.keys()) { const c = kitCookie(port); if (c) for (const domain of ['127.0.0.1', 'localhost']) all.push({ ...c, domain, path: '/', httpOnly: true, sameSite: 'Strict' }) }
+  if (all.length) await ctx.addCookies(all).catch(() => {})
+}
 // fn's value once it's truthy, or null after ms.
 export async function until(fn, ms = 15000, step = 300) {
   const end = Date.now() + ms
@@ -161,6 +194,9 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     // Nor a speech model (huggingface.co): downloads go nowhere, and fail at once. And what runs
     // Parakeet is a stand-in for sherpa-onnx's addon (stand-ins/sherpa.cjs), so no test loads one.
     BRIDGE_MODELS_URL: 'http://127.0.0.1:9',
+    // Nor Perplexity's API, which AI Assist's answers look things up with: a test gives a stand-in
+    // (stand-ins/model.mjs answers as Sonar does), or a key saved in a test reaches nothing.
+    BRIDGE_PERPLEXITY_URL: 'http://127.0.0.1:9',
     BRIDGE_SHERPA: path.join(TEST, 'stand-ins', 'sherpa.cjs'),
     // Nor the computer's own apps, which Studio offers to open a file in (server/studioapps.js): a
     // Mac's Applications folder is one of the kit's, and Windows' registry a stand-in that knows
@@ -178,11 +214,13 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   const log = fs.openSync(path.join(dir, 'server.log'), 'w')
   const more = typeof env === 'function' ? env({ bin, data, home, PATH }) : env
   const url = `http://127.0.0.1:${port}`
+  KITS.set(port, { data: more.BRIDGE_HOME || data, key: null })
   let server = null
   const run = async () => {
     server = spawn(node, [path.join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...base, ...more }, stdio: ['ignore', log, log] })
     const up = await until(async () => (await fetch(`${url}/api/config`)).ok, 60000, 250)
     if (!up) { stopTree(server); throw new Error(`the server didn't start on ${port}: ${fs.readFileSync(path.join(dir, 'server.log'), 'utf8').slice(-1500)}`) }
+    for (const ctx of contexts) await letIn(ctx)
   }
   await run()
   // Bridge AI quit and opened again, on the same folders (what it kept, it keeps). between(): what
@@ -204,7 +242,7 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     if (!r.ok) throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { status: r.status, j })
     return j
   }
-  return { port, url, dir, home, data, bin, api, program, restart, stop: () => stopTree(server), log: () => fs.readFileSync(path.join(dir, 'server.log'), 'utf8') }
+  return { port, url, dir, home, data, bin, api, program, restart, stop: () => stopTree(server), log: () => fs.readFileSync(path.join(dir, 'server.log'), 'utf8'), get key() { return keyOf(port) }, get cookie() { return kitCookie(port) } }
 }
 
 // A Mac with or without Apple's command line developer tools, whatever this one has: a stand-in
@@ -353,15 +391,29 @@ export async function browser() {
   const pw = await import('playwright-core')
   const which = process.env.BRIDGE_TEST_BROWSER === 'webkit' ? 'webkit' : 'chromium'
   const b = await pw[which].launch(which === 'chromium' ? { args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] } : {})
+  // Each context it opens is let in to every kit (above).
+  const open = b.newContext.bind(b)
+  b.newContext = async (...a) => {
+    const ctx = await open(...a)
+    contexts.add(ctx)
+    ctx.on('close', () => contexts.delete(ctx))
+    await letIn(ctx)
+    return ctx
+  }
   return { b, which }
 }
+// A ResizeObserver that couldn't hand over every change in one frame is reported as a page error
+// (by WebKit, now and then). It's the browser's notice, not a fault in the page.
+export const browserNotice = (message) => message === 'ResizeObserver loop completed with undelivered notifications.'
 // A page with Bridge AI's tour done and a look picked: { mode, theme }; phone: a phone's screen and
 // touch. store: more of the page's saved state, there before it opens (a reload to change it would
 // cut off its requests, which WebKit reports as page errors). before(ctx): routes of the test's own,
 // in place before it opens (WebKit doesn't apply ones added after). Calls that would reach the
 // internet (news, markets, weather, mail) are turned away. Terminals are drawn as page elements
 // (cc-term-dom), so a test can read their rows as text; store { 'cc-term-dom': false } for the GPU.
-export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440, height = 900, phone = false, mic = true, store = {}, before, locale } = {}) {
+// waitUntil: how far the page has got when it's handed back ('load' unless said: a test that holds
+// one of the app's files back says 'domcontentloaded', as the app may fetch it before 'load').
+export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440, height = 900, phone = false, mic = true, store = {}, before, locale, waitUntil = 'load' } = {}) {
   const ctx = await b.newContext({ viewport: phone ? { width: 390, height: 844 } : { width, height }, ...(phone ? { isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : {}), colorScheme: mode, ...(locale ? { locale } : {}), ...(mic && b.browserType().name() === 'chromium' ? { permissions: ['microphone'] } : {}) })
   await ctx.addInitScript(({ look, more }) => { try { localStorage.setItem('cc-toured', JSON.stringify({ desktop: true, phone: true })); localStorage.setItem('cc-appearance', JSON.stringify({ ...look, text: 'm' })); for (const [k, v] of Object.entries(more)) localStorage.setItem(k, JSON.stringify(v)) } catch { /* no storage */ } }, { look: { mode, theme }, more: { 'cc-term-dom': true, ...store } })
   // Playwright's own WebKit build freezes the whole page on pushManager.getSubscription() (Settings ›
@@ -372,13 +424,11 @@ export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440
   if (before) await before(ctx)
   const p = await ctx.newPage()
   const errors = []
-  // A ResizeObserver that couldn't hand over every change in one frame is reported as a page error
-  // (by WebKit, now and then). It's the browser's notice, not a fault in the page.
-  p.on('pageerror', (e) => { if (e.message !== 'ResizeObserver loop completed with undelivered notifications.') errors.push(e.message) })
+  p.on('pageerror', (e) => { if (!browserNotice(e.message)) errors.push(e.message) })
   // A page whose process crashed is closed, and every call on it fails as "Target page, context or
   // browser has been closed" (dictation-cleanup in WebKit, once in CI): the log says so, and where.
   p.on('crash', () => console.log(`the page crashed (${b.browserType().name()}): ${p.url()}`))
-  await p.goto(url)
+  await p.goto(url, { waitUntil })
   return { ctx, p, errors }
 }
 // A page's errors besides what WebKit reports for requests it couldn't make (offline, a reload, the
@@ -401,6 +451,35 @@ export const changeAnswer = (ctx, url, change, { orElse } = {}) => ctx.route(url
   } catch { await r.continue().catch(() => {}) }
 })
 export const noServiceWorker = (ctx) => ctx.addInitScript(() => { try { delete Navigator.prototype.serviceWorker } catch { /* none */ } })
+// The phone page (relay/web) on its way to Bridge AI, for a test to say how far it got when Bridge AI
+// didn't open in it: phoneNotes(ctx) before the page opens notes, from its start (ms), when its
+// service worker took it over, each request the worker handed it to send to the computer (Bridge
+// AI's own page first), each address its frame was given and each load there; phoneSaw(page) adds
+// what's there now: the worker's state, the frame's address, and which screen the page shows.
+export const phoneNotes = (ctx) => ctx.addInitScript(() => {
+  if (window !== window.top || !navigator.serviceWorker) return
+  const notes = window.__phoneNotes = []
+  const note = (what) => { if (notes.length < 30) notes.push(`${Math.round(performance.now())} ${what}`) }
+  let files = 0
+  navigator.serviceWorker.addEventListener('controllerchange', () => note('worker took over'))
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.type !== 'fetch') return
+    if (!String(e.data.u).startsWith('/assets/')) note(`worker asks ${e.data.m} ${e.data.u}`)
+    else if (++files === 1) note('worker asks for the app\'s files')
+  })
+  const frame = () => {
+    const f = document.getElementById('app')
+    if (!f) return setTimeout(frame, 20)
+    new MutationObserver(() => note(`frame given ${f.getAttribute('src')}`)).observe(f, { attributes: true, attributeFilter: ['src'] })
+    f.addEventListener('load', () => { let at = '?'; try { at = f.contentWindow.location.href } catch { /* another site */ } note(`frame loaded ${at}`) })
+  }
+  frame()
+})
+export const phoneSaw = (p) => p.evaluate(async () => {
+  const r = await navigator.serviceWorker?.getRegistration().catch(() => null)
+  const shown = ['pair', 'wait', 'home', 'away', 'bar'].filter((id) => document.getElementById(id) && !document.getElementById(id).hidden).map((id) => `${id}: ${document.getElementById(id).innerText.trim().slice(0, 80)}`)
+  return { worker: { controls: !!navigator.serviceWorker?.controller, active: r?.active?.state || null, installing: r?.installing?.state || null, waiting: r?.waiting?.state || null }, frame: document.getElementById('app')?.getAttribute('src') ?? null, shown, notes: window.__phoneNotes || null }
+}).catch((e) => e.message)
 // The time a test runs at: now, or what BRIDGE_TEST_CLOCK names, a time today ("21:30") or a weekday
 // and a time ("Sat 00:30": that weekday nearest today), so a test can be tried at any hour on any day.
 // The clock flows on from there as the real one does.

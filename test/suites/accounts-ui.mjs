@@ -298,15 +298,37 @@ try {
     const refused = await kit.api('/accounts/active/claude', { id: 'claude-default' }).then(() => null, (e) => e.message)
     ok(/off the list/.test(refused || ''), `${t}: it can't be made default while it's off the list`, refused)
 
-    // Settings › Model Providers › Accounts: shows it again.
+    // Settings › Model Providers › Accounts: shows it again. Opened at Accounts, the panel is on its
+    // way to them in the frame they're drawn (at the top, or as far as it goes until what's below
+    // them comes), not a moment later: they moved up from under a click on Show your usual login.
+    await p.evaluate(() => {
+      window.__drawn = null
+      const mo = new MutationObserver(() => {
+        const s = document.querySelector('#pv-accounts')
+        if (!s) return
+        mo.disconnect()
+        requestAnimationFrame(() => { const b = s.closest('.st-scroll'); window.__drawn = { top: Math.round(s.getBoundingClientRect().top - b.getBoundingClientRect().top), scrolled: Math.round(b.scrollTop), room: Math.round(b.scrollHeight - b.clientHeight) } })
+      })
+      mo.observe(document.body, { childList: true, subtree: true })
+    })
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'accounts' } })))
     const sec = p.locator('#pv-accounts')
     await sec.waitFor({ timeout: 15000 })
     ok(!(await p.locator('.pv > .pv-loading').count()), `${t}: Settings' accounts show once your agents above them are in, not before, to move down under the pointer as they come`)
     const sRow = (name) => sec.locator('.pv-acct', { has: p.locator('.pv-acct-title', { hasText: new RegExp(`^${name}`) }) }).first()
     ok(!(await sRow('Your usual login').count()), `${t}: Settings doesn't list it`)
-    await sec.locator('button', { hasText: 'Show your usual login' }).click()
-    ok(!!(await until(async () => (await sRow('Your usual login').count()) === 1, 10000)), `${t}: Show your usual login puts it back`)
+    const drawn = await until(() => p.evaluate(() => window.__drawn), 5000, 50)
+    ok(drawn && (Math.abs(drawn.top) <= 1 || drawn.scrolled >= drawn.room - 1), `${t}: opened at Accounts, they're at the top of the panel in the frame they're drawn, or as near as it goes then`, drawn)
+    // Then where Settings settles them, the top, once what's below has come.
+    const atTop = () => sec.evaluate((s) => Math.abs(s.getBoundingClientRect().top - s.closest('.st-scroll').getBoundingClientRect().top) <= 1)
+    ok(!!(await until(atTop, 10000)), `${t}: and at the top once what's below them has come`)
+    // (If the click is lost: where the button was, and what took it.)
+    await p.evaluate(() => { window.__pressed = []; for (const k of ['pointerdown', 'pointerup', 'click']) window.addEventListener(k, (e) => window.__pressed.push(`${k} ${e.target?.className?.baseVal ?? e.target?.className}`), true) })
+    const showBtn = sec.locator('button', { hasText: 'Show your usual login' })
+    const wasAt = (await showBtn.boundingBox())?.y
+    await showBtn.click()
+    const back = await until(async () => (await sRow('Your usual login').count()) === 1, 10000)
+    ok(!!back, `${t}: Show your usual login puts it back`, back ? undefined : { pressed: await p.evaluate(() => window.__pressed), wasAt, nowAt: (await showBtn.boundingBox().catch(() => null))?.y })
     const g3 = await claudeOf()
     ok(!g3.usualHidden && g3.accounts[0].id === 'claude-default' && g3.setting === personal.id, `${t}: first in the list again, and Personal stays the default`, g3.accounts.map((a) => a.label))
     ok(!!(await until(async () => (await sRow('Personal').locator('.def-tag').count()) === 1 && (await sec.locator('.def-tag').count()) === 1, 10000)), `${t}: Settings has the star on Personal`)
@@ -434,7 +456,9 @@ try {
     await err("Couldn't load accounts").getByRole('button', { name: 'Retry' }).click()
     ok(!!(await until(async () => /Main/.test(await p.locator('#pv-accounts').innerText().catch(() => '')), 10000)), 'and Retry brings the accounts')
     await err("Couldn't check agent sign-ins").getByRole('button', { name: 'Retry' }).click()
-    ok(!!(await until(async () => (await p.locator('.modal.settings .pv-agent').count()) > 0 && !(await p.locator('.modal.settings .pv-err').count()), 10000)), 'and the agents\' sign-ins')
+    const retriedAt = Date.now()
+    const signIns = await until(async () => (await p.locator('.modal.settings .pv-agent').count()) > 0 && !(await p.locator('.modal.settings .pv-err').count()), 10000)
+    ok(!!signIns, 'and the agents\' sign-ins', signIns ? undefined : { agents: await p.locator('.modal.settings .pv-agent').count(), errs: await p.locator('.modal.settings .pv-err').allInnerTexts().catch(() => []), loading: await p.locator('.modal.settings .pv-loading').count(), later: !!(await until(async () => (await p.locator('.modal.settings .pv-agent').count()) > 0 && !(await p.locator('.modal.settings .pv-err').count()), 30000)) && Date.now() - retriedAt })
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
   }

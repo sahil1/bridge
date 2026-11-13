@@ -510,16 +510,16 @@ export default function Terminal({ paneId, active, focusKey, onChat, shell = fal
       <div className="terminal-host" ref={hostRef} onClick={onClick} />
       {held && (
         <button className="term-jump" onClick={() => { termRef.current?.scrollToBottom(); if (pendingRef.current != null) paint(pendingRef.current); setHeld(false) }}>
-          <Icon name="chevron" size={11} className="rot90" /> New output · jump to latest
+          <Icon name="chevron" size={11} className="rot90" /> {t('New output · jump to latest')}
         </button>
       )}
       <div className="term-hint">
-        {noHistory ? <><span>This agent runs Claude's full-screen view, which keeps its history inside Claude, so there is nothing to scroll here.</span>{onChat && <button className="link" onClick={onChat}>Read it in Chat</button>}<button className="link" onClick={() => setNoHistory(false)}>Dismiss</button></>
+        {noHistory ? <><span>{t('This agent runs Claude\'s full-screen view, which keeps its history inside Claude, so there is nothing to scroll here.')}</span>{onChat && <button className="link" onClick={onChat}>{t('Read it in Chat')}</button>}<button className="link" onClick={() => setNoHistory(false)}>{t('Dismiss')}</button></>
           : error ? <span className="error-text">{error}</span>
-          : more === 'loading' ? <span>Loading earlier output…</span>
-          : more === 'all' ? <span>That's as far back as this terminal keeps.</span>
-          : focused ? <><span className="live-dot" /> {shell ? 'Typing into the terminal.' : 'Typing into the terminal. Esc and arrows go to the agent. Click a numbered option to pick it.'}</>
-            : <>Click the terminal to type. Scroll up to read history.</>}
+          : more === 'loading' ? <span>{t('Loading earlier output…')}</span>
+          : more === 'all' ? <span>{t('That\'s as far back as this terminal keeps.')}</span>
+          : focused ? <><span className="live-dot" /> {shell ? t('Typing into the terminal.') : t('Typing into the terminal. Esc and arrows go to the agent. Click a numbered option to pick it.')}</>
+            : <>{t('Click the terminal to type. Scroll up to read history.')}</>}
       </div>
     </div>
   )

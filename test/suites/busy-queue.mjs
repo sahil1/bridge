@@ -16,7 +16,7 @@ import { checks, until, sleep, page, shot } from '../lib/harness.mjs'
 import { busyKit, LIGHT, DARK, enc, same, openChat, seesWorking, sendFrom, bubbles, userMsgs } from '../lib/busy.mjs'
 
 const { ok, done } = checks('busy-queue')
-const { kit, b, tag, got, agentOf, queueOf, launch, working, settled, phone, wentIn } = await busyKit('busy-queue')
+const { kit, b, tag, got, agentOf, queueOf, launch, working, release, settled, phone, wentIn } = await busyKit('busy-queue')
 
 try {
   await kit.api('/setup', { name: 'Tester' })
@@ -24,12 +24,14 @@ try {
 
   // ---------- Three messages from a phone while it works ----------
   {
-    const ag = await launch('Refunds', 'busy 3 8 3')
+    // It works on what it's asked next until the test has looked (a held turn): on a slow computer the
+    // checks took longer than a turn of a few seconds, and what was queued went in before they were done.
+    const ag = await launch('Refunds', 'busy 3 hold 3')
     await settled(ag, 3)
     const { ctx, p, errors } = await phone(LIGHT, 390)
     await openChat(p, ag.paneId)
     await kit.api(`/agents/${enc(ag.paneId)}/prompt`, { text: 'Start on the refunds' })
-    await seesWorking(p)
+    ok(!!(await seesWorking(p)), 'phone: the chat shows it at work', await agentOf(ag.paneId))
     const msgs = ['Check the refunds first', 'Then the credits:\nboth currencies', 'And say what you changed ☕']
     for (const m of msgs) await sendFrom(p, m, { touch: true })
     const shown = await until(async () => { const x = await bubbles(p); return x.length === 3 && x.every((y) => /Edit/.test(y.says)) && x }, 8000, 100) || await bubbles(p)
@@ -40,8 +42,9 @@ try {
     await shot(p, `${tag}busy-queued-phone-light-390`)
     await sleep(1500)
     ok(!got(ag.sessionId).some((x) => msgs.some((m) => x.text.includes(m.split('\n')[0]))), 'none goes into the agent while it works', got(ag.sessionId))
+    release(ag)
     const g = await wentIn(ag, msgs)
-    ok(same(g.map((x) => x.text), ['busy 3 8 3', 'Start on the refunds', ...msgs]) && g.every((x) => x.how === 'turn'), 'then each goes in on its own, in order, once, exactly as written', g)
+    ok(same(g.map((x) => x.text), ['busy 3 hold 3', 'Start on the refunds', ...msgs]) && g.every((x) => x.how === 'turn'), 'then each goes in on its own, in order, once, exactly as written', g)
     const chat = await until(async () => { const u = await userMsgs(p); return msgs.every((m) => u.includes(m)) && !(await bubbles(p)).length && u }, 20000, 300)
     ok(!!chat, 'and shows in the chat, nothing left queued', chat || { users: await userMsgs(p), queued: await bubbles(p) })
     await shot(p, `${tag}busy-delivered-phone-light-390`)
@@ -51,13 +54,13 @@ try {
 
   // ---------- The same on a desktop: one taken back, one changed ----------
   for (const look of [LIGHT, DARK]) {
-    const ag = await launch(`Credits ${look.mode}`, 'busy 3 10 3')
+    const ag = await launch(`Credits ${look.mode}`, 'busy 3 hold 3')
     await settled(ag, 3)
     const { ctx, p, errors } = await page(b, kit.url, { ...look, width: 1440, height: 900 })
     await p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
     await openChat(p, ag.paneId)
     await kit.api(`/agents/${enc(ag.paneId)}/prompt`, { text: 'Start on the credits' })
-    await seesWorking(p)
+    ok(!!(await seesWorking(p)), `desktop ${look.mode}: the chat shows it at work`, await agentOf(ag.paneId))
     const msgs = [`Look at the ${look.mode} credits`, 'Skip the old ones', 'Then the totals']
     for (const m of msgs) await sendFrom(p, m, { touch: false })
     const shown = await until(async () => { const x = await bubbles(p); return x.length === 3 && x }, 8000, 100)
@@ -71,10 +74,11 @@ try {
     const want = [msgs[0], 'Then the totals, both currencies']
     ok(!!(await until(async () => same(await queueOf(ag.paneId), want), 5000, 100)), `desktop ${look.mode}: and one changed before it goes`, await queueOf(ag.paneId))
     ok(!!(await until(async () => same((await bubbles(p)).map((x) => x.text), want), 5000, 100)), `desktop ${look.mode}: the chat shows the two left, the change in place`, await bubbles(p))
+    release(ag)
     // What's left going in: once is enough (the light one).
     if (look === LIGHT) {
       const g = await wentIn(ag, want)
-      ok(same(g.map((x) => x.text), ['busy 3 10 3', 'Start on the credits', ...want]), `desktop ${look.mode}: what's left goes in, in order, once each; the one taken back never does`, g)
+      ok(same(g.map((x) => x.text), ['busy 3 hold 3', 'Start on the credits', ...want]), `desktop ${look.mode}: what's left goes in, in order, once each; the one taken back never does`, g)
     }
     ok(errors.length === 0, `desktop ${look.mode}: no page errors`, errors)
     await ctx.close()

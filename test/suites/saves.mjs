@@ -76,18 +76,32 @@ try {
   ok(goneErr === 'ENOENT' && read() === 'written in place' && !strays().length, 'any other failure says so and leaves the file as it was', { goneErr, text: read(), strays: strays() })
 
   // Bridge AI stopped dead in the middle of saving, again and again: the file always reads back.
+  // Each saver is stopped only once its first save has landed (it leaves a mark then), so the stop
+  // falls among its saves wherever a busy machine is slow to start Node; before that there would
+  // be nothing of this saver's to read back.
   const crash = path.join(dir, 'crash.json')
-  const saver = `import { writeFileAtomic } from ${JSON.stringify(pathToFileURL(path.join(ROOT, 'server', 'paths.js')).href)}
-for (let n = 0; ; n++) writeFileAtomic(${JSON.stringify(crash)}, JSON.stringify({ n, rows: Array.from({ length: 5000 }, (_, i) => 'row ' + i + ' of save ' + n) }))`
-  let whole = 0
+  const saving = path.join(dir, 'saving')
+  const saver = (run) => `import fs from 'node:fs'
+import { writeFileAtomic } from ${JSON.stringify(pathToFileURL(path.join(ROOT, 'server', 'paths.js')).href)}
+for (let n = 0; ; n++) {
+  writeFileAtomic(${JSON.stringify(crash)}, JSON.stringify({ run: ${run}, n, rows: Array.from({ length: 5000 }, (_, i) => 'row ' + i + ' of save ' + n) }))
+  if (n === 0) fs.writeFileSync(${JSON.stringify(saving)}, '')
+}`
+  const runs = []
   for (let i = 0; i < 5; i++) {
-    const p = spawn(process.execPath, ['--input-type=module', '-e', saver], { stdio: 'ignore' })
-    await new Promise((r) => setTimeout(r, 300 + i * 70))
+    fs.rmSync(saving, { force: true })
+    const p = spawn(process.execPath, ['--input-type=module', '-e', saver(i)], { stdio: 'ignore' })
+    const t0 = Date.now()
+    while (!fs.existsSync(saving) && p.exitCode == null && Date.now() - t0 < 20000) await new Promise((r) => setTimeout(r, 10))
+    const started = fs.existsSync(saving) ? Date.now() - t0 : null
+    await new Promise((r) => setTimeout(r, 50 + i * 70))
     p.kill('SIGKILL')
-    await new Promise((r) => p.once('exit', r))
-    try { JSON.parse(fs.readFileSync(crash, 'utf8')); whole++ } catch { /* half a file */ }
+    if (p.exitCode == null && p.signalCode == null) await new Promise((r) => p.once('exit', r))
+    let got
+    try { got = JSON.parse(fs.readFileSync(crash, 'utf8')) } catch (e) { got = e.code || `half a file (${fs.statSync(crash).size} bytes)` }
+    runs.push({ started, got: typeof got === 'object' ? { run: got.run, n: got.n } : got })
   }
-  ok(whole === 5, 'stopped dead mid-save five times, the file reads back whole each time', `${whole} of 5`)
+  ok(runs.every((r, i) => r.got.run === i), 'stopped dead mid-save five times, the file reads back whole each time', runs)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
 }
