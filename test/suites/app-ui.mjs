@@ -33,7 +33,7 @@
 // your devices alone.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, changeAnswer, IS_WIN, ROOT } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, changeAnswer, IS_MAC, IS_WIN, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('app-ui')
 const kit = await startKit('app-ui')
@@ -295,10 +295,11 @@ try {
     ok(more.setup === false ? /Bridge AI 3\.7\.0 is available/.test(note) : /^Setting up · 1 of 3/.test(note), `${t}: one line under it, the most pressing: ${more.setup === false ? 'the update' : 'setup'}`, note)
     await shot(p, `${tag}phone-top-bar-${width}`)
     if (width === 375) {
-      // What left the bar is in the Today tab: the next meeting, usage and the weather.
+      // What left the bar is in the Today tab: the next meeting (the calendar reads macOS Calendar,
+      // so a Mac's only), usage and the weather.
       await p.locator('.tabbar button', { hasText: 'Today' }).click()
-      const today = await until(async () => { const x = await p.locator('.m-today').innerText().catch(() => ''); return /Weekly payments sync/.test(x) && /Springfield/.test(x) && /62%/.test(x) && x }, 8000)
-      ok(!!today, `${t}: the next meeting, usage and the weather are in the Today tab`, (await p.locator('.m-today').innerText().catch(() => '')).slice(0, 400))
+      const today = await until(async () => { const x = await p.locator('.m-today').innerText().catch(() => ''); return /Weekly payments sync/.test(x) === IS_MAC && /Springfield/.test(x) && /62%/.test(x) && x }, 8000)
+      ok(!!today, `${t}: ${IS_MAC ? 'the next meeting, ' : 'no meeting (no calendar off a Mac), '}usage and the weather are in the Today tab`, (await p.locator('.m-today').innerText().catch(() => '')).slice(0, 400))
       await p.locator('.tabbar button', { hasText: 'Chief' }).click()
     }
     // The update, a tap away: its line, or the dot on Settings while a line before it shows.
@@ -505,9 +506,10 @@ try {
     ok(bar.filled.length === 1 && /need/.test(bar.filled[0]), `${t}: one chip is filled, what needs you; the rest are quiet until the pointer is on them`, bar.filled)
     ok(bar.pins.every((x) => x.hover), `${t}: each pinned chip says what it is on hover`, bar.pins)
     const rows = await statusRows(p)
-    const want = { setup: /Setting up · 1 of 3/, restart: /Restart Bridge AI to apply it/, update: /Bridge AI 3\.7\.0 is available/, meeting: /Now APM Platform/ }
+    // The meeting from the calendar, which reads macOS Calendar: a Mac's only.
+    const want = { setup: /Setting up · 1 of 3/, restart: /Restart Bridge AI to apply it/, update: /Bridge AI 3\.7\.0 is available/, ...(IS_MAC ? { meeting: /Now APM Platform/ } : {}) }
     const missing = Object.entries(want).filter(([k, re]) => !bar.has[k] && !re.test(rows)).map(([k]) => k)
-    ok(!missing.length && /Claude/.test(rows) && /new agents start on Work Primary/.test(rows) && /Notification sounds/.test(rows) && /Springfield/.test(rows) && /°F/.test(rows), `${t}: what isn't in the bar is in the Status menu, with usage, sounds, the weather and the time`, { missing, rows: rows.slice(0, 400) })
+    ok(!missing.length && (IS_MAC || !/Now APM Platform/.test(rows)) && /Claude/.test(rows) && /new agents start on Work Primary/.test(rows) && /Notification sounds/.test(rows) && /Springfield/.test(rows) && /°F/.test(rows), `${t}: what isn't in the bar is in the Status menu, with usage, sounds, the weather and the time`, { missing, rows: rows.slice(0, 400) })
     return bar
   }
   {

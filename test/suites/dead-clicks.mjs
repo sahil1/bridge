@@ -155,7 +155,8 @@ const PLACES = [
   { name: 'Files', open: view('view:files'), scope: '.cmd .fx', ready: '.fx .fx-body' },
   { name: 'Studio', open: view('view:studio'), scope: '.cmd .sd-home-view', ready: '.sd-home-view' },
   { name: 'Meetings', open: view('view:meetings'), scope: '.cmd .mt-view', ready: '.mt-view' },
-  { name: 'Calendar', open: (p) => send(p, { date: today }, 'bridge-open-event'), scope: '.cmd .calv', ready: '.calv' },
+  // The calendar reads macOS Calendar: elsewhere there's none to open.
+  ...(process.platform === 'darwin' ? [{ name: 'Calendar', open: (p) => send(p, { date: today }, 'bridge-open-event'), scope: '.cmd .calv', ready: '.calv' }] : []),
   ...SECTIONS.map((s) => ({
     name: `Settings › ${s.label}`, open: (p) => send(p, { section: s.id }, 'bridge-open-settings'), scope: '.modal.settings .st-body', ready: '.modal.settings .st-head h3', over: 1,
     prep: (p) => p.evaluate(() => document.querySelectorAll('.modal.settings details').forEach((d) => { d.open = true })),
