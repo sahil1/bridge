@@ -112,7 +112,7 @@ function ScreenNames() {
     </div>
   )
 }
-// Voices in a room (server/voices.js), only where it can run: told apart by the voice model, and,
+// Voices in a room, and a room on a call (server/voices.js), only where it can run: told apart by the voice model, and,
 // if you want, remembered by voice once named. Turning it on downloads the model (30 MB) with its
 // progress here; otherwise it waits for the first Who spoke on a meeting.
 function RoomVoices({ v, m, set, refresh }) {
@@ -124,7 +124,7 @@ function RoomVoices({ v, m, set, refresh }) {
       <h4>{t('Who Spoke')}</h4>
       <label className="st-check">
         <input type="checkbox" checked={m.roomVoices === true} onChange={(e) => on(e.target.checked)} />
-        <span title={`${t('With your mic only (no call), each line says Speaker 1, Speaker 2 and so on, by voice, worked out on this computer. Name a speaker once and all their lines take the name.')}${v.live ? '' : ` ${t('On this computer it runs once a meeting ends, so the transcript keeps up while it records.')}`}`}><b>{t('Tell voices apart in a room')}</b> <span className="muted small">{t('Speaker 1, Speaker 2 and so on, worked out on this computer.')} {t('It uses a small voice model ({model}, {mb} MB, {license}), downloaded the first time.', { model: v.label, mb: v.mb, license: v.license })}</span></span>
+        <span title={`${t('With your mic only (no call), each line says Speaker 1, Speaker 2 and so on, by voice, worked out on this computer. In a room on a call, the voices on your mic are told apart too, beside the call\'s. Name a speaker once and all their lines take the name.')}${v.live ? '' : ` ${t('On this computer it runs once a meeting ends, so the transcript keeps up while it records.')}`}`}><b>{t('Tell voices apart in a room')}</b> <span className="muted small">{t('Speaker 1, Speaker 2 and so on, worked out on this computer.')} {t('It uses a small voice model ({model}, {mb} MB, {license}), downloaded the first time.', { model: v.label, mb: v.mb, license: v.license })}</span></span>
       </label>
       <label className="st-check">
         <input type="checkbox" checked={m.callVoices !== false} onChange={(e) => set({ callVoices: e.target.checked })} />
@@ -132,7 +132,7 @@ function RoomVoices({ v, m, set, refresh }) {
       </label>
       <label className="st-check">
         <input type="checkbox" checked={m.learnVoice !== false} onChange={(e) => set({ learnVoice: e.target.checked })} />
-        <span title={t("From your mic on calls, where every line is yours, so a meeting in a room knows which voice is you without your naming it. It's a few hundred numbers for how your voice sounds, on this computer only.")}><b>{t('Learn my voice')}</b> <span className="muted small">{t('So a room knows which voice is you. Kept on this computer only.')} {v.mine ? t('Learned.') : ''}</span></span>
+        <span title={t("From your mic on calls where it hears only you, so a meeting in a room knows which voice is you without your naming it. With others in the room on your mic, only from the voice that already sounds like you. It's a few hundred numbers for how your voice sounds, on this computer only.")}><b>{t('Learn my voice')}</b> <span className="muted small">{t('So a room knows which voice is you. Kept on this computer only.')} {v.mine ? t('Learned.') : ''}</span></span>
       </label>
       <ScreenNames />
       {v.downloading && <p className={`small ${v.downloading.error ? 'error-text' : 'muted'}`} role="status">{v.downloading.error || t('Downloading the voice model: {n}%', { n: v.downloading.percent })}</p>}

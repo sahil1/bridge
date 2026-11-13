@@ -13,16 +13,23 @@
 // here is offered (fit()): where sherpa-onnx runs, with 2 GB of memory or more.
 //
 // Kept in each meeting's folder: voices.jsonl (a line's embedding, as it's worked out) and
-// voices.json ({ line: { key: speaker }, names: { speaker: { name, guess, me } }, speakers, at }).
+// voices.json ({ line: { key: speaker }, names: { speaker: { name, guess, me } }, speakers, at,
+// src: you | them | both, side: { speaker: you | them } with both }).
 // Remembering other people's voices for next time is yours to turn on (Settings › Meetings, off to
 // start with): then a speaker you name is kept as one embedding with their name in
 // <data>/meetings/voices.json, on this computer only, and Forget voices removes them all. Your own
-// voice is learned by itself (unless that's turned off), from your mic on calls, where every line
-// on it is yours, so a room knows which voice is you.
+// voice is learned by itself (unless that's turned off), from your mic on calls when it heard one
+// voice there, so a room knows which voice is you. Your mic hearing several (a room on the call),
+// it's learned only from the one that already sounds like you, else not at all.
 //
 // On a call, the voices are told apart once it ends, by themselves when the model is here (or it
 // downloads, once, after a call with more than one other person), and while it records where the
-// computer can spare the cores.
+// computer can spare the cores. A room on a call (people around you, on your mic with you) has its
+// voices told apart too, with rooms turned on: each side's on its own, numbered together in the
+// order they first spoke (src both). Your mic hearing one voice leaves its lines as You; a voice on
+// your mic that sounds like one on the call is the call through your speakers, and stays unmarked.
+// Where the call's video showed who was talking (sights.js, a beta feature), that goes too: a voice
+// seen as two people at different places is two speakers, and two voices seen as one person are one.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -31,6 +38,7 @@ import { DATA, writeFileAtomic } from './paths.js'
 import { tool } from './fixes.js'
 import * as speech from './speech.js'
 import * as asr from './asr.js'
+import * as sights from './sights.js'
 import { machine } from './machine.js'
 
 let cfg = {}
@@ -144,54 +152,122 @@ export const isRoom = (lines) => lines.some((l) => l.src === 'you' && l.text) &&
 // The side whose voices are told apart: your mic's in a room, the call's on a call.
 export const sideOf = (lines) => (lines.some((l) => l.src === 'them' && l.text) ? 'them' : 'you')
 const callsOn = () => cfg.meetings?.callVoices !== false
+const roomsOn = () => cfg.meetings?.roomVoices === true
+// Every side told apart: your mic in a room; on a call the call's (unless that's off) and your mic's
+// too with rooms on, for a room on the call. asked: Who spoke on a call, which tells the call's apart
+// even with both off.
+export const sidesOf = (lines, { asked = false } = {}) => {
+  if (sideOf(lines) === 'you') return ['you']
+  const s = [callsOn() && 'them', roomsOn() && 'you'].filter(Boolean)
+  return s.length || !asked ? s : ['them']
+}
 // Told apart by itself once it ends: a room, with the model here and it turned on (or used once);
 // a call, unless that's turned off, with the model here, or with more than one other person on it
-// (guests: how many were invited besides you, null when nobody knows), when it downloads first.
+// (guests: how many were invited besides you, null when nobody knows), when it downloads first; a
+// room on a call, with rooms on and the model here.
 export const wanted = (lines, { guests = null } = {}) => (isRoom(lines)
-  ? cfg.meetings?.roomVoices === true && speech.have(speech.VOICE)
-  : sideOf(lines) === 'them' && callsOn() && (speech.have(speech.VOICE) || guests == null || guests >= 2))
+  ? roomsOn() && speech.have(speech.VOICE)
+  : sideOf(lines) === 'them' && ((callsOn() && (speech.have(speech.VOICE) || guests == null || guests >= 2)) || (roomsOn() && speech.have(speech.VOICE))))
+
+// One side's lines grouped by voice: [{ src, keys, c, first }], a group to a speaker.
+const t0Of = (k) => Number(k.slice(k.indexOf(':') + 1))
+function groupsOf(src, lines, embs) {
+  const items = lines.filter((l) => l.src === src && embs.get(keyOf(l))?.v).map((l) => ({ key: keyOf(l), v: embs.get(keyOf(l)).v, s: embs.get(keyOf(l)).s, t0: l.t0 }))
+  const g = group(items)
+  return Object.entries(g.centroids).map(([n, c]) => {
+    const keys = Object.entries(g.line).filter(([, m]) => String(m) === n).map(([k]) => k)
+    return { src, keys, c, first: Math.min(...keys.map(t0Of)) }
+  })
+}
+// A group's middle and first line again, once lines have moved: from its long lines, else all.
+function redo(g, embs) {
+  const vs = g.keys.map((k) => embs.get(k)).filter((x) => x?.v)
+  const long = vs.filter((x) => x.s >= LONG)
+  return { ...g, c: mean((long.length ? long : vs).map((x) => x.v)), first: Math.min(...g.keys.map(t0Of)) }
+}
+// What the call's video showed (sights.js): seen: { key: { who } }, the face seen talking as each line
+// was said. A voice seen as two people, the second at least SEEN_LINES lines and a third of what was
+// seen of it, is two speakers; two voices seen as the same person, most of what was seen of each,
+// are one.
+const SEEN_LINES = 3
+function bySight(gs, seen, embs) {
+  if (!seen.size || !gs.length) return gs
+  const tally = (g) => {
+    const v = new Map()
+    for (const k of g.keys) { const s = seen.get(k); if (s) v.set(s.who, (v.get(s.who) || 0) + 1) }
+    const t = [...v.entries()].sort((a, b) => b[1] - a[1])
+    return { t, all: t.reduce((n, [, c]) => n + c, 0) }
+  }
+  const out = []
+  for (const g of gs) {
+    const { t, all } = tally(g)
+    if (t.length < 2 || t[1][1] < SEEN_LINES || t[1][1] * 3 < all) { out.push(g); continue }
+    const two = new Set(g.keys.filter((k) => seen.get(k)?.who === t[1][0]))
+    out.push(redo({ ...g, keys: g.keys.filter((k) => !two.has(k)) }, embs), redo({ ...g, keys: [...two] }, embs))
+  }
+  const main = (g) => { const { t, all } = tally(g); return t[0] && t[0][1] >= SEEN_LINES && t[0][1] >= all * 0.7 ? t[0][0] : null }
+  for (let merged = true; merged && out.length > 1;) {
+    merged = false
+    for (let i = 0; i < out.length && !merged; i++) for (let j = i + 1; j < out.length && !merged; j++) {
+      const w = main(out[i])
+      if (w && w === main(out[j])) { out[i] = redo({ ...out[i], keys: [...out[i].keys, ...out[j].keys] }, embs); out.splice(j, 1); merged = true }
+    }
+  }
+  return out
+}
 
 // The lines grouped again (after each new one while it records, or all at once after), with the
 // names given before kept by speaker, and a speaker you named in another meeting known again by
-// voice when remembering is on.
-function regroup(id, lines) {
+// voice when remembering is on. Each side on its own (sidesOf), then numbered together in the order
+// they first spoke. asked: Who spoke, which tells a call's voices apart even with that turned off.
+function regroup(id, lines, { asked = false } = {}) {
   const embs = embeddings(id)
-  const src = sideOf(lines)
-  const items = lines.filter((l) => l.src === src && embs.get(keyOf(l))?.v).map((l) => ({ key: keyOf(l), v: embs.get(keyOf(l)).v, s: embs.get(keyOf(l)).s, t0: l.t0 }))
-  const g = group(items)
+  const sides = sidesOf(lines, { asked })
+  const seen = sights.seen(id, lines)
+  const parts = sides.map((src) => ({ src, gs: bySight(groupsOf(src, lines, embs), seen, embs) }))
+  const call = parts.find((p) => p.src === 'them'), mic = parts.find((p) => p.src === 'you')
+  // On a call, a voice on your mic that sounds like one on the call is the call through your speakers.
+  if (call && mic) mic.gs = mic.gs.filter((g) => !call.gs.some((h) => cos(g.c, h.c) >= SAME))
+  // With both sides, a side is told apart from two voices up: one on your mic is You, one on the call Them.
+  const told = parts.length > 1 ? parts.filter((p) => p.gs.length >= 2) : parts
+  const src = told.length > 1 || (told[0]?.src === 'you' && sideOf(lines) === 'them') ? 'both' : told[0]?.src || sides[0] || sideOf(lines)
+  const all = told.flatMap((p) => p.gs).sort((a, b) => a.first - b.first)
+  const line = {}, centroids = {}, side = {}
+  all.forEach((g, i) => { centroids[i + 1] = g.c; side[i + 1] = g.src; for (const k of g.keys) line[k] = i + 1 })
   const was = of(id) || {}
   // A speaker keeps the name it had: the old speaker most of its lines were.
   const names = {}
-  for (const [n] of Object.entries(g.centroids)) {
+  for (const [n] of Object.entries(centroids)) {
     const votes = {}
-    for (const [k, m] of Object.entries(g.line)) if (String(m) === n && was.line?.[k] != null) votes[was.line[k]] = (votes[was.line[k]] || 0) + 1
+    for (const [k, m] of Object.entries(line)) if (String(m) === n && was.line?.[k] != null) votes[was.line[k]] = (votes[was.line[k]] || 0) + 1
     const old = Object.entries(votes).sort((a, b) => b[1] - a[1])[0]?.[0]
     if (old && was.names?.[old] && !Object.values(names).includes(was.names[old])) names[n] = was.names[old]
   }
-  // Voices known from before: yours (learned from calls), in a room, and the people you named once
-  // when remembering is on. Your voice isn't looked for on a call: you're on the mic.
-  const known = readJSON(KNOWN(), { voices: [] }).voices.filter((k) => (k.me ? src === 'you' && cfg.meetings?.learnVoice !== false : cfg.meetings?.rememberVoices === true))
-  for (const [n, c] of Object.entries(g.centroids)) {
+  // Voices known from before: yours (learned from calls), on your mic, and the people you named
+  // once when remembering is on. Your voice isn't looked for among the call's: you're on the mic.
+  const known = readJSON(KNOWN(), { voices: [] }).voices.filter((k) => (k.me ? cfg.meetings?.learnVoice !== false : cfg.meetings?.rememberVoices === true))
+  for (const [n, c] of Object.entries(centroids)) {
     if (names[n]) continue
     let best = null
-    for (const k of known) { const s = cos(dec(k.v), c); if (s >= SAME_KNOWN && (!best || s > best.s)) best = { k, s } }
+    for (const k of known) { if (k.me && side[n] !== 'you') continue; const s = cos(dec(k.v), c); if (s >= SAME_KNOWN && (!best || s > best.s)) best = { k, s } }
     if (best && !Object.values(names).some((x) => x.name === best.k.name || (x.me && best.k.me))) names[n] = best.k.me ? { me: true, byVoice: true } : { name: best.k.name, guess: true, byVoice: true }
   }
-  const out = { src, speakers: g.speakers, line: g.line, names, at: new Date().toISOString(), model: speech.VOICE.id }
+  const out = { src, speakers: all.length, line, names, ...(src === 'both' ? { side } : {}), at: new Date().toISOString(), model: speech.VOICE.id }
   save(id, out)
   return out
 }
 
 // ---------- While it records ----------
 // One line just transcribed, on a computer that can spare the cores, once the model is here: in a
-// room, once you've turned it on (or used it once); on a call, the call's lines, unless that's off.
+// room, once you've turned it on (or used it once); on a call, the call's lines, unless that's off,
+// and your mic's with rooms on.
 // Its voice, and the speakers again.
 const chains = new Map() // id -> promise: one meeting's lines in order
 export async function heard(id, line, pcm, lines) {
   if (!speech.have(speech.VOICE)) return
   const all = lines.concat(line)
   const room = isRoom(all)
-  if (room ? cfg.meetings?.roomVoices !== true : !callsOn() || line.src !== 'them') return
+  if (room ? !roomsOn() : !sidesOf(all).includes(line.src)) return
   if (!(await fit()).ok || !fitted.live) return
   const run = (chains.get(id) || Promise.resolve()).then(async () => {
     const v = await embed(pcm).catch(() => null)
@@ -261,7 +337,7 @@ export async function tell(id, lines) {
   if (work.has(id) && !work.get(id).error) return { working: working(id) }
   const f = await fit()
   if (!f.ok) throw new Error(f.why || 'Telling voices apart can\'t run on this computer')
-  const src = sideOf(lines)
+  const sides = sidesOf(lines, { asked: true })
   const w = { state: speech.have(speech.VOICE) ? 'listening' : 'downloading', percent: 0, error: null }
   work.set(id, w)
   w.done = (async () => {
@@ -274,12 +350,15 @@ export async function tell(id, lines) {
       }
       // Used once in a room, so room meetings from now on get their speakers by themselves
       // (Settings › Meetings turns it off).
-      if (src === 'you' && cfg.meetings?.roomVoices == null) await setting({ roomVoices: true })
+      if (sideOf(lines) === 'you' && cfg.meetings?.roomVoices == null) await setting({ roomVoices: true })
       const done = embeddings(id)
-      const todo = lines.filter((l) => l.src === src && l.text && !done.has(keyOf(l)))
+      const todo = lines.filter((l) => sides.includes(l.src) && l.text && !done.has(keyOf(l)))
       let n = 0
-      if (todo.length) await fromRecording(id, todo, async (l, pcm) => { keep(id, keyOf(l), pcm.length >= RATE / 2 ? await embed(pcm).catch(() => null) : null, pcm.length / RATE); w.percent = Math.round((++n / todo.length) * 100) }, src)
-      return regroup(id, lines)
+      for (const src of sides) {
+        const mine = todo.filter((l) => l.src === src)
+        if (mine.length) await fromRecording(id, mine, async (l, pcm) => { keep(id, keyOf(l), pcm.length >= RATE / 2 ? await embed(pcm).catch(() => null) : null, pcm.length / RATE); w.percent = Math.round((++n / todo.length) * 100) }, src)
+      }
+      return regroup(id, lines, { asked: true })
     } catch (e) { w.error = e.message; throw e } finally { if (!w.error) work.delete(id); else setTimeout(() => { if (work.get(id) === w) work.delete(id) }, 60_000).unref?.() }
   })()
   w.done.catch(() => {})
@@ -333,8 +412,19 @@ export async function learnMe(id, lines) {
   if (!(await fit()).ok) return null
   const mine = lines.filter((l) => l.src === 'you' && l.text && l.t1 - l.t0 >= 2 * LONG).sort((a, b) => (b.t1 - b.t0) - (a.t1 - a.t0)).slice(0, MINE).sort((a, b) => a.t0 - b.t0)
   if (mine.length < 3) return null
-  const vs = []
-  await fromRecording(id, mine, async (l, pcm) => { const v = pcm.length >= RATE ? await embed(pcm).catch(() => null) : null; if (v) vs.push(v) }, 'you')
+  const heard = []
+  await fromRecording(id, mine, async (l, pcm) => { const v = pcm.length >= RATE ? await embed(pcm).catch(() => null) : null; if (v) heard.push({ key: keyOf(l), v, s: l.t1 - l.t0, t0: l.t0 }) }, 'you')
+  // More than one voice on your mic (a room on the call): only the one that sounds like you already,
+  // else nothing, so someone beside you never becomes you.
+  const g = group(heard)
+  const big = Object.keys(g.centroids).filter((n) => Object.values(g.line).filter((m) => String(m) === n).length >= 2)
+  let vs = heard.map((x) => x.v)
+  if (big.length > 1) {
+    const was = readJSON(KNOWN(), { voices: [] }).voices.find((k) => k.me)
+    const best = was && big.map((n) => ({ n, s: cos(dec(was.v), g.centroids[n]) })).sort((a, b) => b.s - a.s)[0]
+    if (!best || best.s < SAME_KNOWN) return { ok: false, several: true }
+    vs = heard.filter((x) => String(g.line[x.key]) === best.n).map((x) => x.v)
+  }
   if (vs.length < 3) return null
   const c = mean(vs)
   const alike = vs.filter((v) => cos(v, c) >= SAME)

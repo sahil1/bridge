@@ -60,6 +60,12 @@ voices you name (Settings › Meetings, off to start with), the voices you name 
 numbers each, with the name you gave, in `~/.bridge-ai/meetings/voices.json`, readable by you only;
 they're never sent anywhere, not to your other devices either, and Forget voices deletes them.
 
+Speakers from the call's video (a beta feature, on a Mac, off until you turn it on) takes a few
+pictures of the call's window while someone talks, as your Screen Recording permission allows, and
+reads them on your Mac with Apple's Vision: where the faces are, how much each mouth moved and the
+names under them. The pictures stay in memory and are never written to disk; only those numbers and
+names are kept, in that meeting's folder (`sights.jsonl`), and they go with it when it's deleted.
+
 Dictation and voice notes are turned into text on your computer, and the recording isn't kept
 (unless you ask for it, below). With "Show the words as you talk" (Settings › Voice, on where your
 computer keeps up), the sound goes to your computer as you talk, a moment at a time, rather than all

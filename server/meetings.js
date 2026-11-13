@@ -24,6 +24,7 @@ import * as livewords from './livewords.js'
 import * as memory from './meetmemory.js'
 import { notPerson } from './notpeople.js'
 import * as voices from './voices.js'
+import * as sights from './sights.js'
 import * as doctext from './doctext.js'
 import { DECK_RULES } from './studio.js'
 import { canOpen } from './files.js'
@@ -146,10 +147,11 @@ export function transcript(id, { raw = false, clean = true, dropped = false } = 
   let one = null
   try { one = onlyGuest(meta(id)) } catch { /* gone */ }
   // Each line's voice (voices.js), on the side told apart: your mic's in a room, the call's on a
-  // call. Speaker n, or the name given to that voice, or you. A name you gave the line comes first.
+  // call, both with a room on the call. Speaker n, or the name given to that voice, or you. A name
+  // you gave the line comes first.
   const room = voices.of(id)
   const voiceOf = (l, k) => {
-    const n = l.src === (room?.src || 'you') && room?.speakers >= 2 ? room.line?.[k] : null
+    const n = room?.speakers >= 2 && (room.src === 'both' || l.src === (room.src || 'you')) ? room.line?.[k] : null
     if (!n) return {}
     const v = room.names?.[n]
     return v?.me ? { voice: n, me: true, ...(v.byVoice ? { byVoice: true } : {}) } : v?.name ? { voice: n, name: v.name, guess: !!v.guess, ...(v.byVoice ? { byVoice: true } : {}) } : { voice: n }
@@ -808,7 +810,7 @@ export function get(id) {
   // me: your name (Settings › General), for your lines.
   // In a room: how many voices, and telling them apart while it's going (the model downloading).
   const room = voices.of(id)
-  return { ...m, voices: room ? { src: room.src || 'you', speakers: room.speakers, names: room.names || {}, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, callAccess: callAccess(id), partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assistAt: help.at || null, assisting: assisting.has(id), assistLevel: assistLevel() }
+  return { ...m, voices: room ? { src: room.src || 'you', speakers: room.speakers, names: room.names || {}, side: room.side || null, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, callAccess: callAccess(id), partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20), assistError: help.error || null, assistAt: help.at || null, assisting: assisting.has(id), assistLevel: assistLevel() }
 }
 
 export function setKind(id, kind) { return patchMeta(id, { kind: KINDS[kind] ? kind : 'general', kindPicked: true }) }
@@ -984,18 +986,28 @@ export const sameName = (a, b) => {
 const guests = (m) => { const me = String(cfg.name || '').trim(); return (m.event?.attendees || []).filter((p) => (!me || !sameName(p, me)) && !notPerson(p)) }
 const asWritten = (p) => (/^[a-z0-9._-]+$/.test(p) && /[._-]/.test(p) ? nameParts(p).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ') : p)
 function onlyGuest(m) { const g = guests(m); return g.length === 1 ? asWritten(g[0]) : null }
+// Who the call's video showed talking as each line was said (sights.js), for a model: saw(line) is
+// " (seen talking: ...)" or nothing, and saw.any whether any line has it.
+function seenSaid(id, said) {
+  const seen = sights.seen(id, said)
+  const saw = (l) => { const x = seen.get(l.key || `${l.src}:${l.t0}`); return x ? ` (seen talking: ${sights.hint(x)})` : '' }
+  saw.any = seen.size > 0
+  return saw
+}
+const SEEN_SAYS = 'A line may say who the call\'s video showed talking while it was said: "seen talking" and the name under the face whose mouth was moving, or where that face was in a room\'s camera (the person on the left in "Huddle Room"). It\'s good evidence for who said it, but the name under a face can be a room\'s or a computer\'s rather than a person\'s, and two people can talk at once.'
 // The call is one sound for everyone on it, so who said each of Them's lines is worked out by a
 // model: from what's said (names used, a question put to someone and answered, who presents what),
 // the words on the screen at the time (a video call shows names on its tiles, and a look at it
-// while someone on the call talked shows who that was: glance) and who was invited. A line it
-// can't place stays Them; the ones you named yourself are left as they are.
+// while someone on the call talked shows who that was: glance; and, from its video, whose mouth was
+// moving as each line was said: sights.js) and who was invited. A line it can't place stays Them;
+// the ones you named yourself are left as they are.
 export async function nameSpeakers(id, { model } = {}) {
   const m = meta(id)
   const use = model || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
   if (!use) throw noModel()
   const told = voices.of(id)
   if (told?.speakers >= 2 && (told.src || 'you') === 'you' && !transcript(id).some((l) => l.src === 'them' && l.text)) return nameVoices(id, use)
-  if (told?.speakers >= 2 && told.src === 'them') return nameVoices(id, use, { call: true })
+  if ((told?.src === 'them' || told?.src === 'both') && told.speakers >= 2) return nameVoices(id, use, { call: true })
   const said = transcript(id).filter((l) => l.text)
   if (!said.some((l) => l.src === 'them')) throw new Error('Nobody on the call was heard in this meeting')
   const me = String(cfg.name || '').trim()
@@ -1003,17 +1015,19 @@ export async function nameSpeakers(id, { model } = {}) {
   const screens = [...(m.captures || []).filter((c) => c.text).map((c) => ({ t: c.t, screen: c.text.replace(/\s+/g, ' ').slice(0, 300) })),
     ...glances(id).map((g) => ({ t: g.t, screen: g.text.slice(0, 500), talking: true }))]
   const byN = new Map()
+  const saw = seenSaid(id, said)
   const rows = [...said, ...screens].sort((a, b) => (a.t0 ?? a.t) - (b.t0 ?? b.t)).map((x) => {
     if (x.screen) return `    [${clock(x.t)}] On the screen${x.talking ? ' as Them talked' : ''}: ${x.screen}`
-    if (x.src !== 'them') return `    [${clock(x.t0)}] You: ${x.text}`
+    if (x.src !== 'them') return `    [${clock(x.t0)}] You: ${x.text}${saw(x)}`
     byN.set(byN.size + 1, x.key)
-    return `${byN.size}. [${clock(x.t0)}] Them: ${x.text}`
+    return `${byN.size}. [${clock(x.t0)}] Them: ${x.text}${saw(x)}`
   })
   const mem = memory.about(`${m.title}\n${people.join('\n')}\n${said.map((l) => l.text).join('\n')}`)
   const about = [`Meeting: ${m.title}`, people.length ? `Invited, besides You: ${people.join(', ')}` : 'There is no list of who was invited, but the meeting\'s name may say who it was with.', me ? `"You" is ${me}, who recorded it.` : '"You" is the person who recorded it.'].join('\n')
   const ask = [about, mem ? `\n${mem}` : '', '',
     '"Them" is everyone else on the call: they share one sound, so the transcript doesn\'t say which of them spoke. Say who said each numbered Them line, from what was said (names used, introductions, a question put to someone and their answer, who presents what), the words on the screen at the time and who was invited.',
     'The screen is the call\'s window, read as text. Video calls show names on their tiles; the one talking is often the big tile, or named in a label like "Talking: Priya Shah" or "Priya Shah is presenting"; captions show who said what ("Priya Shah" and then their words). Match those words and names to the lines said at that time.',
+    saw.any ? SEEN_SAYS : '',
     'Use names the way they were invited or said. When you can\'t tell, use null: a wrong name is worse than none. Never name You.',
     'Answer with one JSON object and nothing else, from line number to name, like {"1": "Priya Shah", "2": null}.'].join('\n')
   const got = {}
@@ -1042,23 +1056,29 @@ export async function nameSpeakers(id, { model } = {}) {
 
 // The same for told-apart voices: each Speaker n named from what's said ("Thanks, Priya"), who was
 // invited and, in a room, which of them is you; on a call, also from the names its window showed as
-// they talked (glances). A voice you named yourself is left as it is; one it can't place stays
-// Speaker n.
+// they talked (glances) and whose mouth moved on its video (sights.js). A room on a call (src both)
+// has the call's voices and your mic's, and one of your mic's is you. A voice you named yourself is
+// left as it is; one it can't place stays Speaker n.
 async function nameVoices(id, use, { call = false } = {}) {
   const m = meta(id)
   const said = transcript(id).filter((l) => l.text)
   const room = voices.of(id)
+  const both = room.src === 'both'
+  const sideOf = (n) => room.side?.[n] || room.src
+  const nums = (src) => Array.from({ length: room.speakers }, (_, i) => i + 1).filter((n) => sideOf(n) === src)
   const me = String(cfg.name || '').trim()
   const people = guests(m)
   const screens = call ? [...(m.captures || []).filter((c) => c.text).map((c) => ({ t: c.t, screen: c.text.replace(/\s+/g, ' ').slice(0, 300) })), ...glances(id).map((g) => ({ t: g.t, screen: g.text.slice(0, 500), talking: true }))] : []
+  const saw = seenSaid(id, said)
   const rows = [...said, ...screens].sort((a, b) => (a.t0 ?? a.t) - (b.t0 ?? b.t)).map((l) => (l.screen ? `    [${clock(l.t)}] On the screen${l.talking ? ' as someone on the call talked' : ''}: ${l.screen}`
-    : `[${clock(l.t0)}] ${l.voice ? `Speaker ${l.voice}` : call && l.src === 'them' ? 'Someone on the call' : me || 'You'}: ${l.text}`))
+    : `[${clock(l.t0)}] ${l.voice ? `Speaker ${l.voice}` : call && l.src === 'them' ? 'Someone on the call' : me || 'You'}: ${l.text}${saw(l)}`))
   const mem = memory.about(`${m.title}\n${people.join('\n')}\n${said.map((l) => l.text).join('\n')}`)
   const ask = call
     ? [`Meeting: ${m.title}`, people.length ? `Invited, besides You: ${people.join(', ')}` : 'There is no list of who was invited, but the meeting\'s name may say who it was with.', me ? `"You" is ${me}, who recorded it, on their own microphone.` : '"You" is the person who recorded it, on their own microphone.', mem ? `\n${mem}` : '', '',
-      `Everyone else on this call shares one sound, and their voices were told apart by how they sound: Speaker 1 to Speaker ${room.speakers}. Say who each voice on the call is, from what was said (names used, introductions, a question put to someone and their answer), the words on the screen at the time (a call's window shows names on its tiles, "Talking: ..." labels and captions with who said them), who was invited and the meeting's name. None of them is You.`,
+      both ? `This call had people on it and people in the room with You, and each side's voices were told apart by how they sound. On the call (sharing one sound): ${nums('them').map((n) => `Speaker ${n}`).join(', ') || 'none told apart'}. In the room, on Your microphone: ${nums('you').map((n) => `Speaker ${n}`).join(', ')}; one of those is usually You: say "me" for that one. Say who each is, from what was said (names used, introductions, a question put to someone and their answer), the words on the screen at the time (a call's window shows names on its tiles, "Talking: ..." labels and captions with who said them), who was invited and the meeting's name.` : `Everyone else on this call shares one sound, and their voices were told apart by how they sound: Speaker 1 to Speaker ${room.speakers}. Say who each voice on the call is, from what was said (names used, introductions, a question put to someone and their answer), the words on the screen at the time (a call's window shows names on its tiles, "Talking: ..." labels and captions with who said them), who was invited and the meeting's name. None of them is You.`,
+      saw.any ? SEEN_SAYS : '',
       'Use names the way they were invited or said. When you can\'t tell, use null: a wrong name is worse than none.',
-      'Answer with one JSON object and nothing else, from speaker number to name, like {"1": "Priya Shah", "2": null}.'].join('\n')
+      both ? 'Answer with one JSON object and nothing else, from speaker number to name, like {"1": "Priya Shah", "2": "me", "3": null}.' : 'Answer with one JSON object and nothing else, from speaker number to name, like {"1": "Priya Shah", "2": null}.'].filter(Boolean).join('\n')
     : [`Meeting: ${m.title}`, people.length ? `Invited, besides the person recording: ${people.join(', ')}` : 'There is no list of who was invited, but the meeting\'s name may say who it was with.', me ? `The person recording it is ${me}.` : '', mem ? `\n${mem}` : '', '',
       `This meeting was in a room with one microphone, and the voices were told apart by how they sound: Speaker 1 to Speaker ${room.speakers}. Say who each speaker is, from what was said (names used, introductions, a question put to someone and their answer), who was invited and the meeting's name. One of them is usually the person recording it: say "me" for that one.`,
       'Use names the way they were invited or said. When you can\'t tell, use null: a wrong name is worse than none.',
@@ -1079,7 +1099,7 @@ async function nameVoices(id, use, { call = false } = {}) {
     if (!(s >= 1 && s <= room.speakers) || (was && !was.guess && !was.byVoice) || typeof name !== 'string') continue
     const v = clean(name, 80)
     const isMe = /^(me|you|myself)$/i.test(v) || (me && sameName(v, me))
-    if (!v || /^(null|unknown|speaker \d+|them)$/i.test(v) || (!isMe && notPerson(v)) || taken.has(isMe ? ':me' : v) || (call && isMe)) continue
+    if (!v || /^(null|unknown|speaker \d+|them)$/i.test(v) || (!isMe && notPerson(v)) || taken.has(isMe ? ':me' : v) || (call && isMe && sideOf(s) !== 'you')) continue
     await voices.name(id, s, isMe ? { me: true, guess: true } : { name: v, guess: true })
     taken.add(isMe ? ':me' : v)
     n++
@@ -1414,6 +1434,37 @@ export async function lookAround(now = Date.now()) {
   } finally { lookingNow = false }
 }
 setInterval(() => { lookAround().catch(() => {}) }, Number(process.env.BRIDGE_LOOK_EVERY_MS || 1000)).unref?.()
+
+// ---------- Who's seen talking, on the call's video (sights.js) ----------
+// With it on (a beta feature) and Screen Recording allowed, while a call records and someone talks,
+// on the call or on your mic (a room on the call), a burst of pictures of the call's window every
+// SIGHT_MS, read on this Mac for whose mouth moves. Three bursts in a row with no faces (cameras off,
+// a shared screen filling the window): once a minute until there are some. One burst at a time.
+const SIGHT_MS = Number(process.env.BRIDGE_SIGHT_EVERY_MS || 5000)
+const SIGHT_IDLE_MS = 60_000
+const SIGHTS = 1500
+const sighted = new Map() // id -> { at, empty, n }
+let seeing = false
+// Someone talking now, on the call or on your mic.
+const speaking = (id) => Object.values(live.get(id)?.sources || {}).some((s) => Date.now() - (s.talkingAt || 0) < 2000)
+export async function seeAround(now = Date.now()) {
+  if (seeing || !sights.on() || !helpers.faces) return
+  seeing = true
+  try {
+    for (const m of recordingNow()) {
+      if (m.status !== 'recording' || m.call !== 'on' || !(m.callApps || []).length || !speaking(m.id)) continue
+      const k = sighted.get(m.id) || { at: 0, empty: 0, n: 0 }
+      if (k.n >= SIGHTS || now - k.at < (k.empty >= 3 ? SIGHT_IDLE_MS : SIGHT_MS)) continue
+      if (!(await helpers.canLook?.())) return
+      const t = nowIn(m.id, m) ?? 0
+      sighted.set(m.id, { ...k, at: now })
+      const raw = await helpers.faces(m.callApps[0]).catch(() => null)
+      const r = raw ? sights.keep(m.id, t, raw) : { faces: 0 }
+      sighted.set(m.id, { at: now, empty: r.faces ? 0 : k.empty + 1, n: k.n + 1 })
+    }
+  } finally { seeing = false }
+}
+setInterval(() => { seeAround().catch(() => {}) }, Number(process.env.BRIDGE_LOOK_EVERY_MS || 1000)).unref?.()
 
 // ---------- Files and links ----------
 // What goes with a meeting: files on this computer (a deck, the SOW), links (a SharePoint deck from
