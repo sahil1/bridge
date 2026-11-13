@@ -12,13 +12,18 @@
 // come back by themselves once it stops; the meeting being recorded's card goes to the menu bar and
 // comes back as it was, where it was (not for Bridge AI's own look at the screen). A reminder's menu by its
 // ×, whole in the window: Remind me 1 min before (put off, and the app told to look again now), Hide
-// until the next meeting, and Turn off meeting reminders, asked first, saying where they come back.
+// until the next meeting (on the server; by the app when the server can't), and Turn off meeting
+// reminders, asked first, saying where they come back. Two meetings at the same time: ‹ 1 of 2 ›
+// before they start (the other's name and Join, still there after the card's next look, × hiding
+// that one only), when a call starts (Take notes for the one showing) and while it records (named
+// after the other). Its name changed on the card by the pencil: Enter keeps it, Esc and an empty
+// name don't, and one the server refuses is said.
 // 3.13.2's card at 110% (⌘+ once): its window stayed the card's size at 100%, which cut it off on
 // the right and at the bottom.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { checks, startKit, electronBin, until, TEST, OUT } from '../lib/harness.mjs'
+import { checks, startKit, electronBin, until, sleep, TEST, OUT } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('float-card-window')
 const electron = electronBin()
@@ -86,7 +91,7 @@ try {
       { src: 'you', t0: 716, t1: 720, text: 'Okay, what does that do to the launch date?' },
     ],
     sections: [{ title: 'Intro' }, { title: 'Rollout plan and dates' }],
-    event: { end: new Date(now + 20 * 60000).toISOString(), attendees: ['a', 'b', 'c', 'd', 'e', 'f'] },
+    event: { title: TITLE, start: new Date(now - 15 * 60000).toISOString(), end: new Date(now + 20 * 60000).toISOString(), attendees: ['a', 'b', 'c', 'd', 'e', 'f'] },
   } }))
   await ctx.route(/\/api\/prep(\?|$)/, (r) => r.fulfill({ json: {
     writer: true,
@@ -386,11 +391,116 @@ try {
     const before = await asked()
     await confirm.locator('button', { hasText: 'Turn off' }).click()
     ok(!!(await until(async () => sent.some(([k, b]) => k === 'settings' && b?.meetings?.remind === false) && (await asked()).look > before.look, 4000, 100)), 'Turn off: Remind me before meetings off, and the app told to look again at once', sent)
+    // Hide: the server leaves that meeting's reminder out from then, and the app looks again at
+    // once (then there's nothing for the card, and it goes). A server that can't: hidden by the app.
+    await ctx.route(/\/api\/calls\/hide(\?|$)/, (r) => { sent.push(['hide', r.request().postDataJSON()]); return r.fulfill({ json: { ok: true } }) })
+    const b4 = await asked()
     await card.click('.float-card .fc-opts')
     await card.locator('.fc-menu .fc-hide').click()
-    ok(!!(await until(async () => (await asked()).hide === before.hide + 1, 4000, 100)), 'Hide until the next meeting: hidden as its × does')
+    ok(!!(await until(async () => sent.some(([k, b]) => k === 'hide' && b.id === soonK.calls.soon.id) && (await asked()).look > b4.look, 4000, 100)) && (await asked()).hide === b4.hide, 'Hide until the next meeting: that meeting hidden on the server, the app told to look again at once', { sent, asked: await asked() })
+    await ctx.unroute(/\/api\/calls\/hide(\?|$)/)
+    await card.click('.float-card .fc-head > .fc-x')
+    ok(!!(await until(async () => (await asked()).hide === b4.hide + 1, 4000, 100)), "its ×, with a server that can't hide it (the meeting isn't on its calendar): the app hides the card as it is", await asked())
     await ctx.unroute(/\/api\/calls\/snooze(\?|$)/)
     await ctx.unroute(/\/api\/settings(\?|$)/)
+  }
+
+  // ---------- Two meetings at the same time ----------
+  // Before they start: ‹ 1 of 2 › under the bar, saying what the other is. Next shows the other
+  // (its name, its Join), which stays through the card's next looks; its × hides that one on the
+  // server and the first stays. When a call starts: which one the notes are for, and Take notes
+  // starts for the one showing. While it records for one: the arrows name it after the other.
+  {
+    const soonK = KINDS.find((x) => x.name === 'a meeting about to start')
+    const one = soonK.calls.soon
+    const two = { ...one, id: 'ev-two', title: 'Budget check-in with finance', join: 'https://meet.example.com/two-two-two' }
+    const sent = []
+    const asked = () => el.evaluate(() => ({ ...globalThis.asked }))
+    const text = (sel) => card.locator(sel).innerText().catch(() => '')
+    const fit = () => until(async () => { const x = await look(); return whole(x) && !x.past.length && !x.cut.length ? x : null }, 4000, 100)
+    await ctx.route(/\/api\/calls\/hide(\?|$)/, (r) => { sent.push(['hide', r.request().postDataJSON()]); calls = { ...calls, soon: { ...one, others: [] } }; return r.fulfill({ json: { ok: true } }) })
+    await card.reload()
+    await card.waitForSelector('.float-card', { timeout: 15000 })
+    await show({ calls: { ...soonK.calls, soon: { ...one, others: [two] } }, ready: '.float-card .fc-among .mt-among' })
+    const among = card.locator('.float-card .fc-among')
+    ok((await text('.float-card .fc-title')) === one.title && (await text('.fc-among .mt-among-n')) === '1 of 2' && (await text('.fc-among-next')) === `Also coming up: ${two.title}` && await among.getByRole('button', { name: 'Next meeting' }).count() === 1 && await among.getByRole('button', { name: 'Previous meeting' }).count() === 1, 'two meetings about to start: the first, "1 of 2", what the other is, Previous and Next by name', await text('.float-card'))
+    const w1 = await card.evaluate(() => Math.round(document.querySelector('.float-card .fc-title').getBoundingClientRect().width))
+    await show(soonK)
+    const w0 = await card.evaluate(() => Math.round(document.querySelector('.float-card .fc-title').getBoundingClientRect().width))
+    await show({ calls: { ...soonK.calls, soon: { ...one, others: [two] } }, ready: '.float-card .fc-among .mt-among' })
+    ok(!!(await fit()) && w1 === w0, 'whole in its window, nothing past its edge or cut off, the title as wide as with one meeting', { look: await look(), w1, w0 })
+    await capture('float-two-meetings')
+    await among.getByRole('button', { name: 'Next meeting' }).click()
+    await until(async () => (await text('.float-card .fc-title')) === two.title, 3000, 100)
+    await sleep(2600) // it has looked again since
+    ok((await text('.float-card .fc-title')) === two.title && (await text('.fc-among .mt-among-n')) === '2 of 2' && (await card.locator('.float-card a.fc-join').getAttribute('href')) === two.join && (await text('.fc-among-next')) === `Also coming up: ${one.title}`, "Next: the other meeting and its Join, still showing after the card's next look", await text('.float-card'))
+    const b4 = await asked()
+    await card.click('.float-card .fc-head > .fc-x')
+    ok(!!(await until(async () => sent.some(([k, b]) => k === 'hide' && b.id === two.id) && (await asked()).look > b4.look && (await text('.float-card .fc-title')) === one.title && !(await among.count()), 5000, 100)) && (await asked()).hide === b4.hide, 'its ×: the one showing is hidden on the server, the card stays with the other, no arrows', { sent, text: await text('.float-card'), asked: await asked() })
+    await ctx.unroute(/\/api\/calls\/hide(\?|$)/)
+
+    // A call starts with two on.
+    const evA = { id: 'ev-a', title: 'Weekly sync', start: new Date(now - 5 * 60000).toISOString(), end: new Date(now + 25 * 60000).toISOString(), attendees: ['Priya Raman'] }
+    const evB = { ...evA, id: 'ev-b', title: 'Northwind renewal: pricing and the seat count' }
+    await ctx.route(/\/api\/calls\/event(\?|$)/, (r) => r.fulfill({ json: { event: evA, others: [evB], by: 'call' } }))
+    const promptK = KINDS.find((x) => x.name === 'a call started')
+    await show({ calls: { ...promptK.calls, prompt: { ...promptK.calls.prompt, at: now + 1 } }, ready: '.float-card .fc-acts .mt-among' })
+    ok(/Take notes for Weekly sync\?/.test(await text('.float-card .fc-sub')) && (await text('.fc-acts .mt-among-n')) === '1 of 2' && !!(await fit()), 'a call started with two meetings on: the likelier one named, "1 of 2" by Take notes, whole in its window', { text: await text('.float-card'), look: await look() })
+    await card.locator('.fc-acts').getByRole('button', { name: 'Next meeting' }).click()
+    ok(!!(await until(async () => /Take notes for Northwind renewal/.test(await text('.float-card .fc-sub')) && (await text('.fc-acts .mt-among-n')) === '2 of 2', 3000, 100)) && !!(await fit()), 'Next: the other one named, still whole', { text: await text('.float-card'), look: await look() })
+    await capture('float-call-two-meetings')
+    await card.locator('.fc-acts button', { hasText: 'Take notes' }).click()
+    const started = await until(async () => (await asked()).start, 4000, 100)
+    ok(started?.app === 'Microsoft Teams' && started.event?.id === 'ev-b', 'Take notes: started for the one showing', started)
+    await ctx.unroute(/\/api\/calls\/event(\?|$)/)
+
+    // While it records for one of two that were on.
+    const other = { id: 'ev-other', title: 'Budget check-in with finance', start: new Date(now - 14 * 60000).toISOString(), end: new Date(now + 16 * 60000).toISOString(), attendees: ['Dana'] }
+    await ctx.route(new RegExp(`/api/meetings/${ID}/events(\\?|$)`), (r) => r.fulfill({ json: { events: [{ id: 'ev-mine', title: TITLE, start: new Date(now - 15 * 60000).toISOString(), end: new Date(now + 20 * 60000).toISOString(), attendees: ['a'] }, other] } }))
+    await ctx.route(new RegExp(`/api/meetings/${ID}/event(\\?|$)`), (r) => { sent.push(['event', r.request().postDataJSON()]); return r.fulfill({ json: { id: ID } }) })
+    const naming = new RegExp(`/api/meetings/${ID}([?].*)?$`) // (the meeting's own address, a pattern apart from the one above)
+    await ctx.route(naming, (r) => { if (r.request().method() !== 'PATCH') return r.fallback(); sent.push(['rename', r.request().postDataJSON()]); return r.fulfill({ json: { id: ID, title: r.request().postDataJSON().title } }) })
+    await card.reload()
+    await card.waitForSelector('.float-card', { timeout: 15000 })
+    await show({ ...KINDS[1], ready: '.float-card .fc-info-row .mt-among' })
+    ok((await text('.fc-info-row .mt-among-n')) === '1 of 2' && /Ends .* · 6 invited/.test(await text('.fc-info')) && !!(await fit()), 'recording for one of two meetings that were on: "1 of 2" by when it ends, whole in its window', { text: await text('.fc-info-row'), look: await look() })
+    await card.locator('.fc-info-row').getByRole('button', { name: 'Next meeting' }).click()
+    ok(!!(await until(() => sent.some(([k, b]) => k === 'event' && b.event?.id === 'ev-other'), 4000, 100)), 'Next: the recording is said to be for the other meeting', sent)
+
+    // ---------- Its name, changed on the card ----------
+    // The pencil by the name (there once the card is pointed at): a box with the name selected.
+    // Enter keeps it, Esc doesn't, nor is an empty one kept; the card stays whole meanwhile.
+    const pen = card.locator('.float-card .fc-head .mt-rename-btn')
+    const box = card.locator('.float-card .fc-head input.mt-rename')
+    await card.hover('.float-card .fc-head .fc-time')
+    const penW = await pen.evaluate((b) => Math.round(b.getBoundingClientRect().width))
+    ok(penW >= 20 && (await pen.getAttribute('aria-label')) === 'Rename the meeting', 'pointed at, its name has a pencil: Rename the meeting', penW)
+    await pen.click()
+    const sel = await box.evaluate((i) => document.activeElement === i && i.selectionStart === 0 && i.selectionEnd === i.value.length && i.value).catch(() => null)
+    ok(sel === TITLE && !!(await fit()), 'a box with the name in it, selected, the card whole', { sel, look: await look() })
+    await capture('float-rename')
+    await card.keyboard.type('Platform plan')
+    await card.keyboard.press('Enter')
+    ok(!!(await until(async () => sent.some(([k, b]) => k === 'rename' && b.title === 'Platform plan') && !(await box.count()) && (await text('.float-card .fc-head .fc-title')) === 'Platform plan', 4000, 100)), 'Enter: renamed on the server, and the card shows the new name', { sent, title: await text('.float-card .fc-head .fc-title') })
+    const n = sent.filter(([k]) => k === 'rename').length
+    await pen.click()
+    await card.keyboard.type('Not this')
+    await card.keyboard.press('Escape')
+    await pen.click()
+    await box.fill(' ')
+    await card.keyboard.press('Enter')
+    await sleep(400)
+    ok(!(await box.count()) && sent.filter(([k]) => k === 'rename').length === n && (await text('.float-card .fc-head .fc-title')) === 'Platform plan', 'Esc leaves the name as it was, and an empty one is not kept', sent)
+    // A name that couldn't be kept says so.
+    await ctx.unroute(naming)
+    await ctx.route(naming, (r) => (r.request().method() === 'PATCH' ? r.fulfill({ status: 502, json: { error: 'The disk is full' } }) : r.fallback()))
+    await pen.click()
+    await card.keyboard.type('Another name')
+    await card.keyboard.press('Enter')
+    ok(!!(await until(async () => /Couldn't rename it: The disk is full/.test(await text('.float-card .fc-line')) && (await text('.float-card .fc-head .fc-title')) === TITLE, 4000, 100)), "a rename the server refuses: said on the card, the name the server has showing", await text('.float-card'))
+    await ctx.unroute(naming)
+    await ctx.unroute(new RegExp(`/api/meetings/${ID}/events(\\?|$)`))
+    await ctx.unroute(new RegExp(`/api/meetings/${ID}/event(\\?|$)`))
   }
 
   // ---------- A short screen ----------

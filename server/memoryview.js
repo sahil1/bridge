@@ -203,7 +203,7 @@ export async function view() {
   // A series: the same name three times or more, as Meeting Insights has it.
   const key = (m) => meetWork.seriesOf(m.title) || meetWork.seriesOf(m.event?.title)
   const n = new Map()
-  for (const m of all) { const k = key(m); if (k) n.set(k, (n.get(k) || 0) + 1) }
+  for (const m of all.filter((x) => !x.parts)) { const k = key(m); if (k) n.set(k, (n.get(k) || 0) + 1) }
   const mids = new Set(items.flatMap((x) => x.meetings || []))
   const seen = all.filter((m) => mids.has(m.id)).map((m) => [m.id, { title: m.title, startedAt: m.startedAt, series: n.get(key(m)) >= 3 ? key(m) : null }])
   const made = draft(items, people || [], all)
