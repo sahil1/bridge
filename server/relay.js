@@ -61,6 +61,7 @@ const PAIR_USES = 1 // a code adds one device; Add another device makes a new on
 // the CLI (bridge-ai pair --review). Kept in relay.json, so it's the same code after a restart.
 const REVIEW = process.env.BRIDGE_REVIEW_PAIRING === '1'
 const REVIEW_DAYS = 14
+const REVIEW_MAX_DAYS = 90 // a review can take weeks, and the next version's wants a code too
 const REVIEW_USES = 25
 const REMOVED_DAYS = 90 // how long a removed device's key is kept, to tell it it was removed
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
@@ -652,17 +653,26 @@ export async function pair() {
 
 export function stopPairing() { pairing = null; return status() }
 
-// The review code (above): made anew each time, so the one before stops working. The devices it
-// pairs are phones not kept yet, like Pair a device's.
-export async function reviewPair({ days, uses } = {}) {
+// The review code (above). With one that works already, days and uses change how long it lasts
+// (from now) and how many it pairs, and it stays the same code, so a QR code already sent keeps
+// working; fresh, or none that works, makes another and the one before stops. The devices it pairs
+// are phones not kept yet, like Pair a device's.
+export async function reviewPair({ days, uses, fresh } = {}) {
   if (!REVIEW) throw new Error('A code that lasts for days is only for a computer set up for others to try. Start Bridge AI with BRIDGE_REVIEW_PAIRING=1 to make it one.')
   if (!conf.url) throw new Error('Set up the relay first')
   await key()
   const within = (n, d, max) => Math.min(max, Math.max(1, Math.round(Number(n)) || d))
+  const now = review()
+  if (now && !fresh) {
+    if (days != null) now.expires = Date.now() + within(days, REVIEW_DAYS, REVIEW_MAX_DAYS) * 86400000
+    if (uses != null) now.max = within(uses, REVIEW_USES, 100)
+    save()
+    return status()
+  }
   const code = newPairCode()
   const { id, secret } = splitCode(code)
   const link = `${conf.url.replace(/\/$/, '')}/#pair=${formatCode(code)}&name=${encodeURIComponent(computerName())}`
-  conf.review = { id, secret, code: formatCode(code), link, expires: Date.now() + within(days, REVIEW_DAYS, 30) * 86400000, uses: 0, max: within(uses, REVIEW_USES, 100) }
+  conf.review = { id, secret, code: formatCode(code), link, expires: Date.now() + within(days, REVIEW_DAYS, REVIEW_MAX_DAYS) * 86400000, uses: 0, max: within(uses, REVIEW_USES, 100) }
   save()
   return status()
 }

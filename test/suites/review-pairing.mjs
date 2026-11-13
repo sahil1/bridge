@@ -47,7 +47,7 @@ try {
   ok(stray.refused?.why === 'code-expired' && (await mine.api('/relay')).review === null, 'and one written into its relay.json is refused there', stray.refused)
 
   // ---------- the review code: days, several phones ----------
-  const r = (await demo.api('/relay/pair', { review: {} })).review
+  const r = (await demo.api('/relay/pair', { review: { fresh: true } })).review
   const days = (r.expires - Date.now()) / 86400000
   ok(r.link === `${rd.url}/#pair=${r.code}&name=Demo` && /^[A-Z2-9]{4}(-[A-Z2-9]{4}){4}$/.test(r.code) && r.code !== planted.code && days > 13.9 && days <= 14 && r.uses === 0 && r.max === 25, 'Demo makes one: a link and a code as Pair a device\'s, for 14 days and 25 phones', { ...r, days })
   const old = await linkAs(rd.url, { code: planted.code, name: 'Late' })
@@ -90,9 +90,14 @@ try {
 
   // ---------- used up, run out, stopped ----------
   await sleep(10500)
-  const short = cli(demo, 'pair', '--review', '--uses', '1', '--days', '2')
+  const longer = cli(demo, 'pair', '--review', '--days', '60')
+  const l1 = (await demo.api('/relay')).review
+  ok(longer.status === 0 && l1.code === r.code && l1.uses === 3 && l1.max === 25 && Math.round((l1.expires - Date.now()) / 86400000) === 60 && longer.stdout.includes(`Link: ${r.link}`), '--days on one that works makes the same code last that long, with what it has paired', [longer.stderr, l1])
+  const most = (await demo.api('/relay/pair', { review: { days: 400 } })).review
+  ok(most.code === r.code && Math.round((most.expires - Date.now()) / 86400000) === 90, 'for 90 days at most', most)
+  const short = cli(demo, 'pair', '--review', '--new', '--uses', '1', '--days', '2')
   const s1 = (await demo.api('/relay')).review
-  ok(short.status === 0 && s1.code !== r.code && s1.max === 1 && Math.round((s1.expires - Date.now()) / 86400000) === 2, '--uses and --days make a new one, for that many', [short.stderr, s1])
+  ok(short.status === 0 && s1.code !== r.code && s1.uses === 0 && s1.max === 1 && Math.round((s1.expires - Date.now()) / 86400000) === 2, '--new makes another, for that many', [short.stderr, s1])
   const u1 = await linkAs(rd.url, { code: s1.code, name: 'x', about: { name: 'Only' } })
   const u2 = await linkAs(rd.url, { code: s1.code, name: 'x', about: { name: 'Too many' } })
   ok((await u1.request?.('GET', '/api/version'))?.status === 200 && u2.refused?.why === 'code-expired' && (await demo.api('/relay')).review === null, 'a code for one phone pairs one, then is gone', [u1.refused, u2.refused])

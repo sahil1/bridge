@@ -393,7 +393,7 @@ one themselves.
 
 App Review can't pair with a computer of its own, and Pair a device's code works once, for 15
 minutes, so a picture of one is no use to a reviewer. For them there's a review code: it lasts 14
-days and pairs 25 phones (`--days` up to 30, `--uses` up to 100), is kept through restarts, and
+days and pairs 25 phones (`--days` up to 90, `--uses` up to 100; on a code that works they change that code, so its QR code stays good, and `--new` makes another), is kept through restarts, and
 exists only on a Bridge AI started with `BRIDGE_REVIEW_PAIRING=1` (`server/relay.js`; elsewhere
 `bridge-ai pair --review` is refused, and one copied into another computer's `relay.json` doesn't
 work). The phones it pairs show in Settings › Devices as any phone paired with a code does, to

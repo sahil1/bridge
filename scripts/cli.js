@@ -332,8 +332,9 @@ async function reviewPairCmd(args) {
   if (!r0.configured) throw new Error('Set up the relay first: bridge-ai relay setup')
   const days = flag(args, 'days')
   const uses = flag(args, 'uses')
-  const fresh = flag(args, 'new') || !r0.review || days || uses
-  const r = fresh ? await api('/relay/pair', { method: 'POST', body: { review: { days: days === true ? null : days, uses: uses === true ? null : uses } } }) : r0
+  // --days and --uses on a code that works change that code (the QR code already sent stays good).
+  const fresh = !!flag(args, 'new') || !r0.review
+  const r = fresh || days || uses ? await api('/relay/pair', { method: 'POST', body: { review: { days: !days || days === true ? null : days, uses: !uses || uses === true ? null : uses, fresh } } }) : r0
   const p = r.review
   const { default: QRCode } = await import('qrcode')
   console.log(`${fresh ? 'A new review code' : 'The review code'} for ${r.computer}:\n\n${await QRCode.toString(p.link, { type: 'terminal', small: true })}`)
@@ -347,7 +348,7 @@ async function reviewPairCmd(args) {
     console.log(`The QR code as a picture: ${file}`)
   }
   if (!r.online) console.log(`\nThe relay isn't connected right now (${r.error || 'connecting'}). Phones can pair once it is.`)
-  console.log(DIM('\nAnyone with this code can use Bridge AI on this computer, its terminals included. Keep nothing of yours on it.\nbridge-ai pair --review --new makes another (this one stops working); --stop ends it.'))
+  console.log(DIM('\nAnyone with this code can use Bridge AI on this computer, its terminals included. Keep nothing of yours on it.\nbridge-ai pair --review --days 60 makes this one last 60 days from now (up to 90); --new makes another (this one stops working); --stop ends it.'))
 }
 
 async function pairCmd(args) {
