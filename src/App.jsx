@@ -792,7 +792,7 @@ function App() {
     wide && { id: 'a:topbar', label: t("Choose what's in the top bar…"), icon: 'pin', keywords: 'pin unpin top bar status menu weather temperature clock time usage update restart setup sounds', run: () => setSettings('topbar') },
     { id: 'a:theme', label: nextTheme === 'dark' ? t('Color mode: switch to dark') : nextTheme === 'light' ? t('Color mode: switch to light') : t('Color mode: switch to system'), icon: theme === 'dark' ? 'sun' : 'moon', keywords: 'dark light mode', run: () => setTheme(nextTheme) },
     { id: 'a:ideas', label: t('Add an idea'), icon: 'bulb', keywords: 'backlog todo', run: () => { showCard('bulb'); setTimeout(() => document.querySelector('.idea-add input')?.focus(), 250) } },
-    { id: 'a:cal', label: t('Open calendar'), icon: 'calendar', keywords: 'week month year schedule meetings', run: () => showToday('calendar') },
+    conf?.calendar !== false && { id: 'a:cal', label: t('Open calendar'), icon: 'calendar', keywords: 'week month year schedule meetings', run: () => showToday('calendar') },
     conf?.mail && { id: 'a:mail', label: t('Open mail'), icon: 'mail', keywords: 'inbox email outlook needs you', run: () => showToday('mail') },
     conf?.mail && { id: 'a:triage', label: t('Triage my inbox with an agent'), icon: 'sparkle', keywords: 'mail email', run: async () => { try { const o = await api('/mail/triage', { method: 'POST' }); if (o.paneId) setTimeout(() => openAgent(o.paneId), 1200) } catch { showToday('mail') } } },
     // Mail's keys, taught here: each action with its key beside it. Mail is only where it can be read.
