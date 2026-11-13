@@ -53,7 +53,7 @@ HOSTED = "1"
 HOSTED_DOMAIN = "boldbridge.app"
 # The accounts service's public key, which every relay token is checked with (account/key.js
 # --public prints it). Empty, no computer can register or connect.
-ACCOUNTS_PUBLIC_KEY = ""
+ACCOUNTS_PUBLIC_KEY = "FqJDwoi18T2Ip2TSLiPxhoP0L56mGOOu_0Zfu4jjr_s"
 # The kill switch: "1" (or a message of your own) refuses new computers and every connection.
 HOSTED_OFF = "0"
 # Each computer's limits. These are the defaults; HOSTED.md says why.
