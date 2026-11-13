@@ -2,6 +2,24 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.18.0
+
+Add a computer leads the phone's devices menu, and Windows and Linux no longer show a calendar they can't read. A new install is counted the day it happens. Fixes: updating on a Mac opens the new version every time, and the document editor, sheets, Word files and Markdown are on their newest versions.
+
+<!-- rollout: 10 -->
+
+### What's new
+
+- **Add a computer on the phone**: pairing the phone with another computer is the first thing under On this phone in the devices menu, and the main button of Your Computers in Settings › Devices.
+- **No calendar where it can't work**: on Windows, Linux and a server, there's no Calendar tab, Schedule card or Open calendar in the palette, on the computer and on a phone showing it, as with Mail. The calendar reads macOS Calendar.
+- **A new install is counted the day it happens**, with usage stats on: once, two minutes after Bridge AI first runs on a computer, a report with the day it was installed, its version, channel, system, chip and how it was installed, and no ID. A copy stays in `telemetry/sent/first.json`. It isn't sent with usage stats off or `DO_NOT_TRACK` set.
+- **A computer for others to try** (for developers): on a Bridge AI started with `BRIDGE_REVIEW_PAIRING=1` (`docker-compose.review.yml`), `bridge-ai pair --review` makes a pairing code that lasts 14 days (up to 90 with `--days`) and pairs up to 25 phones, kept through restarts. Pair a device's code is as it was: one phone, within 15 minutes.
+
+### Fixes
+
+- **Updating on a Mac opens the new version every time**: the installer closed the running app and waited a second before opening the new one; opened while the old copy was still quitting, nothing started. It now waits until the old copy has quit.
+- **The libraries Bridge AI is built on are up to date**: the document editor (Tiptap 3.32.1), sheets (Univer 1.3.1), Word files (docx 9.15.0) and Markdown (marked 18.1.2), with no known issues.
+
 ## 3.17.1
 
 Your own tab groups, pinned tabs and Rename in a tab's menu. In a room that's on a call, the people beside you are told apart by voice. In Beta Features: AI Assist answers questions asked in a meeting, and on a Mac the call's video shows who's talking.
