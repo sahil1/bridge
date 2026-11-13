@@ -300,6 +300,11 @@ html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box
 .fc-tip-text { grid-column: 1; font-size: 12.5px; line-height: 1.4; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .fc-tip-acts { grid-column: 2; grid-row: 1 / span 2; display: inline-flex; align-self: start; margin-top: -3px; }
 .fc-tip .fc-x { width: 24px; height: 24px; }
+/* An answer: its question above it on one line, and where it's from below. */
+.fc-tip-q, .fc-tip-from { grid-column: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; line-height: 1.35; color: var(--ink-2); }
+.fc-tip-q { font-style: italic; }
+.fc-tip-from { color: var(--ink-3); }
+.fc-tip-from.fail { color: var(--critical); }
 .fc-tip .fc-x:hover { background: color-mix(in srgb, var(--ai) 12%, transparent); }
 
 /* A call that ended, or one with no sound: what happened, and what to do. */
@@ -620,6 +625,17 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .mt-tip-text small { font-size: 11.5px; line-height: 1.35; }
 .mt-tip .mt-t { padding-top: 2px; }
 .mt-tip-acts { display: inline-flex; gap: 2px; }
+/* An answer to a question raised (Answers in AI Assist): the question as asked, the answer, and
+   where it's from, the model's own knowledge set apart from yours. */
+.mt-tip.k-answer .mt-tip-kind { color: var(--ai); }
+.mt-ans-q { color: var(--ink-2); font-size: 12.5px; line-height: 1.4; }
+.mt-ans-from { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; margin-top: 2px; }
+.mt-ans-web { display: contents; }
+.mt-ans-from .chip { height: 22px; }
+.mt-ans-src { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-2); }
+.mt-ans-src.k-general { font-style: italic; }
+.mt-ans-web-state .aa-spin { display: inline-block; width: 10px; height: 10px; margin: 0 5px 0 0; vertical-align: -1px; }
+.mt-ans-web-state .link-btn { font-size: inherit; }
 .mt-tip-acts .ghost-btn { height: 22px; padding: 0 6px; }
 .mt-assist-wand, .mt-ask-wand, .mt-tool.lead > .icon { flex: none; color: var(--ai); }
 

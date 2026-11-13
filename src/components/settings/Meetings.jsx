@@ -15,7 +15,8 @@ import '../meetings/meetings.css'
 // a key for), the language, names and terms, the model that writes the notes and what it does by
 // itself (the summary, cleaning up, naming who spoke, preparing: on unless turned off, and what each
 // reads goes to that model, so which and where it runs is said there), AI Assist's live board (a
-// beta feature: on for every meeting, and what it sends where), calls and their sound (and, in
+// beta feature: on for every meeting, and what it sends where), Answers in AI Assist (a beta
+// feature: what it answers from, and what goes where, the web too), calls and their sound (and, in
 // the desktop app, the floating card's reminder before a meeting), and
 // saving them as Markdown. Under Advanced: the other speech services, suggesting what to ask, who
 // spoke, the key that mentions a meeting in a message, the floating card, and where and how notes
@@ -148,6 +149,7 @@ function RoomVoices({ v, m, set, refresh }) {
 // Settings › Model Providers at its speech services, where their keys go; Settings › Voice.
 const openSpeechKeys = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers-speech' } }))
 const openVoice = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } }))
+const openProviders = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))
 
 export default function Meetings({ onOpenAgent }) {
   const { s, save, note } = useSettings()
@@ -160,6 +162,9 @@ export default function Meetings({ onOpenAgent }) {
   const calendar = usePoll('/config', 10 * 60 * 1000).data?.calendar === true
   const home = useTrial('home') // Home, a beta feature: named only when it's there
   const liveBoard = useTrial('meeting-board') // AI Assist's live board, a beta feature
+  const answers = useTrial('assist-answers') // Answers in AI Assist, a beta feature
+  const [web, setWeb] = useState(null) // the route that looks things up on the web (consult.js: Perplexity), once asked
+  useEffect(() => { if (answers) api('/consult').then((l) => setWeb((Array.isArray(l) ? l : []).find((x) => x.id === 'perplexity') || { available: false }), () => setWeb({ available: false })) }, [answers])
   useEffect(() => { api('/chat/models').then((r) => { setModels(r.models || []); setAuto(r.automatic || null) }).catch(() => setModels([])) }, [])
   const m = s?.effective?.meetings || {}
   useEffect(() => { if (s) { setVocab(m.vocabulary || ''); setInstr(m.instructions || '') } }, [s]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -293,6 +298,20 @@ export default function Meetings({ onOpenAgent }) {
           <p className="muted small" data-board-where>{!models ? ' ' : !notes ? t('No model to keep it with yet: sign in to an agent, or add one in Settings › Model Providers.')
             : notes.via === 'local' ? t("While a meeting records, about once a minute, what's been said since and what's on the board go to {model}, on this computer: they stay here.", { model: notes.label })
               : t("While a meeting records, about once a minute, what's been said since and what's on the board go to {model} ({provider}). Nothing else is sent.", { model: notes.label, provider: notes.provider })}</p>
+        </section>
+      )}
+
+      {/* Answers in AI Assist, a beta feature: what it does, and what goes where, the web too. */}
+      {answers && (
+        <section className="st-sec" data-setting="assist-answers">
+          <h4 className="st-wand"><Icon name="wand" size={13} /> {t('Answers in AI Assist')}</h4>
+          <p className="muted small">{t('While a meeting records with AI Assist on, a question raised that has a general or factual answer is answered on a card: from your past meetings, notes, files and meeting memory first, else from what the model knows, which may be out of date.')}</p>
+          <p className="muted small" data-answers-model>{!models ? ' ' : !notes ? t('No model to answer with yet: sign in to an agent, or add one in Settings › Model Providers.')
+            : notes.via === 'local' ? t('The questions, and the past meetings that may answer them, go to {model}, on this computer: they stay here.', { model: notes.label })
+              : t('The questions, and the past meetings that may answer them, go to {model} ({provider}) with what AI Assist reads already.', { model: notes.label, provider: notes.provider })}</p>
+          <p className="muted small" data-answers-web>{!web ? ' ' : web.available
+            ? t('A question that needs current facts is looked up on the web with your Perplexity key. Only the question goes to Perplexity, never the transcript, your notes or files.')
+            : <>{t('To look up questions that need current facts on the web, add a Perplexity key. Only the question would go to Perplexity, never the transcript, your notes or files.')} <button type="button" className="link-btn" onClick={openProviders}>{t('Open Model Providers')}</button></>}</p>
         </section>
       )}
 
