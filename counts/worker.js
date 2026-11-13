@@ -55,6 +55,10 @@ export const TABLES = [
   // A day's reports: installs that ran each version that day, by system and whether they crashed,
   // and the updates that day, from which version.
   'CREATE TABLE IF NOT EXISTS daily (day TEXT NOT NULL, app TEXT NOT NULL, os TEXT NOT NULL, install TEXT NOT NULL, crashed INTEGER NOT NULL, starts TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, app, os, install, crashed, starts))',
+  // Each day's installs by chip, apart from the rest of the day's report (as dims is from a week's),
+  // and new installs by the day they were installed (a first report, /v1/first).
+  'CREATE TABLE IF NOT EXISTS daily_chips (day TEXT NOT NULL, os TEXT NOT NULL, arch TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, os, arch))',
+  'CREATE TABLE IF NOT EXISTS firsts (day TEXT NOT NULL, app TEXT NOT NULL, os TEXT NOT NULL, arch TEXT NOT NULL, install TEXT NOT NULL, channel TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, app, os, arch, install, channel))',
   'CREATE TABLE IF NOT EXISTS daily_updates (day TEXT NOT NULL, app TEXT NOT NULL, from_app TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, app, from_app))',
   // What the admin view can change without a deploy: countsOff, crashesOff, crashesPerDay, crashDays.
   'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
@@ -192,7 +196,7 @@ export function checkDay(r, now = new Date()) {
   if (r.day > new Date(+now + DAY).toISOString().slice(0, 10) || r.day < new Date(+now - 15 * DAY).toISOString().slice(0, 10)) return { error: 'Not a recent day' }
   return {
     day: r.day, nonce: r.nonce, app: versionOf(r.app), from: r.from == null ? null : versionOf(r.from),
-    os: ONE_OF.os.includes(r.os) ? r.os : 'other', install: ONE_OF.install.includes(r.install) ? r.install : 'other',
+    os: ONE_OF.os.includes(r.os) ? r.os : 'other', arch: ONE_OF.arch.includes(r.arch) ? r.arch : 'other', install: ONE_OF.install.includes(r.install) ? r.install : 'other',
     crashed: r.crashed === true ? 1 : 0, starts: BUCKETS.has(r.starts) ? r.starts : 'other', channel: channelOf(r),
   }
 }
@@ -213,9 +217,35 @@ async function takeDay(req, env) {
   await db.batch([
     db.prepare('INSERT INTO daily (day, app, os, install, crashed, starts, n) VALUES (?, ?, ?, ?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(r.day, r.app, r.os, r.install, r.crashed, r.starts),
     ...(r.from && r.from !== r.app ? [db.prepare('INSERT INTO daily_updates (day, app, from_app, n) VALUES (?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(r.day, r.app, r.from)] : []),
+    db.prepare('INSERT INTO daily_chips (day, os, arch, n) VALUES (?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(r.day, r.os, r.arch),
     db.prepare('INSERT INTO daily_channels (day, app, channel, tester, rollout, crashed, n) VALUES (?, ?, ?, ?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1')
       .bind(r.day, r.app, r.channel.channel, r.channel.tester, r.channel.rollout, r.crashed),
   ])
+  return json({ ok: true })
+}
+
+// ---------- A first report ----------
+// A new install, by the day it was installed: checked as a day's is, kept as a total.
+export function checkFirst(r, now = new Date()) {
+  const d = checkDay(r, now)
+  if (d.error) return d
+  return { day: d.day, nonce: d.nonce, app: d.app, os: d.os, arch: d.arch, install: d.install, channel: d.channel.channel }
+}
+async function takeFirst(req, env) {
+  const stop = await off(env)
+  if (stop) return json({ ok: false, stop: true, why: stop })
+  if (!/^application\/json\b/i.test(req.headers.get('content-type') || '')) return json({ ok: false, error: 'Send JSON' }, 415)
+  const text = await req.text()
+  if (text.length > 4096) return json({ ok: false, error: 'Too big' }, 413)
+  let body
+  try { body = JSON.parse(text) } catch { return json({ ok: false, error: 'Not JSON' }, 400) }
+  const r = checkFirst(body)
+  if (r.error) return json({ ok: false, error: r.error }, 400)
+  const db = env.DB
+  await tables(db)
+  const first = await db.prepare('INSERT OR IGNORE INTO seen (nonce, day) VALUES (?, ?)').bind(r.nonce, new Date().toISOString().slice(0, 10)).run()
+  if (!first.meta?.changes) return json({ ok: true, duplicate: true })
+  await db.prepare('INSERT INTO firsts (day, app, os, arch, install, channel, n) VALUES (?, ?, ?, ?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(r.day, r.app, r.os, r.arch, r.install, r.channel).run()
   return json({ ok: true })
 }
 
@@ -298,6 +328,7 @@ export default {
       if (req.method !== 'POST') return json({ ok: false, error: 'POST a report' }, 405)
       return take(req, env)
     }
+    if (pathname === '/v1/first') return req.method === 'POST' ? takeFirst(req, env) : json({ ok: false, error: 'POST a report' }, 405)
     if (pathname === '/v1/day') return req.method === 'POST' ? takeDay(req, env) : json({ ok: false, error: 'POST a report' }, 405)
     if (pathname === '/' && (req.method === 'GET' || req.method === 'HEAD')) return away(PRIVACY.counts)
     return new Response('Not found\n', { status: 404 })
