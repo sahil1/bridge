@@ -79,6 +79,7 @@ const SUITES = [
   { name: 'mail-assist', build: null, covers: [/^server\/(mail|mailparse|mailassist|freetimes|calendar|usagelog|openin)\.js$/, /^test\/stand-ins\/(model|mailbox)\.mjs$/] },
   { name: 'updates', build: 'dist', browser: true, covers: [/^server\/(updates|machine|earlyaccess)\.js$/, /^install\.sh$/, /^scripts\/(release|rollout|early-access-code)\.js$/, /^shared\/(version|rollout)\.js$/, /^src\/earlyLink\.js$/, /^desktop\/package\.json$/, /^src\/components\/(UpdateChip|TopNotes)\.jsx$/, /^src\/components\/settings\/About\.jsx$/, /^shared\/autoupdate\.js$/, /^src\/busy\.js$/, /^desktop\/(main|preload)\.js$/, /^test\/stand-ins\/installer\.cjs$/] },
   { name: 'screen-watch', build: null, covers: [/^src\/components\/meetings\/(changes|screen)\.js$/] },
+  { name: 'review-pairing', build: null, covers: [/^server\/relay\.js$/, /^scripts\/cli\.js$/, /^relay\//, /^test\/stand-ins\/relay\.mjs$/] },
   { name: 'devices', build: null, covers: [/^server\/(machines|relay|index)\.js$/, /^relay\//, /^test\/stand-ins\/relay\.mjs$/] },
   { name: 'setup-all', build: 'dist', browser: true, covers: [/^src\/components\/(Onboarding|SetupAll|SetupChip|PermissionFix|LiveShell)\.jsx$/, /^src\/components\/settings\/General\.jsx$/, /^src\/(setupPlan|App)\.jsx?$/, /^server\/(index|speech|voice|fixes|nodejs|gitready)\.js$/, /^scripts\/setup-mac\.sh$/, /^test\/stand-ins\/(installer|xcode-select)\.cjs$/] },
   { name: 'setup-mac', build: null, covers: [/^scripts\/setup-mac\.sh$/, /^test\/stand-ins\/xcode-select\.cjs$/] },

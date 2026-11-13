@@ -2688,7 +2688,8 @@ app.post('/api/home-pins', trialOff('home', 'Home'), wrap((req) => homeList.pin(
 app.post('/api/home-layout', trialOff('home', 'Home'), wrap((req) => homeList.layout(req.body?.for, { order: req.body?.order, hidden: req.body?.hidden, reset: req.body?.reset === true })))
 app.post('/api/relay/deploy', wrap((req) => { onComputer(req); return relay.deploy({ method: req.body?.method, token: req.body?.token, account: req.body?.account }) }))
 app.post('/api/relay/update', wrap((req) => { onComputer(req); return relay.update() }))
-app.post('/api/relay/pair', wrap((req) => { onComputer(req); return req.body?.stop ? relay.stopPairing() : relay.pair() }))
+// review: the code for a computer set up for others to try (bridge-ai pair --review; relay.js).
+app.post('/api/relay/pair', wrap((req) => { onComputer(req); const rv = req.body?.review; return rv ? (rv.stop ? relay.stopReview() : relay.reviewPair(rv)) : req.body?.stop ? relay.stopPairing() : relay.pair() }))
 app.post('/api/relay/awake', wrap((req) => { onComputer(req); return relay.setAwake(!!req.body?.on) }))
 app.post('/api/relay/forget', wrap((req) => { onComputer(req); return relay.forget() }))
 // A phone can also remove itself (when it forgets this computer).

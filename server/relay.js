@@ -55,6 +55,14 @@ const OP = { DATA: 1, OPEN: 2, CLOSE: 3, OK: 4 }
 const HELLO_SECONDS = 15
 const PAIR_MINUTES = 15
 const PAIR_USES = 1 // a code adds one device; Add another device makes a new one
+// A code for a computer set up for other people to try (an app store's reviewers), who can't be
+// handed one that works once for 15 minutes: it lasts days and pairs several devices. Only where
+// BRIDGE_REVIEW_PAIRING=1 says this computer is that (docker-compose.review.yml), and only from
+// the CLI (bridge-ai pair --review). Kept in relay.json, so it's the same code after a restart.
+const REVIEW = process.env.BRIDGE_REVIEW_PAIRING === '1'
+const REVIEW_DAYS = 14
+const REVIEW_MAX_DAYS = 90 // a review can take weeks, and the next version's wants a code too
+const REVIEW_USES = 25
 const REMOVED_DAYS = 90 // how long a removed device's key is kept, to tell it it was removed
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
 
@@ -85,6 +93,8 @@ let busy = null // what's being done right now ('signing in', 'deploying', …)
 let loginUrl = null
 let relayBuild = null
 let pairing = null // { id, secret, code, expires, uses, tries, paired: { name, at } once a device has }
+// The review code, while it works: for this relay's address, not run out, not used up.
+const review = () => { const r = REVIEW && conf.review; return r && conf.url && r.link.startsWith(`${conf.url.replace(/\/$/, '')}/#`) && r.expires > Date.now() && r.uses < r.max ? r : null }
 let retry = null
 const FIRST_TRY = 500 // after the connection drops: soon, then less and less often
 let backoff = FIRST_TRY
@@ -180,6 +190,8 @@ export function status() {
     pairing: pairing && pairing.expires > Date.now() && pairing.uses < PAIR_USES ? { code: pairing.code, expires: pairing.expires, link: pairing.link, qr: pairing.qr } : null,
     // The code was used: which device it paired, for "Add another device" (its QR is gone).
     paired: pairing?.paired && pairing.paired.at > Date.now() - PAIR_MINUTES * 60000 ? pairing.paired : null,
+    // The code for people trying this computer (bridge-ai pair --review), and how many it has paired.
+    review: review() ? (({ code, link, expires, uses, max }) => ({ code, link, expires, uses, max }))(review()) : null,
     awake: conf.awake !== false,
     awakeNow: !!awakeProc,
     canAwake: CAN_AWAKE,
@@ -443,7 +455,10 @@ class Conn {
     if (!helloRoom(typeof msg?.d === 'string' && !msg.pair && devices.some((d) => d.key === msg.d))) { this.close(); return }
     // The phone's code, or a one-time code for another of your devices.
     const code = (pid) => (pairing && pairing.id === pid && pairing.expires > Date.now() && pairing.uses < PAIR_USES && pairing.tries < 5 ? pairing : null)
-      || invites.find((p) => p.id === pid && p.expires > Date.now() && p.uses < 1 && p.tries < 5) || null
+      || invites.find((p) => p.id === pid && p.expires > Date.now() && p.uses < 1 && p.tries < 5)
+      // The review code: no count of wrong tries, which anyone who saw its first four letters (the
+      // relay) could use up to stop it; the other sixteen are too many to guess.
+      || (review()?.id === pid ? review() : null) || null
     // With a code, it's checked as a new pairing even when its key is known here, so the answer
     // proves this computer by the code: what puts it right for a device that has an old key for
     // this one (after this one was set up again).
@@ -476,13 +491,15 @@ class Conn {
     const told = { name: typeof msg.name === 'string' ? msg.name.trim().slice(0, 60) : null, kind: msg.kind, relay: msg.relay }
     let id = r.device?.id
     if (r.newDevice) {
-      const used = [pairing, ...invites].find((p) => p?.id === r.newDevice.pairId)
+      const used = [pairing, review(), ...invites].find((p) => p?.id === r.newDevice.pairId)
       if (used) used.uses++
+      // The review code's count is kept, with the device it paired (prove) or now if it never shows its key.
+      if (used && used === conf.review) save()
       // Added once it has shown it holds its key (prove), as what it says sealed. Paired again: the
       // same device, not a second copy of it.
       const again = devices.find((d) => d.key === r.newDevice.key)
       id = again?.id || randomBytes(6).toString('base64url')
-      this.pending = { id, key: r.newDevice.key, told, by: used === pairing ? 'code' : 'invite', code: used === pairing ? used : null }
+      this.pending = { id, key: r.newDevice.key, told, by: used === pairing || used === conf.review ? 'code' : 'invite', code: used === pairing ? used : null }
     }
     this.device = devices.find((d) => d.id === id) || { id, name: told.name || 'A new device', kind: told.kind === 'computer' ? 'computer' : undefined }
     // ping: this computer answers PING (a phone checks it's still there with it).
@@ -635,6 +652,31 @@ export async function pair() {
 }
 
 export function stopPairing() { pairing = null; return status() }
+
+// The review code (above). With one that works already, days and uses change how long it lasts
+// (from now) and how many it pairs, and it stays the same code, so a QR code already sent keeps
+// working; fresh, or none that works, makes another and the one before stops. The devices it pairs
+// are phones not kept yet, like Pair a device's.
+export async function reviewPair({ days, uses, fresh } = {}) {
+  if (!REVIEW) throw new Error('A code that lasts for days is only for a computer set up for others to try. Start Bridge AI with BRIDGE_REVIEW_PAIRING=1 to make it one.')
+  if (!conf.url) throw new Error('Set up the relay first')
+  await key()
+  const within = (n, d, max) => Math.min(max, Math.max(1, Math.round(Number(n)) || d))
+  const now = review()
+  if (now && !fresh) {
+    if (days != null) now.expires = Date.now() + within(days, REVIEW_DAYS, REVIEW_MAX_DAYS) * 86400000
+    if (uses != null) now.max = within(uses, REVIEW_USES, 100)
+    save()
+    return status()
+  }
+  const code = newPairCode()
+  const { id, secret } = splitCode(code)
+  const link = `${conf.url.replace(/\/$/, '')}/#pair=${formatCode(code)}&name=${encodeURIComponent(computerName())}`
+  conf.review = { id, secret, code: formatCode(code), link, expires: Date.now() + within(days, REVIEW_DAYS, REVIEW_MAX_DAYS) * 86400000, uses: 0, max: within(uses, REVIEW_USES, 100) }
+  save()
+  return status()
+}
+export function stopReview() { delete conf.review; save(); return status() }
 
 // ---------- your other devices ----------
 // A relay address as machines.js compares them: https (or a test relay on this computer), no path.

@@ -67,8 +67,11 @@ function useNow(ms = 30000) {
   return now
 }
 
+// The calendar reads macOS Calendar: where the computer shown can't (Windows, Linux, a server),
+// there's no Calendar tab or Schedule card at all, rather than one that says it can't work.
+export const useCalendarHere = () => usePoll('/config', 10 * 60 * 1000).data?.calendar !== false
 export function useCalendar() {
-  return usePoll('/calendar', 3 * 60 * 1000)
+  return usePoll(useCalendarHere() ? '/calendar' : null, 3 * 60 * 1000)
 }
 
 // A meeting you declined isn't one of yours to go to: not next, not on now.
@@ -124,6 +127,9 @@ function EventRow({ e, now, past }) {
 }
 
 export function Agenda() {
+  return useCalendarHere() ? <AgendaCard /> : null
+}
+function AgendaCard() {
   const { data, error, errorCode, refresh } = useCalendar()
   const now = useNow()
   const [showPast, setShowPast] = useState(false)

@@ -371,7 +371,7 @@ function Computers() {
         ))}
       </ul>
       <p className="muted small">{t('Bridge AI on another computer? On it, open Settings › Devices and choose Pair a device, then add it here.')}</p>
-      <div><button type="button" className="ghost-btn" onClick={() => relayComputers.add()}><Icon name="plus" size={12} /> {t('Add a computer')}</button></div>
+      <div><button type="button" className="btn small primary" onClick={() => relayComputers.add()}><Icon name="plus" size={12} /> {t('Add a computer')}</button></div>
     </>
   )
 }

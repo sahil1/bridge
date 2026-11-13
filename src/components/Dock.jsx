@@ -3,7 +3,7 @@ import Icon from './Icon.jsx'
 import { PaneHeader, store, useShared } from './layout.jsx'
 import { Brief, Quota, Weather } from './Trackers.jsx'
 import { Routines, Insights, Ideas } from './Routines.jsx'
-import { Agenda } from './Agenda.jsx'
+import { Agenda, useCalendarHere } from './Agenda.jsx'
 import { Inbox } from './Inbox.jsx'
 import { CalendarView, UsageStats } from '../lazy.jsx'
 import MailView, { useMail } from './MailView.jsx'
@@ -37,7 +37,9 @@ export { openToday }
 // Mail reads Apple Mail: where the computer shown can't (Windows, Linux, a server), there's no Mail
 // tab or Inbox card at all, rather than a tab that says it can't work.
 export const useMailHere = () => usePoll('/config', 10 * 60 * 1000).data?.mail !== false
-const shownTabs = (here) => (here ? TABS : TABS.filter(([id]) => id !== 'mail'))
+// The same for the calendar (useCalendarHere). here: mail; cal: the calendar.
+const shownTabs = (here, cal) => TABS.filter(([id]) => (here || id !== 'mail') && (cal || id !== 'calendar'))
+const shownCards = (here, cal) => CARDS.filter(([id]) => (here || id !== 'mail') && (cal || id !== 'calendar'))
 
 export function showCard(id) {
   store.set(`cc-card-${id}`, true)
@@ -47,12 +49,13 @@ export function showCard(id) {
 
 export function TodayTabs({ tab, setTab, compact }) {
   const here = useMailHere()
+  const cal = useCalendarHere()
   const mail = useMail()
   // Unread, a reminder that's come back, or mail you sent that nobody answered by when you said.
   const needs = mail.data?.available ? mail.data.messages.filter((m) => m.bucket === 'needs' && (!m.read || m.reminded)).length + (mail.data.nudges || []).filter((n) => n.due).length : 0
   return (
     <nav className={`today-tabs ${compact ? 'compact' : ''}`} role="tablist" aria-label={t('Today sections')}>
-      {shownTabs(here).map(([id, icon, label]) => (
+      {shownTabs(here, cal).map(([id, icon, label]) => (
         <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>
           <Icon name={icon} size={13} /> <span>{id === 'markets' && !compact ? t('Markets & News') : t(label)}</span>
           {id === 'mail' && needs > 0 && <span className="tab-badge">{needs}</span>}
@@ -68,6 +71,7 @@ export function TodayBody({ wide, phone = false, onOpenAgent, tab, setTab, stack
   const [mailId, setMailId] = useState(null)
   const [focus, setFocus] = useState(null) // { date, event, at }: a day in the calendar, and an event on it to open
   const here = useMailHere()
+  const cal = useCalendarHere()
   // Where openToday() sent it: at once while it's open, and as it opens for one said before then.
   useEffect(() => {
     const on = () => {
@@ -81,7 +85,7 @@ export function TodayBody({ wide, phone = false, onOpenAgent, tab, setTab, stack
     window.addEventListener('cc-today', on)
     return () => window.removeEventListener('cc-today', on)
   }, [setTab])
-  if (tab === 'calendar') return <CalendarView onOpenAgent={onOpenAgent} focus={focus} />
+  if (tab === 'calendar' && cal) return <CalendarView onOpenAgent={onOpenAgent} focus={focus} />
   if (tab === 'mail' && here) return <MailView onOpenAgent={onOpenAgent} openId={mailId} />
   if (tab === 'markets') return <MarketsView />
   if (tab === 'usage') return <UsageStats phone={phone} />
@@ -102,6 +106,7 @@ export function TodayBody({ wide, phone = false, onOpenAgent, tab, setTab, stack
 export default function Dock({ minimized, simple, maximized, onMinimize, onMaximize, onOpenAgent }) {
   const [tab, setTab] = useShared('cc-today-tab', 'overview')
   const here = useMailHere()
+  const cal = useCalendarHere()
   // The simple layout: one button, and the panel opens on its overview.
   if (minimized && simple) {
     return (
@@ -120,11 +125,11 @@ export default function Dock({ minimized, simple, maximized, onMinimize, onMaxim
     return (
       <aside className="dock is-min" aria-label={t('Today')}>
         <button className="win-btn" onClick={onMinimize} title={t('Show Today panel')} aria-label={t('Show Today panel')}><Icon name="panel-right" size={16} /></button>
-        {shownTabs(here).slice(1).map(([id, icon, label]) => (
+        {shownTabs(here, cal).slice(1).map(([id, icon, label]) => (
           <button key={id} className="strip-btn" onClick={() => go(id)} title={t(label)} aria-label={t(label)}><Icon name={icon} size={17} /></button>
         ))}
         <span className="strip-sep" />
-        {CARDS.filter(([id]) => here || id !== 'mail').map(([id, label]) => (
+        {shownCards(here, cal).map(([id, label]) => (
           <button key={id} className="strip-btn" onClick={() => go('overview', id)} title={t(label)} aria-label={t(label)}><Icon name={id} size={17} /></button>
         ))}
       </aside>

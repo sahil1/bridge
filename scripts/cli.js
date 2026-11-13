@@ -15,6 +15,8 @@
 //                                   it needs your Bold Bridge account, signed in in Settings › Account)
 //   bridge-ai relay [update|forget] update the relay, or stop using it
 //   bridge-ai pair                  pair a phone: QR code, link and code
+//   bridge-ai pair --review         a code that lasts days and pairs several phones, for a computer
+//                                   set up for others to try (BRIDGE_REVIEW_PAIRING=1; server/relay.js)
 //   bridge-ai mcp                   Bridge AI as an MCP server on stdio, for another app (scripts/mcp.js)
 //   bridge-ai phones [remove <name>]  paired phones, or remove one
 import { spawn } from 'node:child_process'
@@ -204,6 +206,7 @@ async function statusCmd() {
   if (r) {
     row('Relay', relayLine(r))
     if (r.configured) row('Phones', r.devices.length ? r.devices.map(phoneLine).join('\n            ') : 'none paired yet. Pair one with: bridge-ai pair')
+    if (r.review) row('Review code', `${r.review.code}, until ${new Date(r.review.expires).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}, ${r.review.uses} of ${r.review.max} phones paired (bridge-ai pair --review)`)
   }
 }
 
@@ -318,7 +321,38 @@ async function relayCmd(args) {
   if (r.configured) console.log(`Phones: ${r.devices.length ? r.devices.map((d) => d.name).join(', ') : 'none paired yet (bridge-ai pair)'}`)
 }
 
+// The code for people trying this computer (an app store's reviewers): its link, and its QR code
+// as a picture to send them.
+async function reviewPairCmd(args) {
+  if (flag(args, 'stop')) {
+    await api('/relay/pair', { method: 'POST', body: { review: { stop: true } } })
+    return console.log('Stopped. The review code no longer works; the phones it paired stay until you remove them (bridge-ai phones).')
+  }
+  const r0 = await api('/relay')
+  if (!r0.configured) throw new Error('Set up the relay first: bridge-ai relay setup')
+  const days = flag(args, 'days')
+  const uses = flag(args, 'uses')
+  // --days and --uses on a code that works change that code (the QR code already sent stays good).
+  const fresh = !!flag(args, 'new') || !r0.review
+  const r = fresh || days || uses ? await api('/relay/pair', { method: 'POST', body: { review: { days: !days || days === true ? null : days, uses: !uses || uses === true ? null : uses, fresh } } }) : r0
+  const p = r.review
+  const { default: QRCode } = await import('qrcode')
+  console.log(`${fresh ? 'A new review code' : 'The review code'} for ${r.computer}:\n\n${await QRCode.toString(p.link, { type: 'terminal', small: true })}`)
+  console.log(`Link: ${p.link}`)
+  console.log(`Code: ${p.code}`)
+  console.log(`It works until ${new Date(p.expires).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}, for ${p.max - p.uses} more ${p.max - p.uses === 1 ? 'phone' : 'phones'} (${p.uses} paired so far).`)
+  const png = flag(args, 'png')
+  if (png) {
+    const file = path.resolve(png === true ? 'bridge-ai-review-qr.png' : png)
+    await QRCode.toFile(file, p.link, { type: 'png', width: 1024, margin: 4, errorCorrectionLevel: 'M' })
+    console.log(`The QR code as a picture: ${file}`)
+  }
+  if (!r.online) console.log(`\nThe relay isn't connected right now (${r.error || 'connecting'}). Phones can pair once it is.`)
+  console.log(DIM('\nAnyone with this code can use Bridge AI on this computer, its terminals included. Keep nothing of yours on it.\nbridge-ai pair --review --days 60 makes this one last 60 days from now (up to 90); --new makes another (this one stops working); --stop ends it.'))
+}
+
 async function pairCmd(args) {
+  if (flag(args, 'review')) return reviewPairCmd(args)
   if (flag(args, 'stop')) {
     await api('/relay/pair', { method: 'POST', body: { stop: true } })
     return console.log('Stopped pairing. The code no longer works.')
@@ -421,6 +455,9 @@ const run = {
                                 (sign in first: Settings › Account)` : ''}
   bridge-ai relay [update|forget]  update the relay, or stop using it
   bridge-ai pair [--stop]       pair a phone: shows a QR code, the link and the code
+  bridge-ai pair --review [--days 14] [--uses 25] [--png file] [--new] [--stop]
+                                a code that lasts, for a computer set up for others to try
+                                (it must run with BRIDGE_REVIEW_PAIRING=1)
   bridge-ai phones [remove <name>]  paired phones, or remove one`),
 }
 const fn = run[cmd]
