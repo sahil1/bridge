@@ -443,8 +443,9 @@ try {
     ok(await untilLay(p, 'meetings [Numbers] weekly* checkout* board map deploy'), 'dragged out of the group, it leaves it', await lay(p))
     await dragOnto(p, A.deploy, A.weekly, false)
     ok(await untilLay(p, 'meetings [Numbers] deploy* weekly* checkout* board map'), 'dropped just after the chip (before the group\'s first tab), a tab joins the group', await lay(p))
+    // (Back out to the end, for what follows: a drop WebKit misses on a slow computer is tried again.)
     await dragOnto(p, A.deploy, 'view:map', true)
-    await untilLay(p, 'meetings [Numbers] weekly* checkout* board map deploy')
+    for (let i = 0; i < 3 && !(await untilLay(p, 'meetings [Numbers] weekly* checkout* board map deploy', 2000)); i++) await dragOnto(p, A.deploy, 'view:map', true)
     // Ctrl+Shift+→ at the group's edge: out of it first, where it is; Ctrl+Shift+← beside it: back in.
     await p.locator(`.ws-tab[data-pane="${A.checkout}"]`).focus()
     await p.keyboard.press('Control+Shift+ArrowRight')
