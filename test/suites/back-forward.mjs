@@ -75,7 +75,10 @@ try {
   const tabs = (p) => p.evaluate(() => [...document.querySelectorAll('.ws-tabs-scroll > .ws-tab')].map((x) => x.dataset.pane))
 
   // Site's Chat → Terminal → Meetings (⌘K) → its Memory → the meeting → Files → Projects → Calendar.
-  const PLACES = ['Site › Chat', 'Site › Terminal', 'Meetings › Meetings', 'Meetings › Memory', 'the meeting Quarterly plan', 'Files › Home', 'Files › Projects', 'Calendar']
+  // The calendar reads macOS Calendar: off a Mac there's none, and the last place is Whiteboards.
+  const LAST = IS_MAC ? 'Calendar' : 'whiteboards'
+  const LAST_NAME = IS_MAC ? 'Calendar' : 'Whiteboards'
+  const PLACES = ['Site › Chat', 'Site › Terminal', 'Meetings › Meetings', 'Meetings › Memory', 'the meeting Quarterly plan', 'Files › Home', 'Files › Projects', LAST]
   const walk = async (p) => {
     const went = [await here(p)]
     await p.locator('.console .seg [role="tab"]', { hasText: 'Terminal' }).click()
@@ -94,8 +97,9 @@ try {
     await p.locator('.fx-row[data-name="Projects"]').dblclick()
     await p.locator('.fx-row[data-name="site"]').waitFor({ timeout: 10000 })
     await at(p, 'Files › Projects'); await settle(); went.push(await here(p))
-    await send(p, 'bridge-open-event', { date: today })
-    await at(p, 'Calendar'); await settle(); went.push(await here(p))
+    if (IS_MAC) await send(p, 'bridge-open-event', { date: today })
+    else await send(p, 'bridge-open-agent', { paneId: 'view:whiteboards' })
+    await at(p, LAST); await settle(); went.push(await here(p))
     return went
   }
 
@@ -105,7 +109,7 @@ try {
     await btn(p, 'back').waitFor({ timeout: 10000 })
     ok(await greyed(p, 'back') && await greyed(p, 'forward'), 'a window just opened: ‹ and › at the start of the top bar, both greyed, with nowhere to go yet')
     const went = await walk(p)
-    ok(JSON.stringify(went) === JSON.stringify(PLACES), 'through eight places: Site\'s Chat and Terminal, Meetings found with ⌘K and its Memory, a meeting, Files and a folder in it, Calendar', went)
+    ok(JSON.stringify(went) === JSON.stringify(PLACES), `through eight places: Site's Chat and Terminal, Meetings found with ⌘K and its Memory, a meeting, Files and a folder in it, ${LAST_NAME}`, went)
     ok(!(await greyed(p, 'back')) && await greyed(p, 'forward'), 'at the last: ‹ ready, › greyed')
     const backs = []
     for (let i = PLACES.length - 2; i >= 0; i--) {
@@ -148,7 +152,7 @@ try {
     await sleep(700)
     await p.mouse.up()
     const ahead = await menu.locator('[role="menuitem"]').allInnerTexts().catch(() => [])
-    ok(ahead.length === 4 && /Quarterly plan/.test(ahead[0]) && /Calendar/.test(ahead[3]) && (await here(p)) === 'Meetings › Memory', 'holding › lists the places after, without going on', ahead)
+    ok(ahead.length === 4 && /Quarterly plan/.test(ahead[0]) && new RegExp(LAST_NAME).test(ahead[3]) && (await here(p)) === 'Meetings › Memory', 'holding › lists the places after, without going on', ahead)
     await p.keyboard.press('Escape')
     ok(!!(await until(async () => !(await menu.count()), 2000)), 'Esc closes the list')
     ok(errors.length === 0, 'the buttons: no page errors', errors)
@@ -167,7 +171,7 @@ try {
     await p.keyboard.press(BACK)
     ok(!!(await at(p, 'Settings › General')), `${BACK}: back to Settings › General`, await here(p))
     await p.keyboard.press(BACK)
-    ok(!!(await at(p, 'Calendar')), `${BACK} again: Settings closes, back at Calendar`, await here(p))
+    ok(!!(await at(p, LAST)), `${BACK} again: Settings closes, back at ${LAST_NAME}`, await here(p))
     await p.keyboard.press(FORWARD)
     ok(!!(await at(p, 'Settings › General')), `${FORWARD}: Settings opens again, at General`, await here(p))
     await p.keyboard.press(FORWARD)
@@ -175,13 +179,13 @@ try {
     await p.keyboard.press(BACK)
     await at(p, 'Settings › General')
     await p.keyboard.press(BACK)
-    await at(p, 'Calendar')
+    await at(p, LAST)
     // Not while typing: ⌘K's box.
     await p.keyboard.press('ControlOrMeta+K')
     await p.locator('.palette input').fill('agent')
     await p.locator('.palette input').press(BACK)
     await sleep(500)
-    ok((await here(p)) === 'Calendar' && (await p.locator('.palette').count()) === 1, `${BACK} while typing in a box does nothing but what it does there`, await here(p))
+    ok((await here(p)) === LAST && (await p.locator('.palette').count()) === 1, `${BACK} while typing in a box does nothing but what it does there`, await here(p))
     await p.keyboard.press('Escape')
     await sleep(200)
 

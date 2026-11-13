@@ -72,7 +72,7 @@ const PATHS = {
   'a:topbar': { none: 'What\'s pinned to the desktop\'s top bar; a phone\'s bar keeps to what needs you now, the rest in Today and a line under it' },
   'a:theme': { phone: 'Search › Color mode' },
   'a:ideas': { phone: 'Search › Add an idea' },
-  'a:cal': { phone: 'Today › Calendar' },
+  'a:cal': { phone: 'Today › Calendar', mac: true }, // the calendar reads macOS Calendar
   'a:mail': { phone: 'Today › Mail', mac: true },
   'a:triage': { phone: 'Search › Triage my inbox', mac: true },
   'a:mail-done': { phone: 'Today › Mail', mac: true },
@@ -357,7 +357,7 @@ try {
     const tabs = await tabNames()
     ok(tabs.join('|') === HOME_TABS.join('|'), 'Home on: Home is the first tab, Today is not a tab', tabs)
     ok(!!(await until(() => ph.p.locator('.hm').isVisible(), 10000)), 'and the phone opens at Home')
-    const today = [['More › Today', '.m-more-view .m-today'], ['More › Today › Calendar', '.m-more-view .m-today'], ...(IS_MAC ? [['More › Today › Mail', '.m-more-view .m-today']] : []),
+    const today = [['More › Today', '.m-more-view .m-today'], ...(IS_MAC ? [['More › Today › Calendar', '.m-more-view .m-today'], ['More › Today › Mail', '.m-more-view .m-today']] : []),
       ['More › Usage', '.m-more-view > .ustats']].map(([phone, shows]) => ({ phone, shows }))
     const routes = [...new Map([...Object.values(PATHS).filter((x) => x.trial === 'home'), ...today].map((x) => [`${x.phone}|${x.shows || ''}`, x])).values()]
     const bad = []

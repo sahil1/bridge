@@ -1,7 +1,7 @@
 // The calendar (Today › Calendar, server/calendar.js) and AI Assist's Prepare for this meeting
 // (server/meetprep.js), in the
 // browser named BRIDGE_TEST_BROWSER, through a stand-in for Bridge AI's calendar helper
-// (native/bridgecal; not on Windows, where the stand-in is a script it can't start). A realistic week
+// (native/bridgecal), on a Mac: elsewhere there's no calendar in the app. A realistic week
 // on four calendars (one with no colour of its own): a standup every day, meetings that overlap, a
 // two-day all-day event, one you organised, one you said maybe to, one you declined, one not answered
 // yet, the weekend's family events; today, a meeting starting in eight minutes with people you've met
@@ -30,12 +30,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, changeAnswer, IS_WIN, IS_MAC, TEST } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, changeAnswer, IS_MAC, TEST } from '../lib/harness.mjs'
 import { openStandIn } from '../stand-ins/mailbox.mjs'
 
 const { ok, skip, done } = checks('calendar')
-if (IS_WIN) {
-  skip('the calendar and its meeting prep', 'the stand-in calendar helper is a script Windows can\'t start')
+// The calendar reads macOS Calendar: off a Mac the app has none (mail-ui checks it's left out).
+if (!IS_MAC) {
+  skip('the calendar and its meeting prep', 'the calendar is a Mac\'s (macOS Calendar); elsewhere the app leaves it out')
   process.exit(done().fail ? 1 : 0)
 }
 
