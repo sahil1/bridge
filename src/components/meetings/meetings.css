@@ -574,6 +574,10 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .mt-quote { font-style: italic; }
 .mt-fromcal { color: var(--accent); }
 .mt-archived { cursor: pointer; }
+/* A summary that's out of date, and Resume recording on a phone. */
+.mt-stale { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 7px 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warning, #b7791f) 35%, var(--line-2)); background: color-mix(in srgb, var(--warning, #b7791f) 6%, var(--pane)); }
+.mt-stale svg { flex: none; color: var(--warning, #b7791f); }
+.mt-resume-row { display: flex; }
 .mt-archived svg { margin-right: 2px; }
 .mt-in svg { vertical-align: -1px; }
 .mt-places { display: flex; flex-wrap: wrap; gap: 6px; }

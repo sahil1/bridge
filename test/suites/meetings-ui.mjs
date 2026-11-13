@@ -1015,6 +1015,65 @@ process.exit(1)`)
   // (Bridge AI restarting under the card cuts off what it was asking, which WebKit reports.)
   ok(withoutCutOff(fl.errors).length === 0, 'card: no page errors', fl.errors)
   await fl.ctx.close()
+
+  // ---------- Resume recording ----------
+  // On a meeting that ended hours ago, in ⋯; on one that just ended, a button by its state too. It
+  // records again as the same meeting with its time carried on, and says why it can't while another
+  // one records.
+  { // names of its own, apart from the ones above
+  for (const x of (await api('/meetings')).meetings.filter((x) => x.status === 'recording' || x.status === 'paused')) await api(`/meetings/${x.id}/stop`, {})
+  await until(async () => !(await api('/meetings')).meetings.some((x) => x.status !== 'done'), 15000)
+  await api('/settings', { meetings: { autoSummary: false } }, 'PATCH')
+  const dirOf = (id) => path.join(kit.data, 'meetings', id)
+  const metaOf = (id) => JSON.parse(fs.readFileSync(path.join(dirOf(id), 'meeting.json'), 'utf8'))
+  const made = async (title, text, minsAgo) => {
+    const x = await api('/meetings', { title, call: false })
+    await api(`/meetings/${x.id}/stop`, {})
+    await until(async () => (await api(`/meetings/${x.id}`)).status === 'done', 10000)
+    said(x.id, [['you', 1, text]])
+    const at = Date.now() - minsAgo * 60e3
+    fs.writeFileSync(path.join(dirOf(x.id), 'meeting.json'), JSON.stringify({ ...metaOf(x.id), startedAt: new Date(at).toISOString(), endedAt: new Date(at + 300e3).toISOString(), seconds: 300 }))
+    return x.id
+  }
+  const cb = await page(b, kit.url, { store: { 'cc-rail-meetings': true, 'cc-meet-tab': 'list' }, before: noServiceWorker })
+  const cp = cb.p
+  await cp.waitForSelector('.rail-nav-row', { timeout: 15000 }).catch(() => {})
+  const openIt = async (id) => { await until(async () => { await cp.evaluate((mid) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: mid } })), id); return (await cp.locator('.mt-title').inputValue().catch(() => '')) === metaOf(id).title }, 10000, 1000) }
+  const Y = await api('/meetings', { title: 'Ended by mistake', call: false })
+  await send(Y.id, Buffer.concat([tone(0.5), tone(2, true), tone(3.5)]))
+  await api(`/meetings/${Y.id}/stop`, {})
+  await until(async () => (await api(`/meetings/${Y.id}`)).status === 'done', 15000)
+  const old = await made('Last week\'s review', 'An old one.', 6 * 60)
+  await openIt(old)
+  await cp.locator('.mt-view .win-btn[aria-label="More actions"]').click()
+  ok((await cp.locator('.mt-view .mt-resume').count()) === 0 && (await cp.locator('.menu-anchor .menu button', { hasText: 'Resume recording' }).count()) === 1, 'a meeting that ended hours ago: Resume recording is in ⋯, not in its header')
+  await cp.keyboard.press('Escape')
+  await openIt(Y.id)
+  ok(!!(await until(() => cp.locator('.mt-view .pane-head .mt-resume').first().isVisible().catch(() => false), 8000)) && /Resume recording/.test(await cp.locator('.mt-view .mt-resume').first().innerText().catch(() => '')), 'a meeting that just ended has Resume recording by its state', await cp.locator('.mt-view').innerText().catch(() => '').then((x) => x.slice(0, 300)))
+  await shot(cp, `${tag}resume-recording`)
+  // While another one records (elsewhere), it says why it can't.
+  const Z = await api('/meetings', { title: 'Standing meeting', call: false })
+  await until(async () => (await cp.evaluate(() => fetch('/api/calls').then((r) => r.json()).then((j) => j.recording?.title).catch(() => null))) === 'Standing meeting', 8000)
+  await sleep(3000) // the page's own look at what's recording
+  await cp.locator('.mt-view .mt-resume').first().click()
+  ok(!!(await until(async () => /"Standing meeting" is recording\. Stop it first\./.test(await cp.locator('.mt-msg').innerText().catch(() => '')), 8000)), 'while another meeting records, Resume recording says so and which', await cp.locator('.mt-msg').innerText().catch(() => ''))
+  await api(`/meetings/${Z.id}/stop`, {})
+  await until(async () => (await api(`/meetings/${Z.id}`)).status === 'done', 10000)
+  await sleep(3000)
+  if (which === 'chromium') {
+    await cp.locator('.mt-view .mt-resume').first().click()
+    const back = await until(async () => { const m = await api(`/meetings/${Y.id}`); return m.status === 'recording' && m }, 10000)
+    ok(!!back && back.resumedFrom === 6 && await cp.locator('.mt-recbar').isVisible().catch(() => false), 'Resume recording: the same meeting records again, with its recording bar', back && [back.status, back.resumedFrom])
+    const shownTime = (await cp.locator('.mt-recbar .mt-rectime').innerText().catch(() => '')).trim()
+    ok(/^0:(0[6-9]|[1-5]\d)$/.test(shownTime) && (await cp.locator('.mt-view .mt-resume').count()) === 0, 'its time carries on from where it stopped', shownTime)
+    await sleep(2500)
+    await cp.locator('.mt-recbar button', { hasText: 'Stop' }).click()
+    const ended = await until(async () => { const m = await api(`/meetings/${Y.id}`); return m.status === 'done' && m }, 15000)
+    ok(!!ended && ended.seconds >= 7 && (await api('/meetings')).meetings.filter((x) => x.title === 'Ended by mistake').length === 1, 'stopped again: one meeting still, longer than it was', ended && ended.seconds)
+  } else skip('Resume recording records again, its time carried on', `${which} has no fake mic`)
+  ok(withoutCutOff(cb.errors).length === 0, 'resume: no page errors', cb.errors)
+  await cb.ctx.close()
+  }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))

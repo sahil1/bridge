@@ -524,6 +524,9 @@ function WrittenFrom({ from, onView }) {
 // in view whatever else you look at: beside it on a wide screen, above it on a phone.
 // Board: AI Assist's live board, a beta feature (board.jsx), there once the server says how it is.
 const VIEWS = [['summary', 'sparkle', tx('Summary')], ['assist', 'bulb', tx('Suggestions')], ['board', 'shapes', tx('Board')], ['mine', 'edit', tx('My notes')], ['transcript', 'chat', tx('Transcript')], ['files', 'paperclip', tx('Files')]]
+// Resume recording is offered in the header for this long after a meeting ended (stopped by
+// mistake, or by itself); after, it's in ⋯.
+const RESUME_MS = 4 * 3600e3
 const here = onThisComputer
 const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 // For <input type="datetime-local">: the time where you are.
@@ -560,6 +563,7 @@ export function MeetingPage({ id, onBack }) {
   const [fix, setFix] = useState(null) // { from } while fixing a word
   const [sel, setSel] = useState(null) // { text, top, left }: words picked in the transcript
   const [dialog, setDialog] = useState(null) // 'again' | 'calendar' | 'delete' | 'folder'
+  const [micErr, setMicErr] = useState(null) // Resume recording, and macOS is blocking the mic
   const [whoAt, setWhoAt] = useState(null) // { x, y, l }: the menu for who said a line
   const [naming, setNaming] = useState(null) // { l, name }: a name typed for a line
   const [events, setEvents] = useState(null) // calendar events around when it was recorded
@@ -689,6 +693,12 @@ export function MeetingPage({ id, onBack }) {
   const reveal = () => act('reveal', () => api(`/meetings/${encodeURIComponent(id)}/reveal`, { method: 'POST' }))
   const copy = async (text, done) => { try { await navigator.clipboard.writeText(text); setMsg({ text: done }) } catch { setMsg({ error: true, text: t("Couldn't copy") }) } }
   const remove = () => setDialog('delete')
+  // Resume recording: this meeting again, from where it had got to. Why not is said (another one
+  // recording, its last words still being transcribed, no mic).
+  const resumeRec = async () => {
+    setBusy('resume'); setMsg(null); setMicErr(null)
+    try { await m.recordAgain(id); refresh() } catch (e) { if (e.code === 'mic') setMicErr(e); else setMsg({ error: true, text: e.message }) } finally { setBusy(null) }
+  }
   const archive = (on) => act('archive', async () => { await api(`/meetings/${encodeURIComponent(id)}`, { method: 'PATCH', body: { archived: on } }); setMsg({ text: on ? t("Archived. It's under Archived in the list, and left out of search.") : t('Back in the list.') }) })
   // Who said a line: a name (null: back to You or Them). The first one named offers the same name
   // for every line from the call (a call with one other person).
@@ -902,11 +912,16 @@ export function MeetingPage({ id, onBack }) {
       </button>
     </>
   )
+  // Resume recording: on a meeting that has ended.
+  const canResume = done && !!m?.recordAgain
+  const recent = Date.now() - Date.parse(data.endedAt || data.startedAt) < RESUME_MS
+  const resumeBtn = <button type="button" className="btn small mt-resume" onClick={resumeRec} disabled={busy === 'resume'} title={t('Carry on recording this meeting from where it stopped. Nothing recorded is lost, and the summary is written again when it ends.')}><Icon name="mic" size={12} /> {busy === 'resume' ? t('Starting…') : t('Resume recording')}</button>
   const head = (
     <PaneHeader icon="mic" title={<input className="mt-title" value={title ?? data.title} onChange={(e) => setTitle(e.target.value)} onBlur={saveTitle} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setTitle(null); e.currentTarget.blur() } }} aria-label={t('Meeting title')} title={t('Click to rename')} />}
       leading={onBack && <><button type="button" className="win-btn back" onClick={onBack} aria-label={t('All meetings')} title={t('All meetings')}><Icon name="chevron" size={16} className="flip" /></button><span className="pane-icon"><Icon name="mic" size={15} /></span></>}
       subtitle={phone ? null : meta}>
       <span className={`state-tag mt-state st-${state[0]}`}>{state[0] === 'rec' ? <span className="rec-dot" aria-hidden="true" /> : <StatusDot status={state[0] === 'paused' ? 'idle' : state[0]} size={7} />}{state[1]}</span>
+      {canResume && recent && !phone && resumeBtn}
       {data.archived && <button type="button" className="state-tag mt-state mt-archived" onClick={() => archive(false)} title={t('Archived: left out of search and of questions about your meetings. Click to take it out of the archive.')}><Icon name="archive" size={11} /> {t('Archived')}</button>}
       <div className="seg" role="tablist" aria-label={t('Show')}>
         {views.map(([v, icon, label]) => (
@@ -926,6 +941,7 @@ export function MeetingPage({ id, onBack }) {
           data.saved && here() && { icon: 'folder-open', label: t('Show saved notes in Finder'), run: reveal },
           atActions(data.summary) && { icon: 'helm', label: t('Send action items to Chief of Staff'), run: toChief },
           '-',
+          canResume && { icon: 'mic', label: t('Resume recording'), run: resumeRec },
           { icon: 'edit', label: t('Fix a word everywhere'), run: () => setFix({ from: '' }) },
           done && { icon: 'refresh', label: t('Transcribe again…'), run: () => setDialog('again') },
           done && data.cleanedAt && { icon: 'undo', label: t('Undo the cleanup'), run: uncleanAll },
@@ -1025,6 +1041,10 @@ export function MeetingPage({ id, onBack }) {
         <span className="mt-grow" />
         {data.summary && <button type="button" className="ghost-btn" onClick={() => copy(data.summary, t('Copied the summary.'))} title={t('Copy the summary')}><Icon name="copy" size={12} /> {t('Copy')}</button>}
       </div>
+      {/* Written before more was recorded (Resume recording). */}
+      {data.summary && data.summaryStale && !data.summarizing && (
+        <p className="mt-stale small" role="status"><Icon name="alert" size={12} /> <span>{t('This summary is out of date: more was recorded since it was written.')}</span> <button type="button" className="link-btn" onClick={summarize} disabled={busy === 'summary'}>{t('Regenerate')}</button></p>
+      )}
       {data.summary ? (todo ? (
         <>
           {todo.head.trim() && <div className="mt-summary md" dangerouslySetInnerHTML={{ __html: md(todo.head) }} />}
@@ -1075,6 +1095,8 @@ export function MeetingPage({ id, onBack }) {
         {(recording || Date.now() - Date.parse(data.startedAt) < 36 * 3600e3) && <SinceLastTime path={`/meetings/${encodeURIComponent(id)}/since`} onOpen={(mid) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: mid } }))} />}
         {(data.status === 'recording' || data.status === 'paused') && <SpeechSetup recording />}
         {!live && (data.status === 'recording' || data.status === 'paused') && <p className="muted small">{t('This meeting is recording in another window.')}</p>}
+        {canResume && recent && phone && <div className="mt-resume-row">{resumeBtn}</div>}
+        {micErr && <MicFix stale={micErr.stale} onClose={() => setMicErr(null)} onAllowed={resumeRec} />}
         {msg && <p className={`small mt-msg ${msg.error ? 'error-text' : 'muted'}`} role="status">{msg.text}{msg.act && <> <button type="button" className="link-btn" onClick={msg.act.run}>{msg.act.label}</button></>}</p>}
         <div ref={colsRef} className={`mt-cols${two ? '' : ' single'}${two && tw ? ' sized' : ''}${recording ? ' pinned' : ''}`} style={two && tw ? { '--mt-tw': `${tw}px` } : undefined}>
           {recording ? mine : main}
