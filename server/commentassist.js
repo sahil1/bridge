@@ -1,4 +1,4 @@
-// @bridge in a comment (Comments and @bridge, a beta feature): AI Assist asked, in a document's
+// @bridge in a comment (Comments and @bridge): AI Assist asked, in a document's
 // comment, about the words the comment is on. What it's given is that place only: the words, the
 // document around them, the thread so far and the request; what it gives back is a reply for the
 // thread (what it did and why, or the answer to a question) and, when the request asks for one, the

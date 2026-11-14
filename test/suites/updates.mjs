@@ -686,7 +686,6 @@ try {
   // ---------- What a window says an update would lose (src/busy.js) ----------
   // Asked as the desktop app asks it: nothing open, nothing; Studio with an unsaved change; a chat
   // with a message being typed.
-  await a.api('/settings', { trials: { studio: true } }, 'PATCH')
   const doc = await a.api('/studio/new', { root: 'studio', dir: '', name: 'Plan.md', text: '# Plan\n\nFirst draft.\n' })
   const chat = await a.api('/agents/launch', { kind: 'claude', cwd: work, label: 'Billing', newSpace: 'shop', prompt: 'idle' })
   {

@@ -1,4 +1,4 @@
-// No button that does nothing. The main views (Home, an agent's Chat, Terminal and Files, Files,
+// No button that does nothing. The main views (Home, an agent's Chat, Terminal and Files, Folders,
 // Studio, Meetings, Calendar, the top bar and its menus, ‹ and › with somewhere to go, the sidebar,
 // the tabs and the Agents board) and, in dead-clicks-settings (this file again), each section of
 // Settings are opened in the desktop app (a stand-in for what it gives the page,
@@ -42,7 +42,7 @@ const SKIP = [
   [/^Stop what the agent is doing and send this now$|^Runs the agent's own sign-in/, 'starts or stops real work, or listens'],
   [SHORT(/^(allow|ask|reset and ask)\b/i), 'asks macOS (or another computer) for a permission'],
   [/^Open in your terminal app$/, 'opens a terminal app on this computer'],
-  [/^\//, 'a folder outside the test\'s own home (macOS can ask about what\'s below it)', /^Files$/],
+  [/^\//, 'a folder outside the test\'s own home (macOS can ask about what\'s below it)', /^Folders$/],
 ]
 const skipOf = (place, name) => SKIP.find(([is, , at]) => (!at || at.test(place)) && (typeof is === 'function' ? is(name) : is.test(name)))
 // What may show nothing when pressed, and why: by place and name (RegExps), or by what it is.
@@ -51,7 +51,7 @@ const QUIET = [
 ]
 
 // ---------- a Bridge AI with something in each view ----------
-const kit = await startKit(NAME, { config: { trials: { studio: true, home: true, files: true, routines: true, 'meeting-insights': true, 'tab-groups': true, 'usage-everywhere': true, 'signature-assist': true, 'recommended-settings': true, comments: true } } })
+const kit = await startKit(NAME, { config: { trials: { home: true, routines: true, 'meeting-insights': true, 'usage-everywhere': true } } })
 // macOS's open, osascript (Finder, Terminal) and xdg-open: written down, never run.
 const NOTE = "require('fs').appendFileSync(require('path').join(__dirname, 'opened.log'), JSON.stringify(process.argv.slice(1)) + '\\n')\n"
 for (const n of ['open', 'osascript', 'xdg-open']) kit.program(n, NOTE)
@@ -136,6 +136,7 @@ const agentView = (v) => async (p) => {
   if (!(await p.locator(`.ws-tab[aria-selected="true"][data-pane="${pane}"]`).count())) { await send(p, { paneId: pane }); await sleep(200) }
   await send(p, { paneId: pane, view: v }, 'cc-set-view')
 }
+// (Voice & Meetings' tabs are read as places too, each by its id: Dictation, Speech to Text.)
 const SECTIONS = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(fs.readFileSync(path.join(ROOT, 'src', 'components', 'Settings.jsx'), 'utf8'))?.[1] || '').matchAll(/\{ id: '([\w-]+)', label: tx\('([^']+)'\)([^}]*)\}/g)]
   .filter((m) => !/accounts: true/.test(m[3]) && (!/mac: true/.test(m[3]) || process.platform === 'darwin')).map((m) => ({ id: m[1], label: m[2] }))
 const PLACES = [
@@ -152,7 +153,7 @@ const PLACES = [
       await p.locator('.viewer-head').waitFor({ timeout: 5000 })
     },
   },
-  { name: 'Files', open: view('view:files'), scope: '.cmd .fx', ready: '.fx .fx-body' },
+  { name: 'Folders', open: view('view:files'), scope: '.cmd .fx', ready: '.fx .fx-body' },
   { name: 'Studio', open: view('view:studio'), scope: '.cmd .sd-home-view', ready: '.sd-home-view' },
   { name: 'Meetings', open: view('view:meetings'), scope: '.cmd .mt-view', ready: '.mt-view' },
   // The calendar reads macOS Calendar: elsewhere there's none to open.
@@ -162,8 +163,8 @@ const PLACES = [
     prep: (p) => p.evaluate(() => document.querySelectorAll('.modal.settings details').forEach((d) => { d.open = true })),
   })),
   { name: 'the top bar', open: async () => {}, scope: '.topbar', drill: true },
-  // ‹ and › (Back and Forward, on to start with) with somewhere to go each way: after a key (so
-  // what follows is yours, not the window opening), Meetings, then Files, then ‹ back to Meetings.
+  // ‹ and › (Back and Forward) with somewhere to go each way: after a key (so what follows is yours,
+  // not the window opening), Meetings, then Folders, then ‹ back to Meetings.
   {
     name: 'Back and Forward', scope: '.topbar .nav-arrows', ready: '.topbar .nav-btn[data-dir="forward"]:not([disabled])',
     open: async (p) => {
@@ -235,7 +236,7 @@ async function walk(shape) {
       await c.addInitScript(WATCH)
       if (desktop) await c.addInitScript(DESKTOP)
       await c.route(/^https?:\/\/(?!127\.0\.0\.1|localhost)/, (r) => r.abort())
-      // Files' sidebar without this computer's other drives: macOS asks before an app opens one.
+      // Folders' sidebar without this computer's other drives: macOS asks before an app opens one.
       await changeAnswer(c, /\/api\/files\/sidebar/, (j) => ({ ...j, drives: (j.drives || []).filter((d) => !d.guard) }))
     },
   })

@@ -11,7 +11,6 @@ import { Item, Swatches, Glyph, COMMON_FONTS, SIZES, fontHere } from '../doctool
 import { Menu, Present, DeckFind, AiPanel, deckAssist, useSize } from './DeckParts.jsx'
 import { deckRenderer, PLAIN, withFront, FRONT_COLORS } from '../deck.js'
 import { slidesOf } from '../pptx.js'
-import { useTrial } from '../../../trials.js'
 import { Threads, SAY, useAuthor } from '../doccomments.jsx'
 import { useDeckThreads } from '../deckcomments.jsx'
 import '../deck.css'
@@ -1044,10 +1043,9 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
     setMsg({ text: t('Kept, on this file\'s own layouts. Undo takes it back.') })
   }
 
-  // ---------- Comments (Comments and @bridge, a beta feature) ----------
+  // ---------- Comments (Comments and @bridge) ----------
   // On the slide shown or the shape picked on it, kept in the file as PowerPoint's own modern
   // comments (deckcomments.jsx); what @bridge suggests is kept here as an edit undo takes back.
-  const threading = useTrial('comments')
   const author = useAuthor()
   const [commentsOpen, setCommentsOpen] = useState(false)
   const idOf = (xml) => /<p:cNvPr\b[^>]*\bid="(\d+)"/.exec(xml || '')?.[1] || null
@@ -1087,12 +1085,12 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
       return made.key
     },
   }
-  const threads = useDeckThreads({ doc, on: threading && !readOnly, author, file, dirty: () => onDirty(true), deck: deckForThreads })
+  const threads = useDeckThreads({ doc, on: !readOnly, author, file, dirty: () => onDirty(true), deck: deckForThreads })
   const comment = () => { flushTyping(); setCommentsOpen(true); threads.start() }
 
   // ---------- Saving, exporting ----------
   handle.current = {
-    save: async () => { flushTyping(); return P.writePptx(doc, slidesRef.current, { media: media.current, threads: threading ? threads.save() : null }) },
+    save: async () => { flushTyping(); return P.writePptx(doc, slidesRef.current, { media: media.current, threads: threads.save() }) },
     selection: () => {
       const s = window.getSelection?.()
       const text = s && !s.isCollapsed && canvasRef.current?.contains(s.anchorNode) ? s.toString() : P.textsOf(slidesRef.current[curRef.current]).map((x) => P.plainOf(x.t)).join('\n')
@@ -1197,7 +1195,7 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
   const cell = edit?.cell || [0, 0]
 
   return (
-    <div className={`sd-deck2 sd-slides${aiOpen && !readOnly ? ' with-ai' : ''}${commentsOpen && threading ? ' with-comments' : ''}`}>
+    <div className={`sd-deck2 sd-slides${aiOpen && !readOnly ? ' with-ai' : ''}${commentsOpen ? ' with-comments' : ''}`}>
       <style>{`${SLIDE_CSS}${aiCss}`}</style>
       <div className="sd-toolbar sd-deck-tools sd-slides-tools" role="toolbar" aria-label={t('Slides')}>
         <div className="px-row">
@@ -1234,7 +1232,7 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
         <span className="sd-grow" />
         <div className="sd-group">
           <Btn name={t('Find and replace')} icon="search" run={() => setFind({ replace: true, n: Date.now() })} k={['mod', 'f']} />
-          {threading && <Btn name={t('Comments')} icon="comment" on={commentsOpen} run={() => setCommentsOpen((x) => !x)} tip={t('Comments on the slides, kept in the PowerPoint file. @bridge in one asks AI Assist.')} />}
+          <Btn name={t('Comments')} icon="comment" on={commentsOpen} run={() => setCommentsOpen((x) => !x)} tip={t('Comments on the slides, kept in the PowerPoint file. @bridge in one asks AI Assist.')} />
           <Btn name={t('Grid')} icon="grid" on={grid} run={() => { flushTyping(); setEdit(null); setGrid((x) => !x) }} tip={t('Every slide at once, to see the whole deck and drag slides into order')} />
         </div>
         <div className="sd-group">
@@ -1349,7 +1347,7 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
           { label: t('Move down'), icon: 'down', run: () => moveSlides(pickedList().at(-1) + 2), disabled: ctx.i >= count - 1, keys: keys('mod', '↓') },
           '-',
           { label: t('Present from here'), icon: 'play', run: () => startPresent(ctx.i) },
-          ...(threading && !readOnly ? [{ label: t('Comment'), icon: 'chat', run: () => { go(ctx.i); setTimeout(comment, 0) } }] : []),
+          ...(!readOnly ? [{ label: t('Comment'), icon: 'chat', run: () => { go(ctx.i); setTimeout(comment, 0) } }] : []),
           '-',
           { label: picked.size > 1 ? t('Delete {n} slides', { n: pickedList().length }) : t('Delete the slide'), icon: 'trash', run: removeSlides, danger: true, disabled: count <= 1 },
         ]} /></div>}
@@ -1404,7 +1402,7 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
             </div>
           </div>
         )}
-        {commentsOpen && threading && <Threads threads={threads} readOnly={readOnly} say={SAY.deck} onComment={comment} onClose={() => setCommentsOpen(false)} />}
+        {commentsOpen && <Threads threads={threads} readOnly={readOnly} say={SAY.deck} onComment={comment} onClose={() => setCommentsOpen(false)} />}
         {aiOpen && !readOnly && <AiPanel file={file} getSlides={aiSlides} at={at} mode={aiMode} setMode={setAiMode} draw={aiDraw} onKeep={keepAi} onClose={() => setAiOpen(false)} />}
       </div>
       {objMenu && <div className="sd-ctx" style={{ left: objMenu.x, top: objMenu.y }}><Menu label={t('What\'s picked')} onClose={() => setObjMenu(null)} items={[
@@ -1412,7 +1410,7 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
         { label: t('Copy'), icon: 'copy', run: () => copy('objs'), keys: keys('mod', 'c') },
         { label: t('Paste'), icon: 'clipboard', run: paste, disabled: !clip, keys: keys('mod', 'v') },
         { label: t('Duplicate'), icon: 'copy', run: duplicateSel, keys: keys('mod', 'd') },
-        ...(threading ? [{ label: t('Comment'), icon: 'chat', run: comment }] : []),
+        { label: t('Comment'), icon: 'chat', run: comment },
         '-',
         { label: t('Bring to front'), icon: 'up', run: () => reorder('front'), keys: keys('shift', 'mod', '↑') },
         { label: t('Send to back'), icon: 'down', run: () => reorder('back'), keys: keys('shift', 'mod', '↓') },

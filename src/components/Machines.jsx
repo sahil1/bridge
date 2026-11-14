@@ -235,9 +235,7 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
 
 // ---------- the sidebar ----------
 const rank = { blocked: 0, working: 1, done: 2, idle: 3, unknown: 4 }
-// compact: the sidebar's views folded to a row of icons (Rail.jsx), Devices one of them, which
-// opens Agent Map, with a dot while one of them needs you.
-export function RailMachines({ compact = false }) {
+export function RailMachines() {
   const { data } = useMachines()
   const [open, setOpen] = useState(() => { try { return localStorage.getItem('cc-rail-machines') !== '0' } catch { return true } })
   const [own, setOwn] = useState(null) // the device this page comes from, while it shows another
@@ -255,10 +253,6 @@ export function RailMachines({ compact = false }) {
   ]
   if (!rows.length) return null
   const needs = rows.reduce((n, m) => n + needing(m.counts), 0)
-  if (compact) {
-    const label = needs ? `${t('Devices')} (${needs === 1 ? t('{n} needs you', { n: needs }) : t('{n} need you', { n: needs })})` : t('Devices')
-    return <button type="button" className="rail-icon" onClick={openMap} aria-label={label} title={`${label}\n${t("What's running on each of your computers")}`}><Icon name="laptop" size={15} />{needs > 0 && <span className="mini-needs" />}</button>
-  }
   return (
     <div className="rail-machines">
       <div className="rail-nav-row">
@@ -491,7 +485,7 @@ function DeviceDetails({ m, here = false, readOnly = false, onChanged }) {
         {st?.error && <p className="error-text small">{st.error}</p>}
       </>}
       {rows.length > 0 && <dl className="mch-facts">{rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>}
-      {m.safety && <p className="muted small">{here ? t('Your other devices show this security code for this one. If one shows a different code, it isn\'t linked to this device.') : t('On {name}, Settings › Devices › Details shows the same code. If it doesn\'t, link again.', { name: m.name })}</p>}
+      {m.safety && <p className="muted small">{here ? t('Your other devices show this security code for this one. If one shows a different code, it isn\'t linked to this device.') : t('On {name}, Settings › Devices › Computers › Details shows the same code. If it doesn\'t, link again.', { name: m.name })}</p>}
     </div>
   )
 }
@@ -648,10 +642,10 @@ export function MachinesSettings({ embedded = false, focus = false }) {
           <button type="submit" className="btn primary" disabled={!link.trim() || !!busy}>{busy === 'add' ? t('Linking…') : t('Link')}</button>
         </form>
         {data.canBeLinked && !machineId
-          ? <p className="muted small">{t('To link this device from another one, choose Pair a device at the top of this page and use its link or code there.')}</p>
+          ? <p className="muted small">{t('To link this device from another one, choose Pair a device in the Phone tab and use its link or code there.')}</p>
           : !data.canBeLinked && <p className="muted small">{data.hostedAvailable
-            ? t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare (or use Bridge AI's relay) at the top of this page. It can still link to them.")
-            : t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare at the top of this page. It can still link to them.")}</p>}
+            ? t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare (or use Bridge AI's relay) in the Phone tab. It can still link to them.")
+            : t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare in the Phone tab. It can still link to them.")}</p>}
         {msg && <p className={`small ${msg.error ? 'error-text' : 'muted'}`}>{msg.text}</p>}
       </section>}
     </Wrap>

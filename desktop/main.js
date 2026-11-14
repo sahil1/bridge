@@ -852,7 +852,7 @@ function buildMenu() {
   ]))
 }
 
-// ---------- The floating card (Settings › Meetings) ----------
+// ---------- The floating card (Settings › Voice & Meetings) ----------
 // A small window over the others, on every desktop and over full-screen apps: the meeting being
 // recorded, Take notes when a call starts, Stop when it ends, a meeting's prep shortly before it
 // starts, or what needs you. It's the app's own
@@ -930,7 +930,7 @@ async function watchCalls() {
 // ---------- In the menu bar (Mac) ----------
 // The meeting's time at the top of the screen, out of the way of a screen you share, with Pause,
 // Stop and the way back to it in its menu; or Take notes when a call starts. Instead of the card
-// (Settings › Meetings), or for one meeting when you move its card up here.
+// (Settings › Voice & Meetings), or for one meeting when you move its card up here.
 let tray = null
 let trayMenu = null // what the menu was built for
 let trayAt = null // { c, at, base }: the last /api/calls, when it came, and the time shown then

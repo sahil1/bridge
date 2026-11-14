@@ -1,13 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import { api, settingsChanged, usePoll } from '../api.js'
-import { useTrial } from '../trials.js'
 import { modelLabel } from './ModelChip.jsx'
 import { EFFORTS, EFFORT_LABEL, EFFORT_NOTE, suggestEffort } from '../recommended.js'
 import { t, midSentence } from '../i18n/index.js'
 import './recommended.css'
 
-// Recommended Settings, a beta feature (src/recommended.js has the table and the reasons): what
+// Recommended Settings (src/recommended.js has the table and the reasons): what
 // Claude Code starts with, picked for your plan, said once it's signed in (setup's Connect your AI,
 // Settings › Agents) with Use these or Keep; what it starts with now, changed in Settings › Agents;
 // and a task's effort chip (New, Home's box), suggested from what's asked. Bridge AI passes them
@@ -15,14 +14,13 @@ import './recommended.css'
 
 export const effortName = (e) => t(EFFORT_LABEL[e] || e)
 
-// What's recommended for each agent that takes an effort, with the beta on: { data, error, reload,
-// answer }. data is null while it looks (and with the beta off).
+// What's recommended for each agent that takes an effort: { data, error, reload, answer, save }.
+// data is null while it looks.
 export function useRecommended() {
-  const on = useTrial('recommended-settings')
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const load = (fresh) => api(`/recommended${fresh ? '?fresh=1' : ''}`).then((d) => { setData(d); setError(null) }).catch((e) => setError(e.message))
-  useEffect(() => { if (on) load(); else setData(null) }, [on]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const answer = async (kind, choice) => {
     const r = await api(`/recommended/${kind}`, { method: 'POST', body: { choice } })
     setData((d) => d && { ...d, agents: d.agents.map((x) => (x.kind === kind ? r : x)) })
@@ -38,7 +36,7 @@ export function useRecommended() {
     settingsChanged()
     await load()
   }
-  return { on, data, error, reload: load, answer, save }
+  return { data, error, reload: load, answer, save }
 }
 
 // "Opus, high effort"
@@ -124,7 +122,7 @@ export function StartsWith({ r, runtime, onSave }) {
 }
 
 // The effort an agent of this kind starts with when a task's chip says nothing: your setting for
-// it (Settings › Agents), or null (the agent's own). From /config, only with the beta on.
+// it (Settings › Agents), or null (the agent's own). From /config.
 export function useUsualEffort(kind) {
   const { data } = usePoll('/config', 10 * 60 * 1000)
   return data?.efforts?.[kind] || null

@@ -1,4 +1,4 @@
-// AI Assist's Look over this folder, beside Files (a beta feature): what takes room in a folder and how it could be
+// AI Assist's Look over this folder, beside Files and Folders: what takes room in a folder and how it could be
 // tidier, with nothing in the folder changed. A made-up folder ("Mess") with a bit of everything:
 // the same photo in three places (and a hard link, which isn't a copy), two files of the same size
 // that differ, big videos, a year-old tax return, installers and an unpacked archive in Downloads,
@@ -13,7 +13,8 @@
 //   computer; a model elsewhere only once picked, saying where the names go; names, sizes and dates
 //   sent, never what's in a file;
 //   another computer's folder through the link (Studio, its own server and relay): looked at there,
-//   its beta switch said when off, its model said to be its own, a look that stops at its limit;
+//   a Files switch saved off there from before read by nothing, its model said to be its own, a look
+//   that stops at its limit;
 //   a folder macOS asks about (scripts/tcc-sim.mjs): the server never frozen, the look waiting and
 //   saying why, then done;
 //   the panel in Files, from AI Assist's menu at the right end of Files' bar: the findings with Open
@@ -157,7 +158,6 @@ try {
   relays.push(ra, rb)
   const GEMMA = 'gemma-4-E2B-it-Q4_0.gguf'
   const kit = await startKit('files-assist', {
-    config: { trials: { files: true } },
     env: ({ bin, data }) => {
       fs.writeFileSync(path.join(data, 'relay.json'), JSON.stringify(rb.relayFile))
       const models = path.join(path.dirname(bin), 'llm-models.json')
@@ -263,7 +263,7 @@ try {
     // As PRIVACY.md says: what Files shows, what AI Assist reads in it, and what Suggest how to
     // organize it sends where.
     const policy = fs.readFileSync(path.join(ROOT, 'PRIVACY.md'), 'utf8').replace(/\s+/g, ' ')
-    ok(/With Files on \(a beta feature/.test(policy) && /AI Assist in Files looks at the folder you ask it about on your computer/.test(policy) && /Suggest how to organize it, which sends that folder's file and folder names, sizes and dates \(never what's in a file\) to the model you pick/.test(policy), 'PRIVACY.md says what Files shows, what AI Assist reads there, and what Suggest how to organize it sends to which model', null)
+    ok(/Folders, in the sidebar, also shows your home folder/.test(policy) && /AI Assist in Files and Folders looks at the folder you ask it about on your computer/.test(policy) && /Suggest how to organize it, which sends that folder's file and folder names, sizes and dates \(never what's in a file\) to the model you pick/.test(policy), 'PRIVACY.md says what Files shows, what AI Assist reads there, and what Suggest how to organize it sends to which model', null)
     // A model elsewhere: only once it's picked, and the names go there.
     const cloud = others.find((x) => !x.local)
     const picked = await api('/files/assist/model', { model: cloud.id }, 'PUT')
@@ -290,7 +290,7 @@ try {
       const { ctx, p, errors } = await page(b, kit.url, look)
       try {
         const bar = await openFiles(p, pane)
-        ok(await bar.isVisible() && await bar.evaluate((e) => !e.nextElementSibling), `${name}: AI Assist is at the right end of Files' bar with the beta switch on`)
+        ok(await bar.isVisible() && await bar.evaluate((e) => !e.nextElementSibling), `${name}: AI Assist is at the right end of Files' bar`)
         await bar.click()
         const menu = p.locator('.ai-menu')
         ok(/Look over this folder/.test(await menu.innerText()), `${name}: AI Assist's menu has Look over this folder`, await menu.innerText().catch(() => ''))
@@ -362,11 +362,10 @@ try {
     const m = await until(async () => (await api('/machines')).machines.find((x) => x.name === 'Studio' && x.online), 30000, 300)
     ok(!!m, 'Laptop is linked to Studio')
     const M = (p2, body, method) => fetch(`${kit.url}/m/${m.id}/api${p2}`, { method: method || (body ? 'POST' : 'GET'), headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }).then(async (r) => ({ status: r.status, ...(await r.json().catch(() => ({}))) }))
-    let r = await M('/files/insights', { root: `place:${spl.id}`, rel: '' })
-    ok(r.status === 404 && r.trial === 'files' && /beta feature/.test(r.error), 'with Files off on Studio, it says it\'s a beta feature there', r)
-    await studio.api('/settings', { trials: { files: true } }, 'PATCH')
-    r = await M('/files/insights', { root: `place:${spl.id}`, rel: '' })
-    ok(r.status === 200 && r.computer === 'Studio', 'turned on there, the look runs on Studio', r)
+    // A Files switch saved off on Studio from before it was part of the app: read by nothing.
+    await studio.api('/settings', { trials: { files: false } }, 'PATCH')
+    const r = await M('/files/insights', { root: `place:${spl.id}`, rel: '' })
+    ok(r.status === 200 && r.computer === 'Studio', 'the look runs on Studio, with Files saved off there from before', r)
     const x = await until(async () => { const y = await M(`/files/insights/${r.id}`); return y.state !== 'running' ? y : null }, 30000, 200)
     ok(x?.state === 'done' && x.found.duplicates.groups[0]?.files.join() === 'clip copy.mov,clip.mov', 'Studio\'s duplicates, found there', x?.found?.duplicates)
     ok(x.partial === 'limit' && x.skipped.some((s) => s.kind === 'limit' && s.files === 40), 'a look that reaches its limit stops there and says so', { partial: x.partial, skipped: x.skipped })
@@ -396,7 +395,6 @@ try {
     if (IS_WIN) { skip('a folder whose first read is held', 'the slow-folder stand-in (scripts/tcc-sim.mjs) takes POSIX paths'); return }
     const HOLD = 4000
     const tk = await startKit('files-assist-tcc', {
-      config: { trials: { files: true } },
       env: ({ home }) => ({ NODE_OPTIONS: `--import ${pathToFileURL(path.join(ROOT, 'scripts', 'tcc-sim.mjs')).href}`, SIM_PROTECTED: ['Documents', 'Downloads', 'Desktop'].map((d) => path.join(home, d)).join(':'), SIM_MS: String(HOLD) }),
     })
     kits.push(tk)

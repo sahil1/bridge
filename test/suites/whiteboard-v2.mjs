@@ -74,8 +74,8 @@ const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${n
 
 try {
   await api('/setup', { name: 'Tester' })
-  // Studio on, for AI Assist's Make a document and Make a deck (whiteboard.mjs has it off).
-  await api('/settings', { trials: { studio: true } }, 'PATCH')
+  // Whiteboards are in Studio: the list is Studio's Files at Whiteboards, New makes one, a board opens
+  // in Studio's Preview, and what asks for Whiteboards' own places gets those.
   await api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
 
   // ---------- The server ----------
@@ -209,7 +209,10 @@ try {
   const opened = async (detail, there) => {
     if (!await until(async () => { if (await there()) return true; await p.evaluate((d) => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: d })), detail); return there() }, 60000, 1000)) throw new Error(`couldn't open ${JSON.stringify(detail)}`)
   }
-  const toList = () => opened({ list: true }, () => p.locator('.wb-home').isVisible())
+  const toList = () => opened({ list: true }, () => p.locator('.sd-home .wb-home').isVisible())
+  // A board's tab, in Studio's Preview.
+  const inStudio = (name) => `view:studio:board:${encodeURIComponent(name)}`
+  const openTabs = () => p.evaluate(() => JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs || [])
   const canvasBox = async () => p.locator('.wb-canvas').boundingBox()
   // A board's drawing area up and the size of the room it has (Excalidraw sizes its canvas a moment
   // after it shows), so where a test points is where Excalidraw thinks it is.
@@ -256,8 +259,14 @@ try {
 
   await part('the clean look', async () => {
     await toList()
-    await p.getByRole('button', { name: 'New whiteboard' }).click()
+    ok(await p.locator('.rail-nav-btn', { hasText: 'Whiteboards' }).count() === 0 && await p.locator('.rail-nav-btn.on').innerText().then((x) => x.trim() === 'Studio', () => false) && await p.locator('.sd-groups button[aria-current="true"]', { hasText: 'Whiteboards' }).count() === 1,
+      'the sidebar has no Whiteboards row, and the list of whiteboards is Studio\'s Files at Whiteboards', await p.locator('.rail-nav-btn').allInnerTexts())
+    await p.locator('.sd-new-open').click()
+    await p.locator('.sd-new-menu [role="menuitem"]', { hasText: 'Whiteboard' }).click()
+    await p.locator('.sd-new-form input').fill('Untitled')
+    await p.locator('.sd-new-form button', { hasText: 'Make it' }).click()
     await canvasReady()
+    ok((await openTabs()).includes(inStudio('Untitled')) && fs.existsSync(file('Untitled')), 'Studio\'s New › Whiteboard makes a board and opens it in Studio\'s Preview', await openTabs())
     ok(await until(() => p.locator('.wb-empty-board').isVisible(), 5000), 'an empty board says what can be done on it, in Bridge AI\'s words')
     ok(!(await p.locator('.excalidraw .main-menu-trigger').isVisible().catch(() => false)) && !(await p.locator('.welcome-screen-center, .welcome-screen-decor').count()), 'Excalidraw\'s own menu and welcome screen aren\'t there')
     const colours = await p.evaluate(() => {
@@ -323,18 +332,36 @@ try {
     await input.press('Enter')
     ok(await until(() => fs.existsSync(file('Network plan')) && !fs.existsSync(file('Untitled')), 8000), 'Enter renames the board\'s file', fs.readdirSync(BOARDS))
     ok(await until(() => p.locator('.wb-view .pane-titles .wb-name', { hasText: 'Network plan' }).count(), 8000) && live(readBoard('Network plan')).filter((e) => e.type === 'rectangle').length === 2, 'and the board stays open under its new name, with what was on it', await p.locator('.wb-view .pane-titles').innerText().catch(() => ''))
-    ok(await p.evaluate(() => JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs?.includes('view:whiteboard:Network plan') && !JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs?.includes('view:whiteboard:Untitled')), 'in the same tab, now named for it')
+    ok(await until(async () => { const tabs = await openTabs(); return tabs.includes(inStudio('Network plan')) && !tabs.includes(inStudio('Untitled')) }, 5000), 'in the same tab, now named for it', await openTabs())
     await toList()
     await p.locator('.wb-card', { hasText: 'Network plan' }).locator('.wb-name').click()
     await p.locator('.wb-card .wb-name-input').fill('Network map')
     await p.locator('.wb-card .wb-name-input').press('Enter')
     ok(await until(() => fs.existsSync(file('Network map')) && !fs.existsSync(file('Network plan')), 8000), 'in the list, clicking a board\'s name renames it too', fs.readdirSync(BOARDS))
-    ok(await until(() => p.evaluate(() => JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs?.includes('view:whiteboard:Network map')), 5000), 'and its open tab follows the new name')
+    ok(await until(async () => (await openTabs()).includes(inStudio('Network map')), 5000), 'and its open tab follows the new name', await openTabs())
     await p.locator('.wb-card', { hasText: 'Network map' }).getByRole('button', { name: 'More' }).click()
     await p.getByRole('menuitem', { name: 'Rename…' }).click()
     ok(await until(() => p.locator('.wb-card .wb-name-input').isVisible(), 3000), 'and Rename… in its menu opens the same box')
     await p.keyboard.press('Escape')
     await shot(p, `${tag}whiteboard-v2-list`)
+  })
+
+  await part('places from before whiteboards were in Studio', async () => {
+    const old = await page(b, kit.url, { store: { 'cc-ws': { tabs: ['view:whiteboards'], active: 'view:whiteboards', side: null, split: false, group: 'main' } }, before: async (c) => watch(c) })
+    const there = await until(() => old.p.locator('.sd-home .wb-home .wb-card', { hasText: 'Network map' }).isVisible(), 30000)
+    const tabs = await old.p.evaluate(() => JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs || [])
+    ok(!!there && JSON.stringify(tabs) === '["view:studio"]' && await old.p.locator('.sd-groups button[aria-current="true"]', { hasText: 'Whiteboards' }).count() === 1 && await old.p.locator('.wb-view').count() === 0,
+      'a window that kept Whiteboards in a tab opens Studio in that tab, its Files at Whiteboards', tabs)
+    await old.p.keyboard.press('ControlOrMeta+k')
+    await old.p.keyboard.type('whiteboard')
+    const hit = old.p.locator('.palette .pal-item', { hasText: 'Whiteboards' }).first()
+    ok(await until(() => hit.count(), 5000) && /In Studio/.test(await hit.innerText()), '⌘K still finds Whiteboards, and says they are in Studio', await hit.innerText().catch(() => ''))
+    await old.p.keyboard.press('Escape')
+    await old.p.locator('.sd-groups button', { hasText: 'Recent' }).first().click()
+    await old.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'view:whiteboards' } })))
+    ok(await until(() => old.p.locator('.sd-home .wb-home').isVisible(), 8000) && JSON.stringify(await old.p.evaluate(() => JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs || [])) === '["view:studio"]', 'a link to Whiteboards, with Studio open at something else, shows Studio\'s Whiteboards, in the same tab')
+    ok(!old.errors.length, 'no page errors', old.errors)
+    await old.ctx.close()
   })
 
   await part('shapes and containers', async () => {
@@ -624,12 +651,16 @@ try {
     ok(await until(() => p.locator('.sd-file .pane-head', { hasText: `${id} deck.md` }).count(), 20000), 'and opened in Studio')
     await sleep(800)
     await shot(p, `${tag}whiteboard-v2-made-deck`)
-    // AI Assist's menu on a board, dark: the meeting moves and the write-ups with Studio on.
+    // AI Assist's menu on a board, dark: the meeting moves and the write-ups in Studio.
     const night = await page(b, kit.url, { mode: 'dark', store: { 'cc-ws': { tabs: [`view:whiteboard:${id}`], active: `view:whiteboard:${id}`, side: null, split: false, group: 'main' } }, before: async (c) => watch(c) })
     await night.p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
+    // The window had the board in a tab of its own, from before whiteboards were in Studio.
+    const kept = await until(async () => { const tabs = await night.p.evaluate(() => JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs || []); return tabs.length === 1 && tabs[0] === inStudio(id) ? tabs : null }, 8000)
+    ok(!!kept && await night.p.locator('.wb-view .sd-tabs [role="tab"][aria-selected="true"]', { hasText: 'Preview' }).count() === 1 && await night.p.locator('.rail-nav-btn.on').innerText().then((x) => x.trim() === 'Studio', () => false),
+      'a whiteboard\'s tab kept from before opens the board in Studio\'s Preview, in that tab, with Studio marked in the sidebar', await night.p.evaluate(() => localStorage.getItem('cc-ws')))
     await night.p.locator('.wb-view .pane-extras button[aria-label="AI Assist"]').click()
     const items = await night.p.locator('.ai-menu .ai-item-label').allInnerTexts()
-    ok(['Group by theme', 'A timeline', 'Action items', 'Make a document', 'Make a deck'].every((x) => items.includes(x)), 'with Studio on, a board\'s AI Assist offers Make a document and Make a deck after the meeting moves', items)
+    ok(['Group by theme', 'A timeline', 'Action items', 'Make a document', 'Make a deck'].every((x) => items.includes(x)), 'a board\'s AI Assist offers Make a document and Make a deck after the meeting moves', items)
     await shot(night.p, `${tag}whiteboard-v2-ai-menu-dark`)
     ok(!night.errors.length, 'dark: no page errors', night.errors)
     await night.ctx.close()
@@ -687,11 +718,10 @@ try {
 
   await part('comments and @bridge', async () => {
     // A board with Start and Ship, and Sam's comment on Ship (a pin, its thread in customData.bridge,
-    // as the board's own file keeps one): with the beta on, threads beside the board; one on the
+    // as the board's own file keeps one): threads beside the board, with no Beta Feature on; one on the
     // board posted, saved as a pin of its own; @bridge changing it as a suggestion (dashed, Keep and
     // Discard on the board and in the thread); Sam's waiting until sent; no model said; resolved
     // and deleted, in the file.
-    await api('/settings', { trials: { comments: true } }, 'PATCH')
     const base = { angle: 0, strokeColor: '#1f2733', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 1, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted: false, updated: 1, link: null, locked: false }
     const box = (id, text, x) => [{ ...base, id, type: 'rectangle', x, y: 0, width: 160, height: 70, boundElements: [{ type: 'text', id: `${id}t` }] },
       { ...base, id: `${id}t`, type: 'text', x: x + 50, y: 22, width: 60, height: 25, boundElements: null, text, originalText: text, fontSize: 20, fontFamily: 5, textAlign: 'center', verticalAlign: 'middle', containerId: id, autoResize: true, lineHeight: 1.25 }]
@@ -760,7 +790,6 @@ try {
       await shot(ph.p, `${tag}whiteboard-v2-comments-phone`)
       await ph.ctx.close()
     } finally {
-      await api('/settings', { trials: { comments: false } }, 'PATCH').catch(() => {})
       await openBoard(board).catch(() => {})
     }
   })
@@ -780,7 +809,8 @@ try {
     await ph.p.keyboard.press('ControlOrMeta+k')
     await ph.p.keyboard.type('Whiteboards')
     await ph.p.keyboard.press('Enter')
-    await ph.p.waitForSelector('.wb-home', { timeout: 15000 })
+    await ph.p.waitForSelector('.sd-home .wb-home', { timeout: 15000 })
+    ok((await ph.p.locator('.tabbar button.on').innerText()).trim() === 'More', 'on a phone, ⌘K\'s Whiteboards opens Studio at your whiteboards, in More')
     await ph.p.locator('.wb-card', { hasText: board }).locator('.wb-thumb').click()
     await ph.p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
     const fits = () => ph.p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1 && [...document.querySelectorAll('.wb-view .pane-head *, .wb-shapes *, .wb-settings *')].every((e) => { const r = e.getBoundingClientRect(); return !r.width || (r.left >= -1 && r.right <= window.innerWidth + 1) }))

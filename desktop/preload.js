@@ -92,7 +92,7 @@ if (!own) {
   watching: (on) => ipcRenderer.invoke('bridge:watching', !!on),
   // Studio's Focus: this window full screen (true) or back (false), or whether it is (nothing).
   fullScreen: (on) => ipcRenderer.invoke('bridge:full-screen', typeof on === 'boolean' ? on : null),
-  // Dictation's key from other apps (Settings › Voice), and its window (?dictate=1): what was
+  // Dictation's key from other apps (Settings › Voice & Meetings), and its window (?dictate=1): what was
   // pressed before it was ready, its size, whether it's listening (Esc is held for it then), hiding,
   // copying, and the keyboard while its words are edited there (taken, then given back). Pasting
   // where you're typing in another app: the text pasted there (back: from the card, with that app

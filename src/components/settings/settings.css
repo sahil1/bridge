@@ -40,7 +40,7 @@
 .st-dictation-more .st-note { margin: 0; }
 .st-adv-part textarea.st-input { height: auto; padding: 8px 11px; resize: vertical; font-family: var(--font); }
 
-/* A fold inside a section (Voice's Whisper models). */
+/* A fold inside a section (Speech to Text's Whisper models). */
 .st-fold > summary { list-style: none; display: flex; align-items: center; gap: 6px; min-height: 32px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-2); }
 .st-fold > summary::-webkit-details-marker { display: none; }
 .st-fold > summary:hover { color: var(--ink); }

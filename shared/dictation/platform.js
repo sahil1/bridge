@@ -54,9 +54,9 @@ export function globalKey(m = {}) {
 
 // The key from other apps is off until you say yes: Alfred, Raycast and other launchers often have
 // it there. Bridge AI asks once, after your first words in it (controller.js offerAnyApp), and
-// Settings › Voice turns it on or off.
+// Settings › Voice & Meetings turns it on or off.
 
-// One key on its own as the key (Settings › Voice, opt-in; keys.js LONE), where this computer can hear
+// One key on its own as the key (Settings › Voice & Meetings, opt-in; keys.js LONE), where this computer can hear
 // it from other apps:
 //   a Mac          Fn (🌐) and the right ⌥, through bridgekeys' listen-only event tap, which needs
 //                  Input Monitoring (or Accessibility, which covers it): asked when you pick one
@@ -73,7 +73,7 @@ export function loneKeys(m = {}) {
   return { keys: [], asks: null }
 }
 
-// Pasting what you said where you're typing in the other app ("Where I'm typing", Settings › Voice;
+// Pasting what you said where you're typing in the other app ("Where I'm typing", Settings › Voice & Meetings;
 // off until you pick it). It's the clipboard and the paste keys pressed for you, so it needs the key
 // from other apps first, and what this system lets one app press in another:
 //   a Mac          native/bridgekeys paste (⌘V through CGEvent), which needs Accessibility: asked
@@ -111,7 +111,7 @@ export function pasteInto(m = {}) {
   return { can: false, why: 'Not on this system' }
 }
 
-// Edit by voice (Settings › Voice, opt-in): select text in another app, hold the key and say what to
+// Edit by voice (Settings › Voice & Meetings, opt-in): select text in another app, hold the key and say what to
 // change ("make this shorter"); the model you pick rewrites it and it's pasted in its place. So it
 // needs pasting first, and a way to read the selection that doesn't copy a whole line when nothing's
 // selected (an editor's Ctrl+C does):

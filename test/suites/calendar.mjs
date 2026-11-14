@@ -664,7 +664,7 @@ try {
   // ---------- The reminder: put off, turned off and on ----------
   // Remind me 1 min before: gone until then, for that meeting alone, kept through a restart, and
   // back once it's due. Remind me before meetings off (from the card's menu, or Settings): no
-  // reminder; on again, it's back. Settings › Meetings has the switch in the desktop app.
+  // reminder; on again, it's back. Settings › Voice & Meetings has the switch in the desktop app.
   {
     const soonNow = (await api('/calls')).soon
     const snoozed = await api('/calls/snooze', { id: soonNow.id })
@@ -735,9 +735,9 @@ try {
       ok(!!(await until(async () => { const c = await api('/calls'); return c.soon?.id === soonNow.id && !c.soon.others.length }, 8000)), 'the other gone from the calendar: one meeting on the card again')
     }
     await api('/settings', { meetings: { prep: true } }, 'PATCH')
-    // Settings › Meetings, in the desktop app: Remind me before meetings, off and on. (Only where
+    // Settings › Voice & Meetings, in the desktop app: Remind me before meetings, off and on. (Only where
     // there's a calendar to remind from: a Mac's.)
-    if (!IS_MAC) skip('Settings › Meetings › Remind me before meetings, off and on', 'it shows only with a calendar, which is a Mac\'s (Calendar or icalBuddy)')
+    if (!IS_MAC) skip('Settings › Voice & Meetings › Remind me before meetings, off and on', 'it shows only with a calendar, which is a Mac\'s (Calendar or icalBuddy)')
     else {
       // (Said to be the desktop app once the page is up, for Settings to show what's the app's.)
       const { p, errors } = await open({ mode: 'light' })
@@ -745,7 +745,7 @@ try {
       const sw = p.locator('.modal.settings [data-setting="meeting-remind"]')
       await until(() => sw.isVisible(), 10000)
       const box = sw.locator('input[type="checkbox"]')
-      ok(await sw.isVisible() && /Remind me before meetings/.test(await sw.innerText()) && await box.isChecked(), 'Settings › Meetings › Remind me before meetings, on, found as ⌘K finds it', await sw.innerText().catch(() => ''))
+      ok(await sw.isVisible() && /Remind me before meetings/.test(await sw.innerText()) && await box.isChecked(), 'Settings › Voice & Meetings › Remind me before meetings, on, found as ⌘K finds it', await sw.innerText().catch(() => ''))
       await box.click() // (it shows off once the server has it)
       ok(!!(await until(async () => (await api('/settings')).effective.meetings?.remind === false && (await api('/calls')).soon === null && !(await box.isChecked()), 5000)), 'turned off there: no reminder, and it shows off')
       await shot(p, `${tag}calendar-remind-setting`)

@@ -16,7 +16,7 @@
 //   within the budget saying so), an error, a provider that fell for an instruction (turned down),
 //   the model started while you talk; no model: what's needed, and on a 4 GB computer, a model of
 //   your own. Nothing is downloaded until asked.
-//   In the app, the desktop app simulated: Beta Features lists it; Settings › Voice › Dictation has
+//   In the app, the desktop app simulated: Beta Features lists it; Settings › Voice & Meetings › Dictation has
 //   Tidy what I say only with the trial on (off to start with), the model it uses and whether the
 //   words leave the computer, picked in a field like Settings' others; with no model, the download
 //   in one click and its progress; on 4 GB, where to add one, with the way there, and turned on
@@ -226,21 +226,21 @@ try {
     await w.p.waitForSelector('.rail-nav-btn, body', { timeout: 30000 }).catch(() => {})
     const dict = w.p.locator('.st-dictation')
     await until(async () => {
-      if (!(await w.p.locator('.modal.settings').count())) await w.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } })))
+      if (!(await w.p.locator('.modal.settings').count())) await w.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'dictation' } })))
       return (await dict.count()) > 0
     }, 30000, 1000)
     await sleep(500)
-    // Tidy what I say is under Voice's Advanced.
+    // Tidy what I say is under the Dictation tab's Advanced.
     const s = await advanced(w.p)
     return { ...w, s }
   }
   const tidyBox = (s) => s.locator('.dict-tidy')
 
-  // Beta Features lists it; with the trial off, Settings › Voice doesn't show it.
+  // Beta Features lists it; with the trial off, Settings › Voice & Meetings doesn't show it.
   await kit.api('/settings', { trials: { 'dictation-cleanup': false } }, 'PATCH')
   {
     const { ctx, p, s } = await voice(kit)
-    ok(await tidyBox(s).count() === 0 && !/Tidy what I say/.test(await s.innerText()), 'the trial off: Settings › Voice › Dictation has no Tidy what I say', await s.innerText())
+    ok(await tidyBox(s).count() === 0 && !/Tidy what I say/.test(await s.innerText()), 'the trial off: Settings › Voice & Meetings › Dictation has no Tidy what I say', await s.innerText())
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
     const trial = p.locator('.st-check', { hasText: 'Tidy what I say' })
     ok(!!(await until(() => trial.isVisible(), 10000, 200)) && /tidied by a model before it's pasted/.test(await trial.innerText()) && !(await trial.locator('input').isChecked()), 'Settings › About & Updates › Beta Features: Tidy what I say, off', await trial.innerText().catch(() => ''))

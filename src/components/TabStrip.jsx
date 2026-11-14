@@ -30,7 +30,7 @@ import './tabstrip.css'
 // middle button or their menu closes one). They move among themselves; pinning takes a tab out of its
 // group.
 //
-// Your own groups, as Chrome's, with Tab Groups on or off: a chip in the group's color, with its name,
+// Your own groups, as Chrome's: a chip in the group's color, with its name,
 // before its tabs, and a line in that color under them. Add tab to new group makes one and opens its
 // editor by the chip: its name (focused; the chip shows it as it's typed) and its colors, then New
 // agent in group (when its agents are all in one space, there, and it joins the group), Ungroup and
@@ -41,7 +41,7 @@ import './tabstrip.css'
 // closes. Groups and pins are kept with the window's tabs, as colors are (App.jsx), so a reload keeps
 // them.
 //
-// Tab Groups (a beta feature): the tabs not in a group of yours kept together as the sidebar has them.
+// Tab Groups: the tabs not in a group of yours kept together as the sidebar has them.
 // Home and the other views first, then each space of this computer in the sidebar's order, then each
 // of your other computers under its name, so what's from elsewhere is out of the way of what you're
 // doing here; a group of yours comes after the space its first tab is in. Each space's group starts
@@ -107,7 +107,7 @@ function whereOf(a) {
 // tabs } }; pinned: the pinned tabs' ids. onGroup(id, key, keep) puts a tab in a group (a new key
 // makes one), at its end unless keep (it was dropped where it is), or out of its group (key null);
 // onName(key, name), onUngroup(key), onPin(id, on).
-export default function TabStrip({ ids, byId, active, side, focus, folded: foldedKeys, colors, own, pinned, grouping, spaces = [], onOpen, onClose, onMove, onFold, onColor, onGroup, onName, onUngroup, onPin, onSide, onNewAgent, children }) {
+export default function TabStrip({ ids, byId, active, side, focus, folded: foldedKeys, colors, own, pinned, spaces = [], onOpen, onClose, onMove, onFold, onColor, onGroup, onName, onUngroup, onPin, onSide, onNewAgent, children }) {
   const [drag, setDrag] = useState(null) // { id, over, after }: over a tab's id, or chip:<key>
   const [kept, setKept] = useState(null) // each tab's width, kept after a close with the pointer: { id: px }
   const [fit, setFit] = useState('roomy') // 'roomy' | 'tight' (the others narrower) | 'icons' (the others their icon)
@@ -154,30 +154,20 @@ export default function TabStrip({ ids, byId, active, side, focus, folded: folde
     const key = `ws:${a.workspaceId || ''}`
     return { key, at: i < 0 ? 1e5 : i, label, color: chosen(key) || colorOf(spaces[i], i, label), space: a.workspaceId }
   }
-  // Without Tab Groups: the tabs in their order, each group of yours where its first tab is. With it:
-  // by space (groupOf), each group of yours after the space of its first tab.
-  const runs = []
-  if (!grouping) {
-    for (const id of loose) {
-      const key = mineOf[id]
-      if (key) { if (!runs.some((g) => g.key === key)) runs.push(mine.find((g) => g.key === key)) }
-      else if (runs.at(-1)?.run) runs.at(-1).ids.push(id)
-      else runs.push({ key: `run:${runs.length}`, run: true, ids: [id] })
-    }
-  }
+  // By space (groupOf), each group of yours after the space of its first tab.
   const groups = [
     pins.length > 0 && { key: 'pinned', pinned: true, ids: pins },
-    ...(!grouping ? runs : [...loose.filter((id) => !mineOf[id]).reduce((m, id) => {
+    ...[...loose.filter((id) => !mineOf[id]).reduce((m, id) => {
       const g = groupOf(id)
       if (!m.has(g.key)) m.set(g.key, { ...g, first: open.indexOf(id), ids: [] })
       m.get(g.key).ids.push(id)
       return m
-    }, new Map()).values(), ...mine.map((g) => ({ ...g, at: groupOf(g.ids[0]).at + 0.5 }))].sort((x, y) => x.at - y.at || x.first - y.first)),
+    }, new Map()).values(), ...mine.map((g) => ({ ...g, at: groupOf(g.ids[0]).at + 0.5 }))].sort((x, y) => x.at - y.at || x.first - y.first),
   ].filter(Boolean)
   // An agent's tab is named as the sidebar names it (its tab's name, not its terminal's title, which
   // on Windows can be the shell's own); a view, a terminal or another computer's agent by its title.
   const tabName = (a) => named[a.paneId] ?? (a.view || a.shellTab || a.remote ? a.title : agentName(a))
-  const spaced = groups.filter((g) => !g.own && !g.pinned && !g.run)
+  const spaced = groups.filter((g) => !g.own && !g.pinned)
   const multi = spaced.filter((g) => g.label).length > 1 || spaced.some((g) => g.device)
   const headed = (g) => g.own || (multi && !!g.label && (g.device || g.ids.length > 1 || String(tabName(byId[g.ids[0]]) || '').trim().toLowerCase() !== String(g.label).trim().toLowerCase()))
   const shown = groups.map((g) => {
@@ -280,7 +270,7 @@ export default function TabStrip({ ids, byId, active, side, focus, folded: folde
   }
   // Ctrl+Shift+←/→, as Chrome's Ctrl+Shift+PgUp/PgDn: one place along what the strip shows. At a
   // group's edge a tab leaves it first; beside a group, it goes in (past a folded one); pinned tabs
-  // move among themselves; with Tab Groups, a tab stays in its space's group.
+  // move among themselves; a tab stays in its space's group.
   const nudge = (id, dir) => {
     const g = groupFor[id]
     if (!g) return
@@ -289,10 +279,7 @@ export default function TabStrip({ ids, byId, active, side, focus, folded: folde
     if (next) { onMove(id, next, dir > 0); return }
     if (g.own) { onGroup?.(id, null, true); return }
     const near = !g.pinned && shown[shown.indexOf(g) + dir]
-    if (near?.own && !near.folded) { onMove(id, dir > 0 ? near.ids[0] : near.ids.at(-1), dir < 0); onGroup?.(id, near.key, true); return }
-    if (grouping || !near || near.pinned) return
-    if (near.own) onMove(id, dir > 0 ? near.ids.at(-1) : near.ids[0], dir > 0)
-    else if (near.shown.length) onMove(id, dir > 0 ? near.shown[0] : near.shown.at(-1), dir > 0)
+    if (near?.own && !near.folded) { onMove(id, dir > 0 ? near.ids[0] : near.ids.at(-1), dir < 0); onGroup?.(id, near.key, true) }
   }
 
   // ---------- the hover card ----------

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { api, usePoll, useFleet, onThisComputer } from '../../api.js'
+import { api, refetch, usePoll, useFleet, onThisComputer } from '../../api.js'
 import { PaneHeader, useMedia, store } from '../layout.jsx'
 import { WhiteboardPage } from '../../lazy.jsx'
 import { Menu, fileOp } from '../FileExtras.jsx'
@@ -12,14 +12,14 @@ import { fontCss, lookOfPack } from './look.js'
 import { withKeys, keys } from './keys.js'
 import { useFocus, canFullScreen } from './focus.js'
 import { useBusy } from '../../busy.js'
-import { useTrial } from '../../trials.js'
 import { YourFiles } from './HomeFiles.jsx'
 import AiAssist from '../AiAssist.jsx'
 import './studio.css'
 import './home.css'
 
-// Studio: documents, sheets, decks, PDFs and pages, like Meetings and Whiteboards a place of its own.
-// Any of them from Files or an agent's folder (on this computer, or another of yours through its
+// Studio: the one place to make things. Documents, sheets, decks, PDFs and pages, and your
+// whiteboards (which have no place of their own), like Meetings a place of its own.
+// A file from Files or an agent's folder (on this computer, or another of yours through its
 // window) opens here, is edited and saved where it is, and keeps every version (server/studio.js).
 // Ask an agent sends a change to one of your agents, and Studio shows it once the agent saves.
 // Each kind's editor loads only when a file of that kind opens.
@@ -30,8 +30,7 @@ const EDITORS = {
   page: lazy(() => import('./editors/PageEditor.jsx')),
   pdf: lazy(() => import('./pdf/PdfView.jsx')),
 }
-// Your signature and initials for AI Assist's Sign this, on the home page while Sign PDFs is on (a
-// beta feature).
+// Your signature and initials for AI Assist's Sign this (Sign PDFs), on the home page.
 const SignatureHome = lazy(() => import('./pdf/Signatures.jsx'))
 const ICON = { doc: 'doc', sheet: 'grid', deck: 'screen', pdf: 'file', page: 'code', board: 'shapes' }
 const KIND_LABEL = { doc: tx('Document'), sheet: tx('Sheet'), deck: tx('Deck'), pdf: tx('PDF'), page: tx('Page'), board: tx('Whiteboard') }
@@ -67,14 +66,18 @@ function StudioTabs({ on, onFiles, onPreview, name }) {
 // ---------- Files ----------
 // Studio's home, its Files: your files from wherever they are by kind and by where (HomeFiles.jsx),
 // and your design packs, with New in the header (a document, sheet, deck or page in a folder you
-// pick; its cards on the page only while there are no files yet). Preview opens the file last
-// open, or says how to pick one.
+// pick, or a whiteboard; its cards on the page only while there are no files yet). Preview opens
+// the file last open, or says how to pick one.
+// What New makes, one entry a kind: a file of that kind in the folder picked, started by startOf;
+// or, with make(title), something Bridge AI keeps itself, which answers what to open ({ root, path }).
+// Another kind is another entry here (and its row in HomeFiles.jsx's KINDS, to list them).
 const NEW = [
   { kind: 'doc', ext: '.docx', label: tx('Document'), hint: tx('A Word file') },
   { kind: 'doc', ext: '.md', label: tx('Markdown'), hint: tx('A Markdown file') },
   { kind: 'sheet', ext: '.xlsx', label: tx('Sheet'), hint: tx('An Excel file') },
   { kind: 'deck', ext: '.md', deck: true, label: tx('Deck'), hint: tx('Slides in Markdown, to present or send as PowerPoint') },
   { kind: 'page', ext: '.html', label: tx('Page'), hint: tx('An HTML page, like an artifact') },
+  { kind: 'board', label: tx('Whiteboard'), hint: tx('A board to draw on by hand, or to have a diagram drawn on'), make: async (title) => { const b = await api('/boards', { method: 'POST', body: { title } }); refetch('/boards'); return { root: 'board', path: b.id } } },
 ]
 // A new file starts in your default design pack's look, where it has one: a Word file's fonts and
 // colours, a page's (as CSS variables an agent keeps using, and its logo). A deck follows the
@@ -142,7 +145,6 @@ export function StudioHome({ onOpen }) {
   const { data, refresh } = usePoll('/studio/recent', 15_000)
   const folders = useFolders()
   const packs = useDesignPacks()
-  const signing = useTrial('signature-assist')
   const [view, setView] = useState('files') // files, or preview with nothing open yet
   const last = lastOpen()
   const preview = () => (last?.root && last.path ? onOpen({ root: last.root, path: last.path }) : setView('preview'))
@@ -152,7 +154,6 @@ export function StudioHome({ onOpen }) {
   const [making, setMaking] = useState(null) // the New kind being named
   const [name, setName] = useState('')
   const [forWhat, setForWhat] = useState('') // what a new sheet is for, for AI Assist to make (Make a Sheet)
-  const makeSheets = useTrial('make-sheet')
   const [where, setWhere] = useState('')
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -163,10 +164,11 @@ export function StudioHome({ onOpen }) {
     try {
       const n = making
       const title = name.trim() || t(n.label)
+      if (n.make) { const made = await n.make(title); setMaking(null); setName(''); onOpen(made); return }
       const file = `${title}${n.deck ? '.md' : n.ext}`
       const r = await api('/studio/new', { method: 'POST', body: { root: where, dir: '', name: file, ...(await startOf(n, title, packFor(packs.list))) } })
       // A sheet said to be for something: AI Assist makes it as it opens, to keep or discard.
-      if (n.kind === 'sheet' && makeSheets && forWhat.trim()) (await import('./xlsx.js')).makeOnOpen(where, r.path, forWhat)
+      if (n.kind === 'sheet' && forWhat.trim()) (await import('./xlsx.js')).makeOnOpen(where, r.path, forWhat)
       setMaking(null); setName(''); setForWhat('')
       onOpen({ root: where, path: r.path })
     } catch (x) { setErr(x.message) } finally { setBusy(false) }
@@ -178,7 +180,7 @@ export function StudioHome({ onOpen }) {
     <PaneHeader icon="layers" title={t('Studio')}>
       <StudioTabs on={view} onFiles={() => setView('files')} onPreview={preview} name={last?.name} />
       <button type="button" className="btn small sd-head-btn sd-new-open" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenuAt(menuAt ? null : { x: r.right - 220, y: r.bottom + 4 }) }} disabled={!folders.length}
-        aria-haspopup="menu" aria-expanded={!!menuAt} aria-label={t('New')} title={t('Make a new document, sheet, deck or page')}><Icon name="plus" size={12} /> <span className="sd-btn-label">{t('New')}</span></button>
+        aria-haspopup="menu" aria-expanded={!!menuAt} aria-label={t('New')} title={t('Make a new document, sheet, deck, page or whiteboard')}><Icon name="plus" size={12} /> <span className="sd-btn-label">{t('New')}</span></button>
       {menuAt && <Menu x={menuAt.x} y={menuAt.y} className="sd-new-menu" onClose={closeMenu} items={NEW.map((n) => ({ label: t(n.label), icon: n.deck ? 'screen' : n.ext === '.md' ? 'doc' : ICON[n.kind], run: () => pick(n) }))} />}
     </PaneHeader>
   )
@@ -199,7 +201,7 @@ export function StudioHome({ onOpen }) {
     <div className="sd-home-view">
       {head}
       <div className="sd-home">
-        <p className="muted small sd-home-say">{t('Your documents, sheets, decks, PDFs and pages, wherever they are, edited here or by your agents, with every version kept.')}</p>
+        <p className="muted small sd-home-say">{t('Your documents, sheets, decks, PDFs and pages, wherever they are, and your whiteboards, edited here or by your agents, with every version kept.')}</p>
         {/* New's cards only while there are no files at all, as the way to start; else it's the
             header's menu, and your files have the page. */}
         {(empty || making) && <section className="sd-sec sd-new-sec">
@@ -218,16 +220,16 @@ export function StudioHome({ onOpen }) {
               <label className="sd-field"><span className="muted small">{t('Name')}</span>
                 <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t(making.label)} maxLength={100} />
               </label>
-              {making.kind === 'sheet' && makeSheets && (
+              {making.kind === 'sheet' && (
                 <label className="sd-field wide sd-new-for"><span className="muted small"><Icon name="wand" size={11} /> {t('What it\'s for, for AI Assist to make (or leave it empty)')}</span>
                   <input value={forWhat} onChange={(e) => setForWhat(e.target.value)} placeholder={t('A budget for a team of five')} maxLength={400} />
                 </label>
               )}
-              <label className="sd-field wide"><span className="muted small">{t('Where')}</span>
+              {!making.make && <label className="sd-field wide"><span className="muted small">{t('Where')}</span>
                 <select value={where} onChange={(e) => setWhere(e.target.value)}>
                   {folders.map((f) => <option key={f.root} value={f.root}>{f.label} · {home(f.path)}</option>)}
                 </select>
-              </label>
+              </label>}
               <span className="sd-new-acts">
                 <button type="submit" className="btn small primary" disabled={busy}>{busy ? t('Making it…') : t('Make it')}</button>
                 <button type="button" className="ghost-btn" onClick={() => setMaking(null)}>{t('Cancel')}</button>
@@ -243,7 +245,7 @@ export function StudioHome({ onOpen }) {
           return { kind: kindName(f.kind, extOf(f.name)), folder: f.dir || at?.path || f.where || null, full: at ? `${at.label} · ${at.full}` : f.dir || null }
         }} />
         <PacksSection packs={packs} />
-        {signing && <Suspense fallback={null}><SignatureHome /></Suspense>}
+        <Suspense fallback={null}><SignatureHome /></Suspense>
       </div>
     </div>
   )
@@ -298,8 +300,8 @@ function useApps() {
 // out of full screen, a strip of its own for them, which moves the window as a title bar does.
 const MAC_APP = typeof window !== 'undefined' && !!window.bridgeApp?.desktop && window.bridgeApp.platform === 'darwin'
 
-// Preview: a file in its own editor, or a whiteboard (root board, its name as the path) on
-// Whiteboards' own page.
+// Preview: a file in its own editor, or a whiteboard (root board, its name as the path) in the
+// whiteboard's own.
 export function StudioPage(props) {
   return props.root === 'board' ? <BoardPreview id={props.path} onBack={props.onBack} onOpen={props.onOpen} /> : <FilePage {...props} />
 }
@@ -473,7 +475,6 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   // doesn't update by itself meanwhile (busy.js).
   useEffect(() => { if (!dirty) return; const q = (e) => { e.preventDefault(); e.returnValue = '' }; window.addEventListener('beforeunload', q); return () => window.removeEventListener('beforeunload', q) }, [dirty])
   useBusy('studio', dirty)
-  const signOn = useTrial('signature-assist') // AI Assist's Sign this on a PDF (Sign PDFs, a beta feature)
   // Focus (focus.js): the page alone in the whole window, kept for each kind of editor.
   const focus = useFocus(meta?.kind, { onRefused: () => setNote({ text: t("This browser didn't let the page go full screen. Focus still gives it the whole window."), info: true }) })
   const apps = useApps()
@@ -524,7 +525,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   // AI Assist at the header's right end (in Focus, the status line's), with what the editor offers
   // as it opens (its handle's assist()): a document's words picked, a sheet's cells, a deck's
   // slides, a PDF to sign.
-  const assists = !!meta && (readOnly ? kind === 'pdf' && signOn : ASSISTS.has(kind) && meta.ext !== '.txt')
+  const assists = !!meta && (readOnly ? kind === 'pdf' : ASSISTS.has(kind) && meta.ext !== '.txt')
   const assist = assists && ((cls, more) => <AiAssist items={() => handle.current?.assist?.() || []} className={cls} {...more} />)
   const opening = <div className="sd-empty sd-loading" role="status"><Icon name="refresh" size={16} className="spin" /><span className="muted">{t('Opening {name}…', { name })}</span></div>
   const versions = meta?.versions?.length || 0

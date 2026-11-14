@@ -9,7 +9,9 @@
 .app.narrow .ask-btn { height: 40px; padding: 0 16px 0 14px; font-size: 14px; }
 .app.narrow .ask-line { white-space: normal; line-height: 1.35; }
 
-/* Settings › Voice › Spoken Answers. */
+/* Settings › Voice & Meetings › Spoken Answers. Its one column no wider than the panel, however long
+   a voice's name is (on a phone it ran past the edge). */
+.st-voice-out { grid-template-columns: minmax(0, 1fr); }
 .st-voice-out .st-row > span:first-child { min-width: 120px; font-size: 13px; }
 .st-voice-out select.st-input { width: auto; min-width: 200px; max-width: 100%; }
 .st-note.st-natural-ask { flex-direction: column; align-items: flex-start; gap: 5px; }

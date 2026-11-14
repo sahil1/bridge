@@ -615,7 +615,7 @@ export async function change({ prompt, scene, model, selected = false } = {}) {
   return { ops: r.got.ops, model: r.model, calls: r.calls }
 }
 
-// @bridge in a comment on a board (Comments and @bridge, a beta feature): Change it on the shapes
+// @bridge in a comment on a board (Comments and @bridge): Change it on the shapes
 // the comment is on (or the board around its pin), the request being what's asked, the comments
 // before it given as what to work on, never as instructions. The page puts what comes back on
 // the board as a suggestion, and says what it did in the thread, signed with the model (by).

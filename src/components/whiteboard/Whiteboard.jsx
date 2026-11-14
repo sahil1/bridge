@@ -22,7 +22,6 @@ import { openBoard, openBoards } from './links.js'
 import { NameDialog } from '../FileExtras.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { useBusy } from '../../busy.js'
-import { useTrial } from '../../trials.js'
 import { Threads, SAY, useAuthor } from '../studio/doccomments.jsx'
 import { useBoardThreads } from './boardcomments.jsx'
 import './whiteboard.css'
@@ -39,7 +38,7 @@ const enc = encodeURIComponent
 // about the shapes selected (or the whole board); and the meeting moves (DrawPanel.jsx KINDS),
 // made straight away. open: the panel is open; drawn: something's on the board; sel: how many
 // shapes are selected; show(mode): opens the panel that way.
-const drawAssist = (open, drawn, show, sel = 0, studio = false) => [
+const drawAssist = (open, drawn, show, sel = 0) => [
   { label: t('Draw this'), hint: t('A diagram from what you describe, a meeting or a document'), run: () => show('draw') },
   { label: t('Change it'), hint: drawn ? t('The whole board, or the shapes you select') : t('Once there\'s something on the board'), disabled: !drawn, run: () => show('change') },
   { label: sel ? t('Ask about these') : t('Ask about the board'), hint: !drawn ? t('Once there\'s something on the board') : sel ? t('A question about the {n} selected, answered here', { n: sel }) : t('Select shapes to ask about only those'), disabled: !drawn, run: () => show('ask') },
@@ -48,10 +47,10 @@ const drawAssist = (open, drawn, show, sel = 0, studio = false) => [
   { label: t('Group by theme'), hint: !drawn ? t('Once there\'s something on the board') : sel ? t('The {n} selected, gathered in a box per theme', { n: sel }) : t('The notes on the board, gathered in a box per theme'), disabled: !drawn, run: () => show('themes') },
   { label: t('A timeline'), hint: drawn ? t('With owners and dates, from what\'s on the board') : t('With owners and dates, from a meeting'), run: () => show('timeline') },
   { label: t('Action items'), hint: t('For each person, to put on your task list'), run: () => show('actions') },
-  // The board written up, into Studio (a beta feature: offered only once it's on).
-  studio && 'sep',
-  studio && { label: t('Make a document'), hint: drawn ? t('A Word document of this board, in Studio') : t('Once there\'s something on the board'), disabled: !drawn, run: () => show('doc') },
-  studio && { label: t('Make a deck'), hint: drawn ? t('Slides of this board, in Studio, to present or send as PowerPoint') : t('Once there\'s something on the board'), disabled: !drawn, run: () => show('deck') },
+  // The board written up, into Studio.
+  'sep',
+  { label: t('Make a document'), hint: drawn ? t('A Word document of this board, in Studio') : t('Once there\'s something on the board'), disabled: !drawn, run: () => show('doc') },
+  { label: t('Make a deck'), hint: drawn ? t('Slides of this board, in Studio, to present or send as PowerPoint') : t('Once there\'s something on the board'), disabled: !drawn, run: () => show('deck') },
   open && 'sep',
   open && { label: t('Close AI Assist'), run: () => show(null) },
 ]
@@ -390,14 +389,11 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
   const dark = useDarkMode()
   // Whether this computer can show the folder (not in Docker, or on Linux with no desktop).
   const canOpen = !!usePoll('/boards', 10 * 60 * 1000).data?.canOpen
-  // Make a document or a deck writes into Studio, a beta feature (src/trials.js).
-  const studio = useTrial('studio')
   const boardLook = look || d.ready?.look || 'clean'
-  // Comments on the shapes or a place on the board, kept in its file (Comments and @bridge, a
-  // beta feature): a pin picked on the board opens its thread (boardcomments.jsx).
-  const commenting = useTrial('comments')
+  // Comments on the shapes or a place on the board, kept in its file (Comments and @bridge): a pin
+  // picked on the board opens its thread (boardcomments.jsx).
   const author = useAuthor()
-  const threads = useBoardThreads({ board: d.board, on: commenting, author, look: boardLook, onOpen: () => setPanel('comments') })
+  const threads = useBoardThreads({ board: d.board, on: true, author, look: boardLook, onOpen: () => setPanel('comments') })
   const comment = () => { setPanel('comments'); threads.start() }
   const scheme = prefs?.on ? prefs.prefs?.colours?.value || 'soft' : 'soft'
   // A meeting's live board (server/meetboard.js): the meeting it's kept from, a click away.
@@ -529,9 +525,9 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
           )} />}
         </span>}
         {wide && <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-label={t('Versions')} title={t('Versions: as you left it, and before each AI Assist change')} aria-pressed={panel === 'versions'}><Icon name="clock" size={14} /></button>}
-        {commenting && <button type="button" className={`win-btn wb-comments-btn${panel === 'comments' ? ' on' : ''}`} onClick={() => setPanel(panel === 'comments' ? null : 'comments')} aria-label={t('Comments')} title={t('Comments on the shapes picked, or a place on the board, kept in its file. @bridge in one asks AI Assist.')} aria-pressed={panel === 'comments'}><Icon name="chat" size={14} />{threads.count > 0 && <span className="wb-comments-n">{threads.count}</span>}</button>}
+        <button type="button" className={`win-btn wb-comments-btn${panel === 'comments' ? ' on' : ''}`} onClick={() => setPanel(panel === 'comments' ? null : 'comments')} aria-label={t('Comments')} title={t('Comments on the shapes picked, or a place on the board, kept in its file. @bridge in one asks AI Assist.')} aria-pressed={panel === 'comments'}><Icon name="chat" size={14} />{threads.count > 0 && <span className="wb-comments-n">{threads.count}</span>}</button>
         <button type="button" className={`win-btn${panel === 'settings' ? ' on' : ''}`} onClick={() => setPanel(panel === 'settings' ? null : 'settings')} aria-label={t('Whiteboard Settings')} title={t('Whiteboard Settings')} aria-pressed={panel === 'settings'}><Icon name="settings" size={14} /></button>
-        <AiAssist className="btn small wb-ai-btn" compact={!wide} on={panel === 'draw'} disabled={!d.board.api} items={() => drawAssist(panel === 'draw', !!count.n, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel('draw') } else setPanel(null) }, count.sel, studio)} />
+        <AiAssist className="btn small wb-ai-btn" compact={!wide} on={panel === 'draw'} disabled={!d.board.api} items={() => drawAssist(panel === 'draw', !!count.n, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel('draw') } else setPanel(null) }, count.sel)} />
         <span className="menu-anchor">
           <button type="button" className="win-btn" onClick={() => setMenu(menu === 'more' ? null : 'more')} aria-label={t('More')} title={t('More')}><Icon name="more" size={14} /></button>
           {menu === 'more' && <Menu onClose={() => setMenu(null)} items={[
@@ -569,7 +565,7 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
             </div>
           )}
           {panel === 'draw' && d.board.api && <div className="wb-draw-wrap"><DrawPanel board={d.board} start={start} want={want} onStarted={() => setStart(null)} onClose={() => setPanel(null)} compact={!wide} boardId={id} look={boardLook} prefs={prefs} onDrawn={drawn} onSave={() => d.flush()} onAi={(what) => { aiNext.current = what }} /></div>}
-          {panel === 'comments' && commenting && d.board.api && <div className="wb-draw-wrap"><Threads threads={threads} say={SAY.board} className="wb-draw wb-comments" onComment={comment} onClose={() => setPanel(null)} /></div>}
+          {panel === 'comments' && d.board.api && <div className="wb-draw-wrap"><Threads threads={threads} say={SAY.board} className="wb-draw wb-comments" onComment={comment} onClose={() => setPanel(null)} /></div>}
           {panel === 'settings' && <div className="wb-draw-wrap"><BoardSettings look={boardLook} onLook={pickLook} prefs={prefs} onPrefs={setPrefs} onClose={() => setPanel(null)} /></div>}
           {panel === 'versions' && <div className="wb-draw-wrap"><BoardVersions id={id} onRestore={putBack} onClose={() => setPanel(null)} dark={dark} /></div>}
         </div>
@@ -616,6 +612,8 @@ function BoardCard({ b, onOpen, onError, refresh }) {
   )
 }
 
+// Shown by Studio's Files for its Whiteboards kind (HomeFiles.jsx), which has the page's header,
+// New and scroll: only what to draw and the boards.
 export function WhiteboardsHome({ onOpen }) {
   const { data, error, refresh } = usePoll('/boards', 15000)
   const boards = data?.boards || []
@@ -640,45 +638,35 @@ export function WhiteboardsHome({ onOpen }) {
   const draw = (e) => { e?.preventDefault(); const p = text.trim(); if (p && !busy) create({ title: titleFor(p), prompt: p }).then(() => setText('')) }
   const n = boards.length
   return (
-    <div className="wb-view">
-      <PaneHeader icon="shapes" title={t('Whiteboards')} subtitle={(
-        <>
-          <span className="sub-where">{data ? (n === 1 ? t('{n} whiteboard', { n }) : t('{n} whiteboards', { n })) : ''}</span>
-          {data?.folder && <button type="button" className="path-chip" onClick={() => onThisComputer() && data.canOpen && api('/boards/folder', { method: 'POST' }).catch((x) => setErr(x.message))} title={t('Where whiteboards are saved: {path}', { path: data.folder })}><Icon name="folder" size={10} /> <span>{data.folder.replace(/^(\/Users\/|\/home\/|C:\\Users\\)[^/\\]+/, '~')}</span></button>}
-        </>
-      )}>
-        <button type="button" className="btn small primary" onClick={() => create()} disabled={busy}><Icon name="plus" size={13} /> {t('New whiteboard')}</button>
-      </PaneHeader>
-      <div className="wb-home">
-        <form className="wb-ask" onSubmit={draw}>
-          <h1>{t('What should we draw?')}</h1>
-          <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder={t('Describe a flowchart, an architecture or network, a sequence or an org chart. It comes out as shapes and icons you can move and edit.')}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) draw(e) }} aria-label={t('What to draw')} />
-          <div className="wb-ask-row">
-            <div className="wb-kinds" role="radiogroup" aria-label={t('Kind of diagram')}>
-              {KINDS.map(([id, label]) => <button type="button" key={id} role="radio" aria-checked={kind === id} className={`chip${kind === id ? ' on' : ''}`} onClick={() => setKind(id)}>{t(label)}</button>)}
-            </div>
-            <span className="wb-grow" />
-            <button type="submit" className="btn small primary" disabled={busy || !text.trim() || (m.loaded && !m.models.length)}><Icon name="wand" size={12} /> {t('Draw')}</button>
+    <div className="wb-home in-studio">
+      <form className="wb-ask" onSubmit={draw}>
+        <h1>{t('What should we draw?')}</h1>
+        <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder={t('Describe a flowchart, an architecture or network, a sequence or an org chart. It comes out as shapes and icons you can move and edit.')}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) draw(e) }} aria-label={t('What to draw')} />
+        <div className="wb-ask-row">
+          <div className="wb-kinds" role="radiogroup" aria-label={t('Kind of diagram')}>
+            {KINDS.map(([id, label]) => <button type="button" key={id} role="radio" aria-checked={kind === id} className={`chip${kind === id ? ' on' : ''}`} onClick={() => setKind(id)}>{t(label)}</button>)}
           </div>
-          {m.loaded && !m.models.length
-            ? <p className="small muted">{t('No model to draw with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers. You can still draw by hand.')}</p>
-            : m.model && <p className="small muted">{m.model.via === 'local' ? t('Drawn by {model}, on this computer.', { model: m.model.label }) : t('Drawn by {model}: your words go to {provider}.', { model: m.model.label, provider: m.model.provider || m.model.label })} {t("To draw from a meeting, a project or an agent's work, use Draw this on a board.")}</p>}
-        </form>
-        {(err || (error && !data)) && <p className="error-text small" role="alert">{err || error}</p>}
-        {data && !n && (
-          <div className="wb-empty">
-            <Icon name="shapes" size={22} />
-            <p>{t('No whiteboards yet.')}</p>
-            <p className="muted small">{t('Draw by hand, paste pictures in, or ask for a diagram above. Agents and the Chief of Staff can make boards too, and diagram files in your projects (.excalidraw, Mermaid, draw.io) open as boards from Files.')}</p>
-          </div>
-        )}
-        {n > 0 && (
-          <ul className={`wb-grid${dark ? ' dark' : ''}`} aria-label={t('Whiteboards')}>
-            {boards.map((b) => <BoardCard key={b.id} b={b} onOpen={onOpen} onError={setErr} refresh={refresh} />)}
-          </ul>
-        )}
-      </div>
+          <span className="wb-grow" />
+          <button type="submit" className="btn small primary" disabled={busy || !text.trim() || (m.loaded && !m.models.length)}><Icon name="wand" size={12} /> {t('Draw')}</button>
+        </div>
+        {m.loaded && !m.models.length
+          ? <p className="small muted">{t('No model to draw with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers. You can still draw by hand.')}</p>
+          : m.model && <p className="small muted">{m.model.via === 'local' ? t('Drawn by {model}, on this computer.', { model: m.model.label }) : t('Drawn by {model}: your words go to {provider}.', { model: m.model.label, provider: m.model.provider || m.model.label })} {t("To draw from a meeting, a project or an agent's work, use Draw this on a board.")}</p>}
+      </form>
+      {(err || (error && !data)) && <p className="error-text small" role="alert">{err || error}</p>}
+      {data && !n && (
+        <div className="wb-empty">
+          <Icon name="shapes" size={22} />
+          <p>{t('No whiteboards yet.')}</p>
+          <p className="muted small">{t('Draw by hand, paste pictures in, or ask for a diagram above. Agents and the Chief of Staff can make boards too, and diagram files in your projects (.excalidraw, Mermaid, draw.io) open as boards from Files.')}</p>
+        </div>
+      )}
+      {n > 0 && (
+        <ul className={`wb-grid${dark ? ' dark' : ''}`} aria-label={t('Whiteboards')}>
+          {boards.map((b) => <BoardCard key={b.id} b={b} onOpen={onOpen} onError={setErr} refresh={refresh} />)}
+        </ul>
+      )}
     </div>
   )
 }
@@ -748,7 +736,7 @@ export function FileDrawing({ pane, f, onSaved, onOpenPath }) {
         {own ? <SaveState status={d.status} /> : <span className="muted small">{kind === 'drawio' ? t('Drawn from this draw.io file, which stays as it is.') : t('Drawn from this Mermaid, which stays as it is.')}</span>}
         <span className="wb-grow" />
         {!own && <button type="button" className="btn small" onClick={saveBeside} disabled={!d.board.api} title={t('Saves the drawing as {name} next to this file', { name: `${base}.excalidraw` })}>{t('Save as .excalidraw')}</button>}
-        <button type="button" className="btn small" onClick={done ? () => openBoard(done) : toBoards} disabled={!d.board.api}><Icon name="shapes" size={12} /> {done ? t('Open in Whiteboards') : t('Add to Whiteboards')}</button>
+        <button type="button" className="btn small" onClick={done ? () => openBoard(done) : toBoards} disabled={!d.board.api}><Icon name="shapes" size={12} /> {done ? t('Open in Studio') : t('Add to Studio')}</button>
         <AiAssist className="btn small wb-ai-btn" on={panel} disabled={!d.board.api} items={() => drawAssist(panel, true, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel(true) } else setPanel(false) }, selected(d.board.api))} />
       </div>
       {d.conflict && <Conflict onTheirs={() => d.takeTheirs().catch((e) => setErr(e.message))} onMine={() => d.flush(true)} />}

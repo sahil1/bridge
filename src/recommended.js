@@ -1,9 +1,8 @@
-// Recommended Settings, a beta feature (Settings › About & Updates › Beta Features): the model and
-// effort Claude Code starts with, picked for your plan, and an effort level for each task from what
-// it's asked. One file the UI and the server share (server/index.js applies them when an agent
-// starts; desktop/stage.js copies it into the app). Nothing here leaves this computer: the plan
-// comes from Claude Code's own sign-in check (claude auth status), the effort from the words of
-// the message, read here, with no model asked.
+// Recommended Settings: the model and effort Claude Code starts with, picked for your plan, and an
+// effort level for each task from what it's asked. One file the UI and the server share
+// (server/index.js applies them when an agent starts; desktop/stage.js copies it into the app).
+// Nothing here leaves this computer: the plan comes from Claude Code's own sign-in check (claude
+// auth status), the effort from the words of the message, read here, with no model asked.
 
 // The English, marked for the translations (scripts/i18n.js finds tx('…') in src); it's translated
 // with t() where it shows. Not i18n's own tx: that one needs Vite, and the server reads this file too.

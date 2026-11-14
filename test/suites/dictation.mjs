@@ -823,7 +823,7 @@ try {
   ok(JSON.stringify((await kit.api('/config')).dictation) === '{}', 'no dictation settings at first: everything as it comes')
   await kit.api('/settings', { dictation: { key: 'Control+Alt+D', cleanup: false } }, 'PATCH')
   const c = (await kit.api('/config')).dictation
-  ok(c.key === 'Control+Alt+D' && c.cleanup === false, 'Settings › Voice saves them, and pages read them from /api/config', c)
+  ok(c.key === 'Control+Alt+D' && c.cleanup === false, 'Settings › Voice & Meetings saves them, and pages read them from /api/config', c)
   // Edit by voice: the selection rewritten by the model picked for it (a stand-in model), and only that.
   const none = await kit.api('/dictation/edit', { text: 'teh draft', instruction: 'fix the spelling' }).catch((e) => e.message)
   ok(/Pick the model/.test(none), 'edit by voice with no model picked: it says to pick one, and nothing\'s sent anywhere', none)

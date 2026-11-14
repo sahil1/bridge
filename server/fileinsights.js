@@ -1,4 +1,4 @@
-// AI Assist in Files (a beta feature): what takes room in a folder you asked about and the
+// AI Assist in Files and Folders: what takes room in a folder you asked about and the
 // folders in it, and how it could be tidier. It's read-only. Nothing here renames, moves, deletes or
 // writes anything in your folders: there's no call in this file that could (no write, rename,
 // removal or change of times), and the panel's buttons only open a file or show it in Finder.
@@ -618,8 +618,7 @@ function askView(a) {
 const answer = (fn) => async (req, res) => {
   try { res.json(await fn(req)) } catch (e) { res.status(e.status >= 400 && e.status < 600 ? e.status : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) }) }
 }
-export function routes(app, { rootOf, trialOff, here }) {
-  app.use(['/api/files/insights', '/api/files/assist'], trialOff('files', 'Files'))
+export function routes(app, { rootOf, here }) {
   app.post('/api/files/insights', answer(async (req) => {
     const root = String(req.body?.root || '')
     if (!root) throw fail('Say which folder to look at', 'root', 400)

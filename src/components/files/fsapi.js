@@ -16,7 +16,7 @@ export async function getJson(base, p, { signal } = {}) {
   const r = await fetch(`${base}/api${p}`, { signal, headers: { 'Content-Type': 'application/json' } })
   const data = await r.json().catch(() => null)
   if (!r.ok || !data) {
-    const said = data?.error || (r.status === 404 ? t('That computer\'s Bridge AI doesn\'t have Files yet. Update it there.') : `HTTP ${r.status}`)
+    const said = data?.error || (r.status === 404 ? t('That computer\'s Bridge AI doesn\'t have Folders yet. Update it there.') : `HTTP ${r.status}`)
     throw Object.assign(new Error(said), { status: r.status, code: data?.code || (data?.trial ? 'trial' : null), data: data || {} })
   }
   return data

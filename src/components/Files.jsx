@@ -30,7 +30,6 @@ import { SendDialog, UploadSheet, TransferStrip, PlacesMenu, usePlaces, canCopyH
 import { locale, t, tn, tx } from '../i18n/index.js'
 import { FileDrawing } from '../lazy.jsx'
 import { isDiagramFile, addMermaidButtons, whiteboards as studioHere } from './whiteboard/links.js'
-import { useTrial } from '../trials.js'
 import Assist from './files/Assist.jsx'
 import AiAssist from './AiAssist.jsx'
 import { useBusy } from '../busy.js'
@@ -235,7 +234,6 @@ function Editor({ value, onChange, onSave }) {
 }
 
 function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere }) {
-  const studio = useTrial('studio') // a beta feature (src/trials.js)
   const [state, setState] = useState({ loading: true })
   const [mode, setMode] = usePersisted('cc-md-mode', 'preview')
   const key = `${pane}\n${filePath}`
@@ -356,7 +354,7 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
           {(f?.kind === 'image' || f?.kind === 'pdf' || f?.kind === 'video' || f?.kind === 'audio' || isHtml) && <a className="win-btn" href={isHtml ? site : raw} target="_blank" rel="noreferrer" title={newTabLabel()} aria-label={newTabLabel()}><Icon name="external" size={13} /></a>}
           {f && onCopyHere && <button className="ghost-btn small copy-here" onClick={() => onCopyHere({ path: filePath, name: f.name, dir: false, size: f.size })} title={copyHereLabel()} aria-label={copyHereLabel()}><Icon name="download" size={12} /><span>{copyHereLabel()}</span></button>}
           {/* Studio edits Word, Excel, PowerPoint, Markdown, CSV, HTML and PDF files, with versions and Ask an agent. */}
-          {f && studioHere && studio && STUDIO_OPENS.test(filePath) && <button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root: pane, path: filePath } }))} title={t('Edit it in Studio, with every version kept and your agents to change it')}><Icon name="layers" size={12} /> {t('Open in Studio')}</button>}
+          {f && studioHere && STUDIO_OPENS.test(filePath) && <button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root: pane, path: filePath } }))} title={t('Edit it in Studio, with every version kept and your agents to change it')}><Icon name="layers" size={12} /> {t('Open in Studio')}</button>}
           {f?.kind === 'office' && onComputer && <button className="btn small" onClick={() => fileOp(pane, 'open', filePath).catch((e) => setSaveMsg({ text: e.message }))} title={t('Open it in the app that usually opens it')}><Icon name="external" size={12} /> {t('Open in app')}</button>}
           {onMenu && <button className="win-btn" title={t('More')} aria-label={t('More actions for this file')} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onMenu({ path: filePath, name: crumbs.at(-1), dir: false }, { clientX: r.right - 200, clientY: r.bottom + 4 }) }}><Icon name="more" size={14} /></button>}
         </div>
@@ -478,8 +476,9 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
   const [toast, setToast] = useState(null)
   const say = (text) => { setToast(text); setTimeout(() => setToast((t) => (t === text ? null : t)), 2200) }
   const [automation, setAutomation] = useState(false) // macOS said no to Finder (Trash on older macOS)
-  // AI Assist's Look over this folder, for a folder here ('' is the root), with Files (a beta feature).
-  const assistOn = useTrial('files')
+  // AI Assist's Look over this folder, for a folder here ('' is the root), where there's a computer to
+  // look on (not the demo or the phone apps' Cloud agents).
+  const assistOn = studioHere
   const [assist, setAssist] = useState(null)
   useEffect(() => setAssist(null), [pane])
   const onMenu = useCallback((entry, e) => setMenu({ x: e.clientX, y: e.clientY, entry }), [])

@@ -27,7 +27,6 @@ import { ENCODINGS } from '../csv.js'
 import SheetChart, { chartOfGrid } from '../sheetchart.jsx'
 import { googleKeys } from '../sheetkeys.js'
 import { sheetCells, formulaErrorWords } from '../sheetcells.js'
-import { useTrial } from '../../../trials.js'
 import { Threads, SAY, useAuthor } from '../doccomments.jsx'
 import { useSheetThreads, commentKey } from '../sheetcomments.jsx'
 import '../sheet.css'
@@ -138,10 +137,9 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
   const setPanelRef = useRef(setPanel)
   setPanelRef.current = setPanel
   const changed = useCallback((d) => { dirty.current = d; onDirty(d) }, [onDirty])
-  // Comments on the cells, as threads (Comments and @bridge, a beta feature), in an Excel file: read
-  // with it when the beta is on as it opens, and written back into it (sheetcomments.jsx). @bridge's
-  // changes go on the sheet as AI Assist's do (putChange), to keep or discard from the thread.
-  const threading = useTrial('comments')
+  // Comments on the cells, as threads (Comments and @bridge), in an Excel file: read with it as it
+  // opens, and written back into it (sheetcomments.jsx). @bridge's changes go on the sheet as AI
+  // Assist's do (putChange), to keep or discard from the thread.
   const author = useAuthor()
   const core = useRef(null) // Univer itself, for the services its facade doesn't reach
   const [threadMode, setThreadMode] = useState(false) // read with its threads
@@ -158,10 +156,9 @@ export default function SheetEditor({ file, data, onDirty, onStats, handle, read
   const commentRef = useRef(null)
   commentRef.current = () => { if (!threadsRef.current.on) return; setPanel('comments'); threadsRef.current.start() }
   useEffect(() => { if (panel === 'comments') threadsRef.current.cellPicked(sel) }, [sel, panel])
-  // Make a sheet (Make a Sheet, a beta feature): an empty Excel sheet made from what it's for,
-  // asked here or by New › Sheet (xlsx.js takeMake), made as soon as it opens.
-  const makeOn = useTrial('make-sheet')
-  const makes = makeOn && !readOnly && !info?.csv
+  // Make a sheet (Make a Sheet): an empty Excel sheet made from what it's for, asked here or by
+  // New › Sheet (xlsx.js takeMake), made as soon as it opens.
+  const makes = !readOnly && !info?.csv
   const [making, setMaking] = useState(false) // its panel opened once: kept from then on
   const [makePreset, setMakePreset] = useState(null)
   useEffect(() => { if (panel === 'make') setMaking(true) }, [panel])
@@ -232,11 +229,11 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
     let made = null
     const offs = []
     setReady(false); setErr(null); ops.current = []
-    Promise.all([readSheet(data, file.name, file.ext, { ...picked, threads: threading }), univerWords(), officeFonts()]).then(([wb, { code, words }]) => {
+    Promise.all([readSheet(data, file.name, file.ext, { ...picked, threads: true }), univerWords(), officeFonts()]).then(([wb, { code, words }]) => {
       if (!on || !host.current) return
       book.current = wb
       setInfo({ lost: wb.lost, charts: wb.charts || [], csv: wb.csv || null })
-      setThreadMode(threading && wb.kind === 'xlsx')
+      setThreadMode(wb.kind === 'xlsx')
       setThreadsIn(wb.threads || {})
       const n = wb.data.sheetOrder.length
       onStats?.({ text: n === 1 ? t('1 sheet') : t('{n} sheets', { n }) })
@@ -263,7 +260,7 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
       const u = made.univerAPI
       univer.current = u
       core.current = made.univer
-      const commenting = threading && !csv && !readOnly
+      const commenting = !csv && !readOnly
       // Charts and Print as the ribbon's own buttons, and AI Assist's Ask about these cells on a
       // right-click (AI Assist itself is at the right end of the page's header).
       if (!readOnly) {

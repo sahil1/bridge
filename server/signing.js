@@ -1,4 +1,4 @@
-// AI Assist's Sign this (Sign PDFs, a beta feature): a PDF you're asked to sign, explained in plain
+// AI Assist's Sign this (Sign PDFs, in Studio): a PDF you're asked to sign, explained in plain
 // words by the model you pick, then your drawn signature, initials and today's date put where you
 // approve, in a new copy: <its folder>/_signed/<name> (signed).pdf. The original isn't touched.
 // Your signature and initials are pictures you drew, kept only here, in <data>/studio/signatures,
@@ -275,10 +275,8 @@ export async function explain(root, rel, { pages: given, total, model, lang } = 
 }
 
 // ---------- Routes ----------
-// Under Studio's own (/api/studio), so both beta features must be on.
-export function routes(app, { wrap, rootOf, sq, trialOff }) {
-  app.use('/api/studio/signature', trialOff('signature-assist', 'Sign PDFs'))
-  app.use('/api/studio/sign', trialOff('signature-assist', 'Sign PDFs'))
+// Under Studio's own (/api/studio).
+export function routes(app, { wrap, rootOf, sq }) {
   app.get('/api/studio/sign/setup', wrap(async (req) => ({ ...(await mine()), model: await modelInfo(String(req.query.model || '') || null), readsScans: !!helpers.scanText })))
   app.get('/api/studio/signature/:which', async (req, res) => {
     try { res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.type('image/png').sendFile(await imageFile(req.params.which), { dotfiles: 'allow' }) } catch { res.status(404).json({ error: 'Not drawn yet' }) }

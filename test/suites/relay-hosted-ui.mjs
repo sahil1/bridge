@@ -26,7 +26,7 @@ import { ROOT, TEST, startKit, startHostedRelay, startAccounts, checks, until, b
 
 const { ok, done } = checks('relay-hosted-ui')
 const kits = []
-const devices = (p) => p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))
+const devices = (p) => p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'phone' } })))
 const HOSTED = 'Bridge AI\'s relay'
 const TOKEN = 'stats-for-tests'
 const env = { NODE_OPTIONS: `--import ${pathToFileURL(path.join(TEST, 'stand-ins', 'no-localhost-names.mjs')).href}` }
@@ -65,8 +65,15 @@ try {
   ok(/Recommended/.test(await way(s.p, HOSTED).innerText()) && /true/.test(await way(s.p, HOSTED).getAttribute('aria-checked')), 'with Bridge AI\'s relay offered and nothing set up, it\'s picked, as recommended')
   await needs.waitFor({ timeout: 10000 })
   ok(await needs.locator('.acct-in input[type=email]').count() === 1 && !(await s.p.locator('button', { hasText: 'Use Bridge AI\'s relay' }).count()), 'signed out: it asks for your email right there, with no Use button', await needs.innerText())
+  // What to do comes first: the sign-in, then what the relay can see and fair use, folded until opened.
+  const facts = s.p.locator('.relay-box details.relay-facts')
+  const folded = await s.p.evaluate(() => { const b = document.querySelector('.relay-box'); const a = b?.querySelector('.relay-needs'); const d = b?.querySelector('details.relay-facts'); return { first: !!(a && d && (a.compareDocumentPosition(d) & Node.DOCUMENT_POSITION_FOLLOWING)), open: d?.open, summary: d?.querySelector('summary')?.innerText.trim() } })
+  ok(folded.first && folded.open === false && folded.summary === 'What Bold Bridge can see, and fair use' && !(await facts.locator('.ph-facts').isVisible()) && (await s.p.locator('.st-tabs [aria-selected="true"]').innerText()) === 'Phone', 'on the Phone tab, the sign-in comes before what Bold Bridge can see and fair use, which are folded away', folded)
   await needs.scrollIntoViewIfNeeded()
   await shot(s.p, `${tag}relay-hosted-signin`)
+  await facts.locator('summary').click()
+  ok(!!(await until(() => facts.locator('.ph-facts').isVisible(), 3000, 100)) && await facts.locator('.ph-facts li').count() === 3 && /What it can see:[\s\S]*Fair use:[\s\S]*Open source:/.test(await facts.innerText()), 'opened: what it can see, fair use and open source, as they were', await facts.innerText())
+  await facts.locator('summary').click()
   // The one path: your email, the code it's sent, and the relay is asked for by itself.
   await needs.locator('input[type=email]').fill('sam@example.com')
   await needs.locator('button', { hasText: 'Email me a code' }).click()
@@ -220,9 +227,14 @@ try {
   await none.api('/setup', { name: 'Tester' })
   await h.p.reload()
   await h.p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
+  // (Each of its tabs, one after the other.)
   await devices(h.p)
-  const devText = await until(async () => { const x = await h.p.locator('.modal.settings').innerText().catch(() => ''); return /Link a device/.test(x) && /isn't set up yet/.test(x) && x }, 10000)
-  ok(!!devText && !/Bridge AI's relay|Bold Bridge/.test(devText) && /sign in to Cloudflare at the top of this page/.test(devText), 'and Settings › Devices names no hosted relay and no account anywhere, Link a device included', devText && devText.slice(-600))
+  let devText = ''
+  for (const [tab, re] of [['Phone', /Sign in with Cloudflare/], ['Computers', /Link a device[\s\S]*isn't set up yet/], ['Notifications', /What to notify about/]]) {
+    await h.p.locator('.st-tabs [role="tab"]', { hasText: tab }).click()
+    devText += (await until(async () => { const x = await h.p.locator('.modal.settings').innerText().catch(() => ''); return re.test(x) && x }, 10000)) || `(${tab} never showed)`
+  }
+  ok(!/never showed/.test(devText) && !/Bridge AI's relay|Bold Bridge/.test(devText) && /sign in to Cloudflare in the Phone tab/.test(devText), 'and Settings › Devices names no hosted relay and no account anywhere, Link a device included', devText && devText.slice(-600))
   ok(!(await h.p.locator('[data-check="page"]').count()) && (await none.api('/relay/pagecheck')).on === false, 'nor checks a phone page: there\'s no hosted relay in use', await none.api('/relay/pagecheck'))
   const noAcc = await fresh('noacc', { relay: { hostedUrl: hr.url } })
   ok(!(await noAcc.api('/relay')).hostedAvailable, 'and a hosted relay with no Bold Bridge accounts isn\'t offered at all (it can\'t work without one)')

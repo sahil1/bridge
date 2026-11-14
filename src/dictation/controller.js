@@ -62,7 +62,7 @@ export const dictationKey = (c) => (c?.key && (c.key !== 'Fn' || fnHeard(c)) ? c
 // What a bar says while it listens, held or hands-free.
 export const listeningHint = (mode, label) => (mode === 'free' ? t("Listening… press {key} or Enter when you're done", { key: label }) : t('Talking… let go to add it · Esc cancels'))
 
-// Settings › Voice › Dictation, from /api/config: { on, key, cleanup, atFiles, to, background,
+// Settings › Voice & Meetings › Dictation, from /api/config: { on, key, cleanup, atFiles, to, background,
 // history, keepFor, keepAudio, liveWords, tidy }.
 let cfg = {}
 export const configure = (c) => { cfg = c || {} }
@@ -490,7 +490,7 @@ async function transcribe(id) {
 
 // ---------- Tidy what I say (a trial: dictation-cleanup) ----------
 // From another app (the dictation window; not for a window of Bridge AI's it listens for, which is
-// as if said in Bridge AI), with it on in Settings › Voice › Dictation: the words go to the computer
+// as if said in Bridge AI), with it on in Settings › Voice & Meetings › Dictation: the words go to the computer
 // to be tidied by a model before they're pasted or sent (server/dictation.js tidy).
 // The server gives it a few seconds; this waits a little longer for the answer, then stops waiting
 // too. Nothing is lost either way: { text, by } tidied, or { code, error, local } and the words go
@@ -562,7 +562,7 @@ function liveSender(id) {
   }
 }
 
-// ---------- Kept (Settings › Voice › Dictation History; server/dictations.js) ----------
+// ---------- Kept (Settings › Voice & Meetings › Dictation History; server/dictations.js) ----------
 // Each dictation, with where it went: typed into a message box (its agent), a terminal or another
 // box in Bridge AI. The dictation window's are kept as soon as they're heard, with the app they
 // were said in, and amended once pasted, sent or copied (amend). With history off, nothing's sent
@@ -619,7 +619,7 @@ export const latest = (...ls) => ls.filter((l) => l?.pane && Number.isFinite(l.a
 // ---------- The key from any app ----------
 // Off until you say yes (shared/dictation/platform.js). In the desktop app, where this computer lets
 // it be heard from other apps, the first words that land in Bridge AI ask once; either answer is
-// kept, and Settings › Voice changes it.
+// kept, and Settings › Voice & Meetings changes it.
 let offered = false
 async function offerAnyApp() {
   const app = window.bridgeApp
@@ -636,5 +636,5 @@ export async function answerOffer(yes) {
   await api('/settings', { method: 'PATCH', body: { dictation: { background: yes } } }).then(settingsChanged, () => {})
   if (!yes || !was) return
   const s = await window.bridgeApp?.dictateConfigure?.(cfg).catch(() => null)
-  if (s?.taken) set({ note: t('{key} is taken by another app. Pick another key in Settings › Voice.', { key: keyLabel(s.key, keysPlatform()) }) })
+  if (s?.taken) set({ note: t('{key} is taken by another app. Pick another key in Settings › Voice & Meetings › Dictation.', { key: keyLabel(s.key, keysPlatform()) }) })
 }

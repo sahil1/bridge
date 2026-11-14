@@ -149,7 +149,8 @@ function Progress({ scan, onStop }) {
 
 function Problem({ err, machine, where, onAgain }) {
   const on = where || t('that computer')
-  const text = err.trial && machine ? t('Files is a beta feature on {computer} too. Turn it on there in Settings › About & Updates › Beta Features.', { computer: on })
+  // One from before Folders was part of Bridge AI, with the beta it was off.
+  const text = err.trial && machine ? t('{computer} has an older Bridge AI. Update it there, or turn on Files in its Settings › About & Updates › Beta Features.', { computer: on })
     : err.status === 404 && machine && !err.code ? t('Update Bridge AI on {computer} to use AI Assist there.', { computer: on })
     : err.message
   return <div className="fa-problem"><p className="error-text">{text}</p><button type="button" className="btn small" onClick={onAgain}><Icon name="refresh" size={12} /> {t('Try again')}</button></div>

@@ -1,7 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Icon from '../../Icon.jsx'
 import { usePersisted } from '../../layout.jsx'
-import { useTrial } from '../../../trials.js'
 import { t, tx } from '../../../i18n/index.js'
 import { rawUrl } from '../files.js'
 import { withKeys } from '../keys.js'
@@ -14,14 +13,13 @@ import './pdf.css'
 // beside them, zoom (to the width, the whole page, a percentage; ⌘ and the wheel, or a pinch), find
 // in its text with every match marked, the page you're on and a way to any other, and its text
 // to select and copy (or to Ask an agent about). Links in it open in a tab of their own.
-// Read-only: Studio doesn't change a PDF. With Sign PDFs on (a beta feature), AI Assist's Sign this
-// explains it and signs a copy (SignAssist.jsx).
+// Read-only: Studio doesn't change a PDF. AI Assist's Sign this (Sign PDFs) explains it and signs a
+// copy (SignAssist.jsx).
 const SignAssist = lazy(() => import('./SignAssist.jsx'))
 const narrow = () => typeof matchMedia === 'function' && matchMedia('(max-width: 700px)').matches
 const ZOOMS = [['page-width', tx('Fit width')], ['page-fit', tx('Whole page')], ['0.5', '50%'], ['0.75', '75%'], ['1', '100%'], ['1.25', '125%'], ['1.5', '150%'], ['2', '200%'], ['3', '300%'], ['4', '400%']]
 
 export default function PdfView({ file, data, onStats, handle, onOpen }) {
-  const signOn = useTrial('signature-assist')
   const scroller = useRef(null)
   const inner = useRef(null)
   const pdf = useRef(null) // { lib, V, doc, viewer, bus }
@@ -138,7 +136,7 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
   // or waits for its password, can't be signed.
   handle.current = {
     save: null,
-    assist: () => (signOn ? [{ label: t('Sign this'), hint: t('What you\'re signing in plain words, then your signature where it goes, in a signed copy'), on: signing, disabled: state.phase === 'error' || state.phase === 'password', run: () => { setSigning(!signing); if (signing) setPicked(null) } }] : []),
+    assist: () => [{ label: t('Sign this'), hint: t('What you\'re signing in plain words, then your signature where it goes, in a signed copy'), on: signing, disabled: state.phase === 'error' || state.phase === 'password', run: () => { setSigning(!signing); if (signing) setPicked(null) } }],
     selection: () => {
       const s = window.getSelection?.()
       const text = String(s || '').trim()

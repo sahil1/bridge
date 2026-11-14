@@ -5,7 +5,7 @@ import { threadsOf, AI_AUTHOR } from './wordcomments.js'
 import { mentions, requestOf, askOf } from './doccomments.jsx'
 import { deckComments, deckGuid } from './pptxdoc.js'
 
-// Comments on a PowerPoint's slides, as threads (Comments and @bridge, a beta feature): a comment on
+// Comments on a PowerPoint's slides, as threads (Comments and @bridge): a comment on
 // the slide shown, or on the shape picked on it, replies, resolved and opened again, deleted, all
 // written into the file as PowerPoint keeps its modern comments (pptxdoc.js), so PowerPoint shows
 // them as you left them. The pane is doccomments.jsx's, with a deck's words.

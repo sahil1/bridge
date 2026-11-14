@@ -535,6 +535,9 @@ export function createDemo({ everything = true } = {}) {
   on('GET', '/panes', () => ({ panes: panes() }))
   on('GET', '/agent-kinds', () => F.kinds())
   on('GET', '/agents/catalog', () => F.catalog())
+  // Recommended Settings (Settings › Agents): nothing to recommend here, with no sign-in to read a
+  // plan from.
+  on('GET', '/recommended', () => ({ runtime: 'builtin', agents: [] }))
   on('GET', '/dirs', ({ query }) => {
     const q = query.get('q') || '~/'
     const full = untilde(q)

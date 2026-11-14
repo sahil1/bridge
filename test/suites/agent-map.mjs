@@ -8,7 +8,7 @@
 // computer's agents by project with their state, what they're doing, their model and subagents,
 // and the Chief of Staff's hand-off; Laptop closed shows as offline with what it last said, also
 // after Studio restarts; the map opened just as an agent shows up stays open; one click opens
-// Desk's agent in a tab on Studio; with Tab Groups on (a beta feature), the tabs grouped by space
+// Desk's agent in a tab on Studio; Tab Groups: the tabs grouped by space
 // with Desk's at the end under its name, folding. Then 34 agents on four computers and the cloud (made up): side
 // by side on a desktop, nothing spilling out of its lane, in a light and a dark theme, and one lane
 // under another at phone width.
@@ -207,7 +207,8 @@ try {
   // One click: Desk's agent, in a tab here.
   await desk.locator('.am-row', { hasText: 'Fix rounding' }).locator('.am-main').waitFor({ timeout: 20000 })
   await desk.locator('.am-row', { hasText: 'Fix rounding' }).locator('.am-main').click()
-  ok(!!(await until(async () => /Fix rounding/.test(await s.p.locator('.ws-tab.main').innerText().catch(() => '')) && /Desk/.test(await s.p.locator('.ws-tab.main').innerText().catch(() => '')), 15000)), "one click opens Desk's agent in a tab here", await s.p.locator('.ws-tabs').innerText().catch(() => ''))
+  // (Its tab in Desk's group, the computer's name on the group's chip: Tab Groups.)
+  ok(!!(await until(async () => /Fix rounding/.test(await s.p.locator('.ws-tab.main').innerText().catch(() => '')) && /Desk/.test(await s.p.locator('.ws-group[data-group^="dev:"]').innerText().catch(() => '')), 15000)), "one click opens Desk's agent in a tab here, in Desk's group", await s.p.locator('.ws-tabs').innerText().catch(() => ''))
   // The sidebar's devices and the agents board open it too, full size; its button puts the rest back.
   await s.p.locator('.rail-machines .rmc-map').click()
   ok(!!(await until(async () => (await s.p.locator('.work.maxed .am').count()) === 1, 8000)), "the sidebar's devices open it")
@@ -217,12 +218,11 @@ try {
   await s.p.locator('.board .board-map').click()
   ok(!!(await until(async () => (await s.p.locator('.work.maxed .am').count()) === 1, 8000)), "and the agents board's Map")
   await s.p.keyboard.press('Escape')
-  // Tab Groups, a beta feature: the tabs kept together as the sidebar has them, the views first,
+  // Tab Groups: the tabs kept together as the sidebar has them, the views first,
   // then this computer's spaces, then Desk's agent at the end under Desk's name; Desk's group folds
   // to its name and how many. A reload keeps the tabs and what's on screen.
   // The agent opened here has a shell's title in its terminal, as one on Windows can: its tab is
   // named as the sidebar names it.
-  await a.api('/settings', { trials: { 'tab-groups': true } }, 'PATCH')
   const ledger = await launch(a, 'books', 'shell title', 'Ledger')
   ok(!!(await until(async () => /^Administrator: C:\\Windows/.test((await laneOf(a, 'Studio'))?.agents?.find((x) => x.paneId === ledger.paneId)?.title || ''), 30000, 400)), "Ledger's terminal has a shell's title")
   await s.p.locator('.rail .tab-main', { hasText: 'Ledger' }).first().click()
@@ -246,7 +246,6 @@ try {
   ok(!!(await until(async () => !(await strip.locator(`.ws-tab[data-pane="${deskTab}"]`).count()) && /Desk\s*1/.test(await strip.locator('.ws-group.folded').innerText().catch(() => '')), 5000)), "folded, Desk's group is its name and how many", await order())
   await strip.locator('.ws-group', { hasText: 'Desk' }).click()
   ok(!!(await until(async () => (await strip.locator(`.ws-tab[data-pane="${deskTab}"]`).count()) === 1, 5000)), 'and unfolded, its tab is back')
-  await a.api('/settings', { trials: { 'tab-groups': false } }, 'PATCH')
   ok(s.errors.filter((e) => !/due to access control checks/.test(e)).length === 0, 'no page errors', s.errors)
   await s.ctx.close()
 

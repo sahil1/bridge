@@ -11,7 +11,7 @@ import { MEETING_KEYS } from '../../../shared/mentions.js'
 import { Advanced, Line } from './Advanced.jsx'
 import '../meetings/meetings.css'
 
-// Settings › Meetings: which engine turns speech into text (on this computer, or a service you have
+// Settings › Voice & Meetings: which engine turns speech into text (on this computer, or a service you have
 // a key for), the language, names and terms, the model that writes the notes and what it does by
 // itself (the summary, cleaning up, naming who spoke, preparing: on unless turned off, and what each
 // reads goes to that model, so which and where it runs is said there), AI Assist's live board (a
@@ -146,7 +146,7 @@ function RoomVoices({ v, m, set, refresh }) {
     </section>
   )
 }
-// Settings › Model Providers at its speech services, where their keys go; Settings › Voice.
+// Settings › Model Providers at its speech services, where their keys go; Speech to Text, the tab after Dictation.
 const openSpeechKeys = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers-speech' } }))
 const openVoice = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } }))
 const openProviders = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))
@@ -208,7 +208,7 @@ export default function Meetings({ onOpenAgent }) {
         <div className="mt-engines" role="radiogroup" aria-label={t('Speech engine')}>
           <label className={`mt-engine ${d.engine === 'local' ? 'on' : ''}`}>
             <input type="radio" name="engine" checked={d.engine === 'local'} onChange={() => set({ engine: 'local' })} />
-            <span className="mt-engine-main"><b>{t('On this computer')}</b><small>{t('{model}, the speech model picked in Settings › Voice. Free and private.', { model: model?.label || 'Parakeet' })}</small></span>
+            <span className="mt-engine-main"><b>{t('On this computer')}</b><small>{t('{model}, the speech model picked in Speech to Text. Free and private.', { model: model?.label || 'Parakeet' })}</small></span>
             <span className={`mt-state ${d.local.ready ? 'good' : ''}`}>{d.local.ready ? t('Ready') : d.needs === 'whisper' || d.needs === 'brew' ? t('Needs whisper.cpp') : t('Needs a download')}</span>
           </label>
           {(d.apple?.available || d.engine === 'apple') && (
@@ -225,7 +225,7 @@ export default function Meetings({ onOpenAgent }) {
             <span className="muted small">{model?.have
               ? t('{model}, the one voice notes and dictation use too.', { model: model.label })
               : d.standIn === 'apple' ? t("{model} isn't downloaded yet, so the Mac's own speech is used until it is.", { model: model?.label || 'Parakeet' })
-                : t("{model} isn't downloaded yet. It downloads when your first meeting starts, or now from Settings › Voice.", { model: model?.label || 'Parakeet' })}</span>
+                : t("{model} isn't downloaded yet. It downloads when your first meeting starts, or now from Speech to Text.", { model: model?.label || 'Parakeet' })}</span>
             <button type="button" className="btn small" onClick={openVoice}><Icon name="mic" size={12} /> {t('Speech models')}</button>
           </div>
         )}
@@ -246,7 +246,7 @@ export default function Meetings({ onOpenAgent }) {
             {LANGS.map(([id, label]) => <option key={id} value={id}>{id === 'auto' ? t('Detect it') : langName(id, label)}</option>)}
           </select>
         </Line>
-        {d.engine === 'local' && Array.isArray(model?.languages) && m.language && m.language !== 'auto' && !model.languages.includes(m.language) && <p className="st-note warn small"><Icon name="info" size={13} /> {t("{model} doesn't hear this language. Pick Whisper in Settings › Voice, or a speech service above.", { model: model.label })}</p>}
+        {d.engine === 'local' && Array.isArray(model?.languages) && m.language && m.language !== 'auto' && !model.languages.includes(m.language) && <p className="st-note warn small"><Icon name="info" size={13} /> {t("{model} doesn't hear this language. Pick Whisper in Speech to Text, or a speech service above.", { model: model.label })}</p>}
       </section>
 
       <section className="st-sec" data-setting="names-terms">

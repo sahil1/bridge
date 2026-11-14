@@ -119,7 +119,7 @@ export default function Memory({ from = 'meetings' }) {
               </div>
             </div>
           )}
-          {data && !data.dictationsKept && (all || from === 'dictations') && <p className="mm-note muted small" role="status"><Icon name="info" size={13} /> {t('Dictation history is off, so the names you say in dictations aren\'t counted here. Turn it on in Settings › Voice.')}</p>}
+          {data && !data.dictationsKept && (all || from === 'dictations') && <p className="mm-note muted small" role="status"><Icon name="info" size={13} /> {t('Dictation history is off, so the names you say in dictations aren\'t counted here. Turn it on in Settings › Voice & Meetings › Dictation.')}</p>}
           {err && <p className="error-text small" role="alert">{err}</p>}
           {/* Memory couldn't be read (the computer this window shows is away, say): said, with Try
               again. Once it's been read, a look that fails says so above what it showed. */}

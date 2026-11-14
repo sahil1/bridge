@@ -16,7 +16,7 @@ import { t, tn, tx } from '../i18n/index.js'
 // whether it stays awake for your phone, your AI
 // (any plan you sign in with, what's on this computer signed in or not, with Install and Sign in
 // right there; or an API key, or a model running on this computer: any one is enough; with
-// Recommended Settings on, the model and effort that suit a signed-in Claude Code's plan), then your
+// Recommended Settings, the model and effort that suit a signed-in Claude Code's plan), then your
 // projects (the folders your agents already worked in, the likely ones ticked). Nothing has to be
 // done to go on, and it can be closed at any step: name, weather and your phone keep their guessed
 // defaults and live in Settings. It ends on Home, in your first project.
@@ -127,11 +127,11 @@ export default function Onboarding({ onDone }) {
   const [installing, setInstalling] = useState(() => new Set()) // agents installed from here: once in, their sign-in starts by itself
   const phone = usePhoneOffer() // where to set up your phone, when Bridge AI's relay is offered
   const setup = useSetupPlan()
-  // Recommended Settings (a beta feature): once Claude Code is signed in, what suits its plan.
+  // Recommended Settings: once Claude Code is signed in, what suits its plan.
   const rec = useRecommended()
   const load = () => api('/setup').then(setD).catch((e) => setErr(e.message))
   const recheck = () => {
-    if (rec.on) rec.reload(true)
+    rec.reload(true)
     return api('/subscriptions?refresh=1').then((list) => setD((x) => x && ({
       ...x, usable: x.usable.map((a) => ({ ...a, signedIn: list.find((s) => s.kind === a.kind)?.signedIn ?? a.signedIn })),
     }))).catch(() => {})

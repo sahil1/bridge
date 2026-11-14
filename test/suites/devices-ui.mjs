@@ -30,7 +30,7 @@ const kitWith = async (name, rel) => {
   return k
 }
 const other = async (k, name) => (await k.api('/machines')).machines.find((m) => m.name === name) || null
-const devices = (p) => p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))
+const devices = (p, tab = 'machines') => p.evaluate((section) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section } })), tab)
 
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -82,7 +82,7 @@ try {
   // ---------- Pair a device ----------
   const s = await page(b, a.url, { mode: 'light', theme: 'sky' })
   await s.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
-  await devices(s.p)
+  await devices(s.p, 'phone')
   const pairBtn = s.p.locator('button', { hasText: 'Pair a device' })
   await pairBtn.waitFor({ timeout: 10000 })
   await pairBtn.click()
@@ -267,7 +267,7 @@ try {
   // ---------- on a phone ----------
   const narrow = await page(b, a.url, { phone: true, mode: 'dark', theme: 'midnight' })
   await narrow.p.waitForSelector('.tabbar button', { timeout: 15000 })
-  await devices(narrow.p)
+  await devices(narrow.p, 'phone')
   // (The code from above is still showing: it lasts 15 minutes.)
   await narrow.p.waitForSelector('.ph-pair', { timeout: 10000 })
   ok((await narrow.p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1, 'Pair a device fits a phone')

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Icon, { StatusDot } from './Icon.jsx'
 import { usePersisted } from './layout.jsx'
@@ -6,8 +6,6 @@ import { api, usePoll, fmtRelative, openInTerminal } from '../api.js'
 import { CloudMark, linkOf, whereOf } from './cloudBits.jsx'
 import SessionSwitcher from './Sessions.jsx'
 import RailMeetings from './meetings/RailMeetings.jsx'
-import RailDictations from './dictations/RailDictations.jsx'
-import { ANY as ANY_DICTATION } from './dictations/shared.jsx'
 import { RailMachines } from './Machines.jsx'
 import { Quiet } from './ErrorBoundary.jsx'
 import { openMeeting, useMeetings } from './meetings/recording.jsx'
@@ -137,39 +135,22 @@ function HoverCard({ row, rect, git, preview }) {
 
 // New (Home: start something) and Meetings sit above the spaces; a red dot while a meeting records.
 // With Home on (a beta feature), Home is the first row, with what needs you on every device (needs).
-export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onNewTerminal, onHistory, onMeetings, onDictations, recording, needs = 0 }) {
-  const studio = useTrial('studio') // a beta feature (src/trials.js)
-  const files = useTrial('files') // so is Files, every folder on your computers
-  const home = useTrial('home')
+// Dictations are a tab of Meetings (Meetings.jsx), so Meetings is marked while they show.
+export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onNewTerminal, onHistory, onMeetings, recording, needs = 0 }) {
+  // Studio and Folders, where there's a computer to keep files on (not the demo or the phone apps'
+  // Cloud agents). Whiteboards are one of Studio's kinds, so they have no row of their own.
+  const inStudio = String(selected || '').startsWith('view:studio')
+  const home = useTrial('home') // a beta feature (src/trials.js)
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState(null)
   const [closedWs, setClosedWs] = usePersisted('cc-rail-closed', {})
-  // The sidebar's two parts fold under their headings, as Slack's and Linear's sections do: Views
-  // (Home to Files, and Devices) to one row of their icons, so none is more than a click away, and
-  // Spaces out of sight but for how many there are (or how many need you). Both open to start with;
-  // kept on this computer. The sidebar scrolls as one with both headings kept in sight (styles.css
-  // .rail-head): Spaces' stops under Views' as you scroll into your spaces, so it's told how tall
-  // Views' is (a row of icons wraps in a narrow sidebar).
-  const [viewsOpen, setViewsOpen] = usePersisted('cc-rail-views', true)
+  // Spaces fold under their heading, as Slack's and Linear's sections do, out of sight but for how
+  // many there are (or how many need you); open to start with, kept on this computer. The rows above
+  // them (Home to Folders, and Devices) don't fold: there are few, and each is a way in. The sidebar
+  // scrolls as one with Spaces' heading kept in sight (styles.css .rail-head).
   const [spacesOpen, setSpacesOpen] = usePersisted('cc-rail-spaces', true)
-  const scrollRef = useRef(null)
-  const viewsHead = useRef(null)
-  useLayoutEffect(() => {
-    const head = viewsHead.current
-    const box = scrollRef.current
-    if (!head || !box) return
-    const fit = () => box.style.setProperty('--rail-views-h', `${head.offsetHeight}px`)
-    fit()
-    if (typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(fit)
-    ro.observe(head)
-    return () => ro.disconnect()
-  }, [collapsed])
   // Meetings, listed under their row like a space's tabs: open once you go to Meetings.
   const [meetingsOpen, setMeetingsOpen] = usePersisted('cc-rail-meetings', false)
-  // Dictations, under Meetings, once there's one kept (or it's open): its latest listed the same way.
-  const [dictOpen, setDictOpen] = usePersisted('cc-rail-dictations', false)
-  const anyDictation = usePoll(ANY_DICTATION, 60000).data?.total > 0 || selected === 'view:dictations'
   const [menu, setMenu] = useState(null) // row id or `ws:<id>`
   const [renaming, setRenaming] = useState(null) // { kind: 'tab'|'ws', id }
   const [hover, setHover] = useState(null) // { row, rect }
@@ -317,10 +298,8 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         <button className={`mini-nav ${selected === 'view:new' ? 'on' : ''}`} data-tour="new-agent" onClick={() => onNewAgent?.()} aria-label={t('New')} title={t('New')}><Icon name="edit" size={15} /></button>
         {!fleet?.down && <button className={`mini-nav ${chiefOn ? 'on' : ''}`} data-tour="chief" onClick={goChief} disabled={launching} aria-label={t('Chief of Staff')} title={`${t('Chief of Staff')}\n${chiefWhat}`}><Icon name="helm" size={15} />{(chief?.status === 'blocked' || threads.some((a) => a.status === 'blocked')) && <span className="mini-needs" />}</button>}
         <button className={`mini-nav ${String(selected || '').startsWith('view:meeting') ? 'on' : ''}`} onClick={() => onMeetings?.()} aria-label={recording ? t('Meetings (recording)') : t('Meetings')} title={t('Meetings')}><Icon name="mic" size={15} />{recording && <span className="rec-dot mini-rec" />}</button>
-        {anyDictation && <button className={`mini-nav ${selected === 'view:dictations' ? 'on' : ''}`} onClick={() => onDictations?.()} aria-label={t('Dictations')} title={t('Dictations')}><Icon name="wave" size={15} /></button>}
-        {whiteboards && <button className={`mini-nav ${String(selected || '').startsWith('view:whiteboard') ? 'on' : ''}`} onClick={() => onOpen('view:whiteboards')} aria-label={t('Whiteboards')} title={t('Whiteboards')}><Icon name="shapes" size={15} /></button>}
-        {whiteboards && studio && <button className={`mini-nav ${String(selected || '').startsWith('view:studio') ? 'on' : ''}`} onClick={() => onOpen('view:studio')} aria-label={t('Studio')} title={t('Studio')}><Icon name="layers" size={15} /></button>}
-        {whiteboards && files && <button className={`mini-nav ${selected === 'view:files' ? 'on' : ''}`} onClick={() => onOpen('view:files')} aria-label={t('Files')} title={t('Files')}><Icon name="folder" size={15} /></button>}
+        {whiteboards && <button className={`mini-nav ${inStudio ? 'on' : ''}`} onClick={() => onOpen('view:studio')} aria-label={t('Studio')} title={t('Studio')}><Icon name="layers" size={15} /></button>}
+        {whiteboards && <button className={`mini-nav ${selected === 'view:files' ? 'on' : ''}`} onClick={() => onOpen('view:files')} aria-label={t('Folders')} title={t('Folders')}><Icon name="folder" size={15} /></button>}
         <div className="rail-mini">
           {groups.filter((g) => rowsOf(g).length).map((g) => (
             <div key={g.id} className="mini-ws">
@@ -340,38 +319,13 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
     )
   }
 
-  // Views folded: each one an icon, with what its row says at a glance (a need, a recording).
-  const icon = (on, label, name, run, dot = null, more = {}) => (
-    <button type="button" className={`rail-icon${on ? ' on' : ''}`} onClick={run} aria-label={label} title={more.title || label} {...more}><Icon name={name} size={15} />{dot}</button>
-  )
   const spaceNeeds = groups.filter(listed).reduce((n, g) => n + g.agents.filter((a) => a.status === 'blocked' && !a.chief).length, 0)
   const spaceCount = groups.filter(listed).length
   const fold = (open, name) => ({ 'aria-expanded': open, 'aria-label': open ? t('Collapse {name}', { name }) : t('Expand {name}', { name }), title: open ? t('Collapse') : t('Expand') })
   return (
     <nav className="rail" aria-label={t('Workspaces')} data-tour="agents">
-      <div className="rail-scroll" ref={scrollRef}>
-        <div className={`rail-head rail-views-head${viewsOpen ? '' : ' folded'}`} ref={viewsHead}>
-          <button type="button" className="rail-sec" onClick={() => setViewsOpen(!viewsOpen)} {...fold(viewsOpen, t('Views'))}>
-            <Icon name="chevron" size={10} className={`caret ${viewsOpen ? 'rot90' : ''}`} />
-            {viewsOpen && <span className="rail-label">{t('Views')}</span>}
-          </button>
-          {!viewsOpen && (
-            <span className="rail-icons">
-              {home && icon(selected === 'view:home' || selected === 'view:everything', needs ? t('Home ({n} need you)', { n: needs }) : t('Home'), 'home', () => onOpen('view:home'), needs > 0 && <span className="mini-needs" />)}
-              {icon(selected === 'view:new', t('New'), 'edit', () => onNewAgent?.(), null, { 'data-tour': 'new-agent' })}
-              {!fleet?.down && icon(chiefOn, t('Chief of Staff'), 'helm', goChief, (chief?.status === 'blocked' || threads.some((a) => a.status === 'blocked')) && <span className="mini-needs" />, { 'data-tour': 'chief', disabled: launching, title: `${t('Chief of Staff')}\n${chiefWhat}` })}
-              {icon(String(selected || '').startsWith('view:meeting'), recording ? t('Meetings (recording)') : t('Meetings'), 'mic', () => onMeetings?.(), recording && <span className="rec-dot mini-rec" />)}
-              {anyDictation && icon(selected === 'view:dictations', t('Dictations'), 'wave', () => onDictations?.())}
-              {whiteboards && icon(String(selected || '').startsWith('view:whiteboard'), t('Whiteboards'), 'shapes', () => onOpen('view:whiteboards'))}
-              {whiteboards && studio && icon(String(selected || '').startsWith('view:studio'), t('Studio'), 'layers', () => onOpen('view:studio'))}
-              {whiteboards && files && icon(selected === 'view:files', t('Files'), 'folder', () => onOpen('view:files'))}
-              <Quiet name="Devices"><RailMachines compact /></Quiet>
-            </span>
-          )}
-        </div>
-        {/* Starting the chief of staff failed with its row folded away: said here. */}
-        {error && !viewsOpen && <p className="error-text small rail-rec-err" role="alert">{error}</p>}
-        {viewsOpen && <div className="rail-nav">
+      <div className="rail-scroll">
+        <div className="rail-nav">
           {home && <button className={`rail-nav-btn rail-home ${selected === 'view:home' || selected === 'view:everything' ? 'on' : ''}`} onClick={() => onOpen('view:home')}><Icon name="home" size={14} /> {t('Home')}{needs > 0 && <span className="mc-needs" aria-label={needs === 1 ? t('{n} needs you', { n: needs }) : t('{n} need you', { n: needs })}>{needs}</span>}</button>}
           <button className={`rail-nav-btn ${selected === 'view:new' ? 'on' : ''}`} data-tour="new-agent" onClick={() => onNewAgent?.()}><Icon name="edit" size={14} /> {t('New')}</button>
           {!fleet?.down && (
@@ -426,31 +380,19 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
             </Dialog>
           )}
           {meetingsOpen && <Quiet name="Meetings list"><RailMeetings selected={selected} onOpen={openMeeting} /></Quiet>}
-          {anyDictation && (
-            <div className="rail-nav-row">
-              <button className={`rail-nav-btn ${selected === 'view:dictations' ? 'on' : ''}`} onClick={() => { setDictOpen(true); onDictations?.() }}><Icon name="wave" size={14} /> {t('Dictations')}</button>
-              <button className="rail-nav-fold" onClick={() => setDictOpen(!dictOpen)} aria-expanded={dictOpen} aria-label={dictOpen ? t('Hide the dictations list') : t('Show the dictations list')} title={dictOpen ? t('Hide the list') : t('Show the list')}><Icon name="down" size={12} className={dictOpen ? '' : 'rot-up'} /></button>
-            </div>
-          )}
-          {anyDictation && dictOpen && <Quiet name="Dictations list"><RailDictations /></Quiet>}
           {whiteboards && (
             <div className="rail-nav-row">
-              <button className={`rail-nav-btn ${String(selected || '').startsWith('view:whiteboard') ? 'on' : ''}`} onClick={() => onOpen('view:whiteboards')}><Icon name="shapes" size={14} /> {t('Whiteboards')}</button>
+              <button className={`rail-nav-btn ${inStudio ? 'on' : ''}`} onClick={() => onOpen('view:studio')}><Icon name="layers" size={14} /> {t('Studio')}</button>
             </div>
           )}
-          {whiteboards && studio && (
+          {/* Folders: every folder on this computer and your others, as Finder shows them. */}
+          {whiteboards && (
             <div className="rail-nav-row">
-              <button className={`rail-nav-btn ${String(selected || '').startsWith('view:studio') ? 'on' : ''}`} onClick={() => onOpen('view:studio')}><Icon name="layers" size={14} /> {t('Studio')}</button>
-            </div>
-          )}
-          {/* Files: every folder on this computer and your others, as Finder shows them. */}
-          {whiteboards && files && (
-            <div className="rail-nav-row">
-              <button className={`rail-nav-btn ${selected === 'view:files' ? 'on' : ''}`} onClick={() => onOpen('view:files')}><Icon name="folder" size={14} /> {t('Files')}</button>
+              <button className={`rail-nav-btn ${selected === 'view:files' ? 'on' : ''}`} onClick={() => onOpen('view:files')}><Icon name="folder" size={14} /> {t('Folders')}</button>
             </div>
           )}
           <Quiet name="Devices"><RailMachines /></Quiet>
-        </div>}
+        </div>
         <div className="rail-head rail-spaces-head">
           <button type="button" className="rail-sec" onClick={() => setSpacesOpen(!spacesOpen)} {...fold(spacesOpen, t('Spaces'))}>
             <Icon name="chevron" size={10} className={`caret ${spacesOpen ? 'rot90' : ''}`} />
@@ -460,7 +402,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
           {!spacesOpen && spaceCount > 0 && <span className="ws-count" title={spaceNeeds ? (spaceNeeds === 1 ? t('{n} needs you', { n: spaceNeeds }) : t('{n} need you', { n: spaceNeeds })) : undefined}>{spaceNeeds ? <b className="needs">{spaceNeeds}</b> : spaceCount}</span>}
           <span className={`live-dot ${live ? 'on' : ''}`} title={live ? t('Live updates') : t('Reconnecting')} />
           <span className="rail-tools">
-            <button className="rail-tool" onClick={() => { setSpacesOpen(true); setNaming(true) }} aria-label={t('New space')} title={t('New space')}><Icon name="layers" size={14} /></button>
+            <button className="rail-tool" onClick={() => { setSpacesOpen(true); setNaming(true) }} aria-label={t('New space')} title={t('New space')}><Icon name="plus" size={14} /></button>
             {onNewTerminal && !fleet?.down && <button className="rail-tool" onClick={() => onNewTerminal()} aria-label={t('New terminal')} title={t('New terminal, to run commands on this computer')}><Icon name="terminal" size={14} /></button>}
             <button className="rail-tool" onClick={() => onHistory?.()} aria-label={t('History')} title={t('Search every conversation, and closed agents (⌘⇧F)')}><Icon name="clock" size={14} /></button>
             <button className="rail-tool" onClick={() => setAll(!allClosed)} aria-label={allClosed ? t('Expand all spaces') : t('Collapse all spaces')} title={allClosed ? t('Expand all') : t('Collapse all')}>
@@ -474,7 +416,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
           {!fleet && <div className="skeleton-rows pad"><div /><div /><div /></div>}
           {naming && (
             <div className="ws-row new-space-row">
-              <Icon name="layers" size={12} className="muted" />
+              <Icon name="plus" size={12} className="muted" />
               <InlineRename value="" onDone={createSpace} />
             </div>
           )}

@@ -48,7 +48,7 @@ const STEPS = {
     { at: 'agents', title: tx('Your agents'), body: tx('Every agent you run and what it\'s doing: {legend} The badge counts the ones waiting on you.') },
     CHIEF_PHONE,
     { at: 'views', title: tx('Chat or terminal'), body: tx('Switch between the conversation, the agent\'s live terminal, its files and its changes.') },
-    { at: 'settings', title: tx('Get notified'), body: tx('In Settings › Devices, turn on notifications to hear when an agent needs you or finishes.') },
+    { at: 'settings', title: tx('Get notified'), body: tx('In Settings › Devices › Notifications, turn on notifications to hear when an agent needs you or finishes.') },
     { at: 'search', title: tx('Your turn'), body: tx('Search finds any agent, file or command. It\'s also where you start a new agent.'), last: true },
   ],
 }

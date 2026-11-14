@@ -1,4 +1,4 @@
-// Files' sidebar, as Finder's: Favorites (your home folder and the usual folders in it), your cloud
+// Folders' sidebar, as Finder's: Favorites (your home folder and the usual folders in it), your cloud
 // drives, your projects (the folders your agents work in) and places, and Locations (the computer's
 // drives, then your other computers). It lists the computer you're looking at; another of yours
 // shows its own when you pick it. Naming a folder isn't reading it: Desktop and the rest are only
@@ -40,7 +40,7 @@ export default function Sidebar({ side, error, computers, machine, loc, onGo, on
   const icloud = side?.clouds?.[0]?.label === 'iCloud Drive'
   const shown = machine ? computers.others.find((c) => c.id === machine) : null
   return (
-    <nav className="fx-side" aria-label={t('Files sidebar')}>
+    <nav className="fx-side" aria-label={t('Folders sidebar')}>
       {shown && (
         <div className="fx-side-on">
           <Icon name="laptop" size={13} /><span>{t('On {name}', { name: shown.name })}</span>

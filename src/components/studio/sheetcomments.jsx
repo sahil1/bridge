@@ -6,7 +6,7 @@ import { api } from '../../api.js'
 import { threadsOf, AI_AUTHOR } from './wordcomments.js'
 import { mentions, requestOf, askOf } from './doccomments.jsx'
 
-// Comments on a sheet's cells, as threads (Comments and @bridge, a beta feature): a comment on the
+// Comments on a sheet's cells, as threads (Comments and @bridge): a comment on the
 // cell or the cells picked, replies, resolved and opened again, deleted, all written into the Excel
 // file itself as Excel 365 keeps them (xlsxbook.js: threaded comments, the persons who wrote them,
 // and a placeholder note for older Excels), so Excel shows them as you left them. A cell with an
@@ -62,7 +62,7 @@ export function commentKey(univer, run) {
 }
 
 // univer: the facade's ref; core: Univer itself (its services); initial: readSheet's threads, by
-// sheet id; on: whether comments can be written (the beta feature, and not read-only); author:
+// sheet id; on: whether comments can be written (an Excel file, not read-only); author:
 // your name; file: { root, path, name }; dirty(): a change to save; gridText(sheet, range): the
 // cells as the model reads them; change: the sheet's suggestions (put, keep, back), as AI Assist's
 // panel has them.

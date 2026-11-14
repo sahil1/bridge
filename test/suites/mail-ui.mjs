@@ -59,7 +59,7 @@ if (!IS_MAC) {
     await p.locator('.settings-btn').click()
     await p.locator('.modal.settings .st-nav').waitFor({ timeout: 8000 })
     const nav = (await p.locator('.st-nav .st-nav-item').allInnerTexts()).map((x) => x.trim())
-    ok(nav.includes('Meetings') && !nav.includes('Mail'), 'Settings has no Mail section', nav)
+    ok(nav.includes('Voice & Meetings') && !nav.includes('Mail'), 'Settings has no Mail section', nav)
     await shot(p, `${tag}mail-not-mac-1440`)
     ok(!real(errors).length, 'no page errors', errors)
     const ph = await page(b, kit.url, { phone: true })

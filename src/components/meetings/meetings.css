@@ -143,7 +143,7 @@
   .mt-transcript { border-left: 0; padding-left: 0; }
 }
 
-/* Settings › Meetings (settings/Meetings.jsx). */
+/* Settings › Voice & Meetings (settings/Meetings.jsx). */
 .st-check { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; line-height: 1.45; cursor: pointer; }
 .st-check input { margin-top: 3px; flex: none; }
 .st-meet textarea.st-input { height: auto; padding: 8px 11px; resize: vertical; font-family: var(--font); }
@@ -431,7 +431,7 @@ html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box
 .mt-mem-src { min-width: 56px; text-align: center; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--pane-3); color: var(--ink-3); }
 .mt-mem-src.you { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 
-/* Settings › Meetings › Save notes: a folder, subfolders and a file name for each kind of note. */
+/* Settings › Voice & Meetings › Save notes: a folder, subfolders and a file name for each kind of note. */
 .st-group { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--pane-2); }
 .st-pattern { display: grid; grid-template-columns: 110px minmax(0, 1fr); align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
 .st-pattern .st-row { margin: 0; }
@@ -801,11 +801,10 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
    Every meeting screen: each thing you tap a whole 40px target, fields at 16px (iOS zooms into a
    smaller one), one scroll for the page instead of a box scrolling inside it, and clear of the
    notch and the rounded corners when the phone is on its side. */
-/* A meeting fills the Meetings tab: without Meetings | Dictations over it, it's the only row. */
-.m-meetings > .pane:only-child { grid-row: 1 / -1; }
+/* The Meetings tab is one page: Meetings (or Dictations, as its tab says), or a meeting. */
+.m-meetings > .pane { grid-row: 1 / -1; }
 .app.narrow .mt-home, .app.narrow .mt-page { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
 .app.narrow .mt-page { padding-top: 10px; }
-.app.narrow .m-meetings > .m-seg button { height: 40px; }
 
 /* The header: Back, the name, its state and ⋯ on one row, then the views as a row of their own (an
    icon over each name), not squeezed beside the name. When it was, who was there and where it's
@@ -834,6 +833,9 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .app.narrow .mt-view .pane-head .seg { order: 5; flex: 1 0 100%; display: flex; padding: 3px; border-radius: 11px; }
 .app.narrow .mt-view .pane-head .seg button { flex: 1 1 0; min-width: 0; flex-direction: column; justify-content: center; gap: 1px; height: 44px; padding: 0 2px; border-radius: 8px; }
 .app.narrow .mt-view .pane-head .seg button span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 1.2; }
+/* Five (Meetings, Dictations, Insights, People, Memory): each as wide as its name, the room left
+   shared, so Dictations isn't cut short beside People. */
+.app.narrow .mt-view .pane-head .seg:has(> button:nth-child(5)) button { flex: 1 1 auto; }
 /* AI Assist at the right end of the views' row, so the name keeps its room on the first. */
 .app.narrow .mt-view .pane-head .mt-ai-btn { order: 6; align-self: center; }
 .app.narrow .mt-view .pane-head:has(.mt-ai-btn) .seg { flex-basis: calc(100% - 46px); }

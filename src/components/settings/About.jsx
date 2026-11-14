@@ -244,17 +244,11 @@ function ByItself({ u, checks }) {
 // Beta features (src/trials.js): each hidden until it's turned on here, for this computer. Each
 // says what it is in a line (all of it on hover).
 const SHORT = {
-  studio: tx('Documents, sheets, decks and PDFs, edited here or by your agents.'),
   home: tx('Where Bridge AI opens: what needs you on every computer, and what\'s coming up.'),
   'dictation-cleanup': tx('Dictation from other apps tidied by a model before it\'s pasted.'),
   'usage-everywhere': tx('The tokens each provider and model used, in Today › Usage. It stays on this computer.'),
   'meeting-insights': tx('Your meetings added up, and the people you meet. It turns on by itself once 5 meetings are recorded here.'),
-  'tab-groups': tx('The tabs above your agents, grouped as the sidebar has them.'),
-  'back-forward': tx('‹ and › in the top bar, as in a browser: back to where you were, and forward again. On to start with.'),
   routines: tx('Routines that run by themselves at the time you set, and History › Commands.'),
-  files: tx('Every folder on this computer and your others, as Finder shows them. Read-only for now.'),
-  'signature-assist': tx('In Studio, AI Assist\'s Sign this on a PDF you\'re asked to sign.'),
-  'make-sheet': tx('In Studio, a new sheet written by AI Assist from what it\'s for, shown to keep or discard.'),
   'call-video': tx("On a call, whose mouth moves on its video names who said what. Read on this Mac; no pictures kept."),
   'mcp-server': tx('Claude Code, Claude Desktop, Cursor and Codex read your boards, files and meeting summaries, and suggest changes you keep. Set up in Settings › MCP Servers.'),
 }
@@ -270,14 +264,10 @@ function Trials() {
     <section className="st-sec" data-setting="beta">
       <h4>{t('Beta Features')}</h4>
       <p className="muted small" title={t("New parts of Bridge AI, in beta. Each stays hidden until you turn it on here, and turning it off hides it again; what you made with it stays where it is.")}>{t('Each stays hidden until you turn it on here.')}</p>
-      {TRIALS.filter((x) => !x.mac || conf?.platform === 'darwin').map((x) => {
-        // One that's part of another works only with that one on, and says so.
-        const needs = x.needs && !on(x.needs) ? TRIALS.find((y) => y.id === x.needs) : null
-        return (
-          <label key={x.id} className="st-check"><input type="checkbox" checked={on(x.id) && !needs} disabled={!s || !!needs} onChange={(e) => set(x.id, e.target.checked)} />
-            <span title={t(x.hint)}><b>{t(x.label)}</b> <span className="muted small">{SHORT[x.id] ? t(SHORT[x.id]) : t(x.hint)}</span>{needs && <span className="muted small"> {t('It needs {name} on.', { name: t(needs.label) })}</span>}{auto[x.id] && on(x.id) && <span className="muted small ab-auto-on"> {t('Turned on by itself on {date}, once there were meetings to add up.', { date: new Date(auto[x.id]).toLocaleDateString(locale(), { month: 'long', day: 'numeric' }) })}</span>}</span></label>
-        )
-      })}
+      {TRIALS.filter((x) => !x.mac || conf?.platform === 'darwin').map((x) => (
+        <label key={x.id} className="st-check"><input type="checkbox" checked={on(x.id)} disabled={!s} onChange={(e) => set(x.id, e.target.checked)} />
+          <span title={t(x.hint)}><b>{t(x.label)}</b> <span className="muted small">{SHORT[x.id] ? t(SHORT[x.id]) : t(x.hint)}</span>{auto[x.id] && on(x.id) && <span className="muted small ab-auto-on"> {t('Turned on by itself on {date}, once there were meetings to add up.', { date: new Date(auto[x.id]).toLocaleDateString(locale(), { month: 'long', day: 'numeric' }) })}</span>}</span></label>
+      ))}
     </section>
   )
 }

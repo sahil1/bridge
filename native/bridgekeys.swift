@@ -42,7 +42,7 @@
 //                                             then exits:
 //     {"app":"Safari","bundle":"com.apple.Safari","path":"/Applications/Safari.app","pid":123,"secure":false}
 //   bridgekeys paste [--pid <pid>]            the text on stdin, pasted where you're typing in the
-//                                             app in front (Settings › Voice › "Where I'm typing"):
+//                                             app in front (Settings › Voice & Meetings › "Where I'm typing"):
 //                                             put on the clipboard, ⌘V pressed, and what was on the
 //                                             clipboard put back once that app has read it. --pid: the
 //                                             app that was in front when the key was pressed; if
