@@ -31,7 +31,9 @@ import { t, tx } from '../i18n/index.js'
 // what most people change first, and the rest under Advanced at its end (settings/Advanced.jsx).
 // Voice & Meetings is one section with tabs (they were two, Voice and Meetings, with dictation
 // inside Voice): what's showing is its tab, so "meetings" and "voice" open where they always did,
-// and "dictation" opens Dictation.
+// and "dictation" opens Dictation. Devices has tabs too (it was one long page): "phone" opens
+// Phone, "machines" Computers, as they did. A section with tabs has no line under its name there
+// (it would say the tabs again); the phone's list of sections keeps it.
 export const SECTIONS = [
   { id: 'general', label: tx('General'), icon: 'home', hint: tx('Name, default agent and model, location') },
   { id: 'agents', label: tx('Agents'), icon: 'bot', hint: tx('Installed agents and sign-in') },
@@ -40,7 +42,8 @@ export const SECTIONS = [
     tabs: [{ id: 'meetings', label: tx('Meetings') }, { id: 'dictation', label: tx('Dictation') }, { id: 'voice', label: tx('Speech to Text') }] },
   { id: 'mail', label: tx('Mail'), icon: 'mail', hint: tx('How You Write, for the replies AI Assist drafts, and your working hours'), mac: true },
   { id: 'mcp', label: tx('MCP Servers'), icon: 'tool', hint: tx('Tools your agents can use') },
-  { id: 'phone', label: tx('Devices'), icon: 'phone', hint: tx('Your phone and your other computers, through your relay or Tailscale; what to notify you about') },
+  { id: 'devices', label: tx('Devices'), icon: 'phone', hint: tx('Your phone and your other computers, through your relay or Tailscale; what to notify you about'),
+    tabs: [{ id: 'phone', label: tx('Phone') }, { id: 'machines', label: tx('Computers') }, { id: 'notifications', label: tx('Notifications') }] },
   { id: 'account', label: tx('Account'), icon: 'user', hint: tx('Your Bold Bridge account, for Early Access and Bridge AI\'s relay'), accounts: true },
   { id: 'appearance', label: tx('Appearance'), icon: 'palette', hint: tx('Theme, text size, density') },
   { id: 'config', label: tx('Config File'), icon: 'braces', hint: tx('Every setting, as JSON') },
@@ -56,10 +59,9 @@ const PHONE = [
 // section: where Settings opens. "all" is Settings itself: the list on a phone, General on a wider
 // screen. A section's id opens it (on a phone with ‹ Settings back to the list), and so does one
 // setting's (search.js: "accounts", "cloud", "permissions", "commands", "topbar" and the rest),
-// which opens its section at it, with Advanced opened when it's in there (reveal). "machines"
-// opens Devices at your devices (they were two sections, and linking machines needs the relay set
-// up on the phone one). A tab's id opens its section at it (and is no setting's, though Dictation
-// is both), and a section with tabs opens at its first.
+// which opens its section at it, with Advanced opened when it's in there (reveal). A tab's id
+// opens its section at it (and is no setting's, though Dictation and Devices' Computers,
+// "machines", are both), and a section with tabs opens at its first.
 const holds = (s, id) => s.id === id || !!s.tabs?.some((x) => x.id === id)
 const isTab = (id) => SECTIONS.some((s) => s.tabs?.some((x) => x.id === id))
 const settingOf = (section) => (cloudOnly || isTab(section) ? null : SETTINGS.find((x) => x.id === section) || null)
@@ -128,7 +130,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
     {at === 'mcp' && <Mcp />}
     {at === 'appearance' && <Appearance />}
     {at === 'config' && <ConfigFile />}
-    {at === 'phone' && <Phone focus={section === 'machines' ? 'machines' : null} />}
+    {cur.id === 'devices' && <Phone tab={at} focus={section === 'machines' ? 'machines' : null} />}
     {at === 'about' && <About />}
     {at === 'account' && <Account />}
     {at === 'cloud' && <CloudKeys focus="cloud" bare />}
@@ -168,7 +170,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
             </nav>
           ) : (
             <div className="st-scroll" key={at}>
-              {cur.hint && <p className="muted small st-lede">{t(cur.hint)}</p>}
+              {cur.hint && !tabs && <p className="muted small st-lede">{t(cur.hint)}</p>}
               {tabs}
               {body}
             </div>
@@ -193,8 +195,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
           <header className="st-head">
             <div>
               <h3>{t(cur.label)}</h3>
-              <p className="muted small">{t(cur.hint)}</p>
-              {tabs}
+              {tabs || <p className="muted small">{t(cur.hint)}</p>}
             </div>
             <button type="button" className="win-btn" onClick={onClose} aria-label={t('Close settings')}><Icon name="x" size={14} /></button>
           </header>

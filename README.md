@@ -243,11 +243,11 @@ Link your other computers running Bridge AI (Mac, Windows or Linux) and switch b
 
 1. Each device needs its relay (Settings › Devices, below).
 2. On one, Settings › Devices › **Pair a device**. It shows a QR code, a link and a code, the same for a phone or a computer, for 15 minutes and one device (**Add another device** makes a new one). A pairing link opened on a phone asks "Pair with <name>?" first.
-3. On the other computer, Settings › Devices › **Link a device**: paste the link, or type the address and code. They link both ways. The first one says the new device paired, with **Keep** and **Remove**; once you keep it, it's introduced to your other devices too.
+3. On the other computer, Settings › Devices › Computers › **Link a device**: paste the link, or type the address and code. They link both ways. The first one says the new device paired, with **Keep** and **Remove**; once you keep it, it's introduced to your other devices too.
 
 Or let your phone do it: scan the new computer's code with the Bridge AI app on a phone that's paired with another of your computers. The phone offers to link the two, asks, and takes you to the other one to allow it after checking both show the same six digits. A device's relay address alone asks the same way.
 
-Devices talk end-to-end encrypted through each other's relay, the same way a phone does ([server/machines.js](server/machines.js)). A link looks after itself: one that goes quiet (a Mac that slept, a network that changed) starts over, a device that moves to a new relay is followed there, and one that was set up again says so and links again with a new code. When one is offline, **Fix** checks each step between the two, says plainly where it stops, and connects again. Unlink in Settings › Devices, on either one.
+Devices talk end-to-end encrypted through each other's relay, the same way a phone does ([server/machines.js](server/machines.js)). A link looks after itself: one that goes quiet (a Mac that slept, a network that changed) starts over, a device that moves to a new relay is followed there, and one that was set up again says so and links again with a new code. When one is offline, **Fix** checks each step between the two, says plainly where it stops, and connects again. Unlink in Settings › Devices › Computers, on either one.
 
 The relay in between is trusted with nothing. What a device says about itself (its name, that it's a computer, where it's reached) counts only when it comes sealed, a refusal or another key through the relay is said ("the answer couldn't be checked") and tried again rather than acted on, and only the computer's own sealed word, or your Forget, unpairs a phone or unlinks a computer.
 
@@ -325,7 +325,7 @@ You rarely need to edit the file by hand. **Settings** (the gear in the top bar,
 | Voice & Meetings | Three tabs. **Meetings**: speech to text (this computer or a service), the language, names and terms, recording the call's sound, noticing calls and stopping when they end, the floating card, the model that writes notes, and where and how they're saved. **Dictation**: on or off, its key, where the words go, and its history. **Speech to Text**: the speech models this computer can run (Parakeet, Parakeet English, Whisper), which one voice notes, dictation and meetings use, their downloads, and the voice that reads answers aloud |
 | Mail | On a Mac: How You Write, for Reply Assist, and your working hours |
 | MCP Servers | The tools your agents can call, across all of them, with a catalog of 35 popular servers by category (web search, docs and notes, planning, Microsoft 365, deploy and monitoring, data, design); and Bridge AI as an MCP Server (a Beta Feature), so Claude Code, Claude Desktop, Cursor and Codex can read your whiteboards, files in your Places and meeting summaries, and suggest changes you keep in Needs You |
-| Devices | How your phone reaches this computer (Bridge AI's relay, a relay on your own Cloudflare, or Tailscale), pairing a phone, linking your other computers, and what you're notified about on which devices |
+| Devices | Three tabs. **Phone**: how your phone reaches this computer (Bridge AI's relay, a relay on your own Cloudflare, or Tailscale) and pairing a phone. **Computers**: linking your other computers. **Notifications**: what you're notified about, on which devices |
 | Account | Your Bold Bridge account, for Bridge AI's relay and Early Access: sign in with your email and a code, its devices, the relay's use, sign out, delete it. Bridge AI works the same without one |
 | Appearance | Theme, color mode, text size, density, font, language |
 | Config File | Your `config.json`, editable, checked before it's saved, with the effective settings and defaults beside it |
@@ -427,7 +427,7 @@ A small relay ([relay/](relay)) runs on your own free Cloudflare account. Bridge
 1. In Bridge AI, open **Settings › Devices** and click **Sign in with Cloudflare** (or use an API token made with Cloudflare's "Edit Cloudflare Workers" template). Bridge AI deploys the relay to your account. Its sign-in is kept apart from any other Cloudflare tools you use. Signing in this way needs Node.js; on a computer without it, **Install Node.js** puts the official version from nodejs.org in Bridge AI's own folder, with no password, and signs you in right after.
 2. Click **Pair a device** and scan the QR code with the phone's camera (or open the relay's address and type the code).
 3. Add it to the Home Screen: iPhone, Share › **Add to Home Screen**; Android, ⋮ › **Install app**. Open it from there, and type the code again if it asks.
-4. In Bridge AI on the phone, go to **Settings › Devices** and click **Turn on notifications**.
+4. In Bridge AI on the phone, go to **Settings › Devices › Notifications** and click **Turn on notifications**.
 
 Everything between the phone and the computer is end-to-end encrypted ([relay/web/link.js](relay/web/link.js)): each paired phone has its own key, kept on the phone, and each connection makes fresh keys. The relay, and Cloudflare, see when and how much, never what. That holds as long as the page doing the encrypting is Bridge AI's own: the iPhone and Android apps carry their own copy; in a phone's browser the page comes from the relay, which here is yours. It stores when your computer was last online, and messages waiting for your computer (below), sealed so it can't read them. Remove a phone in Settings and it's out. A phone can't pair other phones or change the relay; that's done on the computer.
 
@@ -443,10 +443,10 @@ If you already use [Tailscale](https://tailscale.com), a free private network be
 
 Only devices signed in to your Tailscale account can reach Bridge AI; nothing is opened to the internet.
 
-Either way, choose what you're notified about in Settings › Devices: an agent needs you, an agent finished, and usage running low (5 to 25% left). Notifications are encrypted end to end to your phone. iPhone needs iOS 16.4 or later for notifications.
+Either way, choose what you're notified about in Settings › Devices › Notifications: an agent needs you, an agent finished, and usage running low (5 to 25% left). Notifications are encrypted end to end to your phone. iPhone needs iOS 16.4 or later for notifications.
 
 - **What it's asking**: a "needs you" notification shows the agent's question or permission request, and tapping it opens that agent at its question.
-- **Answer buttons**: on Android and in Chrome on a computer (not iPhone), a yes or no question, or one with two short choices, gets buttons that answer it without opening the app. Each works once, for 10 minutes, and only if the agent is still asking that same question; otherwise Bridge AI opens. Turn them off in Settings › Devices.
+- **Answer buttons**: on Android and in Chrome on a computer (not iPhone), a yes or no question, or one with two short choices, gets buttons that answer it without opening the app. Each works once, for 10 minutes, and only if the agent is still asking that same question; otherwise Bridge AI opens. Turn them off in Settings › Devices › Notifications.
 - **Quiet while you're at the computer**: while Bridge AI is in front on your computer, or you typed or clicked in it in the last 2 minutes, your phone isn't notified (the computer's own notifications still are). **Notify my phone even when I'm at the computer** changes that.
 - **Mute an agent**: ⋯ › **Mute notifications** in its header or the sidebar, until you unmute it.
 
