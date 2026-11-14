@@ -1,9 +1,11 @@
 import { store } from '../layout.jsx'
 
-// Meetings at one of its tabs (Meetings.jsx MeetingsHome: its list, Dictations, Memory, Insights,
-// People): taken at once if it's open, else as it opens. more: what else the tab is told (a person).
+// Meetings at one of its tabs (Meetings.jsx MeetingsHome): Dictations, one of the meetings' own (its
+// list, Memory, Insights, People), or 'meetings' for the meetings at whichever of those they were
+// on. Taken at once if it's open, else as it opens. more: what else the tab is told (a person).
 export function meetingsAt(tab, more = {}) {
-  store.set('cc-meet-tab', tab)
+  store.set('cc-meet-kind', tab === 'dictations' ? 'dictations' : 'meetings')
+  if (tab !== 'dictations' && tab !== 'meetings') store.set('cc-meet-tab', tab)
   window.dispatchEvent(new CustomEvent('bridge-meetings-tab', { detail: { tab, ...more } }))
 }
 

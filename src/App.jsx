@@ -864,7 +864,7 @@ function App() {
   const openEverything = () => { openAgent('view:everything'); if (wide) set({ max: 'main' }) }
   const meetingsTab = (tab) => { meetingsAt(tab); openAgent('view:meetings') }
   // Meetings itself (the sidebar's row, ⌘K): its meetings, not Dictations, at the tab it was on.
-  const openMeetings = () => { if (store.get('cc-meet-tab', 'list') === 'dictations') meetingsAt('list'); openAgent('view:meetings') }
+  const openMeetings = () => { if (store.get('cc-meet-kind', 'meetings') === 'dictations') meetingsAt('meetings'); openAgent('view:meetings') }
   const paletteActions = [
     homeOn && { id: 'a:homeview', label: t('Home'), icon: 'home', keywords: 'needs you waiting answer ready review coming up today next meeting tasks inbox start', run: openHome },
     homeOn && { id: 'a:everything', label: t('Everything'), icon: 'grid', keywords: 'all every item device computer meetings tasks whiteboards agents lanes', run: openEverything },
@@ -1083,7 +1083,7 @@ function App() {
   // Terminal kept as the tab keeps it; Meetings' tab and Files' folder told to the view).
   const showInner = (id, v) => {
     if (v == null) return
-    if (id === 'view:meetings') { store.set('cc-meet-tab', v); window.dispatchEvent(new CustomEvent('bridge-meetings-tab', { detail: { tab: v } })); return }
+    if (id === 'view:meetings') { meetingsAt(v); return }
     if (isView(id) || isRemote(id) || id.startsWith('tab:')) { showPlaceIn(id, v); return }
     try { localStorage.setItem('cc-agent-views', JSON.stringify({ ...JSON.parse(localStorage.getItem('cc-agent-views') || '{}'), [id]: v })) } catch { /* private mode */ }
     setTimeout(() => window.dispatchEvent(new CustomEvent('cc-set-view', { detail: { paneId: id, view: v } })), 60)
@@ -1210,7 +1210,7 @@ function App() {
         </main>
         <nav className="tabbar" aria-label={t('Sections')}>
           {tabs.map(([id, icon, label]) => (
-            <button key={id} className={mtab === id ? 'on' : ''} data-tour={{ mate: 'chief', agents: 'agents', meetings: 'meetings' }[id]} onClick={() => { setMtab(id); if (id === 'agents' && mtab === 'agents') setMobileAgent(null); if (id === 'meetings' && mtab === 'meetings') { setMobileMeeting(null); if (store.get('cc-meet-tab', 'list') === 'dictations') meetingsAt('list') } if (id === 'more' && mtab === 'more') setMoreView(null); if (id === 'home') setHomeView('home') }} aria-current={mtab === id}>
+            <button key={id} className={mtab === id ? 'on' : ''} data-tour={{ mate: 'chief', agents: 'agents', meetings: 'meetings' }[id]} onClick={() => { setMtab(id); if (id === 'agents' && mtab === 'agents') setMobileAgent(null); if (id === 'meetings' && mtab === 'meetings') { setMobileMeeting(null); if (store.get('cc-meet-kind', 'meetings') === 'dictations') meetingsAt('meetings') } if (id === 'more' && mtab === 'more') setMoreView(null); if (id === 'home') setHomeView('home') }} aria-current={mtab === id}>
               <span className="tab-icon">
                 <Icon name={icon} size={20} />
                 {(id === 'home' || (id === 'agents' && !homeOn)) && needN > 0 && <span className="badge">{needN}</span>}

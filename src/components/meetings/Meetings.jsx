@@ -246,12 +246,15 @@ export function MeetingsHome({ onOpen }) {
   useEffect(() => { if (data && place && (place === ':archived' ? !archivedN : !folders.includes(place))) setPlace('') }, [data, place, archivedN, folders.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
   const hits = useSearch(q, place === ':archived')
   // Memory beside the list (memory/Memory.jsx), what came up in your meetings to start with; Insights
-  // and People too, a beta feature (insights.jsx); and Dictations. ⌘K opens any of them, through the
-  // tab kept here and bridge-meetings-tab for a list already open (memory/open.js meetingsAt).
+  // and People too, a beta feature (insights.jsx). ⌘K opens any of them, through the tab kept here and
+  // bridge-meetings-tab for a list already open (memory/open.js meetingsAt). And Dictations in place
+  // of all of them (Kinds), the meetings' own tab kept meanwhile.
   const insightsOn = useTrial('meeting-insights')
   const [tabKept, setTab] = usePersisted('cc-meet-tab', 'list')
-  const tab = ['memory', 'dictations'].includes(tabKept) || (insightsOn && ['insights', 'people'].includes(tabKept)) ? tabKept : 'list'
-  const anyDictation = usePoll(ANY_DICTATION, 60000).data?.total > 0 || tab === 'dictations'
+  const tab = tabKept === 'memory' || (insightsOn && ['insights', 'people'].includes(tabKept)) ? tabKept : 'list'
+  const [kind, setKind] = usePersisted('cc-meet-kind', 'meetings')
+  const dictations = kind === 'dictations'
+  const anyDictation = usePoll(ANY_DICTATION, 60000).data?.total > 0 || dictations
   const tabs = HOME_TABS.filter(([v]) => insightsOn || v === 'list' || v === 'memory')
   // Someone's page asked for from elsewhere (a meeting's guests) before Meetings was open.
   const [person, setPerson] = useState(takePerson)
@@ -260,12 +263,18 @@ export function MeetingsHome({ onOpen }) {
   const autoOn = data?.insightsOn
   useEffect(() => { if (autoOn && !insightsOn) refetch('/config') }, [autoOn, insightsOn])
   useEffect(() => {
-    const on = (e) => { takePerson(); setTab(e.detail?.tab || 'list'); setPerson(e.detail?.person || null) }
+    const on = (e) => {
+      const to = e.detail?.tab || 'list'
+      takePerson()
+      setKind(to === 'dictations' ? 'dictations' : 'meetings')
+      if (to !== 'dictations' && to !== 'meetings') setTab(to)
+      setPerson(e.detail?.person || null)
+    }
     window.addEventListener('bridge-meetings-tab', on)
     return () => window.removeEventListener('bridge-meetings-tab', on)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   // Which tab, for Back and Forward (src/backForward.js): Dictations, Memory, Insights and People are places.
-  useEffect(() => { sayPlace('view:meetings', tab, tab === 'list' ? null : tab === 'dictations' ? t('Dictations') : t(HOME_TABS.find(([v]) => v === tab)?.[2] || '')) }, [tab])
+  useEffect(() => { sayPlace('view:meetings', dictations ? 'dictations' : tab, dictations ? t('Dictations') : tab === 'list' ? null : t(HOME_TABS.find(([v]) => v === tab)?.[2] || '')) }, [tab, dictations])
   const list = all.filter((x) => (place === ':archived' ? x.archived : !x.archived && (!place || x.folder === place))).filter((x) => !q.trim() || !hits || hits.results.has(x.id))
   // What was asked for last, to carry on once the mic is allowed (MicFix).
   const last = useRef(null)
@@ -279,8 +288,8 @@ export function MeetingsHome({ onOpen }) {
   const [setupDone, setSetupDone] = useState(() => { try { return localStorage.getItem(SETUP) === '1' } catch { return false } })
   const first = data && !all.length && !setupDone && !m?.rec
   const doneSetup = () => { setSetupDone(true); try { localStorage.setItem(SETUP, '1') } catch { /* no storage: it shows again next time */ } }
-  const kinds = anyDictation && <Kinds dictations={tab === 'dictations'} onPick={(d) => { if (d !== (tab === 'dictations')) { setTab(d ? 'dictations' : 'list'); setPerson(null) } }} />
-  if (tab === 'dictations') return <Dictations kinds={kinds} />
+  const kinds = anyDictation && <Kinds dictations={dictations} onPick={(d) => { setKind(d ? 'dictations' : 'meetings'); setPerson(null) }} />
+  if (dictations) return <Dictations kinds={kinds} />
   return (
     <div className={`mt-view${kinds ? ' with-kinds' : ''}`}>
       {kinds}
