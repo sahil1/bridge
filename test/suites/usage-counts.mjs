@@ -34,6 +34,15 @@ const NAMES = new Set(Object.keys(SCHEMA.counters))
   const { AGENTS, CHAT } = await import('../../server/agents.js')
   const kinds = [...AGENTS, CHAT].map((a) => a.kind)
   ok(kinds.every((k) => NAMES.has(`agents.started.${k}`)), 'and every kind of agent has its own counter (a new one is added to the list in public)', kinds.filter((k) => !NAMES.has(`agents.started.${k}`)))
+  // Models: counted as their family on the list, never by name; how an answer was reached; what asked.
+  const { familyOf, minuteRange } = await import('../../server/counts.js')
+  const { FEATURES } = await import('../../server/usagelog.js')
+  const families = [...Object.keys(SCHEMA.modelFamilies).filter((f) => f !== 'about'), 'other']
+  const missing = [...families.flatMap((f) => [`models.${f}`, `agents.model.${f}`]), 'agents.model.default', ...['signin', 'key', 'cloud', 'local', 'builtin'].map((v) => `models.via.${v}`), ...[...FEATURES, 'other'].map((f) => `ai.${f}`)].filter((n) => !NAMES.has(n))
+  ok(missing.length === 0, 'every model family, way of reaching a model and part of Bridge AI that asks one has its counter on the list', missing)
+  const fam = Object.fromEntries(['claude-opus-5-5', 'sonnet[1m]', 'gpt-5-codex', 'gpt-5.1', 'o4-mini', 'gemini-2.5-pro', 'gemini-3-flash', 'gemma-4-e2b', 'llama3.2', 'qwen2.5-coder:7b', 'acme-billing-tuned', ''].map((m) => [m, familyOf(m)]))
+  ok(JSON.stringify(Object.values(fam)) === JSON.stringify(['claude-opus', 'claude-sonnet', 'codex', 'gpt-5', 'o-series', 'gemini-pro', 'gemini-flash', 'gemma', 'llama', 'qwen', 'other', 'other']), 'a model is counted as its family, and a name off the list (a model of your own) only as other', fam)
+  ok(SCHEMA.dayTimeRanges.join() === '0,under 5 minutes,5-15 minutes,15-30 minutes,30-60 minutes,1-2 hours,2-4 hours,4-8 hours,8+ hours' && [0, 1, 14, 15, 59, 60, 239, 480].map(minuteRange).join() === '0,under 5 minutes,5-15 minutes,15-30 minutes,30-60 minutes,1-2 hours,2-4 hours,8+ hours', 'a day\'s time in use goes as a range of minutes, never the minutes')
   ok(SCHEMA.buckets.join() === '0,1,2-5,6-20,21-100,100+' && Object.keys(SCHEMA.report).join() === 'schema,week,app,channel,tester,rollout,os,osVersion,arch,chip,memory,cores,install,layout,runtime,phone,phones,computers,installAge,daysActive,activeTime,openTime,features,agents,counts,nonce' && kinds.filter((k) => k !== 'chat').every((k) => SCHEMA.agents.includes(k)) && SCHEMA.timeRanges.join() === '0,under 1 hour,1-5 hours,5-10 hours,10-20 hours,20-40 hours,40+ hours', 'the list says what a report has, field by field, and its ranges (counts, and time in use and open)')
 }
 process.env.BRIDGE_HOME = path.join(os.tmpdir(), `bridge-counts-rules-${process.pid}`)
@@ -133,7 +142,7 @@ try {
   const p1 = await k.api('/counts/preview')
   const r1 = p1.report
   ok(a1.counted === true && a2.counted === false && r1.activeTime === 'under 1 hour' && r1.openTime === 'under 1 hour', 'on: a minute in use is counted once however many windows say so, and the minutes it runs are counted, each sent as a range', { a1, a2, active: r1.activeTime, open: r1.openTime })
-  ok(p1.share && p1.goes === 'after this week' && r1.counts['agents.started.claude'] === '2-5' && r1.counts['errors.window'] === '2-5' && r1.counts['chief.tasks'] === '1' && r1.daysActive === 1 && r1.installAge === 'week 1', 'on: what would be sent is this week so far, in ranges (agents started, errors, a task)', p1)
+  ok(p1.share && p1.goes === 'after this week' && r1.counts['agents.started.claude'] === '2-5' && r1.counts['agents.model.default'] === '2-5' && r1.counts['errors.window'] === '2-5' && r1.counts['chief.tasks'] === '1' && r1.daysActive === 1 && r1.installAge === 'week 1', 'on: what would be sent is this week so far, in ranges (agents started, on their own default model, errors, a task)', p1)
   ok(got.length === 0 && weekFiles(k.data).length === 1, 'kept on this computer until the week is over', { got, files: weekFiles(k.data) })
   const gone = async (kit) => { kit.stop(); await until(async () => !(await fetch(`${kit.url}/api/config`).then(() => true, () => false)), 10000, 100) }
   await gone(k)
@@ -147,7 +156,7 @@ try {
   ok(JSON.stringify(sent) === JSON.stringify(r1), 'and it is exactly what What would be sent showed', { sent, shown: r1 })
   const dayGot = await until(() => got.find((g) => g.path === '/v1/day'), 5000)
   const dr = dayGot ? JSON.parse(dayGot.body) : null
-  ok(!!dr && Object.keys(dr).join() === Object.keys(SCHEMA.dayReport.report).join() && dr.app && dr.crashed === false && /^[0-9a-f]{24}$/.test(dr.nonce) && dr.day < new Date(day(9)).toISOString().slice(0, 10), 'and a day\'s report for a day it ran: its version, the system, how often it started, whether it crashed', dr)
+  ok(!!dr && Object.keys(dr).join() === Object.keys(SCHEMA.dayReport.report).join() && dr.app && dr.crashed === false && dr.activeTime === 'under 5 minutes' && /^[0-9a-f]{24}$/.test(dr.nonce) && dr.day < new Date(day(9)).toISOString().slice(0, 10), 'and a day\'s report for a day it ran: its version, the system, how often it started, whether it crashed, and its minute in use as a range', dr)
   const all = JSON.stringify(sent)
   const personal = ['Priya', 'acme', 'Fix ', k.home, os.homedir(), os.userInfo().username, os.hostname().replace(/\.local$/, '')].filter((v) => v && all.includes(v))
   ok(!!sent && Object.keys(sent).join() === Object.keys(SCHEMA.report).join() && Object.keys(sent.counts).every((n) => NAMES.has(n)) && Object.values(sent.counts).every((v) => SCHEMA.buckets.includes(v)) && personal.length === 0, 'nothing personal in it: the fields on the list, counts on the list in ranges, no name, path, project, user or computer', { personal, sent })

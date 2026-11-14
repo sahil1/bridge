@@ -217,8 +217,9 @@ const modelFor = (kind) => cfg.agents?.[kind]?.model || null
 const launchAgent = (o) => {
   const kind = o.kind || cfg.defaultAgent || 'claude'
   const picked = o.account === 'auto' || accounts.has(kind, o.account) ? o.account : accounts.accountOf(kind, null, o.resume || o.fork)
-  return rt.launch({ ...o, model: o.model === 'default' ? null : o.model || modelFor(kind), effort: effortFor(kind, o) || undefined, account: accounts.resolve(kind, picked) || accounts.activeId(kind) })
-    .then((out) => { insights.noteLaunch(out?.paneId, o.prompt); if (kind !== 'shell') counts.started(kind); return out })
+  const model = o.model === 'default' ? null : o.model || modelFor(kind)
+  return rt.launch({ ...o, model, effort: effortFor(kind, o) || undefined, account: accounts.resolve(kind, picked) || accounts.activeId(kind) })
+    .then((out) => { insights.noteLaunch(out?.paneId, o.prompt); if (kind !== 'shell') { counts.started(kind); counts.agentModel(model) } return out })
 }
 
 // How hard it thinks, with Recommended Settings on (a beta feature): the level a task's effort chip

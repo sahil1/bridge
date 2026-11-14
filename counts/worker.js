@@ -23,6 +23,7 @@ import { scrub } from '../shared/crashreport.js'
 
 const NAMES = new Set(Object.keys(SCHEMA.counters))
 const BUCKETS = new Set(SCHEMA.buckets.filter((b) => b !== '0'))
+const DAY_TIMES = new Set(SCHEMA.dayTimeRanges || [])
 // What a report may say about the install; anything else is kept as "other".
 const ONE_OF = {
   os: ['mac', 'windows', 'linux'],
@@ -60,6 +61,9 @@ export const TABLES = [
   'CREATE TABLE IF NOT EXISTS daily_chips (day TEXT NOT NULL, os TEXT NOT NULL, arch TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, os, arch))',
   'CREATE TABLE IF NOT EXISTS firsts (day TEXT NOT NULL, app TEXT NOT NULL, os TEXT NOT NULL, arch TEXT NOT NULL, install TEXT NOT NULL, channel TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, app, os, arch, install, channel))',
   'CREATE TABLE IF NOT EXISTS daily_updates (day TEXT NOT NULL, app TEXT NOT NULL, from_app TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, app, from_app))',
+  // Each day's time in use, as the range it was in, by system and version (unknown: a version from
+  // before a day's report said it), apart from the rest of the day's report.
+  'CREATE TABLE IF NOT EXISTS daily_time (day TEXT NOT NULL, app TEXT NOT NULL, os TEXT NOT NULL, active TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, app, os, active))',
   // What the admin view can change without a deploy: countsOff, crashesOff, crashesPerDay, crashDays.
   'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
   `CREATE TABLE IF NOT EXISTS crash_reports (id TEXT PRIMARY KEY, day TEXT NOT NULL, app TEXT NOT NULL, os TEXT NOT NULL,
@@ -198,6 +202,7 @@ export function checkDay(r, now = new Date()) {
     day: r.day, nonce: r.nonce, app: versionOf(r.app), from: r.from == null ? null : versionOf(r.from),
     os: ONE_OF.os.includes(r.os) ? r.os : 'other', arch: ONE_OF.arch.includes(r.arch) ? r.arch : 'other', install: ONE_OF.install.includes(r.install) ? r.install : 'other',
     crashed: r.crashed === true ? 1 : 0, starts: BUCKETS.has(r.starts) ? r.starts : 'other', channel: channelOf(r),
+    active: r.activeTime == null ? 'unknown' : DAY_TIMES.has(r.activeTime) ? r.activeTime : 'other',
   }
 }
 async function takeDay(req, env) {
@@ -218,6 +223,7 @@ async function takeDay(req, env) {
     db.prepare('INSERT INTO daily (day, app, os, install, crashed, starts, n) VALUES (?, ?, ?, ?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(r.day, r.app, r.os, r.install, r.crashed, r.starts),
     ...(r.from && r.from !== r.app ? [db.prepare('INSERT INTO daily_updates (day, app, from_app, n) VALUES (?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(r.day, r.app, r.from)] : []),
     db.prepare('INSERT INTO daily_chips (day, os, arch, n) VALUES (?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(r.day, r.os, r.arch),
+    db.prepare('INSERT INTO daily_time (day, app, os, active, n) VALUES (?, ?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(r.day, r.app, r.os, r.active),
     db.prepare('INSERT INTO daily_channels (day, app, channel, tester, rollout, crashed, n) VALUES (?, ?, ?, ?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1')
       .bind(r.day, r.app, r.channel.channel, r.channel.tester, r.channel.rollout, r.crashed),
   ])
