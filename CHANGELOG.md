@@ -2,18 +2,20 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
-## 3.18.1
+## 3.19.0
 
-Settings is shorter: Voice and Meetings are one section with tabs, and Devices has tabs too. With Bridge AI's relay picked, the email sign-in comes first.
+Studio, Sign PDFs, Comments and @bridge, Make a Sheet, Folders, Back and Forward, Tab Groups and Recommended Settings are out of beta. The sidebar is shorter: Dictations are a tab of Meetings, whiteboards are in Studio, and Files is Folders. Settings is shorter too: Voice and Meetings are one section with tabs, and Devices has tabs. With Bridge AI's relay picked, the email sign-in comes first.
 
 <!-- rollout: 10 -->
 
 ### What's new
 
+- **Out of beta**: on for everyone, and no longer in Settings › About & Updates › Beta Features. **Studio** is in the sidebar and ⌘K (on a phone, More), with **Sign PDFs** (AI Assist › Sign this on a PDF in Studio), **Comments and @bridge** (Comments in a document's, sheet's, deck's or whiteboard's toolbar) and **Make a Sheet** (New › Sheet in Studio, or on an empty sheet). **Folders**, which was Files, is in the sidebar and ⌘K (on a phone, More). **Back and Forward** is ‹ and › at the start of the top bar. **Tab Groups** groups the tabs above your agents. **Recommended Settings** is in Settings › Agents, with the effort chip in New and Home's box. A Beta Features switch saved for any of them is no longer read, and Sign this has no Beta badge.
+- **The sidebar**: Dictations are a tab at the top of Meetings, shown once you've dictated, with Meetings marked in the sidebar while they show. The Dictations row and its list are gone, from the phone's More too; ⌘K's Dictations, a tab kept from before and a dictation in Memory open the tab. Files is **Folders**: its row, its page, ⌘K and the phone's More (Studio's own Files tab keeps its name). The Views heading is gone: New to Folders always show, with Spaces under them. New space has a + in place of Studio's layers icon.
 - **Voice & Meetings**: Settings' Voice and Meetings sections are one, with tabs for Meetings, Dictation and Speech to Text. Dictation's settings have a tab of their own; they were inside Voice. Everything that opened either section opens its tab, and search (⌘K) finds each setting where it is now.
 - **Tabs in Settings › Devices**: Phone (how your phone reaches this computer), Computers (your linked computers, Link a device) and Notifications (this device, what to notify about, the devices that get them).
 - **Bridge AI's relay, picked**: the sign-in, or where your request stands, comes right under the choice. What Bold Bridge can see, fair use and where the relay's code is are folded under one line below it.
-- **Whiteboards in Studio**: with Studio on (a Beta Feature), the sidebar and the phone's More have Studio and no Whiteboards row. Studio's Files lists your whiteboards under Whiteboards, New makes one, and a board opens in Studio's Preview in the same editor. Tabs, links and ⌘K's Whiteboards open them there. With Studio off, Whiteboards is where it was.
+- **Whiteboards in Studio**: the sidebar and the phone's More have no Whiteboards row. Studio's Files lists your whiteboards under Whiteboards, New makes one, and a board opens in Studio's Preview in the same editor. Tabs, links and ⌘K's Whiteboards open them there.
 
 ### Fixes
 
