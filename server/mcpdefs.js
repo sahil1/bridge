@@ -60,7 +60,7 @@ export const TOOLS = [
   {
     name: 'bridge_new_board',
     title: 'New whiteboard',
-    description: 'Make a new whiteboard in Bridge AI from a diagram; Bridge AI lays it out in the user\'s look the next time they open it (Whiteboards, or Studio where the user has Studio on). It never changes an existing board: to add to one or redo it, use bridge_suggest_change. A name that\'s taken gets " 2".',
+    description: 'Make a new whiteboard in Bridge AI from a diagram; Bridge AI lays it out in the user\'s look the next time they open it (in Studio, under Whiteboards). It never changes an existing board: to add to one or redo it, use bridge_suggest_change. A name that\'s taken gets " 2".',
     inputSchema: {
       type: 'object',
       properties: { title: { type: 'string', minLength: 1, maxLength: 80, description: 'The board\'s name, like "Checkout architecture".' }, ...DIAGRAM },

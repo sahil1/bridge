@@ -23,7 +23,7 @@
 //               an agent with model() and resume() restarts on the new model, same conversation.
 //   install     how to install it ({ npm } package, or a { unix, win } shell command)
 //   effort(lvl) arguments that set how hard it thinks, for that session only (low … max, as
-//               src/recommended.js lists them); Recommended Settings, a beta feature, passes them
+//               src/recommended.js lists them); Recommended Settings passes them
 //   access(lvl) arguments for how much it may do without asking: 'ask' (its default: before edits
 //               and commands), 'edits' (changes files freely, asks before commands), 'full' (nothing
 //               asked). Only flags from each CLI's docs; agents without it always ask.

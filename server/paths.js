@@ -73,8 +73,8 @@ export function loadConfig() {
   if (yours.moreModels === undefined && yours.chinaModels !== undefined) yours.moreModels = yours.chinaModels
   const example = readJSON(path.join(ROOT, 'config.example.json'))
   const merged = { ...example, ...yours }
-  // Beta features on to start with (Back and Forward) stay on beside the ones you turned on, until
-  // you turn them off.
+  // A beta feature on to start with (config.example.json's trials) stays on beside the ones you
+  // turned on, until you turn it off.
   if (example.trials && yours.trials && typeof yours.trials === 'object') merged.trials = { ...example.trials, ...yours.trials }
   if (process.env.BRIDGE_PORT) merged.port = Number(process.env.BRIDGE_PORT)
   // Only for a container whose port is published to 127.0.0.1 on its machine (docker-compose.yml):

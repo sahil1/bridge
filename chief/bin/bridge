@@ -191,8 +191,8 @@ const cmds = {
     const opt = (k) => { const i = args.indexOf(k); if (i < 0) return null; const v = args[i + 1]; args.splice(i, 2); return v }
     const flag = (k) => { const i = args.indexOf(k); if (i >= 0) args.splice(i, 1); return i >= 0 }
     const space = opt('--space'), cwd = opt('--cwd'), name = opt('--name'), kind = opt('--kind') || undefined
-    // How hard it thinks (Claude Code: low … max); left out, Bridge AI picks one from the brief when
-    // Recommended Settings is on (Beta Features), else it starts as set in Settings › Agents.
+    // How hard it thinks (Claude Code: low … max); left out, Bridge AI picks one from the brief
+    // (Recommended Settings), else it starts as set in Settings › Agents.
     const effort = opt('--effort')
     if (effort && !['low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) throw new Error('--effort is one of low, medium, high, xhigh, max')
     // Own branch: a new git worktree on a new branch (--branch, or bridge/<name>) from --base.

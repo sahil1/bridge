@@ -113,7 +113,7 @@ import * as earlyAccess from './earlyaccess.js'
 import * as crashes from './crashes.js'
 import * as cloud from './cloud.js'
 import { makeModels, forLaunch } from './models.js'
-// Recommended Settings (a beta feature): the table by plan and the effort for a task, shared with the UI.
+// Recommended Settings: the table by plan and the effort for a task, shared with the UI.
 import { planOf, recommend, suggestEffort, isEffort } from '../src/recommended.js'
 import { makeHandoff } from './handoff.js'
 import * as asks from './asks.js'
@@ -221,12 +221,11 @@ const launchAgent = (o) => {
     .then((out) => { insights.noteLaunch(out?.paneId, o.prompt); if (kind !== 'shell') counts.started(kind); return out })
 }
 
-// How hard it thinks, with Recommended Settings on (a beta feature): the level a task's effort chip
-// picked (New, Home's box), or for 'suggest' (Chief of Staff's hand-off, bridge new) one from what
-// it's asked (src/recommended.js), else your setting for that agent (Settings › Agents), else its
-// own. Off: none is given, as before, whatever the setting says.
+// How hard it thinks (Recommended Settings): the level a task's effort chip picked (New, Home's
+// box), or for 'suggest' (Chief of Staff's hand-off, bridge new) one from what it's asked
+// (src/recommended.js), else your setting for that agent (Settings › Agents), else its own.
 function effortFor(kind, o) {
-  if (!trialOn('recommended-settings') || !adapter(kind).effort) return null
+  if (!adapter(kind).effort) return null
   if (isEffort(o.effort)) return o.effort
   const asked = o.effort === 'suggest' ? suggestEffort(o.prompt) : null
   if (asked) return asked.effort
@@ -420,9 +419,6 @@ app.get('/api/previews', wrap(async () => {
 // Any pane works here (agents and plain shells); the root is that pane's folder. A place you
 // added to Files (place:<id>) works the same way, its folder the root.
 const rootOf = async (pane) => {
-  // Studio's (a beta feature): its own folder and the folders its home found your files in, only
-  // while it's on, as its routes are.
-  if (studioRoot(pane) && !trialOn('studio')) throw Object.assign(new Error(STUDIO_OFF), { status: 404, code: 'trial' })
   // Studio's own folder: decks made from meetings, and new files with no folder of yours to go in.
   if (pane === 'studio') { const d = path.join(DATA, 'studio', 'files'); fs.mkdirSync(d, { recursive: true }); return d }
   if (String(pane).startsWith('place:')) {
@@ -432,45 +428,35 @@ const rootOf = async (pane) => {
   }
   // A folder Studio's home found one of your files in (studiofound.js).
   if (String(pane).startsWith('found:')) return studioFound.foundDir(String(pane).slice(6))
-  // Files (a beta feature): your home folder (home) and this computer's drives (drive:<key>).
-  if (explorer.isFilesRoot(pane)) {
-    if (!trialOn('files')) throw Object.assign(new Error(FILES_OFF), { status: 404, code: 'trial' })
-    return explorer.rootDir(String(pane))
-  }
+  // Folders: your home folder (home) and this computer's drives (drive:<key>).
+  if (explorer.isFilesRoot(pane)) return explorer.rootDir(String(pane))
   const p = ((await rt.fleet()).panes || []).find((x) => x.paneId === pane)
   if (!p) throw new Error(`No pane ${pane}`)
   return p.cwd
 }
 // ---------- Beta features ----------
 // Still being finished, so hidden until turned on in Settings › About & Updates › Beta Features
-// (trials: { studio: true } in the config; src/trials.js). Their routes answer only then.
-// One that's no longer a beta stays in older configs, read by nothing (memory: Memory, now a page
-// for everyone). One can be on to start with (config.example.json's trials: Back and Forward), until
-// it's turned off.
-const TRIALS = ['studio', 'home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'signature-assist', 'tab-groups', 'routines', 'files', 'back-forward', 'recommended-settings', 'comments', 'mcp-server', 'meeting-board', 'make-sheet', 'assist-answers', 'call-video']
+// (trials: { home: true } in the config; src/trials.js). Their routes answer only then.
+// One that's no longer a beta stays in older configs, read by nothing: Memory, now a page for
+// everyone; Studio, Sign PDFs, Comments and @bridge, Make a Sheet, Back and Forward, Tab Groups,
+// Files (Folders now) and Recommended Settings, part of the app since 3.19.0.
+const TRIALS = ['home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'routines', 'mcp-server', 'meeting-board', 'assist-answers', 'call-video']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
-const FILES_OFF = 'Files is a beta feature. Turn it on in Settings › About & Updates › Beta Features.'
-const STUDIO_OFF = 'Studio is a beta feature. Turn it on in Settings › About & Updates › Beta Features.'
-const studioRoot = (pane) => pane === 'studio' || String(pane).startsWith('found:')
-// The file routes on Studio's roots (/api/agents/studio/..., found:<id>) answer as Studio's own do.
-app.use('/api/agents/:pane', (req, res, next) => (studioRoot(req.params.pane) ? trialOff('studio', 'Studio')(req, res, next) : next()))
 
-// ---------- Files (explorer.js) ----------
+// ---------- Folders (explorer.js) ----------
 // Your folders as Finder shows them: its sidebar, a folder's listing, Get Info, a folder's size and a
-// search, answered only while the beta is on. The home folder and the drives are roots for the
-// agents' file routes too (the viewer, Open in its app, Show in Finder), only to read for now:
-// anything that would change a file through them is refused here, before it reaches those routes.
-// From another of your devices, a folder macOS hasn't asked about isn't read (explorer.notFromAfar).
-app.use('/api/files', trialOff('files', 'Files'))
+// search. The home folder and the drives are roots for the agents' file routes too (the viewer,
+// Open in its app, Show in Finder), only to read for now: anything that would change a file through
+// them is refused here, before it reaches those routes. From another of your devices, a folder
+// macOS hasn't asked about isn't read (explorer.notFromAfar).
 const LOOK_ONLY = new Set(['reveal', 'open'])
 app.use('/api/agents/:pane', async (req, res, next) => {
   if (!explorer.isFilesRoot(req.params.pane)) return next()
   if (!['GET', 'HEAD'].includes(req.method) && !(req.method === 'POST' && req.path === '/fileop' && LOOK_ONLY.has(req.body?.op))) {
-    return res.status(403).json({ error: 'Files is read-only for now: nothing is renamed, moved or deleted from it yet.', code: 'readOnly' })
+    return res.status(403).json({ error: 'Folders is read-only for now: nothing is renamed, moved or deleted from it yet.', code: 'readOnly' })
   }
   try {
-    if (!trialOn('files')) return res.status(404).json({ error: FILES_OFF, code: 'trial', trial: 'files' })
     const site = /^\/site\//.test(req.path)
     const rel = site ? decodeURIComponent(req.path.slice(6)) : String(req.query.path ?? req.body?.path ?? '')
     explorer.notFromAfar(await explorer.lexical(req.params.pane, rel), { here: !req.headers['x-bridge-relay'] })
@@ -518,7 +504,6 @@ app.get('/api/files/search', fsWrap(async (req, res) => { const q = await fsAt(r
 // ---------- Studio (studio.js) ----------
 // Its files are named as Files names them: root (an agent's pane, or place:<id>) and a path in it.
 // Ask an agent sends the change to the agent you pick (pane), or starts one in the file's folder.
-app.use('/api/studio', trialOff('studio', 'Studio'))
 const sq = (req) => ({ root: String(req.query.root || req.body?.root || ''), path: String(req.query.path || req.body?.path || '') })
 // Studio's home asking for your files starts the look for the apps that open them, so it's done by
 // the time a file opens (studioapps.js).
@@ -580,7 +565,7 @@ signing.setHelpers({
   describe: (id) => chatModels.describe(id), via: async (id) => (await chatModels.models().catch(() => [])).find((m) => m.id === id)?.via || null,
   contextOf: (id) => chatModels.contextOf(id), scanText: doctext.ocrBin() ? (file) => doctext.textOf(file, 200_000) : null,
 })
-signing.routes(app, { wrap, rootOf, sq, trialOff })
+signing.routes(app, { wrap, rootOf, sq })
 // Your files wherever they are, for Studio's home (studiofound.js): asked for only once it's open,
 // and let go of if you leave before it's done. Each found in an agent's folder or a place opens
 // through it, and one in Studio's own folder (a deck made from a meeting) through that.
@@ -625,9 +610,9 @@ app.post('/api/studio/rewrite', async (req, res) => {
     res.json({ ...out, model, by: d?.label || model })
   } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
 })
-// @bridge in a document's comment (Comments and @bridge, a beta feature): AI Assist's reply for
-// the thread and, when asked for, the words rewritten, by the model AI Assist uses for documents.
-app.post('/api/studio/comment-assist', trialOff('comments', 'Comments and @bridge'), async (req, res) => {
+// @bridge in a document's comment (Comments and @bridge): AI Assist's reply for the thread and,
+// when asked for, the words rewritten, by the model AI Assist uses for documents.
+app.post('/api/studio/comment-assist', async (req, res) => {
   try {
     const model = String(req.body?.model || '') || await studioModel()
     const out = await commentAssist.assist({ ...req.body, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
@@ -637,7 +622,7 @@ app.post('/api/studio/comment-assist', trialOff('comments', 'Comments and @bridg
 })
 // @bridge in a comment on a PowerPoint's slide, or a shape on it (Comments and @bridge): a reply,
 // and the shape's words or the slide rewritten, or a new slide after it, to keep or discard.
-app.post('/api/studio/deck/comment', trialOff('comments', 'Comments and @bridge'), async (req, res) => {
+app.post('/api/studio/deck/comment', async (req, res) => {
   try {
     const model = String(req.body?.model || '') || await studioModel()
     const out = await commentAssist.deckAssist({ ...req.body, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
@@ -675,11 +660,10 @@ const sheetAi = async (req, thread = null) => {
   const d = (await chatModels.models().catch(() => [])).find((x) => x.id === use)
   return { ...(book ? studio.bookAnswer(r?.text) : studio.sheetAnswer(r?.text)), model: use, by: d?.label || String(use).split(':').slice(1).join(':') || use }
 }
-// Make a sheet (mode: 'book') is a beta feature of its own, Make a Sheet.
-app.post('/api/studio/sheet/ai', (req, res, next) => (req.body?.mode === 'book' ? trialOff('make-sheet', 'Make a Sheet')(req, res, next) : next()), wrap((req) => sheetAi(req)))
-// @bridge in a comment on a sheet's cells (Comments and @bridge, a beta feature): the same fast
-// path, with the thread so far, given as what to work on.
-app.post('/api/studio/sheet/comment', trialOff('comments', 'Comments and @bridge'), wrap((req) => sheetAi(req, Array.isArray(req.body?.thread) ? req.body.thread : [])))
+app.post('/api/studio/sheet/ai', wrap((req) => sheetAi(req)))
+// @bridge in a comment on a sheet's cells (Comments and @bridge): the same fast path, with the
+// thread so far, given as what to work on.
+app.post('/api/studio/sheet/comment', wrap((req) => sheetAi(req, Array.isArray(req.body?.thread) ? req.body.thread : [])))
 // A picture put on a slide, saved beside the deck.
 app.post('/api/studio/picture', wrap(async (req) => { const q = sq(req); return studio.savePicture(await rootOf(q.root), q.path, req.body?.name, Buffer.from(String(req.body?.data || ''), 'base64')) }))
 app.get('/api/agents/:pane/files', wrap(async (req) => files.listDir(await rootOf(req.params.pane), String(req.query.path || ''), { showHidden: req.query.hidden === '1' })))
@@ -804,7 +788,7 @@ fileInsights.setHelpers({
   models: () => chatModels.models(), reply: (id, msgs, o) => chatModels.reply(id, msgs, o), isLocal: (id) => chatModels.isLocal(id),
   picked: () => cfg.filesAssist?.model || null, save: (id) => afterChange(settings.patch({ filesAssist: id ? { model: id } : null })), computer: () => relay.thisName(),
 })
-fileInsights.routes(app, { rootOf, trialOff, here: (req) => fromHere(req) })
+fileInsights.routes(app, { rootOf, here: (req) => fromHere(req) })
 // The copies this computer runs, and the ones others are making to it.
 app.get('/api/transfers', tx(() => transfers.list()))
 app.post('/api/transfers', tx((req) => {
@@ -1853,7 +1837,7 @@ app.get('/api/meetings/search', wrap((req) => meetings.search(String(req.query.q
 app.post('/api/meetings/ask', wrap((req) => meetings.askAll(String(req.body?.question || '').slice(0, 2000), { ids: [].concat(req.body?.ids || []).slice(0, 50), model: req.body?.model })))
 app.post('/api/meetings/:id/keep', wrap((req) => meetings.keep(req.params.id)))
 // Make a deck from a meeting, in Studio's own folder, to open in Studio.
-app.post('/api/meetings/:id/deck', trialOff('studio', 'Studio'), wrap((req) => meetings.deck(req.params.id, { model: req.body?.model })))
+app.post('/api/meetings/:id/deck', wrap((req) => meetings.deck(req.params.id, { model: req.body?.model })))
 // Meeting memory (meetmemory.js): the names and terms in your meetings, yours to edit.
 // With the meetings each came up in (name, when, series), to group them and open one.
 app.get('/api/meetings/memory', wrap(() => {
@@ -3019,9 +3003,8 @@ app.get('/api/config', (req, res) => res.json({
   alertSounds: cfg.alertSounds !== false, // the speaker in the top bar
   meetingKey: MEETING_KEYS.includes(cfg.meetings?.mentionKey) ? cfg.meetings.mentionKey : '@', // Settings › Voice & Meetings
   trials: Object.fromEntries(TRIALS.map((id) => [id, trialOn(id)])), // Settings › About & Updates › Beta Features
-  // The effort each agent starts with (Settings › Agents), for a task's effort chip to say: only
-  // with Recommended Settings on, as it's only passed then.
-  efforts: trialOn('recommended-settings') ? Object.fromEntries(AGENTS.filter((a) => a.effort && isEffort(cfg.agents?.[a.kind]?.effort)).map((a) => [a.kind, cfg.agents[a.kind].effort])) : {},
+  // The effort each agent starts with (Settings › Agents), for a task's effort chip to say.
+  efforts: Object.fromEntries(AGENTS.filter((a) => a.effort && isEffort(cfg.agents?.[a.kind]?.effort)).map((a) => [a.kind, cfg.agents[a.kind].effort])),
   trialsAuto: trialOn('meeting-insights') && meetInsights.autoOn() ? { 'meeting-insights': meetInsights.autoOn().at } : {}, // the ones that turned themselves on, when
 }))
 // The speaker in the top bar: notifications (this computer's, a browser's, your phones') come with a
@@ -3079,13 +3062,12 @@ app.put('/api/settings/raw', async (req, res) => {
 app.get('/api/settings/geocode', wrap((req) => settings.geocode(req.query.q)))
 app.get('/api/agents/catalog', wrap(async () => { clearInstalledCache(); return agentCatalog() }))
 
-// ---------- Recommended Settings (a beta feature) ----------
+// ---------- Recommended Settings ----------
 // For each agent that takes an effort (Claude Code): the plan its sign-in says (claude auth status,
 // on this computer), what's recommended for it (src/recommended.js), whether you answered for that
 // plan (asked again when the plan changes), and what it starts with now. Use these puts the model
 // and effort in Bridge AI's own settings (agents.<kind>), which it passes when it starts the agent;
 // nothing is written to the agent's own settings files. Keep leaves things as they are.
-app.use('/api/recommended', trialOff('recommended-settings', 'Recommended Settings'))
 async function recommendedFor(kind, { fresh = false } = {}) {
   const s = await accounts.signInOf(kind, { fresh }).catch(() => null)
   const plan = planOf(kind, s)
@@ -3672,7 +3654,7 @@ boards.setHelpers({
   contextOf: (id) => chatModels.contextOf(id), agentWork: async (pane) => transcript(await findAgent(pane)),
 })
 // @bridge in a comment on a board (Comments and @bridge): Change it on what the comment is on.
-app.post('/api/boards/comment', trialOff('comments', 'Comments and @bridge'), async (req, res) => {
+app.post('/api/boards/comment', async (req, res) => {
   try { res.json(await boards.comment(req.body || {})) } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
 })
 boards.routes(app, { wrap, onComputer, counted: (name) => counts.add(name) })
