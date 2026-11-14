@@ -210,6 +210,25 @@ const cmds = {
     if (out.setupError) console.log(`The repo's setup command failed: ${out.setupError}`)
   },
 
+  // Hand a piece of work to a helper: an agent of its own with a role (marketing, research,
+  // engineer), in the task's own folder (work/<task>/) unless --cwd names another. It goes on your
+  // task list, and Bridge AI tells you in this thread when the helper stops, with what it said
+  // last and the files it made. More than the helpers allowed at once wait their turn.
+  async delegate(args) {
+    const opt = (k) => { const i = args.indexOf(k); if (i < 0) return null; const v = args[i + 1]; args.splice(i, 2); return v }
+    const role = opt('--role'), cwd = opt('--cwd'), kind = opt('--agent') || opt('--kind'), title = opt('--title')
+    let brief = args.join(' ')
+    if (brief === '-' || (!brief && !process.stdin.isTTY)) brief = fs.readFileSync(0, 'utf8')
+    if (!role || !brief.trim()) throw new Error('Usage: bridge delegate --role <role> [--cwd <folder>] [--agent claude|codex|...] [--title "short title"] "brief"   (- reads the brief from stdin)')
+    const r = await api('/chief/delegate', { method: 'POST', body: { role, brief: brief.trim(), title: title || undefined, kind: kind || undefined, cwd: cwd ? path.resolve(cwd.replace(/^~(?=\/|$)/, HOME)) : undefined, thread: THREAD } })
+    const h = r.helper
+    const you = SETTINGS.name && SETTINGS.name !== 'the user' ? SETTINGS.name : 'the user'
+    const head = `Task ${r.task.id} (${h.role}): ${r.task.title}`
+    if (h.state === 'working') return console.log(`${head}\nA helper is on it in ${h.paneId}, working in ${tilde(h.cwd)}${h.edits ? ' (it may edit files there without asking)' : ''}. Bridge AI tells you here when it stops.`)
+    if (h.state === 'queued') return console.log(`${head}\nQueued, ${h.position === 1 ? 'next in line' : `number ${h.position} in line`}: ${r.helpers.working} helpers are working, the most at once. It starts by itself when one finishes, and you hear back here as usual.`)
+    console.log(`${head}\nThe helper couldn't start: ${h.error}\nThe task waits on ${you}: tell them why, and delegate it again once that's fixed.`)
+  },
+
   // The chief's threads: separate conversations with you, each with the agents it handed work to.
   async threads() {
     const f = await fleet()
@@ -272,10 +291,12 @@ const cmds = {
     const opt = (k) => { const i = rest.indexOf(k); if (i < 0) return undefined; const v = rest[i + 1]; rest.splice(i, 2); return v }
     const flag = (k) => { const i = rest.indexOf(k); if (i >= 0) rest.splice(i, 1); return i >= 0 }
     const you = SETTINGS.name && SETTINGS.name !== 'the user' ? SETTINGS.name : 'the user'
-    const tag = (t) => `[${t.status === 'waiting' ? `waiting on ${you}` : t.status}]`
+    // A delegated one waiting its turn is queued; one whose helper waits on an answer says so.
+    const tag = (t) => `[${t.status === 'waiting' ? `waiting on ${you}` : t.helper?.state === 'queued' ? 'queued' : t.helper?.state === 'working' && t.helper.status === 'blocked' ? `helper waits on ${you}` : t.status}]`
+    const helper = (t) => (t.role ? `  (${t.role} helper${t.helper?.paneId && t.helper.live ? `, ${t.helper.paneId}` : ''})` : '')
     let w = 9
-    const line = (t) => `  ${t.id.padStart(3)}  ${tag(t).padEnd(w)}  ${t.title}${t.from === 'you' ? `  (from ${you}, ${t.added})` : t.added ? `  (added ${t.added})` : ''}${t.needs ? `\n         needs: ${t.needs}` : ''}${t.link && t.status !== 'done' ? `\n         ${t.link}` : ''}`
-    const doneLine = (t) => `  ${t.id.padStart(3)}  ${t.title} (done ${t.done || '?'})${t.outcome ? `: ${clip(t.outcome, 200)}` : ''}${t.link ? `\n         ${t.link}` : ''}`
+    const line = (t) => `  ${t.id.padStart(3)}  ${tag(t).padEnd(w)}  ${t.title}${helper(t)}${t.from === 'you' ? `  (from ${you}, ${t.added})` : t.added ? `  (added ${t.added})` : ''}${t.needs ? `\n         needs: ${t.needs}` : ''}${t.link && t.status !== 'done' ? `\n         ${t.link}` : ''}`
+    const doneLine = (t) => `  ${t.id.padStart(3)}  ${t.title}${helper(t)} (done ${t.done || '?'})${t.outcome ? `: ${clip(t.outcome, 200)}` : ''}${t.link ? `\n         ${t.link}` : ''}`
     if (sub === 'list' || sub === '--all') {
       const { items } = await api('/chief/tasks')
       const open = items.filter((t) => t.status !== 'done')
@@ -373,6 +394,10 @@ const cmds = {
       [--own-branch [--branch name] [--base branch]]
                                     ...on its own git branch, in its own worktree, so it can't clash with
                                     other agents in that repo (branch default: bridge/<name>)
+  bridge delegate --role <role> [--cwd <folder>] [--agent claude|codex|...] [--title "short title"] "brief"
+                                    hand work to a helper with a role (marketing, research, engineer...): it goes
+                                    on your task list and starts in work/<task>/ (or --cwd), queued if the most
+                                    helpers at once are working; you hear back in this thread when it stops
   bridge wait <pane>… [--timeout s] block until those agents stop working: finished or blocked (run in the background)
   bridge threads                    your threads with ${SETTINGS.name && SETTINGS.name !== 'the user' ? SETTINGS.name : 'the user'} (Main and the others), which one is you,
                                     and the agents each one handed work to
@@ -380,8 +405,9 @@ const cmds = {
   bridge ask <who> [--model m] "question"
                                     a one-off question to another model (grok, muse, gemini, gpt, claude, perplexity, ...)
 
-  Your own tasks (standalone work you do yourself; hand-offs go in the ledger):
-  bridge task list [--all]          open tasks first, then the latest done (--all: every done one)
+  Your tasks (work you do yourself, and what you delegated; send/new hand-offs go in the ledger):
+  bridge task list [--all]          open tasks first, then the latest done (--all: every done one); a delegated
+                                    one names its helper's role and pane
   bridge task add [--doing] "title" put a task on the list (--doing: you're starting it now)
   bridge task doing <id>            you've started it (again, once you have what you were waiting for)
   bridge task waiting <id> "question"
