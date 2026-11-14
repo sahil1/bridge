@@ -28,6 +28,15 @@ url_for() {
 }
 # Downloads only follow redirects to https.
 get() { curl --proto-redir '=https' -fL "$@"; }
+# macOS: closes what's running from $1 (pkill -f; -a, our own parents too: when the app updates
+# itself, it started this installer) and waits until it has gone, up to 15 seconds. Opened while
+# the old copy is still quitting, macOS hands the open to that copy, which then goes, and nothing
+# new starts.
+close_mac() {
+  pkill -TERM -a -f "$1" 2>/dev/null || return 0
+  i=0
+  while pgrep -a -f "$1" >/dev/null 2>&1 && [ "$i" -lt 30 ]; do sleep 0.5; i=$((i + 1)); done
+}
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -167,7 +176,7 @@ ditto -x -k "$TMP/bridge.zip" "$TMP/app" || fail "the download looks damaged; ru
 
 # A copy opened straight from the .dmg runs from a temporary place of macOS's (App Translocation),
 # and the update from it goes in $DEST: close it, or the new version finds it still open and quits.
-pkill -TERM -a -f "/AppTranslocation/.*/$APP/Contents/" 2>/dev/null && sleep 1 || true
+close_mac "/AppTranslocation/.*/$APP/Contents/"
 
 # Updating: close the running app and stop its server, so the new version starts fresh. Your
 # agents keep running in its terminal host, which shows as "Bridge AI terminal host" rather than
@@ -177,7 +186,7 @@ if [ -d "$DEST/$APP" ]; then
   # -a: include our own parents (and the signal must come first on macOS). When the app updates itself, it started this installer, and
   # without -a macOS pkill skips it and its server, leaving the old version running. Contents/, not
   # Contents/MacOS/: from 3.0.1 the server runs on the Helper, in Contents/Frameworks.
-  pkill -TERM -a -f "$DEST/$APP/Contents/" 2>/dev/null && sleep 1 || true
+  close_mac "$DEST/$APP/Contents/"
   # Except a terminal host on the app's own executable (3.0.0 and before): it checked in with macOS
   # as Bridge AI itself, so macOS would take the new version for open already and refuse to open it.
   # Stop that one; the new version resumes its agents. A host on the Helper stays.
@@ -188,7 +197,7 @@ if [ -d "$DEST/$APP" ]; then
   if [ -f "$PIDFILE" ]; then
     PID="$(cat "$PIDFILE" 2>/dev/null || true)"
     case "$(ps -o command= -p "$PID" 2>/dev/null || true)" in
-      *"$APP"*) kill "$PID" 2>/dev/null || true; sleep 1 ;;
+      *"$APP"*) kill "$PID" 2>/dev/null || true; i=0; while kill -0 "$PID" 2>/dev/null && [ "$i" -lt 30 ]; do sleep 0.5; i=$((i + 1)); done ;;
     esac
   fi
   rm -rf "$DEST/$APP"

@@ -7,7 +7,9 @@
 // that goes quiet asks whether to stop and stops by itself, and talking again takes that back.
 // Saved by itself as it ends, without a summary, and a folder it can't write to says so. An agent
 // you rename goes by that name, over the title it gives its own session, renamed from its header
-// too; and the meeting's page offers the other meeting.
+// too; and the meeting's page offers the other meeting. With two on as a call starts, the prompt's
+// ‹ 1 of 2 › picks which one Take notes records for; its name is changed from the top bar's menu,
+// the pill follows a rename made anywhere, and a name you gave stays when another meeting is picked.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startModel, checks, until, sleep, browser, page, TEST, IS_MAC, IS_WIN } from '../lib/harness.mjs'
@@ -131,6 +133,12 @@ try {
     await api(`/meetings/${m.id}/event`, { event: { ...B, links: [] } })
     const m2 = await api(`/meetings/${m.id}`)
     ok(m2.title === 'Pricing sync' && m2.event.attendees.includes('Ana Lima') && !m2.links.some((l) => l.from === 'invite'), 'taking the other: its name, its people, and the first one\'s invite links gone', { t: m2.title, who: m2.event.attendees, links: m2.links })
+    // Renamed by you since (the card's pencil, the top bar's, its page), then said to be Design
+    // review after all: its people follow and your name stays, even one that reads like a call's.
+    await api(`/meetings/${m.id}`, { title: 'Vendor call, the pricing one' }, 'PATCH')
+    await api(`/meetings/${m.id}/event`, { event: A })
+    const m2b = await api(`/meetings/${m.id}`)
+    ok(m2b.title === 'Vendor call, the pricing one' && m2b.event.title === 'Design review' && m2b.event.attendees.includes('Priya Shah') && !m2b.event.attendees.includes('Ana Lima'), 'a name you gave it stays when another meeting is picked for it, with that one\'s people', { t: m2b.title, event: m2b.event })
     await api(`/meetings/${m.id}/stop`, {})
     // The same from the meeting's page: Another meeting?, and the one it was.
     const m3 = await api('/meetings', { title: A.title, event: A, call: false })
@@ -218,6 +226,78 @@ try {
     await ctx.close()
     call({})
     await until(async () => !(await api('/calls')).calls.length, 8000)
+  }
+
+  // ---------- Two meetings on when a call starts ----------
+  // Double-booked: the prompt names the likelier one, with ‹ 1 of 2 › to say it's the other, and
+  // Take notes records for the one showing. Its name is changed from the top bar's menu (the pencil
+  // by it): Enter keeps it, Esc and an empty name don't, and the pill follows, as it does a rename
+  // made somewhere else (the floating card). Said to be the other meeting after, the name stays.
+  {
+    const n0 = new Date(), p2 = (n) => String(n).padStart(2, '0')
+    const a0 = new Date(+n0 - 20 * 60e3), a1 = new Date(+n0 + 40 * 60e3), b0 = new Date(+n0 - 5 * 60e3), b1 = new Date(+n0 + 25 * 60e3)
+    const { b, which } = await browser()
+    browsers.push(b)
+    if (!IS_MAC || a0.getDate() !== n0.getDate() || a1.getDate() !== n0.getDate()) skip("a call's prompt with two meetings on, and the recording's name from the top bar", IS_MAC ? 'too near midnight for a calendar of today' : 'the calendar is macOS Calendar')
+    else if (which !== 'chromium') skip("a call's prompt with two meetings on, and the recording's name from the top bar", "Take notes needs a mic, and the stand-in one is Chromium's")
+    else {
+      const hm = (t) => `${p2(t.getHours())}:${p2(t.getMinutes())}`
+      const day = `${n0.getFullYear()}-${p2(n0.getMonth() + 1)}-${p2(n0.getDate())}`
+      const line = (title, s, e, who, link) => `@@EV@@${title} (Work)\u00a6${day} at ${hm(s)} - ${hm(e)}\u00a6location: Microsoft Teams Meeting\u00a6url: ${link}\u00a6attendees: ${who}\n`
+      kit.program('icalBuddy', `process.stdout.write(${JSON.stringify(line('Roadmap review', a0, a1, 'Priya Shah, Tester', 'https://teams.microsoft.com/l/meetup-join/19%3ameeting_r') + line('Vendor intro', b0, b1, 'Dan Ruiz, Tester', 'https://teams.microsoft.com/l/meetup-join/19%3ameeting_v'))})`)
+      await api('/calendar?refresh=1')
+      const { p, ctx, errors } = await page(b, kit.url)
+      await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+      call({ input: ['com.microsoft.teams2'] })
+      const prompt = p.locator('.call-prompt', { hasText: 'Teams call started' })
+      await until(() => prompt.locator('.mt-among').count(), 15000)
+      const picked = await api('/calls/event?app=Teams')
+      const first = picked.event?.title, second = picked.others?.[0]?.title
+      const said = () => prompt.locator('.call-prompt-main small').innerText().catch(() => '')
+      const nth = () => prompt.locator('.mt-among-n').innerText().catch(() => '')
+      ok(picked.others?.length === 1 && (await said()).includes(`Take notes for "${first}"?`) && (await nth()) === '1 of 2' && await prompt.getByRole('button', { name: 'Previous meeting' }).count() === 1, 'two meetings on as a call starts: the prompt names the likelier one, "1 of 2", with Previous and Next by name', { picked: [first, second], said: await said(), nth: await nth() })
+      await prompt.getByRole('button', { name: 'Next meeting' }).click()
+      ok((await said()).includes(`Take notes for "${second}"?`) && (await nth()) === '2 of 2', 'Next: the other one', { said: await said(), nth: await nth() })
+      await prompt.locator('button', { hasText: 'Take notes' }).click()
+      const rec = await until(async () => (await api('/calls')).recording, 15000)
+      const m = rec && await api(`/meetings/${rec.id}`)
+      ok(!!m && m.title === second && m.event?.title === second && m.event.attendees.includes(second === 'Vendor intro' ? 'Dan Ruiz' : 'Priya Shah'), 'Take notes: the recording is for the one showing, with its name and people', m && { t: m.title, event: m.event })
+      if (m) {
+        const pill = p.locator('.topbar .rec-pill')
+        await until(() => pill.isVisible(), 10000)
+        const menu = p.locator('.rec-menu')
+        const pencil = async () => { if (!(await menu.count())) { await p.mouse.move(700, 500); await pill.hover() } await menu.waitFor({ timeout: 4000 }).catch(() => {}); await menu.getByRole('button', { name: 'Rename the meeting' }).click() }
+        const box = menu.locator('input.mt-rename')
+        const titleOf = async () => (await api(`/meetings/${rec.id}`)).title
+        await pencil()
+        const sel = await box.evaluate((i) => document.activeElement === i && i.selectionStart === 0 && i.selectionEnd === i.value.length && i.value).catch(() => null)
+        ok(sel === second && (await box.getAttribute('aria-label')) === 'Meeting title', "the pencil by its name in the top bar's menu: a box with the name in it, selected", sel)
+        await p.keyboard.type('Vendor pricing')
+        await p.keyboard.press('Enter')
+        ok(!!(await until(async () => (await titleOf()) === 'Vendor pricing' && (await pill.locator('.rec-name').innerText()) === 'Vendor pricing' && !(await box.count()), 5000)), 'Enter: renamed, on the pill too', { title: await titleOf(), pill: await pill.innerText().catch(() => '') })
+        await pencil()
+        await p.keyboard.type('Not this')
+        await p.keyboard.press('Escape')
+        await pencil()
+        await box.fill('  ')
+        await p.keyboard.press('Enter')
+        await sleep(600)
+        ok(!(await box.count()) && (await titleOf()) === 'Vendor pricing' && (await menu.locator('.rec-menu-title').innerText().catch(() => '')) === 'Vendor pricing', 'Esc leaves it as it was, and an empty name is not kept', await titleOf())
+        // Renamed somewhere else (the floating card renames it on the server, as here).
+        await api(`/meetings/${rec.id}`, { title: 'Named on the card' }, 'PATCH')
+        ok(!!(await until(async () => (await pill.locator('.rec-name').innerText().catch(() => '')) === 'Named on the card', 10000)), 'renamed somewhere else while it records: the pill follows', await pill.innerText().catch(() => ''))
+        await api(`/meetings/${rec.id}/event`, { event: picked.event })
+        const m3 = await api(`/meetings/${rec.id}`)
+        ok(m3.title === 'Named on the card' && m3.event.title === first, 'said to be the other meeting after: its event changes, the name you gave stays', { t: m3.title, event: m3.event.title })
+        await api(`/meetings/${rec.id}/stop`, {})
+      }
+      ok(errors.length === 0, 'the prompt and the pill: no page errors', errors)
+      await ctx.close()
+      call({})
+      await until(async () => !(await api('/calls')).calls.length, 8000)
+      kit.program('icalBuddy', "process.stdout.write('')")
+      await api('/calendar?refresh=1')
+    }
   }
 
   // ---------- Quiet: the meeting seems over ----------

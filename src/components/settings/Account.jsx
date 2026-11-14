@@ -41,7 +41,8 @@ export default function Account() {
 }
 
 // ---------- signing in ----------
-function SignIn({ st, onIn }) {
+// (inline: in Settings › Devices, under Bridge AI's relay, which says what it's for itself.)
+export function SignIn({ st, onIn, inline = false }) {
   const [email, setEmail] = useState(st.pending?.email || '')
   const [code, setCode] = useState('')
   const [step, setStep] = useState(st.pending ? 'code' : 'email')
@@ -65,13 +66,17 @@ function SignIn({ st, onIn }) {
       : problem.code === 'account-wrong' ? problem.text
         : problem.text)
   return (
-    <section className="st-sec acct-in">
-      <h4>{t('Sign in to Bold Bridge')}</h4>
-      <p className="muted small">{t('For Early Access and Bridge AI\'s relay; Bridge AI works the same without one. There\'s no password: you\'re emailed a code.')}</p>
+    <section className={inline ? 'acct-in k-inline' : 'st-sec acct-in'}>
+      {inline ? <p className="small"><b>{t('Your email, to ask for it.')}</b> {t('There\'s no password: you\'re emailed a code, and that\'s your Bold Bridge account.')}</p> : (
+        <>
+          <h4>{t('Sign in to Bold Bridge')}</h4>
+          <p className="muted small">{t('For Early Access and Bridge AI\'s relay; Bridge AI works the same without one. There\'s no password: you\'re emailed a code.')}</p>
+        </>
+      )}
       {st.signedOut && <p className="st-note warn acct-out"><Icon name="alert" size={13} /> {st.signedOut.why}</p>}
       {step === 'email' ? (
         <form className="st-row acct-form" onSubmit={(e) => { e.preventDefault(); if (email.trim()) send() }}>
-          <input className="st-input acct-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t('Your email')} aria-label={t('Your email')} autoComplete="email" spellCheck={false} autoFocus />
+          <input className="st-input acct-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t('Your email')} aria-label={t('Your email')} autoComplete="email" spellCheck={false} autoFocus={!inline} />
           <button type="submit" className="btn small primary" disabled={busy || !email.trim()}><Icon name="mail" size={13} /> {busy ? t('Sending…') : t('Email me a code')}</button>
         </form>
       ) : (

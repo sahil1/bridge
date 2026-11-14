@@ -1015,6 +1015,128 @@ process.exit(1)`)
   // (Bridge AI restarting under the card cuts off what it was asking, which WebKit reports.)
   ok(withoutCutOff(fl.errors).length === 0, 'card: no page errors', fl.errors)
   await fl.ctx.close()
+
+  // ---------- Resume recording ----------
+  // On a meeting that ended hours ago, in ⋯; on one that just ended, a button by its state too. It
+  // records again as the same meeting with its time carried on, and says why it can't while another
+  // one records.
+  { // names of its own, apart from the ones above
+  for (const x of (await api('/meetings')).meetings.filter((x) => x.status === 'recording' || x.status === 'paused')) await api(`/meetings/${x.id}/stop`, {})
+  await until(async () => !(await api('/meetings')).meetings.some((x) => x.status !== 'done'), 15000)
+  await api('/settings', { meetings: { autoSummary: false } }, 'PATCH')
+  const dirOf = (id) => path.join(kit.data, 'meetings', id)
+  const metaOf = (id) => JSON.parse(fs.readFileSync(path.join(dirOf(id), 'meeting.json'), 'utf8'))
+  const made = async (title, text, minsAgo) => {
+    const x = await api('/meetings', { title, call: false })
+    await api(`/meetings/${x.id}/stop`, {})
+    await until(async () => (await api(`/meetings/${x.id}`)).status === 'done', 10000)
+    said(x.id, [['you', 1, text]])
+    const at = Date.now() - minsAgo * 60e3
+    // Written until it stays: the server saves the meeting's notes by itself once it's done, and
+    // a record it read just before this write would go back over it.
+    const when = { startedAt: new Date(at).toISOString(), endedAt: new Date(at + 300e3).toISOString(), seconds: 300 }
+    await until(async () => {
+      fs.writeFileSync(path.join(dirOf(x.id), 'meeting.json'), JSON.stringify({ ...metaOf(x.id), ...when }))
+      await sleep(300)
+      return metaOf(x.id).seconds === 300 && metaOf(x.id).startedAt === when.startedAt
+    }, 10000)
+    return x.id
+  }
+  const cb = await page(b, kit.url, { store: { 'cc-rail-meetings': true, 'cc-meet-tab': 'list' }, before: noServiceWorker })
+  const cp = cb.p
+  await cp.waitForSelector('.rail-nav-row', { timeout: 15000 }).catch(() => {})
+  const openIt = async (id) => { await until(async () => { await cp.evaluate((mid) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: mid } })), id); return (await cp.locator('.mt-title').inputValue().catch(() => '')) === metaOf(id).title }, 10000, 1000) }
+  const Y = await api('/meetings', { title: 'Ended by mistake', call: false })
+  await send(Y.id, Buffer.concat([tone(0.5), tone(2, true), tone(3.5)]))
+  await api(`/meetings/${Y.id}/stop`, {})
+  await until(async () => (await api(`/meetings/${Y.id}`)).status === 'done', 15000)
+  const old = await made('Last week\'s review', 'An old one.', 6 * 60)
+  await openIt(old)
+  await cp.locator('.mt-view .win-btn[aria-label="More actions"]').click()
+  ok((await cp.locator('.mt-view .mt-resume').count()) === 0 && (await cp.locator('.menu-anchor .menu button', { hasText: 'Resume recording' }).count()) === 1, 'a meeting that ended hours ago: Resume recording is in ⋯, not in its header')
+  await cp.keyboard.press('Escape')
+  await openIt(Y.id)
+  ok(!!(await until(() => cp.locator('.mt-view .pane-head .mt-resume').first().isVisible().catch(() => false), 8000)) && /Resume recording/.test(await cp.locator('.mt-view .mt-resume').first().innerText().catch(() => '')), 'a meeting that just ended has Resume recording by its state', await cp.locator('.mt-view').innerText().catch(() => '').then((x) => x.slice(0, 300)))
+  await shot(cp, `${tag}resume-recording`)
+  // While another one records (elsewhere), it says why it can't.
+  const Z = await api('/meetings', { title: 'Standing meeting', call: false })
+  await until(async () => (await cp.evaluate(() => fetch('/api/calls').then((r) => r.json()).then((j) => j.recording?.title).catch(() => null))) === 'Standing meeting', 8000)
+  await sleep(3000) // the page's own look at what's recording
+  await cp.locator('.mt-view .mt-resume').first().click()
+  ok(!!(await until(async () => /"Standing meeting" is recording\. Stop it first\./.test(await cp.locator('.mt-msg').innerText().catch(() => '')), 8000)), 'while another meeting records, Resume recording says so and which', await cp.locator('.mt-msg').innerText().catch(() => ''))
+  await api(`/meetings/${Z.id}/stop`, {})
+  await until(async () => (await api(`/meetings/${Z.id}`)).status === 'done', 10000)
+  await sleep(3000)
+  if (which === 'chromium') {
+    await cp.locator('.mt-view .mt-resume').first().click()
+    const back = await until(async () => { const m = await api(`/meetings/${Y.id}`); return m.status === 'recording' && m }, 10000)
+    ok(!!back && back.resumedFrom === 6 && await cp.locator('.mt-recbar').isVisible().catch(() => false), 'Resume recording: the same meeting records again, with its recording bar', back && [back.status, back.resumedFrom])
+    const shownTime = (await cp.locator('.mt-recbar .mt-rectime').innerText().catch(() => '')).trim()
+    ok(/^0:(0[6-9]|[1-5]\d)$/.test(shownTime) && (await cp.locator('.mt-view .mt-resume').count()) === 0, 'its time carries on from where it stopped', shownTime)
+    await sleep(2500)
+    await cp.locator('.mt-recbar button', { hasText: 'Stop' }).click()
+    const ended = await until(async () => { const m = await api(`/meetings/${Y.id}`); return m.status === 'done' && m }, 15000)
+    ok(!!ended && ended.seconds >= 7 && (await api('/meetings')).meetings.filter((x) => x.title === 'Ended by mistake').length === 1, 'stopped again: one meeting still, longer than it was', ended && ended.seconds)
+  } else skip('Resume recording records again, its time carried on', `${which} has no fake mic`)
+
+  // ---------- Combine ----------
+  // Two picked on the Meetings page and combined: a meeting of its own with them in it and a summary
+  // across them, no transcript, speakers or recording of its own; they stay in the list, each tagged
+  // with it. Its summary says when it's out of date. Separate says its meetings stay, and they do.
+  const W1 = await made('Workshop morning', 'We agreed the themes.', 50)
+  const W2 = await made('Workshop afternoon', 'We agreed who hires.', 20)
+  fs.writeFileSync(path.join(dirOf(W1), 'summary.md'), '## Summary\n- Themes agreed.\n')
+  await cp.locator('.rail-nav-btn', { hasText: 'Meetings' }).click()
+  await cp.waitForSelector('.mt-row', { timeout: 8000 }).catch(() => {})
+  const mrow = (title) => cp.locator('.mt-home .mt-row', { hasText: title }).first()
+  await mrow('Workshop morning').locator('.mt-pick').check()
+  ok((await cp.locator('.mt-home .mt-bulk .mt-combine').count()) === 0, 'with one picked, there\'s no Combine')
+  await mrow('Workshop afternoon').locator('.mt-pick').check()
+  await cp.locator('.mt-home .mt-bulk .mt-combine').click()
+  const whole = await until(async () => (await api('/meetings')).meetings.find((x) => x.parts), 8000)
+  ok(!!whole && whole.title === 'Workshop morning' && whole.parts.join() === [W1, W2].join() && whole.seconds === 600, 'two picked, Combine: a combined meeting named after the first, with both in it', whole)
+  ok(!!(await until(async () => (await cp.locator('.mt-parts .mt-part').count()) === 2 && /^2 parts$/.test((await cp.locator('.mt-nparts').first().innerText().catch(() => '')).trim()), 8000)), 'it opens: the meetings in it, and "2 parts" under its name', await cp.locator('.mt-view').innerText().catch(() => ''))
+  ok((await cp.locator('.mt-parts .mt-part-open b').allInnerTexts()).join('|') === 'Workshop morning|Workshop afternoon' && /no summary yet/.test(await cp.locator('.mt-parts .mt-part').nth(1).innerText()), 'in the order they were, each with when and how long, and whether it has a summary', await cp.locator('.mt-parts').innerText().catch(() => ''))
+  const viewsShown = await cp.locator('.mt-view .seg button').evaluateAll((els) => els.map((e) => e.dataset.view))
+  ok(viewsShown.join() === 'summary,mine,parts' && (await cp.locator('.mt-voices-btn, .mt-resume, .mt-talk').count()) === 0, 'its views are Summary, My notes and Meetings: no transcript, speakers or Resume recording', viewsShown)
+  ok(/No summary yet\. Summarize writes an overview across its meetings/.test(await cp.locator('.mt-notes').first().innerText().catch(() => '')), 'with summaries not written by themselves, it says how to have its overview written')
+  await cp.locator('.mt-tool.lead', { hasText: 'Summarize' }).click()
+  ok(!!(await until(async () => /beta ships/.test(await cp.locator('.mt-summary').first().innerText().catch(() => '')), 15000)) && /Meetings · 2/.test(await cp.locator('.mt-from').innerText().catch(() => '')), 'Summarize writes it, and it says it was written from the 2 meetings', await cp.locator('.mt-from').innerText().catch(() => ''))
+  await shot(cp, `${tag}combined`)
+  await cp.locator('.mt-view .win-btn[aria-label="More actions"]').click()
+  const cm = await cp.locator('.menu-anchor .menu button').allInnerTexts().then((a) => a.map((x) => x.trim()))
+  ok(cm.includes('Separate…') && cm.includes('Add a meeting…') && !cm.some((x) => /Transcribe again|Resume recording|Fix a word|Delete meeting|Tell the voices/.test(x)), '⋯ has Separate and Add a meeting, and nothing that needs a recording', cm)
+  await cp.keyboard.press('Escape')
+  // One of its meetings summarized again: out of date, until Regenerate.
+  await api(`/meetings/${W2}/summary`, {})
+  ok(!!(await until(async () => /out of date: a meeting in it was added, taken out or summarized again/.test(await cp.locator('.mt-stale').innerText().catch(() => '')), 15000)), 'a meeting in it summarized again: its summary says it\'s out of date')
+  await cp.locator('.mt-stale button', { hasText: 'Regenerate' }).click()
+  ok(!!(await until(async () => (await cp.locator('.mt-stale').count()) === 0 && !(await api(`/meetings/${whole.id}`)).summaryStale, 15000)), 'Regenerate writes it again, and it stops saying so')
+  // In the list: "2 parts" on it, and each of its meetings tagged with it.
+  await cp.locator('.rail-nav-btn', { hasText: 'Meetings' }).click()
+  await cp.waitForSelector('.mt-home .mt-row', { timeout: 8000 }).catch(() => {})
+  ok(!!(await until(async () => (await cp.locator('.mt-home .mt-row .mt-nparts').count()) === 1 && (await cp.locator('.mt-home .mt-row .mt-partof').count()) === 2, 8000)) && /2 parts/.test(await cp.locator('.mt-home .mt-row .mt-nparts').innerText()) && (await cp.locator('.mt-home .mt-row', { hasText: 'Workshop' }).count()) === 3, 'the list has it with "2 parts", and its meetings still there, each tagged with it', await cp.locator('.mt-home .mt-row').allInnerTexts())
+  await shot(cp, `${tag}combined-list`)
+  await mrow('Workshop afternoon').locator('.mt-partof').click()
+  ok(!!(await until(async () => (await cp.locator('.mt-parts .mt-part').count()) === 2, 8000)), 'the tag opens the combined meeting')
+  ok(!!(await until(async () => (await cp.locator('.rail-meetings .rm-row.on .rm-parts').count()) === 1, 10000)) && /2 parts/.test(await cp.locator('.rail-meetings .rm-row.on .rm-parts').innerText().catch(() => '')), 'and the sidebar says "2 parts" on it', await cp.locator('.rail-meetings').innerText().catch(() => ''))
+  await cp.locator('.mt-parts .mt-part-open', { hasText: 'Workshop afternoon' }).click()
+  // It has a summary by now, so it opens on that (WebKit, where nothing before this left the page
+  // on Transcript).
+  await cp.locator('.mt-view .seg button[data-view="transcript"]').click({ timeout: 8000 }).catch(() => {})
+  ok(!!(await until(async () => /We agreed who hires/.test(await cp.locator('.mt-transcript').innerText().catch(() => '')) && /Workshop morning/.test(await cp.locator('.mt-partof-chip').innerText().catch(() => '')), 8000)), 'a meeting in it opens as itself, with its transcript, saying what it\'s part of', await cp.locator('.mt-partof-chip').evaluateAll((els) => els.map((e) => [e.innerText, e.getBoundingClientRect().width])))
+  await cp.locator('.mt-partof-chip').click()
+  await until(async () => (await cp.locator('.mt-parts .mt-part').count()) === 2, 8000)
+  await cp.locator('.mt-view .win-btn[aria-label="More actions"]').click()
+  await cp.locator('.menu-anchor .menu button', { hasText: 'Separate…' }).click()
+  const sep = cp.locator('.mt-dialog', { hasText: 'Separate this combined meeting?' })
+  ok(/The 2 meetings in it stay as they are, each with its own recording, transcript, notes and summary\./.test(await sep.innerText().catch(() => '')), 'Separate says first that its meetings stay', await sep.innerText().catch(() => ''))
+  await sep.locator('.btn.danger', { hasText: 'Separate' }).click()
+  ok(!!(await until(async () => { const l = (await api('/meetings')).meetings; return !l.some((x) => x.parts) && l.some((x) => x.id === W1) && l.some((x) => x.id === W2) && !metaOf(W1).partOf }, 8000)) && /Themes agreed/.test((await api(`/meetings/${W1}`)).summary), 'separated: it goes, and its meetings are as they were')
+
+  ok(withoutCutOff(cb.errors).length === 0, 'resume and combine: no page errors', cb.errors)
+  await cb.ctx.close()
+  }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))

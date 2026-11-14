@@ -58,4 +58,6 @@ app.whenReady().then(async () => {
   globalThis.asked = { look: 0, hide: 0 }
   ipcMain.handle('bridge:float-look', (e) => { if (ours(e)) globalThis.asked.look++; return true })
   ipcMain.handle('bridge:float-hide', (e) => { if (ours(e)) globalThis.asked.hide++; return true })
+  // Take notes, from the card: what it asked to start (the call's app, and the meeting picked on it).
+  ipcMain.handle('bridge:float-start', (e, o) => { if (ours(e)) globalThis.asked.start = o; return true })
 })

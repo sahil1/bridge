@@ -17,18 +17,17 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { dataFile, ensureDir, writeFileAtomic, loadConfig } from './paths.js'
 
-// Where the accounts service is. Until it exists this stays empty, and while it's empty nothing
-// about accounts shows anywhere (Settings, the relay, the command line), and Early Access and the
-// relay work as they do without one. One computer can point at another with "account": { "url":
+// Where the accounts service is. Empty, nothing about accounts shows anywhere (Settings, the relay,
+// the command line), and Early Access and the relay work as they do without one. One computer can point at another with "account": { "url":
 // "https://…" } in its config.json, and BRIDGE_ACCOUNTS_URL stands in for this one (the tests set it
 // empty, so none reaches the project's).
-export const ACCOUNTS_URL = ''
+export const ACCOUNTS_URL = 'https://accounts.boldbridge.ai'
 // Its public key (account/key.js --public), which an Early Access code from the account is checked
 // with: one, or several separated by commas while the service's key is being changed (the new one
 // added before the service signs with it, the old one kept until what it signed has ended:
 // account/README.md, Changing the signing key). BRIDGE_ACCOUNTS_KEY, or "account": { "publicKey" }
 // in config.json (a string, or a list), stands in for it.
-export const ACCOUNTS_PUBLIC_KEY = ''
+export const ACCOUNTS_PUBLIC_KEY = 'FqJDwoi18T2Ip2TSLiPxhoP0L56mGOOu_0Zfu4jjr_s'
 
 export function accountsBase() {
   const u = String(loadConfig().account?.url ?? process.env.BRIDGE_ACCOUNTS_URL ?? ACCOUNTS_URL).trim().replace(/\/+$/, '')

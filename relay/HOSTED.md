@@ -53,7 +53,7 @@ this:
 
 ## Switching it on in the app
 
-It's hidden until it's switched on, and it needs Bold Bridge accounts switched on too
+It's switched on, with Bold Bridge accounts, which it needs
 ([account/README.md](../account/README.md)). The one switch is [server/hosted.js](../server/hosted.js):
 
 ```js
@@ -64,17 +64,20 @@ While that's empty, or `ACCOUNTS_URL` in server/account.js is, the option doesn'
 first-run setup or `bridge-ai help`, and nothing changes for anyone. The `relay-hosted` test fails if
 it's set while `ACCOUNTS_URL` isn't, or while PRIVACY.md and TERMS.md lack the hosted relay's
 sections (below), and if PRIVACY.md describes a hosted relay while it's empty, so the switch and the
-policy go out together. To try it on one computer before shipping, put this in that computer's
-`~/.bridge-ai/config.json` instead (with the accounts service's too):
+policy go out together. To point one computer at another relay (a test one, say), put this in that
+computer's `~/.bridge-ai/config.json` (with the accounts service's too):
 
 ```json
 "relay": { "hostedUrl": "https://boldbridge.app" }
 ```
 
-Then Settings › Devices starts with a choice of three ways (Bridge AI's relay, your own
-Cloudflare, Tailscale). Bridge AI's relay says what's missing, with the button that fixes it: sign in
-to your Bold Bridge account (Settings › Account), ask for the relay, or wait for the request; once
-it's approved, Use Bridge AI's relay. First-run setup asks for nothing: it says that Settings ›
+Settings › Devices starts with a choice of three ways (Bridge AI's relay, your own Cloudflare,
+Tailscale). Bridge AI's relay is one path, there: your email and the code it's sent (that's the Bold
+Bridge account), and the relay is asked for by itself; while the request waits it says so, and asks
+the account again every so often and when the window comes back. Approved while that's open, the
+relay is set up and the pairing code shows with nothing more to click; opened later, it's Use Bridge
+AI's relay, and the pairing code follows. An account signed in already that never asked has Request
+access. First-run setup asks for nothing: it says that Settings ›
 Devices sets the phone up. `bridge-ai relay setup --hosted` works from a terminal once the account
 has the relay, and says to sign in first otherwise. Moving between the ways works too; phones pair
 again after a move to another relay, and the app says so. The tests never reach it:
@@ -170,13 +173,12 @@ belongs to the relay.
   https://boldbridge.app/_relay/register` with no token answers 401 saying it needs an account, and
   `curl -s -H "Authorization: Bearer <STATS_TOKEN>" https://boldbridge.app/_relay/stats` answers
   today's counts with `"accounts":{"on":0,"max":500}`.
-- [ ] **Try it** on one computer with the config.json overrides above (the relay's and the accounts
-  service's): sign in in Settings › Account, ask for the relay, approve it in the admin view, then
-  Settings › Devices › Bridge AI's relay › Use Bridge AI's relay, and Pair a device. Settings shows
+- [ ] **Try it** on one computer: Settings › Devices › Bridge AI's relay, your email and its code,
+  approve the request in the admin view, and the pairing code shows. Settings shows
   the account's use in the 8-hour window and the week; `/_relay/stats` says one account on it.
 - [ ] **Ship it**: keep (or cherry-pick) the commit that switches it on ("Switch on Bridge AI's
-  hosted relay at boldbridge.app"): it sets `HOSTED_URL` in server/hosted.js and puts the policy text
-  below into PRIVACY.md and TERMS.md (the drafts at the end of this file), with accounts switched on
+  hosted relay at boldbridge.app"): it sets `HOSTED_URL` in server/hosted.js and puts the hosted relay's
+  sections into PRIVACY.md and TERMS.md, with accounts switched on
   already or in the same release. Then run `npm test -- relay-hosted relay-hosted-ui privacy-hosts`,
   and release. Without that commit nothing in the app changes.
 
@@ -654,138 +656,7 @@ and the stats, with nothing reaching Cloudflare, and `npm test -- relay-hosted-u
 side (Settings › Devices with an account and without, a relay that's full, an account's limit
 reached and reset, first-run setup, `bridge-ai relay setup --hosted`) against the stand-ins.
 
-## Policy text to add when it goes live
+## The policy's hosted relay sections
 
-Paste these in the same change that sets `HOSTED_URL`, with `<domain>` filled in, once the accounts
-service's (account/README.md) are in or with them. Until then PRIVACY.md and TERMS.md stay as they
-are, and stay true for everyone who runs their own relay. The `relay-hosted` test keeps these in
-step: each "Replace" must still be word for word in its file, and pasted in, they must say what the
-relay sees, keeps, counts and limits.
-
-### PRIVACY.md: the opening paragraph
-
-Replace
-
-> Bridge AI is an open-source app (https://github.com/sahil1/bridge) made of three parts: the app on
-> your computer, a relay on your own Cloudflare account, and the phone apps for iPhone and Android.
-> The app on your computer sends the project anonymous usage stats and crash reports (below), which
-> you can turn off in Settings › About & Updates; nothing else goes to the project or its author. The
-> relay and the phone apps send the project nothing.
-
-with
-
-> Bridge AI is an open-source app (https://github.com/sahil1/bridge) made of three parts: the app on
-> your computer, a relay (on your own Cloudflare account, or Bridge AI's relay, run by the project),
-> and the phone apps for iPhone and Android. The app on your computer sends the project anonymous
-> usage stats and crash reports (below), which you can turn off in Settings › About & Updates. If you
-> choose Bridge AI's relay, your phone and computer talk through it, end-to-end encrypted, and it
-> keeps only what it needs to work (below). Nothing else goes to the project or its author. A relay of
-> your own and the phone apps send the project nothing.
-
-### PRIVACY.md: in "Usage stats"
-
-Replace
-
-> The phone apps and the relay send nothing of the kind.
-
-with
-
-> The phone apps and a relay of your own send nothing of the kind; Bridge AI's relay counts its own
-> use (below).
-
-### PRIVACY.md: a new section after "Your relay"
-
-> ## Bridge AI's relay (optional)
->
-> If you'd rather not set up a relay of your own, you can choose Bridge AI's relay in Settings ›
-> Devices. It comes with a Bold Bridge account (above), by request. It's the same relay
-> ([relay/worker.js](relay/worker.js)), run by the project on its own Cloudflare account at
-> `<domain>`, so the project's Cloudflare account carries your traffic instead of yours. Cloudflare
-> processes it for the project.
->
-> **What it can read: nothing past the handshake.** Everything between your phone and your computer
-> is end-to-end encrypted, so the relay passes on bytes it can't read. That holds as long as the page
-> doing the encrypting is the one Bridge AI wrote: the iPhone and Android apps have it built in, and
-> a pairing link opens them when they're installed, but in a phone's browser the page comes from the
-> relay, so whoever runs the relay could change it (the page says so before pairing). On a relay
-> that isn't yours, use the iPhone or Android app. Your computer checks the page the relay serves
-> once a day, and when you open Settings › Devices, against Bridge AI's own for the version the
-> relay says it runs (its own copy, or that release's from GitHub), and Settings › Devices says so
-> if they differ; nothing is sent but those requests. What it sees, as any server does: the IP
-> addresses of your phone and computer, when they connect, and how much they send.
->
-> **What it keeps for your computer**: a random id (its address there), a hash of the token your
-> computer uses to connect (never the token), your account's and this device's ids, the Bridge AI
-> version it was set up with, when it registered and last connected, today's message and data counts,
-> and, as any relay does, your paired phones as ids made from their keys (and which of them connected
-> this week), and messages from your phone waiting for your computer, sealed so it can't read them,
-> for 7 days at most. **For your account**: its messages in each 8-hour window and each week, across
-> your computers (for its limits), which it reports to your Bold Bridge account every few minutes
-> while you use it. And because it takes a limited number of accounts at once, it keeps a list of the
-> computers on it, by their random ids and their accounts' ids, with when each was set up and last
-> used.
->
-> **What it counts, for the project**: when a computer registers and connects (with its Bridge AI
-> version), how many paired phones connect each week, how much data passes, when a limit is reached,
-> and each day's totals with the day's busiest computers' use, kept 35 days. Each is by your
-> computer's random id only: no IP addresses, no content, no names. The full list is in
-> [relay/HOSTED.md](relay/HOSTED.md).
->
-> **Its limits**: it's free, with an allowance for each account, across its computers: so many
-> messages in each 8-hour window and each week, like Claude's (Settings › Account and Settings ›
-> Devices show them), and limits that stop floods (how big one message can be, how many come at
-> once, how many phones and tabs are connected at once). It takes a limited number of accounts, and
-> when it's full, Bridge AI says so and offers the other ways (a relay of your own, or Tailscale). It
-> also has a daily limit for all the computers on it together; if that's reached, it stops for
-> everyone until 00:00 UTC. When a limit is reached, your phone and Settings › Devices say which, and
-> when it ends. The limits may change, and paid plans with higher ones may come; anything a paid plan
-> would keep or send elsewhere (to take payment) will be said here first.
->
-> **Stop using it** (Settings › Devices › Stop using the relay) and your computer's data there is
-> deleted at once (should that message not arrive, its id leaves the list of computers within a few
-> days). A computer that hasn't connected for 90 days is deleted the same way, and deleting your Bold
-> Bridge account deletes your account's counts and its computers there within a day. Everything else
-> in this policy, including what Cloudflare sees, applies to it as to a relay of your own, except
-> that it's the project's Cloudflare account.
-
-### TERMS.md: the opening paragraph
-
-Replace
-
-> the relay you can set
-> up on your own Cloudflare account,
-
-with
-
-> the relay you can set up on your own Cloudflare account (or use the project's),
-
-### TERMS.md: in "Privacy"
-
-Replace
-
-> The app on your computer sends it anonymous usage
-> stats and crash reports unless you turn them off (Settings › About & Updates).
-
-with
-
-> The app on your computer sends it anonymous usage
-> stats and crash reports unless you turn them off (Settings › About & Updates), and if you use its
-> relay, the relay keeps what it needs to work and counts its use.
-
-### TERMS.md: a new section after "Your accounts with other services"
-
-> ## Bridge AI's relay
->
-> The project offers an optional relay, so your phone can reach your computer without a Cloudflare
-> account of your own. It comes with a Bold Bridge account, by request, and the project may say no.
-> It's free, with fair-use limits for each account (an allowance of messages every 8 hours and each
-> week, and limits that stop floods). It takes a limited number of accounts, so it may be full when
-> you ask, and it has a daily limit for all of them together, past which it stops for everyone until
-> the next day. The project may change those limits or offer paid plans with higher ones; it will say
-> so here and in the app before charging for anything. It's provided as is, like the rest of Bridge
-> AI: it may be slow, be full, go down, change, or stop, with or without notice. If you need it to be
-> dependable, set up a relay on your own Cloudflare account instead.
->
-> Use it only for Bridge AI, as Bridge AI uses it. Don't use it to pass on anything else, to get
-> around its limits, to disturb other people's use of it, or for anything unlawful. The project may
-> remove a computer from it, suspend the account, or block a network, if it's misused.
+PRIVACY.md and TERMS.md each have a "Bridge AI's relay" section: what the relay sees, keeps, counts
+and limits. The `relay-hosted` test fails if `HOSTED_URL` is set without them.

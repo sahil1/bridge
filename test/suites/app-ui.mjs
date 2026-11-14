@@ -33,7 +33,7 @@
 // your devices alone.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, changeAnswer, IS_WIN, ROOT } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, changeAnswer, IS_MAC, IS_WIN, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('app-ui')
 const kit = await startKit('app-ui')
@@ -64,12 +64,12 @@ try {
     const titled = (x) => x.split(/\s+/).every((w, i) => (i > 0 && /^(a|an|and|as|at|by|for|in|of|on|or|the|to|&)$/.test(w)) || !/^\p{Ll}/u.test(w))
     ok(navs.length > 5 && navs.every(titled), `${t}: Settings' section names are in Title Case`, navs)
     // README.md's table of Settings has a row for each of them (Mail's row says it's a Mac's), and
-    // none for a section that isn't there (Account, until Bold Bridge accounts are switched on).
+    // none for a section that isn't there (Account's is: the tests run without Bold Bridge accounts).
     // (Windows' checkout writes its lines with \r\n: read as \n, so the table ends at its blank line.)
     const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8').replace(/\r\n/g, '\n')
     const table = readme.slice(readme.indexOf('| Section | What\'s there |'))
     const rows = [...table.slice(0, table.search(/\n\n/)).matchAll(/^\| ([^|]+?) \|/gm)].map((m) => m[1]).filter((x) => !/^(Section|-+)$/.test(x))
-    ok(navs.every((x) => rows.includes(x)) && rows.every((x) => navs.includes(x) || x === 'Mail'), `${t}: README.md's Settings table has a row for each section, and only those`, { rows, navs })
+    ok(navs.every((x) => rows.includes(x)) && rows.every((x) => navs.includes(x) || x === 'Mail' || x === 'Account'), `${t}: README.md's Settings table has a row for each section, and only those`, { rows, navs })
     await p.locator('.st-nav-item', { hasText: 'Devices' }).click()
     // (Once the relay's own heading is in: Tailscale, when it isn't the way picked, is under Advanced at the end.)
     const at = (re, h = heads) => (h || []).findIndex((x) => re.test(x))
@@ -295,10 +295,11 @@ try {
     ok(more.setup === false ? /Bridge AI 3\.7\.0 is available/.test(note) : /^Setting up · 1 of 3/.test(note), `${t}: one line under it, the most pressing: ${more.setup === false ? 'the update' : 'setup'}`, note)
     await shot(p, `${tag}phone-top-bar-${width}`)
     if (width === 375) {
-      // What left the bar is in the Today tab: the next meeting, usage and the weather.
+      // What left the bar is in the Today tab: the next meeting (the calendar reads macOS Calendar,
+      // so a Mac's only), usage and the weather.
       await p.locator('.tabbar button', { hasText: 'Today' }).click()
-      const today = await until(async () => { const x = await p.locator('.m-today').innerText().catch(() => ''); return /Weekly payments sync/.test(x) && /Springfield/.test(x) && /62%/.test(x) && x }, 8000)
-      ok(!!today, `${t}: the next meeting, usage and the weather are in the Today tab`, (await p.locator('.m-today').innerText().catch(() => '')).slice(0, 400))
+      const today = await until(async () => { const x = await p.locator('.m-today').innerText().catch(() => ''); return /Weekly payments sync/.test(x) === IS_MAC && /Springfield/.test(x) && /62%/.test(x) && x }, 8000)
+      ok(!!today, `${t}: ${IS_MAC ? 'the next meeting, ' : 'no meeting (no calendar off a Mac), '}usage and the weather are in the Today tab`, (await p.locator('.m-today').innerText().catch(() => '')).slice(0, 400))
       await p.locator('.tabbar button', { hasText: 'Chief' }).click()
     }
     // The update, a tap away: its line, or the dot on Settings while a line before it shows.
@@ -356,7 +357,7 @@ try {
     const rows = (await menu.locator('.mc-item').allInnerTexts().catch(() => [])).map((x) => x.replace(/\s+/g, ' ').trim())
     ok(rows.length === 4 && /this one/.test(rows[0]) && /^Studio Mac Mac · 1 needs you$/.test(rows[1]) && /^Windows PC Windows · Offline, seen/.test(rows[2]) && /^Linux box Paired on this phone$/.test(rows[3]), 'phone app: the devices menu lists this computer, the others with whether they\'re online, and one paired on the phone alone', rows)
     const items = (await menu.locator('.menu-item').allInnerTexts().catch(() => [])).map((x) => x.trim())
-    ok(/On this phone/i.test(await menu.innerText().catch(() => '')) && ['Cloud Agents', 'Start screen'].every((x) => items.includes(x)), 'and On this phone: Cloud Agents and the start screen', items)
+    ok(/On this phone/i.test(await menu.innerText().catch(() => '')) && ['Add a computer', 'Cloud Agents', 'Start screen'].every((x) => items.includes(x)), 'and On this phone: Add a computer, Cloud Agents and the start screen', items)
     const sizes = await menu.evaluate((m) => [...m.querySelectorAll('.mc-item, .menu-item')].map((e) => { const r = e.getBoundingClientRect(); return { h: Math.round(r.height), out: r.left < 0 || r.right > window.innerWidth } }))
     ok(sizes.length > 0 && sizes.every((x) => x.h >= 40 && !x.out), 'every row in it on screen and at least 40px tall', sizes)
     await shot(ph.p, `${tag}phone-app-devices`)
@@ -372,6 +373,9 @@ try {
     await menu.locator('.menu-item', { hasText: 'Start screen' }).tap()
     ok(await ph.p.evaluate(() => window.started) === 1, 'Start screen goes to the app\'s screen for pairing or opening a computer')
     await openMenu()
+    await menu.locator('.menu-item', { hasText: 'Add a computer' }).tap()
+    ok(await ph.p.evaluate(() => window.started) === 2, 'Add a computer goes to the app\'s pairing screen, to scan another computer\'s code')
+    await openMenu()
     await menu.locator('.mc-item', { hasText: 'Windows PC' }).tap()
     ok(!!(await until(() => ph.p.frames().some((f) => /\/m\/test-win\/$/.test(f.url())), 8000)), 'one linked to this computer only is shown through it', ph.p.frames().map((f) => f.url()))
     await ph.ctx.close()
@@ -385,7 +389,7 @@ try {
     const menu = p.locator('.mc-menu')
     await menu.waitFor({ timeout: 5000 }).catch(() => {})
     const text = await menu.innerText().catch(() => '')
-    ok(/Studio Mac/.test(text) && /Windows PC/.test(text) && !/On this phone|Cloud Agents|Start screen|Linux box/i.test(text), 'phone browser: the devices menu has your devices, and nothing that needs the app', text)
+    ok(/Studio Mac/.test(text) && /Windows PC/.test(text) && !/On this phone|Add a computer|Cloud Agents|Start screen|Linux box/i.test(text), 'phone browser: the devices menu has your devices, and nothing that needs the app', text)
     await ctx.close()
   }
 
@@ -502,9 +506,10 @@ try {
     ok(bar.filled.length === 1 && /need/.test(bar.filled[0]), `${t}: one chip is filled, what needs you; the rest are quiet until the pointer is on them`, bar.filled)
     ok(bar.pins.every((x) => x.hover), `${t}: each pinned chip says what it is on hover`, bar.pins)
     const rows = await statusRows(p)
-    const want = { setup: /Setting up · 1 of 3/, restart: /Restart Bridge AI to apply it/, update: /Bridge AI 3\.7\.0 is available/, meeting: /Now APM Platform/ }
+    // The meeting from the calendar, which reads macOS Calendar: a Mac's only.
+    const want = { setup: /Setting up · 1 of 3/, restart: /Restart Bridge AI to apply it/, update: /Bridge AI 3\.7\.0 is available/, ...(IS_MAC ? { meeting: /Now APM Platform/ } : {}) }
     const missing = Object.entries(want).filter(([k, re]) => !bar.has[k] && !re.test(rows)).map(([k]) => k)
-    ok(!missing.length && /Claude/.test(rows) && /new agents start on Work Primary/.test(rows) && /Notification sounds/.test(rows) && /Springfield/.test(rows) && /°F/.test(rows), `${t}: what isn't in the bar is in the Status menu, with usage, sounds, the weather and the time`, { missing, rows: rows.slice(0, 400) })
+    ok(!missing.length && (IS_MAC || !/Now APM Platform/.test(rows)) && /Claude/.test(rows) && /new agents start on Work Primary/.test(rows) && /Notification sounds/.test(rows) && /Springfield/.test(rows) && /°F/.test(rows), `${t}: what isn't in the bar is in the Status menu, with usage, sounds, the weather and the time`, { missing, rows: rows.slice(0, 400) })
     return bar
   }
   {

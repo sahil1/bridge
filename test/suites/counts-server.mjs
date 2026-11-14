@@ -223,6 +223,28 @@ try {
     }
   }
 
+  // ---------- A first report, and the chip each day ----------
+  {
+    const db = d1()
+    const env = { DB: db }
+    const to = (what, body) => worker.fetch(new Request(`https://counts.boldbridge.ai/v1/${what}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), env)
+    const y = new Date(Date.now() - 864e5).toISOString().slice(0, 10)
+    const first = (over = {}) => ({ schema: 1, day: y, app: '3.14.1', channel: 'stable', os: 'mac', arch: 'x64', install: 'desktop', nonce: nonce(70), ...over })
+    await to('first', first())
+    await to('first', first())
+    await to('first', first({ nonce: nonce(71) }))
+    await to('first', first({ nonce: nonce(72), arch: 'arm64', os: 'solaris', channel: 'nightly', name: 'Priya' }))
+    const f = rows(db, 'firsts')
+    ok(f.length === 2 && f.find((x) => x.arch === 'x64')?.n === 2 && f.find((x) => x.os === 'other')?.channel === 'other' && !JSON.stringify(f).includes('Priya'), 'first reports: new installs by day, version, system and chip; one sent twice counts once, and what isn\'t on the list isn\'t kept', f)
+    const bad = await answer(await to('first', first({ day: '2020-01-01', nonce: nonce(73) })))
+    ok(bad.status === 400, 'a first report for a day long ago: turned away', bad)
+    await to('day', { schema: 1, day: y, app: '3.14.1', from: null, os: 'mac', arch: 'x64', install: 'desktop', starts: '1', crashed: false, nonce: nonce(74) })
+    await to('day', { schema: 1, day: y, app: '3.14.1', from: null, os: 'mac', arch: 'arm64', install: 'desktop', starts: '1', crashed: false, nonce: nonce(75) })
+    await to('day', { schema: 1, day: y, app: '3.14.0', from: null, os: 'mac', arch: 'arm64', install: 'desktop', starts: '1', crashed: false, nonce: nonce(76) })
+    const chips = rows(db, 'daily_chips')
+    ok(chips.find((x) => x.arch === 'x64')?.n === 1 && chips.find((x) => x.arch === 'arm64')?.n === 2, 'a day\'s reports: installs by chip, kept apart from the rest', chips)
+  }
+
   // ---------- What the admin view can change ----------
   {
     const db = d1()

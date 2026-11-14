@@ -221,6 +221,8 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
             <>
               <div className="menu-sep" />
               <div className="mc-head">{t('On this phone')}</div>
+              {/* Pairing this phone with another computer (its QR code), which Link a device above isn't. */}
+              <button type="button" role="menuitem" className="menu-item" onClick={close(() => relayComputers.add())}><Icon name="plus" size={13} /> {t('Add a computer')}</button>
               {app.cloud && <button type="button" role="menuitem" className="menu-item" onClick={close(app.cloud)}><Icon name="cloud" size={13} /> {t('Cloud Agents')}</button>}
               <button type="button" role="menuitem" className="menu-item" onClick={close(app.start)} title={t('Back to the start: pair or open a computer')}><Icon name="phone" size={13} /> {t('Start screen')}</button>
             </>
