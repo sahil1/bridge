@@ -71,14 +71,19 @@ try {
     const rows = [...table.slice(0, table.search(/\n\n/)).matchAll(/^\| ([^|]+?) \|/gm)].map((m) => m[1]).filter((x) => !/^(Section|-+)$/.test(x))
     ok(navs.every((x) => rows.includes(x)) && rows.every((x) => navs.includes(x) || x === 'Mail' || x === 'Account'), `${t}: README.md's Settings table has a row for each section, and only those`, { rows, navs })
     await p.locator('.st-nav-item', { hasText: 'Devices' }).click()
-    // (Once the relay's own heading is in: Tailscale, when it isn't the way picked, is under Advanced at the end.)
-    const at = (re, h = heads) => (h || []).findIndex((x) => re.test(x))
-    const heads = await until(async () => { const h = (await p.locator('.st-body h4').allInnerTexts()).map((x) => x.trim()); return h.includes('Your Devices') && at(/relay|Tailscale/i, h) >= 0 && at(/relay|Tailscale/i, h) < at(/^Your Devices$/, h) && h }, 6000)
-    ok(heads && at(/relay|Tailscale/i) >= 0 && at(/relay|Tailscale/i) < at(/^Your Devices$/) && at(/^Your Devices$/) < at(/^Notifications on this device$/), `${t}: connect first, then your devices, then notifications`, heads)
+    // Its three tabs: connect first (the relay's own heading, once it's in), then your computers, then notifications.
+    const heads = async () => (await p.locator('.st-body .st-scroll h4').allInnerTexts()).map((x) => x.trim())
+    const tabs = await p.locator('.st-head .st-tabs [role="tab"]').allInnerTexts()
+    const order = []
+    for (const [tab, re] of [['Phone', /relay|Tailscale/i], ['Computers', /^Your Devices$/], ['Notifications', /^What to notify about$/]]) {
+      await p.locator('.st-tabs [role="tab"]', { hasText: tab }).click()
+      order.push(await until(async () => { const h = await heads(); return h.some((x) => re.test(x)) && h }, 6000) || await heads())
+    }
+    ok(tabs.join('|') === 'Phone|Computers|Notifications' && /relay|Tailscale/i.test(order[0].join()) && !order[0].includes('Your Devices') && order[1].includes('Your Devices') && !order[1].some((x) => /relay|Notifications/i.test(x)) && order[2].includes('Notifications on this device') && order[2].includes('What to notify about'), `${t}: Devices' tabs: Phone (connect), Computers (your devices), Notifications, each with its own`, { tabs, order })
     await p.keyboard.press('Escape')
     // The devices menu's way in (section "machines") opens it at your devices.
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))
-    ok(!!(await until(async () => /Devices/.test(await p.locator('.st-nav-item.on').innerText()) && await p.evaluate(() => { const e = document.getElementById('st-machines'); const b = document.querySelector('.st-scroll'); return !!e && !!b && Math.abs(e.getBoundingClientRect().top - b.getBoundingClientRect().top) < 40 }), 6000)), `${t}: Link a device… opens it at your devices`)
+    ok(!!(await until(async () => /Devices/.test(await p.locator('.st-nav-item.on').innerText()) && (await p.locator('.st-tabs [aria-selected="true"]').innerText()) === 'Computers' && await p.evaluate(() => { const e = document.getElementById('st-machines'); const b = document.querySelector('.st-scroll'); return !!e && !!b && Math.abs(e.getBoundingClientRect().top - b.getBoundingClientRect().top) < 40 }), 6000)), `${t}: Link a device… opens it at your devices, the Computers tab`)
     await shot(p, `${tag}settings-machines-${t}`)
     await p.keyboard.press('Escape')
     if (look.mode === 'light') {

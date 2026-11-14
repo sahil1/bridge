@@ -43,17 +43,21 @@ const model = await startModel('settings-ui')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 
-// What each section shows first (not under Advanced); for Voice & Meetings, each of its tabs.
+// What each section shows first (not under Advanced); for Voice & Meetings and Devices, each of
+// their tabs.
 const TABS = ['Meetings', 'Dictation', 'Speech to Text']
+const TABBED = { 'Voice & Meetings': TABS, Devices: ['Phone', 'Computers', 'Notifications'] }
 const FIRST = {
   General: ['Your name', 'Default agent', 'Pick up unfinished work', 'Layout', 'Location'],
   'Model Providers': ['Your agents', /model labs/i, /run locally/i],
-  'Speech to Text': ['Speech to text', 'Spoken Answers'],
+  'Speech to Text': ['Speech Model', 'Spoken Answers'],
   Dictation: ['Talk to your agents'],
   Meetings: ['Transcribe with', 'Language', 'Names and terms', 'Notes are written by', 'Write the summary when a meeting ends', 'Clean up the transcript when a meeting ends', 'Name who spoke on the call', ...(IS_MAC ? ['Prepare for each meeting'] : []), 'Record the other side of calls', 'Notice calls', 'Save every meeting as Markdown'],
   Mail: ['How You Write', 'Learn it again now and then', 'Working days', 'Working hours', 'Read-Only'],
   'MCP Servers': ['Bridge AI as an MCP Server', 'Add server'],
-  Devices: ['Your Devices', 'What to notify about', 'An agent needs you'],
+  Phone: [/relay|Cloudflare/i],
+  Computers: ['Your Devices', 'Link a device'],
+  Notifications: ['Notifications on this device', 'What to notify about', 'An agent needs you'],
   Appearance: ['Color Mode', 'Theme', 'Text Size', 'Language'],
   'Config File': ['Copy path'],
   'About & Updates': ['Version', 'Check for new versions', 'Report a problem', 'Beta Features'],
@@ -70,7 +74,9 @@ const ALL = {
   Meetings: ['input|On this computer', 'input|OpenAI', 'input|Groq', 'input|Deepgram', 'input|AssemblyAI', 'input|Another OpenAI-style service', 'button|Speech models', 'select|Meeting language', 'button|Open Memory', 'input|More words to listen for', 'input|Record the other side of calls', 'select|Model for meeting notes', 'input|Write the summary when a meeting ends', 'input|Clean up the transcript when a meeting ends', 'input|Suggest what to ask, in every meeting', 'select|How often AI Assist suggests something', ...(IS_MAC ? ['input|Prepare for each meeting'] : []), 'input|Name who spoke on the call', 'textarea|Your own instructions for every summary', 'input|Tell voices apart in a room', 'input|Tell voices apart on a call', 'input|Learn my voice', 'input|Remember voices you name', 'select|The key that mentions a meeting', 'input|Notice calls', 'input|Stop by itself when the call ends', 'select|What to save', 'input|Folder', 'input|Subfolders', 'input|File name', 'input|Front matter', 'input|Your mic, as', 'input|The call, as', 'input|Keep saved notes up to date', 'input|Save every meeting as Markdown'],
   Mail: ['input|Learn it again now and then', 'button|Mon', 'button|Sun', 'input|From', 'input|To', 'select|Kept clear around meetings', 'select|Around a meeting somewhere else', 'select|How many times to offer'],
   'MCP Servers': ['input|Bridge AI as an MCP Server', 'button|Add server', 'button|Refresh'],
-  Devices: ['button|Sign in with Cloudflare', 'button|Use an API token instead', 'button|Check again', 'button|Details', "input|The other device's link", 'button|Link', 'button|Turn on notifications', 'input|An agent needs you (a question, a permission)', 'input|An agent finished', 'select|Usage running low', 'input|Answer buttons for simple questions (yes or no, or two short choices)', "input|Notify my phone even when I'm at the computer"],
+  Phone: ['button|Sign in with Cloudflare', 'button|Use an API token instead', 'button|Check again'],
+  Computers: ['button|Details', "input|The other device's link", 'button|Link'],
+  Notifications: ['button|Turn on notifications', 'input|An agent needs you (a question, a permission)', 'input|An agent finished', 'select|Usage running low', 'input|Answer buttons for simple questions (yes or no, or two short choices)', "input|Notify my phone even when I'm at the computer"],
   Appearance: ['button|Light', 'button|Dark', 'button|Sync with system', 'button|Midnight', 'button|Custom', 'button|Copy', 'input|Paste a theme', 'button|Use', 'button|Small', 'button|Large', 'button|Comfortable', 'button|Compact', 'button|Geist', 'button|Rounded', 'input|Weather', 'input|Clock', 'input|Usage', 'input|Updates', 'input|Restart to apply', 'input|Setup', 'input|Notification sounds', 'select|Language', 'button|Reset appearance'],
   'Config File': ['button|Copy path', 'textarea|config.json', 'button|Save', 'button|Effective settings', 'button|Defaults'],
   'About & Updates': ['button|Check now', 'input|Check for new versions', 'button|Take the tour', 'a|Report a problem', 'a|Suggest an idea', 'button|Copy details', 'input|Studio', 'input|Home', 'input|Tidy what I say', 'input|Usage Across Every Provider', 'input|Meeting Insights', 'input|Tab Groups', 'input|Scheduled Routines', 'input|Files', 'input|Sign PDFs', 'input|Bridge AI as an MCP Server', ...(IS_MAC ? ["input|Speakers From the Call's Video"] : [])],
@@ -123,7 +129,7 @@ try {
     const navs = (await p.locator('.st-nav-item').allInnerTexts()).map((x) => x.trim())
     ok(navs.filter((x) => x === 'Voice & Meetings').length === 1 && !navs.includes('Voice') && !navs.includes('Meetings') && !navs.includes('Dictation'), 'Voice & Meetings is one section, with no Voice or Meetings beside it', navs)
     // Voice & Meetings: each of its tabs, as a section was.
-    const places = navs.flatMap((x) => (x === 'Voice & Meetings' ? TABS.map((tab) => [x, tab]) : [[x, null]]))
+    const places = navs.flatMap((x) => (TABBED[x] ? TABBED[x].map((tab) => [x, tab]) : [[x, null]]))
     for (const [section, tab] of places) {
       const name = tab || section
       await nav(p, section)
@@ -137,7 +143,9 @@ try {
       const want = (FIRST[name] || []).filter((x) => !(typeof x === 'string' ? shown.includes(x) : x.test(shown)))
       if (FIRST[name]) ok(!want.length, `${name}: what most people change shows first`, { missing: want.map(String), shown: shown.slice(0, 600) })
       const has = await adv(p).count() && await adv(p).isVisible()
-      if (name === 'Speech to Text') ok(!has, 'Speech to Text: nothing under Advanced, so no Advanced', { has })
+      if (TABBED[section]) ok(await p.locator('.st-head p').count() === 0, `${name}: no line under the section's name, where its tabs are`)
+      if (section === 'Devices' && tab === 'Phone') ok(JSON.stringify(await p.locator('.st-head .st-tabs [role="tab"]').allInnerTexts()) === JSON.stringify(TABBED.Devices), 'Devices: its tabs are Phone, Computers and Notifications', await p.locator('.st-tabs [role="tab"]').allInnerTexts())
+      if (name === 'Speech to Text' || name === 'Computers') ok(!has, `${name}: nothing under Advanced, so no Advanced`, { has })
       else if (name !== 'MCP Servers' && name !== 'Agents') ok(has && (await isOpen(p)) === false, `${name}: the rest under Advanced, at the end, closed`, { has, open: await isOpen(p) })
       if (ALL[name]) {
         const got = await names(p)
@@ -169,6 +177,22 @@ try {
     ok(await lands('voice-meetings', 'Meetings', '.st-meet'), 'and the section\'s own id: its first tab', await at())
     ok(await lands('dictation-history', 'Dictation', '[data-setting="dictation-history"]') && await isOpen(p) === true, 'a setting of dictation\'s (Dictation History): the Dictation tab, Advanced opened to show it', await at())
     ok(await lands('spoken-answers', 'Speech to Text', '[data-setting="spoken-answers"]'), 'Spoken Answers: Speech to Text', await at())
+    // The Dictation tab says Dictation once: no heading under the tab, and Advanced's part has its own name.
+    await lands('dictation', 'Dictation', '.st-dictation')
+    ok(await p.locator('.st-dictation > h4').count() === 0 && /Cleanup and Mentions/.test(await adv(p).locator('summary').innerText()) && !/Dictation,/.test(await adv(p).locator('summary').innerText()), 'the Dictation tab has no Dictation heading under it, and Advanced says Cleanup and Mentions', await adv(p).locator('summary').innerText())
+    // Devices the same way: what opened it at the phone, your devices or a notification setting lands on its tab.
+    const landsDev = async (section, tab, sel) => {
+      await p.evaluate((s) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: s } })), section)
+      return !!(await until(async () => { const a = await at(); return a.nav === 'Devices' && a.tab === tab && await p.locator(`.modal.settings .st-scroll ${sel}`).first().isVisible() }, 8000, 100))
+    }
+    ok(await landsDev('phone', 'Phone', '[data-setting="relay"]') && await p.locator('.modal.settings #st-machines, .modal.settings [data-setting="notify"]').count() === 0, 'a link to "phone": Devices at Phone, the relay without your devices or notifications', await at())
+    ok(await landsDev('machines', 'Computers', '#st-machines') && await p.locator('.modal.settings [data-setting="relay"], .modal.settings [data-setting="notify"]').count() === 0, 'a link to "machines": Computers, your devices on their own', await at())
+    ok(await landsDev('link-device', 'Computers', '[data-setting="link-device"]'), 'Link a device: Computers', await at())
+    ok(await landsDev('devices', 'Phone', '[data-setting="relay"]'), 'the section\'s own id: its first tab, Phone', await at())
+    for (const id of ['this-device', 'notify', 'notify-more']) ok(await landsDev(id, 'Notifications', `[data-setting="${id}"]`) && (id !== 'notify-more' || await isOpen(p) === true), `a link to "${id}": Notifications, at it`, await at())
+    ok(await landsDev('notifications', 'Notifications', '[data-setting="this-device"]') && await p.locator('.modal.settings [data-setting="relay"], .modal.settings #st-machines').count() === 0, 'and "notifications": the tab, on its own', await at())
+    ok(await landsDev('relay', 'Phone', '[data-setting="relay"]') && await landsDev('keep-awake', 'Phone', '[data-setting="relay"]'), 'the relay, and keeping the computer awake (not there without a relay: the relay instead): Phone', await at())
+    await lands('meetings', 'Meetings', '.st-meet')
     // The section in the list, with a tab showing: it stays; from another section: the first again.
     await p.locator('.st-tabs [role="tab"]', { hasText: 'Dictation' }).click()
     await nav(p, 'Voice & Meetings')
@@ -392,6 +416,19 @@ try {
     ok(rows.filter((x) => x === 'Voice & Meetings').length === 1 && !rows.includes('Voice') && !rows.includes('Meetings'), 'phone: one Voice & Meetings row in the list', rows)
     await p.locator('.st-list-row', { hasText: 'Voice & Meetings' }).click()
     ok(!!(await until(async () => (await p.locator('.st-tabs [role="tab"][aria-selected="true"]').innerText().catch(() => '')) === 'Meetings', 5000, 100)), 'and its row opens it at Meetings')
+    ok(await p.locator('.modal.settings.phone .st-lede').count() === 0, 'phone: no line under the bar where the tabs are (the list keeps it)')
+    // Devices on a phone: its three tabs across the top, each fitting.
+    await p.locator('.st-back').click()
+    await p.locator('.st-list-row', { hasText: 'Devices' }).click()
+    for (const [tab, sel] of [['Phone', '[data-setting="relay"]'], ['Computers', '#st-machines'], ['Notifications', '[data-setting="notify"]']]) {
+      await p.locator('.st-tabs [role="tab"]', { hasText: tab }).click()
+      await p.locator(`.modal.settings.phone .st-scroll ${sel}`).waitFor({ timeout: 8000 }).catch(() => {})
+      await settled(p)
+      const f = await phoneFaults(p, '.modal.settings .st-scroll')
+      const dt = await p.locator('.st-tabs [role="tab"]').evaluateAll((l) => l.map((e) => { const r = e.getBoundingClientRect(); return { name: e.innerText.trim(), h: Math.round(r.height), inside: r.left >= 0 && r.right <= innerWidth } }))
+      ok(await p.locator(`.modal.settings.phone .st-scroll ${sel}`).isVisible() && dt.map((x) => x.name).join('|') === 'Phone|Computers|Notifications' && dt.every((x) => x.h >= 40 && x.inside) && !f.wider && !f.past && !f.sideways && !f.cut, `phone: Devices' ${tab} tab, its tabs across the top, nothing wider than the screen, past its edge or cut off`, { f, dt })
+    }
+    await shot(p, `${tag}settings-ui-phone-devices`)
     ok(errors.length === 0, 'phone: no page errors', errors)
     await ctx.close()
   }

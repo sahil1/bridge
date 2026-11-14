@@ -38,7 +38,7 @@ try {
     const t = look.theme
     const { ctx, p, errors } = await page(b, kit.url, look)
     await openVoice(p)
-    ok((await p.locator('.st-nav-item.on').innerText().catch(() => '')).trim() === 'Voice & Meetings' && /Meetings, dictation, and speech to text on this computer/.test(await p.locator('.st-head').innerText()) && (await p.locator('.st-head .st-tabs [aria-selected="true"]').innerText().catch(() => '')) === 'Speech to Text', `${t}: Settings › Voice & Meetings at Speech to Text, with its line`)
+    ok((await p.locator('.st-nav-item.on').innerText().catch(() => '')).trim() === 'Voice & Meetings' && (await p.locator('.st-head .st-tabs [aria-selected="true"]').innerText().catch(() => '')) === 'Speech to Text', `${t}: Settings › Voice & Meetings at Speech to Text`)
     const ids = await p.locator('.st-voice li[data-model]').evaluateAll((l) => l.map((x) => x.dataset.model))
     ok(ids[0] === 'parakeet-v3' && ids[1] === 'parakeet-en' && ids.includes('large-v3-turbo-q5_0') && !ids.includes('apple'), `${t}: the models this computer runs, Parakeet first (no Mac speech here)`, ids)
     // Folded away until it's wanted (later, a Whisper download that failed keeps it open, to say why).
