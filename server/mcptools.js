@@ -179,7 +179,7 @@ export function make({ on, sendOn, boards, meetings, places, files, studio, doct
   // ---------- Making ----------
   async function newBoard({ title, format, diagram }) {
     const b = await boards.create({ title, source: { kind: format, text: diagram } }).catch((e) => { throw why(e.message) })
-    return say(`Made the whiteboard "${b.id}" in Bridge AI (bridge://boards/${enc(b.id)}). It's drawn in the user's look the first time they open it in Whiteboards.`)
+    return say(`Made the whiteboard "${b.id}" in Bridge AI (bridge://boards/${enc(b.id)}). It's drawn in the user's look the first time they open it, in Whiteboards (in Studio, where the user has Studio on).`)
   }
   function placeFor(name) {
     const all = placeList()

@@ -13,6 +13,7 @@ Settings is shorter: Voice and Meetings are one section with tabs, and Devices h
 - **Voice & Meetings**: Settings' Voice and Meetings sections are one, with tabs for Meetings, Dictation and Speech to Text. Dictation's settings have a tab of their own; they were inside Voice. Everything that opened either section opens its tab, and search (⌘K) finds each setting where it is now.
 - **Tabs in Settings › Devices**: Phone (how your phone reaches this computer), Computers (your linked computers, Link a device) and Notifications (this device, what to notify about, the devices that get them).
 - **Bridge AI's relay, picked**: the sign-in, or where your request stands, comes right under the choice. What Bold Bridge can see, fair use and where the relay's code is are folded under one line below it.
+- **Whiteboards in Studio**: with Studio on (a Beta Feature), the sidebar and the phone's More have Studio and no Whiteboards row. Studio's Files lists your whiteboards under Whiteboards, New makes one, and a board opens in Studio's Preview in the same editor. Tabs, links and ⌘K's Whiteboards open them there. With Studio off, Whiteboards is where it was.
 
 ### Fixes
 
