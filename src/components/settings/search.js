@@ -16,6 +16,8 @@ export const SETTINGS = [
     ['layout', tx('Layout'), 'simple everything panels today board'],
     ['location', tx('Location'), 'city weather morning brief place where'],
     ['chief', tx('Chief of Staff runs on'), 'chief of staff agent'],
+    ['chief-helpers', tx('Helpers at once'), 'chief of staff helpers delegate parallel queue queued at once'],
+    ['chief-helpers-edit', tx('Helpers may edit in their own work folder'), 'chief of staff helpers edit permission ask work folder', { near: 'chief-helpers' }],
     ['plan-usage', tx('Plan usage'), 'quota limits read sign-in anthropic'],
     ['permissions', tx('Permissions'), 'allow access microphone accessibility calendars full disk files automation notifications privacy macos', { near: 'name' }],
     ['commands', tx('Command History'), 'history commands asked keep delete', { when: 'routines' }],
