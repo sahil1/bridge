@@ -80,7 +80,7 @@ export default function Voice() {
       )}
 
       <section className="st-sec" data-setting="speech-model">
-        <h4>{t('Speech to text')}</h4>
+        <h4>{t('Speech Model')}</h4>
         <p className="muted small" title={t('Voice notes, dictation and meetings are turned into text on this computer by the speech model you pick here. What you say never leaves it. Each model is one download, from Hugging Face.')}>{t('Voice notes, dictation and meetings are turned into text here: what you say never leaves this computer.')}</p>
         {v.standIn === 'apple' && <p className="small">{t("Until {model} is downloaded, the Mac's own speech turns what you say into text.", { model: v.model.label })}</p>}
         <ul className="mt-models" aria-label={t('Speech models')}>

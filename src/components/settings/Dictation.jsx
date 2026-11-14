@@ -106,7 +106,6 @@ export default function Dictation() {
   return (
     <div className="st-sections">
     <section className="st-sec st-dictation" data-setting="dictation">
-      <h4>{t('Dictation')}</h4>
       <SaveNote note={note} />
       <label className="st-check"><input type="checkbox" checked={on} onChange={(e) => set({ on: e.target.checked })} />
         <span title={touch ? undefined : t('Hold {key} and talk; let go and the words are where you were typing (a message box, a terminal, a search). Tap it instead to keep listening. Esc cancels.', { key: label })}><b>{t('Talk to your agents')}</b> <span className="muted small">{touch ? t('Hold the mic button in a message box and talk; tap it to keep listening.') : t('Hold {key} and talk; let go and the words are where you were typing.', { key: label })}</span></span></label>
@@ -174,7 +173,7 @@ export default function Dictation() {
           {/* What most people leave as it is: under Advanced, at the end of the tab. */}
           <Advanced order={20}>
             <section className="st-sec st-dictation-more" data-setting="dictation-more">
-              <h4>{t('Dictation')}</h4>
+              <h4>{t('Cleanup and Mentions')}</h4>
               {mode && background && status?.edit?.can && (
                 <>
                   <label className="st-check dict-edit" data-setting="edit-by-voice"><input type="checkbox" checked={d.edit === true} onChange={async (e) => { const on = e.target.checked; await set({ edit: on }); if (on && !status.paste?.allowed) setAskEdit((n) => n + 1) }} />
