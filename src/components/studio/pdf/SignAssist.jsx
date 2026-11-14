@@ -57,9 +57,7 @@ export default function SignAssist({ file, pdf, setup, marks, setMarks, picked, 
   }
   return (
     <aside className="sd-sign" aria-label={t('AI Assist')}>
-      <AssistHead className="sd-panel-head sd-sign-head" what={t('Sign this')} onClose={onClose}>
-        <span className="sd-beta">{t('Beta')}</span>
-      </AssistHead>
+      <AssistHead className="sd-panel-head sd-sign-head" what={t('Sign this')} onClose={onClose} />
       <div className="sd-sign-body" ref={body}>
         <ol className="sd-steps">
           {STEPS.map(([id, title], i) => {
