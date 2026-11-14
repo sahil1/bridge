@@ -288,7 +288,6 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
 
   // ---------- The server ----------
   await api('/setup', { name: 'Tester' })
-  await api('/settings', { trials: { studio: true } }, 'PATCH')
   const dir = path.join(kit.home, 'Work', 'decks')
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, 'pitch.md'), DECK)

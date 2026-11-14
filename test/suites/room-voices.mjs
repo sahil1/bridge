@@ -152,7 +152,7 @@ try {
   await setup(kit)
   let st = await tryApi(kit, '/meetings/voices')
   ok(st.offered === true && st.have === false && st.on === false && st.live === true && st.mb === 26 && st.license === 'Apache-2.0', 'offered here, the model not downloaded, not on yet', st)
-  ok((await kit.api('/speech')).voices?.offered === true, 'and Settings › Meetings is told so')
+  ok((await kit.api('/speech')).voices?.offered === true, 'and Settings › Voice & Meetings is told so')
 
   // A room meeting before anything's asked: nothing downloaded, nothing told apart.
   const event = { title: 'Design review', attendees: ['Priya Shah', 'Dan Ruiz', 'Tester'] }

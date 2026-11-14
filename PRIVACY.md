@@ -21,7 +21,7 @@ transcripts on your computer and types into them for you.
 The outside requests Bridge AI makes itself are for what it shows you: the weather (Open-Meteo,
 with only the coordinates you picked), market prices and news headlines (Yahoo Finance, the Federal
 Reserve and public news feeds), speech models when you download one, the first time you use the
-mic or a meeting or from Settings › Voice (one download each from Hugging Face; what you say is
+mic or a meeting or from Settings › Voice & Meetings (one download each from Hugging Face; what you say is
 turned into text on your computer and never sent anywhere, unless you pick a speech service for
 meetings), the local model (Gemma 4 E2B, 2.8 GB) only when you click Download for it in Settings ›
 Model Providers (one download from Hugging Face; what you give it is read on your computer by
@@ -59,7 +59,7 @@ that model. Both go straight from your computer to that provider.
 Who said what in a room (a meeting with your mic only) is worked out on your computer by a small
 voice model you download from Hugging Face the first time you ask for it. What it works out from
 each line stays in that meeting's folder and goes with it when it's deleted. If you turn on Remember
-voices you name (Settings › Meetings, off to start with), the voices you name are kept as a few hundred
+voices you name (Settings › Voice & Meetings, off to start with), the voices you name are kept as a few hundred
 numbers each, with the name you gave, in `~/.bridge-ai/meetings/voices.json`, readable by you only;
 they're never sent anywhere, not to your other devices either, and Forget voices deletes them.
 
@@ -70,9 +70,9 @@ names under them. The pictures stay in memory and are never written to disk; onl
 names are kept, in that meeting's folder (`sights.jsonl`), and they go with it when it's deleted.
 
 Dictation and voice notes are turned into text on your computer, and the recording isn't kept
-(unless you ask for it, below). With "Show the words as you talk" (Settings › Voice, on where your
+(unless you ask for it, below). With "Show the words as you talk" (Settings › Voice & Meetings, on where your
 computer keeps up), the sound goes to your computer as you talk, a moment at a time, rather than all
-at once when you let go; it's heard there the same way and goes nowhere else. The dictation key from other apps (Settings › Voice) is heard for
+at once when you let go; it's heard there the same way and goes nowhere else. The dictation key from other apps (Settings › Voice & Meetings) is heard for
 that one key only: on a Mac it's registered with macOS, which tells Bridge AI when it's pressed and
 let go; on Windows and Linux a keyboard hook runs only while the key is held, and until Ctrl, Alt,
 Shift and the Windows key are let go too (a few seconds at most), to hear them let go, and ignores
@@ -97,7 +97,7 @@ is read.
 When you ask the Chief of Staff out loud, what you said goes to it as any message you type does,
 and its answer is read to you by a voice on the device you're using (its own voices, never one
 fetched from the internet), by the natural voice made on your computer if you pick it in Settings ›
-Voice (Supertonic 3, one download from Hugging Face when you ask for it; the answer is read on your
+Voice & Meetings (Supertonic 3, one download from Hugging Face when you ask for it; the answer is read on your
 computer and its sound goes only to the device you're using), or, on a device with none, by eSpeak
 NG on your computer.
 
@@ -107,7 +107,7 @@ where they went (the name and bundle ID of the app you were in, and its icon; or
 whether they were pasted, sent, typed or copied). It's kept for always unless you pick 30 days or a
 year, and never leaves your computer (a paired phone shows it end-to-end encrypted, as it shows
 everything else). The recording itself is only kept if you turn on "Keep the recordings too".
-Settings › Voice › Dictation turns the history off (then nothing new is kept) and deletes all of it;
+Settings › Voice & Meetings › Dictation turns the history off (then nothing new is kept) and deletes all of it;
 deleting one deletes it from the disk, not just from the list. A dictation refused because a
 password field had the keyboard isn't kept.
 
@@ -143,7 +143,7 @@ terms, and is told your mail is read-only.
 
 AI Assist drafts a reply only when you ask it to (Draft a reply). Then the open email (with the
 earlier messages it quotes), your How You Write profile with a few of your own replies as examples,
-and any free times you put in, go to the model you picked for meeting notes (Settings › Meetings); a
+and any free times you put in, go to the model you picked for meeting notes (Settings › Voice & Meetings); a
 model on your computer keeps them there. AI Assist names that model and shows exactly what it was
 sent. How You Write is learnt the first time you agree to it, and again now and then while AI Assist
 drafts your replies (Settings › Mail turns that off): up to 40 of your own replies from Mail's Sent
@@ -160,17 +160,16 @@ looks in none of them until you open it. A file you copy to another of your comp
 your phone, goes end-to-end encrypted over the same link as everything else (the relay sees only
 how much goes), and lands only in the folder you pick on the computer it goes to.
 
-With Files on (a beta feature, off until you turn it on), it also shows your home folder, your cloud
-drives and this computer's drives, read-only, to you and to your own linked computers and paired
-phones over that same encrypted link. Bridge AI's own folder and your keys' folders (`~/.ssh`,
+Folders, in the sidebar, also shows your home folder, your cloud drives and this computer's drives,
+read-only, to you and to your own linked computers and paired phones over that same encrypted link. Bridge AI's own folder and your keys' folders (`~/.ssh`,
 `~/.gnupg`, Keychains) are never shown, and on a Mac, Desktop, Documents, Downloads and iCloud Drive
-aren't read until you open one. AI Assist in Files looks at the folder you ask it about on your computer,
+aren't read until you open one. AI Assist in Files and Folders looks at the folder you ask it about on your computer,
 and reads a file's contents only to tell whether two files of the same size are the same; nothing
 about it leaves the computer unless you choose Suggest how to organize it, which sends that folder's file and folder
 names, sizes and dates (never what's in a file) to the model you pick for it, and says which model
 and where it runs first. A model on your computer keeps them there.
 
-AI Assist's Sign this (Sign PDFs, a beta feature in Studio, off until you turn it on) keeps the
+AI Assist's Sign this (Sign PDFs, in Studio) keeps the
 signature and initials you draw as two pictures in `~/.bridge-ai/studio/signatures`, readable by you
 only; they're never sent to a model or anywhere else, and removing one deletes it from the disk. A
 PDF you sign is read on your computer to find where to sign. Only when you press Explain it does the
@@ -190,7 +189,7 @@ already on your computer: who's coming and which of them are in your recorded me
 and the action items still open from the last meeting like it, the invite's agenda and files, and on
 a Mac your mail with them from Mail's own index (the last ten days' subjects, senders and Mail's
 short previews, read-only). When it suggests goals and questions (when you ask, or by itself fifteen
-minutes before, unless you turn that off in Settings › Meetings), all of that goes to the model that
+minutes before, unless you turn that off in Settings › Voice & Meetings), all of that goes to the model that
 writes your meeting notes, as your meeting notes do: a model on your computer keeps it there; any
 other gets it. What it suggests is kept in `~/.bridge-ai/cache/meeting-prep.json` until two days
 after the meeting.
@@ -237,10 +236,17 @@ account, that account's id (below); its rollout bucket, a number from 0 to 99
   typing, clicking, scrolling or touching it in the last two minutes; phones aren't counted) and how
   long it was running, as ranges ("1-5 hours"); and the counts of what you used (agents started by
   kind, meetings recorded, dictations, files sent between your computers, crashes and the rest), as
-  ranges ("2-5").
+  ranges ("2-5"). Among them, the models used: for the answers Bridge AI asks a model for itself (a
+  chat, AI Assist, meeting notes, tidying a dictation and the rest), each model's family on the
+  list ("claude-sonnet", "gpt-5", "llama"; a model of your own is only "other"), how it was reached
+  (an agent's sign-in, a key, a cloud, a model server on your computer, or the local model built
+  in) and which part of Bridge AI asked; and for agents, the family of the model each started on or
+  was switched to, or that none was picked. Never a model's name, and nothing from a prompt or an
+  answer.
 - **Once a day**, after the day is over: the version it ran, the one it updated from that day if it
   did, its update channel, rollout bucket and early-access tester as above, the operating system and
-  how it's installed, how many times it started (a range), and whether something crashed.
+  how it's installed, how many times it started (a range), whether something crashed, and how long
+  it was in use that day, as a range ("15-30 minutes").
 - **Once, a couple of minutes after Bridge AI first runs on a computer**: that there's a new
   install, the day it was installed, its version and update channel, the operating system, the
   chip and how it's installed. Turn usage stats off before then and it never goes.

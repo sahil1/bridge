@@ -12,8 +12,8 @@ import { t } from '../../i18n/index.js'
 // Settings › Agents: every agent CLI Bridge AI knows, whether it's installed and signed in,
 // and one click to install it (in a terminal tab you can watch) or start it.
 // Their own sign-in, from here (SignIn.jsx); the others sign in the first time they open. Under
-// Advanced: the models the Chief of Staff can consult. With Recommended Settings on (a beta
-// feature), under Claude Code: what's recommended for your plan, and what it starts with.
+// Advanced: the models the Chief of Staff can consult. Under Claude Code (Recommended Settings):
+// what's recommended for your plan, and what it starts with.
 
 export default function Agents({ onOpenAgent }) {
   const [list, setList] = useState(null)
@@ -32,7 +32,7 @@ export default function Agents({ onOpenAgent }) {
   const recheck = () => {
     api('/agents/catalog').then(setList).catch(() => {})
     api('/subscriptions?refresh=1').then((r) => setSubs(Object.fromEntries((r || []).map((x) => [x.kind, x])))).catch(() => {})
-    if (rec.on) rec.reload(true) // signed in meanwhile: its plan's recommendation
+    rec.reload(true) // signed in meanwhile: its plan's recommendation
   }
   useRecheck(recheck, msg?.paneId ? 8000 : 0)
 
@@ -56,7 +56,7 @@ export default function Agents({ onOpenAgent }) {
     <div className="st-sections">
       <div className="st-row between">
         <p className="muted small">{t("Bridge AI uses the agents' own sign-ins and subscriptions; it never sees your passwords or tokens.")}</p>
-        <button type="button" className="ghost-btn" onClick={() => { load(); if (rec.on) rec.reload(true) }}><Icon name="refresh" size={12} /> {t('Refresh')}</button>
+        <button type="button" className="ghost-btn" onClick={() => { load(); rec.reload(true) }}><Icon name="refresh" size={12} /> {t('Refresh')}</button>
       </div>
       {msg?.error && <p className="st-note bad"><Icon name="alert" size={13} /> {msg.error}</p>}
       {rec.error && <p className="st-note bad"><Icon name="alert" size={13} /> {t("Couldn't look up the settings recommended for your plan: {error}", { error: rec.error })}</p>}

@@ -18,6 +18,9 @@ import { Advanced } from './Advanced.jsx'
 // nothing more to click while this is open. Until it's offered this is exactly the relay section it
 // always was.
 //
+// With Bridge AI's relay picked, what to do comes first (the sign-in, where the request stands, or
+// Use Bridge AI's relay), and what it can see, fair use and its source are folded under it.
+//
 // What Bridge AI's relay can see is said as it is: with the iPhone or Android app, never what you
 // do, since the app carries the code that does the encrypting; in a phone's browser that code comes
 // from the relay (relay/web/shell.js says so there too).
@@ -181,14 +184,18 @@ export default function Relay({ way, setWay, onOffer }) {
         {pick === 'hosted' && (
           <div className="relay-box">
             <p className="small">{t('A relay run by Bold Bridge passes your phone\'s connection on to this computer. It comes with a Bold Bridge account, by request; nothing to set up.')}</p>
+            {current === 'hosted' ? <p className="muted small"><Icon name="check" size={12} /> {t('This is how your phone connects now.')}</p>
+              : busy ? <p className="st-note"><Icon name="refresh" size={13} className="spin" /> {st.busy || t('Working…')}</p>
+              : <Needs acct={acct} asking={asking} onAsk={askRelay} onIn={signedIn}>{full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="phone" size={14} /> {t('Use Bridge AI\'s relay')}</button></div>}</Needs>}
+            {/* What to do comes first; what the relay sees and its fair use, a click away. */}
+            <details className="st-fold relay-facts">
+              <summary><Icon name="chevron" size={12} />{t('What Bold Bridge can see, and fair use')}</summary>
             <ul className="ph-facts">
               <li><b>{t('What it can see:')}</b> {t('the IP addresses of your phone and this computer, and when and how much data passes. With the iPhone or Android app, never what you do: everything between them is end-to-end encrypted by code the app carries. In a phone\'s browser, that code comes from the relay.')}</li>
               <li><b>{t('Fair use:')}</b> {t('your account has an allowance every 8 hours and each week, across its computers, plenty for normal use. Settings › Account shows it.')}</li>
               <li><b>{t('Open source:')}</b> {tn('the relay\'s code is {github}. If you\'d rather not use the project\'s, pick your own Cloudflare instead.', { github: <a href={CODE} target="_blank" rel="noreferrer">{t('on GitHub')}</a> })}</li>
             </ul>
-            {current === 'hosted' ? <p className="muted small"><Icon name="check" size={12} /> {t('This is how your phone connects now.')}</p>
-              : busy ? <p className="st-note"><Icon name="refresh" size={13} className="spin" /> {st.busy || t('Working…')}</p>
-              : <Needs acct={acct} asking={asking} onAsk={askRelay} onIn={signedIn}>{full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="phone" size={14} /> {t('Use Bridge AI\'s relay')}</button></div>}</Needs>}
+            </details>
           </div>
         )}
         {pick === 'cloudflare' && (
@@ -421,7 +428,7 @@ function PairCode({ p, onStop, forPhone = false }) {
       <div className="ph-pair-text">
         <ol className="ph-steps">
           <li><b>{t('A phone:')}</b> {t('scan this with its camera, or in the Bridge AI app. To use it like an app in a browser, add it to the Home Screen (iPhone: Share › Add to Home Screen; Android: ⋮ › Install app) and pair it there. A code pairs one device.')}</li>
-          {!forPhone && <li><b>{t('Another computer:')}</b> {t('in Bridge AI there, open Settings › Devices › Link a device, and paste the link or type the address and code.')}</li>}
+          {!forPhone && <li><b>{t('Another computer:')}</b> {t('in Bridge AI there, open Settings › Devices › Computers › Link a device, and paste the link or type the address and code.')}</li>}
           {!forPhone && <li><b>{t('Or let your phone link them:')}</b> {t('scan this with the Bridge AI app on a phone that\'s paired with the other computer, and it offers to link the two.')}</li>}
         </ol>
         <div className="ph-code">

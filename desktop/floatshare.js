@@ -1,4 +1,4 @@
-// The floating card and a screen you share or record (desktop/main.js, Settings › Meetings › Hide it
+// The floating card and a screen you share or record (desktop/main.js, Settings › Voice & Meetings › Hide it
 // from screen sharing): a screen you share on a call, a recording of it. On a Mac, native/callwatch
 // sharing says when, from the moment the card is wanted.
 // Asking macOS to leave a window out of pictures of the screen isn't enough: macOS 15 and later lets

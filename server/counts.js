@@ -12,11 +12,16 @@
 //   counts), the features it has on, the agents installed, the counts of what was
 //   used, days used, and time in use and running (a window of it in front, with someone typing,
 //   clicking or touching it in the last two minutes: the window says so once a minute; and how long
-//   it ran at all), each as a range ("1-5 hours"), never minutes or times of day.
+//   it ran at all), each as a range ("1-5 hours"), never minutes or times of day. Among the counts,
+//   the models behind Bridge AI's own answers (a chat, AI Assist, meeting notes, dictation…) and
+//   the ones agents start on, each as its family on the list ("claude-sonnet", "gpt-5"), never its
+//   name; how each answer was reached (a sign-in, a key, a cloud, this computer); and which part of
+//   Bridge AI asked.
 // - a day's (<data>/telemetry/days/<day>.json), sent the next day: the version that day (and the
 //   one before it, the day it updated), its channel, bucket and tester as the week's has them, the
-//   OS and how it's installed, how many times it started, and whether it crashed, so each version's
-//   adoption and crash-free days can be seen, on each channel and at each step of a rollout.
+//   OS and how it's installed, how many times it started, whether it crashed, and how long it was
+//   in use (a range: "15-30 minutes"), so each version's adoption and crash-free days, and the
+//   minutes a day it's used, can be seen, on each channel and at each step of a rollout.
 // - a first one (telemetry/sent/first.json), once: a couple of minutes after Bridge AI first runs on
 //   a computer, that there's a new install, the day it was installed, and its version, channel,
 //   system, chip and how it's installed, so a new install is counted the day it happens (a day's
@@ -77,6 +82,10 @@ export function timeRange(min) {
   const h = (min || 0) / 60
   return !(min > 0) ? '0' : h < 1 ? 'under 1 hour' : h < 5 ? '1-5 hours' : h < 10 ? '5-10 hours' : h < 20 ? '10-20 hours' : h < 40 ? '20-40 hours' : '40+ hours'
 }
+// "15-30 minutes": how a day's minutes in use are sent.
+export function minuteRange(min) {
+  return !(min > 0) ? '0' : min < 5 ? 'under 5 minutes' : min < 15 ? '5-15 minutes' : min < 30 ? '15-30 minutes' : min < 60 ? '30-60 minutes' : min < 120 ? '1-2 hours' : min < 240 ? '2-4 hours' : min < 480 ? '4-8 hours' : '8+ hours'
+}
 // "2-5": how a count is sent.
 export function bucket(n) {
   if (!(n > 0)) return '0'
@@ -132,10 +141,13 @@ const later = () => { clearTimeout(writing); writing = setTimeout(() => flush().
 function today(w) { const d = ((now().getDay() + 6) % 7) + 1; if (!w.days.includes(d)) w.days.push(d) }
 
 // One more of a feature used (name: on the list). While sharing is off, nothing at all.
-export async function add(name, by = 1) {
-  if (!sharing() || !NAMES.has(name)) return
+export async function add(name, by = 1) { return addAll([name], by) }
+// Several at once (an answer's model, route and feature), with one look at this install.
+async function addAll(names, by = 1) {
+  const list = names.filter((n) => NAMES.has(n))
+  if (!sharing() || !list.length) return
   const w = await current()
-  w.counts[name] = (w.counts[name] || 0) + by
+  for (const name of list) w.counts[name] = (w.counts[name] || 0) + by
   w.about = await context()
   today(w)
   later()
@@ -148,6 +160,20 @@ export async function most(name, n) {
 }
 // The kind of agent started, as the list names it.
 export const started = (kind) => add(NAMES.has(`agents.started.${kind}`) ? `agents.started.${kind}` : 'agents.started.other')
+// A model's family, as the list names it (modelFamilies): the first whose pattern fits, else
+// other. Never the name, which can be anything a provider or a model server calls it.
+const FAMILIES = Object.entries(SCHEMA.modelFamilies || {}).filter(([k]) => k !== 'about').map(([k, re]) => [k, new RegExp(re, 'i')])
+export const familyOf = (model) => FAMILIES.find(([, re]) => re.test(String(model || '')))?.[0] || 'other'
+// An agent started on a model, or switched to one: its family, or default when none was picked.
+export const agentModel = (model) => add(model ? `agents.model.${familyOf(model)}` : 'agents.model.default')
+// An answer Bridge AI asked a model for itself (chatmodels.js reply()): the model's family (the one
+// the provider says answered, when it says), how it was reached, and the part of Bridge AI that
+// asked (usagelog.js FEATURES).
+const VIA = (route) => (route === 'cli' ? 'signin' : route === 'bridge' ? 'builtin' : /^(ollama|lmstudio)$/.test(route) ? 'local' : /^(azure|bedrock|vertex)$/.test(route) ? 'cloud' : 'key')
+export async function answered(id, feature, said) {
+  const [route, ...rest] = String(id || '').split(':')
+  await addAll([`models.${familyOf(said || rest.join(':') || route)}`, `models.via.${VIA(route)}`, NAMES.has(`ai.${feature}`) ? `ai.${feature}` : 'ai.other'])
+}
 
 // How long Bridge AI has been on this computer, from when its data folder was made.
 async function installAge() {
@@ -280,7 +306,7 @@ const DAYS = path.join(DIR, 'days')
 const LAST = path.join(DIR, 'version.json') // the version this computer ran last, to tell an update
 // The day a moment is in, on this computer's calendar: '2026-11-04'.
 export const dayOf = (d = now()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-let day = null // { day, app, from, starts, crashed, nonce, about }
+let day = null // { day, app, from, starts, crashed, active (minutes in use), nonce, about }
 const sys = (c) => ({ os: c.os, arch: c.arch, install: c.install, ...channelOf(c) })
 async function currentDay() {
   const d = dayOf()
@@ -289,7 +315,7 @@ async function currentDay() {
     if (kept?.day === d) day = kept
     else {
       const last = await fs.promises.readFile(LAST, 'utf8').then(JSON.parse, () => null)
-      day = { day: d, app: last?.app || null, from: null, starts: 0, crashed: false, nonce: crypto.randomBytes(12).toString('hex'), about: {} }
+      day = { day: d, app: last?.app || null, from: null, starts: 0, crashed: false, active: 0, nonce: crypto.randomBytes(12).toString('hex'), about: {} }
     }
   }
   // The version now; an update during the day keeps the one it came from.
@@ -310,7 +336,7 @@ export async function crashed() { if (!sharing()) return; const d = await curren
 // A day's report, exactly as it's sent.
 export function dayReport(d) {
   const c = d.about || {}
-  return { schema: SCHEMA.schema, day: d.day, app: d.app, from: d.from || null, ...channelOf(c), os: c.os, arch: c.arch, install: c.install, starts: bucket(d.starts), crashed: !!d.crashed, nonce: d.nonce }
+  return { schema: SCHEMA.schema, day: d.day, app: d.app, from: d.from || null, ...channelOf(c), os: c.os, arch: c.arch, install: c.install, starts: bucket(d.starts), crashed: !!d.crashed, activeTime: minuteRange(d.active), nonce: d.nonce }
 }
 const dayEndpoint = () => { const w = endpoint(); try { return /\/v1\/week$/.test(w) ? w.replace(/\/v1\/week$/, '/v1/day') : new URL('/v1/day', w).href } catch { return null } }
 // Each day that's over goes, once; one that can't is tried again, and forgotten after two weeks.
@@ -376,6 +402,10 @@ export async function activity() {
   w.active = (w.active || 0) + 1
   today(w)
   later()
+  // And on the day's: written down every five minutes in use, and as the server stops.
+  const d = await currentDay()
+  d.active = (d.active || 0) + 1
+  if (d.active % 5 === 1) await writeDay()
   return { counted: true }
 }
 // A minute of Bridge AI running, once a minute (BRIDGE_COUNTS_MINUTE_MS: the tests' minute). A
@@ -400,5 +430,8 @@ export function start() {
   setInterval(tick, 6 * 3600 * 1000).unref?.()
   setInterval(() => running().catch(() => {}), MINUTE_MS).unref?.()
 }
-// Stopping: this week's counts are written down first (the server's last moment, so at once).
-process.on('exit', () => { if (week && sharing() && (used(week) || week.open > 0)) try { fs.mkdirSync(DIR, { recursive: true }); fs.writeFileSync(fileOf(week.week), JSON.stringify(week)) } catch { /* next time */ } })
+// Stopping: this week's counts and today's are written down first (the server's last moment, so at once).
+process.on('exit', () => {
+  if (week && sharing() && (used(week) || week.open > 0)) try { fs.mkdirSync(DIR, { recursive: true }); fs.writeFileSync(fileOf(week.week), JSON.stringify(week)) } catch { /* next time */ }
+  if (day && sharing() && day.app) try { fs.mkdirSync(DAYS, { recursive: true }); fs.writeFileSync(path.join(DAYS, `${day.day}.json`), JSON.stringify(day)) } catch { /* next time */ }
+})

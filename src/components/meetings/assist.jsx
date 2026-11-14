@@ -17,7 +17,7 @@ import { t, tx } from '../../i18n/index.js'
 // here too, so AI Assist can read them.
 // It says when it last looked, so a quiet stretch never looks like it stopped: "Looked at 2:14 PM:
 // nothing stood out yet". How often it suggests is a slider, Low to High, for every meeting (Settings ›
-// Meetings has it too), and the suggestions sort newest first, oldest first or by kind (per browser).
+// Voice & Meetings has it too), and the suggestions sort newest first, oldest first or by kind (per browser).
 // With Answers in AI Assist on (a beta feature, src/trials.js), a question raised in the meeting that
 // has a general or factual answer is answered here too, on a card of its own (AnswerTip).
 

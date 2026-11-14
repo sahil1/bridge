@@ -380,7 +380,7 @@ try {
     await card.locator('.fc-menu .fc-off').click()
     const confirm = card.locator('.float-card .fc-confirm')
     const said = await until(async () => { const x = await confirm.innerText().catch(() => ''); return /Turn off meeting reminders\?/.test(x) && x }, 4000, 100)
-    ok(!!said && /Settings › Meetings › Remind me before meetings/.test(said), 'Turn off meeting reminders… asks first, saying where to turn them back on', said)
+    ok(!!said && /Settings › Voice & Meetings › Remind me before meetings/.test(said), 'Turn off meeting reminders… asks first, saying where to turn them back on', said)
     const l = await until(async () => { const x = await look(); return whole(x) && !x.past.length && !x.cut.length ? x : null }, 4000, 100)
     ok(!!l, 'whole in its window, nothing past its edge or cut off', await look())
     await capture('float-reminder-turn-off')

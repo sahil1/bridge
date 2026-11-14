@@ -1,7 +1,7 @@
 // Studio's PDFs and AI Assist's Sign this, in the browser named by BRIDGE_TEST_BROWSER. PDFs made here
 // with pdf-lib: an agreement (a page of terms, then a page with a form's signature field and date
 // field), a letter with "Signature: ____" and "Date: ____" in its text, a page with no text, and a
-// locked one. The server: Sign PDFs is a beta feature under Studio, off to start with; a
+// locked one. The server: Sign PDFs is part of Studio, with no Beta Feature to turn on; a
 // signature kept only for you, and removed; the explanation asked of the model picked, with the
 // document's text; a signed copy in _signed, the picture on the right page where it was put, the
 // form's date field filled and its signature field done with, never over a copy that's there, the
@@ -69,7 +69,6 @@ const images = async (file, n) => { const doc = await PDFDocument.load(fs.readFi
 
 try {
   await api('/setup', { name: 'Tester' })
-  await api('/settings', { trials: { studio: true } }, 'PATCH')
   // ---------- The files ----------
   const dir = path.join(kit.home, 'Deals')
   fs.mkdirSync(dir, { recursive: true })
@@ -112,8 +111,8 @@ try {
   const before = sha(path.join(dir, 'agreement.pdf'))
 
   // ---------- The server ----------
-  ok((await api('/config')).trials?.['signature-assist'] === false && /Sign PDFs is a beta feature/.test((await err('/studio/sign/setup'))?.message || ''), 'Sign PDFs is a beta feature, off to start with: its routes say how to turn it on')
-  await api('/settings', { trials: { 'signature-assist': true } }, 'PATCH')
+  // Out of beta: no switch for it, and its routes answer from the start.
+  ok(!('signature-assist' in ((await api('/config')).trials || {})), 'Sign PDFs isn\'t a Beta Feature', (await api('/config')).trials)
   // No model yet: it says so, and where to add one, rather than nothing.
   const none = await api('/studio/sign/setup')
   const noModel = await err('/studio/sign/explain', { ...F('agreement.pdf'), pages: [{ n: 1, text: 'Terms' }] })
@@ -195,7 +194,7 @@ try {
   await shot(p, `${tag}studio-pdf-ai-menu`)
   await p.locator('.ai-menu button', { hasText: 'Sign this' }).click()
   await p.locator('.sd-sign').waitFor({ timeout: 10000 })
-  ok(/AI Assist/.test(await p.locator('.sd-sign-head').innerText()) && /Sign this/.test(await p.locator('.sd-sign-head').innerText()), 'its panel says it\'s AI Assist, signing this', await p.locator('.sd-sign-head').innerText().catch(() => ''))
+  ok(/AI Assist/.test(await p.locator('.sd-sign-head').innerText()) && /Sign this/.test(await p.locator('.sd-sign-head').innerText()) && !/\bBeta\b/.test(await p.locator('.sd-sign-head').innerText()), 'its panel says it\'s AI Assist, signing this, with no Beta badge', await p.locator('.sd-sign-head').innerText().catch(() => ''))
   ok(/gpt-5/.test(await p.locator('.sd-model select').evaluate((s) => s.options[s.selectedIndex]?.text || '')) && /Its text goes to gpt-5/.test(await p.locator('.sd-sent').innerText()), "What you're signing: it says which model reads it, and that the text goes to it", await p.locator('.sd-sign').innerText())
   await shot(p, `${tag}studio-sign-start`)
   await p.locator('.sd-explain button', { hasText: 'Explain it' }).click()
@@ -278,18 +277,6 @@ try {
   ok((await p.locator('.sd-sign-home .sd-sigcard img').count()) === 1 && /Kept only on this computer/.test(await p.locator('.sd-sign-home').innerText()) && (await p.locator('.sd-sign-home button[aria-label="Remove your signature"]').count()) === 1, "Studio's home: Your Signature, your signature and initials, where they're kept, and Remove", await p.locator('.sd-sign-home').innerText())
   await p.locator('.sd-sign-home').scrollIntoViewIfNeeded()
   await shot(p, `${tag}studio-sign-home`)
-  // Settings: part of Studio, so off with it, saying so.
-  await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
-  const trial = (name) => p.locator('.st-check', { has: p.locator('b', { hasText: new RegExp(`^${name}$`) }) })
-  await trial('Sign PDFs').waitFor({ timeout: 15000 })
-  await until(async () => !(await trial('Studio').locator('input').isDisabled()), 10000)
-  ok(await trial('Sign PDFs').locator('input').isChecked() && /AI Assist's Sign this/.test(await trial('Sign PDFs').innerText()), 'Settings › About & Updates › Beta Features: Sign PDFs, on, saying it\'s AI Assist\'s Sign this')
-  await trial('Studio').locator('input').uncheck()
-  ok(!!(await until(async () => (await trial('Sign PDFs').locator('input').isDisabled()) && !(await trial('Sign PDFs').locator('input').isChecked()) && /It needs Studio on/.test(await trial('Sign PDFs').innerText()), 5000)), 'Studio off: Sign PDFs off too, saying it needs Studio', await trial('Sign PDFs').innerText())
-  await shot(p, `${tag}studio-sign-trial`)
-  await trial('Studio').locator('input').check()
-  ok(!!(await until(async () => !(await trial('Sign PDFs').locator('input').isDisabled()) && await trial('Sign PDFs').locator('input').isChecked(), 5000)), 'and back on with it')
-  await p.locator('button[aria-label="Close settings"]').click()
   ok(w.errors.length === 0, 'no page errors', w.errors)
   // Dark, and Sign this picked while the PDF is still opening (its reader held back here): signing
   // starts once it's open.

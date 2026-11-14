@@ -222,8 +222,8 @@ export function makeMeetings() {
     },
   ]
 }
-// Settings › Meetings on the made-up computer: whisper.cpp ready, with the best model.
-// The speech models, as Settings › Voice and › Meetings show them (server/speech.js status).
+// Settings › Voice & Meetings on the made-up computer: whisper.cpp ready, with the best model.
+// The speech models, as Settings › Voice & Meetings shows them (server/speech.js status).
 const EU25 = ['bg', 'hr', 'cs', 'da', 'nl', 'en', 'et', 'fi', 'fr', 'de', 'el', 'hu', 'it', 'lv', 'lt', 'mt', 'pl', 'pt', 'ro', 'sk', 'sl', 'es', 'sv', 'ru', 'uk']
 export const speechModels = () => [
   { id: 'parakeet-v3', runtime: 'sherpa', label: 'Parakeet', short: 'Parakeet', mb: 670, best: true, languages: EU25, license: 'CC-BY-4.0', by: 'NVIDIA', note: 'Accurate and quick on any computer. English and 24 more European languages, which it tells apart itself.', have: true, usable: true, downloading: null },

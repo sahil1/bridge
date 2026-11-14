@@ -1,5 +1,14 @@
 import { store } from '../layout.jsx'
 
+// Meetings at one of its tabs (Meetings.jsx MeetingsHome): Dictations, one of the meetings' own (its
+// list, Memory, Insights, People), or 'meetings' for the meetings at whichever of those they were
+// on. Taken at once if it's open, else as it opens. more: what else the tab is told (a person).
+export function meetingsAt(tab, more = {}) {
+  store.set('cc-meet-kind', tab === 'dictations' ? 'dictations' : 'meetings')
+  if (tab !== 'dictations' && tab !== 'meetings') store.set('cc-meet-tab', tab)
+  window.dispatchEvent(new CustomEvent('bridge-meetings-tab', { detail: { tab, ...more } }))
+}
+
 // Memory is a page in Meetings and in Dictations (memory/Memory.jsx), a tab of each: each shows
 // what came up there (and what you added), until you pick All memory. That's kept while the app is
 // open, so a meeting opened from it and Back finds it as it was; going to Memory again from its tab,
@@ -11,11 +20,10 @@ export function setMemoryAll(from, all) {
   window.dispatchEvent(new CustomEvent('bridge-memory-all', { detail: { from, all: !!all } }))
 }
 // Meetings at its Memory tab: its own, or all of it. App.jsx opens it so for ⌘K's Memory, Settings ›
-// Meetings and a tab kept from when Memory was a page of its own (view:memory), which showed all of it.
+// Voice & Meetings and a tab kept from when Memory was a page of its own (view:memory), which showed all of it.
 export function memoryTab({ all = false } = {}) {
   setMemoryAll('meetings', all)
-  store.set('cc-meet-tab', 'memory')
-  window.dispatchEvent(new CustomEvent('bridge-meetings-tab', { detail: { tab: 'memory' } }))
+  meetingsAt('memory')
 }
 // A meeting's menu: Meetings' Memory, what came up in your meetings.
 export function openMemory({ all = false } = {}) {
@@ -27,8 +35,7 @@ export function openMemory({ all = false } = {}) {
 let pendingPerson = null
 export function openPerson(id) {
   pendingPerson = id
-  store.set('cc-meet-tab', 'people')
-  window.dispatchEvent(new CustomEvent('bridge-meetings-tab', { detail: { tab: 'people', person: id } }))
+  meetingsAt('people', { person: id })
   window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { list: true } }))
 }
 export const takePerson = () => { const p = pendingPerson; pendingPerson = null; return p }

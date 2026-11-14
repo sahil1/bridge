@@ -112,7 +112,7 @@ html.is-hud, html.is-hud body, html.is-hud #root { background: transparent !impo
 .app.narrow .dict-tidy :is(.btn, .st-input) { min-height: 40px; }
 .app.narrow .dict-tidy .st-input { font-size: 16px; }
 
-/* Settings › Voice › Dictation. */
+/* Settings › Voice & Meetings › Dictation. */
 .st-dictation .st-check, .st-dict-history .st-check { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; line-height: 1.45; cursor: pointer; }
 .st-dictation .st-check input, .st-dict-history .st-check input { margin-top: 3px; flex: none; }
 .st-dictation .st-row > span:first-child, .st-dict-history .st-row > span:first-child { min-width: 120px; font-size: 13px; }
@@ -122,6 +122,6 @@ html.is-hud, html.is-hud body, html.is-hud #root { background: transparent !impo
 .st-radios { align-items: flex-start; }
 .st-choices { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
 .st-choices label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
-/* Settings › Voice › Dictation History. */
+/* Settings › Voice & Meetings › Dictation History. */
 .st-dict-history { gap: 10px; }
 .st-choices.st-choices-row { flex-direction: row; flex-wrap: wrap; gap: 6px 16px; }

@@ -221,6 +221,11 @@ try {
       const a = await answer(await dayPost(body))
       ok(a.status === 400, `${what}: turned away`, a)
     }
+    // Time in use that day, as its range, by system and version: unknown from a version before a
+    // day's report said it, other for what isn't a range on the list.
+    for (const [i, active] of [[60, '15-30 minutes'], [61, '15-30 minutes'], [62, '8+ hours'], [63, '17 minutes']]) await dayPost(day({ nonce: nonce(i), activeTime: active }))
+    const t = rows(db, 'daily_time').map((x) => `${x.app} ${x.os} ${x.active} ${x.n}`).sort()
+    ok(JSON.stringify(t) === JSON.stringify(['3.9.1 windows unknown 1', '3.9.2 mac 15-30 minutes 2', '3.9.2 mac 8+ hours 1', '3.9.2 mac other 1', '3.9.2 mac unknown 3']) && SCHEMA.dayTimeRanges.includes('15-30 minutes'), 'a day\'s time in use, kept as its range by version and system (unknown from an older version, other when it isn\'t a range on the list)', t)
   }
 
   // ---------- A first report, and the chip each day ----------

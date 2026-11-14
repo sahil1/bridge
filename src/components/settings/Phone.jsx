@@ -9,25 +9,26 @@ import { pushSupport, pushState, enablePush, disablePush, isIOS } from '../../pw
 import { locale, t, tn } from '../../i18n/index.js'
 import { Advanced } from './Advanced.jsx'
 
-// Settings › Devices: open Bridge AI on your phone (through your own relay, or through
-// Tailscale, as a Home Screen app), link your other computers (through each one's relay: the same
-// sign-in, so it's one place), and choose what you get notified about, on which devices. All
-// optional; Bridge AI works on this computer without any of it. focus: 'machines' starts there.
-// Under Advanced: Tailscale (until it's the way picked, or on), keeping this computer awake, the
-// rest of what to notify about, and the devices that get notifications.
-export default function Phone({ focus = null }) {
+// Settings › Devices, in three tabs (Settings.jsx; tab: the one showing). Phone: open Bridge AI on
+// your phone (through your own relay, or through Tailscale, as a Home Screen app). Computers: link
+// your other computers (through each one's relay: the same sign-in, so it's one section).
+// Notifications: what you get notified about, on which devices. All optional; Bridge AI works on
+// this computer without any of it. focus: 'machines' starts at your devices.
+// Under each tab's Advanced: Tailscale (until it's the way picked, or on) and keeping this computer
+// awake; the rest of what to notify about, and the devices that get notifications.
+export default function Phone({ tab = 'phone', focus = null }) {
   // With Bridge AI's relay offered, Relay starts with a choice of three ways; Tailscale's section
   // shows when it's the one picked (or already on).
   const [way, setWay] = useState(null)
   const [offer, setOffer] = useState(false)
   return (
     <div className="st-sections">
-      <Relay way={way} setWay={setWay} onOffer={setOffer} />
-      <PhoneAccess quiet={offer && way !== 'tailscale'} picked={offer && way === 'tailscale'} />
-      <MachinesSettings embedded focus={focus === 'machines'} />
-      <ThisDevice />
-      <WhatToSend />
-      <Devices />
+      {tab === 'phone' && <Relay way={way} setWay={setWay} onOffer={setOffer} />}
+      {tab === 'phone' && <PhoneAccess quiet={offer && way !== 'tailscale'} picked={offer && way === 'tailscale'} />}
+      {tab === 'machines' && <MachinesSettings embedded focus={focus === 'machines'} />}
+      {tab === 'notifications' && <ThisDevice />}
+      {tab === 'notifications' && <WhatToSend />}
+      {tab === 'notifications' && <Devices />}
     </div>
   )
 }
@@ -89,7 +90,7 @@ function PhoneSetup({ quiet, picked }) {
                 <li>{tn('{install} and sign in with the same account as this computer.', { install: <b>{t('Install Tailscale on your phone')}</b> })}</li>
                 <li>{tn('{scan} with the phone\'s camera, or open {link}.', { scan: <b>{t('Scan this code')}</b>, link: <a href={st.url} target="_blank" rel="noreferrer"><code>{st.url}</code></a> })}</li>
                 <li>{tn('{add} so it opens like an app. iPhone: Share › Add to Home Screen. Android: ⋮ › Install app.', { add: <b>{t('Add it to your Home Screen')}</b> })}</li>
-                <li>{tn('{open} and turn on notifications below (Settings › Devices, on the phone).', { open: <b>{t('Open it from the Home Screen')}</b> })}</li>
+                <li>{tn('{open} and turn on notifications (Settings › Devices › Notifications, on the phone).', { open: <b>{t('Open it from the Home Screen')}</b> })}</li>
               </ol>
               <div className="st-row">
                 <CopyButton text={st.url} label={t('Copy link')} />
@@ -125,7 +126,7 @@ function ThisDevice() {
       {relayComputers ? <p className="muted small">{t('Notifications aren\'t in the Bridge AI app yet. To get them today, open your relay\'s address in {browser}, pair it with a new code, and add it to your Home Screen.', { browser: isIOS() ? 'Safari' : 'Chrome' })}</p>
         : support.why === 'desktop' ? <DesktopNotes onMsg={setMsg} />
         : support.why === 'ios-home-screen' ? <p className="muted small">{isIOS() ? t('On iPhone and iPad, notifications work in the Home Screen app: tap Share › Add to Home Screen, open Bridge AI from there, and turn them on here.') : t('On this device, notifications work in the Home Screen app: tap Share › Add to Home Screen, open Bridge AI from there, and turn them on here.')}</p>
-        : support.why === 'insecure' ? <p className="muted small">{tn('Notifications need a secure connection. Open Bridge AI through its phone link (above), or on this computer at {address}.', { address: <code>http://127.0.0.1</code> })}</p>
+        : support.why === 'insecure' ? <p className="muted small">{tn('Notifications need a secure connection. Open Bridge AI through its phone link (Settings › Devices › Phone), or on this computer at {address}.', { address: <code>http://127.0.0.1</code> })}</p>
         : support.why === 'unsupported' ? <p className="muted small">{t('This browser can\'t receive notifications.')}</p>
         : (
           <>

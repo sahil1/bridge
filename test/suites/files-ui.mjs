@@ -1,8 +1,8 @@
-// Files, a beta feature (src/components/files/, server/explorer.js): every folder on your computers,
+// Folders (src/components/files/, server/explorer.js): every folder on your computers,
 // as Finder shows them. Two Bridge AIs ("Desk" and "Laptop"), each on its own relay, linked. On Desk
 // Desktop, Documents and iCloud Drive act like macOS's guarded folders (scripts/tcc-sim.mjs: each
 // look into one is held a moment and written down) and Downloads like one you said no to. Checked:
-//   the server: off, its routes say how to turn it on; on, the home folder and the drives are roots
+//   the server: with no Beta Feature on (and with one saved off from before), the home folder and the drives are roots
 //   to read, and the sidebar names your usual folders, cloud drives, projects, places and drives
 //   without looking into any folder macOS asks about; a folder as Finder lists it (hidden ones
 //   only when asked for); what's refused (a path up, a link out, Bridge AI's own folder and your
@@ -11,7 +11,7 @@
 //   in Finder (stand-ins); Get Info and a folder's size; a search below a folder, bounded and
 //   stopped when it's no longer wanted; from another computer, a folder macOS hasn't asked about
 //   isn't read; and another site can't load a page's files through these roots;
-//   the app: Files in the sidebar; its own sidebar; the list, sorted by name and size; the path you
+//   the app: Folders in the sidebar (no Files row); its own sidebar; the list, sorted by name and size; the path you
 //   click and back and forward (buttons and keys); Quick Look with Space and the arrow keys; Get
 //   Info and a folder's size; renaming and Trash shown as coming; hidden files; icons with pictures
 //   of pictures and PDFs; columns with a file's preview; a search and its Stop; a document opened
@@ -79,8 +79,8 @@ try {
     NODE_OPTIONS: `--import ${pathToFileURL(path.join(ROOT, 'scripts', 'tcc-sim.mjs')).href}`, SIM_LOG: '1', SIM_MS: String(HOLD),
     ...(IS_MAC ? { SIM_PROTECTED: ['Desktop', 'Documents', path.join('Library', 'Mobile Documents')].map((d) => path.join(home, d)).join(':'), SIM_DENY: path.join(home, 'Downloads') }
       : { SIM_PROTECTED: path.join(home, 'Far', 'Slow') }),
-  } : {}), { trials: { studio: true } })
-  const lap = await kitWith('Laptop', rb, () => ({}), { trials: { files: true } })
+  } : {}))
+  const lap = await kitWith('Laptop', rb, () => ({}))
   const looked = (dir) => (desk.log().match(/\[tcc-sim\] (HELD|FROZE) .*/g) || []).filter((l) => l.includes(path.join(desk.home, dir)))
   const opened = () => { try { return fs.readFileSync(path.join(desk.bin, 'opened.log'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } }
   desk.program(IS_MAC ? 'open' : 'xdg-open', OPENER)
@@ -131,12 +131,13 @@ try {
   ok(!!deskOnLap && !!lapOnDesk, 'Desk and Laptop are linked, each way')
 
   // ---------- the server ----------
-  await part('off, then on', async () => {
+  await part('part of the app', async () => {
+    // A Files switch saved off from before it was part of the app: read by nothing.
+    await desk.api('/settings', { trials: { files: false } }, 'PATCH')
+    // (Asked as Folders' page asks: its own listing doesn't look into a folder macOS asks about.)
     const side = await ask(desk.url, '/files/sidebar')
-    const home = await ask(desk.url, `/agents/${HOME}/files`)
-    ok(side.s === 404 && side.j.trial === 'files' && /Beta Features/.test(side.j.error) && home.s === 404 && home.j.trial === 'files' && home.j.error === side.j.error, 'off, Files\' routes and its roots say it\'s a beta feature and where to turn it on, in the same words', { side, home })
-    await desk.api('/settings', { trials: { files: true } }, 'PATCH')
-    ok((await ask(desk.url, '/files/sidebar')).s === 200, 'turned on in Settings, they answer')
+    const home = await ask(desk.url, `/files/list?root=${HOME}&path=`)
+    ok(side.s === 200 && home.s === 200 && !('files' in ((await desk.api('/config')).trials || {})), 'with no Beta Feature on (Files saved off from before, read by nothing), its routes and its roots answer', { side: side.s, home: home.s })
   })
   let side = null
   await part('the sidebar', async () => {
@@ -262,9 +263,11 @@ try {
   const shots = []
   // (After what's opening has faded in.)
   const snap = async (name) => { await sleep(300); await shot(p, `${tag}files-ui-${name}`); shots.push(name) }
-  await part('Files in the sidebar', async () => {
-    await p.locator('.rail-nav-btn', { hasText: 'Files' }).click()
-    ok(await p.locator('.fx .fx-row[data-name="Projects"]').waitFor({ timeout: 15000 }).then(() => true, () => false), 'Files opens from the sidebar, at your home folder')
+  await part('Folders in the sidebar', async () => {
+    ok(await p.locator('.rail-nav-btn', { hasText: /^\s*Files\s*$/ }).count() === 0, 'the sidebar has Folders, no Files row', await p.locator('.rail-nav-btn').allInnerTexts())
+    await p.locator('.rail-nav-btn', { hasText: 'Folders' }).click()
+    ok(await p.locator('.fx .fx-row[data-name="Projects"]').waitFor({ timeout: 15000 }).then(() => true, () => false), 'Folders opens from the sidebar, at your home folder')
+    ok((await p.locator('.fx-view > .pane-head h2, .pane-head h2').first().innerText().catch(() => '')).trim() === 'Folders' && /Folders/.test(await p.locator('.ws-tab.main').innerText().catch(() => '')), 'its page and its tab are called Folders', { head: await p.locator('.pane-head h2').first().innerText().catch(() => ''), tab: await p.locator('.ws-tab.main').innerText().catch(() => '') })
     // Its sidebar comes on its own (/api/files/sidebar), after the folder now and then (Windows in
     // CI): whole, with a placeholder until then, never Locations alone to jump down under the rest.
     const early = await p.locator('.fx-side-sec h3').allInnerTexts()
@@ -328,7 +331,7 @@ try {
     await p.keyboard.press(`${MOD}+i`)
     const info = p.locator('.fx-info')
     ok(!!(await until(async () => { const x = await info.innerText().catch(() => ''); return /34 bytes/.test(x) && /Modified/.test(x) && /Where/.test(x) && /Markdown document/.test(x) }, 8000)), 'Get Info (⌘I): its kind, size, where it is, when it changed', await info.innerText().catch(() => ''))
-    ok((await info.locator('button', { hasText: 'Rename (coming)' }).isDisabled()) && (await info.locator('button', { hasText: 'Move to Trash (coming)' }).isDisabled()), 'renaming and the Trash are there as coming, and can\'t be used yet')
+    ok(await info.locator('button:disabled').count() === 0 && !/coming/i.test(await info.innerText()), 'no buttons that can\'t be used yet (nothing "coming")', await info.innerText().catch(() => ''))
     await info.locator('button[aria-label="Close Info"]').click()
     await p.locator('.fx-path .fx-crumb', { hasText: 'Projects' }).click()
     await p.locator('.fx-row[data-name="site"]').click()
@@ -344,7 +347,7 @@ try {
     const menu = p.locator('.ctx-menu')
     await menu.waitFor({ timeout: 4000 })
     const items = await menu.locator('button').evaluateAll((els) => els.map((e) => `${e.querySelector('span')?.innerText.trim()}${e.disabled ? ' (off)' : ''}`))
-    ok(items.includes('Get Info') && items.includes('Copy path') && items.includes('Rename (coming) (off)') && items.includes('Move to Trash (coming) (off)'), 'right-click: Get Info, Copy path, and renaming and the Trash shown as coming', items)
+    ok(items.includes('Get Info') && items.includes('Copy path') && !items.some((x) => / \(off\)$|coming/.test(x)), 'right-click: Get Info, Copy path, and nothing that can\'t be used yet', items)
     await p.keyboard.press('Escape')
   })
   await part('hidden files', async () => {
@@ -387,7 +390,7 @@ try {
     if (IS_MAC) ok(/Not looked in: .*Documents/.test(await p.locator('.fx-search-note').innerText()), 'and it says which folders it didn\'t go into (macOS would ask first)', await p.locator('.fx-search-note').innerText())
     await p.locator('.fx-row[data-name="notes.md"]').dblclick()
     ok(!!(await until(async () => /Launch on/.test(await p.locator('.sd-page .ProseMirror').innerText().catch(() => '')), 15000)), 'a double-click on a document opens it in Studio')
-    await p.locator('.ws-tab', { hasText: 'Files' }).first().click()
+    await p.locator('.ws-tab', { hasText: 'Folders' }).first().click()
     await p.locator('.fx').waitFor({ timeout: 8000 })
     await p.locator('.fx-search input').fill('')
     // Stop: a search that takes its time (held here until it's stopped), stopped.
@@ -481,7 +484,7 @@ try {
   // ---------- dark, and a phone ----------
   await part('dark', async () => {
     const d = await page(b, desk.url, { mode: 'dark', store: { 'cc-fx-view': 'list', 'cc-fx-where:here': { root: 'home', path: 'Projects/site' } } })
-    await d.p.locator('.rail-nav-btn', { hasText: 'Files' }).click()
+    await d.p.locator('.rail-nav-btn', { hasText: 'Folders' }).click()
     await d.p.locator('.fx-row[data-name="notes.md"]').click({ timeout: 15000 })
     await shot(d.p, `${tag}files-ui-dark-list`)
     await d.p.keyboard.press('Space')
@@ -504,7 +507,7 @@ try {
     const q = ph.p
     await q.locator('.tabbar button', { hasText: 'More' }).click()
     await q.locator('.m-more-row[data-id="files"]').click()
-    ok(await q.locator('.fx.narrow .fx-row[data-name="Projects"]').waitFor({ timeout: 15000 }).then(() => true, () => false), 'on a phone: More › Files, your home folder in one column')
+    ok(await q.locator('.fx.narrow .fx-row[data-name="Projects"]').waitFor({ timeout: 15000 }).then(() => true, () => false), 'on a phone: More › Folders, your home folder in one column')
     const tall = await q.locator('.fx-row[data-name="Projects"]').evaluate((e) => Math.round(e.getBoundingClientRect().height))
     ok(tall >= 44, `a row is a whole target (${tall} px)`)
     await q.locator('.fx-row[data-name="Projects"]').click()

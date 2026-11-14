@@ -1,4 +1,4 @@
-// Studio's comments in Word files (Comments and @bridge, a beta feature), in the browser named by
+// Studio's comments in Word files (Comments and @bridge), in the browser named by
 // BRIDGE_TEST_BROWSER. A Word file with comments as Word 365 writes them (lib/wordfile.mjs
 // threadsDocx: a question and its reply, a resolved comment, a colleague's @bridge) read as
 // threads: who wrote each and when, which answers which, the resolved one folded away and its words
@@ -27,9 +27,8 @@
 // threads on its slides and shapes; one on a slide saved as PowerPoint writes one (its part named
 // for the slide, the slide's relationship and creation id, its author), the rest as they were;
 // @bridge on a shape rewriting its words, and on a slide adding one after it, each a suggestion in
-// the thread kept onto the slides, or discarded. With the beta off, the comments as before: shown,
-// to answer in Word, and a sheet's and a deck's kept as they are; @bridge's routes not there, and
-// nothing sent. In the dark and on a phone.
+// the thread kept onto the slides, or discarded. Out of beta: a switch for it saved off from before
+// changes nothing. In the dark and on a phone.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -60,7 +59,6 @@ const threadsIn = async (file) => threadsOf(commentsOf(await readDocx(fs.readFil
 
 try {
   await kit.api('/setup', { name: 'Tester' })
-  await kit.api('/settings', { trials: { studio: true, comments: true } }, 'PATCH')
   const dir = path.join(kit.home, 'Work', 'plans')
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, 'threads.docx'), await threadsDocx())
@@ -509,33 +507,18 @@ try {
   ok(dFits.left >= 0 && dFits.right <= dFits.width, 'its comments over the slide, fitting the phone', dFits)
   await shot(ph.p, `${tag}studio-comments-deck-phone`)
 
-  // ---------- The beta off ----------
+  // ---------- Out of beta ----------
+  // A switch for it saved off from before is read by nothing: @bridge's route is there, and a Word
+  // file opens with its comments as threads to write in.
   await kit.api('/settings', { trials: { comments: false } }, 'PATCH')
-  const refused = await kit.api('/studio/comment-assist', { request: 'make this shorter', text: 'Some words' }).catch((e) => e)
-  ok(refused?.status === 404 && refused.j?.trial === 'comments' && /^Comments and @bridge is a beta feature\. Turn it on in Settings › About & Updates › Beta Features\.$/.test(refused.message), 'with the beta off, @bridge\'s route isn\'t there, and says how to turn it on', refused?.message)
-  const asks = model.asked(/^Request:/).length
-  const xAsked = model.asked(/^In the spreadsheet/).length
-  const off = await page(b, kit.url, { width: 1440, height: 900 })
-  pages.push(off)
-  await off.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
-  await until(async () => { await off.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'threads.docx' } })), { root }); return off.p.locator('.sd-w').first().waitFor({ timeout: 2500 }).then(() => true, () => false) }, 25000, 300)
-  await off.p.locator('.sd-doc-tools button[aria-label="Comments"]').click()
-  ok(!!(await until(async () => /Answer them in Word/.test(await off.p.locator('.sd-comments-pane').innerText().catch(() => '')), 5000, 100)) && (await off.p.locator('.sd-threads, .sd-thread-add').count()) === 0, 'with Comments and @bridge off: the comments shown as before, to answer in Word, and nothing to write them with')
-  await shot(off.p, `${tag}studio-comments-off`)
-  await off.p.evaluate(() => { const ed = document.querySelector('.sd-w').editor; let r = null; ed.state.doc.descendants((n, pos) => { if (!r && n.isTextblock && n.textContent.includes('first hour')) r = { from: pos + 1, to: pos + 10 }; return !r }); ed.view.focus(); ed.commands.setTextSelection(r) })
-  ok(!!(await until(() => off.p.locator('.sd-bubble-ai').isVisible(), 5000, 100)) && (await off.p.locator('.sd-bubble-cmt').count()) === 0, 'and words picked have AI Assist by them, not Comment')
-  ok((await off.p.locator('.sd-comments-pane').innerText()).includes('@bridge make this shorter') && !(await off.p.locator('.sd-comments-pane button', { hasText: /Send to AI Assist|Keep|Reply/ }).count()) && model.asked(/^Request:/).length === asks, 'a comment with @bridge in it is only words: nothing to send, and nothing sent')
-  const xRefused = await kit.api('/studio/sheet/comment', { instruction: 'double these', selection: 'A1' }).catch((e) => e)
-  ok(xRefused?.status === 404 && xRefused.j?.trial === 'comments', 'and @bridge\'s route for a sheet isn\'t there either', xRefused?.message)
-  ok(!!(await openSheet(off.p, 'threads.xlsx')), 'an Excel file with threaded comments, the beta off')
-  ok(!!(await until(async () => /threaded comments: they aren't shown here, and saving here keeps them as they are/.test(await off.p.locator('.sh-note').innerText().catch(() => '')), 8000, 100)), 'says, as before, that it has threaded comments kept as they are', await off.p.locator('.sh-note').innerText().catch(() => ''))
-  await off.p.locator('.sd-univer [role="tab"]', { hasText: 'Insert' }).first().click()
-  ok((await off.p.locator('.sd-univer [data-u-command="bridge.sheet.comment"], .sd-univer [data-u-command="bridge.sheet.comments"], .sh-threads').count()) === 0 && model.asked(/^In the spreadsheet/).length === xAsked, 'and has nothing to comment with, and nothing was sent', model.asked(/^In the spreadsheet/).length)
-  await shot(off.p, `${tag}studio-comments-sheet-off`)
-  const dRefused = await kit.api('/studio/deck/comment', { request: 'make this shorter', text: 'Some words' }).catch((e) => e)
-  ok(dRefused?.status === 404 && dRefused.j?.trial === 'comments', 'and a deck\'s @bridge route isn\'t there', dRefused?.message)
-  ok(!!(await openDeck(off.p)), 'a PowerPoint with comments, the beta off')
-  ok((await off.p.locator('.sd-slides-tools button[aria-label="Comments"], .sd-threads').count()) === 0, 'has no Comments to write them with, as before (they\'re kept in the file as they are)')
+  const answered = await kit.api('/studio/comment-assist', { request: 'make this shorter', text: 'Some words' }).catch((e) => e)
+  ok(answered?.j?.trial !== 'comments' && !/beta feature/i.test(answered?.message || ''), 'with a Comments and @bridge switch saved off from before, @bridge\'s route is still there', answered?.message || answered)
+  const still = await page(b, kit.url, { width: 1440, height: 900 })
+  pages.push(still)
+  await still.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+  await until(async () => { await still.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'threads.docx' } })), { root }); return still.p.locator('.sd-w').first().waitFor({ timeout: 2500 }).then(() => true, () => false) }, 25000, 300)
+  await still.p.locator('.sd-doc-tools button[aria-label="Comments"]').click()
+  ok(!!(await until(async () => (await still.p.locator('.sd-threads .sd-thread').count()) > 0, 5000, 100)) && !(await still.p.locator('.sd-comments-pane', { hasText: 'Answer them in Word' }).count()), 'and the Word file\'s comments are threads to answer here')
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))

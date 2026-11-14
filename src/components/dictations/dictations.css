@@ -1,4 +1,4 @@
-/* Dictations (Dictations.jsx) and the sidebar's list of them (RailDictations.jsx). */
+/* Dictations (Dictations.jsx), a tab of Meetings. */
 .dc-view { display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); height: 100%; min-height: 0; min-width: 0; background: var(--pane); position: relative; }
 .dc-count { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dc-home { min-height: 0; overflow: auto; display: grid; align-content: start; gap: 12px; width: 100%; max-width: 820px; margin: 0 auto; padding: 18px clamp(14px, 3vw, 32px) 72px; }
@@ -72,11 +72,3 @@
   .app.narrow .dc-view .pane-head .seg button span { font-size: 12.5px; }
 }
 
-/* The sidebar: a day's heading, then its dictations, each with its icon. */
-.rd-day { margin: 6px 0 2px 25px; font: 600 10.5px var(--font); letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); }
-.rd-row img.dc-glyph { border-radius: 3px; }
-.rd-all { justify-self: start; margin: 4px 0 2px 25px; }
-/* The phone's Meetings tab: Meetings or Dictations. */
-.m-seg { display: flex; gap: 4px; margin: 10px 14px 0; padding: 3px; border-radius: 10px; background: var(--pane-2); }
-.m-seg button { flex: 1; height: 32px; border-radius: 8px; color: var(--ink-2); font: 500 13px var(--font); }
-.m-seg button.on { background: var(--pane); color: var(--ink); box-shadow: var(--shadow); }

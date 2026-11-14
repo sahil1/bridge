@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, refetch } from '../../api.js'
-import { RECENT, ANY } from '../dictations/shared.jsx'
+import { ANY } from '../dictations/shared.jsx'
 import Icon from '../Icon.jsx'
 import { useSettings, SaveNote } from './General.jsx'
 import PermissionFix, { UpdateApp, OpenSettings } from '../PermissionFix.jsx'
@@ -12,9 +12,9 @@ import { Advanced } from './Advanced.jsx'
 import { t, tx } from '../../i18n/index.js'
 import '../../dictation/dictation.css'
 
-// Settings › Voice › Dictation (dictation/controller.js): on or off, the key, whether it works from
+// Settings › Voice & Meetings › Dictation (dictation/controller.js): on or off, the key, whether it works from
 // other apps too (the desktop app, where this computer lets it: desktop/dictation.js says how), where
-// the text goes from there; under Advanced (the end of Voice), Edit by voice, Tidy what I say, the
+// the text goes from there; under Advanced (the end of the tab), Edit by voice, Tidy what I say, the
 // light cleanup, files by name, live words and the history. Saved as `dictation` in config.json;
 // the desktop app is told at once.
 //
@@ -38,7 +38,7 @@ import '../../dictation/dictation.css'
 // words here or send them out. With no model to tidy with, what's needed, on or off: the local
 // model in one click where it runs, else a model of your own (Tidy.jsx).
 //
-// History: each dictation kept on this computer (Dictations, under Meetings), on until you turn it
+// History: each dictation kept on this computer (Meetings › Dictations), on until you turn it
 // off, for always or less; the recordings only if you ask; Delete all, after asking.
 const TO = [['last', tx('The agent I looked at last')], ['chief', tx('The chief of staff')], ['ask', tx('Ask each time')]]
 // How long dictations are kept (server/dictations.js): always unless you pick less.
@@ -104,9 +104,8 @@ export default function Dictation() {
     if (v === 'paste' && paste?.asks === 'accessibility' && !paste.allowed) setAsking((n) => n + 1)
   }
   return (
-    <>
+    <div className="st-sections">
     <section className="st-sec st-dictation" data-setting="dictation">
-      <h4>{t('Dictation')}</h4>
       <SaveNote note={note} />
       <label className="st-check"><input type="checkbox" checked={on} onChange={(e) => set({ on: e.target.checked })} />
         <span title={touch ? undefined : t('Hold {key} and talk; let go and the words are where you were typing (a message box, a terminal, a search). Tap it instead to keep listening. Esc cancels.', { key: label })}><b>{t('Talk to your agents')}</b> <span className="muted small">{touch ? t('Hold the mic button in a message box and talk; tap it to keep listening.') : t('Hold {key} and talk; let go and the words are where you were typing.', { key: label })}</span></span></label>
@@ -171,10 +170,10 @@ export default function Dictation() {
           {pasting && status && !paste && <p className="st-note"><Icon name="info" size={13} /> {t('Pasting where you\'re typing can\'t work on this computer, so what you say goes to the agent you looked at last.')}</p>}
           {!app?.desktop && !touch && <p className="muted small">{t('In the desktop app, the key works from other apps too.')}</p>}
           {app?.desktop && !app.dictateStatus && !touch && <UpdateApp why={t('The key from other apps needs a newer Bridge AI desktop app.')} />}
-          {/* What most people leave as it is: under Advanced, at the end of Voice. */}
+          {/* What most people leave as it is: under Advanced, at the end of the tab. */}
           <Advanced order={20}>
             <section className="st-sec st-dictation-more" data-setting="dictation-more">
-              <h4>{t('Dictation')}</h4>
+              <h4>{t('Cleanup and Mentions')}</h4>
               {mode && background && status?.edit?.can && (
                 <>
                   <label className="st-check dict-edit" data-setting="edit-by-voice"><input type="checkbox" checked={d.edit === true} onChange={async (e) => { const on = e.target.checked; await set({ edit: on }); if (on && !status.paste?.allowed) setAskEdit((n) => n + 1) }} />
@@ -204,9 +203,9 @@ export default function Dictation() {
     </section>
     <Advanced order={30}><History d={d} set={set} cleared={cleared} onClear={async () => {
       if (!window.confirm(`${t('Delete every dictation kept on this computer?')}\n\n${t('Their words, their recordings and the apps\' icons go. This can\'t be undone.')}`)) return
-      try { await api('/dictations', { method: 'DELETE' }); setCleared(t('Deleted.')); refetch(RECENT); refetch(ANY) } catch (e) { setCleared(e.message) }
+      try { await api('/dictations', { method: 'DELETE' }); setCleared(t('Deleted.')); refetch(ANY) } catch (e) { setCleared(e.message) }
     }} /></Advanced>
-    </>
+    </div>
   )
 }
 
@@ -218,7 +217,7 @@ function History({ d, set, cleared, onClear }) {
     <section className="st-sec st-dict-history" data-setting="dictation-history">
       <h4>{t('Dictation History')}</h4>
       <label className="st-check"><input type="checkbox" checked={on} onChange={(e) => set({ history: e.target.checked })} />
-        <span title={t('In Dictations, under Meetings: what you said, when, and where it went (the app or the agent), to find, copy or send again. Only on this computer.')}><b>{t('Keep a history of what you dictate')}</b> <span className="muted small">{t('In Dictations, on this computer only.')}</span></span></label>
+        <span title={t('In Meetings › Dictations: what you said, when, and where it went (the app or the agent), to find, copy or send again. Only on this computer.')}><b>{t('Keep a history of what you dictate')}</b> <span className="muted small">{t('In Meetings › Dictations, on this computer only.')}</span></span></label>
       {on && (
         <>
           <div className="st-row st-radios" role="radiogroup" aria-label={t('Keep them for')}><span>{t('Keep them for')}</span>

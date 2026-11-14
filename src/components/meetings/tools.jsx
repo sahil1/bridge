@@ -128,7 +128,7 @@ export function memGroups(list, seen, by) {
   return out.sort((a, b) => (a.key.startsWith(':')) - (b.key.startsWith(':')) || (a.key === ':none') - (b.key === ':none') || b.items.length - a.items.length)
 }
 
-// Where Memory opens (memory/open.js), for a meeting's menu and Settings › Meetings.
+// Where Memory opens (memory/open.js), for a meeting's menu and Settings › Voice & Meetings.
 export { openMemory } from '../memory/open.js'
 
 // Transcribe one meeting, or several, again from their audio: with another engine or speech model,
@@ -163,7 +163,7 @@ export function TranscribeAgain({ ids, onClose, onDone }) {
         <label><span>{t('With')}</span>
           <select value={pick} onChange={(e) => setPick(e.target.value)} aria-label={t('Transcribe with')}>
             {!sp && <option value="">{t('Loading…')}</option>}
-            {sp && !options.length && <option value="">{t('Nothing set up: Settings › Meetings')}</option>}
+            {sp && !options.length && <option value="">{t('Nothing set up: Settings › Voice & Meetings')}</option>}
             {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
         </label>
@@ -172,7 +172,7 @@ export function TranscribeAgain({ ids, onClose, onDone }) {
             {LANGS.map(([v, l]) => <option key={v} value={v}>{t(l)}</option>)}
           </select>
         </label>
-        {sp && sp.local.models.some((x) => !x.have) && <p className="muted small">{t('More speech models are in Settings › Voice.')}</p>}
+        {sp && sp.local.models.some((x) => !x.have) && <p className="muted small">{t('More speech models are in Settings › Voice & Meetings.')}</p>}
         {err && <p className="error-text small">{err}</p>}
         <div className="mt-dialog-acts"><button type="button" className="ghost-btn" onClick={onClose}>{t('Cancel')}</button><button type="button" className="btn primary small" disabled={busy || !pick} onClick={go}><Icon name="refresh" size={12} /> {t('Transcribe again')}</button></div>
       </div>

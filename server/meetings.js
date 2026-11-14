@@ -452,7 +452,7 @@ const round = (s) => Math.round(s * 100) / 100
 function append(id, line) { fs.appendFileSync(path.join(dirOf(id), 'transcript.jsonl'), `${JSON.stringify(line)}\n`) }
 const waiting = (id) => [...queue, ...running].filter((j) => j.id === id).length
 // Recording stopped and every stretch is in: the meeting is done, its transcript cleaned up and
-// then summarized, each when you have it happen by itself (Settings › Meetings).
+// then summarized, each when you have it happen by itself (Settings › Voice & Meetings).
 function settle(id) {
   const m = readJSON(path.join(DIR, id, 'meeting.json'))
   if (!m || m.status !== 'transcribing' || waiting(id) || decoding.has(id)) return
@@ -480,7 +480,7 @@ function settle(id) {
     // A summary still being written is of what there was before it was recorded again: this one waits.
     await summarizing.get(id)?.catch(() => {})
     if (sum && still() && transcriptText(id)) await summarize(id).catch(() => {})
-    // Saved by itself (Settings › Meetings) with its summary, or without one when it couldn't be
+    // Saved by itself (Settings › Voice & Meetings) with its summary, or without one when it couldn't be
     // written: the transcript and your notes, and the summary once it is.
     resave(id)
   })()
@@ -515,7 +515,7 @@ const eventOf = (e) => ({
 
 // event: the calendar event it's for ({ title, start, end, attendees, agenda }), when there's one.
 // kind: the kind of meeting (KINDS), for the summary; else the kind its name says. The call's sound
-// is recorded too unless it's turned off (Settings › Meetings) or this one asks not to. AI Assist is
+// is recorded too unless it's turned off (Settings › Voice & Meetings) or this one asks not to. AI Assist is
 // on when you have it on for every meeting.
 export function start({ title, event, language, kind, call = true, callApps = [] } = {}) {
   const id = `${new Date().toISOString().slice(0, 10)}-${crypto.randomBytes(3).toString('hex')}`
@@ -529,7 +529,7 @@ export function start({ title, event, language, kind, call = true, callApps = []
     // Its live board, a beta feature (boardSoon): on when you have it on for every meeting.
     board: cfg.meetings?.board === true,
   })
-  const why = call && cfg.meetings?.callAudio !== false ? listen(id) : 'Recording the call\'s sound is off (Settings › Meetings).'
+  const why = call && cfg.meetings?.callAudio !== false ? listen(id) : 'Recording the call\'s sound is off (Settings › Voice & Meetings).'
   speech.prepare(cfg)
   return patchMeta(id, why ? { call: 'off', callWhy: why } : { call: 'on' })
 }
@@ -662,14 +662,14 @@ export function reopen(id, { call = true, callApps = [] } = {}) {
     callEnded: null, callEndedApp: null, endWhy: null, stopsAt: null, call: 'off', callWhy: null, callError: null, summaryRetryAt: null,
     callApps: [...new Set([].concat(callApps || []).map(String))].slice(0, 5),
   })
-  const why = call && cfg.meetings?.callAudio !== false ? listen(id) : 'Recording the call\'s sound is off (Settings › Meetings).'
+  const why = call && cfg.meetings?.callAudio !== false ? listen(id) : 'Recording the call\'s sound is off (Settings › Voice & Meetings).'
   speech.prepare(cfg)
   return patchMeta(id, why ? { call: 'off', callWhy: why } : { call: 'on' })
 }
 
 // The call a meeting is on (calls.js), noted when it starts recording or when one starts during it.
 // When that call ends, the meeting says so and the app asks whether to stop; unless you keep it
-// going (or the call comes back), it stops by itself two minutes later (Settings › Meetings).
+// going (or the call comes back), it stops by itself two minutes later (Settings › Voice & Meetings).
 const AUTO_STOP_MS = Number(process.env.BRIDGE_AUTO_STOP_MS || 120_000)
 const stopping = new Map() // id -> timer
 const recordingNow = () => list().filter((m) => m.status === 'recording' || m.status === 'paused')
@@ -785,10 +785,10 @@ export async function retranscribe(id, { engine, localModel, language } = {}) {
   const st = await speech.status(c)
   if (st.engine === 'local') {
     const lm = st.local.models.find((x) => x.id === st.local.model)
-    if (lm?.runtime === 'whisper' && !st.local.program) throw new Error(`${lm.label} needs whisper.cpp. Install it in Settings › Voice, or pick Parakeet there.`)
-    if (!lm?.have) throw new Error(`Download ${lm?.label || 'that speech model'} first, in Settings › Voice.`)
+    if (lm?.runtime === 'whisper' && !st.local.program) throw new Error(`${lm.label} needs whisper.cpp. Install it in Settings › Voice & Meetings, or pick Parakeet there.`)
+    if (!lm?.have) throw new Error(`Download ${lm?.label || 'that speech model'} first, in Settings › Voice & Meetings.`)
   } else if (st.engine === 'apple') {
-    if (!st.apple.available) throw new Error(`The Mac's own speech isn't available here (${st.apple.why || 'it needs macOS 26 or later'}). Pick another engine in Settings › Meetings.`)
+    if (!st.apple.available) throw new Error(`The Mac's own speech isn't available here (${st.apple.why || 'it needs macOS 26 or later'}). Pick another engine in Settings › Voice & Meetings.`)
   } else if (!st.services.find((x) => x.id === st.engine)?.ready) throw new Error('That service needs its key first, in Settings › Model Providers.')
   const old = path.join(d, 'transcript.jsonl')
   if (fs.existsSync(old)) fs.renameSync(old, path.join(d, `transcript-${Date.now()}.jsonl`))
@@ -1052,7 +1052,7 @@ export function combine(ids, { title } = {}) {
   const same = (f) => (ps.every((p) => (p[f] || null) === (ps[0][f] || null)) ? ps[0][f] || null : null)
   saveMeta({ id, title: clean(title, 200) || ps[0].title, event: null, links: [], status: 'done', kind: 'general', folder: same('folder'), combinedAt: new Date().toISOString(), ...spanOf(ps) })
   for (const p of ps) patchMeta(p.id, { partOf: id })
-  // Its overview, written now unless summaries wait until you ask (Settings › Meetings).
+  // Its overview, written now unless summaries wait until you ask (Settings › Voice & Meetings).
   if (cfg.meetings?.autoSummary !== false) summarize(id).catch(() => {})
   else resave(id)
   return get(id)
@@ -1544,7 +1544,7 @@ export async function glance(id, buf, { auto = false } = {}) {
 // With Screen Recording allowed, nobody has to pick a screen: while a call records and someone on it
 // talks, Bridge AI takes the same looks at the call's window (as each starts talking, and every 15 s
 // while one goes on), read on this Mac and kept as text as a watched screen's are. Not while the
-// page watches a screen (it sends its own), with names off (Settings › Meetings), or once there are
+// page watches a screen (it sends its own), with names off (Settings › Voice & Meetings), or once there are
 // enough.
 const pageLook = new Map() // id -> when the page last sent a look
 const looked = new Map() // id -> { stretch, at }
@@ -2011,7 +2011,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     const k = whole ? { ask: 'Summarize these meetings as one.' } : KINDS[kind || m.kind || 'general'] || KINDS.general
     const lang = SUMMARY_LANGS[language ?? m.summaryLanguage ?? 'auto'] || null
     patchMeta(id, { summarizing: true, summaryError: null, summaryRetryAt: null, kind: kind || m.kind || 'general', ...(model ? { summaryModelPick: model } : {}), ...(language ? { summaryLanguage: language } : {}), ...(again ? {} : { summaryTries: 0 }) })
-    // Who said what on the call, worked out once before the first summary (Settings › Meetings can
+    // Who said what on the call, worked out once before the first summary (Settings › Voice & Meetings can
     // turn it off): from who was invited, names said ("Hi, Priya"), the meeting's name and the screen.
     // The summary can then say who's doing what. With one other person invited, it's them.
     if (cfg.meetings?.nameSpeakers !== false && !m.namedAt && ((!onlyGuest(m) && transcript(id).some((l) => l.src === 'them' && l.text)) || voices.of(id)?.speakers >= 2)) {
@@ -2166,7 +2166,7 @@ export async function ask(id, question, { model } = {}) {
 // general | web, ... }], yours first) and web (null, or { state: looking | done | failed | off, via,
 // error }).
 const ASSIST_MS = Number(process.env.BRIDGE_ASSIST_MS || 60_000)
-// How often it looks and how much it says, by the level picked in Settings › Meetings or on Assist
+// How often it looks and how much it says, by the level picked in Settings › Voice & Meetings or on Assist
 // while it records: every (times ASSIST_MS), once this many words were said since it last looked,
 // at most this many suggestions. Low says one thing, and only when something clearly stands out.
 export const ASSIST_LEVELS = { low: { every: 3, words: 120, most: 1 }, medium: { every: 1, words: 40, most: 3 }, high: { every: 0.5, words: 20, most: 3 } }
@@ -2697,7 +2697,7 @@ export function setWork(id, key, patch) {
 }
 
 // As notes in your notes folder, laid out the way Granola's sync and its Obsidian plugin do it (and
-// so a vault with Granola or Meetily notes gets these beside them). Settings › Meetings › Save
+// so a vault with Granola or Meetily notes gets these beside them). Settings › Voice & Meetings › Save
 // notes picks, for the summary note and the transcript note each: the folder, a subfolder pattern
 // ({year}/{month}/{day} to start with) and a file name pattern ({title}-summary); what to save
 // (both, linked for Obsidian; one note with everything; or only one of them); front matter; the
@@ -2720,7 +2720,7 @@ async function vaultOf(dir) {
     if (path.dirname(d) === d) return null
   }
 }
-// Settings › Meetings › Save notes, with what earlier versions had (folders by date, one note or
+// Settings › Voice & Meetings › Save notes, with what earlier versions had (folders by date, one note or
 // two) as the starting point.
 export function saving() {
   const c = cfg.meetings || {}
@@ -2744,7 +2744,7 @@ function fill(pattern, m, { dir = false } = {}) {
 }
 // ---------- A meeting mentioned in a message ----------
 // The meetings that match what's typed after the meeting key (@, or the one picked in Settings ›
-// Meetings) in the message box: every word in the title, newest first; with nothing typed, the
+// Voice & Meetings) in the message box: every word in the title, newest first; with nothing typed, the
 // latest ones that aren't archived.
 export function mentionable(q = '', n = 8) {
   const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8)
@@ -2853,7 +2853,7 @@ async function writeNotes(id, { auto = false } = {}) {
   const m = meta(id)
   const o = saving()
   const { note, transcript: tfile } = target(m, o)
-  if (!note && !tfile) throw new Error('A combined meeting has no transcript of its own, and only transcripts are saved (Settings › Meetings). Its meetings are saved one by one.')
+  if (!note && !tfile) throw new Error('A combined meeting has no transcript of its own, and only transcripts are saved (Settings › Voice & Meetings). Its meetings are saved one by one.')
   const at = new Date(m.startedAt)
   const day = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
   const vault = await vaultOf(path.dirname(note || tfile))
@@ -2922,7 +2922,7 @@ const resaving = new Map()
 function resave(id, ms = 0) {
   let m
   try { m = meta(id) } catch { return }
-  // Saving every meeting by itself is on unless turned off (Settings › Meetings).
+  // Saving every meeting by itself is on unless turned off (Settings › Voice & Meetings).
   if (!m.saved && !(cfg.meetings?.autoSave !== false && (m.summarizedAt || (m.status === 'done' && !m.summarizing)))) return
   // "Keep saved notes up to date" off: a meeting saved once isn't written again by itself.
   if (m.saved && cfg.meetings?.keepSaved === false) return
@@ -2931,7 +2931,7 @@ function resave(id, ms = 0) {
   resaving.set(id, setTimeout(() => { resaving.delete(id); save(id, { auto: true }).catch(() => {}) }, ms))
 }
 // Why a save didn't work: macOS not letting Bridge AI into the folder, a disk full.
-const savingError = (e) => (e?.code === 'EPERM' || e?.code === 'EACCES' ? `Bridge AI isn't allowed to write to ${folder().replace(os.homedir(), '~')}.${IS_MAC ? ' Allow it in System Settings › Privacy & Security › Files and Folders, or pick' : ' Pick'} another folder in Settings › Meetings.` : String(e?.message || e).slice(0, 300))
+const savingError = (e) => (e?.code === 'EPERM' || e?.code === 'EACCES' ? `Bridge AI isn't allowed to write to ${folder().replace(os.homedir(), '~')}.${IS_MAC ? ' Allow it in System Settings › Privacy & Security › Files and Folders, or pick' : ' Pick'} another folder in Settings › Voice & Meetings.` : String(e?.message || e).slice(0, 300))
 
 // ---------- A deck from a meeting ----------
 // Make a deck: a short Marp deck (Markdown slides, MIT), written by the notes model from the

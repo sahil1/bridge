@@ -17,7 +17,7 @@
 // beta feature): the meeting's Board filling in, kept and discarded there and on the board itself,
 // the floating card's line, the summary's link, its action items onto the task list and Settings.
 // Answers in AI Assist (a beta feature): each answer's card in Suggestions and on the floating card,
-// and what Settings › Meetings says goes where.
+// and what Settings › Voice & Meetings says goes where.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -439,7 +439,7 @@ process.exit(1)`)
 
   // ---------- A meeting mentioned in the agent's message box ----------
   // @ and words of its name: the meeting, beside any files found; picked, @ and the file the agent
-  // reads, with the meeting in it. With another key picked in Settings › Meetings: only meetings.
+  // reads, with the meeting in it. With another key picked in Settings › Voice & Meetings: only meetings.
   const box = p.locator('.composer-stack textarea:visible').first()
   const menuText = () => p.locator('.mention-menu').innerText({ timeout: 1000 }).catch(() => '')
   await box.click({ timeout: 5000 }).catch(() => {})
@@ -459,7 +459,7 @@ process.exit(1)`)
   await box.pressSequentially('#', { delay: 20 })
   // Titled Meetings (what's in it), each row marked as a meeting.
   const keyRows = () => p.evaluate(() => [...document.querySelectorAll('.mention-menu .slash-item')].map((e) => ({ meeting: e.classList.contains('k-meeting'), title: e.querySelector('b').innerText.trim() })))
-  ok(!!(await until(async () => { const r = await keyRows(); return /^Meetings$/.test(await p.locator('.mention-menu .slash-title').innerText().catch(() => '')) && r.length && r.every((x) => x.meeting) && r.some((x) => x.title === 'Weekly payments sync') }, 8000, 150)), 'with # picked in Settings › Meetings: # alone lists the latest meetings, under Meetings', await menuText())
+  ok(!!(await until(async () => { const r = await keyRows(); return /^Meetings$/.test(await p.locator('.mention-menu .slash-title').innerText().catch(() => '')) && r.length && r.every((x) => x.meeting) && r.some((x) => x.title === 'Weekly payments sync') }, 8000, 150)), 'with # picked in Settings › Voice & Meetings: # alone lists the latest meetings, under Meetings', await menuText())
   await box.fill('')
   await box.pressSequentially('see @weekly', { delay: 20 })
   await p.waitForTimeout(600)
@@ -548,7 +548,7 @@ process.exit(1)`)
   // model's own knowledge (which may be out of date; for one that needs current facts, how to add a
   // web search), the web with its pages, or a lookup that failed, saying why. ✓ puts it in your
   // notes, × waves it away. The floating card shows the newest, with its question and source.
-  // Settings › Meetings says what it answers from and what goes where.
+  // Settings › Voice & Meetings says what it answers from and what goes where.
   await api('/settings', { trials: { 'assist-answers': true } }, 'PATCH')
   const PM = await api('/meetings', { title: 'Northwind pricing call', call: false })
   await api(`/meetings/${PM.id}/stop`, {})
@@ -597,10 +597,10 @@ process.exit(1)`)
   // A click on the meeting it's from opens that meeting.
   await aCard('agree on pricing').locator('button.mt-source', { hasText: 'Northwind pricing call' }).click({ timeout: 5000 })
   ok(!!(await until(async () => (await p.locator('.mt-title').inputValue({ timeout: 1000 }).catch(() => '')) === 'Northwind pricing call', 5000)), 'a click on the meeting an answer is from opens it')
-  // Settings › Meetings: what it answers from, what goes where, and how to add a web search.
+  // Settings › Voice & Meetings: what it answers from, what goes where, and how to add a web search.
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meetings' } })))
   const st = p.locator('.st-meet [data-setting="assist-answers"]')
-  ok(!!(await until(async () => /Answers in AI Assist/i.test(await st.innerText({ timeout: 1000 }).catch(() => '')) && /past meetings that may answer them, go to gpt-5 \(OpenAI\)/.test(await st.innerText().catch(() => '')) && /add a Perplexity key\. Only the question would go to Perplexity, never the transcript/.test(await st.innerText().catch(() => '')), 8000)), 'Settings › Meetings: what it answers from, what goes to the model, and that only the question would go to a web search', await st.innerText().catch(() => ''))
+  ok(!!(await until(async () => /Answers in AI Assist/i.test(await st.innerText({ timeout: 1000 }).catch(() => '')) && /past meetings that may answer them, go to gpt-5 \(OpenAI\)/.test(await st.innerText().catch(() => '')) && /add a Perplexity key\. Only the question would go to Perplexity, never the transcript/.test(await st.innerText().catch(() => '')), 8000)), 'Settings › Voice & Meetings: what it answers from, what goes to the model, and that only the question would go to a web search', await st.innerText().catch(() => ''))
   await st.scrollIntoViewIfNeeded().catch(() => {})
   await shot(p, `${tag}meeting-answers-settings`)
   await p.keyboard.press('Escape')
@@ -615,7 +615,7 @@ process.exit(1)`)
   // (the board's minute is BRIDGE_BOARD_MS's 1.5 s here); Keep and Discard there, and on the board
   // itself, with the way back to its meeting; the floating card's one line, which opens it; after
   // the meeting, the summary's link and the action items onto the task list with a click; and
-  // Settings › Meetings saying what it sends where. In light, dark and on a phone.
+  // Settings › Voice & Meetings saying what it sends where. In light, dark and on a phone.
   await api('/settings', { trials: { 'meeting-board': true } }, 'PATCH')
   const boardMarks = (name) => { try { return JSON.parse(fs.readFileSync(path.join(kit.data, 'boards', `${name}.excalidraw`), 'utf8')).elements.filter((e) => e.type === 'rectangle' && e.customData?.bridge?.suggestion).length } catch { return -1 } }
   const boardText = (name) => { try { return JSON.parse(fs.readFileSync(path.join(kit.data, 'boards', `${name}.excalidraw`), 'utf8')).elements.map((e) => e.text || '').join('\n') } catch { return '' } }
@@ -719,10 +719,10 @@ process.exit(1)`)
   ok(!Object.keys(headFaults).length && await ap.p.locator('.mt-board .mt-bitem').count() === 5 && /Kept while the meeting recorded/.test(await ap.p.locator('.mt-board').innerText()), 'on a phone after it: the views still fit across, and the board is there', headFaults)
   await shot(ap.p, `${tag}meeting-board-after-phone`)
   await ap.ctx.close()
-  // Settings › Meetings: on for every meeting, and what it sends where.
+  // Settings › Voice & Meetings: on for every meeting, and what it sends where.
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meetings' } })))
   const sb = p.locator('.st-meet [data-setting="meeting-board"]')
-  ok(!!(await until(async () => /Keep a live board, in every meeting/.test(await sb.innerText().catch(() => '')) && /what's been said since and what's on the board go to gpt-5 \(OpenAI\)/.test(await sb.innerText().catch(() => '')), 8000)), 'Settings › Meetings: Live Board, on for every meeting or not, and what it sends where', await sb.innerText().catch(() => ''))
+  ok(!!(await until(async () => /Keep a live board, in every meeting/.test(await sb.innerText().catch(() => '')) && /what's been said since and what's on the board go to gpt-5 \(OpenAI\)/.test(await sb.innerText().catch(() => '')), 8000)), 'Settings › Voice & Meetings: Live Board, on for every meeting or not, and what it sends where', await sb.innerText().catch(() => ''))
   await sb.scrollIntoViewIfNeeded().catch(() => {})
   await shot(p, `${tag}meeting-board-settings`)
   await p.keyboard.press('Escape')
@@ -764,7 +764,7 @@ process.exit(1)`)
   // A meeting with your mic only, its voices told apart (voices.json, as voices.js writes it): each
   // line says Speaker 1 or 2; clicking one offers who was invited and you, and names every line of
   // that voice at once. Who spoke is there on a room meeting; where the voices can't be told apart
-  // it isn't. Settings › Meetings has Voices in a room. With no way to download the voice model
+  // it isn't. Settings › Voice & Meetings has Voices in a room. With no way to download the voice model
   // (nothing is reached here), Who spoke says why, with Try again.
   const V = await api('/meetings', { title: 'Design review', call: false, event: { title: 'Design review', attendees: ['Priya Shah', 'Dan Ruiz', 'Tester'] } })
   await api(`/meetings/${V.id}/stop`, {})
@@ -803,17 +803,17 @@ process.exit(1)`)
   await p.locator('.mt-transcript .mt-voices-btn').click({ timeout: 5000 }).catch(() => {})
   const failed = p.locator('.mt-transcript .mt-hint', { hasText: "The voices weren't told apart" })
   ok(!!(await until(() => failed.isVisible(), 10000)) && await failed.locator('button', { hasText: 'Try again' }).isVisible(), 'Who spoke with no way to download the voice model: it says why, with Try again', await p.locator('.mt-transcript').innerText({ timeout: 1000 }).catch(() => ''))
-  // Settings › Meetings: Voices in a room, under its Advanced (a link to Who Spoke opens it there).
+  // Settings › Voice & Meetings: Voices in a room, under its Advanced (a link to Who Spoke opens it there).
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'who-spoke' } })))
   const sec = p.locator('.st-voices')
   const sectionShown = !!(await until(() => sec.isVisible(), 8000)) && /Tell voices apart in a room/.test(await sec.innerText()) && /Remember voices you name/.test(await sec.innerText()) && /ERes2Net, 26 MB, Apache-2\.0/.test(await sec.innerText())
-  ok(sectionShown, 'Settings › Meetings: Voices in a room, with the model it uses and remembering voices', await sec.innerText().catch(() => ''))
+  ok(sectionShown, 'Settings › Voice & Meetings: Voices in a room, with the model it uses and remembering voices', await sec.innerText().catch(() => ''))
   // Prepare for each meeting (where there's a calendar, a Mac) says where to ask for it, never naming Home, a beta
   // feature that's off here.
   if (IS_MAC) {
     // (In a line; all of it on hover.)
     const prep = await p.locator('.st-check', { hasText: 'Prepare for each meeting' }).locator('span[title]').first().getAttribute('title').catch(() => '')
-    ok(/with AI Assist on the meeting in Calendar\./.test(prep) && !/Home/.test(prep) && !(await kit.api('/config')).trials.home, 'Settings › Meetings: Prepare for each meeting says AI Assist does it from the meeting in Calendar, and names no Home while Home is off', prep)
+    ok(/with AI Assist on the meeting in Calendar\./.test(prep) && !/Home/.test(prep) && !(await kit.api('/config')).trials.home, 'Settings › Voice & Meetings: Prepare for each meeting says AI Assist does it from the meeting in Calendar, and names no Home while Home is off', prep)
   }
   await sec.scrollIntoViewIfNeeded().catch(() => {})
   await shot(p, `${tag}settings-room-voices`)
@@ -838,7 +838,7 @@ process.exit(1)`)
   ok(whoSpokeShown && askedVoices > 0 && (await nv.p.locator('.mt-transcript .mt-voices-btn').count()) === 0 && (await nv.p.locator('.mt-transcript .mt-line').count()) === 2, "where the voices can't be told apart (the server says so), a room meeting has no Who spoke", { askedVoices, text: await nv.p.locator('.mt-transcript').innerText().catch(() => '') })
   await nv.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meetings' } })))
   await nv.p.waitForSelector('.st-meet', { timeout: 8000 }).catch(() => {})
-  ok(sectionShown && (await nv.p.locator('.st-voices').count()) === 0 && (await nv.p.locator('.st-meet').count()) === 1 && nv.errors.length === 0, 'nor Voices in a room in Settings › Meetings (and no page errors)', nv.errors)
+  ok(sectionShown && (await nv.p.locator('.st-voices').count()) === 0 && (await nv.p.locator('.st-meet').count()) === 1 && nv.errors.length === 0, 'nor Voices in a room in Settings › Voice & Meetings (and no page errors)', nv.errors)
   await nv.ctx.close()
 
   // ---------- On a phone, while it records: a big My notes box, one tap away ----------

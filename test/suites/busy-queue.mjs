@@ -105,8 +105,10 @@ try {
     const freeOne = await launch('Fees', 'busy 2 3')
     for (const text of ['Note the receipt totals.', 'Note the fees.']) await kit.api('/dictations', { text, ms: 900 })
     // The page first: on a slow computer it can take longer to open than the agent's turn lasts.
-    const { ctx, p, errors } = await page(b, kit.url, { ...LIGHT, width: 1440, height: 900, store: { 'cc-rail-dictations': true } })
-    await p.locator('.rail-nav-btn', { hasText: 'Dictations' }).click()
+    const { ctx, p, errors } = await page(b, kit.url, { ...LIGHT, width: 1440, height: 900 })
+    // Dictations, a tab of Meetings.
+    await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click()
+    await p.locator('.mt-view .pane-head .seg button[data-kind="dictations"]').click({ timeout: 20000 })
     const v = p.locator('.dc-view')
     await v.waitFor({ timeout: 20000 })
     await until(async () => (await v.locator('.dc-row').count()) >= 2, 10000, 100)

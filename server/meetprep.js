@@ -6,7 +6,7 @@
 // goals or questions written by the model that writes your meeting notes, each saying what it's
 // based on and which model said it. All but the suggestions is there without a model.
 // Suggestions are made when you ask, or by themselves shortly before a meeting with other people
-// (unless Settings › Meetings says not to), and kept in <data>/cache/meeting-prep.json, so
+// (unless Settings › Voice & Meetings says not to), and kept in <data>/cache/meeting-prep.json, so
 // each meeting is asked about once; Again asks afresh. Read only: nothing here writes to a calendar
 // or to mail, or answers an invite.
 import fs from 'node:fs'
@@ -153,7 +153,7 @@ function keep(key, entry) {
   const fresh = Object.entries(c).filter(([, v]) => Date.parse(v.start || 0) > Date.now() - 2 * 864e5).sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).slice(0, 100)
   try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); writeFileAtomic(FILE, JSON.stringify(Object.fromEntries(fresh), null, 1)) } catch { /* next time */ }
 }
-// The model that writes your meeting notes (Settings › Meetings), else the one they'd use.
+// The model that writes your meeting notes (Settings › Voice & Meetings), else the one they'd use.
 async function writer() {
   const id = cfg.meetings?.model || await helpers.pickModel().catch(() => null)
   if (!id) return null
@@ -259,7 +259,7 @@ const hidden = () => new Set(Array.isArray(cfg.calendar?.hidden) ? cfg.calendar.
 // Today's and tomorrow's events as the app last had them: the floating card asks every two seconds,
 // so this never waits on the calendar, and it never asks macOS for it either.
 const todays = () => { const d = helpers.calendar?.(); return d ? [...(d.today || []), ...(d.tomorrow || [])] : [] }
-// Reminded before meetings (Settings › Meetings › Remind me before meetings), unless it's turned off,
+// Reminded before meetings (Settings › Voice & Meetings › Remind me before meetings), unless it's turned off,
 // there or from the card. Before there was a switch of its own, Prepare for each meeting off meant
 // no reminders either, and it still does until this one is set.
 export const reminds = () => (typeof cfg.meetings?.remind === 'boolean' ? cfg.meetings.remind : cfg.meetings?.prep !== false)

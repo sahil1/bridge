@@ -18,9 +18,9 @@ import './dictation.css'
 // The desktop app's dictation window (?dictate=1, desktop/dictation.js): it shows over whatever app
 // you're in when you press the dictation key there, without taking the keyboard from it, as a small
 // pill just under the menu bar (Pill.jsx): the level, how long, and where the words go. Then
-// "Transcribing…", and with "Where I'm typing" picked in Settings › Voice, "Pasted into Slack" for a
+// "Transcribing…", and with "Where I'm typing" picked in Settings › Voice & Meetings, "Pasted into Slack" for a
 // moment, and it's gone. Otherwise the pill grows into a card with the words, to Send to the agent
-// (the one you last looked at in Bridge AI, or the chief of staff: Settings › Voice), to another (To
+// (the one you last looked at in Bridge AI, or the chief of staff: Settings › Voice & Meetings), to another (To
 // ▾), or to Copy. The words can be edited right there first: click them (or Edit), and the window
 // takes the keyboard until you're done (the desktop app gives it back to the app you were in); Esc
 // stops editing, ⌘↩ (Ctrl+Enter) does what the card's main button does. A name you put right is
@@ -31,9 +31,9 @@ import './dictation.css'
 // from there, and once it's on (noticed by itself), Paste pastes what's waiting where you were
 // typing. After a Copy, it asks once whether to paste for you next time. Each dictation is kept with
 // the app it was said in, and amended with what became of it, and your edit of it (controller.js
-// keep). Edit by voice (Settings › Voice, a Mac): with text selected where
+// keep). Edit by voice (Settings › Voice & Meetings, a Mac): with text selected where
 // you were typing, what you said is how to change it; the model picked for it rewrites the text and
-// it's pasted in its place. Tidy what I say (a trial, Settings › Voice): what you said is tidied by
+// it's pasted in its place. Tidy what I say (a trial, Settings › Voice & Meetings): what you said is tidied by
 // a model first ("Tidying…"), and pasted tidied; when it isn't (too slow, an error, an answer that
 // wasn't what you said, no model yet) it's pasted as you said it, and the pill says why for a
 // moment, or with no model yet, the card offers the local model in one click. On the card, Use what

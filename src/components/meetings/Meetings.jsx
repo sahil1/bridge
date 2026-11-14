@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../Icon.jsx'
 import { copyText } from '../../copy.js'
 import Lightbox from '../Lightbox.jsx'
 import { Menu } from '../Rail.jsx'
 import { api, usePoll, onThisComputer, refetch } from '../../api.js'
 import { t, tx, locale, tn } from '../../i18n/index.js'
-import { usePersisted, Handle, PaneHeader, useMedia } from '../layout.jsx'
+import { usePersisted, Handle, PaneHeader, useMedia, store } from '../layout.jsx'
 import { useMeetings, clock, length, ScreenButton, SectionButton, openMeeting } from './recording.jsx'
 import { byDay, day, timeOf, useSelection, BulkBar } from './bulk.jsx'
 import { useMeetingMenu, foldersOf, ConfirmDelete, FolderPick, chiefSaid } from './actions.jsx'
@@ -15,7 +15,7 @@ import { Menu as AtMenu } from '../FileExtras.jsx'
 import { FilesPane, linkFiles } from './context.jsx'
 import { AssistPane, setAssist } from './assist.jsx'
 import { BoardPane, BoardLink, setBoard } from './board.jsx'
-import { openBoard } from '../whiteboard/links.js'
+import { openBoard, whiteboards as studioHere } from '../whiteboard/links.js'
 import AiAssist from '../AiAssist.jsx'
 import PermissionFix from '../PermissionFix.jsx'
 import { useScreenAccess, useAllowCall, allowSteps } from './allowcall.jsx'
@@ -29,6 +29,8 @@ import { InsightsView } from './insights.jsx'
 import { PeopleView } from './people.jsx'
 import Memory from '../memory/Memory.jsx'
 import { setMemoryAll, takePerson } from '../memory/open.js'
+import { ANY as ANY_DICTATION } from '../dictations/shared.jsx'
+import { Dictations } from '../../lazy.jsx'
 import { sayPlace } from '../../backForward.js'
 
 // The meeting pages: the list of meetings, and one meeting with your notes beside its transcript, the
@@ -210,7 +212,10 @@ function InsightsOn({ n, onShow }) {
 }
 
 const SETUP = 'cc-meet-setup'
-// Memory always; Insights and People with Meeting Insights on (a beta feature).
+// Memory always; Insights and People with Meeting Insights on (a beta feature). Dictations is a tab
+// too once a dictation is kept, after Meetings: what you said with the dictation key
+// (dictations/Dictations.jsx), shown instead of all these with Meetings, Dictations and its own Memory
+// as its tabs. One row of tabs either way.
 const HOME_TABS = [['list', 'mic', tx('Meetings')], ['insights', 'trend', tx('Insights')], ['people', 'users', tx('People')], ['memory', 'book', tx('Memory')]]
 const ASK_ALL = [tx('What did I agree to do this week?'), tx("What's still open from this week?"), tx('Write my weekly update from these meetings')]
 const ASK_ONE = [tx('Draft a follow-up email'), tx('What did I agree to do?'), tx("What's still open?")]
@@ -231,10 +236,14 @@ export function MeetingsHome({ onOpen }) {
   const hits = useSearch(q, place === ':archived')
   // Memory beside the list (memory/Memory.jsx), what came up in your meetings to start with; Insights
   // and People too, a beta feature (insights.jsx). ⌘K opens any of them, through the tab kept here and
-  // bridge-meetings-tab for a list already open.
+  // bridge-meetings-tab for a list already open (memory/open.js meetingsAt). And Dictations in place
+  // of all of them, the meetings' own tab kept meanwhile (for the sidebar's Meetings).
   const insightsOn = useTrial('meeting-insights')
   const [tabKept, setTab] = usePersisted('cc-meet-tab', 'list')
   const tab = tabKept === 'memory' || (insightsOn && ['insights', 'people'].includes(tabKept)) ? tabKept : 'list'
+  const [kind, setKind] = usePersisted('cc-meet-kind', 'meetings')
+  const dictations = kind === 'dictations'
+  const anyDictation = usePoll(ANY_DICTATION, 60000).data?.total > 0 || dictations
   const tabs = HOME_TABS.filter(([v]) => insightsOn || v === 'list' || v === 'memory')
   // Someone's page asked for from elsewhere (a meeting's guests) before Meetings was open.
   const [person, setPerson] = useState(takePerson)
@@ -242,13 +251,26 @@ export function MeetingsHome({ onOpen }) {
   // a note saying so until it's read.
   const autoOn = data?.insightsOn
   useEffect(() => { if (autoOn && !insightsOn) refetch('/config') }, [autoOn, insightsOn])
-  useEffect(() => {
-    const on = (e) => { takePerson(); setTab(e.detail?.tab || 'list'); setPerson(e.detail?.person || null) }
+  // Listening from as soon as the page is there; and a tab asked for while it was opening (after it
+  // first read the kept one, before it listened: a phone's Meetings tapped again just after a reload)
+  // is taken now, as the kept one says.
+  useLayoutEffect(() => {
+    const kept = store.get('cc-meet-kind', 'meetings')
+    if (kept !== kind) setKind(kept)
+    const keptTab = store.get('cc-meet-tab', 'list')
+    if (keptTab !== tabKept) setTab(keptTab)
+    const on = (e) => {
+      const to = e.detail?.tab || 'list'
+      takePerson()
+      setKind(to === 'dictations' ? 'dictations' : 'meetings')
+      if (to !== 'dictations' && to !== 'meetings') setTab(to)
+      setPerson(e.detail?.person || null)
+    }
     window.addEventListener('bridge-meetings-tab', on)
     return () => window.removeEventListener('bridge-meetings-tab', on)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  // Which tab, for Back and Forward (src/backForward.js): Memory, Insights and People are places.
-  useEffect(() => { sayPlace('view:meetings', tab, tab === 'list' ? null : t(HOME_TABS.find(([v]) => v === tab)?.[2] || '')) }, [tab])
+  // Which tab, for Back and Forward (src/backForward.js): Dictations, Memory, Insights and People are places.
+  useEffect(() => { sayPlace('view:meetings', dictations ? 'dictations' : tab, dictations ? t('Dictations') : tab === 'list' ? null : t(HOME_TABS.find(([v]) => v === tab)?.[2] || '')) }, [tab, dictations])
   const list = all.filter((x) => (place === ':archived' ? x.archived : !x.archived && (!place || x.folder === place))).filter((x) => !q.trim() || !hits || hits.results.has(x.id))
   // What was asked for last, to carry on once the mic is allowed (MicFix).
   const last = useRef(null)
@@ -262,6 +284,9 @@ export function MeetingsHome({ onOpen }) {
   const [setupDone, setSetupDone] = useState(() => { try { return localStorage.getItem(SETUP) === '1' } catch { return false } })
   const first = data && !all.length && !setupDone && !m?.rec
   const doneSetup = () => { setSetupDone(true); try { localStorage.setItem(SETUP, '1') } catch { /* no storage: it shows again next time */ } }
+  // Dictations' tabs start with Meetings, its list; Meetings' Dictations tab opens Dictations' list.
+  if (dictations) return <Dictations toMeetings={() => { setKind('meetings'); setTab('list'); setPerson(null) }} />
+  const toDictations = () => { store.set('cc-dict-tab', 'list'); setKind('dictations'); setPerson(null) }
   return (
     <div className="mt-view">
       <PaneHeader icon="mic" title={t('Meetings')} subtitle={(
@@ -271,11 +296,12 @@ export function MeetingsHome({ onOpen }) {
         </>
       )}>
         <div className="seg" role="tablist" aria-label={t('Show')}>
-          {tabs.map(([v, icon, label]) => (
-            <button key={v} type="button" role="tab" data-view={v} aria-selected={tab === v} className={tab === v ? 'on' : ''}
+          {tabs.flatMap(([v, icon, label]) => [
+            <button key={v} type="button" role="tab" data-view={v} data-kind={v === 'list' ? 'meetings' : undefined} aria-selected={tab === v} className={tab === v ? 'on' : ''}
               title={v === 'memory' ? t('People, organizations and words from your meetings and dictations') : undefined}
-              onClick={() => { if (v === 'memory' && tab !== 'memory') setMemoryAll('meetings', false); setTab(v); setPerson(null) }}><Icon name={icon} size={14} /><span>{t(label)}</span></button>
-          ))}
+              onClick={() => { if (v === 'memory' && tab !== 'memory') setMemoryAll('meetings', false); setTab(v); setPerson(null) }}><Icon name={icon} size={14} /><span>{t(label)}</span></button>,
+            v === 'list' && anyDictation && <button key="dictations" type="button" role="tab" data-view="dictations" data-kind="dictations" aria-selected={false} onClick={toDictations}><Icon name="wave" size={14} /><span>{t('Dictations')}</span></button>,
+          ])}
         </div>
         {!m?.rec && <button type="button" className="btn small primary" onClick={() => go({})}><Icon name="mic" size={13} /> {t('Start recording')}</button>}
       </PaneHeader>
@@ -537,7 +563,6 @@ const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 const localInput = (iso) => { const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
 
 export function MeetingPage({ id, onBack }) {
-  const studio = useTrial('studio') // Make a deck writes one into Studio, a beta feature (src/trials.js)
   const m = useMeetings()
   const live = m?.rec?.id === id
   const { data, refresh } = usePoll(`/meetings/${encodeURIComponent(id)}`, live ? 1500 : 4000)
@@ -890,7 +915,8 @@ export function MeetingPage({ id, onBack }) {
     heard && { label: t('Work out who said each line'), hint: t('From names said, the screen and who was invited'), disabled: busy === 'who', run: nameAll },
     canTell && voiced && { label: t('Work out who each voice is'), hint: t('From names said and who was invited'), disabled: busy === 'who' || !!working, run: nameAll },
     (lines.length > 0 || data.summary) && { label: t('Ask about this meeting'), hint: t("What was decided, who's doing what, a follow-up email"), run: asking },
-    studio && done && (data.summary || lines.length > 0) && { label: t('Make a deck'), hint: t('Written by the model that writes your notes, opened in Studio'), disabled: busy === 'deck', run: makeDeck },
+    // Into Studio, where there's one (not the demo or the phone apps' Cloud agents).
+    studioHere && done && (data.summary || lines.length > 0) && { label: t('Make a deck'), hint: t('Written by the model that writes your notes, opened in Studio'), disabled: busy === 'deck', run: makeDeck },
   ]
 
   // When it was, who was there and where it's saved: under the name on a wide screen, at the top of

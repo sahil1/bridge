@@ -52,15 +52,14 @@ const bare = (p) => p.locator('.sd-file').evaluateAll((els) => els.flatMap((root
 try {
   await api('/setup', { name: 'Tester' })
   await api('/agents/catalog')
-  // A beta feature: off to start with, its routes refused and nothing leading to it, until it's
-  // turned on (Settings › About & Updates › Beta Features, checked on the page below).
-  ok((await api('/config')).trials?.studio === false && /beta feature/.test((await err('/studio/recent'))?.message || ''), 'Studio is a beta feature, off to start with: its routes say how to turn it on', (await api('/config')).trials)
-  // And the file routes on its own roots (its folder, and a folder its home found a file in): the same
-  // answer, with nothing made in the data folder meanwhile.
-  const offRoots = await Promise.all(['studio', 'found:abc'].map((r) => fetch(`${kit.url}/api/agents/${encodeURIComponent(r)}/files?path=`).then(async (x) => ({ status: x.status, ...(await x.json()) }))))
-  ok(offRoots.every((x) => x.status === 404 && x.trial === 'studio' && /^Studio is a beta feature\. Turn it on in Settings › About & Updates › Beta Features\.$/.test(x.error)) && !fs.existsSync(path.join(kit.data, 'studio', 'files')), 'off, its own folders\' file routes are refused as its routes are, and nothing is made for them', offRoots)
-  await api('/settings', { trials: { studio: true } }, 'PATCH')
-  ok((await api('/config')).trials?.studio === true && Array.isArray((await api('/studio/recent')).files), 'turned on, it answers')
+  // Out of beta: it answers with no Beta Feature on, and isn't one of them (a switch for it saved
+  // from before is read by nothing).
+  await api('/settings', { trials: { studio: false } }, 'PATCH')
+  const conf = await api('/config')
+  ok(!('studio' in (conf.trials || {})) && Array.isArray((await api('/studio/recent')).files), 'Studio answers with no Beta Feature on, and a switch for it kept from before is read by nothing', conf.trials)
+  // And the file routes on its own folder, the same.
+  const own = await fetch(`${kit.url}/api/agents/studio/files?path=`).then(async (x) => ({ status: x.status, ...(await x.json()) }))
+  ok(own.status === 200 && !own.trial, 'its own folder\'s file routes answer too', own)
   // ---------- The files ----------
   const dir = path.join(kit.home, 'Work', 'q4')
   fs.mkdirSync(dir, { recursive: true })
@@ -204,23 +203,17 @@ try {
   pages.push(w)
   const p = w.p
   await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
-  // Settings › About & Updates: Studio's switch under Beta Features, and every button there one
-  // size. Off, Studio leaves the sidebar; on, it's back.
+  // Settings › About & Updates: no switch for Studio under Beta Features, and every button there one
+  // size. Studio is in the sidebar.
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
-  const trial = p.locator('.st-check', { has: p.locator('b', { hasText: /^Studio$/ }) }).locator('input')
-  await trial.waitFor({ timeout: 15000 })
-  // The switch is off and disabled until the settings have come (a slow computer shows that first).
-  await until(async () => !(await trial.isDisabled()), 10000)
-  ok(await trial.isChecked(), 'Settings › About & Updates › Beta Features: Studio, on')
+  const beta = p.locator('.st-sec[data-setting="beta"]')
+  await beta.locator('.st-check').first().waitFor({ timeout: 15000 })
+  ok(await beta.locator('.st-check b', { hasText: /^(Studio|Sign PDFs|Comments and @bridge|Make a Sheet)$/ }).count() === 0, 'Settings › About & Updates › Beta Features: no Studio, Sign PDFs, Comments and @bridge or Make a Sheet', await beta.innerText())
   await advanced(p)
   const sizes = await p.locator('.st-sections .st-sec .btn').evaluateAll((bs) => [...new Set(bs.map((x) => Math.round(x.getBoundingClientRect().height)))])
   ok(sizes.length === 1, `every button on About & Updates is one size (${sizes.join(', ')} px)`, sizes)
-  await shot(p, `${tag}studio-trial`)
-  const inRail = () => p.locator('.rail-nav-btn', { hasText: 'Studio' }).count()
-  await trial.uncheck()
-  ok(!!(await until(async () => (await inRail()) === 0, 8000)), 'turned off: Studio leaves the sidebar')
-  await trial.check()
-  ok(!!(await until(async () => (await inRail()) > 0, 8000)), 'turned on again: it is back')
+  await shot(p, `${tag}studio-about`)
+  ok(await p.locator('.rail-nav-btn', { hasText: 'Studio' }).count() === 1, 'Studio is in the sidebar')
   await p.locator('button[aria-label="Close settings"]').click()
   // Studio's home, from the rail (clicked again until it shows: WebKit can take a click before the
   // app is listening).
@@ -229,7 +222,7 @@ try {
   await p.locator('.sd-new-open').click()
   const newItems = await p.locator('.sd-new-menu [role="menuitem"]').allInnerTexts()
   await p.keyboard.press('Escape')
-  ok(JSON.stringify(newItems) === '["Document","Markdown","Sheet","Deck","Page"]' && !!(await until(async () => (await p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)), "Studio's home: New in its header (document, Markdown, sheet, deck, page) and your recent files", newItems)
+  ok(JSON.stringify(newItems) === '["Document","Markdown","Sheet","Deck","Page","Whiteboard"]' && !!(await until(async () => (await p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)), "Studio's home: New in its header (document, Markdown, sheet, deck, page, whiteboard) and your recent files", newItems)
   await shot(p, `${tag}studio-home`)
   // A Markdown file, edited and saved.
   await p.locator('.sd-file-name', { hasText: 'notes.md' }).first().click()

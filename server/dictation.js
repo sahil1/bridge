@@ -92,7 +92,7 @@ export function forget({ id, created, was } = {}) {
 
 // ---------- Edit by voice ----------
 // Select text in another app, hold the dictation key, say what to change: the text and what you said
-// go to the model you picked in Settings › Voice (dictation.editModel), and its answer is pasted in
+// go to the model you picked in Settings › Voice & Meetings (dictation.editModel), and its answer is pasted in
 // the selection's place (src/dictation/Hud.jsx). Only that model sees them: one on this computer
 // (Ollama, LM Studio) keeps them here; any other is labelled, where it's picked, as sending them out.
 // The names from meeting memory that either mentions go with them (namesIn). reply: chatmodels.js
@@ -105,7 +105,7 @@ export async function edit({ text, instruction, model, reply }) {
   if (!t.trim()) throw new Error('Nothing was selected to change')
   if (!said) throw new Error('Nothing was said about what to change')
   if (t.length > EDIT_MAX) throw new Error('That\'s more text than edit by voice takes (20,000 characters)')
-  if (!model) throw new Error('Pick the model that rewrites it, in Settings › Voice › Dictation')
+  if (!model) throw new Error('Pick the model that rewrites it, in Settings › Voice & Meetings › Dictation')
   const names = namesIn(`${said.slice(0, 2000)}\n${t}`)
   const r = await reply(model, [{ role: 'user', text: `Instruction: ${said.slice(0, 2000)}\n\nText:\n${t}` }], { system: names ? `${EDIT_SYSTEM}\n\n${names}` : EDIT_SYSTEM, feature: 'voice-edit' })
   let out = String(r?.text || '').trim()
@@ -119,7 +119,7 @@ export async function edit({ text, instruction, model, reply }) {
 
 // ---------- Tidy what I say (a trial: dictation-cleanup) ----------
 // What you say from another app, tidied by a model before the dictation window pastes or sends it
-// (Settings › Voice › Dictation, off until you turn it on): fillers, false starts and words said
+// (Settings › Voice & Meetings › Dictation, off until you turn it on): fillers, false starts and words said
 // twice taken out, punctuation and capitals fixed, nothing else changed. The local model built in
 // unless you pick another (index.js), so by default the words stay on this computer. It never holds
 // the words up for long or loses them: past a few seconds, on any error, or when the answer isn't

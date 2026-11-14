@@ -48,7 +48,6 @@ const WEB = `<h3>Web heading</h3><ul><li>Web bullet</li><li>Web bullet two<ul><l
 
 try {
   await kit.api('/setup', { name: 'Tester' })
-  await kit.api('/settings', { trials: { studio: true } }, 'PATCH')
   const dir = path.join(kit.home, 'Work', 'drafts')
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, 'report.docx'), await richDocx({ pages: 2 }))
