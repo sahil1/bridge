@@ -33,6 +33,7 @@ import { moreOn, hiddenModel, OFF } from './labs.js'
 import { machine } from './machine.js'
 import * as llm from './llm.js'
 import * as usagelog from './usagelog.js'
+import * as counts from './counts.js'
 
 const TIMEOUT = 5 * 60 * 1000
 const until = (signal, ms = TIMEOUT) => (AbortSignal.any && signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : signal || AbortSignal.timeout(ms)) // any(): Node 20+
@@ -661,6 +662,8 @@ export async function reply(id, messages, { signal, tools, system = SYSTEM, json
   const started = Date.now()
   const { usage, ...r } = await answer(id, messages, { signal, tools: canUseTools(id) ? tools : null, system, json, think })
   usagelog.record({ id, feature, usage, ms: Date.now() - started })
+  // The usage counts, when they're shared: the model's family, how it was reached, what asked.
+  counts.answered(id, feature, usage?.model).catch(() => {})
   return r
 }
 async function answer(id, messages, o) {

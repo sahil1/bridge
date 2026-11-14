@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../Icon.jsx'
 import { api, usePoll, useFleet } from '../../api.js'
-import { MEETINGS_CHANNEL, clock, useCallEvent, QuickNote, endedWords } from './recording.jsx'
+import { MEETINGS_CHANNEL, clock, QuickNote, endedWords } from './recording.jsx'
+import { Among, useCallEvents, MeetingName } from './cardparts.jsx'
 import { KIND, setAssist, markAssist, fromWords, webWords } from './assist.jsx'
 import { boardWords } from './board.jsx'
 import { PrepGlance } from './prep.jsx'
@@ -25,6 +26,10 @@ import './meetings.css'
 // meeting with other people: Join, and what to go in with at a glance (prep.jsx's PrepGlance), with
 // a small menu by its ×: remind me again when it's about to start, hide it until the next meeting,
 // or turn these reminders off (Settings › Meetings › Remind me before meetings turns them back on).
+// With more than one meeting at the same time, ‹ 1 of 2 › goes from one to the other: before they
+// start (Join, the prep and the menu are the one showing's, and × hides that one only), when a call
+// starts (which one the notes are for) and while it records (the notes go to the other one instead).
+// While it records, the pencil by its name renames it there (cardparts.jsx).
 // While you share or record your screen on a Mac it isn't there: the meeting being recorded's card goes
 // to the menu bar by itself and comes back as it was after, and any other waits (desktop/floatshare.js).
 // Drag it from anywhere that isn't a button. Resize it by its edges and corners, as any window: its
@@ -104,12 +109,27 @@ export default function FloatCard() {
   const card = useRef(null)
   const leave = useRef(null)
   const r = c?.recording
-  useEffect(() => { setOpts(null) }, [c?.soon?.id])
+  // Meetings about to start: the first, and any others due at the same time. The one you went to
+  // stays the one showing while it's due.
+  const due = c?.soon ? [c.soon, ...(c.soon.others || [])] : []
+  const [dueAt, setDueAt] = useState(null)
+  const soon = due.find((x) => x.id === dueAt) || due[0] || null
+  useEffect(() => { setOpts(null) }, [soon?.id])
   const onHover = c?.floatHover !== false
   // Low on the screen, the desktop app's window grows upward (desktop/floatfit.js), so the rest opens
   // above the bar. In a browser tab the page doesn't move. Set below, once it's known if it's open.
   const upAt = useRef(null)
-  const { data: m } = usePoll(r ? `/meetings/${encodeURIComponent(r.id)}` : null, hover || pinned ? 1500 : 4000)
+  const { data: m, refresh: refreshM } = usePoll(r ? `/meetings/${encodeURIComponent(r.id)}` : null, hover || pinned ? 1500 : 4000)
+  // Recording for a calendar event: the events that were on when it started, to say from here it's
+  // one of the others instead (as Another meeting? on its page).
+  const [near, setNear] = useState(null) // { id, events }
+  const forEvent = !!m?.event?.title
+  useEffect(() => {
+    if (!r?.id || !forEvent) return
+    let on = true
+    api(`/meetings/${encodeURIComponent(r.id)}/events`).then((d) => on && setNear({ id: r.id, events: d.events || [] })).catch(() => {})
+    return () => { on = false }
+  }, [r?.id, forEvent])
   // ⌘+ and ⌘− in the main window zoom this page too: its window is the wrong size for the card then,
   // without the card changing size, so the page says so again (and how much of the screen it has).
   // While it's resized by an edge, the window follows the pointer and the card fills the window.
@@ -149,7 +169,8 @@ export default function FloatCard() {
     if (!card.current?.matches(':hover')) out()
   }
   const usualSize = () => { setSize({}); keepSize({}) }
-  const ev = useCallEvent(!r && c?.prompt ? c.prompt.at : null, c?.prompt?.app)
+  const evs = useCallEvents(!r && c?.prompt ? c.prompt.at : null, c?.prompt?.app)
+  const ev = evs.ev
 
   useEffect(() => {
     const ch = new BroadcastChannel(MEETINGS_CHANNEL)
@@ -262,7 +283,8 @@ export default function FloatCard() {
   let open = true
   if (r) {
     const paused = live?.rec?.id === r.id ? live.rec.paused : r.status === 'paused'
-    const secs = live?.rec?.id === r.id ? live.elapsed : (Date.now() - new Date(r.startedAt).getTime()) / 1000
+    // Recorded again after it ended (Resume recording): its time carries on from where it had got to.
+    const secs = live?.rec?.id === r.id ? live.elapsed : r.resumedAt ? r.resumedFrom + (Date.now() - new Date(r.resumedAt).getTime()) / 1000 : (Date.now() - new Date(r.startedAt).getTime()) / 1000
     open = hover || (onHover && pinned) || !!r.callEnded
     const tall = open && !!size.h
     const said = (m?.transcript || []).filter((l) => l.text)
@@ -277,13 +299,19 @@ export default function FloatCard() {
     const tip = m?.assist ? [...(m.assistItems || [])].reverse().find((x) => x.state === 'new') : null
     const info = [part, toEnd != null && (toEnd >= 0 ? t('Ends {time}, in {n} min', { time: end.toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }), n: toEnd }) : t('{n} min past its end', { n: -toEnd })), m?.event?.attendees?.length ? t('{n} invited', { n: m.event.attendees.length }) : null].filter(Boolean).join(' · ')
     const call = m?.call === 'on'
+    // The events on when it started, the one it's for among them: the arrows name it after the next.
+    const t0 = Date.parse(r.startedAt)
+    const same = (x) => x.title === m.event.title && (x.start || '') === (m.event.start || '')
+    const on = forEvent && near?.id === r.id ? near.events.filter((x) => same(x) || (Date.parse(x.start) - 10 * 60_000 <= t0 && Date.parse(x.end) > t0)) : []
+    const onAt = on.findIndex(same)
+    const toEvent = (d) => act(async () => { await api(`/meetings/${encodeURIComponent(r.id)}/event`, { method: 'POST', body: { event: on[(onAt + d + on.length) % on.length] } }); await refreshM() })
     body = (
       <>
         {/* The bar: the same open or not, so what's under the pointer as it opens stays put. */}
         <div className={`fc-head${onHover ? '' : ' fc-click'}`}>
           <span className={`fc-dot${paused ? ' paused' : ''}`}><span className="rec-dot" aria-hidden="true" /></span>
           <b className="fc-time">{clock(secs)}</b>
-          <span className="fc-title" title={r.title}>{r.title}</span>
+          <MeetingName id={r.id} title={r.title} className="fc-title" onRenamed={() => refresh()} onError={setErr} />
           {r.callQuiet && !paused && <button type="button" className="fc-x fc-warn" onClick={r.callAccess === 'allowed' ? () => setHover(true) : allowCall} aria-label={t('No sound from the call')} title={r.callAccess === 'allowed' ? t('No sound from the call') : t('No sound from the call. If people are talking, turn on Bridge AI in System Audio Recording Only, the second list on that page of System Settings: click to open it')}><Icon name="alert" size={13} /></button>}
           {!r.callEnded && (paused
             ? <button type="button" className="fc-x fc-play" onClick={() => op('resume')} aria-label={t('Resume')} title={t('Resume recording')}><Icon name="play" size={13} /></button>
@@ -317,7 +345,12 @@ export default function FloatCard() {
             )}
             {r.callQuiet && !paused && <QuietBanner access={r.callAccess} />}
             <div className="fc-live">
-              {info && <p className="fc-info" title={info}>{info}</p>}
+              {(info || (onAt >= 0 && on.length > 1)) && (
+                <div className="fc-info-row">
+                  <p className="fc-info" title={info}>{info}</p>
+                  {onAt >= 0 && <Among n={on.length} i={onAt} onStep={toEvent} disabled={busy} what={t('These notes are for {event}', { event: m.event.title })} />}
+                </div>
+              )}
               <div className="fc-said" ref={saidBox}>
                 {recent.length ? recent.map((l) => <p key={`${l.src}:${l.t0}`} className={`fc-said-line src-${l.src}`}><b>{l.name || (l.me ? m?.me || t('You') : l.voice ? t('Speaker {n}', { n: l.voice }) : l.src === 'them' ? t('Them') : m?.me || t('You'))}</b> {l.text}</p>) : !m?.partial && <p className="fc-said-none">{paused ? t('Paused.') : t('Listening…')}</p>}
                 {/* Live words: what someone is still saying, before its line is in. */}
@@ -375,13 +408,16 @@ export default function FloatCard() {
         </div>
         <div className="fc-acts fc-end">
           {/* Not now always works, even while Take notes is still starting. */}
+          <Among n={evs.n} i={evs.i} onStep={evs.step} disabled={busy} what={ev ? t('These notes are for {event}', { event: ev.title }) : null} />
+          <span className="fc-grow" />
           <button type="button" className="btn small" onClick={() => { setErr(null); api('/calls/dismiss', { method: 'POST' }).catch((e) => setErr(e.message)).finally(refresh) }}>{t('Not now')}</button>
-          <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => app().floatStart?.({ app: c.prompt.app }))} title={t('Your mic and the call, transcribed as you go.')}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Take notes')}</button>
+          <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => app().floatStart?.({ app: c.prompt.app, ...(evs.n > 1 ? { event: ev } : {}) }))} title={t('Your mic and the call, transcribed as you go.')}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Take notes')}</button>
         </div>
       </>
     )
-  } else if (c?.soon) {
-    const e = c.soon
+  } else if (soon) {
+    const e = soon
+    const dueI = due.indexOf(e)
     const left = Date.parse(e.start) - Date.now()
     const mins = Math.max(1, Math.round(left / 60000))
     const ago = Math.max(1, Math.round(-left / 60000))
@@ -396,10 +432,17 @@ export default function FloatCard() {
     // before, or at its start once that minute has begun: the server decides), hide it until the
     // next meeting (its ×), and turn these reminders off, saying first where they're turned back on.
     const snooze = () => act(async () => { await api('/calls/snooze', { method: 'POST', body: { id: e.id } }); await app().floatLook?.() })
+    // Its ×: no reminder of this one again (the server leaves it out), so another due at the same
+    // time shows, and with none the card goes until the next meeting. If the server can't, the
+    // desktop app hides the card as it is.
+    const hideIt = () => act(async () => {
+      try { await api('/calls/hide', { method: 'POST', body: { id: e.id } }) } catch (x) { if (due.length > 1 || !app().floatHide) throw x; await app().floatHide(); return }
+      await app().floatLook?.()
+    })
     const stop = () => act(async () => { await api('/settings', { method: 'PATCH', body: { meetings: { remind: false } } }); setOpts(null); await app().floatLook?.() })
     const items = [
       left > 0 && { icon: 'clock', label: left > 60e3 ? t('Remind me 1 min before') : t('Remind me when it starts'), hint: clockAt(left > 60e3 ? Date.parse(e.start) - 60e3 : e.start), run: snooze, cls: 'fc-later' },
-      app().floatHide && { icon: 'x', label: t('Hide until the next meeting'), run: () => app().floatHide(), cls: 'fc-hide' },
+      { icon: 'x', label: due.length > 1 ? t('Hide this one') : t('Hide until the next meeting'), run: hideIt, cls: 'fc-hide' },
       '-',
       { icon: 'bell-off', label: t('Turn off meeting reminders…'), run: () => setOpts('off'), cls: 'fc-off' },
     ].filter(Boolean)
@@ -418,8 +461,15 @@ export default function FloatCard() {
             <button type="button" className={`fc-x fc-opts${opts === 'menu' ? ' on' : ''}`} onClick={() => setOpts((v) => (v === 'menu' ? null : 'menu'))} aria-haspopup="menu" aria-expanded={opts === 'menu'} aria-label={t('Reminder options')} title={t('Remind me later, hide it, or turn off these reminders')}><Icon name="more" size={13} /></button>
             {opts === 'menu' && <FcMenu items={items} onClose={() => setOpts(null)} />}
           </span>
-          <button type="button" className="fc-x" onClick={() => app().floatHide?.()} aria-label={t('Hide the card')} title={t('Hide until the next meeting')}><Icon name="x" size={12} /></button>
+          <button type="button" className="fc-x" onClick={hideIt} aria-label={due.length > 1 ? t('Hide this one') : t('Hide the card')} title={due.length > 1 ? t('Hide this one. The other stays.') : t('Hide until the next meeting')}><Icon name="x" size={12} /></button>
         </div>
+        {/* Another at the same time: which one this is, and what the arrow goes to. */}
+        {due.length > 1 && (
+          <div className="fc-among">
+            <Among n={due.length} i={dueI} onStep={(d) => setDueAt(due[(dueI + d + due.length) % due.length].id)} />
+            <span className="fc-among-next" title={due[(dueI + 1) % due.length].title}>{t('Also coming up: {title}', { title: due[(dueI + 1) % due.length].title })}</span>
+          </div>
+        )}
         {opts === 'off' && (
           <div className="fc-banner fc-confirm" role="alertdialog" aria-label={t('Turn off meeting reminders?')}>
             <p><b>{t('Turn off meeting reminders?')}</b> {t("The card won't show before your meetings. Turn them back on in Settings › Meetings › Remind me before meetings.")}</p>
@@ -429,7 +479,7 @@ export default function FloatCard() {
             </span>
           </div>
         )}
-        <div className="fc-scroll"><PrepGlance e={e} onOpenEvent={app().floatOpen ? () => app().floatOpen({ event: { date: day, id: e.id } }) : null} /></div>
+        <div className="fc-scroll"><PrepGlance key={e.id} e={e} onOpenEvent={app().floatOpen ? () => app().floatOpen({ event: { date: day, id: e.id } }) : null} /></div>
       </>
     )
   } else {

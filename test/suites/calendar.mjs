@@ -684,6 +684,56 @@ try {
     ok((await api('/calls')).soon === null, 'reminders turned off: none')
     await api('/settings', { meetings: { remind: true, prep: false } }, 'PATCH')
     ok((await api('/calls')).soon?.id === soonNow.id, 'turned on again: back (and on even with Prepare for each meeting off, once it\'s been set)')
+    // Double-booked: another meeting with other people due at the same time. The card's meeting is
+    // the first by its start, with the other in others; ‹ 1 of 2 › goes to it, with its own Join and
+    // prep, and it stays through the card's next looks. Its × hides that one, and the first stays.
+    {
+      const s0 = Date.now() + OFFSET + 6 * 60e3
+      const ALSO = ev('Budget check-in', 'Work', new Date(s0), new Date(s0 + 30 * 60e3), { attendees: ['Tester', 'Pat Lin'], notes: 'Join: https://meet.google.com/abc-defg-hij' })
+      const alsoId = `${ALSO.title}|${ALSO.start}`
+      fs.writeFileSync(path.join(kit.bin, 'bridgecal.json'), JSON.stringify({ status: 'granted', events: [...EVENTS, ALSO] }))
+      await api('/calendar?refresh=1')
+      const two = await until(async () => { const c = await api('/calls'); return c.soon?.others?.length === 1 && c.soon }, 8000)
+      const both = two ? [two, ...two.others] : []
+      ok(both.map((x) => x.id).sort().join() === [soonNow.id, alsoId].sort().join() && both.every((x) => typeof x.suggestions === 'number' && typeof x.snoozed === 'boolean' && x.start && x.join) && both.every((x) => !x.others || x === two) && !(two.start > two.others[0].start), '/api/calls with two due at once: the first by its start, and the other in others, each with what the card shows', two)
+      const { p, errors } = await open({ mode: 'light' })
+      const card = await p.context().newPage()
+      card.on('pageerror', (e) => errors.push(`card: ${e.message}`))
+      await card.setViewportSize({ width: 360, height: 620 })
+      await card.goto(`${kit.url}/?float=1`)
+      const among = card.locator('.float-card .mt-among')
+      await until(() => among.count(), 15000)
+      const title = () => card.locator('.float-card .fc-title').innerText().catch(() => '')
+      const first = await title()
+      const second = both.find((x) => x.title !== first)
+      ok(first === two.title && (await among.locator('.mt-among-n').innerText()) === '1 of 2' && new RegExp(`Also coming up: ${second?.title}`).test(await card.locator('.fc-among-next').innerText()) && await among.getByRole('button', { name: 'Next meeting' }).count() === 1 && await among.getByRole('button', { name: 'Previous meeting' }).count() === 1, 'the card with two due: the first, "1 of 2", what the other is, and Previous and Next by name', { first, text: await card.locator('.float-card').innerText().catch(() => '') })
+      const fits = await card.evaluate(() => { const c = document.querySelector('.float-card').getBoundingClientRect(), a = document.querySelector('.fc-among').getBoundingClientRect(), t = document.querySelector('.float-card .fc-title').getBoundingClientRect(); return { in: a.left >= c.left && a.right <= c.right + 0.5, title: Math.round(t.width) } })
+      ok(fits.in && fits.title > 80, 'the arrows fit the card, the title as wide as it was', fits)
+      await among.getByRole('button', { name: 'Next meeting' }).focus()
+      await card.keyboard.press('Enter')
+      await until(async () => (await title()) === second.title, 3000)
+      await sleep(2600) // the card has looked again since
+      const joinOf = () => card.locator('.float-card a.fc-join').getAttribute('href').catch(() => null)
+      const invited = second.title === ALSO.title ? /1 invited/ : /3 invited/
+      await until(async () => invited.test(await card.locator('.float-card').innerText().catch(() => '')), 8000)
+      ok((await title()) === second.title && (await among.locator('.mt-among-n').innerText()) === '2 of 2' && (await joinOf()) === second.join && invited.test(await card.locator('.float-card').innerText()), 'Next, from the keyboard: the other meeting, its Join and its prep, still showing after the card looked again', { title: await title(), join: await joinOf(), want: second.join })
+      await shot(card, `${tag}calendar-float-two`)
+      // Hidden with its ×: that one only.
+      await card.locator('.float-card .fc-head > .fc-x').last().click()
+      const left = await until(async () => { const c = await api('/calls'); return c.soon && !c.soon.others.length && c.soon }, 5000)
+      await until(async () => !(await among.count()) && (await title()) === first, 5000)
+      ok(left?.id === two.id && (await title()) === first && !(await among.count()), 'its × with another due: that one is hidden, the other stays on the card, with no arrows', { left: left?.id, title: await title() })
+      const badHide = await err('/calls/hide', { id: 'no-such-meeting' })
+      ok(/isn't on your calendar/.test(badHide?.message || ''), "hiding a meeting that isn't on the calendar: refused, saying why", badHide?.message)
+      ok(real(errors).length === 0, 'the card with two due: no page errors', errors)
+      await p.context().close()
+      fs.writeFileSync(path.join(kit.bin, 'bridgecal.json'), JSON.stringify({ status: 'granted', events: EVENTS }))
+      await api('/calendar?refresh=1')
+      // (If the one hidden was the meeting the rest of this test is about, it's due again for what follows.)
+      const file2 = path.join(kit.data, 'cache', 'meeting-reminders.json')
+      fs.writeFileSync(file2, JSON.stringify(Object.fromEntries(Object.entries(JSON.parse(fs.readFileSync(file2, 'utf8'))).map(([k, v]) => [k, v.hidden ? { start: v.start, until: new Date(Date.now() + OFFSET - 1000).toISOString() } : v]))))
+      ok(!!(await until(async () => { const c = await api('/calls'); return c.soon?.id === soonNow.id && !c.soon.others.length }, 8000)), 'the other gone from the calendar: one meeting on the card again')
+    }
     await api('/settings', { meetings: { prep: true } }, 'PATCH')
     // Settings › Meetings, in the desktop app: Remind me before meetings, off and on. (Only where
     // there's a calendar to remind from: a Mac's.)

@@ -31,6 +31,10 @@ export function ConfirmDelete({ items, onClose, onDone }) {
   const one = n === 1 ? items[0] : null
   // The title in bold, where the language puts it.
   const goes = t('{title} goes, with its recording, transcript, notes and summary.').split('{title}')
+  // A combined meeting is separated: only it goes, and the meetings in it stay as they are.
+  const whole = one?.parts ? one : null
+  const apart = t('{title} goes, with its combined summary and your notes on it. The {n} meetings in it stay as they are, each with its own recording, transcript, notes and summary.', { n: whole?.parts.length || 0 }).split('{title}')
+  const wholes = items.filter((x) => x.parts).length
   const go = async (action) => {
     setBusy(true); setErr(null)
     try {
@@ -42,15 +46,17 @@ export function ConfirmDelete({ items, onClose, onDone }) {
     } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
   return (
-    <Dialog title={one ? t('Delete this meeting?') : t('Delete {n} meetings?', { n })} onClose={onClose}>
+    <Dialog title={whole ? t('Separate this combined meeting?') : one ? t('Delete this meeting?') : t('Delete {n} meetings?', { n })} onClose={onClose}>
       <div className="mt-fix mt-confirm">
-        <p>{one ? <>{goes[0]}<b>{one.title}</b>{goes[1]}</> : t('{n} meetings go, with their recordings, transcripts, notes and summaries.', { n })} {t("This can't be undone.")}</p>
+        <p>{whole ? <>{apart[0]}<b>{whole.title}</b>{apart[1]}</> : one ? <>{goes[0]}<b>{one.title}</b>{goes[1]}</> : t('{n} meetings go, with their recordings, transcripts, notes and summaries.', { n })} {t("This can't be undone.")}</p>
+        {!one && wholes > 0 && <p className="muted small">{t('A combined meeting among them is separated: the meetings in it stay, unless you picked them too.')}</p>}
+        {one?.partOf && <p className="muted small">{t("It's taken out of the combined meeting it's part of.")}</p>}
         <p className="muted small">{t('Notes you saved to your notes folder stay.')} {one ? t('Archiving keeps it instead: out of the list and out of search, and back whenever you like.') : t('Archiving keeps them instead: out of the list and out of search, and back whenever you like.')}</p>
         {err && <p className="error-text small">{err}</p>}
         <div className="mt-dialog-acts">
           <button type="button" className="ghost-btn" onClick={onClose} autoFocus>{t('Cancel')}</button>
           {items.some((x) => !x.archived) && <button type="button" className="btn small" disabled={busy} onClick={() => go('archive')}><Icon name="archive" size={12} /> {t('Archive instead')}</button>}
-          <button type="button" className="btn small danger" disabled={busy} onClick={() => go('delete')}><Icon name="trash" size={12} /> {t('Delete')}</button>
+          <button type="button" className="btn small danger" disabled={busy} onClick={() => go('delete')}><Icon name={whole ? 'split' : 'trash'} size={12} /> {whole ? t('Separate') : t('Delete')}</button>
         </div>
       </div>
     </Dialog>
@@ -110,21 +116,26 @@ export function useMeetingMenu({ list, onOpen, onGone }) {
   const say = (text, error = false) => { setMsg({ text, error }); clearTimeout(timer.current); timer.current = setTimeout(() => setMsg(null), 5000) }
   const run = (fn) => Promise.resolve().then(fn).catch((e) => say(e.message, true))
   const id = (m) => encodeURIComponent(m.id)
+  // The combined meeting one is part of, while it's in the list.
+  const wholeOf = (m) => (m.partOf ? (list || []).find((x) => x.id === m.partOf && x.parts?.includes(m.id)) : null)
   const items = (m) => [
     { icon: 'doc', label: t('Open'), run: () => onOpen(m.id) },
+    wholeOf(m) && { icon: 'layers', label: t('Open "{title}", which it\'s part of', { title: wholeOf(m).title }), run: () => onOpen(m.partOf) },
     { icon: 'download', label: t('Save as Markdown'), run: () => run(async () => { const r = await api(`/meetings/${id(m)}/save`, { method: 'POST' }); refetch('/meetings'); say(t('Saved to {file}', { file: tilde(r.file) })) }) },
     m.saved && onThisComputer() && { icon: 'folder-open', label: t('Show saved notes in Finder'), run: () => run(() => api(`/meetings/${id(m)}/reveal`, { method: 'POST' })) },
     m.hasSummary && { icon: 'helm', label: t('Send action items to Chief of Staff'), run: () => run(async () => { const r = await api(`/meetings/${id(m)}/chief`, { method: 'POST' }); refetch('/meetings'); say(chiefSaid(r)) }) },
     'sep',
-    { icon: 'edit', label: t('Fix a word everywhere'), run: () => setDialog({ kind: 'fix', items: [m] }) },
-    m.status === 'done' && { icon: 'refresh', label: t('Transcribe again…'), run: () => setDialog({ kind: 'again', items: [m] }) },
+    !m.parts && { icon: 'edit', label: t('Fix a word everywhere'), run: () => setDialog({ kind: 'fix', items: [m] }) },
+    m.status === 'done' && !m.parts && { icon: 'refresh', label: t('Transcribe again…'), run: () => setDialog({ kind: 'again', items: [m] }) },
     { icon: 'book', label: t('Open Memory'), run: openMemory },
     'sep',
     { icon: 'folder', label: m.folder ? t('Move to another folder…') : t('Move to a folder…'), run: () => setDialog({ kind: 'folder', items: [m] }) },
     !live(m) && (m.archived
       ? { icon: 'archive', label: t('Unarchive'), run: () => run(async () => { await api(`/meetings/${id(m)}`, { method: 'PATCH', body: { archived: false } }); refetch('/meetings'); say(t('{title} is back in the list.', { title: m.title })) }) }
       : { icon: 'archive', label: t('Archive'), run: () => run(async () => { await api(`/meetings/${id(m)}`, { method: 'PATCH', body: { archived: true } }); refetch('/meetings'); say(t("Archived {title}. It's under Archived, and left out of search.", { title: m.title })) }) }),
-    !live(m) && { icon: 'trash', label: t('Delete meeting…'), danger: true, run: () => setDialog({ kind: 'delete', items: [m] }) },
+    !live(m) && (m.parts
+      ? { icon: 'split', label: t('Separate…'), danger: true, run: () => setDialog({ kind: 'delete', items: [m] }) }
+      : { icon: 'trash', label: t('Delete meeting…'), danger: true, run: () => setDialog({ kind: 'delete', items: [m] }) }),
   ]
   const open = useCallback((e, m) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY, m }) }, [])
   const close = useCallback(() => setMenu(null), [])
@@ -135,7 +146,7 @@ export function useMeetingMenu({ list, onOpen, onGone }) {
       {dialog?.kind === 'fix' && <FixWord id={dialog.items[0].id} onClose={shut} onDone={(text) => { say(text); refetch('/meetings') }} />}
       {dialog?.kind === 'again' && <TranscribeAgain ids={dialog.items.map((x) => x.id)} onClose={shut} onDone={say} />}
       {dialog?.kind === 'folder' && <FolderPick items={dialog.items} folders={foldersOf(list)} onClose={shut} onDone={say} />}
-      {dialog?.kind === 'delete' && <ConfirmDelete items={dialog.items} onClose={shut} onDone={(action, r) => { if (action === 'delete') { onGone?.(r.done); say(deleted(r.done.length)) } else say(archivedN(r.done.length)) }} />}
+      {dialog?.kind === 'delete' && <ConfirmDelete items={dialog.items} onClose={shut} onDone={(action, r) => { if (action === 'delete') { onGone?.(r.done); say(dialog.items.length === 1 && dialog.items[0].parts ? t('Separated. Its meetings are as they were.') : deleted(r.done.length)) } else say(archivedN(r.done.length)) }} />}
     </>
   )
   return { open, node, msg, setDialog, clearMsg: () => setMsg(null) }
