@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon, { StatusDot } from '../Icon.jsx'
 import { copyText } from '../../copy.js'
 import Lightbox from '../Lightbox.jsx'
 import { Menu } from '../Rail.jsx'
 import { api, usePoll, onThisComputer, refetch } from '../../api.js'
 import { t, tx, locale, tn } from '../../i18n/index.js'
-import { usePersisted, Handle, PaneHeader, useMedia } from '../layout.jsx'
+import { usePersisted, Handle, PaneHeader, useMedia, store } from '../layout.jsx'
 import { useMeetings, clock, length, ScreenButton, SectionButton, openMeeting } from './recording.jsx'
 import { byDay, day, timeOf, useSelection, BulkBar } from './bulk.jsx'
 import { useMeetingMenu, foldersOf, ConfirmDelete, FolderPick, chiefSaid } from './actions.jsx'
@@ -262,7 +262,14 @@ export function MeetingsHome({ onOpen }) {
   // a note saying so until it's read.
   const autoOn = data?.insightsOn
   useEffect(() => { if (autoOn && !insightsOn) refetch('/config') }, [autoOn, insightsOn])
-  useEffect(() => {
+  // Listening from as soon as the page is there; and a tab asked for while it was opening (after it
+  // first read the kept one, before it listened: a phone's Meetings tapped again just after a reload)
+  // is taken now, as the kept one says.
+  useLayoutEffect(() => {
+    const kept = store.get('cc-meet-kind', 'meetings')
+    if (kept !== kind) setKind(kept)
+    const keptTab = store.get('cc-meet-tab', 'list')
+    if (keptTab !== tabKept) setTab(keptTab)
     const on = (e) => {
       const to = e.detail?.tab || 'list'
       takePerson()
