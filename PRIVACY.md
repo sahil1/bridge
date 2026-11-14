@@ -232,10 +232,17 @@ Two reports go to the project's server, `counts.boldbridge.ai`, run on Cloudflar
   typing, clicking, scrolling or touching it in the last two minutes; phones aren't counted) and how
   long it was running, as ranges ("1-5 hours"); and the counts of what you used (agents started by
   kind, meetings recorded, dictations, files sent between your computers, crashes and the rest), as
-  ranges ("2-5").
+  ranges ("2-5"). Among them, the models used: for the answers Bridge AI asks a model for itself (a
+  chat, AI Assist, meeting notes, tidying a dictation and the rest), each model's family on the
+  list ("claude-sonnet", "gpt-5", "llama"; a model of your own is only "other"), how it was reached
+  (an agent's sign-in, a key, a cloud, a model server on your computer, or the local model built
+  in) and which part of Bridge AI asked; and for agents, the family of the model each started on or
+  was switched to, or that none was picked. Never a model's name, and nothing from a prompt or an
+  answer.
 - **Once a day**, after the day is over: the version it ran, the one it updated from that day if it
   did, its update channel, rollout bucket and early-access tester as above, the operating system and
-  how it's installed, how many times it started (a range), and whether something crashed.
+  how it's installed, how many times it started (a range), whether something crashed, and how long
+  it was in use that day, as a range ("15-30 minutes").
 - **Once, a couple of minutes after Bridge AI first runs on a computer**: that there's a new
   install, the day it was installed, its version and update channel, the operating system, the
   chip and how it's installed. Turn usage stats off before then and it never goes.

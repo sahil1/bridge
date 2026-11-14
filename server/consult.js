@@ -19,6 +19,7 @@ import { agentEnv } from './runtime/spawn.js'
 import { hiddenAgent, hiddenProvider, hiddenModel, OFF } from './labs.js'
 import * as accounts from './accounts.js'
 import * as usagelog from './usagelog.js'
+import * as counts from './counts.js'
 
 const DIR = () => ensureDir(dataFile('consult'))
 // BRIDGE_ANTHROPIC_URL (tests): a stand-in for Anthropic's API.
@@ -236,7 +237,8 @@ function runOnce(kind, prompt, model, extraEnv = {}, signal) {
 // it may take.
 async function runApi(id, prompt, model, feature, ms = TIMEOUT) {
   const started = Date.now()
-  const noted = (j, m) => usagelog.record({ id: `${id}:${m}`, feature, usage: usagelog.usageOf(j), ms: Date.now() - started })
+  // What the answer took, on this computer, and its model's family in the usage counts (when shared).
+  const noted = (j, m) => { const usage = usagelog.usageOf(j); usagelog.record({ id: `${id}:${m}`, feature, usage, ms: Date.now() - started }); counts.answered(`${id}:${m}`, feature, usage?.model).catch(() => {}) }
   const a = API[id]
   if (a.local) {
     const m = await localModel(model)
@@ -312,6 +314,7 @@ export async function ask({ who, prompt, model, via, env, feature = 'consult' },
   if (useCli && c.cli) {
     const r = await oneShot(c.cli, q, model, env && typeof env === 'object' ? env : {})
     usagelog.record({ id: `cli:${c.cli}`, feature, usage: r.usage, ms: Date.now() - started })
+    counts.answered(`cli:${c.cli}`, feature, r.usage?.model || model).catch(() => {})
     return { who: c.id, via: 'cli', route: opt.route, model: model || null, text: r.text, ms: Date.now() - started }
   }
   if (c.api && (via === 'api' || opt.via === 'api' || !c.cli)) {

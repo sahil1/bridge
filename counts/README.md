@@ -49,6 +49,14 @@ made-up weeks. That's the cost of having no IDs. A Cloudflare rate limiting rule
   the week's.
 - **The chip, each day** (`daily_chips`: day, OS, chip, n), kept apart from the rest of the day's
   report, so Intel and Apple-silicon Macs can be told apart the next day, not a week on.
+- **Time in use, each day** (`daily_time`: day, version, OS, the range it was in, n), kept apart
+  from the rest of the day's report: the minutes a day Bridge AI is used, as ranges
+  ("15-30 minutes"). A version from before a day's report said it is `unknown`; a value that isn't
+  a range on the list, `other`.
+- **Models**, among a week's counts: `models.<family>` for the answers Bridge AI asks a model for
+  itself, `models.via.<how>` for how each was reached, `ai.<part>` for the part of Bridge AI that
+  asked, and `agents.model.<family>` for the models agents start on (`default`: none picked). A
+  family is on the public list (`modelFamilies`), never a model's name.
 - **A first report** (`POST /v1/first`): `firsts` (day, version, OS, chip, how it's installed,
   channel, n): new installs by the day they were installed. Bridge AI sends it once, a couple of
   minutes after it first runs on a computer; a day's report only comes the day after, and only if

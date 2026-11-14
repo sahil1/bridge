@@ -691,6 +691,7 @@
   "Border weight": "枠線の太さ",
   "Both": "両方",
   "Both also say its update channel and its rollout bucket: a number from 0 to 99, picked at random once, that lets a new version reach a few computers at a time.": "どちらにもアップデートチャンネルと配信グループが記載されます。配信グループは一度だけランダムに選ばれる 0〜99 の番号で、新しいバージョンを少しずつコンピューターに届けるために使います。",
+  "Among what's counted: the family of each model that answered (Claude Sonnet, GPT-5; never its name), and each day, how long it was in use, as a range.": "数える項目には、応答した各モデルのファミリー（Claude Sonnet、GPT-5。名前そのものは含みません）と、毎日の使用時間（範囲として）も含まれます。",
   "Bottom": "下",
   "Brainstorm in its name, or picked.": "名前にブレインストーミング、または選択済み。",
   "Brainstorms": "ブレインストーミング",

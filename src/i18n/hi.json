@@ -691,6 +691,7 @@
   "Border weight": "बॉर्डर की मोटाई",
   "Both": "दोनों",
   "Both also say its update channel and its rollout bucket: a number from 0 to 99, picked at random once, that lets a new version reach a few computers at a time.": "दोनों इसका अपडेट चैनल और रोलआउट बकेट भी बताते हैं: 0 से 99 तक की एक संख्या, जो एक बार रैंडम चुनी जाती है, ताकि नया वर्ज़न एक बार में कुछ कंप्यूटरों तक पहुँचे।",
+  "Among what's counted: the family of each model that answered (Claude Sonnet, GPT-5; never its name), and each day, how long it was in use, as a range.": "गिनती में यह भी शामिल है: जवाब देने वाले हर मॉडल का परिवार (Claude Sonnet, GPT-5; उसका नाम कभी नहीं), और हर दिन यह कितनी देर इस्तेमाल हुआ, एक सीमा के रूप में।",
   "Bottom": "नीचे",
   "Brainstorm in its name, or picked.": "नाम में ब्रेनस्टॉर्म, या चुना गया।",
   "Brainstorms": "ब्रेनस्टॉर्म",

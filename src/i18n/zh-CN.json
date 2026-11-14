@@ -691,6 +691,7 @@
   "Border weight": "边框粗细",
   "Both": "两者",
   "Both also say its update channel and its rollout bucket: a number from 0 to 99, picked at random once, that lets a new version reach a few computers at a time.": "两者都会注明它的更新渠道和发布分组：一个 0 到 99 之间的数字，只随机选一次，让新版本每次只推送给少数电脑。",
+  "Among what's counted: the family of each model that answered (Claude Sonnet, GPT-5; never its name), and each day, how long it was in use, as a range.": "计数中还包括每个作答模型的系列（Claude Sonnet、GPT-5；从不包含其名称），以及每天的使用时长（以区间表示）。",
   "Bottom": "下",
   "Brainstorm in its name, or picked.": "名称中有头脑风暴，或已选择。",
   "Brainstorms": "头脑风暴",

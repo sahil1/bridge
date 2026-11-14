@@ -691,6 +691,7 @@
   "Border weight": "Grosor del borde",
   "Both": "Ambos",
   "Both also say its update channel and its rollout bucket: a number from 0 to 99, picked at random once, that lets a new version reach a few computers at a time.": "Ambos indican también su canal de actualizaciones y su grupo de despliegue: un número del 0 al 99, elegido al azar una vez, que permite que una versión nueva llegue a unos pocos ordenadores cada vez.",
+  "Among what's counted: the family of each model that answered (Claude Sonnet, GPT-5; never its name), and each day, how long it was in use, as a range.": "También se cuentan la familia de cada modelo que respondió (Claude Sonnet, GPT-5; nunca su nombre) y, cada día, cuánto tiempo se usó, como un rango.",
   "Bottom": "Inferior",
   "Brainstorm in its name, or picked.": "Brainstorm en el nombre, o elegido.",
   "Brainstorms": "Lluvias de ideas",
