@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { api, usePoll, useFleet, onThisComputer } from '../../api.js'
+import { api, refetch, usePoll, useFleet, onThisComputer } from '../../api.js'
 import { PaneHeader, useMedia, store } from '../layout.jsx'
 import { WhiteboardPage } from '../../lazy.jsx'
 import { Menu, fileOp } from '../FileExtras.jsx'
@@ -18,8 +18,9 @@ import AiAssist from '../AiAssist.jsx'
 import './studio.css'
 import './home.css'
 
-// Studio: documents, sheets, decks, PDFs and pages, like Meetings and Whiteboards a place of its own.
-// Any of them from Files or an agent's folder (on this computer, or another of yours through its
+// Studio: the one place to make things. Documents, sheets, decks, PDFs and pages, and your
+// whiteboards (which have no place of their own while Studio shows), like Meetings a place of its own.
+// A file from Files or an agent's folder (on this computer, or another of yours through its
 // window) opens here, is edited and saved where it is, and keeps every version (server/studio.js).
 // Ask an agent sends a change to one of your agents, and Studio shows it once the agent saves.
 // Each kind's editor loads only when a file of that kind opens.
@@ -67,14 +68,18 @@ function StudioTabs({ on, onFiles, onPreview, name }) {
 // ---------- Files ----------
 // Studio's home, its Files: your files from wherever they are by kind and by where (HomeFiles.jsx),
 // and your design packs, with New in the header (a document, sheet, deck or page in a folder you
-// pick; its cards on the page only while there are no files yet). Preview opens the file last
-// open, or says how to pick one.
+// pick, or a whiteboard; its cards on the page only while there are no files yet). Preview opens
+// the file last open, or says how to pick one.
+// What New makes, one entry a kind: a file of that kind in the folder picked, started by startOf;
+// or, with make(title), something Bridge AI keeps itself, which answers what to open ({ root, path }).
+// Another kind is another entry here (and its row in HomeFiles.jsx's KINDS, to list them).
 const NEW = [
   { kind: 'doc', ext: '.docx', label: tx('Document'), hint: tx('A Word file') },
   { kind: 'doc', ext: '.md', label: tx('Markdown'), hint: tx('A Markdown file') },
   { kind: 'sheet', ext: '.xlsx', label: tx('Sheet'), hint: tx('An Excel file') },
   { kind: 'deck', ext: '.md', deck: true, label: tx('Deck'), hint: tx('Slides in Markdown, to present or send as PowerPoint') },
   { kind: 'page', ext: '.html', label: tx('Page'), hint: tx('An HTML page, like an artifact') },
+  { kind: 'board', label: tx('Whiteboard'), hint: tx('A board to draw on by hand, or to have a diagram drawn on'), make: async (title) => { const b = await api('/boards', { method: 'POST', body: { title } }); refetch('/boards'); return { root: 'board', path: b.id } } },
 ]
 // A new file starts in your default design pack's look, where it has one: a Word file's fonts and
 // colours, a page's (as CSS variables an agent keeps using, and its logo). A deck follows the
@@ -163,6 +168,7 @@ export function StudioHome({ onOpen }) {
     try {
       const n = making
       const title = name.trim() || t(n.label)
+      if (n.make) { const made = await n.make(title); setMaking(null); setName(''); onOpen(made); return }
       const file = `${title}${n.deck ? '.md' : n.ext}`
       const r = await api('/studio/new', { method: 'POST', body: { root: where, dir: '', name: file, ...(await startOf(n, title, packFor(packs.list))) } })
       // A sheet said to be for something: AI Assist makes it as it opens, to keep or discard.
@@ -178,7 +184,7 @@ export function StudioHome({ onOpen }) {
     <PaneHeader icon="layers" title={t('Studio')}>
       <StudioTabs on={view} onFiles={() => setView('files')} onPreview={preview} name={last?.name} />
       <button type="button" className="btn small sd-head-btn sd-new-open" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenuAt(menuAt ? null : { x: r.right - 220, y: r.bottom + 4 }) }} disabled={!folders.length}
-        aria-haspopup="menu" aria-expanded={!!menuAt} aria-label={t('New')} title={t('Make a new document, sheet, deck or page')}><Icon name="plus" size={12} /> <span className="sd-btn-label">{t('New')}</span></button>
+        aria-haspopup="menu" aria-expanded={!!menuAt} aria-label={t('New')} title={t('Make a new document, sheet, deck, page or whiteboard')}><Icon name="plus" size={12} /> <span className="sd-btn-label">{t('New')}</span></button>
       {menuAt && <Menu x={menuAt.x} y={menuAt.y} className="sd-new-menu" onClose={closeMenu} items={NEW.map((n) => ({ label: t(n.label), icon: n.deck ? 'screen' : n.ext === '.md' ? 'doc' : ICON[n.kind], run: () => pick(n) }))} />}
     </PaneHeader>
   )
@@ -199,7 +205,7 @@ export function StudioHome({ onOpen }) {
     <div className="sd-home-view">
       {head}
       <div className="sd-home">
-        <p className="muted small sd-home-say">{t('Your documents, sheets, decks, PDFs and pages, wherever they are, edited here or by your agents, with every version kept.')}</p>
+        <p className="muted small sd-home-say">{t('Your documents, sheets, decks, PDFs and pages, wherever they are, and your whiteboards, edited here or by your agents, with every version kept.')}</p>
         {/* New's cards only while there are no files at all, as the way to start; else it's the
             header's menu, and your files have the page. */}
         {(empty || making) && <section className="sd-sec sd-new-sec">
@@ -223,11 +229,11 @@ export function StudioHome({ onOpen }) {
                   <input value={forWhat} onChange={(e) => setForWhat(e.target.value)} placeholder={t('A budget for a team of five')} maxLength={400} />
                 </label>
               )}
-              <label className="sd-field wide"><span className="muted small">{t('Where')}</span>
+              {!making.make && <label className="sd-field wide"><span className="muted small">{t('Where')}</span>
                 <select value={where} onChange={(e) => setWhere(e.target.value)}>
                   {folders.map((f) => <option key={f.root} value={f.root}>{f.label} · {home(f.path)}</option>)}
                 </select>
-              </label>
+              </label>}
               <span className="sd-new-acts">
                 <button type="submit" className="btn small primary" disabled={busy}>{busy ? t('Making it…') : t('Make it')}</button>
                 <button type="button" className="ghost-btn" onClick={() => setMaking(null)}>{t('Cancel')}</button>
@@ -237,7 +243,7 @@ export function StudioHome({ onOpen }) {
           )}
         </section>}
         <YourFiles recent={data} refreshRecent={refresh} onOpen={onOpen} areaOf={areaOf} onEmpty={setEmpty} describe={(f) => {
-          if (f.kind === 'board') return { kind: t('Whiteboard'), folder: t('Whiteboards'), full: null }
+          if (f.kind === 'board') return { kind: t('Whiteboard'), folder: t('Bridge AI'), full: t("Bridge AI's own: your whiteboards") }
           if (f.root === 'studio') return { kind: kindName(f.kind, extOf(f.name)), folder: t('Bridge AI'), full: t("Studio's own folder: decks made from meetings, and new files with nowhere else to go") }
           const at = whereOf(folders, f.root, f.path)
           return { kind: kindName(f.kind, extOf(f.name)), folder: f.dir || at?.path || f.where || null, full: at ? `${at.label} · ${at.full}` : f.dir || null }
@@ -298,8 +304,8 @@ function useApps() {
 // out of full screen, a strip of its own for them, which moves the window as a title bar does.
 const MAC_APP = typeof window !== 'undefined' && !!window.bridgeApp?.desktop && window.bridgeApp.platform === 'darwin'
 
-// Preview: a file in its own editor, or a whiteboard (root board, its name as the path) on
-// Whiteboards' own page.
+// Preview: a file in its own editor, or a whiteboard (root board, its name as the path) in the
+// whiteboard's own.
 export function StudioPage(props) {
   return props.root === 'board' ? <BoardPreview id={props.path} onBack={props.onBack} onOpen={props.onOpen} /> : <FilePage {...props} />
 }

@@ -5,13 +5,15 @@ import { useWidth, usePersisted } from '../layout.jsx'
 import { t, tx, locale } from '../../i18n/index.js'
 import { canAddPlace } from '../Transfers.jsx'
 import { fileOp } from '../FileExtras.jsx'
+import { WhiteboardsHome } from '../../lazy.jsx'
 
 // Studio's Files: what you opened here, the documents, sheets, decks and PDFs on this computer
 // (server/studiofound.js: Spotlight on a Mac, Recent items on Windows, the recently used list on
 // Linux, and a short look through your agents' folders, your places and Studio's own folder) and
 // your whiteboards. Asked for once Studio is open, never before. Shown by what's picked on the left:
 // Recent, a kind, or where they are (Bridge AI's own, a project, a place, a cloud drive, a folder);
-// a search looks through all of them. A row each, with its folder, when it changed, and Open, which
+// a search looks through all of them (a kind is a row of KINDS; what New makes is Studio.jsx's NEW).
+// A row each, with its folder, when it changed, and Open, which
 // shows it in Preview, in its own editor. Add a folder: a place in Files, looked through from then on.
 const KIND_ICON = { doc: 'doc', sheet: 'grid', deck: 'screen', pdf: 'file', page: 'code', board: 'shapes' }
 const KINDS = [
@@ -20,8 +22,13 @@ const KINDS = [
   ['sheet', tx('Sheets'), tx('No sheets found: Excel or CSV files.')],
   ['pdf', tx('PDFs'), tx('No PDFs found.')],
   ['page', tx('Pages'), tx('No pages found: HTML files.')],
-  ['board', tx('Whiteboards'), tx('No whiteboards yet. Make one in Whiteboards, or ask an agent or the Chief of Staff to draw one.')],
+  ['board', tx('Whiteboards'), null],
 ]
+// A kind with a list of its own in place of rows, when it's the kind picked: your whiteboards as
+// their own page has them (what to draw, then each as a card to open, rename or delete).
+const OWN_LIST = {
+  board: WhiteboardsHome && ((onOpen) => <WhiteboardsHome inStudio onOpen={(id) => onOpen({ root: 'board', path: id })} />),
+}
 const AREA_ICON = { studio: 'layers', project: 'bot', place: 'pin', cloud: 'cloud', folder: 'folder', home: 'home', other: 'folder' }
 const AREA_ORDER = ['studio', 'project', 'place', 'cloud', 'folder', 'home', 'other']
 const SOURCE = { spotlight: tx('Spotlight'), recent: tx("Windows' Recent items"), xbel: tx('your recently used files'), folders: tx("your agents' folders and places"), studio: tx("Studio's own folder"), boards: tx('your whiteboards') }
@@ -60,6 +67,12 @@ export function YourFiles({ recent, refreshRecent, describe, areaOf, onOpen, onE
   const openInApp = (f) => fileOp(f.root, 'open', f.path).then(() => setNote({ text: t('Opening {name} in its own app…', { name: f.name }) }), (e) => setNote({ text: t("Couldn't open {name}: {error}", { name: f.name, error: e.message }), error: true }))
   const [group, setGroup] = usePersisted('cc-studio-group', 'recent') // recent, kind:<kind> or area:<type>:<name>
   const [q, setQ] = useState('')
+  // Asked for from outside while it's open (Whiteboards, from ⌘K or a link to the list of them).
+  useEffect(() => {
+    const on = (e) => { if (e.detail?.group) { setGroup(e.detail.group); setQ('') } }
+    window.addEventListener('bridge-studio-show', on)
+    return () => window.removeEventListener('bridge-studio-show', on)
+  }, [setGroup])
   const [boxRef, boxW] = useWidth()
   const narrow = boxW > 0 && boxW < 640
   const boards = usePoll('/boards', 60_000)
@@ -105,9 +118,10 @@ export function YourFiles({ recent, refreshRecent, describe, areaOf, onOpen, onE
   const capped = Object.entries(found?.capped || {})
   const title = needle ? t('Matching “{q}”', { q: q.trim() }) : kind ? t(kind[1]) : area ? areaName(area) : t('Recent')
   const none = needle ? t('No file of yours matches “{q}”.', { q: q.trim() })
-    : kind ? t(kind[2])
+    : kind?.[2] ? t(kind[2])
       : !rows.length ? t('No documents, sheets, decks or PDFs yet. One you open from an agent\'s Files, start above, or keep in a folder you add shows here.')
         : t('Nothing opened or changed in the last 30 days. Pick a kind or a folder to see the rest.')
+  const own = (!needle && kind && OWN_LIST[kind[0]]) || null
   const groupBtn = (id, icon, label, n, hint) => (
     <button key={id} type="button" className={pick === id && !needle ? 'on' : ''} aria-current={pick === id && !needle ? 'true' : undefined} onClick={() => { setGroup(id); setQ('') }} title={hint || label}>
       <Icon name={icon} size={14} /><span>{label}</span><small>{n}</small>
@@ -147,7 +161,7 @@ export function YourFiles({ recent, refreshRecent, describe, areaOf, onOpen, onE
             {kind && found?.capped?.[kind[0]] && <small className="muted">{t('the newest {n} of {total}', { n: found.perKind, total: found.capped[kind[0]].toLocaleString(locale()) })}</small>}
           </div>
           {note && <p className={`sd-files-note small${note.error ? ' error-text' : ' muted'}`} role={note.error ? 'alert' : 'status'}>{note.text}</p>}
-          <div className="sd-files-table" role="table" aria-label={title}>
+          {own ? own(onOpen) : <div className="sd-files-table" role="table" aria-label={title}>
             <div className="sd-files-row head" role="row"><span role="columnheader">{t('Name')}</span><span role="columnheader">{t('Folder')}</span><span role="columnheader">{t('Changed')}</span><span role="columnheader" aria-label={t('Open')} /></div>
             {shown.map((f) => {
               const d = describe(f)
@@ -175,7 +189,7 @@ export function YourFiles({ recent, refreshRecent, describe, areaOf, onOpen, onE
             })}
             {looking && !found && <div className="sd-files-row wait" role="row"><span role="cell" className="muted small"><Icon name="refresh" size={12} className="spin" /> {t('Looking for your files…')}</span></div>}
             {!shown.length && (found || !looking) && <div className="sd-files-none" role="row"><span role="cell">{none}</span></div>}
-          </div>
+          </div>}
         </div>
       </div>
       {found && !found.error && (

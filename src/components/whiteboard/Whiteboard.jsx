@@ -616,7 +616,9 @@ function BoardCard({ b, onOpen, onError, refresh }) {
   )
 }
 
-export function WhiteboardsHome({ onOpen }) {
+// inStudio: shown by Studio's Files for its Whiteboards kind (HomeFiles.jsx), which has the page's
+// header, New and scroll: only what to draw and the boards.
+export function WhiteboardsHome({ onOpen, inStudio = false }) {
   const { data, error, refresh } = usePoll('/boards', 15000)
   const boards = data?.boards || []
   const [text, setText] = useState('')
@@ -640,16 +642,16 @@ export function WhiteboardsHome({ onOpen }) {
   const draw = (e) => { e?.preventDefault(); const p = text.trim(); if (p && !busy) create({ title: titleFor(p), prompt: p }).then(() => setText('')) }
   const n = boards.length
   return (
-    <div className="wb-view">
-      <PaneHeader icon="shapes" title={t('Whiteboards')} subtitle={(
+    <div className={inStudio ? undefined : 'wb-view'}>
+      {!inStudio && <PaneHeader icon="shapes" title={t('Whiteboards')} subtitle={(
         <>
           <span className="sub-where">{data ? (n === 1 ? t('{n} whiteboard', { n }) : t('{n} whiteboards', { n })) : ''}</span>
           {data?.folder && <button type="button" className="path-chip" onClick={() => onThisComputer() && data.canOpen && api('/boards/folder', { method: 'POST' }).catch((x) => setErr(x.message))} title={t('Where whiteboards are saved: {path}', { path: data.folder })}><Icon name="folder" size={10} /> <span>{data.folder.replace(/^(\/Users\/|\/home\/|C:\\Users\\)[^/\\]+/, '~')}</span></button>}
         </>
       )}>
         <button type="button" className="btn small primary" onClick={() => create()} disabled={busy}><Icon name="plus" size={13} /> {t('New whiteboard')}</button>
-      </PaneHeader>
-      <div className="wb-home">
+      </PaneHeader>}
+      <div className={`wb-home${inStudio ? ' in-studio' : ''}`}>
         <form className="wb-ask" onSubmit={draw}>
           <h1>{t('What should we draw?')}</h1>
           <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder={t('Describe a flowchart, an architecture or network, a sequence or an org chart. It comes out as shapes and icons you can move and edit.')}
@@ -689,6 +691,7 @@ export function WhiteboardsHome({ onOpen }) {
 // your whiteboards. f: the file as the viewer has it; onSaved(file): after saving into it;
 // onOpenPath: to the copy saved beside it.
 export function FileDrawing({ pane, f, onSaved, onOpenPath }) {
+  const inStudio = useTrial('studio') // where your whiteboards are while Studio shows (a beta feature)
   const kind = kindOfFile(f.name)
   const own = kind === 'excalidraw'
   // A save of ours changes the file's time; only someone else's change draws it again.
@@ -748,7 +751,7 @@ export function FileDrawing({ pane, f, onSaved, onOpenPath }) {
         {own ? <SaveState status={d.status} /> : <span className="muted small">{kind === 'drawio' ? t('Drawn from this draw.io file, which stays as it is.') : t('Drawn from this Mermaid, which stays as it is.')}</span>}
         <span className="wb-grow" />
         {!own && <button type="button" className="btn small" onClick={saveBeside} disabled={!d.board.api} title={t('Saves the drawing as {name} next to this file', { name: `${base}.excalidraw` })}>{t('Save as .excalidraw')}</button>}
-        <button type="button" className="btn small" onClick={done ? () => openBoard(done) : toBoards} disabled={!d.board.api}><Icon name="shapes" size={12} /> {done ? t('Open in Whiteboards') : t('Add to Whiteboards')}</button>
+        <button type="button" className="btn small" onClick={done ? () => openBoard(done) : toBoards} disabled={!d.board.api}><Icon name="shapes" size={12} /> {done ? (inStudio ? t('Open in Studio') : t('Open in Whiteboards')) : (inStudio ? t('Add to Studio') : t('Add to Whiteboards'))}</button>
         <AiAssist className="btn small wb-ai-btn" on={panel} disabled={!d.board.api} items={() => drawAssist(panel, true, (mode) => { if (mode) { setWant({ mode, n: Date.now() }); setPanel(true) } else setPanel(false) }, selected(d.board.api))} />
       </div>
       {d.conflict && <Conflict onTheirs={() => d.takeTheirs().catch((e) => setErr(e.message))} onMine={() => d.flush(true)} />}

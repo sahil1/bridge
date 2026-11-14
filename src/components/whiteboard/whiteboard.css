@@ -216,6 +216,8 @@
 
 /* The list */
 .wb-home { grid-row: 4; height: auto; min-height: 0; overflow: auto; padding: 22px clamp(14px, 3vw, 32px) 28px; display: grid; align-content: start; gap: 14px; max-width: 980px; width: 100%; margin: 0 auto; }
+/* In Studio's Files, which has the page's padding and scroll. */
+.wb-home.in-studio { overflow: visible; padding: 0; max-width: none; margin: 0; }
 .wb-ask { display: grid; gap: 8px; padding: 14px; border-radius: var(--r); border: 1px solid var(--line-2); background: var(--pane-2); }
 .wb-ask h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
 .wb-ask p { margin: 0; }
