@@ -7,7 +7,7 @@ import { tx } from './i18n/index.js'
 // with it stays. The server says which are on (/config trials) and answers a trial's routes only
 // then (server/index.js TRIALS).
 export const TRIALS = [
-  { id: 'studio', label: tx('Studio'), hint: tx('Documents, sheets, decks, PDFs and pages from any of your folders and computers, edited here or by your agents, with every version kept.') },
+  { id: 'studio', label: tx('Studio'), hint: tx('Documents, sheets, decks, PDFs and pages from any of your folders and computers, edited here or by your agents, with every version kept. Your whiteboards are in Studio too, in place of their own row in the sidebar.') },
   { id: 'home', label: tx('Home'), hint: tx('Where Bridge AI opens: what needs you on every computer, answered right there, then what\'s ready to look at and what\'s coming up, with Everything a click away.') },
   { id: 'dictation-cleanup', label: tx('Tidy what I say'), hint: tx('Dictation from other apps tidied by a model before it\'s pasted: fillers and false starts out, punctuation fixed, your words kept. Turned on in Settings › Voice & Meetings › Dictation.') },
   { id: 'usage-everywhere', label: tx('Usage Across Every Provider'), hint: tx('In Today › Usage: the tokens each provider and model used, by day and by what in Bridge AI used them, with the cost where an API key has a price and the time a model took on this computer. It stays on this computer.') },
@@ -34,4 +34,9 @@ export const TRIALS = [
 export function useTrial(id) {
   const { data } = usePoll('/config', 10 * 60 * 1000)
   return data?.trials?.[id] === true
+}
+// Whether the settings are in yet: until then no trial is known to be on or off, for what shows
+// only while one is off (Whiteboards' own row in the sidebar, which Studio takes in).
+export function useTrialsKnown() {
+  return !!usePoll('/config', 10 * 60 * 1000).data
 }
