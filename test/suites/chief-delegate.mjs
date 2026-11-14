@@ -38,7 +38,8 @@ const bridge = (...args) => {
 const logOf = (f) => { try { return fs.readFileSync(path.join(kit.home, f), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } }
 const reports = () => logOf('chief-got.log').filter((x) => /^Report from your/.test(x.text))
 const reportsOn = (id) => reports().filter((x) => x.text.includes(`on task ${id},`))
-const started = () => logOf('helpers-started.log')
+// How the helper whose brief says this was started, once it has (its launch can return first).
+const startOf = (words) => until(() => logOf('helpers-started.log').find((x) => x.message.includes(words)), 10000)
 const tasks = async () => (await kit.api('/chief/tasks')).items
 const task = async (id) => (await tasks()).find((x) => x.id === String(id))
 const idOf = (out) => /^Task (\d+)/m.exec(out)?.[1] || null
@@ -68,7 +69,7 @@ try {
   ok(/A helper is on it in \S+, working in .*work\/draft-the-launch-deck\. Bridge AI tells you here when it stops/.test(out1), 'bridge delegate: a helper is on it, in the task\'s own folder, and the chief hears back here', out1)
   const it1 = await task(t1)
   ok(it1?.role === 'marketing' && it1.status === 'doing' && !!it1.pane && it1.helper?.state === 'working', 'the task is on its list as doing, with the helper\'s role and pane', it1)
-  const s1 = started().at(-1)
+  const s1 = await startOf('Draft the launch deck for the spring release')
   const work1 = path.join(CHIEF, 'work', 'draft-the-launch-deck')
   ok(real(s1?.cwd || '') === real(work1), 'the helper started in the task\'s own folder, work/draft-the-launch-deck', s1?.cwd)
   ok(/^You're helping Tester's Chief of Staff in Bridge AI as its marketing helper, on task \d+: "Draft the launch deck"/.test(s1?.message || '') && /put what you make there/.test(s1.message) && /end with a short summary of what you made or found and where it is/.test(s1.message) && s1.message.endsWith('Draft the launch deck for the spring release, ten slides.'),
@@ -179,12 +180,12 @@ try {
   // ---------- Helpers may edit in their own work folder ----------
   await kit.api('/settings', { chief: { helpers: { editOwnFolder: true } } }, 'PATCH')
   const outO = bridge('delegate', '--role', 'writer', '--title', 'Write the FAQ', '[work 1] [file faq.md] Write the FAQ.')
-  const sO = started().at(-1)
+  const sO = await startOf('Write the FAQ.')
   ok(sO?.args.join(' ').includes('--permission-mode acceptEdits') && /it may edit files there without asking/.test(outO), 'on: a helper in its own work folder may edit there without asking', { args: sO?.args, out: outO })
   const site = path.join(kit.home, 'site')
   fs.mkdirSync(site, { recursive: true })
   const outN = bridge('delegate', '--role', 'engineer', '--cwd', site, '--title', 'Fix the footer', '[work 1] [file footer.md] Fix the footer.')
-  const sN = started().at(-1)
+  const sN = await startOf('Fix the footer.')
   ok(real(sN?.cwd || '') === real(site) && !sN.args.includes('--permission-mode') && !/may edit/.test(outN), 'but one in a folder of yours still asks', { cwd: sN?.cwd, args: sN?.args, out: outN })
   await kit.api('/settings', { chief: { helpers: { editOwnFolder: false } } }, 'PATCH')
   await until(async () => (await task(idOf(outN)))?.status === 'done', 20000)
@@ -194,6 +195,17 @@ try {
   const asking = await until(async () => { const x = await task(tA); return x?.helper?.status === 'blocked' ? x : null }, 20000)
   ok(!!asking && asking.status === 'doing', 'a helper asking permission waits on you, its task still doing', await task(tA))
   ok((await kit.api('/needs-you')).items.some((i) => i.paneId === asking?.pane), 'and it\'s in Needs You', (await kit.api('/needs-you')).items.map((i) => i.paneId))
+  await part('a helper asking, on the board', async () => {
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', store: { 'cc-agent-views': { [chiefPane]: 'tasks' } } })
+    await p.locator('.rail-board').click({ timeout: 15000 })
+    const needs = await until(async () => { const x = await p.locator('.cb-col.c-needs').innerText().catch(() => ''); return /Tidy the release notes/.test(x) ? x : null }, 10000)
+    ok(/Waiting for your answer/.test(needs || ''), 'on the board, under Needs you: it waits for your answer', needs)
+    await p.locator('.pane-head .seg [role="tab"]', { hasText: 'Chat' }).click()
+    const row = p.locator('.ct-tray .ct-item', { hasText: 'Tidy the release notes' })
+    ok(!!(await until(async () => /Needs you/.test(await row.innerText().catch(() => '')), 8000)), 'and in the Tasks tray its task says Needs you', await row.innerText().catch(() => ''))
+    ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+  })
   await kit.api(`/agents/${encodeURIComponent(asking.pane)}/keys`, { keys: ['1'] })
   ok(!!(await until(async () => (await task(tA))?.status === 'done', 20000)), 'answered, it finishes')
 
