@@ -95,7 +95,7 @@ export const VOICE = {
 // The natural voice that reads answers aloud (voicespeak.js): Supertone's Supertonic 3, in the int8
 // ONNX form the sherpa-onnx project made, ten voices (five women's, then five men's) in 31
 // languages. Not speech to text, so not in the list above; downloaded when you pick it in Settings ›
-// Voice › Spoken Answers. It reads the words as they're written: of the voices sherpa-onnx runs, the
+// Voice & Meetings › Spoken Answers. It reads the words as they're written: of the voices sherpa-onnx runs, the
 // others need a dictionary of words (sherpa-onnx 2 no longer has eSpeak NG to sound out the rest),
 // and Kokoro and Kitten left out "agents", "minutes" and "PR 42" from an agent's answer; Pocket
 // TTS's ONNX form is for non-commercial use only.
@@ -180,7 +180,7 @@ const portable = () => offered().find((x) => x.id === DEFAULT) || offered().find
 // Ready to turn speech into text: downloaded, and what runs it is here.
 const runnable = (m) => have(m) && (m.runtime === 'sherpa' ? shown(m.id) : !!fitted?.whisperHere)
 
-// The model picked (Settings › Voice, or an older pick in Settings › Meetings), when it can run
+// The model picked (Settings › Voice & Meetings › Speech to Text, or an older pick in its Meetings tab), when it can run
 // here; else one already here that can run, Parakeet first; else the portable default.
 const pickedId = (cfg) => cfg?.meetings?.localModel || cfg?.speech?.model || null
 export function localModel(cfg) {
@@ -381,7 +381,7 @@ async function local(wav, o) {
   }
   // An older whisper.cpp without the server: the command line, loading the model each time.
   const cli = await tool('whisper-cli')
-  if (!cli) throw fatal(`${m.label} needs whisper.cpp, which isn't on this computer. Install it in Settings › Meetings, or pick Parakeet in Settings › Voice.`, { needs: 'whisper' })
+  if (!cli) throw fatal(`${m.label} needs whisper.cpp, which isn't on this computer. Install it, or pick Parakeet, in Settings › Voice & Meetings.`, { needs: 'whisper' })
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-speech-'))
   try {
     fs.writeFileSync(path.join(tmp, 'in.wav'), wav)
@@ -406,7 +406,7 @@ async function appleStatus(language) {
 }
 async function apple(wav, { language }) {
   const bin = appleBin()
-  if (!bin) throw fatal('Transcribing on the Mac itself needs macOS 26 or later. Pick another engine in Settings › Meetings.')
+  if (!bin) throw fatal('Transcribing on the Mac itself needs macOS 26 or later. Pick another engine in Settings › Voice & Meetings.')
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-speech-'))
   try {
     fs.writeFileSync(path.join(tmp, 'in.wav'), wav)
@@ -441,7 +441,7 @@ async function service(id, wav, { cfg, language, prompt }) {
   const s = SERVICES[id]
   const e = env()
   const key = e[s.key] || (id === 'gemini' && (e.GOOGLE_API_KEY || e.GOOGLE_GENERATIVE_AI_API_KEY))
-  if (!key && !s.custom) throw fatal(`No ${s.label} key saved. Add one in Settings › Model Providers, or pick another engine in Settings › Meetings.`)
+  if (!key && !s.custom) throw fatal(`No ${s.label} key saved. Add one in Settings › Model Providers, or pick another engine in Settings › Voice & Meetings.`)
   const model = cfg?.meetings?.serviceModel?.[id] || (s.custom ? e.SPEECH_MODEL : s.models[0])
   const lang = language && language !== 'auto' ? language : null
   const timeout = AbortSignal.timeout(120_000)
@@ -524,7 +524,7 @@ export async function transcribe(wav, o = {}) {
   return id === 'local' ? local(wav, o) : id === 'apple' ? apple(wav, o) : service(id, wav, o)
 }
 // A voice note or a dictation: on this computer only (a service is for meetings you pick it for).
-// The model picked in Settings › Voice (or the Mac's own, picked there); not downloaded yet, the
+// The model picked in Settings › Voice & Meetings (or the Mac's own, picked there); not downloaded yet, the
 // Mac's own speech stands in when it can; else the model says what it needs (needs: 'model').
 // Names in meeting memory come out spelled its way.
 export async function voice(wav, o = {}) {
@@ -575,7 +575,7 @@ const modelInfo = (x, whisperHere) => ({
 // download), 'whisper' (whisper.cpp, for a Whisper model) or 'brew' (Homebrew first, on a Mac).
 const localNeeds = (m, whisperHere, brew) => (m.runtime === 'whisper' && !whisperHere ? (brew || fitted?.m.platform !== 'darwin' ? 'whisper' : 'brew') : !have(m) ? 'model' : null)
 
-// Everything Settings › Meetings and › Voice show: the engines, which are ready, the models offered
+// Everything Settings › Voice & Meetings shows: the engines, which are ready, the models offered
 // on this computer and their downloads, and what isn't offered here and why (for diagnostics).
 export async function status(cfg) {
   const e = env()
@@ -623,7 +623,7 @@ export async function status(cfg) {
 }
 
 // What voice notes and dictation use, and whether they're ready (the message box's mic, the
-// dictation key, Settings › Voice): engine 'local' (a speech model) or 'apple'; standIn: the Mac's
+// dictation key, Settings › Voice & Meetings): engine 'local' (a speech model) or 'apple'; standIn: the Mac's
 // own speech answering until the model is here; needs: what's missing ('model', 'whisper', 'brew').
 export async function voiceStatus(cfg) {
   const f = await fit()

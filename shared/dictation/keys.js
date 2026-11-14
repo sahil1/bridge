@@ -22,7 +22,7 @@ export function domCode(key) {
 const KEY_OF_CODE = Object.fromEntries(Object.entries(PUNCT).map(([k, v]) => [v, k]))
 const keyOfCode = (code) => (code === 'Space' ? 'Space' : /^Key[A-Z]$/.test(code) ? code.slice(3) : /^Digit[0-9]$/.test(code) ? code.slice(5) : /^F([1-9]|1[0-9]|2[0-4])$/.test(code) ? code : KEY_OF_CODE[code] || null)
 
-// Or one key on its own, held to talk (Settings › Voice, opt-in): Fn (🌐) on a Mac, or the right
+// Or one key on its own, held to talk (Settings › Voice & Meetings, opt-in): Fn (🌐) on a Mac, or the right
 // ⌥ / Right Alt. The desktop app hears them from other apps where platform.js loneKeys says (a Mac
 // asks for Input Monitoring). Inside Bridge AI the page hears the right Alt itself (AltRight); Fn
 // never reaches a page, so the desktop app tells the page about it, as it does from other apps.

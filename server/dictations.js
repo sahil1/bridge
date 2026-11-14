@@ -1,4 +1,4 @@
-// Your dictations, kept (Settings › Voice › Dictation History): what you said with the
+// Your dictations, kept (Settings › Voice & Meetings › Dictation History): what you said with the
 // dictation key, inside Bridge AI or in another app, so it's never lost in an app that didn't take
 // it. Each one: when and how long, the text as it was put in (or as you edited it since) and as it
 // was heard (before the light cleanup), and with Tidy what I say, what you said before the model

@@ -4,7 +4,7 @@
 // while the rest are made; or eSpeak NG where it's installed (most Linux desktops have it, for
 // their screen reader), for a device with no voice of its own. Each answer is a WAV, so it plays
 // the same on this computer or a phone through the relay. Nothing leaves the computer: the natural
-// voice is one download from Hugging Face, when you pick it in Settings › Voice, never by itself.
+// voice is one download from Hugging Face, when you pick it in Settings › Voice & Meetings, never by itself.
 import path from 'node:path'
 import { execFile, fork } from 'node:child_process'
 import { tool } from './fixes.js'
@@ -158,7 +158,7 @@ async function natural(text, { lang, voice, rate }) {
   const n = speech.NATURAL
   const f = await fit()
   if (!f.ok) throw fail(`The natural voice can't run on this computer: ${f.why}`, 409)
-  if (!speech.have(n)) throw fail(speech.downloading(n.id) && !speech.downloading(n.id).error ? 'The natural voice is still downloading' : 'The natural voice isn\'t downloaded. Download it in Settings › Voice.', 409)
+  if (!speech.have(n)) throw fail(speech.downloading(n.id) && !speech.downloading(n.id).error ? 'The natural voice is still downloading' : 'The natural voice isn\'t downloaded. Download it in Settings › Voice & Meetings.', 409)
   const code = String(lang || 'en').toLowerCase().split('-')[0]
   if (!n.languages.includes(code)) throw fail('The natural voice doesn\'t speak this language', 400)
   // A sentence or two at a time comes from the page; a long one is still read whole.

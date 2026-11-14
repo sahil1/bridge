@@ -7,9 +7,9 @@ import './settings.css'
 
 // Settings, in two parts: what most people change first, then Advanced, folded away at the end of
 // each section. A section marks what's advanced with <Advanced>, wherever it is in the section
-// (Voice's dictation, Devices' notifications), and AdvancedFrame gathers it all, by `order`, into
-// one Advanced at the end: closed until it's opened, then kept open or closed for that section on
-// this device. A section with nothing advanced has none. Outside Settings, <Advanced> shows in place.
+// (Dictation's extras, Devices' notifications), and AdvancedFrame gathers it all, by `order`, into
+// one Advanced at the end: closed until it's opened, then kept open or closed for that section (for
+// each tab of Voice & Meetings) on this device. A section with nothing advanced has none. Outside Settings, <Advanced> shows in place.
 // ⌘K and links reach a setting in it all the same (reveal, below; search.js).
 const KEY = 'cc-settings-advanced'
 const Parts = createContext(undefined)

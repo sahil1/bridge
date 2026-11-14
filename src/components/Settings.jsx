@@ -13,6 +13,7 @@ import Account from './settings/Account.jsx'
 import Meetings from './settings/Meetings.jsx'
 import Mail from './settings/Mail.jsx'
 import Voice from './settings/Voice.jsx'
+import Dictation from './settings/Dictation.jsx'
 import CloudKeys from './settings/CloudKeys.jsx'
 import ErrorBoundary from './ErrorBoundary.jsx'
 import { SettingsAt } from './settings/where.js'
@@ -28,12 +29,15 @@ import { t, tx } from '../i18n/index.js'
 // where it can work: Mail, where Bridge AI reads Apple Mail (the computer shown is a Mac). One marked
 // accounts is only once Bold Bridge accounts exist (server/account.js): Account. Each section shows
 // what most people change first, and the rest under Advanced at its end (settings/Advanced.jsx).
+// Voice & Meetings is one section with tabs (they were two, Voice and Meetings, with dictation
+// inside Voice): what's showing is its tab, so "meetings" and "voice" open where they always did,
+// and "dictation" opens Dictation.
 export const SECTIONS = [
   { id: 'general', label: tx('General'), icon: 'home', hint: tx('Name, default agent and model, location') },
   { id: 'agents', label: tx('Agents'), icon: 'bot', hint: tx('Installed agents and sign-in') },
   { id: 'providers', label: tx('Model Providers'), icon: 'layers', hint: tx('API keys, clouds, local models, cloud agents') },
-  { id: 'voice', label: tx('Voice'), icon: 'mic', hint: tx('Speech to text on this computer, and dictation') },
-  { id: 'meetings', label: tx('Meetings'), icon: 'mic', hint: tx('How meetings are transcribed and summarized') },
+  { id: 'voice-meetings', label: tx('Voice & Meetings'), icon: 'mic', hint: tx('Meetings, dictation, and speech to text on this computer'),
+    tabs: [{ id: 'meetings', label: tx('Meetings') }, { id: 'dictation', label: tx('Dictation') }, { id: 'voice', label: tx('Speech to Text') }] },
   { id: 'mail', label: tx('Mail'), icon: 'mail', hint: tx('How You Write, for the replies AI Assist drafts, and your working hours'), mac: true },
   { id: 'mcp', label: tx('MCP Servers'), icon: 'tool', hint: tx('Tools your agents can use') },
   { id: 'phone', label: tx('Devices'), icon: 'phone', hint: tx('Your phone and your other computers, through your relay or Tailscale; what to notify you about') },
@@ -54,11 +58,15 @@ const PHONE = [
 // setting's (search.js: "accounts", "cloud", "permissions", "commands", "topbar" and the rest),
 // which opens its section at it, with Advanced opened when it's in there (reveal). "machines"
 // opens Devices at your devices (they were two sections, and linking machines needs the relay set
-// up on the phone one).
-const settingOf = (section) => (cloudOnly ? null : SETTINGS.find((x) => x.id === section) || null)
+// up on the phone one). A tab's id opens its section at it (and is no setting's, though Dictation
+// is both), and a section with tabs opens at its first.
+const holds = (s, id) => s.id === id || !!s.tabs?.some((x) => x.id === id)
+const isTab = (id) => SECTIONS.some((s) => s.tabs?.some((x) => x.id === id))
+const settingOf = (section) => (cloudOnly || isTab(section) ? null : SETTINGS.find((x) => x.id === section) || null)
 const sectionFor = (section, sections) => {
   const to = cloudOnly ? (section === 'all' ? null : section === 'appearance' ? 'appearance' : 'cloud') : settingOf(section)?.section || section
-  return sections.some((s) => s.id === to) ? to : null
+  const s = sections.find((x) => holds(x, to))
+  return !s ? null : s.tabs && s.id === to ? s.tabs[0].id : to
 }
 
 export default function Settings({ section = 'all', onClose, onOpenAgent }) {
@@ -66,7 +74,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
   const sections = cloudOnly ? PHONE : SECTIONS.filter((s) => (!s.mac || conf?.mail) && (!s.accounts || conf?.accounts))
   const phone = useMedia('(max-width: 760px)')
   const to = sectionFor(section, sections)
-  const [at, setAt] = useState(to || sections[0].id)
+  const [at, setAt] = useState(to || sections[0].id) // the section showing, or its tab
   const [list, setList] = useState(!to) // on a phone: the list of sections, rather than one of them
   const go = (id) => { setAt(id); setList(false) }
   useEffect(() => { if (to) go(to) }, [to]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -89,18 +97,21 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
-  const cur = sections.find((s) => s.id === at)
-  // Which section, for Back and Forward (src/backForward.js): each is a place.
-  useEffect(() => { sayPlace('settings', at, `${t('Settings')} › ${t(cur?.label || '')}`) }, [at, cur?.label])
+  const cur = sections.find((s) => holds(s, at))
+  const tab = cur?.tabs?.find((x) => x.id === at)
+  // Which section, and which tab of it, for Back and Forward (src/backForward.js): each is a place.
+  useEffect(() => { sayPlace('settings', at, `${t('Settings')} › ${t(cur?.label || '')}${tab ? ` › ${t(tab.label)}` : ''}`) }, [at, cur?.label, tab?.label])
   useEffect(() => () => sayPlace('settings', null), [])
   const showList = phone && list
+  // A section picked from the list: one with tabs at its first, or where it is when it's showing already.
+  const open = (s) => go(!s.tabs ? s.id : s === cur && !showList ? at : s.tabs[0].id)
   // From the list to a section and back, the focus goes along: to ‹ Settings, then to the row left.
   const sheet = useRef(null)
   const was = useRef(showList)
   useEffect(() => {
     if (was.current === showList) return
     was.current = showList
-    sheet.current?.querySelector(showList ? `.st-list-row[data-id="${at}"]` : '.st-back')?.focus()
+    sheet.current?.querySelector(showList ? `.st-list-row[data-id="${cur.id}"]` : '.st-back')?.focus()
   }, [showList]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const body = (
@@ -111,6 +122,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
     {at === 'agents' && <Agents onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
     {at === 'providers' && <Providers onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
     {at === 'voice' && <Voice />}
+    {at === 'dictation' && <Dictation />}
     {at === 'meetings' && <Meetings onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
     {at === 'mail' && <Mail />}
     {at === 'mcp' && <Mcp />}
@@ -123,6 +135,12 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
     </AdvancedFrame>
     </ErrorBoundary>
     </SettingsAt.Provider>
+  )
+
+  const tabs = cur.tabs && (
+    <div className="seg st-tabs" role="tablist" aria-label={t(cur.label)}>
+      {cur.tabs.map((x) => <button key={x.id} type="button" role="tab" data-tab={x.id} aria-selected={at === x.id} className={at === x.id ? 'on' : ''} onClick={() => go(x.id)}>{t(x.label)}</button>)}
+    </div>
   )
 
   if (phone) {
@@ -139,7 +157,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
               <ul className="m-more-list">
                 {sections.map((s) => (
                   <li key={s.id}>
-                    <button type="button" className="m-more-row st-list-row" data-id={s.id} onClick={() => go(s.id)}>
+                    <button type="button" className="m-more-row st-list-row" data-id={s.id} onClick={() => open(s)}>
                       <span className="m-more-ico"><Icon name={s.icon} size={17} /></span>
                       <span className="m-more-text"><b>{t(s.label)}</b>{s.hint && <span>{t(s.hint)}</span>}</span>
                       <Icon name="chevron" size={13} className="muted" />
@@ -151,6 +169,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
           ) : (
             <div className="st-scroll" key={at}>
               {cur.hint && <p className="muted small st-lede">{t(cur.hint)}</p>}
+              {tabs}
               {body}
             </div>
           )}
@@ -165,7 +184,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
         <nav className="st-nav" aria-label={t('Settings sections')}>
           <div className="st-nav-title">{t('Settings')}</div>
           {sections.map((s) => (
-            <button key={s.id} type="button" className={`st-nav-item ${at === s.id ? 'on' : ''}`} aria-current={at === s.id ? 'page' : undefined} onClick={() => go(s.id)}>
+            <button key={s.id} type="button" className={`st-nav-item ${cur === s ? 'on' : ''}`} aria-current={cur === s ? 'page' : undefined} onClick={() => open(s)}>
               <Icon name={s.icon} size={15} /><span>{t(s.label)}</span>
             </button>
           ))}
@@ -175,6 +194,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
             <div>
               <h3>{t(cur.label)}</h3>
               <p className="muted small">{t(cur.hint)}</p>
+              {tabs}
             </div>
             <button type="button" className="win-btn" onClick={onClose} aria-label={t('Close settings')}><Icon name="x" size={14} /></button>
           </header>

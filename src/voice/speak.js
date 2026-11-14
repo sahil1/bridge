@@ -2,7 +2,7 @@
 // device you're using: the system's own voices that run on it (macOS's, Windows', the phone's), never
 // one the browser fetches from the internet (Chrome's "Google" voices say localService: false and
 // are left out), the most natural first. Or by the natural voice your computer makes, once it's
-// downloaded there (picked in Settings › Voice; server/voicespeak.js), a sentence or two at a time,
+// downloaded there (picked in Settings › Voice & Meetings; server/voicespeak.js), a sentence or two at a time,
 // and played here. Where the device has no voice of its own (Linux, mostly), that, or eSpeak NG when
 // it's installed on the computer. Where there's none, nothing is offered: the answer is in the chat
 // as always.
@@ -175,7 +175,7 @@ export function unlock() {
 }
 
 // Reads it aloud: { done: Promise (true once it's all been heard), stop(), voice, error, note }.
-// With the voice picked in Settings › Voice on this device (choice() above). The natural voice
+// With the voice picked in Settings › Voice & Meetings on this device (choice() above). The natural voice
 // failing before a word is heard (its download gone, the computer out of reach) hands it to this
 // device's own voice, and says why in note; error says why nothing was heard.
 export function say(text, { voice = null } = {}) {

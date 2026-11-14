@@ -154,7 +154,7 @@ export function MeetingsSetup({ onDone }) {
             {(mic.state === 'denied' || mic.state === 'restricted') && <PermissionFix pane="microphone" onCheck={mic.check}><p className="small">{t('The mic is turned off for Bridge AI in System Settings.')}</p></PermissionFix>}
           </Step>
         )}
-        <Step ok={notesOk} title={t('Writing the notes')} detail={models == null ? t('Looking…') : notesOk ? t('The summary, decisions and action items, by your sign-in or key. Pick which in Settings › Meetings.') : t('The summary needs a model: sign in to an agent like Claude Code, or add a key.')}>
+        <Step ok={notesOk} title={t('Writing the notes')} detail={models == null ? t('Looking…') : notesOk ? t('The summary, decisions and action items, by your sign-in or key. Pick which in Settings › Voice & Meetings.') : t('The summary needs a model: sign in to an agent like Claude Code, or add a key.')}>
           {models && !notesOk && <span className="mt-step-acts"><button type="button" className="btn small primary" onClick={() => settings('providers')}>{t('Model Providers')}</button></span>}
         </Step>
         {d.mac && (

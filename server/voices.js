@@ -15,7 +15,7 @@
 // Kept in each meeting's folder: voices.jsonl (a line's embedding, as it's worked out) and
 // voices.json ({ line: { key: speaker }, names: { speaker: { name, guess, me } }, speakers, at,
 // src: you | them | both, side: { speaker: you | them } with both }).
-// Remembering other people's voices for next time is yours to turn on (Settings › Meetings, off to
+// Remembering other people's voices for next time is yours to turn on (Settings › Voice & Meetings, off to
 // start with): then a speaker you name is kept as one embedding with their name in
 // <data>/meetings/voices.json, on this computer only, and Forget voices removes them all. Your own
 // voice is learned by itself (unless that's turned off), from your mic on calls when it heard one
@@ -349,7 +349,7 @@ export async function tell(id, lines) {
         w.state = 'listening'
       }
       // Used once in a room, so room meetings from now on get their speakers by themselves
-      // (Settings › Meetings turns it off).
+      // (Settings › Voice & Meetings turns it off).
       if (sideOf(lines) === 'you' && cfg.meetings?.roomVoices == null) await setting({ roomVoices: true })
       const done = embeddings(id)
       const todo = lines.filter((l) => sides.includes(l.src) && l.text && !done.has(keyOf(l)))
@@ -402,7 +402,7 @@ function keepKnown(id, who, c) {
 // ---------- Your voice ----------
 // Learned from your mic on a call, once it ends, with the model here: every line on your mic is
 // yours (the call's sound is apart), so your longest lines are heard again and averaged with what's
-// known of you. Kept as you in voices.json, on this computer only (Settings › Meetings turns it
+// known of you. Kept as you in voices.json, on this computer only (Settings › Voice & Meetings turns it
 // off; Forget voices removes it), so a room knows which of its voices is you, with nobody naming it.
 // Lines that don't sound like the rest (someone beside you, the call through your speakers) are
 // left out. lines: the meeting's transcript, with your mic's echoes of the call taken out.

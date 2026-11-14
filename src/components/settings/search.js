@@ -5,7 +5,8 @@ import { t, tx } from '../../i18n/index.js'
 // Settings at it, Advanced too (Settings.jsx; bridge-open-settings with section: its id). near: what
 // to show instead when it isn't there just now (dictation's extras while dictation is off). when:
 // only in the desktop app ('desktop'), with the desktop's top bar ('wide'), or with a beta feature
-// on (its id, src/trials.js).
+// on (its id, src/trials.js). Its section is where Settings opens for it: for Voice & Meetings, the
+// tab it's in (voice is Speech to Text).
 const at = (section, list) => list.map(([id, label, keywords = '', o = {}]) => ({ section, id, label, keywords, ...o }))
 
 export const SETTINGS = [
@@ -40,6 +41,9 @@ export const SETTINGS = [
   ]),
   ...at('voice', [
     ['speech-model', tx('Speech to text'), 'speech model parakeet whisper transcribe download voice notes'],
+    ['spoken-answers', tx('Spoken Answers'), 'read aloud voice speed speak answers ask out loud'],
+  ]),
+  ...at('dictation', [
     ['dictation', tx('Dictation'), 'dictation key talk hold fn background paste where typing'],
     ['edit-by-voice', tx('Edit by voice'), 'rewrite selection voice edit', { when: 'desktop', near: 'dictation' }],
     ['tidy', tx('Tidy what I say'), 'tidy cleanup filler um model', { when: 'dictation-cleanup', near: 'dictation' }],
@@ -47,7 +51,6 @@ export const SETTINGS = [
     ['mention-files', tx('Mention files by saying them'), 'at file mention say', { near: 'dictation' }],
     ['live-words', tx('Show the words as you talk'), 'live words as you talk', { near: 'dictation' }],
     ['dictation-history', tx('Dictation History'), 'history keep recordings delete dictations', { near: 'dictation' }],
-    ['spoken-answers', tx('Spoken Answers'), 'read aloud voice speed speak answers ask out loud'],
   ]),
   ...at('meetings', [
     ['transcribe', tx('Transcribe with'), 'speech engine transcription service local apple'],
@@ -115,7 +118,7 @@ export const SETTINGS = [
 ]
 
 const PLACES = {
-  general: tx('General'), agents: tx('Agents'), providers: tx('Model Providers'), voice: tx('Voice'), meetings: tx('Meetings'), mail: tx('Mail'),
+  general: tx('General'), agents: tx('Agents'), providers: tx('Model Providers'), voice: tx('Voice & Meetings'), dictation: tx('Voice & Meetings'), meetings: tx('Voice & Meetings'), mail: tx('Mail'),
   mcp: tx('MCP Servers'), phone: tx('Devices'), account: tx('Account'), appearance: tx('Appearance'), config: tx('Config File'), about: tx('About & Updates'),
 }
 export const placeOf = (x) => t(PLACES[x.section])

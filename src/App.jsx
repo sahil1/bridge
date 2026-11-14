@@ -457,7 +457,7 @@ function App() {
   const openAgent = useCallback((paneId, { toSide = false, replace = null } = {}) => {
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission()
     // Memory is a tab of Meetings and of Dictations, no longer a page of its own: ⌘K's Memory,
-    // Settings › Meetings' Open Memory and anything else that still asks for view:memory get
+    // Settings › Voice & Meetings' Open Memory and anything else that still asks for view:memory get
     // Meetings at Memory, all of it, as the page showed.
     if (paneId === MEMORY) { memoryTab({ all: true }); paneId = 'view:meetings' }
     setView('command')

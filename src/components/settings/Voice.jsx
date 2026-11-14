@@ -2,17 +2,16 @@ import { useState } from 'react'
 import Icon from '../Icon.jsx'
 import { api, usePoll, viaRelay } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
-import Dictation from './Dictation.jsx'
 import SpokenAnswers from '../../voice/SpokenAnswers.jsx'
 import { t, tx } from '../../i18n/index.js'
 import '../meetings/meetings.css'
 
-// Settings › Voice: the speech models this computer can run (the ones it can't aren't listed), the
-// one voice notes, dictation and meetings use, and their downloads. Parakeet first; Whisper, for the
-// languages Parakeet doesn't hear, folded away until it's wanted. Server: speech.js (status, and
-// what this computer can run), voice.js. Then dictation's own settings (Dictation.jsx), and the voice
-// that reads the Chief of Staff's answers aloud (voice/SpokenAnswers.jsx), where a robotic one is
-// swapped for a natural one, so it isn't under Advanced.
+// Settings › Voice & Meetings › Speech to Text: the speech models this computer can run (the ones it
+// can't aren't listed), the one voice notes, dictation and meetings use, and their downloads.
+// Parakeet first; Whisper, for the languages Parakeet doesn't hear, folded away until it's wanted.
+// Server: speech.js (status, and what this computer can run), voice.js. Then the voice that reads
+// the Chief of Staff's answers aloud (voice/SpokenAnswers.jsx), where a robotic one is swapped for a
+// natural one, so it isn't under Advanced. Dictation's own settings are the tab before (Dictation.jsx).
 const size = (mb) => (mb >= 1000 ? t('{n} GB', { n: (mb / 1000).toFixed(1) }) : t('{n} MB', { n: mb }))
 // What the server says of each speech model (server/speech.js), marked here so it's translated.
 tx('Accurate and quick on any computer. English and 24 more European languages, which it tells apart itself.'); tx('The best at tool names and jargon (worktree, Claude Code).')
@@ -30,7 +29,7 @@ export default function Voice() {
   const d = sp.data
   const v = vo.data
   const act = async (name, fn) => { setBusy(name); setErr(null); try { await fn() } catch (e) { setErr(e.message) } finally { setBusy(null); sp.refresh(); vo.refresh() } }
-  // One pick for everything: an older pick in Settings › Meetings gives way to it.
+  // One pick for everything: an older pick in the Meetings tab gives way to it.
   const use = (id) => act(`use:${id}`, () => save({ speech: { model: id }, meetings: { localModel: null } }))
   const using = v.engine === 'apple' ? 'apple' : v.model.id
   const fell = d.fellBack || v.fellBack
@@ -106,7 +105,6 @@ export default function Voice() {
         )}
         {d.hidden?.length > 0 && <p className="muted small">{t('More speech models are offered on other computers.')}</p>}
       </section>
-      <Dictation />
       <div data-setting="spoken-answers"><SpokenAnswers /></div>
     </div>
   )

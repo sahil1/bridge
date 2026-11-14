@@ -6,7 +6,7 @@
 // the one talking. Only that's kept, in the meeting's sights.jsonl: when, and each face's place, the
 // name under it and how much its mouth moved. The pictures are never written anywhere, so no faces
 // from the call are kept. It needs Screen Recording, as the names on the screen do (calls.js), and
-// stops with those turned off (Settings › Meetings).
+// stops with those turned off (Settings › Voice & Meetings).
 //
 // What it's used for: each line's "seen talking", the face seen talking most while it was said.
 // voices.js checks the voices against it (a voice seen as two people is two, two seen as one are
