@@ -3476,7 +3476,8 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .mch-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 11px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane); }
 .mch-row.here { background: transparent; }
 .mch-main { flex: 1 1 200px; min-width: 0; display: grid; gap: 1px; }
-.mch-main b { font: 600 13px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A computer's name is shown whole, on as many lines as it takes: a long host name was cut short on a phone. */
+.mch-main b { font: 600 13px var(--font); overflow-wrap: anywhere; }
 .mch-main small { font-size: 12px; }
 .mch-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 .mch-about { flex: 1 1 100%; display: grid; gap: 8px; padding: 10px 0 2px 18px; border-top: 1px solid var(--line); margin-top: 4px; }
