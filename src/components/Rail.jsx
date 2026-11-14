@@ -211,6 +211,9 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
     try { onOpen((await api('/chief/launch', { method: 'POST' })).paneId) } catch (e) { setError(e.message) } finally { setLaunching(false) }
   }
   const goChief = () => { setChiefKnown(true); if (chief) onOpen(chief.paneId); else launch() }
+  // Its board (the Tasks view): one click from its row, with how many of its helpers are at work.
+  const helpersAtWork = (fleet?.agents || []).filter((a) => a.helper && a.status === 'working').length
+  const goBoard = () => { setChiefKnown(true); window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: chief.paneId, view: 'tasks' } })) }
   const chiefTab = chief && (fleet?.tabs || []).find((x) => x.tabId === chief.tabId)
   const allClosed = groups.length > 0 && groups.every((g) => closedWs[g.id])
   const setAll = (closed) => setClosedWs(closed ? Object.fromEntries(groups.map((g) => [g.id, true])) : {})
@@ -338,6 +341,12 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
                 </span>
                 {chief?.status === 'blocked' && <span className="rm-badge" title={t('Needs you')}>!</span>}
               </button>
+              {chief && (
+                <button type="button" className={`rail-board${helpersAtWork ? ' busy' : ''}`} onClick={goBoard} aria-label={t('Tasks board')}
+                  title={!helpersAtWork ? t('Tasks board') : helpersAtWork === 1 ? t('Tasks board: 1 helper at work') : t('Tasks board: {n} helpers at work', { n: helpersAtWork })}>
+                  <Icon name="columns" size={13} />{helpersAtWork > 0 && <span className="rail-board-n">{helpersAtWork}</span>}
+                </button>
+              )}
               {chief && <button className="rail-nav-fold" onClick={() => setMenu(menu === 'chief' ? null : 'chief')} aria-label={t('{name} actions', { name: t('Chief of Staff') })} title={t('More')}><Icon name="more" size={13} /></button>}
               {menu === 'chief' && chief && (
                 <Menu onClose={() => setMenu(null)} items={[

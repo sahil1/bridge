@@ -60,6 +60,7 @@ import { loadConfig, ROOT, DATA, CACHE, expand, ensureDir, cacheFile, IS_MAC, br
 import { prepareChief } from './chief.js'
 import { makeTasks } from './chieftasks.js'
 import { makeThreads, isChiefName } from './threads.js'
+import { makeDelegate } from './delegate.js'
 import { providerRoutes, providerEnv, subscriptions, signedInNow } from './providers.js'
 import { signInScreen, SIGN_IN_ENDED } from './firstrun.js'
 import * as settings from './settings.js'
@@ -141,6 +142,19 @@ const chiefTasks = makeTasks(CHIEF_DIR, () => String(cfg.name || '').trim() || '
 const threads = makeThreads()
 // Main, the chief you get by default (requests from the Tasks panel and the ideas go to it).
 const mainChief = (f) => f?.agents.find((a) => a.chief && a.thread?.main) || f?.agents.find((a) => a.chief)
+// Its helpers: work it hands to an agent of its own with a role, watched until each one stops and
+// reported back to the thread that handed it out (delegate.js; launchHelper and helperSaid below).
+const delegate = makeDelegate({
+  cfg, dir: CHIEF_DIR, tasks: chiefTasks, you: () => String(cfg.name || '').trim() || 'the user',
+  resolve: (p) => places.resolveDir(p),
+  launch: (o) => launchHelper(o),
+  link: async (thread, paneId) => { const r = threads.link(thread, paneId, await fleetView()); if (r) pushFleet(); return r },
+  tell: (text, thread) => tellChief(text, { thread }),
+  said: (h) => helperSaid(h),
+  replied: (a, since) => { try { const p = preview(a); return p?.role === 'assistant' && !!p.ts && Date.parse(p.ts) >= Date.parse(since) } catch { return false } },
+  held: (paneId) => (queue.all()[paneId] || []).length,
+  changed: () => pushFleet(),
+})
 // Where agents run: herdr, or Bridge AI's own terminals (see runtime/index.js).
 const rt = await pickRuntime(cfg)
 if (fellBack()) console.log(`Agents run in Bridge AI itself, not herdr: ${fellBack().why}. Update herdr (herdr update) and restart Bridge AI.`)
@@ -281,6 +295,7 @@ async function fleetView() {
     if (!a.chief && a.tab && namedTabs.has(String(a.tabId))) { a.ownTitle = a.title; a.title = a.tab; a.named = true }
   }
   threads.decorate(f)
+  delegate.decorate(f)
   // Its space and first tab, made before 3.6 as "Chief of staff", show by its name now.
   for (const x of [...(f.workspaces || []), ...(f.tabs || [])]) if (x.label === 'Chief of staff') x.label = 'Chief of Staff'
   for (const t of f.tabs || []) for (const p of t.panes || []) p.worktree = worktrees.describe(p.cwd)
@@ -989,12 +1004,51 @@ app.post('/api/chief/threads', wrap(async (req) => {
     return { ...out, thread: id }
   } finally { threads.release() }
 }))
-// From `bridge new` and `bridge send`: the agent a thread just handed work to.
+// From `bridge new` and `bridge send`: the agent a thread just handed work to. A helper that had
+// reported, sent a follow-up, is watched again for one more report.
 app.post('/api/chief/threads/link', wrap(async (req) => {
-  const r = threads.link(String(req.body?.thread || '') || null, String(req.body?.paneId || ''), await fleetView())
-  if (r) pushFleet()
-  return r || { thread: null }
+  const paneId = String(req.body?.paneId || '')
+  const r = threads.link(String(req.body?.thread || '') || null, paneId, await fleetView())
+  const again = delegate.again(paneId)
+  if (r || again) pushFleet()
+  return { ...(r || { thread: null }), ...(again ? { watched: true } : {}) }
 }))
+
+// ---------- The chief of staff's helpers (delegate.js) ----------
+// `bridge delegate`: a task on its list and a helper on it, now or once there's room.
+app.post('/api/chief/delegate', wrap((req) => delegate.add(req.body || {})))
+// Try again, on a task whose helper couldn't start or was closed before it finished.
+app.post('/api/chief/delegate/:task/retry', wrap((req) => delegate.retry(req.params.task)))
+// A helper's agent: in its own folder (made by delegate.js inside the chief's, so not checked
+// as a folder you picked), allowed edits there when you said helpers may; in a folder the chief
+// named, as New agent starts one. Either way in the Helpers space, a tab each. Its brief goes on
+// its command line, so on Windows as one line with its quotes curly, as a meeting's action item's
+// does (meetwork.js): through claude.cmd it was cut at its first line break and split at a quote.
+async function launchHelper({ kind, cwd, own, label, space, prompt: brief, access }) {
+  const prompt = meetWork.forCommandLine(brief)
+  const f = await fleetView()
+  const ws = (f.workspaces || []).find((w) => w.label.toLowerCase() === String(space).toLowerCase())
+  const where = ws ? { workspaceId: ws.id } : { newSpace: space }
+  if (!own) return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest' })), session: f.session || '' }
+  if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
+  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, effort: 'suggest' })
+  pushFleet()
+  return { ...out, session: f.session || '' }
+}
+// What a helper said last: its last reply in its conversation, or for an agent whose conversations
+// Bridge AI can't read, the end of its screen.
+async function helperSaid(h) {
+  try {
+    const msgs = transcript({ kind: h.kind, sessionId: h.sessionId, cwd: h.cwd }).messages || []
+    const last = [...msgs].reverse().find((m) => m.role === 'assistant' && String(m.text || '').trim())
+    if (last) return { text: String(last.text).trim(), from: 'chat' }
+  } catch { /* no conversation to read */ }
+  if (!h.paneId) return null
+  // eslint-disable-next-line no-control-regex
+  const lines = String(await rt.read(h.paneId, 60).catch(() => '')).replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, '').split(/\r?\n/)
+    .map((l) => l.trimEnd()).filter((l) => l.trim() && !/^\s*[─━═-]{3,}\s*$/.test(l))
+  return lines.length ? { text: lines.slice(-20).join('\n'), from: 'screen' } : null
+}
 
 // An agent that isn't installed: code install:<kind> lets the app offer its Install button. One
 // that's hidden (Qwen Code, while Show more models is off) says how to show it.
@@ -1391,7 +1445,14 @@ app.post('/api/ideas/:id/send', wrap(async (req) => {
 }))
 
 // ---------- The chief of staff's own tasks (state/tasks.md in its folder) ----------
-app.get('/api/chief/tasks', wrap(() => chiefTasks.list()))
+// With each delegated task's helper: its state, and what its agent is doing now (the agent map's
+// look at it), for the Tasks tray and board.
+app.get('/api/chief/tasks', wrap(async () => {
+  const list = chiefTasks.list()
+  const f = lastFleet || await fleetView().catch(() => null)
+  const map = f && !f.down && list.items.some((x) => x.role) ? await runs.agents(f).catch(() => []) : []
+  return delegate.board(list, { agents: f?.agents || [], map })
+}))
 // send: added in the Tasks panel, so the chief hears about it now (held if it's busy). Without a
 // running chief it waits on the list, which the chief reads before each request.
 app.post('/api/chief/tasks', wrap(async (req) => {
@@ -1403,8 +1464,11 @@ app.post('/api/chief/tasks', wrap(async (req) => {
   return { item, ...(await tellChief(`Task ${item.id} from my Tasks panel: ${item.title}\n\n(It's on your task list as ${item.id}. Keep it current with \`node bin/bridge task\`.)`)) }
 }))
 // A message for the chief of staff: now if it's waiting, else after what it's doing (queued).
-async function tellChief(text) {
-  const mate = mainChief(await fleetView().catch(() => null))
+// thread: the thread's chief it's for (a helper's report goes to the one that handed it out), when
+// that one's still open; else Main.
+async function tellChief(text, { thread = null } = {}) {
+  const f = await fleetView().catch(() => null)
+  const mate = (thread && f?.agents.find((a) => a.chief && a.thread?.id === thread)) || mainChief(f)
   if (!mate) return { sent: false }
   const held = () => {
     const item = queue.add(mate.paneId, text)
@@ -1459,8 +1523,9 @@ let fleetGen = 0
 let notifiedSession
 function sessionSwitched() { fleetGen++; lastFleet = null; geo = { at: 0, cols: {} }; pushFleet() }
 async function pollFleet() {
-  // Watched while a window is open, work is queued, or a notification channel (your phone) is on.
-  if (clients.size || queue.size() || notify.active()) {
+  // Watched while a window is open, work is queued, a notification channel (your phone) is on, or
+  // the chief of staff has helpers at work (each one's end is reported to it, window open or not).
+  if (clients.size || queue.size() || notify.active() || delegate.watching()) {
     try {
       const gen = fleetGen
       const same = () => gen === fleetGen
@@ -1473,6 +1538,7 @@ async function pollFleet() {
         counts.most('agents.peak', f.agents.length)
         runs.observe(f.agents)
         routines.observe(f.agents, { said: routineSaid })
+        delegate.observe(f).catch((e) => console.log(`Watching the helpers: ${e.message}`))
         // Another session's agents are new to the notifications, not news (see notify.forget).
         if (f.session !== notifiedSession) { notifiedSession = f.session; notify.forget() }
         if (!f.down) notify.onFleet(f, cfg)
@@ -1511,7 +1577,8 @@ rt.whenInterrupted?.((paneId, why) => {
   pushFleet()
 })
 // Nobody watching: still note now and then what each agent is doing, for Insights.
-setInterval(() => { if (!(clients.size || queue.size() || notify.active())) rt.fleet().then((f) => { if (!f.down) { insights.observe(f.agents); runs.observe(f.agents); routines.observe(f.agents, { said: routineSaid }) } }, () => {}) }, 30 * 1000)
+// And a helper's report that waits for a chief of staff to be running goes as soon as one is.
+setInterval(() => { if (!(clients.size || queue.size() || notify.active() || delegate.watching())) { rt.fleet().then((f) => { if (!f.down) { insights.observe(f.agents); runs.observe(f.agents); routines.observe(f.agents, { said: routineSaid }) } }, () => {}); delegate.flush().catch(() => {}) } }, 30 * 1000)
 // What a routine's agent said last, once it's done (Routines shows it under the run).
 function routineSaid(a) { return preview(a)?.text || null }
 setInterval(() => { for (const c of clients) c.write(': ping\n\n') }, 25000)

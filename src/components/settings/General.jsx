@@ -13,7 +13,9 @@ import { Advanced, Line } from './Advanced.jsx'
 
 // Settings › General: who you are, which agent and model to use by default, picking up unfinished
 // work (it has agents carry on by themselves), the layout and where you are; under Advanced, the Chief of Staff's agent, plan usage, what Bridge AI is allowed on this
-// computer (Permissions), Command History, and the terminal and where agents run.
+// computer (Permissions), Command History, and the terminal and where agents run. The Chief of
+// Staff's helpers (server/delegate.js) are with its agent: how many work at once, and whether they
+// may edit in their own work folder, offered only when an agent here can be started that way.
 export function useSettings() {
   const [s, setS] = useState(null)
   const [note, setNote] = useState(null)
@@ -57,6 +59,10 @@ export default function General({ onGo, onOpenAgent }) {
   const def = eff.defaultAgent || 'claude'
   const defAgent = (agents || []).find((a) => a.kind === def)
   const model = eff.agents?.[def]?.model || ''
+  const helpers = eff.chief?.helpers || {}
+  const setHelpers = (patch) => save({ chief: { helpers: { ...helpers, ...patch } } })
+  // The agents that can be told to edit without asking (agents.js access()); the rest always ask.
+  const canEdit = installed.filter((a) => a.access).map((a) => a.label)
   const seg = (label, value, options, onPick) => (
     <div className="seg ap-seg" role="radiogroup" aria-label={t(label)}>
       {options.map(([v, l]) => <button key={l} type="button" role="radio" aria-checked={value === v} className={value === v ? 'on' : ''} onClick={() => onPick(v)}>{t(l)}</button>)}
@@ -127,6 +133,17 @@ export default function General({ onGo, onOpenAgent }) {
               {installed.map((a) => <option key={a.kind} value={a.kind}>{a.label}{a.caps?.chat ? '' : ` ${t('(terminal only)')}`}</option>)}
             </select>
           </Line>
+          <Line setting="chief-helpers" label={t('Helpers at once')} hint={t('How many helpers the Chief of Staff has at work together. More wait their turn and start as one finishes.')}>
+            <select className="st-input" value={Math.max(1, Math.min(10, Number(helpers.max) || 3))} onChange={(e) => setHelpers({ max: Number(e.target.value) })} aria-label={t('Helpers at once')}>
+              {[1, 2, 3, 4, 5, 6, 8, 10].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </Line>
+          {canEdit.length > 0 && (
+            <label className="st-check" data-setting="chief-helpers-edit" title={t('A helper the Chief of Staff starts in its task\'s own folder (work/<task> in its folder) changes files there without asking. A helper working in one of your folders still asks before each change.')}>
+              <input type="checkbox" checked={helpers.editOwnFolder === true} onChange={(e) => setHelpers({ editOwnFolder: e.target.checked })} />
+              <span><b>{t('Helpers may edit in their own work folder')}</b> <span className="muted small">{t('Off: they ask before each change, as agents do. For helpers on {agents}; others always ask.', { agents: canEdit.join(', ') })}</span></span>
+            </label>
+          )}
         </section>
         <section className="st-sec" data-setting="plan-usage">
           <Line label={t('Plan usage')} hint={t("Read with your agents' own sign-ins, which some providers, Anthropic among them, don't allow.")} title={t(USAGE_OFF_WHY)}>

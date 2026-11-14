@@ -3302,6 +3302,73 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .app.narrow .ct-act { grid-column: 3; grid-row: 1 / 3; align-self: center; }
 .app.narrow .ct-act span { display: none; }
 .app.narrow .ct-act { width: 32px; height: 32px; justify-content: center; }
+/* A task handed to a helper: its role, before the title. */
+.ct-role, .cb-role { display: inline-block; padding: 0 6px; border-radius: 5px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-size: 11px; font-weight: 600; line-height: 17px; white-space: nowrap; }
+.ct-role { margin-right: 6px; vertical-align: 1px; }
+
+/* ============ Chief of staff: its board (ChiefTasks.jsx's ChiefBoard), its Tasks view ============
+   Four columns of cards, as Home's: Queued, Working, Needs you and Done. In a narrow pane (a phone,
+   or a pane beside others) one column at a time, picked in the segmented control above them. */
+.cb { container-type: inline-size; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px 22px 28px; background: var(--pane); color: var(--ink); }
+.cb-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 14px; }
+.cb-head h3 { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+.cb-head h3 > .icon { align-self: center; color: var(--accent); }
+.cb-sum { font-size: 12.5px; color: var(--ink-3); }
+.cb-note { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; font-size: 12.5px; color: var(--ink-2); }
+.cb-note.error { color: var(--critical); }
+.cb-seg { display: none; margin-bottom: 12px; }
+.cb-seg button { gap: 5px; }
+.cb-cols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.cb-col { min-width: 0; padding: 8px; border-radius: 12px; border: 1px solid var(--line); background: var(--pane-2); }
+.cb-col-head { display: flex; align-items: center; gap: 7px; margin: 2px 4px 9px; font-size: 12.5px; font-weight: 650; color: var(--ink-2); }
+.cb-n { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--pane-3); color: var(--ink-2); font: 600 10.5px/18px var(--font); text-align: center; font-variant-numeric: tabular-nums; }
+.cb-n.needs { background: var(--needs-fill); color: #fff; }
+.cb-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.cb-card { min-width: 0; border-radius: 10px; border: 1px solid var(--line); background: var(--pane); box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.cb-card.c-needs { border-color: color-mix(in srgb, var(--needs) 40%, transparent); background: color-mix(in srgb, var(--needs) 5%, var(--pane)); }
+.cb-card.off { border-color: color-mix(in srgb, var(--critical) 35%, transparent); background: color-mix(in srgb, var(--critical) 4%, var(--pane)); }
+.cb-main { display: grid; gap: 5px; width: 100%; min-width: 0; padding: 10px 11px; border-radius: 10px; color: inherit; font: inherit; text-align: left; }
+button.cb-main:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+button.cb-main:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cb-top { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 11.5px; color: var(--ink-3); }
+.cb-role { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cb-self { font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+.cb-id { flex: none; font-variant-numeric: tabular-nums; }
+.cb-when { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cb-title { font-size: 13.5px; font-weight: 550; line-height: 1.4; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.cb-card.c-done .cb-title { font-weight: 500; color: var(--ink-2); }
+.cb-now { display: flex; align-items: flex-start; gap: 5px; min-width: 0; font-size: 12px; line-height: 1.4; color: var(--ink-2); }
+.cb-now > .icon { flex: none; margin-top: 3px; color: var(--ink-3); }
+.cb-now > span { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cb-now.needs { color: var(--needs); }
+.cb-outcome { margin: -3px 11px 9px; font-size: 12px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.cb-error { display: flex; align-items: flex-start; gap: 6px; margin: -3px 11px 9px; font-size: 12px; line-height: 1.45; color: var(--critical); overflow-wrap: anywhere; }
+.cb-error > .icon { flex: none; margin-top: 3px; }
+.cb-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 11px 10px; }
+.cb-retry { border: 1px solid var(--line-2); }
+.cb-empty { margin: 2px 6px 6px; font-size: 12px; color: var(--ink-3); }
+.cb-more { margin: 8px 6px 2px; font-size: 11.5px; color: var(--ink-3); }
+.cb-empty-all { display: grid; justify-items: center; gap: 6px; max-width: 460px; margin: 10vh auto 0; text-align: center; color: var(--ink-3); }
+.cb-empty-all p { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+.cb-empty-all p.muted { font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
+.cb-loading { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.cb-loading div { height: 160px; border-radius: 12px; background: linear-gradient(90deg, var(--pane-2), var(--pane-3), var(--pane-2)); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
+@media (prefers-reduced-motion: reduce) { .cb-loading div { animation: none; } }
+@container (max-width: 720px) {
+  .cb-seg { display: flex; width: 100%; }
+  .cb-seg button { flex: 1 1 auto; justify-content: center; min-width: 0; padding: 0 6px; }
+  .cb-cols, .cb-loading { grid-template-columns: minmax(0, 1fr); }
+  .cb-col { padding: 0; border: 0; background: none; }
+  .cb-col:not(.on), .cb-col-head { display: none; }
+}
+@container (max-width: 360px) {
+  .cb-seg button { gap: 3px; padding: 0 4px; font-size: 12px; }
+}
+.app.narrow .cb { padding: 12px 12px 24px; }
+.app.narrow .cb-seg button { height: 40px; font-size: 13px; }
+/* (A phone's segmented controls are icons only; this one's counts stay.) */
+.app.narrow .cb-seg .cb-n { padding: 0 5px; font-size: 10.5px; }
+.app.narrow .cb-acts :is(.ct-open, .ghost-btn) { min-height: 40px; }
 .app.narrow .ct-add input { font-size: 16px; height: 34px; } /* stops iOS zooming into the field */
 .app.narrow .ct-add-btn span { display: none; }
 .app.narrow .ct-add-btn { padding: 4px 9px; }
@@ -3604,6 +3671,11 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .rail-nav-btn.rail-chief.fresh { height: auto; min-height: 30px; padding-top: 5px; padding-bottom: 5px; }
 .rail-chief-row .rail-nav-fold { opacity: 0; }
 .rail-chief-row:hover .rail-nav-fold, .rail-chief-row .rail-nav-fold:focus-visible { opacity: 1; }
+/* Its board (the Tasks view), one click from its row: how many of its helpers are at work on it. */
+.rail-board { position: relative; flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; color: var(--ink-3); }
+.rail-board:hover { background: var(--pane); color: var(--ink); }
+.rail-board.busy { color: var(--working); }
+.rail-board-n { position: absolute; top: -3px; right: -4px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--working); color: #fff; font: 700 9.5px/14px var(--font); text-align: center; font-variant-numeric: tabular-nums; }
 .rail-threads { display: grid; }
 
 /* The phone's devices menu (Machines.jsx): under the bar, the screen's width, rows big enough to tap;
