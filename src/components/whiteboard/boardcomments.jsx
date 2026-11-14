@@ -8,7 +8,7 @@ import { reroute } from './layout.js'
 import { fontsReady } from './look.js'
 import { before, mark, markOf, keep as keepIt, discard as discardIt } from './suggest.js'
 
-// Comments on a whiteboard, as threads (Comments and @bridge, a beta feature): on the shapes
+// Comments on a whiteboard, as threads (Comments and @bridge): on the shapes
 // picked, or on a place on the board when nothing is. Each thread is a pin on the board, a small
 // round mark at the corner of what it's on, and lives in the .excalidraw file itself: the pin's
 // customData.bridge.thread holds it ({ id, on: the shapes' ids, at: { x, y } the place, items: [{

@@ -1,4 +1,4 @@
-// Files, a beta feature: a page of its own for every file on your computers, as Finder or Explorer
+// Folders: a page of its own for every file on your computers, as Finder or Explorer
 // shows them (server/explorer.js). A sidebar of your folders, drives and other computers; a folder as
 // a list, icons or columns, with the way you came (back and forward) and a path to click along; a
 // search in it and below it; Get Info; Quick Look with Space and the arrow keys; a double-click opens
@@ -10,7 +10,6 @@ import Icon from '../Icon.jsx'
 import { PaneHeader, Handle, usePersisted, useWidth } from '../layout.jsx'
 import { api, machineId, onThisComputer } from '../../api.js'
 import { useMachines } from '../Machines.jsx'
-import { useTrial } from '../../trials.js'
 import { t, tx } from '../../i18n/index.js'
 import { Menu, OPENABLE } from '../FileExtras.jsx'
 import PermissionFix from '../PermissionFix.jsx'
@@ -74,7 +73,6 @@ function useSearch(base, root, path, q, hidden) {
 }
 
 export default function Explorer() {
-  const studioOn = useTrial('studio')
   // Where it was, or the folder Back or Forward opens it at.
   const [loc, setLocState] = useState(() => placeWhere(takePlace('view:files')) || readWhere())
   const setLoc = (w) => { setLocState(w); keepWhere(w) }
@@ -171,7 +169,7 @@ export default function Explorer() {
 
   // ---------- doing things ----------
   const revealLabel = os === 'mac' ? t('Show in Finder') : os === 'windows' ? t('Show in Explorer') : t('Show in file manager')
-  const studioOpens = (e) => studioOn && !machine && !e.dir && STUDIO_OPENS.test(e.name)
+  const studioOpens = (e) => !machine && !e.dir && STUDIO_OPENS.test(e.name)
   const appOpens = (e) => here && !e.dir && OPENABLE.test(e.name)
   const openLabel = (e) => (!e ? null : e.dir ? t('Open') : studioOpens(e) ? t('Open in Studio') : appOpens(e) ? t('Open in its app') : null)
   const openInApp = async (e) => {
@@ -312,12 +310,13 @@ export default function Explorer() {
         </div>
       )
     }
+    // Another computer on a Bridge AI from before Folders was part of it, with the beta it was off.
     if (st.code === 'trial' && machine) {
       return (
         <div className="fx-state" role="alert" data-state="off">
           <Icon name="layers" size={22} />
-          <b>{t('Files is off on {name}.', { name: computer?.name || '' })}</b>
-          <p className="muted">{t('Turn it on there, in Settings › About & Updates › Beta Features, to see its files from here.')}</p>
+          <b>{t('{name} has an older Bridge AI.', { name: computer?.name || '' })}</b>
+          <p className="muted">{t('Update it there to see its folders from here, or turn on Files in its Settings › About & Updates › Beta Features.')}</p>
         </div>
       )
     }
@@ -395,7 +394,7 @@ export default function Explorer() {
 
   // A phone has no room for columns: the list instead.
   const shownView = narrow && view === 'columns' ? 'list' : view
-  const sideEl = <Sidebar side={side.data} error={side.error && (side.code === 'trial' && machine ? t('Files is off on {name}.', { name: computer?.name || '' }) : side.error)} computers={computers} machine={machine} loc={{ ...loc, machine }} onGo={(w) => go({ machine, ...w })} onComputer={toComputer} />
+  const sideEl = <Sidebar side={side.data} error={side.error && (side.code === 'trial' && machine ? t('{name} has an older Bridge AI.', { name: computer?.name || '' }) : side.error)} computers={computers} machine={machine} loc={{ ...loc, machine }} onGo={(w) => go({ machine, ...w })} onComputer={toComputer} />
   const showSide = !narrow || screen === 'side'
   const showMain = !narrow || screen === 'folder'
   return (

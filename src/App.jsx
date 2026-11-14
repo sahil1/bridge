@@ -11,7 +11,7 @@ import Board from './components/Board.jsx'
 import TabStrip from './components/TabStrip.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty, showChat } from './components/Console.jsx'
-import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, WhiteboardsHome, WhiteboardPage, StudioHome, StudioPage, Explorer, UsageStats, preloadViews } from './lazy.jsx'
+import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, StudioHome, StudioPage, Explorer, UsageStats, preloadViews } from './lazy.jsx'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
 import { MeetingsProvider, RecordingPill, CallPrompt, useMeetings } from './components/meetings/recording.jsx'
@@ -201,16 +201,16 @@ function useFit(onFold) {
 }
 
 // Views that open in tabs beside the agents: Home (start something new), Meetings, a meeting,
-// Dictations, Whiteboards and a whiteboard (in Studio where Studio shows: placeNow), and the agent
-// map (what runs on which of your computers).
+// Dictations, Studio and a file in it (a whiteboard too: placeNow), Files, and the agent map (what
+// runs on which of your computers).
 // With Home on (a trial): Home (what needs you, NeedsHome.jsx) and Everything.
-const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everything': { title: tx('Everything'), icon: 'grid' }, 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:dictations': { title: tx('Dictations'), icon: 'wave' }, 'view:whiteboards': { title: tx('Whiteboards'), icon: 'shapes' }, 'view:studio': { title: tx('Studio'), icon: 'layers' }, 'view:files': { title: tx('Files'), icon: 'folder' }, 'view:map': { title: tx('Agent Map'), icon: 'grid' } }
-// A whiteboard's tab is named as the board is (its id).
+const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everything': { title: tx('Everything'), icon: 'grid' }, 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:dictations': { title: tx('Dictations'), icon: 'wave' }, 'view:studio': { title: tx('Studio'), icon: 'layers' }, 'view:files': { title: tx('Files'), icon: 'folder' }, 'view:map': { title: tx('Agent Map'), icon: 'grid' } }
+// A whiteboard's place before whiteboards were in Studio (its id after it): placeNow.
 const BOARD = 'view:whiteboard:'
 // A Studio file's tab: its root (an agent's pane, or place:<id>) and path, each encoded. A
 // whiteboard in Studio's Preview is root board, its name the path.
-// A beta feature's tab, left open from before it was turned off (or opened on another computer
-// where it's on): says so, with the way to turn it on.
+// A beta feature's tab (Home's), left open from before it was turned off (or opened on another
+// computer where it's on): says so, with the way to turn it on.
 function TrialOff({ name }) {
   return (
     <div className="trial-off" role="status">
@@ -225,21 +225,18 @@ const STUDIO = 'view:studio:'
 const studioId = (f) => `${STUDIO}${encodeURIComponent(f.root)}:${encodeURIComponent(f.path)}`
 const studioOf = (id) => { const [r, p] = id.slice(STUDIO.length).split(':'); return { root: decodeURIComponent(r || ''), path: decodeURIComponent(p || '') } }
 const isView = (id) => typeof id === 'string' && id.startsWith('view:')
-// Whiteboards are one of Studio's kinds where Studio shows (a beta feature): its Files lists them
-// and one opens in its Preview, so there they have no page or tab of their own. Whatever still asks
-// for the old place (a tab kept from before, a link, ⌘K, Home, a meeting's board, an agent) gets the
-// one in Studio; with Studio off, a board left open in Studio is on Whiteboards' own page, so it's
-// never out of reach. studio: whether Studio shows, null until the settings say.
-const STUDIO_BOARD = `${STUDIO}board:`
-function placeNow(id, studio) {
-  if (typeof id !== 'string' || studio == null || !StudioHome) return id
-  if (!studio) return id.startsWith(STUDIO_BOARD) ? `${BOARD}${studioOf(id).path}` : id
+// Whiteboards are one of Studio's kinds: its Files lists them and one opens in its Preview, so they
+// have no page or tab of their own. Whatever still asks for the old place (a tab kept from before, a
+// link, ⌘K, Home, a meeting's board, an agent) gets the one in Studio. (Neither is in the demo or the
+// phone apps' Cloud agents, which have no computer to keep them on.)
+function placeNow(id) {
+  if (typeof id !== 'string' || !StudioHome) return id
   return id === 'view:whiteboards' ? 'view:studio' : id.startsWith(BOARD) ? studioId({ root: 'board', path: id.slice(BOARD.length) }) : id
 }
 // A window's tabs, each where it is now: one whose place is open already gives way to that tab.
-function tabsNow(w, studio) {
+function tabsNow(w) {
   for (const from of w.tabs) {
-    const to = placeNow(from, studio)
+    const to = placeNow(from)
     if (to === from) continue
     const swap = (x) => (x === from ? to : x)
     if (!w.tabs.includes(to)) { w = { ...follow(w, from, to), tabs: w.tabs.map(swap), active: swap(w.active), side: swap(w.side) }; continue }
@@ -281,6 +278,24 @@ function memoryMoved() {
 }
 memoryMoved()
 
+// What a window kept from before whiteboards were in Studio, before anything shows: its tabs (each
+// herdr session's too) and the phone's More, each where it is now (placeNow). Whiteboards on screen
+// becomes Studio's Files at Whiteboards.
+function boardsMoved() {
+  if (!StudioHome) return
+  const old = (w) => !!w?.tabs?.some((id) => placeNow(id) !== id)
+  const ws = store.get('cc-ws', null)
+  if (old(ws)) {
+    if (ws.active === 'view:whiteboards' || (ws.split && ws.side === 'view:whiteboards')) showStudioKind('board')
+    store.set('cc-ws', tabsNow(ws))
+  }
+  const bySession = store.get('cc-ws-sessions', null)
+  if (bySession && Object.values(bySession).some(old)) store.set('cc-ws-sessions', Object.fromEntries(Object.entries(bySession).map(([k, w]) => [k, old(w) ? tabsNow(w) : w])))
+  const more = store.get('cc-more-view', null)
+  if (typeof more === 'string' && placeNow(more) !== more) { if (more === 'view:whiteboards') showStudioKind('board'); store.set('cc-more-view', placeNow(more)) }
+}
+boardsMoved()
+
 // The recording of a meeting lives above everything else, so it goes on while you move around.
 export default function Root() {
   return <MeetingsProvider><App /></MeetingsProvider>
@@ -298,19 +313,9 @@ function App() {
   // The live herdr view exists only when herdr is the runtime (see server/runtime).
   const confPoll = usePoll('/config', 10 * 60 * 1000)
   const conf = confPoll.data
-  // Studio is a beta feature (src/trials.js): out of sight until it's turned on.
-  const studioOn = conf?.trials?.studio === true
   // Meeting Insights and People, tabs of Meetings (a beta feature): ⌘K opens Meetings at either.
   const insightsOn = conf?.trials?.['meeting-insights'] === true
-  const studioOnRef = useRef(studioOn)
-  studioOnRef.current = studioOn
-  // Whether Studio shows, once the settings say (placeNow): null until then.
-  const studioKnown = conf ? studioOn : null
-  const studioKnownRef = useRef(studioKnown)
-  studioKnownRef.current = studioKnown
-  // Files, every folder on your computers as Finder shows them (a beta feature too).
-  const filesOn = conf?.trials?.files === true
-  // So is Home: with it on, it's where the app opens, and what needs you opens there.
+  // Home is a beta feature too: with it on, it's where the app opens, and what needs you opens there.
   const homeOn = conf?.trials?.home === true
   const routinesOn = conf?.trials?.routines === true
   // Onboarding stays up from the first sign that setup is needed until you close it, so its last
@@ -372,7 +377,6 @@ function App() {
   const meetingList = usePoll(meetingTabs ? '/meetings' : null, 20 * 1000).data?.meetings || []
   const views = [...new Set([...W.tabs, mobileAgent].filter(isView))].map((id) => {
     const m = id.startsWith('view:meeting:') ? meetingList.find((x) => x.id === id.slice(13)) : null
-    if (id.startsWith(BOARD)) return { paneId: id, view: true, title: id.slice(BOARD.length), icon: 'shapes' }
     if (id.startsWith(STUDIO)) return { paneId: id, view: true, title: studioOf(id).path.split('/').pop(), icon: studioOf(id).root === 'board' ? 'shapes' : 'layers' }
     return { paneId: id, view: true, title: VIEWS[id] ? t(VIEWS[id].title) : m?.title || t('Meeting'), icon: VIEWS[id]?.icon || 'mic' }
   })
@@ -491,11 +495,11 @@ function App() {
     // Settings › Voice & Meetings' Open Memory and anything else that still asks for view:memory get
     // Meetings at Memory, all of it, as the page showed.
     if (paneId === MEMORY) { memoryTab({ all: true }); paneId = 'view:meetings' }
-    // Whiteboards and a whiteboard are in Studio where Studio shows (placeNow): the list of them is
-    // Studio's Files at Whiteboards.
-    if (paneId === 'view:whiteboards' && studioKnownRef.current && StudioHome) showStudioKind('board')
-    paneId = placeNow(paneId, studioKnownRef.current)
-    replace = placeNow(replace, studioKnownRef.current)
+    // Whiteboards and a whiteboard are in Studio (placeNow): the list of them is Studio's Files at
+    // Whiteboards.
+    if (paneId === 'view:whiteboards' && StudioHome) showStudioKind('board')
+    paneId = placeNow(paneId)
+    replace = placeNow(replace)
     setView('command')
     // Not on a phone, or in the phone apps (their page holds this one): there, that device is shown.
     if (isRemote(paneId) && (!wide || viaRelay)) { const r = remoteOf(paneId); goMachine(r.machine, { agent: r.pane, back: byId[paneId]?.title || true }); return }
@@ -503,10 +507,10 @@ function App() {
       const a = byId[paneId]
       // On the phone's Cloud agents, Back (Android's) closes the agent first.
       if (cloudOnly && paneId !== mobileAgent) { if (window.history.state?.agent) window.history.replaceState({ agent: paneId }, ''); else window.history.pushState({ agent: paneId }, '') }
-      // Meetings, a meeting and Dictations open in the phone's own Meetings tab; Whiteboards, a
-      // whiteboard, Studio and Files in its More tab.
+      // Meetings, a meeting and Dictations open in the phone's own Meetings tab; Studio (and a
+      // whiteboard in it) and Files in its More tab.
       if (typeof paneId === 'string' && (paneId.startsWith('view:meeting') || paneId === 'view:dictations')) { setMtab('meetings'); setMobileMeeting(paneId === 'view:meetings' ? null : paneId); return }
-      if (typeof paneId === 'string' && (paneId.startsWith('view:whiteboard') || paneId.startsWith('view:studio') || paneId === 'view:files')) { setMtab('more'); setMoreView(paneId); return }
+      if (typeof paneId === 'string' && (paneId.startsWith('view:studio') || paneId === 'view:files')) { setMtab('more'); setMoreView(paneId); return }
       if (paneId === 'view:home' || paneId === 'view:everything') { setMtab('home'); setHomeView(paneId === 'view:home' ? 'home' : 'everything'); return }
       if (a?.chief) { setMtab('mate'); setMobileAgent(null); setMateId(paneId) } else { setMtab('agents'); setMobileAgent(paneId) }
       return
@@ -556,21 +560,6 @@ function App() {
   fleetRef.current = fleet
   const wsRef = useRef(W)
   wsRef.current = W
-  // Tabs kept from before whiteboards were in Studio (or from while they were, with Studio since
-  // turned off), and the phone's More: each where it is now (placeNow), Back and Forward's steps
-  // with them. Whiteboards on screen becomes Studio's Files at Whiteboards.
-  useEffect(() => {
-    if (studioKnown == null) return
-    const now = (id) => placeNow(id, studioKnown)
-    const old = W.tabs.filter((id) => now(id) !== id)
-    const shown = (id) => id === 'view:whiteboards' && studioKnown
-    if (old.length) {
-      if (shown(W.active) || (W.split && shown(W.side))) showStudioKind('board')
-      for (const id of old) renamedTab(id, now(id))
-      setW((w) => tabsNow(w, studioKnown))
-    }
-    if (moreView && now(moreView) !== moreView) { if (shown(moreView)) showStudioKind('board'); setMoreView(now(moreView)) }
-  }, [studioKnown, W.tabs, moreView]) // eslint-disable-line react-hooks/exhaustive-deps
   openAgentRef.current = openAgent
   const openFilesRef = useRef(null)
   const startChiefRef = useRef(null)
@@ -620,12 +609,11 @@ function App() {
   useEffect(() => {
     const on = (e) => {
       const d = e.detail || {}
-      // In the list's tab, where it's open: Whiteboards', or Studio's where they're in Studio.
-      const list = placeNow('view:whiteboards', studioKnownRef.current)
-      if (d.id) openAgentRef.current?.(`${BOARD}${d.id}`, { replace: d.replace || (wsRef.current?.tabs.includes(list) ? list : null) })
+      // In Studio's tab, where it's open.
+      if (d.id) openAgentRef.current?.(`${BOARD}${d.id}`, { replace: d.replace || (wsRef.current?.tabs.includes('view:studio') ? 'view:studio' : null) })
       else if (d.list) openAgentRef.current?.('view:whiteboards', { replace: d.replace || null })
       else if (d.renamed) {
-        const from = placeNow(`${BOARD}${d.renamed.from}`, studioKnownRef.current), to = placeNow(`${BOARD}${d.renamed.to}`, studioKnownRef.current)
+        const from = placeNow(`${BOARD}${d.renamed.from}`), to = placeNow(`${BOARD}${d.renamed.to}`)
         renamedTab(from, to)
         setW((w) => (!w.tabs.includes(from) || w.tabs.includes(to) ? w : { ...follow(w, from, to), tabs: w.tabs.map((x) => (x === from ? to : x)), active: w.active === from ? to : w.active, side: w.side === from ? to : w.side }))
       }
@@ -636,7 +624,7 @@ function App() {
   // A file opened in Studio from anywhere (Files, a chat's link), or Studio itself.
   useEffect(() => {
     const on = (e) => {
-      if (!studioOnRef.current) return
+      if (!StudioHome) return
       const d = e.detail || {}
       if (d.root && d.path) openAgentRef.current?.(studioId(d), { replace: wsRef.current?.tabs.includes('view:studio') ? 'view:studio' : null })
       else openAgentRef.current?.('view:studio')
@@ -880,9 +868,9 @@ function App() {
     insightsOn && { id: 'a:people', label: t('People You Meet'), icon: 'users', keywords: 'people attendees contacts who met meetings together', run: () => meetingsTab('people') },
     { id: 'a:dictations', label: t('Dictations'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent('view:dictations') },
     { id: 'a:memory', label: t('Memory'), sub: t('In Meetings and Dictations'), icon: 'book', keywords: 'memory people organizations organisations companies projects products terms names words misheard about me about you persona context meeting memory', run: () => openAgent(MEMORY) },
-    StudioHome && studioOn && { id: 'a:studio', label: t('Studio'), icon: 'layers', keywords: 'studio document word docx sheet excel xlsx spreadsheet deck slides powerpoint pptx pdf page html artifact markdown design pack', run: () => openAgent('view:studio') },
-    Explorer && filesOn && { id: 'a:files', label: t('Files'), icon: 'folder', keywords: 'files finder explorer folders browse desktop documents downloads home drive disk icloud onedrive dropbox quick look get info', run: () => openAgent('view:files') },
-    WhiteboardsHome && { id: 'a:boards', label: t('Whiteboards'), sub: studioOn && StudioHome ? t('In Studio') : undefined, icon: 'shapes', keywords: 'whiteboard board excalidraw draw sketch diagram flowchart architecture sequence org chart mermaid drawio canvas', run: () => openAgent('view:whiteboards') },
+    StudioHome && { id: 'a:studio', label: t('Studio'), icon: 'layers', keywords: 'studio document word docx sheet excel xlsx spreadsheet deck slides powerpoint pptx pdf page html artifact markdown design pack', run: () => openAgent('view:studio') },
+    Explorer && { id: 'a:files', label: t('Files'), icon: 'folder', keywords: 'files finder explorer folders browse desktop documents downloads home drive disk icloud onedrive dropbox quick look get info', run: () => openAgent('view:files') },
+    StudioHome && { id: 'a:boards', label: t('Whiteboards'), sub: t('In Studio'), icon: 'shapes', keywords: 'whiteboard board excalidraw draw sketch diagram flowchart architecture sequence org chart mermaid drawio canvas', run: () => openAgent('view:whiteboards') },
     { id: 'a:map', label: t('Agent Map'), icon: 'grid', keywords: 'what is running where devices computers machines all agents overview cloud subagents', run: openMap },
     { id: 'a:needs', label: t('Needs You'), icon: 'bell', keywords: 'inbox waiting approve allow permission questions answer review finished failed devices', run: () => setInbox({}) },
     { id: 'a:history', label: t('Search history and closed agents…'), icon: 'clock', keywords: 'search find transcript conversation closed archived resume old past', run: () => setHistory(true) },
@@ -1056,24 +1044,21 @@ function App() {
           controls={wide ? { maximized: !!L.max, onMaximize: () => set({ max: L.max ? null : 'main' }) } : null} /></section>
         : id === 'view:meetings' ? <section className="pane view-pane"><MeetingsHome onOpen={(mid) => openAgent(`view:meeting:${mid}`, wide ? { replace: 'view:meetings' } : {})} /></section>
           : id === 'view:dictations' ? <section className="pane view-pane"><Dictations /></section>
-            : id === 'view:whiteboards' && WhiteboardsHome ? <section className="pane view-pane"><WhiteboardsHome onOpen={(bid) => openAgent(`${BOARD}${bid}`, wide ? { replace: 'view:whiteboards' } : {})} /></section>
-              : id.startsWith(BOARD) && WhiteboardPage ? <section className="pane view-pane"><WhiteboardPage id={id.slice(BOARD.length)} onBack={() => openAgent('view:whiteboards', { replace: id })} /></section>
-                : id === 'view:files' ? <section className="pane view-pane">{filesOn && Explorer ? <Explorer /> : <TrialOff name={t('Files')} />}</section>
-                : id.startsWith('view:studio') && !studioOn ? <section className="pane view-pane"><TrialOff name={t('Studio')} /></section>
+                : id === 'view:files' && Explorer ? <section className="pane view-pane"><Explorer /></section>
                 : id === 'view:studio' && StudioHome ? <section className="pane view-pane"><StudioHome onOpen={(f) => openAgent(studioId(f), wide ? { replace: 'view:studio' } : {})} /></section>
                   : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f, o) => openAgent(studioId(f), o?.replace ? { replace: id } : {})} /></section>
                 : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
     </ErrorBoundary>
   )
 
-  // ---------- Back and Forward (src/backForward.js, a beta feature) ----------
+  // ---------- Back and Forward (src/backForward.js) ----------
   // On a computer's layout, once the window has what it shows (its agents and settings). What's on
   // screen is a place: Herdr's view, a section of Settings, Today or the Agents board full size, or
   // the tab in front (and the one beside it), full size or not, with where it is inside itself (an
   // agent's Chat or Terminal, Meetings' Memory, the folder Files is in).
   const navReady = useRef(false)
   if (fleet && conf) navReady.current = true
-  const navOn = conf?.trials?.['back-forward'] === true && wide && !cloudOnly && navReady.current
+  const navOn = wide && !cloudOnly && navReady.current
   usePlaces(navOn)
   // rough: before the view has said where it is (its code on its way): what it says next is the same step.
   const saidIn = W.active ? placeOf(W.active) : null
@@ -1104,8 +1089,6 @@ function App() {
     if (pl.max === 'board') { set({ max: 'board', boardMin: false }); return }
     set({ max: pl.max || null })
     if (!pl.tab) return
-    // A step from before whiteboards were in Studio: where it is now.
-    pl = { ...pl, tab: placeNow(pl.tab, studioKnownRef.current), side: placeNow(pl.side, studioKnownRef.current) }
     // Its tab, or the one that took its place since (a meeting in Meetings' tab), which it takes back.
     const slot = slotOf(pl.tab, tabOpen)
     if (!slot) return
@@ -1169,10 +1152,8 @@ function App() {
       homeOn && { id: 'today', icon: 'today', label: t('Today'), hint: t('Calendar, mail, markets and usage'), run: () => setMoreView('today') },
       // The usage chip's account and figure (the desktop's top bar has it; a phone's has no room).
       { id: 'usage', icon: 'gauge', label: t('Usage'), hint: t('Plans, limits and history'), side: <UsageGlance quota={quota.data} primary={primary} />, run: () => setMoreView('usage') },
-      // Whiteboards have a row of their own only where Studio, which lists them, doesn't show.
-      WhiteboardsHome && studioKnown === false && { id: 'whiteboards', icon: 'shapes', label: t('Whiteboards'), hint: t('Draw by hand, or describe a diagram'), run: () => setMoreView('view:whiteboards') },
-      StudioHome && studioOn && { id: 'studio', icon: 'layers', label: t('Studio'), hint: t('Documents, sheets, decks, pages and whiteboards'), run: () => setMoreView('view:studio') },
-      Explorer && filesOn && { id: 'files', icon: 'folder', label: t('Files'), hint: t('Every folder on your computers'), run: () => setMoreView('view:files') },
+      StudioHome && { id: 'studio', icon: 'layers', label: t('Studio'), hint: t('Documents, sheets, decks, pages and whiteboards'), run: () => setMoreView('view:studio') },
+      Explorer && { id: 'files', icon: 'folder', label: t('Files'), hint: t('Every folder on your computers'), run: () => setMoreView('view:files') },
       { id: 'terminals', icon: 'terminal', label: t('Terminals'), hint: t("Every agent's terminal, live"), run: () => setMoreView('terminals') },
       { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
       { id: 'dictations', icon: 'wave', label: t('Dictations'), hint: t("Everything you've dictated"), run: () => setMoreView('view:dictations') },
@@ -1210,8 +1191,8 @@ function App() {
           {mtab === 'more' && (moreView
             ? (
               <div className="m-view m-more-view">
-                {/* A whiteboard has its own way back, to the list of them. */}
-                {!moreView.startsWith(BOARD) && !moreView.startsWith(STUDIO) && <button type="button" className="ghost-btn m-view-back" onClick={() => setMoreView(null)}><Icon name="back" size={14} /> {t('More')}</button>}
+                {/* A file in Studio has its own way back, to Studio. */}
+                {!moreView.startsWith(STUDIO) && <button type="button" className="ghost-btn m-view-back" onClick={() => setMoreView(null)}><Icon name="back" size={14} /> {t('More')}</button>}
                 {moreView === 'terminals' ? <Terminals key={fleet?.session || ''} onChat={(id) => openAgent(id)} />
                   : moreView === 'today' ? <div className="m-today"><TodayTabs tab={todayTab} setTab={setTodayTab} compact /><div className={`m-today-body tab-${todayTab}`}><TodayBody phone onOpenAgent={openAgent} tab={todayTab} setTab={setTodayTab} stackClass="m-stack" /></div></div>
                     : moreView === 'usage' ? <ErrorBoundary name="Usage"><UsageStats phone /></ErrorBoundary>
@@ -1316,11 +1297,9 @@ function App() {
     return { ...w, tabs: rest }
   })
 
-  // The tabs above the agents (TabStrip.jsx), with Tab Groups when that beta feature is on. A color
-  // picked in a tab's or a group's right-click menu is kept with them as a folded group is: a group's
-  // by its key, a tab's by its id; none takes it off. Your own groups and pinned tabs are kept the
-  // same way (tidyTabs, above).
-  const grouping = conf?.trials?.['tab-groups'] === true
+  // The tabs above the agents (TabStrip.jsx), in Tab Groups. A color picked in a tab's or a group's
+  // right-click menu is kept with them as a folded group is: a group's by its key, a tab's by its id;
+  // none takes it off. Your own groups and pinned tabs are kept the same way (tidyTabs, above).
   const foldGroup = (key) => setW((w) => ({ ...w, folded: { ...(w.folded || {}), [key]: !w.folded?.[key] } }))
   const colorTab = (key, color) => setW((w) => {
     const colors = { ...(w.colors || {}) }
@@ -1332,7 +1311,7 @@ function App() {
   // Ungroup: the group goes, its tabs stay where they are.
   const ungroup = (key) => setW((w) => tidyTabs({ ...w, tabGroups: { ...(w.tabGroups || {}), [key]: { tabs: [] } } }))
   const tabStrip = (
-    <TabStrip ids={W.tabs} byId={byId} active={W.active} side={split ? W.side : null} focus={W.group} folded={W.folded} colors={W.colors} own={W.tabGroups} pinned={W.pinned} grouping={grouping} spaces={fleet?.workspaces}
+    <TabStrip ids={W.tabs} byId={byId} active={W.active} side={split ? W.side : null} focus={W.group} folded={W.folded} colors={W.colors} own={W.tabGroups} pinned={W.pinned} spaces={fleet?.workspaces}
       onOpen={openAgent} onClose={closeTab} onMove={moveTab} onFold={foldGroup} onColor={colorTab} onSide={canSplit ? (id) => openAgent(id, { toSide: true }) : null} onNewAgent={(init) => setNewAgent(init)}
       onGroup={(id, key, keep) => setW((w) => inGroup(w, id, key, keep))} onName={nameGroup} onUngroup={ungroup} onPin={(id, on) => setW((w) => pinTab(w, id, on))}>
       <button className={`win-btn ${split ? 'on' : ''}`} onClick={toggleSplit} disabled={!canSplit || W.tabs.length < 2}

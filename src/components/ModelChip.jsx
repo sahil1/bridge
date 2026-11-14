@@ -4,7 +4,6 @@ import { AgentIcon } from './settings/ProviderIcon.jsx'
 import { api, usePoll } from '../api.js'
 import { HandoffSection, HandoffPanel, useHandoff, useHandedNote } from './Handoff.jsx'
 import { AcctName, Left, nameOf, slotsOf } from './AccountMenu.jsx'
-import { useTrial } from '../trials.js'
 import { EFFORT_LABEL } from '../recommended.js'
 import { t, tx } from '../i18n/index.js'
 
@@ -24,8 +23,7 @@ export function heldWhy(reason) {
 // (Handoff.jsx). Claude Code switches model in place (its own
 // /model, sent like a message); agents that can't, like Codex, restart on the new model with the
 // same conversation. The server does the work (server/models.js, server/handoff.js); this shows
-// it and says how it went. With Recommended Settings on (a beta feature), the menu also says the
-// effort it started with.
+// it and says how it went. The menu also says the effort it started with (Recommended Settings).
 
 // Short names: "Opus 5.5", "Sonnet", "Sonnet 1M"; anything else as the CLI names it.
 const ALIAS = { opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku', fable: 'Fable', best: 'Best', opusplan: 'Opus Plan', default: 'Default' }
@@ -209,7 +207,7 @@ function ModelMenu({ data, agent, anchor, onPick, onClose, account = null, onAcc
   const okName = VALID.test(typed)
   // The effort it started with (--effort): said, not changed here, as /effort typed into it would
   // also change your default in Claude Code's own settings.
-  const effort = useTrial('recommended-settings') && EFFORT_LABEL[agent.effort] ? agent.effort : null
+  const effort = EFFORT_LABEL[agent.effort] ? agent.effort : null
   const switches = data.mode === 'switch' || data.mode === 'restart'
   return (
     <div className="acct-pop model-pop" ref={ref} role="menu" tabIndex={-1} aria-label={switches ? t('{agent} model', { agent: data.label }) : data.label} onKeyDown={onKeyDown}>

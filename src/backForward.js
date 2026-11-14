@@ -1,7 +1,6 @@
 import { useSyncExternalStore } from 'react'
 
-// Back and Forward, as a browser's or Finder's (a beta feature, on unless it's turned off in
-// Settings › About & Updates › Beta Features). Each place you go in this window is a step: a view
+// Back and Forward, as a browser's or Finder's. Each place you go in this window is a step: a view
 // or an agent's tab and what it shows (Chat, Terminal, Files, Changes; Meetings' Memory; the folder
 // Files is in), a section of Settings, Today full size. ‹ and › at the start of the top bar go back
 // and forward through them (held or right-clicked: the places, to pick one), and so do ⌘[ and ⌘]

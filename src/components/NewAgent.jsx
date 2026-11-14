@@ -9,14 +9,13 @@ import AgentMark from './settings/agentMark.jsx'
 import { AccountPicker, nameOf } from './AccountMenu.jsx'
 import NewCloudAgent from './NewCloudAgent.jsx'
 import { EffortChip, launchEffort } from './Recommended.jsx'
-import { useTrial } from '../trials.js'
 import { t, tn } from '../i18n/index.js'
 
 // Start any installed agent in a project folder (in an existing space or a new one), or as a
 // plain chat with no project, like talking to Claude or Codex directly. Optionally with a first message.
 // Or in the cloud: on Cursor, Copilot, Jules or Claude's computers, with your key (NewCloudAgent).
-// With Recommended Settings on (a beta feature), the first message has an effort chip, suggested
-// from what it says (Recommended.jsx).
+// The first message has an effort chip, suggested from what it says (Recommended Settings,
+// Recommended.jsx).
 export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onAddAccount, onCloudSettings }) {
   const [kinds, setKinds] = useState(null)
   const [recent, setRecent] = usePersisted('cc-recent-dirs', [])
@@ -80,7 +79,7 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
   const pickedModel = modelList.some((m) => m.id === chatModel) ? chatModel : modelList[0]?.id || ''
   const anyBlocked = kind === 'chat' && (!chatModels || !modelList.length)
   const kindInfo = (kinds || []).find((k) => k.kind === kind)
-  const effortOn = useTrial('recommended-settings') && !!kindInfo?.effort
+  const effortOn = !!kindInfo?.effort
   const withEffort = (text) => (effortOn ? { effort: launchEffort(text, effort) } : {})
   const reloadKinds = () => api('/agent-kinds').then((ks) => { setKinds(ks); if (ks.length && !ks.some((k) => k.kind === kind)) setKind(ks[0].kind) }).catch(() => {})
   const group = accts.find((k) => k.kind === kind)

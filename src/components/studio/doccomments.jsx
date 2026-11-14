@@ -7,7 +7,7 @@ import { commentKey } from './docview.js'
 import { commentsOf, threadsOf, newComment, usedIds, anchor, writeComments, AI_AUTHOR } from './wordcomments.js'
 import './threads.css'
 
-// Comments in a Word file, as threads (Comments, a beta feature): a comment on the words you pick,
+// Comments in a Word file, as threads (Comments and @bridge): a comment on the words you pick,
 // replies, resolved and opened again, deleted, all written into the file itself (wordcomments.js),
 // so Word shows them as you left them, and comments from Word read as Word made them: who wrote
 // each, when, which answers which, and which are resolved. The comments live in the document's
@@ -81,8 +81,8 @@ function plainWords(doc, from, to) {
 }
 
 // The comments' list and what's done to it, for a Word file's editor. on: whether comments can be
-// written here (the beta feature, and the file not read-only); author: the name they're signed
-// with; name: the file's, for AI Assist; dirty(): the file now has changes to save. save(w, put):
+// written here (the file not read-only); author: the name they're signed with; name: the file's,
+// for AI Assist; dirty(): the file now has changes to save. save(w, put):
 // the comment parts written (writeDocx's more).
 export function useThreads({ editor, model, on, author, dirty, name = '' }) {
   const [list, setList] = useState(() => commentsOf(model))

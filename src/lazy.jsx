@@ -87,7 +87,7 @@ const studio = import.meta.env.MODE !== 'demo' && import.meta.env.MODE !== 'clou
 export const StudioHome = studio && wrap(studio, 'StudioHome')
 export const StudioPage = studio && wrap(studio, 'StudioPage')
 
-// Files (a beta feature: every folder on your computers, as Finder shows them) loads only when it's
+// Folders (every folder on your computers, as Finder shows them) loads only when it's
 // opened; not in the demo or the phone apps' Cloud agents.
 const files = import.meta.env.MODE !== 'demo' && import.meta.env.MODE !== 'cloud' ? () => import('./components/files/Explorer.jsx') : null
 export const Explorer = files && wrap(files)

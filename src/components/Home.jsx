@@ -5,7 +5,6 @@ import { usePersisted } from './layout.jsx'
 import { api, usePoll } from '../api.js'
 import { openSettings } from './SignIn.jsx'
 import { EffortChip, launchEffort } from './Recommended.jsx'
-import { useTrial } from '../trials.js'
 import { t, tn, tx } from '../i18n/index.js'
 import './home.css'
 
@@ -13,8 +12,8 @@ import './home.css'
 // Code. The project's name is the picker; the agent (or any model), how much it may do without
 // asking, and where it works are small chips on the box; Enter starts it in that project and opens
 // it. With no project, it's a chat. The full New agent dialog (cloud agents, comparing two agents,
-// an account, the space it goes in) is under More options. With Recommended Settings on (a beta
-// feature), an effort chip too, suggested from what you type (Recommended.jsx).
+// an account, the space it goes in) is under More options. An effort chip too, suggested from what
+// you type (Recommended Settings, Recommended.jsx).
 
 // How much it may do without asking (server: agents.js access()).
 const ACCESS = [
@@ -61,7 +60,7 @@ export default function Home({ fleet, onLaunched, onMore, autoFocus = true }) {
   const choices = [...(kinds || []), ANY]
   const kind = choices.find((k) => k.kind === pref.kind)?.kind || kinds?.find((k) => k.kind === 'claude')?.kind || kinds?.[0]?.kind || 'chat'
   const agent = choices.find((k) => k.kind === kind) || ANY
-  const effortOn = useTrial('recommended-settings') && !!agent.effort
+  const effortOn = !!agent.effort
   // Any model: in a project it needs a model that can use tools (not a sign-in's one-shot mode).
   useEffect(() => { if (kind === 'chat' && !models) api('/chat/models').then((r) => setModels(r.models || [])).catch(() => setModels([])) }, [kind, models])
   const usable = (models || []).filter((m) => noProject || !project || m.via !== 'sign-in')

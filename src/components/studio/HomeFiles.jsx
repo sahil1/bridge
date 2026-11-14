@@ -27,7 +27,7 @@ const KINDS = [
 // A kind with a list of its own in place of rows, when it's the kind picked: your whiteboards as
 // their own page has them (what to draw, then each as a card to open, rename or delete).
 const OWN_LIST = {
-  board: WhiteboardsHome && ((onOpen) => <WhiteboardsHome inStudio onOpen={(id) => onOpen({ root: 'board', path: id })} />),
+  board: WhiteboardsHome && ((onOpen) => <WhiteboardsHome onOpen={(id) => onOpen({ root: 'board', path: id })} />),
 }
 const AREA_ICON = { studio: 'layers', project: 'bot', place: 'pin', cloud: 'cloud', folder: 'folder', home: 'home', other: 'folder' }
 const AREA_ORDER = ['studio', 'project', 'place', 'cloud', 'folder', 'home', 'other']

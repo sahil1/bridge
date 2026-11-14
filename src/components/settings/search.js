@@ -112,7 +112,7 @@ export const SETTINGS = [
   ...at('about', [
     ['version', tx('Check for new versions'), 'version update check'],
     ['auto-update', tx("Update by itself while you're away"), 'auto update automatic', { when: 'desktop', near: 'version' }],
-    ['beta', tx('Beta Features'), 'beta trials studio home files routines insights tab groups'],
+    ['beta', tx('Beta Features'), 'beta trials home routines insights usage tidy board answers mcp'],
     ['report', tx('Report a problem'), 'bug issue github idea feedback'],
     ['usage-counts', tx('Usage Counts'), 'telemetry analytics anonymous share', { near: 'report' }],
     ['crash-reports', tx('Crash Reports'), 'crash reports send', { near: 'report' }],

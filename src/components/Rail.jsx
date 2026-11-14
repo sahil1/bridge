@@ -14,7 +14,7 @@ import { openMeeting, useMeetings } from './meetings/recording.jsx'
 import { Dialog } from './meetings/tools.jsx'
 import { whiteboards } from './whiteboard/links.js'
 import { t, tn, tx } from '../i18n/index.js'
-import { useTrial, useTrialsKnown } from '../trials.js'
+import { useTrial } from '../trials.js'
 
 // Mirrors herdr's sidebar: numbered workspaces, each with its tabs. Spaces fold,
 // every row shows the folder it works in, and a ⋯ menu covers rename/close/copy.
@@ -138,14 +138,10 @@ function HoverCard({ row, rect, git, preview }) {
 // New (Home: start something) and Meetings sit above the spaces; a red dot while a meeting records.
 // With Home on (a beta feature), Home is the first row, with what needs you on every device (needs).
 export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onNewTerminal, onHistory, onMeetings, onDictations, recording, needs = 0 }) {
-  const studio = useTrial('studio') // a beta feature (src/trials.js)
-  // Whiteboards are one of Studio's kinds where Studio shows, so they have a row of their own only
-  // where it doesn't (once the settings say so: until then neither row shows).
-  const trialsKnown = useTrialsKnown()
-  const boardsRow = whiteboards && trialsKnown && !studio
-  const inStudio = String(selected || '').startsWith('view:studio') || String(selected || '').startsWith('view:whiteboard')
-  const files = useTrial('files') // so is Files, every folder on your computers
-  const home = useTrial('home')
+  // Studio and Files, where there's a computer to keep files on (not the demo or the phone apps'
+  // Cloud agents). Whiteboards are one of Studio's kinds, so they have no row of their own.
+  const inStudio = String(selected || '').startsWith('view:studio')
+  const home = useTrial('home') // a beta feature (src/trials.js)
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState(null)
   const [closedWs, setClosedWs] = usePersisted('cc-rail-closed', {})
@@ -323,9 +319,8 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         {!fleet?.down && <button className={`mini-nav ${chiefOn ? 'on' : ''}`} data-tour="chief" onClick={goChief} disabled={launching} aria-label={t('Chief of Staff')} title={`${t('Chief of Staff')}\n${chiefWhat}`}><Icon name="helm" size={15} />{(chief?.status === 'blocked' || threads.some((a) => a.status === 'blocked')) && <span className="mini-needs" />}</button>}
         <button className={`mini-nav ${String(selected || '').startsWith('view:meeting') ? 'on' : ''}`} onClick={() => onMeetings?.()} aria-label={recording ? t('Meetings (recording)') : t('Meetings')} title={t('Meetings')}><Icon name="mic" size={15} />{recording && <span className="rec-dot mini-rec" />}</button>
         {anyDictation && <button className={`mini-nav ${selected === 'view:dictations' ? 'on' : ''}`} onClick={() => onDictations?.()} aria-label={t('Dictations')} title={t('Dictations')}><Icon name="wave" size={15} /></button>}
-        {boardsRow && <button className={`mini-nav ${String(selected || '').startsWith('view:whiteboard') ? 'on' : ''}`} onClick={() => onOpen('view:whiteboards')} aria-label={t('Whiteboards')} title={t('Whiteboards')}><Icon name="shapes" size={15} /></button>}
-        {whiteboards && studio && <button className={`mini-nav ${inStudio ? 'on' : ''}`} onClick={() => onOpen('view:studio')} aria-label={t('Studio')} title={t('Studio')}><Icon name="layers" size={15} /></button>}
-        {whiteboards && files && <button className={`mini-nav ${selected === 'view:files' ? 'on' : ''}`} onClick={() => onOpen('view:files')} aria-label={t('Files')} title={t('Files')}><Icon name="folder" size={15} /></button>}
+        {whiteboards && <button className={`mini-nav ${inStudio ? 'on' : ''}`} onClick={() => onOpen('view:studio')} aria-label={t('Studio')} title={t('Studio')}><Icon name="layers" size={15} /></button>}
+        {whiteboards && <button className={`mini-nav ${selected === 'view:files' ? 'on' : ''}`} onClick={() => onOpen('view:files')} aria-label={t('Files')} title={t('Files')}><Icon name="folder" size={15} /></button>}
         <div className="rail-mini">
           {groups.filter((g) => rowsOf(g).length).map((g) => (
             <div key={g.id} className="mini-ws">
@@ -367,9 +362,8 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
               {!fleet?.down && icon(chiefOn, t('Chief of Staff'), 'helm', goChief, (chief?.status === 'blocked' || threads.some((a) => a.status === 'blocked')) && <span className="mini-needs" />, { 'data-tour': 'chief', disabled: launching, title: `${t('Chief of Staff')}\n${chiefWhat}` })}
               {icon(String(selected || '').startsWith('view:meeting'), recording ? t('Meetings (recording)') : t('Meetings'), 'mic', () => onMeetings?.(), recording && <span className="rec-dot mini-rec" />)}
               {anyDictation && icon(selected === 'view:dictations', t('Dictations'), 'wave', () => onDictations?.())}
-              {boardsRow && icon(String(selected || '').startsWith('view:whiteboard'), t('Whiteboards'), 'shapes', () => onOpen('view:whiteboards'))}
-              {whiteboards && studio && icon(inStudio, t('Studio'), 'layers', () => onOpen('view:studio'))}
-              {whiteboards && files && icon(selected === 'view:files', t('Files'), 'folder', () => onOpen('view:files'))}
+              {whiteboards && icon(inStudio, t('Studio'), 'layers', () => onOpen('view:studio'))}
+              {whiteboards && icon(selected === 'view:files', t('Files'), 'folder', () => onOpen('view:files'))}
               <Quiet name="Devices"><RailMachines compact /></Quiet>
             </span>
           )}
@@ -438,18 +432,13 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
             </div>
           )}
           {anyDictation && dictOpen && <Quiet name="Dictations list"><RailDictations /></Quiet>}
-          {boardsRow && (
-            <div className="rail-nav-row">
-              <button className={`rail-nav-btn ${String(selected || '').startsWith('view:whiteboard') ? 'on' : ''}`} onClick={() => onOpen('view:whiteboards')}><Icon name="shapes" size={14} /> {t('Whiteboards')}</button>
-            </div>
-          )}
-          {whiteboards && studio && (
+          {whiteboards && (
             <div className="rail-nav-row">
               <button className={`rail-nav-btn ${inStudio ? 'on' : ''}`} onClick={() => onOpen('view:studio')}><Icon name="layers" size={14} /> {t('Studio')}</button>
             </div>
           )}
           {/* Files: every folder on this computer and your others, as Finder shows them. */}
-          {whiteboards && files && (
+          {whiteboards && (
             <div className="rail-nav-row">
               <button className={`rail-nav-btn ${selected === 'view:files' ? 'on' : ''}`} onClick={() => onOpen('view:files')}><Icon name="folder" size={14} /> {t('Files')}</button>
             </div>

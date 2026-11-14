@@ -15,7 +15,7 @@ import { Menu as AtMenu } from '../FileExtras.jsx'
 import { FilesPane, linkFiles } from './context.jsx'
 import { AssistPane, setAssist } from './assist.jsx'
 import { BoardPane, BoardLink, setBoard } from './board.jsx'
-import { openBoard } from '../whiteboard/links.js'
+import { openBoard, whiteboards as studioHere } from '../whiteboard/links.js'
 import AiAssist from '../AiAssist.jsx'
 import PermissionFix from '../PermissionFix.jsx'
 import { useScreenAccess, useAllowCall, allowSteps } from './allowcall.jsx'
@@ -537,7 +537,6 @@ const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 const localInput = (iso) => { const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
 
 export function MeetingPage({ id, onBack }) {
-  const studio = useTrial('studio') // Make a deck writes one into Studio, a beta feature (src/trials.js)
   const m = useMeetings()
   const live = m?.rec?.id === id
   const { data, refresh } = usePoll(`/meetings/${encodeURIComponent(id)}`, live ? 1500 : 4000)
@@ -890,7 +889,8 @@ export function MeetingPage({ id, onBack }) {
     heard && { label: t('Work out who said each line'), hint: t('From names said, the screen and who was invited'), disabled: busy === 'who', run: nameAll },
     canTell && voiced && { label: t('Work out who each voice is'), hint: t('From names said and who was invited'), disabled: busy === 'who' || !!working, run: nameAll },
     (lines.length > 0 || data.summary) && { label: t('Ask about this meeting'), hint: t("What was decided, who's doing what, a follow-up email"), run: asking },
-    studio && done && (data.summary || lines.length > 0) && { label: t('Make a deck'), hint: t('Written by the model that writes your notes, opened in Studio'), disabled: busy === 'deck', run: makeDeck },
+    // Into Studio, where there's one (not the demo or the phone apps' Cloud agents).
+    studioHere && done && (data.summary || lines.length > 0) && { label: t('Make a deck'), hint: t('Written by the model that writes your notes, opened in Studio'), disabled: busy === 'deck', run: makeDeck },
   ]
 
   // When it was, who was there and where it's saved: under the name on a wide screen, at the top of
