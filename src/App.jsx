@@ -10,7 +10,7 @@ import Rail, { agentName } from './components/Rail.jsx'
 import Board from './components/Board.jsx'
 import TabStrip from './components/TabStrip.jsx'
 import Dock from './components/Dock.jsx'
-import Console, { MateEmpty, showChat } from './components/Console.jsx'
+import Console, { MateEmpty, showChat, showView } from './components/Console.jsx'
 import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, WhiteboardsHome, WhiteboardPage, StudioHome, StudioPage, Explorer, UsageStats, preloadViews } from './lazy.jsx'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
@@ -544,6 +544,8 @@ function App() {
       // one about a video it made: its Files, at the video.
       if (e.detail.view === 'files') return openFilesRef.current?.(id, e.detail.path || undefined)
       if (e.detail.view === 'chat') showChat(id)
+      // The chief of staff's board (the sidebar's Tasks by its row).
+      if (e.detail.view === 'tasks') showView(id, 'tasks')
       openAgentRef.current?.(id, { replace: e.detail.replace || null })
     }
     window.addEventListener('bridge-open-agent', on)

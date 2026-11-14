@@ -3,7 +3,7 @@ import Icon, { StatusDot } from './Icon.jsx'
 import { copyText } from '../copy.js'
 import { Terminal, FilesView, ChangesView, PreviewView } from '../lazy.jsx'
 import Subagents from './Subagents.jsx'
-import ChiefTasks from './ChiefTasks.jsx'
+import ChiefTasks, { ChiefBoard } from './ChiefTasks.jsx'
 import ChiefThreads from './ChiefThreads.jsx'
 import Question, { parseScreen } from './Question.jsx'
 import AskCard from './AskCard.jsx'
@@ -616,14 +616,17 @@ export function MateEmpty({ onLaunch, launching, error, code }) {
   )
 }
 
-const VIEWS = [['chat', 'chat', tx('Chat')], ['terminal', 'terminal', tx('Terminal')], ['files', 'folder', tx('Files')], ['changes', 'branch', tx('Changes')], ['preview', 'play', tx('Preview')]]
+// Tasks: the chief of staff's board (ChiefTasks.jsx), only on its console.
+const VIEWS = [['chat', 'chat', tx('Chat')], ['tasks', 'columns', tx('Tasks')], ['terminal', 'terminal', tx('Terminal')], ['files', 'folder', tx('Files')], ['changes', 'branch', tx('Changes')], ['preview', 'play', tx('Preview')]]
 
 function readViews() { try { return JSON.parse(localStorage.getItem('cc-agent-views') || '{}') } catch { return {} } }
-// Show an agent's Chat, where its question card is (opening a "needs you" notification).
-export function showChat(paneId) {
-  try { localStorage.setItem('cc-agent-views', JSON.stringify({ ...readViews(), [paneId]: 'chat' })) } catch { /* private mode */ }
-  setTimeout(() => window.dispatchEvent(new CustomEvent('cc-set-view', { detail: { paneId, view: 'chat' } })), 60)
+// Show an agent's Chat, where its question card is (opening a "needs you" notification), or another
+// of its views (the chief of staff's Tasks, from the sidebar).
+export function showView(paneId, view) {
+  try { localStorage.setItem('cc-agent-views', JSON.stringify({ ...readViews(), [paneId]: view })) } catch { /* private mode */ }
+  setTimeout(() => window.dispatchEvent(new CustomEvent('cc-set-view', { detail: { paneId, view } })), 60)
 }
+export const showChat = (paneId) => showView(paneId, 'chat')
 
 // Cloud agents (Cursor, Copilot, Jules, Claude in their own cloud) have a view of their own.
 export default function Console(props) {
@@ -898,8 +901,9 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
         {agent.muted && <span className="muted-tag" role="img" title={t('Notifications muted (⋯ to unmute)')} aria-label={t('Notifications muted')}><Icon name="bell-off" size={13} /></span>}
         {!minimized && (
           <div className="seg" role="tablist" data-tour="views">
-            {/* A plain chat has no project; on the simple layout, neither has the chief of staff to show */}
-            {VIEWS.filter(([id]) => !((agent.plainChat || (simple && agent.chief)) && (id === 'files' || id === 'changes' || id === 'preview'))).map(([id, icon, label]) => (
+            {/* A plain chat has no project; on the simple layout, neither has the chief of staff to show.
+                Only the chief of staff has Tasks. */}
+            {VIEWS.filter(([id]) => !((agent.plainChat || (simple && agent.chief)) && (id === 'files' || id === 'changes' || id === 'preview')) && (id !== 'tasks' || agent.chief)).map(([id, icon, label]) => (
               <button key={id} role="tab" aria-selected={view === id} className={view === id ? 'on' : ''} data-tour={id === 'changes' ? 'changes' : undefined} onClick={() => setView(id)} title={t(label)}><Icon name={icon} size={14} /><span>{t(label)}</span></button>
             ))}
           </div>
@@ -951,6 +955,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
             {view === 'changes' && <ChangesView key={agent.paneId} agent={agent} onOpenFile={(p) => { setOpenPath(p); setView('files') }}
               onSendReview={async (t) => { const ok = await send(t, { review: true }); setView(agent.caps?.chat ? 'chat' : 'terminal'); return ok }} />}
             {view === 'preview' && <PreviewView agent={agent} onSendToAgent={({ text, files }) => { setView('chat'); setPrefill({ text, files, append: true, n: Date.now() }) }} />}
+            {view === 'tasks' && agent.chief && <ChiefBoard agent={agent} onOpenPath={(p) => { setOpenPath(p); setView('files') }} />}
           </div>
 
           {agent.asking && view === 'chat' && <AskCard agent={agent} Rich={RichText} onNote={setFlash} onOpenTerminal={() => setView('terminal')} />}
@@ -958,8 +963,8 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
             <BlockedCard agent={agent} onKey={sendKeys} onOpenTerminal={() => setView('terminal')} />
           )}
 
-          <div className="composer-wrap" data-tour="composer" hidden={view === 'files' || view === 'changes' || view === 'preview' || (view === 'chat' && showsFirstRun(agent))}>
-            {agent.chief && view === 'chat' && <ChiefTasks agent={agent} onOpenPath={(p) => { setOpenPath(p); setView('files') }} />}
+          <div className="composer-wrap" data-tour="composer" hidden={view === 'files' || view === 'changes' || view === 'preview' || view === 'tasks' || (view === 'chat' && showsFirstRun(agent))}>
+            {agent.chief && view === 'chat' && <ChiefTasks agent={agent} onOpenPath={(p) => { setOpenPath(p); setView('files') }} onBoard={() => setView('tasks')} />}
             {agent.caps?.subagents && view === 'chat' && <Subagents paneId={agent.paneId} working={agent.status === 'working'} Rich={RichText} />}
             {agent.asking && view === 'terminal' && (
               <div className="ask-strip" role="status">
