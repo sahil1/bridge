@@ -137,7 +137,7 @@ function HoverCard({ row, rect, git, preview }) {
 // With Home on (a beta feature), Home is the first row, with what needs you on every device (needs).
 // Dictations are a tab of Meetings (Meetings.jsx), so Meetings is marked while they show.
 export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onNewTerminal, onHistory, onMeetings, recording, needs = 0 }) {
-  // Studio and Files, where there's a computer to keep files on (not the demo or the phone apps'
+  // Studio and Folders, where there's a computer to keep files on (not the demo or the phone apps'
   // Cloud agents). Whiteboards are one of Studio's kinds, so they have no row of their own.
   const inStudio = String(selected || '').startsWith('view:studio')
   const home = useTrial('home') // a beta feature (src/trials.js)
@@ -145,7 +145,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
   const [error, setError] = useState(null)
   const [closedWs, setClosedWs] = usePersisted('cc-rail-closed', {})
   // The sidebar's two parts fold under their headings, as Slack's and Linear's sections do: Views
-  // (Home to Files, and Devices) to one row of their icons, so none is more than a click away, and
+  // (Home to Folders, and Devices) to one row of their icons, so none is more than a click away, and
   // Spaces out of sight but for how many there are (or how many need you). Both open to start with;
   // kept on this computer. The sidebar scrolls as one with both headings kept in sight (styles.css
   // .rail-head): Spaces' stops under Views' as you scroll into your spaces, so it's told how tall
@@ -315,7 +315,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         {!fleet?.down && <button className={`mini-nav ${chiefOn ? 'on' : ''}`} data-tour="chief" onClick={goChief} disabled={launching} aria-label={t('Chief of Staff')} title={`${t('Chief of Staff')}\n${chiefWhat}`}><Icon name="helm" size={15} />{(chief?.status === 'blocked' || threads.some((a) => a.status === 'blocked')) && <span className="mini-needs" />}</button>}
         <button className={`mini-nav ${String(selected || '').startsWith('view:meeting') ? 'on' : ''}`} onClick={() => onMeetings?.()} aria-label={recording ? t('Meetings (recording)') : t('Meetings')} title={t('Meetings')}><Icon name="mic" size={15} />{recording && <span className="rec-dot mini-rec" />}</button>
         {whiteboards && <button className={`mini-nav ${inStudio ? 'on' : ''}`} onClick={() => onOpen('view:studio')} aria-label={t('Studio')} title={t('Studio')}><Icon name="layers" size={15} /></button>}
-        {whiteboards && <button className={`mini-nav ${selected === 'view:files' ? 'on' : ''}`} onClick={() => onOpen('view:files')} aria-label={t('Files')} title={t('Files')}><Icon name="folder" size={15} /></button>}
+        {whiteboards && <button className={`mini-nav ${selected === 'view:files' ? 'on' : ''}`} onClick={() => onOpen('view:files')} aria-label={t('Folders')} title={t('Folders')}><Icon name="folder" size={15} /></button>}
         <div className="rail-mini">
           {groups.filter((g) => rowsOf(g).length).map((g) => (
             <div key={g.id} className="mini-ws">
@@ -357,7 +357,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
               {!fleet?.down && icon(chiefOn, t('Chief of Staff'), 'helm', goChief, (chief?.status === 'blocked' || threads.some((a) => a.status === 'blocked')) && <span className="mini-needs" />, { 'data-tour': 'chief', disabled: launching, title: `${t('Chief of Staff')}\n${chiefWhat}` })}
               {icon(String(selected || '').startsWith('view:meeting'), recording ? t('Meetings (recording)') : t('Meetings'), 'mic', () => onMeetings?.(), recording && <span className="rec-dot mini-rec" />)}
               {whiteboards && icon(inStudio, t('Studio'), 'layers', () => onOpen('view:studio'))}
-              {whiteboards && icon(selected === 'view:files', t('Files'), 'folder', () => onOpen('view:files'))}
+              {whiteboards && icon(selected === 'view:files', t('Folders'), 'folder', () => onOpen('view:files'))}
               <Quiet name="Devices"><RailMachines compact /></Quiet>
             </span>
           )}
@@ -424,10 +424,10 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
               <button className={`rail-nav-btn ${inStudio ? 'on' : ''}`} onClick={() => onOpen('view:studio')}><Icon name="layers" size={14} /> {t('Studio')}</button>
             </div>
           )}
-          {/* Files: every folder on this computer and your others, as Finder shows them. */}
+          {/* Folders: every folder on this computer and your others, as Finder shows them. */}
           {whiteboards && (
             <div className="rail-nav-row">
-              <button className={`rail-nav-btn ${selected === 'view:files' ? 'on' : ''}`} onClick={() => onOpen('view:files')}><Icon name="folder" size={14} /> {t('Files')}</button>
+              <button className={`rail-nav-btn ${selected === 'view:files' ? 'on' : ''}`} onClick={() => onOpen('view:files')}><Icon name="folder" size={14} /> {t('Folders')}</button>
             </div>
           )}
           <Quiet name="Devices"><RailMachines /></Quiet>

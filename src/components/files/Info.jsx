@@ -1,6 +1,6 @@
 // Get Info, as Finder's: what it is, how big (a folder's size worked out when you ask, and stopped
 // when you close it), where it is, when it was made, changed and last opened, and whether you can
-// change it. Renaming and moving to the Trash are named where Finder has them, as coming: Files is
+// change it. Renaming and moving to the Trash are named where Finder has them, as coming: Folders is
 // read-only for now.
 import { useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'

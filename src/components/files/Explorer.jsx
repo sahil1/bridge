@@ -144,7 +144,7 @@ export default function Explorer() {
     setHist((h) => ({ back: [...h.back, loc].slice(-60), fwd: h.fwd.slice(1) }))
     setLoc(next); setSel(null); setQl(false); setQ('')
   }
-  // Back and Forward (src/backForward.js): each folder is a place of Files', gone to again as any is.
+  // Back and Forward (src/backForward.js): each folder is a place of Folders', gone to again as any is.
   useEffect(() => onPlaceShow('view:files', (w) => { if (placeWhere(w)) go(placeWhere(w)) }), [go])
   // The folder it's in, with this one picked (as Finder does).
   const up = () => { if (loc.path) go({ ...loc, path: parentOf(loc.path) }, { select: loc.path }) }
@@ -252,7 +252,7 @@ export default function Explorer() {
     if (k === 'ArrowRight') return hit(() => (view === 'icons' ? step(1) : view === 'columns' && current?.dir ? openEntry(current) : null))
     if (k === 'ArrowLeft') return hit(() => (view === 'icons' ? step(-1) : view === 'columns' ? up() : null))
   }
-  // Keys go to the folder once you've clicked in it (or opened Files).
+  // Keys go to the folder once you've clicked in it (or opened Folders).
   useEffect(() => { if (!narrow) mainRef.current?.focus({ preventScroll: true }) }, [loc.root, loc.path, machine, narrow])
 
   // ---------- the folder, or what's keeping it ----------
@@ -399,7 +399,7 @@ export default function Explorer() {
   const showMain = !narrow || screen === 'folder'
   return (
     <div className={`fx ${narrow ? 'narrow' : ''}`} ref={boxRef} data-view={view}>
-      <PaneHeader icon="folder" title={t('Files')} subtitle={machine ? t('On {name}', { name: computer?.name || '' }) : t('On this computer')} />
+      <PaneHeader icon="folder" title={t('Folders')} subtitle={machine ? t('On {name}', { name: computer?.name || '' }) : t('On this computer')} />
       <div className="fx-wrap">
         {showSide && <div className="fx-side-box" style={narrow ? undefined : { width: sideW }}>{sideEl}</div>}
         {!narrow && <Handle axis="x" size={sideW} min={150} max={360} onSize={setSideW} label={t('Resize the sidebar')} />}

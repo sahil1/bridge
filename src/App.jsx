@@ -201,10 +201,10 @@ function useFit(onFold) {
 }
 
 // Views that open in tabs beside the agents: Home (start something new), Meetings (and Dictations,
-// a tab of it), a meeting, Studio and a file in it (a whiteboard too: placeNow), Files, and the agent
-// map (what runs on which of your computers).
+// a tab of it), a meeting, Studio and a file in it (a whiteboard too: placeNow), Folders (view:files),
+// and the agent map (what runs on which of your computers).
 // With Home on (a trial): Home (what needs you, NeedsHome.jsx) and Everything.
-const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everything': { title: tx('Everything'), icon: 'grid' }, 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:studio': { title: tx('Studio'), icon: 'layers' }, 'view:files': { title: tx('Files'), icon: 'folder' }, 'view:map': { title: tx('Agent Map'), icon: 'grid' } }
+const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everything': { title: tx('Everything'), icon: 'grid' }, 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:studio': { title: tx('Studio'), icon: 'layers' }, 'view:files': { title: tx('Folders'), icon: 'folder' }, 'view:map': { title: tx('Agent Map'), icon: 'grid' } }
 // A whiteboard's place before whiteboards were in Studio (its id after it): placeNow.
 const BOARD = 'view:whiteboard:'
 // A Studio file's tab: its root (an agent's pane, or place:<id>) and path, each encoded. A
@@ -341,7 +341,7 @@ function App() {
   const [mobileAgent, setMobileAgent] = useState(null)
   const [mobileMeeting, setMobileMeeting] = useState(null) // the meeting open in the phone's Meetings tab
   // What the phone's More tab shows: its list (null), Terminals ('terminals'), or a view (Studio, a
-  // file in it, Files, the agent map). Kept, as a computer keeps its tabs, so a reload comes back
+  // file in it, Folders, the agent map). Kept, as a computer keeps its tabs, so a reload comes back
   // to it. Terminals had a tab of its own until 3.8.3 (Memory a row through 3.13, Dictations through
   // 3.18: intoMeetings).
   const [moreView, setMoreView] = usePersisted('cc-more-view', null)
@@ -515,7 +515,7 @@ function App() {
       // On the phone's Cloud agents, Back (Android's) closes the agent first.
       if (cloudOnly && paneId !== mobileAgent) { if (window.history.state?.agent) window.history.replaceState({ agent: paneId }, ''); else window.history.pushState({ agent: paneId }, '') }
       // Meetings (Dictations too) and a meeting open in the phone's own Meetings tab; Studio (and a
-      // whiteboard in it) and Files in its More tab.
+      // whiteboard in it) and Folders in its More tab.
       if (typeof paneId === 'string' && paneId.startsWith('view:meeting')) { setMtab('meetings'); setMobileMeeting(paneId === 'view:meetings' ? null : paneId); return }
       if (typeof paneId === 'string' && (paneId.startsWith('view:studio') || paneId === 'view:files')) { setMtab('more'); setMoreView(paneId); return }
       if (paneId === 'view:home' || paneId === 'view:everything') { setMtab('home'); setHomeView(paneId === 'view:home' ? 'home' : 'everything'); return }
@@ -878,7 +878,7 @@ function App() {
     { id: 'a:dictations', label: t('Dictations'), sub: t('In Meetings'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent(DICTATIONS) },
     { id: 'a:memory', label: t('Memory'), sub: t('In Meetings and Dictations'), icon: 'book', keywords: 'memory people organizations organisations companies projects products terms names words misheard about me about you persona context meeting memory', run: () => openAgent(MEMORY) },
     StudioHome && { id: 'a:studio', label: t('Studio'), icon: 'layers', keywords: 'studio document word docx sheet excel xlsx spreadsheet deck slides powerpoint pptx pdf page html artifact markdown design pack', run: () => openAgent('view:studio') },
-    Explorer && { id: 'a:files', label: t('Files'), icon: 'folder', keywords: 'files finder explorer folders browse desktop documents downloads home drive disk icloud onedrive dropbox quick look get info', run: () => openAgent('view:files') },
+    Explorer && { id: 'a:files', label: t('Folders'), icon: 'folder', keywords: 'folders files finder explorer browse desktop documents downloads home drive disk icloud onedrive dropbox quick look get info', run: () => openAgent('view:files') },
     StudioHome && { id: 'a:boards', label: t('Whiteboards'), sub: t('In Studio'), icon: 'shapes', keywords: 'whiteboard board excalidraw draw sketch diagram flowchart architecture sequence org chart mermaid drawio canvas', run: () => openAgent('view:whiteboards') },
     { id: 'a:map', label: t('Agent Map'), icon: 'grid', keywords: 'what is running where devices computers machines all agents overview cloud subagents', run: openMap },
     { id: 'a:needs', label: t('Needs You'), icon: 'bell', keywords: 'inbox waiting approve allow permission questions answer review finished failed devices', run: () => setInbox({}) },
@@ -1161,7 +1161,7 @@ function App() {
       // The usage chip's account and figure (the desktop's top bar has it; a phone's has no room).
       { id: 'usage', icon: 'gauge', label: t('Usage'), hint: t('Plans, limits and history'), side: <UsageGlance quota={quota.data} primary={primary} />, run: () => setMoreView('usage') },
       StudioHome && { id: 'studio', icon: 'layers', label: t('Studio'), hint: t('Documents, sheets, decks, pages and whiteboards'), run: () => setMoreView('view:studio') },
-      Explorer && { id: 'files', icon: 'folder', label: t('Files'), hint: t('Every folder on your computers'), run: () => setMoreView('view:files') },
+      Explorer && { id: 'files', icon: 'folder', label: t('Folders'), hint: t('Every folder on your computers'), run: () => setMoreView('view:files') },
       { id: 'terminals', icon: 'terminal', label: t('Terminals'), hint: t("Every agent's terminal, live"), run: () => setMoreView('terminals') },
       { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
       { id: 'needs', icon: 'bell', label: t('Needs You'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
