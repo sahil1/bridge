@@ -64,8 +64,9 @@ export default function ChiefTasks({ agent, onOpenPath, onBoard }) {
   const items = data?.items || []
   const open = items.filter((x) => x.status !== 'done')
   const done = items.filter((x) => x.status === 'done')
-  const waiting = open.filter((x) => x.status === 'waiting').length
-  const doing = open.filter((x) => x.status === 'doing').length
+  // (A helper asking you something counts as needing you, as on the board.)
+  const waiting = open.filter((x) => columnOf(x) === 'needs').length
+  const doing = open.filter((x) => columnOf(x) === 'working').length
 
   // The tray grows upward into the chat; cap it so some of the conversation stays visible.
   const trayRef = useRef(null)
@@ -144,16 +145,18 @@ export default function ChiefTasks({ agent, onOpenPath, onBoard }) {
   const row = (it) => {
     const isDone = it.status === 'done'
     const queued = it.helper?.state === 'queued'
+    // Its helper asking you something: it needs you, though the task is still being done.
+    const asks = !isDone && columnOf(it) === 'needs' && it.status !== 'waiting'
     return (
-      <li key={it.id} className={`ct-item s-${it.status}`}>
-        <span className={`sdot sdot-${DOT[it.status]}`} style={{ '--d': '8px' }} role="img" aria-label={t(LABEL[it.status])} title={t(LABEL[it.status])} />
+      <li key={it.id} className={`ct-item s-${asks ? 'waiting' : it.status}`}>
+        <span className={`sdot sdot-${asks ? 'blocked' : DOT[it.status]}`} style={{ '--d': '8px' }} role="img" aria-label={asks ? t('Needs you') : t(LABEL[it.status])} title={asks ? t('Needs you') : t(LABEL[it.status])} />
         <div className="ct-main">
           <span className="ct-title"><span className="ct-id">{it.id}</span>{it.role && <span className="ct-role">{roleName(it.role)}</span>}{it.title}</span>
           {it.status === 'waiting' && it.needs && <span className="ct-needs">{t('Needs: {needs}', { needs: it.needs })}</span>}
           {isDone && it.outcome && <span className="ct-outcome">{it.outcome}</span>}
           {it.link && <span className="ct-links"><Result link={it.link} cwd={agent.cwd} onOpenPath={onOpenPath} /></span>}
         </div>
-        <span className="ct-meta">{isDone ? t('Done {day}', { day: day(it.done) }) : queued ? t('Queued') : `${it.status === 'open' ? '' : `${t(LABEL[it.status])} · `}${it.from === 'you' ? t('from you, {day}', { day: day(it.added) }) : day(it.added)}`}</span>
+        <span className="ct-meta">{isDone ? t('Done {day}', { day: day(it.done) }) : queued ? t('Queued') : asks ? t('Needs you') : `${it.status === 'open' ? '' : `${t(LABEL[it.status])} · `}${it.from === 'you' ? t('from you, {day}', { day: day(it.added) }) : day(it.added)}`}</span>
         {isDone
           ? <button className="ct-act" onClick={() => set(it, { status: 'open' })} disabled={busy === it.id} title={t('Reopen')} aria-label={t('Reopen task {id}', { id: it.id })}><Icon name="undo" size={12} /><span>{t('Reopen')}</span></button>
           : <button className="ct-act" onClick={() => set(it, { status: 'done', outcome: 'Marked done in the Tasks panel' })} disabled={busy === it.id} title={t('Mark done')} aria-label={t('Mark task {id} done', { id: it.id })}><Icon name="check" size={12} /><span>{t('Done')}</span></button>}
