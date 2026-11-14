@@ -2,6 +2,15 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.19.0
+
+The Chief of Staff hands work to helpers, each an agent with a role, and hears back from each one when it stops; its tasks show on a board.
+
+### What's new
+
+- **Helpers for the Chief of Staff**: it answers quick questions itself and hands longer or self-contained work to a helper, an agent with a role it picks (marketing, research, engineer), with `bridge delegate`. A helper works in its task's own folder, or the project folder named, and goes on the Chief of Staff's task list. Three work at once unless Settings › General › Advanced says otherwise; the rest are queued and start as one finishes. When a helper stops, the Chief of Staff gets one message with its task, what the helper said last and the files it made, on any agent it runs on; the task is marked done, or waiting on you with the reason when the helper couldn't start or was closed. Helpers ask before changing files, as agents do; **Helpers may edit in their own work folder** (off unless you turn it on) lets Claude Code, Codex, Gemini CLI and Antigravity CLI helpers change files there without asking.
+- **The Tasks board**: the Chief of Staff's tasks in four columns, Queued, Working, Needs you and Done. Each card has its helper's role, what it's doing now and for how long, and opens the helper; a finished one has its outcome and file, and one that couldn't start says why, with Try again. It's the Tasks tab on the Chief of Staff, Board in its Tasks panel, and the board button by its row in the sidebar, which shows how many helpers are at work. On a phone, one column at a time.
+
 ## 3.18.0
 
 Bridge AI's relay: your phone reaches your computer with your email and a code, and no Cloudflare account of your own. A meeting that ended can record again, several meetings combine into one with its own summary, and the meeting card switches between meetings at the same time and renames the recording. Add a computer leads the phone's devices menu, and Windows and Linux no longer show a calendar they can't read. A new install is counted the day it happens. Fixes: updating on a Mac opens the new version every time, and the document editor, sheets, Word files and Markdown are on their newest versions.
