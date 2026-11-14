@@ -1,5 +1,5 @@
 // Voice notes and dictation: speech to text on this computer, so audio never leaves it. The speech
-// model is the one picked in Settings › Voice (Parakeet unless you pick another), shared with
+// model is the one picked in Settings › Voice & Meetings (Parakeet unless you pick another), shared with
 // meetings (speech.js runs it); until it's downloaded, the Mac's own speech answers on macOS 26.
 // The model is one download, asked for the first time you use the mic (or from Settings), never
 // by itself.
@@ -19,7 +19,7 @@ import * as memory from './meetmemory.js'
 let cfg = {}
 export const configure = (c) => { cfg = c || {} }
 
-// What voice notes use and need, for the mic and Settings › Voice. The fields the page has always
+// What voice notes use and need, for the mic and Settings › Voice & Meetings. The fields the page has always
 // read (ready, model, modelMB, missing, installCommand, needsBrew, downloading, error) are kept.
 export async function status() {
   const s = await speech.voiceStatus(cfg)
@@ -122,7 +122,7 @@ async function viaFfmpeg(audio, type) {
 function notYet(s) {
   const m = s.model
   if (s.needs === 'model') return Object.assign(new Error(`Speech to text needs a one-time download: ${m.label}, ${m.mb} MB. It stays on this computer, and so does what you say.`), { code: 'needs-model', status: 409, model: m })
-  return Object.assign(new Error(`${m.label} needs whisper.cpp, which isn't on this computer. Set it up in Settings › Voice, or pick Parakeet there.`), { code: s.needs === 'brew' ? 'needs-brew' : 'needs-whisper', status: 409, model: m })
+  return Object.assign(new Error(`${m.label} needs whisper.cpp, which isn't on this computer. Set it up in Settings › Voice & Meetings, or pick Parakeet there.`), { code: s.needs === 'brew' ? 'needs-brew' : 'needs-whisper', status: 409, model: m })
 }
 
 // The names Parakeet listens for in a voice note, besides yours: the agents' and what they work in.
@@ -131,7 +131,7 @@ const HINT = 'chief of staff, Claude, Codex, Gemini, Cursor, Grok, Copilot, GitH
 
 // So names come out right: whisper takes a hint (words it's likely to hear), Parakeet names to
 // listen for (speech.js adds meeting memory's). Both have Bridge AI's words (or your own:
-// voice.prompt) and the words in Settings › Meetings; whisper's also meeting memory's names (yours
+// voice.prompt) and the words in Settings › Voice & Meetings; whisper's also meeting memory's names (yours
 // first, then the ones that come up most), as a meeting's has, and Parakeet's the names Bridge AI
 // knows (more). { prompt, words }.
 export function listenFor(more = []) {

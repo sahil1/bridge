@@ -1,5 +1,5 @@
 // The dictation key from any app (main.js starts this), and the small window that shows what you
-// said there (the app's own page, ?dictate=1: src/dictation/Hud.jsx). Settings › Voice › Dictation
+// said there (the app's own page, ?dictate=1: src/dictation/Hud.jsx). Settings › Voice & Meetings › Dictation
 // picks the key and turns it on or off; holding it inside Bridge AI is the page's own and needs none
 // of this.
 //
@@ -22,7 +22,7 @@
 // before the page gets it (before-input-event), with this computer's key. It says which agent it
 // has on screen (bridge:looking), for the dictation window's "the agent I looked at last".
 //
-// "Where I'm typing" (Settings › Voice, off until you pick it): the dictation window, once it has
+// "Where I'm typing" (Settings › Voice & Meetings, off until you pick it): the dictation window, once it has
 // the text, asks for it to be pasted into the app you were in (pasteInto in platform.js says how,
 // and whether this computer can): a Mac's helper (bridgekeys paste, which needs Accessibility, asked
 // for when you pick it), the keyboard hook's keyTap on Windows and X11, wtype on Wayland. Anything in
@@ -552,7 +552,7 @@ function start({ electron, ROOT, DATA, URL_BASE, preload, isOurs, askAccess, tru
     return keyPaste({ text, clipboard, hook: loadHook(), terminal, ready: keys?.modsUp ? () => keys.modsUp(1500) : null })
   }
   // ---------- Edit by voice ----------
-  // On only when picked (Settings › Voice) and where this computer can (platform.js editByVoice), and
+  // On only when picked (Settings › Voice & Meetings) and where this computer can (platform.js editByVoice), and
   // only with Accessibility (the selection is asked of the app through it).
   const editOn = () => settings.edit === true && !!ev.can && pasteStatus().allowed
   function readSelection(pid) {

@@ -39,7 +39,7 @@ const saveDraft = (id, d) => {
 // desktop app's dictation window). The speech model: what it is and its size, in the server's
 // words, one button to download it with progress, then what you said, kept meanwhile
 // (initial.audio: dictation/controller.js holds it), turned into text by onReady, which sends it
-// again. whisper.cpp (a Whisper model picked in Settings › Voice): installed in a terminal tab, with
+// again. whisper.cpp (a Whisper model picked in Settings › Voice & Meetings): installed in a terminal tab, with
 // Homebrew first on a Mac that has none.
 export function VoiceSetup({ initial, onReady, onClose }) {
   const [v, setV] = useState(initial)
@@ -79,8 +79,8 @@ export function VoiceSetup({ initial, onReady, onClose }) {
   else if (whisper && brewing && v.installCommand) { text = t('Homebrew is in. One more step: whisper.cpp.'); actions = <button className="btn small primary" onClick={() => { setBrewing(false); setup() }}>{t('Set up')}</button> }
   else if (whisper && brewing) text = t('Installing Homebrew in a terminal tab, in the Setup space. It asks for your Mac password there.')
   else if (whisper && started && v.installCommand) text = t('Installing whisper.cpp in a terminal tab, in the Setup space. If it asks for your password, answer it there.')
-  else if (whisper && v.needsBrew) { text = t("{model} needs whisper.cpp, which comes from Homebrew, and Homebrew isn't on this Mac yet. Or pick Parakeet in Settings › Voice: nothing to install.", { model: model.label }); actions = <button className="btn small primary" onClick={installBrew}>{t('Install Homebrew')}</button> }
-  else if (whisper && !v.installCommand) text = t('{model} needs whisper.cpp: install whisper-cli on your computer, then tap the mic again. Or pick Parakeet in Settings › Voice: nothing to install.', { model: model.label })
+  else if (whisper && v.needsBrew) { text = t("{model} needs whisper.cpp, which comes from Homebrew, and Homebrew isn't on this Mac yet. Or pick Parakeet in Settings › Voice & Meetings: nothing to install.", { model: model.label }); actions = <button className="btn small primary" onClick={installBrew}>{t('Install Homebrew')}</button> }
+  else if (whisper && !v.installCommand) text = t('{model} needs whisper.cpp: install whisper-cli on your computer, then tap the mic again. Or pick Parakeet in Settings › Voice & Meetings: nothing to install.', { model: model.label })
   else if (whisper) { text = t('{model} needs whisper.cpp, a free program. It installs in a minute.', { model: model.label }); actions = <button className="btn small primary" onClick={setup}>{t('Install it')}</button> }
   else {
     // In your language from what's needed; else the server's own words from its answer.
@@ -142,7 +142,7 @@ function useMentions(url, query) {
   }, [url, query])
   return { items, cwd }
 }
-// Meetings to mention, found as you type after the meeting key (Settings › Meetings): on the
+// Meetings to mention, found as you type after the meeting key (Settings › Voice & Meetings): on the
 // computer the agent runs on (its own, where the file it reads will be) and on the ones linked to it,
 // which that computer asks (one that's offline or slow is named in unreachable, not waited for).
 // While the answer for what's typed is on its way, the last answer's meetings that match it stay, so
@@ -566,7 +566,7 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   const isJump = (f) => f.place || (f.label === '..' && mentionQ === '')
   const mentionItems = mentionQ != null && found && !onlyMeet ? found.filter((f) => !isJump(f)).map(toItem) : []
   const mentionJumps = mentionQ != null && found && !onlyMeet ? found.filter(isJump).map(toItem) : []
-  // Meetings, mentioned with the meeting key (Settings › Meetings). With @ and nothing after it, the
+  // Meetings, mentioned with the meeting key (Settings › Voice & Meetings). With @ and nothing after it, the
   // first row is Meetings, which makes the menu your meetings, the latest first and then those that
   // match what you type (Esc, or Backspace with nothing typed, goes back to the files); with a word
   // after @, the meetings whose name has it come first, then the files. With another key, only

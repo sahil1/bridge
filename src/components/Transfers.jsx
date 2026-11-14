@@ -123,7 +123,7 @@ export function SendDialog({ src, here = false, onClose }) {
           {what ? (what.dir ? t('A folder: {n} files, {size}', { n: what.count, size: fmtSize(what.total) }) : fmtSize(what.total)) : src.size != null && !src.dir ? fmtSize(src.size) : ' '}
           {what?.links ? ` · ${t('{n} links in it are left out', { n: what.links })}` : ''}
         </p>
-        {noDevices && <p className="small">{t('None of your other devices is linked to this one yet. Link one in Settings › Devices.')}</p>}
+        {noDevices && <p className="small">{t('None of your other devices is linked to this one yet. Link one in Settings › Devices › Computers.')}</p>}
         {!here && devices?.length > 0 && (
           <label className="na-field">
             <span className="na-label">{t('To')}</span>

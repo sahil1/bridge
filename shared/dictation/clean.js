@@ -1,4 +1,4 @@
-// What you said, tidied before it lands (Settings › Voice › Dictation): no model, a few
+// What you said, tidied before it lands (Settings › Voice & Meetings › Dictation): no model, a few
 // milliseconds, the same in the desktop app, a browser and on the phone (whose words are turned into
 // text on the computer, and tidied by the page it serves).
 //   Light cleanup (on unless turned off): "um" and "uh" go, a word said twice is kept once, the

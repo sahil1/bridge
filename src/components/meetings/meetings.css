@@ -143,7 +143,7 @@
   .mt-transcript { border-left: 0; padding-left: 0; }
 }
 
-/* Settings › Meetings (settings/Meetings.jsx). */
+/* Settings › Voice & Meetings (settings/Meetings.jsx). */
 .st-check { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; line-height: 1.45; cursor: pointer; }
 .st-check input { margin-top: 3px; flex: none; }
 .st-meet textarea.st-input { height: auto; padding: 8px 11px; resize: vertical; font-family: var(--font); }
@@ -431,7 +431,7 @@ html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box
 .mt-mem-src { min-width: 56px; text-align: center; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--pane-3); color: var(--ink-3); }
 .mt-mem-src.you { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 
-/* Settings › Meetings › Save notes: a folder, subfolders and a file name for each kind of note. */
+/* Settings › Voice & Meetings › Save notes: a folder, subfolders and a file name for each kind of note. */
 .st-group { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--pane-2); }
 .st-pattern { display: grid; grid-template-columns: 110px minmax(0, 1fr); align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
 .st-pattern .st-row { margin: 0; }

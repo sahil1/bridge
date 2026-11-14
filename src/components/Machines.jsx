@@ -491,7 +491,7 @@ function DeviceDetails({ m, here = false, readOnly = false, onChanged }) {
         {st?.error && <p className="error-text small">{st.error}</p>}
       </>}
       {rows.length > 0 && <dl className="mch-facts">{rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>}
-      {m.safety && <p className="muted small">{here ? t('Your other devices show this security code for this one. If one shows a different code, it isn\'t linked to this device.') : t('On {name}, Settings › Devices › Details shows the same code. If it doesn\'t, link again.', { name: m.name })}</p>}
+      {m.safety && <p className="muted small">{here ? t('Your other devices show this security code for this one. If one shows a different code, it isn\'t linked to this device.') : t('On {name}, Settings › Devices › Computers › Details shows the same code. If it doesn\'t, link again.', { name: m.name })}</p>}
     </div>
   )
 }
@@ -648,10 +648,10 @@ export function MachinesSettings({ embedded = false, focus = false }) {
           <button type="submit" className="btn primary" disabled={!link.trim() || !!busy}>{busy === 'add' ? t('Linking…') : t('Link')}</button>
         </form>
         {data.canBeLinked && !machineId
-          ? <p className="muted small">{t('To link this device from another one, choose Pair a device at the top of this page and use its link or code there.')}</p>
+          ? <p className="muted small">{t('To link this device from another one, choose Pair a device in the Phone tab and use its link or code there.')}</p>
           : !data.canBeLinked && <p className="muted small">{data.hostedAvailable
-            ? t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare (or use Bridge AI's relay) at the top of this page. It can still link to them.")
-            : t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare at the top of this page. It can still link to them.")}</p>}
+            ? t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare (or use Bridge AI's relay) in the Phone tab. It can still link to them.")
+            : t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare in the Phone tab. It can still link to them.")}</p>}
         {msg && <p className={`small ${msg.error ? 'error-text' : 'muted'}`}>{msg.text}</p>}
       </section>}
     </Wrap>

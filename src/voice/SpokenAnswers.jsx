@@ -5,7 +5,7 @@ import { how, onVoices, prefs, setPrefs, say, choice, keyOf, tier, quality, bett
 import { t } from '../i18n/index.js'
 import './voice.css'
 
-// Settings › Voice › Spoken Answers: the voice that reads the Chief of Staff's answers aloud on this
+// Settings › Voice & Meetings › Spoken Answers: the voice that reads the Chief of Staff's answers aloud on this
 // device (its own voices, the most natural first and picked unless you pick another; kept on this
 // device, since each has different ones), how fast, and a Test. Or the natural voice your computer
 // makes, where it can run: one download, said with its size before it starts, then picked; which

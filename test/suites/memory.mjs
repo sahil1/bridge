@@ -30,7 +30,7 @@
 // People with the people you meet (Meeting Insights on), one kept in memory, and nothing of it with
 // it off. Dictations' Memory tab: what came up in dictations and yours, A to Z, no people you meet,
 // All memory with them, and from dictations again from its tab. Every way in opens a page, never a
-// dialog: Meetings' tab and a meeting's menu at its own, ⌘K, Settings › Meetings and a tab kept from
+// dialog: Meetings' tab and a meeting's menu at its own, ⌘K, Settings › Voice & Meetings and a tab kept from
 // when Memory was a page of its own at all of it. A window showing another computer (Desk, its own
 // server, reached at /m/desk/ as Bridge AI does): Desk's memory, said to be Desk's; each computer
 // keeping its own Meetings at Memory and collection as the window goes from one to the other; Desk
@@ -408,7 +408,7 @@ try {
   await away()
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meetings' } })))
   await p.locator('.modal.settings button', { hasText: 'Open Memory' }).click()
-  ok(!!(await opened(true)), 'and Settings › Meetings\' Open Memory, closing Settings, at all of it')
+  ok(!!(await opened(true)), 'and Settings › Voice & Meetings\' Open Memory, closing Settings, at all of it')
   ok(!real(deskPage.errors).length, 'no page errors', deskPage.errors)
 
   // ---------- A window showing Desk ----------

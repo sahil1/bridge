@@ -5,7 +5,8 @@ import { t, tx } from '../../i18n/index.js'
 // Settings at it, Advanced too (Settings.jsx; bridge-open-settings with section: its id). near: what
 // to show instead when it isn't there just now (dictation's extras while dictation is off). when:
 // only in the desktop app ('desktop'), with the desktop's top bar ('wide'), or with a beta feature
-// on (its id, src/trials.js).
+// on (its id, src/trials.js). Its section is where Settings opens for it: for Voice & Meetings and
+// Devices, the tab it's in (voice is Speech to Text, phone and machines Devices' Phone and Computers).
 const at = (section, list) => list.map(([id, label, keywords = '', o = {}]) => ({ section, id, label, keywords, ...o }))
 
 export const SETTINGS = [
@@ -39,7 +40,10 @@ export const SETTINGS = [
     ['providers-speech', tx('Speech to text services'), 'deepgram assemblyai elevenlabs speech transcription keys'],
   ]),
   ...at('voice', [
-    ['speech-model', tx('Speech to text'), 'speech model parakeet whisper transcribe download voice notes'],
+    ['speech-model', tx('Speech Model'), 'speech to text model parakeet whisper transcribe download voice notes'],
+    ['spoken-answers', tx('Spoken Answers'), 'read aloud voice speed speak answers ask out loud'],
+  ]),
+  ...at('dictation', [
     ['dictation', tx('Dictation'), 'dictation key talk hold fn background paste where typing'],
     ['edit-by-voice', tx('Edit by voice'), 'rewrite selection voice edit', { when: 'desktop', near: 'dictation' }],
     ['tidy', tx('Tidy what I say'), 'tidy cleanup filler um model', { when: 'dictation-cleanup', near: 'dictation' }],
@@ -47,7 +51,6 @@ export const SETTINGS = [
     ['mention-files', tx('Mention files by saying them'), 'at file mention say', { near: 'dictation' }],
     ['live-words', tx('Show the words as you talk'), 'live words as you talk', { near: 'dictation' }],
     ['dictation-history', tx('Dictation History'), 'history keep recordings delete dictations', { near: 'dictation' }],
-    ['spoken-answers', tx('Spoken Answers'), 'read aloud voice speed speak answers ask out loud'],
   ]),
   ...at('meetings', [
     ['transcribe', tx('Transcribe with'), 'speech engine transcription service local apple'],
@@ -77,13 +80,17 @@ export const SETTINGS = [
   ...at('phone', [
     ['relay', tx('From anywhere'), 'relay phone cloudflare pair a device remote away'],
     ['tailscale', tx('Tailscale'), 'tailscale phone access vpn'],
+    ['keep-awake', tx('Keep this computer awake while your phone can reach it'), 'awake sleep lid', { near: 'relay' }],
+  ]),
+  ...at('machines', [
     ['machines', tx('Your Devices'), 'devices computers other computers'],
     ['link-device', tx('Link a device'), 'link pair computer address code'],
+  ]),
+  ...at('notifications', [
     ['this-device', tx('Notifications on this device'), 'notifications push turn on test'],
     ['notify', tx('What to notify about'), 'notify needs you finished usage low'],
     ['notify-more', tx('Answer buttons for simple questions (yes or no, or two short choices)'), 'answer buttons phone at computer muted unmute', { near: 'notify' }],
     ['notify-devices', tx('Devices getting notifications'), 'devices notifications remove', { near: 'notify' }],
-    ['keep-awake', tx('Keep this computer awake while your phone can reach it'), 'awake sleep lid', { near: 'relay' }],
   ]),
   ...at('account', [
     ['delete-account', tx('Delete account…'), 'delete account bold bridge'],
@@ -115,8 +122,8 @@ export const SETTINGS = [
 ]
 
 const PLACES = {
-  general: tx('General'), agents: tx('Agents'), providers: tx('Model Providers'), voice: tx('Voice'), meetings: tx('Meetings'), mail: tx('Mail'),
-  mcp: tx('MCP Servers'), phone: tx('Devices'), account: tx('Account'), appearance: tx('Appearance'), config: tx('Config File'), about: tx('About & Updates'),
+  general: tx('General'), agents: tx('Agents'), providers: tx('Model Providers'), voice: tx('Voice & Meetings'), dictation: tx('Voice & Meetings'), meetings: tx('Voice & Meetings'), mail: tx('Mail'),
+  mcp: tx('MCP Servers'), phone: tx('Devices'), machines: tx('Devices'), notifications: tx('Devices'), account: tx('Account'), appearance: tx('Appearance'), config: tx('Config File'), about: tx('About & Updates'),
 }
 export const placeOf = (x) => t(PLACES[x.section])
 

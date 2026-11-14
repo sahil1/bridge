@@ -11,7 +11,7 @@ export function setMemoryAll(from, all) {
   window.dispatchEvent(new CustomEvent('bridge-memory-all', { detail: { from, all: !!all } }))
 }
 // Meetings at its Memory tab: its own, or all of it. App.jsx opens it so for ⌘K's Memory, Settings ›
-// Meetings and a tab kept from when Memory was a page of its own (view:memory), which showed all of it.
+// Voice & Meetings and a tab kept from when Memory was a page of its own (view:memory), which showed all of it.
 export function memoryTab({ all = false } = {}) {
   setMemoryAll('meetings', all)
   store.set('cc-meet-tab', 'memory')

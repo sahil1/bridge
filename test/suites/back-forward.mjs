@@ -58,7 +58,8 @@ try {
   const here = (p) => p.evaluate(() => {
     const txt = (s) => document.querySelector(s)?.textContent?.trim() || ''
     const st = txt('.modal.settings .st-head h3')
-    if (st) return `Settings › ${st}`
+    const stTab = txt('.modal.settings .st-tabs [aria-selected="true"]')
+    if (st) return `Settings › ${st}${stTab ? ` › ${stTab}` : ''}`
     if (document.querySelector('.work.maxed .calv')) return 'Calendar'
     const tab = document.querySelector('.ws-tab.main')?.dataset.pane || ''
     if (tab === 'view:meetings') return `Meetings › ${txt('.mt-view .seg [aria-selected="true"]')}`
@@ -176,6 +177,19 @@ try {
     ok(!!(await at(p, 'Settings › General')), `${FORWARD}: Settings opens again, at General`, await here(p))
     await p.keyboard.press(FORWARD)
     ok(!!(await at(p, 'Settings › Appearance')), `${FORWARD} again: at Appearance`, await here(p))
+    // Voice & Meetings' tabs: a place each, too.
+    await p.locator('.st-nav-item', { hasText: 'Voice & Meetings' }).click()
+    await at(p, 'Settings › Voice & Meetings › Meetings'); await settle()
+    await p.locator('.st-tabs [role="tab"]', { hasText: 'Dictation' }).click()
+    await at(p, 'Settings › Voice & Meetings › Dictation'); await settle()
+    await p.keyboard.press(BACK)
+    ok(!!(await at(p, 'Settings › Voice & Meetings › Meetings')), `${BACK} from Voice & Meetings' Dictation tab: its Meetings tab`, await here(p))
+    await p.keyboard.press(FORWARD)
+    ok(!!(await at(p, 'Settings › Voice & Meetings › Dictation')), `${FORWARD}: Dictation again`, await here(p))
+    await p.keyboard.press(BACK)
+    await at(p, 'Settings › Voice & Meetings › Meetings')
+    await p.keyboard.press(BACK)
+    await at(p, 'Settings › Appearance')
     await p.keyboard.press(BACK)
     await at(p, 'Settings › General')
     await p.keyboard.press(BACK)

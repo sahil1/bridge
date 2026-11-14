@@ -1633,7 +1633,7 @@ app.post('/api/dictation/live/:sid', express.raw({ type: () => true, limit: '4mb
 })
 app.delete('/api/dictation/live/:sid', wrap((req) => livewords.end(req.params.sid)))
 // Answers read aloud by this computer (voicespeak.js): the natural voice once it's downloaded, or
-// eSpeak NG where the device has no voice of its own. Its download is asked for in Settings › Voice.
+// eSpeak NG where the device has no voice of its own. Its download is asked for in Settings › Voice & Meetings.
 app.get('/api/voice/speak', wrap(() => voicespeak.status()))
 app.post('/api/voice/speak', async (req, res) => {
   const b = req.body || {}
@@ -1746,14 +1746,14 @@ meetings.setHelpers({
 // A meeting's action items as agents and Chief of Staff's tasks (meetwork.js).
 meetWork.configure(cfg)
 meetWork.setHelpers({ fleet: () => (lastFleet ? Promise.resolve(lastFleet) : fleetView()), projects: () => projects.list(), tasks: () => chiefTasks.list(), pr: (dir, branch) => pr.status(dir, { branch }), tree: (folder) => worktrees.describe(folder), kindLabel: (k) => adapter(k).label || k, launch: (body) => launchFrom(body) })
-// Speech engines (speech.js): what Settings › Meetings shows, models to download, whisper.cpp to install.
+// Speech engines (speech.js): what Settings › Voice & Meetings shows, models to download, whisper.cpp to install.
 app.get('/api/speech', wrap(async () => ({ ...(await speech.status(cfg)), callAudio: cfg.meetings?.callAudio !== false, canRecordCall: !!meetings.tapBin(), canWatchCalls: !!calls.watchBin(), folder: meetings.folder(), voices: await voices.status() })))
 app.post('/api/speech/models/:id', wrap(async (req) => { speech.fetchModel(req.params.id); return speech.status(cfg) }))
 app.delete('/api/speech/models/:id', wrap(async (req) => { await speech.removeModel(req.params.id); return speech.status(cfg) }))
 app.post('/api/speech/install', wrap(async (req) => {
   onComputer(req)
   const s = await speech.status(cfg)
-  if (!s.local.installCommand) throw new Error(s.local.program ? 'whisper.cpp is already installed' : 'Install Homebrew first (brew.sh), or pick a service in Settings › Meetings')
+  if (!s.local.installCommand) throw new Error(s.local.program ? 'whisper.cpp is already installed' : 'Install Homebrew first (brew.sh), or pick a service in Settings › Voice & Meetings')
   return { openId: await setupTab('Install whisper.cpp', s.local.installCommand) }
 }))
 // The list without each meeting's pictures and files (counts only): they can be long.
@@ -1807,7 +1807,7 @@ app.post('/api/meetings/bulk', wrap(async (req) => {
   return out
 }))
 // Voices in a room (voices.js): whether it's offered here, the model, what's remembered; Forget
-// voices; Download (Settings › Meetings).
+// voices; Download (Settings › Voice & Meetings).
 app.get('/api/meetings/voices', wrap(() => voices.status()))
 app.post('/api/meetings/voices/forget', wrap(() => voices.forget()))
 app.post('/api/meetings/voices/download', wrap(async () => { if (!(await voices.status()).offered) throw new Error((await voices.status()).why || 'Telling voices apart can\'t run on this computer'); speech.fetchModel(speech.VOICE.id); return voices.status() }))
@@ -1878,7 +1878,7 @@ app.post('/api/memory/apart', wrap((req) => meetMemory.apart(String(req.body?.a 
 app.post('/api/memory/tidy', wrap((req) => ({ ...meetMemory.removeMany([].concat(req.body?.remove || []).slice(0, 2000)), ...meetMemory.keep([].concat(req.body?.keep || []).slice(0, 2000)) })))
 app.post('/api/memory/about', wrap((req) => memoryView.setAboutYou(req.body || {})))
 app.post('/api/memory/people/keep', wrap((req) => memoryView.keepPerson(String(req.body?.id || ''))))
-// Where notes are saved (Settings › Meetings), the example it shows, and meetings saved elsewhere.
+// Where notes are saved (Settings › Voice & Meetings), the example it shows, and meetings saved elsewhere.
 app.get('/api/meetings/saving', wrap(() => {
   const o = meetings.saving()
   const t = meetings.target({ title: 'Weekly sync', startedAt: new Date().toISOString(), kind: 'general' }, o)
@@ -1935,7 +1935,7 @@ app.get('/api/calls/event', wrap(async (req) => {
 }))
 syncCalls()
 // Meetings to mention in a message, and one as a file for an agent to read (the message box's
-// meeting key, @ unless Settings › Meetings says another): this computer's, and those on your other
+// meeting key, @ unless Settings › Voice & Meetings says another): this computer's, and those on your other
 // computers (machines.js), each asked at once and given MENTION_MS, so one that's slow or offline
 // never holds up the menu; it's named in unreachable instead. here=1: only this computer's, as
 // another computer asks. agentText: this Bridge AI gives a meeting's words to another computer
@@ -3014,10 +3014,10 @@ app.get('/api/config', (req, res) => res.json({
   name: cfg.name || '', location: cfg.location?.label || null, hasMortgage: !!cfg.mortgage,
   runtime: { name: rt.name, ...rt.caps, attach: !!rt.attach, ...(rt.name === 'herdr' ? { session: herdrSession() } : { keep: cfg.keepAgents !== false }), ...(fellBack() ? { fellBack: fellBack() } : {}) }, platform: process.platform, mail: IS_MAC, calendar: IS_MAC, accounts: account.available(),
   defaultAgent: cfg.defaultAgent || 'claude', chiefKind: cfg.chief?.kind || 'claude', setupDone: !!cfg.setupDone, simple: !!cfg.simple,
-  // Settings › Voice › Dictation; Tidy what I say only while its trial is on.
+  // Settings › Voice & Meetings › Dictation; Tidy what I say only while its trial is on.
   dictation: trialOn('dictation-cleanup') || !cfg.dictation?.tidy ? cfg.dictation || {} : { ...cfg.dictation, tidy: false },
   alertSounds: cfg.alertSounds !== false, // the speaker in the top bar
-  meetingKey: MEETING_KEYS.includes(cfg.meetings?.mentionKey) ? cfg.meetings.mentionKey : '@', // Settings › Meetings
+  meetingKey: MEETING_KEYS.includes(cfg.meetings?.mentionKey) ? cfg.meetings.mentionKey : '@', // Settings › Voice & Meetings
   trials: Object.fromEntries(TRIALS.map((id) => [id, trialOn(id)])), // Settings › About & Updates › Beta Features
   // The effort each agent starts with (Settings › Agents), for a task's effort chip to say: only
   // with Recommended Settings on, as it's only passed then.
@@ -3462,7 +3462,7 @@ app.post('/api/signin/:kind', wrap(async (req) => {
 const CHAT_NOTE = `# Chat\n\nThis is a plain conversation with the user, not a project. Answer directly and helpfully. There are no project files here; only read or change files elsewhere if the user asks.\n`
 // kind 'chat': Bridge AI's own chat with any model (chatmodels.js), on the model picked. automatic:
 // the one meeting notes are written with when none is picked (pickMeetingModel), for Settings ›
-// Meetings to say which it is and where it runs.
+// Voice & Meetings to say which it is and where it runs.
 app.get('/api/chat/models', wrap(async (req) => {
   const models = await chatModels.models({ fresh: !!req.query.refresh })
   return { models, runtime: rt.name, automatic: await pickMeetingModel() }

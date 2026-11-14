@@ -2461,6 +2461,11 @@ button.ue-row:hover { background: var(--pane-2); }
 .st-list .m-more-text span { white-space: normal; overflow: visible; line-height: 1.35; }
 .st-list .m-more-row { min-height: 60px; padding-block: 10px; }
 .st-lede { margin: 0 0 12px; }
+/* A section's tabs (Voice & Meetings): under its name, and on a phone across the top of it. */
+.st-tabs { margin-top: 10px; }
+.modal.settings.phone .st-tabs { display: flex; margin: 0 0 14px; }
+.modal.settings.phone .st-tabs button { white-space: nowrap; }
+.modal.settings.phone .st-tabs button { flex: 1; justify-content: center; min-height: 40px; padding: 0 6px; }
 
 /* New agent: project or plain chat, agents with their logos */
 .na-mode { width: 100%; }

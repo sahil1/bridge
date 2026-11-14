@@ -89,11 +89,18 @@ const PATHS = {
   'settings:general': { phone: 'Settings › General' },
   'settings:agents': { phone: 'Settings › Agents' },
   'settings:providers': { phone: 'Settings › Model Providers' },
-  'settings:voice': { phone: 'Settings › Voice' },
-  'settings:meetings': { phone: 'Settings › Meetings' },
+  // Voice & Meetings, and its tabs (their ids open it at each).
+  'settings:voice-meetings': { phone: 'Settings › Voice & Meetings' },
+  'settings:meetings': { phone: 'Settings › Voice & Meetings › Meetings' },
+  'settings:dictation': { phone: 'Settings › Voice & Meetings › Dictation' },
+  'settings:voice': { phone: 'Settings › Voice & Meetings › Speech to Text' },
   'settings:mail': { phone: 'Settings › Mail', mac: true },
   'settings:mcp': { phone: 'Settings › MCP Servers' },
-  'settings:phone': { phone: 'Settings › Devices' },
+  // Devices, and its tabs.
+  'settings:devices': { phone: 'Settings › Devices' },
+  'settings:phone': { phone: 'Settings › Devices › Phone' },
+  'settings:machines': { phone: 'Settings › Devices › Computers' },
+  'settings:notifications': { phone: 'Settings › Devices › Notifications' },
   // (There only once Bold Bridge accounts exist, server/account.js: account-ui follows it on a phone.)
   'settings:account': { phone: 'Settings › Account', accounts: true },
   'settings:appearance': { phone: 'Settings › Appearance' },
@@ -268,10 +275,10 @@ try {
     await shot(ph.p, `${tag}phone-settings-${width}`)
     // (Each tap gives up after a moment, so a missing control fails its own check below.)
     const tap = (l) => l.click({ timeout: 4000 }).catch(() => {})
-    await tap(ph.p.locator('.modal.settings .st-list').getByText('Voice', { exact: true }))
-    await at(ph.p, 'Voice', 4000)
+    await tap(ph.p.locator('.modal.settings .st-list').getByText('Agents', { exact: true }))
+    await at(ph.p, 'Agents', 4000)
     const voice = await sheet()
-    ok(voice.title === 'Voice' && voice.back === 'Settings' && voice.closes === 1 && !voice.rows.length && !voice.tabs && voice.full && voice.lede === named.find((s) => s.name === 'Voice')?.hint,
+    ok(voice.title === 'Agents' && voice.back === 'Settings' && voice.closes === 1 && !voice.rows.length && !voice.tabs && voice.full && voice.lede === named.find((s) => s.name === 'Agents')?.hint,
       `${width}: a section opens full width, its name over it with ‹ Settings beside and the same one close, and what's in it at the top`, voice)
     f = await phoneFaults(ph.p, '.modal.settings .st-bar')
     ok(!Object.keys(f).length, `${width}: its bar fits the phone (‹ Settings, the name and the close, each a whole target, nothing cut off)`, f)
@@ -285,7 +292,7 @@ try {
 
     // Opened at a section: there, with ‹ Settings back to the list. A link to it (from Meetings, the
     // tour, a fix), ⌘K, a link from inside Settings, and a link to the section it opened at.
-    const deep = [['voice', 'Voice'], ['accounts', 'Model Providers'], ['machines', 'Devices'], ['permissions', 'General'], ['about', 'About & Updates']]
+    const deep = [['voice', 'Voice & Meetings'], ['dictation', 'Voice & Meetings'], ['accounts', 'Model Providers'], ['machines', 'Devices'], ['notify', 'Devices'], ['permissions', 'General'], ['about', 'About & Updates']]
     const missed = []
     const open = (section) => ph.p.evaluate((section) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section } })), section)
     for (const [section, name] of deep) {

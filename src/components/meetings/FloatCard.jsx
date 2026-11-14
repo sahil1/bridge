@@ -17,15 +17,15 @@ import './meetings.css'
 // note, Suggest what to ask and watching the shared screen (Capture), New section and Stop, and the
 // way back to the meeting or to every meeting. The bar is the same open or closed, so the button
 // under the pointer as it opens stays where it was. Pinned, it stays open. Set to open on a click
-// instead (Settings › Meetings), a click on the bar opens and closes it. On a Mac it can move to the
+// instead (Settings › Voice & Meetings), a click on the bar opens and closes it. On a Mac it can move to the
 // menu bar for the meeting, out of the way of a screen you share. When a call starts: Take notes.
-// When it ends: Stop or keep recording. Otherwise (Settings › Meetings › Always): what needs you.
+// When it ends: Stop or keep recording. Otherwise (Settings › Voice & Meetings › Always): what needs you.
 // With AI Assist's live board on (a beta feature), a line says what's on it and opens it.
 // With AI Assist's Suggest what to ask on, its newest suggestion shows under the bar, open or not,
 // since you're looking at the call: ✓ puts it in your notes, ✕ dismisses it. Ten minutes before a
 // meeting with other people: Join, and what to go in with at a glance (prep.jsx's PrepGlance), with
 // a small menu by its ×: remind me again when it's about to start, hide it until the next meeting,
-// or turn these reminders off (Settings › Meetings › Remind me before meetings turns them back on).
+// or turn these reminders off (Settings › Voice & Meetings › Remind me before meetings turns them back on).
 // With more than one meeting at the same time, ‹ 1 of 2 › goes from one to the other: before they
 // start (Join, the prep and the menu are the one showing's, and × hides that one only), when a call
 // starts (which one the notes are for) and while it records (the notes go to the other one instead).
@@ -472,7 +472,7 @@ export default function FloatCard() {
         )}
         {opts === 'off' && (
           <div className="fc-banner fc-confirm" role="alertdialog" aria-label={t('Turn off meeting reminders?')}>
-            <p><b>{t('Turn off meeting reminders?')}</b> {t("The card won't show before your meetings. Turn them back on in Settings › Meetings › Remind me before meetings.")}</p>
+            <p><b>{t('Turn off meeting reminders?')}</b> {t("The card won't show before your meetings. Turn them back on in Settings › Voice & Meetings › Remind me before meetings.")}</p>
             <span className="fc-banner-acts">
               <button type="button" className="btn small" onClick={() => setOpts(null)}>{t('Cancel')}</button>
               <button type="button" className="btn small primary" disabled={busy} onClick={stop}><Icon name="bell-off" size={12} /> {t('Turn off')}</button>

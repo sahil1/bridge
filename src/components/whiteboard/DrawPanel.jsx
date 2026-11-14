@@ -120,7 +120,7 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
   useEffect(() => board.api?.onChange((elements, appState) => { const c = count(elements, appState); setScene((x) => (x.n === c.n && x.sel === c.sel && x.waits === c.waits && x.sugs === c.sugs ? x : c)) }), [board.api])
   useEffect(() => { const ex = board.api; if (ex) setScene(count(ex.getSceneElements(), ex.getAppState())) }, [sug]) // eslint-disable-line react-hooks/exhaustive-deps
   const sel = scene.sel
-  // Dictation's key (Settings › Voice), to say what to draw.
+  // Dictation's key (Settings › Voice & Meetings), to say what to draw.
   const dict = usePoll('/config', 10 * 60 * 1000).data?.dictation
   const platform = window.bridgeApp?.platform || (/Mac|iPhone|iPad/.test(navigator.platform) ? 'darwin' : /Win/.test(navigator.platform) ? 'win32' : 'linux')
   const dictKey = dict?.on === false ? null : keyLabel(dict?.key || defaultKey(platform), platform)

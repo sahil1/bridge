@@ -96,11 +96,11 @@ export default function Dictations() {
               onClick={() => { if (v === 'memory' && tab !== 'memory') setMemoryAll('dictations', false); setTab(v) }}><Icon name={icon} size={14} /><span>{t(label)}</span></button>
           ))}
         </div>
-        <button type="button" className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } }))} title={t('Keep history, how long, the recordings, Delete all')}><Icon name="settings" size={13} /> {t('Settings')}</button>
+        <button type="button" className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'dictation' } }))} title={t('Keep history, how long, the recordings, Delete all')}><Icon name="settings" size={13} /> {t('Settings')}</button>
       </PaneHeader>
       {tab === 'memory' ? <Memory from="dictations" /> : <div className="dc-home" ref={listRef}>
         {data && !data.history && (
-          <p className="dc-off small" role="status"><Icon name="info" size={13} /> {t('History is off, so new dictations aren\'t kept. Turn it on in Settings › Voice.')}</p>
+          <p className="dc-off small" role="status"><Icon name="info" size={13} /> {t('History is off, so new dictations aren\'t kept. Turn it on in Settings › Voice & Meetings › Dictation.')}</p>
         )}
         {(total > 0 || q) && <input className="dc-search" type="search" placeholder={t('Search what you said, and where')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search dictations')} />}
         {error && !data && <p className="error-text small">{error}</p>}
