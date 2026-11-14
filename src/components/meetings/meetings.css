@@ -498,10 +498,6 @@ html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box
 /* 3.0: a meeting and the list of them in a tab, with a header like an agent's (layout.jsx
    PaneHeader): the name, when, who and where the notes are, changed or opened in place. */
 .mt-view { display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); height: 100%; min-height: 0; min-width: 0; background: var(--pane); }
-/* Meetings or Dictations, at the top of Meetings once there's a dictation (Meetings.jsx Kinds), over
-   either one's header. */
-.mt-view.with-kinds { grid-template-rows: auto auto minmax(0, 1fr); }
-.mt-kinds { display: flex; padding: 8px 14px 0; background: var(--pane); }
 .mt-view > .mt-page, .mt-view > .mt-home { height: auto; min-height: 0; overflow: auto; }
 .mt-view .pane-titles h2 { padding-left: 4px; }
 .mt-view .menu .menu-item { white-space: nowrap; }
@@ -809,11 +805,6 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .m-meetings > .pane { grid-row: 1 / -1; }
 .app.narrow .mt-home, .app.narrow .mt-page { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
 .app.narrow .mt-page { padding-top: 10px; }
-/* Meetings or Dictations: the width of the screen, each a whole 40px target. */
-.app.narrow .mt-kinds { padding: 10px max(14px, env(safe-area-inset-right)) 4px max(14px, env(safe-area-inset-left)); }
-.app.narrow .mt-kinds .seg { flex: 1; display: flex; padding: 3px; border-radius: 11px; }
-.app.narrow .mt-kinds .seg button { flex: 1 1 0; justify-content: center; height: 40px; border-radius: 8px; }
-.app.narrow .mt-kinds .seg button span { padding: 0; font-size: 13.5px; }
 
 /* The header: Back, the name, its state and ⋯ on one row, then the views as a row of their own (an
    icon over each name), not squeezed beside the name. When it was, who was there and where it's
@@ -842,6 +833,9 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .app.narrow .mt-view .pane-head .seg { order: 5; flex: 1 0 100%; display: flex; padding: 3px; border-radius: 11px; }
 .app.narrow .mt-view .pane-head .seg button { flex: 1 1 0; min-width: 0; flex-direction: column; justify-content: center; gap: 1px; height: 44px; padding: 0 2px; border-radius: 8px; }
 .app.narrow .mt-view .pane-head .seg button span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 1.2; }
+/* Five (Meetings, Dictations, Insights, People, Memory): each as wide as its name, the room left
+   shared, so Dictations isn't cut short beside People. */
+.app.narrow .mt-view .pane-head .seg:has(> button:nth-child(5)) button { flex: 1 1 auto; }
 /* AI Assist at the right end of the views' row, so the name keeps its room on the first. */
 .app.narrow .mt-view .pane-head .mt-ai-btn { order: 6; align-self: center; }
 .app.narrow .mt-view .pane-head:has(.mt-ai-btn) .seg { flex-basis: calc(100% - 46px); }

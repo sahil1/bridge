@@ -21,9 +21,9 @@ import './dictations.css'
 // recording when it was kept), to Edit its words right there, Copy it, Paste it again into the app
 // it went to (the desktop app, where pasting works), Send it to an agent, or Delete it, with Undo
 // for a moment. A name you put right in an edit is offered to meeting memory (Remember.jsx). It's a
-// tab of Meetings (Meetings.jsx MeetingsHome), the other things you've said: kinds is the Meetings
-// and Dictations tabs, at the top. Memory is a tab of it (memory/Memory.jsx), what came up in your
-// dictations to start with.
+// tab of Meetings (Meetings.jsx MeetingsHome), the other things you've said, so its tabs start with
+// Meetings (toMeetings). Memory is a tab of it (memory/Memory.jsx), what came up in your dictations
+// to start with.
 const app = () => window.bridgeApp || {}
 const WHY = {
   secure: () => t('Secure input is on (a password field, or Secure Keyboard Entry), so it wasn\'t pasted.'),
@@ -34,7 +34,7 @@ const WHY = {
 
 const TABS = [['list', 'wave', tx('Dictations')], ['memory', 'book', tx('Memory')]]
 
-export default function Dictations({ kinds = null }) {
+export default function Dictations({ toMeetings = null }) {
   const [tab, setTab] = usePersisted('cc-dict-tab', 'list')
   const elsewhere = useElsewhere()
   const [q, setQ] = useState('')
@@ -88,12 +88,12 @@ export default function Dictations({ kinds = null }) {
   const total = data?.total ?? 0
   const groups = byDay(items)
   return (
-    <div className={`dc-view${kinds ? ' with-kinds' : ''}`}>
-      {kinds}
+    <div className="dc-view">
       <PaneHeader icon="wave" title={t('Dictations')} subtitle={<span className="dc-count">{data ? (total === 1 ? t('{n} dictation', { n: total }) : t('{n} dictations', { n: total })) : t('Dictations')} · {elsewhere ? t('On {name}', { name: elsewhere }) : t('On this computer')}</span>}>
         <div className="seg" role="tablist" aria-label={t('Show')}>
+          {toMeetings && <button type="button" role="tab" data-view="meetings" data-kind="meetings" aria-selected={false} onClick={toMeetings}><Icon name="mic" size={14} /><span>{t('Meetings')}</span></button>}
           {TABS.map(([v, icon, label]) => (
-            <button key={v} type="button" role="tab" data-view={v} aria-selected={tab === v} className={tab === v ? 'on' : ''}
+            <button key={v} type="button" role="tab" data-view={v} data-kind={v === 'list' ? 'dictations' : undefined} aria-selected={tab === v} className={tab === v ? 'on' : ''}
               title={v === 'memory' ? t('People, organizations and words from your meetings and dictations') : undefined}
               onClick={() => { if (v === 'memory' && tab !== 'memory') setMemoryAll('dictations', false); setTab(v) }}><Icon name={icon} size={14} /><span>{t(label)}</span></button>
           ))}

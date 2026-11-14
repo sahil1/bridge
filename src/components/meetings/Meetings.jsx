@@ -211,22 +211,11 @@ function InsightsOn({ n, onShow }) {
   )
 }
 
-// Meetings or Dictations (dictations/Dictations.jsx): what you said in a meeting, or with the
-// dictation key. At the top of Meetings once a dictation is kept, or while Dictations shows.
-function Kinds({ dictations, onPick }) {
-  return (
-    <div className="mt-kinds">
-      <div className="seg" role="tablist" aria-label={t('Meetings or dictations')}>
-        <button type="button" role="tab" data-kind="meetings" aria-selected={!dictations} className={dictations ? '' : 'on'} onClick={() => onPick(false)}><Icon name="mic" size={14} /><span>{t('Meetings')}</span></button>
-        <button type="button" role="tab" data-kind="dictations" aria-selected={dictations} className={dictations ? 'on' : ''} onClick={() => onPick(true)}><Icon name="wave" size={14} /><span>{t('Dictations')}</span></button>
-      </div>
-    </div>
-  )
-}
-
 const SETUP = 'cc-meet-setup'
 // Memory always; Insights and People with Meeting Insights on (a beta feature). Dictations is a tab
-// too, the one shown instead of all these (Kinds).
+// too once a dictation is kept, after Meetings: what you said with the dictation key
+// (dictations/Dictations.jsx), shown instead of all these with Meetings, Dictations and its own Memory
+// as its tabs. One row of tabs either way.
 const HOME_TABS = [['list', 'mic', tx('Meetings')], ['insights', 'trend', tx('Insights')], ['people', 'users', tx('People')], ['memory', 'book', tx('Memory')]]
 const ASK_ALL = [tx('What did I agree to do this week?'), tx("What's still open from this week?"), tx('Write my weekly update from these meetings')]
 const ASK_ONE = [tx('Draft a follow-up email'), tx('What did I agree to do?'), tx("What's still open?")]
@@ -248,7 +237,7 @@ export function MeetingsHome({ onOpen }) {
   // Memory beside the list (memory/Memory.jsx), what came up in your meetings to start with; Insights
   // and People too, a beta feature (insights.jsx). ⌘K opens any of them, through the tab kept here and
   // bridge-meetings-tab for a list already open (memory/open.js meetingsAt). And Dictations in place
-  // of all of them (Kinds), the meetings' own tab kept meanwhile.
+  // of all of them, the meetings' own tab kept meanwhile (for the sidebar's Meetings).
   const insightsOn = useTrial('meeting-insights')
   const [tabKept, setTab] = usePersisted('cc-meet-tab', 'list')
   const tab = tabKept === 'memory' || (insightsOn && ['insights', 'people'].includes(tabKept)) ? tabKept : 'list'
@@ -295,11 +284,11 @@ export function MeetingsHome({ onOpen }) {
   const [setupDone, setSetupDone] = useState(() => { try { return localStorage.getItem(SETUP) === '1' } catch { return false } })
   const first = data && !all.length && !setupDone && !m?.rec
   const doneSetup = () => { setSetupDone(true); try { localStorage.setItem(SETUP, '1') } catch { /* no storage: it shows again next time */ } }
-  const kinds = anyDictation && <Kinds dictations={dictations} onPick={(d) => { setKind(d ? 'dictations' : 'meetings'); setPerson(null) }} />
-  if (dictations) return <Dictations kinds={kinds} />
+  // Dictations' tabs start with Meetings, its list; Meetings' Dictations tab opens Dictations' list.
+  if (dictations) return <Dictations toMeetings={() => { setKind('meetings'); setTab('list'); setPerson(null) }} />
+  const toDictations = () => { store.set('cc-dict-tab', 'list'); setKind('dictations'); setPerson(null) }
   return (
-    <div className={`mt-view${kinds ? ' with-kinds' : ''}`}>
-      {kinds}
+    <div className="mt-view">
       <PaneHeader icon="mic" title={t('Meetings')} subtitle={(
         <>
           <span className="sub-where mt-when">{data ? (n === 1 ? t('{n} meeting', { n }) : t('{n} meetings', { n })) : t('Meetings')}</span>
@@ -307,11 +296,12 @@ export function MeetingsHome({ onOpen }) {
         </>
       )}>
         <div className="seg" role="tablist" aria-label={t('Show')}>
-          {tabs.map(([v, icon, label]) => (
-            <button key={v} type="button" role="tab" data-view={v} aria-selected={tab === v} className={tab === v ? 'on' : ''}
+          {tabs.flatMap(([v, icon, label]) => [
+            <button key={v} type="button" role="tab" data-view={v} data-kind={v === 'list' ? 'meetings' : undefined} aria-selected={tab === v} className={tab === v ? 'on' : ''}
               title={v === 'memory' ? t('People, organizations and words from your meetings and dictations') : undefined}
-              onClick={() => { if (v === 'memory' && tab !== 'memory') setMemoryAll('meetings', false); setTab(v); setPerson(null) }}><Icon name={icon} size={14} /><span>{t(label)}</span></button>
-          ))}
+              onClick={() => { if (v === 'memory' && tab !== 'memory') setMemoryAll('meetings', false); setTab(v); setPerson(null) }}><Icon name={icon} size={14} /><span>{t(label)}</span></button>,
+            v === 'list' && anyDictation && <button key="dictations" type="button" role="tab" data-view="dictations" data-kind="dictations" aria-selected={false} onClick={toDictations}><Icon name="wave" size={14} /><span>{t('Dictations')}</span></button>,
+          ])}
         </div>
         {!m?.rec && <button type="button" className="btn small primary" onClick={() => go({})}><Icon name="mic" size={13} /> {t('Start recording')}</button>}
       </PaneHeader>

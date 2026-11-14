@@ -149,7 +149,7 @@ try {
     ['Folders, in a folder of 100', async (p) => { await open(p, 'view:files'); await p.locator('.fx-side-row', { hasText: 'Work' }).first().click({ timeout: 15000 }) }, '.fx-body :text("notes-2.md")'],
     ['Whiteboards, in Studio', (p) => open(p, 'view:whiteboards'), '.sd-home .wb-home'],
     ['Agent Map', (p) => open(p, 'view:map'), '.am-row'],
-    ['Dictations, in Meetings', (p) => open(p, 'view:dictations'), '.dc-view.with-kinds .dc-home'],
+    ['Dictations, in Meetings', (p) => open(p, 'view:dictations'), '.dc-view .dc-home'],
     ['Usage', async (p) => {
       await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-card', { detail: { id: 'gauge' } })))
       await p.locator('.usage-card button', { hasText: 'Stats, patterns and history' }).first().click({ timeout: 15000 })

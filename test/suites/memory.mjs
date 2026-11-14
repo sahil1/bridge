@@ -165,7 +165,7 @@ const front = (p) => p.locator('.ws-tab.main').first().getAttribute('data-pane',
 // Dictations: Meetings, from the sidebar, then its Dictations tab.
 const toDictations = async (p) => {
   await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click()
-  await p.locator('.mt-kinds button[data-kind="dictations"]').click({ timeout: 10000 })
+  await p.locator('.mt-view .pane-head .seg button[data-kind="dictations"]').click({ timeout: 10000 })
 }
 const meetView = (p) => p.locator('.mt-view .pane-head .seg button[aria-selected="true"]').first().getAttribute('data-view', { timeout: 1000 }).catch(() => null)
 const picked = (p) => p.locator('.mm-colls button[aria-selected="true"]').first().getAttribute('data-coll', { timeout: 1000 }).catch(() => null)
@@ -542,7 +542,7 @@ try {
     await ph.p.reload()
     ok(!!(await until(() => ph.p.locator('.m-meetings .mt-view .mm-page').isVisible(), 10000)) && (await ph.p.locator('.tabbar button.on').innerText()).trim() === 'Meetings', `${w} px: still Memory after a reload`)
     // Dictations' Memory.
-    await ph.p.locator('.m-meetings .mt-kinds button', { hasText: 'Dictations' }).click()
+    await ph.p.locator('.m-meetings .mt-view .pane-head .seg button[data-kind="dictations"]').click()
     await ph.p.locator('.m-meetings .dc-view .pane-head .seg button[data-view="memory"]').click()
     const pd = ph.p.locator('.m-meetings .dc-view .mm-page')
     ok(!!(await until(() => pd.locator('.mm-item[data-term="Tailspin"]').count(), 10000)) && (await scope(pd)) === 'here', `${w} px: Dictations' Memory, from dictations`)

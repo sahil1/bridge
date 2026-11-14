@@ -379,18 +379,20 @@ try {
   // Meetings, from the sidebar, then its Dictations tab.
   const toDictations = async (p) => {
     await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click({ timeout: 10000 })
-    await p.locator('.mt-kinds button[data-kind="dictations"]').click({ timeout: 10000 })
+    await p.locator('.mt-view .pane-head .seg button[data-kind="dictations"]').click({ timeout: 10000 })
   }
   for (const mode of ['light', 'dark']) {
     const { ctx, p, errors } = await view({ mode })
     await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().waitFor({ timeout: 15000 })
     ok(await p.locator('.rail-nav-btn', { hasText: 'Dictations' }).count() === 0 && await p.locator('.rail-dictations').count() === 0, `${mode}: no Dictations row or list in the sidebar`, await p.locator('.rail-nav').innerText().catch(() => ''))
     await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click()
-    const kinds = p.locator('.mt-kinds [role="tab"]')
-    ok(!!(await until(async () => (await kinds.allInnerTexts()).map((x) => x.trim()).join('|') === 'Meetings|Dictations', 10000, 200)) && await p.locator('.mt-kinds [aria-selected="true"]').innerText() === 'Meetings', `${mode}: Meetings has two tabs at its top, Meetings (on) and Dictations`, await kinds.allInnerTexts().catch(() => []))
-    await p.locator('.mt-kinds button[data-kind="dictations"]').click()
+    // One row of tabs, Dictations beside Meetings, in either one's header.
+    const tabsOf = async (sel) => (await p.locator(`${sel} [role="tab"]`).allInnerTexts().catch(() => [])).map((x) => x.trim()).join('|')
+    ok(!!(await until(async () => /^Meetings\|Dictations\|(.+\|)?Memory$/.test(await tabsOf('.mt-view')), 10000, 200)) && await p.locator('.mt-view [role="tablist"]').count() === 1 && await p.locator('.mt-view .pane-head .seg [aria-selected="true"]').innerText() === 'Meetings', `${mode}: Meetings has one row of tabs, Meetings (on), Dictations, then Memory`, await tabsOf('.mt-view'))
+    await p.locator('.mt-view .pane-head .seg button[data-kind="dictations"]').click()
     const v = p.locator('.dc-view')
     await v.waitFor({ timeout: 10000 })
+    ok(!!(await until(async () => (await tabsOf('.dc-view')) === 'Meetings|Dictations|Memory', 5000, 100)) && await p.locator('.dc-view [role="tablist"]').count() === 1 && (await v.locator('.pane-head .seg [aria-selected="true"]').innerText()).trim() === 'Dictations', `${mode}: Dictations has the same row, Dictations on`, await tabsOf('.dc-view'))
     ok(/^Meetings/.test((await p.locator('.rail-nav-btn.on').innerText().catch(() => '')).trim()) && (await p.locator('.ws-tab.main').innerText().catch(() => '')).trim() === 'Meetings', `${mode}: Dictations shows in Meetings' tab, with Meetings marked in the sidebar`, { rail: await p.locator('.rail-nav-btn.on').innerText().catch(() => ''), tab: await p.locator('.ws-tab.main').innerText().catch(() => '') })
     ok(!!(await until(async () => (await v.locator('.dc-group h3').first().innerText().catch(() => '')).toLowerCase() === 'today', 5000, 100)), `${mode}: by day, today first`, await v.locator('.dc-group h3').allInnerTexts())
     const slack = v.locator('.dc-row', { hasText: 'See you at three' }).first()
@@ -506,7 +508,7 @@ try {
     const { ctx, p, errors } = await view({ phone: true })
     await p.waitForSelector('.tabbar button', { timeout: 15000 })
     await p.locator('.tabbar button', { hasText: 'Meetings' }).click()
-    await p.locator('.mt-kinds button', { hasText: 'Dictations' }).click()
+    await p.locator('.mt-view .pane-head .seg button[data-kind="dictations"]').click()
     const v = p.locator('.dc-view')
     await v.waitFor({ timeout: 10000 })
     ok(!!(await until(async () => (await v.locator('.dc-row').count()) >= 3, 8000, 100)), 'a phone: Dictations in the Meetings tab')
@@ -518,7 +520,7 @@ try {
     await shots(p, 'dictations-phone')
     // Tapping Meetings again: its meetings. And More has no Dictations row.
     await p.locator('.tabbar button', { hasText: 'Meetings' }).click()
-    ok(!!(await until(async () => (await p.locator('.mt-kinds [aria-selected="true"]').innerText().catch(() => '')).trim() === 'Meetings' && await p.locator('.dc-view').count() === 0, 5000, 100)), 'a phone: Meetings tapped again shows its meetings')
+    ok(!!(await until(async () => (await p.locator('.mt-view .pane-head .seg [aria-selected="true"]').innerText().catch(() => '')).trim() === 'Meetings' && await p.locator('.dc-view').count() === 0, 5000, 100)), 'a phone: Meetings tapped again shows its meetings')
     await p.locator('.tabbar button', { hasText: 'More' }).click()
     await p.locator('.m-more-row').first().waitFor({ timeout: 8000 }).catch(() => {})
     const more = await p.locator('.m-more-row').evaluateAll((els) => els.map((e) => e.dataset.id))
@@ -529,21 +531,21 @@ try {
   {
     // A phone that had Dictations open in More (before 3.19): the Meetings tab at Dictations.
     const { ctx, p } = await view({ phone: true, store: { 'cc-mtab': 'more', 'cc-more-view': 'view:dictations' } })
-    ok(!!(await until(async () => (await p.locator('.tabbar button[aria-current="true"]').innerText().catch(() => '')).trim() === 'Meetings' && await p.locator('.dc-view.with-kinds').isVisible().catch(() => false), 15000, 200)), 'a phone with Dictations kept open in More from before: the Meetings tab, at Dictations', await p.locator('main').innerText().catch(() => ''))
+    ok(!!(await until(async () => (await p.locator('.tabbar button[aria-current="true"]').innerText().catch(() => '')).trim() === 'Meetings' && await p.locator('.dc-view .pane-head .seg [data-kind="meetings"]').isVisible().catch(() => false), 15000, 200)), 'a phone with Dictations kept open in More from before: the Meetings tab, at Dictations', await p.locator('main').innerText().catch(() => ''))
     await ctx.close()
   }
   {
     // Dictations' old places on a computer, each landing on Meetings' Dictations tab: a tab kept from
     // before (with nothing else open), ⌘K's Dictations, a link (?agent=view:dictations), and Back.
-    const atDictations = async (p) => !!(await until(async () => await p.locator('.dc-view.with-kinds').isVisible().catch(() => false) && (await p.locator('.ws-tab.main').innerText().catch(() => '')).trim() === 'Meetings', 15000, 200))
+    const atDictations = async (p) => !!(await until(async () => await p.locator('.dc-view .pane-head .seg [data-kind="meetings"]').isVisible().catch(() => false) && (await p.locator('.ws-tab.main').innerText().catch(() => '')).trim() === 'Meetings', 15000, 200))
     const kept = await view({ store: { 'cc-ws': { tabs: ['view:dictations'], active: 'view:dictations', side: null, split: false, group: 'main' } } })
     ok(await atDictations(kept.p) && !JSON.stringify(await kept.p.evaluate(() => JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs || [])).includes('view:dictations'), 'a Dictations tab kept from before: Meetings\' tab, at Dictations', await kept.p.evaluate(() => localStorage.getItem('cc-ws')))
     // Back from Meetings, to Dictations.
-    await kept.p.locator('.mt-kinds button[data-kind="meetings"]').click()
-    await kept.p.locator('.mt-view.with-kinds').waitFor({ timeout: 8000 }).catch(() => {})
+    await kept.p.locator('.dc-view .pane-head .seg button[data-kind="meetings"]').click()
+    await kept.p.locator('.mt-view .pane-head .seg [data-kind="dictations"]').waitFor({ timeout: 8000 }).catch(() => {})
     await kept.p.waitForTimeout(600)
     await kept.p.locator('.nav-btn[data-dir="back"]').click()
-    ok(await atDictations(kept.p), 'Back from its Meetings tab: Dictations again', await kept.p.locator('.mt-kinds').innerText().catch(() => ''))
+    ok(await atDictations(kept.p), 'Back from its Meetings tab: Dictations again', await kept.p.locator('.pane-head .seg').first().innerText().catch(() => ''))
     await kept.ctx.close()
     const cmd = await view({})
     await cmd.p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().waitFor({ timeout: 15000 })
