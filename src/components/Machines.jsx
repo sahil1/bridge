@@ -235,9 +235,7 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
 
 // ---------- the sidebar ----------
 const rank = { blocked: 0, working: 1, done: 2, idle: 3, unknown: 4 }
-// compact: the sidebar's views folded to a row of icons (Rail.jsx), Devices one of them, which
-// opens Agent Map, with a dot while one of them needs you.
-export function RailMachines({ compact = false }) {
+export function RailMachines() {
   const { data } = useMachines()
   const [open, setOpen] = useState(() => { try { return localStorage.getItem('cc-rail-machines') !== '0' } catch { return true } })
   const [own, setOwn] = useState(null) // the device this page comes from, while it shows another
@@ -255,10 +253,6 @@ export function RailMachines({ compact = false }) {
   ]
   if (!rows.length) return null
   const needs = rows.reduce((n, m) => n + needing(m.counts), 0)
-  if (compact) {
-    const label = needs ? `${t('Devices')} (${needs === 1 ? t('{n} needs you', { n: needs }) : t('{n} need you', { n: needs })})` : t('Devices')
-    return <button type="button" className="rail-icon" onClick={openMap} aria-label={label} title={`${label}\n${t("What's running on each of your computers")}`}><Icon name="laptop" size={15} />{needs > 0 && <span className="mini-needs" />}</button>
-  }
   return (
     <div className="rail-machines">
       <div className="rail-nav-row">

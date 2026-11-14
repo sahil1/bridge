@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Icon, { StatusDot } from './Icon.jsx'
 import { usePersisted } from './layout.jsx'
@@ -144,27 +144,11 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState(null)
   const [closedWs, setClosedWs] = usePersisted('cc-rail-closed', {})
-  // The sidebar's two parts fold under their headings, as Slack's and Linear's sections do: Views
-  // (Home to Folders, and Devices) to one row of their icons, so none is more than a click away, and
-  // Spaces out of sight but for how many there are (or how many need you). Both open to start with;
-  // kept on this computer. The sidebar scrolls as one with both headings kept in sight (styles.css
-  // .rail-head): Spaces' stops under Views' as you scroll into your spaces, so it's told how tall
-  // Views' is (a row of icons wraps in a narrow sidebar).
-  const [viewsOpen, setViewsOpen] = usePersisted('cc-rail-views', true)
+  // Spaces fold under their heading, as Slack's and Linear's sections do, out of sight but for how
+  // many there are (or how many need you); open to start with, kept on this computer. The rows above
+  // them (Home to Folders, and Devices) don't fold: there are few, and each is a way in. The sidebar
+  // scrolls as one with Spaces' heading kept in sight (styles.css .rail-head).
   const [spacesOpen, setSpacesOpen] = usePersisted('cc-rail-spaces', true)
-  const scrollRef = useRef(null)
-  const viewsHead = useRef(null)
-  useLayoutEffect(() => {
-    const head = viewsHead.current
-    const box = scrollRef.current
-    if (!head || !box) return
-    const fit = () => box.style.setProperty('--rail-views-h', `${head.offsetHeight}px`)
-    fit()
-    if (typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(fit)
-    ro.observe(head)
-    return () => ro.disconnect()
-  }, [collapsed])
   // Meetings, listed under their row like a space's tabs: open once you go to Meetings.
   const [meetingsOpen, setMeetingsOpen] = usePersisted('cc-rail-meetings', false)
   const [menu, setMenu] = useState(null) // row id or `ws:<id>`
@@ -335,36 +319,13 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
     )
   }
 
-  // Views folded: each one an icon, with what its row says at a glance (a need, a recording).
-  const icon = (on, label, name, run, dot = null, more = {}) => (
-    <button type="button" className={`rail-icon${on ? ' on' : ''}`} onClick={run} aria-label={label} title={more.title || label} {...more}><Icon name={name} size={15} />{dot}</button>
-  )
   const spaceNeeds = groups.filter(listed).reduce((n, g) => n + g.agents.filter((a) => a.status === 'blocked' && !a.chief).length, 0)
   const spaceCount = groups.filter(listed).length
   const fold = (open, name) => ({ 'aria-expanded': open, 'aria-label': open ? t('Collapse {name}', { name }) : t('Expand {name}', { name }), title: open ? t('Collapse') : t('Expand') })
   return (
     <nav className="rail" aria-label={t('Workspaces')} data-tour="agents">
-      <div className="rail-scroll" ref={scrollRef}>
-        <div className={`rail-head rail-views-head${viewsOpen ? '' : ' folded'}`} ref={viewsHead}>
-          <button type="button" className="rail-sec" onClick={() => setViewsOpen(!viewsOpen)} {...fold(viewsOpen, t('Views'))}>
-            <Icon name="chevron" size={10} className={`caret ${viewsOpen ? 'rot90' : ''}`} />
-            {viewsOpen && <span className="rail-label">{t('Views')}</span>}
-          </button>
-          {!viewsOpen && (
-            <span className="rail-icons">
-              {home && icon(selected === 'view:home' || selected === 'view:everything', needs ? t('Home ({n} need you)', { n: needs }) : t('Home'), 'home', () => onOpen('view:home'), needs > 0 && <span className="mini-needs" />)}
-              {icon(selected === 'view:new', t('New'), 'edit', () => onNewAgent?.(), null, { 'data-tour': 'new-agent' })}
-              {!fleet?.down && icon(chiefOn, t('Chief of Staff'), 'helm', goChief, (chief?.status === 'blocked' || threads.some((a) => a.status === 'blocked')) && <span className="mini-needs" />, { 'data-tour': 'chief', disabled: launching, title: `${t('Chief of Staff')}\n${chiefWhat}` })}
-              {icon(String(selected || '').startsWith('view:meeting'), recording ? t('Meetings (recording)') : t('Meetings'), 'mic', () => onMeetings?.(), recording && <span className="rec-dot mini-rec" />)}
-              {whiteboards && icon(inStudio, t('Studio'), 'layers', () => onOpen('view:studio'))}
-              {whiteboards && icon(selected === 'view:files', t('Folders'), 'folder', () => onOpen('view:files'))}
-              <Quiet name="Devices"><RailMachines compact /></Quiet>
-            </span>
-          )}
-        </div>
-        {/* Starting the chief of staff failed with its row folded away: said here. */}
-        {error && !viewsOpen && <p className="error-text small rail-rec-err" role="alert">{error}</p>}
-        {viewsOpen && <div className="rail-nav">
+      <div className="rail-scroll">
+        <div className="rail-nav">
           {home && <button className={`rail-nav-btn rail-home ${selected === 'view:home' || selected === 'view:everything' ? 'on' : ''}`} onClick={() => onOpen('view:home')}><Icon name="home" size={14} /> {t('Home')}{needs > 0 && <span className="mc-needs" aria-label={needs === 1 ? t('{n} needs you', { n: needs }) : t('{n} need you', { n: needs })}>{needs}</span>}</button>}
           <button className={`rail-nav-btn ${selected === 'view:new' ? 'on' : ''}`} data-tour="new-agent" onClick={() => onNewAgent?.()}><Icon name="edit" size={14} /> {t('New')}</button>
           {!fleet?.down && (
@@ -431,7 +392,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
             </div>
           )}
           <Quiet name="Devices"><RailMachines /></Quiet>
-        </div>}
+        </div>
         <div className="rail-head rail-spaces-head">
           <button type="button" className="rail-sec" onClick={() => setSpacesOpen(!spacesOpen)} {...fold(spacesOpen, t('Spaces'))}>
             <Icon name="chevron" size={10} className={`caret ${spacesOpen ? 'rot90' : ''}`} />
