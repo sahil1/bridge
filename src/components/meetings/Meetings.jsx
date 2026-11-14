@@ -29,6 +29,8 @@ import { InsightsView } from './insights.jsx'
 import { PeopleView } from './people.jsx'
 import Memory from '../memory/Memory.jsx'
 import { setMemoryAll, takePerson } from '../memory/open.js'
+import { ANY as ANY_DICTATION } from '../dictations/shared.jsx'
+import { Dictations } from '../../lazy.jsx'
 import { sayPlace } from '../../backForward.js'
 
 // The meeting pages: the list of meetings, and one meeting with your notes beside its transcript, the
@@ -209,8 +211,22 @@ function InsightsOn({ n, onShow }) {
   )
 }
 
+// Meetings or Dictations (dictations/Dictations.jsx): what you said in a meeting, or with the
+// dictation key. At the top of Meetings once a dictation is kept, or while Dictations shows.
+function Kinds({ dictations, onPick }) {
+  return (
+    <div className="mt-kinds">
+      <div className="seg" role="tablist" aria-label={t('Meetings or dictations')}>
+        <button type="button" role="tab" data-kind="meetings" aria-selected={!dictations} className={dictations ? '' : 'on'} onClick={() => onPick(false)}><Icon name="mic" size={14} /><span>{t('Meetings')}</span></button>
+        <button type="button" role="tab" data-kind="dictations" aria-selected={dictations} className={dictations ? 'on' : ''} onClick={() => onPick(true)}><Icon name="wave" size={14} /><span>{t('Dictations')}</span></button>
+      </div>
+    </div>
+  )
+}
+
 const SETUP = 'cc-meet-setup'
-// Memory always; Insights and People with Meeting Insights on (a beta feature).
+// Memory always; Insights and People with Meeting Insights on (a beta feature). Dictations is a tab
+// too, the one shown instead of all these (Kinds).
 const HOME_TABS = [['list', 'mic', tx('Meetings')], ['insights', 'trend', tx('Insights')], ['people', 'users', tx('People')], ['memory', 'book', tx('Memory')]]
 const ASK_ALL = [tx('What did I agree to do this week?'), tx("What's still open from this week?"), tx('Write my weekly update from these meetings')]
 const ASK_ONE = [tx('Draft a follow-up email'), tx('What did I agree to do?'), tx("What's still open?")]
@@ -230,11 +246,12 @@ export function MeetingsHome({ onOpen }) {
   useEffect(() => { if (data && place && (place === ':archived' ? !archivedN : !folders.includes(place))) setPlace('') }, [data, place, archivedN, folders.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
   const hits = useSearch(q, place === ':archived')
   // Memory beside the list (memory/Memory.jsx), what came up in your meetings to start with; Insights
-  // and People too, a beta feature (insights.jsx). ⌘K opens any of them, through the tab kept here and
-  // bridge-meetings-tab for a list already open.
+  // and People too, a beta feature (insights.jsx); and Dictations. ⌘K opens any of them, through the
+  // tab kept here and bridge-meetings-tab for a list already open (memory/open.js meetingsAt).
   const insightsOn = useTrial('meeting-insights')
   const [tabKept, setTab] = usePersisted('cc-meet-tab', 'list')
-  const tab = tabKept === 'memory' || (insightsOn && ['insights', 'people'].includes(tabKept)) ? tabKept : 'list'
+  const tab = ['memory', 'dictations'].includes(tabKept) || (insightsOn && ['insights', 'people'].includes(tabKept)) ? tabKept : 'list'
+  const anyDictation = usePoll(ANY_DICTATION, 60000).data?.total > 0 || tab === 'dictations'
   const tabs = HOME_TABS.filter(([v]) => insightsOn || v === 'list' || v === 'memory')
   // Someone's page asked for from elsewhere (a meeting's guests) before Meetings was open.
   const [person, setPerson] = useState(takePerson)
@@ -247,8 +264,8 @@ export function MeetingsHome({ onOpen }) {
     window.addEventListener('bridge-meetings-tab', on)
     return () => window.removeEventListener('bridge-meetings-tab', on)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  // Which tab, for Back and Forward (src/backForward.js): Memory, Insights and People are places.
-  useEffect(() => { sayPlace('view:meetings', tab, tab === 'list' ? null : t(HOME_TABS.find(([v]) => v === tab)?.[2] || '')) }, [tab])
+  // Which tab, for Back and Forward (src/backForward.js): Dictations, Memory, Insights and People are places.
+  useEffect(() => { sayPlace('view:meetings', tab, tab === 'list' ? null : tab === 'dictations' ? t('Dictations') : t(HOME_TABS.find(([v]) => v === tab)?.[2] || '')) }, [tab])
   const list = all.filter((x) => (place === ':archived' ? x.archived : !x.archived && (!place || x.folder === place))).filter((x) => !q.trim() || !hits || hits.results.has(x.id))
   // What was asked for last, to carry on once the mic is allowed (MicFix).
   const last = useRef(null)
@@ -262,8 +279,11 @@ export function MeetingsHome({ onOpen }) {
   const [setupDone, setSetupDone] = useState(() => { try { return localStorage.getItem(SETUP) === '1' } catch { return false } })
   const first = data && !all.length && !setupDone && !m?.rec
   const doneSetup = () => { setSetupDone(true); try { localStorage.setItem(SETUP, '1') } catch { /* no storage: it shows again next time */ } }
+  const kinds = anyDictation && <Kinds dictations={tab === 'dictations'} onPick={(d) => { if (d !== (tab === 'dictations')) { setTab(d ? 'dictations' : 'list'); setPerson(null) } }} />
+  if (tab === 'dictations') return <Dictations kinds={kinds} />
   return (
-    <div className="mt-view">
+    <div className={`mt-view${kinds ? ' with-kinds' : ''}`}>
+      {kinds}
       <PaneHeader icon="mic" title={t('Meetings')} subtitle={(
         <>
           <span className="sub-where mt-when">{data ? (n === 1 ? t('{n} meeting', { n }) : t('{n} meetings', { n })) : t('Meetings')}</span>

@@ -11,11 +11,11 @@ import Board from './components/Board.jsx'
 import TabStrip from './components/TabStrip.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty, showChat } from './components/Console.jsx'
-import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, Dictations, StudioHome, StudioPage, Explorer, UsageStats, preloadViews } from './lazy.jsx'
+import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, StudioHome, StudioPage, Explorer, UsageStats, preloadViews } from './lazy.jsx'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
 import { MeetingsProvider, RecordingPill, CallPrompt, useMeetings } from './components/meetings/recording.jsx'
-import { memoryTab } from './components/memory/open.js'
+import { memoryTab, meetingsAt } from './components/memory/open.js'
 import { openLink } from './pwa.js'
 import NewAgent from './components/NewAgent.jsx'
 import AddAccount from './components/AddAccount.jsx'
@@ -200,11 +200,11 @@ function useFit(onFold) {
   }, [])
 }
 
-// Views that open in tabs beside the agents: Home (start something new), Meetings, a meeting,
-// Dictations, Studio and a file in it (a whiteboard too: placeNow), Files, and the agent map (what
-// runs on which of your computers).
+// Views that open in tabs beside the agents: Home (start something new), Meetings (and Dictations,
+// a tab of it), a meeting, Studio and a file in it (a whiteboard too: placeNow), Files, and the agent
+// map (what runs on which of your computers).
 // With Home on (a trial): Home (what needs you, NeedsHome.jsx) and Everything.
-const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everything': { title: tx('Everything'), icon: 'grid' }, 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:dictations': { title: tx('Dictations'), icon: 'wave' }, 'view:studio': { title: tx('Studio'), icon: 'layers' }, 'view:files': { title: tx('Files'), icon: 'folder' }, 'view:map': { title: tx('Agent Map'), icon: 'grid' } }
+const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everything': { title: tx('Everything'), icon: 'grid' }, 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:studio': { title: tx('Studio'), icon: 'layers' }, 'view:files': { title: tx('Files'), icon: 'folder' }, 'view:map': { title: tx('Agent Map'), icon: 'grid' } }
 // A whiteboard's place before whiteboards were in Studio (its id after it): placeNow.
 const BOARD = 'view:whiteboard:'
 // A Studio file's tab: its root (an agent's pane, or place:<id>) and path, each encoded. A
@@ -251,32 +251,35 @@ const showStudioKind = (kind) => { store.set('cc-studio-group', `kind:${kind}`);
 // Typing in a Studio document, where ⌘K is a link and ⌘, subscript, as in Google Docs and Word.
 const writingDoc = (e) => !!e.target?.closest?.('.sd-doc .ProseMirror')
 
-// Memory had a tab of its own, and a row in the phone's More, through 3.13; it's a tab of Meetings
-// and of Dictations now. What a window kept from then, before anything shows: Meetings in Memory's tab
-// (or Meetings' own, when that was open too), at Memory, all of it, as the page showed.
+// Memory had a tab of its own, and a row in the phone's More, through 3.13; Dictations had both
+// through 3.18. Each is a tab of Meetings now. What a window kept from then, before anything shows:
+// Meetings in that tab (or Meetings' own, when that was open too), at Memory (all of it, as the page
+// showed) or at Dictations.
 const MEMORY = 'view:memory'
-function memoryMoved() {
+const DICTATIONS = 'view:dictations'
+function intoMeetings(from, show) {
   let shown = false
   const move = (w, here) => {
-    if (!w?.tabs?.includes(MEMORY)) return w
-    if (here) shown ||= w.active === MEMORY || w.side === MEMORY || !w.tabs.includes('view:meetings')
-    const to = (id) => (id === MEMORY ? 'view:meetings' : id)
+    if (!w?.tabs?.includes(from)) return w
+    if (here) shown ||= w.active === from || w.side === from || !w.tabs.includes('view:meetings')
+    const to = (id) => (id === from ? 'view:meetings' : id)
     if (!w.tabs.includes('view:meetings')) return { ...w, tabs: w.tabs.map(to), active: to(w.active), side: to(w.side) }
     const active = to(w.active)
     const side = to(w.side) === active ? null : to(w.side)
-    return { ...w, tabs: w.tabs.filter((id) => id !== MEMORY), active, side, split: !!w.split && !!side }
+    return { ...w, tabs: w.tabs.filter((id) => id !== from), active, side, split: !!w.split && !!side }
   }
   const ws = store.get('cc-ws', null)
-  if (ws?.tabs?.includes(MEMORY)) store.set('cc-ws', move(ws, true))
+  if (ws?.tabs?.includes(from)) store.set('cc-ws', move(ws, true))
   const bySession = store.get('cc-ws-sessions', null)
-  if (bySession && Object.values(bySession).some((w) => w?.tabs?.includes(MEMORY))) store.set('cc-ws-sessions', Object.fromEntries(Object.entries(bySession).map(([k, w]) => [k, move(w)])))
-  if (store.get('cc-more-view', null) === MEMORY) {
+  if (bySession && Object.values(bySession).some((w) => w?.tabs?.includes(from))) store.set('cc-ws-sessions', Object.fromEntries(Object.entries(bySession).map(([k, w]) => [k, move(w)])))
+  if (store.get('cc-more-view', null) === from) {
     store.set('cc-more-view', null)
     if (store.get('cc-mtab', null) === 'more') { store.set('cc-mtab', 'meetings'); shown = true }
   }
-  if (shown) memoryTab({ all: true })
+  if (shown) show()
 }
-memoryMoved()
+intoMeetings(MEMORY, () => memoryTab({ all: true }))
+intoMeetings(DICTATIONS, () => meetingsAt('dictations'))
 
 // What a window kept from before whiteboards were in Studio, before anything shows: its tabs (each
 // herdr session's too) and the phone's More, each where it is now (placeNow). Whiteboards on screen
@@ -337,9 +340,10 @@ function App() {
   const [mtab, setMtab] = usePersisted('cc-mtab', 'mate')
   const [mobileAgent, setMobileAgent] = useState(null)
   const [mobileMeeting, setMobileMeeting] = useState(null) // the meeting open in the phone's Meetings tab
-  // What the phone's More tab shows: its list (null), Terminals ('terminals'), or a view (Whiteboards,
-  // a whiteboard, the agent map, Dictations). Kept, as a computer keeps its tabs, so a reload comes
-  // back to it. Terminals had a tab of its own until 3.8.3 (Memory a row, through 3.13: memoryMoved).
+  // What the phone's More tab shows: its list (null), Terminals ('terminals'), or a view (Studio, a
+  // file in it, Files, the agent map). Kept, as a computer keeps its tabs, so a reload comes back
+  // to it. Terminals had a tab of its own until 3.8.3 (Memory a row through 3.13, Dictations through
+  // 3.18: intoMeetings).
   const [moreView, setMoreView] = usePersisted('cc-more-view', null)
   useEffect(() => { if (mtab === 'herdr') { setMtab('more'); setMoreView('terminals') } }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [homeView, setHomeView] = useState('home') // the phone's Home tab: Home, or Everything
@@ -495,6 +499,9 @@ function App() {
     // Settings › Voice & Meetings' Open Memory and anything else that still asks for view:memory get
     // Meetings at Memory, all of it, as the page showed.
     if (paneId === MEMORY) { memoryTab({ all: true }); paneId = 'view:meetings' }
+    // Dictations are a tab of Meetings too: ⌘K's Dictations, a dictation in Memory, a link or a tab
+    // kept from before get Meetings at Dictations.
+    if (paneId === DICTATIONS) { meetingsAt('dictations'); paneId = 'view:meetings' }
     // Whiteboards and a whiteboard are in Studio (placeNow): the list of them is Studio's Files at
     // Whiteboards.
     if (paneId === 'view:whiteboards' && StudioHome) showStudioKind('board')
@@ -507,9 +514,9 @@ function App() {
       const a = byId[paneId]
       // On the phone's Cloud agents, Back (Android's) closes the agent first.
       if (cloudOnly && paneId !== mobileAgent) { if (window.history.state?.agent) window.history.replaceState({ agent: paneId }, ''); else window.history.pushState({ agent: paneId }, '') }
-      // Meetings, a meeting and Dictations open in the phone's own Meetings tab; Studio (and a
+      // Meetings (Dictations too) and a meeting open in the phone's own Meetings tab; Studio (and a
       // whiteboard in it) and Files in its More tab.
-      if (typeof paneId === 'string' && (paneId.startsWith('view:meeting') || paneId === 'view:dictations')) { setMtab('meetings'); setMobileMeeting(paneId === 'view:meetings' ? null : paneId); return }
+      if (typeof paneId === 'string' && paneId.startsWith('view:meeting')) { setMtab('meetings'); setMobileMeeting(paneId === 'view:meetings' ? null : paneId); return }
       if (typeof paneId === 'string' && (paneId.startsWith('view:studio') || paneId === 'view:files')) { setMtab('more'); setMoreView(paneId); return }
       if (paneId === 'view:home' || paneId === 'view:everything') { setMtab('home'); setHomeView(paneId === 'view:home' ? 'home' : 'everything'); return }
       if (a?.chief) { setMtab('mate'); setMobileAgent(null); setMateId(paneId) } else { setMtab('agents'); setMobileAgent(paneId) }
@@ -520,7 +527,7 @@ function App() {
     if (replace && replace !== 'view:new' && wsRef.current.tabs.includes(replace) && !wsRef.current.tabs.includes(paneId)) replacedWith(replace, paneId)
     setW((w) => {
       // In the tab it replaces: where that one was, or, when that one was behind another (a meeting
-      // opened from Dictations' Memory while Meetings waits in a tab), to the front as any tab opened is.
+      // opened from Home while Meetings waits in a tab), to the front as any tab opened is.
       if (replace && w.tabs.includes(replace) && !w.tabs.includes(paneId)) {
         const tabs = w.tabs.map((t) => (t === replace ? paneId : t))
         w = follow(w, replace, paneId)
@@ -598,9 +605,9 @@ function App() {
     window.addEventListener('bridge-open-meeting', on)
     return () => window.removeEventListener('bridge-open-meeting', on)
   }, [])
-  // Dictations, from the sidebar's list (with one to open) or anywhere else.
+  // Dictations, from Memory (with one to open) or anywhere else: Meetings at Dictations.
   useEffect(() => {
-    const on = () => openAgentRef.current?.('view:dictations')
+    const on = () => openAgentRef.current?.(DICTATIONS)
     window.addEventListener('bridge-open-dictations', on)
     return () => window.removeEventListener('bridge-open-dictations', on)
   }, [])
@@ -855,7 +862,9 @@ function App() {
   // puts the rest back).
   const openHome = () => { openAgent('view:home'); if (wide) set({ max: 'main' }) }
   const openEverything = () => { openAgent('view:everything'); if (wide) set({ max: 'main' }) }
-  const meetingsTab = (tab) => { store.set('cc-meet-tab', tab); window.dispatchEvent(new CustomEvent('bridge-meetings-tab', { detail: { tab } })); openAgent('view:meetings') }
+  const meetingsTab = (tab) => { meetingsAt(tab); openAgent('view:meetings') }
+  // Meetings itself (the sidebar's row, ⌘K): its meetings, not Dictations, at the tab it was on.
+  const openMeetings = () => { if (store.get('cc-meet-tab', 'list') === 'dictations') meetingsAt('list'); openAgent('view:meetings') }
   const paletteActions = [
     homeOn && { id: 'a:homeview', label: t('Home'), icon: 'home', keywords: 'needs you waiting answer ready review coming up today next meeting tasks inbox start', run: openHome },
     homeOn && { id: 'a:everything', label: t('Everything'), icon: 'grid', keywords: 'all every item device computer meetings tasks whiteboards agents lanes', run: openEverything },
@@ -863,10 +872,10 @@ function App() {
     { id: 'a:home', label: t('New…'), icon: 'plus', keywords: 'new thread start build project agent chat what should we build', run: openNew },
     { id: 'a:new', label: t('New agent with all the options…'), icon: 'bot', keywords: 'launch start claude codex gemini copilot opencode project dialog compare account', run: () => setNewAgent({ mode: 'project' }) },
     { id: 'a:record', label: t('Record a meeting'), icon: 'mic', keywords: 'meeting notes transcript record call granola minutes', run: () => meetings?.start().catch(() => openAgent('view:meetings')) },
-    { id: 'a:meetings', label: t('Meetings'), icon: 'mic', keywords: 'meeting notes transcripts summaries', run: () => openAgent('view:meetings') },
+    { id: 'a:meetings', label: t('Meetings'), icon: 'mic', keywords: 'meeting notes transcripts summaries', run: openMeetings },
     insightsOn && { id: 'a:insights', label: t('Meeting Insights'), icon: 'trend', keywords: 'meetings stats hours talk time share words week kind', run: () => meetingsTab('insights') },
     insightsOn && { id: 'a:people', label: t('People You Meet'), icon: 'users', keywords: 'people attendees contacts who met meetings together', run: () => meetingsTab('people') },
-    { id: 'a:dictations', label: t('Dictations'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent('view:dictations') },
+    { id: 'a:dictations', label: t('Dictations'), sub: t('In Meetings'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent(DICTATIONS) },
     { id: 'a:memory', label: t('Memory'), sub: t('In Meetings and Dictations'), icon: 'book', keywords: 'memory people organizations organisations companies projects products terms names words misheard about me about you persona context meeting memory', run: () => openAgent(MEMORY) },
     StudioHome && { id: 'a:studio', label: t('Studio'), icon: 'layers', keywords: 'studio document word docx sheet excel xlsx spreadsheet deck slides powerpoint pptx pdf page html artifact markdown design pack', run: () => openAgent('view:studio') },
     Explorer && { id: 'a:files', label: t('Files'), icon: 'folder', keywords: 'files finder explorer folders browse desktop documents downloads home drive disk icloud onedrive dropbox quick look get info', run: () => openAgent('view:files') },
@@ -1043,7 +1052,6 @@ function App() {
         : id === 'view:map' ? <section className="pane view-pane"><AgentMap phone={!wide} onOpen={(d, a) => openOn(d.id, a.paneId, { device: d.name, title: a.name || a.title, kind: a.kind })}
           controls={wide ? { maximized: !!L.max, onMaximize: () => set({ max: L.max ? null : 'main' }) } : null} /></section>
         : id === 'view:meetings' ? <section className="pane view-pane"><MeetingsHome onOpen={(mid) => openAgent(`view:meeting:${mid}`, wide ? { replace: 'view:meetings' } : {})} /></section>
-          : id === 'view:dictations' ? <section className="pane view-pane"><Dictations /></section>
                 : id === 'view:files' && Explorer ? <section className="pane view-pane"><Explorer /></section>
                 : id === 'view:studio' && StudioHome ? <section className="pane view-pane"><StudioHome onOpen={(f) => openAgent(studioId(f), wide ? { replace: 'view:studio' } : {})} /></section>
                   : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f, o) => openAgent(studioId(f), o?.replace ? { replace: id } : {})} /></section>
@@ -1156,7 +1164,6 @@ function App() {
       Explorer && { id: 'files', icon: 'folder', label: t('Files'), hint: t('Every folder on your computers'), run: () => setMoreView('view:files') },
       { id: 'terminals', icon: 'terminal', label: t('Terminals'), hint: t("Every agent's terminal, live"), run: () => setMoreView('terminals') },
       { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
-      { id: 'dictations', icon: 'wave', label: t('Dictations'), hint: t("Everything you've dictated"), run: () => setMoreView('view:dictations') },
       { id: 'needs', icon: 'bell', label: t('Needs You'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
       { id: 'history', icon: 'clock', label: t('History'), hint: t('Every conversation, and closed agents'), run: () => setHistory(true) },
       { id: 'settings', icon: 'settings', label: t('Settings'), hint: t('Devices, voice, appearance and more'), run: () => setSettings('all') },
@@ -1178,13 +1185,7 @@ function App() {
               action={<span className="m-acts"><button className="btn small" onClick={openMap} aria-label={t('Agent Map')} title={t("What's running on each of your computers")}><Icon name="grid" size={12} /> {t('Map')}</button><button className="btn small" onClick={openNew} aria-label={t('Start something new')}><Icon name="plus" size={12} /> {t('New')}</button></span>} /></>)}
           {mtab === 'meetings' && (
             <div className="m-view m-meetings">
-              {/* Meetings or Dictations: what you've said, either way. */}
-              {(!mobileMeeting || mobileMeeting === 'view:dictations') && (
-                <div className="m-seg" role="tablist" aria-label={t('Meetings or dictations')}>
-                  <button type="button" role="tab" aria-selected={!mobileMeeting} className={!mobileMeeting ? 'on' : ''} onClick={() => setMobileMeeting(null)}>{t('Meetings')}</button>
-                  <button type="button" role="tab" aria-selected={mobileMeeting === 'view:dictations'} className={mobileMeeting === 'view:dictations' ? 'on' : ''} onClick={() => setMobileMeeting('view:dictations')}>{t('Dictations')}</button>
-                </div>
-              )}
+              {/* Meetings, with Dictations a tab of it (Meetings.jsx), or a meeting. */}
               {viewFor(mobileMeeting || 'view:meetings', { onBack: () => setMobileMeeting(null) })}
             </div>
           )}
@@ -1209,7 +1210,7 @@ function App() {
         </main>
         <nav className="tabbar" aria-label={t('Sections')}>
           {tabs.map(([id, icon, label]) => (
-            <button key={id} className={mtab === id ? 'on' : ''} data-tour={{ mate: 'chief', agents: 'agents', meetings: 'meetings' }[id]} onClick={() => { setMtab(id); if (id === 'agents' && mtab === 'agents') setMobileAgent(null); if (id === 'meetings' && mtab === 'meetings') setMobileMeeting(null); if (id === 'more' && mtab === 'more') setMoreView(null); if (id === 'home') setHomeView('home') }} aria-current={mtab === id}>
+            <button key={id} className={mtab === id ? 'on' : ''} data-tour={{ mate: 'chief', agents: 'agents', meetings: 'meetings' }[id]} onClick={() => { setMtab(id); if (id === 'agents' && mtab === 'agents') setMobileAgent(null); if (id === 'meetings' && mtab === 'meetings') { setMobileMeeting(null); if (store.get('cc-meet-tab', 'list') === 'dictations') meetingsAt('list') } if (id === 'more' && mtab === 'more') setMoreView(null); if (id === 'home') setHomeView('home') }} aria-current={mtab === id}>
               <span className="tab-icon">
                 <Icon name={icon} size={20} />
                 {(id === 'home' || (id === 'agents' && !homeOn)) && needN > 0 && <span className="badge">{needN}</span>}
@@ -1347,7 +1348,7 @@ function App() {
           <div className="slot rail-slot" style={{ width: railOpen ? L.railW : 52 }}>
             <Rail fleet={fleet} live={live} collapsed={!railOpen} onToggle={() => set({ railOpen: !L.railOpen })}
               selected={W.active} onOpen={(id) => (id === 'view:home' ? openHome() : openAgent(id))} onOpenInHerdr={openInHerdr} onOpenFiles={openFiles} onNewAgent={(init) => (init ? setNewAgent(init) : openNew())} onNewTerminal={newTerminal} onHistory={() => setHistory(true)}
-              onMeetings={() => openAgent('view:meetings')} onDictations={() => openAgent('view:dictations')} recording={!!meetings?.rec} needs={needN} />
+              onMeetings={openMeetings} recording={!!meetings?.rec} needs={needN} />
           </div>
           {railOpen && <Handle axis="x" size={L.railW} min={180} max={380} onSize={(v) => set({ railW: v })} onToggle={() => set({ railOpen: false })} label={t('Resize sidebar')} />}
 

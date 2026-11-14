@@ -2,11 +2,10 @@ import Icon from '../Icon.jsx'
 import { apiUrl } from '../../api.js'
 import { t, locale } from '../../i18n/index.js'
 
-// What Dictations (the view) and the sidebar's list share: where each one went, said in a few words
-// with the icon of the app it went into (or the agent's), its day and time, and opening one.
+// What Dictations (the view) and Memory share: where each one went, said in a few words with the
+// icon of the app it went into (or the agent's), its day and time, and opening one.
 
-// The sidebar's list, and whether there's any at all (the row shows once there is).
-export const RECENT = '/dictations?limit=40'
+// Whether there's any at all (Meetings' Dictations tab shows once there is).
 export const ANY = '/dictations?limit=1'
 
 export const timeOf = (iso) => new Date(iso).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })
@@ -40,16 +39,15 @@ export function whereOf(r) {
 }
 
 // The icon: the agent's when it went to one, else the app's (kept by the desktop app), else what
-// kind of place it was. bare: the icon alone, the size of the text around it (the sidebar).
-export function Glyph({ r, size = 28, bare = false }) {
+// kind of place it was.
+export function Glyph({ r, size = 28 }) {
   const toAgent = (r.how === 'sent' || r.how === 'queued' || r.how === 'typed') && r.agent
   if (!toAgent && r.icon && r.app?.bundle) return <img className="dc-glyph" src={apiUrl(`/dictations/icons/${encodeURIComponent(r.app.bundle)}`)} alt="" width={size} height={size} draggable="false" />
   const name = toAgent ? (r.agent.chief ? 'helm' : 'bot') : r.place === 'terminal' ? 'terminal' : r.how === 'copied' ? 'copy' : r.how === 'typed' ? 'edit' : 'wave'
-  if (bare) return <Icon name={name} size={size} className="dc-glyph muted" />
   return <span className="dc-glyph dc-glyph-icon" style={{ width: size, height: size }} aria-hidden="true"><Icon name={name} size={Math.round(size * 0.52)} /></span>
 }
 
-// Opens Dictations (App.jsx) at its list, with that one open when given.
+// Opens Meetings at Dictations (App.jsx), at its list, with that one open when given.
 let wanted = null // { id }
 export const takeWanted = () => { const w = wanted; wanted = null; return w }
 export function openDictations(id = null) {

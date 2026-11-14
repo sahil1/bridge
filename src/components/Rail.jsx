@@ -6,8 +6,6 @@ import { api, usePoll, fmtRelative, openInTerminal } from '../api.js'
 import { CloudMark, linkOf, whereOf } from './cloudBits.jsx'
 import SessionSwitcher from './Sessions.jsx'
 import RailMeetings from './meetings/RailMeetings.jsx'
-import RailDictations from './dictations/RailDictations.jsx'
-import { ANY as ANY_DICTATION } from './dictations/shared.jsx'
 import { RailMachines } from './Machines.jsx'
 import { Quiet } from './ErrorBoundary.jsx'
 import { openMeeting, useMeetings } from './meetings/recording.jsx'
@@ -137,7 +135,8 @@ function HoverCard({ row, rect, git, preview }) {
 
 // New (Home: start something) and Meetings sit above the spaces; a red dot while a meeting records.
 // With Home on (a beta feature), Home is the first row, with what needs you on every device (needs).
-export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onNewTerminal, onHistory, onMeetings, onDictations, recording, needs = 0 }) {
+// Dictations are a tab of Meetings (Meetings.jsx), so Meetings is marked while they show.
+export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onNewTerminal, onHistory, onMeetings, recording, needs = 0 }) {
   // Studio and Files, where there's a computer to keep files on (not the demo or the phone apps'
   // Cloud agents). Whiteboards are one of Studio's kinds, so they have no row of their own.
   const inStudio = String(selected || '').startsWith('view:studio')
@@ -168,9 +167,6 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
   }, [collapsed])
   // Meetings, listed under their row like a space's tabs: open once you go to Meetings.
   const [meetingsOpen, setMeetingsOpen] = usePersisted('cc-rail-meetings', false)
-  // Dictations, under Meetings, once there's one kept (or it's open): its latest listed the same way.
-  const [dictOpen, setDictOpen] = usePersisted('cc-rail-dictations', false)
-  const anyDictation = usePoll(ANY_DICTATION, 60000).data?.total > 0 || selected === 'view:dictations'
   const [menu, setMenu] = useState(null) // row id or `ws:<id>`
   const [renaming, setRenaming] = useState(null) // { kind: 'tab'|'ws', id }
   const [hover, setHover] = useState(null) // { row, rect }
@@ -318,7 +314,6 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         <button className={`mini-nav ${selected === 'view:new' ? 'on' : ''}`} data-tour="new-agent" onClick={() => onNewAgent?.()} aria-label={t('New')} title={t('New')}><Icon name="edit" size={15} /></button>
         {!fleet?.down && <button className={`mini-nav ${chiefOn ? 'on' : ''}`} data-tour="chief" onClick={goChief} disabled={launching} aria-label={t('Chief of Staff')} title={`${t('Chief of Staff')}\n${chiefWhat}`}><Icon name="helm" size={15} />{(chief?.status === 'blocked' || threads.some((a) => a.status === 'blocked')) && <span className="mini-needs" />}</button>}
         <button className={`mini-nav ${String(selected || '').startsWith('view:meeting') ? 'on' : ''}`} onClick={() => onMeetings?.()} aria-label={recording ? t('Meetings (recording)') : t('Meetings')} title={t('Meetings')}><Icon name="mic" size={15} />{recording && <span className="rec-dot mini-rec" />}</button>
-        {anyDictation && <button className={`mini-nav ${selected === 'view:dictations' ? 'on' : ''}`} onClick={() => onDictations?.()} aria-label={t('Dictations')} title={t('Dictations')}><Icon name="wave" size={15} /></button>}
         {whiteboards && <button className={`mini-nav ${inStudio ? 'on' : ''}`} onClick={() => onOpen('view:studio')} aria-label={t('Studio')} title={t('Studio')}><Icon name="layers" size={15} /></button>}
         {whiteboards && <button className={`mini-nav ${selected === 'view:files' ? 'on' : ''}`} onClick={() => onOpen('view:files')} aria-label={t('Files')} title={t('Files')}><Icon name="folder" size={15} /></button>}
         <div className="rail-mini">
@@ -361,7 +356,6 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
               {icon(selected === 'view:new', t('New'), 'edit', () => onNewAgent?.(), null, { 'data-tour': 'new-agent' })}
               {!fleet?.down && icon(chiefOn, t('Chief of Staff'), 'helm', goChief, (chief?.status === 'blocked' || threads.some((a) => a.status === 'blocked')) && <span className="mini-needs" />, { 'data-tour': 'chief', disabled: launching, title: `${t('Chief of Staff')}\n${chiefWhat}` })}
               {icon(String(selected || '').startsWith('view:meeting'), recording ? t('Meetings (recording)') : t('Meetings'), 'mic', () => onMeetings?.(), recording && <span className="rec-dot mini-rec" />)}
-              {anyDictation && icon(selected === 'view:dictations', t('Dictations'), 'wave', () => onDictations?.())}
               {whiteboards && icon(inStudio, t('Studio'), 'layers', () => onOpen('view:studio'))}
               {whiteboards && icon(selected === 'view:files', t('Files'), 'folder', () => onOpen('view:files'))}
               <Quiet name="Devices"><RailMachines compact /></Quiet>
@@ -425,13 +419,6 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
             </Dialog>
           )}
           {meetingsOpen && <Quiet name="Meetings list"><RailMeetings selected={selected} onOpen={openMeeting} /></Quiet>}
-          {anyDictation && (
-            <div className="rail-nav-row">
-              <button className={`rail-nav-btn ${selected === 'view:dictations' ? 'on' : ''}`} onClick={() => { setDictOpen(true); onDictations?.() }}><Icon name="wave" size={14} /> {t('Dictations')}</button>
-              <button className="rail-nav-fold" onClick={() => setDictOpen(!dictOpen)} aria-expanded={dictOpen} aria-label={dictOpen ? t('Hide the dictations list') : t('Show the dictations list')} title={dictOpen ? t('Hide the list') : t('Show the list')}><Icon name="down" size={12} className={dictOpen ? '' : 'rot-up'} /></button>
-            </div>
-          )}
-          {anyDictation && dictOpen && <Quiet name="Dictations list"><RailDictations /></Quiet>}
           {whiteboards && (
             <div className="rail-nav-row">
               <button className={`rail-nav-btn ${inStudio ? 'on' : ''}`} onClick={() => onOpen('view:studio')}><Icon name="layers" size={14} /> {t('Studio')}</button>

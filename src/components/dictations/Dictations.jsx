@@ -6,7 +6,7 @@ import { keyLabel } from '../../../shared/dictation/keys.js'
 import { corrections } from '../../../shared/dictation/corrected.js'
 import { keysPlatform, dictationKey, settings as dictationSettings } from '../../dictation/controller.js'
 import Remember from '../../dictation/Remember.jsx'
-import { RECENT, ANY, byDay, timeOf, length, whereOf, Glyph, takeWanted } from './shared.jsx'
+import { ANY, byDay, timeOf, length, whereOf, Glyph, takeWanted } from './shared.jsx'
 import PermissionFix from '../PermissionFix.jsx'
 import { agentName } from '../Rail.jsx'
 import { t, tx } from '../../i18n/index.js'
@@ -20,9 +20,10 @@ import './dictations.css'
 // agent's). Search; click one to see it whole (and what was heard, before the cleanup, and the
 // recording when it was kept), to Edit its words right there, Copy it, Paste it again into the app
 // it went to (the desktop app, where pasting works), Send it to an agent, or Delete it, with Undo
-// for a moment. A name you put right in an edit is offered to meeting memory (Remember.jsx). It
-// sits under Meetings in the sidebar, and in the phone's Meetings tab: the other things you've said.
-// Memory is a tab of it (memory/Memory.jsx), what came up in your dictations to start with.
+// for a moment. A name you put right in an edit is offered to meeting memory (Remember.jsx). It's a
+// tab of Meetings (Meetings.jsx MeetingsHome), the other things you've said: kinds is the Meetings
+// and Dictations tabs, at the top. Memory is a tab of it (memory/Memory.jsx), what came up in your
+// dictations to start with.
 const app = () => window.bridgeApp || {}
 const WHY = {
   secure: () => t('Secure input is on (a password field, or Secure Keyboard Entry), so it wasn\'t pasted.'),
@@ -33,7 +34,7 @@ const WHY = {
 
 const TABS = [['list', 'wave', tx('Dictations')], ['memory', 'book', tx('Memory')]]
 
-export default function Dictations() {
+export default function Dictations({ kinds = null }) {
   const [tab, setTab] = usePersisted('cc-dict-tab', 'list')
   const elsewhere = useElsewhere()
   const [q, setQ] = useState('')
@@ -48,7 +49,7 @@ export default function Dictations() {
   const [msg, setMsg] = useState(null) // { text, error }
   const [paste, setPaste] = useState(null) // the desktop app's: can it paste here?
   useEffect(() => { app().dictateStatus?.().then((s) => setPaste(s?.paste?.can ? s.paste : null), () => {}) }, [])
-  // Opened for one (the sidebar's list, a name in Memory): the list, with that one open and in view.
+  // Opened for one (a name in Memory): the list, with that one open and in view.
   const listRef = useRef(null)
   useEffect(() => {
     const take = () => {
@@ -69,7 +70,7 @@ export default function Dictations() {
   useEffect(() => { if (!gone) return; const id = setTimeout(() => setGone(null), 8000); return () => clearTimeout(id) }, [gone])
 
   const items = (data?.items || []).filter((r) => !hidden.has(r.id))
-  const changed = () => { refresh(); refetch(RECENT); refetch(ANY) }
+  const changed = () => { refresh(); refetch(ANY) }
   const remove = async (r) => {
     setHidden((h) => new Set(h).add(r.id))
     setOpen(null)
@@ -87,7 +88,8 @@ export default function Dictations() {
   const total = data?.total ?? 0
   const groups = byDay(items)
   return (
-    <div className="dc-view">
+    <div className={`dc-view${kinds ? ' with-kinds' : ''}`}>
+      {kinds}
       <PaneHeader icon="wave" title={t('Dictations')} subtitle={<span className="dc-count">{data ? (total === 1 ? t('{n} dictation', { n: total }) : t('{n} dictations', { n: total })) : t('Dictations')} · {elsewhere ? t('On {name}', { name: elsewhere }) : t('On this computer')}</span>}>
         <div className="seg" role="tablist" aria-label={t('Show')}>
           {TABS.map(([v, icon, label]) => (

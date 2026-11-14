@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, refetch } from '../../api.js'
-import { RECENT, ANY } from '../dictations/shared.jsx'
+import { ANY } from '../dictations/shared.jsx'
 import Icon from '../Icon.jsx'
 import { useSettings, SaveNote } from './General.jsx'
 import PermissionFix, { UpdateApp, OpenSettings } from '../PermissionFix.jsx'
@@ -38,7 +38,7 @@ import '../../dictation/dictation.css'
 // words here or send them out. With no model to tidy with, what's needed, on or off: the local
 // model in one click where it runs, else a model of your own (Tidy.jsx).
 //
-// History: each dictation kept on this computer (Dictations, under Meetings), on until you turn it
+// History: each dictation kept on this computer (Meetings › Dictations), on until you turn it
 // off, for always or less; the recordings only if you ask; Delete all, after asking.
 const TO = [['last', tx('The agent I looked at last')], ['chief', tx('The chief of staff')], ['ask', tx('Ask each time')]]
 // How long dictations are kept (server/dictations.js): always unless you pick less.
@@ -203,7 +203,7 @@ export default function Dictation() {
     </section>
     <Advanced order={30}><History d={d} set={set} cleared={cleared} onClear={async () => {
       if (!window.confirm(`${t('Delete every dictation kept on this computer?')}\n\n${t('Their words, their recordings and the apps\' icons go. This can\'t be undone.')}`)) return
-      try { await api('/dictations', { method: 'DELETE' }); setCleared(t('Deleted.')); refetch(RECENT); refetch(ANY) } catch (e) { setCleared(e.message) }
+      try { await api('/dictations', { method: 'DELETE' }); setCleared(t('Deleted.')); refetch(ANY) } catch (e) { setCleared(e.message) }
     }} /></Advanced>
     </div>
   )
@@ -217,7 +217,7 @@ function History({ d, set, cleared, onClear }) {
     <section className="st-sec st-dict-history" data-setting="dictation-history">
       <h4>{t('Dictation History')}</h4>
       <label className="st-check"><input type="checkbox" checked={on} onChange={(e) => set({ history: e.target.checked })} />
-        <span title={t('In Dictations, under Meetings: what you said, when, and where it went (the app or the agent), to find, copy or send again. Only on this computer.')}><b>{t('Keep a history of what you dictate')}</b> <span className="muted small">{t('In Dictations, on this computer only.')}</span></span></label>
+        <span title={t('In Meetings › Dictations: what you said, when, and where it went (the app or the agent), to find, copy or send again. Only on this computer.')}><b>{t('Keep a history of what you dictate')}</b> <span className="muted small">{t('In Meetings › Dictations, on this computer only.')}</span></span></label>
       {on && (
         <>
           <div className="st-row st-radios" role="radiogroup" aria-label={t('Keep them for')}><span>{t('Keep them for')}</span>
