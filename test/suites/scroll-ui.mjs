@@ -153,7 +153,7 @@ try {
       await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-card', { detail: { id: 'gauge' } })))
       await p.locator('.usage-card button', { hasText: 'Stats, patterns and history' }).first().click({ timeout: 15000 })
     }, '.ustats'],
-    ...['General', 'Model Providers', 'Meetings', 'Devices', 'About & Updates'].map((s) => [`Settings › ${s}`, async (p) => {
+    ...['General', 'Model Providers', 'Voice & Meetings', 'Devices', 'About & Updates'].map((s) => [`Settings › ${s}`, async (p) => {
       if (!(await p.locator('.modal.settings').count())) await p.locator('button[aria-label="Settings"]').first().click()
       await p.locator('.st-nav-item', { hasText: s }).first().click({ timeout: 8000 })
     }, '.modal.settings .st-scroll']),

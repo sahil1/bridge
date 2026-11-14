@@ -19,7 +19,7 @@
 //   Dictations: in the sidebar once there's one, by day with each one's app icon or agent, search,
 //   one open whole (and as it was heard), Edit right there (Esc, ⌘↩ saves it, the names put right
 //   offered to meeting memory: Remember, Not now, Undo; light and dark), Copy, Paste again (the desktop app simulated; with no
-//   Accessibility yet, the way to allow it there, then pasted), Send to an agent, Delete and Undo; on a phone in the Meetings tab, with no Paste again. Settings › Voice:
+//   Accessibility yet, the way to allow it there, then pasted), Send to an agent, Delete and Undo; on a phone in the Meetings tab, with no Paste again. Settings › Voice & Meetings:
 //   history off (nothing kept, and the view says so), 30 days, the recordings, Delete all.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -509,16 +509,16 @@ try {
     await ctx.close()
   }
 
-  // ---------- Settings › Voice: history off, and Delete all ----------
+  // ---------- Settings › Voice & Meetings: history off, and Delete all ----------
   {
     const { ctx, p, errors } = await page(b, kit.url, { before })
     await p.locator('button[aria-label="Settings"]').first().click()
-    await p.locator('.st-nav-item', { hasText: 'Voice' }).click()
-    // Under Voice's Advanced, which stays open for the next time.
+    await p.locator('.st-nav-item', { hasText: 'Voice & Meetings' }).click(); await p.locator('.st-tabs [role="tab"]', { hasText: 'Dictation' }).click()
+    // Under the Dictation tab's Advanced, which stays open for the next time.
     await advanced(p)
     const sec = p.locator('.st-dict-history')
     await sec.waitFor({ timeout: 8000 })
-    ok(await sec.locator('input[type=checkbox]').first().isChecked() && await sec.locator('input[name="dict-keep"]').nth(2).isChecked() && !(await sec.locator('label', { hasText: 'Keep the recordings too' }).locator('input').isChecked()), 'Settings › Voice: history on, kept always, the recordings not', await sec.innerText())
+    ok(await sec.locator('input[type=checkbox]').first().isChecked() && await sec.locator('input[name="dict-keep"]').nth(2).isChecked() && !(await sec.locator('label', { hasText: 'Keep the recordings too' }).locator('input').isChecked()), 'Settings › Voice & Meetings: history on, kept always, the recordings not', await sec.innerText())
     await shot(p, `${tag}settings-dictation-history`)
     await sec.locator('label', { hasText: '30 days' }).click()
     ok(!!(await until(async () => (await kit.api('/settings')).effective?.dictation?.keepFor === '30d', 4000, 100)), '30 days, picked and kept')
@@ -551,7 +551,7 @@ try {
     ok(!!(await until(() => off.isVisible(), 5000, 100)) && /History is off/.test(await off.innerText()), 'Dictations says history is off (from ⌘K)')
     // Delete all, after asking.
     await p.locator('button[aria-label="Settings"]').first().click()
-    await p.locator('.st-nav-item', { hasText: 'Voice' }).click()
+    await p.locator('.st-nav-item', { hasText: 'Voice & Meetings' }).click(); await p.locator('.st-tabs [role="tab"]', { hasText: 'Dictation' }).click()
     p.once('dialog', (d) => d.accept())
     await p.locator('.st-dict-history button', { hasText: 'Delete all dictations' }).click()
     ok(!!(await until(async () => (await list()).total === 0 && !fs.existsSync(DIR), 5000, 100)), 'Delete all, after asking: every dictation, recording and icon gone')

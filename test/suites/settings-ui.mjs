@@ -8,7 +8,11 @@
 // Advanced: Meetings' cleanup, naming who spoke and preparing (with which model writes the notes and
 // where it runs said there: none yet, then a key's), Mail's learning again, General's picking up
 // unfinished work. Nothing was lost: every setting that was there before Advanced (each control by its
-// name) is still in its section, Advanced opened. At phone width (375 px), dark: Meetings with
+// name) is still in its section, Advanced opened. Voice & Meetings is one section with three tabs
+// (Meetings, Dictation, Speech to Text: they were two sections, Voice and Meetings): each tab with
+// what was its own, a link to "meetings", "voice" or "dictation" landing on its tab, the section's
+// own id and its row in the list on the first, and on a phone the tabs across the top, each a whole
+// 40 px target. At phone width (375 px), dark: Meetings with
 // Advanced open, nothing wider than the screen or cut off, and Advanced a whole 40 px target.
 // Meetings' Names from the call, on a Mac, where Screen Recording shows as on in System Settings and
 // doesn't take until Bridge AI restarts: after Open it, Restart Bridge AI (the top bar's Restart to
@@ -39,11 +43,13 @@ const model = await startModel('settings-ui')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 
-// What each section shows first (not under Advanced).
+// What each section shows first (not under Advanced); for Voice & Meetings, each of its tabs.
+const TABS = ['Meetings', 'Dictation', 'Speech to Text']
 const FIRST = {
   General: ['Your name', 'Default agent', 'Pick up unfinished work', 'Layout', 'Location'],
   'Model Providers': ['Your agents', /model labs/i, /run locally/i],
-  Voice: ['Speech to text', 'Talk to your agents'],
+  'Speech to Text': ['Speech to text', 'Spoken Answers'],
+  Dictation: ['Talk to your agents'],
   Meetings: ['Transcribe with', 'Language', 'Names and terms', 'Notes are written by', 'Write the summary when a meeting ends', 'Clean up the transcript when a meeting ends', 'Name who spoke on the call', ...(IS_MAC ? ['Prepare for each meeting'] : []), 'Record the other side of calls', 'Notice calls', 'Save every meeting as Markdown'],
   Mail: ['How You Write', 'Learn it again now and then', 'Working days', 'Working hours', 'Read-Only'],
   'MCP Servers': ['Bridge AI as an MCP Server', 'Add server'],
@@ -59,7 +65,8 @@ const ALL = {
   General: ['input|Your name', 'button|More agents', 'button|Simple', 'button|Everything', 'button|Use my location', 'input|Search for a city', 'button|Off', 'button|On', 'select|Chief of Staff runs on', 'select|Terminal app', 'button|Built in', 'button|herdr', 'input|Keep agents running when Bridge AI quits', 'input|Pick up unfinished work after an update, a crash or a restart'],
   Agents: ['button|Refresh', 'button|Install', 'button|Copy the command'],
   'Model Providers': ['button|Check sign-ins again', 'input|Show more models (Qwen Code, DeepSeek, Kimi, GLM)', 'button|Anthropic', 'button|OpenAI', 'button|Azure OpenAI', 'button|AWS Bedrock', 'button|OpenRouter', 'button|Groq', 'button|Ollama', 'button|LM Studio', 'button|Deepgram', 'button|AssemblyAI', 'button|Another speech service', 'button|Cursor', 'button|GitHub Copilot', 'button|Jules'],
-  Voice: ['button|Download', 'input|Talk to your agents', 'button|Change', 'input|Light cleanup', 'input|Mention files by saying them', 'input|Show the words as you talk', 'input|Keep a history of what you dictate', 'input|30 days', 'input|1 year', 'input|Always', 'input|Keep the recordings too', 'button|Delete all dictations', 'select|Voice', 'select|Speed', 'button|Test'],
+  'Speech to Text': ['button|Download', 'select|Voice', 'select|Speed', 'button|Test'],
+  Dictation: ['input|Talk to your agents', 'button|Change', 'input|Light cleanup', 'input|Mention files by saying them', 'input|Show the words as you talk', 'input|Keep a history of what you dictate', 'input|30 days', 'input|1 year', 'input|Always', 'input|Keep the recordings too', 'button|Delete all dictations'],
   Meetings: ['input|On this computer', 'input|OpenAI', 'input|Groq', 'input|Deepgram', 'input|AssemblyAI', 'input|Another OpenAI-style service', 'button|Speech models', 'select|Meeting language', 'button|Open Memory', 'input|More words to listen for', 'input|Record the other side of calls', 'select|Model for meeting notes', 'input|Write the summary when a meeting ends', 'input|Clean up the transcript when a meeting ends', 'input|Suggest what to ask, in every meeting', 'select|How often AI Assist suggests something', ...(IS_MAC ? ['input|Prepare for each meeting'] : []), 'input|Name who spoke on the call', 'textarea|Your own instructions for every summary', 'input|Tell voices apart in a room', 'input|Tell voices apart on a call', 'input|Learn my voice', 'input|Remember voices you name', 'select|The key that mentions a meeting', 'input|Notice calls', 'input|Stop by itself when the call ends', 'select|What to save', 'input|Folder', 'input|Subfolders', 'input|File name', 'input|Front matter', 'input|Your mic, as', 'input|The call, as', 'input|Keep saved notes up to date', 'input|Save every meeting as Markdown'],
   Mail: ['input|Learn it again now and then', 'button|Mon', 'button|Sun', 'input|From', 'input|To', 'select|Kept clear around meetings', 'select|Around a meeting somewhere else', 'select|How many times to offer'],
   'MCP Servers': ['input|Bridge AI as an MCP Server', 'button|Add server', 'button|Refresh'],
@@ -114,13 +121,24 @@ try {
     await p.locator('button[aria-label="Settings"]').first().click()
     await p.waitForSelector('.st-nav-item', { timeout: 8000 })
     const navs = (await p.locator('.st-nav-item').allInnerTexts()).map((x) => x.trim())
-    for (const name of navs) {
-      await nav(p, name)
+    ok(navs.filter((x) => x === 'Voice & Meetings').length === 1 && !navs.includes('Voice') && !navs.includes('Meetings') && !navs.includes('Dictation'), 'Voice & Meetings is one section, with no Voice or Meetings beside it', navs)
+    // Voice & Meetings: each of its tabs, as a section was.
+    const places = navs.flatMap((x) => (x === 'Voice & Meetings' ? TABS.map((tab) => [x, tab]) : [[x, null]]))
+    for (const [section, tab] of places) {
+      const name = tab || section
+      await nav(p, section)
+      if (section === 'Voice & Meetings' && tab === TABS[0]) {
+        const tabs = p.locator('.st-head .st-tabs [role="tab"]')
+        ok(JSON.stringify(await tabs.allInnerTexts()) === JSON.stringify(TABS) && (await p.locator('.st-tabs [role="tab"][aria-selected="true"]').innerText()) === 'Meetings' && (await p.locator('.st-head h3').innerText()).trim() === 'Voice & Meetings', 'Voice & Meetings: its tabs are Meetings, Dictation and Speech to Text, opened at Meetings', await tabs.allInnerTexts())
+      }
+      if (tab) { await p.locator('.st-tabs [role="tab"]', { hasText: tab }).click(); await settled(p) }
+      if (!tab) ok(await p.locator('.modal.settings .st-tabs').count() === 0, `${name}: no tabs`)
       const shown = await first(p)
       const want = (FIRST[name] || []).filter((x) => !(typeof x === 'string' ? shown.includes(x) : x.test(shown)))
       if (FIRST[name]) ok(!want.length, `${name}: what most people change shows first`, { missing: want.map(String), shown: shown.slice(0, 600) })
       const has = await adv(p).count() && await adv(p).isVisible()
-      if (name !== 'MCP Servers' && name !== 'Agents') ok(has && (await isOpen(p)) === false, `${name}: the rest under Advanced, at the end, closed`, { has, open: await isOpen(p) })
+      if (name === 'Speech to Text') ok(!has, 'Speech to Text: nothing under Advanced, so no Advanced', { has })
+      else if (name !== 'MCP Servers' && name !== 'Agents') ok(has && (await isOpen(p)) === false, `${name}: the rest under Advanced, at the end, closed`, { has, open: await isOpen(p) })
       if (ALL[name]) {
         const got = await names(p)
         // Spoken Answers' speed and Test are there only where this browser has a voice of its own
@@ -129,10 +147,47 @@ try {
         const lost = ALL[name].filter((x) => voiced || !['select|Speed', 'button|Test'].includes(x)).filter((x) => { const [k, n] = x.split('|'); return !got.some((g) => g.startsWith(`${k}|`) && g.slice(k.length + 1).includes(n)) })
         ok(!lost.length, `${name}: every setting there was is still here`, { lost, got })
       }
-      if (['Meetings', 'General', 'About & Updates'].includes(name)) await shot(p, `${tag}settings-ui-${name.replace(/\W+/g, '-').toLowerCase()}`)
+      if (['Meetings', 'Dictation', 'Speech to Text', 'General', 'About & Updates'].includes(name)) await shot(p, `${tag}settings-ui-${name.replace(/\W+/g, '-').toLowerCase()}`)
     }
     ok(!navs.includes('Mail') || IS_MAC, 'Mail only on a Mac', navs)
     ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+  }
+
+  // ---------- Voice & Meetings: what opened Voice, Meetings or dictation lands on its tab ----------
+  {
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+    const at = () => p.evaluate(() => ({ nav: document.querySelector('.st-nav-item.on')?.innerText.trim(), tab: document.querySelector('.st-tabs [role="tab"][aria-selected="true"]')?.innerText.trim() }))
+    const lands = async (section, tab, sel) => {
+      await p.evaluate((s) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: s } })), section)
+      return !!(await until(async () => { const a = await at(); return a.nav === 'Voice & Meetings' && a.tab === tab && await p.locator(`.modal.settings .st-scroll ${sel}`).first().isVisible() }, 8000, 100))
+    }
+    ok(await lands('voice', 'Speech to Text', '.st-voice [data-setting="speech-model"]') && await p.locator('.modal.settings .st-dictation').count() === 0, 'a link to "voice" (Settings closed) opens Voice & Meetings at Speech to Text: the speech models, without dictation', await at())
+    ok(await lands('meetings', 'Meetings', '.st-meet'), 'a link to "meetings" (from another tab): Meetings', await at())
+    ok(await lands('dictation', 'Dictation', '.st-dictation') && await p.locator('.modal.settings .st-voice, .modal.settings .st-meet').count() === 0, 'a link to "dictation": Dictation, on its own', await at())
+    ok(await lands('voice-meetings', 'Meetings', '.st-meet'), 'and the section\'s own id: its first tab', await at())
+    ok(await lands('dictation-history', 'Dictation', '[data-setting="dictation-history"]') && await isOpen(p) === true, 'a setting of dictation\'s (Dictation History): the Dictation tab, Advanced opened to show it', await at())
+    ok(await lands('spoken-answers', 'Speech to Text', '[data-setting="spoken-answers"]'), 'Spoken Answers: Speech to Text', await at())
+    // The section in the list, with a tab showing: it stays; from another section: the first again.
+    await p.locator('.st-tabs [role="tab"]', { hasText: 'Dictation' }).click()
+    await nav(p, 'Voice & Meetings')
+    ok((await at()).tab === 'Dictation', 'Voice & Meetings in the list, while it shows: the tab stays', await at())
+    await nav(p, 'General')
+    await nav(p, 'Voice & Meetings')
+    ok((await at()).tab === 'Meetings', 'from another section: Meetings again', await at())
+    // Opened where it opens first (a reload, then Settings at a tab), and ⌘K says where each is.
+    await p.reload()
+    await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+    ok(await lands('dictation', 'Dictation', '.st-dictation'), 'Settings opened at "dictation": Dictation', await at())
+    await p.locator('button[aria-label="Close settings"]').click()
+    await p.keyboard.press('ControlOrMeta+K')
+    await p.locator('.palette input').fill('dictation history')
+    const hit = p.locator('.pal-item[data-id="s:dictation-history"]')
+    ok(!!(await until(() => hit.isVisible(), 4000)) && /Settings › Voice & Meetings/.test(await hit.innerText()), '⌘K "dictation history": in Settings › Voice & Meetings', await p.locator('.pal-list').innerText().catch(() => ''))
+    await hit.click()
+    ok(!!(await until(async () => (await at()).tab === 'Dictation' && await p.locator('.modal.settings [data-setting="dictation-history"]').isVisible(), 8000, 100)), 'and it opens the Dictation tab at it', await at())
+    ok(errors.length === 0, 'Voice & Meetings: no page errors', errors)
     await ctx.close()
   }
 
@@ -171,7 +226,7 @@ try {
     ok(await p.locator('.pal-item[data-id^="s:"]').count() === 0, '⌘K with nothing typed: no settings listed')
     await p.locator('.palette input').fill('front matter')
     const hit = p.locator('.pal-item[data-id="s:save-notes"]')
-    ok(!!(await until(() => hit.isVisible(), 4000)) && /Settings › Meetings/.test(await hit.innerText()), '⌘K "front matter": Save notes as Markdown, in Settings › Meetings', await p.locator('.pal-list').innerText())
+    ok(!!(await until(() => hit.isVisible(), 4000)) && /Settings › Voice & Meetings/.test(await hit.innerText()), '⌘K "front matter": Save notes as Markdown, in Settings › Voice & Meetings', await p.locator('.pal-list').innerText())
     await hit.click()
     const target = p.locator('.modal.settings [data-setting="save-notes"]')
     ok(!!(await until(async () => /Meetings/.test(await p.locator('.st-nav-item.on').innerText().catch(() => '')) && await target.isVisible(), 8000)) && await isOpen(p) === true, 'Settings opens at Meetings, Advanced opened to show it')
@@ -321,6 +376,22 @@ try {
     ok(!faults.wider && !faults.past && !faults.sideways && !faults.cut, 'phone: Meetings with Advanced open, nothing wider than the screen, past its edge or cut off', faults)
     ok(box && box.height >= 40 && box.width >= 40, 'and Advanced a whole 40 px target', box)
     await shot(p, `${tag}settings-ui-phone-dark`)
+    // Voice & Meetings on a phone: its name in the bar, the tabs across the top, one row in the list.
+    const tabs = await p.locator('.modal.settings.phone .st-scroll .st-tabs [role="tab"]').evaluateAll((l) => l.map((e) => { const r = e.getBoundingClientRect(); return { name: e.innerText.trim(), on: e.getAttribute('aria-selected') === 'true', h: Math.round(r.height), inside: r.left >= 0 && r.right <= innerWidth } }))
+    ok((await p.locator('.st-bar h3').innerText()).trim() === 'Voice & Meetings' && JSON.stringify(tabs.map((x) => x.name)) === JSON.stringify(TABS) && tabs[0].on && tabs.every((x) => x.h >= 40 && x.inside), 'phone: Voice & Meetings in the bar, its three tabs across the top at Meetings, each a whole 40 px target', tabs)
+    for (const [tab, sel] of [['Dictation', '.st-dictation'], ['Speech to Text', '.st-voice']]) {
+      await p.locator('.st-tabs [role="tab"]', { hasText: tab }).click()
+      await p.locator(`.modal.settings.phone .st-scroll ${sel}`).waitFor({ timeout: 8000 }).catch(() => {})
+      await settled(p)
+      const f = await phoneFaults(p, '.modal.settings .st-scroll')
+      ok(await p.locator(`.modal.settings.phone .st-scroll ${sel}`).isVisible() && (await p.locator('.st-tabs [role="tab"][aria-selected="true"]').innerText()) === tab && !f.wider && !f.past && !f.sideways && !f.cut, `phone: the ${tab} tab, nothing wider than the screen, past its edge or cut off`, f)
+    }
+    await shot(p, `${tag}settings-ui-phone-tabs`)
+    await p.locator('.st-back').click()
+    const rows = await p.locator('.st-list-row b').allInnerTexts()
+    ok(rows.filter((x) => x === 'Voice & Meetings').length === 1 && !rows.includes('Voice') && !rows.includes('Meetings'), 'phone: one Voice & Meetings row in the list', rows)
+    await p.locator('.st-list-row', { hasText: 'Voice & Meetings' }).click()
+    ok(!!(await until(async () => (await p.locator('.st-tabs [role="tab"][aria-selected="true"]').innerText().catch(() => '')) === 'Meetings', 5000, 100)), 'and its row opens it at Meetings')
     ok(errors.length === 0, 'phone: no page errors', errors)
     await ctx.close()
   }

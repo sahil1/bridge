@@ -12,7 +12,7 @@
 //   history as sent to the Chief of Staff. Tapped: it listens on, saying to press it again. On a
 //   phone, held with a finger.
 //   Interrupting: Esc stops it at once, and so does pressing Ask out loud again (before it listens).
-//   Settings › Voice › Spoken Answers: this device's own voices, the most natural first and picked
+//   Settings › Voice & Meetings › Spoken Answers: this device's own voices, the most natural first and picked
 //   (Premium, then Enhanced, then the rest; novelty voices left out; Chrome's two of one name once),
 //   a speed, Test; with only basic voices on a Mac, where to download better ones.
 //   The natural voice, where it can run (the rules for each kind of computer): offered beside the
@@ -235,12 +235,12 @@ try {
     await ctx.close()
   }
 
-  // Settings › Voice › Spoken Answers: this device's own voices, a speed, Test.
+  // Settings › Voice & Meetings › Spoken Answers: this device's own voices, a speed, Test.
   {
     const { ctx, p } = await open(LOCAL)
     const sec = await toSettings(p)
     const names = await sec.locator('select').first().locator('option').allInnerTexts()
-    ok(names.length === 2 && /Samantha/.test(names[0]) && /^Natural voice, made on your computer \(145 MB download\)$/.test(names[1]), 'Settings › Voice › Spoken Answers: this device\'s own voices (never the internet one), and the natural voice with its size', names)
+    ok(names.length === 2 && /Samantha/.test(names[0]) && /^Natural voice, made on your computer \(145 MB download\)$/.test(names[1]), 'Settings › Voice & Meetings › Spoken Answers: this device\'s own voices (never the internet one), and the natural voice with its size', names)
     await sec.locator('select').nth(1).selectOption('1.15')
     await sec.locator('button', { hasText: 'Test' }).click()
     const tst = await until(() => p.evaluate(() => window.__said.at(-1)), 3000, 100)

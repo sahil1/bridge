@@ -93,7 +93,7 @@ try {
     await kit.api(`/meetings/${C.id}/stop`, {})
   }
 
-  // When the floating card is kept out of screenshots and screen sharing (Settings › Meetings; the
+  // When the floating card is kept out of screenshots and screen sharing (Settings › Voice & Meetings; the
   // desktop app reads it from /api/calls, desktop/floatshare.js).
   ok((await kit.api('/calls')).floatHide === 'sharing', 'the floating card: kept out of a screen you share, to begin with')
   await kit.api('/settings', { meetings: { floatHide: 'never' } }, 'PATCH')
@@ -679,7 +679,7 @@ try {
   ok(path.basename(ref.path) === 'Quarterly plan.md' && ref.path.startsWith(path.join(kit.data, 'meetings', A.id)) && /^# Quarterly plan\n/.test(refText) && /## Summary/.test(refText) && /## Transcript/.test(refText) && /\] Dan Ruiz: These slides/.test(refText) && /## Demo \(from 0:0\d\)/.test(refText), 'mentioned: the meeting as one file for the agent, named for it, beside the meeting, with its summary and the transcript in sections', refText.slice(0, 300))
   ok((await kit.api('/config')).meetingKey === '@', 'the meeting key is @ to begin with')
   await kit.api('/settings', { meetings: { mentionKey: '#' } }, 'PATCH')
-  ok((await kit.api('/config')).meetingKey === '#', 'and the one picked in Settings › Meetings')
+  ok((await kit.api('/config')).meetingKey === '#', 'and the one picked in Settings › Voice & Meetings')
   await kit.api('/settings', { meetings: { mentionKey: 'x' } }, 'PATCH')
   ok((await kit.api('/config')).meetingKey === '@', 'one the app doesn\'t offer is @')
   await kit.api('/settings', { meetings: { mentionKey: null } }, 'PATCH')
