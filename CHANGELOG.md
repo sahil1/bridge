@@ -2,6 +2,23 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.18.1
+
+Settings is shorter: Voice and Meetings are one section with tabs, and Devices has tabs too. With Bridge AI's relay picked, the email sign-in comes first.
+
+<!-- rollout: 10 -->
+
+### What's new
+
+- **Voice & Meetings**: Settings' Voice and Meetings sections are one, with tabs for Meetings, Dictation and Speech to Text. Dictation's settings have a tab of their own; they were inside Voice. Everything that opened either section opens its tab, and search (⌘K) finds each setting where it is now.
+- **Tabs in Settings › Devices**: Phone (how your phone reaches this computer), Computers (your linked computers, Link a device) and Notifications (this device, what to notify about, the devices that get them).
+- **Bridge AI's relay, picked**: the sign-in, or where your request stands, comes right under the choice. What Bold Bridge can see, fair use and where the relay's code is are folded under one line below it.
+
+### Fixes
+
+- Settings › Voice & Meetings › Speech to Text on a phone: Spoken Answers no longer runs past the edge of the screen when a voice's name is long.
+- The Dictation tab says Dictation once: its settings had the name as a heading and again under Advanced, which is now Cleanup and Mentions. Speech to Text's models are under Speech Model.
+
 ## 3.18.0
 
 Bridge AI's relay: your phone reaches your computer with your email and a code, and no Cloudflare account of your own. A meeting that ended can record again, several meetings combine into one with its own summary, and the meeting card switches between meetings at the same time and renames the recording. Add a computer leads the phone's devices menu, and Windows and Linux no longer show a calendar they can't read. A new install is counted the day it happens. Fixes: updating on a Mac opens the new version every time, and the document editor, sheets, Word files and Markdown are on their newest versions.
