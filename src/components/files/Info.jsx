@@ -1,14 +1,11 @@
 // Get Info, as Finder's: what it is, how big (a folder's size worked out when you ask, and stopped
 // when you close it), where it is, when it was made, changed and last opened, and whether you can
-// change it. Renaming and moving to the Trash are named where Finder has them, as coming: Folders is
-// read-only for now.
+// change it. Folders is read-only for now, so nothing here renames or moves it.
 import { useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { locale, t } from '../../i18n/index.js'
 import { Thumb } from './views.jsx'
 import { getJson, enc, kindName, fmtSize, fmtWhen } from './fsapi.js'
-
-const SOON = () => t('Read-only for now: renaming, moving and deleting are coming.')
 
 export default function Info({ base, root, entry, cloud, onClose, onOpen, openLabel, onReveal, revealLabel, onCopy }) {
   const [d, setD] = useState(null)
@@ -79,10 +76,7 @@ export default function Info({ base, root, entry, cloud, onClose, onOpen, openLa
       <div className="fx-info-acts">
         {openLabel && <button type="button" className="btn small" onClick={onOpen}><Icon name={folder ? 'folder-open' : 'external'} size={12} /> {openLabel}</button>}
         {onReveal && <button type="button" className="btn small" onClick={onReveal}><Icon name="folder-open" size={12} /> {revealLabel}</button>}
-        <button type="button" className="btn small" disabled title={SOON()}>{t('Rename (coming)')}</button>
-        <button type="button" className="btn small" disabled title={SOON()}>{t('Move to Trash (coming)')}</button>
       </div>
-      <p className="muted small fx-info-soon">{SOON()}</p>
     </aside>
   )
 }

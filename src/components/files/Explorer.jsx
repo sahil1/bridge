@@ -27,7 +27,6 @@ import './explorer.css'
 const HOME = { machine: null, root: 'home', path: '' }
 const VIEWS = [['list', 'list', tx('As list')], ['icons', 'grid', tx('As icons')], ['columns', 'columns', tx('As columns')]]
 const ASKED_ABOUT = ['Desktop', 'Documents', 'Downloads']
-const SOON = () => t('Read-only for now: renaming, moving and deleting are coming.')
 const readWhere = () => { try { const w = JSON.parse(localStorage.getItem(WHERE_KEY)); return w?.root ? { machine: w.machine || null, root: String(w.root), path: String(w.path || '') } : HOME } catch { return HOME } }
 const keepWhere = (w) => { try { localStorage.setItem(WHERE_KEY, JSON.stringify({ machine: w.machine, root: w.root, path: w.path })) } catch { /* not kept */ } }
 // A folder Back or Forward goes to (src/backForward.js), as kept.
@@ -204,11 +203,6 @@ export default function Explorer() {
       'sep',
       { label: t('Copy path'), icon: 'copy', run: () => copy(fullOf(e)) },
       isFolderHere && { label: hidden ? t('Hide hidden files') : t('Show hidden files'), icon: hidden ? 'eye-off' : 'eye', hint: '⌘⇧.', run: () => setHidden(!hidden) },
-      'sep',
-      isFolderHere && { label: t('New Folder (coming)'), icon: 'folder', disabled: true, title: SOON(), run: () => {} },
-      !isFolderHere && { label: t('Rename (coming)'), icon: 'edit', disabled: true, title: SOON(), run: () => {} },
-      !isFolderHere && { label: t('Move to… (coming)'), icon: 'send', disabled: true, title: SOON(), run: () => {} },
-      !isFolderHere && { label: t('Move to Trash (coming)'), icon: 'trash', disabled: true, title: SOON(), run: () => {} },
     ].filter(Boolean)
   }
 

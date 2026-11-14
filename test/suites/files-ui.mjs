@@ -331,7 +331,7 @@ try {
     await p.keyboard.press(`${MOD}+i`)
     const info = p.locator('.fx-info')
     ok(!!(await until(async () => { const x = await info.innerText().catch(() => ''); return /34 bytes/.test(x) && /Modified/.test(x) && /Where/.test(x) && /Markdown document/.test(x) }, 8000)), 'Get Info (⌘I): its kind, size, where it is, when it changed', await info.innerText().catch(() => ''))
-    ok((await info.locator('button', { hasText: 'Rename (coming)' }).isDisabled()) && (await info.locator('button', { hasText: 'Move to Trash (coming)' }).isDisabled()), 'renaming and the Trash are there as coming, and can\'t be used yet')
+    ok(await info.locator('button:disabled').count() === 0 && !/coming/i.test(await info.innerText()), 'no buttons that can\'t be used yet (nothing "coming")', await info.innerText().catch(() => ''))
     await info.locator('button[aria-label="Close Info"]').click()
     await p.locator('.fx-path .fx-crumb', { hasText: 'Projects' }).click()
     await p.locator('.fx-row[data-name="site"]').click()
@@ -347,7 +347,7 @@ try {
     const menu = p.locator('.ctx-menu')
     await menu.waitFor({ timeout: 4000 })
     const items = await menu.locator('button').evaluateAll((els) => els.map((e) => `${e.querySelector('span')?.innerText.trim()}${e.disabled ? ' (off)' : ''}`))
-    ok(items.includes('Get Info') && items.includes('Copy path') && items.includes('Rename (coming) (off)') && items.includes('Move to Trash (coming) (off)'), 'right-click: Get Info, Copy path, and renaming and the Trash shown as coming', items)
+    ok(items.includes('Get Info') && items.includes('Copy path') && !items.some((x) => / \(off\)$|coming/.test(x)), 'right-click: Get Info, Copy path, and nothing that can\'t be used yet', items)
     await p.keyboard.press('Escape')
   })
   await part('hidden files', async () => {
