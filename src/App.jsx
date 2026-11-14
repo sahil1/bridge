@@ -1052,10 +1052,10 @@ function App() {
         : id === 'view:map' ? <section className="pane view-pane"><AgentMap phone={!wide} onOpen={(d, a) => openOn(d.id, a.paneId, { device: d.name, title: a.name || a.title, kind: a.kind })}
           controls={wide ? { maximized: !!L.max, onMaximize: () => set({ max: L.max ? null : 'main' }) } : null} /></section>
         : id === 'view:meetings' ? <section className="pane view-pane"><MeetingsHome onOpen={(mid) => openAgent(`view:meeting:${mid}`, wide ? { replace: 'view:meetings' } : {})} /></section>
-                : id === 'view:files' && Explorer ? <section className="pane view-pane"><Explorer /></section>
-                : id === 'view:studio' && StudioHome ? <section className="pane view-pane"><StudioHome onOpen={(f) => openAgent(studioId(f), wide ? { replace: 'view:studio' } : {})} /></section>
-                  : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f, o) => openAgent(studioId(f), o?.replace ? { replace: id } : {})} /></section>
-                : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
+        : id === 'view:files' && Explorer ? <section className="pane view-pane"><Explorer /></section>
+        : id === 'view:studio' && StudioHome ? <section className="pane view-pane"><StudioHome onOpen={(f) => openAgent(studioId(f), wide ? { replace: 'view:studio' } : {})} /></section>
+        : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f, o) => openAgent(studioId(f), o?.replace ? { replace: id } : {})} /></section>
+        : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
     </ErrorBoundary>
   )
 
@@ -1063,7 +1063,7 @@ function App() {
   // On a computer's layout, once the window has what it shows (its agents and settings). What's on
   // screen is a place: Herdr's view, a section of Settings, Today or the Agents board full size, or
   // the tab in front (and the one beside it), full size or not, with where it is inside itself (an
-  // agent's Chat or Terminal, Meetings' Memory, the folder Files is in).
+  // agent's Chat or Terminal, Meetings' Memory or Dictations, the folder Folders is in).
   const navReady = useRef(false)
   if (fleet && conf) navReady.current = true
   const navOn = wide && !cloudOnly && navReady.current
@@ -1080,7 +1080,7 @@ function App() {
   byIdRef.current = byId
   const tabOpen = (id) => wsRef.current.tabs.includes(id)
   // Where a view or an agent was inside itself: there again as it shows (an agent's Chat or
-  // Terminal kept as the tab keeps it; Meetings' tab and Files' folder told to the view).
+  // Terminal kept as the tab keeps it; Meetings' tab and Folders' folder told to the view).
   const showInner = (id, v) => {
     if (v == null) return
     if (id === 'view:meetings') { meetingsAt(v); return }
