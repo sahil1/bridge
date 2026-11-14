@@ -6,8 +6,11 @@
 //   - [x] Compare the CRM quotes <!-- id:3 added:2026-10-20 done:2026-10-21 -->
 //     Outcome: HubSpot is cheapest for 10 seats; only Salesforce has SSO.
 //     File: work/crm-quotes/comparison.md
+//   - [ ] Draft the launch deck <!-- id:5 status:doing added:2026-11-14 role:marketing pane:w3:p1 -->
 // changed: when an open one's title, status or what it needs last changed, to the minute, in this
 // computer's time (Home: a task that waits on you and hasn't changed for days has gone quiet).
+// role and pane: a task the chief handed to a helper (delegate.js), the helper's role and the agent
+// working on it, so the list says who has it however it's read.
 import fs from 'node:fs'
 import path from 'node:path'
 import { ROOT, writeFileAtomic } from './paths.js'
@@ -19,6 +22,8 @@ const KEEP_DONE = 40
 const today = () => new Date().toLocaleDateString('en-CA')
 const minute = () => { const d = new Date(); return `${d.toLocaleDateString('en-CA')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
 const oneLine = (s, n) => String(s ?? '').replace(/<!--|-->/g, '').replace(/\s+/g, ' ').trim().slice(0, n)
+// A role or a pane id, kept as one word in the line's notes.
+const word = (s, n) => oneLine(s, n).replace(/\s/g, '') || null
 const RANK = { waiting: 0, doing: 1, open: 2 }
 
 // dir: the chief's folder. you(): the name its instructions use, for a list made from scratch.
@@ -41,7 +46,7 @@ export function makeTasks(dir, you = () => 'the user') {
       if (m) {
         const meta = Object.fromEntries((m[3] || '').trim().split(/\s+/).filter(Boolean).map((kv) => kv.split(/:(.*)/s).slice(0, 2)))
         const status = m[1] !== ' ' ? 'done' : RANK[meta.status] != null ? meta.status : 'open'
-        items.push({ id: meta.id ? String(meta.id) : null, title: m[2].trim(), status, added: meta.added || null, changed: status === 'done' ? null : meta.changed || null, done: status === 'done' ? meta.done || null : null, from: meta.from || null, outcome: null, link: null, needs: null })
+        items.push({ id: meta.id ? String(meta.id) : null, title: m[2].trim(), status, added: meta.added || null, changed: status === 'done' ? null : meta.changed || null, done: status === 'done' ? meta.done || null : null, from: meta.from || null, role: meta.role || null, pane: meta.pane || null, outcome: null, link: null, needs: null })
         continue
       }
       const d = DETAIL.exec(l)
@@ -60,7 +65,7 @@ export function makeTasks(dir, you = () => 'the user') {
   }
 
   function format(it) {
-    const meta = [`id:${it.id}`, it.status !== 'done' && it.status !== 'open' && `status:${it.status}`, it.added && `added:${it.added}`, it.status !== 'done' && it.changed && `changed:${it.changed}`, it.done && `done:${it.done}`, it.from && `from:${it.from}`].filter(Boolean).join(' ')
+    const meta = [`id:${it.id}`, it.status !== 'done' && it.status !== 'open' && `status:${it.status}`, it.added && `added:${it.added}`, it.status !== 'done' && it.changed && `changed:${it.changed}`, it.done && `done:${it.done}`, it.from && `from:${it.from}`, it.role && `role:${it.role}`, it.pane && `pane:${it.pane}`].filter(Boolean).join(' ')
     const out = [`- [${it.status === 'done' ? 'x' : ' '}] ${it.title} <!-- ${meta} -->`]
     if (it.status === 'waiting' && it.needs) out.push(`  Needs: ${it.needs}`)
     if (it.status === 'done' && it.outcome) out.push(`  Outcome: ${it.outcome}`)
@@ -108,12 +113,12 @@ export function makeTasks(dir, you = () => 'the user') {
       const open = items.filter((x) => x.status !== 'done').sort((a, b) => RANK[a.status] - RANK[b.status] || Number(b.id) - Number(a.id))
       return { items: [...open, ...ordered(items).filter((x) => x.status === 'done')], file: FILE, dir }
     },
-    add(title, { status = 'open', from = null, link = null } = {}) {
+    add(title, { status = 'open', from = null, link = null, role = null, pane = null } = {}) {
       const t = oneLine(title, 200)
       if (!t) throw new Error('Say what the task is')
       if (!STATUSES.includes(status) || status === 'done' || status === 'waiting') status = 'open'
       const { head, items } = read()
-      const it = { id: String(Math.max(0, ...items.map((x) => Number(x.id) || 0)) + 1), title: t, status, added: today(), changed: null, done: null, from: from ? oneLine(from, 20).replace(/\s/g, '') : null, outcome: null, link: cleanLink(link), needs: null }
+      const it = { id: String(Math.max(0, ...items.map((x) => Number(x.id) || 0)) + 1), title: t, status, added: today(), changed: null, done: null, from: from ? word(from, 20) : null, role: role ? word(role, 30) : null, pane: pane ? word(pane, 80) : null, outcome: null, link: cleanLink(link), needs: null }
       write(head, [...items, it])
       return it
     },
@@ -132,6 +137,8 @@ export function makeTasks(dir, you = () => 'the user') {
       if (patch.needs !== undefined) it.needs = oneLine(patch.needs, 300) || null
       if (patch.outcome !== undefined) it.outcome = oneLine(patch.outcome, 400) || null
       if (patch.link !== undefined) it.link = cleanLink(patch.link)
+      if (patch.role !== undefined) it.role = patch.role ? word(patch.role, 30) : null
+      if (patch.pane !== undefined) it.pane = patch.pane ? word(patch.pane, 80) : null
       it.changed = it.status === 'done' ? null : `${it.title}|${it.status}|${it.needs}` !== was ? minute() : it.changed
       write(head, items)
       return it
