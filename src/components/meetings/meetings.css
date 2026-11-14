@@ -515,6 +515,9 @@ span.mt-when { cursor: default; }
 .mt-view .pane-sub .mt-people { max-width: 170px; }
 .mt-view .pane-sub .mt-people > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mt-view .pane-sub .mt-saved { flex: 0 1 auto; min-width: 26px; }
+/* The combined meeting it's part of, and how many are in one: never squeezed to nothing (WebKit
+   gave the name no width at all beside the chips that don't shrink). */
+.mt-view .pane-sub .mt-partof-chip, .mt-view .pane-sub .mt-nparts { flex: none; max-width: 170px; }
 /* A narrow transcript: its tools as icons (each still says what it does when pointed at). */
 .mt-transcript { container-type: inline-size; }
 @container (max-width: 520px) { .mt-thead .lbl { display: none; } }

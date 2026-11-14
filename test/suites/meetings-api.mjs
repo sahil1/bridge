@@ -941,7 +941,14 @@ process.exit(1)`)
     await kit.api(`/meetings/${x.id}/stop`, {})
     await until(async () => (await kit.api(`/meetings/${x.id}`)).status === 'done', 10000)
     said(x.id, [['you', 1, text]])
-    fs.writeFileSync(path.join(dirOf(x.id), 'meeting.json'), JSON.stringify({ ...meetingJson(x.id), startedAt: new Date(at).toISOString(), endedAt: new Date(at + 600e3).toISOString(), seconds: 600 }))
+    // Written until it stays: the server saves the meeting's notes by itself once it's done, and
+    // a record it read just before this write would go back over it.
+    const when = { startedAt: new Date(at).toISOString(), endedAt: new Date(at + 600e3).toISOString(), seconds: 600 }
+    await until(async () => {
+      fs.writeFileSync(path.join(dirOf(x.id), 'meeting.json'), JSON.stringify({ ...meetingJson(x.id), ...when }))
+      await sleep(300)
+      return meetingJson(x.id).seconds === 600 && meetingJson(x.id).startedAt === when.startedAt
+    }, 10000)
     return x.id
   }
   const day0 = new Date(); day0.setHours(9, 0, 0, 0)

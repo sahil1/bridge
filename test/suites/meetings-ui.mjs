@@ -1032,7 +1032,14 @@ process.exit(1)`)
     await until(async () => (await api(`/meetings/${x.id}`)).status === 'done', 10000)
     said(x.id, [['you', 1, text]])
     const at = Date.now() - minsAgo * 60e3
-    fs.writeFileSync(path.join(dirOf(x.id), 'meeting.json'), JSON.stringify({ ...metaOf(x.id), startedAt: new Date(at).toISOString(), endedAt: new Date(at + 300e3).toISOString(), seconds: 300 }))
+    // Written until it stays: the server saves the meeting's notes by itself once it's done, and
+    // a record it read just before this write would go back over it.
+    const when = { startedAt: new Date(at).toISOString(), endedAt: new Date(at + 300e3).toISOString(), seconds: 300 }
+    await until(async () => {
+      fs.writeFileSync(path.join(dirOf(x.id), 'meeting.json'), JSON.stringify({ ...metaOf(x.id), ...when }))
+      await sleep(300)
+      return metaOf(x.id).seconds === 300 && metaOf(x.id).startedAt === when.startedAt
+    }, 10000)
     return x.id
   }
   const cb = await page(b, kit.url, { store: { 'cc-rail-meetings': true, 'cc-meet-tab': 'list' }, before: noServiceWorker })
@@ -1114,7 +1121,10 @@ process.exit(1)`)
   ok(!!(await until(async () => (await cp.locator('.mt-parts .mt-part').count()) === 2, 8000)), 'the tag opens the combined meeting')
   ok(!!(await until(async () => (await cp.locator('.rail-meetings .rm-row.on .rm-parts').count()) === 1, 10000)) && /2 parts/.test(await cp.locator('.rail-meetings .rm-row.on .rm-parts').innerText().catch(() => '')), 'and the sidebar says "2 parts" on it', await cp.locator('.rail-meetings').innerText().catch(() => ''))
   await cp.locator('.mt-parts .mt-part-open', { hasText: 'Workshop afternoon' }).click()
-  ok(!!(await until(async () => /We agreed who hires/.test(await cp.locator('.mt-transcript').innerText().catch(() => '')) && /Workshop morning/.test(await cp.locator('.mt-partof-chip').innerText().catch(() => '')), 8000)), 'a meeting in it opens as itself, with its transcript, saying what it\'s part of')
+  // It has a summary by now, so it opens on that (WebKit, where nothing before this left the page
+  // on Transcript).
+  await cp.locator('.mt-view .seg button[data-view="transcript"]').click({ timeout: 8000 }).catch(() => {})
+  ok(!!(await until(async () => /We agreed who hires/.test(await cp.locator('.mt-transcript').innerText().catch(() => '')) && /Workshop morning/.test(await cp.locator('.mt-partof-chip').innerText().catch(() => '')), 8000)), 'a meeting in it opens as itself, with its transcript, saying what it\'s part of', await cp.locator('.mt-partof-chip').evaluateAll((els) => els.map((e) => [e.innerText, e.getBoundingClientRect().width])))
   await cp.locator('.mt-partof-chip').click()
   await until(async () => (await cp.locator('.mt-parts .mt-part').count()) === 2, 8000)
   await cp.locator('.mt-view .win-btn[aria-label="More actions"]').click()
