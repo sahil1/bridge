@@ -402,7 +402,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
           {!spacesOpen && spaceCount > 0 && <span className="ws-count" title={spaceNeeds ? (spaceNeeds === 1 ? t('{n} needs you', { n: spaceNeeds }) : t('{n} need you', { n: spaceNeeds })) : undefined}>{spaceNeeds ? <b className="needs">{spaceNeeds}</b> : spaceCount}</span>}
           <span className={`live-dot ${live ? 'on' : ''}`} title={live ? t('Live updates') : t('Reconnecting')} />
           <span className="rail-tools">
-            <button className="rail-tool" onClick={() => { setSpacesOpen(true); setNaming(true) }} aria-label={t('New space')} title={t('New space')}><Icon name="layers" size={14} /></button>
+            <button className="rail-tool" onClick={() => { setSpacesOpen(true); setNaming(true) }} aria-label={t('New space')} title={t('New space')}><Icon name="plus" size={14} /></button>
             {onNewTerminal && !fleet?.down && <button className="rail-tool" onClick={() => onNewTerminal()} aria-label={t('New terminal')} title={t('New terminal, to run commands on this computer')}><Icon name="terminal" size={14} /></button>}
             <button className="rail-tool" onClick={() => onHistory?.()} aria-label={t('History')} title={t('Search every conversation, and closed agents (⌘⇧F)')}><Icon name="clock" size={14} /></button>
             <button className="rail-tool" onClick={() => setAll(!allClosed)} aria-label={allClosed ? t('Expand all spaces') : t('Collapse all spaces')} title={allClosed ? t('Expand all') : t('Collapse all')}>
@@ -416,7 +416,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
           {!fleet && <div className="skeleton-rows pad"><div /><div /><div /></div>}
           {naming && (
             <div className="ws-row new-space-row">
-              <Icon name="layers" size={12} className="muted" />
+              <Icon name="plus" size={12} className="muted" />
               <InlineRename value="" onDone={createSpace} />
             </div>
           )}
