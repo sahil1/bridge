@@ -243,7 +243,7 @@ export function StudioHome({ onOpen }) {
           )}
         </section>}
         <YourFiles recent={data} refreshRecent={refresh} onOpen={onOpen} areaOf={areaOf} onEmpty={setEmpty} describe={(f) => {
-          if (f.kind === 'board') return { kind: t('Whiteboard'), folder: t('Bridge AI'), full: t("Bridge AI's own: your whiteboards") }
+          if (f.kind === 'board') return { kind: t('Whiteboard'), folder: t('Whiteboards'), full: null }
           if (f.root === 'studio') return { kind: kindName(f.kind, extOf(f.name)), folder: t('Bridge AI'), full: t("Studio's own folder: decks made from meetings, and new files with nowhere else to go") }
           const at = whereOf(folders, f.root, f.path)
           return { kind: kindName(f.kind, extOf(f.name)), folder: f.dir || at?.path || f.where || null, full: at ? `${at.label} · ${at.full}` : f.dir || null }

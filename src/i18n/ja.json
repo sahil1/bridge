@@ -738,7 +738,6 @@
   "Bridge AI's own terminals": "Bridge AI 内蔵のターミナル",
   "Bridge AI's own words. Not every screen is translated yet; the rest shows in English.": "Bridge AI の表示言語です。まだすべての画面が翻訳されているわけではなく、残りは英語で表示されます。",
   "Bridge AI's own: decks made from meetings, new files with nowhere else to go, and your whiteboards": "Bridge AI 専用：ミーティングから作ったデッキ、ほかに置き場のない新しいファイル、ホワイトボード",
-  "Bridge AI's own: your whiteboards": "Bridge AI 専用：ホワイトボード",
   "Bridge AI's relay": "Bridge AI のリレー",
   "Bridge AI's relay has carried all it can today, for every computer on it. It starts again at {time}. For no limits, put the relay on your own Cloudflare account.": "Bridge AI のリレーは、今日はすべてのコンピューター分の上限に達しました。{time} に再開します。上限なしで使うには、自分の Cloudflare アカウントにリレーを置いてください。",
   "Bridge AI's relay is full for now, so it can't take this computer.": "Bridge AI のリレーは今いっぱいなので、このコンピューターを受け付けられません。",

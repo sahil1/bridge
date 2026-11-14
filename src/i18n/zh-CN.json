@@ -738,7 +738,6 @@
   "Bridge AI's own terminals": "Bridge AI 自带的终端",
   "Bridge AI's own words. Not every screen is translated yet; the rest shows in English.": "Bridge AI 自身的文字。目前并非所有界面都已翻译，其余部分以英文显示。",
   "Bridge AI's own: decks made from meetings, new files with nowhere else to go, and your whiteboards": "Bridge AI 自己的：根据会议生成的幻灯片、无处可放的新文件，以及你的白板",
-  "Bridge AI's own: your whiteboards": "Bridge AI 自己的：你的白板",
   "Bridge AI's relay": "Bridge AI 中继",
   "Bridge AI's relay has carried all it can today, for every computer on it. It starts again at {time}. For no limits, put the relay on your own Cloudflare account.": "Bridge AI 中继今天已达到所有电脑的总承载上限。它会在 {time} 重新开始。如需不受限制，请把中继放在你自己的 Cloudflare 账号上。",
   "Bridge AI's relay is full for now, so it can't take this computer.": "Bridge AI 中继暂时已满，无法接入这台电脑。",

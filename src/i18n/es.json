@@ -738,7 +738,6 @@
   "Bridge AI's own terminals": "Las terminales propias de Bridge AI",
   "Bridge AI's own words. Not every screen is translated yet; the rest shows in English.": "Los textos de Bridge AI. Aún no están traducidas todas las pantallas; el resto aparece en inglés.",
   "Bridge AI's own: decks made from meetings, new files with nowhere else to go, and your whiteboards": "Los propios de Bridge AI: presentaciones hechas a partir de reuniones, archivos nuevos sin otro sitio donde ir y tus pizarras",
-  "Bridge AI's own: your whiteboards": "Los propios de Bridge AI: tus pizarras",
   "Bridge AI's relay": "Relé de Bridge AI",
   "Bridge AI's relay has carried all it can today, for every computer on it. It starts again at {time}. For no limits, put the relay on your own Cloudflare account.": "El relé de Bridge AI ya ha transmitido hoy todo lo que puede, para todos los ordenadores que lo usan. Vuelve a empezar a las {time}. Para no tener límites, pon el relé en tu propia cuenta de Cloudflare.",
   "Bridge AI's relay is full for now, so it can't take this computer.": "El relé de Bridge AI está lleno por ahora, así que no puede admitir este ordenador.",

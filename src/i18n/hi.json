@@ -738,7 +738,6 @@
   "Bridge AI's own terminals": "Bridge AI के अपने टर्मिनल",
   "Bridge AI's own words. Not every screen is translated yet; the rest shows in English.": "Bridge AI के अपने शब्द। अभी हर स्क्रीन का अनुवाद नहीं हुआ है; बाकी अंग्रेज़ी में दिखता है।",
   "Bridge AI's own: decks made from meetings, new files with nowhere else to go, and your whiteboards": "Bridge AI का अपना: मीटिंग से बने डेक, ऐसी नई फ़ाइलें जिनके लिए कोई और जगह नहीं, और आपके व्हाइटबोर्ड",
-  "Bridge AI's own: your whiteboards": "Bridge AI का अपना: आपके व्हाइटबोर्ड",
   "Bridge AI's relay": "Bridge AI का रिले",
   "Bridge AI's relay has carried all it can today, for every computer on it. It starts again at {time}. For no limits, put the relay on your own Cloudflare account.": "Bridge AI का रिले आज, उस पर मौजूद हर कंप्यूटर के लिए, जितना ले जा सकता था ले जा चुका है। यह {time} पर फिर शुरू होगा। बिना सीमा के लिए, रिले को अपने खुद के Cloudflare अकाउंट पर लगाएँ।",
   "Bridge AI's relay is full for now, so it can't take this computer.": "Bridge AI का रिले अभी भरा हुआ है, इसलिए यह इस कंप्यूटर को नहीं ले सकता।",
