@@ -2,9 +2,11 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
-## 3.19.0
+## 3.20.0
 
 The Chief of Staff hands work to helpers, each an agent with a role, and hears back from each one when it stops; its tasks show on a board.
+
+<!-- rollout: 10 -->
 
 ### What's new
 
