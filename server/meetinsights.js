@@ -139,6 +139,7 @@ export function digests() {
     let archived = 0, recording = 0, reread = 0, failed = 0
     for (const m of all) {
       if (m.archived) { archived++; continue }
+      if (m.parts) continue // a combined meeting: its meetings are counted themselves
       if (['recording', 'paused'].includes(m.status)) { recording++; continue }
       const sig = sigOf(m)
       let hit = cache[m.id]
@@ -582,7 +583,7 @@ let auto
 export const autoOn = () => (auto === undefined ? (auto = readJSON(AUTO, null)) : auto)
 // How many meetings there are to add up, once there are enough (else 0): finished, not archived.
 export function ready(list) {
-  const n = list.filter((m) => !m.archived && !['recording', 'paused'].includes(m.status)).length
+  const n = list.filter((m) => !m.archived && !m.parts && !['recording', 'paused'].includes(m.status)).length
   return n >= AUTO_AFTER ? n : 0
 }
 const keepAuto = (a) => { fs.mkdirSync(DIR, { recursive: true }); writeFileAtomic(AUTO, JSON.stringify(a)); auto = a }

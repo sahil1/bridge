@@ -5,6 +5,9 @@
 .acct .acct-sent { margin: 0; }
 .acct .acct-mail { overflow-wrap: anywhere; }
 .acct .acct-problem { margin: 0; }
+/* ...and signing in under Bridge AI's relay, in Settings › Devices (Relay.jsx). */
+.acct-in.k-inline { display: grid; gap: 8px; }
+.acct-in.k-inline > p { margin: 0; }
 .acct .acct-followed { justify-content: space-between; }
 .acct .acct-followed > span:first-of-type { flex: 1; min-width: 200px; }
 .acct-use { display: grid; gap: 10px; max-width: 460px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane-2); }

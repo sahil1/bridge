@@ -270,7 +270,9 @@ const LATER = cacheFile('meeting-reminders.json')
 const LATE_MS = 5 * 60e3
 const later = () => { const v = readJSON(LATER, {}); return v && typeof v === 'object' && !Array.isArray(v) ? v : {} }
 // The next meeting with other people that starts within ten minutes, for the floating card, unless
-// reminders are off; one put off, once it's due again. snoozed: it was put off.
+// reminders are off; one put off, once it's due again. snoozed: it was put off. others: the rest
+// that are due too (double-booked, or minutes apart), four at most, for the card to switch between.
+// One hidden from the card (hide) isn't due again.
 export function soon(now = Date.now()) {
   if (!reminds()) return null
   const hide = hidden()
@@ -278,14 +280,21 @@ export function soon(now = Date.now()) {
   const due = (x) => {
     const s = Date.parse(x.start)
     const z = put[keyOf(eventOf(x))]
+    if (z?.hidden) return false
     if (z) return now >= Date.parse(z.until) && now < s + LATE_MS && !(Date.parse(x.end) <= now)
     return s > now && s - now <= SOON_MS
   }
-  const e = todays().filter((x) => worthIt(x) && !hide.has(x.calendar) && due(x)).sort((a, b) => a.start.localeCompare(b.start))[0]
-  if (!e) return null
-  const key = keyOf(eventOf(e))
-  const kept = cache()[key]
-  return { ...e, suggestions: kept?.items?.length || 0, snoozed: !!put[key] }
+  const kept = cache()
+  const all = todays().filter((x) => worthIt(x) && !hide.has(x.calendar) && due(x)).sort((a, b) => a.start.localeCompare(b.start)).slice(0, 5)
+    .map((e) => { const key = keyOf(eventOf(e)); return { ...e, suggestions: kept[key]?.items?.length || 0, snoozed: !!put[key] } })
+  return all.length ? { ...all[0], others: all.slice(1) } : null
+}
+// What's said of one meeting's reminder (put off, or hidden), kept with the rest; what's past is dropped.
+function keepLater(e, what, now) {
+  const v = Object.fromEntries(Object.entries(later()).filter(([, x]) => Date.parse(x?.start) > now - 864e5))
+  v[keyOf(eventOf(e))] = { ...what, start: e.start }
+  fs.mkdirSync(path.dirname(LATER), { recursive: true })
+  writeFileAtomic(LATER, JSON.stringify(v, null, 1))
 }
 // Remind me again when it's about to start, for this one meeting (id: the calendar's): a minute
 // before, or at its start when that's sooner than a minute away. { until }.
@@ -295,12 +304,16 @@ export function snooze(id, now = Date.now()) {
   const s = Date.parse(e.start)
   if (!(s > now)) throw new Error('It has started already.')
   const until = new Date(s - 60e3 > now ? s - 60e3 : s).toISOString()
-  // What's past is dropped.
-  const v = Object.fromEntries(Object.entries(later()).filter(([, x]) => Date.parse(x?.start) > now - 864e5))
-  v[keyOf(eventOf(e))] = { until, start: e.start }
-  fs.mkdirSync(path.dirname(LATER), { recursive: true })
-  writeFileAtomic(LATER, JSON.stringify(v, null, 1))
+  keepLater(e, { until }, now)
   return { until }
+}
+// The card's ×, for this one meeting: no reminder of it again. Another that's due at the same time
+// still shows (soon), which is how the card goes on to it.
+export function hide(id, now = Date.now()) {
+  const e = todays().find((x) => x.id === id)
+  if (!e) throw new Error("That meeting isn't on your calendar for today or tomorrow, so its reminder can't be hidden.")
+  keepLater(e, { hidden: true }, now)
+  return { ok: true }
 }
 // Every minute: a meeting with other people starting within fifteen minutes gets its suggestions,
 // once, when there's a model and Prepare for each meeting isn't turned off.
@@ -330,7 +343,7 @@ export async function tick(now = Date.now()) {
 // (from ten minutes before). { [event id]: { id, summary } }.
 let recs = { at: 0, list: [] }
 export function recorded(events) {
-  if (Date.now() - recs.at > 30e3) { try { recs = { at: Date.now(), list: meetings.list().filter((m) => !m.archived) } } catch { recs = { at: Date.now(), list: [] } } }
+  if (Date.now() - recs.at > 30e3) { try { recs = { at: Date.now(), list: meetings.list().filter((m) => !m.archived && !m.parts) } } catch { recs = { at: Date.now(), list: [] } } }
   const out = {}
   const used = new Set()
   for (const e of events.filter((x) => !x.allDay)) {

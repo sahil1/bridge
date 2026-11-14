@@ -1053,9 +1053,11 @@ ipc.handle('bridge:float-watch', async (e) => {
   return true
 })
 // Take notes for the call: the recording runs in the main window (it has the mic), shown or not.
-ipc.handle('bridge:float-start', async (e, { app: callApp } = {}) => {
+// event: the calendar event picked on the card, with more than one on (else the main window's pick).
+ipc.handle('bridge:float-start', async (e, { app: callApp, event } = {}) => {
   if (!fromFloat(e) || typeof callApp !== 'string' || callApp.length > 60) return false
-  await tellMain(`window.dispatchEvent(new CustomEvent('bridge-meeting-start', { detail: { app: ${JSON.stringify(callApp)} } }))`, false)
+  const ev = event && typeof event === 'object' && typeof event.title === 'string' ? JSON.stringify(event) : null
+  await tellMain(`window.dispatchEvent(new CustomEvent('bridge-meeting-start', { detail: { app: ${JSON.stringify(callApp)}, event: ${ev && ev.length < 60_000 ? ev : 'null'} } }))`, false)
   return true
 })
 // event: a calendar event's day and id, to open it in Today › Calendar with its prep. board: a

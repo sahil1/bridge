@@ -130,14 +130,14 @@ on, with boldbridge.ai already a zone there, and the account and the domains set
 9. **The public key in the relay**: `ACCOUNTS_PUBLIC_KEY` in relay/wrangler.hosted.toml (`node
    account/key.js --public` prints it again), and go live with the relay (HOSTED.md).
 10. **The admin view**: its binding, as above, and deploy it.
-11. **Try it on one computer** before shipping, with this in that computer's
-    `~/.bridge-ai/config.json`: `"account": { "url": "https://accounts.boldbridge.ai", "publicKey": "<the public key>" }`.
+11. **To point one computer at another accounts service** (a test one, say), put this in that
+    computer's `~/.bridge-ai/config.json`: `"account": { "url": "https://accounts.boldbridge.ai", "publicKey": "<the public key>" }`.
     Settings › Account appears; sign in, ask for Early Access, approve it in the admin view, and
     About & Updates says Early Access is on with your account.
 12. **Ship it**: in server/account.js, set `ACCOUNTS_URL = 'https://accounts.boldbridge.ai'` and
-    `ACCOUNTS_PUBLIC_KEY` to the public key, and paste the policy text below into PRIVACY.md and
+    `ACCOUNTS_PUBLIC_KEY` to the public key, with the account's sections in PRIVACY.md and
     TERMS.md, in the same commit. Then `npm test -- account-service relay-hosted privacy-hosts`, and
-    release. Until that commit, nothing about accounts shows in the app.
+    release. Without that commit, nothing about accounts shows in the app.
 13. **Turnstile, once there's a site key** (owner, then a change here): Cloudflare › Turnstile › Add
     widget, for the hostname `boldbridge.ai`, Managed. Its site key goes in the website's form; its
     secret key becomes a Worker secret here (`TURNSTILE_SECRET`); and worker.js then checks the
@@ -217,106 +217,7 @@ wrangler.toml, onboard its own sending domain, make its own key, and point its b
 (`ACCOUNTS_URL`, `ACCOUNTS_PUBLIC_KEY` in server/account.js), with its relay's `ACCOUNTS_PUBLIC_KEY`
 and binding to match. `PRIVACY` in worker.js is where a browser opening the address goes.
 
-## Policy text to add when it goes live
+## The policy's account sections
 
-Paste these in the same change that sets `ACCOUNTS_URL`. Until then PRIVACY.md and TERMS.md stay as
-they are. The `account-service` test keeps these in step: each "Replace" must still be word for word
-in its file, and pasted in, they must say what the account keeps and sends, and how to delete it.
-
-### PRIVACY.md: the opening paragraph
-
-Replace
-
-> There is no account and no ads.
-
-with
-
-> There are no ads, and there's no account unless you want Early Access or Bridge AI's relay, which
-> come with a Bold Bridge account (below).
-
-### PRIVACY.md: in "Usage stats", who an early-access code is for
-
-Replace
-
-> who the code is for: the first name or nickname
-> the project gave that tester when it made the code;
-
-with
-
-> who the code is for: the first name or nickname
-> the project gave that tester when it made the code, or, with Early Access from your Bold Bridge
-> account, that account's id (below);
-
-### PRIVACY.md: in "Usage stats", what they don't have
-
-Replace
-
-> Neither has your name (on Early Access, the tester's name is the one the project chose for the
-> code it gave them), an ID for you or your computer
-
-with
-
-> Neither has your name (on Early Access, the tester's name is the one the project chose for the
-> code it gave them, or your Bold Bridge account's id), an ID for your computer
-
-### PRIVACY.md: in "Crash reports"
-
-Replace
-
-> with the tester's name the project chose)
-
-with
-
-> with the tester's name the project chose, or your Bold Bridge account's id)
-
-### PRIVACY.md: a new section after "Crash reports (on unless you turn them off)"
-
-> ## Your Bold Bridge account (optional)
->
-> Early Access and Bridge AI's relay come with a Bold Bridge account. Nothing else needs one, and
-> Bridge AI never asks you to make one. You sign in in Settings › Account with your email and a
-> 6-digit code it's sent (there's no password), at `accounts.boldbridge.ai`, run by the project on
-> Cloudflare; its code is [account/worker.js](account/worker.js) in this repo.
->
-> **What it keeps**: your email; your devices (five at most): the name each was given (your
-> computer's name in Bridge AI), whether it's a computer or a phone, its system, when it was added
-> and last used, and a hash of its sign-in token; whether you asked for or have Early Access and the
-> relay, and whether the account is suspended; your requests and their notes; what was changed on
-> the account and by whom; and, if you use Bridge AI's relay, its counts for your account (messages
-> in each 8-hour window and each week, and each day's total, kept 90 days). To limit codes, it keeps
-> for an hour how many were sent to each email and from each network, and for a day the wrong codes
-> entered for each email, under a hash of each. Never
-> anything from your computer: your agents, meetings, mail, files and what you type stay there.
->
-> **What goes with it**: your email, when you sign in or ask for something; the codes and notices
-> emailed to you, sent with Cloudflare's Email Service; and, on Early Access, your account's id in the
-> usage stats and crash reports (above), so the project can tell testers' reports apart.
->
-> **Your other computers**: once one of your computers is signed in, it can sign in the others linked
-> to it (Settings › Account), over the end-to-end encrypted link between them. One that would rather
-> not says so, and is left alone.
->
-> **Leaving**: Sign out, or remove a device, in Settings › Account. Delete account there deletes the
-> account, its devices, requests, history and counts at once (Bridge AI's relay forgets its own within
-> a day). Bold Bridge's admins see what's kept, to answer requests, and can suspend an account that
-> misuses Early Access or the relay.
-
-### TERMS.md: in "Privacy"
-
-Replace
-
-> The project collects nothing that identifies you.
-
-with
-
-> The project collects nothing that identifies you, unless you make a Bold Bridge account (below).
-
-### TERMS.md: a new section after "Your accounts with other services"
-
-> ## Your Bold Bridge account
->
-> A Bold Bridge account is optional. It's for Early Access and Bridge AI's relay, one per email with
-> up to five devices, and you can delete it at any time in Settings › Account. Early Access and the
-> relay are by request or invitation: the project may say no, and may stop either for an account at
-> any time. Anyone who can read your email can sign in to your account, so keep it yours. The project
-> may suspend an account that misuses Early Access or the relay.
+PRIVACY.md and TERMS.md each have a "Your Bold Bridge account" section: what an account keeps and
+sends, and how to delete it. The `account-service` test fails if `ACCOUNTS_URL` is set without them.

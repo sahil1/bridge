@@ -334,7 +334,8 @@ export function lastOf(target) {
   const every = meetings.list()
   const ours = ownDomains(every)
   const theirs = customers(about, ours)
-  const all = every.filter((x) => x.id !== about.id && !x.archived && x.hasSummary && Date.parse(x.startedAt) < at - 60_000 && at - Date.parse(x.startedAt) < 120 * 86400e3)
+  // Not a combined meeting: the last time is one of its meetings.
+  const all = every.filter((x) => x.id !== about.id && !x.archived && !x.parts && x.hasSummary && Date.parse(x.startedAt) < at - 60_000 && at - Date.parse(x.startedAt) < 120 * 86400e3)
   const pick = (why, test) => { const m = all.find(test); return m ? { m, why } : null }
   const found = (series && pick('series', (x) => seriesOf(x.title) === series || seriesOf(x.event?.title) === series))
     || pick('people', (x) => samePeople(about.people, x.event?.attendees))

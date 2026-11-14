@@ -326,7 +326,8 @@ You rarely need to edit the file by hand. **Settings** (the gear in the top bar,
 | Meetings | Speech to text (this computer or a service), the language, names and terms, recording the call's sound, noticing calls and stopping when they end, the floating card, the model that writes notes, and where and how they're saved |
 | Mail | On a Mac: How You Write, for Reply Assist, and your working hours |
 | MCP Servers | The tools your agents can call, across all of them, with a catalog of 35 popular servers by category (web search, docs and notes, planning, Microsoft 365, deploy and monitoring, data, design); and Bridge AI as an MCP Server (a Beta Feature), so Claude Code, Claude Desktop, Cursor and Codex can read your whiteboards, files in your Places and meeting summaries, and suggest changes you keep in Needs You |
-| Devices | Your relay (sign in to Cloudflare or an API token) or Tailscale, pairing a phone, linking your other computers, and what you're notified about on which devices |
+| Devices | How your phone reaches this computer (Bridge AI's relay, a relay on your own Cloudflare, or Tailscale), pairing a phone, linking your other computers, and what you're notified about on which devices |
+| Account | Your Bold Bridge account, for Bridge AI's relay and Early Access: sign in with your email and a code, its devices, the relay's use, sign out, delete it. Bridge AI works the same without one |
 | Appearance | Theme, color mode, text size, density, font, language |
 | Config File | Your `config.json`, editable, checked before it's saved, with the effective settings and defaults beside it |
 | About & Updates | The version and updates, Beta Features, the tour, usage stats and crash reports, and reporting a problem |
@@ -408,6 +409,17 @@ You can also run the builds without releasing: Actions › Release › Run workf
 ## On your phone
 
 Bridge AI works on your phone as an app on the Home Screen, with notifications when an agent needs you or finishes. It's the same app, served by your computer, so you don't need an app store; there are also iPhone and Android apps ([mobile/](mobile)) that add a lock-screen card and a demo (the Android one is [a download](#android)). There are two ways to reach your computer; both are optional, and Bridge AI works the same on the computer without either.
+
+### From anywhere, through Bridge AI's relay
+
+The quickest way: a relay the project runs at boldbridge.app, so you need no Cloudflare account. It comes with a Bold Bridge account, by request.
+
+1. In Bridge AI, open **Settings › Devices**. Bridge AI's relay is picked.
+2. Type your email, then the 6-digit code it's sent. That's your Bold Bridge account, and the relay is asked for.
+3. Bold Bridge emails you when it's on. With Settings › Devices open then, the relay is set up and the pairing code shows; otherwise click **Use Bridge AI's relay**.
+4. Scan the QR code with the Bridge AI app on your phone.
+
+Everything between the phone and the computer is end-to-end encrypted, as on a relay of your own. The relay sees the IP addresses of your phone and computer, and when and how much data passes. With the iPhone or Android app it can't read the rest; in a phone's browser the page comes from the relay, so use the apps. Your account has an allowance of messages every 8 hours and each week (Settings › Account shows it), and the relay takes a limited number of accounts, so it can be full. [PRIVACY.md](PRIVACY.md) says what it keeps, and [relay/HOSTED.md](relay/HOSTED.md) how it's run. A second computer signed in with the same email is on the same account.
 
 ### From anywhere, through your own relay
 
