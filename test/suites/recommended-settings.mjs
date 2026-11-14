@@ -1,15 +1,15 @@
-// Recommended Settings, a beta feature (src/recommended.js, src/components/Recommended.jsx), with a
+// Recommended Settings, part of the app (src/recommended.js, src/components/Recommended.jsx), with a
 // stand-in Claude Code (stand-ins/claude.cjs) that notes how each agent was started
 // (~/claude-started.log) and answers its sign-in check on the plan the test gives it
-// (stand-in-plan.json). Off: no route, nothing passed at launch whatever the settings say, and
-// nothing in the app. On: what's recommended for each plan (Pro, Max, Max 5x and 20x, Team,
+// (stand-in-plan.json). With no Beta Feature on: what's recommended for each plan (Pro, Max, Max 5x and 20x, Team,
 // Enterprise, an API key; none through a cloud provider, none signed out), Use these and Keep, asked
 // again when the plan changes, what's passed when an agent starts (--model, --effort), and Claude
 // Code's own settings never written. A task's effort, suggested from sample asks. In the app, in
 // the browser named by BRIDGE_TEST_BROWSER: setup's Connect your AI and Settings › Agents say the
 // recommendation and Use these applies it; what it starts with is changed there; Home's box and New
 // have an effort chip suggested from what's typed, changed from its menu, which is what the agent
-// starts with; the agent's model menu says it. Light, dark and a phone.
+// starts with; the agent's model menu says it; a switch for it saved off from before changes
+// nothing. Light, dark and a phone.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, checks, until, browser, page, shot, solid, TEST } from '../lib/harness.mjs'
@@ -46,18 +46,10 @@ const tag = which === 'webkit' ? 'webkit-' : ''
 try {
   ok((await kit.api('/agents/catalog')).some((a) => a.kind === 'claude' && a.installed && a.effort), 'the stand-in Claude Code is found, and takes an effort')
 
-  // ---------- Off (the default) ----------
-  const off = await kit.api('/recommended').then(() => null, (e) => e)
-  ok(off?.status === 404 && /Recommended Settings is a beta feature\. Turn it on in Settings › About & Updates › Beta Features/.test(off.message), 'off: its route says it is a beta feature and where to turn it on', off?.message)
-  await kit.api('/settings', { agents: { claude: { effort: 'xhigh' } } }, 'PATCH')
-  const offArgs = await launch({ prompt: 'Refactor billing.py, invoices.py, ledger.py, tax.py, api.js, ui.jsx to share one money type', effort: 'max' })
-  ok(!!offArgs && !offArgs.includes('--effort') && !offArgs.includes('--model'), 'off: an agent starts with no --effort, whatever the chip, the brief or the setting says', offArgs)
-  const offChief = await launch({ prompt: 'Refactor the billing module across all the files that call it', effort: 'suggest' })
-  ok(!!offChief && !offChief.includes('--effort'), "off: nor one Chief of Staff starts", offChief)
-  ok(JSON.stringify((await kit.api('/config')).efforts) === '{}', 'off: the app is told no effort')
-
-  // ---------- On ----------
-  await kit.api('/settings', { trials: { 'recommended-settings': true }, agents: { claude: {} } }, 'PATCH')
+  // ---------- Part of the app ----------
+  const conf = await kit.api('/config')
+  ok(!('recommended-settings' in (conf.trials || {})) && Array.isArray((await kit.api('/recommended')).agents), 'with no Beta Feature on, its route answers (it isn\'t a Beta Feature)', conf.trials)
+  await kit.api('/settings', { agents: { claude: {} } }, 'PATCH')
   const recFor = async () => (await kit.api('/recommended?fresh=1')).agents.find((a) => a.kind === 'claude')
   // What each plan gets, as the sign-in check says it.
   const PLANS = [
@@ -279,20 +271,18 @@ try {
     await ctx.close()
   }
 
-  // Off again: none of it in the app.
+  // A switch for it saved off from before it was part of the app: read by nothing.
   await kit.api('/settings', { trials: { 'recommended-settings': false } }, 'PATCH')
   {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
     await openAgents(p)
-    await p.waitForTimeout(800)
-    ok(await p.locator('.rec-card, .rec-starts').count() === 0, 'off: Settings › Agents has no recommendation and no Starts with')
+    ok(!!(await until(async () => (await p.locator('.rec-starts').count()) > 0, 8000)), 'saved off from before: Settings › Agents still says what Claude Code starts with')
     await p.locator('button[aria-label="Close settings"]').click()
     await p.locator('[data-tour="new-agent"]:visible, button[aria-label="Start something new"]:visible').first().click()
     await p.locator('.home-box textarea').waitFor({ timeout: 10000 })
     await p.fill('.home-box textarea', 'Refactor the billing module across all the files that call it')
-    await p.waitForTimeout(400)
-    ok(await p.locator('.eff-chip').count() === 0, "off: Home's box has no effort chip")
-    ok(errors.length === 0, 'off: no page errors', errors)
+    ok(!!(await until(async () => (await p.locator('.eff-chip').count()) > 0, 4000)), "and Home's box has its effort chip")
+    ok(errors.length === 0, 'saved off: no page errors', errors)
     await ctx.close()
   }
 } catch (e) {

@@ -6,8 +6,9 @@
 // add it here. Each path is then followed on a phone, 375 and 430 px wide: every tap is there, and
 // the place opens. Usage has a row of its own in More (Home on or off), opening it straight away, not
 // through Today, and ⌘K's Show usage and Usage stats and history open it there on a phone. Then
-// Whiteboards on the phone, in Studio (which is on here, so More has no Whiteboards row): the list, a
-// board opened from it (with its way back to Studio), and AI Assist's Draw this;
+// Whiteboards on the phone, in Studio (More has no Whiteboards row, nor a Dictations row: Dictations is
+// a tab of Meetings): the list, a board opened from it (with its way back to Studio), and AI Assist's
+// Draw this;
 // a phone that had the old Terminals tab open gets Terminals in More.
 //
 // Then Settings, as a phone's settings: it opens at the list of every section (a whole row each,
@@ -33,12 +34,10 @@ const PATHS = {
   'view:home': { phone: 'Home', shows: '.hm', trial: 'home' },
   'view:everything': { phone: 'Home › See everything', shows: '.ey', trial: 'home' },
   'view:new': { phone: 'Agents › New', shows: '.home-title' },
+  // Meetings, with Dictations a tab of it.
   'view:meetings': { phone: 'Meetings', shows: '.m-meetings' },
-  'view:dictations': { phone: 'Meetings › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
-  // Whiteboards are in Studio where Studio shows, as it does here (its Files, at Whiteboards).
-  'view:whiteboards': { phone: 'More › Studio', shows: '.sd-home' },
   'view:studio': { phone: 'More › Studio', shows: '.sd-home' },
-  'view:files': { phone: 'More › Files', shows: '.fx' },
+  'view:files': { phone: 'More › Folders', shows: '.fx' },
   'view:map': { phone: 'Agents › Map', shows: '.am' },
   // ⌘K's actions (App.jsx paletteActions).
   'a:homeview': { phone: 'Home', shows: '.hm', trial: 'home' },
@@ -50,11 +49,12 @@ const PATHS = {
   'a:meetings': { phone: 'Meetings', shows: '.m-meetings' },
   'a:insights': { phone: 'Meetings › Insights', shows: '.m-meetings :is(.mi, .mi-empty)' },
   'a:people': { phone: 'Meetings › People', shows: '.m-meetings .mi-people' },
-  'a:dictations': { phone: 'More › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
+  'a:dictations': { phone: 'Meetings › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
   'a:memory': { phone: 'Meetings › Memory', shows: '.m-meetings .mt-view .mm-page' },
+  // Whiteboards are in Studio (its Files, at Whiteboards).
   'a:boards': { phone: 'More › Studio', shows: '.sd-home' },
   'a:studio': { phone: 'More › Studio', shows: '.sd-home' },
-  'a:files': { phone: 'More › Files', shows: '.fx' },
+  'a:files': { phone: 'More › Folders', shows: '.fx' },
   'a:map': { phone: 'More › Agent Map', shows: '.am' },
   'a:needs': { phone: 'More › Needs You', shows: '.ny-panel' },
   'a:history': { phone: 'More › History', shows: '.modal.history' },
@@ -114,9 +114,8 @@ const PATHS = {
   'rail:Chief of Staff': { phone: 'Chief', shows: '.mate-hero, .console' },
   'rail:Meetings': { phone: 'Meetings', shows: '.m-meetings' },
   'rail:Record a meeting now': { phone: 'Meetings', shows: '.m-meetings button:has-text("Start recording")' },
-  'rail:Dictations': { phone: 'Meetings › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
   'rail:Studio': { phone: 'More › Studio', shows: '.sd-home' },
-  'rail:Files': { phone: 'More › Files', shows: '.fx' },
+  'rail:Folders': { phone: 'More › Folders', shows: '.fx' },
   'rail:New space': { phone: 'Search › New agent with all the options' },
   'rail:New terminal': { phone: 'Search › New terminal' },
   'rail:History': { phone: 'More › History', shows: '.modal.history' },
@@ -135,7 +134,7 @@ const sections = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(settings)?
 // Each section's name and what's in it, as the phone's list of them shows them.
 // (One marked mac, Mail, is there only where Apple Mail can be read.)
 const named = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(settings)?.[1] || '').matchAll(/label: tx\('([^']+)'\), icon: '[\w-]+', hint: tx\('([^']+)'\)(, mac: true)?/g)].filter((m) => !m[3] || IS_MAC).map((m) => ({ name: m[1], hint: m[2] }))
-ok(views.length >= 5 && views.includes('view:whiteboards'), 'the desktop\'s views are read from App.jsx', views)
+ok(views.length >= 5 && views.includes('view:studio') && !views.includes('view:dictations') && !views.includes('view:whiteboards'), 'the desktop\'s views are read from App.jsx (Dictations a tab of Meetings, whiteboards in Studio: no views of their own)', views)
 ok(actions.length >= 30 && actions.includes('a:boards'), 'and ⌘K\'s actions', actions.length)
 ok(sections.length >= 8, 'and Settings\' sections', sections)
 const missing = (ids) => ids.filter((id) => !PATHS[id])
@@ -143,25 +142,25 @@ for (const [what, ids] of [['view', views], ['⌘K action', actions], ['Settings
   ok(!missing(ids).length, `every desktop ${what} has a way in on a phone, or says why not (add it to PATHS here)`, missing(ids))
 }
 
-const kit = await startKit('phone-parity', { config: { trials: { studio: true, 'meeting-insights': true, routines: true, files: true } } }) // the beta features on: their ways in are checked too
+const kit = await startKit('phone-parity', { config: { trials: { 'meeting-insights': true, routines: true } } }) // the beta features on: their ways in are checked too
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 try {
   await kit.api('/setup', { name: 'Tester' })
-  // A dictation and a board, so Dictations and the sidebar's Dictations show, and a board opens.
+  // A dictation and a board, so Meetings' Dictations tab shows, and a board opens.
   await kit.api('/dictations', { text: 'A note to self', ms: 1200 }).catch(() => {})
   const board = (await kit.api('/boards', { title: 'Parity board' })).id
 
   // ---------- the desktop's sidebar and ⌘K, as they are ----------
   const desk = await page(b, kit.url)
   await desk.p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
-  await until(() => desk.p.locator('.rail-nav-btn', { hasText: 'Dictations' }).count(), 8000)
+  await until(() => desk.p.locator('.rail-nav-btn', { hasText: 'Folders' }).count(), 8000)
   const rail = await desk.p.evaluate(() => [
     ...[...document.querySelectorAll('.rail-nav .rail-nav-btn')].map((e) => e.innerText.split('\n')[0].trim()),
     ...[...document.querySelectorAll('.rail-tools .rail-tool, .rail-nav .rail-rec')].map((e) => e.getAttribute('aria-label')),
   ].filter(Boolean))
   ok(rail.includes('Studio') && rail.includes('History'), 'the desktop\'s sidebar rows and tools are read', rail)
-  ok(!rail.includes('Whiteboards'), 'with Studio on, the sidebar has Studio and no Whiteboards row', rail)
+  ok(rail.includes('Folders') && !rail.some((r) => ['Whiteboards', 'Dictations', 'Files'].includes(r)), 'the sidebar has Studio and Folders, and no Whiteboards, Dictations or Files row', rail)
   ok(!missing(rail.map((r) => `rail:${r}`)).length, 'every row and tool in the desktop\'s sidebar has a way in on a phone, or says why not', missing(rail.map((r) => `rail:${r}`)))
   await desk.p.keyboard.press('ControlOrMeta+k')
   await desk.p.waitForSelector('.pal-item', { timeout: 5000 })
@@ -330,7 +329,7 @@ try {
     await shot(ph.p, `${tag}phone-more-${width}`)
 
     // Whiteboards, in Studio: the list, a board from it, its way back, and AI Assist's Draw this.
-    ok(rows.some((r) => r.name === 'Studio') && !rows.some((r) => r.name === 'Whiteboards'), `${width}: with Studio on, More has Studio and no Whiteboards row`, rows.map((r) => r.name))
+    ok(rows.some((r) => r.name === 'Studio') && rows.some((r) => r.name === 'Folders') && !rows.some((r) => ['Whiteboards', 'Dictations', 'Files'].includes(r.name)), `${width}: More has Studio and Folders, and no Whiteboards, Dictations or Files row`, rows.map((r) => r.name))
     await ph.p.locator('.m-more-row', { hasText: 'Studio' }).click()
     await ph.p.waitForSelector('.sd-home', { timeout: 15000 })
     ok(await ph.p.locator('.m-more-view > .m-view-back', { hasText: 'More' }).isVisible(), `${width}: Studio opens in More, with Back to More`)

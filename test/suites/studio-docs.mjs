@@ -96,7 +96,6 @@ const bare = (p, scope = '.sd-file') => p.locator(scope).evaluateAll((els) => el
   .map((x) => x.outerHTML.slice(0, 140))))
 try {
   await api('/setup', { name: 'Tester' })
-  await api('/settings', { trials: { studio: true } }, 'PATCH')
   const dir = path.join(kit.home, 'Work', 'plans')
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, 'report.docx'), await richDocx({ pages: 3 }))
@@ -317,7 +316,7 @@ try {
   ok(!(await bare(p, '.sd-home-view')).length, 'nothing on the home is a bare control', await bare(p, '.sd-home-view'))
   // Whiteboards are one of Studio's kinds, with no row of their own in the sidebar. Picked, your
   // boards are listed as Whiteboards' own page has them: what to draw, then each as a card.
-  ok(await p.locator('.rail-nav-btn', { hasText: 'Whiteboards' }).count() === 0 && await p.locator('.rail-nav-btn', { hasText: 'Studio' }).count() === 1, 'with Studio on, the sidebar has Studio and no Whiteboards')
+  ok(await p.locator('.rail-nav-btn', { hasText: 'Whiteboards' }).count() === 0 && await p.locator('.rail-nav-btn', { hasText: 'Studio' }).count() === 1, 'the sidebar has Studio and no Whiteboards')
   await group('Whiteboards').click()
   ok(!!(await until(async () => (await p.locator('.sd-list .wb-card', { hasText: 'Roadmap' }).count()) === 1 && p.locator('.sd-list .wb-ask textarea').isVisible(), 10000)) && await p.locator('.wb-view').count() === 0, 'Whiteboards, picked in Files: your boards as cards under what to draw, inside Studio\'s page')
   // New makes one: named, with no folder to pick (Bridge AI keeps it), and opened in Preview.
@@ -637,7 +636,7 @@ try {
   // ---------- No files yet ----------
   // New's cards on the page, as the way to start, only while Studio has no files at all: a Bridge AI
   // of its own with nothing in its home, its folder or Spotlight (stood in for, saying nothing).
-  empty = await startKit('studio-docs-none', { config: { trials: { studio: true } } })
+  empty = await startKit('studio-docs-none')
   empty.program('mdfind', '')
   await empty.api('/setup', { name: 'Tester' })
   const none = await page(b, empty.url, { width: 1440, height: 900 })

@@ -162,6 +162,11 @@ const tidied = async (text) => {
 // Which tab is in front, Meetings' view, which memory and collection are picked, and how many each
 // collection says it has.
 const front = (p) => p.locator('.ws-tab.main').first().getAttribute('data-pane', { timeout: 1000 }).catch(() => null)
+// Dictations: Meetings, from the sidebar, then its Dictations tab.
+const toDictations = async (p) => {
+  await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click()
+  await p.locator('.mt-kinds button[data-kind="dictations"]').click({ timeout: 10000 })
+}
 const meetView = (p) => p.locator('.mt-view .pane-head .seg button[aria-selected="true"]').first().getAttribute('data-view', { timeout: 1000 }).catch(() => null)
 const picked = (p) => p.locator('.mm-colls button[aria-selected="true"]').first().getAttribute('data-coll', { timeout: 1000 }).catch(() => null)
 const scope = (where) => where.locator('.mm-scope button[aria-selected="true"]').first().getAttribute('data-scope', { timeout: 1000 }).catch(() => null)
@@ -192,7 +197,7 @@ try {
   const betas = p.locator('.modal.settings .st-sec', { has: p.locator('h4', { hasText: 'Beta Features' }) })
   await betas.locator('.st-check').first().waitFor({ timeout: 8000 })
   const listed = (await betas.locator('.st-check b').allInnerTexts()).map((x) => x.trim())
-  ok(listed.includes('Studio') && !listed.includes('Memory'), 'and Beta Features doesn\'t list it', listed)
+  ok(listed.includes('Home') && !listed.includes('Memory'), 'and Beta Features doesn\'t list it', listed)
   await p.keyboard.press('Escape')
   await until(async () => !(await p.locator('.modal.settings').count()), 5000)
   // Dictations after: one with a name only ever said in dictations.
@@ -221,15 +226,15 @@ try {
   ok(/Names this person often says, spelled the way they write them[^"]*Acme, Atlas, Priya Shah/.test(tidy0), 'and the one tidying dictation, the names in it', tidy0.slice(0, 600))
 
   // ---------- In the app ----------
-  // Nothing of Memory in the sidebar, wide or folded down: it's a tab of Meetings and of Dictations.
-  // (Dictations shows there once the sidebar has heard there's one.)
-  await until(() => p.locator('.rail-nav-btn', { hasText: 'Dictations' }).count(), 8000)
+  // Nothing of Memory in the sidebar, wide or folded down: it's a tab of Meetings and of Dictations
+  // (itself a tab of Meetings).
+  await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().waitFor({ timeout: 8000 })
   const rows = await p.locator('.rail-nav .rail-nav-btn').allInnerTexts()
-  ok(rows.some((x) => /Meetings/.test(x)) && rows.some((x) => /Dictations/.test(x)) && !rows.some((x) => /Memory/.test(x)), 'nothing of Memory in the sidebar', rows)
+  ok(rows.some((x) => /Meetings/.test(x)) && !rows.some((x) => /Memory|Dictations/.test(x)), 'nothing of Memory (or Dictations) in the sidebar', rows)
   await p.locator('.rail-btn').click()
   await p.waitForSelector('.rail.collapsed', { timeout: 5000 }).catch(() => {})
   const minis = await p.locator('.rail.collapsed .mini-nav').evaluateAll((xs) => xs.map((x) => x.getAttribute('aria-label')))
-  ok(minis.includes('Meetings') && minis.includes('Dictations') && !minis.includes('Memory'), 'nor in it folded down', minis)
+  ok(minis.includes('Meetings') && !minis.includes('Dictations') && !minis.includes('Memory'), 'nor in it folded down', minis)
   await p.locator('.rail-btn').click()
   // Meetings' Memory: a tab beside the list, a page in Meetings.
   await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click()
@@ -354,10 +359,10 @@ try {
   // All memory; from dictations again when it's gone to from its tab. Then back to Meetings'.
   v = await api('/memory')
   const inDicts = v.terms.filter((x) => x.dictations.length || x.source === 'you')
-  await p.locator('.rail-nav-btn', { hasText: 'Dictations' }).click()
+  await toDictations(p)
   await p.locator('.dc-view .pane-head .seg button[data-view="memory"]').click()
   const dm = p.locator('.dc-view .mm-page')
-  ok(!!(await until(() => dm.locator('.mm-item').count(), 10000)) && await front(p) === 'view:dictations', 'Dictations\' Memory: a page in Dictations')
+  ok(!!(await until(() => dm.locator('.mm-item').count(), 10000)) && await front(p) === 'view:meetings', 'Dictations\' Memory: a page in Dictations, Meetings\' tab')
   // (At People, as Meetings' was: the collection is the same in both.)
   ok(await picked(p) === 'person', 'at the collection Meetings\' was at', await picked(p))
   await dm.locator('.mm-colls button[data-coll="all"]').click()
@@ -387,8 +392,8 @@ try {
 
   // ---------- Every way in opens a page ----------
   const away = async () => {
-    await p.locator('.rail-nav-btn', { hasText: 'Dictations' }).click()
-    await until(async () => await front(p) === 'view:dictations', 5000)
+    await toDictations(p)
+    await until(() => p.locator('.dc-view').isVisible(), 5000)
   }
   const opened = (all) => until(async () => await front(p) === 'view:meetings' && await meetView(p) === 'memory' && (await scope(home)) === (all ? 'all' : 'here') && (await home.isVisible()) && !(await p.locator('.mt-dialog, .modal.settings, .ctx-menu').count()), 8000)
   await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click()
@@ -445,7 +450,7 @@ try {
   ok(!!(await until(async () => (await mm.locator('.mm-item[data-term="Kestrel"]').count()) === 1 && !(await mm.locator('.mm-item[data-term="Atlas"]').count()) && /On Desk/.test(await mm.locator('.mm-bar').innerText()), 10000)), 'Desk\'s window: Desk\'s memory, and it says so', await mm.locator('.mm-bar').innerText().catch(() => ''))
   ok(/made and kept on Desk/.test(await mm.locator('.mm-you').innerText()), 'with About You made on Desk', await mm.locator('.mm-you').innerText())
   ok(!(await mm.locator('.mm-item[data-term="Fabrikam"]').count()) && /^1 of 2 names · On Desk$/.test((await mm.locator('.mm-bar .mm-count').innerText()).trim()), 'from Desk\'s meetings and yours: not a name from neither', await mm.locator('.mm-bar .mm-count').innerText())
-  // (Desk has no dictations, so its sidebar has no Dictations yet.)
+  // (Desk has no dictations, so its Meetings has no Dictations tab yet.)
   await q.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-dictations')))
   ok(!!(await until(async () => /On Desk/.test(await q.locator('.dc-view .pane-sub').innerText().catch(() => '')), 8000)), 'and Desk\'s Dictations say they\'re Desk\'s', await q.locator('.dc-view .pane-sub').innerText().catch(() => ''))
   await meetMemory()
@@ -479,7 +484,7 @@ try {
   const tabsNow = await dark.p.locator('.ws-tab').evaluateAll((xs) => xs.map((x) => x.dataset.pane))
   ok(tabsNow.filter((x) => x === 'view:meetings').length === 1 && !tabsNow.includes('view:memory'), 'with one Meetings tab, and none for Memory', tabsNow)
   await shot(dark.p, `${tag}memory-dark`)
-  await dark.p.locator('.rail-nav-btn', { hasText: 'Dictations' }).click()
+  await toDictations(dark.p)
   await dark.p.locator('.dc-view .pane-head .seg button[data-view="memory"]').click()
   await until(() => dark.p.locator('.dc-view .mm-page .mm-item').count(), 10000)
   await shot(dark.p, `${tag}memory-dictations-dark`)
@@ -488,7 +493,7 @@ try {
   const none = await page(b, kit.url, { before: async (ctx) => { await noServiceWorker(ctx); await changeAnswer(ctx, /\/api\/memory(\?|$)/, (r) => ({ ...r, terms: r.terms.map((x) => ({ ...x, dictations: [], source: 'learned' })) })) } })
   pages.push(none)
   await none.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
-  await none.p.locator('.rail-nav-btn', { hasText: 'Dictations' }).click()
+  await toDictations(none.p)
   await none.p.locator('.dc-view .pane-head .seg button[data-view="memory"]').click()
   const nm = none.p.locator('.dc-view .mm-page')
   ok(!!(await until(async () => /Nothing in memory has come up in a dictation yet\.[\s\S]*Show all memory/.test(await nm.locator('.mm-none-here').innerText().catch(() => '')) && !(await nm.locator('.mm-tools').count()) && (await nm.locator('.mm-you').count()) === 1, 10000)),
@@ -537,7 +542,7 @@ try {
     await ph.p.reload()
     ok(!!(await until(() => ph.p.locator('.m-meetings .mt-view .mm-page').isVisible(), 10000)) && (await ph.p.locator('.tabbar button.on').innerText()).trim() === 'Meetings', `${w} px: still Memory after a reload`)
     // Dictations' Memory.
-    await ph.p.locator('.m-meetings .m-seg button', { hasText: 'Dictations' }).click()
+    await ph.p.locator('.m-meetings .mt-kinds button', { hasText: 'Dictations' }).click()
     await ph.p.locator('.m-meetings .dc-view .pane-head .seg button[data-view="memory"]').click()
     const pd = ph.p.locator('.m-meetings .dc-view .mm-page')
     ok(!!(await until(() => pd.locator('.mm-item[data-term="Tailspin"]').count(), 10000)) && (await scope(pd)) === 'here', `${w} px: Dictations' Memory, from dictations`)

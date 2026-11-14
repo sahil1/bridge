@@ -16,10 +16,13 @@
 //   or Pasting… then "Pasted into Slack"; the window keeps its width and top and grows down; clicks
 //   go through it but for the pill; each kept with the app it was said in and what became of it; a
 //   password field's not kept. Light and dark.
-//   Dictations: in the sidebar once there's one, by day with each one's app icon or agent, search,
+//   Dictations: a tab at the top of Meetings once there's one (no row of its own in the sidebar, and
+//   Meetings marked there while it shows), by day with each one's app icon or agent, search,
 //   one open whole (and as it was heard), Edit right there (Esc, ⌘↩ saves it, the names put right
 //   offered to meeting memory: Remember, Not now, Undo; light and dark), Copy, Paste again (the desktop app simulated; with no
-//   Accessibility yet, the way to allow it there, then pasted), Send to an agent, Delete and Undo; on a phone in the Meetings tab, with no Paste again. Settings › Voice & Meetings:
+//   Accessibility yet, the way to allow it there, then pasted), Send to an agent, Delete and Undo; on a phone in the Meetings tab, with no Paste again
+//   and no Dictations row in More. Its old places open the tab: a tab kept from before, ⌘K, a link,
+//   Back, and on a phone the More view kept from before. Settings › Voice & Meetings:
 //   history off (nothing kept, and the view says so), 30 days, the recordings, Delete all.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -373,14 +376,22 @@ try {
       })
     }
   } })
+  // Meetings, from the sidebar, then its Dictations tab.
+  const toDictations = async (p) => {
+    await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click({ timeout: 10000 })
+    await p.locator('.mt-kinds button[data-kind="dictations"]').click({ timeout: 10000 })
+  }
   for (const mode of ['light', 'dark']) {
-    const { ctx, p, errors } = await view({ mode, store: { 'cc-rail-dictations': true } })
-    const row = p.locator('.rail-nav-btn', { hasText: 'Dictations' })
-    ok(!!(await until(() => row.isVisible(), 10000, 200)), `${mode}: Dictations in the sidebar, under Meetings`)
-    ok(!!(await until(async () => (await p.locator('.rail-dictations .rd-row').count()) >= 3, 8000, 200)), `${mode}: its latest listed under it`, await p.locator('.rail-dictations').innerText().catch(() => ''))
-    await row.click()
+    const { ctx, p, errors } = await view({ mode })
+    await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().waitFor({ timeout: 15000 })
+    ok(await p.locator('.rail-nav-btn', { hasText: 'Dictations' }).count() === 0 && await p.locator('.rail-dictations').count() === 0, `${mode}: no Dictations row or list in the sidebar`, await p.locator('.rail-nav').innerText().catch(() => ''))
+    await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().click()
+    const kinds = p.locator('.mt-kinds [role="tab"]')
+    ok(!!(await until(async () => (await kinds.allInnerTexts()).map((x) => x.trim()).join('|') === 'Meetings|Dictations', 10000, 200)) && await p.locator('.mt-kinds [aria-selected="true"]').innerText() === 'Meetings', `${mode}: Meetings has two tabs at its top, Meetings (on) and Dictations`, await kinds.allInnerTexts().catch(() => []))
+    await p.locator('.mt-kinds button[data-kind="dictations"]').click()
     const v = p.locator('.dc-view')
     await v.waitFor({ timeout: 10000 })
+    ok(/^Meetings/.test((await p.locator('.rail-nav-btn.on').innerText().catch(() => '')).trim()) && (await p.locator('.ws-tab.main').innerText().catch(() => '')).trim() === 'Meetings', `${mode}: Dictations shows in Meetings' tab, with Meetings marked in the sidebar`, { rail: await p.locator('.rail-nav-btn.on').innerText().catch(() => ''), tab: await p.locator('.ws-tab.main').innerText().catch(() => '') })
     ok(!!(await until(async () => (await v.locator('.dc-group h3').first().innerText().catch(() => '')).toLowerCase() === 'today', 5000, 100)), `${mode}: by day, today first`, await v.locator('.dc-group h3').allInnerTexts())
     const slack = v.locator('.dc-row', { hasText: 'See you at three' }).first()
     ok(await slack.locator('img.dc-glyph').count() === 1 && /Pasted into Slack/.test(await slack.locator('.dc-where').innerText()) && await slack.evaluate((el) => el.querySelector('img.dc-glyph').naturalWidth > 0), `${mode}: one pasted into Slack shows Slack's icon`, await slack.innerText())
@@ -468,7 +479,7 @@ try {
   {
     // Paste again with no Accessibility yet: the way to allow it, there (macOS asked right away), and
     // once it's on (noticed with no click), pasted. A Mac's answers stood in (window.__allowed).
-    const { ctx, p } = await view({ store: { 'cc-rail-dictations': true }, fix: { mac: true, win: false, app: { name: 'Bridge AI', desktop: true }, panes: {}, restart: [], tools: {}, canReset: true, desktop: null, asked: null } })
+    const { ctx, p } = await view({ fix: { mac: true, win: false, app: { name: 'Bridge AI', desktop: true }, panes: {}, restart: [], tools: {}, canReset: true, desktop: null, asked: null } })
     await p.evaluate(() => {
       window.__allowed = false
       window.__asked = 0
@@ -477,7 +488,7 @@ try {
         pasteAccess: async () => (window.__allowed ? 'ok' : 'denied'), pasteAsk: async () => { window.__asked++; return 'asked' },
       })
     })
-    await p.locator('.rail-nav-btn', { hasText: 'Dictations' }).click()
+    await toDictations(p)
     const v = p.locator('.dc-view')
     await v.waitFor({ timeout: 10000 })
     const sl = v.locator('.dc-row', { hasText: 'Check the invoices light' }).first()
@@ -495,7 +506,7 @@ try {
     const { ctx, p, errors } = await view({ phone: true })
     await p.waitForSelector('.tabbar button', { timeout: 15000 })
     await p.locator('.tabbar button', { hasText: 'Meetings' }).click()
-    await p.locator('.m-seg button', { hasText: 'Dictations' }).click()
+    await p.locator('.mt-kinds button', { hasText: 'Dictations' }).click()
     const v = p.locator('.dc-view')
     await v.waitFor({ timeout: 10000 })
     ok(!!(await until(async () => (await v.locator('.dc-row').count()) >= 3, 8000, 100)), 'a phone: Dictations in the Meetings tab')
@@ -505,8 +516,48 @@ try {
     await first.locator('.dc-head').click()
     ok(await first.locator('button', { hasText: 'Copy' }).isVisible() && await first.locator('button', { hasText: 'Send to an agent' }).isVisible() && await first.locator('button', { hasText: /Paste again/ }).count() === 0, 'one open: Copy, Send, Delete, and no Paste again on a phone')
     await shots(p, 'dictations-phone')
+    // Tapping Meetings again: its meetings. And More has no Dictations row.
+    await p.locator('.tabbar button', { hasText: 'Meetings' }).click()
+    ok(!!(await until(async () => (await p.locator('.mt-kinds [aria-selected="true"]').innerText().catch(() => '')).trim() === 'Meetings' && await p.locator('.dc-view').count() === 0, 5000, 100)), 'a phone: Meetings tapped again shows its meetings')
+    await p.locator('.tabbar button', { hasText: 'More' }).click()
+    await p.locator('.m-more-row').first().waitFor({ timeout: 8000 }).catch(() => {})
+    const more = await p.locator('.m-more-row').evaluateAll((els) => els.map((e) => e.dataset.id))
+    ok(more.includes('files') && !more.includes('dictations') && /Folders/.test(await p.locator('.m-more-row[data-id="files"]').innerText()), 'a phone: More has Folders and no Dictations row', more)
     ok(real(errors).length === 0, 'no page errors on the phone', errors)
     await ctx.close()
+  }
+  {
+    // A phone that had Dictations open in More (before 3.19): the Meetings tab at Dictations.
+    const { ctx, p } = await view({ phone: true, store: { 'cc-mtab': 'more', 'cc-more-view': 'view:dictations' } })
+    ok(!!(await until(async () => (await p.locator('.tabbar button[aria-current="true"]').innerText().catch(() => '')).trim() === 'Meetings' && await p.locator('.dc-view.with-kinds').isVisible().catch(() => false), 15000, 200)), 'a phone with Dictations kept open in More from before: the Meetings tab, at Dictations', await p.locator('main').innerText().catch(() => ''))
+    await ctx.close()
+  }
+  {
+    // Dictations' old places on a computer, each landing on Meetings' Dictations tab: a tab kept from
+    // before (with nothing else open), ⌘K's Dictations, a link (?agent=view:dictations), and Back.
+    const atDictations = async (p) => !!(await until(async () => await p.locator('.dc-view.with-kinds').isVisible().catch(() => false) && (await p.locator('.ws-tab.main').innerText().catch(() => '')).trim() === 'Meetings', 15000, 200))
+    const kept = await view({ store: { 'cc-ws': { tabs: ['view:dictations'], active: 'view:dictations', side: null, split: false, group: 'main' } } })
+    ok(await atDictations(kept.p) && !JSON.stringify(await kept.p.evaluate(() => JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs || [])).includes('view:dictations'), 'a Dictations tab kept from before: Meetings\' tab, at Dictations', await kept.p.evaluate(() => localStorage.getItem('cc-ws')))
+    // Back from Meetings, to Dictations.
+    await kept.p.locator('.mt-kinds button[data-kind="meetings"]').click()
+    await kept.p.locator('.mt-view.with-kinds').waitFor({ timeout: 8000 }).catch(() => {})
+    await kept.p.waitForTimeout(600)
+    await kept.p.locator('.nav-btn[data-dir="back"]').click()
+    ok(await atDictations(kept.p), 'Back from its Meetings tab: Dictations again', await kept.p.locator('.mt-kinds').innerText().catch(() => ''))
+    await kept.ctx.close()
+    const cmd = await view({})
+    await cmd.p.locator('.rail-nav-btn', { hasText: 'Meetings' }).first().waitFor({ timeout: 15000 })
+    await cmd.p.keyboard.press('ControlOrMeta+K')
+    await cmd.p.locator('.pal-input input').fill('Dictations')
+    await cmd.p.waitForTimeout(300)
+    const item = cmd.p.locator('.pal-item').filter({ has: cmd.p.locator('.pal-text b', { hasText: /^Dictations$/ }) }).first()
+    ok(/In Meetings/.test(await item.innerText().catch(() => '')), '⌘K\'s Dictations says it\'s in Meetings', await cmd.p.locator('.pal-item').allInnerTexts())
+    await item.click()
+    ok(await atDictations(cmd.p), '⌘K\'s Dictations: Meetings, at Dictations')
+    await cmd.ctx.close()
+    const link = await page(b, `${kit.url}/?agent=view:dictations`, { before })
+    ok(await atDictations(link.p), 'a link to view:dictations: Meetings, at Dictations')
+    await link.ctx.close()
   }
 
   // ---------- Settings › Voice & Meetings: history off, and Delete all ----------

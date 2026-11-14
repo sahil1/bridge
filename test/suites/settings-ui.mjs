@@ -8,7 +8,7 @@
 // Advanced: Meetings' cleanup, naming who spoke and preparing (with which model writes the notes and
 // where it runs said there: none yet, then a key's), Mail's learning again, General's picking up
 // unfinished work. Nothing was lost: every setting that was there before Advanced (each control by its
-// name) is still in its section, Advanced opened. Voice & Meetings is one section with three tabs
+// name) is still in its section, Advanced opened. Beta Features lists only what's still in beta. Voice & Meetings is one section with three tabs
 // (Meetings, Dictation, Speech to Text: they were two sections, Voice and Meetings): each tab with
 // what was its own, a link to "meetings", "voice" or "dictation" landing on its tab, the section's
 // own id and its row in the list on the first, and on a phone the tabs across the top, each a whole
@@ -79,8 +79,12 @@ const ALL = {
   Notifications: ['button|Turn on notifications', 'input|An agent needs you (a question, a permission)', 'input|An agent finished', 'select|Usage running low', 'input|Answer buttons for simple questions (yes or no, or two short choices)', "input|Notify my phone even when I'm at the computer"],
   Appearance: ['button|Light', 'button|Dark', 'button|Sync with system', 'button|Midnight', 'button|Custom', 'button|Copy', 'input|Paste a theme', 'button|Use', 'button|Small', 'button|Large', 'button|Comfortable', 'button|Compact', 'button|Geist', 'button|Rounded', 'input|Weather', 'input|Clock', 'input|Usage', 'input|Updates', 'input|Restart to apply', 'input|Setup', 'input|Notification sounds', 'select|Language', 'button|Reset appearance'],
   'Config File': ['button|Copy path', 'textarea|config.json', 'button|Save', 'button|Effective settings', 'button|Defaults'],
-  'About & Updates': ['button|Check now', 'input|Check for new versions', 'button|Take the tour', 'a|Report a problem', 'a|Suggest an idea', 'button|Copy details', 'input|Studio', 'input|Home', 'input|Tidy what I say', 'input|Usage Across Every Provider', 'input|Meeting Insights', 'input|Tab Groups', 'input|Scheduled Routines', 'input|Files', 'input|Sign PDFs', 'input|Bridge AI as an MCP Server', ...(IS_MAC ? ["input|Speakers From the Call's Video"] : [])],
+  'About & Updates': ['button|Check now', 'input|Check for new versions', 'button|Take the tour', 'a|Report a problem', 'a|Suggest an idea', 'button|Copy details', 'input|Home', 'input|Tidy what I say', 'input|Usage Across Every Provider', 'input|Meeting Insights', 'input|Scheduled Routines', 'input|Bridge AI as an MCP Server', ...(IS_MAC ? ["input|Speakers From the Call's Video"] : [])],
 }
+// Beta Features: only those still in beta, in order (Studio, Sign PDFs, Comments and @bridge, Make a
+// Sheet, Back and Forward, Tab Groups, Files and Recommended Settings are part of the app since
+// 3.19.0); Speakers From the Call's Video only where the server runs on a Mac.
+const BETAS = ['Home', 'Tidy what I say', 'Usage Across Every Provider', 'Meeting Insights', 'Scheduled Routines', 'Live Meeting Board', 'Answers in AI Assist', 'Bridge AI as an MCP Server', ...(IS_MAC ? ["Speakers From the Call's Video"] : [])]
 
 // Every control's name in the panel, every fold opened (as kind|name).
 const names = (p) => p.evaluate(() => {
@@ -154,6 +158,10 @@ try {
         const voiced = await p.evaluate(() => (window.speechSynthesis?.getVoices?.() || []).some((v) => v.localService))
         const lost = ALL[name].filter((x) => voiced || !['select|Speed', 'button|Test'].includes(x)).filter((x) => { const [k, n] = x.split('|'); return !got.some((g) => g.startsWith(`${k}|`) && g.slice(k.length + 1).includes(n)) })
         ok(!lost.length, `${name}: every setting there was is still here`, { lost, got })
+      }
+      if (name === 'About & Updates') {
+        const betas = (await p.locator('[data-setting="beta"] .st-check b').allInnerTexts()).map((x) => x.trim())
+        ok(JSON.stringify(betas) === JSON.stringify(BETAS), 'About & Updates › Beta Features lists only the features still in beta', betas)
       }
       if (['Meetings', 'Dictation', 'Speech to Text', 'General', 'About & Updates'].includes(name)) await shot(p, `${tag}settings-ui-${name.replace(/\W+/g, '-').toLowerCase()}`)
     }

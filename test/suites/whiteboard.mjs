@@ -6,7 +6,8 @@
 //   of staff's `bridge board` making one from Mermaid, reading it back and updating it; "Draw this"
 //   from a meeting and a project (what goes to the model), and a project that isn't one of yours
 //   refused.
-//   The app, in Chromium or WebKit: Whiteboards in the sidebar and ⌘K; Excalidraw loaded only when
+//   The app, in Chromium or WebKit: Whiteboards in Studio (no row of their own in the sidebar) and
+//   ⌘K; Excalidraw loaded only when
 //   a board opens; a shape drawn by hand saved to its file and there when opened again; a board the
 //   chief made drawn into shapes when opened, and a new version from it drawn in while it's open;
 //   Mermaid's own arrow ends kept (a line has none), an arrow back between two shapes drawn apart
@@ -18,7 +19,7 @@
 //   discarded from AI Assist's panel or the board, kept with the bar's Keep; PNG and SVG export; ⌘K over
 //   the board opening Bridge AI's search; a dark theme. Diagram files in an agent's Files tab:
 //   .excalidraw drawn and saved back into the file, .mmd and .drawio (plain and compressed) drawn
-//   as shapes, saved beside or added to Whiteboards; a Mermaid block in Markdown and in the
+//   as shapes, saved beside or added to Studio's whiteboards; a Mermaid block in Markdown and in the
 //   agent's chat opening as a board. On a phone: the list and a board fit, with Excalidraw's phone
 //   tools. Nothing the page loads comes from anywhere but this computer (Excalidraw's fonts
 //   included).
@@ -148,13 +149,13 @@ try {
   await p.waitForSelector('.rail-nav', { timeout: 30000 })
   await sleep(3500) // the views that load once the app is idle
   ok(!loaded.length, 'Excalidraw isn\'t loaded when the app opens, or when it\'s idle', loaded)
-  // Studio is off here (a beta feature), so Whiteboards has its own row and page (with it on, they
-  // are in Studio: whiteboard-v2 and studio-docs).
-  await p.locator('.rail-nav-btn', { hasText: 'Whiteboards' }).click()
-  await p.waitForSelector('.wb-home', { timeout: 20000 })
-  ok(await p.locator('.rail-nav-btn', { hasText: 'Studio' }).count() === 0 && await p.locator('.wb-view > .pane-head', { hasText: 'Whiteboards' }).count() === 1 && await p.locator('.rail-nav-btn.on').innerText().then((x) => x.trim() === 'Whiteboards', () => false),
-    'with Studio off, Whiteboards keeps its row in the sidebar and its own page', await p.locator('.rail-nav-btn').allInnerTexts())
-  ok(await until(() => p.locator('.wb-card', { hasText: 'Checkout' }).count(), 10000), 'Whiteboards in the sidebar lists the boards', await p.locator('.wb-home').innerText())
+  // Whiteboards are in Studio, with no row of their own: its Files, at Whiteboards (whiteboard-v2 and
+  // studio-docs have more of it).
+  ok(await p.locator('.rail-nav-btn', { hasText: 'Whiteboards' }).count() === 0, 'the sidebar has no Whiteboards row', await p.locator('.rail-nav-btn').allInnerTexts())
+  await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { list: true } })))
+  await p.waitForSelector('.sd-home .wb-home', { timeout: 20000 })
+  ok(await p.locator('.rail-nav-btn.on').innerText().then((x) => x.trim() === 'Studio', () => false), 'the list of whiteboards is Studio\'s, with Studio marked in the sidebar', await p.locator('.rail-nav-btn').allInnerTexts())
+  ok(await until(() => p.locator('.wb-card', { hasText: 'Checkout' }).count(), 10000), 'Studio\'s Whiteboards lists the boards', await p.locator('.wb-home').innerText())
   await shot(p, `${tag}whiteboard-list`)
   await p.keyboard.press('ControlOrMeta+k')
   await p.keyboard.type('whiteboard')
@@ -182,9 +183,9 @@ try {
     await p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { id } })), id)
     return until(() => { const j = readBoard(id); return !j?.bridge && texts(j).includes(word) && j }, 20000)
   }
-  // Comments and @bridge off (as it starts): a board has no Comments, and @bridge's route isn't there.
-  const commentOff = await api('/boards/comment', { request: 'add a cache', scene: {} }).catch((e) => e)
-  ok(commentOff?.status === 404 && commentOff.j?.trial === 'comments' && (await p.locator('.wb-view .pane-extras button[aria-label="Comments"]').count()) === 0, 'with Comments and @bridge off, a board has no Comments, and its @bridge route isn\'t there', commentOff?.message)
+  // Comments and @bridge, out of beta: a board has Comments, and @bridge's route is there for everyone.
+  const commentOn = await api('/boards/comment', { request: 'add a cache', scene: {} }).catch((e) => e)
+  ok(commentOn?.j?.trial !== 'comments' && (await p.locator('.wb-view .pane-extras button[aria-label="Comments"]').count()) === 1, 'with no Beta Feature on, a board has Comments, and its @bridge route answers', commentOn?.message || commentOn)
   const word = (j, w) => live(j).find((e) => e.type === 'text' && (e.originalText ?? e.text) === w)
   const holding = (j, w) => { const t = word(j, w); return t && live(j).find((e) => e.id === t.containerId) }
   const end = (a, i) => { const q = a.points.at(i); return { x: a.x + q[0], y: a.y + q[1] } }
@@ -216,7 +217,11 @@ try {
   await p.locator('.wb-view .pane-head button', { hasText: /^‹?\s*$/ }).first().click().catch(() => {})
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { list: true } })))
   await p.waitForSelector('.wb-home')
-  await p.getByRole('button', { name: 'New whiteboard' }).click()
+  // Studio's New › Whiteboard.
+  await p.locator('.sd-new-open').click()
+  await p.locator('.sd-new-menu [role="menuitem"]', { hasText: 'Whiteboard' }).click()
+  await p.locator('.sd-new-form input').fill('Untitled')
+  await p.locator('.sd-new-form button', { hasText: 'Make it' }).click()
   await p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
   await until(() => fs.existsSync(file('Untitled')), 5000)
   await p.locator('[data-testid="toolbar-rectangle"]').click({ force: true })
@@ -237,7 +242,7 @@ try {
   ok(await wand.evaluate((e) => e.parentElement.lastElementChild === e.nextElementSibling && e.nextElementSibling?.classList.contains('menu-anchor')), 'AI Assist at the right end of the board\'s header, with only More after it')
   await wand.click()
   const verbs = await again.locator('.ai-menu .ai-item-label').allInnerTexts()
-  ok(JSON.stringify(verbs) === JSON.stringify(['Draw this', 'Change it', 'Ask about the board', 'Group by theme', 'A timeline', 'Action items']) && await again.locator('.ai-menu button', { hasText: 'Change it' }).isEnabled(), 'a board\'s AI Assist: Draw this, Change it, Ask about the board, and the meeting moves (Group by theme, A timeline, Action items), Change it offered with a shape on the board', verbs)
+  ok(JSON.stringify(verbs) === JSON.stringify(['Draw this', 'Change it', 'Ask about the board', 'Group by theme', 'A timeline', 'Action items', 'Make a document', 'Make a deck']) && await again.locator('.ai-menu button', { hasText: 'Change it' }).isEnabled(), 'a board\'s AI Assist: Draw this, Change it, Ask about the board, the meeting moves (Group by theme, A timeline, Action items) and the board written up in Studio (Make a document, Make a deck), Change it offered with a shape on the board', verbs)
   await shot(again, `${tag}whiteboard-ai-menu`)
   await again.locator('.ai-menu button', { hasText: 'Change it' }).click()
   ok(await until(() => again.locator('.wb-draw [role="tab"][aria-selected="true"]', { hasText: 'Change it' }).count(), 5000) && /AI Assist/.test(await again.locator('.wb-draw-head').innerText()), 'Change it opens AI Assist\'s panel on Change it')
@@ -408,9 +413,9 @@ try {
   await openFile('docs/system.drawio')
   await p.waitForSelector('.viewer .wb-file .excalidraw canvas', { timeout: 30000 })
   await shot(p, `${tag}whiteboard-file-drawio`)
-  await p.locator('.wb-file-bar').getByRole('button', { name: 'Add to Whiteboards' }).click()
+  await p.locator('.wb-file-bar').getByRole('button', { name: 'Add to Studio' }).click()
   const sys = await until(() => readBoard('system'), 10000)
-  ok(!!sys && ['Web app', 'API', 'Database', 'calls', 'Queue', 'Services', 'Jobs'].every((w) => texts(sys).includes(w)), 'a .drawio file is drawn, both pages (one of them compressed), with its words and arrow labels, and added to Whiteboards', sys && texts(sys))
+  ok(!!sys && ['Web app', 'API', 'Database', 'calls', 'Queue', 'Services', 'Jobs'].every((w) => texts(sys).includes(w)), 'a .drawio file is drawn, both pages (one of them compressed), with its words and arrow labels, and added to Studio\'s whiteboards', sys && texts(sys))
   if (sys) {
     const els = live(sys)
     ok(els.some((e) => e.type === 'ellipse') && els.some((e) => e.type === 'diamond') && els.some((e) => e.backgroundColor === '#dae8fc'), 'its shapes and colours as drawn', els.map((e) => [e.type, e.backgroundColor]))
@@ -483,12 +488,12 @@ try {
   ok(!!looking && !!written && !said && !!both, 'a look for a newer file answered while the board\'s own save is on its way: not taken for a change from somewhere else, and what was drawn meanwhile saved too', { looking: !!looking, written: !!written, said: !!said, rects: live(readBoard('Race')).filter((e) => e.type === 'rectangle').length })
   await rc.ctx.close()
 
-  // A dark theme. The window kept the board in Studio's Preview, from while Studio was on: with it
-  // off, the board is on Whiteboards' own page, in that tab.
-  const dark = await page(b, kit.url, { mode: 'dark', store: { 'cc-ws': { tabs: [`view:studio:board:${encodeURIComponent(board)}`], active: `view:studio:board:${encodeURIComponent(board)}`, active: `view:whiteboard:${board}`, side: null, split: false, group: 'main' } }, before: async (c) => watch(c) })
+  // A dark theme. The window kept the board in a tab of its own, from before whiteboards were in
+  // Studio: it opens in Studio's Preview, in that tab.
+  const dark = await page(b, kit.url, { mode: 'dark', store: { 'cc-ws': { tabs: [`view:whiteboard:${board}`], active: `view:whiteboard:${board}`, side: null, split: false, group: 'main' } }, before: async (c) => watch(c) })
   await dark.p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
-  ok(await dark.p.evaluate((id) => { const tabs = JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs || []; return tabs.length === 1 && tabs[0] === id }, `view:whiteboard:${board}`) && await dark.p.locator('.wb-view button[aria-label="All whiteboards"]').count() === 1 && await dark.p.locator('.wb-view .sd-tabs').count() === 0 && await dark.p.locator('.rail-nav-btn.on').innerText().then((x) => x.trim() === 'Whiteboards', () => false),
-    'a board left open in Studio, with Studio since turned off, opens on Whiteboards\' own page, with Whiteboards marked in the sidebar', await dark.p.evaluate(() => localStorage.getItem('cc-ws')))
+  ok(await dark.p.evaluate((id) => { const tabs = JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs || []; return tabs.length === 1 && tabs[0] === id }, `view:studio:board:${encodeURIComponent(board)}`) && await dark.p.locator('.wb-view .sd-tabs').count() === 1 && await dark.p.locator('.rail-nav-btn.on').innerText().then((x) => x.trim() === 'Studio', () => false),
+    'a board\'s tab kept from before whiteboards were in Studio opens in Studio\'s Preview, in that tab, with Studio marked in the sidebar', await dark.p.evaluate(() => localStorage.getItem('cc-ws')))
   ok(await dark.p.locator('.excalidraw.theme--dark').count() === 1, 'in a dark theme, the board is dark too')
   await shot(dark.p, `${tag}whiteboard-dark`)
   await assist(dark.p, 'Change it')
@@ -531,7 +536,7 @@ try {
   await ph.p.keyboard.press('ControlOrMeta+k')
   await ph.p.keyboard.type('Whiteboards')
   await ph.p.keyboard.press('Enter')
-  await ph.p.waitForSelector('.wb-home', { timeout: 15000 })
+  await ph.p.waitForSelector('.sd-home .wb-home', { timeout: 15000 })
   const fits = (pp) => pp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1 && [...document.querySelectorAll('.wb-home *, .wb-view .pane-head *, .wb-draw *')].every((e) => { const r = e.getBoundingClientRect(); return !r.width || (r.left >= -1 && r.right <= window.innerWidth + 1) }))
   ok(await fits(ph.p), 'on a phone the list fits the screen')
   await shot(ph.p, `${tag}whiteboard-phone-list`)

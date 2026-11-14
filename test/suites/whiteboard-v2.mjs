@@ -74,10 +74,8 @@ const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${n
 
 try {
   await api('/setup', { name: 'Tester' })
-  // Studio on, for AI Assist's Make a document and Make a deck (whiteboard.mjs has it off). With it
-  // on, whiteboards are in Studio: the list is Studio's Files at Whiteboards, New makes one, a board
-  // opens in Studio's Preview, and what asks for Whiteboards' own places gets those.
-  await api('/settings', { trials: { studio: true } }, 'PATCH')
+  // Whiteboards are in Studio: the list is Studio's Files at Whiteboards, New makes one, a board opens
+  // in Studio's Preview, and what asks for Whiteboards' own places gets those.
   await api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
 
   // ---------- The server ----------
@@ -262,7 +260,7 @@ try {
   await part('the clean look', async () => {
     await toList()
     ok(await p.locator('.rail-nav-btn', { hasText: 'Whiteboards' }).count() === 0 && await p.locator('.rail-nav-btn.on').innerText().then((x) => x.trim() === 'Studio', () => false) && await p.locator('.sd-groups button[aria-current="true"]', { hasText: 'Whiteboards' }).count() === 1,
-      'with Studio on, the sidebar has no Whiteboards row, and the list of whiteboards is Studio\'s Files at Whiteboards', await p.locator('.rail-nav-btn').allInnerTexts())
+      'the sidebar has no Whiteboards row, and the list of whiteboards is Studio\'s Files at Whiteboards', await p.locator('.rail-nav-btn').allInnerTexts())
     await p.locator('.sd-new-open').click()
     await p.locator('.sd-new-menu [role="menuitem"]', { hasText: 'Whiteboard' }).click()
     await p.locator('.sd-new-form input').fill('Untitled')
@@ -653,7 +651,7 @@ try {
     ok(await until(() => p.locator('.sd-file .pane-head', { hasText: `${id} deck.md` }).count(), 20000), 'and opened in Studio')
     await sleep(800)
     await shot(p, `${tag}whiteboard-v2-made-deck`)
-    // AI Assist's menu on a board, dark: the meeting moves and the write-ups with Studio on.
+    // AI Assist's menu on a board, dark: the meeting moves and the write-ups in Studio.
     const night = await page(b, kit.url, { mode: 'dark', store: { 'cc-ws': { tabs: [`view:whiteboard:${id}`], active: `view:whiteboard:${id}`, side: null, split: false, group: 'main' } }, before: async (c) => watch(c) })
     await night.p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
     // The window had the board in a tab of its own, from before whiteboards were in Studio.
@@ -662,7 +660,7 @@ try {
       'a whiteboard\'s tab kept from before opens the board in Studio\'s Preview, in that tab, with Studio marked in the sidebar', await night.p.evaluate(() => localStorage.getItem('cc-ws')))
     await night.p.locator('.wb-view .pane-extras button[aria-label="AI Assist"]').click()
     const items = await night.p.locator('.ai-menu .ai-item-label').allInnerTexts()
-    ok(['Group by theme', 'A timeline', 'Action items', 'Make a document', 'Make a deck'].every((x) => items.includes(x)), 'with Studio on, a board\'s AI Assist offers Make a document and Make a deck after the meeting moves', items)
+    ok(['Group by theme', 'A timeline', 'Action items', 'Make a document', 'Make a deck'].every((x) => items.includes(x)), 'a board\'s AI Assist offers Make a document and Make a deck after the meeting moves', items)
     await shot(night.p, `${tag}whiteboard-v2-ai-menu-dark`)
     ok(!night.errors.length, 'dark: no page errors', night.errors)
     await night.ctx.close()
@@ -720,11 +718,10 @@ try {
 
   await part('comments and @bridge', async () => {
     // A board with Start and Ship, and Sam's comment on Ship (a pin, its thread in customData.bridge,
-    // as the board's own file keeps one): with the beta on, threads beside the board; one on the
+    // as the board's own file keeps one): threads beside the board, with no Beta Feature on; one on the
     // board posted, saved as a pin of its own; @bridge changing it as a suggestion (dashed, Keep and
     // Discard on the board and in the thread); Sam's waiting until sent; no model said; resolved
     // and deleted, in the file.
-    await api('/settings', { trials: { comments: true } }, 'PATCH')
     const base = { angle: 0, strokeColor: '#1f2733', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 1, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted: false, updated: 1, link: null, locked: false }
     const box = (id, text, x) => [{ ...base, id, type: 'rectangle', x, y: 0, width: 160, height: 70, boundElements: [{ type: 'text', id: `${id}t` }] },
       { ...base, id: `${id}t`, type: 'text', x: x + 50, y: 22, width: 60, height: 25, boundElements: null, text, originalText: text, fontSize: 20, fontFamily: 5, textAlign: 'center', verticalAlign: 'middle', containerId: id, autoResize: true, lineHeight: 1.25 }]
@@ -793,7 +790,6 @@ try {
       await shot(ph.p, `${tag}whiteboard-v2-comments-phone`)
       await ph.ctx.close()
     } finally {
-      await api('/settings', { trials: { comments: false } }, 'PATCH').catch(() => {})
       await openBoard(board).catch(() => {})
     }
   })

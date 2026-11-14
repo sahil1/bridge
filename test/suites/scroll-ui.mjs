@@ -7,7 +7,8 @@
 // doesn't undo it for the rest of the app. Then each main view scrolls in one place, at 1440x900 and
 // at 1024x700 with the Agents panel under it: Home, Meetings, a meeting (its summary and transcript
 // flowing down the page when its panel is that short), Studio's home and a document, a sheet and a
-// page in it, Files in a folder of 100, Whiteboards, Agent Map, Dictations, Usage and Settings.
+// page in it, Folders in a folder of 100, Whiteboards (in Studio), Agent Map, Dictations (in
+// Meetings), Usage and Settings.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, checks, until, browser, page, shot, withoutCutOff, TEST, ROOT } from '../lib/harness.mjs'
@@ -48,7 +49,7 @@ try {
   for (let i = 0; i < 10; i++) fs.writeFileSync(path.join(docs, `page-${i}.html`), `<!doctype html><title>Page ${i}</title><h1>Page ${i}</h1>`)
   const place = (await kit.api('/places', { path: docs })).place
   await until(async () => (await kit.api('/fleet')).agents.length >= 6, 30000)
-  const store = { 'cc-rail-meetings': true, 'cc-rail-dictations': true }
+  const store = { 'cc-rail-meetings': true }
   const open = (p, paneId) => p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: id } })), paneId)
   const colorOf = (p, sel) => p.evaluate((s) => { const e = document.querySelector(s); return e ? getComputedStyle(e).scrollbarColor : null }, sel)
   const widthOf = (p, sel) => p.evaluate((s) => { const e = document.querySelector(s); return e ? getComputedStyle(e).scrollbarWidth : null }, sel)
@@ -145,10 +146,10 @@ try {
     ['a document in Studio', studio('notes-1.md'), '.sd-desk'],
     ['a sheet in Studio', studio('data-1.csv'), '.sd-univer canvas'],
     ['a page in Studio', studio('page-1.html'), '.sd-page-ed'],
-    ['Files, in a folder of 100', async (p) => { await open(p, 'view:files'); await p.locator('.fx-side-row', { hasText: 'Work' }).first().click({ timeout: 15000 }) }, '.fx-body :text("notes-2.md")'],
-    ['Whiteboards', (p) => open(p, 'view:whiteboards'), '.wb-home'],
+    ['Folders, in a folder of 100', async (p) => { await open(p, 'view:files'); await p.locator('.fx-side-row', { hasText: 'Work' }).first().click({ timeout: 15000 }) }, '.fx-body :text("notes-2.md")'],
+    ['Whiteboards, in Studio', (p) => open(p, 'view:whiteboards'), '.sd-home .wb-home'],
     ['Agent Map', (p) => open(p, 'view:map'), '.am-row'],
-    ['Dictations', (p) => open(p, 'view:dictations'), '.dc-home'],
+    ['Dictations, in Meetings', (p) => open(p, 'view:dictations'), '.dc-view.with-kinds .dc-home'],
     ['Usage', async (p) => {
       await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-card', { detail: { id: 'gauge' } })))
       await p.locator('.usage-card button', { hasText: 'Stats, patterns and history' }).first().click({ timeout: 15000 })
@@ -178,7 +179,7 @@ try {
         twice.push({ name, failed: e.message.split('\n')[0], saw })
       }
     }
-    ok(!twice.length, `${width}x${height}: Home, Meetings, a meeting, Studio's home and a document, sheet and page in it, Files, Whiteboards, Agent Map, Dictations, Usage and Settings each scroll in one place, none with a scroll area inside another`, twice)
+    ok(!twice.length, `${width}x${height}: Home, Meetings, a meeting, Studio's home and a document, sheet and page in it, Folders, Whiteboards, Agent Map, Dictations, Usage and Settings each scroll in one place, none with a scroll area inside another`, twice)
     ok(withoutCutOff(errors).filter((e) => !/sandboxed and lacks the 'allow-same-origin'/.test(e)).length === 0, `${width}x${height}: no page errors`, errors)
     await ctx.close()
   }

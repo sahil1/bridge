@@ -13,10 +13,10 @@
 // answered by its model (the stand-in) in seconds: saying how to add one when there's none, Write a
 // formula and Clean this column as suggestions outlined on the sheet, discarded or kept (Keep all),
 // Summarise said beside it, Chart this drawn first, an answer that isn't a change said, and Hand to
-// an agent still there; Make a sheet (Make a Sheet, a beta feature): New › Sheet said what it's for
+// an agent still there; Make a sheet (Make a Sheet, with no Beta Feature on): New › Sheet said what it's for
 // (or the empty sheet's Make a sheet) gives a whole workbook shown first, Discard emptying it again,
 // Keep saving it as an Excel file with its sheets, formulas, formats, a dropdown and the heading
-// row frozen, and no model said; with the beta off, nothing new; light and dark; no page errors.
+// row frozen, and no model said; light and dark; no page errors.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -34,7 +34,6 @@ const MOD = process.platform === 'darwin' ? 'Meta' : 'Control'
 const pages = []
 try {
   await kit.api('/setup', { name: 'Tester' })
-  await kit.api('/settings', { trials: { studio: true } }, 'PATCH')
   const dir = path.join(kit.home, 'Work', 'sheets')
   fs.mkdirSync(dir, { recursive: true })
   // 50,000 rows: codes with leading zeros, names, amounts with two decimals, dates, percents.
@@ -361,12 +360,10 @@ try {
   ok(w.errors.length === 0, 'no page errors', w.errors)
 
   // ---------- Make a sheet ----------
-  // With Make a Sheet on (a beta feature, off to start): an empty Excel sheet made from what it's for, by AI Assist's model
-  // on the sheet's fast path, from New › Sheet or the empty sheet itself; shown on the sheet
-  // before it's kept (Discard empties it again), then saved as an Excel file with its sheets,
-  // formulas, formats, dropdowns and frozen headings. With the beta off, the empty sheet as before.
-  const offBook = await kit.api('/studio/sheet/ai', { root, path: 'costs.xlsx', mode: 'book', instruction: 'A budget' }).catch((e) => e)
-  ok(offBook?.status === 404 && offBook.j?.trial === 'make-sheet' && /^Make a Sheet is a beta feature/.test(offBook.message), 'with Make a Sheet off (as it starts), its route isn\'t there', offBook?.message)
+  // Make a Sheet, with no Beta Feature on: an empty Excel sheet made from what it's for, by AI
+  // Assist's model on the sheet's fast path, from New › Sheet or the empty sheet itself; shown on the
+  // sheet before it's kept (Discard empties it again), then saved as an Excel file with its sheets,
+  // formulas, formats, dropdowns and frozen headings.
   const studioHome = () => until(async () => { await p.locator('.rail-nav-btn', { hasText: 'Studio' }).click(); return p.locator('.sd-home').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 20000, 300)
   const newSheet = async (name, forWhat) => {
     await studioHome()
@@ -380,9 +377,8 @@ try {
   await studioHome()
   await p.locator('.sd-new-open').click()
   await p.locator('.sd-new-menu [role="menuitem"]', { hasText: 'Sheet' }).first().click()
-  ok((await p.locator('.sd-new-for').count()) === 0, 'and New › Sheet asks only its name and folder, as before')
+  ok((await p.locator('.sd-new-for').count()) === 1, 'New › Sheet asks what it\'s for, beside its name and folder')
   await p.locator('.sd-new-form button', { hasText: 'Cancel' }).click()
-  await kit.api('/settings', { trials: { 'make-sheet': true } }, 'PATCH')
   const booksAsked = model.asked(/^Make a spreadsheet: /).length
   await newSheet('Team budget', 'A budget for a team of five')
   const made = p.locator('.sh-make')

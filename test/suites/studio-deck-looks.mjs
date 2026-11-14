@@ -144,7 +144,6 @@ try {
 
   // ---------- The page ----------
   await api('/setup', { name: 'Tester' })
-  await api('/settings', { trials: { studio: true } }, 'PATCH')
   const dir = path.join(kit.home, 'Work', 'looks')
   fs.mkdirSync(dir, { recursive: true })
   for (const c of cases) fs.writeFileSync(path.join(dir, `${c.name}.pptx`), files.get(c.name))

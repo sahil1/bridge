@@ -1,6 +1,6 @@
-// Back and Forward (src/backForward.js, a beta feature on to start with), in the browser named by
+// Back and Forward (src/backForward.js), in the browser named by
 // BRIDGE_TEST_BROWSER. Through several places (an agent's Chat and Terminal, Meetings found with
-// ⌘K and its Memory, a meeting in Meetings' tab, Files and a folder in it, Today's Calendar, two
+// ⌘K and its Memory, a meeting in Meetings' tab, Folders and a folder in it, Today's Calendar, two
 // sections of Settings), then back and forward again: by ‹ and › at the start of the top bar (each
 // greyed with nowhere to go that way), by ⌘[ and ⌘] (Alt+← and Alt+→ off a Mac), but not while
 // typing, by the mouse's back and forward buttons, by the browser's own Back and Forward, and as
@@ -8,14 +8,14 @@
 // was: the agent's view, Meetings' tab, the meeting back in Meetings' tab, the folder, a long folder
 // at its scroll. Held or right-clicked, ‹ and › list the places that way, and one picked is shown. A
 // tab closed is passed over. On a phone nothing's added (its tabs, and the system's Back in the
-// phone apps, are its way around), and with the beta feature off nothing changes, until it's turned
-// on again in Settings › About & Updates › Beta Features.
+// phone apps, are its way around). Out of beta, a switch for it saved off from before changes
+// nothing, and Beta Features has no Back and Forward, Tab Groups, Recommended Settings or Files.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, checks, until, browser, page, shot, sleep, changeAnswer, TEST, IS_MAC } from '../lib/harness.mjs'
 
 const { ok, done } = checks('back-forward')
-const kit = await startKit('back-forward', { config: { trials: { studio: true, files: true } } })
+const kit = await startKit('back-forward')
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -39,11 +39,11 @@ try {
   await kit.api(`/meetings/${M.id}/stop`, {})
   const today = new Date().toISOString().slice(0, 10)
 
-  // ---------- on to start with ----------
+  // ---------- part of the app ----------
   const conf = await kit.api('/config')
-  ok(conf.trials?.['back-forward'] === true && conf.trials?.studio === true, 'Back and Forward is on to start with, beside the beta features this computer turned on', conf.trials)
+  ok(!('back-forward' in (conf.trials || {})) && !('studio' in (conf.trials || {})) && !('files' in (conf.trials || {})), 'Back and Forward, Studio and Folders are part of the app: none is a Beta Feature', conf.trials)
 
-  // A page at 1440 (or narrower), with Site's tab open (and more), Files' sidebar without this
+  // A page at 1440 (or narrower), with Site's tab open (and more), Folders' sidebar without this
   // computer's other drives (macOS asks before an app opens one).
   const open = async (o = {}) => {
     const pg = await page(b, kit.url, {
@@ -62,9 +62,9 @@ try {
     if (st) return `Settings › ${st}${stTab ? ` › ${stTab}` : ''}`
     if (document.querySelector('.work.maxed .calv')) return 'Calendar'
     const tab = document.querySelector('.ws-tab.main')?.dataset.pane || ''
-    if (tab === 'view:meetings') return `Meetings › ${txt('.mt-view .seg [aria-selected="true"]')}`
+    if (tab === 'view:meetings') return `Meetings › ${txt('.mt-view .pane-head .seg [aria-selected="true"]')}`
     if (tab.startsWith('view:meeting:')) return `the meeting ${txt('.ws-tab.main .ws-tab-name')}`
-    if (tab === 'view:files') return `Files › ${txt('.fx-path [aria-current="location"]')}`
+    if (tab === 'view:files') return `Folders › ${txt('.fx-path [aria-current="location"]')}`
     if (tab.startsWith('view:')) return tab.slice(5)
     return `${txt('.ws-tab.main .ws-tab-name')} › ${txt('.console .seg [aria-selected="true"]')}`
   })
@@ -75,12 +75,12 @@ try {
   const send = (p, e, detail) => p.evaluate(([e, d]) => window.dispatchEvent(new CustomEvent(e, { detail: d })), [e, detail])
   const tabs = (p) => p.evaluate(() => [...document.querySelectorAll('.ws-tabs-scroll > .ws-tab')].map((x) => x.dataset.pane))
 
-  // Site's Chat → Terminal → Meetings (⌘K) → its Memory → the meeting → Files → Projects → Calendar.
+  // Site's Chat → Terminal → Meetings (⌘K) → its Memory → the meeting → Folders → Projects → Calendar.
   // The calendar reads macOS Calendar: off a Mac there's none, and the last place is Whiteboards,
-  // asked for as it was before whiteboards were in Studio: with Studio on, that's Studio.
+  // asked for as it was before whiteboards were in Studio: that's Studio.
   const LAST = IS_MAC ? 'Calendar' : 'studio'
   const LAST_NAME = IS_MAC ? 'Calendar' : 'Studio'
-  const PLACES = ['Site › Chat', 'Site › Terminal', 'Meetings › Meetings', 'Meetings › Memory', 'the meeting Quarterly plan', 'Files › Home', 'Files › Projects', LAST]
+  const PLACES = ['Site › Chat', 'Site › Terminal', 'Meetings › Meetings', 'Meetings › Memory', 'the meeting Quarterly plan', 'Folders › Home', 'Folders › Projects', LAST]
   const walk = async (p) => {
     const went = [await here(p)]
     await p.locator('.console .seg [role="tab"]', { hasText: 'Terminal' }).click()
@@ -95,10 +95,10 @@ try {
     await at(p, 'the meeting Quarterly plan'); await settle(); went.push(await here(p))
     await send(p, 'bridge-open-agent', { paneId: 'view:files' })
     await p.locator('.fx-row[data-name="Projects"]').waitFor({ timeout: 10000 })
-    await at(p, 'Files › Home'); await settle(); went.push(await here(p))
+    await at(p, 'Folders › Home'); await settle(); went.push(await here(p))
     await p.locator('.fx-row[data-name="Projects"]').dblclick()
     await p.locator('.fx-row[data-name="site"]').waitFor({ timeout: 10000 })
-    await at(p, 'Files › Projects'); await settle(); went.push(await here(p))
+    await at(p, 'Folders › Projects'); await settle(); went.push(await here(p))
     if (IS_MAC) await send(p, 'bridge-open-event', { date: today })
     else await send(p, 'bridge-open-agent', { paneId: 'view:whiteboards' })
     await at(p, LAST); await settle(); went.push(await here(p))
@@ -111,7 +111,7 @@ try {
     await btn(p, 'back').waitFor({ timeout: 10000 })
     ok(await greyed(p, 'back') && await greyed(p, 'forward'), 'a window just opened: ‹ and › at the start of the top bar, both greyed, with nowhere to go yet')
     const went = await walk(p)
-    ok(JSON.stringify(went) === JSON.stringify(PLACES), `through eight places: Site's Chat and Terminal, Meetings found with ⌘K and its Memory, a meeting, Files and a folder in it, ${LAST_NAME}`, went)
+    ok(JSON.stringify(went) === JSON.stringify(PLACES), `through eight places: Site's Chat and Terminal, Meetings found with ⌘K and its Memory, a meeting, Folders and a folder in it, ${LAST_NAME}`, went)
     ok(!(await greyed(p, 'back')) && await greyed(p, 'forward'), 'at the last: ‹ ready, › greyed')
     const backs = []
     for (let i = PLACES.length - 2; i >= 0; i--) {
@@ -132,7 +132,7 @@ try {
         const strip = await tabs(p)
         ok(strip.includes(`view:meeting:${M.id}`) && !strip.includes('view:meetings'), '› to the meeting: it takes Meetings\' tab again', strip)
       }
-      if (PLACES[i] === 'Files › Projects') ok(!!(await until(async () => (await p.locator('.fx-row[data-name="site"]').count()) === 1, 6000, 100)), '› to Files › Projects: that folder, its files listed')
+      if (PLACES[i] === 'Folders › Projects') ok(!!(await until(async () => (await p.locator('.fx-row[data-name="site"]').count()) === 1, 6000, 100)), '› to Folders › Projects: that folder, its files listed')
     }
     ok(JSON.stringify(fwds) === JSON.stringify(PLACES.slice(1)), '› goes forward through each again', fwds)
     ok(!(await greyed(p, 'back')) && await greyed(p, 'forward'), 'at the last again: › greyed')
@@ -142,7 +142,7 @@ try {
     const menu = p.locator('.nav-menu[role="menu"]')
     await menu.waitFor({ timeout: 3000 })
     const listed = await menu.locator('[role="menuitem"]').allInnerTexts()
-    ok(listed.length === 7 && /Files › Projects/.test(listed[0]) && /Files › Home/.test(listed[1]) && /Quarterly plan/.test(listed[2]) && /Meetings › Memory/.test(listed[3]) && /Site › Terminal/.test(listed[5]) && /Site › Chat/.test(listed[6]),
+    ok(listed.length === 7 && /Folders › Projects/.test(listed[0]) && /Folders › Home/.test(listed[1]) && /Quarterly plan/.test(listed[2]) && /Meetings › Memory/.test(listed[3]) && /Site › Terminal/.test(listed[5]) && /Site › Chat/.test(listed[6]),
       'right-clicking ‹ lists the places before, nearest first, each named', listed)
     await shot(p, `${tag}back-forward-list`, { clip: { x: 0, y: 0, width: 640, height: 360 } })
     await menu.locator('[role="menuitem"]', { hasText: 'Meetings › Memory' }).click()
@@ -212,24 +212,24 @@ try {
       document.body.dispatchEvent(up)
       return up.defaultPrevented
     }, button)
-    ok(await mouse(3) && !!(await at(p, 'Files › Projects')), 'the mouse\'s back button: back to Files › Projects (and the browser\'s own isn\'t used)', await here(p))
-    ok(await mouse(3) && !!(await at(p, 'Files › Home')), 'again: Files › Home', await here(p))
-    ok(await mouse(4) && !!(await at(p, 'Files › Projects')), 'its forward button: Files › Projects', await here(p))
+    ok(await mouse(3) && !!(await at(p, 'Folders › Projects')), 'the mouse\'s back button: back to Folders › Projects (and the browser\'s own isn\'t used)', await here(p))
+    ok(await mouse(3) && !!(await at(p, 'Folders › Home')), 'again: Folders › Home', await here(p))
+    ok(await mouse(4) && !!(await at(p, 'Folders › Projects')), 'its forward button: Folders › Projects', await here(p))
 
     // The browser's own Back and Forward (popstate): the same steps.
     await p.goBack()
-    ok(!!(await at(p, 'Files › Home')), 'the browser\'s Back: Files › Home', await here(p))
+    ok(!!(await at(p, 'Folders › Home')), 'the browser\'s Back: Folders › Home', await here(p))
     await p.goBack()
     ok(!!(await at(p, 'the meeting Quarterly plan')), 'and again: the meeting', await here(p))
     await p.goForward()
-    ok(!!(await at(p, 'Files › Home')), 'the browser\'s Forward: Files › Home', await here(p))
+    ok(!!(await at(p, 'Folders › Home')), 'the browser\'s Forward: Folders › Home', await here(p))
     ok(p.url() === `${kit.url}/`, 'the address stays the app\'s own', p.url())
 
     // The desktop app: its mouse buttons on Windows and a swipe on a Mac come as bridge-nav.
     await send(p, 'bridge-nav', 'back')
     ok(!!(await at(p, 'the meeting Quarterly plan')), 'the desktop app\'s back (a mouse button on Windows, a swipe on a Mac): the meeting', await here(p))
     await send(p, 'bridge-nav', 'forward')
-    ok(!!(await at(p, 'Files › Home')), 'and its forward: Files › Home', await here(p))
+    ok(!!(await at(p, 'Folders › Home')), 'and its forward: Folders › Home', await here(p))
     ok(errors.length === 0, 'keys, mouse, browser: no page errors', errors)
     await ctx.close()
   })
@@ -246,7 +246,7 @@ try {
     await send(p, 'bridge-open-agent', { paneId: 'view:meetings' })
     await at(p, 'Meetings › Meetings'); await settle()
     await btn(p, 'back').click()
-    await at(p, 'Files › Big')
+    await at(p, 'Folders › Big')
     const top = await until(async () => { const v = await p.locator('.fx-body').evaluate((el) => el.scrollTop); return v > 850 ? v : null }, 4000, 100)
     ok(!!top && top < 950, '‹ back to a long folder: at its scroll, as it was', top || await p.locator('.fx-body').evaluate((el) => el.scrollTop))
     ok(errors.length === 0, 'scroll: no page errors', errors)
@@ -329,32 +329,24 @@ try {
     await ctx.close()
   })
 
-  // ---------- turned off: nothing changes ----------
-  await part('off', async () => {
+  // ---------- out of beta: a switch saved off from before changes nothing ----------
+  await part('a switch saved off', async () => {
     await kit.api('/settings', { trials: { 'back-forward': false } }, 'PATCH')
     const { ctx, p, errors } = await open()
-    const was = await p.evaluate(() => history.length)
+    ok(!!(await until(async () => (await p.locator('.topbar .nav-btn').count()) === 2, 8000)), 'with Back and Forward saved off from before it was part of the app: ‹ and › in the top bar all the same')
     await p.locator('.console .seg [role="tab"]', { hasText: 'Terminal' }).click()
     await at(p, 'Site › Terminal'); await settle()
     await send(p, 'bridge-open-agent', { paneId: 'view:meetings' })
     await at(p, 'Meetings › Meetings'); await settle()
-    ok((await p.locator('.nav-btn').count()) === 0, 'turned off: no ‹ and › in the top bar')
     await p.keyboard.press(BACK)
-    await p.evaluate(() => { const o = { button: 3, bubbles: true, cancelable: true }; document.body.dispatchEvent(new MouseEvent('mousedown', o)); document.body.dispatchEvent(new MouseEvent('mouseup', o)) })
-    await send(p, 'bridge-nav', 'back')
-    await sleep(600)
-    ok((await here(p)) === 'Meetings › Meetings' && (await p.evaluate(() => history.length)) === was, 'and nothing changes: the keys, the mouse\'s button and the desktop app\'s back go nowhere, and nothing is added to the browser\'s history', { at: await here(p), was, now: await p.evaluate(() => history.length) })
+    ok(!!(await at(p, 'Site › Terminal')), 'and they go back', await here(p))
     await p.keyboard.press('ControlOrMeta+Comma')
     await p.locator('.st-nav-item', { hasText: 'About & Updates' }).click()
-    const box = p.locator('[data-setting="beta"] label', { hasText: 'Back and Forward' }).locator('input')
-    await box.scrollIntoViewIfNeeded()
-    ok(!(await box.isChecked()), 'Settings › About & Updates › Beta Features: Back and Forward, off')
-    await box.check()
+    await p.locator('[data-setting="beta"] label').first().waitFor({ timeout: 8000 })
+    ok(await p.locator('[data-setting="beta"] label', { hasText: /Back and Forward|Tab Groups|Recommended Settings|^Files/ }).count() === 0, 'Settings › About & Updates › Beta Features: no Back and Forward, Tab Groups, Recommended Settings or Files', await p.locator('[data-setting="beta"]').innerText())
     await p.keyboard.press('Escape')
-    ok(!!(await until(async () => (await p.locator('.topbar .nav-btn').count()) === 2, 8000)), 'turned on there: ‹ and › in the top bar at once')
-    ok(errors.length === 0, 'off: no page errors', errors)
+    ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
-    ok((await kit.api('/config')).trials['back-forward'] === true, 'and kept on')
   })
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
