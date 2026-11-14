@@ -201,6 +201,9 @@ try {
     await p.locator('.rail-board').click({ timeout: 15000 })
     const needs = await until(async () => { const x = await p.locator('.cb-col.c-needs').innerText().catch(() => ''); return /Tidy the release notes/.test(x) ? x : null }, 10000)
     ok(/Waiting for your answer/.test(needs || ''), 'on the board, under Needs you: it waits for your answer', needs)
+    // The board was there already (the view kept from before); the board button's own switch to
+    // Tasks lands a moment after its click (Console.jsx showView), so Chat waits for it.
+    await sleep(400)
     await p.locator('.pane-head .seg [role="tab"]', { hasText: 'Chat' }).click()
     const row = p.locator('.ct-tray .ct-item', { hasText: 'Tidy the release notes' })
     ok(!!(await until(async () => /Needs you/.test(await row.innerText().catch(() => '')), 8000)), 'and in the Tasks tray its task says Needs you', await row.innerText().catch(() => ''))
