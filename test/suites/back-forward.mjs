@@ -76,9 +76,10 @@ try {
   const tabs = (p) => p.evaluate(() => [...document.querySelectorAll('.ws-tabs-scroll > .ws-tab')].map((x) => x.dataset.pane))
 
   // Site's Chat → Terminal → Meetings (⌘K) → its Memory → the meeting → Files → Projects → Calendar.
-  // The calendar reads macOS Calendar: off a Mac there's none, and the last place is Whiteboards.
-  const LAST = IS_MAC ? 'Calendar' : 'whiteboards'
-  const LAST_NAME = IS_MAC ? 'Calendar' : 'Whiteboards'
+  // The calendar reads macOS Calendar: off a Mac there's none, and the last place is Whiteboards,
+  // asked for as it was before whiteboards were in Studio: with Studio on, that's Studio.
+  const LAST = IS_MAC ? 'Calendar' : 'studio'
+  const LAST_NAME = IS_MAC ? 'Calendar' : 'Studio'
   const PLACES = ['Site › Chat', 'Site › Terminal', 'Meetings › Meetings', 'Meetings › Memory', 'the meeting Quarterly plan', 'Files › Home', 'Files › Projects', LAST]
   const walk = async (p) => {
     const went = [await here(p)]

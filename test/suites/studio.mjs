@@ -229,7 +229,7 @@ try {
   await p.locator('.sd-new-open').click()
   const newItems = await p.locator('.sd-new-menu [role="menuitem"]').allInnerTexts()
   await p.keyboard.press('Escape')
-  ok(JSON.stringify(newItems) === '["Document","Markdown","Sheet","Deck","Page"]' && !!(await until(async () => (await p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)), "Studio's home: New in its header (document, Markdown, sheet, deck, page) and your recent files", newItems)
+  ok(JSON.stringify(newItems) === '["Document","Markdown","Sheet","Deck","Page","Whiteboard"]' && !!(await until(async () => (await p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)), "Studio's home: New in its header (document, Markdown, sheet, deck, page, whiteboard) and your recent files", newItems)
   await shot(p, `${tag}studio-home`)
   // A Markdown file, edited and saved.
   await p.locator('.sd-file-name', { hasText: 'notes.md' }).first().click()

@@ -6,7 +6,8 @@
 // add it here. Each path is then followed on a phone, 375 and 430 px wide: every tap is there, and
 // the place opens. Usage has a row of its own in More (Home on or off), opening it straight away, not
 // through Today, and ⌘K's Show usage and Usage stats and history open it there on a phone. Then
-// Whiteboards on the phone: the list, a board opened from it (with its own way back), and AI Assist's Draw this;
+// Whiteboards on the phone, in Studio (which is on here, so More has no Whiteboards row): the list, a
+// board opened from it (with its way back to Studio), and AI Assist's Draw this;
 // a phone that had the old Terminals tab open gets Terminals in More.
 //
 // Then Settings, as a phone's settings: it opens at the list of every section (a whole row each,
@@ -34,7 +35,8 @@ const PATHS = {
   'view:new': { phone: 'Agents › New', shows: '.home-title' },
   'view:meetings': { phone: 'Meetings', shows: '.m-meetings' },
   'view:dictations': { phone: 'Meetings › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
-  'view:whiteboards': { phone: 'More › Whiteboards', shows: '.wb-home' },
+  // Whiteboards are in Studio where Studio shows, as it does here (its Files, at Whiteboards).
+  'view:whiteboards': { phone: 'More › Studio', shows: '.sd-home' },
   'view:studio': { phone: 'More › Studio', shows: '.sd-home' },
   'view:files': { phone: 'More › Files', shows: '.fx' },
   'view:map': { phone: 'Agents › Map', shows: '.am' },
@@ -50,7 +52,7 @@ const PATHS = {
   'a:people': { phone: 'Meetings › People', shows: '.m-meetings .mi-people' },
   'a:dictations': { phone: 'More › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
   'a:memory': { phone: 'Meetings › Memory', shows: '.m-meetings .mt-view .mm-page' },
-  'a:boards': { phone: 'More › Whiteboards', shows: '.wb-home' },
+  'a:boards': { phone: 'More › Studio', shows: '.sd-home' },
   'a:studio': { phone: 'More › Studio', shows: '.sd-home' },
   'a:files': { phone: 'More › Files', shows: '.fx' },
   'a:map': { phone: 'More › Agent Map', shows: '.am' },
@@ -113,7 +115,6 @@ const PATHS = {
   'rail:Meetings': { phone: 'Meetings', shows: '.m-meetings' },
   'rail:Record a meeting now': { phone: 'Meetings', shows: '.m-meetings button:has-text("Start recording")' },
   'rail:Dictations': { phone: 'Meetings › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
-  'rail:Whiteboards': { phone: 'More › Whiteboards', shows: '.wb-home' },
   'rail:Studio': { phone: 'More › Studio', shows: '.sd-home' },
   'rail:Files': { phone: 'More › Files', shows: '.fx' },
   'rail:New space': { phone: 'Search › New agent with all the options' },
@@ -159,7 +160,8 @@ try {
     ...[...document.querySelectorAll('.rail-nav .rail-nav-btn')].map((e) => e.innerText.split('\n')[0].trim()),
     ...[...document.querySelectorAll('.rail-tools .rail-tool, .rail-nav .rail-rec')].map((e) => e.getAttribute('aria-label')),
   ].filter(Boolean))
-  ok(rail.includes('Whiteboards') && rail.includes('History'), 'the desktop\'s sidebar rows and tools are read', rail)
+  ok(rail.includes('Studio') && rail.includes('History'), 'the desktop\'s sidebar rows and tools are read', rail)
+  ok(!rail.includes('Whiteboards'), 'with Studio on, the sidebar has Studio and no Whiteboards row', rail)
   ok(!missing(rail.map((r) => `rail:${r}`)).length, 'every row and tool in the desktop\'s sidebar has a way in on a phone, or says why not', missing(rail.map((r) => `rail:${r}`)))
   await desk.p.keyboard.press('ControlOrMeta+k')
   await desk.p.waitForSelector('.pal-item', { timeout: 5000 })
@@ -327,19 +329,23 @@ try {
     ok(await ph.p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `${width}: nothing wider than the phone`)
     await shot(ph.p, `${tag}phone-more-${width}`)
 
-    // Whiteboards: the list, a board from it, its own way back, and AI Assist's Draw this.
-    await ph.p.locator('.m-more-row', { hasText: 'Whiteboards' }).click()
-    await ph.p.waitForSelector('.wb-home', { timeout: 15000 })
-    ok(await ph.p.locator('.m-more-view > .m-view-back', { hasText: 'More' }).isVisible(), `${width}: Whiteboards opens in More, with Back to More`)
-    await ph.p.locator('.wb-card', { hasText: board }).click()
+    // Whiteboards, in Studio: the list, a board from it, its way back, and AI Assist's Draw this.
+    ok(rows.some((r) => r.name === 'Studio') && !rows.some((r) => r.name === 'Whiteboards'), `${width}: with Studio on, More has Studio and no Whiteboards row`, rows.map((r) => r.name))
+    await ph.p.locator('.m-more-row', { hasText: 'Studio' }).click()
+    await ph.p.waitForSelector('.sd-home', { timeout: 15000 })
+    ok(await ph.p.locator('.m-more-view > .m-view-back', { hasText: 'More' }).isVisible(), `${width}: Studio opens in More, with Back to More`)
+    await ph.p.locator('.sd-group-pick select').selectOption('kind:board')
+    await ph.p.waitForSelector('.sd-home .wb-home', { timeout: 15000 })
+    ok(!!(await until(() => ph.p.locator('.sd-home .wb-card', { hasText: board }).count(), 8000)) && await ph.p.locator('.sd-home .wb-ask textarea').isVisible(), `${width}: Studio's Whiteboards lists your boards, with what to draw above them`)
+    await ph.p.locator('.wb-card', { hasText: board }).locator('.wb-thumb').click()
     ok(!!(await until(() => ph.p.locator('.excalidraw canvas').count(), 30000)), `${width}: a board opens from the list, in More`)
     ok((await ph.p.locator('.tabbar button.on').innerText()).trim() === 'More' && !(await ph.p.locator('.m-more-view > .m-view-back').count()), `${width}: still in More, with the board's own way back only`)
     await ph.p.locator('.wb-view .pane-extras button[aria-label="AI Assist"]').click()
     await ph.p.locator('.ai-menu button', { hasText: 'Draw this' }).click()
     ok(!!(await until(() => ph.p.locator('.wb-draw textarea').isVisible(), 8000)), `${width}: AI Assist's Draw this opens on the board`)
     await shot(ph.p, `${tag}phone-board-${width}`)
-    await ph.p.locator('.wb-view button[aria-label="All whiteboards"]').click()
-    ok(!!(await until(() => ph.p.locator('.wb-home').isVisible(), 8000)), `${width}: and its Back goes to the list`)
+    await ph.p.locator('.wb-view button[aria-label="Back to Studio"]').click()
+    ok(!!(await until(() => ph.p.locator('.sd-home .wb-home').isVisible(), 8000)), `${width}: and its Back goes to the list, in Studio`)
     await ph.p.locator('.tabbar button', { hasText: 'More' }).click()
     ok(!!(await until(() => ph.p.locator('.m-more-row').first().isVisible(), 4000)), `${width}: More again goes back to its list`)
     // (Going from one path to the next loads the page again, cutting off its requests and any part of

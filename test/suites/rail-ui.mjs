@@ -184,6 +184,7 @@ try {
   ok(!!(await until(() => p.locator('.rail-nav .rail-meetings').nth(1).locator('.rm-row').count(), 10000)), 'Dictations\' list open under Meetings\'', await p.locator('.rail-nav').innerText().catch(() => ''))
   await p.locator('.rail .tab-row', { hasText: 'Payments' }).waitFor({ timeout: 20000 }).catch(() => {})
   ok(await p.locator('.rail-nav-btn', { hasText: /^\s*(Studio|Files)\s*$/ }).count() === 2, 'every Beta Feature on: Studio and Files are in the sidebar too', await p.locator('.rail-nav-btn').allInnerTexts())
+  ok(await p.locator('.rail-nav-btn', { hasText: 'Whiteboards' }).count() === 0, 'and with Studio there, Whiteboards has no row of its own: they are in Studio', await p.locator('.rail-nav-btn').allInnerTexts())
   await p.locator('.rail-nav-btn', { hasText: 'Files' }).scrollIntoViewIfNeeded()
   // The sidebar's scroll areas, and where its headings are against what scrolls.
   const look = () => p.evaluate(() => {
@@ -217,7 +218,7 @@ try {
   const icons = p.locator('.rail-views-head .rail-icon')
   await icons.first().waitFor({ timeout: 5000 }).catch(() => {})
   const row = await icons.evaluateAll((els) => els.map((e) => ({ name: e.getAttribute('aria-label'), top: Math.round(e.getBoundingClientRect().top) })))
-  ok(row.length >= 8 && new Set(row.map((x) => x.top)).size === 1 && ['Home', 'New', 'Chief of Staff', 'Dictations', 'Whiteboards', 'Studio', 'Files'].every((n) => row.some((x) => x.name === n)) && row.some((x) => /^Meetings/.test(x.name)), 'Views folded: one row of their icons', row)
+  ok(row.length >= 7 && new Set(row.map((x) => x.top)).size === 1 && ['Home', 'New', 'Chief of Staff', 'Dictations', 'Studio', 'Files'].every((n) => row.some((x) => x.name === n)) && row.some((x) => /^Meetings/.test(x.name)) && !row.some((x) => x.name === 'Whiteboards'), 'Views folded: one row of their icons, Studio among them and no Whiteboards', row)
   fit = await look()
   ok(await p.locator('.rail-nav').count() === 0 && fit.spaces.top - fit.views.bottom <= 1 && fit.space?.bottom < 200, 'and your spaces right under it, in view', fit)
   await shot(p, `${tag}rail-views-folded`)

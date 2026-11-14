@@ -148,8 +148,12 @@ try {
   await p.waitForSelector('.rail-nav', { timeout: 30000 })
   await sleep(3500) // the views that load once the app is idle
   ok(!loaded.length, 'Excalidraw isn\'t loaded when the app opens, or when it\'s idle', loaded)
+  // Studio is off here (a beta feature), so Whiteboards has its own row and page (with it on, they
+  // are in Studio: whiteboard-v2 and studio-docs).
   await p.locator('.rail-nav-btn', { hasText: 'Whiteboards' }).click()
   await p.waitForSelector('.wb-home', { timeout: 20000 })
+  ok(await p.locator('.rail-nav-btn', { hasText: 'Studio' }).count() === 0 && await p.locator('.wb-view > .pane-head', { hasText: 'Whiteboards' }).count() === 1 && await p.locator('.rail-nav-btn.on').innerText().then((x) => x.trim() === 'Whiteboards', () => false),
+    'with Studio off, Whiteboards keeps its row in the sidebar and its own page', await p.locator('.rail-nav-btn').allInnerTexts())
   ok(await until(() => p.locator('.wb-card', { hasText: 'Checkout' }).count(), 10000), 'Whiteboards in the sidebar lists the boards', await p.locator('.wb-home').innerText())
   await shot(p, `${tag}whiteboard-list`)
   await p.keyboard.press('ControlOrMeta+k')
@@ -479,9 +483,12 @@ try {
   ok(!!looking && !!written && !said && !!both, 'a look for a newer file answered while the board\'s own save is on its way: not taken for a change from somewhere else, and what was drawn meanwhile saved too', { looking: !!looking, written: !!written, said: !!said, rects: live(readBoard('Race')).filter((e) => e.type === 'rectangle').length })
   await rc.ctx.close()
 
-  // A dark theme.
-  const dark = await page(b, kit.url, { mode: 'dark', store: { 'cc-ws': { tabs: [`view:whiteboard:${board}`], active: `view:whiteboard:${board}`, side: null, split: false, group: 'main' } }, before: async (c) => watch(c) })
+  // A dark theme. The window kept the board in Studio's Preview, from while Studio was on: with it
+  // off, the board is on Whiteboards' own page, in that tab.
+  const dark = await page(b, kit.url, { mode: 'dark', store: { 'cc-ws': { tabs: [`view:studio:board:${encodeURIComponent(board)}`], active: `view:studio:board:${encodeURIComponent(board)}`, active: `view:whiteboard:${board}`, side: null, split: false, group: 'main' } }, before: async (c) => watch(c) })
   await dark.p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
+  ok(await dark.p.evaluate((id) => { const tabs = JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs || []; return tabs.length === 1 && tabs[0] === id }, `view:whiteboard:${board}`) && await dark.p.locator('.wb-view button[aria-label="All whiteboards"]').count() === 1 && await dark.p.locator('.wb-view .sd-tabs').count() === 0 && await dark.p.locator('.rail-nav-btn.on').innerText().then((x) => x.trim() === 'Whiteboards', () => false),
+    'a board left open in Studio, with Studio since turned off, opens on Whiteboards\' own page, with Whiteboards marked in the sidebar', await dark.p.evaluate(() => localStorage.getItem('cc-ws')))
   ok(await dark.p.locator('.excalidraw.theme--dark').count() === 1, 'in a dark theme, the board is dark too')
   await shot(dark.p, `${tag}whiteboard-dark`)
   await assist(dark.p, 'Change it')

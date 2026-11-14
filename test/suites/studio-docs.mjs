@@ -269,7 +269,7 @@ try {
   // New, in the header beside Files and Preview: no cards on a page that has files.
   ok(await p.locator('.sd-new-btn').count() === 0, "with files, New's cards aren't on the page")
   await p.locator('.sd-new-open').click()
-  ok(JSON.stringify(await p.locator('.sd-new-menu [role="menuitem"]').allInnerTexts()) === '["Document","Markdown","Sheet","Deck","Page"]', 'New is a menu in the header: a document, Markdown, a sheet, a deck, a page')
+  ok(JSON.stringify(await p.locator('.sd-new-menu [role="menuitem"]').allInnerTexts()) === '["Document","Markdown","Sheet","Deck","Page","Whiteboard"]', 'New is a menu in the header: a document, Markdown, a sheet, a deck, a page, a whiteboard')
   await p.locator('.sd-new-menu [role="menuitem"]', { hasText: 'Markdown' }).click()
   ok(!!(await until(async () => (await p.locator('.sd-new-sec h3').textContent().catch(() => '')) === 'New Markdown', 3000, 100)) && await p.locator('.sd-new-form input').count() === 1, 'one picked asks its name and folder at the top of Files')
   await p.locator('.sd-new-form button', { hasText: 'Cancel' }).click()
@@ -315,9 +315,23 @@ try {
   ok(!!(await until(async () => (await api('/places')).places.some((x) => /Projects[\\/]site$/.test(x.path)) && (await row('Brief.md').count()) === 1, 10000)), 'Add a folder: a place in Files, and its files in the list')
   await shot(p, `${tag}studio-docs-home`)
   ok(!(await bare(p, '.sd-home-view')).length, 'nothing on the home is a bare control', await bare(p, '.sd-home-view'))
-  // A whiteboard opens in Preview as a board, Studio's tabs in its header; Files is a click back.
+  // Whiteboards are one of Studio's kinds, with no row of their own in the sidebar. Picked, your
+  // boards are listed as Whiteboards' own page has them: what to draw, then each as a card.
+  ok(await p.locator('.rail-nav-btn', { hasText: 'Whiteboards' }).count() === 0 && await p.locator('.rail-nav-btn', { hasText: 'Studio' }).count() === 1, 'with Studio on, the sidebar has Studio and no Whiteboards')
   await group('Whiteboards').click()
-  await row('Roadmap').locator('.sd-file-name').click()
+  ok(!!(await until(async () => (await p.locator('.sd-list .wb-card', { hasText: 'Roadmap' }).count()) === 1 && p.locator('.sd-list .wb-ask textarea').isVisible(), 10000)) && await p.locator('.wb-view').count() === 0, 'Whiteboards, picked in Files: your boards as cards under what to draw, inside Studio\'s page')
+  // New makes one: named, with no folder to pick (Bridge AI keeps it), and opened in Preview.
+  await p.locator('.sd-new-open').click()
+  await p.locator('.sd-new-menu [role="menuitem"]', { hasText: 'Whiteboard' }).click()
+  ok(!!(await until(async () => (await p.locator('.sd-new-sec h3').textContent().catch(() => '')) === 'New Whiteboard', 3000, 100)) && await p.locator('.sd-new-form input').count() === 1 && await p.locator('.sd-new-form select').count() === 0, 'New › Whiteboard asks its name, and no folder')
+  await p.locator('.sd-new-form input').fill('Launch map')
+  await p.locator('.sd-new-form button', { hasText: 'Make it' }).click()
+  ok(!!(await until(async () => (await p.locator('.wb-view .sd-tabs [role="tab"][aria-selected="true"]', { hasText: 'Preview' }).count()) === 1 && (await p.locator('.wb-view .pane-head h2').innerText().catch(() => '')).includes('Launch map'), 20000)) && (await api('/boards')).boards.some((x) => x.id === 'Launch map'), 'it\'s made and opens in Preview, as a board')
+  ok(await p.locator('.rail-nav-btn.on').innerText().then((x) => x.trim() === 'Studio', () => false), 'with a board open, Studio is the one marked in the sidebar')
+  await p.locator('.wb-view .sd-tabs [role="tab"]', { hasText: 'Files' }).click()
+  ok(!!(await until(async () => (await p.locator('.sd-list .wb-card', { hasText: 'Launch map' }).count()) === 1, 10000)), 'and Files lists it with your other boards')
+  // A whiteboard opens in Preview as a board, Studio's tabs in its header; Files is a click back.
+  await p.locator('.sd-list .wb-card', { hasText: 'Roadmap' }).locator('.wb-thumb').click()
   ok(!!(await until(async () => (await p.locator('.wb-view .sd-tabs [role="tab"][aria-selected="true"]', { hasText: 'Preview' }).count()) === 1 && (await p.locator('.wb-view .pane-head h2').innerText().catch(() => '')).includes('Roadmap'), 20000)), 'a whiteboard opens in Preview, on its own page with Files and Preview')
   await p.locator('.wb-view .excalidraw').first().waitFor({ timeout: 20000 }).catch(() => {})
   await shot(p, `${tag}studio-docs-board`)
@@ -630,7 +644,7 @@ try {
   pages.push(none)
   await none.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
   await until(async () => { await none.p.locator('.rail-nav-btn', { hasText: 'Studio' }).click(); return none.p.locator('.sd-home').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 20000, 300)
-  ok(!!(await until(async () => (await none.p.locator('.sd-new-btn').count()) === 5 && /No documents, sheets, decks or PDFs yet/.test(await none.p.locator('.sd-files-none').innerText().catch(() => '')), 10000)), "no files at all: New's cards on the page as the way to start, and the list says so")
+  ok(!!(await until(async () => (await none.p.locator('.sd-new-btn').count()) === 6 && /No documents, sheets, decks or PDFs yet/.test(await none.p.locator('.sd-files-none').innerText().catch(() => '')), 10000)), "no files at all: New's cards on the page as the way to start, and the list says so")
   await shot(none.p, `${tag}studio-docs-empty`)
 
   // ---------- A phone ----------
@@ -648,7 +662,7 @@ try {
   await ph.p.locator('.sd-new-menu').waitFor({ timeout: 3000 })
   await solid(ph.p, '.sd-new-menu')
   f = await phoneFaults(ph.p, '.sd-new-menu')
-  ok(!Object.keys(f).length && await ph.p.locator('.sd-new-menu [role="menuitem"]').count() === 5, "phone: New's menu from the header, each a whole target", f)
+  ok(!Object.keys(f).length && await ph.p.locator('.sd-new-menu [role="menuitem"]').count() === 6, "phone: New's menu from the header, each a whole target", f)
   await shot(ph.p, `${tag}studio-docs-new-phone`)
   await ph.p.keyboard.press('Escape')
   // What to show is one list to pick from on a phone.
