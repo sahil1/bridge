@@ -71,6 +71,8 @@ ok(up.offered({ current: '3.20.0', latest: N, channel: 'nightly' }) && up.offere
 const NOW = Date.parse('2026-11-16T15:00:00Z')
 const pre = { how: 'app', available: true, latest: N, prerelease: true, publishedAt: new Date(NOW - 5 * 3600e3).toISOString() }
 ok(same(au.releaseWhy({ u: { ...pre, channel: 'nightly' }, now: NOW }), []) && same(au.releaseWhy({ u: { ...pre, channel: 'stable' }, now: NOW }), ['prerelease']), 'by itself while you\'re away: on Nightly a nightly goes in; on Stable it never would')
+const fresh = { ...pre, publishedAt: new Date(NOW - 10 * 60e3).toISOString() }
+ok(same(au.releaseWhy({ u: { ...fresh, channel: 'nightly' }, now: NOW }), []) && same(au.releaseWhy({ u: { ...fresh, channel: 'early' }, now: NOW }), ['young']), 'a nightly out ten minutes goes in without the wait a beta or release has')
 ok(counts.channelOf({ channel: 'nightly' }).channel === 'nightly' && counts.channelOf({ channel: 'weird' }).channel === 'other', 'the stats server keeps Nightly apart')
 
 // ---------- a server ----------
@@ -98,6 +100,7 @@ try {
   const k = await kitAs('app', 'app')
   let u = await k.api('/updates?refresh=1')
   ok(u.channel === 'stable' && u.latest === '99.0.0' && u.nightly?.on === false, 'Stable to start with: offered the release, not the nightly', u)
+  ok(u.built && 'at' in u.built && 'commit' in u.built, 'and it says when this build was made and from which commit (none from a clone)', u.built)
   const relayed = await refused(fetch(`${k.url}/api/updates/nightly`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-bridge-relay': '1' }, body: '{}' }).then(async (r) => { if (!r.ok) throw Object.assign(new Error((await r.json()).error), { status: r.status }); return r.json() }))
   ok(relayed.status >= 400 && /on the computer itself/.test(relayed.error || '') && (await k.api('/updates')).channel === 'stable', 'Nightly can\'t be switched on through the relay (a phone, another computer)', relayed)
   u = await k.api('/updates/nightly', {})
@@ -114,7 +117,7 @@ try {
   const sec = p.locator('.ab-nightly')
   const shown = await until(async () => /Nightly/.test(await sec.innerText().catch(() => '')) && /a build of main each morning/.test(await sec.innerText()), 10000)
   ok(!!shown && await sec.locator('button', { hasText: 'Leave Nightly' }).count() === 1 && await p.locator('.ab-early-ask').count() === 0, 'About & Updates: Nightly, on, with Leave Nightly, and no early-access link', await p.locator('.st-body').innerText().catch(() => ''))
-  ok(/99\.1\.0-nightly\.20261116\.7 is available/.test(await p.locator('.st-body').innerText()), 'and the nightly offered there')
+  ok(/99\.1\.0-nightly\.20261116\.7 is available \(Nightly build\)/.test(await p.locator('.st-body').innerText()) && /^Nightly/.test(await p.locator('.ab-build').innerText()), 'and the nightly offered there, said to be one, with this computer on Nightly', await p.locator('.st-body').innerText())
   await sec.locator('button', { hasText: 'Leave Nightly' }).click()
   ok(!!(await until(async () => (await sec.count()) === 0, 10000)), 'Leave Nightly: the section goes')
   u = await k.api('/updates')

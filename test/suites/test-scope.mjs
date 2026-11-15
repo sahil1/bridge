@@ -32,7 +32,7 @@ ok(/schedule:\s*\n\s*- cron: '0 6 \* \* 6'/.test(test), 'Friday night (6:00 UTC 
 ok(/test:\n\s*name: Tests \(\$\{\{ matrix\.name \}\}\)\n\s*needs: scope\n\s*if: needs\.scope\.outputs\.count != '0'/.test(test) && /node test\/run\.mjs \$ARGS --lanes 2/.test(test), 'the test machines only when a test applies, running just those')
 ok(/ios:\n\s*name: iPhone app\n\s*needs: scope\n\s*if: needs\.scope\.outputs\.mobile == 'true'/.test(test) && /android:\n\s*needs: scope\n\s*if: github\.ref_type != 'tag' && needs\.scope\.outputs\.mobile == 'true'/.test(test), 'the iPhone and Android builds with every test, or a change to mobile/')
 const release = yml('release.yml')
-ok(/test:\n\s*needs: guard\n\s*uses: \.\/\.github\/workflows\/test\.yml\n\s*with:\n\s*base: \$\{\{ inputs\.nightly && inputs\.since \|\| '' \}\}/.test(release), 'release.yml: every test for a release, only what changed since the last for a nightly')
+ok(/test:\n\s*needs: guard\n\s*uses: \.\/\.github\/workflows\/test\.yml\n\s*with:\n\s*base: \$\{\{ needs\.guard\.outputs\.base \}\}/.test(release), 'release.yml: every test for a release, only what changed since for a nightly or a beta (the guard says from where)')
 ok(/since=\$\(node scripts\/nightly\.js since\)/.test(yml('nightly.yml')) && /since: \$\{\{ needs\.plan\.outputs\.since \}\}/.test(yml('nightly.yml')), 'nightly.yml hands on the last nightly (or release) to test from')
 
 process.exit(done().fail ? 1 : 0)

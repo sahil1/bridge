@@ -40,7 +40,7 @@ export const HELD = ['studio', 'file', 'draft', 'board', 'dictating', 'playing']
 //   none         nothing newer (or a staged release not out to this computer yet)
 //   prerelease   a pre-release, unless this computer is on Early Access or Nightly (u.channel),
 //                which asked for them
-//   young        out less than RELEASE_HOURS (or GitHub didn't say when it came out)
+//   young        out less than RELEASE_HOURS (or GitHub didn't say when it came out); not on Nightly
 export function releaseWhy({ u = {}, on = true, checks = true, now = Date.now() } = {}) {
   if (!on) return ['off']
   if (!checks || u.disabled) return ['checks']
@@ -49,8 +49,9 @@ export function releaseWhy({ u = {}, on = true, checks = true, now = Date.now() 
   if (u.held) return ['held']
   if (!u.available || !u.latest) return ['none']
   if ((u.prerelease || /-/.test(u.latest)) && u.channel !== 'early' && u.channel !== 'nightly') return ['prerelease']
+  // A nightly goes in without the wait: it's for trying a change soon after it's made.
   const at = Date.parse(u.publishedAt || '')
-  if (!Number.isFinite(at) || now - at < RELEASE_HOURS * HOUR) return ['young']
+  if (u.channel !== 'nightly' && (!Number.isFinite(at) || now - at < RELEASE_HOURS * HOUR)) return ['young']
   return []
 }
 

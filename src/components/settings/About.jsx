@@ -6,7 +6,7 @@ import CrashReports from './CrashReports.jsx'
 import { api, usePoll } from '../../api.js'
 import { useSettings } from './General.jsx'
 import { startTour } from '../Tour.jsx'
-import { withApp, installUpdate } from '../UpdateChip.jsx'
+import { withApp, installUpdate, channelTag } from '../UpdateChip.jsx'
 import { appVersion } from '../../permissions.js'
 import { t, tn, tx, locale } from '../../i18n/index.js'
 import { openSettings } from '../SignIn.jsx'
@@ -84,10 +84,11 @@ function Updates() {
         <>
           <div className="st-row">
             <span className="ab-version">{t('Bridge AI {version}', { version: raw?.current || u.current })}</span>
+            {raw?.channel && <BuildLine u={raw} />}
             {app && raw?.current && app !== raw.current && <span className="muted small">{t('the desktop app is {version}', { version: app })}</span>}
             {u.disabled ? <span className="muted small">{t('Update checks are off')}</span>
               : u.error && !u.latest ? <span className="muted small">{t("Couldn't check for updates ({error})", { error: u.error })}</span>
-              : u.available ? <span className="st-chip warn"><Icon name="download" size={11} /> {t('{version} is available', { version: u.latest })}</span>
+              : u.available ? <span className="st-chip warn"><Icon name="download" size={11} /> {channelTag(u.latest) ? t('{version} is available ({kind})', { version: u.latest, kind: channelTag(u.latest) }) : t('{version} is available', { version: u.latest })}</span>
               : u.held ? <span className="st-chip good"><Icon name="check" size={11} /> {t('Up to date for this Mac')}</span>
               : <span className="st-chip good"><Icon name="check" size={11} /> {t('Up to date')}</span>}
           </div>
@@ -116,6 +117,21 @@ function Updates() {
     {earlyShown && raw?.channel !== 'nightly' && <EarlyAccess u={raw} code={link} onDone={() => { doneWithEarlyLink(); setJoining(false) }} onChange={() => load(false)} onJoined={doneWithEarlyLink} />}
     {(raw?.nightly?.on || raw?.nightly?.problem) && <Nightly u={raw} onChange={() => load(false)} />}
     </>
+  )
+}
+
+// Which channel this computer is on, and when this build was made and from which commit (the app
+// stamps both; a clone has neither): "Nightly · built Nov 16, 2:10 PM from 1a2b3c4".
+const CHANNEL = { stable: tx('Stable'), early: tx('Early Access'), nightly: tx('Nightly') }
+function BuildLine({ u }) {
+  const at = u.built?.at && new Date(u.built.at)
+  const when = at && !Number.isNaN(at.getTime()) ? at.toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null
+  const sha = u.built?.commit
+  return (
+    <span className="muted small ab-build" data-channel={u.channel}>
+      {t(CHANNEL[u.channel] || CHANNEL.stable)}
+      {when && <> · {sha ? <>{t('built {when} from', { when })} <a href={`${REPO}/commit/${sha}`} target="_blank" rel="noreferrer" className="mono">{sha.slice(0, 7)}</a></> : t('built {when}', { when })}</>}
+    </span>
   )
 }
 

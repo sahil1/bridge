@@ -91,6 +91,20 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
   before. A release goes to everyone at the weekend: Friday night's run tests every test on main,
   and the release runs every test again before it's built. A fix that can't wait is a patch release
   at any time.
+- **Shipping from your computer, a step at a time** (`npm run ship`, `scripts/ship.js`; git and the
+  GitHub CLI signed in). `npm run ship` says where things stand: this branch, main's version, the
+  newest nightly, beta and release, the runs going, and this computer's version and channel.
+  `npm run ship -- nightly` puts this branch onto main (a pull request, merged at once) and starts a
+  nightly from main now; it's tested for what changed since the last nightly, and computers on
+  Nightly are offered it within half an hour and install it while you're away, with no wait.
+  `npm run ship -- beta` makes main the next beta (main's own when it names one not out yet, else
+  the next; `--patch` for a patch's), with its notes from the commits since the last beta or release
+  unless its CHANGELOG section is written, and releases it to Early Access, tested since the last
+  nightly. `npm run ship -- stable` releases the version main names (a beta's version, or main's
+  own) to everyone, once its CHANGELOG section is written, after every test. `npm run ship --
+  promote 3.20.0 50` widens it (0 pauses). `npm run ship -- join` puts this computer on Nightly
+  (`--install` first installs the newest nightly where the version here is too old for them). Each
+  takes `--dry-run`, and `--wait` to follow its run to the end.
 
 - **A release for everyone.** Set the version in `package.json` and `desktop/package.json` (3.13.0),
   write its `## 3.13.0` section in CHANGELOG.md, merge to main, then `npm run release`. Everyone on

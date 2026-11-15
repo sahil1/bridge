@@ -39,6 +39,8 @@ jobs:
   guard:
     name: On main
     runs-on: ubuntu-latest
+    outputs:
+      base: ${{ steps.base.outputs.base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,13 +65,25 @@ jobs:
             { echo "::error::$GITHUB_SHA isn't on main: nightlies are built from main only"; exit 1; }
           [[ "$NIGHTLY" =~ ^[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}\.[0-9]+$ ]] ||
             { echo "::error::$NIGHTLY isn't a nightly version"; exit 1; }
+      # What the tests go from: a nightly, the last nightly (nightly.yml says which); a beta, the last
+      # nightly or release before it, as each nightly tested what changed since the one before; a
+      # release to everyone, nothing: every test.
+      - name: What the tests go from
+        id: base
+        env:
+          NIGHTLY: ${{ inputs.nightly }}
+          SINCE: ${{ inputs.since }}
+        run: |
+          if [ -n "$NIGHTLY" ]; then echo "base=$SINCE" >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_REF" == refs/tags/v*-* ]]; then echo "base=$(node scripts/nightly.js since "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
+          fi
 
-  # Every test for a release; a nightly, only those for what changed since the last one.
+  # Every test for a release to everyone; a nightly or a beta, only those for what changed since.
   test:
     needs: guard
     uses: ./.github/workflows/test.yml
     with:
-      base: ${{ inputs.nightly && inputs.since || '' }}
+      base: ${{ needs.guard.outputs.base }}
 
   build:
     name: Build (${{ matrix.platform }})

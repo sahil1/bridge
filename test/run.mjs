@@ -64,6 +64,7 @@ const SUITES = [
   { name: 'find-in-pane', build: 'dist', browser: true, covers: [/^src\/(find|termFind)\.js$/, /^src\/components\/(FindBar|Console|Terminal|LiveShell|ShellTab)\.jsx$/, /^src\/components\/studio\/keys\.js$/, /^src\/styles\.css$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'terminal-app', build: 'dist', browser: true, covers: [/^server\/(terminal|attach)\.js$/, /^scripts\/cli\.js$/, /^src\/components\/(Console|settings\/General)\.jsx$/, /^test\/stand-ins\/long-output\.cjs$/] },
   { name: 'terminal-scroll', build: 'dist', browser: true, covers: [/^src\/components\/(Terminal|LiveShell)\.jsx$/, /^src\/termTouch\.js$/, /^server\/runtime\/(builtin|screen|ptyhost)\.js$/, /^test\/stand-ins\/long-output\.cjs$/] },
+  { name: 'ship', build: null, covers: [/^scripts\/(ship|nightly|release)\.js$/, /^\.github\/workflows\/release\.yml$/] },
   { name: 'test-scope', build: null, covers: [/^\.github\/workflows\/(test|release|nightly)\.yml$/, /^scripts\/nightly\.js$/] },
   // Releases started and moved on from GitHub itself (the admin view's buttons only start these).
   { name: 'release-controls', build: null, covers: [/^\.github\/workflows\/(rollout|release-start|release|docker|fresh-install|test)\.yml$/, /^scripts\/(release|rollout)\.js$/, /^shared\/rollout\.js$/] },
@@ -143,7 +144,7 @@ const SUITES = [
   { name: 'account-ui', build: 'dist', browser: true, covers: [/^account\/worker\.js$/, /^server\/(account|machines|relay|updates|earlyaccess|index)\.js$/, /^src\/components\/settings\/(Account|Relay|About)\.jsx$/, /^src\/components\/settings\/account\.css$/, /^src\/components\/(Settings|Usage)\.jsx$/, /^test\/stand-ins\/(accounts|relay)\.mjs$/] },
   { name: 'privacy-hosts', build: null, covers: [/^server\//, /^desktop\//, /^shared\//, /^PRIVACY\.md$/] },
 ]
-// A change to these runs everything.
+// A change to these runs everything; to the package files, unless it's only the version (a release's).
 const EVERYTHING = [/^test\/(lib|stand-ins)\//, /^test\/run\.mjs$/, /^package(-lock)?\.json$/]
 
 const args = process.argv.slice(2)
@@ -163,7 +164,10 @@ else if (named.length) {
 } else {
   const base = opt('--base')
   const changed = [...new Set([...git('diff', '--name-only', 'HEAD'), ...git('ls-files', '--others', '--exclude-standard'), ...(base ? git('diff', '--name-only', `${base}...HEAD`) : [])])].map((f) => f.replace(/\\/g, '/'))
-  pick = changed.some((f) => EVERYTHING.some((re) => re.test(f))) ? SUITES : SUITES.filter((s) => changed.some((f) => s.covers.some((re) => re.test(f))) || changed.includes(`test/suites/${s.name}.mjs`))
+  // Only "version" lines changed in it, since the base (or the last commit) and in the working tree.
+  const from = base ? git('merge-base', base, 'HEAD')[0] : 'HEAD'
+  const versionOnly = (f) => /^package(-lock)?\.json$/.test(f) && !!from && git('diff', '-U0', from, '--', f).filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---) /.test(l)).every((l) => /^[+-]\s*"version": "[^"]*",?$/.test(l))
+  pick = changed.some((f) => EVERYTHING.some((re) => re.test(f)) && !versionOnly(f)) ? SUITES : SUITES.filter((s) => changed.some((f) => s.covers.some((re) => re.test(f))) || changed.includes(`test/suites/${s.name}.mjs`))
   if (!flag('--list')) {
     console.log(changed.length ? `Changed: ${changed.length} file${changed.length === 1 ? '' : 's'}` : 'Nothing changed since the last commit.')
     if (!pick.length) { console.log('No test covers these changes. node test/run.mjs --all runs every test.'); process.exit(0) }

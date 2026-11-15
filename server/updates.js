@@ -28,7 +28,13 @@ const REPO = 'sahil1/bridge'
 const LATEST = process.env.BRIDGE_RELEASES_API || `https://api.github.com/repos/${REPO}/releases/latest`
 const LIST = `${LATEST.replace(/\/latest$/, '')}?per_page=30`
 const EVERY = 6 * 60 * 60 * 1000
-const current = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
+// Nightly asks every half hour: a build of main can come after any change, not once a night only.
+const NIGHTLY_EVERY = 30 * 60 * 1000
+const PKG = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
+const current = PKG.version
+// This build: when it was made and from which commit (desktop/stage.js stamps both in the app; a
+// clone has neither), for About & Updates.
+const built = { at: PKG.bridgeBuild || null, commit: /^[0-9a-f]{40}$/.test(PKG.bridgeCommit || '') ? PKG.bridgeCommit : null }
 
 // The oldest macOS a release's Mac app opens on, in its notes as a line GitHub doesn't show
 // (scripts/release.js writes it there from desktop/package.json): <!-- macOS 14.0 or later -->.
@@ -68,7 +74,7 @@ async function check(force = false) {
   const code = earlyCode()
   const night = onNightly()
   const key = night ? 'nightly' : code?.id || null
-  if (!force && last.code === key && Date.now() - last.at < EVERY) return last
+  if (!force && last.code === key && Date.now() - last.at < (night ? NIGHTLY_EVERY : EVERY)) return last
   try {
     if (night) {
       const all = await ask(LIST)
@@ -167,7 +173,7 @@ export function below(s, m) {
 // computers and not to this one yet is offered here too.
 export async function status({ force = false, byHand = false, disabled = false } = {}) {
   const { bucket } = settings()
-  if (disabled) return { current, disabled: true, channel: channelNow().channel, early: earlyView(last), nightly: nightlyView(), bucket }
+  if (disabled) return { current, built, disabled: true, channel: channelNow().channel, early: earlyView(last), nightly: nightlyView(), bucket }
   const s = await check(force)
   const m = await machine()
   const held = heldBack(s, m)
@@ -176,6 +182,7 @@ export async function status({ force = false, byHand = false, disabled = false }
   if (byHand && s.latest && newer(s.latest, current) && s.rollout > 0) asked = s.latest
   return {
     current,
+    built,
     latest: s.latest,
     available: !held && offered({ current, latest: s.latest, channel, bucket, rollout: s.rollout, asked }),
     held,

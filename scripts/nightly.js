@@ -7,8 +7,8 @@
 // package.json only, so main gets no commit for it.
 //   node scripts/nightly.js version [--date 20261116] [--run 57]   the version for this commit
 //   node scripts/nightly.js changed      exits 1 when this commit already has a nightly
-//   node scripts/nightly.js since        the last nightly before this commit, else the last release:
-//                                        what its notes and its tests go from
+//   node scripts/nightly.js since [tag]  the last nightly before this commit, else the last release
+//                                        (not tag, the one being made): what its notes and tests go from
 //   node scripts/nightly.js stamp <version>          set it in package.json and desktop/package.json
 //   node scripts/nightly.js notes <version> <file>   its notes: what changed since the last nightly
 //   node scripts/nightly.js older <keep>             of the tags on stdin, the nightlies past the
@@ -62,7 +62,7 @@ function sinceHere(self = null) {
   const head = git('rev-parse', 'HEAD')
   const isAncestor = (t) => { try { git('merge-base', '--is-ancestor', t, head); return true } catch { return false } }
   return nightlies(tags).find((t) => t !== self && isAncestor(t)) ||
-    tags.filter((t) => RELEASE_VERSION.test(t.replace(/^v/, '')) && isAncestor(t)).sort((x, y) => compare(y, x))[0] || null
+    tags.filter((t) => t !== self && RELEASE_VERSION.test(t.replace(/^v/, '')) && isAncestor(t)).sort((x, y) => compare(y, x))[0] || null
 }
 const readJson = (f) => JSON.parse(fs.readFileSync(path.join(ROOT, f), 'utf8'))
 
@@ -90,7 +90,7 @@ function main(args) {
     }
     return console.log(`package.json and desktop/package.json say ${a1}`)
   }
-  if (cmd === 'since') return console.log(sinceHere() || '')
+  if (cmd === 'since') return console.log(sinceHere(a1 || null) || '')
   if (cmd === 'notes') {
     if (!NIGHTLY_VERSION.test(a1 || '') || !a2) fail('notes <version> <file>')
     const head = git('rev-parse', 'HEAD')
