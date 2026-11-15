@@ -84,6 +84,12 @@ own on its own Cloudflare account:
 
 For the project's owner, or a fork's: what `npm run release` puts out, and who is offered it.
 
+- **The cadence.** Changes go to main through the week, each tested for what it changes, and your
+  own computers get each night's main (Nightly, below), tested for what changed since the night
+  before. A release goes to everyone at the weekend: Friday night's run tests every test on main,
+  and the release runs every test again before it's built. A fix that can't wait is a patch release
+  at any time.
+
 - **A release for everyone.** Set the version in `package.json` and `desktop/package.json` (3.13.0),
   write its `## 3.13.0` section in CHANGELOG.md, merge to main, then `npm run release`. Everyone on
   Stable is offered it at once. `npm run release -- --dry-run` says who it goes to.
@@ -129,8 +135,8 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
   whose code ends, stays on the beta they have until a regular release is newer.
 - **Nightly builds, for your own computers.** `.github/workflows/nightly.yml` builds main each night
   it has changed (about 3 AM in California; Actions › Nightly › Run workflow builds one now) through
-  the release workflow: the tests on all three systems, then the app signed and notarized as a
-  release is, at a version like `3.20.1-nightly.20261116.57` (`scripts/nightly.js`: what main is
+  the release workflow: the tests for what changed since the last nightly on all three systems,
+  then the app signed and notarized as a release is, at a version like `3.20.1-nightly.20261116.57` (`scripts/nightly.js`: what main is
   heading for, the day and the run), set in that build only, so main gets no commit. It's a GitHub
   pre-release, never the latest, with the changes since the last nightly as its notes; no Android
   app, no Docker image, and only the newest 7 are kept. Nothing in the app offers it: on each of
@@ -144,7 +150,7 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
 
 ## Before you open a pull request
 
-- `npm run build` passes, and `npm test` (the tests for what you changed; `test/README.md` says what each covers). CI runs every test on macOS, Windows and Linux.
+- `npm run build` passes, and `npm test` (the tests for what you changed; `test/README.md` says what each covers). CI runs the tests for what the pull request changes on macOS, Windows and Linux; every test runs before a release.
 - No personal data: names, email addresses, company names, home folder paths or tokens. Settings belong in `~/.bridge-ai`, not in the repo.
 - `npm run check:private` passes. It looks for keys, tokens, home folder paths, email addresses, session transcripts and Bridge AI data files, plus your own name, places and hostnames from your `~/.bridge-ai` settings and the names in your Memory. `npm install` turns on git hooks that run it before every commit (the staged files) and every push (each commit being pushed, so something added and then deleted is still caught). Releases, app builds and CI run it too. `--no-verify` skips a hook; the push check still catches what that commit let through.
 - Commit messages say what changed, in your words. The hooks refuse a message with a link to an AI coding session or a line crediting an AI (`Claude-Session:`, `Co-Authored-By: Claude`, "Generated with Claude Code"): public history can't be taken back.

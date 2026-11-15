@@ -1,23 +1,91 @@
-# Bridge AI's tests (test/run.mjs) on macOS, Windows and Linux: on every push to main and every pull
-# request, and before a release is built (release.yml runs this first). The app's tests run in
-# Chromium everywhere, and in WebKit (the engine of Safari and the iPhone app) on macOS too. Beside
-# them, the iPhone app is built for the Simulator on macOS and the Android app on Linux. When
-# something fails, the logs and screenshots are kept with the run for a week.
+# Bridge AI's tests (test/run.mjs) on macOS, Windows and Linux. How many depends on why it runs:
+#   a pull request, or a push to main: only the tests for the files it changes (each suite's
+#     `covers` in test/run.mjs), and none when no test covers them (a change to the docs);
+#   a nightly build (nightly.yml, through release.yml): the tests for everything changed since the
+#     last nightly;
+#   a release's tag (release.yml), Friday night's run before the weekend's release, and a run by
+#     hand: every test.
+# The app's tests run in Chromium everywhere, and in WebKit (the engine of Safari and the iPhone app)
+# on macOS too. Beside them, the iPhone app is built for the Simulator on macOS and the Android app on
+# Linux, when every test runs or the change is to mobile/. When something fails, the logs and
+# screenshots are kept with the run for a week.
 name: Tests
 
 on:
   push:
     branches: [main]
   pull_request:
+  # Friday night in California: every test on main, so the weekend's release starts from a known state.
+  schedule:
+    - cron: '0 6 * * 6'
   workflow_call:
+    inputs:
+      base:
+        description: Only the tests for what changed since this commit or tag (empty runs every test)
+        type: string
+        default: ''
   workflow_dispatch:
+    inputs:
+      base:
+        description: Only the tests for what changed since this commit, branch or tag (empty runs every test)
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 jobs:
+  # Which tests this run needs (test/run.mjs --list), before any machine is set up for them.
+  scope:
+    name: Which tests
+    runs-on: ubuntu-latest
+    outputs:
+      args: ${{ steps.s.outputs.args }}
+      count: ${{ steps.s.outputs.count }}
+      mobile: ${{ steps.s.outputs.mobile }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: s
+        env:
+          ASKED: ${{ inputs.base }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -n "$ASKED" ]; then base="$ASKED"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then base=
+          elif [ "$EVENT" = pull_request ]; then base="$PR_BASE"
+          elif [ "$EVENT" = push ]; then base="$BEFORE"
+          else base=; fi
+          # A base that isn't a commit here (a branch's first push, a mistyped tag): every test.
+          if [ -n "$base" ] && { ! [[ "$base" =~ ^[A-Za-z0-9._/-]+$ ]] || ! git rev-parse -q --verify "$base^{commit}" >/dev/null; }; then
+            echo "::notice::$base isn't a commit here, so every test runs"; base=
+          fi
+          if [ -n "$base" ]; then
+            args="--base $base"
+            git diff --name-only "$base...HEAD" | grep -q '^mobile/' && mobile=true || mobile=false
+          else
+            args=--all; mobile=true
+          fi
+          node test/run.mjs --list $args > scope.json
+          count=$(node -p "require('./scope.json').names.length")
+          echo "args=$args" >> "$GITHUB_OUTPUT"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "mobile=$mobile" >> "$GITHUB_OUTPUT"
+          if [ -n "$base" ]; then
+            echo "### $count of the tests, for what changed since $base" >> "$GITHUB_STEP_SUMMARY"
+            node -p "require('./scope.json').names.join(', ') || 'None: no test covers these changes.'" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Every test ($count)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   test:
     name: Tests (${{ matrix.name }})
+    needs: scope
+    if: needs.scope.outputs.count != '0'
     strategy:
       fail-fast: false
       matrix:
@@ -42,6 +110,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0 # what changed since the base, for a run of only the tests for that
           persist-credentials: false
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -98,7 +167,9 @@ jobs:
           echo "BRIDGE_TEST_HERDR=$RUNNER_TEMP/herdr/herdr" >> "$GITHUB_ENV"
 
       - name: Tests
-        run: node test/run.mjs --all --lanes 2 --browser ${{ matrix.browser }}
+        env:
+          ARGS: ${{ needs.scope.outputs.args }}
+        run: node test/run.mjs $ARGS --lanes 2 --browser ${{ matrix.browser }}
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
@@ -111,6 +182,8 @@ jobs:
   # The iPhone app, beside the tests rather than after them.
   ios:
     name: iPhone app
+    needs: scope
+    if: needs.scope.outputs.mobile == 'true'
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -161,7 +234,8 @@ jobs:
   # release's is, so a change that breaks either shows up here. Not when release.yml runs these
   # tests for a tag: it builds the real one itself, and nothing here may hold up a desktop release.
   android:
-    if: github.ref_type != 'tag'
+    needs: scope
+    if: github.ref_type != 'tag' && needs.scope.outputs.mobile == 'true'
     uses: ./.github/workflows/android.yml
     with:
       throwaway-key: true

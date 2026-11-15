@@ -21,6 +21,10 @@ on:
         description: A nightly version (3.20.1-nightly.20261116.57), from nightly.yml
         type: string
         default: ''
+      since:
+        description: A nightly's last nightly (or release), to run only the tests for what changed since
+        type: string
+        default: ''
 
 # Read-only, except publishing (the release job): the builds run npm packages' install scripts.
 permissions:
@@ -57,9 +61,12 @@ jobs:
           [[ "$NIGHTLY" =~ ^[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}\.[0-9]+$ ]] ||
             { echo "::error::$NIGHTLY isn't a nightly version"; exit 1; }
 
+  # Every test for a release; a nightly, only those for what changed since the last one.
   test:
     needs: guard
     uses: ./.github/workflows/test.yml
+    with:
+      base: ${{ inputs.nightly && inputs.since || '' }}
 
   build:
     name: Build (${{ matrix.platform }})

@@ -7,6 +7,8 @@
 // package.json only, so main gets no commit for it.
 //   node scripts/nightly.js version [--date 20261116] [--run 57]   the version for this commit
 //   node scripts/nightly.js changed      exits 1 when this commit already has a nightly
+//   node scripts/nightly.js since        the last nightly before this commit, else the last release:
+//                                        what its notes and its tests go from
 //   node scripts/nightly.js stamp <version>          set it in package.json and desktop/package.json
 //   node scripts/nightly.js notes <version> <file>   its notes: what changed since the last nightly
 //   node scripts/nightly.js older <keep>             of the tags on stdin, the nightlies past the
@@ -53,6 +55,15 @@ export function notesFor({ version, sha, since, changes, mac }) {
 }
 
 const tagsHere = () => git('tag', '-l', 'v*').split('\n').filter(Boolean)
+// The last nightly on main before this commit (not `self`, the one being made), else the last
+// release, else null: what a nightly's notes list the changes since, and its tests test.
+function sinceHere(self = null) {
+  const tags = tagsHere()
+  const head = git('rev-parse', 'HEAD')
+  const isAncestor = (t) => { try { git('merge-base', '--is-ancestor', t, head); return true } catch { return false } }
+  return nightlies(tags).find((t) => t !== self && isAncestor(t)) ||
+    tags.filter((t) => RELEASE_VERSION.test(t.replace(/^v/, '')) && isAncestor(t)).sort((x, y) => compare(y, x))[0] || null
+}
 const readJson = (f) => JSON.parse(fs.readFileSync(path.join(ROOT, f), 'utf8'))
 
 function main(args) {
@@ -79,14 +90,11 @@ function main(args) {
     }
     return console.log(`package.json and desktop/package.json say ${a1}`)
   }
+  if (cmd === 'since') return console.log(sinceHere() || '')
   if (cmd === 'notes') {
     if (!NIGHTLY_VERSION.test(a1 || '') || !a2) fail('notes <version> <file>')
-    const tags = tagsHere()
     const head = git('rev-parse', 'HEAD')
-    const isAncestor = (t) => { try { git('merge-base', '--is-ancestor', t, head); return true } catch { return false } }
-    // The last nightly before this one on main, else the last release, else the last 30 commits.
-    const prev = nightlies(tags).find((t) => t !== `v${a1}` && isAncestor(t)) ||
-      tags.filter((t) => RELEASE_VERSION.test(t.replace(/^v/, '')) && isAncestor(t)).sort((x, y) => compare(y, x))[0] || null
+    const prev = sinceHere(`v${a1}`)
     const changes = git('log', '--no-merges', '--format=%s', ...(prev ? [`${prev}..HEAD`] : ['-30'])).split('\n').filter(Boolean)
     const mac = readJson(path.join('desktop', 'package.json')).build?.mac?.minimumSystemVersion
     if (!/^\d+(\.\d+)*$/.test(mac || '')) fail('desktop/package.json has no build.mac.minimumSystemVersion')
@@ -100,7 +108,7 @@ function main(args) {
     for (const t of older(tags, keep)) console.log(t)
     return
   }
-  fail('version | changed | stamp <version> | notes <version> <file> | older <keep>')
+  fail('version | changed | since | stamp <version> | notes <version> <file> | older <keep>')
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main(process.argv.slice(2))
