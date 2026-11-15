@@ -217,8 +217,11 @@ const LANG = (code) => { try { return new Intl.DisplayNames(['en'], { type: 'lan
 
 let helpers = { reply: null, pickModel: null, describe: (id) => id, via: async () => null, contextOf: async () => null, scanText: null }
 export const setHelpers = (h) => { helpers = { ...helpers, ...h } }
-export async function modelInfo(id) {
-  const use = id || await helpers.pickModel?.().catch(() => null)
+// The model that reads it: the one asked for, else AI Assist's for a document of that text (with
+// Auto, a short one on this computer). Without text, as for a long one; set to stay on this computer
+// and it can't, null from setup, and from explain the error saying why.
+export async function modelInfo(id, text = null, { strict = false } = {}) {
+  const use = id || await (strict ? helpers.pickModel?.(text) : helpers.pickModel?.(text).catch(() => null))
   return use ? { id: use, label: helpers.describe(use), via: await helpers.via(use).catch(() => null) } : null
 }
 
@@ -231,9 +234,9 @@ async function budget(model) {
 export async function explain(root, rel, { pages: given, total, model, lang } = {}) {
   const { real } = await safePath(root, rel)
   if (path.extname(real).toLowerCase() !== '.pdf') throw new Error('Only a PDF can be read for signing')
-  const info = await modelInfo(model)
-  if (!info) throw Object.assign(new Error('No model to read it with. Sign in to an agent, or add an API key or a local model in Settings › Model Providers.'), { code: 'no_model' })
   let pages = (Array.isArray(given) ? given : []).slice(0, 2000).map((p, i) => ({ n: Number(p?.n) || i + 1, text: String(p?.text || '').slice(0, 60_000) }))
+  const info = await modelInfo(model, pages.map((p) => p.text).join('\n').slice(0, 400_000), { strict: true })
+  if (!info) throw Object.assign(new Error('No model to read it with. Sign in to an agent, or add an API key or a local model in Settings › Model Providers.'), { code: 'no_model' })
   let scanned = false
   // Pictures of pages with no text: read them on a Mac, else say so.
   if (pages.reduce((n, p) => n + p.text.trim().length, 0) < 40) {

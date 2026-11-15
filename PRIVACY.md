@@ -23,8 +23,9 @@ with only the coordinates you picked), market prices and news headlines (Yahoo F
 Reserve and public news feeds), speech models when you download one, the first time you use the
 mic or a meeting or from Settings › Voice & Meetings (one download each from Hugging Face; what you say is
 turned into text on your computer and never sent anywhere, unless you pick a speech service for
-meetings), the local model (Gemma 4 E2B, 2.8 GB) only when you click Download for it in Settings ›
-Model Providers (one download from Hugging Face; what you give it is read on your computer by
+meetings), a local model (Gemma 4 E2B, 2.8 GB; E4B, 4.6 GB; or 26B-A4B, 14.6 GB, as fits your
+computer) only when you click Download for it in Settings › Model Providers or where Tidy what I
+say needs one (one download from Hugging Face; what you give it is read on your computer by
 llama.cpp, which runs there and answers only Bridge AI, and is never sent anywhere), a check on
 GitHub for a newer version, which you can turn off in Settings › About &
 Updates (and the new version from GitHub, when you update, or by itself while you're away in the
