@@ -3,11 +3,12 @@ import Icon, { StatusDot } from './Icon.jsx'
 import { api, hostApi, machineId, machineUrl, apart, relayComputers, phoneApp, viaRelay } from '../api.js'
 import { passOn } from '../passed.js'
 import { t, tx, locale, tn } from '../i18n/index.js'
+import { useDevicesName } from './settings/search.js'
 
 // Your other devices (server/machines.js): Macs, Windows and Linux computers running Bridge AI,
 // linked to this one. The top bar's machine menu switches the window to one (its own Bridge AI,
 // at /m/<id>/, through this device), the sidebar lists each one's agents, and Settings › Devices
-// links and unlinks them. Lists come from the device this page is served from, which knows where
+// (Account & Devices once there are Bold Bridge accounts) › Computers links and unlinks them. Lists come from the device this page is served from, which knows where
 // each one is, whichever machine the page shows.
 
 const OS_LABEL = { mac: 'Mac', windows: 'Windows', linux: 'Linux' }
@@ -440,6 +441,7 @@ export const onFor = (s) => (s >= 86400 ? (Math.floor(s / 86400) === 1 ? t('{n} 
 // showing another device at its port only reads the links of the computer it runs on (that page
 // can't change them: server/machinepages.js), so it doesn't offer to.
 function DeviceDetails({ m, here = false, readOnly = false, onChanged }) {
+  const devices = useDevicesName()
   const [name, setName] = useState(m.name)
   const [st, setSt] = useState(null) // 'saving' | 'saved' | { error }
   useEffect(() => { if (st !== 'saving') setName(m.name) }, [m.name]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -485,15 +487,16 @@ function DeviceDetails({ m, here = false, readOnly = false, onChanged }) {
         {st?.error && <p className="error-text small">{st.error}</p>}
       </>}
       {rows.length > 0 && <dl className="mch-facts">{rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>}
-      {m.safety && <p className="muted small">{here ? t('Your other devices show this security code for this one. If one shows a different code, it isn\'t linked to this device.') : t('On {name}, Settings › Devices › Computers › Details shows the same code. If it doesn\'t, link again.', { name: m.name })}</p>}
+      {m.safety && <p className="muted small">{here ? t('Your other devices show this security code for this one. If one shows a different code, it isn\'t linked to this device.') : t('On {name}, Settings › {devices} › Computers › Details shows the same code. If it doesn\'t, link again.', { name: m.name, devices })}</p>}
     </div>
   )
 }
 
-// ---------- Settings › Devices: your devices ----------
-// embedded: its sections go straight into the Devices tab. focus: scrolled to on opening
+// ---------- Settings › Devices › Computers: your devices ----------
+// embedded: its sections go straight into the Computers tab. focus: scrolled to on opening
 // (from the devices menu's Link a device…).
 export function MachinesSettings({ embedded = false, focus = false }) {
+  const devices = useDevicesName()
   const { data, refresh } = useMachines(4000)
   const [link, setLink] = useState('')
   const [busy, setBusy] = useState(null)
@@ -636,7 +639,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
 
       {!readOnly && <section className="st-sec" data-setting="link-device">
         <h4>{t('Link a device')}</h4>
-        <p className="muted small" title={t('On the other device, open Settings › Devices and choose Pair a device. Paste its link here, or type its address and code. Its address alone asks instead, and waits for you to allow it there.')}>{t('On the other device, choose Pair a device in Settings › Devices, then paste its link here.')}</p>
+        <p className="muted small" title={t('On the other device, open Settings › {devices} and choose Pair a device. Paste its link here, or type its address and code. Its address alone asks instead, and waits for you to allow it there.', { devices })}>{t('On the other device, choose Pair a device in Settings › {devices}, then paste its link here.', { devices })}</p>
         <form className="mch-add" onSubmit={add}>
           <input className="st-input" value={link} onChange={(e) => setLink(e.target.value)} placeholder={t('Link, or address and code')} aria-label={t("The other device's link")} />
           <button type="submit" className="btn primary" disabled={!link.trim() || !!busy}>{busy === 'add' ? t('Linking…') : t('Link')}</button>

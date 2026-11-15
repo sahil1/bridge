@@ -8,7 +8,8 @@ import { useSettings } from './General.jsx'
 import { startTour } from '../Tour.jsx'
 import { withApp, installUpdate } from '../UpdateChip.jsx'
 import { appVersion } from '../../permissions.js'
-import { t, tx, locale } from '../../i18n/index.js'
+import { t, tn, tx, locale } from '../../i18n/index.js'
+import { openSettings } from '../SignIn.jsx'
 import { TRIALS } from '../../trials.js'
 import { AWAY_MINUTES, RELEASE_HOURS, waitingLong } from '../../../shared/autoupdate.js'
 import { isPre } from '../../../shared/version.js'
@@ -142,7 +143,7 @@ function Nightly({ u, onChange }) {
 }
 
 // Early Access: pre-releases for testers, joined with a code the project made for them, or by itself
-// with a tester's Bold Bridge account (Settings › Account). Joined, it says who it's for and when it
+// with a tester's Bold Bridge account (Settings › Account & Devices › Account). Joined, it says who it's for and when it
 // ends (or that it's the account's, renewed by itself), with Leave Early Access; a code that stopped working says why
 // (ended, taken back), and this computer is on regular releases again, never put back to an older
 // version. A code that's wrong when pasted says why too (server/earlyaccess.js).
@@ -202,7 +203,7 @@ function EarlyAccess({ u, code: fromLink, onDone, onChange, onJoined }) {
           <p className="muted small ab-early-code">{e.fromAccount ? t('Your account renews it by itself while it has Early Access.') : e.until ? t('Code made on {made}, good until {until}.', { made: day(e.made), until: day(e.until) }) : t('Code made on {made}, with no end date.', { made: day(e.made) })}</p>
           {state?.error && <p className="st-note bad ab-early-error"><Icon name="alert" size={13} /> {state.error}</p>}
           <div className="st-row"><button type="button" className="btn small" disabled={state === 'leaving'} onClick={leave}><Icon name="x" size={13} /> {t('Leave Early Access')}</button></div>
-          <p className="muted small">{t('Leaving keeps the version you have: Bridge AI stays on it until a regular release is newer.')}{e.fromAccount && ` ${t('To join again, open Settings › Account.')}`}</p>
+          <p className="muted small">{t('Leaving keeps the version you have: Bridge AI stays on it until a regular release is newer.')}{e.fromAccount && <> {tn('To join again, open {place}.', { place: <button type="button" className="link-btn" onClick={() => openSettings('account')}>{t('Settings › Account & Devices')}</button> })}</>}</p>
         </>
       ) : e.problem ? (
         <>

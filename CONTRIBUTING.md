@@ -71,11 +71,13 @@ own on its own Cloudflare account:
   `"stats": { "url": "https://counts.<your domain>" }` in `config.example.json` (your build's
   default), in `~/.bridge-ai/config.json` (one computer), or as `BRIDGE_STATS_URL`. `"url": ""` sends
   nothing. People still see what would be sent and turn it off in one click.
-- **The relay**: anyone can put one on their own Cloudflare account from Settings › Devices. One
+- **The relay**: anyone can put one on their own Cloudflare account from Settings › Devices (Account &
+  Devices once there are accounts). One
   for many computers is [relay/HOSTED.md](relay/HOSTED.md), switched on by `HOSTED_URL` in
   `server/hosted.js`, for accounts of your own.
 - **Accounts** (for Early Access and the hosted relay): [account/](account/README.md), switched on by
-  `ACCOUNTS_URL` and `ACCOUNTS_PUBLIC_KEY` in `server/account.js`. Empty, nothing about accounts shows.
+  `ACCOUNTS_URL` and `ACCOUNTS_PUBLIC_KEY` in `server/account.js`. Empty, nothing about accounts shows
+  (Settings › Devices has no Account tab, and keeps that name).
 - **The privacy policy**: `npm test -- privacy-hosts` fails when the code contacts a host PRIVACY.md
   doesn't cover, so a new one goes in PRIVACY.md (by name, or under a category it states) in the
   same change.
@@ -124,7 +126,7 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
   (and Linux's package); a copy run from a clone or in Docker isn't offered it. `--check <code>`
   says what a code says.
 - **Testers with a Bold Bridge account.** Once accounts are live (account/README.md), a tester asks
-  for Early Access in Settings › Account (or the website's form), you say yes in the admin view, and
+  for Early Access in Settings › Account & Devices (or the website's form), you say yes in the admin view, and
   their computers take a code from the account by themselves, renewed while they have it, for the
   account's id (usage stats never carry an email). Saying no, or suspending the account, ends it
   within 6 hours. The paste-a-code way above stays for anyone without an account.

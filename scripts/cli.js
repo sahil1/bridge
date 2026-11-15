@@ -12,7 +12,7 @@
 //   bridge-ai status                is it running, which agents, the relay and paired phones
 //   bridge-ai relay setup           put your relay on Cloudflare with an API token
 //                                   (--hosted: Bridge AI's relay instead, once it exists: server/hosted.js;
-//                                   it needs your Bold Bridge account, signed in in Settings › Account)
+//                                   it needs your Bold Bridge account, signed in in Settings › Account & Devices)
 //   bridge-ai relay [update|forget] update the relay, or stop using it
 //   bridge-ai pair                  pair a phone: QR code, link and code
 //   bridge-ai pair --review         a code that lasts days and pairs several phones, for a computer
@@ -233,7 +233,7 @@ async function switching(before, to, args) {
 }
 
 // Bridge AI's relay: the server gets this computer an address on it, with your Bold Bridge account
-// (signed in in Settings › Account, and allowed the relay; if not, it says what's missing).
+// (signed in in Settings › Account & Devices, and allowed the relay; if not, it says what's missing).
 async function hostedSetup(args) {
   const before = await api('/relay')
   if (before.busy) throw new Error(`Bridge AI is busy with the relay: ${before.busy}`)
@@ -244,12 +244,12 @@ async function hostedSetup(args) {
   try {
     await api('/relay/deploy', { method: 'POST', body: { method: 'hosted' } })
   } catch (e) {
-    // Full for now: the other ways, as Settings › Devices offers them.
+    // Full for now: the other ways, as Settings › Account & Devices offers them.
     const others = `\n\nOther ways to reach this computer from your phone:\n  bridge-ai relay setup     a relay on your own Cloudflare account (free)\n  bridge-ai start phone     through Tailscale, if it's on this computer and your phone`
     if (e.code === 'hostedFull' || e.code === 'accountStopped' || e.code === 'accountSuspended') e.message += others
     // No account signed in here, or it hasn't the relay yet: where to sign in or ask for it.
-    else if (e.code === 'accountSignIn') e.message = `Sign in first. ${e.message}\nOpen Bridge AI (bridge-ai open), then Settings › Account; once your account has the relay, run this again.${others}`
-    else if (/^account/.test(e.code || '')) e.message += `\nOpen Bridge AI (bridge-ai open), then Settings › Account.${others}`
+    else if (e.code === 'accountSignIn') e.message = `Sign in first. ${e.message}\nOpen Bridge AI (bridge-ai open), then Settings › Account & Devices; once your account has the relay, run this again.${others}`
+    else if (/^account/.test(e.code || '')) e.message += `\nOpen Bridge AI (bridge-ai open), then Settings › Account & Devices.${others}`
     throw e
   }
   let s = await api('/relay')
@@ -379,7 +379,7 @@ async function pairCmd(args) {
       for (const d of added) console.log(`Paired: ${d.name}.`)
       console.log(`\nOn the phone, add it to the Home Screen (iPhone: Share › Add to Home Screen; Android: ⋮ › Install app),
 open it from there and type the code again if it asks. Then turn on notifications in its
-Settings › Devices.`)
+Settings › ${accountsBase() ? 'Account & Devices' : 'Devices'} › Notifications.`)
       return
     }
     if (!s.pairing) throw new Error('The code expired or was used up. Run bridge-ai pair again.')
@@ -466,7 +466,7 @@ const run = {
   bridge-ai relay setup         put your phone relay on Cloudflare with an API token
                                 (asks for it, or reads CLOUDFLARE_API_TOKEN or stdin)${hostedBase() && accountsBase() ? `
   bridge-ai relay setup --hosted  use Bridge AI's relay instead, with your Bold Bridge account
-                                (sign in first: Settings › Account)` : ''}
+                                (sign in first: Settings › Account & Devices)` : ''}
   bridge-ai relay [update|forget]  update the relay, or stop using it
   bridge-ai pair [--stop]       pair a phone: shows a QR code, the link and the code
   bridge-ai pair --review [--days 14] [--uses 25] [--png file] [--new] [--stop]

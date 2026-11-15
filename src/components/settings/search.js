@@ -1,4 +1,5 @@
 import { t, tx } from '../../i18n/index.js'
+import { cloudOnly, usePoll } from '../../api.js'
 
 // Every setting ⌘K finds (Palette.jsx), first in its section or under Advanced: its section, its
 // name and the words it's looked for by. Its id is its data-setting there, and a link to it opens
@@ -6,7 +7,8 @@ import { t, tx } from '../../i18n/index.js'
 // to show instead when it isn't there just now (dictation's extras while dictation is off). when:
 // only in the desktop app ('desktop'), with the desktop's top bar ('wide'), or with a beta feature
 // on (its id, src/trials.js). Its section is where Settings opens for it: for Voice & Meetings and
-// Devices, the tab it's in (voice is Speech to Text, phone and machines Devices' Phone and Computers).
+// Devices, the tab it's in (voice is Speech to Text, phone and machines Devices' Phone and Computers,
+// account its Account tab, there once Bold Bridge accounts exist).
 const at = (section, list) => list.map(([id, label, keywords = '', o = {}]) => ({ section, id, label, keywords, ...o }))
 
 export const SETTINGS = [
@@ -95,6 +97,8 @@ export const SETTINGS = [
     ['notify-devices', tx('Devices getting notifications'), 'devices notifications remove', { near: 'notify' }],
   ]),
   ...at('account', [
+    ['bold-bridge', tx('Bold Bridge account'), 'account sign in sign out email code bold bridge'],
+    ['hosted-relay', tx('Bridge AI\'s Relay'), 'relay hosted phone allowance request access use it on this computer pair a phone', { near: 'bold-bridge' }],
     ['delete-account', tx('Delete account…'), 'delete account bold bridge'],
   ]),
   ...at('appearance', [
@@ -123,14 +127,22 @@ export const SETTINGS = [
   ]),
 ]
 
+// Each tab's section, by its name; Devices' tabs by devicesName (below).
 const PLACES = {
   general: tx('General'), agents: tx('Agents'), providers: tx('Model Providers'), voice: tx('Voice & Meetings'), dictation: tx('Voice & Meetings'), meetings: tx('Voice & Meetings'), mail: tx('Mail'),
-  mcp: tx('MCP Servers'), phone: tx('Devices'), machines: tx('Devices'), notifications: tx('Devices'), account: tx('Account'), appearance: tx('Appearance'), config: tx('Config File'), about: tx('About & Updates'),
+  mcp: tx('MCP Servers'), appearance: tx('Appearance'), config: tx('Config File'), about: tx('About & Updates'),
 }
-export const placeOf = (x) => t(PLACES[x.section])
+const DEVICES = ['phone', 'machines', 'notifications', 'account']
+export const placeOf = (x) => (DEVICES.includes(x.section) ? devicesName(x) : t(PLACES[x.section]))
+
+// What Settings calls the section with your devices, for a sentence that points there: Account &
+// Devices once Bold Bridge accounts exist (it has their Account tab: Settings.jsx), else Devices.
+export const devicesName = (conf) => (conf?.accounts ? t('Account & Devices') : t('Devices'))
+export const useDevicesName = () => devicesName(usePoll(cloudOnly ? null : '/config', 10 * 60 * 1000).data)
 
 // The ones that can show here: Mail's where Mail is read, Account's once Bold Bridge accounts exist,
-// the desktop app's in it, the top bar's with it, and a beta feature's while it's on.
+// the desktop app's in it, the top bar's with it, and a beta feature's while it's on. (Each says
+// whether there are accounts, for its section's name.)
 export const findable = (conf) => SETTINGS.filter((x) => (x.section !== 'mail' || conf?.mail) && (x.section !== 'account' || conf?.accounts)
   && (x.when !== 'desktop' || !!window.bridgeApp?.desktop) && (x.when !== 'wide' || matchMedia('(min-width: 900px)').matches)
-  && (!x.when || ['desktop', 'wide'].includes(x.when) || conf?.trials?.[x.when] === true))
+  && (!x.when || ['desktop', 'wide'].includes(x.when) || conf?.trials?.[x.when] === true)).map((x) => ({ ...x, accounts: !!conf?.accounts }))
