@@ -403,9 +403,9 @@ try {
     const listed = (name) => lp.locator('.sd-files-row', { hasText: name })
     ok(!!(await until(async () => (await listed('draft.md').count()) === 1 && (await listed('doc.pdf').count()) === 1, 15000)), "Studio's Files on Laptop lists Studio's computer's files: one opened there, a PDF in its agent's folder")
     // A kind Studio doesn't open, there: its app is on Studio's computer, so it says so, with no button.
-    await lp.locator('.sd-groups button', { hasText: 'Documents' }).first().click()
+    await lp.locator('.fx-side-row[data-shelf="kind:doc"]').click()
     ok(!!(await until(async () => /Open it on its computer/.test(await listed('brief.doc').innerText().catch(() => '')) && (await listed('brief.doc').locator('button', { hasText: /Open/ }).count()) === 0, 10000)), "an older Word file on Studio's computer: said to open there, no button that can't work from here", await listed('brief.doc').innerText().catch(() => ''))
-    await lp.locator('.sd-groups button', { hasText: 'PDFs' }).first().click()
+    await lp.locator('.fx-side-row[data-shelf="kind:pdf"]').click()
     await listed('doc.pdf').locator('.sd-file-name').click()
     ok(!!(await until(async () => (await lp.locator('.sd-file .sd-tabs [role="tab"][aria-selected="true"]', { hasText: 'Preview' }).count()) === 1 && /doc\.pdf/.test(await lp.locator('.sd-file .pane-head h2').innerText().catch(() => '')) && /Read-only/.test(await lp.locator('.sd-status').innerText().catch(() => '')), 20000)), 'a PDF there, picked by its kind, opens in Preview')
     await shot(lp, `${tag}remote-files-studio-pdf`)

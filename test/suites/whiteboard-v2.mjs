@@ -259,7 +259,7 @@ try {
 
   await part('the clean look', async () => {
     await toList()
-    ok(await p.locator('.rail-nav-btn', { hasText: 'Whiteboards' }).count() === 0 && await p.locator('.rail-nav-btn.on').innerText().then((x) => x.trim() === 'Studio', () => false) && await p.locator('.sd-groups button[aria-current="true"]', { hasText: 'Whiteboards' }).count() === 1,
+    ok(await p.locator('.rail-nav-btn', { hasText: 'Whiteboards' }).count() === 0 && await p.locator('.rail-nav-btn.on').innerText().then((x) => x.trim() === 'Studio', () => false) && await p.locator('.fx-side-row[data-shelf="kind:board"][aria-current="location"]').count() === 1,
       'the sidebar has no Whiteboards row, and the list of whiteboards is Studio\'s Files at Whiteboards', await p.locator('.rail-nav-btn').allInnerTexts())
     await p.locator('.sd-new-open').click()
     await p.locator('.sd-new-menu [role="menuitem"]', { hasText: 'Whiteboard' }).click()
@@ -350,14 +350,14 @@ try {
     const old = await page(b, kit.url, { store: { 'cc-ws': { tabs: ['view:whiteboards'], active: 'view:whiteboards', side: null, split: false, group: 'main' } }, before: async (c) => watch(c) })
     const there = await until(() => old.p.locator('.sd-home .wb-home .wb-card', { hasText: 'Network map' }).isVisible(), 30000)
     const tabs = await old.p.evaluate(() => JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs || [])
-    ok(!!there && JSON.stringify(tabs) === '["view:studio"]' && await old.p.locator('.sd-groups button[aria-current="true"]', { hasText: 'Whiteboards' }).count() === 1 && await old.p.locator('.wb-view').count() === 0,
+    ok(!!there && JSON.stringify(tabs) === '["view:studio"]' && await old.p.locator('.fx-side-row[data-shelf="kind:board"][aria-current="location"]').count() === 1 && await old.p.locator('.wb-view').count() === 0,
       'a window that kept Whiteboards in a tab opens Studio in that tab, its Files at Whiteboards', tabs)
     await old.p.keyboard.press('ControlOrMeta+k')
     await old.p.keyboard.type('whiteboard')
     const hit = old.p.locator('.palette .pal-item', { hasText: 'Whiteboards' }).first()
     ok(await until(() => hit.count(), 5000) && /In Studio/.test(await hit.innerText()), '⌘K still finds Whiteboards, and says they are in Studio', await hit.innerText().catch(() => ''))
     await old.p.keyboard.press('Escape')
-    await old.p.locator('.sd-groups button', { hasText: 'Recent' }).first().click()
+    await old.p.locator('.fx-side-row[data-shelf="recent"]').click()
     await old.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'view:whiteboards' } })))
     ok(await until(() => old.p.locator('.sd-home .wb-home').isVisible(), 8000) && JSON.stringify(await old.p.evaluate(() => JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs || [])) === '["view:studio"]', 'a link to Whiteboards, with Studio open at something else, shows Studio\'s Whiteboards, in the same tab')
     ok(!old.errors.length, 'no page errors', old.errors)

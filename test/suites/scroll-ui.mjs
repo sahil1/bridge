@@ -7,7 +7,7 @@
 // doesn't undo it for the rest of the app. Then each main view scrolls in one place, at 1440x900 and
 // at 1024x700 with the Agents panel under it: Home, Meetings, a meeting (its summary and transcript
 // flowing down the page when its panel is that short), Studio's home and a document, a sheet and a
-// page in it, Folders in a folder of 100, Whiteboards (in Studio), Agent Map, Dictations (in
+// page in it, Studio's home in a folder of 100, Whiteboards (in Studio), Agent Map, Dictations (in
 // Meetings), Usage and Settings.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -146,7 +146,7 @@ try {
     ['a document in Studio', studio('notes-1.md'), '.sd-desk'],
     ['a sheet in Studio', studio('data-1.csv'), '.sd-univer canvas'],
     ['a page in Studio', studio('page-1.html'), '.sd-page-ed'],
-    ['Folders, in a folder of 100', async (p) => { await open(p, 'view:files'); await p.locator('.fx-side-row', { hasText: 'Work' }).first().click({ timeout: 15000 }) }, '.fx-body :text("notes-2.md")'],
+    ['Studio\'s home, in a folder of 100', async (p) => { await open(p, 'view:studio'); await p.locator('.fx-side-row', { hasText: 'Work' }).first().click({ timeout: 15000 }) }, '.fx-body :text("notes-2.md")'],
     ['Whiteboards, in Studio', (p) => open(p, 'view:whiteboards'), '.sd-home .wb-home'],
     ['Agent Map', (p) => open(p, 'view:map'), '.am-row'],
     ['Dictations, in Meetings', (p) => open(p, 'view:dictations'), '.dc-view .dc-home'],
@@ -179,7 +179,7 @@ try {
         twice.push({ name, failed: e.message.split('\n')[0], saw })
       }
     }
-    ok(!twice.length, `${width}x${height}: Home, Meetings, a meeting, Studio's home and a document, sheet and page in it, Folders, Whiteboards, Agent Map, Dictations, Usage and Settings each scroll in one place, none with a scroll area inside another`, twice)
+    ok(!twice.length, `${width}x${height}: Home, Meetings, a meeting, Studio's home and a document, sheet and page in it and at a folder, Whiteboards, Agent Map, Dictations, Usage and Settings each scroll in one place, none with a scroll area inside another`, twice)
     ok(withoutCutOff(errors).filter((e) => !/sandboxed and lacks the 'allow-same-origin'/.test(e)).length === 0, `${width}x${height}: no page errors`, errors)
     await ctx.close()
   }
