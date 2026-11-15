@@ -241,8 +241,9 @@ export async function models({ fresh = false } = {}) {
     getJSON(`${LMSTUDIO()}/models`, {}, 1200).then((j) => (j.data || []).map((m) => m.id).filter((x) => x && !NOT_CHAT.test(x)).map((x) => ({ id: `lmstudio:${x}`, label: x, provider: PROVIDER.lmstudio, via: 'local' }))).catch(() => []),
   ])
   for (const l of lists) out.push(...l)
-  // The local model built in, last: only once it's downloaded (nothing is tried before that).
-  if (await llm.ready().catch(() => false)) out.push({ id: llm.ID, label: llm.MODELS[0].label, provider: PROVIDER.bridge, via: 'local', builtin: true })
+  // The local model built in, last: only once it's downloaded (nothing is tried before that). The one
+  // in use first, then any other downloaded that runs here.
+  for (const m of await llm.usable().catch(() => [])) out.push({ id: llm.idOf(m.id), label: m.label, provider: PROVIDER.bridge, via: 'local', builtin: true })
   const list = out.filter((m) => !hiddenModel(m.id))
   cache = { at: Date.now(), list, keys: keysStamp(), more: moreOn(), llm: llm.listStamp() }
   return list
@@ -459,19 +460,20 @@ export async function localInfo(id, { fresh = false } = {}) {
   const was = infos.get(id)
   if (!fresh && was && Date.now() - was.at < 2 * 60 * 1000) return was.value
   const [route, ...rest] = String(id).split(':')
-  if (route === 'bridge') return bridgeInfo()
+  if (route === 'bridge') return bridgeInfo(id)
   const value = await (route === 'ollama' ? ollamaInfo : lmsInfo)(rest.join(':')).catch(() => null)
   infos.set(id, { at: Date.now(), value })
   return value
 }
 // The local model built in: what it reads at a time on this computer, whether it's loaded now, and
 // whether it has a GPU here (Metal on Apple Silicon, Vulkan where llama.cpp found one). Its speed is
-// guessed from its 2.3 billion effective parameters until it's been used.
-async function bridgeInfo() {
+// guessed from the parameters at work for each word (2.3 billion for Gemma 4 E2B) until it's been used.
+async function bridgeInfo(id) {
   const f = await llm.fit()
   const m = f.machine
-  const gpu = f.gpu ? true : m.platform === 'darwin' ? m.arch === 'arm64' : m.docker ? false : null
-  return { max: llm.MODELS[0].context, loaded: llm.loaded() ? await llm.context() : null, thinks: false, canStop: true, vision: false, billions: 2.3, gpu }
+  const mod = llm.MODELS.find((x) => llm.idOf(x.id) === id) || llm.MODELS[0]
+  const gpu = f.gpu ? llm.gpuPath(m, f.gpu) : m.platform === 'darwin' ? m.arch === 'arm64' : m.docker ? false : null
+  return { max: mod.context, loaded: llm.loaded() ? await llm.context() : null, thinks: false, canStop: true, vision: false, billions: mod.active, gpu }
 }
 // How many tokens one request to a model on this computer can hold (null for any other model):
 // Ollama's, as much as the model takes up to what this computer's memory holds (or more, when it's
@@ -490,7 +492,7 @@ const fmtK = (n) => (n >= 1024 ? `${Math.round(n / 1024)}K` : String(n))
 function tooLong(id, ctx, need) {
   const [route, ...rest] = String(id).split(':')
   const how = route === 'lmstudio' ? 'Load it with a longer context in LM Studio (the model\'s Context Length), or pick another model.' : 'Pick a model with a longer context, or one on a computer with more memory.'
-  const name = route === 'bridge' ? llm.MODELS[0].label : rest.join(':')
+  const name = route === 'bridge' ? llm.labelOf(id) || 'The local model' : rest.join(':')
   return Object.assign(new Error(`${name} takes ${fmtK(ctx)} tokens at a time, and this needs about ${fmtK(need)}. ${how}`), { code: 'too_long', context: ctx, need })
 }
 const tooLongSaid = (j) => /context (length|size|window)|exceeds the available context|longer than the context|too many tokens|n_ctx/i.test(JSON.stringify(j?.error || j?.message || ''))
@@ -516,14 +518,16 @@ async function pace(id) {
   const guess = gpu ? { read: 300, write: 25 } : { read: 40, write: 8 }
   return { read: Math.round(guess.read / scale), write: Math.round(guess.write / scale), measured: false, gpu, sure: gpu != null }
 }
-// How long a request of text (and an answer of about out tokens) takes on this model here, in
-// seconds: { seconds, measured, gpu, sure, billions }. sure: false when it's only a guess.
+// How long a request of text (or that many tokens) and an answer of about out tokens takes on this
+// model here, in seconds: { seconds, measured, gpu, sure, billions }. sure: false when it's a guess.
 export async function estimate(id, text, out = 800) {
   if (!isLocal(id)) return null
   const p = await pace(id)
   const i = await localInfo(id)
-  return { seconds: Math.round(3 + tokensOf(text) / p.read + out / p.write), measured: p.measured, gpu: p.gpu, sure: p.measured || p.sure, billions: i?.billions || null }
+  return { seconds: Math.round(3 + (typeof text === 'number' ? text : tokensOf(text)) / p.read + out / p.write), measured: p.measured, gpu: p.gpu, sure: p.measured || p.sure, billions: i?.billions || null }
 }
+// How fast a model here reads and writes, tokens a second: { read, write, measured, gpu }.
+export const speed = (id) => (isLocal(id) ? pace(id) : Promise.resolve(null))
 // Long enough for this computer: a processor alone can take many minutes over a long prompt, so the
 // usual five minutes would end work that was going fine. Up to 45.
 async function callTime(id, text, out) {
@@ -600,21 +604,21 @@ async function lmsChat(model, messages, o) {
   }
 }
 
-// The local model built in (llm.js): llama-server's OpenAI-style API with its key, started if it isn't
-// running, thinking off unless a chat lets it (chat_template_kwargs, as Gemma's and Qwen's templates
-// read it), and how fast it read and wrote noted from its timings.
-async function builtinChat(messages, o) {
-  const id = llm.ID
+// The local model built in (llm.js): llama-server's OpenAI-style API with its key, started with that
+// model if it isn't running it, thinking off unless a chat lets it (chat_template_kwargs, as Gemma's
+// and Qwen's templates read it), and how fast it read and wrote noted from its timings.
+async function builtinChat(model, messages, o) {
+  const id = `bridge:${model}`
   const cap = await llm.context()
   const text = allText(messages, o.system, o.tools)
   const need = tokensOf(text) + ANSWER
   if (messages.length === 1 && need > cap * 1.15) throw tooLong(id, cap, need)
   const ms = await callTime(id, text, 800)
   try {
-    return await llm.use(({ url, key }) => openaiStyle('The local model', `${url}/v1/chat/completions`, bearer(key), 'bridge', messages, {
+    return await llm.use(({ url, key }) => openaiStyle(llm.labelOf(id) || 'The local model', `${url}/v1/chat/completions`, bearer(key), 'bridge', messages, {
       ...o, ms, extra: { chat_template_kwargs: { enable_thinking: !!o.think } },
       onStats: (t) => measured(id, t.prompt_n > 200 ? t.prompt_per_second : null, t.predicted_n > 50 ? t.predicted_per_second : null),
-    }))
+    }), id)
   } catch (e) {
     if (tooLongSaid(e.body)) throw tooLong(id, cap, need)
     throw e
@@ -684,7 +688,7 @@ async function answer(id, messages, o) {
   }
   if (route === 'ollama') return ollamaChat(model, messages, o)
   if (route === 'lmstudio') return lmsChat(model, messages, o)
-  if (route === 'bridge') return builtinChat(messages, o)
+  if (route === 'bridge') return builtinChat(model, messages, o)
   if (MORE[route]) {
     const key = env()[MORE[route].key]
     if (!key) throw new Error(`No ${MORE[route].label} key saved. Add one in Settings › Model Providers.`)

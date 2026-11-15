@@ -126,12 +126,15 @@ function fromCommits(branch, commits) {
 }
 
 // The cheapest model you can reach: an agent CLI on your own subscription (small model where it
-// takes one), or a local Ollama model. Never an API key that bills per token.
+// takes one), or a model on this computer. Never an API key that bills per token. route(prompt):
+// where Titles and tidy-ups run for a prompt this size (index.js pickFor): with Auto, a short one on
+// the local model built in once it's downloaded; set to stay on this computer, only there, or the
+// note says why not.
 const WRITERS = [['claude', 'haiku'], ['gemini'], ['gpt'], ['cursor'], ['copilot'], ['opencode'], ['qwen'], ['grok'], ['local']]
 const PROMPT = `Write the title and description for a GitHub pull request from the commits and diff below.
 Reply with only the title on the first line (under 70 characters, no period at the end), then a blank line, then the description in GitHub Markdown: a sentence or two on what changed and why, then a short bullet list of the notable changes if there are several. Plain and specific. No preamble, no sign-off, no mention of AI or of any tool, and no "Generated with" or "Co-authored-by" lines.`
 
-export async function draft(root, { base } = {}) {
+export async function draft(root, { base, route = null } = {}) {
   const r = await repoInfo(root)
   if (!r) throw new Error("This folder isn't a git repository")
   if (!r.branch) throw new Error("You're not on a branch")
@@ -143,15 +146,21 @@ export async function draft(root, { base } = {}) {
   if (!commits.length) throw new Error(`${r.branch} has no commits that aren't on ${b}`)
   const plain = { ...fromCommits(r.branch, commits), base: b, commits: commits.length, via: null }
   const avail = await consult.options().catch(() => [])
-  const pick = WRITERS.find(([id]) => avail.some((o) => o.id === id && o.available && (o.via === 'cli' || id === 'local')))
+  let pick = WRITERS.find(([id]) => avail.some((o) => o.id === id && o.available && (o.via === 'cli' || id === 'local')))
   if (!pick) return plain
   const stat = await git(r.top, ['diff', '--stat', `${ref}...HEAD`]) || ''
   const diff = (await git(r.top, ['diff', '--no-color', '-U2', `${ref}...HEAD`]) || '').slice(0, 30000)
   const list = commits.map((c) => `- ${c.subject}${c.body ? `\n  ${uncredit(c.body).replace(/\n/g, '\n  ')}` : ''}`).join('\n')
   const prompt = `${PROMPT}\n\nBranch ${r.branch} into ${b}.\n\nCommits (newest first):\n${list}\n\nFiles:\n${stat}\n\nDiff:\n${diff}`
+  let here = null
+  if (route) {
+    try { here = await route(prompt) } catch (e) { return { ...plain, note: `${e.message} So this is from your commits.` } }
+    if (here?.where === 'local' && here.id) pick = ['local', here.id]
+    else here = null
+  }
   const o = avail.find((x) => x.id === pick[0])
   // A model on this computer by its name ("Local model, qwen3.5:4b (Ollama, on this computer)").
-  const label = pick[0] === 'local' && o?.route ? `${o.label}, ${o.route}` : `${o?.label || pick[0]}${pick[1] ? ` (${pick[1]})` : ''}`
+  const label = here ? `Local model, ${here.label || here.id} (on this computer)` : pick[0] === 'local' && o?.route ? `${o.label}, ${o.route}` : `${o?.label || pick[0]}${pick[1] ? ` (${pick[1]})` : ''}`
   try {
     const a = await consult.ask({ who: pick[0], prompt, model: pick[1], via: pick[0] === 'local' ? 'api' : 'cli', feature: 'pr' })
     const lines = String(a.text || '').trim().replace(/^```\w*\n([\s\S]*?)\n```$/, '$1').split('\n')
