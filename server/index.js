@@ -2258,14 +2258,24 @@ app.post('/api/meetings/:id/save', wrap((req) => meetings.save(req.params.id)))
 app.post('/api/meetings/:id/retry', wrap((req) => meetings.retry(req.params.id)))
 // What was on the screen: pictures taken while it records, or pasted into your notes.
 app.post('/api/meetings/:id/captures', express.raw({ type: () => true, limit: '16mb' }), wrap((req) => meetings.addCapture(req.params.id, req.body, { kind: String(req.query.kind || 'screen'), t: req.query.t, note: req.query.note, source: req.query.source })))
+// whole=1: as it was taken, when it's been cropped. Each crop or put back changes its v, so a page
+// asks for it afresh.
 app.get('/api/meetings/:id/captures/:cid', (req, res) => {
   try {
-    const file = meetings.captureFile(req.params.id, req.params.cid)
+    const file = meetings.captureFile(req.params.id, req.params.cid, { whole: req.query.whole === '1' })
     res.set({ 'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=86400' })
     res.sendFile(file, { dotfiles: 'allow' }) // in the data folder, ~/.bridge-ai
   } catch (e) { res.status(404).json({ error: e.message }) }
 })
-app.patch('/api/meetings/:id/captures/:cid', wrap((req) => meetings.noteCapture(req.params.id, req.params.cid, req.body?.note)))
+// A picture of a call's window cropped to what's shared (the page works it out: crop.js), or, with
+// no picture, looked at and nothing to crop. look: what it saw, to keep the next crops steady.
+app.post('/api/meetings/:id/captures/:cid/crop', express.raw({ type: () => true, limit: '16mb' }), wrap((req) => {
+  let look = null
+  try { look = req.query.look ? JSON.parse(String(req.query.look)) : null } catch { /* left out */ }
+  return meetings.cropCapture(req.params.id, req.params.cid, Buffer.isBuffer(req.body) ? req.body : null, { rect: req.query, look, why: req.query.why, v: req.query.v, sure: req.query.sure !== '0' })
+}))
+// A note on it, or { crop }: its crop (true) or the picture as it was taken (false).
+app.patch('/api/meetings/:id/captures/:cid', wrap((req) => (typeof req.body?.crop === 'boolean' ? meetings.setCrop(req.params.id, req.params.cid, req.body.crop) : meetings.noteCapture(req.params.id, req.params.cid, req.body?.note))))
 app.delete('/api/meetings/:id/captures/:cid', wrap((req) => meetings.removeCapture(req.params.id, req.params.cid)))
 // The screen as a video (meetvideo.js, Record the screen too): started, its pieces as it records
 // and its end, then played in the meeting (the browser asks for parts of it as it seeks).

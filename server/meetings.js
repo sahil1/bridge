@@ -1474,8 +1474,10 @@ export async function addCapture(id, buf, { kind = 'screen', t, note, source } =
   let text = null
   if (what === 'auto' && doctext.ocrBin()) {
     try { text = (await doctext.textOf(path.join(dirOf(id), file), 4000)) || '' } catch { text = null }
-    const last = [...(meta(id).captures || [])].reverse().find((x) => x.kind !== 'paste' && typeof x.text === 'string')
-    if (text != null && last && !brings(text, last.text)) { fs.rmSync(path.join(dirOf(id), file), { force: true }); return { kept: false } }
+    // Against the last one as it was taken, not its crop: this one isn't cropped yet.
+    const said = (x) => x.crop?.texts?.whole ?? x.text
+    const last = [...(meta(id).captures || [])].reverse().find((x) => x.kind !== 'paste' && typeof said(x) === 'string')
+    if (text != null && last && !brings(text, said(last))) { fs.rmSync(path.join(dirOf(id), file), { force: true }); return { kept: false } }
   }
   const c = { id: cid, file, t: round(at), at: new Date().toISOString(), kind: what, note: String(note || '').slice(0, 300), source: String(source || '').slice(0, 80), text, read: text != null ? 'done' : doctext.ocrBin() ? 'reading' : 'no' }
   patchMeta(id, { captures: [...(meta(id).captures || []), c] })
@@ -1495,13 +1497,70 @@ function readCapture(id, cid) {
     let c
     try { c = meta(id).captures.find((x) => x.id === cid) } catch { return }
     if (!c) return
-    try { patchCapture(id, cid, { text: (await doctext.textOf(path.join(dirOf(id), c.file), 4000)) || '', read: 'done' }) } catch { try { patchCapture(id, cid, { read: 'failed' }) } catch { /* gone */ } }
+    const file = c.file
+    let text
+    try { text = (await doctext.textOf(path.join(dirOf(id), file), 4000)) || '' } catch { try { patchCapture(id, cid, { read: 'failed' }) } catch { /* gone */ } return }
+    // A cropped one keeps the words on each picture, so Whole screen and Crop needn't read again.
+    try {
+      const now = meta(id).captures.find((x) => x.id === cid)
+      const which = now?.crop?.file === file ? 'crop' : now?.crop?.whole === file ? 'whole' : null
+      patchCapture(id, cid, { ...(now?.file === file ? { text, read: 'done' } : {}), ...(which ? { crop: { ...now.crop, texts: { ...now.crop.texts, [which]: text } } } : {}) })
+    } catch { /* gone */ }
   })
 }
-export function captureFile(id, cid) {
+// The picture in use (the crop, once there is one), or as it was taken (whole).
+export function captureFile(id, cid, { whole = false } = {}) {
   const c = (meta(id).captures || []).find((x) => x.id === String(cid))
   if (!c) throw new Error('No such picture')
-  return path.join(dirOf(id), c.file)
+  return path.join(dirOf(id), whole ? c.crop?.whole || c.file : c.file)
+}
+
+// ---------- A picture of a call's window, cropped ----------
+// The page works out what's shared in a picture of the screen (src/components/meetings/crop.js:
+// the slide, without the faces beside it, the call's buttons and its window) and sends the crop
+// here. Both are kept: the crop is the picture from then on, shown, read and put in the notes, and
+// the one taken stays beside it. Whole screen on the picture puts that back, and Crop the crop again
+// (setCrop); either is the person's say, which a later look leaves alone. With Crop pictures of
+// calls off (Settings › Voice & Meetings), or a look not sure enough (sure: false), a crop is kept
+// aside: offered on the picture, not used. A look that found nothing to crop is noted too, so the
+// page doesn't look again.
+const cropsOn = () => cfg.meetings?.cropShots !== false
+const KEEPS = /^captures\/[\w-]+\.(png|jpg|gif|webp)$/
+export function cropCapture(id, cid, buf, { rect, look, why, v, sure = true } = {}) {
+  const c = (meta(id).captures || []).find((x) => x.id === String(cid))
+  if (!c) throw new Error('No such picture')
+  if (c.kind === 'paste') throw new Error('Only pictures of the screen are cropped')
+  if (c.crop?.byHand || (c.crop?.file && !buf?.length)) return c
+  const whole = c.crop?.whole || c.file
+  const base = { v: Number(v) || 1, look: look && typeof look === 'object' ? look : c.crop?.look || null, why: String(why || '').slice(0, 200), whole }
+  if (!buf?.length) return patchCapture(id, c.id, { crop: { ...base, rect: null } })
+  const ext = Buffer.isBuffer(buf) && buf.length > 64 ? pictureType(buf) : null
+  if (!ext) throw new Error('That isn\'t a picture (PNG, JPEG, WebP or GIF)')
+  const r = Object.fromEntries(['x0', 'y0', 'x1', 'y1', 'w', 'h'].map((k) => [k, Math.round(Number(rect?.[k]))]))
+  if (!Object.values(r).every(Number.isFinite) || r.x1 <= r.x0 || r.y1 <= r.y0) throw new Error('Where to crop it is missing')
+  const file = `captures/${c.id}-crop.${ext}`
+  if (!KEEPS.test(file) || !KEEPS.test(whole)) throw new Error('No such picture')
+  fs.writeFileSync(path.join(dirOf(id), file), buf)
+  const on = (!!sure && cropsOn()) || c.file === file
+  const texts = { whole: c.crop?.texts?.whole ?? (c.file === whole && c.read === 'done' ? c.text : null), crop: null }
+  // A crop put in place of one in use is a new picture to the page, as the first is.
+  const out = patchCapture(id, c.id, { crop: { ...base, rect: r, file, on, sure: !!sure, texts }, ...(on ? { file, text: null, read: doctext.ocrBin() ? 'reading' : 'no' } : {}), ...(on || c.file === file ? { v: (c.v || 0) + 1 } : {}) })
+  if (on && out.read === 'reading') readCapture(id, c.id)
+  if (on) resave(id, 5000)
+  return out
+}
+// The crop, or the picture as it was taken: on, by hand.
+export function setCrop(id, cid, on) {
+  const c = (meta(id).captures || []).find((x) => x.id === String(cid))
+  if (!c) throw new Error('No such picture')
+  if (!c.crop?.file) throw new Error('This picture has no crop')
+  const file = on ? c.crop.file : c.crop.whole
+  const text = c.crop.texts?.[on ? 'crop' : 'whole']
+  const known = typeof text === 'string'
+  const out = patchCapture(id, c.id, { file, crop: { ...c.crop, on: !!on, byHand: true }, v: (c.v || 0) + 1, text: known ? text : null, read: known ? 'done' : doctext.ocrBin() ? 'reading' : 'no' })
+  if (out.read === 'reading') readCapture(id, c.id)
+  resave(id, 3000)
+  return out
 }
 export const noteCapture = (id, cid, note) => { const c = patchCapture(id, String(cid), { note: String(note || '').slice(0, 300) }); resave(id, 3000); return c }
 // A picture removed goes from your notes too.
@@ -1509,7 +1568,7 @@ export function removeCapture(id, cid) {
   const m = meta(id)
   const c = (m.captures || []).find((x) => x.id === String(cid))
   if (!c) throw new Error('No such picture')
-  fs.rmSync(path.join(dirOf(id), c.file), { force: true })
+  for (const f of new Set([c.file, c.crop?.file, c.crop?.whole].filter(Boolean))) fs.rmSync(path.join(dirOf(id), f), { force: true })
   patchMeta(id, { captures: m.captures.filter((x) => x.id !== c.id) })
   const f = path.join(dirOf(id), 'notes.md')
   const notes = readText(f)

@@ -7,6 +7,7 @@ import { watch as watchShare, sendPicture, sendGlance } from './screen.js'
 import { recordVideo, canRecordScreen } from './videorec.js'
 import { VideoChoice, RECORD_SCREEN } from './video.jsx'
 import { store } from '../layout.jsx'
+import { cropKept } from './cropping.jsx'
 import { t, locale } from '../../i18n/index.js'
 import { Among, useCallEvents, MeetingName } from './cardparts.jsx'
 import './meetings.css'
@@ -226,7 +227,8 @@ export function MeetingsProvider({ children }) {
     talk.current.off = false
     const w = watchShare(stream, {
       // Counted when kept: the server leaves out a change whose words are the last picture's.
-      onPicture: async (blob, kind) => { const r = await sendPicture(mid, blob, { kind, source: w.label }); if (r?.kept !== false) setScreen((x) => (x ? { ...x, kept: x.kept + 1 } : x)) },
+      // Then cropped to what's shared in it, here (cropping.jsx).
+      onPicture: async (blob, kind) => { const r = await sendPicture(mid, blob, { kind, source: w.label }); if (r?.kept !== false) { setScreen((x) => (x ? { ...x, kept: x.kept + 1 } : x)); cropKept(mid, r, blob) } },
       glance,
       onGlance: (blob) => sendGlance(mid, blob).then((r) => { if (r.stop) talk.current.off = true }, () => {}),
       onEnd: () => { share.current = null; shown.current = null; film.current?.stop(); setScreen(null); window.bridgeApp?.watching?.(false) },

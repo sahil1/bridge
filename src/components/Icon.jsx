@@ -62,6 +62,7 @@ const PATHS = {
   // A tree's folders all closed (Files' Collapse all).
   'collapse-all': <><path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/></>,
   'expand-v': <><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></>,
+  crop: <><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></>,
   focus: <><path d="M3 8V5a2 2 0 0 1 2-2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><rect x="8" y="8" width="8" height="8" rx="1"/></>,
   x: <><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>,
   keyboard: <><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M8 16h8"/></>,

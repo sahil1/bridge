@@ -17,7 +17,7 @@ import '../meetings/meetings.css'
 // reads goes to that model, so which and where it runs is said there), AI Assist's live board (a
 // beta feature: on for every meeting, and what it sends where), Answers in AI Assist (a beta
 // feature: what it answers from, and what goes where, the web too), calls and their sound (and, in
-// the desktop app, the floating card's reminder before a meeting), and
+// the desktop app, the floating card's reminder before a meeting), cropping pictures of a call, and
 // saving them as Markdown. Under Advanced: the other speech services, suggesting what to ask, who
 // spoke, the key that mentions a meeting in a message, the floating card, and where and how notes
 // are saved. Server: speech.js, meetings.js.
@@ -341,6 +341,13 @@ export default function Meetings({ onOpenAgent }) {
         <label className="st-check">
           <input type="checkbox" checked={m.autoStop !== false} onChange={(e) => set({ autoStop: e.target.checked })} disabled={!d.canWatchCalls || m.detect === false} />
           <span><b>{t('Stop by itself when the call ends')}</b> <span className="muted small">{t('Two minutes after, unless you keep it going.')}</span></span>
+        </label>
+        {/* Worked out on this computer from the picture alone (meetings/crop.js); both pictures are kept. */}
+        <label className="st-check" data-setting="crop-shots">
+          <input type="checkbox" checked={m.cropShots !== false} onChange={(e) => set({ cropShots: e.target.checked })} />
+          <span title={t("When a watched screen shows a call, its pictures keep the slide or page being shared, and leave out the people beside it, the call's buttons and its window. Only when the picture plainly shows a call, and never into what's shared. Worked out on this computer; the picture as it was taken is kept too.")}><b>{t("Crop pictures of a call to what's shared")}</b> <span className="muted small">{m.cropShots !== false
+            ? t("The slide or page, without the people and the call's buttons. Whole screen on a picture puts it back.")
+            : t('Pictures stay whole. Crop on a picture of a call crops that one.')}</span></span>
         </label>
       </section>
 
