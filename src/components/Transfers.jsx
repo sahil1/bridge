@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { api, apiUrl, hostApi, machineId, viaRelay, usePoll } from '../api.js'
 import { t } from '../i18n/index.js'
+import { useDevicesName } from './settings/search.js'
 import './transfers.css'
 
 const MB = 1048576
@@ -61,7 +62,7 @@ function HostedNote({ hosted, total, device }) {
   if (!hosted || !(total > BIG)) return null
   return (
     <p className="xfer-note small" role="note"><Icon name="info" size={12} /> <span>
-      {t('This goes through Bridge AI\'s relay, and counts towards your Bold Bridge account\'s allowance there, with everything else {name} does (Settings › Account shows what\'s left). If it runs out, the copy stops and carries on once it resets.', { name: device })}
+      {t('This goes through Bridge AI\'s relay, and counts towards your Bold Bridge account\'s allowance there, with everything else {name} does (Settings › Account & Devices shows what\'s left). If it runs out, the copy stops and carries on once it resets.', { name: device })}
       {` ${t('For big files, use a relay on your own Cloudflare account (free, no allowance), or Tailscale.')}`}
     </span></p>
   )
@@ -115,6 +116,7 @@ export function SendDialog({ src, here = false, onClose }) {
   }
   const title = here ? t('Copy {name} to this computer', { name: src.name }) : t('Send {name}', { name: src.name })
   const noDevices = !here && devices && !devices.length
+  const section = useDevicesName()
   return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}>
       <form className="modal xfer-dialog" onSubmit={submit} onKeyDown={(e) => { if (e.key === 'Escape' && !busy) { e.stopPropagation(); onClose() } }}>
@@ -123,7 +125,7 @@ export function SendDialog({ src, here = false, onClose }) {
           {what ? (what.dir ? t('A folder: {n} files, {size}', { n: what.count, size: fmtSize(what.total) }) : fmtSize(what.total)) : src.size != null && !src.dir ? fmtSize(src.size) : ' '}
           {what?.links ? ` · ${t('{n} links in it are left out', { n: what.links })}` : ''}
         </p>
-        {noDevices && <p className="small">{t('None of your other devices is linked to this one yet. Link one in Settings › Devices › Computers.')}</p>}
+        {noDevices && <p className="small">{t('None of your other devices is linked to this one yet. Link one in Settings › {devices} › Computers.', { devices: section })}</p>}
         {!here && devices?.length > 0 && (
           <label className="na-field">
             <span className="na-label">{t('To')}</span>
