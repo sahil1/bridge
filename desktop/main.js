@@ -1100,10 +1100,12 @@ app.whenReady().then(async () => {
   })
   // Watching a screen in a meeting: macOS's own picker (macOS 15 and later), where you pick the
   // window being shared. Before macOS 15: the whole main screen, which macOS asks to allow (Screen
-  // Recording) the first time.
+  // Recording) the first time. Recording the screen too, on Windows: with what the computer plays
+  // (the call's sound), which the page asks for there (src/components/meetings/recording.jsx).
   session.defaultSession.setDisplayMediaRequestHandler((req, cb) => {
     if (!req.frame || req.frame.parent || !pages.permits('display-capture', { url: req.frame.url })) return cb({})
-    desktopCapturer.getSources({ types: ['screen'] }).then((s) => cb(s[0] ? { video: s[0] } : {}), () => cb({}))
+    const sound = req.audioRequested && process.platform === 'win32' ? { audio: 'loopback' } : {}
+    desktopCapturer.getSources({ types: ['screen'] }).then((s) => cb(s[0] ? { video: s[0], ...sound } : {}), () => cb({}))
   }, { useSystemPicker: true })
   // Right-click: spelling suggestions, Cut, Copy and Paste, in every window from here on.
   contextMenu.attach({ app, Menu, clipboard: electron.clipboard, session })

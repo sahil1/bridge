@@ -69,6 +69,7 @@ import * as insights from './insights.js'
 import * as chatModels from './chatmodels.js'
 import * as llm from './llm.js'
 import * as meetings from './meetings.js'
+import * as meetVideo from './meetvideo.js'
 import * as boards from './boards.js'
 import * as meetBoard from './meetboard.js'
 import * as labs from './labs.js'
@@ -1767,6 +1768,7 @@ setInterval(() => dictations.tidy().catch(() => {}), 6 * 60 * 60 * 1000).unref()
 
 // ---------- Meeting notes (meetings.js; speech engines in speech.js) ----------
 meetings.configure(cfg)
+meetVideo.configure(cfg)
 memoryView.configure(cfg, { chief: CHIEF_DIR })
 memoryView.keepFresh()
 voices.configure(cfg)
@@ -1969,7 +1971,9 @@ app.post('/api/calls/hide', wrap((req) => meetPrep.hide(String(req.body?.id || '
 // Screen Recording, for the names a call shows as people talk: whether it's allowed, and Allow
 // (macOS's own window the first time; after that, System Settings is where it's turned on).
 // fresh=1: looked at now, not what was kept from a moment ago. started: when this server started.
-app.get('/api/calls/screen', wrap(async (req) => ({ allowed: await calls.screen({ fresh: req.query.fresh === '1' }), started: calls.started })))
+// picker: macOS's own picker for a screen or window to share (macOS 15 and later, Darwin 24), which
+// the desktop app uses and which needs no Screen Recording to record what's picked.
+app.get('/api/calls/screen', wrap(async (req) => ({ allowed: await calls.screen({ fresh: req.query.fresh === '1' }), started: calls.started, picker: IS_MAC && Number(os.release().split('.')[0]) >= 24 })))
 app.post('/api/calls/screen', wrap(async (req) => { hereOnly(req, 'Allow Screen Recording'); return { allowed: await calls.screenAsk() } }))
 // The calendar event to take notes for (callevent.js): the one the call on app is for (or the call
 // on now), by its window's title, a Join in Bridge AI or when it started; with no call, the one
@@ -2046,7 +2050,7 @@ app.post('/api/meetings/:id/for-agents', wrap(async (req) => {
 // With the live board on (a beta feature): what's on the meeting's board, kept or still suggested,
 // and how it's getting on (liveBoard), for the meeting's Board, its summary and the floating card.
 app.get('/api/meetings/:id', wrap(async (req) => {
-  const m = meetings.get(req.params.id)
+  const m = { ...meetings.get(req.params.id), videos: meetVideo.list(req.params.id) }
   return trialOn('meeting-board') ? { ...m, liveBoard: await liveBoard(m) } : m
 }))
 app.post('/api/meetings/:id/audio', express.raw({ type: () => true, limit: '4mb' }), wrap((req) => meetings.audio(req.params.id, String(req.query.src || ''), req.body, req.query.seq)))
@@ -2193,6 +2197,29 @@ app.get('/api/meetings/:id/captures/:cid', (req, res) => {
 })
 app.patch('/api/meetings/:id/captures/:cid', wrap((req) => meetings.noteCapture(req.params.id, req.params.cid, req.body?.note)))
 app.delete('/api/meetings/:id/captures/:cid', wrap((req) => meetings.removeCapture(req.params.id, req.params.cid)))
+// The screen as a video (meetvideo.js, Record the screen too): started, its pieces as it records
+// and its end, then played in the meeting (the browser asks for parts of it as it seeks).
+app.post('/api/meetings/:id/videos', wrap((req) => meetVideo.start(req.params.id, req.body || {})))
+app.post('/api/meetings/:id/videos/:vid', express.raw({ type: () => true, limit: '64mb' }), wrap((req) => meetVideo.piece(req.params.id, req.params.vid, req.body, { seq: req.query.seq, seconds: req.query.s })))
+app.post('/api/meetings/:id/videos/:vid/end', wrap((req) => meetVideo.end(req.params.id, req.params.vid, { seconds: req.body?.seconds, why: req.body?.why })))
+app.get('/api/meetings/:id/videos/:vid', (req, res) => {
+  try {
+    const file = meetVideo.file(req.params.id, req.params.vid)
+    res.set({ 'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-cache' })
+    res.sendFile(file, { dotfiles: 'allow' }) // in the data folder, ~/.bridge-ai
+  } catch (e) { res.status(404).json({ error: e.message }) }
+})
+app.delete('/api/meetings/:id/videos/:vid', wrap((req) => meetVideo.remove(req.params.id, req.params.vid)))
+app.post('/api/meetings/:id/videos/:vid/reveal', wrap((req) => { hereOnly(req, 'Show it in Finder'); return meetVideo.reveal(req.params.id, req.params.vid) }))
+// The call's sound as Bridge AI records it (a Mac), as it comes, for that video's sound: 16 kHz
+// mono 16-bit samples, until the page lets go.
+app.get('/api/meetings/:id/sound', (req, res) => {
+  let off
+  try { off = meetings.hear(req.params.id, (b) => res.write(b)) } catch (e) { res.status(404).json({ error: e.message }); return }
+  res.set({ 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' })
+  res.flushHeaders()
+  req.on('close', off)
+})
 // Files, links and emails that go with a meeting: linked where they are, read when notes are written.
 // A file by its path only from this computer, or one of Mail's attachments that Bridge AI found:
 // a phone can't read the computer's files by linking them. From there, files are sent as copies.
