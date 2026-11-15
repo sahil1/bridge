@@ -3047,6 +3047,20 @@ app.delete('/api/updates/early', wrap(async () => {
   if (fromAccount) afterChange(settings.patch({ earlyAccess: { from: 'account', left: true } }))
   return updates.status({ force: true, disabled: cfg.updates?.check === false })
 }))
+// Nightly (updates.js): nightly builds of main, for the owner's own computers. Nothing in the app
+// offers it: it's switched on here, on the computer itself (`bridge-ai nightly on`, or the local API
+// with its key), and kept as updates.nightly in the settings. Leave Nightly in About & Updates
+// switches it off from anywhere the page opens.
+app.post('/api/updates/nightly', wrap(async (req) => {
+  if (!fromHere(req)) throw Object.assign(new Error('Nightly is switched on on the computer itself.'), { status: 403 })
+  if (!updates.canNightly()) throw new Error(updates.how() === 'docker' ? 'Nightly is for the desktop app. Bridge AI in Docker updates by its image\'s tag, which stays on regular releases.' : 'Nightly is for the desktop app. Bridge AI from a clone updates with git pull, which is main already.')
+  afterChange(settings.patch({ updates: { nightly: true } }))
+  return updates.status({ force: true, disabled: cfg.updates?.check === false })
+}))
+app.delete('/api/updates/nightly', wrap(async () => {
+  afterChange(settings.patch({ updates: { nightly: false } }))
+  return updates.status({ force: true, disabled: cfg.updates?.check === false })
+}))
 // auto: by itself while you're away, asked by the desktop app on this computer only.
 app.post('/api/updates/install', wrap((req) => {
   if (req.body?.auto === true && !fromHere(req)) throw Object.assign(new Error('Only the desktop app updates by itself'), { status: 403 })
@@ -3064,7 +3078,7 @@ function rolloutBucket() {
   try { afterChange(settings.patch({ updates: { bucket: n } })) } catch { cfg.updates = { ...cfg.updates, bucket: n } }
   return n
 }
-updates.useSettings(() => ({ on: cfg.updates?.auto !== false, checks: cfg.updates?.check !== false, code: cfg.earlyAccess?.code || null, from: cfg.earlyAccess?.from || null, left: !!cfg.earlyAccess?.left, bucket: rolloutBucket() }))
+updates.useSettings(() => ({ on: cfg.updates?.auto !== false, checks: cfg.updates?.check !== false, code: cfg.earlyAccess?.code || null, from: cfg.earlyAccess?.from || null, left: !!cfg.earlyAccess?.left, bucket: rolloutBucket(), nightly: cfg.updates?.nightly === true }))
 // What an update would cut short: this computer's agents working or waiting on you (a cloud agent
 // runs elsewhere, and other devices' agents on them), a meeting recording, being transcribed or its
 // notes being written, and a dictation being heard (its live words, or its recording being turned

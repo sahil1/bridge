@@ -403,6 +403,19 @@ async function phonesCmd(args) {
   for (const d of r.devices) console.log(`${phoneLine(d)}  ${DIM(d.id)}`)
 }
 
+// Nightly builds of main on this computer (server/updates.js, scripts/nightly.js): on, off, or
+// where it stands.
+async function nightlyCmd(args) {
+  const [sub] = args
+  if (sub && !['on', 'off'].includes(sub)) throw new Error(`Unknown: bridge-ai nightly ${sub}. Try: bridge-ai nightly on, or off`)
+  const u = sub === 'on' ? await api('/updates/nightly', { method: 'POST', body: {} }) : sub === 'off' ? await api('/updates/nightly', { method: 'DELETE' }) : await api('/updates')
+  if (u.nightly?.on) {
+    console.log(`On Nightly: this computer gets a build of main each morning that main has changed. Bridge AI ${u.current} here${u.available ? `; ${u.latest} is ready (About & Updates, or by itself while you're away)` : ''}.`)
+    return console.log(DIM('bridge-ai nightly off goes back to regular releases; the version here stays until one passes it.'))
+  }
+  console.log(sub === 'off' ? `Off: back to ${u.channel === 'early' ? 'Early Access' : 'regular releases'}. Bridge AI ${u.current} stays until a release passes it.` : `Not on Nightly (${u.channel === 'early' ? 'Early Access' : 'Stable'}). bridge-ai nightly on, on this computer, turns it on.`)
+}
+
 function openUrl(url) {
   const [cmd, args] = IS_MAC ? ['open', [url]] : IS_WIN ? ['cmd', ['/c', 'start', '', url]] : ['xdg-open', [url]]
   return new Promise((resolve) => {
@@ -437,6 +450,7 @@ const run = {
   relay: () => relayCmd(args),
   pair: () => pairCmd(args),
   phones: () => phonesCmd(args),
+  nightly: () => nightlyCmd(args),
   help: () => console.log(`bridge-ai: Bridge AI from your terminal
 
   bridge-ai start [dev|phone]   start the server
@@ -458,7 +472,8 @@ const run = {
   bridge-ai pair --review [--days 14] [--uses 25] [--png file] [--new] [--stop]
                                 a code that lasts, for a computer set up for others to try
                                 (it must run with BRIDGE_REVIEW_PAIRING=1)
-  bridge-ai phones [remove <name>]  paired phones, or remove one`),
+  bridge-ai phones [remove <name>]  paired phones, or remove one
+  bridge-ai nightly [on|off]    nightly builds of main on this computer, for trying what's next`),
 }
 const fn = run[cmd]
 if (!fn) { console.error(`Unknown command: ${cmd}`); run.help(); process.exit(2) }

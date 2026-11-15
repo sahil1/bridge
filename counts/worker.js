@@ -70,7 +70,8 @@ export const TABLES = [
     arch TEXT NOT NULL, install TEXT NOT NULL, kind TEXT NOT NULL, fingerprint TEXT NOT NULL, title TEXT NOT NULL,
     what TEXT NOT NULL, details TEXT NOT NULL)`,
   'CREATE INDEX IF NOT EXISTS crash_reports_by_group ON crash_reports (fingerprint, day)',
-  // The update channel (stable, or early for Early Access with who the code is for, '' on Stable)
+  // The update channel (stable; early for Early Access, with who the code is for, '' otherwise; or
+  // nightly, the owner's own computers on nightly builds)
   // and the rollout bucket (0-99, -1 when not said), kept with the version and nothing else: each
   // version's installs a week, and a day with whether they crashed, so a pre-release or a release
   // part way out can be compared with the rest. A crash report's channel, by its id.
@@ -146,12 +147,13 @@ export function check(r, now = new Date()) {
 }
 // A system's version or a chip's family, as the app writes them, or "other".
 const textOf = (v) => (typeof v === 'string' && /^[A-Za-z][\w .,()+-]{0,39}$/.test(v) ? v : 'other')
-// Bridge AI's version: 3.12.0, or a pre-release of one (3.13.0-beta.1), else "other".
-const versionOf = (v) => (typeof v === 'string' && /^\d{1,3}\.\d{1,3}\.\d{1,3}(-(alpha|beta|rc)\.\d{1,3})?$/.test(v) ? v : 'other')
+// Bridge AI's version: 3.12.0, or a pre-release of one (3.13.0-beta.1, 3.20.1-nightly.20261116.57),
+// else "other".
+const versionOf = (v) => (typeof v === 'string' && /^\d{1,3}\.\d{1,3}\.\d{1,3}(-(alpha|beta|rc)\.\d{1,3}|-nightly\.\d{8}\.\d{1,6})?$/.test(v) ? v : 'other')
 // The update channel, who an early-access code is for (a name the project gave its tester), and
 // the rollout bucket. A report from before there were channels says none of them ('unknown').
 export function channelOf(r) {
-  const channel = r.channel == null ? 'unknown' : ['stable', 'early'].includes(r.channel) ? r.channel : 'other'
+  const channel = r.channel == null ? 'unknown' : ['stable', 'early', 'nightly'].includes(r.channel) ? r.channel : 'other'
   const tester = channel !== 'early' || r.tester == null ? '' : typeof r.tester === 'string' && /^[\p{L}\p{N}][\p{L}\p{N} .'_-]{0,31}$/u.test(r.tester) ? r.tester : 'other'
   const rollout = Number.isInteger(r.rollout) && r.rollout >= 0 && r.rollout <= 99 ? r.rollout : -1
   return { channel, tester, rollout }

@@ -226,8 +226,8 @@ use (below).
 Two reports go to the project's server, `counts.boldbridge.ai`, run on Cloudflare; its code is
 [counts/worker.js](counts/worker.js) in this repo:
 
-- **Once a week**, after the week is over: Bridge AI's version; its update channel (Stable, or
-  Early Access for testers) and, on Early Access, who the code is for: the first name or nickname
+- **Once a week**, after the week is over: Bridge AI's version; its update channel (Stable,
+  Early Access for testers, or Nightly, the project's own computers on nightly builds) and, on Early Access, who the code is for: the first name or nickname
 the project gave that tester when it made the code, or, with Early Access from your Bold Bridge
 account, that account's id (below); its rollout bucket, a number from 0 to 99
   picked at random once and kept in your settings, which decides how soon a release that goes out

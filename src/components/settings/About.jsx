@@ -92,7 +92,7 @@ function Updates() {
           </div>
           {u.held && <p className="muted small">{t('Bridge AI {latest} needs macOS {macos} or later, and this Mac has macOS {have}, so Bridge AI stays on {current}, which keeps working. Update macOS in System Settings › General › Software Update to get newer versions.', { latest: u.held.latest, macos: u.held.macos, have: u.held.have, current: u.current })}</p>}
           {/* A pre-release, off Early Access (left, or its code ended): it's never put back to an older version. */}
-          {raw?.channel === 'stable' && isPre(raw.current) && !u.available && <p className="muted small ab-pre-stays">{t('{version} is a pre-release. Bridge AI stays on it until a regular release is newer, then updates to that.', { version: raw.current })}</p>}
+          {raw?.channel !== 'early' && raw?.channel !== 'nightly' && isPre(raw.current) && !u.available && <p className="muted small ab-pre-stays">{t('{version} is a pre-release. Bridge AI stays on it until a regular release is newer, then updates to that.', { version: raw.current })}</p>}
           {u.failed && state !== 'installing' && <p className="st-note bad"><Icon name="alert" size={13} /> {t('The last update didn\'t go through: {why}', { why: u.failed.line || t('the installer stopped') })}{u.failed.auto && ` ${t('It was updating by itself while you were away, and tries again in a few hours.')}`}</p>}
           {u.available && (
             state === 'installing'
@@ -108,12 +108,36 @@ function Updates() {
           <label className="st-check"><input type="checkbox" checked={auto} onChange={(e) => save({ updates: { check: e.target.checked } }).then(() => load(true))} />
             <span><b>{t('Check for new versions')}</b> <span className="muted small">{t('Asks GitHub a few times a day; nothing about you is sent.')}</span></span></label>
           {canAuto && <ByItself u={raw} checks={auto} />}
-          {early?.offered && !earlyShown && <p className="small ab-early-ask"><button type="button" className="link-btn" onClick={() => setJoining(true)}>{t('Have an early-access code?')}</button></p>}
+          {early?.offered && !earlyShown && raw?.channel !== 'nightly' && <p className="small ab-early-ask"><button type="button" className="link-btn" onClick={() => setJoining(true)}>{t('Have an early-access code?')}</button></p>}
         </>
       )}
     </section>
-    {earlyShown && <EarlyAccess u={raw} code={link} onDone={() => { doneWithEarlyLink(); setJoining(false) }} onChange={() => load(false)} onJoined={doneWithEarlyLink} />}
+    {earlyShown && raw?.channel !== 'nightly' && <EarlyAccess u={raw} code={link} onDone={() => { doneWithEarlyLink(); setJoining(false) }} onChange={() => load(false)} onJoined={doneWithEarlyLink} />}
+    {(raw?.nightly?.on || raw?.nightly?.problem) && <Nightly u={raw} onChange={() => load(false)} />}
     </>
+  )
+}
+
+// Nightly: a build of main each morning it changed, for the project's own computers. Nothing here
+// turns it on (`bridge-ai nightly on`, on the computer itself); shown once it's on, with Leave Nightly,
+// or switched on where it can't work (Docker, a clone), with why.
+function Nightly({ u, onChange }) {
+  const [state, setState] = useState(null) // leaving | { error }
+  const leave = async () => {
+    setState('leaving')
+    try { await api('/updates/nightly', { method: 'DELETE' }); setState(null); onChange() } catch (err) { setState({ error: err.message }) }
+  }
+  return (
+    <section className="st-sec ab-nightly">
+      <h4>{t('Nightly')}</h4>
+      {u.nightly.on ? <>
+        <div className="st-row"><span className="st-chip good"><Icon name="check" size={11} /> {t('On')}</span></div>
+        <p className="muted small">{t('This computer gets a build of main each morning that main has changed, to try what\'s next before it\'s released. Its usage stats and crash reports say they\'re from Nightly.')}</p>
+      </> : <p className="st-note bad"><Icon name="alert" size={13} /> {u.nightly.problem === 'docker' ? t("Nightly is switched on, but it's for the desktop app: Bridge AI in Docker updates by its image's tag, which stays on regular releases.") : t('Nightly is switched on, but it\'s for the desktop app: Bridge AI from a clone updates with git pull, which is main already.')}</p>}
+      {state?.error && <p className="st-note bad"><Icon name="alert" size={13} /> {state.error}</p>}
+      <div className="st-row"><button type="button" className="btn small" disabled={state === 'leaving'} onClick={leave}><Icon name="x" size={13} /> {t('Leave Nightly')}</button></div>
+      {u.nightly.on && <p className="muted small">{t('Leaving keeps the version you have: Bridge AI stays on it until a regular release is newer.')}</p>}
+    </section>
   )
 }
 

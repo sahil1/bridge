@@ -127,6 +127,20 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
   `server/earlyaccess.js` before the next release. A code made with `--days` ends by itself.
 - **Leaving.** Bridge AI never goes back to an older version: a tester who leaves Early Access, or
   whose code ends, stays on the beta they have until a regular release is newer.
+- **Nightly builds, for your own computers.** `.github/workflows/nightly.yml` builds main each night
+  it has changed (about 3 AM in California; Actions › Nightly › Run workflow builds one now) through
+  the release workflow: the tests on all three systems, then the app signed and notarized as a
+  release is, at a version like `3.20.1-nightly.20261116.57` (`scripts/nightly.js`: what main is
+  heading for, the day and the run), set in that build only, so main gets no commit. It's a GitHub
+  pre-release, never the latest, with the changes since the last nightly as its notes; no Android
+  app, no Docker image, and only the newest 7 are kept. Nothing in the app offers it: on each of
+  your computers, once, with the desktop app open, run `bridge-ai nightly on`, or without the
+  command, `curl -X POST -H "Authorization: Bearer $(cat ~/.bridge-ai/api-token)" -H
+  'content-type: application/json' -d '{}' http://127.0.0.1:7420/api/updates/nightly`. It's refused
+  through the relay. That computer then takes the newest of everything, nightlies, betas and
+  releases, at once and by itself while you're away; Stable and Early Access are never offered a
+  nightly. About & Updates shows Nightly with Leave Nightly, which keeps the version you have until a
+  regular release passes it. Its usage stats and crash reports say Nightly.
 
 ## Before you open a pull request
 

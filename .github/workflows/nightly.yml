@@ -1,0 +1,47 @@
+# A nightly build of main, for the owner's own computers (scripts/nightly.js): each night when main
+# has changed since the last one, the release workflow tests main on macOS, Windows and Linux,
+# builds it at a nightly version and publishes it as a pre-release that only computers on Nightly
+# are offered (server/updates.js). Stable and Early Access never get one, and GitHub's latest
+# release, the website's download and Docker's tags stay on regular releases. Running it by hand
+# (Actions › Nightly › Run workflow) builds one now, changed or not.
+name: Nightly
+
+on:
+  schedule:
+    - cron: '17 10 * * *' # about 3 AM in California
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: What to build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: v
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::Nightlies are built from main only"; exit 1; }
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && ! node scripts/nightly.js changed; then exit 0; fi
+          echo "version=$(node scripts/nightly.js version)" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Build and publish
+    needs: plan
+    if: needs.plan.outputs.version != ''
+    uses: ./.github/workflows/release.yml
+    with:
+      nightly: ${{ needs.plan.outputs.version }}
+    secrets: inherit
+    # What the release workflow's publishing job asks for: writing the release, and signing where
+    # each download was built.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
