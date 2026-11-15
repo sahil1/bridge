@@ -71,14 +71,17 @@ computer's `~/.bridge-ai/config.json` (with the accounts service's too):
 "relay": { "hostedUrl": "https://boldbridge.app" }
 ```
 
-Settings › Devices starts with a choice of three ways (Bridge AI's relay, your own Cloudflare,
-Tailscale). Bridge AI's relay is one path, there: your email and the code it's sent (that's the Bold
-Bridge account), and the relay is asked for by itself; while the request waits it says so, and asks
-the account again every so often and when the window comes back. Approved while that's open, the
-relay is set up and the pairing code shows with nothing more to click; opened later, it's Use Bridge
-AI's relay, and the pairing code follows. An account signed in already that never asked has Request
-access. First-run setup asks for nothing: it says that Settings ›
-Devices sets the phone up. `bridge-ai relay setup --hosted` works from a terminal once the account
+Settings › Account & Devices has the account and the relay on its Account tab, and the ways to
+reach the computer on its Phone tab, which starts with a choice of three (Bridge AI's relay, your own
+Cloudflare, Tailscale). Bridge AI's relay is one path, on either: your email and the code it's sent
+(that's the Bold Bridge account), and the relay asked for (by itself on the Phone tab); while the
+request waits it says so, and asks the account again every so often and when the window comes back
+(the computer itself every half hour). Once approved, a computer with nothing else set up for the
+phone (no relay, no Tailscale) starts using it by itself and says so; otherwise the Account tab's
+Use it on this computer (or Use Bridge AI's relay instead, from a relay of your own) sets it up right
+there, each step said, and Pair a phone follows. An account signed in already that never asked has
+Request access. First-run setup asks for nothing: it says that Settings › Account & Devices sets the
+phone up. `bridge-ai relay setup --hosted` works from a terminal once the account
 has the relay, and says to sign in first otherwise. Moving between the ways works too; phones pair
 again after a move to another relay, and the app says so. The tests never reach it:
 `BRIDGE_HOSTED_URL` and `BRIDGE_ACCOUNTS_URL` stand in for the two switches, and the test kits set
@@ -173,7 +176,7 @@ belongs to the relay.
   https://boldbridge.app/_relay/register` with no token answers 401 saying it needs an account, and
   `curl -s -H "Authorization: Bearer <STATS_TOKEN>" https://boldbridge.app/_relay/stats` answers
   today's counts with `"accounts":{"on":0,"max":500}`.
-- [ ] **Try it** on one computer: Settings › Devices › Bridge AI's relay, your email and its code,
+- [ ] **Try it** on one computer: Settings › Account & Devices › Phone › Bridge AI's relay, your email and its code,
   approve the request in the admin view, and the pairing code shows. Settings shows
   the account's use in the 8-hour window and the week; `/_relay/stats` says one account on it.
 - [ ] **Ship it**: keep (or cherry-pick) the commit that switches it on ("Switch on Bridge AI's
@@ -254,13 +257,13 @@ never written in the file.
 **Ids from before the checksum was keyed.** Until then an id's checksum was a plain hash anyone
 could work out. Those ids (made only while trying the relay out; it wasn't live) don't pass any more:
 their addresses answer 404, the computer says Bridge AI's relay doesn't know it any more, and
-setting it up again in Settings › Devices gives it a new address, after which its phones pair again.
+setting it up again in Settings › Account & Devices gives it a new address, after which its phones pair again.
 Its old Hub is deleted after `IDLE_DAYS`, as any computer's that stops connecting.
 
 And one binding to another Worker: `ACCOUNTS`, the accounts service's `Relay` entrypoint, which
 answers `/internal` and nothing else (never the admin view's `/admin`), for `GET
 /internal/status?a=&d=` (whether an account may use the relay, and whether that device is still on
-it) and `POST /internal/usage` (its use, for Settings › Account and the admin view).
+it) and `POST /internal/usage` (its use, for Settings › Account & Devices and the admin view).
 
 ### Why these limits
 
@@ -299,7 +302,7 @@ a paired phone uses is cut off without a word; a connection the computer hasn't 
 - **Too big, or too many at once**: that phone's connection is closed with a message (the phone
   shows "Too much at once for Bridge AI's relay. Connecting again in a moment.") and it reconnects
   5 or 10 seconds later. A computer's message for a phone counts against that phone. The computer
-  is told too, and Settings › Devices shows it while it lasts.
+  is told too, and Settings › Account & Devices shows it while it lasts.
 - **Too many connected**: with `MAX_PHONES` paired phones and tabs connected (strangers make room
   first), one more is told so ("Bridge AI's relay takes 16 connections to one computer at once…")
   and tries again a minute later; the computer is told a phone was turned away, and why.
@@ -308,7 +311,7 @@ a paired phone uses is cut off without a word; a connection the computer hasn't 
   has used its allowance on Bridge AI's relay for now (150,000 messages in 8 hours). It resets at
   14:32 UTC. For no limits, put the relay on your own Cloudflare account." Phones are let go and
   turned away with the same words until then; the phone shows it (in place of Bridge AI, or on a bar
-  if it's open) and waits. Settings › Devices on the computer says it in its own time zone, with a
+  if it's open) and waits. Settings › Account & Devices on the computer says it in its own time zone, with a
   link to set up its own Cloudflare, and shows the use as the usage chip shows a plan's. The
   computers stay connected, quietly, so phones are back the moment it resets. Each computer's Hub
   tells the Account what it carried every 1,000 messages (more often as the allowance runs low, and
@@ -316,10 +319,10 @@ a paired phone uses is cut off without a word; a connection the computer hasn't 
   it's reached, so an account can go a little over, never by much.
 - **The account itself**: suspended, no longer allowed the relay, or deleted (`why: "suspended" |
   "relay" | "deleted"`), its computers and phones are told so and let go, and the computers wait 10
-  minutes before asking again. Bridge AI says the same in Settings › Devices and Settings › Account.
+  minutes before asking again. Bridge AI says the same on the Phone and Account tabs of Settings › Account & Devices.
   A computer connecting without a relay token, or with one that ended or is another account's, is
   told `why: "token"`; Bridge AI gets a new one from the account and connects again.
-- **A device removed from the account** (removed in Settings › Account or the admin view, or signed
+- **A device removed from the account** (removed in Settings › Account & Devices or the admin view, or signed
   out there): its computer is turned away with `why: "token"` the next time it, or the Account, asks
   the accounts service about it (`/internal/status?a=&d=`, at most a minute old), and its phones
   with it, not when its relay token ends; registering with its relay token is refused (401, `token:
@@ -343,7 +346,7 @@ a paired phone uses is cut off without a word; a connection the computer hasn't 
   accounts on the relay, an account's first computer gets 503 with `why: "full"`: "Bridge AI's relay
   is full for now: it has as many accounts as it can take. Put a relay on your own Cloudflare
   account instead (it's free), or use Tailscale." The app says so in its own words wherever the
-  relay is offered: Settings › Devices marks it "Full for now" among the ways and offers your own
+  relay is offered: Settings › Account & Devices marks it "Full for now" among the ways and offers your own
   Cloudflare and Tailscale (each a click) and Try again, and picks your own Cloudflare for the next
   hour; `bridge-ai relay setup --hosted` prints it with `bridge-ai relay setup` and `bridge-ai start
   phone`, and fails. An account already on the relay isn't affected.
@@ -589,7 +592,7 @@ Same as going live: build and deploy, from the release's tag (`git checkout v<ve
 page it serves is that release's. A computer on the relay checks (once a day, and when Settings ›
 Devices opens) that the page files the relay serves are those of the version `/_relay/health` says
 it runs, compared with its own copy when that's its own version and with the release's on GitHub
-otherwise, and Settings › Devices says so if they differ (server/relaycheck.js). A build from
+otherwise, and Settings › Account & Devices says so if they differ (server/relaycheck.js). A build from
 between releases would show as changed. Any computer's or phone's connection drops and comes back
 within seconds. Computers on the hosted relay never try to update it themselves (they do for a
 relay on your own account). Keep `[[migrations]]` as they are: `v1` made the Hub class and `v2` the
@@ -653,7 +656,7 @@ Then point a test Bridge AI at both with `"relay": { "hostedUrl": "http://localh
 http is allowed only for localhost and 127.0.0.1). Never point a computer you use at a test relay.
 `npm test -- relay-hosted` runs the Worker in Node with every limit, the accounts' windows and weeks
 and the stats, with nothing reaching Cloudflare, and `npm test -- relay-hosted-ui` shows the app's
-side (Settings › Devices with an account and without, a relay that's full, an account's limit
+side (Settings › Account & Devices with an account, Devices without, a relay that's full, an account's limit
 reached and reset, first-run setup, `bridge-ai relay setup --hosted`) against the stand-ins.
 
 ## The policy's hosted relay sections

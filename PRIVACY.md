@@ -306,8 +306,8 @@ collecting, Bridge AI turns crash reports off and says so.
 ## Your Bold Bridge account (optional)
 
 Early Access and Bridge AI's relay come with a Bold Bridge account. Nothing else needs one, and
-Bridge AI never asks you to make one. You sign in in Settings › Account (or in Settings › Devices,
-for the relay) with your email and a 6-digit code it's sent (there's no password), at `accounts.boldbridge.ai`, run by the project on
+Bridge AI never asks you to make one. You sign in in Settings › Account & Devices (its Account tab,
+or its Phone tab for the relay) with your email and a 6-digit code it's sent (there's no password), at `accounts.boldbridge.ai`, run by the project on
 Cloudflare; its code is [account/worker.js](account/worker.js) in this repo.
 
 **What it keeps**: your email; your devices (five at most): the name each was given (your
@@ -325,10 +325,10 @@ emailed to you, sent with Cloudflare's Email Service; and, on Early Access, your
 usage stats and crash reports (above), so the project can tell testers' reports apart.
 
 **Your other computers**: once one of your computers is signed in, it can sign in the others linked
-to it (Settings › Account), over the end-to-end encrypted link between them. One that would rather
+to it (Settings › Account & Devices), over the end-to-end encrypted link between them. One that would rather
 not says so, and is left alone.
 
-**Leaving**: Sign out, or remove a device, in Settings › Account. Delete account there deletes the
+**Leaving**: Sign out, or remove a device, in Settings › Account & Devices. Delete account there deletes the
 account, its devices, requests, history and counts at once (Bridge AI's relay forgets its own within
 a day). Bold Bridge's admins see what's kept, to answer requests, and can suspend an account that
 misuses Early Access or the relay.
@@ -371,10 +371,15 @@ Tailscale's privacy policy.
 ## Bridge AI's relay (optional)
 
 If you'd rather not set up a relay of your own, you can choose Bridge AI's relay in Settings ›
-Devices. It comes with a Bold Bridge account (above), by request. It's the same relay
+Account & Devices. It comes with a Bold Bridge account (above), by request. It's the same relay
 ([relay/worker.js](relay/worker.js)), run by the project on its own Cloudflare account at
 `boldbridge.app`, so the project's Cloudflare account carries your traffic instead of yours. Cloudflare
 processes it for the project.
+
+Once your account has it, a computer signed in to it with nothing else set up for your phone (no
+relay, no Tailscale) starts using it by itself, and Settings says so; one you stopped using it on
+doesn't. While a request waits, Bridge AI asks your account about it every half hour, rather than
+every 6 hours, so this happens soon after the yes.
 
 **What it can read: nothing past the handshake.** Everything between your phone and your computer
 is end-to-end encrypted, so the relay passes on bytes it can't read. That holds as long as the page
@@ -382,8 +387,8 @@ doing the encrypting is the one Bridge AI wrote: the iPhone and Android apps hav
 a pairing link opens them when they're installed, but in a phone's browser the page comes from the
 relay, so whoever runs the relay could change it (the page says so before pairing). On a relay
 that isn't yours, use the iPhone or Android app. Your computer checks the page the relay serves
-once a day, and when you open Settings › Devices, against Bridge AI's own for the version the
-relay says it runs (its own copy, or that release's from GitHub), and Settings › Devices says so
+once a day, and when you open Settings › Account & Devices, against Bridge AI's own for the version the
+relay says it runs (its own copy, or that release's from GitHub), and Settings says so
 if they differ; nothing is sent but those requests. What it sees, as any server does: the IP
 addresses of your phone and computer, when they connect, and how much they send.
 
@@ -405,16 +410,16 @@ computer's random id only: no IP addresses, no content, no names. The full list 
 [relay/HOSTED.md](relay/HOSTED.md).
 
 **Its limits**: it's free, with an allowance for each account, across its computers: so many
-messages in each 8-hour window and each week, like Claude's (Settings › Account and Settings ›
-Devices show them), and limits that stop floods (how big one message can be, how many come at
+messages in each 8-hour window and each week, like Claude's (Settings › Account & Devices
+shows them), and limits that stop floods (how big one message can be, how many come at
 once, how many phones and tabs are connected at once). It takes a limited number of accounts, and
 when it's full, Bridge AI says so and offers the other ways (a relay of your own, or Tailscale). It
 also has a daily limit for all the computers on it together; if that's reached, it stops for
-everyone until 00:00 UTC. When a limit is reached, your phone and Settings › Devices say which, and
+everyone until 00:00 UTC. When a limit is reached, your phone and Settings › Account & Devices say which, and
 when it ends. The limits may change, and paid plans with higher ones may come; anything a paid plan
 would keep or send elsewhere (to take payment) will be said here first.
 
-**Stop using it** (Settings › Devices › Stop using the relay) and your computer's data there is
+**Stop using it** (Settings › Account & Devices › Phone › Stop using the relay) and your computer's data there is
 deleted at once (should that message not arrive, its id leaves the list of computers within a few
 days). A computer that hasn't connected for 90 days is deleted the same way, and deleting your Bold
 Bridge account deletes your account's counts and its computers there within a day. Everything else
