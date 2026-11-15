@@ -11,15 +11,17 @@
 // files from wherever they are (Spotlight on a Mac, the recently used list on Linux, a look in the
 // usual and cloud drive folders elsewhere, your places, your agents' folders and Studio's own),
 // each with its folder, when it changed and Open, looked for only once Studio is opened; shown by
-// Recent, by kind and by where they are, with a search through all of them; a project's code
-// listing only its documents and decks; the newest of each kind; a folder added. Preview beside
-// Files, as an agent's tab has them: the file open in its own editor, a whiteboard on its own page.
+// Recent and by kind at the top of its home's sidebar, over your folders (a cloud drive's opened
+// there), with the bar's search through all of them; a project's code listing only its documents
+// and decks; the newest of each kind; a folder added. Preview beside Files, as an agent's tab has
+// them: the file open in its own editor, a whiteboard on its own page.
 // Open in Word: which apps this computer has (Windows' registry, Linux's PATH and a Mac's
 // Applications folders and Spotlight, each with stand-ins, run here whatever this computer is; then
 // this computer's through the server), the app for each kind and none for a page, opening it there
 // (open -a, LibreOffice), what's saved there shown and never saved over, a save that can't be made
 // said in Focus, and in another computer's window said to open on the file's computer.
-// On a phone: what to show picked from one list, the home and a Word file as one column, fitting.
+// On a phone: what to show picked from the home's sidebar (a screen of its own), the home and a Word
+// file as one column, fitting.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -258,13 +260,17 @@ try {
   ok(!!(await until(async () => /Nothing open in Preview yet/.test(await p.locator('.sd-home-view .sd-empty').innerText().catch(() => '')), 3000, 100)), 'Preview with nothing open yet says how to open something')
   await p.locator('.sd-home-view .sd-empty button', { hasText: 'Show Files' }).click()
   const row = (name) => p.locator('.sd-files-row', { hasText: name })
-  const group = (name) => p.locator('.sd-groups button', { hasText: name }).first()
+  // Studio's lists, at the top of its home's sidebar (the rows of folders under them).
+  const group = (name) => p.locator('.fx-side-row[data-shelf]', { hasText: name }).first()
   const listed = () => p.locator('.sd-files-row:not(.head) .sd-file-text b').allInnerTexts()
   ok(!!(await until(async () => (await row('Contract.docx').count()) === 1 && (await row('report.docx').count()) === 1, 10000)), 'its home lists your files from wherever they are, in Recent')
   const cells = await row('Contract.docx').evaluate((r) => ({ dir: r.querySelector('.sd-file-dir')?.innerText, when: r.querySelector('.sd-file-when')?.innerText, open: !!r.querySelector('.sd-file-acts .btn') }))
   ok(cells.dir === downloadsShown && !!cells.when && cells.open, 'each with its folder, when it changed, and Open', cells)
-  const groups = await p.locator('.sd-groups').textContent()
-  ok(['Recent', 'Kinds', 'Documents', 'Presentations', 'Sheets', 'PDFs', 'Pages', 'Whiteboards', 'Where', 'Bridge AI', cloudName, 'plans', 'Downloads'].every((w) => groups.includes(w)), 'shown by Recent, by kind and by where they are', groups)
+  await p.locator('.fx-side-sec h3', { hasText: 'Places' }).waitFor({ timeout: 10000 }).catch(() => {})
+  const shelves = await p.locator('.fx-side-row[data-shelf] .fx-side-name').allInnerTexts()
+  const folders = await p.locator('.fx-side-row[data-label]').evaluateAll((els) => els.map((e) => e.dataset.label))
+  ok(JSON.stringify(shelves) === '["Recent","Documents","Presentations","Sheets","PDFs","Pages","Whiteboards","Design Packs","Your Signature"]' && [cloudName, 'plans', 'Home'].every((x) => folders.includes(x)),
+    'shown by Recent and by kind in the sidebar\'s first lists, with your folders under them (the cloud drive, a place, Home)', { shelves, folders })
   // New, in the header beside Files and Preview: no cards on a page that has files.
   ok(await p.locator('.sd-new-btn').count() === 0, "with files, New's cards aren't on the page")
   await p.locator('.sd-new-open').click()
@@ -285,22 +291,22 @@ try {
   await group('Presentations').click()
   ok(!!(await until(async () => { const n = await listed(); return ['Pitch.pptx', 'Weekly sync deck.md', 'Launch.md'].every((x) => n.includes(x)) && !n.includes('Contract.docx') && !n.includes('README.md') }, 3000, 100)), "Presentations: a PowerPoint in a cloud drive, the deck in Studio's own folder and a project's Markdown deck", await listed())
   await shot(p, `${tag}studio-docs-presentations`)
-  await group(cloudName).click()
-  ok(!!(await until(async () => JSON.stringify(await listed()) === '["Pitch.pptx"]', 3000, 100)), `by where: ${cloudName}`, await listed())
-  await group('Bridge AI').click()
-  ok(!!(await until(async () => { const n = await listed(); return n.includes('Weekly sync deck.md') && n.includes('Roadmap') }, 3000, 100)), "Bridge AI's own: the deck made from a meeting and the whiteboard", await listed())
   ok(await row('Weekly sync deck.md').locator('.sd-file-dir').innerText() === 'Bridge AI', "a file in Studio's own folder: its folder said as Bridge AI, not a path", await row('Weekly sync deck.md').locator('.sd-file-dir').innerText())
+  // Where they are: the folders under the lists, as Finder has them (the cloud drive's).
+  await p.locator(`.fx-side-row[data-label="${cloudName}"]`).click()
+  await p.locator('.fx-row[data-name="Plans"]').dblclick({ timeout: 10000 })
+  ok(await p.locator('.fx-row[data-name="Pitch.pptx"]').waitFor({ timeout: 10000 }).then(() => true, () => false), `by where: ${cloudName}, in the sidebar's folders, with the PowerPoint in it`)
   await group('PDFs').click()
   ok(!!(await until(async () => /the newest 100 of 1(0[4-9]|[1-9]\d)/.test(await p.locator('.sd-list-head').innerText()), 3000, 100)), 'PDFs: the newest 100, saying how many there are', await p.locator('.sd-list-head').innerText())
   await group('Pages').click()
   ok(!!(await until(async () => /No pages found/.test(await p.locator('.sd-files-none').innerText().catch(() => '')), 3000, 100)), 'a kind with nothing in it says so')
   await group('Recent').click()
-  await p.locator('.sd-files-search input').fill('contr')
-  ok(!!(await until(async () => (await p.locator('.sd-files-row:not(.head)').count()) === 1, 3000, 100)), 'and by name')
+  await p.locator('.fx-search input').fill('contr')
+  ok(!!(await until(async () => (await p.locator('.sd-files-row:not(.head)').count()) === 1, 3000, 100)), 'and by name, from the bar\'s search')
   await group('Sheets').click()
-  await p.locator('.sd-files-search input').fill('pitch')
+  await p.locator('.fx-search input').fill('pitch')
   ok(!!(await until(async () => JSON.stringify(await listed()) === '["Pitch.pptx"]', 3000, 100)), 'a search looks through all your files, not only the kind picked', await listed())
-  await p.locator('.sd-files-search input').fill('')
+  await p.locator('.fx-search input').fill('')
   await group('Recent').click()
   const src = await p.locator('.sd-files-src').innerText()
   ok(/Spotlight|recently used|folders/.test(src) && /Studio's own folder/.test(src) && /newest 100 of each kind/.test(src) && /projects' code/.test(src), 'it says where it looked, that only the newest of each kind are listed, and what a project\'s code leaves out', src)
@@ -311,7 +317,7 @@ try {
   await p.locator('.sd-add-folder button', { hasText: 'Add a folder' }).click()
   await p.locator('.sd-add-form input').fill(extra)
   await p.locator('.sd-add-form button', { hasText: 'Add' }).first().click()
-  ok(!!(await until(async () => (await api('/places')).places.some((x) => /Projects[\\/]site$/.test(x.path)) && (await row('Brief.md').count()) === 1, 10000)), 'Add a folder: a place in Files, and its files in the list')
+  ok(!!(await until(async () => (await api('/places')).places.some((x) => /Projects[\\/]site$/.test(x.path)) && (await row('Brief.md').count()) === 1, 10000)), 'Add a folder: one of your places, and its files in the list')
   await shot(p, `${tag}studio-docs-home`)
   ok(!(await bare(p, '.sd-home-view')).length, 'nothing on the home is a bare control', await bare(p, '.sd-home-view'))
   // Whiteboards are one of Studio's kinds, with no row of their own in the sidebar. Picked, your
@@ -629,7 +635,7 @@ try {
   await shot(dark.p, `${tag}studio-docs-word-dark`)
   // Files in the dark look too, from the file's Files tab.
   await dark.p.locator('.sd-file .sd-tabs [role="tab"]', { hasText: 'Files' }).click()
-  await dark.p.locator('.sd-groups button', { hasText: 'Presentations' }).first().click({ timeout: 15000 })
+  await dark.p.locator('.fx-side-row[data-shelf="kind:deck"]').click({ timeout: 15000 })
   ok(!!(await until(async () => (await dark.p.locator('.sd-files-row', { hasText: 'Pitch.pptx' }).count()) === 1, 10000)), 'dark: Files, at Presentations')
   await shot(dark.p, `${tag}studio-docs-presentations-dark`)
 
@@ -664,13 +670,15 @@ try {
   ok(!Object.keys(f).length && await ph.p.locator('.sd-new-menu [role="menuitem"]').count() === 6, "phone: New's menu from the header, each a whole target", f)
   await shot(ph.p, `${tag}studio-docs-new-phone`)
   await ph.p.keyboard.press('Escape')
-  // What to show is one list to pick from on a phone.
-  await ph.p.locator('.sd-group-pick select').selectOption('kind:deck')
-  ok(!!(await until(async () => (await ph.p.locator('.sd-files-row', { hasText: 'Pitch.pptx' }).count()) === 1 && (await ph.p.locator('.sd-files-row', { hasText: 'report.docx' }).count()) === 0, 3000, 100)), 'phone: Presentations picked from the list')
+  // What to show is picked from the home's sidebar, a screen of its own on a phone (its back arrow).
+  await ph.p.locator('.fx-bar button[aria-label="All locations"]').click()
+  await ph.p.locator('.fx-side-row[data-shelf="kind:deck"]').click()
+  ok(!!(await until(async () => (await ph.p.locator('.sd-files-row', { hasText: 'Pitch.pptx' }).count()) === 1 && (await ph.p.locator('.sd-files-row', { hasText: 'report.docx' }).count()) === 0, 3000, 100)), 'phone: Presentations picked from the sidebar')
   f = await phoneFaults(ph.p, '.sd-home-view')
   ok(!Object.keys(f).length, 'phone: and it still fits', f)
   await shot(ph.p, `${tag}studio-docs-presentations-phone`)
-  await ph.p.locator('.sd-group-pick select').selectOption('recent')
+  await ph.p.locator('.fx-bar button[aria-label="All locations"]').click()
+  await ph.p.locator('.fx-side-row[data-shelf="recent"]').click()
   await ph.p.locator('.sd-files-row', { hasText: 'report.docx' }).locator('.sd-file-name').click()
   await until(async () => (await ph.p.locator('.sd-word.flow .sd-w').count()) > 0, 15000)
   await sleep(600)

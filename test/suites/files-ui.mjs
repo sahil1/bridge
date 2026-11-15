@@ -1,5 +1,6 @@
-// Folders (src/components/files/, server/explorer.js): every folder on your computers,
-// as Finder shows them. Two Bridge AIs ("Desk" and "Laptop"), each on its own relay, linked. On Desk
+// Studio's home (src/components/files/, server/explorer.js): every folder on your computers, as
+// Finder shows them, with Studio's own lists beside them. Two Bridge AIs ("Desk" and "Laptop"), each
+// on its own relay, linked. On Desk
 // Desktop, Documents and iCloud Drive act like macOS's guarded folders (scripts/tcc-sim.mjs: each
 // look into one is held a moment and written down) and Downloads like one you said no to. Checked:
 //   the server: with no Beta Feature on (and with one saved off from before), the home folder and the drives are roots
@@ -11,13 +12,17 @@
 //   in Finder (stand-ins); Get Info and a folder's size; a search below a folder, bounded and
 //   stopped when it's no longer wanted; from another computer, a folder macOS hasn't asked about
 //   isn't read; and another site can't load a page's files through these roots;
-//   the app: Folders in the sidebar (no Files row); its own sidebar; the list, sorted by name and size; the path you
+//   the app: Studio in the sidebar (no Folders or Files row), its home's own sidebar (Studio's
+//   lists, then the folders); the list, sorted by name and size; the path you
 //   click and back and forward (buttons and keys); Quick Look with Space and the arrow keys; Get
 //   Info and a folder's size; renaming and Trash shown as coming; hidden files; icons with pictures
 //   of pictures and PDFs; columns with a file's preview; a search and its Stop; a document opened
-//   in Studio and a picture in its own app (a stand-in); Assist's panel; macOS asking about a folder
+//   in Studio's editor, a page of code in Quick Look and a picture in its own app (a stand-in); Recent
+//   and New on the home (a new file in the folder shown); Assist's panel; macOS asking about a folder
 //   you open (said, with nothing frozen meanwhile) and one it was refused (said, with how to allow
-//   it); Laptop's files from Desk, through the link; and on a phone, one column at a time.
+//   it); Laptop's files from Desk, through the link; Folders' old places (a tab, a link, the phone's
+//   More) landing in Studio's home at the folder; and on a phone, one column at a time, with Studio
+//   the one entry in More.
 // Pictures in light and dark and at a phone's width are in test/.out/shots (files-ui-*).
 import fs from 'node:fs'
 import path from 'node:path'
@@ -263,19 +268,25 @@ try {
   const shots = []
   // (After what's opening has faded in.)
   const snap = async (name) => { await sleep(300); await shot(p, `${tag}files-ui-${name}`); shots.push(name) }
-  await part('Folders in the sidebar', async () => {
-    ok(await p.locator('.rail-nav-btn', { hasText: /^\s*Files\s*$/ }).count() === 0, 'the sidebar has Folders, no Files row', await p.locator('.rail-nav-btn').allInnerTexts())
-    await p.locator('.rail-nav-btn', { hasText: 'Folders' }).click()
-    ok(await p.locator('.fx .fx-row[data-name="Projects"]').waitFor({ timeout: 15000 }).then(() => true, () => false), 'Folders opens from the sidebar, at your home folder')
-    ok((await p.locator('.fx-view > .pane-head h2, .pane-head h2').first().innerText().catch(() => '')).trim() === 'Folders' && /Folders/.test(await p.locator('.ws-tab.main').innerText().catch(() => '')), 'its page and its tab are called Folders', { head: await p.locator('.pane-head h2').first().innerText().catch(() => ''), tab: await p.locator('.ws-tab.main').innerText().catch(() => '') })
+  await part('Studio in the sidebar', async () => {
+    await p.locator('.rail-nav-btn', { hasText: 'Studio' }).waitFor({ timeout: 15000 })
+    const navs = await p.locator('.rail-nav-btn').allInnerTexts()
+    ok(navs.some((x) => x.trim() === 'Studio') && !navs.some((x) => /^\s*(Files|Folders)\s*$/.test(x)), 'the sidebar has Studio, and no Folders or Files row', navs)
+    await p.locator('.rail-nav-btn', { hasText: 'Studio' }).click()
+    ok(await p.locator('.fx.sd-home .fx-side-row[data-shelf="recent"][aria-current="location"]').waitFor({ timeout: 15000 }).then(() => true, () => false), 'Studio opens at Recent, its first list, in the sidebar of its home')
+    ok((await p.locator('.sd-home > .pane-head h2').innerText().catch(() => '')).trim() === 'Studio' && /Studio/.test(await p.locator('.ws-tab.main').innerText().catch(() => '')), 'its page and its tab are called Studio', { head: await p.locator('.sd-home > .pane-head h2').innerText().catch(() => ''), tab: await p.locator('.ws-tab.main').innerText().catch(() => '') })
     // Its sidebar comes on its own (/api/files/sidebar), after the folder now and then (Windows in
     // CI): whole, with a placeholder until then, never Locations alone to jump down under the rest.
     const early = await p.locator('.fx-side-sec h3').allInnerTexts()
-    ok(!early.length || early.includes('Favorites'), 'its sidebar comes whole, not Locations first and the rest above it after', early)
+    ok(!early.filter((h) => h !== 'Studio').length || early.includes('Favorites'), 'its sidebar comes whole, not Locations first and the rest above it after', early)
     await p.locator('.fx-side-sec h3', { hasText: 'Favorites' }).waitFor({ timeout: 15000 }).catch(() => {})
     const sections = await p.locator('.fx-side-sec h3').allInnerTexts()
+    const shelves = await p.locator('.fx-side-row[data-shelf]').evaluateAll((els) => els.map((e) => e.dataset.shelf))
+    ok(sections[0] === 'Studio' && JSON.stringify(shelves) === JSON.stringify(['recent', 'kind:doc', 'kind:deck', 'kind:sheet', 'kind:pdf', 'kind:page', 'kind:board', 'packs', 'signature']), 'Studio\'s lists first: Recent, each kind, Design Packs and Your Signature', { sections, shelves })
+    await p.locator('.fx-side-row[data-label="Home"]').click()
+    ok(await p.locator('.fx .fx-row[data-name="Projects"]').waitFor({ timeout: 15000 }).then(() => true, () => false), 'Home in its sidebar: your home folder')
     const sideRows = await p.locator('.fx-side-row').evaluateAll((els) => els.map((e) => e.dataset.label || e.dataset.computer))
-    ok(['Favorites', 'Projects', 'Places', 'Locations'].every((s) => sections.includes(s)) && sideRows.includes('Home') && sideRows.includes('Pictures') && sideRows.includes('Laptop') && (!IS_MAC || ['Desktop', 'Documents', 'Downloads', 'iCloud Drive', 'OneDrive'].every((n) => sideRows.includes(n))), 'its sidebar: Favorites, cloud drives, Projects, Places and Locations (drives, and Laptop)', { sections, sideRows })
+    ok(['Favorites', 'Projects', 'Places', 'Locations'].every((s) => sections.includes(s)) && sideRows.includes('Home') && sideRows.includes('Pictures') && sideRows.includes('Laptop') && (!IS_MAC || ['Desktop', 'Documents', 'Downloads', 'iCloud Drive', 'OneDrive'].every((n) => sideRows.includes(n))), 'then the folders: Favorites, cloud drives, Projects, Places and Locations (drives, and Laptop)', { sections, sideRows })
     if (IS_MAC) ok(!looked('Desktop').length && !looked('Documents').length && !looked('Downloads').length && !looked('Library/Mobile Documents').length, 'nothing macOS asks about has been looked into: the page, the sidebar and the home folder never read them')
     await snap('home')
   })
@@ -389,9 +400,12 @@ try {
     ok(!!found && where === 'Projects/site', 'a search in the folder and below it, with where each one is', { found, where })
     if (IS_MAC) ok(/Not looked in: .*Documents/.test(await p.locator('.fx-search-note').innerText()), 'and it says which folders it didn\'t go into (macOS would ask first)', await p.locator('.fx-search-note').innerText())
     await p.locator('.fx-row[data-name="notes.md"]').dblclick()
-    ok(!!(await until(async () => /Launch on/.test(await p.locator('.sd-page .ProseMirror').innerText().catch(() => '')), 15000)), 'a double-click on a document opens it in Studio')
-    await p.locator('.ws-tab', { hasText: 'Folders' }).first().click()
-    await p.locator('.fx').waitFor({ timeout: 8000 })
+    ok(!!(await until(async () => /Launch on/.test(await p.locator('.sd-page .ProseMirror').innerText().catch(() => '')), 15000)), 'a double-click on a document opens it in Studio\'s editor')
+    const tabs = await p.evaluate(() => JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs || [])
+    ok(tabs.length === 1 && tabs[0] === `view:studio:home:${enc('Projects/site/notes.md')}`, 'in the same place: Studio\'s tab, now the document', tabs)
+    // Files, in its header: back to the folder it was opened from.
+    await p.locator('.sd-file .sd-tabs [role="tab"]', { hasText: 'Files' }).click()
+    ok(await p.locator('.fx.sd-home .fx-row[data-name="notes.txt"]').waitFor({ timeout: 8000 }).then(() => true, () => false) && (await crumbs(p)).join(' › ') === 'Home', 'Files in its header: back to the folder, as it was', await crumbs(p))
     await p.locator('.fx-search input').fill('')
     // Stop: a search that takes its time (held here until it's stopped), stopped.
     let letGo
@@ -406,6 +420,41 @@ try {
     await p.unroute(/\/api\/files\/search/)
     await p.locator('.fx-search input').fill('')
     await p.locator('.fx-row[data-name="notes.txt"]').waitFor()
+  })
+  await part('anything else in Quick Look', async () => {
+    await p.locator('.fx-side-row[data-label="Home"]').click()
+    await p.locator('.fx-row[data-name="Projects"]').dblclick()
+    await p.locator('.fx-row[data-name="site"]').dblclick()
+    await p.locator('.fx-row[data-name="style.css"]').dblclick()
+    ok(await p.locator('.fx-ql .code-view').waitFor({ timeout: 8000 }).then(() => true, () => false) && /style\.css/.test(await p.locator('.fx-ql-title b').innerText()) && (await p.locator('.sd-file').count()) === 0,
+      'a double-click on a file Studio doesn\'t edit (a stylesheet) shows it in Quick Look, over the folder', await p.locator('.fx-ql-title').innerText().catch(() => ''))
+    await p.keyboard.press('Escape')
+    ok(!!(await until(async () => (await p.locator('.fx-ql').count()) === 0, 4000)), 'and Esc closes it')
+  })
+  await part('Recent and New on the home', async () => {
+    // Recent, in Studio's own lists: the document opened from the folder, with its folder said.
+    await p.locator('.fx-side-row[data-shelf="recent"]').click()
+    const row = p.locator('.sd-shelf .sd-files-row', { hasText: 'notes.md' }).first()
+    ok(await row.waitFor({ timeout: 10000 }).then(() => true, () => false) && /~\/Projects\/site/.test(await row.locator('.sd-file-dir').innerText()), 'Recent lists the document opened from a folder, with where it is', await row.innerText().catch(() => ''))
+    ok((await crumbs(p)).join(' › ') === 'Recent' && await p.locator('.fx-bar .fx-views').count() === 0 && await p.locator('.fx-bar button[aria-label="AI Assist"]').count() === 0, 'a list has its name in the path, without a folder\'s views or AI Assist', await crumbs(p))
+    // Find a file, in the bar: through all of them.
+    await p.locator('.fx-search input').fill('notes')
+    ok(!!(await until(async () => /Matching “notes”/.test(await p.locator('.sd-list-head').innerText().catch(() => '')), 4000)), 'the bar\'s search finds a file by its name, through all of them')
+    await p.locator('.fx-search input').fill('')
+    // New, in the header: in the folder shown, which it offers first.
+    await p.locator('.fx-side-row[data-label="Home"]').click()
+    await p.locator('.fx-row[data-name="Projects"]').dblclick()
+    await p.locator('.fx-row[data-name="site"]').waitFor({ timeout: 8000 })
+    await p.locator('.sd-new-open').click()
+    ok(JSON.stringify(await p.locator('.sd-new-menu [role="menuitem"]').allInnerTexts()) === '["Document","Markdown","Sheet","Deck","Page","Whiteboard"]', 'New, in Studio\'s header, from a folder: what it makes')
+    await p.locator('.sd-new-menu [role="menuitem"]', { hasText: 'Markdown' }).click()
+    const where = p.locator('.sd-new-form select')
+    ok(await where.waitFor({ timeout: 4000 }).then(() => true, () => false) && /This folder \(Projects\)/.test(await where.evaluate((s) => s.options[s.selectedIndex]?.text || '')), 'its name and where, over the folder: this folder first', await where.evaluate((s) => [...s.options].map((o) => o.text)).catch(() => []))
+    await p.locator('.sd-new-form input').fill('Plan')
+    await p.locator('.sd-new-form button', { hasText: 'Make it' }).click()
+    ok(!!(await until(() => fs.existsSync(path.join(h, 'Projects', 'Plan.md')), 10000)) && await p.locator('.sd-file').waitFor({ timeout: 15000 }).then(() => true, () => false), 'Make it: made in that folder, and open in the editor')
+    await p.locator('.sd-file .sd-tabs [role="tab"]', { hasText: 'Files' }).click()
+    ok(await p.locator('.fx-row[data-name="Plan.md"]').waitFor({ timeout: 8000 }).then(() => true, () => false), 'and there in the folder, back on the home')
   })
   await part('in its own app', async () => {
     if (IS_WIN) { skip('a picture opened in its own app', 'Explorer can\'t be stood in for'); return }
@@ -478,13 +527,43 @@ try {
     await p.locator('.fx-side-on button', { hasText: 'Back to' }).click()
     ok(await p.locator('.fx-row[data-name="Projects"]').waitFor({ timeout: 8000 }).then(() => true, () => false), 'and back to this computer')
   })
+  await part('a link to Folders', async () => {
+    // From where Studio's home is now (one of its lists): your home folder, as Folders opened.
+    await p.locator('.fx-side-row[data-shelf="kind:doc"]').click()
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'view:files' } })))
+    ok(await p.locator('.fx.sd-home .fx-row[data-name="Projects"]').waitFor({ timeout: 8000 }).then(() => true, () => false) && (await crumbs(p)).join(' › ') === 'Home', 'a link to Folders, with Studio at a list: Studio\'s home at your home folder', await crumbs(p))
+    const tabs = await p.evaluate(() => JSON.parse(localStorage.getItem('cc-ws') || '{}').tabs || [])
+    ok(JSON.stringify(tabs) === '["view:studio"]', 'in Studio\'s tab, not one of its own', tabs)
+    // From a folder: that folder stays.
+    await p.locator('.fx-row[data-name="Pictures"]').dblclick()
+    await p.locator('.fx-row[data-name="sky.png"]').waitFor({ timeout: 8000 })
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: 'view:files' } })))
+    await sleep(500)
+    ok((await crumbs(p)).join(' › ') === 'Home › Pictures', 'with Studio at a folder, it stays there', await crumbs(p))
+  })
   ok(!errors.length, 'no page errors', errors.slice(0, 3))
   await p.context().close()
+
+  // ---------- Folders' places from before it was Studio's home ----------
+  await part('a tab kept from before', async () => {
+    // A window that had Folders in a tab, pinned, at a folder: Studio's home in that tab, at it.
+    const ws = { tabs: ['view:files'], active: 'view:files', side: null, split: false, group: 'main', pinned: ['view:files'] }
+    const o = await page(b, desk.url, { store: { 'cc-ws': ws, 'cc-fx-view': 'list', 'cc-fx-where:here': { root: 'home', path: 'Projects/site' } } })
+    ok(await o.p.locator('.fx.sd-home .fx-row[data-name="notes.md"]').waitFor({ timeout: 15000 }).then(() => true, () => false) && (await o.p.locator('.fx-path .fx-crumb').allInnerTexts()).join(' › ') === 'Home › Projects › site', 'a window that kept Folders in a tab opens Studio\'s home there, at the folder Folders was in')
+    const kept = await o.p.evaluate(() => JSON.parse(localStorage.getItem('cc-ws') || '{}'))
+    ok(JSON.stringify(kept.tabs) === '["view:studio"]' && kept.active === 'view:studio' && JSON.stringify(kept.pinned) === '["view:studio"]' && /Studio/.test(await o.p.locator('.ws-tab.main').innerText().catch(() => '')), 'its tab is Studio\'s now, still pinned, and no blank page', kept)
+    ok(!o.errors.length, 'no page errors', o.errors.slice(0, 3))
+    await o.ctx.close()
+    // One that never went into a folder (Folders opened at your home folder): there.
+    const n = await page(b, desk.url, { store: { 'cc-ws': ws } })
+    ok(await n.p.locator('.fx.sd-home .fx-row[data-name="Projects"]').waitFor({ timeout: 15000 }).then(() => true, () => false) && (await n.p.locator('.fx-path .fx-crumb').allInnerTexts()).join(' › ') === 'Home', 'one that kept Folders at your home folder opens Studio there, not at a list')
+    await n.ctx.close()
+  })
 
   // ---------- dark, and a phone ----------
   await part('dark', async () => {
     const d = await page(b, desk.url, { mode: 'dark', store: { 'cc-fx-view': 'list', 'cc-fx-where:here': { root: 'home', path: 'Projects/site' } } })
-    await d.p.locator('.rail-nav-btn', { hasText: 'Folders' }).click()
+    await d.p.locator('.rail-nav-btn', { hasText: 'Studio' }).click()
     await d.p.locator('.fx-row[data-name="notes.md"]').click({ timeout: 15000 })
     await shot(d.p, `${tag}files-ui-dark-list`)
     await d.p.keyboard.press('Space')
@@ -506,8 +585,10 @@ try {
     const ph = await page(b, desk.url, { phone: true, store: { 'cc-fx-where:here': { root: 'home', path: '' }, 'cc-fx-view': 'list' } })
     const q = ph.p
     await q.locator('.tabbar button', { hasText: 'More' }).click()
-    await q.locator('.m-more-row[data-id="files"]').click()
-    ok(await q.locator('.fx.narrow .fx-row[data-name="Projects"]').waitFor({ timeout: 15000 }).then(() => true, () => false), 'on a phone: More › Folders, your home folder in one column')
+    const more = await q.locator('.m-more-row').evaluateAll((els) => els.map((e) => e.dataset.id))
+    ok(more.includes('studio') && !more.includes('files') && !(await q.locator('.m-more-row', { hasText: /^Folders/ }).count()), 'on a phone, More has Studio, one entry for your files, and no Folders row', more)
+    await q.locator('.m-more-row[data-id="studio"]').click()
+    ok(await q.locator('.fx.narrow .fx-row[data-name="Projects"]').waitFor({ timeout: 15000 }).then(() => true, () => false), 'More › Studio: your home folder in one column, where it was')
     const tall = await q.locator('.fx-row[data-name="Projects"]').evaluate((e) => Math.round(e.getBoundingClientRect().height))
     ok(tall >= 44, `a row is a whole target (${tall} px)`)
     await q.locator('.fx-row[data-name="Projects"]').click()
@@ -519,7 +600,7 @@ try {
     await q.locator('.fx-bar button[aria-label="Up to the folder it\'s in"]').click()
     await q.locator('.fx-row[data-name="Projects"]').waitFor({ timeout: 8000 })
     await q.locator('.fx-bar button[aria-label="All locations"]').click()
-    ok(await q.locator('.fx.narrow .fx-side-row[data-label="Home"]').waitFor({ timeout: 4000 }).then(() => true, () => false), 'back from the top: the sidebar, a screen of its own')
+    ok(await q.locator('.fx.narrow .fx-side-row[data-label="Home"]').waitFor({ timeout: 4000 }).then(() => true, () => false) && await q.locator('.fx.narrow .fx-side-row[data-shelf="recent"]').isVisible(), 'back from the top: the sidebar, a screen of its own, Studio\'s lists first')
     f = await phoneFaults(q, '.fx')
     ok(!f.wider && !f.past && !f.sideways && !f.small, 'and it fits too', f)
     await shot(q, `${tag}files-ui-phone-sidebar`)
@@ -531,11 +612,9 @@ try {
     await q.locator('.fx-ql button[aria-label="Close"]').click()
     ok(!ph.errors.length, 'no page errors on the phone', ph.errors.slice(0, 3))
     await ph.p.context().close()
-    // And in dark.
-    const dk = await page(b, desk.url, { phone: true, mode: 'dark', store: { 'cc-fx-where:here': { root: 'home', path: 'Projects/site' }, 'cc-fx-view': 'list' } })
-    await dk.p.locator('.tabbar button', { hasText: 'More' }).click()
-    await dk.p.locator('.m-more-row[data-id="files"]').click()
-    await dk.p.locator('.fx-row[data-name="notes.md"]').waitFor({ timeout: 15000 })
+    // And in dark, a phone left at More's old Folders row: Studio there, at the folder it was in.
+    const dk = await page(b, desk.url, { phone: true, mode: 'dark', store: { 'cc-mtab': 'more', 'cc-more-view': 'view:files', 'cc-fx-where:here': { root: 'home', path: 'Projects/site' }, 'cc-fx-view': 'list' } })
+    ok(await dk.p.locator('.m-more-view .fx.sd-home .fx-row[data-name="notes.md"]').waitFor({ timeout: 15000 }).then(() => true, () => false) && await dk.p.evaluate(() => JSON.parse(localStorage.getItem('cc-more-view'))) === 'view:studio', 'a phone left at More\'s Folders: Studio, at the folder it was in')
     await shot(dk.p, `${tag}files-ui-phone-dark`)
     ok(!dk.errors.length, 'no page errors on the phone in dark', dk.errors.slice(0, 3))
     await dk.p.context().close()

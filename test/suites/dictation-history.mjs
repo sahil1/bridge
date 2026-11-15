@@ -524,7 +524,7 @@ try {
     await p.locator('.tabbar button', { hasText: 'More' }).click()
     await p.locator('.m-more-row').first().waitFor({ timeout: 8000 }).catch(() => {})
     const more = await p.locator('.m-more-row').evaluateAll((els) => els.map((e) => e.dataset.id))
-    ok(more.includes('files') && !more.includes('dictations') && /Folders/.test(await p.locator('.m-more-row[data-id="files"]').innerText()), 'a phone: More has Folders and no Dictations row', more)
+    ok(more.includes('studio') && !more.includes('files') && !more.includes('dictations') && /Studio/.test(await p.locator('.m-more-row[data-id="studio"]').innerText()), 'a phone: More has Studio and no Folders or Dictations row', more)
     ok(real(errors).length === 0, 'no page errors on the phone', errors)
     await ctx.close()
   }

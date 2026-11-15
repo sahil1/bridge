@@ -1,8 +1,11 @@
 /* Studio: its home, a file's page, each kind's editor, versions, Ask an agent and design packs.
    The app's colours (--pane, --ink, --line, --accent) so light and dark both look right. */
 .sd-home-view { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0; background: var(--pane); }
-.sd-home { min-height: 0; overflow: auto; padding: 20px 26px 40px; background: var(--pane); }
-.sd-home > * { max-width: 1040px; }
+/* One of Studio's lists on its home (Recent, a kind, design packs, your signature), where a folder
+   would be; New's form over it, or over a folder. */
+.sd-shelf { padding: 20px 26px 40px; }
+.sd-shelf > * { max-width: 1040px; }
+.fx-body > .sd-new-sec { max-width: 1040px; margin: 16px 26px 12px; }
 .sd-home-say { margin: 0 0 16px; line-height: 1.5; }
 /* Studio's headers (its home, a file's page; a whiteboard's, in whiteboard.css, the same): every
    control one height, 30px, as the toolbar's under them are, so a row of them lines up top and
@@ -308,7 +311,8 @@
 /* A narrow pane: one column, the versions over the file (under its header, over its editor); a Word
    page with smaller margins. */
 @media (max-width: 700px) {
-  .sd-home { padding: 16px 16px 32px; }
+  .sd-shelf { padding: 16px 16px 32px; }
+  .fx-body > .sd-new-sec { margin: 12px 16px 8px; }
   .sd-body.with-panel { grid-template-columns: minmax(0, 1fr); }
   .sd-panel { position: absolute; inset: 0; z-index: 3; }
   .sd-page.md, .sd-page:not(.word):not(.md) { margin: 0; padding: 22px 18px 48px; }
@@ -365,7 +369,8 @@
 /* Studio's home on a phone: New two a row, each its icon and name (what it makes in its title), so
    your files come into sight sooner; the form's fields whole, a recent file's folder on a line of
    its own rather than cut off, and its remove button always there (a phone has no hover). */
-.app.narrow .sd-home { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
+.app.narrow .sd-shelf { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
+.app.narrow .fx-body > .sd-new-sec { margin-left: max(14px, env(safe-area-inset-left)); margin-right: max(14px, env(safe-area-inset-right)); }
 .app.narrow .sd-new { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .app.narrow .sd-new-btn { grid-template-columns: 30px minmax(0, 1fr); grid-template-rows: auto; column-gap: 10px; align-items: center; min-height: 48px; padding: 8px 10px; }
 .app.narrow .sd-new-ic { grid-row: 1; }

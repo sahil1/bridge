@@ -7,8 +7,8 @@
 // folding; the one recording and the one open stay in sight when their group is folded; what's
 // folded is kept after a reload; a month of more than ten shows eight and Show more; and the list
 // stays short and quick however many there are. With dictations kept and every Beta Feature on, the
-// rows at the top are Home, New, Chief of Staff, Meetings, Studio and Folders, with no heading over
-// them and no Dictations, Whiteboards or Files row, and New space's icon isn't Studio's. On a
+// rows at the top are Home, New, Chief of Staff, Meetings and Studio, with no heading over them and
+// no Dictations, Whiteboards, Files or Folders row, and New space's icon isn't Studio's. On a
 // 1280x800 window with the meetings' list long, the sidebar scrolls as one (no list in it scrolls on
 // its own), Spaces' heading stays in sight however far it's scrolled, and the window is never pushed
 // up past the top bar; Spaces fold to how many there are, and stay folded after a reload.
@@ -174,12 +174,12 @@ try {
   const again = await p.evaluate(() => [...document.querySelectorAll('.rail-meetings .rm-day-head, .rail-meetings .rm-span-head')].filter((e) => e.getAttribute('aria-expanded') === 'true').map((e) => e.innerText.replace(/\s+/g, ' ').trim()))
   ok(!again.some((x) => /^today/i.test(x)) && again.some((x) => /^yesterday/i.test(x)) && again.some((x) => /^earlier/i.test(x)) && again.length === 3, 'after a reload, what was open or folded stays so', again)
   // The rows at the top, with dictations kept and every Beta Feature on: Home, New, Chief of Staff,
-  // Meetings, Studio and Folders, with no heading over them, no Dictations or Whiteboards row, and
+  // Meetings and Studio, with no heading over them, no Dictations, Whiteboards or Folders row, and
   // one list under them (Meetings').
   await p.locator('.rail .tab-row', { hasText: 'Payments' }).waitFor({ timeout: 20000 }).catch(() => {})
   const navs = (await p.locator('.rail-nav > .rail-nav-btn, .rail-nav > .rail-nav-row > .rail-nav-btn').allInnerTexts()).map((x) => x.replace(/\s+/g, ' ').trim())
-  ok(['Home', 'New', 'Meetings', 'Studio', 'Folders'].every((n) => navs.some((x) => x === n || x.startsWith(`${n} `))) && navs.some((x) => /^Chief of Staff/.test(x)), 'the rows at the top: Home, New, Chief of Staff, Meetings, Studio and Folders', navs)
-  ok(!navs.some((x) => /^(Dictations|Whiteboards|Files)\b/.test(x)) && await p.locator('.rail-dictations').count() === 0, 'no Dictations, Whiteboards or Files row, and no list of dictations: Dictations is a tab of Meetings, whiteboards are in Studio, Files is Folders', navs)
+  ok(['Home', 'New', 'Meetings', 'Studio'].every((n) => navs.some((x) => x === n || x.startsWith(`${n} `))) && navs.some((x) => /^Chief of Staff/.test(x)), 'the rows at the top: Home, New, Chief of Staff, Meetings and Studio', navs)
+  ok(!navs.some((x) => /^(Dictations|Whiteboards|Files|Folders)\b/.test(x)) && await p.locator('.rail-dictations').count() === 0, 'no Dictations, Whiteboards, Files or Folders row, and no list of dictations: Dictations is a tab of Meetings, whiteboards and your folders are in Studio', navs)
   ok(await p.locator('.rail-views-head').count() === 0 && !/\bViews\b/.test(await p.locator('.rail').innerText()), 'and no Views heading over them', await p.locator('.rail').innerText())
   // New space's icon isn't Studio's.
   const glyph = (l) => l.locator('svg').first().innerHTML().catch(() => '')
@@ -189,7 +189,7 @@ try {
   // scrolling on its own; Spaces' heading stays in view at its foot; and bringing its last row into
   // view (as the keyboard or the app does) never pushes the whole window up past the top bar.
   await p.setViewportSize({ width: 1280, height: 800 })
-  await p.locator('.rail-nav-btn', { hasText: 'Folders' }).scrollIntoViewIfNeeded()
+  await p.locator('.rail-nav-btn', { hasText: 'Studio' }).scrollIntoViewIfNeeded()
   // The sidebar's scroll areas, and where its heading is against what scrolls.
   const look = () => p.evaluate(() => {
     const box = (s) => { const r = document.querySelector(s)?.getBoundingClientRect(); return r ? { top: Math.round(r.top), bottom: Math.round(r.bottom) } : null }
@@ -224,7 +224,7 @@ try {
   await shot(p, `${tag}rail-spaces-folded`)
   await p.reload()
   await p.locator('.rail-spaces-head').waitFor({ timeout: 20000 }).catch(() => {})
-  ok(!!(await until(async () => await p.locator('.rail-spaces-head .rail-sec').getAttribute('aria-expanded') === 'false' && await p.locator('.rail-nav-btn', { hasText: 'Folders' }).count() === 1, 8000)), 'after a reload, Spaces is still folded, and the rows above it are there', await p.locator('.rail').innerText())
+  ok(!!(await until(async () => await p.locator('.rail-spaces-head .rail-sec').getAttribute('aria-expanded') === 'false' && await p.locator('.rail-nav-btn', { hasText: 'Studio' }).count() === 1, 8000)), 'after a reload, Spaces is still folded, and the rows above it are there', await p.locator('.rail').innerText())
   await p.locator('.rail-spaces-head .rail-sec').click()
   ok(!!(await until(async () => (await p.locator('.rail .tab-row', { hasText: 'Payments' }).count()) === 1, 8000)), 'unfolded, Spaces is back as it was', await p.locator('.rail .tab-row').allInnerTexts())
   // WebKit counts a request the reload cut off (the presence ping, the live feed) as a page error.

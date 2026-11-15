@@ -11,7 +11,7 @@ import Board from './components/Board.jsx'
 import TabStrip from './components/TabStrip.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty, showChat, showView } from './components/Console.jsx'
-import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, StudioHome, StudioPage, Explorer, UsageStats, preloadViews } from './lazy.jsx'
+import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, StudioHome, StudioPage, UsageStats, preloadViews } from './lazy.jsx'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
 import { MeetingsProvider, RecordingPill, CallPrompt, useMeetings } from './components/meetings/recording.jsx'
@@ -49,6 +49,7 @@ import RemoteAgent from './components/RemoteAgent.jsx'
 import Dictation from './dictation/Dictation.jsx'
 import BackForward from './components/BackForward.jsx'
 import { start as navStart, stop as navStop, seen as navSeen, recheck as navRecheck, usePlaces, placeOf, placeLabel, showPlaceIn, replacedWith, renamedTab, slotOf } from './backForward.js'
+import { WHERE_KEY, SHELF } from './components/files/fsapi.js'
 import { t, tn, tx } from './i18n/index.js'
 
 const MIN_PANE = 420
@@ -201,10 +202,11 @@ function useFit(onFold) {
 }
 
 // Views that open in tabs beside the agents: Home (start something new), Meetings (and Dictations,
-// a tab of it), a meeting, Studio and a file in it (a whiteboard too: placeNow), Folders (view:files),
-// and the agent map (what runs on which of your computers).
+// a tab of it), a meeting, Studio (every file on your computers; Folders was a place of its own
+// through 3.19: placeNow) and a file in it (a whiteboard too), and the agent map (what runs on which
+// of your computers).
 // With Home on (a trial): Home (what needs you, NeedsHome.jsx) and Everything.
-const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everything': { title: tx('Everything'), icon: 'grid' }, 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:studio': { title: tx('Studio'), icon: 'layers' }, 'view:files': { title: tx('Folders'), icon: 'folder' }, 'view:map': { title: tx('Agent Map'), icon: 'grid' } }
+const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everything': { title: tx('Everything'), icon: 'grid' }, 'view:new': { title: tx('New'), icon: 'plus' }, 'view:meetings': { title: tx('Meetings'), icon: 'mic' }, 'view:studio': { title: tx('Studio'), icon: 'layers' }, 'view:map': { title: tx('Agent Map'), icon: 'grid' } }
 // A whiteboard's place before whiteboards were in Studio (its id after it): placeNow.
 const BOARD = 'view:whiteboard:'
 // A Studio file's tab: its root (an agent's pane, or place:<id>) and path, each encoded. A
@@ -226,12 +228,15 @@ const studioId = (f) => `${STUDIO}${encodeURIComponent(f.root)}:${encodeURICompo
 const studioOf = (id) => { const [r, p] = id.slice(STUDIO.length).split(':'); return { root: decodeURIComponent(r || ''), path: decodeURIComponent(p || '') } }
 const isView = (id) => typeof id === 'string' && id.startsWith('view:')
 // Whiteboards are one of Studio's kinds: its Files lists them and one opens in its Preview, so they
-// have no page or tab of their own. Whatever still asks for the old place (a tab kept from before, a
-// link, ⌘K, Home, a meeting's board, an agent) gets the one in Studio. (Neither is in the demo or the
-// phone apps' Cloud agents, which have no computer to keep them on.)
+// have no page or tab of their own. Folders is Studio's home, every file on your computers. Whatever
+// still asks for an old place (a tab kept from before, a link, ⌘K, Home, a meeting's board, an agent)
+// gets the one in Studio: Folders' at the folder it was in, which Studio's home keeps where Folders
+// did (files/fsapi.js WHERE_KEY). (None is in the demo or the phone apps' Cloud agents, which have no
+// computer to keep them on.)
+const FOLDERS = 'view:files'
 function placeNow(id) {
   if (typeof id !== 'string' || !StudioHome) return id
-  return id === 'view:whiteboards' ? 'view:studio' : id.startsWith(BOARD) ? studioId({ root: 'board', path: id.slice(BOARD.length) }) : id
+  return id === 'view:whiteboards' || id === FOLDERS ? 'view:studio' : id.startsWith(BOARD) ? studioId({ root: 'board', path: id.slice(BOARD.length) }) : id
 }
 // A window's tabs, each where it is now: one whose place is open already gives way to that tab.
 function tabsNow(w) {
@@ -246,8 +251,12 @@ function tabsNow(w) {
   }
   return w
 }
-// Studio's Files at one of its kinds (Whiteboards, for what asked for the list of them).
-const showStudioKind = (kind) => { store.set('cc-studio-group', `kind:${kind}`); window.dispatchEvent(new CustomEvent('bridge-studio-show', { detail: { group: `kind:${kind}` } })) }
+// Studio's Files at one of its kinds (Whiteboards, for what asked for the list of them): where its
+// home opens, or goes now while it's open.
+const showStudioKind = (kind) => {
+  try { localStorage.setItem(WHERE_KEY, JSON.stringify({ machine: null, root: `${SHELF}kind:${kind}`, path: '' })) } catch { /* private mode */ }
+  window.dispatchEvent(new CustomEvent('bridge-studio-show', { detail: { group: `kind:${kind}` } }))
+}
 // Typing in a Studio document, where ⌘K is a link and ⌘, subscript, as in Google Docs and Word.
 const writingDoc = (e) => !!e.target?.closest?.('.sd-doc .ProseMirror')
 
@@ -281,23 +290,41 @@ function intoMeetings(from, show) {
 intoMeetings(MEMORY, () => memoryTab({ all: true }))
 intoMeetings(DICTATIONS, () => meetingsAt('dictations'))
 
-// What a window kept from before whiteboards were in Studio, before anything shows: its tabs (each
-// herdr session's too) and the phone's More, each where it is now (placeNow). Whiteboards on screen
-// becomes Studio's Files at Whiteboards.
-function boardsMoved() {
+// Folders asked for (a link, ⌘K or a tab kept from before it was Studio's home): Studio's home at the
+// folder Folders was in, or at your home folder (as Folders opened) while it shows one of its lists.
+function showFolders() {
+  let w = null
+  try { w = JSON.parse(localStorage.getItem(WHERE_KEY)) } catch { /* none kept */ }
+  if (w?.root && !String(w.root).startsWith(SHELF)) return
+  const home = { machine: null, root: 'home', path: '' }
+  try { localStorage.setItem(WHERE_KEY, JSON.stringify(home)) } catch { /* private mode */ }
+  window.dispatchEvent(new CustomEvent('bridge-studio-show', { detail: { where: home } }))
+}
+
+// What a window kept from before whiteboards and Folders were in Studio, before anything shows: its
+// tabs (each herdr session's too) and the phone's More, each where it is now (placeNow). Whiteboards
+// on screen becomes Studio's Files at Whiteboards; Folders, Studio's home at its folder (its tab, when
+// it had Studio's place, or was the one on screen).
+function placesMoved() {
   if (!StudioHome) return
   const old = (w) => !!w?.tabs?.some((id) => placeNow(id) !== id)
+  const onScreen = (w, id) => w.active === id || (!!w.split && w.side === id)
   const ws = store.get('cc-ws', null)
   if (old(ws)) {
-    if (ws.active === 'view:whiteboards' || (ws.split && ws.side === 'view:whiteboards')) showStudioKind('board')
+    if (onScreen(ws, 'view:whiteboards')) showStudioKind('board')
+    if (ws.tabs.includes(FOLDERS) && (!ws.tabs.includes('view:studio') || onScreen(ws, FOLDERS))) showFolders()
     store.set('cc-ws', tabsNow(ws))
   }
   const bySession = store.get('cc-ws-sessions', null)
   if (bySession && Object.values(bySession).some(old)) store.set('cc-ws-sessions', Object.fromEntries(Object.entries(bySession).map(([k, w]) => [k, old(w) ? tabsNow(w) : w])))
   const more = store.get('cc-more-view', null)
-  if (typeof more === 'string' && placeNow(more) !== more) { if (more === 'view:whiteboards') showStudioKind('board'); store.set('cc-more-view', placeNow(more)) }
+  if (typeof more === 'string' && placeNow(more) !== more) {
+    if (more === 'view:whiteboards') showStudioKind('board')
+    if (more === FOLDERS) showFolders()
+    store.set('cc-more-view', placeNow(more))
+  }
 }
-boardsMoved()
+placesMoved()
 
 // The recording of a meeting lives above everything else, so it goes on while you move around.
 export default function Root() {
@@ -341,9 +368,9 @@ function App() {
   const [mobileAgent, setMobileAgent] = useState(null)
   const [mobileMeeting, setMobileMeeting] = useState(null) // the meeting open in the phone's Meetings tab
   // What the phone's More tab shows: its list (null), Terminals ('terminals'), or a view (Studio, a
-  // file in it, Folders, the agent map). Kept, as a computer keeps its tabs, so a reload comes back
-  // to it. Terminals had a tab of its own until 3.8.3 (Memory a row through 3.13, Dictations through
-  // 3.18: intoMeetings).
+  // file in it, the agent map). Kept, as a computer keeps its tabs, so a reload comes back to it.
+  // Terminals had a tab of its own until 3.8.3 (Memory a row through 3.13, Dictations through 3.18:
+  // intoMeetings; Folders through 3.19: placesMoved).
   const [moreView, setMoreView] = usePersisted('cc-more-view', null)
   useEffect(() => { if (mtab === 'herdr') { setMtab('more'); setMoreView('terminals') } }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [homeView, setHomeView] = useState('home') // the phone's Home tab: Home, or Everything
@@ -503,8 +530,9 @@ function App() {
     // kept from before get Meetings at Dictations.
     if (paneId === DICTATIONS) { meetingsAt('dictations'); paneId = 'view:meetings' }
     // Whiteboards and a whiteboard are in Studio (placeNow): the list of them is Studio's Files at
-    // Whiteboards.
+    // Whiteboards. Folders is Studio's home, at the folder it was in.
     if (paneId === 'view:whiteboards' && StudioHome) showStudioKind('board')
+    if (paneId === FOLDERS && StudioHome) showFolders()
     paneId = placeNow(paneId)
     replace = placeNow(replace)
     setView('command')
@@ -515,9 +543,9 @@ function App() {
       // On the phone's Cloud agents, Back (Android's) closes the agent first.
       if (cloudOnly && paneId !== mobileAgent) { if (window.history.state?.agent) window.history.replaceState({ agent: paneId }, ''); else window.history.pushState({ agent: paneId }, '') }
       // Meetings (Dictations too) and a meeting open in the phone's own Meetings tab; Studio (and a
-      // whiteboard in it) and Folders in its More tab.
+      // file or whiteboard in it) in its More tab.
       if (typeof paneId === 'string' && paneId.startsWith('view:meeting')) { setMtab('meetings'); setMobileMeeting(paneId === 'view:meetings' ? null : paneId); return }
-      if (typeof paneId === 'string' && (paneId.startsWith('view:studio') || paneId === 'view:files')) { setMtab('more'); setMoreView(paneId); return }
+      if (typeof paneId === 'string' && paneId.startsWith('view:studio')) { setMtab('more'); setMoreView(paneId); return }
       if (paneId === 'view:home' || paneId === 'view:everything') { setMtab('home'); setHomeView(paneId === 'view:home' ? 'home' : 'everything'); return }
       if (a?.chief) { setMtab('mate'); setMobileAgent(null); setMateId(paneId) } else { setMtab('agents'); setMobileAgent(paneId) }
       return
@@ -879,8 +907,8 @@ function App() {
     insightsOn && { id: 'a:people', label: t('People You Meet'), icon: 'users', keywords: 'people attendees contacts who met meetings together', run: () => meetingsTab('people') },
     { id: 'a:dictations', label: t('Dictations'), sub: t('In Meetings'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent(DICTATIONS) },
     { id: 'a:memory', label: t('Memory'), sub: t('In Meetings and Dictations'), icon: 'book', keywords: 'memory people organizations organisations companies projects products terms names words misheard about me about you persona context meeting memory', run: () => openAgent(MEMORY) },
-    StudioHome && { id: 'a:studio', label: t('Studio'), icon: 'layers', keywords: 'studio document word docx sheet excel xlsx spreadsheet deck slides powerpoint pptx pdf page html artifact markdown design pack', run: () => openAgent('view:studio') },
-    Explorer && { id: 'a:files', label: t('Folders'), icon: 'folder', keywords: 'folders files finder explorer browse desktop documents downloads home drive disk icloud onedrive dropbox quick look get info', run: () => openAgent('view:files') },
+    // Studio is also where your folders are (Folders until 3.19): found by their words too.
+    StudioHome && { id: 'a:studio', label: t('Studio'), sub: t('Every file on your computers'), icon: 'layers', keywords: 'studio document word docx sheet excel xlsx spreadsheet deck slides powerpoint pptx pdf page html artifact markdown design pack folders files finder explorer browse desktop documents downloads home drive disk icloud onedrive dropbox quick look get info', run: () => openAgent('view:studio') },
     StudioHome && { id: 'a:boards', label: t('Whiteboards'), sub: t('In Studio'), icon: 'shapes', keywords: 'whiteboard board excalidraw draw sketch diagram flowchart architecture sequence org chart mermaid drawio canvas', run: () => openAgent('view:whiteboards') },
     { id: 'a:map', label: t('Agent Map'), icon: 'grid', keywords: 'what is running where devices computers machines all agents overview cloud subagents', run: openMap },
     { id: 'a:needs', label: t('Needs You'), icon: 'bell', keywords: 'inbox waiting approve allow permission questions answer review finished failed devices', run: () => setInbox({}) },
@@ -1054,7 +1082,6 @@ function App() {
         : id === 'view:map' ? <section className="pane view-pane"><AgentMap phone={!wide} onOpen={(d, a) => openOn(d.id, a.paneId, { device: d.name, title: a.name || a.title, kind: a.kind })}
           controls={wide ? { maximized: !!L.max, onMaximize: () => set({ max: L.max ? null : 'main' }) } : null} /></section>
         : id === 'view:meetings' ? <section className="pane view-pane"><MeetingsHome onOpen={(mid) => openAgent(`view:meeting:${mid}`, wide ? { replace: 'view:meetings' } : {})} /></section>
-        : id === 'view:files' && Explorer ? <section className="pane view-pane"><Explorer /></section>
         : id === 'view:studio' && StudioHome ? <section className="pane view-pane"><StudioHome onOpen={(f) => openAgent(studioId(f), wide ? { replace: 'view:studio' } : {})} /></section>
         : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f, o) => openAgent(studioId(f), o?.replace ? { replace: id } : {})} /></section>
         : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
@@ -1065,7 +1092,7 @@ function App() {
   // On a computer's layout, once the window has what it shows (its agents and settings). What's on
   // screen is a place: Herdr's view, a section of Settings, Today or the Agents board full size, or
   // the tab in front (and the one beside it), full size or not, with where it is inside itself (an
-  // agent's Chat or Terminal, Meetings' Memory or Dictations, the folder Folders is in).
+  // agent's Chat or Terminal, Meetings' Memory or Dictations, the folder or list Studio's home shows).
   const navReady = useRef(false)
   if (fleet && conf) navReady.current = true
   const navOn = wide && !cloudOnly && navReady.current
@@ -1082,7 +1109,7 @@ function App() {
   byIdRef.current = byId
   const tabOpen = (id) => wsRef.current.tabs.includes(id)
   // Where a view or an agent was inside itself: there again as it shows (an agent's Chat or
-  // Terminal kept as the tab keeps it; Meetings' tab and Folders' folder told to the view).
+  // Terminal kept as the tab keeps it; Meetings' tab and Studio's folder told to the view).
   const showInner = (id, v) => {
     if (v == null) return
     if (id === 'view:meetings') { meetingsAt(v); return }
@@ -1162,8 +1189,7 @@ function App() {
       homeOn && { id: 'today', icon: 'today', label: t('Today'), hint: t('Calendar, mail, markets and usage'), run: () => setMoreView('today') },
       // The usage chip's account and figure (the desktop's top bar has it; a phone's has no room).
       { id: 'usage', icon: 'gauge', label: t('Usage'), hint: t('Plans, limits and history'), side: <UsageGlance quota={quota.data} primary={primary} />, run: () => setMoreView('usage') },
-      StudioHome && { id: 'studio', icon: 'layers', label: t('Studio'), hint: t('Documents, sheets, decks, pages and whiteboards'), run: () => setMoreView('view:studio') },
-      Explorer && { id: 'files', icon: 'folder', label: t('Folders'), hint: t('Every folder on your computers'), run: () => setMoreView('view:files') },
+      StudioHome && { id: 'studio', icon: 'layers', label: t('Studio'), hint: t('Every file on your computers, and documents, sheets, decks and whiteboards'), run: () => setMoreView('view:studio') },
       { id: 'terminals', icon: 'terminal', label: t('Terminals'), hint: t("Every agent's terminal, live"), run: () => setMoreView('terminals') },
       { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
       { id: 'needs', icon: 'bell', label: t('Needs You'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },

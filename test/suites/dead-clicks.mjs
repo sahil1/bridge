@@ -1,5 +1,5 @@
-// No button that does nothing. The main views (Home, an agent's Chat, Terminal and Files, Folders,
-// Studio, Meetings, Calendar, the top bar and its menus, ‹ and › with somewhere to go, the sidebar,
+// No button that does nothing. The main views (Home, an agent's Chat, Terminal and Files, Studio at
+// one of its lists and at a folder, Meetings, Calendar, the top bar and its menus, ‹ and › with somewhere to go, the sidebar,
 // the tabs and the Agents board) and, in dead-clicks-settings (this file again), each section of
 // Settings are opened in the desktop app (a stand-in for what it gives the page,
 // window.bridgeApp, and for where it opens a link in a new window, desktop/senders.js opens) and in
@@ -42,7 +42,7 @@ const SKIP = [
   [/^Stop what the agent is doing and send this now$|^Runs the agent's own sign-in/, 'starts or stops real work, or listens'],
   [SHORT(/^(allow|ask|reset and ask)\b/i), 'asks macOS (or another computer) for a permission'],
   [/^Open in your terminal app$/, 'opens a terminal app on this computer'],
-  [/^\//, 'a folder outside the test\'s own home (macOS can ask about what\'s below it)', /^Folders$/],
+  [/^\//, 'a folder outside the test\'s own home (macOS can ask about what\'s below it)', /^Studio/],
 ]
 const skipOf = (place, name) => SKIP.find(([is, , at]) => (!at || at.test(place)) && (typeof is === 'function' ? is(name) : is.test(name)))
 // What may show nothing when pressed, and why: by place and name (RegExps), or by what it is.
@@ -132,6 +132,11 @@ const DESKTOP = () => {
 const send = (p, detail, event = 'bridge-open-agent') => p.evaluate(({ e, d }) => window.dispatchEvent(new CustomEvent(e, { detail: d })), { e: event, d: detail })
 const today = new Date().toISOString().slice(0, 10)
 const view = (id) => (p) => send(p, { paneId: id })
+// Studio's home at one of its lists or at a folder, wherever a press before left it.
+const studioAt = (where) => async (p) => {
+  await p.evaluate((w) => { localStorage.setItem('cc-fx-where:here', JSON.stringify(w)); window.dispatchEvent(new CustomEvent('bridge-studio-show', { detail: { where: w } })) }, where)
+  await send(p, { paneId: 'view:studio' })
+}
 const agentView = (v) => async (p) => {
   if (!(await p.locator(`.ws-tab[aria-selected="true"][data-pane="${pane}"]`).count())) { await send(p, { paneId: pane }); await sleep(200) }
   await send(p, { paneId: pane, view: v }, 'cc-set-view')
@@ -153,8 +158,8 @@ const PLACES = [
       await p.locator('.viewer-head').waitFor({ timeout: 5000 })
     },
   },
-  { name: 'Folders', open: view('view:files'), scope: '.cmd .fx', ready: '.fx .fx-body' },
-  { name: 'Studio', open: view('view:studio'), scope: '.cmd .sd-home-view', ready: '.sd-home-view' },
+  { name: 'Studio', open: studioAt({ machine: null, root: 'shelf:recent', path: '' }), scope: '.cmd .sd-home-view', ready: '.sd-home-view .sd-shelf' },
+  { name: 'Studio at a folder', open: studioAt({ machine: null, root: 'home', path: '' }), scope: '.cmd .sd-home-view', ready: '.sd-home-view .fx-body .fx-row' },
   { name: 'Meetings', open: view('view:meetings'), scope: '.cmd .mt-view', ready: '.mt-view' },
   // The calendar reads macOS Calendar: elsewhere there's none to open.
   ...(process.platform === 'darwin' ? [{ name: 'Calendar', open: (p) => send(p, { date: today }, 'bridge-open-event'), scope: '.cmd .calv', ready: '.calv' }] : []),
@@ -164,14 +169,14 @@ const PLACES = [
   })),
   { name: 'the top bar', open: async () => {}, scope: '.topbar', drill: true },
   // ‹ and › (Back and Forward) with somewhere to go each way: after a key (so what follows is yours,
-  // not the window opening), Meetings, then Folders, then ‹ back to Meetings.
+  // not the window opening), Meetings, then Studio, then ‹ back to Meetings.
   {
     name: 'Back and Forward', scope: '.topbar .nav-arrows', ready: '.topbar .nav-btn[data-dir="forward"]:not([disabled])',
     open: async (p) => {
       await p.locator('.topbar .nav-btn').first().waitFor({ timeout: 10000 }).catch(() => {})
       await p.keyboard.press('Shift')
       await send(p, { paneId: 'view:meetings' }); await sleep(400)
-      await send(p, { paneId: 'view:files' }); await sleep(400)
+      await send(p, { paneId: 'view:studio' }); await sleep(400)
       await p.locator('.topbar .nav-btn[data-dir="back"]').click({ timeout: 3000 }).catch(() => {})
     },
   },
@@ -236,7 +241,7 @@ async function walk(shape) {
       await c.addInitScript(WATCH)
       if (desktop) await c.addInitScript(DESKTOP)
       await c.route(/^https?:\/\/(?!127\.0\.0\.1|localhost)/, (r) => r.abort())
-      // Folders' sidebar without this computer's other drives: macOS asks before an app opens one.
+      // Studio's sidebar without this computer's other drives: macOS asks before an app opens one.
       await changeAnswer(c, /\/api\/files\/sidebar/, (j) => ({ ...j, drives: (j.drives || []).filter((d) => !d.guard) }))
     },
   })

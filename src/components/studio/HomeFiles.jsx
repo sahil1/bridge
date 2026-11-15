@@ -1,22 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { api, refetch, usePoll, onThisComputer } from '../../api.js'
-import { useWidth, usePersisted } from '../layout.jsx'
 import { t, tx, locale } from '../../i18n/index.js'
 import { canAddPlace } from '../Transfers.jsx'
 import { fileOp } from '../FileExtras.jsx'
 import { WhiteboardsHome } from '../../lazy.jsx'
 
-// Studio's Files: what you opened here, the documents, sheets, decks and PDFs on this computer
-// (server/studiofound.js: Spotlight on a Mac, Recent items on Windows, the recently used list on
-// Linux, and a short look through your agents' folders, your places and Studio's own folder) and
-// your whiteboards. Asked for once Studio is open, never before. Shown by what's picked on the left:
-// Recent, a kind, or where they are (Bridge AI's own, a project, a place, a cloud drive, a folder);
-// a search looks through all of them (a kind is a row of KINDS; what New makes is Studio.jsx's NEW).
-// A row each, with its folder, when it changed, and Open, which
-// shows it in Preview, in its own editor. Add a folder: a place in Files, looked through from then on.
-const KIND_ICON = { doc: 'doc', sheet: 'grid', deck: 'screen', pdf: 'file', page: 'code', board: 'shapes' }
-const KINDS = [
+// Studio's lists of your files, beside your folders on its home (Studio.jsx): what you opened here,
+// the documents, sheets, decks and PDFs on this computer (server/studiofound.js: Spotlight on a Mac,
+// Recent items on Windows, the recently used list on Linux, and a short look through your agents'
+// folders, your places and Studio's own folder) and your whiteboards. Asked for once Studio is open,
+// never before. One list at a time, as its sidebar picks it: Recent, or a kind (a row of KINDS; what
+// New makes is Studio.jsx's NEW); a search looks through all of them. A row each, with its folder,
+// when it changed, and Open, which shows it in Preview, in its own editor. Add a folder: one of your
+// places (the sidebar's Places), looked through from then on.
+export const KIND_ICON = { doc: 'doc', sheet: 'grid', deck: 'screen', pdf: 'file', page: 'code', board: 'shapes' }
+export const KINDS = [
   ['doc', tx('Documents'), tx('No documents found: Word, Markdown or text files.')],
   ['deck', tx('Presentations'), tx('No presentations found: PowerPoint files or Markdown decks.')],
   ['sheet', tx('Sheets'), tx('No sheets found: Excel or CSV files.')],
@@ -29,14 +28,12 @@ const KINDS = [
 const OWN_LIST = {
   board: WhiteboardsHome && ((onOpen) => <WhiteboardsHome onOpen={(id) => onOpen({ root: 'board', path: id })} />),
 }
-const AREA_ICON = { studio: 'layers', project: 'bot', place: 'pin', cloud: 'cloud', folder: 'folder', home: 'home', other: 'folder' }
-const AREA_ORDER = ['studio', 'project', 'place', 'cloud', 'folder', 'home', 'other']
+// Whiteboards only where they can be opened (not the demo or the phone apps' Cloud agents).
+export const kindsHere = KINDS.filter(([k]) => k !== 'board' || !!OWN_LIST.board)
 const SOURCE = { spotlight: tx('Spotlight'), recent: tx("Windows' Recent items"), xbel: tx('your recently used files'), folders: tx("your agents' folders and places"), studio: tx("Studio's own folder"), boards: tx('your whiteboards') }
 const RECENT_DAYS = 30
 const RECENT_MAX = 60
 const keyOf = (f) => `${f.root}\n${f.path}`
-const areaKey = (a) => `${a?.type || 'other'}:${a?.name || ''}`
-const areaName = (a) => (a.type === 'studio' ? t('Bridge AI') : a.type === 'home' ? t('Home folder') : a.name || t('Elsewhere'))
 const picker = typeof window !== 'undefined' ? window.bridgeApp?.pickFolder : null
 // A file's own app opens it on the computer it's on, so only from a window there (not a phone, or
 // another computer's window).
@@ -56,25 +53,11 @@ export function ago(iso) {
   return d.toLocaleDateString(locale(), { month: 'short', day: 'numeric', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) })
 }
 
-// recent: Studio's own list (/studio/recent); describe(f): { kind, folder, full } in words;
-// areaOf(f): where a file Studio opened is ({ type, name }) when the look didn't find it;
-// onEmpty(yes): whether there are no files at all, once that's known.
-export function YourFiles({ recent, refreshRecent, describe, areaOf, onOpen, onEmpty }) {
+// Your files, looked for once Studio's home is open and kept while you go from folder to list (let
+// go of if you leave first). recent: Studio's own list (/studio/recent).
+export function useYourFiles(recent) {
   const [found, setFound] = useState(null) // { files, sources, errors, at, capped, skipped } or { error }
   const [looking, setLooking] = useState(false)
-  const [note, setNote] = useState(null) // { text, error }: what came of Open in app
-  useEffect(() => { if (!note || note.error) return undefined; const id = setTimeout(() => setNote(null), 4000); return () => clearTimeout(id) }, [note])
-  const openInApp = (f) => fileOp(f.root, 'open', f.path).then(() => setNote({ text: t('Opening {name} in its own app…', { name: f.name }) }), (e) => setNote({ text: t("Couldn't open {name}: {error}", { name: f.name, error: e.message }), error: true }))
-  const [group, setGroup] = usePersisted('cc-studio-group', 'recent') // recent, kind:<kind> or area:<type>:<name>
-  const [q, setQ] = useState('')
-  // Asked for from outside while it's open (Whiteboards, from ⌘K or a link to the list of them).
-  useEffect(() => {
-    const on = (e) => { if (e.detail?.group) { setGroup(e.detail.group); setQ('') } }
-    window.addEventListener('bridge-studio-show', on)
-    return () => window.removeEventListener('bridge-studio-show', on)
-  }, [setGroup])
-  const [boxRef, boxW] = useWidth()
-  const narrow = boxW > 0 && boxW < 640
   const boards = usePoll('/boards', 60_000)
   const ctl = useRef(null)
   const look = useCallback((fresh) => {
@@ -86,111 +69,82 @@ export function YourFiles({ recent, refreshRecent, describe, areaOf, onOpen, onE
       .then((r) => { if (!c.signal.aborted) setFound(r) }, (e) => { if (!c.signal.aborted) setFound({ error: e.message }) })
       .finally(() => { if (!c.signal.aborted) setLooking(false) })
   }, [])
-  // Looked for once Studio is open; let go of if you leave first.
   useEffect(() => { look(false); return () => ctl.current?.abort() }, [look])
   // Each file once: what the look found, what you opened here (its kind as it opened: a Markdown deck
   // is a deck), and your whiteboards, which are Bridge AI's own.
   const rows = useMemo(() => {
     const by = new Map()
     for (const f of found?.files || []) by.set(keyOf(f), { ...f, changed: f.at })
-    for (const r of recent?.files || []) { const k = keyOf(r); const was = by.get(k); by.set(k, { ...(was || {}), ...r, area: was?.area || areaOf(r), opened: r.at, changed: was?.changed || null, mine: true }) }
-    for (const b of boards.data?.boards || []) by.set(`board\n${b.id}`, { root: 'board', path: b.id, name: b.id, kind: 'board', changed: new Date(b.mtime).toISOString(), area: { type: 'studio', name: null } })
+    for (const r of recent?.files || []) { const k = keyOf(r); const was = by.get(k); by.set(k, { ...(was || {}), ...r, opened: r.at, changed: was?.changed || null, mine: true }) }
+    if (OWN_LIST.board) for (const b of boards.data?.boards || []) by.set(`board\n${b.id}`, { root: 'board', path: b.id, name: b.id, kind: 'board', changed: new Date(b.mtime).toISOString() })
     return [...by.values()].sort((a, b) => when(b) - when(a))
-  }, [found, recent, boards.data, areaOf])
-  useEffect(() => { onEmpty?.(!!found && !rows.length) }, [found, rows, onEmpty])
+  }, [found, recent, boards.data])
   // Recent: what you opened here, and what was opened or changed in the last 30 days.
   const recentRows = useMemo(() => rows.filter((f) => f.mine || Date.now() - when(f) < RECENT_DAYS * 86400_000).slice(0, RECENT_MAX), [rows])
-  const areas = useMemo(() => {
-    const by = new Map()
-    for (const f of rows) { const k = areaKey(f.area); const a = by.get(k) || { key: k, ...(f.area || { type: 'other', name: null }), n: 0 }; a.n++; by.set(k, a) }
-    return [...by.values()].sort((a, b) => AREA_ORDER.indexOf(a.type) - AREA_ORDER.indexOf(b.type) || (a.type === 'folder' || a.type === 'cloud' ? b.n - a.n : 0) || areaName(a).localeCompare(areaName(b), locale()))
-  }, [rows])
-  const kindCount = Object.fromEntries(KINDS.map(([k]) => [k, rows.filter((f) => f.kind === k).length]))
-  // A group that's gone (its folder no longer has a file) shows Recent.
-  const pick = group === 'recent' || (group.startsWith('kind:') && KINDS.some(([k]) => `kind:${k}` === group)) || areas.some((a) => `area:${a.key}` === group) ? group : 'recent'
+  const kindCount = useMemo(() => Object.fromEntries(KINDS.map(([k]) => [k, rows.filter((f) => f.kind === k).length])), [rows])
+  return { found, looking, look, boards, rows, recentRows, kindCount, empty: !!found && !rows.length }
+}
+
+// One of the lists: group is recent or kind:<kind>; q a search through all of them (the folder bar's
+// search, while a list is shown). describe(f): { kind, folder, full } in words.
+export function YourFiles({ files, group, q = '', refreshRecent, describe, onOpen }) {
+  const { found, looking, look, boards, rows, recentRows } = files
+  const [note, setNote] = useState(null) // { text, error }: what came of Open in app
+  useEffect(() => { if (!note || note.error) return undefined; const id = setTimeout(() => setNote(null), 4000); return () => clearTimeout(id) }, [note])
+  const openInApp = (f) => fileOp(f.root, 'open', f.path).then(() => setNote({ text: t('Opening {name} in its own app…', { name: f.name }) }), (e) => setNote({ text: t("Couldn't open {name}: {error}", { name: f.name, error: e.message }), error: true }))
   const needle = q.trim().toLocaleLowerCase()
-  const kind = pick.startsWith('kind:') ? KINDS.find(([k]) => `kind:${k}` === pick) : null
-  const area = pick.startsWith('area:') ? areas.find((a) => `area:${a.key}` === pick) : null
-  const shown = needle ? rows.filter((f) => f.name.toLocaleLowerCase().includes(needle))
-    : kind ? rows.filter((f) => f.kind === kind[0]) : area ? rows.filter((f) => areaKey(f.area) === area.key) : recentRows
+  const kind = String(group).startsWith('kind:') ? KINDS.find(([k]) => `kind:${k}` === group) : null
+  const shown = needle ? rows.filter((f) => f.name.toLocaleLowerCase().includes(needle)) : kind ? rows.filter((f) => f.kind === kind[0]) : recentRows
   const forget = (f) => api(`/studio/recent?root=${encodeURIComponent(f.root)}&path=${encodeURIComponent(f.path)}`, { method: 'DELETE' }).then(refreshRecent)
   const sources = [...(found?.sources || []), ...(boards.data ? ['boards'] : [])].map((s) => t(SOURCE[s] || s))
   const capped = Object.entries(found?.capped || {})
-  const title = needle ? t('Matching “{q}”', { q: q.trim() }) : kind ? t(kind[1]) : area ? areaName(area) : t('Recent')
+  const title = needle ? t('Matching “{q}”', { q: q.trim() }) : kind ? t(kind[1]) : t('Recent')
   const none = needle ? t('No file of yours matches “{q}”.', { q: q.trim() })
     : kind?.[2] ? t(kind[2])
-      : !rows.length ? t('No documents, sheets, decks or PDFs yet. One you open from an agent\'s Files, start above, or keep in a folder you add shows here.')
+      : !rows.length ? t('No documents, sheets, decks or PDFs yet. One you open from a folder here or an agent\'s Files, start with New, or keep in a folder you add shows here.')
         : t('Nothing opened or changed in the last 30 days. Pick a kind or a folder to see the rest.')
   const own = (!needle && kind && OWN_LIST[kind[0]]) || null
-  const groupBtn = (id, icon, label, n, hint) => (
-    <button key={id} type="button" className={pick === id && !needle ? 'on' : ''} aria-current={pick === id && !needle ? 'true' : undefined} onClick={() => { setGroup(id); setQ('') }} title={hint || label}>
-      <Icon name={icon} size={14} /><span>{label}</span><small>{n}</small>
-    </button>
-  )
   return (
-    <section className="sd-sec sd-files" aria-label={t('Your Files')} ref={boxRef}>
-      <div className="sd-files-head">
-        <h3>{t('Your Files')}</h3>
-        <span className="sd-grow" />
-        <label className="sd-files-search"><Icon name="search" size={13} /><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Find a file')} aria-label={t('Find a file by its name, in all your files')} /></label>
-        <button type="button" className="win-btn" onClick={() => look(true)} disabled={looking} aria-label={t('Look again')} title={t('Look for your files again')}><Icon name="refresh" size={14} className={looking ? 'spin' : ''} /></button>
-        {canAddPlace && <AddFolder onAdded={() => look(true)} />}
-      </div>
-      <div className={`sd-browse${narrow ? ' narrow' : ''}`}>
-        {narrow ? (
-          <label className="sd-group-pick"><span className="muted small">{t('Show')}</span>
-            <select value={pick} onChange={(e) => { setGroup(e.target.value); setQ('') }} aria-label={t('Show')}>
-              <option value="recent">{t('Recent')} ({recentRows.length})</option>
-              <optgroup label={t('Kinds')}>{KINDS.map(([k, label]) => <option key={k} value={`kind:${k}`}>{t(label)} ({kindCount[k]})</option>)}</optgroup>
-              {areas.length > 0 && <optgroup label={t('Where')}>{areas.map((a) => <option key={a.key} value={`area:${a.key}`}>{areaName(a)} ({a.n})</option>)}</optgroup>}
-            </select>
-          </label>
-        ) : (
-          <nav className="sd-groups" aria-label={t('Show')}>
-            {groupBtn('recent', 'clock', t('Recent'), recentRows.length, t('What you opened here, and what was opened or changed in the last 30 days'))}
-            <h4>{t('Kinds')}</h4>
-            {KINDS.map(([k, label]) => groupBtn(`kind:${k}`, KIND_ICON[k], t(label), kindCount[k]))}
-            {areas.length > 0 && <h4>{t('Where')}</h4>}
-            {areas.map((a) => groupBtn(`area:${a.key}`, AREA_ICON[a.type] || 'folder', areaName(a), a.n, a.type === 'studio' ? t('Bridge AI\'s own: decks made from meetings, new files with nowhere else to go, and your whiteboards') : undefined))}
-          </nav>
-        )}
-        <div className="sd-list">
-          <div className="sd-list-head">
-            <b>{title}</b>
-            <small className="muted">{shown.length === 1 ? t('1 file') : t('{n} files', { n: shown.length })}</small>
-            {kind && found?.capped?.[kind[0]] && <small className="muted">{t('the newest {n} of {total}', { n: found.perKind, total: found.capped[kind[0]].toLocaleString(locale()) })}</small>}
-          </div>
-          {note && <p className={`sd-files-note small${note.error ? ' error-text' : ' muted'}`} role={note.error ? 'alert' : 'status'}>{note.text}</p>}
-          {own ? own(onOpen) : <div className="sd-files-table" role="table" aria-label={title}>
-            <div className="sd-files-row head" role="row"><span role="columnheader">{t('Name')}</span><span role="columnheader">{t('Folder')}</span><span role="columnheader">{t('Changed')}</span><span role="columnheader" aria-label={t('Open')} /></div>
-            {shown.map((f) => {
-              const d = describe(f)
-              // A kind Studio doesn't open (an older Word file, Keynote…): its own app opens it, from a
-              // window on its computer; anywhere else that's said rather than offered.
-              const other = f.opens === false
-              const open = other ? (inApp ? () => openInApp(f) : null) : () => onOpen({ root: f.root, path: f.path })
-              const inner = <>
-                <span className={`sd-file-ic${f.kind ? ` k-${f.kind}` : ''}`}><Icon name={KIND_ICON[f.kind] || 'file'} size={15} /></span>
-                <span className="sd-file-text"><b>{f.name}</b><small className="muted">{other ? t('{kind}, opened in its own app', { kind: d.kind }) : d.kind}</small></span>
-              </>
-              return (
-                <div key={keyOf(f)} className={`sd-files-row${other ? ' other' : ''}`} role="row">
-                  {open ? <button type="button" role="cell" className="sd-file-name" onClick={open} title={d.full || f.path}>{inner}</button> : <span role="cell" className="sd-file-name" title={d.full || f.path}>{inner}</span>}
-                  <span role="cell" className="sd-file-dir" title={d.full || d.folder || ''}><Icon name="folder" size={12} /><span>{d.folder || '—'}</span></span>
-                  <span role="cell" className="sd-file-when" title={f.changed ? new Date(f.changed).toLocaleString(locale()) : f.opened ? new Date(f.opened).toLocaleString(locale()) : ''}>{f.changed ? ago(f.changed) : f.opened ? t('Opened {when}', { when: ago(f.opened) }) : ''}</span>
-                  <span role="cell" className="sd-file-acts">
-                    {!other && <button type="button" className="btn small" onClick={open} aria-label={t('Open {name}', { name: f.name })} title={t('Open it in Preview, in its own editor')}>{t('Open')}</button>}
-                    {other && inApp && <button type="button" className="btn small" onClick={open} aria-label={t('Open {name} in its app', { name: f.name })} title={t("Studio doesn't open this kind of file: open it in the app that usually does")}><Icon name="external" size={11} /> {t('Open in app')}</button>}
-                    {other && !inApp && <span className="sd-file-away muted small" title={t("Studio doesn't open this kind of file, and its app opens it only in a window on the computer it's on")}>{t('Open it on its computer')}</span>}
-                    {f.mine && <button type="button" className="ghost-btn sd-file-x" aria-label={t('Take {name} off the list', { name: f.name })} title={t('Take it off the list (the file stays)')} onClick={() => forget(f)}><Icon name="x" size={12} /></button>}
-                  </span>
-                </div>
-              )
-            })}
-            {looking && !found && <div className="sd-files-row wait" role="row"><span role="cell" className="muted small"><Icon name="refresh" size={12} className="spin" /> {t('Looking for your files…')}</span></div>}
-            {!shown.length && (found || !looking) && <div className="sd-files-none" role="row"><span role="cell">{none}</span></div>}
-          </div>}
+    <section className="sd-sec sd-files" aria-label={title}>
+      <div className="sd-list">
+        <div className="sd-list-head">
+          <b>{title}</b>
+          <small className="muted">{shown.length === 1 ? t('1 file') : t('{n} files', { n: shown.length })}</small>
+          {kind && found?.capped?.[kind[0]] && <small className="muted">{t('the newest {n} of {total}', { n: found.perKind, total: found.capped[kind[0]].toLocaleString(locale()) })}</small>}
+          <span className="sd-grow" />
+          <button type="button" className="win-btn" onClick={() => look(true)} disabled={looking} aria-label={t('Look again')} title={t('Look for your files again')}><Icon name="refresh" size={14} className={looking ? 'spin' : ''} /></button>
+          {canAddPlace && <AddFolder onAdded={() => look(true)} />}
         </div>
+        {note && <p className={`sd-files-note small${note.error ? ' error-text' : ' muted'}`} role={note.error ? 'alert' : 'status'}>{note.text}</p>}
+        {own ? own(onOpen) : <div className="sd-files-table" role="table" aria-label={title}>
+          <div className="sd-files-row head" role="row"><span role="columnheader">{t('Name')}</span><span role="columnheader">{t('Folder')}</span><span role="columnheader">{t('Changed')}</span><span role="columnheader" aria-label={t('Open')} /></div>
+          {shown.map((f) => {
+            const d = describe(f)
+            // A kind Studio doesn't open (an older Word file, Keynote…): its own app opens it, from a
+            // window on its computer; anywhere else that's said rather than offered.
+            const other = f.opens === false
+            const open = other ? (inApp ? () => openInApp(f) : null) : () => onOpen({ root: f.root, path: f.path })
+            const inner = <>
+              <span className={`sd-file-ic${f.kind ? ` k-${f.kind}` : ''}`}><Icon name={KIND_ICON[f.kind] || 'file'} size={15} /></span>
+              <span className="sd-file-text"><b>{f.name}</b><small className="muted">{other ? t('{kind}, opened in its own app', { kind: d.kind }) : d.kind}</small></span>
+            </>
+            return (
+              <div key={keyOf(f)} className={`sd-files-row${other ? ' other' : ''}`} role="row">
+                {open ? <button type="button" role="cell" className="sd-file-name" onClick={open} title={d.full || f.path}>{inner}</button> : <span role="cell" className="sd-file-name" title={d.full || f.path}>{inner}</span>}
+                <span role="cell" className="sd-file-dir" title={d.full || d.folder || ''}><Icon name="folder" size={12} /><span>{d.folder || '—'}</span></span>
+                <span role="cell" className="sd-file-when" title={f.changed ? new Date(f.changed).toLocaleString(locale()) : f.opened ? new Date(f.opened).toLocaleString(locale()) : ''}>{f.changed ? ago(f.changed) : f.opened ? t('Opened {when}', { when: ago(f.opened) }) : ''}</span>
+                <span role="cell" className="sd-file-acts">
+                  {!other && <button type="button" className="btn small" onClick={open} aria-label={t('Open {name}', { name: f.name })} title={t('Open it in Preview, in its own editor')}>{t('Open')}</button>}
+                  {other && inApp && <button type="button" className="btn small" onClick={open} aria-label={t('Open {name} in its app', { name: f.name })} title={t("Studio doesn't open this kind of file: open it in the app that usually does")}><Icon name="external" size={11} /> {t('Open in app')}</button>}
+                  {other && !inApp && <span className="sd-file-away muted small" title={t("Studio doesn't open this kind of file, and its app opens it only in a window on the computer it's on")}>{t('Open it on its computer')}</span>}
+                  {f.mine && <button type="button" className="ghost-btn sd-file-x" aria-label={t('Take {name} off the list', { name: f.name })} title={t('Take it off the list (the file stays)')} onClick={() => forget(f)}><Icon name="x" size={12} /></button>}
+                </span>
+              </div>
+            )
+          })}
+          {looking && !found && <div className="sd-files-row wait" role="row"><span role="cell" className="muted small"><Icon name="refresh" size={12} className="spin" /> {t('Looking for your files…')}</span></div>}
+          {!shown.length && (found || !looking) && <div className="sd-files-none" role="row"><span role="cell">{none}</span></div>}
+        </div>}
       </div>
       {found && !found.error && (
         <p className="sd-files-src muted small">
@@ -207,7 +161,7 @@ export function YourFiles({ recent, refreshRecent, describe, areaOf, onOpen, onE
 }
 
 // Add a folder: the system's folder picker in the desktop app, else (a browser on this computer)
-// typed, with this computer's folders as you type. A place in Files from then on.
+// typed, with this computer's folders as you type. One of your places from then on.
 function AddFolder({ onAdded }) {
   const [typing, setTyping] = useState(false)
   const [v, setV] = useState('~/')
@@ -229,7 +183,7 @@ function AddFolder({ onAdded }) {
   }
   return (
     <span className="sd-add-folder">
-      <button type="button" className="btn small" onClick={start} title={t('Add a folder: Studio looks for your files there too, and Files shows it')}><Icon name="plus" size={12} /> {t('Add a folder')}</button>
+      <button type="button" className="btn small" onClick={start} title={t('Add a folder: Studio looks for your files there too, and lists it under Places')}><Icon name="plus" size={12} /> {t('Add a folder')}</button>
       {typing && (
         <form className="sd-add-form" onSubmit={(e) => { e.preventDefault(); add(v) }}>
           <input className="input" value={v} onChange={(e) => setV(e.target.value)} list="sd-add-dirs" autoFocus spellCheck={false} aria-label={t('Folder on this computer')} />
