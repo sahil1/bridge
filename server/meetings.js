@@ -10,8 +10,9 @@
 // Each meeting is a folder in <data>/meetings/<id>: meeting.json, transcript.jsonl (a line per
 // stretch, appended as they come), notes.md (yours), summary.md, and the audio: Opus through
 // ffmpeg (about 11 MB an hour per source), or WAV without it. captures/ holds pictures of what was
-// on the screen (or pasted into your notes); the files and links that go with a meeting are kept
-// as links in meeting.json, read from where they are when the notes are written.
+// on the screen (or pasted into your notes), and a video of the screen (Record the screen too) is
+// video-1.mp4 or .webm, with videos.json (meetvideo.js); the files and links that go with a meeting
+// are kept as links in meeting.json, read from where they are when the notes are written.
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -556,6 +557,7 @@ export async function audio(id, src, buf, seq) {
   if (seq != null) s.seq = Number(seq)
   const even = buf.length - (buf.length % 2)
   const samples = new Int16Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + even))
+  if (src === 'them') for (const fn of hearers.get(id) || []) fn(Buffer.from(samples.buffer))
   s.finder.push(samples)
   if (s.finder.frames.length && s.finder.voiced >= 5) { s.talkingAt = Date.now(); s.stretch = s.finder.frames[0].t }
   hearSoFar(m, s)
@@ -605,6 +607,15 @@ const HEARD = 33
 // nothing played, or macOS hasn't let Bridge AI hear it yet (System Audio Recording).
 // BRIDGE_CALL_QUIET_MS: how long before it says so.
 const QUIET_AFTER = Number(process.env.BRIDGE_CALL_QUIET_MS) || 30_000
+// The call's sound as it comes, while it records, for the video of the screen (Record the screen
+// too): each piece to fn, until the function it returns is called.
+const hearers = new Map() // id -> Set of fn
+export function hear(id, fn) {
+  meta(id)
+  if (!hearers.has(id)) hearers.set(id, new Set())
+  hearers.get(id).add(fn)
+  return () => { const s = hearers.get(id); s?.delete(fn); if (s && !s.size) hearers.delete(id) }
+}
 // Someone on the call is talking now, while it records: the stretch of speech in its sound (where it
 // started, a new number when someone starts again), or null.
 export const talking = (id) => { const s = live.get(id)?.sources.them; return s && Date.now() - (s.talkingAt || 0) < 2000 ? s.stretch : null }

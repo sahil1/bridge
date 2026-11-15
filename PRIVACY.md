@@ -70,6 +70,11 @@ reads them on your Mac with Apple's Vision: where the faces are, how much each m
 names under them. The pictures stay in memory and are never written to disk; only those numbers and
 names are kept, in that meeting's folder (`sights.jsonl`), and they go with it when it's deleted.
 
+Record the screen too (off until you tick it) keeps a video of the window or screen you pick while a
+meeting records, with the meeting's sound. It goes only to Bridge AI on your computer as it records,
+which keeps it in that meeting's folder (`video-1.mp4`, or `.webm`); it's never sent anywhere else,
+and it goes with the meeting when that's deleted, or on its own with Delete video.
+
 Dictation and voice notes are turned into text on your computer, and the recording isn't kept
 (unless you ask for it, below). With "Show the words as you talk" (Settings › Voice & Meetings, on where your
 computer keeps up), the sound goes to your computer as you talk, a moment at a time, rather than all
