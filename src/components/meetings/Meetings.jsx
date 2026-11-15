@@ -21,6 +21,7 @@ import PermissionFix from '../PermissionFix.jsx'
 import { useScreenAccess, useAllowCall, allowSteps } from './allowcall.jsx'
 import { MicFix } from '../Composer.jsx'
 import { sendPicture, pictureUrl } from './screen.js'
+import { useCropping, CropButton } from './cropping.jsx'
 import './meetings.css'
 import SpeechSetup, { MeetingsSetup } from './SpeechSetup.jsx'
 import { ActionItems, SinceLastTime } from './work.jsx'
@@ -489,6 +490,7 @@ function Picture({ id, c, onOpen, onChange, onError }) {
           : <button type="button" className="mt-pic-note" onClick={() => setNote(c.note || '')} title={t('Add a note on what it shows')}>{c.note || (c.kind === 'auto' ? t('The screen changed') : t('Captured'))}{c.source ? <small> · {c.source}</small> : null}</button>}
         <span className="mt-grow" />
         {c.read === 'reading' && <small className="muted">{t('Reading it…')}</small>}
+        <CropButton id={id} c={c} onChange={onChange} onError={onError} />
         <button type="button" className="ghost-btn" onClick={remove} aria-label={t('Remove this picture')} title={t('Remove')}><Icon name="trash" size={12} /></button>
       </figcaption>
       {c.text && <details className="mt-pic-text"><summary className="small muted">{t('The words on it')}</summary><p className="small">{c.text}</p></details>}
@@ -566,6 +568,7 @@ export function MeetingPage({ id, onBack }) {
   const m = useMeetings()
   const live = m?.rec?.id === id
   const { data, refresh } = usePoll(`/meetings/${encodeURIComponent(id)}`, live ? 1500 : 4000)
+  useCropping(id, data, refresh)
   const { data: list } = usePoll('/meetings', 60_000)
   const models = useChatModels()
   // The phone layout (App.jsx): the header keeps to the name and the views, and when it was, who
