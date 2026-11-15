@@ -72,7 +72,7 @@ try {
   const s1 = await startOf('Draft the launch deck for the spring release')
   const work1 = path.join(CHIEF, 'work', 'draft-the-launch-deck')
   ok(real(s1?.cwd || '') === real(work1), 'the helper started in the task\'s own folder, work/draft-the-launch-deck', s1?.cwd)
-  // On Windows it's one line, its quotes curly (meetwork.js forCommandLine).
+  // On Windows it's one line, its quotes curly (runtime/spawn.js forCommandLine).
   ok(/^You're helping Tester's Chief of Staff in Bridge AI as its marketing helper, on task \d+: ["“]Draft the launch deck["”]/.test(s1?.message || '') && /put what you make there/.test(s1.message) && /end with a short summary of what you made or found and where it is/.test(s1.message) && s1.message.endsWith('Draft the launch deck for the spring release, ten slides.'),
     'with who it works for, where its work goes, to end with what it made and where, then the brief', s1?.message)
   ok(!s1?.args.includes('--permission-mode'), 'and, with helpers not allowed to edit, nothing that lets it edit without asking', s1?.args)

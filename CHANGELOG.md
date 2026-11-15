@@ -22,6 +22,7 @@ The Chief of Staff hands work to helpers, each an agent with a role, and hears b
 
 ### Fixes
 
+- Windows: an agent started with a first message (New agent, Hand off to another agent, a routine, a Chief of Staff thread) gets all of it. The message went on the agent's command line, where a line break cut it short and a straight double quote split it; it now goes as one line, its double quotes curly. A curly apostrophe in it, as in don’t, no longer stops the agent starting.
 - Settings › Voice & Meetings › Speech to Text on a phone: Spoken Answers no longer runs past the edge of the screen when a voice's name is long.
 - The Dictation tab says Dictation once: its settings had the name as a heading and again under Advanced, which is now Cleanup and Mentions. Speech to Text's models are under Speech Model.
 
