@@ -17,7 +17,7 @@ import headless from '@xterm/headless'
 import { adapter, loginPath, newSessionId, installed } from '../agents.js'
 import { discoverSession, locate } from '../transcripts.js'
 import { dataFile, ensureDir, DATA, IS_WIN, ROOT, writeFileAtomic } from '../paths.js'
-import { shellCommand, agentEnv, SETUP_DONE } from './spawn.js'
+import { shellCommand, agentEnv, forCommandLine, SETUP_DONE } from './spawn.js'
 import { providerEnv } from '../providers.js'
 import * as accounts from '../accounts.js'
 import { firstRun, knows } from '../firstrun.js'
@@ -97,7 +97,7 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
     } else if (hasLog) { args = a.resume(sessionId); reopened = true } else {
       if (resume) sessionId = null
       if (a.sessionId === 'assign' && !sessionId) sessionId = newSessionId()
-      args = a.start({ sessionId: a.sessionId === 'assign' ? sessionId : undefined, prompt: a.promptArg ? opening : undefined })
+      args = a.start({ sessionId: a.sessionId === 'assign' ? sessionId : undefined, prompt: a.promptArg ? forCommandLine(opening) : undefined })
     }
     if (model && a.model) args = [...a.model(model), ...args]
     if (effort && a.effort) args = [...a.effort(effort), ...args]

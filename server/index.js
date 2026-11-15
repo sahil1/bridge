@@ -1021,11 +1021,8 @@ app.post('/api/chief/delegate', wrap((req) => delegate.add(req.body || {})))
 app.post('/api/chief/delegate/:task/retry', wrap((req) => delegate.retry(req.params.task)))
 // A helper's agent: in its own folder (made by delegate.js inside the chief's, so not checked
 // as a folder you picked), allowed edits there when you said helpers may; in a folder the chief
-// named, as New agent starts one. Either way in the Helpers space, a tab each. Its brief goes on
-// its command line, so on Windows as one line with its quotes curly, as a meeting's action item's
-// does (meetwork.js): through claude.cmd it was cut at its first line break and split at a quote.
-async function launchHelper({ kind, cwd, own, label, space, prompt: brief, access }) {
-  const prompt = meetWork.forCommandLine(brief)
+// named, as New agent starts one. Either way in the Helpers space, a tab each.
+async function launchHelper({ kind, cwd, own, label, space, prompt, access }) {
   const f = await fleetView()
   const ws = (f.workspaces || []).find((w) => w.label.toLowerCase() === String(space).toLowerCase())
   const where = ws ? { workspaceId: ws.id } : { newSpace: space }

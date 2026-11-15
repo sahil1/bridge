@@ -149,14 +149,6 @@ export function brief(m, item, { lines = [], summary = '' } = {}) {
     'Work on it here. If what\'s wanted isn\'t clear enough to start, ask me first. When you\'re done, say what you changed.',
   ].filter(Boolean).join('\n\n')
 }
-// The first message goes on the agent's command line. On Windows that passes through cmd for an
-// agent npm installed (claude.cmd), which ends it at a line break and at a straight double quote,
-// so there it goes as one line, its quotes curly.
-export function forCommandLine(text, win = process.platform === 'win32') {
-  if (!win) return text
-  let open = true
-  return text.replace(/"/g, () => ((open = !open) ? '”' : '“')).replace(/\s*\n+\s*/g, ' · ').replace(/%/g, ' percent')
-}
 // A short name for the agent's tab and branch: the item's first words, without who it's for.
 export const labelOf = (item) => {
   const w = plain(item.what || item.text).replace(/\s*\([^)]*\)\s*$/, '').replace(/[.:;,]+$/, '').split(' ')
@@ -193,7 +185,7 @@ export async function start(id, key, { cwd, kind, own = true, prompt, label } = 
   const space = String(m.title || 'Meeting').slice(0, 60)
   const ws = (fleet?.workspaces || []).find((w) => w.label === space)
   const name = String(label || prep.label).trim().slice(0, 60) || prep.label
-  const text = forCommandLine(String(prompt || '').trim() || prep.prompt)
+  const text = String(prompt || '').trim() || prep.prompt
   const out = await helpers.launch({ kind, cwd, label: name, prompt: text, ownBranch: own !== false, ...(ws ? { workspaceId: ws.id } : { newSpace: space }) })
   const project = (await helpers.projects().catch(() => [])).find((p) => p.path === path.resolve(String(cwd).replace(/^~(?=$|\/)/, process.env.HOME || ''))) || null
   const agent = {

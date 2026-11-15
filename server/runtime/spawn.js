@@ -5,7 +5,19 @@ import { execFile } from 'node:child_process'
 import { IS_WIN } from '../paths.js'
 
 const shQuote = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'\\''`)}'`)
-const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`
+// PowerShell ends a single-quoted string at a curly single quote too (‘ ’ ‚ ‛), so a prompt's
+// "don’t" ended it there; each is doubled like a straight one.
+const psQuote = (s) => `'${String(s).replace(/['‘’‚‛]/g, '$&$&')}'`
+
+// An agent's first message, which goes on its command line. On Windows that passes through
+// PowerShell, which hands a program an argument's straight double quotes unescaped, then through
+// cmd for an agent npm installed (claude.cmd), which ends it at a line break and reads % as the
+// start of a variable. So there it goes as one line, its quotes curly.
+export function forCommandLine(text, win = IS_WIN) {
+  if (!win || !text) return text
+  let open = true
+  return String(text).replace(/"/g, () => ((open = !open) ? '”' : '“')).replace(/\s*[\r\n]+\s*/g, ' · ').replace(/%/g, ' percent')
+}
 
 // One line you could type into a shell to run `bin args...`.
 export function quoteCommand(bin, args = []) {

@@ -7,6 +7,7 @@ import http from 'node:http'
 import path from 'node:path'
 import { startKit, startModel, checks, until, IS_WIN } from '../lib/harness.mjs'
 import { draftIn } from '../../server/promptsafe.js'
+import { forCommandLine } from '../../server/runtime/spawn.js'
 
 const { ok, skip, done } = checks('server')
 const kit = await startKit('server', { env: { BRIDGE_TAILNET_OWNER: 'me@example.com' } }) // who this computer is on Tailscale
@@ -132,6 +133,12 @@ try {
   ok(draftIn(box('❯\xa0\x1b[0;7mR\x1b[0;38;2;153;153;153mun the tests again\x1b[0m\r')) === '', 'a suggested next message, faint under the cursor, isn\'t typed text')
   ok(draftIn(box('\x1b[0;38;2;102;102;102m❯\xa0\x1b[0mhalf typed\x1b[0;7m \x1b[0m\r')) === 'half typed', 'what\'s typed is seen while it works, too')
   ok(draftIn(box('❯\xa0first line\r', '  second line\r')) === 'first line\nsecond line', 'and every line of it')
+
+  // An agent's first message goes on its command line (runtime/spawn.js forCommandLine): on Windows,
+  // through PowerShell and claude.cmd, as one line with its quotes curly, so none of it is lost.
+  const first = 'Fix the "Save" button.\r\n\nIt’s at 50% width:\n  src/App.jsx'
+  ok(forCommandLine(first, true) === 'Fix the “Save” button. · It’s at 50 percent width: · src/App.jsx', 'a first message on Windows: one line, its quotes curly', forCommandLine(first, true))
+  ok(forCommandLine(first, false) === first && forCommandLine(undefined, true) === undefined, 'elsewhere, or with none, it\'s as it was')
 } catch (e) {
   ok(false, `crashed: ${e.message}`)
   console.log(kit.log().slice(-1500))
