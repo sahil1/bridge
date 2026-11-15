@@ -5,8 +5,11 @@
 # run says why), and android-apk.yml adds it afterwards.
 #   Pushing a tag v<version> (npm run release does this) builds and publishes that release; a
 #   pre-release's tag (v3.13.0-beta.1) publishes a pre-release, for Early Access only.
-#   Running it by hand (Actions › Release › Run workflow) only builds and tests; the installers
-#   are attached to the run so you can try them.
+#   Started at a tag (release-start.yml does this, as a tag pushed with GitHub's own token starts
+#   nothing), it's the same as the tag's push: every step below goes by the ref (refs/tags/v…),
+#   never by what started it, so the check that the tag is on main and publishing are as for a push.
+#   Running it by hand on a branch (Actions › Release › Run workflow) only builds and tests; the
+#   installers are attached to the run so you can try them.
 #   Called by nightly.yml with a nightly version (nightly), it builds main at that version and
 #   publishes it as a pre-release only computers on Nightly are offered (scripts/nightly.js).
 name: Release

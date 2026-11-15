@@ -12,6 +12,7 @@
 //   npm run rollout -- 3.13.0 10        10%, then 50, then 100
 //   npm run rollout -- 3.13.0 0         paused
 //   npm run rollout -- 3.13.0 50 --dry-run   the notes it would write, changing nothing
+// Without a terminal, .github/workflows/rollout.yml runs this on GitHub with its own token.
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -21,7 +22,8 @@ import { rolloutOf, withRollout } from '../shared/rollout.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
-const fail = (msg) => { console.error(`rollout: ${msg}`); process.exit(1) }
+// On GitHub (rollout.yml) the reason is also the run's error, which the admin view reads.
+const fail = (msg) => { console.error(process.env.GITHUB_ACTIONS === 'true' ? `::error::rollout: ${String(msg).replace(/%/g, '%25').replace(/\r?\n/g, '%0A')}` : `rollout: ${msg}`); process.exit(1) }
 // BRIDGE_GH (tests): a Node script standing in for gh.
 const gh = (...a) => {
   const [cmd, all] = process.env.BRIDGE_GH ? [process.execPath, [process.env.BRIDGE_GH, ...a]] : ['gh', a]

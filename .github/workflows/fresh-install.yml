@@ -51,8 +51,9 @@ env:
 jobs:
   release:
     name: Which release
-    # After Release, only when it published one (a tag it built and that passed).
-    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    # After Release, only when it published one (a tag it built and that passed): a pushed tag, or a
+    # run started at the tag (release-start.yml's, as GitHub's own token pushed the tag).
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && (github.event.workflow_run.event == 'push' || (github.event.workflow_run.event == 'workflow_dispatch' && startsWith(github.event.workflow_run.head_branch, 'v'))))
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}

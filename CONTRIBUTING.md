@@ -105,6 +105,17 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
 - **Pausing.** `npm run rollout -- 3.13.0 0`: nobody else is offered it, Early Access included, not
   even by Check now, and it isn't installed by itself. Computers that have it keep it; put it right
   with a 3.13.1, or raise the percentage again to carry on.
+- **Without a terminal.** Two workflows do the same on GitHub, from main only, with GitHub's own
+  token. Actions › Release start › Run workflow (`release-start.yml`) runs `scripts/release.js`'s
+  checks and pushes the tag, then starts the Release workflow and the Docker image at it (a tag
+  pushed with GitHub's token starts nothing by itself; started at the tag, each does what the tag's
+  push would). Actions › Rollout › Run workflow (`rollout.yml`), with the version and the
+  percentage, runs `scripts/rollout.js`. Each refuses what the script refuses, and the run says why.
+  The project's admin view (boldbridge.ai/admin, in the private repo) has Release, Promote (10, 50,
+  100), Pause and Nightly now buttons that only start these and `nightly.yml`: its token is a
+  fine-grained one for this repo only, with Actions: Read and write, Contents: Read and Metadata:
+  Read, so it can't write to the repo itself. Release from there sends the version it showed, and
+  release-start.yml refuses it if main has moved on to another.
 - **A beta, for Early Access.** Set the version to a pre-release, `3.13.0-beta.1` in both
   package.json files, give it a `## 3.13.0-beta.1` section in CHANGELOG.md (a few lines is enough),
   and `npm run release`. GitHub marks it a pre-release, so it's never the latest release: not the

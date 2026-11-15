@@ -1,0 +1,62 @@
+# A release out a few computers at a time, without a terminal: what npm run rollout does
+# (scripts/rollout.js), run here with GitHub's own token. It sets the line GitHub hides in the
+# release's notes (<!-- rollout: 10 -->) that the update check reads: 0 pauses it for everyone, Early
+# Access too, and 100 is everyone (the line goes). From main only. scripts/rollout.js refuses what it
+# refuses on your computer: a release GitHub doesn't have, a draft, a percentage that isn't a whole
+# number from 0 to 100; the run fails, saying why.
+#   Actions › Rollout › Run workflow, or
+#   gh workflow run rollout.yml --repo sahil1/bridge --ref main -f version=3.20.0 -f percent=50
+# Bold Bridge's admin view starts it (Promote, Pause) with a token that can only start workflows, so
+# what changes a release is always this file and the repo's own script (CONTRIBUTING.md).
+name: Rollout
+# The admin view finds the run, and its timeline the change, by this title.
+run-name: Rollout ${{ inputs.version }} to ${{ inputs.percent }}%
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The release, like 3.20.0
+        required: true
+        type: string
+      percent:
+        description: Computers on Stable offered it, 0 (paused) to 100 (everyone)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# One change at a time for a release, so two can't write its notes at once.
+concurrency:
+  group: rollout-${{ inputs.version }}
+
+jobs:
+  rollout:
+    name: Set the rollout
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # editing the release's notes
+    steps:
+      # The inputs reach the shell as variables, never as code. A flag in either would change what
+      # the script does, so only a version and a number get as far as it.
+      - name: From main, with a version and a percentage
+        env:
+          VERSION: ${{ inputs.version }}
+          PERCENT: ${{ inputs.percent }}
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::A rollout is changed from main only, not $GITHUB_REF"; exit 1; }
+          [[ "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::\"$VERSION\" isn't a version, like 3.20.0"; exit 1; }
+          [[ "$PERCENT" =~ ^[0-9]+$ ]] || { echo "::error::rollout: the percentage is a whole number from 0 to 100, not \"$PERCENT\""; exit 1; }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set it on the release's notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+          PERCENT: ${{ inputs.percent }}
+        run: node scripts/rollout.js "$VERSION" "$PERCENT"

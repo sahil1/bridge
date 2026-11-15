@@ -13,6 +13,8 @@
 // download or Docker's latest, and only computers on Early Access are offered it. A release that
 // goes out a few computers at a time says so in its CHANGELOG section, <!-- rollout: 10 -->, and
 // npm run rollout -- <version> <percent> moves it on (scripts/rollout.js, CONTRIBUTING.md).
+// Without a terminal, .github/workflows/release-start.yml runs this on GitHub, the same checks and
+// the same tag, then starts the release at it.
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -23,7 +25,10 @@ import { rolloutOf, withRollout } from '../shared/rollout.js'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null }
-const fail = (msg) => { console.error(`release: ${msg}`); process.exit(1) }
+// On GitHub (release.yml's notes, release-start.yml) the reason is also the run's error, which the
+// run's page shows and the admin view reads.
+const ci = process.env.GITHUB_ACTIONS === 'true'
+const fail = (msg) => { console.error(ci ? `::error::release: ${String(msg).replace(/%/g, '%25').replace(/\r?\n/g, '%0A')}` : `release: ${msg}`); process.exit(1) }
 const git = (...a) => execFileSync('git', a, { cwd: ROOT, encoding: 'utf8' }).trim()
 
 const read = (f) => JSON.parse(fs.readFileSync(path.join(ROOT, f), 'utf8')).version
@@ -74,7 +79,7 @@ if (git('status', '--porcelain', '--untracked-files=no')) fail('you have uncommi
 git('fetch', '-q', 'origin', 'main', '--tags')
 const head = git('rev-parse', 'HEAD')
 const main = git('rev-parse', 'origin/main')
-if (head !== main) fail(`your checkout (${head.slice(0, 7)}) isn't what's on origin/main (${main.slice(0, 7)}). Merge and push to main, then check out main.`)
+if (head !== main) fail(ci ? `main moved on to ${main.slice(0, 7)} after this run started at ${head.slice(0, 7)}; start it again` : `your checkout (${head.slice(0, 7)}) isn't what's on origin/main (${main.slice(0, 7)}). Merge and push to main, then check out main.`)
 if (git('ls-remote', '--tags', 'origin', `refs/tags/${tag}`)) fail(`${tag} already exists on GitHub. Bump the version in package.json and desktop/package.json for a new release.`)
 
 // Who it goes to, said before anything is pushed.
@@ -89,4 +94,6 @@ if (args.includes('--dry-run')) { console.log('Dry run: nothing pushed.'); proce
 git('tag', '-a', tag, '-m', `Bridge AI ${version}`, main)
 git('push', 'origin', tag)
 const repo = git('remote', 'get-url', 'origin').replace(/\.git$/, '').replace(/^git@github\.com:/, 'https://github.com/')
-console.log(`Pushed ${tag}. GitHub is building macOS, Windows and Linux now, and the Android app (about 15 minutes):\n  ${repo}/actions\nThe ${beta ? 'pre-release' : 'release'} appears at ${repo}/releases when all three desktop builds pass.`)
+// A tag GitHub's own token pushes starts no workflow: release-start.yml starts them itself.
+if (ci) console.log(`Pushed ${tag}. Pushed with GitHub's own token, it starts nothing by itself: release-start.yml starts the Release workflow and the Docker image at it next.`)
+else console.log(`Pushed ${tag}. GitHub is building macOS, Windows and Linux now, and the Android app (about 15 minutes):\n  ${repo}/actions\nThe ${beta ? 'pre-release' : 'release'} appears at ${repo}/releases when all three desktop builds pass.`)
