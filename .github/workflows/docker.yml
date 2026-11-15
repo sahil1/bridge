@@ -2,9 +2,11 @@
 # that it starts, and pushes it to ghcr.io/sahil1/bridge.
 #   Pushing a tag v<version> (npm run release does this) pushes <version>, <major>.<minor> and
 #   latest; a pre-release's (v3.13.0-beta.1) pushes only <version>. It runs apart from release.yml,
-#   so a problem here never holds up the desktop release.
-#   A pull request that changes what goes into the image, or running it by hand (Actions › Docker
-#   image › Run workflow), only builds and tests, so a release isn't the first to find a broken image.
+#   so a problem here never holds up the desktop release. Started at a tag instead
+#   (release-start.yml, whose tag GitHub's own token pushes and so starts nothing), it's the same.
+#   A pull request that changes what goes into the image, or running it by hand on a branch (Actions
+#   › Docker image › Run workflow), only builds and tests, so a release isn't the first to find a
+#   broken image.
 name: Docker image
 
 on:

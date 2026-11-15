@@ -1,0 +1,71 @@
+# Starts a release without a terminal: what npm run release does (scripts/release.js), run here.
+# From main only; the version is main's package.json. scripts/release.js checks what it checks on
+# your computer (nothing personal in the repo, both package.json files on a version Bridge AI is
+# released as, its CHANGELOG.md section, its tag not there yet, this run at main's newest commit),
+# says who it goes to, and pushes the tag v<version>. A tag pushed with GitHub's own token starts no
+# workflow, so this then starts the two a pushed tag would, at the tag: the release (release.yml:
+# every test, the builds, then the release published) and the Docker image (docker.yml).
+#   Actions › Release start › Run workflow (on main), or
+#   gh workflow run release-start.yml --repo sahil1/bridge --ref main
+# Bold Bridge's admin view starts it (Release) with a token that can only start workflows, and sends
+# the version it showed, so main moving on meanwhile releases nothing it didn't name.
+name: Release start
+run-name: Release start${{ inputs.version && format(' {0}', inputs.version) || '' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Only if main is at this version (empty, whatever main says)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+# One at a time: two at once could both find the tag not there yet.
+concurrency:
+  group: release-start
+
+jobs:
+  start:
+    name: Check, tag and start the release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the tag
+      actions: write # starting release.yml and docker.yml at it
+    steps:
+      - name: From main
+        run: '[ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::A release starts from main only, not $GITHUB_REF"; exit 1; }'
+
+      # The token stays for the tag's push: nothing here installs a package or runs anything but the
+      # repo's own scripts.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: The version asked for is main's
+        env:
+          ASKED: ${{ inputs.version }}
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          [ -z "$ASKED" ] || [ "$ASKED" = "$v" ] ||
+            { echo "::error::release: main is at $v now, not $ASKED: look again before releasing"; exit 1; }
+
+      - name: The checks npm run release makes, then the tag
+        id: tag
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          node scripts/release.js
+          echo "tag=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: The release and the Docker image, at the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+          gh workflow run docker.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+          echo "Started Release and Docker image at $TAG: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions" | tee -a "$GITHUB_STEP_SUMMARY"

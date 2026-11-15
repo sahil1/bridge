@@ -65,6 +65,8 @@ const SUITES = [
   { name: 'terminal-app', build: 'dist', browser: true, covers: [/^server\/(terminal|attach)\.js$/, /^scripts\/cli\.js$/, /^src\/components\/(Console|settings\/General)\.jsx$/, /^test\/stand-ins\/long-output\.cjs$/] },
   { name: 'terminal-scroll', build: 'dist', browser: true, covers: [/^src\/components\/(Terminal|LiveShell)\.jsx$/, /^src\/termTouch\.js$/, /^server\/runtime\/(builtin|screen|ptyhost)\.js$/, /^test\/stand-ins\/long-output\.cjs$/] },
   { name: 'test-scope', build: null, covers: [/^\.github\/workflows\/(test|release|nightly)\.yml$/, /^scripts\/nightly\.js$/] },
+  // Releases started and moved on from GitHub itself (the admin view's buttons only start these).
+  { name: 'release-controls', build: null, covers: [/^\.github\/workflows\/(rollout|release-start|release|docker|fresh-install|test)\.yml$/, /^scripts\/(release|rollout)\.js$/, /^shared\/rollout\.js$/] },
   { name: 'nightly', build: 'dist', browser: true, covers: [/^scripts\/nightly\.js$/, /^shared\/(version|autoupdate)\.js$/, /^server\/updates\.js$/, /^src\/components\/settings\/About\.jsx$/, /^counts\/worker\.js$/, /^\.github\/workflows\/(nightly|release)\.yml$/] },
   { name: 'model-names', build: null, covers: [/^server\/(models|transcripts)\.js$/, /^src\/components\/ModelChip\.jsx$/] },
   { name: 'chat-account', build: 'dist', browser: true, covers: [/^src\/components\/(ModelChip|AccountMenu|Console|Handoff)\.jsx$/, /^src\/App\.jsx$/, /^server\/(accounts|models|handoff|index|transcripts|queue)\.js$/] },
