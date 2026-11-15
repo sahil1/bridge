@@ -34,6 +34,8 @@ import { startKit, startModel, startLocalModel, checks, until, sleep, OUT, TEST,
 
 const { ok, skip, done } = checks('builtin-model')
 const STAND_IN = path.join(TEST, 'stand-ins', 'llama-server.mjs')
+// Every kind of job on Auto (Cloud first is the default).
+const AUTO = { notes: 'auto', assist: 'auto', mail: 'auto', tidy: 'auto', live: 'auto', diagrams: 'auto' }
 
 // ---------- The rules, for every kind of computer ----------
 process.env.BRIDGE_HOME = path.join(OUT, 'kits', 'builtin-rules')
@@ -239,7 +241,7 @@ try {
   const kept = await notesBy(kit)
   ok(kept.error === 'Meeting notes is set to run on this computer, but Gemma 4 E4B isn\'t downloaded yet. Download it in Settings › Model Providers, or set Meeting notes to Auto there.' && kept.model === null, 'Meeting notes set to On this computer, with no model here: the meeting says why they weren\'t written', kept)
   const jobsHere = await kit.api('/model-jobs')
-  ok(jobsHere.jobs.length === 6 && jobsHere.jobs.find((j) => j.id === 'notes').set === 'local' && jobsHere.jobs.filter((j) => j.id !== 'notes').every((j) => j.set === 'auto') && jobsHere.missing?.code === 'not_downloaded' && jobsHere.offered, 'Settings is told which jobs are set how, and what\'s missing here', jobsHere)
+  ok(jobsHere.jobs.length === 6 && jobsHere.jobs.find((j) => j.id === 'notes').set === 'local' && jobsHere.jobs.filter((j) => j.id !== 'notes').every((j) => j.set === 'cloud') && jobsHere.missing?.code === 'not_downloaded' && jobsHere.offered, 'Settings is told which jobs are set how (the rest Cloud first, the default), and what\'s missing here', jobsHere)
   await kit.api('/settings', { modelJobs: null }, 'PATCH')
   // (A meeting starting gets the speech model ready, from the same stand-in for Hugging Face: not this.)
   const ours = () => files.asked.filter((a) => a.id === 'gemma-4-e2b')
@@ -307,6 +309,7 @@ try {
   cloud = await startModel('builtin')
   await kit.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${cloud.url}/v1` } }, 'PUT')
   // Auto, with a key and the local model: a short meeting here, saying so; a long one on the key.
+  await kit.api('/settings', { modelJobs: AUTO }, 'PATCH')
   const by = await notesBy(kit)
   ok(by.model === 'bridge:gemma-4-e2b' && /^Written on this computer by bridge:gemma-4-e2b: with Auto, a meeting this short stays here/.test(by.note || ''), 'with an API key too: a short meeting\'s notes by the local model (Auto), saying so under them', by)
   const longOne = await meeting(kit, 'A long one')
@@ -327,7 +330,7 @@ try {
   await kit.api(`/meetings/${failing}/summary`, {})
   const keptFb = await until(async () => { const x = await kit.api(`/meetings/${failing}`); return !x.summarizing && x.summarizedAt !== fb.summarizedAt && x }, 30000)
   ok(keptFb?.summaryModel === 'ollama:llama3.2:3b' && /^bridge:gemma-4-e2b couldn't write it here \(.*out of memory \(stand-in\)\), so ollama:llama3\.2:3b wrote it\.$/.test(keptFb.summaryNote || '') && cloud.asked(/LOCAL FAILS/).length === toKey, 'set to On this computer: your Ollama, also here, writes it, saying why, and nothing goes to the key\'s model', { model: keptFb?.summaryModel, note: keptFb?.summaryNote })
-  await kit.api('/settings', { modelJobs: null }, 'PATCH')
+  await kit.api('/settings', { modelJobs: AUTO }, 'PATCH')
   const jobsNow = await kit.api('/model-jobs')
   ok(jobsNow.local?.id === 'bridge:gemma-4-e2b' && /^openai:/.test(jobsNow.cloud?.id || '') && jobsNow.limit?.minutes === 50, 'Settings is told what Auto does here: the local model up to about 50 minutes, the key\'s model after', jobsNow)
   const listed2 = await kit.api('/chat/models')
@@ -398,6 +401,8 @@ try {
   const by = await notesBy(withClaude)
   ok(by.model === 'cli:claude' && launches(withClaude).length === 0, 'with Claude Code signed in and Meeting notes on Cloud first: Claude writes the notes, first of all, and the local model isn\'t started', by)
   await withClaude.api('/settings', { modelJobs: null }, 'PATCH')
+  ok((await notesBy(withClaude)).model === 'cli:claude', 'by default (Cloud first): Claude writes them, as before')
+  await withClaude.api('/settings', { modelJobs: AUTO }, 'PATCH')
   const auto = await notesBy(withClaude)
   ok(auto.model === 'bridge:gemma-4-e2b' && launches(withClaude).length === 1, 'on Auto: a short meeting by the local model, on this computer', auto)
   // Diagrams stay with Claude on Auto, however short.
@@ -450,7 +455,7 @@ try {
   // Which jobs run here: each kind, Auto, and what Auto does with no model here yet.
   const jobsBox = p.locator('[data-model-jobs]')
   await jobsBox.waitFor({ timeout: 10000 })
-  ok((await jobsBox.locator('li[data-job]').count()) === 6 && (await jobsBox.locator('li[data-job] select').evaluateAll((s) => s.every((x) => x.value === 'auto'))) && /Meeting notes/.test(await jobsBox.innerText()) && /Diagrams/.test(await jobsBox.innerText()), 'Which jobs run here: six kinds, each on Auto', await jobsBox.innerText())
+  ok((await jobsBox.locator('li[data-job]').count()) === 6 && (await jobsBox.locator('li[data-job] select').evaluateAll((s) => s.every((x) => x.value === 'cloud'))) && /Meeting notes/.test(await jobsBox.innerText()) && /Diagrams/.test(await jobsBox.innerText()), 'Which jobs run here: six kinds, each on Cloud first to start', await jobsBox.innerText())
   ok((await jobsBox.locator('li[data-job="live"] option[value="local"]').count()) === 1, 'On this computer offered for live suggestions here (it has a GPU)')
   await row.scrollIntoViewIfNeeded()
   await shot(p, `${which}-builtin-1-offered`)
@@ -461,6 +466,7 @@ try {
   files.slow = 0
   text = await row.innerText()
   ok(/Remove/.test(await small2.innerText()) && /Gemma 4 E2B is in use, in every model list/.test(text) && /With Auto, Bridge AI runs short jobs on it/.test(await more()), 'with Remove, and how it\'s used: in every list, short jobs on Auto', [text, await more()])
+  await jobsBox.locator('li[data-job="notes"] select').selectOption('auto')
   ok(!!(await until(async () => /Gemma 4 E2B, on this computer: there's no other model/.test(await jobsBox.locator('li[data-job="notes"]').innerText()), 10000, 200)), 'Which jobs run here says what Auto does now: with no other model, everything here', await jobsBox.innerText())
   await jobsBox.locator('li[data-job="notes"] select').selectOption('local')
   ok(!!(await until(async () => (await ui.api('/settings')).user.modelJobs?.notes === 'local' && /Always on this computer, with Gemma 4 E2B/.test(await jobsBox.locator('li[data-job="notes"]').innerText()), 10000, 200)), 'Meeting notes set to On this computer, there and in the settings', (await ui.api('/settings')).user.modelJobs)

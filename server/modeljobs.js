@@ -1,6 +1,6 @@
 // Which model each kind of job runs on when you haven't picked one for it: on this computer, or your
 // cloud model (a sign-in or a key). Each kind has a setting in Settings › Model Providers
-// (modelJobs.<job>): Auto (the default), On this computer, or Cloud first.
+// (modelJobs.<job>): Cloud first (the default), Auto, or On this computer.
 //   Auto: the local model built in (or the one picked there for jobs that stay on this computer)
 //   when there's no other model, or when the job is short: it fits in one go in what the local model
 //   reads at a time, it's no more than about 50 minutes of talk (SHORT), and it would be done here
@@ -8,7 +8,8 @@
 //   research found small models clearly worse: research/local-models.md), your cloud model.
 //   On this computer: always here, and when the local model can't run (not downloaded, not offered
 //   here), the job says why rather than going elsewhere.
-//   Cloud first: as before Auto, your sign-in or key first, a model here only when there's nothing else.
+//   Cloud first: your sign-in or key first, a model here only when there's nothing else. The default,
+//   so a local model downloaded for dictation doesn't start writing meeting notes until you pick Auto.
 // A model picked for a job where it's used (Settings › Voice & Meetings, a meeting's own pick, Studio's
 // writer) always comes first; this is only for when there's none. Edit by voice and Tidy what I say
 // have their own picks and keep to this computer by themselves (index.js), and AI Assist's look at
@@ -24,7 +25,7 @@ export const JOBS = [
   { id: 'diagrams', label: 'Diagrams', about: 'Draw this and Change it on the whiteboard', cloud: true },
 ]
 export const SETTINGS = ['auto', 'local', 'cloud']
-export const setting = (cfg, job) => (SETTINGS.includes(cfg?.modelJobs?.[job]) ? cfg.modelJobs[job] : 'auto')
+export const setting = (cfg, job) => (SETTINGS.includes(cfg?.modelJobs?.[job]) ? cfg.modelJobs[job] : 'cloud')
 
 // About 50 minutes of a meeting's transcript (an hour is about 14,000 tokens): small models' notes
 // were faithful on a short call and slower and less complete on long ones.
