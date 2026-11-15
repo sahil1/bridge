@@ -1,13 +1,14 @@
 // Your Bold Bridge account (account/API.md): one per email, for the two things Bold Bridge runs for
 // you, Early Access and Bridge AI's relay, and nothing else. Bridge AI works the same without it,
-// and setup never asks for it: it's in Settings › Account, once the accounts service exists.
+// and setup never asks for it: it's in Settings › Account & Devices, once the accounts service exists.
 //
 // Signing in is your email and a 6-digit code it's sent; no password. This computer is then one of
 // the account's devices (5 at most, computers and phones) and keeps its device token in
 // ~/.bridge-ai/account.json (only you can read it), with what the account last said: your email,
 // its devices, whether it's a tester (then the updater's Early Access takes its code), and whether it
 // may use the relay (then relay.js registers and connects with its relay token). Asked at start,
-// every 6 hours, and whenever Settings › Account is opened. Once signed in, the computers linked to
+// every 6 hours (every half hour while a request waits, so a yes is heard soon), and whenever
+// Settings › Account & Devices shows the account. Once signed in, the computers linked to
 // this one can be signed in too, without the email (a one-time grant, handed over the link between
 // them, machines.js); one that would rather not says so, and is left alone after.
 //
@@ -41,6 +42,7 @@ export const available = () => !!accountsBase()
 
 const FILE = dataFile('account.json')
 const EVERY = 6 * 3600 * 1000
+const WAITING = 30 * 60 * 1000
 const read = () => { try { const d = JSON.parse(fs.readFileSync(FILE, 'utf8')); return d && typeof d === 'object' ? d : {} } catch { return {} } }
 let conf = read()
 const save = () => { ensureDir(path.dirname(FILE)); writeFileAtomic(FILE, JSON.stringify(conf, null, 2), { mode: 0o600 }) }
@@ -117,7 +119,7 @@ export function refresh() {
   return asking
 }
 
-// For Settings › Account (and /api/account): signed in or not, the account, its devices, Early
+// For Settings › Account & Devices (and /api/account): signed in or not, the account, its devices, Early
 // Access and the relay, and the last thing that went wrong.
 export function status() {
   if (!available()) return { available: false }
@@ -189,7 +191,7 @@ export const grant = () => call('POST', '/v1/grant')
 export async function redeem({ grant: g, by, replace }) {
   if (!available()) return { ok: false, why: 'none', text: 'This Bridge AI has no Bold Bridge accounts.' }
   if (conf.deviceToken && conf.account) return { ok: false, why: 'signed-in', text: `Signed in already, as ${conf.account.email}.` }
-  if (conf.declined) return { ok: false, why: 'declined', text: 'It said not to sign it in from your other computers. Sign in there by hand, in Settings › Account.' }
+  if (conf.declined) return { ok: false, why: 'declined', text: 'It said not to sign it in from your other computers. Sign in there by hand, in Settings › Account & Devices.' }
   try {
     const r = await call('POST', '/v1/redeem', { grant: g, device: device(), ...(replace ? { replace } : {}) }, null)
     conf = { deviceToken: r.deviceToken }
@@ -237,9 +239,11 @@ export async function deleteAccount(email) {
   return status()
 }
 
-// At start, then every 6 hours.
+// At start, then every 6 hours. While Early Access or the relay is asked for and waiting, every half
+// hour too: the relay then starts here by itself soon after the yes (relay.js), with Bridge AI open.
 export function start() {
   if (!available()) return
   refresh().catch(() => {})
   setInterval(() => refresh().catch(() => {}), EVERY).unref()
+  setInterval(() => { if ([conf.account?.relay, conf.account?.tester].includes('requested') && conf.deviceToken) refresh().catch(() => {}) }, WAITING).unref()
 }

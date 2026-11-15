@@ -21,7 +21,9 @@
 // Or, with no Cloudflare account at all, Bridge AI's own relay (relay/HOSTED.md): the same relay,
 // run by the project for many computers, each with an address of its own, for a Bold Bridge
 // account that may use it (account.js gives the relay token it registers and connects with). It's
-// offered only once hosted.js says where it is and Bold Bridge accounts exist.
+// offered only once hosted.js says where it is and Bold Bridge accounts exist. Once the account has
+// it and nothing else is set up here (no relay, no Tailscale for the phone), this computer starts
+// using it by itself (maybeAuto), and Settings says so.
 //
 // Your other devices connect the same way a phone does (machines.js): with a one-time code from
 // invite() (when one device links another, or introduces two), or by asking. An ask waits here
@@ -108,6 +110,7 @@ let failed = null // how the last try failed: { code } when nothing answered, { 
 let limit = null // what Bridge AI's relay last said about its limits: { why, text, until }
 let use = null // and this computer's account's use there: { window, week }, each { messages, limit, resetsAt }
 let hostedFull = null // Bridge AI's relay turned this computer away as full: { at, text }, said for an hour
+let hostedRun = null // setting up Bridge AI's relay: the one run, which a second ask waits on
 let pinger = null
 let hostKey = null // { privateKey, public }
 let awakeProc = null // what keeps this computer awake, while it does (holdAwake)
@@ -181,6 +184,11 @@ export function status() {
     hosted: !!conf.hosted, // on Bridge AI's relay
     hostedAvailable: !!hostedBase() && accountsOn(), // Bridge AI's relay is offered at all (it needs an account)
     hostedFull: hostedFull && hostedFull.at > Date.now() - 3600000 ? hostedFull.text : null, // ...but it was full just now
+    // Started by itself (maybeAuto): when, and how it went ({ at, ok, text, code }). autoNext: it
+    // would, once the account has the relay (nothing else set up here, and never stopped here).
+    auto: conf.auto || null,
+    autoNext: autoOpen(),
+    tailnet,
     limit: limit && limit.until > Date.now() ? limit : null,
     use: conf.hosted ? use : null,
     needsUpdate: !!(!conf.hosted && online && relayBuild && relayBuild !== relayCode().build),
@@ -204,6 +212,9 @@ export function start(serverBase) {
   holdAwake()
   if (conf.url && conf.token) connect()
   if (conf.leaving?.length) sendLeaving()
+  // An account that has the relay already, and nothing set up here: once the account has been asked
+  // and Tailscale has said whether it serves the phone (index.js asks both as it starts).
+  if (!conf.url) setTimeout(maybeAuto, 20000).unref()
 }
 
 function connect() {
@@ -219,7 +230,7 @@ function connect() {
   const relayToken = conf.hosted ? acct?.relayTokenNow() : null
   if (conf.hosted && !relayToken) {
     const st = acct?.relayState() || {}
-    lastError = !st.signedIn ? 'Bridge AI\'s relay needs this computer signed in to your Bold Bridge account (Settings › Account).' : st.status === 'suspended' ? 'Your Bold Bridge account is suspended, so Bridge AI\'s relay doesn\'t carry this computer for now.' : st.relay !== 'approved' ? 'Your Bold Bridge account doesn\'t have Bridge AI\'s relay any more. Use your own Cloudflare or Tailscale, in Settings › Devices.' : 'Getting a pass for Bridge AI\'s relay from your Bold Bridge account…'
+    lastError = !st.signedIn ? 'Bridge AI\'s relay needs this computer signed in to your Bold Bridge account (Settings › Account & Devices).' : st.status === 'suspended' ? 'Your Bold Bridge account is suspended, so Bridge AI\'s relay doesn\'t carry this computer for now.' : st.relay !== 'approved' ? 'Your Bold Bridge account doesn\'t have Bridge AI\'s relay any more. Use your own Cloudflare or Tailscale, in Settings › Account & Devices.' : 'Getting a pass for Bridge AI\'s relay from your Bold Bridge account…'
     limit = { why: !st.signedIn ? 'token' : st.status === 'suspended' ? 'suspended' : st.relay !== 'approved' ? 'relay' : 'token', text: lastError, until: Date.now() + 5 * 60000 }
     if (st.signedIn && st.relay === 'approved') acct?.relayToken().then((t) => { if (t) connect() }).catch(() => {})
     retry = setTimeout(connect, 5 * 60000)
@@ -324,9 +335,10 @@ function onUse(m) {
   if (['window', 'week'].includes(limit?.why) && use[limit.why].messages <= (use[limit.why].limit ?? Infinity)) limit = null
 }
 // The account changed (signed in or out, the relay given or taken away, a new pass): on Bridge AI's
-// relay, connected again with it.
+// relay, connected again with it; with nothing set up here, perhaps using it by itself.
 export function accountChanged() {
-  if (!conf.hosted || !conf.url) return
+  if (!conf.url) return maybeAuto()
+  if (!conf.hosted) return
   if (['token', 'suspended', 'relay', 'deleted'].includes(limit?.why)) limit = null
   disconnect()
   connect()
@@ -689,7 +701,7 @@ export const hostPublic = async () => b64u((await key()).public)
 // A one-time code for another of your devices: when one links to this one, it hands this one a
 // code to link back; when one introduces another, it asks this one for a code to hand on.
 export async function invite() {
-  if (!conf.url) throw new Error('This device has no relay yet. Set it up in Settings › Devices.')
+  if (!conf.url) throw new Error(`This device has no relay yet. Set it up in Settings › ${accountsOn() ? 'Account & Devices' : 'Devices'}.`)
   await key()
   const c = newPairCode()
   const { id, secret } = splitCode(c)
@@ -1072,17 +1084,49 @@ async function deployWith(token, account) {
 // gives this computer an address of its own and a token, and Bridge AI connects to it as to any
 // relay. The same computer (the same device on the account) gets the same address back. The project
 // keeps it up to date.
-// What's missing, said where the relay is offered (Settings › Devices, setup, the command line),
-// with the code the app offers a fix for: sign in, ask for it, wait for it, or nothing to be done.
+// What's missing, said where the relay is offered (Settings › Account & Devices, setup, the command
+// line), with the code the app offers a fix for: sign in, ask for it, wait for it, or nothing to be done.
 function needsAccount(st) {
   const say = (code, text) => { throw Object.assign(new Error(text), { code }) }
-  if (!st.signedIn) say('accountSignIn', 'Bridge AI\'s relay comes with a Bold Bridge account. Sign in first, in Settings › Account: it takes your email and a code.')
+  if (!st.signedIn) say('accountSignIn', 'Bridge AI\'s relay comes with a Bold Bridge account. Sign in first, in Settings › Account & Devices: it takes your email and a code.')
   if (st.status === 'suspended') say('accountSuspended', 'Your Bold Bridge account is suspended, so it can\'t use Bridge AI\'s relay for now. Your own Cloudflare or Tailscale still work.')
   if (st.relay === 'requested') say('accountRequested', 'You\'ve asked for Bridge AI\'s relay, and the request is waiting. Bold Bridge emails you when it\'s on.')
-  if (st.relay === 'declined') say('accountDeclined', 'Your request for Bridge AI\'s relay was declined. Ask again in Settings › Account, or use your own Cloudflare or Tailscale.')
-  if (st.relay !== 'approved') say('accountRequest', 'Your Bold Bridge account doesn\'t have Bridge AI\'s relay yet. Ask for it in Settings › Devices or Settings › Account.')
+  if (st.relay === 'declined') say('accountDeclined', 'Your request for Bridge AI\'s relay was declined. Ask again in Settings › Account & Devices, or use your own Cloudflare or Tailscale.')
+  if (st.relay !== 'approved') say('accountRequest', 'Your Bold Bridge account doesn\'t have Bridge AI\'s relay yet. Ask for it in Settings › Account & Devices.')
 }
-async function useHosted() {
+
+// Using it by itself (accountChanged, and as Bridge AI starts): once the account signed in here has
+// the relay, and nothing else is set up for the phone (no relay, no Tailscale), kept in conf.auto
+// with how it went, which Settings says. Once it has worked, never again by itself; one that didn't
+// (full, no network) is tried again at the next start or pass from the account, not in a loop. Never
+// after you stopped using a relay here (conf.stopped); Use it on this computer is a click away then.
+function autoOpen() { return !conf.url && !conf.stopped && !conf.auto?.ok && !tailnet && !!hostedBase() && accountsOn() }
+function maybeAuto() {
+  if (!autoOpen() || busy || hostedRun) return
+  const st = acct.relayState()
+  if (!st.signedIn || st.relay !== 'approved' || st.status === 'suspended' || !acct.relayTokenNow()) return
+  conf.auto = { at: new Date().toISOString() }
+  save()
+  useHosted({ auto: true }).catch(() => {}) // (how it went is in conf.auto)
+}
+
+// One at a time: a second ask (Settings and the account's own news at once) waits on the first.
+function useHosted(o) {
+  return (hostedRun ||= setUpHosted(o).finally(() => { hostedRun = null }))
+}
+// auto: the run by itself, which keeps how it went in conf.auto for Settings to say. One by hand that
+// works takes away what a run by itself that didn't said.
+async function setUpHosted({ auto = false } = {}) {
+  try {
+    const r = await registerHosted()
+    if (auto) { conf.auto = { at: conf.auto?.at || new Date().toISOString(), ok: true }; save() } else if (conf.auto && !conf.auto.ok) { delete conf.auto; save() }
+    return r
+  } catch (e) {
+    if (auto) { conf.auto = { ...conf.auto, ok: false, text: String(e.message).slice(0, 400), ...(e.code ? { code: e.code } : {}) }; save() }
+    throw e
+  }
+}
+async function registerHosted() {
   const where = hostedBase()
   if (!where || !accountsOn()) throw new Error('Bridge AI\'s relay isn\'t available yet. Use your own Cloudflare account, or Tailscale.')
   if (conf.hosted && conf.url && limit?.why !== 'gone') return status() // (gone: it forgot this computer, so again)
@@ -1143,7 +1187,8 @@ function leave() {
   // (Which Worker was yours on Cloudflare stays, so going back to it updates that one. Its phones'
   // keys stay too, so one that reaches this computer again is told it was forgotten, sealed.)
   tombstone(was.devices || [])
-  conf = { key: was.key, awake: was.awake, removed: was.removed, ...(was.leaving ? { leaving: was.leaving } : {}), ...(was.cf?.script ? { cf: { account: was.cf.account, accountName: was.cf.accountName, script: was.cf.script } } : {}) }
+  // (And whether Bridge AI's relay was started here by itself, which Settings says while it's in use.)
+  conf = { key: was.key, awake: was.awake, removed: was.removed, ...(was.leaving ? { leaving: was.leaving } : {}), ...(was.cf?.script ? { cf: { account: was.cf.account, accountName: was.cf.accountName, script: was.cf.script } } : {}), ...(was.auto ? { auto: was.auto } : {}) }
   save()
   if (was.hosted) unregister(was)
 }
@@ -1196,6 +1241,8 @@ function relayPost(url, token) {
 // you paste). When the sign-in has several Cloudflare accounts, the answer lists them; ask again
 // with the one to use.
 export async function deploy({ method, token, account }) {
+  // (Bridge AI's relay being set up already, by itself or from another window: that one's answer.)
+  if (method === 'hosted' && hostedRun) return hostedRun
   if (busy) throw new Error('Already working on it')
   if (method === 'hosted') { lastError = null; return useHosted() }
   lastError = null
@@ -1251,7 +1298,8 @@ export async function update() {
 
 // Stop using the relay on this computer. The Worker stays on your Cloudflare account (delete it
 // there if you like); phones paired with it are forgotten. On Bridge AI's relay, this computer's
-// address there is removed, with anything it kept.
+// address there is removed, with anything it kept. Bridge AI's relay doesn't start here by itself
+// after this (stopped).
 export function forget() {
   if (conf.hosted) unregister(conf)
   limit = null
@@ -1262,7 +1310,7 @@ export function forget() {
   pairing = null
   tombstone(conf.devices || [])
   const { key: k, awake: a, leaving: l, removed: x } = conf
-  conf = { key: k, awake: a, removed: x, ...(l ? { leaving: l } : {}) }
+  conf = { key: k, awake: a, removed: x, ...(l ? { leaving: l } : {}), stopped: new Date().toISOString() }
   save()
   fs.rmSync(CF_HOME, { recursive: true, force: true }) // and sign Bridge AI out of Cloudflare
   return status()
