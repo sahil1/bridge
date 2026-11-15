@@ -23,6 +23,10 @@ Studio's home is your files: Folders is part of Studio. The local model comes in
 - Docker: the image's health check asks a route that needs no key, so a running container shows healthy.
 - A finished meeting with nothing transcribed says no one was heard speaking in the time recorded.
 
+## 3.20.0-beta.1
+
+A beta of 3.20.0, to try before it goes to everyone. Studio's home is your files, with Folders folded into Studio. The local model comes in three sizes, the one that fits your computer recommended, and Settings › Model Providers › Which jobs run here sets which jobs may use it (every job on Cloud first until you pick Auto). Record the screen too keeps a meeting's screen as a video beside its transcript. Pictures of a call's window are cropped to what's shared. The model menu says which version Opus and Sonnet are. And fixes: no crash report when an update ends the old window, Docker's health check, and a silent meeting saying no one was heard.
+
 ## 3.19.0
 
 The Chief of Staff hands work to helpers, each an agent with a role, and hears back from each one when it stops; its tasks show on a board. Studio, Sign PDFs, Comments and @bridge, Make a Sheet, Folders, Back and Forward, Tab Groups and Recommended Settings are out of beta. The sidebar is shorter: Dictations are a tab of Meetings, whiteboards are in Studio, and Files is Folders. Settings is shorter too: Voice and Meetings are one section with tabs, and Devices has tabs. With Bridge AI's relay picked, the email sign-in comes first. Usage stats add the time in use each day and the models used.
