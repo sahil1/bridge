@@ -1,13 +1,14 @@
-// Folders: a page of its own for every file on your computers, as Finder or Explorer
-// shows them (server/explorer.js). A sidebar of your folders, drives and other computers; a folder as
-// a list, icons or columns, with the way you came (back and forward) and a path to click along; a
-// search in it and below it; Get Info; Quick Look with Space and the arrow keys; a double-click opens
-// a document in Studio and anything else in its own app, or shows it. Only to look for now: nothing
-// is renamed, moved or deleted from here. On a phone, one column at a time: the sidebar, then a
-// folder, then a file.
+// Studio's home (Studio.jsx StudioHome): every file on your computers, as Finder or Explorer shows
+// them (server/explorer.js). A sidebar of Studio's own lists (shelves: Recent, its kinds, design
+// packs, your signature), then your folders, drives and other computers; a folder as a list, icons or
+// columns, with the way you came (back and forward) and a path to click along; a search in it and
+// below it; Get Info; Quick Look with Space and the arrow keys; a double-click opens a document in
+// Studio's editor and anything else in its own app, or shows it. Only to look for now: nothing is
+// renamed, moved or deleted from here. On a phone, one column at a time: the sidebar, then a folder
+// or a list, then a file.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { PaneHeader, Handle, usePersisted, useWidth } from '../layout.jsx'
+import { Handle, usePersisted, useWidth } from '../layout.jsx'
 import { api, machineId, onThisComputer } from '../../api.js'
 import { useMachines } from '../Machines.jsx'
 import { t, tx } from '../../i18n/index.js'
@@ -20,17 +21,20 @@ import QuickLook from './QuickLook.jsx'
 import Info from './Info.jsx'
 import Assist, { folderAssist } from './Assist.jsx'
 import AiAssist from '../AiAssist.jsx'
-import { baseOf, getJson, postJson, useFolder, sorted, enc, joinFull, parentOf, nameOf, kindName, fmtSize, fmtWhen, WHERE_KEY } from './fsapi.js'
+import { baseOf, getJson, postJson, useFolder, sorted, enc, joinFull, parentOf, nameOf, kindName, fmtSize, fmtWhen, WHERE_KEY, SHELF } from './fsapi.js'
 import { sayPlace, takePlace, onPlaceShow, useNav, keyDir } from '../../backForward.js'
 import './explorer.css'
 
 const HOME = { machine: null, root: 'home', path: '' }
 const VIEWS = [['list', 'list', tx('As list')], ['icons', 'grid', tx('As icons')], ['columns', 'columns', tx('As columns')]]
 const ASKED_ABOUT = ['Desktop', 'Documents', 'Downloads']
-const readWhere = () => { try { const w = JSON.parse(localStorage.getItem(WHERE_KEY)); return w?.root ? { machine: w.machine || null, root: String(w.root), path: String(w.path || '') } : HOME } catch { return HOME } }
+// The view's place for Back and Forward (src/backForward.js), and what an old link to Folders lands on.
+const PLACE = 'view:studio'
+// A shelf is where one of Studio's lists is, rather than a folder: always this computer's.
+const shelfOf = (w) => (String(w?.root || '').startsWith(SHELF) ? w.root.slice(SHELF.length) : null)
+const placeWhere = (w) => (!w?.root ? null : shelfOf(w) ? { machine: null, root: String(w.root), path: '' } : { machine: w.machine || null, root: String(w.root), path: String(w.path || '') })
+const readWhere = (first) => { try { return placeWhere(JSON.parse(localStorage.getItem(WHERE_KEY))) || first } catch { return first } }
 const keepWhere = (w) => { try { localStorage.setItem(WHERE_KEY, JSON.stringify({ machine: w.machine, root: w.root, path: w.path })) } catch { /* not kept */ } }
-// A folder Back or Forward goes to (src/backForward.js), as kept.
-const placeWhere = (w) => (w?.root ? { machine: w.machine || null, root: String(w.root), path: String(w.path || '') } : null)
 const typingIn = (el) => !!el?.closest?.('input, textarea, select, [contenteditable="true"], .fx-ql, .fx-info, .fx-assist')
 
 // The sidebar's list, for the computer shown, looked at again now and then.
@@ -71,9 +75,14 @@ function useSearch(base, root, path, q, hidden) {
   return [st, stop]
 }
 
-export default function Explorer() {
-  // Where it was, or the folder Back or Forward opens it at.
-  const [loc, setLocState] = useState(() => placeWhere(takePlace('view:files')) || readWhere())
+// head: the page's header (Studio's). shelves: Studio's lists, { rows: [{ id, icon, label, n,
+// hint }], first, render(id, { q }) }. onOpenDoc({ root, path }): a document opened, in Studio's
+// editor. above(at): what goes over the folder or list (New's form), for where it is ({ machine,
+// root, path, shelf }).
+export default function Explorer({ head = null, className = '', shelves = null, onOpenDoc = null, above = null }) {
+  // Where it was, or the folder Back or Forward opens it at; at first, the first of the shelves.
+  const first = shelves ? { machine: null, root: `${SHELF}${shelves.first || shelves.rows[0].id}`, path: '' } : HOME
+  const [loc, setLocState] = useState(() => placeWhere(takePlace(PLACE)) || readWhere(first))
   const setLoc = (w) => { setLocState(w); keepWhere(w) }
   const [hist, setHist] = useState({ back: [], fwd: [] })
   const appNav = useNav()
@@ -107,7 +116,11 @@ export default function Explorer() {
     if (machineId && devs?.here) others.unshift({ id: 'host', name: devs.here.name, online: true, os: devs.here.os })
     return { here: { id: null, name: here?.name || t('This computer'), os: here?.os }, others }
   }, [devs])
-  const machine = loc.machine && computers.others.some((c) => c.id === loc.machine) ? loc.machine : loc.machine && !devs ? loc.machine : null
+  // One of Studio's lists, when that's what's shown (one that isn't offered here any more: the first).
+  const asked = shelves ? shelfOf(loc) : null
+  const shelf = !asked ? null : shelves.rows.some((s) => s.id === asked) ? asked : shelves.rows[0].id
+  const shelfRow = shelf ? shelves.rows.find((s) => s.id === shelf) : null
+  const machine = shelf ? null : loc.machine && computers.others.some((c) => c.id === loc.machine) ? loc.machine : loc.machine && !devs ? loc.machine : null
   const computer = machine ? computers.others.find((c) => c.id === machine) : computers.here
   const base = baseOf(machine)
   const side = useSide(base)
@@ -115,8 +128,8 @@ export default function Explorer() {
   // Show in Finder, Open in its app and macOS's question are for the computer you're at.
   const here = !machine && onThisComputer()
   const searching = !!q.trim()
-  const folder = useFolder(base, loc.root, loc.path, { hidden, ver })
-  const [found, stopSearch] = useSearch(base, loc.root, loc.path, searching ? q : '', hidden)
+  const folder = useFolder(base, loc.root, loc.path, { hidden, ver, on: !shelf })
+  const [found, stopSearch] = useSearch(base, loc.root, loc.path, searching && !shelf ? q : '', hidden)
   const top = folder.data?.top || found?.top || null
 
   // ---------- going places ----------
@@ -143,8 +156,17 @@ export default function Explorer() {
     setHist((h) => ({ back: [...h.back, loc].slice(-60), fwd: h.fwd.slice(1) }))
     setLoc(next); setSel(null); setQl(false); setQ('')
   }
-  // Back and Forward (src/backForward.js): each folder is a place of Folders', gone to again as any is.
-  useEffect(() => onPlaceShow('view:files', (w) => { if (placeWhere(w)) go(placeWhere(w)) }), [go])
+  // Back and Forward (src/backForward.js): each folder and list is a place of Studio's, gone to again
+  // as any is.
+  useEffect(() => onPlaceShow(PLACE, (w) => { if (placeWhere(w)) go(placeWhere(w)) }), [go])
+  const toShelf = useCallback((id) => go({ machine: null, root: `${SHELF}${id}`, path: '' }), [go])
+  // One of the lists or a folder asked for from outside while it's open (Whiteboards, from ⌘K or a
+  // link to them; a link to Folders).
+  useEffect(() => {
+    const on = (e) => { if (e.detail?.group) toShelf(e.detail.group); else if (placeWhere(e.detail?.where)) go(placeWhere(e.detail.where)) }
+    window.addEventListener('bridge-studio-show', on)
+    return () => window.removeEventListener('bridge-studio-show', on)
+  }, [toShelf, go])
   // The folder it's in, with this one picked (as Finder does).
   const up = () => { if (loc.path) go({ ...loc, path: parentOf(loc.path) }, { select: loc.path }) }
   const toComputer = (id) => { go({ machine: id, root: 'home', path: '' }); setSel(null) }
@@ -156,7 +178,7 @@ export default function Explorer() {
   const list = useMemo(() => sorted(entries, sort), [entries, sort])
   const current = list.find((e) => e.path === sel) || null
   const cloud = !!folder.data?.cloud
-  const rootLabel = loc.root === 'home' ? 'Home' : side.data?.drives?.find((d) => d.root === loc.root)?.label || side.data?.projects?.find((p) => p.root === loc.root && !p.path)?.label || t('Folder')
+  const rootLabel = shelfRow ? shelfRow.label : loc.root === 'home' ? 'Home' : side.data?.drives?.find((d) => d.root === loc.root)?.label || side.data?.projects?.find((p) => p.root === loc.root && !p.path)?.label || t('Folder')
   const parts = loc.path ? loc.path.split('/') : []
   const folderEntry = { name: parts.at(-1) || named(rootLabel), path: loc.path, dir: true, ...(loc.path ? {} : { drive: loc.root !== 'home' }) }
   // The one picked kept in view (after the arrow keys, a sort, a refresh).
@@ -170,7 +192,7 @@ export default function Explorer() {
   const revealLabel = os === 'mac' ? t('Show in Finder') : os === 'windows' ? t('Show in Explorer') : t('Show in file manager')
   const studioOpens = (e) => !machine && !e.dir && STUDIO_OPENS.test(e.name)
   const appOpens = (e) => here && !e.dir && OPENABLE.test(e.name)
-  const openLabel = (e) => (!e ? null : e.dir ? t('Open') : studioOpens(e) ? t('Open in Studio') : appOpens(e) ? t('Open in its app') : null)
+  const openLabel = (e) => (!e ? null : e.dir || studioOpens(e) ? t('Open') : appOpens(e) ? t('Open in its app') : null)
   const openInApp = async (e) => {
     try { await postJson(base, `/agents/${enc(loc.root)}/fileop`, { op: 'open', path: e.path }); say(t('Opened {name} in its app', { name: e.name })) } catch (x) { say(x.message) }
   }
@@ -181,13 +203,17 @@ export default function Explorer() {
     try { await navigator.clipboard.writeText(text); say(t('Path copied')) } catch { say(t('Couldn\'t copy it here: {path}', { path: text })) }
   }
   const fullOf = (e) => (top ? joinFull(top, e.path) : e.path)
-  // A double-click (or Enter): a folder opens here, a document in Studio, anything else in its own
-  // app on this computer, or in Quick Look where that can't be.
+  // A double-click (or Enter): a folder opens here, a document in Studio's editor, anything else in
+  // its own app on this computer, or in Quick Look where that can't be.
   const openEntry = (e) => {
     if (!e) return
     if (e.dir) return go({ ...loc, path: e.path, hint: e.guard ? { guard: e.guard, asked: e.asked } : null })
     setSel(e.path)
-    if (studioOpens(e)) { window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root: loc.root, path: e.path } })); return }
+    if (studioOpens(e)) {
+      if (onOpenDoc) onOpenDoc({ root: loc.root, path: e.path })
+      else window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root: loc.root, path: e.path } }))
+      return
+    }
     if (appOpens(e)) { openInApp(e); return }
     setQl(true)
   }
@@ -232,6 +258,8 @@ export default function Explorer() {
     if (appNav.on && keyDir(e)) return
     if ((mod && k === '[') || (e.altKey && k === 'ArrowLeft')) return hit(back)
     if ((mod && k === ']') || (e.altKey && k === 'ArrowRight')) return hit(forward)
+    // A list of Studio's has its own buttons: the arrow keys scroll it, as on any page.
+    if (shelf) return
     if (mod && k === 'ArrowUp') return hit(up)
     if (mod && k === 'ArrowDown') return current && hit(() => openEntry(current))
     if (mod && e.shiftKey && e.code === 'Period') return hit(() => setHidden(!hidden))
@@ -246,14 +274,14 @@ export default function Explorer() {
     if (k === 'ArrowRight') return hit(() => (view === 'icons' ? step(1) : view === 'columns' && current?.dir ? openEntry(current) : null))
     if (k === 'ArrowLeft') return hit(() => (view === 'icons' ? step(-1) : view === 'columns' ? up() : null))
   }
-  // Keys go to the folder once you've clicked in it (or opened Folders).
+  // Keys go to the folder once you've clicked in it (or opened Studio).
   useEffect(() => { if (!narrow) mainRef.current?.focus({ preventScroll: true }) }, [loc.root, loc.path, machine, narrow])
 
   // ---------- the folder, or what's keeping it ----------
   const guard = folder.guard || loc.hint?.guard || null
   const asking = !!guard && loc.hint?.asked !== true
   const folderName = parts.length ? parts.at(-1) : named(rootLabel)
-  useEffect(() => { sayPlace('view:files', { machine: loc.machine || null, root: loc.root, path: loc.path }, folderName) }, [loc.machine, loc.root, loc.path, folderName])
+  useEffect(() => { sayPlace(PLACE, { machine: loc.machine || null, root: loc.root, path: loc.path }, folderName) }, [loc.machine, loc.root, loc.path, folderName])
   const retry = () => setVer((v) => v + 1)
   const problem = (st) => {
     const g = st.guard || guard
@@ -325,7 +353,11 @@ export default function Explorer() {
   }
 
   // ---------- the parts ----------
-  const label = t('Files in {name}', { name: folderName })
+  const label = shelf ? folderName : t('Files in {name}', { name: folderName })
+  // What goes over it (New's form, a new file's name and folder): on a phone, the folder's screen
+  // comes forward to show it.
+  const over = above ? above({ machine, root: loc.root, path: loc.path, shelf, name: folderName }) : null
+  useEffect(() => { if (over) setScreen('folder') }, [!!over]) // eslint-disable-line react-hooks/exhaustive-deps
   const sel1 = (p) => { setSel(p); if (!narrow) mainRef.current?.focus({ preventScroll: true }) }
   const preview = view === 'columns' && current && !current.dir && (
     <div className="fx-preview">
@@ -340,6 +372,8 @@ export default function Explorer() {
     </div>
   )
   const body = () => {
+    // One of Studio's lists: its own page, searched by the bar's search.
+    if (shelf) return <div className="sd-shelf" data-shelf={shelf}>{shelves.render(shelf, { q })}</div>
     if (searching) {
       return (
         <>
@@ -388,12 +422,13 @@ export default function Explorer() {
 
   // A phone has no room for columns: the list instead.
   const shownView = narrow && view === 'columns' ? 'list' : view
-  const sideEl = <Sidebar side={side.data} error={side.error && (side.code === 'trial' && machine ? t('{name} has an older Bridge AI.', { name: computer?.name || '' }) : side.error)} computers={computers} machine={machine} loc={{ ...loc, machine }} onGo={(w) => go({ machine, ...w })} onComputer={toComputer} />
+  const sideEl = <Sidebar side={side.data} error={side.error && (side.code === 'trial' && machine ? t('{name} has an older Bridge AI.', { name: computer?.name || '' }) : side.error)} computers={computers} machine={machine} loc={{ ...loc, machine }} onGo={(w) => go({ machine, ...w })} onComputer={toComputer}
+    shelves={shelves?.rows} shelf={shelf} onShelf={toShelf} />
   const showSide = !narrow || screen === 'side'
   const showMain = !narrow || screen === 'folder'
   return (
-    <div className={`fx ${narrow ? 'narrow' : ''}`} ref={boxRef} data-view={view}>
-      <PaneHeader icon="folder" title={t('Folders')} subtitle={machine ? t('On {name}', { name: computer?.name || '' }) : t('On this computer')} />
+    <div className={`fx ${className} ${narrow ? 'narrow' : ''}`} ref={boxRef} data-view={view} data-shelf={shelf || undefined}>
+      {head}
       <div className="fx-wrap">
         {showSide && <div className="fx-side-box" style={narrow ? undefined : { width: sideW }}>{sideEl}</div>}
         {!narrow && <Handle axis="x" size={sideW} min={150} max={360} onSize={setSideW} label={t('Resize the sidebar')} />}
@@ -419,31 +454,36 @@ export default function Explorer() {
               <div className="fx-tools">
                 <label className="fx-search">
                   <Icon name="search" size={12} />
-                  <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={narrow ? t('Search') : t('Search {name}', { name: folderName })} aria-label={t('Search in this folder and below it')}
+                  <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={shelf ? t('Find a file') : narrow ? t('Search') : t('Search {name}', { name: folderName })}
+                    aria-label={shelf ? t('Find a file by its name, in all your files') : t('Search in this folder and below it')}
                     onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setQ(''); mainRef.current?.focus() } }} />
                   {q && <button type="button" className="fx-search-x" onClick={() => setQ('')} aria-label={t('Clear the search')}><Icon name="x" size={11} /></button>}
                 </label>
-                <div className="seg small-seg fx-views" role="group" aria-label={t('View')}>
-                  {VIEWS.filter(([v]) => !narrow || v !== 'columns').map(([v, icon, name]) => (
-                    <button key={v} type="button" className={shownView === v ? 'on' : ''} onClick={() => setView(v)} aria-pressed={shownView === v} aria-label={t(name)} title={t(name)}><Icon name={icon} size={13} /></button>
-                  ))}
-                </div>
-                <button type="button" className={`win-btn ${hidden ? 'on' : ''}`} onClick={() => setHidden(!hidden)} aria-pressed={hidden} aria-label={hidden ? t('Hide hidden files') : t('Show hidden files')} title={`${hidden ? t('Hide hidden files') : t('Show hidden files')} (⌘⇧.)`}><Icon name={hidden ? 'eye' : 'eye-off'} size={13} /></button>
-                <button type="button" className="win-btn" onClick={() => setInfo(current || folderEntry)} aria-label={t('Get Info')} title={t('Get Info (⌘I)')}><Icon name="info" size={13} /></button>
-                <AiAssist className="btn small fx-assist-btn" compact={narrow} on={!!assist} items={() => folderAssist(!!assist, showAssist)} />
+                {/* How a folder shows, and what's in it: not for one of Studio's lists. */}
+                {!shelf && <>
+                  <div className="seg small-seg fx-views" role="group" aria-label={t('View')}>
+                    {VIEWS.filter(([v]) => !narrow || v !== 'columns').map(([v, icon, name]) => (
+                      <button key={v} type="button" className={shownView === v ? 'on' : ''} onClick={() => setView(v)} aria-pressed={shownView === v} aria-label={t(name)} title={t(name)}><Icon name={icon} size={13} /></button>
+                    ))}
+                  </div>
+                  <button type="button" className={`win-btn ${hidden ? 'on' : ''}`} onClick={() => setHidden(!hidden)} aria-pressed={hidden} aria-label={hidden ? t('Hide hidden files') : t('Show hidden files')} title={`${hidden ? t('Hide hidden files') : t('Show hidden files')} (⌘⇧.)`}><Icon name={hidden ? 'eye' : 'eye-off'} size={13} /></button>
+                  <button type="button" className="win-btn" onClick={() => setInfo(current || folderEntry)} aria-label={t('Get Info')} title={t('Get Info (⌘I)')}><Icon name="info" size={13} /></button>
+                  <AiAssist className="btn small fx-assist-btn" compact={narrow} on={!!assist} items={() => folderAssist(!!assist, showAssist)} />
+                </>}
               </div>
             </div>
             <div className="fx-panes">
-              <div className={`fx-body ${view === 'columns' && !narrow && !searching ? 'cols' : ''}`} ref={mainRef} tabIndex={0}
-                onContextMenu={(e) => { if (e.target.closest('.fx-row, .fx-tile, .fx-crow')) return; e.preventDefault(); onMenu(folderEntry, e) }}
+              <div className={`fx-body ${view === 'columns' && !narrow && !searching && !shelf ? 'cols' : ''}`} ref={mainRef} tabIndex={0}
+                onContextMenu={(e) => { if (shelf || e.target.closest('.fx-row, .fx-tile, .fx-crow')) return; e.preventDefault(); onMenu(folderEntry, e) }}
                 onMouseDown={(e) => { if (!e.target.closest('.fx-row, .fx-tile, .fx-crow, button, input, a')) setSel(null) }}>
-                {narrow && assist ? <div className="fx-assist" data-root={loc.root} data-rel={loc.path || ''}><Assist root={loc.root} rel={loc.path} machine={machine} at={assistAt} onOpen={(p) => { setAssist(false); showPath(p) }} onClose={() => setAssist(false)} /></div> : body()}
+                {over}
+                {narrow && assist && !shelf ? <div className="fx-assist" data-root={loc.root} data-rel={loc.path || ''}><Assist root={loc.root} rel={loc.path} machine={machine} at={assistAt} onOpen={(p) => { setAssist(false); showPath(p) }} onClose={() => setAssist(false)} /></div> : body()}
               </div>
-              {info && <Info base={base} root={loc.root} entry={info} cloud={cloud} onClose={() => { setInfo(null); mainRef.current?.focus() }} onOpen={() => { const e = info; setInfo(null); openEntry(e) }}
+              {info && !shelf && <Info base={base} root={loc.root} entry={info} cloud={cloud} onClose={() => { setInfo(null); mainRef.current?.focus() }} onOpen={() => { const e = info; setInfo(null); openEntry(e) }}
                 openLabel={info.path === loc.path ? null : openLabel(info)} onReveal={here ? () => reveal(info) : null} revealLabel={revealLabel} onCopy={copy} />}
-              {assist && !narrow && <div className="fa-dock fx-assist" data-root={loc.root} data-rel={loc.path || ''}><Assist root={loc.root} rel={loc.path} machine={machine} at={assistAt} onOpen={showPath} onClose={() => setAssist(false)} /></div>}
+              {assist && !narrow && !shelf && <div className="fa-dock fx-assist" data-root={loc.root} data-rel={loc.path || ''}><Assist root={loc.root} rel={loc.path} machine={machine} at={assistAt} onOpen={showPath} onClose={() => setAssist(false)} /></div>}
             </div>
-            <footer className="fx-foot muted small" role="status">{status}</footer>
+            {!shelf && <footer className="fx-foot muted small" role="status">{status}</footer>}
           </section>
         )}
       </div>

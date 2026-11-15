@@ -1,4 +1,4 @@
-// Files' talk with a computer (server/explorer.js and the agents' file routes): this window's
+// Studio's Files' talk with a computer (server/explorer.js and the agents' file routes): this window's
 // computer at BASE, or another of yours through this one (/m/<id>), so one page can browse them all.
 // And what a file is, in words: its kind, its size, when.
 import { useEffect, useRef, useState } from 'react'
@@ -16,7 +16,7 @@ export async function getJson(base, p, { signal } = {}) {
   const r = await fetch(`${base}/api${p}`, { signal, headers: { 'Content-Type': 'application/json' } })
   const data = await r.json().catch(() => null)
   if (!r.ok || !data) {
-    const said = data?.error || (r.status === 404 ? t('That computer\'s Bridge AI doesn\'t have Folders yet. Update it there.') : `HTTP ${r.status}`)
+    const said = data?.error || (r.status === 404 ? t('That computer\'s Bridge AI is too old to show its folders here. Update it there.') : `HTTP ${r.status}`)
     throw Object.assign(new Error(said), { status: r.status, code: data?.code || (data?.trial ? 'trial' : null), data: data || {} })
   }
   return data
@@ -125,5 +125,8 @@ export const joinFull = (dir, rel) => { const s = sepOf(dir); return rel ? `${di
 export const parentOf = (p) => p.split('/').slice(0, -1).join('/')
 export const nameOf = (p) => p.split('/').pop()
 
-// Where you were, per window's computer: kept on this device.
+// Where you were in Studio's home, per window's computer: kept on this device. A folder
+// ({ machine, root, path }), or one of Studio's lists, as a root of its own (shelf:recent,
+// shelf:kind:board...). Folders kept its place here too, so Studio opens where Folders was.
 export const WHERE_KEY = `cc-fx-where:${machineId || 'here'}`
+export const SHELF = 'shelf:'

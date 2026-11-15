@@ -81,16 +81,12 @@ export const WhiteboardsHome = whiteboard && wrap(whiteboard, 'WhiteboardsHome')
 export const WhiteboardPage = whiteboard && wrap(whiteboard, 'WhiteboardPage')
 export const FileDrawing = whiteboard && wrap(whiteboard, 'FileDrawing')
 
-// Studio loads only when it's opened too, and each kind's editor only when a file of that kind does
-// (Univer, Tiptap and Marp are big); not in the demo or the phone apps' Cloud agents.
+// Studio loads only when it's opened too (its home, every folder on your computers, with it), and
+// each kind's editor only when a file of that kind does (Univer, Tiptap and Marp are big); not in the
+// demo or the phone apps' Cloud agents.
 const studio = import.meta.env.MODE !== 'demo' && import.meta.env.MODE !== 'cloud' ? () => import('./components/studio/Studio.jsx') : null
 export const StudioHome = studio && wrap(studio, 'StudioHome')
 export const StudioPage = studio && wrap(studio, 'StudioPage')
-
-// Folders (every folder on your computers, as Finder shows them) loads only when it's
-// opened; not in the demo or the phone apps' Cloud agents.
-const files = import.meta.env.MODE !== 'demo' && import.meta.env.MODE !== 'cloud' ? () => import('./components/files/Explorer.jsx') : null
-export const Explorer = files && wrap(files)
 
 // Not while the page is offline (it waits until it's back on); if some didn't come (the computer out
 // of reach for a moment), they're fetched again a little later.

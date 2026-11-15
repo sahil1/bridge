@@ -1,6 +1,7 @@
-/* Files (Explorer.jsx): a sidebar of places down the left, the folder beside it with its toolbar (back
-   and forward, the path, a search, the views) above and a line about it below; Get Info and Assist
-   open beside the folder. On a phone (a narrow pane), one column: the sidebar or the folder. */
+/* Studio's home (Explorer.jsx): a sidebar of places down the left, the folder beside it with its
+   toolbar (back and forward, the path, a search, the views) above and a line about it below; Get Info
+   and Assist open beside the folder. On a phone (a narrow pane), one column: the sidebar or the
+   folder. */
 .fx { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0; min-width: 0; background: var(--pane); position: relative; }
 .fx-wrap { display: flex; min-height: 0; min-width: 0; border-top: 1px solid var(--line); }
 .fx-side-box { flex: none; min-width: 0; overflow: auto; background: var(--pane-2); border-right: 1px solid var(--line); }
@@ -161,8 +162,6 @@ button.fx-th:hover { color: var(--ink); }
 .fx-path-title .fx-crumb-pc { flex: none; }
 .fx.narrow .fx-bar { flex-wrap: wrap; padding: 6px 8px; }
 .fx.narrow .fx-tools { flex: 1 1 100%; min-width: 0; gap: 4px; }
-/* Files' own title is the folder's, on a phone: the pane's header gives way to it. */
-.fx.narrow > .pane-head { display: none; }
 .fx.narrow .fx-search { flex: 1; width: auto; min-width: 0; height: 40px; }
 .fx.narrow .fx-search input { font-size: 16px; height: 100%; min-height: 40px; }
 .fx.narrow .fx-search-x { min-width: 40px; min-height: 40px; justify-content: center; align-items: center; margin-right: -8px; }

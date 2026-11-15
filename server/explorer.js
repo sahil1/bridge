@@ -1,4 +1,4 @@
-// Folders (src/components/files/): your folders as Finder shows them. The home folder
+// Studio's home (src/components/files/): your folders as Finder shows them. The home folder
 // and this computer's drives are roots beside agents' folders and places, read through the same
 // routes (files.js: listing, the viewer, open in its app, show in Finder), and this lists them for
 // its sidebar, lists a folder as Finder does, and answers Get Info, a folder's size and a search
@@ -11,7 +11,7 @@
 // can't: the server's guard (guard.js) turns other sites away, and a page's files (the HTML preview)
 // are served from these roots only to Bridge AI's own preview. Kept out whatever the root:
 // Bridge AI's own folder (it holds the link's keys) and your keys' folders (files.js KEPT_OUT). A
-// root is only ever one of these (rootDir); anything else is refused. And Folders is read-only for now:
+// root is only ever one of these (rootDir); anything else is refused. And they're read-only for now:
 // nothing renames, moves or deletes through these roots (index.js refuses it).
 //
 // macOS asks before an app reads Desktop, Documents, Downloads, iCloud Drive or a removable or

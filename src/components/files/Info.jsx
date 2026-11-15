@@ -1,6 +1,6 @@
 // Get Info, as Finder's: what it is, how big (a folder's size worked out when you ask, and stopped
 // when you close it), where it is, when it was made, changed and last opened, and whether you can
-// change it. Folders is read-only for now, so nothing here renames or moves it.
+// change it. Studio's folders are read-only for now, so nothing here renames or moves it.
 import { useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { locale, t } from '../../i18n/index.js'

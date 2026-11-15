@@ -444,7 +444,7 @@ const rootOf = async (pane) => {
   }
   // A folder Studio's home found one of your files in (studiofound.js).
   if (String(pane).startsWith('found:')) return studioFound.foundDir(String(pane).slice(6))
-  // Folders: your home folder (home) and this computer's drives (drive:<key>).
+  // Studio's home: your home folder (home) and this computer's drives (drive:<key>).
   if (explorer.isFilesRoot(pane)) return explorer.rootDir(String(pane))
   const p = ((await rt.fleet()).panes || []).find((x) => x.paneId === pane)
   if (!p) throw new Error(`No pane ${pane}`)
@@ -455,12 +455,12 @@ const rootOf = async (pane) => {
 // (trials: { home: true } in the config; src/trials.js). Their routes answer only then.
 // One that's no longer a beta stays in older configs, read by nothing: Memory, now a page for
 // everyone; Studio, Sign PDFs, Comments and @bridge, Make a Sheet, Back and Forward, Tab Groups,
-// Files (Folders now) and Recommended Settings, part of the app since 3.19.0.
+// Files (Folders, now Studio's home) and Recommended Settings, part of the app since 3.19.0.
 const TRIALS = ['home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'routines', 'mcp-server', 'meeting-board', 'assist-answers', 'call-video']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 
-// ---------- Folders (explorer.js) ----------
+// ---------- Studio's home: your folders (explorer.js) ----------
 // Your folders as Finder shows them: its sidebar, a folder's listing, Get Info, a folder's size and a
 // search. The home folder and the drives are roots for the agents' file routes too (the viewer,
 // Open in its app, Show in Finder), only to read for now: anything that would change a file through
@@ -470,7 +470,7 @@ const LOOK_ONLY = new Set(['reveal', 'open'])
 app.use('/api/agents/:pane', async (req, res, next) => {
   if (!explorer.isFilesRoot(req.params.pane)) return next()
   if (!['GET', 'HEAD'].includes(req.method) && !(req.method === 'POST' && req.path === '/fileop' && LOOK_ONLY.has(req.body?.op))) {
-    return res.status(403).json({ error: 'Folders is read-only for now: nothing is renamed, moved or deleted from it yet.', code: 'readOnly' })
+    return res.status(403).json({ error: 'Your home folder and drives are read-only here for now: nothing is renamed, moved or deleted through them yet.', code: 'readOnly' })
   }
   try {
     const site = /^\/site\//.test(req.path)
