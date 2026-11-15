@@ -1046,7 +1046,7 @@ export function MeetingPage({ id, onBack }) {
       </div>
       <TalkTime lines={lines} me={data.me} />
       <div className="mt-lines" ref={listRef} onMouseUp={picked} onTouchEnd={picked} onScroll={(e) => { const el = e.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; setSel(null) }}>
-        {!lines.length && !(recording && data.partial) && <p className="muted small mt-hint">{recording ? t('The transcript appears here as people talk, a few seconds behind.') : data.waiting || again ? t('Transcribing…') : t('Nothing was transcribed.')}{done && !lines.length && <> <button type="button" className="link-btn" onClick={() => setDialog('again')}>{t('Transcribe it again')}</button></>}</p>}
+        {!lines.length && !(recording && data.partial) && <p className="muted small mt-hint">{recording ? t('The transcript appears here as people talk, a few seconds behind.') : data.waiting || again ? t('Transcribing…') : !data.error && data.seconds > 0 ? t('No one was heard speaking in the {time} recorded, so nothing was transcribed.', { time: length(data.seconds) }) : t('Nothing was transcribed.')}{done && !lines.length && <> <button type="button" className="link-btn" onClick={() => setDialog('again')}>{t('Transcribe it again')}</button></>}</p>}
         {timeline.map((x, i) => (x.k === 'line'
           ? <Line key={x.l.key || `${x.l.t0}-${x.l.src}-${i}`} l={x.l} id={id} me={data.me} onSaved={refresh} onError={(t) => setMsg({ error: true, text: t })} onWho={(e, l) => setWhoAt({ x: e.clientX, y: e.clientY, l })} />
           : x.k === 'sec'

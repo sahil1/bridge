@@ -83,6 +83,6 @@ WORKDIR /home/bridge
 # The server listens on 127.0.0.1 inside the container. Nothing is published: phones come in
 # through the relay connection this machine opens. See docker-compose.yml for local browser access.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.BRIDGE_PORT||7420)+'/api/version').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.BRIDGE_PORT||7420)+'/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "/app/server/index.js"]

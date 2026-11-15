@@ -93,7 +93,7 @@ const tailnet = ['studio', 'tail1234', 'ts', 'net'].join('.')
 {
   const require = createRequire(import.meta.url)
   const d = require(path.join(ROOT, 'desktop', 'crashes.js'))
-  ok(d.fromWindowGone({ reason: 'clean-exit' }) === null && d.fromWindowGone({ reason: 'oom', exitCode: 9 })?.kind === 'window' && d.fromWindowGone({ reason: 'crashed', exitCode: 11 })?.reason === 'crashed', 'the window\'s page: a crash or out of memory counts, closing doesn\'t')
+  ok(d.fromWindowGone({ reason: 'clean-exit' }) === null && d.fromWindowGone({ reason: 'oom', exitCode: 9 })?.kind === 'window' && d.fromWindowGone({ reason: 'crashed', exitCode: 11 })?.reason === 'crashed' && d.fromWindowGone({ reason: 'killed', exitCode: 9 }) === null && d.fromWindowGone({ reason: 'killed', exitCode: 15 }) === null, 'the window\'s page: a crash or out of memory counts; closing it, or an update\'s installer or Force Quit ending it, doesn\'t')
   ok(d.fromChildGone({ type: 'GPU', reason: 'crashed', exitCode: 5 })?.kind === 'gpu' && d.fromChildGone({ type: 'GPU', reason: 'killed' }) === null && d.fromChildGone({ type: 'Utility', reason: 'crashed' }) === null, 'the graphics process crashing counts; ended on purpose, or another process, doesn\'t')
   ok(d.fromServerExit(0, null) === null && d.fromServerExit(null, 'SIGTERM') === null && d.fromServerExit(null, 'SIGKILL') === null && d.fromServerExit(1, null)?.reason === 'exited with code 1' && d.fromServerExit(null, 'SIGSEGV')?.reason === 'ended by SIGSEGV', 'the server: an exit code or a crash signal counts; stopped, updated or forced to quit doesn\'t')
   const data = path.join(OUT, `crash-report-desktop-${LANE}`)
