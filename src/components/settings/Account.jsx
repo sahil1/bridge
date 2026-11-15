@@ -168,7 +168,7 @@ function Devices({ st, act, busy }) {
   }
   return (
     <section className="st-sec acct-devices">
-      <h4>{t('Signed In to Your Account')}</h4>
+      <h4>{t('Devices on Your Account')}</h4>
       <p className="muted small">{st.devices.length === 1 ? t('1 of 5 devices on your account, computers and phones.') : t('{n} of 5 devices on your account, computers and phones.', { n: st.devices.length })}</p>
       <ul className="ph-devices">
         {st.devices.map((d) => (
@@ -415,7 +415,7 @@ function Others({ st, hostedHere }) {
         {list.map((o) => (
           <li key={o.id}>
             <Icon name="laptop" size={14} /><span>{o.name}</span>
-            {relays[o.id] && <span className="muted small acct-other-relay">{relays[o.id] === 'hosted' ? t('On Bridge AI\'s relay') : t('Its own relay')}</span>}
+            {['hosted', 'own'].includes(relays[o.id]) && <span className="muted small acct-other-relay">{relays[o.id] === 'hosted' ? t('On Bridge AI\'s relay') : t('Its own relay')}</span>}
             <span className={`st-chip ${o.state === 'signed-in' ? 'good' : ''}`}>{STATE[o.state] || o.state}</span>
           </li>
         ))}
