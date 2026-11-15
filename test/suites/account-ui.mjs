@@ -1,8 +1,10 @@
-// Settings › Account, in the browser named by BRIDGE_TEST_BROWSER, in a light and a dark theme and at
-// phone width, with Bold Bridge's accounts service stood in for (stand-ins/accounts.mjs: the real
-// Worker, signed with a key made for the run) and two Bridge AIs, "Studio" and "Desk", linked through
-// relays of their own (stand-ins/relay.mjs), as devices-ui links them. No accounts service: no
-// Account section at all. Then signing in on Studio: a throwaway address refused saying why; the
+// Settings › Account & Devices › Account, in the browser named by BRIDGE_TEST_BROWSER, in a light and
+// a dark theme and at phone width, with Bold Bridge's accounts service stood in for
+// (stand-ins/accounts.mjs: the real Worker, signed with a key made for the run) and two Bridge AIs,
+// "Studio" and "Desk", linked through relays of their own (stand-ins/relay.mjs), as devices-ui links
+// them. No accounts service: no Account tab at all, and the section is Devices. With accounts, one
+// section, Account & Devices, with Account, Phone, Computers and Notifications, and every way into
+// what were Account and Devices landing on its tab, on a desktop, from ⌘K and on a phone. Then signing in on Studio: a throwaway address refused saying why; the
 // code step; a wrong code with the tries left; one that ran out (the service's clock moved on), Send
 // a new code, signed in. Signed in: the email, this computer among the account's devices, Early
 // Access and Bridge AI's relay each to ask for; asked, Requested; approved, On, with the relay's use
@@ -24,6 +26,23 @@ const MIN = 60000
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const openAccount = (p) => p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'account' } })))
+const open = (p, section) => p.evaluate((section) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section } })), section)
+const tabsOf = async (p) => (await p.locator('.st-tabs [role="tab"]').allInnerTexts()).map((x) => x.trim())
+// Where Settings is: the section (its name over it on a phone) and the tab.
+const where = async (p) => ({ section: (await p.locator('.st-nav-item.on, .st-bar h3').first().innerText().catch(() => '')).trim(), tab: (await p.locator('.st-tabs [aria-selected="true"]').innerText().catch(() => '')).trim() })
+// Every way into what was Account or Devices (a link, a setting, ⌘K's), and the tab it lands on.
+const WAYS = [['account', 'Account', '.acct-who'], ['devices', 'Account', '.acct-who'], ['bold-bridge', 'Account', '[data-setting="bold-bridge"]'], ['hosted-relay', 'Account', '[data-setting="hosted-relay"]'], ['delete-account', 'Account', '[data-setting="delete-account"]'],
+  ['phone', 'Phone', '[data-setting="relay"]'], ['relay', 'Phone', '[data-setting="relay"]'], ['tailscale', 'Phone', '[data-setting="relay"]'], ['machines', 'Computers', '#st-machines'], ['link-device', 'Computers', '[data-setting="link-device"]'],
+  ['notifications', 'Notifications', '[data-setting="this-device"]'], ['notify', 'Notifications', '[data-setting="notify"]'], ['notify-more', 'Notifications', '[data-setting="notify-more"]']]
+const lands = async (p, ways) => {
+  const missed = []
+  for (const [section, tab, sel] of ways) {
+    await open(p, section)
+    const ok1 = await until(async () => { const w = await where(p); return w.section === 'Account & Devices' && w.tab === tab && await p.locator(`.modal.settings .st-scroll ${sel}`).first().isVisible() }, 8000, 100)
+    if (!ok1) missed.push({ section, want: tab, got: await where(p) })
+  }
+  return missed
+}
 let acc = null
 try {
   acc = await startAccounts('account-ui')
@@ -45,6 +64,8 @@ try {
   await pp.p.locator('.settings-btn').click()
   await pp.p.locator('.st-nav').waitFor({ timeout: 8000 })
   ok(!(await pp.p.locator('.st-nav-item', { hasText: 'Account' }).count()) && (await plain.api('/account')).available === false && !(await plain.api('/config')).accounts, 'with no accounts service, Settings has no Account section, and nothing about accounts shows', await pp.p.locator('.st-nav').innerText())
+  await pp.p.locator('.st-nav-item', { hasText: 'Devices' }).click()
+  ok(JSON.stringify(await tabsOf(pp.p)) === JSON.stringify(['Phone', 'Computers', 'Notifications']) && (await pp.p.locator('.st-head h3').innerText()) === 'Devices', 'and it\'s Devices, with Phone, Computers and Notifications (no Account tab)', await tabsOf(pp.p))
   await pp.ctx.close()
 
   // ---------- Signing in ----------
@@ -105,6 +126,22 @@ try {
   const devs = s.p.locator('.acct-devices')
   ok(/Studio/.test(await devs.innerText()) && /This computer/.test(await devs.innerText()) && /1 of 5 devices/.test(await devs.innerText()), 'this computer among the account\'s devices, of 5', await devs.innerText())
   ok(await s.p.locator('.acct-early button', { hasText: 'Request Early Access' }).count() === 1 && await s.p.locator('.acct-relay button', { hasText: 'Request access' }).count() === 1, 'Early Access and Bridge AI\'s relay, each to ask for')
+
+  // ---------- Account and Devices, one section ----------
+  const navs = (await s.p.locator('.st-nav-item').allInnerTexts()).map((x) => x.trim())
+  ok(navs.includes('Account & Devices') && !navs.includes('Account') && !navs.includes('Devices') && JSON.stringify(await tabsOf(s.p)) === JSON.stringify(['Account', 'Phone', 'Computers', 'Notifications']) && (await s.p.locator('.st-head h3').innerText()) === 'Account & Devices', 'with accounts, Account and Devices are one section, Account & Devices, its tabs Account, Phone, Computers and Notifications', { navs, tabs: await tabsOf(s.p) })
+  const missedDesk = await lands(s.p, WAYS)
+  ok(!missedDesk.length, 'every way in that went to Account or Devices (and each setting in them) lands on its tab of Account & Devices', missedDesk)
+  // From outside Settings too, and ⌘K: Delete account under the Account tab's Advanced.
+  await s.p.locator('button[aria-label="Close settings"]').click()
+  await s.p.keyboard.press('ControlOrMeta+K')
+  await s.p.locator('.palette input').waitFor({ timeout: 5000 })
+  await s.p.locator('.palette input').fill('delete account')
+  const found = s.p.locator('.pal-item[data-id="s:delete-account"]')
+  ok(!!(await found.waitFor({ timeout: 5000 }).then(() => true, () => false)) && /Settings › Account & Devices/.test(await found.innerText()), '⌘K finds Delete account, under Settings › Account & Devices', await found.innerText().catch(() => ''))
+  await found.click()
+  ok(!!(await until(async () => { const w = await where(s.p); return w.section === 'Account & Devices' && w.tab === 'Account' && await s.p.locator('[data-setting="delete-account"]').isVisible() }, 8000)), 'and opens it there, on the Account tab with Advanced open', await where(s.p))
+  await s.p.locator('.st-nav-item', { hasText: 'Account & Devices' }).click()
 
   // ---------- Linked computers follow ----------
   const offer = s.p.locator('.acct-offer')
@@ -194,8 +231,18 @@ try {
   await ph.p.locator('.acct-who').waitFor({ timeout: 10000 })
   const faults = await phoneFaults(ph.p, '.st-scroll')
   ok(!Object.keys(faults).length, 'on a phone: nothing past its edge or sideways, every button a whole 40 px target', faults)
-  ok(/Account/.test(await ph.p.locator('.st-bar h3').innerText()), 'under ‹ Settings and its name', await ph.p.locator('.st-bar h3').innerText())
+  ok((await ph.p.locator('.st-bar h3').innerText()) === 'Account & Devices' && await ph.p.locator('.st-back').count() === 1, 'under ‹ Settings and its name, Account & Devices', await ph.p.locator('.st-bar h3').innerText())
+  // Its four tabs across the top, each a whole 40 px target within the screen.
+  const tabFit = await ph.p.evaluate(() => [...document.querySelectorAll('.modal.settings.phone .st-tabs [role="tab"]')].map((e) => { const r = e.getBoundingClientRect(); return { name: e.innerText.trim(), h: Math.round(r.height), inside: r.left >= 0 && r.right <= innerWidth + 0.5, whole: e.scrollWidth <= e.clientWidth + 1 } }))
+  ok(tabFit.map((x) => x.name).join('|') === 'Account|Phone|Computers|Notifications' && tabFit.every((x) => x.h >= 40 && x.inside && x.whole), 'on a phone, its four tabs are across the top, each a whole 40 px target, none cut off', tabFit)
   await shot(ph.p, `${tag}account-phone-dark`)
+  const missedPhone = await lands(ph.p, WAYS)
+  ok(!missedPhone.length, 'on a phone too, every way in lands on its tab, with ‹ Settings', missedPhone)
+  // The list of sections: one row for it, Account & Devices, which opens at its Account tab.
+  await ph.p.locator('.st-back').click()
+  const rows = (await ph.p.locator('.st-list-row b').allInnerTexts()).map((x) => x.trim())
+  await ph.p.locator('.st-list-row', { hasText: 'Account & Devices' }).click()
+  ok(rows.includes('Account & Devices') && !rows.includes('Account') && !rows.includes('Devices') && !!(await until(async () => (await where(ph.p)).tab === 'Account', 5000)), 'the phone\'s list of sections has one row for it, Account & Devices, opening at Account', { rows, at: await where(ph.p) })
   await ph.ctx.close()
 
   // ---------- Sign out, and delete ----------

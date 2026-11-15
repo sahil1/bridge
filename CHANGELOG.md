@@ -4,7 +4,7 @@ Each version's section here becomes its GitHub release notes (`npm run release`)
 
 ## 3.20.0
 
-Studio's home is your files: Folders is part of Studio. The local model comes in three sizes, with the one that fits your computer recommended, and short jobs can run on it when you pick Auto. A meeting can keep its screen as a video, and pictures of a call's window are cropped to what's shared. The model menu says which version Opus and Sonnet are.
+Studio's home is your files: Folders is part of Studio. The local model comes in three sizes, with the one that fits your computer recommended, and short jobs can run on it when you pick Auto. A meeting can keep its screen as a video, and pictures of a call's window are cropped to what's shared. The model menu says which version Opus and Sonnet are. Settings' Account and Devices are one section, where Bridge AI's relay is set up on the spot.
 
 <!-- rollout: 10 -->
 
@@ -16,6 +16,7 @@ Studio's home is your files: Folders is part of Studio. The local model comes in
 - **Record the screen too**: a tick beside Start recording, in the call prompt and beside Watch a screen keeps the shared screen as a video with the meeting's sound, your mic and the call. MP4 in the desktop app, Chrome, Edge and Safari; WebM in Firefox. It's saved in pieces as it records, in the meeting's folder on this computer, at most about 500 MB an hour. After the meeting, Video plays it beside the transcript; click a line to go there. The recording bar shows its size so far; it stops with less than 2 GB free, and the meeting says why a video ended early. Off until you tick it, and not offered on a phone or where the browser can't record a screen.
 - **Pictures of a call cropped to what's shared**: a still of a Teams, Zoom or Meet window keeps the slide or screen being shared, without the people's tiles, the toolbars and the chat. It's done on this computer. The words are read from the crop, and the notes have it. Whole screen puts back the picture as taken, and Crop crops it again. Settings › Voice & Meetings › Calls › Crop pictures of a call to what's shared, on to start. Pictures from before are cropped when their meeting opens.
 - **Model versions in the model menu**: Opus, Sonnet, Haiku and Default say which version they are now (Opus 5.5), learnt from Claude Code's replies to an agent asked for each.
+- **Account & Devices**: Settings' Account and Devices are one section, with tabs for Account, Phone, Computers and Notifications; everything that opened either one opens its tab. With Bridge AI's relay on your account, Use it on this computer on the Account tab sets it up right there, saying each step (setting up, connecting and why not yet, On for this computer, or what went wrong and what to do), then shows a code to pair a phone; Use Bridge AI's relay instead moves a computer from a relay of your own. A computer signed in with nothing else set up for your phone starts using the relay by itself once your account has it, and says so; while a request waits, it asks your account every half hour. The relay's allowance is on the Account tab, and Your Other Computers says which relay each one uses.
 
 ### Fixes
 
@@ -25,7 +26,7 @@ Studio's home is your files: Folders is part of Studio. The local model comes in
 
 ## 3.20.0-beta.1
 
-A beta of 3.20.0, to try before it goes to everyone. Studio's home is your files, with Folders folded into Studio. The local model comes in three sizes, the one that fits your computer recommended, and Settings › Model Providers › Which jobs run here sets which jobs may use it (every job on Cloud first until you pick Auto). Record the screen too keeps a meeting's screen as a video beside its transcript. Pictures of a call's window are cropped to what's shared. The model menu says which version Opus and Sonnet are. And fixes: no crash report when an update ends the old window, Docker's health check, and a silent meeting saying no one was heard.
+A beta of 3.20.0, to try before it goes to everyone. Studio's home is your files, with Folders folded into Studio. The local model comes in three sizes, the one that fits your computer recommended, and Settings › Model Providers › Which jobs run here sets which jobs may use it (every job on Cloud first until you pick Auto). Record the screen too keeps a meeting's screen as a video beside its transcript. Pictures of a call's window are cropped to what's shared. The model menu says which version Opus and Sonnet are. Account and Devices are one section in Settings, where Use it on this computer sets up Bridge AI's relay right there, and a computer with nothing else set up starts on it by itself. And fixes: no crash report when an update ends the old window, Docker's health check, and a silent meeting saying no one was heard.
 
 ## 3.19.0
 

@@ -141,8 +141,10 @@ const agentView = (v) => async (p) => {
   if (!(await p.locator(`.ws-tab[aria-selected="true"][data-pane="${pane}"]`).count())) { await send(p, { paneId: pane }); await sleep(200) }
   await send(p, { paneId: pane, view: v }, 'cc-set-view')
 }
-// (Voice & Meetings' tabs are read as places too, each by its id: Dictation, Speech to Text.)
-const SECTIONS = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(fs.readFileSync(path.join(ROOT, 'src', 'components', 'Settings.jsx'), 'utf8'))?.[1] || '').matchAll(/\{ id: '([\w-]+)', label: tx\('([^']+)'\)([^}]*)\}/g)]
+// (Voice & Meetings' tabs are read as places too, each by its id: Dictation, Speech to Text. What
+// marks one, accounts or mac, is up to its own end or its first tab: a section's first tab marked
+// accounts, Devices' Account, is that tab's, not its section's.)
+const SECTIONS = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(fs.readFileSync(path.join(ROOT, 'src', 'components', 'Settings.jsx'), 'utf8'))?.[1] || '').matchAll(/\{ id: '([\w-]+)', label: tx\('([^']+)'\)([^{}]*)/g)]
   .filter((m) => !/accounts: true/.test(m[3]) && (!/mac: true/.test(m[3]) || process.platform === 'darwin')).map((m) => ({ id: m[1], label: m[2] }))
 const PLACES = [
   { name: 'Home', open: view('view:home'), scope: '.cmd .hm', ready: '.hm' },

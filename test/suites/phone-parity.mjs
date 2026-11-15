@@ -97,13 +97,14 @@ const PATHS = {
   'settings:voice': { phone: 'Settings › Voice & Meetings › Speech to Text' },
   'settings:mail': { phone: 'Settings › Mail', mac: true },
   'settings:mcp': { phone: 'Settings › MCP Servers' },
-  // Devices, and its tabs.
+  // Devices, and its tabs (Account & Devices once Bold Bridge accounts exist).
   'settings:devices': { phone: 'Settings › Devices' },
   'settings:phone': { phone: 'Settings › Devices › Phone' },
   'settings:machines': { phone: 'Settings › Devices › Computers' },
   'settings:notifications': { phone: 'Settings › Devices › Notifications' },
-  // (There only once Bold Bridge accounts exist, server/account.js: account-ui follows it on a phone.)
-  'settings:account': { phone: 'Settings › Account', accounts: true },
+  // (Its Account tab, there only once Bold Bridge accounts exist, server/account.js: account-ui
+  // follows it on a phone, and each way into the section and its tabs.)
+  'settings:account': { phone: 'Settings › Account & Devices › Account', accounts: true },
   'settings:appearance': { phone: 'Settings › Appearance' },
   'settings:config': { phone: 'Settings › Config File' },
   'settings:about': { phone: 'Settings › About & Updates' },
