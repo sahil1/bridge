@@ -15,6 +15,11 @@
 //                               to how to sign in, where the second, Sign in with Device Code, shows
 //                               the page and the code as the TUI does (keys in ~/codex-typed.log);
 //                               signed in there, its welcome, and Enter to its prompt
+//   codex [--model <m>] [<prompt>], in a terminal: a conversation, its log started where Codex
+//                               keeps it ($CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl,
+//                               the id and folder in its first line), then its prompt, waiting (keys
+//                               in ~/codex-typed.log); its arguments noted in ~/codex-started.log
+//   codex [--model <m>] resume <id>, in a terminal: that conversation again, the same way
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -88,6 +93,25 @@ if (fs.existsSync(path.join(os.homedir(), 'codex-first-run.json'))) {
       waitForDevice(() => { at = 'done'; screen(['', '  Welcome to Codex, OpenAI\'s command-line coding agent', '', '  Press Enter to continue', '']) })
     }
   }
+  setInterval(() => {}, 1 << 30)
+  return
+}
+
+// A conversation, in a terminal: a new one's log named as Codex names it (where Bridge AI finds its
+// session), or the one it resumes; then its prompt, waiting.
+if (process.stdin.isTTY) {
+  fs.appendFileSync(path.join(os.homedir(), 'codex-started.log'), JSON.stringify(args) + '\n')
+  if (!args.includes('resume')) {
+    const now = new Date()
+    const day = path.join(home, 'sessions', String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0'))
+    const id = require('node:crypto').randomUUID()
+    fs.mkdirSync(day, { recursive: true })
+    fs.writeFileSync(path.join(day, `rollout-${now.toISOString().slice(0, 19).replace(/:/g, '-')}-${id}.jsonl`), JSON.stringify({ timestamp: now.toISOString(), type: 'session_meta', payload: { id, timestamp: now.toISOString(), cwd: process.cwd(), originator: 'codex_cli_rs', cli_version: '0.160.0' } }) + '\n')
+  }
+  process.stdin.setRawMode(true)
+  process.stdin.setEncoding('utf8')
+  process.stdin.on('data', (chunk) => fs.appendFileSync(path.join(os.homedir(), 'codex-typed.log'), JSON.stringify(chunk) + '\n'))
+  process.stdout.write('\x1b[2J\x1b[H\r\n› Ask Codex to do anything\r\n')
   setInterval(() => {}, 1 << 30)
   return
 }

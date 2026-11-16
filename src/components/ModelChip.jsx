@@ -3,6 +3,7 @@ import Icon from './Icon.jsx'
 import { AgentIcon } from './settings/ProviderIcon.jsx'
 import { api, usePoll } from '../api.js'
 import { HandoffSection, HandoffPanel, useHandoff, useHandedNote } from './Handoff.jsx'
+import { carryDraft } from './Composer.jsx'
 import { AcctName, Left, nameOf, slotsOf } from './AccountMenu.jsx'
 import { EFFORT_LABEL } from '../recommended.js'
 import { t, tx } from '../i18n/index.js'
@@ -113,9 +114,11 @@ export default function ModelChip({ agent, onNote, onSent, account = null }) {
     if (data.mode === 'restart') onNote?.(t('Restarting on {name}…', { name: model === 'default' ? t('its default model') : modelLabel(model) }))
     try {
       const r = await api(`/agents/${pid}/model`, { method: 'POST', body: { model } })
-      // Restarted: it's a new pane now, whose chip says so once it's open.
-      if (r.restarted) setTimeout(() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: r.paneId } })), 1200)
-      else {
+      // Restarted: it's a new pane now, which gets what was in the message box, and whose chip says so once it's open.
+      if (r.restarted) {
+        carryDraft(agent.paneId, r.paneId)
+        setTimeout(() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: r.paneId } })), 1200)
+      } else {
         started.current = { model, t: Date.now() }
         if (!r.queued) onSent?.()
         onNote?.(r.queued ? (r.reason && r.reason !== 'working' ? t('Queued {command}. It goes in when {agent} is free ({reason}).', { command: r.command, agent: data.label, reason: heldWhy(r.reason) }) : t('Queued {command}. It goes in when {agent} is free.', { command: r.command, agent: data.label })) : t('Sent {command}', { command: r.command }))
