@@ -435,7 +435,7 @@ try {
     // Recent, in Studio's own lists: the document opened from the folder, with its folder said.
     await p.locator('.fx-side-row[data-shelf="recent"]').click()
     const row = p.locator('.sd-shelf .sd-files-row', { hasText: 'notes.md' }).first()
-    ok(await row.waitFor({ timeout: 10000 }).then(() => true, () => false) && /~\/Projects\/site/.test(await row.locator('.sd-file-dir').innerText()), 'Recent lists the document opened from a folder, with where it is', await row.innerText().catch(() => ''))
+    ok(await row.waitFor({ timeout: 10000 }).then(() => true, () => false) && /~[/\\]Projects[/\\]site/.test(await row.locator('.sd-file-dir').innerText()), 'Recent lists the document opened from a folder, with where it is', await row.innerText().catch(() => ''))
     ok((await crumbs(p)).join(' › ') === 'Recent' && await p.locator('.fx-bar .fx-views').count() === 0 && await p.locator('.fx-bar button[aria-label="AI Assist"]').count() === 0, 'a list has its name in the path, without a folder\'s views or AI Assist', await crumbs(p))
     // Find a file, in the bar: through all of them.
     await p.locator('.fx-search input').fill('notes')

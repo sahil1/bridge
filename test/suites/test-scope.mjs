@@ -21,7 +21,8 @@ const suites = fs.readdirSync(path.join(ROOT, 'test', 'suites')).filter((f) => f
 ok(all.names.length === suites && all.browser, '--list --all: every suite there is', [all.names.length, suites])
 
 // ---------- the workflows ----------
-const yml = (f) => fs.readFileSync(path.join(ROOT, '.github', 'workflows', f), 'utf8')
+// With \n between lines on Windows too, where git checks them out with \r\n.
+const yml = (f) => fs.readFileSync(path.join(ROOT, '.github', 'workflows', f), 'utf8').replace(/\r\n/g, '\n')
 const test = yml('test.yml')
 const scope = test.split('\n  scope:\n')[1]?.split('\n  test:\n')[0] || ''
 ok(/node test\/run\.mjs --list \$args/.test(scope) && /echo "count=\$count"/.test(scope), 'test.yml works out which tests first (--list), and how many')

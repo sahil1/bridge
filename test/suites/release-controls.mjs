@@ -18,7 +18,8 @@ import { spawnSync } from 'node:child_process'
 import { checks, ROOT, IS_WIN } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('release-controls')
-const yml = (f) => fs.readFileSync(path.join(ROOT, '.github', 'workflows', f), 'utf8')
+// With \n between lines on Windows too, where git checks them out with \r\n.
+const yml = (f) => fs.readFileSync(path.join(ROOT, '.github', 'workflows', f), 'utf8').replace(/\r\n/g, '\n')
 const rollout = yml('rollout.yml')
 const start = yml('release-start.yml')
 const release = yml('release.yml')
