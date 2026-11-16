@@ -120,6 +120,18 @@ async function tagRun(tag) {
   }
   return null
 }
+// gh workflow run, again for a few minutes while GitHub answers 404: a workflow the merge just added
+// to main isn't one GitHub knows of until it has taken in that push.
+async function dispatch(workflow) {
+  for (let i = 0; ; i++) {
+    try { return gh('workflow', 'run', workflow, '--repo', REPO, '--ref', 'main') } catch (e) {
+      const why = String(e.stderr || e.message).trim()
+      if (!/HTTP 404/.test(why) || i >= 40) fail(`gh workflow run ${workflow} didn't go through: ${why}`)
+      if (!i) say(`GitHub doesn't know ${workflow} on main yet; asking again every 15 seconds.`)
+      await sleep(15000)
+    }
+  }
+}
 async function follow(r, what, wait) {
   if (!r) return say(`${what} started; its run is at https://github.com/${REPO}/actions`)
   say(`${what}: ${r.url}`)
@@ -161,7 +173,7 @@ async function nightly(o) {
   say('A nightly built from main now: the tests for what changed since the last nightly, then the builds, about 40 minutes. Computers on Nightly are offered it within half an hour of it coming out.')
   if (o.dry) return say('Dry run: nothing pushed or started.')
   const t0 = Date.now()
-  live('gh', ['workflow', 'run', 'nightly.yml', '--repo', REPO, '--ref', 'main'])
+  await dispatch('nightly.yml')
   await follow(await startedRun('nightly.yml', t0), 'Nightly', o.wait)
 }
 
