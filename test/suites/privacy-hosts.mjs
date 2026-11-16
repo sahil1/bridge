@@ -36,6 +36,8 @@ const CATEGORIES = {
     hosts: ['console.anthropic.com', 'platform.openai.com', 'aistudio.google.com', 'console.cloud.google.com', 'console.aws.amazon.com', 'ai.azure.com', 'console.mistral.ai', 'console.groq.com', 'console.x.ai', 'console.deepgram.com', 'platform.deepseek.com', 'platform.moonshot.ai', 'platform.claude.com', 'dashboard.cohere.com', 'cloud.cerebras.ai', 'fireworks.ai', 'elevenlabs.io', 'www.assemblyai.com', 'www.perplexity.ai', 'z.ai', 'lmstudio.ai', 'ollama.com', 'dev.meta.ai', 'cursor.com', 'github.com', 'jules.google.com', 'www.google.com', 'finance.yahoo.com', 'news.ycombinator.com'],
   },
   insights: { says: /\/insights report[\s\S]{0,120}Google Fonts/, hosts: ['fonts.googleapis.com', 'fonts.gstatic.com'] },
+  // The Slack Bot: Slack's Web API, and the Socket Mode address it gives (in no code: from Slack).
+  slack: { says: /The Slack Bot \(a beta feature[\s\S]{0,300}Socket Mode, a connection your\s+computer opens to `slack\.com` and then to the `wss-\*\.slack\.com` address[\s\S]{0,120}never goes\s+through Bold Bridge or your relay/, hosts: ['slack.com'] },
   self: { says: /It listens only on\s+your computer/, hosts: [] },
 }
 // Addresses made at run time from what someone set, by file: which category covers them.

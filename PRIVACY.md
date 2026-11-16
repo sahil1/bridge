@@ -160,6 +160,25 @@ Find a time reads your calendar on your computer and holds or adds nothing; the 
 only if you put them in a draft. Copy and Open in your mail app hand the draft to you and your mail
 app; you send it.
 
+The Slack Bot (a beta feature, off until you turn it on) talks only to a Slack app you make yourself,
+in your own workspace, and only from your computer: through Slack's Socket Mode, a connection your
+computer opens to `slack.com` and then to the `wss-*.slack.com` address Slack gives it. It never goes
+through Bold Bridge or your relay, and no app of Bold Bridge's is involved. Its two tokens are kept in
+`~/.bridge-ai/slack-bot.json`, readable by you only, never in your settings and never given to an
+agent; Disconnect deletes them. Slack sends your computer the messages that mention the bot or are
+sent to it directly; when it connects again after being away (your computer asleep, Bridge AI
+closed), it reads the bot's conversations back from the last message it saw (three days at most)
+for what was asked meanwhile. Besides those, it asks Slack only for your workspace's members' names
+(to pick who may ask) and its channels' names. A question from someone you didn't add goes to no
+agent: it gets a polite no, or nothing, as you choose. One from someone you added goes to an agent on
+your computer, started read-only in a folder you opened to questions (or in an empty folder of its
+own), which sends the question, and what it reads in that folder, to its own provider, as any agent
+does; it's never sent to the Chief of Staff. What goes to Slack is only what you send from Needs You,
+or, with Answer without asking on, an answer from a folder you opened or a throwaway agent; and a
+short note when a question is passed on to you, or, if you chose it, that only people you added get
+answers. The questions, the answers and what was sent are kept in `~/.bridge-ai/front-desk.json`
+(the latest 200), for its log in Settings › Slack Bot.
+
 Files shows your agents' folders, and only the other folders you add to it yourself (Places, with
 the folder picker); it keeps each place's path in `~/.bridge-ai/places.json`, not what's in it, and
 looks in none of them until you open it. A file you copy to another of your computers, or send from
