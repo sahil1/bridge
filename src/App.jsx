@@ -26,6 +26,7 @@ import RestartChip from './components/RestartChip.jsx'
 import SetupChip from './components/SetupChip.jsx'
 import TopNotes, { useUpdateNote, FreshChip } from './components/TopNotes.jsx'
 import { useFresh, oldApp } from './fresh.js'
+import { useRelayMove } from './moved.js'
 import RuntimeNotice from './components/RuntimeNotice.jsx'
 import { CHANNEL, nameOf, popOut, tell } from './components/Solo.jsx'
 import Palette from './components/Palette.jsx'
@@ -444,8 +445,9 @@ function App() {
   const toReview = (ny.data?.items || []).filter((i) => (i.type === 'review' || i.type === 'failed') && i.online && (i.machine || null) === (machineId || null) && !isQuiet(i)).length
   const homeCount = useHome(homeOn && !cloudOnly, 12000)
   const homeNeeds = homeOn && homeCount.data ? needCount(homeCount.data) : null
-  // And what other apps ask of you here (Bridge AI as an MCP Server), on this computer's window.
-  const needN = homeNeeds ? homeNeeds.here : needsYou.length + (machineId ? 0 : ny.data?.outside?.length || 0)
+  // And what other apps ask of you here (Bridge AI as an MCP Server) and the Slack Bot's answers,
+  // on this computer's window.
+  const needN = homeNeeds ? homeNeeds.here : needsYou.length + (machineId ? 0 : (ny.data?.outside?.length || 0) + (ny.data?.slack?.length || 0))
   const needElse = homeNeeds ? homeNeeds.elsewhere : waiting - needsYou.length
 
   // herdr sessions each have their own agents (and number panes alike), so each keeps its own open
@@ -852,6 +854,8 @@ function App() {
   // The computer updated while this page was open: the new one loads by itself when nothing's under
   // way, or a line under the top bar says so with Reload (src/fresh.js).
   const fresh = useFresh({ hold: !!meetings?.rec })
+  // On a phone that reached this computer at a relay it moved from: it follows it (src/moved.js).
+  useRelayMove()
   // ⌘K, but where something on the page has it for its own (a sheet's Insert link, as in Google
   // Sheets and Excel, or a document's link while you write in it): there the top bar's search opens
   // this. ⌘, likewise, but in a document, where it's subscript.

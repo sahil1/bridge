@@ -10,10 +10,13 @@ import './tabstrip.css'
 // width, each as wide as the others (224px at most), and narrow evenly as more open, down to where a
 // few letters of each name still show; past that the tab on screen keeps its name and its × while the
 // others are their icon alone, and only past that does a tab go out of sight, with Search tabs (the
-// ⌄ at the end, saying how many) listing every one, to find by typing. A tab closed with the pointer
-// leaves the others as wide as they were until the pointer leaves the strip, so the next × comes under
-// it. A moment's hover shows a card with the tab's whole name and where it is. Drag a tab to reorder;
-// Ctrl+Shift+←/→ moves the focused one.
+// ⌄ at the end, saying how many) listing every one, to find by typing. However many are open, the tab
+// on screen has its name and its ×. A narrowed tab's × shows under the pointer (or the keyboard) in
+// its icon's place, as on Chrome's narrow tabs, the icon gone while it shows: never on the icon, nor
+// past the tab's edge; the middle button and its menu's Close close it too. A tab closed with the
+// pointer leaves the others as wide as they were until the pointer leaves the strip, so the next ×
+// comes under it. A moment's hover shows a card with the tab's whole name and where it is. Drag a tab
+// to reorder; Ctrl+Shift+←/→ moves the focused one.
 //
 // A right-click on a tab (or Shift+F10, or the menu key, on the focused one) has what Chrome's tab
 // menu has that fits here: a new agent in its space, open it beside the tab on screen; add it to a new
@@ -51,6 +54,12 @@ import './tabstrip.css'
 // tab on screen stays out); a right-click has the rest, its color too. With only one space's group
 // there are no chips for spaces, nor for a space whose one tab is named as it is (the Chief of
 // Staff's). Each tab's place in its group is yours, as before (drag, or Ctrl+Shift+←/→).
+// Meetings: with two or more meeting tabs open (not counting one in a group of yours, which stays
+// there), they come together after the views under a Meetings chip in a color of its own (purple,
+// whatever the spaces' are, or one picked in its menu), its line under them. Its chip folds them as a
+// space's does, to how many (a meeting has no dot to show), and its right-click menu is a space's:
+// fold, its colors, close its tabs. One meeting tab alone stays among the views. Its fold and its
+// color are kept as a space's are.
 
 // How wide a tab is, as tabstrip.css has it: 224px at most; the others down to 72 with a few letters
 // of their name (then down to 52 with fewer, then their icon alone), the one on screen 124 at least,
@@ -84,6 +93,10 @@ const colorOf = (space, i, label) => {
 const renamable = (a) => !!a?.tabId && !a.view && !a.remote && !a.cloud && !a.chief
 const without = (o, k) => { const n = { ...o }; delete n[k]; return n }
 const STUDIO = 'view:studio:'
+const MEETING = 'view:meeting:'
+// The Meetings group's color, one of the palette's, the same wherever it is (a space's goes by its
+// place in the sidebar); one picked in its menu comes first, as a space's does.
+const MEETINGS = 'purple'
 // What a tab's card says about where it is: its space (and its tab, for a terminal), the computer
 // it's on, or for a view, what kind it is (a Studio file with its folder).
 function whereOf(a) {
@@ -95,7 +108,7 @@ function whereOf(a) {
       return { text: t('Studio'), path: path.split('/').slice(0, -1).join('/') || null }
     }
     if (id.startsWith('view:whiteboard:')) return { text: t('Whiteboard') }
-    if (id.startsWith('view:meeting:')) return { text: t('Meeting') }
+    if (id.startsWith(MEETING)) return { text: t('Meeting') }
     return null
   }
   return { text: a.shellTab ? `${a.workspace} › ${a.label}` : a.workspace || t('Space'), path: a.cwd ? tildePath(a.cwd) : null }
@@ -142,8 +155,11 @@ export default function TabStrip({ ids, byId, active, side, focus, folded: folde
     m.get(key).ids.push(id)
     return m
   }, new Map()).values()]
+  // Meeting tabs, two or more not in a group of yours: a group of their own, after the views.
+  const meets = loose.filter((id) => !mineOf[id] && id.startsWith(MEETING))
   const groupOf = (id) => {
     const a = byId[id]
+    if (meets.length > 1 && meets.includes(id)) return { key: 'meetings', at: -0.75, label: t('Meetings'), meetings: true, color: chosen('meetings') || MEETINGS }
     if (a.view) return { key: 'views', at: -1 }
     if (a.remote) {
       const key = `dev:${a.remote.machine || 'here'}`
@@ -167,9 +183,9 @@ export default function TabStrip({ ids, byId, active, side, focus, folded: folde
   // An agent's tab is named as the sidebar names it (its tab's name, not its terminal's title, which
   // on Windows can be the shell's own); a view, a terminal or another computer's agent by its title.
   const tabName = (a) => named[a.paneId] ?? (a.view || a.shellTab || a.remote ? a.title : agentName(a))
-  const spaced = groups.filter((g) => !g.own && !g.pinned)
+  const spaced = groups.filter((g) => !g.own && !g.pinned && !g.meetings)
   const multi = spaced.filter((g) => g.label).length > 1 || spaced.some((g) => g.device)
-  const headed = (g) => g.own || (multi && !!g.label && (g.device || g.ids.length > 1 || String(tabName(byId[g.ids[0]]) || '').trim().toLowerCase() !== String(g.label).trim().toLowerCase()))
+  const headed = (g) => g.own || g.meetings || (multi && !!g.label && (g.device || g.ids.length > 1 || String(tabName(byId[g.ids[0]]) || '').trim().toLowerCase() !== String(g.label).trim().toLowerCase()))
   const shown = groups.map((g) => {
     const head = headed(g)
     const isFolded = head && !!foldedKeys?.[g.key]
@@ -244,6 +260,9 @@ export default function TabStrip({ ids, byId, active, side, focus, folded: folde
   // ---------- closing ----------
   // With the pointer (a click on its ×, or the middle button): every tab keeps its width until the
   // pointer leaves the strip. The tab shown in its place is the one after it, else the one before.
+  // The tab on screen keeps its 124px at least meanwhile (tabFor): kept at the width it had as one of
+  // the others, it was its icon alone, its name gone. So closing the tab on screen brings the next
+  // one's × under the pointer.
   const close = (id, e) => {
     if (e && (e.detail > 0 || e.button === 1) && scroller.current) {
       setKept(Object.fromEntries([...scroller.current.querySelectorAll(':scope > .ws-tab')].map((x) => [x.dataset.pane, x.getBoundingClientRect().width])))
@@ -372,7 +391,7 @@ export default function TabStrip({ ids, byId, active, side, focus, folded: folde
       onDrop={(e) => { e.preventDefault(); if (drag) { onMove(drag.id, g.ids[0], false); if (mineOf[drag.id] !== g.key) onGroup?.(drag.id, g.key, true) } setDrag(null) }}
       title={g.folded ? (g.ids.length === 1 ? t('{name}: 1 tab. Show it', { name: chipName(g) }) : t('{name}: {n} tabs. Show them', { name: chipName(g), n: g.ids.length })) : t('{name}: fold its tabs away', { name: chipName(g) })}>
       {g.device && <Icon name="laptop" size={11} />}
-      {g.folded && <span className="ws-group-dot"><StatusDot status={worstOf(g.ids, byId)} size={6} /></span>}
+      {g.folded && !g.meetings && <span className="ws-group-dot"><StatusDot status={worstOf(g.ids, byId)} size={6} /></span>}
       {g.label && <span className="ws-group-name">{g.label}</span>}
       {g.folded && <span className="ws-group-n">{g.ids.length}</span>}
     </button>
@@ -450,7 +469,7 @@ export default function TabStrip({ ids, byId, active, side, focus, folded: folde
     return (
       <div key={id} role="tab" data-pane={id} aria-selected={inMain || inSide} tabIndex={0} draggable={!isRen}
         className={`ws-tab ${inMain ? 'main' : ''} ${inSide ? 'side' : ''} ${pin ? 'pinned' : ''} ${isRen ? 'renaming' : ''} ${(inMain && focus === 'main') || (inSide && focus === 'side') ? 'focus' : ''} ${g.head ? 'grouped' : tint ? 'tinted' : ''} ${g.head && n === g.shown.length - 1 ? 'group-end' : ''} ${drag?.id === id ? 'dragging' : ''} ${drag?.over === id && drag.id !== id ? (drag.after ? 'drop-after' : 'drop-before') : ''}`}
-        style={{ ...paint(tint), ...(kept?.[id] ? { flex: `0 0 ${kept[id]}px`, minWidth: 0, maxWidth: 'none' } : null) }}
+        style={{ ...paint(tint), ...(kept?.[id] ? { flex: `0 0 ${kept[id]}px`, maxWidth: 'none', ...(inMain || inSide || isRen ? null : { minWidth: 0 }) } : null) }}
         aria-description={description(a)} aria-describedby={card?.id === id ? 'ws-tab-card' : undefined}
         onMouseEnter={(e) => { if (!drag && !menu && !isRen) hover(id, e.currentTarget) }} onMouseLeave={() => { clearTimeout(cardTimer.current); cardTimer.current = setTimeout(hideCard, 80) }}
         onFocus={(e) => { if (e.target === e.currentTarget && e.currentTarget.matches(':focus-visible')) hover(id, e.currentTarget) }} onBlur={hideCard}

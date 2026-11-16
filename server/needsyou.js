@@ -44,6 +44,8 @@ export function projectOf(a) {
 // agent or a question Codex asked); p: its last message (transcripts.preview).
 export function itemOf(a, { q = null, p = null } = {}) {
   if (!a?.paneId || a.shellTab || a.kind === 'shell') return null
+  // The Slack Bot's answering agents: what they answered waits in Needs You as itself (frontdesk.js).
+  if (a.helper?.list) return null
   const agent = {
     title: nameOf(a), kind: a.kind, kindLabel: a.kindLabel || a.kind, chief: !!a.chief, project: projectOf(a),
     branch: a.cloud?.branch || a.worktree?.branch || null, account: a.account || null, model: a.model || null,

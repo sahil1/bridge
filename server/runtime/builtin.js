@@ -94,6 +94,9 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
       // A copy of session `fork`: Claude takes the new id we give it; Codex names its own.
       sessionId = a.sessionId === 'assign' ? newSessionId() : null
       args = a.fork(fork, sessionId || undefined)
+      // With a first message for the copy (the Slack Bot's question to a copy of an agent's
+      // conversation), after it on the command line, as a fresh start has its own.
+      if (opening && a.promptArg) args = [...args, forCommandLine(opening)]
     } else if (hasLog) { args = a.resume(sessionId); reopened = true } else {
       if (resume) sessionId = null
       if (a.sessionId === 'assign' && !sessionId) sessionId = newSessionId()

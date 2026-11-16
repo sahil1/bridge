@@ -183,7 +183,15 @@ try {
   await goTo('A2'); await p.keyboard.press(`${MOD}+p`)
   const printed = await until(async () => p.locator('iframe.sh-print-frame').last().evaluate((f) => f.contentDocument?.body?.innerText || '').catch(() => ''), 5000)
   ok(/Item\s+Cost\s+Qty/.test(printed || '') && /Total\s+1975/.test(printed || ''), '⌘P (and Print beside undo and redo): the sheet\'s cells as they show, to print or save as PDF', (printed || '').slice(0, 200))
-  ok((await p.locator('.sd-univer [data-u-command="bridge.sheet.print-button"]').count()) === 1, 'Print is in the ribbon beside undo and redo')
+  ok((await p.locator('.sd-univer [data-u-command="bridge.sheet.print-button"]:visible').count()) === 1, 'Print is in the ribbon beside undo and redo')
+  // Its tools on one row under their tabs, from the left, what doesn't fit under ⋮ at its end, as a
+  // document's and a deck's are.
+  const ribbonRow = await p.locator('.sd-univer [data-u-comp="ribbon-toolbar"]').first().evaluate((t) => {
+    const r = (e) => e.getBoundingClientRect()
+    const shown = [...t.querySelectorAll('[data-u-command], button')].filter((x) => r(x).width > 0)
+    return { rows: new Set(shown.map((x) => Math.round(r(x).top + r(x).height / 2))).size, h: Math.round(r(t).height), past: shown.filter((x) => r(x).right > r(t).right + 1).length, left: Math.round(r(shown[0]).left - r(t).left) }
+  })
+  ok(ribbonRow.rows === 1 && ribbonRow.h <= 44 && !ribbonRow.past && ribbonRow.left < 40, 'its tools on one row under their tabs, from the left', ribbonRow)
 
   // ---------- Focus ----------
   // A sheet in Focus keeps its keys: Focus's own types nothing into the cell picked, Esc while a
@@ -246,7 +254,7 @@ try {
   // ---------- Insert › Chart ----------
   await goTo('A1:B6')
   await p.locator('.sd-univer [role="tab"]', { hasText: 'Insert' }).first().click()
-  await p.locator('.sd-univer [data-u-command="bridge.sheet.insert-chart"]').first().click()
+  await p.locator('.sd-univer [data-u-command="bridge.sheet.insert-chart"]:visible').first().click()
   ok(!!(await until(async () => (await p.locator('.sh-charts .sh-fig svg').count()) === 1, 5000)), 'Insert › Chart: the cells picked, drawn beside the sheet at once')
   await p.locator('.sh-fig-tools select').selectOption('pie')
   await p.locator('.sh-fig-tools input').fill('Costs')
@@ -424,7 +432,7 @@ try {
   await until(async () => { if (!(await night.p.locator('.sd-univer').count())) await night.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'budget.xlsx' } })), { root }); return (await night.p.locator('.sd-univer canvas').count()) > 0 }, 30000, 1000)
   await sleep(1200)
   await night.p.locator('.sd-univer [role="tab"]', { hasText: 'Insert' }).first().click()
-  await night.p.locator('.sd-univer [data-u-command="bridge.sheet.charts"]').first().click()
+  await night.p.locator('.sd-univer [data-u-command="bridge.sheet.charts"]:visible').first().click()
   await night.p.locator('.sh-charts').waitFor({ timeout: 5000 })
   // Its five costs, $900.00 and 4500% among them, each a slice: the numbers, not as they show.
   ok((await night.p.locator('.sh-charts .sh-fig svg').count()) === 1 && (await night.p.locator('.sh-charts .sc-slice').count()) === 5, 'dark: the chart saved in the file, in Charts, a slice for each of its five costs however they\'re formatted', await night.p.locator('.sh-charts').innerText())

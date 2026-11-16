@@ -11,7 +11,8 @@
 // browser named by BRIDGE_TEST_BROWSER: the phone page on Bridge AI's relay (<id>.localhost, as
 // when it's tried on a computer) says before pairing that its code comes from the relay, with the
 // iPhone and Android apps a tap away, until it's dismissed; on a relay of your own and in the apps,
-// it says nothing.
+// it says nothing. A pairing link opened in Safari or Chrome on a phone (the camera opens one) says
+// it pairs the browser, not the app, with the app instead a tap away; in the apps, none of that.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -132,6 +133,26 @@ try {
     const inApp = await open(hosted, { ua: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36 BridgeAIApp/3.14.0' })
     ok(!!(await pairing(inApp)) && (await inApp.locator('#hosted-note').count()) === 0, 'and in the apps (BridgeAIApp in the user agent) it never shows', null)
   }
+  // ---------- A pairing link opened in a phone's browser (the camera opens one there) ----------
+  // It says plainly that it pairs the browser, not the app, with the app a tap away; pairing the
+  // browser still works. In the apps, none of it.
+  const link = `${relay.url}/#pair=ABCD-EFGH-JKMN-PQRS-TVWX&name=Studio`
+  const said = async (p) => {
+    await pairing(p)
+    return p.evaluate(() => {
+      const shown = (id) => !document.getElementById(id).hidden
+      return { intro: document.getElementById('pair-intro').textContent, go: document.getElementById('pair-go').textContent, box: shown('use-app'), text: document.getElementById('use-app-text').textContent, open: shown('use-app-open'), get: document.getElementById('use-app-get').getAttribute('href'), wide: document.documentElement.scrollWidth - window.innerWidth }
+    })
+  }
+  const safari = await said(await open(link, { ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1' }))
+  ok(/^This link pairs Safari on this phone with Studio \([^)]+\), not the Bridge AI app\. Pair only if it's yours\./.test(safari.intro) && safari.go === 'Pair Safari', 'opened in Safari: it says it pairs Safari, not the Bridge AI app, and Pair says so too', safari)
+  ok(safari.box && /^Use the Bridge AI app instead: open it, tap Add a computer \(or Scan the QR code\), and scan the code on Studio's screen\.$/.test(safari.text) && safari.open && safari.get === 'https://boldbridge.ai/phone' && safari.wide <= 1, 'with the app instead a tap away (Open the Bridge AI app, and Get the app), on a 390 px phone', safari)
+  const chrome = await said(await open(link, { ua: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36' }))
+  ok(/^This link pairs this browser on this phone with Studio/.test(chrome.intro) && chrome.go === 'Pair this browser' && chrome.box && !chrome.open && chrome.get === 'https://boldbridge.ai/#android', 'in Chrome on Android: the same, with the Android app', chrome)
+  const theApp = await said(await open(link, { ua: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36 BridgeAIApp/3.20.0' }))
+  ok(!theApp.box && theApp.go === 'Pair' && /so it can use Bridge AI there/.test(theApp.intro), 'and in the apps, none of it', theApp)
+  ok(/case "pair"|url\.host == "pair"/.test(wvc) && /usePairingLink\(link\)/.test(wvc.slice(wvc.indexOf('func open(_ url: URL)'))), 'the iPhone app pairs from bridgeai://pair?link=… (Open the Bridge AI app), asking first as ever', null)
+
   ok(!errors.length, 'no page errors', errors)
 } catch (e) {
   ok(false, `the test ran to the end: ${e.stack}`)

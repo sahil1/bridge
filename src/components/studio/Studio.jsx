@@ -264,11 +264,11 @@ export function StudioHome({ onOpen }) {
       { id: 'packs', icon: 'palette', label: t('Design Packs'), hint: t('Your colours, fonts and logo, for the decks, documents and pages Studio makes') },
       { id: 'signature', icon: 'signature', label: t('Your Signature'), hint: t("Your signature and initials, for AI Assist's Sign this on a PDF") },
     ],
-    render: (id, { q }) => (id === 'packs' ? <PacksSection packs={packs} />
+    render: (id, { q, tap, keys, focus }) => (id === 'packs' ? <PacksSection packs={packs} />
       : id === 'signature' ? <Suspense fallback={null}><SignatureHome /></Suspense>
         : <>
           {id === 'recent' && !q && <p className="muted small sd-home-say">{t('Your folders on every computer, and these lists of your documents. Documents, sheets, decks, PDFs and pages open here to edit, by you or your agents, with every version kept; anything else opens in Quick Look or its own app.')}</p>}
-          <YourFiles files={files} group={id} q={q} refreshRecent={refresh} onOpen={onOpen} describe={describe} />
+          <YourFiles files={files} group={id} q={q} refreshRecent={refresh} onOpen={onOpen} describe={describe} tap={tap} keys={keys} focus={focus} />
         </>),
   }
   return <Explorer className="sd-home-view sd-home" head={head} shelves={shelves} onOpenDoc={onOpen} above={above} />

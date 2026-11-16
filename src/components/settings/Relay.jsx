@@ -97,7 +97,7 @@ export default function Relay({ way, setWay, onOffer }) {
     try { const r = await api(path, { method: 'POST', body }); setSt(r); return r } catch (e) { setErr(e.code === 'hostedFull' ? null : e.message); load() }
   }
   const deploy = async (account) => {
-    if (st.hosted && !account && !window.confirm(t('Move to a relay on your own Cloudflare account? Your phones pair again with it afterwards.'))) return
+    if (st.hosted && !account && !window.confirm(t('Move to a relay on your own Cloudflare account? Phones and computers paired here come along: they find this computer there by themselves.'))) return
     setWorking(true)
     const r = await run('/relay/deploy', { method: mode === 'token' ? 'token' : 'browser', token: mode === 'token' ? token.trim() : undefined, account })
     setWorking(false)
@@ -105,7 +105,7 @@ export default function Relay({ way, setWay, onOffer }) {
     else if (r) { setAccounts(null); setMode(null); setToken(''); setChanging(false); setWay?.(null) }
   }
   const useHosted = async () => {
-    if (st.configured && !st.hosted && !window.confirm(t('Move to Bridge AI\'s relay? Your phones pair again with it afterwards.'))) return
+    if (st.configured && !st.hosted && !window.confirm(t('Move to Bridge AI\'s relay? Phones and computers paired here come along: they find this computer there by themselves.'))) return
     setWorking(true)
     const r = await run('/relay/deploy', { method: 'hosted' })
     setWorking(false)
@@ -180,7 +180,7 @@ export default function Relay({ way, setWay, onOffer }) {
     return (
       <section className="st-sec" data-setting="relay">
         <h4>{t('Use Bridge AI on your phone')}</h4>
-        <p className="muted small">{st.configured ? t('Pick how your phone reaches this computer when you\'re away from it. Moving to another relay means pairing your phones again.') : t('Pick how your phone reaches this computer when you\'re away from it.')}</p>
+        <p className="muted small">{st.configured ? t('Pick how your phone reaches this computer when you\'re away from it. Moving to another relay keeps your phones paired: they follow this computer there by themselves, with no need to stop using this one first.') : t('Pick how your phone reaches this computer when you\'re away from it.')}</p>
         <div className="ph-ways" role="radiogroup" aria-label={t('How your phone reaches this computer')}>
           {WAYS.map((w) => (
             <button key={w.id} type="button" role="radio" aria-checked={pick === w.id} className={`ph-way ${pick === w.id ? 'on' : ''}`} onClick={() => setWay?.(w.id)}>
@@ -240,6 +240,7 @@ export default function Relay({ way, setWay, onOffer }) {
             <code className="small">{st.url.replace(/^https:\/\//, '')}</code>
             {st.account && <span className="muted small">{t('on {account}', { account: st.account })}</span>}
           </div>
+          {st.moved && <p className="muted small" data-moved=""><Icon name="info" size={12} /> {t('Moved here from {from}. Phones paired there follow this computer here by themselves the next time they open Bridge AI; until {date}, it stays connected there for them.', { from: st.moved.from.replace(/^https?:\/\//, ''), date: new Date(st.moved.until).toLocaleString(locale(), { day: 'numeric', month: 'short' }) })}</p>}
           {st.hosted && st.auto?.ok && <p className="muted small">{t('It started by itself on {date}: your account has it, and this computer had no other way set up for your phone.', { date: new Date(st.auto.at).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) })}</p>}
           {st.hosted && <p className="muted small"><button type="button" className="link-btn" onClick={() => openSettings('account')}>{t('Your account\'s allowance, on the Account tab')}</button></p>}
           {st.busy && <p className="st-note"><Icon name="refresh" size={13} className="spin" /> {st.busy}</p>}
@@ -263,6 +264,7 @@ export default function Relay({ way, setWay, onOffer }) {
                 <li key={d.id}>
                   <Icon name="phone" size={14} /><span>{d.name}</span>
                   {d.fresh && <span className="st-chip">{t('New')}</span>}
+                  {d.moving && <span className="st-chip" title={t('It follows this computer here the next time it opens Bridge AI.')}>{t('Not moved yet')}</span>}
                   <span className="muted small">{d.connected ? t('connected now') : d.lastSeen ? t('last used {when}', { when: new Date(d.lastSeen).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) }) : ''}</span>
                   {/* Just paired: Keep it (yours), as the app's notice offers too. */}
                   {d.fresh && <button type="button" className="ghost-btn" onClick={async () => { setErr(null); try { setSt(await api(`/relay/devices/${encodeURIComponent(d.id)}/keep`, { method: 'POST' })); window.dispatchEvent(new Event('bridge-machines')) } catch (e) { setErr(e.message) } }}>{t('Keep')}</button>}
@@ -275,13 +277,21 @@ export default function Relay({ way, setWay, onOffer }) {
           <Advanced order={20}><KeepAwake st={st} onChange={setSt} /></Advanced>
           <div className={offer ? 'st-row' : undefined}>
             {offer && <button type="button" className="ghost-btn" onClick={() => { setChanging(true); setWay?.(null) }}>{t('Change how your phone connects')}</button>}
-            <button type="button" className="ghost-btn" onClick={() => { if (window.confirm(st.hosted ? t('Stop using Bridge AI\'s relay? Paired phones are forgotten, and this computer\'s address on the relay is removed.') : t('Stop using this relay? Paired phones are forgotten and Bridge AI signs out of Cloudflare. The relay stays on your Cloudflare account; delete it there if you like.'))) run('/relay/forget') }}>{t('Stop using the relay')}</button>
+            <button type="button" className="ghost-btn" onClick={() => { if (window.confirm(stopSays(st, offer))) run('/relay/forget') }}>{t('Stop using the relay')}</button>
           </div>
         </>
       )}
       {problem}
     </section>
   )
+}
+
+// Exactly what Stop using the relay does, asked first. It's never needed to move to another relay.
+function stopSays(st, offer) {
+  const what = st.hosted
+    ? t('Stop using Bridge AI\'s relay? Every paired phone is forgotten (each pairs again with a new code), this computer gets a new key, and its address on the relay is removed. Your other computers stay linked.')
+    : t('Stop using this relay? Every paired phone is forgotten (each pairs again with a new code), this computer gets a new key, and Bridge AI signs out of Cloudflare. The relay stays on your Cloudflare account, and setting it up here again puts it back at the same address. Your other computers stay linked.')
+  return offer ? `${what}\n\n${t('To move to another relay instead, use Change how your phone connects: your phones come along.')}` : what
 }
 
 // What Bridge AI's relay needs before this computer can use it: your Bold Bridge account signed in

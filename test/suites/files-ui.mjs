@@ -13,22 +13,31 @@
 //   stopped when it's no longer wanted; from another computer, a folder macOS hasn't asked about
 //   isn't read; and another site can't load a page's files through these roots;
 //   the app: Studio in the sidebar (no Folders or Files row), its home's own sidebar (Studio's
-//   lists, then the folders); the list, sorted by name and size; the path you
+//   lists, then the folders); the list, sorted by name and size; one click picking a file or a
+//   folder in the list, icons, columns and Studio's lists, with Studio's bar and the path as they
+//   were, and a double-click or Enter opening it; the path you
 //   click and back and forward (buttons and keys); Quick Look with Space and the arrow keys; Get
 //   Info and a folder's size; renaming and Trash shown as coming; hidden files; icons with pictures
-//   of pictures and PDFs; columns with a file's preview; a search and its Stop; a document opened
+//   of pictures and PDFs, at a size each folder keeps (⌘+, ⌘−, ⌘0, the slider, Use as Defaults);
+//   Arrange By and Group by Kind; folders marked as a Mac marks them (Desktop, a cloud drive, a
+//   project) and documents' first pages and decks' first slides as their icons, but none on a cloud
+//   drive; columns with a file's preview; a search and its Stop; a document opened
 //   in Studio's editor, a page of code in Quick Look and a picture in its own app (a stand-in); Recent
 //   and New on the home (a new file in the folder shown); Assist's panel; macOS asking about a folder
 //   you open (said, with nothing frozen meanwhile) and one it was refused (said, with how to allow
 //   it); Laptop's files from Desk, through the link; Folders' old places (a tab, a link, the phone's
 //   More) landing in Studio's home at the folder; and on a phone, one column at a time, with Studio
 //   the one entry in More.
-// Pictures in light and dark and at a phone's width are in test/.out/shots (files-ui-*).
+// Pictures in light and dark and at a phone's width are in test/.out/shots (files-ui-*): icons at
+// three sizes, the list and groups at 1440 and 390 px wide in each.
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import { pathToFileURL } from 'node:url'
+import JSZip from 'jszip'
 import { startKit, startRelay, checks, until, browser, page, shot, phoneFaults, sleep, noServiceWorker, ROOT, TEST, IS_MAC, IS_WIN } from '../lib/harness.mjs'
+import { richDocx } from '../lib/wordfile.mjs'
+import { deckPptx, boardSlides } from '../lib/deckfile.mjs'
 
 const { ok, skip, done } = checks('files-ui')
 const { b, which } = await browser()
@@ -115,6 +124,22 @@ try {
   fs.mkdirSync(path.join(h, 'Library', 'Mobile Documents', 'com~apple~CloudDocs'), { recursive: true })
   fs.mkdirSync(path.join(h, 'Library', 'CloudStorage', 'OneDrive-Personal'), { recursive: true })
   fs.mkdirSync(path.join(h, 'Library', 'CloudStorage', 'GoogleDrive-Work'), { recursive: true })
+  // Documents of each kind, for their icons: a Word file's first page, one with Office's own picture
+  // of itself in it, a deck's first slide, a Markdown file's first lines; and one on a cloud drive
+  // (Dropbox, in the home folder anywhere), never read for its icon.
+  const pictured = await JSZip.loadAsync(await richDocx({ pages: 1 }))
+  pictured.file('docProps/thumbnail.png', png(120, 160, [200, 40, 160]))
+  put('Docs/Plan.docx', await richDocx({ pages: 1 }))
+  put('Docs/Pictured.docx', await pictured.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }))
+  put('Docs/Review.pptx', await deckPptx({ slides: boardSlides(2) }))
+  put('Docs/Readme.md', '# Read me first\n\nWhat this folder is for, and who keeps it.\n')
+  put('Docs/scan.pdf', PDF)
+  put('Docs/budget.csv', 'item,cost\nhosting,12\n')
+  put('Docs/song.mp3', 'x')
+  put('Docs/backup.zip', 'x')
+  put('Docs/data.json', '{}\n')
+  fs.mkdirSync(path.join(h, 'Docs', 'Drafts'), { recursive: true })
+  put('Dropbox/Away.md', '# Away\n\nOnly in the cloud.\n')
   let linked = false
   try { fs.symlinkSync(desk.data, path.join(h, 'escape'), IS_WIN ? 'junction' : 'dir'); linked = true } catch { /* no links here */ }
   const sizeOf = (dir) => fs.readdirSync(dir, { withFileTypes: true }).reduce((n, e) => n + (e.isDirectory() ? sizeOf(path.join(dir, e.name)) : fs.statSync(path.join(dir, e.name)).size), 0)
@@ -303,6 +328,24 @@ try {
     ok(desc.indexOf('Projects') < desc.indexOf('Archive') && desc.indexOf('notes.txt') < desc.indexOf('big.bin'), 'by name the other way', desc)
     await p.locator('.fx-th', { hasText: 'Name' }).click()
   })
+  // Studio's bar (its header: Studio, Files and Preview, New), the folder's bar and its path, and
+  // whether a file is open in the editor: what a click mustn't change.
+  const barNow = async () => JSON.stringify({
+    head: await p.locator('.sd-home > .pane-head').innerText().catch(() => null), crumbs: await crumbs(p),
+    tools: await p.locator('.fx-bar button').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') || e.innerText.trim())), editor: await p.locator('.sd-file').count(),
+  })
+  const picked = (sel) => p.locator(sel).getAttribute('aria-selected').catch(() => null)
+  await part('one click picks, and the bar stays put', async () => {
+    const was = await barNow()
+    await p.locator('.fx-row[data-name="notes.txt"]').click()
+    ok(await picked('.fx-row[data-name="notes.txt"]') === 'true' && await barNow() === was, 'the list: one click picks a file, and Studio\'s bar, the folder\'s and its path stay as they were', { was, now: await barNow() })
+    await p.locator('.fx-row[data-name="Projects"]').click()
+    ok(await picked('.fx-row[data-name="Projects"]') === 'true' && await picked('.fx-row[data-name="notes.txt"]') === 'false' && await barNow() === was, 'a folder too: picked, not opened')
+    await p.keyboard.press('Enter')
+    ok(!!(await until(async () => (await crumbs(p)).join(' › ') === 'Home › Projects', 6000)), 'Enter opens the one picked', await crumbs(p))
+    await p.keyboard.press(`${MOD}+ArrowUp`)
+    await p.locator('.fx-row[data-name="Projects"][aria-selected="true"]').waitFor({ timeout: 6000 })
+  })
   await part('the path, back and forward', async () => {
     await p.locator('.fx-row[data-name="Projects"]').dblclick()
     await p.locator('.fx-row[data-name="site"]').dblclick()
@@ -378,6 +421,126 @@ try {
     ok(!!pic && !!pdf, 'as icons: a picture of each picture and of the PDF', { pic, pdf })
     await snap('icons')
   })
+  // The icons' size, as each folder keeps it (its View Options), from their box.
+  const iconSize = () => p.locator('.fx-icons').evaluate((e) => parseFloat(getComputedStyle(e).getPropertyValue('--fx-icon'))).catch(() => null)
+  const tiles = () => p.locator('.fx-icons .fx-tile').evaluateAll((els) => els.map((e) => e.dataset.name))
+  const options = p.locator('.fx-vo')
+  await part('icons: a click picks, and each folder keeps its size', async () => {
+    const was = await barNow()
+    await p.locator('.fx-tile[data-name="sea.png"]').click()
+    ok(await picked('.fx-tile[data-name="sea.png"]') === 'true' && await barNow() === was && (await p.locator('.fx-ql').count()) === 0, 'icons: one click picks one, and the bars stay as they were', { was, now: await barNow() })
+    await p.keyboard.press('ArrowLeft')
+    ok(await picked('.fx-tile[data-name="scan.pdf"]') === 'true', 'the arrow keys go from icon to icon')
+    ok(await iconSize() === 64 && await p.locator('.fx-bar .fx-size input').inputValue().catch(() => null) === '64', 'at first the usual size, 64 px, with Finder\'s slider in the bar', await iconSize())
+    await p.keyboard.press(`${MOD}+Equal`)
+    await p.keyboard.press(`${MOD}+Equal`)
+    ok(!!(await until(async () => await iconSize() === 96, 3000)) && await p.locator('.fx-bar .fx-size input').inputValue() === '96', '⌘+ twice: 96 px, the slider with it', await iconSize())
+    await p.locator('.fx-side-row[data-label="Home"]').click()
+    await p.locator('.fx-tile[data-name="Projects"]').waitFor({ timeout: 8000 })
+    ok(await iconSize() === 64, 'another folder keeps its own (the defaults\'): 64 px', await iconSize())
+    await p.locator('.fx-side-row[data-label="Pictures"]').first().click()
+    await p.locator('.fx-tile[data-name="sky.png"]').waitFor({ timeout: 8000 })
+    ok(await iconSize() === 96, 'and Pictures is still 96 px', await iconSize())
+    // Use as Defaults: every folder without its own size shows Pictures' now.
+    await p.locator('.fx-bar button[aria-label="View Options"]').click()
+    ok(await options.waitFor({ timeout: 4000 }).then(() => true, () => false) && /Arrange By/.test(await options.innerText()) && /Group by Kind/.test(await options.innerText()) && await options.locator('input[type="range"]').count() === 1 && /Text Size/.test(await options.innerText()),
+      'View Options: Arrange By, Group by Kind, the icon size and the text size', await options.innerText().catch(() => ''))
+    await options.locator('button', { hasText: 'Use as Defaults' }).click()
+    ok(await options.locator('button', { hasText: 'These Are the Defaults' }).isDisabled().catch(() => false), 'Use as Defaults: it says these are the defaults now')
+    await p.keyboard.press('Escape')
+    ok(!!(await until(async () => (await options.count()) === 0, 3000)), 'Esc closes View Options')
+    await p.locator('.fx-side-row[data-label="Home"]').click()
+    await p.locator('.fx-tile[data-name="Projects"]').waitFor({ timeout: 8000 })
+    ok(!!(await until(async () => await iconSize() === 96, 3000)), 'Home, with no size of its own: the defaults, 96 px', await iconSize())
+    // ⌘0: the usual size, for this folder alone.
+    await p.locator('.fx-tile[data-name="Projects"]').click()
+    await p.keyboard.press(`${MOD}+0`)
+    ok(!!(await until(async () => await iconSize() === 64, 3000)), '⌘0 back to 64 px here', await iconSize())
+    await p.locator('.fx-bar .fx-size input').fill('160')
+    ok(!!(await until(async () => await iconSize() === 160, 3000)), 'the slider: 160 px', await iconSize())
+    const kept = await p.evaluate(() => ({ folders: JSON.parse(localStorage.getItem('cc-fx-folders') || '{}'), look: JSON.parse(localStorage.getItem('cc-fx-look') || '{}') }))
+    ok(kept.folders['\nhome\n']?.icon === 160 && kept.look.icon === 96, 'kept on this device: Home\'s own size, and the defaults', kept)
+    // (Home back to the defaults, as the rest of the test expects it.)
+    await p.locator('.fx-bar button[aria-label="View Options"]').click()
+    await options.locator('button', { hasText: 'Use the Defaults' }).click()
+    await p.keyboard.press('Escape')
+    ok(!!(await until(async () => await iconSize() === 96, 3000)), 'Use the Defaults: Home lets go of its own size', await iconSize())
+  })
+  await part('Arrange By and Group by Kind', async () => {
+    await p.locator('.fx-row[data-name="Docs"], .fx-tile[data-name="Docs"]').first().dblclick()
+    await p.locator('.fx-tile[data-name="Plan.docx"]').waitFor({ timeout: 8000 })
+    ok(JSON.stringify(await tiles()) === '["Drafts","backup.zip","budget.csv","data.json","Pictured.docx","Plan.docx","Readme.md","Review.pptx","scan.pdf","song.mp3"]', 'by name at first, folders first', await tiles())
+    await p.locator('.fx-bar button[aria-label="View Options"]').click()
+    const arrange = options.locator('select').first()
+    const offered = await arrange.evaluate((s) => [...s.options].map((o) => o.value))
+    const made = (await desk.api('/files/list?root=home&path=Docs')).entries.some((e) => e.btime)
+    ok(['name', 'kind', 'mtime', 'size'].every((x) => offered.includes(x)) && (made ? offered.includes('btime') : !offered.includes('btime') && /Date Created isn't offered/.test(await options.innerText())),
+      made ? 'Arrange By: Name, Kind, Date Modified, Date Created and Size' : 'Arrange By: Name, Kind, Date Modified and Size; Date Created isn\'t offered, and it says why (this disk doesn\'t keep it)', offered)
+    await arrange.selectOption('kind')
+    ok(!!(await until(async () => JSON.stringify(await tiles()) === '["Drafts","song.mp3","budget.csv","data.json","Readme.md","scan.pdf","Review.pptx","Pictured.docx","Plan.docx","backup.zip"]', 3000)), 'Arrange By Kind: folders, then each kind by its name', await tiles())
+    await arrange.selectOption('size')
+    const bySize = await tiles()
+    ok(bySize[0] === 'Drafts' && bySize.indexOf('Review.pptx') < bySize.indexOf('data.json') && bySize.indexOf('Plan.docx') < bySize.indexOf('song.mp3'), 'Arrange By Size: the biggest first', bySize)
+    await arrange.selectOption('kind')
+    await options.locator('label', { hasText: 'Group by Kind' }).click()
+    const groups = () => p.locator('.fx-icons .fx-icon-group').evaluateAll((els) => els.map((e) => `${e.getAttribute('aria-label')}:${e.querySelectorAll('.fx-tile').length}`))
+    ok(!!(await until(async () => JSON.stringify(await groups()) === '["Folder:1","Audio:1","CSV table:1","JSON:1","Markdown document:1","PDF document:1","PowerPoint presentation:1","Word document:2","ZIP archive:1"]', 3000))
+      && /Word document\s*2/.test(await p.locator('.fx-icon-group[aria-label="Word document"] .fx-group-h').innerText()), 'Group by Kind: a section for each kind, under its name, folders first', await groups())
+    await p.keyboard.press('Escape')
+    await snap('grouped')
+    // Down a row from the only folder: into the next group.
+    await p.locator('.fx-tile[data-name="Drafts"]').click()
+    await p.keyboard.press('ArrowDown')
+    ok(await picked('.fx-tile[data-name="Drafts"]') === 'false' && (await p.locator('.fx-tile[aria-selected="true"]').count()) === 1, '↓ goes down a row, across groups', await p.locator('.fx-tile[aria-selected="true"]').getAttribute('data-name').catch(() => null))
+    // The list in the same groups, each under its kind's name.
+    await p.locator('.fx-bar button[aria-label="As list"]').click()
+    const heads = await p.locator('.fx-list .fx-group .fx-group-h').evaluateAll((els) => els.map((e) => e.firstChild.textContent))
+    ok(JSON.stringify(heads) === '["Folder","Audio","CSV table","JSON","Markdown document","PDF document","PowerPoint presentation","Word document","ZIP archive"]' && (await p.locator('.fx-list [role="rowgroup"]').count()) === 9, 'as a list, the same groups, each under its kind\'s name', heads)
+    await snap('grouped-list')
+    // Kept for Docs alone.
+    await p.locator('.fx-path .fx-crumb', { hasText: 'Home' }).click()
+    await p.locator('.fx-row[data-name="Projects"]').waitFor({ timeout: 8000 })
+    ok((await p.locator('.fx-list .fx-group').count()) === 0, 'another folder isn\'t grouped: Docs keeps its own')
+    await p.locator('.fx-row[data-name="Docs"]').dblclick()
+    ok(await p.locator('.fx-list .fx-group').first().waitFor({ timeout: 8000 }).then(() => true, () => false), 'and Docs is still grouped, back in it')
+    await p.locator('.fx-bar button[aria-label="As icons"]').click()
+  })
+  await part('folders as a Mac draws them, and documents\' first pages', async () => {
+    const asked = []
+    const watch = (r) => { if (/\/raw\?path=Dropbox/.test(r.url())) asked.push(r.url()) }
+    p.on('request', watch)
+    // Docs, as icons (from the part before): each document's first page or slide, made once it's on
+    // screen (each scrolled to: the groups go on below).
+    const see = (name) => p.locator(`.fx-tile[data-name="${name}"]`).scrollIntoViewIfNeeded().catch(() => {})
+    const page = (name) => p.locator(`.fx-tile[data-name="${name}"] .fx-sk-page`).innerText().catch(() => '')
+    await see('Plan.docx')
+    ok(!!(await until(async () => /Quarterly plan/.test(await page('Plan.docx')), 10000)), 'a Word file: its first page, in words', await page('Plan.docx'))
+    await see('Review.pptx')
+    ok(!!(await until(async () => /Northwind Annual Review/.test(await p.locator('.fx-tile[data-name="Review.pptx"] .fx-sk-slide b').innerText().catch(() => '')), 10000)), 'a deck: its first slide')
+    await see('Pictured.docx')
+    ok(!!(await until(() => p.locator('.fx-tile[data-name="Pictured.docx"] img').evaluate((i) => i.complete && i.naturalWidth === 120 && i.src.startsWith('blob:')).catch(() => false), 10000)), 'a Word file with its own picture of itself (Office\'s): that picture')
+    await see('Readme.md')
+    ok(!!(await until(async () => /Read me first/.test(await page('Readme.md')), 10000)), 'a Markdown file: its first lines')
+    await see('budget.csv')
+    ok(await p.locator('.fx-tile[data-name="budget.csv"] .fx-page.k-sheet .fx-page-ext').textContent() === 'CSV' && await p.locator('.fx-tile[data-name="Drafts"] .fx-fold .fx-fold-front').count() === 1, 'anything else: a page of its kind, with its extension; a folder, filled with its tab')
+    // Home: Desktop, Documents and Downloads marked as a Mac marks them, Dropbox as a cloud drive.
+    await p.locator('.fx-path .fx-crumb', { hasText: 'Home' }).click()
+    await p.locator('.fx-tile[data-name="Projects"]').waitFor({ timeout: 8000 })
+    const marked = await p.locator('.fx-tile').evaluateAll((els) => els.filter((e) => e.querySelector('.fx-fold-glyph')).map((e) => e.dataset.name))
+    ok(['Desktop', 'Documents', 'Downloads', 'Music', 'Pictures', 'Dropbox'].every((n) => marked.includes(n)) && !marked.includes('Archive') && !marked.includes('Docs'), 'the usual folders and a cloud drive marked, any other plain', marked)
+    if (IS_MAC) ok(!looked('Desktop').length && !looked('Documents').length && !looked('Downloads').length, 'and drawn without a look into a folder macOS asks about')
+    await p.locator('.fx-tile[data-name="Projects"]').dblclick()
+    ok(await p.locator('.fx-tile[data-name="site"] .fx-fold-glyph').waitFor({ timeout: 8000 }).then(() => true, () => false), 'a project (an agent works in it): marked as one')
+    await snap('marks')
+    // A cloud drive: its documents aren't read for their icons (reading one would download it).
+    await p.locator('.fx-path .fx-crumb', { hasText: 'Home' }).click()
+    await p.locator('.fx-tile[data-name="Dropbox"]').dblclick()
+    await p.locator('.fx-tile[data-name="Away.md"]').waitFor({ timeout: 8000 })
+    await sleep(800)
+    ok(await p.locator('.fx-tile[data-name="Away.md"] .fx-sketch').count() === 0 && await p.locator('.fx-tile[data-name="Away.md"] .fx-page').count() === 1 && !asked.length, 'on a cloud drive, a document\'s icon is its kind\'s, and nothing in it is read', asked)
+    p.off('request', watch)
+    await p.locator('.fx-path .fx-crumb', { hasText: 'Home' }).click()
+  })
   await part('columns', async () => {
     await p.locator('.fx-side-row[data-label="Home"]').click()
     await p.locator('.fx-bar button[aria-label="As columns"]').click()
@@ -386,6 +549,7 @@ try {
     await p.locator('.fx-col.last .fx-crow[data-name="notes.md"]').click()
     const cols = await until(async () => { const n = await p.locator('.fx-col:not(.fx-col-preview)').count(); return n === 3 && (await p.locator('.fx-col-preview', { hasText: 'notes.md' }).count()) === 1 && n }, 8000)
     ok(cols === 3 && (await crumbs(p)).join(' › ') === 'Home › Projects › site', 'as columns: each folder on the way beside the next, and the file picked shown at the end', { cols, crumbs: await crumbs(p) })
+    ok(await picked('.fx-col.last .fx-crow[data-name="notes.md"]') === 'true' && await p.locator('.sd-file').count() === 0, 'one click picks the file there, and nothing opens')
     await snap('columns')
     await p.locator('.fx-body').focus()
     await p.keyboard.press('ArrowLeft')
@@ -430,6 +594,36 @@ try {
       'a double-click on a file Studio doesn\'t edit (a stylesheet) shows it in Quick Look, over the folder', await p.locator('.fx-ql-title').innerText().catch(() => ''))
     await p.keyboard.press('Escape')
     ok(!!(await until(async () => (await p.locator('.fx-ql').count()) === 0, 4000)), 'and Esc closes it')
+  })
+  await part('Studio\'s lists: a click picks, a double-click or Enter opens', async () => {
+    await p.locator('.fx-side-row[data-shelf="recent"]').click()
+    const row = p.locator('.sd-shelf .sd-files-row', { hasText: 'notes.md' }).first()
+    await row.waitFor({ timeout: 10000 })
+    const was = await barNow()
+    await row.locator('.sd-file-name').click()
+    ok(await row.getAttribute('aria-selected') === 'true' && await barNow() === was && /notes\.md picked/.test(await p.locator('.sd-list-head').innerText()),
+      'Recent: one click picks a file, says so, and Studio\'s bar and what\'s on screen stay as they were', { was, now: await barNow() })
+    await snap('recent-picked')
+    await p.keyboard.press('Space')
+    ok(await p.locator('.fx-ql .md-view h1', { hasText: 'Site notes' }).waitFor({ timeout: 8000 }).then(() => true, () => false) && await barNow() === was, 'Space: Quick Look on it, over the list')
+    await p.keyboard.press('Escape')
+    await until(async () => (await p.locator('.fx-ql').count()) === 0, 4000)
+    const rowsNow = await p.locator('.sd-shelf .sd-files-row[data-key]').count()
+    if (rowsNow > 1) {
+      const at = await p.locator('.sd-shelf .sd-files-row[data-key]').evaluateAll((els) => els.findIndex((e) => e.getAttribute('aria-selected') === 'true'))
+      await p.keyboard.press(at ? 'ArrowUp' : 'ArrowDown')
+      ok(await row.getAttribute('aria-selected') === 'false' && (await p.locator('.sd-shelf .sd-files-row[aria-selected="true"]').count()) === 1, 'the arrow keys go up and down the list')
+      await p.keyboard.press(at ? 'ArrowDown' : 'ArrowUp')
+    } else skip('the arrow keys in Studio\'s lists', 'Recent has one file here')
+    ok(await row.getAttribute('aria-selected') === 'true', 'and back to it')
+    await p.keyboard.press('Enter')
+    ok(!!(await until(async () => /Launch on/.test(await p.locator('.sd-page .ProseMirror').innerText().catch(() => '')), 15000)), 'Enter opens it in Studio\'s editor')
+    await p.locator('.sd-file .sd-tabs [role="tab"]', { hasText: 'Files' }).click()
+    await row.waitFor({ timeout: 10000 })
+    await row.locator('.sd-file-when').dblclick()
+    ok(!!(await until(async () => /Launch on/.test(await p.locator('.sd-page .ProseMirror').innerText().catch(() => '')), 15000)), 'a double-click opens it too')
+    await p.locator('.sd-file .sd-tabs [role="tab"]', { hasText: 'Files' }).click()
+    await row.waitFor({ timeout: 10000 })
   })
   await part('Recent and New on the home', async () => {
     // Recent, in Studio's own lists: the document opened from the folder, with its folder said.
@@ -619,7 +813,47 @@ try {
     ok(!dk.errors.length, 'no page errors on the phone in dark', dk.errors.slice(0, 3))
     await dk.p.context().close()
   })
-  console.log(`pictures: test/.out/shots/${tag}files-ui-{${shots.join(',')},dark-list,dark-quicklook,dark-columns,phone-folder,phone-sidebar,phone-quicklook,phone-dark}.png`)
+  // ---------- icons, the list and groups, in light and dark, on a computer and a phone ----------
+  const looks = []
+  await part('pictures of the icons, the list and groups', async () => {
+    for (const mode of ['light', 'dark']) {
+      for (const phone of [false, true]) {
+        const at = `${mode}-${phone ? 390 : 1440}`
+        const o = await page(b, desk.url, { mode, phone, store: { 'cc-fx-view': 'icons', 'cc-fx-where:here': { root: 'home', path: 'Docs' }, 'cc-fx-folders': {}, 'cc-fx-look': { group: false, icon: 64, text: 13 } } })
+        const q = o.p
+        if (phone) { await q.locator('.tabbar button', { hasText: 'More' }).click(); await q.locator('.m-more-row[data-id="studio"]').click() } else await q.locator('.rail-nav-btn', { hasText: 'Studio' }).click()
+        await q.locator('.fx-tile[data-name="Plan.docx"]').waitFor({ timeout: 15000 })
+        const opts = q.locator('.fx-vo')
+        for (const size of [48, 96, 176]) {
+          if (phone) await q.locator('.fx-bar button[aria-label="View Options"]').click()
+          await (phone ? opts : q.locator('.fx-bar')).locator('.fx-size input').fill(String(size))
+          if (phone) { await sleep(150); if (size === 96) { const f = await phoneFaults(q, '.fx'); ok(!f.wider && !f.past?.length && !f.small?.length && !f.zooms?.length, `${at}: View Options fits the phone, each control a whole target`, f) } await q.keyboard.press('Escape') }
+          await until(() => q.locator('.fx-tile[data-name="Plan.docx"] .fx-sk-page').count(), 8000)
+          await sleep(300)
+          await shot(q, `${tag}files-ui-icons-${size}-${at}`)
+          looks.push(`icons-${size}-${at}`)
+        }
+        await q.locator('.fx-bar button[aria-label="As list"]').click()
+        await q.locator('.fx-row[data-name="Plan.docx"]').waitFor({ timeout: 8000 })
+        await sleep(200)
+        await shot(q, `${tag}files-ui-list-${at}`)
+        looks.push(`list-${at}`)
+        await q.locator('.fx-bar button[aria-label="As icons"]').click()
+        await q.locator('.fx-bar button[aria-label="View Options"]').click()
+        await opts.locator('.fx-size input').fill('64')
+        await opts.locator('label', { hasText: 'Group by Kind' }).click()
+        await q.keyboard.press('Escape')
+        await q.locator('.fx-icon-group').first().waitFor({ timeout: 8000 })
+        await sleep(300)
+        await shot(q, `${tag}files-ui-grouped-${at}`)
+        looks.push(`grouped-${at}`)
+        if (phone) { const f = await phoneFaults(q, '.fx'); ok(!f.wider && !f.past?.length && !f.sideways?.length, `${at}: icons in groups fit the phone`, f) }
+        ok(!o.errors.length, `${at}: no page errors`, o.errors.slice(0, 3))
+        await o.ctx.close()
+      }
+    }
+  })
+  console.log(`pictures: test/.out/shots/${tag}files-ui-{${[...shots, ...looks].join(',')},dark-list,dark-quicklook,dark-columns,phone-folder,phone-sidebar,phone-quicklook,phone-dark}.png`)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   for (const k of kits) console.log(k.log().slice(-1500))

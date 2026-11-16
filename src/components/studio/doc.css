@@ -4,18 +4,8 @@
    the page's own are the document's. */
 .sd-doc { --desk: color-mix(in srgb, var(--ink) 6%, var(--pane-2)); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0; background: var(--desk); }
 .sd-doc .sd-doc-head { position: relative; z-index: 2; background: var(--pane); }
-.sd-doc .sd-toolbar { position: static; flex-wrap: nowrap; align-items: flex-start; box-shadow: 0 1px 0 var(--line); border-bottom: 0; }
-/* The formatting tools wrap onto a second row where there isn't room for one; the view's (find,
-   outline, print, zoom) stay at the right of the first. */
-.sd-tools-main { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.sd-doc .sd-toolbar { position: static; box-shadow: 0 1px 0 var(--line); border-bottom: 0; }
 .sd-doc .sd-view-tools { flex: none; margin-left: 4px; padding-left: 0; background: none; }
-/* A narrower pane: all of them in one flow, the view's at the right of the last row, which takes
-   fewer rows there than keeping the first row's end for them. */
-@container (max-width: 960px) {
-  .sd-doc .sd-toolbar { flex-wrap: wrap; align-items: center; }
-  .sd-doc .sd-tools-main { display: contents; }
-  .sd-doc .sd-view-tools { margin-left: auto; }
-}
 .sd-doc .sd-tool.wide { width: auto; padding: 0 7px; gap: 4px; display: inline-flex; align-items: center; }
 .sd-tool-n { font: 600 11px var(--font); font-variant-numeric: tabular-nums; }
 
@@ -31,7 +21,7 @@
 .sd-drop-btn > svg:last-child { color: var(--ink-3); flex: none; }
 .sd-swatch-bar { position: absolute; left: 8px; bottom: 4px; width: 14px; height: 3px; border-radius: 1px; box-shadow: 0 0 0 .5px rgb(0 0 0 / .25); }
 .sd-drop-btn:has(.sd-swatch-bar) { position: relative; padding-bottom: 3px; }
-.sd-drop { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; display: grid; min-width: 188px; max-height: min(62vh, 520px); overflow: auto; padding: 5px; border-radius: 10px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 12px 32px rgb(0 0 0 / .18); }
+.sd-drop { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; display: grid; min-width: 188px; max-width: calc(100vw - 16px); max-height: min(62vh, 520px); overflow: auto; padding: 5px; border-radius: 10px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 12px 32px rgb(0 0 0 / .18); }
 .sd-drop.wide { min-width: 240px; }
 .sd-drop.narrow { min-width: 72px; }
 .sd-drop .menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
@@ -131,6 +121,13 @@
 .sd-w [data-resize-handle="top-right"], .sd-w [data-resize-handle="bottom-left"] { cursor: nesw-resize; }
 .sd-w [data-resize-container]:hover [data-resize-handle], .sd-w .ProseMirror-selectednode [data-resize-handle], .sd-w [data-resize-state="true"] [data-resize-handle] { opacity: 1; }
 .sd-w .ProseMirror-selectednode img, .sd-w .ProseMirror-selectednode > [data-resize-wrapper] { outline: 2px solid var(--accent); }
+/* How text goes round a picture (wordschema.js WordImage): wrapped round it at the column's side,
+   or above and below it (at its side, or in the middle), as Word lays them out. */
+.sd-w [data-resize-container][data-wrap="square"] { float: left; margin: 4px 14px 6px 0; }
+.sd-w [data-resize-container][data-wrap="square"][data-side="right"] { float: right; margin: 4px 0 6px 14px; }
+.sd-w [data-resize-container][data-wrap="top"] { display: flex !important; width: 100%; margin: 6px 0; justify-content: flex-start; }
+.sd-w [data-resize-container][data-wrap="top"][data-side="center"] { justify-content: center; }
+.sd-w [data-resize-container][data-wrap="top"][data-side="right"] { justify-content: flex-end; }
 /* Tables as Word draws them: its cell margins; its borders where it has them, else light guides. */
 .sd-w .tableWrapper { overflow: visible; }
 .sd-w table { border-collapse: collapse; table-layout: fixed; margin: 0; }
@@ -201,6 +198,17 @@
 .sd-link-pop > svg { flex: none; color: var(--ink-3); }
 .sd-link-pop a { flex: 1; min-width: 0; padding: 0 6px; overflow: hidden; color: var(--accent); font: 13px var(--font); text-overflow: ellipsis; white-space: nowrap; }
 .sd-link-pop .sd-tool { flex: none; width: 30px; height: 30px; border-radius: 6px; }
+/* A picture picked: how text goes round it, and its side. */
+.sd-pic-pop { padding: 4px; }
+.sd-pop-sep { flex: none; width: 1px; height: 18px; margin: 0 3px; background: var(--line); }
+/* A tracked change the cursor's in: what it is, who and when, and Accept and Reject for it. */
+.sd-change-what { flex: 1; min-width: 0; padding: 0 6px; overflow: hidden; font: 12.5px var(--font); color: var(--ink-2); text-overflow: ellipsis; white-space: nowrap; }
+.sd-change-what b { font-weight: 600; color: var(--ink); }
+.sd-change-pop .sd-accept { color: var(--good); }
+/* Editing or Suggesting: Suggesting in green while it's on, as Google Docs has it. */
+.sd-mode-drop .sd-drop-text { width: auto; }
+.sd-doc .sd-mode-drop.suggesting .sd-drop-btn { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
+.app.narrow .sd-mode-drop .sd-drop-text { display: none; }
 .sd-print-frame { position: fixed; right: 0; bottom: 0; width: 1px; height: 1px; border: 0; opacity: 0; pointer-events: none; }
 .sd-doc .sd-doc-said { border-top: 1px solid var(--line); border-bottom: 0; box-shadow: 0 1px 0 var(--line); }
 
@@ -225,6 +233,7 @@
 .sd-setup-body select, .sd-setup-margins input { width: 100%; height: 32px; padding: 0 10px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink); font: 13px var(--font); }
 .sd-setup-margins { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 8px; }
 .sd-setup-margins > span { grid-column: 1 / -1; }
+.sd-spacing .sd-setup-margins { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .sd-setup-body p { margin: 0; line-height: 1.45; }
 .sd-setup-acts { padding: 12px 16px 16px; }
 
@@ -265,7 +274,7 @@
 .app.narrow .sd-doc .sd-tool { width: 40px; height: 40px; }
 .app.narrow .sd-doc .sd-drop-btn { width: auto; height: 40px; min-width: 40px; }
 /* A phone has the text's style, marks, colours and lists; fonts, sizes and indents are a computer's. */
-.app.narrow .sd-font-drop, .app.narrow .sd-size, .app.narrow .sd-doc-tools .sd-wide-only { display: none; }
+.app.narrow .sd-font-drop, .app.narrow .sd-size, .app.narrow .sd-font-group, .app.narrow .sd-doc-tools .sd-wide-only { display: none; }
 .app.narrow .sd-style-drop .sd-drop-text, .app.narrow .sd-font-drop .sd-drop-text { width: 84px; }
 .app.narrow .sd-size-box input, .app.narrow .sd-find-row input, .app.narrow .sd-ask-own input { height: 40px; font-size: 16px; }
 .app.narrow .sd-size-box input { width: 48px; }
@@ -281,10 +290,7 @@
 .app.narrow .sd-setup-body select, .app.narrow .sd-setup-margins input { height: 40px; font-size: 16px; }
 .app.narrow .sd-setup-margins { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .app.narrow .sd-radio { min-height: 40px; }
-/* On a phone its rows wrap a button at a time, the view's tools (outline, find) following the rest
-   rather than on a row of their own at its right. */
-.app.narrow .sd-doc .sd-toolbar { flex-wrap: wrap; align-items: center; }
-.app.narrow .sd-doc .sd-tools-main { display: contents; }
+/* On a phone its one row has no lines between the groups, for room. */
 .app.narrow .sd-doc .sd-group + .sd-group, .app.narrow .sd-doc .sd-view-tools { margin-left: 0; padding-left: 0; background: none; }
 .app.narrow .sd-sw-grid { grid-template-columns: repeat(10, 24px); }
 .app.narrow .sd-sw { width: 24px; height: 24px; }
