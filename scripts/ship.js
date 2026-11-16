@@ -194,7 +194,7 @@ async function versioned(version, notes, o) {
     if (next !== log) fs.writeFileSync(at('CHANGELOG.md'), next)
     const changed = run('git', ['status', '--porcelain'], { cwd: tmp })
     if (changed) {
-      say(`main to ${version}: ${changed.split('\n').map((l) => l.slice(3)).join(', ')}.`)
+      say(`main to ${version}: ${changed.split('\n').map((l) => l.trim().replace(/^\S+\s+/, '')).join(', ')}.`)
       if (o.dry) { say(run('git', ['diff', '--', 'CHANGELOG.md'], { cwd: tmp }).split('\n').slice(0, 40).join('\n')); return say('Dry run: nothing pushed or started.') }
       run('git', ['commit', '-qam', `${version}: ${isPre(version) ? 'a beta for Early Access' : 'a release to everyone'}`], { cwd: tmp })
       live('git', ['push', '-u', 'origin', branch], { cwd: tmp })
