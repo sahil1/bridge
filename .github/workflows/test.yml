@@ -105,8 +105,9 @@ jobs:
             name: Linux
             browser: chromium
     runs-on: ${{ matrix.os }}
-    # The full suite takes 35 to 45 minutes on the Mac runners as it is, more with a test tried again.
-    timeout-minutes: 60
+    # The full suite takes 45 minutes in Chromium on the Mac runners and over an hour in WebKit (93 of
+    # 115 suites in 58 minutes on 16 Nov), more with a test tried again.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -166,7 +167,10 @@ jobs:
           chmod +x "$RUNNER_TEMP/herdr/herdr"
           echo "BRIDGE_TEST_HERDR=$RUNNER_TEMP/herdr/herdr" >> "$GITHUB_ENV"
 
+      # bash on Windows too: PowerShell reads $ARGS as its own (empty) list of arguments, and the tests
+      # for "what changed since the last commit" there are none.
       - name: Tests
+        shell: bash
         env:
           ARGS: ${{ needs.scope.outputs.args }}
         run: node test/run.mjs $ARGS --lanes 2 --browser ${{ matrix.browser }}
