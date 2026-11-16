@@ -1,19 +1,28 @@
-// The local model built into Bridge AI (server/llm.js): Gemma 4 E2B on llama.cpp's llama-server,
-// with a stand-in llama-server (stand-ins/llama-server.mjs) and a small fake model served from this
-// computer, so nothing real is downloaded or run.
+// The local model built into Bridge AI (server/llm.js): Gemma 4 E2B, E4B or 26B-A4B on llama.cpp's
+// llama-server, with a stand-in llama-server (stand-ins/llama-server.mjs) and a small fake model
+// served from this computer, so nothing real is downloaded or run.
 //   Where it's offered, by the rules for every kind of computer (memory, the build for its platform
 //   and chip, macOS and glibc versions, the Docker image, a build that won't load), then by servers
 //   standing in for some of them: hidden, with why, where it can't run.
+//   Which model, by the computer: the three pinned; the one recommended for 8, 16, 24, 32 and 64 GB
+//   Macs, an Intel Mac, PCs with and without a GPU, and why; the larger ones hidden where there's no
+//   GPU or too little memory, saying why.
+//   Which jobs run here (modeljobs.js): Auto puts a short job on the local model and a long one, a
+//   diagram, live suggestions or the transcript cleanup on your cloud model; Cloud first; On this
+//   computer, which says why when it can't run.
 //   Nothing downloads or starts before you pick it: not at start, not when Settings looks, not when
 //   a model is chosen for a job. The download: its progress, picked up where it stopped, checked
-//   against its SHA-256 (one that doesn't match is thrown away), and too little room said first.
-//   Which model Bridge AI uses: Claude first, then a key, then your own Ollama, and the built-in
-//   model only once it's downloaded, by itself only for edit by voice or when there's nothing else.
+//   against its SHA-256 (one that doesn't match is thrown away), and too little room said first; a
+//   model downloaded before stays in use until the one recommended is downloaded.
+//   Which model Bridge AI uses: your own Ollama before the built-in model with nothing else; with a
+//   key or Claude, a short meeting on the local model and a long one on the cloud (Auto), Claude
+//   first on Cloud first, everything here on On this computer; edit by voice on it by itself.
 //   llama-server: started on first use, on 127.0.0.1 with a key in its environment (not on its
 //   command line), thinking off, kept a while and let go when idle, started again when it stops,
 //   and a request it stopped in the middle of asked again. Remove stops it and takes the file away.
-//   Settings › Model Providers: the row with its size and what it's good for, Download with progress,
-//   Ready and Remove; no row on a computer with 4 GB of memory.
+//   Settings › Model Providers: the one recommended and why, a row for each model this computer
+//   runs with its size and what it's good for, Download with progress, In use and Remove; which jobs
+//   run here, each with what Auto does now; none of it on a computer with 4 GB of memory.
 // BRIDGE_REAL_LLAMA=1: also the real thing, once, by hand: this computer's llama-server (node
 // scripts/llama.js native/llama puts it there) and the real Gemma 4 E2B (downloaded from Hugging Face
 // into test/.out/real-models, kept for next time), asked to rewrite a sentence and for JSON.
@@ -25,6 +34,8 @@ import { startKit, startModel, startLocalModel, checks, until, sleep, OUT, TEST,
 
 const { ok, skip, done } = checks('builtin-model')
 const STAND_IN = path.join(TEST, 'stand-ins', 'llama-server.mjs')
+// Every kind of job on Auto (Cloud first is the default).
+const AUTO = { notes: 'auto', assist: 'auto', mail: 'auto', tidy: 'auto', live: 'auto', diagrams: 'auto' }
 
 // ---------- The rules, for every kind of computer ----------
 process.env.BRIDGE_HOME = path.join(OUT, 'kits', 'builtin-rules')
@@ -59,6 +70,72 @@ ok(/isn't in the Docker image/.test(fit({ platform: 'linux', arch: 'x64', glibc:
 ok(/didn't come with this copy/.test(fit({ platform: 'linux', arch: 'x64', glibc: '2.39' }, { build: null }).why || ''), 'a server run from a checkout without a build: not offered, saying why')
 const broken = fit({ platform: 'darwin', arch: 'arm64', os: '14.6' }, { probe: { ok: false, error: 'Library not loaded: @rpath/libggml-metal.0.dylib' } })
 ok(!broken.ok && /doesn't load on this computer: Library not loaded/.test(broken.why || ''), 'a build that doesn\'t load here (tried in a process of its own): not offered, with what the loader said', broken)
+
+// ---------- Which model, for each kind of computer ----------
+// The larger ones, pinned like the first (values from Hugging Face's own listing of each revision).
+const e4b = llm.MODELS.find((m) => m.id === 'gemma-4-e4b')
+const big = llm.MODELS.find((m) => m.id === 'gemma-4-26b-a4b')
+ok(llm.MODELS.length === 3 && llm.MODELS.every((m) => m.license === 'Apache-2.0' && /^ggml-org\/gemma-4-/.test(m.repo) && /^[0-9a-f]{40}$/.test(m.rev) && m.files.length === 1 && /^[0-9a-f]{64}$/.test(m.files[0].sha256) && m.files[0].bytes > 1e9) && llm.MODELS.map((m) => m.memGB).join() === '8,16,32', 'three models, smallest first, each Apache-2.0 from the llama.cpp team, pinned to a revision, a size and a SHA-256', llm.MODELS.map((m) => [m.id, m.memGB]))
+ok(e4b?.files[0].name === 'gemma-4-E4B-it-Q4_0.gguf' && e4b.files[0].bytes === 4590807392 && e4b.files[0].sha256 === 'a555b900214b477d8880e7832e0b8925e139b0159640036b09fe472b6f2097f2' && e4b.rev === 'a69f018d7678a2b9f5e705f8903d6fb29b9b25dc' && e4b.gpu && e4b.active === 4.5, 'Gemma 4 E4B: 4.6 GB, for 16 GB with a GPU', e4b)
+ok(big?.files[0].name === 'gemma-4-26B-A4B-it-Q4_0.gguf' && big.files[0].bytes === 14618145824 && big.files[0].sha256 === 'd208665ab1cd3a69f7a9a4bc59430e8448c8093d9b06334f566ac59d6d504a03' && big.rev === '9cf8c8db0f83fb4582f15381f8fb1a7c1b0b9ca2' && big.gpu && big.active === 3.8, 'Gemma 4 26B-A4B: 14.6 GB, for 32 GB with a GPU', big)
+const RECOMMEND = [
+  ['an 8 GB Mac', { platform: 'darwin', arch: 'arm64', memGB: 8.6 }, 'Apple M2', 'gemma-4-e2b', '8 GB of memory: Gemma 4 E2B'],
+  ['a 16 GB Mac', { platform: 'darwin', arch: 'arm64', memGB: 17.2 }, 'Apple M4', 'gemma-4-e4b', '16 GB of memory: Gemma 4 E4B'],
+  ['a 24 GB Mac', { platform: 'darwin', arch: 'arm64', memGB: 25.8 }, 'Apple M4', 'gemma-4-e4b', '24 GB of memory: Gemma 4 E4B'],
+  ['a 32 GB Mac', { platform: 'darwin', arch: 'arm64', memGB: 34.4 }, 'Apple M4 Pro', 'gemma-4-26b-a4b', '32 GB of memory: Gemma 4 26B-A4B'],
+  ['a 64 GB Mac', { platform: 'darwin', arch: 'arm64', memGB: 68.7 }, 'Apple M4 Max', 'gemma-4-26b-a4b', '64 GB of memory: Gemma 4 26B-A4B'],
+  ['an Intel Mac with 16 GB (Metal unused there)', { platform: 'darwin', arch: 'x64', memGB: 17.2 }, 'AMD Radeon Pro 5500M', 'gemma-4-e2b', '16 GB of memory, processor only: Gemma 4 E2B'],
+  ['a PC with 16 GB and no GPU', { platform: 'win32', arch: 'x64', memGB: 17.2 }, null, 'gemma-4-e2b', '16 GB of memory, processor only: Gemma 4 E2B'],
+  ['a PC with 8 GB and no GPU', { platform: 'win32', arch: 'x64', memGB: 8.5 }, null, 'gemma-4-e2b', '8 GB of memory: Gemma 4 E2B'],
+  ['Linux with 16 GB and a Vulkan GPU', { platform: 'linux', arch: 'x64', glibc: '2.35', memGB: 16.7 }, 'AMD Radeon RX 7600', 'gemma-4-e4b', '16 GB of memory: Gemma 4 E4B'],
+  ['a PC with 32 GB and an NVIDIA GPU', { platform: 'win32', arch: 'x64', memGB: 34.3 }, 'NVIDIA GeForce RTX 4070', 'gemma-4-26b-a4b', '32 GB of memory: Gemma 4 26B-A4B'],
+  ['Windows on Arm with 32 GB (processor only)', { platform: 'win32', arch: 'x64', emulated: true, memGB: 34.3 }, null, 'gemma-4-e2b', '32 GB of memory, processor only: Gemma 4 E2B'],
+]
+for (const [what, m, gpu, id, why] of RECOMMEND) {
+  const r = llm.recommend(m, { gpu })
+  ok(r?.id === id && r.why === why, `${what}: recommends ${id}, saying "${why}"`, r)
+}
+ok(llm.recommend({ platform: 'darwin', arch: 'arm64', memGB: 4.3 }, { gpu: 'Apple M1' }) === null, 'a computer with 4 GB: none recommended')
+// Hidden where it can't run, saying why.
+const onCpu = llm.fitModel(e4b, { platform: 'win32', arch: 'x64', memGB: 34.3 }, { build: buildFor({ platform: 'win32', arch: 'x64' }), gpu: null })
+ok(!onCpu.ok && /Gemma 4 E4B needs a GPU llama\.cpp can use/.test(onCpu.why || ''), 'Gemma 4 E4B on a PC without a GPU: hidden, saying why', onCpu)
+const intelMac = llm.fitModel(e4b, { platform: 'darwin', arch: 'x64', os: '14.7', memGB: 34.4 }, { build: buildFor({ platform: 'darwin', arch: 'x64' }), gpu: 'AMD Radeon Pro 5500M' })
+ok(!intelMac.ok && /needs a GPU/.test(intelMac.why || ''), 'and on an Intel Mac, whose GPU llama.cpp doesn\'t use', intelMac)
+const tooSmall = llm.fitModel(big, { platform: 'darwin', arch: 'arm64', os: '15.4', memGB: 25.8 }, { build: buildFor({ platform: 'darwin', arch: 'arm64' }), gpu: 'Apple M4' })
+ok(!tooSmall.ok && /Gemma 4 26B-A4B needs 32 GB of memory; this computer has 25\.8 GB/.test(tooSmall.why || ''), 'Gemma 4 26B-A4B on a 24 GB Mac: hidden, saying why', tooSmall)
+ok(llm.fitModel(gemma, { platform: 'win32', arch: 'x64', memGB: 8.5 }, { build: buildFor({ platform: 'win32', arch: 'x64' }), gpu: null }).ok, 'Gemma 4 E2B runs on a processor alone')
+
+// ---------- Which jobs run here (modeljobs.js) ----------
+const jobs = await import('../../server/modeljobs.js')
+const here = { id: 'bridge:gemma-4-e4b', label: 'Gemma 4 E4B' }
+const limit = jobs.shortLimit({ ctx: 32768, readPerSecond: 300 })
+ok(limit.tokens === 12000 && Math.floor(limit.tokens / jobs.PER_MINUTE) === 50, 'Auto\'s short: about 50 minutes of a meeting, within what the model reads at a time', limit)
+ok(jobs.shortLimit({ ctx: 8192 }).tokens === 8192 - 2048 && jobs.shortLimit({ ctx: 16384, readPerSecond: 40 }).by === 'slow', 'held to less by a short context, or a slow processor', [jobs.shortLimit({ ctx: 8192 }), jobs.shortLimit({ ctx: 16384, readPerSecond: 40 })])
+const both = { job: 'notes', first: 'cli:claude', cloud: 'cli:claude', local: here, limit }
+let r = jobs.route({ ...both, need: 3000, seconds: 40 })
+ok(r.id === here.id && r.where === 'local' && r.auto && r.why === 'short', 'Auto: a short meeting\'s notes on the local model, though Claude is there', r)
+r = jobs.route({ ...both, need: 20000, seconds: 90 })
+ok(r.id === 'cli:claude' && r.why === 'long', 'Auto: a meeting longer than that on Claude', r)
+r = jobs.route({ ...both, need: 3000, seconds: 400 })
+ok(r.id === 'cli:claude' && r.why === 'slow', 'Auto: one that would take minutes here on Claude', r)
+r = jobs.route({ ...both, need: null })
+ok(r.id === 'cli:claude' && r.why === 'unknown', 'Auto: one of no known size on Claude', r)
+for (const job of ['diagrams', 'live']) {
+  r = jobs.route({ ...both, job, need: 300, seconds: 5 })
+  ok(r.id === 'cli:claude' && r.why === 'better', `Auto: ${job === 'live' ? 'live suggestions' : 'diagrams'}, however short, on Claude`, r)
+}
+r = jobs.route({ ...both, job: 'tidy', need: 300, seconds: 5, better: true })
+ok(r.id === 'cli:claude', 'Auto: the transcript cleanup on Claude too', r)
+r = jobs.route({ ...both, cloud: null, first: here.id, need: 90000 })
+ok(r.id === here.id && r.why === 'nothing else', 'Auto with nothing else: the local model, however long', r)
+r = jobs.route({ ...both, set: 'cloud', need: 300 })
+ok(r.id === 'cli:claude' && !r.auto, 'Cloud first: Claude, as before', r)
+r = jobs.route({ ...both, set: 'local', need: 90000 })
+ok(r.id === here.id && r.kept, 'On this computer: the local model, however long', r)
+r = jobs.route({ ...both, set: 'local', local: null, missing: { code: 'not_downloaded', why: 'Gemma 4 E4B isn\'t downloaded yet' } })
+ok(r.error?.code === 'local_missing' && r.error.message === 'Meeting notes is set to run on this computer, but Gemma 4 E4B isn\'t downloaded yet. Download it in Settings › Model Providers, or set Meeting notes to Auto there.', 'On this computer with the model not downloaded: an error that says so, and what to do', r.error?.message)
+r = jobs.route({ ...both, job: 'mail', set: 'local', local: null, missing: { code: 'not_here', why: 'Gemma 4 E2B needs 8 GB of memory; this computer has 4 GB' } })
+ok(/^Mail is set to run on this computer, but Gemma 4 E2B needs 8 GB of memory; this computer has 4 GB\. Set Mail to Auto/.test(r.error?.message || ''), 'and on a computer it can\'t run on, why not', r.error?.message)
 
 // ---------- A small fake model, served from this computer ----------
 const fake = (n) => { const b = Buffer.alloc(n); for (let i = 0; i < n; i++) b[i] = (i * 37 + 11) & 255; return b }
@@ -154,21 +231,31 @@ try {
   // Nothing before you pick it.
   await sleep(500)
   let s = await kit.api('/llm')
-  ok(s.offered && !s.have && !s.downloading && !s.loaded && s.model.mb === 2841 && s.model.label === 'Gemma 4 E2B', 'a new computer: the local model is offered (2.8 GB), not downloaded, not running', s)
+  ok(s.offered && !s.have && !s.downloading && !s.loaded && !s.using && s.recommended?.id === 'gemma-4-e4b' && s.recommended.why === '16 GB of memory: Gemma 4 E4B' && s.model.id === 'gemma-4-e4b', 'a new 16 GB computer with a GPU: the local model is offered, Gemma 4 E4B recommended and why, nothing downloaded, nothing running', s)
+  ok(s.models.map((m) => m.id).join() === 'gemma-4-e2b,gemma-4-e4b' && s.models[0].mb === 2841 && s.hidden.length === 1 && /Gemma 4 26B-A4B needs 32 GB of memory/.test(s.hidden[0].why), 'offered: Gemma 4 E2B (2.8 GB) and E4B; the 32 GB one hidden, with why', { models: s.models, hidden: s.hidden })
   ok(!(await builtinListed(kit)), 'and it isn\'t in the model lists until it\'s downloaded')
   const asNone = await notesBy(kit)
   ok(/No model/i.test(asNone.error || '') && asNone.model === null, 'with nothing else, notes aren\'t written by it before it\'s downloaded: no model, said', asNone)
+  // Meeting notes set to stay here, with nothing here: why it didn't run, and no going elsewhere.
+  await kit.api('/settings', { modelJobs: { notes: 'local' } }, 'PATCH')
+  const kept = await notesBy(kit)
+  ok(kept.error === 'Meeting notes is set to run on this computer, but Gemma 4 E4B isn\'t downloaded yet. Download it in Settings › Model Providers, or set Meeting notes to Auto there.' && kept.model === null, 'Meeting notes set to On this computer, with no model here: the meeting says why they weren\'t written', kept)
+  const jobsHere = await kit.api('/model-jobs')
+  ok(jobsHere.jobs.length === 6 && jobsHere.jobs.find((j) => j.id === 'notes').set === 'local' && jobsHere.jobs.filter((j) => j.id !== 'notes').every((j) => j.set === 'cloud') && jobsHere.missing?.code === 'not_downloaded' && jobsHere.offered, 'Settings is told which jobs are set how (the rest Cloud first, the default), and what\'s missing here', jobsHere)
+  await kit.api('/settings', { modelJobs: null }, 'PATCH')
   // (A meeting starting gets the speech model ready, from the same stand-in for Hugging Face: not this.)
   const ours = () => files.asked.filter((a) => a.id === 'gemma-4-e2b')
   ok(ours().length === 0 && !fs.existsSync(path.join(kit.data, 'models', 'llm')), 'nothing was downloaded: not at start, not when Settings looked, not when a model was picked for notes', files.asked)
   ok(launches(kit).length === 0, 'and llama-server never started (only its device list was asked for, to see it loads here)', llamaLog(kit))
 
-  // The download: progress, cut short, picked up where it stopped.
+  // The download: progress, cut short, picked up where it stopped. Gemma 4 E2B, picked rather than
+  // the one recommended: then it's the one used.
   files.slow = 25
   files.cut = 1_000_000
-  await kit.api('/llm/download', {})
+  await kit.api('/llm/download', { model: 'gemma-4-e2b' })
   const cutShort = await until(async () => (await kit.api('/llm')).downloading?.error, 15000)
   ok(/cut short/.test(cutShort || ''), 'a download cut short says so', cutShort)
+  ok((await kit.api('/settings')).user.llmModel === 'gemma-4-e2b' && (await kit.api('/llm')).model.id === 'gemma-4-e2b', 'a download you start for a model makes it your pick', (await kit.api('/settings')).user.llmModel)
   const partFile = path.join(kit.data, 'models', 'llm', 'gemma-4-e2b', `${gemma.files[0].name}.part`)
   ok(fs.existsSync(partFile) && fs.statSync(partFile).size === 1_000_000, 'and keeps what came', fs.existsSync(partFile) ? fs.statSync(partFile).size : null)
   const seen = new Set()
@@ -221,8 +308,41 @@ try {
   ok(r.text === 'TEH PLAN IS FINE' && llamaLog(kit).filter((x) => x.chat).at(-1)?.user.includes('Instruction: make it louder'), 'edit by voice still uses the built-in one when none is picked (the text stays here, on the model meant for it)', r)
   cloud = await startModel('builtin')
   await kit.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${cloud.url}/v1` } }, 'PUT')
+  // Auto, with a key and the local model: a short meeting here, saying so; a long one on the key.
+  await kit.api('/settings', { modelJobs: AUTO }, 'PATCH')
   const by = await notesBy(kit)
-  ok(/^openai:/.test(by.model || ''), 'with an API key: notes by it', by)
+  ok(by.model === 'bridge:gemma-4-e2b' && /^Written on this computer by bridge:gemma-4-e2b: with Auto, a meeting this short stays here/.test(by.note || ''), 'with an API key too: a short meeting\'s notes by the local model (Auto), saying so under them', by)
+  const longOne = await meeting(kit, 'A long one')
+  // (About 18,000 tokens, all said into your microphone: an hour and a quarter.)
+  fs.appendFileSync(path.join(kit.data, 'meetings', longOne, 'transcript.jsonl'), Array.from({ length: 600 }, (_, i) => JSON.stringify({ src: 'you', t0: 10 + i * 8, t1: 17 + i * 8, text: `Point ${i}: we went over the rollout plan, the budget for the quarter and who follows up with the customer.`, engine: 'test' })).join('\n') + '\n')
+  await kit.api(`/meetings/${longOne}/summary`, {})
+  const longBy = await until(async () => { const x = await kit.api(`/meetings/${longOne}`); return !x.summarizing && (x.summary || x.summaryError) && x }, 30000)
+  ok(/^openai:/.test(longBy?.summaryModel || '') && !longBy.summaryNote, 'and a meeting longer than about 50 minutes by the key\'s model (Auto)', { model: longBy?.summaryModel, note: longBy?.summaryNote, error: longBy?.summaryError })
+  // Auto put a short one here and the local model can't run it (out of memory): the key's model writes
+  // it, and the note under it says why. Set to stay here, only another model here may (your Ollama).
+  const failing = await meeting(kit, 'Out of memory here')
+  fs.appendFileSync(path.join(kit.data, 'meetings', failing, 'transcript.jsonl'), `${JSON.stringify({ src: 'you', t0: 6, t1: 9, text: 'LOCAL FAILS on this one.', engine: 'test' })}\n`)
+  await kit.api(`/meetings/${failing}/summary`, {})
+  const fb = await until(async () => { const x = await kit.api(`/meetings/${failing}`); return !x.summarizing && (x.summary || x.summaryError) && x }, 30000)
+  ok(/^openai:/.test(fb?.summaryModel || '') && /^bridge:gemma-4-e2b couldn't write it here \(Gemma 4 E2B: failed to allocate buffer: out of memory \(stand-in\)\), so openai:\S+ wrote it\.$/.test(fb.summaryNote || ''), 'Auto, and the local model can\'t run it here: the key\'s model writes it, and the note says why', { model: fb?.summaryModel, note: fb?.summaryNote, error: fb?.summaryError })
+  await kit.api('/settings', { modelJobs: { notes: 'local' } }, 'PATCH')
+  const toKey = cloud.asked(/LOCAL FAILS/).length
+  await kit.api(`/meetings/${failing}/summary`, {})
+  const keptFb = await until(async () => { const x = await kit.api(`/meetings/${failing}`); return !x.summarizing && x.summarizedAt !== fb.summarizedAt && x }, 30000)
+  ok(keptFb?.summaryModel === 'ollama:llama3.2:3b' && /^bridge:gemma-4-e2b couldn't write it here \(.*out of memory \(stand-in\)\), so ollama:llama3\.2:3b wrote it\.$/.test(keptFb.summaryNote || '') && cloud.asked(/LOCAL FAILS/).length === toKey, 'set to On this computer: your Ollama, also here, writes it, saying why, and nothing goes to the key\'s model', { model: keptFb?.summaryModel, note: keptFb?.summaryNote })
+  await kit.api('/settings', { modelJobs: AUTO }, 'PATCH')
+  const jobsNow = await kit.api('/model-jobs')
+  ok(jobsNow.local?.id === 'bridge:gemma-4-e2b' && /^openai:/.test(jobsNow.cloud?.id || '') && jobsNow.limit?.minutes === 50, 'Settings is told what Auto does here: the local model up to about 50 minutes, the key\'s model after', jobsNow)
+  const listed2 = await kit.api('/chat/models')
+  ok(/^openai:/.test(listed2.automatic || '') && listed2.short?.id === 'bridge:gemma-4-e2b' && listed2.short.minutes === 50, 'and Voice & Meetings: notes by the key\'s model, short ones by the local model', { automatic: listed2.automatic, short: listed2.short })
+  await kit.api('/settings', { modelJobs: { notes: 'cloud' } }, 'PATCH')
+  ok(/^openai:/.test((await notesBy(kit)).model || ''), 'Meeting notes set to Cloud first: a short one by the key\'s model, as before Auto')
+  await kit.api('/settings', { modelJobs: { notes: 'local' } }, 'PATCH')
+  const before0 = cloud.asked(/Point 1:/).length
+  await kit.api(`/meetings/${longOne}/summary`, {})
+  const keptLong = await until(async () => { const x = await kit.api(`/meetings/${longOne}`); return !x.summarizing && x.summarizedAt !== longBy.summarizedAt && x }, 30000)
+  ok(keptLong?.summaryModel === 'bridge:gemma-4-e2b' && cloud.asked(/Point 1:/).length === before0, 'set to On this computer: the long one by the local model too, and nothing sent to the key\'s', { model: keptLong?.summaryModel, note: keptLong?.summaryNote })
+  await kit.api('/settings', { modelJobs: null }, 'PATCH')
   await kit.api('/settings', { dictation: { editModel: 'openai:gpt-5' } }, 'PATCH')
   const before = cloud.asked(/Instruction: make it louder/).length
   r = await edit(kit)
@@ -274,14 +394,25 @@ try {
   await withClaude.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${cloud2.url}/v1` } }, 'PUT')
   const list = (await withClaude.api('/chat/models?refresh=1')).models.map((m) => m.id)
   ok(list.includes('cli:claude') && list.includes('bridge:gemma-4-e2b') && list.some((m) => m.startsWith('openai:')), '(Claude Code, a key and the local model are all there)', list)
+  // Gemma 4 E2B, downloaded before E4B was recommended for 16 GB: still the one used, nothing else fetched.
+  const st = await withClaude.api('/llm')
+  ok(st.using?.id === 'gemma-4-e2b' && st.recommended?.id === 'gemma-4-e4b' && !st.have && !files.asked.some((a) => a.id === 'gemma-4-e4b'), 'a model downloaded before stays in use until the one recommended is downloaded too; nothing downloads by itself', { using: st.using, recommended: st.recommended })
+  await withClaude.api('/settings', { modelJobs: { notes: 'cloud' } }, 'PATCH')
   const by = await notesBy(withClaude)
-  ok(by.model === 'cli:claude' && launches(withClaude).length === 0, 'with Claude Code signed in: Claude writes the notes, first of all, and the local model isn\'t started', by)
+  ok(by.model === 'cli:claude' && launches(withClaude).length === 0, 'with Claude Code signed in and Meeting notes on Cloud first: Claude writes the notes, first of all, and the local model isn\'t started', by)
+  await withClaude.api('/settings', { modelJobs: null }, 'PATCH')
+  ok((await notesBy(withClaude)).model === 'cli:claude', 'by default (Cloud first): Claude writes them, as before')
+  await withClaude.api('/settings', { modelJobs: AUTO }, 'PATCH')
+  const auto = await notesBy(withClaude)
+  ok(auto.model === 'bridge:gemma-4-e2b' && launches(withClaude).length === 1, 'on Auto: a short meeting by the local model, on this computer', auto)
+  // Diagrams stay with Claude on Auto, however short.
+  ok((await withClaude.api('/boards/models')).pick === 'cli:claude', 'Diagrams on Auto: Claude')
 } finally { withClaude.stop(); cloud2.stop() }
 
 // ---------- A download that doesn't match, and too little room ----------
 const bad = await startKit('builtin-checksum', { env: kitEnv({ models: catalog('0'.repeat(64)) }) })
 try {
-  await bad.api('/llm/download', {})
+  await bad.api('/llm/download', { model: 'gemma-4-e2b' })
   const e = await until(async () => (await bad.api('/llm')).downloading?.error, 15000)
   const dir = path.join(bad.data, 'models', 'llm', 'gemma-4-e2b')
   ok(/didn't match its checksum, so it was thrown away/.test(e || '') && !(fs.existsSync(dir) && fs.readdirSync(dir).length), 'a download that doesn\'t match its SHA-256 is thrown away, saying so', { e, left: fs.existsSync(dir) ? fs.readdirSync(dir) : [] })
@@ -289,10 +420,11 @@ try {
 } finally { bad.stop() }
 const tight = await startKit('builtin-tight', { env: kitEnv({ machine: { freeMB: 5 } }) })
 try {
-  const n = files.asked.filter((a) => a.id === 'gemma-4-e2b').length
+  // (Download with none named: the one recommended here, Gemma 4 E4B.)
+  const n = files.asked.length
   await tight.api('/llm/download', {})
   const e = await until(async () => (await tight.api('/llm')).downloading?.error, 10000)
-  ok(/Not enough free space: Gemma 4 E2B needs \d+ MB, and there's 5 MB free/.test(e || '') && files.asked.filter((a) => a.id === 'gemma-4-e2b').length === n, 'too little free space: said before anything downloads', e)
+  ok(/Not enough free space: Gemma 4 E4B needs 4791 MB, and there's 5 MB free/.test(e || '') && files.asked.length === n, 'too little free space: said before anything downloads (the one recommended, as none was named)', e)
 } finally { tight.stop() }
 
 // ---------- Settings › Model Providers ----------
@@ -314,30 +446,45 @@ try {
   const row = p.locator('[data-builtin-model]')
   await row.waitFor({ timeout: 15000 })
   let text = await row.innerText()
-  ok(/Local model on this computer/.test(text) && /Gemma 4 E2B by Google, 2\.8 GB, Apache-2\.0/.test(text) && /Download \(2\.8 GB\)/.test(text), 'Settings › Model Providers: "Local model on this computer", Gemma 4 E2B, its size and licence, and Download', text)
+  const small2 = row.locator('[data-llm="gemma-4-e2b"]')
+  ok(/Local model on this computer/.test(text) && /Recommended here: Gemma 4 E4B \(16 GB of memory\)/.test(text) && /Gemma 4 E2B\s+By Google, 2\.8 GB, Apache-2\.0/.test(await small2.innerText()) && /By Google, 4\.6 GB, Apache-2\.0/.test(await row.locator('[data-llm="gemma-4-e4b"]').innerText()) && !/26B/.test(text) && /Download \(2\.8 GB\)/.test(await small2.innerText()), 'Settings › Model Providers: "Local model on this computer", the one recommended here and why, each model this computer can run with its size, licence and Download (not the 32 GB one)', text)
+  ok(/Recommended/.test(await row.locator('[data-llm="gemma-4-e4b"]').innerText()), 'the recommended one marked')
   // What it's good for on hover; that it downloads only when asked, and stays private, in a line.
   const more = () => row.locator('p[title]').first().getAttribute('title').catch(() => '')
   ok(/rewriting text, Edit by voice, questions about a meeting/.test(await more()) && /only when you click Download/.test(text) && /never leaves this computer/.test(text), 'with what it\'s good for, and that it downloads only when asked', [text, await more()])
+  // Which jobs run here: each kind, Auto, and what Auto does with no model here yet.
+  const jobsBox = p.locator('[data-model-jobs]')
+  await jobsBox.waitFor({ timeout: 10000 })
+  ok((await jobsBox.locator('li[data-job]').count()) === 6 && (await jobsBox.locator('li[data-job] select').evaluateAll((s) => s.every((x) => x.value === 'cloud'))) && /Meeting notes/.test(await jobsBox.innerText()) && /Diagrams/.test(await jobsBox.innerText()), 'Which jobs run here: six kinds, each on Cloud first to start', await jobsBox.innerText())
+  ok((await jobsBox.locator('li[data-job="live"] option[value="local"]').count()) === 1, 'On this computer offered for live suggestions here (it has a GPU)')
   await row.scrollIntoViewIfNeeded()
   await shot(p, `${which}-builtin-1-offered`)
   files.slow = 40
-  await row.getByRole('button', { name: /Download/ }).click()
-  ok(!!(await until(async () => /Downloading \d+%/.test(await row.innerText()) && (await row.locator('[role=progressbar]').count()) === 1, 10000, 100)), 'Download: its progress shows', await row.innerText())
-  ok(!!(await until(async () => /Ready/.test(await row.innerText()), 20000, 200)), 'then Ready', await row.innerText())
+  await small2.getByRole('button', { name: /Download/ }).click()
+  ok(!!(await until(async () => /Downloading \d+%/.test(await small2.innerText()) && (await small2.locator('[role=progressbar]').count()) === 1, 10000, 100)), 'Download: its progress shows', await row.innerText())
+  ok(!!(await until(async () => /In use/.test(await small2.innerText()), 20000, 200)), 'then In use (the one downloaded is the one used)', await row.innerText())
   files.slow = 0
   text = await row.innerText()
-  ok(/Remove/.test(text) && /In every model list/.test(text) && /Claude and your other models come first/.test(await more()), 'with Remove, and how it\'s used: in every list, Claude and your other models first', [text, await more()])
+  ok(/Remove/.test(await small2.innerText()) && /Gemma 4 E2B is in use, in every model list/.test(text) && /With Auto, Bridge AI runs short jobs on it/.test(await more()), 'with Remove, and how it\'s used: in every list, short jobs on Auto', [text, await more()])
+  await jobsBox.locator('li[data-job="notes"] select').selectOption('auto')
+  ok(!!(await until(async () => /Gemma 4 E2B, on this computer: there's no other model/.test(await jobsBox.locator('li[data-job="notes"]').innerText()), 10000, 200)), 'Which jobs run here says what Auto does now: with no other model, everything here', await jobsBox.innerText())
+  await jobsBox.locator('li[data-job="notes"] select').selectOption('local')
+  ok(!!(await until(async () => (await ui.api('/settings')).user.modelJobs?.notes === 'local' && /Always on this computer, with Gemma 4 E2B/.test(await jobsBox.locator('li[data-job="notes"]').innerText()), 10000, 200)), 'Meeting notes set to On this computer, there and in the settings', (await ui.api('/settings')).user.modelJobs)
   await row.scrollIntoViewIfNeeded()
   await shot(p, `${which}-builtin-2-ready`)
-  await row.getByRole('button', { name: /Remove/ }).click()
-  ok(!!(await until(async () => /Download \(2\.8 GB\)/.test(await row.innerText()), 10000, 200)), 'Remove: back to Download')
+  await jobsBox.scrollIntoViewIfNeeded()
+  await shot(p, `${which}-builtin-3-jobs`)
+  await small2.getByRole('button', { name: /Remove/ }).click()
+  ok(!!(await until(async () => /Download \(2\.8 GB\)/.test(await small2.innerText()), 10000, 200)), 'Remove: back to Download')
+  ok(!!(await until(async () => /Set to stay here, but Gemma 4 E4B isn't downloaded yet/.test(await jobsBox.locator('li[data-job="notes"]').innerText()), 10000, 200)), 'and a job set to stay here says why it can\'t run now', await jobsBox.locator('li[data-job="notes"]').innerText())
+  await ui.api('/settings', { modelJobs: null }, 'PATCH')
   ok(!errors.length, 'no page errors', errors)
   await ctx.close()
   const s2 = await page(b, small.url)
   await openProviders(s2.p)
   await s2.p.locator('.pv-group', { hasText: /run locally/i }).first().waitFor({ timeout: 10000 }).catch(() => {})
   await sleep(800)
-  ok((await s2.p.locator('[data-builtin-model]').count()) === 0, 'a computer with 4 GB of memory: no row for it at all')
+  ok((await s2.p.locator('[data-builtin-model]').count()) === 0 && (await s2.p.locator('[data-model-jobs]').count()) === 0, 'a computer with 4 GB of memory: no row for it at all, and no jobs to put on it')
   await s2.ctx.close()
 } finally {
   await b.close()

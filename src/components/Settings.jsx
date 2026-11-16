@@ -26,14 +26,17 @@ import { t, tx } from '../i18n/index.js'
 // One Settings window, Slack style: sections down the left, one scrolling panel on the right.
 // On a phone it's a phone's settings: the list of sections, each opening full width under a bar
 // with ‹ Settings (back to the list), its name, and the one close. A section marked mac is only
-// where it can work: Mail, where Bridge AI reads Apple Mail (the computer shown is a Mac). One marked
-// accounts is only once Bold Bridge accounts exist (server/account.js): Account. Each section shows
-// what most people change first, and the rest under Advanced at its end (settings/Advanced.jsx).
+// where it can work: Mail, where Bridge AI reads Apple Mail (the computer shown is a Mac). A tab
+// marked accounts is only once Bold Bridge accounts exist (server/account.js), and its section then
+// goes by its accountsLabel. Each section shows what most people change first, and the rest under
+// Advanced at its end (settings/Advanced.jsx).
 // Voice & Meetings is one section with tabs (they were two, Voice and Meetings, with dictation
 // inside Voice): what's showing is its tab, so "meetings" and "voice" open where they always did,
 // and "dictation" opens Dictation. Devices has tabs too (it was one long page): "phone" opens
-// Phone, "machines" Computers, as they did. A section with tabs has no line under its name there
-// (it would say the tabs again); the phone's list of sections keeps it.
+// Phone, "machines" Computers, as they did. With accounts it's Account & Devices, Account its first
+// tab (Account was a section of its own, and the relay was described in both): "account" opens it.
+// A section with tabs has no line under its name there (it would say the tabs again); the phone's
+// list of sections keeps it.
 export const SECTIONS = [
   { id: 'general', label: tx('General'), icon: 'home', hint: tx('Name, default agent and model, location') },
   { id: 'agents', label: tx('Agents'), icon: 'bot', hint: tx('Installed agents and sign-in') },
@@ -43,8 +46,8 @@ export const SECTIONS = [
   { id: 'mail', label: tx('Mail'), icon: 'mail', hint: tx('How You Write, for the replies AI Assist drafts, and your working hours'), mac: true },
   { id: 'mcp', label: tx('MCP Servers'), icon: 'tool', hint: tx('Tools your agents can use') },
   { id: 'devices', label: tx('Devices'), icon: 'phone', hint: tx('Your phone and your other computers, through your relay or Tailscale; what to notify you about'),
-    tabs: [{ id: 'phone', label: tx('Phone') }, { id: 'machines', label: tx('Computers') }, { id: 'notifications', label: tx('Notifications') }] },
-  { id: 'account', label: tx('Account'), icon: 'user', hint: tx('Your Bold Bridge account, for Early Access and Bridge AI\'s relay'), accounts: true },
+    accountsLabel: tx('Account & Devices'), accountsHint: tx('Your Bold Bridge account and Bridge AI\'s relay, your phone and your other computers; what to notify you about'),
+    tabs: [{ id: 'account', label: tx('Account'), accounts: true }, { id: 'phone', label: tx('Phone') }, { id: 'machines', label: tx('Computers') }, { id: 'notifications', label: tx('Notifications') }] },
   { id: 'appearance', label: tx('Appearance'), icon: 'palette', hint: tx('Theme, text size, density') },
   { id: 'config', label: tx('Config File'), icon: 'braces', hint: tx('Every setting, as JSON') },
   { id: 'about', label: tx('About & Updates'), icon: 'info', hint: tx('Version, updates, beta features, the tour, reporting a problem') },
@@ -71,9 +74,14 @@ const sectionFor = (section, sections) => {
   return !s ? null : s.tabs && s.id === to ? s.tabs[0].id : to
 }
 
+// What shows here: Mail where it's read, and a section's accounts tab (with its name for it) once
+// Bold Bridge accounts exist.
+const shownOf = (conf) => SECTIONS.filter((s) => !s.mac || conf?.mail)
+  .map((s) => (!s.tabs?.some((x) => x.accounts) ? s : conf?.accounts ? { ...s, label: s.accountsLabel, hint: s.accountsHint } : { ...s, tabs: s.tabs.filter((x) => !x.accounts) }))
+
 export default function Settings({ section = 'all', onClose, onOpenAgent }) {
   const conf = usePoll(cloudOnly ? null : '/config', 10 * 60 * 1000).data
-  const sections = cloudOnly ? PHONE : SECTIONS.filter((s) => (!s.mac || conf?.mail) && (!s.accounts || conf?.accounts))
+  const sections = cloudOnly ? PHONE : shownOf(conf)
   const phone = useMedia('(max-width: 760px)')
   const to = sectionFor(section, sections)
   const [at, setAt] = useState(to || sections[0].id) // the section showing, or its tab
@@ -130,7 +138,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
     {at === 'mcp' && <Mcp />}
     {at === 'appearance' && <Appearance />}
     {at === 'config' && <ConfigFile />}
-    {cur.id === 'devices' && <Phone tab={at} focus={section === 'machines' ? 'machines' : null} />}
+    {cur.id === 'devices' && at !== 'account' && <Phone tab={at} focus={section === 'machines' ? 'machines' : null} />}
     {at === 'about' && <About />}
     {at === 'account' && <Account />}
     {at === 'cloud' && <CloudKeys focus="cloud" bare />}

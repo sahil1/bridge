@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, refetch, settingsChanged } from '../../api.js'
 import Icon from '../Icon.jsx'
 import { AllowKeychain, Left, nameOf, makeDefault, removeAccount, signOut, DefaultTag, weekResets, slotsOf, ColorPick } from '../AccountMenu.jsx'
-import { t, tn } from '../../i18n/index.js'
+import { t, tn, tx } from '../../i18n/index.js'
 import { addAccount } from '../AddAccount.jsx'
 import ProviderIcon, { AgentIcon } from './ProviderIcon.jsx'
 import { GROUPS, AGENT_LABEL, providerChip, agentChip } from './providerCatalog.js'
@@ -325,21 +325,24 @@ function Editor({ p, labels, installedSet, onSaved }) {
   )
 }
 
-// The local model built into Bridge AI (server/llm.js): Gemma 4 E2B, run by llama.cpp that came with
-// the app. Shown only where it can run (8 GB of memory or more, a llama.cpp build that loads here);
-// downloaded only when Download is clicked, with its progress; then Remove. Once it's here, it's in
-// every model list, and Bridge AI uses it by itself only for edit by voice or when there's nothing else.
+// The local model built into Bridge AI (server/llm.js): one of Google's Gemma 4 models, run by
+// llama.cpp that came with the app. Shown only where one can run (8 GB of memory or more, a llama.cpp
+// build that loads here), and only the models this computer can run: the one recommended for it
+// first said, with why ("16 GB of memory: Gemma 4 E4B"). Each downloads only when its Download is
+// clicked, with its progress, and is then the one used; Use this switches to another downloaded;
+// Remove. Which jobs use it is below it (ModelJobs).
+const gbOf = (mb) => (mb / 1000).toFixed(1)
 function BuiltinModel({ onChange }) {
   const [s, setS] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const load = useCallback(() => api('/llm').then((x) => { setS(x); return x }, () => { setS(null); return null }), [])
   useEffect(() => { load() }, [load])
-  const going = !!s?.downloading && !s.downloading.error
-  // While it downloads: its progress, each second, and the model lists told once it's here.
+  const going = !!s?.models?.some((m) => m.downloading && !m.downloading.error)
+  // While one downloads: its progress, each second, and the model lists told once it's here.
   useEffect(() => {
     if (!going) return undefined
-    const id = setInterval(async () => { const x = await load(); if (x?.have) { settingsChanged(); onChange?.() } }, 1000)
+    const id = setInterval(async () => { const x = await load(); if (x && !x.models?.some((m) => m.downloading && !m.downloading.error)) { settingsChanged(); onChange?.() } }, 1000)
     return () => clearInterval(id)
   }, [going, load, onChange])
   if (!s?.offered) return null
@@ -347,42 +350,117 @@ function BuiltinModel({ onChange }) {
     setBusy(true); setErr(null)
     try { setS(await fn()); settingsChanged(); onChange?.() } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
-  const gb = (s.model.mb / 1000).toFixed(1)
-  const dl = s.downloading
+  const use = (id) => act(async () => { await api('/settings', { method: 'PATCH', body: { llmModel: id } }); return api('/llm') })
+  const rec = s.recommended
   return (
     <div className="pv-builtin" data-builtin-model>
       <div className="pv-builtin-head">
         <span className="pv-builtin-icon" aria-hidden="true"><Icon name="laptop" size={16} /></span>
         <span className="pv-builtin-name">
           <b>{t('Local model on this computer')}</b>
-          <span className="muted small">{t('{model} by {by}, {size} GB, {license}', { model: s.model.label, by: s.model.by, size: gb, license: s.model.license })}</span>
-        </span>
-        <span className="pv-builtin-acts">
-          {going ? (
-            <>
-              <span className="muted small">{t('Downloading {n}%', { n: dl.percent })}</span>
-              <button type="button" className="ghost-btn" disabled={busy} onClick={() => act(() => api('/llm', { method: 'DELETE' }))}>{t('Cancel')}</button>
-            </>
-          ) : s.have ? (
-            <>
-              <span className="mt-state good"><Icon name="check" size={12} /> {t('Ready')}</span>
-              <button type="button" className="btn small danger-soft" disabled={busy} onClick={() => act(() => api('/llm', { method: 'DELETE' }))}><Icon name="trash" size={12} /> {t('Remove')}</button>
-            </>
-          ) : (
-            <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => api('/llm/download', { method: 'POST' }))}>
-              <Icon name="download" size={12} /> {dl?.error ? t('Try again') : t('Download ({size} GB)', { size: gb })}
-            </button>
-          )}
+          {rec && <span className="muted small" data-recommended={rec.id}>{rec.held
+            ? t('Recommended here: {model} ({n} GB of memory, processor only)', { model: rec.label, n: rec.memGB })
+            : t('Recommended here: {model} ({n} GB of memory)', { model: rec.label, n: rec.memGB })}</span>}
         </span>
       </div>
-      {going && <span className="vs-bar" role="progressbar" aria-valuenow={dl.percent} aria-valuemin={0} aria-valuemax={100} aria-label={t('Downloading {model}', { model: s.model.label })}><span style={{ width: `${dl.percent}%` }} /></span>}
-      <p className="muted small" title={`${t('Free, private and works offline. Good at rewriting text, Edit by voice, questions about a meeting and notes for short meetings; weaker than your cloud model at long meetings and diagrams.')} ${s.have
-        ? t('In every model list, marked on this computer. Bridge AI picks it by itself only for Edit by voice, or when there\'s no other model: Claude and your other models come first.')
-        : t('Downloaded once from Hugging Face, only when you click Download. What you give it never leaves this computer.')}`}>{s.have
-        ? t('In every model list; used by itself only when there\'s no other. What you give it never leaves this computer.')
+      <ul className="pv-builtin-models">
+        {s.models.map((m) => {
+          const dl = m.downloading
+          const getting = !!dl && !dl.error
+          return (
+            <li key={m.id} className={`pv-builtin-model${m.using ? ' on' : ''}`} data-llm={m.id}>
+              <span className="pv-builtin-name">
+                <span className="pv-builtin-title"><b>{m.label}</b>{m.recommended && <span className="pv-chip pv-chip-local">{t('Recommended')}</span>}</span>
+                <span className="muted small">{t('By {by}, {size} GB, {license}', { by: m.by, size: gbOf(m.mb), license: m.license })}</span>
+              </span>
+              <span className="pv-builtin-acts">
+                {getting ? (
+                  <>
+                    <span className="muted small">{t('Downloading {n}%', { n: dl.percent })}</span>
+                    <button type="button" className="ghost-btn" disabled={busy} onClick={() => act(() => api(`/llm?model=${encodeURIComponent(m.id)}`, { method: 'DELETE' }))}>{t('Cancel')}</button>
+                  </>
+                ) : m.have ? (
+                  <>
+                    {m.using ? <span className="mt-state good"><Icon name="check" size={12} /> {t('In use')}</span>
+                      : <><span className="mt-state good"><Icon name="check" size={12} /> {t('Ready')}</span><button type="button" className="btn small" disabled={busy} onClick={() => use(m.id)}>{t('Use this')}</button></>}
+                    <button type="button" className="btn small danger-soft" disabled={busy} onClick={() => act(() => api(`/llm?model=${encodeURIComponent(m.id)}`, { method: 'DELETE' }))}><Icon name="trash" size={12} /> {t('Remove')}</button>
+                  </>
+                ) : (
+                  <button type="button" className={`btn small${m.chosen ? ' primary' : ''}`} disabled={busy} onClick={() => act(() => api('/llm/download', { method: 'POST', body: { model: m.id } }))}>
+                    <Icon name="download" size={12} /> {dl?.error ? t('Try again') : t('Download ({size} GB)', { size: gbOf(m.mb) })}
+                  </button>
+                )}
+              </span>
+              {getting && <span className="vs-bar" role="progressbar" aria-valuenow={dl.percent} aria-valuemin={0} aria-valuemax={100} aria-label={t('Downloading {model}', { model: m.label })}><span style={{ width: `${dl.percent}%` }} /></span>}
+              {dl?.error && <p className="pv-note pv-err">{dl.error}</p>}
+            </li>
+          )
+        })}
+      </ul>
+      <p className="muted small" title={`${t('Free, private and works offline. Good at rewriting text, Edit by voice, questions about a meeting and notes for short meetings; weaker than your cloud model at long meetings and diagrams.')} ${s.using
+        ? t('In every model list, marked on this computer. With Auto, Bridge AI runs short jobs on it and keeps long meetings and diagrams on Claude and your other models.')
+        : t('Downloaded once from Hugging Face, only when you click Download. What you give it never leaves this computer.')}`}>{s.using
+        ? t('{model} is in use, in every model list. What you give it never leaves this computer.', { model: s.using.label })
         : t('Free and offline, downloaded only when you click Download. What you give it never leaves this computer.')}</p>
-      {dl?.error && <p className="pv-note pv-err">{dl.error}</p>}
       {err && <p className="pv-note pv-err">{err}</p>}
+    </div>
+  )
+}
+
+// Which jobs run on the local model (server/modeljobs.js), for each kind: Auto (short ones here, long
+// meetings and diagrams on your cloud model), On this computer, or Cloud first, with what Auto does
+// on this computer now. On this computer is offered for live suggestions only with a GPU here.
+// Shown once there's a model on this computer, or one can be downloaded here.
+const JOB_TEXT = {
+  notes: [tx('Meeting notes'), tx('Summaries, who said what, questions about a meeting, meeting prep')],
+  assist: [tx('AI Assist'), tx('Rewrites, @bridge in comments, PDFs to sign, sheets and decks')],
+  mail: [tx('Mail'), tx('Reply drafts and How You Write')],
+  tidy: [tx('Titles and tidy-ups'), tx('Pull request titles and descriptions, transcript cleanup')],
+  live: [tx('Live AI Assist'), tx('Suggestions during a meeting')],
+  diagrams: [tx('Diagrams'), tx('Draw this and Change it on the whiteboard')],
+}
+function ModelJobs({ stamp }) {
+  const [d, setD] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const load = useCallback(() => api('/model-jobs').then(setD).catch(() => setD(null)), [])
+  useEffect(() => { load() }, [load, stamp])
+  if (!d || (!d.offered && !d.anyHere)) return null
+  const set = async (job, v) => {
+    setBusy(true)
+    try { await api('/settings', { method: 'PATCH', body: { modelJobs: { [job]: v } } }); settingsChanged(); await load() } finally { setBusy(false) }
+  }
+  const local = d.local?.label
+  const cloud = d.cloud?.label
+  const now = (j) => {
+    if (j.set === 'local') return local ? t('Always on this computer, with {model}.', { model: local }) : d.anyHere ? t('Always on this computer.') : t('Set to stay here, but {why}: it says so instead of running.', { why: d.missing?.why || t('there\'s no model on this computer') })
+    if (j.set === 'cloud') return cloud ? t('{model} first, as before.', { model: cloud }) : t('Your sign-in or key first; there isn\'t one yet, so a model here.')
+    if (!local) return cloud ? t('{model}. Download a local model above to run short ones here.', { model: cloud }) : t('No model yet: download one above, or add one below.')
+    if (!cloud) return t('{model}, on this computer: there\'s no other model.', { model: local })
+    if (j.cloudBetter) return t('{model}: small models are weaker at this.', { model: cloud })
+    if (j.id === 'notes' && d.limit) return t('Meetings up to about {n} minutes on {local}, here; longer ones on {cloud}.', { n: d.limit.minutes, local, cloud })
+    if (j.id === 'tidy') return t('Short ones on {local}, here; transcript cleanup on {cloud}, which fixes misheard names better.', { local, cloud })
+    return t('Short ones on {local}, here; longer ones on {cloud}.', { local, cloud })
+  }
+  return (
+    <div className="pv-jobs" data-model-jobs>
+      <b className="pv-jobs-head">{t('Which jobs run here')}</b>
+      <ul className="pv-jobs-list">
+        {d.jobs.map((j) => {
+          const [label, about] = JOB_TEXT[j.id] || [j.label, j.about]
+          return (
+            <li key={j.id} data-job={j.id} data-set={j.set}>
+              <span className="pv-job-name"><b>{(j.id === 'assist' || j.id === 'live') && <Icon name="wand" size={12} />}{t(label)}</b><span className="muted small">{t(about)}</span></span>
+              <select className="st-input" value={j.set} disabled={busy} onChange={(e) => set(j.id, e.target.value)} aria-label={t('Where {job} runs', { job: t(label) })}>
+                <option value="auto">{t('Auto')}</option>
+                {(j.canLocal || j.set === 'local') && <option value="local">{t('On this computer')}</option>}
+                <option value="cloud">{t('Cloud first')}</option>
+              </select>
+              <span className={`small pv-job-now${j.set === 'local' && !local && !d.anyHere ? ' pv-local-warn' : ' muted'}`} data-job-now>{now(j)}</span>
+            </li>
+          )
+        })}
+      </ul>
+      <p className="pv-note">{t('Edit by voice and Tidy what I say stay on this computer unless you pick a model for them in Settings › Voice & Meetings, and so does AI Assist\'s look at a folder unless you pick one there.')}</p>
     </div>
   )
 }
@@ -500,6 +578,7 @@ export default function Providers() {
               <section key={g.id} className="pv-sec" data-setting={`providers-${g.id}`}>
                 <h4 className="pv-group">{t(g.name)}</h4>
                 {g.id === 'local' && <BuiltinModel onChange={() => setLocalStamp((n) => n + 1)} />}
+                {g.id === 'local' && <ModelJobs stamp={`${items.filter((p) => p.status === 'connected').map((p) => p.id).join()}:${localStamp}`} />}
                 <div className="pv-grid">
                   {items.map((p) => (
                     <Card key={p.id} p={p} open={open === p.id} onToggle={() => setOpen((o) => (o === p.id ? null : p.id))}>

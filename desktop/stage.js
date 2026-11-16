@@ -74,8 +74,10 @@ const all = Object.keys(pkg.dependencies || {})
 pkg.dependencies = Object.fromEntries(Object.entries(pkg.dependencies || {}).filter(([d]) => used.has(d)))
 delete pkg.devDependencies
 if (pkg.scripts) delete pkg.scripts.prepare // sets up git hooks in a clone; the app isn't one
-// Which build this is, so the app can tell its own server from one an older build left running.
+// Which build this is, so the app can tell its own server from one an older build left running, and
+// the commit it was built from, which About & Updates shows (a nightly's especially).
 pkg.bridgeBuild = new Date().toISOString()
+try { pkg.bridgeCommit = process.env.GITHUB_SHA || require('node:child_process').execFileSync('git', ['rev-parse', 'HEAD'], { cwd: path.join(__dirname, '..'), encoding: 'utf8' }).trim() } catch { /* not a clone */ }
 fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2) + '\n')
 console.log(`Installing what the server uses: ${Object.keys(pkg.dependencies).join(', ')} (left out: ${all.filter((d) => !used.has(d)).join(', ')})`)
 run(['install', '--omit=dev', '--no-audit', '--no-fund'], OUT) // versions from package-lock.json

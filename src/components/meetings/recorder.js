@@ -21,8 +21,9 @@ import { RATE, addWorklet, askMic } from '../../audio/pcm.js'
 // streams: { you: MediaStream, them?: MediaStream }. onLevel({ you, them }) for the meters;
 // onTrouble(message | null) when pieces aren't getting through, and when they are again;
 // reopen: { you: () => a new MediaStream } for a source whose mic was let go; onGap(ms) after a
-// stretch when nothing could be heard.
-export async function record(meetingId, streams, { onLevel, onTrouble, reopen = {}, onGap } = {}) {
+// stretch when nothing could be heard; onStream(src, stream) when a source's stream is opened again
+// (the video of the screen hears the mic through it: videorec.js).
+export async function record(meetingId, streams, { onLevel, onTrouble, reopen = {}, onGap, onStream } = {}) {
   const ctx = new AudioContext({ sampleRate: RATE })
   await addWorklet(ctx) // src/audio/pcm.js
   const levels = {}
@@ -97,6 +98,7 @@ export async function record(meetingId, streams, { onLevel, onTrouble, reopen = 
       s.input = ctx.createMediaStreamSource(stream)
       s.input.connect(s.node)
       watchTrack(s)
+      onStream?.(s.src, stream)
     } catch { /* not now (still in the background): asked again when it's back */ } finally { reopening = false }
   }
   function watchTrack(s) {
@@ -111,6 +113,8 @@ export async function record(meetingId, streams, { onLevel, onTrouble, reopen = 
     // A pause isn't a gap: count from the first piece after it.
     resume() { paused = false; for (const k of Object.keys(last)) delete last[k] },
     get paused() { return paused },
+    // A source's stream now (your mic: the one opened again after a call started or ended).
+    stream: (src) => sinks.find((x) => x.src === src)?.stream || null,
     // The source's stream opened again from reopen, with the settings that fit now (a call started
     // or ended: microphone()'s room).
     async swap(src) { const s = sinks.find((x) => x.src === src); if (s) await again(s) },

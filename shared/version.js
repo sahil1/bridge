@@ -32,3 +32,9 @@ export const newer = (a, b) => compare(a, b) > 0
 export const isPre = (v) => /^v?\d+\.\d+\.\d+-/.test(String(v || ''))
 // A version Bridge AI is released as: 3.13.0, or a pre-release of it (3.13.0-beta.1, 3.13.0-rc.2).
 export const RELEASE_VERSION = /^\d+\.\d+\.\d+(-(alpha|beta|rc)\.\d+)?$/
+// A nightly build of main (scripts/nightly.js): 3.20.1-nightly.20261116.57, the day it was built and
+// the run that built it. It comes after its version's betas and before its release candidates and
+// the version itself, so a computer on Nightly moves on to the release when it's out. Only Nightly
+// is offered one.
+export const NIGHTLY_VERSION = /^\d+\.\d+\.\d+-nightly\.\d{8}\.\d+$/
+export const isNightly = (v) => NIGHTLY_VERSION.test(String(v || '').replace(/^v/, ''))

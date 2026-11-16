@@ -1,17 +1,20 @@
-// Settings › Account: your Bold Bridge account (server/account.js), for Early Access and Bridge AI's
-// relay, and nothing else: Bridge AI works the same without it. The section shows only once Bold
-// Bridge accounts exist (Settings.jsx).
+// Settings › Account & Devices › Account: your Bold Bridge account (server/account.js), for Early
+// Access and Bridge AI's relay, and nothing else: Bridge AI works the same without it. The tab shows
+// only once Bold Bridge accounts exist (Settings.jsx).
 // Signed out: your email, then the 6-digit code it's sent (a wrong one, one that ran out, too many:
 // each says why, and what to do); an account with as many devices as it takes lists them, to remove
-// one and sign in here. Signed in: the account, its devices (Remove), Early Access and Bridge AI's
-// relay (each on, or to ask for, asked, or declined; the relay's use as the usage chip shows it),
-// your other computers (sign them in too), Sign out and Delete account. A computer another one
-// signed in says so, and can be signed out again.
+// one and sign in here. Signed in: the account; Bridge AI's relay (to ask for, asked, or declined;
+// given, its allowance across your computers as the usage chip shows a plan's, and this computer on
+// it, right here: see ThisComputer); Early Access; the account's devices (Remove); your other
+// computers (sign them in too, and which relay each uses); Sign out and Delete account. A computer
+// another one signed in says so, and can be signed out again. How your phone reaches this computer
+// in every other way, and its pairing, are the Phone tab's (Relay.jsx).
 import { useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { WindowRow } from '../Usage.jsx'
 import { openSettings } from '../SignIn.jsx'
-import { api } from '../../api.js'
+import { HostedFull, PairCode, limitSaid, pickWay } from './Relay.jsx'
+import { api, apiOn, viaRelay } from '../../api.js'
 import { t, locale } from '../../i18n/index.js'
 import { Advanced } from './Advanced.jsx'
 import './account.css'
@@ -41,7 +44,7 @@ export default function Account() {
 }
 
 // ---------- signing in ----------
-// (inline: in Settings › Devices, under Bridge AI's relay, which says what it's for itself.)
+// (inline: on the Phone tab, under Bridge AI's relay, which says what it's for itself.)
 export function SignIn({ st, onIn, inline = false }) {
   const [email, setEmail] = useState(st.pending?.email || '')
   const [code, setCode] = useState('')
@@ -66,7 +69,7 @@ export function SignIn({ st, onIn, inline = false }) {
       : problem.code === 'account-wrong' ? problem.text
         : problem.text)
   return (
-    <section className={inline ? 'acct-in k-inline' : 'st-sec acct-in'}>
+    <section className={inline ? 'acct-in k-inline' : 'st-sec acct-in'} data-setting={inline ? undefined : 'bold-bridge'}>
       {inline ? <p className="small"><b>{t('Your email, to ask for it.')}</b> {t('There\'s no password: you\'re emailed a code, and that\'s your Bold Bridge account.')}</p> : (
         <>
           <h4>{t('Sign in to Bold Bridge')}</h4>
@@ -121,10 +124,11 @@ function SignedIn({ st, setSt, setErr, load }) {
     try { const s = await fn(); if (s && s.available !== undefined) setSt(s); return s } catch (e) { setErr(e.message); return null } finally { setBusy(null) }
   }
   const stopped = a.status === 'suspended'
+  const relay = useRelayStatus(st.relay?.state === 'approved' && !stopped)
   return (
     <>
       {st.signedInBy && <Followed st={st} act={act} />}
-      <section className="st-sec acct-who">
+      <section className="st-sec acct-who" data-setting="bold-bridge">
         <h4>{t('Your Account')}</h4>
         <div className="st-row">
           <Icon name="user" size={15} /><b className="acct-mail">{a.email}</b>
@@ -134,10 +138,10 @@ function SignedIn({ st, setSt, setErr, load }) {
         {stopped && <p className="st-note warn"><Icon name="alert" size={13} /> {t('Your account is suspended, so Early Access and Bridge AI\'s relay are off for now. If you think that\'s a mistake, reply to an email from Bold Bridge.')}</p>}
         {st.error && <p className="st-note warn"><Icon name="alert" size={13} /> {t('Couldn\'t check your account just now: {why}. What\'s here is from {when}.', { why: st.error, when: seen(st.checkedAt) })}</p>}
       </section>
-      <Devices st={st} act={act} busy={busy} />
+      <RelayRow st={st} act={act} busy={busy} stopped={stopped} load={load} relay={relay} />
       <EarlyRow st={st} act={act} busy={busy} stopped={stopped} />
-      <RelayRow st={st} act={act} busy={busy} stopped={stopped} />
-      <Others st={st} />
+      <Devices st={st} act={act} busy={busy} />
+      <Others st={st} hostedHere={!!relay[0]?.hosted} />
       <Leave st={st} act={act} busy={busy} load={load} />
     </>
   )
@@ -164,7 +168,7 @@ function Devices({ st, act, busy }) {
   }
   return (
     <section className="st-sec acct-devices">
-      <h4>{t('Devices')}</h4>
+      <h4>{t('Devices on Your Account')}</h4>
       <p className="muted small">{st.devices.length === 1 ? t('1 of 5 devices on your account, computers and phones.') : t('{n} of 5 devices on your account, computers and phones.', { n: st.devices.length })}</p>
       <ul className="ph-devices">
         {st.devices.map((d) => (
@@ -218,27 +222,44 @@ export function RelayUse({ used, limits }) {
   )
 }
 
-function RelayRow({ st, act, busy, stopped }) {
+// Bridge AI's relay on the account: to ask for, asked (looked at again while this is open, so a yes
+// shows), declined, or given, with its allowance across your computers and this computer on it.
+function RelayRow({ st, act, busy, stopped, load, relay: [rs, setRs, loadRelay] }) {
   const r = st.relay || {}
   const s = r.state
   const ask = () => act('relay', () => api('/account/request', { method: 'POST', body: { kind: 'relay' } }))
+  useEffect(() => {
+    if (s !== 'requested' || stopped) return undefined
+    const again = () => load(true)
+    const id = setInterval(again, 20000)
+    window.addEventListener('focus', again)
+    return () => { clearInterval(id); window.removeEventListener('focus', again) }
+  }, [s, stopped]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Whether this computer starts on it by itself once it's given (server/relay.js maybeAuto).
+  const byItself = rs?.hostedAvailable && rs.autoNext && !viaRelay
+  // Its use: the relay's own word while this computer is on it (fresher, and polled here), else
+  // what the account last said.
+  const live = rs?.hosted && rs.use?.window?.limit ? rs.use : null
+  const isoOf = (n) => (n ? new Date(n).toISOString() : null)
+  const used = live ? { window: { messages: live.window.messages, resetsAt: isoOf(live.window.resetsAt) }, week: { messages: live.week.messages, resetsAt: isoOf(live.week.resetsAt) } } : r.used
+  const limits = live ? { window: { hours: live.window.hours || 8, messages: live.window.limit }, week: { messages: live.week.limit } } : r.limits
   return (
-    <section className="st-sec acct-relay">
+    <section className="st-sec acct-relay" data-setting="hosted-relay">
       <div className="st-row between">
         <h4>{t('Bridge AI\'s Relay')}</h4>
         {!stopped && (s === 'approved' ? <span className="st-chip good"><Icon name="check" size={11} /> {t('On')}</span> : s === 'requested' ? <span className="st-chip">{t('Requested')}</span> : s === 'declined' ? <span className="st-chip warn">{t('Declined')}</span> : null)}
       </div>
       {s === 'approved' && !stopped ? (
         <>
-          <p className="muted small">{t('Your phone reaches your computers through a relay run by Bold Bridge, end-to-end encrypted. Your account has an allowance every {h} hours and each week, across its computers.', { h: r.limits?.window?.hours || 8 })}</p>
-          <RelayUse used={r.used} limits={r.limits} />
-          {!st.relayHere && <div className="st-row"><button type="button" className="btn small" onClick={() => openSettings('phone')}><Icon name="phone" size={13} /> {t('Use it on this computer')}</button><span className="muted small">{t('In Settings › Devices.')}</span></div>}
+          <p className="muted small">{t('Your phone reaches your computers through a relay run by Bold Bridge. Your account\'s allowance, every {h} hours and each week, across its computers:', { h: limits?.window?.hours || 8 })}</p>
+          <RelayUse used={used} limits={limits} />
+          <ThisComputer rs={rs} setRs={setRs} load={loadRelay} />
         </>
-      ) : s === 'requested' ? <p className="muted small">{t('You asked for Bridge AI\'s relay. Bold Bridge emails you when it\'s on.')}</p>
+      ) : s === 'requested' ? <p className="muted small">{byItself ? t('You asked for Bridge AI\'s relay. Bold Bridge emails you when it\'s on, and this computer starts using it by itself, as it has no other way set up for your phone.') : t('You asked for Bridge AI\'s relay. Bold Bridge emails you when it\'s on; then it\'s one click here.')}</p>
         : stopped ? <p className="muted small">{t('Off while your account is suspended.')}</p>
           : (
             <div className="st-row">
-              <span className="muted small">{s === 'declined' ? t('Your request was declined. Your own Cloudflare or Tailscale still work, in Settings › Devices.') : t('Reach your computers from your phone without a Cloudflare account of your own. It\'s by request.')}</span>
+              <span className="muted small">{s === 'declined' ? t('Your request was declined. A relay on your own Cloudflare account, or Tailscale, still works: on the Phone tab.') : t('Reach your computers from your phone without a Cloudflare account of your own. It\'s by request.')}</span>
               <button type="button" className="btn small" disabled={!!busy} onClick={ask}>{busy === 'relay' ? t('Asking…') : s === 'declined' ? t('Ask again') : t('Request access')}</button>
             </div>
           )}
@@ -246,18 +267,131 @@ function RelayRow({ st, act, busy, stopped }) {
   )
 }
 
-// Your other computers (linked to this one in Settings › Devices): those not signed in yet are
-// offered, "Also sign in Desk and Laptop?"; each says how it went. Not now puts it away here.
-function Others({ st }) {
+// This computer's relay (/api/relay), looked at again while it's changing: being set up, connecting,
+// a pairing code up (to see the phone arrive); with the relay given, now and then too, as it can start
+// by itself (not from a phone, where each look goes through the relay).
+function useRelayStatus(given) {
+  const [rs, setRs] = useState(null)
+  const load = () => api('/relay').then(setRs).catch(() => {})
+  useEffect(() => { load() }, [given])
+  const quick = !!(rs?.busy || rs?.pairing || (rs?.hosted && !rs.online) || (rs?.auto && rs.auto.ok == null))
+  const every = quick ? 1500 : given && !viaRelay ? 5000 : 0
+  useEffect(() => {
+    if (!every) return undefined
+    const id = setInterval(load, every)
+    return () => clearInterval(id)
+  }, [every])
+  return [rs, setRs, load]
+}
+
+// This computer on Bridge AI's relay, right here, never a trip to another tab: on it (connected, with
+// Pair a phone, which shows its code here), or being set up (each step said: setting up, connecting,
+// on), or Use it on this computer, which does what `bridge-ai relay setup --hosted` does; from a relay
+// on your own Cloudflare, Use Bridge AI's relay instead, after asking (phones pair again). What went
+// wrong is said with what to do: full for now (the other ways, on the Phone tab), or the relay's own
+// words with Try again. Started by itself (server/relay.js), it says so, and if that didn't work, why.
+// From a phone it says how it is, as only the computer sets up its relay.
+function ThisComputer({ rs, setRs, load }) {
+  const [working, setWorking] = useState(false)
+  const [problem, setProblem] = useState(null)
+  const pairNext = useRef(false)
+  const pair = async (stop = false) => {
+    setProblem(null)
+    try { setRs(await api('/relay/pair', { method: 'POST', body: stop ? { stop: true } : {} })) } catch (e) { setProblem(e.message) }
+  }
+  // Set up from here: the pairing code once it's connected, as the next thing to do.
+  useEffect(() => {
+    if (!pairNext.current || !rs?.hosted || !rs.online) return
+    pairNext.current = false
+    if (!rs.pairing) pair()
+  }, [rs?.hosted, rs?.online]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!rs) return <div className="skeleton-rows"><div /></div>
+  if (!rs.hostedAvailable) return null
+  const name = rs.computer
+  if (viaRelay) {
+    return <p className="muted small acct-here">{rs.hosted ? <><Icon name="check" size={12} /> {t('On for {name}.', { name })}</> : t('{name} doesn\'t use it. Turn it on in Bridge AI on that computer: Settings › Account & Devices.', { name })}</p>
+  }
+  const use = async () => {
+    if (rs.configured && !rs.hosted && !window.confirm(t('Move to Bridge AI\'s relay? Your phones pair again with it afterwards.'))) return
+    setWorking(true); setProblem(null)
+    try {
+      setRs(await api('/relay/deploy', { method: 'POST', body: { method: 'hosted' } }))
+      pairNext.current = true
+    } catch (e) {
+      // (Full for now is said by its own box, from rs.hostedFull.)
+      if (e.code !== 'hostedFull') setProblem(e.message)
+      load()
+    } finally { setWorking(false) }
+  }
+  const step = working || rs.busy
+  const phones = (rs.devices || []).filter((d) => d.kind !== 'computer')
+  // On it, but not connected, or held back: why, and whether it carries on by itself.
+  const note = limitSaid(rs.limit) || (rs.hosted && !rs.online && rs.error && (rs.limit?.why === 'gone' ? rs.error : t('{why}. Bridge AI keeps trying by itself.', { why: rs.error.replace(/\.$/, '') })))
+  const said = (text, again) => <p className="st-note bad acct-here-bad" role="alert"><Icon name="alert" size={13} /> {text}{again && <> <button type="button" className="link-btn" disabled={!!step} onClick={use}>{t('Try again')}</button></>}</p>
+  return (
+    <div className="acct-here" data-here={step ? 'setting-up' : rs.hosted ? (rs.online ? 'on' : 'connecting') : 'off'}>
+      {step ? (
+        <p className="st-note" role="status"><Icon name="refresh" size={13} className="spin" /> {rs.busy || t('Setting up Bridge AI\'s relay…')}</p>
+      ) : rs.hosted ? (
+        <>
+          <div className="st-row" role="status">
+            {rs.online
+              ? <span className="st-chip good"><Icon name="check" size={11} /> {t('On for this computer')}</span>
+              : <span className="st-chip warn"><Icon name="refresh" size={11} className="spin" /> {t('Connecting…')}</span>}
+            {rs.online && phones.length > 0 && <span className="muted small">{phones.length === 1 ? t('1 phone paired') : t('{n} phones paired', { n: phones.length })}</span>}
+          </div>
+          {rs.auto?.ok && <p className="muted small">{t('It started by itself on {date}: your account has it, and this computer had no other way set up for your phone.', { date: new Date(rs.auto.at).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) })}</p>}
+          {note && <p className="st-note warn acct-here-note"><Icon name="alert" size={13} /> {note}{rs.limit?.why === 'gone' && <> <button type="button" className="link-btn" onClick={use}>{t('Set up Bridge AI\'s relay again')}</button></>}</p>}
+          {rs.pairing ? <PairCode p={rs.pairing} onStop={() => pair(true)} forPhone /> : (
+            <div className="st-row">
+              {rs.paired && <span className="st-chip good"><Icon name="check" size={11} /> {t('{name} paired', { name: rs.paired.name })}</span>}
+              <button type="button" className={rs.paired || phones.length ? 'btn small' : 'btn small primary'} disabled={!rs.online} onClick={() => pair()}><Icon name={rs.paired || phones.length ? 'plus' : 'link'} size={13} /> {rs.paired || phones.length ? t('Pair another phone') : t('Pair a phone')}</button>
+              {!rs.online && <span className="muted small">{t('Waiting for the relay to connect.')}</span>}
+              <button type="button" className="link-btn" onClick={() => openSettings('phone')}>{t('Your phones, on the Phone tab')}</button>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {rs.configured && <p className="muted small">{t('This computer uses a relay on your own Cloudflare account. Moving to Bridge AI\'s relay means pairing your phones again.')}</p>}
+          {!rs.hostedFull && (
+            <div className="st-row">
+              <button type="button" className={rs.configured ? 'btn small' : 'btn small primary'} onClick={use}><Icon name="phone" size={13} /> {rs.configured ? t('Use Bridge AI\'s relay instead') : t('Use it on this computer')}</button>
+              {!rs.configured && <span className="muted small">{t('Your phone then reaches this computer through it, from anywhere.')}</span>}
+            </div>
+          )}
+          {rs.hostedFull && <HostedFull onWay={(w) => { pickWay(w); openSettings('phone') }} onRetry={use} busy={!!step} />}
+          {problem ? said(t('Couldn\'t use Bridge AI\'s relay on this computer: {why}', { why: problem }), true)
+            : rs.auto?.ok === false && !rs.hostedFull && said(t('Your account has Bridge AI\'s relay, but this computer couldn\'t start using it by itself: {why}', { why: rs.auto.text }), true)}
+        </>
+      )}
+      {rs.hosted && problem && said(problem)}
+    </div>
+  )
+}
+
+// Your other computers (linked to this one, on the Computers tab): those not signed in yet are
+// offered, "Also sign in Desk and Laptop?"; each says how it went. Not now puts it away here. With
+// this one on Bridge AI's relay, which relay each signed-in one uses, asked of it over the link; one
+// on its own relay moves in its own Bridge AI (only a computer moves its own relay: its phones pair
+// again), and that's said.
+function Others({ st, hostedHere }) {
   const [list, setList] = useState(null)
   const [results, setResults] = useState(null)
   const [busy, setBusy] = useState(false)
   const [later, setLater] = useState(() => { try { return JSON.parse(localStorage.getItem('cc-account-later') || '[]') } catch { return [] } })
+  const [relays, setRelays] = useState({}) // id -> 'hosted' | 'own' | 'none'
   useEffect(() => { api('/account/others').then((r) => setList(r.others || [])).catch(() => setList([])) }, [st.account?.id])
+  const inIds = (list || []).filter((o) => o.state === 'signed-in').map((o) => o.id).join(',')
+  useEffect(() => {
+    if (!hostedHere || !inIds) return
+    for (const id of inIds.split(',')) apiOn(id, '/relay').then((x) => setRelays((m) => ({ ...m, [id]: x.hosted ? 'hosted' : x.configured ? 'own' : 'none' }))).catch(() => {})
+  }, [hostedHere, inIds])
   if (!list?.length) return null
   const offer = list.filter((o) => o.state === 'not-signed-in')
   const asked = offer.filter((o) => !later.includes(o.id))
   const names = (xs) => (xs.length === 1 ? xs[0].name : t('{some} and {last}', { some: xs.slice(0, -1).map((x) => x.name).join(', '), last: xs.at(-1).name }))
+  const elsewhere = list.filter((o) => relays[o.id] === 'own')
   const go = async () => {
     setBusy(true)
     try { const r = await api('/account/others', { method: 'POST', body: { ids: asked.map((o) => o.id) } }); setResults(r.results); setList(r.others) } catch (e) { setResults([{ ok: false, text: e.message }]) } finally { setBusy(false) }
@@ -276,10 +410,17 @@ function Others({ st }) {
           </div>
         </div>
       )}
-      {results?.map((r, i) => <p key={r.id || i} className={`st-note ${r.ok ? 'ok' : 'warn'} acct-result`}><Icon name={r.ok ? 'check' : 'alert'} size={13} /> {r.ok ? t('{name} is signed in.', { name: r.name }) : r.why === 'declined' ? t('{name} said not to be signed in from your other computers. Sign in there by hand, in Settings › Account.', { name: r.name }) : r.why === 'devices' ? t('{name}: your account has 5 devices already. Remove one above, then try again.', { name: r.name }) : `${r.name ? `${r.name}: ` : ''}${r.text}`}</p>)}
+      {results?.map((r, i) => <p key={r.id || i} className={`st-note ${r.ok ? 'ok' : 'warn'} acct-result`}><Icon name={r.ok ? 'check' : 'alert'} size={13} /> {r.ok ? t('{name} is signed in.', { name: r.name }) : r.why === 'declined' ? t('{name} said not to be signed in from your other computers. Sign in there by hand, in Settings › Account & Devices.', { name: r.name }) : r.why === 'devices' ? t('{name}: your account has 5 devices already. Remove one above, then try again.', { name: r.name }) : `${r.name ? `${r.name}: ` : ''}${r.text}`}</p>)}
       <ul className="ph-devices">
-        {list.map((o) => <li key={o.id}><Icon name="laptop" size={14} /><span>{o.name}</span><span className={`st-chip ${o.state === 'signed-in' ? 'good' : ''}`}>{STATE[o.state] || o.state}</span></li>)}
+        {list.map((o) => (
+          <li key={o.id}>
+            <Icon name="laptop" size={14} /><span>{o.name}</span>
+            {['hosted', 'own'].includes(relays[o.id]) && <span className="muted small acct-other-relay">{relays[o.id] === 'hosted' ? t('On Bridge AI\'s relay') : t('Its own relay')}</span>}
+            <span className={`st-chip ${o.state === 'signed-in' ? 'good' : ''}`}>{STATE[o.state] || o.state}</span>
+          </li>
+        ))}
       </ul>
+      {elsewhere.length > 0 && <p className="muted small acct-also">{elsewhere.length === 1 ? t('Also on {name}? It uses its own relay, and only a computer moves its own: in Bridge AI on {name}, choose Use Bridge AI\'s relay instead in Settings › Account & Devices. Its phones pair again with it.', { name: elsewhere[0].name }) : t('Also on {names}? They use their own relays, and only a computer moves its own: in Bridge AI on each, choose Use Bridge AI\'s relay instead in Settings › Account & Devices. Their phones pair again with it.', { names: names(elsewhere) })}</p>}
       {offer.length > 0 && !asked.length && !results && <div><button type="button" className="ghost-btn" onClick={() => { setLater([]); try { localStorage.removeItem('cc-account-later') } catch { /* not kept */ } }}>{t('Sign in {names} too', { names: names(offer) })}</button></div>}
     </section>
   )

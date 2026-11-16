@@ -10,8 +10,9 @@
 // Each meeting is a folder in <data>/meetings/<id>: meeting.json, transcript.jsonl (a line per
 // stretch, appended as they come), notes.md (yours), summary.md, and the audio: Opus through
 // ffmpeg (about 11 MB an hour per source), or WAV without it. captures/ holds pictures of what was
-// on the screen (or pasted into your notes); the files and links that go with a meeting are kept
-// as links in meeting.json, read from where they are when the notes are written.
+// on the screen (or pasted into your notes), and a video of the screen (Record the screen too) is
+// video-1.mp4 or .webm, with videos.json (meetvideo.js); the files and links that go with a meeting
+// are kept as links in meeting.json, read from where they are when the notes are written.
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -556,6 +557,7 @@ export async function audio(id, src, buf, seq) {
   if (seq != null) s.seq = Number(seq)
   const even = buf.length - (buf.length % 2)
   const samples = new Int16Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + even))
+  if (src === 'them') for (const fn of hearers.get(id) || []) fn(Buffer.from(samples.buffer))
   s.finder.push(samples)
   if (s.finder.frames.length && s.finder.voiced >= 5) { s.talkingAt = Date.now(); s.stretch = s.finder.frames[0].t }
   hearSoFar(m, s)
@@ -605,6 +607,15 @@ const HEARD = 33
 // nothing played, or macOS hasn't let Bridge AI hear it yet (System Audio Recording).
 // BRIDGE_CALL_QUIET_MS: how long before it says so.
 const QUIET_AFTER = Number(process.env.BRIDGE_CALL_QUIET_MS) || 30_000
+// The call's sound as it comes, while it records, for the video of the screen (Record the screen
+// too): each piece to fn, until the function it returns is called.
+const hearers = new Map() // id -> Set of fn
+export function hear(id, fn) {
+  meta(id)
+  if (!hearers.has(id)) hearers.set(id, new Set())
+  hearers.get(id).add(fn)
+  return () => { const s = hearers.get(id); s?.delete(fn); if (s && !s.size) hearers.delete(id) }
+}
 // Someone on the call is talking now, while it records: the stretch of speech in its sound (where it
 // started, a new number when someone starts again), or null.
 export const talking = (id) => { const s = live.get(id)?.sources.them; return s && Date.now() - (s.talkingAt || 0) < 2000 ? s.stretch : null }
@@ -1124,13 +1135,15 @@ const SEEN_SAYS = 'A line may say who the call\'s video showed talking while it 
 // while someone on the call talked shows who that was: glance; and, from its video, whose mouth was
 // moving as each line was said: sights.js) and who was invited. A line it can't place stays Them;
 // the ones you named yourself are left as they are.
-export async function nameSpeakers(id, { model } = {}) {
+// anywhere: with model, as choose() says it for the summary that asked.
+export async function nameSpeakers(id, { model, anywhere = false } = {}) {
   const m = meta(id)
-  const use = model || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
+  const pick = model ? { id: model, anywhere } : await choose(m, null, 'notes', transcriptText(id))
+  const use = pick.id
   if (!use) throw noModel()
   const told = voices.of(id)
-  if (told?.speakers >= 2 && (told.src || 'you') === 'you' && !transcript(id).some((l) => l.src === 'them' && l.text)) return nameVoices(id, use)
-  if ((told?.src === 'them' || told?.src === 'both') && told.speakers >= 2) return nameVoices(id, use, { call: true })
+  if (told?.speakers >= 2 && (told.src || 'you') === 'you' && !transcript(id).some((l) => l.src === 'them' && l.text)) return nameVoices(id, use, { anywhere: pick.anywhere })
+  if ((told?.src === 'them' || told?.src === 'both') && told.speakers >= 2) return nameVoices(id, use, { call: true, anywhere: pick.anywhere })
   const said = transcript(id).filter((l) => l.text)
   if (!said.some((l) => l.src === 'them')) throw new Error('Nobody on the call was heard in this meeting')
   const me = String(cfg.name || '').trim()
@@ -1157,7 +1170,7 @@ export async function nameSpeakers(id, { model } = {}) {
   let used = use
   await roomy(use, 'working out who said what')
   await inPieces(rows.join('\n'), (await budget(use, rows.join('\n'))) - ask.length - 2000, async (part) => {
-    const r = await jsonReply(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You work out who said what in a meeting transcript. You are careful and say null when unsure.' }, { schema: NAMES_SCHEMA, check: namesOk })
+    const r = await jsonReply(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You work out who said what in a meeting transcript. You are careful and say null when unsure.', anywhere: pick.anywhere }, { schema: NAMES_SCHEMA, check: namesOk })
     used = r.model
     Object.assign(got, r.value || {}) // not JSON: nothing from this part
   })
@@ -1182,7 +1195,7 @@ export async function nameSpeakers(id, { model } = {}) {
 // they talked (glances) and whose mouth moved on its video (sights.js). A room on a call (src both)
 // has the call's voices and your mic's, and one of your mic's is you. A voice you named yourself is
 // left as it is; one it can't place stays Speaker n.
-async function nameVoices(id, use, { call = false } = {}) {
+async function nameVoices(id, use, { call = false, anywhere = false } = {}) {
   const m = meta(id)
   const said = transcript(id).filter((l) => l.text)
   const room = voices.of(id)
@@ -1210,7 +1223,7 @@ async function nameVoices(id, use, { call = false } = {}) {
   let used = use
   await roomy(use, 'working out who said what')
   await inPieces(rows.join('\n'), (await budget(use, rows.join('\n'))) - ask.length - 2000, async (part) => {
-    const r = await jsonReply(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You work out who said what in a meeting transcript. You are careful and say null when unsure.' }, { schema: NAMES_SCHEMA, check: namesOk })
+    const r = await jsonReply(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You work out who said what in a meeting transcript. You are careful and say null when unsure.', anywhere }, { schema: NAMES_SCHEMA, check: namesOk })
     used = r.model
     for (const [k, v] of Object.entries(r.value || {})) if (got[k] == null) got[k] = v // not JSON: nothing from this part
   })
@@ -1260,7 +1273,10 @@ export function cleanup(id, { model } = {}) {
   const p = (async () => {
     const m = meta(id)
     if (m.status === 'recording' || m.status === 'paused') throw new Error('Still recording')
-    const use = model || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
+    // A tidy-up, which Auto keeps on your cloud model: small models here send back fragments, not
+    // whole lines (research/local-models.md).
+    const pick = await choose(m, model, 'tidy', transcriptText(id), { cloudBetter: true })
+    const use = pick.id
     if (!use) throw noModel()
     const said = transcript(id, { clean: false }).filter((l) => l.text)
     if (!said.length) throw new Error('Nothing was transcribed yet')
@@ -1290,7 +1306,7 @@ export function cleanup(id, { model } = {}) {
     const ctx = await contextOf(use)
     const room = (await budget(use, rows.join('\n'), { answer: ctx ? Math.floor(ctx / 3) : undefined })) - ask.length - 2000
     await inPieces(rows.join('\n'), ctx ? Math.min(60_000, room) : Math.max(8000, Math.min(60_000, room)), async (part) => {
-      const r = await jsonReply(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You correct speech-to-text transcripts. You change only what was clearly misheard, and say so with JSON.' }, { schema: CLEANUP_SCHEMA, check: cleanupOk })
+      const r = await jsonReply(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You correct speech-to-text transcripts. You change only what was clearly misheard, and say so with JSON.', anywhere: pick.anywhere }, { schema: CLEANUP_SCHEMA, check: cleanupOk })
       used = r.model
       if (!r.value) return // not JSON: nothing from this part
       Object.assign(got.fix, r.value.fix && typeof r.value.fix === 'object' ? r.value.fix : {})
@@ -1458,8 +1474,10 @@ export async function addCapture(id, buf, { kind = 'screen', t, note, source } =
   let text = null
   if (what === 'auto' && doctext.ocrBin()) {
     try { text = (await doctext.textOf(path.join(dirOf(id), file), 4000)) || '' } catch { text = null }
-    const last = [...(meta(id).captures || [])].reverse().find((x) => x.kind !== 'paste' && typeof x.text === 'string')
-    if (text != null && last && !brings(text, last.text)) { fs.rmSync(path.join(dirOf(id), file), { force: true }); return { kept: false } }
+    // Against the last one as it was taken, not its crop: this one isn't cropped yet.
+    const said = (x) => x.crop?.texts?.whole ?? x.text
+    const last = [...(meta(id).captures || [])].reverse().find((x) => x.kind !== 'paste' && typeof said(x) === 'string')
+    if (text != null && last && !brings(text, said(last))) { fs.rmSync(path.join(dirOf(id), file), { force: true }); return { kept: false } }
   }
   const c = { id: cid, file, t: round(at), at: new Date().toISOString(), kind: what, note: String(note || '').slice(0, 300), source: String(source || '').slice(0, 80), text, read: text != null ? 'done' : doctext.ocrBin() ? 'reading' : 'no' }
   patchMeta(id, { captures: [...(meta(id).captures || []), c] })
@@ -1479,13 +1497,70 @@ function readCapture(id, cid) {
     let c
     try { c = meta(id).captures.find((x) => x.id === cid) } catch { return }
     if (!c) return
-    try { patchCapture(id, cid, { text: (await doctext.textOf(path.join(dirOf(id), c.file), 4000)) || '', read: 'done' }) } catch { try { patchCapture(id, cid, { read: 'failed' }) } catch { /* gone */ } }
+    const file = c.file
+    let text
+    try { text = (await doctext.textOf(path.join(dirOf(id), file), 4000)) || '' } catch { try { patchCapture(id, cid, { read: 'failed' }) } catch { /* gone */ } return }
+    // A cropped one keeps the words on each picture, so Whole screen and Crop needn't read again.
+    try {
+      const now = meta(id).captures.find((x) => x.id === cid)
+      const which = now?.crop?.file === file ? 'crop' : now?.crop?.whole === file ? 'whole' : null
+      patchCapture(id, cid, { ...(now?.file === file ? { text, read: 'done' } : {}), ...(which ? { crop: { ...now.crop, texts: { ...now.crop.texts, [which]: text } } } : {}) })
+    } catch { /* gone */ }
   })
 }
-export function captureFile(id, cid) {
+// The picture in use (the crop, once there is one), or as it was taken (whole).
+export function captureFile(id, cid, { whole = false } = {}) {
   const c = (meta(id).captures || []).find((x) => x.id === String(cid))
   if (!c) throw new Error('No such picture')
-  return path.join(dirOf(id), c.file)
+  return path.join(dirOf(id), whole ? c.crop?.whole || c.file : c.file)
+}
+
+// ---------- A picture of a call's window, cropped ----------
+// The page works out what's shared in a picture of the screen (src/components/meetings/crop.js:
+// the slide, without the faces beside it, the call's buttons and its window) and sends the crop
+// here. Both are kept: the crop is the picture from then on, shown, read and put in the notes, and
+// the one taken stays beside it. Whole screen on the picture puts that back, and Crop the crop again
+// (setCrop); either is the person's say, which a later look leaves alone. With Crop pictures of
+// calls off (Settings › Voice & Meetings), or a look not sure enough (sure: false), a crop is kept
+// aside: offered on the picture, not used. A look that found nothing to crop is noted too, so the
+// page doesn't look again.
+const cropsOn = () => cfg.meetings?.cropShots !== false
+const KEEPS = /^captures\/[\w-]+\.(png|jpg|gif|webp)$/
+export function cropCapture(id, cid, buf, { rect, look, why, v, sure = true } = {}) {
+  const c = (meta(id).captures || []).find((x) => x.id === String(cid))
+  if (!c) throw new Error('No such picture')
+  if (c.kind === 'paste') throw new Error('Only pictures of the screen are cropped')
+  if (c.crop?.byHand || (c.crop?.file && !buf?.length)) return c
+  const whole = c.crop?.whole || c.file
+  const base = { v: Number(v) || 1, look: look && typeof look === 'object' ? look : c.crop?.look || null, why: String(why || '').slice(0, 200), whole }
+  if (!buf?.length) return patchCapture(id, c.id, { crop: { ...base, rect: null } })
+  const ext = Buffer.isBuffer(buf) && buf.length > 64 ? pictureType(buf) : null
+  if (!ext) throw new Error('That isn\'t a picture (PNG, JPEG, WebP or GIF)')
+  const r = Object.fromEntries(['x0', 'y0', 'x1', 'y1', 'w', 'h'].map((k) => [k, Math.round(Number(rect?.[k]))]))
+  if (!Object.values(r).every(Number.isFinite) || r.x1 <= r.x0 || r.y1 <= r.y0) throw new Error('Where to crop it is missing')
+  const file = `captures/${c.id}-crop.${ext}`
+  if (!KEEPS.test(file) || !KEEPS.test(whole)) throw new Error('No such picture')
+  fs.writeFileSync(path.join(dirOf(id), file), buf)
+  const on = (!!sure && cropsOn()) || c.file === file
+  const texts = { whole: c.crop?.texts?.whole ?? (c.file === whole && c.read === 'done' ? c.text : null), crop: null }
+  // A crop put in place of one in use is a new picture to the page, as the first is.
+  const out = patchCapture(id, c.id, { crop: { ...base, rect: r, file, on, sure: !!sure, texts }, ...(on ? { file, text: null, read: doctext.ocrBin() ? 'reading' : 'no' } : {}), ...(on || c.file === file ? { v: (c.v || 0) + 1 } : {}) })
+  if (on && out.read === 'reading') readCapture(id, c.id)
+  if (on) resave(id, 5000)
+  return out
+}
+// The crop, or the picture as it was taken: on, by hand.
+export function setCrop(id, cid, on) {
+  const c = (meta(id).captures || []).find((x) => x.id === String(cid))
+  if (!c) throw new Error('No such picture')
+  if (!c.crop?.file) throw new Error('This picture has no crop')
+  const file = on ? c.crop.file : c.crop.whole
+  const text = c.crop.texts?.[on ? 'crop' : 'whole']
+  const known = typeof text === 'string'
+  const out = patchCapture(id, c.id, { file, crop: { ...c.crop, on: !!on, byHand: true }, v: (c.v || 0) + 1, text: known ? text : null, read: known ? 'done' : doctext.ocrBin() ? 'reading' : 'no' })
+  if (out.read === 'reading') readCapture(id, c.id)
+  resave(id, 3000)
+  return out
 }
 export const noteCapture = (id, cid, note) => { const c = patchCapture(id, String(cid), { note: String(note || '').slice(0, 300) }); resave(id, 3000); return c }
 // A picture removed goes from your notes too.
@@ -1493,7 +1568,7 @@ export function removeCapture(id, cid) {
   const m = meta(id)
   const c = (m.captures || []).find((x) => x.id === String(cid))
   if (!c) throw new Error('No such picture')
-  fs.rmSync(path.join(dirOf(id), c.file), { force: true })
+  for (const f of new Set([c.file, c.crop?.file, c.crop?.whole].filter(Boolean))) fs.rmSync(path.join(dirOf(id), f), { force: true })
   patchMeta(id, { captures: m.captures.filter((x) => x.id !== c.id) })
   const f = path.join(dirOf(id), 'notes.md')
   const notes = readText(f)
@@ -1834,20 +1909,35 @@ function marksFor(notes, captures = []) {
 
 // ---------- Summary, questions, saving ----------
 // index.js hands over the model call (chatmodels.reply), the pick of model and the models there
-// are, best first (setHelpers).
-let helpers = { reply: null, pickModel: null, models: null, mailRelated: null, mailMessage: null }
+// are, best first, and the model for a kind of job by its size (pickFor, modeljobs.js) (setHelpers).
+let helpers = { reply: null, pickModel: null, pickFor: null, models: null, mailRelated: null, mailMessage: null }
 export const setHelpers = (h) => { helpers = { ...helpers, ...h } }
+
+// The model for a job on a meeting: the one asked for, the meeting's own pick, Settings › Voice &
+// Meetings' pick, else the one for that kind of job (Settings › Model Providers) by what it reads
+// (text): with Auto, the local model for a short one. { id, anywhere, auto }: anywhere, it may go to
+// a model elsewhere when the one here can't run it (Auto put it here; you didn't); auto: how
+// pickFor chose. Set to stay on this computer and it can't: the error says why.
+async function choose(m, model, job, text, o = {}) {
+  const set = model || m?.summaryModelPick || cfg.meetings?.model
+  if (set) return { id: set, anywhere: false, auto: null }
+  if (!helpers.pickFor) return { id: await helpers.pickModel(), anywhere: false, auto: null }
+  const r = await helpers.pickFor(job, { text, ...o })
+  return { id: r.id, anywhere: !r.kept, auto: r }
+}
 
 // A model call that a dropped connection doesn't end: the same model again (twice, a few seconds
 // apart, when it looks like the network or a busy service), then up to three of the other models
 // you have. The answer says which model wrote it. Only when none can is it an error. A model on
 // this computer is only ever followed by another on this computer: what you kept here stays here.
-// A prompt too long for the model isn't passed on either: it goes again in smaller pieces (inPieces).
+// Unless Auto put it here (o.anywhere: a short job, with your cloud model there too): then your
+// cloud model is next. A prompt too long for the model isn't passed on either: it goes again in
+// smaller pieces (inPieces).
 const RETRY_MS = Number(process.env.BRIDGE_MODEL_RETRY_MS || 3000)
 const passing = (e) => /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|EPIPE|socket hang up|fetch failed|network|connection|overloaded|rate.?limit|too many requests|timed? ?out|\b(429|500|502|503|504|529)\b/i.test(String(e?.message || e))
 const isLocal = (id) => /^(ollama|lmstudio|bridge):/.test(String(id || ''))
 // o.feature: what's noted with what each answer took (usagelog.js): meeting notes unless said.
-async function replyAny(use, msgs, o0) {
+async function replyAny(use, msgs, { anywhere = false, ...o0 } = {}) {
   const o = { feature: 'meetings', ...o0 }
   const once = async (id) => {
     for (let i = 0; ; i++) {
@@ -1860,8 +1950,8 @@ async function replyAny(use, msgs, o0) {
     }
   }
   try { return await once(use) } catch (first) {
-    if (first.code === 'too_long') throw first
-    const others = ((await helpers.models?.().catch(() => [])) || []).filter((id) => id !== use && (!isLocal(use) || isLocal(id))).slice(0, 3)
+    if (first.code === 'too_long' && !(anywhere && isLocal(use))) throw first
+    const others = ((await helpers.models?.().catch(() => [])) || []).filter((id) => id !== use && (anywhere || !isLocal(use) || isLocal(id))).slice(0, 3)
     for (const id of others) { try { return { ...(await once(id)), fellBack: use, why: first.message } } catch { /* next */ } }
     first.tried = [use, ...others]
     throw first
@@ -1990,7 +2080,7 @@ function tryLater(id, e) {
   let m
   try { m = meta(id) } catch { return }
   const tries = (m.summaryTries || 0) + 1
-  if (e.code === 'no_model' || e.code === 'too_small' || e.code === 'too_long' || tries > 6 || /Nothing was transcribed/.test(e.message)) return patchMeta(id, { summaryRetryAt: null })
+  if (e.code === 'no_model' || e.code === 'too_small' || e.code === 'too_long' || e.code === 'local_missing' || tries > 6 || /Nothing was transcribed/.test(e.message)) return patchMeta(id, { summaryRetryAt: null })
   const at = Date.now() + LATER_MS
   patchMeta(id, { summaryTries: tries, summaryRetryAt: new Date(at).toISOString() })
   clearTimeout(later.get(id))
@@ -2004,10 +2094,12 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
   if (!again) { clearTimeout(later.get(id)); later.delete(id) }
   const p = (async () => {
     const m = meta(id)
-    const use = model || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
-    if (!use) throw noModel()
     // A combined meeting: an overview across its meetings, from their notes rather than a transcript.
     const whole = m.parts ? partsOf(m) : null
+    // Sized by the transcript and your notes: with Auto, a short meeting's on this computer.
+    const pick = await choose(m, model, 'notes', `${whole ? wholeText(whole) : transcriptText(id)}\n${readText(path.join(dirOf(id), 'notes.md'))}`)
+    const use = pick.id
+    if (!use) throw noModel()
     const k = whole ? { ask: 'Summarize these meetings as one.' } : KINDS[kind || m.kind || 'general'] || KINDS.general
     const lang = SUMMARY_LANGS[language ?? m.summaryLanguage ?? 'auto'] || null
     patchMeta(id, { summarizing: true, summaryError: null, summaryRetryAt: null, kind: kind || m.kind || 'general', ...(model ? { summaryModelPick: model } : {}), ...(language ? { summaryLanguage: language } : {}), ...(again ? {} : { summaryTries: 0 }) })
@@ -2015,7 +2107,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     // turn it off): from who was invited, names said ("Hi, Priya"), the meeting's name and the screen.
     // The summary can then say who's doing what. With one other person invited, it's them.
     if (cfg.meetings?.nameSpeakers !== false && !m.namedAt && ((!onlyGuest(m) && transcript(id).some((l) => l.src === 'them' && l.text)) || voices.of(id)?.speakers >= 2)) {
-      await nameSpeakers(id, { model: use }).catch(() => patchMeta(id, { namedAt: new Date().toISOString() }))
+      await nameSpeakers(id, { model: use, anywhere: pick.anywhere }).catch(() => patchMeta(id, { namedAt: new Date().toISOString() }))
     }
     // A picture still being read (one captured or pasted just before the end) is waited for, a little.
     if ((meta(id).captures || []).some((c) => c.read === 'reading')) await Promise.race([reading, new Promise((r) => setTimeout(r, 20_000))])
@@ -2060,7 +2152,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
       let got = []
       await inPieces(text, size - partAsk(99, 99).length, async (part, i, n) => {
         await progress(id, used, i + 1, n + 1, `${partAsk(i, n)}${part}`)
-        const r = await replyAny(used, [{ role: 'user', text: `${partAsk(i, n)}${part}` }], { system: 'You take accurate meeting notes.' })
+        const r = await replyAny(used, [{ role: 'user', text: `${partAsk(i, n)}${part}` }], { system: 'You take accurate meeting notes.', anywhere: pick.anywhere })
         used = r.model
         got.push(r.text)
       })
@@ -2069,7 +2161,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
       for (let round = 0; got.length > 1 && got.map((g, i) => `### Part ${i + 1}\n${g}`).join('\n\n').length > room && round < 3; round++) {
         const merged = []
         await inPieces(got.map((g, i) => `### Part ${i + 1}\n${g}`).join('\n\n'), size - 600, async (chunk) => {
-          const r = await replyAny(used, [{ role: 'user', text: `${about}\n\nThese are the key points of consecutive parts of one meeting, in order. Merge them into one list of its key points, decisions, action items (who and what) and open questions, as short bullets, in order. Keep every name, number and date. Only what is there.\n\n${chunk}` }], { system: 'You take accurate meeting notes.' })
+          const r = await replyAny(used, [{ role: 'user', text: `${about}\n\nThese are the key points of consecutive parts of one meeting, in order. Merge them into one list of its key points, decisions, action items (who and what) and open questions, as short bullets, in order. Keep every name, number and date. Only what is there.\n\n${chunk}` }], { system: 'You take accurate meeting notes.', anywhere: pick.anywhere })
           used = r.model
           merged.push(r.text)
         })
@@ -2079,7 +2171,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     }
     const prompt = `${head(files)}\n\n${whole ? 'The meetings' : 'Transcript'}:\n${body}`
     await progress(id, used, parts > 1 ? parts + 1 : 1, parts > 1 ? parts + 1 : 1, prompt)
-    const r = await replyAny(used, [{ role: 'user', text: prompt }], { system: 'You take accurate, useful meeting notes.' })
+    const r = await replyAny(used, [{ role: 'user', text: prompt }], { system: 'You take accurate, useful meeting notes.', anywhere: pick.anywhere })
     let out = String(r.text || '').trim()
     // The names it found go to meeting memory; the block isn't part of the notes.
     const block = /```terms\s*\n([\s\S]*?)```/.exec(out)
@@ -2100,9 +2192,13 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
       invite: !!(ev.attendees?.length || ev.agenda),
       ...(whole ? { parts: whole.length } : {}),
     }
-    // Said under the notes: another model stepped in; a model on this computer read it in parts
-    // (its context is short); or took minutes, when a smaller one would be quicker.
-    const said = [r.fellBack ? `${r.fellBack} couldn't be reached (${String(r.why).slice(0, 120)}), so ${r.model} wrote it.` : '']
+    // Said under the notes: Auto wrote a short one here, though you have a cloud model; another model
+    // stepped in; a model on this computer read it in parts (its context is short); or took
+    // minutes, when a smaller one would be quicker.
+    const said = [
+      pick.auto?.why === 'short' && r.model === use ? `Written on this computer by ${r.model}: with Auto, a meeting this short stays here (Settings › Model Providers).` : '',
+      r.fellBack ? `${r.fellBack} ${isLocal(r.fellBack) ? 'couldn\'t write it here' : 'couldn\'t be reached'} (${String(r.why).slice(0, 120)}), so ${r.model} wrote it.` : '',
+    ]
     if (isLocal(r.model) && parts > 1) said.push(`${r.model} takes ${await contextOf(r.model)} tokens at a time, so it read the meeting in ${parts} parts.`)
     const took = (Date.now() - t0) / 1000
     if (isLocal(r.model) && took > 150) {
@@ -2125,9 +2221,10 @@ export async function ask(id, question, { model } = {}) {
   const q = String(question || '').trim()
   if (!q) throw new Error('Ask something')
   const m = meta(id)
-  const use = model || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
-  if (!use) throw noModel()
   const text = transcriptText(id)
+  const pick = await choose(m, model, 'notes', `${text}\n${q}`)
+  const use = pick.id
+  if (!use) throw noModel()
   const { text: notes, shown } = notesFor(readText(path.join(dirOf(id), 'notes.md')).trim(), m.captures || [])
   const summary = readText(path.join(dirOf(id), 'summary.md')).trim()
   await roomy(use, 'questions about a meeting')
@@ -2137,8 +2234,8 @@ export async function ask(id, question, { model } = {}) {
   const left = isLocal(use) ? Math.max(1000, size - summary.length - notes.length - more.length - q.length - 2000) : size
   const context = text.length > left ? `${summary}\n\n(Transcript, the end of it:)\n${text.slice(-left)}` : text
   const mem = memory.about(`${m.title}\n${notes}\n${context}`)
-  const r = await replyAny(use, [{ role: 'user', text: `Meeting: ${m.title}, ${new Date(m.startedAt).toDateString()}\n${mem ? `\n${mem}\n` : ''}${notes ? `\nMy notes:\n${notes}\n` : ''}${more ? `\n${more}\n` : ''}\nTranscript ("You" is me, "Them" the others):\n${context}\n\nQuestion: ${q}\n\nAnswer from the meeting only, briefly. When asked to write something (a follow-up email, an update), write it ready to send, from what was said. Say so if it wasn't covered.` }], { system: 'You answer questions about a meeting from its transcript. Be accurate and brief.' })
-  return { answer: String(r.text || '').trim(), model: r.model, note: r.fellBack ? `${r.fellBack} couldn't be reached, so ${r.model} answered.` : null }
+  const r = await replyAny(use, [{ role: 'user', text: `Meeting: ${m.title}, ${new Date(m.startedAt).toDateString()}\n${mem ? `\n${mem}\n` : ''}${notes ? `\nMy notes:\n${notes}\n` : ''}${more ? `\n${more}\n` : ''}\nTranscript ("You" is me, "Them" the others):\n${context}\n\nQuestion: ${q}\n\nAnswer from the meeting only, briefly. When asked to write something (a follow-up email, an update), write it ready to send, from what was said. Say so if it wasn't covered.` }], { system: 'You answer questions about a meeting from its transcript. Be accurate and brief.', anywhere: pick.anywhere })
+  return { answer: String(r.text || '').trim(), model: r.model, note: r.fellBack ? `${r.fellBack} ${isLocal(r.fellBack) ? 'couldn\'t answer here' : 'couldn\'t be reached'}, so ${r.model} answered.` : null }
 }
 
 // ---------- AI Assist ----------
@@ -2267,7 +2364,10 @@ export function assist(id, { now = false, model } = {}) {
     const lv = ASSIST_LEVELS[assistLevel()]
     if (!now && fresh.reduce((n, l) => n + tokens(l.text).length, 0) < lv.words) return a
     if (!said.length && !now) return a
-    const use = model || cfg.meetings?.assistModel || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
+    // Live suggestions, which Auto keeps on your cloud model: a small model here is slow and weaker
+    // at them (research/local-models.md).
+    const pick = await choose(m, model || cfg.meetings?.assistModel, 'live', null)
+    const use = pick.id
     if (!use) throw noModel()
     const me = String(cfg.name || '').trim()
     const people = guests(m)
@@ -2454,8 +2554,9 @@ export function setBoard(id, on) {
   else { clearTimeout(boardLater.get(id)); boardLater.delete(id) }
   return { on: !!m.board, ...boardOf(id) }
 }
-// The model it uses: the meeting's own pick for its notes, Settings', or the one Automatic is.
-export const boardModel = async (m) => m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel?.() || null
+// The model it uses: the meeting's own pick for its notes, Settings', or Diagrams' (with Auto, your
+// cloud model: small models here draw weaker diagrams).
+export const boardModel = async (m) => (await choose(m, null, 'diagrams', null)).id || null
 // One look: what's new since the last, onto the board. now: Update now (whatever was said since).
 // last: the meeting's last look, once every line is in. Resolves with board.json as it is then.
 export function boardLook(id, { now = false, last = false, model } = {}) {
@@ -2648,7 +2749,8 @@ const wholeText = (ps) => ps.map((p, i) => { const body = bodyOf(p, textOf(p)); 
 export async function askAll(question, { ids, model } = {}) {
   const q = String(question || '').trim()
   if (!q) throw new Error('Ask something')
-  const use = model || cfg.meetings?.model || await helpers.pickModel()
+  // Several meetings' notes: long, so with Auto your cloud model when you have one.
+  const use = (await choose(null, model, 'notes', null)).id
   if (!use) throw noModel()
   let pool = list()
   if (ids?.length) { const want = new Set(ids.map(String)); pool = pool.filter((m) => want.has(m.id)) } else pool = likely(q).map((x) => x.m)
@@ -2941,12 +3043,12 @@ const savingError = (e) => (e?.code === 'EPERM' || e?.code === 'EACCES' ? `Bridg
 // said.
 export async function deck(id, { model } = {}) {
   const m = meta(id)
-  const use = model || m.summaryModelPick || cfg.meetings?.model || await helpers.pickModel()
-  if (!use) throw noModel()
   const summary = readText(path.join(dirOf(id), 'summary.md')).trim()
   const notes = filled(readText(path.join(dirOf(id), 'notes.md')), m.sections).trim()
   const said = summary ? '' : transcriptText(id).slice(0, 30_000)
   if (!summary && !notes && !said) throw new Error('This meeting has nothing to make a deck from yet')
+  const use = (await choose(m, model, 'notes', `${summary}\n${notes}\n${said}`)).id
+  if (!use) throw noModel()
   const people = (m.event?.attendees || []).join(', ')
   const ask = [
     `Meeting: ${m.title}, ${new Date(m.startedAt).toDateString()}${people ? `, with ${people}` : ''}`,

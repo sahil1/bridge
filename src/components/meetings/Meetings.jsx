@@ -21,6 +21,10 @@ import PermissionFix from '../PermissionFix.jsx'
 import { useScreenAccess, useAllowCall, allowSteps } from './allowcall.jsx'
 import { MicFix } from '../Composer.jsx'
 import { sendPicture, pictureUrl } from './screen.js'
+import { canRecordScreen } from './videorec.js'
+import { VideoChoice, VideoChip, VideoAllow } from './video.jsx'
+import { VideoPane, VideoNotes } from './player.jsx'
+import { useCropping, CropButton } from './cropping.jsx'
 import './meetings.css'
 import SpeechSetup, { MeetingsSetup } from './SpeechSetup.jsx'
 import { ActionItems, SinceLastTime } from './work.jsx'
@@ -118,8 +122,12 @@ function RecordingBar({ id, data }) {
       <Meter level={m.levels.you} label={t('You')} />
       {call === 'on' ? <Meter level={data?.levels?.them} label={t('Call')} /> : <span className="mt-nocall muted small" title={data?.callError || call || ''}>{t('Your mic only')}</span>}
       {m.screen && <span className="mt-watching small" title={t('A picture is kept each time {name} changes', { name: m.screen.label })}><Icon name="eye" size={12} /> {m.screen.label}</span>}
+      <VideoChip m={m} />
       {data?.sections?.length > 0 && <span className="mt-watching small" title={t("The part of the meeting it's in now")}><Icon name="flag" size={12} /> {data.sections[data.sections.length - 1].title}</span>}
       <span className="mt-grow" />
+      {/* Record the screen too: before a screen is watched, the choice; while one is, without a video of it, one from now. */}
+      {!m.screen && <VideoChoice m={m} />}
+      {m.screen && !m.screen.video && canRecordScreen() && <button type="button" className="btn small" onClick={() => m.watchScreen({ video: true }).catch(() => {})} title={t("Keep a video of {name} from now, with the meeting's sound, on this computer", { name: m.screen.label })}><Icon name="record" size={12} /> {t('Record the screen')}</button>}
       <ScreenButton m={m} />
       <SectionButton m={m} />
       {r.paused
@@ -127,6 +135,7 @@ function RecordingBar({ id, data }) {
         : <button type="button" className="btn small" onClick={m.pause}><Icon name="pause" size={13} /> {t('Pause')}</button>}
       <button type="button" className="btn small danger-soft" onClick={m.stop}><Icon name="stop" size={13} /> {t('Stop')}</button>
       {r.trouble && <p className="mt-trouble small" role="status">{r.trouble}</p>}
+      {m.screenNote && <p className="mt-trouble small mt-screen-note" role="status">{m.screenNote} <button type="button" className="link-btn" onClick={m.clearScreenNote}>{t('OK')}</button></p>}
       {r.missed > 0 && <p className="mt-trouble small mt-missed" role="status">{phone ? t('Not recorded: {time}, while the phone was locked or another app was in front. It carried on after.', { time: span(r.missed) }) : t('Not recorded: {time}, while the computer was asleep or the mic was taken. It carried on after.', { time: span(r.missed) })}</p>}
       {phone && !r.missed && <p className="mt-hint-call muted small">{t('Keep Bridge AI in front while it records: a phone stops the mic of an app in the background.')}</p>}
       {data?.callError && <p className="mt-trouble small" role="status">{data.callError} {t('Your mic still records.')}</p>}
@@ -303,6 +312,7 @@ export function MeetingsHome({ onOpen }) {
             v === 'list' && anyDictation && <button key="dictations" type="button" role="tab" data-view="dictations" data-kind="dictations" aria-selected={false} onClick={toDictations}><Icon name="wave" size={14} /><span>{t('Dictations')}</span></button>,
           ])}
         </div>
+        {!m?.rec && <VideoChoice m={m} hint={false} />}
         {!m?.rec && <button type="button" className="btn small primary" onClick={() => go({})}><Icon name="mic" size={13} /> {t('Start recording')}</button>}
       </PaneHeader>
     {tab === 'memory' ? <Memory from="meetings" /> : <div className="mt-home">
@@ -311,6 +321,7 @@ export function MeetingsHome({ onOpen }) {
       {tab === 'people' && <PeopleView onOpen={onOpen} person={person} setPerson={setPerson} />}
       {tab === 'list' && <>
       {first ? <MeetingsSetup onDone={doneSetup} /> : <SpeechSetup recording={!!m?.rec} />}
+      {!m?.rec && <VideoAllow m={m} className="mt-video-allow-home" />}
       {next && !m?.rec && (
         <div className="mt-next">
           <Icon name="calendar" size={15} />
@@ -391,7 +402,9 @@ const markOf = (l) => (l.edited ? [tx('edited'), tx('Heard: {text}')]
     : l.cleaned ? [tx('cleaned up'), tx('Fixed by the cleanup, from what the meeting is about. Heard: {text}')]
       : l.fixed ? [tx('fixed'), tx('Heard: {text}')]
         : l.trimmed ? [tx('trimmed'), tx('Your mic heard the call too, so what they said is left out of your line. Heard: {text}')] : null)
-function Line({ l, id, me, onSaved, onError, onWho }) {
+// With a video of the screen (player.jsx): its time plays the video from there (onPlay), and while
+// the video's beside it (playing) so does a click on the line; now: it's being said in the video.
+function Line({ l, id, me, onSaved, onError, onWho, onPlay, playing = false, now = false }) {
   const [edit, setEdit] = useState(null)
   const [note, setNote] = useState(null) // a note at this line's time, while it's written
   // Tapped (a phone, where nothing hovers): its Add a note and Edit show, until it's tapped again.
@@ -408,10 +421,16 @@ function Line({ l, id, me, onSaved, onError, onWho }) {
     try { await api(`/meetings/${encodeURIComponent(id)}/note`, { method: 'POST', body: { text: note, at: l.t0 } }); setNote(null); onSaved() } catch (e) { onError(e.message) }
   }
   return (
-    <div className={`mt-line src-${l.src}${l.edited ? ' edited' : ''}${l.dropped ? ' dropped' : ''}${open ? ' open' : ''}`} onClick={(e) => { if (l.key && !e.target.closest('button, input, textarea, a') && !window.getSelection()?.toString()) setOpen((o) => !o) }}>
+    <div className={`mt-line src-${l.src}${l.edited ? ' edited' : ''}${l.dropped ? ' dropped' : ''}${open ? ' open' : ''}${now ? ' now' : ''}${playing && onPlay ? ' plays' : ''}`} onClick={(e) => {
+      if (e.target.closest('button, input, textarea, a') || window.getSelection()?.toString()) return
+      if (playing && onPlay && edit == null && note == null) onPlay(l.t0)
+      if (l.key) setOpen((o) => !o)
+    }}>
       <button type="button" className={`mt-who${l.name ? ' named' : ''}${l.guess ? ' guess' : ''}`} disabled={!l.key || !onWho} onClick={(e) => onWho?.(e, l)}
         title={l.name ? (l.byVoice ? t('{name}: known by their voice. Click to change', { name: l.name }) : l.guess ? t('{name}: worked out from the meeting. Click to change', { name: l.name }) : t('{name}. Click to change', { name: l.name })) : l.voice && !l.me ? t('Speaker {n}, told apart by voice. Click to name them, once for all their lines', { n: l.voice }) : t('Who said it? Click to name them')}>{l.name || (l.me ? me || t('You') : l.voice ? t('Speaker {n}', { n: l.voice }) : l.src === 'them' ? t('Them') : me || t('You'))}</button>
-      <span className="mt-t">{clock(l.t0)}</span>
+      {onPlay
+        ? <button type="button" className="mt-t mt-t-play" onClick={() => onPlay(l.t0)} aria-label={t('Play the video from {time}', { time: clock(l.t0) })} title={t('Play the video from {time}', { time: clock(l.t0) })}>{clock(l.t0)}</button>
+        : <span className="mt-t">{clock(l.t0)}</span>}
       {l.key && edit == null && (
         <span className="mt-line-acts">
           {l.edited && <button type="button" className="link-btn small" onClick={() => put(null)} title={t('Heard: {text}', { text: l.heard })}>{t('Undo')}</button>}
@@ -489,6 +508,7 @@ function Picture({ id, c, onOpen, onChange, onError }) {
           : <button type="button" className="mt-pic-note" onClick={() => setNote(c.note || '')} title={t('Add a note on what it shows')}>{c.note || (c.kind === 'auto' ? t('The screen changed') : t('Captured'))}{c.source ? <small> · {c.source}</small> : null}</button>}
         <span className="mt-grow" />
         {c.read === 'reading' && <small className="muted">{t('Reading it…')}</small>}
+        <CropButton id={id} c={c} onChange={onChange} onError={onError} />
         <button type="button" className="ghost-btn" onClick={remove} aria-label={t('Remove this picture')} title={t('Remove')}><Icon name="trash" size={12} /></button>
       </figcaption>
       {c.text && <details className="mt-pic-text"><summary className="small muted">{t('The words on it')}</summary><p className="small">{c.text}</p></details>}
@@ -553,7 +573,7 @@ function WrittenFrom({ from, onView }) {
 // in view whatever else you look at: beside it on a wide screen, above it on a phone.
 // Board: AI Assist's live board, a beta feature (board.jsx), there once the server says how it is.
 // A combined meeting (several as one) has its summary, your notes on it and the meetings in it.
-const VIEWS = [['summary', 'sparkle', tx('Summary')], ['assist', 'bulb', tx('Suggestions')], ['board', 'shapes', tx('Board')], ['mine', 'edit', tx('My notes')], ['transcript', 'chat', tx('Transcript')], ['parts', 'layers', tx('Meetings')], ['files', 'paperclip', tx('Files')]]
+const VIEWS = [['summary', 'sparkle', tx('Summary')], ['assist', 'bulb', tx('Suggestions')], ['board', 'shapes', tx('Board')], ['mine', 'edit', tx('My notes')], ['transcript', 'chat', tx('Transcript')], ['video', 'video', tx('Video')], ['parts', 'layers', tx('Meetings')], ['files', 'paperclip', tx('Files')]]
 // Resume recording is offered in the header for this long after a meeting ended (stopped by
 // mistake, or by itself); after, it's in ⋯.
 const RESUME_MS = 4 * 3600e3
@@ -566,6 +586,7 @@ export function MeetingPage({ id, onBack }) {
   const m = useMeetings()
   const live = m?.rec?.id === id
   const { data, refresh } = usePoll(`/meetings/${encodeURIComponent(id)}`, live ? 1500 : 4000)
+  useCropping(id, data, refresh)
   const { data: list } = usePoll('/meetings', 60_000)
   const models = useChatModels()
   // The phone layout (App.jsx): the header keeps to the name and the views, and when it was, who
@@ -600,6 +621,8 @@ export function MeetingPage({ id, onBack }) {
   const [tw, setTw] = usePersisted('cc-mt-transcript-w', 0) // the transcript's width, once dragged
   const [big, setBig] = useState(null) // the picture shown full size (an index in pics)
   const [dropping, setDropping] = useState(false)
+  const [playFrom, setPlayFrom] = useState(null) // { t, n }: a line's time, for the video to play from
+  const [playAt, setPlayAt] = useState(null) // where in the meeting the video is
   const mineRef = useRef(null)
   const colsRef = useRef(null)
   const pageRef = useRef(null)
@@ -635,7 +658,7 @@ export function MeetingPage({ id, onBack }) {
     setMsg({ text: n >= 2 ? t('Told {n} voices apart. Click Speaker on a line to name them, once for all their lines.', { n }) : t('Only one voice was heard clearly, so the lines stay as they are.') })
   }, [data?.voicesWork, data?.voices?.at]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { setNotes(null); setTitle(null); setWhen(null); setPeople(null); setView(null); setOpts(null); setSel(null); setMenu(false); setWhoAt(null); setNaming(null); known.current = null; sent.current = {} }, [id])
+  useEffect(() => { setNotes(null); setTitle(null); setWhen(null); setPeople(null); setView(null); setOpts(null); setSel(null); setMenu(false); setWhoAt(null); setNaming(null); setPlayFrom(null); setPlayAt(null); known.current = null; sent.current = {} }, [id])
   // While it records, your notes are in view whatever else is (pinned); after, it leads with the
   // summary again, whatever was picked while it recorded (unless you're still writing your notes).
   const isRecording = data?.status === 'recording' || data?.status === 'paused'
@@ -832,9 +855,13 @@ export function MeetingPage({ id, onBack }) {
   // With the live board on (and Suggest what to ask off), its Board.
   const lb = data.liveBoard || null
   const showing = recording
-    ? (view && view !== 'mine' ? view : data.assist ? 'assist' : lb?.on ? 'board' : 'transcript')
+    ? (view && view !== 'mine' && view !== 'video' ? view : data.assist ? 'assist' : lb?.on ? 'board' : 'transcript')
     : view || (combined || data.summary || data.summarizing || data.summaryError ? 'summary' : 'mine')
-  const views = VIEWS.filter(([v]) => (combined ? ['summary', 'mine', 'parts'].includes(v) : v !== 'parts') && (v !== 'assist' || recording || data.assist || data.assistItems?.length) && (v !== 'board' || (!!lb && (recording || lb.on || !!lb.id))) && (v !== 'mine' || !recording))
+  // A video of the screen (Record the screen too), once it's recorded: a view of its own, beside the
+  // transcript, whose lines play it from their time.
+  const videos = data.videos || []
+  const hasVideo = !recording && videos.some((v) => v.bytes > 0)
+  const views = VIEWS.filter(([v]) => (combined ? ['summary', 'mine', 'parts'].includes(v) : v !== 'parts') && (v !== 'assist' || recording || data.assist || data.assistItems?.length) && (v !== 'board' || (!!lb && (recording || lb.on || !!lb.id))) && (v !== 'mine' || !recording) && (v !== 'video' || (!recording && videos.length > 0)))
   // The lines the cleanup left out are kept, and shown on request (Put back on one keeps it).
   const all = data.transcript || []
   const lines = all.filter((l) => !l.dropped)
@@ -854,9 +881,15 @@ export function MeetingPage({ id, onBack }) {
   const shown = inNotes(notes ?? data.notes).map((f) => caps.find((c) => c.file === f)).filter(Boolean)
   const pics = [...shots, ...caps.filter((c) => c.kind === 'paste')].map((c) => ({ c, src: pictureUrl(id, c), name: c.note ? t('{name} at {time}', { name: c.note, time: clock(c.t) }) : c.kind === 'paste' ? t('Picture at {time}', { time: clock(c.t) }) : t('The screen at {time}', { time: clock(c.t) }) }))
   const openPic = (c) => setBig(Math.max(0, pics.findIndex((p) => p.c.id === c.id)))
-  // The transcript beside the view (wide); while it records, what's picked beside your notes.
-  const beside = !recording && wide && split && showing !== side
+  // The transcript beside the view (wide), always beside the video; while it records, what's picked
+  // beside your notes.
+  const watching = showing === 'video'
+  const beside = !recording && wide && (split || watching) && showing !== side
   const two = recording ? wide : beside
+  // A line's time plays the video from there; the line being said as it plays is marked.
+  const play = (at) => { setView('video'); setSel(null); setPlayFrom((p) => ({ t: at, n: (p?.n || 0) + 1 })) }
+  let nowLine = null
+  if (watching && playAt != null) for (const l of lines) if (l.t0 <= playAt + 0.5 && (!nowLine || l.t0 >= nowLine.t0)) nowLine = l
   // As text: who said what, and a heading where each section starts.
   const said = () => {
     const out = []
@@ -980,7 +1013,7 @@ export function MeetingPage({ id, onBack }) {
           </button>
         ))}
       </div>
-      {wide && !recording && showing !== side && <button type="button" className={`win-btn${split ? ' on' : ''}`} onClick={() => setSplit(!split)} aria-pressed={split} aria-label={combined ? (split ? t('Hide the meetings beside it') : t('Show the meetings beside it')) : split ? t('Hide the transcript beside it') : t('Show the transcript beside it')} title={combined ? (split ? t('Hide the meetings beside it') : t('Show the meetings beside it')) : split ? t('Hide the transcript beside it') : t('Show the transcript beside it')}><Icon name="panel-right" size={14} /></button>}
+      {wide && !recording && showing !== side && !watching && <button type="button" className={`win-btn${split ? ' on' : ''}`} onClick={() => setSplit(!split)} aria-pressed={split} aria-label={combined ? (split ? t('Hide the meetings beside it') : t('Show the meetings beside it')) : split ? t('Hide the transcript beside it') : t('Show the transcript beside it')} title={combined ? (split ? t('Hide the meetings beside it') : t('Show the meetings beside it')) : split ? t('Hide the transcript beside it') : t('Show the transcript beside it')}><Icon name="panel-right" size={14} /></button>}
       <button type="button" className="win-btn mt-hb" onClick={save} disabled={busy === 'save'} aria-label={t('Save')} title={t('Save as Markdown in your notes folder')}><Icon name="download" size={14} /></button>
       <AiAssist className="btn small mt-ai-btn" compact={phone} on={recording && (!!data.assist || !!lb?.on)} items={assists} />
       <span className="menu-anchor">
@@ -1033,7 +1066,7 @@ export function MeetingPage({ id, onBack }) {
     </section>
   )
   const transcriptPane = combined ? partsPane : (
-    <section ref={tRef} className={`mt-transcript${beside || showing === 'transcript' ? '' : ' off'}`} aria-label={t('Transcript')}>
+    <section ref={tRef} className={`mt-transcript${beside || showing === 'transcript' || watching ? '' : ' off'}`} aria-label={t('Transcript')}>
       <div className="mt-thead mt-phead">
         <span className="muted small">{again ? (data.progress != null ? t('Transcribing again: {n}%', { n: data.progress }) : t('Transcribing again…')) : lines.length ? `${lines.length === 1 ? t('{n} line', { n: lines.length }) : t('{n} lines', { n: lines.length })}${shots.length ? `, ${shots.length === 1 ? t('{n} picture', { n: shots.length }) : t('{n} pictures', { n: shots.length })}` : ''}` : t('Transcript')}</span>
         <span className="mt-grow" />
@@ -1042,13 +1075,13 @@ export function MeetingPage({ id, onBack }) {
         {lines.length > 0 && <button type="button" className="ghost-btn" onClick={() => setFix({ from: '' })} aria-label={t('Fix a word')} title={t('Fix a misheard word or name everywhere in this meeting')}><Icon name="edit" size={12} /><span className="lbl"> {t('Fix a word')}</span></button>}
         {done && <button type="button" className="ghost-btn" onClick={() => setDialog('again')} aria-label={t('Transcribe again')} title={t('Transcribe it again from the recording')}><Icon name="refresh" size={12} /><span className="lbl"> {t('Transcribe again')}</span></button>}
         {lines.length > 0 && <button type="button" className="ghost-btn" onClick={() => copy(said(), t('Copied the transcript.'))} aria-label={t('Copy the transcript')} title={t('Copy the transcript')}><Icon name="copy" size={12} /><span className="lbl"> {t('Copy')}</span></button>}
-        {beside && <button type="button" className="ghost-btn mt-thide" onClick={() => { setSplit(false); setSel(null) }} aria-label={t('Hide the transcript')} title={t('Hide the transcript (the view gets the room)')}><Icon name="panel-right" size={14} /></button>}
+        {beside && !watching && <button type="button" className="ghost-btn mt-thide" onClick={() => { setSplit(false); setSel(null) }} aria-label={t('Hide the transcript')} title={t('Hide the transcript (the view gets the room)')}><Icon name="panel-right" size={14} /></button>}
       </div>
       <TalkTime lines={lines} me={data.me} />
       <div className="mt-lines" ref={listRef} onMouseUp={picked} onTouchEnd={picked} onScroll={(e) => { const el = e.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; setSel(null) }}>
-        {!lines.length && !(recording && data.partial) && <p className="muted small mt-hint">{recording ? t('The transcript appears here as people talk, a few seconds behind.') : data.waiting || again ? t('Transcribing…') : t('Nothing was transcribed.')}{done && !lines.length && <> <button type="button" className="link-btn" onClick={() => setDialog('again')}>{t('Transcribe it again')}</button></>}</p>}
+        {!lines.length && !(recording && data.partial) && <p className="muted small mt-hint">{recording ? t('The transcript appears here as people talk, a few seconds behind.') : data.waiting || again ? t('Transcribing…') : !data.error && data.seconds > 0 ? t('No one was heard speaking in the {time} recorded, so nothing was transcribed.', { time: length(data.seconds) }) : t('Nothing was transcribed.')}{done && !lines.length && <> <button type="button" className="link-btn" onClick={() => setDialog('again')}>{t('Transcribe it again')}</button></>}</p>}
         {timeline.map((x, i) => (x.k === 'line'
-          ? <Line key={x.l.key || `${x.l.t0}-${x.l.src}-${i}`} l={x.l} id={id} me={data.me} onSaved={refresh} onError={(t) => setMsg({ error: true, text: t })} onWho={(e, l) => setWhoAt({ x: e.clientX, y: e.clientY, l })} />
+          ? <Line key={x.l.key || `${x.l.t0}-${x.l.src}-${i}`} l={x.l} id={id} me={data.me} onSaved={refresh} onError={(t) => setMsg({ error: true, text: t })} onWho={(e, l) => setWhoAt({ x: e.clientX, y: e.clientY, l })} onPlay={hasVideo ? play : undefined} playing={watching} now={x.l === nowLine} />
           : x.k === 'sec'
             ? <SectionHead key={`sec-${x.i}-${x.s.t}`} id={id} s={x.s} i={x.i} onChange={refresh} onError={(t) => setMsg({ error: true, text: t })} />
           : x.k === 'pic'
@@ -1157,6 +1190,8 @@ export function MeetingPage({ id, onBack }) {
     <section className="mt-notes" aria-label={t('Board')}><BoardPane id={id} data={data} onChange={refresh} onMsg={setMsg} models={models} /></section>
   ) : showing === 'files' ? (
     <section className="mt-notes" aria-label={t('Files')}><FilesPane id={id} data={data} onChange={refresh} onMsg={setMsg} shots={shots} pictureUrl={pictureUrl} onOpenPic={openPic} /></section>
+  ) : watching ? (
+    <section className="mt-notes mt-video-view" aria-label={t('Video')}><VideoPane id={id} videos={videos} at={playFrom} onTime={setPlayAt} onChange={refresh} onMsg={setMsg} /></section>
   ) : null
 
   return (
@@ -1171,9 +1206,11 @@ export function MeetingPage({ id, onBack }) {
         {canResume && recent && phone && <div className="mt-resume-row">{resumeBtn}</div>}
         {micErr && <MicFix stale={micErr.stale} onClose={() => setMicErr(null)} onAllowed={resumeRec} />}
         {msg && <p className={`small mt-msg ${msg.error ? 'error-text' : 'muted'}`} role="status">{msg.text}{msg.act && <> <button type="button" className="link-btn" onClick={msg.act.run}>{msg.act.label}</button></>}</p>}
+        {/* A video of the screen that ended early, or wasn't kept: why (the Video view says it too). */}
+        {!recording && !watching && <VideoNotes videos={videos} />}
         <div ref={colsRef} className={`mt-cols${two ? '' : ' single'}${two && tw ? ' sized' : ''}${recording ? ' pinned' : ''}`} style={two && tw ? { '--mt-tw': `${tw}px` } : undefined}>
           {recording ? mine : main}
-          {two && <Handle axis="x" size={tw || Math.round((colsRef.current?.clientWidth || 900) * 0.44)} min={260} max={Math.max(320, (colsRef.current?.clientWidth || 900) - 320)} invert onSize={setTw} onToggle={recording ? undefined : () => setSplit(false)} label={recording ? t('Resize split') : t('Resize the transcript')} />}
+          {two && <Handle axis="x" size={tw || Math.round((colsRef.current?.clientWidth || 900) * 0.44)} min={260} max={Math.max(320, (colsRef.current?.clientWidth || 900) - 320)} invert onSize={setTw} onToggle={recording || watching ? undefined : () => setSplit(false)} label={recording ? t('Resize split') : t('Resize the transcript')} />}
           {recording && main}
           {transcriptPane}
         </div>

@@ -71,11 +71,13 @@ own on its own Cloudflare account:
   `"stats": { "url": "https://counts.<your domain>" }` in `config.example.json` (your build's
   default), in `~/.bridge-ai/config.json` (one computer), or as `BRIDGE_STATS_URL`. `"url": ""` sends
   nothing. People still see what would be sent and turn it off in one click.
-- **The relay**: anyone can put one on their own Cloudflare account from Settings › Devices. One
+- **The relay**: anyone can put one on their own Cloudflare account from Settings › Devices (Account &
+  Devices once there are accounts). One
   for many computers is [relay/HOSTED.md](relay/HOSTED.md), switched on by `HOSTED_URL` in
   `server/hosted.js`, for accounts of your own.
 - **Accounts** (for Early Access and the hosted relay): [account/](account/README.md), switched on by
-  `ACCOUNTS_URL` and `ACCOUNTS_PUBLIC_KEY` in `server/account.js`. Empty, nothing about accounts shows.
+  `ACCOUNTS_URL` and `ACCOUNTS_PUBLIC_KEY` in `server/account.js`. Empty, nothing about accounts shows
+  (Settings › Devices has no Account tab, and keeps that name).
 - **The privacy policy**: `npm test -- privacy-hosts` fails when the code contacts a host PRIVACY.md
   doesn't cover, so a new one goes in PRIVACY.md (by name, or under a category it states) in the
   same change.
@@ -83,6 +85,26 @@ own on its own Cloudflare account:
 ## Releases, betas and rollouts
 
 For the project's owner, or a fork's: what `npm run release` puts out, and who is offered it.
+
+- **The cadence.** Changes go to main through the week, each tested for what it changes, and your
+  own computers get each night's main (Nightly, below), tested for what changed since the night
+  before. A release goes to everyone at the weekend: Friday night's run tests every test on main,
+  and the release runs every test again before it's built. A fix that can't wait is a patch release
+  at any time.
+- **Shipping from your computer, a step at a time** (`npm run ship`, `scripts/ship.js`; git and the
+  GitHub CLI signed in). `npm run ship` says where things stand: this branch, main's version, the
+  newest nightly, beta and release, the runs going, and this computer's version and channel.
+  `npm run ship -- nightly` puts this branch onto main (a pull request, merged at once) and starts a
+  nightly from main now; it's tested for what changed since the last nightly, and computers on
+  Nightly are offered it within half an hour and install it while you're away, with no wait.
+  `npm run ship -- beta` makes main the next beta (main's own when it names one not out yet, else
+  the next; `--patch` for a patch's), with its notes from the commits since the last beta or release
+  unless its CHANGELOG section is written, and releases it to Early Access, tested since the last
+  nightly. `npm run ship -- stable` releases the version main names (a beta's version, or main's
+  own) to everyone, once its CHANGELOG section is written, after every test. `npm run ship --
+  promote 3.20.0 50` widens it (0 pauses). `npm run ship -- join` puts this computer on Nightly
+  (`--install` first installs the newest nightly where the version here is too old for them). Each
+  takes `--dry-run`, and `--wait` to follow its run to the end.
 
 - **A release for everyone.** Set the version in `package.json` and `desktop/package.json` (3.13.0),
   write its `## 3.13.0` section in CHANGELOG.md, merge to main, then `npm run release`. Everyone on
@@ -97,6 +119,17 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
 - **Pausing.** `npm run rollout -- 3.13.0 0`: nobody else is offered it, Early Access included, not
   even by Check now, and it isn't installed by itself. Computers that have it keep it; put it right
   with a 3.13.1, or raise the percentage again to carry on.
+- **Without a terminal.** Two workflows do the same on GitHub, from main only, with GitHub's own
+  token. Actions › Release start › Run workflow (`release-start.yml`) runs `scripts/release.js`'s
+  checks and pushes the tag, then starts the Release workflow and the Docker image at it (a tag
+  pushed with GitHub's token starts nothing by itself; started at the tag, each does what the tag's
+  push would). Actions › Rollout › Run workflow (`rollout.yml`), with the version and the
+  percentage, runs `scripts/rollout.js`. Each refuses what the script refuses, and the run says why.
+  The project's admin view (boldbridge.ai/admin, in the private repo) has Release, Promote (10, 50,
+  100), Pause and Nightly now buttons that only start these and `nightly.yml`: its token is a
+  fine-grained one for this repo only, with Actions: Read and write, Contents: Read and Metadata:
+  Read, so it can't write to the repo itself. Release from there sends the version it showed, and
+  release-start.yml refuses it if main has moved on to another.
 - **A beta, for Early Access.** Set the version to a pre-release, `3.13.0-beta.1` in both
   package.json files, give it a `## 3.13.0-beta.1` section in CHANGELOG.md (a few lines is enough),
   and `npm run release`. GitHub marks it a pre-release, so it's never the latest release: not the
@@ -118,7 +151,7 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
   (and Linux's package); a copy run from a clone or in Docker isn't offered it. `--check <code>`
   says what a code says.
 - **Testers with a Bold Bridge account.** Once accounts are live (account/README.md), a tester asks
-  for Early Access in Settings › Account (or the website's form), you say yes in the admin view, and
+  for Early Access in Settings › Account & Devices (or the website's form), you say yes in the admin view, and
   their computers take a code from the account by themselves, renewed while they have it, for the
   account's id (usage stats never carry an email). Saying no, or suspending the account, ends it
   within 6 hours. The paste-a-code way above stays for anyone without an account.
@@ -127,10 +160,24 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
   `server/earlyaccess.js` before the next release. A code made with `--days` ends by itself.
 - **Leaving.** Bridge AI never goes back to an older version: a tester who leaves Early Access, or
   whose code ends, stays on the beta they have until a regular release is newer.
+- **Nightly builds, for your own computers.** `.github/workflows/nightly.yml` builds main each night
+  it has changed (about 3 AM in California; Actions › Nightly › Run workflow builds one now) through
+  the release workflow: the tests for what changed since the last nightly on all three systems,
+  then the app signed and notarized as a release is, at a version like `3.20.1-nightly.20261116.57` (`scripts/nightly.js`: what main is
+  heading for, the day and the run), set in that build only, so main gets no commit. It's a GitHub
+  pre-release, never the latest, with the changes since the last nightly as its notes; no Android
+  app, no Docker image, and only the newest 7 are kept. Nothing in the app offers it: on each of
+  your computers, once, with the desktop app open, run `bridge-ai nightly on`, or without the
+  command, `curl -X POST -H "Authorization: Bearer $(cat ~/.bridge-ai/api-token)" -H
+  'content-type: application/json' -d '{}' http://127.0.0.1:7420/api/updates/nightly`. It's refused
+  through the relay. That computer then takes the newest of everything, nightlies, betas and
+  releases, at once and by itself while you're away; Stable and Early Access are never offered a
+  nightly. About & Updates shows Nightly with Leave Nightly, which keeps the version you have until a
+  regular release passes it. Its usage stats and crash reports say Nightly.
 
 ## Before you open a pull request
 
-- `npm run build` passes, and `npm test` (the tests for what you changed; `test/README.md` says what each covers). CI runs every test on macOS, Windows and Linux.
+- `npm run build` passes, and `npm test` (the tests for what you changed; `test/README.md` says what each covers). CI runs the tests for what the pull request changes on macOS, Windows and Linux; every test runs before a release.
 - No personal data: names, email addresses, company names, home folder paths or tokens. Settings belong in `~/.bridge-ai`, not in the repo.
 - `npm run check:private` passes. It looks for keys, tokens, home folder paths, email addresses, session transcripts and Bridge AI data files, plus your own name, places and hostnames from your `~/.bridge-ai` settings and the names in your Memory. `npm install` turns on git hooks that run it before every commit (the staged files) and every push (each commit being pushed, so something added and then deleted is still caught). Releases, app builds and CI run it too. `--no-verify` skips a hook; the push check still catches what that commit let through.
 - Commit messages say what changed, in your words. The hooks refuse a message with a link to an AI coding session or a line crediting an AI (`Claude-Session:`, `Co-Authored-By: Claude`, "Generated with Claude Code"): public history can't be taken back.

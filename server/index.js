@@ -68,7 +68,9 @@ import * as consult from './consult.js'
 import * as insights from './insights.js'
 import * as chatModels from './chatmodels.js'
 import * as llm from './llm.js'
+import * as modelJobs from './modeljobs.js'
 import * as meetings from './meetings.js'
+import * as meetVideo from './meetvideo.js'
 import * as boards from './boards.js'
 import * as meetBoard from './meetboard.js'
 import * as labs from './labs.js'
@@ -131,6 +133,7 @@ try { fs.chmodSync(DATA, 0o700) } catch { /* Windows, or a folder that isn't you
 ensureDir(CACHE)
 const cfg = loadConfig()
 labs.configure(cfg) // more models (Qwen, DeepSeek, Kimi, GLM): hidden unless cfg.moreModels
+llm.configure(cfg) // the local model you picked in Settings › Model Providers (llmModel), if any
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
 crashes.watch(VERSION) // an error nothing catches is written down as the server stops, to report later
 let TZ = cfg.location?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -444,7 +447,7 @@ const rootOf = async (pane) => {
   }
   // A folder Studio's home found one of your files in (studiofound.js).
   if (String(pane).startsWith('found:')) return studioFound.foundDir(String(pane).slice(6))
-  // Folders: your home folder (home) and this computer's drives (drive:<key>).
+  // Studio's home: your home folder (home) and this computer's drives (drive:<key>).
   if (explorer.isFilesRoot(pane)) return explorer.rootDir(String(pane))
   const p = ((await rt.fleet()).panes || []).find((x) => x.paneId === pane)
   if (!p) throw new Error(`No pane ${pane}`)
@@ -455,12 +458,12 @@ const rootOf = async (pane) => {
 // (trials: { home: true } in the config; src/trials.js). Their routes answer only then.
 // One that's no longer a beta stays in older configs, read by nothing: Memory, now a page for
 // everyone; Studio, Sign PDFs, Comments and @bridge, Make a Sheet, Back and Forward, Tab Groups,
-// Files (Folders now) and Recommended Settings, part of the app since 3.19.0.
+// Files (Folders, now Studio's home) and Recommended Settings, part of the app since 3.19.0.
 const TRIALS = ['home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'routines', 'mcp-server', 'meeting-board', 'assist-answers', 'call-video']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 
-// ---------- Folders (explorer.js) ----------
+// ---------- Studio's home: your folders (explorer.js) ----------
 // Your folders as Finder shows them: its sidebar, a folder's listing, Get Info, a folder's size and a
 // search. The home folder and the drives are roots for the agents' file routes too (the viewer,
 // Open in its app, Show in Finder), only to read for now: anything that would change a file through
@@ -470,7 +473,7 @@ const LOOK_ONLY = new Set(['reveal', 'open'])
 app.use('/api/agents/:pane', async (req, res, next) => {
   if (!explorer.isFilesRoot(req.params.pane)) return next()
   if (!['GET', 'HEAD'].includes(req.method) && !(req.method === 'POST' && req.path === '/fileop' && LOOK_ONLY.has(req.body?.op))) {
-    return res.status(403).json({ error: 'Folders is read-only for now: nothing is renamed, moved or deleted from it yet.', code: 'readOnly' })
+    return res.status(403).json({ error: 'Your home folder and drives are read-only here for now: nothing is renamed, moved or deleted through them yet.', code: 'readOnly' })
   }
   try {
     const site = /^\/site\//.test(req.path)
@@ -574,10 +577,11 @@ app.post('/api/studio/ask', wrap(async (req) => {
   await studio.noteAsk(root, q.path, adapter(kind).label)
   return { ...out, name: adapter(kind).label }
 }))
-// AI Assist's Sign this (signing.js): a PDF explained by the model meeting notes use unless you pick
-// another, then signed in a copy in _signed beside it. A scan is read on a Mac (doctext.js).
+// AI Assist's Sign this (signing.js): a PDF explained by the model meeting notes use when you've
+// picked one, else AI Assist's (pickFor), then signed in a copy in _signed beside it. A scan is read
+// on a Mac (doctext.js).
 signing.setHelpers({
-  reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: () => (cfg.meetings?.model ? Promise.resolve(cfg.meetings.model) : pickMeetingModel()),
+  reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: (text) => (cfg.meetings?.model ? Promise.resolve(cfg.meetings.model) : pickModelFor('assist', { text })),
   describe: (id) => chatModels.describe(id), via: async (id) => (await chatModels.models().catch(() => [])).find((m) => m.id === id)?.via || null,
   contextOf: (id) => chatModels.contextOf(id), scanText: doctext.ocrBin() ? (file) => doctext.textOf(file, 200_000) : null,
 })
@@ -609,69 +613,74 @@ app.post('/api/studio/open-in', wrap(async (req) => {
   return studioApps.openIn(real)
 }))
 // Edit in place: part of a document rewritten as asked, by the model picked for Studio (Settings:
-// studio.model), else the one the app reaches first (your agent's sign-in, a key, one on this
-// computer). writer: which that is, and the others to pick from.
-const studioModel = async () => cfg.studio?.model || await pickMeetingModel()
+// studio.model), else AI Assist's (pickFor: with Auto, the local model for a short one once it's
+// downloaded, else the one the app reaches first). text: what the job sends, for its size; none
+// (writer, which says which model it would be): as for a long one. writer: which that is, and the
+// others to pick from.
+const studioModel = async (text) => cfg.studio?.model || await pickModelFor('assist', { text })
+const jobText = (b) => JSON.stringify(b || {})
 app.get('/api/studio/writer', wrap(async () => {
   const list = await chatModels.models().catch(() => [])
-  const id = await studioModel()
+  let id = null
+  let why = null
+  try { id = await studioModel() } catch (e) { why = e.message }
   const d = list.find((x) => x.id === id)
-  return { model: id ? { id, label: d?.label || String(id).split(':').slice(1).join(':') || id, provider: d?.provider || null, missing: !d } : null, picked: !!cfg.studio?.model, models: list.map((m) => ({ id: m.id, label: m.label, provider: m.provider, via: m.via })) }
+  return { model: id ? { id, label: d?.label || String(id).split(':').slice(1).join(':') || id, provider: d?.provider || null, missing: !d } : null, why, picked: !!cfg.studio?.model, models: list.map((m) => ({ id: m.id, label: m.label, provider: m.provider, via: m.via })) }
 }))
+// Which model wrote it, by its name.
+const byName = async (id) => (await chatModels.models().catch(() => [])).find((x) => x.id === id)?.label || llm.labelOf(id) || id
 app.post('/api/studio/rewrite', async (req, res) => {
   try {
-    const model = String(req.body?.model || '') || await studioModel()
+    const model = String(req.body?.model || '') || await studioModel(jobText(req.body))
     const out = await studioFound.rewrite({ ...req.body, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
-    const d = (await chatModels.models().catch(() => [])).find((x) => x.id === model)
-    res.json({ ...out, model, by: d?.label || model })
+    res.json({ ...out, model, by: await byName(model) })
   } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
 })
 // @bridge in a document's comment (Comments and @bridge): AI Assist's reply for the thread and,
 // when asked for, the words rewritten, by the model AI Assist uses for documents.
 app.post('/api/studio/comment-assist', async (req, res) => {
   try {
-    const model = String(req.body?.model || '') || await studioModel()
+    const model = String(req.body?.model || '') || await studioModel(jobText(req.body))
     const out = await commentAssist.assist({ ...req.body, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
-    const d = (await chatModels.models().catch(() => [])).find((x) => x.id === model)
-    res.json({ ...out, model, by: d?.label || model })
+    res.json({ ...out, model, by: await byName(model) })
   } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
 })
 // @bridge in a comment on a PowerPoint's slide, or a shape on it (Comments and @bridge): a reply,
 // and the shape's words or the slide rewritten, or a new slide after it, to keep or discard.
 app.post('/api/studio/deck/comment', async (req, res) => {
   try {
-    const model = String(req.body?.model || '') || await studioModel()
+    const model = String(req.body?.model || '') || await studioModel(jobText(req.body))
     const out = await commentAssist.deckAssist({ ...req.body, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
-    const d = (await chatModels.models().catch(() => [])).find((x) => x.id === model)
-    res.json({ ...out, model, by: d?.label || model })
+    res.json({ ...out, model, by: await byName(model) })
   } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
 })
 // The change an agent asked in place wrote beside the file, taken once (studio.takeProposal).
 app.get('/api/studio/proposal', wrap(async (req) => { const q = sq(req); return studio.takeProposal(await rootOf(q.root), q.path) }))
-// Decks written by a model (the one meeting notes use, unless one's picked): a whole deck from what
-// it's about or a document, a slide rewritten, a slide added. The page shows it before it's taken.
-app.get('/api/studio/models', wrap(async () => ({ models: (await chatModels.models().catch(() => [])).map(({ id, label, provider, via }) => ({ id, label, provider, via })), pick: cfg.meetings?.model || await pickMeetingModel() })))
+// Decks written by a model (the one meeting notes use when you've picked one, else AI Assist's): a
+// whole deck from what it's about or a document, a slide rewritten, a slide added. The page shows it
+// before it's taken.
+app.get('/api/studio/models', wrap(async () => ({ models: (await chatModels.models().catch(() => [])).map(({ id, label, provider, via }) => ({ id, label, provider, via })), pick: cfg.meetings?.model || await pickModelFor('assist').catch(() => null) })))
 app.post('/api/studio/deck/ai', wrap(async (req) => {
   const b = req.body || {}
   const mode = ['deck', 'slide', 'add'].includes(b.mode) ? b.mode : 'deck'
-  const use = String(b.model || '') || cfg.meetings?.model || await pickMeetingModel()
-  if (!use) throw Object.assign(new Error('No model to write with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers.'), { code: 'noModel' })
   const source = await studio.deckSource(b.from?.root ? { root: await rootOf(String(b.from.root)), path: String(b.from.path || '') } : null, b.upload)
   if (mode === 'deck' && !String(b.prompt || '').trim() && !source) throw new Error('Say what the deck is about, or pick a document to make it from')
   const ask = studio.deckAsk({ mode, prompt: b.prompt, slides: Array.isArray(b.slides) ? b.slides.map(String) : [], at: b.at, source: source?.text, sourceName: source?.name, count: b.count })
+  const use = String(b.model || '') || cfg.meetings?.model || await pickModelFor('assist', { text: ask.prompt })
+  if (!use) throw Object.assign(new Error('No model to write with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers.'), { code: 'noModel' })
   const r = await chatModels.reply(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, feature: 'studio' })
-  return { ...studio.deckAnswer(r?.text), model: use }
+  return { ...studio.deckAnswer(r?.text), model: use, by: await byName(use) }
 }))
 // A sheet's AI Assist (studio.sheetAsk): the cells picked and what to do with them, answered by
-// Studio's model (the one picked for it, else the one the app reaches first) as a change the page
-// shows on the sheet to keep or discard.
+// Studio's model (the one picked for it, else AI Assist's) as a change the page shows on the sheet
+// to keep or discard.
 // mode: 'book', a whole workbook made from what it's for (an empty sheet's Make a sheet).
 const sheetAi = async (req, thread = null) => {
   const b = req.body || {}
-  const use = String(b.model || '') || await studioModel()
-  if (!use) throw Object.assign(new Error('No model to answer with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers.'), { code: 'noModel' })
   const book = b.mode === 'book' && !thread
   const ask = book ? studio.bookAsk({ instruction: b.instruction, rel: sq(req).path }) : studio.sheetAsk({ rel: sq(req).path, instruction: b.instruction, selection: b.selection, where: b.where, sheet: b.sheet, sheets: b.sheets, used: b.used, thread })
+  const use = String(b.model || '') || await studioModel(ask.prompt)
+  if (!use) throw Object.assign(new Error('No model to answer with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers.'), { code: 'noModel' })
   const r = await chatModels.reply(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, json: book ? studio.BOOK_SCHEMA : studio.SHEET_SCHEMA, feature: 'studio' })
   const d = (await chatModels.models().catch(() => [])).find((x) => x.id === use)
   return { ...(book ? studio.bookAnswer(r?.text) : studio.sheetAnswer(r?.text)), model: use, by: d?.label || String(use).split(':').slice(1).join(':') || use }
@@ -704,7 +713,7 @@ app.post('/api/agents/:pane/commit', wrap(async (req) => files.commit(await root
 app.post('/api/agents/:pane/push', wrap(async (req) => files.push(await rootOf(req.params.pane))))
 // The branch's pull request (cached; gh goes over the network), a drafted title and body, and opening one.
 app.get('/api/agents/:pane/pr', wrap(async (req) => pr.status(await rootOf(req.params.pane), { refresh: req.query.refresh === '1' })))
-app.post('/api/agents/:pane/pr/draft', wrap(async (req) => pr.draft(await rootOf(req.params.pane), { base: req.body?.base })))
+app.post('/api/agents/:pane/pr/draft', wrap(async (req) => pr.draft(await rootOf(req.params.pane), { base: req.body?.base, route: (text) => pickFor('tidy', { text }) })))
 app.post('/api/agents/:pane/pr', wrap(async (req) => { const out = await pr.create(await rootOf(req.params.pane), req.body || {}); counts.add('prs.opened'); return out }))
 app.get('/api/agents/:pane/diff', wrap(async (req) => files.gitDiff(await rootOf(req.params.pane), String(req.query.path || ''))))
 // A file in the agent's folder as it is: in parts when asked (Range: a video's player asks for the
@@ -1695,7 +1704,7 @@ app.delete('/api/voice/natural', wrap(() => voicespeak.remove()))
 // None picked: the local model built in, once it's downloaded (the text stays on this computer).
 app.post('/api/dictation/edit', wrap(async (req) => {
   onComputer(req)
-  const model = cfg.dictation?.editModel || ((await llm.ready().catch(() => false)) ? llm.ID : null)
+  const model = cfg.dictation?.editModel || await llm.current().catch(() => null)
   return dictation.edit({ text: req.body?.text, instruction: req.body?.instruction, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
 }))
 // Tidy what I say (dictation.js tidy; a trial: dictation-cleanup): what you said from another app,
@@ -1706,9 +1715,9 @@ app.post('/api/dictation/edit', wrap(async (req) => {
 // A slow answer, an error or one that isn't what you said comes back as an error with its code,
 // and the page pastes your words as you said them.
 app.use('/api/dictation/tidy', trialOff('dictation-cleanup', 'Tidy what I say'))
-const tidyAuto = async () => ((await llm.ready().catch(() => false)) ? llm.ID : (await chatModels.localModel(cfg.localModel).catch(() => null))?.id || null)
+const tidyAuto = async () => (await llm.current().catch(() => null)) || (await chatModels.localModel(cfg.localModel).catch(() => null))?.id || null
 const tidyModel = async () => cfg.dictation?.tidyModel || tidyAuto()
-const tidyLabel = (id) => (id === llm.ID ? llm.MODELS[0].label : String(id).split(':').slice(1).join(':') || String(id))
+const tidyLabel = (id) => llm.labelOf(id) || String(id).split(':').slice(1).join(':') || String(id)
 const tidyLocal = async () => { const s = await llm.status(); return { offered: s.offered, why: s.why, have: s.have, downloading: s.downloading, mb: s.model.mb, label: s.model.label } }
 // model: the one it uses now ({ id, label, provider, via, missing: not there now }), or null;
 // auto: the one it uses with none picked.
@@ -1720,7 +1729,7 @@ app.get('/api/dictation/tidy', wrap(async () => {
 }))
 app.post('/api/dictation/tidy/warm', wrap(async () => {
   const model = await tidyModel()
-  if (model !== llm.ID || !(await llm.warm())) return { warming: false }
+  if (!llm.isOurs(model) || !(await llm.warm(model))) return { warming: false }
   // Its instructions read once as it loads, so the first words to tidy don't wait for that either.
   dictation.tidy({ text: 'Okay.', model, reply: (id, msgs, o) => chatModels.reply(id, msgs, { ...o, feature: 'dictation' }), ms: 60_000 }).catch(() => {})
   return { warming: true }
@@ -1731,7 +1740,7 @@ app.post('/api/dictation/tidy', async (req, res) => {
     if (!model) return res.status(409).json({ error: 'There\'s no model to tidy with yet', code: 'no-model', local: await tidyLocal() })
     const into = typeof req.body?.app === 'string' ? req.body.app.slice(0, 80) : null
     // The local model still loading (started as the key went down, after a while unused): 2 s more.
-    const more = model === llm.ID && llm.loading() ? 2000 : 0
+    const more = llm.isOurs(model) && llm.loading() ? 2000 : 0
     // With About you on (Memory), the names in it, so they come out spelled right.
     const out = await dictation.tidy({ text: req.body?.text, app: into, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, { ...o, feature: 'dictation' }), more, names: meetMemory.personaNames() })
     res.json({ ...out, model, by: tidyLabel(model) })
@@ -1767,6 +1776,7 @@ setInterval(() => dictations.tidy().catch(() => {}), 6 * 60 * 60 * 1000).unref()
 
 // ---------- Meeting notes (meetings.js; speech engines in speech.js) ----------
 meetings.configure(cfg)
+meetVideo.configure(cfg)
 memoryView.configure(cfg, { chief: CHIEF_DIR })
 memoryView.keepFresh()
 voices.configure(cfg)
@@ -1780,11 +1790,73 @@ if (cfg.setupDone) projects.upgrading()
 // LM Studio's before the local model built in, which is only there once you've downloaded it).
 const VIA_ORDER = ['sign-in', 'key', 'cloud', 'local']
 const rank = (m) => (m.id === 'cli:claude' ? -1 : VIA_ORDER.indexOf(m.via) + (m.builtin ? 0.5 : 0))
-const pickMeetingModel = async () => [...await chatModels.models().catch(() => [])].sort((a, b) => rank(a) - rank(b))[0]?.id || null
+const ranked = async () => [...await chatModels.models().catch(() => [])].sort((a, b) => rank(a) - rank(b))
+async function pickMeetingModel() { return (await ranked())[0]?.id || null }
 // The models to fall back on when the one picked can't be reached, in the same order.
-const meetingModels = async () => [...await chatModels.models().catch(() => [])].sort((a, b) => rank(a) - rank(b)).map((m) => m.id)
+const meetingModels = async () => (await ranked()).map((m) => m.id)
+
+// ---------- Which model each kind of job runs on (modeljobs.js) ----------
+// The model on this computer Auto may use: the local model built in, once one's downloaded; else the
+// model here picked in Settings › Model Providers (localModel), when it's running. any: any model
+// here (your Ollama's or LM Studio's too), for a job set to stay on this computer.
+async function localFor(list, { any = false } = {}) {
+  const built = await llm.current().catch(() => null)
+  const hit = built && list.find((m) => m.id === built)
+  if (hit) return hit
+  if (!any && !cfg.localModel) return null
+  const m = await chatModels.localModel(cfg.localModel).catch(() => null)
+  return m && (any || m.picked) ? m : null
+}
+// The most a job can be for Auto to run it on that local model here, and how fast it reads.
+async function localLimit(local) {
+  const ctx = await chatModels.contextOf(local.id).catch(() => null)
+  const sp = await chatModels.speed(local.id).catch(() => null)
+  return modelJobs.shortLimit({ ctx, readPerSecond: sp?.read || null })
+}
+// The model for a job of that kind with none picked for it where it's used: { id, label, where,
+// auto, kept, why, cloud } (modeljobs.js route). text (or tokens): what the job sends, for its size;
+// with neither, Auto takes it as long. cloudBetter: Auto keeps this one on your cloud model (the
+// transcript cleanup, which small models do poorly). Throws, saying why, when the job is set to stay
+// on this computer and no model can run here.
+async function pickFor(job, { text = null, tokens = null, cloudBetter = false } = {}) {
+  const list = await ranked()
+  const set = modelJobs.setting(cfg, job)
+  const first = list[0]?.id || null
+  const cloud = list.find((m) => m.via !== 'local')?.id || null
+  const local = await localFor(list)
+  const here = set === 'local' ? await localFor(list, { any: true }) : null
+  const need = tokens ?? (text != null ? chatModels.tokensOf(text) + 1500 : null)
+  let limit = null
+  let seconds = null
+  if (set === 'auto' && local && cloud && need != null) {
+    limit = await localLimit(local)
+    seconds = (await chatModels.estimate(local.id, need, 800).catch(() => null))?.seconds ?? null
+  }
+  const missing = set === 'local' && !here ? await llm.whyNot().catch(() => null) : null
+  const r = modelJobs.route({ job, set, first, cloud, local, here, need, limit, seconds, missing, better: cloudBetter })
+  if (r.error) throw r.error
+  return { ...r, job, label: list.find((m) => m.id === r.id)?.label || llm.labelOf(r.id) || null, cloud }
+}
+const pickModelFor = async (job, o) => (await pickFor(job, o)).id
+// What each kind of job runs on now, for Settings › Model Providers: its setting, what Auto does
+// with it on this computer, and whether it can stay here (live suggestions need a GPU here).
+app.get('/api/model-jobs', wrap(async () => {
+  const list = await ranked()
+  const local = await localFor(list)
+  const cloud = list.find((m) => m.via !== 'local') || null
+  const st = await llm.status().catch(() => null)
+  const limit = local ? await localLimit(local) : null
+  const name = (m) => (m ? { id: m.id, label: m.label, provider: m.provider || null } : null)
+  const anyHere = !!(await localFor(list, { any: true }))
+  return {
+    jobs: modelJobs.JOBS.map((j) => ({ id: j.id, label: j.label, about: j.about, set: modelJobs.setting(cfg, j.id), cloudBetter: !!j.cloud, canLocal: j.id !== 'live' || !!st?.onGpu || !!(local && !local.builtin) })),
+    local: name(local), cloud: name(cloud), anyHere,
+    limit: limit ? { tokens: limit.tokens, minutes: Math.floor(limit.tokens / modelJobs.PER_MINUTE), by: limit.by } : null,
+    offered: !!st?.offered, missing: await llm.whyNot().catch(() => null),
+  }
+}))
 meetings.setHelpers({
-  reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: meetingModels, mailRelated: (o) => mail.related(o), mailMessage: (id) => mail.message(id),
+  reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, pickFor, models: meetingModels, mailRelated: (o) => mail.related(o), mailMessage: (id) => mail.message(id),
   // How much a model on this computer takes at a time, and how long it takes here.
   context: (id) => chatModels.contextOf(id), tokens: chatModels.tokensOf, estimate: (id, text, out) => chatModels.estimate(id, text, out),
   // A look at the call's window, when Screen Recording allows it (calls.js).
@@ -1867,7 +1939,7 @@ meetInsights.setHelpers({ calendar: (from, to) => calendar.range(from, to) })
 // Meeting prep (meetprep.js): before a meeting, who's coming, last time, the invite, your mail with
 // them and a few goals from the model that writes your notes. Read only, like the calendar.
 meetPrep.configure(cfg)
-meetPrep.setHelpers({ calendar: () => calendar.cached(), mail: IS_MAC ? () => mail() : null, reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: () => chatModels.models() })
+meetPrep.setHelpers({ calendar: () => calendar.cached(), mail: IS_MAC ? () => mail() : null, reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: (text) => pickModelFor('notes', { text }), models: () => chatModels.models() })
 meetPrep.start()
 app.post('/api/prep', wrap((req) => meetPrep.prep(req.body?.event || {})))
 app.post('/api/prep/suggest', wrap((req) => meetPrep.suggest(req.body?.event || {}, { again: !!req.body?.again })))
@@ -1969,7 +2041,9 @@ app.post('/api/calls/hide', wrap((req) => meetPrep.hide(String(req.body?.id || '
 // Screen Recording, for the names a call shows as people talk: whether it's allowed, and Allow
 // (macOS's own window the first time; after that, System Settings is where it's turned on).
 // fresh=1: looked at now, not what was kept from a moment ago. started: when this server started.
-app.get('/api/calls/screen', wrap(async (req) => ({ allowed: await calls.screen({ fresh: req.query.fresh === '1' }), started: calls.started })))
+// picker: macOS's own picker for a screen or window to share (macOS 15 and later, Darwin 24), which
+// the desktop app uses and which needs no Screen Recording to record what's picked.
+app.get('/api/calls/screen', wrap(async (req) => ({ allowed: await calls.screen({ fresh: req.query.fresh === '1' }), started: calls.started, picker: IS_MAC && Number(os.release().split('.')[0]) >= 24 })))
 app.post('/api/calls/screen', wrap(async (req) => { hereOnly(req, 'Allow Screen Recording'); return { allowed: await calls.screenAsk() } }))
 // The calendar event to take notes for (callevent.js): the one the call on app is for (or the call
 // on now), by its window's title, a Join in Bridge AI or when it started; with no call, the one
@@ -2046,7 +2120,7 @@ app.post('/api/meetings/:id/for-agents', wrap(async (req) => {
 // With the live board on (a beta feature): what's on the meeting's board, kept or still suggested,
 // and how it's getting on (liveBoard), for the meeting's Board, its summary and the floating card.
 app.get('/api/meetings/:id', wrap(async (req) => {
-  const m = meetings.get(req.params.id)
+  const m = { ...meetings.get(req.params.id), videos: meetVideo.list(req.params.id) }
   return trialOn('meeting-board') ? { ...m, liveBoard: await liveBoard(m) } : m
 }))
 app.post('/api/meetings/:id/audio', express.raw({ type: () => true, limit: '4mb' }), wrap((req) => meetings.audio(req.params.id, String(req.query.src || ''), req.body, req.query.seq)))
@@ -2184,15 +2258,48 @@ app.post('/api/meetings/:id/save', wrap((req) => meetings.save(req.params.id)))
 app.post('/api/meetings/:id/retry', wrap((req) => meetings.retry(req.params.id)))
 // What was on the screen: pictures taken while it records, or pasted into your notes.
 app.post('/api/meetings/:id/captures', express.raw({ type: () => true, limit: '16mb' }), wrap((req) => meetings.addCapture(req.params.id, req.body, { kind: String(req.query.kind || 'screen'), t: req.query.t, note: req.query.note, source: req.query.source })))
+// whole=1: as it was taken, when it's been cropped. Each crop or put back changes its v, so a page
+// asks for it afresh.
 app.get('/api/meetings/:id/captures/:cid', (req, res) => {
   try {
-    const file = meetings.captureFile(req.params.id, req.params.cid)
+    const file = meetings.captureFile(req.params.id, req.params.cid, { whole: req.query.whole === '1' })
     res.set({ 'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=86400' })
     res.sendFile(file, { dotfiles: 'allow' }) // in the data folder, ~/.bridge-ai
   } catch (e) { res.status(404).json({ error: e.message }) }
 })
-app.patch('/api/meetings/:id/captures/:cid', wrap((req) => meetings.noteCapture(req.params.id, req.params.cid, req.body?.note)))
+// A picture of a call's window cropped to what's shared (the page works it out: crop.js), or, with
+// no picture, looked at and nothing to crop. look: what it saw, to keep the next crops steady.
+app.post('/api/meetings/:id/captures/:cid/crop', express.raw({ type: () => true, limit: '16mb' }), wrap((req) => {
+  let look = null
+  try { look = req.query.look ? JSON.parse(String(req.query.look)) : null } catch { /* left out */ }
+  return meetings.cropCapture(req.params.id, req.params.cid, Buffer.isBuffer(req.body) ? req.body : null, { rect: req.query, look, why: req.query.why, v: req.query.v, sure: req.query.sure !== '0' })
+}))
+// A note on it, or { crop }: its crop (true) or the picture as it was taken (false).
+app.patch('/api/meetings/:id/captures/:cid', wrap((req) => (typeof req.body?.crop === 'boolean' ? meetings.setCrop(req.params.id, req.params.cid, req.body.crop) : meetings.noteCapture(req.params.id, req.params.cid, req.body?.note))))
 app.delete('/api/meetings/:id/captures/:cid', wrap((req) => meetings.removeCapture(req.params.id, req.params.cid)))
+// The screen as a video (meetvideo.js, Record the screen too): started, its pieces as it records
+// and its end, then played in the meeting (the browser asks for parts of it as it seeks).
+app.post('/api/meetings/:id/videos', wrap((req) => meetVideo.start(req.params.id, req.body || {})))
+app.post('/api/meetings/:id/videos/:vid', express.raw({ type: () => true, limit: '64mb' }), wrap((req) => meetVideo.piece(req.params.id, req.params.vid, req.body, { seq: req.query.seq, seconds: req.query.s })))
+app.post('/api/meetings/:id/videos/:vid/end', wrap((req) => meetVideo.end(req.params.id, req.params.vid, { seconds: req.body?.seconds, why: req.body?.why })))
+app.get('/api/meetings/:id/videos/:vid', (req, res) => {
+  try {
+    const file = meetVideo.file(req.params.id, req.params.vid)
+    res.set({ 'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-cache' })
+    res.sendFile(file, { dotfiles: 'allow' }) // in the data folder, ~/.bridge-ai
+  } catch (e) { res.status(404).json({ error: e.message }) }
+})
+app.delete('/api/meetings/:id/videos/:vid', wrap((req) => meetVideo.remove(req.params.id, req.params.vid)))
+app.post('/api/meetings/:id/videos/:vid/reveal', wrap((req) => { hereOnly(req, 'Show it in Finder'); return meetVideo.reveal(req.params.id, req.params.vid) }))
+// The call's sound as Bridge AI records it (a Mac), as it comes, for that video's sound: 16 kHz
+// mono 16-bit samples, until the page lets go.
+app.get('/api/meetings/:id/sound', (req, res) => {
+  let off
+  try { off = meetings.hear(req.params.id, (b) => res.write(b)) } catch (e) { res.status(404).json({ error: e.message }); return }
+  res.set({ 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' })
+  res.flushHeaders()
+  req.on('close', off)
+})
 // Files, links and emails that go with a meeting: linked where they are, read when notes are written.
 // A file by its path only from this computer, or one of Mail's attachments that Bridge AI found:
 // a phone can't read the computer's files by linking them. From there, files are sent as copies.
@@ -2330,7 +2437,7 @@ app.post('/api/mail/mark', wrap((req) => { const r = setMark(req.body || {}); ma
 // AI Assist in Mail (mailassist.js): a reply, How You Write and free times. Text and times only.
 makeMailAssist({
   cfg, mail, calendar, meetings, zone: () => TZ,
-  chat: { pick: pickMeetingModel, reply: (id, msgs, o) => chatModels.reply(id, msgs, o), describe: (id) => chatModels.describe(id), isLocal: (id) => chatModels.isLocal(id) },
+  chat: { pick: (text) => pickModelFor('mail', { text }), reply: (id, msgs, o) => chatModels.reply(id, msgs, o), describe: (id) => chatModels.describe(id), isLocal: (id) => chatModels.isLocal(id) },
 }).routes(app, wrap)
 // A span of days for Today › Calendar: every calendar's events (the hidden ones too, for the legend
 // to bring back), each with the meeting recorded for it.
@@ -2940,6 +3047,20 @@ app.delete('/api/updates/early', wrap(async () => {
   if (fromAccount) afterChange(settings.patch({ earlyAccess: { from: 'account', left: true } }))
   return updates.status({ force: true, disabled: cfg.updates?.check === false })
 }))
+// Nightly (updates.js): nightly builds of main, for the owner's own computers. Nothing in the app
+// offers it: it's switched on here, on the computer itself (`bridge-ai nightly on`, or the local API
+// with its key), and kept as updates.nightly in the settings. Leave Nightly in About & Updates
+// switches it off from anywhere the page opens.
+app.post('/api/updates/nightly', wrap(async (req) => {
+  if (!fromHere(req)) throw Object.assign(new Error('Nightly is switched on on the computer itself.'), { status: 403 })
+  if (!updates.canNightly()) throw new Error(updates.how() === 'docker' ? 'Nightly is for the desktop app. Bridge AI in Docker updates by its image\'s tag, which stays on regular releases.' : 'Nightly is for the desktop app. Bridge AI from a clone updates with git pull, which is main already.')
+  afterChange(settings.patch({ updates: { nightly: true } }))
+  return updates.status({ force: true, disabled: cfg.updates?.check === false })
+}))
+app.delete('/api/updates/nightly', wrap(async () => {
+  afterChange(settings.patch({ updates: { nightly: false } }))
+  return updates.status({ force: true, disabled: cfg.updates?.check === false })
+}))
 // auto: by itself while you're away, asked by the desktop app on this computer only.
 app.post('/api/updates/install', wrap((req) => {
   if (req.body?.auto === true && !fromHere(req)) throw Object.assign(new Error('Only the desktop app updates by itself'), { status: 403 })
@@ -2957,7 +3078,7 @@ function rolloutBucket() {
   try { afterChange(settings.patch({ updates: { bucket: n } })) } catch { cfg.updates = { ...cfg.updates, bucket: n } }
   return n
 }
-updates.useSettings(() => ({ on: cfg.updates?.auto !== false, checks: cfg.updates?.check !== false, code: cfg.earlyAccess?.code || null, from: cfg.earlyAccess?.from || null, left: !!cfg.earlyAccess?.left, bucket: rolloutBucket() }))
+updates.useSettings(() => ({ on: cfg.updates?.auto !== false, checks: cfg.updates?.check !== false, code: cfg.earlyAccess?.code || null, from: cfg.earlyAccess?.from || null, left: !!cfg.earlyAccess?.left, bucket: rolloutBucket(), nightly: cfg.updates?.nightly === true }))
 // What an update would cut short: this computer's agents working or waiting on you (a cloud agent
 // runs elsewhere, and other devices' agents on them), a meeting recording, being transcribed or its
 // notes being written, and a dictation being heard (its live words, or its recording being turned
@@ -3508,11 +3629,19 @@ app.post('/api/signin/:kind', wrap(async (req) => {
 // one empty folder (each is its own session), so the agent asks to trust it only once.
 const CHAT_NOTE = `# Chat\n\nThis is a plain conversation with the user, not a project. Answer directly and helpfully. There are no project files here; only read or change files elsewhere if the user asks.\n`
 // kind 'chat': Bridge AI's own chat with any model (chatmodels.js), on the model picked. automatic:
-// the one meeting notes are written with when none is picked (pickMeetingModel), for Settings ›
-// Voice & Meetings to say which it is and where it runs.
+// the one meeting notes are written with when none is picked (pickFor, as for a long meeting), for
+// Settings › Voice & Meetings to say which it is and where it runs; short: with Auto, the model on
+// this computer that writes short ones, and up to how many minutes.
 app.get('/api/chat/models', wrap(async (req) => {
   const models = await chatModels.models({ fresh: !!req.query.refresh })
-  return { models, runtime: rt.name, automatic: await pickMeetingModel() }
+  const automatic = await pickModelFor('notes').catch(() => pickMeetingModel())
+  let short = null
+  if (modelJobs.setting(cfg, 'notes') === 'auto' && automatic && !chatModels.isLocal(automatic)) {
+    const local = await localFor(await ranked()).catch(() => null)
+    const limit = local && await localLimit(local).catch(() => null)
+    if (local && limit) short = { id: local.id, label: local.label, minutes: Math.floor(limit.tokens / modelJobs.PER_MINUTE) }
+  }
+  return { models, runtime: rt.name, automatic, short }
 }))
 app.post('/api/chats', wrap(async (req) => {
   const kind = String(req.body?.kind || cfg.defaultAgent || 'claude')
@@ -3598,11 +3727,22 @@ app.post('/api/consult', wrap((req) => consult.ask({ ...(req.body || {}), env: u
 // The models on this computer (Ollama, LM Studio), for Settings › Model Providers: how much each
 // takes at a time, and the one Bridge AI's jobs that stay here use (localModel).
 app.get('/api/local-models', wrap(() => chatModels.localModels(cfg.localModel)))
-// The local model built in (llm.js): whether it's offered here and why not, downloaded, downloading,
-// loaded. The download starts only from Settings' Download, never by itself; Remove stops it first.
+// The local model built in (llm.js): whether it's offered here and why not, the models that run here
+// and the one recommended, downloaded, downloading, loaded. The download starts only from a Download
+// button, never by itself; one for a model you named makes it the one you use (llmModel). Remove
+// stops it first, and a model you'd picked that's removed goes back to the one recommended.
 app.get('/api/llm', wrap(() => llm.status()))
-app.post('/api/llm/download', wrap(async () => { await llm.fetchModel(); return llm.status() }))
-app.delete('/api/llm', wrap(async () => { await llm.removeModel(); return llm.status() }))
+app.post('/api/llm/download', wrap(async (req) => {
+  const id = req.body?.model ? String(req.body.model) : null
+  await llm.fetchModel(id)
+  if (id && cfg.llmModel !== id) afterChange(settings.patch({ llmModel: id }))
+  return llm.status()
+}))
+app.delete('/api/llm', wrap(async (req) => {
+  const gone = await llm.removeModel(req.query.model ? String(req.query.model) : null)
+  if (cfg.llmModel && cfg.llmModel === gone) afterChange(settings.patch({ llmModel: null }))
+  return llm.status()
+}))
 providerRoutes(app, { cfg, installed })
 mcpRoutes(app, { cfg, installed })
 
@@ -3712,10 +3852,11 @@ app.use('/api/boards', (req, res, next) => {
   }
   next()
 })
-// Drawn with the model picked there, else the one meeting notes use. contextOf: how much a model on
-// this computer reads at a time (chatmodels.js).
+// Drawn with the model picked there, else Diagrams' (pickFor: with Auto, your cloud model, which
+// draws better than a small one here). contextOf: how much a model on this computer reads at a time
+// (chatmodels.js).
 boards.setHelpers({
-  reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, models: () => chatModels.models(), canSee: (id) => chatModels.canSee(id),
+  reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: () => pickModelFor('diagrams'), models: () => chatModels.models(), canSee: (id) => chatModels.canSee(id),
   contextOf: (id) => chatModels.contextOf(id), agentWork: async (pane) => transcript(await findAgent(pane)),
 })
 // @bridge in a comment on a board (Comments and @bridge): Change it on what the comment is on.

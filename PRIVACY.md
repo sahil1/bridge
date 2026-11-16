@@ -23,8 +23,9 @@ with only the coordinates you picked), market prices and news headlines (Yahoo F
 Reserve and public news feeds), speech models when you download one, the first time you use the
 mic or a meeting or from Settings › Voice & Meetings (one download each from Hugging Face; what you say is
 turned into text on your computer and never sent anywhere, unless you pick a speech service for
-meetings), the local model (Gemma 4 E2B, 2.8 GB) only when you click Download for it in Settings ›
-Model Providers (one download from Hugging Face; what you give it is read on your computer by
+meetings), a local model (Gemma 4 E2B, 2.8 GB; E4B, 4.6 GB; or 26B-A4B, 14.6 GB, as fits your
+computer) only when you click Download for it in Settings › Model Providers or where Tidy what I
+say needs one (one download from Hugging Face; what you give it is read on your computer by
 llama.cpp, which runs there and answers only Bridge AI, and is never sent anywhere), a check on
 GitHub for a newer version, which you can turn off in Settings › About &
 Updates (and the new version from GitHub, when you update, or by itself while you're away in the
@@ -68,6 +69,11 @@ pictures of the call's window while someone talks, as your Screen Recording perm
 reads them on your Mac with Apple's Vision: where the faces are, how much each mouth moved and the
 names under them. The pictures stay in memory and are never written to disk; only those numbers and
 names are kept, in that meeting's folder (`sights.jsonl`), and they go with it when it's deleted.
+
+Record the screen too (off until you tick it) keeps a video of the window or screen you pick while a
+meeting records, with the meeting's sound. It goes only to Bridge AI on your computer as it records,
+which keeps it in that meeting's folder (`video-1.mp4`, or `.webm`); it's never sent anywhere else,
+and it goes with the meeting when that's deleted, or on its own with Delete video.
 
 Dictation and voice notes are turned into text on your computer, and the recording isn't kept
 (unless you ask for it, below). With "Show the words as you talk" (Settings › Voice & Meetings, on where your
@@ -160,10 +166,10 @@ looks in none of them until you open it. A file you copy to another of your comp
 your phone, goes end-to-end encrypted over the same link as everything else (the relay sees only
 how much goes), and lands only in the folder you pick on the computer it goes to.
 
-Folders, in the sidebar, also shows your home folder, your cloud drives and this computer's drives,
+Studio, in the sidebar, also shows your home folder, your cloud drives and this computer's drives,
 read-only, to you and to your own linked computers and paired phones over that same encrypted link. Bridge AI's own folder and your keys' folders (`~/.ssh`,
 `~/.gnupg`, Keychains) are never shown, and on a Mac, Desktop, Documents, Downloads and iCloud Drive
-aren't read until you open one. AI Assist in Files and Folders looks at the folder you ask it about on your computer,
+aren't read until you open one. AI Assist in an agent's Files and in Studio's folders looks at the folder you ask it about on your computer,
 and reads a file's contents only to tell whether two files of the same size are the same; nothing
 about it leaves the computer unless you choose Suggest how to organize it, which sends that folder's file and folder
 names, sizes and dates (never what's in a file) to the model you pick for it, and says which model
@@ -220,8 +226,8 @@ use (below).
 Two reports go to the project's server, `counts.boldbridge.ai`, run on Cloudflare; its code is
 [counts/worker.js](counts/worker.js) in this repo:
 
-- **Once a week**, after the week is over: Bridge AI's version; its update channel (Stable, or
-  Early Access for testers) and, on Early Access, who the code is for: the first name or nickname
+- **Once a week**, after the week is over: Bridge AI's version; its update channel (Stable,
+  Early Access for testers, or Nightly, the project's own computers on nightly builds) and, on Early Access, who the code is for: the first name or nickname
 the project gave that tester when it made the code, or, with Early Access from your Bold Bridge
 account, that account's id (below); its rollout bucket, a number from 0 to 99
   picked at random once and kept in your settings, which decides how soon a release that goes out
@@ -300,8 +306,8 @@ collecting, Bridge AI turns crash reports off and says so.
 ## Your Bold Bridge account (optional)
 
 Early Access and Bridge AI's relay come with a Bold Bridge account. Nothing else needs one, and
-Bridge AI never asks you to make one. You sign in in Settings › Account (or in Settings › Devices,
-for the relay) with your email and a 6-digit code it's sent (there's no password), at `accounts.boldbridge.ai`, run by the project on
+Bridge AI never asks you to make one. You sign in in Settings › Account & Devices (its Account tab,
+or its Phone tab for the relay) with your email and a 6-digit code it's sent (there's no password), at `accounts.boldbridge.ai`, run by the project on
 Cloudflare; its code is [account/worker.js](account/worker.js) in this repo.
 
 **What it keeps**: your email; your devices (five at most): the name each was given (your
@@ -319,10 +325,10 @@ emailed to you, sent with Cloudflare's Email Service; and, on Early Access, your
 usage stats and crash reports (above), so the project can tell testers' reports apart.
 
 **Your other computers**: once one of your computers is signed in, it can sign in the others linked
-to it (Settings › Account), over the end-to-end encrypted link between them. One that would rather
+to it (Settings › Account & Devices), over the end-to-end encrypted link between them. One that would rather
 not says so, and is left alone.
 
-**Leaving**: Sign out, or remove a device, in Settings › Account. Delete account there deletes the
+**Leaving**: Sign out, or remove a device, in Settings › Account & Devices. Delete account there deletes the
 account, its devices, requests, history and counts at once (Bridge AI's relay forgets its own within
 a day). Bold Bridge's admins see what's kept, to answer requests, and can suspend an account that
 misuses Early Access or the relay.
@@ -365,10 +371,15 @@ Tailscale's privacy policy.
 ## Bridge AI's relay (optional)
 
 If you'd rather not set up a relay of your own, you can choose Bridge AI's relay in Settings ›
-Devices. It comes with a Bold Bridge account (above), by request. It's the same relay
+Account & Devices. It comes with a Bold Bridge account (above), by request. It's the same relay
 ([relay/worker.js](relay/worker.js)), run by the project on its own Cloudflare account at
 `boldbridge.app`, so the project's Cloudflare account carries your traffic instead of yours. Cloudflare
 processes it for the project.
+
+Once your account has it, a computer signed in to it with nothing else set up for your phone (no
+relay, no Tailscale) starts using it by itself, and Settings says so; one you stopped using it on
+doesn't. While a request waits, Bridge AI asks your account about it every half hour, rather than
+every 6 hours, so this happens soon after the yes.
 
 **What it can read: nothing past the handshake.** Everything between your phone and your computer
 is end-to-end encrypted, so the relay passes on bytes it can't read. That holds as long as the page
@@ -376,8 +387,8 @@ doing the encrypting is the one Bridge AI wrote: the iPhone and Android apps hav
 a pairing link opens them when they're installed, but in a phone's browser the page comes from the
 relay, so whoever runs the relay could change it (the page says so before pairing). On a relay
 that isn't yours, use the iPhone or Android app. Your computer checks the page the relay serves
-once a day, and when you open Settings › Devices, against Bridge AI's own for the version the
-relay says it runs (its own copy, or that release's from GitHub), and Settings › Devices says so
+once a day, and when you open Settings › Account & Devices, against Bridge AI's own for the version the
+relay says it runs (its own copy, or that release's from GitHub), and Settings says so
 if they differ; nothing is sent but those requests. What it sees, as any server does: the IP
 addresses of your phone and computer, when they connect, and how much they send.
 
@@ -399,16 +410,16 @@ computer's random id only: no IP addresses, no content, no names. The full list 
 [relay/HOSTED.md](relay/HOSTED.md).
 
 **Its limits**: it's free, with an allowance for each account, across its computers: so many
-messages in each 8-hour window and each week, like Claude's (Settings › Account and Settings ›
-Devices show them), and limits that stop floods (how big one message can be, how many come at
+messages in each 8-hour window and each week, like Claude's (Settings › Account & Devices
+shows them), and limits that stop floods (how big one message can be, how many come at
 once, how many phones and tabs are connected at once). It takes a limited number of accounts, and
 when it's full, Bridge AI says so and offers the other ways (a relay of your own, or Tailscale). It
 also has a daily limit for all the computers on it together; if that's reached, it stops for
-everyone until 00:00 UTC. When a limit is reached, your phone and Settings › Devices say which, and
+everyone until 00:00 UTC. When a limit is reached, your phone and Settings › Account & Devices say which, and
 when it ends. The limits may change, and paid plans with higher ones may come; anything a paid plan
 would keep or send elsewhere (to take payment) will be said here first.
 
-**Stop using it** (Settings › Devices › Stop using the relay) and your computer's data there is
+**Stop using it** (Settings › Account & Devices › Phone › Stop using the relay) and your computer's data there is
 deleted at once (should that message not arrive, its id leaves the list of computers within a few
 days). A computer that hasn't connected for 90 days is deleted the same way, and deleting your Bold
 Bridge account deletes your account's counts and its computers there within a day. Everything else

@@ -17,6 +17,8 @@ export function withApp(u) {
   if (!u.appUpdate) return u
   return { ...u, available: true, current: v, forApp: true }
 }
+// What kind of build a version is: a nightly build of main, a beta, or (null) a release.
+export const channelTag = (v) => (/-nightly\./.test(v || '') ? t('Nightly build') : /-(alpha|beta|rc)\./.test(v || '') ? t('Beta') : null)
 // Out a few days and still not installed: said more plainly, with the version on the chip.
 const DAYS = 3
 export const overdue = (u) => !!u?.available && !!u.publishedAt && Date.now() - Date.parse(u.publishedAt) > DAYS * 24 * 60 * 60 * 1000
@@ -47,7 +49,9 @@ export default function UpdateChip({ u, onDetails, onDone, row = false }) {
   // first sentence. Install is for new computers, not an update, so the notes stop there.
   const lines = String(u.notes || '').split(/^#+ Install\b/m)[0].split('\n').map((l) => l.trim()).filter((l) => l && !/^#/.test(l) && !/checksums/i.test(l))
   const summary = lines.find((l) => !l.startsWith('-')) || ''
-  const items = lines.filter((l) => l.startsWith('- ')).slice(0, 4).map((l) => {
+  // A nightly's notes are its changes, one line each: a few more of them.
+  const tag = channelTag(u.latest)
+  const items = lines.filter((l) => l.startsWith('- ')).slice(0, /-nightly\./.test(u.latest || '') ? 8 : 4).map((l) => {
     const [, label = '', text = l.slice(2)] = l.slice(2).match(/^\*\*(.+?):?\*\*:?\s*(.*)$/) || []
     return { label, text: text.replace(/[`*]/g, '').split(/(?<=\.)\s/)[0] }
   })
@@ -76,7 +80,7 @@ export default function UpdateChip({ u, onDetails, onDone, row = false }) {
         </button>}
       {open && (
         <div className="update-pop" role="dialog" aria-label={t('Update Bridge AI')}>
-          <div className="update-head"><b>Bridge AI {u.latest}</b><span className="muted small">{t('you have {version}', { version: u.current })}</span></div>
+          <div className="update-head"><b>Bridge AI {u.latest}</b>{tag && <span className="st-chip update-kind">{tag}</span>}<span className="muted small">{t('you have {version}', { version: u.current })}</span></div>
           {u.forApp && <p className="small">{t('This is the desktop app\'s update: Bridge AI runs from your clone here, and the app around it is {version}.', { version: u.current })}</p>}
           {u.failed && !state && <p className="error-text small">{t('The last update didn\'t go through: {why}', { why: u.failed.line || t('the installer stopped') })}</p>}
           {summary && <p className="small">{summary}</p>}

@@ -306,7 +306,7 @@ try {
     // Approving: the person emailed, the request closed, and /v1/me gives the relay token.
     const ok1 = await s.call(`/admin/accounts/${a.account.id}`, { method: 'POST', bound: true, body: { relay: 'approved', note: 'Welcome' } })
     const told = s.mail.sent.filter((m) => m.to === 'ana@example.com').at(-1)
-    ok(ok1.status === 200 && ok1.j.account.relay === 'approved' && ok1.j.emailed === true && /relay is on/.test(told.subject) && /Settings › Devices/.test(told.text), 'approving the relay: { account, emailed }, and the person is told where to turn it on', { r: ok1.j, told: told.subject })
+    ok(ok1.status === 200 && ok1.j.account.relay === 'approved' && ok1.j.emailed === true && /relay is on/.test(told.subject) && /by itself/.test(told.text) && /Settings › Account & Devices and choose Use it on this computer/.test(told.text), 'approving the relay: { account, emailed }, and the person is told it starts by itself, or where to turn it on', { r: ok1.j, told: told.subject })
     ok(!(await s.call('/admin/requests', { bound: true })).j.requests.length && (await s.call('/admin/requests?state=all', { bound: true })).j.requests.length === 1, 'its request is closed')
     const me = (await s.call('/v1/me', { token: a.deviceToken })).j
     const rt = payload(me.relay?.token)

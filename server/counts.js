@@ -201,10 +201,10 @@ export function report(w) {
     nonce: w.nonce,
   }
 }
-// The update channel (stable or early), for Early Access who the code is for (a name the project
+// The update channel (stable, early or nightly), for Early Access who the code is for (a name the project
 // picked for its tester), and the staged rollout's bucket (0-99, random): each version's counts and
 // crashes, told apart by channel and by how soon it reached a computer.
-const channelOf = (c) => ({ channel: c.channel === 'early' ? 'early' : 'stable', tester: c.channel === 'early' && c.tester ? String(c.tester).slice(0, 32) : null, rollout: Number.isInteger(c.rollout) ? c.rollout : null })
+const channelOf = (c) => ({ channel: ['early', 'nightly'].includes(c.channel) ? c.channel : 'stable', tester: c.channel === 'early' && c.tester ? String(c.tester).slice(0, 32) : null, rollout: Number.isInteger(c.rollout) ? c.rollout : null })
 // Only the features on the public list, each with one of its values.
 const FEATURES = SCHEMA.features || {}
 const AGENT_KINDS = new Set(SCHEMA.agents || [])

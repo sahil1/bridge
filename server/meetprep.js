@@ -27,8 +27,8 @@ let cfg = {}
 export const configure = (c) => { cfg = c || {} }
 // calendar(): today's and tomorrow's events as last read for the app (calendar.js's cache, never a
 // read of its own), or null; mail(): the inbox as mail.js reads it, or
-// null where there's no Mail (not a Mac); reply(id, msgs, o), pickModel(), models(): as meetings.js
-// has them (chatmodels.js), so the model is the one that writes your notes.
+// null where there's no Mail (not a Mac); reply(id, msgs, o), models(): as meetings.js has them
+// (chatmodels.js); pickModel(text): the model meeting notes use for that much text (index.js pickFor).
 let helpers = { calendar: null, mail: null, reply: null, pickModel: async () => null, models: async () => [] }
 export const setHelpers = (h) => { helpers = { ...helpers, ...h } }
 
@@ -153,9 +153,11 @@ function keep(key, entry) {
   const fresh = Object.entries(c).filter(([, v]) => Date.parse(v.start || 0) > Date.now() - 2 * 864e5).sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).slice(0, 100)
   try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); writeFileAtomic(FILE, JSON.stringify(Object.fromEntries(fresh), null, 1)) } catch { /* next time */ }
 }
-// The model that writes your meeting notes (Settings › Voice & Meetings), else the one they'd use.
-async function writer() {
-  const id = cfg.meetings?.model || await helpers.pickModel().catch(() => null)
+// The model that writes your meeting notes (Settings › Voice & Meetings), else the one they'd use
+// for this much text (with Auto, a short one on this computer). strict: when meeting notes are set to
+// stay on this computer and can't, the error saying why rather than none.
+async function writer(text = null, { strict = false } = {}) {
+  const id = cfg.meetings?.model || await (strict ? helpers.pickModel(text) : helpers.pickModel(text).catch(() => null))
   if (!id) return null
   const list = await helpers.models().catch(() => [])
   return { id, label: list.find((m) => m.id === id)?.label || id }
@@ -202,10 +204,10 @@ export function suggest(raw, { again = false } = {}) {
   const p = (async () => {
     const was = cache()[key]
     if (was?.items?.length && !again) return prep(e)
-    const w = await writer()
-    if (!w) throw Object.assign(new Error('No model to write with. Sign in to an agent, or add an API key or a local model in Settings › Model Providers.'), { code: 'no_model' })
     const base = await gather(e)
     const { text, basis } = ask(e, base)
+    const w = await writer(text, { strict: true })
+    if (!w) throw Object.assign(new Error('No model to write with. Sign in to an agent, or add an API key or a local model in Settings › Model Providers.'), { code: 'no_model' })
     const msgs = [{ role: 'user', text }]
     const o = { system: 'You help someone get ready for a meeting with a few sharp, specific goals and questions. You are brief and never make things up.', feature: 'assist' }
     const entry = { start: e.start, title: e.title, at: new Date().toISOString(), model: w.id, label: w.label, basis, items: [], error: null }
@@ -238,7 +240,8 @@ async function gather(e) {
 export async function prep(raw) {
   const e = eventOf(raw)
   const key = keyOf(e)
-  const [base, w] = await Promise.all([gather(e), writer()])
+  const base = await gather(e)
+  const w = await writer(ask(e, base).text)
   const kept = cache()[key] || null
   return {
     key, title: e.title, start: e.start, end: e.end,

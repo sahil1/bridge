@@ -107,7 +107,8 @@ const tidy = async (kit, text, app = 'TextEdit') => {
 }
 
 const kit = await kitOf('dictation-cleanup')
-const bare = await kitOf('dictation-cleanup-none', { have: false })
+// (An 8 GB computer, where the one recommended is Gemma 4 E2B, 2.8 GB.)
+const bare = await kitOf('dictation-cleanup-none', { have: false, memGB: 8.6 })
 const small = await kitOf('dictation-cleanup-4gb', { have: false, memGB: 4 })
 const cloud = await startModel('dictation-cleanup')
 const { b, which } = await browser()
@@ -335,7 +336,7 @@ try {
     n = await pastedCount(p)
     await talk(p, 'fail on purpose this time')
     got = await pastedNow(p, n)
-    ok(got === 'Fail on purpose this time.' && !!(await until(async () => /Not tidied: The local model: Context shift is disabled/.test(await hudText(p)), 4000, 50)), 'the model\'s error: pasted as you said it, and the window says why, in its words', { got, text: await hudText(p) })
+    ok(got === 'Fail on purpose this time.' && !!(await until(async () => /Not tidied: Gemma 4 E2B: Context shift is disabled/.test(await hudText(p)), 4000, 50)), 'the model\'s error: pasted as you said it, and the window says why, in its words', { got, text: await hudText(p) })
     // A provider that falls for what it's told.
     await kit.api('/settings', { dictation: { tidyModel: 'openai:gpt-5' } }, 'PATCH')
     n = await pastedCount(p)

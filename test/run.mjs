@@ -3,6 +3,8 @@
 //   node test/run.mjs                       the tests for the files changed since the last commit
 //   node test/run.mjs --base origin/main    ... and the ones changed since origin/main
 //   node test/run.mjs --all                 every test
+//   node test/run.mjs --list [--base X]     which tests would run, as JSON ({ names, browser }),
+//                                           running none (CI asks before it sets anything up)
 //   node test/run.mjs meetings-ui app-ui    just these
 //   --lanes N     how many at once (default 3; each has its own server and port)
 //   --browser webkit|chromium|both          which engine the app's tests run in (default chromium)
@@ -23,9 +25,9 @@ const SUITES = [
   { name: 'smoke', build: 'dist', covers: [/^scripts\/smoke\.js$/, /^server\/(index|apiauth|apitoken|guard|setup|attach|terminal)\.js$/] },
   { name: 'relay-signin', build: null, covers: [/^server\/(relay|agents|nodejs|paths)\.js$/] },
   { name: 'meetings-api', build: null, covers: [/^server\/(meetings|meetwork|meetmemory|speech|calendar|doctext|index|pr|chieftasks|worktrees)\.js$/] },
-  { name: 'studio', build: 'dist', browser: true, covers: [/^server\/(studio|studioapps|files|office|index)\.js$/, /^src\/components\/studio\//, /^src\/(App|lazy)\.jsx$/, /^src\/components\/(Files|Rail)\.jsx$/] },
+  { name: 'studio', build: 'dist', browser: true, covers: [/^server\/(studio|studioapps|files|office|index)\.js$/, /^src\/components\/studio\//, /^src\/components\/files\/(Explorer|Sidebar|fsapi)\.jsx?$/, /^src\/(App|lazy)\.jsx$/, /^src\/components\/(Files|Rail)\.jsx$/] },
   { name: 'studio-pdf', build: 'dist', browser: true, covers: [/^server\/(signing|studio|files|index)\.js$/, /^shared\/signmarks\.js$/, /^src\/components\/studio\/(pdf\/|Studio\.jsx$|focus\.js$)/, /^src\/components\/settings\/About\.jsx$/, /^src\/trials\.js$/, /^test\/stand-ins\/model\.mjs$/] },
-  { name: 'studio-docs', build: 'dist', browser: true, covers: [/^server\/(studio|studiofound|studioapps|files|index|chatmodels)\.js$/, /^src\/components\/studio\/(Studio|HomeFiles|ooxml|wordschema|docview|doctools|search|keys|files|focus)\.jsx?$/, /^src\/components\/studio\/(doc|home|studio)\.css$/, /^src\/components\/studio\/editors\/DocEditor\.jsx$/, /^test\/lib\/wordfile\.mjs$/] },
+  { name: 'studio-docs', build: 'dist', browser: true, covers: [/^server\/(studio|studiofound|studioapps|files|index|chatmodels)\.js$/, /^src\/components\/studio\/(Studio|HomeFiles|ooxml|wordschema|docview|doctools|search|keys|files|focus)\.jsx?$/, /^src\/components\/studio\/(doc|home|studio)\.css$/, /^src\/components\/studio\/editors\/DocEditor\.jsx$/, /^src\/components\/files\/(Explorer|Sidebar|fsapi)\.jsx?$/, /^test\/lib\/wordfile\.mjs$/] },
   { name: 'studio-comments', build: 'dist', browser: true, covers: [/^server\/(studio|index|commentassist)\.js$/, /^src\/components\/studio\/(ooxml|wordschema|docview|doctools|wordcomments|doccomments|sheetcomments|deckcomments|xlsxbook|pptxdoc)\.jsx?$/, /^src\/components\/studio\/(doc|threads)\.css$/, /^src\/components\/studio\/editors\/(DocEditor|SheetEditor|SlidesEditor)\.jsx$/, /^src\/trials\.js$/, /^test\/lib\/(wordfile|sheetfile|deckfile)\.mjs$/, /^test\/stand-ins\/model\.mjs$/] },
   { name: 'studio-writing', build: 'dist', browser: true, covers: [/^server\/studio\.js$/, /^src\/components\/studio\/(Studio|ooxml|wordschema|docview|doctools|search|keys|files|paste|docx|focus)\.jsx?$/, /^src\/components\/studio\/doc\.css$/, /^src\/components\/studio\/editors\/DocEditor\.jsx$/, /^test\/lib\/wordfile\.mjs$/] },
   { name: 'studio-xlsx', build: null, covers: [/^src\/components\/studio\/(xlsxbook|xlsx)\.js$/, /^test\/lib\/sheetfile\.mjs$/] },
@@ -44,7 +46,7 @@ const SUITES = [
   { name: 'settings-ui', build: 'dist', browser: true, covers: [/^src\/components\/settings\//, /^src\/components\/(Settings|Appearance|Palette|Machines)\.jsx$/, /^src\/(dictation|voice)\/[\w.]+\.css$/, /^src\/styles\.css$/] },
   { name: 'app-ui', build: 'dist', browser: true, covers: [/^src\//, /^index\.html$/, /^public\//, /^vite\.config\.js$/, /^server\/(index|attach|terminal|settings)\.js$/, /^server\/runtime\//] },
   // Every button and link you can see on the main views (Home, an agent's Chat, Terminal and Files,
-  // Files, Studio, Meetings, Calendar, the top bar and its menus, the sidebar, the tabs and the
+  // Studio at a list and at a folder, Meetings, Calendar, the top bar and its menus, the sidebar, the tabs and the
   // board), and in Settings' sections (a test of their own), pressed in the desktop app and in a
   // browser: each has to do something.
   { name: 'dead-clicks', build: 'dist', browser: true, covers: [/^src\//, /^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/] },
@@ -62,6 +64,12 @@ const SUITES = [
   { name: 'find-in-pane', build: 'dist', browser: true, covers: [/^src\/(find|termFind)\.js$/, /^src\/components\/(FindBar|Console|Terminal|LiveShell|ShellTab)\.jsx$/, /^src\/components\/studio\/keys\.js$/, /^src\/styles\.css$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'terminal-app', build: 'dist', browser: true, covers: [/^server\/(terminal|attach)\.js$/, /^scripts\/cli\.js$/, /^src\/components\/(Console|settings\/General)\.jsx$/, /^test\/stand-ins\/long-output\.cjs$/] },
   { name: 'terminal-scroll', build: 'dist', browser: true, covers: [/^src\/components\/(Terminal|LiveShell)\.jsx$/, /^src\/termTouch\.js$/, /^server\/runtime\/(builtin|screen|ptyhost)\.js$/, /^test\/stand-ins\/long-output\.cjs$/] },
+  { name: 'ship', build: null, covers: [/^scripts\/(ship|nightly|release)\.js$/, /^\.github\/workflows\/release\.yml$/] },
+  { name: 'test-scope', build: null, covers: [/^\.github\/workflows\/(test|release|nightly)\.yml$/, /^scripts\/nightly\.js$/] },
+  // Releases started and moved on from GitHub itself (the admin view's buttons only start these).
+  { name: 'release-controls', build: null, covers: [/^\.github\/workflows\/(rollout|release-start|release|docker|fresh-install|test)\.yml$/, /^scripts\/(release|rollout)\.js$/, /^shared\/rollout\.js$/] },
+  { name: 'nightly', build: 'dist', browser: true, covers: [/^scripts\/nightly\.js$/, /^shared\/(version|autoupdate)\.js$/, /^server\/updates\.js$/, /^src\/components\/settings\/About\.jsx$/, /^counts\/worker\.js$/, /^\.github\/workflows\/(nightly|release)\.yml$/] },
+  { name: 'model-names', build: null, covers: [/^server\/(models|transcripts)\.js$/, /^src\/components\/ModelChip\.jsx$/] },
   { name: 'chat-account', build: 'dist', browser: true, covers: [/^src\/components\/(ModelChip|AccountMenu|Console|Handoff)\.jsx$/, /^src\/App\.jsx$/, /^server\/(accounts|models|handoff|index|transcripts|queue)\.js$/] },
   { name: 'usage-accounts', build: 'dist', browser: true, covers: [/^server\/(usagesplit|usage|usagestats|insights|accounts|consult|logread|prices)\.js$/, /^server\/runtime\/(builtin|herdr)\.js$/, /^src\/components\/(Usage|UsageStats|AccountMenu|StatusMenu|NewAgent|Routines)\.jsx$/, /^src\/components\/settings\/Providers\.jsx$/, /^src\/components\/needshome\.css$/, /^src\/styles\.css$/] },
   { name: 'usage-everywhere', build: 'dist', browser: true, covers: [/^server\/(usagelog|usageall|agenttokens|prices|otherlogs|usagestats|chatmodels|consult|meetings|boards|dictation|insights|pr|chatagent|llm)\.js$/, /^src\/components\/(UsageEverywhere|UsageStats|Usage|Trackers)\.jsx$/, /^src\/trials\.js$/, /^test\/stand-ins\/(claude\.cjs|local-model\.mjs|llama-server\.mjs)$/] },
@@ -79,6 +87,8 @@ const SUITES = [
   { name: 'mail-assist', build: null, covers: [/^server\/(mail|mailparse|mailassist|freetimes|calendar|usagelog|openin)\.js$/, /^test\/stand-ins\/(model|mailbox)\.mjs$/] },
   { name: 'updates', build: 'dist', browser: true, covers: [/^server\/(updates|machine|earlyaccess)\.js$/, /^install\.sh$/, /^scripts\/(release|rollout|early-access-code)\.js$/, /^shared\/(version|rollout)\.js$/, /^src\/earlyLink\.js$/, /^desktop\/package\.json$/, /^src\/components\/(UpdateChip|TopNotes)\.jsx$/, /^src\/components\/settings\/About\.jsx$/, /^shared\/autoupdate\.js$/, /^src\/busy\.js$/, /^desktop\/(main|preload)\.js$/, /^test\/stand-ins\/installer\.cjs$/] },
   { name: 'screen-watch', build: null, covers: [/^src\/components\/meetings\/(changes|screen)\.js$/] },
+  { name: 'meeting-video', build: 'dist', browser: true, covers: [/^server\/(meetvideo|meetings|machine|index)\.js$/, /^src\/components\/meetings\/(videorec|recorder|screen)\.js$/, /^src\/components\/meetings\/(video|player|recording|allowcall|Meetings)\.jsx$/, /^src\/components\/meetings\/meetings\.css$/, /^desktop\/main\.js$/] },
+  { name: 'meeting-crop', build: 'dist', browser: true, covers: [/^src\/components\/meetings\/(crop\.js|cropping\.jsx|screen\.js|recording\.jsx|Meetings\.jsx)$/, /^src\/components\/settings\/Meetings\.jsx$/, /^server\/(meetings|index)\.js$/, /^test\/lib\/callwindows\.mjs$/] },
   { name: 'review-pairing', build: null, covers: [/^server\/relay\.js$/, /^scripts\/cli\.js$/, /^relay\//, /^test\/stand-ins\/relay\.mjs$/] },
   { name: 'devices', build: null, covers: [/^server\/(machines|relay|index)\.js$/, /^relay\//, /^test\/stand-ins\/relay\.mjs$/] },
   { name: 'setup-all', build: 'dist', browser: true, covers: [/^src\/components\/(Onboarding|SetupAll|SetupChip|PermissionFix|LiveShell)\.jsx$/, /^src\/components\/settings\/General\.jsx$/, /^src\/(setupPlan|App)\.jsx?$/, /^server\/(index|speech|voice|fixes|nodejs|gitready)\.js$/, /^scripts\/setup-mac\.sh$/, /^test\/stand-ins\/(installer|xcode-select)\.cjs$/] },
@@ -109,7 +119,7 @@ const SUITES = [
   { name: 'api-key', build: 'dist', browser: true, covers: [/^server\/(apiauth|apitoken|guard|chief|relay|inbox|index)\.js$/, /^desktop\/(apitoken|main|preload)\.js$/, /^scripts\/cli\.js$/, /^chief\/bin\/bridge$/, /^src\/components\/Files\.jsx$/, /^test\/stand-ins\/desktop-windows\.cjs$/] },
   { name: 'device-isolation', build: 'dist', browser: true, covers: [/^desktop\/(senders|main|preload|dictation)\.js$/, /^server\/(machinepages|guard|machines|index)\.js$/, /^src\/(api|passed)\.js$/, /^src\/components\/(RemoteAgent|Machines)\.jsx$/, /^src\/dictation\/controller\.js$/] },
   { name: 'remote-files', build: 'dist', browser: true, covers: [/^src\/components\/(Files|FileMedia|FileExtras)\.jsx$/, /^server\/(files|machines|relay|index)\.js$/, /^relay\/web\//, /^test\/fixtures\//] },
-  { name: 'files-ui', build: 'dist', browser: true, covers: [/^src\/components\/files\//, /^server\/(explorer|files|transfers|projects|index)\.js$/, /^src\/components\/(Files|FileMedia|FileExtras|Rail|Icon)\.jsx$/, /^src\/components\/studio\/pdf\/pdfjs\.js$/, /^src\/(App|lazy)\.jsx$/, /^src\/trials\.js$/, /^scripts\/tcc-sim\.mjs$/] },
+  { name: 'files-ui', build: 'dist', browser: true, covers: [/^src\/components\/files\//, /^server\/(explorer|files|transfers|projects|index)\.js$/, /^src\/components\/(Files|FileMedia|FileExtras|Rail|Icon)\.jsx$/, /^src\/components\/studio\/pdf\/pdfjs\.js$/, /^src\/components\/studio\/(Studio|HomeFiles)\.jsx$/, /^src\/components\/studio\/(studio|home)\.css$/, /^src\/(App|lazy)\.jsx$/, /^src\/trials\.js$/, /^scripts\/tcc-sim\.mjs$/] },
   { name: 'files-across', build: 'dist', browser: true, covers: [/^server\/(transfers|files|places|machines|notify|index)\.js$/, /^src\/components\/(Transfers|Files|FileExtras|FileMedia)\.jsx$/, /^src\/components\/transfers\.css$/, /^src\/(pwa|App)\.jsx?$/, /^shared\/media\.js$/, /^scripts\/tcc-sim\.mjs$/, /^desktop\/(main|preload)\.js$/] },
   { name: 'files-assist', build: 'dist', browser: true, covers: [/^server\/(fileinsights|files|places|projects|index)\.js$/, /^src\/components\/files\//, /^src\/components\/(Files|FileExtras)\.jsx$/, /^src\/trials\.js$/, /^scripts\/tcc-sim\.mjs$/, /^test\/stand-ins\/(model|llama-server)\.mjs$/] },
   { name: 'dictation-cleanup', build: 'dist', browser: true, covers: [/^server\/(dictation|dictations|llm|chatmodels|index)\.js$/, /^src\/dictation\//, /^src\/components\/dictations\//, /^src\/components\/settings\/Dictation\.jsx$/, /^src\/trials\.js$/] },
@@ -134,7 +144,7 @@ const SUITES = [
   { name: 'account-ui', build: 'dist', browser: true, covers: [/^account\/worker\.js$/, /^server\/(account|machines|relay|updates|earlyaccess|index)\.js$/, /^src\/components\/settings\/(Account|Relay|About)\.jsx$/, /^src\/components\/settings\/account\.css$/, /^src\/components\/(Settings|Usage)\.jsx$/, /^test\/stand-ins\/(accounts|relay)\.mjs$/] },
   { name: 'privacy-hosts', build: null, covers: [/^server\//, /^desktop\//, /^shared\//, /^PRIVACY\.md$/] },
 ]
-// A change to these runs everything.
+// A change to these runs everything; to the package files, unless it's only the version (a release's).
 const EVERYTHING = [/^test\/(lib|stand-ins)\//, /^test\/run\.mjs$/, /^package(-lock)?\.json$/]
 
 const args = process.argv.slice(2)
@@ -154,9 +164,18 @@ else if (named.length) {
 } else {
   const base = opt('--base')
   const changed = [...new Set([...git('diff', '--name-only', 'HEAD'), ...git('ls-files', '--others', '--exclude-standard'), ...(base ? git('diff', '--name-only', `${base}...HEAD`) : [])])].map((f) => f.replace(/\\/g, '/'))
-  pick = changed.some((f) => EVERYTHING.some((re) => re.test(f))) ? SUITES : SUITES.filter((s) => changed.some((f) => s.covers.some((re) => re.test(f))) || changed.includes(`test/suites/${s.name}.mjs`))
-  console.log(changed.length ? `Changed: ${changed.length} file${changed.length === 1 ? '' : 's'}` : 'Nothing changed since the last commit.')
-  if (!pick.length) { console.log('No test covers these changes. node test/run.mjs --all runs every test.'); process.exit(0) }
+  // Only "version" lines changed in it, since the base (or the last commit) and in the working tree.
+  const from = base ? git('merge-base', base, 'HEAD')[0] : 'HEAD'
+  const versionOnly = (f) => /^package(-lock)?\.json$/.test(f) && !!from && git('diff', '-U0', from, '--', f).filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---) /.test(l)).every((l) => /^[+-]\s*"version": "[^"]*",?$/.test(l))
+  pick = changed.some((f) => EVERYTHING.some((re) => re.test(f)) && !versionOnly(f)) ? SUITES : SUITES.filter((s) => changed.some((f) => s.covers.some((re) => re.test(f))) || changed.includes(`test/suites/${s.name}.mjs`))
+  if (!flag('--list')) {
+    console.log(changed.length ? `Changed: ${changed.length} file${changed.length === 1 ? '' : 's'}` : 'Nothing changed since the last commit.')
+    if (!pick.length) { console.log('No test covers these changes. node test/run.mjs --all runs every test.'); process.exit(0) }
+  }
+}
+if (flag('--list')) {
+  console.log(JSON.stringify({ names: pick.map((s) => s.name), browser: pick.some((s) => s.browser) }))
+  process.exit(0)
 }
 
 // The app's build, when its source is newer (or it isn't there). The source includes what the build

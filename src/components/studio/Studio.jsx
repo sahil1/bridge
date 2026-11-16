@@ -12,15 +12,18 @@ import { fontCss, lookOfPack } from './look.js'
 import { withKeys, keys } from './keys.js'
 import { useFocus, canFullScreen } from './focus.js'
 import { useBusy } from '../../busy.js'
-import { YourFiles } from './HomeFiles.jsx'
+import { YourFiles, useYourFiles, kindsHere, KIND_ICON } from './HomeFiles.jsx'
+import Explorer from '../files/Explorer.jsx'
 import AiAssist from '../AiAssist.jsx'
 import './studio.css'
 import './home.css'
 
-// Studio: the one place to make things. Documents, sheets, decks, PDFs and pages, and your
-// whiteboards (which have no place of their own), like Meetings a place of its own.
-// A file from Files or an agent's folder (on this computer, or another of yours through its
-// window) opens here, is edited and saved where it is, and keeps every version (server/studio.js).
+// Studio: your files and the one place to make things. Its home is every file on your computers, as
+// Finder shows them (files/Explorer.jsx), with Studio's own lists beside your folders: Recent, each
+// kind it makes, your design packs and signature. Documents, sheets, decks, PDFs and pages, and your
+// whiteboards (which have no place of their own), open here from a folder, an agent's or a list (on
+// this computer, or another of yours through its window), are edited and saved where they are, and
+// keep every version (server/studio.js); anything else opens in Quick Look or its own app.
 // Ask an agent sends a change to one of your agents, and Studio shows it once the agent saves.
 // Each kind's editor loads only when a file of that kind opens.
 const EDITORS = {
@@ -57,17 +60,18 @@ const keepLast = (f) => store.set('cc-studio-last', f)
 function StudioTabs({ on, onFiles, onPreview, name }) {
   return (
     <div className="seg sd-tabs" role="tablist" aria-label={t('Studio')}>
-      <button type="button" role="tab" aria-selected={on === 'files'} className={on === 'files' ? 'on' : ''} onClick={on === 'files' ? undefined : onFiles} title={t('Your documents, sheets, decks, PDFs and whiteboards')}><Icon name="folder" size={14} /><span>{t('Files')}</span></button>
+      <button type="button" role="tab" aria-selected={on === 'files'} className={on === 'files' ? 'on' : ''} onClick={on === 'files' ? undefined : onFiles} title={t('Every file on your computers, and your documents, sheets, decks, PDFs and whiteboards')}><Icon name="folder" size={14} /><span>{t('Files')}</span></button>
       <button type="button" role="tab" aria-selected={on === 'preview'} className={on === 'preview' ? 'on' : ''} onClick={on === 'preview' ? undefined : onPreview} title={name ? t('Preview: {name}, in its own editor', { name }) : t('Preview: the file you open, in its own editor')}><Icon name="eye" size={14} /><span>{t('Preview')}</span></button>
     </div>
   )
 }
 
 // ---------- Files ----------
-// Studio's home, its Files: your files from wherever they are by kind and by where (HomeFiles.jsx),
-// and your design packs, with New in the header (a document, sheet, deck or page in a folder you
-// pick, or a whiteboard; its cards on the page only while there are no files yet). Preview opens
-// the file last open, or says how to pick one.
+// Studio's home, its Files: every folder on your computers (files/Explorer.jsx), with Studio's own
+// lists at the top of its sidebar: Recent and each kind, from wherever they are (HomeFiles.jsx), your
+// design packs and your signature. New is in the header (a document, sheet, deck or page in the
+// folder shown or one you pick, or a whiteboard; its cards on Recent only while there are no files
+// yet). Preview opens the file last open, or says how to pick one.
 // What New makes, one entry a kind: a file of that kind in the folder picked, started by startOf;
 // or, with make(title), something Bridge AI keeps itself, which answers what to open ({ root, path }).
 // Another kind is another entry here (and its row in HomeFiles.jsx's KINDS, to list them).
@@ -103,7 +107,8 @@ function pageOf(title, pack) {
   return `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>${esc(title)}</title>\n<style>\n${vars}  body { ${body} max-width: 760px; margin: 3rem auto; padding: 0 1rem; }\n${heads}</style>\n</head>\n<body>\n${logo}<h1>${esc(title)}</h1>\n</body>\n</html>\n`
 }
 
-// Where a new file can go: the folders your agents work in, and the places you added to Files.
+// Where a new file can go (besides the folder shown on Studio's home): the folders your agents work
+// in, and the places you added.
 function useFolders() {
   const { fleet } = useFleet()
   const { data: pl } = usePoll('/places', 60_000)
@@ -126,37 +131,38 @@ function useFolders() {
 const home = (p) => p.replace(/^(\/Users\/|\/home\/|[A-Z]:\\Users\\)[^/\\]+/, '~')
 function whereOf(folders, root, rel) {
   const dir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : ''
+  // One opened from your home folder on Studio's home: said from ~.
+  if (root === 'home') { const at = dir ? `~/${dir}` : '~'; return { label: t('Home'), path: at, full: at } }
   const f = folders.find((x) => x.root === root)
   if (!f) return null
   const at = dir ? `${f.path.replace(/\/$/, '')}/${dir}` : f.path
   return { label: f.label, path: home(at), full: at }
 }
 
-// Where a file opened here is, for Files to show it by, when the look didn't find it (a project's
-// Markdown, say): its project or place, or Studio's own folder.
-const areaOfOpened = (folders) => (f) => {
-  if (f.root === 'studio') return { type: 'studio', name: null }
-  const at = folders.find((x) => x.root === f.root)
-  if (at) return { type: String(f.root).startsWith('place:') ? 'place' : 'project', name: at.label.split(' › ')[0] }
-  return { type: 'other', name: null }
-}
+// The lists at the top of the home's sidebar (shelves), beside your folders: Recent, each kind, your
+// design packs and your signature. An old Studio's list kept from before (cc-studio-group: recent or
+// kind:<kind>; a folder's group of then, area:..., is Recent) is where it opens the first time.
+const firstShelf = () => { const g = store.get('cc-studio-group', 'recent'); return typeof g === 'string' && g.startsWith('kind:') ? g : 'recent' }
+// The folder shown, as the first place a new file can go (New › Where): on this computer, a folder
+// (not one of Studio's lists).
+const SHOWN = '\nshown'
 
 export function StudioHome({ onOpen }) {
   const { data, refresh } = usePoll('/studio/recent', 15_000)
   const folders = useFolders()
   const packs = useDesignPacks()
+  const files = useYourFiles(data)
   const [view, setView] = useState('files') // files, or preview with nothing open yet
   const last = lastOpen()
   const preview = () => (last?.root && last.path ? onOpen({ root: last.root, path: last.path }) : setView('preview'))
-  const areaOf = useMemo(() => areaOfOpened(folders), [folders])
   const [menuAt, setMenuAt] = useState(null) // where New's menu opens
-  const [empty, setEmpty] = useState(false) // no files at all yet: New's cards, as the start
   const [making, setMaking] = useState(null) // the New kind being named
   const [name, setName] = useState('')
   const [forWhat, setForWhat] = useState('') // what a new sheet is for, for AI Assist to make (Make a Sheet)
   const [where, setWhere] = useState('')
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
+  const shown = useRef(null) // the folder on screen, as New's form last saw it
   useEffect(() => { if (!where && folders[0]) setWhere(folders[0].root) }, [folders, where])
   const make = async (e) => {
     e.preventDefault()
@@ -166,14 +172,15 @@ export function StudioHome({ onOpen }) {
       const title = name.trim() || t(n.label)
       if (n.make) { const made = await n.make(title); setMaking(null); setName(''); onOpen(made); return }
       const file = `${title}${n.deck ? '.md' : n.ext}`
-      const r = await api('/studio/new', { method: 'POST', body: { root: where, dir: '', name: file, ...(await startOf(n, title, packFor(packs.list))) } })
+      const into = where === SHOWN && shown.current ? { root: shown.current.root, dir: shown.current.path } : { root: where === SHOWN ? folders[0]?.root : where, dir: '' }
+      const r = await api('/studio/new', { method: 'POST', body: { ...into, name: file, ...(await startOf(n, title, packFor(packs.list))) } })
       // A sheet said to be for something: AI Assist makes it as it opens, to keep or discard.
-      if (n.kind === 'sheet' && forWhat.trim()) (await import('./xlsx.js')).makeOnOpen(where, r.path, forWhat)
+      if (n.kind === 'sheet' && forWhat.trim()) (await import('./xlsx.js')).makeOnOpen(into.root, r.path, forWhat)
       setMaking(null); setName(''); setForWhat('')
-      onOpen({ root: where, path: r.path })
+      onOpen({ root: into.root, path: r.path })
     } catch (x) { setErr(x.message) } finally { setBusy(false) }
   }
-  const pick = (n) => { setMaking(n); setErr(null); setView('files') }
+  const pick = (n) => { setMaking(n); setErr(null); setView('files'); setWhere(shown.current ? SHOWN : folders[0]?.root || '') }
   const closeMenu = useCallback(() => setMenuAt(null), [])
   // New, beside Files and Preview: a menu of what it makes, and its name and folder asked under it.
   const head = (
@@ -197,58 +204,74 @@ export function StudioHome({ onOpen }) {
       </div>
     )
   }
-  return (
-    <div className="sd-home-view">
-      {head}
-      <div className="sd-home">
-        <p className="muted small sd-home-say">{t('Your documents, sheets, decks, PDFs and pages, wherever they are, and your whiteboards, edited here or by your agents, with every version kept.')}</p>
-        {/* New's cards only while there are no files at all, as the way to start; else it's the
-            header's menu, and your files have the page. */}
-        {(empty || making) && <section className="sd-sec sd-new-sec">
-          <h3>{making && !empty ? t('New {kind}', { kind: t(making.label) }) : t('New')}</h3>
-          {empty && <div className="sd-new">
-            {NEW.map((n) => (
-              <button key={n.label} type="button" className={`sd-new-btn${making === n ? ' on' : ''}`} onClick={() => pick(n)} disabled={!folders.length} aria-pressed={making === n} title={t(n.hint)}>
-                <span className={`sd-new-thumb ${n.deck ? 'deck' : n.ext === '.md' ? 'md' : n.kind}`} aria-hidden="true"><i /><i /><i /><i /></span>
-                <span className="sd-new-ic"><Icon name={ICON[n.kind]} size={16} /></span><b>{t(n.label)}</b><small className="muted">{t(n.hint)}</small>
-              </button>
-            ))}
-          </div>}
-          {folders.length === 1 && <p className="muted small">{t('Start an agent in a folder, or add a place in Files, to make a file there; until then, they go in Studio\'s own folder.')}</p>}
-          {making && (
-            <form className="sd-new-form" onSubmit={make}>
-              <label className="sd-field"><span className="muted small">{t('Name')}</span>
-                <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t(making.label)} maxLength={100} />
+  // New's cards on Recent only while there are no files at all, as the way to start; else it's the
+  // header's menu. A kind picked asks its name and where it goes over whatever is shown, the folder
+  // on screen offered first.
+  const above = (at) => {
+    shown.current = !at.machine && !at.shelf ? { root: at.root, path: at.path, name: at.name } : null
+    const cards = files.empty && at.shelf === 'recent'
+    if (!cards && !making) return null
+    const whereNow = where === SHOWN && !shown.current ? folders[0]?.root || '' : where
+    return (
+      <section className="sd-sec sd-new-sec">
+        <h3>{making && !cards ? t('New {kind}', { kind: t(making.label) }) : t('New')}</h3>
+        {cards && <div className="sd-new">
+          {NEW.map((n) => (
+            <button key={n.label} type="button" className={`sd-new-btn${making === n ? ' on' : ''}`} onClick={() => pick(n)} disabled={!folders.length} aria-pressed={making === n} title={t(n.hint)}>
+              <span className={`sd-new-thumb ${n.deck ? 'deck' : n.ext === '.md' ? 'md' : n.kind}`} aria-hidden="true"><i /><i /><i /><i /></span>
+              <span className="sd-new-ic"><Icon name={ICON[n.kind]} size={16} /></span><b>{t(n.label)}</b><small className="muted">{t(n.hint)}</small>
+            </button>
+          ))}
+        </div>}
+        {folders.length === 1 && !shown.current && <p className="muted small">{t('Open a folder here, start an agent in one, or add a place, to make a file there; until then, they go in Studio\'s own folder.')}</p>}
+        {making && (
+          <form className="sd-new-form" onSubmit={make}>
+            <label className="sd-field"><span className="muted small">{t('Name')}</span>
+              <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t(making.label)} maxLength={100} />
+            </label>
+            {making.kind === 'sheet' && (
+              <label className="sd-field wide sd-new-for"><span className="muted small"><Icon name="wand" size={11} /> {t('What it\'s for, for AI Assist to make (or leave it empty)')}</span>
+                <input value={forWhat} onChange={(e) => setForWhat(e.target.value)} placeholder={t('A budget for a team of five')} maxLength={400} />
               </label>
-              {making.kind === 'sheet' && (
-                <label className="sd-field wide sd-new-for"><span className="muted small"><Icon name="wand" size={11} /> {t('What it\'s for, for AI Assist to make (or leave it empty)')}</span>
-                  <input value={forWhat} onChange={(e) => setForWhat(e.target.value)} placeholder={t('A budget for a team of five')} maxLength={400} />
-                </label>
-              )}
-              {!making.make && <label className="sd-field wide"><span className="muted small">{t('Where')}</span>
-                <select value={where} onChange={(e) => setWhere(e.target.value)}>
-                  {folders.map((f) => <option key={f.root} value={f.root}>{f.label} · {home(f.path)}</option>)}
-                </select>
-              </label>}
-              <span className="sd-new-acts">
-                <button type="submit" className="btn small primary" disabled={busy}>{busy ? t('Making it…') : t('Make it')}</button>
-                <button type="button" className="ghost-btn" onClick={() => setMaking(null)}>{t('Cancel')}</button>
-              </span>
-              {err && <p className="error-text small sd-new-err" role="alert">{t("Couldn't make it: {error}", { error: err })}</p>}
-            </form>
-          )}
-        </section>}
-        <YourFiles recent={data} refreshRecent={refresh} onOpen={onOpen} areaOf={areaOf} onEmpty={setEmpty} describe={(f) => {
-          if (f.kind === 'board') return { kind: t('Whiteboard'), folder: t('Whiteboards'), full: null }
-          if (f.root === 'studio') return { kind: kindName(f.kind, extOf(f.name)), folder: t('Bridge AI'), full: t("Studio's own folder: decks made from meetings, and new files with nowhere else to go") }
-          const at = whereOf(folders, f.root, f.path)
-          return { kind: kindName(f.kind, extOf(f.name)), folder: f.dir || at?.path || f.where || null, full: at ? `${at.label} · ${at.full}` : f.dir || null }
-        }} />
-        <PacksSection packs={packs} />
-        <Suspense fallback={null}><SignatureHome /></Suspense>
-      </div>
-    </div>
-  )
+            )}
+            {!making.make && <label className="sd-field wide"><span className="muted small">{t('Where')}</span>
+              <select value={whereNow} onChange={(e) => setWhere(e.target.value)}>
+                {shown.current && <option value={SHOWN}>{t('This folder ({name})', { name: shown.current.name })}</option>}
+                {folders.map((f) => <option key={f.root} value={f.root}>{f.label} · {home(f.path)}</option>)}
+              </select>
+            </label>}
+            <span className="sd-new-acts">
+              <button type="submit" className="btn small primary" disabled={busy}>{busy ? t('Making it…') : t('Make it')}</button>
+              <button type="button" className="ghost-btn" onClick={() => setMaking(null)}>{t('Cancel')}</button>
+            </span>
+            {err && <p className="error-text small sd-new-err" role="alert">{t("Couldn't make it: {error}", { error: err })}</p>}
+          </form>
+        )}
+      </section>
+    )
+  }
+  const describe = (f) => {
+    if (f.kind === 'board') return { kind: t('Whiteboard'), folder: t('Whiteboards'), full: null }
+    if (f.root === 'studio') return { kind: kindName(f.kind, extOf(f.name)), folder: t('Bridge AI'), full: t("Studio's own folder: decks made from meetings, and new files with nowhere else to go") }
+    const at = whereOf(folders, f.root, f.path)
+    return { kind: kindName(f.kind, extOf(f.name)), folder: f.dir || at?.path || f.where || null, full: at ? `${at.label} · ${at.full}` : f.dir || null }
+  }
+  const shelves = {
+    first: firstShelf(),
+    rows: [
+      { id: 'recent', icon: 'clock', label: t('Recent'), n: files.found ? files.recentRows.length : null, hint: t('What you opened here, and what was opened or changed in the last 30 days') },
+      ...kindsHere.map(([k, label]) => ({ id: `kind:${k}`, icon: KIND_ICON[k], label: t(label), n: files.found ? files.kindCount[k] : null })),
+      { id: 'packs', icon: 'palette', label: t('Design Packs'), hint: t('Your colours, fonts and logo, for the decks, documents and pages Studio makes') },
+      { id: 'signature', icon: 'signature', label: t('Your Signature'), hint: t("Your signature and initials, for AI Assist's Sign this on a PDF") },
+    ],
+    render: (id, { q }) => (id === 'packs' ? <PacksSection packs={packs} />
+      : id === 'signature' ? <Suspense fallback={null}><SignatureHome /></Suspense>
+        : <>
+          {id === 'recent' && !q && <p className="muted small sd-home-say">{t('Your folders on every computer, and these lists of your documents. Documents, sheets, decks, PDFs and pages open here to edit, by you or your agents, with every version kept; anything else opens in Quick Look or its own app.')}</p>}
+          <YourFiles files={files} group={id} q={q} refreshRecent={refresh} onOpen={onOpen} describe={describe} />
+        </>),
+  }
+  return <Explorer className="sd-home-view sd-home" head={head} shelves={shelves} onOpenDoc={onOpen} above={above} />
 }
 
 // ---------- One file ----------

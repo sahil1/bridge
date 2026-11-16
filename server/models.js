@@ -42,6 +42,22 @@ export function remember(a, model) {
 const recent = (kind) => [...new Set(Object.entries(picked).filter(([k, v]) => k.startsWith(`${kind}:`) && v.model !== 'default')
   .sort((x, y) => (y[1].at || '').localeCompare(x[1].at || '')).map(([, v]) => v.model))].slice(0, 6)
 
+// What Claude Code's short names stand for ("opus" is claude-opus-5-5 today), learnt from its
+// replies to an agent asked for one, so the menu can say "Opus 5.5" and not just "Opus". The newest
+// reply wins: a Claude Code update moves "opus" on. Kept in model-names.json.
+const NAMES_FILE = dataFile('model-names.json')
+const SHORT = new Set(['opus', 'sonnet', 'haiku', 'fable', 'best', 'default'])
+let named = {} // short name -> { id, at }
+try { named = JSON.parse(fs.readFileSync(NAMES_FILE, 'utf8')) || {} } catch { named = {} }
+function learn(asked, reply) {
+  const short = String(asked || '').replace(/\[1m\]$/i, '').toLowerCase()
+  const id = String(reply?.model || '').replace(/\[1m\]$/i, '')
+  if (!SHORT.has(short) || !/^claude-[\w.-]+$/.test(id) || !reply.at) return
+  if (named[short] && (named[short].id === id || named[short].at >= reply.at)) return
+  named[short] = { id, at: reply.at }
+  try { ensureDir(DATA); writeFileAtomic(NAMES_FILE, JSON.stringify(named, null, 2)) } catch { /* read-only disk: keep going */ }
+}
+
 // A model name as a CLI takes it: "opus", "sonnet[1m]", "claude-opus-5-5", "gpt-5-codex",
 // "openrouter/x/y". Nothing that a shell or the agent's input could read as more than a name.
 export const validModel = (m) => typeof m === 'string' && /^[A-Za-z0-9][\w.:/@[\]-]{0,99}$/.test(m)
@@ -135,6 +151,8 @@ export function makeModels({ rt, cfg, findAgent, launchAgent, archiveWhere, push
     // The menu's tick: what you picked here, or a /model typed in the agent itself since, or what it started on.
     let checked = pick || a.model || cfg.agents?.[a.kind]?.model || 'default'
     if (m?.switched?.arg && setAt > pickAt) checked = m.switched.arg
+    // A reply since it was last asked for a short name says what that name stands for now.
+    if (a.kind === 'claude' && replyAt > Math.max(setAt, pickAt)) learn(checked, m.reply)
     // A chat with any model: every model you can reach now, by name ("gpt-5 (OpenAI)").
     const reach = a.kind === 'chat' ? await chatModels.models().catch(() => []) : null
     if (reach && current) checked = current
@@ -142,6 +160,7 @@ export function makeModels({ rt, cfg, findAgent, launchAgent, archiveWhere, push
       kind: a.kind, label: ad.label, mode, current: current === 'default' ? null : current, source, checked: checked || 'default',
       models: reach ? reach.map((x) => x.id) : [...new Set([...(ad.models || []), ...recent(a.kind)])],
       ...(reach && { labels: Object.fromEntries(reach.map((x) => [x.id, x.via === 'sign-in' ? `${x.label} (your sign-in)` : `${x.label} (${x.provider.replace(/, on this computer$/, '')})`])) }),
+      ...(a.kind === 'claude' && { named: Object.fromEntries(Object.entries(named).map(([k, v]) => [k, v.id])) }),
       canDefault: mode === 'restart' || (mode === 'switch' && !!ad.switchModel.dflt),
       canResume: !!a.sessionId,
       switching: s && { model: s.model, state: s.state, said: s.said || null, at: new Date(s.at).toISOString() },

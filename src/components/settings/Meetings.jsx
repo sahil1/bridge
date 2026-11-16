@@ -17,7 +17,7 @@ import '../meetings/meetings.css'
 // reads goes to that model, so which and where it runs is said there), AI Assist's live board (a
 // beta feature: on for every meeting, and what it sends where), Answers in AI Assist (a beta
 // feature: what it answers from, and what goes where, the web too), calls and their sound (and, in
-// the desktop app, the floating card's reminder before a meeting), and
+// the desktop app, the floating card's reminder before a meeting), cropping pictures of a call, and
 // saving them as Markdown. Under Advanced: the other speech services, suggesting what to ask, who
 // spoke, the key that mentions a meeting in a message, the floating card, and where and how notes
 // are saved. Server: speech.js, meetings.js.
@@ -155,7 +155,8 @@ export default function Meetings({ onOpenAgent }) {
   const { s, save, note } = useSettings()
   const sp = usePoll('/speech', 3000)
   const [models, setModels] = useState(null)
-  const [auto, setAuto] = useState(null) // the model Automatic is, as the server picks it (server/index.js pickMeetingModel)
+  const [auto, setAuto] = useState(null) // the model Automatic is, as the server picks it (server/index.js pickFor)
+  const [short, setShort] = useState(null) // with Auto, the model on this computer that writes short meetings' notes
   const [vocab, setVocab] = useState(null)
   const [instr, setInstr] = useState(null)
   // Preparing for meetings needs the calendar: only where there's one (a Mac).
@@ -165,7 +166,7 @@ export default function Meetings({ onOpenAgent }) {
   const answers = useTrial('assist-answers') // Answers in AI Assist, a beta feature
   const [web, setWeb] = useState(null) // the route that looks things up on the web (consult.js: Perplexity), once asked
   useEffect(() => { if (answers) api('/consult').then((l) => setWeb((Array.isArray(l) ? l : []).find((x) => x.id === 'perplexity') || { available: false }), () => setWeb({ available: false })) }, [answers])
-  useEffect(() => { api('/chat/models').then((r) => { setModels(r.models || []); setAuto(r.automatic || null) }).catch(() => setModels([])) }, [])
+  useEffect(() => { api('/chat/models').then((r) => { setModels(r.models || []); setAuto(r.automatic || null); setShort(r.short || null) }).catch(() => setModels([])) }, [])
   const m = s?.effective?.meetings || {}
   useEffect(() => { if (s) { setVocab(m.vocabulary || ''); setInstr(m.instructions || '') } }, [s]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!s || !sp.data) return <div className="skeleton-rows"><div /><div /><div /></div>
@@ -262,6 +263,7 @@ export default function Meetings({ onOpenAgent }) {
           : !notes ? t('No model to write them yet: sign in to an agent, or add one in Settings › Model Providers.')
           : notes.via === 'local' ? t('{model} runs on this computer: what it reads stays here.', { model: notes.label })
             : t('{model}, at {provider}: the transcript, and what each one below reads, go there.', { model: notes.label, provider: notes.provider })}</p>
+        {!m.model && short && <p className="muted small" data-notes-short>{t('Meetings up to about {n} minutes are written by {model} on this computer instead (Auto, in Settings › Model Providers).', { n: short.minutes, model: short.label })}</p>}
         <select className="st-input" value={m.model || ''} onChange={(e) => set({ model: e.target.value || null })} aria-label={t('Model for meeting notes')}>
           <option value="">{t('Automatic (your Claude sign-in first, then a key or a local model)')}</option>
           {(models || []).map((x) => <option key={x.id} value={x.id}>{x.label} ({x.provider})</option>)}
@@ -339,6 +341,13 @@ export default function Meetings({ onOpenAgent }) {
         <label className="st-check">
           <input type="checkbox" checked={m.autoStop !== false} onChange={(e) => set({ autoStop: e.target.checked })} disabled={!d.canWatchCalls || m.detect === false} />
           <span><b>{t('Stop by itself when the call ends')}</b> <span className="muted small">{t('Two minutes after, unless you keep it going.')}</span></span>
+        </label>
+        {/* Worked out on this computer from the picture alone (meetings/crop.js); both pictures are kept. */}
+        <label className="st-check" data-setting="crop-shots">
+          <input type="checkbox" checked={m.cropShots !== false} onChange={(e) => set({ cropShots: e.target.checked })} />
+          <span title={t("When a watched screen shows a call, its pictures keep the slide or page being shared, and leave out the people beside it, the call's buttons and its window. Only when the picture plainly shows a call, and never into what's shared. Worked out on this computer; the picture as it was taken is kept too.")}><b>{t("Crop pictures of a call to what's shared")}</b> <span className="muted small">{m.cropShots !== false
+            ? t("The slide or page, without the people and the call's buttons. Whole screen on a picture puts it back.")
+            : t('Pictures stay whole. Crop on a picture of a call crops that one.')}</span></span>
         </label>
       </section>
 

@@ -51,7 +51,9 @@ const TWEAKS = {
 export function makeMailAssist({ cfg, mail, calendar, meetings, chat, zone }) {
   let learning = null
   let learnError = null
-  const pickModel = async () => cfg.meetings?.model || await chat.pick()
+  // The model you picked for meeting notes, else Mail's for that much text (text: what goes to it;
+  // with Auto, a short one on this computer; none, as for a long one).
+  const pickModel = async (text) => cfg.meetings?.model || await chat.pick(text)
 
   // What you said in meetings: on a call, your mic's lines (the call's sound is everyone else); in a
   // room, the voice Who spoke says is you; a line named for someone else is theirs. A room whose
@@ -104,8 +106,8 @@ export function makeMailAssist({ cfg, mail, calendar, meetings, chat, zone }) {
     if (learning) return learning
     learnError = null
     learning = (async () => {
-      const use = await pickModel()
-      if (!use) throw noModel()
+      // Said before anything's read when there's no model at all; which one, once its size is known.
+      if (!(await pickModel())) throw noModel()
       const [sent, said] = [await mail.sent({ days: DAYS, limit: 40 }).catch(() => ({ available: false, items: [] })), myLines({ limit: 40 })]
       if (!sent.items.length && !said.items.length) {
         throw fail(sent.available
@@ -122,6 +124,8 @@ export function makeMailAssist({ cfg, mail, calendar, meetings, chat, zone }) {
         'Answer with one JSON object and nothing else: {"profile": ["...", "..."], "examples": ["E2", "E5"]}',
         '', ...emails, ...(emails.length ? [''] : []), ...lines,
       ].filter((x, i, a) => x !== '' || a[i - 1] !== '').join('\n')
+      const use = await pickModel(ask)
+      if (!use) throw noModel()
       const r = await chat.reply(use, [{ role: 'user', text: ask }], { system: VOICE_SYSTEM, json: VOICE_SCHEMA, feature: 'mail' })
       const j = objectIn(r.text)
       const bullets = Array.isArray(j?.profile) ? j.profile.map((x) => String(x).trim()).filter(Boolean)
@@ -174,8 +178,7 @@ export function makeMailAssist({ cfg, mail, calendar, meetings, chat, zone }) {
     if (tweak && !TWEAKS[tweak]) throw fail('Unknown change', null, 400)
     // The email first: where Mail can't be read (not a Mac), that's what to say.
     const msg = await mail.message(id)
-    const use = await pickModel()
-    if (!use) throw noModel()
+    if (!(await pickModel())) throw noModel()
     const list = await mail().catch(() => null)
     const row = list?.messages?.find((x) => String(x.id) === String(id))
     const subject = msg.subject || row?.subject || ''
@@ -201,6 +204,7 @@ export function makeMailAssist({ cfg, mail, calendar, meetings, chat, zone }) {
       quoted ? `Earlier in the thread, as the email quotes it:\n<<<\n${quoted}\n>>>` : '',
       tweak && text ? `\nTheir draft so far:\n<<<\n${clip(text, 6000)}\n>>>\n\n${TWEAKS[tweak]} Answer with the reply's text only.` : '',
     ].filter(Boolean).join('\n\n')
+    const use = await pickModel(`${DRAFT_SYSTEM}\n${ask}`)
     let r
     try { r = await chat.reply(use, [{ role: 'user', text: ask }], { system: DRAFT_SYSTEM, feature: 'mail' }) } catch (e) {
       throw fail(`${chat.describe(use)} couldn't write it: ${e.message}`, e.code === 'limit' ? 'limit' : null)

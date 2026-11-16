@@ -2,6 +2,32 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.20.0
+
+Studio's home is your files: Folders is part of Studio. The local model comes in three sizes, with the one that fits your computer recommended, and short jobs can run on it when you pick Auto. A meeting can keep its screen as a video, and pictures of a call's window are cropped to what's shared. The model menu says which version Opus and Sonnet are. Settings' Account and Devices are one section, where Bridge AI's relay is set up on the spot.
+
+<!-- rollout: 10 -->
+
+### What's new
+
+- **Studio is your files**: Studio's home is the Folders browser for all your computers, with its views, Back and Forward, search, Quick Look, Get Info, hidden files, AI Assist's Look over this folder and your other computers under Locations. Its sidebar starts with Studio's lists: Recent, Documents, Presentations, Sheets, PDFs, Pages, Whiteboards, Design Packs and Your Signature, with counts. A document opens in Studio's editor in the same tab, and its Files tab goes back to the folder; anything else opens in Quick Look. New offers the folder shown first. Folders has no row, ⌘K entry or phone More row of its own: a link, a tab (a pinned one stays pinned) or the phone's More view that opened Folders opens Studio's home at that folder.
+- **The local model that fits your computer**: Settings › Model Providers › Local model on this computer recommends Gemma 4 E2B (2.8 GB) with 8 GB of memory, Gemma 4 E4B (4.6 GB) with 16 GB and Gemma 4 26B-A4B (14.6 GB) with 32 GB or more, and says why. It lists only the ones this computer can run; an Intel Mac, and a PC without a graphics card llama.cpp can use, get E2B. Nothing downloads until you pick one.
+- **Which jobs run here**: under the local model, a setting for each kind of job (meeting notes, AI Assist, mail, titles and tidy-ups, live AI Assist, diagrams): Cloud first, Auto or On this computer. Cloud first, where every job starts, is as before: your sign-in or key first, the local model when there's nothing else. Auto runs a job on the local model when it's short: a meeting up to about 50 minutes, a rewrite, a mail draft, a pull request description; long meetings, diagrams, live suggestions and transcript cleanup stay on your cloud model. What ran says which model it was, and a job set to On this computer that can't run says why.
+- **Record the screen too**: a tick beside Start recording, in the call prompt and beside Watch a screen keeps the shared screen as a video with the meeting's sound, your mic and the call. MP4 in the desktop app, Chrome, Edge and Safari; WebM in Firefox. It's saved in pieces as it records, in the meeting's folder on this computer, at most about 500 MB an hour. After the meeting, Video plays it beside the transcript; click a line to go there. The recording bar shows its size so far; it stops with less than 2 GB free, and the meeting says why a video ended early. Off until you tick it, and not offered on a phone or where the browser can't record a screen.
+- **Pictures of a call cropped to what's shared**: a still of a Teams, Zoom or Meet window keeps the slide or screen being shared, without the people's tiles, the toolbars and the chat. It's done on this computer. The words are read from the crop, and the notes have it. Whole screen puts back the picture as taken, and Crop crops it again. Settings › Voice & Meetings › Calls › Crop pictures of a call to what's shared, on to start. Pictures from before are cropped when their meeting opens.
+- **Model versions in the model menu**: Opus, Sonnet, Haiku and Default say which version they are now (Opus 5.5), learnt from Claude Code's replies to an agent asked for each.
+- **Account & Devices**: Settings' Account and Devices are one section, with tabs for Account, Phone, Computers and Notifications; everything that opened either one opens its tab. With Bridge AI's relay on your account, Use it on this computer on the Account tab sets it up right there, saying each step (setting up, connecting and why not yet, On for this computer, or what went wrong and what to do), then shows a code to pair a phone; Use Bridge AI's relay instead moves a computer from a relay of your own. A computer signed in with nothing else set up for your phone starts using the relay by itself once your account has it, and says so; while a request waits, it asks your account every half hour. The relay's allowance is on the Account tab, and Your Other Computers says which relay each one uses.
+
+### Fixes
+
+- The desktop app no longer reports a crash when an update's installer, or Force Quit, ends its window; the window still opens again.
+- Docker: the image's health check asks a route that needs no key, so a running container shows healthy.
+- A finished meeting with nothing transcribed says no one was heard speaking in the time recorded.
+
+## 3.20.0-beta.1
+
+A beta of 3.20.0, to try before it goes to everyone. Studio's home is your files, with Folders folded into Studio. The local model comes in three sizes, the one that fits your computer recommended, and Settings › Model Providers › Which jobs run here sets which jobs may use it (every job on Cloud first until you pick Auto). Record the screen too keeps a meeting's screen as a video beside its transcript. Pictures of a call's window are cropped to what's shared. The model menu says which version Opus and Sonnet are. Account and Devices are one section in Settings, where Use it on this computer sets up Bridge AI's relay right there, and a computer with nothing else set up starts on it by itself. And fixes: no crash report when an update ends the old window, Docker's health check, and a silent meeting saying no one was heard.
+
 ## 3.19.0
 
 The Chief of Staff hands work to helpers, each an agent with a role, and hears back from each one when it stops; its tasks show on a board. Studio, Sign PDFs, Comments and @bridge, Make a Sheet, Folders, Back and Forward, Tab Groups and Recommended Settings are out of beta. The sidebar is shorter: Dictations are a tab of Meetings, whiteboards are in Studio, and Files is Folders. Settings is shorter too: Voice and Meetings are one section with tabs, and Devices has tabs. With Bridge AI's relay picked, the email sign-in comes first. Usage stats add the time in use each day and the models used.

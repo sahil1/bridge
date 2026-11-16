@@ -15,7 +15,7 @@ Three parts keep to this file:
   `https://accounts.boldbridge.ai` with a D1 database (`bridge-accounts`), on the project's account.
 - **The relay** ([relay/worker.js](../relay/worker.js), with `HOSTED=1`): checks an account's relay
   token, keeps each account's use, and enforces its limits.
-- **Bridge AI** (server/account.js and Settings › Account) and **the admin view**
+- **Bridge AI** (server/account.js and Settings › Account & Devices) and **the admin view**
   (boldbridge.ai/admin, in the private repo).
 
 ## Rules
@@ -117,7 +117,8 @@ signed out, removed or past its end is refused with `signed-out` (401) on every 
   as it last reported it (every few minutes while the account uses it; a window or week that has
   ended since reads 0), or `null` before it has reported any.
 
-Bridge AI asks it at start, then every 6 hours, and when Settings › Account is opened.
+Bridge AI asks it at start, then every 6 hours (every half hour while a request waits), and when
+Settings › Account & Devices shows the account.
 
 ### Requests
 

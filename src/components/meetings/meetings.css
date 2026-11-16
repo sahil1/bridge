@@ -460,12 +460,30 @@ html[data-theme="dark"] .float-card { --fc-them: #b98fe8; --fc-rec: #f2555a; box
 .mt-pic-note { border: 0; background: none; padding: 0; color: var(--ink-2); font: 12.5px var(--font); text-align: left; cursor: text; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .mt-pic-note:hover { color: var(--ink); }
 .mt-pic .ghost-btn { height: 22px; padding: 0 5px; }
+.mt-pic-crop { flex: none; white-space: nowrap; }
 .mt-pic-text { padding: 0 8px 6px; }
 .mt-pic-text summary { cursor: pointer; }
 .mt-pic-text p { margin: 4px 0 0; white-space: pre-wrap; max-height: 160px; overflow: auto; color: var(--ink-2); }
 .mt-mark { display: flex; align-items: baseline; gap: 7px; padding: 5px 9px; border-radius: 8px; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--pane)); font-size: 13px; color: var(--ink); }
 .mt-mark svg { color: var(--accent); flex: none; align-self: center; }
 .mt-line-note { grid-column: 1 / -1; height: 28px; padding: 0 8px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--line-2)); background: var(--pane); color: var(--ink); font: 13px var(--font); outline: none; }
+/* Record the screen too (video.jsx): the choice, the video's size while it records, and the video
+   beside the transcript (player.jsx), whose times play it from there. */
+.mt-video-choice { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; color: var(--ink-2); }
+.mt-video-choice label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+.mt-video-allow { flex-basis: 100%; color: var(--warning, #b7791f); }
+.mt-video-allow-home { display: block; padding: 8px 12px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warning, #b7791f) 35%, var(--line-2)); background: color-mix(in srgb, var(--warning, #b7791f) 6%, var(--pane)); }
+.mt-video-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 2px 1px 8px; border-radius: 999px; background: color-mix(in srgb, #e5484d 10%, transparent); color: color-mix(in srgb, #e5484d 70%, var(--ink)); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mt-video-chip .ghost-btn { height: 20px; padding: 0 5px; color: inherit; }
+.mt-video-pane { display: grid; gap: 8px; align-content: start; }
+.mt-video { display: block; width: 100%; max-height: 62vh; border-radius: 10px; background: #000; }
+.mt-video-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.mt-video-meta .ghost-btn { height: 24px; }
+.mt-video-pick { justify-self: start; }
+.mt-t-play { border: 0; background: none; padding: 2px 0 0; font: inherit; font-size: 11px; color: var(--ink-3); cursor: pointer; text-align: left; align-self: start; }
+.mt-t-play:hover, .mt-t-play:focus-visible { color: var(--accent); text-decoration: underline; }
+.mt-line.plays { cursor: pointer; }
+.mt-line.now { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .mt-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-top: 10px; }
 .mt-gallery-head { grid-column: 1 / -1; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
 .mt-thumb { display: grid; gap: 3px; padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--pane-2); text-align: left; cursor: zoom-in; }
@@ -907,6 +925,8 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
    as compact as it was (the extra room reaches over the line's own words, which aren't tapped). */
 .app.narrow .mt-view button.mt-who { min-height: 40px; min-width: 40px; margin: -10px 0; padding: 10px 6px 10px 0; }
 .app.narrow .mt-view .mt-line-acts .ghost-btn { width: 40px; height: 40px; min-height: 40px; margin: -10px 0; padding: 0; }
+.app.narrow .mt-view .mt-t-play { min-width: 40px; min-height: 40px; margin: -10px 0; padding: 0; }
+.app.narrow .mt-view :is(.mt-video-meta .ghost-btn, .mt-video-pick button) { min-height: 40px; }
 /* Nothing hovers on a phone: they show once the line is tapped (Line in Meetings.jsx), and can't be
    hit while they're hidden. */
 .app.narrow .mt-view .mt-line:not(.open, :focus-within) .mt-line-acts { visibility: hidden; }

@@ -14,7 +14,8 @@
 // "I mean" out, a phrase said twice kept once, a capital and a full stop; "take your time" in it
 // answers after 8 s, "fail on purpose" with an error), Ask a Model in AI Assist's look at a folder (a folder of documents,
 // as JSON), anything else "built-in answer". A prompt with "CRASH ONCE" stops the process
-// mid-request the first time (a file beside the log remembers), as a crash would.
+// mid-request the first time (a file beside the log remembers), as a crash would; one with
+// "LOCAL FAILS" is refused every time, as a computer out of memory would.
 import http from 'node:http'
 import fs from 'node:fs'
 
@@ -78,6 +79,7 @@ http.createServer((req, res) => {
       log({ chat: true, user, system, chat_template_kwargs: b.chat_template_kwargs ?? null, response_format: b.response_format ?? null })
       if (/CRASH ONCE/.test(user) && !fs.existsSync(crashMark)) { fs.writeFileSync(crashMark, '1'); process.exit(1) }
       if (/fail on purpose/i.test(dictated(user) || '')) return j(500, { error: { code: 500, message: 'Context shift is disabled (stand-in)', type: 'server_error' } })
+      if (/LOCAL FAILS/.test(user)) return j(500, { error: { code: 500, message: 'failed to allocate buffer: out of memory (stand-in)', type: 'server_error' } })
       const content = answer(user, b.response_format?.type === 'json_schema')
       const reply = () => j(200, { choices: [{ message: { role: 'assistant', content } }], timings: { prompt_n: 300, prompt_per_second: 500, predicted_n: 80, predicted_per_second: 48 } })
       return /take your time/i.test(dictated(user) || '') ? setTimeout(reply, 8000) : reply()

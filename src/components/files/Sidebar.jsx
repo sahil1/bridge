@@ -1,8 +1,9 @@
-// Folders' sidebar, as Finder's: Favorites (your home folder and the usual folders in it), your cloud
+// Studio's sidebar, as Finder's: Studio's own lists first (Recent, its kinds, design packs and your
+// signature: shelves), then Favorites (your home folder and the usual folders in it), your cloud
 // drives, your projects (the folders your agents work in) and places, and Locations (the computer's
 // drives, then your other computers). It lists the computer you're looking at; another of yours
-// shows its own when you pick it. Naming a folder isn't reading it: Desktop and the rest are only
-// read once you open them (server/explorer.js).
+// shows its own when you pick it (without Studio's lists, which are this one's). Naming a folder
+// isn't reading it: Desktop and the rest are only read once you open them (server/explorer.js).
 import Icon from '../Icon.jsx'
 import { t, tx } from '../../i18n/index.js'
 
@@ -33,19 +34,32 @@ function Section({ title, children }) {
   )
 }
 
-export default function Sidebar({ side, error, computers, machine, loc, onGo, onComputer }) {
-  const at = (it) => !!loc && loc.machine === machine && loc.root === it.root && (loc.path || '') === (it.path || '')
+// shelves: [{ id, icon, label, n, hint }], each a list of Studio's; shelf: the one shown.
+export default function Sidebar({ side, error, computers, machine, loc, onGo, onComputer, shelves = null, shelf = null, onShelf }) {
+  const at = (it) => !!loc && !shelf && loc.machine === machine && loc.root === it.root && (loc.path || '') === (it.path || '')
   const pick = (it) => () => onGo({ root: it.root, path: it.path || '', hint: it.guard ? { guard: it.guard, asked: it.asked } : null })
   const row = (it, sub) => <Row key={`${it.root}|${it.path}|${it.label}`} it={it} on={at(it)} onPick={pick(it)} sub={sub} />
   const icloud = side?.clouds?.[0]?.label === 'iCloud Drive'
   const shown = machine ? computers.others.find((c) => c.id === machine) : null
   return (
-    <nav className="fx-side" aria-label={t('Folders sidebar')}>
+    <nav className="fx-side" aria-label={t('Sidebar')}>
       {shown && (
         <div className="fx-side-on">
           <Icon name="laptop" size={13} /><span>{t('On {name}', { name: shown.name })}</span>
           <button type="button" className="link-btn" onClick={() => onComputer(null)}>{t('Back to {name}', { name: computers.here.name })}</button>
         </div>
+      )}
+      {shelves && !machine && (
+        <Section title={t('Studio')}>
+          {shelves.map((s) => (
+            <button key={s.id} type="button" className={`fx-side-row ${shelf === s.id ? 'on' : ''}`} onClick={() => onShelf(s.id)} title={s.hint || s.label}
+              aria-current={shelf === s.id ? 'location' : undefined} data-shelf={s.id}>
+              <Icon name={s.icon} size={14} />
+              <span className="fx-side-name">{s.label}</span>
+              {s.n != null && <span className="fx-side-sub">{s.n}</span>}
+            </button>
+          ))}
+        </Section>
       )}
       {error && <p className="error-text small fx-side-err">{error}</p>}
       {!side && !error && <div className="fx-side-wait"><div className="skeleton-rows"><div /><div /><div /></div></div>}

@@ -206,11 +206,12 @@ async function createWindow() {
   win.webContents.on('page-title-updated', (e, title) => { e.preventDefault(); win?.setTitle(title); updateBadge(title) })
   win.webContents.on('did-fail-load', (_e, code) => { if (code !== -3) setTimeout(connect, 1500) })
   // The page went away (a crash, out of memory): written down, and opened again, which then offers
-  // to report it. At most once a minute, so a page that can't stay up doesn't go round and round.
+  // to report it. Ended from outside, it's opened again without a report. At most once a minute,
+  // so a page that can't stay up doesn't go round and round.
   win.webContents.on('render-process-gone', (_e, d) => {
+    if (quitting || d?.reason === 'clean-exit') return
     const c = crashes.fromWindowGone(d)
-    if (!c || quitting) return
-    crashes.note(c, { base: URL_BASE, data: DATA, version: app.getVersion(), fetch }).catch(() => {})
+    if (c) crashes.note(c, { base: URL_BASE, data: DATA, version: app.getVersion(), fetch }).catch(() => {})
     if (Date.now() - reopened > 60000) { reopened = Date.now(); setTimeout(() => { if (self && !self.isDestroyed()) self.webContents.reload() }, 1000) }
   })
 
@@ -1100,10 +1101,12 @@ app.whenReady().then(async () => {
   })
   // Watching a screen in a meeting: macOS's own picker (macOS 15 and later), where you pick the
   // window being shared. Before macOS 15: the whole main screen, which macOS asks to allow (Screen
-  // Recording) the first time.
+  // Recording) the first time. Recording the screen too, on Windows: with what the computer plays
+  // (the call's sound), which the page asks for there (src/components/meetings/recording.jsx).
   session.defaultSession.setDisplayMediaRequestHandler((req, cb) => {
     if (!req.frame || req.frame.parent || !pages.permits('display-capture', { url: req.frame.url })) return cb({})
-    desktopCapturer.getSources({ types: ['screen'] }).then((s) => cb(s[0] ? { video: s[0] } : {}), () => cb({}))
+    const sound = req.audioRequested && process.platform === 'win32' ? { audio: 'loopback' } : {}
+    desktopCapturer.getSources({ types: ['screen'] }).then((s) => cb(s[0] ? { video: s[0], ...sound } : {}), () => cb({}))
   }, { useSystemPicker: true })
   // Right-click: spelling suggestions, Cut, Copy and Paste, in every window from here on.
   contextMenu.attach({ app, Menu, clipboard: electron.clipboard, session })

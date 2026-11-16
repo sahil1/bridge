@@ -1,4 +1,4 @@
-// AI Assist's Look over this folder, beside Files and Folders: what takes room in a folder and how it could be
+// AI Assist's Look over this folder, beside an agent's Files and Studio's folders: what takes room in a folder and how it could be
 // tidier, with nothing in the folder changed. A made-up folder ("Mess") with a bit of everything:
 // the same photo in three places (and a hard link, which isn't a copy), two files of the same size
 // that differ, big videos, a year-old tax return, installers and an unpacked archive in Downloads,
@@ -263,7 +263,7 @@ try {
     // As PRIVACY.md says: what Files shows, what AI Assist reads in it, and what Suggest how to
     // organize it sends where.
     const policy = fs.readFileSync(path.join(ROOT, 'PRIVACY.md'), 'utf8').replace(/\s+/g, ' ')
-    ok(/Folders, in the sidebar, also shows your home folder/.test(policy) && /AI Assist in Files and Folders looks at the folder you ask it about on your computer/.test(policy) && /Suggest how to organize it, which sends that folder's file and folder names, sizes and dates \(never what's in a file\) to the model you pick/.test(policy), 'PRIVACY.md says what Files shows, what AI Assist reads there, and what Suggest how to organize it sends to which model', null)
+    ok(/Studio, in the sidebar, also shows your home folder/.test(policy) && /AI Assist in an agent.s Files and in Studio.s folders looks at the folder you ask it about on your computer/.test(policy) && /Suggest how to organize it, which sends that folder's file and folder names, sizes and dates \(never what's in a file\) to the model you pick/.test(policy), 'PRIVACY.md says what Files shows, what AI Assist reads there, and what Suggest how to organize it sends to which model', null)
     // A model elsewhere: only once it's picked, and the names go there.
     const cloud = others.find((x) => !x.local)
     const picked = await api('/files/assist/model', { model: cloud.id }, 'PUT')

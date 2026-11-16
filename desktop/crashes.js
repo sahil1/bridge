@@ -6,10 +6,11 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
-// The window's page went away. A clean exit is the window closing; anything else (a crash, out of
-// memory, the system ending it) is worth reporting.
+// The window's page went away. A clean exit is the window closing, and killed is something outside
+// ending it (an update's installer stops the old app's processes, as does Force Quit): neither is
+// worth reporting. Anything else (a crash, out of memory) is.
 function fromWindowGone(d) {
-  if (!d || d.reason === 'clean-exit') return null
+  if (!d || d.reason === 'clean-exit' || d.reason === 'killed') return null
   return { kind: 'window', reason: d.reason || 'gone', exitCode: Number.isFinite(d.exitCode) ? d.exitCode : null }
 }
 // Another process of the app went away: only the graphics process (GPU) counts, and not when it

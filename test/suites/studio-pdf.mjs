@@ -260,12 +260,13 @@ try {
   ok(!!(await until(async () => (await marks()).some((m) => m.kind === 'initials' && m.page === 1), 3000)) && (await p.locator('.sd-place .sd-pad.initials').count()) === 1, 'Add Initials: a place on the page, and a pad to draw them on, as there are none yet')
   await p.locator('.sd-places li', { hasText: 'Initials' }).locator('button[aria-label="Take this place away"]').click()
   ok(!!(await until(async () => !(await marks()).some((m) => m.kind === 'initials'), 3000)), 'taken away again')
-  // Studio's home: your signature, kept here, to draw again or remove. While it's still asking
-  // the server, it says neither "not drawn yet" nor offers a pad (the answer held back here; only
-  // Chromium takes a route added after the page opened).
+  // Studio's home, at Your Signature in its sidebar: your signature, kept here, to draw again or
+  // remove. While it's still asking the server, it says neither "not drawn yet" nor offers a pad
+  // (the answer held back here; only Chromium takes a route added after the page opened).
   const slow = which === 'chromium' ? async (r) => { await sleep(1500); await r.continue().catch(() => {}) } : null
   if (slow) await p.route('**/api/studio/sign/setup*', slow)
   await p.locator('.sd-file .sd-tabs [role="tab"]', { hasText: 'Files' }).click()
+  await p.locator('.fx-side-row[data-shelf="signature"]').click({ timeout: 10000 })
   if (slow) {
     await p.locator('.sd-sign-home[aria-busy="true"]').waitFor({ timeout: 10000 })
     const waiting = await p.locator('.sd-sign-home').innerText()

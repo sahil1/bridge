@@ -5,14 +5,29 @@
 # run says why), and android-apk.yml adds it afterwards.
 #   Pushing a tag v<version> (npm run release does this) builds and publishes that release; a
 #   pre-release's tag (v3.13.0-beta.1) publishes a pre-release, for Early Access only.
-#   Running it by hand (Actions › Release › Run workflow) only builds and tests; the installers
-#   are attached to the run so you can try them.
+#   Started at a tag (release-start.yml does this, as a tag pushed with GitHub's own token starts
+#   nothing), it's the same as the tag's push: every step below goes by the ref (refs/tags/v…),
+#   never by what started it, so the check that the tag is on main and publishing are as for a push.
+#   Running it by hand on a branch (Actions › Release › Run workflow) only builds and tests; the
+#   installers are attached to the run so you can try them.
+#   Called by nightly.yml with a nightly version (nightly), it builds main at that version and
+#   publishes it as a pre-release only computers on Nightly are offered (scripts/nightly.js).
 name: Release
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      nightly:
+        description: A nightly version (3.20.1-nightly.20261116.57), from nightly.yml
+        type: string
+        default: ''
+      since:
+        description: A nightly's last nightly (or release), to run only the tests for what changed since
+        type: string
+        default: ''
 
 # Read-only, except publishing (the release job): the builds run npm packages' install scripts.
 permissions:
@@ -24,6 +39,8 @@ jobs:
   guard:
     name: On main
     runs-on: ubuntu-latest
+    outputs:
+      base: ${{ steps.base.outputs.base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -38,10 +55,35 @@ jobs:
           v="$(node -p "require('./package.json').version")"
           [ "v$v" = "$GITHUB_REF_NAME" ] ||
             { echo "::error::$GITHUB_REF_NAME doesn't match package.json's version ($v) at that commit"; exit 1; }
+      - name: A nightly is of main, at a nightly version
+        if: inputs.nightly
+        env:
+          NIGHTLY: ${{ inputs.nightly }}
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main ||
+            { echo "::error::$GITHUB_SHA isn't on main: nightlies are built from main only"; exit 1; }
+          [[ "$NIGHTLY" =~ ^[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}\.[0-9]+$ ]] ||
+            { echo "::error::$NIGHTLY isn't a nightly version"; exit 1; }
+      # What the tests go from: a nightly, the last nightly (nightly.yml says which); a beta, the last
+      # nightly or release before it, as each nightly tested what changed since the one before; a
+      # release to everyone, nothing: every test.
+      - name: What the tests go from
+        id: base
+        env:
+          NIGHTLY: ${{ inputs.nightly }}
+          SINCE: ${{ inputs.since }}
+        run: |
+          if [ -n "$NIGHTLY" ]; then echo "base=$SINCE" >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_REF" == refs/tags/v*-* ]]; then echo "base=$(node scripts/nightly.js since "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
+          fi
 
+  # Every test for a release to everyone; a nightly or a beta, only those for what changed since.
   test:
     needs: guard
     uses: ./.github/workflows/test.yml
+    with:
+      base: ${{ needs.guard.outputs.base }}
 
   build:
     name: Build (${{ matrix.platform }})
@@ -77,6 +119,13 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm --prefix desktop ci --no-audit --no-fund
+
+      # A nightly: its version in this build's package.json files only.
+      - name: The nightly's version
+        if: inputs.nightly
+        env:
+          NIGHTLY: ${{ inputs.nightly }}
+        run: node scripts/nightly.js stamp "$NIGHTLY"
 
       # Speech to text on the Mac itself (native/bridgespeech.swift) needs the macOS 26 SDK, which
       # comes with Xcode 26: the newest one here, if there is one. Without it, that helper is left out.
@@ -136,7 +185,7 @@ jobs:
       # With the Developer ID it's the same for every version, so an update keeps all of it; signed any
       # other way (the secrets missing, say), an update would ask for everything again. Not released so.
       - name: The Mac app keeps what people allowed
-        if: matrix.platform == 'mac' && startsWith(github.ref, 'refs/tags/v')
+        if: matrix.platform == 'mac' && (startsWith(github.ref, 'refs/tags/v') || inputs.nightly)
         shell: bash
         run: |
           apps=$(find desktop/dist -maxdepth 2 -name 'Bridge AI.app')
@@ -168,6 +217,7 @@ jobs:
   android:
     name: Android
     needs: test
+    if: ${{ !inputs.nightly }}
     uses: ./.github/workflows/android.yml
     secrets:
       BRIDGE_ANDROID_P12: ${{ secrets.BRIDGE_ANDROID_P12 }}
@@ -177,7 +227,7 @@ jobs:
   release:
     name: Publish the release
     # Waits for the Android app, but only the desktop builds decide: the APK never holds a release up.
-    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.build.result == 'success' }}
+    if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/v') || inputs.nightly) && needs.build.result == 'success' }}
     needs: [build, android]
     runs-on: ubuntu-latest
     # Writes the release, and signs where each download was built (GitHub's build provenance:
@@ -190,6 +240,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: ${{ inputs.nightly && '0' || '1' }} # a nightly's notes list the changes since the last one
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -197,8 +248,11 @@ jobs:
           merge-multiple: true
 
       - name: Notes and checksums
+        env:
+          NIGHTLY: ${{ inputs.nightly }}
         run: |
-          node scripts/release.js --notes notes.md $([ -f out/Bridge-AI-android.apk ] && echo --android)
+          if [ -n "$NIGHTLY" ]; then node scripts/nightly.js notes "$NIGHTLY" notes.md
+          else node scripts/release.js --notes notes.md $([ -f out/Bridge-AI-android.apk ] && echo --android); fi
           cd out && sha256sum Bridge-AI-* > SHA256SUMS.txt && cat SHA256SUMS.txt
 
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -209,6 +263,7 @@ jobs:
       # release: GitHub's latest (which the website, the installers' downloads and Stable's update
       # check use) stays on the last regular one, and only Early Access is offered it.
       - name: Publish
+        if: ${{ !inputs.nightly }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -217,3 +272,15 @@ jobs:
             *-*) gh release create "$GITHUB_REF_NAME" --title "Bridge AI $VERSION" --notes-file notes.md --prerelease --latest=false out/Bridge-AI-* out/SHA256SUMS.txt ;;
             *) gh release create "$GITHUB_REF_NAME" --title "Bridge AI $VERSION" --notes-file notes.md out/Bridge-AI-* out/SHA256SUMS.txt ;;
           esac
+
+      # A nightly: a pre-release of its own, tagged at the commit it was built from, never GitHub's
+      # latest. The newest 7 are kept; older ones and their tags go.
+      - name: Publish the nightly
+        if: inputs.nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY: ${{ inputs.nightly }}
+        run: |
+          gh release create "v$NIGHTLY" --target "$GITHUB_SHA" --title "Bridge AI $NIGHTLY (nightly)" --notes-file notes.md --prerelease --latest=false out/Bridge-AI-* out/SHA256SUMS.txt
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName -q '.[].tagName' | node scripts/nightly.js older 7 |
+            while read -r old; do gh release delete "$old" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes; done

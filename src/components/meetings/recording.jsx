@@ -4,6 +4,10 @@ import { api, usePoll, BASE, onThisComputer, refetch } from '../../api.js'
 import { record, microphone } from './recorder.js'
 import { micRefused, micBlocked } from '../../audio/pcm.js'
 import { watch as watchShare, sendPicture, sendGlance } from './screen.js'
+import { recordVideo, canRecordScreen } from './videorec.js'
+import { VideoChoice, RECORD_SCREEN } from './video.jsx'
+import { store } from '../layout.jsx'
+import { cropKept } from './cropping.jsx'
 import { t, locale } from '../../i18n/index.js'
 import { Among, useCallEvents, MeetingName } from './cardparts.jsx'
 import './meetings.css'
@@ -60,8 +64,17 @@ export function MeetingsProvider({ children }) {
   // Switching machines would stop it: the device menu opens another window instead (Machines.jsx).
   useEffect(() => { document.documentElement.dataset.recording = rec ? '1' : '' }, [rec])
   const [levels, setLevels] = useState({})
-  const [screen, setScreen] = useState(null) // { label, kept } while a screen is watched (screen.js)
+  const [screen, setScreen] = useState(null) // { label, kept, video } while a screen is watched (screen.js)
   const share = useRef(null)
+  // Record the screen too (videorec.js), remembered on this device: the screen picked as recording
+  // starts, or watched, is kept as a video too. film: the video being made; shown: the stream it's
+  // made of (the one screen.js watches); screenNote: why the screen isn't being recorded, when it
+  // was meant to be.
+  const [video, setVideo] = useState(() => store.get(RECORD_SCREEN, false) === true)
+  const recordScreen = (on) => { setVideo(!!on); store.set(RECORD_SCREEN, !!on) }
+  const film = useRef(null)
+  const shown = useRef(null)
+  const [screenNote, setScreenNote] = useState(null)
   const handle = useRef(null)
   const [now, setNow] = useState(Date.now())
   useEffect(() => { if (!rec) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t) }, [rec])
@@ -100,18 +113,27 @@ export function MeetingsProvider({ children }) {
       onTrouble: (t) => setRec((r) => (r ? { ...r, trouble: t } : r)),
       reopen: { you: () => microphone(undefined, { room: room.current }) },
       onGap: (ms) => setRec((r) => (r ? { ...r, missed: (r.missed || 0) + ms, missedAt: Date.now() } : r)),
+      onStream: (src, s) => { if (src === 'you') film.current?.mic(s) },
     })
     setNow(Date.now()) // its time is right from the start, not at the clock's next second
     setRec({ id: m.id, title: m.title, startedAt: Date.now() - from * 1000, at: Date.now(), paused: false, pausedMs: 0, call: m.call === 'on' ? 'on' : m.callWhy || null })
     openMeeting(m.id)
     return m.id
   }
-  const start = async ({ title, event, kind } = {}) => {
-    if (handle.current) { openMeeting(rec.id); return rec.id }
-    const mic = await openMic()
-    // The call's sound is recorded by the server (on a Mac); this page records your mic.
-    const m = await api('/meetings', { method: 'POST', body: { title: title || `Meeting, ${when()}`, event, kind } })
-    return recordIt(m, mic)
+  // picking: the screen to record (Record the screen too), asked for already (startNow), or here
+  // before anything is waited on: a browser shows its picker only straight after a click.
+  const start = async ({ title, event, kind, picking } = {}) => {
+    if (handle.current) { letGo(picking); openMeeting(rec.id); return rec.id }
+    if (picking === undefined) picking = pickFirst()
+    let mic, m
+    try {
+      mic = await openMic()
+      // The call's sound is recorded by the server (on a Mac); this page records your mic.
+      m = await api('/meetings', { method: 'POST', body: { title: title || `Meeting, ${when()}`, event, kind } })
+    } catch (e) { mic?.getTracks().forEach((x) => x.stop()); letGo(picking); throw e }
+    const id = await recordIt(m, mic)
+    screenFrom(m, picking)
+    return id
   }
   // Resume recording: a meeting that ended (stopped by mistake, or by itself) records again, the
   // same meeting from where it had got to. Not while another one records.
@@ -119,15 +141,19 @@ export function MeetingsProvider({ children }) {
     if (handle.current && rec.id === id) return id
     const other = handle.current ? rec : calls?.recording && calls.recording.id !== id ? calls.recording : null
     if (other) throw new Error(t('"{title}" is recording. Stop it first.', { title: other.title }))
-    const mic = await openMic()
+    const picking = pickFirst()
+    let mic
+    try { mic = await openMic() } catch (e) { letGo(picking); throw e }
     let m
-    try { m = await api(`/meetings/${encodeURIComponent(id)}/reopen`, { method: 'POST' }) } catch (e) { mic.getTracks().forEach((x) => x.stop()); throw e }
+    try { m = await api(`/meetings/${encodeURIComponent(id)}/reopen`, { method: 'POST' }) } catch (e) { mic.getTracks().forEach((x) => x.stop()); letGo(picking); throw e }
     refreshCalls()
-    return recordIt(m, mic, m.seconds || 0)
+    const mid = await recordIt(m, mic, m.seconds || 0)
+    screenFrom(m, picking)
+    return mid
   }
   const changedAt = useRef(0) // when Pause or Resume was last pressed here
-  const pauseHere = () => { handle.current.pause(); setRec((r) => ({ ...r, paused: true, pausedAt: Date.now() })) }
-  const resumeHere = () => { handle.current.resume(); setRec((r) => ({ ...r, paused: false, pausedMs: r.pausedMs + (Date.now() - r.pausedAt) })) }
+  const pauseHere = () => { handle.current.pause(); film.current?.pause(); setRec((r) => ({ ...r, paused: true, pausedAt: Date.now() })) }
+  const resumeHere = () => { handle.current.resume(); film.current?.resume(); setRec((r) => ({ ...r, paused: false, pausedMs: r.pausedMs + (Date.now() - r.pausedAt) })) }
   const pause = async () => {
     if (!handle.current) return
     changedAt.current = Date.now()
@@ -157,29 +183,83 @@ export function MeetingsProvider({ children }) {
     k.fresh = false
     return true
   }
-  // Watch a screen (the window someone shares slides in): a picture each time it changes, and
-  // Capture for one now. Asks which screen or window, in the browser's or macOS's own picker.
-  const watchScreen = async () => {
-    if (!handle.current) throw new Error(t('Start recording first'))
-    if (share.current) return
-    if (!navigator.mediaDevices?.getDisplayMedia) throw new Error(t('Watching a screen needs the desktop app, or a browser that can share one'))
-    let stream
-    try { stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 2, max: 5 } }, audio: false, selfBrowserSurface: 'exclude', surfaceSwitching: 'include' }) } catch (e) {
-      if (e.name === 'NotAllowedError' || e.name === 'AbortError') return // not now, or no to the picker
-      throw new Error(e.message || t("Couldn't watch that screen"))
+  // The screen or window to watch, in the browser's or macOS's own picker: { stream }, {} when none
+  // was picked, or { error } saying why it can't be. For a video (Record the screen too): smooth, at
+  // most 1920 wide (the stills are no bigger), and with its own sound where that can be the call's
+  // (a browser offers a tab's, the desktop app on Windows what the computer plays) unless Bridge AI
+  // records the call's sound itself (call: a Mac).
+  const pick = async ({ video: filmIt = false, call = false } = {}) => {
+    if (!navigator.mediaDevices?.getDisplayMedia) return { error: new Error(t('Watching a screen needs the desktop app, or a browser that can share one')) }
+    const app = window.bridgeApp
+    const sound = filmIt && !call && (!app || app.platform === 'win32')
+    try {
+      return { stream: await navigator.mediaDevices.getDisplayMedia({ video: filmIt ? { frameRate: { ideal: 15, max: 30 }, width: { max: 1920 }, height: { max: 1200 } } : { frameRate: { ideal: 2, max: 5 } }, audio: sound, ...(sound ? { systemAudio: 'include' } : {}), selfBrowserSurface: 'exclude', surfaceSwitching: 'include' }) }
+    } catch (e) {
+      // macOS isn't letting the browser see the screen (its picker says so too).
+      if (e.name === 'NotAllowedError' && /system/i.test(e.message)) return { error: new Error(t("macOS isn't letting this browser see the screen. Turn on your browser under System Settings › Privacy & Security › Screen & System Audio Recording, in Screen Recording, then try again.")) }
+      if (e.name === 'NotAllowedError' || e.name === 'AbortError') return {} // not now, or no to the picker
+      return { error: new Error(e.message || t("Couldn't watch that screen")) }
     }
-    const mid = rec.id
+  }
+  const pickFirst = () => (video && canRecordScreen() ? pick({ video: true }) : null)
+  const letGo = (picking) => { picking?.then((r) => r.stream?.getTracks().forEach((x) => x.stop())) }
+  // The screen picked as recording started: watched and recorded, or why not, said on the meeting.
+  const screenFrom = async (m, picking) => {
+    if (!picking) return
+    const r = await picking
+    if (!r.stream) { setScreenNote(r.error?.message || t("The screen isn't being recorded: none was picked. Watch a screen to pick one.")); return }
+    if (!handle.current) { letGo(picking); return }
+    await watchScreen({ id: m.id, stream: r.stream, video: true, call: m.call === 'on' }).catch((e) => setScreenNote(e.message))
+  }
+  // Watch a screen (the window someone shares slides in): a picture each time it changes, and
+  // Capture for one now. Asks which screen or window, in the browser's or macOS's own picker. With
+  // Record the screen too, a video of it as well (and watched already, a video of it from now).
+  // id, stream, call: the meeting just started, the screen picked as it did, and its call's sound.
+  const watchScreen = async ({ id: mid = rec?.id, stream, video: filmIt = video && canRecordScreen(), call = rec?.call === 'on' } = {}) => {
+    if (!handle.current) throw new Error(t('Start recording first'))
+    if (share.current) { if (filmIt && !film.current && shown.current) await filmScreen(mid, shown.current, call); return }
+    if (!stream) {
+      const r = await pick({ video: filmIt, call })
+      if (r.error) throw r.error
+      if (!r.stream) return
+      stream = r.stream
+    }
     talk.current.off = false
     const w = watchShare(stream, {
       // Counted when kept: the server leaves out a change whose words are the last picture's.
-      onPicture: async (blob, kind) => { const r = await sendPicture(mid, blob, { kind, source: w.label }); if (r?.kept !== false) setScreen((x) => (x ? { ...x, kept: x.kept + 1 } : x)) },
+      // Then cropped to what's shared in it, here (cropping.jsx).
+      onPicture: async (blob, kind) => { const r = await sendPicture(mid, blob, { kind, source: w.label }); if (r?.kept !== false) { setScreen((x) => (x ? { ...x, kept: x.kept + 1 } : x)); cropKept(mid, r, blob) } },
       glance,
       onGlance: (blob) => sendGlance(mid, blob).then((r) => { if (r.stop) talk.current.off = true }, () => {}),
-      onEnd: () => { share.current = null; setScreen(null); window.bridgeApp?.watching?.(false) },
+      onEnd: () => { share.current = null; shown.current = null; film.current?.stop(); setScreen(null); window.bridgeApp?.watching?.(false) },
     })
     share.current = w
-    setScreen({ label: w.label, kept: 0 })
+    shown.current = stream
+    setScreen({ label: w.label, kept: 0, video: null })
+    setScreenNote(null)
     window.bridgeApp?.watching?.(true)
+    if (filmIt) await filmScreen(mid, stream, call)
+  }
+  // The video of the screen being watched: its size as it grows, and why, if it stops before the
+  // screen does (the disk nearly full).
+  const filmScreen = async (mid, stream, call) => {
+    try {
+      const f = await recordVideo(mid, stream, {
+        mic: handle.current?.stream?.('you'),
+        call,
+        label: stream.getVideoTracks()[0]?.label || '',
+        onSize: (s) => setScreen((x) => (x?.video ? { ...x, video: { ...x.video, ...s } } : x)),
+        onEnd: (why) => {
+          if (film.current === f) film.current = null
+          setScreen((x) => (x ? { ...x, video: null } : x))
+          if (why) setScreenNote(t('The screen stopped being recorded: {why}', { why }))
+        },
+      })
+      if (!handle.current || shown.current !== stream) { f.stop(); return }
+      film.current = f
+      if (handle.current.paused) f.pause()
+      setScreen((x) => (x ? { ...x, video: { bytes: 0, free: null, seconds: 0, sound: f.sound } } : x))
+    } catch (e) { setScreenNote(t("The screen isn't being recorded: {why}", { why: e.message })) }
   }
   const capture = async () => {
     if (!share.current) throw new Error(t('Watch a screen first'))
@@ -188,13 +268,16 @@ export function MeetingsProvider({ children }) {
   const unwatch = () => share.current?.stop()
   const stop = async () => {
     if (!handle.current) return
+    // The video's last pieces go before the meeting is stopped.
+    const f = film.current
     share.current?.stop()
     const id = rec.id
     const h = handle.current
     handle.current = null
     setRec(null)
     setLevels({})
-    await h.stop()
+    setScreenNote(null)
+    await Promise.all([h.stop(), f?.stop()])
     await api(`/meetings/${id}/stop`, { method: 'POST' }).catch(() => {})
     refetch('/meetings') // the lists show it stopped now (its menu offers Archive and Delete again)
     refreshCalls()
@@ -202,14 +285,16 @@ export function MeetingsProvider({ children }) {
   // Notes for a call that just started: named after the calendar event on now, if there is one
   // (picked: the one chosen in its prompt, with more than one on).
   const startForCall = async (app, picked) => {
+    const picking = pickFirst()
     const event = picked?.title ? picked : await eventNow(app)
-    return start({ title: event?.title || `${app} call, ${when()}`, event })
+    return start({ title: event?.title || `${app} call, ${when()}`, event, picking })
   }
   // Recording now, from the sidebar: for the calendar event on now (its name and people), if there
   // is one.
   const startNow = async () => {
+    const picking = pickFirst()
     const event = await eventNow()
-    return start(event ? { title: event.title, event } : {})
+    return start(event ? { title: event.title, event, picking } : { picking })
   }
   // A new section from here (a lap).
   const section = async (title) => {
@@ -297,7 +382,7 @@ export function MeetingsProvider({ children }) {
 
   const elapsed = rec ? Math.max(0, (rec.paused ? rec.pausedAt : now) - rec.startedAt - rec.pausedMs) / 1000 : 0
   useEffect(() => { chan.current?.postMessage({ type: 'state', rec: rec && { id: rec.id, title: rec.title, paused: rec.paused, section: rec.section || null }, elapsed, you: levels.you || 0, screen, canWatch: !!navigator.mediaDevices?.getDisplayMedia }) }, [rec, elapsed, levels, screen])
-  const value = useMemo(() => ({ rec, levels, elapsed, start, recordAgain, startNow, pause, resume, stop, section, calls, refreshCalls, startForCall, retitle, screen, watchScreen, capture, unwatch }), [rec, levels, elapsed, calls, screen]) // eslint-disable-line react-hooks/exhaustive-deps
+  const value = useMemo(() => ({ rec, levels, elapsed, start, recordAgain, startNow, pause, resume, stop, section, calls, refreshCalls, startForCall, retitle, screen, watchScreen, capture, unwatch, video, recordScreen, screenNote, clearScreenNote: () => setScreenNote(null), stopVideo: () => film.current?.stop() }), [rec, levels, elapsed, calls, screen, video, screenNote]) // eslint-disable-line react-hooks/exhaustive-deps
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 
@@ -465,6 +550,7 @@ export function CallPrompt() {
         <span className="call-prompt-main"><b>{what}</b><small>{ev ? t('Take notes for "{title}"?', { title: ev.title }) : t('Take notes?')} {t('Your mic and the call, transcribed as you go.')}</small></span>
         {/* More than one meeting on: which one the notes are for. */}
         <Among n={evs.n} i={evs.i} onStep={evs.step} disabled={busy} what={ev ? t('These notes are for {event}', { event: ev.title }) : null} />
+        <VideoChoice m={m} />
         <button type="button" className="btn small primary" disabled={busy} onClick={takeNotes}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Take notes')}</button>
         <button type="button" className="ghost-btn" onClick={notNow}>{t('Not now')}</button>
         {err && <span className="error-text small">{err}</span>}

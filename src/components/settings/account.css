@@ -1,11 +1,11 @@
-/* Settings › Account (Account.jsx): your Bold Bridge account. */
+/* Settings › Account & Devices › Account (Account.jsx): your Bold Bridge account. */
 .acct .acct-form { gap: 8px; }
 .acct .acct-email { width: min(320px, 100%); }
 .acct .acct-code { width: 9.5em; letter-spacing: .18em; }
 .acct .acct-sent { margin: 0; }
 .acct .acct-mail { overflow-wrap: anywhere; }
 .acct .acct-problem { margin: 0; }
-/* ...and signing in under Bridge AI's relay, in Settings › Devices (Relay.jsx). */
+/* ...and signing in under Bridge AI's relay, on the Phone tab (Relay.jsx). */
 .acct-in.k-inline { display: grid; gap: 8px; }
 .acct-in.k-inline > p { margin: 0; }
 .acct .acct-followed { justify-content: space-between; }
@@ -18,6 +18,11 @@
 .acct .btn.danger { color: var(--critical); border-color: color-mix(in srgb, var(--critical) 40%, var(--line-2)); }
 .acct .btn.danger:not(:disabled):hover { background: color-mix(in srgb, var(--critical) 10%, transparent); }
 .acct .st-row.between { justify-content: space-between; }
+/* This computer on Bridge AI's relay (ThisComputer): each step, and Pair a phone right there. */
+.acct .acct-here { display: grid; gap: 8px; }
+.acct .acct-here > p, .acct .acct-also { margin: 0; }
+.acct .acct-others .acct-other-relay { margin-left: auto; }
+.acct .acct-others .acct-other-relay + .st-chip { margin-left: 0; }
 @media (max-width: 760px) {
   /* A phone: a whole 40 px target each, and fields iOS doesn't zoom into. */
   .acct .st-input { font-size: 16px; height: 40px; }

@@ -113,4 +113,5 @@ export async function sendGlance(id, blob) {
   const r = await fetch(`${BASE}/api/meetings/${encodeURIComponent(id)}/glances`, { method: 'POST', headers: { 'Content-Type': blob.type || 'application/octet-stream' }, body: blob })
   return r.ok ? r.json().catch(() => ({})) : {}
 }
-export const pictureUrl = (id, c) => `${BASE}/api/meetings/${encodeURIComponent(id)}/captures/${encodeURIComponent(c.id)}`
+// v: which of a cropped picture's two it shows (cropping.jsx), so a change is fetched afresh.
+export const pictureUrl = (id, c) => `${BASE}/api/meetings/${encodeURIComponent(id)}/captures/${encodeURIComponent(c.id)}${c.v ? `?v=${c.v}` : ''}`

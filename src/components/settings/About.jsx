@@ -6,9 +6,10 @@ import CrashReports from './CrashReports.jsx'
 import { api, usePoll } from '../../api.js'
 import { useSettings } from './General.jsx'
 import { startTour } from '../Tour.jsx'
-import { withApp, installUpdate } from '../UpdateChip.jsx'
+import { withApp, installUpdate, channelTag } from '../UpdateChip.jsx'
 import { appVersion } from '../../permissions.js'
-import { t, tx, locale } from '../../i18n/index.js'
+import { t, tn, tx, locale } from '../../i18n/index.js'
+import { openSettings } from '../SignIn.jsx'
 import { TRIALS } from '../../trials.js'
 import { AWAY_MINUTES, RELEASE_HOURS, waitingLong } from '../../../shared/autoupdate.js'
 import { isPre } from '../../../shared/version.js'
@@ -83,16 +84,17 @@ function Updates() {
         <>
           <div className="st-row">
             <span className="ab-version">{t('Bridge AI {version}', { version: raw?.current || u.current })}</span>
+            {raw?.channel && <BuildLine u={raw} />}
             {app && raw?.current && app !== raw.current && <span className="muted small">{t('the desktop app is {version}', { version: app })}</span>}
             {u.disabled ? <span className="muted small">{t('Update checks are off')}</span>
               : u.error && !u.latest ? <span className="muted small">{t("Couldn't check for updates ({error})", { error: u.error })}</span>
-              : u.available ? <span className="st-chip warn"><Icon name="download" size={11} /> {t('{version} is available', { version: u.latest })}</span>
+              : u.available ? <span className="st-chip warn"><Icon name="download" size={11} /> {channelTag(u.latest) ? t('{version} is available ({kind})', { version: u.latest, kind: channelTag(u.latest) }) : t('{version} is available', { version: u.latest })}</span>
               : u.held ? <span className="st-chip good"><Icon name="check" size={11} /> {t('Up to date for this Mac')}</span>
               : <span className="st-chip good"><Icon name="check" size={11} /> {t('Up to date')}</span>}
           </div>
           {u.held && <p className="muted small">{t('Bridge AI {latest} needs macOS {macos} or later, and this Mac has macOS {have}, so Bridge AI stays on {current}, which keeps working. Update macOS in System Settings › General › Software Update to get newer versions.', { latest: u.held.latest, macos: u.held.macos, have: u.held.have, current: u.current })}</p>}
           {/* A pre-release, off Early Access (left, or its code ended): it's never put back to an older version. */}
-          {raw?.channel === 'stable' && isPre(raw.current) && !u.available && <p className="muted small ab-pre-stays">{t('{version} is a pre-release. Bridge AI stays on it until a regular release is newer, then updates to that.', { version: raw.current })}</p>}
+          {raw?.channel !== 'early' && raw?.channel !== 'nightly' && isPre(raw.current) && !u.available && <p className="muted small ab-pre-stays">{t('{version} is a pre-release. Bridge AI stays on it until a regular release is newer, then updates to that.', { version: raw.current })}</p>}
           {u.failed && state !== 'installing' && <p className="st-note bad"><Icon name="alert" size={13} /> {t('The last update didn\'t go through: {why}', { why: u.failed.line || t('the installer stopped') })}{u.failed.auto && ` ${t('It was updating by itself while you were away, and tries again in a few hours.')}`}</p>}
           {u.available && (
             state === 'installing'
@@ -108,17 +110,56 @@ function Updates() {
           <label className="st-check"><input type="checkbox" checked={auto} onChange={(e) => save({ updates: { check: e.target.checked } }).then(() => load(true))} />
             <span><b>{t('Check for new versions')}</b> <span className="muted small">{t('Asks GitHub a few times a day; nothing about you is sent.')}</span></span></label>
           {canAuto && <ByItself u={raw} checks={auto} />}
-          {early?.offered && !earlyShown && <p className="small ab-early-ask"><button type="button" className="link-btn" onClick={() => setJoining(true)}>{t('Have an early-access code?')}</button></p>}
+          {early?.offered && !earlyShown && raw?.channel !== 'nightly' && <p className="small ab-early-ask"><button type="button" className="link-btn" onClick={() => setJoining(true)}>{t('Have an early-access code?')}</button></p>}
         </>
       )}
     </section>
-    {earlyShown && <EarlyAccess u={raw} code={link} onDone={() => { doneWithEarlyLink(); setJoining(false) }} onChange={() => load(false)} onJoined={doneWithEarlyLink} />}
+    {earlyShown && raw?.channel !== 'nightly' && <EarlyAccess u={raw} code={link} onDone={() => { doneWithEarlyLink(); setJoining(false) }} onChange={() => load(false)} onJoined={doneWithEarlyLink} />}
+    {(raw?.nightly?.on || raw?.nightly?.problem) && <Nightly u={raw} onChange={() => load(false)} />}
     </>
   )
 }
 
+// Which channel this computer is on, and when this build was made and from which commit (the app
+// stamps both; a clone has neither): "Nightly · built Nov 16, 2:10 PM from 1a2b3c4".
+const CHANNEL = { stable: tx('Stable'), early: tx('Early Access'), nightly: tx('Nightly') }
+function BuildLine({ u }) {
+  const at = u.built?.at && new Date(u.built.at)
+  const when = at && !Number.isNaN(at.getTime()) ? at.toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null
+  const sha = u.built?.commit
+  return (
+    <span className="muted small ab-build" data-channel={u.channel}>
+      {t(CHANNEL[u.channel] || CHANNEL.stable)}
+      {when && <> · {sha ? <>{t('built {when} from', { when })} <a href={`${REPO}/commit/${sha}`} target="_blank" rel="noreferrer" className="mono">{sha.slice(0, 7)}</a></> : t('built {when}', { when })}</>}
+    </span>
+  )
+}
+
+// Nightly: a build of main each morning it changed, for the project's own computers. Nothing here
+// turns it on (`bridge-ai nightly on`, on the computer itself); shown once it's on, with Leave Nightly,
+// or switched on where it can't work (Docker, a clone), with why.
+function Nightly({ u, onChange }) {
+  const [state, setState] = useState(null) // leaving | { error }
+  const leave = async () => {
+    setState('leaving')
+    try { await api('/updates/nightly', { method: 'DELETE' }); setState(null); onChange() } catch (err) { setState({ error: err.message }) }
+  }
+  return (
+    <section className="st-sec ab-nightly">
+      <h4>{t('Nightly')}</h4>
+      {u.nightly.on ? <>
+        <div className="st-row"><span className="st-chip good"><Icon name="check" size={11} /> {t('On')}</span></div>
+        <p className="muted small">{t('This computer gets a build of main each morning that main has changed, to try what\'s next before it\'s released. Its usage stats and crash reports say they\'re from Nightly.')}</p>
+      </> : <p className="st-note bad"><Icon name="alert" size={13} /> {u.nightly.problem === 'docker' ? t("Nightly is switched on, but it's for the desktop app: Bridge AI in Docker updates by its image's tag, which stays on regular releases.") : t('Nightly is switched on, but it\'s for the desktop app: Bridge AI from a clone updates with git pull, which is main already.')}</p>}
+      {state?.error && <p className="st-note bad"><Icon name="alert" size={13} /> {state.error}</p>}
+      <div className="st-row"><button type="button" className="btn small" disabled={state === 'leaving'} onClick={leave}><Icon name="x" size={13} /> {t('Leave Nightly')}</button></div>
+      {u.nightly.on && <p className="muted small">{t('Leaving keeps the version you have: Bridge AI stays on it until a regular release is newer.')}</p>}
+    </section>
+  )
+}
+
 // Early Access: pre-releases for testers, joined with a code the project made for them, or by itself
-// with a tester's Bold Bridge account (Settings › Account). Joined, it says who it's for and when it
+// with a tester's Bold Bridge account (Settings › Account & Devices › Account). Joined, it says who it's for and when it
 // ends (or that it's the account's, renewed by itself), with Leave Early Access; a code that stopped working says why
 // (ended, taken back), and this computer is on regular releases again, never put back to an older
 // version. A code that's wrong when pasted says why too (server/earlyaccess.js).
@@ -178,7 +219,7 @@ function EarlyAccess({ u, code: fromLink, onDone, onChange, onJoined }) {
           <p className="muted small ab-early-code">{e.fromAccount ? t('Your account renews it by itself while it has Early Access.') : e.until ? t('Code made on {made}, good until {until}.', { made: day(e.made), until: day(e.until) }) : t('Code made on {made}, with no end date.', { made: day(e.made) })}</p>
           {state?.error && <p className="st-note bad ab-early-error"><Icon name="alert" size={13} /> {state.error}</p>}
           <div className="st-row"><button type="button" className="btn small" disabled={state === 'leaving'} onClick={leave}><Icon name="x" size={13} /> {t('Leave Early Access')}</button></div>
-          <p className="muted small">{t('Leaving keeps the version you have: Bridge AI stays on it until a regular release is newer.')}{e.fromAccount && ` ${t('To join again, open Settings › Account.')}`}</p>
+          <p className="muted small">{t('Leaving keeps the version you have: Bridge AI stays on it until a regular release is newer.')}{e.fromAccount && <> {tn('To join again, open {place}.', { place: <button type="button" className="link-btn" onClick={() => openSettings('account')}>{t('Settings › Account & Devices')}</button> })}</>}</p>
         </>
       ) : e.problem ? (
         <>

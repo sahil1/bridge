@@ -147,8 +147,8 @@ export async function send(text, kind, { byItself = false } = {}) {
     schema: counts.SCHEMA.schema,
     kind: ['ui', 'server', 'window', 'gpu'].includes(kind) ? kind : 'ui',
     app: ctx.version || null,
-    // Stable or Early Access, and the tester an early-access code is for (PRIVACY.md).
-    channel: ctx.channel === 'early' ? 'early' : 'stable',
+    // Stable, Early Access or Nightly, and the tester an early-access code is for (PRIVACY.md).
+    channel: ['early', 'nightly'].includes(ctx.channel) ? ctx.channel : 'stable',
     tester: ctx.channel === 'early' && ctx.tester ? String(ctx.tester).slice(0, 32) : null,
     os: { darwin: 'mac', win32: 'windows' }[process.platform] || 'linux',
     arch: m.arch || process.arch,

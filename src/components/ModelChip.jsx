@@ -31,12 +31,16 @@ const HINT = { opus: tx('Latest Opus'), sonnet: tx('Latest Sonnet'), haiku: tx('
 const cap = (w) => w[0].toUpperCase() + w.slice(1).toLowerCase()
 // Names the server gives (a chat's "gpt-5 (OpenAI)"), by model id.
 const NAMES = {}
+// What Claude Code's short names stand for now ("opus": "claude-opus-5-5"), as the server has seen.
+const BEHIND = {}
 export function modelLabel(m) {
   if (!m) return 'Default'
   if (NAMES[m]) return NAMES[m]
   const wide = /\[1m\]$/i.test(m) ? ' 1M' : ''
   const base = m.replace(/\[1m\]$/i, '')
-  if (ALIAS[base.toLowerCase()]) return ALIAS[base.toLowerCase()] + wide
+  const short = base.toLowerCase()
+  if (BEHIND[short] && short !== 'default' && short !== 'best') return modelLabel(BEHIND[short]) + wide
+  if (ALIAS[short]) return ALIAS[short] + wide
   let x = /^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/i.exec(base)
   if (x) return `${cap(x[1])} ${x[2]}${x[3] ? `.${x[3]}` : ''}${wide}`
   x = /^claude-(\d+)(?:-(\d))?-(opus|sonnet|haiku)(?:-\d{8})?$/i.exec(base)
@@ -90,6 +94,7 @@ export default function ModelChip({ agent, onNote, onSent, account = null }) {
 
   if (!data || agent.kind === 'shell') return null
   if (data.labels) Object.assign(NAMES, data.labels)
+  if (data.named) Object.assign(BEHIND, data.named)
   const switching = sending || (live ? sw.model : null)
   // No model to show (an agent with no model setting, or one that picks its own and hasn't said): the agent.
   const plainKind = !data.mode || (data.mode === 'fixed' && !data.current)
@@ -218,7 +223,8 @@ function ModelMenu({ data, agent, anchor, onPick, onClose, account = null, onAcc
       {switches && <>
       <div className="acct-sec" aria-hidden="true">{t('{agent} model', { agent: data.label })}</div>
       {blocked && <p className="model-note">{blocked}</p>}
-      {data.canDefault && row('default', t('Default (recommended)'), restart ? t('{agent} picks, as when you start it yourself', { agent: data.label }) : t("{agent}'s default for your account", { agent: data.label }), 'default', true)}
+      {data.canDefault && row('default', t('Default (recommended)'), restart ? t('{agent} picks, as when you start it yourself', { agent: data.label })
+        : BEHIND.default ? t("{agent}'s default for your account, {name} now", { agent: data.label, name: modelLabel(BEHIND.default) }) : t("{agent}'s default for your account", { agent: data.label }), 'default', true)}
       {models.map((m) => row(m, modelLabel(m), (HINT[m] && t(HINT[m])) || (modelLabel(m) !== m ? m : null)))}
       {current && row(current, modelLabel(current), modelLabel(current) !== current ? t('{model}, on now', { model: current }) : t('on now'), `now:${current}`)}
       {data.checked !== 'default' && !models.includes(data.checked) && data.checked !== current && row(data.checked, modelLabel(data.checked), modelLabel(data.checked) !== data.checked ? data.checked : null, `pick:${data.checked}`)}
