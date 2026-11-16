@@ -237,6 +237,20 @@ try {
   await p.keyboard.press(`${MOD}+g`)
   const f1 = await until(async () => { const v = await p.locator('.sd-find-count').innerText(); return v !== f0 && v }, 3000, 50) || f0
   ok(Number(f1.split(' ')[0]) === Number(f0.split(' ')[0]) % Number(f0.split(' ').pop()) + 1, '⌘G: the next match', { f0, f1 })
+  // Whole words only ("the", not "they" or "there"), and a regular expression; one that isn't, said.
+  const found = () => E((ed) => { const s = ed.state.plugins.map((pl) => pl.getState?.(ed.state)).find((x) => x && Array.isArray(x.list) && 'q' in x); return (s?.list || []).map((m) => ed.state.doc.textBetween(m.from, m.to)) })
+  const any = await total()
+  await p.locator('.sd-findbar button[aria-label="Whole words only"]').click()
+  const wholeOnly = await until(async () => { const n = await total(); return n > 0 && n < any && n }, 3000, 100)
+  const wholeWords = await found()
+  await p.locator('.sd-findbar button[aria-label="Whole words only"]').click()
+  await p.locator('.sd-findbar button[aria-label="Regular expression"]').click()
+  await p.locator('.sd-findbar input').first().fill('\\d+%')
+  const pct = await until(async () => { const w = await found(); return w.length >= 3 && w }, 3000, 100)
+  await p.locator('.sd-findbar input').first().fill('(')
+  const bad = await until(async () => /Not a pattern/.test(await p.locator('.sd-find-count').innerText()), 3000, 100)
+  ok(!!wholeOnly && wholeWords.every((x) => x.toLowerCase() === 'the') && !!pct && pct.every((x) => /^\d+%$/.test(x)) && !!bad, 'find: whole words only ("the", not "they"), a regular expression (\\d+%), and one that isn\'t a pattern said', { any, wholeOnly, pct })
+  await p.locator('.sd-findbar button[aria-label="Regular expression"]').click()
   await p.keyboard.press('Escape')
   // ⌘/: the keyboard shortcuts, this computer's way.
   await caret('Next dashed')
@@ -329,6 +343,27 @@ try {
   const md = fs.existsSync(file('report.md')) ? fs.readFileSync(file('report.md'), 'utf8') : ''
   const pic = /!\[[^\]]*\]\((images\/report-\d+\.png)\)/.exec(md)?.[1]
   ok(/^## What we did$/m.test(md) && /^- A faster editor/m.test(md) && /^1\. Write the first-hour guide$/m.test(md) && /^- \[ \] Pack the bags$/m.test(md) && /<table/.test(md) && !!pic && fs.existsSync(path.join(dir, pic)) && /pricing page in November/.test(md) && !/in December/.test(md), 'its headings, lists and checklist, its table, its pictures (in images, beside it), and its words as they read now', md.slice(0, 900))
+
+  // A plain text copy beside it: a line a paragraph, lists' bullets and numbers, a table's cells
+  // apart by tabs, a tracked deletion's words out.
+  await tb.locator('button[aria-label="File"]').click()
+  await p.locator('.sd-drop .sd-item', { hasText: 'Plain text copy' }).click()
+  ok(!!(await until(async () => /Saved as report\.txt, beside it/.test(await p.locator('.sd-doc-said').innerText().catch(() => '')), 10000, 150)), 'a plain text copy, saved beside it, and said', await p.locator('.sd-doc-said').innerText().catch(() => ''))
+  const txt = fs.existsSync(file('report.txt')) ? fs.readFileSync(file('report.txt'), 'utf8') : ''
+  ok(/^Quarterly plan$/m.test(txt) && /^[•●◦▪■] A faster editor that opens large files at once$/m.test(txt) && /^1\. Write the first-hour guide$/m.test(txt) && /^Measure\tQ3\tQ4$/m.test(txt) && /in November/.test(txt) && !/in December/.test(txt) && !/<|>/.test(txt), 'its words as they read: headings and paragraphs a line each, lists with their bullets and numbers, a table by tabs, the tracked deletion out', txt.slice(0, 400))
+  // Custom spacing (Line and paragraph spacing › Custom spacing…): 1.3 lines, 6 pt before, 12 after.
+  await caret('Next dashed')
+  await (await inBar(tb, 'Line and paragraph spacing')).click()
+  await p.locator('.sd-drop .sd-item', { hasText: 'Custom spacing' }).click()
+  const cs = p.locator('.sd-spacing')
+  await cs.locator('input[aria-label="Line spacing"]').fill('1.3')
+  await cs.locator('input[aria-label="Space before, in points"]').fill('6')
+  await cs.locator('input[aria-label="Space after, in points"]').fill('12')
+  await shot(p, `${tag}studio-writing-custom-spacing`)
+  await cs.locator('button[type="submit"]').click()
+  const spaced = await until(async () => { const x = await xml(); const para0 = [...x.matchAll(/<w:p[ >][\s\S]*?<\/w:p>/g)].map((m) => m[0]).find((y) => /Next dashed/.test(y)); return para0 && /w:line="312"/.test(para0) && para0 }, 10000)
+  const sp = /<w:spacing [^>]*\/>/.exec(spaced || '')?.[0] || ''
+  ok(['w:before="120"', 'w:after="240"', 'w:line="312"', 'w:lineRule="auto"'].every((x) => sp.includes(x)), 'Custom spacing: 1.3 lines, 6 pt before and 12 after, saved as Word\'s own', (spaced || '').slice(0, 300))
 
   // A change from elsewhere while you type: saving stops, and it's said; theirs isn't written over.
   await caret('Next dashed'); await p.keyboard.type(' mine')

@@ -4,7 +4,7 @@ import Icon from '../Icon.jsx'
 import { api } from '../../api.js'
 import { t, tx, locale } from '../../i18n/index.js'
 import { withKeys } from './keys.js'
-import { find, findKey } from './search.js'
+import { find, findKey, patternOf } from './search.js'
 import { lineDiff } from './diff.js'
 
 // What a document's editor is made of besides the page: its toolbar's pieces (a button, a menu, a
@@ -37,6 +37,8 @@ const GLYPH = {
   'wrap-top-bottom': <><rect x="8" y="8" width="8" height="7" rx="1" /><path d="M3 4h18M3 19h18" /></>,
   'chevron-down': <path d="m6 9 6 6 6-6" />,
   replace: <><path d="M14 4h6v6" /><path d="M20 4 13 11" /><path d="M10 20H4v-6" /><path d="m4 20 7-7" /></>,
+  'whole-word': <><path d="M3 16v3h18v-3" /><path d="m6 13 2.5-7 2.5 7M7 11h3M14 6v7M14 10.5a2.5 2.5 0 1 0 5 0 2.5 2.5 0 1 0-5 0" /></>,
+  regex: <><path d="M17 3v9M13.1 5.25l7.8 4.5M13.1 9.75l7.8-4.5" /><circle cx="6" cy="18" r="2" /></>,
   'case': <><path d="m3 15 4-8 4 8M4.5 12h5" /><path d="M14 11.5a2.5 2.5 0 1 1 5 0V15M19 13a2.5 2.5 0 1 1-5 1.5" /></>,
   zoom: <><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3M8 11h6M11 8v6" /></>,
   font: <><path d="M4 7V5h16v2M9 19h6M12 5v14" /></>,
@@ -69,6 +71,16 @@ export function Drop({ name, tip, icon, text, panel, disabled, className = '', w
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   const close = useCallback(() => setOpen(false), [])
+  // On the screen: a menu that would run past its right edge (one under More, on a phone) moves left.
+  const box = useRef(null)
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!open || !el) return
+    el.style.left = ''
+    const r = el.getBoundingClientRect()
+    const over = r.right - (window.innerWidth - 8)
+    if (over > 0) el.style.left = `${-Math.min(over, r.left - 8)}px`
+  }, [open])
   useEffect(() => {
     if (!open) return undefined
     const down = (e) => { if (!ref.current?.contains(e.target)) setOpen(false) }
@@ -85,7 +97,7 @@ export function Drop({ name, tip, icon, text, panel, disabled, className = '', w
         {swatch !== undefined && <i className="sd-swatch-bar" style={{ background: swatch || 'transparent' }} />}
         <Glyph name="chevron-down" size={12} />
       </button>
-      {open && <div className={`sd-drop${wide ? ' wide' : ''}`} role="menu" aria-label={name} onMouseDown={keepFocus}>{panel(close)}</div>}
+      {open && <div ref={box} className={`sd-drop${wide ? ' wide' : ''}`} role="menu" aria-label={name} onMouseDown={keepFocus}>{panel(close)}</div>}
     </span>
   )
 }
@@ -244,12 +256,15 @@ export function FindBar({ editor, replace: withReplace, onClose }) {
   const [q, setQ] = useState(() => editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, ' ').slice(0, 100))
   const [r, setR] = useState('')
   const [matchCase, setCase] = useState(false)
+  // Whole words only (Word's), and a regular expression (Google Docs' Match using regular expressions).
+  const [whole, setWhole] = useState(false)
+  const [regex, setRegex] = useState(false)
   const [showReplace, setShowReplace] = useState(withReplace)
   const [said, setSaid] = useState(null)
   const input = useRef(null)
   const [, tick] = useState(0)
   useEffect(() => { setShowReplace(withReplace || showReplace) }, [withReplace]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { find.set(editor, { q, matchCase }); setSaid(null) }, [editor, q, matchCase])
+  useEffect(() => { find.set(editor, { q, matchCase, whole, regex }); setSaid(null) }, [editor, q, matchCase, whole, regex])
   useEffect(() => { const up = () => tick((n) => n + 1); editor.on('transaction', up); return () => { editor.off('transaction', up); find.set(editor, { q: '' }) } }, [editor])
   useEffect(() => { input.current?.focus(); input.current?.select() }, [])
   const s = findKey.getState(editor.state) || { list: [], index: -1 }
@@ -264,7 +279,7 @@ export function FindBar({ editor, replace: withReplace, onClose }) {
     if (e.key === 'Escape') { e.preventDefault(); close() }
     if (e.key === 'Enter') { e.preventDefault(); find.step(editor, e.shiftKey ? -1 : 1) }
   }
-  const count = q ? (s.list.length ? t('{n} of {total}', { n: s.index + 1, total: s.list.length }) : t('No matches')) : ''
+  const count = q ? (regex && !patternOf(q, { regex, whole }) ? t('Not a pattern') : s.list.length ? t('{n} of {total}', { n: s.index + 1, total: s.list.length }) : t('No matches')) : ''
   return (
     <div className="sd-findbar" role="search" aria-label={t('Find and replace')}>
       <div className="sd-find-row">
@@ -272,6 +287,8 @@ export function FindBar({ editor, replace: withReplace, onClose }) {
         <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={key} placeholder={t('Find in the document')} aria-label={t('Find')} spellCheck={false} />
         <span className="sd-find-count muted small" aria-live="polite">{count}</span>
         <Tool name={t('Match case')} icon="case" on={matchCase} run={() => setCase((x) => !x)} />
+        <Tool name={t('Whole words only')} icon="whole-word" on={whole} run={() => setWhole((x) => !x)} />
+        <Tool name={t('Regular expression')} icon="regex" on={regex} run={() => setRegex((x) => !x)} tip={t('Match using a regular expression')} />
         <Tool name={t('Previous match')} icon="up" run={() => find.step(editor, -1)} disabled={!s.list.length} keys={['mod', 'shift', 'g']} />
         <Tool name={t('Next match')} icon="down" run={() => find.step(editor, 1)} disabled={!s.list.length} keys={['mod', 'g']} />
         <Tool name={t('Replace')} icon="replace" on={showReplace} run={() => setShowReplace((x) => !x)} tip={t('Show replace')} />

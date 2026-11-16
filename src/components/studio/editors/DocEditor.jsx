@@ -492,6 +492,7 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
   const [linking, setLinking] = useState(null)
   const [exporting, setExporting] = useState(false)
   const [settingUp, setSettingUp] = useState(false)
+  const [spacing, setSpacing] = useState(false)
   const asking = useRef(null) // AskInPlace's, for AI Assist in the page's header
 
   handle.current = {
@@ -748,6 +749,27 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
   printRef.current = print
   // A Markdown copy beside it: its headings, words and their marks, lists (checklists too), links,
   // tables and pictures (saved in an images folder beside it), as Markdown has them.
+  // A plain text copy beside it, as Google Docs' Download › Plain text: a line a paragraph (its
+  // list's bullet or number in front), a table's cells apart by tabs, the words as they read now (a
+  // tracked deletion's out), what isn't words (a picture, a comment's marks) left out.
+  const toText = async () => {
+    setExporting(true); setSay(null)
+    try {
+      const dom = editor.view.dom.cloneNode(true)
+      for (const x of dom.querySelectorAll('del.sd-rev, .sd-x:not(.sd-x-fld), .sd-pbr, .sd-pb, .sd-pb-top, .sd-pb-end, tr.sd-pb-row, [data-resize-handle], .ProseMirror-separator, .sd-xbl-label')) x.remove()
+      const rows = []
+      const walk = (el) => {
+        for (const c of el.children) {
+          if (c.matches('table')) { for (const tr of c.querySelectorAll('tr')) rows.push([...tr.children].map((td) => td.textContent.replace(/\s+/g, ' ').trim()).join('\t')); rows.push('') } else if (c.matches('p, h1, h2, h3, h4, h5, h6')) { const mk = c.getAttribute('data-mk'); rows.push(`${'  '.repeat(Number(c.getAttribute('data-lvl')) || 0)}${mk ? `${mk} ` : ''}${c.textContent}`) } else walk(c)
+        }
+      }
+      walk(dom)
+      const base = file.name.replace(/\.[^.]+$/, '')
+      const dir = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : ''
+      const r = await api('/studio/new', { method: 'POST', body: { root: file.root, dir, name: `${base}.txt`, text: `${rows.join('\n').replace(/\n{3,}/g, '\n\n').trim()}\n` } })
+      setSay({ text: t('Saved as {name}, beside it.', { name: r.name }), open: r.path })
+    } catch (e) { setSay({ text: t("Couldn't make the text copy: {error}", { error: e.message }), error: true }) } finally { setExporting(false) }
+  }
   const toMarkdown = async () => {
     setExporting(true); setSay(null)
     try {
@@ -811,6 +833,7 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
           <Item icon="printer" label={t('Print, or save as PDF')} keys={['mod', 'p']} run={print} close={close} />
           <div className="menu-sep" />
           <Item icon="code" label={t('Markdown copy, beside it')} run={toMarkdown} close={close} />
+          <Item icon="doc" label={t('Plain text copy, beside it')} run={toText} close={close} />
           <div className="menu-sep" />
           <Item icon="keyboard" label={t('Keyboard shortcuts')} keys={['mod', '/']} run={() => setHelp(true)} close={close} />
         </>)} />
@@ -865,6 +888,8 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
           <div className="menu-sep" />
           <Item label={s.sb ? t('Remove space before paragraph') : t('Add space before paragraph')} run={() => paras({ sb: s.sb ? 0 : 240 })} close={close} />
           <Item label={s.sa ? t('Remove space after paragraph') : t('Add space after paragraph')} run={() => paras({ sa: s.sa ? 0 : 160 })} close={close} />
+          <div className="menu-sep" />
+          <Item label={t('Custom spacing…')} run={() => setSpacing(true)} close={close} />
         </>)} />
       </span>
       <span className="sd-group" key="lists" data-keep={7}>
@@ -916,6 +941,7 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
       {counting && <WordCount editor={editor} pages={flow ? null : pages.total} onClose={() => setCount(false)} />}
       {editingHf && <HfEditor which={editingHf} info={info} model={model} page={page} css={css} scope={scope} value={hf} onClose={() => setEditingHf(null)} onDone={(next) => { touched.current = true; setHf(next); hfRef.current = next; stamp.current++; setEditingHf(null); onDirty(true); again.current?.() }} />}
       {helping && <Shortcuts word onClose={() => { setHelp(false); editor.commands.focus() }} />}
+      {spacing && <CustomSpacing line={s.line} before={s.sb} after={s.sa} onClose={() => { setSpacing(false); editor.commands.focus() }} onDone={(a) => { setSpacing(false); paras(a) }} />}
       {settingUp && <PageSetup page={page} sections={(() => { let n = 1; editor.state.doc.forEach((b) => { if (b.attrs?.sect) n++ }); return n })()} onClose={() => { setSettingUp(false); editor.commands.focus() }} onDone={(next) => { touched.current = true; setPage(next); setSettingUp(false); onDirty(true); editor.commands.focus() }} />}
       {!readOnly && linking == null && <LinkBubble editor={editor} href={s.href} scroller={desk} onEdit={() => setLinking(s.href || '')} onRemove={() => c().extendMarkRange('link').unsetLink().run()} />}
       {!readOnly && linking == null && !s.link && <ChangeBubble editor={editor} scroller={desk} onResolve={resolveOne} />}
@@ -1092,6 +1118,45 @@ function PageSetup({ page, sections, onClose, onDone }) {
           {err && <p className="error-text small" role="alert">{err}</p>}
         </div>
         <div className="sd-ask-acts sd-setup-acts"><button type="submit" className="btn small primary"><Icon name="check" size={12} /> {t('OK')}</button><button type="button" className="ghost-btn" onClick={onClose}>{t('Cancel')}</button></div>
+      </form>
+    </div>,
+    document.body,
+  )
+}
+
+// Custom spacing, as Google Docs has it: the lines' spacing as a multiple of single, and the space
+// before and after the paragraph in points. Written as Word's own (w:spacing, line in 240ths).
+function CustomSpacing({ line, before, after, onClose, onDone }) {
+  const [rule, n] = String(line || 'auto:240').split(':')
+  const [v, setV] = useState({ line: rule === 'auto' ? String(Math.round((Number(n) / 240) * 100) / 100) : '1', before: String(Math.round((before || 0) / 2) / 10), after: String(Math.round((after || 0) / 2) / 10) })
+  const [err, setErr] = useState(null)
+  useEffect(() => { const k = (e) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [onClose])
+  const num = (x) => Number(String(x).replace(',', '.'))
+  const done = (e) => {
+    e.preventDefault()
+    const l = num(v.line), b = num(v.before), a = num(v.after)
+    if (!Number.isFinite(l) || l < 0.5 || l > 10) { setErr(t('Line spacing is a number from 0.5 to 10')); return }
+    if (![b, a].every((x) => Number.isFinite(x) && x >= 0 && x <= 1584)) { setErr(t('Space before and after is a number of points, 0 or more')); return }
+    onDone({ ln: `auto:${Math.round(l * 240)}`, sb: Math.round(b * 20), sa: Math.round(a * 20) })
+  }
+  const field = (k, label, aria) => <label className="sd-field"><span className="small">{label}</span><input inputMode="decimal" value={v[k]} onChange={(e) => { setErr(null); setV({ ...v, [k]: e.target.value }) }} aria-label={aria} /></label>
+  return createPortal(
+    <div className="sd-modal" role="dialog" aria-label={t('Custom spacing')} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <form className="sd-count sd-page-setup sd-spacing" onSubmit={done}>
+        <div className="sd-panel-head"><b>{t('Custom spacing')}</b><span className="sd-grow" /><button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={13} /></button></div>
+        <div className="sd-setup-body">
+          <div className="sd-setup-margins">
+            <span className="muted small">{t('Line spacing')}</span>
+            {field('line', t('Multiple of single'), t('Line spacing'))}
+          </div>
+          <div className="sd-setup-margins">
+            <span className="muted small">{t('Paragraph spacing (pt)')}</span>
+            {field('before', t('Before'), t('Space before, in points'))}
+            {field('after', t('After'), t('Space after, in points'))}
+          </div>
+          {err && <p className="error-text small" role="alert">{err}</p>}
+        </div>
+        <div className="sd-ask-acts sd-setup-acts"><button type="submit" className="btn small primary"><Icon name="check" size={12} /> {t('Apply')}</button><button type="button" className="ghost-btn" onClick={onClose}>{t('Cancel')}</button></div>
       </form>
     </div>,
     document.body,

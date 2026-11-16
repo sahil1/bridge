@@ -21,7 +21,7 @@
 .sd-drop-btn > svg:last-child { color: var(--ink-3); flex: none; }
 .sd-swatch-bar { position: absolute; left: 8px; bottom: 4px; width: 14px; height: 3px; border-radius: 1px; box-shadow: 0 0 0 .5px rgb(0 0 0 / .25); }
 .sd-drop-btn:has(.sd-swatch-bar) { position: relative; padding-bottom: 3px; }
-.sd-drop { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; display: grid; min-width: 188px; max-height: min(62vh, 520px); overflow: auto; padding: 5px; border-radius: 10px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 12px 32px rgb(0 0 0 / .18); }
+.sd-drop { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; display: grid; min-width: 188px; max-width: calc(100vw - 16px); max-height: min(62vh, 520px); overflow: auto; padding: 5px; border-radius: 10px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 12px 32px rgb(0 0 0 / .18); }
 .sd-drop.wide { min-width: 240px; }
 .sd-drop.narrow { min-width: 72px; }
 .sd-drop .menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
@@ -233,6 +233,7 @@
 .sd-setup-body select, .sd-setup-margins input { width: 100%; height: 32px; padding: 0 10px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink); font: 13px var(--font); }
 .sd-setup-margins { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 8px; }
 .sd-setup-margins > span { grid-column: 1 / -1; }
+.sd-spacing .sd-setup-margins { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .sd-setup-body p { margin: 0; line-height: 1.45; }
 .sd-setup-acts { padding: 12px 16px 16px; }
 
