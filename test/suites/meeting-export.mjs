@@ -92,7 +92,10 @@ try {
   const reveal = p.waitForResponse((r) => /\/reveal$/.test(r.url()), { timeout: 8000 }).catch(() => null)
   await p.locator('.rm-msg .link-btn').click({ timeout: 4000 }).catch(() => {})
   const shown = await (await reveal)?.json().catch(() => null)
-  ok(shown?.dry?.includes(docx), 'Show in Finder beside it shows the Word file', shown)
+  // The file selected (open -R; explorer /select,<file>), or on Linux its folder (xdg-open opens no file selected).
+  const dry = shown?.dry || []
+  const slash = (s) => String(s || '').replace(/\\/g, '/')
+  ok(dry.includes(docx) || dry.some((a) => slash(a) === `/select,${slash(docx)}`) || (dry[0] === 'xdg-open' && slash(dry[1]) === slash(path.dirname(docx || ''))), 'Show in Finder beside it shows the Word file', shown)
 
   // ---------- PDF, from the open meeting's ⋯ menu ----------
   await row.click()
@@ -134,7 +137,8 @@ try {
     }
     ok(drawn.length >= 4 && drawn.every(([w, , x]) => x >= 53 && x + w <= W - 53), 'each picture drawn inside the page\'s margins', { W, drawn: drawn.slice(0, 8) })
     const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
-    const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), isEvalSupported: false, standardFontDataUrl: `${path.join(ROOT, 'node_modules', 'pdfjs-dist', 'standard_fonts')}${path.sep}` }).promise
+    // Its fonts' folder ending in / (pdf.js insists, on Windows too, where it reads D:/… as well).
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), isEvalSupported: false, standardFontDataUrl: `${path.join(ROOT, 'node_modules', 'pdfjs-dist', 'standard_fonts').replace(/\\/g, '/')}/` }).promise
     const words = async (n) => (await (await doc.getPage(n)).getTextContent()).items.map((x) => x.str).join(' ').replace(/\s+/g, ' ')
     const first = await words(1)
     const last = await words(pages)
