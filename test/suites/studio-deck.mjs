@@ -328,6 +328,12 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
   // halves (New slide, Present) and its words' contrast on its fill; how many times the download
   // icon shows (the header's Download; Export is another); the toolbar's rows (each with
   // controls in it, none spent on a hint) and the hint over the slide.
+  // A button of a PowerPoint's toolbar: on its row, or under More (⋯) where the row hasn't room.
+  const bar = async (pp, name) => {
+    const b = pp.locator(`.sd-slides-tools button[aria-label="${name}"]`).first()
+    if (!(await b.isVisible().catch(() => false))) await pp.locator('.sd-slides-tools .sd-more-btn').click()
+    return b
+  }
   const chrome = (pp) => pp.evaluate(() => {
     const box = (e) => e.getBoundingClientRect()
     const rgb = (c) => { const m = /^rgba?\(([^)]+)\)/.exec(c); if (m) return m[1].split(/[\s,/]+/).filter(Boolean).slice(0, 3).map(Number); const s = /^color\(srgb ([^)]+)\)/.exec(c); return s ? s[1].trim().split(/\s+/).slice(0, 3).map((x) => Number(x) * 255) : [0, 0, 0] }
@@ -341,7 +347,7 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
     })
     const dl = document.querySelector('.sd-file .pane-head .sd-dl-btn svg')?.innerHTML
     const downloads = [...document.querySelectorAll('.sd-file .pane-head svg, .sd-toolbar svg')].filter((x) => x.innerHTML === dl && box(x).width > 0).length
-    const rows = [...document.querySelectorAll('.sd-toolbar .px-row')].filter((r) => box(r).height > 0).map((r) => ({ h: Math.round(box(r).height), controls: [...r.querySelectorAll('button')].filter((x) => box(x).width > 0).length, hint: !!r.querySelector('.px-hint') }))
+    const rows = [...document.querySelectorAll('.sd-toolbar.sd-one-row')].filter((r) => box(r).height > 0).map((r) => { const shown = [...r.querySelectorAll('button')].filter((x) => box(x).width > 0); return { h: Math.round(box(r).height), controls: shown.length, oneLine: new Set(shown.map((x) => Math.round(box(x).top + box(x).height / 2))).size === 1, hint: !!r.querySelector('.px-hint') } })
     const saved = head.querySelector('.sd-save-state')
     return { heights: [...new Set(controls.map((e) => Math.round(box(e).height)))], saved: saved ? { text: saved.innerText.trim(), contrast: contrast(getComputedStyle(saved).color, getComputedStyle(document.querySelector('.sd-file')).backgroundColor) } : null, splits, downloads, rows, hint: document.querySelector('.px-stage .px-hint')?.innerText || '' }
   })
@@ -431,7 +437,7 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
   md = await saved()
   ok(/^---\nmarp: true\ntitle: Q4 pitch\npaginate: true\npack: Ember\n---\n/.test(md) && /d9502b/i.test(await p.locator('.sd-deck2 > style').innerText()), 'Theme: Ember, written in its front matter and drawn in it', md.slice(0, 90))
   // A picture, beside the deck; then the speaker notes.
-  await p.locator('.sd-deck-tools input[type=file]').setInputFiles({ name: 'chart.png', mimeType: 'image/png', buffer: PNG })
+  await p.locator('.sd-deck2 > input[type=file]').setInputFiles({ name: 'chart.png', mimeType: 'image/png', buffer: PNG })
   md = await until(async () => { const x = await saved(); return /!\[bg right:42%\]\(images\/chart\.png\)/.test(x) && x }, 20000, 300)
   ok(!!md && fs.existsSync(path.join(dir, 'images', 'chart.png')) && /<!-- _class: image -->/.test(md), 'Picture: saved beside the deck, on the slide, which becomes text and picture', md && md.slice(md.indexOf('# Why now') - 40, md.indexOf('# Why now') + 200))
   ok(!!(await until(async () => /images%2Fchart\.png/.test(await p.locator('.sd-canvas').innerHTML()), 5000, 100)), 'and drawn on it, from beside the deck')
@@ -569,11 +575,11 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
     const go = async (i) => { await thumbs.nth(i).locator('.sd-thumb-btn').click(); await sleep(100) }
     await go(4)
     ok((await objs.count()) === 8 && /Order/.test(await p.locator('.px-canvas').innerText()), 'its shapes where they are, each one there to pick')
-    // Its toolbar: two rows of tools as high as any editor's (the format row's greyed until there's
-    // something to format, so the slide doesn't jump), the hint over the slide rather than a row of
+    // Its toolbar: one row of tools as high as any editor's (the format of what's picked joins it
+    // while something is, so the slide doesn't jump), the hint over the slide rather than a row of
     // its own; its split buttons and header as a deck's.
     looks = await chrome(p)
-    ok(looks.rows.length === 2 && looks.rows.every((r) => Math.abs(r.h - 42) <= 1 && r.controls > 0 && !r.hint) && /^Click something on the slide/.test(looks.hint) && await p.locator('.px-format button[aria-label="Bold"]').isDisabled(), 'a PowerPoint\'s toolbar: two rows of tools 42 px high, its format tools greyed with nothing picked, and the hint over the slide, not a row of its own', { rows: looks.rows, hint: looks.hint })
+    ok(looks.rows.length === 1 && looks.rows.every((r) => Math.abs(r.h - 42) <= 1 && r.controls > 0 && r.oneLine && !r.hint) && /^Click something on the slide/.test(looks.hint) && !(await p.locator('.sd-slides-tools button[aria-label="Bold"]').count()), 'a PowerPoint\'s toolbar: one row of tools 42 px high, no format tools with nothing picked, and the hint over the slide, not a row of its own', { rows: looks.rows, hint: looks.hint })
     ok(splitsOk(looks) && looks.heights.join() === '30' && looks.downloads === 1, 'a PowerPoint\'s split buttons and header as a deck\'s: one look, one height, the download icon once', looks)
     await shot(p, `${tag}deck-pptx`)
     // In Focus: the slide bigger in the middle; Esc lets go of the shapes picked first, then leaves.
@@ -603,7 +609,7 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
     ok(!!(await until(async () => /Agenda for 2026/.test(await thumbs.nth(1).innerText()), 3000, 50)), 'typed in its title, where it is: the thumbnail follows')
     await p.keyboard.press(`${MOD}+a`)
     await p.keyboard.press(`${MOD}+b`)
-    ok(/font-weight:\s*700/.test(await p.locator('.px-edit-body span').first().getAttribute('style')) && (await p.locator('.px-format button[aria-label="Bold"]').getAttribute('aria-pressed')) === 'true', 'made bold (⌘B), shown on its button')
+    ok(/font-weight:\s*700/.test(await p.locator('.px-edit-body span').first().getAttribute('style')) && (await (await bar(p, 'Bold')).getAttribute('aria-pressed')) === 'true', 'made bold (⌘B), shown on its button')
     await p.keyboard.press('Escape')
     // Its points: Enter for a new one, Tab under the one before, numbered.
     const bb = await objs.nth(1).boundingBox()
@@ -628,7 +634,7 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
     // A shape: put in, picked, sized by a handle, turned, coloured, moved with guides, duplicated.
     await go(13)
     const n0 = await objs.count()
-    await p.locator('.px-row button[aria-label="Shape"]').click()
+    await (await bar(p, 'Shape')).click()
     await p.locator('.px-shape-grid button[aria-label="Oval"]').click()
     ok(!!(await until(async () => (await objs.count()) === n0 + 1 && (await p.locator('.px-frame .px-handle').count()) === 9, 2000, 50)), 'a shape put in, picked, with its handles')
     const f0 = await p.locator('.px-frame').first().boundingBox()
@@ -639,7 +645,7 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
     const rot = await p.locator('.px-frame .px-handle.rot').boundingBox()
     await p.mouse.move(rot.x + 4, rot.y + 4); await p.mouse.down(); await p.mouse.move(f1.x + f1.width / 2 + 200, f1.y + f1.height / 2, { steps: 4 }); await p.mouse.up()
     ok(/rotate\(90deg\)/.test(await p.locator('.px-frame').first().evaluate((x) => x.style.transform)), 'turned by its handle, settling on 90°')
-    await p.locator('.px-format button[aria-label="Fill colour"]').click()
+    await (await bar(p, 'Fill colour')).click()
     await p.locator('.sd-drop .sd-sw[aria-label="#6AA84F"]').click()
     ok(/#6AA84F/i.test(await objs.last().innerHTML()), 'filled in a colour')
     const c0 = await p.locator('.px-frame').first().boundingBox()
@@ -658,7 +664,7 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
     await p.keyboard.press('Delete')
     ok(!!(await until(async () => (await objs.count()) === n0 + 1, 2000, 50)), 'deleted (Delete)')
     // A picture: put in, cropped by its edge.
-    await p.locator('.px-row input[type=file]').first().setInputFiles({ name: 'team.png', mimeType: 'image/png', buffer: PNG })
+    await p.locator('.sd-slides > input[type=file]').first().setInputFiles({ name: 'team.png', mimeType: 'image/png', buffer: PNG })
     ok(!!(await until(async () => (await objs.count()) === n0 + 2, 5000, 50)), 'a picture put on the slide')
     await objs.last().dblclick()
     const ce = await p.locator('.px-frame.crop .px-handle.e').boundingBox()
@@ -667,7 +673,7 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
     const iw = await objs.last().locator('img').evaluate((x) => [x.offsetWidth, x.parentElement.offsetWidth])
     ok(iw[0] > iw[1] + 10, 'cropped: the picture runs past its box', iw)
     // A table: put in, its cell typed in.
-    await p.locator('.px-row button[aria-label="Table"]').click()
+    await (await bar(p, 'Table')).click()
     await p.locator('.sd-grid-cell').nth(9).click()
     const tbl = p.locator('.px-canvas [data-o]:has(table)').last()
     await tbl.locator('td').first().click()
@@ -755,10 +761,10 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
     const rv = reread.slides.map((s) => X.slideView(reread, s))
     ok(reread.slides.length === 22 && /Agenda for 2026/.test(X.plainOf(rv[1].objs[0].textModel)) && /Budget/.test(X.plainOf(rv[1].objs[1].textModel)) && reread.slides[2].notes.text === 'Keep it short' && reread.slides[21].hidden && rv[13].objs.some((o) => o.kind === 'table') && rv[13].objs.some((o) => o.kind === 'pic'), 'read back: the words, the new point, notes, the skipped copy, the table and picture', reread.slides.length)
     // A Markdown deck of it, beside it; this slide as a picture.
-    await p.locator('.px-row button[aria-label="Export"]').click()
+    await (await bar(p, 'Export')).click()
     await p.locator('.sd-tool-menu .menu-item', { hasText: 'Markdown deck, beside it' }).click()
     ok(!!(await until(() => fs.existsSync(path.join(dir, 'board.md')) && /# Agenda for 2026/.test(fs.readFileSync(path.join(dir, 'board.md'), 'utf8')), 10000, 100)), 'Export: a Markdown deck of it, beside it')
-    await p.locator('.px-row button[aria-label="Export"]').click()
+    await (await bar(p, 'Export')).click()
     await p.locator('.sd-tool-menu .menu-item', { hasText: 'This slide as a picture' }).click()
     ok(!!(await until(async () => /saved as a picture/.test((await p.locator('.sd-note').allInnerTexts()).join(' ')), 8000, 100)), 'Export: this slide as a picture', (await p.locator('.sd-note').allInnerTexts()).join(' '))
   }
@@ -848,7 +854,7 @@ for (const [k, v] of Object.entries(${JSON.stringify(Object.fromEntries(Object.e
       await sleep(300)
       f = await phoneFaults(ph.p, '.sd-file')
       ok(!Object.keys(f).length, 'phone: a PowerPoint fits, each control a whole 40 px target', f)
-      ok(!(await ph.p.locator('.px-format').isVisible()) && !(await ph.p.locator('.px-hint').isVisible()), 'phone: with nothing picked, no format row and no hint taking the screen', { format: await ph.p.locator('.px-format').isVisible() })
+      ok(!(await ph.p.locator('.sd-slides-tools button[aria-label="Bold"]').count()) && !(await ph.p.locator('.px-hint').isVisible()) && (await ph.p.locator('.sd-slides-tools').boundingBox()).height < 52, 'phone: one row of tools, with nothing picked no format tools and no hint taking the screen', { bold: await ph.p.locator('.sd-slides-tools button[aria-label="Bold"]').count() })
       await ph.p.locator('.sd-nav button[aria-label="Next"]').click()
       ok(!!(await until(async () => /2 of 22/.test(await ph.p.locator('.sd-nav').innerText()), 3000, 100)), 'phone: its next slide')
       await shot(ph.p, `${tag}deck-phone-pptx`)

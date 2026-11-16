@@ -7,6 +7,7 @@ import { keys, withKeys } from '../keys.js'
 import * as D from '../deck.js'
 import { slidesOf, pptxOf } from '../pptx.js'
 import { Slide, Menu, LayoutGallery, ThemeGallery, Present, AiPanel, deckAssist, DeckFind, LAYOUT_LABEL, sampleOf, useSize } from './DeckParts.jsx'
+import { OneRow } from '../doctools.jsx'
 import SlidesEditor from './SlidesEditor.jsx'
 import '../deck.css'
 
@@ -650,44 +651,8 @@ html,body{margin:0;background:#fff}div.marpit>svg{display:block;width:100vw;heig
   return (
     <div className={`sd-deck2${show.ai ? ' with-ai' : ''}${show.md ? ' with-md' : ''}`}>
       <style>{css}</style>
-      <div className="sd-toolbar sd-deck-tools" role="toolbar" aria-label={t('Deck')}>
-        {!readOnly && (
-          <div className="sd-group">
-            <span className="menu-anchor sd-split">
-              <button type="button" className="sd-tool wide" onClick={() => addSlide()} title={withKeys(t('New slide'), 'mod', 'm')} aria-label={t('New slide')}><Icon name="plus" size={15} /><span className="sd-tool-label">{t('New slide')}</span></button>
-              <button type="button" className={`sd-tool caret${menu === 'new' ? ' on' : ''}`} onClick={() => setMenu(menu === 'new' ? null : 'new')} aria-label={t('New slide in a layout')} title={t('New slide in a layout')} aria-haspopup="menu" aria-expanded={menu === 'new'}><Icon name="down" size={12} /></button>
-              {menu === 'new' && previews && <LayoutGallery label={t('New slide in a layout')} previews={previews} onPick={(id) => addSlide(id)} onClose={() => setMenu(null)} />}
-            </span>
-            {tool(t('Undo'), 'undo', undo, { tip: withKeys(t('Undo'), 'mod', 'z'), disabled: !hist.current.past.length })}
-            {tool(t('Redo'), 'redo', redo, { tip: withKeys(t('Redo'), 'shift', 'mod', 'z'), disabled: !hist.current.future.length })}
-          </div>
-        )}
-        {!readOnly && (
-          <div className="sd-group">
-            <span className="menu-anchor">
-              {tool(t('Layout'), 'split', () => setMenu(menu === 'layout' ? null : 'layout'), { label: true, on: menu === 'layout' || undefined, tip: t('Layout: {name}', { name: t(LAYOUT_LABEL[layout]) }), more: { 'aria-haspopup': 'menu', 'aria-expanded': menu === 'layout' } })}
-              {menu === 'layout' && previews && <LayoutGallery label={t('Layout of slide {n}', { n: at + 1 })} previews={previews} on={layout} onPick={setLayout} onClose={() => setMenu(null)} />}
-            </span>
-            <span className="menu-anchor">
-              {tool(t('Theme'), 'palette', () => setMenu(menu === 'theme' ? null : 'theme'), { label: true, tip: marpTheme ? t('Theme: Marp\'s {name}', { name: marpTheme }) : t('Theme: {name}', { name: look.builtIn ? t(look.name) : look.name }), more: { 'aria-haspopup': 'menu', 'aria-expanded': menu === 'theme' } })}
-              {menu === 'theme' && <ThemeGallery packs={packs} own={own} current={marpTheme ? null : lookKey} onPick={pickLook} onClose={() => setMenu(null)} />}
-            </span>
-            {tool(picture ? t('Change the picture') : t('Picture'), 'image', () => picInput.current?.click(), { label: true, disabled: busy === 'picture', tip: picture ? t('Put another picture in this one\'s place') : t('Put a picture on this slide (or drop one on it)') })}
-            <input ref={picInput} type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" hidden onChange={(e) => { addPicture(e.target.files?.[0]); e.target.value = '' }} />
-          </div>
-        )}
-        {!readOnly && (
-          <div className="sd-group sd-marks">
-            {tool(t('Bold'), 'bold', () => document.execCommand('bold'), { tip: withKeys(t('Bold'), 'mod', 'b') })}
-            {tool(t('Italic'), 'italic', () => document.execCommand('italic'), { tip: withKeys(t('Italic'), 'mod', 'i') })}
-            {tool(t('Strikethrough'), 'strike', () => document.execCommand('strikeThrough'), { tip: withKeys(t('Strikethrough'), 'shift', 'mod', 'x') })}
-            {tool(t('Bulleted list'), 'list', () => listFocused('bullet'), { tip: withKeys(t('Bulleted list'), 'shift', 'mod', '8') })}
-            {tool(t('Numbered list'), 'list-ordered', () => listFocused('number'), { tip: withKeys(t('Numbered list'), 'shift', 'mod', '7') })}
-          </div>
-        )}
-        {missing && <span className="muted small sd-tool-note" title={t('This deck names a design pack you don\'t have, so it uses your default.')}><Icon name="info" size={12} /> {t('No pack "{name}"', { name: named })}</span>}
-        <span className="sd-grow" />
-        <div className="sd-group">
+      <OneRow className="sd-deck-tools" label={t('Deck')} side={[
+        <div className="sd-group" key="view">
           {tool(t('Find and replace'), 'search', () => { flush(); setFind({ replace: true, n: Date.now() }) }, { tip: withKeys(t('Find and replace'), 'mod', 'f') })}
           {!narrow && <span className="menu-anchor">
             {tool(t('Zoom'), 'maximize', () => setMenu(menu === 'zoom' ? null : 'zoom'), { label: true, tip: t('Zoom: {n}', { n: zoom === 'fit' ? t('Fit') : `${Math.round(zoom * 100)}%` }), more: { 'aria-haspopup': 'menu', 'aria-expanded': menu === 'zoom' } })}
@@ -695,7 +660,17 @@ html,body{margin:0;background:#fff}div.marpit>svg{display:block;width:100vw;heig
           </span>}
           {tool(t('Grid'), 'grid', () => { flush(); setGrid((x) => !x) }, { label: true, on: grid, tip: t('Every slide at once, to see the whole deck and drag slides into order') })}
           {!pptx && tool(t('Markdown'), 'code', () => { flush(); setShow((s) => ({ ...s, md: !s.md })) }, { label: true, on: show.md, tip: t('The deck as Markdown, beside the slides') })}
-        </div>
+        </div>,
+        <div className="sd-group" key="export">
+          <span className="menu-anchor">
+            {tool(t('Export'), 'export', () => setMenu(menu === 'export' ? null : 'export'), { label: true, disabled: !!busy, tip: t('A PowerPoint or PDF of it'), more: { 'aria-haspopup': 'menu', 'aria-expanded': menu === 'export' } })}
+            {menu === 'export' && <Menu label={t('Export')} className="right" onClose={() => setMenu(null)} items={[
+              pptx ? { label: t('Markdown deck, beside it'), icon: 'code', run: () => saveBeside('md') } : { label: t('PowerPoint, beside it'), icon: 'screen', run: () => saveBeside('pptx') },
+              { label: t('PDF (print it, or save as PDF)'), icon: 'doc', run: print },
+            ]} />}
+          </span>
+        </div>,
+      ]} end={(
         <div className="sd-group">
           <span className="menu-anchor sd-split primary">
             <button type="button" className="sd-tool wide sd-present-btn" onClick={() => { flush(); setPresent({ at, presenter: false }) }} title={withKeys(t('Present from this slide'), 'mod', 'enter')} aria-label={t('Present')}><Icon name="play" size={13} /><span className="sd-tool-label">{t('Present')}</span></button>
@@ -706,15 +681,45 @@ html,body{margin:0;background:#fff}div.marpit>svg{display:block;width:100vw;heig
               { label: t('Presenter view'), icon: 'panel-right', run: () => setPresent({ at, presenter: true }) },
             ]} />}
           </span>
-          <span className="menu-anchor">
-            {tool(t('Export'), 'export', () => setMenu(menu === 'export' ? null : 'export'), { label: true, disabled: !!busy, tip: t('A PowerPoint or PDF of it'), more: { 'aria-haspopup': 'menu', 'aria-expanded': menu === 'export' } })}
-            {menu === 'export' && <Menu label={t('Export')} className="right" onClose={() => setMenu(null)} items={[
-              pptx ? { label: t('Markdown deck, beside it'), icon: 'code', run: () => saveBeside('md') } : { label: t('PowerPoint, beside it'), icon: 'screen', run: () => saveBeside('pptx') },
-              { label: t('PDF (print it, or save as PDF)'), icon: 'doc', run: print },
-            ]} />}
-          </span>
         </div>
-      </div>
+      )}>
+        {!readOnly && (
+          <div className="sd-group" key="slide" data-keep={9}>
+            <span className="menu-anchor sd-split">
+              <button type="button" className="sd-tool wide" onClick={() => addSlide()} title={withKeys(t('New slide'), 'mod', 'm')} aria-label={t('New slide')}><Icon name="plus" size={15} /><span className="sd-tool-label">{t('New slide')}</span></button>
+              <button type="button" className={`sd-tool caret${menu === 'new' ? ' on' : ''}`} onClick={() => setMenu(menu === 'new' ? null : 'new')} aria-label={t('New slide in a layout')} title={t('New slide in a layout')} aria-haspopup="menu" aria-expanded={menu === 'new'}><Icon name="down" size={12} /></button>
+              {menu === 'new' && previews && <LayoutGallery label={t('New slide in a layout')} previews={previews} onPick={(id) => addSlide(id)} onClose={() => setMenu(null)} />}
+            </span>
+            {tool(t('Undo'), 'undo', undo, { tip: withKeys(t('Undo'), 'mod', 'z'), disabled: !hist.current.past.length })}
+            {tool(t('Redo'), 'redo', redo, { tip: withKeys(t('Redo'), 'shift', 'mod', 'z'), disabled: !hist.current.future.length })}
+          </div>
+        )}
+        {!readOnly && (
+          <div className="sd-group" key="design" data-keep={7}>
+            <span className="menu-anchor">
+              {tool(t('Layout'), 'split', () => setMenu(menu === 'layout' ? null : 'layout'), { label: true, on: menu === 'layout' || undefined, tip: t('Layout: {name}', { name: t(LAYOUT_LABEL[layout]) }), more: { 'aria-haspopup': 'menu', 'aria-expanded': menu === 'layout' } })}
+              {menu === 'layout' && previews && <LayoutGallery label={t('Layout of slide {n}', { n: at + 1 })} previews={previews} on={layout} onPick={setLayout} onClose={() => setMenu(null)} />}
+            </span>
+            <span className="menu-anchor">
+              {tool(t('Theme'), 'palette', () => setMenu(menu === 'theme' ? null : 'theme'), { label: true, tip: marpTheme ? t('Theme: Marp\'s {name}', { name: marpTheme }) : t('Theme: {name}', { name: look.builtIn ? t(look.name) : look.name }), more: { 'aria-haspopup': 'menu', 'aria-expanded': menu === 'theme' } })}
+              {menu === 'theme' && <ThemeGallery packs={packs} own={own} current={marpTheme ? null : lookKey} onPick={pickLook} onClose={() => setMenu(null)} />}
+            </span>
+            {tool(picture ? t('Change the picture') : t('Picture'), 'image', () => picInput.current?.click(), { label: true, disabled: busy === 'picture', tip: picture ? t('Put another picture in this one\'s place') : t('Put a picture on this slide (or drop one on it)') })}
+          </div>
+        )}
+        {!readOnly && (
+          <div className="sd-group sd-marks" key="marks" data-keep={6}>
+            {tool(t('Bold'), 'bold', () => document.execCommand('bold'), { tip: withKeys(t('Bold'), 'mod', 'b') })}
+            {tool(t('Italic'), 'italic', () => document.execCommand('italic'), { tip: withKeys(t('Italic'), 'mod', 'i') })}
+            {tool(t('Strikethrough'), 'strike', () => document.execCommand('strikeThrough'), { tip: withKeys(t('Strikethrough'), 'shift', 'mod', 'x') })}
+            {tool(t('Bulleted list'), 'list', () => listFocused('bullet'), { tip: withKeys(t('Bulleted list'), 'shift', 'mod', '8') })}
+            {tool(t('Numbered list'), 'list-ordered', () => listFocused('number'), { tip: withKeys(t('Numbered list'), 'shift', 'mod', '7') })}
+          </div>
+        )}
+        {missing && <span className="muted small sd-tool-note" key="missing" data-keep={10} title={t('This deck names a design pack you don\'t have, so it uses your default.')}><Icon name="info" size={12} /> {t('No pack "{name}"', { name: named })}</span>}
+      </OneRow>
+      {/* Beside the toolbar, not in it: a group under More can close while its file is picked. */}
+      <input ref={picInput} type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" hidden onChange={(e) => { addPicture(e.target.files?.[0]); e.target.value = '' }} />
       {find && <DeckFind key={find.n} count={found.list.length} at={found.at} replace={find.replace} on={findOn} onClose={() => { setFind(null); setFound({ list: [], at: 0 }) }} />}
       {msg && <p className={`small sd-note${msg.error ? ' error-text' : ''}`} role={msg.error ? 'alert' : 'status'}>{msg.text} {msg.open && <button type="button" className="link-btn" onClick={() => onOpen?.({ root: file.root, path: msg.open })}>{t('Open it')}</button>} <button type="button" className="link-btn" onClick={() => setMsg(null)}>{t('Close')}</button></p>}
       {pptx && <p className="small sd-note sd-deck-said"><Icon name="info" size={12} /> {t('A PowerPoint, shown with its text, lists, pictures, tables, notes and theme in Studio\'s layouts.')} {start.skipped > 0 && t('{n} things on its slides (charts, diagrams, video) aren\'t shown.', { n: start.skipped })} {t('Saving writes it again from what\'s here; the file as it was stays in its versions.')}</p>}

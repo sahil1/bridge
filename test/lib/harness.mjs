@@ -511,6 +511,15 @@ export function testClock(spec = process.env.BRIDGE_TEST_CLOCK || '') {
   }
 }
 export const shot = (p, name, o = {}) => { fs.mkdirSync(path.join(OUT, 'shots'), { recursive: true }); return p.screenshot({ path: path.join(OUT, 'shots', `${name}.png`), ...o }) }
+// A button of a Studio editor's toolbar by its name (bar: a locator of the toolbar), on its one row
+// or under More (⋯) where the row hasn't room for it, which is opened for it.
+export async function inBar(bar, name) {
+  const b = bar.locator(`button[aria-label="${name}"]`).first()
+  if (await b.isVisible().catch(() => false)) return b
+  const more = bar.locator('.sd-more-btn').first()
+  if ((await more.count()) && (await more.getAttribute('aria-expanded')) !== 'true') await more.click()
+  return b
+}
 // What's wrong on a phone's screen, within the first of scopes (CSS selectors) that's there: the
 // page wider than the screen; something past its edge, scrolling sideways or cut off (…); a button,
 // link, tick or field smaller than a whole 40 px target, or covered by something else; a field under
@@ -536,7 +545,8 @@ export const phoneFaults = (p, ...scopes) => p.evaluate((scopes) => {
   const name = (e) => `${(e.getAttribute('aria-label') || e.innerText || e.value || e.placeholder || e.tagName).trim().replace(/\s+/g, ' ').slice(0, 40)} <${e.tagName.toLowerCase()}.${String(e.className).split(' ')[0]}>`
   const scope = scopes.map((s) => document.querySelector(s)).find(Boolean)
   if (!scope) return { scope: `none of ${scopes.join(' or ')}` }
-  const taps = [...scope.querySelectorAll('button, a[href], input:not([type=hidden]), select, textarea, summary, [role=tab]')].filter((e) => !(e.matches('input[type=checkbox], input[type=radio]') && e.closest('label')))
+  // (A link in the words of a document being written is part of its sentence, WCAG's inline exception.)
+  const taps = [...scope.querySelectorAll('button, a[href], input:not([type=hidden]), select, textarea, summary, [role=tab]')].filter((e) => !(e.matches('input[type=checkbox], input[type=radio]') && e.closest('label')) && !(e.matches('a') && e.closest('[contenteditable="true"]')))
   taps.push(...scope.querySelectorAll('label:has(input[type=checkbox]), label:has(input[type=radio])'))
   for (const e of taps) {
     const s = shown(e)
