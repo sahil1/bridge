@@ -911,11 +911,12 @@ export async function openFolder() {
   if (process.env.BRIDGE_FIX_DRYRUN) return { ok: true, dry: [bin, f] }
   return new Promise((resolve) => { execFile(bin, [f], { timeout: 10000 }, () => resolve({ ok: true })) })
 }
-// The saved notes in Finder.
-export function revealSaved(id) {
+// The saved notes in Finder, or the Word file or PDF it was saved as (format).
+export function revealSaved(id, format = null) {
   const m = meta(id)
-  if (!m.saved || !fs.existsSync(m.saved)) throw new Error(m.saved ? 'The saved notes aren\'t where they were. Save it again.' : 'Not saved yet')
-  const [bin, args] = IS_MAC ? ['open', ['-R', m.saved]] : IS_WIN ? ['explorer.exe', [`/select,${m.saved}`]] : ['xdg-open', [path.dirname(m.saved)]]
+  if (!format && (!m.saved || !fs.existsSync(m.saved))) throw new Error(m.saved ? 'The saved notes aren\'t where they were. Save it again.' : 'Not saved yet')
+  const file = format ? exported(id, String(format)) : m.saved
+  const [bin, args] = IS_MAC ? ['open', ['-R', file]] : IS_WIN ? ['explorer.exe', [`/select,${file}`]] : ['xdg-open', [path.dirname(file)]]
   if (process.env.BRIDGE_FIX_DRYRUN) return { ok: true, dry: [bin, ...args] }
   return new Promise((resolve) => { execFile(bin, args, { timeout: 10000 }, () => resolve({ ok: true })) })
 }
@@ -2951,6 +2952,26 @@ async function writeWhole(file, body) {
     await fs.promises.writeFile(to, body)
   }
 }
+// What a meeting's note says under its title, in order: its summary (with the action items), your
+// notes, a combined meeting's meetings, the pictures from the screen with their time and note, and
+// its files and links. Save writes it with the pictures in a folder beside the note (at); Export
+// makes a Word file or a PDF of the same (exportOf), its pictures in it, with their time and note
+// under each (shown). link(file): a link to another note, for a meeting in a combined one that's saved.
+function noteParts(id, m, { at = 'attachments', link = null, shown = false } = {}) {
+  const notes = filled(readText(path.join(dirOf(id), 'notes.md')), m.sections)
+  const mine = at === 'captures' ? notes : notes.replace(/\]\(<?captures\//g, `](${at}/`)
+  const shots = (m.captures || []).filter((c) => c.kind !== 'paste')
+  const pic = (c) => `![${clock(c.t)}${c.note ? ` ${c.note.replace(/[[\]]/g, '')}` : ''}](${at}/${path.basename(c.file)})`
+  const linkLine = (l) => (l.kind === 'url' ? `- [${l.name.replace(/[[\]]/g, '')}](${l.url})` : l.kind === 'mail' ? `- Email: ${l.name}${l.mail.from ? `, from ${l.mail.from}` : ''}${l.mail.mid ? ` ([open in Mail](message://${encodeURIComponent(`<${l.mail.mid.replace(/^<|>$/g, '')}>`)}))` : ''}` : `- [${l.name.replace(/[[\]]/g, '')}](<file://${l.path}>)`)
+  return [
+    readText(path.join(dirOf(id), 'summary.md')).trim(),
+    mine ? `## My notes\n\n${mine}` : '',
+    // A combined meeting: the meetings in it, each with the note it's saved as.
+    m.parts ? `## Meetings\n\n${partsOf(m).map((p) => `- ${p.saved && link ? `${link(p.saved)} ` : ''}${p.title}, ${new Date(p.startedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}, ${clock(p.seconds || 0)}`).join('\n')}` : '',
+    shots.length ? `## From the screen\n\n${shots.map((c) => (shown ? `${pic(c)}\n\n**${clock(c.t)}**${c.note ? ` ${c.note}` : ''}` : `${pic(c)}${c.note ? `\n${c.note}` : ''}`)).join('\n\n')}` : '',
+    (m.links || []).length ? `## Files and links\n\n${m.links.map(linkLine).join('\n')}` : '',
+  ]
+}
 async function writeNotes(id, { auto = false } = {}) {
   const m = meta(id)
   const o = saving()
@@ -2961,29 +2982,20 @@ async function writeNotes(id, { auto = false } = {}) {
   const vault = await vaultOf(path.dirname(note || tfile))
   const link = (file) => `[[${(vault ? path.relative(vault, file) : path.basename(file)).split(path.sep).join('/').replace(/\.md$/, '')}]]`
   const label = (src) => (src === 'them' ? o.them : o.you)
-  const notes = filled(readText(path.join(dirOf(id), 'notes.md')), m.sections)
-  const summary = readText(path.join(dirOf(id), 'summary.md')).trim()
   const fm = (type, extra) => (o.frontmatter ? ['---', `meeting_id: ${m.id}`, `title: ${JSON.stringify(type === 'transcript' ? `${m.title} - Transcript` : m.title)}`, `type: ${type}`,
     `created: ${new Date(m.startedAt).toISOString()}`, `updated: ${new Date().toISOString()}`, `date: ${day}`, `duration: ${clock(m.seconds || 0)}`,
     `kind: ${JSON.stringify(KINDS[m.kind]?.label || KINDS.general.label)}`, `attendees: ${yamlList(m.event?.attendees)}`, 'source: bridge-ai', ...extra, '---'].join('\n') : '')
   const said = transcript(id).filter((l) => l.text)
   const files = []
   // Pictures go in an attachments folder beside the note; files and links stay links.
-  const shots = (m.captures || []).filter((c) => c.kind !== 'paste')
   const pics = note ? (m.captures || []) : []
   if (pics.length) {
     const att = path.join(path.dirname(note), 'attachments')
     await fs.promises.mkdir(att, { recursive: true })
     for (const c of pics) await fs.promises.copyFile(path.join(dirOf(id), c.file), path.join(att, path.basename(c.file))).catch(() => {})
   }
-  const mine = notes.replace(/\]\(<?captures\//g, '](attachments/')
-  const screen = shots.length ? `## From the screen\n\n${shots.map((c) => `![${clock(c.t)}${c.note ? ` ${c.note.replace(/[[\]]/g, '')}` : ''}](attachments/${path.basename(c.file)})${c.note ? `\n${c.note}` : ''}`).join('\n\n')}` : ''
-  const linkLine = (l) => (l.kind === 'url' ? `- [${l.name.replace(/[[\]]/g, '')}](${l.url})` : l.kind === 'mail' ? `- Email: ${l.name}${l.mail.from ? `, from ${l.mail.from}` : ''}${l.mail.mid ? ` ([open in Mail](message://${encodeURIComponent(`<${l.mail.mid.replace(/^<|>$/g, '')}>`)}))` : ''}` : `- [${l.name.replace(/[[\]]/g, '')}](<file://${l.path}>)`)
-  const linked = (m.links || []).length ? `## Files and links\n\n${m.links.map(linkLine).join('\n')}` : ''
-  // A combined meeting: the meetings in it, each with the note it's saved as.
-  const whole = m.parts ? `## Meetings\n\n${partsOf(m).map((p) => `- ${p.saved ? `${link(p.saved)} ` : ''}${p.title}, ${new Date(p.startedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}, ${clock(p.seconds || 0)}`).join('\n')}` : ''
   if (note) {
-    files.push([note, [fm('note', tfile ? [`transcript: ${JSON.stringify(link(tfile))}`] : []), `# ${m.title}`, summary, mine ? `## My notes\n\n${mine}` : '', whole, screen, linked,
+    files.push([note, [fm('note', tfile ? [`transcript: ${JSON.stringify(link(tfile))}`] : []), `# ${m.title}`, ...noteParts(id, m, { link }),
       tfile ? `Transcript: ${link(tfile)}` : o.what === 'one' && said.length ? `## Transcript\n\n${bySection(said, m.sections).map((l) => (l.head ? `### ${l.head.title}` : `[${clock(l.t0)}] ${speaker(l, label)}: ${l.text}`)).join('\n\n')}` : ''].filter(Boolean).join('\n\n')])
   }
   // The transcript as Granola writes it: a heading per stretch, with who and the time of day (and
@@ -3019,6 +3031,60 @@ export async function moveSaved() {
   const out = { moved: 0, failed: [] }
   for (const m of misplaced()) { try { await save(m.id); out.moved++ } catch (e) { out.failed.push({ id: m.id, error: e.message }) } }
   return out
+}
+
+// ---------- Export: one file to share ----------
+// A meeting as a Word file or a PDF, its pictures in it, to send as one file (a note's pictures are
+// in a folder beside it, which a note sent on its own loses). The page makes the file
+// (src/components/meetings/exporting.js) from what Save writes as one note with everything, with
+// when it was, how long and who was there under its title (a note has them in its front matter),
+// and keeps it here beside the meeting's note, named as the note is.
+// markdown: all of it but the transcript's lines, which come as they are ({ head } where a section
+// starts, else { t, who, text }). pictures: each picture by its file, as the Markdown names it.
+const EXPORTS = { docx: (b) => b.subarray(0, 4).toString('latin1') === 'PK\x03\x04', pdf: (b) => b.subarray(0, 5).toString('latin1') === '%PDF-' }
+const exportName = { docx: 'Word file', pdf: 'PDF' }
+const exportable = (format) => Object.hasOwn(EXPORTS, String(format))
+function exportFile(m, ext) {
+  const o = saving()
+  const t = target(m, o)
+  const md = t.note || t.transcript || path.join(o.folder, fill(o.noteSub, m, { dir: true }), `${fill(o.noteName, m)}.md`)
+  return md.replace(/\.md$/, `.${ext}`)
+}
+export function exportOf(id) {
+  const m = meta(id)
+  const o = saving()
+  const at = new Date(m.startedAt)
+  const label = (src) => (src === 'them' ? o.them : o.you)
+  const said = transcript(id).filter((l) => l.text)
+  const when = `${at.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}, ${pad(at.getHours())}:${pad(at.getMinutes())}, ${clock(m.seconds || 0)} long`
+  const who = m.event?.attendees?.length ? `Attendees: ${m.event.attendees.join(', ')}` : ''
+  return {
+    title: m.title,
+    name: path.basename(exportFile(m, 'md'), '.md'),
+    markdown: [`# ${m.title}`, [when, who].filter(Boolean).join('  \n'), ...noteParts(id, m, { at: 'captures', shown: true }), said.length ? '## Transcript' : ''].filter(Boolean).join('\n\n'),
+    transcript: said.length ? bySection(said, m.sections).map((l) => (l.head ? { head: l.head.title } : { t: clock(l.t0), who: speaker(l, label), text: l.text })) : [],
+    pictures: Object.fromEntries((m.captures || []).map((c) => [c.file, { id: c.id, v: c.v || 0 }])),
+  }
+}
+// The file the page made, written whole beside the note (over the one exported before).
+export async function saveExport(id, format, buf) {
+  const m = meta(id)
+  if (!exportable(format)) throw new Error('A meeting is exported as a Word file (docx) or a PDF')
+  if (!Buffer.isBuffer(buf) || !EXPORTS[format](buf)) throw new Error(`What came isn't a ${exportName[format]}`)
+  const file = exportFile(m, format)
+  try {
+    await fs.promises.mkdir(path.dirname(file), { recursive: true })
+    await writeWhole(file, buf)
+  } catch (e) { throw new Error(savingError(e)) }
+  patchMeta(id, { exported: { ...(meta(id).exported || {}), [format]: file } })
+  return { file }
+}
+// The file exported last, for the iPhone app to take (its share sheet) or Show in Finder.
+export function exported(id, format) {
+  const file = exportable(format) ? meta(id).exported?.[format] : null
+  if (!file) throw new Error(`Not saved as a ${exportable(format) ? exportName[format] : 'Word file or a PDF'} yet`)
+  if (!fs.existsSync(file)) throw new Error(`The ${exportName[format]} isn't where it was. Save it again.`)
+  return file
 }
 const resaving = new Map()
 function resave(id, ms = 0) {

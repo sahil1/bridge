@@ -9,6 +9,7 @@ import { usePersisted, Handle, PaneHeader, useMedia, store } from '../layout.jsx
 import { useMeetings, clock, length, ScreenButton, SectionButton, openMeeting } from './recording.jsx'
 import { byDay, day, timeOf, useSelection, BulkBar } from './bulk.jsx'
 import { useMeetingMenu, foldersOf, ConfirmDelete, FolderPick, chiefSaid } from './actions.jsx'
+import { exportAndSay } from './exporting.js'
 import { AskPanel, md } from './ask.jsx'
 import { FixWord, TranscribeAgain, useChatModels, NOTE_LANGS, Dialog, openMemory } from './tools.jsx'
 import { Menu as AtMenu } from '../FileExtras.jsx'
@@ -385,7 +386,7 @@ export function MeetingsHome({ onOpen }) {
         </section>
       ))}
       <BulkBar selection={selection} list={all} onOpen={onOpen} />
-      {menu.msg && <p className={`small ${menu.msg.error ? 'error-text' : 'muted'}`} role="status">{menu.msg.text}</p>}
+      {menu.msg && <p className={`small ${menu.msg.error ? 'error-text' : 'muted'}`} role="status">{menu.msg.text}{menu.msg.act && <> <button type="button" className="link-btn" onClick={menu.msg.act.run}>{menu.msg.act.label}</button></>}</p>}
       {menu.node}
       </>}
     </div>}
@@ -743,6 +744,8 @@ export function MeetingPage({ id, onBack }) {
   const toChief = () => act('chief', async () => { const r = await api(`/meetings/${encodeURIComponent(id)}/chief`, { method: 'POST' }); setMsg({ text: chiefSaid(r) }); refetch(`/meetings/${encodeURIComponent(id)}/work`) })
   const save = () => act('save', async () => { const r = await api(`/meetings/${encodeURIComponent(id)}/save`, { method: 'POST' }); setMsg({ text: r.files?.length > 1 ? t('Saved to {path} and its transcript', { path: tilde(r.file) }) : t('Saved to {path}', { path: tilde(r.file) }) }) })
   const reveal = () => act('reveal', () => api(`/meetings/${encodeURIComponent(id)}/reveal`, { method: 'POST' }))
+  // As one file with its pictures in it, to share: Word or PDF (exporting.js).
+  const exportAs = (format) => busy !== 'export' && act('export', () => exportAndSay(data, format, ({ text, error, act: a }) => setMsg({ text, error, act: a })))
   const copy = async (text, done) => { try { await navigator.clipboard.writeText(text); setMsg({ text: done }) } catch { setMsg({ error: true, text: t("Couldn't copy") }) } }
   const remove = () => setDialog('delete')
   // Resume recording: this meeting again, from where it had got to. Why not is said (another one
@@ -1020,6 +1023,8 @@ export function MeetingPage({ id, onBack }) {
         <button type="button" className="win-btn" onClick={() => setMenu(!menu)} aria-label={t('More actions')} title={t('More')}><Icon name="more" size={14} /></button>
         {menu && <Menu onClose={() => setMenu(false)} items={[
           { icon: 'download', label: t('Save as Markdown'), run: save },
+          { icon: 'doc', label: t('Save as Word (.docx)'), run: () => exportAs('docx') },
+          { icon: 'file', label: t('Save as PDF'), run: () => exportAs('pdf') },
           data.saved && here() && { icon: 'folder-open', label: t('Show saved notes in Finder'), run: reveal },
           atActions(data.summary) && { icon: 'helm', label: t('Send action items to Chief of Staff'), run: toChief },
           '-',

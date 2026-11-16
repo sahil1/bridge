@@ -3,11 +3,13 @@ import Icon from '../Icon.jsx'
 import { Menu } from '../FileExtras.jsx'
 import { api, refetch, onThisComputer } from '../../api.js'
 import { Dialog, FixWord, TranscribeAgain, openMemory } from './tools.jsx'
+import { exportAndSay } from './exporting.js'
 import { t } from '../../i18n/index.js'
 
 // What can be done to a meeting from a list (right-click a meeting in the sidebar or on the
-// Meetings page), the same as its own ⋯ menu: save it, fix a word, transcribe it again, put it in a
-// folder, archive it, delete it. Deleting asks first, and offers the archive instead.
+// Meetings page), the same as its own ⋯ menu: save it (as Markdown, or as one file to share, Word or
+// PDF: exporting.js), fix a word, transcribe it again, put it in a folder, archive it, delete it.
+// Deleting asks first, and offers the archive instead.
 
 const deleted = (n) => (n === 1 ? t('Deleted {n} meeting.', { n }) : t('Deleted {n} meetings.', { n }))
 const archivedN = (n) => (n === 1 ? t('Archived {n} meeting.', { n }) : t('Archived {n} meetings.', { n }))
@@ -113,7 +115,8 @@ export function useMeetingMenu({ list, onOpen, onGone }) {
   const [msg, setMsg] = useState(null)
   const timer = useRef(null)
   useEffect(() => () => clearTimeout(timer.current), [])
-  const say = (text, error = false) => { setMsg({ text, error }); clearTimeout(timer.current); timer.current = setTimeout(() => setMsg(null), 5000) }
+  // act: a button after it (Show in Finder). busy: it says what's being done, until what came of it.
+  const say = (text, error = false, { act = null, busy = false } = {}) => { setMsg({ text, error, act }); clearTimeout(timer.current); if (!busy) timer.current = setTimeout(() => setMsg(null), act ? 12000 : 5000) }
   const run = (fn) => Promise.resolve().then(fn).catch((e) => say(e.message, true))
   const id = (m) => encodeURIComponent(m.id)
   // The combined meeting one is part of, while it's in the list.
@@ -122,6 +125,8 @@ export function useMeetingMenu({ list, onOpen, onGone }) {
     { icon: 'doc', label: t('Open'), run: () => onOpen(m.id) },
     wholeOf(m) && { icon: 'layers', label: t('Open "{title}", which it\'s part of', { title: wholeOf(m).title }), run: () => onOpen(m.partOf) },
     { icon: 'download', label: t('Save as Markdown'), run: () => run(async () => { const r = await api(`/meetings/${id(m)}/save`, { method: 'POST' }); refetch('/meetings'); say(t('Saved to {file}', { file: tilde(r.file) })) }) },
+    { icon: 'doc', label: t('Save as Word (.docx)'), title: t('One file with its pictures in it, to share'), run: () => exportAndSay(m, 'docx', (x) => say(x.text, x.error, x)) },
+    { icon: 'file', label: t('Save as PDF'), title: t('One file with its pictures in it, to share'), run: () => exportAndSay(m, 'pdf', (x) => say(x.text, x.error, x)) },
     m.saved && onThisComputer() && { icon: 'folder-open', label: t('Show saved notes in Finder'), run: () => run(() => api(`/meetings/${id(m)}/reveal`, { method: 'POST' })) },
     m.hasSummary && { icon: 'helm', label: t('Send action items to Chief of Staff'), run: () => run(async () => { const r = await api(`/meetings/${id(m)}/chief`, { method: 'POST' }); refetch('/meetings'); say(chiefSaid(r)) }) },
     'sep',
