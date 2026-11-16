@@ -49,7 +49,7 @@ const SUITES = [
   // Studio at a list and at a folder, Meetings, Calendar, the top bar and its menus, the sidebar, the tabs and the
   // board), and in Settings' sections (a test of their own), pressed in the desktop app and in a
   // browser: each has to do something.
-  { name: 'dead-clicks', build: 'dist', browser: true, covers: [/^src\//, /^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/] },
+  { name: 'dead-clicks', build: 'dist', browser: true, minutes: 8, covers: [/^src\//, /^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/] },
   { name: 'dead-clicks-settings', build: 'dist', browser: true, covers: [/^src\//, /^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/, /^test\/suites\/dead-clicks\.mjs$/] },
   { name: 'back-forward', build: 'dist', browser: true, covers: [/^src\/backForward\.js$/, /^src\/components\/(BackForward|Console|Settings|files\/Explorer|meetings\/Meetings)\.jsx$/, /^src\/components\/backforward\.css$/, /^src\/(App\.jsx|pwa\.js|trials\.js)$/, /^server\/(index|paths)\.js$/, /^config\.example\.json$/, /^desktop\/main\.js$/] },
   { name: 'tab-strip', build: 'dist', browser: true, covers: [/^src\/components\/(TabStrip|Rail|Icon|NewAgent)\.jsx$/, /^src\/components\/tabstrip\.css$/, /^src\/(App\.jsx|styles\.css|trials\.js)$/, /^test\/stand-ins\/claude\.cjs$/] },
@@ -196,13 +196,16 @@ fs.mkdirSync(path.join(OUT, 'logs'), { recursive: true })
 const runOne = (j, attempt) => new Promise((resolve) => {
   const t0 = Date.now()
   const log = path.join(OUT, 'logs', `${j.label.replace(/[^\w-]+/g, '-')}${attempt > 1 ? '-retry' : ''}.log`)
-  const out = fs.openSync(log, 'w')
+  // Opened to add to, so what's added here (that it was stopped) isn't written over by the suite.
+  fs.writeFileSync(log, '')
+  const out = fs.openSync(log, 'a')
   const p = spawn(process.execPath, [path.join(ROOT, 'test', 'suites', `${j.name}.mjs`)], { cwd: ROOT, env: { ...process.env, BRIDGE_TEST_BROWSER: j.engine || '' }, stdio: ['ignore', out, out] })
   // Too long: stopped with everything it started (its server, its browser). Playwright catches a
   // plain stop to close its browser first, and a test stuck waiting would then never end.
   // Five minutes, or a suite's own (minutes). dead-clicks, which presses every button on every view in
   // two shapes at once, took longer than five on CI's macOS WebKit runner, so Settings' sections are a
-  // test of their own (dead-clicks-settings) and each half has the five.
+  // test of their own (dead-clicks-settings) and each half has the five; with Studio's home and
+  // Account & Devices (3.20) the main views took 270 to 300 s there, so they have eight.
   const mins = j.minutes || 5
   const limit = setTimeout(() => { fs.appendFileSync(log, `\nFAIL took more than ${mins} minutes, so it was stopped\n`); stopTree(p) }, mins * 60_000)
   p.on('exit', (code, signal) => {
