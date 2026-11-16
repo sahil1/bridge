@@ -51,7 +51,8 @@ const many = nj.notesFor({ version: N, sha: 'abcdef1234567', since: '3.20.0', ch
 ok((many.match(/^- Change/gm) || []).length === 60 && /…and 15 more/.test(many), 'at most 60 changes listed, and how many more')
 
 // ---------- the workflows ----------
-const yml = (f) => fs.readFileSync(path.join(ROOT, '.github', 'workflows', f), 'utf8')
+// With \n between lines on Windows too, where git checks them out with \r\n.
+const yml = (f) => fs.readFileSync(path.join(ROOT, '.github', 'workflows', f), 'utf8').replace(/\r\n/g, '\n')
 const nightlyYml = yml('nightly.yml')
 const releaseYml = yml('release.yml')
 ok(/schedule:\s*\n\s*- cron: '17 10 \* \* \*'/.test(nightlyYml) && /workflow_dispatch:/.test(nightlyYml) && /node scripts\/nightly\.js changed/.test(nightlyYml) && /uses: \.\/\.github\/workflows\/release\.yml/.test(nightlyYml) && /nightly: \$\{\{ needs\.plan\.outputs\.version \}\}/.test(nightlyYml), 'nightly.yml: each night (or by hand), when main changed, builds main through release.yml at the nightly version')

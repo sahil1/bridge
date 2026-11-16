@@ -55,7 +55,8 @@ if (IS_WIN) {
   fs.mkdirSync(top, { recursive: true })
   fs.copyFileSync(process.execPath, path.join(top, 'node.exe'))
   for (const n of ['npm', 'npx']) fs.writeFileSync(path.join(top, `${n}.cmd`), '@echo 10.0.0\r\n')
-  execFileSync('tar', ['-a', '-cf', path.join(tmp, tarName), '-C', tmp, path.basename(top)])
+  // Windows' own tar, which makes a .zip (-a): in bash, Git's comes first, and takes C: for a host.
+  execFileSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'), ['-a', '-cf', path.join(tmp, tarName), '-C', tmp, path.basename(top)])
 } else {
   fs.mkdirSync(path.join(top, 'bin'), { recursive: true })
   for (const [n, say] of [['node', NODE_V], ['npm', '10.0.0'], ['npx', '10.0.0']]) fs.writeFileSync(path.join(top, 'bin', n), `#!/bin/sh\necho ${say}\n`, { mode: 0o755 })

@@ -281,7 +281,10 @@ export function sheetAnswer(text) {
 }
 
 // ---------- Opening, saving, watching ----------
-const recent = async () => (await readJSON(RECENT, { files: [] })).files
+// Paths in Recent with / between folders on every system, as the look at your files says them, so a
+// file opened here and found there is one row (Windows' own have \, and Recent said only ~ there).
+const slashed = (p) => String(p || '').split(path.sep).join('/')
+const recent = async () => (await readJSON(RECENT, { files: [] })).files.map((f) => ({ ...f, path: slashed(f.path) }))
 async function remember(entry) {
   const files = [entry, ...(await recent()).filter((f) => !(f.root === entry.root && f.path === entry.path))].slice(0, 40)
   await fsp.mkdir(DIR, { recursive: true })
@@ -289,7 +292,7 @@ async function remember(entry) {
 }
 export const recentFiles = recent
 export async function forget(root, rel) {
-  const files = (await recent()).filter((f) => !(f.root === root && f.path === rel))
+  const files = (await recent()).filter((f) => !(f.root === root && f.path === slashed(rel)))
   writeFileAtomic(RECENT, JSON.stringify({ files }, null, 1))
   return { files }
 }
@@ -305,7 +308,7 @@ export async function open(root, rel, { rootId = null, label = null } = {}) {
   const w = whoChanged(real)
   const now = await snapshot(real, vs.length ? w.by : 'opened', { name: w.name })
   if (w.by === 'agent' && now?.by === 'agent') asked.delete(real)
-  if (rootId) remember({ root: String(rootId), path: r, name: path.basename(real), kind, at: new Date().toISOString(), ...(label ? { where: String(label).slice(0, 120) } : {}) }).catch(() => {})
+  if (rootId) remember({ root: String(rootId), path: slashed(r), name: path.basename(real), kind, at: new Date().toISOString(), ...(label ? { where: String(label).slice(0, 120) } : {}) }).catch(() => {})
   return { path: r, name: path.basename(real), kind, ext: path.extname(real).toLowerCase(), size: st.size, mtime: st.mtimeMs, versions: shown(await versionsOf(real)) }
 }
 

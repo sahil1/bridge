@@ -17,6 +17,7 @@ const data = path.join(scratch, 'data')
 fs.mkdirSync(home, { recursive: true })
 process.env.BRIDGE_HOME = data
 process.env.HOME = home
+process.env.USERPROFILE = home // Windows' home, for os.homedir() there
 const cwd = path.join(home, 'code', 'shop')
 const projects = path.join(home, '.claude', 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'))
 fs.mkdirSync(projects, { recursive: true })
