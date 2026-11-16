@@ -6,7 +6,7 @@
 // (model-names.json).
 import fs from 'node:fs'
 import path from 'node:path'
-import { checks, OUT } from '../lib/harness.mjs'
+import { checks, OUT, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('model-names')
 
@@ -80,7 +80,7 @@ const load = async (tag) => {
 
 // The menu's labels, as ModelChip.jsx makes them, from what the server says.
 {
-  const src = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', '..', 'src', 'components', 'ModelChip.jsx'), 'utf8')
+  const src = fs.readFileSync(path.join(ROOT, 'src', 'components', 'ModelChip.jsx'), 'utf8')
   ok(/BEHIND\[short\]/.test(src) && /data\.named/.test(src), 'the chip reads the names the server sends')
 }
 
