@@ -10,9 +10,12 @@
 import WebSocket from 'ws'
 import { newKey, phoneHello, phoneFinish, plainFrame, readPlain, splitCode, K, pack, unpack, json, text } from '../../relay/web/link.js'
 
+// (A relay at <id>.localhost, Bridge AI's relay stood in for, is reached on this computer, as a
+// browser reaches such names.)
+const loopback = (host, opts, cb) => (opts?.all ? cb(null, [{ address: '127.0.0.1', family: 4 }]) : cb(null, '127.0.0.1', 4))
 export async function linkAs(relayUrl, { device = null, code = null, hostKey = null, name = 'Node phone', about = null, old = false, hello = {}, ms = 10000 } = {}) {
   device ||= await newKey(true)
-  const ws = new WebSocket(`${relayUrl.replace(/^http/, 'ws')}/_relay/link`)
+  const ws = new WebSocket(`${relayUrl.replace(/^http/, 'ws')}/_relay/link`, /\.localhost$/i.test(new URL(relayUrl).hostname) ? { lookup: loopback } : {})
   const got = []
   let wake = null
   let closed = false

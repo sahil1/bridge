@@ -47,8 +47,9 @@ const ANSWER_MS = 4000 // no answer to that this long: the link starts over
 const byId = (id) => conf.machines.find((m) => m.id === id) || null
 const byRelay = (r) => conf.machines.find((m) => m.relay === r) || null
 // What this device says about itself to each of the others, sealed, as its first record (ABOUT):
-// its name, that it's a computer, and where it's reached, so a move to another relay is followed.
-const aboutMe = () => ({ name: relay.thisName(), kind: 'computer', relay: relay.relayUrl(), os: OS, version: VERSION })
+// its name, that it's a computer, where it's reached (null: nowhere now), so a move to another relay
+// is followed, and its key there, so a new one (Stop using the relay makes one) is too.
+const aboutMe = () => ({ name: relay.thisName(), kind: 'computer', relay: relay.relayUrl(), host: relay.publicKey(), os: OS, version: VERSION })
 
 // This device's key for one of yours (made when they link, kept here).
 async function deviceKey(m) {
@@ -83,6 +84,20 @@ class Link {
   }
 
   start() { this.stopped = false; this.connect() }
+  // Connected again now, so the other device hears this one's ABOUT again (it moved to another relay,
+  // or has a new key).
+  again() {
+    if (this.stopped) return
+    clearTimeout(this.timer)
+    this.timer = null
+    this.backoff = 2000
+    const ws = this.ws
+    this.ws = null
+    clearInterval(this.pinger)
+    try { ws?.terminate() } catch { /* closed */ }
+    this.drop('Connecting again')
+    this.connect()
+  }
   stop() {
     this.stopped = true
     clearTimeout(this.timer)
@@ -99,7 +114,7 @@ class Link {
     // One still closing is let go first, with its session (sealed for it, a record on the new
     // connection wouldn't open there).
     if (this.ws) { const old = this.ws; this.ws = null; try { old.terminate() } catch { /* closed */ } this.drop('Connecting again') }
-    const ws = new WebSocket(`${this.m.relay.replace(/^http/, 'ws')}/_relay/link`, { handshakeTimeout: 15000 })
+    const ws = new WebSocket(`${this.m.relay.replace(/^http/, 'ws')}/_relay/link`, { handshakeTimeout: 15000, ...relay.reachOptions(this.m.relay) })
     this.ws = ws
     this.heard = Date.now()
     ws.on('open', () => {
@@ -119,7 +134,11 @@ class Link {
       this.heard = Date.now()
       this.q = this.q.then(() => (isBinary ? this.onData(data) : this.onText(String(data)))).catch((e) => { this.error = e.message; try { ws.close() } catch { /* closed */ } })
     })
-    ws.on('error', (e) => { this.error = `Can't reach its relay: ${e.message}` })
+    // Its address isn't there any more (Bridge AI's relay removed it, or the Worker went): it moved,
+    // or stopped using that relay. It says where it is now the next time it connects to this one.
+    ws.on('unexpected-response', (req, res) => { if (res.statusCode === 403 || res.statusCode === 404) this.gone = true; res.resume() })
+    ws.on('error', (e) => { this.error = this.gone ? `${this.m.name} isn't at its relay's address any more: it moved to another relay, or stopped using one. It tells this computer where it is as soon as both are online; or link it again with a code from ${this.m.name}.` : `Can't reach its relay: ${e.message}` })
+    ws.on('upgrade', () => { this.gone = false })
     ws.on('close', (code) => {
       if (this.ws !== ws) return
       clearInterval(this.pinger)
@@ -219,6 +238,9 @@ class Link {
     this.fromIt = Date.now()
     if (kind === K.PING) return this.send(K.PONG, 0)
     if (kind === K.PONG) return
+    // That device moved to another relay, said sealed (this one reached it at the address it left):
+    // followed, as when it says so in ABOUT.
+    if (kind === K.MOVE) { let to = null; try { to = relay.cleanRelay(json(body).url) } catch { /* not that */ } if (to) follow(this.m, to); return }
     // That device removed this one, said sealed: the only word that ends the link here.
     if (kind === K.GONE) {
       this.m.state = 'removed'
@@ -447,7 +469,8 @@ export function list() {
       id: m.id, name: s?.name || m.name, relay: m.relay, os: s?.os || m.os || null, version: s?.version || m.version || null,
       state: m.state, online: !!l?.session, lastSeen: m.lastSeen || null, addedAt: m.addedAt,
       held: !!m.held, // linked back to it, and it meets your others once you keep it here (onLinked)
-      code: m.state === 'asking' ? m.ask?.code || null : null, error: m.state === 'linked' && l?.session ? null : l?.error || null,
+      code: m.state === 'asking' ? m.ask?.code || null : null,
+      error: m.state === 'linked' && l?.session ? null : m.norelay ? `${m.name} stopped using its relay, so this computer can't reach it until it has one again. It can still reach this one, and says where it is once it does.` : l?.error || null,
       counts: s?.counts || {}, agents: s?.agents || [],
       // What waits on you there (null from a Bridge AI too old to say), and when it last said.
       needs: s?.needs || null, at: s?.at ? new Date(s.at).toISOString() : null,
@@ -643,13 +666,38 @@ export function unlinked(fromRelay) {
 // It moved to another relay (set up again there): it says so whenever it connects to this one,
 // sealed (ABOUT: the relay can't send it elsewhere), so this device follows it instead of waiting
 // at the old address for ever.
-relay.whenMoved((from, to) => {
-  const m = byRelay(from)
-  if (!m || byRelay(to)) return
+relay.whenMoved((from, to) => { const m = byRelay(from); if (m) follow(m, to) })
+function follow(m, to) {
+  // It has no relay now (it stopped using one): it can reach this device, not the other way round,
+  // so it isn't looked for at the old address meanwhile, and the app says why.
+  if (!to) {
+    if (m.norelay) return
+    m.norelay = true
+    save()
+    links.get(m.id)?.stop()
+    return
+  }
+  if (to === m.relay && !m.norelay) return
+  if (to !== m.relay && byRelay(to)) return
   m.relay = to
+  delete m.norelay
   save()
   const l = links.get(m.id)
-  if (l) { l.stop(); l.backoff = 2000; if (m.state === 'linked' || m.state === 'asking') l.start() }
+  if (l) { l.stop(); l.backoff = 2000; l.gone = false; if (m.state === 'linked' || m.state === 'asking') l.start() }
+}
+// ...or has a new key (it stopped using its relay, which makes one), said sealed by that device
+// itself (ABOUT): this device reaches it with that one now.
+relay.whenRekeyed((at, key) => {
+  const m = byRelay(at)
+  if (!m || m.state !== 'linked' || m.hostKey === key) return
+  m.hostKey = key
+  save()
+  links.get(m.id)?.again()
+})
+// This device moved to another relay, stopped using one, or has a new key: each of the others hears
+// so from it now (ABOUT, when it connects), not the next time Bridge AI starts.
+relay.whenChanged(() => {
+  for (const m of conf.machines) if (m.state === 'linked' || m.state === 'asking') links.get(m.id)?.again()
 })
 
 // Computers that reach this one (they're in its paired devices) that this one isn't linked to: one
@@ -821,12 +869,12 @@ export function viaHosted(id) {
 
 // ---------- start ----------
 export function start() {
-  for (const m of conf.machines) if (m.state === 'linked' || m.state === 'asking') linkOf(m).start()
+  for (const m of conf.machines) if ((m.state === 'linked' || m.state === 'asking') && !m.norelay) linkOf(m).start()
 }
 // Every minute: a linked device with no connection and nothing on its way is started again.
 setInterval(() => {
   for (const m of conf.machines) {
-    if (m.state !== 'linked') continue
+    if (m.state !== 'linked' || m.norelay) continue
     const l = linkOf(m)
     if (l.stopped || (!l.ws && !l.timer)) { l.backoff = 2000; l.start() }
   }

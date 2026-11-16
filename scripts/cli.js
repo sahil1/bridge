@@ -308,12 +308,12 @@ async function relayCmd(args) {
   }
   if (sub === 'forget') {
     if (!flag(rest, 'yes')) {
-      if (!process.stdin.isTTY) throw new Error('This forgets your relay and every paired phone. Run it again with --yes to go ahead.')
-      if (!/^y/i.test(await ask('Stop using the relay here and forget every paired phone? (y/N) '))) return
+      if (!process.stdin.isTTY) throw new Error('This forgets your relay and every paired phone, and gives this computer a new key. To move to another relay instead, run bridge-ai relay setup (with --hosted for Bridge AI\'s relay): your phones come along. Run it again with --yes to go ahead.')
+      if (!/^y/i.test(await ask('Stop using the relay here, forget every paired phone and give this computer a new key? (Moving to another relay needs none of this: bridge-ai relay setup.) (y/N) '))) return
     }
     const was = await api('/relay')
     await api('/relay/forget', { method: 'POST' })
-    return console.log(was.hosted ? 'Done. This computer\'s address on Bridge AI\'s relay is removed, and paired phones are forgotten.' : 'Done. The relay stays on your Cloudflare account (delete it there if you like); paired phones are forgotten.')
+    return console.log(was.hosted ? 'Done. This computer\'s address on Bridge AI\'s relay is removed, paired phones are forgotten, and this computer has a new key. Your other computers stay linked.' : 'Done. The relay stays on your Cloudflare account (setting it up here again puts it back at the same address); Bridge AI signed out of Cloudflare, paired phones are forgotten, and this computer has a new key. Your other computers stay linked.')
   }
   if (sub && sub !== 'status') throw new Error(`Unknown: bridge-ai relay ${sub}. Try: setup, update, forget`)
   const r = await api('/relay')

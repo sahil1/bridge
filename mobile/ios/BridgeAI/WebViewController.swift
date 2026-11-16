@@ -207,8 +207,15 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
         if !usePairingLink(link.absoluteString) { alert("That isn't a Bridge AI pairing code. On your computer, open Settings › Devices and click Pair a device.") }
     }
 
-    // The lock screen card was tapped (bridgeai://agent?id=<pane>): show that agent.
+    // The lock screen card was tapped (bridgeai://agent?id=<pane>): show that agent. Or a pairing
+    // page in Safari handed its link over (bridgeai://pair?link=<the link>: its Open the Bridge AI
+    // app), which pairs as a scanned code does, asking first as ever.
     func open(_ url: URL) {
+        if url.scheme == "bridgeai", url.host == "pair" {
+            let link = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "link" })?.value
+            if let link, usePairingLink(link) { return }
+            return alert("That isn't a Bridge AI pairing code. On your computer, open Settings › Devices and click Pair a device.")
+        }
         guard url.scheme == "bridgeai", url.host == "agent",
               let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "id" })?.value else { return }
         web.evaluateJavaScript("window.bridgeOpenAgent && window.bridgeOpenAgent(\(Self.js(id)))")

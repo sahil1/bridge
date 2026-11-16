@@ -287,7 +287,7 @@ function useRelayStatus(given) {
 // This computer on Bridge AI's relay, right here, never a trip to another tab: on it (connected, with
 // Pair a phone, which shows its code here), or being set up (each step said: setting up, connecting,
 // on), or Use it on this computer, which does what `bridge-ai relay setup --hosted` does; from a relay
-// on your own Cloudflare, Use Bridge AI's relay instead, after asking (phones pair again). What went
+// on your own Cloudflare, Use Bridge AI's relay instead, after asking (phones come along). What went
 // wrong is said with what to do: full for now (the other ways, on the Phone tab), or the relay's own
 // words with Try again. Started by itself (server/relay.js), it says so, and if that didn't work, why.
 // From a phone it says how it is, as only the computer sets up its relay.
@@ -312,7 +312,7 @@ function ThisComputer({ rs, setRs, load }) {
     return <p className="muted small acct-here">{rs.hosted ? <><Icon name="check" size={12} /> {t('On for {name}.', { name })}</> : t('{name} doesn\'t use it. Turn it on in Bridge AI on that computer: Settings › Account & Devices.', { name })}</p>
   }
   const use = async () => {
-    if (rs.configured && !rs.hosted && !window.confirm(t('Move to Bridge AI\'s relay? Your phones pair again with it afterwards.'))) return
+    if (rs.configured && !rs.hosted && !window.confirm(t('Move to Bridge AI\'s relay? Phones and computers paired here come along: they find this computer there by themselves.'))) return
     setWorking(true); setProblem(null)
     try {
       setRs(await api('/relay/deploy', { method: 'POST', body: { method: 'hosted' } }))
@@ -420,7 +420,7 @@ function Others({ st, hostedHere }) {
           </li>
         ))}
       </ul>
-      {elsewhere.length > 0 && <p className="muted small acct-also">{elsewhere.length === 1 ? t('Also on {name}? It uses its own relay, and only a computer moves its own: in Bridge AI on {name}, choose Use Bridge AI\'s relay instead in Settings › Account & Devices. Its phones pair again with it.', { name: elsewhere[0].name }) : t('Also on {names}? They use their own relays, and only a computer moves its own: in Bridge AI on each, choose Use Bridge AI\'s relay instead in Settings › Account & Devices. Their phones pair again with it.', { names: names(elsewhere) })}</p>}
+      {elsewhere.length > 0 && <p className="muted small acct-also">{elsewhere.length === 1 ? t('Also on {name}? It uses its own relay, and only a computer moves its own: in Bridge AI on {name}, choose Use Bridge AI\'s relay instead in Settings › Account & Devices. Its phones come along.', { name: elsewhere[0].name }) : t('Also on {names}? They use their own relays, and only a computer moves its own: in Bridge AI on each, choose Use Bridge AI\'s relay instead in Settings › Account & Devices. Their phones come along.', { names: names(elsewhere) })}</p>}
       {offer.length > 0 && !asked.length && !results && <div><button type="button" className="ghost-btn" onClick={() => { setLater([]); try { localStorage.removeItem('cc-account-later') } catch { /* not kept */ } }}>{t('Sign in {names} too', { names: names(offer) })}</button></div>}
     </section>
   )
