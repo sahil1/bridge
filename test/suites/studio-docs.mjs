@@ -25,7 +25,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, solid, noServiceWorker, TEST, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, inBar, phoneFaults, solid, noServiceWorker, TEST, ROOT } from '../lib/harness.mjs'
 import { richDocx, chartPng } from '../lib/wordfile.mjs'
 
 const require = createRequire(path.join(ROOT, 'package.json'))
@@ -365,22 +365,24 @@ try {
   const status = await until(async () => { const x = await p.locator('.sd-status').innerText(); return /^Page 1 of [2-9]/.test(x) && x }, 5000, 100)
   ok(!!status && /Saved/.test(status), 'the status line: the page you\'re on of how many, and opened is not changed', status || await p.locator('.sd-status').innerText())
   await shot(p, `${tag}studio-docs-word`)
-  // The toolbar at 1440: its controls one height (30 px, as every Studio editor's), the formatting
-  // in at most two rows, and the view's tools (outline, find, print, zoom) at the right of the first
-  // rather than on a row of their own.
+  // The toolbar at 1440: its controls one height (30 px, as every Studio editor's), on one row as
+  // Google Docs' are, what doesn't fit under More (⋯) at its end, the view's tools (outline, find,
+  // print, zoom) at its right, and nothing past its right edge.
   const rows = await p.locator('.sd-doc-tools').evaluate((t) => {
     const r = (e) => e.getBoundingClientRect()
-    const shown = [...t.querySelectorAll('button')].filter((x) => r(x).width > 0 && !x.closest('.sd-drop'))
-    const tops = [...new Set(shown.map((x) => Math.round(r(x).top)))].sort((a, z) => a - z)
-    return { heights: [...new Set(shown.map((x) => Math.round(r(x).height)))], rows: tops.length, view: Math.round(r(t.querySelector('.sd-view-tools')).top - r(t.querySelector('.sd-group')).top) }
+    const shown = [...t.querySelectorAll('button')].filter((x) => r(x).width > 0 && !x.closest('.sd-drop, .sd-more-row'))
+    const tops = [...new Set(shown.map((x) => Math.round(r(x).top + r(x).height / 2)))].sort((a, z) => a - z)
+    return { heights: [...new Set(shown.map((x) => Math.round(r(x).height)))], rows: tops.length, h: Math.round(r(t).height), past: shown.filter((x) => r(x).right > r(t).right + 1).length, more: !!t.querySelector('.sd-more-btn'), view: Math.round(r(t).right - r(t.querySelector('.sd-view-tools')).right) }
   })
-  ok(rows.heights.join() === '30' && rows.rows <= 2 && rows.view === 0, 'a Word file\'s toolbar: every control 30 px high, in two rows at most, the view\'s tools at the right of the first', rows)
-  // The toolbar: each control named, with its shortcut in its tooltip.
+  ok(rows.heights.join() === '30' && rows.rows === 1 && rows.h <= 43 && !rows.past && rows.view <= 12, 'a Word file\'s toolbar: every control 30 px high, on one row, the view\'s tools at its right', rows)
+  // The toolbar: each control named (on its row or under More), with its shortcut in its tooltip.
   const tb = p.locator('.sd-doc-tools')
+  if (rows.more) await tb.locator('.sd-more-btn').click()
   const names = await tb.locator('button').evaluateAll((bs) => bs.map((x) => x.getAttribute('aria-label')))
+  const tips = await tb.locator('button[aria-label="Bold"], button[aria-label="Numbered list"], button[aria-label="Find and replace"]').evaluateAll((bs) => bs.map((x) => x.title))
+  if (rows.more) await tb.locator('.sd-more-btn').click()
   const want = ['Undo', 'Redo', 'Text style', 'Font', 'Smaller', 'Bigger', 'Bold', 'Italic', 'Underline', 'More text formatting', 'Text colour', 'Highlight', 'Alignment', 'Line and paragraph spacing', 'Bulleted list', 'Numbered list', 'Decrease indent', 'Increase indent', 'Insert link', 'Insert picture', 'Table', 'Insert', 'Tracked changes', 'Comments', 'Outline', 'Find and replace', 'Zoom']
   ok(want.every((n) => names.includes(n)) && !names.includes('Inline code'), "a Word file's toolbar: styles, fonts and sizes, marks, colours, alignment and spacing, lists, links, pictures, tables, and the view", names)
-  const tips = await tb.locator('button[aria-label="Bold"], button[aria-label="Numbered list"], button[aria-label="Find and replace"]').evaluateAll((bs) => bs.map((x) => x.title))
   ok(tips.every((x) => /\(.*(⌘|Ctrl)/.test(x)), 'with their shortcuts in their tooltips', tips)
   ok(!(await bare(p)).length, 'nothing on the page is a bare control', await bare(p))
   // The outline: its headings; one tapped is where you are.
@@ -414,24 +416,24 @@ try {
   await p.keyboard.type('Toggle me')
   const line = () => doc.locator(':is(p,h1,h2,h3)', { hasText: 'Toggle me' })
   const pick = () => pickAll(p, 'Toggle me')
-  const drop = async (name, item) => { await tb.locator(`button[aria-label="${name}"]`).click(); await p.locator('.sd-drop .sd-item, .sd-drop .sd-sw', { hasText: item }).first().click() }
+  const drop = async (name, item) => { await (await inBar(tb, name)).click(); await p.locator('.sd-drop .sd-item, .sd-drop .sd-sw', { hasText: item }).first().click() }
   await pick()
-  const btn = (n) => tb.locator(`button[aria-label="${n}"]`)
+  const btn = (n) => inBar(tb, n)
   const marks = []
   for (const [n, sel] of [['Bold', 'strong'], ['Italic', 'em'], ['Underline', 'u']]) {
-    await btn(n).click()
-    const on = !!(await until(async () => (await line().locator(sel).count()) === 1 && (await btn(n).getAttribute('aria-pressed')) === 'true', 3000, 100))
-    await btn(n).click()
+    await (await btn(n)).click()
+    const on = !!(await until(async () => (await line().locator(sel).count()) === 1 && (await (await btn(n)).getAttribute('aria-pressed')) === 'true', 3000, 100))
+    await (await btn(n)).click()
     const off = !!(await until(async () => (await line().locator(sel).count()) === 0, 3000, 100))
     marks.push(`${n} ${on ? 'on' : 'NOT ON'} ${off ? 'off' : 'NOT OFF'}`)
   }
   ok(marks.every((x) => /on off$/.test(x)), 'Bold, Italic and Underline do what they say, shown on their buttons', marks)
   await pick()
-  await btn('Text colour').click()
+  await (await btn('Text colour')).click()
   await p.locator('.sd-drop .sd-sw[aria-label="#CC0000"]').click()
-  await btn('Highlight').click()
+  await (await btn('Highlight')).click()
   await p.locator('.sd-drop .sd-sw[aria-label="yellow"]').click()
-  await btn('Bigger').click()
+  await (await btn('Bigger')).click()
   await drop('Font', 'Calibri Light')
   await drop('Alignment', 'Center')
   await drop('Line and paragraph spacing', 'Double')
@@ -444,9 +446,9 @@ try {
   await line().click()
   await p.keyboard.press(`${MOD}+Alt+Digit0`)
   ok(!!(await until(async () => (await doc.locator('p', { hasText: 'Toggle me' }).count()) === 1, 3000, 100)), 'and back to Normal from the keyboard')
-  await btn('Bulleted list').click()
+  await (await btn('Bulleted list')).click()
   const bullet = !!(await until(async () => /^[•●◦▪■]$/.test(await line().getAttribute('data-mk') || ''), 3000, 100))
-  await btn('Numbered list').click()
+  await (await btn('Numbered list')).click()
   ok(bullet && !!(await until(async () => /^\d+\.$/.test(await line().getAttribute('data-mk') || ''), 3000, 100)), 'a bulleted list, then numbered')
   await saveNow()
   const fmt = await until(async () => { const x = (await partsOf(file('report.docx')))['word/document.xml']; const q = paras(x).find((y) => /Toggle me/.test(y)); return q && /<w:numPr>/.test(q) && q }, 10000)
@@ -457,7 +459,7 @@ try {
   const before = await partsOf(file('report.docx'))
   await caret(p, 'Toggle me')
   await p.keyboard.press('Enter')
-  await tb.locator('input[type="file"]').setInputFiles({ name: 'chart.png', mimeType: 'image/png', buffer: chartPng(120, 70) })
+  await p.locator('.sd-doc-head > input[type="file"]').setInputFiles({ name: 'chart.png', mimeType: 'image/png', buffer: chartPng(120, 70) })
   ok(!!(await until(async () => (await doc.locator('img[src^="data:image/png"]').count()) === 1, 5000, 100)), 'a picture put in')
   // The chart already there, made smaller by its corner.
   const chart = doc.locator('img[src^="blob:"]').first()
@@ -468,11 +470,11 @@ try {
   if (hb) { await p.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await p.mouse.down(); await p.mouse.move(hb.x - 80, hb.y - 40, { steps: 6 }); await p.mouse.up() }
   ok(!!hb && !!(await until(async () => ((await chart.boundingBox())?.width || box.width) < box.width - 40, 3000, 100)), 'a picture resized by its corner', { box, after: await chart.boundingBox() })
   await caret(p, 'end')
-  await tb.locator('button[aria-label="Table"]').click()
+  await (await inBar(tb, 'Table')).click()
   await p.locator('.sd-grid-cell[aria-label="2 by 3"]').click()
   const tables = await doc.locator('table').count()
   await p.keyboard.type('Cell one')
-  await tb.locator('button[aria-label="Table"]').click()
+  await (await inBar(tb, 'Table')).click()
   await p.locator('.sd-drop .sd-item', { hasText: 'Add a row below' }).click()
   // Its own rows: where a page ends inside a table (as it can with another computer's fonts), the
   // page's band is a row of its own between them.

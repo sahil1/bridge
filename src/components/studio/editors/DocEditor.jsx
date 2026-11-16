@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useEditor, useEditorState, EditorContent } from '@tiptap/react'
 import { Extension, Editor, getMarkRange } from '@tiptap/core'
-import { DOMSerializer, DOMParser as PMDOMParser } from '@tiptap/pm/model'
-import { Selection } from '@tiptap/pm/state'
+import { DOMSerializer, DOMParser as PMDOMParser, Fragment, Slice } from '@tiptap/pm/model'
+import { Selection, NodeSelection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { Table, TableRow, TableCell, TableHeader } from '@tiptap/extension-table'
@@ -17,9 +17,10 @@ import { readDocx, writeDocx, fingerprint } from '../ooxml.js'
 import { wordExtensions, fontStack } from '../wordschema.js'
 import { docInfo, wordCss, listPlugin, commentPlugin, pagePlugin, pageOf, hfRenderer } from '../docview.js'
 import { findPlugin } from '../search.js'
+import { suggestPlugin, changeAt, changes, resolve } from '../suggest.js'
 import { cleanPaste, listsOut } from '../paste.js'
 import { keys } from '../keys.js'
-import { Tool, Drop, Item, Glyph, Swatches, Markers, markerCss, FindBar, Outline, useHeadings, WordCount, Shortcuts, AskInPlace, askItems, countWords, fontHere, COMMON_FONTS, SIZES } from '../doctools.jsx'
+import { Tool, Drop, Item, Glyph, OneRow, Swatches, Markers, markerCss, FindBar, Outline, useHeadings, WordCount, Shortcuts, AskInPlace, askItems, countWords, fontHere, COMMON_FONTS, SIZES } from '../doctools.jsx'
 import { useThreads, useAuthor, Threads } from '../doccomments.jsx'
 import '../doc.css'
 
@@ -156,33 +157,12 @@ const pageRules = (re) => [...document.styleSheets].flatMap((s) => { try { retur
 // A link the cursor is in, as Google Docs shows it: its address (a click opens it), and Copy,
 // Change and Remove.
 function LinkBubble({ editor, href, onEdit, onRemove, scroller }) {
-  const [box, setBox] = useState(null)
   const [copied, setCopied] = useState(false)
-  const place = useCallback(() => {
-    if (!editor || editor.isDestroyed) return
+  const box = useBubble(editor, scroller, () => {
     const { empty, $from } = editor.state.selection
-    if (!empty || !editor.isFocused || !editor.isActive('link')) { setBox(null); return }
-    const r = getMarkRange($from, editor.schema.marks.link) || { from: $from.pos, to: $from.pos }
-    try {
-      const a = editor.view.coordsAtPos(r.from)
-      const host = scroller?.current?.getBoundingClientRect()
-      // Scrolled out of sight, the link's bubble goes with it.
-      if (host && (a.bottom < host.top || a.top > host.bottom)) { setBox(null); return }
-      const left = Math.max((host?.left ?? 0) + 8, Math.min(a.left, (host?.right ?? window.innerWidth) - 360))
-      // Under the link, or over it where there's no room under it.
-      const below = a.bottom + 6
-      setBox({ left, top: below + 44 > (host?.bottom ?? window.innerHeight) ? Math.max(8, a.top - 50) : below })
-    } catch { setBox(null) }
-  }, [editor, scroller])
-  useEffect(() => {
-    if (!editor) return undefined
-    const up = () => requestAnimationFrame(place)
-    editor.on('selectionUpdate', up); editor.on('focus', up); editor.on('blur', up); editor.on('update', up)
-    const el = scroller?.current
-    el?.addEventListener('scroll', up, { passive: true })
-    window.addEventListener('resize', up)
-    return () => { editor.off('selectionUpdate', up); editor.off('focus', up); editor.off('blur', up); editor.off('update', up); el?.removeEventListener('scroll', up); window.removeEventListener('resize', up) }
-  }, [editor, place, scroller])
+    if (!empty || !editor.isActive('link')) return null
+    return getMarkRange($from, editor.schema.marks.link) || { from: $from.pos, to: $from.pos }
+  })
   useEffect(() => setCopied(false), [href])
   if (!box || !href) return null
   const shown = href.replace(/^mailto:/, '').replace(/^https?:\/\//, '').replace(/\/$/, '')
@@ -197,6 +177,91 @@ function LinkBubble({ editor, href, onEdit, onRemove, scroller }) {
     </div>,
     document.body,
   )
+}
+// A tracked change the cursor is in, as Google Docs shows a suggestion: what it is, who made it and
+// when, and Accept and Reject for it alone.
+function ChangeBubble({ editor, scroller, onResolve }) {
+  const ch = useRef(null)
+  const box = useBubble(editor, scroller, () => {
+    const { from, to } = editor.state.selection
+    const c = changeAt(editor.state, from)
+    ch.current = c && to <= c.to ? c : null
+    return ch.current
+  })
+  const c = ch.current
+  if (!box || !c) return null
+  const what = c.ins && c.del ? t('Replaced') : c.ins ? t('Added') : t('Deleted')
+  const when = c.at ? new Date(c.at) : null
+  const date = when && !Number.isNaN(when.getTime()) ? when.toLocaleDateString(locale(), { month: 'short', day: 'numeric' }) : ''
+  return createPortal(
+    <div className="sd-link-pop sd-change-pop" role="dialog" aria-label={t('Tracked change')} style={{ left: box.left, top: box.top }} onMouseDown={(e) => e.preventDefault()}>
+      <Glyph name="changes" size={12} />
+      <span className="sd-change-what"><b>{what}</b> · {c.by || t('Someone')}{date && ` · ${date}`}</span>
+      <Tool name={t('Accept')} className="sd-accept" icon="check" run={() => onResolve(c, true)} tip={t('Accept this change')} />
+      <Tool name={t('Reject')} icon="x" run={() => onResolve(c, false)} tip={t('Reject this change')} />
+    </div>,
+    document.body,
+  )
+}
+// A picture picked, as Google Docs has it: how text goes round it (in line, wrapped round it, above
+// and below it) and, set apart from the text, which side it's at. Saved as Word places it.
+function PictureBubble({ editor, scroller, onPlace }) {
+  const pic = useRef(null)
+  const box = useBubble(editor, scroller, () => {
+    const sel = editor.state.selection
+    const n = sel instanceof NodeSelection && sel.node.type.name === 'image' ? sel.node : null
+    pic.current = n ? { pos: sel.from, wrap: n.attrs.wrap || 'inline', side: n.attrs.side } : null
+    const dom = n ? editor.view.nodeDOM(sel.from) : null
+    const img = dom?.querySelector?.('img') || dom
+    return n && img ? { from: sel.from, rect: img.getBoundingClientRect() } : null
+  })
+  const p = pic.current
+  if (!box || !p) return null
+  const side = p.side || (p.wrap === 'top' ? 'center' : 'left')
+  const WRAP = [['inline', t('In line with text'), 'wrap-inline'], ['square', t('Wrap text'), 'wrap-square'], ['top', t('Break text'), 'wrap-top-bottom']]
+  const SIDES = [['left', t('Left'), 'align-left'], ['center', t('Center'), 'align-center'], ['right', t('Right'), 'align-right']].filter(([v]) => v !== 'center' || p.wrap === 'top')
+  return createPortal(
+    <div className="sd-link-pop sd-pic-pop" role="toolbar" aria-label={t('Picture')} style={{ left: box.left, top: box.top }} onMouseDown={(e) => e.preventDefault()}>
+      {WRAP.map(([v, label, icon]) => <Tool key={v} name={label} icon={icon} on={p.wrap === v} run={() => onPlace(p.pos, { wrap: v, side: v === 'inline' ? null : v === 'top' ? (p.wrap === 'square' ? side : 'center') : side === 'center' ? 'left' : side })} />)}
+      {(p.wrap === 'square' || p.wrap === 'top') && <>
+        <span className="sd-pop-sep" />
+        {SIDES.map(([v, label, icon]) => <Tool key={v} name={label} icon={icon} on={side === v} run={() => onPlace(p.pos, { wrap: p.wrap, side: v })} />)}
+      </>}
+    </div>,
+    document.body,
+  )
+}
+// Where a bubble goes for the range range() gives (null: none): under it, or over it where there's
+// no room under it; gone while the editor isn't focused or the range is scrolled out of sight. A
+// range with a rect (a picture's box) goes by its box.
+function useBubble(editor, scroller, range) {
+  const [box, setBox] = useState(null)
+  const rangeRef = useRef(range)
+  rangeRef.current = range
+  const place = useCallback(() => {
+    if (!editor || editor.isDestroyed) return
+    const r = editor.isFocused ? rangeRef.current() : null
+    if (!r) { setBox(null); return }
+    try {
+      const a = r.rect || editor.view.coordsAtPos(r.from)
+      const host = scroller?.current?.getBoundingClientRect()
+      // Scrolled out of sight, the bubble goes with it.
+      if (host && (a.bottom < host.top || a.top > host.bottom)) { setBox(null); return }
+      const left = Math.max((host?.left ?? 0) + 8, Math.min(a.left, (host?.right ?? window.innerWidth) - 360))
+      const below = a.bottom + 6
+      setBox({ left, top: below + 44 > (host?.bottom ?? window.innerHeight) ? Math.max(8, a.top - 50) : below })
+    } catch { setBox(null) }
+  }, [editor, scroller])
+  useEffect(() => {
+    if (!editor) return undefined
+    const up = () => requestAnimationFrame(place)
+    editor.on('selectionUpdate', up); editor.on('focus', up); editor.on('blur', up); editor.on('update', up)
+    const el = scroller?.current
+    el?.addEventListener('scroll', up, { passive: true })
+    window.addEventListener('resize', up)
+    return () => { editor.off('selectionUpdate', up); editor.off('focus', up); editor.off('blur', up); editor.off('update', up); el?.removeEventListener('scroll', up); window.removeEventListener('resize', up) }
+  }, [editor, place, scroller])
+  return box
 }
 
 // ---------- Shared by both editors ----------
@@ -301,6 +366,13 @@ function usePane(name, wide) {
 
 // ---------- A Word file ----------
 const TRANSPARENT = 'transparent'
+// A tracked change copied and pasted is a change of its own: without the file's id for the one
+// it was copied from (ooxml.js gives it one when it's saved).
+function pastedChanges(slice) {
+  const own = (marks) => marks.map((m) => (m.type.name === 'rev' && m.attrs.tag ? m.type.create({ ...m.attrs, tag: '' }) : m))
+  const walk = (frag) => Fragment.fromArray(frag.content.map((n) => (n.isText ? n.mark(own(n.marks)) : n.copy(walk(n.content)).mark(own(n.marks)))))
+  return new Slice(walk(slice.content), slice.openStart, slice.openEnd)
+}
 // What's copied out: as the editor writes it, its lists as lists (paste.js).
 const COPY_OUT = {
   serializeFragment: (frag, o, target) => {
@@ -352,7 +424,12 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
   // Comments as threads: what the page marks is theirs (doccomments.jsx).
   const skip = useRef(() => false)
   const busy = useRef(() => false)
-  const plugins = useMemo(() => Extension.create({ name: 'wordView', addProseMirrorPlugins: () => [listPlugin(model, info), commentPlugin({ skip: (id) => skip.current(id), busy: (id) => busy.current(id) }), findPlugin(), pagesPlugin] }), [model, info, pagesPlugin])
+  // Suggesting (suggest.js): your edits as tracked changes, by you, to accept or reject.
+  const [suggesting, setSuggesting] = useState(false)
+  const suggestOn = useRef(false)
+  suggestOn.current = suggesting && !readOnly
+  const authorRef = useRef('')
+  const plugins = useMemo(() => Extension.create({ name: 'wordView', addProseMirrorPlugins: () => [listPlugin(model, info), commentPlugin({ skip: (id) => skip.current(id), busy: (id) => busy.current(id) }), findPlugin(), pagesPlugin, suggestPlugin({ on: () => suggestOn.current, who: () => authorRef.current })] }), [model, info, pagesPlugin])
   // What's pasted, dropped or clicked, handled where the editor's own handling isn't Google Docs'
   // (its handlers are set once; what they do is this render's).
   const own = useRef({})
@@ -364,7 +441,7 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
       handleDOMEvents: { ...handlers, mousedown: (view, e) => { handlers.mousedown(); return own.current.tick?.(view, e) || false } },
       attributes: { 'aria-label': t('The document'), class: `sd-w ${scope}`, spellcheck: 'true' },
       transformPastedHTML: (html) => cleanPaste(html, { paras: true, quote: info.get('Quote') ? 'Quote' : null, title: info.get('Title') ? 'Title' : null }),
-      transformPasted: (slice) => { own.current.pasted?.(slice); return slice },
+      transformPasted: (slice) => { own.current.pasted?.(slice); return pastedChanges(slice) },
       handlePaste: (view, e, slice) => own.current.paste?.(view, e, slice) || false,
       handleDrop: (view, e, slice, moved) => (!moved && own.current.drop?.(view, e)) || false,
       clipboardSerializer: COPY_OUT,
@@ -388,6 +465,7 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
   const [outline, setOutline] = usePane('outline', true)
   const [showComments, setShowComments] = useState(false)
   const author = useAuthor()
+  authorRef.current = author
   const threads = useThreads({ editor, model, on: !readOnly, author, name: file.name, dirty: () => { touched.current = true; onDirty(true) } })
   skip.current = threads.skip
   busy.current = threads.busy
@@ -463,13 +541,10 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
       }
     },
   })
-  const revs = useMemo(() => {
-    if (!editor) return 0
-    // A change each, however many runs of text it covers (each has its own id in the file).
-    const seen = new Set()
-    editor.state.doc.descendants((node) => { for (const m of node.marks || []) if (m.type.name === 'rev') seen.add(m.attrs.tag || m.attrs.at) })
-    return seen.size
-  }, [editor, editor?.state.doc]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The tracked changes, in order: a change each, however many runs of text it covers (a word
+  // replaced, its deletion and insertion, is one).
+  const revList = useMemo(() => (editor ? changes(editor.state) : []), [editor, editor?.state.doc]) // eslint-disable-line react-hooks/exhaustive-deps
+  const revs = revList.length
   const fonts = useMemo(() => {
     const used = new Set([model.theme.fonts.major, model.theme.fonts.minor, model.styles.defaults.run.font, ...model.styles.list.map((x) => x.look?.run?.font)].filter(Boolean))
     editor?.state.doc.descendants((n) => { for (const m of n.marks || []) if (m.type.name === 'ff' && m.attrs.f) used.add(m.attrs.f) })
@@ -627,15 +702,33 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
     else c().extendMarkRange('link').setLink({ href }).run()
     setLinking(null)
   }
+  // Tracked changes accepted or rejected: all of them, or the one the cursor's in (suggest.js).
   const resolveAll = (accept) => {
     touched.current = true
-    const { state } = editor
-    const type = state.schema.marks.rev
-    const tr = state.tr
-    const ranges = []
-    state.doc.descendants((n, pos) => { if (!n.isInline) return true; const m = n.marks.find((x) => x.type === type); if (m) ranges.push({ from: pos, to: pos + n.nodeSize, ins: m.attrs.k === 'ins' || m.attrs.k === 'moveTo' }) })
-    for (const r of ranges.reverse()) { if (r.ins === accept) tr.removeMark(r.from, r.to, type); else tr.delete(r.from, r.to) }
-    editor.view.dispatch(tr)
+    editor.view.dispatch(resolve(editor.state, accept))
+    editor.commands.focus()
+  }
+  const resolveOne = (ch, accept) => {
+    touched.current = true
+    editor.view.dispatch(resolve(editor.state, accept, ch.from, ch.to))
+    editor.commands.focus()
+  }
+  // The next tracked change after the cursor (or the one before), picked and scrolled to.
+  const goChange = (dir) => {
+    if (!revList.length) return
+    const at = editor.state.selection.from
+    const next = dir > 0 ? revList.find((x) => x.from > at) || revList[0] : [...revList].reverse().find((x) => x.to < at) || revList[revList.length - 1]
+    editor.chain().focus().setTextSelection({ from: next.from, to: next.to }).scrollIntoView().run()
+  }
+  const setMode = (on) => { setSuggesting(on); suggestOn.current = on && !readOnly; editor.commands.focus() }
+  // A picture placed another way (PictureBubble): still picked, to place again or size.
+  const placePicture = (pos, { wrap, side }) => {
+    const n = editor.state.doc.nodeAt(pos)
+    if (n?.type.name !== 'image') return
+    touched.current = true
+    const tr = editor.state.tr.setNodeMarkup(pos, null, { ...n.attrs, wrap, side })
+    editor.view.dispatch(tr.setSelection(NodeSelection.create(tr.doc, pos)))
+    editor.commands.focus()
   }
   // Printed as its pages, at their size and margins, its header and footer at the top and bottom
   // of each (their words, with the page number), from the document as it is now.
@@ -688,80 +781,28 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
   const alignIcon = (ALIGN.find((x) => x[0] === s.align || (s.align === 'start' && x[0] === 'left') || (s.align === 'end' && x[0] === 'right')) || ALIGN[0])[2]
   const zooms = [0.5, 0.75, 0.9, 1, 1.25, 1.5, 2]
 
-  // The formatting tools, wrapping onto a second row where the pane is too narrow for one; the view's
-  // (find, outline, print, zoom) at the right of the first row either way.
+  // The formatting tools on one row, those that don't fit under More (⋯) at its end, as Google Docs
+  // has them; the view's (find, outline, print, zoom) at its right whatever the width, and beside
+  // them Editing or Suggesting and the tracked changes (on a phone, the last under More).
   const toolbar = !readOnly && (
-    <div className="sd-toolbar sd-doc-tools" role="toolbar" aria-label={t('Formatting')}>
-      <div className="sd-tools-main">
-      <span className="sd-group">
-        <Tool name={t('Undo')} icon="undo" run={() => c().undo().run()} keys={['mod', 'z']} disabled={!s.undo} />
-        <Tool name={t('Redo')} icon="redo" run={() => c().redo().run()} keys={['mod', 'shift', 'z']} disabled={!s.redo} />
-      </span>
-      <span className="sd-group">
-        <Drop name={t('Text style')} className="sd-style-drop" text={styleName(s.style)} tip={t('Text style: {paragraph} for normal text, {heading} for a heading', { paragraph: keys('mod', 'alt', '0'), heading: `${keys('mod', 'alt', '1')}–3` })} wide panel={(close) => quick.map((st) => (
-          <Item key={st.id} label={displayName(st.name)} style={styleLook(st)} on={s.style === st.id} run={() => setStyle(st.id)} close={close} />
-        ))} />
-      </span>
-      <span className="sd-group">
-        <Drop name={t('Font')} className="sd-font-drop" text={s.font} tip={t('Font')} wide panel={(close) => (<>
-          {fonts.used.length > 0 && <div className="sd-drop-head">{t('In this document')}</div>}
-          {fonts.used.map((f) => <Item key={f} label={f} style={{ fontFamily: fontStack(f) }} hint={fontHere(f) ? null : t('not on this computer')} on={s.font === f} run={() => mark('ff', { f })} close={close} />)}
-          <div className="sd-drop-head">{t('More fonts')}</div>
-          {fonts.common.filter(fontHere).map((f) => <Item key={f} label={f} style={{ fontFamily: fontStack(f) }} on={s.font === f} run={() => mark('ff', { f })} close={close} />)}
+    <OneRow className="sd-doc-tools" label={t('Formatting')} side={[
+      <span className="sd-group sd-review" key="review">
+        {/* Editing or Suggesting, as Google Docs has them: suggesting, your edits are tracked changes. */}
+        <Drop name={t('Mode')} className={`sd-mode-drop${suggesting ? ' suggesting' : ''}`} icon={suggesting ? 'suggesting' : 'editing'} text={suggesting ? t('Suggesting') : null} tip={suggesting ? t('Suggesting: what you type and delete are tracked changes, to accept or reject') : t('Editing: change the document as it is')} panel={(close) => (<>
+          <Item icon="editing" label={t('Editing')} hint={t('Change the document as it is')} on={!suggesting} keys={['mod', 'alt', 'shift', 'z']} run={() => setMode(false)} close={close} />
+          <Item icon="suggesting" label={t('Suggesting')} hint={t('Your edits become tracked changes, in Word too')} on={suggesting} keys={['mod', 'alt', 'shift', 'x']} run={() => setMode(true)} close={close} />
         </>)} />
-        <span className="sd-size">
-          <Tool name={t('Smaller')} icon="minus" run={() => step(-1)} tip={t('Make the text smaller')} />
-          <SizeBox value={s.size} onPick={sizeTo} />
-          <Tool name={t('Bigger')} icon="plus" run={() => step(1)} tip={t('Make the text bigger')} />
-        </span>
-      </span>
-      <span className="sd-group">
-        <Tool name={t('Bold')} icon="bold" run={() => c().toggleBold().run()} on={s.bold} keys={['mod', 'b']} />
-        <Tool name={t('Italic')} icon="italic" run={() => c().toggleItalic().run()} on={s.italic} keys={['mod', 'i']} />
-        <Tool name={t('Underline')} icon="underline" run={() => c().toggleUnderline().run()} on={s.underline} keys={['mod', 'u']} />
-        <Drop name={t('More text formatting')} icon="more" tip={t('Strikethrough, superscript, subscript, clear formatting')} panel={(close) => (<>
-          <Item icon="strike" label={t('Strikethrough')} on={s.strike} keys={['mod', 'shift', 'x']} run={() => c().toggleStrike().run()} close={close} />
-          <Item icon="superscript" label={t('Superscript')} on={s.sup} keys={['mod', '.']} run={() => (s.sup ? mark('va') : mark('va', { v: 'superscript' }))} close={close} />
-          <Item icon="subscript" label={t('Subscript')} on={s.sub} keys={['mod', ',']} run={() => (s.sub ? mark('va') : mark('va', { v: 'subscript' }))} close={close} />
+        {revs > 0 && <Drop name={t('Tracked changes')} icon="changes" text={String(revs)} tip={revs === 1 ? t('1 tracked change') : t('{n} tracked changes', { n: revs })} panel={(close) => (<>
+          <div className="sd-drop-head">{revs === 1 ? t('1 tracked change') : t('{n} tracked changes', { n: revs })}</div>
+          <Item icon="down" label={t('Next change')} run={() => goChange(1)} close={close} />
+          <Item icon="up" label={t('Previous change')} run={() => goChange(-1)} close={close} />
           <div className="menu-sep" />
-          <Item icon="eraser" label={t('Clear formatting')} keys={['mod', '\\']} run={clear} close={close} />
-        </>)} />
-        <Drop name={t('Text colour')} icon="text-color" swatch={s.color ? `#${s.color}` : 'currentColor'} panel={(close) => <Swatches value={s.color} auto={t('Automatic')} onPick={(v) => mark('fc', v ? { c: v } : null)} close={close} />} />
-        <Drop name={t('Highlight')} className="sd-wide-only" icon="highlighter" swatch={markerCss(s.hl) || TRANSPARENT} panel={(close) => <Markers value={s.hl} onPick={(v) => mark('hl', v ? { c: v } : null)} close={close} />} />
-      </span>
-      <span className="sd-group">
-        <Drop name={t('Alignment')} icon={alignIcon} panel={(close) => ALIGN.map(([v, label, icon, k]) => <Item key={v} label={label} icon={icon} on={alignIcon === icon} keys={['mod', 'shift', k]} run={() => paras({ al: v === 'left' && !info.get(s.style)?.look?.para?.jc ? null : v })} close={close} />)} />
-        <Drop name={t('Line and paragraph spacing')} className="sd-wide-only" icon="line-spacing" panel={(close) => (<>
-          {lines.map(([v, label]) => <Item key={v} label={label} on={s.line === v} run={() => paras({ ln: v })} close={close} />)}
-          <div className="menu-sep" />
-          <Item label={s.sb ? t('Remove space before paragraph') : t('Add space before paragraph')} run={() => paras({ sb: s.sb ? 0 : 240 })} close={close} />
-          <Item label={s.sa ? t('Remove space after paragraph') : t('Add space after paragraph')} run={() => paras({ sa: s.sa ? 0 : 160 })} close={close} />
-        </>)} />
-        <Tool name={t('Bulleted list')} icon="list" run={() => toggleList('bullet')} on={s.list === 'bullet'} keys={['mod', 'shift', '8']} />
-        <Tool name={t('Numbered list')} icon="list-ordered" run={() => toggleList('number')} on={s.list === 'number'} keys={['mod', 'shift', '7']} />
-        <Tool name={t('Checklist')} icon="checklist" run={() => toggleList('check')} on={s.list === 'check' || s.list === 'checked'} keys={['mod', 'shift', '9']} />
-        <Tool name={t('Decrease indent')} className="sd-wide-only" icon="outdent" run={() => indent(-1)} keys={['mod', '[']} />
-        <Tool name={t('Increase indent')} className="sd-wide-only" icon="indent" run={() => indent(1)} keys={['mod', ']']} />
-      </span>
-      <span className="sd-group">
-        <Tool name={t('Insert link')} icon="link" run={() => setLinking(linking == null ? s.href || '' : null)} on={s.link || linking != null} tip={s.link ? t('Link: change it, open it or remove it') : t('Insert link')} keys={['mod', 'k']} />
-        <Tool name={t('Insert picture')} icon="image" run={() => picker.current?.click()} tip={t('Insert a picture: or paste one, or drop it on the page')} />
-        <input ref={picker} type="file" accept="image/*" hidden onChange={(e) => { insertImage(e.target.files?.[0]); e.target.value = '' }} />
-        <TableTool editor={editor} c={c} on={s.table} width={g.w - g.left - g.right} />
-        <Drop name={t('Insert')} className="sd-wide-only" icon="plus" tip={t('Insert a page break, header or footer')} panel={(close) => (<>
-          <Item icon="page-break" label={t('Page break')} keys={['mod', 'enter']} run={() => c().insertContent([{ type: 'paragraph', content: [{ type: 'pbr' }] }]).run()} close={close} />
-          <Item icon="comment" label={t('Comment')} keys={['mod', 'alt', 'm']} run={comment} close={close} />
-          <Item icon="header-footer" label={hf.header ? t('Edit the header') : t('Add a header')} run={() => setEditingHf('header')} close={close} />
-          <Item icon="header-footer" label={hf.footer ? t('Edit the footer') : t('Add a footer')} run={() => setEditingHf('footer')} close={close} />
-        </>)} />
-      </span>
-      </div>
-      <span className="sd-group sd-view-tools">
-        {revs > 0 && <Drop name={t('Tracked changes')} className="sd-wide-only" icon="changes" text={String(revs)} tip={t('{n} tracked changes', { n: revs })} panel={(close) => (<>
-          <div className="sd-drop-head">{t('{n} tracked changes', { n: revs })}</div>
           <Item icon="check" label={t('Accept all')} run={() => resolveAll(true)} close={close} />
           <Item icon="x" label={t('Reject all')} run={() => resolveAll(false)} close={close} />
         </>)} />}
+      </span>,
+    ]} end={(
+      <span className="sd-group sd-view-tools">
         <Tool name={t('Comments')} icon="comment" on={showComments} run={() => setShowComments((x) => !x)} tip={t('Comments: add one on the words picked, answer and resolve them')}>{threads.threads.some((x) => !x.done) && <span className="sd-tool-n">{threads.threads.filter((x) => !x.done).length}</span>}</Tool>
         {!flow && <Tool name={t('Outline')} icon="outline" on={showOutline} run={() => setOutline(!showOutline)} tip={t('Outline: the headings, to go to')} />}
         <Tool name={t('Find and replace')} icon="search" on={!!finding} run={() => setFinding(finding ? null : 'find')} keys={['mod', 'f']} />
@@ -778,13 +819,86 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
           {zooms.map((z) => <Item key={z} label={`${Math.round(z * 100)}%`} on={zoom === z} run={() => setZoom(z)} close={close} />)}
         </>)} />}
       </span>
-    </div>
+    )}>
+      <span className="sd-group" key="undo" data-keep={9}>
+        <Tool name={t('Undo')} icon="undo" run={() => c().undo().run()} keys={['mod', 'z']} disabled={!s.undo} />
+        <Tool name={t('Redo')} icon="redo" run={() => c().redo().run()} keys={['mod', 'shift', 'z']} disabled={!s.redo} />
+      </span>
+      <span className="sd-group" key="style" data-keep={8}>
+        <Drop name={t('Text style')} className="sd-style-drop" text={styleName(s.style)} tip={t('Text style: {paragraph} for normal text, {heading} for a heading', { paragraph: keys('mod', 'alt', '0'), heading: `${keys('mod', 'alt', '1')}–3` })} wide panel={(close) => quick.map((st) => (
+          <Item key={st.id} label={displayName(st.name)} style={styleLook(st)} on={s.style === st.id} run={() => setStyle(st.id)} close={close} />
+        ))} />
+      </span>
+      <span className="sd-group sd-font-group" key="font" data-keep={3}>
+        <Drop name={t('Font')} className="sd-font-drop" text={s.font} tip={t('Font')} wide panel={(close) => (<>
+          {fonts.used.length > 0 && <div className="sd-drop-head">{t('In this document')}</div>}
+          {fonts.used.map((f) => <Item key={f} label={f} style={{ fontFamily: fontStack(f) }} hint={fontHere(f) ? null : t('not on this computer')} on={s.font === f} run={() => mark('ff', { f })} close={close} />)}
+          <div className="sd-drop-head">{t('More fonts')}</div>
+          {fonts.common.filter(fontHere).map((f) => <Item key={f} label={f} style={{ fontFamily: fontStack(f) }} on={s.font === f} run={() => mark('ff', { f })} close={close} />)}
+        </>)} />
+        <span className="sd-size">
+          <Tool name={t('Smaller')} icon="minus" run={() => step(-1)} tip={t('Make the text smaller')} />
+          <SizeBox value={s.size} onPick={sizeTo} />
+          <Tool name={t('Bigger')} icon="plus" run={() => step(1)} tip={t('Make the text bigger')} />
+        </span>
+      </span>
+      <span className="sd-group" key="marks" data-keep={9}>
+        <Tool name={t('Bold')} icon="bold" run={() => c().toggleBold().run()} on={s.bold} keys={['mod', 'b']} />
+        <Tool name={t('Italic')} icon="italic" run={() => c().toggleItalic().run()} on={s.italic} keys={['mod', 'i']} />
+        <Tool name={t('Underline')} icon="underline" run={() => c().toggleUnderline().run()} on={s.underline} keys={['mod', 'u']} />
+        <Drop name={t('More text formatting')} icon="more" tip={t('Strikethrough, superscript, subscript, clear formatting')} panel={(close) => (<>
+          <Item icon="strike" label={t('Strikethrough')} on={s.strike} keys={['mod', 'shift', 'x']} run={() => c().toggleStrike().run()} close={close} />
+          <Item icon="superscript" label={t('Superscript')} on={s.sup} keys={['mod', '.']} run={() => (s.sup ? mark('va') : mark('va', { v: 'superscript' }))} close={close} />
+          <Item icon="subscript" label={t('Subscript')} on={s.sub} keys={['mod', ',']} run={() => (s.sub ? mark('va') : mark('va', { v: 'subscript' }))} close={close} />
+          <div className="menu-sep" />
+          <Item icon="eraser" label={t('Clear formatting')} keys={['mod', '\\']} run={clear} close={close} />
+        </>)} />
+      </span>
+      <span className="sd-group" key="colour" data-keep={4}>
+        <Drop name={t('Text colour')} icon="text-color" swatch={s.color ? `#${s.color}` : 'currentColor'} panel={(close) => <Swatches value={s.color} auto={t('Automatic')} onPick={(v) => mark('fc', v ? { c: v } : null)} close={close} />} />
+        <Drop name={t('Highlight')} icon="highlighter" swatch={markerCss(s.hl) || TRANSPARENT} panel={(close) => <Markers value={s.hl} onPick={(v) => mark('hl', v ? { c: v } : null)} close={close} />} />
+      </span>
+      <span className="sd-group" key="para" data-keep={5}>
+        <Drop name={t('Alignment')} icon={alignIcon} panel={(close) => ALIGN.map(([v, label, icon, k]) => <Item key={v} label={label} icon={icon} on={alignIcon === icon} keys={['mod', 'shift', k]} run={() => paras({ al: v === 'left' && !info.get(s.style)?.look?.para?.jc ? null : v })} close={close} />)} />
+        <Drop name={t('Line and paragraph spacing')} icon="line-spacing" panel={(close) => (<>
+          {lines.map(([v, label]) => <Item key={v} label={label} on={s.line === v} run={() => paras({ ln: v })} close={close} />)}
+          <div className="menu-sep" />
+          <Item label={s.sb ? t('Remove space before paragraph') : t('Add space before paragraph')} run={() => paras({ sb: s.sb ? 0 : 240 })} close={close} />
+          <Item label={s.sa ? t('Remove space after paragraph') : t('Add space after paragraph')} run={() => paras({ sa: s.sa ? 0 : 160 })} close={close} />
+        </>)} />
+      </span>
+      <span className="sd-group" key="lists" data-keep={7}>
+        <Tool name={t('Bulleted list')} icon="list" run={() => toggleList('bullet')} on={s.list === 'bullet'} keys={['mod', 'shift', '8']} />
+        <Tool name={t('Numbered list')} icon="list-ordered" run={() => toggleList('number')} on={s.list === 'number'} keys={['mod', 'shift', '7']} />
+        <Tool name={t('Checklist')} icon="checklist" run={() => toggleList('check')} on={s.list === 'check' || s.list === 'checked'} keys={['mod', 'shift', '9']} />
+        <Tool name={t('Decrease indent')} icon="outdent" run={() => indent(-1)} keys={['mod', '[']} />
+        <Tool name={t('Increase indent')} icon="indent" run={() => indent(1)} keys={['mod', ']']} />
+      </span>
+      <span className="sd-group" key="insert" data-keep={6}>
+        <Tool name={t('Insert link')} icon="link" run={() => setLinking(linking == null ? s.href || '' : null)} on={s.link || linking != null} tip={s.link ? t('Link: change it, open it or remove it') : t('Insert link')} keys={['mod', 'k']} />
+        <Tool name={t('Insert picture')} icon="image" run={() => picker.current?.click()} tip={t('Insert a picture: or paste one, or drop it on the page')} />
+        <TableTool editor={editor} c={c} on={s.table} width={g.w - g.left - g.right} />
+        <Drop name={t('Insert')} icon="plus" tip={t('Insert a page break, header or footer')} panel={(close) => (<>
+          <Item icon="page-break" label={t('Page break')} keys={['mod', 'enter']} run={() => c().insertContent([{ type: 'paragraph', content: [{ type: 'pbr' }] }]).run()} close={close} />
+          <Item icon="comment" label={t('Comment')} keys={['mod', 'alt', 'm']} run={comment} close={close} />
+          <Item icon="header-footer" label={hf.header ? t('Edit the header') : t('Add a header')} run={() => setEditingHf('header')} close={close} />
+          <Item icon="header-footer" label={hf.footer ? t('Edit the footer') : t('Add a footer')} run={() => setEditingHf('footer')} close={close} />
+        </>)} />
+      </span>
+    </OneRow>
   )
   return (
-    <div className={`sd-doc sd-word${flow ? ' flow' : ''}`} onKeyDown={(e) => { if (!readOnly && (e.metaKey || e.ctrlKey) && e.altKey && e.code === 'KeyM') { e.preventDefault(); comment(); return } onKeys(e) }}>
+    <div className={`sd-doc sd-word${flow ? ' flow' : ''}${suggesting ? ' suggesting' : ''}`} onKeyDown={(e) => {
+      if (!readOnly && (e.metaKey || e.ctrlKey) && e.altKey && !e.shiftKey && e.code === 'KeyM') { e.preventDefault(); comment(); return }
+      // Google Docs' keys for Suggesting and Editing: ⌥⇧⌘X and ⌥⇧⌘Z.
+      if (!readOnly && (e.metaKey || e.ctrlKey) && e.altKey && e.shiftKey && (e.code === 'KeyX' || e.code === 'KeyZ')) { e.preventDefault(); setMode(e.code === 'KeyX'); return }
+      onKeys(e)
+    }}>
       <style>{css}</style>
       <div className="sd-doc-head">
         {toolbar}
+        {/* Beside the toolbar, not in it: a group under More can close while its file is picked. */}
+        <input ref={picker} type="file" accept="image/*" hidden onChange={(e) => { insertImage(e.target.files?.[0]); e.target.value = '' }} />
         {linking != null && <LinkBar value={linking} setValue={setLinking} link={s.link} href={s.href} onSubmit={applyLink} onRemove={() => { c().extendMarkRange('link').unsetLink().run(); setLinking(null) }} onClose={() => { setLinking(null); editor.commands.focus() }} />}
         {finding && <FindBar editor={editor} replace={finding === 'replace'} onClose={() => setFinding(null)} />}
         <Said say={say} onClose={() => setSay(null)} onOpen={(path) => onOpen?.({ root: file.root, path })} />
@@ -804,6 +918,8 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
       {helping && <Shortcuts word onClose={() => { setHelp(false); editor.commands.focus() }} />}
       {settingUp && <PageSetup page={page} sections={(() => { let n = 1; editor.state.doc.forEach((b) => { if (b.attrs?.sect) n++ }); return n })()} onClose={() => { setSettingUp(false); editor.commands.focus() }} onDone={(next) => { touched.current = true; setPage(next); setSettingUp(false); onDirty(true); editor.commands.focus() }} />}
       {!readOnly && linking == null && <LinkBubble editor={editor} href={s.href} scroller={desk} onEdit={() => setLinking(s.href || '')} onRemove={() => c().extendMarkRange('link').unsetLink().run()} />}
+      {!readOnly && linking == null && !s.link && <ChangeBubble editor={editor} scroller={desk} onResolve={resolveOne} />}
+      {!readOnly && <PictureBubble editor={editor} scroller={desk} onPlace={placePicture} />}
       <WordKeys editor={editor} setStyle={setStyle} info={info} toggleList={toggleList} paras={paras} mark={mark} s={s} indent={indent} step={step} openLink={() => setLinking(s.href || '')} c={c} clear={clear} />
     </div>
   )
@@ -1240,37 +1356,7 @@ function MarkdownDoc({ file, text, onDirty, onStats, handle, readOnly, onOpen })
     <div className="sd-doc sd-mdoc" onKeyDown={onKeys}>
       <div className="sd-doc-head">
         {!readOnly && (
-          <div className="sd-toolbar sd-doc-tools" role="toolbar" aria-label={t('Formatting')}>
-            <div className="sd-tools-main">
-            <span className="sd-group">
-              <Tool name={t('Undo')} icon="undo" run={() => c().undo().run()} keys={['mod', 'z']} disabled={!s.undo} />
-              <Tool name={t('Redo')} icon="redo" run={() => c().redo().run()} keys={['mod', 'shift', 'z']} disabled={!s.redo} />
-            </span>
-            <span className="sd-group">
-              <Drop name={t('Text style')} className="sd-style-drop" text={label} tip={t('Text style: {paragraph} for normal text, {heading} for a heading', { paragraph: keys('mod', 'alt', '0'), heading: `${keys('mod', 'alt', '1')}–3` })} wide panel={(close) => STYLES.map(([v, l]) => (
-                <Item key={v} label={l} style={{ fontSize: { p: 14, h1: 20, h2: 17, h3: 15 }[v], fontWeight: v === 'p' ? 400 : 650 }} on={s.style === v} run={() => setStyle(v)} close={close} />
-              ))} />
-            </span>
-            <span className="sd-group">
-              <Tool name={t('Bold')} icon="bold" run={() => c().toggleBold().run()} on={s.bold} keys={['mod', 'b']} />
-              <Tool name={t('Italic')} icon="italic" run={() => c().toggleItalic().run()} on={s.italic} keys={['mod', 'i']} />
-              <Tool name={t('Strikethrough')} icon="strike" run={() => c().toggleStrike().run()} on={s.strike} keys={['mod', 'shift', 'x']} />
-              <Tool name={t('Inline code')} icon="code" run={() => c().toggleCode().run()} on={s.code} keys={['mod', 'e']} />
-            </span>
-            <span className="sd-group">
-              <Tool name={t('Bulleted list')} icon="list" run={() => c().toggleBulletList().run()} on={s.bulletList} keys={['mod', 'shift', '8']} />
-              <Tool name={t('Numbered list')} icon="list-ordered" run={() => c().toggleOrderedList().run()} on={s.orderedList} keys={['mod', 'shift', '7']} />
-              <Tool name={t('Checklist')} icon="checklist" run={() => c().toggleTaskList().run()} on={s.taskList} keys={['mod', 'shift', '9']} />
-              <Tool name={t('Quote')} icon="quote" run={() => c().toggleBlockquote().run()} on={s.blockquote} keys={['mod', 'shift', 'b']} />
-              <Tool name={t('Code block')} icon="code-block" run={() => c().toggleCodeBlock().run()} on={s.codeBlock} keys={['mod', 'alt', 'c']} />
-            </span>
-            <span className="sd-group">
-              <Tool name={t('Insert link')} icon="link" run={() => setLinking(linking == null ? s.href || '' : null)} on={s.link || linking != null} tip={s.link ? t('Link: change it, open it or remove it') : t('Insert link')} keys={['mod', 'k']} />
-              <Tool name={t('Insert picture')} icon="image" run={() => picker.current?.click()} tip={t('Insert a picture: or paste one, or drop it on the page')} />
-              <input ref={picker} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) putPictures([f]) }} />
-              <TableTool editor={editor} c={c} on={s.table} />
-            </span>
-            </div>
+          <OneRow className="sd-doc-tools" label={t('Formatting')} end={(
             <span className="sd-group sd-view-tools">
               <Tool name={t('Outline')} icon="outline" on={showOutline} run={() => setOutline(!showOutline)} tip={t('Outline: the headings, to go to')} />
               <Tool name={t('Find and replace')} icon="search" on={!!finding} run={() => setFinding(finding ? null : 'find')} keys={['mod', 'f']} />
@@ -1282,8 +1368,38 @@ function MarkdownDoc({ file, text, onDirty, onStats, handle, readOnly, onOpen })
                 <Item icon="keyboard" label={t('Keyboard shortcuts')} keys={['mod', '/']} run={() => setHelp(true)} close={close} />
               </>)} />
             </span>
-          </div>
+          )}>
+            <span className="sd-group" key="undo" data-keep={9}>
+              <Tool name={t('Undo')} icon="undo" run={() => c().undo().run()} keys={['mod', 'z']} disabled={!s.undo} />
+              <Tool name={t('Redo')} icon="redo" run={() => c().redo().run()} keys={['mod', 'shift', 'z']} disabled={!s.redo} />
+            </span>
+            <span className="sd-group" key="style" data-keep={8}>
+              <Drop name={t('Text style')} className="sd-style-drop" text={label} tip={t('Text style: {paragraph} for normal text, {heading} for a heading', { paragraph: keys('mod', 'alt', '0'), heading: `${keys('mod', 'alt', '1')}–3` })} wide panel={(close) => STYLES.map(([v, l]) => (
+                <Item key={v} label={l} style={{ fontSize: { p: 14, h1: 20, h2: 17, h3: 15 }[v], fontWeight: v === 'p' ? 400 : 650 }} on={s.style === v} run={() => setStyle(v)} close={close} />
+              ))} />
+            </span>
+            <span className="sd-group" key="marks" data-keep={9}>
+              <Tool name={t('Bold')} icon="bold" run={() => c().toggleBold().run()} on={s.bold} keys={['mod', 'b']} />
+              <Tool name={t('Italic')} icon="italic" run={() => c().toggleItalic().run()} on={s.italic} keys={['mod', 'i']} />
+              <Tool name={t('Strikethrough')} icon="strike" run={() => c().toggleStrike().run()} on={s.strike} keys={['mod', 'shift', 'x']} />
+              <Tool name={t('Inline code')} icon="code" run={() => c().toggleCode().run()} on={s.code} keys={['mod', 'e']} />
+            </span>
+            <span className="sd-group" key="lists" data-keep={7}>
+              <Tool name={t('Bulleted list')} icon="list" run={() => c().toggleBulletList().run()} on={s.bulletList} keys={['mod', 'shift', '8']} />
+              <Tool name={t('Numbered list')} icon="list-ordered" run={() => c().toggleOrderedList().run()} on={s.orderedList} keys={['mod', 'shift', '7']} />
+              <Tool name={t('Checklist')} icon="checklist" run={() => c().toggleTaskList().run()} on={s.taskList} keys={['mod', 'shift', '9']} />
+              <Tool name={t('Quote')} icon="quote" run={() => c().toggleBlockquote().run()} on={s.blockquote} keys={['mod', 'shift', 'b']} />
+              <Tool name={t('Code block')} icon="code-block" run={() => c().toggleCodeBlock().run()} on={s.codeBlock} keys={['mod', 'alt', 'c']} />
+            </span>
+            <span className="sd-group" key="insert" data-keep={6}>
+              <Tool name={t('Insert link')} icon="link" run={() => setLinking(linking == null ? s.href || '' : null)} on={s.link || linking != null} tip={s.link ? t('Link: change it, open it or remove it') : t('Insert link')} keys={['mod', 'k']} />
+              <Tool name={t('Insert picture')} icon="image" run={() => picker.current?.click()} tip={t('Insert a picture: or paste one, or drop it on the page')} />
+              <TableTool editor={editor} c={c} on={s.table} />
+            </span>
+          </OneRow>
         )}
+        {/* Beside the toolbar, not in it: a group under More can close while its file is picked. */}
+        <input ref={picker} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) putPictures([f]) }} />
         {linking != null && <LinkBar value={linking} setValue={setLinking} link={s.link} href={s.href} onSubmit={applyLink} onRemove={() => { c().extendMarkRange('link').unsetLink().run(); setLinking(null) }} onClose={() => { setLinking(null); editor.commands.focus() }} />}
         {finding && <FindBar editor={editor} replace={finding === 'replace'} onClose={() => setFinding(null)} />}
         <Said say={say} onClose={() => setSay(null)} onOpen={(path) => onOpen?.({ root: file.root, path })} />

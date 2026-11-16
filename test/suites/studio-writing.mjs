@@ -8,7 +8,9 @@
 // file that isn't one said. "- ", "1. " and "[] " typed starting lists, Backspace putting them back;
 // checklists (⇧⌘9, ticked with a click, kept as Word keeps them); the link the cursor is in, with
 // Copy, Change and Remove; ⇧⌘X, ⇧⌘> and ⇧⌘<, ⌘G; lists copied out as lists. Page setup saved into
-// the file; Print (⌘P) as its pages; a Markdown copy of the Word file. In Markdown: checklists, a
+// the file; Print (⌘P) as its pages; a Markdown copy of the Word file. Suggesting: edits as tracked
+// changes saved as Word's own, accepted and rejected one at a time once opened again; a picture
+// wrapped round, set apart and in line again, saved as Word places it. In Markdown: checklists, a
 // picture pasted (saved beside it), Word's lists pasted, a list of plain and checklist items shown and
 // saved as written, and a Word copy of it. Written in Focus
 // (⌘. still superscript, saved as you type, Esc out). In the dark too.
@@ -16,7 +18,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
 import { createRequire } from 'node:module'
-import { startKit, checks, until, sleep, browser, page, shot, freePort, ROOT } from '../lib/harness.mjs'
+import { startKit, checks, until, sleep, browser, page, shot, inBar, freePort, ROOT } from '../lib/harness.mjs'
 import { richDocx, chartPng } from '../lib/wordfile.mjs'
 
 const require = createRequire(path.join(ROOT, 'package.json'))
@@ -52,6 +54,7 @@ try {
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, 'report.docx'), await richDocx({ pages: 2 }))
   fs.writeFileSync(path.join(dir, 'other.docx'), await richDocx({ pages: 1 }))
+  fs.writeFileSync(path.join(dir, 'review.docx'), await richDocx({ pages: 1 }))
   fs.writeFileSync(path.join(dir, 'notes.md'), '# Notes\n\nA first line.\n')
   // A list of plain items and checklist items together, as people write them by hand.
   const MIXED = '# Northwind\n\n- Renewal in March\n- [ ] Send the pricing doc\n- [x] Book the call\n- Ask about seats\n\nShip it.\n'
@@ -190,7 +193,7 @@ try {
   await p.keyboard.press('Enter')
   await p.keyboard.type('Call the venue')
   await p.keyboard.press(`${MOD}+Shift+Digit9`)
-  ok((await para('Call the venue'))?.mk === '☐' && (await tb.locator('button[aria-label="Checklist"]').getAttribute('aria-pressed')) === 'true', '⇧⌘9: a checklist, shown on its button', await para('Call the venue'))
+  ok((await para('Call the venue'))?.mk === '☐' && (await (await inBar(tb, 'Checklist')).getAttribute('aria-pressed')) === 'true', '⇧⌘9: a checklist, shown on its button', await para('Call the venue'))
   const item = p.locator('.sd-w [data-mk]', { hasText: 'Call the venue' })
   const box = await item.boundingBox()
   await p.mouse.click(box.x - 8, box.y + 6)
@@ -204,7 +207,8 @@ try {
   await pick('Sized words')
   await p.keyboard.press(`${MOD}+Shift+KeyX`)
   const struck = (await para('Sized words'))?.marks.includes('strike')
-  const size = () => p.locator('.sd-size-box input').inputValue()
+  // The size box: on the toolbar's row, or under More where the row hasn't room for it.
+  const size = async () => { const i = p.locator('.sd-doc-tools .sd-size-box input'); if (!(await i.isVisible().catch(() => false))) await inBar(tb, 'Bigger'); return i.inputValue() }
   const s0 = await size()
   await p.keyboard.press(`${MOD}+Shift+Period`)
   const s1 = await until(async () => { const v = await size(); return v !== s0 && v }, 3000, 100)
@@ -339,6 +343,122 @@ try {
   await open('other.docx', '.sd-pb')
   ok(!!(await until(async () => / leaving/.test(await xml()), 6000, 150)), 'another file opened straight after typing: what was typed saved all the same')
 
+  // ---------- Suggesting, and pictures text goes round ----------
+  // Suggesting, as Google Docs has it: what's typed is a tracked change of yours, what's deleted
+  // stays struck through, words you suggested and took out again are gone; saved as Word's own
+  // w:ins and w:del, each with an id of its own, who and when.
+  await open('review.docx', '.sd-pb')
+  await sleep(500)
+  const rxml = async () => (await partsOf(file('review.docx')))['word/document.xml']
+  const reviewWas = await partsOf(file('review.docx'))
+  const revsOf = () => E((ed) => { const out = []; ed.state.doc.descendants((n) => { if (n.isText) { const m = n.marks.find((x) => x.type.name === 'rev'); if (m) out.push(`${m.attrs.k}:${m.attrs.by}:${n.text}`) } }); return out })
+  await (await inBar(tb, 'Mode')).click()
+  await p.locator('.sd-drop .sd-item', { hasText: 'Suggesting' }).click()
+  ok(/Suggesting/.test(await p.locator('.sd-mode-drop').innerText()), 'Suggesting: picked in the toolbar, and said there')
+  await caret('Prepared for the product team', 'Prepared for the product team'.length)
+  await p.keyboard.type(' and the board')
+  await pick('Quarterly')
+  await p.keyboard.type('Annual')
+  await caret('Write the first-hour guide')
+  for (let i = 0; i < 3; i++) await p.keyboard.press('Backspace')
+  await p.keyboard.type('xyz')
+  for (let i = 0; i < 3; i++) await p.keyboard.press('Backspace')
+  const sug = await revsOf()
+  ok(['ins:Tester: and the board', 'del:Tester:Quarterly', 'ins:Tester:Annual', 'del:Tester:ide'].every((x) => sug.includes(x)) && !sug.some((x) => /xyz|xy|yz/.test(x)), 'typed, typed over and deleted: tracked changes by you (deleted words struck through, still there); what you typed and took out again, gone', sug)
+  ok(await p.locator('.sd-w del.sd-rev', { hasText: 'Quarterly' }).count() === 1 && await p.locator('.sd-w ins.sd-rev', { hasText: 'Annual' }).count() === 1, 'shown as Word shows them: struck through, and underlined')
+  await caret('and the board', 3)
+  const change = p.locator('.sd-change-pop')
+  ok(!!(await until(async () => /Added · Tester/.test(await change.innerText().catch(() => '')), 3000, 100)), 'the cursor in one: what it is and who made it, with Accept and Reject', await change.innerText().catch(() => ''))
+  await shot(p, `${tag}studio-writing-suggesting`)
+  await p.keyboard.press(`${MOD}+s`)
+  const sx = await until(async () => { const x = await rxml(); return /Annual/.test(x) && x }, 10000)
+  const ids = [...(sx || '').matchAll(/<w:(?:ins|del) w:id="(\d+)"/g)].map((m) => m[1])
+  ok(!!sx && /<w:del w:id="\d+" w:author="Tester" w:date="\d{4}-\d\d-\d\dT\d\d:\d\d:00Z"><w:r><w:delText>Quarterly<\/w:delText><\/w:r><\/w:del><w:ins w:id="\d+" w:author="Tester" w:date="[^"]+Z"><w:r>(<w:rPr>[\s\S]*?<\/w:rPr>)?<w:t>Annual<\/w:t><\/w:r><\/w:ins>/.test(sx) && /<w:delText>ide<\/w:delText>/.test(sx) && /<w:t xml:space="preserve"> and the board<\/w:t>/.test(sx) && !/xyz|<w:t>x<\/w:t>/.test(sx) && new Set(ids).size === ids.length && ids.length >= 6, 'saved as Word\'s tracked changes: w:del and w:ins with an id each, by you and when; Avery\'s own kept', { ids, sx: (sx || '').slice(0, 200) })
+  ok(/<w:ins w:id="1" w:author="Avery Stone" w:date="2026-10-02T09:00:00Z"><w:r><w:t xml:space="preserve"> in November<\/w:t><\/w:r><\/w:ins>/.test(sx || ''), 'the change the file had, kept as Word wrote it')
+  // Opened again: the changes there, each accepted or rejected on its own; all at once too.
+  const again = await page(b, kit.url, { width: 1440, height: 900 })
+  pages.push(again)
+  const q = again.p
+  await q.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+  await until(async () => { await q.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'review.docx' } })), { root }); return q.locator('.sd-pb').first().waitFor({ timeout: 2500 }).then(() => true, () => false) }, 25000, 300)
+  const QE = (fn, arg) => q.evaluate(({ fn, arg }) => { const ed = document.querySelector('.sd-w').editor; return new Function('ed', 'arg', `return (${fn})(ed, arg)`)(ed, arg) }, { fn: String(fn), arg })
+  const qCaret = (text, at) => QE((ed, a) => { let r = null; ed.state.doc.descendants((n, pos) => { if (r == null && n.isTextblock && n.textContent.includes(a.text)) r = pos + 1 + n.textContent.indexOf(a.text) + a.at; return r == null }); ed.view.focus(); ed.commands.setTextSelection(r); return r }, { text, at })
+  const qRevs = () => QE((ed) => { const out = []; ed.state.doc.descendants((n) => { if (n.isText) { const m = n.marks.find((x) => x.type.name === 'rev'); if (m) out.push(`${m.attrs.k}:${n.text}`) } }); return out })
+  const reopened = await qRevs()
+  ok(['del:Quarterly', 'ins:Annual', 'del:ide', 'ins: and the board'].every((x) => reopened.includes(x)), 'opened again: the changes as they were saved', reopened)
+  const qtb = q.locator('.sd-doc-tools')
+  ok(/^\s*4\s*$/.test(await (await inBar(qtb, 'Tracked changes')).innerText()), 'four changes, each counted once (a word typed over is one)', await (await inBar(qtb, 'Tracked changes')).innerText())
+  await qCaret('Annual', 2)
+  const qChange = q.locator('.sd-change-pop')
+  ok(!!(await until(async () => /Replaced · Tester/.test(await qChange.innerText().catch(() => '')), 3000, 100)), 'a word typed over: one change, Replaced', await qChange.innerText().catch(() => ''))
+  await qChange.locator('button[aria-label="Accept"]').click()
+  await qCaret('and the board', 3)
+  await until(async () => /Added/.test(await qChange.innerText().catch(() => '')), 3000, 100)
+  await qChange.locator('button[aria-label="Reject"]').click()
+  const settled = await qRevs()
+  const title = await QE((ed) => ed.state.doc.firstChild.textContent)
+  ok(title.startsWith('Annual plan') && !settled.some((x) => /Quarterly|Annual|the board/.test(x)) && settled.includes('del:ide'), 'Accept: the new word kept, the old gone; Reject: the words suggested gone; the others still there', { title, settled })
+  await q.keyboard.press(`${MOD}+s`)
+  const sx2 = await until(async () => { const x = await rxml(); return !/Quarterly/.test(x) && x }, 10000)
+  ok(!!sx2 && /<w:t>Annual plan<\/w:t>/.test(sx2) && !/<w:ins [^>]*><w:r>(<w:rPr>[\s\S]*?<\/w:rPr>)?<w:t>Annual/.test(sx2) && !/the board/.test(sx2) && /<w:delText>ide<\/w:delText>/.test(sx2), 'saved: accepted and rejected as Word would have them', (sx2 || '').slice(0, 300))
+  // Editing again (⌥⇧⌘Z): typed words are just words.
+  await q.keyboard.press(`${MOD}+Alt+Shift+KeyZ`)
+  await qCaret('Prepared for', 0)
+  await q.keyboard.type('Plain ')
+  ok(/^Editing/.test(await q.locator('.sd-mode-drop button').getAttribute('title')) && !(await q.locator('.sd-mode-drop.suggesting').count()) && !(await qRevs()).some((x) => /Plain/.test(x)), '⌥⇧⌘Z: Editing again, what\'s typed isn\'t tracked')
+  // A picture: text wrapped round it at the right, then above and below it in the middle, then in
+  // line again; sized by its corner while it's wrapped; each saved as Word places one (wp:anchor
+  // with wrapSquare or wrapTopAndBottom, at the column's side), the picture itself as it was.
+  const picBox = q.locator('.sd-w [data-resize-container]').first()
+  await picBox.locator('img').scrollIntoViewIfNeeded()
+  await picBox.locator('img').click()
+  const picPop = q.locator('.sd-pic-pop')
+  await picPop.waitFor({ timeout: 3000 })
+  ok((await picPop.locator('button[aria-pressed="true"]').getAttribute('aria-label')) === 'In line with text', 'a picture picked: how text goes round it, in line as the file has it')
+  await picPop.locator('button[aria-label="Wrap text"]').click()
+  await picPop.locator('button[aria-label="Right"]').click()
+  const floated = await picBox.evaluate((e) => ({ wrap: e.dataset.wrap, side: e.dataset.side, float: getComputedStyle(e).float }))
+  const beside = await q.evaluate(() => { const img = document.querySelector('.sd-w [data-resize-container] img').getBoundingClientRect(); const h = [...document.querySelectorAll('.sd-w :is(h1,h2,h3,p,li)')].find((x) => /Next steps/.test(x.textContent)); const t = document.createRange(); t.selectNodeContents(h); const r = t.getBoundingClientRect(); return { textRight: Math.round(r.left + h.scrollWidth), imgLeft: Math.round(img.left), sameRow: r.top < img.bottom && r.bottom > img.top } })
+  ok(floated.wrap === 'square' && floated.side === 'right' && floated.float === 'right' && beside.sameRow, 'Wrap text, Right: the picture at the right, the words beside it', { floated, beside })
+  await shot(q, `${tag}studio-writing-picture-wrapped`)
+  const picW = () => QE((ed) => { let w = null; ed.state.doc.descendants((n) => { if (w == null && n.type.name === 'image') w = n.attrs.width; return w == null }); return w })
+  const picHb = await picBox.locator('[data-resize-handle="bottom-right"]').boundingBox()
+  const picW0 = await picW()
+  if (picHb) { await q.mouse.move(picHb.x + picHb.width / 2, picHb.y + picHb.height / 2); await q.mouse.down(); await q.mouse.move(picHb.x - 60, picHb.y - 30, { steps: 6 }); await q.mouse.up() }
+  const picW1 = await until(async () => { const w = await picW(); return w < picW0 - 30 && w }, 3000, 100)
+  ok(!!picW1, 'sized by its corner while it\'s wrapped', { picW0, picW1 })
+  const media = Object.keys(reviewWas).filter((k) => k.startsWith('word/media/'))
+  await q.keyboard.press(`${MOD}+s`)
+  const sq = await until(async () => { const x = await rxml(); return /<wp:anchor /.test(x) && x }, 10000)
+  const anchor = /<w:drawing><wp:anchor [^>]*>([\s\S]*?)<\/wp:anchor><\/w:drawing>/.exec(sq || '')?.[1] || ''
+  const order = [...anchor.matchAll(/<(wp:\w+|a:graphic)\b/g)].map((m) => m[1]).filter((n, i, all) => all.indexOf(n) === i).join(' ')
+  const cx = Number(/<wp:extent cx="(\d+)"/.exec(anchor)?.[1])
+  const nowParts = await partsOf(file('review.docx'))
+  ok(/<wp:positionH relativeFrom="column"><wp:align>right<\/wp:align><\/wp:positionH>/.test(anchor) && /<wp:wrapSquare wrapText="bothSides"\/>/.test(anchor) && order === 'wp:simplePos wp:positionH wp:align wp:positionV wp:posOffset wp:extent wp:effectExtent wp:wrapSquare wp:docPr wp:cNvGraphicFramePr a:graphic' && Math.abs(cx - picW1 * 9525) < 9525 * 3 && /<a:blip r:embed="rId\d+"/.test(anchor) && media.every((k) => nowParts[k] === reviewWas[k]), 'saved as Word floats a picture: wp:anchor at the column\'s right, wrapSquare, its parts in the schema\'s order, its new size, the picture as it was', { order, cx, picW1, anchor: anchor.slice(0, 300) })
+  // Opened again: wrapped as it was left.
+  const third = await page(b, kit.url, { width: 1440, height: 900 })
+  pages.push(third)
+  await third.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+  await until(async () => { await third.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'review.docx' } })), { root }); return third.p.locator('.sd-pb').first().waitFor({ timeout: 2500 }).then(() => true, () => false) }, 25000, 300)
+  const back3 = await third.p.locator('.sd-w [data-resize-container]').first().evaluate((e) => ({ wrap: e.dataset.wrap, side: e.dataset.side, float: getComputedStyle(e).float }))
+  ok(back3.wrap === 'square' && back3.side === 'right' && back3.float === 'right', 'opened again: wrapped at the right, as it was left', back3)
+  await third.ctx.close()
+  // Break text, in the middle; then in line again: saved each way.
+  await picBox.locator('img').click()
+  await picPop.locator('button[aria-label="Break text"]').click()
+  await picPop.locator('button[aria-label="Center"]').click()
+  const apart = await picBox.evaluate((e) => ({ wrap: e.dataset.wrap, side: e.dataset.side, display: getComputedStyle(e).display, justify: getComputedStyle(e).justifyContent }))
+  await q.keyboard.press(`${MOD}+s`)
+  const tb2 = await until(async () => { const x = await rxml(); return /<wp:wrapTopAndBottom\/>/.test(x) && x }, 10000)
+  ok(apart.wrap === 'top' && apart.display === 'flex' && apart.justify === 'center' && !!tb2 && /<wp:align>center<\/wp:align>/.test(tb2), 'Break text, Center: on a line of its own in the middle; saved with wrapTopAndBottom, centred', apart)
+  await picBox.locator('img').click()
+  await picPop.locator('button[aria-label="In line with text"]').click()
+  await q.keyboard.press(`${MOD}+s`)
+  const inl = await until(async () => { const x = await rxml(); return !/<wp:anchor /.test(x) && x }, 10000)
+  ok(!!inl && /<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="\d+" cy="\d+"\/>/.test(inl), 'In line with text again: saved in line, as Word has one', (/<w:drawing>[\s\S]{0,200}/.exec(inl || '') || [''])[0])
+  await shot(q, `${tag}studio-writing-picture-inline`)
+  ok(again.errors.length === 0, 'no page errors while suggesting and placing pictures', again.errors)
+
   // ---------- Markdown ----------
   ok(!!(await open('notes.md', '.sd-page .ProseMirror')), 'a Markdown file opens')
   await atEnd()
@@ -396,6 +516,26 @@ try {
   const pop = await until(() => dark.p.locator('.sd-link-pop').evaluate((e) => getComputedStyle(e).backgroundColor).catch(() => null), 5000, 100)
   ok(!!pop && pop !== 'rgb(255, 255, 255)', 'dark: the link bubble in the dark look', pop)
   await shot(dark.p, `${tag}studio-writing-dark`)
+  // Suggesting and a picture picked, in the dark: their bubbles in the dark look.
+  await until(async () => { await dark.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'review.docx' } })), { root }); return dark.p.locator('.sd-w del.sd-rev').first().waitFor({ timeout: 2500 }).then(() => true, () => false) }, 25000, 300)
+  await dark.p.evaluate(() => { const ed = document.querySelector('.sd-w').editor; let r = null; ed.state.doc.descendants((n, pos) => { if (r == null && n.isText && n.text === 'ide') r = pos + 1; return r == null }); ed.view.focus(); ed.commands.setTextSelection(r) })
+  const dChange = await until(() => dark.p.locator('.sd-change-pop').evaluate((e) => getComputedStyle(e).backgroundColor).catch(() => null), 5000, 100)
+  ok(!!dChange && dChange !== 'rgb(255, 255, 255)', 'dark: a tracked change\'s bubble in the dark look', dChange)
+  await shot(dark.p, `${tag}studio-writing-suggesting-dark`)
+  await dark.p.locator('.sd-w [data-resize-container] img').first().scrollIntoViewIfNeeded()
+  await dark.p.locator('.sd-w [data-resize-container] img').first().click()
+  ok(!!(await dark.p.locator('.sd-pic-pop').waitFor({ timeout: 3000 }).then(() => true, () => false)), 'dark: a picture picked, its bubble')
+  await shot(dark.p, `${tag}studio-writing-picture-dark`)
+  // On a phone: one row of tools, Editing or Suggesting and the rest under More.
+  const ph = await page(b, kit.url, { phone: true })
+  pages.push(ph)
+  await until(async () => { await ph.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'review.docx' } })), { root }); return ph.p.locator('.sd-w').first().waitFor({ timeout: 2500 }).then(() => true, () => false) }, 25000, 300)
+  await sleep(500)
+  const phRow = await ph.p.locator('.sd-doc-tools').evaluate((t) => { const r = (e) => e.getBoundingClientRect(); const shown = [...t.querySelectorAll('button')].filter((x) => r(x).width > 0 && !x.closest('.sd-more-row')); return { rows: new Set(shown.map((x) => Math.round(r(x).top + r(x).height / 2))).size, past: shown.filter((x) => r(x).right > innerWidth + 1).length, small: shown.filter((x) => r(x).height < 40).length } })
+  ok(phRow.rows === 1 && !phRow.past && !phRow.small, 'phone: the document\'s tools on one row, each a 40 px target, none past the screen\'s edge', phRow)
+  await (await inBar(ph.p.locator('.sd-doc-tools'), 'Mode')).click()
+  ok(!!(await ph.p.locator('.sd-drop .sd-item', { hasText: 'Suggesting' }).waitFor({ timeout: 3000 }).then(() => true, () => false)), 'phone: Suggesting there, under More')
+  await shot(ph.p, `${tag}studio-writing-phone-more`)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))
