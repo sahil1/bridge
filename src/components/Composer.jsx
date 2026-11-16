@@ -34,6 +34,19 @@ const saveDraft = (id, d) => {
     else localStorage.setItem(draftKey(id), JSON.stringify(d))
   } catch { /* private mode */ }
 }
+// The message boxes open now, by agent: what each holds (saved 250 ms after a change) and a way to
+// change it, for carryDraft.
+const boxes = new Map()
+// The conversation goes on in another pane (restarted on another model or account, handed to another
+// agent): what was in its message box goes with it, after anything already in the new one's.
+export function carryDraft(from, to) {
+  if (!from || !to || from === to) return
+  const d = boxes.get(from)?.now() || loadDraft(from)
+  if (!d.text.trim() && !d.files.length) return
+  const there = boxes.get(to)?.now() || loadDraft(to)
+  const both = { text: there.text.trim() ? `${there.text.replace(/\s+$/, '')}\n\n${d.text}` : d.text, files: [...there.files, ...d.files.filter((f) => !there.files.some((x) => x.path === f.path))] }
+  for (const [id, x] of [[from, { text: '', files: [] }], [to, both]]) { saveDraft(id, x); boxes.get(id)?.set(x) }
+}
 
 // Shown when voice notes and dictation need something first (here, the dictation bar and the
 // desktop app's dictation window). The speech model: what it is and its size, in the server's
@@ -376,6 +389,15 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
     return true
   }
   useEffect(() => { const t = setTimeout(() => saveDraft(id, draft), 250); return () => clearTimeout(t) }, [id, draft])
+  // Listed in boxes for carryDraft, and saved as it is when the box closes or moves to another agent
+  // (with what was typed in its last 250 ms).
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+  useEffect(() => {
+    const box = { now: () => draftRef.current, set: (d) => { draftRef.current = d; setDraft(d) } }
+    boxes.set(id, box)
+    return () => { if (boxes.get(id) === box) boxes.delete(id); saveDraft(id, draftRef.current) }
+  }, [id])
   useEffect(() => { onDraft?.(draft.text) }, [draft.text]) // eslint-disable-line react-hooks/exhaustive-deps
   // A message being typed: the desktop app doesn't update by itself under it (busy.js).
   useBusy('draft', !!(draft.text.trim() || draft.files.length))
@@ -422,8 +444,6 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   useEffect(() => { setVoiceSetup(mine && dict.setup ? dict.setup : null) }, [mine, dict.setup])
   const [dictated, setDictated] = useState(false)
   useEffect(() => { if (!dictated) return; const t = setTimeout(() => setDictated(false), 1200); return () => clearTimeout(t) }, [dictated])
-  const draftRef = useRef(draft)
-  draftRef.current = draft
   const filesRef = useRef(filesUrl)
   filesRef.current = filesUrl
   const rootRef = useRef(null)

@@ -9,7 +9,7 @@ import Question, { parseScreen } from './Question.jsx'
 import AskCard from './AskCard.jsx'
 import FirstRunCard, { showsFirstRun } from './FirstRun.jsx'
 import { InstallAgentButton } from './SignIn.jsx'
-import Composer from './Composer.jsx'
+import Composer, { carryDraft } from './Composer.jsx'
 import ModelChip, { heldWhy } from './ModelChip.jsx'
 import Lightbox from './Lightbox.jsx'
 import { addAccount } from './AddAccount.jsx'
@@ -855,6 +855,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
     if (!window.confirm(`${t('Continue this conversation on {name}?', { name: nameOf(x) })}\n\n${nudge ? t('The agent stops and starts again signed in as {name}, with the same conversation, and is told to carry on from where it stopped.', { name: nameOf(x) }) : t('The agent stops and starts again signed in as {name}, with the same conversation.', { name: nameOf(x) })}`)) return
     try {
       const r = await api(`/agents/${pid}/continue`, { method: 'POST', body: { account: x.id, ...(nudge ? { nudge: true } : {}) } })
+      carryDraft(agent.paneId, r.paneId)
       setTimeout(() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: r.paneId } })), 1200)
     } catch (e) { setFlash(e.message) }
   }

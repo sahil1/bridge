@@ -4,7 +4,9 @@
 // same conversation), not while it's working; the agent's header has no second switcher; the top
 // bar's menu says it's the account new agents start on. And a usage limit: Chat says when it resets
 // and whether it carries on by itself, and Continue now moves it to the other account and tells it
-// to carry on.
+// to carry on. What's in the message box goes with the conversation to the pane that takes its
+// place, and the window doesn't load again: on another account, restarted on another model (Codex,
+// stand-ins/codex.cjs, restarts to switch), handed to another agent.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, TEST } from '../lib/harness.mjs'
@@ -23,6 +25,18 @@ try {
   const dir = path.join(kit.home, 'billing')
   fs.mkdirSync(dir, { recursive: true })
   const agentOf = async (pred) => ((await kit.api('/fleet')).agents || []).find(pred)
+  // A draft typed in an agent's message box, with a mark on the window that a reload would take away.
+  const typeDraft = async (p, pane, text) => {
+    await p.locator(`textarea[data-composer="${pane}"]`).fill(text)
+    await p.evaluate(() => { window.__stayed = true })
+  }
+  // That draft in the message box of the pane that took over, none left for the old one, and the mark still there.
+  const carried = async (p, from, to, text) => {
+    const box = p.locator(`textarea[data-composer="${to}"]`)
+    const got = !!to && !!(await until(async () => (await box.inputValue().catch(() => null)) === text, 15000))
+    const was = await p.evaluate((k) => ({ stayed: window.__stayed === true, left: localStorage.getItem(k) }), `cc-draft-${from}`)
+    return { ok: got && was.stayed && !was.left, box: await box.inputValue().catch(() => null), ...was }
+  }
 
   for (const look of [{ mode: 'light', theme: 'sky' }, { mode: 'dark', theme: 'midnight' }]) {
     const t = look.theme
@@ -36,6 +50,8 @@ try {
     const chip = p.locator('.model-chip').first()
     ok(!!(await until(async () => (await chip.locator('.mc-acct').innerText().catch(() => '')).trim() === 'Your usual login', 15000)), `${t}: the message box's chip says the account it's on (your usual login, not "Default")`, await chip.innerText().catch(() => ''))
     ok((await p.locator('.pane-head .acct-tag, .pane-head .acct-chip, .pane-sub .acct-chip').count()) === 0, `${t}: the agent's header has no switcher of its own`)
+    const draft = `Then the ${t} invoices`
+    await typeDraft(p, one.paneId, draft)
     await chip.click()
     const menu = p.locator('.model-pop')
     await menu.waitFor({ timeout: 5000 }).catch(() => {})
@@ -51,6 +67,8 @@ try {
     const moved = await until(() => agentOf((a) => a.sessionId === first.sessionId && a.paneId !== first.paneId && a.accountId === work.id), 30000, 500)
     ok(!!moved, `${t}: the conversation continues on Work`, ((await kit.api('/fleet')).agents || []).map((a) => ({ pane: a.paneId, session: a.sessionId, account: a.accountId })))
     ok(!!(await until(async () => (await p.locator('.model-chip .mc-acct').first().innerText().catch(() => '')).trim() === 'Work', 20000)), `${t}: and its chip says Work`, await p.locator('.model-chip').first().innerText().catch(() => ''))
+    const went = await carried(p, first.paneId, moved?.paneId, draft)
+    ok(went.ok, `${t}: what was in its message box is in the new one's, and the window didn't load again`, went)
     // Not while it's working.
     const busy = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: `${label} busy`, newSpace: label })
     await until(() => agentOf((a) => a.paneId === busy.paneId && a.sessionId && a.status === 'working'), 60000, 1000)
@@ -162,6 +180,47 @@ try {
     ok(asWork === 'Work', "your usual login off the list, signed in as Work: the agent's chip says Work", asWork)
     const asNone = await chipFor(null)
     ok(/^pa•••@example\.com$/.test(asNone), 'signed in as none you listed: who it is, its email mostly hidden', asNone)
+  }
+
+  // Restarted on another model (Codex restarts to switch), then handed to another agent: what was in
+  // the message box goes too, and the window doesn't load again.
+  {
+    kit.program('codex', fs.readFileSync(path.join(TEST, 'stand-ins', 'codex.cjs'), 'utf8'))
+    fs.mkdirSync(path.join(kit.home, '.codex'), { recursive: true })
+    fs.writeFileSync(path.join(kit.home, '.codex', 'auth.json'), JSON.stringify({ tokens: { id_token: 'stand-in' } }))
+    ok((await kit.api('/agents/catalog')).some((a) => a.kind === 'codex' && a.installed), 'the stand-in Codex is found')
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'dark', theme: 'midnight' })
+    p.on('dialog', (d) => d.accept())
+    const l = await kit.api('/agents/launch', { kind: 'codex', cwd: dir, label: 'Ledger', newSpace: 'Ledger' })
+    const cx = await until(() => agentOf((a) => a.paneId === l.paneId && a.sessionId && a.status !== 'working' && a.status !== 'unknown'), 60000, 1000)
+    ok(!!cx, 'a Codex agent with a conversation', await agentOf((a) => a.paneId === l.paneId))
+    await p.locator('.tab-main', { hasText: 'Ledger' }).first().click({ timeout: 20000 })
+    await typeDraft(p, l.paneId, 'Then the March ledger')
+    await p.locator('.model-chip').first().click()
+    await p.locator('.model-pop button', { hasText: 'Other…' }).click()
+    await p.locator('.model-other input').fill('gpt-5-codex')
+    await p.locator('.model-other button', { hasText: 'Restart' }).click()
+    const back = await until(() => agentOf((a) => a.sessionId === cx?.sessionId && a.paneId !== l.paneId), 30000, 500)
+    const started = () => { try { return fs.readFileSync(path.join(kit.home, 'codex-started.log'), 'utf8').trim().split('\n').map((x) => JSON.parse(x)) } catch { return [] } }
+    ok(!!back && started().some((x) => x.join(' ') === `--model gpt-5-codex resume ${cx?.sessionId}`), 'Codex restarts on gpt-5-codex, with the same conversation', { back, started: started() })
+    const restarted = await carried(p, l.paneId, back?.paneId, 'Then the March ledger')
+    ok(restarted.ok, "restarted: what was in its message box is in the new one's, and the window didn't load again", restarted)
+
+    const h = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Handover', newSpace: 'Handover', prompt: 'idle' })
+    const cl = await until(() => agentOf((a) => a.paneId === h.paneId && a.sessionId && a.status !== 'working' && a.status !== 'unknown'), 60000, 1000)
+    ok(!!cl, 'a Claude Code agent to hand off, done working', await agentOf((a) => a.paneId === h.paneId))
+    await p.locator('.tab-main', { hasText: 'Handover' }).first().click({ timeout: 20000 })
+    await typeDraft(p, h.paneId, 'Then the April ledger')
+    const before = new Set(((await kit.api('/fleet')).agents || []).map((a) => a.paneId))
+    await p.locator('.model-chip').first().click()
+    await p.locator('.model-pop .ho-item', { hasText: 'Codex' }).click()
+    await p.locator('.ho-pop button[type="submit"]').click()
+    const to = await until(() => agentOf((a) => a.kind === 'codex' && !before.has(a.paneId)), 30000, 500)
+    ok(!!to && !(await agentOf((a) => a.paneId === h.paneId)), 'handed to Codex, in a new pane, the old one closed', ((await kit.api('/fleet')).agents || []).map((a) => ({ pane: a.paneId, kind: a.kind, tab: a.tab })))
+    const handed = await carried(p, h.paneId, to?.paneId, 'Then the April ledger')
+    ok(handed.ok, "handed off: what was in its message box is in the new agent's, and the window didn't load again", handed)
+    ok(errors.length === 0, 'restart and hand-off: no page errors', errors)
+    await ctx.close()
   }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

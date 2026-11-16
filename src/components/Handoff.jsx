@@ -4,6 +4,7 @@ import { AgentIcon } from './settings/ProviderIcon.jsx'
 import { api } from '../api.js'
 import { modelLabel } from './ModelChip.jsx'
 import { nameOf } from './AccountMenu.jsx'
+import { carryDraft } from './Composer.jsx'
 import { t } from '../i18n/index.js'
 import './handoff.css'
 
@@ -149,6 +150,7 @@ export function HandoffPanel({ agent, view: first, target, anchor, onBack, onClo
       const r = await api(`/agents/${pid}/handoff`, { method: 'POST', body: { to: target.kind, account: account || undefined, model: pick || undefined, keep, note: note.trim() || undefined, summary: ready || undefined } })
       onClose()
       onNote?.(t('Handing over to {name}…', { name: target.label }))
+      carryDraft(agent.paneId, r.paneId)
       setTimeout(() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: r.paneId } })), 1200)
     } catch (x) { setErr(x.message); setSending(false) }
   }
