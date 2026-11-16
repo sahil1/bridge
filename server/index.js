@@ -16,6 +16,7 @@ import { usageStats } from './usagestats.js'
 import { everywhere } from './usageall.js'
 import * as usagelog from './usagelog.js'
 import * as files from './files.js'
+import * as fileLinks from './filelinks.js'
 import * as fileInsights from './fileinsights.js'
 import * as pr from './pr.js'
 import * as office from './office.js'
@@ -704,6 +705,9 @@ app.put('/api/agents/:pane/file', async (req, res) => {
   }
 })
 app.get('/api/agents/:pane/find', wrap(async (req) => ({ files: await files.findFiles(await rootOf(req.params.pane), String(req.query.q || '').slice(0, 100)) })))
+// A file named in the agent's chat, found where it is (filelinks.js): as written, in its folder, in
+// the folders its conversation worked in, or by a search below its folder. Only ever inside its folder.
+app.get('/api/agents/:pane/locate', wrap(async (req) => fileLinks.locate(await rootOf(req.params.pane), await findAgent(req.params.pane).catch(() => null), String(req.query.path || '').slice(0, 1000))))
 app.get('/api/agents/:pane/git', wrap(async (req) => files.gitStatus(await rootOf(req.params.pane))))
 app.post('/api/agents/:pane/discard', wrap(async (req) => {
   const root = await rootOf(req.params.pane)

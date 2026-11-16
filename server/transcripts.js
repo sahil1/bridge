@@ -684,6 +684,83 @@ export function planOf({ kind, sessionId, cwd }) {
   return plan?.filter((x) => x.text) || null
 }
 
+// Where a conversation worked, for finding a file it names in Chat (filelinks.js): each full path it
+// named anywhere (a Read, Write or Edit's file, a search's folder, what a command printed, its own
+// words), and the folders it worked in (each entry's cwd, a shell's cd, Codex's workdir, the folder
+// of each file it named), newest first. Read from the end of its log as Chat reads it, and kept
+// while the log stays the same (or for a few seconds while it grows).
+const USED_BYTES = 8 * 1024 * 1024
+const used = new Map() // file -> { size, mtime, at, out }
+// A full path in any text: from / or ~/, up to a space, quote, bracket or colon (file.js:12).
+const ABS = /(?:^|[\s"'`(<[=,])((?:~\/|\/)[^\s"'`()<>[\]{}|;,:*?$\\]{2,})/g
+const CD = /(?:^|[;&|(]|\n)\s*cd\s+("[^"\n]+"|'[^'\n]+'|[^\s;&|)]+)/g
+const PATCHED = /^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm
+const DIR_KEYS = new Set(['cwd', 'workdir', 'working_directory', 'dir_path', 'directory'])
+const PATH_KEYS = new Set(['file_path', 'filePath', 'absolute_path', 'notebook_path', 'path', 'file'])
+const SKIP_KEYS = new Set(['data', 'signature', 'encrypted_content'])
+export function usedPaths({ kind, sessionId, cwd }) {
+  const none = { named: [], dirs: [] }
+  const file = sessionId && locate(kind, sessionId, cwd)
+  if (!file) return none
+  let st
+  try { st = fs.statSync(file) } catch { return none }
+  const hit = used.get(file)
+  if (hit && ((hit.size === st.size && hit.mtime === st.mtimeMs) || Date.now() - hit.at < 3000)) return hit.out
+  let entries = []
+  try {
+    // Gemini CLI's older logs are one JSON file a session.
+    if (file.endsWith('.json')) { if (st.size < 16 * 1024 * 1024) { const j = JSON.parse(fs.readFileSync(file, 'utf8')); entries = Array.isArray(j) ? j : Array.isArray(j.messages) ? j.messages : [j] } } else entries = parseLines(readTail(file, USED_BYTES).lines)
+  } catch { return none }
+  const named = new Set()
+  const dirs = new Set()
+  const full = (base, p) => {
+    const s = String(p).trim().replace(/^(["'])(.*)\1$/, '$2')
+    if (!s || s.length > 1000) return null
+    if (s === '~' || s.startsWith('~/')) return path.join(HOME, s.slice(1))
+    return path.isAbsolute(s) ? path.normalize(s) : base ? path.resolve(base, s) : null
+  }
+  const dir = (p) => { if (p) dirs.add(p) }
+  const walk = (v, base, key, depth) => {
+    if (depth > 14 || v == null) return
+    if (typeof v === 'string') {
+      if (!v || v.length > 200000) return
+      if (DIR_KEYS.has(key)) return dir(full(base, v))
+      if (PATH_KEYS.has(key) && v.length < 1000 && !v.includes('\n')) {
+        const p = full(base, v)
+        if (p) { named.add(p); dir(path.extname(p) ? path.dirname(p) : p) }
+        return
+      }
+      if (key === 'arguments' && v.startsWith('{')) { try { return walk(JSON.parse(v), base, '', depth + 1) } catch { /* plain text */ } }
+      if (key === 'command' || key === 'cmd') for (const m of v.matchAll(CD)) dir(full(base, m[1]))
+      if (v.includes('*** ')) for (const m of v.matchAll(PATCHED)) { const p = full(base, m[1] || m[2]); if (p) { named.add(p); dir(path.dirname(p)) } }
+      if (v.includes('/')) for (const m of v.matchAll(ABS)) { const p = full(base, m[1].replace(/[.)\]/]+$/, '')); if (p && p !== '/') named.add(p) }
+      return
+    }
+    if (Array.isArray(v)) {
+      // Codex's command is a list, ["bash", "-lc", "cd site && npm run build"]: each part read as one.
+      for (const x of v) walk(x, base, key, depth + 1)
+      return
+    }
+    if (typeof v !== 'object') return
+    // A command run in a folder of its own (Codex's workdir): what it names is from there.
+    const here = typeof v.workdir === 'string' ? full(base, v.workdir) || base : base
+    for (const [k, x] of Object.entries(v)) if (!SKIP_KEYS.has(k)) walk(x, here, k, depth + 1)
+  }
+  // Each entry's folder: its own cwd, else the last one said before it (Codex's turn_context), else
+  // the agent's.
+  let at = cwd || null
+  const bases = entries.map((e) => { const c = e?.cwd || e?.payload?.cwd; if (typeof c === 'string' && path.isAbsolute(c)) at = c; return at })
+  for (let i = entries.length - 1; i >= 0 && named.size < 20000; i--) {
+    if (!entries[i] || typeof entries[i] !== 'object') continue
+    walk(entries[i], bases[i], '', 0)
+    dir(bases[i])
+  }
+  const out = { named: [...named], dirs: [...dirs] }
+  used.set(file, { size: st.size, mtime: st.mtimeMs, at: Date.now(), out })
+  if (used.size > 50) used.delete(used.keys().next().value)
+  return out
+}
+
 // The session an agent started after `since` in `cwd`, for agents that name their own session
 // (Codex writes ~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl, cwd in the first line).
 export function discoverSession(kind, cwd, since) {
