@@ -2266,6 +2266,17 @@ app.post('/api/meetings/:id/summary', wrap(async (req) => {
 }))
 app.post('/api/meetings/:id/ask', wrap((req) => meetings.ask(req.params.id, req.body?.question, { model: req.body?.model })))
 app.post('/api/meetings/:id/save', wrap((req) => meetings.save(req.params.id)))
+// Save as Word or PDF (meetings.js exportOf): what goes in, then the file the page made, kept beside
+// the meeting's note; and that file, for the iPhone app to take to the phone.
+app.get('/api/meetings/:id/export', wrap((req) => meetings.exportOf(req.params.id)))
+app.post('/api/meetings/:id/export', express.raw({ type: () => true, limit: '400mb' }), wrap((req) => meetings.saveExport(req.params.id, String(req.query.format || ''), req.body)))
+app.get('/api/meetings/:id/export/:format', (req, res) => {
+  try {
+    const file = meetings.exported(req.params.id, req.params.format)
+    res.set({ 'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' })
+    res.download(file, path.basename(file), { dotfiles: 'allow' })
+  } catch (e) { res.status(404).json({ error: e.message }) }
+})
 app.post('/api/meetings/:id/retry', wrap((req) => meetings.retry(req.params.id)))
 // What was on the screen: pictures taken while it records, or pasted into your notes.
 app.post('/api/meetings/:id/captures', express.raw({ type: () => true, limit: '16mb' }), wrap((req) => meetings.addCapture(req.params.id, req.body, { kind: String(req.query.kind || 'screen'), t: req.query.t, note: req.query.note, source: req.query.source })))
@@ -2339,7 +2350,7 @@ app.post('/api/meetings/:id/work/:key/agent', wrap((req) => { counts.add('meetin
 app.post('/api/meetings/:id/work/:key/done', wrap((req) => meetWork.tick(req.params.id, req.params.key, req.body?.done !== false)))
 app.get('/api/meetings/:id/since', wrap((req) => meetWork.since(meetings.get(req.params.id))))
 app.get('/api/meetings/:id/suggest', wrap((req) => meetings.suggest(req.params.id, { ask: req.query.ask === '1' })))
-app.post('/api/meetings/:id/reveal', wrap((req) => { hereOnly(req, 'Show it in Finder'); return meetings.revealSaved(req.params.id) }))
+app.post('/api/meetings/:id/reveal', wrap((req) => { hereOnly(req, 'Show it in Finder'); return meetings.revealSaved(req.params.id, req.body?.format || null) }))
 app.delete('/api/meetings/:id', wrap((req) => meetings.remove(req.params.id)))
 // The action items (all of them, or the ones given), on the chief of staff's task list, and the
 // chief told once about all of them. Each item keeps its task, to show what became of it.
