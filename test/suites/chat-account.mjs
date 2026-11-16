@@ -202,7 +202,9 @@ try {
     await p.locator('.model-other button', { hasText: 'Restart' }).click()
     const back = await until(() => agentOf((a) => a.sessionId === cx?.sessionId && a.paneId !== l.paneId), 30000, 500)
     const started = () => { try { return fs.readFileSync(path.join(kit.home, 'codex-started.log'), 'utf8').trim().split('\n').map((x) => JSON.parse(x)) } catch { return [] } }
-    ok(!!back && started().some((x) => x.join(' ') === `--model gpt-5-codex resume ${cx?.sessionId}`), 'Codex restarts on gpt-5-codex, with the same conversation', { back, started: started() })
+    // The new pane is listed before its Codex has started (on Windows, a while before), so wait for that.
+    const resumed = await until(() => started().some((x) => x.join(' ') === `--model gpt-5-codex resume ${cx?.sessionId}`), 20000, 300)
+    ok(!!back && resumed, 'Codex restarts on gpt-5-codex, with the same conversation', { back, started: started() })
     const restarted = await carried(p, l.paneId, back?.paneId, 'Then the March ledger')
     ok(restarted.ok, "restarted: what was in its message box is in the new one's, and the window didn't load again", restarted)
 
