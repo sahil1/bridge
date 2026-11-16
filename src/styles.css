@@ -884,9 +884,13 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 .s-del { background: color-mix(in srgb, var(--critical) 20%, transparent); color: var(--critical); }
 .chg-dir { color: var(--ink-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
 .chg-n { display: inline-flex; gap: 4px; font: 10.5px var(--font-mono); flex: none; }
-.path-link { display: inline; padding: 0; color: inherit; }
+.path-link { display: inline; padding: 0; color: inherit; text-align: start; }
 .path-link code { color: var(--accent); cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent); text-underline-offset: 2px; }
 .path-link:hover code { background: var(--accent-soft); }
+/* A path in the words of a message, or a Markdown link to a file (FileLinks.jsx) */
+.path-link.words { font: inherit; line-height: inherit; text-align: inherit; color: var(--accent); cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent); text-underline-offset: 2px; }
+.path-link.words:hover { background: var(--accent-soft); border-radius: 3px; }
+.msg.user .path-link.words { color: inherit; text-decoration-color: currentColor; }
 .composer-wrap[hidden] { display: none !important; }
 
 /* quick open */
@@ -900,6 +904,25 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 .qo-name { font-weight: 550; color: var(--ink); white-space: nowrap; }
 .qo-dir { color: var(--ink-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qo-empty { padding: 14px; margin: 0; color: var(--ink-3); }
+/* In Files, a path that isn't there: looking for it, which one, or where it looked (FileLinks.jsx) */
+.find-file p { margin: 0; max-width: 460px; overflow-wrap: anywhere; }
+.find-file .ff-title { color: var(--ink); font-weight: 600; }
+.ff-looked { max-width: 460px; text-align: left; color: var(--ink-2); }
+.ff-looked ul { margin: 4px 0 0; padding-left: 18px; }
+.ff-looked li { margin: 2px 0; overflow-wrap: anywhere; }
+.ff-acts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
+.find-file.pick { width: 100%; max-width: 640px; margin: 0 auto; padding: 20px 16px; box-sizing: border-box; }
+.find-file.pick .ff-head { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; max-width: none; color: var(--ink); font-weight: 600; }
+.ff-list { list-style: none; margin: 0 0 8px; padding: 4px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--pane); }
+.ff-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 10px; border-radius: 7px; text-align: left; color: var(--ink-2); }
+.ff-row:hover, .ff-row:focus-visible { background: var(--accent-soft); color: var(--ink); }
+.ff-name { font-weight: 550; color: var(--ink); white-space: nowrap; }
+.ff-dir { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; }
+.ff-meta { white-space: nowrap; color: var(--ink-3); font-size: 11.5px; }
+@media (max-width: 560px) {
+  .ff-row { grid-template-columns: auto minmax(0, 1fr); row-gap: 2px; }
+  .ff-dir, .ff-meta { grid-column: 2; }
+}
 
 /* highlight.js tokens, both themes */
 .hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-meta .hljs-keyword { color: #a626a4; }
@@ -2965,6 +2988,14 @@ ul.usage-now-says li:first-child { color: var(--ink-2); }
 .msg-pic { position: relative; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: rgba(255,255,255,.12); cursor: zoom-in; line-height: 0; }
 .msg-pic img { display: block; max-width: 220px; max-height: 160px; object-fit: cover; }
 .msg-chip[href] { color: inherit; text-decoration: none; }
+/* Pictures an agent names in a reply, small under it (FileLinks.jsx) */
+.reply-pics { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; margin-top: 8px; white-space: normal; }
+/* Still there while empty: it's what's watched for coming on screen. */
+.reply-pics:empty { margin: 0; }
+.reply-pic { max-width: 100%; padding: 0; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; background: var(--pane-2); line-height: 0; cursor: zoom-in; }
+.reply-pic.pdf { background: #fff; cursor: pointer; }
+.reply-pic:hover { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.reply-pic img, .reply-pdf { display: block; width: auto; height: auto; max-width: 220px; max-height: 150px; object-fit: contain; }
 .msg-chip[href]:hover { text-decoration: underline; }
 .lightbox { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 24px 24px 64px; background: rgb(0 0 0 / .78); }
 .lightbox img { max-width: 100%; max-height: calc(100vh - 110px); border-radius: 8px; box-shadow: var(--shadow-lg); background: #fff; }

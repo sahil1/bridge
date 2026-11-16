@@ -28,25 +28,16 @@ import { whiteboards, isMermaid, boardFromMermaid } from './whiteboard/links.js'
 import { useTrial } from '../trials.js'
 import { makeRoutine, fromMessage } from './routineDraft.js'
 import { sayPlace } from '../backForward.js'
+import { looksLikePath, hrefPath, BARE, tabPath, quickFind, ReplyPictures } from './FileLinks.jsx'
 
 const KEYS = [
   ['1', '1'], ['2', '2'], ['3', '3'], ['enter', '⏎ Enter'], ['esc', 'Esc'],
   ['up', '↑'], ['down', '↓'], ['tab', 'Tab'], ['shift+tab', '⇧Tab'], ['ctrl+c', '⌃C'],
 ]
 
-// Paths in chat open in the Files view of the same agent.
+// Paths in chat open in the Files view of the same agent: found where they are first
+// (FileLinks.jsx), since an agent names them from wherever it was working.
 const PathCtx = createContext(null)
-// Linkify only things that are clearly paths: a file with an extension, or a folder
-// path anchored at / ~/ ./ ../  ("owner/repo" style names stay plain text).
-const FILE_RE = /^(~\/|\/|\.{1,2}\/)?([\w@.+-]+\/)*[\w@+-][\w@.+-]*\.[A-Za-z][A-Za-z0-9]{0,7}$/
-const DIR_RE = /^(~\/|\/|\.{1,2}\/)[\w@.+-]+(\/[\w@.+-]+)*\/?$/
-function looksLikePath(s) {
-  if (s.length > 240 || /\s/.test(s) || /^https?:/.test(s)) return false
-  if (/^[\w-]+\.(com|org|io|ai|dev|net|app|co)(\/|$)/i.test(s)) return false // domains
-  if (/^v?\d+(\.\d+)+$/.test(s)) return false // versions
-  if (/^\/[\w-]+\/?$/.test(s)) return false // slash commands like /cos
-  return FILE_RE.test(s) || DIR_RE.test(s)
-}
 
 function CodeSpan({ text }) {
   const openPath = useContext(PathCtx)
@@ -56,12 +47,37 @@ function CodeSpan({ text }) {
   return <code>{text}</code>
 }
 
-// Minimal, safe markdown: code fences, headings, **bold** and `code`. No HTML is injected.
+// A path in the words themselves (html/roadmap.html, review-qr.png), or a Markdown link to one.
+function PathWords({ text }) {
+  const openPath = useContext(PathCtx)
+  if (!openPath) return text
+  const out = []
+  let at = 0
+  for (const m of text.matchAll(BARE)) {
+    const from = m.index + m[1].length
+    if (!looksLikePath(m[2])) continue
+    out.push(text.slice(at, from), <button key={from} className="path-link words" onClick={() => openPath(m[2])} title={t('Open in Files')}>{m[2]}</button>)
+    at = from + m[2].length
+  }
+  if (!at) return text
+  out.push(text.slice(at))
+  return out
+}
+function LinkSpan({ label, href, raw }) {
+  const openPath = useContext(PathCtx)
+  const p = hrefPath(href)
+  if (!openPath || !p) return raw
+  return <button className="path-link words" onClick={() => openPath(p)} title={p}>{label}</button>
+}
+
+// Minimal, safe markdown: code fences, headings, **bold**, `code` and links to files. No HTML is injected.
 function Inline({ text }) {
-  return text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/).map((s, j) => {
+  return text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\([^)\s]+\))/).map((s, j) => {
     if (s.length > 2 && s.startsWith('`') && s.endsWith('`')) return <CodeSpan key={j} text={s.slice(1, -1)} />
     if (s.length > 4 && s.startsWith('**') && s.endsWith('**')) return <strong key={j}>{s.slice(2, -2)}</strong>
-    return s
+    const link = /^\[([^\]\n]+)\]\(([^)\s]+)\)$/.exec(s)
+    if (link) return <LinkSpan key={j} label={link[1]} href={link[2]} raw={s} />
+    return s && <PathWords key={j} text={s} />
   })
 }
 
@@ -356,6 +372,7 @@ function QueuedMsg({ q, agent, actions }) {
 function Chat({ agent, going = [], queued = [], delivered = [], outbox = [], queuedActions, onEdit, onUndo, editingText, onOpenTerminal, accounts, onLimit }) {
   const { data, error } = useLive(`/agents/${encodeURIComponent(agent.paneId)}/transcript`)
   const routinesOn = useTrial('routines') // Make a routine of a message you sent
+  const onOpenFile = useContext(PathCtx) // a picture under a reply, opened in Files
   // Stopped at its limit, for the account menu (its other accounts can pick it up now).
   const stopped = !!data?.limit
   useEffect(() => { onLimit?.(stopped); return () => onLimit?.(false) }, [stopped]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -487,7 +504,7 @@ function Chat({ agent, going = [], queued = [], delivered = [], outbox = [], que
               : <div key={k} className={`chat-event ev-${m.status}`}><span className="ev-dot" /><span>{m.text}</span><time>{fmtTime(m.ts)}</time></div>
             : (
               <div key={k} className={`msg ${m.role} ${editingText && m.role === 'user' && m.text === editingText ? 'editing' : ''} ${fromPhone(m) ? 'from-phone' : ''}`}>
-                <div className="msg-text">{m.role === 'user' ? <UserText text={m.text} images={m.images} paneId={agent.paneId} /> : <RichText text={m.text} />}</div>
+                <div className="msg-text">{m.role === 'user' ? <UserText text={m.text} images={m.images} paneId={agent.paneId} /> : <><RichText text={m.text} /><ReplyPictures text={m.text} pane={agent.paneId} onOpen={onOpenFile} /></>}</div>
                 <div className="msg-time">
                   {fmtTime(m.ts)}
                   {fromPhone(m) && <span className="msg-sent"><Icon name="check" size={11} /> {t('Delivered from your phone')}</span>}
@@ -642,13 +659,12 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
     setViewRaw(v)
     try { localStorage.setItem('cc-agent-views', JSON.stringify({ ...readViews(), [agent.paneId]: v })) } catch { /* private mode */ }
   }
-  const openFromChat = (raw) => {
-    const home = (agent.cwd.match(/^\/Users\/[^/]+/) || [''])[0]
-    let p = raw.replace(/^~(?=\/)/, home)
-    if (p.startsWith(agent.cwd + '/')) p = p.slice(agent.cwd.length + 1)
-    else if (p.startsWith('/')) p = p // absolute outside root: the server will say so
-    p = p.replace(/^\.\//, '').replace(/\/$/, '')
-    setOpenPath(p)
+  // Where it is, when that's quick to say (most are in the agent's folder, or where its
+  // conversation worked); else Files opens it as written and says what it finds (FindFile).
+  const openFromChat = async (raw) => {
+    const p = tabPath(raw, agent.cwd)
+    const one = await quickFind(agent.paneId, p.replace(/\/$/, ''))
+    setOpenPath(one ? `${one.path}${one.dir ? '/' : ''}` : p.replace(/\/$/, ''))
     setView('files')
   }
   const going = useSending(agent?.paneId)
