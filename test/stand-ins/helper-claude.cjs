@@ -109,7 +109,8 @@ function turn(text, answer, ms, made) {
 
 // An answer for the Slack Bot: what it can do is what it was started with.
 function answerTurn(text) {
-  const q = (/----- question from[^\n]*\n([\s\S]*?)\n----- end of question -----/.exec(text) || [])[1] || ''
+  // (On Windows its lines come as one, joined by " · ": runtime/spawn.js forCommandLine.)
+  const q = (/----- question from.*? -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of question -----/.exec(text) || [])[1] || ''
   const tools = opt('--tools')
   const can = (t) => tools == null || tools.split(',').map((x) => x.trim()).includes(t)
   const dontAsk = opt('--permission-mode') === 'dontAsk'
