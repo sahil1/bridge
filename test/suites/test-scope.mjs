@@ -30,6 +30,7 @@ ok(/if \[ -n "\$ASKED" \]; then base="\$ASKED"/.test(scope) && /refs\/tags\/\*\ 
 ok(/isn't a commit here, so every test runs/.test(scope), 'a base that isn\'t a commit here: every test, never none')
 ok(/schedule:\s*\n\s*- cron: '0 6 \* \* 6'/.test(test), 'Friday night (6:00 UTC on Saturday): every test on main')
 ok(/test:\n\s*name: Tests \(\$\{\{ matrix\.name \}\}\)\n\s*needs: scope\n\s*if: needs\.scope\.outputs\.count != '0'/.test(test) && /node test\/run\.mjs \$ARGS --lanes 2/.test(test), 'the test machines only when a test applies, running just those')
+ok(/- name: Tests\n\s*shell: bash\n\s*env:\n\s*ARGS: \$\{\{ needs\.scope\.outputs\.args \}\}\n\s*run: node test\/run\.mjs \$ARGS /.test(test), 'the tests in bash on Windows too, where PowerShell reads $ARGS as its own empty list (and ran none, 16 Nov)')
 ok(/ios:\n\s*name: iPhone app\n\s*needs: scope\n\s*if: needs\.scope\.outputs\.mobile == 'true'/.test(test) && /android:\n\s*needs: scope\n\s*if: github\.ref_type != 'tag' && needs\.scope\.outputs\.mobile == 'true'/.test(test), 'the iPhone and Android builds with every test, or a change to mobile/')
 const release = yml('release.yml')
 ok(/test:\n\s*needs: guard\n\s*uses: \.\/\.github\/workflows\/test\.yml\n\s*with:\n\s*base: \$\{\{ needs\.guard\.outputs\.base \}\}/.test(release), 'release.yml: every test for a release, only what changed since for a nightly or a beta (the guard says from where)')

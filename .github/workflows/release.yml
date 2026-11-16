@@ -120,9 +120,11 @@ jobs:
           npm ci --no-audit --no-fund
           npm --prefix desktop ci --no-audit --no-fund
 
-      # A nightly: its version in this build's package.json files only.
+      # A nightly: its version in this build's package.json files only. bash on Windows too, where
+      # PowerShell would read "$NIGHTLY" as a variable of its own, which is empty.
       - name: The nightly's version
         if: inputs.nightly
+        shell: bash
         env:
           NIGHTLY: ${{ inputs.nightly }}
         run: node scripts/nightly.js stamp "$NIGHTLY"
