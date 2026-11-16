@@ -240,6 +240,8 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
       const narrow = narrowNow()
       // A CSV keeps only values, so the tools for formats, merged cells, conditional formats and
       // validation aren't offered there (as the other editors do).
+      // Its tools on one row under their tabs (Start, Insert, Formulas, Data, View), what doesn't fit
+      // under ⋮ at its end, as a document's and a deck's are; on a phone, one row of every tab's.
       const menu = {}
       const csv = wb.kind === 'csv'
       if (csv) for (const id of CSV_HIDDEN) menu[id] = { hidden: true }
@@ -252,7 +254,7 @@ html,body{margin:0;background:#fff;color:#000}body{padding:0}table{border-collap
         presets: [
           // A CSV's text that looks like a number ("007", a long ID) is text on purpose, and kept
           // so: not marked as a number stored as text.
-          UniverSheetsCorePreset({ container: host.current, header: !readOnly, toolbar: !readOnly, ribbonType: narrow ? 'simple' : 'grid', menu, footer: { sheetBar: true, statisticBar: !narrow, menus: false, zoomSlider: !narrow }, sheets: { disableForceStringMark: csv, disableForceStringAlert: csv } }),
+          UniverSheetsCorePreset({ container: host.current, header: !readOnly, toolbar: !readOnly, ribbonType: narrow ? 'simple' : 'classic', menu, footer: { sheetBar: true, statisticBar: !narrow, menus: false, zoomSlider: !narrow }, sheets: { disableForceStringMark: csv, disableForceStringAlert: csv } }),
           UniverSheetsSortPreset(), UniverSheetsFilterPreset(), UniverSheetsConditionalFormattingPreset(),
           UniverSheetsDataValidationPreset(), UniverSheetsFindReplacePreset(), UniverSheetsHyperLinkPreset(), UniverSheetsNotePreset(),
         ],

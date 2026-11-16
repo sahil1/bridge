@@ -478,7 +478,21 @@ function imageOf(d, cx, marks, wrap, whole) {
     return opaque(whole, 'shape', /chart/.test(chart) ? 'chart' : /diagram/.test(chart) ? 'diagram' : 'shape', wrap, { w, h })
   }
   const pr = find(d, 'wp:docPr')
-  return withMarks({ type: 'image', attrs: { src: media.url, alt: av(pr, 'descr') || av(pr, 'title') || null, title: null, width: w || null, height: h || null, rid, raw: raw(d), w0: w, h0: h, float: !!kid(d, 'wp:anchor') } }, marks)
+  const place = wrapOf(kid(d, 'wp:anchor'))
+  return withMarks({ type: 'image', attrs: { src: media.url, alt: av(pr, 'descr') || av(pr, 'title') || null, title: null, width: w || null, height: h || null, rid, raw: raw(d), w0: w, h0: h, float: !!kid(d, 'wp:anchor'), wrap: place.wrap, side: place.side, wrap0: place.wrap, side0: place.side } }, marks)
+}
+// How text goes round a picture Word floats (wp:anchor): square (wrapSquare, and tight and through,
+// which Studio draws the same), top and bottom, or none (in front of the text, or behind it); and
+// which side it's on, by its alignment or, placed by an offset, by which half it starts in.
+function wrapOf(anchor) {
+  if (!anchor) return { wrap: 'inline', side: null }
+  const w = els(anchor).find((k) => /^wp:wrap/.test(k.name))?.name || 'wp:wrapNone'
+  const wrap = w === 'wp:wrapTopAndBottom' ? 'top' : w === 'wp:wrapNone' ? (av(anchor, 'behindDoc') === '1' || av(anchor, 'behindDoc') === 'true' ? 'behind' : 'front') : 'square'
+  const ph = kid(anchor, 'wp:positionH')
+  const al = textIn(kid(ph, 'wp:align') || { kids: [] }).trim()
+  const off = num(textIn(kid(ph, 'wp:posOffset') || { kids: [] }))
+  const side = al === 'center' ? 'center' : al === 'right' || al === 'outside' ? 'right' : al ? 'left' : off > 2286000 ? 'right' : 'left'
+  return { wrap, side }
 }
 
 // A table: its properties and grid as written, each row's and cell's too; a cell merged down
@@ -631,10 +645,13 @@ export async function readDocx(buf, { urlOf = () => '' } = {}) {
   const ns = { ...(docEl.scope || {}) }
   const maxRid = Math.max(0, ...rels.map((r) => num(/^rId(\d+)$/.exec(r.id)?.[1]) || 0))
   const maxDocPr = Math.max(0, ...[...xml.matchAll(/<wp:docPr\b[^>]*?\sid="(\d+)"/g)].map((m) => Number(m[1])))
+  // A tracked change's id counts on from the highest the document has (a change's, a comment's or
+  // a bookmark's), so a suggestion made here is never taken for one of them.
+  const maxRev = Math.max(0, ...[...xml.matchAll(/\sw:id="(\d+)"/g)].map((m) => Number(m[1])).filter((n) => n < 1e9))
   return {
     zip, docPath, relsXml, rels: relsCache, main, hf, json: { type: 'doc', content: content.length ? content : [{ type: 'paragraph', attrs: { x: null, pa: '', ppr: '' } }] },
     styles, numbering, theme, comments, cparts, footnotes, endnotes, page: pageOf(sect), stylesPath, numberingPath, ns,
-    added: { rels: new Map(), media: new Map(), styles: new Map(), abs: [], nums: [], next: { rid: maxRid, docPr: maxDocPr, abs: numbering.maxAbs, num: numbering.maxNum } },
+    added: { rels: new Map(), media: new Map(), styles: new Map(), abs: [], nums: [], next: { rid: maxRid, docPr: maxDocPr, rev: maxRev, abs: numbering.maxAbs, num: numbering.maxNum } },
   }
 }
 
@@ -675,8 +692,13 @@ function withAttrs(rawXml, name, set, scope) {
 
 export class Writer {
   // A new picture's id counts on from the file's own, the same way each save, so a file saved again
-  // as it is comes out the same.
-  constructor(model) { this.m = model; this.scope = { ...NS, ...model.ns }; this.docPr = model.added.next.docPr }
+  // as it is comes out the same; so does a new tracked change's.
+  constructor(model) { this.m = model; this.scope = { ...NS, ...model.ns }; this.docPr = model.added.next.docPr; this.revId = model.added.next.rev || 0; this.revTags = new Set() }
+  // A tracked change made here (suggest.js): Word's own w:ins or w:del, with who made it and when.
+  revOpen(a) {
+    const k = ['ins', 'del', 'moveFrom', 'moveTo'].includes(a.k) ? a.k : 'ins'
+    return `<w:${k} w:id="${++this.revId}" w:author="${esc(a.by || 'Unknown')}"${a.at ? ` w:date="${esc(a.at)}"` : ''}>`
+  }
   // type: one of the package's own (image, header…), or a relationship's whole name (Word's own
   // since 2010, like commentsExtended).
   relsAdd(from, type, target, external = false) {
@@ -750,7 +772,10 @@ export class Writer {
       }
       if (!same(r, rev) || (!r) !== (!rev)) {
         close()
-        if (r) { out += r.attrs.tag || `<w:${r.attrs.k}>`; rev = r }
+        // A change as the file had it, once; written again (copied and pasted), with an id of its own.
+        const tag = r?.attrs.tag && !this.revTags.has(r.attrs.tag) ? r.attrs.tag : null
+        if (tag) this.revTags.add(tag)
+        if (r) { out += tag || this.revOpen(r.attrs); rev = r }
       }
       out += this.node(n, part, r?.attrs.k)
     }
@@ -778,10 +803,13 @@ export class Writer {
   }
   drawing(a, part) {
     const cx = Math.round((a.width || a.w0 || 100) * EMU), cy = Math.round((a.height || a.h0 || 100) * EMU)
+    // Text put round it another way than the file had (wordschema.js WordImage).
+    const moved = (a.wrap || 'inline') !== (a.wrap0 || 'inline') || (a.side || null) !== (a.side0 || null)
     if (a.raw) {
-      if (a.width === a.w0 && a.height === a.h0) return a.raw
       const size = (tag) => (s) => s.replace(new RegExp(`(<${tag}\\b[^>]*?\\scx=")\\d+(")`), `$1${cx}$2`).replace(new RegExp(`(<${tag}\\b[^>]*?\\scy=")\\d+(")`), `$1${cy}$2`)
-      return size('a:ext')(size('wp:extent')(a.raw))
+      const sized = a.width === a.w0 && a.height === a.h0 ? a.raw : size('a:ext')(size('wp:extent')(a.raw))
+      const parts = moved ? drawingParts(sized) : null
+      return parts ? `<w:drawing>${this.placed(a.wrap, a.side, cx, cy, parts)}</w:drawing>` : sized
     }
     const m = /^data:(image\/[\w+.-]+);base64,(.+)$/.exec(a.src || '')
     if (!m) return ''
@@ -796,7 +824,25 @@ export class Writer {
     const rid = this.relsAdd(part.path, 'image', relTarget(part.path, media.path))
     const id = ++this.docPr
     const A = NS.a, PIC = NS.pic
-    return `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${id}" name="Picture ${id}"${a.alt ? ` descr="${esc(a.alt)}"` : ''}/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="${A}" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="${A}"><a:graphicData uri="${PIC}"><pic:pic xmlns:pic="${PIC}"><pic:nvPicPr><pic:cNvPr id="${id}" name="Picture ${id}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`
+    const parts = {
+      id, effect: null,
+      docPr: `<wp:docPr id="${id}" name="Picture ${id}"${a.alt ? ` descr="${esc(a.alt)}"` : ''}/>`,
+      frame: `<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="${A}" noChangeAspect="1"/></wp:cNvGraphicFramePr>`,
+      graphic: `<a:graphic xmlns:a="${A}"><a:graphicData uri="${PIC}"><pic:pic xmlns:pic="${PIC}"><pic:nvPicPr><pic:cNvPr id="${id}" name="Picture ${id}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic>`,
+    }
+    return `<w:drawing>${this.placed(a.wrap, a.side, cx, cy, parts)}</w:drawing>`
+  }
+  // A picture's place, as Word writes it: in line with the text (wp:inline), or floated (wp:anchor)
+  // at the column's side with the text round it (wrapSquare) or above and below it
+  // (wrapTopAndBottom), from the top of its paragraph; its parts (drawingParts) as they were.
+  placed(wrap, side, cx, cy, p) {
+    const ext = `<wp:extent cx="${cx}" cy="${cy}"/>${p.effect || '<wp:effectExtent l="0" t="0" r="0" b="0"/>'}`
+    const body = `${p.docPr}${p.frame}${p.graphic}`
+    if (wrap !== 'square' && wrap !== 'top') return `<wp:inline distT="0" distB="0" distL="0" distR="0">${ext}${body}</wp:inline>`
+    const align = side === 'right' ? 'right' : side === 'center' && wrap === 'top' ? 'center' : 'left'
+    const dist = wrap === 'square' ? 'distT="0" distB="0" distL="114300" distR="114300"' : 'distT="0" distB="0" distL="0" distR="0"'
+    const how = wrap === 'square' ? '<wp:wrapSquare wrapText="bothSides"/>' : '<wp:wrapTopAndBottom/>'
+    return `<wp:anchor ${dist} simplePos="0" relativeHeight="${251658240 + p.id}" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="column"><wp:align>${align}</wp:align></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV>${ext}${how}${body}</wp:anchor>`
   }
   blocks(list, part, seen = new Set()) {
     let out = ''
@@ -891,6 +937,17 @@ export class Writer {
   }
 }
 const noIds = (t) => String(t || '').replace(/\s+w14:(paraId|textId)="[^"]*"/g, '')
+// A picture's drawing as written, in the parts that stay when it's placed another way: its name and
+// id (docPr), its frame's locks, the picture itself (a:graphic) and its effects' room. Null where
+// it isn't written with Word's usual prefixes, so it's kept as it is.
+function drawingParts(xml) {
+  const docPr = /<wp:docPr\b[^>]*?(?:\/>|>[\s\S]*?<\/wp:docPr>)/.exec(xml)?.[0]
+  const graphic = /<a:graphic\b[\s\S]*<\/a:graphic>/.exec(xml)?.[0]
+  if (!docPr || !graphic) return null
+  const frame = /<wp:cNvGraphicFramePr\b[^>]*?(?:\/>|>[\s\S]*?<\/wp:cNvGraphicFramePr>)/.exec(xml)?.[0] || ''
+  const effect = /<wp:effectExtent\b[^>]*\/>/.exec(xml)?.[0] || null
+  return { docPr, graphic, frame, effect, id: Number(/\sid="(\d+)"/.exec(docPr)?.[1]) || 1 }
+}
 const shadeOfCell = (tcpr, scope) => { if (!tcpr) return null; const f = av(kid(els(parseXml(tcpr, scope))[0], 'w:shd'), 'w:fill'); return f && /^[0-9a-f]{6}$/i.test(f) ? f.toUpperCase() : null }
 const relTarget = (from, to) => {
   const a = from.split('/').slice(0, -1), b = to.split('/')
@@ -994,6 +1051,10 @@ function withPage(x, p, scope) {
 // written too (the comments: wordcomments.js), with the relationships and types they add. Bytes back.
 export async function writeDocx(m, json, { hf = {}, make = {}, page = null, more = null } = {}) {
   const w = new Writer(m)
+  // A change made here counts on from the ones the document has now too (AI Assist's, written with
+  // their own ids), so no two share an id.
+  const ids = (n) => { for (const k of n.marks || []) if (k.type === 'rev' && k.attrs?.tag) w.revId = Math.max(w.revId, Number(/w:id="(\d+)"/.exec(k.attrs.tag)?.[1]) || 0); for (const c of n.content || []) ids(c) }
+  ids(json)
   const zip = m.zip
   const write = (part, body, sect = null) => {
     let tail = part.tail

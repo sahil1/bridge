@@ -213,7 +213,7 @@ try {
   await shot(p, `${tag}looks-ai`)
   await p.locator('.sd-ai-head button[aria-label="Close AI Assist"]').click()
   // A Markdown deck of it, beside it: its master's background and words' colour kept, and drawn so.
-  await p.locator('.px-row button[aria-label="Export"]').click()
+  await p.locator('.sd-slides-tools button[aria-label="Export"]').click()
   await p.locator('.sd-tool-menu .menu-item', { hasText: 'Markdown deck, beside it' }).click()
   const mdPath = path.join(dir, 'dark-master.md')
   ok(!!(await until(() => fs.existsSync(mdPath) && /^background: "#111827"$/m.test(fs.readFileSync(mdPath, 'utf8')) && /^textColor: "#ffffff"$/m.test(fs.readFileSync(mdPath, 'utf8')), 10000, 100)), 'a Markdown deck of it, beside it, keeping its background and its words\' colour', fs.existsSync(mdPath) ? fs.readFileSync(mdPath, 'utf8').slice(0, 200) : 'not made')

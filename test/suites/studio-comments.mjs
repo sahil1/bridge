@@ -32,7 +32,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { startKit, startModel, checks, until, browser, page, shot, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, browser, page, shot, inBar, ROOT } from '../lib/harness.mjs'
 import { richDocx, threadsDocx, THREADS, THREAD_PARAS } from '../lib/wordfile.mjs'
 import { readDocx } from '../../src/components/studio/ooxml.js'
 import { commentsOf, threadsOf } from '../../src/components/studio/wordcomments.js'
@@ -169,7 +169,7 @@ try {
   const openSheet = (pg, rel) => until(async () => { await pg.evaluate(({ root, rel }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: rel } })), { root, rel }); return pg.locator('.pane-head h2', { hasText: rel }).first().waitFor({ timeout: 2500 }).then(() => pg.locator('.sd-univer canvas').first().waitFor({ timeout: 5000 })).then(() => true, () => false) }, 25000, 300)
   const nameBox = (pg) => until(() => pg.evaluate(() => { document.querySelectorAll('[data-name-box]').forEach((x) => x.removeAttribute('data-name-box')); const i = [...document.querySelectorAll('.sd-file .sd-univer [data-u-comp="defined-name"] input, .sd-file .sd-univer input')].find((x) => /^[A-Z]+[0-9]+$/.test(x.value)); i?.setAttribute('data-name-box', '1'); return !!i }), 15000, 200)
   const goTo = async (a1) => { const nb = p.locator('input[data-name-box]'); await nb.click(); await nb.fill(a1); await nb.press('Enter'); await p.waitForTimeout(250) }
-  const ribbon = async (pg, cmd) => { await pg.locator('.sd-univer [role="tab"]', { hasText: 'Insert' }).first().click(); await pg.locator(`.sd-univer [data-u-command="${cmd}"]`).first().click() }
+  const ribbon = async (pg, cmd) => { await pg.locator('.sd-univer [role="tab"]', { hasText: 'Insert' }).first().click(); await pg.locator(`.sd-univer [data-u-command="${cmd}"]:visible`).first().click() }
   const xThread = (has) => p.locator('.sh-threads .sd-thread', { hasText: has })
   const xSaved = (test) => savedWith('threads.xlsx', test)
   const tcIn = (x) => x['xl/threadedComments/threadedComment1.xml'] || ''
@@ -501,7 +501,7 @@ try {
   ok(fits.right <= fits.width && !fits.small.length, 'on a phone: the comments over the page, fitting it, each button big enough to tap', fits)
   await shot(ph.p, `${tag}studio-comments-phone`)
   ok(!!(await openDeck(ph.p)), 'on a phone: the PowerPoint')
-  await ph.p.locator('.sd-slides-tools button[aria-label="Comments"]').click()
+  await (await inBar(ph.p.locator('.sd-slides-tools'), 'Comments')).click()
   await ph.p.locator('.sd-threads .sd-thread').first().waitFor({ timeout: 5000 })
   const dFits = await ph.p.evaluate(() => { const pane = document.querySelector('.sd-threads').getBoundingClientRect(); return { left: Math.round(pane.left), right: Math.round(pane.right), width: innerWidth } })
   ok(dFits.left >= 0 && dFits.right <= dFits.width, 'its comments over the slide, fitting the phone', dFits)

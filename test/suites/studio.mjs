@@ -28,7 +28,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, withoutCutOff, noServiceWorker, TEST, ROOT, advanced } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, inBar, phoneFaults, withoutCutOff, noServiceWorker, TEST, ROOT, advanced } from '../lib/harness.mjs'
 
 const require = createRequire(path.join(ROOT, 'package.json'))
 const { ok, done } = checks('studio')
@@ -228,7 +228,12 @@ try {
   await p.locator('.sd-file-name', { hasText: 'notes.md' }).first().dblclick()
   const pm = p.locator('.sd-page .ProseMirror')
   ok(!!(await until(async () => /Second draft/.test(await pm.innerText().catch(() => '')), 15000)), 'a Markdown file opens as a document')
+  // Its tools on their one row and under More, where the row hasn't room for them all.
+  const mdMore = p.locator('.sd-doc-tools .sd-more-btn')
+  const hasMore = (await mdMore.count()) > 0
+  if (hasMore) await mdMore.click()
   const mdTools = await p.locator('.sd-doc-tools button').evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')))
+  if (hasMore) await mdMore.click()
   ok(!mdTools.includes('Underline') && mdTools.includes('Inline code') && mdTools.includes('Code block'), "a Markdown file's toolbar: code and code blocks, and no underline (Markdown has none)", mdTools)
   ok(!!(await until(async () => { const x = await p.locator('.sd-status').innerText(); return /^\d+ words?/.test(x) && /Markdown/.test(x) && /Saved/.test(x) }, 5000)) && /^Markdown · \d+ KB$/.test(await p.locator('.sd-sub-kind').innerText()), 'its header says Markdown and its size; its status line its words, and Saved', await p.locator('.sd-status').innerText())
   // Saved, said quietly in the header (words, not a button that looks turned off).
@@ -421,7 +426,7 @@ try {
   ok(!!(await until(async () => (await shown.locator('svg .sc-bar').count()) === 2 && /Costs/.test(await shown.innerText()), 10000)), 'Chart this: the chart drawn from the cells, before it\'s added', await shown.innerHTML().catch(() => ''))
   await shot(p, `${tag}studio-sheet-chart`)
   await shown.locator('button', { hasText: 'Keep' }).click()
-  await p.locator('.sd-univer [data-u-command="bridge.sheet.charts"]').click({ timeout: 3000 }).catch(async () => { await p.locator('.sd-univer [role="tab"]', { hasText: 'Insert' }).first().click(); await p.locator('.sd-univer [data-u-command="bridge.sheet.charts"]').click() })
+  await p.locator('.sd-univer [data-u-command="bridge.sheet.charts"]:visible').first().click({ timeout: 3000 }).catch(async () => { await p.locator('.sd-univer [role="tab"]', { hasText: 'Insert' }).first().click(); await p.locator('.sd-univer [data-u-command="bridge.sheet.charts"]:visible').first().click() })
   ok(!!(await until(async () => /Costs/.test(await p.locator('.sh-charts').innerText().catch(() => '')) && (await p.locator('.sh-charts svg .sc-bar').count()) === 2, 5000)), 'Charts: the one kept, drawn from its cells', await p.locator('.sh-charts').innerText().catch(() => ''))
   await p.locator('.pane-head button', { hasText: 'Save' }).click()
   const JSZip0 = require('jszip')
@@ -430,7 +435,7 @@ try {
   // A filter, from the Data tab, saved as Excel's own.
   await goTo('A1:C3')
   await p.locator('.sd-univer [role="tab"]', { hasText: 'Data' }).click()
-  await p.locator('.sd-univer [data-u-command="sheet.command.smart-toggle-filter"]').first().click()
+  await p.locator('.sd-univer [data-u-command="sheet.command.smart-toggle-filter"]:visible').first().click()
   await until(async () => /Unsaved changes/.test(await p.locator('.sd-status').innerText()), 5000)
   await p.locator('.pane-head button', { hasText: 'Save' }).click()
   const sheetXml = () => JSZip0.loadAsync(fs.readFileSync(path.join(dir, 'budget.xlsx'))).then((z) => z.file('xl/worksheets/sheet1.xml').async('string')).catch(() => '')
@@ -477,7 +482,7 @@ try {
   await open('people.csv')
   const csvBar = p.locator('.sh-csv')
   ok(!!(await until(async () => (await csvBar.locator('select').first().inputValue().catch(() => '')) === ';' && (await csvBar.locator('select').nth(1).inputValue()) === 'utf-8-bom' && /Windows line endings/.test(await csvBar.innerText()), 15000)), "a CSV: its separator (semicolons), encoding (UTF-8 with a BOM) and line endings found, and said", await csvBar.innerText().catch(() => ''))
-  ok(!(await p.locator('.sd-univer [data-u-command="sheet.command.set-range-bold"]').count()) && (await p.locator('.sd-univer [data-u-command="bridge.sheet.print-button"]').count()) === 1, "and its ribbon offers no formats, which a CSV can't keep")
+  ok(!(await p.locator('.sd-univer [data-u-command="sheet.command.set-range-bold"]').count()) && (await p.locator('.sd-univer [data-u-command="bridge.sheet.print-button"]:visible').count()) === 1, "and its ribbon offers no formats, which a CSV can't keep")
   await shot(p, `${tag}studio-sheet-csv`)
   await sleep(500)
   await goTo('B2')
@@ -505,8 +510,8 @@ try {
   ok(/#ff8800/.test(await drawn()), 'a deck is drawn in your default design pack', (await drawn()).slice(0, 400))
   await api('/studio/packs', { name: 'Board', colors: { background: '#ffffff', text: '#222222', accent: '#0a7d4f' }, fonts: { heading: 'Georgia', body: 'Georgia' } })
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-refetch', { detail: '/studio/packs' })))
-  const theme = async (name) => { await p.locator('.sd-deck-tools button[aria-label="Theme"]').click(); await p.locator('.sd-themes button', { hasText: name }).first().click() }
-  await until(async () => { await p.locator('.sd-deck-tools button[aria-label="Theme"]').click(); const n = await p.locator('.sd-themes button', { hasText: 'Board' }).count(); await p.keyboard.press('Escape'); return n > 0 }, 15000, 500)
+  const theme = async (name) => { await (await inBar(p.locator('.sd-deck-tools'), 'Theme')).click(); await p.locator('.sd-themes button', { hasText: name }).first().click() }
+  await until(async () => { await (await inBar(p.locator('.sd-deck-tools'), 'Theme')).click(); const n = await p.locator('.sd-themes button', { hasText: 'Board' }).count(); await p.keyboard.press('Escape'); return n > 0 }, 15000, 500)
   await theme('Board')
   const deckMd = () => p.locator('.sd-deck-md').inputValue()
   ok(!!(await until(async () => /^---\nmarp: true\npack: Board\n---\n/.test(await deckMd()) && /#0a7d4f/.test(await drawn()), 5000)), 'Theme: another pack, written in its front matter and drawn in it', await deckMd())

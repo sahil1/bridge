@@ -5,12 +5,20 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view'
 // paragraph (a match doesn't run from one paragraph into the next, as in Word).
 export const findKey = new PluginKey('sd-find')
 
+// What's looked for, as a pattern: the words as typed, or a regular expression; whole words only
+// (not inside a longer word), as Word's Whole words only. Null for a pattern that isn't one.
+export function patternOf(q, { matchCase = false, whole = false, regex = false } = {}) {
+  if (!q) return null
+  const body = regex ? q : q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  try { return new RegExp(whole ? `(?<![\\p{L}\\p{N}_])(?:${body})(?![\\p{L}\\p{N}_])` : body, `gu${matchCase ? '' : 'i'}`) } catch { return null }
+}
+
 // Each match of q in the document, as positions: [{ from, to }]. Things that aren't text (a
 // picture, a tab) count as one character no word matches.
-export function matches(doc, q, { matchCase = false } = {}) {
+export function matches(doc, q, o = {}) {
   const out = []
-  if (!q) return out
-  const needle = matchCase ? q : q.toLocaleLowerCase()
+  const re = patternOf(q, o)
+  if (!re) return out
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return true
     let text = ''
@@ -19,11 +27,10 @@ export function matches(doc, q, { matchCase = false } = {}) {
       if (child.isText) { for (let i = 0; i < child.text.length; i++) at.push(pos + 1 + offset + i); text += child.text }
       else { at.push(pos + 1 + offset); text += '\uFFFC' }
     })
-    const hay = matchCase ? text : text.toLocaleLowerCase()
-    let i = hay.indexOf(needle)
-    while (i >= 0 && needle) {
-      out.push({ from: at[i], to: at[i + needle.length - 1] + 1 })
-      i = hay.indexOf(needle, i + needle.length)
+    re.lastIndex = 0
+    for (let m = re.exec(text); m; m = re.exec(text)) {
+      if (!m[0].length) { re.lastIndex++; continue }
+      out.push({ from: at[m.index], to: at[m.index + m[0].length - 1] + 1 })
     }
     return false
   })
@@ -38,12 +45,12 @@ export function findPlugin() {
   return new Plugin({
     key: findKey,
     state: {
-      init: () => ({ q: '', matchCase: false, list: [], index: -1, set: DecorationSet.empty }),
+      init: () => ({ q: '', matchCase: false, whole: false, regex: false, list: [], index: -1, set: DecorationSet.empty }),
       apply(tr, old) {
         const meta = tr.getMeta(findKey)
         if (!meta && !tr.docChanged) return old
         const s = { ...old, ...(meta || {}) }
-        if (tr.docChanged || meta?.q !== undefined || meta?.matchCase !== undefined) s.list = matches(tr.doc, s.q, s)
+        if (tr.docChanged || meta?.q !== undefined || meta?.matchCase !== undefined || meta?.whole !== undefined || meta?.regex !== undefined) s.list = matches(tr.doc, s.q, s)
         if (meta?.index === undefined) {
           // Still on the match nearest where it was.
           const was = old.list[old.index]

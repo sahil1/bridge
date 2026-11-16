@@ -213,13 +213,8 @@
 .px-marquee { position: absolute; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .sd-thumb-n > svg { display: block; margin: 3px 0 0 auto; color: var(--ink-3); }
 .sd-slides .sd-sorter .sd-thumb-btn .px-slide-box { width: 100% !important; height: auto !important; }
-/* Its toolbar in two rows that stay put, each as high as any editor's toolbar: the deck's tools,
-   then the format of what's picked (greyed while there's nothing to format, so the slide doesn't
-   jump when something is picked). On a phone the format row only while it has something in it. */
-.sd-slides .sd-slides-tools { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 0; padding: 0 10px; }
-.px-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 42px; padding: 6px 0; }
-.px-row.px-format { border-top: 1px solid var(--line); }
-.app.narrow .sd-slides .px-format:not(:has(> .sd-group:not(.sd-marks))) { display: none; }
+/* Its toolbar is one row as high as any editor's (doctools.jsx OneRow), so the slide doesn't jump
+   when something is picked: the format of what's picked joins it, what doesn't fit under More. */
 /* How to start, over the slide (in the space above it) while nothing on it is picked: not a row of
    its own, and out of the way of a click. */
 .px-hint { position: absolute; top: 6px; left: 0; right: 0; z-index: 1; margin: 0; padding: 0 16px; line-height: 16px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
@@ -258,7 +253,7 @@
 .app.narrow .sd-deck-tools .sd-tool.wide { width: 40px; padding: 0; justify-content: center; }
 .app.narrow .sd-deck-tools .sd-tool.wide .sd-tool-label { display: none; }
 .app.narrow .sd-deck-tools .sd-tool.caret { width: 40px; margin: 0; }
-.app.narrow .sd-deck-tools .sd-marks { display: none; }
+.app.narrow .sd-deck-tools:not(.sd-slides-tools) .sd-marks { display: none; }
 .app.narrow .sd-strip-add .ghost-btn, .app.narrow .sd-ai .btn.small, .app.narrow .sd-ai .ghost-btn, .app.narrow .sd-chip, .app.narrow .sd-pic-bar .btn.small { min-height: 40px; }
 .app.narrow .sd-ai textarea, .app.narrow .sd-ai-field select { font-size: 16px; }
 .app.narrow .sd-ai-field select { height: 40px; }
@@ -270,10 +265,10 @@
 .app.narrow .sd-present-bar .win-btn { width: 44px; height: 44px; }
 .app.narrow .sd-slides .sd-drop-btn { min-width: 40px; height: 40px; }
 .app.narrow .sd-slides .sd-stage.px-stage { padding: 12px 0; }
-.app.narrow .sd-slides .px-row { gap: 2px; min-height: 0; padding: 0; }
-.app.narrow .sd-slides .px-row.px-format { padding-top: 4px; margin-top: 4px; }
 .app.narrow .sd-slides .px-hint { display: none; }
 .app.narrow .sd-slides .sd-size { gap: 0; }
+/* A phone fits the slide to the screen whatever the zoom, so it has none. */
+.app.narrow .sd-slides .sd-zoom-drop { display: none; }
 .app.narrow .sd-findbar .win-btn, .app.narrow .sd-findbar .btn.small { min-width: 40px; min-height: 40px; }
 .app.narrow .sd-findbar input { font-size: 16px; height: 40px; }
 .app.narrow .sd-find-case { min-height: 40px; }

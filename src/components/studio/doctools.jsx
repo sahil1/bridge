@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Children, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from '../Icon.jsx'
 import { api } from '../../api.js'
 import { t, tx, locale } from '../../i18n/index.js'
 import { withKeys } from './keys.js'
-import { find, findKey } from './search.js'
+import { find, findKey, patternOf } from './search.js'
 import { lineDiff } from './diff.js'
 
 // What a document's editor is made of besides the page: its toolbar's pieces (a button, a menu, a
@@ -30,8 +30,15 @@ const GLYPH = {
   outline: <><path d="M3 5h12M7 12h14M7 19h14" /><path d="M3 12v7" /></>,
   comment: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
   changes: <><path d="M12 3v14M5 10h14" /><path d="M5 21h14" /></>,
+  editing: <><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13.5 6.5 4 4" /></>,
+  suggesting: <><path d="M3 18h3l9-9a2.1 2.1 0 0 0-3-3l-9 9z" /><path d="M18 14v6M15 17h6" /></>,
+  'wrap-inline': <><rect x="9" y="8" width="6" height="6" rx="1" /><path d="M3 14h4M17 14h4M3 19h18M3 4h18" /></>,
+  'wrap-square': <><rect x="8" y="8" width="7" height="7" rx="1" /><path d="M3 4h18M3 8h3M3 12h3M3 16h3M17 8h4M17 12h4M17 16h4M3 20h18" /></>,
+  'wrap-top-bottom': <><rect x="8" y="8" width="8" height="7" rx="1" /><path d="M3 4h18M3 19h18" /></>,
   'chevron-down': <path d="m6 9 6 6 6-6" />,
   replace: <><path d="M14 4h6v6" /><path d="M20 4 13 11" /><path d="M10 20H4v-6" /><path d="m4 20 7-7" /></>,
+  'whole-word': <><path d="M3 16v3h18v-3" /><path d="m6 13 2.5-7 2.5 7M7 11h3M14 6v7M14 10.5a2.5 2.5 0 1 0 5 0 2.5 2.5 0 1 0-5 0" /></>,
+  regex: <><path d="M17 3v9M13.1 5.25l7.8 4.5M13.1 9.75l7.8-4.5" /><circle cx="6" cy="18" r="2" /></>,
   'case': <><path d="m3 15 4-8 4 8M4.5 12h5" /><path d="M14 11.5a2.5 2.5 0 1 1 5 0V15M19 13a2.5 2.5 0 1 1-5 1.5" /></>,
   zoom: <><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3M8 11h6M11 8v6" /></>,
   font: <><path d="M4 7V5h16v2M9 19h6M12 5v14" /></>,
@@ -64,6 +71,16 @@ export function Drop({ name, tip, icon, text, panel, disabled, className = '', w
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   const close = useCallback(() => setOpen(false), [])
+  // On the screen: a menu that would run past its right edge (one under More, on a phone) moves left.
+  const box = useRef(null)
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!open || !el) return
+    el.style.left = ''
+    const r = el.getBoundingClientRect()
+    const over = r.right - (window.innerWidth - 8)
+    if (over > 0) el.style.left = `${-Math.min(over, r.left - 8)}px`
+  }, [open])
   useEffect(() => {
     if (!open) return undefined
     const down = (e) => { if (!ref.current?.contains(e.target)) setOpen(false) }
@@ -80,7 +97,7 @@ export function Drop({ name, tip, icon, text, panel, disabled, className = '', w
         {swatch !== undefined && <i className="sd-swatch-bar" style={{ background: swatch || 'transparent' }} />}
         <Glyph name="chevron-down" size={12} />
       </button>
-      {open && <div className={`sd-drop${wide ? ' wide' : ''}`} role="menu" aria-label={name} onMouseDown={keepFocus}>{panel(close)}</div>}
+      {open && <div ref={box} className={`sd-drop${wide ? ' wide' : ''}`} role="menu" aria-label={name} onMouseDown={keepFocus}>{panel(close)}</div>}
     </span>
   )
 }
@@ -93,6 +110,99 @@ export function Item({ label, hint, icon, on, run, close, danger, style, keys = 
       {keys.length > 0 && <small className="sd-item-keys">{withKeys('', ...keys).replace(/^ \(|\)$/g, '')}</small>}
       {on && <Icon name="check" size={13} />}
     </button>
+  )
+}
+
+// ---------- One row ----------
+// A toolbar's groups on one row, as Google Docs and Slides have theirs: the groups that don't fit
+// under More (⋯) at its right, opened as a row of their own below it. Each group may say how long
+// it stays (data-keep, higher stays longer; else the later a group, the sooner it goes), and those
+// that stay keep their order. end: what stays at the right whatever the width (the view's tools).
+// side: groups at the right beside end where the bar is wide, the first to go under More where
+// it's a phone's. Each group is measured where it shows and remembered, so one gone under More
+// still knows how wide it is; a group not seen yet is put out once to be measured, before anything
+// is drawn.
+export function OneRow({ children, end, side, label, className = '', moreLabel }) {
+  const [small, setSmall] = useState(false)
+  const items = [...Children.toArray(children), ...(small ? Children.toArray(side).map((x) => cloneElement(x, { 'data-keep': -100 })) : [])].filter(Boolean)
+  const bar = useRef(null)
+  const main = useRef(null)
+  const more = useRef(null)
+  const els = useRef(new Map())
+  const widths = useRef(new Map())
+  const [hidden, setHidden] = useState('')
+  const [open, setOpen] = useState(false)
+  const keyList = items.map((x) => `${x.key}=${x.props['data-keep'] ?? ''}`).join('|')
+  const place = useCallback(() => {
+    const m = main.current
+    if (!m) return
+    const list = keyList.split('|').map((x, i) => { const [k, keep] = x.split('='); return { k, i, keep: keep === '' ? null : Number(keep) } })
+    // Each shown group's width, with the space before it (the gap, its line), as it's laid out.
+    let prev = m.getBoundingClientRect().left
+    for (const { k } of list) {
+      const el = els.current.get(k)
+      if (!el?.isConnected) continue
+      const r = el.getBoundingClientRect()
+      if (r.width) { widths.current.set(k, r.right - prev); prev = r.right } else widths.current.set(k, 0)
+    }
+    if (list.some(({ k }) => !widths.current.has(k))) { setHidden(''); return }
+    // More's own width (a button's, before it's shown) and the gap before it.
+    const moreW = (more.current?.offsetWidth || m.querySelector('.sd-tool')?.offsetWidth || 30) + 4
+    const room = m.clientWidth + (more.current ? moreW : 0)
+    let used = list.reduce((s, { k }) => s + widths.current.get(k), 0)
+    const out = new Set()
+    if (used > room) {
+      const order = [...list].sort((a, b) => (a.keep ?? -1 - a.i / 100) - (b.keep ?? -1 - b.i / 100) || b.i - a.i)
+      for (const x of order) { if (used <= room - moreW) break; out.add(x.k); used -= widths.current.get(x.k) }
+    }
+    setHidden(list.filter(({ k }) => out.has(k)).map(({ k }) => k).join('|'))
+  }, [keyList])
+  useLayoutEffect(() => { setSmall(bar.current?.clientWidth < 600) }, [])
+  useLayoutEffect(() => { place() })
+  useEffect(() => {
+    if (!bar.current || typeof ResizeObserver !== 'function') return undefined
+    const ro = new ResizeObserver(() => { setSmall(bar.current?.clientWidth < 600); place() })
+    ro.observe(bar.current)
+    return () => ro.disconnect()
+  }, [place])
+  const gone = new Set(hidden ? hidden.split('|') : [])
+  const shown = items.filter((x) => !gone.has(x.key))
+  const rest = items.filter((x) => gone.has(x.key))
+  useEffect(() => { if (!rest.length) setOpen(false) }, [rest.length])
+  // Opened under More, its right edge at More's, moved right as far as it must to stay on the bar.
+  const pop = useRef(null)
+  useLayoutEffect(() => {
+    const el = pop.current, b = bar.current, m = more.current
+    if (!open || !el || !b || !m) return
+    const br = b.getBoundingClientRect(), mr = m.getBoundingClientRect()
+    el.style.maxWidth = `${Math.max(160, Math.min(560, br.width - 16))}px`
+    const w = el.getBoundingClientRect().width
+    const over = br.left + 8 - (mr.right - w)
+    el.style.right = `${over > 0 ? -over : 0}px`
+  })
+  useEffect(() => {
+    if (!open) return undefined
+    const down = (e) => { if (!more.current?.contains(e.target)) setOpen(false) }
+    const key = (e) => { if (e.key === 'Escape' && !e.defaultPrevented) setOpen(false) }
+    document.addEventListener('mousedown', down)
+    document.addEventListener('keydown', key)
+    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key) }
+  }, [open])
+  return (
+    <div className={`sd-toolbar sd-one-row ${className}`} role="toolbar" aria-label={label} ref={bar}>
+      <div className="sd-row-main" ref={main}>
+        {shown.map((x) => cloneElement(x, { ref: (el) => { if (el) els.current.set(x.key, el); else els.current.delete(x.key) } }))}
+      </div>
+      {rest.length > 0 && (
+        <span className="menu-anchor sd-more-wrap" ref={more}>
+          <button type="button" className={`sd-tool sd-more-btn${open ? ' on' : ''}`} onMouseDown={keepFocus} onClick={() => setOpen((x) => !x)} title={moreLabel || t('More tools')} aria-label={moreLabel || t('More tools')} aria-haspopup="true" aria-expanded={open}><Icon name="more" size={16} /></button>
+          {/* Open while its buttons are pressed (bold, a list); a choice made in a menu of its closes it. */}
+          {open && <div className="sd-more-row" ref={pop} role="group" aria-label={moreLabel || t('More tools')} onMouseDown={keepFocus} onClick={(e) => { if (e.target.closest('.sd-drop, [role="menu"]')) setOpen(false) }}>{rest}</div>}
+        </span>
+      )}
+      {!small && side}
+      {end}
+    </div>
   )
 }
 
@@ -146,12 +256,15 @@ export function FindBar({ editor, replace: withReplace, onClose }) {
   const [q, setQ] = useState(() => editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, ' ').slice(0, 100))
   const [r, setR] = useState('')
   const [matchCase, setCase] = useState(false)
+  // Whole words only (Word's), and a regular expression (Google Docs' Match using regular expressions).
+  const [whole, setWhole] = useState(false)
+  const [regex, setRegex] = useState(false)
   const [showReplace, setShowReplace] = useState(withReplace)
   const [said, setSaid] = useState(null)
   const input = useRef(null)
   const [, tick] = useState(0)
   useEffect(() => { setShowReplace(withReplace || showReplace) }, [withReplace]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { find.set(editor, { q, matchCase }); setSaid(null) }, [editor, q, matchCase])
+  useEffect(() => { find.set(editor, { q, matchCase, whole, regex }); setSaid(null) }, [editor, q, matchCase, whole, regex])
   useEffect(() => { const up = () => tick((n) => n + 1); editor.on('transaction', up); return () => { editor.off('transaction', up); find.set(editor, { q: '' }) } }, [editor])
   useEffect(() => { input.current?.focus(); input.current?.select() }, [])
   const s = findKey.getState(editor.state) || { list: [], index: -1 }
@@ -166,7 +279,7 @@ export function FindBar({ editor, replace: withReplace, onClose }) {
     if (e.key === 'Escape') { e.preventDefault(); close() }
     if (e.key === 'Enter') { e.preventDefault(); find.step(editor, e.shiftKey ? -1 : 1) }
   }
-  const count = q ? (s.list.length ? t('{n} of {total}', { n: s.index + 1, total: s.list.length }) : t('No matches')) : ''
+  const count = q ? (regex && !patternOf(q, { regex, whole }) ? t('Not a pattern') : s.list.length ? t('{n} of {total}', { n: s.index + 1, total: s.list.length }) : t('No matches')) : ''
   return (
     <div className="sd-findbar" role="search" aria-label={t('Find and replace')}>
       <div className="sd-find-row">
@@ -174,6 +287,8 @@ export function FindBar({ editor, replace: withReplace, onClose }) {
         <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={key} placeholder={t('Find in the document')} aria-label={t('Find')} spellCheck={false} />
         <span className="sd-find-count muted small" aria-live="polite">{count}</span>
         <Tool name={t('Match case')} icon="case" on={matchCase} run={() => setCase((x) => !x)} />
+        <Tool name={t('Whole words only')} icon="whole-word" on={whole} run={() => setWhole((x) => !x)} />
+        <Tool name={t('Regular expression')} icon="regex" on={regex} run={() => setRegex((x) => !x)} tip={t('Match using a regular expression')} />
         <Tool name={t('Previous match')} icon="up" run={() => find.step(editor, -1)} disabled={!s.list.length} keys={['mod', 'shift', 'g']} />
         <Tool name={t('Next match')} icon="down" run={() => find.step(editor, 1)} disabled={!s.list.length} keys={['mod', 'g']} />
         <Tool name={t('Replace')} icon="replace" on={showReplace} run={() => setShowReplace((x) => !x)} tip={t('Show replace')} />
