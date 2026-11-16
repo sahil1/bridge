@@ -44,7 +44,7 @@ const word = async (c, kind, ms = 15000) => {
 const codeOf = (link) => new URLSearchParams(new URL(link).hash.slice(1)).get('pair')
 // The phone page as it was before MOVE: it ignores the computer's word, and offers Bridge AI no way
 // to follow (bridgeRelay.move).
-const shellNow = fs.readFileSync(path.join(ROOT, 'relay', 'web', 'shell.js'), 'utf8')
+const shellNow = fs.readFileSync(path.join(ROOT, 'relay', 'web', 'shell.js'), 'utf8').replace(/\r\n/g, '\n') // (as git checks it out on Windows: CRLF)
 const shellBefore = shellNow.replace(/\n {2}if \(kind === K\.MOVE\)[^\n]*/, '').replace(/\n {2}relay: \(\) => relay,\n {2}move: \(m\) => moved\(m\),/, '')
 
 const { b, which } = await browser()
