@@ -2718,7 +2718,9 @@ app.post('/api/phone', wrap((req) => (req.body?.enabled ? phone.enable(cfg.port)
 // Your own relay (relay.js). Set up from the computer only: a phone using the relay can see it,
 // but can't pair more phones, remove one, or change where the relay is.
 const onComputer = (req) => { if (req.headers['x-bridge-relay']) throw Object.assign(new Error('Do this in Bridge AI on your computer'), { status: 403 }) }
-app.get('/api/relay', wrap((req) => ({ ...relay.status(), here: req.headers['x-bridge-relay'] || null })))
+// here: the paired device asking (through the relay), and left: the address it moved here from with
+// this computer, which the phone app there can let go of (src/moved.js).
+app.get('/api/relay', wrap((req) => ({ ...relay.status(), here: req.headers['x-bridge-relay'] || null, left: relay.movedFrom(req.headers['x-bridge-relay']) })))
 // On Bridge AI's relay: whether the phone page it serves is a release's (relaycheck.js). Asking checks
 // again when the last check is a while old, without waiting for it.
 app.get('/api/relay/pagecheck', wrap((req) => relaycheck.ask({ now: req.query.now === '1' })))
@@ -2883,6 +2885,9 @@ app.post('/api/relay/devices/:id/keep', wrap((req) => {
 }))
 // Messages a phone sent while this computer was offline, still on the phone (server/inbox.js).
 app.post('/api/relay/inbox', wrap((req) => relay.fromPhone(req.headers['x-bridge-relay'], req.body)))
+// Where this computer is now, for a paired phone that reached it at the address it moved from
+// (src/moved.js), with a pairing link there made for that phone alone.
+app.post('/api/relay/move', wrap((req) => relay.moveFor(req.headers['x-bridge-relay'])))
 
 // ---------- Your Bold Bridge account (account.js) ----------
 // Only once the accounts service exists (account.available()). Here or from a paired phone; another

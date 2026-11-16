@@ -131,14 +131,17 @@ const Highlight = Mark.create({
 })
 const CharStyle = Mark.create({ name: 'rs', addAttributes: () => markAttrs({ id: null }), parseHTML: () => [{ tag: 'span[data-rs]', getAttrs: (el) => ({ id: el.getAttribute('data-rs') }) }], renderHTML: ({ mark }) => ['span', { 'data-rs': mark.attrs.id }, 0] })
 const Caps = Mark.create({ name: 'caps', addAttributes: () => markAttrs({ small: false }), parseHTML: () => [], renderHTML: ({ mark }) => ['span', { style: mark.attrs.small ? 'font-variant:small-caps' : 'text-transform:uppercase' }, 0] })
-// A tracked change (an insertion or deletion, by whom and when), shown as Word shows it.
+// A tracked change (an insertion or deletion, by whom and when), shown as Word shows it. Read back
+// from the page as it's drawn, so what's typed or deleted among them (which the editor reads from
+// the page) keeps them as they were; above strikethrough's own reading of a del.
 const Rev = Mark.create({
   name: 'rev', inclusive: false, excludes: '', addAttributes: () => markAttrs({ k: 'ins', tag: '', by: null, at: null }),
-  parseHTML: () => [],
+  parseHTML: () => ['ins', 'del'].map((tag) => ({ tag: `${tag}.sd-rev`, priority: 60, getAttrs: (el) => ({ k: el.getAttribute('data-k') || tag, tag: el.getAttribute('data-tag') || '', by: el.getAttribute('data-by') || null, at: el.getAttribute('data-at') || null }) })),
   renderHTML: ({ mark }) => {
-    const del = mark.attrs.k === 'del' || mark.attrs.k === 'moveFrom'
-    const when = mark.attrs.at ? new Date(mark.attrs.at).toLocaleDateString() : ''
-    return [del ? 'del' : 'ins', { class: 'sd-rev', title: [del ? t('Deleted') : t('Inserted'), mark.attrs.by, when].filter(Boolean).join(' · ') }, 0]
+    const a = mark.attrs
+    const del = a.k === 'del' || a.k === 'moveFrom'
+    const when = a.at ? new Date(a.at).toLocaleDateString() : ''
+    return [del ? 'del' : 'ins', { class: 'sd-rev', 'data-k': a.k, ...(a.by ? { 'data-by': a.by } : {}), ...(a.at ? { 'data-at': a.at } : {}), ...(a.tag ? { 'data-tag': a.tag } : {}), title: [del ? t('Deleted') : t('Inserted'), a.by, when].filter(Boolean).join(' · ') }, 0]
   },
 })
 // A link: its address, and how the file had it (its relationship, or a place in the document).
@@ -253,9 +256,26 @@ const OpaqueBlock = Node.create({
   },
 })
 
-// A picture: resized by its corner, kept as written but for its new size.
+// A picture: resized by its corners, kept as written but for its new size and how text goes round
+// it. wrap: 'inline' (in line with the text), 'square' (text wraps round it, at the side's edge),
+// 'top' (text above and below it, at the side), or as Word had it ('front', 'behind': kept, shown
+// in line); side: 'left', 'center' or 'right'. wrap0 and side0: as the file had them.
+export const WRAPS = ['inline', 'square', 'top']
 const WordImage = Image.extend({
-  addAttributes() { return { ...this.parent?.(), rid: attr(null, false), raw: attr('', false), w0: attr(null, false), h0: attr(null, false), float: attr(false, false) } },
+  addAttributes() { return { ...this.parent?.(), rid: attr(null, false), raw: attr('', false), w0: attr(null, false), h0: attr(null, false), float: attr(false, false), wrap: attr('inline', false), side: attr(null, false), wrap0: attr('inline', false), side0: attr(null, false) } },
+  // Its box says how text goes round it, for the page's CSS (doc.css) to float it or set it apart.
+  addNodeView() {
+    const make = this.parent?.()
+    if (!make) return null
+    return (props) => {
+      const view = make(props)
+      const set = (n) => { view.dom.dataset.wrap = n.attrs.wrap || 'inline'; view.dom.dataset.side = n.attrs.side || (n.attrs.wrap === 'top' ? 'center' : 'left') }
+      set(props.node)
+      const was = view.update?.bind(view)
+      view.update = (n, ...rest) => { const ok = was ? was(n, ...rest) : n.type === props.node.type; if (ok) set(n); return ok }
+      return view
+    }
+  },
 }).configure({ inline: true, allowBase64: true, resize: { enabled: true, alwaysPreserveAspectRatio: true, minWidth: 24, minHeight: 16 } })
 
 // ---------- Tables ----------

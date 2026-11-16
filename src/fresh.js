@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiUrl, viaRelay, machineId, cloudOnly } from './api.js'
 import { getState as dictation } from './dictation/controller.js'
+import { checkMoved } from './moved.js'
 
 // Keeping up with the computer. A phone keeps Bridge AI's page open for days (the phone app in the
 // background, a home-screen app the phone holds in memory, what the phone kept while the computer
@@ -100,8 +101,10 @@ export function useFresh({ hold = false } = {}) {
         setStale({ ui: v.ui, version: v.version || null, computer: v.computer || null })
       } finally { busy = false }
     }
-    // Known to be out of date: the next quiet moment loads the new one, without asking again.
-    const tick = () => { const s = staleRef.current; if (s && quiet(holdRef.current) && !tried(s.ui)) reloadFor(s.ui); else if (!s) check() }
+    // Known to be out of date: the next quiet moment loads the new one, without asking again. (And
+    // whether the computer moved to another relay meanwhile: the phone page asks this each time its
+    // link is new, src/moved.js.)
+    const tick = () => { checkMoved(); const s = staleRef.current; if (s && quiet(holdRef.current) && !tried(s.ui)) reloadFor(s.ui); else if (!s) check() }
     const onVis = () => { if (!document.hidden) tick() }
     const first = setTimeout(tick, FIRST)
     const every = setInterval(() => { if (!document.hidden) tick() }, EVERY)

@@ -200,7 +200,12 @@ export async function openNote(me, from, note, dir) {
 // GONE: from the computer, to a phone or device it removed: the only word that unpairs it. A
 // refusal in the clear (or a key that isn't the computer's) could be the relay's, so it changes
 // nothing kept.
-export const K = { REQ: 1, BODY: 2, END: 3, HEAD: 4, ERR: 5, CANCEL: 6, WS_OPEN: 7, WS_MSG: 8, WS_CLOSE: 9, WS_OPENED: 10, PING: 11, PONG: 12, MORE: 13, ABOUT: 14, GONE: 15 }
+// MOVE: from the computer, sealed: it moved to another relay ({ url, name, hosted, link }: link, a
+// pairing link there made for this device alone, for a phone whose key can't go with it), or it
+// forgot this phone ({ forgot: true, name }). Only this word moves a phone or device to another
+// address: the relay can't say it, and the new address still has to answer with the computer's key.
+// An end from before ignores it.
+export const K = { REQ: 1, BODY: 2, END: 3, HEAD: 4, ERR: 5, CANCEL: 6, WS_OPEN: 7, WS_MSG: 8, WS_CLOSE: 9, WS_OPENED: 10, PING: 11, PONG: 12, MORE: 13, ABOUT: 14, GONE: 15, MOVE: 16 }
 export const CHUNK = 192 * 1024
 // An answer comes no faster than whoever asked takes it in (a video that's paused, a download to a
 // slow disk), so a big one never piles up in memory on the way. A request says how much may be on

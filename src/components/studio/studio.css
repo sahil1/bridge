@@ -156,6 +156,14 @@
 .sd-group { display: inline-flex; align-items: center; gap: 2px; }
 .sd-group + .sd-group { margin-left: 2px; padding-left: 7px; background: linear-gradient(var(--line), var(--line)) 0 50% / 1px 18px no-repeat; }
 .sd-grow + .sd-group { margin-left: 0; padding-left: 0; background: none; }
+/* One row (doctools.jsx OneRow): the groups that fit, More (⋯) for the rest, opening them as a row
+   of their own under it, and the view's tools at the right. */
+.sd-toolbar.sd-one-row { flex-wrap: nowrap; }
+.sd-row-main { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 4px; }
+.sd-row-main > .sd-group, .sd-one-row > .sd-group { flex: none; }
+.sd-more-wrap { position: relative; flex: none; display: inline-flex; }
+.sd-more-row { position: absolute; top: calc(100% + 7px); right: 0; z-index: 41; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; width: max-content; max-width: min(560px, calc(100vw - 24px)); box-sizing: border-box; padding: 6px 8px; border-radius: 10px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 12px 32px rgb(0 0 0 / .18); }
+.sd-more-row > .sd-group:first-child { margin-left: 0; padding-left: 0; background: none; }
 .sd-toolbar .btn.small { height: 30px; padding: 0 11px; gap: 6px; font-size: 12.5px; border-radius: 8px; }
 .sd-toolbar .seg { padding: 2px; }
 .sd-toolbar .seg button { height: 24px; }
@@ -337,8 +345,10 @@
 .app.narrow .sd-toolbar { gap: 4px; padding: 4px 8px; }
 .app.narrow .sd-group + .sd-group { margin-left: 0; padding-left: 0; background: none; }
 /* Its groups give way there, so the rows fill up a button at a time rather than a group at a time
-   (a lone row of two buttons at the end). */
-.app.narrow .sd-toolbar:not(.sd-pdf-bar) .sd-group:not(.sd-marks) { display: contents; }
+   (a lone row of two buttons at the end). One row keeps its groups, to put under More whole. */
+.app.narrow .sd-toolbar:not(.sd-pdf-bar):not(.sd-one-row) .sd-group:not(.sd-marks) { display: contents; }
+.app.narrow .sd-one-row .sd-row-main { gap: 2px; }
+.app.narrow .sd-one-row .sd-group { gap: 0; }
 .app.narrow .sd-toolbar .sd-grow { display: none; }
 .app.narrow .sd-tool { width: 40px; height: 40px; }
 .app.narrow .sd-style { height: 40px; font-size: 16px; }

@@ -7,7 +7,7 @@ import { locale, t } from '../../i18n/index.js'
 import { Thumb } from './views.jsx'
 import { getJson, enc, kindName, fmtSize, fmtWhen } from './fsapi.js'
 
-export default function Info({ base, root, entry, cloud, onClose, onOpen, openLabel, onReveal, revealLabel, onCopy }) {
+export default function Info({ base, root, entry, cloud, glyph = null, onClose, onOpen, openLabel, onReveal, revealLabel, onCopy }) {
   const [d, setD] = useState(null)
   const [sz, setSz] = useState(null) // { busy } | the size | { error }
   const ctl = useRef(null)
@@ -40,7 +40,7 @@ export default function Info({ base, root, entry, cloud, onClose, onOpen, openLa
   return (
     <aside className="fx-info" role="dialog" aria-label={t('Info: {name}', { name: entry.name })} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}>
       <header className="fx-info-head">
-        <Thumb base={base} root={root} e={entry} cloud={cloud} big />
+        <Thumb base={base} root={root} e={entry} cloud={cloud} size={56} glyph={glyph} />
         <div className="fx-info-title"><b title={entry.name}>{entry.name}</b><span className="muted small">{kindName({ ...entry, dir: folder })}</span></div>
         <button type="button" className="win-btn" onClick={onClose} aria-label={t('Close Info')} title={t('Close (Esc)')}><Icon name="x" size={14} /></button>
       </header>

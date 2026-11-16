@@ -37,6 +37,8 @@
     .others .small, .try .small { font-size: 14px; margin: 0; }
     .others .state { color: var(--muted); font-weight: 400; }
     .try { display: grid; gap: 8px; margin-top: 22px; }
+    #use-app { padding: 12px; border: 1px solid var(--line); border-radius: 12px; text-align: left; }
+    #use-app a { color: var(--muted); }
     .legal { margin-top: 26px; font-size: 13px; }
     .legal a { color: var(--muted); }
     ol { text-align: left; color: var(--muted); padding-left: 20px; }
@@ -80,6 +82,11 @@
         <button id="pair-cancel" class="ghost" type="button" hidden>Not now</button>
       </form>
       <p id="pair-err" class="err" hidden></p>
+      <div id="use-app" class="try" hidden>
+        <p class="small" id="use-app-text"></p>
+        <button id="use-app-open" class="ghost" type="button" hidden>Open the Bridge AI app</button>
+        <p class="small"><a id="use-app-get" target="_blank" rel="noreferrer">Get the app</a></p>
+      </div>
       <div class="others" hidden></div>
       <div class="try demo-try" hidden>
         <p class="small">No computer to pair yet?</p>
@@ -103,6 +110,7 @@
         <button id="app-open" type="button" hidden>Back</button>
         <button id="saved-open" class="ghost" type="button" hidden>Open what it last sent</button>
         <button id="retry" class="ghost" type="button" hidden>Try again</button>
+        <button id="pair-again" class="ghost" type="button" hidden>Pair again</button>
       </div>
       <div class="try cloud-try" hidden>
         <p class="small">Cloud agents run with no computer, from this phone:</p>

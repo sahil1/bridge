@@ -82,8 +82,12 @@ Use it on this computer (or Use Bridge AI's relay instead, from a relay of your 
 there, each step said, and Pair a phone follows. An account signed in already that never asked has
 Request access. First-run setup asks for nothing: it says that Settings › Account & Devices sets the
 phone up. `bridge-ai relay setup --hosted` works from a terminal once the account
-has the relay, and says to sign in first otherwise. Moving between the ways works too; phones pair
-again after a move to another relay, and the app says so. The tests never reach it:
+has the relay, and says to sign in first otherwise. Moving between the ways works too, each one
+step, with phones and linked computers staying paired: the computer keeps its key and its devices,
+tells those connected the new address in a sealed record (MOVE, relay/web/link.js), and stays
+connected to the address it left for two weeks (or until every device has been seen at the new one)
+to tell the rest there; then its address here is removed. Stop using the relay forgets the phones,
+removes the address at once and gives the computer a new key. The tests never reach it:
 `BRIDGE_HOSTED_URL` and `BRIDGE_ACCOUNTS_URL` stand in for the two switches, and the test kits set
 them empty (a test that wants them runs `test/stand-ins/hosted-relay.mjs` and
 `test/stand-ins/accounts.mjs`, and points `relay.hostedUrl` and `account.url` at them).
@@ -418,8 +422,9 @@ version it registered with, when it registered and connected last, its paired ph
 from each phone's key (as a personal relay keeps them), today's counts, which of its paired phones
 were counted this week (by those ids), and messages a phone sent while the computer was offline,
 sealed so the relay can't read them, for 7 days at most. Forget on the computer (Stop using the
-relay) deletes all of it at once; otherwise it goes after `IDLE_DAYS`, or when its account is
-deleted.
+relay) deletes all of it at once; moving the computer to a relay of its own deletes it once its
+phones have followed, two weeks at most; otherwise it goes after `IDLE_DAYS`, or when its account
+is deleted.
 
 Per account, in its Account: when it was first used, its messages in the current window and week,
 each of the last three days' total, its computers' addresses by device, and what the accounts

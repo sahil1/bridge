@@ -119,7 +119,7 @@ const SUITES = [
   { name: 'api-key', build: 'dist', browser: true, covers: [/^server\/(apiauth|apitoken|guard|chief|relay|inbox|index)\.js$/, /^desktop\/(apitoken|main|preload)\.js$/, /^scripts\/cli\.js$/, /^chief\/bin\/bridge$/, /^src\/components\/Files\.jsx$/, /^test\/stand-ins\/desktop-windows\.cjs$/] },
   { name: 'device-isolation', build: 'dist', browser: true, covers: [/^desktop\/(senders|main|preload|dictation)\.js$/, /^server\/(machinepages|guard|machines|index)\.js$/, /^src\/(api|passed)\.js$/, /^src\/components\/(RemoteAgent|Machines)\.jsx$/, /^src\/dictation\/controller\.js$/] },
   { name: 'remote-files', build: 'dist', browser: true, covers: [/^src\/components\/(Files|FileMedia|FileExtras)\.jsx$/, /^server\/(files|machines|relay|index)\.js$/, /^relay\/web\//, /^test\/fixtures\//] },
-  { name: 'files-ui', build: 'dist', browser: true, covers: [/^src\/components\/files\//, /^server\/(explorer|files|transfers|projects|index)\.js$/, /^src\/components\/(Files|FileMedia|FileExtras|Rail|Icon)\.jsx$/, /^src\/components\/studio\/pdf\/pdfjs\.js$/, /^src\/components\/studio\/(Studio|HomeFiles)\.jsx$/, /^src\/components\/studio\/(studio|home)\.css$/, /^src\/(App|lazy)\.jsx$/, /^src\/trials\.js$/, /^scripts\/tcc-sim\.mjs$/] },
+  { name: 'files-ui', build: 'dist', browser: true, minutes: 8, covers: [/^src\/components\/files\//, /^server\/(explorer|files|transfers|projects|index)\.js$/, /^src\/components\/(Files|FileMedia|FileExtras|Rail|Icon)\.jsx$/, /^src\/components\/studio\/pdf\/pdfjs\.js$/, /^src\/components\/studio\/(Studio|HomeFiles)\.jsx$/, /^src\/components\/studio\/(studio|home)\.css$/, /^src\/(App|lazy)\.jsx$/, /^src\/trials\.js$/, /^scripts\/tcc-sim\.mjs$/] },
   { name: 'files-across', build: 'dist', browser: true, covers: [/^server\/(transfers|files|places|machines|notify|index)\.js$/, /^src\/components\/(Transfers|Files|FileExtras|FileMedia)\.jsx$/, /^src\/components\/transfers\.css$/, /^src\/(pwa|App)\.jsx?$/, /^shared\/media\.js$/, /^scripts\/tcc-sim\.mjs$/, /^desktop\/(main|preload)\.js$/] },
   { name: 'files-assist', build: 'dist', browser: true, covers: [/^server\/(fileinsights|files|places|projects|index)\.js$/, /^src\/components\/files\//, /^src\/components\/(Files|FileExtras)\.jsx$/, /^src\/trials\.js$/, /^scripts\/tcc-sim\.mjs$/, /^test\/stand-ins\/(model|llama-server)\.mjs$/] },
   { name: 'dictation-cleanup', build: 'dist', browser: true, covers: [/^server\/(dictation|dictations|llm|chatmodels|index)\.js$/, /^src\/dictation\//, /^src\/components\/dictations\//, /^src\/components\/settings\/Dictation\.jsx$/, /^src\/trials\.js$/] },
@@ -140,6 +140,7 @@ const SUITES = [
   { name: 'site', build: null, browser: true, covers: [/^site\//, /^\.github\/workflows\/android\.yml$/, /^README\.md$/] },
   { name: 'counts-server', build: null, covers: [/^counts\//, /^shared\/(telemetry-schema\.json|crashreport\.js|private\.js)$/, /^server\/(counts|crashes)\.js$/, /^PRIVACY\.md$/, /^src\/components\/settings\/UsageCounts\.jsx$/] },
   { name: 'relay-hosted', build: null, covers: [/^relay\/(worker|build)\.js$/, /^relay\/(HOSTED\.md|wrangler\.hosted\.toml)$/, /^server\/(hosted|account)\.js$/, /^(PRIVACY|TERMS)\.md$/] },
+  { name: 'relay-move', build: 'dist', browser: true, covers: [/^server\/(relay|machines|index)\.js$/, /^relay\/web\//, /^src\/(moved|fresh|App)\.jsx?$/, /^src\/components\/settings\/(Relay|Account)\.jsx$/, /^test\/stand-ins\/(relay|hosted-relay|accounts|no-localhost-names)\.mjs$/] },
   { name: 'relay-hosted-ui', build: 'dist', browser: true, covers: [/^relay\/worker\.js$/, /^server\/(relay|relaycheck|hosted|account)\.js$/, /^scripts\/cli\.js$/, /^src\/components\/(Onboarding|OnboardingPhone)\.jsx$/, /^src\/components\/settings\/(Relay|Phone|Account)\.jsx$/, /^test\/stand-ins\/(hosted-relay|accounts|no-localhost-names)\.mjs$/] },
   { name: 'account-service', build: null, covers: [/^account\//, /^server\/(account|earlyaccess)\.js$/, /^(PRIVACY|TERMS)\.md$/, /^test\/lib\/workers\.mjs$/, /^test\/stand-ins\/cloudflare-workers\.mjs$/] },
   { name: 'account-ui', build: 'dist', browser: true, covers: [/^account\/worker\.js$/, /^server\/(account|machines|relay|updates|earlyaccess|index)\.js$/, /^src\/components\/settings\/(Account|Relay|About)\.jsx$/, /^src\/components\/settings\/account\.css$/, /^src\/components\/(Settings|Usage)\.jsx$/, /^test\/stand-ins\/(accounts|relay)\.mjs$/] },
@@ -206,7 +207,8 @@ const runOne = (j, attempt) => new Promise((resolve) => {
   // Five minutes, or a suite's own (minutes). dead-clicks, which presses every button on every view in
   // two shapes at once, took longer than five on CI's macOS WebKit runner, so Settings' sections are a
   // test of their own (dead-clicks-settings) and each half has the five; with Studio's home and
-  // Account & Devices (3.20) the main views took 270 to 300 s there, so they have eight.
+  // Account & Devices (3.20) the main views took 270 to 300 s there, so they have eight; files-ui too,
+  // since it pictures the icons, the list and groups in light and dark, on a computer and a phone.
   const mins = j.minutes || 5
   const limit = setTimeout(() => { fs.appendFileSync(log, `\nFAIL took more than ${mins} minutes, so it was stopped\n`); stopTree(p) }, mins * 60_000)
   p.on('exit', (code, signal) => {

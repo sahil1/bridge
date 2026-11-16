@@ -25,6 +25,13 @@
 // it and nothing else is set up here (no relay, no Tailscale for the phone), this computer starts
 // using it by itself (maybeAuto), and Settings says so.
 //
+// Moving between them (Bridge AI's relay, your own Cloudflare, and back) keeps everything paired:
+// a relay is only an address for the same encrypted link, so the phones and computers paired here,
+// and this computer's key, stay as they are (moveTo). Those connected then are told the new address
+// at once, sealed (MOVE); the rest find this computer at the old address, which it stays connected
+// to for MOVE_DAYS, or until each has been seen at the new one, and each is told there. Stop using
+// the relay (forget) is the one thing that forgets the phones, and it makes this computer a new key.
+//
 // Your other devices connect the same way a phone does (machines.js): with a one-time code from
 // invite() (when one device links another, or introduces two), or by asking. An ask waits here
 // until you allow it, on this computer or a paired phone, after checking both devices show the
@@ -66,6 +73,8 @@ const REVIEW_DAYS = 14
 const REVIEW_MAX_DAYS = 90 // a review can take weeks, and the next version's wants a code too
 const REVIEW_USES = 25
 const REMOVED_DAYS = 90 // how long a removed device's key is kept, to tell it it was removed
+const MOVE_DAYS = 14 // how long the address this computer moved from stays connected, for the phones paired there
+const MOVE_MINUTES = 30 // a code for one device to pair again at the new address (a browser's key can't move)
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
 
 let built = null
@@ -118,6 +127,7 @@ let awakeBroken = false // it couldn't (no systemd-inhibit, say): not tried agai
 let tailnet = false // Tailscale publishes this computer to your phone (phone.js)
 const conns = new Map() // phone connection id -> Conn
 let invites = [] // one-time codes for another of your devices: { id, secret, expires, uses, tries }
+let moves = [] // one-time codes for a device moving here with this computer: { id, secret, expires, uses, tries, device, from }
 const asks = new Map() // device key -> another device asking to link: { id, key, name, os, relay, at, c, n, code }
 const askTries = [] // when each ask (or a new commit for one) came, over the last hour
 const denied = new Map() // device key -> until when its asks are turned away
@@ -169,7 +179,8 @@ export const thisName = () => computerName()
 export const publicKey = () => conf.key?.public || null
 
 export function status() {
-  const live = new Set([...conns.values()].filter((c) => c.proven).map((c) => c.device?.id))
+  const live = new Set([...conns.values(), ...prior.conns.values()].filter((c) => c.proven).map((c) => c.device?.id))
+  const m = conf.moved
   return {
     configured: !!(conf.url && conf.token),
     computer: computerName(),
@@ -193,7 +204,12 @@ export function status() {
     use: conf.hosted ? use : null,
     needsUpdate: !!(!conf.hosted && online && relayBuild && relayBuild !== relayCode().build),
     // fresh: paired with Pair a device's code and not kept yet (Keep or Remove, said in the app).
-    devices: (conf.devices || []).map(({ id, name, kind, relay, addedAt, lastSeen, fresh }) => ({ id, name, kind: kind || 'phone', relay: relay || null, addedAt, lastSeen, connected: live.has(id), fresh: !!fresh })),
+    // moving: not seen at this address yet since this computer moved here (it finds it through the
+    // old one, moved).
+    devices: (conf.devices || []).map(({ id, name, kind, relay, addedAt, lastSeen, fresh }) => ({ id, name, kind: kind || 'phone', relay: relay || null, addedAt, lastSeen, connected: live.has(id), fresh: !!fresh, moving: !!m?.left?.includes(id) })),
+    // Moved here from another relay: which, until when this computer stays connected there for the
+    // devices not seen here yet, and whether it is now.
+    moved: m ? { from: m.url, hosted: !!m.hosted, at: m.at, until: m.until, connected: prior.ws?.readyState === 1 } : null,
     asks: [...asks.values()].filter((a) => a.code && a.at > Date.now() - ASK_MINUTES * 60000).map(({ id, name, os, relay, at, code }) => ({ id, name, os, relay, at, code })),
     pairing: pairing && pairing.expires > Date.now() && pairing.uses < PAIR_USES ? { code: pairing.code, expires: pairing.expires, link: pairing.link, qr: pairing.qr } : null,
     // The code was used: which device it paired, for "Add another device" (its QR is gone).
@@ -211,6 +227,7 @@ export function start(serverBase) {
   base = serverBase
   holdAwake()
   if (conf.url && conf.token) connect()
+  if (conf.moved) connectPrior()
   if (conf.leaving?.length) sendLeaving()
   // An account that has the relay already, and nothing set up here: once the account has been asked
   // and Tailscale has said whether it serves the phone (index.js asks both as it starts).
@@ -337,6 +354,8 @@ function onUse(m) {
 // The account changed (signed in or out, the relay given or taken away, a new pass): on Bridge AI's
 // relay, connected again with it; with nothing set up here, perhaps using it by itself.
 export function accountChanged() {
+  // (The address this computer moved from, on Bridge AI's relay, waiting for a pass: now.)
+  if (conf.moved?.hosted && !prior.ws) connectPrior()
   if (!conf.url) return maybeAuto()
   if (!conf.hosted) return
   if (['token', 'suspended', 'relay', 'deleted'].includes(limit?.why)) limit = null
@@ -356,23 +375,28 @@ function disconnect() {
   conns.clear()
 }
 
-const toRelay = (op, id, payload) => {
-  if (!link || link.readyState !== 1) return false
+const frameTo = (ws, op, id, payload) => {
+  if (!ws || ws.readyState !== 1) return false
   const p = payload ? Buffer.from(payload) : Buffer.alloc(0)
   const h = Buffer.alloc(5)
   h[0] = op
   h.writeUInt32BE(id, 1)
-  link.send(Buffer.concat([h, p]))
+  ws.send(Buffer.concat([h, p]))
   return true
 }
+const toRelay = (op, id, payload) => frameTo(link, op, id, payload)
 const toRelayText = (obj) => { if (link?.readyState === 1) link.send(JSON.stringify(obj)) }
+// Where a connection came in: this computer's relay (main), or the address it moved from (prior),
+// which it stays connected to for a while (connectPrior), each with its own connections.
+const main = { conns, send: toRelay, buffered: () => link?.bufferedAmount || 0 }
+const prior = { conns: new Map(), ws: null, prior: true, backoff: 2000, send: (op, id, payload) => frameTo(prior.ws, op, id, payload), buffered: () => prior.ws?.bufferedAmount || 0 }
 // Big answers (a picture, a PDF) go out in pieces; wait while the connection is backed up.
-const drained = async () => { while (link && link.bufferedAmount > 4 * 1024 * 1024) await new Promise((r) => setTimeout(r, 20)) }
+const drained = async (via = main) => { while (via.buffered() > 4 * 1024 * 1024) await new Promise((r) => setTimeout(r, 20)) }
 // The rest of a long answer (a video, a download) waits for the connection to be nearly clear
 // before each piece, so what else the phone asks meanwhile (a chat, a terminal) goes ahead of it
 // rather than behind megabytes of it.
 const BULK = 256 * 1024
-const clear = async (conn) => { while (link && link.bufferedAmount > BULK && conn.session) await new Promise((r) => setTimeout(r, 10)) }
+const clear = async (conn) => { while (conn.via.buffered() > BULK && conn.session) await new Promise((r) => setTimeout(r, 10)) }
 // An answer whose reader stopped taking it in (a video left paused) is let go after this long, so a
 // phone that went away without a word doesn't keep a file open here for good.
 const IDLE_MS = Number(process.env.BRIDGE_LINK_IDLE_MS) || 10 * 60000
@@ -401,8 +425,9 @@ function helloRoom(known) {
 }
 
 class Conn {
-  constructor(id) {
+  constructor(id, via = main) {
     this.id = id
+    this.via = via // the relay it came in through (main, or the address this computer moved from)
     this.session = null
     this.device = null
     this.q = Promise.resolve()
@@ -418,7 +443,7 @@ class Conn {
   // whose it was: a record that didn't open is one missing or changed on the way.
   receive(buf) { this.q = this.q.then(() => this.handle(buf)).catch((e) => { console.error(`relay: ${this.device ? `${this.device.name} (${this.device.kind || 'phone'})` : 'a connection'}: ${e.message}; closed it`); this.close() }) }
 
-  close() { toRelay(OP.CLOSE, this.id); this.end(); conns.delete(this.id) }
+  close() { this.via.send(OP.CLOSE, this.id); this.end(); this.via.conns.delete(this.id) }
 
   end() {
     clearTimeout(this.timer)
@@ -433,8 +458,8 @@ class Conn {
     if (!session) return Promise.resolve()
     const p = this.out.then(async () => {
       const rec = await session.seal(pack(kind, sid, body))
-      await drained()
-      if (this.session === session) toRelay(OP.DATA, this.id, rec)
+      await drained(this.via)
+      if (this.session === session) this.via.send(OP.DATA, this.id, rec)
     })
     this.out = p.catch(() => {})
     return p
@@ -468,6 +493,8 @@ class Conn {
     // The phone's code, or a one-time code for another of your devices.
     const code = (pid) => (pairing && pairing.id === pid && pairing.expires > Date.now() && pairing.uses < PAIR_USES && pairing.tries < 5 ? pairing : null)
       || invites.find((p) => p.id === pid && p.expires > Date.now() && p.uses < 1 && p.tries < 5)
+      // A device moving here with this computer, with the code made for it alone (moveFor).
+      || moves.find((p) => p.id === pid && p.expires > Date.now() && p.uses < 1 && p.tries < 5 && deviceOf(p.device))
       // The review code: no count of wrong tries, which anyone who saw its first four letters (the
       // relay) could use up to stop it; the other sixteen are too many to guess.
       || (review()?.id === pid ? review() : null) || null
@@ -481,19 +508,19 @@ class Conn {
     const removed = !fresh && !msg?.ask && msg?.seal === 1 && (conf.removed || []).some((x) => x.key === msg.d)
     const r = await computerWelcome(await key(), msg, { known: (k) => (fresh ? null : devices.find((d) => d.key === k) || (removed ? { gone: true } : null)), pairing: code })
     if (r.refuse) {
-      if (r.refuse === 'wrong-code') { const p = [pairing, ...invites].find((x) => x?.id === r.pairId); if (p) p.tries++ }
+      if (r.refuse === 'wrong-code') { const p = [pairing, ...invites, ...moves].find((x) => x?.id === r.pairId); if (p) p.tries++ }
       // Another of your devices asking to link, with no code: it waits for you (askFrom). A code
       // that didn't work gets one answer whatever was wrong with it (used, expired or mistyped), so
       // nothing tells a guess at one from another.
       const a = r.refuse === 'not-paired' && msg?.ask && msg.kind === 'computer' ? await askFrom(msg) : { why: r.refuse === 'wrong-code' ? 'code-expired' : r.refuse }
-      toRelay(OP.DATA, this.id, plainFrame({ t: 'refuse', why: a.why, ...(a.why === 'asked' ? { h: b64u((await key()).public), n: a.n } : {}) }))
+      this.via.send(OP.DATA, this.id, plainFrame({ t: 'refuse', why: a.why, ...(a.why === 'asked' ? { h: b64u((await key()).public), n: a.n } : {}) }))
       setTimeout(() => this.close(), 500)
       return
     }
     if (r.device?.gone) {
       this.gone = true
       this.session = r.session
-      toRelay(OP.DATA, this.id, plainFrame(r.welcome))
+      this.via.send(OP.DATA, this.id, plainFrame(r.welcome))
       await this.send(K.GONE, 0)
       setTimeout(() => this.close(), 500)
       return
@@ -503,19 +530,20 @@ class Conn {
     const told = { name: typeof msg.name === 'string' ? msg.name.trim().slice(0, 60) : null, kind: msg.kind, relay: msg.relay }
     let id = r.device?.id
     if (r.newDevice) {
-      const used = [pairing, review(), ...invites].find((p) => p?.id === r.newDevice.pairId)
+      const used = [pairing, review(), ...invites, ...moves].find((p) => p?.id === r.newDevice.pairId)
       if (used) used.uses++
       // The review code's count is kept, with the device it paired (prove) or now if it never shows its key.
       if (used && used === conf.review) save()
       // Added once it has shown it holds its key (prove), as what it says sealed. Paired again: the
-      // same device, not a second copy of it.
+      // same device, not a second copy of it. Moving here with a code made for it: that device, with
+      // the key it has here.
       const again = devices.find((d) => d.key === r.newDevice.key)
-      id = again?.id || randomBytes(6).toString('base64url')
-      this.pending = { id, key: r.newDevice.key, told, by: used === pairing || used === conf.review ? 'code' : 'invite', code: used === pairing ? used : null }
+      id = used?.device || again?.id || randomBytes(6).toString('base64url')
+      this.pending = { id, key: r.newDevice.key, told, by: used?.device ? 'move' : used === pairing || used === conf.review ? 'code' : 'invite', code: used === pairing ? used : null, from: used?.from || null }
     }
     this.device = devices.find((d) => d.id === id) || { id, name: told.name || 'A new device', kind: told.kind === 'computer' ? 'computer' : undefined }
     // ping: this computer answers PING (a phone checks it's still there with it).
-    toRelay(OP.DATA, this.id, plainFrame({ ...r.welcome, device: id, ping: 1 }))
+    this.via.send(OP.DATA, this.id, plainFrame({ ...r.welcome, device: id, ping: 1 }))
     this.session = r.session
   }
 
@@ -530,7 +558,15 @@ class Conn {
     const p = this.pending
     this.pending = null
     let device = (conf.devices || []).find((d) => d.id === this.device?.id)
-    if (p && !device) {
+    if (p?.by === 'move' && device) {
+      // Moved here with this computer, paired again with the code made for it (a browser, or the
+      // Android app: each relay is a site of its own there, so its key couldn't come along): the
+      // same device, with its key here, and where it came from (so the app there can let go of it).
+      device.key = p.key
+      if (p.from) device.movedFrom = p.from
+      if (cleanName(said?.name)) device.name = cleanName(said.name)
+      roster().catch(() => {})
+    } else if (p && !device) {
       // Paired just now. Its kind is how it paired, never changed after: a one-time code this
       // computer made for another of yours is a computer; Pair a device's code is a phone, unless
       // what it says sealed (or a Bridge AI from before, in its hello) is that it's a computer,
@@ -546,11 +582,19 @@ class Conn {
       // Known already: its name as it says now, and for a computer where it's reached (a move it
       // asked for, sealed, which machines.js follows). Never its kind.
       if (cleanName(said.name)) device.name = cleanName(said.name)
-      const r = device.kind === 'computer' && cleanRelay(said.relay)
-      if (r && r !== device.relay) {
-        const was = device.relay
-        device.relay = r
-        if (was) onMoved(was, r)
+      if (device.kind === 'computer') {
+        // Its own key, when it has a new one (it stopped using its relay, which makes one): said
+        // sealed by the device itself, so what this computer reaches it with is put right, before
+        // the move below takes this computer to its new address.
+        if (typeof said.host === 'string' && /^[\w-]{87}$/.test(said.host) && device.relay) onRekeyed(device.relay, said.host)
+        // Where it's reached: a new address, the same one (machines.js looks there again if it had
+        // stopped), or none now (null).
+        const r = cleanRelay(said.relay)
+        if (r || said.relay === null) {
+          const was = device.relay
+          if (r) device.relay = r
+          if (was) onMoved(was, r)
+        }
       }
     }
     if (!device) return
@@ -558,8 +602,16 @@ class Conn {
     if (p?.code) p.code.paired = { id: device.id, name: device.name, kind: device.kind || 'phone', at: Date.now() }
     this.device = device
     device.lastSeen = new Date().toISOString()
+    // Since this computer moved: one that reached the address it left is told the new one (MOVE);
+    // one seen here has moved, and once all have, the old address goes.
+    const m = conf.moved
+    if (m && this.via !== prior && m.left?.includes(device.id)) {
+      m.left = m.left.filter((x) => x !== device.id)
+      if (!m.left.length) setTimeout(() => endMove(), 0)
+    }
     save()
-    toRelay(OP.OK, this.id)
+    this.via.send(OP.OK, this.id)
+    if (m && this.via === prior) tellMove(this, relayUrl()).catch(() => {})
   }
 
   // Removed here: what it asks from now on is turned down at once (its connections close a moment
@@ -691,9 +743,10 @@ export async function reviewPair({ days, uses, fresh } = {}) {
 export function stopReview() { delete conf.review; save(); return status() }
 
 // ---------- your other devices ----------
-// A relay address as machines.js compares them: https (or a test relay on this computer), no path.
+// A relay address as machines.js compares them: https (or a test relay on this computer, at
+// 127.0.0.1 or <name>.localhost), no path.
 export function cleanRelay(u) {
-  try { const x = new URL(String(u || '')); return (x.protocol === 'https:' || (x.protocol === 'http:' && x.hostname === '127.0.0.1')) ? x.origin : null } catch { return null }
+  try { const x = new URL(String(u || '')); return (x.protocol === 'https:' || (x.protocol === 'http:' && (x.hostname === '127.0.0.1' || onThisComputer(x.href)))) ? x.origin : null } catch { return null }
 }
 export const relayUrl = () => (conf.url ? conf.url.replace(/\/$/, '') : null)
 export const hostPublic = async () => b64u((await key()).public)
@@ -707,6 +760,35 @@ export async function invite() {
   const { id, secret } = splitCode(c)
   invites = [...invites.filter((p) => p.expires > Date.now() && p.uses < 1), { id, secret, expires: Date.now() + 10 * 60000, uses: 0, tries: 0 }].slice(-10)
   return { link: `${relayUrl()}/#pair=${formatCode(c)}`, name: computerName() }
+}
+
+// ---------- moving with this computer ----------
+// Where this computer is now, for a device that reached it at the address it moved from (or was
+// connected when it moved): { url, name, hosted, link }, sealed in MOVE, or asked for by Bridge AI
+// on the phone (moveFor). The iPhone app takes its pairing, key and all, to the new address; a
+// browser or the Android app keeps a key per address (each relay is a site of its own there), so
+// link pairs it there again, as the same device, with a code made for it alone that works once, for
+// MOVE_MINUTES. Only that device ever sees it: it goes sealed, to it.
+// at: the new address; from: the one the device is at now (the app there can let go of it).
+function moveCode(deviceId, at, from) {
+  const c = newPairCode()
+  const { id, secret } = splitCode(c)
+  moves = [...moves.filter((p) => p.expires > Date.now() && p.uses < 1), { id, secret, expires: Date.now() + MOVE_MINUTES * 60000, uses: 0, tries: 0, device: deviceId, from: from || null }].slice(-32)
+  return `${at}/#pair=${formatCode(c)}&name=${encodeURIComponent(computerName())}`
+}
+// (hosted: whether the new address is on Bridge AI's relay.)
+const whereNow = (device, at, from, hosted = !!conf.hosted) => ({ url: at, name: computerName(), hosted, ...(device.kind === 'computer' ? {} : { link: moveCode(device.id, at, from) }) })
+async function tellMove(c, at, hosted) {
+  if (!c.proven || !c.device || !deviceOf(c.device.id) || !at) return
+  await c.send(K.MOVE, 0, whereNow(c.device, at, c.via === prior ? conf.moved?.url : conf.url, hosted))
+}
+// Bridge AI on a phone asking where this computer is now (src/moved.js), for the phone it runs on,
+// which reached it at the address it moved from.
+export function moveFor(deviceId) {
+  const d = deviceOf(deviceId)
+  if (!d) throw Object.assign(new Error('Only a device paired with this computer can ask'), { status: 403 })
+  if (!relayUrl()) throw Object.assign(new Error('This computer doesn\'t use a relay now'), { status: 409 })
+  return whereNow(d, relayUrl(), conf.moved?.url)
 }
 
 // Six digits shown on both devices, from both keys and a random number from each: the same on each
@@ -750,9 +832,17 @@ export const whenAsked = (fn) => { onAsk = fn }
 // A device paired with a code (the QR, or a one-time code), so you hear of one you didn't pair.
 let onPaired = () => {}
 export const whenPaired = (fn) => { onPaired = fn }
-// Another of your devices now has a different relay address (machines.js follows it).
+// Another of your devices now has a different relay address (machines.js follows it), or none
+// (null: it stopped using its relay).
 let onMoved = () => {}
 export const whenMoved = (fn) => { onMoved = fn }
+// ...or a new key of its own, which it said sealed (machines.js reaches it with that one now).
+let onRekeyed = () => {}
+export const whenRekeyed = (fn) => { onRekeyed = fn }
+// This computer's own relay changed (moved, or stopped), or its key did: your other computers hear
+// it from this one at once (machines.js connects to each again, saying so in ABOUT).
+let onChanged = () => {}
+export const whenChanged = (fn) => { onChanged = fn }
 
 // Allow (it's paired, as a device) or turn down an ask.
 export function answerAsk(id, allow) {
@@ -778,18 +868,22 @@ export function removeMachine(relayAt) {
 }
 // Which of the paired devices are machines (requests through the relay say which device).
 export const deviceOf = (id) => (id && (conf.devices || []).find((d) => d.id === id)) || null
+// The address a device moved here from, with this computer (the phone app there can let go of it).
+export const movedFrom = (id) => deviceOf(id)?.movedFrom || null
 export const isMachine = (deviceId) => !!deviceId && (conf.devices || []).some((d) => d.id === deviceId && d.kind === 'computer')
 
 export function removeDevice(id) {
   const gone = (conf.devices || []).filter((d) => d.id === id)
   conf.devices = (conf.devices || []).filter((d) => d.id !== id)
   tombstone(gone)
+  // (Nor is it waited for at the address this computer moved from.)
+  if (conf.moved?.left?.includes(id)) { conf.moved.left = conf.moved.left.filter((x) => x !== id); if (!conf.moved.left.length) setTimeout(() => endMove(), 0) }
   save()
   roster().catch(() => {})
   onRemoved(id)
   // A moment later, so a phone removing itself still gets the answer (what its connections ask
   // meanwhile is turned down: Conn.removed).
-  setTimeout(() => { for (const c of [...conns.values()]) if (c.device?.id === id) c.close() }, 500)
+  setTimeout(() => { for (const c of [...conns.values(), ...prior.conns.values()]) if (c.device?.id === id) c.close() }, 500)
   return status()
 }
 // A removed device's key, kept a while: when it connects again it's told, sealed, that it was
@@ -1062,10 +1156,11 @@ async function deployWith(token, account) {
 
   const url = `https://${script}.${sub}.workers.dev`
   const changed = conf.url !== url || conf.token !== hostToken
-  if (conf.hosted) leave() // from Bridge AI's relay: phones pair again with this one
-  conf = { ...conf, url, token: hostToken, cf: { ...conf.cf, account: acct.id, accountName: acct.name, script } }
-  save()
-  relayBuild = build
+  const cfNow = { ...conf.cf, account: acct.id, accountName: acct.name, script }
+  // Here already: the same address, updated. From another (Bridge AI's relay, say): this computer
+  // moves once its own is answering, and its phones come along (moveTo).
+  const moving = !!conf.url && conf.url !== url
+  if (!moving) { const { hosted: _, ...rest } = conf; conf = { ...rest, url, token: hostToken, cf: cfNow }; save() }
 
   // A brand-new address can take a minute to start answering.
   busy = 'Waiting for your relay to come online…'
@@ -1074,8 +1169,9 @@ async function deployWith(token, account) {
     if (ok) break
     await new Promise((r) => setTimeout(r, 2000))
   }
-  if (changed) disconnect()
-  connect()
+  if (moving) await moveTo({ url, token: hostToken, cf: cfNow })
+  else { if (changed) disconnect(); connect(); if (changed) onChanged() }
+  relayBuild = build
   return {}
 }
 
@@ -1156,13 +1252,9 @@ async function registerHosted() {
     let ok = false
     try { const u = new URL(d.url); ok = u.protocol === new URL(where).protocol && u.host === `${d.id}.${new URL(where).host}` } catch { /* not a URL */ }
     if (!ok) throw new Error('Bridge AI\'s relay gave an address that isn\'t its own')
-    // From another relay: its phones pair again with this one (each relay is its own address).
-    if (conf.url !== d.url.replace(/\/$/, '')) leave()
-    conf = { ...conf, url: d.url.replace(/\/$/, ''), token: d.token, hosted: { id: d.id, at: new Date().toISOString() } }
+    // From another relay: its phones and your other computers come along (moveTo).
     limit = null
-    save()
-    disconnect()
-    connect()
+    await moveTo({ url: d.url.replace(/\/$/, ''), token: d.token, hosted: { id: d.id, at: new Date().toISOString() } })
   } catch (e) {
     if (['hostedFull', 'accountStopped'].includes(e.code) || /^account/.test(e.code || '')) throw e // said in place, not as an error
     lastError = e.name === 'TimeoutError' ? 'Bridge AI\'s relay didn\'t answer. Try again in a minute.' : /fetch failed|ENOTFOUND|ECONNREFUSED/.test(e.message) ? 'Can\'t reach Bridge AI\'s relay. Check the internet connection and try again.' : e.message
@@ -1173,24 +1265,110 @@ async function registerHosted() {
   return status()
 }
 
-// Done with this relay, for another: disconnected, its phones forgotten (they pair again with the
-// new one), and if it was Bridge AI's relay, this computer's address there is removed.
-function leave() {
-  const was = conf
-  disconnect()
-  for (const c of conns.values()) c.end()
-  conns.clear()
+// To another relay (next: { url, token, hosted, cf }), from the one in use. The phones and your
+// other computers paired here stay paired, and this computer keeps its key: they find it at the new
+// address with what they have. Those connected now are told where it's going first, sealed (MOVE),
+// before their connection ends. The rest find it at the old address, which this computer stays
+// connected to (connectPrior) for MOVE_DAYS, or until each has been seen at the new one; then, if it
+// was Bridge AI's relay, it's removed there. Moving back to the address it moved from: that one's
+// in use again, as it was. (Which Worker was yours on Cloudflare stays, so going back to it updates
+// that one, at the same address.)
+async function moveTo(next) {
+  const elsewhere = conf.url !== next.url
+  const from = conf.url && conf.token && elsewhere ? { url: conf.url, token: conf.token, hosted: !!conf.hosted } : null
+  if (from) {
+    const back = conf.moved?.url === next.url
+    await Promise.all([...conns.values(), ...(back ? [] : prior.conns.values())].map((c) => tellMove(c, next.url, !!next.hosted).catch(() => {})))
+    endMove({ keep: back })
+  }
+  const left = from ? (conf.devices || []).map((d) => d.id) : []
+  const { hosted: _, ...rest } = conf
+  conf = {
+    ...rest, url: next.url, token: next.token, ...(next.hosted ? { hosted: next.hosted } : {}), ...(next.cf ? { cf: next.cf } : {}),
+    ...(from && left.length ? { moved: { ...from, at: new Date().toISOString(), until: Date.now() + MOVE_DAYS * 86400000, left } } : {}),
+  }
   pairing = null
   limit = null
   use = null
-  relayBuild = null
-  // (Which Worker was yours on Cloudflare stays, so going back to it updates that one. Its phones'
-  // keys stay too, so one that reaches this computer again is told it was forgotten, sealed.)
-  tombstone(was.devices || [])
-  // (And whether Bridge AI's relay was started here by itself, which Settings says while it's in use.)
-  conf = { key: was.key, awake: was.awake, removed: was.removed, ...(was.leaving ? { leaving: was.leaving } : {}), ...(was.cf?.script ? { cf: { account: was.cf.account, accountName: was.cf.accountName, script: was.cf.script } } : {}), ...(was.auto ? { auto: was.auto } : {}) }
   save()
-  if (was.hosted) unregister(was)
+  disconnect()
+  connect()
+  if (conf.moved) { prior.backoff = 2000; connectPrior() } else if (from?.hosted) unregister(from) // nobody to wait for there
+  if (elsewhere) onChanged()
+}
+
+// Done with the address this computer moved from: each device has been seen at the new one,
+// MOVE_DAYS have passed, it moved again, or you stopped using the relay. On Bridge AI's relay, the
+// address is removed there, unless it's the one in use again (keep).
+function endMove({ keep = false } = {}) {
+  clearTimeout(prior.retry)
+  clearInterval(prior.pinger)
+  const ws = prior.ws
+  prior.ws = null
+  try { ws?.close() } catch { /* closed */ }
+  for (const c of prior.conns.values()) c.end()
+  prior.conns.clear()
+  const m = conf.moved
+  if (!m) return
+  delete conf.moved
+  save()
+  if (m.hosted && !keep) unregister(m)
+}
+
+// The address this computer moved from, kept connected meanwhile, as the one in use is: a phone or
+// computer that reaches it there is let in as anywhere (with its key, as always), and told sealed
+// where this computer is now (prove: MOVE). The relay's own word there (notes, limits, use) is for
+// the address in use, not this one. It goes when it's done (endMove), or when the relay says the
+// address isn't there any more.
+function connectPrior() {
+  clearTimeout(prior.retry)
+  const m = conf.moved
+  if (!m) return
+  if (Date.now() > m.until || !m.left?.length) return endMove()
+  if (prior.ws && prior.ws.readyState <= 1) return
+  const relayToken = m.hosted ? acct?.relayTokenNow() : null
+  if (m.hosted && !relayToken) { prior.retry = setTimeout(connectPrior, 5 * 60000); return }
+  const ws = new WebSocket(`${m.url.replace(/^http/, 'ws')}/_relay/host`, { headers: { Authorization: `Bearer ${m.token}`, ...(m.hosted ? { 'X-Bridge-Version': VERSION, 'X-Relay-Token': relayToken } : {}) }, handshakeTimeout: 15000, ...(onThisComputer(m.url) ? { lookup: loopback } : {}) })
+  prior.ws = ws
+  let heard = Date.now()
+  let gone = false
+  ws.on('open', () => {
+    prior.backoff = 2000
+    clearInterval(prior.pinger)
+    prior.pinger = setInterval(() => {
+      if (Date.now() > (conf.moved?.until || 0)) return endMove()
+      if (Date.now() - heard > 40000) return ws.terminate()
+      try { ws.send('ping') } catch { /* closing */ }
+    }, 15000)
+  })
+  ws.on('message', (data, isBinary) => {
+    heard = Date.now()
+    if (!isBinary) return
+    const b = new Uint8Array(data)
+    const id = Buffer.from(b.buffer, b.byteOffset, b.byteLength).readUInt32BE(1)
+    if (b[0] === OP.OPEN) prior.conns.set(id, new Conn(id, prior))
+    else if (b[0] === OP.CLOSE) { prior.conns.get(id)?.end(); prior.conns.delete(id) }
+    else if (b[0] === OP.DATA) {
+      let c = prior.conns.get(id)
+      if (!c) prior.conns.set(id, (c = new Conn(id, prior)))
+      c.receive(b.slice(5))
+    }
+  })
+  // That address isn't there any more (Bridge AI's relay removed it, or the Worker went): nothing
+  // to wait for there.
+  ws.on('unexpected-response', (req, res) => { gone = res.statusCode === 403 || res.statusCode === 404; res.resume() })
+  ws.on('error', () => {})
+  ws.on('close', () => {
+    if (prior.ws !== ws) return
+    clearInterval(prior.pinger)
+    prior.ws = null
+    for (const c of prior.conns.values()) c.end()
+    prior.conns.clear()
+    if (!conf.moved) return
+    if (gone) return endMove()
+    prior.retry = setTimeout(connectPrior, prior.backoff + Math.random() * 1000)
+    prior.backoff = Math.min(prior.backoff * 2, 5 * 60000)
+  })
 }
 
 // This computer's address on Bridge AI's relay, removed there. Until the relay has heard it, the
@@ -1225,6 +1403,8 @@ async function sendLeaving() {
 // may know only "localhost" itself).
 const onThisComputer = (u) => { try { return /\.localhost$/i.test(new URL(u).hostname) } catch { return false } }
 const loopback = (host, opts, cb) => (opts?.all ? cb(null, [{ address: '127.0.0.1', family: 4 }]) : cb(null, '127.0.0.1', 4))
+// ...for another device's relay too (machines.js).
+export const reachOptions = (u) => (onThisComputer(u) ? { lookup: loopback } : {})
 // POST to a relay with this computer's token: its status, or 0 when it couldn't be reached.
 function relayPost(url, token) {
   return new Promise((resolve) => {
@@ -1296,22 +1476,32 @@ export async function update() {
   return status()
 }
 
-// Stop using the relay on this computer. The Worker stays on your Cloudflare account (delete it
-// there if you like); phones paired with it are forgotten. On Bridge AI's relay, this computer's
-// address there is removed, with anything it kept. Bridge AI's relay doesn't start here by itself
-// after this (stopped).
-export function forget() {
+// Stop using the relay on this computer. It's never needed to move to another relay (moveTo does
+// that, with everything paired coming along); this is for when you want none. The Worker stays on
+// your Cloudflare account (delete it there if you like), and which one it is stays here, so setting
+// it up again puts it back at the same address, where your other computers still look; only the
+// sign-in goes (Bridge AI signs out of Cloudflare). On Bridge AI's relay, this computer's address
+// there is removed, with anything it kept. Paired phones are forgotten (those connected now are
+// told so, sealed), and this computer gets a new key, so nothing kept of the old one opens anything
+// any more: the way to replace it. Your other computers stay linked, and hear the new key from this
+// one, sealed (machines.js). Bridge AI's relay doesn't start here by itself after this (stopped).
+export async function forget() {
+  await Promise.all([...conns.values(), ...prior.conns.values()].filter((c) => c.proven && c.device && c.device.kind !== 'computer').map((c) => c.send(K.MOVE, 0, { forgot: true, name: computerName() }).catch(() => {})))
+  endMove()
   if (conf.hosted) unregister(conf)
   limit = null
   use = null
   disconnect()
-  for (const c of conns.values()) c.end()
-  conns.clear()
   pairing = null
-  tombstone(conf.devices || [])
-  const { key: k, awake: a, leaving: l, removed: x } = conf
-  conf = { key: k, awake: a, removed: x, ...(l ? { leaving: l } : {}), stopped: new Date().toISOString() }
+  moves = []
+  tombstone((conf.devices || []).filter((d) => d.kind !== 'computer'))
+  const computers = (conf.devices || []).filter((d) => d.kind === 'computer')
+  const { awake: a, leaving: l, removed: x, cf: c } = conf
+  conf = { awake: a, removed: x, ...(computers.length ? { devices: computers } : {}), ...(l ? { leaving: l } : {}), ...(c?.script ? { cf: { account: c.account, accountName: c.accountName, script: c.script } } : {}), stopped: new Date().toISOString() }
+  hostKey = null
   save()
+  await key()
   fs.rmSync(CF_HOME, { recursive: true, force: true }) // and sign Bridge AI out of Cloudflare
+  onChanged()
   return status()
 }
