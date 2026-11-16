@@ -97,6 +97,8 @@ const PATHS = {
   'settings:voice': { phone: 'Settings › Voice & Meetings › Speech to Text' },
   'settings:mail': { phone: 'Settings › Mail', mac: true },
   'settings:mcp': { phone: 'Settings › MCP Servers' },
+  // A beta feature's, there only while it's on (slack-bot follows it on a phone).
+  'settings:slack-bot': { phone: 'Settings › Slack Bot', trial: 'slack-bot' },
   // Devices, and its tabs (Account & Devices once Bold Bridge accounts exist).
   'settings:devices': { phone: 'Settings › Devices' },
   'settings:phone': { phone: 'Settings › Devices › Phone' },
@@ -131,8 +133,9 @@ const actions = [...app.matchAll(/\{ id: '(a:[\w-]+)'/g)].map((m) => m[1])
 const settings = source('src', 'components', 'Settings.jsx')
 const sections = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(settings)?.[1] || '').matchAll(/\{ id: '([\w-]+)'/g)].map((m) => `settings:${m[1]}`)
 // Each section's name and what's in it, as the phone's list of them shows them.
-// (One marked mac, Mail, is there only where Apple Mail can be read.)
-const named = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(settings)?.[1] || '').matchAll(/label: tx\('([^']+)'\), icon: '[\w-]+', hint: tx\('([^']+)'\)(, mac: true)?/g)].filter((m) => !m[3] || IS_MAC).map((m) => ({ name: m[1], hint: m[2] }))
+// (One marked mac, Mail, is there only where Apple Mail can be read; one marked trial only while
+// that beta feature is on, which none here is.)
+const named = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(settings)?.[1] || '').matchAll(/label: tx\('([^']+)'\), icon: '[\w-]+', hint: tx\('([^']+)'\)(, mac: true)?(, trial: '[\w-]+')?/g)].filter((m) => (!m[3] || IS_MAC) && !m[4]).map((m) => ({ name: m[1], hint: m[2] }))
 ok(views.length >= 5 && views.includes('view:studio') && !views.includes('view:dictations') && !views.includes('view:whiteboards') && !views.includes('view:files'), 'the desktop\'s views are read from App.jsx (Dictations a tab of Meetings, whiteboards and Folders in Studio: no views of their own)', views)
 ok(actions.length >= 30 && actions.includes('a:boards') && !actions.includes('a:files'), 'and ⌘K\'s actions (Studio\'s one entry for your files, no Folders)', actions.length)
 ok(sections.length >= 8, 'and Settings\' sections', sections)

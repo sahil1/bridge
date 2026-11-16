@@ -26,7 +26,11 @@
 //               src/recommended.js lists them); Recommended Settings passes them
 //   access(lvl) arguments for how much it may do without asking: 'ask' (its default: before edits
 //               and commands), 'edits' (changes files freely, asks before commands), 'full' (nothing
-//               asked). Only flags from each CLI's docs; agents without it always ask.
+//               asked), and 'read' (reads and answers, nothing else: the Slack Bot's answers,
+//               frontdesk.js). Only flags from each CLI's docs; agents without it always ask, and
+//               can't answer read-only.
+//   confined    'read' keeps it to its own folder too: anything that would ask is refused instead,
+//               and reading outside its folder would ask
 //   login       arguments that sign it in, in a terminal tab Bridge AI opens (Sign in buttons);
 //               [] for Gemini CLI, which signs in when it starts (index.js preselects Google)
 //   caps        chat: a transcript Bridge can render; subagents; commands: a "/" menu;
@@ -56,7 +60,12 @@ export const AGENTS = [
     sessionId: 'assign',
     start: ({ sessionId, prompt }) => [...(sessionId ? ['--session-id', sessionId] : []), ...(prompt ? [prompt] : [])], promptArg: true,
     resume: (id) => ['--resume', id],
-    access: (lvl) => (lvl === 'edits' ? ['--permission-mode', 'acceptEdits'] : lvl === 'full' ? ['--permission-mode', 'bypassPermissions'] : []),
+    // read: its tools cut to Read, Grep and Glob (nothing that edits, runs a command, fetches a page
+    // or starts a subagent), no MCP servers, and anything that would ask refused rather than asked
+    // (dontAsk), which is what reading outside its folder would do. --tools takes a list, so a flag
+    // follows it before anything else can.
+    access: (lvl) => (lvl === 'edits' ? ['--permission-mode', 'acceptEdits'] : lvl === 'full' ? ['--permission-mode', 'bypassPermissions'] : lvl === 'read' ? ['--tools', 'Read,Grep,Glob', '--permission-mode', 'dontAsk', '--strict-mcp-config'] : []),
+    confined: true,
     // A copy of a conversation under a new id (the original stays as it is).
     fork: (id, newId) => ['--resume', id, '--fork-session', ...(newId ? ['--session-id', newId] : [])],
     busy: CLAUDE_BUSY,
@@ -72,7 +81,9 @@ export const AGENTS = [
     sessionId: 'discover',
     start: ({ prompt }) => (prompt ? [prompt] : []), promptArg: true,
     resume: (id) => ['resume', id],
-    access: (lvl) => (lvl === 'edits' ? ['--sandbox', 'workspace-write', '--ask-for-approval', 'on-request'] : lvl === 'full' ? ['--dangerously-bypass-approvals-and-sandbox'] : []),
+    // read: its read-only sandbox, never asking (what it runs can read anywhere, but write nothing
+    // and reach no network), so it isn't confined to its folder.
+    access: (lvl) => (lvl === 'edits' ? ['--sandbox', 'workspace-write', '--ask-for-approval', 'on-request'] : lvl === 'full' ? ['--dangerously-bypass-approvals-and-sandbox'] : lvl === 'read' ? ['--sandbox', 'read-only', '--ask-for-approval', 'never'] : []),
     fork: (id) => ['fork', id],
     busy: ESC_INTERRUPT,
     caps: { chat: true, commands: true, typeAhead: true, fork: true, rewind: true },
@@ -118,6 +129,8 @@ export const CHAT = {
 const byKind = new Map(AGENTS.map((a) => [a.kind, a]))
 export const adapter = (kind) => byKind.get(kind) || (kind === 'shell' ? SHELL : kind === 'chat' ? CHAT : { kind, label: kind, bin: [kind], start: () => [], busy: ESC_INTERRUPT, caps: {} })
 export const caps = (kind) => adapter(kind).caps || {}
+// Whether an agent can be started read-only (access 'read'), and whether that keeps it to its folder.
+export const readOnly = (kind) => (adapter(kind).access?.('read')?.length ? { confined: !!adapter(kind).confined } : null)
 export const newSessionId = () => crypto.randomUUID()
 
 // Your login shell's PATH: apps opened from the Dock or a launcher get a bare one, and agent

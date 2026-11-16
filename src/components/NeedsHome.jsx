@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Icon, { StatusDot } from './Icon.jsx'
-import { NeedsItem, onDevice, Why, QuietFold, OutsideItem } from './NeedsYou.jsx'
+import { NeedsItem, onDevice, Why, QuietFold, OutsideItem, SlackItem } from './NeedsYou.jsx'
 import { useAgentMap } from './AgentMap.jsx'
 import { useCalendar, shortTitle } from './Agenda.jsx'
 import { PrepCard } from './meetings/prep.jsx'
@@ -111,8 +111,8 @@ export function needCount(data) {
   const pinned = new Set((data?.pins || []).map((p) => p.id))
   const all = (data?.items || []).filter((i) => i.group === 'needs' && i.online && (pinned.has(i.uid) || !isQuiet(i)))
   const here = all.filter(onShown).length
-  // What other apps ask of you here (Bridge AI as an MCP Server) counts here too.
-  return { here: here + (data?.outside?.length || 0), elsewhere: all.length - here }
+  // What other apps ask of you here (Bridge AI as an MCP Server), and the Slack Bot's answers, count here too.
+  return { here: here + (data?.outside?.length || 0) + (data?.slack?.length || 0), elsewhere: all.length - here }
 }
 
 // The calendar's part of coming up: the meetings left today and tomorrow's, with the files each
@@ -888,8 +888,10 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
   const [sure, setSure] = useState(false) // Clear all older, asked once more
   const [quietOpen, setQuietOpen] = useState(false) // what has gone quiet, unfolded
   const [read, markRead] = useRead()
-  // What other apps ask of you here (Bridge AI as an MCP Server), first under Waiting on You.
+  // What other apps ask of you here (Bridge AI as an MCP Server), first under Waiting on You, and
+  // the Slack Bot's answers to send or discard.
   const outside = (data?.outside || []).filter((x) => !gone[`outside|${x.id}`])
+  const slack = (data?.slack || []).filter((x) => !gone[`slack|${x.id}`])
   const pins = usePins(data, refresh, setNote)
   const arr = useArrangement(data, refresh, setNote, phone)
   // Edit Home: from Edit in the header, a long press on a section's name, or ⌘K (now or as Home opens).
@@ -1035,11 +1037,12 @@ export default function NeedsHome({ phone = false, calendar = false, onOpen, onO
       : awayBy.length === 1 ? t('1 other computer') : t('{n} other computers', { n: awayBy.length }),
   }
   const blocks = {
-    waiting: (showAll || needs.length > 0 || quiet.length > 0 || outside.length > 0) && (
+    waiting: (showAll || needs.length > 0 || quiet.length > 0 || outside.length > 0 || slack.length > 0) && (
       <section key="waiting" className="hm-sec hm-waiting" aria-label={t('Waiting on You')}>
-        <h3 {...press}>{t('Waiting on You')}{needs.length + outside.length > 0 && <span className="fcount">{needs.length + outside.length}</span>}<span className="hm-hint">{t('your answer starts them again')}</span></h3>
+        <h3 {...press}>{t('Waiting on You')}{needs.length + outside.length + slack.length > 0 && <span className="fcount">{needs.length + outside.length + slack.length}</span>}<span className="hm-hint">{t('your answer starts them again')}</span></h3>
+        {slack.map((x) => <SlackItem key={x.id} it={x} setNote={setNote} onDone={(o) => { setGone((g) => ({ ...g, [`slack|${o.id}`]: Date.now() })); setTimeout(refresh, 300) }} />)}
         {outside.map((x) => <OutsideItem key={x.id} it={x} setNote={setNote} onDone={(o) => { setGone((g) => ({ ...g, [`outside|${o.id}`]: Date.now() })); setTimeout(refresh, 300) }} />)}
-        {needs.length > 0 ? grouped(needs, sort, devices, cards) : outside.length ? null
+        {needs.length > 0 ? grouped(needs, sort, devices, cards) : outside.length || slack.length ? null
           : pinnedOf('needs') ? <p className="muted small hm-none">{t('Pinned, at the top.')}</p>
             : <div className="hm-empty"><Icon name="check" size={16} /><span>{focus ? t('Nothing needs you on this computer right now.') : t('Nothing needs you right now.')}</span></div>}
         <QuietFold items={quiet} open={quietOpen} setOpen={setQuietOpen} {...quietProps} />
