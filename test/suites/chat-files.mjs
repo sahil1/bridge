@@ -5,12 +5,12 @@
 // and review-qr.png. Two Bridge AIs ("Desk", the agent's, and "Laptop"), each on its own relay,
 // linked, and a phone paired with Desk. Checked:
 //   the server: a path in full (from / and from ~), one in the agent's folder (with a line number
-//   after it), one from the folders the conversation worked in, one found by a search below the
-//   folder, several that end the same way, none (saying where it looked), a path outside the
-//   folder (said, never looked at), a path up and out of it; the search keeps out of node_modules,
-//   a cloud drive and, on a Mac, the folders macOS asks about (stood in for by scripts/tcc-sim.mjs:
-//   nothing in them is touched), unless the agent's folder is in one; the same answers through
-//   Laptop's link and the phone's;
+//   after it), one from the folders the conversation worked in (Claude Code's and Codex's logs),
+//   one found by a search below the folder, several that end the same way, none (saying where it
+//   looked), a path outside the folder (said, never looked at), a path up and out of it; the search
+//   keeps out of node_modules, a cloud drive and, on a Mac, the folders macOS asks about (stood in
+//   for by scripts/tcc-sim.mjs: nothing in them is touched), unless the agent's folder is in one;
+//   the same answers through Laptop's link and the phone's;
 //   the app: the names in a reply are links (in `code`, a Markdown link, the words themselves);
 //   html/roadmap.html opens the page in Files, rendered in its sandbox; report.txt offers the two to
 //   pick from; missing.txt says where it looked and offers Search, never a bare "Not found";
@@ -22,6 +22,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import { pathToFileURL } from 'node:url'
+import { spawnSync } from 'node:child_process'
 import { startKit, startRelay, checks, until, browser, page, shot, sleep, browserNotice, phoneNotes, phoneSaw, ROOT, TEST, IS_MAC, IS_WIN } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('chat-files')
@@ -151,6 +152,37 @@ try {
   } else skip('the search keeps out of Desktop, Documents and Downloads', 'only macOS asks before an app looks in them')
   r = await locate(desk.url, 'review-qr.png')
   ok(one(r, 'bridge-utils/store/ios/review-env/out/review-qr.png'), 'with the agent\'s folder in Desktop, it\'s searched all the same', r)
+
+  // Codex's log: a patch that adds site/pages/new.html, and a command run in site (its workdir)
+  // that cds into docs. Read by the server's own modules, run on a home of their own.
+  {
+    const ch = path.join(desk.dir, 'codex-home')
+    const cw = path.join(ch, 'work')
+    put(path.join(cw, 'site', 'pages', 'new.html'), '<h1>New</h1>')
+    put(path.join(cw, 'site', 'docs', 'guide.md'), '# Guide\n')
+    const sid = '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b'
+    const day = new Date()
+    const at2 = (n) => String(n).padStart(2, '0')
+    const log2 = path.join(ch, '.codex', 'sessions', String(day.getFullYear()), at2(day.getMonth() + 1), at2(day.getDate()), `rollout-${day.getFullYear()}-${at2(day.getMonth() + 1)}-${at2(day.getDate())}T09-00-00-${sid}.jsonl`)
+    const lines = [
+      { type: 'session_meta', payload: { id: sid, cwd: cw } },
+      { type: 'turn_context', payload: { cwd: cw, model: 'gpt-5-codex' } },
+      { type: 'response_item', payload: { type: 'custom_tool_call', name: 'apply_patch', call_id: 'c1', input: '*** Begin Patch\n*** Add File: site/pages/new.html\n+<h1>New</h1>\n*** End Patch' } },
+      { type: 'response_item', payload: { type: 'function_call', name: 'shell', call_id: 'c2', arguments: JSON.stringify({ command: ['bash', '-lc', 'cd docs && make'], workdir: path.join(cw, 'site') }) } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Added `pages/new.html` and `guide.md`.' }] } },
+    ]
+    put(log2, lines.map((l) => JSON.stringify({ timestamp: new Date().toISOString(), ...l })).join('\n') + '\n')
+    const run = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      const { locate } = await import(process.env.FL)
+      const out = {}
+      for (const q of ['pages/new.html', 'guide.md']) out[q] = await locate(process.env.CW, { kind: 'codex', sessionId: process.env.SID, cwd: process.env.CW }, q)
+      console.log(JSON.stringify(out))
+    `], { env: { ...process.env, HOME: ch, USERPROFILE: ch, BRIDGE_HOME: path.join(ch, '.bridge-ai'), FL: pathToFileURL(path.join(ROOT, 'server', 'filelinks.js')).href, CW: cw, SID: sid }, encoding: 'utf8', timeout: 30000 })
+    let got = null
+    try { got = JSON.parse(run.stdout.trim().split('\n').at(-1)) } catch { /* said below */ }
+    ok(one({ s: 200, ...got?.['pages/new.html'] }, 'site/pages/new.html', 'conversation'), 'Codex: a file its patch added, named from a folder below', got?.['pages/new.html'] || run.stderr.slice(-600))
+    ok(one({ s: 200, ...got?.['guide.md'] }, 'site/docs/guide.md', 'conversation'), 'Codex: a file in the folder a command cd\'d into from its workdir', got?.['guide.md'] || run.stderr.slice(-600))
+  }
 
   // Through Laptop, linked to Desk, and through the phone's link.
   const p = (await desk.api('/relay/pair', {})).pairing

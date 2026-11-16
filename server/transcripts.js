@@ -737,12 +737,14 @@ export function usedPaths({ kind, sessionId, cwd }) {
       return
     }
     if (Array.isArray(v)) {
-      // Codex's command is a list: ["bash", "-lc", "cd site && npm run build"].
-      if ((key === 'command' || key === 'cmd') && v.every((x) => typeof x === 'string')) return walk(v.join(' '), base, key, depth)
+      // Codex's command is a list, ["bash", "-lc", "cd site && npm run build"]: each part read as one.
       for (const x of v) walk(x, base, key, depth + 1)
       return
     }
-    if (typeof v === 'object') for (const [k, x] of Object.entries(v)) if (!SKIP_KEYS.has(k)) walk(x, base, k, depth + 1)
+    if (typeof v !== 'object') return
+    // A command run in a folder of its own (Codex's workdir): what it names is from there.
+    const here = typeof v.workdir === 'string' ? full(base, v.workdir) || base : base
+    for (const [k, x] of Object.entries(v)) if (!SKIP_KEYS.has(k)) walk(x, here, k, depth + 1)
   }
   // Each entry's folder: its own cwd, else the last one said before it (Codex's turn_context), else
   // the agent's.
