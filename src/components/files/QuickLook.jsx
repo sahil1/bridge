@@ -11,12 +11,16 @@ import { Code, Markdown, HtmlView } from '../Files.jsx'
 import { MediaView, PictureView, OtherFile } from '../FileMedia.jsx'
 import { OfficeView } from '../FileExtras.jsx'
 import { Thumb } from './views.jsx'
+import { FileIcon } from './art.jsx'
 import { getJson, rawUrl, enc, kindName, fmtSize, fmtWhen } from './fsapi.js'
 
-export default function QuickLook({ base, root, entry, at, count, cloud, onClose, onStep, onOpen, openLabel, onInfo, onOpenPath }) {
+// glyph: a folder's mark (art.jsx). A whiteboard of Studio's lists (entry.board: { preview }, its
+// picture's address or null) is shown as its picture. onInfo: Get Info, where there is one (Studio's
+// lists have none).
+export default function QuickLook({ base, root, entry, at, count, cloud, glyph = null, onClose, onStep, onOpen, openLabel, onInfo = null, onOpenPath }) {
   const [st, setSt] = useState({ loading: true })
   const box = useRef(null)
-  const folder = entry.dir || entry.pkg
+  const folder = entry.dir || entry.pkg || !!entry.board
   useEffect(() => {
     if (folder) { setSt({}); return }
     let live = true
@@ -31,7 +35,7 @@ export default function QuickLook({ base, root, entry, at, count, cloud, onClose
     if (typing) return
     if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); onStep(1) }
     if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); onStep(-1) }
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'i') { e.preventDefault(); e.stopPropagation(); onInfo() }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'i' && onInfo) { e.preventDefault(); e.stopPropagation(); onInfo() }
   }
   const f = st.f
   const raw = rawUrl(base, root, entry.path)
@@ -42,25 +46,32 @@ export default function QuickLook({ base, root, entry, at, count, cloud, onClose
         <header className="fx-ql-head">
           <div className="fx-ql-title">
             <b title={entry.name}>{entry.name}</b>
-            <span className="muted small">{[kindName(entry), !folder && fmtSize(entry.size), entry.mtime && fmtWhen(entry.mtime)].filter(Boolean).join(' · ')}{count > 1 ? ` · ${t('{n} of {total}', { n: at + 1, total: count })}` : ''}</span>
+            <span className="muted small">{[entry.board ? t('Whiteboard') : kindName(entry), !folder && fmtSize(entry.size), entry.mtime && fmtWhen(entry.mtime)].filter(Boolean).join(' · ')}{count > 1 ? ` · ${t('{n} of {total}', { n: at + 1, total: count })}` : ''}</span>
           </div>
           <div className="fx-ql-acts">
             {count > 1 && <>
               <button type="button" className="win-btn" onClick={() => onStep(-1)} aria-label={t('The one before')} title={t('The one before (↑)')}><Icon name="up" size={13} /></button>
               <button type="button" className="win-btn" onClick={() => onStep(1)} aria-label={t('The one after')} title={t('The one after (↓)')}><Icon name="down" size={13} /></button>
             </>}
-            <button type="button" className="win-btn" onClick={onInfo} aria-label={t('Get Info')} title={t('Get Info (⌘I)')}><Icon name="info" size={13} /></button>
-            {openLabel && <button type="button" className="btn small" onClick={onOpen}><Icon name={folder ? 'folder-open' : 'external'} size={12} /> {openLabel}</button>}
+            {onInfo && <button type="button" className="win-btn" onClick={onInfo} aria-label={t('Get Info')} title={t('Get Info (⌘I)')}><Icon name="info" size={13} /></button>}
+            {openLabel && <button type="button" className="btn small" onClick={onOpen}><Icon name={folder && !entry.board ? 'folder-open' : 'external'} size={12} /> {openLabel}</button>}
             <button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')} title={t('Close (Space)')}><Icon name="x" size={14} /></button>
           </div>
         </header>
         {(cloud || entry.offline) && !folder && <p className="fx-ql-note small"><Icon name="cloud" size={12} /> {t('This file is on a cloud drive: showing it downloads it, if it isn\'t here already.')}</p>}
         <div className="fx-ql-body">
-          {folder && (
+          {folder && !entry.board && (
             <div className="fx-ql-folder">
-              <Thumb base={base} root={root} e={entry} big />
+              <Thumb base={base} root={root} e={entry} big glyph={glyph} />
               <b>{entry.name}</b>
               <span className="muted small">{entry.pkg ? kindName(entry) : t('Folder')}{entry.mtime ? ` · ${t('Modified {when}', { when: fmtWhen(entry.mtime) })}` : ''}</span>
+            </div>
+          )}
+          {entry.board && (
+            <div className="fx-ql-folder">
+              {entry.board.preview ? <img className="fx-ql-board" src={entry.board.preview} alt="" /> : <FileIcon e={entry} art="board" size={128} />}
+              <b>{entry.name}</b>
+              <span className="muted small">{t('Whiteboard')}{entry.mtime ? ` · ${t('Modified {when}', { when: fmtWhen(entry.mtime) })}` : ''}</span>
             </div>
           )}
           {st.loading && !folder && <div className="pad"><div className="skeleton-rows"><div /><div /><div /></div></div>}

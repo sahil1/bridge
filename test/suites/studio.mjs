@@ -225,7 +225,7 @@ try {
   ok(JSON.stringify(newItems) === '["Document","Markdown","Sheet","Deck","Page","Whiteboard"]' && !!(await until(async () => (await p.locator('.sd-files-row', { hasText: 'notes.md' }).count()) > 0, 10000)), "Studio's home: New in its header (document, Markdown, sheet, deck, page, whiteboard) and your recent files", newItems)
   await shot(p, `${tag}studio-home`)
   // A Markdown file, edited and saved.
-  await p.locator('.sd-file-name', { hasText: 'notes.md' }).first().click()
+  await p.locator('.sd-file-name', { hasText: 'notes.md' }).first().dblclick()
   const pm = p.locator('.sd-page .ProseMirror')
   ok(!!(await until(async () => /Second draft/.test(await pm.innerText().catch(() => '')), 15000)), 'a Markdown file opens as a document')
   const mdTools = await p.locator('.sd-doc-tools button').evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')))

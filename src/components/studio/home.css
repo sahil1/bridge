@@ -46,23 +46,24 @@
 .sd-files-table { display: grid; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--pane); }
 .sd-files-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.6fr) 120px 150px; align-items: center; gap: 12px; min-height: 48px; padding: 0 12px 0 8px; border-top: 1px solid var(--line); }
 .sd-files-row:first-child { border-top: 0; }
+.sd-files-row:not(.head) { cursor: default; user-select: none; }
 .sd-files-row:not(.head):hover { background: color-mix(in srgb, var(--pane-2) 70%, transparent); }
+/* Picked, as a folder's row is (a click picks, a double-click opens). */
+.sd-files-row.on, .sd-files-row.on:hover { background: var(--accent-fill); }
+.sd-files-row.on :is(.sd-file-text b, .sd-file-text small, .sd-file-dir, .sd-file-dir > svg, .sd-file-when, .sd-file-away) { color: var(--on-accent); }
+.sd-files-row.on .sd-file-x { color: var(--on-accent); opacity: 1; }
+.sd-files-picked:empty { display: none; }
 .sd-files-row.head { min-height: 34px; background: var(--pane-2); color: var(--ink-3); font: 600 10.5px var(--font); letter-spacing: .06em; text-transform: uppercase; }
 .sd-files-row.head > span:first-child { padding-left: 46px; }
 .sd-files-row.wait { grid-template-columns: 1fr; padding-left: 16px; }
 .sd-files-row.wait span { display: inline-flex; align-items: center; gap: 6px; }
 .sd-file-name { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 6px 4px; border-radius: 8px; color: var(--ink); text-align: left; }
-.sd-file-ic { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--pane-2); color: var(--ink-2); }
-.sd-file-ic.k-doc { background: color-mix(in srgb, #2b6cde 13%, var(--pane)); color: #2b6cde; }
-.sd-file-ic.k-sheet { background: color-mix(in srgb, #1e8e3e 13%, var(--pane)); color: #1e8e3e; }
-.sd-file-ic.k-deck { background: color-mix(in srgb, #e8710a 14%, var(--pane)); color: #d9650a; }
-.sd-file-ic.k-pdf { background: color-mix(in srgb, #d93025 12%, var(--pane)); color: #d93025; }
-.sd-file-ic.k-page { background: color-mix(in srgb, #7c4dff 12%, var(--pane)); color: #7c4dff; }
-.sd-file-ic.k-board { background: color-mix(in srgb, #0f9d8f 13%, var(--pane)); color: #0f9d8f; }
+/* Its icon, as Files draws a file (files/art.jsx, its colours from explorer.css: Studio's home is
+   inside .fx). */
+.sd-file-ic { flex: none; display: grid; place-items: center; width: 32px; height: 32px; }
 .sd-file-text { display: grid; min-width: 0; }
 .sd-file-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; font-size: 13px; }
 .sd-file-text small { font-size: 11.5px; }
-.sd-file-name:hover b { color: var(--accent); }
 .sd-file-dir { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-2); font-size: 12.5px; }
 .sd-file-dir > svg { flex: none; color: var(--ink-3); }
 .sd-file-dir > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

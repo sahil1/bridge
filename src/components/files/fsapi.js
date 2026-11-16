@@ -91,6 +91,15 @@ export function kindOf(e) {
 }
 export const kindName = (e) => kindOf(e)[0]
 export const iconOf = (e) => kindOf(e)[1]
+// What a file's icon is drawn as (art.jsx): its kind's colour and mark, by its extension.
+const ART = {
+  doc: 'doc docx docm odt rtf pages', text: 'txt log md markdown', pdf: 'pdf', sheet: 'xlsx xlsm xls ods numbers csv tsv', deck: 'pptx pptm ppt odp key',
+  page: 'html htm', code: 'js jsx mjs ts tsx py sh css go rs java swift c cpp h', data: 'json xml yml yaml', image: 'png jpg jpeg gif webp heic heif svg tif tiff bmp avif ico',
+  video: 'mp4 mov m4v webm mkv avi', audio: 'mp3 m4a wav aac flac ogg aif aiff', archive: 'zip gz tgz 7z rar', disk: 'dmg iso', app: 'app exe msi pkg', book: 'epub',
+}
+const ART_OF = Object.fromEntries(Object.entries(ART).flatMap(([art, exts]) => exts.split(' ').map((x) => [x, art])))
+export const extOf = (name) => EXT(name)
+export const artOf = (e) => ART_OF[EXT(e.name)] || 'file'
 export const isPicture = (name) => /\.(png|jpe?g|gif|webp|avif|bmp|svg|ico)$/i.test(name)
 export const isPdf = (name) => /\.pdf$/i.test(name)
 
@@ -107,16 +116,33 @@ export function fmtWhen(ms, { long = false } = {}) {
   return d.toLocaleDateString(locale(), { year: 'numeric', month: 'short', day: 'numeric' }) + (d.getFullYear() === now.getFullYear() ? `, ${time}` : '')
 }
 
-// Sorted as you picked, folders first. by: name, mtime, size or kind.
+// Sorted as you picked, folders first. by: name, mtime, btime (when it was made), size or kind.
 export function sorted(list, { by = 'name', desc = false } = {}) {
   const name = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
   const cmp = {
     name,
     mtime: (a, b) => (a.mtime || 0) - (b.mtime || 0) || name(a, b),
+    btime: (a, b) => (a.btime || 0) - (b.btime || 0) || name(a, b),
     size: (a, b) => (a.size ?? -1) - (b.size ?? -1) || name(a, b),
     kind: (a, b) => kindName(a).localeCompare(kindName(b)) || name(a, b),
   }[by] || name
   return [...list].sort((a, b) => (b.dir - a.dir) || (desc ? -cmp(a, b) : cmp(a, b)))
+}
+// What a folder can be arranged by (Finder's Arrange By), each first the way Finder has it: names
+// and kinds A to Z, dates newest first, sizes biggest first. When it was made only where the
+// computer says (a disk that doesn't keep it gives none).
+export const ARRANGE = [['name', tx('Name')], ['kind', tx('Kind')], ['mtime', tx('Date Modified')], ['btime', tx('Date Created')], ['size', tx('Size')]]
+export const firstWay = (by) => by === 'mtime' || by === 'btime' || by === 'size'
+// In groups by kind, as Finder's Group by Kind: folders first, then each kind by its name, each
+// sorted as picked. [{ kind, entries }]
+export function grouped(list, sort) {
+  const by = new Map()
+  for (const e of sorted(list, sort)) {
+    const k = kindName(e)
+    if (!by.has(k)) by.set(k, { kind: k, dir: !!e.dir, entries: [] })
+    by.get(k).entries.push(e)
+  }
+  return [...by.values()].sort((a, b) => (b.dir - a.dir) || a.kind.localeCompare(b.kind, locale()))
 }
 
 // The separator a computer's paths use, from one of its paths.

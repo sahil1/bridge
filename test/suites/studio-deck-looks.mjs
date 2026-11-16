@@ -162,7 +162,7 @@ try {
   await until(async () => { await p.locator('.rail-nav-btn', { hasText: 'Studio' }).click(); return p.locator('.sd-home').waitFor({ timeout: 1500 }).then(() => true, () => false) }, 20000, 300)
   const row = p.locator('.sd-files-row', { hasText: 'mac.pptx' })
   ok(!!(await until(async () => (await row.count()) > 0, 20000, 300)), 'the decks listed in Studio\'s Recent')
-  await row.first().locator('.sd-file-name').click()
+  await row.first().locator('.sd-file-name').dblclick()
   ok(!!(await showing(p, first)), 'a deck opened from Studio\'s Recent list, as PowerPoint for Mac saved it')
   const bad = { editor: [], thumbs: [], present: [] }
   const thumb = () => p.locator('.sd-strip .sd-thumb.on .px-slide-box')
