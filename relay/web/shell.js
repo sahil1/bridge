@@ -23,8 +23,9 @@ import * as offline from './offline.js'
 const $ = (id) => document.getElementById(id)
 // A start screen in front of Bridge AI (or Bridge AI, with null). Bridge AI stays loaded behind it,
 // so its banner goes with it, and comes back with it (showApp).
-const show = (id) => { for (const s of ['pair', 'wait', 'home']) $(s).hidden = s !== id; if (id) { $('app').hidden = true; $('away').hidden = true; bar(null); listOthers(); offerDemo() } }
+const show = (id) => { for (const s of ['pair', 'wait', 'home']) $(s).hidden = s !== id; $('use-app').hidden = true; if (id) { $('app').hidden = true; $('away').hidden = true; bar(null); listOthers(); offerDemo() } }
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+const onAndroid = /Android/.test(navigator.userAgent)
 // The iPhone app; the Android app runs this same page, and says so in its user agent.
 const native = window.bridgeNative || null
 const inApp = !!native || /BridgeAIApp\//.test(navigator.userAgent)
@@ -557,9 +558,39 @@ function whyWaiting() {
   const name = thisComputer()
   const it = name === 'Your computer' ? 'your computer' : name
   if (unchecked) waitScreen(`Can't connect to ${it}`, uncheckedText(), true)
-  else if (heardStatus && !hostOnline) waitScreen(`${name} is offline`, `${hostSeen ? `Offline since ${when(hostSeen)}. ` : ''}It opens here as soon as it's back on, with Bridge AI running.`, true)
-  else if (heardStatus) waitScreen(`${name} isn't answering`, 'It\'s online, but hasn\'t answered yet. Bridge AI keeps trying.', true)
-  else waitScreen(`Can't reach ${it}`, 'Its relay doesn\'t answer: check this phone\'s connection. Bridge AI keeps trying.', true)
+  else if (heardStatus && !hostOnline) {
+    // Offline for a day or more: it may have moved to another relay, or stopped using this one,
+    // while this phone was away (it says so to a phone that's connected, and at this address for two
+    // weeks after a move). So that's said too, with Pair again.
+    const long = !!hostSeen && Date.now() - hostSeen > LONG_GONE
+    waitScreen(`${name} is offline`, `${hostSeen ? `Offline since ${when(hostSeen)}. ` : ''}It opens here as soon as it's back on, with Bridge AI running.${long ? ` If it moved to another relay or stopped using this one, pair this phone with it again: ${pairHow(it)}` : ''}`, true)
+    $('pair-again').hidden = !long
+  } else if (heardStatus) waitScreen(`${name} isn't answering`, 'It\'s online, but hasn\'t answered yet. Bridge AI keeps trying.', true)
+  else {
+    waitScreen(`Can't reach ${it}`, 'Its relay doesn\'t answer: check this phone\'s connection. Bridge AI keeps trying.', true)
+    // Bridge AI's relay answers that this address isn't there any more: the computer moved to
+    // another relay, or stopped using this one (it removes the address then).
+    addressGone().then((gone) => {
+      if (!gone || $('wait').hidden || heardStatus) return
+      waitScreen(`${name} isn't at this address any more`, `It moved to another relay, or stopped using this one. To use it here again, pair this phone with it: ${pairHow(it)}`, true)
+      $('pair-again').hidden = false
+    })
+  }
+}
+const LONG_GONE = 24 * 3600 * 1000
+const pairHow = (it) => `on ${it}, click Pair a device in Settings, and scan its code ${apps ? 'here, with Add a computer' : 'with this phone\'s camera'}.`
+// Whether this page's relay says its address is gone (Bridge AI's relay answers 404 for an address
+// it removed). Only where the page is at the relay's own address (a browser, the Android app).
+async function addressGone() {
+  if (native || relay !== location.origin) return false
+  const r = await fetch('/_relay/health', { cache: 'no-store' }).catch(() => null)
+  return r?.status === 404
+}
+$('pair-again').onclick = () => {
+  if (apps) return addComputer()
+  $('pair').querySelector('h1').textContent = 'Pair with your computer'
+  $('pair-err').hidden = true
+  show('pair')
 }
 $('saved-open').onclick = () => openSaved()
 
@@ -634,6 +665,7 @@ async function onData(buf) {
   if (kind === K.PING) return send(K.PONG, 0)
   if (kind === K.PONG) return
   if (kind === K.GONE) return removedThere()
+  if (kind === K.MOVE) { let m = null; try { m = json(body) } catch { /* not that */ } return moved(m) }
   const s = streams.get(id)
   if (!s) return
   if (kind === K.HEAD) s.onHead?.(json(body))
@@ -683,8 +715,8 @@ async function refused(why) {
   $('pair-err').textContent = WHY[why] || why
 }
 // Your computer removed this phone, and said so sealed (GONE): the pairing goes, and what this
-// phone kept for it.
-async function removedThere() {
+// phone kept for it. (why: what to say instead, when it forgot it another way.)
+async function removedThere(why) {
   const name = thisComputer() === 'Your computer' ? 'your computer' : thisComputer()
   dropSession()
   abandon()
@@ -699,7 +731,46 @@ async function removedThere() {
   $('app').src = 'about:blank'
   show('pair')
   $('pair-err').hidden = false
-  $('pair-err').textContent = `This phone was removed on ${name}. To use it again, pair it with a new code from Pair a device there.`
+  $('pair-err').textContent = why || `This phone was removed on ${name}. To use it again, pair it with a new code from Pair a device there.`
+}
+
+// ---------- your computer moved to another relay, or forgot this phone ----------
+// Said only by the computer itself, sealed (MOVE): the relay can't say it, and the new address still
+// has to answer with the computer's own key before anything goes there. Moved (Bridge AI's relay,
+// your own Cloudflare): this phone follows it at once, still paired. The iPhone app takes its
+// pairing there, key and all; a browser or the Android app keeps a key per address (each relay is a
+// site of its own), so it pairs there again with the code made for this phone alone (link): a tap.
+// Forgot (you stopped using the relay on it): the pairing goes, and the pairing screen says why,
+// with how to pair again.
+let moving = false
+const relayOrigin = (u) => { try { const x = new URL(String(u || '')); return x.protocol === 'https:' || (x.protocol === 'http:' && (x.hostname === '127.0.0.1' || /\.localhost$/i.test(x.hostname))) ? x.origin : null } catch { return null } }
+async function moved(m) {
+  const name = String(m?.name || '').trim().slice(0, 60) || (thisComputer() === 'Your computer' ? 'your computer' : thisComputer())
+  if (m?.forgot) return removedThere(`${name} stopped using its relay, so it forgot this phone. To use it again: on ${name}, set up the phone in Settings › Account & Devices, click Pair a device, and scan its code ${apps ? 'here (Add a computer)' : 'with this phone\'s camera'}.`)
+  const to = relayOrigin(m?.url)
+  const link = (() => { try { const l = new URL(String(m?.link || '')); return relayOrigin(l.href) === to && /[#&]pair=/.test(l.hash) ? l.href : null } catch { return null } })()
+  if (!to || to === relay || moving) return
+  moving = true
+  const where = m.hosted ? 'Bridge AI\'s relay' : 'its own relay'
+  if (!native && !link) { moving = false; return waitScreen(`${name} moved to ${where}`, `Pair this phone with it there: on ${name}, open Settings › Account & Devices, click Pair a device, and scan its code.`, false) }
+  dropSession()
+  abandon()
+  awayBanner(false)
+  bar(null)
+  appShown = false
+  $('app').src = 'about:blank'
+  waitScreen(`${name} moved to ${where}`, native ? 'Following it there…' : 'Following it there: pair this phone with it there, one tap.', false)
+  const from = relay
+  if (native) {
+    // The pairing, kept under the new address; the old one let go; and the app opened there.
+    const keep = native.pairing
+    native.post({ type: 'relay', url: to })
+    if (keep) native.post({ type: 'keep', pairing: keep })
+    if (m.name) native.post({ type: 'name', name })
+    native.post({ type: 'forget', url: from })
+    native.post({ type: 'switch', url: to })
+  } else if (android) android.pair(link)
+  else location.href = link
 }
 
 function dropSession(msg) {
@@ -1049,6 +1120,10 @@ window.bridgeRelay = {
   openCloud: bundledUis.includes('cloud') ? () => openBundled('cloud') : null,
   // Bridge AI's new version, once the computer has one (src/fresh.js).
   reload: () => { reloadApp().catch(() => reloadFrame()) },
+  // The relay this page reaches its computer through, and following the computer to another one,
+  // as its sealed word says (src/moved.js asks it over the link: { url, name, hosted, link }).
+  relay: () => relay,
+  move: (m) => moved(m),
 }
 
 // ---------- Bridge AI on the computer updated ----------
@@ -1160,6 +1235,7 @@ function waitScreen(title, msg, retry) {
   $('wait-title').textContent = title
   $('wait-text').textContent = msg || ''
   $('retry').hidden = !retry
+  $('pair-again').hidden = true
   $('app-open').hidden = true
   // What this phone kept of it, while it isn't there.
   $('saved-open').hidden = true
@@ -1204,13 +1280,30 @@ function askPair(c, name) {
   const who = String(name || '').trim().slice(0, 60)
   const host = (() => { try { return new URL(relay).host } catch { return relay } })()
   $('pair').querySelector('h1').textContent = who ? `Pair with ${who}?` : 'Pair with this computer?'
-  $('pair-intro').textContent = `This link pairs this phone with ${who || 'a computer'} (${host}), so it can use Bridge AI there. Pair only if it's yours.${isIOS && !standalone ? ' To use it like an app, add Bridge AI to your Home Screen first (Share › Add to Home Screen) and pair there: each code pairs one device.' : ''}`
+  // In a phone's browser (the QR code scanned with the camera opens one): it says plainly that this
+  // pairs the browser, not the Bridge AI app, and how to use the app instead. Pairing the browser
+  // still works.
+  const browser = !inApp && !standalone ? (onAndroid ? 'this browser' : isIOS ? 'Safari' : null) : null
+  $('pair-intro').textContent = browser
+    ? `This link pairs ${browser} on this phone with ${who || 'a computer'} (${host}), not the Bridge AI app. Pair only if it's yours.${isIOS ? ' To use it like an app, add Bridge AI to your Home Screen first (Share › Add to Home Screen) and pair there: each code pairs one device.' : ''}`
+    : `This link pairs this phone with ${who || 'a computer'} (${host}), so it can use Bridge AI there. Pair only if it's yours.${isIOS && !standalone ? ' To use it like an app, add Bridge AI to your Home Screen first (Share › Add to Home Screen) and pair there: each code pairs one device.' : ''}`
   $('pair-how').textContent = ''
   $('code').value = formatCode(c)
-  $('pair-go').textContent = 'Pair'
+  $('pair-go').textContent = browser ? `Pair ${browser === 'Safari' ? 'Safari' : 'this browser'}` : 'Pair'
   // Paired already (with another computer, or before): Not now keeps it as it is.
   $('pair-cancel').hidden = !paired
   show('pair')
+  if (browser) useApp(who)
+}
+// The Bridge AI app instead: open it, Add a computer, and scan the code on the computer's screen
+// again. On iPhone, Open the Bridge AI app goes straight there (bridgeai://pair, with this link,
+// which the app pairs from; an app from before that only opens).
+function useApp(who) {
+  $('use-app-text').textContent = `Use the Bridge AI app instead: open it, tap Add a computer (or Scan the QR code), and scan the code on ${who || 'your computer'}'s screen.`
+  $('use-app-open').hidden = onAndroid
+  $('use-app-open').onclick = () => { location.href = `bridgeai://pair?link=${encodeURIComponent(location.href)}` }
+  $('use-app-get').href = onAndroid ? 'https://boldbridge.ai/#android' : 'https://boldbridge.ai/phone'
+  $('use-app').hidden = false
 }
 $('pair-cancel').onclick = () => { history.replaceState(null, '', location.pathname + location.search); location.reload() }
 

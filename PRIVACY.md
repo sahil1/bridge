@@ -421,7 +421,9 @@ would keep or send elsewhere (to take payment) will be said here first.
 
 **Stop using it** (Settings › Account & Devices › Phone › Stop using the relay) and your computer's data there is
 deleted at once (should that message not arrive, its id leaves the list of computers within a few
-days). A computer that hasn't connected for 90 days is deleted the same way, and deleting your Bold
+days). Move your computer to a relay of your own instead and its address here stays for up to two
+weeks, while your phones paired there move with it, and is then deleted the same way. A computer
+that hasn't connected for 90 days is deleted the same way, and deleting your Bold
 Bridge account deletes your account's counts and its computers there within a day. Everything else
 in this policy, including what Cloudflare sees, applies to it as to a relay of your own, except
 that it's the project's Cloudflare account.
