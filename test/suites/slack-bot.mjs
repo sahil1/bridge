@@ -299,6 +299,12 @@ try {
       await p.locator('.sb [data-setting="slack-replies"]').scrollIntoViewIfNeeded()
       await sleep(200)
       await shot(p, `${tag}slack-bot-settings-${mode}${phone ? '-phone' : ''}-more`)
+      if (phone) {
+        // ‹ Settings: the list of sections has it, with what's in it, while the beta feature is on.
+        await p.locator('.st-back').click()
+        const row = p.locator('.st-list-row', { hasText: 'Slack Bot' })
+        ok(/Answers to questions from people you name in your Slack workspace/.test(await row.innerText().catch(() => '')), 'on a phone, Settings\' list of sections has it', await p.locator('.st-list').innerText().catch(() => ''))
+      }
       ok(errors.length === 0, 'no page errors', errors)
       await ctx.close()
     })
