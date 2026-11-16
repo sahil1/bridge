@@ -8,9 +8,10 @@
 //   topics. A mention from someone you named: to the folder its words fit, answered by an agent
 //   started there read-only (Claude Code with only Read, Grep and Glob, refusing what would ask, no
 //   MCP servers), told the question is someone else's words, on the desk's own task list (not the
-//   Chief of Staff's); its answer a draft in Needs You, edited there and sent in the question's
-//   thread. A question about what an agent is working on: a read-only copy of that agent's
-//   conversation answers (the agent itself gets nothing); discarded, nothing goes. Nothing fits: a
+//   Chief of Staff's, which can't list or read the answering agents either); its answer a draft in
+//   Needs You, edited there and sent in the question's thread. A question about what an agent is
+//   working on: a read-only copy of that agent's conversation answers (the agent itself gets
+//   nothing); discarded, nothing goes. Nothing fits: a
 //   throwaway agent in a folder of its own; sent as it was, in the direct message. The limits: an
 //   answering agent asked to write a file, run a command and read outside its folder does none of
 //   them. Nothing can answer: to you with an empty reply, the asker told it's been passed on; your
@@ -22,7 +23,8 @@
 //   of what came in and what went out.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startSlack, checks, until, sleep, browser, page, shot, phoneFaults, TEST, IS_WIN } from '../lib/harness.mjs'
+import { spawnSync } from 'node:child_process'
+import { startKit, startSlack, checks, until, sleep, browser, page, shot, phoneFaults, TEST, ROOT, IS_WIN } from '../lib/harness.mjs'
 
 const { ok, done } = checks('slack-bot')
 const slack = await startSlack('slack-bot')
@@ -51,6 +53,11 @@ const openSettings = async (p, section = 'slack-bot', ready = '.modal.settings .
   await p.locator(ready).first().waitFor({ timeout: 5000 })
 }
 const M = '<@UBOT>'
+// The Chief of Staff's own command, as it runs it in its folder.
+const chief = (...args) => {
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'chief', 'bin', 'bridge'), ...args], { encoding: 'utf8', cwd: path.join(kit.data, 'chief'), env: { ...process.env, BRIDGE_URL: kit.url, BRIDGE_HOME: kit.data, BRIDGE_THREAD: 'main' } })
+  return `${r.stdout || ''}${r.stderr || ''}`
+}
 
 // Two folders to open to questions, and a file outside both.
 const PRICING = path.join(kit.home, 'pricing')
@@ -155,6 +162,10 @@ try {
   ok(!(await kit.api('/chief/tasks')).items.some((x) => /Slack/.test(x.title)), 'on the desk\'s own task list, not the Chief of Staff\'s', (await kit.api('/chief/tasks')).items.map((x) => x.title))
   ok(!(await posted()).length, 'and nothing has gone to Slack yet')
   ok(!(await kit.api('/needs-you')).items.some((i) => /Slack question/.test(i.agent?.title || '')), 'its agent isn\'t in Needs You as finished work besides (its answer is)', (await kit.api('/needs-you')).items.map((i) => i.agent?.title))
+  const answering = (await kit.api('/fleet')).agents.find((a) => a.helper?.list === 'desk')
+  const listed = chief('agents', '--brief')
+  const shown = chief('show', answering?.paneId || 'none')
+  ok(!!answering && !listed.includes(answering.paneId) && !/enterprise plans/.test(listed) && /Slack Bot's answering agents/.test(shown) && !/enterprise plans/.test(shown), 'the Chief of Staff doesn\'t see the answering agents in bridge agents, and can\'t read one', { listed, shown })
   await part('the draft in Needs You', async () => {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
     await p.locator('.needs-chip').click({ timeout: 15000 })
