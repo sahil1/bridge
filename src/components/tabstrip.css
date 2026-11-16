@@ -55,10 +55,16 @@
 .ws-tabs-scroll > .ws-tab.drop-after::after { left: auto; right: -2px; }
 
 /* Less room: the others narrower than 72, the tab on screen keeping its name and ×; less still, the
-   others their icon alone (and their × only by the middle button, as in Chrome). */
+   others their icon alone. */
 .ws-tabs-scroll.tight .ws-tab:not(.main, .side, .pinned, .renaming) { min-width: 38px; max-width: 72px; padding: 0 4px 0 10px; }
 .ws-tabs-scroll.icons .ws-tab:not(.main, .side, .pinned, .renaming) { justify-content: center; gap: 0; padding: 0; }
-.ws-tabs-scroll.icons .ws-tab:not(.main, .side, .pinned, .renaming) :is(.ws-tab-name, .ws-tab-where, .ws-tab-x) { display: none; }
+.ws-tabs-scroll.icons .ws-tab:not(.main, .side, .pinned, .renaming) :is(.ws-tab-name, .ws-tab-where) { display: none; }
+/* One of those under the pointer (or the keyboard): its × in its icon's place, the icon gone while it
+   shows, as on Chrome's narrow tabs. Centered where the icon was, its letters staying put; centered in
+   the tab, when it's its icon alone. Never onto the icon, nor past the tab's edge (38px at least). */
+.ws-tabs-scroll.tight .ws-tab:not(.main, .side, .pinned, .renaming):is(:hover, :focus-within) > :is(.icon, .sdot) { display: none; }
+.ws-tabs-scroll.tight .ws-tab:not(.main, .side, .pinned, .renaming):is(:hover, :focus-within) .ws-tab-x { order: -1; }
+.ws-tabs-scroll.tight:not(.icons) .ws-tab:not(.main, .side, .pinned, .renaming):is(:hover, :focus-within) { padding-left: 6px; gap: 3px; }
 .ws-tabs-scroll.icons .ws-tab:not(.main, .side, .pinned) > .sdot:not(:first-child):not(.sdot-blocked) { display: none; }
 .ws-tabs-scroll.icons .ws-tab:not(.main, .side, .pinned):has(> .sdot-blocked:not(:first-child)) > .tab-ship { display: none; }
 

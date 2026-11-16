@@ -33,6 +33,14 @@
 // tabs to the right leave pinned tabs; a reload keeps them. Rename…: in the tab, Enter keeps it (the
 // sidebar has it too), Esc puts it back, one that doesn't take says why; a view has no Rename. Every
 // menu and editor is as wide as what it says (320px at most), inside the window.
+// Crowded (Home, four meetings and three spaces' agents, at 1440 a few letters each, at 1024 their
+// icons alone): under the pointer or the keyboard's focus a tab's × takes its icon's place, inside
+// the tab (centered in an icon-alone one); the tab on screen is 124px at least with its name, and
+// closed with the pointer, the next one shows as wide, with its name, its × under the pointer.
+// Meetings: two meeting tabs come together after the views under a purple Meetings chip, its line
+// under them; a click folds them to "Meetings 2" (no dot), still folded after a reload, the one on
+// screen staying out; its right-click menu folds it, has the nine colors and closes its tabs. One
+// meeting tab alone has no chip, and one in a group of yours stays there.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, checks, until, browser, page, shot, withoutCutOff, noServiceWorker, TEST } from '../lib/harness.mjs'
@@ -114,9 +122,11 @@ try {
   // Chrome's colors in each look (tabstrip.css), as the browser gives them.
   const RED = { light: 'rgb(217, 48, 37)', dark: 'rgb(242, 139, 130)' }
   const L = { mode: 'light', theme: 'sky' }
+  // Meetings' own tabs (a meeting the server doesn't have is named Meeting): m1 to m4.
+  const MEET = ['m1', 'm2', 'm3', 'm4'].map((m) => `view:meeting:${m}`)
   // The strip from left to right, each tab by a short name: a group's chip as [its name, and how
   // many when folded], a tab in a group with a chip *, a pinned one ^.
-  const NICK = { ...Object.fromEntries(Object.entries(A).map(([k, v]) => [v, k])), 'view:meetings': 'meetings', 'view:map': 'map' }
+  const NICK = { ...Object.fromEntries(Object.entries(A).map(([k, v]) => [v, k])), 'view:meetings': 'meetings', 'view:map': 'map', 'view:home': 'home', ...Object.fromEntries(MEET.map((id) => [id, id.slice(13)])) }
   const lay = (p) => p.locator('.ws-tabs-scroll').evaluate((s, nick) => [...s.children].map((x) => (x.classList.contains('ws-group')
     ? `[${x.querySelector('.ws-group-name')?.textContent || ''}${x.querySelector('.ws-group-n') ? ` ${x.querySelector('.ws-group-n').textContent}` : ''}]`
     : `${nick[x.dataset.pane] || x.dataset.pane}${x.classList.contains('grouped') ? '*' : ''}${x.classList.contains('pinned') ? '^' : ''}`)).join(' '), NICK).catch((e) => e.message)
@@ -744,6 +754,109 @@ try {
     ok(await untilLay(p, 'meetings [shop] checkout* [Ship] deploy* [Reporting] weekly* board* [billing-api] rounding*'), 'Remove from group: back in its space\'s group', await lay(p))
     ok(withoutCutOff(errors).length === 0, 'your own groups across spaces: no page errors', errors)
     await ctx.close()
+  })
+
+  // ---------- A crowded strip: the × on a narrowed tab, and the tab on screen ----------
+  // Home, four meetings and three spaces' agents, as the owner's strip of 16 Nov had them: a few
+  // letters each at 1440, their icons alone at 1024.
+  // A tab's box, its ×'s and its icon's, each null when it doesn't show.
+  const parts = (p, id) => p.locator(`.ws-tab[data-pane="${id}"]`).evaluate((e) => {
+    const box = (x) => (x && x.getClientRects().length && getComputedStyle(x).display !== 'none' ? (({ left, right }) => ({ left, right }))(x.getBoundingClientRect()) : null)
+    return { tab: box(e), x: box(e.querySelector('.ws-tab-x')), icon: box(e.querySelector(':scope > .icon, :scope > .sdot')), strip: e.parentElement.className }
+  })
+  // Its × inside it, and not on its icon (gone while the × shows).
+  const clean = (y) => !!y.x && y.x.left >= y.tab.left - 0.5 && y.x.right <= y.tab.right + 0.5 && (!y.icon || y.icon.right <= y.x.left || y.icon.left >= y.x.right)
+  const crowd = ['view:home', ...MEET, A.checkout, A.deploy, A.weekly, A.board, A.rounding, A.invoices, studio('Agenda.md')]
+  for (const [width, fit] of [[1440, 'tight'], [1024, 'icons']]) {
+    await part(`crowded at ${width}`, async () => {
+      const { ctx, p, errors } = await open(L, ws(crowd, MEET[0]), width)
+      const g = await geo(p)
+      const main = g.tabs.find((x) => x.main)
+      const cls = await p.locator('.ws-tabs-scroll').getAttribute('class')
+      ok(cls.split(/\s+/).includes(fit) && (fit === 'icons' || !cls.includes('icons')), `crowded at ${width}: the others are ${fit === 'tight' ? 'a few letters each' : 'their icons alone'}`, { cls, widths: g.tabs.map((x) => x.w) })
+      ok(main?.id === MEET[0] && main.w >= 124 && main.name >= 50 && main.x, `crowded at ${width}: the tab on screen is 124px at least, its name showing and its ×`, main)
+      // Under the pointer: a meeting's tab (an icon) and an agent's (its dot), each in sight.
+      const inSight = g.tabs.filter((x) => !x.main && x.left >= g.left && x.right <= g.right).map((x) => x.id)
+      const agent = inSight.find((x) => !x.startsWith('view:'))
+      ok(inSight.includes(MEET[1]) && !!agent, `crowded at ${width}: a meeting's tab and an agent's in sight`, inSight)
+      for (const id of [MEET[1], agent].filter(Boolean)) {
+        await p.locator(`.ws-tab[data-pane="${id}"]`).hover()
+        const got = await until(async () => { const y = await parts(p, id); return y.x && y }, 3000, 100) || await parts(p, id)
+        ok(clean(got) && !got.icon && (fit === 'tight' || Math.abs((got.x.left + got.x.right) / 2 - (got.tab.left + got.tab.right) / 2) <= 1), `crowded at ${width}: under the pointer ${NICK[id]}'s × takes its icon's place${fit === 'icons' ? ', centered' : ''}, inside the tab`, got)
+      }
+      await strip(p, `${tag}tab-strip-crowded-${width}-hover`)
+      // From the keyboard: the same.
+      await p.mouse.move(700, 600)
+      await p.locator(`.ws-tab[data-pane="${MEET[2]}"]`).focus()
+      const k = await until(async () => { const y = await parts(p, MEET[2]); return y.x && y }, 3000, 100) || await parts(p, MEET[2])
+      ok(clean(k) && !k.icon, `crowded at ${width}: on the tab with the keyboard's focus, the same`, k)
+      await p.locator(`.ws-tab[data-pane="${MEET[2]}"]`).blur()
+      // The tab on screen closed with its ×: the next one shows, on screen as wide, its name showing and
+      // its × under the pointer.
+      const bx = await p.locator(`.ws-tab[data-pane="${MEET[0]}"] .ws-tab-x`).boundingBox()
+      await p.mouse.click(bx.x + bx.width / 2, bx.y + bx.height / 2)
+      await until(async () => !(await p.locator(`.ws-tab[data-pane="${MEET[0]}"]`).count()), 3000)
+      await p.waitForTimeout(150)
+      const now = (await geo(p)).tabs.find((x) => x.main)
+      const under = await p.evaluate(([cx, cy]) => { const e = document.elementFromPoint(cx, cy); return { x: !!e?.closest('.ws-tab-x'), tab: e?.closest('.ws-tab')?.dataset.pane } }, [bx.x + bx.width / 2, bx.y + bx.height / 2])
+      ok(now?.id === MEET[1] && now.w >= 124 && now.name >= 50 && now.x, `crowded at ${width}: closing the tab on screen with the pointer shows the next, 124px at least, with its name and ×`, now)
+      ok(under.x && under.tab === MEET[1], `crowded at ${width}: and its × is under the pointer`, under)
+      await strip(p, `${tag}tab-strip-crowded-${width}-closed`)
+      ok(errors.length === 0, `crowded at ${width}: no page errors`, errors)
+      await ctx.close()
+    })
+  }
+
+  // ---------- Meetings: a group of their own ----------
+  await part('Meetings group', async () => {
+    // Two meeting tabs: together after the views, under a Meetings chip, its line under them.
+    const { ctx, p, errors } = await seeded(L, ws(['view:home', MEET[0], A.weekly, MEET[1], A.board], 'view:home'))
+    ok(await untilLay(p, 'home [Meetings] m1* m2* weekly board', 8000), 'two meeting tabs are a group of their own after the views, under a Meetings chip (one space: no chip for it)', await lay(p))
+    const look = () => p.locator('.ws-tabs-scroll').evaluate((s, ids) => {
+      const chip = [...s.querySelectorAll('.ws-group')].find((x) => x.querySelector('.ws-group-name')?.textContent === 'Meetings')
+      return { chip: chip && getComputedStyle(chip).backgroundColor, lines: ids.map((id) => { const l = s.querySelector(`.ws-tab[data-pane="${id}"] .ws-tab-line`); return l && getComputedStyle(l).backgroundColor }) }
+    }, MEET.slice(0, 2))
+    const purple = await p.evaluate(() => { const e = document.createElement('i'); e.style.background = 'var(--tg-purple)'; document.querySelector('.ws-tabs').append(e); const c = getComputedStyle(e).backgroundColor; e.remove(); return c })
+    const was = await look()
+    ok(was.chip === purple && was.lines.every((l) => l === purple), 'its chip is purple, whatever the spaces\' colors, and a purple line runs under its tabs', { was, purple })
+    await strip(p, `${tag}tab-strip-meetings`)
+    // A click folds it to how many (with no dot: a meeting has none); the tab on screen stays out.
+    await p.locator('.ws-group', { hasText: 'Meetings' }).click()
+    ok(await untilLay(p, 'home [Meetings 2] weekly board'), 'a click on the chip folds the meetings to it, with how many', await lay(p))
+    ok(!(await p.locator('.ws-group.folded .sdot').count()), 'folded, it has no status dot')
+    await until(async () => /"meetings":true/.test(await p.evaluate(() => localStorage.getItem('cc-ws'))), 3000, 100)
+    await p.reload()
+    await p.waitForSelector('.ws-group', { timeout: 20000 }).catch(() => {})
+    ok(await untilLay(p, 'home [Meetings 2] weekly board', 8000), 'after a reload it is still folded', await lay(p))
+    await p.locator('.ws-group', { hasText: 'Meetings' }).click()
+    await untilLay(p, 'home [Meetings] m1* m2* weekly board')
+    await p.locator(`.ws-tab[data-pane="${MEET[1]}"]`).click()
+    await p.locator('.ws-group', { hasText: 'Meetings' }).click()
+    ok(await untilLay(p, 'home [Meetings 2] m2* weekly board'), 'folded with a meeting on screen, that one stays out', await lay(p))
+    await p.locator('.ws-group', { hasText: 'Meetings' }).click()
+    // A right-click: what a space's chip has that fits (no New agent: meetings have no space).
+    await p.locator('.ws-group', { hasText: 'Meetings' }).click({ button: 'right' })
+    const menu = p.locator('.tab-group-menu')
+    await menu.waitFor({ timeout: 3000 }).catch(() => {})
+    const said = await itemsOf(menu)
+    ok(said.join('|') === 'Fold its tabs away|Close its 2 tabs' && (await menu.locator('.tab-menu-color').count()) === 9 && (await menu.locator('.tab-menu-color[aria-checked="true"]').getAttribute('data-color').catch(() => null)) === 'purple', 'its right-click menu folds it, has the nine colors (purple ticked) and closes its tabs', said)
+    ok(compact(await menuBox(menu)), 'as wide as what it says, inside the window', await menuBox(menu))
+    const green = await menu.locator('[data-color="green"]').evaluate((e) => getComputedStyle(e).backgroundColor).catch(() => null)
+    await menu.locator('[data-color="green"]').click()
+    ok(!!(await until(async () => { const x = await look(); return x.chip === green && x.lines.every((l) => l === green) }, 3000)), 'Green there colors its chip and its line', await look())
+    await p.keyboard.press('Escape')
+    ok(withoutCutOff(errors).length === 0, 'Meetings group: no page errors', errors)
+    await ctx.close()
+    // One meeting tab alone stays among the views; one in a group of yours stays there.
+    const one = await open(L, ws(['view:home', MEET[0], A.weekly, A.board], 'view:home'))
+    ok(await untilLay(one.p, 'home m1 weekly board'), 'one meeting tab alone: no chip, among the views', await lay(one.p))
+    await one.ctx.close()
+    const mine = await open(L, ws(['view:home', MEET[0], MEET[1], MEET[2], A.weekly], 'view:home', { tabGroups: { 'g:prep': { name: 'Prep', tabs: [MEET[1]] } }, colors: { 'g:prep': 'blue' } }))
+    ok(await untilLay(mine.p, 'home [Meetings] m1* m3* [Prep] m2* weekly'), 'a meeting tab in a group of yours stays there, the others under Meetings', await lay(mine.p))
+    await mine.ctx.close()
+    const kept = await open(L, ws(['view:home', MEET[0], MEET[1], A.weekly], 'view:home', { tabGroups: { 'g:prep': { name: 'Prep', tabs: [MEET[1]] } }, colors: { 'g:prep': 'blue' } }))
+    ok(await untilLay(kept.p, 'home m1 [Prep] m2* weekly'), 'and with only one meeting tab left out of it, no Meetings chip', await lay(kept.p))
+    await kept.ctx.close()
   })
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
