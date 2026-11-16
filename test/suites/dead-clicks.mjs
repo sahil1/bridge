@@ -51,7 +51,9 @@ const QUIET = [
 ]
 
 // ---------- a Bridge AI with something in each view ----------
-const kit = await startKit(NAME, { config: { trials: { home: true, routines: true, 'meeting-insights': true, 'usage-everywhere': true } } })
+// (The Slack Bot's on too, for its section in Settings, with no Slack to reach: harness.mjs.)
+const TRIALS_ON = ['home', 'routines', 'meeting-insights', 'usage-everywhere', 'slack-bot']
+const kit = await startKit(NAME, { config: { trials: Object.fromEntries(TRIALS_ON.map((id) => [id, true])) } })
 // macOS's open, osascript (Finder, Terminal) and xdg-open: written down, never run.
 const NOTE = "require('fs').appendFileSync(require('path').join(__dirname, 'opened.log'), JSON.stringify(process.argv.slice(1)) + '\\n')\n"
 for (const n of ['open', 'osascript', 'xdg-open']) kit.program(n, NOTE)
@@ -143,9 +145,10 @@ const agentView = (v) => async (p) => {
 }
 // (Voice & Meetings' tabs are read as places too, each by its id: Dictation, Speech to Text. What
 // marks one, accounts or mac, is up to its own end or its first tab: a section's first tab marked
-// accounts, Devices' Account, is that tab's, not its section's.)
+// accounts, Devices' Account, is that tab's, not its section's. One marked trial is a beta
+// feature's, there only when this kit has it on: TRIALS_ON.)
 const SECTIONS = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(fs.readFileSync(path.join(ROOT, 'src', 'components', 'Settings.jsx'), 'utf8'))?.[1] || '').matchAll(/\{ id: '([\w-]+)', label: tx\('([^']+)'\)([^{}]*)/g)]
-  .filter((m) => !/accounts: true/.test(m[3]) && (!/mac: true/.test(m[3]) || process.platform === 'darwin')).map((m) => ({ id: m[1], label: m[2] }))
+  .filter((m) => !/accounts: true/.test(m[3]) && (!/mac: true/.test(m[3]) || process.platform === 'darwin') && (!/trial: '/.test(m[3]) || TRIALS_ON.includes(/trial: '([\w-]+)'/.exec(m[3])[1]))).map((m) => ({ id: m[1], label: m[2] }))
 const PLACES = [
   { name: 'Home', open: view('view:home'), scope: '.cmd .hm', ready: '.hm' },
   { name: 'an agent\'s Chat', open: agentView('chat'), scope: '.cmd .work .console', ready: '.console .msg, .console .composer' },

@@ -15,7 +15,22 @@
 //                                            Each start goes in ~/helpers-started.log ({ args, cwd,
 //                                            message }). A follow-up typed in once it's done works a
 //                                            second and ends "Followed up: <the message>".
-//   --model <m>, --effort <level>, --permission-mode <mode>  taken, as Claude Code takes them
+//   claude ... "<the Slack Bot's brief>"     an answering agent (its brief marks off a question from
+//                                            someone), as it was started; by what the question says:
+//     [answer <text>]                        reads what's in its folder, then answers that
+//     [noanswer]                             says NO ANSWER, and why
+//     [try-write <name>]                     tries to write <name> in its folder first: only when
+//                                            --tools lets it Write, else it says it couldn't
+//     [try-run]                              tries to run a command (touch ran.txt): only when
+//                                            --tools lets it use Bash
+//     [try-read <path>]                      tries to read a file outside its folder: refused under
+//                                            --permission-mode dontAsk, as Claude Code refuses
+//                                            what would have asked
+//                                            Each try goes in ~/answer-tries.log ({ try, done }).
+//   claude --resume <id> --fork-session --session-id <new> "<brief>"   a copy of a conversation:
+//                                            <id>'s, then the brief as above
+//   --model <m>, --effort <level>, --permission-mode <mode>, --tools <list>, --strict-mcp-config
+//                                            taken, as Claude Code takes them
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -23,7 +38,7 @@ const path = require('node:path')
 const args = process.argv.slice(2)
 if (args.includes('--version')) { console.log('2.1.312 (Claude Code)'); process.exit(0) }
 if (args[0] === 'auth') { console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: 'max' })); process.exit(0) }
-const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode', '--effort'])
+const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode', '--effort', '--tools'])
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null }
 const message = args.find((a, i) => !a.startsWith('--') && !WITH_VALUE.has(args[i - 1])) || ''
 const id = opt('--session-id') || opt('--resume') || `s-${process.pid}`
@@ -35,6 +50,14 @@ if (/\[exit\]/.test(message)) process.exit(0)
 // Its conversation, where Bridge AI reads Claude Code's.
 const project = path.join(home, '.claude', 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'))
 fs.mkdirSync(project, { recursive: true })
+// A copy of another conversation (--fork-session): that one's lines first, under this one's id.
+const forked = args.includes('--fork-session') && opt('--resume')
+if (forked && forked !== id) {
+  try {
+    const was = fs.readFileSync(path.join(project, `${forked}.jsonl`), 'utf8').split('\n').filter(Boolean)
+    fs.writeFileSync(path.join(project, `${id}.jsonl`), was.map((l) => JSON.stringify({ ...JSON.parse(l), sessionId: id })).join('\n') + '\n')
+  } catch { /* nothing to copy */ }
+}
 const log = fs.openSync(path.join(project, `${id}.jsonl`), 'a')
 let prev = null
 const w = (o) => {
@@ -84,7 +107,45 @@ function turn(text, answer, ms, made) {
   const look = setInterval(() => { if (fs.existsSync(go)) { clearInterval(look); finish() } }, 200)
 }
 
-if (message && /\[ask\]/.test(message)) {
+// An answer for the Slack Bot: what it can do is what it was started with.
+function answerTurn(text) {
+  // (On Windows its lines come as one, joined by " · ": runtime/spawn.js forCommandLine.)
+  const q = (/----- question from.*? -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of question -----/.exec(text) || [])[1] || ''
+  const tools = opt('--tools')
+  const can = (t) => tools == null || tools.split(',').map((x) => x.trim()).includes(t)
+  const dontAsk = opt('--permission-mode') === 'dontAsk'
+  const tried = (what, done) => note('answer-tries.log', { try: what, done, cwd: process.cwd() })
+  user(text)
+  state = 'working'
+  began = Date.now()
+  draw()
+  setTimeout(() => {
+    const out = []
+    for (const f of fs.readdirSync(process.cwd()).filter((x) => /\.(md|txt)$/.test(x)).slice(0, 3)) tool('Read', { file_path: path.join(process.cwd(), f) })
+    const w = /\[try-write ([\w.-]+)\]/.exec(q)
+    if (w) {
+      if (can('Write')) { tool('Write', { file_path: path.join(process.cwd(), w[1]) }); fs.writeFileSync(path.join(process.cwd(), w[1]), 'Written.\n'); tried('write', true); out.push(`I wrote ${w[1]}.`) } else { tried('write', false); out.push(`I can't write ${w[1]}: I have no tool that writes files.`) }
+    }
+    if (/\[try-run\]/.test(q)) {
+      if (can('Bash')) { fs.writeFileSync(path.join(process.cwd(), 'ran.txt'), ''); tried('run', true); out.push('I ran it.') } else { tried('run', false); out.push('I can\'t run commands here.') }
+    }
+    const r = /\[try-read ([^\]]+)\]/.exec(q)
+    if (r) {
+      const want = path.resolve(r[1].replace(/^~/, home))
+      const here = want.startsWith(fs.realpathSync(process.cwd()) + path.sep) || want.startsWith(process.cwd() + path.sep)
+      if (!can('Read') || (!here && dontAsk)) { tried('read', false); out.push(`I couldn't read ${r[1]}: reading outside this folder was refused.`) } else { let c = ''; try { c = fs.readFileSync(want, 'utf8').trim() } catch { /* none */ } tried('read', true); out.push(`It says: ${c}`) }
+    }
+    const a = /\[answer ([^\]]+)\]/.exec(q)
+    const answer = /\[noanswer\]/.test(q) ? 'NO ANSWER\nNothing in this folder says.' : [...out, a ? a[1] : 'Here is what I found.'].join(' ')
+    said = answer
+    reply(answer)
+    state = 'idle'
+    draw()
+  }, secs * 1000)
+}
+
+if (message && /----- question from/.test(message)) answerTurn(message)
+else if (message && /\[ask\]/.test(message)) {
   user(message)
   state = 'asking'
   draw()

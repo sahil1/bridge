@@ -15,6 +15,14 @@
 // Kept in chief-helpers.json in the data folder. The request is general on purpose: what to do, a
 // role, and optionally a folder, an agent, a thread to report to and read-only, so something other
 // than the chief's `bridge delegate` can hand a question to a helper the same way.
+//
+// The Slack Bot's front desk does (frontdesk.js): its helpers answer a question each, on a task list
+// of its own (list: 'desk', added with list()), with as many at once as it says, in folders of its
+// own for a throwaway one. A helper on another list never reaches the chief: not its task list, not
+// its work folder, not a report (what it says came from outside and goes back to that list, heard()).
+// Read-only is started so (agents.js access 'read'), not only asked for: it can't edit files or run
+// commands. fork: a copy of an agent's conversation, so a question can be answered from what that
+// agent knows without reaching the agent itself.
 import fs from 'node:fs'
 import path from 'node:path'
 import { dataFile, writeFileAtomic } from './paths.js'
@@ -65,16 +73,25 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
     try { writeFileAtomic(FILE, JSON.stringify(data, null, 2)) } catch { /* read-only disk */ }
   }
   const max = () => Math.max(1, Math.min(10, Math.round(Number(cfg.chief?.helpers?.max)) || MAX_DEFAULT))
-  const active = () => data.helpers.filter((h) => h.state === 'starting' || h.state === 'working').length
-  const waiting = () => data.helpers.filter((h) => h.state === 'queued').sort((a, b) => String(a.at).localeCompare(String(b.at)))
+  // Other task lists: name -> { tasks, dir, max(), heard(h) } (list() below). A helper's own list is
+  // the chief's unless it says.
+  const lists = {}
+  const tasksOf = (h) => (h.list ? lists[h.list]?.tasks : tasks) || null
+  const maxOf = (list) => (list ? Math.max(1, lists[list]?.max?.() || 1) : max())
+  const active = (list = null) => data.helpers.filter((h) => (h.list || null) === list && (h.state === 'starting' || h.state === 'working')).length
+  const waiting = (list) => data.helpers.filter((h) => h.state === 'queued' && (list === undefined || (h.list || null) === list)).sort((a, b) => String(a.at).localeCompare(String(b.at)))
+  // Its task changed, on its own list (gone: nothing to change).
+  const mark = (h, patch) => { try { tasksOf(h)?.update(h.task, patch) } catch { /* the task is gone */ } }
   const edits = () => cfg.chief?.helpers?.editOwnFolder === true
   const rel = (p) => path.relative(dir, p).split(path.sep).join('/')
 
-  // The task's own folder: work/<title as a name>, or with its number when that's taken.
-  async function workFolder(title, id) {
+  // The task's own folder: work/<title as a name>, or with its number when that's taken; for another
+  // list, in that list's own folder.
+  async function workFolder(title, id, list) {
     const base = slugOf(title) || `task-${id}`
-    let p = path.join(dir, 'work', base)
-    if (await fs.promises.access(p).then(() => true, () => false)) p = path.join(dir, 'work', `${base}-${id}`)
+    const root = list ? lists[list].dir : path.join(dir, 'work')
+    let p = path.join(root, base)
+    if (await fs.promises.access(p).then(() => true, () => false)) p = path.join(root, `${base}-${id}`)
     await fs.promises.mkdir(p, { recursive: true })
     return p
   }
@@ -82,6 +99,7 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
   // What the helper is told before the brief: who it works for, where its work goes, and to end
   // with what it made and where, which is what the chief hears back.
   function promptOf(h) {
+    if (h.list) return h.brief // another list's brief says it all (frontdesk.js)
     const who = you()
     const where = h.own ? `Work in this folder, ${h.cwd}: it's this task's own folder, so put what you make there.` : `Work in ${h.cwd}.`
     return [
@@ -94,13 +112,13 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
   const tabName = (h) => clip(`${h.role[0].toUpperCase()}${h.role.slice(1)}: ${h.title}`, 48)
 
   // Its agent started, in its own folder with edits allowed when you said helpers may, else asking
-  // as any agent does. Couldn't: the task says why, and so does its card.
+  // as any agent does; read-only, started so. Couldn't: the task says why, and so does its card.
   async function start(h) {
-    const access = h.own && !h.readOnly && edits() ? 'edits' : undefined
+    const access = h.readOnly ? 'read' : h.own && edits() ? 'edits' : undefined
     try {
-      const out = await launch({ kind: h.kind, cwd: h.cwd, own: h.own, label: tabName(h), space: h.space, prompt: promptOf(h), access })
+      const out = await launch({ kind: h.kind, cwd: h.cwd, own: h.own, label: tabName(h), space: h.space, prompt: promptOf(h), access, fork: h.fork || undefined })
       Object.assign(h, { state: 'working', paneId: out.paneId, session: out.session || '', startedAt: new Date().toISOString(), access: access || null, worked: false, again: false, againAt: null, armedAt: null })
-      try { tasks.update(h.task, { status: 'doing', pane: out.paneId }) } catch { /* the task is gone */ }
+      mark(h, { status: 'doing', pane: out.paneId })
       save()
       await Promise.resolve(link(h.thread, out.paneId)).catch(() => {})
     } catch (e) {
@@ -109,8 +127,8 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
     changed()
   }
 
-  // Start what's waiting while there's room: one pass at a time, so two delegations at once can't
-  // both take the last place; one that comes in meanwhile is looked at before the pass ends.
+  // Start what's waiting while there's room on its list: one pass at a time, so two delegations at
+  // once can't both take the last place; one that comes in meanwhile is looked at before the pass ends.
   let filling = null
   let again = false
   function fill() {
@@ -118,7 +136,8 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
     filling = (async () => {
       do {
         again = false
-        for (let next = waiting()[0]; next && active() < max(); next = waiting()[0]) {
+        for (const next of waiting()) {
+          if (next.state !== 'queued' || active(next.list || null) >= maxOf(next.list)) continue
           next.state = 'starting'
           save()
           await start(next)
@@ -171,7 +190,7 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
       : how === 'failed'
         ? { status: 'waiting', needs: `Its ${h.role} helper couldn't start: ${oneLine(error, 200)}` }
         : { status: 'waiting', needs: `Its ${h.role} helper was closed before it finished. Start it again, or drop it?` }
-    try { tasks.update(h.task, patch) } catch { /* the task is gone */ }
+    mark(h, patch)
     // Couldn't start while it was being asked for: whoever asked hears it in the answer instead.
     h.report = quiet || (how === 'failed' && h.inRequest) ? 'none' : 'due'
     save()
@@ -180,7 +199,8 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
     changed()
   }
 
-  // What the chief hears when a helper stops, in its own words to act on.
+  // What the chief hears when a helper stops, in its own words to act on. (One on another list is
+  // heard by that list instead, never by the chief.)
   function reportOf(h) {
     const who = you()
     const head = `Report from your ${h.role} helper${h.paneId ? ` (${h.paneId})` : ''} on task ${h.task}, "${h.title}"`
@@ -202,9 +222,11 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
       for (const h of data.helpers.filter((x) => x.report === 'due' || (x.report === 'pending' && Date.now() - (x.tried || 0) > RETRY_MS))) {
         h.report = 'sending'
         h.tried = Date.now()
-        const r = await Promise.resolve(tell(reportOf(h), h.thread)).catch((e) => ({ sent: false, error: e.message }))
+        const r = h.list
+          ? await Promise.resolve(lists[h.list]?.heard?.({ ...h })).then(() => ({ sent: !!lists[h.list] }), (e) => ({ sent: false, error: e.message }))
+          : await Promise.resolve(tell(reportOf(h), h.thread)).catch((e) => ({ sent: false, error: e.message }))
         h.report = r?.sent ? (r.queued ? 'queued' : 'sent') : 'pending'
-        if (!r?.sent && r?.error) console.log(`Couldn't tell the Chief of Staff about task ${h.task}: ${r.error}`)
+        if (!r?.sent && r?.error) console.log(`Couldn't ${h.list ? `hand back ${h.list}'s` : 'tell the Chief of Staff about'} task ${h.task}: ${r.error}`)
         save()
       }
     } finally { flushing = false }
@@ -228,7 +250,7 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
           continue
         }
         if (h.missing) { delete h.missing; dirty = true }
-        if (a.paneId !== h.paneId) { h.paneId = a.paneId; try { tasks.update(h.task, { pane: a.paneId }) } catch { /* gone */ } dirty = true }
+        if (a.paneId !== h.paneId) { h.paneId = a.paneId; mark(h, { pane: a.paneId }); dirty = true }
         if (a.sessionId && a.sessionId !== h.sessionId) { h.sessionId = a.sessionId; dirty = true }
         const asking = a.status === 'blocked' || !!a.asking
         if (asking !== !!h.blocked) { if (asking) h.blocked = true; else delete h.blocked; dirty = true; changed() }
@@ -252,9 +274,9 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
   function helperView(h, agents, map) {
     const a = h.paneId && h.state !== 'queued' ? agents.find((x) => x.paneId === h.paneId) : null
     const m = a && map.find((x) => x.paneId === a.paneId)
-    const line = waiting()
+    const line = waiting(h.list || null)
     return {
-      id: h.id, role: h.role, state: h.state, end: h.end || null, error: h.error || null, kind: h.kind, cwd: h.cwd, own: !!h.own, readOnly: !!h.readOnly,
+      id: h.id, role: h.role, state: h.state, end: h.end || null, error: h.error || null, kind: h.kind, cwd: h.cwd, own: !!h.own, readOnly: !!h.readOnly, list: h.list || null,
       paneId: a ? a.paneId : h.paneId || null, live: !!a, status: a?.status || null, asking: m?.asking || (a?.asking?.title ? oneLine(a.asking.title, 140) : null),
       doing: m?.doing || null, worked: !!h.worked, edits: h.access === 'edits',
       at: h.at, startedAt: h.startedAt || null, endedAt: h.endedAt || null, statusSince: m?.statusSince || null,
@@ -264,6 +286,12 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
 
   return {
     max,
+    // Another task list for helpers (frontdesk.js): its tasks (chieftasks.js's makeTasks), the folder
+    // its own work folders go in, how many at once (max()), and heard(h), told once when one stops,
+    // in place of the chief's report.
+    list(name, l) { lists[name] = l; setTimeout(() => { fill(); flush().catch(() => {}) }, 0) },
+    // A helper by its id (a copy, as kept), for the list that started it.
+    get: (id) => { const h = data.helpers.find((x) => x.id === id); return h ? { ...h } : null },
     // Anything to keep an eye on: a helper at work or waiting its turn, or a report about to go. (One
     // that waits for a chief to be running is tried again as the fleet is looked at anyway.)
     watching: () => data.helpers.some((h) => h.state !== 'ended' || h.report === 'due'),
@@ -271,52 +299,58 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
     flush,
 
     // A helper for this: its task on the list and its folder made, then started now, or queued
-    // behind the ones at work. b: { brief, role, title, cwd, kind, thread, readOnly, space, from }.
+    // behind the ones at work. b: { brief, role, title, cwd, kind, thread, readOnly, space, from,
+    // list, fork }: list, another task list than the chief's (list() above); fork, the session of
+    // an agent whose conversation it starts as a copy of, in that agent's folder (cwd).
     async add(b = {}) {
       const brief = String(b.brief || '').trim()
       if (!brief) throw new Error('Say what the helper should do')
       if (brief.length > 20000) throw new Error('The brief is too long: keep it under 20,000 characters and point to files for the rest')
       const kind = String(b.kind || cfg.defaultAgent || 'claude')
       if (NOT_HELPERS.has(kind)) throw new Error(`A helper needs an agent that works on its own: ${kind} can't take a brief`)
+      const list = b.list ? String(b.list) : null
+      if (list && !lists[list]) throw new Error(`No task list ${list}`)
+      const on = list ? lists[list].tasks : tasks
       const role = roleOf(b.role)
       const title = oneLine(b.title, 200) || titleOf(brief) || `${role} work`
       // A folder named: checked before anything is made, so a wrong one is said at once.
       const named = b.cwd ? await resolve(String(b.cwd)) : null
-      const item = tasks.add(title, { status: 'open', role })
-      const cwd = named || await workFolder(item.title, item.id)
+      const item = on.add(title, { status: 'open', role })
+      const cwd = named || await workFolder(item.title, item.id, list)
       const h = {
         id: `h${data.next++}`, task: item.id, role, title: item.title, brief, kind, cwd, own: !named, readOnly: b.readOnly === true,
         thread: b.thread ? oneLine(b.thread, 20) : null, space: oneLine(b.space, 40) || 'Helpers', from: oneLine(b.from, 20) || 'chief',
+        ...(list ? { list } : {}), ...(b.fork && named ? { fork: oneLine(b.fork, 80) } : {}),
         state: 'queued', at: new Date().toISOString(), paneId: null, report: null, inRequest: true,
       }
       data.helpers.unshift(h)
       save()
       changed()
       try { await fill() } finally { delete h.inRequest; save() }
-      return { task: tasks.list().items.find((x) => x.id === item.id) || item, helper: helperView(h, [], []), helpers: { max: max(), working: active(), queued: waiting().length } }
+      return { task: on.list().items.find((x) => x.id === item.id) || item, helper: helperView(h, [], []), helpers: { max: maxOf(list), working: active(list), queued: waiting(list).length } }
     },
 
     // Try again: a helper that couldn't start, or was closed before it finished, back in line.
     async retry(taskId) {
-      const h = data.helpers.find((x) => x.task === String(taskId))
+      const h = data.helpers.find((x) => x.task === String(taskId) && !x.list)
       if (!h) throw new Error(`Task ${taskId} has no helper`)
       if (h.state !== 'ended' || h.end === 'finished') throw new Error(h.state === 'ended' ? 'Its helper finished; send it a follow-up instead' : 'Its helper is already on it')
       Object.assign(h, { state: 'queued', at: new Date().toISOString(), paneId: null, end: null, error: null, said: null, files: [], report: null, worked: false, again: false, againAt: null, startedAt: null, endedAt: null, inRequest: true })
-      try { tasks.update(h.task, { status: 'open', pane: null }) } catch { /* gone */ }
+      mark(h, { status: 'open', pane: null })
       save()
       changed()
       try { await fill() } finally { delete h.inRequest; save() }
-      return { task: tasks.list().items.find((x) => x.id === h.task) || null, helper: helperView(h, [], []) }
+      return { task: tasksOf(h)?.list().items.find((x) => x.id === h.task) || null, helper: helperView(h, [], []) }
     },
 
     // The chief sent a helper that had reported a follow-up (`bridge send`): watched again, for
     // one more report when it stops.
     again(paneId) {
-      const h = data.helpers.find((x) => x.paneId === paneId)
+      const h = data.helpers.find((x) => x.paneId === paneId && !x.list)
       if (!h || h.state !== 'ended' || h.end === 'failed' || Date.now() - Date.parse(h.endedAt || 0) > AGAIN_MS) return false
       Object.assign(h, { state: 'working', worked: false, again: true, againAt: h.endedAt, armedAt: new Date().toISOString(), end: null, report: null })
       delete h.missing
-      try { tasks.update(h.task, { status: 'doing' }) } catch { /* gone */ }
+      mark(h, { status: 'doing' })
       save()
       changed()
       return true
@@ -326,7 +360,7 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
     decorate(f) {
       for (const a of f?.agents || []) {
         const h = !a.chief && data.helpers.find((x) => x.paneId === a.paneId && x.state !== 'queued')
-        if (h) a.helper = { task: h.task, role: h.role }
+        if (h) a.helper = { task: h.task, role: h.role, ...(h.list ? { list: h.list } : {}) }
       }
     },
 
@@ -334,11 +368,11 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
     // fleet's; map, the agent map's view of them (what each is doing).
     board(list, { agents = [], map = [] } = {}) {
       const latest = new Map()
-      for (const h of data.helpers) if (!latest.has(h.task)) latest.set(h.task, h)
+      for (const h of data.helpers) if (!h.list && !latest.has(h.task)) latest.set(h.task, h)
       return {
         ...list,
         items: list.items.map((it) => (latest.has(it.id) ? { ...it, helper: helperView(latest.get(it.id), agents, map) } : it)),
-        helpers: { max: max(), working: active(), queued: waiting().length, edits: edits() },
+        helpers: { max: max(), working: active(), queued: waiting(null).length, edits: edits() },
       }
     },
   }

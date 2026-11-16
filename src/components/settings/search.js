@@ -101,6 +101,12 @@ export const SETTINGS = [
     ['hosted-relay', tx('Bridge AI\'s Relay'), 'relay hosted phone allowance request access use it on this computer pair a phone', { near: 'bold-bridge' }],
     ['delete-account', tx('Delete account…'), 'delete account bold bridge'],
   ]),
+  ...at('slack-bot', [
+    ['slack-status', tx('Slack Bot'), 'slack bot questions answers connect tokens socket mode', { when: 'slack-bot' }],
+    ['slack-askers', tx('Who Can Ask'), 'slack people askers members refuse', { when: 'slack-bot' }],
+    ['slack-folders', tx('Folders Opened to Questions'), 'slack folders topics read only', { when: 'slack-bot' }],
+    ['slack-replies', tx('Answers'), 'slack review answer without asking auto throwaway agent', { when: 'slack-bot' }],
+  ]),
   ...at('appearance', [
     ['color-mode', tx('Color Mode'), 'dark light system mode'],
     ['theme', tx('Theme'), 'theme colors accent frame'],
@@ -118,7 +124,7 @@ export const SETTINGS = [
   ...at('about', [
     ['version', tx('Check for new versions'), 'version update check'],
     ['auto-update', tx("Update by itself while you're away"), 'auto update automatic', { when: 'desktop', near: 'version' }],
-    ['beta', tx('Beta Features'), 'beta trials home routines insights usage tidy board answers mcp'],
+    ['beta', tx('Beta Features'), 'beta trials home routines insights usage tidy board answers mcp slack'],
     ['report', tx('Report a problem'), 'bug issue github idea feedback'],
     ['usage-counts', tx('Usage Counts'), 'telemetry analytics anonymous share', { near: 'report' }],
     ['crash-reports', tx('Crash Reports'), 'crash reports send', { near: 'report' }],
@@ -130,7 +136,7 @@ export const SETTINGS = [
 // Each tab's section, by its name; Devices' tabs by devicesName (below).
 const PLACES = {
   general: tx('General'), agents: tx('Agents'), providers: tx('Model Providers'), voice: tx('Voice & Meetings'), dictation: tx('Voice & Meetings'), meetings: tx('Voice & Meetings'), mail: tx('Mail'),
-  mcp: tx('MCP Servers'), appearance: tx('Appearance'), config: tx('Config File'), about: tx('About & Updates'),
+  mcp: tx('MCP Servers'), 'slack-bot': tx('Slack Bot'), appearance: tx('Appearance'), config: tx('Config File'), about: tx('About & Updates'),
 }
 const DEVICES = ['phone', 'machines', 'notifications', 'account']
 export const placeOf = (x) => (DEVICES.includes(x.section) ? devicesName(x) : t(PLACES[x.section]))

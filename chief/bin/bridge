@@ -32,7 +32,10 @@ async function api(path, { method = 'GET', body } = {}) {
 }
 
 const fleet = () => api('/fleet')
-const others = (f) => f.agents.filter((a) => !a.chief)
+// Not the Slack Bot's answering agents (a.helper.list): they answer questions from outside, which the
+// Chief of Staff doesn't read, send to or wait on (server/frontdesk.js).
+const outside = (a) => !!a?.helper?.list
+const others = (f) => f.agents.filter((a) => !a.chief && !outside(a))
 // Which of the chief's threads this is (Bridge AI starts each with BRIDGE_THREAD set), and the
 // agent it just handed work to, so the thread shows it.
 const THREAD = process.env.BRIDGE_THREAD || null
@@ -434,4 +437,11 @@ const cmds = {
 const [cmd = 'help', ...args] = process.argv.slice(2)
 const fn = cmds[cmd]
 if (!fn) { console.error(`Unknown command: ${cmd}`); cmds.help(); process.exit(2) }
-Promise.resolve().then(() => fn(args)).catch((e) => { console.error(e.message); process.exit(1) })
+// A command on an agent's pane: never one of the Slack Bot's answering agents.
+const ON_PANES = new Set(['show', 'subagents', 'screen', 'model', 'handoff', 'send', 'wait'])
+const notOutside = async () => {
+  if (!ON_PANES.has(cmd) || !args.length) return
+  const f = await fleet()
+  if (args.some((x) => outside(f.agents.find((a) => a.paneId === x)))) throw new Error('That\'s one of the Slack Bot\'s answering agents, answering a question from outside: you don\'t read, send to or wait on them.')
+}
+Promise.resolve().then(notOutside).then(() => fn(args)).catch((e) => { console.error(e.message); process.exit(1) })

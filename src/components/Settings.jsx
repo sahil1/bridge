@@ -6,6 +6,7 @@ import General from './settings/General.jsx'
 import Agents from './settings/Agents.jsx'
 import Providers from './settings/Providers.jsx'
 import Mcp from './settings/Mcp.jsx'
+import SlackBot from './settings/SlackBot.jsx'
 import ConfigFile from './settings/ConfigFile.jsx'
 import Phone from './settings/Phone.jsx'
 import About from './settings/About.jsx'
@@ -36,7 +37,8 @@ import { t, tx } from '../i18n/index.js'
 // Phone, "machines" Computers, as they did. With accounts it's Account & Devices, Account its first
 // tab (Account was a section of its own, and the relay was described in both): "account" opens it.
 // A section with tabs has no line under its name there (it would say the tabs again); the phone's
-// list of sections keeps it.
+// list of sections keeps it. A section marked trial is a beta feature's, there only while it's on
+// (Slack Bot).
 export const SECTIONS = [
   { id: 'general', label: tx('General'), icon: 'home', hint: tx('Name, default agent and model, location') },
   { id: 'agents', label: tx('Agents'), icon: 'bot', hint: tx('Installed agents and sign-in') },
@@ -45,6 +47,7 @@ export const SECTIONS = [
     tabs: [{ id: 'meetings', label: tx('Meetings') }, { id: 'dictation', label: tx('Dictation') }, { id: 'voice', label: tx('Speech to Text') }] },
   { id: 'mail', label: tx('Mail'), icon: 'mail', hint: tx('How You Write, for the replies AI Assist drafts, and your working hours'), mac: true },
   { id: 'mcp', label: tx('MCP Servers'), icon: 'tool', hint: tx('Tools your agents can use') },
+  { id: 'slack-bot', label: tx('Slack Bot'), icon: 'chat', hint: tx('Answers to questions from people you name in your Slack workspace'), trial: 'slack-bot' },
   { id: 'devices', label: tx('Devices'), icon: 'phone', hint: tx('Your phone and your other computers, through your relay or Tailscale; what to notify you about'),
     accountsLabel: tx('Account & Devices'), accountsHint: tx('Your Bold Bridge account and Bridge AI\'s relay, your phone and your other computers; what to notify you about'),
     tabs: [{ id: 'account', label: tx('Account'), accounts: true }, { id: 'phone', label: tx('Phone') }, { id: 'machines', label: tx('Computers') }, { id: 'notifications', label: tx('Notifications') }] },
@@ -74,9 +77,9 @@ const sectionFor = (section, sections) => {
   return !s ? null : s.tabs && s.id === to ? s.tabs[0].id : to
 }
 
-// What shows here: Mail where it's read, and a section's accounts tab (with its name for it) once
-// Bold Bridge accounts exist.
-const shownOf = (conf) => SECTIONS.filter((s) => !s.mac || conf?.mail)
+// What shows here: Mail where it's read, a beta feature's while it's on, and a section's accounts
+// tab (with its name for it) once Bold Bridge accounts exist.
+const shownOf = (conf) => SECTIONS.filter((s) => (!s.mac || conf?.mail) && (!s.trial || conf?.trials?.[s.trial] === true))
   .map((s) => (!s.tabs?.some((x) => x.accounts) ? s : conf?.accounts ? { ...s, label: s.accountsLabel, hint: s.accountsHint } : { ...s, tabs: s.tabs.filter((x) => !x.accounts) }))
 
 export default function Settings({ section = 'all', onClose, onOpenAgent }) {
@@ -136,6 +139,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
     {at === 'meetings' && <Meetings onOpenAgent={(id) => { onOpenAgent?.(id); onClose() }} />}
     {at === 'mail' && <Mail />}
     {at === 'mcp' && <Mcp />}
+    {at === 'slack-bot' && <SlackBot />}
     {at === 'appearance' && <Appearance />}
     {at === 'config' && <ConfigFile />}
     {cur.id === 'devices' && at !== 'account' && <Phone tab={at} focus={section === 'machines' ? 'machines' : null} />}

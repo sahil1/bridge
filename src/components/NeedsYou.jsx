@@ -359,6 +359,53 @@ export function OutsideItem({ it, onDone, setNote }) {
   )
 }
 
+// A question put to the Slack Bot (server/frontdesk.js): the answer an agent drafted from where the
+// desk sent it, to edit, then send or discard; or one nothing could answer, its reply empty for you
+// to write (the asker was told it's passed on). The question is the asker's words, shown as theirs;
+// nothing goes to Slack until you press Send.
+export function SlackItem({ it, onDone, setNote }) {
+  const [text, setText] = useState(it.draft || '')
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState(it.problem || null)
+  const who = it.from?.name || t('Someone')
+  const where = it.place?.kind === 'dm' ? t('in a direct message') : it.place?.name ? t('in #{channel}', { channel: it.place.name }) : t('in a channel')
+  const r = it.route
+  const from = it.needsOwner ? t('Nothing could answer it: {why}. {name} was told it\'s passed on to you.', { why: it.why || '', name: who })
+    : r?.to === 'folder' ? t('Answered from your {folder} folder, as it mentions {words}.', { folder: r.name, words: r.matched.join(', ') })
+      : r?.to === 'agent' ? t('Answered by a read-only copy of {agent}\'s conversation.', { agent: r.name })
+        : t('Answered by a throwaway agent, from what it knows.')
+  const decide = async (send) => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      const out = await onDevice(null, `/slack-bot/questions/${encodeURIComponent(it.id)}`, { send, text })
+      if (out.item?.state === 'draft') { setProblem(out.item.problem || null); return }
+      onDone(it)
+      setNote({ text: !send ? t('Discarded: nothing sent') : out.item?.state === 'sent' ? t('Sent to {name} in Slack', { name: who }) : t('Sending to Slack: {why}', { why: out.item?.problem || t('in a moment') }) })
+    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <article className={`ny-item t-slack ${it.needsOwner ? 'yours' : ''}`} aria-label={t('{name} asked {where}', { name: who, where })}>
+      <div className="ny-top">
+        <Icon name="chat" size={12} />
+        <span className="ny-kind">{it.needsOwner ? t('Needs your reply') : t('Answer to check')}</span>
+        <span className="ny-age" title={new Date(it.at).toLocaleString()}>{ago(it.at)}</span>
+        <span className="ny-grow" />
+        <span className="ny-device here" title={t('Through the Slack Bot (Settings › Slack Bot)')}><Icon name="chat" size={11} />Slack</span>
+      </div>
+      <p className="ny-text">{t('{name} asked {where}', { name: who, where })}{it.late ? ` ${t('(while Bridge AI was away)')}` : ''}:</p>
+      <p className="ny-said">“{it.text}”</p>
+      <p className="muted small ny-from">{from}</p>
+      <textarea className="ny-draft" value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(8, Math.max(3, text.split('\n').length + 1))} placeholder={t('Write the reply…')} aria-label={t('Reply to {name}', { name: who })} disabled={busy} />
+      {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
+      <div className="ny-acts">
+        <button type="button" className="btn small primary" disabled={busy || !text.trim()} onClick={() => decide(true)}><Icon name="send" size={12} /> {busy ? t('Sending…') : t('Send')}</button>
+        <button type="button" className="btn small" disabled={busy} onClick={() => decide(false)}>{t('Discard')}</button>
+      </div>
+    </article>
+  )
+}
+
 // The inbox itself: a panel under the chip on a computer, the whole screen on a phone.
 // focus: { paneId, machine } to show first (from a notification).
 export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onClose, onOpen }) {
@@ -419,7 +466,8 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
   const focused = focus?.paneId ? all.find((i) => i.paneId === focus.paneId && (i.machine || null) === (focus.machine || null)) : null
   const focusId = focused ? uid(focused) : null
   const outside = (data?.outside || []).filter((x) => !gone[`outside|${x.id}`])
-  const waiting = all.filter((i) => isAsk(i) && i.online && !isQuiet(i)).length + outside.length
+  const slack = (data?.slack || []).filter((x) => !gone[`slack|${x.id}`])
+  const waiting = all.filter((i) => isAsk(i) && i.online && !isQuiet(i)).length + outside.length + slack.length
   const list = (rows) => rows.map((it) => <NeedsItem key={uid(it)} it={it} focused={uid(it) === focusId} top={top.has(uid(it))} onOpen={onOpen} onGone={onGone} setNote={setNote} />)
   // Clear all that have gone quiet, each on its own device: off the list at once, and back with a
   // note for any its device couldn't clear.
@@ -464,13 +512,19 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
       {note && <p className="ny-note" role="status">{note.text}</p>}
       <div className="ny-list">
         {!data && <div className="skeleton-rows pad"><div /><div /></div>}
+        {slack.length > 0 && (
+          <section className="ny-group" aria-label={t('From Slack')}>
+            <h3>{t('From Slack')}<span className="fcount">{slack.length}</span></h3>
+            {slack.map((x) => <SlackItem key={x.id} it={x} setNote={setNote} onDone={(o) => { setGone((g) => ({ ...g, [`slack|${o.id}`]: Date.now() })); for (const ms of [0, 1500]) setTimeout(() => refresh(''), ms) }} />)}
+          </section>
+        )}
         {outside.length > 0 && (
           <section className="ny-group" aria-label={t('From other apps')}>
             <h3>{t('From other apps')}<span className="fcount">{outside.length}</span></h3>
             {outside.map((x) => <OutsideItem key={x.id} it={x} setNote={setNote} onDone={(o) => { setGone((g) => ({ ...g, [`outside|${o.id}`]: Date.now() })); for (const ms of [0, 1500]) setTimeout(() => refresh(''), ms) }} />)}
           </section>
         )}
-        {data && !items.length && !outside.length && (
+        {data && !items.length && !outside.length && !slack.length && (
           <div className="ny-empty"><Icon name="check" size={20} /><p>{t('Nothing needs you right now.')}</p><small className="muted">{quiet.length ? t('Only what has been quiet for a while, folded below.') : t('Questions, permissions, failed runs and finished work from all your devices show here.')}</small></div>
         )}
         {by === 'urgent'

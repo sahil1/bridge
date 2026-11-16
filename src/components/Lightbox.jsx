@@ -1,10 +1,11 @@
-// Images full size, one at a time: arrows step through them, Esc closes.
+// Images full size, one at a time: arrows step through them, Esc closes. onOpen: a button that
+// opens the one shown elsewhere (a picture an agent made, in its Files tab), named openLabel.
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { t } from '../i18n/index.js'
 
-export default function Lightbox({ pics, at, onAt, onClose }) {
+export default function Lightbox({ pics, at, onAt, onClose, onOpen, openLabel }) {
   useEffect(() => {
     const k = (e) => {
       if (e.key === 'Escape') onClose()
@@ -24,6 +25,7 @@ export default function Lightbox({ pics, at, onAt, onClose }) {
         <span>{p.name}{pics.length > 1 ? ` · ${t('{n} of {total}', { n: at + 1, total: pics.length })}` : ''}</span>
         {pics.length > 1 && <button className="win-btn" disabled={at === 0} onClick={() => onAt(at - 1)} aria-label={t('Previous image')}><Icon name="chevron" size={14} className="flip" /></button>}
         {pics.length > 1 && <button className="win-btn" disabled={at === pics.length - 1} onClick={() => onAt(at + 1)} aria-label={t('Next image')}><Icon name="chevron" size={14} /></button>}
+        {onOpen && <button className="win-btn" onClick={() => onOpen(p)} aria-label={openLabel} title={openLabel}><Icon name="folder-open" size={14} /></button>}
         <a className="win-btn" href={p.src} target="_blank" rel="noreferrer" aria-label={own} title={own}><Icon name="external" size={14} /></a>
         <button className="win-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={14} /></button>
       </div>

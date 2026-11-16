@@ -197,6 +197,9 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     // Nor Perplexity's API, which AI Assist's answers look things up with: a test gives a stand-in
     // (stand-ins/model.mjs answers as Sonar does), or a key saved in a test reaches nothing.
     BRIDGE_PERPLEXITY_URL: 'http://127.0.0.1:9',
+    // Nor Slack, for the Slack Bot: a test gives a stand-in (stand-ins/slack.mjs, startSlack), or
+    // tokens saved in a test reach nothing.
+    BRIDGE_SLACK_URL: 'http://127.0.0.1:9',
     BRIDGE_SHERPA: path.join(TEST, 'stand-ins', 'sherpa.cjs'),
     // Nor the computer's own apps, which Studio offers to open a file in (server/studioapps.js): a
     // Mac's Applications folder is one of the kit's, and Windows' registry a stand-in that knows
@@ -342,6 +345,29 @@ export async function startHostedRelay(name, settings = {}, accounts = null) {
     state: () => post('/_test/state', {}).then((r) => r.json()),
     // A phone page file served as text instead ({ name, text }), and the version it says ({ version }).
     page: (change) => post('/_test/page', change).then((r) => r.json()),
+    stop: () => stopTree(p),
+  }
+}
+
+// A Slack workspace (stand-ins/slack.mjs: its Web API and Socket Mode) on a port of its own, for the
+// Slack Bot: a kit reaches it with BRIDGE_SLACK_URL: url. ask(o): someone writes to the bot;
+// drop/away/back/refresh: what a network, a sleeping computer and Slack itself do to its connection;
+// limit(o)/fail(o): Slack's 429s and errors; state(): connections and what was posted; calls():
+// each Web API call ({ method, params }).
+export async function startSlack(name) {
+  const port = await freePort()
+  const log = path.join(OUT, 'kits', `${name}-slack-${port}.log`)
+  fs.mkdirSync(path.dirname(log), { recursive: true })
+  fs.rmSync(log, { force: true })
+  const p = spawn(process.execPath, [path.join(TEST, 'stand-ins', 'slack.mjs'), String(port), log], { stdio: 'ignore' })
+  const url = `http://127.0.0.1:${port}`
+  if (!await until(async () => (await fetch(`${url}/_test/state`)).ok, 15000, 150)) throw new Error('the stand-in Slack didn\'t start')
+  const ctl = (what, body) => fetch(`${url}/_test/${what}`, { method: what === 'state' ? 'GET' : 'POST', ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) }).then((r) => r.json())
+  const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+  return {
+    url, port, calls,
+    ask: (o) => ctl('ask', o), drop: () => ctl('drop'), away: () => ctl('away'), back: () => ctl('back'), refresh: () => ctl('refresh'),
+    limit: (o) => ctl('limit', o), fail: (o) => ctl('fail', o), state: () => ctl('state'),
     stop: () => stopTree(p),
   }
 }

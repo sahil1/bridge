@@ -33,6 +33,7 @@ import { isDiagramFile, addMermaidButtons, whiteboards as studioHere } from './w
 import Assist from './files/Assist.jsx'
 import AiAssist from './AiAssist.jsx'
 import { useBusy } from '../busy.js'
+import { FindFile } from './FileLinks.jsx'
 // The kinds of file Studio opens (server/studio.js).
 export const STUDIO_OPENS = /\.(docx|md|markdown|txt|xlsx|xlsm|csv|tsv|pptx|pdf|html?)$/i
 
@@ -84,8 +85,8 @@ function TreeNode({ pane, entry, depth, selected, onOpen, expanded, toggle, show
 }
 
 // ---------- quick open (⌘P) ----------
-function QuickOpen({ pane, onPick, onClose }) {
-  const [q, setQ] = useState('')
+function QuickOpen({ pane, onPick, onClose, initial = '' }) {
+  const [q, setQ] = useState(initial)
   const [res, setRes] = useState([])
   const [i, setI] = useState(0)
   useEffect(() => {
@@ -233,7 +234,9 @@ function Editor({ value, onChange, onSave }) {
   return <textarea className="file-editor" value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={onKey} spellCheck={false} autoFocus aria-label={t('File text')} />
 }
 
-function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere }) {
+// onFind: for a path that isn't there, what was found for it ({ pick, search, folder }: FindFile).
+const MISSING = /^(Not found|Outside the agent folder)$/
+function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere, onFind }) {
   const [state, setState] = useState({ loading: true })
   const [mode, setMode] = usePersisted('cc-md-mode', 'preview')
   const key = `${pane}\n${filePath}`
@@ -248,6 +251,8 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
   }, [pane, filePath])
   useEffect(() => { setState({ loading: true }); load() }, [load])
   useEffect(() => { if (ver) load() }, [ver]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A folder's path opened as a file (a name in the chat): shown open in the tree instead.
+  useEffect(() => { if (state.error === 'Is a folder' && onFind) onFind.pick(filePath, filePath, true) }, [state.error]) // eslint-disable-line react-hooks/exhaustive-deps
   const f = state.f
   const raw = `${BASE}/api/agents/${enc(pane)}/raw?path=${enc(filePath)}`
   const isMd = f?.kind === 'text' && f.ext === '.md'
@@ -374,7 +379,9 @@ function Viewer({ pane, filePath, onOpenPath, onBack, onMenu, ver, onCopyHere })
       )}
       <div className={`viewer-body ${editing ? 'editing' : ''} ${split ? 'split' : ''} ${shown === 'drawing' ? 'drawing' : ''}`}>
         {state.loading && <div className="pad"><div className="skeleton-rows"><div /><div /><div /></div></div>}
-        {state.error && <div className="viewer-empty"><Icon name="alert" size={22} /><p>{state.error}</p></div>}
+        {state.error && (onFind && MISSING.test(state.error)
+          ? <FindFile pane={pane} path={filePath} folder={onFind.folder} onSearch={onFind.search} onPick={(p, dir) => (p === filePath && !dir ? load() : onFind.pick(filePath, p, dir))} />
+          : <div className="viewer-empty"><Icon name="alert" size={22} /><p>{state.error}</p></div>)}
         {f?.kind === 'text' && shown === 'drawing' && <FileDrawing key={`${pane}\n${f.path}`} pane={pane} f={f} onSaved={(nf) => setState({ f: nf })} onOpenPath={onOpenPath} />}
         {f?.kind === 'text' && shown !== 'drawing' && (shown === 'edit'
           ? <>
@@ -521,6 +528,14 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
     setTabs(next)
     if (selected === p) setSelected(next[Math.min(at, next.length - 1)] || null)
   }
+  // A path that isn't there (a name in the chat, a tab from before) swapped for the file found for
+  // it (FindFile), in its tab; or, a folder, shown open in the tree.
+  const swap = (from, to, isDir) => {
+    if (isDir) { closeTab(from); revealDirs(`${to}/x`); return }
+    setTabs((ts) => (ts.includes(to) ? ts.filter((x) => x !== from) : ts.includes(from) ? ts.map((x) => (x === from ? to : x)) : [...ts, to]))
+    setSelected(to)
+    revealDirs(to)
+  }
   const toggle = (p) => setExpanded((s) => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n })
 
   // Collapse all has something to do only while a folder shows open (one inside a closed folder doesn't).
@@ -631,7 +646,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
         )}
         {selected
           ? <Viewer key={`${pane}\n${selected}`} pane={pane} filePath={selected} onOpenPath={open} onBack={narrow ? () => setSelected(null) : undefined} onMenu={onMenu} ver={ver}
-              onCopyHere={canCopyHere ? (src) => setSend({ src: { pane, ...src }, here: true }) : null} />
+              onCopyHere={canCopyHere ? (src) => setSend({ src: { pane, ...src }, here: true }) : null} onFind={{ pick: swap, search: (q) => setQuick(q), folder: rootName }} />
           : (
             <div className="viewer-empty">
               <Icon name="folder-open" size={26} />
@@ -652,7 +667,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
       {send && <SendDialog src={send.src} here={send.here} onClose={() => setSend(null)} />}
       {picked && <UploadSheet list={picked.list} folder={{ v: place ? `place:${place.id}` : `pane:${agent.paneId}`, dir: picked.dir, label: rootName }} onClose={() => setPicked(null)} />}
       {dialog && <NameDialog title={dialog.title} initial={dialog.initial} action={dialog.action} onSubmit={dialog.submit} onClose={() => setDialog(null)} />}
-      {quick && <div className="qo-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setQuick(false) }}><QuickOpen pane={pane} onPick={open} onClose={() => setQuick(false)} /></div>}
+      {quick && <div className="qo-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setQuick(false) }}><QuickOpen pane={pane} onPick={open} onClose={() => setQuick(false)} initial={typeof quick === 'string' ? quick : ''} /></div>}
     </div>
   )
 }
