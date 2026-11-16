@@ -85,8 +85,9 @@ export function remove(paneId, id) {
   save()
 }
 
-// Changed before it went: { text } puts the new words in its place; { editing: true } holds this
-// agent's messages while you change it (for two minutes at most), { editing: false } lets them go.
+// Changed before it went: { text } puts the new words in its place (the same words: sent again, one
+// the agent didn't take); { editing: true } holds this agent's messages while you change it (for
+// two minutes at most), { editing: false } lets them go.
 const EDIT_MS = 2 * 60 * 1000
 export function edit(paneId, id, { text, editing } = {}) {
   ours()
@@ -98,6 +99,7 @@ export function edit(paneId, id, { text, editing } = {}) {
     if (!text.trim()) throw new Error('Empty message')
     it.text = text.trim()
     delete it.editing
+    delete it.failed
   } else if (editing) it.editing = new Date(Date.now() + EDIT_MS).toISOString()
   else delete it.editing
   save()
@@ -142,8 +144,9 @@ export async function deliver(agents, prompt, readScreen) {
     // A question Codex asked shows it as needing you (asks.js); a message can still go in.
     if (!['idle', 'done'].includes(a.asking?.status || a.status)) { readySince.delete(k); continue }
     const next = q[k][0]
-    // Being changed: it (and so what's after it) waits until you're done, or two minutes.
-    if (!next || next.sending || (next.editing && Date.parse(next.editing) > Date.now())) continue
+    // Being changed: it (and so what's after it) waits until you're done, or two minutes. One the
+    // agent didn't take (failed) waits for you too, saying so: changed, or sent again, it goes.
+    if (!next || next.sending || next.failed || (next.editing && Date.parse(next.editing) > Date.now())) continue
     if (!readySince.has(k)) readySince.set(k, Date.now())
     if (Date.now() - readySince.get(k) < (next.now ? 400 : 3000)) continue
     try { if (looksBusy(await readScreen(paneId))) continue } catch { continue }
@@ -158,7 +161,11 @@ export async function deliver(agents, prompt, readScreen) {
       readySince.delete(k)
       a.status = 'working'
       changed = true
-    } catch { /* try again next pass */ } finally { delete next.sending }
+    } catch (e) {
+      // Typed in, but the agent didn't take it (promptsafe.js NotTaken): held with why, not typed in
+      // again and again. Anything else (its box covered, say): tried again next pass.
+      if (e.code === 'not_taken') { next.failed = e.message; changed = true }
+    } finally { delete next.sending }
   }
   if (changed) save()
   return changed

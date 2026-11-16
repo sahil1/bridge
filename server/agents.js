@@ -32,6 +32,15 @@
 //   caps        chat: a transcript Bridge can render; subagents; commands: a "/" menu;
 //               questions: Claude-style pickers become clickable cards; inputBox: Bridge can
 //               see what's typed in its prompt and avoid merging messages
+//   submit      how a message goes in, where it differs from the rest (pasted, Enter 120 ms later):
+//               enterAfter, the wait before Enter, past the time the CLI takes an Enter as part of
+//               what was pasted (its source names it below); bracketed: pasted as one bracketed
+//               paste even before the terminal has seen the CLI ask for that (the built-in runtime,
+//               not on Windows); box: which reader in promptsafe.js tells what's typed in its input
+//               box ('draft': a ❯ or › line between two rules; 'codex'), so Bridge sees the message
+//               leave the box once Enter is pressed, and says so when it doesn't (without one, it's
+//               sent as is); shown: Enter waits until the message shows in that box, and a message
+//               that never does is said to have gone nowhere.
 import { execFile } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -64,6 +73,7 @@ export const AGENTS = [
     // terminal. rewind: Bridge AI can edit a sent message through its Rewind list. btw: /btw side questions.
     // undo: that rewind can restore files too, so Chat offers "Undo this reply".
     caps: { chat: true, subagents: true, commands: true, questions: true, inputBox: true, typeAhead: true, rewind: true, undo: true, btw: true, fork: true },
+    submit: { box: 'draft' },
   },
   {
     // Its installer ends by asking "Start Codex now? [y/N]", which waits forever in an install tab
@@ -76,9 +86,17 @@ export const AGENTS = [
     fork: (id) => ['fork', id],
     busy: ESC_INTERRUPT,
     caps: { chat: true, commands: true, typeAhead: true, fork: true, rewind: true },
+    // Codex takes an Enter it reads among a paste's keys (8 ms apart; 120 ms on from the last, the
+    // wait Bridge AI had) as a newline, so a message could stay in its box unsent
+    // (codex-rs/tui/src/bottom_pane/paste_burst.rs). A bracketed paste is one event to it whatever
+    // its mode (its terminal library reads one either way), and Enter goes once the message shows.
+    submit: { box: 'codex', shown: true, bracketed: true, enterAfter: 300 },
   },
   // Chat from their own logs (otherlogs.js): the session they start is found after launch.
-  { kind: 'gemini', label: 'Gemini CLI', install: { npm: '@google/gemini-cli', brew: 'gemini-cli' }, bin: ['gemini'], herdr: 'gemini', start: ({ prompt }) => (prompt ? ['-i', prompt] : []), promptArg: true, busy: ESC_INTERRUPT, sessionId: 'discover', resume: (id) => ['--resume', id], access: (lvl) => (lvl === 'edits' ? ['--approval-mode', 'auto_edit'] : lvl === 'full' ? ['--approval-mode', 'yolo'] : []), login: [], caps: { chat: true } },
+  // Gemini CLI takes an Enter within 40 ms of a paste as a newline, and one within 30 ms of a key
+  // (packages/cli/src/ui/components/InputPrompt.tsx, contexts/KeypressContext.tsx); the 40 ms end on
+  // a timer, which runs late while it draws a long paste, so Enter waits longer.
+  { kind: 'gemini', label: 'Gemini CLI', install: { npm: '@google/gemini-cli', brew: 'gemini-cli' }, bin: ['gemini'], herdr: 'gemini', start: ({ prompt }) => (prompt ? ['-i', prompt] : []), promptArg: true, busy: ESC_INTERRUPT, sessionId: 'discover', resume: (id) => ['--resume', id], access: (lvl) => (lvl === 'edits' ? ['--approval-mode', 'auto_edit'] : lvl === 'full' ? ['--approval-mode', 'yolo'] : []), login: [], caps: { chat: true }, submit: { enterAfter: 250 } },
   // Google's Antigravity CLI: what Google AI plans moved to when Gemini CLI stopped serving them (18
   // June 2026; Gemini CLI goes on for API keys and Code Assist licences). It signs in in the browser
   // the first time it starts. Its conversations aren't read into Chat yet, so it's a terminal.
@@ -86,14 +104,22 @@ export const AGENTS = [
   { kind: 'grok', label: 'Grok', model: (m) => ['--model', m], models: [], install: { npm: '@vibe-kit/grok-cli' }, bin: ['grok'], herdr: 'grok', start: () => [], busy: ESC_INTERRUPT, caps: {} },
   { kind: 'cursor', label: 'Cursor Agent', model: (m) => ['--model', m], models: [], install: { unix: 'curl https://cursor.com/install -fsS | bash' }, bin: ['cursor-agent'], herdr: 'cursor', start: () => [], busy: ESC_INTERRUPT, sessionId: 'discover', resume: (id) => ['--resume', id], login: ['login'], caps: { chat: true } },
   { kind: 'copilot', label: 'GitHub Copilot CLI', install: { unix: 'curl -fsSL https://gh.io/copilot-install | bash', win: 'winget install GitHub.Copilot', npm: '@github/copilot', brew: 'copilot-cli' }, bin: ['copilot'], start: () => [], busy: ESC_INTERRUPT, sessionId: 'discover', resume: (id) => ['--resume', id], login: ['login'], caps: { chat: true } },
-  { kind: 'opencode', label: 'OpenCode', model: (m) => ['--model', m], models: [], install: { npm: 'opencode-ai' }, bin: ['opencode'], start: () => [], busy: ESC_INTERRUPT, login: ['auth', 'login'], caps: {} },
+  // OpenCode puts a paste in its box only after looking whether it's a file's path, and an Enter
+  // before then sends nothing (packages/tui/src/component/prompt/index.tsx, pasteInputText).
+  { kind: 'opencode', label: 'OpenCode', model: (m) => ['--model', m], models: [], install: { npm: 'opencode-ai' }, bin: ['opencode'], start: () => [], busy: ESC_INTERRUPT, login: ['auth', 'login'], caps: {}, submit: { enterAfter: 300 } },
   { kind: 'amp', label: 'Amp', install: { npm: '@sourcegraph/amp' }, bin: ['amp'], start: () => [], busy: ESC_INTERRUPT, login: ['login'], caps: {} },
-  { kind: 'qwen', label: 'Qwen Code', install: { npm: '@qwen-code/qwen-code' }, bin: ['qwen'], start: ({ prompt }) => (prompt ? ['-i', prompt] : []), promptArg: true, busy: ESC_INTERRUPT, sessionId: 'discover', resume: (id) => ['--resume', id], caps: { chat: true } },
-  // Aider's /model switches its main model in place (aider.chat/docs/usage/commands.html).
-  { kind: 'aider', label: 'Aider', model: (m) => ['--model', m], models: [], switchModel: { command: (m) => `/model ${m}` }, install: { unix: 'python3 -m pip install aider-install && aider-install', win: 'py -m pip install aider-install; aider-install' }, bin: ['aider'], start: () => [], busyFromOutput: true, caps: {} },
+  // Qwen Code drops an Enter within 500 ms of a paste on Windows and on Node.js before 20
+  // (packages/cli/src/ui/components/InputPrompt.tsx, its paste workaround).
+  { kind: 'qwen', label: 'Qwen Code', install: { npm: '@qwen-code/qwen-code' }, bin: ['qwen'], start: ({ prompt }) => (prompt ? ['-i', prompt] : []), promptArg: true, busy: ESC_INTERRUPT, sessionId: 'discover', resume: (id) => ['--resume', id], caps: { chat: true }, submit: { enterAfter: 650 } },
+  // Aider's /model switches its main model in place (aider.chat/docs/usage/commands.html). It asks
+  // for bracketed paste only while its prompt waits, and a line break typed bare sends what's before
+  // it (prompt_toolkit reads LF as Enter): so always bracketed, which prompt_toolkit reads either way.
+  { kind: 'aider', label: 'Aider', model: (m) => ['--model', m], models: [], switchModel: { command: (m) => `/model ${m}` }, install: { unix: 'python3 -m pip install aider-install && aider-install', win: 'py -m pip install aider-install; aider-install' }, bin: ['aider'], start: () => [], busyFromOutput: true, caps: {}, submit: { bracketed: true } },
   { kind: 'goose', label: 'Goose', install: { unix: 'curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash' }, bin: ['goose'], start: () => ['session'], busy: ESC_INTERRUPT, login: ['configure'], caps: {} },
   { kind: 'muse', label: 'Muse Code (Meta)', install: { unix: 'curl -fsSL https://dev.meta.ai/install.sh | bash' }, bin: ['muse'], start: () => [], busy: ESC_INTERRUPT, caps: {} },
-  { kind: 'crush', label: 'Crush', install: { npm: '@charmland/crush' }, bin: ['crush'], start: () => [], busy: ESC_INTERRUPT, login: ['login'], caps: {} },
+  // Crush makes a long paste (over 10 lines) an attachment in the background, and an Enter before
+  // it's there sends nothing (internal/ui/model/ui.go, handlePasteMsg).
+  { kind: 'crush', label: 'Crush', install: { npm: '@charmland/crush' }, bin: ['crush'], start: () => [], busy: ESC_INTERRUPT, login: ['login'], caps: {}, submit: { enterAfter: 300 } },
 ]
 
 // Plain shells (dev servers, editors) use the same machinery with no agent features.
@@ -113,6 +139,7 @@ export const CHAT = {
   switchModel: { command: (m) => `/model ${m}` }, // models from chatmodels.js; it says "Set model to …"
   busy: ESC_INTERRUPT,
   caps: { chat: true, inputBox: true, typeAhead: true },
+  submit: { box: 'draft' },
 }
 
 const byKind = new Map(AGENTS.map((a) => [a.kind, a]))

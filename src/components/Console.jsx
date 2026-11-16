@@ -342,10 +342,11 @@ function QueuedMsg({ q, agent, actions }) {
       </div>
       <div className="msg-time">
         <Icon name="clock" size={11} />
-        {q.sending ? t('Sending…') : q.waiting ? t('Waiting for the connection to your computer…') : agent.chief ? t('Queued, sends when Chief of Staff is free') : t('Queued, sends when the agent is free')}
+        {/* failed: typed in, but the agent didn't take it (server/queue.js); it waits for you. */}
+        {q.failed ? <span className="queued-failed" role="alert">{q.failed}</span> : q.sending ? t('Sending…') : q.waiting ? t('Waiting for the connection to your computer…') : agent.chief ? t('Queued, sends when Chief of Staff is free') : t('Queued, sends when the agent is free')}
         {editing
           ? <><button className="link" disabled={busy} onClick={save}>{t('Save')}</button><button className="link" disabled={busy} onClick={stop}>{t('Cancel')}</button></>
-          : ready && <><button className="link" onClick={start}>{t('Edit')}</button><button className="link" onClick={() => actions.remove(q.id)}>{t('Remove')}</button></>}
+          : ready && <>{q.failed && <button className="link" onClick={() => actions.edit(q.id, q.text)}>{t('Send again')}</button>}<button className="link" onClick={start}>{t('Edit')}</button><button className="link" onClick={() => actions.remove(q.id)}>{t('Remove')}</button></>}
       </div>
     </div>
   )

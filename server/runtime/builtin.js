@@ -125,7 +125,7 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
       if (!panes.has(paneId)) return clearInterval(tick)
       if (p.setupPending && Date.now() - p.startedAt < 15 * 60000) { begun = Date.now(); return }
       const quiet = Date.now() - p.lastOutput > 1500 && Date.now() - begun > 2500
-      if (quiet || Date.now() - begun > 25000) { clearInterval(tick); prompt(paneId, opening).catch(() => {}) }
+      if (quiet || Date.now() - begun > 25000) { clearInterval(tick); prompt(paneId, opening, a.submit).catch(() => {}) }
     }, 500)
   }
   findSession(p, !!setup)
@@ -443,7 +443,9 @@ function keyBytes(k) {
   return k.length === 1 ? k : ''
 }
 const write = (p, data) => { p.lastInput = Date.now(); p.seen = true; p.proc.write(data) }
-const paste = (p, t) => write(p, p.term.modes.bracketedPasteMode ? `\x1b[200~${t}\x1b[201~` : t)
+// bracketed: as one bracketed paste even when the app hasn't asked for that (yet); not on Windows,
+// where the console turns what's typed into key presses before the app reads it.
+const paste = (p, t, bracketed = false) => write(p, (bracketed && !IS_WIN) || p.term.modes.bracketedPasteMode ? `\x1b[200~${t}\x1b[201~` : t)
 
 // In order per pane, so fast typing never arrives shuffled.
 export async function input(paneId, steps) {
@@ -461,12 +463,16 @@ export async function input(paneId, steps) {
 export const keys = (paneId, k) => input(paneId, [{ keys: k }])
 export const paneKeys = keys
 export const text = (paneId, t) => input(paneId, [{ text: t }])
-export async function prompt(paneId, t) {
+// A message: pasted, then Enter. how: its agent's submit (agents.js), the wait before Enter and
+// whether it's always bracketed; enter: false types it only (promptsafe.js presses Enter once it
+// sees it in the box).
+export async function prompt(paneId, t, { enterAfter = 120, bracketed = false, enter = true } = {}) {
   const p = need(paneId)
-  paste(p, t)
-  await new Promise((r) => setTimeout(r, 120))
+  paste(p, t, bracketed)
+  if (!enter) return { ok: true, entered: false }
+  await new Promise((r) => setTimeout(r, enterAfter))
   write(p, '\r')
-  return { ok: true }
+  return { ok: true, entered: true }
 }
 export async function focusAgent(paneId) { need(paneId).seen = true }
 // The agent now continues in another session (Codex after an edit): resume that one from here on.

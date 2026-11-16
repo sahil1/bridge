@@ -1382,6 +1382,7 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 .msg.user.queued.editing .msg-text { opacity: 1; width: min(100%, 560px); }
 .msg.queued .msg-time { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; justify-content: flex-end; opacity: 1; }
 .msg.queued .link { margin-left: 6px; }
+.msg.queued .queued-failed { color: var(--critical); text-align: right; }
 .queued-edit { display: block; width: 100%; min-height: 3em; resize: vertical; border: 0; outline: none; background: transparent; color: var(--ink); font: inherit; line-height: 1.5; padding: 0; }
 .app.narrow .msg.queued .link { min-height: 40px; min-width: 40px; padding: 0 6px; }
 .app.narrow .queued-edit { font-size: 16px; }

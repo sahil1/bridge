@@ -1,7 +1,10 @@
 // Sending a message to an agent pastes it into the agent's input box and presses Enter.
 // If something is already sitting in that box (a stray keystroke from the Terminal tab, a
-// half-typed draft), the two would merge into one message. So look first, and clear it.
-import { caps } from './agents.js'
+// half-typed draft), the two would merge into one message. So look first, and clear it. Then, for
+// an agent whose box Bridge can read (agents.js submit.box), look again: the message shows there
+// before Enter goes, and leaves once Enter has taken it. When it doesn't, that's said, never that
+// it went.
+import { adapter, caps } from './agents.js'
 
 // eslint-disable-next-line no-control-regex
 const plain = (s) => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, '').replace(/\r/g, '')
@@ -81,15 +84,29 @@ export function draftIn(ansi) {
   return null
 }
 
-// Codex's input box: the last "› " line near the bottom; empty when only its dim placeholder shows,
-// null when there's none.
+// Codex's input box: the last "› " line near the bottom, with the lines under it while they hold
+// text; empty when only its dim placeholder shows, null when there's none. Read cell by cell: when
+// Codex knows the terminal's background the box has one of its own, which the placeholder's colour
+// codes then carry too. Not a "›" Codex draws dim (your messages above the box, and the box itself
+// while it takes nothing: codex-rs/tui/src/history_cell/messages.rs, bottom_pane/chat_composer.rs),
+// nor a menu's selected row ("› 1. Yes", bottom_pane/picker_option.rs). A tall box (a long message
+// on many lines) is found up to 30 lines up.
 export function codexBox(s) {
   const lines = String(s || '').replace(/\r/g, '').split('\n')
-  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 10); i--) {
-    const raw = lines[i]
-    if (!/^(\x1b\[[0-9;]*m)*›/.test(raw)) continue
-    const after = raw.slice(raw.indexOf('›') + 1).replace(/^(\x1b\[0m)?\s?/, '')
-    return /^\x1b\[[0-9;]*\b2m/.test(after) ? '' : plain(raw).replace(/^›\s*/, '').trim()
+  const text = (row) => row.map((c) => c.ch).join('').trim()
+  const typed = (row) => row.some((c) => c.ch.trim() && !c.faint)
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 30); i--) {
+    const row = cells(lines[i])
+    if (row[0]?.ch !== '›' || row[0].faint || /^\d+\.\s/.test(text(row.slice(1)))) continue
+    if (!typed(row.slice(1))) return ''
+    const out = [text(row.slice(1))]
+    // Its other lines, down to the blank one closing the box (or the dim hints under it).
+    for (let j = i + 1; j < lines.length; j++) {
+      const next = cells(lines[j])
+      if (!typed(next)) break
+      out.push(text(next))
+    }
+    return out.join('\n')
   }
   return null
 }
@@ -141,15 +158,64 @@ export async function promptSafe(rt, paneId, text, agent) {
   if (agent?.kind === 'codex') {
     try {
       for (let i = 0; i < 2; i++) {
-        const left = codexBox(await rt.read(paneId, 30))
+        const left = codexBox(await rt.read(paneId, 40))
         if (!left) break
         cleared = cleared || left
-        await rt.input(paneId, [{ keys: Array(Math.min(left.length + 2, 400)).fill('backspace') }])
+        await rt.input(paneId, [{ keys: Array(Math.min(left.length + 2, 2000)).fill('backspace') }])
         await sleep(300)
       }
     } catch { /* couldn't read the screen: send as before */ }
-    if (cleared && codexBox(await rt.read(paneId, 30).catch(() => ''))) throw new Error(`Codex's input box already has text in it ("${cleared.slice(0, 80)}") and it couldn't be cleared. Clear it in the Terminal tab, then send again.`)
+    if (cleared && codexBox(await rt.read(paneId, 40).catch(() => ''))) throw new Error(`Codex's input box already has text in it ("${cleared.slice(0, 80)}") and it couldn't be cleared. Clear it in the Terminal tab, then send again.`)
   }
-  await rt.prompt(paneId, text)
-  return { ok: true, cleared }
+  return { ...(await typeIn(rt, paneId, text, agent)), cleared }
+}
+
+// Readers of an agent's input box, by its submit.box (agents.js).
+const BOX = { draft: draftIn, codex: codexBox }
+const SHOW_MS = 4000 // for a pasted message to show in the box
+const LEAVE_MS = 2000 // for it to leave once Enter is pressed
+
+// Not taken: still in the box after Enter twice (left), or never shown in it.
+export class NotTaken extends Error {
+  constructor(name, left) {
+    super(left ? `${name} didn't take the message. It's still in its box: press Enter in the Terminal tab, or Send again.` : `${name} didn't take the message: it never showed up in its box. Send again, or type it in the Terminal tab.`)
+    this.code = 'not_taken'
+  }
+}
+
+// The message typed in and sent the way its agent takes one (agents.js submit). With a box Bridge
+// can read, it's looked at after Enter until the message has gone. Still there, Enter once more (it
+// came while the agent counted it part of the paste); still there then, NotTaken. With shown, Enter
+// waits until the message shows in the box (sooner, the agent can take it as part of the paste), and
+// isn't pressed when the box stayed empty: the paste went nowhere, or to whatever opened over the
+// box, which Enter would answer. { taken: true } once it's seen in the box and then leaving it. A box
+// that can't be seen (something covers it, or no reader): sent as before, and no more is said.
+export async function typeIn(rt, paneId, text, agent) {
+  const how = adapter(agent?.kind).submit || {}
+  const read = BOX[how.box]
+  const look = async () => { try { return read(await rt.read(paneId, 40)) } catch { return null } }
+  if (!read || (await look()) === null) { await rt.prompt(paneId, text, how); return { ok: true } }
+  const name = adapter(agent.kind).label
+  const at = Date.now()
+  const r = await rt.prompt(paneId, text, { ...how, enter: !how.shown })
+  let seen = null
+  if (!r?.entered) {
+    while (Date.now() - at < SHOW_MS && !(seen = await look())) await sleep(60)
+    if (seen === '') throw new NotTaken(name, false)
+    await sleep(Math.max(0, (how.enterAfter ?? 120) - (Date.now() - at)))
+    await rt.input(paneId, [{ keys: ['enter'] }])
+  }
+  for (let again = false; ; again = true) {
+    // Gone: the box empty, or covered a while by what the message opened (a command's panel; a
+    // moment's gap is a repaint in pieces, as on Windows).
+    let left = null
+    for (let until = Date.now() + LEAVE_MS, covered = 0; Date.now() < until; await sleep(100)) {
+      left = await look()
+      covered = left === null ? covered || Date.now() : 0
+      if (left === '' || (covered && Date.now() - covered >= 600)) break
+    }
+    if (!left) return seen ? { ok: true, taken: true } : { ok: true }
+    if (again) throw new NotTaken(name, true)
+    await rt.input(paneId, [{ keys: ['enter'] }])
+  }
 }

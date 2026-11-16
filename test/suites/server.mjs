@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process'
 import http from 'node:http'
 import path from 'node:path'
 import { startKit, startModel, checks, until, IS_WIN } from '../lib/harness.mjs'
-import { draftIn } from '../../server/promptsafe.js'
+import { draftIn, codexBox } from '../../server/promptsafe.js'
 import { forCommandLine } from '../../server/runtime/spawn.js'
 
 const { ok, skip, done } = checks('server')
@@ -124,7 +124,7 @@ try {
     ok(!/request aborted/.test(kit.log()), 'one whose page went away as it was sent: nothing in the log', kit.log().slice(-600))
   }
 
-  // What's typed in Claude's input box, before a message goes in (promptsafe.js), on screens as
+  // What's typed in Claude's input box, before and after a message goes in (promptsafe.js), on screens as
   // Claude Code 2.1 draws them: the ❯ greys while it works, its cursor is an inverse cell, and a
   // placeholder or suggestion is faint, possibly starting under the cursor.
   const rule = `\x1b[0;38;2;138;138;138m${'─'.repeat(40)}\x1b[0m\r`
@@ -133,6 +133,17 @@ try {
   ok(draftIn(box('❯\xa0\x1b[0;7mR\x1b[0;38;2;153;153;153mun the tests again\x1b[0m\r')) === '', 'a suggested next message, faint under the cursor, isn\'t typed text')
   ok(draftIn(box('\x1b[0;38;2;102;102;102m❯\xa0\x1b[0mhalf typed\x1b[0;7m \x1b[0m\r')) === 'half typed', 'what\'s typed is seen while it works, too')
   ok(draftIn(box('❯\xa0first line\r', '  second line\r')) === 'first line\nsecond line', 'and every line of it')
+  // And Codex's (codexBox), as Codex 0.160 draws it: a bold "›" and its placeholder dim, on a
+  // background of its own when Codex knows the terminal's; the messages you sent, above it, are "›"
+  // lines drawn dim, and a menu's selected row is "› 1. …".
+  const bg = ';48;2;30;30;34'
+  const cx = (...rows) => ['• Ready.', '', '\x1b[0;1;2m›\x1b[0m Check the invoices\r', '', '', ...rows, '', '\x1b[0;2m  ? for shortcuts      100% context left\x1b[0m\r'].join('\n')
+  ok(codexBox(cx('\x1b[0;1m›\x1b[0m \x1b[0;2mAsk Codex to do anything\x1b[0m\r')) === '', 'Codex\'s box: empty, its placeholder dim')
+  ok(codexBox(cx(`\x1b[0;1${bg}m›\x1b[0${bg}m \x1b[0;2${bg}mAsk Codex to do anything\x1b[0m\r`)) === '', 'empty on a background of its own, too (the dim code then ends with the colour)')
+  ok(codexBox(cx(`\x1b[0;1${bg}m›\x1b[0${bg}m half typed\x1b[0m\r`)) === 'half typed', 'what\'s typed in it', codexBox(cx(`\x1b[0;1${bg}m›\x1b[0${bg}m half typed\x1b[0m\r`)))
+  ok(codexBox(cx('\x1b[0;1m›\x1b[0m first line\r', '  second line\r')) === 'first line\nsecond line', 'every line of it, not the hints under it')
+  ok(codexBox(cx('\x1b[0;1m›\x1b[0m \x1b[0;36m[Pasted Content 1200 chars]\x1b[0m\r')) === '[Pasted Content 1200 chars]', 'a long paste, as Codex shows one')
+  ok(codexBox(['• Ready.', '\x1b[0;1;2m›\x1b[0m Check the invoices', '', '  Run this command?', '\x1b[0;36m› 1. Yes, proceed\x1b[0m', '  2. No, and tell Codex what to do differently'].join('\r\n')) === null, 'no box while a menu covers it: neither a message you sent nor the menu\'s row is taken for one')
 
   // An agent's first message goes on its command line (runtime/spawn.js forCommandLine): on Windows,
   // through PowerShell and claude.cmd, as one line with its quotes curly, so none of it is lost.

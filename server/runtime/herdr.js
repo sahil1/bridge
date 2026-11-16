@@ -153,14 +153,17 @@ export const input = (paneId, steps) => sock.input(paneId, steps)
 export const keys = (paneId, k) => cli.sendKeys(paneId, k)
 export const paneKeys = (paneId, k) => cli.paneSendKeys(paneId, k)
 export const text = (paneId, t) => cli.paneSendText(paneId, t)
-// One of Bridge AI's own agents: typed into its pane (herdr's agent commands don't know it).
-// Line breaks as LF, which it keeps in the message; Enter sends it.
-export async function prompt(paneId, t) {
-  if (!isOwn(paneId)) return cli.prompt(paneId, t)
+// A message. To an agent herdr runs, herdr types it and presses Enter itself, in its own time
+// (promptsafe.js looks at the box after). One of Bridge AI's own agents: typed into its pane
+// (herdr's agent commands don't know it), line breaks as LF, which it keeps in the message, then
+// Enter after how.enterAfter (agents.js submit); enter: false types it only.
+export async function prompt(paneId, t, { enterAfter = 120, enter = true } = {}) {
+  if (!isOwn(paneId)) { await cli.prompt(paneId, t); return { ok: true, entered: true } }
   await sock.input(paneId, [{ text: String(t).replace(/\r\n?/g, '\n') }])
-  await new Promise((r) => setTimeout(r, 120))
+  if (!enter) return { ok: true, entered: false }
+  await new Promise((r) => setTimeout(r, enterAfter))
   await sock.input(paneId, [{ keys: ['enter'] }])
-  return { ok: true }
+  return { ok: true, entered: true }
 }
 // The opening prompt of one of Bridge AI's own agents, typed in once it's up: it writes its state
 // file as it starts (chatagent.js). herdr refuses input a shell still starting can't take in one
