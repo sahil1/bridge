@@ -123,16 +123,17 @@ try {
     await search.fill('jira')
     ok(!(await p.locator('.sb-found button').count()), 'a bot isn\'t offered')
     await search.fill('')
-    // The folders, each with what it's about.
+    // The folders, each with what it's about, with / between a path's parts (Windows shows ~\pricing).
+    const folders = async () => (await p.locator('.sb-folders code').allInnerTexts()).map((x) => x.replace(/\\/g, '/'))
     const addFolder = async (where, topics) => {
       await p.locator('.sb-add input').nth(0).fill(where)
       await p.locator('.sb-add input').nth(1).fill(topics)
       await p.locator('.sb-add button[type="submit"]').click()
-      await until(async () => (await p.locator('.sb-folders code').allInnerTexts()).includes(where), 8000)
+      await until(async () => (await folders()).includes(where), 8000)
     }
     await addFolder('~/pricing', 'pricing, enterprise plans')
     await addFolder('~/launch', 'launch')
-    ok((await p.locator('.sb-folders code').allInnerTexts()).join() === '~/pricing,~/launch', 'two folders opened to questions', await p.locator('.sb-folders').innerText())
+    ok((await folders()).join() === '~/pricing,~/launch', 'two folders opened to questions', await p.locator('.sb-folders').innerText())
     await p.locator('.sb-add input').nth(0).fill('~/nowhere')
     await p.locator('.sb-add button[type="submit"]').click()
     const nope = await until(async () => (await p.locator('.sb > .st-note.bad').innerText().catch(() => '')) || null, 8000)
