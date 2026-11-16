@@ -184,7 +184,8 @@ export function onFleet(fleet, cfg = {}) {
     // A change to "needs you" or "finished", or a new agent that shows up already there (after
     // the first look, so a restart doesn't announce everything again).
     const changed = before ? before.status !== a.status || before.seq !== a.seq : primed
-    if (!changed || isMuted(a.paneId)) continue
+    // (Not the Slack Bot's answering agents: the front desk says when an answer waits, frontdesk.js.)
+    if (!changed || isMuted(a.paneId) || a.helper?.list) continue
     const label = a.chief ? (a.thread && !a.thread.main ? `Chief of Staff · ${a.thread.name}` : 'Chief of Staff') : a.title || a.tab || a.workspace || 'An agent'
     const where = a.cloud ? [`${a.cloud.label} cloud`, a.cloud.repo].filter(Boolean).join(' · ') : [a.workspace, a.tab && a.tab !== label ? a.tab : null].filter(Boolean).join(' › ')
     if (a.status === 'blocked' && want.needsYou !== false) {

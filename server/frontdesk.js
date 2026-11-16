@@ -40,6 +40,7 @@
 // latest 200 in all), the keys of the last 2,000 heard, and the replies still to post, tried again
 // until Slack takes them; the desk's task list and throwaway folders in front-desk/.
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { dataFile, ensureDir, writeFileAtomic } from './paths.js'
 import { makeTasks } from './chieftasks.js'
@@ -127,8 +128,9 @@ function briefOf(q, r, { you, auto }) {
 // cfg: the config (a channel's settings under its own key). delegate: the helpers (delegate.js).
 // fleet(): the agents now. resolve(p): a folder you picked, checked (places.resolveDir). installed():
 // the agents installed. on(): the beta feature is on. you(): your name. changed(): Needs You has
-// news. close(paneId): an answering agent's tab closed, its question done.
-export function makeFrontDesk({ cfg, delegate, fleet, resolve, installed, on = () => true, you = () => 'the owner', changed = () => {}, close = async () => {} }) {
+// news. close(paneId): an answering agent's tab closed, its question done. told(q): a question
+// waits on you now (a notification).
+export function makeFrontDesk({ cfg, delegate, fleet, resolve, installed, on = () => true, you = () => 'the owner', changed = () => {}, close = async () => {}, told = () => {} }) {
   let data = { next: 1, questions: [], keys: [], outbox: [], events: [] }
   try { data = { ...data, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) } } catch { /* none yet */ }
   const save = () => {
@@ -156,11 +158,14 @@ export function makeFrontDesk({ cfg, delegate, fleet, resolve, installed, on = (
     const want = [set.agent, 'claude', 'codex'].filter(Boolean)
     return want.find((k) => have.has(k) && readOnly(k)) || null
   }
-  // The folders opened to questions, each checked (one that's gone is said, and skipped).
+  // The folders opened to questions, each checked (one that's gone is said, and skipped), and shown
+  // from your home folder (~/…).
+  const home = os.homedir()
+  const shown = (p) => (p === home || p.startsWith(home + path.sep) ? `~${p.slice(home.length)}` : p)
   async function foldersOf(set) {
     const out = []
     for (const f of Array.isArray(set.folders) ? set.folders : []) {
-      try { const p = await resolve(String(f.path || '')); out.push({ path: p, name: path.basename(p), topics: String(f.topics || ''), ok: true }) } catch (e) { out.push({ path: String(f.path || ''), name: path.basename(String(f.path || '')), topics: String(f.topics || ''), ok: false, problem: e.message }) }
+      try { const p = await resolve(String(f.path || '')); out.push({ path: p, shown: shown(p), name: path.basename(p), topics: String(f.topics || ''), ok: true }) } catch (e) { out.push({ path: String(f.path || ''), shown: String(f.path || ''), name: path.basename(String(f.path || '')), topics: String(f.topics || ''), ok: false, problem: e.message }) }
     }
     return out
   }
@@ -244,6 +249,7 @@ export function makeFrontDesk({ cfg, delegate, fleet, resolve, installed, on = (
     queue(item, 'hold', `I've passed this on to ${you()}, who'll answer here.`)
     save()
     changed()
+    told(viewOf(item))
   }
 
   // ---------- An answer comes back ----------
@@ -267,6 +273,7 @@ export function makeFrontDesk({ cfg, delegate, fleet, resolve, installed, on = (
     } else item.state = 'draft'
     save()
     changed()
+    if (item.state === 'draft') told(viewOf(item))
   }
 
   // ---------- What goes out ----------

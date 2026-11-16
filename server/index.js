@@ -3867,9 +3867,17 @@ async function closePane(paneId) {
   await rt.closeTab(a.tabId)
   pushFleet()
 }
+// A question that waits on you is a notification, as an agent's question is: who asked and where,
+// not what (it opens Needs You, where the question is).
+const deskTold = (q) => {
+  if (cfg.notify?.needsYou === false) return
+  const who = q.from?.name || 'Someone'
+  const where = q.place?.kind === 'dm' ? 'a direct message' : q.place?.name ? `#${q.place.name}` : 'Slack'
+  notify.send({ kind: 'needs-you', title: `Slack Bot: ${who} asked in ${where}`, body: q.needsOwner ? 'Nothing could answer it: write the reply in Needs You.' : 'An answer waits for you to send or discard.', url: `/?agent=${encodeURIComponent(`slack:${q.id}`)}&inbox=1`, tag: `slack-${q.id}` }).catch(() => {})
+}
 const desk = makeFrontDesk({
   cfg, delegate, fleet: fleetView, resolve: (p) => places.resolveDir(p), installed, on: slackOn,
-  you: () => String(cfg.name || '').trim() || 'the owner', changed: () => pushFleet(), close: closePane,
+  you: () => String(cfg.name || '').trim() || 'the owner', changed: () => pushFleet(), close: closePane, told: deskTold,
 })
 const slack = makeSlack({ say: (e) => desk.note('slack', e) })
 desk.add(slack, 'slackBot')
@@ -3917,11 +3925,17 @@ app.post('/api/slack-bot/settings', trialOff('slack-bot', 'The Slack Bot'), wrap
   if (b.folders !== undefined) {
     if (!Array.isArray(b.folders)) throw new Error('folders is a list')
     next.folders = []
+    // One opened already that's gone since (moved, deleted) stays as it was, or can be taken out;
+    // only a new one has to be there.
+    const had = new Set((slackSet().folders || []).map((f) => f.path))
     for (const f of b.folders.slice(0, 50)) {
+      const topics = String(f?.topics || '').replace(/\s+/g, ' ').trim().slice(0, 300)
+      if (had.has(String(f?.path || '')) && !(await places.resolveDir(String(f.path)).then(() => true, () => false))) { next.folders.push({ path: String(f.path), topics }); continue }
       const full = await places.resolveDir(String(f?.path || ''))
       if (full === os.homedir() || full === path.resolve(os.homedir())) throw new Error('Open a folder inside your home folder, not the whole of it')
       if (full === DATA || full.startsWith(DATA + path.sep)) throw new Error('Bridge AI\'s own folder can\'t be opened to questions')
-      next.folders.push({ path: full.replace(os.homedir(), '~'), topics: String(f?.topics || '').replace(/\s+/g, ' ').trim().slice(0, 300) })
+      if (next.folders.some((x) => x.path === full.replace(os.homedir(), '~'))) continue
+      next.folders.push({ path: full.replace(os.homedir(), '~'), topics })
     }
   }
   afterChange(settings.patch({ slackBot: next }))

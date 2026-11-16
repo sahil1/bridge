@@ -1,0 +1,90 @@
+/* Settings › Slack Bot. The app's tokens, so it follows light and dark mode; nothing wider than the
+   panel on a phone. */
+.sb { container-type: inline-size; min-width: 0; }
+.sb-status { display: grid; gap: 4px; min-width: 0; padding-bottom: 6px; }
+.sb-status .st-note { margin: 0; align-items: flex-start; }
+.sb-status .st-note .icon { flex: none; margin-top: 2px; }
+.sb-status-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.sb-status > p.muted { margin: 0; line-height: 1.45; }
+
+.sb-steps { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.sb-steps li { padding-left: 2px; min-width: 0; overflow-wrap: anywhere; }
+.sb-steps li > span { display: block; }
+.sb-steps .st-row { margin-top: 6px; }
+.sb-steps .btn { display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
+.sb-manifest, .sb-how { min-width: 0; }
+.sb-manifest summary, .sb-how summary { cursor: pointer; font-size: 12.5px; color: var(--ink-2); min-height: 26px; display: flex; align-items: center; gap: 5px; list-style: none; }
+.sb-manifest summary::-webkit-details-marker, .sb-how summary::-webkit-details-marker { display: none; }
+.sb-manifest summary .icon, .sb-how summary .icon { color: var(--ink-3); transition: transform .15s; }
+.sb-manifest[open] > summary .icon, .sb-how[open] > summary .icon { transform: rotate(90deg); }
+.sb-manifest pre { margin: 4px 0 0; max-height: 220px; overflow: auto; padding: 8px 10px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--pane-2); font: 11px/1.45 var(--font-mono); color: var(--ink); white-space: pre; }
+.sb-how[open] { display: grid; gap: 6px; }
+
+.sb-tokens { display: grid; gap: 8px; margin-top: 4px; min-width: 0; }
+.sb-field { display: grid; gap: 3px; min-width: 0; }
+.sb-field > span { font-size: 12px; color: var(--ink-2); font-weight: 500; }
+.sb-have { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; min-width: 0; }
+.sb-have code { font: 11.5px var(--font-mono); color: var(--ink); }
+.sb-have .ghost-btn.danger { color: var(--critical); }
+
+.sb-none { margin: 0; color: var(--ink-2); }
+.sb-askers { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.sb-askers li { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 2px 4px 2px 3px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--pane-2); max-width: 100%; }
+.sb-askers .icon-btn { width: 24px; height: 24px; display: inline-grid; place-items: center; border-radius: 999px; color: var(--ink-3); }
+.sb-asker-name { font-size: 12.5px; font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sb-av { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 999px; font: 700 11px var(--font); color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.sb-pick { display: grid; gap: 4px; min-width: 0; max-width: 420px; }
+.sb-search { display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink-3); min-width: 0; }
+.sb-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.sb-search input { flex: 1; align-self: stretch; min-width: 0; border: 0; outline: none; background: none; color: var(--ink); font: 13px var(--font); }
+.sb-found { list-style: none; margin: 0; padding: 4px; display: grid; gap: 2px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--pane); box-shadow: var(--shadow-sm, none); }
+.sb-found button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 4px 8px; border-radius: 7px; text-align: left; color: var(--ink); }
+.sb-found button:hover, .sb-found button:focus-visible { background: var(--pane-3); }
+.sb-found button > .icon { margin-left: auto; color: var(--ink-3); flex: none; }
+.sb-found-text { display: grid; min-width: 0; font-size: 12.5px; }
+.sb-found-text > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-others { margin-top: 4px; }
+
+.sb-folders { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.sb-folders li { display: flex; align-items: flex-start; gap: 8px; padding: 8px 6px 8px 10px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--pane); min-width: 0; }
+.sb-folders li > .icon { flex: none; margin-top: 3px; color: var(--ink-3); }
+.sb-folders li.bad { border-color: color-mix(in srgb, var(--critical) 40%, var(--line-2)); }
+.sb-folder-text { flex: 1; min-width: 0; display: grid; gap: 5px; }
+.sb-folder-text code { font: 12px var(--font-mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-folder-text .st-input { height: 32px; width: 100%; font-size: 12.5px; }
+.sb-folders .icon-btn { flex: none; width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: 7px; color: var(--ink-3); }
+.sb-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.sb-add .st-input { flex: 1 1 180px; width: auto; min-width: 0; height: 34px; font-size: 12.5px; }
+.sb-add .btn { flex: none; display: inline-flex; align-items: center; gap: 5px; }
+
+.sb-modes { display: grid; gap: 6px; }
+.sb-mode { display: flex; align-items: flex-start; gap: 9px; padding: 9px 10px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--pane); cursor: pointer; min-width: 0; }
+.sb-mode.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.sb-mode input { margin-top: 3px; flex: none; }
+.sb-mode > span { display: grid; gap: 2px; min-width: 0; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.sb .st-note { align-items: flex-start; }
+.sb .st-note .icon { flex: none; margin-top: 2px; }
+.sb .seg { flex-wrap: wrap; max-width: 100%; }
+
+.sb-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.sb-log li { display: flex; align-items: flex-start; gap: 8px; padding: 6px 2px; border-bottom: 1px solid var(--line); min-width: 0; }
+.sb-log li:last-child { border-bottom: 0; }
+.sb-log li > .icon { flex: none; margin-top: 3px; color: var(--ink-3); }
+.sb-log li.s-sent > .icon { color: var(--good); }
+.sb-log li.s-draft > .icon, .sb-log li.s-sending > .icon { color: var(--warning); }
+.sb-log li.bad > .icon { color: var(--critical); }
+.sb-log-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.sb-log-q { font-size: 12.5px; color: var(--ink); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sb-log-out { overflow-wrap: anywhere; }
+.sb-log time { flex: none; white-space: nowrap; }
+/* On a phone: every control a whole 40 px target, and fields at 16 px so iOS doesn't zoom into them. */
+.modal.settings.phone .sb :is(.btn, .ghost-btn, .seg button, .link-btn, summary) { min-height: 40px; }
+.modal.settings.phone .sb .icon-btn { min-width: 40px; min-height: 40px; }
+.modal.settings.phone .sb :is(.st-input, .sb-search input) { font-size: 16px; }
+.modal.settings.phone .sb .st-input, .modal.settings.phone .sb .sb-add .st-input { height: 42px; }
+.modal.settings.phone .sb .sb-search { height: 44px; }
+.modal.settings.phone .sb .sb-found button { min-height: 44px; }
+.modal.settings.phone .sb .sb-askers li { padding-right: 0; }
+.ny-panel.phone .ny-draft { font-size: 16px; }
+.sb-log-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.sb-tag { flex: none; white-space: nowrap; font: 600 10px var(--font); text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 5px; color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
