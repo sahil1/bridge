@@ -29,6 +29,8 @@ const { ok, skip, done } = checks('chat-files')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const enc = encodeURIComponent
+// A path as the app shows it, with / between its parts (on Windows it says ~\Desktop\…, as Windows writes paths).
+const fwd = (p) => (typeof p === 'string' ? p.replace(/\\/g, '/') : p)
 
 // A picture of one colour, made here.
 function png(w, h, rgb) {
@@ -131,11 +133,11 @@ try {
   r = await locate(desk.url, 'vendored-only.txt')
   ok(r.found?.length === 0, 'the search keeps out of node_modules', r)
   r = await locate(desk.url, 'missing.txt')
-  ok(r.s === 200 && r.found?.length === 0 && !r.outside && r.looked?.root === '~/Desktop/code/GIT' && r.looked.used >= 2 && r.looked.folders > 5, 'none: says where it looked (the folder, the folders the conversation worked in, how many below it)', r)
+  ok(r.s === 200 && r.found?.length === 0 && !r.outside && fwd(r.looked?.root) === '~/Desktop/code/GIT' && r.looked.used >= 2 && r.looked.folders > 5, 'none: says where it looked (the folder, the folders the conversation worked in, how many below it)', r)
   r = await locate(desk.url, path.join(h, 'outside.txt'))
-  ok(r.found?.length === 0 && r.outside === '~/outside.txt', 'a path in full outside the agent\'s folder: said to be, not looked at', r)
+  ok(r.found?.length === 0 && fwd(r.outside) === '~/outside.txt', 'a path in full outside the agent\'s folder: said to be, not looked at', r)
   r = await locate(desk.url, '~/outside.txt')
-  ok(r.found?.length === 0 && r.outside === '~/outside.txt', 'and from ~', r)
+  ok(r.found?.length === 0 && fwd(r.outside) === '~/outside.txt', 'and from ~', r)
   r = await locate(desk.url, '../../../outside.txt')
   ok(r.s === 200 && r.found?.length === 0 && !JSON.stringify(r).includes('beside the agent'), 'a path up and out of the folder finds nothing', r)
   // The home folder as the root (Studio's home): the search keeps out of a cloud drive, and on a Mac
@@ -254,7 +256,7 @@ try {
     const none = pg.locator('.find-file[role=alert]')
     await none.waitFor({ timeout: 15000 }).catch(() => {})
     const text = await none.innerText().catch(() => '')
-    ok(/Couldn't find missing\.txt/.test(text) && /Where it looked/.test(text) && /~\/Desktop\/code\/GIT/.test(text) && /folders this conversation worked in/.test(text) && /folders below it/.test(text) && !/^Not found$/m.test(text), `${t}: missing.txt: says it couldn't find it and where it looked`, text)
+    ok(/Couldn't find missing\.txt/.test(text) && /Where it looked/.test(text) && /~[\\/]Desktop[\\/]code[\\/]GIT/.test(text) && /folders this conversation worked in/.test(text) && /folders below it/.test(text) && !/^Not found$/m.test(text), `${t}: missing.txt: says it couldn't find it and where it looked`, text)
     await shot(pg, `${tag}chat-files-none-${t}`)
     await none.locator('button', { hasText: 'Search for missing.txt' }).click()
     ok(await pg.locator('.quick-open input').inputValue().catch(() => '') === 'missing.txt', `${t}: Search opens Go to file with its name in`)
