@@ -7,6 +7,7 @@ import Icon from '../Icon.jsx'
 import { useMedia } from '../layout.jsx'
 import { t, tn } from '../../i18n/index.js'
 import { baseFor, remoteStatus, connect, pointOn } from './remote.js'
+import { hostApi, viaRelay } from '../../api.js'
 import { SWAP, swapsKeys, RATE } from '../../../shared/remote.js'
 import './remote.css'
 
@@ -36,7 +37,10 @@ export default function ScreenView({ machine, name, onClose }) {
   useEffect(() => {
     let live = true
     setErr(null)
-    remoteStatus(base, { sources: true }).then((d) => { if (!live) return; setSt(d); if (!d.screen?.can) setErr({ why: d.screen?.why || t("{name}'s screen can't be seen from here.", { name }), code: d.screen?.code }) },
+    // A phone on Bridge AI's relay: what comes through it counts against the account's allowance,
+    // so the pictures come at that relay's pace (shared/remote.js RATE).
+    const slow = viaRelay ? hostApi('/relay').then((r) => !!r?.hosted, () => false) : Promise.resolve(false)
+    Promise.all([remoteStatus(base, { sources: true }), slow]).then(([d, sl]) => { if (!live) return; setSt({ ...d, slow: sl }); if (!d.screen?.can) setErr({ why: d.screen?.why || t("{name}'s screen can't be seen from here.", { name }), code: d.screen?.code }) },
       (e) => live && setErr({ why: e.message === 'update' ? t('Update Bridge AI on {name} to see its screen from here.', { name }) : e.message }))
     return () => { live = false }
   }, [base, name, run])
@@ -70,7 +74,7 @@ export default function ScreenView({ machine, name, onClose }) {
     setPaused(false)
     setControlling(false)
     const c = connect({
-      base, source: source || 'screen:', control: !!st.control?.on,
+      base, source: source || 'screen:', control: !!st.control?.on, slow: !!st.slow,
       on: {
         hello: (m) => { setSess((x) => ({ ...x, phase: 'live', hello: m })); if (m.source?.w && m.source?.h) setSize({ w: m.source.w, h: m.source.h }) },
         mode: (mode) => setSess((x) => ({ ...x, mode })),
@@ -200,7 +204,7 @@ export default function ScreenView({ machine, name, onClose }) {
         onKeyDown={key(true)} onKeyUp={key(false)} onBlur={releaseAll} onContextMenu={(e) => { if (controlling) e.preventDefault() }}>
         <video ref={video} className="rs-media" muted playsInline autoPlay hidden={sess.mode !== 'p2p'} />
         <img ref={img} className="rs-media" alt="" hidden={sess.mode === 'p2p' || !live} draggable={false} />
-        {!err && sess.phase !== 'live' && sess.phase !== 'ended' && (
+        {!err && sess.phase !== 'ended' && (sess.phase !== 'live' || !sess.mode || sess.mode === 'connecting') && (
           <div className="rs-wait"><Icon name="refresh" size={18} className="spin" /><p>{st ? t('Connecting to {name}…', { name }) : t('Asking {name}…', { name })}</p></div>
         )}
         {err && (

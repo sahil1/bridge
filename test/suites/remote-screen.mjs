@@ -30,11 +30,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
 import { spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
 import WebSocket, { WebSocketServer } from 'ws'
 import { startKit, startRelay, checks, until, browser, page, sleep, shot, ROOT, TEST, IS_WIN, freePort, stopTree } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 import { K, json, text } from '../../relay/web/link.js'
-import { unpackFrame } from '../../shared/remote.js'
+import { unpackFrame, keyFor } from '../../shared/remote.js'
 
 const { ok, skip, done } = checks('remote-screen')
 const say = (...a) => console.log(...a)
@@ -400,6 +401,72 @@ try {
     ok((await studio.api('/remote')).log.some((e) => e.kind === 'page' && e.source.port === dport && e.controlled), 'kept in the log too')
   })
 
+  // ---------- the desktop app's side, with Electron stood in for ----------
+  await part('the desktop app: capture window, badge, an app drawn off screen', async () => {
+    const { create } = createRequire(import.meta.url)(path.join(ROOT, 'desktop', 'remote.js'))
+    const wins = []
+    const sent = []
+    const posts = []
+    class Win {
+      constructor(o) {
+        this.o = o; this.on_ = {}; wins.push(this)
+        const wc = { on_: {}, on: (e, f) => { wc.on_[e] = f }, setWindowOpenHandler: (f) => { wc.open = f }, setFrameRate: (r) => { wc.rate = r }, sendInputEvent: (ev) => sent.push(ev) }
+        this.webContents = wc
+      }
+      loadURL(u) { this.url = u; return Promise.resolve() }
+      on(e, f) { this.on_[e] = f }
+      once(e, f) { this.on_[e] = f }
+      isDestroyed() { return !!this.gone }
+      destroy() { this.gone = true; this.on_.closed?.() }
+      setAlwaysOnTop(...a) { this.top = a }
+      setVisibleOnAllWorkspaces() {}
+      showInactive() { this.shown = true }
+      setContentSize(w, h) { this.size = [w, h] }
+    }
+    let access = 'granted'
+    const desk = create({
+      BrowserWindow: Win,
+      desktopCapturer: { getSources: async () => [{ id: 'screen:1:0', name: 'Entire Screen', display_id: '1' }, { id: 'window:42:0', name: 'Notes' }, { id: 'window:43:0', name: 'Bridge AI screen sharing' }] },
+      screen: { getAllDisplays: () => [{ id: 1, bounds: { x: 0, y: 0, width: 1512, height: 982 }, size: { width: 1512, height: 982 }, scaleFactor: 2 }], getPrimaryDisplay: () => ({ id: 1, workArea: { x: 0, y: 25, width: 1512, height: 900 } }) },
+      systemPreferences: { getMediaAccessStatus: () => access },
+      session: { fromPartition: (n) => ({ name: n, setPermissionRequestHandler: (f) => { f(null, 'media', (ok) => { posts.push(['perm', ok]) }) } }) },
+      nativeTheme: { shouldUseDarkColors: false }, URL_BASE: 'http://127.0.0.1:1', preload: '/preload.js', platform: 'darwin', keyFor,
+      fetch: async (u, o) => { posts.push([u, o]); return { status: 200 } },
+    })
+    const src = await desk.sources()
+    ok(src.permission === 'ok' && src.sources.length === 2 && src.sources[0].kind === 'screen' && src.sources[0].w === 3024 && src.sources[0].primary && src.sources[0].bounds.width === 1512 && src.sources[1].name === 'Notes', 'its screens (in pixels, with where each sits, in points) and windows, never its own', src)
+    access = 'not-determined'
+    ok(desk.permission() === 'ask', 'macOS not asked yet: said so (asked the first time someone looks)')
+    access = 'granted'
+    desk.onEvent({ t: 'need-capture' })
+    const cap = wins.find((w) => /remote=capture/.test(w.url || ''))
+    ok(!!cap && cap.o.show === false && cap.o.webPreferences.backgroundThrottling === false && cap.o.webPreferences.sandbox, 'the capture page opens in a window that never shows, sandboxed', cap?.o)
+    desk.onEvent({ t: 'capture-idle' })
+    ok(cap.gone, 'and closes when nothing has been seen for a while')
+    desk.onEvent({ t: 'sessions', list: [{ id: 'a', kind: 'screen' }] })
+    const badge = wins.find((w) => /remote=badge/.test(w.url || ''))
+    badge?.on_['ready-to-show']?.()
+    ok(!!badge && badge.top?.[0] === true && badge.top[1] === 'screen-saver' && badge.o.frame === false && badge.shown, 'while anyone looks, the badge: over everything, without taking the focus', badge?.o)
+    desk.onEvent({ t: 'sessions', list: [] })
+    ok(badge.gone, 'and it goes when nobody does')
+    desk.onEvent({ t: 'control', on: true })
+    ok(desk.controlOn() === true, 'control on here: the Accessibility question is about it too (permissions.js control)')
+    desk.onEvent({ t: 'page-start', session: 's1', port: 5173, w: 390, h: 700, rate: 2 })
+    const pg = wins.find((w) => w.url === 'http://localhost:5173/')
+    ok(!!pg && pg.o.webPreferences.offscreen === true && pg.o.webPreferences.session?.name === 'persist:bridge-preview' && posts.some((x) => x[0] === 'perm' && x[1] === false), 'a project\'s app for a phone: drawn off screen, in a session of its own that asks for nothing', pg?.o)
+    let stopped = false
+    pg.webContents.on_['will-navigate']({ preventDefault: () => { stopped = true } }, 'https://elsewhere.example/')
+    ok(stopped && pg.webContents.open?.().action === 'deny', 'it stays on its own app: a link elsewhere isn\'t followed, nor a new window opened')
+    pg.webContents.on_.paint({}, {}, { toJPEG: () => Buffer.from('jpeg!'), getSize: () => ({ width: 390, height: 700 }) })
+    await until(() => posts.some((x) => /\/api\/remote\/sessions\/s1\/frame$/.test(x[0])), 3000, 50)
+    const post = posts.find((x) => /\/frame$/.test(String(x[0])))
+    ok(!!post && post[1].headers['x-frame-w'] === '390' && String(post[1].body) === 'jpeg!', 'what it draws goes to the server as pictures', post?.[1]?.headers)
+    desk.onEvent({ t: 'page-input', session: 's1', evs: [{ t: 'down', b: 0, x: 0.5, y: 0.5 }, { t: 'key', code: 'Enter', down: true }, { t: 'text', s: 'hi' }, { t: 'wheel', dx: 0, dy: 100, x: 0.5, y: 0.5 }] })
+    ok(sent.some((e) => e.type === 'mouseDown' && e.x === 195 && e.y === 350 && e.button === 'left') && sent.some((e) => e.type === 'keyDown' && e.keyCode === 'Enter') && sent.filter((e) => e.type === 'char').map((e) => e.keyCode).join('') === 'hi' && sent.some((e) => e.type === 'mouseWheel' && e.deltaY === -100), 'taps, keys, typing and scrolling go to that page', sent)
+    desk.onEvent({ t: 'page-stop', session: 's1' })
+    ok(pg.gone, 'and it closes when the phone stops looking')
+  })
+
   // ---------- in the browser ----------
   ;({ b } = await browser())
   const which = b.browserType().name()
@@ -438,6 +505,11 @@ try {
     await line.waitFor({ timeout: 10000 })
     ok(/Laptop is controlling this screen|Laptop is viewing this screen/.test(await line.innerText()), 'Studio says it\'s being seen, and by which device', await line.innerText())
     await shot(st.p, `${tag}remote-screen-studio-seen`)
+    // The desktop app's badge, the same page in a window of its own.
+    const badge = await page(b, `${studio.url}/?remote=badge`, { width: 460, height: 58 })
+    ok(!!(await until(async () => /Laptop is (viewing|controlling) this screen/.test(await badge.p.locator('.rs-badge').innerText().catch(() => '')), 8000)) && await badge.p.getByRole('button', { name: 'Stop' }).isVisible(), 'the desktop app\'s badge says who, with Stop', await badge.p.locator('.rs-badge').innerText().catch(() => ''))
+    await shot(badge.p, `${tag}remote-screen-badge`)
+    await badge.ctx.close()
     await line.getByRole('button', { name: 'Stop' }).click()
     ok(!!(await until(async () => /Stopped on Studio/.test(await p.locator('.rs-view').innerText()), 8000)), 'Stop on Studio: the viewer says so')
     const notice = st.p.locator('.rs-here')

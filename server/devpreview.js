@@ -102,6 +102,8 @@ export function serve({ trialOn, deviceOf, isDevPort, thisName }) {
     ws.on('message', (d, b) => { if (client?.readyState === 1) client.send(d, { binary: b }); else early.push([d, b]) })
     ws.on('close', (code, why) => { try { client?.close(code >= 1000 && code < 5000 && code !== 1005 && code !== 1006 ? code : 1000, String(why || '')) } catch { /* closed */ } })
     ws.on('error', () => { if (!client) { socket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n'); socket.destroy() } })
+    // Gone before the app answered: its end goes too.
+    socket.on('close', () => { if (!client) try { ws.terminate() } catch { /* closed */ } })
   }
   const isPath = (u) => PREVIEW.test(String(u || '').split('?')[0])
   // For the computer showing it, before it opens an address: may it, and if not, why.

@@ -121,35 +121,37 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   }
   function onCapture(ws) {
     const was = capture
-    capture = { ws, sources: null, permission: null, p2p: false, at: Date.now() }
+    const c = { ws, sources: null, permission: null, p2p: false, at: Date.now(), next: null }
+    capture = c
     if (was && was.ws !== ws) try { was.ws.close(1000, 'replaced') } catch { /* closed */ }
     ws.on('message', (data, binary) => {
+      if (capture !== c) return
       if (binary) {
-        const s = sessions.get(capture?.next)
+        const s = sessions.get(c.next)
         if (s) frameIn(s, data)
         return
       }
       let m
       try { m = JSON.parse(String(data)) } catch { return }
       if (m.t === 'hello' || m.t === 'sources') {
-        capture.sources = Array.isArray(m.sources) ? m.sources.slice(0, 40).map(cleanSource).filter(Boolean) : []
-        capture.permission = typeof m.permission === 'string' ? m.permission : null
-        capture.p2p = m.p2p === true
-        if (m.t === 'hello') { for (const w of captureWaiters.splice(0)) w.resolve(capture); idleLater() }
+        c.sources = Array.isArray(m.sources) ? m.sources.slice(0, 40).map(cleanSource).filter(Boolean) : []
+        c.permission = typeof m.permission === 'string' ? m.permission : null
+        c.p2p = m.p2p === true
+        if (m.t === 'hello') { for (const w of captureWaiters.splice(0)) w.resolve(c); idleLater() }
         for (const w of sourceWaiters.splice(0)) w()
         onChange()
         return
       }
       const s = sessions.get(m.session)
       if (!s || s.provider !== 'capture') return
-      if (m.t === 'frame') { capture.next = s.id; return }
+      if (m.t === 'frame') { c.next = s.id; return }
       if (m.t === 'offer' || m.t === 'ice') return tell(s.viewer, { t: m.t, ...(m.sdp ? { sdp: String(m.sdp) } : {}), ...(m.c ? { c: m.c } : {}) })
       if (m.t === 'started') { s.size = { w: m.w | 0, h: m.h | 0 }; return tell(s.viewer, { t: 'size', w: s.size.w, h: s.size.h }) }
       if (m.t === 'input') return applyInput(s, m.evs)
       if (m.t === 'error') return end(s, 'error', clean(m.why, 300) || 'The screen couldn\'t be shared')
     })
     ws.on('close', () => {
-      if (capture?.ws !== ws) return
+      if (capture !== c) return
       capture = null
       for (const s of [...sessions.values()]) if (s.provider === 'capture') end(s, 'lost', `The Bridge AI app on ${thisName()} stopped sharing its screen.`)
       onChange()
@@ -192,6 +194,10 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       if (!st.can) return fail(st.why, st.code)
       if (!FAKE || capture) {
         try { await needCapture() } catch (e) { return fail(e.message, e.code) }
+        // The capture page's first look is when macOS asks about Screen Recording (first use): turned
+        // down, or not answered yet, it's said, and the question is on that screen.
+        const after = screenStatus()
+        if (!after.can) return fail(after.why, after.code)
       }
       const list = capture?.sources || FAKE_SOURCES
       const src = list.find((x) => x.id === sid && x.kind === (kind === 'window' ? 'window' : 'screen')) || (!sid ? list.find((x) => x.kind === 'screen' && x.primary) || list.find((x) => x.kind === 'screen') : null)
@@ -201,6 +207,8 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       // Control only of a whole screen (where the pointer goes is known there), when it's on here and asked for.
       s.control = q.get('control') === '1' && conf.control && s.source.kind === 'screen' && (await input.status()).can
     }
+    // The viewer went while this was being worked out: nothing to start.
+    if (ws.readyState !== 1) return
     sessions.set(s.id, s)
     clearTimeout(idleTimer)
     s.entry = { id: s.id, kind: s.kind, by: s.by, for: s.for, source: { kind: s.source.kind, name: s.source.name, ...(s.source.port ? { port: s.source.port } : {}) }, control: !!s.control, controlled: false, via: null, started: new Date(s.started).toISOString(), ended: null, seconds: 0, end: null, seen: false }
