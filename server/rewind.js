@@ -6,7 +6,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { draftIn, codexBox, promptSafe } from './promptsafe.js'
+import { draftIn, codexBox, promptSafe, typeIn } from './promptsafe.js'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 // eslint-disable-next-line no-control-regex
@@ -180,7 +180,7 @@ export async function codexRewindAndSend(rt, agent, { original, back = 1, text }
   // The old text is back in the box: clear it, then send the new one.
   if (codexBox(await screenOf(rt, paneId))) { await key(rt, paneId, 'ctrl+c'); await sleep(300) }
   if (codexBox(await screenOf(rt, paneId)) !== '') throw new Error("Codex reverted, but its input box didn't clear; check the Terminal tab")
-  await rt.prompt(paneId, text)
+  await typeIn(rt, paneId, text, agent)
   // The new session: rollout-<time>-<old id>_<new id>.jsonl, written since the revert.
   let sessionId = null
   for (let i = 0; i < 20 && !sessionId; i++) {

@@ -80,7 +80,7 @@ if (fs.existsSync(path.join(os.homedir(), 'codex-first-run.json'))) {
     for (const d of chunk.match(/\x1b\[[A-D]|\x1b|\r|[^\x1b\r]+/g) || []) key(d)
   })
   function key(d) {
-    if (at === 'done') { if (d.includes('\r')) { at = 'main'; screen(['', '› Ask Codex to do anything', '']) } return }
+    if (at === 'done') { if (d.includes('\r')) { at = 'main'; screen(['', '\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m', '']) } return }
     if (at === 'browser' || at === 'device') { if (d === '\x1b') { at = 'picker'; pick = 0; picker() } return }
     if (at !== 'picker') return
     if (d === '\x1b[B') { pick = Math.min(2, pick + 1); return picker() }
@@ -101,18 +101,127 @@ if (fs.existsSync(path.join(os.homedir(), 'codex-first-run.json'))) {
 // session), or the one it resumes; then its prompt, waiting.
 if (process.stdin.isTTY) {
   fs.appendFileSync(path.join(os.homedir(), 'codex-started.log'), JSON.stringify(args) + '\n')
+  let session = args[args.indexOf('resume') + 1] || null
   if (!args.includes('resume')) {
     const now = new Date()
     const day = path.join(home, 'sessions', String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0'))
     const id = require('node:crypto').randomUUID()
+    session = id
     fs.mkdirSync(day, { recursive: true })
     fs.writeFileSync(path.join(day, `rollout-${now.toISOString().slice(0, 19).replace(/:/g, '-')}-${id}.jsonl`), JSON.stringify({ timestamp: now.toISOString(), type: 'session_meta', payload: { id, timestamp: now.toISOString(), cwd: process.cwd(), originator: 'codex_cli_rs', cli_version: '0.160.0' } }) + '\n')
   }
-  process.stdin.setRawMode(true)
-  process.stdin.setEncoding('utf8')
-  process.stdin.on('data', (chunk) => fs.appendFileSync(path.join(os.homedir(), 'codex-typed.log'), JSON.stringify(chunk) + '\n'))
-  process.stdout.write('\x1b[2J\x1b[H\r\n› Ask Codex to do anything\r\n')
-  setInterval(() => {}, 1 << 30)
+  composer(session)
   return
 }
 console.log('codex-cli 0.160.0 (stand-in)')
+
+// Its prompt, as Codex 0.160 draws it and takes keys where that matters to Bridge AI
+// (codex-rs/tui/src/bottom_pane: chat_composer.rs, paste_burst.rs; history_cell/messages.rs):
+//   its screen: what it said last; the messages you sent, each a "› " line drawn dim; its working
+//     line while it works ("• Working (2s • esc to interrupt)"); its box, a bold "›" and its
+//     placeholder drawn dim (what's typed on the lines under it), a blank line, and its hints dim
+//   pastes: it turns bracketed paste on, and takes one whatever the terminal says (its terminal
+//     library reads ESC[200~ either way); one over 1,000 characters shows as "[Pasted Content N
+//     chars]" in the box, and goes as written
+//   keys: a run of them faster than 8 ms apart is a paste, so an Enter among them (within 8 ms of
+//     the last, as it reads them) is a newline, not a send; Ctrl+J a newline; Enter otherwise sends
+//     what's in the box; Backspace, Ctrl+C clears the box (stops a turn while it works), Esc stops one
+//   each message it takes goes in ~/codex-got.log ({ session, text }), as it got it, and it works on
+//     it for a second and a half; its first message can come with it as its argument
+//   ~/codex-enter-newline there: every Enter is a newline (as one among a paste's keys is), so what's
+//     typed stays in its box. ~/codex-slow: it reads what came in every 400 ms, as a busy Codex gets
+//     to it, so text and an Enter sent apart can be read together. ~/codex-no-bracketed: bracketed
+//     paste left off, as before a terminal has seen it asked for. Keys as they came in ~/codex-typed.log
+function composer(session) {
+  const flag = (n) => fs.existsSync(path.join(os.homedir(), n))
+  const got = (text) => fs.appendFileSync(path.join(os.homedir(), 'codex-got.log'), JSON.stringify({ session, text }) + '\n')
+  let box = '' // what's typed, with a placeholder for each long paste
+  const pastes = new Map() // placeholder -> the paste
+  let pending = '' // keys of a run not in the box yet
+  let lastKey = 0
+  let pasting = null // a bracketed paste coming in
+  let said = 'Ready.'
+  let mine = [] // the messages you sent, latest last
+  let working = 0 // since when
+  let turn = null
+
+  const draw = () => {
+    const shown = box.split('\n')
+    const lines = [`• ${said}`, '', ...mine.slice(-3).flatMap((m) => [`\x1b[1;2m›\x1b[0m ${m.split('\n')[0]}`, '']),
+      working ? `• Working (${Math.round((Date.now() - working) / 1000)}s • esc to interrupt)` : '', '', '',
+      box ? `\x1b[1m›\x1b[0m ${shown[0].replace(/\[Pasted Content \d+ chars\]/g, (x) => `\x1b[36m${x}\x1b[0m`)}` : '\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m',
+      ...shown.slice(1).map((l) => `  ${l}`), '', `\x1b[2m  ? for shortcuts${' '.repeat(40)}100% context left\x1b[0m`]
+    process.stdout.write(`\x1b[2J\x1b[H${'\r\n'.repeat(Math.max(0, (process.stdout.rows || 24) - lines.length - 1))}${lines.join('\r\n')}`)
+  }
+  const flush = () => { if (pending) { box += pending; pending = '' } }
+  const stop = () => { if (!working) return; clearTimeout(turn); working = 0; said = 'Stopped, as you asked.' }
+  const submit = () => {
+    const text = [...pastes].reduce((t, [k, v]) => t.split(k).join(v), box).trim()
+    box = ''
+    pastes.clear()
+    if (!text) return
+    got(text)
+    mine.push(text)
+    working = Date.now()
+    clearTimeout(turn)
+    turn = setTimeout(() => { working = 0; said = `Done: ${text.split('\n')[0]}`; draw() }, 1500)
+  }
+  const paste = (t) => {
+    t = t.replace(/\r\n?/g, '\n')
+    if ([...t].length > 1000) {
+      let k = `[Pasted Content ${[...t].length} chars]`
+      for (let n = 2; pastes.has(k); n++) k = `[Pasted Content ${[...t].length} chars] #${n}`
+      pastes.set(k, t)
+      box += k
+    } else box += t
+    lastKey = 0
+  }
+  const key = (k, now) => {
+    if (k === '\r') {
+      if (flag('codex-enter-newline')) { flush(); box += '\n' } else if (pending && now - lastKey <= 8) pending += '\n'
+      else { flush(); submit() }
+      return
+    }
+    if (k.length === 1 && k >= ' ' && k !== '\x7f') { pending += k; lastKey = now; return }
+    flush()
+    if (k === '\n') box += '\n'
+    else if (k === '\x7f' || k === '\b') { const el = [...pastes.keys()].find((p) => box.endsWith(p)); if (el) { box = box.slice(0, -el.length); pastes.delete(el) } else box = Array.from(box).slice(0, -1).join('') }
+    else if (k === '\x03') { if (working) stop(); else { box = ''; pastes.clear() } }
+    else if (k === '\x1b') stop()
+  }
+  const take = (chunk, now) => {
+    let s = chunk
+    while (s.length) {
+      if (pasting != null) {
+        const end = s.indexOf('\x1b[201~')
+        if (end < 0) { pasting += s; s = '' } else { pasting += s.slice(0, end); s = s.slice(end + 6); flush(); paste(pasting); pasting = null }
+      } else if (s.startsWith('\x1b[200~')) { pasting = ''; s = s.slice(6) } else if (s.startsWith('\x1b[') || s.startsWith('\x1bO')) {
+        const k = /^\x1b[[O][0-9;?]*[A-Za-z~]/.exec(s)
+        s = s.slice(k ? k[0].length : 2) // arrows and the like
+      } else {
+        const [c] = s
+        s = s.slice(c.length)
+        key(c, now)
+      }
+    }
+  }
+
+  if (process.stdin.isTTY) process.stdin.setRawMode(true)
+  process.stdin.setEncoding('utf8')
+  if (!flag('codex-no-bracketed')) process.stdout.write('\x1b[?2004h')
+  let waiting = []
+  process.stdin.on('data', (chunk) => {
+    fs.appendFileSync(path.join(os.homedir(), 'codex-typed.log'), JSON.stringify(chunk) + '\n')
+    if (flag('codex-slow')) return waiting.push(chunk)
+    take(chunk, Date.now())
+    draw()
+  })
+  // Read late: what came in meanwhile, all at once.
+  setInterval(() => { if (!waiting.length) return; const now = Date.now(); for (const c of waiting.splice(0)) take(c, now); draw() }, 400)
+  // A run of keys goes in once 8 ms pass without one; and the working line counts on.
+  setInterval(() => { if (pending && Date.now() - lastKey > 8) { flush(); draw() } }, 4)
+  setInterval(() => { if (working) draw() }, 1000)
+  const opening = args.filter((a, i) => !a.startsWith('-') && !['--model', '-m', '--sandbox', '--ask-for-approval'].includes(args[i - 1]) && a !== 'resume' && args[i - 1] !== 'resume').pop()
+  if (opening) { mine.push(opening); got(opening); working = Date.now(); turn = setTimeout(() => { working = 0; said = `Done: ${opening.split('\n')[0]}`; draw() }, 1500) }
+  draw()
+}
