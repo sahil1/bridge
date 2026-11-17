@@ -335,8 +335,9 @@ try {
   ok(await p.locator('.rail-nav-btn.on').innerText().then((x) => x.trim() === 'Studio', () => false), 'with a board open, Studio is the one marked in the sidebar')
   await p.locator('.wb-view .sd-tabs [role="tab"]', { hasText: 'Files' }).click()
   ok(!!(await until(async () => (await p.locator('.sd-list .wb-card', { hasText: 'Launch map' }).count()) === 1, 10000)), 'and Files lists it with your other boards')
-  // A whiteboard opens in Preview as a board, Studio's tabs in its header; Files is a click back.
-  await p.locator('.sd-list .wb-card', { hasText: 'Roadmap' }).locator('.wb-thumb').click()
+  // A whiteboard opens in Preview as a board (a double-click, as Studio's other files), Studio's
+  // tabs in its header; Files is a click back.
+  await p.locator('.sd-list .wb-card', { hasText: 'Roadmap' }).locator('.wb-thumb').dblclick()
   ok(!!(await until(async () => (await p.locator('.wb-view .sd-tabs [role="tab"][aria-selected="true"]', { hasText: 'Preview' }).count()) === 1 && (await p.locator('.wb-view .pane-head h2').innerText().catch(() => '')).includes('Roadmap'), 20000)), 'a whiteboard opens in Preview, on its own page with Files and Preview')
   await p.locator('.wb-view .excalidraw').first().waitFor({ timeout: 20000 }).catch(() => {})
   await shot(p, `${tag}studio-docs-board`)

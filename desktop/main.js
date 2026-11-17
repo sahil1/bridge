@@ -840,7 +840,8 @@ function buildMenu() {
     ] },
     { role: 'editMenu' },
     { label: 'View', submenu: [
-      { label: 'Reload', accelerator: 'CmdOrCtrl+R', click: () => win?.webContents.reload() },
+      // ⌘R: Reload, unless a sheet with focus takes it as Fill Right (contextmenu.js pageFirst).
+      contextMenu.pageFirst({ label: 'Reload', accelerator: 'CmdOrCtrl+R' }, () => win?.webContents.reload()),
       { label: 'Reset This Window\'s Layout', click: resetLayout },
       { label: 'Open in Browser', click: () => { openInBrowser().catch(() => shell.openExternal(URL_BASE)) } },
       { type: 'separator' },

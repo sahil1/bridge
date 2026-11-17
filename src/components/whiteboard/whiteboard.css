@@ -225,9 +225,14 @@
 .wb-empty p { margin: 0; max-width: 520px; }
 .wb-empty > svg { color: var(--ink-3); margin-bottom: 6px; }
 .wb-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
-.wb-card { display: grid; gap: 4px; width: 100%; min-width: 0; padding: 8px; border-radius: 12px; border: 1px solid var(--line); background: var(--pane); text-align: left; color: var(--ink); }
+.wb-card { display: grid; gap: 4px; width: 100%; min-width: 0; padding: 8px; border-radius: 12px; border: 1px solid var(--line); background: var(--pane); text-align: left; color: var(--ink); cursor: default; user-select: none; }
 .wb-card:hover, .wb-card:focus-within { border-color: var(--line-2); box-shadow: var(--shadow); }
-.wb-thumb { display: grid; place-items: center; width: 100%; padding: 0; border: 0; cursor: pointer; aspect-ratio: 16 / 10; border-radius: 8px; background: #fff; overflow: hidden; color: var(--ink-3); }
+/* Picked, as a folder's icon is (a click picks, a double-click opens): ringed, its name filled. */
+.wb-card.on, .wb-card.on:hover { border-color: var(--accent-fill); box-shadow: 0 0 0 1px var(--accent-fill); }
+.wb-card.on .wb-name { background: var(--accent-fill); color: var(--on-accent); }
+.wb-card.on .wb-name svg { color: var(--on-accent); }
+.wb-card .wb-name-input { user-select: text; }
+.wb-thumb { display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 10; border-radius: 8px; background: #fff; overflow: hidden; color: var(--ink-3); }
 .wb-card-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .wb-card-row .wb-card-title { flex: 1; min-width: 0; }
 .wb-thumb img { width: 100%; height: 100%; object-fit: contain; }
