@@ -13,7 +13,7 @@
 //     [exit]                                 ends at once, as an agent that crashed or was closed
 //                                            would, having said nothing
 //                                            Each start goes in ~/helpers-started.log ({ args, cwd,
-//                                            message, secrets: the names of any Slack tokens in its
+//                                            message, secrets: the names of any Slack token, or test Discord or Teams secret, in its
 //                                            environment }). A follow-up typed in once it's done works a
 //                                            second and ends "Followed up: <the message>".
 //   claude ... "<a bot's brief>"             an answering agent (its brief marks off a question from
@@ -88,7 +88,7 @@ const id = opt('--session-id') || opt('--resume') || `s-${process.pid}`
 const home = os.homedir()
 const note = (file, o) => fs.appendFileSync(path.join(home, file), JSON.stringify(o) + '\n')
 // (And any Slack token it was given in its environment, by name: there should never be one.)
-const secrets = Object.entries(process.env).filter(([, v]) => /^(xox[abp]|xapp)-/.test(String(v))).map(([k]) => k)
+const secrets = Object.entries(process.env).filter(([, v]) => /^(xox[abp]|xapp)-|^dtest\.|^teams-secret/.test(String(v))).map(([k]) => k)
 if (message) note('helpers-started.log', { args, cwd: process.cwd(), message, secrets, ...(pointed ? { briefFile: pointed[1] } : {}) })
 if (/\[exit\]/.test(message)) process.exit(0)
 

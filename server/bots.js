@@ -12,6 +12,8 @@
 //   bots/<id>/bot.json          its settings
 //   bots/<id>/instructions.md   its instructions, as written in Settings
 //   bots/<id>/slack.json        its Slack app's tokens (slackbot.js), never in config.json
+//   bots/<id>/discord.json      its Discord bot's token (discordbot.js), the same way
+//   bots/<id>/teams.json        its Azure Bot's app ID, client secret and tenant (teamsbot.js)
 //   bots/<id>/memory.json       what it remembers (botmemory.js)
 //   bots/<id>/trace/            its record (trace.js)
 // A bot deleted leaves its record, until the time it's kept for runs out, with deleted.json naming
@@ -41,6 +43,7 @@ const tilde = (p) => (p === HOME || p.startsWith(HOME + path.sep) ? `~${p.slice(
 // A new bot's settings: named people may ask (none yet), anyone else a polite no; no folders, so it
 // answers from what it knows; drafts you review; its record kept a year.
 // Who you are in Slack (owner: so its drafts come to your direct messages, and you may always ask),
+// and in Discord and Teams (owners: so you may always ask there too),
 // what it may change (changes: none, suggest or pr, in repo, one of its folders), the limits per
 // person (30 questions a day, 2 at once, 10 minutes a run), memory (kept once you approve, straight
 // away, or off), paused, the channels muted with !mute, the channels it answers in without a
@@ -48,11 +51,15 @@ const tilde = (p) => (p === HOME || p.startsWith(HOME + path.sep) ? `~${p.slice(
 export const LIMITS = { day: 30, atOnce: 2, minutes: 10 }
 const DEFAULTS = {
   name: 'Bridge AI', description: '', who: 'named', askers: [], others: 'polite', readsFrom: [], instructionsFile: null, agent: null, auto: false, agentCopies: false, retention: '1y', max: 2,
-  owner: null, changes: 'none', repo: null, limits: LIMITS, memory: 'approve', paused: false, muted: [], listen: [], agentsStatus: false, template: null,
+  owner: null, owners: {}, changes: 'none', repo: null, limits: LIMITS, memory: 'approve', paused: false, muted: [], listen: [], agentsStatus: false, template: null,
 }
+// People and places by their ids: Slack's as Slack gives them; Discord's and Teams' with their
+// platform before them (connector.js combine).
 const SLACK_ID = /^[UW][A-Z0-9]{2,20}$/
-const CHANNEL_ID = /^[CGD][A-Z0-9]{2,20}$/
+export const PERSON_ID = /^([UW][A-Z0-9]{2,20}|discord:\d{1,25}|teams:[\w-]{6,64})$/
+export const CHANNEL_ID = /^([CGD][A-Z0-9]{2,20}|discord:\d{1,25}|teams:[^\s"<>]{3,300})$/
 const person = (p) => (p && SLACK_ID.test(String(p.id || '')) ? { id: String(p.id), name: clean(p.name, 80) || null } : null)
+const someone = (p, platform) => (p && PERSON_ID.test(String(p.id || '')) && String(p.id).startsWith(`${platform}:`) ? { id: String(p.id), name: clean(p.name, 80) || null } : null)
 const place = (c) => (c && CHANNEL_ID.test(String(c.id || '')) ? { id: String(c.id), name: clean(c.name, 80) || null } : null)
 const int = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d }
 export const limitsOf = (l) => ({ day: int(l?.day, 1, 1000, LIMITS.day), atOnce: int(l?.atOnce, 1, 5, LIMITS.atOnce), minutes: int(l?.minutes, 1, 60, LIMITS.minutes) })
@@ -79,6 +86,7 @@ function shape(id, j) {
   b.retention = keepOf(b.retention)
   b.max = Math.max(1, Math.min(5, Math.round(Number(b.max)) || 2))
   b.owner = person(b.owner)
+  b.owners = Object.fromEntries(['discord', 'teams'].map((k) => [k, someone(b.owners?.[k], k)]).filter(([, v]) => v))
   b.changes = ['suggest', 'pr'].includes(b.changes) ? b.changes : 'none'
   b.repo = b.repo ? String(b.repo) : null
   b.limits = limitsOf(b.limits)
@@ -125,7 +133,7 @@ export function create({ name, description = '', template = null } = {}, you = '
 // connected again there, with tokens pasted there). Its folders go as they're named here (~/…),
 // and are checked where it's brought in.
 export const BUNDLE_KIND = 'bridge-ai-bot'
-const CARRIED = ['description', 'who', 'askers', 'others', 'readsFrom', 'instructionsFile', 'agent', 'auto', 'agentCopies', 'retention', 'max', 'owner', 'changes', 'repo', 'limits', 'memory', 'muted', 'listen', 'agentsStatus', 'template']
+const CARRIED = ['description', 'who', 'askers', 'others', 'readsFrom', 'instructionsFile', 'agent', 'auto', 'agentCopies', 'retention', 'max', 'owner', 'owners', 'changes', 'repo', 'limits', 'memory', 'muted', 'listen', 'agentsStatus', 'template']
 export function bundleOf(id, memory = []) {
   const b = get(id)
   if (!b) throw Object.assign(new Error('No such bot'), { status: 404 })
@@ -166,7 +174,7 @@ export function remove(id) {
   const D = path.join(DIR, id)
   if (!fs.existsSync(path.join(D, 'trace'))) { fs.rmSync(D, { recursive: true, force: true }); return }
   writeFileAtomic(path.join(D, 'deleted.json'), JSON.stringify({ name: b?.name || id, deletedAt: new Date().toISOString(), retention: b?.retention || '1y' }, null, 2), { mode: 0o600 })
-  for (const f of ['bot.json', 'instructions.md', 'slack.json', 'memory.json']) fs.rmSync(path.join(D, f), { force: true })
+  for (const f of ['bot.json', 'instructions.md', 'slack.json', 'discord.json', 'teams.json', 'memory.json']) fs.rmSync(path.join(D, f), { force: true })
 }
 // The bots deleted whose record is kept: [{ id, name, deletedAt, retention }].
 export function deleted() {

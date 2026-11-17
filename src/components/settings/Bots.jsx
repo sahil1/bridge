@@ -6,8 +6,9 @@ import { ago } from '../Machines.jsx'
 import { t } from '../../i18n/index.js'
 import './bots.css'
 
-// Settings › Bots (a beta feature, off to start; its id slack-bot): your own bots in Slack, each its
-// own Slack app with the name you give it, which people you choose ask by mentioning it, messaging
+// Settings › Bots (a beta feature, off to start; its id slack-bot): your own bots in Slack, Discord
+// and Microsoft Teams (Where It Answers: each its own app there, with the name you give it, and the
+// steps to make it). People you choose ask one by mentioning it, messaging
 // it, replying in its threads, with its /command or the message shortcut, each question answered by
 // an agent that can only read (server/frontdesk.js) and the answer waiting in Needs You, and in your
 // Slack direct messages, for you to send, edit or discard. At the top, your bots and New Bot (from
@@ -58,8 +59,10 @@ function cached(kind, id, ask, ttl = 60000) {
   cache.set(k, { at: Date.now(), p })
   return p
 }
+// (Connected anywhere: its Slack app, Discord bot or Teams app.)
+const anyTokens = (d) => !!(d.tokens || d.where?.discord?.tokens || d.where?.teams?.tokens)
 function usePeople(d) {
-  const connected = !!d.tokens
+  const connected = anyTokens(d)
   const [people, setPeople] = useState(null)
   const [error, setError] = useState(null)
   useEffect(() => {
@@ -71,7 +74,7 @@ function usePeople(d) {
   return { people, error, connected }
 }
 function useChannels(d) {
-  const connected = !!d.tokens
+  const connected = anyTokens(d)
   const [channels, setChannels] = useState(null)
   const [error, setError] = useState(null)
   useEffect(() => {
@@ -97,7 +100,7 @@ function PeoplePicker({ people, skip = [], onPick, label, placeholder }) {
       {found.length > 0 && (
         <ul className="sb-found" role="listbox" aria-label={t('People in your workspace')}>
           {found.map((p) => (
-            <li key={p.id}><button type="button" role="option" aria-selected="false" onClick={() => { setQ(''); onPick(p) }}><span className="sb-av" aria-hidden="true">{(p.name || '?').slice(0, 1).toUpperCase()}</span><span className="sb-found-text"><b>{p.name}</b>{p.detail && <span className="muted small">{p.detail}</span>}</span><Icon name="plus" size={12} /></button></li>
+            <li key={p.id}><button type="button" role="option" aria-selected="false" onClick={() => { setQ(''); onPick(p) }}><span className="sb-av" aria-hidden="true">{(p.name || '?').slice(0, 1).toUpperCase()}</span><span className="sb-found-text"><b>{p.name} <PlatTag platform={p.platform} /></b>{p.detail && <span className="muted small">{p.detail}</span>}</span><Icon name="plus" size={12} /></button></li>
           ))}
         </ul>
       )}
@@ -113,7 +116,7 @@ function Chips({ list, here, onDrop, dropLabel, hash = false }) {
       {list.map((a) => (
         <li key={a.id}>
           <span className="sb-av" aria-hidden="true">{hash ? '#' : (a.name || '?').slice(0, 1).toUpperCase()}</span>
-          <span className="sb-asker-name">{a.name || a.id}</span>
+          <span className="sb-asker-name">{a.name || a.id} <PlatTag id={a.id} /></span>
           {here && <button type="button" className="icon-btn" onClick={() => onDrop(a)} aria-label={dropLabel(a)}><Icon name="x" size={12} /></button>}
         </li>
       ))}
@@ -262,8 +265,8 @@ function Connect({ d, here, reload }) {
     setBusy(null)
     reload()
   }
-  // nested: inside How the app is made, where the manifest is only copied (no fold inside a fold).
-  const stepsOf = (nested) => (
+  // (Folded under How the app is made: the checklist above has the steps, a click at a time.)
+  const steps = (
     <ol className="sb-steps">
       <li>
         <span>{t('Make the app: in Slack\'s app page, Create New App › From a manifest, pick your workspace and paste this manifest. It carries the name {bot}.', { bot: d.name })}</span>
@@ -271,7 +274,6 @@ function Connect({ d, here, reload }) {
           <a className="btn small" href={create} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {t('Open Slack\'s app page')}</a>
           <CopyButton text={json} label={t('Copy the manifest')} className="btn small" />
         </div>
-        {!nested && <details className="sb-manifest"><summary><Icon name="chevron" size={11} />{t('The manifest')}</summary><pre>{json}</pre></details>}
       </li>
       <li><span>{t('Give it an app-level token: Basic Information › App-Level Tokens › Generate Token and Scopes, add the scope connections:write, then copy the token (it starts with xapp-).')}</span></li>
       <li><span>{t('Install it: Install App › Install to Workspace › Allow, then copy the Bot User OAuth Token (it starts with xoxb-).')}</span></li>
@@ -303,10 +305,11 @@ function Connect({ d, here, reload }) {
               {here && <button type="button" className="ghost-btn danger" onClick={forget} disabled={busy === 'forget'}><Icon name="x" size={12} /> {t('Disconnect')}</button>}
             </div>
             {change && form}
-            <details className="sb-how"><summary><Icon name="chevron" size={11} />{t('How the app is made')}</summary>{stepsOf(true)}</details>
           </>
         )
-        : <>{stepsOf(false)}{form}</>}
+        : form}
+      <details className="sb-manifest"><summary><Icon name="chevron" size={11} />{t('The manifest')}</summary><div className="st-row"><CopyButton text={json} label={t('Copy the manifest')} className="btn small" /></div><pre>{json}</pre></details>
+      <details className="sb-how"><summary><Icon name="chevron" size={11} />{t('How the app is made')}</summary>{steps}</details>
       {!here && <p className="muted small">{t('Connect it in Bridge AI on the computer it runs on.')}</p>}
       {msg && <p className={`small ${msg.ok ? 'muted' : 'error-text'}`} role="status">{msg.text}</p>}
     </section>
@@ -340,6 +343,360 @@ function Owner({ d, here, save }) {
   )
 }
 
+// ---------- Where it answers ----------
+// Slack, Discord and Microsoft Teams: a bot answers in any of them at once, each through an app you
+// make there. The names are the services' own (not translated).
+const PLATFORMS = [['slack', 'Slack'], ['discord', 'Discord'], ['teams', 'Microsoft Teams']]
+const platOfId = (id) => (/^discord:/.test(String(id || '')) ? 'discord' : /^teams:/.test(String(id || '')) ? 'teams' : 'slack')
+const platName = (p) => (PLATFORMS.find(([k]) => k === p) || [])[1] || 'Slack'
+// A small tag saying which a person or place is in, for those not in Slack.
+const PlatTag = ({ id, platform }) => { const p = platform || platOfId(id); return p === 'slack' ? null : <span className={`sb-plat p-${p}`}>{platName(p)}</span> }
+const stateOf = (d, p) => (p === 'slack' ? { state: d.state, why: d.why } : d.where?.[p] || { state: 'no-tokens' })
+
+function Where({ d, at, pick }) {
+  return (
+    <section className="st-sec sb-where" data-setting="bots-where">
+      <h4>{t('Where It Answers')}</h4>
+      <p className="muted small">{t('{bot} can answer in Slack, Discord and Microsoft Teams at once, each through an app you make there. Who can ask, what it reads, its limits, memory and record are the same in all three.', { bot: d.name })}</p>
+      <div className="seg sb-where-tabs" role="tablist" aria-label={t('Where It Answers')}>
+        {PLATFORMS.map(([k, label]) => {
+          const s = stateOf(d, k).state
+          return (
+            <button key={k} type="button" role="tab" aria-selected={at === k} className={at === k ? 'on' : ''} onClick={() => pick(k)} data-platform={k}>
+              <span className={`sb-dot ${STATE[s] || 'warn'}`} aria-hidden="true" />
+              {label}
+              <span className="sb-sr">{s === 'connected' ? t('connected') : s === 'no-tokens' ? t('not set up') : t('not connected')}</span>
+            </button>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+// A connection's line: connected to what, or why not, and a way to try again.
+function PlatformStatus({ s, here, onAgain, connected, setUp, label }) {
+  const st = s?.state || 'no-tokens'
+  const line = st === 'connected' ? connected
+    : st === 'connecting' ? t('Connecting to {platform}…', { platform: label })
+      : st === 'reconnecting' ? t('Not connected: {why}. Trying again by itself.', { why: s.why || t('the connection closed') })
+        : st === 'error' ? t('Not connected: {why}.', { why: s.why || t('{platform} turned it down', { platform: label }) })
+          : setUp
+  return (
+    <p className={`st-note ${STATE[st] || 'warn'}`} role="status">
+      <Icon name={st === 'connected' ? 'check' : st === 'error' ? 'alert' : st === 'no-tokens' ? 'info' : 'refresh'} size={13} />
+      <span className="sb-status-text">{line}</span>
+      {(st === 'error' || st === 'reconnecting') && here && <button type="button" className="link-btn" onClick={onAgain}>{t('Connect again')}</button>}
+    </p>
+  )
+}
+
+// You in Discord, or in Teams: which person there is you, so you may always ask there too.
+function PlatformOwner({ d, here, save, platform }) {
+  const { people, connected } = usePeople(d)
+  const label = platName(platform)
+  const o = d.settings.owners?.[platform] || null
+  const mine = (people || []).filter((p) => p.platform === platform)
+  return (
+    <section className="st-sec" data-setting={`${platform}-owner`}>
+      <h4>{platform === 'discord' ? t('You in Discord') : t('You in Teams')}</h4>
+      <p className="muted small">{t('Which person in {platform} is you, so you can always ask {bot} there, whatever Who Can Ask says. Its drafts wait for you in Needs You.', { platform: label, bot: d.name })}</p>
+      {o
+        ? <Chips list={[o]} here={here} onDrop={() => save({ owners: { [platform]: null } })} dropLabel={() => t('That isn\'t me')} />
+        : <p className="small sb-none">{t('Not set.')}</p>}
+      {here && connected && !o && stateOf(d, platform).state === 'connected' && <PeoplePicker people={mine} onPick={(p) => save({ owners: { [platform]: { id: p.id, name: p.name } } })} label={t('Pick yourself')} placeholder={t('Find yourself in {platform}', { platform: label })} />}
+    </section>
+  )
+}
+
+// Discord: a bot of its own, made in Discord's Developer Portal, connecting from this computer.
+function DiscordSetup({ d, here, save, reload, again }) {
+  const s = d.where?.discord || { state: 'no-tokens' }
+  const [token, setToken] = useState('')
+  const [busy, setBusy] = useState(null)
+  const [msg, setMsg] = useState(null)
+  const [change, setChange] = useState(false)
+  const run = async (key, fn, ok) => {
+    setBusy(key)
+    setMsg(null)
+    try { await fn(); if (ok) setMsg({ ok: true, text: ok }) } catch (err) { setMsg({ text: err.message }) }
+    setBusy(null)
+    reload()
+  }
+  const connect = (e) => { e.preventDefault(); run('connect', async () => { await api(`/bots/${d.id}/discord`, { method: 'POST', body: { token } }); setToken(''); setChange(false) }, t('Connected. Add it to your server with the link below, then pick who can ask.')) }
+  const forget = () => run('forget', () => api(`/bots/${d.id}/discord`, { method: 'DELETE' }), t('Disconnected, and its token deleted from this computer.'))
+  const server = (gid) => run('server', () => api(`/bots/${d.id}/discord/server`, { method: 'POST', body: { guild: gid } }))
+  const intents = s.intents || {}
+  const steps = (
+    <ol className="sb-steps">
+      <li>
+        <span>{t('Make the app: in Discord\'s Developer Portal, New Application, name it {bot}, then Create.', { bot: d.name })}</span>
+        <div className="st-row"><a className="btn small" href="https://discord.com/developers/applications" target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {t('Open the Developer Portal')}</a></div>
+      </li>
+      <li><span>{t('Give it a token: Bot › Reset Token › Yes, do it!, then copy the token.')}</span></li>
+      <li><span>{t('On the same page, under Privileged Gateway Intents, turn on Message Content Intent (it can\'t read questions without it) and Server Members Intent (to pick people from your server), then Save Changes.')}</span></li>
+      <li><span>{t('Paste the token below and Connect.')}</span></li>
+      <li>
+        <span>{t('Add it to your server: Add to Server, pick your server, then Authorize. It asks only to see channels and read their history, send messages, start threads and write in them, and react.')}</span>
+        {s.invite ? <div className="st-row"><a className="btn small" href={s.invite} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {t('Add to Server')}</a></div> : <span className="muted small">{t('(The link is here once it\'s connected.)')}</span>}
+      </li>
+      <li><span>{t('Ask it: mention @{bot} in a channel it can see, or send it a direct message. It answers in a thread it starts from the question; a reply in that thread needs no mention.', { bot: s.bot?.name || d.name })}</span></li>
+    </ol>
+  )
+  const form = (
+    <form className="sb-tokens" onSubmit={connect} autoComplete="off">
+      <label className="sb-field"><span>{t('Bot token')}</span><input className="st-input mono" type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={t('From Bot › Reset Token')} disabled={!here} autoComplete="new-password" spellCheck={false} /></label>
+      <div className="st-row">
+        <button type="submit" className="btn small primary" disabled={!here || busy === 'connect' || !token.trim()}>{busy === 'connect' ? t('Connecting…') : t('Connect')}</button>
+        {change && <button type="button" className="ghost-btn" onClick={() => setChange(false)}>{t('Cancel')}</button>}
+      </div>
+    </form>
+  )
+  return (
+    <>
+      <section className="st-sec" data-setting="discord-connect">
+        <h4>{t('Your Discord Bot')}</h4>
+        <PlatformStatus s={s} here={here} onAgain={again} label="Discord"
+          connected={s.guild ? t('Connected to {server} as @{bot}.', { server: s.guild.name, bot: s.bot?.name || '' }) : t('Connected as @{bot}, but not answering in a server yet: add it to yours with the link below.', { bot: s.bot?.name || '' })}
+          setUp={t('Not connected: its Discord bot\'s token isn\'t here yet. Make the bot below, then paste it.')} />
+        <p className="muted small">{t('It connects from this computer to Discord: nothing reaches this computer from the internet, and nothing goes through Bold Bridge or your relay. While this computer sleeps or Bridge AI is closed, nothing answers; once it\'s back, it reads what was asked in the last three days.')}</p>
+        {intents.content === false && <p className="st-note bad"><Icon name="alert" size={13} /><span>{t('Message Content Intent is off, so it can\'t read questions: turn it on in the Developer Portal (your app › Bot › Privileged Gateway Intents), then Connect again.')}</span></p>}
+        {intents.content && intents.members === false && <p className="st-note warn"><Icon name="info" size={13} /><span>{t('Server Members Intent is off, so only people who\'ve written to it can be picked under Who Can Ask. Turn it on in the same place to pick from everyone in your server.')}</span></p>}
+        {(s.guilds || []).length > 1 && (
+          <label className="sb-field sb-server"><span>{t('Answers in')}</span>
+            <select className="st-input" value={s.guild?.id || ''} disabled={!here || busy === 'server'} onChange={(e) => e.target.value && server(e.target.value)}>
+              {!s.guild && <option value="">{t('Pick its server…')}</option>}
+              {s.guilds.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+          </label>
+        )}
+        {s.guild && <p className="muted small">{t('Members of {server} are its people: anyone writing from another server, or directly without being in {server}, is from outside and never answered; nor is anyone still to pass the server\'s membership screening.', { server: s.guild.name })}</p>}
+        {s.tokens
+          ? (
+            <>
+              <div className="sb-have">
+                <span className="small"><span className="muted">{t('Bot token')}</span> <code>{s.tokens.bot}</code></span>
+                {here && !change && <button type="button" className="ghost-btn" onClick={() => setChange(true)}>{t('Change token')}</button>}
+                {here && <button type="button" className="ghost-btn danger" onClick={forget} disabled={busy === 'forget'}><Icon name="x" size={12} /> {t('Disconnect')}</button>}
+              </div>
+              {change && form}
+            </>
+          )
+          : form}
+        <details className="sb-how"><summary><Icon name="chevron" size={11} />{t('How the bot is made')}</summary>{steps}</details>
+        {!here && <p className="muted small">{t('Connect it in Bridge AI on the computer it runs on.')}</p>}
+        {msg && <p className={`small ${msg.ok ? 'muted' : 'error-text'}`} role="status">{msg.text}</p>}
+      </section>
+      <PlatformOwner d={d} here={here} save={save} platform="discord" />
+    </>
+  )
+}
+
+// Microsoft Teams: an Azure Bot of yours, reached through a tunnel of yours to this computer, and the
+// Teams app made here to upload.
+function TeamsSetup({ d, here, save, reload, again }) {
+  const s = d.where?.teams || { state: 'no-tokens' }
+  const [app, setApp] = useState('')
+  const [tenant, setTenant] = useState('')
+  const [secret, setSecret] = useState('')
+  const [tunnel, setTunnel] = useState(s.endpoint?.url ? s.endpoint.url.replace(/\/api\/messages$/, '') : '')
+  const [busy, setBusy] = useState(null)
+  const [msg, setMsg] = useState(null)
+  const [change, setChange] = useState(false)
+  useEffect(() => { if (s.endpoint?.url) setTunnel(s.endpoint.url.replace(/\/api\/messages$/, '')) }, [s.endpoint?.url])
+  const run = async (key, fn, ok) => {
+    setBusy(key)
+    setMsg(null)
+    try { await fn(); if (ok) setMsg({ key, ok: true, text: ok }) } catch (err) { setMsg({ key, text: err.message }) }
+    setBusy(null)
+    reload()
+  }
+  const port = s.port || 3978
+  const endpoint = s.endpoint?.url || null
+  const connect = (e) => { e.preventDefault(); run('connect', async () => { await api(`/bots/${d.id}/teams`, { method: 'POST', body: { appId: app, tenantId: tenant, password: secret } }); setSecret(''); setChange(false) }, t('Connected: signed in to Microsoft as its Azure Bot. Now the tunnel, below.')) }
+  const keepTunnel = (e) => { e.preventDefault(); run('tunnel', () => api(`/bots/${d.id}/teams/endpoint`, { method: 'POST', body: { publicUrl: tunnel } })) }
+  const check = () => run('check', () => api(`/bots/${d.id}/teams/check`, { method: 'POST' }))
+  const forget = () => run('forget', () => api(`/bots/${d.id}/teams`, { method: 'DELETE' }), t('Disconnected, and its client secret deleted from this computer.'))
+  const cloudflared = `cloudflared tunnel --url http://localhost:${port}`
+  const devtunnel = `devtunnel host -p ${port} --allow-anonymous`
+  const form = (
+    <form className="sb-tokens" onSubmit={connect} autoComplete="off">
+      <label className="sb-field"><span>{t('Microsoft App ID')}</span><input className="st-input mono" value={app} onChange={(e) => setApp(e.target.value)} placeholder="1a2b3c4d-…" disabled={!here} spellCheck={false} /></label>
+      <label className="sb-field"><span>{t('App Tenant ID')}</span><input className="st-input mono" value={tenant} onChange={(e) => setTenant(e.target.value)} placeholder="5e6f7a8b-…" disabled={!here} spellCheck={false} /></label>
+      <label className="sb-field"><span>{t('Client secret')}</span><input className="st-input mono" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={t('Its Value, not its Secret ID')} disabled={!here} autoComplete="new-password" spellCheck={false} /></label>
+      <div className="st-row">
+        <button type="submit" className="btn small primary" disabled={!here || busy === 'connect' || !app.trim() || !tenant.trim() || !secret.trim()}>{busy === 'connect' ? t('Connecting…') : t('Connect')}</button>
+        {change && <button type="button" className="ghost-btn" onClick={() => setChange(false)}>{t('Cancel')}</button>}
+      </div>
+    </form>
+  )
+  const steps = (
+    <ol className="sb-steps">
+      <li>
+        <span>{t('Make an Azure Bot: in the Azure portal, Create a resource › Azure Bot. Name it {bot}, pick Single Tenant and Create new Microsoft App ID, then Create.', { bot: d.name })}</span>
+        <div className="st-row"><a className="btn small" href="https://portal.azure.com/#create/Microsoft.AzureBot" target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {t('Open the Azure portal')}</a></div>
+      </li>
+      <li><span>{t('On the bot\'s Configuration page, copy the Microsoft App ID and the App Tenant ID. Then Manage Password › Certificates & secrets › New client secret › Add, and copy its Value (not its Secret ID).')}</span></li>
+      <li><span>{t('Paste the three below and Connect.')}</span>{!s.tokens && form}</li>
+      <li>
+        <span>{t('Make this computer reachable for Teams with a tunnel of your own, to port {port}: with Cloudflare, or with Microsoft\'s dev tunnels. Run one of these on this computer, paste the https address it shows below, and Check.', { port })}</span>
+        <div className="sb-cmds">
+          <span className="sb-cmd"><code>{cloudflared}</code><CopyButton text={cloudflared} label={t('Copy')} className="ghost-btn" /></span>
+          <span className="sb-cmd"><code>{devtunnel}</code><CopyButton text={devtunnel} label={t('Copy')} className="ghost-btn" /></span>
+        </div>
+        <span className="muted small">{t('A quick tunnel\'s address changes each time it starts: paste the new one here, and in Azure. A named tunnel keeps its address.')}</span>
+        <form className="sb-tunnel" onSubmit={keepTunnel}>
+          <label className="sb-field"><span>{t('Your tunnel\'s address')}</span><input className="st-input mono" value={tunnel} onChange={(e) => setTunnel(e.target.value)} placeholder="https://…trycloudflare.com" disabled={!here} spellCheck={false} /></label>
+          <div className="st-row">
+            <button type="submit" className="btn small" disabled={!here || busy === 'tunnel' || !tunnel.trim() || `${tunnel.trim().replace(/\/+$/, '')}/api/messages` === endpoint}>{t('Save')}</button>
+            <button type="button" className="btn small" disabled={!here || busy === 'check' || !endpoint || s.state !== 'connected'} onClick={check}>{busy === 'check' ? t('Checking…') : t('Check')}</button>
+          </div>
+        </form>
+        {s.endpoint?.at && (s.endpoint.ok
+          ? <p className="st-note ok sb-endpoint" role="status"><Icon name="check" size={13} /><span>{t('Your tunnel reaches it.')}</span></p>
+          : <p className="st-note bad sb-endpoint" role="status"><Icon name="alert" size={13} /><span>{s.endpoint.why}</span></p>)}
+      </li>
+      <li>
+        <span>{t('Back on the Azure Bot\'s Configuration page, set Messaging endpoint to this address and Apply. Then Channels › Microsoft Teams › Apply.')}</span>
+        {endpoint ? <span className="sb-cmd"><code>{endpoint}</code><CopyButton text={endpoint} label={t('Copy')} className="ghost-btn" /></span> : <span className="muted small">{t('(Your tunnel\'s address, with /api/messages after it, once it\'s saved above.)')}</span>}
+      </li>
+      <li>
+        <span>{t('Download its Teams app and add it to Teams: Apps › Manage your apps › Upload an app › Upload a custom app. Your Teams admin may need to allow custom apps first.')}</span>
+        {s.app && here ? <div className="st-row"><a className="btn small" href={apiUrl(`/bots/${d.id}/teams/app.zip`)} download><Icon name="download" size={12} /> {t('Download the Teams app')}</a></div> : <span className="muted small">{t('(Once it\'s connected.)')}</span>}
+      </li>
+      <li><span>{t('Ask it: add it to a team or a group chat and mention @{bot}, or message it directly. A reply in a thread it answered in needs no mention.', { bot: d.name })}</span></li>
+    </ol>
+  )
+  return (
+    <>
+      <section className="st-sec" data-setting="teams-connect">
+        <h4>{t('Your Teams App')}</h4>
+        <PlatformStatus s={s} here={here} onAgain={again} label="Microsoft Teams"
+          connected={t('Signed in to Microsoft as its Azure Bot, and listening on this computer at port {port}.', { port })}
+          setUp={t('Not connected: its Azure Bot\'s app ID, tenant and client secret aren\'t here yet. Make the bot below, then paste them.')} />
+        {s.state === 'connected' && <p className="small muted sb-heard">{s.lastEvent ? t('Last heard from Teams {when}.', { when: ago(s.lastEvent) }) : t('Nothing from Teams yet: once your tunnel runs and the messaging endpoint is set in Azure, mention it in Teams.')}</p>}
+        {s.rejected?.n > 0 && <p className="st-note warn sb-rejected"><Icon name="alert" size={13} /><span>{t('{n} messages to it were turned away, not signed by Microsoft for this bot. The last: {why}.', { n: s.rejected.n, why: s.rejected.why })}</span></p>}
+        <p className="muted small">{t('Teams reaches a bot only from the internet, so it listens on this computer at one address, with nothing else of Bridge AI behind it, and you make that reachable with a tunnel of your own; never through Bold Bridge or your relay. Each message is checked as signed by Microsoft for this bot before anything else. Teams reaches it only while Bridge AI runs and your tunnel is up: what\'s asked meanwhile doesn\'t reach it.')}</p>
+        {s.tokens && (
+          <div className="sb-have">
+            <span className="small"><span className="muted">{t('Microsoft App ID')}</span> <code>{s.app?.id}</code></span>
+            <span className="small"><span className="muted">{t('Client secret')}</span> <code>{s.tokens.secret}</code></span>
+            {here && !change && <button type="button" className="ghost-btn" onClick={() => setChange(true)}>{t('Change')}</button>}
+            {here && <button type="button" className="ghost-btn danger" onClick={forget} disabled={busy === 'forget'}><Icon name="x" size={12} /> {t('Disconnect')}</button>}
+          </div>
+        )}
+        {s.tokens && change && form}
+        {s.tokens ? <details className="sb-how" open={!s.lastEvent}><summary><Icon name="chevron" size={11} />{t('How the bot is made')}</summary>{steps}</details> : steps}
+        {!here && <p className="muted small">{t('Connect it in Bridge AI on the computer it runs on.')}</p>}
+        {msg && <p className={`small ${msg.ok ? 'muted' : 'error-text'}`} role="status">{msg.text}</p>}
+      </section>
+      <PlatformOwner d={d} here={here} save={save} platform="teams" />
+    </>
+  )
+}
+
+// ---------- Set up, step by step ----------
+// For each place it answers, the steps from a new bot to its first answer, each ticked by itself
+// from how things stand (its tokens, its connection, you there, where it's been asked, an answer
+// sent): the clicks on the platform's own site, a button to the page where there is one, and what
+// to do when a step doesn't work. Once every step is done it folds away to a line, with How to set
+// up to see it again.
+const slackCreate = (d) => `https://api.slack.com/apps?new_app=1&manifest_json=${encodeURIComponent(JSON.stringify(d.manifest || {}))}`
+function stepsFor(d, p) {
+  const bot = d.bot?.name || d.name
+  const reached = d.reached?.[p] || {}
+  const made = { title: t('Make the bot'), done: true }
+  const answered = { title: t('Its first answer'), done: !!reached.answered, body: t('Mention @{bot} with a question. Its draft waits in Needs You: send it, and this step is done.', { bot }), fails: t('Nothing came? Activity says what happened to each question, and why.') }
+  const connected = (done, fails) => ({ title: t('Connected'), done, body: t('It connects by itself once it has what it needs, and says so below.'), fails })
+  if (p === 'slack') {
+    return [
+      made,
+      { title: t('Create its Slack app'), done: !!(d.tokens || d.appId), body: t('Open Slack\'s app page: the manifest comes filled in with the name {bot}. Pick your workspace, then Create.', { bot: d.name }), button: { label: t('Open Slack\'s app page'), href: slackCreate(d) }, fails: t('Slack says the manifest isn\'t valid? Copy it from The manifest, under Your Slack App, and paste it under Create New App › From a manifest.') },
+      { title: t('Paste its two tokens'), done: !!d.tokens, body: t('In your app\'s page: Basic Information › App-Level Tokens › Generate Token and Scopes, add the scope connections:write, and copy the token (xapp-…). Then Install App › Install to Workspace › Allow, and copy the Bot User OAuth Token (xoxb-…). Paste both under Your Slack App, below, and Connect.'), fails: t('A token turned down is said under Your Slack App, with Slack\'s reason: copy it again, whole. The app-level token needs the scope connections:write.') },
+      connected(d.state === 'connected', t('It says why it isn\'t connected: do what it says (turn on Socket Mode for the app, or reinstall it), then Connect again.')),
+      { title: t('You in Slack'), done: !!d.settings.owner, body: t('Under You in Slack, pick yourself: its drafts come to your Slack direct messages, and you can always ask it.'), fails: t('Nobody to pick? It lists your workspace\'s people once it\'s connected.') },
+      { title: t('Invite it to a channel, or message it'), done: !!(d.where?.slack?.channels || reached.asked), body: t('In a channel, type /invite @{bot}; or send it a direct message.', { bot }), fails: t('Slack won\'t add it? The app has to be installed in that workspace (step 3).') },
+      answered,
+    ]
+  }
+  if (p === 'discord') {
+    const s = d.where?.discord || {}
+    return [
+      made,
+      { title: t('Create its Discord app'), done: !!s.tokens, body: t('In Discord\'s Developer Portal: New Application, name it {bot}, then Create.', { bot: d.name }), button: { label: t('Open the Developer Portal'), href: 'https://discord.com/developers/applications' }, fails: t('Sign in to the Developer Portal with your Discord account first.') },
+      { title: t('Paste its token'), done: !!s.tokens, body: t('Bot › Reset Token › Yes, do it!, and copy the token. On the same page, under Privileged Gateway Intents, turn on Message Content Intent and Server Members Intent, then Save Changes. Paste the token under Your Discord Bot, below, and Connect.'), fails: t('Turned down? Reset the token again and paste the new one, whole: Discord shows each token only once.') },
+      connected(s.state === 'connected', t('Message Content Intent off, or a token turned down, is said below: put it right in the Developer Portal, then Connect again.')),
+      { title: t('You in Discord'), done: !!d.settings.owners?.discord, body: t('Under You in Discord, pick yourself, so you can always ask it there.'), fails: t('Nobody to pick? It lists your server\'s people once it\'s in your server.') },
+      { title: t('Add it to your server'), done: !!(s.guild || reached.asked), body: t('Add to Server, pick your server, then Authorize. Then mention it in a channel it can see, or message it directly.'), ...(s.invite ? { button: { label: t('Add to Server'), href: s.invite } } : {}), fails: t('Your server isn\'t in the list? You need Manage Server there, or someone who has it can add it with the same link.') },
+      answered,
+    ]
+  }
+  const s = d.where?.teams || {}
+  return [
+    made,
+    { title: t('Create its Azure Bot'), done: !!s.tokens, body: t('Make an Azure Bot: in the Azure portal, Create a resource › Azure Bot. Name it {bot}, pick Single Tenant and Create new Microsoft App ID, then Create.', { bot: d.name }), button: { label: t('Open the Azure portal'), href: 'https://portal.azure.com/#create/Microsoft.AzureBot' }, fails: t('Azure asks for a subscription first; the Azure Bot\'s free tier (F0) is enough.') },
+    { title: t('Paste its IDs and secret'), done: !!s.tokens, body: `${t('On the bot\'s Configuration page, copy the Microsoft App ID and the App Tenant ID. Then Manage Password › Certificates & secrets › New client secret › Add, and copy its Value (not its Secret ID).')} ${t('Paste the three below and Connect.')}`, fails: t('Turned down? Copy the secret\'s Value, not its Secret ID; an expired secret needs a new one.') },
+    { title: t('Reachable from Teams'), done: s.state === 'connected' && !!(s.endpoint?.ok || s.lastEvent), body: t('Run a tunnel of your own to port {port}, paste its address under Your Teams App and Check. Then set the Azure Bot\'s Messaging endpoint to the address shown there, and Channels › Microsoft Teams › Apply.', { port: s.port || 3978 }), fails: t('Check says it isn\'t reached? Start the tunnel again (a quick tunnel\'s address changes each time), then paste the new address here and in Azure.') },
+    { title: t('You in Teams'), done: !!d.settings.owners?.teams, body: t('Under You in Teams, pick yourself, so you can always ask it there.'), fails: t('Nobody to pick? It lists the people of the teams and chats it\'s in, once it\'s been added to one.') },
+    { title: t('Add it to Teams'), done: !!(s.lastEvent || reached.asked), body: t('Download its Teams app and add it to Teams: Apps › Manage your apps › Upload an app › Upload a custom app. Your Teams admin may need to allow custom apps first.'), ...(s.app ? { button: { label: t('Download the Teams app'), href: apiUrl(`/bots/${d.id}/teams/app.zip`), download: true } } : {}), fails: t('No Upload a custom app? Your Teams admin allows custom apps in the Teams admin center (Teams apps › Setup policies).') },
+    answered,
+  ]
+}
+function Guide({ d, platform, here }) {
+  const steps = stepsFor(d, platform)
+  const n = steps.filter((s) => s.done).length
+  const all = n === steps.length
+  const key = `cc-bot-guide-${d.id}-${platform}`
+  const [open, setOpen] = useState(() => saved(key) === 'open')
+  const label = platName(platform)
+  if (all && !open) {
+    return (
+      <p className="small sb-guide-done" data-setting={`${platform}-guide`}>
+        <Icon name="check" size={13} />
+        <span>{t('{bot} is set up in {platform}.', { bot: d.name, platform: label })}</span>
+        <button type="button" className="link-btn" onClick={() => { setOpen(true); saved(key, 'open') }}>{t('How to set up')}</button>
+      </p>
+    )
+  }
+  return (
+    <section className="st-sec sb-guide" data-setting={`${platform}-guide`}>
+      <h4>{t('Set Up in {platform}', { platform: label })}</h4>
+      <p className="muted small">{t('{n} of {total} done. Each step ticks itself once it\'s done.', { n, total: steps.length })}</p>
+      <ol className="sb-guide-list">
+        {steps.map((s, i) => (
+          <li key={i} className={s.done ? 'g-done' : ''}>
+            <span className="sb-tick" aria-hidden="true">{s.done ? <Icon name="check" size={11} /> : i + 1}</span>
+            <div className="sb-guide-step">
+              <b className="small">{s.title}{s.done && <span className="sb-sr"> ({t('done')})</span>}</b>
+              {!s.done && s.body && <span className="small">{s.body}</span>}
+              {!s.done && s.button && here && (
+                <div className="st-row">
+                  <a className="btn small" href={s.button.href} {...(s.button.download ? { download: true } : { target: '_blank', rel: 'noreferrer' })}><Icon name={s.button.download ? 'download' : 'external'} size={12} /> {s.button.label}</a>
+                </div>
+              )}
+              {!s.done && s.fails && <span className="muted small sb-guide-fail">{t('If it doesn\'t work: {what}', { what: s.fails })}</span>}
+            </div>
+          </li>
+        ))}
+      </ol>
+      {all && <button type="button" className="link-btn" onClick={() => { setOpen(false); saved(key, '') }}>{t('Fold it away')}</button>}
+    </section>
+  )
+}
+
+// Settings › Bots before there's a bot: what one is, in two lines, and where to start.
+function FirstBot({ here, onStart }) {
+  return (
+    <div className="sb-first" data-setting="bots-first">
+      <p className="small">{t('A bot answers people for you in Slack, Discord or Microsoft Teams, with the name you give it, from folders on this computer that you choose.')}</p>
+      <p className="muted small">{t('Each answer waits for you to send unless you say otherwise, and everything it does is kept here, in its Activity.')}</p>
+      {here
+        ? <div className="st-row"><button type="button" className="btn small primary" onClick={onStart}><Icon name="plus" size={12} /> {t('Set up your first bot')}</button></div>
+        : <p className="muted small">{t('Make one in Bridge AI on the computer it runs on.')}</p>}
+    </div>
+  )
+}
+
 // Who may ask: people picked from the workspace by name, or everyone in the channels it's in; never
 // guests or people from other companies. The people named are also the only ones (with you) who may
 // ask for a change. And what anyone else gets.
@@ -363,7 +720,7 @@ function Askers({ d, here, save }) {
           <span><b>{t('Everyone in channels it\'s invited to')}</b><span className="muted small">{t('Anyone in your workspace who mentions it in a channel it\'s in, or messages it directly.')}</span></span>
         </label>
       </div>
-      <p className="muted small">{t('Guests and people from other companies (in channels shared through Slack Connect) are never answered, either way.')}</p>
+      <p className="muted small">{t('Guests and people from other companies (in channels shared through Slack Connect) are never answered, either way.')} {t('Nor, in Discord, anyone outside its server or still to pass its screening, or, in Teams, guests and people from other organizations.')}</p>
       {everyone
         ? <p className="small"><b>{t('People you name')}</b> <span className="muted">{t('Anyone in its channels can ask; only the people named here, and you, can ask it for a change.')}</span></p>
         : s.changes && s.changes !== 'none' && <p className="muted small">{t('The people named here, and you, can also ask it for a change.')}</p>}
@@ -708,14 +1065,25 @@ function Scheduled({ d, here, reload }) {
 }
 
 function SetUp({ d, here, save, reload, onDelete, again }) {
+  // (Where it answers: the one you looked at last for this bot, else the first set up, else Slack.)
+  const [at, setAt] = useState(() => { const x = saved(`cc-bot-where-${d.id}`); return PLATFORMS.some(([k]) => k === x) ? x : (PLATFORMS.find(([k]) => stateOf(d, k).state !== 'no-tokens') || ['slack'])[0] })
+  const pick = (k) => { setAt(k); saved(`cc-bot-where-${d.id}`, k) }
   return (
     <>
-      <Status d={d} here={here} onAgain={again} />
+      <Where d={d} at={at} pick={pick} />
+      <Guide key={at} d={d} platform={at} here={here} />
+      {at === 'slack' && (
+        <>
+          <Status d={d} here={here} onAgain={again} />
+          <UpdateApp d={d} here={here} onAgain={again} />
+          <Connect d={d} here={here} reload={reload} />
+          <Owner d={d} here={here} save={save} />
+        </>
+      )}
+      {at === 'discord' && <DiscordSetup d={d} here={here} save={save} reload={reload} again={again} />}
+      {at === 'teams' && <TeamsSetup d={d} here={here} save={save} reload={reload} again={again} />}
       <Pause d={d} here={here} save={save} />
-      <UpdateApp d={d} here={here} onAgain={again} />
       <Identity d={d} here={here} save={save} onDelete={onDelete} />
-      <Connect d={d} here={here} reload={reload} />
-      <Owner d={d} here={here} save={save} />
       <Askers d={d} here={here} save={save} />
       <Instructions d={d} here={here} save={save} />
       <ReadsFrom d={d} here={here} save={save} />
@@ -1265,7 +1633,7 @@ function Bot({ id, here, onGone, onChanged, notice }) {
 }
 
 // A new bot, by its name, from a template or blank; or one exported from another computer.
-function NewBot({ here, onMade, first }) {
+function NewBot({ here, onMade }) {
   const [name, setName] = useState('')
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -1298,7 +1666,6 @@ function NewBot({ here, onMade, first }) {
   const cards = [{ id: '', name: t('Start blank'), description: t('Write its instructions yourself.') }, ...(templates || [])]
   return (
     <div className="sb-newbot">
-      {first && <p className="small">{t('A bot is your own Slack app, with the name you give it: people you choose ask it in Slack, and an agent that can only read answers from the folders you give it, each answer waiting for you to send unless you say otherwise.')}</p>}
       {here && (
         <div className="sb-templates" role="radiogroup" aria-label={t('What it does')}>
           {cards.map((c) => (
@@ -1382,7 +1749,7 @@ export default function Bots() {
       <div className="sb-bots" role="tablist" aria-label={t('Your bots')}>
         {list.map((b) => (
           <button key={b.id} type="button" role="tab" aria-selected={b.id === shown && !adding} className={`sb-chip ${b.id === shown && !adding ? 'on' : ''}`} onClick={() => pick(b.id)}>
-            <span className={`sb-dot ${b.paused ? 'warn' : b.state === 'connected' ? 'ok' : b.state === 'error' ? 'bad' : 'warn'}`} aria-hidden="true" />
+            <span className={`sb-dot ${b.paused ? 'warn' : b.connected || b.state === 'connected' ? 'ok' : b.state === 'error' ? 'bad' : 'warn'}`} aria-hidden="true" />
             <span className="sb-chip-name">{b.name}</span>
             {b.paused && <Icon name="pause" size={11} />}
             {b.waiting > 0 && <span className="sb-count" aria-label={t('{n} waiting in Needs You', { n: b.waiting })}>{b.waiting}</span>}
@@ -1396,7 +1763,8 @@ export default function Bots() {
         ))}
         {(list.length > 0 || gone.length > 0) && here && <button type="button" className={`sb-chip add ${adding ? 'on' : ''}`} onClick={() => setAdding(true)}><Icon name="plus" size={12} /> {t('New Bot')}</button>}
       </div>
-      {((!list.length && !old) || adding) && <NewBot here={here} first={!list.length && !gone.length} onMade={(id, problems) => { setImported(problems?.length ? { id, problems } : null); pick(id); load() }} />}
+      {!list.length && !gone.length && !adding && <FirstBot here={here} onStart={() => setAdding(true)} />}
+      {((!list.length && gone.length > 0 && !old) || adding) && <NewBot here={here} onMade={(id, problems) => { setImported(problems?.length ? { id, problems } : null); pick(id); load() }} />}
       {old && !adding && <DeletedBot key={`${old.id}-${old.cleared || ''}`} d={old} here={here} reload={load} />}
       {shown && !adding && !old && <Bot key={shown} id={shown} here={here} onChanged={load} onGone={left} notice={imported?.id === shown ? imported.problems : null} />}
     </div>

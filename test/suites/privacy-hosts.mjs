@@ -38,6 +38,10 @@ const CATEGORIES = {
   insights: { says: /\/insights report[\s\S]{0,120}Google Fonts/, hosts: ['fonts.googleapis.com', 'fonts.gstatic.com'] },
   // Bots: Slack's Web API, and the Socket Mode address it gives (in no code: from Slack).
   slack: { says: /Bots \(a beta feature[\s\S]{0,300}Socket Mode, a connection your computer opens to\s+`slack\.com` and then to the `wss-\*\.slack\.com`\s+address[\s\S]{0,120}None of it goes through Bold Bridge or your relay/, hosts: ['slack.com'] },
+  // ...and in Discord, through its Gateway (the address it gives, in no code), and in Teams, with
+  // Microsoft's signing keys and Entra ID's sign-in (Teams' own addresses come with each message).
+  discord: { says: /Discord: the bot connects from your computer to Discord's Gateway, through `discord\.com`[\s\S]{0,200}nothing reaches\s+your computer from the internet/, hosts: ['discord.com'] },
+  teams: { says: /a tunnel of your own[\s\S]{0,400}keys\s+Microsoft publishes at `login\.botframework\.com`[\s\S]{0,300}Microsoft Entra ID \(`login\.microsoftonline\.com`\)/, hosts: ['login.botframework.com', 'login.microsoftonline.com'] },
   self: { says: /It listens only on\s+your computer/, hosts: [] },
   // Remote Screen and Preview: the STUN server each end asks its own public address of (stun:, no //).
   stun: { says: /Cloudflare's STUN\s+server, `stun\.cloudflare\.com`, which sees that address and nothing else/, hosts: ['stun.cloudflare.com'] },
@@ -59,6 +63,8 @@ const SET_BY_YOU = {
 const NOT_FETCHED = [
   ['https://www.googleapis.com/auth/', 'an OAuth scope\'s name'],
   ['https://opencode.ai/config.json', 'the $schema line of a config file Bridge AI writes for opencode'],
+  ['https://developer.microsoft.com/en-us/json-schemas/teams/', 'the $schema line of the Teams app manifest a bot\'s Teams app is made with'],
+  ['https://api.botframework.com', 'the Bot Framework\'s name for itself: the issuer of Teams\' tokens, and the scope a bot\'s own token is asked for'],
   ['http://www.w3.org/2000/svg', 'an SVG picture\'s namespace (the test stand-in\'s screen, server/remote.js)'],
 ]
 // Run when the desktop app is built, on the computer building it, not by the app.

@@ -2680,6 +2680,9 @@ button.ue-row:hover { background: var(--pane-2); }
 .ab-cmd p { margin: 0; }
 .ab-cmd code { display: block; padding: 8px 10px; border-radius: 8px; background: var(--pane-2); border: 1px solid var(--line); font: 12.5px var(--font-mono); word-break: break-all; }
 .ab-diag { margin: 0; max-height: 220px; }
+/* Bots on, in Beta Features: Set up a bot, under it. */
+.ab-trial-go { margin: -2px 0 6px 26px; }
+.modal.settings.phone .ab-trial-go .btn { min-height: 40px; }
 /* Early Access: a quiet link for those with a code, and the code's field taking the row's room. */
 .ab-early-ask { margin: 2px 0 0; }
 .ab-early-ask .link-btn { color: var(--ink-3); font-weight: 400; }
