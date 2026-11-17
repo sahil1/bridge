@@ -98,7 +98,7 @@ const PATHS = {
   'settings:mail': { phone: 'Settings › Mail', mac: true },
   'settings:mcp': { phone: 'Settings › MCP Servers' },
   // A beta feature's, there only while it's on (slack-bot follows it on a phone).
-  'settings:slack-bot': { phone: 'Settings › Slack Bot', trial: 'slack-bot' },
+  'settings:slack-bot': { phone: 'Settings › Bots', trial: 'slack-bot' },
   // Devices, and its tabs (Account & Devices once Bold Bridge accounts exist).
   'settings:devices': { phone: 'Settings › Devices' },
   'settings:phone': { phone: 'Settings › Devices › Phone' },

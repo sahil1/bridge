@@ -197,7 +197,7 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     // Nor Perplexity's API, which AI Assist's answers look things up with: a test gives a stand-in
     // (stand-ins/model.mjs answers as Sonar does), or a key saved in a test reaches nothing.
     BRIDGE_PERPLEXITY_URL: 'http://127.0.0.1:9',
-    // Nor Slack, for the Slack Bot: a test gives a stand-in (stand-ins/slack.mjs, startSlack), or
+    // Nor Slack, for Bots: a test gives a stand-in (stand-ins/slack.mjs, startSlack), or
     // tokens saved in a test reach nothing.
     BRIDGE_SLACK_URL: 'http://127.0.0.1:9',
     BRIDGE_SHERPA: path.join(TEST, 'stand-ins', 'sherpa.cjs'),
@@ -349,11 +349,12 @@ export async function startHostedRelay(name, settings = {}, accounts = null) {
   }
 }
 
-// A Slack workspace (stand-ins/slack.mjs: its Web API and Socket Mode) on a port of its own, for the
-// Slack Bot: a kit reaches it with BRIDGE_SLACK_URL: url. ask(o): someone writes to the bot;
+// A Slack workspace (stand-ins/slack.mjs: its Web API and Socket Mode, with two apps) on a port of
+// its own, for Bots: a kit reaches it with BRIDGE_SLACK_URL: url. ask(o): someone writes;
+// edit/remove/pin(o): a message changed, deleted or pinned; scopes(o): what an app's token has;
 // drop/away/back/refresh: what a network, a sleeping computer and Slack itself do to its connection;
-// limit(o)/fail(o): Slack's 429s and errors; state(): connections and what was posted; calls():
-// each Web API call ({ method, params }).
+// limit(o)/fail(o): Slack's 429s and errors; state(): connections, what was posted and the
+// reactions on now; calls(): each Web API call ({ method, params, app }).
 export async function startSlack(name) {
   const port = await freePort()
   const log = path.join(OUT, 'kits', `${name}-slack-${port}.log`)
@@ -366,7 +367,8 @@ export async function startSlack(name) {
   const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
   return {
     url, port, calls,
-    ask: (o) => ctl('ask', o), drop: () => ctl('drop'), away: () => ctl('away'), back: () => ctl('back'), refresh: () => ctl('refresh'),
+    ask: (o) => ctl('ask', o), edit: (o) => ctl('edit', o), remove: (o) => ctl('delete', o), pin: (o) => ctl('pin', o), scopes: (o) => ctl('scopes', o),
+    drop: () => ctl('drop'), away: () => ctl('away'), back: () => ctl('back'), refresh: () => ctl('refresh'),
     limit: (o) => ctl('limit', o), fail: (o) => ctl('fail', o), state: () => ctl('state'),
     stop: () => stopTree(p),
   }

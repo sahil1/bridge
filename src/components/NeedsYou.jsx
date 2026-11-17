@@ -359,10 +359,10 @@ export function OutsideItem({ it, onDone, setNote }) {
   )
 }
 
-// A question put to the Slack Bot (server/frontdesk.js): the answer an agent drafted from where the
-// desk sent it, to edit, then send or discard; or one nothing could answer, its reply empty for you
-// to write (the asker was told it's passed on). The question is the asker's words, shown as theirs;
-// nothing goes to Slack until you press Send.
+// A question put to one of your bots (server/frontdesk.js): the answer an agent drafted, to edit,
+// then send or discard; or one nothing could answer, its reply empty for you to write (the asker was
+// told it's passed on). The question, and what came after it in the thread while it was answered,
+// are the askers' words, shown as theirs; nothing goes to Slack until you press Send.
 export function SlackItem({ it, onDone, setNote }) {
   const [text, setText] = useState(it.draft || '')
   const [busy, setBusy] = useState(false)
@@ -370,15 +370,16 @@ export function SlackItem({ it, onDone, setNote }) {
   const who = it.from?.name || t('Someone')
   const where = it.place?.kind === 'dm' ? t('in a direct message') : it.place?.name ? t('in #{channel}', { channel: it.place.name }) : t('in a channel')
   const r = it.route
+  const bot = it.bot?.name || t('Your bot')
   const from = it.needsOwner ? t('Nothing could answer it: {why}. {name} was told it\'s passed on to you.', { why: it.why || '', name: who })
-    : r?.to === 'folder' ? t('Answered from your {folder} folder, as it mentions {words}.', { folder: r.name, words: r.matched.join(', ') })
-      : r?.to === 'agent' ? t('Answered by a read-only copy of {agent}\'s conversation.', { agent: r.name })
-        : t('Answered by a throwaway agent, from what it knows.')
+    : r?.to === 'agent' ? t('Answered by a read-only copy of {agent}\'s conversation.', { agent: r.name })
+      : r?.to === 'throwaway' ? t('{bot} answered from what it knows: it reads no folders.', { bot })
+        : it.sources?.length ? t('{bot} answered from {files}.', { bot, files: it.sources.slice(0, 4).join(', ') }) : t('{bot} answered from the folders it reads.', { bot })
   const decide = async (send) => {
     setBusy(true)
     setProblem(null)
     try {
-      const out = await onDevice(null, `/slack-bot/questions/${encodeURIComponent(it.id)}`, { send, text })
+      const out = await onDevice(null, `/bots/questions/${encodeURIComponent(it.id)}`, { send, text })
       if (out.item?.state === 'draft') { setProblem(out.item.problem || null); return }
       onDone(it)
       setNote({ text: !send ? t('Discarded: nothing sent') : out.item?.state === 'sent' ? t('Sent to {name} in Slack', { name: who }) : t('Sending to Slack: {why}', { why: out.item?.problem || t('in a moment') }) })
@@ -391,10 +392,11 @@ export function SlackItem({ it, onDone, setNote }) {
         <span className="ny-kind">{it.needsOwner ? t('Needs your reply') : t('Answer to check')}</span>
         <span className="ny-age" title={new Date(it.at).toLocaleString()}>{ago(it.at)}</span>
         <span className="ny-grow" />
-        <span className="ny-device here" title={t('Through the Slack Bot (Settings › Slack Bot)')}><Icon name="chat" size={11} />Slack</span>
+        <span className="ny-device here" title={t('Through {bot} (Settings › Bots)', { bot })}><Icon name="chat" size={11} />{bot}</span>
       </div>
       <p className="ny-text">{t('{name} asked {where}', { name: who, where })}{it.late ? ` ${t('(while Bridge AI was away)')}` : ''}:</p>
       <p className="ny-said">“{it.text}”</p>
+      {(it.more || []).map((m, i) => <p key={i} className="ny-said ny-more"><span className="muted small">{t('Then {name}:', { name: m.from?.name || t('Someone') })}</span> “{m.text}”</p>)}
       <p className="muted small ny-from">{from}</p>
       <textarea className="ny-draft" value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(8, Math.max(3, text.split('\n').length + 1))} placeholder={t('Write the reply…')} aria-label={t('Reply to {name}', { name: who })} disabled={busy} />
       {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}

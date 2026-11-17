@@ -1,4 +1,4 @@
-/* Settings › Slack Bot. The app's tokens, so it follows light and dark mode; nothing wider than the
+/* Settings › Bots. The app's tokens, so it follows light and dark mode; nothing wider than the
    panel on a phone. */
 .sb { container-type: inline-size; min-width: 0; }
 .sb-status { display: grid; gap: 4px; min-width: 0; padding-bottom: 6px; }
@@ -88,3 +88,72 @@
 .ny-panel.phone .ny-draft { font-size: 16px; }
 .sb-log-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .sb-tag { flex: none; white-space: nowrap; font: 600 10px var(--font); text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 5px; color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
+
+/* Your bots, and New Bot: a row of chips over the one picked. */
+.sb-bots { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.sb-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; max-width: 100%; padding: 3px 12px 3px 10px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: 500 12.5px var(--font); }
+.sb-chip.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); background: var(--pane); }
+.sb-chip.add { color: var(--ink-2); border-style: dashed; }
+.sb-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sb-dot { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--warning); }
+.sb-dot.ok { background: var(--good); }
+.sb-dot.bad { background: var(--critical); }
+.sb-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 999px; font: 700 10.5px/18px var(--font); text-align: center; color: var(--warning); background: color-mix(in srgb, var(--warning) 16%, transparent); }
+.sb-new { display: grid; gap: 8px; min-width: 0; }
+.sb-new > p { margin: 0; line-height: 1.5; color: var(--ink-2); }
+.sb-tabs { align-self: start; }
+.sb-tabs button { display: inline-flex; align-items: center; gap: 6px; }
+
+.sb-ident { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 8px; min-width: 0; }
+@container (max-width: 520px) { .sb-ident { grid-template-columns: minmax(0, 1fr); } }
+.sb-sure { align-items: center; padding: 8px 10px; border-radius: var(--r-sm); border: 1px solid color-mix(in srgb, var(--critical) 40%, var(--line-2)); }
+.sb-sure > span { flex: 1 1 220px; min-width: 0; }
+.ghost-btn.danger, .btn.danger { color: var(--critical); }
+.sb-update { border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--line-2)); border-radius: var(--r-sm); padding: 10px 12px; background: color-mix(in srgb, var(--warning) 6%, var(--pane)); }
+.sb-update h4 { display: flex; align-items: center; gap: 6px; color: var(--warning); }
+.sb-update > p { margin: 0; line-height: 1.5; }
+.sb-ins { width: 100%; min-height: 120px; resize: vertical; font: 12.5px/1.5 var(--font-mono); padding: 8px 10px; }
+.sb-full { flex-basis: 100%; margin: 0; }
+.sb-terms { margin: 0; }
+.sb-terms > span { min-width: 0; overflow-wrap: anywhere; }
+
+/* Activity: whether the record holds, how long it's kept, search and filters, export, the
+   conversations, and one as a timeline. */
+.sb-integrity { margin: 0; }
+.sb-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-end; min-width: 0; }
+.sb-filters .sb-search { flex: 1 1 220px; }
+.sb-filters select.st-input { flex: 0 1 150px; width: auto; min-width: 0; height: 34px; font-size: 12.5px; }
+.sb-date { display: grid; gap: 2px; flex: 0 1 140px; min-width: 0; }
+.sb-date .st-input { height: 34px; width: 100%; font-size: 12.5px; }
+.sb-export { align-items: center; }
+.sb-export select.st-input { width: auto; height: 32px; font-size: 12.5px; }
+.sb-export .btn, .sb-tl-head .ghost-btn { display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
+.sb-convs li { display: block; padding: 0; }
+.sb-conv { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 7px 4px; text-align: left; color: var(--ink); border-radius: 7px; min-width: 0; }
+.sb-conv:hover, .sb-conv:focus-visible { background: var(--pane-2); }
+.sb-conv > .icon { flex: none; margin-top: 3px; color: var(--ink-3); }
+.sb-convs li.o-sent .sb-conv > .icon, .sb-convs li.o-edited .sb-conv > .icon, .sb-convs li.o-auto .sb-conv > .icon { color: var(--good); }
+.sb-convs li.o-waiting .sb-conv > .icon, .sb-convs li.o-passed-on .sb-conv > .icon { color: var(--warning); }
+.sb-convs li.o-refused .sb-conv > .icon, .sb-convs li.o-failed .sb-conv > .icon { color: var(--critical); }
+.sb-conv time { flex: none; white-space: nowrap; }
+.sb-timeline { margin: 2px 0 8px 20px; padding: 8px 10px; border-left: 2px solid var(--line-2); display: grid; gap: 6px; min-width: 0; }
+.sb-tl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sb-grow { flex: 1; }
+.sb-tl { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+.sb-tl li { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 2px 8px; align-items: baseline; min-width: 0; }
+.sb-tl li.bad .sb-tl-type { color: var(--critical); }
+.sb-tl-type { font-size: 10.5px; color: var(--ink-3); white-space: nowrap; }
+.sb-tl-text { min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
+.sb-ctx { grid-column: 1 / -1; min-width: 0; }
+.sb-ctx summary { cursor: pointer; font-size: 12px; color: var(--ink-2); min-height: 24px; display: flex; align-items: center; gap: 5px; list-style: none; }
+.sb-ctx summary::-webkit-details-marker { display: none; }
+.sb-ctx[open] > summary .icon { transform: rotate(90deg); }
+.sb-ctx ul { margin: 2px 0 0; padding-left: 16px; display: grid; gap: 2px; overflow-wrap: anywhere; color: var(--ink-2); }
+@container (max-width: 520px) {
+  .sb-tl li { grid-template-columns: auto minmax(0, 1fr); }
+  .sb-tl-type { display: none; }
+  .sb-timeline { margin-left: 4px; }
+}
+.modal.settings.phone .sb :is(select.st-input, .sb-date .st-input, .sb-ins) { font-size: 16px; }
+.modal.settings.phone .sb :is(select.st-input, .sb-date .st-input) { height: 42px; }
+.modal.settings.phone .sb :is(.sb-chip, .sb-conv, .sb-ctx summary, .sb-export .btn, .sb-tl-head .ghost-btn) { min-height: 40px; }

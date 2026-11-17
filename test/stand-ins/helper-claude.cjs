@@ -15,22 +15,27 @@
 //                                            Each start goes in ~/helpers-started.log ({ args, cwd,
 //                                            message }). A follow-up typed in once it's done works a
 //                                            second and ends "Followed up: <the message>".
-//   claude ... "<the Slack Bot's brief>"     an answering agent (its brief marks off a question from
+//   claude ... "<a bot's brief>"             an answering agent (its brief marks off a question from
 //                                            someone), as it was started; by what the question says:
 //     [answer <text>]                        reads what's in its folder, then answers that
 //     [noanswer]                             says NO ANSWER, and why
+//     [notforme]                             says NOT FOR ME
+//     [work <s>]                             takes that many seconds (2 if not said)
+//                                            and by what the bot's instructions say:
+//     [sign <text>]                          ends every answer with it
 //     [try-write <name>]                     tries to write <name> in its folder first: only when
 //                                            --tools lets it Write, else it says it couldn't
 //     [try-run]                              tries to run a command (touch ran.txt): only when
 //                                            --tools lets it use Bash
-//     [try-read <path>]                      tries to read a file outside its folder: refused under
-//                                            --permission-mode dontAsk, as Claude Code refuses
-//                                            what would have asked
+//     [try-read <path>]                      tries to read a file: one in its folder or a folder
+//                                            --add-dir gave it is read; one outside them is refused
+//                                            under --permission-mode dontAsk, as Claude Code
+//                                            refuses what would have asked
 //                                            Each try goes in ~/answer-tries.log ({ try, done }).
 //   claude --resume <id> --fork-session --session-id <new> "<brief>"   a copy of a conversation:
 //                                            <id>'s, then the brief as above
-//   --model <m>, --effort <level>, --permission-mode <mode>, --tools <list>, --strict-mcp-config
-//                                            taken, as Claude Code takes them
+//   --model <m>, --effort <level>, --permission-mode <mode>, --tools <list>, --add-dir <dirs...>,
+//   --strict-mcp-config                      taken, as Claude Code takes them
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -40,7 +45,15 @@ if (args.includes('--version')) { console.log('2.1.312 (Claude Code)'); process.
 if (args[0] === 'auth') { console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: 'max' })); process.exit(0) }
 const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode', '--effort', '--tools'])
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null }
-const message = args.find((a, i) => !a.startsWith('--') && !WITH_VALUE.has(args[i - 1])) || ''
+// --add-dir takes folders until the next flag; anything else that isn't a flag or a flag's value is
+// the opening message.
+const added = []
+let message = ''
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--add-dir') { while (args[i + 1] && !args[i + 1].startsWith('--')) added.push(args[++i]); continue }
+  if (WITH_VALUE.has(args[i])) { i++; continue }
+  if (!args[i].startsWith('--') && !message) message = args[i]
+}
 const id = opt('--session-id') || opt('--resume') || `s-${process.pid}`
 const home = os.homedir()
 const note = (file, o) => fs.appendFileSync(path.join(home, file), JSON.stringify(o) + '\n')
@@ -111,6 +124,8 @@ function turn(text, answer, ms, made) {
 function answerTurn(text) {
   // (On Windows its lines come as one, joined by " · ": runtime/spawn.js forCommandLine.)
   const q = (/----- question from.*? -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of question -----/.exec(text) || [])[1] || ''
+  const told = (/----- instructions -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of instructions -----/.exec(text) || [])[1] || ''
+  const sign = (/\[sign ([^\]]+)\]/.exec(told) || [])[1] || null
   const tools = opt('--tools')
   const can = (t) => tools == null || tools.split(',').map((x) => x.trim()).includes(t)
   const dontAsk = opt('--permission-mode') === 'dontAsk'
@@ -132,11 +147,12 @@ function answerTurn(text) {
     const r = /\[try-read ([^\]]+)\]/.exec(q)
     if (r) {
       const want = path.resolve(r[1].replace(/^~/, home))
-      const here = want.startsWith(fs.realpathSync(process.cwd()) + path.sep) || want.startsWith(process.cwd() + path.sep)
-      if (!can('Read') || (!here && dontAsk)) { tried('read', false); out.push(`I couldn't read ${r[1]}: reading outside this folder was refused.`) } else { let c = ''; try { c = fs.readFileSync(want, 'utf8').trim() } catch { /* none */ } tried('read', true); out.push(`It says: ${c}`) }
+      const real = (p) => { try { return fs.realpathSync(p) } catch { return p } }
+      const here = [process.cwd(), ...added].some((d) => want.startsWith(d + path.sep) || real(want).startsWith(real(d) + path.sep))
+      if (!can('Read') || (!here && dontAsk)) { tried('read', false); out.push(`I couldn't read ${r[1]}: reading outside my folders was refused.`) } else { let c = ''; try { c = fs.readFileSync(want, 'utf8').trim() } catch { /* none */ } tool('Read', { file_path: want }); tried('read', true); out.push(`It says: ${c}`) }
     }
     const a = /\[answer ([^\]]+)\]/.exec(q)
-    const answer = /\[noanswer\]/.test(q) ? 'NO ANSWER\nNothing in this folder says.' : [...out, a ? a[1] : 'Here is what I found.'].join(' ')
+    const answer = /\[noanswer\]/.test(q) ? 'NO ANSWER\nNothing in this folder says.' : /\[notforme\]/.test(q) ? 'NOT FOR ME' : [...out, a ? a[1] : 'Here is what I found.', ...(sign ? [sign] : [])].join(' ')
     said = answer
     reply(answer)
     state = 'idle'

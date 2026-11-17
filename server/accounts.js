@@ -495,8 +495,9 @@ export async function list({ refresh = false } = {}) {
 }
 
 // The sign-in new agents of a kind start with (your default account, or Auto's pick), as its own
-// check says it: { signedIn, sub, tier, method, provider } (accounts' status), for the settings
-// recommended for its plan. fresh: asked again now rather than from the last half minute.
+// check says it: { signedIn, plan, sub, tier, method, provider } (accounts' status), for the
+// settings recommended for its plan and a bot's note on its terms (Settings › Bots). fresh: asked
+// again now rather than from the last half minute.
 export async function signInOf(kind, { fresh = false } = {}) {
   if (!KINDS[kind]) return null
   const id = activeId(kind) || defaultId(kind)
@@ -504,7 +505,7 @@ export async function signInOf(kind, { fresh = false } = {}) {
   const bin = (await installed().catch(() => [])).find((x) => x.kind === kind)?.path || null
   if (!bin) return null
   const s = await statusOf(kind, id, bin, await loginPath())
-  return { signedIn: s.signedIn, ...(s.said || {}) }
+  return { signedIn: s.signedIn, plan: s.plan || null, ...(s.said || {}) }
 }
 
 // One account's sign-in, checked now rather than from the cache: the add-account dialog asks

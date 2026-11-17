@@ -249,11 +249,11 @@ async function moveTabToSpaceNow(tabId, { workspaceId, newSpace, index } = {}) {
 // env: extra variables for the agent (a chief of staff thread's id).
 // effort: how hard it thinks (agents.js effort()), for herdr's agents and the others alike.
 export const launch = after(launchNow)
-async function launchNow({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, pinModel, effort, access, account, resume, fork, setup, env: extraEnv }) {
+async function launchNow({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, pinModel, effort, access, dirs, account, resume, fork, setup, env: extraEnv }) {
   const env = { ...envFor(kind, account), ...extraEnv } // a second account's config folder, if one was picked
   const a = adapter(kind)
   const resumed = fork && a.fork ? a.fork(fork, a.sessionId === 'assign' ? newSessionId() : undefined) : resume && a.resume ? a.resume(resume) : []
-  const allowed = [...(access && a.access ? a.access(access) : []), ...(effort && a.effort ? a.effort(effort) : [])] // how much it may do without asking, and how hard it thinks
+  const allowed = [...(access && a.access ? a.access(access, { dirs }) : []), ...(effort && a.effort ? a.effort(effort) : [])] // how much it may do without asking, and how hard it thinks
   const extra = [...allowed, ...(pinModel && model && a.model && a.herdr ? [...a.model(model), ...resumed] : resumed)]
   const setupError = setup ? await runSetup(setup) : null
   const name = `ba-${Date.now().toString(36)}`
