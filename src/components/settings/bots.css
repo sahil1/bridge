@@ -97,7 +97,7 @@
 .sb-chip.gone { color: var(--ink-3); background: transparent; }
 .sb-chip.gone > .icon { flex: none; }
 .sb-deleted { margin: 0; }
-.sb-deleted > span { min-width: 0; overflow-wrap: anywhere; }
+.sb-deleted > span, .sb-terms > span { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
 .sb-sure .st-check { margin: 0; }
 .sb-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .sb-dot { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--warning); }
@@ -120,7 +120,6 @@
 .sb-ins { width: 100%; min-height: 120px; resize: vertical; font: 12.5px/1.5 var(--font-mono); padding: 8px 10px; }
 .sb-full { flex-basis: 100%; margin: 0; }
 .sb-terms { margin: 0; }
-.sb-terms > span { min-width: 0; overflow-wrap: anywhere; }
 
 /* Activity: whether the record holds, how long it's kept, search and filters, export, the
    conversations, and one as a timeline. */
