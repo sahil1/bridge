@@ -1135,12 +1135,17 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // A question done with (sent, discarded, not for it): its answering agent's tab closes, and the
   // files attached to it and its briefs' files go.
   function done(q) {
+    const closing = []
     for (const r of q.runs) {
       const h = r.helper && delegate.get(r.helper)
-      if (h?.paneId && h.state === 'ended') close(h.paneId).catch(() => {})
+      if (h?.paneId && h.state === 'ended') closing.push(close(h.paneId).catch(() => {}))
     }
-    fs.rmSync(path.join(FILES, q.id), { recursive: true, force: true })
-    try { for (const d of fs.readdirSync(BRIEFS).filter((x) => x.startsWith(`${q.id}-`))) fs.rmSync(path.join(BRIEFS, d), { recursive: true, force: true }) } catch { /* none */ }
+    // (Its copy of a repository, once its pull request is open or it's discarded, goes once its
+    // agent's tab has: on Windows a folder in use can't be deleted.)
+    if (q.change?.dir && (q.change.pr || q.state === 'discarded')) Promise.all(closing).then(() => changes.tidy({ dir: q.change.dir, top: q.change.top })).catch(() => {})
+    const rm = (d) => { try { fs.rmSync(d, { recursive: true, force: true }) } catch { /* in use: next time */ } }
+    rm(path.join(FILES, q.id))
+    try { for (const d of fs.readdirSync(BRIEFS).filter((x) => x.startsWith(`${q.id}-`))) rm(path.join(BRIEFS, d)) } catch { /* none */ }
   }
 
   // Your answer, from Needs You or your Slack direct messages: send (as you edited it; for a change

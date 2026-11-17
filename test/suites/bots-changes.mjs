@@ -151,7 +151,7 @@ try {
       const sec = p.locator('[data-setting="slack-changes"]')
       await sec.scrollIntoViewIfNeeded()
       const said = await sec.innerText()
-      ok(/never merges/i.test(said) && /code\/app/.test(said), 'Settings › Changes: where, and that it never merges', said.slice(0, 400))
+      ok(/never merges/i.test(said) && /code[\\/]app/.test(said), 'Settings › Changes: where, and that it never merges', said.slice(0, 400))
       await shot(p, `${tag}bots-changes-settings-${mode}${phone ? '-phone' : ''}`)
       ok(errors.length === 0, 'no page errors', errors)
       await ctx.close()
