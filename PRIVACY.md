@@ -255,6 +255,22 @@ looks in none of them until you open it. A file you copy to another of your comp
 your phone, goes end-to-end encrypted over the same link as everything else (the relay sees only
 how much goes), and lands only in the folder you pick on the computer it goes to.
 
+With Remote Screen and Preview on (a beta feature, off until you turn it on, on each computer), one
+of your devices can see another computer's screen and the apps its agents serve there, and control
+it once you turn that on at that computer. Only devices paired with it can, over the same link as
+everything else. The screen goes straight between the two devices where the network allows it
+(WebRTC, encrypted end to end), each finding its own public address by asking Cloudflare's STUN
+server, `stun.cloudflare.com`, which sees that address and nothing else; where it doesn't, it goes as
+pictures over the end-to-end encrypted link, so the relay sees only how big each one is. What the two
+devices say to set that up, what you press and type while you control it, and the clipboard text
+you send either way go over that link too. A project's app goes over it to an address of its own on
+127.0.0.1 of the computer looking (only an app an agent's project serves, never Bridge AI itself), or
+on a phone as pictures of it drawn on the computer that runs it. None of it goes to the project. The
+computer being seen shows that it is, and keeps who looked, from which device, at what, when, for
+how long, whether they controlled it and how it came (the last 200) in `~/.bridge-ai/remote.json`,
+readable by you only, shown in Settings. On a Mac, macOS asks about Screen Recording the first time
+one of your devices looks, and about Accessibility when you turn control on; never when you install.
+
 Studio, in the sidebar, also shows your home folder, your cloud drives and this computer's drives,
 read-only, to you and to your own linked computers and paired phones over that same encrypted link. Bridge AI's own folder and your keys' folders (`~/.ssh`,
 `~/.gnupg`, Keychains) are never shown, and on a Mac, Desktop, Documents, Downloads and iCloud Drive

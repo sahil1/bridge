@@ -226,7 +226,7 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
           </button>
           {screens && ctl.here && ctl.data && (
             <button type="button" role="menuitemcheckbox" aria-checked={!!ctl.data.control?.on} className="menu-item" disabled={ctl.busy || (!ctl.data.control?.can && !ctl.data.control?.on)}
-              title={ctl.data.control?.can === false ? ctl.data.control.why : t('Their mouse and keyboard work on this screen while they view it. Anyone here moving the mouse or pressing a key pauses them for a moment.')}
+              title={ctl.data.control?.can === false ? ctl.data.control.why : t('Their mouse and keyboard work on this screen while they view it, and the clipboard goes both ways. Anyone here moving the mouse or pressing a key pauses them for a moment.')}
               onClick={() => ctl.set(!ctl.data.control?.on)}>
               <Icon name={ctl.data.control?.on ? 'check' : 'keyboard'} size={13} /> {t('Let my other devices control this computer')}
             </button>

@@ -526,6 +526,10 @@ Measured here, with the relay running locally:
   incoming messages a second, so about 16,000 an hour and 5 MB.
 - The same phone on the agent's chat: 0.7 a second, about 2,500 an hour.
 - Opening the app: about 45 messages, or about 150 (1.4 MB) the very first time.
+- Another computer's screen through the relay (Remote Screen and Preview, when the two can't
+  connect peer-to-peer): one picture a second on Bridge AI's relay (4 on your own), each a message
+  of at most 180 KB and its answer, so about 2 a second, 7,200 an hour, and a few a second more
+  while you move the mouse on it. Peer-to-peer, the screen doesn't pass through the relay at all.
 - Each connected computer's keepalive: one message every 15 seconds, around the clock, phone or
   not: 5,760 a day. They're answered without waking the Hub, so no duration; Cloudflare's page
   doesn't say whether they count as incoming messages, so they're counted here as if they do: 288
