@@ -59,7 +59,12 @@ import { authHeaders, localKey } from './apitoken.js'
 
 const FILE = dataFile('relay.json')
 const WRANGLER = 'wrangler@4.149.0'
-const CF = 'https://api.cloudflare.com/client/v4'
+// Cloudflare's API, and where the Workers deployed with it are (workers.dev). BRIDGE_CLOUDFLARE_URL
+// (tests): a stand-in for both (test/stand-ins/cloudflare.mjs), at http://localhost:<port>, with
+// each Worker at <script>.<subdomain>.localhost on that port.
+const CF_STANDIN = process.env.BRIDGE_CLOUDFLARE_URL || ''
+const CF = `${(CF_STANDIN || 'https://api.cloudflare.com').replace(/\/+$/, '')}/client/v4`
+const workerAt = (script, sub) => { if (!CF_STANDIN) return `https://${script}.${sub}.workers.dev`; const u = new URL(CF_STANDIN); return `${u.protocol}//${script}.${sub}.${u.host}` }
 const OP = { DATA: 1, OPEN: 2, CLOSE: 3, OK: 4 }
 const HELLO_SECONDS = 15
 const PAIR_MINUTES = 15
@@ -506,7 +511,13 @@ class Conn {
     // told so in it (GONE). One from before is refused in the clear, as it always was; one asking to
     // link again is an ask like any other.
     const removed = !fresh && !msg?.ask && msg?.seal === 1 && (conf.removed || []).some((x) => x.key === msg.d)
-    const r = await computerWelcome(await key(), msg, { known: (k) => (fresh ? null : devices.find((d) => d.key === k) || (removed ? { gone: true } : null)), pairing: code })
+    // A key a phone had before it moved here with this computer and paired again (was, prove): its
+    // page at the address it left, opened again. One that follows that word (moved) gets a session
+    // too, to be told in it where this computer is now (MOVE again), with no code: the key isn't the
+    // device's any more. Nothing it sends counts. A page from before is turned away in the clear, as
+    // it always was.
+    const retired = !fresh && !msg?.ask && msg?.seal === 1 && msg?.moved === 1 && !removed && !!relayUrl() ? devices.find((d) => (d.was || []).some((x) => x.key === msg.d && x.at > Date.now() - REMOVED_DAYS * 86400000)) : null
+    const r = await computerWelcome(await key(), msg, { known: (k) => (fresh ? null : devices.find((d) => d.key === k) || (removed ? { gone: true } : retired ? { retired: retired.id } : null)), pairing: code })
     if (r.refuse) {
       if (r.refuse === 'wrong-code') { const p = [pairing, ...invites, ...moves].find((x) => x?.id === r.pairId); if (p) p.tries++ }
       // Another of your devices asking to link, with no code: it waits for you (askFrom). A code
@@ -522,6 +533,14 @@ class Conn {
       this.session = r.session
       this.via.send(OP.DATA, this.id, plainFrame(r.welcome))
       await this.send(K.GONE, 0)
+      setTimeout(() => this.close(), 500)
+      return
+    }
+    if (r.device?.retired) {
+      this.gone = true // (nothing it sends counts)
+      this.session = r.session
+      this.via.send(OP.DATA, this.id, plainFrame(r.welcome))
+      await this.send(K.MOVE, 0, { url: relayUrl(), name: computerName(), hosted: !!conf.hosted, again: true })
       setTimeout(() => this.close(), 500)
       return
     }
@@ -562,6 +581,9 @@ class Conn {
       // Moved here with this computer, paired again with the code made for it (a browser, or the
       // Android app: each relay is a site of its own there, so its key couldn't come along): the
       // same device, with its key here, and where it came from (so the app there can let go of it).
+      // The key it had there is kept with it (was), so its page there, opened again, is told where
+      // this computer is now rather than turned away (hello); removed with it (tombstone).
+      if (device.key !== p.key) device.was = [...(device.was || []).filter((x) => x.at > Date.now() - REMOVED_DAYS * 86400000), { key: device.key, at: Date.now() }].slice(-4)
       device.key = p.key
       if (p.from) device.movedFrom = p.from
       if (cleanName(said?.name)) device.name = cleanName(said.name)
@@ -886,11 +908,12 @@ export function removeDevice(id) {
   setTimeout(() => { for (const c of [...conns.values(), ...prior.conns.values()]) if (c.device?.id === id) c.close() }, 500)
   return status()
 }
-// A removed device's key, kept a while: when it connects again it's told, sealed, that it was
-// removed (GONE), which is the only word that unpairs it there.
+// A removed device's key, kept a while (and the keys it had before it moved: was): when it connects
+// again it's told, sealed, that it was removed (GONE), which is the only word that unpairs it there.
 function tombstone(devices) {
   const now = Date.now()
-  conf.removed = [...(conf.removed || []).filter((x) => x.at > now - REMOVED_DAYS * 86400000 && !devices.some((d) => d.key === x.key)), ...devices.map((d) => ({ key: d.key, at: now }))].slice(-200)
+  const keys = devices.flatMap((d) => [d.key, ...(d.was || []).map((x) => x.key)])
+  conf.removed = [...(conf.removed || []).filter((x) => x.at > now - REMOVED_DAYS * 86400000 && !keys.includes(x.key)), ...keys.map((key) => ({ key, at: now }))].slice(-200)
 }
 // Its notifications go with it (index.js: push.js).
 let onRemoved = () => {}
@@ -1154,7 +1177,7 @@ async function deployWith(token, account) {
   await cf(token, 'PUT', `/accounts/${acct.id}/workers/scripts/${script}`, form)
   await cf(token, 'POST', `/accounts/${acct.id}/workers/scripts/${script}/subdomain`, { enabled: true, previews_enabled: false })
 
-  const url = `https://${script}.${sub}.workers.dev`
+  const url = workerAt(script, sub)
   const changed = conf.url !== url || conf.token !== hostToken
   const cfNow = { ...conf.cf, account: acct.id, accountName: acct.name, script }
   // Here already: the same address, updated. From another (Bridge AI's relay, say): this computer
@@ -1165,8 +1188,8 @@ async function deployWith(token, account) {
   // A brand-new address can take a minute to start answering.
   busy = 'Waiting for your relay to come online…'
   for (let i = 0; i < 45; i++) {
-    const ok = await fetch(`${url}/_relay/health`, { signal: AbortSignal.timeout(5000) }).then((r) => r.ok).catch(() => false)
-    if (ok) break
+    const r = await relayGet(`${url}/_relay/health`, 5000)
+    if (r?.status >= 200 && r.status < 300) break
     await new Promise((r) => setTimeout(r, 2000))
   }
   if (moving) await moveTo({ url, token: hostToken, cf: cfNow })
@@ -1417,6 +1440,26 @@ function relayPost(url, token) {
   })
 }
 
+// GET from a relay (its health), at most ms: { status, json } (json null when it isn't JSON), or null
+// when it couldn't be reached. A test relay at <name>.localhost is reached on this computer, as
+// relayPost does.
+function relayGet(url, ms) {
+  return new Promise((resolve) => {
+    let u
+    try { u = new URL(url) } catch { return resolve(null) }
+    const req = (u.protocol === 'https:' ? https : http).get(u, onThisComputer(url) ? { lookup: loopback } : {}, (res) => {
+      let text = ''
+      res.setEncoding('utf8')
+      res.on('data', (c) => { if (text.length < 65536) text += c })
+      res.on('end', () => { clearTimeout(t); let json = null; try { json = JSON.parse(text) } catch { /* not JSON */ } resolve({ status: res.statusCode, json }) })
+      res.on('error', () => resolve(null))
+      res.on('close', () => resolve(null)) // (cut short; after end, the answer stands)
+    })
+    const t = setTimeout(() => req.destroy(new Error('timed out')), ms)
+    req.on('error', () => { clearTimeout(t); resolve(null) })
+  })
+}
+
 // method: 'hosted' (Bridge AI's relay), 'browser' (sign in with wrangler) or 'token' (an API token
 // you paste). When the sign-in has several Cloudflare accounts, the answer lists them; ask again
 // with the one to use.
@@ -1454,7 +1497,7 @@ export async function deploy({ method, token, account }) {
 // After an update of Bridge AI, update the relay too (quietly, if Cloudflare still lets us in).
 async function checkBuild() {
   if (conf.hosted) return // Bridge AI's relay: the project keeps it up to date
-  const h = await fetch(`${conf.url}/_relay/health`, { signal: AbortSignal.timeout(8000) }).then((r) => r.json()).catch(() => null)
+  const h = (await relayGet(`${conf.url}/_relay/health`, 8000))?.json
   relayBuild = h?.build || null
   // Only a relay Bridge AI deployed itself, with the sign-in it was deployed with, is updated.
   if (!relayBuild || relayBuild === relayCode().build || busy || !conf.cf?.script || !conf.cf?.method) return

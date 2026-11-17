@@ -247,6 +247,8 @@ let session = null
 let paired = null // { device, hostKey, deviceId }
 let code = null // a pairing code from the QR code or typed in
 let waiting = null // a handshake in progress: { state, pair, resolve }
+let holding = null // a welcome with no device: what the computer says next is waited for (onData)
+const HOLD_MS = 3000
 // After the link drops: again at once, then less and less often (the network coming back, or Bridge
 // AI back on the screen, tries again straight away: check() below).
 const FIRST_TRY = 250
@@ -552,9 +554,11 @@ function watchStart() {
   }, STUCK_MS)
 }
 async function notThere() {
-  if (others().length || !(await openSaved())) whyWaiting()
+  if (paired?.moved || others().length || !(await openSaved())) whyWaiting()
 }
 function whyWaiting() {
+  // It moved, and this phone followed it (or was told so, sealed): that, whatever this address says.
+  if (paired?.moved && !adding) return movedAway(paired.moved)
   const name = thisComputer()
   const it = name === 'Your computer' ? 'your computer' : name
   if (unchecked) waitScreen(`Can't connect to ${it}`, uncheckedText(), true)
@@ -611,6 +615,9 @@ async function handshake() {
   if (!paired) paired = { device: await newKey(!!native) } // the app has to be able to write it to the Keychain
   const pair = paired.hostKey ? null : splitCode(code)
   const state = await phoneHello(paired.device, pair, deviceName())
+  // moved: this page follows the computer's sealed word that its key here was replaced when this
+  // phone followed it to another relay (MOVE again), so it's told that rather than turned away.
+  state.hello.moved = 1
   waiting = { state, pair }
   ws.send(plainFrame(state.hello))
   // No welcome: the computer isn't answering, though its relay says it's there. A new connection
@@ -650,11 +657,18 @@ async function onData(buf) {
       if (location.hash) history.replaceState(null, '', location.pathname + location.search)
       if (isIOS && !standalone) { show('home'); return }
     }
-    apps?.paired()
-    for (const w of readyWaiters.splice(0)) w.ok()
-    bar(null)
-    showApp()
-    backOnline()
+    // A welcome with no device in it: the computer let this phone in only to tell it something,
+    // sealed, which comes next (it was removed: GONE; or its key here was replaced when it followed
+    // the computer to another relay: MOVE again). Bridge AI isn't opened for that, so nothing of it
+    // starts loading only to be cut off. Anything else from the computer opens it, as does nothing
+    // within a few seconds (the relay could take device out of a welcome): asked with a PING.
+    if (!msg.device) {
+      const s = session
+      holding = setTimeout(() => { if (session === s) opened() }, HOLD_MS)
+      send(K.PING, 0).catch(() => {})
+      return
+    }
+    opened()
     return
   }
   if (!session) return
@@ -662,10 +676,16 @@ async function onData(buf) {
   try { plain = await session.open(buf) } catch { ws.close(4002, 'bad record'); return }
   const { kind, id, body } = unpack(plain)
   heardComputer()
-  if (kind === K.PING) return send(K.PONG, 0)
-  if (kind === K.PONG) return
   if (kind === K.GONE) return removedThere()
   if (kind === K.MOVE) { let m = null; try { m = json(body) } catch { /* not that */ } return moved(m) }
+  // Anything else: a session for using it. Bridge AI opens, if it was held (above); and this pairing
+  // still works here (the computer is back at this address, or this phone never finished pairing at
+  // the new one), so what was kept about the move no longer holds. (At the address it moved from,
+  // MOVE comes first, and is kept again.)
+  if (holding) opened()
+  if (paired?.moved) forgetMoved()
+  if (kind === K.PING) return send(K.PONG, 0)
+  if (kind === K.PONG) return
   const s = streams.get(id)
   if (!s) return
   if (kind === K.HEAD) s.onHead?.(json(body))
@@ -675,6 +695,17 @@ async function onData(buf) {
   else if (kind === K.WS_OPENED) s.onOpen?.()
   else if (kind === K.WS_MSG) s.onMessage?.(body[0] === 1 ? text(body.subarray(1)) : body.slice(1).buffer)
   else if (kind === K.WS_CLOSE) { streams.delete(id); s.onClose?.(json(body)) }
+}
+
+// Connected: Bridge AI opens (or comes back), and what waited for the link goes.
+function opened() {
+  clearTimeout(holding)
+  holding = null
+  apps?.paired()
+  for (const w of readyWaiters.splice(0)) w.ok()
+  bar(null)
+  showApp()
+  backOnline()
 }
 
 // A code that didn't work gets one answer, whatever was wrong with it (a computer from before
@@ -690,13 +721,13 @@ const WHY = {
 // the clear, or with a key that isn't your computer's, and the relay could have sent either, so it
 // changes nothing kept (the pairing, what waits to go out): it says so and keeps trying. Only your
 // Forget, or your computer saying so sealed (removedThere), unpairs this phone.
-const uncheckedText = () => `The answer through the relay couldn't be checked, so nothing on this phone was changed. Bridge AI keeps trying. If ${thisComputer() === 'Your computer' ? 'your computer' : thisComputer()} was set up again, scan a new code from it to pair again.`
+const uncheckedText = () => `The answer through the relay couldn't be checked, so nothing on this phone was changed. Bridge AI keeps trying. If ${thisComputer() === 'Your computer' ? 'your computer' : thisComputer()} was set up again or moved to another relay, scan a new code from it to pair again.`
 async function refused(why) {
   dropSession()
   clearTimeout(helloTimer)
   if (paired?.hostKey) {
     unchecked = true
-    if (appShown && !$('app').hidden) bar(uncheckedText(), true)
+    if (appShown && !$('app').hidden && !paired.moved) bar(uncheckedText(), true)
     else whyWaiting()
     // Its connection is let go (the relay may hold it open), and another tried in a while.
     abandon()
@@ -748,6 +779,20 @@ async function moved(m) {
   const name = String(m?.name || '').trim().slice(0, 60) || (thisComputer() === 'Your computer' ? 'your computer' : thisComputer())
   if (m?.forgot) return removedThere(`${name} stopped using its relay, so it forgot this phone. To use it again: on ${name}, set up the phone in Settings › Account & Devices, click Pair a device, and scan its code ${apps ? 'here (Add a computer)' : 'with this phone\'s camera'}.`)
   const to = relayOrigin(m?.url)
+  // This phone followed it before and was paired there with a new key, so the key here isn't this
+  // phone's any more (again): not followed by itself, but said, with the way on (movedAway).
+  if (m?.again) {
+    if (!to) return
+    const was = { url: to, name: m.name ? name : null, hosted: !!m.hosted }
+    await keepMoved(was)
+    dropSession()
+    abandon()
+    awayBanner(false)
+    bar(null)
+    appShown = false
+    $('app').src = 'about:blank'
+    return movedAway(was)
+  }
   const link = (() => { try { const l = new URL(String(m?.link || '')); return relayOrigin(l.href) === to && /[#&]pair=/.test(l.hash) ? l.href : null } catch { return null } })()
   if (!to || to === relay || moving) return
   moving = true
@@ -769,13 +814,56 @@ async function moved(m) {
     if (m.name) native.post({ type: 'name', name })
     native.post({ type: 'forget', url: from })
     native.post({ type: 'switch', url: to })
-  } else if (android) android.pair(link)
+    return
+  }
+  // A browser or the Android app keeps its pairing here, at the address it leaves: what the
+  // computer said goes with it, for when this page is opened here again (movedAway).
+  await keepMoved({ url: to, name: m.name ? name : null, hosted: !!m.hosted })
+  if (android) android.pair(link)
   else location.href = link
+}
+
+// What the computer said, sealed, about where it went, kept with this phone's pairing at the address
+// it left (a browser, the Android app: the iPhone app takes its pairing along instead). Opened here
+// again, this page says so, with the way on, whether or not the computer is still here to say it.
+// Only the computer's sealed word (MOVE) keeps it; the relay's word changes nothing kept. It goes
+// once this pairing works here again.
+async function keepMoved(m) {
+  if (native || !paired?.hostKey) return
+  paired = { ...paired, moved: { ...m, at: Date.now() } }
+  await pairing.set(paired).catch(() => {})
+}
+function forgetMoved() {
+  if (!paired?.moved) return
+  const { moved: _, ...rest } = paired
+  paired = rest
+  pairing.set(paired).catch(() => {})
+}
+// The way on: its new address, where this page goes as any page does (the page there trusts only
+// an answer with the key it keeps for the computer, or a new code), or Pair again. Moved back to
+// this address since: pair again here.
+function movedAway(m) {
+  const name = m.name || thisComputer()
+  const it = m.name || (thisComputer() === 'Your computer' ? 'your computer' : thisComputer())
+  if (m.url === relay) {
+    waitScreen(`Pair this phone with ${it} again`, `This phone followed ${it} to another relay and was paired with it there, which replaced its pairing at this address. ${name} is back at this address, so pair it again here: ${pairHow(it)}`, true)
+  } else {
+    const host = (() => { try { return new URL(m.url).host } catch { return m.url } })()
+    waitScreen(`${name} moved to ${m.hosted ? 'Bridge AI\'s relay' : 'its own relay'}`, `This phone's pairing at this address no longer works. ${name} is at ${host} now: open it there. If this phone isn't paired with it there yet, pair it again: ${pairHow(it)}`, true)
+    // In the apps, only a computer they list (Add a computer pairs another).
+    const open = apps ? apps.list().some((c) => c.relay === m.url) : true
+    $('moved-open').hidden = !open
+    $('moved-open').onclick = () => (apps ? apps.open(m.url) : (location.href = `${m.url}/`))
+  }
+  $('retry').hidden = true // (the computer said where it is: nothing to try here)
+  $('pair-again').hidden = false
 }
 
 function dropSession(msg) {
   session = null
   waiting = null
+  clearTimeout(holding)
+  holding = null
   for (const [, s] of [...streams]) {
     if (s.onLost) s.onLost(msg || 'Connection lost')
     else { s.onError?.(msg || 'Connection lost'); s.onClose?.({ c: 1006, r: 'connection lost' }) }
@@ -1237,6 +1325,7 @@ function waitScreen(title, msg, retry) {
   $('retry').hidden = !retry
   $('pair-again').hidden = true
   $('app-open').hidden = true
+  $('moved-open').hidden = true
   // What this phone kept of it, while it isn't there.
   $('saved-open').hidden = true
   if (retry && paired?.hostKey && !adding) offline.hasCopy().then((has) => { $('saved-open').hidden = !has || $('wait').hidden }, () => {})

@@ -200,6 +200,9 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     // Nor Slack, for the Slack Bot: a test gives a stand-in (stand-ins/slack.mjs, startSlack), or
     // tokens saved in a test reach nothing.
     BRIDGE_SLACK_URL: 'http://127.0.0.1:9',
+    // Nor Cloudflare, for a relay of your own: a test gives a stand-in (stand-ins/cloudflare.mjs,
+    // startCloudflare), or an API token saved in a test reaches nothing.
+    BRIDGE_CLOUDFLARE_URL: 'http://127.0.0.1:9',
     BRIDGE_SHERPA: path.join(TEST, 'stand-ins', 'sherpa.cjs'),
     // Nor the computer's own apps, which Studio offers to open a file in (server/studioapps.js): a
     // Mac's Applications folder is one of the kit's, and Windows' registry a stand-in that knows
@@ -345,6 +348,25 @@ export async function startHostedRelay(name, settings = {}, accounts = null) {
     state: () => post('/_test/state', {}).then((r) => r.json()),
     // A phone page file served as text instead ({ name, text }), and the version it says ({ version }).
     page: (change) => post('/_test/page', change).then((r) => r.json()),
+    stop: () => stopTree(p),
+  }
+}
+
+// Cloudflare, stood in for (stand-ins/cloudflare.mjs): its API, for deploying a relay with an API
+// token that reaches these accounts ({ id, name, subdomain }: none, as a new account has none yet),
+// and the Workers deployed with it, each the relay stand-in, at <script>.<subdomain>.localhost on its
+// port. A kit uses it with BRIDGE_CLOUDFLARE_URL: url. state(): the calls made, and each Worker.
+export async function startCloudflare(name, { token, accounts }) {
+  const port = await freePort()
+  const log = path.join(OUT, 'kits', `${name}-cloudflare-${port}.log`)
+  fs.mkdirSync(path.dirname(log), { recursive: true })
+  const out = fs.openSync(log, 'w')
+  const p = spawn(process.execPath, [path.join(TEST, 'stand-ins', 'cloudflare.mjs'), String(port), JSON.stringify({ token, accounts })], { stdio: ['ignore', out, out] })
+  const at = `http://127.0.0.1:${port}`
+  if (!await until(async () => (await fetch(`${at}/_test/state`)).ok, 15000, 150)) throw new Error(`the Cloudflare stand-in didn't start: ${fs.readFileSync(log, 'utf8').slice(-800)}`)
+  return {
+    url: `http://localhost:${port}`, port,
+    state: () => fetch(`${at}/_test/state`).then((r) => r.json()),
     stop: () => stopTree(p),
   }
 }
