@@ -1019,7 +1019,12 @@ export function upgrade(req, socket, head) {
     // which of your devices, as this one says (a name only; it counts nothing).
     let u = hit[2] || '/'
     const asker = relay.deviceOf(req.headers['x-bridge-relay'])
-    if (asker && /^\/api\/remote\/view(\?|$)/.test(u)) u += `${u.includes('?') ? '&' : '?'}for=${encodeURIComponent(String(asker.name || '').slice(0, 60))}`
+    if (/^\/api\/remote\/view(\?|$)/.test(u)) {
+      const x = new URL(u, 'http://x')
+      x.searchParams.delete('for') // only this computer says it
+      if (asker) x.searchParams.set('for', String(asker.name || '').slice(0, 60))
+      u = `${x.pathname}${x.search}`
+    }
     l.ready(12000).then(() => {
       remote = l.socket(u, {
         onOpen: () => { open = true; for (const [d, b] of pending.splice(0)) remote.send(d, b) },
