@@ -7,9 +7,11 @@
 // a start herdr refuses leaving no tab behind; an out-of-date herdr integration named with the
 // command that updates it. And a stand-in Codex (stand-ins/codex.cjs, which reads keys as Codex
 // does: an Enter among a paste's keys is a newline) sent messages as agent-send sends them in Bridge
-// AI's own terminals, herdr typing each and pressing Enter itself: one line, several lines, and one
-// while Codex reads late with bracketed paste not yet on, each sent once; one Codex keeps in its box
-// says so, with Enter pressed once more and no more; sent again, it's cleared first and goes once.
+// AI's own terminals, typed into its pane and Enter pressed once it shows in the box (not herdr's
+// agent prompt, whose own Enter can come before a busy Codex has read anything): one line, several
+// lines, and one while Codex reads late with bracketed paste not yet on, each seen leaving its box
+// and sent once; one Codex keeps in its box says so, with Enter pressed once more and no more; sent
+// again, it's cleared first and goes once.
 // Not on Windows, where Bridge AI doesn't drive herdr.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -145,15 +147,16 @@ try {
   ok(!!c1 && !!(await codexFree(cx.paneId)), 'a stand-in Codex starts in herdr, at its prompt', { c1, screen: (await screen(cx.paneId)).slice(-300) })
   const march = 'Check the March invoices'
   const m1 = await send(cx.paneId, march)
-  ok(m1.ok && !m1.error && JSON.stringify(codexGot()) === JSON.stringify([march]), 'Codex in herdr: one line is sent, once, as written', { m1, got: codexGot() })
+  ok(m1.ok && m1.taken === true && JSON.stringify(codexGot()) === JSON.stringify([march]), 'Codex in herdr: one line, seen leaving its box, and sent once, as written', { m1, got: codexGot() })
   await codexFree(cx.paneId)
   const credits = 'Then the credits:\n  both currencies\n\nand say what changed'
   const m2 = await send(cx.paneId, credits)
-  ok(m2.ok && !m2.error && codexGot().at(-1) === credits && codexGot().length === 2, 'several lines: one message, every line of it (none sent it early)', { m2, got: codexGot() })
+  ok(m2.ok && m2.taken === true && codexGot().at(-1) === credits && codexGot().length === 2, 'several lines: one message, every line of it (none sent it early)', { m2, got: codexGot() })
   await codexFree(cx.paneId)
 
-  // Reading late, bracketed paste not yet on: herdr types the text as keys and Enter 300 ms after
-  // them, which Codex can read together, the Enter then a newline in its box.
+  // Reading late, bracketed paste not yet on: the text goes as keys, and an Enter read together with
+  // them is a newline in its box. With herdr's agent prompt, Enter 300 ms after the text, the send
+  // said ok while the message stayed in its box.
   flag('codex-no-bracketed', true)
   flag('codex-slow', true)
   const late = await kit.api('/agents/launch', { kind: 'codex', cwd: work, label: 'April', workspaceId: c1.workspaceId })
@@ -162,7 +165,7 @@ try {
   flag('codex-no-bracketed', false)
   const april = 'Start on the April ledger'
   const m3 = await send(late.paneId, april)
-  ok(!!c2 && m3.ok && !m3.error && codexGot().filter((x) => x === april).length === 1, 'Codex reading late, its paste mode unseen: still sent, once', { m3, got: codexGot(), typed: read('codex-typed.log').slice(-300) })
+  ok(!!c2 && m3.ok && m3.taken === true && codexGot().filter((x) => x === april).length === 1, 'Codex reading late, its paste mode unseen: still sent, once', { m3, got: codexGot(), typed: read('codex-typed.log').slice(-300) })
   flag('codex-slow', false)
   await codexFree(late.paneId)
 
@@ -174,10 +177,10 @@ try {
   ok(!codexGot().includes(kept) && (await screen(cx.paneId)).includes(kept), 'Codex didn\'t get it, and it\'s in its box', { got: codexGot(), screen: (await screen(cx.paneId)).slice(-400) })
   const typed = read('codex-typed.log').split('\n').filter(Boolean).map((l) => JSON.parse(l))
   const at = typed.findLastIndex((c) => c.includes(kept))
-  ok(at >= 0 && typed.slice(at + 1).filter((c) => c === '\r').length === 2, 'Enter went twice (herdr\'s and one more), no more', typed.slice(at))
+  ok(at >= 0 && typed.slice(at + 1).filter((c) => c === '\r').length === 2, 'Enter went twice, no more', typed.slice(at))
   flag('codex-enter-newline', false)
   const m5 = await send(cx.paneId, kept)
-  ok(m5.ok && !m5.error && m5.cleared === kept, 'sent again: what was left in its box is cleared first', m5)
+  ok(m5.ok && m5.taken === true && m5.cleared === kept, 'sent again: what was left in its box is cleared first', m5)
   ok(codexGot().filter((x) => x.includes(kept)).length === 1 && codexGot().at(-1) === kept, 'and it goes, once, as written', codexGot())
   await kit.api(`/workspaces/${encodeURIComponent(c1.workspaceId)}/close`, {})
   ok(!!(await until(async () => !(await agentAt(cx.paneId)) && !(await agentAt(late.paneId)), 10000)), 'closing their space ends both Codex agents')
