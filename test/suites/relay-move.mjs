@@ -67,8 +67,14 @@ try {
   await l.api('/machines', { link: (await a.api('/relay/pair', {})).pairing.link })
   ok(!!(await until(async () => (await other(l, 'Studio'))?.online && (await other(a, 'Laptop'))?.online, 30000)), 'Laptop is linked with Studio, each reaching the other')
 
-  // Two phones: Pocket stays connected, Spare is put away.
-  const pairPhone = async (name) => linkAs(ra.url, { code: (await a.api('/relay/pair', {})).pairing.code, name, about: { name } })
+  // Two phones: Pocket stays connected, Spare is put away. A phone is paired once Studio has its first
+  // sealed record (ABOUT): it's not put away before that, or Studio never hears it (on a slower
+  // computer, where both reach Studio at once).
+  const pairPhone = async (name) => {
+    const c = await linkAs(ra.url, { code: (await a.api('/relay/pair', {})).pairing.code, name, about: { name } })
+    await until(async () => c.deviceId && (await a.api('/relay')).devices.some((d) => d.id === c.deviceId), 10000, 100)
+    return c
+  }
   const pocket = await pairPhone('Pocket')
   const spare = await pairPhone('Spare')
   ok(!!pocket.welcome && !!spare.welcome, 'two phones pair with Studio')
@@ -109,7 +115,9 @@ try {
   const moved = await a.api('/relay/deploy', { method: 'hosted' })
   const at = moved.url
   ok(moved.hosted && new RegExp(`^http://[a-z2-7]{12}\\.localhost:${hr.port}$`).test(at || '') && moved.moved?.from === ra.url, 'Studio moves to Bridge AI\'s relay, saying where from', { url: at, moved: moved.moved })
-  ok(relayJson(a).key.public === keyBefore && JSON.stringify(moved.devices.map((d) => d.id).sort()) === JSON.stringify(paired.map((d) => d.id).sort()), 'with the same key, and every phone and computer still paired (none to pair again)', moved.devices.map((d) => d.name))
+  const ids = (list) => list.map((d) => d.id).sort().join()
+  const named = (list) => list.map((d) => `${d.id} ${d.name}`).sort()
+  ok(relayJson(a).key.public === keyBefore && ids(moved.devices) === ids(paired), 'with the same key, and every phone and computer still paired (none to pair again)', { sameKey: relayJson(a).key.public === keyBefore, before: named(paired), after: named(moved.devices) })
 
   // The phone connected as it moved: told at once, sealed, and in at the new address with what it has.
   const told = await word(pocket, K.MOVE)

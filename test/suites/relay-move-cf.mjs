@@ -70,20 +70,28 @@ try {
   await l.api('/machines', { link: (await a.api('/relay/pair', {})).pairing.link })
   ok(!!(await until(async () => (await other(l, 'Studio'))?.online && (await other(a, 'Laptop'))?.online, 30000)), 'Laptop is linked with Studio, each reaching the other', await other(l, 'Studio'))
 
-  // Two phones: Pocket stays connected, Spare is put away.
-  const pairPhone = async (name) => linkAs(hostedAt, { code: (await a.api('/relay/pair', {})).pairing.code, name, about: { name } })
+  // Two phones: Pocket stays connected, Spare is put away. A phone is paired once Studio has its first
+  // sealed record (ABOUT): it's not put away before that, or Studio never hears it (on a slower
+  // computer, where both reach Studio at once).
+  const pairPhone = async (name) => {
+    const c = await linkAs(hostedAt, { code: (await a.api('/relay/pair', {})).pairing.code, name, about: { name } })
+    await until(async () => c.deviceId && (await a.api('/relay')).devices.some((d) => d.id === c.deviceId), 10000, 100)
+    return c
+  }
   const pocket = await pairPhone('Pocket')
   const spare = await pairPhone('Spare')
-  ok(!!pocket.welcome && !!spare.welcome, 'two phones pair with Studio on Bridge AI\'s relay')
   spare.close()
   const paired = (await a.api('/relay')).devices
+  ok(!!pocket.welcome && !!spare.welcome && ['Laptop', 'Pocket', 'Spare'].every((n) => paired.some((d) => d.name === n)) && paired.length === 3, 'two phones pair with Studio on Bridge AI\'s relay, and it lists them with Laptop', paired.map((d) => [d.id, d.name]))
   const keyBefore = relayJson(a).key.public
 
   // ---------- Your own Cloudflare, with an API token ----------
   const moved = await a.api('/relay/deploy', { method: 'token', token: TOKEN })
   const at = moved.url
   ok(moved.method === 'token' && !moved.hosted && new RegExp(`^http://bridge-[0-9a-f]{10}\\.bridge-[0-9a-f]{8}\\.localhost:${cf.port}$`).test(at || '') && moved.moved?.from === hostedAt && moved.moved.hosted === true, 'Studio moves to a Worker of its own on Cloudflare, saying where from', { url: at, method: moved.method, moved: moved.moved })
-  ok(relayJson(a).key.public === keyBefore && JSON.stringify(moved.devices.map((d) => d.id).sort()) === JSON.stringify(paired.map((d) => d.id).sort()), 'with the same key, and every phone and computer still paired (none to pair again)', moved.devices.map((d) => d.name))
+  const ids = (list) => list.map((d) => d.id).sort().join()
+  const named = (list) => list.map((d) => `${d.id} ${d.name}`).sort()
+  ok(relayJson(a).key.public === keyBefore && ids(moved.devices) === ids(paired), 'with the same key, and every phone and computer still paired (none to pair again)', { sameKey: relayJson(a).key.public === keyBefore, before: named(paired), after: named(moved.devices) })
   const conf = relayJson(a)
   const script = conf.cf?.script
   const hostedToken = conf.moved?.token
