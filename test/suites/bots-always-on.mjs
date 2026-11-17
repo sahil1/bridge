@@ -26,6 +26,8 @@ const docker = await botKit('bots-always-on-docker', { slack, folders: ['docs'],
 for (const k of [kit, docker.kit]) fs.writeFileSync(path.join(k.home, 'docs', 'handbook.md'), HANDBOOK)
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
+// A folder as kept, with / between its parts (Windows keeps ~\docs).
+const slashed = (p) => String(p || '').replace(/\\/g, '/')
 const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: crashed: ${e.stack}`) } }
 const inThread = async (ts) => (await slack.state()).posted.filter((x) => x.thread_ts === ts)
 // `bridge-ai` against a server, as on the machine it runs on (its key from its data folder).
@@ -53,7 +55,7 @@ try {
     const r = await fetch(`${kit.url}/api/bots/b1/bundle`)
     const text = await r.text()
     const j = JSON.parse(text)
-    ok(/attachment; filename="Atlas\.bridge-bot\.json"/.test(r.headers.get('content-disposition') || '') && j.kind === 'bridge-ai-bot' && /\[sign — Atlas\]/.test(j.instructions) && j.memory.some((x) => /people team/.test(x.text)) && j.settings.readsFrom.join() === '~/docs' && j.settings.owner?.id === OWNER.id, 'exported: its instructions, memory and settings', { settings: Object.keys(j.settings), memory: j.memory.length })
+    ok(/attachment; filename="Atlas\.bridge-bot\.json"/.test(r.headers.get('content-disposition') || '') && j.kind === 'bridge-ai-bot' && /\[sign — Atlas\]/.test(j.instructions) && j.memory.some((x) => /people team/.test(x.text)) && j.settings.readsFrom.map(slashed).join() === '~/docs' && j.settings.owner?.id === OWNER.id, 'exported: its instructions, memory and settings', { settings: Object.keys(j.settings), memory: j.memory.length })
     ok(!/xoxb-|xapp-|botToken|appToken/.test(text), 'never its tokens', text.match(/xox\w-|xapp-/g))
     fileOut = path.join(docker.kit.home, 'atlas.bridge-bot.json')
     fs.writeFileSync(fileOut, text)
@@ -64,7 +66,7 @@ try {
     const con = await cli(docker.kit, ['bots', 'connect', 'Atlas'], 'xapp-two\nxoxb-two\n')
     ok(con.code === 0 && /Atlas: connected to Acme Test as @atlas/.test(con.out), 'bridge-ai bots connect, the tokens piped in: connected as its own app there', con.out)
     const v = await docker.botOf('b1')
-    ok(v.settings.readsFrom.join() === '~/docs' && v.settings.askers.map((x) => x.id).join() === 'U0DANA' && /\[sign — Atlas\]/.test(v.instructions.text) && (await docker.kit.api('/bots/b1/memory')).items.some((x) => /people team/.test(x.text) && x.state === 'kept'), 'with its settings, instructions and memory as they were')
+    ok(v.settings.readsFrom.map(slashed).join() === '~/docs' && v.settings.askers.map((x) => x.id).join() === 'U0DANA' && /\[sign — Atlas\]/.test(v.instructions.text) && (await docker.kit.api('/bots/b1/memory')).items.some((x) => /people team/.test(x.text) && x.state === 'kept'), 'with its settings, instructions and memory as they were')
     ok(docker.events('b1').some((e) => e.type === 'settings.changed' && e.setting === 'imported'), 'the import is in its record there')
   })
   await part('the same question, the same way', async () => {

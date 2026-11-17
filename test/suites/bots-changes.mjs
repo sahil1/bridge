@@ -14,11 +14,14 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { checks, until, sleep, browser, page, shot, phoneFaults, TEST } from '../lib/harness.mjs'
+import { checks, until, sleep, browser, page, shot, phoneFaults, TEST, IS_WIN } from '../lib/harness.mjs'
 import { botKit, openSettings, M, OWNER } from '../lib/bots.mjs'
 
 const { ok, done } = checks('bots-changes')
-const { slack, kit, draftOf, startOf, logOf, botOf, connected, timelineOf, events, posted } = await botKit('bots-changes', { folders: ['code'] })
+// Its server needs git, as Bridge AI does for a change: on Windows the kit's PATH has only the
+// system's folders, so git's own is added (where this test finds it).
+const gitDir = IS_WIN ? path.dirname(String(spawnSync('where', ['git'], { encoding: 'utf8' }).stdout || '').split(/\r?\n/)[0] || 'C:\\Program Files\\Git\\cmd\\git.exe') : null
+const { slack, kit, draftOf, startOf, logOf, botOf, connected, timelineOf, events, posted } = await botKit('bots-changes', { folders: ['code'], env: ({ PATH }) => (gitDir ? { PATH: `${PATH}${path.delimiter}${gitDir}`, BRIDGE_PATH: `${PATH}${path.delimiter}${gitDir}` } : {}) })
 kit.program('gh', fs.readFileSync(path.join(TEST, 'stand-ins', 'gh.cjs'), 'utf8'))
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''

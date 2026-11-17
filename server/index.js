@@ -4388,5 +4388,12 @@ server.listen(cfg.port, cfg.host, () => {
   crashes.started().catch(() => {})
 })
 // Agents keep running in the terminal host unless you turned that off (Settings › General).
-// (Each bot's Slack app says it's offline on its Home tab first, as far as it gets in a moment.)
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { rt.shutdown?.({ keep: cfg.keepAgents !== false }); for (const b of botsStore.list()) { try { desk.channel(b.id)?.stop() } catch { /* going anyway */ } } setTimeout(() => process.exit(0), 300) })
+// (With a bot connected, its Slack app says it's offline on its Home tab first, as far as it gets
+// in a moment; otherwise it stops at once, as it always did.)
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => {
+  rt.shutdown?.({ keep: cfg.keepAgents !== false })
+  const live = botsStore.list().map((b) => desk.channel(b.id)).filter((ch) => ch?.state().state === 'connected')
+  if (!live.length) process.exit(0)
+  for (const ch of live) { try { ch.stop() } catch { /* going anyway */ } }
+  setTimeout(() => process.exit(0), 300)
+})
