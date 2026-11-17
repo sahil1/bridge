@@ -200,6 +200,10 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     // Nor Slack, for Bots: a test gives a stand-in (stand-ins/slack.mjs, startSlack), or
     // tokens saved in a test reach nothing.
     BRIDGE_SLACK_URL: 'http://127.0.0.1:9',
+    // Nor Discord, nor Microsoft's sign-in, keys and Bot Connector for Teams: a test gives stand-ins
+    // (stand-ins/discord.mjs and teams.mjs, startDiscord and startTeams), or what's saved reaches nothing.
+    BRIDGE_DISCORD_URL: 'http://127.0.0.1:9',
+    BRIDGE_TEAMS_URL: 'http://127.0.0.1:9',
     // Nor Cloudflare, for a relay of your own: a test gives a stand-in (stand-ins/cloudflare.mjs,
     // startCloudflare), or an API token saved in a test reaches nothing.
     BRIDGE_CLOUDFLARE_URL: 'http://127.0.0.1:9',
@@ -396,6 +400,54 @@ export async function startSlack(name) {
     // says each). (stop() ends the stand-in itself.)
     click: (o) => ctl('click', o), submit: (o) => ctl('submit', o), slash: (o) => ctl('slash', o), shortcut: (o) => ctl('shortcut', o),
     home: (o) => ctl('home', o), stopButton: (o) => ctl('stop', o),
+    stop: () => stopTree(p),
+  }
+}
+
+// A Discord (stand-ins/discord.mjs: its REST API and Gateway, with two bots and two servers) on a
+// port of its own: reached with BRIDGE_DISCORD_URL: url. say(o): someone writes; edit/remove/pin;
+// drop/away/back/reconnect/invalid/expire/close: what networks, sleeping computers and Discord do
+// to a connection; intents(o): the Developer Portal's switches; limit(o)/fail(o): 429s and errors;
+// state(): connections, identifies and resumes, what was posted, reactions; calls(): each REST call.
+export async function startDiscord(name) {
+  const port = await freePort()
+  const log = path.join(OUT, 'kits', `${name}-discord-${port}.log`)
+  fs.mkdirSync(path.dirname(log), { recursive: true })
+  fs.rmSync(log, { force: true })
+  const p = spawn(process.execPath, [path.join(TEST, 'stand-ins', 'discord.mjs'), String(port), log], { stdio: 'ignore' })
+  const url = `http://127.0.0.1:${port}`
+  if (!await until(async () => (await fetch(`${url}/_test/state`)).ok, 15000, 150)) throw new Error('the stand-in Discord didn\'t start')
+  const ctl = (what, body) => fetch(`${url}/_test/${what}`, { method: what === 'state' ? 'GET' : 'POST', ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) }).then((r) => r.json())
+  const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+  return {
+    url, port, calls, log,
+    say: (o) => ctl('say', o), edit: (o) => ctl('edit', o), remove: (o) => ctl('delete', o), pin: (o) => ctl('pin', o),
+    drop: () => ctl('drop'), away: () => ctl('away'), back: () => ctl('back'), reconnect: () => ctl('reconnect'), invalid: (o) => ctl('invalid', o), expire: () => ctl('expire'), close: (o) => ctl('close', o),
+    intents: (o) => ctl('intents', o), limit: (o) => ctl('limit', o), fail: (o) => ctl('fail', o), noThreads: (o) => ctl('nothreads', o), heartbeat: (o) => ctl('heartbeat', o), state: () => ctl('state'),
+    stop: () => stopTree(p),
+  }
+}
+
+// Microsoft Teams (stand-ins/teams.mjs: the Bot Framework's keys and token signing, Microsoft
+// Entra ID's token endpoint and the Bot Connector) on a port of its own: reached with
+// BRIDGE_TEAMS_URL: url. endpoint(url): where the bot listens; say(o): someone writes, the activity
+// signed (or wrong in a way asked); raw(o), edit/remove, install, rotate (a new signing key);
+// limit(o)/fail(o); state(): what was posted and updated, typing, tokens issued, keys read.
+export async function startTeams(name) {
+  const port = await freePort()
+  const log = path.join(OUT, 'kits', `${name}-teams-${port}.log`)
+  fs.mkdirSync(path.dirname(log), { recursive: true })
+  fs.rmSync(log, { force: true })
+  const p = spawn(process.execPath, [path.join(TEST, 'stand-ins', 'teams.mjs'), String(port), log], { stdio: 'ignore' })
+  const url = `http://127.0.0.1:${port}`
+  if (!await until(async () => (await fetch(`${url}/_test/state`)).ok, 15000, 150)) throw new Error('the stand-in Teams didn\'t start')
+  const ctl = (what, body) => fetch(`${url}/_test/${what}`, { method: what === 'state' ? 'GET' : 'POST', ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) }).then((r) => r.json())
+  const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+  return {
+    url, port, calls, log,
+    app: { appId: '00000000-0000-4000-8000-00000000a001', password: 'teams-secret-1', tenantId: '11111111-1111-4111-8111-111111111111' },
+    endpoint: (u) => ctl('endpoint', { url: u }), say: (o) => ctl('say', o), raw: (o) => ctl('raw', o), edit: (o) => ctl('edit', o), remove: (o) => ctl('delete', o),
+    install: (o) => ctl('install', o || {}), rotate: () => ctl('rotate'), limit: (o) => ctl('limit', o), fail: (o) => ctl('fail', o), state: () => ctl('state'),
     stop: () => stopTree(p),
   }
 }

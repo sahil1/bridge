@@ -248,6 +248,44 @@ settings you gave it (with the Slack names and ids of the people who may ask) an
 never its tokens; it goes where you save it. A scheduled post is a routine in
 `~/.bridge-ai/routines.json`, its words put to the bot as from you. Bridge AI's health check, asked
 on the computer it runs on (the Docker image's), lists each bot's name and whether it's connected.
+A bot can also answer in Discord and in Microsoft Teams, each through an app you make there
+yourself, its secrets kept in the bot's folder (`discord.json`, `teams.json`), readable by you only,
+never in your settings, a log or its record, and never given to an agent. Neither goes through Bold
+Bridge or your relay.
+- Discord: the bot connects from your computer to Discord's Gateway, through `discord.com` and then
+  the `gateway.discord.gg` address Discord gives it, as Slack's Socket Mode does; nothing reaches
+  your computer from the internet. Discord sends it the messages in the servers it was added to and
+  its direct messages (its Message Content intent, which you turn on in Discord, is what lets it
+  read their words). Bridge AI keeps only a mention of the bot, a direct message to it, a reply to
+  one of its messages, and a message or an edit in a thread it answered in; the rest is dropped as
+  it arrives. For a question it answers, it reads the conversation as it does in Slack (a thread's
+  earlier messages, at most 50; a channel's latest 20 and what's pinned; a direct message's latest
+  20); after being away, what was put to it in the last three days; and your server's members'
+  names, and whether someone is a member, a guest or still to pass its screening, to pick who may
+  ask and to turn the rest away.
+- Microsoft Teams reaches a bot only from the internet, so the bot listens on your computer
+  (`127.0.0.1`, a port of its own) at one address, with nothing else of Bridge AI behind it, and you
+  make that address reachable with a tunnel of your own (Cloudflare Tunnel, or Microsoft's dev
+  tunnels). Teams sends each message there, signed: Bridge AI checks the signature against the keys
+  Microsoft publishes at `login.botframework.com` before it does anything with a message, and turns
+  away any that fails. To reply, the bot signs in to Microsoft Entra ID (`login.microsoftonline.com`)
+  with its app ID and client secret, the only place the secret goes, and posts to the Teams address
+  the message came from, only if it's Microsoft's. Its Teams app asks to be sent the messages of a
+  channel or chat it's added to, for the replies in its threads: Bridge AI keeps them in memory only
+  (the last 50 in each conversation, for three days, gone when Bridge AI closes), as a question's
+  context, and takes in only a mention of the bot, a message in a chat with it, and a reply or an
+  edit in a thread it answered in. It asks Teams for the members of the teams and chats it's in, and
+  whether someone is a guest or from another organization, to pick who may ask and to turn the rest
+  away. Checking your tunnel asks its address for an answer only this computer gives.
+What goes to Discord or Teams, for a question asked there, is what goes to Slack for one asked in
+Slack: what you send, the answers you let it send without asking, its short notes, what it remembers
+about someone (sent only to them, in a direct message, when they ask), a post you scheduled for a
+channel there, and in Discord its reactions (Teams has none for bots: it shows that the bot is typing
+instead). Slack's own stay in Slack: drafts in your Slack direct messages with their buttons, its
+working status and Stop, streamed answers and files. A file sent with a question in Discord or Teams
+is named in its record, never downloaded or read. Its record says which of them each question came
+from, and keeps people and channels there by their Discord or Teams ids. Disconnect, under Where It
+Answers, deletes its Discord token or its Teams app's secret from your computer.
 
 Files shows your agents' folders, and only the other folders you add to it yourself (Places, with
 the folder picker); it keeps each place's path in `~/.bridge-ai/places.json`, not what's in it, and

@@ -231,3 +231,38 @@
 .modal.settings.phone .sb :is(.sb-repo .st-input, .sb-pick-channel, .sb-limits .st-input, .sb-sched-add .st-input, .sb-mem-add select.st-input, .sb-try select.st-input) { height: 42px; font-size: 16px; }
 .modal.settings.phone .sb .sb-try-q { font-size: 16px; }
 .modal.settings.phone .sb .sb-link { display: inline-block; min-height: 40px; line-height: 40px; max-width: 100%; }
+
+/* Where It Answers: Slack, Discord and Microsoft Teams, each with its connection's dot. */
+.sb-where-tabs { flex-wrap: wrap; }
+.sb-where-tabs button { display: inline-flex; align-items: center; gap: 6px; }
+.sb-where-tabs .sb-dot, .app.narrow .sb-where-tabs .sb-dot { padding: 0; }
+.sb-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.sb-plat { display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 4px; font-size: 10.5px; font-weight: 500; line-height: 16px; vertical-align: 1px; color: var(--ink-2); background: var(--pane-2); }
+.sb-plat.p-discord { color: #5865f2; background: rgba(88, 101, 242, 0.12); }
+.sb-plat.p-teams { color: #6264a7; background: rgba(98, 100, 167, 0.14); }
+.sb-cmds { display: grid; gap: 4px; margin: 6px 0; min-width: 0; }
+.sb-cmd { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sb-cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 11.5px; padding: 3px 6px; border-radius: 5px; background: var(--pane-2); }
+.sb-tunnel { display: grid; gap: 6px; margin-top: 6px; min-width: 0; }
+.sb-endpoint, .sb-rejected { margin-top: 6px; }
+.sb-server { max-width: 360px; }
+.modal.settings.phone .sb .sb-where-tabs button { min-height: 40px; }
+.modal.settings.phone .sb :is(.sb-tunnel .st-input, .sb-server select) { height: 42px; font-size: 16px; }
+
+/* Set Up in Slack, Discord or Teams: a checklist that ticks itself; done, a line. */
+.sb-guide-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.sb-guide-list li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; align-items: start; min-width: 0; }
+.sb-tick { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 999px; font-size: 11px; font-weight: 600; color: var(--ink-2); background: var(--pane-2); }
+.sb-guide-list li.g-done .sb-tick { color: #fff; background: var(--good); }
+.sb-guide-list li.g-done b { color: var(--ink-3); font-weight: 500; }
+.sb-guide-step { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.sb-guide-step .st-row { margin-top: 2px; }
+.sb-guide-step .btn { display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
+.sb-guide-fail { font-style: italic; }
+.sb-guide-done { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 4px 0; color: var(--ink-2); }
+.sb-guide-done > .icon, .sb-guide-done > svg { color: var(--good); }
+.sb-first { display: grid; gap: 8px; max-width: 640px; }
+.sb-first p { margin: 0; }
+.sb-first .st-row { margin-top: 4px; }
+.modal.settings.phone .sb .sb-guide-step .btn, .modal.settings.phone .sb .sb-first .btn { min-height: 40px; }
+.modal.settings.phone .sb .sb-guide-done .link-btn { min-height: 40px; }

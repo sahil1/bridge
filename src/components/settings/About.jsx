@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import CopyButton from '../CopyButton.jsx'
 import UsageCounts from './UsageCounts.jsx'
@@ -293,6 +293,15 @@ const SHORT = {
   'call-video': tx("On a call, whose mouth moves on its video names who said what. Read on this Mac; no pictures kept."),
   'mcp-server': tx('Claude Code, Claude Desktop, Cursor and Codex read your boards, files and meeting summaries, and suggest changes you keep. Set up in Settings › MCP Servers.'),
 }
+// Bots just turned on: Set up a bot, which opens Settings › Bots. (Settings lists Bots once it's heard
+// the beta feature is on, a moment after: asked again until it's there, and this has gone with
+// About.)
+function StartBots() {
+  const alive = useRef(true)
+  useEffect(() => () => { alive.current = false }, [])
+  const go = (n = 0) => { openSettings('slack-bot'); if (n < 20) setTimeout(() => { if (alive.current) go(n + 1) }, 250) }
+  return <div className="st-row ab-trial-go" data-setting="beta-bots-start"><button type="button" className="btn small" onClick={() => go()}><Icon name="chat" size={12} /> {t('Set up a bot')}</button></div>
+}
 function Trials() {
   const { s, save } = useSettings()
   const [mine, setMine] = useState({}) // as you set it, at once; saved behind it
@@ -306,8 +315,12 @@ function Trials() {
       <h4>{t('Beta Features')}</h4>
       <p className="muted small" title={t("New parts of Bridge AI, in beta. Each stays hidden until you turn it on here, and turning it off hides it again; what you made with it stays where it is.")}>{t('Each stays hidden until you turn it on here.')}</p>
       {TRIALS.filter((x) => !x.mac || conf?.platform === 'darwin').map((x) => (
-        <label key={x.id} className="st-check"><input type="checkbox" checked={on(x.id)} disabled={!s} onChange={(e) => set(x.id, e.target.checked)} />
-          <span title={t(x.hint)}><b>{t(x.label)}</b> <span className="muted small">{SHORT[x.id] ? t(SHORT[x.id]) : t(x.hint)}</span>{auto[x.id] && on(x.id) && <span className="muted small ab-auto-on"> {t('Turned on by itself on {date}, once there were meetings to add up.', { date: new Date(auto[x.id]).toLocaleDateString(locale(), { month: 'long', day: 'numeric' }) })}</span>}</span></label>
+        <Fragment key={x.id}>
+          <label className="st-check"><input type="checkbox" checked={on(x.id)} disabled={!s} onChange={(e) => set(x.id, e.target.checked)} />
+            <span title={t(x.hint)}><b>{t(x.label)}</b> <span className="muted small">{SHORT[x.id] ? t(SHORT[x.id]) : t(x.hint)}</span>{auto[x.id] && on(x.id) && <span className="muted small ab-auto-on"> {t('Turned on by itself on {date}, once there were meetings to add up.', { date: new Date(auto[x.id]).toLocaleDateString(locale(), { month: 'long', day: 'numeric' }) })}</span>}</span></label>
+          {/* (Bots on: where to start, right there.) */}
+          {x.id === 'slack-bot' && on(x.id) && <StartBots />}
+        </Fragment>
       ))}
     </section>
   )

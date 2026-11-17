@@ -47,7 +47,7 @@ export const SECTIONS = [
     tabs: [{ id: 'meetings', label: tx('Meetings') }, { id: 'dictation', label: tx('Dictation') }, { id: 'voice', label: tx('Speech to Text') }] },
   { id: 'mail', label: tx('Mail'), icon: 'mail', hint: tx('How You Write, for the replies AI Assist drafts, and your working hours'), mac: true },
   { id: 'mcp', label: tx('MCP Servers'), icon: 'tool', hint: tx('Tools your agents can use') },
-  { id: 'slack-bot', label: tx('Bots'), icon: 'chat', hint: tx('Your own named bots in Slack, answering people you choose from the folders you give them'), trial: 'slack-bot' },
+  { id: 'slack-bot', label: tx('Bots'), icon: 'chat', hint: tx('Your own named bots in Slack, Discord and Microsoft Teams, answering people you choose from the folders you give them'), trial: 'slack-bot' },
   { id: 'devices', label: tx('Devices'), icon: 'phone', hint: tx('Your phone and your other computers, through your relay or Tailscale; what to notify you about'),
     accountsLabel: tx('Account & Devices'), accountsHint: tx('Your Bold Bridge account and Bridge AI\'s relay, your phone and your other computers; what to notify you about'),
     tabs: [{ id: 'account', label: tx('Account'), accounts: true }, { id: 'phone', label: tx('Phone') }, { id: 'machines', label: tx('Computers') }, { id: 'notifications', label: tx('Notifications') }] },
