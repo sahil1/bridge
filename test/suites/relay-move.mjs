@@ -132,6 +132,21 @@ try {
   const left = await spareNew.request('GET', '/api/relay')
   ok(left?.json?.here === spareId && left.json.left === ra.url, 'and Studio says where it moved from, for the app there to let go of', left?.json && { here: left.json.here, left: left.json.left })
   spareNew.close()
+  // Its key at the old address isn't Spare's any more. A page that follows the word (moved) is let in
+  // only to be told, sealed, where Studio is now (MOVE again), with no code; a page from before is
+  // turned away in the clear, as it was.
+  const fromBefore = await linkAs(ra.url, { device: spare.device, hostKey: spare.hostKey, about: { name: 'Spare' } })
+  ok(fromBefore.refused?.why === 'not-paired' && !fromBefore.welcome, 'Spare\'s key from the old address, from a page from before: turned away in the clear, as before', fromBefore.refused)
+  const retired = await linkAs(ra.url, { device: spare.device, hostKey: spare.hostKey, hello: { moved: 1 } })
+  const toldAgain = retired.welcome && await word(retired, K.MOVE)
+  ok(toldAgain?.again === true && toldAgain.url === at && toldAgain.name === 'Studio' && toldAgain.hosted === true && !toldAgain.link, 'from a page that follows it: told sealed where Studio is now (MOVE again), with no code', toldAgain)
+  const answered = await retired.request?.('GET', '/api/version').catch((e) => ({ error: e.message }))
+  ok(!answered?.status && (await a.api('/relay')).devices.find((d) => d.id === spareId)?.connected === false, 'and nothing it asks is answered, nor does it count as Spare connected', answered)
+  retired.close?.()
+  const here = await linkAs(at, { device: spare.device, hostKey: spare.hostKey, hello: { moved: 1 } })
+  const hereAgain = here.welcome && await word(here, K.MOVE)
+  ok(hereAgain?.again === true && hereAgain.url === at, 'the same at the new address: told, sealed, that Studio is there (its page there pairs again)', hereAgain)
+  here.close?.()
   const again = await linkAs(at, { code: codeOf(toldThere.link), name: 'Someone' })
   ok(!!again.refused && !again.welcome, 'a code made for a move works once', again.refused)
   const asked = await fetch(`${a.url}/api/relay/move`, { method: 'POST' }).then((r) => r.json())
@@ -159,9 +174,28 @@ try {
   ok(await sp.locator('.ph-devices .st-chip', { hasText: 'Not moved yet' }).count() >= 2, 'with the phones not seen at the new address yet', await sp.locator('.ph-devices').innerText().catch(() => ''))
   await shot(sp, `${tag}relay-moved`)
 
-  // The old address goes once every device has moved (here, the two pages put away).
+  // The page left at the old address. The phone pairs at the new address with the code it followed
+  // (as the page there does, with one tap), so its key at the old one isn't its own any more; opened
+  // there again, the page says Studio moved, with the way on (Studio says so, sealed: MOVE again),
+  // not that the answer couldn't be checked.
+  const nowThere = await linkAs(at, { code: codeOf(now.p.url()), name: 'Now', about: { name: 'Now' } })
+  ok(!!nowThere.welcome, '(the code the page followed pairs it at the new address)', nowThere.refused)
+  nowThere.close?.()
+  const movedScreen = async (p) => (await p.locator('#moved-open').isVisible().catch(() => false)) ? { title: await p.locator('#wait-title').innerText(), text: await p.locator('#wait-text').innerText(), again: await p.locator('#pair-again').isVisible() } : null
+  await now.p.goto(ra.url)
+  const oldPage = await until(() => movedScreen(now.p), 20000, 200)
+  ok(oldPage?.title === 'Studio moved to Bridge AI\'s relay' && oldPage.text.includes(`Studio is at ${new URL(at).host} now: open it there.`) && !/couldn't be checked/.test(oldPage.text) && oldPage.again, 'the page left at the old address, opened again, says Studio moved, with its new address and Pair again (not that the answer couldn\'t be checked)', oldPage)
+  await shot(now.p, `${tag}relay-moved-old-page`)
+  await now.p.locator('#moved-open').click()
+  ok(!!(await until(() => now.p.url() === `${at}/`, 10000, 200)), 'Open it there goes to the new address, where the page has its own pairing', now.p.url())
+
+  // The old address goes once every device has moved (here, the page from before, put away).
   for (const d of (await a.api('/relay')).devices.filter((x) => x.moving)) await a.api(`/relay/devices/${d.id}`, null, 'DELETE')
   ok(!!(await until(async () => !(await a.api('/relay')).moved && (await ra.state()).computers === 0, 15000)), 'once every device has been seen at the new address, Studio lets go of the old one', { moved: (await a.api('/relay')).moved, ra: await ra.state() })
+  // Studio isn't at the old address to say it any more: the page there says it from what it kept.
+  await now.p.goto(ra.url)
+  const kept = await until(() => movedScreen(now.p), 20000, 200)
+  ok(kept?.title === 'Studio moved to Bridge AI\'s relay' && kept.again, 'and once Studio has left the old address, the page there still says where it went (kept from Studio\'s sealed word), not just offline', kept)
 
   // ---------- Stop using the relay ----------
   let asksFirst = ''

@@ -202,9 +202,12 @@ export async function openNote(me, from, note, dir) {
 // nothing kept.
 // MOVE: from the computer, sealed: it moved to another relay ({ url, name, hosted, link }: link, a
 // pairing link there made for this device alone, for a phone whose key can't go with it), or it
-// forgot this phone ({ forgot: true, name }). Only this word moves a phone or device to another
-// address: the relay can't say it, and the new address still has to answer with the computer's key.
-// An end from before ignores it.
+// forgot this phone ({ forgot: true, name }), or this key is one the phone had before it followed
+// the computer and paired again there ({ url, name, hosted, again: true }: where the computer is
+// now, with no link, as the key isn't the device's any more; said only to a hello with moved: 1, a
+// page that knows it, and others are turned away in the clear as before). Only this word moves a
+// phone or device to another address: the relay can't say it, and the new address still has to
+// answer with the computer's key. An end from before ignores it.
 export const K = { REQ: 1, BODY: 2, END: 3, HEAD: 4, ERR: 5, CANCEL: 6, WS_OPEN: 7, WS_MSG: 8, WS_CLOSE: 9, WS_OPENED: 10, PING: 11, PONG: 12, MORE: 13, ABOUT: 14, GONE: 15, MOVE: 16 }
 export const CHUNK = 192 * 1024
 // An answer comes no faster than whoever asked takes it in (a video that's paused, a download to a
