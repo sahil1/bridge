@@ -518,7 +518,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // While it's still answering in this thread: given to that answer once it's done (heard()).
     if (qid === busy?.id) { changed(); return }
     // Over what one person may have answered at once: it waits its turn (next()).
-    const running = [...st.questions.values()].filter((x) => x !== q && x.from?.id && x.from.id === m.from?.id && x.state === 'answering').length
+    const running = [...st.questions.values()].filter((x) => x !== q && x.from?.id && x.from.id === m.from?.id && (x.state === 'answering' || x.state === 'starting')).length
     if (!m.scheduled && running >= bot.limits.atOnce) {
       const ahead = [...st.questions.values()].filter((x) => x.from?.id === m.from?.id && x.state === 'queued').length
       record(id, 'queued', at(q, { ahead, atOnce: bot.limits.atOnce }))
@@ -1005,8 +1005,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   function next(id) {
     const b = bots.get(id)
     const bot = botOf(id)
-    if (!b || !bot) return
-    const running = (pid) => [...b.st.questions.values()].filter((x) => x.from?.id === pid && x.state === 'answering').length
+    if (!b || !bot || !on()) return
+    const running = (pid) => [...b.st.questions.values()].filter((x) => x.from?.id === pid && (x.state === 'answering' || x.state === 'starting')).length
     for (const q of [...b.st.questions.values()].filter((x) => x.state === 'queued').sort((x, y) => String(x.heardAt).localeCompare(String(y.heardAt)))) {
       if (bot.paused) { toYou(id, q, `${bot.name} is paused`); continue }
       if (running(q.from?.id) >= bot.limits.atOnce) continue
@@ -1407,6 +1407,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       // Runs that were going when Bridge AI stopped and never came back: their place in line kept.
       bots.set(id, { channel, trace, st, memory: makeMemory(dir) })
       prune(id)
+      // (What was waiting its turn when Bridge AI stopped goes on now.)
+      setTimeout(() => next(id), 2000).unref?.()
     },
     // A bot deleted: its channel stopped, what waited on you discarded (it can't be sent now),
     // nothing left to post; its record kept, and the deletion in it. history: its activity history
