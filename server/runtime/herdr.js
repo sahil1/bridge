@@ -153,13 +153,18 @@ export const input = (paneId, steps) => sock.input(paneId, steps)
 export const keys = (paneId, k) => cli.sendKeys(paneId, k)
 export const paneKeys = (paneId, k) => cli.paneSendKeys(paneId, k)
 export const text = (paneId, t) => cli.paneSendText(paneId, t)
-// A message. To an agent herdr runs, herdr types it and presses Enter itself, in its own time
-// (promptsafe.js looks at the box after). One of Bridge AI's own agents: typed into its pane
-// (herdr's agent commands don't know it), line breaks as LF, which it keeps in the message, then
-// Enter after how.enterAfter (agents.js submit); enter: false types it only.
+// Text in pieces herdr-socket.js sends whole (it cuts one at 20,000 characters), in order.
+const pieces = (t) => { const cs = Array.from(t); const out = []; for (let i = 0; i < cs.length; i += 10000) out.push(cs.slice(i, i + 10000).join('')); return out }
+// A message. To an agent herdr runs, herdr types it and presses Enter itself, 300 ms later
+// (promptsafe.js looks at the box after). Otherwise typed into its pane, line breaks as LF (as one
+// paste when the agent has asked for that), then Enter after how.enterAfter (agents.js submit):
+// one of Bridge AI's own agents (herdr's agent commands don't know it), or with enter: false, an
+// agent whose message must show in its box before Enter goes (Codex), which promptsafe.js presses
+// once it does. herdr's own Enter can come before a busy Codex has read the text at all, when its
+// box still looks empty, as if the message had gone; read together, the Enter is a newline in it.
 export async function prompt(paneId, t, { enterAfter = 120, enter = true } = {}) {
-  if (!isOwn(paneId)) { await cli.prompt(paneId, t); return { ok: true, entered: true } }
-  await sock.input(paneId, [{ text: String(t).replace(/\r\n?/g, '\n') }])
+  if (!isOwn(paneId) && enter) { await cli.prompt(paneId, t); return { ok: true, entered: true } }
+  await sock.input(paneId, pieces(String(t).replace(/\r\n?/g, '\n')).map((text) => ({ text })))
   if (!enter) return { ok: true, entered: false }
   await new Promise((r) => setTimeout(r, enterAfter))
   await sock.input(paneId, [{ keys: ['enter'] }])

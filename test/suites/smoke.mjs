@@ -29,9 +29,13 @@ const env = {
     ? { USERPROFILE: home, APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'), SystemRoot: sr, ComSpec: process.env.ComSpec, PATHEXT: process.env.PATHEXT, TEMP: os.tmpdir(), TMP: os.tmpdir() }
     : { BRIDGE_SHELL: '/bin/sh', SHELL: '/bin/sh' }),
 }
-const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'smoke.js')], { cwd: ROOT, env, encoding: 'utf8', timeout: 180_000 })
+// Four minutes: its server up (a minute at most), the shell's prompt (half a minute), and the answer
+// to the shell's first command (a minute and a half: scripts/smoke.js).
+const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'smoke.js')], { cwd: ROOT, env, encoding: 'utf8', timeout: 240_000 })
 const out = `${r.stdout || ''}${r.stderr || ''}${r.error ? `\n${r.error.message}` : ''}`
 const lines = out.split('\n')
+// Each step with how long it took, for the log.
+for (const l of lines) if (/^(ok|FAIL|--) /.test(l)) console.log(`  ${l}`)
 for (const name of ['server starts', 'without its key, the API is refused', 'UI is served', 'setup detects agents', 'notifications, phone, updates and diagnostics load', 'a terminal runs a command']) {
   ok(lines.some((l) => l.startsWith(`ok   ${name}`)), `the release's smoke test, from source: ${name}`, lines.find((l) => l.includes(name)) || out.slice(-1500))
 }
