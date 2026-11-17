@@ -130,12 +130,14 @@ try {
   // What the stand-in Codex took as sent, oldest first; ~/codex-* switches its ways (stand-ins/codex.cjs).
   const codexGot = () => read('codex-got.log').split('\n').filter(Boolean).map((l) => JSON.parse(l).text)
   const flag = (n, on) => (on ? fs.writeFileSync(path.join(home, n), '') : fs.rmSync(path.join(home, n), { force: true }))
-  const send = (paneId, text) => kit.api(`/agents/${encodeURIComponent(paneId)}/prompt`, { text }).catch((e) => ({ error: e.message }))
-  // Free for the next message: done working, its box empty, and past the 3 s after a message went in,
-  // when the server holds the next (server/index.js holdFor).
+  let sentAt = 0
+  const send = (paneId, text) => kit.api(`/agents/${encodeURIComponent(paneId)}/prompt`, { text }).catch((e) => ({ error: e.message })).finally(() => { sentAt = Date.now() })
+  // Free for the next message: done working (on screen, and to herdr, which sees it a moment later),
+  // its box empty, and past the 3 s after a message went in, when the server holds the next
+  // (server/index.js holdFor).
   const codexFree = async (paneId) => {
-    const free = await until(async () => ['idle', 'done'].includes((await agentAt(paneId))?.status) && /Ask Codex to do anything/.test(await screen(paneId)), 30000, 200)
-    await sleep(2000)
+    const free = await until(async () => { const s = await screen(paneId); return /Ask Codex to do anything/.test(s) && !/Working \(/.test(s) && ['idle', 'done'].includes((await agentAt(paneId))?.status) }, 30000, 200)
+    await sleep(Math.max(1000, sentAt + 3500 - Date.now()))
     return free
   }
   const cx = await kit.api('/agents/launch', { kind: 'codex', cwd: work, label: 'March', newSpace: 'Herdr Codex' })
