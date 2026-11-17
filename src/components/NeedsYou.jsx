@@ -362,7 +362,12 @@ export function OutsideItem({ it, onDone, setNote }) {
 // A question put to one of your bots (server/frontdesk.js): the answer an agent drafted, to edit,
 // then send or discard; or one nothing could answer, its reply empty for you to write (the asker was
 // told it's passed on). The question, and what came after it in the thread while it was answered,
-// are the askers' words, shown as theirs; nothing goes to Slack until you press Send.
+// are the askers' words, shown as theirs; nothing goes to Slack until you press Send. With it: the
+// files the answer sends back, why an answer that would have gone without asking waits (it quotes a
+// file in a public channel), and a change it made: the diff to approve before a draft pull request
+// opens, or the pull request opened already. The same draft is in your Slack direct messages when
+// you set You in Slack; whichever you answer first, the other is settled.
+const sizeOf = (n) => (n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 export function SlackItem({ it, onDone, setNote }) {
   const [text, setText] = useState(it.draft || '')
   const [busy, setBusy] = useState(false)
@@ -371,6 +376,8 @@ export function SlackItem({ it, onDone, setNote }) {
   const where = it.place?.kind === 'dm' ? t('in a direct message') : it.place?.name ? t('in #{channel}', { channel: it.place.name }) : t('in a channel')
   const r = it.route
   const bot = it.bot?.name || t('Your bot')
+  const change = it.change || null
+  const approve = change?.mode === 'suggest' && !change.pr?.url
   const from = it.needsOwner ? t('Nothing could answer it: {why}. {name} was told it\'s passed on to you.', { why: it.why || '', name: who })
     : r?.to === 'agent' ? t('Answered by a read-only copy of {agent}\'s conversation.', { agent: r.name })
       : r?.to === 'throwaway' ? t('{bot} answered from what it knows: it reads no folders.', { bot })
@@ -398,10 +405,20 @@ export function SlackItem({ it, onDone, setNote }) {
       <p className="ny-said">“{it.text}”</p>
       {(it.more || []).map((m, i) => <p key={i} className="ny-said ny-more"><span className="muted small">{t('Then {name}:', { name: m.from?.name || t('Someone') })}</span> “{m.text}”</p>)}
       <p className="muted small ny-from">{from}</p>
+      {it.warn && <p className="muted small ny-from"><Icon name="info" size={11} /> {it.warn}</p>}
+      {it.files?.length > 0 && <p className="muted small ny-from"><Icon name="paperclip" size={11} /> {t('With {files}', { files: it.files.map((f) => `${f.name}${f.size != null ? ` (${sizeOf(f.size)})` : ''}`).join(', ') })}</p>}
+      {change && (
+        <>
+          <p className="muted small ny-from"><Icon name="branch" size={11} /> {change.pr?.url ? t('A draft pull request opened on {branch}:', { branch: change.branch || '' }) : approve ? t('It made a change on {branch}: approve the diff, and a draft pull request opens.', { branch: change.branch || '' }) : t('It made a change on {branch}.', { branch: change.branch || '' })}{change.pr?.url && <> <a href={change.pr.url} target="_blank" rel="noreferrer">{change.pr.url}</a></>}</p>
+          {change.stat && <p className="muted small ny-from mono">{change.stat}</p>}
+          {change.diff && <pre className="ny-change" aria-label={t('The diff')}>{change.diff}</pre>}
+        </>
+      )}
+      {it.ownerAsked && <p className="muted small ny-from"><Icon name="chat" size={11} /> {t('Also in your Slack direct messages: answer it there or here.')}</p>}
       <textarea className="ny-draft" value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(8, Math.max(3, text.split('\n').length + 1))} placeholder={t('Write the reply…')} aria-label={t('Reply to {name}', { name: who })} disabled={busy} />
       {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
       <div className="ny-acts">
-        <button type="button" className="btn small primary" disabled={busy || !text.trim()} onClick={() => decide(true)}><Icon name="send" size={12} /> {busy ? t('Sending…') : t('Send')}</button>
+        <button type="button" className="btn small primary" disabled={busy || !text.trim()} onClick={() => decide(true)}><Icon name={approve ? 'branch' : 'send'} size={12} /> {busy ? t('Sending…') : approve ? t('Approve and open a pull request') : t('Send')}</button>
         <button type="button" className="btn small" disabled={busy} onClick={() => decide(false)}>{t('Discard')}</button>
       </div>
     </article>

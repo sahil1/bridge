@@ -59,6 +59,8 @@
 .ny-empty small { max-width: 300px; }
 .ny-panel.phone .ny-item { padding: 12px; }
 .ny-panel.phone .ny-acts .btn.small, .ny-panel.phone .ny-acts .ghost-btn { min-height: 36px; }
+/* A bot's answer to send or discard (a change to approve) on a phone: whole 40 px targets. */
+.ny-panel.phone .ny-item.t-slack .ny-acts :is(.btn.small, .btn, .ghost-btn) { min-height: 40px; min-width: 40px; }
 
 /* What has gone quiet: one quiet line, folded; opened, short rows under their project, each opening
    to its card. The inbox and Home have it alike. */
@@ -130,3 +132,5 @@
 .ny-from { margin: 4px 0 0; line-height: 1.4; overflow-wrap: anywhere; }
 .ny-draft { display: block; box-sizing: border-box; width: 100%; margin-top: 7px; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 13px/1.45 var(--font); resize: vertical; min-height: 64px; }
 .ny-draft:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+/* (16 px on a phone, so the reply box doesn't zoom the page when it's tapped.) */
+.ny-panel.phone .ny-draft { font-size: 16px; }

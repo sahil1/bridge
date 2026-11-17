@@ -13,7 +13,8 @@
 //     [exit]                                 ends at once, as an agent that crashed or was closed
 //                                            would, having said nothing
 //                                            Each start goes in ~/helpers-started.log ({ args, cwd,
-//                                            message }). A follow-up typed in once it's done works a
+//                                            message, secrets: the names of any Slack tokens in its
+//                                            environment }). A follow-up typed in once it's done works a
 //                                            second and ends "Followed up: <the message>".
 //   claude ... "<a bot's brief>"             an answering agent (its brief marks off a question from
 //                                            someone), as it was started; by what the question says:
@@ -32,6 +33,24 @@
 //                                            under --permission-mode dontAsk, as Claude Code
 //                                            refuses what would have asked
 //                                            Each try goes in ~/answer-tries.log ({ try, done }).
+//     [edit <name> <text>]                   writes <text> into <name> in its folder: only when
+//                                            --tools lets it Edit and --allowedTools Edit(./**)
+//                                            lets it there without asking (a bot's change, in its
+//                                            own copy of a repository), else it says it couldn't
+//     [edit-outside <path> <text>]           tries to write a file outside its folder: refused
+//                                            under --permission-mode dontAsk (Edit(./**) is only
+//                                            its folder)
+//     [remember <text>]                      ends with REMEMBER: <text>
+//     [remember-me <text>]                   ends with REMEMBER about <the asker>: <text>
+//     [recall]                               says what its brief's memory gave it
+//     [chart]                                reads the CSV attached (from the brief's list of files,
+//                                            when it may read it) and sends back chart.svg
+//     [long]                                 answers at length (over 5,000 characters)
+//     [quote <name>]                         quotes <name> in its folder word for word
+//     [agents]                               says what its brief says your agents are doing
+//   claude ... "Your brief is in <file>. ..."   the brief in a file (Windows): read, when it may
+//                                            read that file (its folder or one --add-dir gave it),
+//                                            then taken as above
 //   claude --resume <id> --fork-session --session-id <new> "<brief>"   a copy of a conversation:
 //                                            <id>'s, then the brief as above
 //   --model <m>, --effort <level>, --permission-mode <mode>, --tools <list>, --add-dir <dirs...>,
@@ -45,6 +64,8 @@ if (args.includes('--version')) { console.log('2.1.312 (Claude Code)'); process.
 // Signed in with a Max plan (BRIDGE_STANDIN_CLAUDE_PLAN: another, team say).
 if (args[0] === 'auth') { console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: process.env.BRIDGE_STANDIN_CLAUDE_PLAN || 'max' })); process.exit(0) }
 const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode', '--effort', '--tools'])
+// (--allowedTools, like --add-dir, takes a list.)
+const allowed = []
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null }
 // --add-dir takes folders until the next flag; anything else that isn't a flag or a flag's value is
 // the opening message.
@@ -52,13 +73,23 @@ const added = []
 let message = ''
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--add-dir') { while (args[i + 1] && !args[i + 1].startsWith('--')) added.push(args[++i]); continue }
+  if (args[i] === '--allowedTools') { while (args[i + 1] && !args[i + 1].startsWith('--')) allowed.push(args[++i]); continue }
   if (WITH_VALUE.has(args[i])) { i++; continue }
   if (!args[i].startsWith('--') && !message) message = args[i]
+}
+// The brief in a file it's pointed to: read when it may (its folder, or a folder --add-dir gave it).
+const pointed = /^Your brief is in (.+?\.md)\. Read it first/.exec(message)
+if (pointed) {
+  const f = pointed[1]
+  const ok = [process.cwd(), ...added].some((d) => path.resolve(f).startsWith(path.resolve(d) + path.sep))
+  try { if (ok) message = fs.readFileSync(f, 'utf8') } catch { /* not there */ }
 }
 const id = opt('--session-id') || opt('--resume') || `s-${process.pid}`
 const home = os.homedir()
 const note = (file, o) => fs.appendFileSync(path.join(home, file), JSON.stringify(o) + '\n')
-if (message) note('helpers-started.log', { args, cwd: process.cwd(), message })
+// (And any Slack token it was given in its environment, by name: there should never be one.)
+const secrets = Object.entries(process.env).filter(([, v]) => /^(xox[abp]|xapp)-/.test(String(v))).map(([k]) => k)
+if (message) note('helpers-started.log', { args, cwd: process.cwd(), message, secrets, ...(pointed ? { briefFile: pointed[1] } : {}) })
 if (/\[exit\]/.test(message)) process.exit(0)
 
 // Its conversation, where Bridge AI reads Claude Code's.
@@ -135,6 +166,8 @@ function answerTurn(text) {
   state = 'working'
   began = Date.now()
   draw()
+  // (How long it takes is the question's to say: a [work] in the conversation around it isn't.)
+  const wait = Number((/\[work (\d+)\]/.exec(q) || [])[1] || 2)
   setTimeout(() => {
     const out = []
     for (const f of fs.readdirSync(process.cwd()).filter((x) => /\.(md|txt)$/.test(x)).slice(0, 3)) tool('Read', { file_path: path.join(process.cwd(), f) })
@@ -152,13 +185,43 @@ function answerTurn(text) {
       const here = [process.cwd(), ...added].some((d) => want.startsWith(d + path.sep) || real(want).startsWith(real(d) + path.sep))
       if (!can('Read') || (!here && dontAsk)) { tried('read', false); out.push(`I couldn't read ${r[1]}: reading outside my folders was refused.`) } else { let c = ''; try { c = fs.readFileSync(want, 'utf8').trim() } catch { /* none */ } tool('Read', { file_path: want }); tried('read', true); out.push(`It says: ${c}`) }
     }
+    // Edits: only in its folder, and only when it was started able to (a bot's change).
+    const editsHere = can('Edit') && can('Write') && allowed.some((x) => /^Edit\(\.\/\*\*\)$/.test(x))
+    for (const m of q.matchAll(/\[edit ([\w./-]+) ([^\]]+)\]/g)) {
+      const f = path.resolve(process.cwd(), m[1])
+      if (editsHere && f.startsWith(process.cwd() + path.sep)) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${m[2]}\n`); tool('Edit', { file_path: f }); tried('edit', true); out.push(`I changed ${m[1]}.`) } else { tried('edit', false); out.push(`I can't change ${m[1]} here.`) }
+    }
+    for (const m of q.matchAll(/\[edit-outside ([^\s\]]+) ([^\]]+)\]/g)) {
+      const f = path.resolve(m[1].replace(/^~/, home))
+      const inHere = f.startsWith(process.cwd() + path.sep)
+      if (can('Edit') && (!dontAsk || (inHere && editsHere))) { fs.writeFileSync(f, `${m[2]}\n`); tried('edit-outside', true); out.push(`I wrote ${m[1]}.`) } else { tried('edit-outside', false); out.push(`I couldn't write ${m[1]}: that was refused.`) }
+    }
+    const memo = (/----- memory -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of memory -----/.exec(text) || [])[1] || ''
+    if (/\[recall\]/.test(q)) out.push(memo ? `I remember: ${memo.replace(/\n| · /g, ' ').trim()}` : 'I remember nothing.')
+    if (/\[agents\]/.test(q)) out.push((/What .*?'s agents are doing now[^\n]*\n((?:- .*\n?)*)/.exec(text) || [])[1]?.trim().replace(/\n/g, ' ') || 'No agents said.')
+    const quote = /\[quote ([\w./-]+)\]/.exec(q)
+    if (quote) { const f = path.join(process.cwd(), quote[1]); try { const c = fs.readFileSync(f, 'utf8').replace(/^#.*$/m, '').trim(); tool('Read', { file_path: f }); out.push(`It says: "${c}"`) } catch { out.push('There is no such file.') } }
+    const files = []
+    if (/\[chart\]/.test(q)) {
+      const csv = (/^- (\S+\.csv) \(/m.exec(text.replace(/ · /g, '\n')) || [])[1]
+      const readable = csv && [process.cwd(), ...added].some((d) => path.resolve(csv).startsWith(path.resolve(d) + path.sep))
+      let rows = []
+      try { if (readable) { tool('Read', { file_path: csv }); rows = fs.readFileSync(csv, 'utf8').trim().split('\n').slice(1).map((l) => l.split(',')) } } catch { /* none */ }
+      if (rows.length) {
+        const bars = rows.map(([k, v], i) => `<rect x="${i * 30}" y="${100 - Number(v)}" width="20" height="${Number(v)}"><title>${k}</title></rect>`).join('')
+        files.push(`FILE: chart.svg\n\`\`\`svg\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${rows.length * 30} 100">${bars}</svg>\n\`\`\``)
+        out.push(`Here's the chart of ${rows.length} rows.`)
+      } else out.push('I couldn\'t read the file.')
+    }
+    const remember = [...q.matchAll(/\[remember ([^\]]+)\]/g)].map((m) => `REMEMBER: ${m[1]}`).concat([...q.matchAll(/\[remember-me ([^\]]+)\]/g)].map((m) => `REMEMBER about ${(/----- question from (.*?) -----/.exec(text) || [])[1] || 'them'}: ${m[1]}`))
     const a = /\[answer ([^\]]+)\]/.exec(q)
-    const answer = /\[noanswer\]/.test(q) ? 'NO ANSWER\nNothing in this folder says.' : /\[notforme\]/.test(q) ? 'NOT FOR ME' : [...out, a ? a[1] : 'Here is what I found.', ...(sign ? [sign] : [])].join(' ')
+    const long = /\[long\]/.test(q) ? `\n\n${Array.from({ length: 60 }, (_, i) => `Point ${i + 1}: the details of this part of the answer, said at some length.`).join('\n\n')}` : ''
+    const answer = /\[noanswer\]/.test(q) ? 'NO ANSWER\nNothing in this folder says.' : /\[notforme\]/.test(q) ? 'NOT FOR ME' : [[...out, a ? a[1] : 'Here is what I found.', ...(sign ? [sign] : [])].join(' ') + long, ...files, ...remember].join('\n\n')
     said = answer
     reply(answer)
     state = 'idle'
     draw()
-  }, secs * 1000)
+  }, wait * 1000)
 }
 
 if (message && /----- question from/.test(message)) answerTurn(message)

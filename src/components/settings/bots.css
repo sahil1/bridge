@@ -78,7 +78,7 @@
 .sb-log-out { overflow-wrap: anywhere; }
 .sb-log time { flex: none; white-space: nowrap; }
 /* On a phone: every control a whole 40 px target, and fields at 16 px so iOS doesn't zoom into them. */
-.modal.settings.phone .sb :is(.btn, .ghost-btn, .seg button, .link-btn, summary) { min-height: 40px; }
+.modal.settings.phone .sb :is(.btn, .ghost-btn, .seg button, .link-btn, summary) { min-height: 40px; min-width: 40px; }
 .modal.settings.phone .sb .icon-btn { min-width: 40px; min-height: 40px; }
 .modal.settings.phone .sb :is(.st-input, .sb-search input) { font-size: 16px; }
 .modal.settings.phone .sb .st-input, .modal.settings.phone .sb .sb-add .st-input { height: 42px; }
@@ -105,7 +105,9 @@
 .sb-dot.bad { background: var(--critical); }
 .sb-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 999px; font: 700 10.5px/18px var(--font); text-align: center; color: var(--warning); background: color-mix(in srgb, var(--warning) 16%, transparent); }
 .sb-new { display: grid; gap: 8px; min-width: 0; }
-.sb-new > p { margin: 0; line-height: 1.5; color: var(--ink-2); }
+.sb-newbot { display: grid; gap: 10px; min-width: 0; }
+.sb-newbot > p { margin: 0; line-height: 1.5; }
+.sb-newbot > p.small:not(.muted) { color: var(--ink-2); }
 .sb-tabs { align-self: start; }
 .sb-tabs button { display: inline-flex; align-items: center; gap: 6px; }
 
@@ -161,3 +163,71 @@
 .modal.settings.phone .sb :is(select.st-input, .sb-date .st-input, .sb-ins) { font-size: 16px; }
 .modal.settings.phone .sb :is(select.st-input, .sb-date .st-input) { height: 42px; }
 .modal.settings.phone .sb :is(.sb-chip, .sb-conv, .sb-ctx summary, .sb-export .btn, .sb-tl-head .ghost-btn) { min-height: 40px; }
+
+/* Pausing it, and what its Slack app lacks. */
+.sb-pause { align-items: center; margin: 0; }
+.sb-pause > span { flex: 1 1 220px; min-width: 0; }
+.sb-pause .ghost-btn, .sb-paused .btn, .sb-export-bot .ghost-btn, .sb-import .ghost-btn, .sb-muted .ghost-btn, .sb-sched .ghost-btn, .sb-mem-acts :is(.btn, .ghost-btn) { display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
+.sb-paused { margin: 0; flex-wrap: wrap; }
+.sb-paused > span { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.sb-needs { margin: 0; padding-left: 18px; display: grid; gap: 2px; line-height: 1.45; }
+.sb-needs code { font: 11px var(--font-mono); color: var(--ink-3); }
+.sb-export-bot, .sb-import, .sb-guess { align-items: center; }
+.sb-export-bot > span, .sb-import > span { flex: 1 1 220px; min-width: 0; }
+
+/* Sections' own small headings, and the lists in Changes, Limits, Channels, Scheduled Posts. */
+.sb-sub { margin: 6px 0 0; color: var(--ink); }
+.sb-repo { max-width: 420px; }
+.sb-repo .st-input, .sb-pick-channel { height: 34px; font-size: 12.5px; width: auto; max-width: 100%; min-width: 0; }
+.sb-limits { display: grid; grid-template-columns: repeat(3, minmax(0, 140px)); gap: 8px; min-width: 0; }
+.sb-limits .st-input { height: 34px; width: 100%; font-size: 12.5px; }
+@container (max-width: 420px) { .sb-limits { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.sb-muted, .sb-sched, .sb-mem { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.sb-muted li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.sb-sched li, .sb-mem-item { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 10px; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--pane); min-width: 0; }
+.sb-sched li.bad { border-color: color-mix(in srgb, var(--critical) 40%, var(--line-2)); }
+.sb-sched-text, .sb-mem-text { flex: 1 1 220px; display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; line-height: 1.45; }
+.sb-sched-add, .sb-mem-add { display: grid; gap: 8px; min-width: 0; }
+.sb-sched-row { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.sb-sched-row > .sb-field { flex: 1 1 180px; }
+.sb-sched-add .st-input, .sb-mem-add select.st-input { height: 34px; font-size: 12.5px; width: 100%; }
+.sb-mem-item.new { border-color: color-mix(in srgb, var(--warning) 45%, var(--line-2)); background: color-mix(in srgb, var(--warning) 5%, var(--pane)); }
+.sb-mem-item > .sb-add { flex: 1 1 100%; }
+.sb-mem-acts { margin: 0; }
+.sb-mem-group { display: grid; gap: 6px; }
+.sb-mem-mode { align-items: center; }
+
+/* What an answer brings: its change and its files; links in its record. */
+.sb-link { color: var(--accent); overflow-wrap: anywhere; }
+.sb-stat { margin: 4px 0 0; color: var(--ink-2); overflow-wrap: anywhere; white-space: pre-wrap; }
+.sb-diff { margin: 4px 0 0; max-height: 260px; overflow-y: auto; overflow-x: hidden; padding: 8px 10px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--pane-2); font: 11px/1.45 var(--font-mono); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.sb-change { display: grid; gap: 2px; min-width: 0; }
+.sb-change > p { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.sb-files { margin: 0; display: flex; align-items: flex-start; gap: 5px; overflow-wrap: anywhere; }
+.sb-files .icon { flex: none; margin-top: 2px; }
+
+/* Try It: the question, then what came of it. */
+.sb-try { display: grid; gap: 8px; min-width: 0; }
+.sb-try .sb-field { max-width: 320px; }
+.sb-try select.st-input { height: 34px; font-size: 12.5px; }
+.sb-try-q { width: 100%; min-height: 72px; resize: vertical; font: 13px/1.45 var(--font); padding: 8px 10px; }
+.sb-try-out { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--pane); min-width: 0; overflow-wrap: anywhere; }
+.sb-try-out > p { margin: 0; line-height: 1.45; }
+.sb-try-out .st-note { margin: 0; }
+.sb-try-draft { margin: 0; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--pane-2); border-radius: 0 var(--r-sm) var(--r-sm) 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+.sb-working { display: flex; align-items: center; gap: 6px; }
+.sb-try-tl .sb-tl { margin-top: 6px; }
+
+/* New Bot: the templates to start from, and an import. */
+.sb-templates { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; min-width: 0; }
+.sb-tpl { display: grid; gap: 2px; align-content: start; text-align: left; padding: 9px 10px; min-height: 40px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--pane); color: var(--ink); line-height: 1.4; min-width: 0; overflow-wrap: anywhere; }
+.sb-tpl.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.sb-tpl:hover, .sb-tpl:focus-visible { background: var(--pane-2); }
+.sb-tpl-ins { margin: 4px 0 0; max-height: 220px; overflow-y: auto; overflow-x: hidden; padding: 8px 10px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--pane-2); font: 11.5px/1.45 var(--font-mono); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* On a phone, the new controls are whole targets too. */
+.modal.settings.phone .sb .st-check { min-height: 40px; }
+.modal.settings.phone .sb :is(.sb-tpl, .sb-sched .ghost-btn, .sb-mem-acts .ghost-btn, .sb-mem-acts .btn) { min-height: 40px; }
+.modal.settings.phone .sb :is(.sb-repo .st-input, .sb-pick-channel, .sb-limits .st-input, .sb-sched-add .st-input, .sb-mem-add select.st-input, .sb-try select.st-input) { height: 42px; font-size: 16px; }
+.modal.settings.phone .sb .sb-try-q { font-size: 16px; }
+.modal.settings.phone .sb .sb-link { display: inline-block; min-height: 40px; line-height: 40px; max-width: 100%; }

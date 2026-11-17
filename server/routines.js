@@ -240,12 +240,27 @@ function scheduleFrom(text) {
   return { ...r.when, days: r.when.days, date: r.when.date, schedule: String(text).trim().slice(0, 200), since: new Date().toISOString() }
 }
 
-// to: 'chief' sends it to the Chief of Staff instead of starting an agent in a folder.
-export async function add({ name, command, cwd, every, workspace, detail, kind, to, schedule, auto }) {
+// to: 'chief' sends it to the Chief of Staff instead of starting an agent in a folder; to: 'bot', a
+// post one of your bots makes in a channel (bot: its id, channel: { id, name }), answered as a
+// question from you and posted there (frontdesk.js), waiting for you first unless it may go
+// without asking.
+export async function add({ name, command, cwd, every, workspace, detail, kind, to, schedule, auto, bot, channel }) {
   name = String(name || '').trim()
   command = String(command || '').trim()
-  if (!name || !command) throw new Error('A routine needs a name and a command')
+  if (!name || !command) throw new Error(to === 'bot' ? 'Say what to post' : 'A routine needs a name and a command')
   if (schedule && !scheduled) throw Object.assign(new Error(BETA), { status: 400 })
+  if (to === 'bot') {
+    if (!/^b\d{1,4}$/.test(String(bot || ''))) throw new Error('Say which bot posts it')
+    if (!/^[CG][A-Z0-9]{2,20}$/.test(String(channel?.id || ''))) throw new Error('Pick the channel it posts in')
+    const defs = readDefs()
+    let id = slug(name)
+    while (defs.some((d) => d.id === id)) id += '-2'
+    const def = { id, name: name.slice(0, 120), detail: detail || '', every: every || 'day', cwd: '', workspace: '', command: command.slice(0, 4000), detect: {}, to: 'bot', bot: String(bot), channel: { id: String(channel.id), name: String(channel.name || '').replace(/^#/, '').slice(0, 80) || null } }
+    if (schedule) Object.assign(def, clean(scheduleFrom(schedule)), { auto: auto !== false })
+    writeDefs([...defs, def])
+    invalidate()
+    return def
+  }
   const chief = to === 'chief'
   if (!chief && cwd && !(await exists(expand(cwd)))) throw new Error(`Folder not found: ${cwd}`)
   const defs = readDefs()
@@ -269,8 +284,12 @@ export function update(id, patch) {
   const allowed = ['name', 'detail', 'every', 'cwd', 'command', 'workspace']
   for (const k of allowed) if (patch[k] !== undefined) defs[i][k] = String(patch[k])
   if ((patch.schedule !== undefined || patch.auto !== undefined || patch.paused !== undefined || patch.to !== undefined || patch.kind !== undefined) && !scheduled) throw Object.assign(new Error(BETA), { status: 400 })
-  if (patch.kind !== undefined) { if (patch.kind) defs[i].kind = String(patch.kind).slice(0, 40); else delete defs[i].kind }
-  if (patch.to !== undefined) { if (patch.to === 'chief') { defs[i].to = 'chief'; defs[i].cwd = '' } else delete defs[i].to }
+  // (A bot's post stays one: its bot and channel, not a folder or an agent.)
+  const bot = defs[i].to === 'bot'
+  if (bot) defs[i].cwd = ''
+  if (patch.kind !== undefined && !bot) { if (patch.kind) defs[i].kind = String(patch.kind).slice(0, 40); else delete defs[i].kind }
+  if (patch.to !== undefined && !bot) { if (patch.to === 'chief') { defs[i].to = 'chief'; defs[i].cwd = '' } else delete defs[i].to }
+  if (bot && patch.channel?.id && /^[CG][A-Z0-9]{2,20}$/.test(String(patch.channel.id))) defs[i].channel = { id: String(patch.channel.id), name: String(patch.channel.name || '').replace(/^#/, '').slice(0, 80) || null }
   // A new schedule counts from now: a time earlier today isn't run straight away.
   if (patch.schedule !== undefined) {
     if (!patch.schedule) for (const k of ['at', 'days', 'date', 'schedule', 'since', 'auto', 'paused']) delete defs[i][k]

@@ -13,7 +13,8 @@
 //   changed is caught, and said where.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startSlack, checks, until, sleep, browser, page, shot, phoneFaults, TEST, IS_WIN } from '../lib/harness.mjs'
+import { pathToFileURL } from 'node:url'
+import { startKit, startSlack, checks, until, sleep, browser, page, shot, phoneFaults, TEST, ROOT, IS_WIN } from '../lib/harness.mjs'
 
 const { ok, done } = checks('bots-activity')
 const slack = await startSlack('bots-activity')
@@ -78,11 +79,14 @@ try {
   ok(want.every((x) => types.has(x)), 'each kind of event is in its record', { missing: want.filter((x) => !types.has(x)) })
   ok(all.every((e) => e.bot === 'b1' && e.owner === 'Tester' && e.at) && all.filter((e) => e.type === 'received').every((e) => e.team === 'T0TEST' && e.channel && e.ts && e.person?.id), 'each says when, which bot and whose, and Slack\'s team, channel, ts and person', all.find((e) => e.type === 'received'))
   const lines = traceLines()
-  const { createHash } = await import('node:crypto')
-  ok(lines.every((l, i) => (i === 0 ? JSON.parse(l).prev === null : JSON.parse(l).prev === createHash('sha256').update(lines[i - 1]).digest('hex'))), 'each line carries the hash of the line before it')
+  // (A line's hash covers all of it, people's words each by their own hash: server/trace.js.)
+  const { hashOfLine } = await import(pathToFileURL(path.join(ROOT, 'server', 'trace.js')).href)
+  ok(lines.every((l, i) => (i === 0 ? JSON.parse(l).prev === null : JSON.parse(l).prev === hashOfLine(lines[i - 1]))), 'each line carries the hash of the line before it')
   const file = path.join(TRACE, `${month}.jsonl`)
   ok(IS_WIN || (fs.statSync(file).mode & 0o777) === 0o600, 'kept a file a month, readable by you only', IS_WIN ? null : (fs.statSync(file).mode & 0o777).toString(8))
-  const every = fs.readdirSync(TRACE).map((f) => fs.readFileSync(path.join(TRACE, f), 'utf8')).join('\n')
+  // (Every file in it, the agents' transcripts beside it included.)
+  const filesIn = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? filesIn(path.join(d, e.name)) : [path.join(d, e.name)]))
+  const every = filesIn(TRACE).map((f) => fs.readFileSync(f, 'utf8')).join('\n')
   ok(!every.includes('xoxb-test') && !every.includes('xapp-test') && /xoxb-…test/.test(every), 'never a token: only its kind and last four', null)
   const run = all.find((e) => e.type === 'run.started')
   ok(run?.agent === 'claude' && run.folders.map(slashed).join() === '~/notes' && /^[0-9a-f]{12}$/.test(run.instructions?.hash) && /# Helpdesk/.test(run.instructionsText || '') && !all.filter((e) => e.type === 'run.started').slice(1).some((e) => e.instructionsText), 'a run: its agent, its folders, and its instructions\' version, their words kept once', run)
