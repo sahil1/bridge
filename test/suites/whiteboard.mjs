@@ -162,8 +162,11 @@ try {
   ok(await until(() => p.locator('.palette .pal-item', { hasText: 'Whiteboards' }).count(), 5000), '⌘K finds Whiteboards')
   await p.keyboard.press('Escape')
 
-  // A board the chief made, drawn into shapes when it opens, and saved that way.
+  // A board the chief made, drawn into shapes when it opens, and saved that way. A card is picked
+  // with a click and opened with a double-click, as Studio's other lists' files are.
   await p.locator('.wb-card', { hasText: 'Checkout' }).click()
+  ok(await p.locator('.wb-card[aria-selected="true"]', { hasText: 'Checkout' }).count() === 1 && await p.locator('.wb-view').count() === 0, 'a click on a board\'s card picks it, and doesn\'t open it')
+  await p.locator('.wb-card', { hasText: 'Checkout' }).dblclick()
   await p.waitForSelector('.excalidraw canvas', { timeout: 30000 })
   ok(loaded.length > 0, 'Excalidraw loads when a board opens', loaded)
   const drawn = await until(() => { const j = readBoard('Checkout'); return !j?.bridge && texts(j).includes('Payment') && j }, 15000)

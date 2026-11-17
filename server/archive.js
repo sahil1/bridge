@@ -14,8 +14,10 @@ function save(list) { ensureDir(DATA); writeFileAtomic(FILE, JSON.stringify(list
 export const all = () => load()
 export const find = (id) => load().find((x) => x.id === id) || null
 
-// An agent that's closing: { kind, sessionId, cwd, label, workspace, preview }. One entry per
-// session (closing it again moves it back to the top).
+// An agent that's closing: { kind, sessionId, paneId, cwd, label, workspace, preview }. One entry per
+// session (closing it again moves it back to the top). Its pane is kept as oldPaneId, so what was
+// typed in its message box (kept in the browser by pane) can follow it when it's resumed in a new
+// one; paneId in the list is the pane it's running in now, if it is.
 export function add(a) {
   if (!a?.sessionId || !a.kind) return null
   const list = load().filter((x) => x.sessionId !== a.sessionId)
@@ -23,6 +25,7 @@ export function add(a) {
     id: crypto.randomBytes(5).toString('hex'), kind: a.kind, sessionId: a.sessionId, cwd: a.cwd,
     label: String(a.label || '').slice(0, 120), workspace: String(a.workspace || '').slice(0, 120),
     preview: String(a.preview || '').slice(0, 300), closedAt: new Date().toISOString(),
+    oldPaneId: a.paneId ? String(a.paneId).slice(0, 120) : null,
   }
   save([item, ...list])
   return item

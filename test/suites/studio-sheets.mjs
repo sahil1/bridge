@@ -5,8 +5,9 @@
 // written back exactly as they were, and a date or percent typed in is saved as it shows, not as a
 // serial number; one cell changed in the big CSV changes one line. The keys Google Sheets users
 // reach for (Home, End, ⌘Home, ⌘End, Page Down, Shift+Space, Ctrl+Space, ⌥↓, Ctrl+Shift+1/4/5,
-// ⌘;, ⌘\, ⇧⌘V, ⌘K for a link rather than the app's search, ⇧⌘H, ⌘P); undo 70 steps back;
-// what's typed keeps no colour of its own, and a word added to a cell keeps it plain text; a
+// ⌘;, ⌘\, ⇧⌘V, ⌘K for a link rather than the app's search, ⇧⌘H, ⌘P, and ⌘R to fill right, which
+// the desktop app's menu, where ⌘R is Reload, asks the sheet with focus for first); undo 70 steps
+// back; what's typed keeps no colour of its own, and a word added to a cell keeps it plain text; a
 // formula's error says why when its cell is picked; Insert › Chart of the cells picked, its kind and title
 // changed beside the sheet, saved as Excel's own chart; the status line counting a sheet added;
 // Focus keeping the sheet's keys (Esc ends a cell's typing first, ⌘K still its link); AI Assist
@@ -206,6 +207,34 @@ try {
     return { rows: new Set(shown.map((x) => Math.round(r(x).top + r(x).height / 2))).size, h: Math.round(r(t).height), past: shown.filter((x) => r(x).right > r(t).right + 1).length, left: Math.round(r(shown[0]).left - r(t).left) }
   })
   ok(ribbonRow.rows === 1 && ribbonRow.h <= 44 && !ribbonRow.past && ribbonRow.left < 40, 'its tools on one row under their tabs, from the left', ribbonRow)
+  // ⌘R: Fill Right, as in Excel, Google Sheets and Numbers, and the page isn't reloaded. The desktop
+  // app's menu has ⌘R for Reload and asks the window first (desktop/contextmenu.js pageFirst, through
+  // window.bridgeMenuKey): the sheet with its cells in focus takes it, and with the focus anywhere
+  // else (or a cell being typed in) the page leaves it to Reload.
+  const budgetNow = async () => { const x = new ExcelJS.Workbook(); await x.xlsx.readFile(path.join(dir, 'budget.xlsx')); const s = x.getWorksheet('Budget'); return (a1) => s.getCell(a1).value }
+  await typeIn('J2', 'Across')
+  await typeIn('J3', 'Asked')
+  await goTo('J2:L2')
+  await p.evaluate(() => { window.__stayed = true })
+  await p.keyboard.press(`${MOD}+r`)
+  await sleep(300)
+  const stayed = await p.evaluate(() => window.__stayed === true)
+  await goTo('J3:L3')
+  const menuTook = await p.evaluate(() => window.bridgeMenuKey?.('CmdOrCtrl+R'))
+  await sleep(300)
+  await goTo('J4'); await p.keyboard.type('Typing')
+  const whileTyping = await p.evaluate(() => window.bridgeMenuKey?.('CmdOrCtrl+R'))
+  await p.keyboard.press('Escape'); await until(async () => !(await editing()), 5000, 50)
+  await p.locator('.rail-nav-btn').first().focus()
+  const outside = await p.evaluate(() => window.bridgeMenuKey?.('CmdOrCtrl+R'))
+  const otherKey = await p.evaluate(() => window.bridgeMenuKey?.('CmdOrCtrl+Shift+R'))
+  await goTo('J20')
+  ok(await save(), 'saved', unsaved)
+  const filled = await budgetNow()
+  const right = { K2: filled('K2'), L2: filled('L2'), K3: filled('K3'), L3: filled('L3'), J4: filled('J4') }
+  ok(right.K2 === 'Across' && right.L2 === 'Across' && stayed, '⌘R fills the cells picked right from the first column, and the page stays', { right, stayed })
+  ok(menuTook === true && right.K3 === 'Asked' && right.L3 === 'Asked' && whileTyping === false && right.J4 == null && outside === false && otherKey === false,
+    'the desktop app\'s menu, asking first: the sheet takes ⌘R and fills right; while a cell is typed in, with the focus outside the sheet, or for another key, it\'s left to the menu (Reload)', { menuTook, right, whileTyping, outside, otherKey })
 
   // ---------- Focus ----------
   // A sheet in Focus keeps its keys: Focus's own types nothing into the cell picked, Esc while a

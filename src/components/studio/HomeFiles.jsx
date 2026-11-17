@@ -7,6 +7,7 @@ import { fileOp } from '../FileExtras.jsx'
 import { WhiteboardsHome } from '../../lazy.jsx'
 import QuickLook from '../files/QuickLook.jsx'
 import { FileIcon } from '../files/art.jsx'
+import { usePick } from '../files/pick.js'
 
 // Studio's lists of your files, beside your folders on its home (Studio.jsx): what you opened here,
 // the documents, sheets, decks and PDFs on this computer (server/studiofound.js: Spotlight on a Mac,
@@ -27,9 +28,11 @@ export const KINDS = [
   ['board', tx('Whiteboards'), null],
 ]
 // A kind with a list of its own in place of rows, when it's the kind picked: your whiteboards as
-// their own page has them (what to draw, then each as a card to open, rename or delete).
+// their own page has them (what to draw, then each as a card to open, rename or delete), picked and
+// opened as the rows are (pick: { tap, keys, focus } as YourFiles has them, and onPicked(name) for
+// the list's head).
 const OWN_LIST = {
-  board: WhiteboardsHome && ((onOpen) => <WhiteboardsHome onOpen={(id) => onOpen({ root: 'board', path: id })} />),
+  board: WhiteboardsHome && ((onOpen, pick) => <WhiteboardsHome onOpen={(id) => onOpen({ root: 'board', path: id })} {...pick} />),
 }
 // Whiteboards only where they can be opened (not the demo or the phone apps' Cloud agents).
 export const kindsHere = KINDS.filter(([k]) => k !== 'board' || !!OWN_LIST.board)
@@ -90,15 +93,13 @@ export function useYourFiles(recent) {
 
 // One of the lists: group is recent or kind:<kind>; q a search through all of them (the folder bar's
 // search, while a list is shown). describe(f): { kind, folder, full } in words. Picked and opened
-// as a folder's files are: a click picks a file (and nothing else changes), a double-click, Enter or
-// ⌘↓ opens it, Space shows it in Quick Look, and the arrow keys go up and down the list (keys: where
-// Explorer.jsx hands them while it's shown; focus: back to it after Quick Look). tap: a phone's,
-// where a tap opens it. Open beside each opens it at once.
+// as a folder's files are (files/pick.js): a click picks a file (and nothing else changes), a
+// double-click, Enter or ⌘↓ opens it, Space shows it in Quick Look, and the arrow keys go up and down
+// the list (keys: where Explorer.jsx hands them while it's shown; focus: back to it after Quick
+// Look). tap: a phone's, where a tap opens it. Open beside each opens it at once.
 export function YourFiles({ files, group, q = '', refreshRecent, describe, onOpen, tap = false, keys = null, focus = null }) {
   const { found, looking, look, boards, rows, recentRows } = files
   const [note, setNote] = useState(null) // { text, error }: what came of Open in app
-  const [sel, setSel] = useState(null) // the file picked (keyOf)
-  const [ql, setQl] = useState(false) // Quick Look on it
   useEffect(() => { if (!note || note.error) return undefined; const id = setTimeout(() => setNote(null), 4000); return () => clearTimeout(id) }, [note])
   const openInApp = (f) => fileOp(f.root, 'open', f.path).then(() => setNote({ text: t('Opening {name} in its own app…', { name: f.name }) }), (e) => setNote({ text: t("Couldn't open {name}: {error}", { name: f.name, error: e.message }), error: true }))
   const needle = q.trim().toLocaleLowerCase()
@@ -113,48 +114,14 @@ export function YourFiles({ files, group, q = '', refreshRecent, describe, onOpe
       : !rows.length ? t('No documents, sheets, decks or PDFs yet. One you open from a folder here or an agent\'s Files, start with New, or keep in a folder you add shows here.')
         : t('Nothing opened or changed in the last 30 days. Pick a kind or a folder to see the rest.')
   const own = (!needle && kind && OWN_LIST[kind[0]]) || null
-  const picked = (!own && sel && shown.find((f) => keyOf(f) === sel)) || null
   // What opening one does: Studio's editor; a kind Studio doesn't open (an older Word file,
   // Keynote…), its own app, from a window on its computer; else (null) Quick Look shows it.
   const openOf = (f) => (f.opens === false ? (inApp ? () => openInApp(f) : null) : () => onOpen({ root: f.root, path: f.path }))
-  const open = (f) => { const go = openOf(f); if (go) go(); else { setSel(keyOf(f)); setQl(true) } }
-  const step = (n) => {
-    if (!shown.length) return
-    const at = picked ? shown.indexOf(picked) : -1
-    setSel(keyOf(shown[at < 0 ? (n > 0 ? 0 : shown.length - 1) : Math.max(0, Math.min(shown.length - 1, at + n))]))
-  }
-  // The one picked kept in view (after the arrow keys).
-  const box = useRef(null)
-  useEffect(() => { if (sel) box.current?.querySelector(`[data-key="${CSS.escape(sel)}"]`)?.scrollIntoView?.({ block: 'nearest' }) }, [sel])
-  // The keys, as a folder's: Explorer.jsx hands them here while the list is shown (hit(fn): taken).
-  const onKey = (e, hit) => {
-    const mod = e.metaKey || e.ctrlKey
-    const k = e.key
-    if (mod && k === 'ArrowDown') return picked && hit(() => open(picked))
-    if (mod || e.altKey) return undefined
-    if (k === ' ') return picked && hit(() => setQl((v) => !v))
-    if (k === 'Enter') return picked && hit(() => open(picked))
-    if (k === 'Escape' && sel) return hit(() => setSel(null))
-    if (k === 'ArrowDown' || k === 'ArrowUp') return hit(() => step(k === 'ArrowDown' ? 1 : -1))
-    if ((k === 'Home' || k === 'End') && shown.length) return hit(() => setSel(keyOf(shown[k === 'Home' ? 0 : shown.length - 1])))
-    return undefined
-  }
-  useEffect(() => {
-    if (!keys) return undefined
-    keys.current = own ? null : onKey
-    return () => { if (keys.current === onKey) keys.current = null }
-  })
-  // A row: picked on a click, opened on a double-click; on a phone, opened on a tap. Its buttons are
-  // their own.
-  const rowProps = (f) => {
-    const key = keyOf(f)
-    const mine = (ev) => !ev.target.closest('button, a, input')
-    return {
-      'data-key': key, 'aria-selected': sel === key,
-      ...(tap ? { onClick: (ev) => { if (mine(ev)) open(f) } }
-        : { onMouseDown: (ev) => { if (ev.button === 0 && mine(ev)) setSel(key) }, onDoubleClick: (ev) => { if (mine(ev)) open(f) } }),
-    }
-  }
+  const pick = usePick(shown, { keyOf, open: (f) => { const go = openOf(f); if (go) go(); return !!go }, tap, keys, focus, on: !own })
+  const { picked } = pick
+  // A list of its own (the whiteboards') picks as this one does, and says which it picked here.
+  const [ownPicked, setOwnPicked] = useState(null)
+  const pickedName = own ? ownPicked : picked?.name
   // Quick Look on the one picked: a file as Files shows it, a whiteboard as its picture.
   const glance = (f) => ({ name: f.name, path: f.path, mtime: when(f) || null, ...(f.kind === 'board' ? { board: { preview: f.preview ? apiUrl(`/boards/${encodeURIComponent(f.path)}/preview?v=${Math.round(f.preview)}`) : null } } : {}) })
   return (
@@ -164,13 +131,13 @@ export function YourFiles({ files, group, q = '', refreshRecent, describe, onOpe
           <b>{title}</b>
           <small className="muted">{shown.length === 1 ? t('1 file') : t('{n} files', { n: shown.length })}</small>
           {kind && found?.capped?.[kind[0]] && <small className="muted">{t('the newest {n} of {total}', { n: found.perKind, total: found.capped[kind[0]].toLocaleString(locale()) })}</small>}
-          {!own && <small className="muted sd-files-picked" role="status">{picked ? t('{name} picked', { name: picked.name }) : ''}</small>}
+          <small className="muted sd-files-picked" role="status">{pickedName ? t('{name} picked', { name: pickedName }) : ''}</small>
           <span className="sd-grow" />
           <button type="button" className="win-btn" onClick={() => look(true)} disabled={looking} aria-label={t('Look again')} title={t('Look for your files again')}><Icon name="refresh" size={14} className={looking ? 'spin' : ''} /></button>
           {canAddPlace && <AddFolder onAdded={() => look(true)} />}
         </div>
         {note && <p className={`sd-files-note small${note.error ? ' error-text' : ' muted'}`} role={note.error ? 'alert' : 'status'}>{note.text}</p>}
-        {own ? own(onOpen) : <div className="sd-files-table" role="grid" aria-label={title} ref={box} onMouseDown={(ev) => { if (!tap && !ev.target.closest('.sd-files-row')) setSel(null) }}>
+        {own ? own(onOpen, { tap, keys, focus, onPicked: setOwnPicked }) : <div className="sd-files-table" role="grid" aria-label={title} {...pick.boxProps}>
           <div className="sd-files-row head" role="row"><span role="columnheader">{t('Name')}</span><span role="columnheader">{t('Folder')}</span><span role="columnheader">{t('Changed')}</span><span role="columnheader" aria-label={t('Open')} /></div>
           {shown.map((f) => {
             const d = describe(f)
@@ -179,7 +146,7 @@ export function YourFiles({ files, group, q = '', refreshRecent, describe, onOpe
             const other = f.opens === false
             const go = openOf(f)
             return (
-              <div key={keyOf(f)} className={`sd-files-row${other ? ' other' : ''}${sel === keyOf(f) ? ' on' : ''}`} role="row" {...rowProps(f)}>
+              <div key={keyOf(f)} className={`sd-files-row${other ? ' other' : ''}${picked === f ? ' on' : ''}`} role="row" {...pick.itemProps(f)}>
                 <span role="gridcell" className="sd-file-name" title={d.full || f.path}>
                   <span className={`sd-file-ic${f.kind ? ` k-${f.kind}` : ''}`}><FileIcon e={f} art={f.kind === 'board' ? 'board' : null} size={32} /></span>
                   <span className="sd-file-text"><b>{f.name}</b><small className="muted">{other ? t('{kind}, opened in its own app', { kind: d.kind }) : d.kind}</small></span>
@@ -199,10 +166,9 @@ export function YourFiles({ files, group, q = '', refreshRecent, describe, onOpe
           {!shown.length && (found || !looking) && <div className="sd-files-none" role="row"><span role="gridcell">{none}</span></div>}
         </div>}
       </div>
-      {ql && picked && (
-        <QuickLook base={BASE} root={picked.root} entry={glance(picked)} at={shown.indexOf(picked)} count={shown.length} cloud={picked.area?.type === 'cloud'}
-          onClose={() => { setQl(false); focus?.() }} onStep={step} openLabel={openOf(picked) ? (picked.opens === false ? t('Open in its app') : t('Open')) : null}
-          onOpen={() => { setQl(false); openOf(picked)?.() }} />
+      {pick.look && (
+        <QuickLook base={BASE} root={picked.root} entry={glance(picked)} cloud={picked.area?.type === 'cloud'}
+          openLabel={openOf(picked) ? (picked.opens === false ? t('Open in its app') : t('Open')) : null} {...pick.look} />
       )}
       {found && !found.error && (
         <p className="sd-files-src muted small">

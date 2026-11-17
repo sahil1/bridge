@@ -363,7 +363,7 @@ export function createDemo({ everything = true } = {}) {
     for (const [id, a] of S.agents) {
       if (a.tabId !== tabId) continue
       a.gen++
-      S.archive.unshift({ id: uid(), sessionId: a.sessionId, kind: a.kind, label: tabOf(tabId)?.label, workspace: spaceOf(a.workspaceId)?.label, cwd: tilde(a.cwd), fullCwd: a.cwd, closedAt: iso(), preview: String([...a.log].reverse().find((m) => m.role === 'assistant')?.text || '').slice(0, 160), paneId: null, log: a.log })
+      S.archive.unshift({ id: uid(), sessionId: a.sessionId, kind: a.kind, label: tabOf(tabId)?.label, workspace: spaceOf(a.workspaceId)?.label, cwd: tilde(a.cwd), fullCwd: a.cwd, closedAt: iso(), preview: String([...a.log].reverse().find((m) => m.role === 'assistant')?.text || '').slice(0, 160), paneId: null, oldPaneId: a.paneId, log: a.log })
       S.agents.delete(id)
     }
     for (const [id, s] of S.shells) if (s.tabId === tabId) S.shells.delete(id)
