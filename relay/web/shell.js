@@ -247,6 +247,8 @@ let session = null
 let paired = null // { device, hostKey, deviceId }
 let code = null // a pairing code from the QR code or typed in
 let waiting = null // a handshake in progress: { state, pair, resolve }
+let holding = null // a welcome with no device: what the computer says next is waited for (onData)
+const HOLD_MS = 3000
 // After the link drops: again at once, then less and less often (the network coming back, or Bridge
 // AI back on the screen, tries again straight away: check() below).
 const FIRST_TRY = 250
@@ -655,11 +657,18 @@ async function onData(buf) {
       if (location.hash) history.replaceState(null, '', location.pathname + location.search)
       if (isIOS && !standalone) { show('home'); return }
     }
-    apps?.paired()
-    for (const w of readyWaiters.splice(0)) w.ok()
-    bar(null)
-    showApp()
-    backOnline()
+    // A welcome with no device in it: the computer let this phone in only to tell it something,
+    // sealed, which comes next (it was removed: GONE; or its key here was replaced when it followed
+    // the computer to another relay: MOVE again). Bridge AI isn't opened for that, so nothing of it
+    // starts loading only to be cut off. Anything else from the computer opens it, as does nothing
+    // within a few seconds (the relay could take device out of a welcome): asked with a PING.
+    if (!msg.device) {
+      const s = session
+      holding = setTimeout(() => { if (session === s) opened() }, HOLD_MS)
+      send(K.PING, 0).catch(() => {})
+      return
+    }
+    opened()
     return
   }
   if (!session) return
@@ -667,14 +676,16 @@ async function onData(buf) {
   try { plain = await session.open(buf) } catch { ws.close(4002, 'bad record'); return }
   const { kind, id, body } = unpack(plain)
   heardComputer()
-  if (kind === K.PING) return send(K.PONG, 0)
-  if (kind === K.PONG) return
   if (kind === K.GONE) return removedThere()
   if (kind === K.MOVE) { let m = null; try { m = json(body) } catch { /* not that */ } return moved(m) }
-  // An answer: this pairing still works here (the computer is back at this address, or this phone
-  // never finished pairing at the new one), so what was kept about the move no longer holds. (At the
-  // address it moved from, MOVE comes first, and is kept again.)
+  // Anything else: a session for using it. Bridge AI opens, if it was held (above); and this pairing
+  // still works here (the computer is back at this address, or this phone never finished pairing at
+  // the new one), so what was kept about the move no longer holds. (At the address it moved from,
+  // MOVE comes first, and is kept again.)
+  if (holding) opened()
   if (paired?.moved) forgetMoved()
+  if (kind === K.PING) return send(K.PONG, 0)
+  if (kind === K.PONG) return
   const s = streams.get(id)
   if (!s) return
   if (kind === K.HEAD) s.onHead?.(json(body))
@@ -684,6 +695,17 @@ async function onData(buf) {
   else if (kind === K.WS_OPENED) s.onOpen?.()
   else if (kind === K.WS_MSG) s.onMessage?.(body[0] === 1 ? text(body.subarray(1)) : body.slice(1).buffer)
   else if (kind === K.WS_CLOSE) { streams.delete(id); s.onClose?.(json(body)) }
+}
+
+// Connected: Bridge AI opens (or comes back), and what waited for the link goes.
+function opened() {
+  clearTimeout(holding)
+  holding = null
+  apps?.paired()
+  for (const w of readyWaiters.splice(0)) w.ok()
+  bar(null)
+  showApp()
+  backOnline()
 }
 
 // A code that didn't work gets one answer, whatever was wrong with it (a computer from before
@@ -840,6 +862,8 @@ function movedAway(m) {
 function dropSession(msg) {
   session = null
   waiting = null
+  clearTimeout(holding)
+  holding = null
   for (const [, s] of [...streams]) {
     if (s.onLost) s.onLost(msg || 'Connection lost')
     else { s.onError?.(msg || 'Connection lost'); s.onClose?.({ c: 1006, r: 'connection lost' }) }
