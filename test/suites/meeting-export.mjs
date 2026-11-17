@@ -8,12 +8,16 @@
 // order, a picture in word/media for each, each no wider than the page. The PDF reads back with
 // pdf-lib and pdf.js: its pages, the words on the first and the last, every picture in it and none
 // drawn wider than the page; the line in Japanese is a picture of its words, and it says so. The page
-// keeps going while a long one is made. Show in Finder shows the file. On a phone, paired through
-// the relay (stand-ins/relay.mjs), Save as PDF downloads it to the phone. A picture that can't be
-// read is left out and said; a folder that can't be written says why; Save as Markdown still writes
-// its note with the pictures beside it.
+// keeps going while a long one is made. Show in Finder shows the file. The open meeting's download
+// button offers the same three as ⋯, and saves each as ⋯ does. On a phone, paired through the relay
+// (stand-ins/relay.mjs), Save as PDF downloads it to the phone. In the iPhone app (its bridgeNative
+// and user agent stood in for), Save as Word and Save as PDF go to the app's own save instead, which
+// takes the file kept on the computer over the link, and nothing downloads in the page. A picture
+// that can't be read is left out and said; a folder that can't be written says why; Save as
+// Markdown still writes its note with the pictures beside it.
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import JSZip from 'jszip'
 import { PDFDocument, PDFName, PDFRawStream, PDFArray, decodePDFRawStream } from 'pdf-lib'
 import { startKit, startRelay, checks, until, browser, page, shot, browserNotice, phoneNotes, phoneSaw, ROOT } from '../lib/harness.mjs'
@@ -149,6 +153,26 @@ try {
   const got = await fetch(`${kit.url}/api/meetings/${M.id}/export/pdf`)
   ok(got.ok && (await got.arrayBuffer()).byteLength === bytes.length, 'the PDF, for the iPhone app to take to the phone', got.status)
 
+  // ---------- The open meeting's download button: the same three as ⋯, saved the same way ----------
+  const dlButton = p.locator('.pane-head .mt-hb > button[aria-label="Save"]')
+  const dlMenu = p.locator('.pane-head .mt-hb .menu .menu-item')
+  await dlButton.click({ timeout: 10000 })
+  const offered = (await dlMenu.allInnerTexts().catch(() => [])).map((x) => x.trim())
+  ok(offered.join('|') === 'Save as Markdown|Save as Word (.docx)|Save as PDF', "the open meeting's download button offers Markdown, Word (.docx) and PDF, as ⋯ does", offered)
+  await shot(p, `${tag}export-download-menu`)
+  const wordBefore = docx && fs.existsSync(docx) ? fs.statSync(docx).mtimeMs : 0
+  const madeWord = p.waitForResponse((r) => r.request().method() === 'POST' && /\/export\?format=docx$/.test(r.url()), { timeout: 60000 }).catch(() => null)
+  await dlMenu.filter({ hasText: 'Save as Word (.docx)' }).click()
+  const said6 = await until(async () => { const x = await p.locator('.mt-msg').innerText().catch(() => ''); return /Saved to .+\.docx/.test(x) && x }, 60000, 200)
+  const word6 = await madeWord
+  ok(!!word6?.ok() && !!said6 && !!docx && fs.existsSync(docx) && fs.statSync(docx).mtimeMs > wordBefore, 'its Save as Word makes the Word file again, beside the note, and says where', { said: said6, status: word6?.status() })
+  await dlButton.click()
+  const savedMd = p.waitForResponse((r) => r.request().method() === 'POST' && /\/meetings\/[^/]+\/save$/.test(r.url()), { timeout: 30000 }).catch(() => null)
+  await dlMenu.filter({ hasText: 'Save as Markdown' }).click()
+  const said7 = await until(async () => { const x = await p.locator('.mt-msg').innerText().catch(() => ''); return /Saved to .+\.md\b/.test(x) && x }, 30000, 200)
+  const md7 = await (await savedMd)?.json().catch(() => null)
+  ok(!!said7 && !!md7?.file && fs.existsSync(md7.file), 'and its Save as Markdown writes the note, as the button did before', { said: said7, file: md7?.file })
+
   // ---------- Save as Markdown, as before ----------
   const md = await api(`/meetings/${M.id}/save`, {})
   const note = fs.readFileSync(md.file, 'utf8')
@@ -184,6 +208,82 @@ try {
     }
     await pctx.close()
   } catch (e) { ok(false, `the phone: ${String(e.message).split('\n')[0]}`) }
+
+  // ---------- In the iPhone app: the app's own save, not a download ----------
+  // The iPhone app (mobile/ios/BridgeAI/WebViewController.swift) gives Bridge AI's frame a
+  // bridgeNative of its own, and the page asks it to save the file it kept on the computer: { type:
+  // 'save', id, url, name }. The app takes only Bridge AI's own files (/api/..., FileViewer.shows),
+  // over the link to the computer (Tunnel.save), says how far it's got and when it's done with
+  // bridge-save events in the frame, then shows its share sheet (Save to Files). Stood in for here,
+  // with the app's user agent: the frame's bridgeNative, which takes the file over the same link
+  // through the relay page (the app reaches it through bridgeTunnel, this through the page's service
+  // worker) and answers as the app does. The app's own Swift, which writes the file on the iPhone and
+  // shows the share sheet, isn't run here.
+  try {
+    const code = (await api('/relay/pair', {})).pairing.code
+    const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
+    const ictx = await b.newContext({ viewport: { width: 390, height: 844 }, userAgent: `Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) BridgeAIApp/${version} Mobile/15E148 Safari/604.1`, isMobile: which === 'chromium', hasTouch: true, deviceScaleFactor: 2, acceptDownloads: true })
+    await ictx.addInitScript(() => { try { localStorage.setItem('cc-toured', JSON.stringify({ desktop: true, phone: true })); localStorage.setItem('cc-appearance', JSON.stringify({ mode: 'light', theme: 'sky', text: 'm' })) } catch { /* no storage */ } })
+    await phoneNotes(ictx)
+    await ictx.addInitScript((origin) => {
+      if (window === window.top || location.origin !== origin || window.bridgeNative) return
+      window.__saves = []
+      const hex = (buf) => [...new Uint8Array(buf)].map((x) => x.toString(16).padStart(2, '0')).join('')
+      window.bridgeNative = {
+        platform: 'ios',
+        post: (m) => {
+          if (m?.type !== 'save' || !m.id || m.cancel) return
+          const x = { url: m.url, name: m.name }
+          window.__saves.push(x)
+          const tell = (d) => window.dispatchEvent(new CustomEvent('bridge-save', { detail: { id: m.id, ...d } }))
+          // As FileViewer.shows: Bridge AI's own files only, or the app does nothing.
+          const u = new URL(m.url)
+          if (u.origin !== location.origin || !/^\/(m\/[A-Za-z0-9_-]{1,20}\/)?api\//.test(u.pathname)) { x.refused = true; return }
+          ;(async () => {
+            try {
+              const r = await fetch(u.pathname + u.search, { headers: { Accept: '*/*' } })
+              if (!r.ok) { x.status = r.status; tell({ error: r.status === 404 ? "That file isn't there any more" : `Your computer answered ${r.status}` }); return }
+              const buf = await r.arrayBuffer()
+              Object.assign(x, { size: buf.byteLength, head: String.fromCharCode(...new Uint8Array(buf.slice(0, 5))), sha: hex(await crypto.subtle.digest('SHA-256', buf)) })
+              tell({ got: buf.byteLength, total: buf.byteLength })
+              tell({ done: true })
+            } catch (e) { x.error = String(e?.message || e); tell({ error: x.error }) }
+          })()
+        },
+      }
+    }, new URL(relay.url).origin)
+    const ip = await ictx.newPage()
+    ip.on('pageerror', (e) => { if (!browserNotice(e.message)) errors.push(e.message) })
+    const downloads = []
+    ip.on('download', (d) => downloads.push(d.suggestedFilename()))
+    await ip.goto(`${relay.url}/#pair=${code}`, { waitUntil: 'commit' })
+    await ip.locator('#pair-go').click({ timeout: 15000 })
+    const app = () => ip.frames().find((f) => f !== ip.mainFrame() && f.url().startsWith(relay.url))
+    const opened = await until(() => app()?.evaluate(() => fetch('/api/version').then((x) => x.ok)), 30000, 200)
+    ok(!!opened, 'the iPhone app (stood in for), paired through the relay, Bridge AI open in it', opened ? undefined : await phoneSaw(ip))
+    if (opened) {
+      const f = app()
+      ok(await f.evaluate(() => window.bridgeNative?.platform === 'ios'), "Bridge AI's frame has the app's bridgeNative, as the app gives it")
+      await f.locator('.tabbar button', { hasText: 'Meetings' }).click({ timeout: 15000 })
+      await f.locator('.mt-row-open', { hasText: 'Pricing review' }).click({ timeout: 15000 })
+      for (const [format, label, magic] of [['docx', 'Save as Word (.docx)', 'PK\u0003\u0004'], ['pdf', 'Save as PDF', '%PDF-']]) {
+        const name = `Pricing review-summary.${format}`
+        await f.locator('.pane-head button[aria-label="More actions"]').click({ timeout: 15000 })
+        await f.locator('.menu .menu-item', { hasText: label }).click()
+        const ready = await until(async () => { const x = await f.locator('.mt-msg').innerText().catch(() => ''); return x.includes(`${name} is ready to save or share.`) && x }, 90000, 200)
+        const asked = (await f.evaluate(() => window.__saves || []).catch(() => [])).find((x) => x.name === name)
+        const file = (await api(`/meetings/${M.id}`)).exported?.[format]
+        const kept = file && fs.existsSync(file) ? fs.readFileSync(file) : null
+        const right = !!asked && !asked.refused && new URL(asked.url).pathname === `/api/meetings/${encodeURIComponent(M.id)}/export/${format}`
+          && !!kept && asked.size === kept.length && asked.sha === crypto.createHash('sha256').update(kept).digest('hex') && String(asked.head).startsWith(magic)
+        ok(right, `in the iPhone app, ${label}: the page asks the app to save it, and what the app takes over the link is the file kept on the computer`, { asked, file, size: kept?.length })
+        ok(!!ready, `and says ${name} is ready to save or share`, ready || await f.locator('.mt-msg').innerText().catch(() => ''))
+      }
+      ok(downloads.length === 0, 'nothing downloads in the page: the app saves it', downloads)
+      await shot(ip, `${tag}export-iphone-app`)
+    }
+    await ictx.close()
+  } catch (e) { ok(false, `the iPhone app: ${String(e.message).split('\n')[0]}`) }
 
   // ---------- When something's wrong, it says so ----------
   // A picture whose file has gone: left out, and said.

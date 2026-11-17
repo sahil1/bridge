@@ -611,6 +611,7 @@ export function MeetingPage({ id, onBack }) {
   const [busy, setBusy] = useState(null)
   const [msg, setMsg] = useState(null)
   const [menu, setMenu] = useState(false)
+  const [saveMenu, setSaveMenu] = useState(false) // the header's download button's menu
   const [fix, setFix] = useState(null) // { from } while fixing a word
   const [sel, setSel] = useState(null) // { text, top, left }: words picked in the transcript
   const [dialog, setDialog] = useState(null) // 'again' | 'calendar' | 'delete' | 'folder' | 'add'
@@ -746,6 +747,12 @@ export function MeetingPage({ id, onBack }) {
   const reveal = () => act('reveal', () => api(`/meetings/${encodeURIComponent(id)}/reveal`, { method: 'POST' }))
   // As one file with its pictures in it, to share: Word or PDF (exporting.js).
   const exportAs = (format) => busy !== 'export' && act('export', () => exportAndSay(data, format, ({ text, error, act: a }) => setMsg({ text, error, act: a })))
+  // Every way to save it, the same from the header's download button as from ⋯.
+  const saveItems = [
+    { icon: 'download', label: t('Save as Markdown'), run: save },
+    { icon: 'doc', label: t('Save as Word (.docx)'), run: () => exportAs('docx') },
+    { icon: 'file', label: t('Save as PDF'), run: () => exportAs('pdf') },
+  ]
   const copy = async (text, done) => { try { await navigator.clipboard.writeText(text); setMsg({ text: done }) } catch { setMsg({ error: true, text: t("Couldn't copy") }) } }
   const remove = () => setDialog('delete')
   // Resume recording: this meeting again, from where it had got to. Why not is said (another one
@@ -1017,14 +1024,15 @@ export function MeetingPage({ id, onBack }) {
         ))}
       </div>
       {wide && !recording && showing !== side && !watching && <button type="button" className={`win-btn${split ? ' on' : ''}`} onClick={() => setSplit(!split)} aria-pressed={split} aria-label={combined ? (split ? t('Hide the meetings beside it') : t('Show the meetings beside it')) : split ? t('Hide the transcript beside it') : t('Show the transcript beside it')} title={combined ? (split ? t('Hide the meetings beside it') : t('Show the meetings beside it')) : split ? t('Hide the transcript beside it') : t('Show the transcript beside it')}><Icon name="panel-right" size={14} /></button>}
-      <button type="button" className="win-btn mt-hb" onClick={save} disabled={busy === 'save'} aria-label={t('Save')} title={t('Save as Markdown in your notes folder')}><Icon name="download" size={14} /></button>
+      <span className="menu-anchor mt-hb">
+        <button type="button" className="win-btn" onClick={() => setSaveMenu(!saveMenu)} disabled={busy === 'save' || busy === 'export'} aria-label={t('Save')} aria-haspopup="menu" aria-expanded={saveMenu} title={t('Save as Markdown, Word or PDF')}><Icon name="download" size={14} /></button>
+        {saveMenu && <Menu onClose={() => setSaveMenu(false)} items={saveItems} />}
+      </span>
       <AiAssist className="btn small mt-ai-btn" compact={phone} on={recording && (!!data.assist || !!lb?.on)} items={assists} />
       <span className="menu-anchor">
         <button type="button" className="win-btn" onClick={() => setMenu(!menu)} aria-label={t('More actions')} title={t('More')}><Icon name="more" size={14} /></button>
         {menu && <Menu onClose={() => setMenu(false)} items={[
-          { icon: 'download', label: t('Save as Markdown'), run: save },
-          { icon: 'doc', label: t('Save as Word (.docx)'), run: () => exportAs('docx') },
-          { icon: 'file', label: t('Save as PDF'), run: () => exportAs('pdf') },
+          ...saveItems,
           data.saved && here() && { icon: 'folder-open', label: t('Show saved notes in Finder'), run: reveal },
           atActions(data.summary) && { icon: 'helm', label: t('Send action items to Chief of Staff'), run: toChief },
           '-',

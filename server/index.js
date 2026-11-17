@@ -1212,7 +1212,7 @@ async function archiveWhere(match) {
     if (!a.sessionId || !adapter(a.kind).resume) continue
     let last = ''
     try { last = preview(a)?.text || '' } catch { /* no transcript */ }
-    archive.add({ kind: a.kind, sessionId: a.sessionId, cwd: a.cwd, label: a.chief ? 'Chief of Staff' : a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title, workspace: a.workspace, preview: last })
+    archive.add({ kind: a.kind, sessionId: a.sessionId, paneId: a.paneId, cwd: a.cwd, label: a.chief ? 'Chief of Staff' : a.tab && !/^\d+$/.test(a.tab) ? a.tab : a.title, workspace: a.workspace, preview: last })
   }
 }
 // The Bridge-made worktrees of the panes about to close; once they have, each one no other pane
@@ -1292,7 +1292,7 @@ app.get('/api/search', wrap(async (req) => {
   const nameOf = (x) => (x.chief ? 'Chief of Staff' : x.tab && !/^\d+$/.test(x.tab) ? x.tab : x.title || null)
   out.results = out.results.map((r) => {
     const a = agents[r.sessionId]
-    return { ...r, paneId: live[r.sessionId] || null, label: (a && nameOf(a)) || closed[r.sessionId]?.label || null, workspace: a?.workspace || closed[r.sessionId]?.workspace || null, cwd: r.cwd ? r.cwd.replace(os.homedir(), '~') : null, fullCwd: r.cwd }
+    return { ...r, paneId: live[r.sessionId] || null, oldPaneId: closed[r.sessionId]?.oldPaneId || null, label: (a && nameOf(a)) || closed[r.sessionId]?.label || null, workspace: a?.workspace || closed[r.sessionId]?.workspace || null, cwd: r.cwd ? r.cwd.replace(os.homedir(), '~') : null, fullCwd: r.cwd }
   })
   const fromCloud = cloud.search(req.query.q)
   if (fromCloud.length) { out.results = [...fromCloud, ...out.results]; out.total = (out.total || 0) + fromCloud.length }

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import AgentMark from './settings/agentMark.jsx'
 import CommandHistory from './CommandHistory.jsx'
+import { carryDraft } from './Composer.jsx'
 import { api } from '../api.js'
 import { locale, t } from '../i18n/index.js'
 
@@ -49,10 +50,13 @@ export default function History({ onClose, onOpen, commands = false }) {
     return () => window.removeEventListener('keydown', k)
   }, [onClose])
 
+  // Resumed in a new pane: what was typed in its message box before it closed goes with it (the
+  // server keeps the pane it closed in, oldPaneId, as drafts are kept by pane).
   const resume = async (r, key) => {
     setBusy(key); setErr(null)
     try {
       const out = await api('/sessions/resume', { method: 'POST', body: { kind: r.kind, sessionId: r.sessionId, cwd: r.fullCwd || r.cwd, label: r.label || r.title, workspace: r.workspace } })
+      carryDraft(r.oldPaneId, out.paneId)
       onOpen(out.paneId, !out.already)
       onClose()
     } catch (e) { setErr(e.message) } finally { setBusy(null) }
