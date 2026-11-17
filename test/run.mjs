@@ -135,6 +135,10 @@ const SUITES = [
   // Bots' record (trace.js): each event written, Activity's conversations and timelines, search,
   // export, the chain checked and a changed line caught, how long it's kept.
   { name: 'bots-activity', build: 'dist', browser: true, covers: [/^server\/(frontdesk|slackbot|bots|trace|index)\.js$/, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^test\/stand-ins\/(slack\.mjs|helper-claude\.cjs)$/] },
+  // Bots in Discord and Teams, each client on its own against its stand-in: who asked, what's
+  // heard, replies, rate limits, reconnecting and resuming (Discord), every token checked (Teams).
+  { name: 'discord-client', build: null, covers: [/^server\/(discordbot|connector)\.js$/, /^test\/stand-ins\/discord\.mjs$/] },
+  { name: 'teams-client', build: null, covers: [/^server\/(teamsbot|teamsapp|connector)\.js$/, /^test\/stand-ins\/teams\.mjs$/] },
   { name: 'voice-chief', build: 'dist', browser: true, covers: [/^src\/voice\//, /^src\/dictation\//, /^src\/components\/Console\.jsx$/, /^src\/components\/settings\/Voice\.jsx$/, /^server\/(voicespeak|tts-worker|speech|chief|index)\.js$/, /^chief\//, /^test\/stand-ins\/sherpa\.cjs$/] },
   { name: 'permissions', build: 'dist', browser: true, covers: [/^src\/permissions\.js$/, /^src\/components\/(PermissionFix|RestartChip|UpdateChip)\.jsx$/, /^src\/components\/settings\/(Permissions|General|About|where)\.jsx?$/, /^desktop\/(permissions|main|preload)\.js$/, /^server\/(fixes|updates)\.js$/, /^scripts\/tcc-sim\.mjs$/] },
   { name: 'whiteboard', build: 'dist', browser: true, covers: [/^src\/components\/whiteboard\//, /^shared\/whiteboard\//, /^src\/components\/(Files|Console|Rail|Icon)\.jsx$/, /^src\/(App|lazy)\.jsx$/, /^server\/(boards|index)\.js$/, /^chief\/bin\/bridge$/, /^scripts\/whiteboard-assets\.js$/, /^vite\.config\.js$/] },
