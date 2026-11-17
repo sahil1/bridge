@@ -406,6 +406,15 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     }
     return { problem: ok.length ? 'None of the folders it reads from is a git repository' : 'It reads from no folders' }
   }
+  // (Settings asks every few seconds: a folder's repository is looked up once a minute.)
+  const repoMemo = new Map()
+  async function repoSeen(dir) {
+    const hit = repoMemo.get(dir)
+    if (hit && Date.now() - hit.at < 60000) return hit.r
+    const r = await changes.repoOf(dir).catch(() => ({}))
+    repoMemo.set(dir, { at: Date.now(), r })
+    return r
+  }
   // May this person ask for a change: you, or someone you named (never "everyone in its channels").
   const mayChange = (bot, p) => bot.changes !== 'none' && (isOwner(bot, p) || (bot.askers || []).some((x) => x?.id === p?.id))
   // Agents of yours working in those folders, by the name you see them by: not the Chief of Staff,
@@ -1504,7 +1513,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       let repo = null
       if (bot.changes !== 'none' || bot.repo) repo = await repoFor(bot, folders).catch((e) => ({ problem: e.message }))
       const repos = []
-      for (const f of folders.filter((x) => x.ok)) { const r = await changes.repoOf(f.path).catch(() => ({})); if (r.top) repos.push({ path: f.shown, shown: f.shown, ok: !r.problem, problem: r.problem || null }) }
+      for (const f of folders.filter((x) => x.ok)) { const r = await repoSeen(f.path); if (r.top) repos.push({ path: f.shown, shown: f.shown, ok: !r.problem, problem: r.problem || null }) }
       return {
         folders,
         answerer: kind ? { kind, confined: !!readOnly(kind)?.confined } : null,

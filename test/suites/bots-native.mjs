@@ -51,6 +51,8 @@ try {
     await openSettings(p)
     const up = await p.locator('.sb-update').innerText()
     ok(/Update Your Slack App/.test(up) && /files:read, files:write, commands, assistant:write/.test(up) && /\/pricing-desk/.test(up), 'Settings: Update Your Slack App names what it lacks and what for', up)
+    const icon = await p.locator('[data-setting="slack-identity"] a', { hasText: 'Add an icon in Slack' }).getAttribute('href').catch(() => null)
+    ok(icon === 'https://api.slack.com/apps/A1/general', 'and links straight to its app\'s page in Slack, for its icon (the app known from Slack\'s hello)', icon)
     await shot(p, `${tag}bots-native-update-app`)
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()

@@ -345,6 +345,7 @@
   "Add a task for the chief": "给幕僚长添加任务",
   "Add an API key": "添加 API 密钥",
   "Add an API key or start a local model first (Settings › Model Providers).": "请先添加 API 密钥或启动本地模型（设置 › 模型提供商）。",
+  "Add an icon in Slack": "在 Slack 中添加图标",
   "Add an idea": "添加想法",
   "Add an idea… use #tags to group": "添加想法… 用 #标签 分组",
   "Add and sign in": "添加并登录",

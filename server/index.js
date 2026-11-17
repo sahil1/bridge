@@ -3983,7 +3983,7 @@ async function signInKind(kind) {
 async function botView(b, { brief = false } = {}) {
   const ch = desk.channel(b.id)
   const s = ch?.state() || { state: 'off' }
-  const base = { id: b.id, name: b.name, description: b.description, state: s.state, why: s.why || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null }
+  const base = { id: b.id, name: b.name, description: b.description, state: s.state, why: s.why || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null, appId: s.appId || null }
   const v = await desk.view(b.id)
   if (brief) return { ...base, waiting: v?.waiting || 0 }
   const have = new Set((await installed()).map((k) => k.kind))

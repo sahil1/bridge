@@ -218,6 +218,7 @@ function Identity({ d, here, save, onDelete }) {
         <label className="sb-field"><span>{t('Description')}</span><input className="st-input" value={about} maxLength={140} disabled={!here} placeholder={t('What it answers, in a line')} onChange={(e) => setAbout(e.target.value)} onBlur={() => { if (about.trim() !== (d.description || '')) save({ description: about.trim() }) }} /></label>
       </div>
       <p className="muted small">{t('Its name in Slack, from the manifest. An app made before a rename keeps its old name until you paste the new manifest under App Manifest. Slack\'s manifest can\'t carry an icon: add one in your app\'s page, Basic Information › Display Information › App icon.')}</p>
+      {d.appId && <div className="st-row"><a className="btn small" href={`https://api.slack.com/apps/${encodeURIComponent(d.appId)}/general`} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {t('Add an icon in Slack')}</a></div>}
       {here && (
         <div className="st-row sb-export-bot" data-setting="slack-export">
           <a className="ghost-btn" href={apiUrl(`/bots/${d.id}/bundle`)} download><Icon name="export" size={12} /> {t('Export {bot}', { bot: d.name })}</a>

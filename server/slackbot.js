@@ -372,6 +372,9 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       if (mine !== gen) return
       if (m.type === 'hello') {
         tries = 0
+        // (Which app it is, from Slack's hello: Settings links to its page, for its icon.)
+        const appId = String(m.connection_info?.app_id || '')
+        if (/^A[A-Z0-9]{1,20}$/.test(appId) && kept.appId !== appId) { kept.appId = appId; marked() }
         if (was && was !== socket) drop(was)
         set({ state: 'connected', why: null, connectedAt: new Date().toISOString(), nextTry: null })
         say({ what: 'connected', ok: true })
@@ -1066,7 +1069,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     ws = null
     set({ state: kept.appToken && kept.botToken ? 'off' : 'no-tokens', why: null, nextTry: null })
   }
-  const state = () => ({ ...st, team: kept.team || null, bot: kept.bot || null, tokens: kept.appToken || kept.botToken ? { app: masked(kept.appToken), bot: masked(kept.botToken) } : null, scopes: { missing: kept.botToken ? missing() : null, known: Array.isArray(kept.scopes) } })
+  const state = () => ({ ...st, team: kept.team || null, bot: kept.bot || null, appId: kept.appId || null, tokens: kept.appToken || kept.botToken ? { app: masked(kept.appToken), bot: masked(kept.botToken) } : null, scopes: { missing: kept.botToken ? missing() : null, known: Array.isArray(kept.scopes) } })
 
   // New tokens: each checked with Slack before it's kept (the bot token with auth.test, the
   // app-level one by opening a connection's address), so a wrong one is said at once. Another

@@ -345,6 +345,7 @@
   "Add a task for the chief": "チーフへのタスクを追加",
   "Add an API key": "API キーを追加",
   "Add an API key or start a local model first (Settings › Model Providers).": "先に API キーを追加するか、ローカルモデルを起動してください（設定 › モデルプロバイダー）。",
+  "Add an icon in Slack": "Slack でアイコンを追加",
   "Add an idea": "アイデアを追加",
   "Add an idea… use #tags to group": "アイデアを追加… #タグでグループ化",
   "Add and sign in": "追加してサインイン",
