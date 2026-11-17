@@ -6,7 +6,8 @@
 // and whether it carries on by itself, and Continue now moves it to the other account and tells it
 // to carry on. What's in the message box goes with the conversation to the pane that takes its
 // place, and the window doesn't load again: on another account, restarted on another model (Codex,
-// stand-ins/codex.cjs, restarts to switch), handed to another agent.
+// stand-ins/codex.cjs, restarts to switch), handed to another agent, and closed then resumed from
+// History's Closed agents.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, TEST } from '../lib/harness.mjs'
@@ -222,6 +223,31 @@ try {
     const handed = await carried(p, h.paneId, to?.paneId, 'Then the April ledger')
     ok(handed.ok, "handed off: what was in its message box is in the new agent's, and the window didn't load again", handed)
     ok(errors.length === 0, 'restart and hand-off: no page errors', errors)
+    await ctx.close()
+  }
+
+  // Closed, then resumed from History's Closed agents in a new pane: Closed agents keeps the pane it
+  // was in, so what was in its message box goes too, and the window doesn't load again.
+  {
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    p.on('dialog', (d) => d.accept())
+    const l = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Payroll', newSpace: 'Payroll', prompt: 'idle' })
+    const was = await until(() => agentOf((a) => a.paneId === l.paneId && a.sessionId && a.status !== 'working' && a.status !== 'unknown'), 60000, 1000)
+    ok(!!was, 'a Claude Code agent to close, done working', await agentOf((a) => a.paneId === l.paneId))
+    await p.locator('.tab-main', { hasText: 'Payroll' }).first().click({ timeout: 20000 })
+    await typeDraft(p, l.paneId, 'Then the June payroll')
+    // Kept in this browser (250 ms after it's typed) before it closes.
+    await until(() => p.evaluate((k) => !!localStorage.getItem(k), `cc-draft-${l.paneId}`), 5000, 100)
+    await kit.api(`/tabs/${encodeURIComponent(was?.tabId || '')}/close`, {})
+    const closed = await until(async () => ((await kit.api('/archive')).items || []).find((x) => x.sessionId === was?.sessionId), 15000, 300)
+    ok(closed?.oldPaneId === l.paneId && !closed.paneId, 'closed: Closed agents lists it, with the pane it was in', closed)
+    await p.keyboard.press('ControlOrMeta+Shift+KeyF')
+    await p.locator('.modal.history .hist-item', { hasText: 'Payroll' }).first().locator('button', { hasText: 'Resume' }).click({ timeout: 10000 })
+    const back = await until(() => agentOf((a) => a.sessionId === was?.sessionId && a.paneId !== l.paneId), 30000, 500)
+    ok(!!back, 'Resume: the same conversation, in a new pane', ((await kit.api('/fleet')).agents || []).map((a) => ({ pane: a.paneId, session: a.sessionId, tab: a.tab })))
+    const resumed = await carried(p, l.paneId, back?.paneId, 'Then the June payroll')
+    ok(resumed.ok, "resumed from Closed agents: what was in its message box is in the new one's, and the window didn't load again", resumed)
+    ok(errors.length === 0, 'closed and resumed: no page errors', errors)
     await ctx.close()
   }
 } catch (e) {
