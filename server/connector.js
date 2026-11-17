@@ -1,34 +1,31 @@
-// A bot's way in and out of a chat service (Bots, a beta feature), the same shape for each: Slack
-// (slackbot.js), Discord (discordbot.js) and Microsoft Teams (teamsbot.js). The front desk
-// (frontdesk.js) talks to one channel per bot; combine() below makes one channel of several, so a
-// bot can answer in Slack, Discord and Teams at once without the desk telling them apart, except
-// where it should: who asked, and where (each message says its platform).
+// A bot's way in and out of a chat service (Bots, a beta feature): Slack (slackbot.js), Discord
+// (discordbot.js) and Microsoft Teams (teamsbot.js). The front desk (frontdesk.js) talks to one
+// channel per bot, the object its header describes (post, react, status, whisper, askOwner and
+// settle, context, download, people, channels, and hear with change, act and draft); combine() below
+// makes that one channel of a connector for each place the bot answers, so a bot can answer in
+// Slack, Discord and Teams at once and the desk tells them apart only where it should: who asked,
+// where, and what each platform can do (capsOf).
 //
-// A connector is an object:
+// Discord's and Teams' connectors do what Slack's does, less what's Slack's own: no buttons in your
+// direct messages (askOwner, settle), no "working" status and Stop, no streaming, no files in or
+// out, no /command, shortcut or Home tab. Each has:
 //   id, label, platform     the bot's id, 'Discord', 'discord'
 //   caps                    what the service lets a bot do: { react, edit, typing, threads, history }
 //   start(hear)             connect, and stay connected; hear(m) for each message put to the bot
 //                           (heard() below says what m is); hear.change(m) for an edit or deletion
-//                           in a thread it follows ({ kind, channel, ts, thread, from, text, before })
-//   stop()
-//   state()                 { state: 'off' | 'no-tokens' | 'connecting' | 'connected' |
-//                           'reconnecting' | 'error', why, since, ... } for Settings
-//   post(reply, text)       a reply where the question was asked: { ts, channel, parts }; throws
-//                           an Error with a code (below) and, for 'ratelimited', retryAfter (seconds)
+//   stop(), state(), forget()
+//   post(reply, text)       a reply where the question was asked, or at the top of a channel (a
+//                           scheduled post): { ts, channel, parts }; throws an Error with a code
+//                           (below) and, for 'ratelimited', retryAfter (seconds)
 //   edit(posted, text)      a reply posted before (what post() gave), changed
-//   react({ channel, ts, name, off })   a reaction (by its Slack name: eyes, white_check_mark,
-//                           hourglass_flowing_sand) on a message, or off it; where a service has no
-//                           reactions for bots (Teams), what stands for one, or nothing, said so
-//   typing(reply)           "working on it", where the service shows that
-//   context({ channel, thread, ts, since, dm })   the conversation it was asked in, as context:
-//                           { kind: 'thread' | 'channel' | 'dm', messages: [{ ts, person, text, you }],
-//                           pins, problem }
-//   people()                who can be picked to ask: [{ id, name, detail }]
-//   person(id)              one person, as heard() gives them
-//   forget()                its secrets and what it kept, gone
+//   react({ channel, ts, name, off })   a reaction by its Slack name (eyes, white_check_mark,
+//                           hourglass_flowing_sand), or off it; Teams has none for bots: { skipped }
+//   typing(reply), whisper(reply, user, text)   "typing…"; a word to that person only (their
+//                           direct messages with the bot)
+//   context({ channel, thread, ts, since, dm }), people(), channels(), person(id)
 //
-// Errors a connector throws carry a code the desk acts on: those it tries again (TRY_AGAIN) and
-// the rest, which it doesn't (a token turned down, a channel gone).
+// Errors carry a code the desk acts on: those it tries again (TRY_AGAIN) and the rest, which it
+// doesn't (a token turned down, a channel gone).
 //
 // Who asked is always one shape, so the desk's rule for who may ask is the same everywhere and
 // fails closed: someone the service couldn't say who they are is unknown, and refused, like a guest
@@ -38,6 +35,12 @@
 // person() below makes sure what it gives can't be read as more than it is.
 
 export const PLATFORMS = { slack: 'Slack', discord: 'Discord', teams: 'Microsoft Teams' }
+// What each can do besides answering in place: Slack's own features are Slack's only.
+export const CAPS = {
+  slack: { files: true, stream: true, status: true, owner: true, react: true },
+  discord: { files: false, stream: false, status: false, owner: false, react: true },
+  teams: { files: false, stream: false, status: false, owner: false, react: false },
+}
 // The errors the desk tries again, later (frontdesk.js TRY_AGAIN has the same).
 export const TRY_AGAIN = new Set(['ratelimited', 'offline', 'http_500', 'http_502', 'http_503', 'http_504', 'internal_error', 'fatal_error', 'service_unavailable', 'request_timeout'])
 // Reactions by their Slack names (what the desk asks for), as the others write them.
@@ -62,11 +65,11 @@ export function person(p) {
 }
 
 // A message put to the bot, as the desk takes it, or null when it's malformed (no id, no place):
-//   { platform, ts, channel, thread, mention, dm, from, text, place: { kind: 'dm' | 'channel', id,
-//     name }, at, late, reply, attachments: [{ id, name, type, size }] }
+//   { platform, ts, channel, thread, mention, dm, via, from, text, place: { kind: 'dm' | 'channel',
+//     id, name, within, private }, at, late, reply, attachments: [{ id, name, type, size }] }
 // ts and channel make it unique (one heard twice is one); thread the thread it's a reply in (null
-// at the top); reply what post() needs to answer it where it was; attachments named only, never
-// fetched here.
+// at the top); via 'listen' for a channel it answers in without a mention; reply what post() needs
+// to answer it where it was; attachments named only, never fetched here.
 export function heard(m, platform) {
   if (!m || typeof m !== 'object') return null
   const ts = m.ts != null ? String(m.ts) : ''
@@ -77,10 +80,10 @@ export function heard(m, platform) {
   return {
     platform: platform || m.platform || null,
     ts, channel, thread: m.thread != null && String(m.thread) ? String(m.thread) : null,
-    mention: m.mention === true, dm,
+    mention: m.mention === true, dm, ...(m.via === 'listen' ? { via: 'listen' } : {}),
     from: person(m.from),
     text: String(m.text ?? ''),
-    place: { kind: dm ? 'dm' : 'channel', id: String(m.place?.id || channel), name: m.place?.name ? clip(m.place.name, 120) : null, ...(m.place?.within ? { within: clip(m.place.within, 120) } : {}) },
+    place: { kind: dm ? 'dm' : 'channel', id: String(m.place?.id || channel), name: m.place?.name ? clip(m.place.name, 120) : null, ...(m.place?.within ? { within: clip(m.place.within, 120) } : {}), ...(m.place?.private ? { private: true } : {}) },
     at, late: m.late === true,
     reply: m.reply && typeof m.reply === 'object' ? m.reply : null,
     attachments: Array.isArray(m.attachments) ? m.attachments.slice(0, 20).map((a) => ({ id: a?.id != null ? String(a.id) : null, name: clip(a?.name || 'file', 200), type: a?.type ? String(a.type).slice(0, 100) : null, size: Number.isFinite(a?.size) ? a.size : null })) : [],
@@ -116,72 +119,119 @@ export function split(text, max) {
   return out.length ? out : ['']
 }
 
+// Which of two message ids is later: Slack's (seconds.micro), Discord's (64-bit integers, too big
+// for a Number) and Teams' (milliseconds, or not numbers at all, which are never later).
+export function laterTs(a, b) {
+  const x = String(a ?? '')
+  const y = String(b ?? '')
+  if (/^\d+$/.test(x) && /^\d+$/.test(y)) return BigInt(x) > BigInt(y)
+  const nx = Number(x)
+  const ny = Number(y || 0)
+  return Number.isFinite(nx) && Number.isFinite(ny) && nx > ny
+}
+
 // ---------- Several connectors as one channel ----------
-// One bot answering in more than one place: a channel of the desk made of a connector for each
-// (any of slack, discord, teams). The desk sees one channel. Ids are kept apart by platform: a
-// Slack conversation's and person's ids as Slack gives them (so a bot's record from before stays
-// as it was), a Discord or Teams one's with its platform before it (discord:123, teams:19:…), and
-// each message, reply and connection event says its platform.
-// make: { slack: (cb) => connector, ... }, each given its own callbacks:
-//   say(e)                  what happened to its connection (e.platform added)
-//   threads()               the threads it's answering in on that platform
-//   follows(channel, thread)
+// One bot answering in more than one place: the desk's channel, made of a connector for each (any
+// of slack, discord, teams). Slack's ids are as Slack gives them, so a bot's record from before is
+// as it was, and Slack's messages pass through untouched; a Discord or Teams conversation's and
+// person's ids have the platform before them (discord:123, teams:19:…), and each of their messages,
+// replies and connection events says its platform. What's Slack's own (your direct messages'
+// buttons, files, its Home tab) goes to Slack only.
+// cb: { id, say, threads, follows, listens }, the desk's (with ids as the desk keeps them).
+// make: { slack: (cb) => connector, discord: …, teams: … }, each given its own callbacks, with its
+// own ids.
 const OWN = (p) => (p === 'slack' ? null : `${p}:`)
-export const idOf = (platform, id) => (id == null ? id : OWN(platform) ? `${OWN(platform)}${id}` : String(id))
+export const idOf = (platform, id) => (id == null ? id : OWN(platform) && !String(id).startsWith(OWN(platform)) ? `${OWN(platform)}${id}` : String(id))
 export const platformOf = (id) => { const m = /^(discord|teams):/.exec(String(id ?? '')); return m ? m[1] : 'slack' }
 export const bare = (id) => String(id ?? '').replace(/^(discord|teams):/, '')
+// The platform of a person or place kept by the desk, as words.
+export const platformName = (id) => PLATFORMS[platformOf(id)]
 
-export function combine({ id = 'bot', say = () => {}, threads = () => [], follows = () => false } = {}, make = {}) {
+export function combine({ id = 'bot', say = () => {}, threads = () => [], follows = () => false, listens = () => false } = {}, make = {}) {
   const parts = {}
-  for (const [p, mk] of Object.entries(make)) {
-    if (!PLATFORMS[p] || typeof mk !== 'function') continue
+  for (const p of ['slack', 'discord', 'teams']) {
+    const mk = make[p]
+    if (typeof mk !== 'function') continue
     parts[p] = mk({
-      say: (e) => say({ ...e, platform: p }),
+      say: (e) => say(p === 'slack' ? e : { ...e, platform: p }),
       threads: async () => (await Promise.resolve(threads()).catch(() => [])).filter((t) => platformOf(t.channel) === p).map((t) => ({ ...t, channel: bare(t.channel) })),
       follows: (channel, thread) => follows(idOf(p, channel), thread),
+      listens: (channel) => listens(idOf(p, channel)),
     })
   }
-  const of = (channel) => { const p = platformOf(channel); const c = parts[p]; if (!c) throw failure(`This bot isn't connected to ${PLATFORMS[p]}`, 'channel_not_found'); return c }
+  const of = (p) => { const c = parts[p]; if (!c) throw failure(`This bot isn't set up for ${PLATFORMS[p] || p}`, 'channel_not_found'); return c }
+  const where = (reply) => reply?.platform || platformOf(reply?.channel)
+  const own = (reply) => (reply ? { ...reply, channel: bare(reply.channel) } : reply)
+  // A Discord or Teams message, its ids made the desk's; Slack's as they are.
   const inbound = (p, m) => {
+    if (p === 'slack') return m ? { ...m, platform: 'slack' } : m
     const x = heard(m, p)
     if (!x) return null
-    return { ...x, channel: idOf(p, x.channel), from: { ...x.from, id: idOf(p, x.from.id) }, place: { ...x.place, id: idOf(p, x.place.id), platform: p }, reply: x.reply ? { ...x.reply, platform: p } : null }
+    const { attachments, ...rest } = x // (files are Slack's only: named in the record, never read)
+    return {
+      ...rest, channel: idOf(p, x.channel), from: { ...x.from, id: idOf(p, x.from.id) },
+      place: { ...x.place, id: idOf(p, x.place.id), platform: p }, reply: x.reply ? { ...x.reply, platform: p } : null,
+      ...(attachments.length ? { attached: attachments.map((a) => a.name) } : {}),
+    }
   }
   let hear = null
+  const connectedOf = (p) => parts[p]?.state().state === 'connected'
+  const order = ['connected', 'connecting', 'reconnecting', 'error', 'no-tokens', 'off']
   return {
     id, label: Object.keys(parts).map((p) => PLATFORMS[p]).join(', ') || 'None', platforms: Object.keys(parts), parts,
     start(fn) {
       hear = fn
       for (const [p, c] of Object.entries(parts)) {
         const each = Object.assign((m) => { const x = inbound(p, m); return x && hear ? hear(x) : undefined }, {
-          change: (m) => (hear?.change && m ? hear.change({ ...m, channel: idOf(p, m.channel), from: m.from ? { ...m.from, id: idOf(p, m.from.id) } : null, platform: p }) : undefined),
+          change: (m) => (hear?.change && m ? hear.change(p === 'slack' ? m : { ...m, channel: idOf(p, m.channel), from: m.from ? { ...m.from, id: idOf(p, m.from.id) } : null, platform: p }) : undefined),
+          ...(p === 'slack' ? { act: (a) => hear?.act?.(a), draft: (q) => hear?.draft?.(q) } : {}),
         })
         c.start(each)
       }
     },
-    stop() { hear = null; for (const c of Object.values(parts)) c.stop() },
-    // The first platform's state at the top (as the desk and Settings read one channel's), and each one's.
+    stop(o) { hear = null; for (const c of Object.values(parts)) c.stop(o) },
+    // Slack's state at the top (as the desk and Settings read it: its team, scopes and tokens), its
+    // state the best of any platform's (connected if any is), and each one's.
     state() {
       const each = Object.fromEntries(Object.entries(parts).map(([p, c]) => [p, c.state()]))
-      const first = Object.values(each)[0] || { state: 'off' }
-      return { ...first, platforms: each }
+      const top = each.slack || Object.values(each)[0] || { state: 'off' }
+      const best = Object.entries(each).sort(([, a], [, b]) => order.indexOf(a.state) - order.indexOf(b.state))[0]?.[1] || top
+      // (One that can't go on until something's fixed is said even while another is connected.)
+      const stuck = Object.entries(each).find(([, s]) => s.state === 'error')
+      return { ...top, state: best.state, why: best.state === top.state ? top.why : best.why, platforms: each, ...(stuck && best.state === 'connected' ? { stuck: { platform: stuck[0], why: stuck[1].why } } : {}) }
     },
-    // (What was posted says where, so an edit of it goes back the same way.)
-    async post(reply, text) {
-      const p = reply?.platform || 'slack'
-      const r = await of(idOf(p, reply?.channel)).post(reply, text)
-      return r && typeof r === 'object' ? { ...r, platform: p } : r
+    connected: (p = null) => (p ? connectedOf(p) : Object.keys(parts).some(connectedOf)),
+    // What the platform a conversation's in can do.
+    capsOf: (channel) => CAPS[platformOf(channel)] || CAPS.slack,
+    async post(reply, text, o = {}) {
+      const p = where(reply)
+      const r = await of(p).post(own(reply), text, p === 'slack' ? o : {})
+      return r && typeof r === 'object' ? { files: [], ...r, platform: p } : r
     },
-    edit: (posted, text) => of(idOf(posted?.platform || 'slack', posted?.channel)).edit?.(posted, text),
-    react: ({ channel, ...rest }) => of(channel).react({ channel: bare(channel), ...rest }),
-    typing: (reply) => of(idOf(reply?.platform || 'slack', reply?.channel)).typing?.(reply),
-    context: ({ channel, ...rest }) => of(channel).context({ channel: bare(channel), ...rest }),
+    edit: (posted, text) => of(where(posted)).edit?.(own(posted), text),
+    react: ({ channel, ...rest }) => of(platformOf(channel)).react({ channel: bare(channel), ...rest }),
+    // Slack's "working" status and Stop; nothing elsewhere (null: not shown, nothing to record).
+    status: async (reply, onOff) => { const p = where(reply); return p === 'slack' && parts.slack?.status ? parts.slack.status(own(reply), onOff) : null },
+    whisper: (reply, user, text) => { const p = where(reply); const c = of(p); if (!c.whisper) throw failure(`${PLATFORMS[p]} has no way to tell one person only`, 'not_supported'); return c.whisper(own(reply), bare(user), text) },
+    typing: (reply) => of(where(reply)).typing?.(own(reply)),
+    context: ({ channel, ...rest }) => of(platformOf(channel)).context({ channel: bare(channel), ...rest }),
+    // Slack's own: your direct messages' buttons, files attached.
+    ...(parts.slack ? {
+      askOwner: (owner, item) => parts.slack.askOwner(owner, item),
+      settle: (handle, outcome) => parts.slack.settle(handle, outcome),
+      download: (f) => parts.slack.download(f),
+      setTokens: (t) => parts.slack.setTokens(t),
+      dm: (...a) => parts.slack.dm(...a),
+      missed: (...a) => parts.slack.missed(...a),
+      masked: (...a) => parts.slack.masked(...a),
+    } : {}),
     // Everyone who can be picked, on each platform; a platform that couldn't list them says why
     // (out.problems), and so does one that could list only some (a list's own problem).
     async people(o) {
       const out = []
       const problems = []
       for (const [p, c] of Object.entries(parts)) {
+        if (c.state().state === 'no-tokens') continue
         try {
           const list = await c.people(o)
           for (const x of list) out.push({ ...x, id: idOf(p, x.id), platform: p })
@@ -190,7 +240,16 @@ export function combine({ id = 'bot', say = () => {}, threads = () => [], follow
       }
       return Object.assign(out, { problems })
     },
-    person: (pid) => of(pid).person?.(bare(pid)),
+    // The conversations it's in, on each platform that's connected: [{ id, name, private, platform }].
+    async channels() {
+      const out = []
+      for (const [p, c] of Object.entries(parts)) {
+        if (!c.channels || !connectedOf(p)) continue
+        for (const x of await c.channels().catch(() => [])) out.push({ ...x, id: idOf(p, x.id), platform: p })
+      }
+      return out
+    },
+    person: (pid) => of(platformOf(pid)).person?.(bare(pid)),
     forget() { for (const c of Object.values(parts)) c.forget?.() },
   }
 }

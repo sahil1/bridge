@@ -251,7 +251,7 @@ export async function add({ name, command, cwd, every, workspace, detail, kind, 
   if (schedule && !scheduled) throw Object.assign(new Error(BETA), { status: 400 })
   if (to === 'bot') {
     if (!/^b\d{1,4}$/.test(String(bot || ''))) throw new Error('Say which bot posts it')
-    if (!/^[CG][A-Z0-9]{2,20}$/.test(String(channel?.id || ''))) throw new Error('Pick the channel it posts in')
+    if (!/^([CG][A-Z0-9]{2,20}|discord:\d{1,25}|teams:[^\s"<>]{3,300})$/.test(String(channel?.id || ''))) throw new Error('Pick the channel it posts in')
     const defs = readDefs()
     let id = slug(name)
     while (defs.some((d) => d.id === id)) id += '-2'
@@ -289,7 +289,7 @@ export function update(id, patch) {
   if (bot) defs[i].cwd = ''
   if (patch.kind !== undefined && !bot) { if (patch.kind) defs[i].kind = String(patch.kind).slice(0, 40); else delete defs[i].kind }
   if (patch.to !== undefined && !bot) { if (patch.to === 'chief') { defs[i].to = 'chief'; defs[i].cwd = '' } else delete defs[i].to }
-  if (bot && patch.channel?.id && /^[CG][A-Z0-9]{2,20}$/.test(String(patch.channel.id))) defs[i].channel = { id: String(patch.channel.id), name: String(patch.channel.name || '').replace(/^#/, '').slice(0, 80) || null }
+  if (bot && patch.channel?.id && /^([CG][A-Z0-9]{2,20}|discord:\d{1,25}|teams:[^\s"<>]{3,300})$/.test(String(patch.channel.id))) defs[i].channel = { id: String(patch.channel.id), name: String(patch.channel.name || '').replace(/^#/, '').slice(0, 80) || null }
   // A new schedule counts from now: a time earlier today isn't run straight away.
   if (patch.schedule !== undefined) {
     if (!patch.schedule) for (const k of ['at', 'days', 'date', 'schedule', 'since', 'auto', 'paused']) delete defs[i][k]

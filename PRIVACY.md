@@ -277,9 +277,15 @@ Bridge or your relay.
   edit in a thread it answered in. It asks Teams for the members of the teams and chats it's in, and
   whether someone is a guest or from another organization, to pick who may ask and to turn the rest
   away. Checking your tunnel asks its address for an answer only this computer gives.
-What goes to Discord or Teams is only what goes to Slack: what you send, the answers you let it send
-without asking, its short notes, and in Discord its reactions (Teams has none for bots: it shows that
-the bot is typing instead). Its record says which of them each question came from.
+What goes to Discord or Teams, for a question asked there, is what goes to Slack for one asked in
+Slack: what you send, the answers you let it send without asking, its short notes, what it remembers
+about someone (sent only to them, in a direct message, when they ask), a post you scheduled for a
+channel there, and in Discord its reactions (Teams has none for bots: it shows that the bot is typing
+instead). Slack's own stay in Slack: drafts in your Slack direct messages with their buttons, its
+working status and Stop, streamed answers and files. A file sent with a question in Discord or Teams
+is named in its record, never downloaded or read. Its record says which of them each question came
+from, and keeps people and channels there by their Discord or Teams ids. Disconnect, under Where It
+Answers, deletes its Discord token or its Teams app's secret from your computer.
 
 Files shows your agents' folders, and only the other folders you add to it yourself (Places, with
 the folder picker); it keeps each place's path in `~/.bridge-ai/places.json`, not what's in it, and

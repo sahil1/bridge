@@ -101,6 +101,9 @@ import { make as makeMcpTools } from './mcptools.js'
 import { make as makeOutside } from './outside.js'
 import { makeFrontDesk } from './frontdesk.js'
 import { makeSlack, manifest as slackManifest, SCOPES as SLACK_SCOPES, SCOPE_FOR as SLACK_SCOPE_FOR, commandOf as slackCommand, shortcutOf as slackShortcut } from './slackbot.js'
+import { makeDiscord } from './discordbot.js'
+import { makeTeams, PORT as TEAMS_PORT } from './teamsbot.js'
+import { combine, platformOf, PLATFORMS } from './connector.js'
 import { listTemplates } from './bottemplates.js'
 import * as botsStore from './bots.js'
 import { keepOf } from './trace.js'
@@ -3216,7 +3219,7 @@ async function servedUi() {
 const localAsk = (req) => !req.headers['x-bridge-relay'] && /^(::1|127\.\d+\.\d+\.\d+|::ffff:127\.\d+\.\d+\.\d+)$/.test(String(req.socket?.remoteAddress || ''))
 app.get('/api/health', (req, res) => res.json({
   ok: true, app: 'Bridge AI', version: VERSION, in: auth.allowed(req),
-  ...(localAsk(req) && trialOn('slack-bot') ? { bots: botsStore.list().map((b) => { const st = desk.channel(b.id)?.state() || { state: 'off' }; return { id: b.id, name: b.name, state: st.state, why: st.why || null, paused: b.paused } }) } : {}),
+  ...(localAsk(req) && trialOn('slack-bot') ? { bots: botsStore.list().map((b) => { const st = desk.channel(b.id)?.state() || { state: 'off' }; return { id: b.id, name: b.name, state: st.state, why: st.why || null, paused: b.paused, where: Object.fromEntries(Object.entries(st.platforms || {}).filter(([, x]) => x.state !== 'no-tokens').map(([k, x]) => [k, { state: x.state, why: x.why || null }])) } }) } : {}),
 }))
 // A one-time link that lets a browser on this computer in (apiauth.js): View › Open in Browser in
 // the desktop app, and `bridge-ai open`. to: where it lands ("/", "/?window=…").
@@ -3913,7 +3916,8 @@ async function closePane(paneId) {
 const deskTold = (q) => {
   if (cfg.notify?.needsYou === false) return
   const who = q.from?.name || 'Someone'
-  const where = q.place?.kind === 'dm' ? 'a direct message' : q.place?.name ? `#${q.place.name}` : 'Slack'
+  const plat = platformOf(q.place?.id || q.conv)
+  const where = `${q.place?.kind === 'dm' ? 'a direct message' : q.place?.name ? (plat === 'teams' ? q.place.name : `#${q.place.name}`) : PLATFORMS[plat]}${plat !== 'slack' ? ` (${PLATFORMS[plat]})` : ''}`
   notify.send({ kind: 'needs-you', title: `${q.bot?.name || 'Your bot'}: ${who} asked in ${where}`, body: q.needsOwner ? 'Nothing could answer it: write the reply in Needs You.' : 'An answer waits for you to send or discard.', url: `/?agent=${encodeURIComponent(`slack:${q.id}`)}&inbox=1`, tag: `bot-${q.id}` }).catch(() => {})
 }
 // The files an answering agent opened in its run, from its conversation (for the record).
@@ -3931,17 +3935,26 @@ const desk = makeFrontDesk({
   you: () => String(cfg.name || '').trim() || 'the owner', changed: () => pushFleet(), close: closePane, told: deskTold, readsOf, transcriptOf, modelOf: (kind) => modelFor(kind), computer: () => relay.thisName(),
   commandOf: (b) => slackCommand(b.name), shortcutOf: (b) => slackShortcut(b.name),
 })
-// A bot's Slack app, as a channel of the desk: the channels it answers in without a mention, and
-// what its Home tab says.
+// A bot's Slack app, Discord bot and Teams app, as one channel of the desk (connector.js combine):
+// the channels it answers in without a mention, and what Slack's Home tab says. Each is idle until
+// it's connected. Teams' listener has a port of its own for each bot (3978 for the first, then up,
+// unless you pick one; BRIDGE_TEAMS_PORT moves where they start, and 0 is any free port, for tests).
+const teamsPortOf = (id) => {
+  const base = process.env.BRIDGE_TEAMS_PORT != null && process.env.BRIDGE_TEAMS_PORT !== '' ? Number(process.env.BRIDGE_TEAMS_PORT) : TEAMS_PORT
+  return base === 0 ? 0 : base + Math.max(0, Number(String(id).replace(/\D/g, '')) - 1)
+}
 const connectBot = (id) => {
   if (desk.has(id)) return desk.channel(id)
-  const ch = makeSlack({
-    id, file: botsStore.fileOf(id, 'slack.json'), say: (e) => desk.note(id, e), threads: () => desk.threads(id), follows: (channel, thread) => desk.follows(id, channel, thread),
-    listens: (channel) => desk.listens(id, channel), info: () => { const b = botsStore.get(id); return { ...desk.info(id), command: b ? slackCommand(b.name) : null, shortcut: b ? slackShortcut(b.name) : null } },
+  const ch = combine({ id, say: (e) => desk.note(id, e), threads: () => desk.threads(id), follows: (channel, thread) => desk.follows(id, channel, thread), listens: (channel) => desk.listens(id, channel) }, {
+    slack: (cb) => makeSlack({ id, file: botsStore.fileOf(id, 'slack.json'), ...cb, info: () => { const b = botsStore.get(id); return { ...desk.info(id), command: b ? slackCommand(b.name) : null, shortcut: b ? slackShortcut(b.name) : null } } }),
+    discord: (cb) => makeDiscord({ id, file: botsStore.fileOf(id, 'discord.json'), ...cb }),
+    teams: (cb) => makeTeams({ id, file: botsStore.fileOf(id, 'teams.json'), ...cb, defaultPort: teamsPortOf(id) }),
   })
   desk.add(id, ch)
   return ch
 }
+// Its Slack app, its Discord bot or its Teams app on its own.
+const partOf = (id, p) => connectBot(id).parts?.[p] || null
 // The Slack Bot (#216), carried over once as the first bot; then each bot's channel.
 {
   const was = botsStore.carryOver(cfg.slackBot, { you: String(cfg.name || '').trim(), unset: () => { settings.patch({ slackBot: null }); applyConfigSoon() } })
@@ -3982,8 +3995,12 @@ async function signInKind(kind) {
 // the manifest to make or update its app with, and how many questions wait.
 async function botView(b, { brief = false } = {}) {
   const ch = desk.channel(b.id)
-  const s = ch?.state() || { state: 'off' }
-  const base = { id: b.id, name: b.name, description: b.description, state: s.state, why: s.why || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null, appId: s.appId || null }
+  const all = ch?.state() || { state: 'off' }
+  // (Its Slack app's state at the top, as before; Discord's and Teams' under where.)
+  const s = all.platforms?.slack || all
+  const where = { slack: { state: s.state, why: s.why || null } }
+  for (const k of ['discord', 'teams']) { const x = all.platforms?.[k]; if (x) where[k] = { ...x, owner: b.owners?.[k] || null } }
+  const base = { id: b.id, name: b.name, description: b.description, state: s.state, why: s.why || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null, appId: s.appId || null, where, connected: all.state === 'connected' }
   const v = await desk.view(b.id)
   if (brief) return { ...base, waiting: v?.waiting || 0 }
   const have = new Set((await installed()).map((k) => k.kind))
@@ -3998,7 +4015,7 @@ async function botView(b, { brief = false } = {}) {
   // A member of the workspace with your name, to offer as you in Slack (from the people already listed).
   let ownerGuess = null
   if (!b.owner && me && s.state === 'connected') {
-    const people = await ch.people().catch(() => [])
+    const people = await (ch.parts?.slack || ch).people().catch(() => [])
     const low = me.toLowerCase()
     ownerGuess = people.find((p) => [p.name, p.detail].some((x) => String(x || '').toLowerCase().split(' · ')[0] === low)) || people.find((p) => String(p.name || '').toLowerCase() === low.split(' ')[0]) || null
     if (ownerGuess) ownerGuess = { id: ownerGuess.id, name: ownerGuess.name }
@@ -4006,7 +4023,7 @@ async function botView(b, { brief = false } = {}) {
   const routinesNow = await routines.list().catch(() => ({ routines: [] }))
   return {
     ...base, ...v,
-    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, changes: b.changes, repo: b.repo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus },
+    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus },
     paused: b.paused,
     instructions: { text: botsStore.readOwn(b.id), file },
     agents: ['claude', 'codex'].map((k) => ({ kind: k, label: adapter(k).label, installed: have.has(k), confined: !!readOnly(k)?.confined, canChange: canChange(k) })),
@@ -4060,7 +4077,7 @@ app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
   if (x.who !== undefined) next.who = x.who === 'channels' ? 'channels' : 'named'
   if (x.askers !== undefined) {
     if (!Array.isArray(x.askers)) throw new Error('askers is a list')
-    next.askers = x.askers.slice(0, 200).map((p) => ({ id: String(p?.id || '').trim(), name: String(p?.name || '').replace(/\s+/g, ' ').trim().slice(0, 80) })).filter((p) => /^[UW][A-Z0-9]{2,20}$/.test(p.id))
+    next.askers = x.askers.slice(0, 200).map((p) => ({ id: String(p?.id || '').trim(), name: String(p?.name || '').replace(/\s+/g, ' ').trim().slice(0, 80) })).filter((p) => botsStore.PERSON_ID.test(p.id))
   }
   if (x.others !== undefined) next.others = x.others === 'silent' ? 'silent' : 'polite'
   if (x.auto !== undefined) next.auto = x.auto === true
@@ -4075,6 +4092,17 @@ app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
   if (x.owner !== undefined) {
     if (x.owner && !/^[UW][A-Z0-9]{2,20}$/.test(String(x.owner.id || ''))) throw new Error('Pick yourself from your workspace\'s people')
     next.owner = x.owner ? { id: String(x.owner.id), name: String(x.owner.name || '').replace(/\s+/g, ' ').trim().slice(0, 80) || null } : null
+  }
+  // You in Discord and in Teams, so you may always ask there too (and aren't limited).
+  if (x.owners !== undefined) {
+    const was = { ...(b.owners || {}) }
+    for (const k of ['discord', 'teams']) {
+      if (x.owners?.[k] === undefined) continue
+      const o = x.owners[k]
+      if (o && !(botsStore.PERSON_ID.test(String(o.id || '')) && String(o.id).startsWith(`${k}:`))) throw new Error(`Pick yourself from the people in ${PLATFORMS[k]}`)
+      was[k] = o ? { id: String(o.id), name: String(o.name || '').replace(/\s+/g, ' ').trim().slice(0, 80) || null } : null
+    }
+    next.owners = Object.fromEntries(Object.entries(was).filter(([, v]) => v))
   }
   // What it may change: only with an agent that keeps its edits to its own copy (Claude Code).
   if (x.changes !== undefined) {
@@ -4097,7 +4125,7 @@ app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
   for (const k of ['muted', 'listen']) {
     if (x[k] === undefined) continue
     if (!Array.isArray(x[k])) throw new Error(`${k} is a list`)
-    next[k] = x[k].slice(0, 100).map((c) => ({ id: String(c?.id || '').trim(), name: String(c?.name || '').replace(/^#/, '').trim().slice(0, 80) || null })).filter((c) => /^[CGD][A-Z0-9]{2,20}$/.test(c.id))
+    next[k] = x[k].slice(0, 100).map((c) => ({ id: String(c?.id || '').trim(), name: String(c?.name || '').replace(/^#/, '').trim().slice(0, 80) || null })).filter((c) => botsStore.CHANNEL_ID.test(c.id))
   }
   if (x.readsFrom !== undefined) {
     if (!Array.isArray(x.readsFrom)) throw new Error('readsFrom is a list')
@@ -4144,8 +4172,7 @@ app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
 app.post('/api/bots/:id/tokens', botsGuard, wrapBot(async (req) => {
   onComputer(req)
   const b = botOr404(req.params.id)
-  const ch = connectBot(b.id)
-  const r = await ch.setTokens(req.body || {})
+  const r = await partOf(b.id, 'slack').setTokens(req.body || {})
   desk.record(b.id, 'settings.changed', { setting: 'tokens', old: null, new: r.tokens, by: String(cfg.name || '').trim() || 'the owner' })
   desk.sync()
   return botView(b)
@@ -4153,10 +4180,85 @@ app.post('/api/bots/:id/tokens', botsGuard, wrapBot(async (req) => {
 app.delete('/api/bots/:id/tokens', botsGuard, wrapBot(async (req) => {
   onComputer(req)
   const b = botOr404(req.params.id)
-  const ch = desk.channel(b.id)
+  const ch = partOf(b.id, 'slack')
   const had = ch?.state().tokens || null
   ch?.forget()
   desk.record(b.id, 'settings.changed', { setting: 'tokens', old: had, new: null, by: String(cfg.name || '').trim() || 'the owner' })
+  return botView(b)
+}))
+// Its Discord bot: its token, checked with Discord before it's kept (and the server it answers in,
+// when it's in more than one); and forgotten. Only its last four in the record.
+const botOwnerName = () => String(cfg.name || '').trim() || 'the owner'
+app.post('/api/bots/:id/discord', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const b = botOr404(req.params.id)
+  const r = await partOf(b.id, 'discord').setToken({ token: req.body?.token, guild: req.body?.guild || null })
+  desk.record(b.id, 'settings.changed', { setting: 'discord', old: null, new: { token: r.tokens?.bot || null, bot: r.bot?.name || null, server: r.guild?.name || null }, by: botOwnerName() })
+  desk.sync()
+  return botView(b)
+}))
+app.post('/api/bots/:id/discord/server', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const b = botOr404(req.params.id)
+  const was = partOf(b.id, 'discord').state().guild
+  const r = await partOf(b.id, 'discord').setGuild(req.body?.guild)
+  desk.record(b.id, 'settings.changed', { setting: 'discord.server', old: was?.name || null, new: r.guild?.name || null, by: botOwnerName() })
+  return botView(b)
+}))
+app.delete('/api/bots/:id/discord', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const b = botOr404(req.params.id)
+  const ch = partOf(b.id, 'discord')
+  const had = ch.state().tokens?.bot || null
+  ch.forget()
+  desk.record(b.id, 'settings.changed', { setting: 'discord', old: { token: had }, new: null, by: botOwnerName() })
+  return botView(b)
+}))
+// Its Teams app: its Azure Bot's app ID, client secret and your organization's tenant, checked with
+// Microsoft before they're kept; your tunnel's address and its port; the tunnel checked; its Teams
+// app to upload; and forgotten. The secret only as its last four in the record.
+app.post('/api/bots/:id/teams', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const b = botOr404(req.params.id)
+  const r = await partOf(b.id, 'teams').setCredentials({ appId: req.body?.appId, password: req.body?.password, tenantId: req.body?.tenantId, single: req.body?.single !== false })
+  desk.record(b.id, 'settings.changed', { setting: 'teams', old: null, new: { appId: r.app?.id || null, tenant: r.tenant || null, secret: r.tokens?.secret || null }, by: botOwnerName() })
+  desk.sync()
+  return botView(b)
+}))
+app.post('/api/bots/:id/teams/endpoint', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const b = botOr404(req.params.id)
+  const ch = partOf(b.id, 'teams')
+  const was = ch.state()
+  const r = await ch.setEndpoint({ ...(req.body?.publicUrl !== undefined ? { publicUrl: req.body.publicUrl } : {}), ...(req.body?.port !== undefined ? { port: req.body.port } : {}) })
+  desk.record(b.id, 'settings.changed', { setting: 'teams.endpoint', old: { url: was.endpoint?.url || null, port: was.port }, new: { url: r.endpoint?.url || null, port: r.port }, by: botOwnerName() })
+  desk.sync()
+  return botView(b)
+}))
+app.post('/api/bots/:id/teams/check', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const b = botOr404(req.params.id)
+  await partOf(b.id, 'teams').checkEndpoint()
+  return botView(b)
+}))
+app.get('/api/bots/:id/teams/app.zip', botsGuard, (req, res) => {
+  try {
+    onComputer(req)
+    const b = botOr404(req.params.id)
+    const out = partOf(b.id, 'teams').teamsApp({ name: b.name, description: b.description, you: String(cfg.name || '').trim() })
+    desk.record(b.id, 'settings.changed', { setting: 'teams.app', old: null, new: { version: out.version }, by: botOwnerName() })
+    res.setHeader('content-type', 'application/zip')
+    res.setHeader('content-disposition', `attachment; filename="${out.file}"`)
+    res.send(out.zip)
+  } catch (e) { res.status(e.status || 400).json({ error: e.message }) }
+})
+app.delete('/api/bots/:id/teams', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const b = botOr404(req.params.id)
+  const ch = partOf(b.id, 'teams')
+  const had = ch.state()
+  ch.forget()
+  desk.record(b.id, 'settings.changed', { setting: 'teams', old: { appId: had.app?.id || null, secret: had.tokens?.secret || null }, new: null, by: botOwnerName() })
   return botView(b)
 }))
 // Connect again now (after it stopped on an error you've since fixed in Slack, or an app updated).
@@ -4237,6 +4339,7 @@ app.post('/api/bots/import', botsGuard, wrapBot(async (req) => {
     ...(v.folders || []).filter((f) => !f.ok).map((f) => `${f.shown} isn't on this computer: ${f.problem}`),
     ...(r.renamed ? [`There's a bot called ${r.bot.name.replace(/ \(\d+\)$/, '')} here already, so this one is ${r.bot.name}`] : []),
     'Connect its Slack app here: paste its two tokens under Your Slack App. (A bot\'s tokens never go in its file.)',
+    'If it answered in Discord or Teams too, connect those here under Where It Answers.',
   ]
   pushFleet()
   return { ...v, problems }
@@ -4244,7 +4347,7 @@ app.post('/api/bots/import', botsGuard, wrapBot(async (req) => {
 // The conversations it's in, to pick channels from.
 app.get('/api/bots/:id/channels', botsGuard, wrapBot(async (req) => {
   const ch = desk.channel(botOr404(req.params.id).id)
-  if (!ch || ch.state().state !== 'connected') throw Object.assign(new Error('Connect it to Slack first, to pick from the channels it\'s in'), { status: 409 })
+  if (!ch || ch.state().state !== 'connected') throw Object.assign(new Error('Connect it first (Slack, Discord or Teams), to pick from the channels it\'s in'), { status: 409 })
   return { channels: await ch.channels() }
 }))
 // It as a file: instructions, memory and settings, never its tokens.

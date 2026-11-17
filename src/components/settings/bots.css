@@ -231,3 +231,20 @@
 .modal.settings.phone .sb :is(.sb-repo .st-input, .sb-pick-channel, .sb-limits .st-input, .sb-sched-add .st-input, .sb-mem-add select.st-input, .sb-try select.st-input) { height: 42px; font-size: 16px; }
 .modal.settings.phone .sb .sb-try-q { font-size: 16px; }
 .modal.settings.phone .sb .sb-link { display: inline-block; min-height: 40px; line-height: 40px; max-width: 100%; }
+
+/* Where It Answers: Slack, Discord and Microsoft Teams, each with its connection's dot. */
+.sb-where-tabs { flex-wrap: wrap; }
+.sb-where-tabs button { display: inline-flex; align-items: center; gap: 6px; }
+.sb-where-tabs .sb-dot, .app.narrow .sb-where-tabs .sb-dot { padding: 0; }
+.sb-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.sb-plat { display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 4px; font-size: 10.5px; font-weight: 500; line-height: 16px; vertical-align: 1px; color: var(--ink-2); background: var(--pane-2); }
+.sb-plat.p-discord { color: #5865f2; background: rgba(88, 101, 242, 0.12); }
+.sb-plat.p-teams { color: #6264a7; background: rgba(98, 100, 167, 0.14); }
+.sb-cmds { display: grid; gap: 4px; margin: 6px 0; min-width: 0; }
+.sb-cmd { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sb-cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 11.5px; padding: 3px 6px; border-radius: 5px; background: var(--pane-2); }
+.sb-tunnel { display: grid; gap: 6px; margin-top: 6px; min-width: 0; }
+.sb-endpoint, .sb-rejected { margin-top: 6px; }
+.sb-server { max-width: 360px; }
+.modal.settings.phone .sb .sb-where-tabs button { min-height: 40px; }
+.modal.settings.phone .sb :is(.sb-tunnel .st-input, .sb-server select) { height: 42px; font-size: 16px; }

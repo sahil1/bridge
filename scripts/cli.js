@@ -193,7 +193,15 @@ function relayLine(r) {
   const limit = r.limit ? `\n            ${r.limit.why === 'day' ? `Today's allowance is used up; phones can connect again after ${at}.` : r.limit.why === 'all' ? `Bridge AI's relay has carried all it can today, for everyone on it; phones can connect again after ${at}.` : r.limit.text}` : ''
   return (r.online ? `online at ${r.url}${update}` : `offline${r.error ? `: ${r.error}` : ', connecting'} (${r.url})`) + limit
 }
-const botLine = (b) => `${b.name}  ${DIM(b.state === 'connected' ? `connected${b.team?.name ? ` to ${b.team.name}` : ''}` : b.state === 'no-tokens' ? 'not connected yet: bridge-ai bots connect' : `${b.state}${b.why ? `: ${b.why}` : ''}`)}${b.waiting ? ` ${DIM(`(${b.waiting} waiting for you)`)}` : ''}`
+const slackSaid = (b) => (b.state === 'connected' ? `connected${b.team?.name ? ` to ${b.team.name}` : ''}` : b.state === 'no-tokens' ? 'not connected yet: bridge-ai bots connect' : `${b.state}${b.why ? `: ${b.why}` : ''}`)
+// (A bot in Discord or Teams too: each one's connection, Slack's only where it's set up. Those are
+// connected in Settings › Bots › Where It Answers.)
+const PLATFORM = { slack: 'Slack', discord: 'Discord', teams: 'Microsoft Teams' }
+const botLine = (b) => {
+  const others = Object.entries(b.where || {}).filter(([k, x]) => k !== 'slack' && x.state && x.state !== 'no-tokens')
+  const said = !others.length ? slackSaid(b) : [...(b.state !== 'no-tokens' ? [['slack', b]] : []), ...others].map(([k, x]) => `${PLATFORM[k]}: ${x.state === 'connected' ? 'connected' : `${x.state}${x.why ? `: ${x.why}` : ''}`}`).join('; ')
+  return `${b.name}  ${DIM(said)}${b.waiting ? ` ${DIM(`(${b.waiting} waiting for you)`)}` : ''}`
+}
 // Bots on a machine with no screen (the Docker image): listed, brought in from a file exported on
 // your computer, sent out as one, and connected to their Slack app. A bot's tokens never go in its
 // file; they're asked for here, or piped in a line each (the app-level token, then the bot token).

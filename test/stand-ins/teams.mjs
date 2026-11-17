@@ -219,6 +219,18 @@ const server = http.createServer(async (req, res) => {
     if (limits[route]?.n > 0) { const l = limits[route]; l.n--; return answer(res, 429, { error: { code: 'TooManyRequests', message: 'Too many requests' } }, { 'retry-after': String(l.wait) }) }
     if (fails[route]?.after > 0) fails[route].after--
     else if (fails[route]?.n > 0) { const f = fails[route]; f.n--; return answer(res, f.status, f.body) }
+    // A new conversation: a post at the top of a channel (with its first message), or a chat with
+    // one person.
+    if (route === 'POST /v3/conversations') {
+      if (j.isGroup && j.channelData?.channel?.id) {
+        const id = nextId()
+        posted.push({ conversation: `${j.channelData.channel.id};messageid=${id}`, replyTo: null, id, text: j.activity?.text, textFormat: j.activity?.textFormat, type: 'message', newPost: true, channel: j.channelData.channel.id })
+        return answer(res, 201, { id: `${j.channelData.channel.id};messageid=${id}`, activityId: id })
+      }
+      const m = j.members?.[0]?.id
+      if (!m || !Object.values(PEOPLE).some((p) => p.id === m)) return answer(res, 400, { error: { code: 'BadArgument', message: 'no such member' } })
+      return answer(res, 201, { id: `a:personal-${m.slice(3)}` })
+    }
     const conv = decodeURIComponent(url.pathname.split('/')[4] || '')
     const rest = url.pathname.split('/').slice(5)
     if (route === 'POST /v3/conversations/:conv/activities/:id' || route === 'POST /v3/conversations/:conv/activities') {

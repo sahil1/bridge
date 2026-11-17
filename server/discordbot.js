@@ -135,7 +135,7 @@ export function plainText(text, { me = null, mentions = [], channels = {} } = {}
 // ({ what, ok, why }). threads(): the threads it's answering in, to read for what was missed
 // ([{ channel, thread, since }], channel the thread's parent). follows(channel, thread): whether
 // it's answering in that thread now (the desk knows).
-export function makeDiscord({ id = 'discord', file, say = () => {}, threads = () => [], follows = () => false } = {}) {
+export function makeDiscord({ id = 'discord', file, say = () => {}, threads = () => [], follows = () => false, listens = () => false } = {}) {
   const FILE = file
   let kept = read(FILE)
   const save = () => writeFileAtomic(FILE, JSON.stringify(kept, null, 2), { mode: 0o600 })
@@ -441,8 +441,9 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
     return { id, name: shown, guest: false, external: false }
   }
 
-  // A message: a mention of the bot, a direct message, a reply to the bot, or one in a thread it's
-  // answering in, from a person, is handed over; anything else isn't for it and goes no further.
+  // A message: a mention of the bot, a direct message, a reply to the bot, one in a thread it's
+  // answering in, or one at the top of a channel it answers in without a mention (listens), from a
+  // person, is handed over; anything else isn't for it and goes no further.
   async function heard(d, { late = false } = {}) {
     if (!d?.id || !d.channel_id || !hear) return
     const me = kept.bot?.id
@@ -466,15 +467,16 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
     if (d.type !== 0 && d.type !== 19) return // a message, or a reply; not joins, pins or thread notices
     const toMe = d.referenced_message?.author?.id === me && !!me
     const mention = (d.mentions || []).some((u) => u.id === me) || toMe
-    if (!dm && !mention && !(inThread && follows(parent, thread))) return
+    const listen = !dm && !inThread && !mention && listens(parent)
+    if (!dm && !mention && !listen && !(inThread && follows(parent, thread))) return
     if (d.referenced_message?.id) remember(quoted, d.id, d.referenced_message, 500)
     const from = await personOf(d.author, d.member, d.guild_id || null)
     if (from.id && from.name) remember(seen, from.id, from.name, 1000)
     const text = plainText(d.content, { me, mentions: d.mentions, channels: chans })
     const top = !dm && !inThread
     await hear({
-      ts: d.id, channel: parent, thread, mention, dm, from, text,
-      place: dm ? { kind: 'dm', id: d.channel_id, name: null } : { kind: 'channel', id: parent, name: chans[parent]?.name || null, within: guilds[d.guild_id]?.name || null },
+      ts: d.id, channel: parent, thread, mention, dm, from, text, ...(listen ? { via: 'listen' } : {}),
+      place: dm ? { kind: 'dm', id: d.channel_id, name: null } : { kind: 'channel', id: parent, name: chans[parent]?.name || null, within: guilds[d.guild_id]?.name || null, ...(ch?.type === 12 ? { private: true } : {}) },
       at: d.timestamp || new Date().toISOString(),
       late,
       attachments: (d.attachments || []).map((a) => ({ id: a.id, name: a.filename, type: a.content_type || null, size: a.size })),
@@ -503,16 +505,18 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
   // messages; and the message a question replied to, if it did.
   async function context({ channel, thread, ts, since = null, dm = false }) {
     const said = (m) => ({ ts: m.id, person: { id: m.author?.id || null, name: nameOf(m.author, m.member) }, text: clip(plainText(m.content, { me: kept.bot?.id, mentions: m.mentions, channels: chans }), LONGEST_SAID), you: !!kept.bot?.id && m.author?.id === kept.bot.id })
-    const before = (m) => m?.id && later_(ts, m.id) && (!since || later_(m.id, since)) && String(m.content || '').trim()
+    // (A post you scheduled has no message of Discord's to read back from: the latest, then.)
+    const own = /^\d+$/.test(String(ts))
+    const before = (m) => m?.id && (!own || later_(ts, m.id)) && (!since || later_(m.id, since)) && String(m.content || '').trim()
     const withQuote = (list) => { const q = quoted.get(String(ts)); return q && !list.some((m) => m.id === q.id) ? [q, ...list] : list }
     if (thread) {
-      const list = await call('GET', `/channels/${thread}/messages`, { query: { before: ts, limit: THREAD_CONTEXT } }) || []
+      const list = await call('GET', `/channels/${thread}/messages`, { query: { ...(own ? { before: ts } : {}), limit: THREAD_CONTEXT } }) || []
       let starter = null
       try { starter = await call('GET', `/channels/${channel}/messages/${thread}`) } catch { /* a thread not started from a message */ }
       const msgs = withQuote([...(starter ? [starter] : []), ...list]).filter(before).sort(order).slice(-THREAD_CONTEXT)
       return { kind: 'thread', messages: msgs.map(said), pins: [] }
     }
-    const list = await call('GET', `/channels/${channel}/messages`, { query: { before: ts, limit: CHANNEL_CONTEXT } }) || []
+    const list = await call('GET', `/channels/${channel}/messages`, { query: { ...(own ? { before: ts } : {}), limit: CHANNEL_CONTEXT } }) || []
     const messages = withQuote(list).filter(before).sort(order).slice(-CHANNEL_CONTEXT).map(said)
     if (dm) return { kind: 'dm', messages, pins: [] }
     let pins = []
@@ -578,12 +582,12 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
   const partial = new Map() // `${message}:${text's length}` -> { target, ids }
   function post(reply, text) {
     const go = line.then(async () => {
-      if (!reply?.channel || !reply.message) throw failure('Nowhere to reply to', 'invalid_arguments')
+      if (!reply?.channel) throw failure('Nowhere to reply to', 'invalid_arguments')
       const key = `${reply.message}:${String(text).length}`
       const had = partial.get(key)
       let target = had?.target || (reply.thread && !reply.start ? reply.thread : reply.channel)
       let reference = null
-      if (!had && reply.start) {
+      if (!had && reply.start && reply.message) {
         try {
           const t = await call('POST', `/channels/${reply.channel}/messages/${reply.message}/threads`, { body: { name: reply.name || 'Question', auto_archive_duration: 1440 }, waits: 1 })
           learnChannel(t, chans[reply.channel]?.guild)
@@ -638,6 +642,22 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
     const emoji = REACTIONS[name] || name
     const at = where.get(String(ts)) || (reply?.message === ts ? reply.channel : null) || channel
     await call(off ? 'DELETE' : 'PUT', `/channels/${at}/messages/${ts}/reactions/${encodeURIComponent(emoji)}/@me`, { waits: 1 })
+  }
+  // A word to one person only: in their direct messages with the bot (Discord's messages only they
+  // see are for slash commands), where it says where it's from.
+  async function whisper(reply, user, text) {
+    const dm = await call('POST', '/users/@me/channels', { body: { recipient_id: String(user) } })
+    const where = reply?.channel && chans[reply.thread || reply.channel] ? ` (about what you asked in #${chans[chans[reply.channel]?.parent || reply.channel]?.name || 'a channel'})` : ''
+    const ids = []
+    for (const part of split(`${text}${where}`, LONGEST)) ids.push((await call('POST', `/channels/${dm.id}/messages`, { body: { content: part, allowed_mentions: { parse: [] } } })).id)
+    return { ts: ids[0], channel: dm.id }
+  }
+  // The text channels of the server it answers in, to pick from (where it answers without a
+  // mention, where it posts on a schedule): [{ id, name, private }].
+  async function channels() {
+    const home = kept.guild?.id
+    if (!home) return []
+    return Object.values(chans).filter((c) => c.guild === home && TEXT.has(c.type)).map((c) => ({ id: c.id, name: c.name || c.id, private: false })).sort((a, b) => a.name.localeCompare(b.name))
   }
   // "Bridge AI is typing…" where the question was asked, for ten seconds.
   const typing = (reply) => call('POST', `/channels/${reply.thread && !reply.start ? reply.thread : reply.channel}/typing`, { waits: 0 }).then(() => true)
@@ -755,6 +775,6 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
   return {
     id, label: 'Discord', platform: 'discord',
     caps: { react: true, edit: true, typing: true, threads: true, history: true },
-    start, stop, state, post, edit, react, typing, context, people, person, setToken, setGuild, forget, missed,
+    start, stop, state, post, edit, react, typing, whisper, context, people, channels, person, setToken, setGuild, forget, missed,
   }
 }

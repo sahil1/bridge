@@ -195,7 +195,7 @@ export async function verify(authorization, activity, o) {
 
 // id: the bot's. file: where its credentials are kept. say(event): what happened, for its record.
 // threads()/follows(): as Slack's (connector.js). port: where it listens (tests: 0, any free one).
-export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => [], follows = () => false, port = null } = {}) {
+export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => [], follows = () => false, listens = () => false, port = null, defaultPort = PORT } = {}) {
   void threads // (Teams can't be asked for what was missed: nothing to read back)
   const FILE = file
   let kept = read(FILE)
@@ -312,7 +312,7 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
       const s = http.createServer((req, res) => { handle(req, res).catch(() => { try { end(res, 500) } catch { /* gone */ } }) })
       s.requestTimeout = 30000
       s.on('error', reject)
-      s.listen(port ?? kept.port ?? PORT, '127.0.0.1', () => { s.off('error', reject); s.on('error', (e) => say({ what: 'listen', ok: false, why: e.message })); resolve(s) })
+      s.listen(port ?? kept.port ?? defaultPort, '127.0.0.1', () => { s.off('error', reject); s.on('error', (e) => say({ what: 'listen', ok: false, why: e.message })); resolve(s) })
     })
   }
 
@@ -320,6 +320,7 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
   const ring = new Map() // `${conversation}:${thread or ''}` -> [{ ts, at, person, text, you }], in memory only
   const refs = new Map() // message id -> its reply ({ serviceUrl, conversation, activity, channel })
   const quotes = new Map() // message id -> what it quoted
+  const users = new Map() // Entra ID -> { user (Teams' id for them), serviceUrl, tenant }, for a word to them alone
   const members = new Map() // `${conversation}:${user}` -> { at, m } or { at, missing }
   const remember = (map, k, v, max = 2000) => { map.delete(k); map.set(k, v); if (map.size > max) map.delete(map.keys().next().value) }
   function keep(key, m) {
@@ -344,8 +345,20 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
     return { conv, kind, base, root, dm: kind === 'personal' }
   }
   const nameOfPlace = (a, p) => (p.dm ? null : p.kind === 'channel' ? a.channelData?.channel?.name || (a.channelData?.channel?.id === a.channelData?.team?.id ? 'General' : null) : a.conversation?.name || 'Group chat')
-  // The conversations it's in, for people() after Bridge AI starts again (ids and addresses only).
+  // The conversations it's in, for people() and channels() after Bridge AI starts again (ids,
+  // names and addresses only).
   function known(a, p) {
+    if (p.kind === 'channel' && a.serviceUrl) {
+      kept.channels ||= {}
+      const c = kept.channels[p.base]
+      const name = nameOfPlace(a, p) || c?.name || null
+      if (!c || c.serviceUrl !== a.serviceUrl || c.name !== name) {
+        kept.channels[p.base] = { id: p.base, name, team: a.channelData?.team?.name || c?.team || null, serviceUrl: a.serviceUrl, tenant: a.channelData?.tenant?.id || null }
+        const all = Object.entries(kept.channels)
+        if (all.length > 200) kept.channels = Object.fromEntries(all.slice(-200))
+        savedSoon()
+      }
+    }
     kept.conversations ||= {}
     const k = p.kind === 'channel' && a.channelData?.team?.id ? `team:${a.channelData.team.id}` : p.base
     const was = kept.conversations[k]
@@ -441,11 +454,13 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
     if (quote) remember(quotes, String(a.id), quote, 500)
     const reply = { serviceUrl: a.serviceUrl, conversation: p.kind === 'channel' ? `${p.base};messageid=${p.root}` : p.conv, activity: String(a.id), channel: p.base, thread: p.kind === 'channel' ? p.root : null }
     remember(refs, String(a.id), reply)
-    if (!p.dm && !mention && !(thread && follows(p.base, thread))) return
+    if (a.from?.aadObjectId && a.from.id) remember(users, a.from.aadObjectId, { user: a.from.id, serviceUrl: a.serviceUrl, tenant: a.channelData?.tenant?.id || a.conversation?.tenantId || null }, 2000)
+    const listen = !p.dm && !mention && !thread && listens(p.base)
+    if (!p.dm && !mention && !listen && !(thread && follows(p.base, thread))) return
     const from = await personOf(a, p)
     await hear({
-      ts: String(a.id), channel: p.base, thread, mention, dm: p.dm, from, text,
-      place: p.dm ? { kind: 'dm', id: p.base, name: null } : { kind: 'channel', id: p.base, name: nameOfPlace(a, p), within: p.kind === 'channel' ? a.channelData?.team?.name || null : null },
+      ts: String(a.id), channel: p.base, thread, mention, dm: p.dm, from, text, ...(listen ? { via: 'listen' } : {}),
+      place: p.dm ? { kind: 'dm', id: p.base, name: null } : { kind: 'channel', id: p.base, name: nameOfPlace(a, p), within: p.kind === 'channel' ? a.channelData?.team?.name || null : null, ...(p.kind !== 'channel' ? { private: true } : {}) },
       at, late: false, attachments: files, reply,
     })
   }
@@ -478,10 +493,28 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
   }
 
   // ---------- What goes out ----------
-  // A reply to the question, in its thread (a channel's) or its chat. Over Teams' longest, in parts.
+  // A reply to the question, in its thread (a channel's) or its chat; or, with no question (a
+  // scheduled post), a new post at the top of a channel, or a message in a group chat it's in. Over
+  // Teams' longest, in parts.
   let line = Promise.resolve()
+  async function newPost(reply, text) {
+    const c = kept.channels?.[reply.channel]
+    const g = Object.values(kept.conversations || {}).find((x) => x.conversation === reply.channel && x.kind === 'groupChat')
+    if (c) {
+      const j = await connector('POST', c.serviceUrl, 'v3/conversations', { isGroup: true, channelData: { channel: { id: c.id }, ...(c.tenant ? { tenant: { id: c.tenant } } : {}) }, activity: { type: 'message', text: escape(text), textFormat: 'markdown' } }, { waits: 1 })
+      const ts = String(j?.activityId || String(j?.id || '').split(';messageid=')[1] || '')
+      keep(`${c.id}:`, { ts, at: now(), person: { id: kept.bot?.id || null, name: kept.bot?.name || null }, text: clip(String(text), LONGEST_SAID), you: true })
+      return { ts, channel: j?.id || c.id, conversation: j?.id || c.id, serviceUrl: c.serviceUrl, parts: [ts] }
+    }
+    if (g) {
+      const j = await connector('POST', g.serviceUrl, `${convPath(g.conversation)}/activities`, { type: 'message', text: escape(text), textFormat: 'markdown' }, { waits: 1 })
+      return { ts: String(j?.id || ''), channel: g.conversation, conversation: g.conversation, serviceUrl: g.serviceUrl, parts: [String(j?.id || '')] }
+    }
+    throw failure('The bot hasn\'t been sent anything in that channel yet, so Teams has given it no way to post there', 'channel_not_found')
+  }
   function post(reply, text) {
     const go = line.then(async () => {
+      if (reply?.channel && !reply.activity) return newPost(reply, text)
       if (!reply?.serviceUrl || !reply.conversation || !reply.activity) throw failure('Nowhere to reply to', 'invalid_arguments')
       const ids = []
       for (const part of split(text, LONGEST)) {
@@ -507,6 +540,22 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
     if (!reply?.serviceUrl || !reply.conversation) return false
     await connector('POST', reply.serviceUrl, `${convPath(reply.conversation)}/activities`, { type: 'typing' }, { waits: 0 })
     return true
+  }
+  // A word to one person only: in a chat between them and the bot (made if there isn't one yet).
+  async function whisper(reply, aad, text) {
+    const u = users.get(String(aad))
+    if (!u?.user) throw failure('Teams hasn\'t told the bot how to reach them on their own', 'not_supported')
+    const j = await connector('POST', u.serviceUrl, 'v3/conversations', { bot: { id: kept.bot?.id || `28:${kept.appId}` }, members: [{ id: u.user }], isGroup: false, ...(u.tenant ? { tenantId: u.tenant, channelData: { tenant: { id: u.tenant } } } : {}) }, { waits: 1 })
+    if (!j?.id) throw failure('Teams didn\'t open a chat with them', 'invalid_arguments')
+    const r = await connector('POST', u.serviceUrl, `${convPath(j.id)}/activities`, { type: 'message', text: escape(text), textFormat: 'markdown' }, { waits: 1 })
+    return { ts: String(r?.id || ''), channel: j.id }
+  }
+  // The channels and group chats it's in, as far as it's been sent anything there (Teams lists a
+  // team's channels only to an app with more permissions): [{ id, name, private }].
+  async function channels() {
+    const out = Object.values(kept.channels || {}).map((c) => ({ id: c.id, name: c.team ? `${c.name || 'General'} (${c.team})` : c.name || c.id, private: false }))
+    for (const g of Object.values(kept.conversations || {}).filter((x) => x.kind === 'groupChat')) out.push({ id: g.conversation, name: g.name || 'Group chat', private: true })
+    return out.sort((a, b) => a.name.localeCompare(b.name))
   }
   // Teams has no reactions for bots: for 👀, "typing…"; for the rest, nothing, said so.
   async function react({ ts, name, off = false, reply = null }) {
@@ -567,7 +616,7 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
     if (st.state !== 'reconnecting') set({ state: 'connecting', why: null })
     if (!server) {
       try { server = await listen() } catch (e) {
-        const p = port ?? kept.port ?? PORT
+        const p = port ?? kept.port ?? defaultPort
         return later(e.code === 'EADDRINUSE' ? `Port ${p} is in use: pick another for this bot, and point your tunnel at it` : `Couldn't listen on port ${p}: ${e.message}`, { final: e.code === 'EADDRINUSE' || e.code === 'EACCES' })
       }
       if (!hear) { server.close(); server = null; return }
@@ -599,7 +648,7 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
   const state = () => ({
     // (team: your organization, as Slack's workspace is, for its record.)
     ...st, bot: kept.bot || null, app: kept.appId ? { id: kept.appId, single: kept.single !== false } : null, tenant: kept.tenantId || null, team: kept.tenantId ? { id: kept.tenantId, name: null } : null,
-    tokens: kept.password ? { secret: masked(kept.password) } : null, port: server?.address()?.port ?? kept.port ?? PORT, endpoint: { url: endpointUrl(), ...(st.endpoint || {}) },
+    tokens: kept.password ? { secret: masked(kept.password) } : null, port: server?.address()?.port ?? kept.port ?? defaultPort, endpoint: { url: endpointUrl(), ...(st.endpoint || {}) },
   })
 
   // New credentials: the app ID and tenant ID as Azure shows them, and a client secret's Value;
@@ -675,7 +724,7 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
     kept = {}
     try { fs.rmSync(FILE, { force: true }) } catch { /* gone */ }
     tok = { value: null, until: 0 }
-    ring.clear(); refs.clear(); quotes.clear(); members.clear()
+    ring.clear(); refs.clear(); quotes.clear(); members.clear(); users.clear()
     memo = { at: 0, list: null }
     set({ state: 'no-tokens', why: null, endpoint: null })
   }
@@ -683,7 +732,7 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
   return {
     id, label: 'Microsoft Teams', platform: 'teams',
     caps: { react: false, edit: true, typing: true, threads: true, history: false },
-    start, stop, state, post, edit, react, typing, context, people, person, setCredentials, setEndpoint, checkEndpoint, teamsApp, forget,
+    start, stop, state, post, edit, react, typing, whisper, context, people, channels, person, setCredentials, setEndpoint, checkEndpoint, teamsApp, forget,
     // (For tests: how often the signing keys were read.)
     keyFetches: () => keys.fetches(),
   }

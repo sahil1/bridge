@@ -275,6 +275,7 @@ const server = http.createServer(async (req, res) => {
     if (route === 'GET /guilds/:id/members/:id') { const m = memberOf(g.id, seg[3]); return m ? answer(res, 200, m) : no(404, 10007, 'Unknown Member') }
     if (route === 'GET /guilds/:id/members') {
       if (!(a.flags & MEMBERS)) return no(403, 50001, 'Missing Access')
+      if (!/^\d*$/.test(url.searchParams.get('after') || '')) return no(400, 50035, 'Invalid Form Body: Value is not snowflake.')
       const after = BigInt(url.searchParams.get('after') || '0')
       const limit = Number(url.searchParams.get('limit') || 1)
       return answer(res, 200, Object.keys(g.members).filter((u) => BigInt(u) > after).sort((x, y) => Number(x) - Number(y)).slice(0, limit).map((u) => memberOf(g.id, u)))
@@ -291,6 +292,7 @@ const server = http.createServer(async (req, res) => {
       const before = url.searchParams.get('before')
       const after = url.searchParams.get('after')
       const limit = Number(url.searchParams.get('limit') || 50)
+      if ([before, after].some((x) => x != null && !/^\d+$/.test(x))) return no(400, 50035, 'Invalid Form Body: Value is not snowflake.')
       let out = list.filter((m) => (!before || BigInt(m.id) < BigInt(before)) && (!after || BigInt(m.id) > BigInt(after)))
       out = after ? out.slice(0, limit) : out.slice(-limit)
       return answer(res, 200, out.reverse().map((m) => wire(m)))
