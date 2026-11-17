@@ -2,6 +2,11 @@
 #   docker compose exec bridge bridge-ai relay setup   # once: your phone relay, with a Cloudflare API token
 #   docker compose exec bridge bridge-ai pair          # pair your phone (shows a QR code)
 #   docker compose exec bridge bridge-ai status
+# Your bots (Bots, a beta feature), answering in Slack from here while your computer is off: export
+# one in Settings › Bots on your computer, copy the file into the home volume, then
+#   docker compose exec bridge bridge-ai bots import /home/bridge/atlas.bridge-bot.json
+#   docker compose exec bridge bridge-ai bots connect Atlas    # its Slack app's two tokens
+# docker compose ps shows it unhealthy when a bot can't connect (its health check says why).
 # Update: docker compose pull && docker compose up -d. See "Run it on an always-on machine" in README.md.
 services:
   bridge:

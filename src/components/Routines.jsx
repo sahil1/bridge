@@ -212,7 +212,7 @@ function RoutineRow({ r, editing, onChanged, onOpenAgent, setFlash, beta, comput
     try {
       if (kind === 'run') {
         const out = await api(`/routines/${r.id}/run`, { method: 'POST' })
-        setFlash(r.to === 'chief' ? t('{name} sent to your Chief of Staff', { name: r.name }) : out.waiting ? t('{name} started; Claude is waiting on a prompt', { name: r.name }) : r.workspace ? t('{name} started in {space}', { name: r.name, space: r.workspace }) : t('{name} started in a new space', { name: r.name }))
+        setFlash(r.to === 'bot' ? t('{name}: its bot is writing the post', { name: r.name }) : r.to === 'chief' ? t('{name} sent to your Chief of Staff', { name: r.name }) : out.waiting ? t('{name} started; Claude is waiting on a prompt', { name: r.name }) : r.workspace ? t('{name} started in {space}', { name: r.name, space: r.workspace }) : t('{name} started in a new space', { name: r.name }))
         if (out.paneId) setTimeout(() => onOpenAgent?.(out.paneId), 1500)
       } else if (kind === 'done') {
         await api(`/routines/${r.id}/done`, { method: 'POST' })
@@ -240,6 +240,7 @@ function RoutineRow({ r, editing, onChanged, onOpenAgent, setFlash, beta, comput
         <div className="r-title">
           <b>{r.name}</b>
           {r.to === 'chief' && <span className="r-to"><Icon name="helm" size={10} /> {t('Chief of Staff')}</span>}
+          {r.to === 'bot' && <span className="r-to"><Icon name="chat" size={10} /> {t('A bot\'s post in #{channel}', { channel: r.channel?.name || r.channel?.id || '' })}</span>}
           <code className="r-cmd">{r.command}</code>
         </div>
         {timed ? (
@@ -275,7 +276,7 @@ function RoutineRow({ r, editing, onChanged, onOpenAgent, setFlash, beta, comput
                 <button className="icon-btn" onClick={() => act('pause')} disabled={!!busy} aria-label={r.paused ? t('Resume {name}', { name: r.name }) : t('Pause {name}', { name: r.name })} title={r.paused ? t('Resume') : t('Pause')}><Icon name={r.paused ? 'play' : 'pause'} size={13} /></button>
               </>
               : <button className="icon-btn" onClick={() => act('done')} disabled={!!busy} aria-label={t('Mark {name} done', { name: r.name })} title={t('I did this (log it now)')}><Icon name="check" size={13} /></button>}
-            <button className={`run-btn ${r.state === 'ok' || r.state === 'paused' ? '' : 'hot'}`} onClick={() => act('run')} disabled={!!busy} title={r.to === 'chief' ? t('Send {command} to your Chief of Staff now', { command: r.command }) : t('Open a Claude tab in {folder} and run {command}', { folder: r.cwd, command: r.command })}>
+            <button className={`run-btn ${r.state === 'ok' || r.state === 'paused' ? '' : 'hot'}`} onClick={() => act('run')} disabled={!!busy} title={r.to === 'chief' ? t('Send {command} to your Chief of Staff now', { command: r.command }) : r.to === 'bot' ? t('Have its bot write this post for #{channel} now', { channel: r.channel?.name || r.channel?.id || '' }) : t('Open a Claude tab in {folder} and run {command}', { folder: r.cwd, command: r.command })}>
               <Icon name={busy === 'run' ? 'refresh' : 'play'} size={11} className={busy === 'run' ? 'spin' : ''} /> {timed ? t('Run now') : t('Run')}
             </button>
           </>

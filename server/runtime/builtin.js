@@ -70,7 +70,7 @@ function save() {
   // version and at: whether what ends up reopening them was an update or the computer restarting.
   const out = {
     nextId, spaces, tabs, version: VERSION, at: Date.now(),
-    panes: [...panes.values(), ...[...reopening.values()].filter((p) => !panes.has(p.paneId))].map((p) => ({ paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId, kind: p.kind, cwd: p.cwd, model: p.model, ...(p.effort ? { effort: p.effort } : {}), ...(p.access === 'read' ? { access: 'read', ...(p.dirs ? { dirs: p.dirs } : {}) } : {}), sessionId: p.sessionId, account: p.account, ...(p.env ? { env: p.env } : {}), ...(p.midTask ? { midTask: true } : {}), ...(p.continuedAt ? { continuedAt: p.continuedAt } : {}) })),
+    panes: [...panes.values(), ...[...reopening.values()].filter((p) => !panes.has(p.paneId))].map((p) => ({ paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId, kind: p.kind, cwd: p.cwd, model: p.model, ...(p.effort ? { effort: p.effort } : {}), ...(p.access === 'read' || p.access === 'change' ? { access: p.access, ...(p.dirs ? { dirs: p.dirs } : {}) } : {}), sessionId: p.sessionId, account: p.account, ...(p.env ? { env: p.env } : {}), ...(p.midTask ? { midTask: true } : {}), ...(p.continuedAt ? { continuedAt: p.continuedAt } : {}) })),
   }
   // Whole or not at all: which agents to reopen, and which were mid-task, survive a crash mid-save.
   try { writeFileAtomic(STATE, JSON.stringify(out, null, 2)) } catch { /* read-only disk: keep going */ }
@@ -205,7 +205,7 @@ async function adopt(t, s) {
   proc.pid = t.pid
   const kind = s.kind || 'shell'
   const p = {
-    paneId: t.id, tabId: s.tabId, workspaceId: s.workspaceId, kind, cwd: s.cwd, model: s.model || null, effort: s.effort || null, access: s.access === 'read' ? 'read' : null, dirs: s.access === 'read' && s.dirs?.length ? s.dirs : null, sessionId: s.sessionId || null, account: s.account || null, env: s.env || null, proc, remote: true, term: null,
+    paneId: t.id, tabId: s.tabId, workspaceId: s.workspaceId, kind, cwd: s.cwd, model: s.model || null, effort: s.effort || null, access: s.access === 'read' || s.access === 'change' ? s.access : null, dirs: (s.access === 'read' || s.access === 'change') && s.dirs?.length ? s.dirs : null, sessionId: s.sessionId || null, account: s.account || null, env: s.env || null, proc, remote: true, term: null,
     title: t.title || '', status: kind === 'shell' ? null : 'idle', seq: 0, seen: true, setupPending: false,
     startedAt: t.startedAt || Date.now(), lastOutput: t.lastOutput || 0, lastInput: 0, clients: new Set(),
   }

@@ -19,7 +19,12 @@
 //                                   set up for others to try (BRIDGE_REVIEW_PAIRING=1; server/relay.js)
 //   bridge-ai mcp                   Bridge AI as an MCP server on stdio, for another app (scripts/mcp.js)
 //   bridge-ai phones [remove <name>]  paired phones, or remove one
+//   bridge-ai bots                  your bots (Bots, a beta feature) and whether each is connected
+//   bridge-ai bots import <file>    a bot exported from Bridge AI on another computer
+//   bridge-ai bots export <name> [file]   a bot as a file: instructions, memory and settings
+//   bridge-ai bots connect <name>   its Slack app's two tokens, asked for (or piped in, a line each)
 import { spawn } from 'node:child_process'
+import fs from 'node:fs'
 import path from 'node:path'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
@@ -188,6 +193,57 @@ function relayLine(r) {
   const limit = r.limit ? `\n            ${r.limit.why === 'day' ? `Today's allowance is used up; phones can connect again after ${at}.` : r.limit.why === 'all' ? `Bridge AI's relay has carried all it can today, for everyone on it; phones can connect again after ${at}.` : r.limit.text}` : ''
   return (r.online ? `online at ${r.url}${update}` : `offline${r.error ? `: ${r.error}` : ', connecting'} (${r.url})`) + limit
 }
+const botLine = (b) => `${b.name}  ${DIM(b.state === 'connected' ? `connected${b.team?.name ? ` to ${b.team.name}` : ''}` : b.state === 'no-tokens' ? 'not connected yet: bridge-ai bots connect' : `${b.state}${b.why ? `: ${b.why}` : ''}`)}${b.waiting ? ` ${DIM(`(${b.waiting} waiting for you)`)}` : ''}`
+// Bots on a machine with no screen (the Docker image): listed, brought in from a file exported on
+// your computer, sent out as one, and connected to their Slack app. A bot's tokens never go in its
+// file; they're asked for here, or piped in a line each (the app-level token, then the bot token).
+async function botsCmd(args) {
+  const [sub, ...rest] = args
+  const list = await api('/bots')
+  const find = (name) => {
+    const n = String(name || '').trim().toLowerCase()
+    const b = list.bots.find((x) => x.name.toLowerCase() === n || x.id === n)
+    if (!b) throw new Error(`No bot called ${name}. Your bots: ${list.bots.map((x) => x.name).join(', ') || 'none yet'}`)
+    return b
+  }
+  if (!sub || sub === 'list') {
+    if (!list.bots.length) return console.log('No bots yet. Make one in Settings › Bots, or bring one in: bridge-ai bots import <file>')
+    for (const b of list.bots) console.log(botLine(b))
+    return
+  }
+  if (sub === 'import') {
+    if (!rest[0]) throw new Error('Say which file: bridge-ai bots import atlas.bridge-bot.json')
+    const bundle = JSON.parse(fs.readFileSync(rest[0], 'utf8'))
+    const v = await api('/bots/import', { method: 'POST', body: { bundle } })
+    console.log(`Brought in ${v.name}.`)
+    for (const p of v.problems || []) console.log(`  ${p}`)
+    console.log(`Connect its Slack app: bridge-ai bots connect "${v.name}"`)
+    return
+  }
+  if (sub === 'export') {
+    const b = find(rest[0])
+    const text = JSON.stringify(await api(`/bots/${b.id}/bundle`), null, 2)
+    const to = rest[1] || `${b.name.replace(/[^\w.-]+/g, '-')}.bridge-bot.json`
+    fs.writeFileSync(to, text)
+    return console.log(`${b.name} is in ${to}: its instructions, memory and settings, not its tokens.`)
+  }
+  if (sub === 'connect') {
+    const b = find(rest[0])
+    let appToken
+    let botToken
+    if (!process.stdin.isTTY) [appToken, botToken] = (await secret('')).split(/\s+/)
+    else {
+      console.log(`${b.name}'s Slack app: its app-level token (Basic Information › App-Level Tokens, starts xapp-) and its bot token (OAuth & Permissions, starts xoxb-).`)
+      appToken = await secret('App-level token: ')
+      botToken = await secret('Bot token: ')
+    }
+    let v = await api(`/bots/${b.id}/tokens`, { method: 'POST', body: { appToken, botToken } })
+    // (Connecting takes a moment: what it comes to is said.)
+    for (let i = 0; i < 30 && ['connecting', 'reconnecting', 'off'].includes(v.state); i++) { await sleep(500); v = await api(`/bots/${b.id}`) }
+    return console.log(`${v.name}: ${v.state === 'connected' ? `connected to ${v.team?.name || 'Slack'} as @${v.bot?.name || v.name}` : `${v.state}${v.why ? `: ${v.why}` : ''}`}`)
+  }
+  throw new Error(`Unknown: bridge-ai bots ${sub}. Try: list, import, export, connect`)
+}
 const phoneLine = (d) => `${d.name}  ${DIM(d.connected ? 'connected now' : `last seen ${ago(d.lastSeen)}`)}`
 
 async function statusCmd() {
@@ -203,6 +259,9 @@ async function statusCmd() {
     const bits = [c.working && `${c.working} working`, c.blocked && `${c.blocked} need you`, c.done && `${c.done} done`, c.idle && `${c.idle} idle`].filter(Boolean)
     row('Running', f.agents.length ? `${f.agents.length} agent${f.agents.length === 1 ? '' : 's'}${bits.length ? ` (${bits.join(', ')})` : ''}` : 'no agents')
   }
+  // Bots, when the beta feature is on: each one and its connection.
+  const bots = await api('/bots').catch(() => null)
+  if (bots?.bots?.length) row('Bots', bots.bots.map(botLine).join('\n            '))
   if (r) {
     row('Relay', relayLine(r))
     if (r.configured) row('Phones', r.devices.length ? r.devices.map(phoneLine).join('\n            ') : 'none paired yet. Pair one with: bridge-ai pair')
@@ -448,6 +507,7 @@ const run = {
   // stdin and stdout: that app runs this (Settings › MCP Servers adds it).
   mcp: async () => { const { serve } = await import('./mcp.js'); await serve() },
   relay: () => relayCmd(args),
+  bots: () => botsCmd(args),
   pair: () => pairCmd(args),
   phones: () => phonesCmd(args),
   nightly: () => nightlyCmd(args),
@@ -473,6 +533,10 @@ const run = {
                                 a code that lasts, for a computer set up for others to try
                                 (it must run with BRIDGE_REVIEW_PAIRING=1)
   bridge-ai phones [remove <name>]  paired phones, or remove one
+  bridge-ai bots [list]         your bots (Bots, a beta feature) and whether each is connected
+  bridge-ai bots import <file>  a bot exported on another computer (instructions, memory, settings)
+  bridge-ai bots export <name> [file]  a bot as a file, never with its tokens
+  bridge-ai bots connect <name> its Slack app's tokens, asked for (or piped in, a line each)
   bridge-ai nightly [on|off]    nightly builds of main on this computer, for trying what's next`),
 }
 const fn = run[cmd]
