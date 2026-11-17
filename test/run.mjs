@@ -153,6 +153,9 @@ const SUITES = [
   // Bots in Discord and Teams, end to end: set up in Settings › Bots › Where It Answers, questions
   // answered, who's refused, commands, memory, limits, pause, a change, the record naming each.
   { name: 'discord-bot', build: 'dist', browser: true, minutes: 8, covers: [/^server\/(frontdesk|discordbot|connector|bots|botmemory|botchanges|trace|index)\.js$/, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^test\/stand-ins\/(discord\.mjs|helper-claude\.cjs|gh\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
+  // Setting up a bot the first time: where to start, then a checklist for Slack, Discord and Teams
+  // that ticks itself as each is connected, asked and answered, and folds away once done.
+  { name: 'bots-guide', build: 'dist', browser: true, minutes: 6, covers: [/^src\/components\/settings\/(Bots|About)\.jsx$/, /^src\/components\/settings\/bots\.css$/, /^src\/trials\.js$/, /^server\/(frontdesk|index)\.js$/, /^test\/stand-ins\/(slack|discord|teams)\.mjs$/] },
   { name: 'teams-bot', build: 'dist', browser: true, minutes: 8, covers: [/^server\/(frontdesk|teamsbot|teamsapp|connector|bots|botmemory|trace|index)\.js$/, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^test\/stand-ins\/(teams\.mjs|helper-claude\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
   { name: 'voice-chief', build: 'dist', browser: true, covers: [/^src\/voice\//, /^src\/dictation\//, /^src\/components\/Console\.jsx$/, /^src\/components\/settings\/Voice\.jsx$/, /^server\/(voicespeak|tts-worker|speech|chief|index)\.js$/, /^chief\//, /^test\/stand-ins\/sherpa\.cjs$/] },
   { name: 'permissions', build: 'dist', browser: true, covers: [/^src\/permissions\.js$/, /^src\/components\/(PermissionFix|RestartChip|UpdateChip)\.jsx$/, /^src\/components\/settings\/(Permissions|General|About|where)\.jsx?$/, /^desktop\/(permissions|main|preload)\.js$/, /^server\/(fixes|updates)\.js$/, /^scripts\/tcc-sim\.mjs$/] },

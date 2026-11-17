@@ -1564,6 +1564,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         queued: qs.filter((q) => q.state === 'queued').length,
         lastEvent: b.st.connection || null,
         memoryCount: { kept: mem.filter((x) => x.state === 'kept').length, proposed: mem.filter((x) => x.state === 'proposed').length },
+        // On each platform: whether anyone's asked it anything there yet, and whether an answer's gone
+        // (Set Up's checklist ticks its last steps from these).
+        reached: qs.filter((q) => !q.try && !q.migrated && q.how !== 'scheduled').reduce((r, q) => { const p = platOf(q); r[p] ||= { asked: false, answered: false }; r[p].asked = true; if (q.state === 'sent') r[p].answered = true; return r }, {}),
         changes: { repos, repo: repo?.folder?.shown || null, gh: await changes.hasGh(), agentOk: !!kind && canChange(kind), problem: bot.changes === 'none' ? null : !kind || !canChange(kind) ? 'Changes need Claude Code, which keeps its edits to its own copy of the repository' : repo?.problem || null },
       }
     },
