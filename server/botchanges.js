@@ -108,10 +108,14 @@ export async function publish(c, { title, body }) {
 }
 
 // Its copy gone (the branch stays, for a follow-up and for its pull request).
-export async function tidy(c) {
+// Never fails: a folder still in use (on Windows, while its agent's tab is still open) is tried
+// again in a minute, and git forgets a worktree whose folder has gone.
+export async function tidy(c, again = 2) {
   if (!c?.dir) return
   if (c.top) await git(c.top, ['worktree', 'remove', '--force', c.dir])
-  fs.rmSync(c.dir, { recursive: true, force: true })
+  try { fs.rmSync(c.dir, { recursive: true, force: true }) } catch {
+    if (again > 0) setTimeout(() => { tidy(c, again - 1).catch(() => {}) }, 60000).unref?.()
+  }
   if (c.top) await git(c.top, ['worktree', 'prune'])
 }
 // Whether gh is there, for Settings.
