@@ -852,6 +852,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         why: q.why || null, warn: q.warn || null, needsOwner: !!q.needsOwner, change: q.change ? { mode: q.change.mode, branch: q.change.branch, stat: q.change.stat, diff: q.change.diff } : null,
       })
       record(id, 'approval.asked', at(q, { via: 'slack', channel: h.channel, ts: h.ts }))
+      // (Decided while it was on its way: settled at once.)
+      if (q.state !== 'draft' || sending(q)) settleOwner(id, q, q.state === 'discarded' ? 'discarded' : 'sent', { by: you() })
     } catch (e) { record(id, 'approval.failed', at(q, { error: oneLine(e.message, 300) })) }
   }
   function settleOwner(id, q, outcome, extra = {}) {

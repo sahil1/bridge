@@ -13,7 +13,7 @@ on:
   push:
     tags: ['v*']
   pull_request:
-    paths: ['Dockerfile', '.dockerignore', 'package.json', 'package-lock.json', '.github/workflows/docker.yml']
+    paths: ['Dockerfile', '.dockerignore', 'package.json', 'package-lock.json', '.github/workflows/docker.yml', 'scripts/health.js']
   workflow_dispatch:
 
 permissions:
@@ -55,6 +55,7 @@ jobs:
           docker run -d --name bridge bridge-ai:test
           for i in $(seq 30); do docker exec bridge bridge-ai status >/dev/null 2>&1 && break; sleep 2; done
           docker exec bridge bridge-ai status
+          docker exec bridge node /app/scripts/health.js
           docker exec bridge git --version
           docker rm -f bridge
 

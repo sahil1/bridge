@@ -62,7 +62,7 @@ try {
     ok(!!(await until(() => reacted(q1.ts, 'hourglass_flowing_sand'), 8000)), '⏳ on the question as soon as its draft waits')
     const dm1 = await until(() => dmOf('When is support open'), 10000)
     ok(!!dm1 && actionsOf(dm1).join() === `bb_send:${d1.id},bb_edit:${d1.id},bb_discard:${d1.id}` && /From 9 to 5/.test(JSON.stringify(dm1.blocks)) && /Dana/.test(JSON.stringify(dm1.blocks)), 'the draft in your Slack DM: who asked, the question, the draft, and Send, Edit and Discard', dm1 && { text: dm1.text, actions: actionsOf(dm1) })
-    ok(d1.ownerAsked, 'Needs You says it\'s in your Slack DM too')
+    ok(!!(await until(async () => ((await kit.api('/needs-you')).slack || []).find((x) => x.id === d1.id)?.ownerAsked, 8000)), 'Needs You says it\'s in your Slack DM too')
     ok(!(await inThread(q1.ts)).some((x) => /checking this/.test(x.text)), '(no holding reply at once)')
     const hold = await until(async () => (await inThread(q1.ts)).find((x) => /checking this/.test(x.text)), HOLD + 10000)
     ok(hold?.text === 'I\'m checking this with Tester.', '"I\'m checking this with Tester" once it has waited (D8)', hold)
@@ -280,6 +280,22 @@ try {
     const plain = await slack.ask({ user: 'U0SAM', text: `${M} When is support open, roughly? [answer Weekdays, nine to five.]` })
     ok(!!(await until(async () => (await inThread(plain.ts)).find((x) => /Weekdays, nine to five/.test(x.text)), 30000)), 'and in a public channel, one that quotes nothing goes too')
     await kit.api('/bots/b1/settings', { auto: false })
+  })
+
+  // ---------- What your agents are doing (agentsStatus) ----------
+  await part('your agents', async () => {
+    const launched = await kit.api('/agents/launch', { kind: 'claude', cwd: path.join(kit.home, 'notes'), label: 'Notes review', newSpace: 'Notes', prompt: '[work 1] [file review.md] Review the notes.' })
+    await until(async () => (await kit.api('/fleet')).agents.find((x) => x.paneId === launched.paneId && x.sessionId), 20000)
+    await slack.ask({ user: 'U0SAM', text: `${M} What are the agents up to? [agents] [answer That's all.]` })
+    const off = await draftOf('agents up to')
+    ok(/^No agents said\./.test(off?.draft || ''), 'off to start: it isn\'t told what your agents are doing', off?.draft)
+    await kit.api(`/bots/questions/${off.id}`, { send: false })
+    await kit.api('/bots/b1/settings', { agentsStatus: true })
+    await slack.ask({ user: 'U0SAM', text: `${M} And now, what are the agents doing? [agents] [answer That's all.]` })
+    const on = await draftOf('what are the agents doing')
+    ok(/- "Notes review" \(Claude Code\) in ~[/\\]notes: (working|finished|idle)/.test(on?.draft || ''), 'on: their names, folders and how they stand, and nothing of their conversations', on?.draft)
+    await kit.api(`/bots/questions/${on.id}`, { send: false })
+    await kit.api('/bots/b1/settings', { agentsStatus: false })
   })
 
   // ---------- No secrets, and transcripts gzipped after a month ----------
