@@ -14,7 +14,9 @@
 //   background, Bridge AI's accent, right-angled arrows joined to shapes) with Excalidraw's menu,
 //   welcome screen, shortcut numbers, own links, web embeds and Mermaid importer gone, and
 //   hand-drawn as an option; renaming by clicking the name, in the header and the list, keeping the
-//   file and its tab; the Shapes panel searched, a container and an icon added, the container
+//   file and its tab; the list's cards picked with a click and opened with a double-click, Enter, ⌘↓
+//   or their menu's Open (Space: Quick Look on the picture; the arrow keys across and down; Esc lets
+//   go); the Shapes panel searched, a container and an icon added, the container
 //   dragged with what's in it; Auto-layout across and down; "Draw this" with Refine x3: an AWS
 //   diagram with icons and containers, two rounds kept as versions to step through, stopping early,
 //   with the calls counted and a picture sent to a model that can see; PDF export with the board's
@@ -344,6 +346,69 @@ try {
     ok(await until(() => p.locator('.wb-card .wb-name-input').isVisible(), 3000), 'and Rename… in its menu opens the same box')
     await p.keyboard.press('Escape')
     await shot(p, `${tag}whiteboard-v2-list`)
+  })
+
+  // The list's cards are picked and opened as Studio's other lists' files are (files/pick.js): one
+  // click picks a card and nothing else changes; a double-click, Enter or ⌘↓ opens it; Space shows
+  // its picture in Quick Look; ← → go across and ↓ a row down; Esc lets go. Its name and its menu
+  // (Open among them) are still its own.
+  await part('picking a card', async () => {
+    const mine = ['Pick one', 'Pick two', 'Pick three']
+    for (const title of mine) await api('/boards', { title })
+    await toList()
+    const card = (name) => p.locator('.sd-home .wb-card', { hasText: name })
+    const showing = await until(async () => {
+      await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-refetch', { detail: '/boards' })))
+      return (await card('Pick three').count()) > 0 && (await card('Pick one').count()) > 0
+    }, 20000, 1000)
+    if (!showing) throw new Error('the new boards never showed in the list')
+    const order = await p.locator('.sd-home .wb-card .wb-name').allInnerTexts()
+    const pickedNow = async () => (await p.locator('.sd-home .wb-card[aria-selected="true"] .wb-name').allInnerTexts()).join(',')
+    const head = () => p.locator('.sd-home .sd-files-picked').innerText().catch(() => '')
+    // What a click mustn't change: Studio's header, the tab, and no board open.
+    const pageNow = async () => JSON.stringify({ head: await p.locator('.sd-home > .pane-head').innerText().catch(() => null), tabs: await openTabs(), board: await p.locator('.wb-view').count(), look: await p.locator('.fx-ql').count() })
+    const was = await pageNow()
+    const two = order.indexOf('Pick two')
+    await card('Pick two').locator('.wb-thumb').click()
+    // The head's status follows a moment after the card (the list tells Studio's which it picked).
+    await until(async () => /Pick two picked/.test(await head()), 3000, 50)
+    ok(await pickedNow() === 'Pick two' && await p.locator('.sd-home .wb-card.on').count() === 1 && await pageNow() === was && /Pick two picked/.test(await head()),
+      'one click on a card\'s picture picks it, the list\'s head says so, and nothing opens', { picked: await pickedNow(), head: await head(), was, now: await pageNow() })
+    await p.keyboard.press('ArrowRight')
+    const right = await pickedNow()
+    await p.keyboard.press('ArrowLeft')
+    ok(right === order[Math.min(order.length - 1, two + 1)] && await pickedNow() === 'Pick two', '→ picks the next card and ← the one before', { order, right, now: await pickedNow() })
+    // ↓: a row down, as many cards on as sit in the first row (from its last row, it stays put).
+    const across = await p.locator('.sd-home .wb-card').evaluateAll((els) => els.filter((e) => Math.abs(e.getBoundingClientRect().top - els[0].getBoundingClientRect().top) < 2).length)
+    await p.keyboard.press('Home')
+    await p.keyboard.press('ArrowDown')
+    ok(await pickedNow() === (across < order.length ? order[across] : order[0]), '↓ goes a row down, Home to the first card', { across, order, now: await pickedNow() })
+    await card('Pick two').locator('.wb-thumb').click()
+    await p.keyboard.press('Space')
+    ok(!!(await until(async () => /Pick two/.test(await p.locator('.fx-ql-title').innerText().catch(() => '')) && /Whiteboard/.test(await p.locator('.fx-ql').innerText().catch(() => '')), 5000)) && await p.locator('.wb-view').count() === 0,
+      'Space: Quick Look on the card picked, its picture over the list', await p.locator('.fx-ql').innerText().catch(() => ''))
+    await shot(p, `${tag}whiteboard-v2-list-look`)
+    await p.keyboard.press('Space')
+    ok(!!(await until(async () => (await p.locator('.fx-ql').count()) === 0, 4000)) && await pickedNow() === 'Pick two', 'Space again closes it, the card still picked')
+    await p.keyboard.press('Escape')
+    ok(!!(await until(async () => await pickedNow() === '' && !/picked/.test(await head()), 3000, 50)), 'Esc lets go of it', { picked: await pickedNow(), head: await head() })
+    const opens = async (how, what) => {
+      await toList()
+      await card('Pick two').waitFor({ timeout: 10000 })
+      await how(card('Pick two'))
+      ok(!!(await until(async () => (await p.locator('.wb-view .pane-titles .wb-name', { hasText: 'Pick two' }).count()) > 0, 20000)), what)
+    }
+    await opens(async (c) => { await c.locator('.wb-thumb').click(); await p.keyboard.press('Enter') }, 'Enter opens the card picked')
+    await opens((c) => c.locator('.wb-thumb').dblclick(), 'a double-click on its picture opens it')
+    await opens(async (c) => { await c.locator('.wb-thumb').click(); await p.keyboard.press('ControlOrMeta+ArrowDown') }, '⌘↓ opens it')
+    await opens(async (c) => { await c.getByRole('button', { name: 'More' }).click(); await p.getByRole('menuitem', { name: 'Open' }).click() }, 'and Open in its menu still opens it')
+    await toList()
+    await card('Pick two').locator('.wb-thumb').click()
+    await card('Pick two').locator('.wb-name').click()
+    ok(await until(() => p.locator('.wb-card .wb-name-input').isVisible(), 3000), 'a click on a card\'s name still opens the box to rename it')
+    await p.keyboard.press('Escape')
+    await shot(p, `${tag}whiteboard-v2-list-picked`)
+    for (const id of mine) await api(`/boards/${enc(id)}`, null, 'DELETE')
   })
 
   await part('places from before whiteboards were in Studio', async () => {

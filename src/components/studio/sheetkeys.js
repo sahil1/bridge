@@ -13,12 +13,14 @@
 //   ⌘\                           clear the formatting
 //   ⇧⌘7                          a border round what's picked
 //   ⇧⌘H                          find and replace (⌘H hides the app on a Mac)
+//   ⌘R                           fill right (Univer's own key; the desktop app's menu, where it's
+//                                Reload, asks the sheet first: takeMenuKey below)
 //   Ctrl+Shift+Z                 redo on Windows and Linux too (Ctrl+Y is Univer's)
 //   ⇧F2                          a note on the cell
 //   ⌘/                           every shortcut (Univer's list, which has these too)
 //   ⌘P                           print, or save as PDF
-import { IShortcutService, KeyCode, MetaKeys, whenSheetEditorFocused, SheetPasteValueCommand } from '@univerjs/preset-sheets-core'
-import { ICommandService, CommandType, RANGE_TYPE, excelDateSerial } from '@univerjs/presets'
+import { IShortcutService, KeyCode, MetaKeys, whenSheetEditorFocused, SheetPasteValueCommand, SheetCopyRightCommand } from '@univerjs/preset-sheets-core'
+import { ICommandService, IContextService, CommandType, RANGE_TYPE, excelDateSerial } from '@univerjs/presets'
 import { t } from '../../i18n/index.js'
 
 const PAGE_UP = 33
@@ -39,6 +41,20 @@ function datePattern() {
 }
 const twelveHours = () => { try { return new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hour12 !== false } catch { return true } }
 const timePattern = () => (twelveHours() ? 'h:mm:ss AM/PM' : 'hh:mm:ss')
+
+// The desktop app's menu keys a sheet takes while it has focus: its menu asks the window first
+// (desktop/contextmenu.js pageFirst, through window.bridgeMenuKey(accelerator)), and does what it
+// always did when nothing takes the key (⌘R: Reload). Each open sheet answers for itself, so of two
+// side by side the one with focus takes it. take(): true when it took the key.
+const menuKeys = new Map() // accelerator -> Set of take()
+function takeMenuKey(key, take) {
+  if (!menuKeys.has(key)) menuKeys.set(key, new Set())
+  menuKeys.get(key).add(take)
+  return { dispose: () => { menuKeys.get(key)?.delete(take) } }
+}
+if (typeof window !== 'undefined') {
+  window.bridgeMenuKey = (key) => [...(menuKeys.get(String(key)) || [])].some((take) => { try { return take() === true } catch { return false } })
+}
 
 // container: the sheet's own element; onPrint: Print; onSay(words): what a key couldn't do.
 export function googleKeys(univer, u, { container, onPrint, onSay } = {}) {
@@ -181,6 +197,17 @@ export function googleKeys(univer, u, { container, onPrint, onSay } = {}) {
   // does nothing rather than fail.
   const ready = (id) => (ctx) => whenSheetEditorFocused(ctx) && commands.hasCommand(id)
   for (const k of KEYS) offs.push(shortcuts.registerShortcut({ preconditions: ready(k.id), ...k }))
+
+  // ⌘R (Ctrl+R on Windows and Linux): Fill Right, as in Excel, Google Sheets and Numbers, which is
+  // Univer's own key. The desktop app's menu has the same key for Reload and asks first: this sheet
+  // takes it where Univer's key would (its cells have focus, none being typed in), and elsewhere it
+  // stays Reload.
+  const context = injector.get(IContextService)
+  offs.push(takeMenuKey('CmdOrCtrl+R', () => {
+    if (!container?.contains(document.activeElement) || !whenSheetEditorFocused(context)) return false
+    commands.executeCommand(SheetCopyRightCommand.id)
+    return true
+  }))
 
   // ⇧⌘V, the values only. The browser's own paste (its Paste and Match Style, which needs no leave
   // to read what was copied, which the desktop app doesn't give) goes in as Univer pastes, and

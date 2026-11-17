@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { PaneHeader, usePersisted, useMedia } from '../layout.jsx'
-import { api, apiUrl, usePoll, refetch, fmtRelative, onThisComputer } from '../../api.js'
+import { api, apiUrl, BASE, usePoll, refetch, fmtRelative, onThisComputer } from '../../api.js'
 import { t } from '../../i18n/index.js'
 import Canvas, { useDarkMode } from './Canvas.jsx'
 import DrawPanel, { KINDS, useBoardModels } from './DrawPanel.jsx'
@@ -20,6 +20,8 @@ import { holderOf, contents } from './holders.js'
 import { ITEMS } from '../../../shared/whiteboard/catalog.js'
 import { openBoard, openBoards } from './links.js'
 import { NameDialog } from '../FileExtras.jsx'
+import QuickLook from '../files/QuickLook.jsx'
+import { usePick } from '../files/pick.js'
 import AiAssist from '../AiAssist.jsx'
 import { useBusy } from '../../busy.js'
 import { Threads, SAY, useAuthor } from '../studio/doccomments.jsx'
@@ -578,13 +580,19 @@ export function WhiteboardPage({ id, onBack, backLabel = null, tabs = null, onRe
 // title: the first words of what was asked for, as a board's name.
 const titleFor = (s) => String(s || '').replace(/^(draw|make|show|create)\s+(me\s+)?(a|an|the)?\s*/i, '').split(/\s+/).slice(0, 7).join(' ').replace(/[.,;:!?]+$/, '').replace(/^./, (c) => c.toUpperCase())
 
-function BoardCard({ b, onOpen, onError, refresh }) {
+// A board's picture, as the list and Quick Look show it.
+const pictureOf = (b) => (b.preview ? apiUrl(`/boards/${enc(b.id)}/preview?v=${Math.round(b.preview)}`) : null)
+
+// A card: picked on a click, opened on a double-click (on a phone, a tap), as a folder's files are
+// (props: files/pick.js itemProps, on: picked). Its name and menu are its own. onRenamed(id): still
+// picked under its new name.
+function BoardCard({ b, onOpen, onError, refresh, props, on, onRenamed }) {
   const [menu, setMenu] = useState(false)
   const [renaming, setRenaming] = useState(0)
   const rename = async (title) => {
     const r = await api(`/boards/${enc(b.id)}`, { method: 'PATCH', body: { title } })
     // An open board's tab takes the new name too.
-    if (r.id !== b.id) window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { renamed: { from: b.id, to: r.id } } }))
+    if (r.id !== b.id) { window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { renamed: { from: b.id, to: r.id } } })); if (on) onRenamed?.(r.id) }
     refresh()
   }
   const remove = async () => {
@@ -593,9 +601,9 @@ function BoardCard({ b, onOpen, onError, refresh }) {
     refresh()
   }
   return (
-    <li className="wb-card">
-      <button type="button" className="wb-thumb" onClick={() => onOpen?.(b.id)} aria-label={t('Open {name}', { name: b.title })}>{b.preview ? <img src={apiUrl(`/boards/${enc(b.id)}/preview?v=${Math.round(b.preview)}`)} alt="" loading="lazy" /> : <Icon name="shapes" size={22} />}</button>
-      <div className="wb-card-row">
+    <li className={`wb-card${on ? ' on' : ''}`} role="row" {...props}>
+      <span className="wb-thumb" role="gridcell">{b.preview ? <img src={pictureOf(b)} alt="" loading="lazy" draggable={false} /> : <Icon name="shapes" size={22} />}</span>
+      <div className="wb-card-row" role="gridcell">
         <span className="wb-card-title"><EditableName editNow={renaming} name={b.title} onRename={rename} label={t('Name this whiteboard')} /></span>
         <span className="menu-anchor">
           <button type="button" className="win-btn" onClick={() => setMenu(!menu)} aria-label={t('More')} title={t('More')}><Icon name="more" size={13} /></button>
@@ -607,16 +615,21 @@ function BoardCard({ b, onOpen, onError, refresh }) {
           ]} />}
         </span>
       </div>
-      <span className="muted small">{t('Edited {when}', { when: fmtRelative(new Date(b.mtime).toISOString()) })}</span>
+      <span className="muted small" role="gridcell">{t('Edited {when}', { when: fmtRelative(new Date(b.mtime).toISOString()) })}</span>
     </li>
   )
 }
 
 // Shown by Studio's Files for its Whiteboards kind (HomeFiles.jsx), which has the page's header,
-// New and scroll: only what to draw and the boards.
-export function WhiteboardsHome({ onOpen }) {
+// New and scroll: only what to draw and the boards, picked and opened as its other lists' files are
+// (files/pick.js: tap, keys and focus as Explorer.jsx hands them; onPicked(name): the one picked,
+// for the list's head).
+export function WhiteboardsHome({ onOpen, tap = false, keys = null, focus = null, onPicked = null }) {
   const { data, error, refresh } = usePoll('/boards', 15000)
   const boards = data?.boards || []
+  const pick = usePick(boards, { keyOf: (b) => b.id, open: (b) => onOpen?.(b.id), tap, keys, focus, across: true })
+  const pickedName = pick.picked?.title || null
+  useEffect(() => { onPicked?.(pickedName); return () => onPicked?.(null) }, [pickedName, onPicked])
   const [text, setText] = useState('')
   const [kind, setKind] = usePersisted('cc-board-kind', 'auto')
   const [busy, setBusy] = useState(false)
@@ -663,10 +676,11 @@ export function WhiteboardsHome({ onOpen }) {
         </div>
       )}
       {n > 0 && (
-        <ul className={`wb-grid${dark ? ' dark' : ''}`} aria-label={t('Whiteboards')}>
-          {boards.map((b) => <BoardCard key={b.id} b={b} onOpen={onOpen} onError={setErr} refresh={refresh} />)}
+        <ul className={`wb-grid${dark ? ' dark' : ''}`} role="grid" aria-label={t('Whiteboards')} {...pick.boxProps}>
+          {boards.map((b) => <BoardCard key={b.id} b={b} onOpen={onOpen} onError={setErr} refresh={refresh} props={pick.itemProps(b)} on={pick.picked === b} onRenamed={pick.setSel} />)}
         </ul>
       )}
+      {pick.look && <QuickLook base={BASE} root="board" entry={{ name: pick.picked.title, path: pick.picked.id, mtime: pick.picked.mtime, board: { preview: pictureOf(pick.picked) } }} openLabel={t('Open')} {...pick.look} />}
     </div>
   )
 }

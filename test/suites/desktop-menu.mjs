@@ -2,8 +2,10 @@
 // word in a message box offers what the system's spelling suggests (one click puts it in) and Add
 // to Dictionary, then Cut, Copy and Paste; a word with no suggestions says so; selected text and a
 // link offer Copy and Copy Link; a right-click on nothing shows nothing; every window the app opens
-// gets the menu; and Windows and Linux spell in the computer's languages. Also: every file the
-// desktop app loads goes into the built app.
+// gets the menu; and Windows and Linux spell in the computer's languages. The menu bar's ⌘R (Ctrl+R
+// on Windows and Linux): the window's page asked first, a sheet with focus taking it (Fill Right),
+// and Reload when the page doesn't take it, doesn't answer in time or has gone, or the item was
+// picked with the pointer. Also: every file the desktop app loads goes into the built app.
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -11,7 +13,7 @@ import { checks, ROOT } from '../lib/harness.mjs'
 
 const { ok, done } = checks('desktop-menu')
 const require = createRequire(import.meta.url)
-const { attach, menuFor } = require(path.join(ROOT, 'desktop', 'contextmenu.js'))
+const { attach, menuFor, pageFirst } = require(path.join(ROOT, 'desktop', 'contextmenu.js'))
 
 const did = []
 const act = { replace: (w) => did.push(['replace', w]), learn: (w) => did.push(['learn', w]), copyLink: (u) => did.push(['link', u]) }
@@ -62,6 +64,48 @@ ok(typed.join(',') === 'the,+teh', 'its items act on that window: the word repla
 wc.handlers['context-menu']?.({}, {})
 ok(popped.length === 1, 'a right-click on nothing: no menu')
 
+// The menu bar's ⌘R: View › Reload, asking the window's page first. A stand-in window's page runs
+// what it's asked against a page of its own (bridgeMenuKey as src/components/studio/sheetkeys.js
+// has it, or none), answers late, or has gone.
+const reloads = []
+const reload = pageFirst({ label: 'Reload', accelerator: 'CmdOrCtrl+R' }, () => reloads.push(1), { ms: 60 })
+const windowWith = (page, { late = false, gone = false, destroyed = false } = {}) => {
+  const asked = []
+  return {
+    asked,
+    webContents: {
+      isDestroyed: () => destroyed,
+      executeJavaScript: (js) => {
+        asked.push(js)
+        if (late) return new Promise(() => {})
+        if (gone) return Promise.reject(new Error('Render frame was disposed'))
+        return Promise.resolve(new Function('window', `return (${js})`)(page))
+      },
+    },
+  }
+}
+const sheet = (took) => ({ bridgeMenuKey: (k) => { took.push(k); return k === 'CmdOrCtrl+R' } })
+const mac = { triggeredByAccelerator: true, metaKey: true, ctrlKey: false }
+const pc = { triggeredByAccelerator: true, metaKey: false, ctrlKey: true }
+const press = async (w, event) => { const before = reloads.length; await reload.click(reload, w, event); return reloads.length > before }
+ok(reload.label === 'Reload' && reload.accelerator === 'CmdOrCtrl+R' && typeof reload.click === 'function', 'View › Reload keeps its name and its key, ⌘R (Ctrl+R on Windows and Linux)', reload)
+let took = []
+let w = windowWith(sheet(took))
+ok(!(await press(w, mac)) && took.join() === 'CmdOrCtrl+R' && w.asked.length === 1, '⌘R with a sheet\'s cells in focus: the page asked first takes it (Fill Right), and nothing reloads', { took, asked: w.asked })
+took = []
+w = windowWith(sheet(took))
+ok(!(await press(w, pc)) && took.join() === 'CmdOrCtrl+R', 'Ctrl+R on Windows and Linux: the same', took)
+ok(await press(windowWith({ bridgeMenuKey: () => false }), mac), '⌘R anywhere else (the page doesn\'t take it): Reload')
+ok(await press(windowWith({}), mac), 'a page with nothing to take it (no sheet opened yet, another page): Reload')
+ok(await press(windowWith({ bridgeMenuKey: () => 'yes' }), mac), 'an answer that isn\'t true: Reload')
+const t0 = Date.now()
+const hung = await press(windowWith(sheet([]), { late: true }), mac)
+ok(hung && Date.now() - t0 < 1000, 'a page that doesn\'t answer (hung, or still loading): Reload, once its time is up', Date.now() - t0)
+ok(await press(windowWith(sheet([]), { gone: true }), mac) && await press(windowWith(sheet([]), { destroyed: true }), mac) && await press(undefined, mac), 'a page that has gone, a window closed, or no window: Reload')
+took = []
+w = windowWith(sheet(took))
+ok(await press(w, { triggeredByAccelerator: false, metaKey: false }) && await press(w, { triggeredByAccelerator: true, metaKey: false, ctrlKey: false }) && !took.length && !w.asked.length, 'Reload picked from the View menu, with the pointer or Enter there: Reload, the page not asked', w.asked)
+
 // The desktop app's own files all go into the built app.
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'desktop', 'package.json'), 'utf8'))
 const files = new Set(pkg.build.files)
@@ -69,6 +113,8 @@ const loaded = (f) => [...fs.readFileSync(path.join(ROOT, 'desktop', f), 'utf8')
 const missing = [...new Set([...loaded('main.js'), ...loaded('dictation.js')])].filter((f) => !files.has(f))
 ok(missing.length === 0, 'every file main.js loads is in the built app', missing)
 const main = fs.readFileSync(path.join(ROOT, 'desktop', 'main.js'), 'utf8')
+// Its menu bar: View › Reload is the item above.
+ok(/contextMenu\.pageFirst\(\{ label: 'Reload', accelerator: 'CmdOrCtrl\+R' \}, \(\) => win\?\.webContents\.reload\(\)\)/.test(main) && (main.match(/accelerator: 'CmdOrCtrl\+R'/g) || []).length === 1, 'the app\'s View › Reload is that item, and nothing else in its menu has ⌘R')
 const ready = main.slice(main.indexOf('app.whenReady()'))
 ok(ready.indexOf('contextMenu.attach(') > 0 && ready.indexOf('contextMenu.attach(') < ready.indexOf('createWindow()'), 'the app sets the menu up before its first window opens')
 
