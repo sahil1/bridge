@@ -146,8 +146,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   try { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); if (Array.isArray(j.questions)) old = j; else if (Array.isArray(j.outbox)) data = { v: 2, outbox: j.outbox } } catch { /* none yet */ }
   const save = () => { try { ensureDir(path.dirname(FILE)); writeFileAtomic(FILE, JSON.stringify(data), { mode: 0o600 }) } catch (e) { console.log(`Bots couldn't save what's still to post: ${e.message}`) } }
   const tasks = makeTasks(ensureDir(DIR), you)
-  const bots = new Map() // id -> { channel, trace, st }
+  const bots = new Map() // id -> { channel, trace, st } (a deleted bot's: no channel, its record only)
   const botOf = (id) => store.get(id)
+  // Its name and how long its record is kept, whether it's a bot still or one deleted.
+  const keptOf = (id) => store.get(id) || store.deletedOf(id)
   // The desk's own task list for its helpers, as many at once as its bots allow (2 unless set).
   delegate.list('desk', { tasks, dir: ensureDir(ANSWERS), max: () => Math.max(1, Math.min(5, ...[...bots.keys()].map((id) => botOf(id)?.max || 2))), heard: (h) => heard(h) })
 
@@ -173,6 +175,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const c = e.conv ? st.convs.get(e.conv) : null
     if (c && e.at > c.last) c.last = e.at
     if (e.type === 'connection') st.connection = e
+    if (e.type === 'trace.deleted' && e.all) st.cleared = e.at
     if (e.type === 'run.started' && e.instructions?.hash) st.versions.add(e.instructions.hash)
     const q = e.q ? st.questions.get(e.q) : null
     if (!q) return
@@ -392,6 +395,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   async function react(id, q, ts, name, off = false) {
     const b = bots.get(id)
     if (!b || !ts) return
+    if (!b.channel) return
     const lacks = b.channel.state().scopes?.missing?.includes('reactions:write')
     if (lacks && (off || name !== 'eyes')) return
     try {
@@ -468,7 +472,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     for (const o of data.outbox.filter((x) => x.next <= Date.now())) {
       const b = bots.get(o.bot)
       const q = b?.st.questions.get(o.q)
-      if (!q || !b) { data.outbox = data.outbox.filter((x) => x !== o); save(); continue }
+      if (!q || !b?.channel) { data.outbox = data.outbox.filter((x) => x !== o); save(); continue }
       try {
         const r = await b.channel.post(q.reply, o.text)
         data.outbox = data.outbox.filter((x) => x !== o)
@@ -526,7 +530,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
 
   // ---------- What it shows ----------
   const viewOf = (q) => {
-    const bot = botOf(q.bot)
+    const bot = keptOf(q.bot)
     return {
       id: q.id, bot: { id: q.bot, name: bot?.name || null }, conv: q.conv, how: q.how, from: q.from, text: q.text, more: q.more.map((x) => ({ from: x.person, text: x.text })), place: q.place, at: q.at, heardAt: q.heardAt, late: q.late, migrated: q.migrated,
       state: sending(q) ? 'sending' : q.state,
@@ -586,23 +590,36 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const b = bots.get(id)
     if (!b) return null
     const keep = (e) => !conv || e.conv === conv
-    const bot = botOf(id)
+    const bot = keptOf(id)
     if (format === 'jsonl') return { type: 'application/x-ndjson', ext: 'jsonl', body: `${b.trace.lines({ from, to, keep }).join('\n')}\n` }
     const evs = b.trace.events({ from, to }).filter(keep)
     if (format === 'csv') return { type: 'text/csv', ext: 'csv', body: toCsv(evs) }
     return { type: 'text/markdown', ext: 'md', body: toMarkdown(evs, { bot: bot?.name, where: (e) => (e.place?.kind === 'dm' ? 'A direct message' : e.place?.name ? `#${e.place.name}` : e.channel) }) }
   }
-  // Older months of its record deleted, past the time you keep it for; that's in the record too.
+  // Older months of its record deleted, past the time you keep it for; that's in the record too. A
+  // deleted bot's record with nothing left in it goes whole, with nothing to write that in.
   function prune(id) {
     const b = bots.get(id)
-    const bot = botOf(id)
+    const bot = keptOf(id)
     if (!b || !bot) return []
     const gone = b.trace.prune(KEEP[bot.retention] ?? null)
+    if (gone.length && bot.deleted && !b.trace.events().length) { bots.delete(id); try { store.forgetRecord(id) } catch { /* next time */ } return gone }
     if (gone.length) record(id, 'trace.deleted', { months: gone, keep: bot.retention, why: 'Older than the time its record is kept for' })
     return gone
   }
   const daily = setInterval(() => { for (const id of bots.keys()) prune(id) }, 6 * 3600 * 1000)
   daily.unref?.()
+
+  // Its activity history deleted, when you said so: every month of its record goes, and a
+  // trace.deleted line takes their place, as when months go for their age, so that it was deleted,
+  // when and by whom stays in the record (until the time it's kept for runs out).
+  function clear(id, why) {
+    const b = bots.get(id)
+    if (!b) return
+    const months = b.trace.clear()
+    b.st = fresh()
+    record(id, 'trace.deleted', { months, all: true, by: you(), why })
+  }
 
   // The threads it's answering in, lately, for its channel to read what was missed in them.
   function threads(id) {
@@ -634,28 +651,46 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   }
 
   return {
-    // A bot's channel, its record read back.
+    // A bot's channel, its record read back (a deleted bot's: no channel, its record only).
     add(id, channel) {
-      const trace = makeTrace(path.join(store.DIR, id), () => ({ bot: id, owner: you(), team: channel.state().team?.id || null }))
+      let team = null
+      const trace = makeTrace(path.join(store.DIR, id), () => ({ bot: id, owner: you(), team: (team = channel?.state().team?.id || team) }))
       const st = fresh()
-      for (const e of trace.events()) apply(st, e)
+      const evs = trace.events()
+      for (const e of evs) apply(st, e)
+      // (A deleted bot's later lines say the workspace its earlier ones did.)
+      team = evs.findLast((e) => e.team)?.team || null
       bots.set(id, { channel, trace, st })
       prune(id)
     },
-    // A bot deleted: its channel stopped, its drafts out of Needs You.
-    remove(id) {
-      bots.get(id)?.channel.stop()
-      bots.delete(id)
+    // A bot deleted: its channel stopped, what waited on you discarded (it can't be sent now),
+    // nothing left to post; its record kept, and the deletion in it. history: its activity history
+    // deleted too (clear() below).
+    remove(id, { history = false } = {}) {
+      const b = bots.get(id)
+      if (!b) return
+      b.channel?.stop()
+      b.channel = null
       data.outbox = data.outbox.filter((o) => o.bot !== id)
       save()
+      for (const q of b.st.questions.values()) if (q.state === 'draft' || q.state === 'answering') record(id, 'discarded', at(q, { by: you(), why: 'The bot was deleted' }))
+      record(id, 'settings.changed', { setting: 'deleted', old: null, new: { history: history ? 'deleted' : 'kept' }, by: you() })
+      if (history) clear(id, 'Its activity history was deleted with the bot')
       changed()
     },
+    // A deleted bot's activity history, deleted now (clear() below).
+    forget: (id) => clear(id, 'Its activity history was deleted'),
+    // When a deleted bot's activity history was deleted, if it was.
+    cleared: (id) => bots.get(id)?.st.cleared || null,
+    // Whether it's answering in that thread now, for its channel to keep track of its replies.
+    follows: (id, channel, thread) => { const c = bots.get(id)?.st.convs.get(`${channel}:${thread}`); return !!(c?.answered && Date.now() - Date.parse(c.last) < IDLE_DAYS * 86400000) },
     has: (id) => bots.has(id),
     channel: (id) => bots.get(id)?.channel || null,
     carry,
     // Each bot's channel started while the beta feature is on, stopped when it's off.
     sync() {
       for (const [id, { channel }] of bots) {
+        if (!channel) continue
         if (on()) channel.start(Object.assign((m) => hear(id, m).catch((e) => record(id, 'connection', { what: 'event', ok: false, why: oneLine(e.message, 300) })), { change: (m) => change(id, m) }))
         else channel.stop()
       }

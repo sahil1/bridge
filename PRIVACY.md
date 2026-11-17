@@ -200,7 +200,10 @@ threads, its settings' changes and its connection. Never a token. It's kept for 
 choose 90 days or always (Settings › Bots › Activity), older months deleted whole; it's never in
 usage counts, crash reports or the relay; and Activity exports it only when you ask. A bot's
 settings and instructions are in the same folder, `~/.bridge-ai/bots/<bot>/`. Deleting a bot deletes
-its tokens, its instructions and its record; its Slack app stays in Slack until you delete it there.
+its tokens, its settings and its instructions, and keeps its record, to look at and export in Settings
+› Bots, until the time it's kept for runs out. If you also delete its activity history, its record
+keeps only that it was deleted, when and by whom. Its Slack app stays in Slack until you delete it
+there.
 
 Files shows your agents' folders, and only the other folders you add to it yourself (Places, with
 the folder picker); it keeps each place's path in `~/.bridge-ai/places.json`, not what's in it, and

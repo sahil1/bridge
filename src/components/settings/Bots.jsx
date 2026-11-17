@@ -19,6 +19,8 @@ import './bots.css'
 //     plan.
 //   Activity: its record (server/trace.js): every conversation it took part in, each as a timeline,
 //     with search, filters and export, and whether the record holds.
+// A bot deleted keeps its record, unless you tick that it goes too: it's there under its name,
+// marked deleted, to look at and export until the time it's kept for runs out, or you delete it.
 // What must hold (who may ask, the folders, read-only, which agent) are settings here, enforced by
 // Bridge AI; the instructions only steer. Changes only on the computer it runs on; elsewhere
 // they're shown, not changed.
@@ -73,6 +75,7 @@ function Identity({ d, here, save, onDelete }) {
   const [name, setName] = useState(d.name)
   const [about, setAbout] = useState(d.description || '')
   const [sure, setSure] = useState(false)
+  const [history, setHistory] = useState(false) // its activity deleted too: only when you tick it
   useEffect(() => { setName(d.name) }, [d.name])
   useEffect(() => { setAbout(d.description || '') }, [d.description])
   return (
@@ -86,9 +89,10 @@ function Identity({ d, here, save, onDelete }) {
       {here && (sure
         ? (
           <div className="st-row sb-sure" role="alert">
-            <span className="small">{t('Delete {bot}, its tokens and its record? Export its activity first if you need it. Its Slack app stays in Slack until you delete it there.', { bot: d.name })}</span>
-            <button type="button" className="btn small danger" onClick={onDelete}><Icon name="trash" size={12} /> {t('Delete {bot}', { bot: d.name })}</button>
-            <button type="button" className="ghost-btn" onClick={() => setSure(false)}>{t('Cancel')}</button>
+            <span className="small">{t('Delete {bot}: its tokens, settings and instructions? Its activity stays, to look at and export here, until the time its record is kept for runs out. Its Slack app stays in Slack until you delete it there.', { bot: d.name })}</span>
+            <label className="st-check sb-full"><input type="checkbox" checked={history} onChange={(e) => setHistory(e.target.checked)} /><span className="small">{t('Also delete its activity history')}</span></label>
+            <button type="button" className="btn small danger" onClick={() => onDelete(history)}><Icon name="trash" size={12} /> {t('Delete {bot}', { bot: d.name })}</button>
+            <button type="button" className="ghost-btn" onClick={() => { setSure(false); setHistory(false) }}>{t('Cancel')}</button>
           </div>
         )
         : <div className="st-row"><button type="button" className="ghost-btn danger" onClick={() => setSure(true)}><Icon name="trash" size={12} /> {t('Delete this bot…')}</button></div>)}
@@ -476,12 +480,14 @@ function Activity({ d, here, save }) {
           <span>{g.ok ? (g.events ? t('The record holds: {n} events since {date}, none changed or taken out.', { n: g.events, date: new Date(g.since).toLocaleDateString() }) : t('Nothing in the record yet.')) : t('The record was changed: {why}, at line {line} of {file}.', { why: g.broken.why, line: g.broken.line, file: g.broken.file })}</span>
         </p>
       )}
-      <div className="st-row sb-keep">
-        <span className="small">{t('Keep the record for')}</span>
-        <div className="seg" role="radiogroup" aria-label={t('Keep the record for')}>
-          {[['90d', t('90 days')], ['1y', t('1 year')], ['forever', t('Always')]].map(([k, l]) => <button key={k} type="button" role="radio" aria-checked={d.settings.retention === k} className={d.settings.retention === k ? 'on' : ''} disabled={!here} onClick={() => save({ retention: k })}>{l}</button>)}
+      {!d.deleted && (
+        <div className="st-row sb-keep">
+          <span className="small">{t('Keep the record for')}</span>
+          <div className="seg" role="radiogroup" aria-label={t('Keep the record for')}>
+            {[['90d', t('90 days')], ['1y', t('1 year')], ['forever', t('Always')]].map(([k, l]) => <button key={k} type="button" role="radio" aria-checked={d.settings.retention === k} className={d.settings.retention === k ? 'on' : ''} disabled={!here} onClick={() => save({ retention: k })}>{l}</button>)}
+          </div>
         </div>
-      </div>
+      )}
       <div className="sb-filters">
         <label className="sb-search"><Icon name="search" size={13} /><input value={f.q} onChange={set('q')} placeholder={t('A word in a question or answer')} aria-label={t('Search its activity')} /></label>
         <select className="st-input" value={f.person} onChange={set('person')} aria-label={t('Person')}>
@@ -565,7 +571,7 @@ function Bot({ id, here, onGone, onChanged }) {
     return done
   }
   const again = async () => { try { await api(`/bots/${id}/connect`, { method: 'POST' }) } catch (e) { setNote(e.message) } load() }
-  const remove = async () => { try { await api(`/bots/${id}`, { method: 'DELETE' }); onGone() } catch (e) { setNote(e.message) } }
+  const remove = async (history) => { try { await api(`/bots/${id}${history ? '?history=1' : ''}`, { method: 'DELETE' }); onGone() } catch (e) { setNote(e.message) } }
   const pickTab = (x) => { setTab(x); saved('cc-bot-tab', x) }
   if (error && !d) return <p className="st-note bad"><Icon name="alert" size={13} /> {error}</p>
   if (!d) return <div className="skeleton-rows"><div /><div /><div /></div>
@@ -608,13 +614,40 @@ function NewBot({ here, onMade, first }) {
   )
 }
 
+// A deleted bot: its record, kept to look at and export until the time it's kept for runs out, and
+// deleted now if you say so.
+function DeletedBot({ d, here, reload }) {
+  const [sure, setSure] = useState(false)
+  const [note, setNote] = useState(null)
+  const forget = async () => { try { await api(`/bots/${d.id}/history`, { method: 'DELETE' }); setSure(false); reload() } catch (e) { setNote(e.message) } }
+  return (
+    <>
+      <p className="st-note warn sb-deleted" role="status"><Icon name="info" size={13} /><span>{d.cleared
+        ? t('{bot} was deleted on {date}, and its activity history with it. Its record keeps only that, until the time it\'s kept for runs out.', { bot: d.name, date: new Date(d.cleared).toLocaleDateString() })
+        : t('{bot} was deleted on {date}. Its record stays here, to look at and export, until the time it\'s kept for runs out, or you delete it.', { bot: d.name, date: d.deletedAt ? new Date(d.deletedAt).toLocaleDateString() : '' })}</span></p>
+      {note && <p className="st-note bad" role="alert"><Icon name="alert" size={13} /> {note}</p>}
+      {here ? <Activity d={{ ...d, settings: { retention: d.retention } }} here={here} save={async () => false} /> : <p className="muted small">{t('Its activity is shown in Bridge AI on the computer it runs on: its record never goes through your relay.')}</p>}
+      {here && !d.cleared && (sure
+        ? (
+          <div className="st-row sb-sure" role="alert">
+            <span className="small">{t('Delete {bot}\'s activity history? It can\'t be brought back.', { bot: d.name })}</span>
+            <button type="button" className="btn small danger" onClick={forget}><Icon name="trash" size={12} /> {t('Delete the history')}</button>
+            <button type="button" className="ghost-btn" onClick={() => setSure(false)}>{t('Cancel')}</button>
+          </div>
+        )
+        : <div className="st-row"><button type="button" className="ghost-btn danger" onClick={() => setSure(true)}><Icon name="trash" size={12} /> {t('Delete its activity history…')}</button></div>)}
+    </>
+  )
+}
+
 export default function Bots() {
   const here = onThisComputer()
   const [list, setList] = useState(null)
+  const [gone, setGone] = useState([]) // bots deleted whose record is kept
   const [error, setError] = useState(null)
   const [at, setAt] = useState(() => saved('cc-bot'))
   const [adding, setAdding] = useState(false)
-  const load = () => api('/bots').then((r) => { setList(r.bots); setError(null) }, (e) => setError(e.message))
+  const load = () => api('/bots').then((r) => { setList(r.bots); setGone(r.deleted || []); setError(null) }, (e) => setError(e.message))
   useEffect(() => {
     load()
     const every = setInterval(() => { if (!document.hidden) load() }, 8000)
@@ -623,7 +656,9 @@ export default function Bots() {
   const pick = (id) => { setAt(id); saved('cc-bot', id); setAdding(false) }
   if (error && !list) return <p className="st-note bad"><Icon name="alert" size={13} /> {error}</p>
   if (!list) return <div className="skeleton-rows"><div /><div /><div /></div>
-  const shown = list.find((b) => b.id === at) ? at : list[0]?.id || null
+  const old = gone.find((b) => b.id === at) || null
+  const shown = old ? null : list.find((b) => b.id === at) ? at : list[0]?.id || null
+  const left = () => { setAt(null); saved('cc-bot', ''); load() }
   return (
     <div className="st-sections sb">
       <div className="sb-bots" role="tablist" aria-label={t('Your bots')}>
@@ -634,10 +669,17 @@ export default function Bots() {
             {b.waiting > 0 && <span className="sb-count" aria-label={t('{n} waiting in Needs You', { n: b.waiting })}>{b.waiting}</span>}
           </button>
         ))}
-        {list.length > 0 && here && <button type="button" className={`sb-chip add ${adding ? 'on' : ''}`} onClick={() => setAdding(true)}><Icon name="plus" size={12} /> {t('New Bot')}</button>}
+        {gone.map((b) => (
+          <button key={b.id} type="button" role="tab" aria-selected={b.id === old?.id && !adding} className={`sb-chip gone ${b.id === old?.id && !adding ? 'on' : ''}`} onClick={() => pick(b.id)}>
+            <Icon name="archive" size={12} />
+            <span className="sb-chip-name">{t('{name} (deleted)', { name: b.name })}</span>
+          </button>
+        ))}
+        {(list.length > 0 || gone.length > 0) && here && <button type="button" className={`sb-chip add ${adding ? 'on' : ''}`} onClick={() => setAdding(true)}><Icon name="plus" size={12} /> {t('New Bot')}</button>}
       </div>
-      {(!list.length || adding) && <NewBot here={here} first={!list.length} onMade={(id) => { pick(id); load() }} />}
-      {shown && !adding && <Bot key={shown} id={shown} here={here} onChanged={load} onGone={() => { setAt(null); saved('cc-bot', ''); load() }} />}
+      {((!list.length && !old) || adding) && <NewBot here={here} first={!list.length && !gone.length} onMade={(id) => { pick(id); load() }} />}
+      {old && !adding && <DeletedBot key={`${old.id}-${old.cleared || ''}`} d={old} here={here} reload={load} />}
+      {shown && !adding && !old && <Bot key={shown} id={shown} here={here} onChanged={load} onGone={left} />}
     </div>
   )
 }

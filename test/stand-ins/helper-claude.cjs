@@ -42,7 +42,8 @@ const path = require('node:path')
 
 const args = process.argv.slice(2)
 if (args.includes('--version')) { console.log('2.1.312 (Claude Code)'); process.exit(0) }
-if (args[0] === 'auth') { console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: 'max' })); process.exit(0) }
+// Signed in with a Max plan (BRIDGE_STANDIN_CLAUDE_PLAN: another, team say).
+if (args[0] === 'auth') { console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: process.env.BRIDGE_STANDIN_CLAUDE_PLAN || 'max' })); process.exit(0) }
 const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode', '--effort', '--tools'])
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null }
 // --add-dir takes folders until the next flag; anything else that isn't a flag or a flag's value is

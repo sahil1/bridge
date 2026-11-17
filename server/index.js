@@ -3916,7 +3916,7 @@ const desk = makeFrontDesk({
 // A bot's Slack app, as a channel of the desk.
 const connectBot = (id) => {
   if (desk.has(id)) return desk.channel(id)
-  const ch = makeSlack({ id, file: botsStore.fileOf(id, 'slack.json'), say: (e) => desk.note(id, e), threads: () => desk.threads(id) })
+  const ch = makeSlack({ id, file: botsStore.fileOf(id, 'slack.json'), say: (e) => desk.note(id, e), threads: () => desk.threads(id), follows: (channel, thread) => desk.follows(id, channel, thread) })
   desk.add(id, ch)
   return ch
 }
@@ -3924,6 +3924,8 @@ const connectBot = (id) => {
 {
   const was = botsStore.carryOver(cfg.slackBot, { you: String(cfg.name || '').trim(), unset: () => { settings.patch({ slackBot: null }); applyConfigSoon() } })
   for (const b of botsStore.list()) connectBot(b.id)
+  // A deleted bot's record, still to look at until its time runs out.
+  for (const d of botsStore.deleted()) desk.add(d.id, null)
   if (was) {
     desk.record(was.id, 'settings.changed', { setting: 'all', old: 'Slack Bot', new: { name: was.name, readsFrom: was.readsFrom, who: was.who, askers: was.askers.length }, by: 'Bridge AI', why: 'The Slack Bot carried over as a bot' })
     desk.carry(was.id)
@@ -3931,6 +3933,8 @@ const connectBot = (id) => {
 }
 function applyConfigSoon() { setTimeout(() => { try { applyConfig() } catch { /* next change */ } }, 0) }
 const botOr404 = (id) => { const b = botsStore.get(id); if (!b) throw Object.assign(new Error('No such bot'), { status: 404 }); return b }
+// A bot, or a deleted one whose record is kept: what Activity and its export look at.
+const recordOr404 = (id) => { const b = botsStore.get(id) || botsStore.deletedOf(id); if (!b || !desk.has(b.id)) throw Object.assign(new Error('No such bot'), { status: 404 }); return b }
 const wrapBot = (fn) => async (req, res) => { try { res.json(await fn(req, res)) } catch (e) { res.status(e.status >= 400 && e.status < 500 ? e.status : 502).json({ error: e.message }) } }
 // How the agent that answers is signed in, for the note on its terms: a personal subscription
 // (Claude's or ChatGPT's own sign-in), an API key, a cloud's (Bedrock, Vertex), or not known.
@@ -3941,6 +3945,8 @@ async function signInKind(kind) {
   if (s.signedIn === false) return { kind: 'none', ...provider }
   if (kind === 'claude') {
     if (s.provider && s.provider !== 'firstParty') return { kind: 'cloud', ...provider }
+    // (A Team or Enterprise plan is an organization's, made for its people to share: no note.)
+    if (/team|enterprise/i.test(String(s.sub || ''))) return { kind: 'organization', ...provider }
     if (s.method === 'claude.ai' || s.method === 'oauth_token' || s.sub) return { kind: 'subscription', plan: s.sub ? String(s.sub).replace(/^claude_/, '').replace(/\b\w/g, (c) => c.toUpperCase()) : null, ...provider }
     if (/api_key/.test(String(s.method || ''))) return { kind: 'api', ...provider }
     if (s.method === 'third_party') return { kind: 'cloud', ...provider }
@@ -3983,7 +3989,12 @@ function recordChanges(id, before, after) {
   }
 }
 
-app.get('/api/bots', botsGuard, wrapBot(async () => ({ bots: await Promise.all(botsStore.list().map((b) => botView(b, { brief: true }))), you: String(cfg.name || '').trim() || null })))
+app.get('/api/bots', botsGuard, wrapBot(async () => ({
+  bots: await Promise.all(botsStore.list().map((b) => botView(b, { brief: true }))),
+  // Bots deleted whose record is kept, to look at in Activity until its time runs out.
+  deleted: botsStore.deleted().filter((d) => desk.has(d.id)).map((d) => ({ ...d, cleared: desk.cleared(d.id) })),
+  you: String(cfg.name || '').trim() || null,
+})))
 // A new bot, by its name.
 app.post('/api/bots', botsGuard, wrapBot(async (req) => {
   onComputer(req)
@@ -4082,14 +4093,25 @@ app.delete('/api/bots/:id/tokens', botsGuard, wrapBot(async (req) => {
 app.post('/api/bots/:id/connect', botsGuard, wrapBot(async (req) => { const b = botOr404(req.params.id); desk.channel(b.id)?.stop(); desk.sync(); return botView(b) }))
 // The workspace's people, to pick who may ask.
 app.get('/api/bots/:id/people', botsGuard, wrapBot(async (req) => ({ people: await desk.channel(botOr404(req.params.id).id).people({ fresh: req.query.fresh === '1' }) })))
-// Gone: its app disconnected, its tokens, instructions and record deleted.
+// Gone: its app disconnected, its tokens, settings and instructions deleted. Its record stays, to
+// look at and export under its name, until the time it's kept for runs out; with history=1, its
+// activity history is deleted too, the record keeping only that it was.
 app.delete('/api/bots/:id', botsGuard, wrapBot(async (req) => {
   onComputer(req)
   const b = botOr404(req.params.id)
+  const history = req.query.history === '1'
   desk.channel(b.id)?.forget()
-  desk.remove(b.id)
+  desk.remove(b.id, { history })
   botsStore.remove(b.id)
   pushFleet()
+  return { ok: true, kept: botsStore.deletedOf(b.id) }
+}))
+// A deleted bot's activity history, deleted now: the record keeps only that it was.
+app.delete('/api/bots/:id/history', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const d = botsStore.deletedOf(req.params.id)
+  if (!d || !desk.has(d.id)) throw Object.assign(new Error('No such deleted bot'), { status: 404 })
+  desk.forget(d.id)
   return { ok: true }
 }))
 // Activity: its conversations (narrowed by q, person, channel, from, to, outcome), whether its
@@ -4097,7 +4119,7 @@ app.delete('/api/bots/:id', botsGuard, wrapBot(async (req) => {
 // record never goes through the relay.
 app.get('/api/bots/:id/activity', botsGuard, wrapBot(async (req) => {
   onComputer(req)
-  const b = botOr404(req.params.id)
+  const b = recordOr404(req.params.id)
   const f = Object.fromEntries(['q', 'person', 'channel', 'from', 'to', 'outcome'].map((k) => [k, req.query[k] ? String(req.query[k]).slice(0, 200) : null]))
   const all = desk.conversations(b.id)
   const list = desk.conversations(b.id, f)
@@ -4105,12 +4127,12 @@ app.get('/api/bots/:id/activity', botsGuard, wrapBot(async (req) => {
     conversations: list.slice(0, 300), total: list.length,
     people: [...new Map(all.flatMap((c) => c.people).map((p) => [p.id, p])).values()].sort((x, y) => String(x.name || x.id).localeCompare(String(y.name || y.id))),
     places: [...new Map(all.filter((c) => c.place).map((c) => [c.place.id, c.place])).values()],
-    integrity: desk.check(b.id), retention: b.retention,
+    integrity: desk.check(b.id), retention: b.retention, deleted: b.deleted ? { at: b.deletedAt } : null,
   }
 }))
 app.get('/api/bots/:id/activity/:conv', botsGuard, wrapBot(async (req) => {
   onComputer(req)
-  const b = botOr404(req.params.id)
+  const b = recordOr404(req.params.id)
   const t = desk.timeline(b.id, String(req.params.conv))
   if (!t) throw Object.assign(new Error('No such conversation'), { status: 404 })
   return t
@@ -4120,7 +4142,7 @@ app.get('/api/bots/:id/activity/:conv', botsGuard, wrapBot(async (req) => {
 app.get('/api/bots/:id/export', botsGuard, (req, res) => {
   try {
     onComputer(req)
-    const b = botOr404(req.params.id)
+    const b = recordOr404(req.params.id)
     const format = ['jsonl', 'csv', 'md'].includes(req.query.format) ? req.query.format : 'jsonl'
     const out = desk.exportOf(b.id, { format, from: req.query.from ? String(req.query.from) : null, to: req.query.to ? String(req.query.to) : null, conv: req.query.conv ? String(req.query.conv) : null })
     const name = `${b.name.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || b.id}-activity${req.query.conv ? '-conversation' : ''}.${out.ext}`

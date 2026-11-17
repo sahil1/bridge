@@ -137,7 +137,18 @@ export function makeTrace(dir, base = () => ({})) {
     return gone
   }
 
-  return { append, events, lines, check, prune, dir: tdir }
+  // Every month deleted (a bot's activity history, deleted when you said so): what went. The next
+  // line starts the chain again.
+  function clear() {
+    const gone = months().map((f) => f.replace(/\.jsonl$/, ''))
+    for (const f of months()) fs.rmSync(path.join(tdir, f), { force: true })
+    fs.rmSync(HEAD, { force: true })
+    last = undefined
+    checked = { sig: null, out: null }
+    return gone
+  }
+
+  return { append, events, lines, check, prune, clear, dir: tdir }
 }
 
 // ---------- Export ----------

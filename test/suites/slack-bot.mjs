@@ -38,7 +38,8 @@ const kit = await startKit('slack-bot', {
   config: { name: 'Tester', slackBot: legacy },
   env: ({ data, home }) => {
     HOME = home
-    fs.writeFileSync(path.join(data, 'slack-bot.json'), JSON.stringify({ appToken: 'xapp-test', botToken: 'xoxb-test', team: { id: 'T0TEST', name: 'Acme Test' }, since: String(Date.now() / 1000 - 60) }), { mode: 0o600 })
+    // (With a thread it was once in, long quiet, as #216 kept every thread's place.)
+    fs.writeFileSync(path.join(data, 'slack-bot.json'), JSON.stringify({ appToken: 'xapp-test', botToken: 'xoxb-test', team: { id: 'T0TEST', name: 'Acme Test' }, since: String(Date.now() / 1000 - 60), threads: { 'C0LAUNCH:1600000000.000100': '1600000000.000200' } }), { mode: 0o600 })
     fs.writeFileSync(path.join(data, 'front-desk.json'), JSON.stringify({ next: 2, questions: [{ id: 'q1', channel: 'slack', key: 'C0LAUNCH:1700000000.000100', from: { id: 'U0SAM', name: 'Sam' }, text: 'Old question: is the launch on track?', place: { kind: 'channel', id: 'C0LAUNCH', name: 'launch' }, reply: { channel: 'C0LAUNCH', thread: '1700000000.000100' }, at: new Date().toISOString(), state: 'draft', draft: 'Yes, on track.', route: { to: 'folder', name: 'launch' } }], keys: ['slack:C0LAUNCH:1700000000.000100'], outbox: [], events: [] }))
     for (const d of ['pricing', 'launch']) fs.mkdirSync(path.join(home, d), { recursive: true })
     return { BRIDGE_SLACK_URL: slack.url, BRIDGE_SLACK_PING_MS: '1000', BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000' }
@@ -250,6 +251,20 @@ try {
   await kit.api(`/bots/questions/${d3.id}`, { send: true, text: d3.draft })
   await postedLike(/press kit is done/)
   ok(!!(await until(async () => (await reacted(q3.ts, 'white_check_mark')) && (await reacted(f3.ts, 'white_check_mark')), 8000)), '✅ on both once sent')
+
+  // ---------- A busy thread it isn't in ----------
+  // Where it got to is kept only for threads it answers in: replies in another leave it as it was,
+  // and nothing is written for them.
+  const lunch = await slack.ask({ user: 'U0SAM', text: 'Lunch at noon?' })
+  await sleep(3000) // (where it got to in the channel, written)
+  const keptBefore = fs.readFileSync(tokens, 'utf8')
+  const keptAt = fs.statSync(tokens).mtimeMs
+  for (let i = 0; i < 6; i++) await slack.ask({ user: i % 2 ? 'U0SAM' : 'U0EVE', thread: lunch.ts, text: `Pizza or tacos? ${i}` })
+  await sleep(3000)
+  const keptAfter = JSON.parse(fs.readFileSync(tokens, 'utf8'))
+  ok(fs.readFileSync(tokens, 'utf8') === keptBefore && fs.statSync(tokens).mtimeMs === keptAt && !Object.keys(keptAfter.threads || {}).some((k) => k.endsWith(lunch.ts)), 'replies in a busy thread it isn\'t in: where it got to isn\'t written, nor that thread kept track of', Object.keys(keptAfter.threads || {}))
+  ok(!keptAfter.threads?.['C0LAUNCH:1600000000.000100'] && Object.keys(keptAfter.threads || {}).every((k) => [q1.ts, q3.ts].some((t) => k.endsWith(t))), 'it keeps track only of the threads it answers in: one long quiet is let go of', keptAfter.threads)
+  ok(!(await convs('b1', 'Pizza')).length, 'and nothing of it is in its record')
 
   // ---------- "@bot is this right?" under a message ----------
   const top = await slack.ask({ user: 'U0SAM', text: 'The enterprise plan is $50 a seat, right?' })

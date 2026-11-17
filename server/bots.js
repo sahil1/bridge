@@ -13,6 +13,9 @@
 //   bots/<id>/instructions.md   its instructions, as written in Settings
 //   bots/<id>/slack.json        its Slack app's tokens (slackbot.js), never in config.json
 //   bots/<id>/trace/            its record (trace.js)
+// A bot deleted leaves its record, until the time it's kept for runs out, with deleted.json naming
+// it (its name, when, how long its record is kept); with its activity history deleted too, the
+// record keeps only that it was (frontdesk.js clear()).
 // The Slack Bot as #216 had it (slackBot in config.json, its tokens in slack-bot.json, its
 // questions in front-desk.json) is carried over once as the first bot, named as it was until you
 // rename it: its folders become what it reads from, and their topics lines in its instructions.
@@ -96,11 +99,32 @@ export function save(id, patch) {
   return { before, after }
 }
 
-// Gone, with its tokens, its instructions and its record.
+// Gone: its settings, tokens and instructions. Its record stays, named by deleted.json, until the
+// time it's kept for runs out (with nothing in it, there's nothing to keep). (Its id isn't given
+// to another bot while its folder is there.)
 export function remove(id) {
   if (!ID.test(String(id))) throw new Error('No such bot')
+  const b = get(id)
   const D = path.join(DIR, id)
-  fs.rmSync(D, { recursive: true, force: true })
+  if (!fs.existsSync(path.join(D, 'trace'))) { fs.rmSync(D, { recursive: true, force: true }); return }
+  writeFileAtomic(path.join(D, 'deleted.json'), JSON.stringify({ name: b?.name || id, deletedAt: new Date().toISOString(), retention: b?.retention || '1y' }, null, 2), { mode: 0o600 })
+  for (const f of ['bot.json', 'instructions.md', 'slack.json']) fs.rmSync(path.join(D, f), { force: true })
+}
+// The bots deleted whose record is kept: [{ id, name, deletedAt, retention }].
+export function deleted() {
+  let ids = []
+  try { ids = fs.readdirSync(DIR).filter((x) => ID.test(x) && !fs.existsSync(fileOf(x, 'bot.json')) && fs.existsSync(fileOf(x, 'deleted.json'))) } catch { /* none */ }
+  return ids.map(deletedOf).filter(Boolean)
+}
+export function deletedOf(id) {
+  if (!ID.test(String(id)) || fs.existsSync(fileOf(id, 'bot.json'))) return null
+  const j = read(fileOf(id, 'deleted.json'))
+  return j ? { id, name: clean(j.name, NAME_MAX) || id, deletedAt: j.deletedAt || null, retention: keepOf(j.retention), deleted: true } : null
+}
+// A deleted bot's record, gone (nothing left in it).
+export function forgetRecord(id) {
+  if (!ID.test(String(id)) || fs.existsSync(fileOf(id, 'bot.json'))) throw new Error('No such deleted bot')
+  fs.rmSync(path.join(DIR, id), { recursive: true, force: true })
 }
 
 // ---------- Instructions ----------

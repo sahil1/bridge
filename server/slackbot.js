@@ -49,6 +49,8 @@ const THREAD_CONTEXT = 50 // earlier messages read from the thread a question is
 const CHANNEL_CONTEXT = 20 // and from the channel, for one asked at its top
 const PINS = 10
 const LONGEST_SAID = 1500 // a message read for context, in characters
+const FOLLOW_DAYS = 7 // a thread it answered in is followed this long after it was last busy (frontdesk.js)
+const MARK_MS = 2000 // where it got to, written this long after it moved
 // A message's kinds that are someone writing: a reply sent to the channel too, one with a file.
 const WRITTEN = new Set(['thread_broadcast', 'file_share'])
 
@@ -114,11 +116,29 @@ export function manifest(bot = {}, you = '') {
 
 // id: the bot's. file: where its tokens are kept. say(event): what happened, for its record
 // ({ what, ok, why }). threads(): the threads it's answering in, to read for what was missed
-// ([{ channel, thread, since, dm }]).
-export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => [] } = {}) {
+// ([{ channel, thread, since, dm }]). follows(channel, thread): whether it's answering in that
+// thread now (the desk knows), so only those threads' replies are kept track of.
+export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => [], follows = () => false } = {}) {
   const FILE = file
   let kept = read(FILE)
   const save = () => writeFileAtomic(FILE, JSON.stringify(kept, null, 2), { mode: 0o600 })
+  // Where it got to in each conversation and each thread it follows moves with nearly every
+  // message in a busy channel: written a moment later, once for all of them, and only when it
+  // moved. Threads it no longer follows, or quiet for a week, are let go of then.
+  let marking = null
+  const tidy = () => {
+    const old = Date.now() / 1000 - FOLLOW_DAYS * 86400
+    for (const [k, ts] of Object.entries(kept.threads || {})) {
+      const [channel, thread] = k.split(':')
+      if (Number(ts) < old || !follows(channel, thread)) delete kept.threads[k]
+    }
+  }
+  const marked = () => {
+    if (marking) return
+    marking = setTimeout(() => { marking = null; tidy(); try { save() } catch (e) { say({ what: 'save', ok: false, why: `Couldn't keep where it got to: ${e.message}` }) } }, MARK_MS)
+    marking.unref?.()
+  }
+  const markedNow = () => { if (!marking) return; clearTimeout(marking); marking = null; tidy(); try { save() } catch { /* next time */ } }
   let hear = null // the front desk's, while started
   let ws = null
   let pinger = null
@@ -298,15 +318,15 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     if (e.type !== 'message' && e.type !== 'app_mention') return
     const dm = e.channel_type === 'im' || String(e.channel).startsWith('D')
     const thread = e.thread_ts && e.thread_ts !== e.ts ? e.thread_ts : null
-    // Where it got to here, for what's missed next time: a conversation's own messages, and each
-    // thread's replies.
+    // Where it got to here, for what's missed next time: a conversation's own messages, and the
+    // replies in each thread it's answering in (no other thread's).
     if (!thread) {
       if (!kept.seen) kept.seen = {}
-      if (!kept.seen[e.channel] || Number(e.ts) > Number(kept.seen[e.channel])) { kept.seen[e.channel] = e.ts; save() }
-    } else {
+      if (!kept.seen[e.channel] || Number(e.ts) > Number(kept.seen[e.channel])) { kept.seen[e.channel] = e.ts; marked() }
+    } else if (follows(e.channel, thread)) {
       if (!kept.threads) kept.threads = {}
       const k = `${e.channel}:${thread}`
-      if (!kept.threads[k] || Number(e.ts) > Number(kept.threads[k])) { kept.threads[k] = e.ts; save() }
+      if (!kept.threads[k] || Number(e.ts) > Number(kept.threads[k])) { kept.threads[k] = e.ts; marked() }
     }
     if (e.bot_id || (e.subtype && !WRITTEN.has(e.subtype)) || !e.user || e.user === kept.bot?.userId) return
     const mention = e.type === 'app_mention' || String(e.text || '').includes(`<@${kept.bot?.userId}>`)
@@ -389,7 +409,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
           found++
           await heard({ ...m, type: im ? 'message' : 'app_mention', channel: c.id, channel_type: im ? 'im' : undefined }, { late: true })
         }
-        if (msgs.length) { if (!kept.seen) kept.seen = {}; kept.seen[c.id] = msgs.at(-1).ts; save() }
+        if (msgs.length) { if (!kept.seen) kept.seen = {}; kept.seen[c.id] = msgs.at(-1).ts; marked() }
       }
       for (const t of (await Promise.resolve(threads()).catch(() => [])).slice(0, MAX_CONVERSATIONS)) {
         const from = Math.max(floor, Number(kept.threads?.[`${t.channel}:${t.thread}`] || 0), Number(t.since || 0))
@@ -461,6 +481,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     connect().catch((e) => later(e.message))
   }
   function stop() {
+    markedNow()
     hear = null
     gen++
     stopTimers()
@@ -491,6 +512,8 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   }
   function forget() {
     stop()
+    clearTimeout(marking)
+    marking = null
     kept = {}
     try { fs.rmSync(FILE, { force: true }) } catch { /* gone */ }
     memo = { at: 0, list: null }
