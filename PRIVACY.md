@@ -205,6 +205,50 @@ its tokens, its settings and its instructions, and keeps its record, to look at 
 keeps only that it was deleted, when and by whom. Its Slack app stays in Slack until you delete it
 there.
 
+What else a bot sends to Slack, and keeps:
+- With "You in Slack" set (Settings › Bots), each draft waiting for you, and each thing it proposes to
+  remember, goes to your own direct messages with the bot, with its buttons: the question, who asked
+  and where, the draft, the files it read and, for a change, its diff. What you press there, and what
+  you write in its Edit box, comes back to your computer through the same Socket Mode connection.
+- While its agent answers, Slack's "working" status and Stop button on the question's thread; an
+  answer sent without asking is streamed into its thread. Its Home tab in Slack says whose bot it is,
+  that it answers from Bridge AI on your computer, and whether it's online, paused or offline.
+- A file attached to a question is downloaded from the address Slack gives for it (on
+  `files.slack.com`), with the bot's token, into `~/.bridge-ai/front-desk/files/` for its agent to
+  read, and deleted once the question is done. A file its answer sends back (a chart, a table), and a
+  long answer as a file, go up to the address Slack gives for each upload; until they're sent they're
+  kept in `~/.bridge-ai/front-desk/out/`.
+- In a channel you pick for it to answer without a mention, Bridge AI keeps the top-level messages
+  of the people who may ask it; everyone else's are dropped as they arrive, as in any channel.
+
+What a bot remembers is kept in `~/.bridge-ai/bots/<bot>/memory.json`, readable by you only: notes
+about the bot itself, a channel or a person, each from its answers, your edits to its drafts or
+someone telling it "remember that…", and each kept only once you keep it (unless you chose straight
+away). Settings › Bots › Memory shows, edits and deletes every one; only kept ones go with a question
+to its agent, and only the bot's, that channel's and that person's. Someone who says "!forget me" has
+what it remembers about them deleted, their words in its record blanked (each replaced by a hash,
+so the record still shows it wasn't changed otherwise), and the kept transcripts of conversations
+they were in deleted; that they asked something, and when, stays in the record.
+
+Each answering agent's whole conversation is kept beside its record (`trace/runs/`), and each change's
+diff (`trace/changes/`), readable by you only, gzipped once they're a month old, and deleted with
+their month. A brief too long for this computer's command line (Windows) is written to a file in
+`~/.bridge-ai/front-desk/briefs/` for its agent to read, and deleted with the question.
+
+If you let a bot make changes (Settings › Bots › Changes, for the people you named), its agent edits
+only its own copy of the repository, a git worktree in `~/.bridge-ai/front-desk/changes/`. Bridge AI
+commits what it changed with your git name, pushes that branch (`bot/<bot>/<thread>`, and only that
+branch) to the repository's own remote, and opens a draft pull request there with your own GitHub CLI
+(`gh`) sign-in: the branch, the commit and the pull request (with the question and the answer in its
+description) are then on GitHub, as any pull request you open is. It never merges and never pushes to
+your default branch. With Suggest, none of that happens until you approve the diff.
+
+A bot's file (Settings › Bots › Export, or `bridge-ai bots export`) holds its instructions, the
+settings you gave it (with the Slack names and ids of the people who may ask) and what it remembers,
+never its tokens; it goes where you save it. A scheduled post is a routine in
+`~/.bridge-ai/routines.json`, its words put to the bot as from you. Bridge AI's health check, asked
+on the computer it runs on (the Docker image's), lists each bot's name and whether it's connected.
+
 Files shows your agents' folders, and only the other folders you add to it yourself (Places, with
 the folder picker); it keeps each place's path in `~/.bridge-ai/places.json`, not what's in it, and
 looks in none of them until you open it. A file you copy to another of your computers, or send from

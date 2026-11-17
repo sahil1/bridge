@@ -2,7 +2,9 @@
 # Bridge AI on an always-on machine (a cloud server, a Mac mini, a Raspberry Pi): the server only,
 # no app window. Your phone reaches it through your own relay, which this machine connects out
 # to, so no port is published. See "Run it on an always-on machine" in README.md and
-# docker-compose.yml.
+# docker-compose.yml. Your bots (Bots, a beta feature) answer from here as on your computer, through
+# Slack's Socket Mode, which this machine opens too: bring one in with
+# `bridge-ai bots import <file>` and connect it with `bridge-ai bots connect <name>`.
 #
 #   docker build -t bridge-ai .
 #   docker build -t bridge-ai --build-arg AGENTS="@anthropic-ai/claude-code @openai/codex opencode-ai" .
@@ -82,7 +84,10 @@ WORKDIR /home/bridge
 
 # The server listens on 127.0.0.1 inside the container. Nothing is published: phones come in
 # through the relay connection this machine opens. See docker-compose.yml for local browser access.
+# Healthy while the server answers; with Bots on, each bot's connection to Slack is said too, and
+# one Slack turned down (its token, Socket Mode off) makes it unhealthy until you fix it
+# (scripts/health.js; docker inspect shows its lines).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.BRIDGE_PORT||7420)+'/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+  CMD node /app/scripts/health.js
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "/app/server/index.js"]

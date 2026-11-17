@@ -135,6 +135,17 @@ const SUITES = [
   // Bots' record (trace.js): each event written, Activity's conversations and timelines, search,
   // export, the chain checked and a changed line caught, how long it's kept.
   { name: 'bots-activity', build: 'dist', browser: true, covers: [/^server\/(frontdesk|slackbot|bots|trace|index)\.js$/, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^test\/stand-ins\/(slack\.mjs|helper-claude\.cjs)$/] },
+  // Bots, Phase 2: approvals in your Slack DM, memory, commands, limits and pause, the public-channel
+  // check, !forget me.
+  { name: 'bots-approvals', build: 'dist', browser: true, minutes: 10, covers: [/^server\/(frontdesk|slackbot|bots|botmemory|trace|delegate|agents|index)\.js$/, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^src\/components\/NeedsYou\.jsx$/, /^test\/stand-ins\/(slack\.mjs|helper-claude\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
+  // Bots' changes: an edit in its own copy of the repository, a draft pull request by Bridge AI.
+  { name: 'bots-changes', build: 'dist', browser: true, minutes: 8, covers: [/^server\/(frontdesk|botchanges|bots|agents|delegate|index)\.js$/, /^server\/runtime\/builtin\.js$/, /^src\/components\/NeedsYou\.jsx$/, /^test\/stand-ins\/(slack\.mjs|helper-claude\.cjs|gh\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
+  // Bots, Phase 3: Slack's status and Stop, streaming, /<name>, the shortcut, the Home tab, files in
+  // and out, Try It, the templates, the brief in a file (Windows).
+  { name: 'bots-native', build: 'dist', browser: true, minutes: 10, covers: [/^server\/(frontdesk|slackbot|bots|bottemplates|trace|index)\.js$/, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^test\/stand-ins\/(slack\.mjs|helper-claude\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
+  // Bots, Phase 4: export and import (into a server as the Docker image runs it), the health check,
+  // scheduled posts, answering without a mention, catching up oldest first.
+  { name: 'bots-always-on', build: 'dist', browser: true, minutes: 10, covers: [/^server\/(frontdesk|slackbot|bots|botmemory|routines|index)\.js$/, /^scripts\/(cli|health)\.js$/, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^src\/components\/Routines\.jsx$/, /^Dockerfile$/, /^test\/stand-ins\/(slack\.mjs|helper-claude\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
   { name: 'voice-chief', build: 'dist', browser: true, covers: [/^src\/voice\//, /^src\/dictation\//, /^src\/components\/Console\.jsx$/, /^src\/components\/settings\/Voice\.jsx$/, /^server\/(voicespeak|tts-worker|speech|chief|index)\.js$/, /^chief\//, /^test\/stand-ins\/sherpa\.cjs$/] },
   { name: 'permissions', build: 'dist', browser: true, covers: [/^src\/permissions\.js$/, /^src\/components\/(PermissionFix|RestartChip|UpdateChip)\.jsx$/, /^src\/components\/settings\/(Permissions|General|About|where)\.jsx?$/, /^desktop\/(permissions|main|preload)\.js$/, /^server\/(fixes|updates)\.js$/, /^scripts\/tcc-sim\.mjs$/] },
   { name: 'whiteboard', build: 'dist', browser: true, covers: [/^src\/components\/whiteboard\//, /^shared\/whiteboard\//, /^src\/components\/(Files|Console|Rail|Icon)\.jsx$/, /^src\/(App|lazy)\.jsx$/, /^server\/(boards|index)\.js$/, /^chief\/bin\/bridge$/, /^scripts\/whiteboard-assets\.js$/, /^vite\.config\.js$/] },

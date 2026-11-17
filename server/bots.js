@@ -12,6 +12,7 @@
 //   bots/<id>/bot.json          its settings
 //   bots/<id>/instructions.md   its instructions, as written in Settings
 //   bots/<id>/slack.json        its Slack app's tokens (slackbot.js), never in config.json
+//   bots/<id>/memory.json       what it remembers (botmemory.js)
 //   bots/<id>/trace/            its record (trace.js)
 // A bot deleted leaves its record, until the time it's kept for runs out, with deleted.json naming
 // it (its name, when, how long its record is kept); with its activity history deleted too, the
@@ -24,6 +25,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { dataFile, writeFileAtomic, HOME } from './paths.js'
 import { keepOf } from './trace.js'
+import { templateOf } from './bottemplates.js'
 
 export const DIR = dataFile('bots')
 const OLD_TOKENS = dataFile('slack-bot.json')
@@ -38,7 +40,22 @@ const tilde = (p) => (p === HOME || p.startsWith(HOME + path.sep) ? `~${p.slice(
 
 // A new bot's settings: named people may ask (none yet), anyone else a polite no; no folders, so it
 // answers from what it knows; drafts you review; its record kept a year.
-const DEFAULTS = { name: 'Bridge AI', description: '', who: 'named', askers: [], others: 'polite', readsFrom: [], instructionsFile: null, agent: null, auto: false, agentCopies: false, retention: '1y', max: 2 }
+// Who you are in Slack (owner: so its drafts come to your direct messages, and you may always ask),
+// what it may change (changes: none, suggest or pr, in repo, one of its folders), the limits per
+// person (30 questions a day, 2 at once, 10 minutes a run), memory (kept once you approve, straight
+// away, or off), paused, the channels muted with !mute, the channels it answers in without a
+// mention (listen), and whether it may say what your agents are doing (agentsStatus).
+export const LIMITS = { day: 30, atOnce: 2, minutes: 10 }
+const DEFAULTS = {
+  name: 'Bridge AI', description: '', who: 'named', askers: [], others: 'polite', readsFrom: [], instructionsFile: null, agent: null, auto: false, agentCopies: false, retention: '1y', max: 2,
+  owner: null, changes: 'none', repo: null, limits: LIMITS, memory: 'approve', paused: false, muted: [], listen: [], agentsStatus: false, template: null,
+}
+const SLACK_ID = /^[UW][A-Z0-9]{2,20}$/
+const CHANNEL_ID = /^[CGD][A-Z0-9]{2,20}$/
+const person = (p) => (p && SLACK_ID.test(String(p.id || '')) ? { id: String(p.id), name: clean(p.name, 80) || null } : null)
+const place = (c) => (c && CHANNEL_ID.test(String(c.id || '')) ? { id: String(c.id), name: clean(c.name, 80) || null } : null)
+const int = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d }
+export const limitsOf = (l) => ({ day: int(l?.day, 1, 1000, LIMITS.day), atOnce: int(l?.atOnce, 1, 5, LIMITS.atOnce), minutes: int(l?.minutes, 1, 60, LIMITS.minutes) })
 export const defaultInstructions = (name, you) => [
   `# ${name}`,
   '',
@@ -61,6 +78,16 @@ function shape(id, j) {
   b.agentCopies = b.agentCopies === true
   b.retention = keepOf(b.retention)
   b.max = Math.max(1, Math.min(5, Math.round(Number(b.max)) || 2))
+  b.owner = person(b.owner)
+  b.changes = ['suggest', 'pr'].includes(b.changes) ? b.changes : 'none'
+  b.repo = b.repo ? String(b.repo) : null
+  b.limits = limitsOf(b.limits)
+  b.memory = ['auto', 'off'].includes(b.memory) ? b.memory : 'approve'
+  b.paused = b.paused === true
+  b.muted = (Array.isArray(b.muted) ? b.muted : []).map(place).filter(Boolean)
+  b.listen = (Array.isArray(b.listen) ? b.listen : []).map(place).filter(Boolean)
+  b.agentsStatus = b.agentsStatus === true
+  b.template = b.template ? clean(b.template, 40) : null
   return b
 }
 
@@ -78,15 +105,46 @@ function write(b) {
 }
 const nextId = () => { const have = new Set(list().map((b) => b.id)); let n = 1; while (have.has(`b${n}`) || fs.existsSync(path.join(DIR, `b${n}`))) n++; return `b${n}` }
 
-// A new bot, with its name, and its instructions to start from.
-export function create({ name, description = '' } = {}, you = '') {
+// A new bot, with its name, and its instructions to start from: a template's (bottemplates.js), or
+// the plain ones.
+export function create({ name, description = '', template = null } = {}, you = '') {
   const n = clean(name, NAME_MAX)
   if (!n) throw new Error('Give it a name: it\'s its name in Slack')
   if (list().some((b) => b.name.toLowerCase() === n.toLowerCase())) throw new Error(`There's a bot called ${n} already`)
-  const b = shape(nextId(), { ...DEFAULTS, name: n, description, createdAt: new Date().toISOString() })
+  const tpl = template ? templateOf(String(template)) : null
+  if (template && !tpl) throw new Error(`No such template: ${template}`)
+  const b = shape(nextId(), { ...DEFAULTS, name: n, description: description || tpl?.description || '', template: tpl?.id || null, createdAt: new Date().toISOString() })
   write(b)
-  writeInstructions(b.id, defaultInstructions(n, you))
+  writeInstructions(b.id, tpl ? tpl.instructions(n, you || 'my') : defaultInstructions(n, you))
   return b
+}
+
+// ---------- Export and import ----------
+// A bot as a file, to take to another computer (the Docker image on an always-on machine, say):
+// its settings, its instructions and what it remembers, never its tokens (its Slack app is
+// connected again there, with tokens pasted there). Its folders go as they're named here (~/…),
+// and are checked where it's brought in.
+export const BUNDLE_KIND = 'bridge-ai-bot'
+const CARRIED = ['description', 'who', 'askers', 'others', 'readsFrom', 'instructionsFile', 'agent', 'auto', 'agentCopies', 'retention', 'max', 'owner', 'changes', 'repo', 'limits', 'memory', 'muted', 'listen', 'agentsStatus', 'template']
+export function bundleOf(id, memory = []) {
+  const b = get(id)
+  if (!b) throw Object.assign(new Error('No such bot'), { status: 404 })
+  return { kind: BUNDLE_KIND, v: 1, exportedAt: new Date().toISOString(), name: b.name, settings: Object.fromEntries(CARRIED.map((k) => [k, b[k]])), instructions: readOwn(id), memory }
+}
+// A bot from such a file: a new one, by its name (with a number after it when that's taken here),
+// answering as it did once its Slack app is connected here. Anything in the file that isn't one of
+// its settings is left out, so a token in it never is kept.
+export function fromBundle(j, you = '') {
+  if (!j || typeof j !== 'object' || j.kind !== BUNDLE_KIND) throw new Error('That isn\'t a bot exported from Bridge AI')
+  const want = clean(j.name, NAME_MAX) || 'Imported bot'
+  const taken = new Set(list().map((b) => b.name.toLowerCase()))
+  let n = want
+  for (let i = 2; taken.has(n.toLowerCase()) && i < 100; i++) n = `${want.slice(0, NAME_MAX - 4)} (${i})`
+  const settings = Object.fromEntries(CARRIED.filter((k) => j.settings && Object.hasOwn(j.settings, k)).map((k) => [k, j.settings[k]]))
+  const b = shape(nextId(), { ...DEFAULTS, ...settings, name: n, createdAt: new Date().toISOString(), importedAt: new Date().toISOString() })
+  write(b)
+  writeInstructions(b.id, typeof j.instructions === 'string' ? j.instructions.slice(0, INSTRUCTIONS_MAX) : defaultInstructions(n, you))
+  return { bot: b, memory: Array.isArray(j.memory) ? j.memory.slice(0, 2000) : [], renamed: n !== want }
 }
 
 // Its settings changed: what they were and are, for the record.
@@ -108,7 +166,7 @@ export function remove(id) {
   const D = path.join(DIR, id)
   if (!fs.existsSync(path.join(D, 'trace'))) { fs.rmSync(D, { recursive: true, force: true }); return }
   writeFileAtomic(path.join(D, 'deleted.json'), JSON.stringify({ name: b?.name || id, deletedAt: new Date().toISOString(), retention: b?.retention || '1y' }, null, 2), { mode: 0o600 })
-  for (const f of ['bot.json', 'instructions.md', 'slack.json']) fs.rmSync(path.join(D, f), { force: true })
+  for (const f of ['bot.json', 'instructions.md', 'slack.json', 'memory.json']) fs.rmSync(path.join(D, f), { force: true })
 }
 // The bots deleted whose record is kept: [{ id, name, deletedAt, retention }].
 export function deleted() {

@@ -53,7 +53,7 @@ import { makeNews } from './news.js'
 import { pickRuntime, fellBack } from './runtime/index.js'
 import { sessionName as herdrSession, useSession as useHerdrSession } from './runtime/herdr-cli.js'
 import * as herdrSessions from './runtime/herdr-sessions.js'
-import { AGENTS, installed, caps, adapter, readOnly, catalog as agentCatalog, installCommand, installNeeds, installTools, clearInstalledCache, forgetLoginPath, loginPath, which } from './agents.js'
+import { AGENTS, installed, caps, adapter, readOnly, canChange, catalog as agentCatalog, installCommand, installNeeds, installTools, clearInstalledCache, forgetLoginPath, loginPath, which } from './agents.js'
 import * as nodejs from './nodejs.js'
 import { devTools } from './gitready.js'
 import { quoteCommand } from './runtime/spawn.js'
@@ -100,7 +100,8 @@ import { mcpRoutes, bridgeMcp } from './mcp.js'
 import { make as makeMcpTools } from './mcptools.js'
 import { make as makeOutside } from './outside.js'
 import { makeFrontDesk } from './frontdesk.js'
-import { makeSlack, manifest as slackManifest, SCOPES as SLACK_SCOPES } from './slackbot.js'
+import { makeSlack, manifest as slackManifest, SCOPES as SLACK_SCOPES, SCOPE_FOR as SLACK_SCOPE_FOR, commandOf as slackCommand, shortcutOf as slackShortcut } from './slackbot.js'
+import { listTemplates } from './bottemplates.js'
 import * as botsStore from './bots.js'
 import { keepOf } from './trace.js'
 import { makeMcp, connection, MODERN, LEGACY } from './mcpproto.js'
@@ -1047,11 +1048,12 @@ async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs
   const ws = (f.workspaces || []).find((w) => w.label.toLowerCase() === String(space).toLowerCase())
   const where = ws ? { workspaceId: ws.id } : { newSpace: space }
   if (access === 'read' && !readOnly(kind)) throw new Error(`${adapter(kind).label} can't be started read-only: answer with Claude Code or Codex`)
+  if (access === 'change' && !canChange(kind)) throw new Error(`${adapter(kind).label} can't make a bot's change held to its folder: changes need Claude Code`)
   // (A read-only one, a bot's answer, is started as it is: its folders were checked, and it isn't
   // work of yours to remember the folder for.)
-  if (!own && !fork && access !== 'read') return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest', access })), session: f.session || '' }
+  if (!own && !fork && access !== 'read' && access !== 'change') return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest', access })), session: f.session || '' }
   if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
-  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: access === 'read' ? dirs : undefined, fork, effort: 'suggest' })
+  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: access === 'read' || access === 'change' ? dirs : undefined, fork, effort: 'suggest' })
   pushFleet()
   return { ...out, session: f.session || '' }
 }
@@ -1386,6 +1388,13 @@ app.post('/api/routines/:id/run', wrap(async (req) => {
 // A routine's run: a new agent in its folder, typed its command (the same agent, space and words
 // each time), or its command to the Chief of Staff, started first if it isn't running.
 async function startRoutine(def) {
+  // A bot's scheduled post: put to the bot, answered and posted in its channel (frontdesk.js).
+  if (def.to === 'bot') {
+    if (!botsOn()) throw new Error('Bots is off: turn it on in Settings › About & Updates › Beta Features')
+    const out = await desk.scheduled(def.bot, { routine: def.id, name: def.name, channel: def.channel, text: def.command })
+    pushFleet()
+    return out
+  }
   if (def.to === 'chief') {
     const mate = mainChief(await fleetView())
     if (mate) {
@@ -3202,7 +3211,13 @@ async function servedUi() {
 // That Bridge AI is here, and which version: public, for a program to check before it has the key
 // (apiauth.js), or one with a key that's wrong.
 // in: this browser or program is let in (the page saying how to get in looks, to open by itself).
-app.get('/api/health', (req, res) => res.json({ ok: true, app: 'Bridge AI', version: VERSION, in: auth.allowed(req) }))
+// With Bots on, each bot's connection too, asked on this computer (the Docker image's health check
+// says it): its name and whether it's connected, and why not.
+const localAsk = (req) => !req.headers['x-bridge-relay'] && /^(::1|127\.\d+\.\d+\.\d+|::ffff:127\.\d+\.\d+\.\d+)$/.test(String(req.socket?.remoteAddress || ''))
+app.get('/api/health', (req, res) => res.json({
+  ok: true, app: 'Bridge AI', version: VERSION, in: auth.allowed(req),
+  ...(localAsk(req) && trialOn('slack-bot') ? { bots: botsStore.list().map((b) => { const st = desk.channel(b.id)?.state() || { state: 'off' }; return { id: b.id, name: b.name, state: st.state, why: st.why || null, paused: b.paused } }) } : {}),
+}))
 // A one-time link that lets a browser on this computer in (apiauth.js): View › Open in Browser in
 // the desktop app, and `bridge-ai open`. to: where it lands ("/", "/?window=…").
 app.post('/api/browser-link', (req, res) => {
@@ -3909,14 +3924,21 @@ async function readsOf(h) {
   const msgs = transcript({ kind: h.kind, sessionId: h.sessionId, cwd: h.cwd }).messages || []
   return msgs.filter((m) => m.role === 'tool' && READS.has(m.tool) && (!m.ts || Date.parse(m.ts) >= since)).map((m) => ({ tool: m.tool, what: String(m.hint || '').replace(os.homedir(), '~') })).filter((x) => x.what)
 }
+// The file its agent keeps its conversation in, to keep beside its record (D4).
+const transcriptOf = (h) => { try { return h.sessionId ? locate(h.kind, h.sessionId, h.cwd) : null } catch { return null } }
 const desk = makeFrontDesk({
   delegate, fleet: fleetView, resolve: (p) => places.resolveDir(p), installed, on: botsOn,
-  you: () => String(cfg.name || '').trim() || 'the owner', changed: () => pushFleet(), close: closePane, told: deskTold, readsOf, modelOf: (kind) => modelFor(kind),
+  you: () => String(cfg.name || '').trim() || 'the owner', changed: () => pushFleet(), close: closePane, told: deskTold, readsOf, transcriptOf, modelOf: (kind) => modelFor(kind), computer: () => relay.thisName(),
+  commandOf: (b) => slackCommand(b.name), shortcutOf: (b) => slackShortcut(b.name),
 })
-// A bot's Slack app, as a channel of the desk.
+// A bot's Slack app, as a channel of the desk: the channels it answers in without a mention, and
+// what its Home tab says.
 const connectBot = (id) => {
   if (desk.has(id)) return desk.channel(id)
-  const ch = makeSlack({ id, file: botsStore.fileOf(id, 'slack.json'), say: (e) => desk.note(id, e), threads: () => desk.threads(id), follows: (channel, thread) => desk.follows(id, channel, thread) })
+  const ch = makeSlack({
+    id, file: botsStore.fileOf(id, 'slack.json'), say: (e) => desk.note(id, e), threads: () => desk.threads(id), follows: (channel, thread) => desk.follows(id, channel, thread),
+    listens: (channel) => desk.listens(id, channel), info: () => { const b = botsStore.get(id); return { ...desk.info(id), command: b ? slackCommand(b.name) : null, shortcut: b ? slackShortcut(b.name) : null } },
+  })
   desk.add(id, ch)
   return ch
 }
@@ -3971,13 +3993,29 @@ async function botView(b, { brief = false } = {}) {
     const ins = await botsStore.instructionsOf(b, (v?.folders || []).filter((f) => f.ok).map((f) => f.path))
     file = { path: b.instructionsFile, ok: !ins.problem, problem: ins.problem }
   }
+  const missing = s.scopes?.missing || []
+  const me = String(cfg.name || '').trim()
+  // A member of the workspace with your name, to offer as you in Slack (from the people already listed).
+  let ownerGuess = null
+  if (!b.owner && me && s.state === 'connected') {
+    const people = await ch.people().catch(() => [])
+    const low = me.toLowerCase()
+    ownerGuess = people.find((p) => [p.name, p.detail].some((x) => String(x || '').toLowerCase().split(' · ')[0] === low)) || people.find((p) => String(p.name || '').toLowerCase() === low.split(' ')[0]) || null
+    if (ownerGuess) ownerGuess = { id: ownerGuess.id, name: ownerGuess.name }
+  }
+  const routinesNow = await routines.list().catch(() => ({ routines: [] }))
   return {
     ...base, ...v,
-    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max },
+    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, changes: b.changes, repo: b.repo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus },
+    paused: b.paused,
     instructions: { text: botsStore.readOwn(b.id), file },
-    agents: ['claude', 'codex'].map((k) => ({ kind: k, label: adapter(k).label, installed: have.has(k), confined: !!readOnly(k)?.confined })),
+    agents: ['claude', 'codex'].map((k) => ({ kind: k, label: adapter(k).label, installed: have.has(k), confined: !!readOnly(k)?.confined, canChange: canChange(k) })),
     signIn: kind ? await signInKind(kind) : null,
-    manifest: slackManifest(b, cfg.name), scopesWanted: SLACK_SCOPES, you: String(cfg.name || '').trim() || null,
+    manifest: slackManifest(b, cfg.name), scopesWanted: SLACK_SCOPES, you: me || null,
+    updateApp: { missing, needs: missing.map((x) => ({ scope: x, for: String(SLACK_SCOPE_FOR[x] || '').replace('<command>', slackCommand(b.name).slice(1)) })) },
+    command: slackCommand(b.name), shortcut: slackShortcut(b.name), ownerGuess,
+    scheduled: (routinesNow.routines || []).filter((r) => r.to === 'bot' && r.bot === b.id).map((r) => ({ id: r.id, name: r.name, command: r.command, channel: r.channel || null, schedule: r.schedule || null, says: r.says || null, next: r.next || [], state: r.state, note: r.note || null, auto: !!r.auto, paused: !!r.paused, runs: (r.runs || []).slice(0, 5) })),
+    routinesOn: trialOn('routines'),
   }
 }
 // What a setting was and is, for the record (people by name, never a token).
@@ -3998,12 +4036,14 @@ app.get('/api/bots', botsGuard, wrapBot(async () => ({
 // A new bot, by its name.
 app.post('/api/bots', botsGuard, wrapBot(async (req) => {
   onComputer(req)
-  const b = botsStore.create({ name: req.body?.name, description: req.body?.description }, String(cfg.name || '').trim())
+  const b = botsStore.create({ name: req.body?.name, description: req.body?.description, template: req.body?.template || null }, String(cfg.name || '').trim())
   connectBot(b.id)
-  desk.record(b.id, 'settings.changed', { setting: 'created', old: null, new: { name: b.name }, by: String(cfg.name || '').trim() || 'the owner' })
+  desk.record(b.id, 'settings.changed', { setting: 'created', old: null, new: { name: b.name, ...(b.template ? { template: b.template } : {}) }, by: String(cfg.name || '').trim() || 'the owner' })
   desk.sync()
   return botView(b)
 }))
+// What a new bot can start from.
+app.get('/api/bots/templates', botsGuard, wrapBot(async () => ({ templates: listTemplates(String(cfg.name || '').trim()) })))
 app.get('/api/bots/:id', botsGuard, wrapBot(async (req) => botView(botOr404(req.params.id))))
 // Its settings, each checked: its name and description (its name in Slack), who may ask (Slack's
 // ids, with the names you picked them by, or everyone in its channels), what anyone else gets, the
@@ -4031,6 +4071,34 @@ app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
     next.agent = x.agent ? String(x.agent) : null
   }
   if (x.max !== undefined) next.max = Math.max(1, Math.min(5, Math.round(Number(x.max)) || 2))
+  // You in Slack, so its drafts come to your direct messages, and you may always ask.
+  if (x.owner !== undefined) {
+    if (x.owner && !/^[UW][A-Z0-9]{2,20}$/.test(String(x.owner.id || ''))) throw new Error('Pick yourself from your workspace\'s people')
+    next.owner = x.owner ? { id: String(x.owner.id), name: String(x.owner.name || '').replace(/\s+/g, ' ').trim().slice(0, 80) || null } : null
+  }
+  // What it may change: only with an agent that keeps its edits to its own copy (Claude Code).
+  if (x.changes !== undefined) {
+    const v = ['suggest', 'pr'].includes(x.changes) ? x.changes : 'none'
+    if (v !== 'none') {
+      const kind = (await desk.view(b.id))?.answerer?.kind
+      if (!kind || !canChange(kind)) throw new Error('Changes need Claude Code, which keeps its edits to its own copy of the repository: pick it under Answered By')
+    }
+    next.changes = v
+  }
+  if (x.repo !== undefined) {
+    const r = String(x.repo || '').trim()
+    if (r && !(next.readsFrom || b.readsFrom).includes(r)) throw new Error('Pick one of the folders it reads from')
+    next.repo = r || null
+  }
+  if (x.limits !== undefined) next.limits = botsStore.limitsOf({ ...b.limits, ...(x.limits || {}) })
+  if (x.memory !== undefined) next.memory = ['auto', 'off'].includes(x.memory) ? x.memory : 'approve'
+  if (x.paused !== undefined) next.paused = x.paused === true
+  if (x.agentsStatus !== undefined) next.agentsStatus = x.agentsStatus === true
+  for (const k of ['muted', 'listen']) {
+    if (x[k] === undefined) continue
+    if (!Array.isArray(x[k])) throw new Error(`${k} is a list`)
+    next[k] = x[k].slice(0, 100).map((c) => ({ id: String(c?.id || '').trim(), name: String(c?.name || '').replace(/^#/, '').trim().slice(0, 80) || null })).filter((c) => /^[CGD][A-Z0-9]{2,20}$/.test(c.id))
+  }
   if (x.readsFrom !== undefined) {
     if (!Array.isArray(x.readsFrom)) throw new Error('readsFrom is a list')
     next.readsFrom = []
@@ -4066,6 +4134,8 @@ app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
   const { before, after } = botsStore.save(b.id, next)
   recordChanges(b.id, before, after)
   if (before.retention !== after.retention) desk.prune(b.id)
+  // Paused: what it's answering is stopped at once.
+  if (after.paused && !before.paused) await desk.pause(b.id)
   pushFleet()
   return botView(after)
 }))
@@ -4151,8 +4221,63 @@ app.get('/api/bots/:id/export', botsGuard, (req, res) => {
     res.send(out.body)
   } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
-// Your answer to one, from Needs You: send (as edited) or discard.
+// Your answer to one, from Needs You: send (as edited) or discard; for a change waiting on you,
+// Send approves it and opens its pull request first.
 app.post('/api/bots/questions/:id', botsGuard, wrapBot((req) => desk.decide(req.params.id, { send: req.body?.send === true, text: req.body?.text })))
+// A bot from a file exported on another computer (instructions, memory and settings; never tokens).
+app.post('/api/bots/import', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const r = botsStore.fromBundle(req.body?.bundle, String(cfg.name || '').trim())
+  connectBot(r.bot.id)
+  const kept = desk.memory.bring(r.bot.id, r.memory)
+  desk.record(r.bot.id, 'settings.changed', { setting: 'imported', old: null, new: { name: r.bot.name, memory: kept, from: String(req.body?.bundle?.exportedAt || '') || null }, by: String(cfg.name || '').trim() || 'the owner' })
+  desk.sync()
+  const v = await botView(r.bot)
+  const problems = [
+    ...(v.folders || []).filter((f) => !f.ok).map((f) => `${f.shown} isn't on this computer: ${f.problem}`),
+    ...(r.renamed ? [`There's a bot called ${r.bot.name.replace(/ \(\d+\)$/, '')} here already, so this one is ${r.bot.name}`] : []),
+    'Connect its Slack app here: paste its two tokens under Your Slack App. (A bot\'s tokens never go in its file.)',
+  ]
+  pushFleet()
+  return { ...v, problems }
+}))
+// The conversations it's in, to pick channels from.
+app.get('/api/bots/:id/channels', botsGuard, wrapBot(async (req) => {
+  const ch = desk.channel(botOr404(req.params.id).id)
+  if (!ch || ch.state().state !== 'connected') throw Object.assign(new Error('Connect it to Slack first, to pick from the channels it\'s in'), { status: 409 })
+  return { channels: await ch.channels() }
+}))
+// It as a file: instructions, memory and settings, never its tokens.
+app.get('/api/bots/:id/bundle', botsGuard, (req, res) => {
+  try {
+    onComputer(req)
+    const b = botOr404(req.params.id)
+    const out = botsStore.bundleOf(b.id, desk.memory.list(b.id).filter((x) => x.state === 'kept').map(({ id, kind, of, ofName, text, state }) => ({ id, kind, of, ofName, text, state })))
+    desk.record(b.id, 'settings.changed', { setting: 'exported', old: null, new: { memory: out.memory.length }, by: String(cfg.name || '').trim() || 'the owner' })
+    res.setHeader('content-type', 'application/json; charset=utf-8')
+    res.setHeader('content-disposition', `attachment; filename="${b.name.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || b.id}.bridge-bot.json"`)
+    res.send(JSON.stringify(out, null, 2))
+  } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
+})
+// What it remembers: every item, and yours to add, keep, edit and delete.
+app.get('/api/bots/:id/memory', botsGuard, wrapBot(async (req) => { onComputer(req); const b = botOr404(req.params.id); return { mode: b.memory, items: desk.memory.list(b.id) } }))
+app.post('/api/bots/:id/memory', botsGuard, wrapBot(async (req) => { onComputer(req); const b = botOr404(req.params.id); return desk.memory.add(b.id, { kind: req.body?.kind, of: req.body?.of, ofName: req.body?.ofName, text: req.body?.text }) }))
+app.patch('/api/bots/:id/memory/:mid', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const b = botOr404(req.params.id)
+  if (req.body?.keep === true) desk.memory.keep(b.id, req.params.mid)
+  return req.body?.text !== undefined ? desk.memory.edit(b.id, req.params.mid, req.body.text) : desk.memory.list(b.id).find((x) => x.id === req.params.mid) || null
+}))
+app.delete('/api/bots/:id/memory/:mid', botsGuard, wrapBot(async (req) => { onComputer(req); desk.memory.remove(botOr404(req.params.id).id, req.params.mid); return { ok: true } }))
+// Try It: a question asked here as someone who may ask, answered the whole way but to Slack.
+app.post('/api/bots/:id/try', botsGuard, wrapBot(async (req) => { onComputer(req); const b = botOr404(req.params.id); return desk.tryIt(b.id, { text: req.body?.text, as: req.body?.as || null }) }))
+app.get('/api/bots/:id/try/:q', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const b = botOr404(req.params.id)
+  const item = desk.get(req.params.q)
+  if (!item || item.bot.id !== b.id || !item.try) throw Object.assign(new Error('No such question'), { status: 404 })
+  return { item, events: desk.timeline(b.id, item.conv)?.events || [] }
+}))
 
 // ---------- Whiteboards (boards.js) ----------
 // Home: a whiteboard you opened, saved, made or renamed here is yours as it is; one an agent drew or
@@ -4263,4 +4388,5 @@ server.listen(cfg.port, cfg.host, () => {
   crashes.started().catch(() => {})
 })
 // Agents keep running in the terminal host unless you turned that off (Settings › General).
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { rt.shutdown?.({ keep: cfg.keepAgents !== false }); process.exit(0) })
+// (Each bot's Slack app says it's offline on its Home tab first, as far as it gets in a moment.)
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { rt.shutdown?.({ keep: cfg.keepAgents !== false }); for (const b of botsStore.list()) { try { desk.channel(b.id)?.stop() } catch { /* going anyway */ } } setTimeout(() => process.exit(0), 300) })

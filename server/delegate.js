@@ -114,9 +114,9 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
   // Its agent started, in its own folder with edits allowed when you said helpers may, else asking
   // as any agent does; read-only, started so. Couldn't: the task says why, and so does its card.
   async function start(h) {
-    const access = h.readOnly ? 'read' : h.own && edits() ? 'edits' : undefined
+    const access = h.change ? 'change' : h.readOnly ? 'read' : h.own && edits() ? 'edits' : undefined
     try {
-      const out = await launch({ kind: h.kind, cwd: h.cwd, own: h.own, label: tabName(h), space: h.space, prompt: promptOf(h), access, dirs: h.readOnly && h.dirs?.length ? h.dirs : undefined, fork: h.fork || undefined })
+      const out = await launch({ kind: h.kind, cwd: h.cwd, own: h.own, label: tabName(h), space: h.space, prompt: promptOf(h), access, dirs: (h.readOnly || h.change) && h.dirs?.length ? h.dirs : undefined, fork: h.fork || undefined })
       Object.assign(h, { state: 'working', paneId: out.paneId, session: out.session || '', ...(out.sessionId ? { sessionId: out.sessionId } : {}), startedAt: new Date().toISOString(), access: access || null, worked: false, again: false, againAt: null, armedAt: null })
       mark(h, { status: 'doing', pane: out.paneId })
       save()
@@ -287,11 +287,29 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
   return {
     max,
     // Another task list for helpers (frontdesk.js): its tasks (chieftasks.js's makeTasks), the folder
-    // its own work folders go in, how many at once (max()), and heard(h), told once when one stops,
-    // in place of the chief's report.
+    // its own work folders go in, other folders of its own (also), how many at once (max()), and
+    // heard(h), told once when one stops, in place of the chief's report.
     list(name, l) { lists[name] = l; setTimeout(() => { fill(); flush().catch(() => {}) }, 0) },
     // A helper by its id (a copy, as kept), for the list that started it.
     get: (id) => { const h = data.helpers.find((x) => x.id === id); return h ? { ...h } : null },
+    // Helpers whose briefs had someone's words in them, now forgotten (a bot's !forget me): their
+    // briefs and last words dropped from what's kept here.
+    scrub(ids) {
+      let n = 0
+      for (const h of data.helpers) if (ids.includes(h.id) && h.list) { h.brief = '(forgotten)'; h.said = null; n++ }
+      if (n) save()
+      return n
+    },
+    // One its list stopped (closed its tab: a bot's answer stopped, paused or out of time), ended now
+    // with nothing to hear back, so its place goes to the next at once.
+    async drop(id) {
+      const h = data.helpers.find((x) => x.id === id)
+      if (!h) return false
+      if (h.state === 'queued') { Object.assign(h, { state: 'ended', end: 'stopped', endedAt: new Date().toISOString(), report: 'none' }); mark(h, { status: 'done', outcome: 'Stopped' }); save(); changed(); return true }
+      if (h.state === 'ended') return false
+      await end(h, 'stopped', { quiet: true })
+      return true
+    },
     // Anything to keep an eye on: a helper at work or waiting its turn, or a report about to go. (One
     // that waits for a chief to be running is tried again as the fleet is looked at anyway.)
     watching: () => data.helpers.some((h) => h.state !== 'ended' || h.report === 'due'),
@@ -317,13 +335,18 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
       const title = oneLine(b.title, 200) || titleOf(brief) || `${role} work`
       // A folder named: checked before anything is made, so a wrong one is said at once. (One of the
       // list's own throwaway folders is its own already.)
-      const own = list && b.cwd && path.resolve(String(b.cwd)).startsWith(path.resolve(lists[list].dir) + path.sep)
+      // (A list's own folders, its throwaway ones and the others it names (also: a bot's copies of
+      // repositories, files attached, briefs), are its own already, not folders of yours to check.)
+      const mine = (p) => !!list && [lists[list].dir, ...(lists[list].also || [])].some((d) => path.resolve(String(p)).startsWith(path.resolve(d) + path.sep))
+      const own = list && b.cwd && mine(b.cwd)
       const named = b.cwd ? (own ? path.resolve(String(b.cwd)) : await resolve(String(b.cwd))) : null
-      const dirs = b.readOnly === true && Array.isArray(b.dirs) ? (await Promise.all(b.dirs.slice(0, 50).map((d) => resolve(String(d))))).filter((d) => d !== named) : []
+      // (A bot's change, on another list only: edits held to its own folder, its copy of a repository.)
+      const change = !!list && b.change === true
+      const dirs = (b.readOnly === true || change) && Array.isArray(b.dirs) ? (await Promise.all(b.dirs.slice(0, 50).map((d) => (mine(d) ? path.resolve(String(d)) : resolve(String(d)))))).filter((d) => d !== named) : []
       const item = on.add(title, { status: 'open', role })
       const cwd = named || await workFolder(item.title, item.id, list)
       const h = {
-        id: `h${data.next++}`, task: item.id, role, title: item.title, brief, kind, cwd, own: !named, readOnly: b.readOnly === true,
+        id: `h${data.next++}`, task: item.id, role, title: item.title, brief, kind, cwd, own: !named, readOnly: b.readOnly === true && !change, ...(change ? { change: true } : {}),
         thread: b.thread ? oneLine(b.thread, 20) : null, space: oneLine(b.space, 40) || 'Helpers', from: oneLine(b.from, 20) || 'chief',
         ...(list ? { list } : {}), ...(b.fork && named ? { fork: oneLine(b.fork, 80) } : {}), ...(dirs.length ? { dirs } : {}),
         state: 'queued', at: new Date().toISOString(), paneId: null, report: null, inRequest: true,

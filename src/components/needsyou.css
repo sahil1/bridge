@@ -59,6 +59,8 @@
 .ny-empty small { max-width: 300px; }
 .ny-panel.phone .ny-item { padding: 12px; }
 .ny-panel.phone .ny-acts .btn.small, .ny-panel.phone .ny-acts .ghost-btn { min-height: 36px; }
+/* A bot's answer to send or discard (a change to approve) on a phone: whole 40 px targets. */
+.ny-panel.phone .ny-item.t-slack .ny-acts :is(.btn.small, .btn, .ghost-btn) { min-height: 40px; min-width: 40px; }
 
 /* What has gone quiet: one quiet line, folded; opened, short rows under their project, each opening
    to its card. The inbox and Home have it alike. */
