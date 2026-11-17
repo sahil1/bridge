@@ -6,6 +6,8 @@ import App from './App.jsx'
 import Solo from './components/Solo.jsx'
 import FloatCard from './components/meetings/FloatCard.jsx'
 import Hud from './dictation/Hud.jsx'
+import Capture from './components/remote/Capture.jsx'
+import { Badge } from './components/remote/Here.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import './styles.css'
 import { apply } from './appearance.js'
@@ -20,16 +22,19 @@ apply()
 // A scroll bar's thumb while you scroll that area from the keys too, not only while you're over it.
 watchScrolling()
 // ?window=<pane>: one agent in a window of its own. ?float=1: the desktop app's floating card.
-// ?dictate=1: its dictation window (dictation/Hud.jsx).
+// ?dictate=1: its dictation window (dictation/Hud.jsx). ?remote=capture and ?remote=badge: Remote
+// Screen and Preview's window that takes the screen (never shown) and its badge, while this screen is
+// seen from another of your devices (desktop/remote.js).
 const solo = new URLSearchParams(location.search).get('window')
 const float = new URLSearchParams(location.search).get('float') === '1'
 const hud = new URLSearchParams(location.search).get('dictate') === '1'
+const remoteWin = /^(capture|badge)$/.exec(new URLSearchParams(location.search).get('remote') || '')?.[1] || null
 if (float) document.documentElement.classList.add('is-float')
 if (hud) document.documentElement.classList.add('is-hud')
 registerServiceWorker()
-if (!float && !hud) { reportPresence(); countActiveTime() }
+if (!float && !hud && !remoteWin) { reportPresence(); countActiveTime() }
 // Messages the last page left on their way to an agent go now (sendbox.js).
-if (!float && !hud) resumeSending()
+if (!float && !hud && !remoteWin) resumeSending()
 // Every window of the desktop app says what an update would lose in it (busy.js).
 answerBusy()
 
@@ -45,9 +50,9 @@ function TestCrash() {
 // Drawn once its language's words are in (Settings › Appearance › Language).
 loadLang().finally(() => createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <ErrorBoundary name="Bridge AI" full={!float && !hud}>
+    <ErrorBoundary name="Bridge AI" full={!float && !hud && !remoteWin}>
       <TestCrash />
-      {float ? <FloatCard /> : hud ? <Hud /> : solo ? <Solo paneId={solo} /> : <App />}
+      {remoteWin === 'capture' ? <Capture /> : remoteWin === 'badge' ? <Badge /> : float ? <FloatCard /> : hud ? <Hud /> : solo ? <Solo paneId={solo} /> : <App />}
     </ErrorBoundary>
   </StrictMode>,
 ))

@@ -8,6 +8,7 @@ const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, ses
 const dictation = require('./dictation.js')
 const contextMenu = require('./contextmenu.js')
 const permissions = require('./permissions.js')
+const remoteDesk = require('./remote.js')
 const senders = require('./senders.js')
 const { execFile } = require('node:child_process')
 const fs = require('node:fs')
@@ -498,6 +499,8 @@ const perms = permissions.create({
   bundleId: () => (BUNDLE ? bundleId() : null),
   showTile: (kind) => showTile(kind),
   paste: () => canPaste,
+  // ...or for "Let my other devices control this computer" (Remote Screen and Preview, remote.js).
+  control: () => !!remote?.controlOn(),
   lone: () => loneKey,
   // Whether macOS lets the app listen to keys, asked of native/bridgekeys (it can only look, or ask).
   listen: IS_MAC ? { access: () => listenAsk('listen-access'), ask: () => listenAsk('listen-ask') } : null,
@@ -538,6 +541,22 @@ function onFixAsk(a) {
   const ask = { pane: a.pane, folder: typeof a.folder === 'string' ? a.folder : null, from: typeof a.from === 'string' ? a.from : null, at: Date.now() }
   tellMain(`window.__bridgePermAsk = ${JSON.stringify(ask)}; window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'permissions' } })); window.dispatchEvent(new CustomEvent('bridge-permission-ask'))`, true).catch(() => {})
 }
+// ---------- Remote Screen and Preview (remote.js) ----------
+// The capture page's screens and windows (macOS asks about Screen Recording the first time, when
+// someone looks), and "Let my other devices control this computer" turned on here: on a Mac, macOS's
+// Accessibility question then, as for pasting where you're typing.
+let remote = null
+let remoteShared = null
+ipc.handle('bridge:remote-sources', async (e) => (fromApp(e) && remote ? remote.sources() : null))
+ipc.handle('bridge:remote-control-ask', async (e) => {
+  if (!fromApp(e) || !remote) return null
+  if (!IS_MAC) return 'ok'
+  remote.setControl(true)
+  const r = await perms.ask('accessibility')
+  reportPerms()
+  return r
+})
+ipc.handle('bridge:remote-control-access', (e) => (fromApp(e) ? (!IS_MAC || !!systemPreferences.isTrustedAccessibilityClient(false)) : null))
 // Whether macOS lets the app use the mic: granted, denied, restricted or not-determined.
 ipc.handle('bridge:media-access', (e, kind) => (fromApp(e) && kind === 'microphone' && IS_MAC ? systemPreferences.getMediaAccessStatus('microphone') : null))
 // The mic, asked of macOS before the page opens it (src/audio/pcm.js askMic): the first time, macOS
@@ -668,9 +687,10 @@ async function watchFleet() {
           const block = buf.slice(0, i)
           buf = buf.slice(i + 2)
           const fleet = /^event: fleet$/m.test(block)
-          if (!fleet && !/^event: fix-ask$/m.test(block)) continue
+          const rem = /^event: remote$/m.test(block)
+          if (!fleet && !rem && !/^event: fix-ask$/m.test(block)) continue
           const data = block.split('\n').filter((l) => l.startsWith('data: ')).map((l) => l.slice(6)).join('\n')
-          try { if (fleet) onFleet(JSON.parse(data)); else onFixAsk(JSON.parse(data)) } catch { /* partial or bad frame */ }
+          try { if (fleet) onFleet(JSON.parse(data)); else if (rem) remote?.onEvent(JSON.parse(data)); else onFixAsk(JSON.parse(data)) } catch { /* partial or bad frame */ }
         }
       }
     } catch { /* server down or restarting; retry */ }
@@ -1115,6 +1135,9 @@ app.whenReady().then(async () => {
   globalShortcut.register(SHORTCUT, toggleWindow)
   await letInWindows()
   createWindow()
+  // Remote Screen and Preview's windows: the capture page, the badge, a project's app drawn off screen.
+  try { remoteShared = await import(require('node:url').pathToFileURL(path.join(ROOT, 'shared', 'remote.js')).href) } catch (e) { console.error('remote:', e.message) }
+  remote = remoteDesk.create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload: path.join(__dirname, 'preload.js'), fetch, keyFor: (c, os) => remoteShared?.keyFor(c, os) ?? null })
   watchFleet()
   watchCalls()
   startUpdatingWhileAway()

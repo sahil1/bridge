@@ -47,6 +47,8 @@ import AgentMap from './components/AgentMap.jsx'
 import NeedsHome, { Everything, useHome, needCount, editHome } from './components/NeedsHome.jsx'
 import More from './components/More.jsx'
 import RemoteAgent from './components/RemoteAgent.jsx'
+import ScreenView from './components/remote/ScreenView.jsx'
+import { RemoteHere } from './components/remote/Here.jsx'
 import Dictation from './dictation/Dictation.jsx'
 import BackForward from './components/BackForward.jsx'
 import { start as navStart, stop as navStop, seen as navSeen, recheck as navRecheck, usePlaces, placeOf, placeLabel, showPlaceIn, replacedWith, renamedTab, slotOf } from './backForward.js'
@@ -361,6 +363,7 @@ function App() {
   const theme = look.mode
   const setTheme = (mode) => saveLook({ mode })
   const [settings, setSettings] = useState(null) // null = closed, else where it opens: 'all' (Settings itself) or a section
+  const [screenOf, setScreenOf] = useState(null) // another computer's screen, seen here: { machine, name } (remote/ScreenView.jsx)
   const [L, setL] = usePersisted('cc-layout', LAYOUT)
   const [W, setW] = usePersisted('cc-ws', WS)
   const [primary] = useShared('cc-primary', 'claude')
@@ -694,6 +697,12 @@ function App() {
     window.addEventListener('bridge-open-settings', on)
     return () => window.removeEventListener('bridge-open-settings', on)
   }, [])
+  // ...or another computer's screen (View screen, in Settings and the devices menu), over everything.
+  useEffect(() => {
+    const on = (e) => { setSettings(null); setScreenOf({ machine: e.detail?.machine || null, name: e.detail?.name || '' }) }
+    window.addEventListener('bridge-view-screen', on)
+    return () => window.removeEventListener('bridge-view-screen', on)
+  }, [])
   // Back from a restart to apply a permission: Settings where it was asked for, to see it's on (the
   // agent you had open comes back by itself).
   useEffect(() => { const r = takeReturn(); if (r?.section) setSettings(r.section) }, [])
@@ -970,6 +979,7 @@ function App() {
   const overlays = (
     <>
       {!cloudOnly && <Dictation conf={conf?.dictation} onScreen={onScreen} looking={looking} />}
+      {screenOf && <ErrorBoundary name="Remote screen" resetKey={screenOf.machine}><ScreenView key={screenOf.machine || 'here'} machine={screenOf.machine} name={screenOf.name} onClose={() => setScreenOf(null)} /></ErrorBoundary>}
       {palette && <Palette fleet={fleet} activeId={wide ? W.active : mobileAgent} onClose={() => setPalette(false)} onOpen={openAgent} onOpenFile={openFiles} actions={actions} />}
       {settings && <Settings section={settings} onClose={closeSettings} onOpenAgent={openAgent} />}
       {(fleet?.agents || []).filter((a) => a.chief && a.setup).map((a) => <FirstRunAnswers key={a.paneId} agent={a} />)}
@@ -1206,6 +1216,7 @@ function App() {
         <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
         <Quiet name="Link requests"><AskBanner /></Quiet>
         <Quiet name="Switched computer"><SwitchedHere /></Quiet>
+      <Quiet name="Remote screen"><RemoteHere /></Quiet>
         <main className="m-body" style={untilAsks}>
           {mtab === 'home' && homeOn && viewFor(homeView === 'everything' ? 'view:everything' : 'view:home')}
           {mtab === 'mate' && (mateShown ? <Console key={mateShown.paneId} agent={mateShown} variant="mobile" queued={queuedFor(mateShown.paneId)} delivered={deliveredFor(mateShown.paneId)} agents={agents} onThread={(id) => setMateId(id)} /> : <MateEmpty onLaunch={mateLaunch.launch} {...mateLaunch} />)}
@@ -1375,6 +1386,7 @@ function App() {
       <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
       <Quiet name="Link requests"><AskBanner /></Quiet>
       <Quiet name="Switched computer"><SwitchedHere /></Quiet>
+      <Quiet name="Remote screen"><RemoteHere /></Quiet>
       <div className="views" style={untilAsks}>
         <main className="cmd" hidden={view !== 'command'} ref={cmdRef}>
           <div className="slot rail-slot" style={{ width: railOpen ? L.railW : 52 }}>

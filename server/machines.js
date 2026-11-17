@@ -838,7 +838,7 @@ export async function exchange(id, { method = 'GET', u, headers = [], body = nul
         clearTimeout(t)
         const header = (k) => (hs || []).find(([x]) => x.toLowerCase() === k)?.[1] ?? null
         const json = async () => { const all = []; for (let c = await next(); c; c = await next()) { all.push(c); grant(c.byteLength) } try { return JSON.parse(Buffer.concat(all).toString('utf8')) } catch { return {} } }
-        resolve({ status: s, header, next, took: (n) => grant(n), cancel: () => r.cancel(), json })
+        resolve({ status: s, header, headers: hs || [], next, took: (n) => grant(n), cancel: () => r.cancel(), json })
       },
       onChunk: (c) => { parts.push(c); nudge() },
       onEnd: () => { ended = true; nudge() },
@@ -846,6 +846,15 @@ export async function exchange(id, { method = 'GET', u, headers = [], body = nul
     })
     r.started.then(async () => { if (body) { await r.write(body, { bulk: true }); await r.end() } }).catch((e) => { clearTimeout(t); failed = e; reject(e); nudge() })
   })
+}
+// A WebSocket on that device, through the link (devpreview.js: a preview's hot reload). handlers as
+// for Link.socket; what it returns sends and closes.
+export async function socketOn(id, u, handlers, ms = 12000) {
+  const m = byId(id)
+  if (!m || m.state !== 'linked') throw Object.assign(new Error('That device isn\'t linked to this one any more'), { status: 404 })
+  const l = linkOf(m)
+  await l.ready(ms)
+  return l.socket(u, handlers)
 }
 // An API call on that device, through the link (index.js: whether it's signed in to your Bold
 // Bridge account, and a grant to sign it in): its answer, or why not (code offline when it isn't
@@ -1006,8 +1015,13 @@ export function upgrade(req, socket, head) {
     let remote = null
     let open = false
     const pending = [] // what the page sent before the other end was open
+    // A screen seen through this computer (Remote Screen and Preview): that computer's log says for
+    // which of your devices, as this one says (a name only; it counts nothing).
+    let u = hit[2] || '/'
+    const asker = relay.deviceOf(req.headers['x-bridge-relay'])
+    if (asker && /^\/api\/remote\/view(\?|$)/.test(u)) u += `${u.includes('?') ? '&' : '?'}for=${encodeURIComponent(String(asker.name || '').slice(0, 60))}`
     l.ready(12000).then(() => {
-      remote = l.socket(hit[2] || '/', {
+      remote = l.socket(u, {
         onOpen: () => { open = true; for (const [d, b] of pending.splice(0)) remote.send(d, b) },
         onMessage: (data, binary) => { if (client.readyState === 1) client.send(data, { binary }) },
         onClose: (c) => { try { client.close(c?.c >= 1000 && c.c < 5000 && c.c !== 1005 && c.c !== 1006 ? c.c : 1011, String(c?.r || '').slice(0, 120)) } catch { /* closed */ } },

@@ -63,7 +63,9 @@ export const machineUrl = (id, rest = '/') => `${id ? `/m/${id}` : ''}${rest}`
 export const onThisComputer = () => !machineId && !viaRelay && (!!window.bridgeApp?.desktop || ['127.0.0.1', 'localhost'].includes(location.hostname))
 
 // A WebSocket to this server (the live terminal), through the relay's link when there is one.
-export const openSocket = (path) => (relayPage ? new relayPage.WebSocket(`${BASE}${path}`) : new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${BASE}${path}`))
+export const openSocket = (path) => openSocketAt(BASE, path)
+// ...or on one of your devices by where its pages are here (/m/<id>, or '' for this one).
+export const openSocketAt = (base, path) => (relayPage ? new relayPage.WebSocket(`${base}${path}`) : new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${base}${path}`))
 
 export const api = (path, opts) => call(apiUrl(path), opts)
 // The same on one of your devices by this computer's id for it (null: this one), through /m/<id>/
