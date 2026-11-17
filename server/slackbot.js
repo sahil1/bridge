@@ -1,9 +1,10 @@
-// The Slack Bot's way in and out of Slack (a beta feature): your own Slack app, reached from this
-// computer through Socket Mode, so nothing reaches this computer from the internet and nothing goes
-// through Bold Bridge or a relay. It's the front desk's first channel (frontdesk.js) and does what
-// a channel does there: connects and stays connected, says whether it is and why not, hands over
-// each question put to the bot, posts a reply where the question was asked, and lists who can be
-// picked to ask.
+// A bot's way in and out of Slack (Bots, a beta feature): your own Slack app, made from the
+// manifest in Settings with the bot's name, reached from this computer through Socket Mode, so
+// nothing reaches this computer from the internet and nothing goes through Bold Bridge or a relay.
+// It's a channel of the front desk (frontdesk.js), one per bot, and does what a channel does there:
+// connects and stays connected, says whether it is and why not, hands over each message put to the
+// bot, reads the conversation a question was asked in, posts a reply where it was asked, marks a
+// question with a reaction, and lists who can be picked to ask.
 //
 // Socket Mode: apps.connections.open, with the app-level token (xapp-, scope connections:write),
 // gives a WebSocket address good for a while. Slack says hello on it, then sends each event in an
@@ -13,31 +14,47 @@
 // after the computer slept; between tries it waits longer each time, up to a minute. What was asked
 // while there was no connection (Bridge AI closed, the computer asleep) waits in Slack: once
 // connected, each conversation the bot is in is read from the last message it saw
-// (conversations.history), and what was put to it meanwhile is handed over then. (A mention in a
-// thread's replies isn't in a conversation's history, so one made while it was away is missed.)
+// (conversations.history), and each thread it's answering in from the last reply it saw
+// (conversations.replies), and what was put to it meanwhile is handed over then.
 //
-// The Web API takes the bot token (xoxb-): auth.test (which workspace, which bot), users.list (the
-// members to pick askers from), chat.postMessage (a reply, in the question's thread),
-// users.conversations and conversations.history (what was missed), conversations.info (a
-// channel's name). Slack's rate limits are kept: a 429 waits as long as its Retry-After says, and
-// replies go one at a time, a second apart.
+// What it hands over: a mention, a direct message, a reply in a thread (the front desk keeps only
+// those in threads it has answered in), and an edit or deletion of a message in a thread. A
+// channel's other messages come too (message.channels, for the replies) and go no further. With
+// each, who wrote it: a guest (is_restricted, is_ultra_restricted) or someone from another company
+// (Slack Connect: another team, or is_stranger) says so, and one Slack couldn't say anything about
+// says that, so the desk refuses them.
 //
-// The tokens are kept in slack-bot.json in the data folder, readable by you only (0600), with where
-// the bot got to in each conversation: never in config.json, and never given to an agent.
+// The Web API takes the bot token (xoxb-): auth.test (which workspace, which bot, and the scopes the
+// token has, in its x-oauth-scopes header), users.list and users.info (the members to pick askers
+// from, and who someone is), chat.postMessage (a reply, in the question's thread),
+// users.conversations, conversations.history and conversations.replies (what was missed, and a
+// question's context), pins.list (a channel's pinned messages, for context), reactions.add and
+// reactions.remove (👀 and ✅), conversations.info (a channel's name). Slack's rate limits are kept:
+// a 429 waits as long as its Retry-After says, and replies go one at a time, a second apart.
+//
+// The tokens are kept in the bot's slack.json in the data folder, readable by you only (0600), with
+// where the bot got to in each conversation: never in config.json, and never given to an agent.
 // BRIDGE_SLACK_URL (tests): a stand-in for Slack (test/stand-ins/slack.mjs).
 import fs from 'node:fs'
 import WebSocket from 'ws'
-import { dataFile, writeFileAtomic } from './paths.js'
+import { writeFileAtomic } from './paths.js'
 
-const FILE = dataFile('slack-bot.json')
 const API = () => `${String(process.env.BRIDGE_SLACK_URL || 'https://slack.com').replace(/\/+$/, '')}/api`
 const PING_MS = Number(process.env.BRIDGE_SLACK_PING_MS) || 30 * 1000 // a ping this often; no pong by the next: gone
 const BACKOFF = [1, 2, 5, 10, 30, 60] // seconds between tries to connect again
 const SLEPT_MS = 30 * 1000 // a timer this late means the computer slept
 const MISSED_DAYS = 3 // what was asked while away, read back this far at most
 const MAX_CONVERSATIONS = 100
+const THREAD_CONTEXT = 50 // earlier messages read from the thread a question is asked in
+const CHANNEL_CONTEXT = 20 // and from the channel, for one asked at its top
+const PINS = 10
+const LONGEST_SAID = 1500 // a message read for context, in characters
+const FOLLOW_DAYS = 7 // a thread it answered in is followed this long after it was last busy (frontdesk.js)
+const MARK_MS = 2000 // where it got to, written this long after it moved
+// A message's kinds that are someone writing: a reply sent to the channel too, one with a file.
+const WRITTEN = new Set(['thread_broadcast', 'file_share'])
 
-const read = () => { try { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); return j && typeof j === 'object' ? j : {} } catch { return {} } }
+const read = (file) => { try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j && typeof j === 'object' ? j : {} } catch { return {} } }
 const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.() })
 // A token shown: its kind and its last four, never the rest.
 const masked = (t) => (t ? `${String(t).slice(0, 5)}…${String(t).slice(-4)}` : null)
@@ -80,23 +97,48 @@ export function plainText(text, { bot = null, names = {} } = {}) {
 // What's posted: Slack's three escapes, so a reply's < or & isn't read as markup.
 const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-// The app's manifest, to paste when making the app: a bot that's mentioned in channels and messaged
-// directly, over Socket Mode, with the scopes the calls above need and no more.
-export const SCOPES = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'users:read', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read']
-export function manifest(you = '') {
+// The app's manifest, to paste when making the app: a bot with the name you gave it, mentioned in
+// channels, messaged directly and followed in its threads, over Socket Mode, with the scopes the
+// calls above need and no more. (A manifest can't carry an icon: that's set in Slack's app page.)
+// An app made from an earlier one lacks some scopes: Settings says which, from auth.test.
+export const SCOPES = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write', 'users:read', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'reactions:write', 'pins:read']
+export const EVENTS = ['app_mention', 'message.channels', 'message.groups', 'message.im', 'message.mpim']
+export function manifest(bot = {}, you = '') {
   const who = String(you || '').trim()
+  const name = String(bot.name || 'Bridge AI').slice(0, 35)
   return {
-    display_information: { name: 'Bridge AI', description: who ? `Answers questions for ${who}, from the folders they open to it` : 'Answers questions from the folders you open to it', background_color: '#1d2330' },
-    features: { app_home: { home_tab_enabled: false, messages_tab_enabled: true, messages_tab_read_only_enabled: false }, bot_user: { display_name: 'Bridge AI', always_online: false } },
+    display_information: { name, description: String(bot.description || (who ? `Answers questions for ${who}` : 'Answers questions from the folders you give it')).slice(0, 140), background_color: '#1d2330' },
+    features: { app_home: { home_tab_enabled: false, messages_tab_enabled: true, messages_tab_read_only_enabled: false }, bot_user: { display_name: name, always_online: false } },
     oauth_config: { scopes: { bot: SCOPES } },
-    settings: { event_subscriptions: { bot_events: ['app_mention', 'message.im'] }, interactivity: { is_enabled: false }, org_deploy_enabled: false, socket_mode_enabled: true, token_rotation_enabled: false },
+    settings: { event_subscriptions: { bot_events: EVENTS }, interactivity: { is_enabled: false }, org_deploy_enabled: false, socket_mode_enabled: true, token_rotation_enabled: false },
   }
 }
 
-// say(event): what happened, for Settings' log ({ what, ok, why }).
-export function makeSlack({ say = () => {} } = {}) {
-  let kept = read()
+// id: the bot's. file: where its tokens are kept. say(event): what happened, for its record
+// ({ what, ok, why }). threads(): the threads it's answering in, to read for what was missed
+// ([{ channel, thread, since, dm }]). follows(channel, thread): whether it's answering in that
+// thread now (the desk knows), so only those threads' replies are kept track of.
+export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => [], follows = () => false } = {}) {
+  const FILE = file
+  let kept = read(FILE)
   const save = () => writeFileAtomic(FILE, JSON.stringify(kept, null, 2), { mode: 0o600 })
+  // Where it got to in each conversation and each thread it follows moves with nearly every
+  // message in a busy channel: written a moment later, once for all of them, and only when it
+  // moved. Threads it no longer follows, or quiet for a week, are let go of then.
+  let marking = null
+  const tidy = () => {
+    const old = Date.now() / 1000 - FOLLOW_DAYS * 86400
+    for (const [k, ts] of Object.entries(kept.threads || {})) {
+      const [channel, thread] = k.split(':')
+      if (Number(ts) < old || !follows(channel, thread)) delete kept.threads[k]
+    }
+  }
+  const marked = () => {
+    if (marking) return
+    marking = setTimeout(() => { marking = null; tidy(); try { save() } catch (e) { say({ what: 'save', ok: false, why: `Couldn't keep where it got to: ${e.message}` }) } }, MARK_MS)
+    marking.unref?.()
+  }
+  const markedNow = () => { if (!marking) return; clearTimeout(marking); marking = null; tidy(); try { save() } catch { /* next time */ } }
   let hear = null // the front desk's, while started
   let ws = null
   let pinger = null
@@ -130,6 +172,8 @@ export function makeSlack({ say = () => {} } = {}) {
       const j = await res.json().catch(() => null)
       if (!res.ok && !j) throw Object.assign(new Error(`Slack answered ${res.status}`), { code: `http_${res.status}`, method })
       if (!j?.ok) throw slackError(method, j)
+      // The scopes the token has, as Slack says them with each answer.
+      if (method === 'auth.test') Object.defineProperty(j, 'scopes', { value: res.headers.has('x-oauth-scopes') ? String(res.headers.get('x-oauth-scopes')).split(',').map((x) => x.trim()).filter(Boolean) : null })
       return j
     }
   }
@@ -162,6 +206,7 @@ export function makeSlack({ say = () => {} } = {}) {
       const who = await call('auth.test')
       kept.team = { id: who.team_id, name: who.team, url: who.url }
       kept.bot = { userId: who.user_id, botId: who.bot_id || null, name: who.user }
+      kept.scopes = who.scopes
       kept.since ||= String(Date.now() / 1000)
       save()
       url = (await call('apps.connections.open', {}, { token: kept.appToken })).url
@@ -200,6 +245,8 @@ export function makeSlack({ say = () => {} } = {}) {
         if (was && was !== socket) drop(was)
         set({ state: 'connected', why: null, connectedAt: new Date().toISOString(), nextTry: null })
         say({ what: 'connected', ok: true })
+        const lacks = missing()
+        if (lacks?.length) say({ what: 'scopes-missing', ok: false, why: `The Slack app lacks ${lacks.join(', ')}: update it with the new manifest`, missing: lacks })
         missed().catch((e) => say({ what: 'missed', ok: false, why: `Couldn't read what was asked while away: ${e.message}` }))
       } else if (m.type === 'disconnect') {
         // Slack moves the bot: refresh_requested and warning, a new connection first; link_disabled,
@@ -230,7 +277,8 @@ export function makeSlack({ say = () => {} } = {}) {
   watch.unref?.()
 
   // ---------- What comes in ----------
-  const names = {} // user id -> name, from users.list
+  const names = {} // user id -> name, from users.list and users.info
+  const users = {} // user id -> { guest, team, stranger }, the same
   const places = {} // channel id -> { kind, name }
   async function placeOf(channel, type) {
     if (type === 'im' || String(channel).startsWith('D')) return { kind: 'dm', id: channel, name: null }
@@ -240,26 +288,55 @@ export function makeSlack({ say = () => {} } = {}) {
     places[channel] = { kind: 'channel', id: channel, name }
     return places[channel]
   }
-  // A question: a mention of the bot in a channel, or a direct message to it, from a person. A
+  const learn = (u) => {
+    if (!u?.id) return
+    names[u.id] = u.profile?.display_name || u.profile?.real_name || u.real_name || u.name || u.id
+    users[u.id] = { guest: !!(u.is_restricted || u.is_ultra_restricted), team: u.team_id || null, stranger: u.is_stranger === true }
+  }
+  // Who wrote it: a member of this workspace, a guest, or someone from another company (Slack
+  // Connect: the event says another team, or Slack does), from the members listed, else asked of
+  // Slack (users.info). One Slack can't say anything about: unknown, and why (refused, as a guest is).
+  async function person(e) {
+    if (!users[e.user]) await people().catch(() => {})
+    if (!users[e.user]) {
+      try { learn((await call('users.info', { user: e.user })).user) } catch (err) { return { id: e.user, name: null, unknown: true, why: err.message } }
+    }
+    const u = users[e.user]
+    if (!u) return { id: e.user, name: null, unknown: true, why: 'Slack said nothing about them' }
+    const team = kept.team?.id
+    const other = (t) => !!(t && team && t !== team)
+    return { id: e.user, name: names[e.user] || null, guest: u.guest, external: u.stranger || other(u.team) || other(e.user_team) || other(e.source_team) }
+  }
+
+  // What comes in: a mention of the bot in a channel, a direct message to it, or a reply in a thread
+  // (the desk keeps only those in threads it answers in), from a person; an edit or deletion. A
   // thread's reply goes in that thread, a channel's message in a thread of its own, a direct message
   // plainly back.
   async function heard(e, { late = false } = {}) {
     if (!e || !hear) return
-    if (e.bot_id || e.subtype || !e.user || e.user === kept.bot?.userId) return
-    const dm = e.channel_type === 'im' || String(e.channel).startsWith('D')
-    if (e.type === 'message' && !dm) return
+    if (e.type === 'message' && (e.subtype === 'message_changed' || e.subtype === 'message_deleted')) return altered(e)
     if (e.type !== 'message' && e.type !== 'app_mention') return
-    // Where it got to here, for what's missed next time (only a top-level message moves it).
-    if (!e.thread_ts || e.thread_ts === e.ts) {
+    const dm = e.channel_type === 'im' || String(e.channel).startsWith('D')
+    const thread = e.thread_ts && e.thread_ts !== e.ts ? e.thread_ts : null
+    // Where it got to here, for what's missed next time: a conversation's own messages, and the
+    // replies in each thread it's answering in (no other thread's).
+    if (!thread) {
       if (!kept.seen) kept.seen = {}
-      if (!kept.seen[e.channel] || Number(e.ts) > Number(kept.seen[e.channel])) { kept.seen[e.channel] = e.ts; save() }
+      if (!kept.seen[e.channel] || Number(e.ts) > Number(kept.seen[e.channel])) { kept.seen[e.channel] = e.ts; marked() }
+    } else if (follows(e.channel, thread)) {
+      if (!kept.threads) kept.threads = {}
+      const k = `${e.channel}:${thread}`
+      if (!kept.threads[k] || Number(e.ts) > Number(kept.threads[k])) { kept.threads[k] = e.ts; marked() }
     }
+    if (e.bot_id || (e.subtype && !WRITTEN.has(e.subtype)) || !e.user || e.user === kept.bot?.userId) return
+    const mention = e.type === 'app_mention' || String(e.text || '').includes(`<@${kept.bot?.userId}>`)
+    // A channel's own message that doesn't mention it: not for it.
+    if (!dm && !mention && !thread) return
     set({ lastEvent: new Date().toISOString() })
     const place = await placeOf(e.channel, dm ? 'im' : null)
-    if (!names[e.user]) await people().catch(() => {})
     await hear({
-      key: `${e.channel}:${e.ts}`,
-      from: { id: e.user, name: names[e.user] || null },
+      ts: e.ts, channel: e.channel, thread, mention, dm,
+      from: await person(e),
       text: plainText(e.text, { bot: kept.bot?.userId, names }),
       place,
       at: new Date(Number(e.ts) * 1000).toISOString(),
@@ -267,9 +344,48 @@ export function makeSlack({ say = () => {} } = {}) {
       reply: { channel: e.channel, thread: dm && !e.thread_ts ? null : e.thread_ts || e.ts },
     })
   }
+  // An edit or a deletion, handed over as one (the desk keeps those in its threads).
+  async function altered(e) {
+    const now = e.message || {}
+    const was = e.previous_message || {}
+    const ts = now.ts || e.deleted_ts || was.ts
+    const thread = now.thread_ts || was.thread_ts || null
+    const user = now.user || was.user || null
+    if (!ts || !hear?.change) return
+    await hear.change({
+      kind: e.subtype === 'message_deleted' ? 'deleted' : 'changed', channel: e.channel, ts, thread: thread || ts,
+      from: user ? { id: user, name: names[user] || null } : null,
+      text: e.subtype === 'message_deleted' ? null : plainText(now.text, { bot: kept.bot?.userId, names }),
+      before: was.text != null ? plainText(was.text, { bot: kept.bot?.userId, names }) : null,
+    })
+  }
+
+  // The conversation a question was asked in, as context: in a thread, its earlier messages (since
+  // `since`, when the answer goes on from an earlier one); at the top of a channel, its latest
+  // messages and what's pinned there; in a direct message, its latest messages. Each with who wrote
+  // it, and whether that was this bot. { kind, messages: [{ ts, person, text, you }], pins, problem }
+  const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
+  async function context({ channel, thread, ts, since = null, dm = false }) {
+    const said = (m) => ({ ts: m.ts, person: { id: m.user || m.bot_id || null, name: names[m.user] || m.username || m.bot_profile?.name || m.user || null }, text: clip(plainText(m.text, { bot: kept.bot?.userId, names }), LONGEST_SAID), you: !!((m.user && m.user === kept.bot?.userId) || (m.bot_id && m.bot_id === kept.bot?.botId)) })
+    if (!Object.keys(names).length) await people().catch(() => {})
+    const before = (m) => Number(m.ts) < Number(ts) && (!since || Number(m.ts) > Number(since)) && String(m.text || '').trim()
+    const order = (a, b) => Number(a.ts) - Number(b.ts)
+    if (thread) {
+      const j = await call('conversations.replies', { channel, ts: thread, limit: 200 })
+      return { kind: 'thread', messages: (j.messages || []).filter(before).sort(order).slice(-THREAD_CONTEXT).map(said), pins: [] }
+    }
+    const j = await call('conversations.history', { channel, latest: ts, inclusive: false, limit: CHANNEL_CONTEXT })
+    const messages = (j.messages || []).filter(before).sort(order).slice(-CHANNEL_CONTEXT).map(said)
+    if (dm) return { kind: 'dm', messages, pins: [] }
+    let pins = []
+    let problem = null
+    try { pins = ((await call('pins.list', { channel })).items || []).filter((i) => i.message?.text).slice(0, PINS).map((i) => said(i.message)) } catch (e) { problem = `Couldn't read what's pinned: ${e.message}` }
+    return { kind: 'channel', messages, pins, problem }
+  }
 
   // What was put to the bot while it wasn't connected: each conversation it's in, read from the
-  // last message it saw there (or from when it was first connected, at most three days back).
+  // last message it saw there (or from when it was first connected, at most three days back), and
+  // each thread it's answering in, from the last reply it saw there.
   let reading = null
   function missed() {
     if (reading) return reading
@@ -293,7 +409,16 @@ export function makeSlack({ say = () => {} } = {}) {
           found++
           await heard({ ...m, type: im ? 'message' : 'app_mention', channel: c.id, channel_type: im ? 'im' : undefined }, { late: true })
         }
-        if (msgs.length) { if (!kept.seen) kept.seen = {}; kept.seen[c.id] = msgs.at(-1).ts; save() }
+        if (msgs.length) { if (!kept.seen) kept.seen = {}; kept.seen[c.id] = msgs.at(-1).ts; marked() }
+      }
+      for (const t of (await Promise.resolve(threads()).catch(() => [])).slice(0, MAX_CONVERSATIONS)) {
+        const from = Math.max(floor, Number(kept.threads?.[`${t.channel}:${t.thread}`] || 0), Number(t.since || 0))
+        const j = await call('conversations.replies', { channel: t.channel, ts: t.thread, oldest: from.toFixed(6), inclusive: false, limit: 200 })
+        const msgs = (j.messages || []).filter((m) => Number(m.ts) > from && m.ts !== t.thread).sort((a, b) => Number(a.ts) - Number(b.ts))
+        for (const m of msgs) {
+          found++
+          await heard({ ...m, type: 'message', channel: t.channel, channel_type: t.dm ? 'im' : 'channel', thread_ts: m.thread_ts || t.thread }, { late: true })
+        }
       }
       if (found) say({ what: 'missed', ok: true, why: `${found} asked while away` })
     })().finally(() => { reading = null })
@@ -316,8 +441,18 @@ export function makeSlack({ say = () => {} } = {}) {
     return go.then((j) => ({ ts: j.ts, channel: j.channel }))
   }
 
-  // The workspace's people, to pick askers from: neither bots nor deactivated accounts. Kept for 10
-  // minutes.
+  // A reaction on a question (👀 as it's taken, ✅ once answered), or taken off. One that's there
+  // already, or gone already, is as asked. An app without reactions:write isn't asked: it says so
+  // (and Settings says to update the app).
+  async function react({ channel, ts, name, off = false }) {
+    if (missing()?.includes('reactions:write')) throw Object.assign(new Error('The Slack app lacks reactions:write: update it with the new manifest'), { code: 'missing_scope' })
+    try { await call(off ? 'reactions.remove' : 'reactions.add', { channel, timestamp: ts, name }, { waits: 1 }) } catch (e) { if (!['already_reacted', 'no_reaction'].includes(e.code)) throw e }
+  }
+  // The scopes the manifest asks for that the app's token doesn't have (null: Slack didn't say).
+  const missing = () => (Array.isArray(kept.scopes) ? SCOPES.filter((x) => !kept.scopes.includes(x)) : null)
+
+  // The workspace's people, to pick askers from: neither bots, deactivated accounts nor guests
+  // (guests are never answered). Kept for 10 minutes.
   let memo = { at: 0, list: null }
   async function people({ fresh = false } = {}) {
     if (!fresh && memo.list && Date.now() - memo.at < 10 * 60 * 1000) return memo.list
@@ -326,9 +461,9 @@ export function makeSlack({ say = () => {} } = {}) {
     do {
       const j = await call('users.list', { limit: 200, cursor })
       for (const u of j.members || []) {
-        if (u.deleted || u.is_bot || u.id === 'USLACKBOT') continue
-        const name = u.profile?.display_name || u.profile?.real_name || u.real_name || u.name
-        names[u.id] = name
+        learn(u)
+        if (u.deleted || u.is_bot || u.id === 'USLACKBOT' || u.is_restricted || u.is_ultra_restricted) continue
+        const name = names[u.id]
         out.push({ id: u.id, name, detail: [u.profile?.real_name && u.profile.real_name !== name ? u.profile.real_name : null, u.profile?.title || null].filter(Boolean).join(' · ') || null })
       }
       cursor = j.response_metadata?.next_cursor || undefined
@@ -346,6 +481,7 @@ export function makeSlack({ say = () => {} } = {}) {
     connect().catch((e) => later(e.message))
   }
   function stop() {
+    markedNow()
     hear = null
     gen++
     stopTimers()
@@ -353,7 +489,7 @@ export function makeSlack({ say = () => {} } = {}) {
     ws = null
     set({ state: kept.appToken && kept.botToken ? 'off' : 'no-tokens', why: null, nextTry: null })
   }
-  const state = () => ({ ...st, team: kept.team || null, bot: kept.bot || null, tokens: kept.appToken || kept.botToken ? { app: masked(kept.appToken), bot: masked(kept.botToken) } : null })
+  const state = () => ({ ...st, team: kept.team || null, bot: kept.bot || null, tokens: kept.appToken || kept.botToken ? { app: masked(kept.appToken), bot: masked(kept.botToken) } : null, scopes: { missing: kept.botToken ? missing() : null, known: Array.isArray(kept.scopes) } })
 
   // New tokens: each checked with Slack before it's kept (the bot token with auth.test, the
   // app-level one by opening a connection's address), so a wrong one is said at once. Another
@@ -366,7 +502,7 @@ export function makeSlack({ say = () => {} } = {}) {
     const who = await call('auth.test', {}, { token: bot }).catch((e) => { throw new Error(`The bot token: ${e.message}`) })
     await call('apps.connections.open', {}, { token: app }).catch((e) => { throw new Error(`The app-level token: ${e.message}${e.code === 'missing_scope' ? ': give it connections:write' : ''}`) })
     const other = !!kept.team?.id && kept.team.id !== who.team_id
-    kept = { ...(other ? {} : kept), appToken: app, botToken: bot, team: { id: who.team_id, name: who.team, url: who.url }, bot: { userId: who.user_id, botId: who.bot_id || null, name: who.user }, since: other || !kept.since ? String(Date.now() / 1000) : kept.since }
+    kept = { ...(other ? {} : kept), appToken: app, botToken: bot, team: { id: who.team_id, name: who.team, url: who.url }, bot: { userId: who.user_id, botId: who.bot_id || null, name: who.user }, scopes: who.scopes, since: other || !kept.since ? String(Date.now() / 1000) : kept.since }
     save()
     memo = { at: 0, list: null }
     const was = hear
@@ -376,11 +512,13 @@ export function makeSlack({ say = () => {} } = {}) {
   }
   function forget() {
     stop()
+    clearTimeout(marking)
+    marking = null
     kept = {}
     try { fs.rmSync(FILE, { force: true }) } catch { /* gone */ }
     memo = { at: 0, list: null }
     set({ state: 'no-tokens', why: null })
   }
 
-  return { id: 'slack', label: 'Slack', start, stop, state, post, people, setTokens, forget, missed }
+  return { id, label: 'Slack', start, stop, state, post, react, context, people, setTokens, forget, missed, masked }
 }

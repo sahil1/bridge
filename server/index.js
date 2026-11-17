@@ -101,6 +101,8 @@ import { make as makeMcpTools } from './mcptools.js'
 import { make as makeOutside } from './outside.js'
 import { makeFrontDesk } from './frontdesk.js'
 import { makeSlack, manifest as slackManifest, SCOPES as SLACK_SCOPES } from './slackbot.js'
+import * as botsStore from './bots.js'
+import { keepOf } from './trace.js'
 import { makeMcp, connection, MODERN, LEGACY } from './mcpproto.js'
 import * as notify from './notify.js'
 import * as push from './push.js'
@@ -1037,17 +1039,19 @@ app.post('/api/chief/delegate', wrap((req) => delegate.add({ ...(req.body || {})
 app.post('/api/chief/delegate/:task/retry', wrap((req) => delegate.retry(req.params.task)))
 // A helper's agent: in its own folder (made by delegate.js inside the chief's, so not checked
 // as a folder you picked), allowed edits there when you said helpers may; in a folder the chief
-// named, as New agent starts one. Either way in the Helpers space, a tab each (the Slack Bot's in
-// its own space). Read-only (access 'read'): started so. fork: a copy of an agent's conversation, in
+// named, as New agent starts one. Either way in the Helpers space, a tab each (the bots' answers in
+// their own space). Read-only (access 'read'): started so. fork: a copy of an agent's conversation, in
 // its folder.
-async function launchHelper({ kind, cwd, own, label, space, prompt, access, fork }) {
+async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs, fork }) {
   const f = await fleetView()
   const ws = (f.workspaces || []).find((w) => w.label.toLowerCase() === String(space).toLowerCase())
   const where = ws ? { workspaceId: ws.id } : { newSpace: space }
   if (access === 'read' && !readOnly(kind)) throw new Error(`${adapter(kind).label} can't be started read-only: answer with Claude Code or Codex`)
-  if (!own && !fork) return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest', access })), session: f.session || '' }
+  // (A read-only one, a bot's answer, is started as it is: its folders were checked, and it isn't
+  // work of yours to remember the folder for.)
+  if (!own && !fork && access !== 'read') return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest', access })), session: f.session || '' }
   if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
-  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, fork, effort: 'suggest' })
+  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: access === 'read' ? dirs : undefined, fork, effort: 'suggest' })
   pushFleet()
   return { ...out, session: f.session || '' }
 }
@@ -1184,7 +1188,7 @@ async function launchFrom(body) {
   // repo's setup command. If it can't start, the worktree goes again (the branch stays).
   const own = ownBranch ? await worktrees.create(dir, { branch, base, label: name }) : null
   // access: how much it may do without asking (agents.js access()); its default, asking, otherwise.
-  // read: only read (the Slack Bot's answers).
+  // read: only read (a bot's answers).
   const level = ['edits', 'full', 'read'].includes(access) ? access : undefined
   const start = (o, tree) => launchAgent({ ...o, access: level, cwd: tree?.cwd || dir, setup: tree?.setup || undefined }).catch(async (e) => { if (tree) await worktrees.tidy(tree.folder); throw e })
   // New space: the workspace takes the space name and its first tab the agent's name.
@@ -2833,7 +2837,7 @@ app.get('/api/needs-you', wrap(async (req) => {
     // What other apps ask of you through Bridge AI's MCP server, here: a change to keep or discard,
     // a message for an agent to send or not (outside.js).
     outside: outside.waiting().map((x) => ({ ...x, change: outsideView(x) })),
-    // The Slack Bot's answers to send or discard, and what nothing could answer (frontdesk.js).
+    // The bots' answers to send or discard, and what nothing could answer (frontdesk.js).
     slack: desk.waiting(),
   }
 }))
@@ -2874,7 +2878,7 @@ app.get('/api/home', trialOff('home', 'Home'), wrap(async (req) => {
     devices: [{ id: null, name, os: machines.OS, online: true, here: true }, ...linked.map((m) => ({ id: m.id, name: m.name, os: m.os, online: !!m.online, lastSeen: m.lastSeen, at: m.at, partial: !Array.isArray(m.home) }))],
     pins: homeList.pins(),
     layouts: homeList.layouts(),
-    // What other apps ask of you here, and the Slack Bot's answers, as in Needs You.
+    // What other apps ask of you here, and the bots' answers, as in Needs You.
     outside: outside.waiting().map((x) => ({ ...x, change: outsideView(x) })),
     slack: desk.waiting(),
   }
@@ -3243,7 +3247,7 @@ function applyConfig() {
   routines.scheduling(trialOn('routines'))
   weather = makeWeather(cfg)
   prepareChief(cfg)
-  desk.sync() // the Slack Bot connected while its beta feature is on, and not while it's off
+  desk.sync() // the bots connected while their beta feature is on, and not while it's off
   memoryView.sync() // About you in Chief of Staff's folder, as About you is
   // The herdr session in view (the sidebar's session menu, Settings), at once.
   if (rt.name === 'herdr') {
@@ -3872,13 +3876,15 @@ app.all('/mcp', async (req, res) => {
   res.status(c === -32601 ? 404 : c === -32022 || (c === -32602 && /_meta|protocol version/i.test(out.error.message)) || c === -32600 ? 400 : 200).json(out)
 })
 
-// ---------- The Slack Bot (a beta feature) ----------
-// Questions from people you named in your Slack workspace, put to your own Slack app (slackbot.js,
-// through Socket Mode from this computer: never through the relay or Bold Bridge), each answered by
-// a read-only agent the front desk picks (frontdesk.js), the answer waiting in Needs You to send or
-// discard unless you said it may go without asking. Its settings: slackBot in the config; its
-// tokens in slack-bot.json (yours only), set only from this computer.
-const slackOn = () => trialOn('slack-bot')
+// ---------- Bots (a beta feature, its id slack-bot) ----------
+// Your own bots in Slack, each its own Slack app with the name you give it (slackbot.js, through
+// Socket Mode from this computer: never through the relay or Bold Bridge), answering people you
+// choose from the folders you give it, each answer by a read-only agent (frontdesk.js), waiting in
+// Needs You to send or discard unless you said it may go without asking. Each bot's settings,
+// instructions, tokens and record in its own folder, bots/<id>/ (bots.js, trace.js), changed only
+// from this computer.
+const botsOn = () => trialOn('slack-bot')
+const botsGuard = trialOff('slack-bot', 'Bots')
 // An answering agent's tab, closed once its question is done (its conversation kept, as any closed one is).
 async function closePane(paneId) {
   const a = ((await rt.fleet()).agents || []).find((x) => x.paneId === paneId)
@@ -3887,84 +3893,266 @@ async function closePane(paneId) {
   await rt.closeTab(a.tabId)
   pushFleet()
 }
-// A question that waits on you is a notification, as an agent's question is: who asked and where,
-// not what (it opens Needs You, where the question is).
+// A question that waits on you is a notification, as an agent's question is: which bot, who asked
+// and where, not what (it opens Needs You, where the question is).
 const deskTold = (q) => {
   if (cfg.notify?.needsYou === false) return
   const who = q.from?.name || 'Someone'
   const where = q.place?.kind === 'dm' ? 'a direct message' : q.place?.name ? `#${q.place.name}` : 'Slack'
-  notify.send({ kind: 'needs-you', title: `Slack Bot: ${who} asked in ${where}`, body: q.needsOwner ? 'Nothing could answer it: write the reply in Needs You.' : 'An answer waits for you to send or discard.', url: `/?agent=${encodeURIComponent(`slack:${q.id}`)}&inbox=1`, tag: `slack-${q.id}` }).catch(() => {})
+  notify.send({ kind: 'needs-you', title: `${q.bot?.name || 'Your bot'}: ${who} asked in ${where}`, body: q.needsOwner ? 'Nothing could answer it: write the reply in Needs You.' : 'An answer waits for you to send or discard.', url: `/?agent=${encodeURIComponent(`slack:${q.id}`)}&inbox=1`, tag: `bot-${q.id}` }).catch(() => {})
+}
+// The files an answering agent opened in its run, from its conversation (for the record).
+const READS = new Set(['Read', 'Grep', 'Glob', 'read_file', 'shell', 'exec_command'])
+async function readsOf(h) {
+  if (!h.sessionId) return []
+  const since = Date.parse(h.startedAt || 0) - 2000
+  const msgs = transcript({ kind: h.kind, sessionId: h.sessionId, cwd: h.cwd }).messages || []
+  return msgs.filter((m) => m.role === 'tool' && READS.has(m.tool) && (!m.ts || Date.parse(m.ts) >= since)).map((m) => ({ tool: m.tool, what: String(m.hint || '').replace(os.homedir(), '~') })).filter((x) => x.what)
 }
 const desk = makeFrontDesk({
-  cfg, delegate, fleet: fleetView, resolve: (p) => places.resolveDir(p), installed, on: slackOn,
-  you: () => String(cfg.name || '').trim() || 'the owner', changed: () => pushFleet(), close: closePane, told: deskTold,
+  delegate, fleet: fleetView, resolve: (p) => places.resolveDir(p), installed, on: botsOn,
+  you: () => String(cfg.name || '').trim() || 'the owner', changed: () => pushFleet(), close: closePane, told: deskTold, readsOf, modelOf: (kind) => modelFor(kind),
 })
-const slack = makeSlack({ say: (e) => desk.note('slack', e) })
-desk.add(slack, 'slackBot')
-const slackSet = () => cfg.slackBot || {}
-// For Settings › Slack Bot: how it's connected and why not, its settings, the agents that can
-// answer read-only (and whether each is kept to its folder), the folders, the log, and the
-// manifest to make the app with.
-app.get('/api/slack-bot', trialOff('slack-bot', 'The Slack Bot'), wrap(async () => {
-  const set = slackSet()
+// A bot's Slack app, as a channel of the desk.
+const connectBot = (id) => {
+  if (desk.has(id)) return desk.channel(id)
+  const ch = makeSlack({ id, file: botsStore.fileOf(id, 'slack.json'), say: (e) => desk.note(id, e), threads: () => desk.threads(id), follows: (channel, thread) => desk.follows(id, channel, thread) })
+  desk.add(id, ch)
+  return ch
+}
+// The Slack Bot (#216), carried over once as the first bot; then each bot's channel.
+{
+  const was = botsStore.carryOver(cfg.slackBot, { you: String(cfg.name || '').trim(), unset: () => { settings.patch({ slackBot: null }); applyConfigSoon() } })
+  for (const b of botsStore.list()) connectBot(b.id)
+  // A deleted bot's record, still to look at until its time runs out.
+  for (const d of botsStore.deleted()) desk.add(d.id, null)
+  if (was) {
+    desk.record(was.id, 'settings.changed', { setting: 'all', old: 'Slack Bot', new: { name: was.name, readsFrom: was.readsFrom, who: was.who, askers: was.askers.length }, by: 'Bridge AI', why: 'The Slack Bot carried over as a bot' })
+    desk.carry(was.id)
+  }
+}
+function applyConfigSoon() { setTimeout(() => { try { applyConfig() } catch { /* next change */ } }, 0) }
+const botOr404 = (id) => { const b = botsStore.get(id); if (!b) throw Object.assign(new Error('No such bot'), { status: 404 }); return b }
+// A bot, or a deleted one whose record is kept: what Activity and its export look at.
+const recordOr404 = (id) => { const b = botsStore.get(id) || botsStore.deletedOf(id); if (!b || !desk.has(b.id)) throw Object.assign(new Error('No such bot'), { status: 404 }); return b }
+const wrapBot = (fn) => async (req, res) => { try { res.json(await fn(req, res)) } catch (e) { res.status(e.status >= 400 && e.status < 500 ? e.status : 502).json({ error: e.message }) } }
+// How the agent that answers is signed in, for the note on its terms: a personal subscription
+// (Claude's or ChatGPT's own sign-in), an API key, a cloud's (Bedrock, Vertex), or not known.
+async function signInKind(kind) {
+  const s = await accounts.signInOf(kind).catch(() => null)
+  const provider = kind === 'codex' ? { account: 'ChatGPT', provider: 'OpenAI' } : { account: 'Claude', provider: 'Anthropic' }
+  if (!s) return { kind: 'unknown', ...provider }
+  if (s.signedIn === false) return { kind: 'none', ...provider }
+  if (kind === 'claude') {
+    if (s.provider && s.provider !== 'firstParty') return { kind: 'cloud', ...provider }
+    // (A Team or Enterprise plan is an organization's, made for its people to share: no note.)
+    if (/team|enterprise/i.test(String(s.sub || ''))) return { kind: 'organization', ...provider }
+    if (s.method === 'claude.ai' || s.method === 'oauth_token' || s.sub) return { kind: 'subscription', plan: s.sub ? String(s.sub).replace(/^claude_/, '').replace(/\b\w/g, (c) => c.toUpperCase()) : null, ...provider }
+    if (/api_key/.test(String(s.method || ''))) return { kind: 'api', ...provider }
+    if (s.method === 'third_party') return { kind: 'cloud', ...provider }
+    return { kind: 'unknown', ...provider }
+  }
+  if (kind === 'codex') return { kind: s.plan === 'ChatGPT' ? 'subscription' : s.plan === 'API key' ? 'api' : 'unknown', ...provider }
+  return { kind: 'unknown', ...provider }
+}
+// A bot as Settings shows it: how it's connected and why not (and the scopes its app lacks), its
+// settings and instructions, its folders as they stand, which agent answers and how it's signed in,
+// the manifest to make or update its app with, and how many questions wait.
+async function botView(b, { brief = false } = {}) {
+  const ch = desk.channel(b.id)
+  const s = ch?.state() || { state: 'off' }
+  const base = { id: b.id, name: b.name, description: b.description, state: s.state, why: s.why || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null }
+  const v = await desk.view(b.id)
+  if (brief) return { ...base, waiting: v?.waiting || 0 }
   const have = new Set((await installed()).map((k) => k.kind))
+  const kind = v?.answerer?.kind || null
+  let file = null
+  if (b.instructionsFile) {
+    const ins = await botsStore.instructionsOf(b, (v?.folders || []).filter((f) => f.ok).map((f) => f.path))
+    file = { path: b.instructionsFile, ok: !ins.problem, problem: ins.problem }
+  }
   return {
-    ...slack.state(),
-    settings: { askers: Array.isArray(set.askers) ? set.askers : [], others: set.others === 'silent' ? 'silent' : 'polite', throwaway: set.throwaway !== false, auto: set.auto === true, agent: set.agent || null, max: set.max || 2 },
+    ...base, ...v,
+    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max },
+    instructions: { text: botsStore.readOwn(b.id), file },
     agents: ['claude', 'codex'].map((k) => ({ kind: k, label: adapter(k).label, installed: have.has(k), confined: !!readOnly(k)?.confined })),
-    ...(await desk.view('slack')),
-    manifest: slackManifest(cfg.name), scopes: SLACK_SCOPES, you: String(cfg.name || '').trim() || null,
+    signIn: kind ? await signInKind(kind) : null,
+    manifest: slackManifest(b, cfg.name), scopesWanted: SLACK_SCOPES, you: String(cfg.name || '').trim() || null,
   }
-}))
-// The tokens, checked with Slack before they're kept; and forgotten (Disconnect).
-app.post('/api/slack-bot/tokens', trialOff('slack-bot', 'The Slack Bot'), wrap(async (req) => { onComputer(req); const r = await slack.setTokens(req.body || {}); desk.sync(); return r }))
-app.delete('/api/slack-bot/tokens', trialOff('slack-bot', 'The Slack Bot'), wrap((req) => { onComputer(req); slack.forget(); return slack.state() }))
-// Connect again now (after it stopped on an error you've since fixed in Slack).
-app.post('/api/slack-bot/connect', trialOff('slack-bot', 'The Slack Bot'), wrap(() => { slack.stop(); desk.sync(); return slack.state() }))
-// The workspace's people, to pick who may ask.
-app.get('/api/slack-bot/people', trialOff('slack-bot', 'The Slack Bot'), wrap(async (req) => ({ people: await slack.people({ fresh: req.query.fresh === '1' }) })))
-// Its settings, each checked: who may ask (Slack's ids, with the names you picked them by), what
-// anyone else gets, the folders opened to it (each one there, inside your home folder) and their
-// topics, a throwaway agent or not, answering without asking, which agent answers, how many at once.
-app.post('/api/slack-bot/settings', trialOff('slack-bot', 'The Slack Bot'), wrap(async (req) => {
+}
+// What a setting was and is, for the record (people by name, never a token).
+const settingSaid = (v) => (Array.isArray(v) ? v.map((x) => (x && typeof x === 'object' ? x.name || x.id : x)) : v)
+function recordChanges(id, before, after) {
+  for (const k of Object.keys(after)) {
+    if (['id', 'createdAt'].includes(k) || JSON.stringify(before[k]) === JSON.stringify(after[k])) continue
+    desk.record(id, 'settings.changed', { setting: k, old: settingSaid(before[k]), new: settingSaid(after[k]), by: String(cfg.name || '').trim() || 'the owner' })
+  }
+}
+
+app.get('/api/bots', botsGuard, wrapBot(async () => ({
+  bots: await Promise.all(botsStore.list().map((b) => botView(b, { brief: true }))),
+  // Bots deleted whose record is kept, to look at in Activity until its time runs out.
+  deleted: botsStore.deleted().filter((d) => desk.has(d.id)).map((d) => ({ ...d, cleared: desk.cleared(d.id) })),
+  you: String(cfg.name || '').trim() || null,
+})))
+// A new bot, by its name.
+app.post('/api/bots', botsGuard, wrapBot(async (req) => {
   onComputer(req)
-  const b = req.body || {}
+  const b = botsStore.create({ name: req.body?.name, description: req.body?.description }, String(cfg.name || '').trim())
+  connectBot(b.id)
+  desk.record(b.id, 'settings.changed', { setting: 'created', old: null, new: { name: b.name }, by: String(cfg.name || '').trim() || 'the owner' })
+  desk.sync()
+  return botView(b)
+}))
+app.get('/api/bots/:id', botsGuard, wrapBot(async (req) => botView(botOr404(req.params.id))))
+// Its settings, each checked: its name and description (its name in Slack), who may ask (Slack's
+// ids, with the names you picked them by, or everyone in its channels), what anyone else gets, the
+// folders it reads from (each one there, inside your home folder, not Bridge AI's own), its
+// instructions (written here, or a file in one of its folders), answering without asking, copies of
+// your agents' conversations, which agent answers, how many at once, and how long its record is kept.
+app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const b = botOr404(req.params.id)
+  const x = req.body || {}
   const next = {}
-  if (b.askers !== undefined) {
-    if (!Array.isArray(b.askers)) throw new Error('askers is a list')
-    next.askers = b.askers.slice(0, 200).map((x) => ({ id: String(x?.id || '').trim(), name: String(x?.name || '').replace(/\s+/g, ' ').trim().slice(0, 80) })).filter((x) => /^[UW][A-Z0-9]{2,20}$/.test(x.id))
+  if (x.name !== undefined) { if (!String(x.name).trim()) throw new Error('Give it a name: it\'s its name in Slack'); next.name = String(x.name) }
+  if (x.description !== undefined) next.description = String(x.description)
+  if (x.who !== undefined) next.who = x.who === 'channels' ? 'channels' : 'named'
+  if (x.askers !== undefined) {
+    if (!Array.isArray(x.askers)) throw new Error('askers is a list')
+    next.askers = x.askers.slice(0, 200).map((p) => ({ id: String(p?.id || '').trim(), name: String(p?.name || '').replace(/\s+/g, ' ').trim().slice(0, 80) })).filter((p) => /^[UW][A-Z0-9]{2,20}$/.test(p.id))
   }
-  if (b.others !== undefined) next.others = b.others === 'silent' ? 'silent' : 'polite'
-  if (b.throwaway !== undefined) next.throwaway = b.throwaway === true
-  if (b.auto !== undefined) next.auto = b.auto === true
-  if (b.agent !== undefined) {
-    if (b.agent && !readOnly(String(b.agent))) throw new Error(`${adapter(String(b.agent)).label} can't answer read-only`)
-    next.agent = b.agent ? String(b.agent) : null
+  if (x.others !== undefined) next.others = x.others === 'silent' ? 'silent' : 'polite'
+  if (x.auto !== undefined) next.auto = x.auto === true
+  if (x.agentCopies !== undefined) next.agentCopies = x.agentCopies === true
+  if (x.retention !== undefined) next.retention = keepOf(x.retention)
+  if (x.agent !== undefined) {
+    if (x.agent && !readOnly(String(x.agent))) throw new Error(`${adapter(String(x.agent)).label} can't answer read-only`)
+    next.agent = x.agent ? String(x.agent) : null
   }
-  if (b.max !== undefined) next.max = Math.max(1, Math.min(5, Math.round(Number(b.max)) || 2))
-  if (b.folders !== undefined) {
-    if (!Array.isArray(b.folders)) throw new Error('folders is a list')
-    next.folders = []
-    // One opened already that's gone since (moved, deleted) stays as it was, or can be taken out;
-    // only a new one has to be there.
-    const had = new Set((slackSet().folders || []).map((f) => f.path))
-    for (const f of b.folders.slice(0, 50)) {
-      const topics = String(f?.topics || '').replace(/\s+/g, ' ').trim().slice(0, 300)
-      if (had.has(String(f?.path || '')) && !(await places.resolveDir(String(f.path)).then(() => true, () => false))) { next.folders.push({ path: String(f.path), topics }); continue }
-      const full = await places.resolveDir(String(f?.path || ''))
-      if (full === os.homedir() || full === path.resolve(os.homedir())) throw new Error('Open a folder inside your home folder, not the whole of it')
-      if (full === DATA || full.startsWith(DATA + path.sep)) throw new Error('Bridge AI\'s own folder can\'t be opened to questions')
-      if (next.folders.some((x) => x.path === full.replace(os.homedir(), '~'))) continue
-      next.folders.push({ path: full.replace(os.homedir(), '~'), topics })
+  if (x.max !== undefined) next.max = Math.max(1, Math.min(5, Math.round(Number(x.max)) || 2))
+  if (x.readsFrom !== undefined) {
+    if (!Array.isArray(x.readsFrom)) throw new Error('readsFrom is a list')
+    next.readsFrom = []
+    // One it read from already that's gone since (moved, deleted) stays as it was, or can be taken
+    // out; only a new one has to be there.
+    const had = new Set(b.readsFrom)
+    for (const f of x.readsFrom.slice(0, 50)) {
+      if (had.has(String(f)) && !(await places.resolveDir(String(f)).then(() => true, () => false))) { next.readsFrom.push(String(f)); continue }
+      const full = await places.resolveDir(String(f || ''))
+      if (full === os.homedir() || full === path.resolve(os.homedir())) throw new Error('Pick a folder inside your home folder, not the whole of it')
+      if (full === DATA || full.startsWith(DATA + path.sep)) throw new Error('Bridge AI\'s own folder can\'t be read from')
+      const t = full.replace(os.homedir(), '~')
+      if (!next.readsFrom.includes(t)) next.readsFrom.push(t)
     }
   }
-  afterChange(settings.patch({ slackBot: next }))
+  if (x.instructionsFile !== undefined) {
+    const f = String(x.instructionsFile || '').trim()
+    if (!f) next.instructionsFile = null
+    else {
+      const full = path.resolve(f.replace(/^~(?=$|[\\/])/, os.homedir()))
+      const folders = await Promise.all((next.readsFrom || b.readsFrom).map((p) => places.resolveDir(p).catch(() => null)))
+      if (!folders.some((d) => d && full.startsWith(d + path.sep))) throw new Error('Pick a file in one of the folders it reads from')
+      const st = await fs.promises.stat(full).catch(() => null)
+      if (!st?.isFile()) throw new Error(`File not found: ${f}`)
+      next.instructionsFile = full.replace(os.homedir(), '~')
+    }
+  }
+  if (x.instructions !== undefined) {
+    const before = botsStore.readOwn(b.id)
+    const text = botsStore.writeInstructions(b.id, x.instructions)
+    if (text !== before) desk.record(b.id, 'settings.changed', { setting: 'instructions', old: { hash: botsStore.hashOf(before) }, new: { hash: botsStore.hashOf(text), text }, by: String(cfg.name || '').trim() || 'the owner' })
+  }
+  const { before, after } = botsStore.save(b.id, next)
+  recordChanges(b.id, before, after)
+  if (before.retention !== after.retention) desk.prune(b.id)
+  pushFleet()
+  return botView(after)
+}))
+// Its tokens, checked with Slack before they're kept; and forgotten (Disconnect). Only their kind
+// and last four in the record.
+app.post('/api/bots/:id/tokens', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const b = botOr404(req.params.id)
+  const ch = connectBot(b.id)
+  const r = await ch.setTokens(req.body || {})
+  desk.record(b.id, 'settings.changed', { setting: 'tokens', old: null, new: r.tokens, by: String(cfg.name || '').trim() || 'the owner' })
+  desk.sync()
+  return botView(b)
+}))
+app.delete('/api/bots/:id/tokens', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const b = botOr404(req.params.id)
+  const ch = desk.channel(b.id)
+  const had = ch?.state().tokens || null
+  ch?.forget()
+  desk.record(b.id, 'settings.changed', { setting: 'tokens', old: had, new: null, by: String(cfg.name || '').trim() || 'the owner' })
+  return botView(b)
+}))
+// Connect again now (after it stopped on an error you've since fixed in Slack, or an app updated).
+app.post('/api/bots/:id/connect', botsGuard, wrapBot(async (req) => { const b = botOr404(req.params.id); desk.channel(b.id)?.stop(); desk.sync(); return botView(b) }))
+// The workspace's people, to pick who may ask.
+app.get('/api/bots/:id/people', botsGuard, wrapBot(async (req) => ({ people: await desk.channel(botOr404(req.params.id).id).people({ fresh: req.query.fresh === '1' }) })))
+// Gone: its app disconnected, its tokens, settings and instructions deleted. Its record stays, to
+// look at and export under its name, until the time it's kept for runs out; with history=1, its
+// activity history is deleted too, the record keeping only that it was.
+app.delete('/api/bots/:id', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const b = botOr404(req.params.id)
+  const history = req.query.history === '1'
+  desk.channel(b.id)?.forget()
+  desk.remove(b.id, { history })
+  botsStore.remove(b.id)
+  pushFleet()
+  return { ok: true, kept: botsStore.deletedOf(b.id) }
+}))
+// A deleted bot's activity history, deleted now: the record keeps only that it was.
+app.delete('/api/bots/:id/history', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const d = botsStore.deletedOf(req.params.id)
+  if (!d || !desk.has(d.id)) throw Object.assign(new Error('No such deleted bot'), { status: 404 })
+  desk.forget(d.id)
   return { ok: true }
 }))
-// Your answer to one, from Needs You: send (as edited) or discard.
-app.post('/api/slack-bot/questions/:id', trialOff('slack-bot', 'The Slack Bot'), async (req, res) => {
-  try { res.json(await desk.decide(req.params.id, { send: req.body?.send === true, text: req.body?.text })) } catch (e) { res.status(e.status >= 400 && e.status < 500 ? e.status : 502).json({ error: e.message }) }
+// Activity: its conversations (narrowed by q, person, channel, from, to, outcome), whether its
+// record holds, and one conversation as a timeline; and its export. Only on this computer: the
+// record never goes through the relay.
+app.get('/api/bots/:id/activity', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const b = recordOr404(req.params.id)
+  const f = Object.fromEntries(['q', 'person', 'channel', 'from', 'to', 'outcome'].map((k) => [k, req.query[k] ? String(req.query[k]).slice(0, 200) : null]))
+  const all = desk.conversations(b.id)
+  const list = desk.conversations(b.id, f)
+  return {
+    conversations: list.slice(0, 300), total: list.length,
+    people: [...new Map(all.flatMap((c) => c.people).map((p) => [p.id, p])).values()].sort((x, y) => String(x.name || x.id).localeCompare(String(y.name || y.id))),
+    places: [...new Map(all.filter((c) => c.place).map((c) => [c.place.id, c.place])).values()],
+    integrity: desk.check(b.id), retention: b.retention, deleted: b.deleted ? { at: b.deletedAt } : null,
+  }
+}))
+app.get('/api/bots/:id/activity/:conv', botsGuard, wrapBot(async (req) => {
+  onComputer(req)
+  const b = recordOr404(req.params.id)
+  const t = desk.timeline(b.id, String(req.params.conv))
+  if (!t) throw Object.assign(new Error('No such conversation'), { status: 404 })
+  return t
+}))
+// Its record as a file, for an audit: a date range or one conversation, as JSON Lines, CSV or
+// Markdown.
+app.get('/api/bots/:id/export', botsGuard, (req, res) => {
+  try {
+    onComputer(req)
+    const b = recordOr404(req.params.id)
+    const format = ['jsonl', 'csv', 'md'].includes(req.query.format) ? req.query.format : 'jsonl'
+    const out = desk.exportOf(b.id, { format, from: req.query.from ? String(req.query.from) : null, to: req.query.to ? String(req.query.to) : null, conv: req.query.conv ? String(req.query.conv) : null })
+    const name = `${b.name.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || b.id}-activity${req.query.conv ? '-conversation' : ''}.${out.ext}`
+    res.setHeader('content-type', `${out.type}; charset=utf-8`)
+    res.setHeader('content-disposition', `attachment; filename="${name}"`)
+    res.send(out.body)
+  } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
+// Your answer to one, from Needs You: send (as edited) or discard.
+app.post('/api/bots/questions/:id', botsGuard, wrapBot((req) => desk.decide(req.params.id, { send: req.body?.send === true, text: req.body?.text })))
 
 // ---------- Whiteboards (boards.js) ----------
 // Home: a whiteboard you opened, saved, made or renamed here is yours as it is; one an agent drew or
@@ -4068,7 +4256,7 @@ server.listen(cfg.port, cfg.host, () => {
   phone.status(cfg.port).then(tailnetSaid).catch(() => {})
   machines.start()
   if (mcpOn()) bridgeMcp.command() // where Bridge AI is now, for the apps it was added to (mcp.js)
-  desk.sync() // the Slack Bot, while its beta feature is on
+  desk.sync() // the bots, while their beta feature is on
   pages.start(app, onUpgrade) // each linked computer's port, for its pages
   transfers.resume() // copies that were going carry on
   counts.start()

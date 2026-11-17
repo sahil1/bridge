@@ -24,11 +24,11 @@
 //   install     how to install it ({ npm } package, or a { unix, win } shell command)
 //   effort(lvl) arguments that set how hard it thinks, for that session only (low … max, as
 //               src/recommended.js lists them); Recommended Settings passes them
-//   access(lvl) arguments for how much it may do without asking: 'ask' (its default: before edits
-//               and commands), 'edits' (changes files freely, asks before commands), 'full' (nothing
-//               asked), and 'read' (reads and answers, nothing else: the Slack Bot's answers,
-//               frontdesk.js). Only flags from each CLI's docs; agents without it always ask, and
-//               can't answer read-only.
+//   access(lvl, { dirs })  arguments for how much it may do without asking: 'ask' (its default:
+//               before edits and commands), 'edits' (changes files freely, asks before commands),
+//               'full' (nothing asked), and 'read' (reads and answers, nothing else: a bot's answers,
+//               frontdesk.js), with dirs the other folders it may read besides its own. Only flags
+//               from each CLI's docs; agents without it always ask, and can't answer read-only.
 //   confined    'read' keeps it to its own folder too: anything that would ask is refused instead,
 //               and reading outside its folder would ask
 //   login       arguments that sign it in, in a terminal tab Bridge AI opens (Sign in buttons);
@@ -71,9 +71,11 @@ export const AGENTS = [
     resume: (id) => ['--resume', id],
     // read: its tools cut to Read, Grep and Glob (nothing that edits, runs a command, fetches a page
     // or starts a subagent), no MCP servers, and anything that would ask refused rather than asked
-    // (dontAsk), which is what reading outside its folder would do. --tools takes a list, so a flag
-    // follows it before anything else can.
-    access: (lvl) => (lvl === 'edits' ? ['--permission-mode', 'acceptEdits'] : lvl === 'full' ? ['--permission-mode', 'bypassPermissions'] : lvl === 'read' ? ['--tools', 'Read,Grep,Glob', '--permission-mode', 'dontAsk', '--strict-mcp-config'] : []),
+    // (dontAsk), which is what reading outside its folder would do. The other folders it may read
+    // are working directories too (--add-dir), read without asking as its own is, and nothing
+    // beyond them. --tools and --add-dir each take a list, so a flag follows each before anything
+    // else can (the opening message would be read as a folder).
+    access: (lvl, o = {}) => (lvl === 'edits' ? ['--permission-mode', 'acceptEdits'] : lvl === 'full' ? ['--permission-mode', 'bypassPermissions'] : lvl === 'read' ? ['--tools', 'Read,Grep,Glob', ...(o.dirs?.length ? ['--add-dir', ...o.dirs] : []), '--permission-mode', 'dontAsk', '--strict-mcp-config'] : []),
     confined: true,
     // A copy of a conversation under a new id (the original stays as it is).
     fork: (id, newId) => ['--resume', id, '--fork-session', ...(newId ? ['--session-id', newId] : [])],
@@ -92,7 +94,7 @@ export const AGENTS = [
     start: ({ prompt }) => (prompt ? [prompt] : []), promptArg: true,
     resume: (id) => ['resume', id],
     // read: its read-only sandbox, never asking (what it runs can read anywhere, but write nothing
-    // and reach no network), so it isn't confined to its folder.
+    // and reach no network), so it isn't confined to its folder, and needs no other folders named.
     access: (lvl) => (lvl === 'edits' ? ['--sandbox', 'workspace-write', '--ask-for-approval', 'on-request'] : lvl === 'full' ? ['--dangerously-bypass-approvals-and-sandbox'] : lvl === 'read' ? ['--sandbox', 'read-only', '--ask-for-approval', 'never'] : []),
     fork: (id) => ['fork', id],
     busy: ESC_INTERRUPT,

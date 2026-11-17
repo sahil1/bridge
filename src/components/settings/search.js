@@ -102,10 +102,12 @@ export const SETTINGS = [
     ['delete-account', tx('Delete account…'), 'delete account bold bridge'],
   ]),
   ...at('slack-bot', [
-    ['slack-status', tx('Slack Bot'), 'slack bot questions answers connect tokens socket mode', { when: 'slack-bot' }],
-    ['slack-askers', tx('Who Can Ask'), 'slack people askers members refuse', { when: 'slack-bot' }],
-    ['slack-folders', tx('Folders Opened to Questions'), 'slack folders topics read only', { when: 'slack-bot' }],
-    ['slack-replies', tx('Answers'), 'slack review answer without asking auto throwaway agent', { when: 'slack-bot' }],
+    ['slack-status', tx('Bots'), 'slack bot bots questions answers connect tokens socket mode manifest name', { when: 'slack-bot' }],
+    ['slack-askers', tx('Who Can Ask'), 'slack people askers members refuse guests everyone channels', { when: 'slack-bot' }],
+    ['slack-instructions', tx('Instructions'), 'slack bot instructions markdown file bot.md steer', { when: 'slack-bot' }],
+    ['slack-folders', tx('Reads From'), 'slack folders read only reads from', { when: 'slack-bot' }],
+    ['slack-replies', tx('Answers'), 'slack review answer without asking auto agent terms account', { when: 'slack-bot' }],
+    ['slack-activity', tx('Activity'), 'slack bot activity record trace history export audit conversations', { when: 'slack-bot' }],
   ]),
   ...at('appearance', [
     ['color-mode', tx('Color Mode'), 'dark light system mode'],
@@ -136,7 +138,7 @@ export const SETTINGS = [
 // Each tab's section, by its name; Devices' tabs by devicesName (below).
 const PLACES = {
   general: tx('General'), agents: tx('Agents'), providers: tx('Model Providers'), voice: tx('Voice & Meetings'), dictation: tx('Voice & Meetings'), meetings: tx('Voice & Meetings'), mail: tx('Mail'),
-  mcp: tx('MCP Servers'), 'slack-bot': tx('Slack Bot'), appearance: tx('Appearance'), config: tx('Config File'), about: tx('About & Updates'),
+  mcp: tx('MCP Servers'), 'slack-bot': tx('Bots'), appearance: tx('Appearance'), config: tx('Config File'), about: tx('About & Updates'),
 }
 const DEVICES = ['phone', 'machines', 'notifications', 'account']
 export const placeOf = (x) => (DEVICES.includes(x.section) ? devicesName(x) : t(PLACES[x.section]))

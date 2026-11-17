@@ -160,24 +160,50 @@ Find a time reads your calendar on your computer and holds or adds nothing; the 
 only if you put them in a draft. Copy and Open in your mail app hand the draft to you and your mail
 app; you send it.
 
-The Slack Bot (a beta feature, off until you turn it on) talks only to a Slack app you make yourself,
-in your own workspace, and only from your computer: through Slack's Socket Mode, a connection your
-computer opens to `slack.com` and then to the `wss-*.slack.com` address Slack gives it. It never goes
-through Bold Bridge or your relay, and no app of Bold Bridge's is involved. Its two tokens are kept in
-`~/.bridge-ai/slack-bot.json`, readable by you only, never in your settings and never given to an
-agent; Disconnect deletes them. Slack sends your computer the messages that mention the bot or are
-sent to it directly; when it connects again after being away (your computer asleep, Bridge AI
-closed), it reads the bot's conversations back from the last message it saw (three days at most)
-for what was asked meanwhile. Besides those, it asks Slack only for your workspace's members' names
-(to pick who may ask) and its channels' names. A question from someone you didn't add goes to no
-agent: it gets a polite no, or nothing, as you choose. One from someone you added goes to an agent on
-your computer, started read-only in a folder you opened to questions (or in an empty folder of its
-own), which sends the question, and what it reads in that folder, to its own provider, as any agent
-does; it's never sent to the Chief of Staff. What goes to Slack is only what you send from Needs You,
-or, with Answer without asking on, an answer from a folder you opened or a throwaway agent; and a
-short note when a question is passed on to you, or, if you chose it, that only people you added get
-answers. The questions, the answers and what was sent are kept in `~/.bridge-ai/front-desk.json`
-(the latest 200), for its log in Settings › Slack Bot.
+Bots (a beta feature, off until you turn it on) are Slack apps you make yourself, each with the name
+you give it, in your own workspace, and each talks to Slack only from your computer: through Slack's
+Socket Mode, a connection your computer opens to `slack.com` and then to the `wss-*.slack.com`
+address Slack gives it. None of it goes through Bold Bridge or your relay, and no app of Bold
+Bridge's is involved. Each bot's two tokens are kept in `~/.bridge-ai/bots/<bot>/slack.json`,
+readable by you only, never in your settings and never given to an agent; Disconnect deletes them.
+
+What a bot reads from Slack, and when:
+- Slack sends your computer the messages in the conversations the bot is in: its direct messages,
+  and every message in a channel it was invited to (Slack sends those for the replies in its
+  threads). Bridge AI keeps only a mention of the bot, a direct message to it, and a reply or an
+  edit in a thread it answered in; the rest is dropped as it arrives, kept nowhere and sent nowhere.
+- When it takes a question from someone it answers, it reads the conversation the question was
+  asked in, then and only then: in a thread, that thread's earlier messages (at most 50); at the top
+  of a channel, the channel's latest 20 messages and what's pinned there; in a direct message, its
+  latest 20. When it goes on in a thread it answered in, only what was said there since.
+- When it connects again after being away (your computer asleep, Bridge AI closed), it reads its
+  conversations, and the threads it's answering in, from the last message it saw (three days at
+  most) for what was asked meanwhile.
+- Besides those, it asks Slack for your workspace's members' names, and whether someone is a guest
+  or from another company (to pick who may ask, and to turn away guests and other companies), and
+  its channels' names.
+
+A question from someone it doesn't answer goes to no agent: it gets a polite no, or nothing, as you
+choose. One from someone it answers goes to an agent on your computer, started read-only with only
+the folders you gave the bot (or an empty folder of its own), with the bot's instructions and the
+conversation read for it, which it sends, with what it reads in those folders, to its own provider,
+as any agent does; none of it is ever sent to the Chief of Staff. What goes to Slack is only what you
+send from Needs You, or, with Answer without asking on, an answer from an agent held to the bot's
+folders; a short note when a question is passed on to you, or, if you chose it, that it only answers
+people you added; and its reactions on a question (👀 while it answers, ✅ once answered).
+
+Each bot keeps a record of everything it sees and does, on your computer only, in
+`~/.bridge-ai/bots/<bot>/trace/` (a file a month, readable by you only): each message it took in,
+the conversation it read for each question, each run of an agent with the names of the files it
+opened, each draft, your edits, what was sent and discarded, its reactions, edits and deletions in its
+threads, its settings' changes and its connection. Never a token. It's kept for a year unless you
+choose 90 days or always (Settings › Bots › Activity), older months deleted whole; it's never in
+usage counts, crash reports or the relay; and Activity exports it only when you ask. A bot's
+settings and instructions are in the same folder, `~/.bridge-ai/bots/<bot>/`. Deleting a bot deletes
+its tokens, its settings and its instructions, and keeps its record, to look at and export in Settings
+› Bots, until the time it's kept for runs out. If you also delete its activity history, its record
+keeps only that it was deleted, when and by whom. Its Slack app stays in Slack until you delete it
+there.
 
 Files shows your agents' folders, and only the other folders you add to it yourself (Places, with
 the folder picker); it keeps each place's path in `~/.bridge-ai/places.json`, not what's in it, and

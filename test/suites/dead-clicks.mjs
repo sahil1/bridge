@@ -51,7 +51,7 @@ const QUIET = [
 ]
 
 // ---------- a Bridge AI with something in each view ----------
-// (The Slack Bot's on too, for its section in Settings, with no Slack to reach: harness.mjs.)
+// (Bots are on too, for their section in Settings, with no Slack to reach: harness.mjs.)
 const TRIALS_ON = ['home', 'routines', 'meeting-insights', 'usage-everywhere', 'slack-bot']
 const kit = await startKit(NAME, { config: { trials: Object.fromEntries(TRIALS_ON.map((id) => [id, true])) } })
 // macOS's open, osascript (Finder, Terminal) and xdg-open: written down, never run.
