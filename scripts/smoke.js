@@ -153,13 +153,23 @@ try {
     // The shell's prompt first: PowerShell starting in a profile it hasn't seen (a test's) takes a while.
     const prompted = await until(() => /[$#%>] ?$/.test(shown().trimEnd().split('\n').pop() || ''), 30000)
     await new Promise((r) => setTimeout(r, 300))
-    // The answer only appears if the shell ran the line (the typed line itself shows 6*7, not 42); typed
-    // again once if nothing came of it.
+    // The answer only appears if the shell ran the line (the typed line itself shows 6*7, not 42). Typed
+    // once, then waited for as a person would once they see the shell take it, however long it takes:
+    // the first command in a Windows PowerShell with a profile it hasn't seen (a test's, or a new CI
+    // machine's) waits while it makes its module cache from every module on its path (on GitHub's
+    // Windows runners, Az's hundred and more), 20 to 40 s; typed again then, it only queued behind.
+    // Typed again once if it never showed.
     const line = process.platform === 'win32' ? 'echo ("bridge-" + 6*7 + "-ok")\r' : 'echo bridge-$((6*7))-ok\r'
+    const answered = () => seen.includes('bridge-42-ok')
+    const taken = () => shown().includes('6*7')
+    const typedAt = Date.now()
     ws.send(line)
-    if (!(await until(() => seen.includes('bridge-42-ok'), 15000))) { ws.send(line); await until(() => seen.includes('bridge-42-ok'), 15000) }
+    if (!(await until(() => answered() || taken(), 15000))) ws.send(line)
+    await until(answered, 90000)
     ws.close()
-    if (!seen.includes('bridge-42-ok')) throw new Error(`no output${prompted ? '' : ' (and no prompt in 30 s)'}; the terminal showed: ${JSON.stringify(shown().replace(/(\r?\n)+/g, '⏎').slice(-400))}`)
+    const secs = Math.round((Date.now() - typedAt) / 1000)
+    if (!answered()) throw new Error(`no output${prompted ? '' : ' (and no prompt in 30 s)'} ${taken() ? `${secs} s after the shell took the line` : 'and the line never showed'}; the terminal showed: ${JSON.stringify(shown().replace(/(\r?\n)+/g, '⏎').slice(-400))}`)
+    return `answered ${secs} s after it was typed`
   })
 } finally {
   server.kill()

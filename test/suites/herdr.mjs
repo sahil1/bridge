@@ -5,11 +5,16 @@
 // Claude Code (stand-ins/claude.cjs, never the real one) started with a short opening prompt on
 // its command line and with a long one sent once it's up, its screen read, typed into, and closed;
 // a start herdr refuses leaving no tab behind; an out-of-date herdr integration named with the
-// command that updates it. Not on Windows, where Bridge AI doesn't drive herdr.
+// command that updates it. And a stand-in Codex (stand-ins/codex.cjs, which reads keys as Codex
+// does: an Enter among a paste's keys is a newline) sent messages as agent-send sends them in Bridge
+// AI's own terminals, herdr typing each and pressing Enter itself: one line, several lines, and one
+// while Codex reads late with bracketed paste not yet on, each sent once; one Codex keeps in its box
+// says so, with Enter pressed once more and no more; sent again, it's cleared first and goes once.
+// Not on Windows, where Bridge AI doesn't drive herdr.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { startKit, checks, until, IS_WIN, TEST } from '../lib/harness.mjs'
+import { startKit, checks, until, sleep, IS_WIN, TEST } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('herdr')
 if (IS_WIN) {
@@ -58,6 +63,12 @@ for (const d of [path.join(own, 'claude-agent'), work, path.join(home, '.config'
 fs.writeFileSync(path.join(own, 'claude-agent', 'package.json'), '{ "type": "commonjs" }\n')
 fs.copyFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), path.join(own, 'claude-agent', 'claude.js'))
 fs.writeFileSync(path.join(own, 'claude'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(own, 'claude-agent', 'claude.js')}" "$@"\n`, { mode: 0o755 })
+// The stand-in Codex the same way (`node …/codex.js`, as its npm install runs it), signed in.
+fs.mkdirSync(path.join(own, 'codex-agent'))
+fs.writeFileSync(path.join(own, 'codex-agent', 'package.json'), '{ "type": "commonjs" }\n')
+fs.copyFileSync(path.join(TEST, 'stand-ins', 'codex.cjs'), path.join(own, 'codex-agent', 'codex.js'))
+fs.writeFileSync(path.join(own, 'codex'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(own, 'codex-agent', 'codex.js')}" "$@"\n`, { mode: 0o755 })
+fs.writeFileSync(path.join(home, '.codex', 'auth.json'), JSON.stringify({ tokens: { id_token: 'stand-in' } }))
 // Panes run a plain /bin/sh, not a login shell: a login shell on a Mac puts the system's folders
 // (and any real agents in them) ahead of the stand-ins on PATH.
 fs.writeFileSync(path.join(home, '.config', 'herdr', 'config.toml'), 'onboarding = false\n\n[terminal]\nshell_mode = "non_login"\ndefault_shell = "/bin/sh"\n')
@@ -114,6 +125,60 @@ try {
   ok(!!(await until(() => read('claude-typed.log').includes(long), 15000)), `and the whole prompt (${long.length} characters) reaches it once it's up`, read('claude-typed.log').slice(-300))
   const a2 = await until(() => agentAt(two.paneId), 10000)
   ok(a2?.kind === 'claude', 'and it\'s listed too', a2)
+
+  // ---------- Messages to Codex ----------
+  // What the stand-in Codex took as sent, oldest first; ~/codex-* switches its ways (stand-ins/codex.cjs).
+  const codexGot = () => read('codex-got.log').split('\n').filter(Boolean).map((l) => JSON.parse(l).text)
+  const flag = (n, on) => (on ? fs.writeFileSync(path.join(home, n), '') : fs.rmSync(path.join(home, n), { force: true }))
+  const send = (paneId, text) => kit.api(`/agents/${encodeURIComponent(paneId)}/prompt`, { text }).catch((e) => ({ error: e.message }))
+  // Free for the next message: done working, its box empty, and past the 3 s after a message went in,
+  // when the server holds the next (server/index.js holdFor).
+  const codexFree = async (paneId) => {
+    const free = await until(async () => ['idle', 'done'].includes((await agentAt(paneId))?.status) && /Ask Codex to do anything/.test(await screen(paneId)), 30000, 200)
+    await sleep(2000)
+    return free
+  }
+  const cx = await kit.api('/agents/launch', { kind: 'codex', cwd: work, label: 'March', newSpace: 'Herdr Codex' })
+  const c1 = await until(async () => { const a = await agentAt(cx.paneId); return a?.kind === 'codex' && a }, 20000)
+  ok(!!c1 && !!(await codexFree(cx.paneId)), 'a stand-in Codex starts in herdr, at its prompt', { c1, screen: (await screen(cx.paneId)).slice(-300) })
+  const march = 'Check the March invoices'
+  const m1 = await send(cx.paneId, march)
+  ok(m1.ok && !m1.error && JSON.stringify(codexGot()) === JSON.stringify([march]), 'Codex in herdr: one line is sent, once, as written', { m1, got: codexGot() })
+  await codexFree(cx.paneId)
+  const credits = 'Then the credits:\n  both currencies\n\nand say what changed'
+  const m2 = await send(cx.paneId, credits)
+  ok(m2.ok && !m2.error && codexGot().at(-1) === credits && codexGot().length === 2, 'several lines: one message, every line of it (none sent it early)', { m2, got: codexGot() })
+  await codexFree(cx.paneId)
+
+  // Reading late, bracketed paste not yet on: herdr types the text as keys and Enter 300 ms after
+  // them, which Codex can read together, the Enter then a newline in its box.
+  flag('codex-no-bracketed', true)
+  flag('codex-slow', true)
+  const late = await kit.api('/agents/launch', { kind: 'codex', cwd: work, label: 'April', workspaceId: c1.workspaceId })
+  const c2 = await until(async () => { const a = await agentAt(late.paneId); return a?.kind === 'codex' && a }, 20000)
+  await codexFree(late.paneId)
+  flag('codex-no-bracketed', false)
+  const april = 'Start on the April ledger'
+  const m3 = await send(late.paneId, april)
+  ok(!!c2 && m3.ok && !m3.error && codexGot().filter((x) => x === april).length === 1, 'Codex reading late, its paste mode unseen: still sent, once', { m3, got: codexGot(), typed: read('codex-typed.log').slice(-300) })
+  flag('codex-slow', false)
+  await codexFree(late.paneId)
+
+  // Kept in its box.
+  flag('codex-enter-newline', true)
+  const kept = 'Close the March ledger'
+  const m4 = await send(cx.paneId, kept)
+  ok(/^Codex didn't take the message\. It's still in its box: press Enter in the Terminal tab, or Send again\.$/.test(m4.error || ''), 'Codex keeps it in its box: the send says so (not that it went)', m4)
+  ok(!codexGot().includes(kept) && (await screen(cx.paneId)).includes(kept), 'Codex didn\'t get it, and it\'s in its box', { got: codexGot(), screen: (await screen(cx.paneId)).slice(-400) })
+  const typed = read('codex-typed.log').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  const at = typed.findLastIndex((c) => c.includes(kept))
+  ok(at >= 0 && typed.slice(at + 1).filter((c) => c === '\r').length === 2, 'Enter went twice (herdr\'s and one more), no more', typed.slice(at))
+  flag('codex-enter-newline', false)
+  const m5 = await send(cx.paneId, kept)
+  ok(m5.ok && !m5.error && m5.cleared === kept, 'sent again: what was left in its box is cleared first', m5)
+  ok(codexGot().filter((x) => x.includes(kept)).length === 1 && codexGot().at(-1) === kept, 'and it goes, once, as written', codexGot())
+  await kit.api(`/workspaces/${encodeURIComponent(c1.workspaceId)}/close`, {})
+  ok(!!(await until(async () => !(await agentAt(cx.paneId)) && !(await agentAt(late.paneId)), 10000)), 'closing their space ends both Codex agents')
 
   // A start herdr refuses (an argument it can't put in a shell) leaves no tab behind.
   process.env.HOME = home
