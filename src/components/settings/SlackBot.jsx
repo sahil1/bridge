@@ -313,16 +313,30 @@ export default function SlackBot() {
   const [error, setError] = useState(null)
   const [note, setNote] = useState(null)
   const alive = useRef(true)
-  const load = () => api('/slack-bot').then((x) => { if (alive.current) { setD(x); setError(null) } }, (e) => alive.current && setError(e.message))
+  // Each look is numbered: one overtaken by a newer look or a change, or back while a change is
+  // still being saved (what it brings is from before), is dropped.
+  const asked = useRef(0)
+  const unsaved = useRef(0)
+  const saving = useRef(Promise.resolve())
+  const load = () => { const n = ++asked.current; return api('/slack-bot').then((x) => { if (alive.current && n === asked.current && !unsaved.current) { setD(x); setError(null) } }, (e) => alive.current && n === asked.current && setError(e.message)) }
   useEffect(() => {
     alive.current = true
     load()
     const id = setInterval(() => { if (!document.hidden) load() }, 4000)
     return () => { alive.current = false; clearInterval(id) }
   }, [])
-  // A change to its settings: saved, then shown as the server has it. False when it wasn't taken.
-  const save = async (patch) => {
-    try { await api('/slack-bot/settings', { method: 'POST', body: patch }); setNote(null); await load(); return true } catch (e) { setNote(e.message); return false }
+  // A change to its settings: shown at once (the folders once the server has checked them), so a
+  // second pick before the first is saved builds on it (Dana, then Sam, keeps both); saved in the
+  // order made; then shown as the server has it. False when it wasn't taken.
+  const save = (patch) => {
+    const settings = Object.fromEntries(Object.entries(patch).filter(([k]) => k !== 'folders'))
+    asked.current++; unsaved.current++
+    setD((x) => x && { ...x, settings: { ...x.settings, ...settings } })
+    const done = saving.current.then(async () => {
+      try { await api('/slack-bot/settings', { method: 'POST', body: patch }); setNote(null); return true } catch (e) { setNote(e.message); return false } finally { unsaved.current--; await load() }
+    })
+    saving.current = done
+    return done
   }
   const again = async () => { try { await api('/slack-bot/connect', { method: 'POST' }) } catch (e) { setNote(e.message) } load() }
   if (error && !d) return <p className="st-note bad"><Icon name="alert" size={13} /> {error}</p>

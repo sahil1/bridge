@@ -171,7 +171,7 @@ export default function RailMeetings({ selected, onOpen }) {
         {folders.map((f) => group(f, 'folder', f, inFolder(f)))}
         {archived.length > 0 && group(':archived', 'archive', t('Archived'), archived)}
       </div>
-      {menu.msg && <p className={`small rm-msg ${menu.msg.error ? 'error-text' : 'muted'}`} role="status">{menu.msg.text}</p>}
+      {menu.msg && <p className={`small rm-msg ${menu.msg.error ? 'error-text' : 'muted'}`} role="status">{menu.msg.text}{menu.msg.act && <> <button type="button" className="link-btn" onClick={menu.msg.act.run}>{menu.msg.act.label}</button></>}</p>}
       <BulkBar selection={selection} compact list={all} onOpen={onOpen} />
       {menu.node}
     </div>

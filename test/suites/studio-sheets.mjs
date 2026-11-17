@@ -87,8 +87,13 @@ try {
     return ms
   }
   const nameBox = () => p.locator('input[data-name-box]').inputValue().catch(() => '')
-  // A cell picked by its name, as in the name box (the mouse would need the grid's sizes).
-  const goTo = async (a1) => { const nb = p.locator('input[data-name-box]'); await nb.click(); await nb.fill(a1); await nb.press('Enter'); await sleep(200) }
+  // A cell picked by its name, as in the name box (the mouse would need the grid's sizes). The name
+  // box is greyed out while a cell is being edited: then that's said, rather than a click that waits.
+  const editing = () => p.locator('input[data-name-box]').isDisabled().catch(() => false)
+  const goTo = async (a1) => {
+    if (!(await until(async () => !(await editing()), 10000, 100))) throw new Error(`${a1} can't be picked: a cell is still being edited (${await p.locator('.sd-univer [data-u-comp="formula-bar"]').innerText().catch(() => '')})`)
+    const nb = p.locator('input[data-name-box]'); await nb.click(); await nb.fill(a1); await nb.press('Enter'); await sleep(200)
+  }
   // Saved with ⌘S; what it says instead, when it doesn't (and a picture of it).
   let unsaved = null
   const save = async () => {
@@ -98,7 +103,13 @@ try {
     await shot(p, `${tag}studio-sheets-unsaved`)
     return false
   }
-  const typeIn = async (a1, text) => { await goTo(a1); await p.keyboard.type(text); await p.keyboard.press('Enter'); await sleep(150) }
+  // Typed in a cell as a person would: Enter once what was typed is there (WebKit on a slow machine
+  // can be keys behind), then the cell closed.
+  const typeIn = async (a1, text) => {
+    await goTo(a1); await p.keyboard.type(text)
+    await until(async () => (await p.locator('.sd-univer [data-u-comp="formula-bar"]').innerText().catch(() => '')).includes(text), 3000, 50)
+    await p.keyboard.press('Enter'); await until(async () => !(await editing()), 5000, 50); await sleep(150)
+  }
   const grid = async () => { const c = await p.locator('.sd-univer canvas').evaluateAll((cs) => cs.map((c) => { const r = c.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height } }).sort((a, b) => b.w * b.h - a.w * a.h)[0]); return c }
 
   // ---------- Big files ----------
@@ -163,6 +174,9 @@ try {
   await goTo('B4'); await p.keyboard.press('Control+Shift+5')
   await goTo('B5'); await p.keyboard.press('Control+Shift+1')
   await goTo('B6'); await p.keyboard.press('Control+Shift+4'); await sleep(200); await p.keyboard.press(`${MOD}+\\`)
+  // The day here when ⌘; went in (the check after may be past midnight).
+  const day = () => { const x = new Date(); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0, 10) }
+  const dayTyped = day()
   await goTo('E2'); await p.keyboard.press(`${MOD}+;`)
   // Paste the values only: the total's 1975, not its formula. Where the browser won't let the page
   // read what was copied (WebKit's test build), it says so rather than doing nothing.
@@ -272,8 +286,7 @@ try {
   const got = { B3: cell('B3'), B4: cell('B4'), B5: cell('B5'), B6: cell('B6'), E2: cell('E2'), D9: cell('D9'), A3: cell('A3'), A9: cell('A9') }
   ok(/\$/.test(got.B3.fmt || '') && /%/.test(got.B4.fmt || '') && got.B5.fmt === '#,##0.00' && !/\$/.test(got.B6.fmt || ''), 'Ctrl+Shift+4, 5 and 1: currency, percent and number, and ⌘\\ clears the formatting', got)
   // Today where the sheet is (the local date), as Excel keeps a date: midnight UTC of that day.
-  const today = new Date(); today.setMinutes(today.getMinutes() - today.getTimezoneOffset())
-  ok(got.E2.v instanceof Date && today.toISOString().slice(0, 10) === got.E2.v.toISOString().slice(0, 10), '⌘; puts in today\'s date, as a date', got.E2)
+  ok(got.E2.v instanceof Date && [dayTyped, day()].includes(got.E2.v.toISOString().slice(0, 10)), '⌘; puts in today\'s date, as a date', got.E2)
   if (which === 'chromium') ok(got.D9.v === 1975 && !pasteSaid, '⇧⌘V pastes the values only: the total\'s 1975, not its formula', { D9: got.D9, pasteSaid })
   else ok(got.D9.v == null && /Couldn't paste the values: .+ Paste with (⌘V|Ctrl\+V), then pick Values only/.test(pasteSaid), '⇧⌘V where the page can\'t read what was copied: it says so, and how else', pasteSaid)
   ok(got.A3.v === 'Design work' && !got.A3.color && got.A9.v === 'New line' && !got.A9.color, 'what\'s typed is plain text in no colour of its own (Univer gave it its theme\'s ink, kept in the file)', { A3: got.A3, A9: got.A9 })
