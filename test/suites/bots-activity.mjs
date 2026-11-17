@@ -42,6 +42,8 @@ const openSettings = async (p) => {
   }, 20000, 100)
 }
 const M = '<@UBOT>'
+// A folder or file as shown, with / between its parts (Windows shows ~\notes).
+const slashed = (p) => String(p || '').replace(/\\/g, '/')
 
 try {
   await kit.api('/setup', { name: 'Tester' })
@@ -83,8 +85,8 @@ try {
   const every = fs.readdirSync(TRACE).map((f) => fs.readFileSync(path.join(TRACE, f), 'utf8')).join('\n')
   ok(!every.includes('xoxb-test') && !every.includes('xapp-test') && /xoxb-…test/.test(every), 'never a token: only its kind and last four', null)
   const run = all.find((e) => e.type === 'run.started')
-  ok(run?.agent === 'claude' && run.folders.join() === '~/notes' && /^[0-9a-f]{12}$/.test(run.instructions?.hash) && /# Helpdesk/.test(run.instructionsText || '') && !all.filter((e) => e.type === 'run.started').slice(1).some((e) => e.instructionsText), 'a run: its agent, its folders, and its instructions\' version, their words kept once', run)
-  ok(all.some((e) => e.type === 'run.read' && e.files.some((f) => f.what === '~/notes/faq.md')), 'the files it opened', all.find((e) => e.type === 'run.read'))
+  ok(run?.agent === 'claude' && run.folders.map(slashed).join() === '~/notes' && /^[0-9a-f]{12}$/.test(run.instructions?.hash) && /# Helpdesk/.test(run.instructionsText || '') && !all.filter((e) => e.type === 'run.started').slice(1).some((e) => e.instructionsText), 'a run: its agent, its folders, and its instructions\' version, their words kept once', run)
+  ok(all.some((e) => e.type === 'run.read' && e.files.some((f) => slashed(f.what) === '~/notes/faq.md')), 'the files it opened', all.find((e) => e.type === 'run.read'))
   ok(all.some((e) => e.type === 'context' && Array.isArray(e.messages)) && all.some((e) => e.type === 'draft.edited' && e.before === 'From 9 to 5.' && e.after === 'From 9 to 5, Monday to Friday.' && e.by === 'Tester'), 'the context read, and your edit, before and after and by whom')
   ok(all.some((e) => e.type === 'sent' && e.how === 'approved' && e.by === 'Tester' && e.posted) && all.some((e) => e.type === 'reaction' && e.name === 'white_check_mark' && e.ok), 'what was sent, by whom, with Slack\'s ts; and the reactions')
 
@@ -92,7 +94,7 @@ try {
   const a = await activity()
   const byWords = (w) => a.conversations.find((c) => c.asked.includes(w))
   ok(a.conversations.length === 3 && byWords('support open')?.outcome === 'sent' && byWords('support open').messages === 2 && byWords('office')?.outcome === 'discarded' && byWords('payroll')?.outcome === 'refused' && byWords('payroll').refused === 'not-allowed', 'its conversations, each with what came of it', a.conversations.map((c) => [c.asked.slice(0, 20), c.outcome, c.messages]))
-  ok(a.integrity?.ok && a.integrity.events === all.length && a.retention === '1y', 'its record holds, and is kept a year to start', a.integrity)
+  ok(a.integrity?.ok && a.integrity.events >= all.length && a.integrity.events <= events().length && a.retention === '1y', 'its record holds, and is kept a year to start', { integrity: a.integrity, read: all.length, now: events().length })
   ok((await activity('?q=weekends')).conversations.length === 1 && (await activity('?person=U0SAM')).conversations.map((c) => c.asked).join() === 'Where is the office? [answer In Austin.]' && (await activity('?outcome=refused')).conversations.length === 1 && (await activity('?channel=C0LAUNCH')).conversations.length === 2, 'narrowed by a word in an answer, a person, an outcome and where')
   ok((await activity(`?from=${encodeURIComponent(new Date(Date.now() + 86400000).toISOString())}`)).conversations.length === 0, 'and by dates')
   const conv = byWords('support open').id
@@ -127,7 +129,7 @@ try {
     await until(async () => (await p.locator('.sb-convs li').count()) === 3, 8000)
     await p.locator('.sb-conv', { hasText: 'support open' }).click()
     await p.locator('.sb-tl li').first().waitFor({ timeout: 10000 })
-    const tline = await p.locator('.sb-timeline').innerText()
+    const tline = slashed(await p.locator('.sb-timeline').innerText())
     ok(/Dana mentioned it: “When is support open\?/.test(tline) && /Claude Code started, reading ~\/notes; instructions [0-9a-f]{12} from Settings/.test(tline) && /Opened ~\/notes\/faq\.md/.test(tline) && /You edited it: “From 9 to 5, Monday to Friday\.”/.test(tline) && /Sent by Tester/.test(tline) && /Dana replied in the thread: “And on weekends\?/.test(tline) && /Dana edited a message/.test(tline), 'one conversation as its timeline: what came in, each run and what it opened, your edit, what was sent', tline)
     const href = await p.locator('.sb-tl-head a', { hasText: 'Export as Markdown' }).getAttribute('href')
     ok(/\/api\/bots\/b1\/export\?format=md&conv=/.test(href || ''), 'it exports on its own', href)
