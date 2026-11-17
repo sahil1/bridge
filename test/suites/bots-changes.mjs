@@ -95,7 +95,7 @@ try {
     await slack.ask({ user: 'U0EVE', text: `${M} Change the README to say hacked [edit README.md Hacked] [answer Done.]` })
     const s = await startOf('Change the README to say hacked')
     const d = await draftOf('Change the README to say hacked')
-    ok(real(s?.cwd || '') === real(APP) && s.args.join(' ').includes('--tools Read,Grep,Glob --permission-mode dontAsk') && !s.args.includes('--allowedTools'), 'everyone may ask in its channels, but only people you named may ask for a change: Eve\'s agent can only read', s?.args)
+    ok(real(s?.cwd || '') === real(APP) && /--tools Read,Grep,Glob (--add-dir \S+ )?--permission-mode dontAsk/.test(s.args.join(' ')) && !s.args.includes('--allowedTools'), 'everyone may ask in its channels, but only people you named may ask for a change: Eve\'s agent can only read', s?.args)
     ok(!d?.change && /I can't change README\.md here/.test(d?.draft || '') && fs.readFileSync(path.join(APP, 'README.md'), 'utf8') === 'Hello wrold\n', 'nothing changed, and its answer says so', d?.draft)
     await kit.api(`/bots/questions/${d.id}`, { send: false })
   })
