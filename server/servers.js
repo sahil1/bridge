@@ -131,13 +131,16 @@ export function ownedBy(port, roots, { exclude = [], ms = 5000 } = {}) {
   const p = (async () => {
     const socks = (await listening()).filter((s) => s.port === port && s.pid !== process.pid)
     if (!socks.length) return false
-    if (IS_WIN) return true
-    const info = await procInfo([...new Set(socks.map((s) => s.pid))])
-    for (const i of info.values()) {
-      const real = await realOr(i.cwd || '')
-      for (const r of roots) if (i.cwd && inside(real, await realOr(r))) return true
+    // As the Preview tab lists them: a web server (it answers), from an agent's folder.
+    let mine = IS_WIN
+    if (!mine) {
+      const info = await procInfo([...new Set(socks.map((s) => s.pid))])
+      for (const i of info.values()) {
+        const real = await realOr(i.cwd || '')
+        for (const r of roots) if (i.cwd && inside(real, await realOr(r))) mine = true
+      }
     }
-    return false
+    return mine && (await probe(port)).http
   })().catch(() => false)
   owned.set(key, { at: Date.now(), p })
   if (owned.size > 200) owned.delete(owned.keys().next().value)

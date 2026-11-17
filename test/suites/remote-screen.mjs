@@ -565,8 +565,13 @@ try {
     const { p, errors: e2 } = await page(b, `http://127.0.0.1:${port}/m/${S.id}/?window=${enc(pane)}`)
     errors.push(...e2)
     await p.getByRole('tab', { name: 'Preview' }).or(p.getByRole('button', { name: 'Preview' })).first().click()
+    // Its server picked (on Windows, which can't tell which folder a server started in, every local one is listed).
+    const chip = p.locator('.preview-chip', { hasText: `:${dport}` })
+    await chip.waitFor({ timeout: 20000 })
+    await chip.click()
     const frame = p.locator('iframe.preview-frame')
     await frame.waitFor({ timeout: 20000 })
+    await until(async () => (await frame.getAttribute('src'))?.startsWith(addr?.url || 'http://127.0.0.1:'), 10000)
     const src = await frame.getAttribute('src')
     ok(src?.startsWith(addr?.url || 'http://127.0.0.1:') && !src.includes(`:${dport}/`), 'the Preview of Studio\'s agent shows Studio\'s app at its own address on Laptop, not Laptop\'s localhost', src)
     const inner = p.frameLocator('iframe.preview-frame').locator('#hello')
