@@ -353,6 +353,8 @@ try {
   await slack.limit({ method: 'chat.startStream', n: 1, wait: 1 })
   const q9 = await slack.ask({ user: 'U0DANA', text: `${M} Enterprise pricing per seat? [answer Forty dollars a seat.]` })
   const p9 = await postedLike(/Forty dollars/, 40000)
+  // (Its stream shows before the record has it as sent.)
+  await until(async () => (await convs('b1', 'Enterprise pricing per seat'))[0]?.outcome === 'auto', 10000)
   ok(p9?.thread_ts === q9.ts && !(await needs()).some((x) => x.text.includes('Enterprise pricing per seat')) && (await convs('b1', 'Enterprise pricing per seat'))[0]?.outcome === 'auto', 'answer without asking: its answer goes straight to Slack, after the wait Slack asked for', p9)
   ok((await slack.calls()).filter((c) => c.method === 'chat.startStream' && /Forty/.test(c.params.markdown_text)).length === 2 && (await slack.state()).streams.some((x) => /Forty dollars a seat/.test(x.text) && x.stopped), 'streamed: the first start turned down (429), the second taken, and the stream ended whole')
   await kit.api('/bots/b1/settings', { agentCopies: true })
