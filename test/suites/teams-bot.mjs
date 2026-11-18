@@ -18,7 +18,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startTeams, checks, until, sleep, browser, page, shot, phoneFaults, TEST, IS_WIN } from '../lib/harness.mjs'
-import { lookers, openSettings } from '../lib/bots.mjs'
+import { lookers, openSettings, ownFile } from '../lib/bots.mjs'
 import { unzip } from '../../server/teamsapp.js'
 
 const { ok, done } = checks('teams-bot')
@@ -85,8 +85,8 @@ try {
     await ctx.close()
   })
   await tm.endpoint(`http://127.0.0.1:${port}/api/messages`)
-  const file = path.join(kit.data, 'bots', 'b1', 'teams.json')
-  ok(fs.existsSync(file) && (IS_WIN || (fs.statSync(file).mode & 0o777) === 0o600), 'its credentials in its own folder, yours only', IS_WIN ? null : (fs.statSync(file).mode & 0o777).toString(8))
+  const file = ownFile(kit, 'b1', 'teams')
+  ok(fs.existsSync(file) && (IS_WIN || (fs.statSync(file).mode & 0o777) === 0o600), 'its credentials with its own connection, yours only', IS_WIN ? null : (fs.statSync(file).mode & 0o777).toString(8))
 
   // ---------- The Teams app ----------
   const zip = await fetch(`${kit.url}/api/bots/b1/teams/app.zip`)

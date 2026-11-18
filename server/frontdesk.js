@@ -319,14 +319,22 @@ const TRY = {
 // what its agent is doing now, for Try It ({ status, asking, doing }).
 // models(): the models Bridge AI reaches (chatmodels.js models), reply: its reply(), signedIn(kind):
 // whether an agent is signed in here (false when it says not), for what answers (botanswer.js).
-export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => true, you = () => 'the owner', changed = () => {}, close = async () => {}, told = () => {}, readsOf = async () => [], transcriptOf = () => null, modelOf = () => null, computer = () => os.hostname(), commandOf = () => null, shortcutOf = () => null, toolsOf = async () => [], nowOf = async () => null, models = async () => [], reply = null, signedIn = async () => null }) {
+// ownersOf(bot): you on each platform as its connections have you ({ slack, discord, teams }:
+// connections.js), ahead of the bot's own.
+export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => true, you = () => 'the owner', changed = () => {}, close = async () => {}, told = () => {}, readsOf = async () => [], transcriptOf = () => null, modelOf = () => null, computer = () => os.hostname(), commandOf = () => null, shortcutOf = () => null, toolsOf = async () => [], nowOf = async () => null, models = async () => [], reply = null, signedIn = async () => null, ownersOf = () => ({}) }) {
   let data = { v: 2, outbox: [] }
   let old = null // the Slack Bot's questions (#216), to carry over
   try { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); if (Array.isArray(j.questions)) old = j; else if (Array.isArray(j.outbox)) data = { v: 2, outbox: j.outbox } } catch { /* none yet */ }
   const save = () => { try { ensureDir(path.dirname(FILE)); writeFileAtomic(FILE, JSON.stringify(data), { mode: 0o600 }) } catch (e) { console.log(`Bots couldn't save what's still to post: ${e.message}`) } }
   const tasks = makeTasks(ensureDir(DIR), you)
   const bots = new Map() // id -> { channel, trace, st, memory } (a deleted bot's: no channel, its record only)
-  const botOf = (id) => store.get(id)
+  // A bot's settings, with you on each platform as its connection there has you, else as it has.
+  const botOf = (id) => {
+    const b = store.get(id)
+    if (!b) return b
+    const o = ownersOf(b) || {}
+    return { ...b, owner: o.slack || b.owner, owners: { ...b.owners, ...(o.discord ? { discord: o.discord } : {}), ...(o.teams ? { teams: o.teams } : {}) } }
+  }
   // Its name and how long its record is kept, whether it's a bot still or one deleted.
   const keptOf = (id) => store.get(id) || store.deletedOf(id)
   // The desk's own task list for its helpers, as many at once as its bots allow (2 unless set).
@@ -538,6 +546,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       ...(m.files?.length ? { files: m.files.slice(0, 10).map((f) => ({ id: f.id || null, name: clip(f.name, 120), type: f.type || null, size: Number(f.size) || 0 })) } : {}),
       ...(m.via ? { via: m.via } : {}), ...(m.try ? { try: true } : { platform: m.platform || platOf(m.channel) }), ...(m.routine ? { routine: m.routine } : {}),
       ...(m.attached?.length ? { notRead: m.attached.slice(0, 10).map((x) => clip(x, 120)) } : {}),
+      ...(m.routed?.by ? { routed: m.routed } : {}),
     }
     const busy = !command && c && c.questions.map((x) => st.questions.get(x)).reverse().find((x) => x?.state === 'answering')
     const qid = !why && busy ? busy.id : `${id}-q${st.next}`
@@ -623,10 +632,13 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const slack = platOf(q) === 'slack'
     const cmdName = slack ? commandOf(bot) : null
     const cut = shortcutOf(bot) || `Ask ${bot.name} about this`
+    // (Asked through a shared connection: reached by its name through that app.)
+    const via = m?.routed?.connection || null
     if (cmd === 'help') {
       return say([
         `I'm ${bot.name}, ${ownerName(bot)}'s bot${bot.description ? `: ${bot.description.replace(/\.$/, '')}` : ''}. I answer from what's on ${ownerName(bot)}'s computer, and ${bot.auto ? 'some answers go out straight away' : `${ownerName(bot)} checks each answer before it's sent`}.`,
-        slack ? `Ask me by mentioning me, in a direct message${cmdName ? `, with ${cmdName}` : ''}, or with "${cut}" in a message's menu. A reply in a thread I answered in needs no mention.` : 'Ask me by mentioning me, or in a direct message. A reply in a thread I answered in needs no mention.',
+        via ? `Ask me through @${via}: start with "${bot.name}:"${m.routed.command ? `, or type ${m.routed.command} ${bot.name.toLowerCase().split(/\s+/)[0]} and your question` : ''}. A reply in a thread I answered in comes to me.`
+          : slack ? `Ask me by mentioning me, in a direct message${cmdName ? `, with ${cmdName}` : ''}, or with "${cut}" in a message's menu. A reply in a thread I answered in needs no mention.` : 'Ask me by mentioning me, or in a direct message. A reply in a thread I answered in needs no mention.',
         'Commands: !status, !mute and !unmute (this channel), !stop, !what do you know about me, !forget me.',
       ].join('\n'))
     }
@@ -1615,6 +1627,17 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     follows: (id, channel, thread) => { const c = bots.get(id)?.st.convs.get(`${channel}:${thread}`); return !!(c?.answered && Date.now() - Date.parse(c.last) < IDLE_DAYS * 86400000) },
     // Whether it answers in that channel without a mention.
     listens: (id, channel) => (botOf(id)?.listen || []).some((x) => x.id === channel),
+    // For a shared connection's routing (connhub.js): why it wouldn't answer this person there (who
+    // may ask, muted there), or null; when it was last busy in a thread; the polite no.
+    mayAsk(id, from, channel = null) {
+      const bot = botOf(id)
+      if (!bot || bot.draft) return 'not-allowed'
+      const why = refusal(bot, from)
+      if (why) return why
+      return channel && (bot.muted || []).some((x) => x.id === channel) ? 'muted' : null
+    },
+    lastIn: (id, channel, thread) => bots.get(id)?.st.convs.get(`${channel}:${thread}`)?.last || null,
+    politeNo: (why) => politeNo(why),
     // What its channel shows of it (Slack's Home tab).
     info(id) {
       const bot = botOf(id)

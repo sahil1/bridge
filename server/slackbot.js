@@ -166,7 +166,11 @@ export const SCOPE_FOR = {
   'files:write': 'send files and long answers',
   commands: 'answer /<command>',
   'assistant:write': 'show Slack\'s working status and Stop button',
+  'chat:write.customize': 'answer with each bot\'s own name and icon',
 }
+// A shared connection's app (connections.js) posts as each bot it reaches: its name and icon on each
+// answer (chat:write.customize), so the manifest asks for that too.
+export const SHARED_SCOPES = [...SCOPES, 'chat:write.customize']
 // Its slash command, from its name: /pricing-desk for "Pricing Desk" (Slack's: lowercase, 32
 // characters at most with the slash).
 export function commandOf(name) {
@@ -179,6 +183,17 @@ export function shortcutOf(name) {
   if (n && `Ask ${n} about this`.length <= 25) return `Ask ${n} about this`
   if (n && `Ask ${n}`.length <= 25) return `Ask ${n}`
   return 'Ask about this'
+}
+// A shared connection's manifest: the app named as you named it, its one /command (a bot's name
+// after it picks the bot), and each bot's own command too when you turned that on (perBot); the
+// scopes to post as each bot. bots: the bots it reaches.
+export function connectionManifest(c = {}, bots = [], you = '') {
+  const who = String(you || '').trim()
+  const m = manifest({ name: c.name, description: bots.length ? `Answers for ${who || 'its owner'}: ${bots.map((b) => b.name).join(', ')}` : '' }, you)
+  if (c.perBot) m.features.slash_commands.push(...bots.map((b) => ({ command: commandOf(b.name), description: `Ask ${b.name} a question`.slice(0, 100), usage_hint: 'your question', should_escape: false })).filter((x) => x.command !== commandOf(c.name)).slice(0, 24))
+  m.features.slash_commands[0].usage_hint = bots.length ? `${String(bots[0].name).toLowerCase().split(/\s+/)[0]} your question` : 'your question'
+  m.oauth_config.scopes.bot = SHARED_SCOPES
+  return m
 }
 export function manifest(bot = {}, you = '') {
   const who = String(you || '').trim()
@@ -216,8 +231,10 @@ const tokenFor = (u) => { try { const x = new URL(u); return (process.env.BRIDGE
 // ([{ channel, thread, since, dm }]). follows(channel, thread): whether it's answering in that
 // thread now (the desk knows), so only those threads' replies are kept track of. listens(channel):
 // whether it answers that channel's messages without a mention. info(): what its Home tab says
-// ({ name, owner, you, description, paused, computer, command, shortcut }).
-export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => [], follows = () => false, listens = () => false, info = () => ({}) } = {}) {
+// ({ name, owner, you, description, paused, computer, command, shortcut; a shared connection's: bots,
+// each with its name, description and command }). wanted: the scopes its manifest asks for (a
+// shared connection's has chat:write.customize too).
+export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => [], follows = () => false, listens = () => false, info = () => ({}), wanted = SCOPES } = {}) {
   const FILE = file
   let kept = read(FILE)
   const save = () => writeFileAtomic(FILE, JSON.stringify(kept, null, 2), { mode: 0o600 })
@@ -291,7 +308,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     }
   }
   // The scopes the manifest asks for that the app's token doesn't have (null: Slack didn't say).
-  const missing = () => (Array.isArray(kept.scopes) ? SCOPES.filter((x) => !kept.scopes.includes(x)) : null)
+  const missing = () => (Array.isArray(kept.scopes) ? wanted.filter((x) => !kept.scopes.includes(x)) : null)
   const lacks = (scope) => !!missing()?.includes(scope)
   const lacking = (scope) => Object.assign(new Error(`The Slack app lacks ${scope}: update it with the new manifest`), { code: 'missing_scope' })
 
@@ -573,6 +590,8 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       if (['bb_send', 'bb_discard', 'bb_approve'].includes(a.action_id)) return act({ act: a.action_id.slice(3), q: a.value, user, team }, where)
       if (a.action_id === 'bb_keep' || a.action_id === 'bb_drop') return act({ act: a.action_id.slice(3), memory: a.value, user, team }, where)
       if (a.action_id === 'bb_edit') return editor(p, a.value, user, where)
+      // (A bot picked for a question on a shared connection: connhub.js.)
+      if (a.action_id === 'bb_pick') { const [key, bot] = String(a.value || '').split(' '); return act({ act: 'pick', key, bot, user, team }, where) }
       return
     }
     if (p.type === 'message_action' && p.callback_id === 'bb_ask') {
@@ -615,7 +634,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   // A question put through /<name> or the shortcut: posted where it was asked, as the bot, so the
   // conversation shows it, then handed over as a mention is, its answer in that post's thread (the
   // shortcut's in the message's own thread). { ts } back, or why not.
-  async function asked({ user, team, channel, thread = null, text, via = 'shortcut' }) {
+  async function asked({ user, team, channel, thread = null, text, via = 'shortcut', command = null }) {
     if (!hear || !channel || !USER.test(String(user?.id || ''))) return { error: 'Slack didn\'t say who or where' }
     const dmd = String(channel).startsWith('D')
     let posted
@@ -630,7 +649,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     const place = await placeOf(channel, dmd ? 'im' : null)
     const top = thread || posted.ts
     hear({
-      ts: posted.ts, channel, thread: thread || null, mention: true, dm: dmd, via,
+      ts: posted.ts, channel, thread: thread || null, mention: true, dm: dmd, via, ...(command ? { command } : {}),
       from: await person({ user: user.id, user_team: team && team !== kept.team?.id ? team : undefined }),
       text: plainText(text, { bot: kept.bot?.userId, names }),
       place, at: new Date(Number(posted.ts) * 1000).toISOString(), late: false,
@@ -649,7 +668,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     const once = (payload) => { if (gone) return; gone = true; ack(payload) }
     const timer = setTimeout(() => once(), SLASH_WAIT)
     timer.unref?.()
-    const r = await asked({ user: { id: p.user_id, name: p.user_name }, team: p.team_id, channel: p.channel_id, text, via: 'slash' })
+    const r = await asked({ user: { id: p.user_id, name: p.user_name }, team: p.team_id, channel: p.channel_id, text, via: 'slash', command: p.command || null })
     clearTimeout(timer)
     if (!r?.error) return once()
     // (Too late to say it with the acknowledgement: said to them alone instead.)
@@ -674,6 +693,21 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     const you = x.you || x.owner?.name || 'its owner'
     const cmd = x.command || commandOf(name)
     const state = !online ? `:white_circle: Offline since ${new Date().toUTCString().replace(/:\d\d GMT$/, ' UTC')}: ${you}'s computer isn't answering.` : x.paused ? `:double_vertical_bar: Paused: questions go to ${you}.` : ':large_green_circle: Online now.'
+    // A shared connection: each bot it reaches, and how to ask each.
+    if (x.shared) {
+      const word = (n) => String(n || '').toLowerCase().split(/\s+/)[0]
+      return {
+        type: 'home',
+        blocks: [
+          { type: 'header', text: { type: 'plain_text', text: clip(name, 150) } },
+          { type: 'section', text: { type: 'mrkdwn', text: clip(`*${escape(name)}* is ${escape(you)}'s way to their bots in Bridge AI, on ${escape(you)}'s computer${x.computer ? ` (${escape(x.computer)})` : ''}.`, 3000) } },
+          { type: 'context', elements: [{ type: 'mrkdwn', text: state }] },
+          ...(x.bots || []).slice(0, 40).map((b) => ({ type: 'section', text: { type: 'mrkdwn', text: clip(`*${escape(b.name)}*${b.paused ? ' (paused)' : ''}${b.description ? `\n${escape(b.description)}` : ''}\nAsk: \`${escape(b.name)}: your question\`, or ${escape(cmd)} ${escape(word(b.name))} your question${b.command ? `, or ${escape(b.command)}` : ''}${b.channels?.length ? `\nAnswers in ${b.channels.map((c) => `#${escape(c)}`).join(', ')}` : ''}`, 3000) } })),
+          { type: 'section', text: { type: 'mrkdwn', text: clip(`*How to ask*\n• Mention @${escape(name)} with a bot's name first, or send a direct message (it goes to the bot you asked last)\n• Type ${escape(cmd)}, a bot's name and your question\n• Not sure which? Just ask: it picks the bot, or asks you which.\nA reply in a thread goes to the bot that answered there.`, 3000) } },
+          { type: 'section', text: { type: 'mrkdwn', text: '*Commands*, after a bot\'s name (like `Pricing Desk: !status`)\n`!help` the bots here, or what one does\n`!status` `!mute` `!unmute` `!stop` `!what do you know about me` `!forget me`' } },
+        ],
+      }
+    }
     return {
       type: 'home',
       blocks: [
@@ -802,11 +836,11 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     if (rest.length) out.push(rest)
     return out
   }
-  async function streamed(reply, text) {
+  async function streamed(reply, text, as = {}) {
     const dmd = String(reply.channel).startsWith('D')
     if (!dmd && !reply.user) throw Object.assign(new Error('Slack needs to know who a stream is for'), { code: 'no_recipient' })
     const [first, ...more] = parts(text).map(escape)
-    const j = await call('chat.startStream', { channel: reply.channel, thread_ts: reply.thread, markdown_text: first, ...(reply.user ? { recipient_user_id: reply.user, recipient_team_id: kept.team?.id } : {}) }, { waits: 1 })
+    const j = await call('chat.startStream', { channel: reply.channel, thread_ts: reply.thread, markdown_text: first, ...(reply.user ? { recipient_user_id: reply.user, recipient_team_id: kept.team?.id } : {}), ...as }, { waits: 1 })
     const ts = j.ts
     const last = more.pop()
     try {
@@ -843,23 +877,34 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     } catch (e) { return { id: null, name, size: bytes.length, ok: false, error: e.message, code: e.code || null } }
   }
 
+  // As a bot on a shared connection (as: { name, icon }): its name and icon on the message (Slack's
+  // username and icon_emoji or icon_url, with chat:write.customize; chat.startStream takes them too),
+  // or, from an app without that scope yet, its name in bold first.
+  const persona = (as) => {
+    if (!as?.name || lacks('chat:write.customize') || !Array.isArray(kept.scopes)) return {}
+    const icon = String(as.icon || '')
+    return { username: clip(as.name, 80), ...(/^:[\w+-]{1,60}:$/.test(icon) ? { icon_emoji: icon } : /^https:\/\/\S{1,500}$/.test(icon) ? { icon_url: icon } : {}) }
+  }
+
   // A reply where the question was asked: streamed when asked to (an answer sent without asking, in
   // a thread, short enough for a stream), else posted plainly, then its files. A stream Slack won't
   // take falls back to a plain post, saying why. Throws { code, retryAfter } when the words can't
-  // go; a file that can't go is said in files[], not thrown.
-  function post(reply, text, { files = [], stream = false } = {}) {
+  // go; a file that can't go is said in files[], not thrown. as: the bot it's posted as, on a shared
+  // connection.
+  function post(reply, text, { files = [], stream = false, as = null } = {}) {
     return inLine(async () => {
-      const out = { ts: null, channel: reply.channel, streamed: false, streamError: null, files: [] }
-      const body = String(text ?? '')
+      const out = { ts: null, channel: reply.channel, streamed: false, streamError: null, files: [], ...(as?.name ? { as: as.name, customized: !!persona(as).username } : {}) }
+      const raw = String(text ?? '')
+      const body = as?.name && !persona(as).username ? `*${as.name}:* ${raw}` : raw
       if (body.trim() || !files.length) {
         if (stream && reply.thread && body.length <= STREAM_MAX && !lacks('chat:write')) {
           try {
-            const s = await streamed(reply, body)
+            const s = await streamed(reply, body, persona(as))
             Object.assign(out, { ts: s.ts, channel: s.channel, streamed: !s.streamError, streamError: s.streamError || null })
           } catch (e) { out.streamError = e.code || e.message }
         } else if (stream) out.streamError = !reply.thread ? 'not_in_thread' : body.length > STREAM_MAX ? 'too_long' : 'missing_scope'
         if (!out.ts) {
-          const j = await call('chat.postMessage', { channel: reply.channel, text: escape(body), ...(reply.thread ? { thread_ts: reply.thread } : {}), unfurl_links: false, unfurl_media: false }, { waits: 1 })
+          const j = await call('chat.postMessage', { channel: reply.channel, text: escape(body), ...(reply.thread ? { thread_ts: reply.thread } : {}), unfurl_links: false, unfurl_media: false, ...persona(as) }, { waits: 1 })
           Object.assign(out, { ts: j.ts, channel: j.channel || reply.channel })
         }
       }
@@ -867,6 +912,18 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       return out
     })
   }
+  // "Pricing Desk or Docs Helper?": the question's asker picks with a button (bb_pick, its value the
+  // question's key and the bot's id), in the question's thread.
+  const choose = (reply, { text, key, options = [] }) => inLine(async () => {
+    const blocks = [
+      { type: 'section', text: { type: 'mrkdwn', text: clip(escape(text), 3000) } },
+      { type: 'actions', block_id: `bb_p_${String(key).slice(0, 200)}`, elements: options.slice(0, 5).map((o, i) => button('bb_pick', o.label, `${key} ${o.id}`, i === 0 ? 'primary' : null)) },
+    ]
+    const j = await call('chat.postMessage', { channel: reply.channel, text: escape(clip(text, 300)), blocks, ...(reply.thread ? { thread_ts: reply.thread } : {}), unfurl_links: false, unfurl_media: false }, { waits: 1 })
+    const handle = { channel: j.channel || reply.channel, ts: j.ts }
+    asks.set(`${handle.channel}:${handle.ts}`, blocks)
+    return handle
+  })
   // A word to one person only, where they asked.
   const whisper = (reply, user, text) => call('chat.postEphemeral', { channel: reply.channel, user, text: escape(text), ...(reply.thread ? { thread_ts: reply.thread } : {}) }, { waits: 1 })
 
@@ -913,7 +970,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   const button = (action, label, value, style) => ({ type: 'button', action_id: action, text: plainIn(label), value: String(value).slice(0, 2000), ...(style ? { style } : {}) })
   const sized = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`)
   function draftBlocks(it) {
-    const blocks = [{ type: 'section', text: { type: 'mrkdwn', text: clip(`*${md(it.who || 'Someone')}* asked ${md(it.where || 'in Slack')}:\n${quote(it.question || '')}`, 3000) } }]
+    const blocks = [{ type: 'section', text: { type: 'mrkdwn', text: clip(`${it.shared && it.bot ? `${md(it.bot)} · ` : ''}*${md(it.who || 'Someone')}* asked ${md(it.where || 'in Slack')}:\n${quote(it.question || '')}`, 3000) } }]
     if (it.needsOwner) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: clip(`Nothing could answer it: ${md(it.why || 'no answer')}`, 3000) } })
     else blocks.push({ type: 'section', text: { type: 'mrkdwn', text: clip(`*Draft:*\n${md(it.draft || '')}`, 3000) } })
     const notes = [
@@ -1102,5 +1159,5 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     set({ state: 'no-tokens', why: null })
   }
 
-  return { id, label: 'Slack', start, stop, state, post, react, context, people, channels, setTokens, forget, missed, masked, whisper, status, askOwner, settle, dm, download }
+  return { id, label: 'Slack', start, stop, state, post, react, context, people, channels, setTokens, forget, missed, masked, whisper, status, askOwner, settle, dm, download, choose }
 }

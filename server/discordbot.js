@@ -74,7 +74,10 @@ const FLAG = { MEMBERS: 1 << 14, MEMBERS_LIMITED: 1 << 15, CONTENT: 1 << 18, CON
 // What it may do in your server, asked for by the invite link: see channels and read their history,
 // send messages, start threads and write in them, add reactions, attach files (for long answers, later).
 export const PERMISSIONS = [6, 10, 11, 15, 16, 35, 38].reduce((a, b) => a | (1n << BigInt(b)), 0n).toString()
-export const invite = (appId) => `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(appId)}&scope=bot&permissions=${PERMISSIONS}`
+// A shared connection's (connections.js) asks to manage webhooks too: each bot's answer is posted
+// through a channel's webhook with that bot's name and avatar.
+export const SHARED_PERMISSIONS = (BigInt(PERMISSIONS) | (1n << 29n)).toString()
+export const invite = (appId, perms = PERMISSIONS) => `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(appId)}&scope=bot&permissions=${perms}`
 // A guild member's flag for a guest (in for one voice channel).
 const IS_GUEST = 1 << 4
 const THREADS = new Set([10, 11, 12]) // announcement, public and private threads
@@ -135,7 +138,8 @@ export function plainText(text, { me = null, mentions = [], channels = {} } = {}
 // ({ what, ok, why }). threads(): the threads it's answering in, to read for what was missed
 // ([{ channel, thread, since }], channel the thread's parent). follows(channel, thread): whether
 // it's answering in that thread now (the desk knows).
-export function makeDiscord({ id = 'discord', file, say = () => {}, threads = () => [], follows = () => false, listens = () => false } = {}) {
+// webhooks: a shared connection's, posting as each bot it reaches (post's as) through a webhook.
+export function makeDiscord({ id = 'discord', file, say = () => {}, threads = () => [], follows = () => false, listens = () => false, webhooks = false } = {}) {
   const FILE = file
   let kept = read(FILE)
   const save = () => writeFileAtomic(FILE, JSON.stringify(kept, null, 2), { mode: 0o600 })
@@ -178,8 +182,8 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
   const buckets = new Map()
   let globalUntil = 0
   const bucketOf = (method, route) => `${method} ${route.replace(/^\/(channels|guilds)\/(\d+)/, '/$1/<$2>').replace(/\/\d+/g, '/:id').replace(/\/reactions\/[^/]+/, '/reactions/:e')}`
-  async function call(method, route, { body = null, query = null, token = kept.token, waits = 3 } = {}) {
-    if (!token) throw failure('No bot token yet', 'not_authed')
+  async function call(method, route, { body = null, query = null, token = kept.token, waits = 3, hook = false } = {}) {
+    if (!token && !hook) throw failure('No bot token yet', 'not_authed')
     const url = new URL(API() + route)
     for (const [k, v] of Object.entries(query || {})) if (v != null) url.searchParams.set(k, String(v))
     const key = bucketOf(method, route)
@@ -188,7 +192,7 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
       if (hold > 0) await sleep(Math.min(hold, 60000))
       let res
       try {
-        res = await fetch(url, { method, headers: { authorization: `Bot ${token}`, 'user-agent': AGENT, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000) })
+        res = await fetch(url, { method, headers: { ...(hook ? {} : { authorization: `Bot ${token}` }), 'user-agent': AGENT, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000) })
       } catch (e) {
         throw failure(`Couldn't reach Discord: ${e.cause?.code || e.message}`, 'offline')
       }
@@ -504,7 +508,8 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
   // top of a channel, its latest messages and what's pinned there; in a direct message, its latest
   // messages; and the message a question replied to, if it did.
   async function context({ channel, thread, ts, since = null, dm = false }) {
-    const said = (m) => ({ ts: m.id, person: { id: m.author?.id || null, name: nameOf(m.author, m.member) }, text: clip(plainText(m.content, { me: kept.bot?.id, mentions: m.mentions, channels: chans }), LONGEST_SAID), you: !!kept.bot?.id && m.author?.id === kept.bot.id })
+    const mine = (m) => (!!kept.bot?.id && m.author?.id === kept.bot.id) || (!!m.webhook_id && Object.values(kept.hooks || {}).some((x) => x?.id === m.webhook_id))
+    const said = (m) => ({ ts: m.id, person: { id: m.author?.id || null, name: nameOf(m.author, m.member) }, text: clip(plainText(m.content, { me: kept.bot?.id, mentions: m.mentions, channels: chans }), LONGEST_SAID), you: mine(m) })
     // (A post you scheduled has no message of Discord's to read back from: the latest, then.)
     const own = /^\d+$/.test(String(ts))
     const before = (m) => m?.id && (!own || later_(ts, m.id)) && (!since || later_(m.id, since)) && String(m.content || '').trim()
@@ -580,7 +585,29 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
   // it's tried again, so no part is posted twice.
   let line = Promise.resolve()
   const partial = new Map() // `${message}:${text's length}` -> { target, ids }
-  function post(reply, text) {
+  // As a bot on a shared connection (as: { name, icon }): through the channel's webhook (made once,
+  // kept with the token), with that bot's name and its icon when it's a picture's address; where the
+  // app may not make webhooks (no Manage Webhooks there), and in direct messages, its name first.
+  const noHook = new Map() // channel -> when making its webhook was turned down
+  const parentOf = (cid) => (THREADS.has(chans[cid]?.type) ? chans[cid].parent || cid : cid)
+  async function hookOf(channel) {
+    kept.hooks ||= {}
+    if (kept.hooks[channel]?.token) return kept.hooks[channel]
+    if (Date.now() - (noHook.get(channel) || 0) < 3600 * 1000) return null
+    try {
+      const w = await call('POST', `/channels/${channel}/webhooks`, { body: { name: clip(kept.bot?.name || 'Bridge AI', 80) }, waits: 1 })
+      if (!w?.id || !w.token) throw failure('Discord gave no webhook', 'invalid_arguments')
+      kept.hooks[channel] = { id: w.id, token: w.token }
+      save()
+      return kept.hooks[channel]
+    } catch (e) {
+      if (!['missing_permissions', 'not_in_channel', 'invalid_arguments', 'not_found', 'channel_not_found'].includes(e.code)) throw e
+      noHook.set(channel, Date.now())
+      say({ what: 'webhooks', ok: false, why: `Couldn't make a webhook in a channel (${e.message}): each answer there says its bot's name first. Give the app Manage Webhooks there to post as each bot.` })
+      return null
+    }
+  }
+  function post(reply, text, { as = null } = {}) {
     const go = line.then(async () => {
       if (!reply?.channel) throw failure('Nowhere to reply to', 'invalid_arguments')
       const key = `${reply.message}:${String(text).length}`
@@ -600,20 +627,26 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
           } else throw e
         }
       }
-      const parts = split(text, LONGEST)
+      const hook = as?.name && webhooks && chans[target] && !reference ? await hookOf(parentOf(target)) : null
+      const words = as?.name && !hook ? `**${as.name}:** ${text}` : text
+      const parts = split(words, LONGEST)
       const ids = had?.ids ? [...had.ids] : []
       try {
         for (let i = ids.length; i < parts.length; i++) {
-          const j = await call('POST', `/channels/${target}/messages`, { body: { content: parts[i], allowed_mentions: { parse: [], replied_user: false }, ...(i === 0 && reference ? { message_reference: reference } : {}) }, waits: 1 })
+          const j = hook
+            ? await call('POST', `/webhooks/${hook.id}/${hook.token}`, { hook: true, query: { wait: 'true', ...(target !== parentOf(target) ? { thread_id: target } : {}) }, body: { content: parts[i], username: clip(as.name, 80), ...(/^https:\/\/\S{1,500}$/.test(String(as.icon || '')) ? { avatar_url: as.icon } : {}), allowed_mentions: { parse: [] } }, waits: 1 })
+            : await call('POST', `/channels/${target}/messages`, { body: { content: parts[i], allowed_mentions: { parse: [], replied_user: false }, ...(i === 0 && reference ? { message_reference: reference } : {}) }, waits: 1 })
           ids.push(j.id)
           remember(where, j.id, target)
         }
       } catch (e) {
         if (ids.length) { partial.set(key, { target, ids }); if (partial.size > 50) partial.delete(partial.keys().next().value) }
+        // (A webhook deleted in Discord: made again next time.)
+        if (hook && ['not_found', 'invalid_auth'].includes(e.code)) { delete kept.hooks[parentOf(target)]; try { save() } catch { /* next time */ } }
         throw e
       }
       partial.delete(key)
-      return { ts: ids[0], channel: target, parts: ids }
+      return { ts: ids[0], channel: target, parts: ids, ...(hook ? { hook: true } : {}) }
     })
     line = go.catch(() => {})
     return go
@@ -727,7 +760,7 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
     set({ state: kept.token ? 'off' : 'no-tokens', why: null, nextTry: null })
   }
   // (team: the server it answers in, as Slack's workspace is, for its record.)
-  const state = () => ({ ...st, bot: kept.bot || null, app: kept.app?.id ? { id: kept.app.id, name: kept.app.name || null } : null, guild: kept.guild || null, team: kept.guild ? { id: kept.guild.id, name: kept.guild.name } : null, guilds: kept.guilds || [], intents: intents(), tokens: kept.token ? { bot: masked(kept.token) } : null, invite: kept.app?.id ? invite(kept.app.id) : null })
+  const state = () => ({ ...st, bot: kept.bot || null, app: kept.app?.id ? { id: kept.app.id, name: kept.app.name || null } : null, guild: kept.guild || null, team: kept.guild ? { id: kept.guild.id, name: kept.guild.name } : null, guilds: kept.guilds || [], intents: intents(), tokens: kept.token ? { bot: masked(kept.token) } : null, invite: kept.app?.id ? invite(kept.app.id, webhooks ? SHARED_PERMISSIONS : PERMISSIONS) : null })
 
   // A new token: checked with Discord before it's kept (who the bot is, that it's a bot, its
   // privileged intents, the servers it's in), so a wrong one is said at once. Another bot's: where

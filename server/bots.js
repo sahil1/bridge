@@ -1,6 +1,7 @@
-// Bots (a beta feature, Settings › Bots, its id slack-bot): each one your own Slack app, with the
-// name you give it, answering people you choose from the folders you give it (frontdesk.js). Several
-// can run on one computer, each its own app, connection and record.
+// Bots (a beta feature, Settings › Bots, its id slack-bot): each answering people you choose, in
+// Slack, Discord or Microsoft Teams, from the folders you give it (frontdesk.js). Several can run on
+// one computer, each with its own record, reached through the platform's shared connection (one app
+// for them all) or a connection of its own (connections.js).
 //
 // What must hold is a setting, kept here and enforced in code: who may ask, which folders it reads
 // (readsFrom), that it can only read, and which agent answers. How it answers is its instructions:
@@ -11,9 +12,8 @@
 // Each bot in its own folder in the data folder, readable by you only:
 //   bots/<id>/bot.json          its settings
 //   bots/<id>/instructions.md   its instructions, as written in Settings
-//   bots/<id>/slack.json        its Slack app's tokens (slackbot.js), never in config.json
-//   bots/<id>/discord.json      its Discord bot's token (discordbot.js), the same way
-//   bots/<id>/teams.json        its Azure Bot's app ID, client secret and tenant (teamsbot.js)
+//   (its app's tokens were in bots/<id>/slack.json, discord.json and teams.json before
+//   connections: each is a connection of its own now, connections/<c>/, connections.js migrate)
 //   bots/<id>/memory.json       what it remembers (botmemory.js)
 //   bots/<id>/setup.json        its setup chat with AI Assist and what it proposes (botsetup.js)
 //   bots/<id>/trace/            its record (trace.js)
@@ -57,8 +57,11 @@ const tilde = (p) => (p === HOME || p.startsWith(HOME + path.sep) ? `~${p.slice(
 export const LIMITS = { day: 30, atOnce: 2, minutes: 10 }
 const DEFAULTS = {
   name: 'Bridge AI', description: '', who: 'named', askers: [], others: 'polite', readsFrom: [], instructionsFile: null, agent: null, auto: false, agentCopies: false, retention: '1y', max: 2,
-  owner: null, owners: {}, changes: 'none', repo: null, limits: LIMITS, memory: 'approve', paused: false, muted: [], listen: [], agentsStatus: false, template: null, mcp: [], answerers: null, fallback: true, draft: false,
+  owner: null, owners: {}, changes: 'none', repo: null, limits: LIMITS, memory: 'approve', paused: false, muted: [], listen: [], agentsStatus: false, template: null, mcp: [], answerers: null, fallback: true, draft: false, icon: null,
 }
+// Its icon where a shared connection posts as it (connhub.js): an emoji's Slack name, or a picture's
+// https address.
+export const ICON = /^(:[\w+-]{1,60}:|https:\/\/\S{1,500})$/
 // An MCP server's name, as the agents' configs take it (mcp.js).
 export const MCP_NAME = /^[A-Za-z0-9_.-]{1,64}$/
 // What may answer: an agent (agent:claude, agent:claude:opus) or a model (model:ollama:qwen3).
@@ -111,6 +114,7 @@ function shape(id, j) {
   if (!b.answerers?.length) b.answerers = null
   b.fallback = b.fallback !== false
   b.draft = b.draft === true
+  b.icon = ICON.test(String(b.icon || '')) ? String(b.icon) : null
   return b
 }
 
@@ -175,7 +179,7 @@ export function undraft(id, instructions) {
 // connected again there, with tokens pasted there). Its folders go as they're named here (~/…),
 // and are checked where it's brought in.
 export const BUNDLE_KIND = 'bridge-ai-bot'
-const CARRIED = ['description', 'who', 'askers', 'others', 'readsFrom', 'instructionsFile', 'agent', 'auto', 'agentCopies', 'retention', 'max', 'owner', 'owners', 'changes', 'repo', 'limits', 'memory', 'muted', 'listen', 'agentsStatus', 'template', 'mcp', 'answerers', 'fallback']
+const CARRIED = ['icon', 'description', 'who', 'askers', 'others', 'readsFrom', 'instructionsFile', 'agent', 'auto', 'agentCopies', 'retention', 'max', 'owner', 'owners', 'changes', 'repo', 'limits', 'memory', 'muted', 'listen', 'agentsStatus', 'template', 'mcp', 'answerers', 'fallback']
 export function bundleOf(id, memory = []) {
   const b = get(id)
   if (!b) throw Object.assign(new Error('No such bot'), { status: 404 })
