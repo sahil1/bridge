@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import CopyButton from '../CopyButton.jsx'
-import { api, apiUrl, onThisComputer } from '../../api.js'
+import { api, apiUrl, BASE, onThisComputer, viaRelay } from '../../api.js'
+import { canDownload, toPhone } from '../../download.js'
+import { useFolder } from '../files/fsapi.js'
 import { ago } from '../Machines.jsx'
 import { t } from '../../i18n/index.js'
 import './bots.css'
@@ -30,8 +32,10 @@ import './bots.css'
 // A bot deleted keeps its record, unless you tick that it goes too: it's there under its name,
 // marked deleted, to look at and export until the time it's kept for runs out, or you delete it.
 // What must hold (who may ask, the folders, read-only, which agent, changes, limits) are settings
-// here, enforced by Bridge AI; the instructions only steer. Changes only on the computer it runs on;
-// elsewhere they're shown, not changed.
+// here, enforced by Bridge AI; the instructions only steer. All of it from your phone (through your
+// relay) and your other computers (through their link) as on the computer it runs on: its folders and
+// files picked from that computer's listing, links opened in the phone's browser, and its files
+// downloaded to the device you're on (src/download.js). Its record says which device a change came from.
 
 const STATE = {
   connected: 'ok', connecting: 'warn', reconnecting: 'warn', error: 'bad', 'no-tokens': 'warn', off: 'warn',
@@ -110,22 +114,94 @@ function PeoplePicker({ people, skip = [], onPick, label, placeholder }) {
 }
 
 // A row of names (people, channels), each with a way to take it off.
-function Chips({ list, here, onDrop, dropLabel, hash = false }) {
+function Chips({ list, onDrop, dropLabel, hash = false }) {
   return (
     <ul className="sb-askers">
       {list.map((a) => (
         <li key={a.id}>
           <span className="sb-av" aria-hidden="true">{hash ? '#' : (a.name || '?').slice(0, 1).toUpperCase()}</span>
           <span className="sb-asker-name">{a.name || a.id} <PlatTag id={a.id} /></span>
-          {here && <button type="button" className="icon-btn" onClick={() => onDrop(a)} aria-label={dropLabel(a)}><Icon name="x" size={12} /></button>}
+          <button type="button" className="icon-btn" onClick={() => onDrop(a)} aria-label={dropLabel(a)}><Icon name="x" size={12} /></button>
         </li>
       ))}
     </ul>
   )
 }
 
+// Its files' names, as the computer names them (its export, its Teams app, its record).
+const fileOf = (d) => String(d.name || '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || d.id
+// One of its files to the device you're on: a plain download here and on your other computers;
+// through the relay, the relay's page or the iPhone app takes it (src/download.js), and the Android
+// app says it can't yet.
+function Save({ href, name, className, children }) {
+  const [st, setSt] = useState(null)
+  if (!viaRelay) return <a className={className} href={href} download>{children}</a>
+  if (!canDownload) return <span className="muted small">{t('The Android app can\'t save files yet.')}</span>
+  const go = async () => {
+    setSt({ busy: true })
+    try { setSt({ ok: await toPhone(href, name) }) } catch (e) { setSt({ error: e.message }) }
+  }
+  return (
+    <>
+      <button type="button" className={className} disabled={!!st?.busy} onClick={go}>{children}</button>
+      {st?.ok && <span className="muted small" role="status">{st.ok}</span>}
+      {st?.error && <span className="error-text small" role="alert">{st.error}</span>}
+    </>
+  )
+}
+
+// A folder (files: a file) on the computer it runs on, picked from that computer's own listing as
+// Files lists it (fsapi.js), so it's the same from your phone and your other computers: from the
+// home folder down, or from tops (the folders it reads from, which a file has to be in). What Files
+// keeps out (Bridge AI's own folder, your keys, what's hidden) isn't listed, and the server checks
+// what's picked again.
+const relOf = (p) => String(p || '').replace(/^~[\\/]?/, '').replace(/\\/g, '/')
+function Browse({ files = false, tops = null, onPick, onClose }) {
+  const roots = tops ? tops.map(relOf) : null
+  const [at, setAt] = useState(roots ? (roots.length === 1 ? roots[0] : null) : '')
+  const st = useFolder(BASE, 'home', at ?? '', { on: at != null })
+  const [busy, setBusy] = useState(false)
+  const entries = (st.data?.entries || []).filter((e) => (e.dir ? !e.cloud : files && !e.pkg && !e.broken))
+  const parent = () => setAt(at.split('/').slice(0, -1).join('/'))
+  // Up to the folder it's in; from one of the folders it reads from, back to their list (or nowhere).
+  const up = at == null ? null : roots ? (!roots.includes(at) ? parent : roots.length > 1 ? () => setAt(null) : null) : at ? parent : null
+  const pick = async (rel) => { setBusy(true); try { await onPick(`~/${rel}`) } finally { setBusy(false) } }
+  return (
+    <div className="sb-browse" role="region" aria-label={files ? t('Pick its instructions file') : t('Pick a folder for it to read from')}>
+      <div className="sb-browse-head">
+        {up && <button type="button" className="icon-btn" onClick={up} aria-label={t('Up to the folder it\'s in')}><Icon name="up" size={13} /></button>}
+        <code className="sb-browse-at">{at == null ? '' : at ? `~/${at}` : '~'}</code>
+        <span className="sb-grow" />
+        {!files && at != null && <button type="button" className="btn small primary" disabled={busy || !at} onClick={() => pick(at)}><Icon name="plus" size={12} /> {t('Read from this folder')}</button>}
+        <button type="button" className="icon-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={12} /></button>
+      </div>
+      {at == null && (
+        <ul className="sb-browse-list">
+          {roots.map((r) => <li key={r}><button type="button" onClick={() => setAt(r)}><Icon name="folder" size={13} /><span>{`~/${r}`}</span><Icon name="chevron" size={11} /></button></li>)}
+        </ul>
+      )}
+      {at != null && st.loading && !st.data && <p className="muted small">{t('Loading…')}</p>}
+      {at != null && st.error && <p className="error-text small" role="alert">{st.error}</p>}
+      {at != null && st.data && (entries.length
+        ? (
+          <ul className="sb-browse-list">
+            {entries.map((e) => (
+              <li key={e.path}>
+                <button type="button" disabled={busy} onClick={() => (e.dir ? setAt(e.path) : pick(e.path))}>
+                  <Icon name={e.dir ? 'folder' : 'file'} size={13} /><span>{e.name}</span>{e.dir && <Icon name="chevron" size={11} />}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )
+        : <p className="muted small">{files ? t('No files here: open a folder, or go up.') : t('No folders in it.')}</p>)}
+      {!files && at === '' && <p className="muted small">{t('Open the folder it should read from, then Read from this folder. Your whole home folder can\'t be picked.')}</p>}
+    </div>
+  )
+}
+
 // ---------- Set Up ----------
-function Status({ d, here, onAgain }) {
+function Status({ d, onAgain }) {
   const s = d.state
   const line = s === 'connected' ? t('Connected to {team} as @{bot}.', { team: d.team?.name || '', bot: d.bot?.name || '' })
     : s === 'connecting' ? t('Connecting to Slack…')
@@ -137,7 +213,7 @@ function Status({ d, here, onAgain }) {
       <p className={`st-note ${STATE[s] || 'warn'}`} role="status">
         <Icon name={s === 'connected' ? 'check' : s === 'error' ? 'alert' : s === 'no-tokens' ? 'info' : 'refresh'} size={13} />
         <span className="sb-status-text">{line}</span>
-        {(s === 'error' || s === 'reconnecting') && here && <button type="button" className="link-btn" onClick={onAgain}>{t('Connect again')}</button>}
+        {(s === 'error' || s === 'reconnecting') && <button type="button" className="link-btn" onClick={onAgain}>{t('Connect again')}</button>}
       </p>
       <p className="muted small">{t('Through Socket Mode, from this computer: Slack is never reached through Bold Bridge or your relay. While this computer sleeps or Bridge AI is closed, questions wait in Slack and are answered once it\'s back, replies in its threads included.')}</p>
     </div>
@@ -145,17 +221,16 @@ function Status({ d, here, onAgain }) {
 }
 
 // Paused: nothing answers, and each question comes to you. Pausing stops what's running at once.
-function Pause({ d, here, save }) {
+function Pause({ d, save }) {
   if (d.settings.paused) {
     return (
       <p className="st-note warn sb-paused" role="status" data-setting="slack-pause">
         <Icon name="pause" size={13} />
         <span>{t('Paused: nothing answers; each question goes to you, and the asker is told it\'s passed on.')}</span>
-        {here && <button type="button" className="btn small" onClick={() => save({ paused: false })}><Icon name="play" size={12} /> {t('Resume')}</button>}
+        <button type="button" className="btn small" onClick={() => save({ paused: false })}><Icon name="play" size={12} /> {t('Resume')}</button>
       </p>
     )
   }
-  if (!here) return null
   return (
     <div className="st-row sb-pause" data-setting="slack-pause">
       <button type="button" className="ghost-btn" onClick={() => save({ paused: true })}><Icon name="pause" size={12} /> {t('Pause {bot}', { bot: d.name })}</button>
@@ -180,7 +255,7 @@ const SCOPE_FOR = () => ({
 
 // An app made from an earlier manifest lacks scopes this one needs: which, what each is for, and how
 // to update it.
-function UpdateApp({ d, here, onAgain }) {
+function UpdateApp({ d, onAgain }) {
   const lacks = d.updateApp?.missing || d.scopes?.missing || []
   if (!d.tokens || !lacks.length) return null
   const json = JSON.stringify(d.manifest, null, 2)
@@ -198,7 +273,7 @@ function UpdateApp({ d, here, onAgain }) {
         <li><span>{t('Copy the new manifest.')}</span><div className="st-row"><CopyButton text={json} label={t('Copy the manifest')} className="btn small" /></div></li>
         <li><span>{t('In your app\'s page on api.slack.com, open App Manifest, paste it over what\'s there, and Save Changes.')}</span></li>
         <li><span>{t('Reinstall it: Install App › Reinstall to Workspace › Allow. The tokens stay the same.')}</span></li>
-        <li><span>{t('Then Connect again here.')}</span>{here && <div className="st-row"><button type="button" className="btn small" onClick={onAgain}><Icon name="refresh" size={12} /> {t('Connect again')}</button></div>}</li>
+        <li><span>{t('Then Connect again here.')}</span><div className="st-row"><button type="button" className="btn small" onClick={onAgain}><Icon name="refresh" size={12} /> {t('Connect again')}</button></div></li>
       </ol>
     </section>
   )
@@ -206,7 +281,7 @@ function UpdateApp({ d, here, onAgain }) {
 
 // Its name and description: its name in Slack, through the manifest. The icon is set in Slack. Its
 // export, and deleting it.
-function Identity({ d, here, save, onDelete }) {
+function Identity({ d, save, onDelete }) {
   const [name, setName] = useState(d.name)
   const [about, setAbout] = useState(d.description || '')
   const [sure, setSure] = useState(false)
@@ -217,18 +292,16 @@ function Identity({ d, here, save, onDelete }) {
     <section className="st-sec" data-setting="slack-identity">
       <h4>{t('Name and Description')}</h4>
       <div className="sb-ident">
-        <label className="sb-field"><span>{t('Name')}</span><input className="st-input" value={name} maxLength={35} disabled={!here} onChange={(e) => setName(e.target.value)} onBlur={() => { if (name.trim() && name.trim() !== d.name) save({ name: name.trim() }); else setName(d.name) }} aria-label={t('Its name in Slack')} /></label>
-        <label className="sb-field"><span>{t('Description')}</span><input className="st-input" value={about} maxLength={140} disabled={!here} placeholder={t('What it answers, in a line')} onChange={(e) => setAbout(e.target.value)} onBlur={() => { if (about.trim() !== (d.description || '')) save({ description: about.trim() }) }} /></label>
+        <label className="sb-field"><span>{t('Name')}</span><input className="st-input" value={name} maxLength={35} onChange={(e) => setName(e.target.value)} onBlur={() => { if (name.trim() && name.trim() !== d.name) save({ name: name.trim() }); else setName(d.name) }} aria-label={t('Its name in Slack')} /></label>
+        <label className="sb-field"><span>{t('Description')}</span><input className="st-input" value={about} maxLength={140} placeholder={t('What it answers, in a line')} onChange={(e) => setAbout(e.target.value)} onBlur={() => { if (about.trim() !== (d.description || '')) save({ description: about.trim() }) }} /></label>
       </div>
       <p className="muted small">{t('Its name in Slack, from the manifest. An app made before a rename keeps its old name until you paste the new manifest under App Manifest. Slack\'s manifest can\'t carry an icon: add one in your app\'s page, Basic Information › Display Information › App icon.')}</p>
       {d.appId && <div className="st-row"><a className="btn small" href={`https://api.slack.com/apps/${encodeURIComponent(d.appId)}/general`} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {t('Add an icon in Slack')}</a></div>}
-      {here && (
-        <div className="st-row sb-export-bot" data-setting="slack-export">
-          <a className="ghost-btn" href={apiUrl(`/bots/${d.id}/bundle`)} download><Icon name="export" size={12} /> {t('Export {bot}', { bot: d.name })}</a>
-          <span className="muted small">{t('A file with its instructions, memory and settings, to import on another computer (or in Docker); never its tokens.')}</span>
-        </div>
-      )}
-      {here && (sure
+      <div className="st-row sb-export-bot" data-setting="slack-export">
+        <Save className="ghost-btn" href={apiUrl(`/bots/${d.id}/bundle`)} name={`${fileOf(d)}.bridge-bot.json`}><Icon name="export" size={12} /> {t('Export {bot}', { bot: d.name })}</Save>
+        <span className="muted small">{t('A file with its instructions, memory and settings, to import on another computer (or in Docker); never its tokens.')}</span>
+      </div>
+      {sure
         ? (
           <div className="st-row sb-sure" role="alert">
             <span className="small">{t('Delete {bot}: its tokens, settings and instructions? Its activity stays, to look at and export here, until the time its record is kept for runs out. Its Slack app stays in Slack until you delete it there.', { bot: d.name })}</span>
@@ -237,13 +310,13 @@ function Identity({ d, here, save, onDelete }) {
             <button type="button" className="ghost-btn" onClick={() => { setSure(false); setHistory(false) }}>{t('Cancel')}</button>
           </div>
         )
-        : <div className="st-row"><button type="button" className="ghost-btn danger" onClick={() => setSure(true)}><Icon name="trash" size={12} /> {t('Delete this bot…')}</button></div>)}
+        : <div className="st-row"><button type="button" className="ghost-btn danger" onClick={() => setSure(true)}><Icon name="trash" size={12} /> {t('Delete this bot…')}</button></div>}
     </section>
   )
 }
 
 // Making the app and connecting it: the steps, the manifest, the two tokens.
-function Connect({ d, here, reload }) {
+function Connect({ d, reload }) {
   const [app, setApp] = useState('')
   const [bot, setBot] = useState('')
   const [busy, setBusy] = useState(null)
@@ -283,10 +356,10 @@ function Connect({ d, here, reload }) {
   )
   const form = (
     <form className="sb-tokens" onSubmit={connect} autoComplete="off">
-      <label className="sb-field"><span>{t('App-level token')}</span><input className="st-input mono" type="password" value={app} onChange={(e) => setApp(e.target.value)} placeholder="xapp-…" disabled={!here} autoComplete="new-password" spellCheck={false} /></label>
-      <label className="sb-field"><span>{t('Bot token')}</span><input className="st-input mono" type="password" value={bot} onChange={(e) => setBot(e.target.value)} placeholder="xoxb-…" disabled={!here} autoComplete="new-password" spellCheck={false} /></label>
+      <label className="sb-field"><span>{t('App-level token')}</span><input className="st-input mono" type="password" value={app} onChange={(e) => setApp(e.target.value)} placeholder="xapp-…" autoComplete="new-password" spellCheck={false} /></label>
+      <label className="sb-field"><span>{t('Bot token')}</span><input className="st-input mono" type="password" value={bot} onChange={(e) => setBot(e.target.value)} placeholder="xoxb-…" autoComplete="new-password" spellCheck={false} /></label>
       <div className="st-row">
-        <button type="submit" className="btn small primary" disabled={!here || busy === 'connect' || !app.trim() || !bot.trim()}>{busy === 'connect' ? t('Connecting…') : t('Connect')}</button>
+        <button type="submit" className="btn small primary" disabled={busy === 'connect' || !app.trim() || !bot.trim()}>{busy === 'connect' ? t('Connecting…') : t('Connect')}</button>
         {change && <button type="button" className="ghost-btn" onClick={() => setChange(false)}>{t('Cancel')}</button>}
       </div>
     </form>
@@ -301,8 +374,8 @@ function Connect({ d, here, reload }) {
             <div className="sb-have">
               <span className="small"><span className="muted">{t('App-level token')}</span> <code>{d.tokens.app}</code></span>
               <span className="small"><span className="muted">{t('Bot token')}</span> <code>{d.tokens.bot}</code></span>
-              {here && !change && <button type="button" className="ghost-btn" onClick={() => setChange(true)}>{t('Change tokens')}</button>}
-              {here && <button type="button" className="ghost-btn danger" onClick={forget} disabled={busy === 'forget'}><Icon name="x" size={12} /> {t('Disconnect')}</button>}
+              {!change && <button type="button" className="ghost-btn" onClick={() => setChange(true)}>{t('Change tokens')}</button>}
+              <button type="button" className="ghost-btn danger" onClick={forget} disabled={busy === 'forget'}><Icon name="x" size={12} /> {t('Disconnect')}</button>
             </div>
             {change && form}
           </>
@@ -310,7 +383,6 @@ function Connect({ d, here, reload }) {
         : form}
       <details className="sb-manifest"><summary><Icon name="chevron" size={11} />{t('The manifest')}</summary><div className="st-row"><CopyButton text={json} label={t('Copy the manifest')} className="btn small" /></div><pre>{json}</pre></details>
       <details className="sb-how"><summary><Icon name="chevron" size={11} />{t('How the app is made')}</summary>{steps}</details>
-      {!here && <p className="muted small">{t('Connect it in Bridge AI on the computer it runs on.')}</p>}
       {msg && <p className={`small ${msg.ok ? 'muted' : 'error-text'}`} role="status">{msg.text}</p>}
     </section>
   )
@@ -319,7 +391,7 @@ function Connect({ d, here, reload }) {
 // You in Slack: which of the workspace's people is you, so its drafts and what it would like to
 // remember come to your direct messages, with buttons to act on them from your phone; and so it
 // knows you may always ask.
-function Owner({ d, here, save }) {
+function Owner({ d, save }) {
   const { people, error, connected } = usePeople(d)
   const o = d.settings.owner
   const guess = !o && d.ownerGuess
@@ -328,15 +400,15 @@ function Owner({ d, here, save }) {
       <h4>{t('You in Slack')}</h4>
       <p className="muted small">{t('Which person in {team} is you. {bot} sends you its drafts, and what it would like to remember, in a direct message with Send, Edit and Discard, so you can answer from your phone. You can always ask it, whatever Who Can Ask says.', { team: d.team?.name || t('your workspace'), bot: d.name })}</p>
       {o
-        ? <Chips list={[o]} here={here} onDrop={() => save({ owner: null })} dropLabel={() => t('That isn\'t me')} />
+        ? <Chips list={[o]} onDrop={() => save({ owner: null })} dropLabel={() => t('That isn\'t me')} />
         : <p className="small sb-none">{t('Not set: its drafts wait in Needs You only.')}</p>}
-      {guess && here && (
+      {guess && (
         <div className="st-row sb-guess">
           <span className="small">{t('Is this you: {name}?', { name: guess.name })}</span>
           <button type="button" className="btn small" onClick={() => save({ owner: { id: guess.id, name: guess.name } })}><Icon name="check" size={12} /> {t('Yes, that\'s me')}</button>
         </div>
       )}
-      {here && connected && !o && <PeoplePicker people={people} onPick={(p) => save({ owner: { id: p.id, name: p.name } })} label={t('Pick yourself')} placeholder={t('Find yourself in {team}', { team: d.team?.name || t('your workspace') })} />}
+      {connected && !o && <PeoplePicker people={people} onPick={(p) => save({ owner: { id: p.id, name: p.name } })} label={t('Pick yourself')} placeholder={t('Find yourself in {team}', { team: d.team?.name || t('your workspace') })} />}
       {!connected && <p className="muted small">{t('Connect the app first to pick yourself from your workspace\'s people.')}</p>}
       {error && connected && !o && <p className="error-text small">{t('Couldn\'t list your workspace\'s people: {error}', { error })}</p>}
     </section>
@@ -375,7 +447,7 @@ function Where({ d, at, pick }) {
 }
 
 // A connection's line: connected to what, or why not, and a way to try again.
-function PlatformStatus({ s, here, onAgain, connected, setUp, label }) {
+function PlatformStatus({ s, onAgain, connected, setUp, label }) {
   const st = s?.state || 'no-tokens'
   const line = st === 'connected' ? connected
     : st === 'connecting' ? t('Connecting to {platform}…', { platform: label })
@@ -386,13 +458,13 @@ function PlatformStatus({ s, here, onAgain, connected, setUp, label }) {
     <p className={`st-note ${STATE[st] || 'warn'}`} role="status">
       <Icon name={st === 'connected' ? 'check' : st === 'error' ? 'alert' : st === 'no-tokens' ? 'info' : 'refresh'} size={13} />
       <span className="sb-status-text">{line}</span>
-      {(st === 'error' || st === 'reconnecting') && here && <button type="button" className="link-btn" onClick={onAgain}>{t('Connect again')}</button>}
+      {(st === 'error' || st === 'reconnecting') && <button type="button" className="link-btn" onClick={onAgain}>{t('Connect again')}</button>}
     </p>
   )
 }
 
 // You in Discord, or in Teams: which person there is you, so you may always ask there too.
-function PlatformOwner({ d, here, save, platform }) {
+function PlatformOwner({ d, save, platform }) {
   const { people, connected } = usePeople(d)
   const label = platName(platform)
   const o = d.settings.owners?.[platform] || null
@@ -402,15 +474,15 @@ function PlatformOwner({ d, here, save, platform }) {
       <h4>{platform === 'discord' ? t('You in Discord') : t('You in Teams')}</h4>
       <p className="muted small">{t('Which person in {platform} is you, so you can always ask {bot} there, whatever Who Can Ask says. Its drafts wait for you in Needs You.', { platform: label, bot: d.name })}</p>
       {o
-        ? <Chips list={[o]} here={here} onDrop={() => save({ owners: { [platform]: null } })} dropLabel={() => t('That isn\'t me')} />
+        ? <Chips list={[o]} onDrop={() => save({ owners: { [platform]: null } })} dropLabel={() => t('That isn\'t me')} />
         : <p className="small sb-none">{t('Not set.')}</p>}
-      {here && connected && !o && stateOf(d, platform).state === 'connected' && <PeoplePicker people={mine} onPick={(p) => save({ owners: { [platform]: { id: p.id, name: p.name } } })} label={t('Pick yourself')} placeholder={t('Find yourself in {platform}', { platform: label })} />}
+      {connected && !o && stateOf(d, platform).state === 'connected' && <PeoplePicker people={mine} onPick={(p) => save({ owners: { [platform]: { id: p.id, name: p.name } } })} label={t('Pick yourself')} placeholder={t('Find yourself in {platform}', { platform: label })} />}
     </section>
   )
 }
 
 // Discord: a bot of its own, made in Discord's Developer Portal, connecting from this computer.
-function DiscordSetup({ d, here, save, reload, again }) {
+function DiscordSetup({ d, save, reload, again }) {
   const s = d.where?.discord || { state: 'no-tokens' }
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(null)
@@ -445,9 +517,9 @@ function DiscordSetup({ d, here, save, reload, again }) {
   )
   const form = (
     <form className="sb-tokens" onSubmit={connect} autoComplete="off">
-      <label className="sb-field"><span>{t('Bot token')}</span><input className="st-input mono" type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={t('From Bot › Reset Token')} disabled={!here} autoComplete="new-password" spellCheck={false} /></label>
+      <label className="sb-field"><span>{t('Bot token')}</span><input className="st-input mono" type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={t('From Bot › Reset Token')} autoComplete="new-password" spellCheck={false} /></label>
       <div className="st-row">
-        <button type="submit" className="btn small primary" disabled={!here || busy === 'connect' || !token.trim()}>{busy === 'connect' ? t('Connecting…') : t('Connect')}</button>
+        <button type="submit" className="btn small primary" disabled={busy === 'connect' || !token.trim()}>{busy === 'connect' ? t('Connecting…') : t('Connect')}</button>
         {change && <button type="button" className="ghost-btn" onClick={() => setChange(false)}>{t('Cancel')}</button>}
       </div>
     </form>
@@ -456,7 +528,7 @@ function DiscordSetup({ d, here, save, reload, again }) {
     <>
       <section className="st-sec" data-setting="discord-connect">
         <h4>{t('Your Discord Bot')}</h4>
-        <PlatformStatus s={s} here={here} onAgain={again} label="Discord"
+        <PlatformStatus s={s} onAgain={again} label="Discord"
           connected={s.guild ? t('Connected to {server} as @{bot}.', { server: s.guild.name, bot: s.bot?.name || '' }) : t('Connected as @{bot}, but not answering in a server yet: add it to yours with the link below.', { bot: s.bot?.name || '' })}
           setUp={t('Not connected: its Discord bot\'s token isn\'t here yet. Make the bot below, then paste it.')} />
         <p className="muted small">{t('It connects from this computer to Discord: nothing reaches this computer from the internet, and nothing goes through Bold Bridge or your relay. While this computer sleeps or Bridge AI is closed, nothing answers; once it\'s back, it reads what was asked in the last three days.')}</p>
@@ -464,7 +536,7 @@ function DiscordSetup({ d, here, save, reload, again }) {
         {intents.content && intents.members === false && <p className="st-note warn"><Icon name="info" size={13} /><span>{t('Server Members Intent is off, so only people who\'ve written to it can be picked under Who Can Ask. Turn it on in the same place to pick from everyone in your server.')}</span></p>}
         {(s.guilds || []).length > 1 && (
           <label className="sb-field sb-server"><span>{t('Answers in')}</span>
-            <select className="st-input" value={s.guild?.id || ''} disabled={!here || busy === 'server'} onChange={(e) => e.target.value && server(e.target.value)}>
+            <select className="st-input" value={s.guild?.id || ''} disabled={busy === 'server'} onChange={(e) => e.target.value && server(e.target.value)}>
               {!s.guild && <option value="">{t('Pick its server…')}</option>}
               {s.guilds.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
             </select>
@@ -476,25 +548,24 @@ function DiscordSetup({ d, here, save, reload, again }) {
             <>
               <div className="sb-have">
                 <span className="small"><span className="muted">{t('Bot token')}</span> <code>{s.tokens.bot}</code></span>
-                {here && !change && <button type="button" className="ghost-btn" onClick={() => setChange(true)}>{t('Change token')}</button>}
-                {here && <button type="button" className="ghost-btn danger" onClick={forget} disabled={busy === 'forget'}><Icon name="x" size={12} /> {t('Disconnect')}</button>}
+                {!change && <button type="button" className="ghost-btn" onClick={() => setChange(true)}>{t('Change token')}</button>}
+                <button type="button" className="ghost-btn danger" onClick={forget} disabled={busy === 'forget'}><Icon name="x" size={12} /> {t('Disconnect')}</button>
               </div>
               {change && form}
             </>
           )
           : form}
         <details className="sb-how"><summary><Icon name="chevron" size={11} />{t('How the bot is made')}</summary>{steps}</details>
-        {!here && <p className="muted small">{t('Connect it in Bridge AI on the computer it runs on.')}</p>}
         {msg && <p className={`small ${msg.ok ? 'muted' : 'error-text'}`} role="status">{msg.text}</p>}
       </section>
-      <PlatformOwner d={d} here={here} save={save} platform="discord" />
+      <PlatformOwner d={d} save={save} platform="discord" />
     </>
   )
 }
 
 // Microsoft Teams: an Azure Bot of yours, reached through a tunnel of yours to this computer, and the
 // Teams app made here to upload.
-function TeamsSetup({ d, here, save, reload, again }) {
+function TeamsSetup({ d, save, reload, again }) {
   const s = d.where?.teams || { state: 'no-tokens' }
   const [app, setApp] = useState('')
   const [tenant, setTenant] = useState('')
@@ -521,11 +592,11 @@ function TeamsSetup({ d, here, save, reload, again }) {
   const devtunnel = `devtunnel host -p ${port} --allow-anonymous`
   const form = (
     <form className="sb-tokens" onSubmit={connect} autoComplete="off">
-      <label className="sb-field"><span>{t('Microsoft App ID')}</span><input className="st-input mono" value={app} onChange={(e) => setApp(e.target.value)} placeholder="1a2b3c4d-…" disabled={!here} spellCheck={false} /></label>
-      <label className="sb-field"><span>{t('App Tenant ID')}</span><input className="st-input mono" value={tenant} onChange={(e) => setTenant(e.target.value)} placeholder="5e6f7a8b-…" disabled={!here} spellCheck={false} /></label>
-      <label className="sb-field"><span>{t('Client secret')}</span><input className="st-input mono" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={t('Its Value, not its Secret ID')} disabled={!here} autoComplete="new-password" spellCheck={false} /></label>
+      <label className="sb-field"><span>{t('Microsoft App ID')}</span><input className="st-input mono" value={app} onChange={(e) => setApp(e.target.value)} placeholder="1a2b3c4d-…" spellCheck={false} /></label>
+      <label className="sb-field"><span>{t('App Tenant ID')}</span><input className="st-input mono" value={tenant} onChange={(e) => setTenant(e.target.value)} placeholder="5e6f7a8b-…" spellCheck={false} /></label>
+      <label className="sb-field"><span>{t('Client secret')}</span><input className="st-input mono" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={t('Its Value, not its Secret ID')} autoComplete="new-password" spellCheck={false} /></label>
       <div className="st-row">
-        <button type="submit" className="btn small primary" disabled={!here || busy === 'connect' || !app.trim() || !tenant.trim() || !secret.trim()}>{busy === 'connect' ? t('Connecting…') : t('Connect')}</button>
+        <button type="submit" className="btn small primary" disabled={busy === 'connect' || !app.trim() || !tenant.trim() || !secret.trim()}>{busy === 'connect' ? t('Connecting…') : t('Connect')}</button>
         {change && <button type="button" className="ghost-btn" onClick={() => setChange(false)}>{t('Cancel')}</button>}
       </div>
     </form>
@@ -546,10 +617,10 @@ function TeamsSetup({ d, here, save, reload, again }) {
         </div>
         <span className="muted small">{t('A quick tunnel\'s address changes each time it starts: paste the new one here, and in Azure. A named tunnel keeps its address.')}</span>
         <form className="sb-tunnel" onSubmit={keepTunnel}>
-          <label className="sb-field"><span>{t('Your tunnel\'s address')}</span><input className="st-input mono" value={tunnel} onChange={(e) => setTunnel(e.target.value)} placeholder="https://…trycloudflare.com" disabled={!here} spellCheck={false} /></label>
+          <label className="sb-field"><span>{t('Your tunnel\'s address')}</span><input className="st-input mono" value={tunnel} onChange={(e) => setTunnel(e.target.value)} placeholder="https://…trycloudflare.com" spellCheck={false} /></label>
           <div className="st-row">
-            <button type="submit" className="btn small" disabled={!here || busy === 'tunnel' || !tunnel.trim() || `${tunnel.trim().replace(/\/+$/, '')}/api/messages` === endpoint}>{t('Save')}</button>
-            <button type="button" className="btn small" disabled={!here || busy === 'check' || !endpoint || s.state !== 'connected'} onClick={check}>{busy === 'check' ? t('Checking…') : t('Check')}</button>
+            <button type="submit" className="btn small" disabled={busy === 'tunnel' || !tunnel.trim() || `${tunnel.trim().replace(/\/+$/, '')}/api/messages` === endpoint}>{t('Save')}</button>
+            <button type="button" className="btn small" disabled={busy === 'check' || !endpoint || s.state !== 'connected'} onClick={check}>{busy === 'check' ? t('Checking…') : t('Check')}</button>
           </div>
         </form>
         {s.endpoint?.at && (s.endpoint.ok
@@ -562,7 +633,7 @@ function TeamsSetup({ d, here, save, reload, again }) {
       </li>
       <li>
         <span>{t('Download its Teams app and add it to Teams: Apps › Manage your apps › Upload an app › Upload a custom app. Your Teams admin may need to allow custom apps first.')}</span>
-        {s.app && here ? <div className="st-row"><a className="btn small" href={apiUrl(`/bots/${d.id}/teams/app.zip`)} download><Icon name="download" size={12} /> {t('Download the Teams app')}</a></div> : <span className="muted small">{t('(Once it\'s connected.)')}</span>}
+        {s.app ? <div className="st-row"><Save className="btn small" href={apiUrl(`/bots/${d.id}/teams/app.zip`)} name={`${fileOf(d)}-teams.zip`}><Icon name="download" size={12} /> {t('Download the Teams app')}</Save></div> : <span className="muted small">{t('(Once it\'s connected.)')}</span>}
       </li>
       <li><span>{t('Ask it: add it to a team or a group chat and mention @{bot}, or message it directly. A reply in a thread it answered in needs no mention.', { bot: d.name })}</span></li>
     </ol>
@@ -571,7 +642,7 @@ function TeamsSetup({ d, here, save, reload, again }) {
     <>
       <section className="st-sec" data-setting="teams-connect">
         <h4>{t('Your Teams App')}</h4>
-        <PlatformStatus s={s} here={here} onAgain={again} label="Microsoft Teams"
+        <PlatformStatus s={s} onAgain={again} label="Microsoft Teams"
           connected={t('Signed in to Microsoft as its Azure Bot, and listening on this computer at port {port}.', { port })}
           setUp={t('Not connected: its Azure Bot\'s app ID, tenant and client secret aren\'t here yet. Make the bot below, then paste them.')} />
         {s.state === 'connected' && <p className="small muted sb-heard">{s.lastEvent ? t('Last heard from Teams {when}.', { when: ago(s.lastEvent) }) : t('Nothing from Teams yet: once your tunnel runs and the messaging endpoint is set in Azure, mention it in Teams.')}</p>}
@@ -581,16 +652,15 @@ function TeamsSetup({ d, here, save, reload, again }) {
           <div className="sb-have">
             <span className="small"><span className="muted">{t('Microsoft App ID')}</span> <code>{s.app?.id}</code></span>
             <span className="small"><span className="muted">{t('Client secret')}</span> <code>{s.tokens.secret}</code></span>
-            {here && !change && <button type="button" className="ghost-btn" onClick={() => setChange(true)}>{t('Change')}</button>}
-            {here && <button type="button" className="ghost-btn danger" onClick={forget} disabled={busy === 'forget'}><Icon name="x" size={12} /> {t('Disconnect')}</button>}
+            {!change && <button type="button" className="ghost-btn" onClick={() => setChange(true)}>{t('Change')}</button>}
+            <button type="button" className="ghost-btn danger" onClick={forget} disabled={busy === 'forget'}><Icon name="x" size={12} /> {t('Disconnect')}</button>
           </div>
         )}
         {s.tokens && change && form}
         {s.tokens ? <details className="sb-how" open={!s.lastEvent}><summary><Icon name="chevron" size={11} />{t('How the bot is made')}</summary>{steps}</details> : steps}
-        {!here && <p className="muted small">{t('Connect it in Bridge AI on the computer it runs on.')}</p>}
         {msg && <p className={`small ${msg.ok ? 'muted' : 'error-text'}`} role="status">{msg.text}</p>}
       </section>
-      <PlatformOwner d={d} here={here} save={save} platform="teams" />
+      <PlatformOwner d={d} save={save} platform="teams" />
     </>
   )
 }
@@ -638,11 +708,11 @@ function stepsFor(d, p) {
     { title: t('Paste its IDs and secret'), done: !!s.tokens, body: `${t('On the bot\'s Configuration page, copy the Microsoft App ID and the App Tenant ID. Then Manage Password › Certificates & secrets › New client secret › Add, and copy its Value (not its Secret ID).')} ${t('Paste the three below and Connect.')}`, fails: t('Turned down? Copy the secret\'s Value, not its Secret ID; an expired secret needs a new one.') },
     { title: t('Reachable from Teams'), done: s.state === 'connected' && !!(s.endpoint?.ok || s.lastEvent), body: t('Run a tunnel of your own to port {port}, paste its address under Your Teams App and Check. Then set the Azure Bot\'s Messaging endpoint to the address shown there, and Channels › Microsoft Teams › Apply.', { port: s.port || 3978 }), fails: t('Check says it isn\'t reached? Start the tunnel again (a quick tunnel\'s address changes each time), then paste the new address here and in Azure.') },
     { title: t('You in Teams'), done: !!d.settings.owners?.teams, body: t('Under You in Teams, pick yourself, so you can always ask it there.'), fails: t('Nobody to pick? It lists the people of the teams and chats it\'s in, once it\'s been added to one.') },
-    { title: t('Add it to Teams'), done: !!(s.lastEvent || reached.asked), body: t('Download its Teams app and add it to Teams: Apps › Manage your apps › Upload an app › Upload a custom app. Your Teams admin may need to allow custom apps first.'), ...(s.app ? { button: { label: t('Download the Teams app'), href: apiUrl(`/bots/${d.id}/teams/app.zip`), download: true } } : {}), fails: t('No Upload a custom app? Your Teams admin allows custom apps in the Teams admin center (Teams apps › Setup policies).') },
+    { title: t('Add it to Teams'), done: !!(s.lastEvent || reached.asked), body: t('Download its Teams app and add it to Teams: Apps › Manage your apps › Upload an app › Upload a custom app. Your Teams admin may need to allow custom apps first.'), ...(s.app ? { button: { label: t('Download the Teams app'), href: apiUrl(`/bots/${d.id}/teams/app.zip`), download: `${fileOf(d)}-teams.zip` } } : {}), fails: t('No Upload a custom app? Your Teams admin allows custom apps in the Teams admin center (Teams apps › Setup policies).') },
     answered,
   ]
 }
-function Guide({ d, platform, here }) {
+function Guide({ d, platform }) {
   const steps = stepsFor(d, platform)
   const n = steps.filter((s) => s.done).length
   const all = n === steps.length
@@ -669,9 +739,11 @@ function Guide({ d, platform, here }) {
             <div className="sb-guide-step">
               <b className="small">{s.title}{s.done && <span className="sb-sr"> ({t('done')})</span>}</b>
               {!s.done && s.body && <span className="small">{s.body}</span>}
-              {!s.done && s.button && here && (
+              {!s.done && s.button && (
                 <div className="st-row">
-                  <a className="btn small" href={s.button.href} {...(s.button.download ? { download: true } : { target: '_blank', rel: 'noreferrer' })}><Icon name={s.button.download ? 'download' : 'external'} size={12} /> {s.button.label}</a>
+                  {s.button.download
+                    ? <Save className="btn small" href={s.button.href} name={s.button.download}><Icon name="download" size={12} /> {s.button.label}</Save>
+                    : <a className="btn small" href={s.button.href} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {s.button.label}</a>}
                 </div>
               )}
               {!s.done && s.fails && <span className="muted small sb-guide-fail">{t('If it doesn\'t work: {what}', { what: s.fails })}</span>}
@@ -685,14 +757,12 @@ function Guide({ d, platform, here }) {
 }
 
 // Settings › Bots before there's a bot: what one is, in two lines, and where to start.
-function FirstBot({ here, onStart }) {
+function FirstBot({ onStart }) {
   return (
     <div className="sb-first" data-setting="bots-first">
       <p className="small">{t('A bot answers people for you in Slack, Discord or Microsoft Teams, with the name you give it, from folders on this computer that you choose.')}</p>
       <p className="muted small">{t('Each answer waits for you to send unless you say otherwise, and everything it does is kept here, in its Activity.')}</p>
-      {here
-        ? <div className="st-row"><button type="button" className="btn small primary" onClick={onStart}><Icon name="plus" size={12} /> {t('Set up your first bot')}</button></div>
-        : <p className="muted small">{t('Make one in Bridge AI on the computer it runs on.')}</p>}
+      <div className="st-row"><button type="button" className="btn small primary" onClick={onStart}><Icon name="plus" size={12} /> {t('Set up your first bot')}</button></div>
     </div>
   )
 }
@@ -700,7 +770,7 @@ function FirstBot({ here, onStart }) {
 // Who may ask: people picked from the workspace by name, or everyone in the channels it's in; never
 // guests or people from other companies. The people named are also the only ones (with you) who may
 // ask for a change. And what anyone else gets.
-function Askers({ d, here, save }) {
+function Askers({ d, save }) {
   const { people, error, connected } = usePeople(d)
   const s = d.settings
   const askers = s.askers
@@ -712,11 +782,11 @@ function Askers({ d, here, save }) {
       <h4>{t('Who Can Ask')}</h4>
       <div className="sb-modes" role="radiogroup" aria-label={t('Who Can Ask')}>
         <label className={`sb-mode ${s.who === 'named' ? 'on' : ''}`}>
-          <input type="radio" name={`sb-who-${d.id}`} checked={s.who === 'named'} disabled={!here} onChange={() => save({ who: 'named' })} />
+          <input type="radio" name={`sb-who-${d.id}`} checked={s.who === 'named'} onChange={() => save({ who: 'named' })} />
           <span><b>{t('People you name')}</b><span className="muted small">{t('Only the people you add here get answers, wherever they ask.')}</span></span>
         </label>
         <label className={`sb-mode ${everyone ? 'on' : ''}`}>
-          <input type="radio" name={`sb-who-${d.id}`} checked={everyone} disabled={!here} onChange={() => save({ who: 'channels' })} />
+          <input type="radio" name={`sb-who-${d.id}`} checked={everyone} onChange={() => save({ who: 'channels' })} />
           <span><b>{t('Everyone in channels it\'s invited to')}</b><span className="muted small">{t('Anyone in your workspace who mentions it in a channel it\'s in, or messages it directly.')}</span></span>
         </label>
       </div>
@@ -725,16 +795,16 @@ function Askers({ d, here, save }) {
         ? <p className="small"><b>{t('People you name')}</b> <span className="muted">{t('Anyone in its channels can ask; only the people named here, and you, can ask it for a change.')}</span></p>
         : s.changes && s.changes !== 'none' && <p className="muted small">{t('The people named here, and you, can also ask it for a change.')}</p>}
       {askers.length > 0
-        ? <Chips list={askers} here={here} onDrop={drop} dropLabel={(a) => t('Remove {name}', { name: a.name || a.id })} />
+        ? <Chips list={askers} onDrop={drop} dropLabel={(a) => t('Remove {name}', { name: a.name || a.id })} />
         : <p className="small sb-none">{everyone ? t('Nobody named: only you can ask it for a change.') : t('Nobody yet: until you add someone, every question gets what anyone else gets.')}</p>}
-      {here && connected && <PeoplePicker people={people} skip={askers.map((a) => a.id)} onPick={add} label={t('Add someone who can ask')} placeholder={t('Add someone from {team}', { team: d.team?.name || t('your workspace') })} />}
+      {connected && <PeoplePicker people={people} skip={askers.map((a) => a.id)} onPick={add} label={t('Add someone who can ask')} placeholder={t('Add someone from {team}', { team: d.team?.name || t('your workspace') })} />}
       {!connected && <p className="muted small">{t('Connect the app first to pick from your workspace\'s people.')}</p>}
       {error && <p className="error-text small">{t('Couldn\'t list your workspace\'s people: {error}', { error })}</p>}
       <div className="st-row sb-others">
         <span className="small">{t('Anyone else who asks gets')}</span>
         <div className="seg" role="radiogroup" aria-label={t('Anyone else who asks gets')}>
-          <button type="button" role="radio" aria-checked={s.others === 'polite'} className={s.others === 'polite' ? 'on' : ''} disabled={!here} onClick={() => save({ others: 'polite' })}>{t('A polite no')}</button>
-          <button type="button" role="radio" aria-checked={s.others === 'silent'} className={s.others === 'silent' ? 'on' : ''} disabled={!here} onClick={() => save({ others: 'silent' })}>{t('No reply')}</button>
+          <button type="button" role="radio" aria-checked={s.others === 'polite'} className={s.others === 'polite' ? 'on' : ''} onClick={() => save({ others: 'polite' })}>{t('A polite no')}</button>
+          <button type="button" role="radio" aria-checked={s.others === 'silent'} className={s.others === 'silent' ? 'on' : ''} onClick={() => save({ others: 'silent' })}>{t('No reply')}</button>
         </div>
       </div>
     </section>
@@ -743,10 +813,13 @@ function Askers({ d, here, save }) {
 
 // Its instructions: what it's for, how it answers, what it declines. Written here (saved as a file in
 // Bridge AI's folder), or a file in one of its folders, read fresh for each question.
-function Instructions({ d, here, save }) {
+function Instructions({ d, save }) {
   const [text, setText] = useState(d.instructions.text)
   const [file, setFile] = useState(d.settings.instructionsFile || '')
   const [useFile, setUseFile] = useState(!!d.settings.instructionsFile)
+  const [browse, setBrowse] = useState(false)
+  // (A file is picked in one of the folders it reads from, as the server checks.)
+  const folders = (d.folders || []).filter((f) => f.ok)
   const typed = useRef(false)
   useEffect(() => { if (!typed.current) setText(d.instructions.text) }, [d.instructions.text])
   useEffect(() => { setFile(d.settings.instructionsFile || ''); setUseFile(!!d.settings.instructionsFile) }, [d.settings.instructionsFile])
@@ -757,37 +830,46 @@ function Instructions({ d, here, save }) {
       <p className="muted small">{t('What it\'s for, how it answers and what it declines, in plain words (Markdown). They steer its answers; they can\'t widen what it may do, which the settings here decide.')}</p>
       <div className="sb-modes" role="radiogroup" aria-label={t('Instructions')}>
         <label className={`sb-mode ${!useFile ? 'on' : ''}`}>
-          <input type="radio" name={`sb-ins-${d.id}`} checked={!useFile} disabled={!here} onChange={() => { setUseFile(false); if (d.settings.instructionsFile) save({ instructionsFile: null }) }} />
+          <input type="radio" name={`sb-ins-${d.id}`} checked={!useFile} onChange={() => { setUseFile(false); if (d.settings.instructionsFile) save({ instructionsFile: null }) }} />
           <span><b>{t('Written here')}</b></span>
         </label>
         <label className={`sb-mode ${useFile ? 'on' : ''}`}>
-          <input type="radio" name={`sb-ins-${d.id}`} checked={useFile} disabled={!here} onChange={() => setUseFile(true)} />
+          <input type="radio" name={`sb-ins-${d.id}`} checked={useFile} onChange={() => setUseFile(true)} />
           <span><b>{t('Use this file instead')}</b><span className="muted small">{t('A file in one of the folders it reads from, such as BOT.md, read fresh for each question. Anyone who can change that file changes how it answers, not what it may do.')}</span></span>
         </label>
       </div>
       {useFile
         ? (
-          <form className="sb-add" onSubmit={(e) => { e.preventDefault(); save({ instructionsFile: file.trim() }) }}>
-            <input className="st-input mono" value={file} onChange={(e) => setFile(e.target.value)} placeholder="~/code/BOT.md" aria-label={t('The instructions file')} disabled={!here} spellCheck={false} />
-            {here && <button type="submit" className="btn small" disabled={!file.trim() || file.trim() === d.settings.instructionsFile}>{t('Use it')}</button>}
-            {d.instructions.file && !d.instructions.file.ok && <p className="error-text small sb-full">{d.instructions.file.problem}</p>}
-          </form>
+          <>
+            <form className="sb-add" onSubmit={(e) => { e.preventDefault(); save({ instructionsFile: file.trim() }) }}>
+              <input className="st-input mono" value={file} onChange={(e) => setFile(e.target.value)} placeholder="~/code/BOT.md" aria-label={t('The instructions file')} spellCheck={false} />
+              {folders.length > 0 && <button type="button" className="btn small" aria-expanded={browse} onClick={() => setBrowse((x) => !x)}>{t('Choose…')}</button>}
+              <button type="submit" className="btn small" disabled={!file.trim() || file.trim() === d.settings.instructionsFile}>{t('Use it')}</button>
+              {d.instructions.file && !d.instructions.file.ok && <p className="error-text small sb-full">{d.instructions.file.problem}</p>}
+            </form>
+            {!folders.length && <p className="muted small">{t('The file has to be in a folder it reads from: add one under Reads From first.')}</p>}
+            {browse && folders.length > 0 && <Browse files tops={folders.map((f) => f.shown)} onPick={(f) => { setFile(f); setBrowse(false); save({ instructionsFile: f }) }} onClose={() => setBrowse(false)} />}
+          </>
         )
-        : <textarea className="st-input sb-ins" value={text} rows={Math.min(14, Math.max(5, text.split('\n').length + 1))} disabled={!here} onChange={(e) => { typed.current = true; setText(e.target.value) }} onBlur={keep} aria-label={t('Its instructions')} spellCheck />}
+        : <textarea className="st-input sb-ins" value={text} rows={Math.min(14, Math.max(5, text.split('\n').length + 1))} onChange={(e) => { typed.current = true; setText(e.target.value) }} onBlur={keep} aria-label={t('Its instructions')} spellCheck />}
     </section>
   )
 }
 
 // The folders it reads from: an agent that can only read, kept to them (with Claude Code).
-function ReadsFrom({ d, here, save }) {
+function ReadsFrom({ d, save }) {
   const [where, setWhere] = useState('')
-  const pickFolder = window.bridgeApp?.pickFolder
+  const [browse, setBrowse] = useState(false)
+  // The system's folder picker on the computer it runs on; anywhere else, that computer's folders,
+  // listed here (Browse).
+  const pickFolder = onThisComputer() ? window.bridgeApp?.pickFolder : null
   const list = d.folders || []
-  const add = async (e) => {
-    e.preventDefault()
-    const ok = await save({ readsFrom: [...d.settings.readsFrom, where.trim()] })
+  const keep = async (f) => {
+    const ok = await save({ readsFrom: [...d.settings.readsFrom, f] })
     if (ok) setWhere('')
+    return ok
   }
+  const add = (e) => { e.preventDefault(); keep(where.trim()) }
   const drop = (f) => save({ readsFrom: d.settings.readsFrom.filter((x, i) => list[i] !== f) })
   return (
     <section className="st-sec" data-setting="slack-folders">
@@ -802,19 +884,18 @@ function ReadsFrom({ d, here, save }) {
                 <code title={f.path}>{f.shown}</code>
                 {!f.ok && <span className="error-text small">{f.problem}</span>}
               </div>
-              {here && <button type="button" className="icon-btn" onClick={() => drop(f)} aria-label={t('Stop reading from {folder}', { folder: f.name })}><Icon name="x" size={12} /></button>}
+              <button type="button" className="icon-btn" onClick={() => drop(f)} aria-label={t('Stop reading from {folder}', { folder: f.name })}><Icon name="x" size={12} /></button>
             </li>
           ))}
         </ul>
       )}
       {!list.length && <p className="small sb-none">{t('None yet: it answers from what the model knows, in an empty folder of its own.')}</p>}
-      {here && (
-        <form className="sb-add" onSubmit={add}>
-          <input className="st-input mono" value={where} onChange={(e) => setWhere(e.target.value)} placeholder="~/code" aria-label={t('Folder')} spellCheck={false} />
-          {pickFolder && <button type="button" className="btn small" onClick={async () => { const p = await pickFolder().catch(() => null); if (p) setWhere(p) }}>{t('Choose…')}</button>}
-          <button type="submit" className="btn small" disabled={!where.trim()}><Icon name="plus" size={12} /> {t('Read from it')}</button>
-        </form>
-      )}
+      <form className="sb-add" onSubmit={add}>
+        <input className="st-input mono" value={where} onChange={(e) => setWhere(e.target.value)} placeholder="~/code" aria-label={t('Folder')} spellCheck={false} />
+        <button type="button" className="btn small" aria-expanded={browse} onClick={async () => { if (!pickFolder) return setBrowse((x) => !x); const p = await pickFolder().catch(() => null); if (p) setWhere(p) }}>{t('Choose…')}</button>
+        <button type="submit" className="btn small" disabled={!where.trim()}><Icon name="plus" size={12} /> {t('Read from it')}</button>
+      </form>
+      {browse && <Browse onPick={async (f) => { if (await keep(f)) setBrowse(false) }} onClose={() => setBrowse(false)} />}
     </section>
   )
 }
@@ -822,7 +903,7 @@ function ReadsFrom({ d, here, save }) {
 // Changes: none, a diff you approve before a draft pull request opens, or a draft pull request at
 // once. The agent edits only its own copy (a git worktree), and Bridge AI does the git and GitHub
 // part with your own gh. Only the people named, and you, may ask for one.
-function Changes({ d, here, save }) {
+function Changes({ d, save }) {
   const s = d.settings
   const c = d.changes || {}
   const repos = c.repos || []
@@ -840,7 +921,7 @@ function Changes({ d, here, save }) {
       <div className="sb-modes" role="radiogroup" aria-label={t('Changes')}>
         {modes.map(([k, label, about]) => (
           <label key={k} className={`sb-mode ${(s.changes || 'none') === k ? 'on' : ''}`}>
-            <input type="radio" name={`sb-changes-${d.id}`} checked={(s.changes || 'none') === k} disabled={!here || (k !== 'none' && !can)} onChange={() => save({ changes: k })} />
+            <input type="radio" name={`sb-changes-${d.id}`} checked={(s.changes || 'none') === k} disabled={k !== 'none' && !can} onChange={() => save({ changes: k })} />
             <span><b>{label}</b><span className="muted small">{about}</span></span>
           </label>
         ))}
@@ -848,7 +929,7 @@ function Changes({ d, here, save }) {
       {repos.length > 1 && (
         <label className="sb-field sb-repo">
           <span>{t('In the repository')}</span>
-          <select className="st-input" value={c.repo || ''} disabled={!here} onChange={(e) => save({ repo: e.target.value || null })}>
+          <select className="st-input" value={c.repo || ''} onChange={(e) => save({ repo: e.target.value || null })}>
             {repos.map((r) => <option key={r.path} value={r.path} disabled={!r.ok}>{r.shown || r.path}</option>)}
           </select>
         </label>
@@ -864,7 +945,7 @@ function Changes({ d, here, save }) {
 // The limits for each person who asks: questions a day, at once, and how long a run may take. You
 // aren't limited.
 const LIMITS = () => [['day', t('Questions a day'), 1, 1000], ['atOnce', t('At once'), 1, 5], ['minutes', t('Minutes a run'), 1, 60]]
-function Limits({ d, here, save }) {
+function Limits({ d, save }) {
   const l = d.settings.limits || { day: 30, atOnce: 2, minutes: 10 }
   const [v, setV] = useState(l)
   useEffect(() => { setV(l) }, [l.day, l.atOnce, l.minutes]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -881,7 +962,7 @@ function Limits({ d, here, save }) {
         {LIMITS().map(([k, label, min, max]) => (
           <label key={k} className="sb-field">
             <span>{label}</span>
-            <input className="st-input" type="number" inputMode="numeric" min={min} max={max} value={v[k] ?? ''} disabled={!here} onChange={(e) => setV((x) => ({ ...x, [k]: e.target.value }))} onBlur={keep} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); keep() } }} />
+            <input className="st-input" type="number" inputMode="numeric" min={min} max={max} value={v[k] ?? ''} onChange={(e) => setV((x) => ({ ...x, [k]: e.target.value }))} onBlur={keep} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); keep() } }} />
           </label>
         ))}
       </div>
@@ -891,7 +972,7 @@ function Limits({ d, here, save }) {
 
 // The channels it answers in without a mention (none until you add one), and those it's been muted
 // in (!mute), each to turn back on.
-function Channels({ d, here, save }) {
+function Channels({ d, save }) {
   const { channels, error, connected } = useChannels(d)
   const s = d.settings
   const listen = s.listen || []
@@ -903,9 +984,9 @@ function Channels({ d, here, save }) {
       <p className="small sb-sub"><b>{t('Answer without a mention')}</b></p>
       <p className="muted small">{t('In these channels it takes each new message from someone who may ask as a question, without being mentioned, and stays quiet when a message isn\'t for it. Off in every channel until you add one.')}</p>
       {listen.length > 0
-        ? <Chips list={listen} hash here={here} onDrop={(c) => save({ listen: listen.filter((x) => x.id !== c.id) })} dropLabel={(c) => t('Stop answering without a mention in #{channel}', { channel: c.name || c.id })} />
+        ? <Chips list={listen} hash onDrop={(c) => save({ listen: listen.filter((x) => x.id !== c.id) })} dropLabel={(c) => t('Stop answering without a mention in #{channel}', { channel: c.name || c.id })} />
         : <p className="small sb-none">{t('None: it answers only when it\'s mentioned, messaged or asked in its threads.')}</p>}
-      {here && connected && channels && (
+      {connected && channels && (
         free.length
           ? (
             <select className="st-input sb-pick-channel" value="" onChange={(e) => { const c = free.find((x) => x.id === e.target.value); if (c) save({ listen: [...listen, { id: c.id, name: c.name }] }) }} aria-label={t('Answer without a mention in')}>
@@ -925,7 +1006,7 @@ function Channels({ d, here, save }) {
             {muted.map((c) => (
               <li key={c.id}>
                 <span className="small">{`#${c.name || c.id}`}</span>
-                {here && <button type="button" className="ghost-btn" onClick={() => save({ muted: muted.filter((x) => x.id !== c.id) })}><Icon name="volume" size={12} /> {t('Unmute')}</button>}
+                <button type="button" className="ghost-btn" onClick={() => save({ muted: muted.filter((x) => x.id !== c.id) })}><Icon name="volume" size={12} /> {t('Unmute')}</button>
               </li>
             ))}
           </ul>
@@ -937,7 +1018,7 @@ function Channels({ d, here, save }) {
 
 // How answers go, which agent answers (and a note on its terms when it answers through a personal
 // plan), copies of your agents' conversations, what your agents are doing, and approvals in Slack.
-function Replies({ d, here, save }) {
+function Replies({ d, save }) {
   const s = d.settings
   const agents = d.agents.filter((a) => a.installed)
   const by = d.answerer
@@ -952,11 +1033,11 @@ function Replies({ d, here, save }) {
       <h4>{t('Answers')}</h4>
       <div className="sb-modes" role="radiogroup" aria-label={t('How answers go')}>
         <label className={`sb-mode ${!s.auto ? 'on' : ''}`}>
-          <input type="radio" name={`sb-auto-${d.id}`} checked={!s.auto} disabled={!here} onChange={() => save({ auto: false })} />
+          <input type="radio" name={`sb-auto-${d.id}`} checked={!s.auto} onChange={() => save({ auto: false })} />
           <span><b>{t('Review each one')}</b><span className="muted small">{t('Each answer waits in Needs You, to edit, send or discard. Nothing goes to Slack until you send it.')}</span></span>
         </label>
         <label className={`sb-mode ${s.auto ? 'on' : ''}`}>
-          <input type="radio" name={`sb-auto-${d.id}`} checked={!!s.auto} disabled={!here} onChange={() => save({ auto: true })} />
+          <input type="radio" name={`sb-auto-${d.id}`} checked={!!s.auto} onChange={() => save({ auto: true })} />
           <span><b>{t('Answer without asking')}</b><span className="muted small">{t('An answer goes straight to Slack when the agent is held to its folders (Claude Code). An answer from a copy of an agent\'s conversation, or from Codex, which can read anywhere, still waits for you.')}</span></span>
         </label>
       </div>
@@ -968,18 +1049,18 @@ function Replies({ d, here, save }) {
         {agents.length
           ? (
             <div className="seg" role="radiogroup" aria-label={t('Answered by')}>
-              {agents.map((a) => <button key={a.kind} type="button" role="radio" aria-checked={by?.kind === a.kind} className={by?.kind === a.kind ? 'on' : ''} disabled={!here} onClick={() => save({ agent: a.kind })}>{a.label}</button>)}
+              {agents.map((a) => <button key={a.kind} type="button" role="radio" aria-checked={by?.kind === a.kind} className={by?.kind === a.kind ? 'on' : ''} onClick={() => save({ agent: a.kind })}>{a.label}</button>)}
             </div>
           )
           : <span className="error-text small">{t('No agent here can answer read-only: install Claude Code or Codex (Settings › Agents).')}</span>}
       </div>
       {terms && <p className="st-note warn sb-terms" data-setting="slack-terms"><Icon name="info" size={13} /><span>{terms}</span></p>}
       <label className="st-check">
-        <input type="checkbox" checked={!!s.agentCopies} disabled={!here} onChange={(e) => save({ agentCopies: e.target.checked })} />
+        <input type="checkbox" checked={!!s.agentCopies} onChange={(e) => save({ agentCopies: e.target.checked })} />
         <span><b>{t('Answer from a copy of an agent\'s conversation')}</b> <span className="muted small">{t('A question that names what one of your agents in its folders is working on is answered by a read-only copy of that agent\'s conversation; the agent itself gets nothing. It knows what that agent read anywhere, so its answers always wait for you.')}</span></span>
       </label>
       <label className="st-check">
-        <input type="checkbox" checked={!!s.agentsStatus} disabled={!here} onChange={(e) => save({ agentsStatus: e.target.checked })} />
+        <input type="checkbox" checked={!!s.agentsStatus} onChange={(e) => save({ agentsStatus: e.target.checked })} />
         <span><b>{t('Say what your agents are doing')}</b> <span className="muted small">{t('It\'s told the names of your agents in its folders and whether each is working, waiting on you or done, so it can answer “is that done yet?”. Never their conversations.')}</span></span>
       </label>
     </section>
@@ -988,7 +1069,7 @@ function Replies({ d, here, save }) {
 
 // Scheduled posts: a question it answers on a schedule, posted in a channel, through Scheduled
 // Routines (server/routines.js). Each goes through its usual approvals.
-function Scheduled({ d, here, reload }) {
+function Scheduled({ d, reload }) {
   const { channels, connected } = useChannels(d)
   const [what, setWhat] = useState('')
   const [ch, setCh] = useState('')
@@ -1030,7 +1111,7 @@ function Scheduled({ d, here, reload }) {
                   {r.note && <span className={`small ${bad ? 'error-text' : 'muted'}`}>{r.note}</span>}
                   {msg?.key === r.id && <span className="error-text small">{msg.text}</span>}
                 </div>
-                {here && d.routinesOn && (
+                {d.routinesOn && (
                   <div className="st-row">
                     <button type="button" className="ghost-btn" disabled={busy === r.id} onClick={() => act(r.id, () => api(`/routines/${encodeURIComponent(r.id)}`, { method: 'PATCH', body: { paused: !paused } }))}><Icon name={paused ? 'play' : 'pause'} size={12} /> {paused ? t('Resume') : t('Pause')}</button>
                     <button type="button" className="ghost-btn danger" disabled={busy === r.id} onClick={() => act(r.id, () => api(`/routines/${encodeURIComponent(r.id)}`, { method: 'DELETE' }))}><Icon name="trash" size={12} /> {t('Delete')}</button>
@@ -1042,7 +1123,7 @@ function Scheduled({ d, here, reload }) {
         </ul>
       )}
       {!list.length && <p className="small sb-none">{t('None yet.')}</p>}
-      {here && d.routinesOn && (connected
+      {d.routinesOn && (connected
         ? (
           <form className="sb-sched-add" onSubmit={add}>
             <label className="sb-field"><span>{t('What to post, as a question to it')}</span><input className="st-input" value={what} onChange={(e) => setWhat(e.target.value)} placeholder={t('What changed in the launch checklist this week?')} /></label>
@@ -1064,34 +1145,34 @@ function Scheduled({ d, here, reload }) {
   )
 }
 
-function SetUp({ d, here, save, reload, onDelete, again }) {
+function SetUp({ d, save, reload, onDelete, again }) {
   // (Where it answers: the one you looked at last for this bot, else the first set up, else Slack.)
   const [at, setAt] = useState(() => { const x = saved(`cc-bot-where-${d.id}`); return PLATFORMS.some(([k]) => k === x) ? x : (PLATFORMS.find(([k]) => stateOf(d, k).state !== 'no-tokens') || ['slack'])[0] })
   const pick = (k) => { setAt(k); saved(`cc-bot-where-${d.id}`, k) }
   return (
     <>
       <Where d={d} at={at} pick={pick} />
-      <Guide key={at} d={d} platform={at} here={here} />
+      <Guide key={at} d={d} platform={at} />
       {at === 'slack' && (
         <>
-          <Status d={d} here={here} onAgain={again} />
-          <UpdateApp d={d} here={here} onAgain={again} />
-          <Connect d={d} here={here} reload={reload} />
-          <Owner d={d} here={here} save={save} />
+          <Status d={d} onAgain={again} />
+          <UpdateApp d={d} onAgain={again} />
+          <Connect d={d} reload={reload} />
+          <Owner d={d} save={save} />
         </>
       )}
-      {at === 'discord' && <DiscordSetup d={d} here={here} save={save} reload={reload} again={again} />}
-      {at === 'teams' && <TeamsSetup d={d} here={here} save={save} reload={reload} again={again} />}
-      <Pause d={d} here={here} save={save} />
-      <Identity d={d} here={here} save={save} onDelete={onDelete} />
-      <Askers d={d} here={here} save={save} />
-      <Instructions d={d} here={here} save={save} />
-      <ReadsFrom d={d} here={here} save={save} />
-      <Changes d={d} here={here} save={save} />
-      <Limits d={d} here={here} save={save} />
-      <Channels d={d} here={here} save={save} />
-      <Replies d={d} here={here} save={save} />
-      <Scheduled d={d} here={here} reload={reload} />
+      {at === 'discord' && <DiscordSetup d={d} save={save} reload={reload} again={again} />}
+      {at === 'teams' && <TeamsSetup d={d} save={save} reload={reload} again={again} />}
+      <Pause d={d} save={save} />
+      <Identity d={d} save={save} onDelete={onDelete} />
+      <Askers d={d} save={save} />
+      <Instructions d={d} save={save} />
+      <ReadsFrom d={d} save={save} />
+      <Changes d={d} save={save} />
+      <Limits d={d} save={save} />
+      <Channels d={d} save={save} />
+      <Replies d={d} save={save} />
+      <Scheduled d={d} reload={reload} />
     </>
   )
 }
@@ -1107,8 +1188,9 @@ const REFUSED = () => ({
   muted: t('it\'s muted in that channel'), paused: t('it\'s paused'), 'over-limit': t('over their limit for the day'),
 })
 // A setting's value, short, for the record's line.
-const valueOf = (v) => { const s = v == null ? '—' : typeof v === 'string' ? v : JSON.stringify(v); return s.length > 80 ? `${s.slice(0, 79)}…` : s }
-// One event of a conversation, as a line of its timeline.
+const valueOf = (v) => { const s = v == null || v === '' ? '—' : typeof v === 'string' ? v : JSON.stringify(v); return s.length > 80 ? `${s.slice(0, 79)}…` : s }
+// One event of a conversation, as a line of its timeline. A change made on another of your devices
+// (your phone, another computer) says which.
 function eventLine(e) {
   const who = e.person?.name || e.person?.id || t('Someone')
   const by = e.by || t('you')
@@ -1159,9 +1241,9 @@ function eventLine(e) {
     case 'approval.asked': return e.memory ? t('Asked you in your Slack direct messages whether to keep it') : t('Sent to your Slack direct messages, to send, edit or discard')
     case 'approval.failed': return t('Couldn\'t send it to your Slack direct messages: {why}', { why: e.error })
     case 'memory.proposed': return t('Would like to remember: “{text}”', { text: wordsOf(e.item?.text) })
-    case 'memory.kept': return t('{name} kept in its memory: “{text}”', { name: by, text: wordsOf(e.item?.text) })
-    case 'memory.edited': return t('{name} changed what it remembers to: “{text}”', { name: by, text: wordsOf(e.item?.text) })
-    case 'memory.deleted': return t('{name} deleted from its memory: “{text}”', { name: by, text: wordsOf(e.item?.text) })
+    case 'memory.kept': return e.imported ? t('Imported with {n} things it remembers', { n: e.imported }) : e.device ? t('{name} kept in its memory, on {device}: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} kept in its memory: “{text}”', { name: by, text: wordsOf(e.item?.text) })
+    case 'memory.edited': return e.device ? t('{name} changed what it remembers, on {device}, to: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} changed what it remembers to: “{text}”', { name: by, text: wordsOf(e.item?.text) })
+    case 'memory.deleted': return e.device ? t('{name} deleted from its memory, on {device}: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} deleted from its memory: “{text}”', { name: by, text: wordsOf(e.item?.text) })
     case 'change.proposed': return t('Changed {n} files on {branch}', { n: e.files?.length || 0, branch: e.branch || '' })
     case 'change.approved': return e.via === 'slack' ? t('{name} approved the change from Slack', { name: by }) : t('{name} approved the change', { name: by })
     case 'change.failed': return t('The change couldn\'t go through ({step}): {why}', { step: e.step || '', why: e.error || '' })
@@ -1169,8 +1251,8 @@ function eventLine(e) {
     case 'file.uploaded': return e.ok === false ? t('Couldn\'t send the file {name}: {why}', { name: e.name, why: e.error || '' }) : t('Sent the file {name} ({size})', { name: e.name, size: sizeOf(e.size) })
     case 'forgotten': return t('{name} asked it to forget them: {memory} things it remembered deleted, their words blanked in {events} events', { name: who, memory: e.memory ?? 0, events: e.events ?? 0 })
     case 'status': return e.ok === false ? t('Couldn\'t set Slack\'s working status: {why}', { why: e.error || '' }) : e.on ? t('Showed Slack\'s working status') : t('Cleared Slack\'s working status')
-    case 'trace.deleted': return e.all ? t('Its activity history was deleted') : t('Months deleted for their age: {months}', { months: (e.months || []).join(', ') })
-    case 'settings.changed': return t('{name} changed {setting}: {before} → {after}', { name: by, setting: e.setting, before: valueOf(e.old), after: valueOf(e.new) })
+    case 'trace.deleted': return e.all ? (e.device ? t('Its activity history was deleted, on {device}', { device: e.device }) : t('Its activity history was deleted')) : t('Months deleted for their age: {months}', { months: (e.months || []).join(', ') })
+    case 'settings.changed': return e.device ? t('{name} changed {setting} on {device}: {before} → {after}', { name: by, setting: e.setting, device: e.device, before: valueOf(e.old), after: valueOf(e.new) }) : t('{name} changed {setting}: {before} → {after}', { name: by, setting: e.setting, before: valueOf(e.old), after: valueOf(e.new) })
     default: return e.type
   }
 }
@@ -1202,6 +1284,7 @@ function Timeline({ d, conv, onClose }) {
   const [error, setError] = useState(null)
   useEffect(() => { api(`/bots/${d.id}/activity/${encodeURIComponent(conv)}`).then(setX, (e) => setError(e.message)) }, [d.id, conv])
   const exp = (f) => apiUrl(`/bots/${d.id}/export?format=${f}&conv=${encodeURIComponent(conv)}`)
+  const named = (f) => `${fileOf(d)}-activity-conversation.${f}`
   // The thread in Slack itself (its workspace's address, the channel and the thread's ts).
   const [channel, thread] = String(conv).split(':')
   const inSlack = d.team?.url && /^[CGD][A-Z0-9]+$/.test(channel) && /^\d+\.\d+$/.test(thread || '') ? `${String(d.team.url).replace(/\/?$/, '/')}archives/${channel}/p${thread.replace('.', '')}` : null
@@ -1211,8 +1294,8 @@ function Timeline({ d, conv, onClose }) {
         <b className="small">{t('Timeline')}</b>
         <span className="sb-grow" />
         {inSlack && <a className="ghost-btn small" href={inSlack} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {t('Open in Slack')}</a>}
-        <a className="ghost-btn small" href={exp('md')} download><Icon name="export" size={12} /> {t('Export as Markdown')}</a>
-        <a className="ghost-btn small" href={exp('jsonl')} download>JSONL</a>
+        <Save className="ghost-btn small" href={exp('md')} name={named('md')}><Icon name="export" size={12} /> {t('Export as Markdown')}</Save>
+        {canDownload && <Save className="ghost-btn small" href={exp('jsonl')} name={named('jsonl')}>JSONL</Save>}
         <button type="button" className="icon-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={12} /></button>
       </div>
       {error && <p className="error-text small">{error}</p>}
@@ -1222,7 +1305,7 @@ function Timeline({ d, conv, onClose }) {
   )
 }
 
-function Activity({ d, here, save }) {
+function Activity({ d, save }) {
   const [f, setF] = useState({ q: '', person: '', channel: '', outcome: '', from: '', to: '' })
   const [x, setX] = useState(null)
   const [error, setError] = useState(null)
@@ -1254,7 +1337,7 @@ function Activity({ d, here, save }) {
         <div className="st-row sb-keep">
           <span className="small">{t('Keep the record for')}</span>
           <div className="seg" role="radiogroup" aria-label={t('Keep the record for')}>
-            {[['90d', t('90 days')], ['1y', t('1 year')], ['forever', t('Always')]].map(([k, l]) => <button key={k} type="button" role="radio" aria-checked={d.settings.retention === k} className={d.settings.retention === k ? 'on' : ''} disabled={!here} onClick={() => save({ retention: k })}>{l}</button>)}
+            {[['90d', t('90 days')], ['1y', t('1 year')], ['forever', t('Always')]].map(([k, l]) => <button key={k} type="button" role="radio" aria-checked={d.settings.retention === k} className={d.settings.retention === k ? 'on' : ''} onClick={() => save({ retention: k })}>{l}</button>)}
           </div>
         </div>
       )}
@@ -1280,7 +1363,7 @@ function Activity({ d, here, save }) {
         <select className="st-input" value={fmt} onChange={(e) => setFmt(e.target.value)} aria-label={t('Export format')}>
           <option value="csv">CSV</option><option value="jsonl">JSON Lines</option><option value="md">Markdown</option>
         </select>
-        <a className="btn small" href={apiUrl(`/bots/${d.id}/export?${range}`)} download><Icon name="export" size={12} /> {t('Export')}</a>
+        <Save className="btn small" href={apiUrl(`/bots/${d.id}/export?${range}`)} name={`${fileOf(d)}-activity.${fmt}`}><Icon name="export" size={12} /> {t('Export')}</Save>
       </div>
       {error && <p className="error-text small">{error}</p>}
       {!x && !error && <div className="skeleton-rows"><div /><div /><div /></div>}
@@ -1302,6 +1385,19 @@ function Activity({ d, here, save }) {
             </li>
           ))}
         </ul>
+      )}
+      {x?.changes?.length > 0 && (
+        <details className="sb-ctx sb-changes" data-setting="bots-changes">
+          <summary><Icon name="chevron" size={11} />{t('Changes to it ({n})', { n: x.changes.length })}</summary>
+          <ol className="sb-tl">
+            {x.changes.map((e, i) => (
+              <li key={`${e.at}-${i}`}>
+                <time className="muted small" dateTime={e.at}>{new Date(e.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</time>
+                <span className="small sb-tl-text">{eventLine(e)}</span>
+              </li>
+            ))}
+          </ol>
+        </details>
       )}
     </section>
   )
@@ -1419,7 +1515,7 @@ function TryIt({ d }) {
 // REMEMBER lines in its answers, your edits to its drafts and people saying "remember that…"; each
 // is kept only once you keep it, unless you said straight away. You see, edit and delete each one.
 const SOURCE = () => ({ remember: t('from one of its answers'), edit: t('from your edit to a draft'), asked: t('someone asked it to remember'), owner: t('added by you'), import: t('imported') })
-function MemItem({ it, here, onSave, onDelete, onKeep, about = null }) {
+function MemItem({ it, onSave, onDelete, onKeep, about = null }) {
   const [edit, setEdit] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -1440,7 +1536,7 @@ function MemItem({ it, here, onSave, onDelete, onKeep, about = null }) {
             <span className="muted small">{[SOURCE()[it.source] || it.source, it.by && it.source !== 'owner' ? it.by : null, it.at ? ago(it.at) : null].filter(Boolean).join(' · ')}</span>
           </div>
         )}
-      {here && edit == null && (
+      {edit == null && (
         <div className="st-row sb-mem-acts">
           {onKeep && <button type="button" className="btn small" disabled={busy} onClick={() => run(onKeep)}><Icon name="check" size={12} /> {t('Keep')}</button>}
           <button type="button" className="ghost-btn" disabled={busy} onClick={() => setEdit(it.text)}><Icon name="edit" size={12} /> {t('Edit')}</button>
@@ -1452,7 +1548,7 @@ function MemItem({ it, here, onSave, onDelete, onKeep, about = null }) {
   )
 }
 
-function Memory({ d, here, save, reload }) {
+function Memory({ d, save, reload }) {
   const [x, setX] = useState(null)
   const [error, setError] = useState(null)
   const [kind, setKind] = useState('bot')
@@ -1509,7 +1605,7 @@ function Memory({ d, here, save, reload }) {
       <div className="st-row sb-mem-mode">
         <span className="small">{t('Learnings')}</span>
         <div className="seg" role="radiogroup" aria-label={t('Learnings')}>
-          {modes.map(([k, l]) => <button key={k} type="button" role="radio" aria-checked={mode === k} className={mode === k ? 'on' : ''} disabled={!here} onClick={async () => { await save({ memory: k }); load() }}>{l}</button>)}
+          {modes.map(([k, l]) => <button key={k} type="button" role="radio" aria-checked={mode === k} className={mode === k ? 'on' : ''} onClick={async () => { await save({ memory: k }); load() }}>{l}</button>)}
         </div>
       </div>
       {mode === 'off' && <p className="muted small">{t('Off: it learns nothing new, and is given nothing it kept before.')}</p>}
@@ -1520,7 +1616,7 @@ function Memory({ d, here, save, reload }) {
           <p className="small sb-sub"><b>{t('Waiting for you')}</b></p>
           <ul className="sb-mem">
             {proposed.map((it) => (
-              <MemItem key={it.id} it={it} about={it.kind === 'channel' ? `#${it.ofName || it.of}` : it.kind === 'person' ? it.ofName || it.of : null} here={here} onSave={edit(it)} onDelete={drop(it)} onKeep={keep(it)} />
+              <MemItem key={it.id} it={it} about={it.kind === 'channel' ? `#${it.ofName || it.of}` : it.kind === 'person' ? it.ofName || it.of : null} onSave={edit(it)} onDelete={drop(it)} onKeep={keep(it)} />
             ))}
           </ul>
         </>
@@ -1528,52 +1624,50 @@ function Memory({ d, here, save, reload }) {
       {groups.map((g) => (
         <div key={g.key} className="sb-mem-group">
           <p className="small sb-sub"><b>{g.title}</b></p>
-          <ul className="sb-mem">{g.list.map((it) => <MemItem key={it.id} it={it} here={here} onSave={edit(it)} onDelete={drop(it)} />)}</ul>
+          <ul className="sb-mem">{g.list.map((it) => <MemItem key={it.id} it={it} onSave={edit(it)} onDelete={drop(it)} />)}</ul>
         </div>
       ))}
       {x && !items.length && <p className="small sb-none">{t('Nothing yet.')}</p>}
-      {here && (
-        <form className="sb-mem-add" onSubmit={add}>
-          <p className="small sb-sub"><b>{t('Teach it something')}</b></p>
-          <div className="sb-sched-row">
-            <label className="sb-field"><span>{t('About')}</span>
-              <select className="st-input" value={kind} onChange={(e) => { setKind(e.target.value); setOf('') }}>
-                <option value="bot">{t('Anything')}</option>
-                <option value="channel">{t('A channel')}</option>
-                <option value="person">{t('A person')}</option>
+      <form className="sb-mem-add" onSubmit={add}>
+        <p className="small sb-sub"><b>{t('Teach it something')}</b></p>
+        <div className="sb-sched-row">
+          <label className="sb-field"><span>{t('About')}</span>
+            <select className="st-input" value={kind} onChange={(e) => { setKind(e.target.value); setOf('') }}>
+              <option value="bot">{t('Anything')}</option>
+              <option value="channel">{t('A channel')}</option>
+              <option value="person">{t('A person')}</option>
+            </select>
+          </label>
+          {kind === 'channel' && (
+            <label className="sb-field"><span>{t('Which channel')}</span>
+              <select className="st-input" value={of} onChange={(e) => setOf(e.target.value)}>
+                <option value="">{t('Pick a channel…')}</option>
+                {chans.map((c) => <option key={c.id} value={c.id}>{`#${c.name || c.id}`}</option>)}
               </select>
             </label>
-            {kind === 'channel' && (
-              <label className="sb-field"><span>{t('Which channel')}</span>
-                <select className="st-input" value={of} onChange={(e) => setOf(e.target.value)}>
-                  <option value="">{t('Pick a channel…')}</option>
-                  {chans.map((c) => <option key={c.id} value={c.id}>{`#${c.name || c.id}`}</option>)}
-                </select>
-              </label>
-            )}
-            {kind === 'person' && (
-              <label className="sb-field"><span>{t('Who')}</span>
-                <select className="st-input" value={of} onChange={(e) => setOf(e.target.value)}>
-                  <option value="">{t('Pick someone…')}</option>
-                  {folks.map((p) => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
-                </select>
-              </label>
-            )}
-          </div>
-          <div className="sb-add">
-            <input className="st-input" value={text} maxLength={500} onChange={(e) => setText(e.target.value)} placeholder={t('Dana leads sales for the west coast')} aria-label={t('What it should remember')} />
-            <button type="submit" className="btn small" disabled={!text.trim()}><Icon name="plus" size={12} /> {t('Remember it')}</button>
-          </div>
-          {msg && <p className="error-text small" role="alert">{msg}</p>}
-        </form>
-      )}
+          )}
+          {kind === 'person' && (
+            <label className="sb-field"><span>{t('Who')}</span>
+              <select className="st-input" value={of} onChange={(e) => setOf(e.target.value)}>
+                <option value="">{t('Pick someone…')}</option>
+                {folks.map((p) => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
+              </select>
+            </label>
+          )}
+        </div>
+        <div className="sb-add">
+          <input className="st-input" value={text} maxLength={500} onChange={(e) => setText(e.target.value)} placeholder={t('Dana leads sales for the west coast')} aria-label={t('What it should remember')} />
+          <button type="submit" className="btn small" disabled={!text.trim()}><Icon name="plus" size={12} /> {t('Remember it')}</button>
+        </div>
+        {msg && <p className="error-text small" role="alert">{msg}</p>}
+      </form>
     </section>
   )
 }
 
 // ---------- One bot ----------
 const TABS = ['setup', 'try', 'memory', 'activity']
-function Bot({ id, here, onGone, onChanged, notice }) {
+function Bot({ id, onGone, onChanged, notice }) {
   const [d, setD] = useState(null)
   const [error, setError] = useState(null)
   const [note, setNote] = useState(null)
@@ -1611,9 +1705,6 @@ function Bot({ id, here, onGone, onChanged, notice }) {
   if (error && !d) return <p className="st-note bad"><Icon name="alert" size={13} /> {error}</p>
   if (!d) return <div className="skeleton-rows"><div /><div /><div /></div>
   const proposed = d.memoryCount?.proposed || 0
-  // (Its record, Try It and its memory are looked at on the computer it's kept on: none of them goes
-  // through the relay.)
-  const away = (what) => <p className="muted small" data-setting={what}>{t('This is shown in Bridge AI on the computer it runs on: it never goes through your relay.')}</p>
   return (
     <>
       <div className="seg sb-tabs" role="tablist" aria-label={d.name}>
@@ -1624,16 +1715,16 @@ function Bot({ id, here, onGone, onChanged, notice }) {
       </div>
       {notice?.length > 0 && <div className="st-note warn" role="status"><Icon name="info" size={13} /><span>{t('Imported. Check these here:')} {notice.join(' · ')}</span></div>}
       {note && <p className="st-note bad" role="alert"><Icon name="alert" size={13} /> {note}</p>}
-      {tab === 'setup' && <SetUp d={d} here={here} save={save} reload={load} onDelete={remove} again={again} />}
-      {tab === 'try' && (here ? <TryIt d={d} /> : away('slack-try'))}
-      {tab === 'memory' && (here ? <Memory d={d} here={here} save={save} reload={load} /> : away('slack-memory'))}
-      {tab === 'activity' && (here ? <Activity d={d} here={here} save={save} /> : <p className="muted small" data-setting="slack-activity">{t('Its activity is shown in Bridge AI on the computer it runs on: its record never goes through your relay.')}</p>)}
+      {tab === 'setup' && <SetUp d={d} save={save} reload={load} onDelete={remove} again={again} />}
+      {tab === 'try' && <TryIt d={d} />}
+      {tab === 'memory' && <Memory d={d} save={save} reload={load} />}
+      {tab === 'activity' && <Activity d={d} save={save} />}
     </>
   )
 }
 
 // A new bot, by its name, from a template or blank; or one exported from another computer.
-function NewBot({ here, onMade }) {
+function NewBot({ onMade }) {
   const [name, setName] = useState('')
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -1666,41 +1757,36 @@ function NewBot({ here, onMade }) {
   const cards = [{ id: '', name: t('Start blank'), description: t('Write its instructions yourself.') }, ...(templates || [])]
   return (
     <div className="sb-newbot">
-      {here && (
-        <div className="sb-templates" role="radiogroup" aria-label={t('What it does')}>
-          {cards.map((c) => (
-            <button key={c.id || 'blank'} type="button" role="radio" aria-checked={tpl === c.id} className={`sb-tpl ${tpl === c.id ? 'on' : ''}`} onClick={() => setTpl(c.id)}>
-              <b className="small">{c.name}</b>
-              {c.description && <span className="muted small">{c.description}</span>}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="sb-templates" role="radiogroup" aria-label={t('What it does')}>
+        {cards.map((c) => (
+          <button key={c.id || 'blank'} type="button" role="radio" aria-checked={tpl === c.id} className={`sb-tpl ${tpl === c.id ? 'on' : ''}`} onClick={() => setTpl(c.id)}>
+            <b className="small">{c.name}</b>
+            {c.description && <span className="muted small">{c.description}</span>}
+          </button>
+        ))}
+      </div>
       {tplError && <p className="muted small">{t('The templates couldn\'t be loaded ({error}): you can still start blank.', { error: tplError })}</p>}
       {picked?.hint && <p className="muted small">{picked.hint}</p>}
       {picked?.instructions && <details className="sb-how"><summary><Icon name="chevron" size={11} />{t('Its instructions, to change after')}</summary><pre className="sb-tpl-ins">{picked.instructions}</pre></details>}
       <form className="sb-new" onSubmit={make} data-setting="slack-new">
         <div className="sb-add">
-          <input className="st-input" value={name} maxLength={35} onChange={(e) => setName(e.target.value)} placeholder={t('Its name, as Slack shows it: Atlas, Pricing Desk…')} aria-label={t('The new bot\'s name')} disabled={!here} />
-          <button type="submit" className="btn small primary" disabled={!here || busy || !name.trim()}><Icon name="plus" size={12} /> {t('New Bot')}</button>
+          <input className="st-input" value={name} maxLength={35} onChange={(e) => setName(e.target.value)} placeholder={t('Its name, as Slack shows it: Atlas, Pricing Desk…')} aria-label={t('The new bot\'s name')} />
+          <button type="submit" className="btn small primary" disabled={busy || !name.trim()}><Icon name="plus" size={12} /> {t('New Bot')}</button>
         </div>
         {error && <p className="error-text small" role="alert">{error}</p>}
-        {!here && <p className="muted small">{t('Make one in Bridge AI on the computer it runs on.')}</p>}
       </form>
-      {here && (
-        <div className="st-row sb-import" data-setting="slack-import">
-          <button type="button" className="ghost-btn" disabled={busy} onClick={() => file.current?.click()}><Icon name="upload" size={12} /> {t('Import a bot…')}</button>
-          <input ref={file} type="file" accept=".json,application/json" hidden onChange={(e) => bring(e.target.files?.[0])} />
-          <span className="muted small">{t('From a file exported in Bridge AI on another computer: its instructions, memory and settings. You connect its Slack app again here.')}</span>
-        </div>
-      )}
+      <div className="st-row sb-import" data-setting="slack-import">
+        <button type="button" className="ghost-btn" disabled={busy} onClick={() => file.current?.click()}><Icon name="upload" size={12} /> {t('Import a bot…')}</button>
+        <input ref={file} type="file" accept=".json,application/json" hidden onChange={(e) => bring(e.target.files?.[0])} />
+        <span className="muted small">{t('From a file exported in Bridge AI on another computer: its instructions, memory and settings. You connect its Slack app again here.')}</span>
+      </div>
     </div>
   )
 }
 
 // A deleted bot: its record, kept to look at and export until the time it's kept for runs out, and
 // deleted now if you say so.
-function DeletedBot({ d, here, reload }) {
+function DeletedBot({ d, reload }) {
   const [sure, setSure] = useState(false)
   const [note, setNote] = useState(null)
   const forget = async () => { try { await api(`/bots/${d.id}/history`, { method: 'DELETE' }); setSure(false); reload() } catch (e) { setNote(e.message) } }
@@ -1710,8 +1796,8 @@ function DeletedBot({ d, here, reload }) {
         ? t('{bot} was deleted on {date}, and its activity history with it. Its record keeps only that, until the time it\'s kept for runs out.', { bot: d.name, date: new Date(d.cleared).toLocaleDateString() })
         : t('{bot} was deleted on {date}. Its record stays here, to look at and export, until the time it\'s kept for runs out, or you delete it.', { bot: d.name, date: d.deletedAt ? new Date(d.deletedAt).toLocaleDateString() : '' })}</span></p>
       {note && <p className="st-note bad" role="alert"><Icon name="alert" size={13} /> {note}</p>}
-      {here ? <Activity d={{ ...d, settings: { retention: d.retention } }} here={here} save={async () => false} /> : <p className="muted small">{t('Its activity is shown in Bridge AI on the computer it runs on: its record never goes through your relay.')}</p>}
-      {here && !d.cleared && (sure
+      <Activity d={{ ...d, settings: { retention: d.retention } }} save={async () => false} />
+      {!d.cleared && (sure
         ? (
           <div className="st-row sb-sure" role="alert">
             <span className="small">{t('Delete {bot}\'s activity history? It can\'t be brought back.', { bot: d.name })}</span>
@@ -1725,7 +1811,6 @@ function DeletedBot({ d, here, reload }) {
 }
 
 export default function Bots() {
-  const here = onThisComputer()
   const [list, setList] = useState(null)
   const [gone, setGone] = useState([]) // bots deleted whose record is kept
   const [error, setError] = useState(null)
@@ -1761,12 +1846,12 @@ export default function Bots() {
             <span className="sb-chip-name">{t('{name} (deleted)', { name: b.name })}</span>
           </button>
         ))}
-        {(list.length > 0 || gone.length > 0) && here && <button type="button" className={`sb-chip add ${adding ? 'on' : ''}`} onClick={() => setAdding(true)}><Icon name="plus" size={12} /> {t('New Bot')}</button>}
+        {(list.length > 0 || gone.length > 0) && <button type="button" className={`sb-chip add ${adding ? 'on' : ''}`} onClick={() => setAdding(true)}><Icon name="plus" size={12} /> {t('New Bot')}</button>}
       </div>
-      {!list.length && !gone.length && !adding && <FirstBot here={here} onStart={() => setAdding(true)} />}
-      {((!list.length && gone.length > 0 && !old) || adding) && <NewBot here={here} onMade={(id, problems) => { setImported(problems?.length ? { id, problems } : null); pick(id); load() }} />}
-      {old && !adding && <DeletedBot key={`${old.id}-${old.cleared || ''}`} d={old} here={here} reload={load} />}
-      {shown && !adding && !old && <Bot key={shown} id={shown} here={here} onChanged={load} onGone={left} notice={imported?.id === shown ? imported.problems : null} />}
+      {!list.length && !gone.length && !adding && <FirstBot onStart={() => setAdding(true)} />}
+      {((!list.length && gone.length > 0 && !old) || adding) && <NewBot onMade={(id, problems) => { setImported(problems?.length ? { id, problems } : null); pick(id); load() }} />}
+      {old && !adding && <DeletedBot key={`${old.id}-${old.cleared || ''}`} d={old} reload={load} />}
+      {shown && !adding && !old && <Bot key={shown} id={shown} onChanged={load} onGone={left} notice={imported?.id === shown ? imported.problems : null} />}
     </div>
   )
 }

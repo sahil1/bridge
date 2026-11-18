@@ -196,9 +196,11 @@ Each bot keeps a record of everything it sees and does, on your computer only, i
 `~/.bridge-ai/bots/<bot>/trace/` (a file a month, readable by you only): each message it took in,
 the conversation it read for each question, each run of an agent with the names of the files it
 opened, each draft, your edits, what was sent and discarded, its reactions, edits and deletions in its
-threads, its settings' changes and its connection. Never a token. It's kept for a year unless you
-choose 90 days or always (Settings › Bots › Activity), older months deleted whole; it's never in
-usage counts, crash reports or the relay; and Activity exports it only when you ask. A bot's
+threads, its settings' changes (and which of your devices each was made on) and its connection. Never
+a token. It's kept for a year unless you choose 90 days or always (Settings › Bots › Activity), older
+months deleted whole; it's never in usage counts or crash reports; your phone and your other
+computers show it in Settings › Bots through their end-to-end encrypted link, which the relay passes
+on without being able to read; and Activity exports it only when you ask. A bot's
 settings and instructions are in the same folder, `~/.bridge-ai/bots/<bot>/`. Deleting a bot deletes
 its tokens, its settings and its instructions, and keeps its record, to look at and export in Settings
 › Bots, until the time it's kept for runs out. If you also delete its activity history, its record
