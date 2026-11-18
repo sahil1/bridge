@@ -35,6 +35,9 @@ const now = () => new Date().toISOString()
 const PLATFORMS = ['slack', 'discord', 'teams']
 const KEEP = 200 // messages kept
 const tilde = (p) => { const s = String(p || '').trim(); return s.startsWith(HOME) ? `~${s.slice(HOME.length)}` : s }
+// A folder as it's compared: from ~, with / between its parts (a model, or you, may write either on
+// Windows), and in one case where the system ignores it.
+const keyOf = (p) => { const k = tilde(p).replace(/\\/g, '/').replace(/\/+$/, ''); return process.platform === 'win32' || process.platform === 'darwin' ? k.toLowerCase() : k }
 
 // ---------- Kept ----------
 const fileOf = (id) => store.fileOf(id, 'setup.json')
@@ -91,16 +94,16 @@ export function sanitize(raw, { ctx, words = '', base = null } = {}) {
   const was = base || {}
   const left = { folders: [], mcp: [], answerers: [] }
   const has = (k) => Object.hasOwn(b, k) && b[k] != null
-  const byPath = new Map(ctx.folders.map((f) => [tilde(f.path), f]))
+  const byPath = new Map(ctx.folders.map((f) => [keyOf(f.path), f]))
   const said = String(words)
   const folders = has('folders') && Array.isArray(b.folders) ? b.folders : was.folders || []
   const keepFolders = []
   for (const f of folders.slice(0, 20)) {
     const p = tilde(f)
-    const known = byPath.get(p) || ctx.folders.find((x) => x.name.toLowerCase() === String(f).toLowerCase())
+    const known = byPath.get(keyOf(p)) || ctx.folders.find((x) => x.name.toLowerCase() === String(f).toLowerCase())
     // (One you named yourself, as a path, may be one Bridge AI doesn't know yet: Create checks it.)
     if (known) keepFolders.push(tilde(known.path))
-    else if (/^(~|\/|[A-Za-z]:\\)/.test(p) && (said.includes(p) || (was.folders || []).includes(p))) keepFolders.push(p)
+    else if (/^(~|\/|[A-Za-z]:[\\/])/.test(p) && (keyOf(said).includes(keyOf(p)) || (was.folders || []).some((x) => keyOf(x) === keyOf(p)))) keepFolders.push(p)
     else left.folders.push(String(f).slice(0, 200))
   }
   const mcpWant = has('mcp') && Array.isArray(b.mcp) ? b.mcp.map(String) : was.mcp || []
@@ -116,7 +119,7 @@ export function sanitize(raw, { ctx, words = '', base = null } = {}) {
     description: clean(has('description') ? b.description : was.description, store.DESCRIPTION_MAX),
     instructions: String(has('instructions') ? b.instructions : was.instructions ?? '').slice(0, store.INSTRUCTIONS_MAX),
     platform: PLATFORMS.includes(b.platform) ? b.platform : PLATFORMS.includes(was.platform) ? was.platform : 'slack',
-    folders: [...new Set(keepFolders)],
+    folders: [...new Map(keepFolders.map((f) => [keyOf(f), f])).values()],
     who: (has('who') ? b.who : was.who) === 'channels' ? 'channels' : 'named',
     people: [...new Set(people)].slice(0, 30),
     channels: [...new Map(channels.map((c) => [c.name, c])).values()].slice(0, 20),
@@ -155,7 +158,7 @@ export function linesOf(from, to) {
   push('name', from.name, to.name)
   push('description', from.description || '', to.description || '')
   if (String(from.instructions || '').trim() !== String(to.instructions || '').trim() && String(to.instructions || '').trim()) out.push({ key: 'instructions', before: from.instructions, after: to.instructions })
-  push('folders', sorted(from.folders), sorted(to.folders))
+  if (!same(sorted(from.folders.map(keyOf)), sorted(to.folders.map(keyOf)))) out.push({ key: 'folders', before: sorted(from.folders), after: sorted(to.folders) })
   push('who', from.who, to.who)
   push('people', sorted(from.people), sorted(to.people))
   push('channels', sorted(from.channels.filter((c) => c.listen).map((c) => c.name)), sorted(to.channels.filter((c) => c.listen).map((c) => c.name)))

@@ -41,11 +41,20 @@ const transportOf = (raw) => (raw.command ? 'stdio' : /sse/i.test(String(raw.typ
 function overStdio(raw, talk) {
   return new Promise((resolve, reject) => {
     let child
-    const done = (fn, x) => { clearTimeout(timer); try { child?.kill() } catch { /* gone */ } fn(x) }
+    // (Its stdin closed first, so one run through cmd on Windows hears it's over too.)
+    const done = (fn, x) => { clearTimeout(timer); try { child?.stdin?.end(); child?.kill() } catch { /* gone */ } fn(x) }
     const timer = setTimeout(() => done(reject, new Error(`it didn't answer within ${LIST_MS / 1000} s`)), LIST_MS)
     loginPath().then((PATH) => {
       try {
-        child = spawn(fill(raw.command), (Array.isArray(raw.args) ? raw.args : []).map(fill), { cwd: HOME, env: { ...process.env, PATH, ...fillAll(raw.env) }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+        // (On Windows a command that isn't a program of its own, npx say, is run through cmd, as
+        // Claude Code's docs have its configs do.)
+        const cmd = fill(raw.command)
+        const args = (Array.isArray(raw.args) ? raw.args : []).map(fill)
+        const viaCmd = process.platform === 'win32' && !/\.(exe|com)$/i.test(cmd)
+        const q = (x) => (/[\s"&|<>^]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x)
+        child = viaCmd
+          ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${[cmd, ...args].map(q).join(' ')}"`], { cwd: HOME, env: { ...process.env, PATH, ...fillAll(raw.env) }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, windowsVerbatimArguments: true })
+          : spawn(cmd, args, { cwd: HOME, env: { ...process.env, PATH, ...fillAll(raw.env) }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
       } catch (e) { return done(reject, e) }
       child.on('error', (e) => done(reject, new Error(`it couldn't start: ${e.message}`)))
       child.on('exit', (code) => done(reject, new Error(`it stopped (${code ?? 'killed'}) before listing its tools`)))

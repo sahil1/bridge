@@ -80,11 +80,11 @@ export function mcpOf(dirs = []) {
   }
   return { dirs: (dirs || []).filter((d) => !runs.includes(d)), mcp }
 }
-// Its flags, with the rules it allows already (allowed). Each takes a list, so another flag follows.
-const mcpFlags = (m, allowed) => {
-  const allow = [...allowed, ...(m ? m.allow : [])]
-  return [...(m ? ['--mcp-config', m.config] : []), ...(allow.length ? ['--allowedTools', ...allow] : []), ...(m?.deny.length ? ['--disallowedTools', ...m.deny] : [])]
-}
+// Its flags (allowed: with its own --allowedTools; a bot's change has put its tools in its own).
+// Each takes a list, so another flag follows.
+const mcpFlags = (m, { allowed = true } = {}) => (m
+  ? ['--mcp-config', m.config, ...(allowed && m.allow.length ? ['--allowedTools', ...m.allow] : []), ...(m.deny.length ? ['--disallowedTools', ...m.deny] : [])]
+  : [])
 
 export const AGENTS = [
   {
@@ -113,7 +113,9 @@ export const AGENTS = [
     access: (lvl, o = {}) => {
       if (lvl !== 'read' && lvl !== 'change') return lvl === 'edits' ? ['--permission-mode', 'acceptEdits'] : lvl === 'full' ? ['--permission-mode', 'bypassPermissions'] : []
       const { dirs, mcp } = mcpOf(o.dirs)
-      return [...(lvl === 'read' ? ['--tools', 'Read,Grep,Glob'] : ['--tools', 'Read,Grep,Glob,Edit,Write']), ...(dirs.length ? ['--add-dir', ...dirs] : []), ...mcpFlags(mcp, lvl === 'change' ? [EDIT_HERE] : []), '--permission-mode', 'dontAsk', '--strict-mcp-config']
+      const add = dirs.length ? ['--add-dir', ...dirs] : []
+      return lvl === 'read' ? ['--tools', 'Read,Grep,Glob', ...add, ...mcpFlags(mcp), '--permission-mode', 'dontAsk', '--strict-mcp-config']
+        : ['--tools', 'Read,Grep,Glob,Edit,Write', '--allowedTools', EDIT_HERE, ...(mcp ? mcp.allow : []), ...add, ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config']
     },
     confined: true,
     // A copy of a conversation under a new id (the original stays as it is).

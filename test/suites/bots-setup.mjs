@@ -52,6 +52,9 @@ const tag = which === 'webkit' ? 'webkit-' : ''
 const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: crashed: ${e.stack}`) } }
 const assist = (id) => kit.api(`/bots/${id}/assist`)
 const shown = (p, sel, ms = 10000) => p.locator(sel).first().waitFor({ timeout: ms }).then(() => true, () => false)
+// A folder as these checks spell it (on Windows the server says ~\code\pricing).
+const fwd = (x) => String(x ?? '').replace(/\\/g, '/')
+const fwds = (l) => (l || []).map(fwd)
 
 try {
   await kit.api('/setup', { name: 'Tester' })
@@ -60,7 +63,7 @@ try {
   // ---------- No model ----------
   await part('no model', async () => {
     const s = await kit.api('/bots/assist')
-    ok(s.assist?.model === null && s.options?.folders.some((f) => f.path === '~/code/pricing') && s.options.mcp.includes('tracker'), 'a new chat knows there\'s no model, and what a bot can be given: the folders Bridge AI knows, your MCP servers', { assist: s.assist, options: s.options })
+    ok(s.assist?.model === null && s.options?.folders.some((f) => fwd(f.path) === '~/code/pricing') && s.options.mcp.includes('tracker'), 'a new chat knows there\'s no model, and what a bot can be given: the folders Bridge AI knows, your MCP servers', { assist: s.assist, options: s.options })
     const r = await kit.api('/bots/assist', { text: 'Answer pricing questions for Dana' })
     ok(!r.bot && r.setup.messages.some((m) => m.kind === 'no-model'), 'said with no model: nothing made, and the chat says why', r.setup.messages)
     ok(!(await kit.api('/bots')).bots.length, 'no bot, not even a draft')
@@ -84,7 +87,7 @@ try {
   // ---------- The sidebar, + and the chat ----------
   await part('sidebar and chat', async () => {
     ok(await shown(p, '.rail-bots-head'), 'the sidebar has Bots, under its own heading')
-    ok(/Make your first bot/.test(await p.locator('.rail-bot-list').innerText()), 'with no bot yet: Make your first bot')
+    ok(await until(async () => /Make your first bot/.test(await p.locator('.rail-bot-list').innerText()), 10000), 'with no bot yet: Make your first bot')
     await p.locator('.rail-bots-head .rail-tool[aria-label="New bot"]').click()
     ok(await shown(p, '.bc .bc-examples'), '+: AI Assist\'s chat, asking what it should do, with examples')
     ok(/gpt-5/.test(await p.locator('.bc .bc-model').innerText().catch(() => '')), 'naming the model AI Assist uses')
@@ -98,11 +101,11 @@ try {
     ok(await until(async () => /Pricing Desk/.test(await p.locator('.rail-bot-list').innerText()) && /draft/i.test(await p.locator('.rail-bot-list').innerText()), 10000), 'in the sidebar as a Draft', await p.locator('.rail-bot-list').innerText().catch(() => ''))
     const s = await assist(id)
     const pr = s.proposal || {}
-    ok(pr.folders?.includes('~/code/pricing') && pr.people.join() === 'Dana,Sam' && pr.channels.some((c) => c.name === 'launch') && pr.mcp.join() === 'tracker' && pr.platform === 'slack' && /Pricing Desk/.test(pr.instructions), 'AI Assist proposes the whole bot: its folder (one Bridge AI knows), the people and channel named, its MCP server, its instructions', pr)
-    const asked = model.asked(/Known folders/).at(-1) || ''
+    ok(fwds(pr.folders).includes('~/code/pricing') && pr.people.join() === 'Dana,Sam' && pr.channels.some((c) => c.name === 'launch') && pr.mcp.join() === 'tracker' && pr.platform === 'slack' && /Pricing Desk/.test(pr.instructions), 'AI Assist proposes the whole bot: its folder (one Bridge AI knows), the people and channel named, its MCP server, its instructions', pr)
+    const asked = fwd(model.asked(/Known folders/).at(-1) || '')
     ok(/~\/code\/pricing/.test(asked) && /- tracker/.test(asked) && /answers pricing questions for Dana/.test(asked), 'the model was given the known folders, the MCP servers and the words', asked.slice(0, 400))
     ok(!fs.existsSync(path.join(kit.data, 'bots', id, 'instructions.md')) && !(await kit.api('/health')).bots?.some((x) => x.id === id), 'nothing of it set up yet: no instructions kept, not connected, not in the health check')
-    const card = await p.locator('.bc-proposal').innerText()
+    const card = fwd(await p.locator('.bc-proposal').innerText())
     ok(/Pricing Desk/.test(await p.locator('.bc-proposal input').first().inputValue()) && /~\/code\/pricing/.test(card) && /Dana/.test(card) && /#launch/.test(card) && /tracker/.test(card), 'one card with each part', card.slice(0, 300))
     await shot(p, `${tag}bots-setup-proposal`)
 
@@ -112,20 +115,20 @@ try {
     await day.blur()
     await p.locator('.bc-proposal form.sb-add input[aria-label="Add a folder by its path"]').fill('~/docs')
     await p.locator('.bc-proposal form.sb-add:has(input[aria-label="Add a folder by its path"]) button[type="submit"]').click()
-    ok(await until(async () => { const x = (await assist(id)).proposal; return x.limits.day === 20 && x.folders.includes('~/docs') }, 8000), 'changed in place: its limit, a folder by its path', (await assist(id)).proposal)
+    ok(await until(async () => { const x = (await assist(id)).proposal; return x.limits.day === 20 && fwds(x.folders).includes('~/docs') }, 8000), 'changed in place: its limit, a folder by its path', (await assist(id)).proposal)
     // In words: a folder that isn't there, and Create turns it down.
     await p.locator('.bc-say textarea').fill('read ~/missing too')
     await p.locator('.bc-say button[type="submit"]').click()
-    ok(await until(async () => (await assist(id)).proposal.folders.includes('~/missing'), 15000), 'more words, the proposal again: a folder named', (await assist(id)).proposal.folders)
+    ok(await until(async () => fwds((await assist(id)).proposal.folders).includes('~/missing'), 15000), 'more words, the proposal again: a folder named', (await assist(id)).proposal.folders)
     await p.locator('.bc-proposal .bc-create .btn.primary').click()
     ok(await until(async () => /Folder not found: ~\/missing/.test(await p.locator('.bc-proposal').innerText()), 8000), 'Create turned down by Settings\' own check, saying why', await p.locator('.bc-proposal').innerText().catch(() => ''))
     ok((await kit.api('/bots')).bots[0].draft && !fs.existsSync(path.join(kit.data, 'bots', id, 'instructions.md')), 'and nothing of it made')
     await p.locator('.bc-proposal .sb-askers li', { hasText: '~/missing' }).locator('button').click()
-    await until(async () => !(await assist(id)).proposal.folders.includes('~/missing'), 5000)
+    await until(async () => !fwds((await assist(id)).proposal.folders).includes('~/missing'), 5000)
     await p.locator('.bc-proposal .bc-create .btn.primary').click()
     ok(await shown(p, '.bp-cols .sb-tabs', 15000), 'Create: the bot\'s page, with its tabs and its chat beside them')
     const v = await botOf(id)
-    ok(!v.draft && v.settings.readsFrom.join() === '~/code/pricing,~/docs' && v.settings.mcp.join() === 'tracker' && v.settings.limits.day === 20 && v.settings.who === 'named' && !v.settings.askers.length && /Pricing Desk/.test(v.instructions.text), 'made as proposed: its folders, MCP server, limits and instructions; the people named wait until it can find them', v.settings)
+    ok(!v.draft && fwds(v.settings.readsFrom).join() === '~/code/pricing,~/docs' && v.settings.mcp.join() === 'tracker' && v.settings.limits.day === 20 && v.settings.who === 'named' && !v.settings.askers.length && /Pricing Desk/.test(v.instructions.text), 'made as proposed: its folders, MCP server, limits and instructions; the people named wait until it can find them', v.settings)
     ok(events(id).some((e) => e.type === 'settings.changed' && e.setting === 'created' && e.new?.with === 'AI Assist'), 'its record says it was made with AI Assist')
     ok(await shown(p, '.bc-connect [data-setting="slack-guide"]'), 'the chat carries on: the steps to connect it, in Slack')
     await shot(p, `${tag}bots-setup-created`)
@@ -179,7 +182,7 @@ try {
     chiefBot = (await kit.api('/bots')).bots.find((x) => x.name === 'Docs Helper')
     ok(chiefBot?.draft && chiefBot.from === 'chief', 'listed as a draft, from the Chief of Staff', chiefBot)
     const s = await assist(chiefBot.id)
-    ok(s.proposal?.platform === 'discord' && s.proposal.who === 'channels' && s.proposal.folders.includes('~/docs') && s.messages.some((m) => m.kind === 'chief'), 'proposed from its words: Discord, anyone, its docs folder; the chat says the Chief drafted it', s.proposal)
+    ok(s.proposal?.platform === 'discord' && s.proposal.who === 'channels' && fwds(s.proposal.folders).includes('~/docs') && s.messages.some((m) => m.kind === 'chief'), 'proposed from its words: Discord, anyone, its docs folder; the chat says the Chief drafted it', s.proposal)
     await kit.api(`/bots/${chiefBot.id}/try`, { text: 'hi' }).then(() => ok(false, 'a draft can\'t be asked'), (e) => ok(e.status === 409, 'nothing of it live: it can\'t be asked', e.message))
     ok(!(await kit.api('/health')).bots.some((x) => x.id === chiefBot.id), 'nor connected')
     ok(await until(async () => /Docs Helper/.test(await p.locator('.rail-bot-list').innerText()), 10000), 'in the sidebar')
@@ -201,17 +204,19 @@ try {
     const eve = await until(() => logOf('mcp-tries.log').filter((x) => x.tool === 'create_issue').length >= 1 && logOf('mcp-tries.log'), 25000)
     ok(eve && eve.find((x) => x.tool === 'list_issues')?.done === true && eve.find((x) => x.tool === 'create_issue')?.done === false, 'someone not named: the tool that only reads used, the other refused', eve)
     const start = logOf('helpers-started.log').find((x) => /what's open/.test(x.message))
-    const args = logOf('claude-args.log').find((x) => x.args.some((a) => /what's open/.test(a)))?.args || []
+    const args = logOf('claude-args.log').find((x) => /what's open/.test(x.message))?.args || []
     const cfg = args[args.indexOf('--mcp-config') + 1]
     ok(args.includes('--strict-mcp-config') && cfg && !(args.includes('--add-dir') && args.slice(args.indexOf('--add-dir')).includes(path.dirname(cfg))) && eve.every((x) => x.config && !x.read), 'its run: only its servers (--mcp-config, --strict-mcp-config), the config never a folder it may read', args)
     ok(args.includes('mcp__tracker__list_issues') && args.includes('mcp__tracker__search') && !args.includes('mcp__tracker') && args.slice(args.indexOf('--disallowedTools')).includes('mcp__tracker__create_issue'), 'allowed: the read-only tools; refused by name: the other', args)
     ok(!start.secrets?.length && !JSON.stringify(args).includes('tok-tracker-123'), 'its token not on its command line')
     ok(await until(() => fs.existsSync(cfg) ? null : true, 20000), 'its MCP folder gone once the run\'s over')
+    const spaces = ((await kit.api('/fleet')).workspaces || []).map((w) => w.label)
+    ok(spaces.includes('Bot Runs') && !spaces.includes('Bots'), 'its answering agents run in the Bot Runs space, not one called Bots beside the sidebar\'s Bots', spaces)
     // Dana, named: every tool.
     await slack.ask({ user: 'U0DANA', text: '<@UBOT> file it please [mcp tracker create_issue]' })
     const dana = await until(() => logOf('mcp-tries.log').filter((x) => x.tool === 'create_issue').length >= 2 && logOf('mcp-tries.log').filter((x) => x.tool === 'create_issue').at(-1), 25000)
     ok(dana?.done === true, 'someone you named: the tool that does more than read too', dana)
-    const dargs = logOf('claude-args.log').find((x) => x.args.some((a) => /file it please/.test(a)))?.args || []
+    const dargs = logOf('claude-args.log').find((x) => /file it please/.test(x.message))?.args || []
     ok(dargs.includes('mcp__tracker') && !dargs.includes('--disallowedTools'), 'their run: the whole server allowed', dargs)
     const used = await until(() => { const e = events(id).filter((x) => x.type === 'run.tools'); return e.length >= 2 ? e : null }, 25000)
     ok(used && used.some((e) => e.tools.some((x) => x.server === 'tracker' && x.tool === 'list_issues')) && used.some((e) => e.tools.some((x) => x.tool === 'create_issue')), 'Activity records which MCP tools each run used', used)
@@ -300,14 +305,15 @@ try {
     // A model answering, kept to its folders: a file there read, one outside refused, a link out of it too.
     fs.mkdirSync(path.join(home, 'private'), { recursive: true })
     fs.writeFileSync(path.join(home, 'private', 'secret.txt'), 'The launch code is 1234.\n')
-    fs.symlinkSync(path.join(home, 'private', 'secret.txt'), path.join(home, 'code', 'pricing', 'secret-link.md'))
+    // (A link to a folder outside it: a junction on Windows, which needs no administrator.)
+    fs.symlinkSync(path.join(home, 'private'), path.join(home, 'code', 'pricing', 'private-link'), 'junction')
     await kit.api(`/bots/${fb.id}/settings`, { answerers: ['model:openai:gpt-5'] })
     x = await ask('Read this [read README.md]')
-    ok(/It says: The Team plan is \$12 a seat\./.test(x?.item.draft || '') && x.events.some((e) => e.type === 'run.read' && e.files.some((f) => /code\/pricing\/README\.md$/.test(f.what))), 'a model answers with Bridge AI\'s tools: a file in its folder read, and in its record', x?.item.draft)
+    ok(/It says: The Team plan is \$12 a seat\./.test(x?.item.draft || '') && x.events.some((e) => e.type === 'run.read' && e.files.some((f) => /code\/pricing\/README\.md$/.test(fwd(f.what)))), 'a model answers with Bridge AI\'s tools: a file in its folder read, and in its record', x?.item.draft)
     ok(x.events.some((e) => e.type === 'run.started' && e.agent === 'model' && e.route?.enforced === true), 'kept to its folders, as Claude Code is: it may answer without asking')
     x = await ask('And this [read ~/private/secret.txt]')
     ok(/outside the folders you can read: refused/.test(x?.item.draft || '') && !/1234/.test(x?.item.draft || ''), 'a file outside its folders: refused', x?.item.draft)
-    x = await ask('And this one [read secret-link.md]')
+    x = await ask('And this one [read private-link/secret.txt]')
     ok(/outside the folders you can read: refused/.test(x?.item.draft || '') && !/1234/.test(x?.item.draft || ''), 'a link out of its folder: refused too', x?.item.draft)
     // A provider's error: the next answers.
     await kit.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-bad', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
@@ -364,7 +370,7 @@ try {
         await x.p.locator('.tabbar button', { hasText: 'More' }).click()
         await x.p.locator('.m-more-row[data-id="bots"]').click()
         ok(await shown(x.p, '[data-setting="phone-bots"] .m-more-row[data-id="new-bot"]'), `${label}: More › Bots, with New bot`)
-        const rows = await x.p.locator('[data-setting="phone-bots"]').innerText()
+        const rows = await until(async () => { const t = await x.p.locator('[data-setting="phone-bots"]').innerText(); return /Fallback Desk/.test(t) ? t : null }, 10000) || ''
         ok(/Pricing Desk/.test(rows) && /Docs Helper/.test(rows) && /draft/i.test(rows), `${label}: every bot, with how it stands`, rows)
         await sleep(300)
         let faults = await phoneFaults(x.p, '[data-setting="phone-bots"]')

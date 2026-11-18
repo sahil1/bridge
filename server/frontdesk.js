@@ -132,7 +132,9 @@ const MINUTE_MS = Number(process.env.BRIDGE_BOT_MINUTE_MS) || 60 * 1000
 // of 8,191 characters at most and the brief's lines would be joined into one (tests ask for it
 // elsewhere too).
 const BRIEF_FILE = IS_WIN || process.env.BRIDGE_BOT_BRIEF_FILE === '1'
-const SPACE = 'Bots'
+// The space its answering agents' tabs are in ("Bots" before 3.22, the name of the sidebar's own
+// section now: index.js fleetView shows an older one by this name).
+export const SPACE = 'Bot Runs'
 const NO_ANSWER = /^\s*\**NO ANSWER\b\**[:.\s-]*/i
 const NOT_FOR_ME = /^\s*\**NOT FOR ME\b/i
 const CHANGE_NEEDED = /^\s*\**CHANGE NEEDED\b\**[:.\s-]*/i

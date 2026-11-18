@@ -16,7 +16,8 @@
 // auth status` says it isn't signed in; with ~/claude-limited there, a bot's question is answered
 // as Claude Code at its usage limit answers ("You've hit your usage limit · resets 5pm").
 // --mcp-config and --disallowedTools are taken here, as helper-claude doesn't know them. Each start
-// goes in ~/claude-args.log ({ args, cwd }) with its arguments as they came.
+// goes in ~/claude-args.log ({ args, cwd, message }) with its arguments as they came and its brief
+// (from the file it's pointed to, on Windows).
 // HELPER_CLAUDE is where helper-claude.cjs is (the test puts it in).
 const fs = require('node:fs')
 const os = require('node:os')
@@ -24,8 +25,7 @@ const path = require('node:path')
 
 const argv = process.argv
 if (argv[2] === 'auth' && fs.existsSync(path.join(os.homedir(), 'claude-signed-out'))) { console.log(JSON.stringify({ loggedIn: false, authMethod: 'none' })); process.exit(0) }
-// (Each start, with its arguments as they came, in ~/claude-args.log: { args, message }.)
-fs.appendFileSync(path.join(os.homedir(), 'claude-args.log'), `${JSON.stringify({ args: argv.slice(2), cwd: process.cwd() })}\n`)
+const original = argv.slice(2)
 const take = (flag, list) => {
   const i = argv.indexOf(flag)
   if (i < 0) return list ? [] : null
@@ -50,7 +50,14 @@ for (let i = 2; i < argv.length; i++) {
   if (VALUE.has(argv[i])) { i++; continue }
   if (!argv[i].startsWith('--')) { at = i; break }
 }
-const message = at >= 0 ? argv[at] : ''
+// (The brief in a file it's pointed to, as on Windows: read there, and what's changed in it written
+// back there for helper-claude to read.)
+const pointed = at >= 0 ? /^Your brief is in (.+?\.md)\. Read it first/.exec(argv[at]) : null
+let message = at >= 0 ? argv[at] : ''
+if (pointed) { try { message = fs.readFileSync(pointed[1], 'utf8') } catch { /* not there */ } }
+const put = (text) => { if (pointed) fs.writeFileSync(pointed[1], text); else argv[at] = text }
+// (Each start, with its arguments as they came and its brief, in ~/claude-args.log: { args, cwd, message }.)
+fs.appendFileSync(path.join(os.homedir(), 'claude-args.log'), `${JSON.stringify({ args: original, cwd: process.cwd(), message })}\n`)
 const q = (/----- question from.*? -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of question -----/.exec(message) || [])[1] || ''
 const norm = (s) => String(s).replace(/[^A-Za-z0-9_-]/g, '_')
 const calls = []
@@ -64,10 +71,10 @@ for (const m of q.matchAll(/\[mcp ([\w.-]+) ([\w.-]+)\]/g)) {
   tries.push({ server, tool, done })
   if (done) calls.push(rule)
 }
-if (at >= 0 && q && fs.existsSync(path.join(os.homedir(), 'claude-limited'))) argv[at] = message.replace(/\[answer [^\]]*\]/g, '').replace(/----- end of question -----/, '[answer You\'ve hit your usage limit · resets 5pm]\n----- end of question -----')
+if (at >= 0 && q && fs.existsSync(path.join(os.homedir(), 'claude-limited'))) put(message.replace(/\[answer [^\]]*\]/g, '').replace(/----- end of question -----/, '[answer You\'ve hit your usage limit · resets 5pm]\n----- end of question -----'))
 else if (at >= 0 && (tries.length || /\[peek\]/.test(q))) {
   const said = tries.map((x) => (x.done ? `I used ${x.server}'s ${x.tool}.` : `${x.server}'s ${x.tool} was refused.`)).join(' ')
-  argv[at] = message.replace(/\[mcp [\w.-]+ [\w.-]+\]/g, '').replace(/----- end of question -----/, (end) => (said && !/\[answer /.test(q) ? `[answer ${said}]\n${end}` : end))
+  put(message.replace(/\[mcp [\w.-]+ [\w.-]+\]/g, '').replace(/----- end of question -----/, (end) => (said && !/\[answer /.test(q) ? `[answer ${said}]\n${end}` : end)))
 }
 require(HELPER_CLAUDE) // eslint-disable-line no-undef
 

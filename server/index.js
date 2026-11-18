@@ -101,7 +101,7 @@ import { terminals, autoTerminal, openAttach, openCommand, opened as terminalOpe
 import { mcpRoutes, bridgeMcp } from './mcp.js'
 import { make as makeMcpTools } from './mcptools.js'
 import { make as makeOutside } from './outside.js'
-import { makeFrontDesk } from './frontdesk.js'
+import { makeFrontDesk, SPACE as BOT_RUNS } from './frontdesk.js'
 import { makeSlack, manifest as slackManifest, SCOPES as SLACK_SCOPES, SCOPE_FOR as SLACK_SCOPE_FOR, commandOf as slackCommand, shortcutOf as slackShortcut } from './slackbot.js'
 import { makeDiscord } from './discordbot.js'
 import { makeTeams, PORT as TEAMS_PORT } from './teamsbot.js'
@@ -335,6 +335,15 @@ async function fleetView() {
   delegate.decorate(f)
   // Its space and first tab, made before 3.6 as "Chief of staff", show by its name now.
   for (const x of [...(f.workspaces || []), ...(f.tabs || [])]) if (x.label === 'Chief of staff') x.label = 'Chief of Staff'
+  // The bots' answering agents' space, made before 3.22 as "Bots" (the sidebar's own section now),
+  // shows by its name now, so they go on in it: a "Bots" space only they are in.
+  for (const w of f.workspaces || []) {
+    if (w.label !== 'Bots') continue
+    const own = f.agents.filter((a) => a.workspaceId === w.id)
+    if (!own.length || !own.every((a) => a.helper?.list === 'desk')) continue
+    w.label = BOT_RUNS
+    for (const x of [...own, ...(f.tabs || []), ...(f.panes || [])]) if (x.workspaceId === w.id) x.workspace = BOT_RUNS
+  }
   for (const t of f.tabs || []) for (const p of t.panes || []) p.worktree = worktrees.describe(p.cwd)
   // What each one has running beside its conversation (its subagents), from what was last looked at.
   for (const a of f.agents) a.subagents = runningFor(a, { locate: (x) => locate('claude', x.sessionId, x.cwd), read: (id) => rt.read(id, 60) })

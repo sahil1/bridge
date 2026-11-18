@@ -196,7 +196,8 @@ try {
     await list.locator('.sb-browse-list button', { hasText: 'pricing' }).click()
     ok(!!(await until(async () => /~\/pricing$/.test(await list.locator('.sb-browse-at').innerText()), 8000)), 'a folder opened in it')
     await list.locator('button', { hasText: 'Read from this folder' }).click()
-    ok(!!(await until(async () => (await botOf(harbor.id)).settings.readsFrom.includes(kept('pricing')), 8000)) && !(await list.count()), 'Read from this folder: it reads from it, and the list closes', (await botOf(harbor.id)).settings.readsFrom)
+    // (The list closes once the setting's saved, a moment after it is.)
+    ok(!!(await until(async () => (await botOf(harbor.id)).settings.readsFrom.includes(kept('pricing')), 8000)) && !!(await until(async () => !(await list.count()), 8000)), 'Read from this folder: it reads from it, and the list closes', (await botOf(harbor.id)).settings.readsFrom)
     ok(/~[\\/]pricing/.test(await folders.locator('.sb-folders').innerText()), 'listed under Reads From')
 
     // Its instructions file, from the folders it reads from.
