@@ -194,7 +194,7 @@ function EarlyRow({ st, act, busy, stopped }) {
       </div>
       {s === 'yes' && !stopped ? (
         st.earlyLeft
-          ? <div className="st-row"><span className="muted small">{t('This computer left Early Access, so it stays on regular releases.')}</span><button type="button" className="btn small" disabled={!!busy} onClick={() => act('early', () => api('/account/early', { method: 'POST' }))}>{t('Join again')}</button></div>
+          ? <p className="muted small">{t('This computer left Early Access, so it stays on regular releases. To join again, pick Early Access in Settings › About & Updates.')}</p>
           : <p className="muted small">{st.earlyHere ? t('Your computers get pre-releases of Bridge AI before everyone else, by themselves. To leave on this one, open Settings › About & Updates.') : t('Your account has Early Access. It\'s for the desktop app: this copy of Bridge AI updates another way, so it stays on regular releases.')}</p>
       ) : s === 'requested' ? <p className="muted small">{t('You asked for Early Access. Bold Bridge emails you when it\'s on.')}</p>
         : stopped ? <p className="muted small">{t('Off while your account is suspended.')}</p>

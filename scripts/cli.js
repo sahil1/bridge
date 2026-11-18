@@ -470,6 +470,18 @@ async function phonesCmd(args) {
   for (const d of r.devices) console.log(`${phoneLine(d)}  ${DIM(d.id)}`)
 }
 
+// The update channel on this computer (server/updates.js), as Settings › About & Updates picks it:
+// stable, early or nightly, or where it stands.
+const CHANNELS = { stable: 'Stable', early: 'Early Access', nightly: 'Nightly' }
+async function channelCmd(args) {
+  const [sub] = args
+  if (sub && !CHANNELS[sub]) throw new Error(`Unknown: bridge-ai channel ${sub}. Try: bridge-ai channel stable, early or nightly`)
+  const u = sub ? await api('/updates/channel', { method: 'POST', body: { channel: sub } }) : await api('/updates')
+  console.log(`${sub ? 'Now on' : 'On'} ${CHANNELS[u.channel] || u.channel}: Bridge AI ${u.current} here${u.available ? `; ${u.latest} is ready (About & Updates, or by itself while you're away)` : ''}.`)
+  if (u.channel !== 'stable') console.log(DIM('Leaving keeps the version you have: Bridge AI stays on it until a regular release is newer.'))
+  else if (!sub) console.log(DIM('bridge-ai channel early or nightly switches, on this computer.'))
+}
+
 // Nightly builds of main on this computer (server/updates.js, scripts/nightly.js): on, off, or
 // where it stands.
 async function nightlyCmd(args) {
@@ -518,6 +530,7 @@ const run = {
   bots: () => botsCmd(args),
   pair: () => pairCmd(args),
   phones: () => phonesCmd(args),
+  channel: () => channelCmd(args),
   nightly: () => nightlyCmd(args),
   help: () => console.log(`bridge-ai: Bridge AI from your terminal
 
@@ -545,6 +558,8 @@ const run = {
   bridge-ai bots import <file>  a bot exported on another computer (instructions, memory, settings)
   bridge-ai bots export <name> [file]  a bot as a file, never with its tokens
   bridge-ai bots connect <name> its Slack app's tokens, asked for (or piped in, a line each)
+  bridge-ai channel [stable|early|nightly]  this computer's update channel: regular releases,
+                                betas before everyone else, or a build of main each day it changes
   bridge-ai nightly [on|off]    nightly builds of main on this computer, for trying what's next`),
 }
 const fn = run[cmd]

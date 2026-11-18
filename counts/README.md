@@ -63,8 +63,8 @@ made-up weeks. That's the cost of having no IDs. A Cloudflare rate limiting rule
   Bridge AI runs again, so an install tried once would never be seen. Counted once by its nonce.
 - **The update channel**, with the version and nothing else: `channels` (week, version, channel,
   tester, bucket, n) and `daily_channels` (day, version, channel, tester, bucket, crashed, n).
-  The channel is `stable` or `early` (Early Access, the pre-releases), the tester is who an
-  early-access code is for (the name the project gave them; empty on Stable), and the bucket is the
+  The channel is `stable`, `early` (Early Access, the betas) or `nightly`, the tester is the Bold
+  Bridge account's id on Early Access from an account (empty otherwise), and the bucket is the
   computer's for staged rollouts (0-99, `-1` when not said). So a pre-release, or a release part
   way out, can be compared with the rest; a report from before channels says `unknown`.
 

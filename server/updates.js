@@ -6,10 +6,10 @@
 // A release that needs a newer macOS than this Mac has isn't offered (the app's own update neither):
 // Bridge AI says once that it stays on this version, and why.
 // The desktop app on a Mac or Windows also updates by itself while you're away (autoView, below).
-// Three channels: Stable, GitHub's latest release (never a pre-release), offered a few computers at a
-// time when its notes say so (a staged rollout, shared/rollout.js); Early Access, for testers with a
-// code (earlyaccess.js): the newest release there is, pre-releases too; and Nightly, for the owner's
-// own computers, switched on on each one (POST /api/updates/nightly from that computer): the newest
+// Three channels, picked in Settings › About & Updates on the computer itself (POST
+// /api/updates/channel), with no code: Stable, the default, GitHub's latest release (never a
+// pre-release), offered a few computers at a time when its notes say so (a staged rollout,
+// shared/rollout.js); Early Access, the newest release there is, betas too; and Nightly, the newest
 // of everything, nightly builds of main too (scripts/nightly.js). None goes to an older version:
 // leaving Early Access or Nightly on a pre-release stays on it until a regular release passes it.
 import { spawn, execFile } from 'node:child_process'
@@ -19,12 +19,12 @@ import { ROOT, IN_APP, IS_WIN, IS_MAC, cacheFile, ensureDir } from './paths.js'
 import { machine, atLeast } from './machine.js'
 import { serverWhy, releaseWhy, RETRY_HOURS, INSTALL_MINUTES } from '../shared/autoupdate.js'
 import { newer, compare, isPre, isNightly, RELEASE_VERSION } from '../shared/version.js'
-import { rolloutOf, inRollout, revokedIn, shown } from '../shared/rollout.js'
-import { readCode, anyKey } from './earlyaccess.js'
+import { rolloutOf, inRollout, shown } from '../shared/rollout.js'
+import { readCode } from './earlyaccess.js'
 
 const REPO = 'sahil1/bridge'
-// BRIDGE_RELEASES_API (tests): where the latest release is asked for. Early Access asks for the
-// list of releases beside it (…/releases, GitHub's newest first).
+// BRIDGE_RELEASES_API (tests): where the latest release is asked for. Early Access and Nightly ask
+// for the list of releases beside it (…/releases, GitHub's newest first).
 const LATEST = process.env.BRIDGE_RELEASES_API || `https://api.github.com/repos/${REPO}/releases/latest`
 const LIST = `${LATEST.replace(/\/latest$/, '')}?per_page=30`
 const EVERY = 6 * 60 * 60 * 1000
@@ -45,7 +45,7 @@ const MIN_MAC = /^<!-- macOS ([\d.]+) or later -->\s*$/m
 const STAR = /^If Bridge AI is useful to you, a star on GitHub helps other people find it\.\s*$/m
 export const minMacOf = (notes) => String(notes || '').match(MIN_MAC)?.[1] || null
 
-let last = { at: 0, latest: null, url: null, notes: null, minMac: null, error: null, revoked: [], code: null }
+let last = { at: 0, latest: null, url: null, notes: null, minMac: null, error: null, channel: null }
 const ask = async (url) => {
   const r = await fetch(url, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'bridge-ai' }, signal: AbortSignal.timeout(8000) })
   if (!r.ok) throw new Error(`GitHub answered ${r.status}`)
@@ -67,71 +67,56 @@ export function newestOf(releases, { early = false, nightly = false } = {}) {
     .sort((a, b) => compare(versionOf(b), versionOf(a)))[0] || null
 }
 
-// What GitHub says. Stable asks for the latest release, as every version has. With an early-access
-// code, the list instead: the newest release, pre-releases too, and the codes the project took back
-// (revokedIn); this computer's taken back, it's Stable again, from the same list.
+// What GitHub says. Stable asks for the latest release, as every version has; Early Access and
+// Nightly, the list of releases, for the newest each takes (newestOf).
 async function check(force = false) {
-  const code = earlyCode()
-  const night = onNightly()
-  const key = night ? 'nightly' : code?.id || null
-  if (!force && last.code === key && Date.now() - last.at < (night ? NIGHTLY_EVERY : EVERY)) return last
+  const { channel } = channelNow()
+  if (!force && last.channel === channel && Date.now() - last.at < (channel === 'nightly' ? NIGHTLY_EVERY : EVERY)) return last
   try {
-    if (night) {
+    if (channel === 'stable') last = { at: Date.now(), ...releaseOf(await ask(LATEST)), channel, error: null }
+    else {
       const all = await ask(LIST)
       if (!Array.isArray(all)) throw new Error('GitHub sent no list of releases')
-      last = { at: Date.now(), ...releaseOf(newestOf(all, { nightly: true })), revoked: [], code: key, error: null }
-    } else if (code) {
-      const all = await ask(LIST)
-      if (!Array.isArray(all)) throw new Error('GitHub sent no list of releases')
-      const revoked = all.flatMap((j) => revokedIn(j.body))
-      last = { at: Date.now(), ...releaseOf(newestOf(all, { early: !revoked.includes(code.id) })), revoked, code: code.id, error: null }
-    } else {
-      last = { at: Date.now(), ...releaseOf(await ask(LATEST)), revoked: [], code: null, error: null }
+      last = { at: Date.now(), ...releaseOf(newestOf(all, { [channel]: true })), channel, error: null }
     }
   } catch (e) {
-    last = { ...last, at: Date.now(), code: key, error: e.message }
+    last = { ...last, at: Date.now(), channel, error: e.message }
   }
   return last
 }
 
-// Early Access: on with a code that checks out, where this copy installs its updates itself (the
-// desktop app) or shows the one command that does (Linux's). From a clone it's git pull, and the
-// Docker image is pulled by its tag: neither takes a pre-release, so neither is offered it.
-export const canEarly = () => anyKey() && ['app', 'app-linux'].includes(how())
-function earlyCode() {
-  const { code } = settings()
-  if (!code || !canEarly()) return null
-  const r = readCode(code)
-  return r.ok ? r : null
+// Early Access and Nightly: where this copy installs its updates itself (the desktop app) or shows
+// the one command that does (Linux's). From a clone it's git pull, and the Docker image is pulled by
+// its tag: neither takes a pre-release, so neither is offered them.
+export const canPick = () => ['app', 'app-linux'].includes(how())
+// The channel picked on this computer, whether or not this copy can take it: Nightly
+// (updates.nightly), else Early Access (earlyAccess: picked here, or with a code an older version
+// took, pasted or from your Bold Bridge account), else Stable.
+function picked() {
+  const { nightly, early } = settings()
+  return nightly ? 'nightly' : early ? 'early' : 'stable'
 }
-// For Settings › About & Updates: whether Early Access can be joined here (offered) and, with a
-// code, who it's for and when it ends, or why it doesn't work (problem: expired, revoked, forged,
-// malformed; none, a build that takes no codes; unsupported, a copy that can't take pre-releases).
-// A code from your Bold Bridge account (account.js) says so (fromAccount): it's renewed by itself, and
-// one left on this computer is kept as left.
-function earlyView(s) {
-  const { code, from, left } = settings()
-  if (!code) return { offered: canEarly(), on: false, ...(left ? { left: true } : {}) }
-  const r = readCode(code, { revoked: s?.revoked || [] })
-  const info = { ...(r.id ? { id: r.id, for: r.for, made: r.made, until: r.until } : {}), ...(from === 'account' ? { fromAccount: true } : {}) }
-  if (!canEarly()) return { offered: false, on: false, ...info, problem: anyKey() ? 'unsupported' : 'none' }
-  return { offered: true, on: r.ok, ...info, ...(r.ok ? {} : { problem: r.why }) }
+// For Settings › About & Updates: each on, or picked where it can't be (Docker, a clone): why not.
+// Early Access from your Bold Bridge account (account.js) says so (fromAccount).
+const notHere = () => (how() === 'docker' ? 'docker' : 'source')
+function earlyView() {
+  const { early, from } = settings()
+  if (!early) return { on: false }
+  const acct = from === 'account' ? { fromAccount: true } : {}
+  return canPick() ? { on: picked() === 'early', ...acct } : { on: false, ...acct, problem: notHere() }
 }
-// Nightly: switched on on this computer, where this copy installs its updates itself (the desktop
-// app) or shows the one command that does (Linux's).
-export const canNightly = () => ['app', 'app-linux'].includes(how())
-const onNightly = () => !!settings().nightly && canNightly()
-// For Settings › About & Updates: on, or switched on where it can't be (Docker, a clone): why not.
 function nightlyView() {
   if (!settings().nightly) return { on: false }
-  return canNightly() ? { on: true } : { on: false, problem: how() === 'docker' ? 'docker' : 'source' }
+  return canPick() ? { on: true } : { on: false, problem: notHere() }
 }
-// The channel this computer is on now, and for Early Access who the code is for: what the usage
-// stats and crash reports say (PRIVACY.md), so each version can be told apart on each channel.
+// The channel this computer is on now, and on Early Access with a code that checks out, who it's for
+// (your Bold Bridge account's id): what the usage stats and crash reports say (PRIVACY.md), so each
+// version can be told apart on each channel. Early Access picked with no code names no one.
 export function channelNow() {
-  if (onNightly()) return { channel: 'nightly', tester: null }
-  const code = earlyCode()
-  return code && !last.revoked?.includes(code.id) ? { channel: 'early', tester: code.for } : { channel: 'stable', tester: null }
+  const channel = canPick() ? picked() : 'stable'
+  const { code } = settings()
+  const r = channel === 'early' && code ? readCode(code) : null
+  return { channel, tester: r?.ok ? r.for : null }
 }
 // Whether the newest release is offered here: only when it's newer than the version here (never an
 // older one, so a computer that left Early Access on a pre-release stays on it until Stable passes
@@ -173,7 +158,7 @@ export function below(s, m) {
 // computers and not to this one yet is offered here too.
 export async function status({ force = false, byHand = false, disabled = false } = {}) {
   const { bucket } = settings()
-  if (disabled) return { current, built, disabled: true, channel: channelNow().channel, early: earlyView(last), nightly: nightlyView(), bucket }
+  if (disabled) return { current, built, disabled: true, channel: channelNow().channel, early: earlyView(), nightly: nightlyView(), bucket, how: how() }
   const s = await check(force)
   const m = await machine()
   const held = heldBack(s, m)
@@ -195,9 +180,9 @@ export async function status({ force = false, byHand = false, disabled = false }
     // one only just out doesn't go in by itself yet (autoView).
     publishedAt: s.publishedAt || null,
     prerelease: !!s.prerelease || isPre(s.latest),
-    // Stable, Early Access or Nightly, and the code (who it's for, when it ends, or why it doesn't work).
+    // Stable, Early Access or Nightly, and each as picked here (on, or why it can't be).
     channel,
-    early: earlyView(s),
+    early: earlyView(),
     nightly: nightlyView(),
     // The staged rollout: the release's percentage (null: everyone) and this computer's bucket.
     rollout: s.rollout ?? null,
@@ -239,7 +224,7 @@ export async function install({ app = false, auto = false } = {}) {
     const fresh = !!v.desktop && Date.now() - Date.parse(v.desktop.at) < 60 * 1000
     if (!v.ready || !fresh) return { started: false, why: v.why.length ? v.why : v.desktop?.why.length ? v.desktop.why : ['desktop'] }
   }
-  if (!RELEASE_VERSION.test(latest || '') && !(onNightly() && isNightly(latest))) throw new Error('Couldn\'t find the newest version on GitHub; try again in a minute.')
+  if (!RELEASE_VERSION.test(latest || '') && !(channelNow().channel === 'nightly' && isNightly(latest))) throw new Error('Couldn\'t find the newest version on GitHub; try again in a minute.')
   // Never to an older version or the same one again (the desktop app's own update, forApp, can be
   // behind a clone's server), and never to one the project paused.
   if (!forApp && !newer(latest, current)) throw new Error(`Bridge AI ${current} is the newest version for this computer; there's nothing to update to.`)
@@ -298,10 +283,10 @@ export const didntGoThrough = (code, line) => !!code || /^Bridge AI install:/.te
 // that's offered here and has been out a few hours, and nothing running that an update would cut
 // short (quiet, from index.js). The app says what it waits for itself (you're here, a window with
 // unsaved work); that's kept a few minutes, for About & Updates to say why when it's been a while.
-// useSettings gives the switch and Check for new versions (on, checks), and for the channels, the
-// early-access code (code), Nightly (nightly) and this computer's rollout bucket (bucket), from the
-// settings (index.js).
-let settings = () => ({ on: true, checks: true, code: null, bucket: null, nightly: false })
+// useSettings gives the switch and Check for new versions (on, checks), and for the channels, Early
+// Access (early, with a code an older version took: code, from), Nightly (nightly) and this
+// computer's rollout bucket (bucket), from the settings (index.js).
+let settings = () => ({ on: true, checks: true, early: false, code: null, from: null, bucket: null, nightly: false })
 let quiet = async () => ({ agents: null })
 export const useSettings = (fn) => { settings = fn }
 export const useQuiet = (fn) => { quiet = fn }

@@ -325,7 +325,6 @@ try {
     earlyAccess.useAccountsKey(() => PUBLIC)
     const read2 = earlyAccess.readCode(code, { key: '' })
     ok(read2.ok && read2.for === a.account.id && read2.id === a.account.id && Date.parse(read2.until) - Date.now() > 14 * DAY, 'tester yes: an Early Access code server/earlyaccess.js reads with the accounts key, for the account\'s id (never the email), 15 days left at least', read2)
-    ok(earlyAccess.readCode(code, { key: earlyAccess.publicKey() || '' }).ok, 'and it checks out beside the owner\'s own key too')
     earlyAccess.useAccountsKey(() => '')
     // Suspended: nothing works, and the relay hears it.
     const noNote = await s.call(`/admin/accounts/${a.account.id}`, { method: 'POST', bound: true, body: { status: 'suspended' } })

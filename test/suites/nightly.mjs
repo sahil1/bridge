@@ -1,5 +1,5 @@
-// Nightly builds of main, for the owner's own computers (scripts/nightly.js, nightly.yml, the
-// Nightly channel in server/updates.js). The version: what main is heading for, the day and the run,
+// Nightly builds of main, for anyone who picks them (scripts/nightly.js, nightly.yml, the Nightly
+// channel in server/updates.js). The version: what main is heading for, the day and the run,
 // after that version's betas and before its release candidates and the version itself, and never a
 // version Stable or Early Access take. The script: the version for main as it is, stamped into both
 // package.json files (nothing else in them changed), notes with the changes since the last nightly
@@ -9,10 +9,10 @@
 // rules: Stable and Early Access are never offered a nightly; Nightly is offered the newest of
 // everything at once, a staged release too, and moves on to the release when it's out; it updates
 // by itself like Early Access. A server in the desktop app on a Mac (stood in for), with GitHub's
-// releases a stand-in: Nightly switched on from the computer itself, never through the relay; on,
-// it's offered the nightly; Docker and a clone are told why not; Leave Nightly goes back to Stable,
-// the version here kept. The page: About & Updates shows Nightly only once it's on, with Leave
-// Nightly, and the early-access link not at all then.
+// releases a stand-in: Nightly switched on from the computer itself, never through the relay (nor
+// off); on, it's offered the nightly; Docker and a clone are told why not; Stable picked goes back
+// to Stable, the version here kept. The page: About & Updates' Update Channel with Nightly picked,
+// the nightly offered, and Stable picked there.
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
@@ -108,6 +108,8 @@ try {
   u = await k.api('/updates/nightly', {})
   ok(u.channel === 'nightly' && u.nightly?.on === true && u.latest === '99.1.0-nightly.20261116.7' && u.available === true && u.prerelease === true, 'switched on from the computer itself: on Nightly, offered the nightly', u)
   ok(JSON.parse(fs.readFileSync(path.join(k.data, 'config.json'), 'utf8')).updates?.nightly === true, 'kept in the settings (updates.nightly)')
+  const off = await fetch(`${k.url}/api/updates/nightly`, { method: 'DELETE', headers: { 'x-bridge-relay': '1' } }).then((r) => r.status)
+  ok(off >= 400 && (await k.api('/updates')).channel === 'nightly', 'nor switched off through the relay', off)
   const v = await k.api('/updates/auto')
   ok(!v.why.includes('prerelease'), 'and it goes in by itself while you\'re away, as Early Access\'s do', v)
 
@@ -116,12 +118,13 @@ try {
   const { p } = await page(b, k.url)
   await p.locator('.topbar .search-btn').waitFor({ timeout: 15000 }).catch(() => {})
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
-  const sec = p.locator('.ab-nightly')
-  const shown = await until(async () => /Nightly/.test(await sec.innerText().catch(() => '')) && /a build of main each morning/.test(await sec.innerText()), 10000)
-  ok(!!shown && await sec.locator('button', { hasText: 'Leave Nightly' }).count() === 1 && await p.locator('.ab-early-ask').count() === 0, 'About & Updates: Nightly, on, with Leave Nightly, and no early-access link', await p.locator('.st-body').innerText().catch(() => ''))
+  const sec = p.locator('.ab-channel')
+  const on = (id) => sec.locator(`.ab-channel-pick.on[data-channel="${id}"]`)
+  const shown = await until(async () => (await on('nightly').count()) === 1 && /A build of main each day it changes/.test(await sec.innerText()), 10000)
+  ok(!!shown, 'About & Updates: the Update Channel with Nightly picked', await p.locator('.st-body').innerText().catch(() => ''))
   ok(/99\.1\.0-nightly\.20261116\.7 is available \(Nightly build\)/.test(await p.locator('.st-body').innerText()) && /^Nightly/.test(await p.locator('.ab-build').innerText()), 'and the nightly offered there, said to be one, with this computer on Nightly', await p.locator('.st-body').innerText())
-  await sec.locator('button', { hasText: 'Leave Nightly' }).click()
-  ok(!!(await until(async () => (await sec.count()) === 0, 10000)), 'Leave Nightly: the section goes')
+  await sec.locator('.ab-channel-pick[data-channel="stable"]').click()
+  ok(!!(await until(async () => (await on('stable').count()) === 1 && (await k.api('/updates')).channel === 'stable', 10000)), 'Stable picked there: Stable marked')
   u = await k.api('/updates')
   ok(u.channel === 'stable' && u.nightly?.on === false && u.latest === '99.0.0', 'back on Stable, offered the release again', u)
   await p.close()
