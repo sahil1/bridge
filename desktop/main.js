@@ -557,6 +557,25 @@ ipc.handle('bridge:remote-control-ask', async (e) => {
   return r
 })
 ipc.handle('bridge:remote-control-access', (e) => (fromApp(e) ? (!IS_MAC || !!systemPreferences.isTrustedAccessibilityClient(false)) : null))
+// Another computer's screen in a window of its own, on the display the asking window is on, and
+// fitted to that screen's shape once the page knows it (remote.js view, fit).
+ipc.handle('bridge:remote-view', (e, o) => {
+  if (!fromApp(e) || !remote || !o || (o.machine != null && !/^[A-Za-z0-9_-]{1,20}$/.test(String(o.machine)))) return false
+  const from = BrowserWindow.fromWebContents(e.sender)
+  remote.view({ machine: o.machine || null, name: typeof o.name === 'string' ? o.name.slice(0, 80) : '', near: from && !from.isDestroyed() ? from.getBounds() : null })
+  return true
+})
+ipc.handle('bridge:remote-fit', (e, o) => {
+  const w = fromApp(e) && remote ? BrowserWindow.fromWebContents(e.sender) : null
+  if (!w || !remote.isView(w) || !o) return false
+  return remote.fit(w, { w: Number(o.w), h: Number(o.h), chrome: Number(o.chrome) })
+})
+// Where each computer's screen window was left (remote.js view), in the app's own folder.
+const VIEW_STATE = path.join(app.getPath('userData'), 'screen-windows.json')
+const viewSizes = {
+  get: (key) => { try { return JSON.parse(fs.readFileSync(VIEW_STATE, 'utf8'))[key] || null } catch { return null } },
+  set: (key, b) => { try { const all = (() => { try { return JSON.parse(fs.readFileSync(VIEW_STATE, 'utf8')) } catch { return {} } })(); all[key] = { x: b.x, y: b.y, width: b.width, height: b.height }; fs.writeFileSync(VIEW_STATE, JSON.stringify(all)) } catch { /* ignore */ } },
+}
 // Whether macOS lets the app use the mic: granted, denied, restricted or not-determined.
 ipc.handle('bridge:media-access', (e, kind) => (fromApp(e) && kind === 'microphone' && IS_MAC ? systemPreferences.getMediaAccessStatus('microphone') : null))
 // The mic, asked of macOS before the page opens it (src/audio/pcm.js askMic): the first time, macOS
@@ -1137,7 +1156,7 @@ app.whenReady().then(async () => {
   createWindow()
   // Remote Screen and Preview's windows: the capture page, the badge, a project's app drawn off screen.
   try { remoteShared = await import(require('node:url').pathToFileURL(path.join(ROOT, 'shared', 'remote.js')).href) } catch (e) { console.error('remote:', e.message) }
-  remote = remoteDesk.create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload: path.join(__dirname, 'preload.js'), fetch, keyFor: (c, os) => remoteShared?.keyFor(c, os) ?? null })
+  remote = remoteDesk.create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload: path.join(__dirname, 'preload.js'), fetch, keyFor: (c, os) => remoteShared?.keyFor(c, os) ?? null, sizes: viewSizes })
   watchFleet()
   watchCalls()
   startUpdatingWhileAway()

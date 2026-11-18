@@ -1026,6 +1026,8 @@ export function upgrade(req, socket, head) {
       u = `${x.pathname}${x.search}`
     }
     l.ready(12000).then(() => {
+      // The page went before the link was ready: nothing to open there (a screen would stay seen).
+      if (client.readyState > 1) return
       remote = l.socket(u, {
         onOpen: () => { open = true; for (const [d, b] of pending.splice(0)) remote.send(d, b) },
         onMessage: (data, binary) => { if (client.readyState === 1) client.send(data, { binary }) },

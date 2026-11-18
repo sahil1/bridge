@@ -1,29 +1,73 @@
 /* Remote Screen and Preview: another computer's screen here (ScreenView), a project's app drawn there
    (PageView), and on the computer being seen, the badge, the line in its window and Settings. */
-.rs-view { position: fixed; inset: 0; z-index: 140; display: grid; grid-template-rows: auto auto 1fr auto auto; background: var(--bg, #0f1115); color: var(--ink); }
-.rs-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; padding-top: max(8px, var(--safe-top, 0px)); border-bottom: 1px solid var(--line); background: var(--pane); }
-.rs-title { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.rs-source { max-width: 240px; height: 28px; padding: 2px 8px; font-size: 12.5px; }
+/* The viewer: the toolbar, a line for notes, then the stage, which takes all the rest. */
+.rs-view { position: fixed; inset: 0; z-index: 140; display: flex; flex-direction: column; background: var(--bg, #0f1115); color: var(--ink); }
+.rs-view.windowed { z-index: 1; }
+.rs-bar { flex: none; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 7px 10px 7px 14px; padding-top: max(7px, var(--safe-top, 0px)); border-bottom: 1px solid var(--line); background: var(--pane); }
+/* The desktop app on a Mac: the toolbar is the title bar, clear of the window's buttons and dragged
+   by, as the app's other windows' are (styles.css, Inside the Bridge AI desktop app). */
+.in-bridge-app.platform-darwin .rs-view:not(.full):not(.phone) .rs-bar { min-height: 52px; padding-left: 84px; }
+.in-bridge-app .rs-view .rs-bar { -webkit-app-region: drag; user-select: none; }
+.in-bridge-app .rs-bar :is(button, select, input, label, a) { -webkit-app-region: no-drag; }
+.rs-title { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; min-width: 0; flex: 0 1 auto; }
+.rs-title > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rs-title svg { flex: none; color: var(--ink-3); }
+.rs-source { height: 28px; max-width: 240px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: 12.5px var(--font); min-width: 0; }
 .rs-mode { font-size: 11.5px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); white-space: nowrap; }
 .rs-mode.m-p2p { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent); }
 .rs-mode.m-relay { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 40%, transparent); }
-.rs-why { display: inline-flex; align-items: center; gap: 4px; }
-.rs-swap { font-size: 12px; align-items: center; }
-.rs-swap input { margin-top: 0; }
-.rs-note { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12.5px; background: var(--accent-soft); border-bottom: 1px solid var(--line); }
+.rs-tools { display: flex; align-items: center; gap: 6px; flex: none; }
+.rs-size button { height: 24px; font-size: 12px; padding: 0 9px; white-space: nowrap; }
+.rs-full.on { color: var(--accent); }
+.rs-take, .rs-stop { white-space: nowrap; gap: 5px; }
+.rs-why { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.rs-swap { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-2); white-space: nowrap; cursor: pointer; }
+.rs-swap input { margin: 0; }
+.rs-note { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12.5px; background: var(--accent-soft); border-bottom: 1px solid var(--line); }
 .rs-note > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .rs-note.bad { background: color-mix(in srgb, var(--critical) 12%, var(--pane)); }
-.rs-stage { position: relative; min-height: 0; overflow: hidden; display: grid; place-items: center; background: #000; outline: none; touch-action: auto; }
+
+/* The stage: a dark letterbox around the picture, in light and dark alike. Fit shows it whole;
+   Actual Size and a pinch make it bigger than the room, scrolled (or dragged) about. */
+.rs-stage { --letterbox: #0b0c0f; position: relative; flex: 1; min-height: 0; display: flex; overflow: hidden; background: var(--letterbox); outline: none; touch-action: pan-x pan-y; }
+.rs-stage.scrolls { overflow: auto; cursor: grab; }
+.rs-stage.scrolls:active { cursor: grabbing; }
 .rs-stage.controlling { cursor: default; touch-action: none; box-shadow: inset 0 0 0 2px var(--accent); }
-.rs-media { grid-area: 1 / 1; width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+.rs-stage.controlling.scrolls:active { cursor: default; }
+.rs-canvas { position: relative; flex: none; margin: auto; }
+.rs-canvas[hidden] { display: none; }
+.rs-media { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
 .rs-media[hidden] { display: none; }
-.rs-wait { grid-area: 1 / 1; display: grid; justify-items: center; gap: 8px; max-width: 460px; padding: 16px; text-align: center; color: #e6e8ee; font-size: 13.5px; line-height: 1.5; }
-.rs-wait p { margin: 0; overflow-wrap: anywhere; }
-.rs-type { padding: 6px 12px; border-top: 1px solid var(--line); background: var(--pane); }
-.rs-type input { width: 100%; }
-.rs-foot { padding: 6px 12px; padding-bottom: max(6px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--pane); overflow-wrap: anywhere; }
-.rs-view.phone .rs-bar { gap: 6px; padding: 6px 10px; padding-top: max(6px, var(--safe-top, 0px)); }
-.rs-view.phone .rs-source { max-width: 150px; }
+.rs-stage.actual .rs-media { image-rendering: auto; }
+/* What the stage says until the picture shows, and when it's gone: a card in the middle, in the
+   app's own colours and buttons, readable on the letterbox in light and dark. */
+.rs-over { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; overflow: auto; pointer-events: none; }
+.rs-card { pointer-events: auto; display: grid; justify-items: center; gap: 10px; width: min(440px, 100%); box-sizing: border-box; padding: 22px 22px 18px; border-radius: 14px; background: var(--pane); color: var(--ink); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg, 0 12px 40px rgb(0 0 0 / .4)); text-align: center; font-size: 13.5px; line-height: 1.5; }
+.rs-card h3 { margin: 0; font-size: 15px; }
+.rs-card p { margin: 0; overflow-wrap: anywhere; }
+.rs-card small { font-size: 12px; line-height: 1.45; }
+.rs-card > svg { color: var(--ink-3); }
+.rs-card.c-locked > svg, .rs-card.c-denied > svg, .rs-card.c-unanswered > svg, .rs-card.c-device > svg, .rs-card.c-error > svg, .rs-card.c-screenPermission > svg { color: var(--critical); }
+.rs-card.c-password > svg { color: var(--accent); }
+.rs-card .st-input { width: 100%; text-align: center; }
+.rs-card-bad { color: var(--critical); font-size: 12.5px; }
+.rs-card-btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 2px; }
+.rs-card-btns .btn { min-width: 96px; }
+.rs-type { flex: none; display: flex; align-items: center; gap: 4px; padding: 6px 8px 6px 12px; padding-bottom: max(6px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--pane); }
+.rs-type input { flex: 1; min-width: 0; width: auto; font-size: 16px; }
+/* A phone: one row, the title giving way, each button a whole 40 px target. */
+.rs-view.phone .rs-bar { gap: 4px; min-height: 52px; padding: 6px 6px 6px 12px; padding-top: max(6px, var(--safe-top, 0px)); }
+.rs-view.phone .rs-tools { gap: 2px; }
+.rs-view.phone .rs-source { max-width: 120px; height: 40px; font-size: 13px; }
+.rs-view.phone .rs-mode { display: none; }
+.rs-view.phone .win-btn, .rs-view.phone .rs-tools .ghost-btn { width: 40px; height: 40px; }
+.rs-view.phone .rs-tools .ghost-btn { width: auto; padding: 0 10px; }
+.rs-view.phone .rs-take { height: 40px; min-width: 40px; padding: 0 10px; }
+.rs-view.phone .rs-take > span, .rs-view.phone .rs-why > span { display: none; }
+.rs-view.phone .rs-stage { padding-bottom: env(safe-area-inset-bottom); }
+.rs-view.phone .rs-card { padding: 18px 16px 14px; }
+.rs-view.phone .rs-card .st-input { height: 44px; font-size: 16px; }
+.rs-view.phone .rs-card-btns .btn { min-height: 40px; }
 
 /* The badge: a small window of its own over everything (desktop/remote.js). */
 .is-badge, .is-badge body { background: var(--pane); overflow: hidden; }
@@ -34,8 +78,10 @@
 .rs-badge-text small { color: var(--ink-2); }
 .rs-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line-2, #888); flex: none; }
 .rs-dot.on { background: var(--critical); box-shadow: 0 0 0 3px color-mix(in srgb, var(--critical) 25%, transparent); animation: rs-pulse 1.6s ease-in-out infinite; }
+.rs-dot.ask { background: var(--warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 25%, transparent); animation: rs-pulse 1.6s ease-in-out infinite; }
 @keyframes rs-pulse { 50% { opacity: .55; } }
-@media (prefers-reduced-motion: reduce) { .rs-dot.on { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .rs-dot.on, .rs-dot.ask { animation: none; } }
+.rs-badge .btn { flex: none; }
 .btn.danger { color: #fff; background: var(--critical); border-color: var(--critical); }
 .btn.danger:hover { background: color-mix(in srgb, var(--critical) 85%, #000); }
 .rs-capture { padding: 12px; font-size: 12px; color: var(--ink-2); }
@@ -47,6 +93,19 @@
 .rs-settings .rs-ok { color: var(--good); display: flex; align-items: center; gap: 6px; margin: 0; }
 .rs-settings .rs-no { display: flex; align-items: flex-start; gap: 6px; margin: 0; }
 .rs-control { margin-top: 4px; }
+.rs-block { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 10px 0; border-top: 1px solid var(--line); min-width: 0; }
+.rs-block:first-of-type { border-top: 0; padding-top: 2px; }
+.rs-block > p { margin: 0; }
+.rs-needs { display: flex; align-items: center; gap: 6px; }
+.rs-pw-form { display: grid; gap: 8px; max-width: 420px; }
+.rs-pw-form .st-input { width: 100%; }
+.rs-devices { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.rs-devices li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 30px; }
+.rs-devices .st-check { flex: 1; min-width: 180px; align-items: center; }
+.rs-devices .st-check input { margin-top: 0; }
+.rs-devices .st-check svg { vertical-align: -1px; color: var(--ink-3); }
+.rs-locked { display: inline-flex; align-items: center; gap: 4px; color: var(--critical); }
+p.rs-locked { margin: 0; }
 .rs-now { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
 .rs-now li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .rs-now li > span:nth-child(2) { flex: 1; min-width: 0; }
@@ -55,6 +114,8 @@
 .rs-log li > span { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
 .rs-log li > svg { grid-row: 1 / span 3; align-self: start; margin-top: 2px; }
 .rs-log li.rs-log-seen { border: 0; padding: 2px 0; display: block; }
+.rs-log li.rs-log-refused { border-color: color-mix(in srgb, var(--critical) 30%, var(--line)); }
+.rs-log li.rs-log-refused > svg { color: var(--critical); }
 
 /* A project's app on a phone, drawn on the computer that runs it (PageView). */
 .pv-pages { position: relative; height: 100%; display: grid; grid-template-rows: auto 1fr auto; background: var(--pane-2); }

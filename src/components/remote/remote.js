@@ -4,14 +4,19 @@
 // or the pictures themselves when that can't be made, and what you press while you control it.
 import { useEffect, useState } from 'react'
 import { BASE, machineId, viaRelay, openSocketAt } from '../../api.js'
-import { P2P_WAIT_MS, INPUT_PER_SECOND, unpackFrame } from '../../../shared/remote.js'
+import { P2P_WAIT_MS, INPUT_PER_SECOND, unpackFrame, pointAt } from '../../../shared/remote.js'
 
 // Where a computer's pages are from this page: the one it shows (BASE), or another linked to the
 // computer it comes from (/m/<id>). A window showing one computer can't reach another through it
 // (server/machinepages.js); a phone can.
 export const baseFor = (machine) => (!machine || machine === machineId ? BASE : `/m/${machine}`)
 export const canReach = (machine) => viaRelay || !machineId || !machine || machine === machineId
-export const viewScreen = (machine, name) => window.dispatchEvent(new CustomEvent('bridge-view-screen', { detail: { machine: machine || null, name: name || '' } }))
+// In the desktop app, a window of its own, sized to that screen on the display it opens on
+// (desktop/remote.js view); elsewhere, over the page (App.jsx).
+export const viewScreen = (machine, name) => {
+  if (window.bridgeApp?.remote?.view) { window.bridgeApp.remote.view({ machine: machine || null, name: name || '' }).catch?.(() => {}); return }
+  window.dispatchEvent(new CustomEvent('bridge-view-screen', { detail: { machine: machine || null, name: name || '' } }))
+}
 
 // That computer's word on its screen, its control and its sessions (GET /api/remote).
 export async function remoteStatus(base, { sources = false } = {}) {
@@ -129,14 +134,6 @@ export function connect({ base, source, control = false, slow = false, page = nu
 }
 
 // Where on the picture a point of the element showing it falls, from 0 to 1 each way (the picture
-// is fitted inside the element, centred), or null when it's outside the picture.
-export function pointOn(el, w, h, clientX, clientY) {
-  const r = el.getBoundingClientRect()
-  if (!w || !h || !r.width || !r.height) return null
-  const scale = Math.min(r.width / w, r.height / h)
-  const cw = w * scale
-  const ch = h * scale
-  const x = (clientX - r.left - (r.width - cw) / 2) / cw
-  const y = (clientY - r.top - (r.height - ch) / 2) / ch
-  return x < 0 || y < 0 || x > 1 || y > 1 ? null : { x, y }
-}
+// is fitted inside the element, centred; zoomed or at Actual Size, the element is the picture), or
+// null when it's outside the picture.
+export const pointOn = (el, w, h, clientX, clientY) => (el ? pointAt(el.getBoundingClientRect(), w, h, clientX, clientY) : null)
