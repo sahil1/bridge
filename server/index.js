@@ -65,7 +65,7 @@ import { makeTasks } from './chieftasks.js'
 import { makeThreads, isChiefName } from './threads.js'
 import { makeDelegate } from './delegate.js'
 import { providerRoutes, providerEnv, subscriptions, signedInNow } from './providers.js'
-import { signInScreen, SIGN_IN_ENDED } from './firstrun.js'
+import { signInScreen, SIGN_IN_ENDED, firstRun, knows } from './firstrun.js'
 import * as settings from './settings.js'
 import * as consult from './consult.js'
 import * as insights from './insights.js'
@@ -168,6 +168,10 @@ const delegate = makeDelegate({
   replied: (a, since) => { try { const p = preview(a); return p?.role === 'assistant' && !!p.ts && Date.parse(p.ts) >= Date.parse(since) } catch { return false } },
   held: (paneId) => (queue.all()[paneId] || []).length,
   changed: () => pushFleet(),
+  // (herdr doesn't say which first-run screen is up: read off the terminal.)
+  setupOf: async (a) => (knows(a.kind) ? firstRun(a.kind, plainScreen(await rt.read(a.paneId, 60))) : null),
+  press: (paneId, keys) => rt.keys(paneId, keys),
+  labelOf: (k) => adapter(k).label || k,
 })
 // Where agents run: herdr, or Bridge AI's own terminals (see runtime/index.js).
 const rt = await pickRuntime(cfg)
@@ -1088,11 +1092,13 @@ async function helperSaid(h) {
     if (last) return { text: String(last.text).trim(), from: 'chat' }
   } catch { /* no conversation to read */ }
   if (!h.paneId) return null
-  // eslint-disable-next-line no-control-regex
-  const lines = String(await rt.read(h.paneId, 60).catch(() => '')).replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, '').split(/\r?\n/)
-    .map((l) => l.trimEnd()).filter((l) => l.trim() && !/^\s*[─━═-]{3,}\s*$/.test(l))
+  const lines = plainScreen(await rt.read(h.paneId, 60).catch(() => '')).filter((l) => l.trim() && !/^\s*[─━═-]{3,}\s*$/.test(l))
   return lines.length ? { text: lines.slice(-20).join('\n'), from: 'screen' } : null
 }
+
+// A terminal's screen as plain rows.
+// eslint-disable-next-line no-control-regex
+const plainScreen = (text) => String(text || '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, '').split(/\r?\n/).map((l) => l.trimEnd())
 
 // An agent that isn't installed: code install:<kind> lets the app offer its Install button. One
 // that's hidden (Qwen Code, while Show more models is off) says how to show it.

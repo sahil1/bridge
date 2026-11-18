@@ -51,6 +51,13 @@
 //   claude ... "Your brief is in <file>. ..."   the brief in a file (Windows): read, when it may
 //                                            read that file (its folder or one --add-dir gave it),
 //                                            then taken as above
+//                                            Before any of that, in a folder Claude Code doesn't trust
+//                                            (~/.claude.json, the folder or one it's in), it asks
+//                                            whether to, as Claude Code 2.1.3 draws it ("No, exit"
+//                                            first, no numbers): Down and Enter trust it and go on,
+//                                            Enter on No ends it. And by what the question says:
+//     [signin]                               shows its sign-in screen instead, and stays there
+//     [stuck]                                asks for permission to write a file, and stays there
 //   claude --resume <id> --fork-session --session-id <new> "<brief>"   a copy of a conversation:
 //                                            <id>'s, then the brief as above
 //   --model <m>, --effort <level>, --permission-mode <mode>, --tools <list>, --add-dir <dirs...>,
@@ -115,11 +122,14 @@ const reply = (text) => w({ type: 'assistant', message: { role: 'assistant', con
 const tool = (name, input) => w({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: `toolu_${Math.random().toString(36).slice(2, 8)}`, name, input }] } })
 
 const rule = '─'.repeat(60)
-let state = 'idle' // idle | working | asking
+let state = 'idle' // idle | working | asking | trust | signin
+let pick = 0 // the trust screen's answer under the pointer: 0 No, 1 Yes
+const trustRows = () => [' Accessing workspace:', '', ` ${process.cwd()}`, '', ' Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open', ' source project, or work from your team). If not, take a moment to review what\'s in this folder first.', '', ' Claude Code\'ll be able to read, edit, and execute files here.', '', ` ${pick === 0 ? '❯' : ' '} No, exit`, ` ${pick === 1 ? '❯' : ' '} Yes, I trust this folder`, '', ' Enter to confirm · Esc to cancel']
+const signinRows = () => [' Claude Code can be used with your Claude subscription or billed based on API usage through your Console account.', '', ' Select login method:', '', ' ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise', '', '   2. Anthropic Console account · API usage billing', '']
 let said = 'Ready.'
 let began = 0
 const draw = () => {
-  const head = state === 'asking'
+  const head = state === 'trust' ? trustRows() : state === 'signin' ? signinRows() : state === 'asking'
     ? ['✻ Brewed for 2s', '', rule, ' Create file', '', `   ${file}`, '', ' Do you want to proceed?', ' ❯ 1. Yes', '   2. Yes, allow all edits during this session (shift+tab)', '   3. No, and tell Claude what to do differently (esc)']
     : [`⏺ ${said}`, '', state === 'working' ? `✻ Pondering… (${Math.round((Date.now() - began) / 1000)}s · esc to interrupt)` : '✻ Brewed for 3s', rule, '❯ \x1b[7m \x1b[27m', rule, '  ⏵⏵ auto mode on']
   process.stdout.write(`\x1b[2J\x1b[H${'\r\n'.repeat(Math.max(0, (process.stdout.rows || 24) - head.length - 1))}${head.join('\r\n')}`)
@@ -224,13 +234,28 @@ function answerTurn(text) {
   }, wait * 1000)
 }
 
-if (message && /----- question from/.test(message)) answerTurn(message)
-else if (message && /\[ask\]/.test(message)) {
-  user(message)
-  state = 'asking'
-  draw()
-} else if (message) turn(message, `I wrote ${file} in this folder.\n\nDone: the draft is in ${file}, ready for review.`, secs * 1000, file)
-else draw()
+function begin() {
+  if (message && /----- question from/.test(message) && /\[signin\]/.test(message)) { state = 'signin'; draw() }
+  else if (message && /----- question from/.test(message) && /\[stuck\]/.test(message)) { user(message); state = 'asking'; draw() }
+  else if (message && /----- question from/.test(message)) answerTurn(message)
+  else if (message && /\[ask\]/.test(message)) {
+    user(message)
+    state = 'asking'
+    draw()
+  } else if (message) turn(message, `I wrote ${file} in this folder.\n\nDone: the draft is in ${file}, ready for review.`, secs * 1000, file)
+  else draw()
+}
+// Trusted, as Claude Code keeps it: the folder, or one it's in, in ~/.claude.json.
+const CLAUDE_JSON = path.join(home, '.claude.json')
+const readJson = () => { try { return JSON.parse(fs.readFileSync(CLAUDE_JSON, 'utf8')) } catch { return {} } }
+function trusted() {
+  const projects = readJson().projects || {}
+  for (let d = process.cwd(); ; d = path.dirname(d)) {
+    if (projects[d]?.hasTrustDialogAccepted) return true
+    if (path.dirname(d) === d) return false
+  }
+}
+if (message && /----- question from/.test(message) && !trusted()) { state = 'trust'; draw() } else begin()
 
 // What's typed: a key at a time, pastes bracketed, Enter sends.
 if (process.stdin.isTTY) process.stdin.setRawMode(true)
@@ -239,6 +264,24 @@ let box = ''
 let pasting = false
 process.stdin.on('data', (d) => {
   let s = String(d)
+  if (state === 'trust') {
+    for (const k of s.match(/\x1b\[[AB]|[\r\n]|\x1b|./g) || []) {
+      if (k === '\x1b[B') pick = 1
+      else if (k === '\x1b[A') pick = 0
+      else if (k === '\x1b') process.exit(1)
+      else if (k === '\r' || k === '\n') {
+        if (!pick) process.exit(1)
+        const j = readJson()
+        j.projects = { ...(j.projects || {}), [process.cwd()]: { ...(j.projects?.[process.cwd()] || {}), hasTrustDialogAccepted: true } }
+        fs.writeFileSync(CLAUDE_JSON, JSON.stringify(j, null, 2))
+        note('trusted.log', { cwd: process.cwd() })
+        state = 'idle'
+        return begin()
+      }
+    }
+    return draw()
+  }
+  if (state === 'signin') return
   if (state === 'asking') {
     if (s[0] === '1' || s[0] === '2') { state = 'idle'; turn('(allowed)', `I wrote ${file} in this folder.\n\nDone: the draft is in ${file}, ready for review.`, 1000, file) }
     return
