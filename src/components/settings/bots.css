@@ -332,3 +332,34 @@
 .sb-plat.p-cloud { color: var(--accent); background: var(--accent-soft); }
 :is(.modal.settings.phone, .bp.phone) :is(.sb-ans-acts .icon-btn) { width: 40px; height: 40px; }
 :is(.modal.settings.phone, .bp.phone) .sb-ans-add { height: 42px; font-size: 16px; }
+
+/* Connections (bots/Connections.jsx): a card a connection, its bots, its channels' bots, and how a
+   bot is reached on each platform (its Set Up). */
+.cn { display: grid; gap: 12px; min-width: 0; }
+.cn-about { margin: 0; }
+.cn-card { display: grid; gap: 10px; min-width: 0; }
+.cn-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+.cn-name { margin: 0; font: 600 14px var(--font); overflow-wrap: anywhere; min-width: 0; }
+.cn-kind { color: var(--ink-2); background: var(--pane-2); }
+.cn-state { margin: 0; }
+.cn-part { display: grid; gap: 6px; min-width: 0; }
+.cn-bots { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.cn-add-default { flex-wrap: wrap; }
+.cn-add-default select { flex: 1 1 140px; min-width: 0; }
+.cn-app { display: grid; gap: 8px; }
+.cn-app[open] > .st-sec { padding-left: 0; padding-right: 0; }
+.cn-rename { max-width: 360px; }
+.cn-routed-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.cn-routed-list li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 10px; min-width: 0; overflow-wrap: anywhere; }
+.cn-make { display: grid; gap: 6px; min-width: 0; }
+.cn-make .sb-add { flex-wrap: wrap; }
+.cn-make .sb-add input { flex: 1 1 180px; min-width: 0; }
+.cn-new-one > summary { font-weight: 500; }
+.cn-own-head { margin: 8px 0 0; }
+.cn-reach { display: grid; gap: 6px; }
+.cn-reach > p { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; }
+.cn-reach .sb-dot { display: inline-block; }
+.cn-chip > .icon { flex: none; }
+.bc-via { display: flex; align-items: flex-start; gap: 6px; margin: 4px 0 0; }
+.bc-via > .icon, .bc-via > svg { flex: none; margin-top: 2px; }
+.bp-conns .bp-main { max-width: 860px; }

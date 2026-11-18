@@ -4714,7 +4714,16 @@ async function connView(c) {
   const reached = { asked: false, answered: false }
   for (const b of on) { const r = (await desk.view(b.id))?.reached?.[c.platform]; if (r?.asked) reached.asked = true; if (r?.answered) reached.answered = true }
   const slack = c.platform === 'slack'
+  // (Someone there with your name, to offer as you, from the people listed already.)
+  const me = String(cfg.name || '').trim().toLowerCase()
+  let ownerGuess = null
+  if (!c.owner && me && s.state === 'connected') {
+    const people = await con.people().catch(() => [])
+    const hit = people.find((p) => [p.name, p.detail].some((x) => String(x || '').toLowerCase().split(' · ')[0] === me)) || people.find((p) => String(p.name || '').toLowerCase() === me.split(' ')[0])
+    if (hit) ownerGuess = { id: idThere(c, hit.id), name: hit.name }
+  }
   return {
+    ownerGuess,
     id: c.id, name: c.name, platform: c.platform, shared: c.shared, own: c.bot ? { id: c.bot, name: botsStore.get(c.bot)?.name || c.bot } : null,
     bots: on.map((b) => ({ id: b.id, name: b.name, description: b.description || '', paused: b.paused, command: slack && c.perBot ? slackCommand(b.name) : null })),
     owner: c.owner, defaults: c.defaults, perBot: c.perBot, createdAt: c.createdAt || null,

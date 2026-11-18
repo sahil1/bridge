@@ -416,7 +416,7 @@ function App() {
   const views = [...new Set([...W.tabs, mobileAgent].filter(isView))].map((id) => {
     const m = id.startsWith('view:meeting:') ? meetingList.find((x) => x.id === id.slice(13)) : null
     if (id.startsWith(STUDIO)) return { paneId: id, view: true, title: studioOf(id).path.split('/').pop(), icon: studioOf(id).root === 'board' ? 'shapes' : 'layers' }
-    if (id.startsWith(BOT_VIEW)) return { paneId: id, view: true, title: id === botView('new') ? t('New bot') : bots.list?.find((b) => botView(b.id) === id)?.name || t('Bot'), icon: 'bot' }
+    if (id.startsWith(BOT_VIEW)) return { paneId: id, view: true, title: id === botView('new') ? t('New bot') : id === botView('connections') ? t('Connections') : bots.list?.find((b) => botView(b.id) === id)?.name || t('Bot'), icon: id === botView('connections') ? 'link' : 'bot' }
     return { paneId: id, view: true, title: VIEWS[id] ? t(VIEWS[id].title) : m?.title || t('Meeting'), icon: VIEWS[id]?.icon || 'mic' }
   })
   // Agents on your other devices, in tabs here: named from what each device last said about them

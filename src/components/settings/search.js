@@ -105,6 +105,7 @@ export const SETTINGS = [
   ]),
   ...at('slack-bot', [
     ['slack-status', tx('Bots'), 'slack bot bots questions answers connect tokens socket mode manifest name', { when: 'slack-bot' }],
+    ['bots-connections-chip', tx('Connections'), 'slack discord teams connection connections shared app one app tokens routing channel default bot command webhook', { when: 'slack-bot' }],
     ['slack-askers', tx('Who Can Ask'), 'slack people askers members refuse guests everyone channels', { when: 'slack-bot' }],
     ['slack-instructions', tx('Instructions'), 'slack bot instructions markdown file bot.md steer', { when: 'slack-bot' }],
     ['slack-folders', tx('Reads From'), 'slack folders read only reads from', { when: 'slack-bot' }],
