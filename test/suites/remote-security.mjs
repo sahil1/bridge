@@ -32,16 +32,18 @@ import crypto from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import WebSocket from 'ws'
-import { startKit, startRelay, checks, until, sleep, freePort, stopTree, TEST, ROOT } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, sleep, freePort, stopTree, TEST, ROOT, IS_WIN } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 import { K, json, text } from '../../relay/web/link.js'
 import { unpackFrame, packFrame, ACCESS } from '../../shared/remote.js'
 
-const { ok, done } = checks('remote-security')
+const { ok, skip, done } = checks('remote-security')
 const relays = []
 const kits = []
 const procs = []
 const PW = 'correct horse 42'
+// A command line for a terminal's shell: PowerShell on Windows (& runs a quoted path), sh elsewhere.
+const typed = (argv) => (IS_WIN ? `& ${argv.map((a) => `'${a}'`).join(' ')}` : argv.map((a) => `"${a}"`).join(' '))
 const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: ${String(e.stack || e.message).split('\n').slice(0, 3).join(' | ')}`) } }
 const OWNER = 'owner@example.com'
 const TS = 'my-mac.tail1234.ts.net'
@@ -191,7 +193,9 @@ try {
     ok(refused(another), 'nor a code for another phone', another.json)
     ok(!(await studio.api('/remote')).access.password, 'nothing changed at Studio')
 
-    // A phone let in by the code in Settings: a one-time link through Tailscale.
+    // A phone let in by the code in Settings: a one-time link through Tailscale. (Bridge AI looks
+    // for tailscale.exe on Windows, which a stand-in script can't be.)
+    if (IS_WIN) return skip('a phone let in by a one-time link through Tailscale', 'Windows runs tailscale.exe, which the stand-in (a script) can\'t be')
     const ph = await studio.api('/phone')
     ok(ph.enabled === true && ph.url === `https://${TS}:8443/`, 'Studio says Tailscale serves it (the stand-in)', ph)
     const code = await studio.api('/phone/link', {})
@@ -502,7 +506,7 @@ try {
     const inPane = async (cwd, port) => {
       const pane = (await studio.api('/agents/launch', { kind: 'shell', cwd, label: 'Dev' })).paneId
       await sleep(800)
-      await studio.api(`/panes/${encodeURIComponent(pane)}/text`, { text: `"${process.execPath}" "${path.join(project, 'dev.cjs')}" ${port}`, enter: true })
+      await studio.api(`/panes/${encodeURIComponent(pane)}/text`, { text: typed([process.execPath, path.join(project, 'dev.cjs'), port]), enter: true })
       return pane
     }
     const P = await freePort()

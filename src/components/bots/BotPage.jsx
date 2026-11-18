@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { Bot } from '../settings/Bots.jsx'
 import BotChat from './BotChat.jsx'
@@ -16,10 +17,18 @@ import './bots-page.css'
 // made, in this tab). onGone: it was deleted. view:bot:connections is Connections (Connections.jsx),
 // the apps your bots are reached through.
 export default function BotPage({ id, phone = false, onOpen, onGone }) {
-  const { list } = useBots()
+  const { on, list } = useBots()
+  const b = list?.find((x) => x.id === id)
+  // (A bot just made isn't in the list as it last came: that's asked for again, once, before it's
+  // called gone; until then, and until the list first comes, its page waits, so a draft is never
+  // shown as a made bot.)
+  const own = id !== 'connections' && id !== 'new'
+  const [asked, setAsked] = useState(null) // { id, list }: the list it wasn't in
+  useEffect(() => { if (own && list && !b && asked?.id !== id) { setAsked({ id, list }); refreshBots() } }, [own, id, list, b, asked])
+  const waiting = own && on && (!list || (!b && (asked?.id !== id || asked.list === list)))
   if (id === 'connections') return <div className={`bp bp-conns${phone ? ' phone' : ''}`}><div className="bp-main sb"><Connections page phone={phone} /></div></div>
   if (id === 'new') return <div className={`bp bp-new${phone ? ' phone' : ''}`}><BotChat id={null} phone={phone} onMade={(bid) => { refreshBots(); onOpen(bid, { replace: true }) }} /></div>
-  const b = list?.find((x) => x.id === id)
+  if (waiting) return <div className={`bp${phone ? ' phone' : ''}`}><div className="skeleton-rows"><div /><div /><div /></div></div>
   if (list && !b) {
     return (
       <div className={`bp${phone ? ' phone' : ''}`}>

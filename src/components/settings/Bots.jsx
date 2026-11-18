@@ -1900,8 +1900,11 @@ export function Bot({ id, onGone, onChanged, notice, page = false, phone = false
   // (How it stands, as its page says it: the sidebar's dot told at once when that changes.)
   const now = !d ? null : d.paused ? 'paused' : d.waiting > 0 || d.state === 'error' ? 'needs' : d.connected || d.state === 'connected' ? 'on' : 'off'
   useEffect(() => { if (page && now && status && now !== status) onChanged?.() }, [now]) // eslint-disable-line react-hooks/exhaustive-deps
+  // (A draft, not made yet, has none of a bot's settings: its page shows its chat instead, once the
+  // list says it's a draft.)
+  useEffect(() => { if (d?.draft) onChanged?.() }, [d?.draft]) // eslint-disable-line react-hooks/exhaustive-deps
   if (error && !d) return <p className="st-note bad"><Icon name="alert" size={13} /> {error}</p>
-  if (!d) return <div className="skeleton-rows"><div /><div /><div /></div>
+  if (!d || d.draft) return <div className="skeleton-rows"><div /><div /><div /></div>
   const proposed = d.memoryCount?.proposed || 0
   const chatOpen = !!assist && !!chat
   const body = (

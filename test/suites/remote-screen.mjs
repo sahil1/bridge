@@ -779,7 +779,12 @@ try {
   // starts is one of its apps)...
   const devPane = (await studio.api('/agents/launch', { kind: 'shell', cwd: project, label: 'Dev server' })).paneId
   await sleep(800)
-  await studio.api(`/panes/${enc(devPane)}/text`, { text: `NODE_PATH="${path.join(ROOT, 'node_modules')}" "${process.execPath}" "${path.join(project, 'dev.mjs')}" ${dport} ${laptop.url}`, enter: true })
+  // (PowerShell on Windows: $env: for the variable, & to run a quoted path.)
+  const nodePath = path.join(ROOT, 'node_modules')
+  const line = IS_WIN
+    ? `$env:NODE_PATH='${nodePath}'; & '${process.execPath}' '${path.join(project, 'dev.mjs')}' ${dport} ${laptop.url}`
+    : `NODE_PATH="${nodePath}" "${process.execPath}" "${path.join(project, 'dev.mjs')}" ${dport} ${laptop.url}`
+  await studio.api(`/panes/${enc(devPane)}/text`, { text: line, enter: true })
   // ...and one that isn't any agent's (started elsewhere).
   const elsewhere = path.join(studio.home, 'elsewhere')
   fs.mkdirSync(elsewhere, { recursive: true })
