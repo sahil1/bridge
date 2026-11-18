@@ -7319,7 +7319,7 @@
   "{program}, port {port}": "{program}, Port {port}",
   "{range} on {sheet}": "{range} in {sheet}",
   "{rows} by {cols}": "{rows} mal {cols}",
-  "{scan} with the phone's camera, or open {link}.": "{scan} mit der Kamera des Handys oder öffne {link}.",
+  "{scan} with the phone's camera. It opens {address} and lets that phone in; each code works once, and a new one shows here every minute.": "{scan} mit der Kamera des Handys. Das öffnet {address} und lässt dieses Handy herein; jeder Code funktioniert einmal, und jede Minute erscheint hier ein neuer.",
   "{service} needs its key, in Settings › Model Providers.": "{service} braucht seinen Schlüssel, unter Einstellungen › Modellanbieter.",
   "{side} margin": "Rand {side}",
   "{size} each": "je {size}",

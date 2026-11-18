@@ -7321,7 +7321,7 @@
   "{program}, port {port}": "{program}, port {port}",
   "{range} on {sheet}": "{range} dans {sheet}",
   "{rows} by {cols}": "{rows} par {cols}",
-  "{scan} with the phone's camera, or open {link}.": "{scan} avec l'appareil photo du téléphone, ou ouvrez {link}.",
+  "{scan} with the phone's camera. It opens {address} and lets that phone in; each code works once, and a new one shows here every minute.": "{scan} avec l'appareil photo du téléphone. Cela ouvre {address} et laisse entrer ce téléphone ; chaque code ne sert qu'une fois, et un nouveau s'affiche ici chaque minute.",
   "{service} needs its key, in Settings › Model Providers.": "{service} a besoin de sa clé, dans Réglages › Fournisseurs de modèles.",
   "{side} margin": "Marge : {side}",
   "{size} each": "{size} chacun",

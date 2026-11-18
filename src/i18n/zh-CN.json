@@ -7315,7 +7315,7 @@
   "{program}, port {port}": "{program}，端口 {port}",
   "{range} on {sheet}": "{sheet} 中的 {range}",
   "{rows} by {cols}": "{rows} 行 × {cols} 列",
-  "{scan} with the phone's camera, or open {link}.": "用手机相机{scan}，或打开 {link}。",
+  "{scan} with the phone's camera. It opens {address} and lets that phone in; each code works once, and a new one shows here every minute.": "用手机相机{scan}。它会打开 {address} 并让那部手机进入；每个代码只能用一次，这里每分钟会显示一个新的。",
   "{service} needs its key, in Settings › Model Providers.": "{service} 需要密钥，请在“设置 › 模型提供商”中添加。",
   "{side} margin": "{side}边距",
   "{size} each": "每个 {size}",

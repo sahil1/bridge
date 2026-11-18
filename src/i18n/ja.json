@@ -7315,7 +7315,7 @@
   "{program}, port {port}": "{program}、ポート {port}",
   "{range} on {sheet}": "{sheet} の {range}",
   "{rows} by {cols}": "{rows} 行 × {cols} 列",
-  "{scan} with the phone's camera, or open {link}.": "スマートフォンのカメラで{scan}か、{link} を開きます。",
+  "{scan} with the phone's camera. It opens {address} and lets that phone in; each code works once, and a new one shows here every minute.": "スマートフォンのカメラで{scan}。{address} が開き、そのスマートフォンが入れるようになります。コードは1回だけ使え、毎分ここに新しいコードが表示されます。",
   "{service} needs its key, in Settings › Model Providers.": "{service} にはキーが必要です（設定 › モデルプロバイダー）。",
   "{side} margin": "{side}の余白",
   "{size} each": "各 {size}",

@@ -7,9 +7,10 @@
 //     paired phone's or another of your computers' requests here (relay.js, inbox.js) once that
 //     device has shown its own key: pairing and linking are as they were;
 //   - the cookie made from the key: a window of the desktop app (its main process sets it before
-//     any window opens), or a browser tab let in by a one-time link (below);
-//   - Tailscale saying it's you, through this server's own Tailscale address while Tailscale
-//     publishes it (Use on your phone), as before: guard.js checks who it is.
+//     any window opens), or a browser tab let in by a one-time link (below), your phone's through
+//     Tailscale too (Use on your phone: the code Settings shows holds one).
+// Tailscale saying who's asking never lets anyone in: it passes requests on to 127.0.0.1, where any
+// program on this computer can send the same headers (guard.js only turns away someone else).
 // Public on purpose, with no key: the app's built files (its code, styles and pictures, the same for
 // everyone with this version, so a page can load to say how to get in), /api/health (that Bridge AI
 // is here, and its version), and the one-time link itself. The relay's pages and the demo aren't
@@ -38,9 +39,8 @@ const COOKIE_DAYS = 400 // as long as browsers keep one
 const PUBLIC_API = new Set(['/api/health'])
 
 // port: this server's own (the cookie is named for it); token(): the key; ui: the built UI's folder;
-// viaTailnet(req): guard.js found it came through Tailscale from you; tailnetServed(): Tailscale
-// publishes this server now.
-export function makeAuth({ port, token, ui, viaTailnet = () => false, tailnetServed = () => false }) {
+// viaTailnet(req): it came through Tailscale (guard.js), for what the page saying how to get in says.
+export function makeAuth({ port, token, ui, viaTailnet = () => false }) {
   const NAME = cookieName(port)
   const codes = new Map() // code -> { until, to }
   const bearer = (req) => { const m = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization || '')); return m ? m[1] : null }
@@ -52,7 +52,7 @@ export function makeAuth({ port, token, ui, viaTailnet = () => false, tailnetSer
     return null
   }
   const keyed = (req) => same(bearer(req), token()) || same(cookieOf(req), cookieValue(token()))
-  const allowed = (req) => keyed(req) || (viaTailnet(req) && tailnetServed())
+  const allowed = (req) => keyed(req)
   const siteKey = (pane) => crypto.createHmac('sha256', token()).update(`site\n${pane}`).digest('base64url').slice(0, 32)
 
   // A file of the built UI (not its page): public.
@@ -81,8 +81,10 @@ export function makeAuth({ port, token, ui, viaTailnet = () => false, tailnetSer
     codes.set(code, { until: now + ms, to: where })
     return { url: `${base}/?open=${code}`, expires: new Date(now + ms).toISOString() }
   }
-  const take = (code) => {
-    const v = codes.get(String(code || ''))
+  // The code, or the whole link pasted on the page saying how to get in.
+  const take = (said) => {
+    const code = /[?&]open=([\w-]+)/.exec(String(said || ''))?.[1] || String(said || '').trim()
+    const v = codes.get(code)
     if (!v) return null
     codes.delete(code)
     return v.until >= Date.now() ? v : null
@@ -92,7 +94,7 @@ export function makeAuth({ port, token, ui, viaTailnet = () => false, tailnetSer
     if (req.method === 'GET' && req.path === '/' && typeof req.query.open === 'string') {
       const v = take(req.query.open)
       if (v) { setCookie(res); res.set('Cache-Control', 'no-store'); return res.redirect(303, v.to) }
-      if (!allowed(req)) return howTo(res, 'used')
+      if (!allowed(req)) return howTo(res, 'used', viaTailnet(req))
       const q = new URLSearchParams(req.query)
       q.delete('open')
       return res.redirect(303, `/${q.size ? `?${q}` : ''}`)
@@ -110,7 +112,7 @@ export function makeAuth({ port, token, ui, viaTailnet = () => false, tailnetSer
     if (page(req)) {
       // Followed from another site, where the cookie stays behind: sent on from here, once.
       if (/^(cross-site|same-site)$/i.test(h(req, 'site'))) return again(res)
-      return howTo(res)
+      return howTo(res, null, viaTailnet(req))
     }
     res.status(401).json({ error: 'Bridge AI needs its key for this. Programs on this computer read it from api-token in Bridge AI\'s data folder; a browser tab gets in with View › Open in Browser in the app, or `bridge-ai open`.', code: 'apiKey' })
   }
@@ -130,13 +132,18 @@ code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--bg);
 // of its own), and then opens what was asked for here, its address as it was (a tester's ?early=…).
 const WATCH = "setInterval(()=>fetch('/api/health',{cache:'no-store'}).then((r)=>r.json()).then((j)=>{if(j.in)location.reload()},()=>{}),2000)"
 const WATCH_SHA = crypto.createHash('sha256').update(WATCH).digest('base64')
-function howTo(res, why) {
-  res.status(401).set({ 'Cache-Control': 'no-store', 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-${WATCH_SHA}'; connect-src 'self'; frame-ancestors 'self'`, 'X-Content-Type-Options': 'nosniff' })
+// tailnet: a phone through Tailscale, let in by the code on the computer (or its link, pasted here).
+function howTo(res, why, tailnet = false) {
+  res.status(401).set({ 'Cache-Control': 'no-store', 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-${WATCH_SHA}'; connect-src 'self'; form-action 'self'; frame-ancestors 'self'`, 'X-Content-Type-Options': 'nosniff' })
+  const steps = tailnet
+    ? `<ol><li>On your computer, open Bridge AI's <b>Settings › Account &amp; Devices › Phone</b>.</li><li>Scan the code there with this phone's camera.</li></ol>
+<form method="get" action="/"><p>Or copy its link there and paste it here:</p><input name="open" autocomplete="off" aria-label="The link from your computer" style="width:100%;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)"> <button style="margin-top:8px;font:inherit;padding:6px 14px">Open</button></form>`
+    : '<ol><li>In the Bridge AI app, choose <b>View › Open in Browser</b>.</li><li>Or, in a terminal on this computer, run <code>bridge-ai open</code>.</li></ol>'
   res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Open Bridge AI</title><style>${PAGE_STYLE}</style></head><body><main>
 <h1>${why === 'used' ? 'That link has been used' : 'Open Bridge AI from the app'}</h1>
-<p>${why === 'used' ? 'Each link to open Bridge AI in a browser works once, for two minutes. Ask for a new one:' : 'Bridge AI opens only in a browser you let in, so other programs and websites can\'t use it. To let this browser in:'}</p>
-<ol><li>In the Bridge AI app, choose <b>View › Open in Browser</b>.</li><li>Or, in a terminal on this computer, run <code>bridge-ai open</code>.</li></ol>
-<p>This browser then stays let in, and this page opens by itself.</p>
+<p>${why === 'used' ? `Each link to open Bridge AI in a browser works once, for two minutes. ${tailnet ? 'Get a new one:' : 'Ask for a new one:'}` : `Bridge AI opens only in a browser you let in, so other programs and websites can't use it. To let this ${tailnet ? 'phone' : 'browser'} in:`}</p>
+${steps}
+<p>This ${tailnet ? 'phone' : 'browser'} then stays let in, and this page opens by itself.</p>
 </main><script>${WATCH}</script></body></html>`)
 }
 

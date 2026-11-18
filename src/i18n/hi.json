@@ -7315,7 +7315,7 @@
   "{program}, port {port}": "{program}, पोर्ट {port}",
   "{range} on {sheet}": "{sheet} पर {range}",
   "{rows} by {cols}": "{rows} × {cols}",
-  "{scan} with the phone's camera, or open {link}.": "फ़ोन के कैमरे से {scan}, या {link} खोलें।",
+  "{scan} with the phone's camera. It opens {address} and lets that phone in; each code works once, and a new one shows here every minute.": "फ़ोन के कैमरे से {scan}। यह {address} खोलता है और उस फ़ोन को अंदर आने देता है; हर कोड एक बार काम करता है, और हर मिनट यहाँ एक नया दिखता है।",
   "{service} needs its key, in Settings › Model Providers.": "{service} को अपनी कुंजी चाहिए, सेटिंग्स › मॉडल प्रोवाइडर में।",
   "{side} margin": "{side} मार्जिन",
   "{size} each": "हर एक {size}",
