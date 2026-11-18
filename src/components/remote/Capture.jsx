@@ -5,9 +5,13 @@
 // can't be made, as pictures to the server, which passes them on over the link (server/remote.js).
 // A device's input over the peer-to-peer channel goes to the server here too, which decides what's
 // done with it. ?fake=1 (tests): a drawn canvas instead of the screen, so nothing real is taken.
+// Sharp: the screen at its own pixels (shared/remote.js captureSize); peer-to-peer, resolution kept
+// over frames when the bandwidth drops, at a bitrate for the size; as pictures, WebP where this page
+// can make it, each as good as fits in one message. Another screen in the same session takes the
+// place of the first (the viewer picked it), with nothing to connect again.
 import { useEffect, useState } from 'react'
 import { openSocket } from '../../api.js'
-import { packFrame, MAX_FRAME } from '../../../shared/remote.js'
+import { packFrame, MAX_FRAME, PICTURE, captureSize, bitrateFor, sdpBitrate } from '../../../shared/remote.js'
 
 const FAKE = new URLSearchParams(location.search).get('fake') === '1'
 const FAKE_SOURCES = [{ id: 'fake-1', name: 'Test screen', kind: 'screen', w: 640, h: 400, primary: true, bounds: { x: 0, y: 0, width: 640, height: 400 } }]
@@ -34,8 +38,29 @@ async function streamOf(source) {
     s.stopDraw = () => clearInterval(tm)
     return s
   }
-  return navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: source.id, maxWidth: 2560, maxHeight: 1600, maxFrameRate: 30 } } })
+  // Its own pixels, its shape kept exactly (a box of another shape would letterbox the picture).
+  const size = captureSize(source.w, source.h)
+  return navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: source.id, maxWidth: size.w, maxHeight: size.h, maxFrameRate: 30 } } })
 }
+// Text on a screen: detail over motion.
+const forScreen = (stream) => { const v = stream.getVideoTracks()[0]; if (v && 'contentHint' in v) v.contentHint = 'detail'; return v }
+// The sender's settings: resolution kept when the bandwidth drops, at most this bitrate.
+async function tune(pc, w, h) {
+  const sender = pc?.getSenders?.().find((x) => x.track?.kind === 'video')
+  if (!sender?.getParameters) return
+  try {
+    const p = sender.getParameters()
+    p.degradationPreference = 'maintain-resolution'
+    if (!p.encodings?.length) p.encodings = [{}]
+    p.encodings[0].maxBitrate = bitrateFor(w, h)
+    p.encodings[0].maxFramerate = 30
+    await sender.setParameters(p)
+  } catch { /* this browser keeps its own */ }
+}
+// WebP where this page can make it (sharper than JPEG at the same size), else JPEG.
+let webp = null
+const pictureType = () => (webp ??= (() => { try { const c = document.createElement('canvas'); c.width = c.height = 2; return c.toDataURL('image/webp').startsWith('data:image/webp') } catch { return false } })()) ? 'image/webp' : 'image/jpeg'
+
 
 export default function Capture() {
   const [said, setSaid] = useState('')
@@ -55,29 +80,40 @@ export default function Capture() {
       s.stream?.stopDraw?.()
       setSaid(sessions.size ? `${sessions.size}` : '')
     }
-    // Pictures, a few a second: each as small as it needs to be to go in one message.
+    // Pictures, a few a second: each as good as fits in one message. Too big, it's made again at a
+    // lower quality (then narrower) straight away; well under, the next one is better (then wider).
     const frames = (id, rate) => {
       const s = sessions.get(id)
       if (!s || s.framing) return
       s.framing = true
       const c = document.createElement('canvas')
+      const g = c.getContext('2d')
+      const type = pictureType()
       const tick = async () => {
         if (!sessions.has(id)) return
         const v = s.video
         if (v.videoWidth) {
-          const w = Math.round(Math.min(1600, v.videoWidth) * s.scale)
-          const h = Math.round(w * v.videoHeight / v.videoWidth)
-          c.width = w
-          c.height = h
-          c.getContext('2d').drawImage(v, 0, 0, w, h)
-          const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', s.q))
-          if (blob) {
+          for (let tries = 0; tries < 4; tries++) {
+            const w = Math.round(Math.min(v.videoWidth, s.width))
+            const h = Math.round(w * v.videoHeight / v.videoWidth)
+            if (c.width !== w || c.height !== h) { c.width = w; c.height = h }
+            g.imageSmoothingQuality = 'high'
+            g.drawImage(v, 0, 0, w, h)
+            const blob = await new Promise((ok) => c.toBlob(ok, type, s.q))
+            if (!blob || !sessions.has(id)) break
             const bytes = new Uint8Array(await blob.arrayBuffer())
-            if (bytes.byteLength > MAX_FRAME) { s.q = Math.max(0.3, s.q - 0.15); if (s.q <= 0.3) s.scale = Math.max(0.4, s.scale - 0.15) } else {
-              send({ t: 'frame', session: id })
-              if (ws?.readyState === 1) ws.send(packFrame('image/jpeg', w, h, bytes))
-              if (bytes.byteLength < MAX_FRAME / 3 && s.q < 0.7) s.q = Math.min(0.7, s.q + 0.05)
+            if (bytes.byteLength > MAX_FRAME) {
+              if (s.q > PICTURE.worst) s.q = Math.max(PICTURE.worst, s.q - 0.1)
+              else s.width = Math.max(PICTURE.narrowest, Math.round(s.width * 0.82))
+              continue
             }
+            send({ t: 'frame', session: id })
+            if (ws?.readyState === 1) ws.send(packFrame(type, w, h, bytes))
+            if (bytes.byteLength < MAX_FRAME * 0.55) {
+              if (s.q < PICTURE.best) s.q = Math.min(PICTURE.best, s.q + 0.04)
+              else if (s.width < Math.min(PICTURE.widest, v.videoWidth)) s.width = Math.min(PICTURE.widest, Math.round(s.width * 1.12))
+            }
+            break
           }
         }
         s.timer = setTimeout(tick, 1000 / Math.max(0.5, rate))
@@ -98,13 +134,14 @@ export default function Capture() {
       video.playsInline = true
       video.srcObject = stream
       await video.play().catch(() => {})
-      const s = { stream, video, q: 0.6, scale: 1, timer: null }
+      const s = { stream, video, q: PICTURE.quality, width: PICTURE.width, timer: null }
       sessions.set(m.session, s)
       setSaid(String(sessions.size))
-      const track = stream.getVideoTracks()[0]
+      const track = forScreen(stream)
       const set = track?.getSettings?.() || {}
-      send({ t: 'started', session: m.session, w: set.width || video.videoWidth || 0, h: set.height || video.videoHeight || 0 })
-      track?.addEventListener('ended', () => { send({ t: 'error', session: m.session, why: 'The screen stopped being shared here.' }); stop(m.session) })
+      s.size = { w: set.width || video.videoWidth || 0, h: set.height || video.videoHeight || 0 }
+      send({ t: 'started', session: m.session, ...s.size })
+      watchEnd(m.session, track)
       if (!m.p2p) return frames(m.session, m.rate)
       try {
         const pc = new RTCPeerConnection({ iceServers: m.p2p.ice || [] })
@@ -115,8 +152,33 @@ export default function Capture() {
         pc.onicecandidate = (e) => { if (e.candidate) send({ t: 'ice', session: m.session, c: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate }) }
         const offer = await pc.createOffer()
         await pc.setLocalDescription(offer)
+        await tune(pc, s.size.w, s.size.h)
         send({ t: 'offer', session: m.session, sdp: offer.sdp })
       } catch { frames(m.session, m.rate) }
+    }
+    // The screen's own end (unplugged, taken away): said, and the session stops.
+    const watchEnd = (id, track) => track?.addEventListener('ended', () => { const s = sessions.get(id); if (s?.stream?.getVideoTracks()[0] !== track) return; send({ t: 'error', session: id, why: 'The screen stopped being shared here.' }); stop(id) })
+    // Another screen picked by the viewer: its stream in place of the last, over the same connection.
+    const switchTo = async (m) => {
+      const s = sessions.get(m.session)
+      if (!s) return
+      let stream
+      try { stream = await streamOf(m.source) } catch (e) { send({ t: 'error', session: m.session, why: `That screen couldn't be shared: ${e.message}` }); return }
+      if (sessions.get(m.session) !== s) { stream.getTracks().forEach((x) => x.stop()); stream.stopDraw?.(); return }
+      const old = s.stream
+      const track = forScreen(stream)
+      s.stream = stream
+      s.video.srcObject = stream
+      await s.video.play().catch(() => {})
+      const set = track?.getSettings?.() || {}
+      s.size = { w: set.width || s.video.videoWidth || m.source.w || 0, h: set.height || s.video.videoHeight || m.source.h || 0 }
+      s.width = PICTURE.width
+      const sender = s.pc?.getSenders?.().find((x) => x.track?.kind === 'video')
+      if (sender) { await sender.replaceTrack(track).catch(() => {}); await tune(s.pc, s.size.w, s.size.h) }
+      watchEnd(m.session, track)
+      old?.getTracks().forEach((x) => x.stop())
+      old?.stopDraw?.()
+      send({ t: 'started', session: m.session, ...s.size })
     }
     const connect = () => {
       if (closed) return
@@ -130,10 +192,12 @@ export default function Capture() {
         if (m.t === 'sources?') hello('sources').catch(() => {})
         else if (m.t === 'start') start(m).catch(() => {})
         else if (m.t === 'stop') stop(m.session)
-        else if (m.t === 'answer' && s?.pc) s.pc.setRemoteDescription({ type: 'answer', sdp: m.sdp }).catch(() => {})
+        else if (m.t === 'switch' && s) switchTo(m).catch(() => {})
+        // Told to start sharp rather than climb from a blur, with a floor that keeps text readable.
+        else if (m.t === 'answer' && s?.pc) s.pc.setRemoteDescription({ type: 'answer', sdp: sdpBitrate(m.sdp, { startKbps: Math.min(4000, bitrateFor(s.size?.w, s.size?.h) / 3000), minKbps: 500 }) }).then(() => tune(s.pc, s.size?.w, s.size?.h), () => {})
         else if (m.t === 'ice' && s?.pc) s.pc.addIceCandidate(m.c).catch(() => {})
         else if (m.t === 'fallback' && s) { try { s.pc?.close() } catch { /* closed */ } s.pc = null; frames(m.session, m.rate) }
-        else if (m.t === 'smaller' && s) { s.q = Math.max(0.3, s.q - 0.15); s.scale = Math.max(0.4, s.scale - 0.1) }
+        else if (m.t === 'smaller' && s) { s.q = Math.max(PICTURE.worst, s.q - 0.1); s.width = Math.max(PICTURE.narrowest, Math.round(s.width * 0.85)) }
       }
       ws.onclose = () => { for (const id of [...sessions.keys()]) stop(id); if (!closed) setTimeout(connect, 2000) }
     }

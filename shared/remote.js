@@ -25,6 +25,55 @@ export const INPUT_PER_SECOND = { hosted: 6, own: 30 }
 // Someone at the computer moving its mouse or pressing a key: remote input waits this long.
 export const PAUSE_MS = 3000
 
+// ---------- the guardrails (server/remote.js) ----------
+// The Remote Access Password: this many wrong tries lock a device out for lockMinutes; Ask Here
+// First waits askSeconds for Allow, then it's a no; control goes back to view-only after
+// idleMinutes without input; a password has at least passwordMin characters.
+export const ACCESS = { tries: 5, lockMinutes: 15, askSeconds: 30, idleMinutes: 10, passwordMin: 6 }
+
+// ---------- sharpness ----------
+// The screen is taken at its own pixels (a Retina display's, not its points), up to 3840 on its
+// long side and 2400 on its short one: a 5K display comes at 3840 x 2160, its shape kept.
+export function captureSize(w, h) {
+  if (!(w > 0) || !(h > 0)) return { w: 3840, h: 2400 }
+  const s = Math.min(1, 3840 / Math.max(w, h), 2400 / Math.min(w, h))
+  return { w: Math.round(w * s), h: Math.round(h * s) }
+}
+// Peer-to-peer: resolution is kept when the bandwidth drops (frames go first, text stays sharp),
+// within a bitrate that suits the size, starting high enough to be sharp from the first second.
+export const bitrateFor = (w, h) => Math.round(Math.min(12_000_000, Math.max(2_500_000, (w || 1920) * (h || 1080) * 2.5)))
+// The answer's video codecs, told to start at startKbps and never go under minKbps (Chromium's own
+// x-google-* settings; other browsers ignore them). A codec without settings gets a line of its own.
+export function sdpBitrate(sdp, { startKbps, minKbps }) {
+  const lines = String(sdp).split('\r\n')
+  const add = `x-google-start-bitrate=${Math.round(startKbps)};x-google-min-bitrate=${Math.round(minKbps)}`
+  const video = new Set(lines.map((l) => /^a=rtpmap:(\d+) (VP8|VP9|H264|AV1)\/90000/i.exec(l)?.[1]).filter(Boolean))
+  const has = new Set()
+  const out = lines.map((l) => {
+    const m = /^a=fmtp:(\d+) (.*)$/.exec(l)
+    if (!m || !video.has(m[1])) return l
+    has.add(m[1])
+    return /x-google-start-bitrate/.test(m[2]) ? l : `a=fmtp:${m[1]} ${m[2]};${add}`
+  })
+  return out.flatMap((l) => { const pt = /^a=rtpmap:(\d+) /.exec(l)?.[1]; return pt && video.has(pt) && !has.has(pt) ? [l, `a=fmtp:${pt} ${add}`] : [l] }).join('\r\n')
+}
+// Pictures through the relay: WebP where the page can make it (sharper than JPEG at the size),
+// starting at this quality and this width, each adjusted to the picture's size against MAX_FRAME.
+export const PICTURE = { quality: 0.82, best: 0.92, worst: 0.55, width: 2048, widest: 2560, narrowest: 960 }
+
+// ---------- where the picture is shown ----------
+// A picture w x h fitted inside a box bw x bh, its shape kept: its size and scale.
+export const fitIn = (bw, bh, w, h) => { const s = w > 0 && h > 0 ? Math.min(bw / w, bh / h) : 0; return { w: w * s, h: h * s, scale: s } }
+// Where on the picture a point falls, from 0 to 1 each way, given the box showing it (rect: left,
+// top, width, height; the picture fitted inside it, centred), or null when it's outside the picture.
+export function pointAt(rect, w, h, clientX, clientY) {
+  if (!w || !h || !rect?.width || !rect?.height) return null
+  const f = fitIn(rect.width, rect.height, w, h)
+  const x = (clientX - rect.left - (rect.width - f.w) / 2) / f.w
+  const y = (clientY - rect.top - (rect.height - f.h) / 2) / f.h
+  return x < 0 || y < 0 || x > 1 || y > 1 ? null : { x, y }
+}
+
 // ---------- input ----------
 // What the viewer sends, each checked here before anything is pressed:
 //   { t: 'move', x, y }            x, y from 0 to 1 across the screen shown
