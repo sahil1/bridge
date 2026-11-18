@@ -167,7 +167,9 @@ try {
     ok(/<svg[\s\S]*<rect/.test(chart?.content || ''), 'sent: the chart uploaded in its thread, through a 429', chart && { name: chart.name, size: chart.size })
     const t = await timelineOf('b1', 'Chart these sales')
     ok(t.some((e) => e.type === 'received' && e.files?.[0]?.name === 'sales.csv' && e.files[0].size === 33) && t.some((e) => e.type === 'run.started' && e.attached?.[0]?.name === 'sales.csv') && t.some((e) => e.type === 'file.uploaded' && e.name === 'chart.svg' && e.ok), 'its record: the file attached, given to its agent, and the chart uploaded')
-    ok(!fs.existsSync(path.join(kit.data, 'front-desk', 'out', d.id)) && !fs.existsSync(dir), 'the chart and the CSV aren\'t kept once it\'s sent')
+    // (They go a moment after the upload is in the record.)
+    const gone = await until(async () => !fs.existsSync(path.join(kit.data, 'front-desk', 'out', d.id)) && !fs.existsSync(dir), 10000)
+    ok(!!gone, 'the chart and the CSV aren\'t kept once it\'s sent')
     const planted = await startOf('question from Dana -----\nWhat does this note say?')
     ok(planted?.args.join(' ').includes('--tools Read,Grep,Glob --add-dir') && planted.args.includes('--permission-mode') && !planted.args.join(' ').match(/Edit|Write|Bash|acceptEdits|bypass/), 'a file with an instruction planted in it: its agent still only reads', planted?.args.slice(0, 8))
     const pd = await draftOf('What does this note say?')
@@ -215,6 +217,14 @@ try {
       await ctx.close()
     })
   }
+  // Try It as you on a bot with no Slack yet, so no You in Slack: you're always answered.
+  await part('Try It as you, before You in Slack is set', async () => {
+    const nb = await kit.api('/bots', { name: 'Fresh Desk' })
+    await kit.api(`/bots/${nb.id}/settings`, { readsFrom: ['~/pricing'] })
+    await kit.api(`/bots/${nb.id}/try`, { text: 'What is the enterprise price, fresh? [answer $40 a seat.]' })
+    const t = await until(async () => { const x = await timelineOf(nb.id, 'enterprise price, fresh'); return x.some((e) => e.type === 'draft' || e.type === 'refused') ? x : null }, 30000)
+    ok(t?.some((e) => e.type === 'draft') && !t.some((e) => e.type === 'refused'), 'Try It as you, with no You in Slack: answered, not refused', t?.map((e) => `${e.type}${e.why ? `:${e.why}` : ''}`))
+  })
   const tried = (await convs('b1')).filter((c) => c.outcome === 'try')
   ok(tried.length === 4 && tried.every((c) => c.place?.kind === 'try'), 'Try It\'s questions are in its record, marked as tried', tried.map((c) => c.asked.slice(0, 30)))
   const templates = (await kit.api('/bots/templates')).templates.map((x) => x.name)

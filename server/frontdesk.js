@@ -310,7 +310,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   delegate.list('desk', { tasks, dir: ensureDir(ANSWERS), also: [CHANGES, FILES, BRIEFS], max: () => Math.max(1, Math.min(5, ...[...bots.keys()].map((id) => botOf(id)?.max || 2))), heard: (h) => heard(h) })
   const chan = (b, q) => (q?.try ? TRY : b?.channel)
   // You: you in Slack, or you in Discord or Teams (owners), whichever you were asked by.
-  const isOwner = (bot, p) => !!(p?.id && ((bot?.owner?.id && bot.owner.id === p.id) || Object.values(bot?.owners || {}).some((o) => o?.id && o.id === p.id)))
+  // (you: asked as you in Try It, or posted for you by a routine, before You in Slack is set.)
+  const isOwner = (bot, p) => !!(p?.you === true || (p?.id && ((bot?.owner?.id && bot.owner.id === p.id) || Object.values(bot?.owners || {}).some((o) => o?.id && o.id === p.id))))
   const ownerName = (bot) => you() || bot?.owner?.name || 'the owner'
 
   // ---------- The record ----------
@@ -1408,12 +1409,12 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (!bot || !bots.has(id)) throw Object.assign(new Error('No such bot'), { status: 404 })
     const words = String(text || '').trim()
     if (!words) throw Object.assign(new Error('Ask it something'), { status: 400 })
-    const person = as ? (bot.askers || []).find((x) => x.id === as) || (bot.owner?.id === as ? bot.owner : null) : bot.owner || { id: 'UYOU', name: you() }
+    const person = as ? (bot.askers || []).find((x) => x.id === as) || (bot.owner?.id === as ? { ...bot.owner, you: true } : null) : { ...(bot.owner || { id: 'UYOU', name: you() }), you: true }
     if (!person) throw Object.assign(new Error('Pick someone who may ask'), { status: 400 })
     const ts = (Date.now() / 1000).toFixed(6)
     const b = bots.get(id)
     const qid = `${id}-q${b.st.next}`
-    await hear(id, { ts, channel: 'TRY', thread: null, mention: true, dm: true, try: true, from: { id: person.id, name: person.name || you() }, text: words, place: { kind: 'try', id: 'TRY', name: null }, at: now(), late: false, reply: { channel: 'TRY', thread: null } })
+    await hear(id, { ts, channel: 'TRY', thread: null, mention: true, dm: true, try: true, from: { id: person.id, name: person.name || you(), ...(person.you ? { you: true } : {}) }, text: words, place: { kind: 'try', id: 'TRY', name: null }, at: now(), late: false, reply: { channel: 'TRY', thread: null } })
     return { q: qid, conv: `TRY:${ts}` }
   }
   // A post a routine scheduled (routines.js, to: 'bot'): put to the bot as from you, answered, and
@@ -1428,8 +1429,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const ts = (Date.now() / 1000).toFixed(6)
     const qid = `${id}-q${b.st.next}`
     const p = platOf(channel.id)
-    const me = (p === 'slack' ? bot.owner : bot.owners?.[p]) || bot.owner || { id: 'UYOU', name: you() }
-    await hear(id, { ts, channel: channel.id, thread: null, mention: true, dm: false, scheduled: true, platform: p, routine: { id: routine, name }, from: { id: me.id, name: me.name || you() }, text: String(text || ''), place: { kind: 'channel', id: channel.id, name: channel.name || null, ...(p !== 'slack' ? { platform: p } : {}) }, at: now(), late: false, reply: { channel: channel.id, thread: null, ...(p !== 'slack' ? { platform: p } : {}) } })
+    const me = { ...((p === 'slack' ? bot.owner : bot.owners?.[p]) || bot.owner || { id: 'UYOU', name: you() }), you: true }
+    await hear(id, { ts, channel: channel.id, thread: null, mention: true, dm: false, scheduled: true, platform: p, routine: { id: routine, name }, from: { id: me.id, name: me.name || you(), you: true }, text: String(text || ''), place: { kind: 'channel', id: channel.id, name: channel.name || null, ...(p !== 'slack' ? { platform: p } : {}) }, at: now(), late: false, reply: { channel: channel.id, thread: null, ...(p !== 'slack' ? { platform: p } : {}) } })
     const q = b.st.questions.get(qid)
     const h = q?.helper ? delegate.get(q.helper) : null
     if (q?.state === 'refused' || (q?.state === 'draft' && q.needsOwner)) throw new Error(q.why || `${bot.name} couldn't take it: ${q.refused || ''}`)
