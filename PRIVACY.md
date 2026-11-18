@@ -160,12 +160,28 @@ Find a time reads your calendar on your computer and holds or adds nothing; the 
 only if you put them in a draft. Copy and Open in your mail app hand the draft to you and your mail
 app; you send it.
 
-Bots (a beta feature, off until you turn it on) are Slack apps you make yourself, each with the name
-you give it, in your own workspace, and each talks to Slack only from your computer: through Slack's
-Socket Mode, a connection your computer opens to `slack.com` and then to the `wss-*.slack.com`
-address Slack gives it. None of it goes through Bold Bridge or your relay, and no app of Bold
-Bridge's is involved. Each bot's two tokens are kept in `~/.bridge-ai/bots/<bot>/slack.json`,
-readable by you only, never in your settings and never given to an agent; Disconnect deletes them.
+Bots (a beta feature, off until you turn it on) answer in Slack through apps you make yourself, in
+your own workspace: a connection is one such app, with the name you give it. One shared connection
+reaches all your bots (each answer posted with that bot's name and icon, which Slack lets the app do
+with its `chat:write.customize` scope), and a bot can have a connection of its own, an app with its
+name. Each talks to Slack only from your computer: through Slack's Socket Mode, a connection your
+computer opens to `slack.com` and then to the `wss-*.slack.com` address Slack gives it. None of it
+goes through Bold Bridge or your relay, and no app of Bold Bridge's is involved. A connection's two
+tokens are kept in `~/.bridge-ai/connections/<connection>/slack.json`, readable by you only, never
+in your settings, never shown back but by their last four, and never given to an agent or a model;
+Disconnect deletes them. (A bot made before connections had its tokens in its own folder; they moved
+to a connection of its own, unchanged.)
+
+On a shared connection, which bot a question is for is decided on your computer: a bot's own slash
+command, the bot you set for that channel, a bot's name at the start, the bot that answered in that
+thread, or in a direct message the bot that person asked last. When none of those says, and more
+than one bot may answer that person there, AI Assist's model (the one Bridge AI already uses for AI
+Assist, which you chose) is sent the question's words and the names and descriptions of those bots,
+nothing else, and only one of those bots can come of it; with no model, or when it can't tell, the
+person is asked which, with a button for each. The connection keeps a record of where each question
+went and why, with who asked and where but not what, in
+`~/.bridge-ai/connections/<connection>/routing.jsonl` (its latest thousand), and the bot each person
+asked last in a direct message, in `state.json` beside it.
 
 What a bot reads from Slack, and when:
 - Slack sends your computer the messages in the conversations the bot is in: its direct messages,
@@ -202,10 +218,11 @@ months deleted whole; it's never in usage counts or crash reports; your phone an
 computers show it in Settings › Bots through their end-to-end encrypted link, which the relay passes
 on without being able to read; and Activity exports it only when you ask. A bot's
 settings and instructions are in the same folder, `~/.bridge-ai/bots/<bot>/`. Deleting a bot deletes
-its tokens, its settings and its instructions, and keeps its record, to look at and export in Settings
-› Bots, until the time it's kept for runs out. If you also delete its activity history, its record
-keeps only that it was deleted, when and by whom. Its Slack app stays in Slack until you delete it
-there.
+its settings, its instructions and its own connections' tokens (a shared connection stays, for your
+other bots), and keeps its record, to look at and export in Settings › Bots, until the time it's kept
+for runs out. If you also delete its activity history, its record keeps only that it was deleted,
+when and by whom. An app stays in Slack until you delete it there; so does a bot's own app after you
+move it to the shared connection, which deletes its tokens here.
 
 What else a bot sends to Slack, and keeps:
 - With "You in Slack" set (Settings › Bots), each draft waiting for you, and each thing it proposes to
@@ -250,10 +267,15 @@ settings you gave it (with the Slack names and ids of the people who may ask) an
 never its tokens; it goes where you save it. A scheduled post is a routine in
 `~/.bridge-ai/routines.json`, its words put to the bot as from you. Bridge AI's health check, asked
 on the computer it runs on (the Docker image's), lists each bot's name and whether it's connected.
-A bot can also answer in Discord and in Microsoft Teams, each through an app you make there
-yourself, its secrets kept in the bot's folder (`discord.json`, `teams.json`), readable by you only,
-never in your settings, a log or its record, and never given to an agent. Neither goes through Bold
-Bridge or your relay.
+A bot can also answer in Discord and in Microsoft Teams, each through a connection there (one shared
+by your bots, or one of the bot's own), an app you make there yourself, its secrets kept in the
+connection's folder (`discord.json`, `teams.json`), readable by you only, never in your settings, a
+log or its record, and never given to an agent or a model. Neither goes through Bold Bridge or your
+relay. On a shared Discord connection, an answer goes through a webhook the app makes in that channel
+(with Discord's Manage Webhooks permission, which its invite link asks for), posted with the bot's
+name and picture; the webhook's token is kept with the app's. Where it can't make one, and in direct
+messages, an answer starts with the bot's name. In Teams an app has one name, so on a shared
+connection each answer starts with the bot's name.
 - Discord: the bot connects from your computer to Discord's Gateway, through `discord.com` and then
   the `gateway.discord.gg` address Discord gives it, as Slack's Socket Mode does; nothing reaches
   your computer from the internet. Discord sends it the messages in the servers it was added to and
@@ -286,8 +308,8 @@ channel there, and in Discord its reactions (Teams has none for bots: it shows t
 instead). Slack's own stay in Slack: drafts in your Slack direct messages with their buttons, its
 working status and Stop, streamed answers and files. A file sent with a question in Discord or Teams
 is named in its record, never downloaded or read. Its record says which of them each question came
-from, and keeps people and channels there by their Discord or Teams ids. Disconnect, under Where It
-Answers, deletes its Discord token or its Teams app's secret from your computer.
+from, and keeps people and channels there by their Discord or Teams ids. Disconnect, under
+Connections, deletes a Discord token or a Teams app's secret from your computer.
 
 Files shows your agents' folders, and only the other folders you add to it yourself (Places, with
 the folder picker); it keeps each place's path in `~/.bridge-ai/places.json`, not what's in it, and

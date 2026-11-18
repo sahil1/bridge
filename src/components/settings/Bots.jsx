@@ -6,6 +6,7 @@ import { canDownload, toPhone } from '../../download.js'
 import { useFolder } from '../files/fsapi.js'
 import { ago } from '../Machines.jsx'
 import AiAssist from '../AiAssist.jsx'
+import { Connections, BotReach } from '../bots/Connections.jsx'
 import { t } from '../../i18n/index.js'
 import './bots.css'
 
@@ -51,6 +52,10 @@ const slugOf = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').
 // Words someone asked it to forget (!forget me): the record keeps that they said something.
 const wordsOf = (s) => (s == null ? t('(their words were forgotten)') : s)
 
+// A bot, or a connection (kind: 'connection': bots/Connections.jsx shows one with the same platform
+// sections, its app's steps, tokens and you there), by where its settings are.
+const apiOf = (d) => (d.kind === 'connection' ? `/connections/${d.id}` : `/bots/${d.id}`)
+
 // ---------- What several sections pick from ----------
 // The workspace's people, asked at most once a minute for each bot (Who Can Ask, You in Slack and
 // Memory all pick from them); and the channels it's in (Channels, Scheduled Posts, Memory).
@@ -73,7 +78,7 @@ function usePeople(d) {
   useEffect(() => {
     if (!connected) return undefined
     let live = true
-    cached('people', d.id, () => api(`/bots/${d.id}/people`).then((r) => r.people || [])).then((x) => { if (live) { setPeople(x); setError(null) } }, (e) => live && setError(e.message))
+    cached('people', d.id, () => api(`${apiOf(d)}/people`).then((r) => r.people || [])).then((x) => { if (live) { setPeople(x); setError(null) } }, (e) => live && setError(e.message))
     return () => { live = false }
   }, [connected, d.id])
   return { people, error, connected }
@@ -85,7 +90,7 @@ function useChannels(d) {
   useEffect(() => {
     if (!connected) return undefined
     let live = true
-    cached('channels', d.id, () => api(`/bots/${d.id}/channels`).then((r) => r.channels || []), 30000).then((x) => { if (live) { setChannels(x); setError(null) } }, (e) => live && setError(e.message))
+    cached('channels', d.id, () => api(`${apiOf(d)}/channels`).then((r) => r.channels || []), 30000).then((x) => { if (live) { setChannels(x); setError(null) } }, (e) => live && setError(e.message))
     return () => { live = false }
   }, [connected, d.id])
   return { channels, error, connected }
@@ -256,7 +261,7 @@ const SCOPE_FOR = () => ({
 
 // An app made from an earlier manifest lacks scopes this one needs: which, what each is for, and how
 // to update it.
-function UpdateApp({ d, onAgain }) {
+export function UpdateApp({ d, onAgain }) {
   const lacks = d.updateApp?.missing || d.scopes?.missing || []
   if (!d.tokens || !lacks.length) return null
   const json = JSON.stringify(d.manifest, null, 2)
@@ -285,19 +290,25 @@ function UpdateApp({ d, onAgain }) {
 function Identity({ d, save, onDelete }) {
   const [name, setName] = useState(d.name)
   const [about, setAbout] = useState(d.description || '')
+  const [icon, setIcon] = useState(d.icon || '')
   const [sure, setSure] = useState(false)
   const [history, setHistory] = useState(false) // its activity deleted too: only when you tick it
   useEffect(() => { setName(d.name) }, [d.name])
   useEffect(() => { setAbout(d.description || '') }, [d.description])
+  useEffect(() => { setIcon(d.icon || '') }, [d.icon])
+  // (Its icon matters where a shared connection posts as it: Slack takes an emoji or a picture.)
+  const anyShared = Object.values(d.connections || {}).some((c) => c?.shared)
   return (
     <section className="st-sec" data-setting="slack-identity">
       <h4>{t('Name and Description')}</h4>
       <div className="sb-ident">
         <label className="sb-field"><span>{t('Name')}</span><input className="st-input" value={name} maxLength={35} onChange={(e) => setName(e.target.value)} onBlur={() => { if (name.trim() && name.trim() !== d.name) save({ name: name.trim() }); else setName(d.name) }} aria-label={t('Its name in Slack')} /></label>
         <label className="sb-field"><span>{t('Description')}</span><input className="st-input" value={about} maxLength={140} placeholder={t('What it answers, in a line')} onChange={(e) => setAbout(e.target.value)} onBlur={() => { if (about.trim() !== (d.description || '')) save({ description: about.trim() }) }} /></label>
+        {anyShared && <label className="sb-field" data-setting="bot-icon"><span>{t('Icon')}</span><input className="st-input" value={icon} maxLength={500} placeholder=":moneybag:" onChange={(e) => setIcon(e.target.value)} onBlur={() => { if (icon.trim() !== (d.icon || '')) save({ icon: icon.trim() }) }} aria-label={t('Its icon, as a shared connection posts it')} /></label>}
       </div>
-      <p className="muted small">{t('Its name in Slack, from the manifest. An app made before a rename keeps its old name until you paste the new manifest under App Manifest. Slack\'s manifest can\'t carry an icon: add one in your app\'s page, Basic Information › Display Information › App icon.')}</p>
-      {d.appId && <div className="st-row"><a className="btn small" href={`https://api.slack.com/apps/${encodeURIComponent(d.appId)}/general`} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {t('Add an icon in Slack')}</a></div>}
+      {anyShared && <p className="muted small">{t('On a shared connection, each answer shows its name and this icon: an emoji\'s name in Slack (:moneybag:), or a picture\'s https address (Slack and Discord). Its description is how AI Assist picks it when a question doesn\'t name a bot.')}</p>}
+      {!d.connections?.slack?.shared && <p className="muted small">{t('Its name in Slack, from the manifest. An app made before a rename keeps its old name until you paste the new manifest under App Manifest. Slack\'s manifest can\'t carry an icon: add one in your app\'s page, Basic Information › Display Information › App icon.')}</p>}
+      {d.appId && !d.connections?.slack?.shared && <div className="st-row"><a className="btn small" href={`https://api.slack.com/apps/${encodeURIComponent(d.appId)}/general`} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {t('Add an icon in Slack')}</a></div>}
       <div className="st-row sb-export-bot" data-setting="slack-export">
         <Save className="ghost-btn" href={apiUrl(`/bots/${d.id}/bundle`)} name={`${fileOf(d)}.bridge-bot.json`}><Icon name="export" size={12} /> {t('Export {bot}', { bot: d.name })}</Save>
         <span className="muted small">{t('A file with its instructions, memory and settings, to import on another computer (or in Docker); never its tokens.')}</span>
@@ -329,13 +340,13 @@ export function Connect({ d, reload }) {
     e.preventDefault()
     setBusy('connect')
     setMsg(null)
-    try { await api(`/bots/${d.id}/tokens`, { method: 'POST', body: { appToken: app, botToken: bot } }); setApp(''); setBot(''); setChange(false); setMsg({ ok: true, text: t('Connected. Pick who can ask, below.') }) } catch (err) { setMsg({ text: err.message }) }
+    try { await api(`${apiOf(d)}/tokens`, { method: 'POST', body: { appToken: app, botToken: bot } }); setApp(''); setBot(''); setChange(false); setMsg({ ok: true, text: t('Connected. Pick who can ask, below.') }) } catch (err) { setMsg({ text: err.message }) }
     setBusy(null)
     reload()
   }
   const forget = async () => {
     setBusy('forget')
-    try { await api(`/bots/${d.id}/tokens`, { method: 'DELETE' }); setMsg({ ok: true, text: t('Disconnected, and the tokens deleted from this computer.') }) } catch (err) { setMsg({ text: err.message }) }
+    try { await api(`${apiOf(d)}/tokens`, { method: 'DELETE' }); setMsg({ ok: true, text: t('Disconnected, and the tokens deleted from this computer.') }) } catch (err) { setMsg({ text: err.message }) }
     setBusy(null)
     reload()
   }
@@ -368,7 +379,7 @@ export function Connect({ d, reload }) {
   return (
     <section className="st-sec" data-setting="slack-connect">
       <h4>{t('Your Slack App')}</h4>
-      <p className="muted small">{t('Each bot is its own Slack app, made by you in your own workspace: no app is shared, and its tokens stay on this computer, readable by you only.')}</p>
+      <p className="muted small">{d.kind === 'connection' && d.shared ? t('One Slack app for every bot that doesn\'t have its own, made by you in your own workspace: each answer shows which bot it\'s from. Its tokens stay on this computer, readable by you only.') : t('An app of its own, made by you in your own workspace: its tokens stay on this computer, readable by you only.')}</p>
       {d.tokens
         ? (
           <>
@@ -430,7 +441,7 @@ function Where({ d, at, pick }) {
   return (
     <section className="st-sec sb-where" data-setting="bots-where">
       <h4>{t('Where It Answers')}</h4>
-      <p className="muted small">{t('{bot} can answer in Slack, Discord and Microsoft Teams at once, each through an app you make there. Who can ask, what it reads, its limits, memory and record are the same in all three.', { bot: d.name })}</p>
+      <p className="muted small">{t('{bot} can answer in Slack, Discord and Microsoft Teams at once, through each one\'s shared connection, or an app of its own there. Who can ask, what it reads, its limits, memory and record are the same in all three.', { bot: d.name })}</p>
       <div className="seg sb-where-tabs" role="tablist" aria-label={t('Where It Answers')}>
         {PLATFORMS.map(([k, label]) => {
           const s = stateOf(d, k).state
@@ -496,9 +507,10 @@ export function DiscordSetup({ d, save, reload, again }) {
     setBusy(null)
     reload()
   }
-  const connect = (e) => { e.preventDefault(); run('connect', async () => { await api(`/bots/${d.id}/discord`, { method: 'POST', body: { token } }); setToken(''); setChange(false) }, t('Connected. Add it to your server with the link below, then pick who can ask.')) }
-  const forget = () => run('forget', () => api(`/bots/${d.id}/discord`, { method: 'DELETE' }), t('Disconnected, and its token deleted from this computer.'))
-  const server = (gid) => run('server', () => api(`/bots/${d.id}/discord/server`, { method: 'POST', body: { guild: gid } }))
+  const conn = d.kind === 'connection'
+  const connect = (e) => { e.preventDefault(); run('connect', async () => { await api(conn ? `${apiOf(d)}/tokens` : `/bots/${d.id}/discord`, { method: 'POST', body: { token } }); setToken(''); setChange(false) }, t('Connected. Add it to your server with the link below, then pick who can ask.')) }
+  const forget = () => run('forget', () => api(conn ? `${apiOf(d)}/tokens` : `/bots/${d.id}/discord`, { method: 'DELETE' }), t('Disconnected, and its token deleted from this computer.'))
+  const server = (gid) => run('server', () => api(`${apiOf(d)}/discord/server`, { method: 'POST', body: { guild: gid } }))
   const intents = s.intents || {}
   const steps = (
     <ol className="sb-steps">
@@ -585,10 +597,11 @@ export function TeamsSetup({ d, save, reload, again }) {
   }
   const port = s.port || 3978
   const endpoint = s.endpoint?.url || null
-  const connect = (e) => { e.preventDefault(); run('connect', async () => { await api(`/bots/${d.id}/teams`, { method: 'POST', body: { appId: app, tenantId: tenant, password: secret } }); setSecret(''); setChange(false) }, t('Connected: signed in to Microsoft as its Azure Bot. Now the tunnel, below.')) }
-  const keepTunnel = (e) => { e.preventDefault(); run('tunnel', () => api(`/bots/${d.id}/teams/endpoint`, { method: 'POST', body: { publicUrl: tunnel } })) }
-  const check = () => run('check', () => api(`/bots/${d.id}/teams/check`, { method: 'POST' }))
-  const forget = () => run('forget', () => api(`/bots/${d.id}/teams`, { method: 'DELETE' }), t('Disconnected, and its client secret deleted from this computer.'))
+  const conn = d.kind === 'connection'
+  const connect = (e) => { e.preventDefault(); run('connect', async () => { await api(conn ? `${apiOf(d)}/tokens` : `/bots/${d.id}/teams`, { method: 'POST', body: { appId: app, tenantId: tenant, password: secret } }); setSecret(''); setChange(false) }, t('Connected: signed in to Microsoft as its Azure Bot. Now the tunnel, below.')) }
+  const keepTunnel = (e) => { e.preventDefault(); run('tunnel', () => api(`${apiOf(d)}/teams/endpoint`, { method: 'POST', body: { publicUrl: tunnel } })) }
+  const check = () => run('check', () => api(`${apiOf(d)}/teams/check`, { method: 'POST' }))
+  const forget = () => run('forget', () => api(conn ? `${apiOf(d)}/tokens` : `/bots/${d.id}/teams`, { method: 'DELETE' }), t('Disconnected, and its client secret deleted from this computer.'))
   const cloudflared = `cloudflared tunnel --url http://localhost:${port}`
   const devtunnel = `devtunnel host -p ${port} --allow-anonymous`
   const form = (
@@ -634,7 +647,7 @@ export function TeamsSetup({ d, save, reload, again }) {
       </li>
       <li>
         <span>{t('Download its Teams app and add it to Teams: Apps › Manage your apps › Upload an app › Upload a custom app. Your Teams admin may need to allow custom apps first.')}</span>
-        {s.app ? <div className="st-row"><Save className="btn small" href={apiUrl(`/bots/${d.id}/teams/app.zip`)} name={`${fileOf(d)}-teams.zip`}><Icon name="download" size={12} /> {t('Download the Teams app')}</Save></div> : <span className="muted small">{t('(Once it\'s connected.)')}</span>}
+        {s.app ? <div className="st-row"><Save className="btn small" href={apiUrl(`${apiOf(d)}/teams/app.zip`)} name={`${fileOf(d)}-teams.zip`}><Icon name="download" size={12} /> {t('Download the Teams app')}</Save></div> : <span className="muted small">{t('(Once it\'s connected.)')}</span>}
       </li>
       <li><span>{t('Ask it: add it to a team or a group chat and mention @{bot}, or message it directly. A reply in a thread it answered in needs no mention.', { bot: d.name })}</span></li>
     </ol>
@@ -709,7 +722,7 @@ function stepsFor(d, p) {
     { title: t('Paste its IDs and secret'), done: !!s.tokens, body: `${t('On the bot\'s Configuration page, copy the Microsoft App ID and the App Tenant ID. Then Manage Password › Certificates & secrets › New client secret › Add, and copy its Value (not its Secret ID).')} ${t('Paste the three below and Connect.')}`, fails: t('Turned down? Copy the secret\'s Value, not its Secret ID; an expired secret needs a new one.') },
     { title: t('Reachable from Teams'), done: s.state === 'connected' && !!(s.endpoint?.ok || s.lastEvent), body: t('Run a tunnel of your own to port {port}, paste its address under Your Teams App and Check. Then set the Azure Bot\'s Messaging endpoint to the address shown there, and Channels › Microsoft Teams › Apply.', { port: s.port || 3978 }), fails: t('Check says it isn\'t reached? Start the tunnel again (a quick tunnel\'s address changes each time), then paste the new address here and in Azure.') },
     { title: t('You in Teams'), done: !!d.settings.owners?.teams, body: t('Under You in Teams, pick yourself, so you can always ask it there.'), fails: t('Nobody to pick? It lists the people of the teams and chats it\'s in, once it\'s been added to one.') },
-    { title: t('Add it to Teams'), done: !!(s.lastEvent || reached.asked), body: t('Download its Teams app and add it to Teams: Apps › Manage your apps › Upload an app › Upload a custom app. Your Teams admin may need to allow custom apps first.'), ...(s.app ? { button: { label: t('Download the Teams app'), href: apiUrl(`/bots/${d.id}/teams/app.zip`), download: `${fileOf(d)}-teams.zip` } } : {}), fails: t('No Upload a custom app? Your Teams admin allows custom apps in the Teams admin center (Teams apps › Setup policies).') },
+    { title: t('Add it to Teams'), done: !!(s.lastEvent || reached.asked), body: t('Download its Teams app and add it to Teams: Apps › Manage your apps › Upload an app › Upload a custom app. Your Teams admin may need to allow custom apps first.'), ...(s.app ? { button: { label: t('Download the Teams app'), href: apiUrl(`${apiOf(d)}/teams/app.zip`), download: `${fileOf(d)}-teams.zip` } } : {}), fails: t('No Upload a custom app? Your Teams admin allows custom apps in the Teams admin center (Teams apps › Setup policies).') },
     answered,
   ]
 }
@@ -1273,11 +1286,15 @@ function SetUp({ d, save, reload, onDelete, again }) {
   // (Where it answers: the one you looked at last for this bot, else the first set up, else Slack.)
   const [at, setAt] = useState(() => { const x = saved(`cc-bot-where-${d.id}`); return PLATFORMS.some(([k]) => k === x) ? x : (PLATFORMS.find(([k]) => stateOf(d, k).state !== 'no-tokens') || ['slack'])[0] })
   const pick = (k) => { setAt(k); saved(`cc-bot-where-${d.id}`, k) }
+  // (Through the shared connection: its app is set up in Connections, for all its bots. Its own, or
+  // none yet: its app's steps here, as ever; tokens pasted here make it a connection of its own.)
+  const shared = !!d.connections?.[at]?.shared
   return (
     <>
       <Where d={d} at={at} pick={pick} />
-      <Guide key={at} d={d} platform={at} />
-      {at === 'slack' && (
+      <BotReach key={`reach-${at}`} d={d} platform={at} reload={reload} />
+      {!shared && <Guide key={at} d={d} platform={at} />}
+      {!shared && at === 'slack' && (
         <>
           <Status d={d} onAgain={again} />
           <UpdateApp d={d} onAgain={again} />
@@ -1285,8 +1302,8 @@ function SetUp({ d, save, reload, onDelete, again }) {
           <Owner d={d} save={save} />
         </>
       )}
-      {at === 'discord' && <DiscordSetup d={d} save={save} reload={reload} again={again} />}
-      {at === 'teams' && <TeamsSetup d={d} save={save} reload={reload} again={again} />}
+      {!shared && at === 'discord' && <DiscordSetup d={d} save={save} reload={reload} again={again} />}
+      {!shared && at === 'teams' && <TeamsSetup d={d} save={save} reload={reload} again={again} />}
       <Pause d={d} save={save} />
       <Identity d={d} save={save} onDelete={onDelete} />
       <Askers d={d} save={save} />
@@ -2040,14 +2057,19 @@ export default function Bots() {
   const pick = (id) => { setAt(id); saved('cc-bot', id); setAdding(false) }
   if (error && !list) return <p className="st-note bad"><Icon name="alert" size={13} /> {error}</p>
   if (!list) return <div className="skeleton-rows"><div /><div /><div /></div>
-  const old = gone.find((b) => b.id === at) || null
+  // (Connections: the apps your bots are reached through, beside them.)
+  const conns = at === 'connections' && !adding
+  const old = conns ? null : gone.find((b) => b.id === at) || null
   // (A draft is its chat with AI Assist, on its page: its chip opens that.)
   const live = list.filter((b) => !b.draft)
-  const shown = old ? null : live.find((b) => b.id === at) ? at : live[0]?.id || null
+  const shown = old || conns ? null : live.find((b) => b.id === at) ? at : live[0]?.id || null
   const left = () => { setAt(null); saved('cc-bot', ''); load() }
   return (
     <div className="st-sections sb">
       <div className="sb-bots" role="tablist" aria-label={t('Your bots')}>
+        <button type="button" role="tab" aria-selected={conns} className={`sb-chip cn-chip ${conns ? 'on' : ''}`} onClick={() => pick('connections')} data-setting="bots-connections-chip">
+          <Icon name="link" size={12} /><span className="sb-chip-name">{t('Connections')}</span>
+        </button>
         {list.map((b) => (b.draft
           ? (
             <button key={b.id} type="button" className="sb-chip" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-bot', { detail: { id: b.id } }))}>
@@ -2070,8 +2092,9 @@ export default function Bots() {
         ))}
         {(list.length > 0 || gone.length > 0) && <button type="button" className={`sb-chip add ${adding ? 'on' : ''}`} onClick={() => setAdding(true)}><Icon name="plus" size={12} /> {t('New Bot')}</button>}
       </div>
-      {!list.length && !gone.length && !adding && <FirstBot onStart={() => setAdding(true)} />}
-      {((!live.length && (gone.length > 0 || list.length > 0) && !old) || adding) && <NewBot onMade={(id, problems) => { setImported(problems?.length ? { id, problems } : null); pick(id); load() }} />}
+      {conns && <Connections />}
+      {!list.length && !gone.length && !adding && !conns && <FirstBot onStart={() => setAdding(true)} />}
+      {((!live.length && (gone.length > 0 || list.length > 0) && !old && !conns) || adding) && <NewBot onMade={(id, problems) => { setImported(problems?.length ? { id, problems } : null); pick(id); load() }} />}
       {old && !adding && <DeletedBot key={`${old.id}-${old.cleared || ''}`} d={old} reload={load} />}
       {shown && !adding && !old && <Bot key={shown} id={shown} onChanged={load} onGone={left} notice={imported?.id === shown ? imported.problems : null} />}
     </div>

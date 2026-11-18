@@ -16,6 +16,8 @@
 //   its people and channels to pick from, You in Slack, Discord and Teams, who may ask by name, a
 //   channel it answers in without a mention, Try It, its memory, its export, an import, Disconnect,
 //   deleted and its history deleted. Its record names the phone for each; no token ever comes back.
+//   A shared connection (Connections) made, its tokens pasted, you there set and it deleted, from
+//   the phone too.
 //   Through Studio's link (/m/<id>/): the same for another bot, its record naming Studio; and Studio's
 //   window on Desk, its Bots working there, a folder picked from Desk's, the export downloaded.
 //   Bots off: none of it there, from the phone or Studio.
@@ -349,6 +351,27 @@ try {
     ok(events(imp.json?.id).some((e) => e.type === 'trace.deleted' && e.all && e.device === 'Pocket'), 'the imported one\'s history deleted on Pocket, which its record keeps')
     ok(events(harbor?.id).some((e) => e.setting === 'tokens' && e.new === null && e.device === 'Pocket'), 'Harbor Desk\'s tokens deleted on Pocket')
     ok(!said.some((x) => leaked(x).length), 'no token came back to the phone in any answer', said.map(leaked).flat())
+    phone.close()
+  })
+
+  // ---------- Connections, through the phone's link ----------
+  // A shared connection made, its tokens pasted, you there and a command for each bot set, and it
+  // deleted, all from the phone; no token back, and its record naming the phone.
+  await part('connections through the phone\'s link', async () => {
+    const phone = await linkAs(rd.url, { code: (await desk.api('/relay/pair', {})).pairing.code, name: 'Pocket 3', about: { name: 'Pocket 3' } })
+    const ask = (m, u, body) => phone.request(m, `/api${u}`, body)
+    let r = await ask('POST', '/connections', { platform: 'slack', name: 'tester_bot' })
+    const c = r.json
+    ok(r.status === 200 && c?.shared && c.name === 'tester_bot', 'a shared Slack connection, made from the phone', r.json)
+    r = await ask('POST', `/connections/${c?.id}/tokens`, { appToken: 'xapp-test', botToken: 'xoxb-test' })
+    ok(r.status === 200 && !!(await until(async () => (await ask('GET', `/connections/${c.id}`)).json?.state === 'connected', 20000)), 'its tokens pasted on the phone: connected', r.json?.error)
+    r = await ask('PATCH', `/connections/${c.id}`, { owner: { id: 'U0OWNER', name: 'Tester' }, perBot: true })
+    ok(r.status === 200 && r.json?.owner?.id === 'U0OWNER' && r.json.perBot === true, 'you there, and a command for each bot, from the phone', r.json)
+    const seen = JSON.stringify([(await ask('GET', '/connections')).json, (await ask('GET', `/connections/${c.id}`)).json])
+    ok(!leaked(seen).length, 'no token comes back to the phone', leaked(seen))
+    ok((await ask('GET', `/connections/${c.id}/activity`)).json?.routed?.some((e) => e.what === 'tokens' && e.device === 'Pocket 3'), 'its record says its tokens were set on Pocket 3')
+    r = await ask('DELETE', `/connections/${c.id}`)
+    ok(r.status === 200 && !(await desk.api('/connections')).connections.some((x) => x.id === c.id), 'and deleted from the phone')
     phone.close()
   })
 

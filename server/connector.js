@@ -1,6 +1,7 @@
 // A bot's way in and out of a chat service (Bots, a beta feature): Slack (slackbot.js), Discord
-// (discordbot.js) and Microsoft Teams (teamsbot.js). The front desk (frontdesk.js) talks to one
-// channel per bot, the object its header describes (post, react, status, whisper, askOwner and
+// (discordbot.js) and Microsoft Teams (teamsbot.js), each one app, a connection (connections.js),
+// that may reach several bots (connhub.js says which bot a question is for). The front desk
+// (frontdesk.js) talks to one channel per bot, the object its header describes (post, react, status, whisper, askOwner and
 // settle, context, download, people, channels, and hear with change, act and draft); combine() below
 // makes that one channel of a connector for each place the bot answers, so a bot can answer in
 // Slack, Discord and Teams at once and the desk tells them apart only where it should: who asked,
@@ -81,6 +82,8 @@ export function heard(m, platform) {
     platform: platform || m.platform || null,
     ts, channel, thread: m.thread != null && String(m.thread) ? String(m.thread) : null,
     mention: m.mention === true, dm, ...(m.via === 'listen' ? { via: 'listen' } : {}),
+    // (Which bot a shared connection gave it to, and why: connhub.js.)
+    ...(m.routed && typeof m.routed === 'object' ? { routed: { by: String(m.routed.by || ''), connection: clip(m.routed.connection, 40), ...(m.routed.command ? { command: clip(m.routed.command, 40) } : {}), ...(m.routed.detail ? { detail: clip(m.routed.detail, 120) } : {}) } } : {}),
     from: person(m.from),
     text: String(m.text ?? ''),
     place: { kind: dm ? 'dm' : 'channel', id: String(m.place?.id || channel), name: m.place?.name ? clip(m.place.name, 120) : null, ...(m.place?.within ? { within: clip(m.place.within, 120) } : {}), ...(m.place?.private ? { private: true } : {}) },

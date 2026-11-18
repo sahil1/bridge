@@ -291,7 +291,9 @@ const cmds = {
     else {
       if (said) console.log(`AI Assist: ${said}`)
       const where = { slack: 'Slack', discord: 'Discord', teams: 'Microsoft Teams' }[p.platform] || 'Slack'
-      console.log(`Proposed: answers in ${where}${p.folders?.length ? `, reading ${p.folders.join(', ')}` : ', from what the model knows (no folders)'}${p.people?.length ? `, for ${p.people.join(', ')}` : ''}${p.mcp?.length ? `, with the MCP servers ${p.mcp.join(', ')}` : ''}.`)
+      // (Through the platform's shared connection, unless it's to have an app of its own.)
+      const via = (r.setup?.options?.connections || []).find((c) => c.platform === p.platform)
+      console.log(`Proposed: answers in ${where}${p.own ? ' with an app of its own there' : via ? ` through ${via.name}, the shared connection there (no app to make)` : ', through a shared connection made once there'}${p.folders?.length ? `, reading ${p.folders.join(', ')}` : ', from what the model knows (no folders)'}${p.people?.length ? `, for ${p.people.join(', ')}` : ''}${p.mcp?.length ? `, with the MCP servers ${p.mcp.join(', ')}` : ''}.`)
     }
     console.log(`Tell ${you} it's there to review: its page shows the whole proposal, each part changeable, and Create.`)
   },

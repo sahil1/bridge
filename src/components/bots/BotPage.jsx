@@ -1,6 +1,7 @@
 import Icon from '../Icon.jsx'
 import { Bot } from '../settings/Bots.jsx'
 import BotChat from './BotChat.jsx'
+import { Connections } from './Connections.jsx'
 import { BotDot } from './RailBots.jsx'
 import { useBots, statusOf, STATUS, refreshBots } from './bots.js'
 import { t } from '../../i18n/index.js'
@@ -12,9 +13,11 @@ import './bots-page.css'
 // up or change it in words. A draft is its chat alone, with what AI Assist proposed and Create; a new
 // one (view:bot:new) a chat that asks what it should do. On a phone the chat takes the page while
 // it's open. phone: laid out for a phone. onOpen(id, { replace }): another bot's page (the draft just
-// made, in this tab). onGone: it was deleted.
+// made, in this tab). onGone: it was deleted. view:bot:connections is Connections (Connections.jsx),
+// the apps your bots are reached through.
 export default function BotPage({ id, phone = false, onOpen, onGone }) {
   const { list } = useBots()
+  if (id === 'connections') return <div className={`bp bp-conns${phone ? ' phone' : ''}`}><div className="bp-main sb"><Connections page phone={phone} /></div></div>
   if (id === 'new') return <div className={`bp bp-new${phone ? ' phone' : ''}`}><BotChat id={null} phone={phone} onMade={(bid) => { refreshBots(); onOpen(bid, { replace: true }) }} /></div>
   const b = list?.find((x) => x.id === id)
   if (list && !b) {
@@ -55,6 +58,13 @@ export function PhoneBots({ onOpen }) {
           <button type="button" className="m-more-row" data-id="new-bot" onClick={() => onOpen('new')}>
             <span className="m-more-ico"><Icon name="plus" size={17} /></span>
             <span className="m-more-text"><b>{t('New bot')}</b><span>{t('Say what it should do, and who it\'s for: AI Assist sets it up')}</span></span>
+            <Icon name="chevron" size={13} className="muted" />
+          </button>
+        </li>
+        <li>
+          <button type="button" className="m-more-row" data-id="connections" onClick={() => onOpen('connections')}>
+            <span className="m-more-ico"><Icon name="link" size={17} /></span>
+            <span className="m-more-text"><b>{t('Connections')}</b><span>{t('The apps on Slack, Discord and Teams your bots are reached through')}</span></span>
             <Icon name="chevron" size={13} className="muted" />
           </button>
         </li>

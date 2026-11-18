@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { AssistHead } from '../AiAssist.jsx'
 import { Guide, Connect, Owner, DiscordSetup, TeamsSetup, NewBot, AnswererList, PLATFORMS, platName } from '../settings/Bots.jsx'
+import { BotReach, ConnectionCard } from './Connections.jsx'
 import { api } from '../../api.js'
 import { t } from '../../i18n/index.js'
 import './bots-page.css'
@@ -13,13 +14,20 @@ import './bots-page.css'
 // (the steps you do on Slack's, Discord's or Microsoft's own site, each ticked as it's done, with
 // where to paste what they give you), says each step as it's done, offers the people and channels you
 // named once it can find them, and takes changes in words, each shown as what would change and
-// applied only when you say so. With no model to ask, it says so and offers the form.
+// applied only when you say so. With no model to ask, it says so and offers the form. Where the
+// platform has a shared connection (Connections.jsx), there's nothing to connect: the card says how
+// people reach it (its name first, its command, the channels it answers in or is the default bot
+// in); with none yet, the chat walks through making the shared one, once; or it gets its own.
 // d, save, reload, again: the bot as it stands, for the steps (Bots.jsx Bot gives them).
 const AGENT = { claude: 'Claude Code', codex: 'Codex' }
 const LABEL = () => ({
   name: t('Name'), description: t('Description'), instructions: t('Instructions'), folders: t('Reads From'), who: t('Who Can Ask'), people: t('People who can ask'),
   channels: t('Answers without a mention in'), posts: t('Scheduled Posts'), answerers: t('What Answers'), fallback: t('When one can\'t answer, try the next'), limits: t('Limits'), auto: t('Answers'), mcp: t('MCP Servers'), platform: t('Where It Answers'),
+  own: t('Its Own Connection'), defaults: t('The Default Bot In'),
 })
+// A Slack command from a name, as Slack takes one (server/slackbot.js commandOf).
+const cmdOf = (name) => `/${String(name || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 31).replace(/-+$/, '') || 'ask-bot'}`
+const firstWord = (name) => String(name || '').toLowerCase().split(/\s+/)[0]
 const whoSaid = (w) => (w === 'channels' ? t('Everyone in channels it\'s invited to') : t('People you name'))
 const limitsSaid = (l) => (l ? t('{day} a day, {atOnce} at once, {minutes} minutes a run', l) : '—')
 const postOf = (x) => t('“{what}” in #{channel}, {when}', x)
@@ -35,7 +43,16 @@ function noteOf(m) {
     case 'unreadable': return t('AI Assist\'s answer couldn\'t be read as a bot. Say it again in other words, or set it up with the form.')
     case 'left': return [v.folders?.length ? t('Left out {folders}: not among the folders Bridge AI knows. Add a folder by its path if you meant one.', { folders: names(v.folders) }) : null, v.mcp?.length ? t('Left out {servers}: not among your MCP servers in Claude Code.', { servers: names(v.mcp) }) : null].filter(Boolean).join(' ')
     case 'chief': return t('The Chief of Staff drafted this from what you asked it for. Look it over, change what you like, and Create.')
-    case 'created': return `${t('{bot} is made. Next, connect it to {platform}: the steps are below, each ticked as it\'s done.', { bot: v.bot, platform: platName(v.platform) })}${v.people?.length || v.channels?.length ? ` ${t('Once it\'s connected, I\'ll find {names} there.', { names: [...(v.people || []), ...(v.channels || []).map((c) => `#${c}`)].join(', ') })}` : ''}`
+    case 'reach': return t('It\'s reached through {name}, your shared {platform} connection, so there\'s nothing to set up there. How should people reach it? Name the channels it answers in, or one where it\'s the default bot, or leave it to its name and AI Assist\'s pick: it\'s on the card below.', { name: v.name, platform: platName(v.platform) })
+    case 'created': {
+      const later = v.people?.length || v.channels?.length ? ` ${t('Once it\'s connected, I\'ll find {names} there.', { names: [...(v.people || []), ...(v.channels || []).map((c) => `#${c}`)].join(', ') })}` : ''
+      const found = v.found?.people?.length || v.found?.channels?.length ? ` ${t('Found {names} there already.', { names: [...(v.found.people || []), ...(v.found.channels || []).map((c) => `#${c}`)].join(', ') })}` : ''
+      // (Made before connections: its own app's steps, as then.)
+      if (!('via' in v)) return `${t('{bot} is made. Next, connect it to {platform}: the steps are below, each ticked as it\'s done.', { bot: v.bot, platform: platName(v.platform) })}${later}`
+      if (v.via?.shared) return `${t('{bot} is made, and reached through {name} in {platform}: nothing to set up there.', { bot: v.bot, name: v.via.name, platform: platName(v.platform) })} ${v.via.command ? t('Ask it with “{bot}: …” after @{name}, or {command}.', { bot: v.bot, name: v.via.name, command: v.via.command }) : t('Ask it with “{bot}: …” after @{name}.', { bot: v.bot, name: v.via.name })}${found}${v.via.connected ? '' : later}`
+      if (v.via?.own) return `${t('{bot} is made, with an app of its own on {platform}: the steps are below, each ticked as it\'s done.', { bot: v.bot, platform: platName(v.platform) })}${later}`
+      return `${t('{bot} is made. To reach it on {platform}, make your shared connection there: once, for all your bots. It\'s below, with the steps.', { bot: v.bot, platform: platName(v.platform) })}${later}`
+    }
     case 'tick':
       if (v.step === 'app') return t('Its app\'s tokens are in.')
       if (v.step === 'connected') return v.team ? t('Connected to {team} as @{bot}.', { team: v.team, bot: v.bot }) : t('Connected to {platform}.', { platform: platName(v.platform) })
@@ -62,7 +79,8 @@ function valueOf(key, v) {
   if (key === 'answerers') return v?.length ? v.map((id) => id.replace(/^agent:(\w+)(?::(.+))?$/, (_, k, m) => `${AGENT[k] || k}${m ? ` (${m})` : ''}`).replace(/^model:[\w-]+:/, '')).join(' → ') : t('Automatic')
   if (key === 'fallback') return v === false ? t('Off') : t('On')
   if (key === 'platform') return platName(v)
-  if (key === 'channels') return listSaid(v, true)
+  if (key === 'channels' || key === 'defaults') return listSaid(v, true)
+  if (key === 'own') return v ? t('Its own app') : t('The shared connection')
   if (Array.isArray(v)) return listSaid(v)
   return v ? String(v) : '—'
 }
@@ -85,7 +103,7 @@ function ChangeCard({ change, onApply, onDiscard, busy }) {
               {l.key === 'instructions'
                 ? <details className="sb-ctx"><summary><Icon name="chevron" size={11} />{t('New instructions')}</summary><pre className="sb-tpl-ins">{l.after}</pre></details>
                 : list
-                  ? <span className="bc-diff">{added.map((x) => <span key={`+${x}`} className="bc-add">+ {l.key === 'channels' ? `#${x}` : x}</span>)}{gone.map((x) => <span key={`-${x}`} className="bc-gone">− {l.key === 'channels' ? `#${x}` : x}</span>)}</span>
+                  ? <span className="bc-diff">{added.map((x) => <span key={`+${x}`} className="bc-add">+ {l.key === 'channels' || l.key === 'defaults' ? `#${x}` : x}</span>)}{gone.map((x) => <span key={`-${x}`} className="bc-gone">− {l.key === 'channels' || l.key === 'defaults' ? `#${x}` : x}</span>)}</span>
                   : <span className="bc-diff"><span className="bc-was">{valueOf(l.key, l.before)}</span> → <b>{valueOf(l.key, l.after)}</b></span>}
             </li>
           )
@@ -143,6 +161,9 @@ function ProposalCard({ p, options, onEdit, onCreate, onDiscard, busy, error }) 
   const folders = options?.folders || []
   const free = folders.filter((f) => !p.folders.includes(f.path))
   const tpl = (options?.templates || []).find((x) => x.id === p.template)
+  // (The platform's shared connection, when there's one: it's reached through that, unless its own.)
+  const via = (options?.connections || []).find((c) => c.platform === p.platform) || null
+  const plat = platName(p.platform)
   return (
     <div className="bc-card bc-proposal" data-setting="bots-proposal">
       <div className="bc-card-head"><Icon name="wand" size={13} className="ai-head-wand" /><b className="small">{t('The bot AI Assist proposes')}</b></div>
@@ -156,6 +177,12 @@ function ProposalCard({ p, options, onEdit, onCreate, onDiscard, busy, error }) 
         <div className="seg" role="radiogroup" aria-label={t('Where It Answers')}>
           {PLATFORMS.map(([k, label]) => <button key={k} type="button" role="radio" aria-checked={p.platform === k} className={p.platform === k ? 'on' : ''} onClick={() => onEdit({ platform: k })}>{label}</button>)}
         </div>
+        <p className="small bc-via" data-setting="bots-proposal-via">
+          <Icon name="link" size={12} /> {p.own ? t('With an app of its own on {platform}: after Create, you make it with the steps.', { platform: plat })
+            : via ? t('Reached through {name}, your shared {platform} connection: nothing to set up there.', { name: via.name, platform: plat })
+              : t('No {platform} connection yet: after Create, you make one, once, for all your bots.', { platform: plat })}
+        </p>
+        <label className="st-check"><input type="checkbox" checked={!!p.own} onChange={(e) => onEdit({ own: e.target.checked })} /><span className="small">{t('Give it its own connection')} <span className="muted">{t('(an app of its own there, for an identity of its own)')}</span></span></label>
       </div>
       <div className="bc-part">
         <span className="bc-label">{t('Reads From')}</span>
@@ -179,14 +206,27 @@ function ProposalCard({ p, options, onEdit, onCreate, onDiscard, busy, error }) 
         <AddOne placeholder={t('A name, as they\'re called there')} label={t('Add someone who can ask')} onAdd={(n) => onEdit({ people: [...p.people, n] })} />
         <p className="muted small">{t('People are found by these names once it\'s connected, and offered to you then. You can always ask it.')}</p>
       </div>
-      <div className="bc-part">
-        <span className="bc-label">{t('Channels')}</span>
+      <div className="bc-part" data-setting="bots-proposal-reach">
+        <span className="bc-label">{t('How People Reach It')}</span>
+        {!p.own && (
+          <p className="small">{p.platform === 'slack'
+            ? t('With its name first, like “{bot}: …” after @{name}, or {command}.', { bot: p.name, name: via?.name || t('your shared app'), command: `${cmdOf(via?.name || options?.suggested || 'my_bot')} ${firstWord(p.name)}` })
+            : t('With its name first, like “{bot}: …” after @{name}.', { bot: p.name, name: via?.name || t('your shared app') })}</p>
+        )}
+        <span className="muted small">{t('The channels it answers in:')}</span>
         {p.channels.length > 0
           ? <Names list={p.channels} hash onDrop={(c) => onEdit({ channels: p.channels.filter((x) => x.name !== c.name) })} extra={(c) => (c.listen ? <span className="sb-plat">{t('without a mention')}</span> : null)} />
           : <p className="small sb-none">{t('None named: it answers wherever it\'s invited, when it\'s mentioned or messaged.')}</p>}
         <AddOne placeholder="support" label={t('Add a channel')} onAdd={(c) => { onEdit({ channels: [...p.channels, { name: c.replace(/^#/, ''), listen }] }); setListen(false) }}>
           <label className="st-check bc-listen"><input type="checkbox" checked={listen} onChange={(e) => setListen(e.target.checked)} /><span className="small">{t('Every message, without a mention')}</span></label>
         </AddOne>
+        {!p.own && (
+          <>
+            <span className="muted small">{t('The channels where everything asked of the shared app goes to it:')}</span>
+            {(p.defaults || []).length > 0 ? <Names list={p.defaults} hash onDrop={(c) => onEdit({ defaults: p.defaults.filter((x) => x !== c) })} /> : <p className="small sb-none">{t('None: it\'s asked by its name, or AI Assist picks it.')}</p>}
+            <AddOne placeholder="sales" label={t('Add a channel it\'s the default bot in')} onAdd={(c) => onEdit({ defaults: [...(p.defaults || []), c.replace(/^#/, '').toLowerCase()] })} />
+          </>
+        )}
       </div>
       {p.posts?.length > 0 && (
         <div className="bc-part">
@@ -244,18 +284,40 @@ function ConnectCard({ d, save, reload, again, platform }) {
   const [at, setAt] = useState(platform || 'slack')
   useEffect(() => { if (platform) setAt(platform) }, [platform])
   const s = at === 'slack' ? { state: d.state } : d.where?.[at] || {}
+  const via = d.connections?.[at] || null
   return (
     <div className="bc-card bc-connect sb" data-setting="bots-chat-connect">
       <div className="seg" role="tablist" aria-label={t('Where It Answers')}>
         {PLATFORMS.map(([k, label]) => <button key={k} type="button" role="tab" aria-selected={at === k} className={at === k ? 'on' : ''} onClick={() => setAt(k)}>{label}</button>)}
       </div>
-      <Guide key={at} d={d} platform={at} />
-      {s.state !== 'connected' && at === 'slack' && <Connect d={d} reload={reload} />}
-      {at === 'slack' && d.state === 'connected' && !d.settings.owner && <Owner d={d} save={save} />}
-      {at === 'discord' && (s.state !== 'connected' || !d.settings.owners?.discord) && <DiscordSetup d={d} save={save} reload={reload} again={again} />}
-      {at === 'teams' && (s.state !== 'connected' || !d.settings.owners?.teams) && <TeamsSetup d={d} save={save} reload={reload} again={again} />}
+      <BotReach key={`reach-${at}`} d={d} platform={at} reload={reload} />
+      {via?.shared
+        ? <SharedSteps key={via.id} id={via.id} d={d} platform={at} />
+        : (
+          <>
+            <Guide key={at} d={d} platform={at} />
+            {s.state !== 'connected' && at === 'slack' && <Connect d={d} reload={reload} />}
+            {at === 'slack' && d.state === 'connected' && !d.settings.owner && <Owner d={d} save={save} />}
+            {at === 'discord' && (s.state !== 'connected' || !d.settings.owners?.discord) && <DiscordSetup d={d} save={save} reload={reload} again={again} />}
+            {at === 'teams' && (s.state !== 'connected' || !d.settings.owners?.teams) && <TeamsSetup d={d} save={save} reload={reload} again={again} />}
+          </>
+        )}
     </div>
   )
+}
+// The shared connection's own card (its app's steps, tokens and you there) until it's connected
+// with you there, made once for every bot on it; then this bot's own checklist, which ticks itself.
+function SharedSteps({ id, d, platform }) {
+  const [c, setC] = useState(null)
+  const load = () => api(`/connections/${id}`).then(setC, () => {})
+  useEffect(() => {
+    load()
+    const every = setInterval(() => { if (!document.hidden) load() }, 4000)
+    return () => clearInterval(every)
+  }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!c) return null
+  if (c.state !== 'connected' || !c.owner) return <ConnectionCard c={c} reload={load} open />
+  return <Guide key={platform} d={d} platform={platform} />
 }
 
 const EXAMPLES = () => [
@@ -308,7 +370,8 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
   const create = async () => {
     setBusy('create')
     setError(null)
-    try { await api(`/bots/${id}/create`, { method: 'POST' }); onCreated?.() } catch (e) { setError(e.message) }
+    // (The chat stays open once it's made, on its page, to carry on: Bots.jsx Bot.)
+    try { await api(`/bots/${id}/create`, { method: 'POST' }); try { localStorage.setItem(`cc-bot-assist-${id}`, 'open') } catch { /* private window */ } onCreated?.() } catch (e) { setError(e.message) }
     setBusy(null)
   }
   const discardDraft = async () => {
