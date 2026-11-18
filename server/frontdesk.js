@@ -316,8 +316,12 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // ---------- The record ----------
   // Each event written to the bot's trace, then taken into what the desk knows (the same function
   // reads the trace back when Bridge AI starts, so the two can't differ).
-  const fresh = () => ({ questions: new Map(), convs: new Map(), keys: new Set(), next: 1, versions: new Set(), memAsked: new Map() })
+  const fresh = () => ({ questions: new Map(), convs: new Map(), keys: new Set(), next: 1, versions: new Set(), memAsked: new Map(), changes: [] })
+  // Changes to it that aren't part of a conversation (its settings, its memory, its record deleted):
+  // the latest, for Activity, each with who made it and on which device.
+  const CHANGED = new Set(['settings.changed', 'memory.kept', 'memory.edited', 'memory.deleted', 'trace.deleted'])
   function apply(st, e) {
+    if (!e.conv && CHANGED.has(e.type)) { st.changes.push(e); if (st.changes.length > 50) st.changes.shift() }
     if (e.type === 'received') {
       st.keys.add(`${e.channel}:${e.ts}`)
       const n = Number(/q(\d+)$/.exec(e.q || '')?.[1])
@@ -655,15 +659,17 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       record(id, 'approval.asked', { memory: item.id, via: 'slack', channel: h.channel, ts: h.ts })
     } catch (e) { record(id, 'approval.failed', { memory: item.id, error: oneLine(e.message, 300) }) }
   }
-  // Your decisions about what it remembers (Settings, or your Slack direct messages).
-  function memoryAct(id, mid, act, { text = null, by = you(), via = 'app' } = {}) {
+  // Your decisions about what it remembers (Settings, or your Slack direct messages). device: the
+  // one of yours Settings was open on, when it isn't this computer.
+  function memoryAct(id, mid, act, { text = null, by = you(), via = 'app', device = null } = {}) {
     const b = bots.get(id)
     if (!b) throw Object.assign(new Error('No such bot'), { status: 404 })
     const handle = b.st.memAsked.get(mid)
     const settle = (outcome) => { if (handle && b.channel?.settle) b.channel.settle(handle, { outcome, by }).catch?.(() => {}) }
-    if (act === 'keep') { const r = b.memory.keep(mid, by); if (r.changed) { record(id, 'memory.kept', { item: pub(r.item), by, via }); settle('kept') } return r.item }
-    if (act === 'edit') { const r = b.memory.edit(mid, text, by); if (r.changed) record(id, 'memory.edited', { item: pub(r.item), before: r.before, by, via }); return r.item }
-    if (act === 'drop') { const x = b.memory.remove(mid); record(id, 'memory.deleted', { item: pub(x), by, via }); settle('discarded'); return x }
+    const from = device ? { device } : {}
+    if (act === 'keep') { const r = b.memory.keep(mid, by); if (r.changed) { record(id, 'memory.kept', { item: pub(r.item), by, via, ...from }); settle('kept') } return r.item }
+    if (act === 'edit') { const r = b.memory.edit(mid, text, by); if (r.changed) record(id, 'memory.edited', { item: pub(r.item), before: r.before, by, via, ...from }); return r.item }
+    if (act === 'drop') { const x = b.memory.remove(mid); record(id, 'memory.deleted', { item: pub(x), by, via, ...from }); settle('discarded'); return x }
     throw new Error(`No such thing to do: ${act}`)
   }
   // !forget me: their memory deleted, their words in the record blanked (the record that an exchange
@@ -1358,12 +1364,12 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // Its activity history deleted, when you said so: every month of its record goes, and a
   // trace.deleted line takes their place, as when months go for their age, so that it was deleted,
   // when and by whom stays in the record (until the time it's kept for runs out).
-  function clear(id, why) {
+  function clear(id, why, { device = null } = {}) {
     const b = bots.get(id)
     if (!b) return
     const months = b.trace.clear()
     b.st = fresh()
-    record(id, 'trace.deleted', { months, all: true, by: you(), why })
+    record(id, 'trace.deleted', { months, all: true, by: you(), ...(device ? { device } : {}), why })
   }
 
   // The threads it's answering in, lately, for its channel to read what was missed in them.
@@ -1449,8 +1455,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     },
     // A bot deleted: its channel stopped, what waited on you discarded (it can't be sent now),
     // nothing left to post; its record kept, and the deletion in it. history: its activity history
-    // deleted too (clear() below).
-    remove(id, { history = false } = {}) {
+    // deleted too (clear() below). device: the one of yours it was deleted from, when it isn't this
+    // computer.
+    remove(id, { history = false, device = null } = {}) {
       const b = bots.get(id)
       if (!b) return
       b.channel?.stop()
@@ -1458,14 +1465,16 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       data.outbox = data.outbox.filter((o) => o.bot !== id)
       save()
       for (const q of b.st.questions.values()) if (['draft', 'answering', 'queued', 'starting'].includes(q.state)) record(id, 'discarded', at(q, { by: you(), why: 'The bot was deleted' }))
-      record(id, 'settings.changed', { setting: 'deleted', old: null, new: { history: history ? 'deleted' : 'kept' }, by: you() })
-      if (history) clear(id, 'Its activity history was deleted with the bot')
+      record(id, 'settings.changed', { setting: 'deleted', old: null, new: { history: history ? 'deleted' : 'kept' }, by: you(), ...(device ? { device } : {}) })
+      if (history) clear(id, 'Its activity history was deleted with the bot', { device })
       changed()
     },
     // A deleted bot's activity history, deleted now (clear() below).
-    forget: (id) => clear(id, 'Its activity history was deleted'),
+    forget: (id, o) => clear(id, 'Its activity history was deleted', o),
     // When a deleted bot's activity history was deleted, if it was.
     cleared: (id) => bots.get(id)?.st.cleared || null,
+    // Its latest changes outside its conversations, the newest first (apply() above).
+    changes: (id) => [...(bots.get(id)?.st.changes || [])].reverse().map(({ prev, ...e }) => e), // eslint-disable-line no-unused-vars
     // Whether it's answering in that thread now, for its channel to keep track of its replies.
     follows: (id, channel, thread) => { const c = bots.get(id)?.st.convs.get(`${channel}:${thread}`); return !!(c?.answered && Date.now() - Date.parse(c.last) < IDLE_DAYS * 86400000) },
     // Whether it answers in that channel without a mention.
@@ -1514,20 +1523,22 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       }
       return n
     },
-    // What it remembers, for Settings › Bots › Memory: every item, and your changes to them.
+    // What it remembers, for Settings › Bots › Memory: every item, and your changes to them (o.device:
+    // the one of yours Settings was open on, when it isn't this computer).
     memory: {
       list: (id) => bots.get(id)?.memory.list() || [],
-      add(id, x) {
+      add(id, x, { device = null } = {}) {
         const b = bots.get(id)
         if (!b) throw Object.assign(new Error('No such bot'), { status: 404 })
         const r = b.memory.add({ ...x, source: x.source || 'owner', keep: true, by: you() })
-        if (r.added) { record(id, 'memory.proposed', { item: pub(r.item), by: you() }); record(id, 'memory.kept', { item: pub(r.item), by: you() }) }
+        const from = device ? { device } : {}
+        if (r.added) { record(id, 'memory.proposed', { item: pub(r.item), by: you(), ...from }); record(id, 'memory.kept', { item: pub(r.item), by: you(), ...from }) }
         changed()
         return r.item
       },
-      keep: (id, mid) => memoryAct(id, mid, 'keep'),
-      edit: (id, mid, text) => memoryAct(id, mid, 'edit', { text }),
-      remove: (id, mid) => memoryAct(id, mid, 'drop'),
+      keep: (id, mid, o = {}) => memoryAct(id, mid, 'keep', o),
+      edit: (id, mid, text, o = {}) => memoryAct(id, mid, 'edit', { ...o, text }),
+      remove: (id, mid, o = {}) => memoryAct(id, mid, 'drop', o),
       // Brought in with a bot from another computer: kept as they were there.
       bring(id, items) {
         const b = bots.get(id)

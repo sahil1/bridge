@@ -4105,12 +4105,22 @@ async function botView(b, { brief = false } = {}) {
   }
 }
 const slackChannels = new Map() // bot id -> { at, n }
+// Who changed a bot, for its record: you, and the device of yours you did it on when that isn't this
+// computer (a phone through the relay, or another of your computers through its link).
+const botOwnerName = () => String(cfg.name || '').trim() || 'the owner'
+const deviceOfReq = (req) => { const id = req.headers['x-bridge-relay']; return id ? relay.deviceOf(id)?.name || 'another of your devices' : null }
+const changedBy = (req) => { const device = deviceOfReq(req); return { by: botOwnerName(), ...(device ? { device } : {}) } }
 // What a setting was and is, for the record (people by name, never a token).
 const settingSaid = (v) => (Array.isArray(v) ? v.map((x) => (x && typeof x === 'object' ? x.name || x.id : x)) : v)
-function recordChanges(id, before, after) {
+// In Bridge AI's own folder, by any name: a link to it in your home folder too.
+async function ownFolder(p) {
+  const [real, data] = await Promise.all([fs.promises.realpath(p).catch(() => p), fs.promises.realpath(DATA).catch(() => DATA)])
+  return [p, real].some((x) => [DATA, data].some((d) => x === d || x.startsWith(d + path.sep)))
+}
+function recordChanges(id, before, after, who) {
   for (const k of Object.keys(after)) {
     if (['id', 'createdAt'].includes(k) || JSON.stringify(before[k]) === JSON.stringify(after[k])) continue
-    desk.record(id, 'settings.changed', { setting: k, old: settingSaid(before[k]), new: settingSaid(after[k]), by: String(cfg.name || '').trim() || 'the owner' })
+    desk.record(id, 'settings.changed', { setting: k, old: settingSaid(before[k]), new: settingSaid(after[k]), ...who })
   }
 }
 
@@ -4122,10 +4132,9 @@ app.get('/api/bots', botsGuard, wrapBot(async () => ({
 })))
 // A new bot, by its name.
 app.post('/api/bots', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = botsStore.create({ name: req.body?.name, description: req.body?.description, template: req.body?.template || null }, String(cfg.name || '').trim())
   connectBot(b.id)
-  desk.record(b.id, 'settings.changed', { setting: 'created', old: null, new: { name: b.name, ...(b.template ? { template: b.template } : {}) }, by: String(cfg.name || '').trim() || 'the owner' })
+  desk.record(b.id, 'settings.changed', { setting: 'created', old: null, new: { name: b.name, ...(b.template ? { template: b.template } : {}) }, ...changedBy(req) })
   desk.sync()
   return botView(b)
 }))
@@ -4137,11 +4146,15 @@ app.get('/api/bots/:id', botsGuard, wrapBot(async (req) => botView(botOr404(req.
 // folders it reads from (each one there, inside your home folder, not Bridge AI's own), its
 // instructions (written here, or a file in one of its folders), answering without asking, copies of
 // your agents' conversations, which agent answers, how many at once, and how long its record is kept.
+// From your phone or another of your computers too: a folder or file macOS hasn't let Bridge AI into
+// yet isn't looked at from there (it would ask on this computer, with nobody at it).
 app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = botOr404(req.params.id)
   const x = req.body || {}
   const next = {}
+  const who = changedBy(req)
+  const here = !req.headers['x-bridge-relay']
+  const lexical = (f) => path.resolve(String(f || '').replace(/^~(?=$|[\\/])/, os.homedir()))
   if (x.name !== undefined) { if (!String(x.name).trim()) throw new Error('Give it a name: it\'s its name in Slack'); next.name = String(x.name) }
   if (x.description !== undefined) next.description = String(x.description)
   if (x.who !== undefined) next.who = x.who === 'channels' ? 'channels' : 'named'
@@ -4205,9 +4218,10 @@ app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
     const had = new Set(b.readsFrom)
     for (const f of x.readsFrom.slice(0, 50)) {
       if (had.has(String(f)) && !(await places.resolveDir(String(f)).then(() => true, () => false))) { next.readsFrom.push(String(f)); continue }
+      if (!had.has(String(f))) explorer.notFromAfar(lexical(f), { here })
       const full = await places.resolveDir(String(f || ''))
       if (full === os.homedir() || full === path.resolve(os.homedir())) throw new Error('Pick a folder inside your home folder, not the whole of it')
-      if (full === DATA || full.startsWith(DATA + path.sep)) throw new Error('Bridge AI\'s own folder can\'t be read from')
+      if (await ownFolder(full)) throw new Error('Bridge AI\'s own folder can\'t be read from')
       const t = full.replace(os.homedir(), '~')
       if (!next.readsFrom.includes(t)) next.readsFrom.push(t)
     }
@@ -4216,21 +4230,23 @@ app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
     const f = String(x.instructionsFile || '').trim()
     if (!f) next.instructionsFile = null
     else {
-      const full = path.resolve(f.replace(/^~(?=$|[\\/])/, os.homedir()))
+      const full = lexical(f)
       const folders = await Promise.all((next.readsFrom || b.readsFrom).map((p) => places.resolveDir(p).catch(() => null)))
       if (!folders.some((d) => d && full.startsWith(d + path.sep))) throw new Error('Pick a file in one of the folders it reads from')
+      explorer.notFromAfar(full, { here })
       const st = await fs.promises.stat(full).catch(() => null)
       if (!st?.isFile()) throw new Error(`File not found: ${f}`)
+      if (await ownFolder(full)) throw new Error('Bridge AI\'s own folder can\'t be read from')
       next.instructionsFile = full.replace(os.homedir(), '~')
     }
   }
   if (x.instructions !== undefined) {
     const before = botsStore.readOwn(b.id)
     const text = botsStore.writeInstructions(b.id, x.instructions)
-    if (text !== before) desk.record(b.id, 'settings.changed', { setting: 'instructions', old: { hash: botsStore.hashOf(before) }, new: { hash: botsStore.hashOf(text), text }, by: String(cfg.name || '').trim() || 'the owner' })
+    if (text !== before) desk.record(b.id, 'settings.changed', { setting: 'instructions', old: { hash: botsStore.hashOf(before) }, new: { hash: botsStore.hashOf(text), text }, ...who })
   }
   const { before, after } = botsStore.save(b.id, next)
-  recordChanges(b.id, before, after)
+  recordChanges(b.id, before, after, who)
   if (before.retention !== after.retention) desk.prune(b.id)
   // Paused: what it's answering is stopped at once.
   if (after.paused && !before.paused) await desk.pause(b.id)
@@ -4240,95 +4256,84 @@ app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
 // Its tokens, checked with Slack before they're kept; and forgotten (Disconnect). Only their kind
 // and last four in the record.
 app.post('/api/bots/:id/tokens', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = botOr404(req.params.id)
   const r = await partOf(b.id, 'slack').setTokens(req.body || {})
-  desk.record(b.id, 'settings.changed', { setting: 'tokens', old: null, new: r.tokens, by: String(cfg.name || '').trim() || 'the owner' })
+  desk.record(b.id, 'settings.changed', { setting: 'tokens', old: null, new: r.tokens, ...changedBy(req) })
   desk.sync()
   return botView(b)
 }))
 app.delete('/api/bots/:id/tokens', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = botOr404(req.params.id)
   const ch = partOf(b.id, 'slack')
   const had = ch?.state().tokens || null
   ch?.forget()
-  desk.record(b.id, 'settings.changed', { setting: 'tokens', old: had, new: null, by: String(cfg.name || '').trim() || 'the owner' })
+  desk.record(b.id, 'settings.changed', { setting: 'tokens', old: had, new: null, ...changedBy(req) })
   return botView(b)
 }))
 // Its Discord bot: its token, checked with Discord before it's kept (and the server it answers in,
 // when it's in more than one); and forgotten. Only its last four in the record.
-const botOwnerName = () => String(cfg.name || '').trim() || 'the owner'
 app.post('/api/bots/:id/discord', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = botOr404(req.params.id)
   const r = await partOf(b.id, 'discord').setToken({ token: req.body?.token, guild: req.body?.guild || null })
-  desk.record(b.id, 'settings.changed', { setting: 'discord', old: null, new: { token: r.tokens?.bot || null, bot: r.bot?.name || null, server: r.guild?.name || null }, by: botOwnerName() })
+  desk.record(b.id, 'settings.changed', { setting: 'discord', old: null, new: { token: r.tokens?.bot || null, bot: r.bot?.name || null, server: r.guild?.name || null }, ...changedBy(req) })
   desk.sync()
   return botView(b)
 }))
 app.post('/api/bots/:id/discord/server', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = botOr404(req.params.id)
   const was = partOf(b.id, 'discord').state().guild
   const r = await partOf(b.id, 'discord').setGuild(req.body?.guild)
-  desk.record(b.id, 'settings.changed', { setting: 'discord.server', old: was?.name || null, new: r.guild?.name || null, by: botOwnerName() })
+  desk.record(b.id, 'settings.changed', { setting: 'discord.server', old: was?.name || null, new: r.guild?.name || null, ...changedBy(req) })
   return botView(b)
 }))
 app.delete('/api/bots/:id/discord', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = botOr404(req.params.id)
   const ch = partOf(b.id, 'discord')
   const had = ch.state().tokens?.bot || null
   ch.forget()
-  desk.record(b.id, 'settings.changed', { setting: 'discord', old: { token: had }, new: null, by: botOwnerName() })
+  desk.record(b.id, 'settings.changed', { setting: 'discord', old: { token: had }, new: null, ...changedBy(req) })
   return botView(b)
 }))
 // Its Teams app: its Azure Bot's app ID, client secret and your organization's tenant, checked with
 // Microsoft before they're kept; your tunnel's address and its port; the tunnel checked; its Teams
 // app to upload; and forgotten. The secret only as its last four in the record.
 app.post('/api/bots/:id/teams', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = botOr404(req.params.id)
   const r = await partOf(b.id, 'teams').setCredentials({ appId: req.body?.appId, password: req.body?.password, tenantId: req.body?.tenantId, single: req.body?.single !== false })
-  desk.record(b.id, 'settings.changed', { setting: 'teams', old: null, new: { appId: r.app?.id || null, tenant: r.tenant || null, secret: r.tokens?.secret || null }, by: botOwnerName() })
+  desk.record(b.id, 'settings.changed', { setting: 'teams', old: null, new: { appId: r.app?.id || null, tenant: r.tenant || null, secret: r.tokens?.secret || null }, ...changedBy(req) })
   desk.sync()
   return botView(b)
 }))
 app.post('/api/bots/:id/teams/endpoint', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = botOr404(req.params.id)
   const ch = partOf(b.id, 'teams')
   const was = ch.state()
   const r = await ch.setEndpoint({ ...(req.body?.publicUrl !== undefined ? { publicUrl: req.body.publicUrl } : {}), ...(req.body?.port !== undefined ? { port: req.body.port } : {}) })
-  desk.record(b.id, 'settings.changed', { setting: 'teams.endpoint', old: { url: was.endpoint?.url || null, port: was.port }, new: { url: r.endpoint?.url || null, port: r.port }, by: botOwnerName() })
+  desk.record(b.id, 'settings.changed', { setting: 'teams.endpoint', old: { url: was.endpoint?.url || null, port: was.port }, new: { url: r.endpoint?.url || null, port: r.port }, ...changedBy(req) })
   desk.sync()
   return botView(b)
 }))
 app.post('/api/bots/:id/teams/check', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = botOr404(req.params.id)
   await partOf(b.id, 'teams').checkEndpoint()
   return botView(b)
 }))
 app.get('/api/bots/:id/teams/app.zip', botsGuard, (req, res) => {
   try {
-    onComputer(req)
     const b = botOr404(req.params.id)
     const out = partOf(b.id, 'teams').teamsApp({ name: b.name, description: b.description, you: String(cfg.name || '').trim() })
-    desk.record(b.id, 'settings.changed', { setting: 'teams.app', old: null, new: { version: out.version }, by: botOwnerName() })
+    desk.record(b.id, 'settings.changed', { setting: 'teams.app', old: null, new: { version: out.version }, ...changedBy(req) })
     res.setHeader('content-type', 'application/zip')
     res.setHeader('content-disposition', `attachment; filename="${out.file}"`)
     res.send(out.zip)
   } catch (e) { res.status(e.status || 400).json({ error: e.message }) }
 })
 app.delete('/api/bots/:id/teams', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = botOr404(req.params.id)
   const ch = partOf(b.id, 'teams')
   const had = ch.state()
   ch.forget()
-  desk.record(b.id, 'settings.changed', { setting: 'teams', old: { appId: had.app?.id || null, secret: had.tokens?.secret || null }, new: null, by: botOwnerName() })
+  desk.record(b.id, 'settings.changed', { setting: 'teams', old: { appId: had.app?.id || null, secret: had.tokens?.secret || null }, new: null, ...changedBy(req) })
   return botView(b)
 }))
 // Connect again now (after it stopped on an error you've since fixed in Slack, or an app updated).
@@ -4339,28 +4344,25 @@ app.get('/api/bots/:id/people', botsGuard, wrapBot(async (req) => ({ people: awa
 // look at and export under its name, until the time it's kept for runs out; with history=1, its
 // activity history is deleted too, the record keeping only that it was.
 app.delete('/api/bots/:id', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = botOr404(req.params.id)
   const history = req.query.history === '1'
   desk.channel(b.id)?.forget()
-  desk.remove(b.id, { history })
+  desk.remove(b.id, { history, device: deviceOfReq(req) })
   botsStore.remove(b.id)
   pushFleet()
   return { ok: true, kept: botsStore.deletedOf(b.id) }
 }))
 // A deleted bot's activity history, deleted now: the record keeps only that it was.
 app.delete('/api/bots/:id/history', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const d = botsStore.deletedOf(req.params.id)
   if (!d || !desk.has(d.id)) throw Object.assign(new Error('No such deleted bot'), { status: 404 })
-  desk.forget(d.id)
+  desk.forget(d.id, { device: deviceOfReq(req) })
   return { ok: true }
 }))
 // Activity: its conversations (narrowed by q, person, channel, from, to, outcome), whether its
-// record holds, and one conversation as a timeline; and its export. Only on this computer: the
-// record never goes through the relay.
+// record holds, and one conversation as a timeline; and its export. On your phone and your other
+// computers too, through their end-to-end encrypted link: the relay passes it on unread.
 app.get('/api/bots/:id/activity', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = recordOr404(req.params.id)
   const f = Object.fromEntries(['q', 'person', 'channel', 'from', 'to', 'outcome'].map((k) => [k, req.query[k] ? String(req.query[k]).slice(0, 200) : null]))
   const all = desk.conversations(b.id)
@@ -4370,10 +4372,10 @@ app.get('/api/bots/:id/activity', botsGuard, wrapBot(async (req) => {
     people: [...new Map(all.flatMap((c) => c.people).map((p) => [p.id, p])).values()].sort((x, y) => String(x.name || x.id).localeCompare(String(y.name || y.id))),
     places: [...new Map(all.filter((c) => c.place).map((c) => [c.place.id, c.place])).values()],
     integrity: desk.check(b.id), retention: b.retention, deleted: b.deleted ? { at: b.deletedAt } : null,
+    changes: desk.changes(b.id),
   }
 }))
 app.get('/api/bots/:id/activity/:conv', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = recordOr404(req.params.id)
   const t = desk.timeline(b.id, String(req.params.conv))
   if (!t) throw Object.assign(new Error('No such conversation'), { status: 404 })
@@ -4383,7 +4385,6 @@ app.get('/api/bots/:id/activity/:conv', botsGuard, wrapBot(async (req) => {
 // Markdown.
 app.get('/api/bots/:id/export', botsGuard, (req, res) => {
   try {
-    onComputer(req)
     const b = recordOr404(req.params.id)
     const format = ['jsonl', 'csv', 'md'].includes(req.query.format) ? req.query.format : 'jsonl'
     const out = desk.exportOf(b.id, { format, from: req.query.from ? String(req.query.from) : null, to: req.query.to ? String(req.query.to) : null, conv: req.query.conv ? String(req.query.conv) : null })
@@ -4398,11 +4399,10 @@ app.get('/api/bots/:id/export', botsGuard, (req, res) => {
 app.post('/api/bots/questions/:id', botsGuard, wrapBot((req) => desk.decide(req.params.id, { send: req.body?.send === true, text: req.body?.text })))
 // A bot from a file exported on another computer (instructions, memory and settings; never tokens).
 app.post('/api/bots/import', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const r = botsStore.fromBundle(req.body?.bundle, String(cfg.name || '').trim())
   connectBot(r.bot.id)
   const kept = desk.memory.bring(r.bot.id, r.memory)
-  desk.record(r.bot.id, 'settings.changed', { setting: 'imported', old: null, new: { name: r.bot.name, memory: kept, from: String(req.body?.bundle?.exportedAt || '') || null }, by: String(cfg.name || '').trim() || 'the owner' })
+  desk.record(r.bot.id, 'settings.changed', { setting: 'imported', old: null, new: { name: r.bot.name, memory: kept, from: String(req.body?.bundle?.exportedAt || '') || null }, ...changedBy(req) })
   desk.sync()
   const v = await botView(r.bot)
   const problems = [
@@ -4423,29 +4423,27 @@ app.get('/api/bots/:id/channels', botsGuard, wrapBot(async (req) => {
 // It as a file: instructions, memory and settings, never its tokens.
 app.get('/api/bots/:id/bundle', botsGuard, (req, res) => {
   try {
-    onComputer(req)
     const b = botOr404(req.params.id)
     const out = botsStore.bundleOf(b.id, desk.memory.list(b.id).filter((x) => x.state === 'kept').map(({ id, kind, of, ofName, text, state }) => ({ id, kind, of, ofName, text, state })))
-    desk.record(b.id, 'settings.changed', { setting: 'exported', old: null, new: { memory: out.memory.length }, by: String(cfg.name || '').trim() || 'the owner' })
+    desk.record(b.id, 'settings.changed', { setting: 'exported', old: null, new: { memory: out.memory.length }, ...changedBy(req) })
     res.setHeader('content-type', 'application/json; charset=utf-8')
     res.setHeader('content-disposition', `attachment; filename="${b.name.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || b.id}.bridge-bot.json"`)
     res.send(JSON.stringify(out, null, 2))
   } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
 // What it remembers: every item, and yours to add, keep, edit and delete.
-app.get('/api/bots/:id/memory', botsGuard, wrapBot(async (req) => { onComputer(req); const b = botOr404(req.params.id); return { mode: b.memory, items: desk.memory.list(b.id) } }))
-app.post('/api/bots/:id/memory', botsGuard, wrapBot(async (req) => { onComputer(req); const b = botOr404(req.params.id); return desk.memory.add(b.id, { kind: req.body?.kind, of: req.body?.of, ofName: req.body?.ofName, text: req.body?.text }) }))
+app.get('/api/bots/:id/memory', botsGuard, wrapBot(async (req) => { const b = botOr404(req.params.id); return { mode: b.memory, items: desk.memory.list(b.id) } }))
+app.post('/api/bots/:id/memory', botsGuard, wrapBot(async (req) => { const b = botOr404(req.params.id); return desk.memory.add(b.id, { kind: req.body?.kind, of: req.body?.of, ofName: req.body?.ofName, text: req.body?.text }, { device: deviceOfReq(req) }) }))
 app.patch('/api/bots/:id/memory/:mid', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = botOr404(req.params.id)
-  if (req.body?.keep === true) desk.memory.keep(b.id, req.params.mid)
-  return req.body?.text !== undefined ? desk.memory.edit(b.id, req.params.mid, req.body.text) : desk.memory.list(b.id).find((x) => x.id === req.params.mid) || null
+  const from = { device: deviceOfReq(req) }
+  if (req.body?.keep === true) desk.memory.keep(b.id, req.params.mid, from)
+  return req.body?.text !== undefined ? desk.memory.edit(b.id, req.params.mid, req.body.text, from) : desk.memory.list(b.id).find((x) => x.id === req.params.mid) || null
 }))
-app.delete('/api/bots/:id/memory/:mid', botsGuard, wrapBot(async (req) => { onComputer(req); desk.memory.remove(botOr404(req.params.id).id, req.params.mid); return { ok: true } }))
+app.delete('/api/bots/:id/memory/:mid', botsGuard, wrapBot(async (req) => { desk.memory.remove(botOr404(req.params.id).id, req.params.mid, { device: deviceOfReq(req) }); return { ok: true } }))
 // Try It: a question asked here as someone who may ask, answered the whole way but to Slack.
-app.post('/api/bots/:id/try', botsGuard, wrapBot(async (req) => { onComputer(req); const b = botOr404(req.params.id); return desk.tryIt(b.id, { text: req.body?.text, as: req.body?.as || null }) }))
+app.post('/api/bots/:id/try', botsGuard, wrapBot(async (req) => { const b = botOr404(req.params.id); return desk.tryIt(b.id, { text: req.body?.text, as: req.body?.as || null }) }))
 app.get('/api/bots/:id/try/:q', botsGuard, wrapBot(async (req) => {
-  onComputer(req)
   const b = botOr404(req.params.id)
   const item = desk.get(req.params.q)
   if (!item || item.bot.id !== b.id || !item.try) throw Object.assign(new Error('No such question'), { status: 404 })

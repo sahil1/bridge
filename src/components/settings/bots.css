@@ -266,3 +266,28 @@
 .sb-first .st-row { margin-top: 4px; }
 .modal.settings.phone .sb .sb-guide-step .btn, .modal.settings.phone .sb .sb-first .btn { min-height: 40px; }
 .modal.settings.phone .sb .sb-guide-done .link-btn { min-height: 40px; }
+
+/* Picking a folder or its instructions file from the computer's own listing (from a phone or another
+   computer as well), and the changes made to it, in Activity. */
+.sb-browse { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--pane); min-width: 0; max-width: 560px; }
+.sb-browse > p { margin: 0 4px; }
+.sb-browse-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.sb-browse-head .icon-btn { flex: none; width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: 7px; color: var(--ink-2); }
+.sb-browse-head .btn { display: inline-flex; align-items: center; gap: 5px; }
+.sb-browse-at { flex: 0 1 auto; min-width: 0; font: 12px var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
+.sb-browse-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; max-height: 280px; overflow-y: auto; overflow-x: hidden; }
+.sb-browse-list button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 4px 8px; border-radius: 7px; text-align: left; color: var(--ink); font-size: 12.5px; }
+.sb-browse-list button:hover, .sb-browse-list button:focus-visible { background: var(--pane-3); }
+.sb-browse-list button > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.sb-browse-list button > .icon { flex: none; color: var(--ink-3); }
+.sb-changes { margin-top: 4px; }
+.sb-changes .sb-tl { margin-top: 4px; }
+.sb-changes .sb-tl li { grid-template-columns: auto minmax(0, 1fr); }
+.modal.settings.phone .sb .sb-browse-head .icon-btn { width: 40px; height: 40px; }
+/* On a phone, a choice with no words under it is a whole target too, and a command wraps rather than
+   scrolling sideways (Copy copies it whole). */
+.modal.settings.phone .sb .sb-mode { min-height: 44px; }
+.sb :is(.sb-integrity, .sb-endpoint, .sb-rejected) > span { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+.modal.settings.phone .sb .sb-cmd { align-items: flex-start; }
+.modal.settings.phone .sb .sb-cmd code { white-space: normal; overflow-wrap: anywhere; overflow-x: visible; }
+.modal.settings.phone .sb .sb-browse-list button { min-height: 44px; font-size: 14px; }
