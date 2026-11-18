@@ -62,6 +62,17 @@ function PhoneSetup({ quiet, picked }) {
     try { setSt(await api('/phone', { method: 'POST', body: { enabled } })) } catch (e) { setErr(e.message) }
     setBusy(false)
   }
+  // The code holds a link that lets one phone in (apiauth.js), once, within two minutes: a new one
+  // every minute while it shows.
+  const [code, setCode] = useState(null) // { url, qr }
+  useEffect(() => {
+    if (!st?.enabled) return
+    let live = true
+    const make = () => api('/phone/link', { method: 'POST' }).then((l) => live && setCode(l), (e) => live && setErr(e.message))
+    make()
+    const tm = setInterval(make, 60000)
+    return () => { live = false; clearInterval(tm) }
+  }, [st?.enabled])
   const link = err?.match(/https:\/\/\S+/)?.[0]
   if (quiet && !st?.enabled) return null
   // Not the way picked, and not on: under Advanced.
@@ -87,16 +98,16 @@ function PhoneSetup({ quiet, picked }) {
           </div>
         ) : (
           <div className="ph-pair">
-            <div className="ph-qr" aria-label={t('QR code for {url}', { url: st.url })} dangerouslySetInnerHTML={{ __html: st.qr }} />
+            {code ? <div className="ph-qr" aria-label={t('QR code for {url}', { url: st.url })} dangerouslySetInnerHTML={{ __html: code.qr }} /> : <div className="ph-qr skeleton-rows"><div /></div>}
             <div className="ph-pair-text">
               <ol className="ph-steps">
                 <li>{tn('{install} and sign in with the same account as this computer.', { install: <b>{t('Install Tailscale on your phone')}</b> })}</li>
-                <li>{tn('{scan} with the phone\'s camera, or open {link}.', { scan: <b>{t('Scan this code')}</b>, link: <a href={st.url} target="_blank" rel="noreferrer"><code>{st.url}</code></a> })}</li>
+                <li>{tn('{scan} with the phone\'s camera. It opens {address} and lets that phone in; each code works once, and a new one shows here every minute.', { scan: <b>{t('Scan this code')}</b>, address: <code>{st.url}</code> })}</li>
                 <li>{tn('{add} so it opens like an app. iPhone: Share › Add to Home Screen. Android: ⋮ › Install app.', { add: <b>{t('Add it to your Home Screen')}</b> })}</li>
                 <li>{tn('{open} and turn on notifications (Settings › {devices} › Notifications, on the phone).', { open: <b>{t('Open it from the Home Screen')}</b>, devices })}</li>
               </ol>
               <div className="st-row">
-                <CopyButton text={st.url} label={t('Copy link')} />
+                {code && <CopyButton text={code.url} label={t('Copy link')} />}
                 <button type="button" className="ghost-btn" disabled={busy} onClick={() => toggle(false)}>{t('Turn off phone access')}</button>
               </div>
               <KeepAwake />

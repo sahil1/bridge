@@ -12,6 +12,8 @@ import { makeAuth } from './apiauth.js'
 import { localKey } from './apitoken.js'
 import * as machinePages from './machinepages.js'
 import { makeRemote } from './remote.js'
+import { makeTell } from './screentell.js'
+import { plainName } from '../shared/remote.js'
 import * as devPreview from './devpreview.js'
 import { usage } from './usage.js'
 import { usageStats } from './usagestats.js'
@@ -193,11 +195,10 @@ const news = makeNews(cfg)
 
 const guard = makeGuard(cfg, { tailnetOwner: phone.tailnetOwner })
 // The key every request needs besides (apiauth.js): in the data folder, made the first time. Through
-// Tailscale, you still get in without it while Tailscale publishes this server (Use on your phone),
-// as you did; the tests stand Tailscale in with BRIDGE_TAILNET_OWNER.
+// Tailscale too: your phone gets its cookie from the code in Settings (Use on your phone), as any
+// browser does; the tests stand Tailscale in with BRIDGE_TAILNET_OWNER.
 localKey()
-let tailnetServed = !!process.env.BRIDGE_TAILNET_OWNER
-const auth = makeAuth({ port: cfg.port, token: localKey, ui: () => UI_DIR, viaTailnet: guard.viaTailnet, tailnetServed: () => tailnetServed })
+const auth = makeAuth({ port: cfg.port, token: localKey, ui: () => UI_DIR, viaTailnet: guard.viaTailnet })
 // Another of your computers' pages, each at a port of its own here, and what they may ask of this one.
 const pages = machinePages.make({
   port: cfg.port, host: cfg.host, thisName: () => relay.thisName(), linked: () => machines.list().filter((m) => m.state === 'linked'),
@@ -205,19 +206,28 @@ const pages = machinePages.make({
 })
 // Remote Screen and Preview (a Beta Feature): this computer's screen and its agents' apps for your
 // other devices (remote.js, devpreview.js serve), and theirs shown here at addresses of their own
-// (devpreview.js ports). A port is a dev server's when a process started in an agent's folder
-// listens on it, and never one of Bridge AI's own.
+// (devpreview.js ports). A port is a dev server's when an agent's terminal started what listens on
+// it (not one in the home folder or Bridge AI's data folder), and never one of Bridge AI's own.
 const previewPorts = devPreview.ports({ machines, linked: () => machines.list().filter((m) => m.state === 'linked') })
 const isDevPort = async (port) => {
-  const roots = [...new Set(((await rt.fleet().catch(() => null))?.panes || []).map((p) => p.cwd).filter(Boolean))]
-  return servers.ownedBy(port, roots, { exclude: [cfg.port, cfg.port + 1, ...pages.ports(), ...previewPorts.portsOpen()] })
+  const panes = rt.processes ? rt.processes() : ((await rt.fleet().catch(() => null))?.panes || []).map((p) => ({ cwd: p.cwd }))
+  return servers.ownedBy(port, panes.filter((p) => p.cwd), { exclude: [cfg.port, cfg.port + 1, ...pages.ports(), ...previewPorts.portsOpen()], never: [os.homedir()], noneIn: [DATA] })
 }
+// Your devices told when this screen is shared, and every window shown what's live here and on
+// your other computers (screentell.js, event: screen on /api/events).
+const screenTell = makeTell({
+  remote: () => remote, notify, machines, relay, pushDevices: () => push.devices(),
+  onLive: (list) => { for (const c of clients) c.write(`event: screen\ndata: ${JSON.stringify({ list })}\n\n`) },
+})
 const remote = makeRemote({
   trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), thisName: () => relay.thisName(), os: machines.OS,
   hosted: () => !!relay.status().hosted, isDevPort, screenAllowed: () => (IS_MAC ? calls.screen() : Promise.resolve(null)),
-  devices: () => relay.status().devices,
+  devices: () => relay.status().devices, onBlocked: (id) => machines.endOnward(id, `${relay.thisName()} stopped letting this device connect.`),
+  tell: (ev) => screenTell.tell(ev), onChange: () => screenTell.changed(), notifyTo: () => screenTell.notifyTo(), blockThere: (hop, id) => screenTell.blockThere(hop, id),
 })
-const servePreview = devPreview.serve({ trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), allows: (id) => remote.allows(id), isDevPort, thisName: () => relay.thisName() })
+// A device of this computer's going on through it to another's screen: this computer's own list and lockout first.
+machines.usePassCheck((asker) => remote.mayPass(asker.id))
+const servePreview = devPreview.serve({ trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), may: (id, port) => remote.mayPreview(id, port), isDevPort, thisName: () => relay.thisName() })
 const app = express()
 app.use(guard.http)
 app.use(auth.http)
@@ -287,7 +297,7 @@ function effortFor(kind, o) {
 }
 
 // Cloud agents (cloud.js) answer the agent routes below for their own panes, so they go first.
-cloud.routes(app, { pushFleet: () => pushFleet() })
+cloud.routes(app, { pushFleet: () => pushFleet(), onComputer: (req) => onComputer(req) })
 
 // ---------- Fleet ----------
 
@@ -1583,6 +1593,8 @@ app.get('/api/events', (req, res) => {
   res.flushHeaders()
   clients.add(res)
   if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(lastFleet)}\n\n`)
+  // Who's viewing a screen of yours now, here or on another of your computers (screentell.js).
+  res.write(`event: screen\ndata: ${JSON.stringify({ list: screenTell.list() })}\n\n`)
   // The desktop app's own feed (desktop/main.js says so): it also hears when another of your devices
   // asks this computer to allow something (fixes.js askHere).
   const off = req.headers['x-bridge-desktop'] && !req.headers['x-bridge-relay'] ? fixes.onAsk((a) => res.write(`event: fix-ask\ndata: ${JSON.stringify(a)}\n\n`)) : null
@@ -2746,8 +2758,8 @@ notify.use(push.channel)
 notify.useRuntime(rt)
 // A finished agent whose last words name a video or a sound in its folder: its notification opens it.
 notify.useLastFile((a) => { try { return mediaNamed(preview(a)?.text || '', a.cwd) } catch { return null } })
-// This computer itself, not a phone (through the relay, or Tailscale's name for it).
-const fromHere = (req) => !req.headers['x-bridge-relay'] && /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(req.headers.host || '')
+// This computer itself, not a phone (through the relay, or through Tailscale).
+const fromHere = (req) => !req.headers['x-bridge-relay'] && !guard.viaTailnet(req) && /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(req.headers.host || '')
 // Quotas: checked every 10 minutes while a notification channel is on.
 setInterval(() => { if (notify.active()) quota().then((q) => notify.onQuota(q, cfg), () => {}) }, 10 * 60 * 1000)
 
@@ -2770,8 +2782,9 @@ app.post('/api/agents/:pane/mute', wrap(async (req) => {
   pushFleet()
   return { ok: true, muted: !!req.body?.muted }
 }))
-// A notification's answer button (the token says which agent, question and answer).
-app.post('/api/notify/answer', wrap((req) => notify.answer(req.body?.token)))
+// A notification's answer button (the token says which agent, question and answer), or another
+// kind's (Remote Screen's Stop and Block This Device), saying which device it was pressed on.
+app.post('/api/notify/answer', wrap((req) => notify.answer(req.body?.token, { by: whoAsks(req) })))
 // You're using Bridge AI on this computer: phones stay quiet meanwhile. Phones can't say this.
 app.post('/api/presence', wrap((req) => { if (fromHere(req)) notify.presence(req.body || {}); return { ok: true } }))
 
@@ -2783,12 +2796,21 @@ app.post('/api/system/stopping', wrap((req) => {
   return { ok: true }
 }))
 // Whether Tailscale publishes this computer decides, with the relay's phones, whether it stays awake.
-const tailnetSaid = (st) => { relay.setTailnet(!!st?.enabled); tailnetServed = !!st?.enabled || !!process.env.BRIDGE_TAILNET_OWNER; return st }
+const tailnetSaid = (st) => { relay.setTailnet(!!st?.enabled); return st }
 app.get('/api/phone', wrap(() => phone.status(cfg.port).then(tailnetSaid)))
-app.post('/api/phone', wrap((req) => (req.body?.enabled ? phone.enable(cfg.port) : phone.disable(cfg.port)).then(tailnetSaid)))
-// Your own relay (relay.js). Set up from the computer only: a phone using the relay can see it,
-// but can't pair more phones, remove one, or change where the relay is.
-const onComputer = (req) => { if (req.headers['x-bridge-relay']) throw Object.assign(new Error('Do this in Bridge AI on your computer'), { status: 403 }) }
+app.post('/api/phone', wrap((req) => { onComputer(req); return (req.body?.enabled ? phone.enable(cfg.port) : phone.disable(cfg.port)).then(tailnetSaid) }))
+// A phone through Tailscale is let in as a browser is (apiauth.js): with a one-time link, which the
+// code in Settings holds. Made here at the computer only; it works once, for two minutes.
+app.post('/api/phone/link', wrap(async (req) => {
+  hereOnly(req, 'Show the code for your phone')
+  const st = await phone.status(cfg.port)
+  if (!st.enabled) throw Object.assign(new Error('Turn on phone access first'), { status: 409 })
+  const l = auth.link({ base: st.url.replace(/\/$/, '') })
+  return { ...l, qr: await phone.qr(l.url) }
+}))
+// Your own relay (relay.js). Set up from the computer only: a phone using the relay or Tailscale
+// can see it, but can't pair more phones, remove one, or change where the relay is.
+const onComputer = (req) => { if (req.headers['x-bridge-relay'] || guard.viaTailnet(req)) throw Object.assign(new Error('Do this in Bridge AI on your computer'), { status: 403 }) }
 // here: the paired device asking (through the relay), and left: the address it moved here from with
 // this computer, which the phone app there can let go of (src/moved.js).
 app.get('/api/relay', wrap((req) => ({ ...relay.status(), here: req.headers['x-bridge-relay'] || null, left: relay.movedFrom(req.headers['x-bridge-relay']) })))
@@ -2853,7 +2875,8 @@ app.post('/api/machines/:id/preview', async (req, res) => {
     if (!(port > 1023 && port < 65536)) return res.status(400).json({ error: 'Which port?' })
     try { await machines.callOn(m.id, 'GET', `/api/remote/preview-check?port=${port}`, undefined, 12000) } catch (e) {
       const old = /^(Not found|.*answered 404)$/.test(e.message)
-      return res.status(e.code === 'offline' ? 503 : 409).json({ error: old ? `Update Bridge AI on ${m.name} to see its apps here.` : e.message, code: e.code === 'offline' ? 'offline' : old ? 'update' : 'refused' })
+      // gate: its password (or Allow there) first, in a session for that app (Preview.jsx).
+      return res.status(e.code === 'offline' ? 503 : 409).json({ error: old ? `Update Bridge AI on ${m.name} to see its apps here.` : e.message, code: e.code === 'offline' ? 'offline' : old ? 'update' : e.said === 'gate' ? 'gate' : 'refused' })
     }
     res.json(await previewPorts.address(m.id, port))
   } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
@@ -2864,7 +2887,15 @@ app.post('/api/machines/:id/preview', async (req, res) => {
 // computer itself: control, the Remote Access Password, Ask Here First (and each answer), which
 // devices may connect, a lockout lifted, stopping a session, and what you've seen of who looked.
 // The password goes no further than remote.js, which keeps only its hash; it's never in a log.
-const atThisComputer = (req) => !req.headers['x-bridge-relay'] && !req.machinePage
+const atThisComputer = (req) => !req.headers['x-bridge-relay'] && !req.machinePage && !guard.viaTailnet(req)
+// Who a Stop or Block came from, for the record: this computer, a device paired here, or one of
+// another computer's devices, as that computer says (from); names as they're shown (plainName).
+const whoAsks = (req, from) => {
+  const d = relay.deviceOf(req.headers['x-bridge-relay'])
+  if (!d) return req.headers['x-bridge-relay'] ? 'a device' : guard.viaTailnet(req) ? 'a device through Tailscale' : relay.thisName()
+  const f = plainName(from)
+  return d.kind === 'computer' && f && f !== d.name ? `${f}, through ${plainName(d.name)}` : plainName(d.name)
+}
 const remoteHere = (req) => { if (!atThisComputer(req)) throw Object.assign(new Error(`Do this at ${relay.thisName()} itself.`), { status: 403, code: 'here' }) }
 const sayErr = (res, e) => res.status(e.status || 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) })
 app.get('/api/remote', async (req, res) => { try { res.json({ ...(await remote.status({ sources: req.query.sources === '1', device: atThisComputer(req) ? null : String(req.headers['x-bridge-relay'] || '') || 'page' })), here: atThisComputer(req) }) } catch (e) { sayErr(res, e) } })
@@ -2877,6 +2908,32 @@ app.post('/api/remote/ask-first', (req, res) => { try { remoteHere(req); res.jso
 app.post('/api/remote/asks/:id', (req, res) => { try { remoteHere(req); res.json({ ok: remote.answer(req.params.id, req.body?.allow === true) }) } catch (e) { sayErr(res, e) } })
 app.post('/api/remote/devices', (req, res) => { try { remoteHere(req); res.json(remote.setDevice(String(req.body?.id || ''), req.body?.allowed !== false)) } catch (e) { sayErr(res, e) } })
 app.post('/api/remote/locks/:id/clear', (req, res) => { try { remoteHere(req); res.json(remote.unlock(req.params.id)) } catch (e) { sayErr(res, e) } })
+app.post('/api/remote/notify', (req, res) => { try { remoteHere(req); res.json(remote.setNotify(req.body?.on !== false)) } catch (e) { sayErr(res, e) } })
+// Your devices told (screentell.js). Stop, or Block This Device, from any of your devices: carried out
+// here (remote.js endFrom), as it only narrows who may connect; letting a device back in is above,
+// here only. From another computer, it says which of its devices it came from, for the record.
+app.post('/api/remote/sessions/:id/end', async (req, res) => { try { res.json(await remote.endFrom(req.params.id, { block: req.body?.block === true, by: whoAsks(req, req.body?.from) })) } catch (e) { sayErr(res, e) } })
+// A device that came through this computer to another of yours, blocked from there (Block This
+// Device on that one's session): unticked here, so it reaches none of them through this one.
+app.post('/api/remote/devices/block', (req, res) => { try { if (!viaMachine(req)) throw Object.assign(new Error('Only another of your computers asks this'), { status: 403 }); res.json(remote.setDevice(String(req.body?.id || ''), false)) } catch (e) { sayErr(res, e) } })
+// What's live here and on your other computers (the cards), and Stop or Block from a window here,
+// for this computer's sessions or, through its link, another's (one hop: not for another computer).
+app.get('/api/remote/live', (req, res) => res.json({ list: screenTell.list() }))
+app.post('/api/remote/live/end', async (req, res) => {
+  try {
+    const machine = typeof req.body?.machine === 'string' && req.body.machine ? req.body.machine : null
+    if (machine && viaMachine(req)) throw Object.assign(new Error('Not through another device'), { status: 403 })
+    res.json(await screenTell.end({ machine, id: String(req.body?.id || ''), block: req.body?.block === true }, whoAsks(req)))
+  } catch (e) { sayErr(res, e) }
+})
+// Another of your computers saying what's live there, and passing on its notification (from it only).
+app.post('/api/remote/heard', async (req, res) => {
+  try {
+    const m = machines.ofDevice(relay.deviceOf(req.headers['x-bridge-relay']))
+    if (!m) throw Object.assign(new Error('Only another of your computers says this'), { status: 403 })
+    res.json(await screenTell.heard(m, req.body || {}))
+  } catch (e) { sayErr(res, e) }
+})
 // A picture of a project's app, drawn off screen by the desktop app here for a phone (desktop/remote.js).
 app.post('/api/remote/sessions/:id/frame', express.raw({ type: () => true, limit: '2mb' }), (req, res) => {
   if (!atThisComputer(req)) return res.status(403).json({ error: 'Only the desktop app here sends these' })
@@ -2903,7 +2960,7 @@ machines.useSummary(async ({ home: withHome = false } = {}) => {
   // quiet: the agents waiting on you whose wait has gone quiet (shared/focus.js), not counted as
   // needing you in the devices menu.
   const quiet = needs.filter((i) => blocking(i) && isQuiet(i)).length
-  return { runtime: rt.name, counts: { ...f.counts, quiet }, agents: await runs.agents(f, { cloudSaid: cloud.previews() }), needs, ...(withHome ? { home: await homeList.items().catch(() => null) } : {}) }
+  return { runtime: rt.name, counts: { ...f.counts, quiet }, agents: await runs.agents(f, { cloudSaid: cloud.previews() }), needs, notifies: push.devices().length, ...(withHome ? { home: await homeList.items().catch(() => null) } : {}) }
 })
 machines.askHome(() => trialOn('home'))
 // The agent map: every computer's agents, this one's from here and the others' from what each last
@@ -3294,7 +3351,7 @@ async function servedUi() {
 // in: this browser or program is let in (the page saying how to get in looks, to open by itself).
 // With Bots on, each bot's connection too, asked on this computer (the Docker image's health check
 // says it): its name and whether it's connected, and why not.
-const localAsk = (req) => !req.headers['x-bridge-relay'] && /^(::1|127\.\d+\.\d+\.\d+|::ffff:127\.\d+\.\d+\.\d+)$/.test(String(req.socket?.remoteAddress || ''))
+const localAsk = (req) => !req.headers['x-bridge-relay'] && !guard.viaTailnet(req) && /^(::1|127\.\d+\.\d+\.\d+|::ffff:127\.\d+\.\d+\.\d+)$/.test(String(req.socket?.remoteAddress || ''))
 app.get('/api/health', (req, res) => res.json({
   ok: true, app: 'Bridge AI', version: VERSION, in: auth.allowed(req),
   ...(localAsk(req) && trialOn('slack-bot') ? { bots: botsStore.live().map((b) => { const st = desk.channel(b.id)?.state() || { state: 'off' }; return { id: b.id, name: b.name, state: st.state, why: st.why || null, paused: b.paused, where: Object.fromEntries(Object.entries(st.platforms || {}).filter(([, x]) => x.state !== 'no-tokens').map(([k, x]) => [k, { state: x.state, why: x.why || null }])) } }) } : {}),

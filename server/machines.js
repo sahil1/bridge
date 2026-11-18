@@ -419,7 +419,7 @@ class Link {
           clearTimeout(t)
           let j = null
           try { j = JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { /* not JSON */ }
-          if (head?.s >= 400) reject(new Error(j?.error || `${this.m.name} answered ${head.s}`))
+          if (head?.s >= 400) reject(Object.assign(new Error(j?.error || `${this.m.name} answered ${head.s}`), { said: typeof j?.code === 'string' ? j.code : null }))
           else resolve(j)
         },
         onError: (msg) => { clearTimeout(t); reject(new Error(msg)) },
@@ -476,6 +476,8 @@ export function list() {
       needs: s?.needs || null, at: s?.at ? new Date(s.at).toISOString() : null,
       // Everything Home lists from there (null unless Home asked, or from a Bridge AI too old to say).
       home: s?.home || null,
+      // How many devices get its notifications (null from a Bridge AI too old to say).
+      notifies: s?.notifies ?? null,
       about: s?.about || null, systemName: s?.systemName || null, safety: safety(m.hostKey),
     }
   })
@@ -484,6 +486,11 @@ export const here = () => ({ name: relay.thisName(), systemName: relay.systemNam
 // The port its pages have on this computer (machinepages.js), kept with it so what they save in the
 // browser stays theirs across restarts (the desktop app reads it here too: desktop/main.js).
 export const portOf = (id) => byId(id)?.port || null
+// The linked computer a request came through (relay.js's device for it), or null.
+export function ofDevice(d) {
+  const m = d?.kind === 'computer' && d.relay ? byRelay(relay.cleanRelay(d.relay)) : null
+  return m && m.state === 'linked' ? { id: m.id, name: kept.get(m.id)?.name || m.name, relay: m.relay } : null
+}
 export function keepPort(id, port) {
   const m = byId(id)
   if (m && m.port !== port) { m.port = port; save() }
@@ -793,7 +800,7 @@ async function refreshNow(m, asked = Date.now()) {
   if (!l?.session) return
   const s = await l.call('GET', `/api/machines/summary${wantHome() ? '?home=1' : ''}`, undefined, 12000)
   if ((kept.get(m.id)?.asked || 0) > asked) return // a later one came first
-  keep(m.id, { asked, name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: Array.isArray(s.agents) ? s.agents.slice(0, 40) : [], needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, home: Array.isArray(s.home) ? s.home.slice(0, 100) : null, about: s.about || null, systemName: s.systemName || null, at: Date.now() })
+  keep(m.id, { asked, name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: Array.isArray(s.agents) ? s.agents.slice(0, 40) : [], needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, home: Array.isArray(s.home) ? s.home.slice(0, 100) : null, about: s.about || null, systemName: s.systemName || null, notifies: Number.isFinite(s.notifies) ? s.notifies : null, at: Date.now() })
   if (s.name && s.name !== m.name) { m.name = String(s.name).slice(0, 60); save() }
   if (s.os !== m.os || s.version !== m.version) { m.os = s.os; m.version = s.version; save() }
 }
@@ -896,6 +903,7 @@ const PASS = new Set(['content-type', 'accept', 'accept-language', 'range', 'if-
 // phone, Tailscale): a service worker over all of them, or clearing what this computer's page saves.
 const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'content-encoding', 'set-cookie', 'service-worker-allowed', 'clear-site-data'])
 const MPATH = /^\/m\/([A-Za-z0-9_-]{1,20})(\/.*)?$/
+const PREVIEWS = /^\/_preview(\/|\?|$)/
 // A page of that device while it isn't reachable: it says so, and tries again every few seconds
 // by itself, so the window opens it as soon as the device is back (it used to sit there, or show
 // the error as the page).
@@ -926,6 +934,9 @@ export async function proxy(req, res, { frames = null, ui = null } = {}) {
   if (!m || m.state !== 'linked') return page ? res.status(404).type('html').send(offlinePage('That device', 'It isn\'t linked to this one.')) : res.status(404).json({ error: 'No such device' })
   // Not on behalf of another device: one hop only.
   if (relay.isMachine(req.headers['x-bridge-relay'])) return res.status(403).json({ error: 'Not through another device' })
+  // A preview of its apps opens at an address of its own (devpreview.js ports), never under this
+  // computer's, where it would run as Bridge AI's own page.
+  if (PREVIEWS.test(hit[2] || '/')) return res.status(404).json({ error: `A preview of ${m.name}'s apps opens at an address of its own.`, code: 'preview' })
   const own = (req.method === 'GET' || req.method === 'HEAD') && await mine(ui, hit[2] || '/')
   if (own) return res.sendFile(own, { root: path.join(ui, 'assets'), headers: { 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' } })
   const l = linkOf(m)
@@ -1004,26 +1015,46 @@ export async function proxy(req, res, { frames = null, ui = null } = {}) {
   } catch (e) { failed(e.message) }
 }
 
+// A device of this computer's going on through it to another's screen or apps (Remote Screen and
+// Preview): this computer's own list and lockout say first whether it may (remote.js mayPass), and
+// what went on ends here when it's unticked here (endOnward). check(device): null, or { code, why }.
+let passCheck = () => null
+export const usePassCheck = (fn) => { passCheck = fn }
+const onward = new Map() // device id -> its sockets gone on to another computer's screen
+export function endOnward(id, why) {
+  for (const c of onward.get(id) || []) { try { c.send(JSON.stringify({ t: 'error', code: 'device', why })); c.close(1008, 'refused') } catch { /* closed */ } }
+}
+
 // A WebSocket to /m/<id>/... (a live terminal there).
 const wss = new WebSocketServer({ noServer: true })
 export function upgrade(req, socket, head) {
   const hit = MPATH.exec(req.url)
   const m = hit && byId(hit[1])
   const l = m && m.state === 'linked' && links.get(m.id)
-  if (!l || relay.isMachine(req.headers['x-bridge-relay'])) { socket.write('HTTP/1.1 404 Not Found\r\n\r\n'); return socket.destroy() }
+  // (A preview of its apps opens at an address of its own, never under this computer's: devpreview.js.)
+  if (!l || relay.isMachine(req.headers['x-bridge-relay']) || PREVIEWS.test(hit[2] || '/')) { socket.write('HTTP/1.1 404 Not Found\r\n\r\n'); return socket.destroy() }
+  // A screen seen through this computer: that computer's log says for which of your devices (its
+  // name, kind and id here, which that computer counts a lockout by, and leaves out of what it tells
+  // this one: screentell.js), as this one says.
+  let u = hit[2] || '/'
+  const asker = relay.deviceOf(req.headers['x-bridge-relay'])
+  const view = /^\/api\/remote\/view(\?|$)/.test(u)
+  if (view) {
+    const x = new URL(u, 'http://x')
+    for (const k of ['for', 'forId', 'forKind']) x.searchParams.delete(k) // only this computer says them
+    if (asker) { x.searchParams.set('for', String(asker.name || '').slice(0, 60)); x.searchParams.set('forId', asker.id); x.searchParams.set('forKind', asker.kind === 'computer' ? 'computer' : 'phone') }
+    u = `${x.pathname}${x.search}`
+  }
+  const no = view && asker ? passCheck(asker) : null
   wss.handleUpgrade(req, socket, head, (client) => {
+    if (no) { client.send(JSON.stringify({ t: 'error', ...no })); setTimeout(() => { try { client.close(1008, 'refused') } catch { /* closed */ } }, 50); return }
     let remote = null
     let open = false
     const pending = [] // what the page sent before the other end was open
-    // A screen seen through this computer (Remote Screen and Preview): that computer's log says for
-    // which of your devices, as this one says (a name only; it counts nothing).
-    let u = hit[2] || '/'
-    const asker = relay.deviceOf(req.headers['x-bridge-relay'])
-    if (/^\/api\/remote\/view(\?|$)/.test(u)) {
-      const x = new URL(u, 'http://x')
-      x.searchParams.delete('for') // only this computer says it
-      if (asker) x.searchParams.set('for', String(asker.name || '').slice(0, 60))
-      u = `${x.pathname}${x.search}`
+    if (view && asker) {
+      if (!onward.has(asker.id)) onward.set(asker.id, new Set())
+      onward.get(asker.id).add(client)
+      client.on('close', () => { onward.get(asker.id)?.delete(client); if (!onward.get(asker.id)?.size) onward.delete(asker.id) })
     }
     l.ready(12000).then(() => {
       // The page went before the link was ready: nothing to open there (a screen would stay seen).

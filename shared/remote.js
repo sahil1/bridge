@@ -30,6 +30,10 @@ export const PAUSE_MS = 3000
 // First waits askSeconds for Allow, then it's a no; control goes back to view-only after
 // idleMinutes without input; a password has at least passwordMin characters.
 export const ACCESS = { tries: 5, lockMinutes: 15, askSeconds: 30, idleMinutes: 10, passwordMin: 6 }
+// A device's name as it's shown (Ask Here First, Screen Activity): without control characters, or
+// the ones that turn text around or hide in it (bidi, zero-width), so a name can't pass for another.
+const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g
+export const plainName = (s, n = 60) => (typeof s === 'string' ? s.replace(HIDDEN, '').replace(/\s+/g, ' ').trim().slice(0, n) : '')
 
 // ---------- sharpness ----------
 // The screen is taken at its own pixels (a Retina display's, not its points), up to 3840 on its

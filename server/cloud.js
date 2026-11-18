@@ -112,8 +112,9 @@ async function ghStatus() {
 }
 
 // ---------- Routes ----------
-// Requests through the relay (your phone) can use cloud agents but not read your GitHub CLI login.
-const onComputer = (req) => { if (req.headers['x-bridge-relay']) throw Object.assign(new Error('Do this in Bridge AI on your computer'), { status: 403 }) }
+// Requests through the relay or Tailscale (your phone) can use cloud agents but not read your GitHub
+// CLI login: index.js's onComputer says which those are.
+let onComputer = (req) => { if (req.headers['x-bridge-relay']) throw Object.assign(new Error('Do this in Bridge AI on your computer'), { status: 403 }) }
 const wrap = (fn) => async (req, res, next) => {
   try {
     const out = await fn(req, res, next)
@@ -121,7 +122,8 @@ const wrap = (fn) => async (req, res, next) => {
   } catch (e) { if (!res.headersSent) res.status(e.status || (e.limited ? 429 : 502)).json({ error: e.message }) }
 }
 
-export function routes(app, { pushFleet = () => {} } = {}) {
+export function routes(app, { pushFleet = () => {}, onComputer: here = null } = {}) {
+  if (here) onComputer = here
   cloud.on({ change: pushFleet })
 
   // The agent routes local agents use (Chat, the chief of staff's `bridge` helper, phone

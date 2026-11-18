@@ -49,7 +49,7 @@ import NeedsHome, { Everything, useHome, needCount, editHome } from './component
 import More from './components/More.jsx'
 import RemoteAgent from './components/RemoteAgent.jsx'
 import ScreenView from './components/remote/ScreenView.jsx'
-import { RemoteHere } from './components/remote/Here.jsx'
+import { RemoteHere, ScreenLive } from './components/remote/Here.jsx'
 import Dictation from './dictation/Dictation.jsx'
 import BackForward from './components/BackForward.jsx'
 import { start as navStart, stop as navStop, seen as navSeen, recheck as navRecheck, usePlaces, placeOf, placeLabel, showPlaceIn, replacedWith, renamedTab, slotOf } from './backForward.js'
@@ -1234,6 +1234,7 @@ function App() {
         <Quiet name="Link requests"><AskBanner /></Quiet>
         <Quiet name="Switched computer"><SwitchedHere /></Quiet>
       <Quiet name="Remote screen"><RemoteHere /></Quiet>
+      <Quiet name="Screens being viewed"><ScreenLive /></Quiet>
         <main className="m-body" style={untilAsks}>
           {mtab === 'home' && homeOn && viewFor(homeView === 'everything' ? 'view:everything' : 'view:home')}
           {mtab === 'mate' && (mateShown ? <Console key={mateShown.paneId} agent={mateShown} variant="mobile" queued={queuedFor(mateShown.paneId)} delivered={deliveredFor(mateShown.paneId)} agents={agents} onThread={(id) => setMateId(id)} /> : <MateEmpty onLaunch={mateLaunch.launch} {...mateLaunch} />)}
@@ -1407,6 +1408,7 @@ function App() {
       <Quiet name="Link requests"><AskBanner /></Quiet>
       <Quiet name="Switched computer"><SwitchedHere /></Quiet>
       <Quiet name="Remote screen"><RemoteHere /></Quiet>
+      <Quiet name="Screens being viewed"><ScreenLive /></Quiet>
       <div className="views" style={untilAsks}>
         <main className="cmd" hidden={view !== 'command'} ref={cmdRef}>
           <div className="slot rail-slot" style={{ width: railOpen ? L.railW : 52 }}>

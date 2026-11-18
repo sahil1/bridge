@@ -117,23 +117,59 @@ export async function serversFor(root, { exclude = [] } = {}) {
   return out.filter(Boolean).sort((a, b) => a.port - b.port)
 }
 
-// Whether a port is one of the web servers running from any of `roots` (the agents' folders): what a
-// preview from another of your devices may reach (devpreview.js), and nothing else on this computer.
-// On Windows, which can't tell where a process was started, any local web server but Bridge AI's.
-// `exclude`: ports never to count (Bridge AI's own). Asked again at most every few seconds per port.
+// Every process's parent: pid -> its parent's pid.
+async function parents() {
+  const out = new Map()
+  const lines = IS_WIN
+    ? await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }'], 15000)
+    : await run('ps', ['-A', '-o', 'pid=,ppid='])
+  for (const l of lines.split(/\r?\n/)) {
+    const m = l.trim().match(/^(\d+)\s+(\d+)$/)
+    if (m) out.set(Number(m[1]), Number(m[2]))
+  }
+  return out
+}
+// Whether pid is one of tops, or started (however far down) by one of them.
+const under = (pid, tops, up) => {
+  for (let p = pid, n = 0; p > 1 && n < 200; p = up.get(p), n++) if (tops.has(p)) return true
+  return false
+}
+
+// Whether a port is one of the agents' dev servers: what a preview from another of your devices may
+// reach (devpreview.js), and nothing else on this computer. panes: the agents' terminals ({ pid,
+// cwd }). A server counts when an agent's terminal started it (its process, or one under it), on
+// every system. Never one started by a terminal in your home folder or above it (never), nor in
+// Bridge AI's data folder, anywhere in it or above it (noneIn): setup's Install and Sign-in
+// terminals open in the home folder. Terminals that don't say their process (herdr's): a server
+// started in one's folder (not those), where the system says it (macOS and Linux). `exclude`: ports
+// never to count (Bridge AI's own). Asked again at most every few seconds per port.
 const owned = new Map() // `${port}` -> { at, p }
-export function ownedBy(port, roots, { exclude = [], ms = 5000 } = {}) {
+export function ownedBy(port, panes, { exclude = [], never = [], noneIn = [], ms = 5000 } = {}) {
   port = Number(port)
   if (!(port >= 1024 && port < 65536) || exclude.includes(port)) return Promise.resolve(false)
-  const key = `${port} ${roots.join('\0')}`
+  const key = `${port} ${panes.map((x) => `${x.pid || ''}:${x.cwd}`).join('\0')}`
   const hit = owned.get(key)
   if (hit && Date.now() - hit.at < ms) return hit.p
   const p = (async () => {
     const socks = (await listening()).filter((s) => s.port === port && s.pid !== process.pid)
     if (!socks.length) return false
-    // As the Preview tab lists them: a web server (it answers), from an agent's folder.
-    let mine = IS_WIN
-    if (!mine) {
+    const nots = await Promise.all(never.filter(Boolean).map(realOr))
+    const nones = await Promise.all(noneIn.filter(Boolean).map(realOr))
+    const fine = async (dir) => {
+      if (!dir) return false
+      const real = await realOr(dir)
+      return !nots.some((n) => inside(n, real)) && !nones.some((n) => inside(n, real) || inside(real, n))
+    }
+    const ok = []
+    for (const x of panes) if (await fine(x.cwd)) ok.push(x)
+    let mine = false
+    const tops = new Set(ok.filter((x) => x.pid).map((x) => Number(x.pid)))
+    if (tops.size) {
+      const up = await parents()
+      mine = socks.some((s) => under(s.pid, tops, up))
+    }
+    const roots = ok.filter((x) => !x.pid).map((x) => x.cwd)
+    if (!mine && roots.length && !IS_WIN) {
       const info = await procInfo([...new Set(socks.map((s) => s.pid))])
       for (const i of info.values()) {
         const real = await realOr(i.cwd || '')

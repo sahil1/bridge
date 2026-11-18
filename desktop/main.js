@@ -548,6 +548,7 @@ function onFixAsk(a) {
 let remote = null
 let remoteShared = null
 ipc.handle('bridge:remote-sources', async (e) => (fromApp(e) && remote ? remote.sources() : null))
+ipc.handle('bridge:remote-thumbs', async (e) => (fromApp(e) && remote ? remote.thumbs() : null))
 ipc.handle('bridge:remote-control-ask', async (e) => {
   if (!fromApp(e) || !remote) return null
   if (!IS_MAC) return 'ok'
