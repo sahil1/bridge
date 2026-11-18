@@ -1215,7 +1215,7 @@ function eventLine(e) {
     case 'run.read': return t('Opened {files}', { files: (e.files || []).map((f) => f.what).join(', ') })
     case 'run.finished':
       if (e.end === 'finished') return t('Finished in {s} s', { s: Math.round((e.took || 0) / 1000) })
-      if (e.end === 'timeout') return t('Stopped after {n} minutes, its longest run', { n: e.minutes ?? '' })
+      if (e.end === 'timeout') return t('Stopped after {n} minutes, its longest run', { n: e.minutes ?? (e.took ? Math.round(e.took / 60000) : '?') })
       if (e.end === 'stopped' && (e.by || e.why)) return e.by ? t('Stopped by {name}', { name: e.by }) + (e.why ? ` (${e.why})` : '') : t('Stopped: {why}', { why: e.why })
       return t('Ended: {why}', { why: e.error || e.end })
     case 'draft': {

@@ -19,7 +19,7 @@ import { botKit, openSettings, M, OWNER } from '../lib/bots.mjs'
 
 const { ok, done } = checks('bots-native')
 const { slack, kit, draftOf, startOf, startsOf, briefOf, botOf, connected, convs, timelineOf, events, posted, postedLike } = await botKit('bots-native', {
-  folders: ['pricing'], env: { BRIDGE_BOT_BRIEF_FILE: '1', BRIDGE_BOT_HOLD_MS: '600000' },
+  folders: ['pricing'], env: { BRIDGE_BOT_BRIEF_FILE: '1', BRIDGE_BOT_HOLD_MS: '600000', BRIDGE_HELPER_ASK_MS: '3000' },
 })
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -225,8 +225,32 @@ try {
     const t = await until(async () => { const x = await timelineOf(nb.id, 'enterprise price, fresh'); return x.some((e) => e.type === 'draft' || e.type === 'refused') ? x : null }, 30000)
     ok(t?.some((e) => e.type === 'draft') && !t.some((e) => e.type === 'refused'), 'Try It as you, with no You in Slack: answered, not refused', t?.map((e) => `${e.type}${e.why ? `:${e.why}` : ''}`))
   })
+  // Claude Code asks whether to trust a folder it hasn't seen, and each question is answered in a
+  // new one: no one sees a bot's terminal, so it's answered for it. A screen it can't get past (its
+  // sign-in), or a question left in its terminal, ends the run at once, saying why, rather than
+  // after its longest run.
+  await part('Claude Code\'s trust and first-run screens, in a bot\'s run', async () => {
+    // (A bot with no folders, as one made from blank is, answers in a new folder of its own each time.)
+    const blank = await kit.api('/bots', { name: 'Blank Desk' })
+    await kit.api(`/bots/${blank.id}/try`, { text: 'Hi [answer Hello!]' })
+    const hi = await until(async () => { const x = await timelineOf(blank.id, 'Hi'); return x.some((e) => e.type === 'draft') ? x : null }, 30000)
+    ok(/Hello!/.test(JSON.stringify(hi?.find((e) => e.type === 'draft') || null)), 'a bot with no folders, asked "Hi" in Try It: it answers', hi?.map((e) => e.type))
+    const trusted = fs.readFileSync(path.join(kit.home, 'trusted.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l).cwd)
+    ok(trusted.some((d) => d.includes(`front-desk${path.sep}answers`)) && trusted.some((d) => d.endsWith(`${path.sep}pricing`)), 'trusting its folder was answered for it: its own answer folder and the folder you gave it', trusted)
+    const ended = async (text) => {
+      const asked = Date.now()
+      await kit.api('/bots/b1/try', { text })
+      const t = await until(async () => { const x = await timelineOf('b1', text.slice(0, 20)); return x.some((e) => e.type === 'draft') ? x : null }, 30000)
+      return { t, took: Date.now() - asked, said: JSON.stringify(t?.find((e) => e.type === 'draft') || null) }
+    }
+    const signin = await ended('Sign-in screen please [signin]')
+    ok(/isn't set up on this computer yet/.test(signin.said) && /its sign-in/.test(signin.said) && signin.took < 30000, 'its sign-in screen: passed to you at once, saying Claude Code isn\'t set up yet', signin.said)
+    const stuck = await ended('Stuck asking please [stuck]')
+    ok(/stopped to ask something in its terminal/.test(stuck.said) && stuck.took < 30000, 'a question left in its terminal: passed to you after a minute (here, three seconds), saying so', stuck.said)
+    ok(![signin.t, stuck.t].some((t) => t?.some((e) => e.type === 'run.finished' && e.end === 'timeout')), 'neither waited out its longest run')
+  })
   const tried = (await convs('b1')).filter((c) => c.outcome === 'try')
-  ok(tried.length === 4 && tried.every((c) => c.place?.kind === 'try'), 'Try It\'s questions are in its record, marked as tried', tried.map((c) => c.asked.slice(0, 30)))
+  ok(tried.length === 6 && tried.every((c) => c.place?.kind === 'try'), 'Try It\'s questions are in its record, marked as tried', tried.map((c) => c.asked.slice(0, 30)))
   const templates = (await kit.api('/bots/templates')).templates.map((x) => x.name)
   ok(templates.join() === 'Code Expert,Team FAQ,Project Status,Meetings Q&A', 'the four templates', templates)
   ok((await kit.api('/bots/b1/activity')).integrity?.ok, 'its record whole at the end')
