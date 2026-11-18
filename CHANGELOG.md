@@ -2,6 +2,54 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.21.0
+
+Bots answer the people you choose in Slack, Discord and Microsoft Teams, from folders on your computer, and each answer waits for you unless you say otherwise. Remote Screen and Preview shows another of your computers' screen and its agents' apps, and its mouse and keyboard can be used once you allow that there. Both are Beta Features. Settings › About & Updates has an Update Channel anyone can pick. Studio's files work as Finder's do, meetings save as Word and PDF, and a file an agent names in its chat opens where it is. And fixes: switching relays keeps phones and computers paired, and messages to Codex are sent.
+
+<!-- rollout: 10 -->
+
+### What's new
+
+- **Bots** (a Beta Feature): Settings › Bots makes bots with names you give them. They answer in Slack, Discord and Microsoft Teams from the folders you give them, which they only read. Start from Code Expert, Team FAQ, Project Status or Meetings Q&A, or from blank. A checklist for each platform says each step of making its app there and ticks it once it's done.
+  - **Who and how:** you say who can ask: people you name, or everyone in the channels it's in. Guests and people from other companies are never answered. Each answer waits for you in Needs You, and in Slack in your direct messages with Send, Edit and Discard, unless you pick Answer without asking.
+  - **Changes:** with Changes on, people you named can ask for a change, and it becomes a draft pull request. The bot never merges.
+  - **Commands:** `!help`, `!status`, `!mute`, `!unmute`, `!stop`, `!what do you know about me` and `!forget me`. It remembers what you approve, keeps to limits for each person, and answers what it missed while it was away.
+  - **Try It** asks it a question without sending anything.
+  - **Activity** keeps every question, what it read, what it sent and who approved it, in a record that shows if anything in it was changed. **Export** saves a copy.
+  - **In Slack** it shows its status and Stop, streams answers it sends without asking, and takes `/<name>`, a message shortcut and files. It also has a Home tab.
+  - It runs in Docker too, and `bridge-ai bots` lists, imports and exports bots.
+  - **From your phone and your other computers:** everything in Bots can be set up and changed there too, with folders picked from that computer's own. Activity names the device each change came from.
+- **Remote Screen and Preview** (a Beta Feature): Settings › Account & Devices › Computers › **View screen**, from another of your computers or your phone, shows that computer's screen.
+  - **How it connects:** peer-to-peer when it can, finding its way with stun.cloudflare.com, and through the relay when it can't.
+  - **The computer being seen** always says so, with Stop, and lists who looked and for how long. macOS asks for Screen Recording the first time.
+  - **Control:** its mouse and keyboard can be used from your other devices once **Let my other devices control this computer** is on at that computer. That switch is off at first, and a Mac asks for Accessibility when it's turned on. Moving the mouse or pressing a key there pauses control for 3 seconds.
+  - **Apps:** an agent's app running on another computer opens in its Preview tab here, at an address of its own on this computer. On a phone it's shown as pictures.
+  - **Who can use it:** only devices paired with that computer, while the Beta Feature is on there.
+- **Update Channel**: Settings › About & Updates picks Stable, Early Access (betas, before everyone else) or Nightly (a build of main each day it changes).
+  - Anyone can pick one, with no code. It's changed on the computer itself.
+  - Leaving keeps the version you have until a regular release is newer.
+  - `bridge-ai channel` does the same in a terminal.
+- **Studio's files as Finder has them**:
+  - **Picking:** a click picks a file in Studio's lists and a card in Whiteboards. A double-click, Enter or ⌘↓ opens it, and Space shows it in Quick Look.
+  - **Icons:** folders look like a Mac's, with marks for Desktop, Documents and the rest. A document's first page or a deck's first slide is its icon.
+  - **View Options** (⌘J) sizes icons and sets Arrange By and Group by Kind.
+- **Studio's editors**:
+  - Toolbars fit on one row, with More for the rest.
+  - Documents have Suggesting: your edits as tracked changes, accepted or rejected one at a time.
+  - Text goes round pictures (in line, wrap or break; left, centre or right), saved as Word's own.
+  - Documents also have Custom spacing….
+  - In the desktop app, ⌘R in a sheet is Fill Right.
+- **Meetings as Word and PDF**: Save as Word and Save as PDF, under Save as Markdown, make one file with the pictures inside. It holds the summary and action items, your notes, the pictures from the screen and the whole transcript.
+- **Files an agent names**: a file named in an agent's reply opens where it is, found where the agent worked. When several match, you pick one. Pictures, and a PDF's first page, that it names show small under its reply.
+- **Meeting tabs together**: two or more meeting tabs are grouped under a Meetings chip. On a narrow tab, the × takes the icon's place.
+
+### Fixes
+
+- Switching between Bridge AI's relay and your own Cloudflare relay keeps paired phones and computers, which follow the computer to its new address. A page left at the old address says where the computer went.
+- A message typed for a Codex agent is sent, with herdr too, and one that doesn't go through says so.
+- What you typed in the message box follows the agent when it restarts on another model, continues on another account, hands off, or is resumed from Closed agents.
+- The tab on screen keeps its name after a tab is closed with its ×.
+
 ## 3.20.0
 
 Studio's home is your files: Folders is part of Studio. The local model comes in three sizes, with the one that fits your computer recommended, and short jobs can run on it when you pick Auto. A meeting can keep its screen as a video, and pictures of a call's window are cropped to what's shared. The model menu says which version Opus and Sonnet are. Settings' Account and Devices are one section, where Bridge AI's relay is set up on the spot.
