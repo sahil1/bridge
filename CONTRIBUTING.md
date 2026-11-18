@@ -140,40 +140,38 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
 - **Promoting a beta.** Set the version to `3.13.0`, with its full CHANGELOG section (and a rollout
   line if you like), and release it as above. A release is newer than its betas, so testers on
   3.13.0-beta.2 are offered 3.13.0 too.
-- **Early-access codes.** Once: `node scripts/early-access-code.js --new-key` makes your key pair.
-  The private key stays in `~/.config/bridge-ai/early-access-key.pem` (keep a copy in a password
-  manager; never commit it), and the public key it prints goes in `server/earlyaccess.js`
-  (`PUBLIC_KEY`). Until a build has one, Early Access isn't shown anywhere. Then a code for each
-  tester: `npm run early-access -- Sam --days 60` (no `--days`: it doesn't end). The name goes with
-  their usage stats and crash reports (PRIVACY.md), so make it a first name or nickname, never an
-  email. They paste the code in Settings › About & Updates › Have an early-access code?, or open
-  `http://127.0.0.1:7420/?early=<code>` in a browser to have it filled in. It's for the desktop app
-  (and Linux's package); a copy run from a clone or in Docker isn't offered it. `--check <code>`
-  says what a code says.
-- **Testers with a Bold Bridge account.** Once accounts are live (account/README.md), a tester asks
-  for Early Access in Settings › Account & Devices (or the website's form), you say yes in the admin view, and
-  their computers take a code from the account by themselves, renewed while they have it, for the
-  account's id (usage stats never carry an email). Saying no, or suspending the account, ends it
-  within 6 hours. The paste-a-code way above stays for anyone without an account.
-- **Taking a code back.** `npm run early-access -- --revoke <id>` writes it in the newest release's
-  notes, which computers on Early Access read at each check. For good, add the id to `REVOKED` in
-  `server/earlyaccess.js` before the next release. A code made with `--days` ends by itself.
-- **Leaving.** Bridge AI never goes back to an older version: a tester who leaves Early Access, or
-  whose code ends, stays on the beta they have until a regular release is newer.
-- **Nightly builds, for your own computers.** `.github/workflows/nightly.yml` builds main each night
-  it has changed (about 3 AM in California; Actions › Nightly › Run workflow builds one now) through
-  the release workflow: the tests for what changed since the last nightly on all three systems,
-  then the app signed and notarized as a release is, at a version like `3.20.1-nightly.20261116.57` (`scripts/nightly.js`: what main is
-  heading for, the day and the run), set in that build only, so main gets no commit. It's a GitHub
-  pre-release, never the latest, with the changes since the last nightly as its notes; no Android
-  app, no Docker image, and only the newest 7 are kept. Nothing in the app offers it: on each of
-  your computers, once, with the desktop app open, run `bridge-ai nightly on`, or without the
-  command, `curl -X POST -H "Authorization: Bearer $(cat ~/.bridge-ai/api-token)" -H
-  'content-type: application/json' -d '{}' http://127.0.0.1:7420/api/updates/nightly`. It's refused
-  through the relay. That computer then takes the newest of everything, nightlies, betas and
-  releases, at once and by itself while you're away; Stable and Early Access are never offered a
-  nightly. About & Updates shows Nightly with Leave Nightly, which keeps the version you have until a
-  regular release passes it. Its usage stats and crash reports say Nightly.
+- **Who gets betas and nightlies.** Anyone who picks them, with no code: Settings › About & Updates ›
+  Update Channel has Stable (the default), Early Access (betas, before everyone else) and Nightly
+  (below). It's picked on the computer itself, or there with `bridge-ai channel early` (`stable`,
+  `nightly`); a phone or another computer's window shows it read-only, and the server refuses a
+  change from them. It's for the desktop app (and Linux's package); a copy run from a clone or in
+  Docker says why not. A link to `http://127.0.0.1:7420/?early` opens About & Updates at the
+  picker. The usage stats and crash reports say the channel (PRIVACY.md).
+- **Testers with a Bold Bridge account.** Once accounts are live (account/README.md), a tester can
+  still ask for Early Access in Settings › Account & Devices (or the website's form). You say yes in
+  the admin view, and their computers go on Early Access by themselves with a code from the
+  account, renewed while they have it; their usage stats and crash reports carry the account's id,
+  never an email. Saying no, or suspending the account, takes them back to Stable within 6 hours,
+  unless Early Access was picked on the computer itself. Early Access picked with no code names no
+  one. Codes made by hand are gone: no build had the key to take one.
+- **Leaving.** Bridge AI never goes back to an older version: a computer that leaves Early Access or
+  Nightly stays on the beta or nightly it has until a regular release is newer.
+- **Nightly builds.** `.github/workflows/nightly.yml` builds main each night it has changed (about
+  3 AM in California; Actions › Nightly › Run workflow builds one now) through the release
+  workflow: the tests for what changed since the last nightly on all three systems, then the app
+  signed and notarized as a release is, at a version like `3.20.1-nightly.20261116.57`
+  (`scripts/nightly.js`: what main is heading for, the day and the run), set in that build only, so
+  main gets no commit. It's a GitHub pre-release, never the latest, with the changes since the last
+  nightly as its notes; no Android app, no Docker image, and only the newest 7 are kept. A computer
+  takes it once Nightly is picked in About & Updates, or on the computer with `bridge-ai nightly on`
+  (`npm run ship -- join` does that for you), or without the command, `curl -X POST -H
+  "Authorization: Bearer $(cat ~/.bridge-ai/api-token)" -H 'content-type: application/json' -d '{}'
+  http://127.0.0.1:7420/api/updates/nightly`. It's refused through the relay. That computer then
+  takes the newest of everything, nightlies, betas and releases, at once and by itself while you're
+  away; Stable and Early Access are never offered a nightly. `bridge-ai nightly off` goes back to
+  the channel under it, and Stable or Early Access in About & Updates to that one; either keeps the
+  version you have until a regular release passes it. Its usage stats and crash reports say
+  Nightly.
 
 ## Before you open a pull request
 

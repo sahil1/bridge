@@ -2984,15 +2984,16 @@ app.post('/api/relay/move', wrap((req) => relay.moveFor(req.headers['x-bridge-re
 // ---------- Your Bold Bridge account (account.js) ----------
 // Only once the accounts service exists (account.available()). Here or from a paired phone; another
 // of your devices may only ask whether this one is signed in, and hand it a grant to sign it in
-// (linked computers follow). An Early Access code from the account goes in the settings as a pasted
-// one does (from: 'account'), unless this computer left Early Access, or has a code of its own.
+// (linked computers follow). An Early Access code from the account goes in the settings (from:
+// 'account'), and this computer is on Early Access with it, unless it left Early Access, picked it
+// itself (updates.js: then signing out doesn't take it away), or has a code of its own.
 account.use({
   name: () => relay.thisName(),
   os: () => machines.OS,
   early: (code) => {
     const was = cfg.earlyAccess
     if (code) {
-      if (was?.left || was?.code === code || (was?.code && was.from !== 'account' && earlyAccess.readCode(was.code).ok)) return
+      if (was?.left || was?.on || was?.code === code || (was?.code && was.from !== 'account' && earlyAccess.readCode(was.code).ok)) return
       afterChange(settings.patch({ earlyAccess: { code, from: 'account' } }))
     } else if (was?.from === 'account') afterChange(settings.patch({ earlyAccess: null }))
   },
@@ -3006,7 +3007,7 @@ const accountOn = () => { if (!account.available()) throw Object.assign(new Erro
 // whether it's on Bridge AI's relay (relayHere).
 const accountView = async (p) => {
   const s = await p
-  return s?.available ? { ...s, earlyLeft: !!cfg.earlyAccess?.left, earlyHere: updates.canEarly(), relayHere: !!relay.status().hosted } : s
+  return s?.available ? { ...s, earlyLeft: !!cfg.earlyAccess?.left, earlyHere: updates.canPick(), relayHere: !!relay.status().hosted } : s
 }
 const yours = (fn) => wrap((req) => { notByMachine(req); return accountView(fn(req)) })
 app.get('/api/account', yours((req) => (req.query.fresh === '1' && account.available() ? account.refresh() : account.status())))
@@ -3018,11 +3019,6 @@ app.post('/api/account/request', yours((req) => { accountOn(); return account.re
 app.delete('/api/account/devices/:id', yours((req) => { accountOn(); return account.removeDevice(req.params.id) }))
 app.post('/api/account/signout', yours(() => account.signOut()))
 app.delete('/api/account', yours((req) => { accountOn(); return account.deleteAccount(req.body?.email) }))
-// Early Access again on this computer, after leaving it (About & Updates): the account's code back.
-app.post('/api/account/early', yours(() => {
-  if (cfg.earlyAccess?.from === 'account') afterChange(settings.patch({ earlyAccess: null }))
-  return account.refresh()
-}))
 // Signed in by another of your computers: kept, or signed out and not again that way.
 app.post('/api/account/followed', yours((req) => account.followed(req.body?.keep === true)))
 app.post('/api/account/follow', yours(() => account.follow()))
@@ -3131,43 +3127,38 @@ app.post('/api/counts/active', wrap(() => counts.activity()))
 // refresh=1: a person asked (Check now, Check for Updates…), so GitHub is asked now, and a release
 // out to some computers and not this one yet is offered here too.
 app.get('/api/updates', wrap((req) => updates.status({ force: req.query.refresh === '1', byHand: req.query.refresh === '1', disabled: cfg.updates?.check === false })))
-// Early Access (updates.js, earlyaccess.js): a tester's code, checked and kept in the settings, and
-// this computer takes pre-releases from then on. Leave Early Access takes it out, and the version
-// here stays until Stable passes it. A code that doesn't work says why.
-app.post('/api/updates/early', wrap(async (req) => {
-  const code = String(req.body?.code || '').replace(/\s+/g, '')
-  const r = earlyAccess.readCode(code)
-  if (!r.ok) throw Object.assign(new Error(earlyAccess.whyNot(r)), { code: `early-${r.why}` })
-  if (!updates.canEarly()) throw new Error(updates.how() === 'docker' ? 'Early Access is for the desktop app. Bridge AI in Docker updates by its image\'s tag, which stays on regular releases.' : 'Early Access is for the desktop app. Bridge AI from a clone already runs the newest code there is (git pull).')
-  settings.patch({ earlyAccess: null }) // (a code of your own, not the account's: nothing of that kept)
-  afterChange(settings.patch({ earlyAccess: { code } }))
-  const u = await updates.status({ force: true, disabled: cfg.updates?.check === false })
-  // Taken back in a release's notes, which only the list of releases says.
-  if (u.early.problem === 'revoked') { afterChange(settings.patch({ earlyAccess: null })); throw Object.assign(new Error(earlyAccess.whyNot({ why: 'revoked', for: r.for })), { code: 'early-revoked' }) }
-  return u
-}))
-// Left, with a code from your Bold Bridge account: kept as left, so the account doesn't put it back
-// (Settings › Account has Join again).
-app.delete('/api/updates/early', wrap(async () => {
-  const fromAccount = cfg.earlyAccess?.from === 'account'
-  afterChange(settings.patch({ earlyAccess: null }))
-  if (fromAccount) afterChange(settings.patch({ earlyAccess: { from: 'account', left: true } }))
+// The update channel (updates.js): Stable, Early Access or Nightly, picked in Settings › About &
+// Updates (or `bridge-ai channel`) with no code, on the computer itself only: never through the
+// relay or another computer, nor by changing the settings from there (below). Early Access is kept
+// as earlyAccess in the settings ({ on: true }, or a code an older version took, which stays), and
+// Nightly apart, as updates.nightly, so switching Nightly off (`bridge-ai nightly off`) goes back to
+// what was under it. Stable takes both off; Early Access from your Bold Bridge account is kept as
+// left, so the account doesn't put it back. None goes to an older version: the version here stays
+// until the channel's newest passes it.
+const CHANNELS = ['stable', 'early', 'nightly']
+const channelHere = (req) => { if (!fromHere(req)) throw Object.assign(new Error('Change the update channel in Bridge AI on the computer itself.'), { status: 403 }) }
+function pickChannel(req, channel) {
+  channelHere(req)
+  if (!CHANNELS.includes(channel)) throw Object.assign(new Error('The update channel is stable, early or nightly.'), { status: 400 })
+  if (channel !== 'stable' && !updates.canPick()) throw new Error(`${channel === 'early' ? 'Early Access' : 'Nightly'} is for the desktop app. ${updates.how() === 'docker' ? 'Bridge AI in Docker updates by its image\'s tag, which stays on regular releases.' : 'Bridge AI from a clone updates with git pull, which is main already.'}`)
+  const was = cfg.earlyAccess || null
+  const kept = !!(was?.on || was?.code)
+  const early = channel === 'nightly' ? was : channel === 'early' ? (kept ? was : { on: true }) : was?.from === 'account' ? { from: 'account', left: true } : null
+  settings.patch({ earlyAccess: null })
+  afterChange(settings.patch({ updates: { nightly: channel === 'nightly' }, ...(early ? { earlyAccess: early } : {}) }))
   return updates.status({ force: true, disabled: cfg.updates?.check === false })
-}))
-// Nightly (updates.js): nightly builds of main, for the owner's own computers. Nothing in the app
-// offers it: it's switched on here, on the computer itself (`bridge-ai nightly on`, or the local API
-// with its key), and kept as updates.nightly in the settings. Leave Nightly in About & Updates
-// switches it off from anywhere the page opens.
-app.post('/api/updates/nightly', wrap(async (req) => {
-  if (!fromHere(req)) throw Object.assign(new Error('Nightly is switched on on the computer itself.'), { status: 403 })
-  if (!updates.canNightly()) throw new Error(updates.how() === 'docker' ? 'Nightly is for the desktop app. Bridge AI in Docker updates by its image\'s tag, which stays on regular releases.' : 'Nightly is for the desktop app. Bridge AI from a clone updates with git pull, which is main already.')
-  afterChange(settings.patch({ updates: { nightly: true } }))
-  return updates.status({ force: true, disabled: cfg.updates?.check === false })
-}))
-app.delete('/api/updates/nightly', wrap(async () => {
+}
+app.post('/api/updates/channel', wrap((req) => pickChannel(req, req.body?.channel)))
+// Nightly alone, on or off: `bridge-ai nightly on|off` and `npm run ship -- join`.
+app.post('/api/updates/nightly', wrap((req) => pickChannel(req, 'nightly')))
+app.delete('/api/updates/nightly', wrap((req) => {
+  channelHere(req)
   afterChange(settings.patch({ updates: { nightly: false } }))
   return updates.status({ force: true, disabled: cfg.updates?.check === false })
 }))
+// What a change to the settings from elsewhere can't touch: the channel (above).
+const channelOf = (s) => JSON.stringify([s?.updates?.nightly === true, s?.earlyAccess || null])
+const channelKept = (req, next) => { if (!fromHere(req) && channelOf(next) !== channelOf(settings.readUser())) channelHere(req) }
 // auto: by itself while you're away, asked by the desktop app on this computer only.
 app.post('/api/updates/install', wrap((req) => {
   if (req.body?.auto === true && !fromHere(req)) throw Object.assign(new Error('Only the desktop app updates by itself'), { status: 403 })
@@ -3185,7 +3176,7 @@ function rolloutBucket() {
   try { afterChange(settings.patch({ updates: { bucket: n } })) } catch { cfg.updates = { ...cfg.updates, bucket: n } }
   return n
 }
-updates.useSettings(() => ({ on: cfg.updates?.auto !== false, checks: cfg.updates?.check !== false, code: cfg.earlyAccess?.code || null, from: cfg.earlyAccess?.from || null, left: !!cfg.earlyAccess?.left, bucket: rolloutBucket(), nightly: cfg.updates?.nightly === true }))
+updates.useSettings(() => ({ on: cfg.updates?.auto !== false, checks: cfg.updates?.check !== false, early: !!(cfg.earlyAccess?.on || cfg.earlyAccess?.code), code: cfg.earlyAccess?.code || null, from: cfg.earlyAccess?.from || null, bucket: rolloutBucket(), nightly: cfg.updates?.nightly === true }))
 // What an update would cut short: this computer's agents working or waiting on you (a cloud agent
 // runs elsewhere, and other devices' agents on them), a meeting recording, being transcribed or its
 // notes being written, and a dictation being heard (its live words, or its recording being turned
@@ -3356,9 +3347,16 @@ const afterChange = (changed) => {
   return { ok: true, changed, restart, settings: settingsView() }
 }
 app.get('/api/settings', wrap(() => settingsView()))
-app.patch('/api/settings', wrap((req) => afterChange(settings.patch(req.body || {}))))
+app.patch('/api/settings', wrap((req) => {
+  if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) channelKept(req, settings.merged(settings.readUser(), req.body))
+  return afterChange(settings.patch(req.body || {}))
+}))
 app.put('/api/settings/raw', async (req, res) => {
-  try { res.json(afterChange(settings.replaceRaw(String(req.body?.text ?? '')))) } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
+  try {
+    const text = String(req.body?.text ?? '')
+    try { channelKept(req, JSON.parse(text)) } catch (e) { if (e.status) throw e }
+    res.json(afterChange(settings.replaceRaw(text)))
+  } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
 app.get('/api/settings/geocode', wrap((req) => settings.geocode(req.query.q)))
 app.get('/api/agents/catalog', wrap(async () => { clearInstalledCache(); return agentCatalog() }))

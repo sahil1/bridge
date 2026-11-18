@@ -24,16 +24,21 @@ function writeUser(obj) {
 // Which top-level keys differ, so the app can say what needs a restart.
 const changedKeys = (a, b) => [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]))
 
-// Merge a patch into your settings. Objects merge one level deep; null removes a key.
-export function patch(p) {
-  if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('Settings must be an object')
-  const before = readUser()
+// Your settings with a patch merged in. Objects merge one level deep; null removes a key.
+export function merged(before, p) {
   const next = { ...before }
   for (const [k, v] of Object.entries(p)) {
     if (v === null) delete next[k]
     else if (v && typeof v === 'object' && !Array.isArray(v) && next[k] && typeof next[k] === 'object' && !Array.isArray(next[k])) next[k] = { ...next[k], ...v }
     else next[k] = v
   }
+  return next
+}
+// ...saved.
+export function patch(p) {
+  if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('Settings must be an object')
+  const before = readUser()
+  const next = merged(before, p)
   writeUser(next)
   return changedKeys(before, next)
 }

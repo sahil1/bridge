@@ -706,8 +706,8 @@ function App() {
   // Back from a restart to apply a permission: Settings where it was asked for, to see it's on (the
   // agent you had open comes back by itself).
   useEffect(() => { const r = takeReturn(); if (r?.section) setSettings(r.section) }, [])
-  // A tester's early-access link (?early=<code>): About & Updates, with the code filled in.
-  useEffect(() => { if (takeEarlyLink()) setSettings('about') }, [])
+  // An early-access link (?early=, with or without a code): About & Updates, at the Update Channel.
+  useEffect(() => { if (takeEarlyLink()) setSettings('channel') }, [])
   // Restart to apply, asked for in Settings: the top bar's Restart to apply decides it (with what it
   // means for agents at work), so Settings steps aside for it rather than covering it.
   useEffect(() => {

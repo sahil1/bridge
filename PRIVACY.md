@@ -6,8 +6,8 @@ and the phone apps for iPhone and Android. The app on your computer sends the pr
 usage stats and crash reports (below), which you can turn off in Settings › About & Updates. If you
 choose Bridge AI's relay, your phone and computer talk through it, end-to-end encrypted, and it
 keeps only what it needs to work (below). Nothing else goes to the project or its author. A relay of
-your own and the phone apps send the project nothing. There are no ads, and there's no account unless you want Early Access or Bridge AI's relay, which
-come with a Bold Bridge account (below).
+your own and the phone apps send the project nothing. There are no ads, and there's no account unless you want Bridge AI's relay, or Early Access from a Bold
+Bridge account (below); anyone can pick Early Access in Settings › About & Updates without one.
 
 Last updated: November 2026.
 
@@ -29,9 +29,9 @@ say needs one (one download from Hugging Face; what you give it is read on your 
 llama.cpp, which runs there and answers only Bridge AI, and is never sent anywhere), a check on
 GitHub for a newer version, which you can turn off in Settings › About &
 Updates (and the new version from GitHub, when you update, or by itself while you're away in the
-desktop app on a Mac or Windows unless you turn that off there too; with an early-access code,
-the check asks for the list of recent releases, and the code is checked on your computer and never
-sent), and, unless you turn them off, usage stats and crash reports to the project (below). Its fonts and icons are part of the app, so nothing is fetched to draw
+desktop app on a Mac or Windows unless you turn that off there too; on Early Access or Nightly,
+the check asks for the list of recent releases, and an early-access code from your Bold Bridge
+account is checked on your computer and never sent), and, unless you turn them off, usage stats and crash reports to the project (below). Its fonts and icons are part of the app, so nothing is fetched to draw
 it. On Windows and Linux, the desktop app's spell check gets the dictionaries for your languages
 once, from Google, as Chrome does; nothing you type goes with them (a Mac uses its own).
 
@@ -372,9 +372,9 @@ Two reports go to the project's server, `counts.boldbridge.ai`, run on Cloudflar
 [counts/worker.js](counts/worker.js) in this repo:
 
 - **Once a week**, after the week is over: Bridge AI's version; its update channel (Stable,
-  Early Access for testers, or Nightly, the project's own computers on nightly builds) and, on Early Access, who the code is for: the first name or nickname
-the project gave that tester when it made the code, or, with Early Access from your Bold Bridge
-account, that account's id (below); its rollout bucket, a number from 0 to 99
+  Early Access for betas, or Nightly for nightly builds of main, as picked in Settings › About &
+  Updates) and, with Early Access from your Bold Bridge account, that account's id (below; picked
+  in Settings, with no code, Early Access names no one); its rollout bucket, a number from 0 to 99
   picked at random once and kept in your settings, which decides how soon a release that goes out
   a few computers at a time reaches yours; your operating system and its
   version (macOS 15.1, Windows 11, Ubuntu 24.04); your chip's family (Apple M2 Pro, Intel Core i7,
@@ -395,15 +395,15 @@ account, that account's id (below); its rollout bucket, a number from 0 to 99
   was switched to, or that none was picked. Never a model's name, and nothing from a prompt or an
   answer.
 - **Once a day**, after the day is over: the version it ran, the one it updated from that day if it
-  did, its update channel, rollout bucket and early-access tester as above, the operating system and
+  did, its update channel, rollout bucket and account's id as above, the operating system and
   how it's installed, how many times it started (a range), whether something crashed, and how long
   it was in use that day, as a range ("15-30 minutes").
 - **Once, a couple of minutes after Bridge AI first runs on a computer**: that there's a new
   install, the day it was installed, its version and update channel, the operating system, the
   chip and how it's installed. Turn usage stats off before then and it never goes.
 
-Neither has your name (on Early Access, the tester's name is the one the project chose for the
-code it gave them, or your Bold Bridge account's id), an ID for your computer (a random number new with each report lets the
+Neither has your name (with Early Access from your Bold Bridge account, that account's id goes
+with them), an ID for your computer (a random number new with each report lets the
 server count a report once; the rollout bucket is shared with about one computer in a hundred), a
 file, folder, project, repo or branch name, anything you typed or said, anything from your agents,
 an email address, a host name, or an exact time. The full list of
@@ -430,8 +430,8 @@ token once, when you click it.
 ## Crash reports (on unless you turn them off)
 
 When something in Bridge AI crashes, its report (the same text **Report on GitHub** shows you: what
-crashed, the error and where in Bridge AI's code, its version and update channel (on Early Access,
-with the tester's name the project chose, or your Bold Bridge account's id), your system, the settings that change how it runs, and
+crashed, the error and where in Bridge AI's code, its version and update channel (with Early
+Access from your Bold Bridge account, that account's id), your system, the settings that change how it runs, and
 the last lines of its log, with your name, your projects' and computers' names,
 folders, emails, keys and network addresses taken out on your computer) can go to the project, to
 help fix it. That happens by itself unless you turn off **Send crash reports by themselves** in
@@ -450,8 +450,9 @@ collecting, Bridge AI turns crash reports off and says so.
 
 ## Your Bold Bridge account (optional)
 
-Early Access and Bridge AI's relay come with a Bold Bridge account. Nothing else needs one, and
-Bridge AI never asks you to make one. You sign in in Settings › Account & Devices (its Account tab,
+Bridge AI's relay comes with a Bold Bridge account, and Early Access can too (anyone can also pick
+it in Settings › About & Updates, with no account). Nothing else needs one, and Bridge AI never asks
+you to make one. You sign in in Settings › Account & Devices (its Account tab,
 or its Phone tab for the relay) with your email and a 6-digit code it's sent (there's no password), at `accounts.boldbridge.ai`, run by the project on
 Cloudflare; its code is [account/worker.js](account/worker.js) in this repo.
 

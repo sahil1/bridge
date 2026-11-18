@@ -150,8 +150,8 @@ const textOf = (v) => (typeof v === 'string' && /^[A-Za-z][\w .,()+-]{0,39}$/.te
 // Bridge AI's version: 3.12.0, or a pre-release of one (3.13.0-beta.1, 3.20.1-nightly.20261116.57),
 // else "other".
 const versionOf = (v) => (typeof v === 'string' && /^\d{1,3}\.\d{1,3}\.\d{1,3}(-(alpha|beta|rc)\.\d{1,3}|-nightly\.\d{8}\.\d{1,6})?$/.test(v) ? v : 'other')
-// The update channel, who an early-access code is for (a name the project gave its tester), and
-// the rollout bucket. A report from before there were channels says none of them ('unknown').
+// The update channel, who an early-access code is for (a Bold Bridge account's id), and the
+// rollout bucket. A report from before there were channels says none of them ('unknown').
 export function channelOf(r) {
   const channel = r.channel == null ? 'unknown' : ['stable', 'early', 'nightly'].includes(r.channel) ? r.channel : 'other'
   const tester = channel !== 'early' || r.tester == null ? '' : typeof r.tester === 'string' && /^[\p{L}\p{N}][\p{L}\p{N} .'_-]{0,31}$/u.test(r.tester) ? r.tester : 'other'

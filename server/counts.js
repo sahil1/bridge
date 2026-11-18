@@ -26,8 +26,8 @@
 //   a computer, that there's a new install, the day it was installed, and its version, channel,
 //   system, chip and how it's installed, so a new install is counted the day it happens (a day's
 //   report only goes the day after, and only if Bridge AI runs again).
-// A copy of each report sent stays in telemetry/sent. Neither ever has a name (an early-access
-// code's is the one the project gave its tester), a path, a repo or branch, a prompt, a transcript,
+// A copy of each report sent stays in telemetry/sent. Neither ever has a name (Early Access from a
+// Bold Bridge account says the account's id), a path, a repo or branch, a prompt, a transcript,
 // what an agent wrote, an email, a host, an account, an exact time, or an ID for you or this
 // computer: each report's nonce is new. The rollout bucket is one of a hundred, shared with about
 // one computer in a hundred.
@@ -201,9 +201,9 @@ export function report(w) {
     nonce: w.nonce,
   }
 }
-// The update channel (stable, early or nightly), for Early Access who the code is for (a name the project
-// picked for its tester), and the staged rollout's bucket (0-99, random): each version's counts and
-// crashes, told apart by channel and by how soon it reached a computer.
+// The update channel (stable, early or nightly), for Early Access from a Bold Bridge account who the
+// code is for (the account's id; none with no code), and the staged rollout's bucket (0-99, random):
+// each version's counts and crashes, told apart by channel and by how soon it reached a computer.
 const channelOf = (c) => ({ channel: ['early', 'nightly'].includes(c.channel) ? c.channel : 'stable', tester: c.channel === 'early' && c.tester ? String(c.tester).slice(0, 32) : null, rollout: Number.isInteger(c.rollout) ? c.rollout : null })
 // Only the features on the public list, each with one of its values.
 const FEATURES = SCHEMA.features || {}

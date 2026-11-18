@@ -2683,12 +2683,16 @@ button.ue-row:hover { background: var(--pane-2); }
 /* Bots on, in Beta Features: Set up a bot, under it. */
 .ab-trial-go { margin: -2px 0 6px 26px; }
 .modal.settings.phone .ab-trial-go .btn { min-height: 40px; }
-/* Early Access: a quiet link for those with a code, and the code's field taking the row's room. */
-.ab-early-ask { margin: 2px 0 0; }
-.ab-early-ask .link-btn { color: var(--ink-3); font-weight: 400; }
-.ab-early-ask .link-btn:hover { color: var(--accent); }
-.ab-early-form .st-input { flex: 1 1 260px; min-width: 0; }
-.ab-early p { margin: 0; }
+/* Update Channel: each channel a row of its own with its line under its name, the one on marked;
+   on a phone each row a whole 40 px target. */
+.ab-channels { display: grid; gap: 6px; }
+.ab-channel-pick { display: flex; align-items: flex-start; gap: 9px; padding: 9px 10px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--pane); cursor: pointer; min-width: 0; }
+.ab-channel-pick.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.ab-channel-pick:has(input:disabled) { cursor: default; }
+.ab-channel-pick input { margin-top: 3px; flex: none; }
+.ab-channel-pick > span { display: grid; gap: 2px; min-width: 0; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.modal.settings.phone .ab-channel-pick { min-height: 40px; }
+.ab-channel p { margin: 0; }
 .update-chip { color: var(--accent); font-weight: 600; }
 /* Out for a few days and still not installed: said more plainly. */
 .update-chip.loud { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }

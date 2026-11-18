@@ -331,7 +331,7 @@ You rarely need to edit the file by hand. **Settings** (the gear in the top bar,
 | Account | Your Bold Bridge account, for Bridge AI's relay and Early Access: sign in with your email and a code, its devices, the relay's use, sign out, delete it. Bridge AI works the same without one |
 | Appearance | Theme, color mode, text size, density, font, language |
 | Config File | Your `config.json`, editable, checked before it's saved, with the effective settings and defaults beside it |
-| About & Updates | The version and updates, Beta Features, the tour, usage stats and crash reports, and reporting a problem |
+| About & Updates | The version and updates, the update channel (Stable, Early Access for betas, or Nightly for a build of main each day it changes, picked on the computer itself with no code), Beta Features, the tour, usage stats and crash reports, and reporting a problem |
 
 Each section shows what most people change first, with a line on each at most. The rest is under **Advanced** at the section's end: closed until you open it, then kept open or closed for that section. ⌘K finds any setting, Advanced or not, and opens Settings at it.
 
