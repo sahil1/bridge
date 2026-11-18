@@ -133,6 +133,7 @@ export const SETTINGS = [
   ...at('about', [
     ['version', tx('Check for new versions'), 'version update check'],
     ['auto-update', tx("Update by itself while you're away"), 'auto update automatic', { when: 'desktop', near: 'version' }],
+    ['channel', tx('Update Channel'), 'channel stable early access beta pre-release nightly testers'],
     ['beta', tx('Beta Features'), 'beta trials home routines insights usage tidy board answers mcp slack'],
     ['report', tx('Report a problem'), 'bug issue github idea feedback'],
     ['usage-counts', tx('Usage Counts'), 'telemetry analytics anonymous share', { near: 'report' }],

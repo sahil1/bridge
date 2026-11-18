@@ -55,9 +55,10 @@ remove a computer from it, suspend the account, or block a network, if it's misu
 ## Your Bold Bridge account
 
 A Bold Bridge account is optional. It's for Early Access and Bridge AI's relay, one per email with
-up to five devices, and you can delete it at any time in Settings › Account. Early Access and the
-relay are by request or invitation: the project may say no, and may stop either for an account at
-any time. Anyone who can read your email can sign in to your account, so keep it yours. The project
+up to five devices, and you can delete it at any time in Settings › Account. The relay, and Early
+Access through an account, are by request or invitation: the project may say no, and may stop
+either for an account at any time. Anyone can pick Early Access in Settings › About & Updates
+without an account. Anyone who can read your email can sign in to your account, so keep it yours. The project
 may suspend an account that misuses Early Access or the relay.
 
 ## Not affiliated with anyone
