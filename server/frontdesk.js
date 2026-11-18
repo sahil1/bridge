@@ -322,8 +322,8 @@ const TRY = {
 // models(): the models Bridge AI reaches (chatmodels.js models), reply: its reply(), signedIn(kind):
 // whether an agent is signed in here (false when it says not), for what answers (botanswer.js).
 // ownersOf(bot): you on each platform as its connections have you ({ slack, discord, teams }:
-// connections.js), ahead of the bot's own.
-export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => true, you = () => 'the owner', changed = () => {}, close = async () => {}, told = () => {}, readsOf = async () => [], transcriptOf = () => null, modelOf = () => null, computer = () => os.hostname(), commandOf = () => null, shortcutOf = () => null, toolsOf = async () => [], nowOf = async () => null, models = async () => [], reply = null, signedIn = async () => null, ownersOf = () => ({}) }) {
+// connections.js), ahead of the bot's own. synced(): its bots' channels started or stopped (sync()).
+export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => true, you = () => 'the owner', changed = () => {}, close = async () => {}, told = () => {}, readsOf = async () => [], transcriptOf = () => null, modelOf = () => null, computer = () => os.hostname(), commandOf = () => null, shortcutOf = () => null, toolsOf = async () => [], nowOf = async () => null, models = async () => [], reply = null, signedIn = async () => null, ownersOf = () => ({}), synced = () => {} }) {
   let data = { v: 2, outbox: [] }
   let old = null // the Slack Bot's questions (#216), to carry over
   try { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); if (Array.isArray(j.questions)) old = j; else if (Array.isArray(j.outbox)) data = { v: 2, outbox: j.outbox } } catch { /* none yet */ }
@@ -1663,6 +1663,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
           }))
         } else channel.stop()
       }
+      synced()
     },
     // What its channel says happened (connected, dropped, caught up, scopes missing), in its record.
     note: (id, e) => record(id, 'connection', { what: e.what, ok: !!e.ok, why: e.why ? oneLine(e.why, 300) : null, ...(e.missing ? { missing: e.missing } : {}), ...(e.platform ? { platform: e.platform } : {}) }),

@@ -747,7 +747,8 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   // messages and what's pinned there; in a direct message, its latest messages. Each with who wrote
   // it, and whether that was this bot. { kind, messages: [{ ts, person, text, you }], pins, problem }
   async function context({ channel, thread, ts, since = null, dm = false }) {
-    const said = (m) => ({ ts: m.ts, person: { id: m.user || m.bot_id || null, name: names[m.user] || m.username || m.bot_profile?.name || m.user || null }, text: clip(plainText(m.text, { bot: kept.bot?.userId, names }), LONGEST_SAID), you: !!((m.user && m.user === kept.bot?.userId) || (m.bot_id && m.bot_id === kept.bot?.botId)) })
+    // (A message posted as one of a shared connection's bots carries that bot's name: username.)
+    const said = (m) => ({ ts: m.ts, person: { id: m.user || m.bot_id || null, name: (m.bot_id && m.username) || names[m.user] || m.username || m.bot_profile?.name || m.user || null }, text: clip(plainText(m.text, { bot: kept.bot?.userId, names }), LONGEST_SAID), you: !!((m.user && m.user === kept.bot?.userId) || (m.bot_id && m.bot_id === kept.bot?.botId)) })
     if (!Object.keys(names).length) await people().catch(() => {})
     const before = (m) => Number(m.ts) < Number(ts) && (!since || Number(m.ts) > Number(since)) && String(m.text || '').trim()
     const order = (a, b) => Number(a.ts) - Number(b.ts)

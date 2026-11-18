@@ -83,8 +83,9 @@ export function pickedOf(text, ids) {
 // from, channel) why it wouldn't answer them there (null: it would), follows, lastIn, threads,
 // listens, note, politeNo, info. make(c, cb): the connector for a connection ({ say, threads,
 // follows, listens, info }). ask(system, prompt): AI Assist's model (throws, code no-model, with
-// none). you(): your name.
-export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner' }) {
+// none). you(): your name. enabled(): Bots is on (a shared connection with tokens stays connected
+// then, bots on it or not, so it's set up once, before any bot is).
+export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner', enabled = () => true }) {
   const hubs = new Map() // connection id -> { connector, started, picks }
   const joins = new Map() // `${bot}:${platform}` -> the bot's hear for that platform (combine's)
   const botOf = (id) => bots().find((b) => b.id === id) || null
@@ -132,12 +133,13 @@ export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner'
     }
   }
 
-  // Each connection's connector running while a bot on it listens, and stopped once none does.
+  // Each connection's connector running while a bot on it listens (a shared one's while Bots is on),
+  // and stopped once none does.
   function sync() {
     const all = conns.list()
     for (const c of all) {
       const h = hubOf(c)
-      const any = on(c).length > 0
+      const any = on(c).length > 0 || (c.shared && enabled())
       if (any && !h.started) { h.started = true; h.connector.start(dispatch(c.id)) } else if (!any && h.started) { h.started = false; h.connector.stop() }
     }
     for (const [id, h] of hubs) if (!all.some((c) => c.id === id)) { if (h.started) h.connector.stop(); hubs.delete(id) }
@@ -365,7 +367,17 @@ export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner'
         return must().post(reply, text, { ...o, as: who })
       },
       edit: (posted, text) => { const who = as(); return must().edit(posted, who && p !== 'slack' && !posted?.hook ? `**${who.name}:** ${text}` : text) },
-      react: pass('react'), status: pass('status'), whisper: pass('whisper'), typing: (r) => con()?.typing?.(r), context: pass('context'),
+      react: pass('react'), status: pass('status'), whisper: pass('whisper'), typing: (r) => con()?.typing?.(r),
+      // The conversation, as context: on a shared connection, what the app posted as another bot is
+      // that bot's (by the name it was posted as, or its name first), not this one's.
+      async context(args) {
+        const r = await must().context(args)
+        const who = as()
+        if (!who || !r?.messages) return r
+        const mine = (x) => x.person?.name === who.name || /^\*{1,2}([^*]+):\*{1,2}/.exec(String(x.text || ''))?.[1] === who.name
+        const fix = (x) => (x.you && !mine(x) ? { ...x, you: false } : x)
+        return { ...r, messages: r.messages.map(fix), pins: (r.pins || []).map(fix) }
+      },
       askOwner: (owner, item) => must().askOwner(owner, as() ? { ...item, shared: true } : item),
       settle: pass('settle'), download: pass('download'), dm: pass('dm'), missed: pass('missed'),
       masked: (...a) => con()?.masked?.(...a),
@@ -377,5 +389,7 @@ export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner'
     }
   }
 
-  return { view, sync, restart, drop, connectorOf: (cid) => { const c = conns.get(cid); return c ? hubOf(c).connector : null }, infoOf, started: (cid) => !!hubs.get(cid)?.started, onNow: (c) => on(c) }
+  // Bridge AI closing: every connector stopped (a Slack app's Home tab says it's offline).
+  const stopAll = () => { for (const h of hubs.values()) if (h.started) { h.started = false; try { h.connector.stop() } catch { /* going anyway */ } } }
+  return { view, sync, restart, drop, stopAll, connectorOf: (cid) => { const c = conns.get(cid); return c ? hubOf(c).connector : null }, infoOf, started: (cid) => !!hubs.get(cid)?.started, onNow: (c) => on(c) }
 }

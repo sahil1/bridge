@@ -4040,6 +4040,7 @@ const desk = makeFrontDesk({
   commandOf: (b) => slackCommand(b.name), shortcutOf: (b) => slackShortcut(b.name), toolsOf, nowOf: helperNow,
   models: () => chatModels.models(), reply: (id, msgs, o) => chatModels.reply(id, msgs, o), signedIn: (kind) => accounts.signInOf(kind),
   ownersOf: (b) => Object.fromEntries(conns.PLATFORMS.map((p) => [p, conns.of(b.id, p)?.owner || null])),
+  synced: () => hubs.sync(),
 })
 // Connections (connections.js): each one app on Slack, Discord or Teams, its connector running while a
 // bot on it listens (connhub.js); a shared one says which bot each question is for, with AI Assist's
@@ -4061,7 +4062,7 @@ const makeConnector = (c, cb) => {
   if (c.platform === 'teams') return makeTeams({ id: c.id, file, ...cb, defaultPort: teamsBase() === 0 ? 0 : c.teamsPort ?? teamsBase() })
   return makeSlack({ id: c.id, file, ...cb, wanted: c.shared ? SHARED_SCOPES : SLACK_SCOPES })
 }
-const hubs = makeHubs({ bots: () => botsStore.live(), desk, make: makeConnector, ask: (system, prompt) => setupAsk(system, prompt), you: () => botOwnerName() })
+const hubs = makeHubs({ bots: () => botsStore.live(), desk, make: makeConnector, ask: (system, prompt) => setupAsk(system, prompt), you: () => botOwnerName(), enabled: botsOn })
 // A bot's way to Slack, Discord and Teams, as one channel of the desk (connector.js combine): on each,
 // a view of the connection it's on now (connhub.js view), its own or the shared one.
 const connectBot = (id) => {
@@ -5139,7 +5140,9 @@ server.listen(cfg.port, cfg.host, () => {
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => {
   rt.shutdown?.({ keep: cfg.keepAgents !== false })
   const live = botsStore.list().map((b) => desk.channel(b.id)).filter((ch) => ch?.state().state === 'connected')
-  if (!live.length) process.exit(0)
+  const shared = conns.list().some((c) => c.shared && hubs.connectorOf(c.id)?.state().state === 'connected')
+  if (!live.length && !shared) process.exit(0)
   for (const ch of live) { try { ch.stop() } catch { /* going anyway */ } }
+  hubs.stopAll()
   setTimeout(() => process.exit(0), 300)
 })
