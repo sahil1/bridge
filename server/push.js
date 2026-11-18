@@ -29,8 +29,9 @@ export const publicKey = () => state().keys.publicKey
 // Those added before this was noted: a computer's name says so ("Mac, Chrome").
 const isHere = (dev) => dev.here ?? /^(Mac|Windows|Linux)\b/.test(dev.label)
 
+// (Read only: nothing is made for asking, as Settings and your other computers do.)
 export function devices() {
-  return state().devices.map((dev) => ({ id: dev.id, label: dev.label, addedAt: dev.addedAt, lastOk: dev.lastOk, here: isHere(dev) }))
+  return (read().devices || []).map((dev) => ({ id: dev.id, label: dev.label, addedAt: dev.addedAt, lastOk: dev.lastOk, here: isHere(dev) }))
 }
 
 // device: the paired phone (or other computer) it came through (relay.js), so removing that one
@@ -64,7 +65,12 @@ export function unsubscribe({ id, endpoint }) {
   return { removed: before - d.devices.length }
 }
 
-// The notification channel (see notify.js).
+// note.skip: devices left out (Remote Screen's: the one doing the viewing, screentell.js), as
+// { devices: [the paired devices they came through], here: this computer's own browsers too }.
+const skipped = (note, dev) => !!note.skip && ((!!dev.device && !!note.skip.devices?.includes(dev.device)) || (!!note.skip.here && isHere(dev)))
+
+// The notification channel (see notify.js). BRIDGE_TEST_PUSH (tests): what would go to each device
+// is written to that file instead, a JSON line each, and counts as sent.
 export const channel = {
   name: 'push',
   ready: () => (read().devices || []).length > 0,
@@ -74,7 +80,13 @@ export const channel = {
     const payload = JSON.stringify({ title: note.title, body: note.body, url: note.url || '/', tag: note.tag, kind: note.kind, actions: note.actions?.length ? note.actions : undefined, silent: note.silent || undefined })
     let sent = 0
     const gone = []
-    await Promise.all(d.devices.filter((dev) => !note.onlyHere || isHere(dev)).map(async (dev) => {
+    await Promise.all(d.devices.filter((dev) => (!note.onlyHere || isHere(dev)) && !skipped(note, dev)).map(async (dev) => {
+      if (process.env.BRIDGE_TEST_PUSH) {
+        fs.appendFileSync(process.env.BRIDGE_TEST_PUSH, `${JSON.stringify({ to: dev.label, device: dev.device || null, here: isHere(dev), note: JSON.parse(payload) })}\n`)
+        dev.lastOk = new Date().toISOString()
+        sent++
+        return
+      }
       try {
         await webpush.sendNotification(dev.sub, payload, opts)
         dev.lastOk = new Date().toISOString()

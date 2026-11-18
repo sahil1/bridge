@@ -15,7 +15,10 @@
 //     or a computer a phone links) starts unticked, its name without what turns text around;
 //   Ask Here First: allowed to view, control is asked for again; after it went idle, the password
 //     and Allow again;
-//   a device asking is told its own standing and the screens it may pick, not the record;
+//   a device asking is told its own standing (behind a guardrail, not even which screens), not the
+//     record; the cards of who's viewing carry no window titles; Which screen?'s stills come only in
+//     a session; Block This Device from a phone unticks a device at the computer it came through,
+//     and one paired there after that starts unticked;
 //   previews: only a server an agent's terminal started (not one in the home folder, nor one no
 //     terminal started), past the password (a session for the app), in a sandbox beside a phone's
 //     page, at an address of its own on Laptop, never under Laptop's own address;
@@ -438,12 +441,54 @@ try {
     const lv = local(laptop, `/m/${S.id}/api/remote/view?source=window:fake-w1`)
     await through(lv)
     await lv.wait((s) => s.frames.length, 5000)
-    const st = (await ph2.request('GET', '/api/remote')).json
+    const st = (await ph2.request('GET', '/api/remote?sources=1')).json
     ok(st && !('sessions' in st) && !('log' in st) && !('asks' in st) && !('unseen' in st) && !st.access.devices && !st.access.locks, 'a phone asking isn\'t told who looks, the record, what\'s asked here, nor the other devices', st && Object.keys(st))
-    ok(st?.access.you?.allowed === true && st.access.password === true && st.screen.sources?.every((x) => x.kind === 'screen' && !x.bounds), 'only its own standing, and the screens it may pick (behind a password, no windows)', st?.access)
+    ok(st?.access.you?.allowed === true && st.access.password === true && !st.screen.sources?.length && st.notify?.on === true && !st.notify.devices && !st.notify.computers, 'only its own standing; behind a password, not even which screens (Which screen? comes in the session), nor where notifications go', { access: st?.access, sources: st?.screen.sources, notify: st?.notify })
+    // The cards (who's viewing a screen of yours): which computer, which device, its kind and how it
+    // came, since when; never what's on it.
+    const card = (await ph2.request('GET', '/api/remote/live')).json?.list || []
+    const mine = card.find((x) => x.machine === null && x.by.name === 'Laptop')
+    const keys = new Set(['id', 'by', 'for', 'forKind', 'control', 'controlled', 'started', 'machine', 'computer', 'ask'])
+    ok(!!mine && card.every((x) => Object.keys(x).every((k) => keys.has(k))) && !JSON.stringify(card).includes('Test window') && mine.computer === 'Studio' && mine.by.kind === 'computer', 'the card a phone gets: who, from which computer, how it came and since when; no window titles, no record', card)
     const here = await studio.api('/remote')
     ok(here.sessions.length === 1 && here.log.length > 0 && here.access.devices.length >= 3, 'Studio itself sees all of it')
     lv.close()
+    await idle()
+  })
+
+  await part('Which screen?\'s stills only in a session, past the password', async () => {
+    const v = ph.socket(V)
+    await v.wait((s) => msg(s, 'password'))
+    await v.send({ t: 'thumbs?' })
+    await sleep(600)
+    ok(!msg(v, 'thumb') && !msg(v, 'hello'), 'asked for at the password: none come', v.msgs.map((m) => m.t))
+    const h = await through(v)
+    await v.send({ t: 'thumbs?' })
+    await v.wait((s) => msgs(s, 'thumb').length >= 2, 5000)
+    ok(!!h && msgs(v, 'thumb').every((m) => /^data:image\//.test(m.data) && h.sources.some((x) => x.id === m.id && x.kind === 'screen')), 'in the session: a still of each screen', msgs(v, 'thumb').length)
+    await v.close()
+    await idle()
+  })
+
+  await part('Block This Device from a phone, on a device that came through Laptop', async () => {
+    const w = pk.socket(`/m/${S.id}${V}`)
+    await through(w)
+    const s = await until(async () => (await studio.api('/remote')).sessions.find((x) => x.for === 'Pocket'), 5000, 100)
+    const r = await ph.request('POST', `/api/remote/sessions/${s?.id}/end`, { block: true })
+    await w.wait((x) => msg(x, 'error') || x.closed, 6000)
+    const onLaptop = (await laptop.api('/remote')).access.devices.find((d) => d.id === POCKET)
+    ok(r.json?.ok === true && onLaptop?.allowed === false && (await studio.api('/remote')).access.devices.find((d) => d.id === LAPTOP)?.allowed, 'Pocket is unticked at Laptop, the computer it came through; Laptop itself still may connect to Studio', [r.json, onLaptop])
+    const again = pk.socket(`/m/${S.id}${V}`)
+    await again.wait((x) => msg(x, 'error'))
+    ok(msg(again, 'error')?.code === 'device' && /Laptop doesn't let Pocket/.test(msg(again, 'error').why), 'so it can\'t come through Laptop again: Laptop turns it away itself', msg(again, 'error'))
+    // With a device unticked at Laptop, one paired there after it starts unticked too.
+    const pk2 = over(await linkAs(rb.url, { code: (await laptop.api('/relay/pair', {})).pairing.code, name: 'Pocket2', about: { name: 'Pocket2' } }))
+    const d2 = await until(async () => (await laptop.api('/remote')).access.devices.find((d) => d.name === 'Pocket2'), 8000, 200)
+    const v2 = pk2.socket(`/m/${S.id}${V}`)
+    await v2.wait((x) => msg(x, 'error') || msg(x, 'password'), 8000)
+    ok(d2 && !d2.allowed && d2.fresh && msg(v2, 'error')?.code === 'device', 'and a phone paired with Laptop after that starts unticked there, so it doesn\'t reach Studio through it either', [d2, msg(v2, 'error')])
+    pk2.stop()
+    await laptop.api('/remote/devices', { id: POCKET, allowed: true })
     await idle()
   })
 

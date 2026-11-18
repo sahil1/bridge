@@ -151,7 +151,7 @@ self.addEventListener('push', (e) => {
       badge: '/icon-512.png',
       data: { url: n.url || '/', actions },
       ...(actions.length ? { actions: actions.map(({ action, title }) => ({ action, title })) } : {}),
-      requireInteraction: n.kind === 'needs-you',
+      requireInteraction: n.kind === 'needs-you' || n.kind === 'screen', // (a screen being viewed: stays until seen)
       silent: !!n.silent, // Bridge AI's sounds are off
     })
   })())
@@ -170,7 +170,7 @@ async function clicked(n, action) {
   let url = d.url || '/'
   if (pick) {
     const r = await answer(pick.token).catch(() => null)
-    if (r?.ok) return answered(n, pick)
+    if (r?.ok) return answered(n, pick, r)
     url = r?.url || url
   }
   return openApp(new URL(url, location.origin).href, n)
@@ -226,10 +226,11 @@ async function answer(token) {
   })
 }
 
-// Says it went through, briefly and without a sound.
-async function answered(n, pick) {
+// Says it went through, briefly and without a sound: in its own words when it has them (a screen's
+// Stop or Block This Device, carried out by the computer being viewed).
+async function answered(n, pick, r) {
   const tag = `${n.tag || 'bridge'}-answered`
-  await self.registration.showNotification(n.title, { body: `Answered: ${pick.title}`, tag, silent: true, icon: '/icon-512.png', badge: '/icon-512.png', data: { url: n.data?.url || '/' } })
+  await self.registration.showNotification(n.title, { body: typeof r?.said === 'string' ? r.said.slice(0, 200) : `Answered: ${pick.title}`, tag, silent: true, icon: '/icon-512.png', badge: '/icon-512.png', data: { url: n.data?.url || '/' } })
   await new Promise((r) => setTimeout(r, 4000))
   for (const x of await self.registration.getNotifications({ tag })) x.close()
 }

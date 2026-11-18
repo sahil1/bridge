@@ -41,14 +41,21 @@
 //     it's being seen, Stop, the notice after, Remote Access set in Settings (and shown, not changed,
 //     from another computer's window) and Screen Activity; peer-to-peer between two pages where the
 //     browser can (the capture page on Studio, with a canvas), said Direct; the agent's Preview tab
-//     on Laptop showing Studio's app at its own address, never Laptop's localhost.
+//     on Laptop showing Studio's app at its own address, never Laptop's localhost;
+//   Which screen?: each display by its own name and size (desktop/remote.js, Electron stood in for, as
+//     a Mac, Windows and Linux give them), a still of each in a session only, asked first on a phone;
+//   your other devices told (BRIDGE_TEST_PUSH: what each would be sent): a session, control taken and
+//     an ask, never to the device viewing, with Stop and Block This Device carried out at Studio, and
+//     a device through Laptop blocked on Laptop; the card in every other window; Settings saying where
+//     they go, and with nowhere set up, saying so;
+//   a phone through its relay page (the apps' page), end to end, through the relay and peer-to-peer.
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import WebSocket, { WebSocketServer } from 'ws'
-import { startKit, startRelay, checks, until, browser, page, sleep, shot, changeAnswer, ROOT, TEST, IS_WIN, freePort, stopTree } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, page, sleep, shot, changeAnswer, phoneFaults, ROOT, TEST, IS_WIN, freePort, stopTree } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 import { K, json, text } from '../../relay/web/link.js'
 import { unpackFrame, keyFor, fitIn, pointAt, captureSize, bitrateFor, sdpBitrate } from '../../shared/remote.js'
@@ -198,7 +205,10 @@ try {
   relays.push(ra, rb)
   const inputs = path.join(TEST, '.out', `remote-screen-input-${process.pid}.jsonl`)
   const clip = path.join(TEST, '.out', `remote-screen-clip-${process.pid}.txt`)
-  for (const f of [inputs, clip, `${inputs}.local`]) fs.rmSync(f, { force: true })
+  // What each would send its devices as notifications (BRIDGE_TEST_PUSH: push.js writes them here).
+  const pushS = path.join(TEST, '.out', `remote-screen-push-studio-${process.pid}.jsonl`)
+  const pushL = path.join(TEST, '.out', `remote-screen-push-laptop-${process.pid}.jsonl`)
+  for (const f of [inputs, clip, `${inputs}.local`, pushS, pushL]) fs.rmSync(f, { force: true })
   const kitWith = async (name, rel, env = {}) => {
     const k = await startKit(`remote-screen-${name.toLowerCase()}`, { config: { trials: { 'remote-screen': true } }, env: (dirs) => { fs.writeFileSync(path.join(dirs.data, 'relay.json'), JSON.stringify(rel.relayFile)); return { BRIDGE_COMPUTER_NAME: name, BRIDGE_REMOTE_ICE: 'none', ...env } } })
     kits.push(k)
@@ -206,8 +216,8 @@ try {
     return k
   }
   // Ask Here First waits 3 s for an answer here, and control idles back to view-only after 6 s.
-  const studio = await kitWith('Studio', ra, { BRIDGE_TEST_SCREEN: 'fake', BRIDGE_TEST_INPUT: inputs, BRIDGE_TEST_CLIPBOARD: clip, BRIDGE_REMOTE_ASK_MS: '3000', BRIDGE_REMOTE_CONTROL_IDLE_MS: '6000' })
-  const laptop = await kitWith('Laptop', rb)
+  const studio = await kitWith('Studio', ra, { BRIDGE_TEST_SCREEN: 'fake', BRIDGE_TEST_INPUT: inputs, BRIDGE_TEST_CLIPBOARD: clip, BRIDGE_REMOTE_ASK_MS: '3000', BRIDGE_REMOTE_CONTROL_IDLE_MS: '6000', BRIDGE_TEST_PUSH: pushS })
+  const laptop = await kitWith('Laptop', rb, { BRIDGE_TEST_PUSH: pushL })
   ok(!!(await until(async () => (await studio.api('/relay')).online && (await laptop.api('/relay')).online, 20000)), 'each is connected to its own relay')
   const p = (await studio.api('/relay/pair', {})).pairing
   await laptop.api('/machines', { link: `${ra.url} ${p.code}` })
@@ -286,7 +296,7 @@ try {
     ok(told.json?.access?.password === true && !told.text.includes(pw.hash) && !told.text.includes(pw.salt) && !/"(hash|salt)"/.test(told.text), 'a device is told there is one, never its hash nor its salt')
     const before = await ph.request('GET', '/api/remote?sources=1')
     const own = await studio.api('/remote?sources=1')
-    ok(before.json?.screen?.sources?.length === 5 && before.json.screen.sources.every((x) => x.kind === 'screen') && !before.text.includes('Test window') && own.screen.sources.some((x) => x.kind === 'window'), 'behind the password, a device asking is told its screens but not its windows\' titles; Studio itself is', before.json?.screen?.sources)
+    ok(!before.json?.screen?.sources?.length && !before.text.includes('Test window') && !before.text.includes('Studio Display') && own.screen.sources.some((x) => x.kind === 'window'), 'behind the password, a device asking isn\'t told its screens nor its windows\' titles (Which screen? comes in the session); Studio itself is', before.json?.screen?.sources)
     const again = await studio.api('/remote/password', { password: `${PW}!` })
     const hash2 = JSON.parse(fs.readFileSync(file, 'utf8')).password.hash
     ok(again.password && hash2 !== pw.hash, 'changed at Studio: a new hash')
@@ -537,6 +547,213 @@ try {
     await studio.api('/remote/seen', {})
     ok(!(await studio.api('/remote')).unseen.length, 'Studio itself can')
     lph.stop()
+  })
+
+  // ---------- Which screen?: a still of each, in a session only ----------
+  await part('Which screen?: a still of each screen, only in a session', async () => {
+    const v = ph.socket('/api/remote/view?source=screen:')
+    const h = await through(v)
+    await v.send({ t: 'thumbs?' })
+    await v.wait((s) => msgs(s, 'thumb').length >= 5, 6000)
+    const th = msgs(v, 'thumb')
+    const screens = h.sources.filter((x) => x.kind === 'screen').map((x) => x.id).sort()
+    ok(th.length === 5 && th.map((x) => x.id).sort().join() === screens.join() && th.every((x) => /^data:image\/svg\+xml;base64,/.test(x.data)), 'asked in the session, a still of each of its screens comes (never its windows)', th.map((x) => x.id))
+    await v.send({ t: 'thumbs?' })
+    await sleep(600)
+    ok(msgs(v, 'thumb').length === 5, 'asked again at once: not taken again (a few seconds apart at most)')
+    await v.close()
+    const before = ph.socket('/api/remote/view?source=screen:')
+    await before.wait((s) => msg(s, 'password'))
+    await before.send({ t: 'thumbs?' })
+    await sleep(500)
+    ok(!msgs(before, 'thumb').length && !msg(before, 'hello'), 'before the password: nothing of the screen, nor a still of it')
+    await before.close()
+  })
+
+  // ---------- your other devices, told ----------
+  await part('your other devices told: each session, control taken and an ask, with Stop and Block This Device', async () => {
+    const tb = await linkAs(rb.url, { code: (await laptop.api('/relay/pair', {})).pairing.code, name: 'Tablet', about: { name: 'Tablet' } })
+    const tbh = over(tb)
+    const sees = (s) => s.sessions.find((x) => x.by.name === 'Phone')
+    // Nothing set up anywhere: never silent all the same.
+    const v0 = ph.socket('/api/remote/view?source=screen:')
+    await through(v0)
+    const t0 = await until(async () => { const x = sees(await studio.api('/remote'))?.told?.[0]; return x && 'sent' in x ? x : null }, 10000, 100)
+    ok(t0?.what === 'view' && t0.sent === 0 && t0.computers?.length === 1 && t0.computers[0].name === 'Laptop' && t0.computers[0].sent === 0, 'no notification channel set up anywhere: the session is recorded as told to nobody (Laptop asked, with none of its own either)', t0)
+    await v0.close()
+    // Each sets up notifications: Studio's own browser, the Phone (paired with Studio), Laptop's own
+    // browser, and the Tablet (paired with Laptop).
+    const sub = (n) => ({ subscription: { endpoint: `https://push.test/${n}/${Date.now()}`, keys: { p256dh: 'test', auth: 'test' } }, label: n })
+    await studio.api('/push/subscribe', sub('Studio browser'))
+    await ph.request('POST', '/api/push/subscribe', sub('Phone'))
+    await laptop.api('/push/subscribe', sub('Laptop browser'))
+    await tbh.request('POST', '/api/push/subscribe', sub('Tablet'))
+    const LM = (await studio.api('/machines')).machines.find((m) => m.name === 'Laptop')
+    await studio.api(`/needs-you?fresh=${LM.id}`)
+    const nt = await until(async () => { const n = (await studio.api('/remote')).notify; return n?.computers?.[0]?.devices === 2 ? n : null }, 20000, 300)
+    ok(nt?.on === true && nt.devices.map((d) => d.label).sort().join() === 'Phone,Studio browser' && nt.computers[0].name === 'Laptop' && nt.computers[0].devices === 2, 'Studio says where they go: its own 2 devices, and 2 through Laptop', nt)
+    const toPhone = (await ph.request('GET', '/api/remote')).json?.notify
+    ok(toPhone?.on === true && !toPhone.devices && !toPhone.computers, 'a device is told only whether they\'re on, not where they go', toPhone)
+    await studio.api('/remote/control', { on: true })
+
+    // The Phone views Studio, and takes control.
+    let n = { s: lines(pushS).length, l: lines(pushL).length }
+    const v1 = ph.socket('/api/remote/view?source=screen:&control=1')
+    const h1 = await through(v1)
+    const s1 = await until(() => { const x = lines(pushS).slice(n.s); return x.length ? x : null }, 8000, 100)
+    const l1 = await until(() => { const x = lines(pushL).slice(n.l); return x.length >= 2 ? x : null }, 8000, 100)
+    await sleep(300)
+    const st = lines(pushS).slice(n.s)
+    ok(st.length === 1 && st[0].to === 'Studio browser' && st[0].note.kind === 'screen' && st[0].note.title === 'Studio\'s screen is being viewed' && /^From Phone \(phone\), who may control it too\. Not you\?/.test(st[0].note.body) && st[0].note.actions?.map((a) => a.title).join() === 'Stop,Block This Device' && st[0].note.tag === `screen-${h1.session}`, 'Studio\'s devices told: which computer, from which device (its kind), view or control, with Stop and Block This Device; never the Phone doing the viewing', s1)
+    ok(l1.map((x) => x.to).sort().join() === 'Laptop browser,Tablet' && l1.every((x) => x.note.title === 'Studio\'s screen is being viewed' && /From Phone \(phone\)/.test(x.note.body)), 'and Laptop\'s, through Laptop', l1)
+    const told1 = await until(async () => { const x = sees(await studio.api('/remote'))?.told?.[0]; return x && 'sent' in x ? x : null }, 6000, 100)
+    ok(told1?.sent === 1 && told1.computers?.[0]?.sent === 2, 'Studio\'s record: told 1 of its devices, and 2 through Laptop', told1)
+    await v1.send({ t: 'input', evs: [{ t: 'move', x: 0.5, y: 0.5 }] })
+    const ctl = await until(() => lines(pushL).slice(n.l).find((x) => x.to === 'Tablet' && x.note.title === 'Studio is being controlled'), 8000, 100)
+    ok(!!ctl && /^From Phone \(phone\), with its mouse and keyboard\./.test(ctl.note.body) && ctl.note.tag === `screen-${h1.session}`, 'control taken: told again, in the same notification\'s place', ctl)
+    // Stop, from the Tablet's notification: through Laptop, carried out at Studio.
+    const stopT = ctl.note.actions.find((a) => a.action === 'stop').token
+    const r1 = await tbh.request('POST', '/api/notify/answer', { token: stopT })
+    ok(r1.json?.ok === true && r1.json.said === 'Stopped: Phone isn\'t viewing Studio\'s screen now.', 'Stop on the Tablet\'s notification: done, and said', r1.json)
+    await v1.wait((s) => msg(s, 'ended') || s.closed, 6000)
+    ok(msg(v1, 'ended')?.why === 'stopped' && msg(v1, 'ended').by === 'Tablet, through Laptop', 'the Phone viewing is told it was stopped, and from where', msg(v1, 'ended'))
+    const e1 = await until(async () => (await studio.api('/remote')).log.find((x) => x.id === h1.session && x.ended), 5000, 100)
+    ok(e1?.end === 'stopped' && e1.stoppedBy === 'Tablet, through Laptop' && e1.told?.map((x) => x.what).join() === 'view,control', 'Studio\'s record: stopped from the Tablet through Laptop, and each notification it sent', e1)
+    const r1b = await tbh.request('POST', '/api/notify/answer', { token: stopT })
+    ok(r1b.json?.ok === false && r1b.json.why === 'used', 'the same button again does nothing', r1b.json)
+
+    // Block This Device, from Studio's own notification.
+    n = { s: lines(pushS).length, l: lines(pushL).length }
+    const v2 = ph.socket('/api/remote/view?source=screen:')
+    const h2 = await through(v2)
+    const b2 = await until(() => lines(pushS).slice(n.s).find((x) => x.note.tag === `screen-${h2.session}`), 8000, 100)
+    const r2 = await studio.api('/notify/answer', { token: b2.note.actions.find((a) => a.action === 'block').token })
+    ok(r2.ok === true && r2.said === 'Phone can\'t connect to Studio any more.', 'Block This Device: done, and said', r2)
+    await v2.wait((s) => msg(s, 'error'), 6000)
+    const P = (await studio.api('/remote')).access.devices.find((d) => d.name === 'Phone')
+    ok(msg(v2, 'error')?.code === 'blocked' && P.allowed === false, 'the Phone\'s session ends, and it\'s unticked in Which Devices May Connect', [msg(v2, 'error'), P])
+    const v3 = ph.socket('/api/remote/view?source=screen:')
+    await v3.wait((s) => msg(s, 'error'))
+    ok(msg(v3, 'error').code === 'device', 'and it can\'t connect again', msg(v3, 'error'))
+    const back = await ph.request('POST', '/api/remote/devices', { id: P.id, allowed: true })
+    ok(back.status === 403 && !(await studio.api('/remote')).access.devices.find((d) => d.id === P.id).allowed, 'letting it back in is done at Studio only', back.json)
+    const e2 = (await studio.api('/remote')).log.find((x) => x.id === h2.session)
+    ok(e2?.end === 'blocked' && e2.stoppedBy === 'Studio', 'Studio\'s record: blocked, and from where', e2)
+    await studio.api('/remote/devices', { id: P.id, allowed: true })
+
+    // The Tablet views Studio through Laptop: everyone but the Tablet is told, with how it came.
+    n = { s: lines(pushS).length, l: lines(pushL).length }
+    const v4 = tbh.socket(`/m/${S.id}/api/remote/view?source=screen:`)
+    const h4 = await through(v4)
+    const s4 = await until(() => { const x = lines(pushS).slice(n.s); return x.length >= 2 ? x : null }, 8000, 100)
+    await until(() => lines(pushL).slice(n.l).length >= 1, 8000, 100)
+    await sleep(500)
+    const l4 = lines(pushL).slice(n.l)
+    ok(s4.map((x) => x.to).sort().join() === 'Phone,Studio browser' && s4.every((x) => /^From Tablet \(phone\) · through Laptop\./.test(x.note.body)), 'the Tablet through Laptop: Studio\'s devices told, saying which device, its kind and how it came', s4)
+    ok(l4.length === 1 && l4[0].to === 'Laptop browser', 'Laptop\'s too, all but the Tablet doing the viewing', l4)
+    // Block This Device on it, from the Phone: the Tablet is unticked on Laptop, the computer it came
+    // through, not Laptop on Studio.
+    const b4 = s4.find((x) => x.to === 'Phone')
+    const r4 = await ph.request('POST', '/api/notify/answer', { token: b4.note.actions.find((a) => a.action === 'block').token })
+    ok(r4.json?.ok === true && r4.json.said === 'Tablet can\'t connect through Laptop any more.', 'Block on a device that came through Laptop: said so', r4.json)
+    await v4.wait((s) => msg(s, 'error') || s.closed, 6000)
+    ok(msg(v4, 'error')?.code === 'blocked' && msg(v4, 'error').at === 'Laptop' && /^Laptop stopped letting this device connect/.test(msg(v4, 'error').why), 'the Tablet is told Laptop stopped letting it connect', msg(v4, 'error'))
+    const onLaptop = (await laptop.api('/remote')).access.devices.find((d) => d.name === 'Tablet')
+    const onStudio = (await studio.api('/remote')).access.devices.find((d) => d.name === 'Laptop')
+    ok(onLaptop?.allowed === false && onStudio?.allowed === true, 'the Tablet is unticked on Laptop; Laptop itself still may connect to Studio', [onLaptop, onStudio])
+    ok((await studio.api('/remote')).log.find((x) => x.id === h4.session)?.stoppedBy === 'Phone', 'Studio\'s record says the Phone blocked it')
+    await laptop.api('/remote/devices', { id: onLaptop.id, allowed: true })
+
+    // Laptop itself views Studio: its own browser isn't told (it's the one viewing), the Tablet is.
+    n = { s: lines(pushS).length, l: lines(pushL).length }
+    const v5 = local(laptop, `/m/${S.id}/api/remote/view?source=screen:`)
+    await through(v5)
+    await until(() => lines(pushL).slice(n.l).length >= 1, 8000, 100)
+    await sleep(500)
+    ok(lines(pushL).slice(n.l).map((x) => x.to).join() === 'Tablet' && /^From Laptop \(computer\)\./.test(lines(pushL).slice(n.l)[0].note.body), 'Laptop itself viewing: Laptop\'s own browser isn\'t told, the Tablet is', lines(pushL).slice(n.l))
+    v5.close()
+
+    // Ask Here First: told while it waits, with Deny and Block This Device; Deny from the Tablet.
+    await studio.api('/remote/ask-first', { on: true })
+    n = { s: lines(pushS).length, l: lines(pushL).length }
+    const v6 = ph.socket('/api/remote/view?source=screen:&control=1')
+    await v6.wait((s) => msg(s, 'password'))
+    await v6.send({ t: 'password', p: PW })
+    await v6.wait((s) => msg(s, 'asking'))
+    const a6 = await until(() => lines(pushL).slice(n.l).find((x) => x.to === 'Tablet'), 8000, 100)
+    ok(a6?.note.title === 'Phone (phone) asks to see and control Studio\'s screen' && /allowed or denied at Studio itself/.test(a6.note.body) && a6.note.actions.map((x) => x.title).join() === 'Deny,Block This Device', 'an ask waiting on Ask Here First: told, with Deny and Block This Device (allowing is for Studio itself)', a6?.note)
+    const r6 = await tbh.request('POST', '/api/notify/answer', { token: a6.note.actions.find((x) => x.action === 'stop').token })
+    await v6.wait((s) => msg(s, 'error'), 6000)
+    ok(r6.json?.ok && msg(v6, 'error')?.code === 'stopped' && msg(v6, 'error').by === 'Tablet, through Laptop' && !msg(v6, 'hello'), 'Deny from the Tablet: the Phone is told no, and from where', [r6.json, msg(v6, 'error')])
+    const e6 = (await studio.api('/remote')).log.find((x) => x.end === 'stopped' && !x.source)
+    ok(!!e6 && e6.stoppedBy === 'Tablet, through Laptop' && e6.told?.[0]?.what === 'ask', 'Studio\'s record keeps it, with the notification', e6)
+    await studio.api('/remote/ask-first', { on: false })
+
+    // What's live, for the cards: Laptop knows, and stops it from there.
+    const v7 = ph.socket('/api/remote/view?source=screen:')
+    await through(v7)
+    const lv = await until(async () => (await laptop.api('/remote/live')).list.find((x) => x.machine === S.id && x.by.name === 'Phone'), 6000, 100)
+    ok(lv?.computer === 'Studio' && lv.by.kind === 'phone' && !lv.ask && !!lv.started && !('source' in lv), 'Laptop knows Studio\'s screen is being viewed, by whom and since when (not what\'s on it)', lv)
+    const own = await ph.request('GET', '/api/remote/live')
+    ok(own.json?.list?.some((x) => x.machine === null && x.computer === 'Studio' && x.by.name === 'Phone'), 'and so does a phone paired with Studio', own.json)
+    const hop = await fetch(`${laptop.url}/m/${S.id}/api/remote/live/end`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${laptop.key}` }, body: JSON.stringify({ machine: 'x', id: lv.id }) })
+    ok(hop.status === 403, 'one hop only: Studio won\'t pass it on to a third', hop.status)
+    const heard = await ph.request('POST', '/api/remote/heard', { sessions: [{ id: 'x', by: { name: 'Fake' } }] })
+    ok(heard.status === 403, 'only another of your computers says what\'s live there', heard.json)
+    const blk = await ph.request('POST', '/api/remote/devices/block', { id: P.id })
+    ok(blk.status === 403, 'and only one asks to block a device that came through this one', blk.json)
+    const r7 = await laptop.api('/remote/live/end', { machine: S.id, id: lv.id })
+    await v7.wait((s) => msg(s, 'ended') || s.closed, 6000)
+    ok(r7.ok && msg(v7, 'ended')?.by === 'Laptop', 'Stop from Laptop: the session ends at Studio', [r7, msg(v7, 'ended')])
+    ok(!!(await until(async () => !(await laptop.api('/remote/live')).list.some((x) => x.machine === S.id), 5000, 100)), 'and Laptop\'s card goes')
+
+    // Off at Studio (only there): nobody told, and the record says so.
+    const offPhone = await ph.request('POST', '/api/remote/notify', { on: false })
+    ok(offPhone.status === 403, 'turned off at Studio only', offPhone.json)
+    await studio.api('/remote/notify', { on: false })
+    n = { s: lines(pushS).length, l: lines(pushL).length }
+    const v8 = ph.socket('/api/remote/view?source=screen:')
+    await through(v8)
+    await sleep(1200)
+    const t8 = sees(await studio.api('/remote'))?.told?.[0]
+    ok(lines(pushS).length === n.s && lines(pushL).length === n.l && t8?.off === true, 'off: nobody told, and the record says they were off', t8)
+    await v8.close()
+    await studio.api('/remote/notify', { on: true })
+    await studio.api('/remote/control', { on: false })
+    tbh.stop()
+  })
+
+  // ---------- each screen by its display's own name ----------
+  await part('each screen by its display\'s own name and size, on a Mac, Windows and Linux', async () => {
+    const { create, displayFor } = createRequire(import.meta.url)(path.join(ROOT, 'desktop', 'remote.js'))
+    const d = (id, label, w, h, k, more = {}) => ({ id, label, bounds: { x: 0, y: 0, width: w, height: h }, size: { width: w, height: h }, workArea: { x: 0, y: 0, width: w, height: h }, scaleFactor: k, ...more })
+    const names = (screens, displays, primary) => [...displayFor(screens, displays, primary).values()].map((x) => `${x.name}@${x.d?.id ?? '-'}`)
+    // A Mac: display_id, and its labels.
+    const mb = d(1, 'Built-in Retina Display', 1512, 982, 2, { internal: true })
+    const lg = d(2, 'LG UltraFine', 2560, 1440, 2)
+    ok(names([{ id: 'screen:1:0', name: 'Screen 1', display_id: '1' }, { id: 'screen:2:0', name: 'Screen 2', display_id: '2' }], [mb, lg], mb).join() === 'Built-in Retina Display@1,LG UltraFine@2', 'a Mac: each by its display\'s own name, matched by display_id')
+    // Windows: no display_id, as many screens as displays, in order; the monitors' own names.
+    const w1 = d(2779098405, 'DELL U2723QE', 3840, 2160, 1.5)
+    const w2 = d(2528732444, 'Generic PnP Monitor', 1920, 1080, 1)
+    ok(names([{ id: 'screen:0:0', name: 'Screen 1', display_id: '' }, { id: 'screen:1:0', name: 'Screen 2', display_id: '' }], [w1, w2], w1).join() === `DELL U2723QE@${w1.id},Generic PnP Monitor@${w2.id}`, 'Windows without display_id: in the displays\' order, by their names')
+    // Linux: no labels; a laptop's own said so, another by its place.
+    const x1 = d(10, '', 1920, 1200, 1, { internal: true })
+    const x2 = d(11, '', 2560, 1440, 1)
+    ok(names([{ id: 'screen:10:0', name: 'Entire screen', display_id: '10' }, { id: 'screen:11:0', name: 'Screen 2', display_id: '11' }], [x1, x2], x1).join() === 'Built-in Display@10,Display 2@11', 'Linux without labels: "Built-in Display" for a laptop\'s own, "Display 2" by its place, never "Screen 2"')
+    // Two of the same model, numbered as macOS does; Wayland's one stream, the main display.
+    ok(names([{ id: 'screen:1:0', display_id: '1' }, { id: 'screen:2:0', display_id: '2' }], [d(1, 'LG UltraFine', 2560, 1440, 2), d(2, 'LG UltraFine', 2560, 1440, 2)], null).join() === 'LG UltraFine (1)@1,LG UltraFine (2)@2', 'two of the same model: numbered')
+    ok(names([{ id: 'screen:0:0', name: 'Entire screen', display_id: '' }], [x1, x2], x1).join() === 'Built-in Display@10', 'one stream with no display (Wayland\'s portal): the main display')
+    // sources() and thumbs(), Electron stood in for.
+    const shotOf = (n) => ({ isEmpty: () => false, toJPEG: () => Buffer.from(`jpeg ${n}`) })
+    const desk = create({
+      BrowserWindow: class {}, systemPreferences: { getMediaAccessStatus: () => 'granted' }, session: {}, nativeTheme: {}, URL_BASE: '', preload: '', fetch: async () => ({}), platform: 'darwin', keyFor,
+      desktopCapturer: { getSources: async (o) => [{ id: 'screen:1:0', name: 'Screen 1', display_id: '1', thumbnail: shotOf(1) }, { id: 'screen:2:0', name: 'Screen 2', display_id: '2', thumbnail: shotOf(2) }, ...(o.types.includes('window') ? [{ id: 'window:9:0', name: 'Notes' }] : [])] },
+      screen: { getAllDisplays: () => [mb, lg], getPrimaryDisplay: () => mb },
+    })
+    const src = (await desk.sources()).sources
+    ok(src.map((x) => `${x.name} ${x.w}×${x.h}${x.primary ? ' main' : ''}`).join() === 'Built-in Retina Display 3024×1964 main,LG UltraFine 5120×2880,Notes 0×0', 'the capture page\'s screens: each by name, at its own pixels, the main one marked', src)
+    const th = await desk.thumbs()
+    ok(th.length === 2 && th[0].id === 'screen:1:0' && th[0].data === `data:image/jpeg;base64,${Buffer.from('jpeg 1').toString('base64')}`, 'and a still of each screen, as a JPEG', th)
   })
 
   // ---------- the Beta Feature off ----------
@@ -813,6 +1030,16 @@ try {
   const downSince = (n) => lines(inputs).slice(n).find((x) => x.t === 'down')
   const near = (a, x, y, d = 3) => !!a && Math.abs(a.x - x) <= d && Math.abs(a.y - y) <= d
   const viewOn = (p) => p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-view-screen', { detail: { machine: id, name: 'Studio' } })), S.id)
+  // Which screen?: opened from the toolbar (unless it's up already), and a screen picked by its name.
+  const chooser = (p) => p.locator('.rs-pick')
+  const pickScreen = async (p, name) => {
+    if (!(await chooser(p).isVisible().catch(() => false))) await p.locator('.rs-bar .rs-source').click()
+    await chooser(p).waitFor({ timeout: 8000 })
+    await chooser(p).locator('.rs-pick-item').filter({ has: p.locator('b', { hasText: new RegExp(`^${name}$`) }) }).click()
+    await chooser(p).waitFor({ state: 'hidden', timeout: 8000 })
+  }
+  // Its rows as shown: name, what's under it, whether it's showing, and whether its still came.
+  const rows = (p) => chooser(p).locator('.rs-pick-list').first().locator('.rs-pick-item').evaluateAll((els) => els.map((e) => ({ name: e.querySelector('b').textContent, sub: e.querySelector('small').textContent, on: e.getAttribute('aria-pressed') === 'true', still: !!e.querySelector('.rs-thumb img')?.complete && (e.querySelector('.rs-thumb img')?.naturalWidth || 0) > 0, box: (() => { const r = e.querySelector('.rs-thumb > span').getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) } })() })))
   const L = (await studio.api('/remote')).access.devices.find((d) => d.name === 'Laptop')
 
   await part('Laptop: View screen, the password, the picture filling the window, Control on each screen', async () => {
@@ -846,7 +1073,8 @@ try {
     await control.click()
     await p.locator('.rs-bar').getByRole('button', { name: 'Controlling' }).waitFor({ timeout: 8000 })
     // Another of its screens, picked in the same session: a 5K one.
-    await p.locator('.rs-source').selectOption('screen:fake-5k')
+    ok(/Test screen/.test(await p.locator('.rs-bar .rs-source').innerText()) && !(await chooser(p).count()), 'on a computer, the toolbar says which screen shows (no question first)', await p.locator('.rs-bar .rs-source').innerText())
+    await pickScreen(p, 'Studio Display')
     ok(!!(await until(async () => { const x = await boxes(p); return fills(x, 5120, 2880) ? x : null }, 10000)), 'Studio Display picked: the picture is that screen, 16:9, fitted', await boxes(p))
     const st0 = await studio.api('/remote')
     ok(st0.sessions.length === 1 && st0.sessions[0].id === first, 'in the same session (nothing to connect again, nor the password asked again)', st0.sessions)
@@ -878,7 +1106,7 @@ try {
     await shot(p, `${tag}remote-screen-actual-size`)
     await p.locator('.rs-size').getByRole('button', { name: 'Fit' }).click()
     // A portrait screen, fitted: tall in the middle, the letterbox either side.
-    await p.locator('.rs-source').selectOption('screen:fake-portrait')
+    await pickScreen(p, 'Portrait screen')
     x = await until(async () => { const y = await boxes(p); return y.mode === 'fit' && fills(y, 1080, 1920) ? y : null }, 10000)
     ok(!!x && x.canvas.w < x.stage.cw / 2, 'a portrait screen: fitted to the height, its shape kept', x)
     n = lines(inputs).length
@@ -890,7 +1118,7 @@ try {
     await sleep(500)
     ok(!downSince(n), 'a click on the letterbox beside it presses nothing')
     await shot(p, `${tag}remote-screen-portrait`)
-    await p.locator('.rs-source').selectOption('screen:fake-1')
+    await pickScreen(p, 'Test screen')
     await until(async () => fills(await boxes(p), 1280, 800), 8000)
     // Studio: the line saying it's being seen, with Stop.
     const st = await page(b, studio.url)
@@ -995,6 +1223,15 @@ try {
     await shot(p, `${tag}remote-screen-phone-password`)
     await enterPw(p)
     await picture(p)
+    // Several screens: Which screen? first, each by name and size, the main one marked, a still of each.
+    await chooser(p).waitFor({ timeout: 8000 })
+    const r0 = await until(async () => { const r = await rows(p); return r.length === 5 && r.every((y) => y.still) ? r : null }, 8000)
+    ok(!!r0 && r0[0].name === 'Test screen' && /^1280×800 · Main screen$/.test(r0[0].sub) && r0[0].on && r0.some((y) => y.name === 'Studio Display' && y.sub === '5120×2880') && r0.some((y) => y.name === 'Portrait screen' && y.sub === '1080×1920'), 'at a phone\'s width with several screens, Which screen? first: each by name and size, the main one marked and showing, a still of each', r0 || await rows(p))
+    const tall = r0?.find((y) => y.name === 'Portrait screen')
+    ok(!!tall && tall.box.h > tall.box.w && r0[0].box.w > r0[0].box.h, 'each still in its screen\'s own shape (the portrait one tall)', r0?.map((y) => y.box))
+    ok(JSON.stringify(await phoneFaults(p, '.rs-pick')) === '{}', 'it fits the phone, each row a whole 40 px target', await phoneFaults(p, '.rs-pick'))
+    await shot(p, `${tag}remote-screen-phone-which`)
+    await pickScreen(p, 'Test screen')
     let x = await boxes(p)
     ok(fills(x, 1280, 800) && Math.abs(x.canvas.w - x.stage.cw) <= 2 && x.wide <= 390, 'fitted to the phone\'s width, its shape kept, nothing wider than the screen', x)
     const small = await p.locator('.rs-bar').evaluate((el) => [...el.querySelectorAll('button, select')].filter((b) => b.offsetParent && (b.getBoundingClientRect().height < 40 || b.getBoundingClientRect().width < 40)).map((b) => b.getAttribute('aria-label') || b.textContent))
@@ -1068,6 +1305,11 @@ try {
     await d.p.locator('.rs-card.c-asking').waitFor({ timeout: 8000 })
     await studio.api(`/remote/asks/${(await until(async () => (await studio.api('/remote')).asks[0], 3000, 100)).id}`, { allow: true })
     await picture(d.p)
+    await chooser(d.p).waitFor({ timeout: 8000 })
+    await until(async () => (await rows(d.p)).every((y) => y.still), 6000)
+    await shot(d.p, `${tag}remote-screen-phone-which-dark`)
+    await pickScreen(d.p, 'MacBook Air')
+    ok(!!(await until(async () => fills(await boxes(d.p), 1440, 900), 8000)), 'dark: MacBook Air picked, its picture fitted')
     await shot(d.p, `${tag}remote-screen-phone-dark`)
     await d.ctx.close()
   })
@@ -1111,7 +1353,7 @@ try {
     await sec.getByLabel('The same again').fill(PW)
     await sec.getByRole('button', { name: 'Save Password' }).click()
     ok(!!(await until(async () => (await studio.api('/remote')).access.password && await sw.isEnabled(), 6000)), 'Set Password: set, and control can be turned on')
-    await sec.getByRole('switch', { name: /Ask Here First/ }).click()
+    await sec.getByRole('switch', { name: /^Ask Here First/ }).click()
     ok(!!(await until(async () => (await studio.api('/remote')).access.askFirst, 5000)), 'Ask Here First turned on there')
     await sec.locator('.rs-devices li', { hasText: 'Phone' }).getByRole('checkbox').click()
     ok(!!(await until(async () => (await studio.api('/remote')).access.devices.find((d) => d.name === 'Phone')?.allowed === false, 5000)), 'a device unticked there')
@@ -1131,14 +1373,118 @@ try {
     const rs = el.p.locator('[data-setting=remote-access]')
     await rs.waitFor({ timeout: 15000 })
     const said = await rs.innerText()
-    ok(/The password is set at Studio itself, never from another device/.test(said) && /Changed at Studio itself/.test(said) && !(await rs.getByRole('button', { name: /Set Password|Change Password/ }).count()) && await rs.getByRole('switch', { name: /Ask Here First/ }).isDisabled() && await rs.getByRole('switch', { name: /Ask Here First/ }).isChecked(), 'from another computer\'s window: shown as it is (Ask Here First on), nothing changed there, saying where it is', said.slice(0, 400))
+    ok(/The password is set at Studio itself, never from another device/.test(said) && /Changed at Studio itself/.test(said) && !(await rs.getByRole('button', { name: /Set Password|Change Password/ }).count()) && await rs.getByRole('switch', { name: /^Ask Here First/ }).isDisabled() && await rs.getByRole('switch', { name: /^Ask Here First/ }).isChecked(), 'from another computer\'s window: shown as it is (Ask Here First on), nothing changed there, saying where it is', said.slice(0, 400))
     ok(!(await rs.locator('.rs-devices').count()) && /Kept at Studio itself/.test(await el.p.locator('[data-setting=remote-sessions]').innerText()), 'Studio\'s devices and its record aren\'t shown there: they\'re Studio\'s own to see')
     await rs.scrollIntoViewIfNeeded()
     await shot(el.p, `${tag}remote-screen-remote-access-elsewhere`)
     await el.ctx.close()
-    await sec.getByRole('switch', { name: /Ask Here First/ }).click()
+    await sec.getByRole('switch', { name: /^Ask Here First/ }).click()
     await sec.locator('.rs-devices li', { hasText: 'Phone' }).getByRole('checkbox').click()
     ok(!!(await until(async () => { const a = (await studio.api('/remote')).access; return !a.askFirst && a.devices.every((d) => d.allowed) }, 5000)), 'and back as they were')
+    await p.context().close()
+  })
+
+  await part('the card in every other window: which computer, from which device, for how long, with Stop and Block This Device', async () => {
+    const { p, errors: e1 } = await page(b, laptop.url)
+    errors.push(...e1)
+    await ready(p)
+    const v = ph.socket('/api/remote/view?source=screen:')
+    await through(v)
+    const card = p.locator('.rs-live .ask-row', { hasText: 'Phone' })
+    await card.waitFor({ timeout: 10000 })
+    const said = await card.innerText()
+    ok(/Studio's screen is being viewed from Phone \(phone\)/.test(said) && /· 1 min/.test(said) && await card.getByRole('button', { name: 'Stop', exact: true }).isVisible() && await card.getByRole('button', { name: 'Block This Device' }).isVisible(), 'Laptop\'s window: a card saying Studio\'s screen is being viewed from Phone, for how long, with Stop and Block This Device', said)
+    ok(await card.getByRole('button', { name: 'Stop', exact: true }).evaluate((el) => getComputedStyle(el).color) === 'rgb(255, 255, 255)', 'its Stop in white on red, whatever else Bridge AI has loaded')
+    await shot(p, `${tag}remote-screen-card`)
+    // Studio's own window says it in its own line (with its Stop), not the card as well.
+    const st = await page(b, studio.url)
+    errors.push(...st.errors)
+    await ready(st.p)
+    await st.p.locator('.rs-here').waitFor({ timeout: 10000 })
+    ok(!(await st.p.locator('.rs-live').count()), 'Studio\'s own window: its own line, not the card too')
+    await st.ctx.close()
+    await card.getByRole('button', { name: 'Stop', exact: true }).click()
+    await v.wait((s) => msg(s, 'ended') || s.closed, 8000)
+    ok(msg(v, 'ended')?.why === 'stopped' && msg(v, 'ended').by === 'Laptop', 'Stop on Laptop\'s card: the session ends at Studio, the phone told it was stopped from Laptop', msg(v, 'ended'))
+    ok(!!(await until(async () => !(await p.locator('.rs-live .ask-row').count()), 8000)), 'and the card goes')
+    // The window viewing it shows no card of its own session.
+    await viewOn(p)
+    await enterPw(p)
+    await picture(p)
+    await sleep(1200)
+    ok(!(await p.locator('.rs-live .ask-row').count()), 'the window doing the viewing shows no card of its own session')
+    await p.locator('.rs-bar').getByRole('button', { name: 'Stop viewing' }).click()
+    await p.context().close()
+    // At a phone's width, dark: the card fits, and Block This Device.
+    for (const mode of ['light', 'dark']) {
+      const d = await page(b, laptop.url, { phone: true, mode })
+      errors.push(...d.errors)
+      await ready(d.p)
+      const v2 = ph.socket('/api/remote/view?source=screen:')
+      await through(v2)
+      const c2 = d.p.locator('.rs-live')
+      await c2.locator('.ask-row', { hasText: 'Phone' }).waitFor({ timeout: 10000 })
+      ok(JSON.stringify(await phoneFaults(d.p, '.rs-live')) === '{}', `${mode}: at a phone's width the card fits, its buttons whole 40 px targets`, await phoneFaults(d.p, '.rs-live'))
+      await shot(d.p, `${tag}remote-screen-card-phone${mode === 'dark' ? '-dark' : ''}`)
+      if (mode === 'light') { await c2.locator('.ask-row', { hasText: 'Phone' }).getByRole('button', { name: 'Stop', exact: true }).click(); await v2.wait((s) => s.closed, 8000); await d.ctx.close(); continue }
+      await c2.locator('.ask-row', { hasText: 'Phone' }).getByRole('button', { name: 'Block This Device' }).click()
+      await v2.wait((s) => msg(s, 'error'), 8000)
+      const P = (await studio.api('/remote')).access.devices.find((x) => x.name === 'Phone')
+      ok(msg(v2, 'error')?.code === 'blocked' && P.allowed === false && /Phone can't connect to Studio any more/.test(await c2.innerText().catch(() => '')), 'Block This Device on the card: the Phone is unticked at Studio, and the card says where it\'s let back in', [msg(v2, 'error'), await c2.innerText().catch(() => '')])
+      await studio.api('/remote/devices', { id: P.id, allowed: true })
+      await d.ctx.close()
+    }
+  })
+
+  await part('Screen Sharing Notifications in Settings, and never silent', async () => {
+    const { p, errors: e1 } = await page(b, studio.url)
+    errors.push(...e1)
+    await devices(p)
+    const sec = p.locator('[data-setting=remote-notify]')
+    await sec.waitFor({ timeout: 10000 })
+    const said = await sec.innerText()
+    ok(await sec.getByRole('switch', { name: /Screen Sharing Notifications/ }).isChecked() && /On this computer: (Studio browser, Phone|Phone, Studio browser)\./.test(said) && /Through Laptop: 2 devices\./.test(said), 'Settings › Remote Access: on, and where they go (this computer\'s devices, and Laptop\'s through it)', said)
+    await sec.scrollIntoViewIfNeeded()
+    await shot(p, `${tag}remote-screen-notify-settings`)
+    // Nobody set up anywhere: said, with the way to set one up, and a session still recorded.
+    for (const k of [studio, laptop]) for (const x of await k.api('/push/devices')) await k.api('/push/unsubscribe', { id: x.id })
+    const LM = (await studio.api('/machines')).machines.find((m) => m.name === 'Laptop')
+    await studio.api(`/needs-you?fresh=${LM.id}`)
+    await until(async () => (await studio.api('/remote')).notify.computers[0]?.devices === 0, 20000, 300)
+    const nowhere = sec.locator('.rs-nowhere')
+    await nowhere.waitFor({ timeout: 10000 })
+    ok(/No notification channel is set up on this computer or your other computers, so nobody would be told/.test(await nowhere.innerText()) && await nowhere.getByRole('button', { name: 'Set Up Notifications' }).isVisible(), 'none set up anywhere: Settings says nobody would be told, with Set Up Notifications', await nowhere.innerText())
+    await nowhere.scrollIntoViewIfNeeded()
+    await shot(p, `${tag}remote-screen-notify-nowhere`)
+    const v = ph.socket('/api/remote/view?source=screen:')
+    await through(v)
+    const here = await page(b, studio.url)
+    errors.push(...here.errors)
+    const line = here.p.locator('.rs-here')
+    ok(!!(await until(async () => /Your other devices weren't told: no notification channel is set up/.test(await line.innerText().catch(() => '')), 10000)), 'a session meanwhile: Studio\'s own line says your other devices weren\'t told, with Set Up Notifications', await line.innerText().catch(() => ''))
+    await shot(here.p, `${tag}remote-screen-notify-untold`)
+    await here.ctx.close()
+    await v.close()
+    await until(async () => !(await studio.api('/remote')).sessions.length, 5000, 100)
+    const rec = p.locator('[data-setting=remote-sessions]')
+    ok(!!(await until(async () => /No notification went out: no notification channel is set up/.test(await rec.innerText()), 8000)) && /Notified 3 of your devices/.test(await rec.innerText()), 'Screen Activity says, for each session, how many of your devices were told, or that none were', (await rec.innerText()).slice(0, 500))
+    await nowhere.getByRole('button', { name: 'Set Up Notifications' }).click()
+    ok(!!(await until(async () => p.locator('[data-setting=this-device]').isVisible(), 6000)), 'Set Up Notifications opens Settings › Notifications')
+    const dk = await page(b, studio.url, { mode: 'dark' })
+    errors.push(...dk.errors)
+    await devices(dk.p)
+    await dk.p.locator('[data-setting=remote-notify]').scrollIntoViewIfNeeded()
+    await shot(dk.p, `${tag}remote-screen-notify-nowhere-dark`)
+    await dk.ctx.close()
+    // From Laptop's window showing Studio: whether they're on, changed at Studio only.
+    const port = (await laptop.api('/machines')).machines.find((m) => m.id === S.id)?.port
+    const el = await page(b, `http://127.0.0.1:${port}/m/${S.id}/`)
+    errors.push(...el.errors)
+    await devices(el.p)
+    const rs = el.p.locator('[data-setting=remote-notify]')
+    await rs.waitFor({ timeout: 15000 })
+    ok(await rs.getByRole('switch', { name: /Screen Sharing Notifications/ }).isDisabled() && /Turned on and off at Studio itself/.test(await rs.innerText()) && !/On this computer:|No notification channel/.test(await rs.innerText()), 'from another computer\'s window: on, changed at Studio only, and not where they go', await rs.innerText())
+    await el.ctx.close()
     await p.context().close()
   })
 
@@ -1202,6 +1548,162 @@ try {
     await sleep(1500)
     ok(!said.some((m) => /"started"/.test(m) && /stopped-1/.test(m)) && !(await cap.p.locator('.rs-capture').getAttribute('data-sessions')), 'stopped while it started: the screen isn\'t taken for it', said.filter((m) => /stopped-1/.test(m)))
     await cap.ctx.close()
+  })
+
+  // ---------- a phone, end to end, as the apps run it ----------
+  // The phone page (relay/web, which the iPhone and Android apps carry) paired with Studio, Bridge AI
+  // in its frame, at 390 px with touch: in WebKit, the iPhone app's engine (WKWebView); in Chromium,
+  // the Android app's WebView.
+  const relayPhone = async (mode = 'light') => {
+    const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: which === 'chromium', hasTouch: true, deviceScaleFactor: 2, colorScheme: mode })
+    await ctx.addInitScript(({ mode }) => { try { localStorage.setItem('cc-toured', JSON.stringify({ desktop: true, phone: true })); localStorage.setItem('cc-appearance', JSON.stringify({ mode, theme: 'sky', text: 'm' })) } catch { /* no storage */ } }, { mode })
+    const p = await ctx.newPage()
+    const errs = []
+    p.on('pageerror', (e) => errs.push(e.message))
+    await p.goto((await studio.api('/relay/pair', {})).pairing.link, { waitUntil: 'commit' })
+    await p.locator('#pair-go').click({ timeout: 20000 })
+    const f = await until(() => p.frames().find((x) => x !== p.mainFrame() && x.url().startsWith(ra.url)), 30000, 100)
+    await f.locator('.settings-btn').waitFor({ timeout: 30000 })
+    // Paired once Studio has a password: it starts unticked there, and is ticked at Studio.
+    const fresh = await until(async () => { const l = (await studio.api('/remote')).access.devices.filter((d) => d.fresh && !d.allowed); return l.length ? l : null }, 8000, 200)
+    for (const d of fresh || []) await studio.api('/remote/devices', { id: d.id, allowed: true })
+    const at = await (await f.frameElement()).boundingBox()
+    return { ctx, p, f, errs, at }
+  }
+  // Where on the phone's screen a point of the frame's page is.
+  const onPhone = async (r, x, y) => { const at = await (await r.f.frameElement()).boundingBox(); return { x: at.x + x, y: at.y + y } }
+  const pinch = (f) => f.evaluate(async () => {
+    try { new Touch({ identifier: 0, target: document.body, clientX: 0, clientY: 0 }) } catch { return null }
+    const el = document.querySelector('.rs-stage')
+    const r = el.getBoundingClientRect()
+    const cx = r.left + r.width / 2
+    const cy = r.top + Math.min(r.height / 2, 120)
+    const t = (id, x0) => new Touch({ identifier: id, target: el, clientX: x0, clientY: cy })
+    const fire = (type, ts) => el.dispatchEvent(new TouchEvent(type, { touches: ts, targetTouches: ts, changedTouches: ts, bubbles: true, cancelable: true }))
+    fire('touchstart', [t(1, cx - 30), t(2, cx + 30)])
+    for (let i = 1; i <= 10; i++) { fire('touchmove', [t(1, cx - 30 - i * 9), t(2, cx + 30 + i * 9)]); await new Promise((ok) => requestAnimationFrame(ok)) }
+    fire('touchend', [])
+    await new Promise((ok) => setTimeout(ok, 150))
+    return { mode: el.dataset.mode, canvas: document.querySelector('.rs-canvas').getBoundingClientRect().width, stage: el.clientWidth }
+  })
+
+  await part('a phone through its relay page, end to end: connect, the password, Which screen?, pinch, switch, control on and off, stop', async () => {
+    const r = await relayPhone()
+    const { p, f } = r
+    // Settings › Computers on the phone: View screen for the computer it's paired with.
+    await devices(f)
+    const view = f.locator('.mch-row.here').getByRole('button', { name: 'View screen' })
+    await view.waitFor({ timeout: 15000 })
+    await view.click()
+    await enterPw(f)
+    await chooser(f).waitFor({ timeout: 15000 })
+    const r0 = await until(async () => { const x = await rows(f); return x.length === 5 && x.every((y) => y.still) ? x : null }, 10000)
+    ok(!!r0 && r0[0].name === 'Test screen' && r0[0].sub === '1280×800 · Main screen' && r0[0].on && r0.some((y) => y.name === 'Studio Display' && y.sub === '5120×2880'), `${which}, through the relay page: the password, then Which screen?, each by name and size with a still`, r0 || await rows(f))
+    await shot(p, `${tag}remote-screen-relay-phone-which`)
+    await pickScreen(f, 'Studio Display')
+    ok(!!(await until(async () => { const x = await boxes(f); return fills(x, 5120, 2880) && Math.abs(x.canvas.w - x.stage.cw) <= 2 ? x : null }, 10000)) && !!(await picture(f)), 'Studio Display (twice its points) picked: its pictures fitted to the phone\'s width', await boxes(f))
+    const st0 = await studio.api('/remote')
+    ok(st0.sessions.length === 1 && st0.sessions[0].source.name === 'Studio Display' && st0.sessions[0].via === 'relay', 'one session at Studio, on that screen, through the relay', st0.sessions)
+    const z = await pinch(f)
+    if (!z) skip('a pinch to zoom through the relay page', `${which} here makes no touch events from a page`)
+    else ok(z.mode === 'zoom' && z.canvas > z.stage * 2.2, 'pinched open', z)
+    if (z) await f.locator('.rs-bar').getByRole('button', { name: 'Fit' }).click()
+    await shot(p, `${tag}remote-screen-relay-phone`)
+    // Another screen: one tap on the toolbar, the same Which screen?.
+    await f.locator('.rs-bar .rs-source').click()
+    await chooser(f).waitFor({ timeout: 5000 })
+    ok((await rows(f)).find((y) => y.name === 'Studio Display')?.on, 'the toolbar opens the same Which screen?, the one showing ticked')
+    await pickScreen(f, 'Portrait screen')
+    let x = await until(async () => { const y = await boxes(f); return fills(y, 1080, 1920) ? y : null }, 10000)
+    ok(!!x && x.canvas.h > x.canvas.w, 'Portrait screen: tall, fitted to the phone', x)
+    ok((await studio.api('/remote')).sessions.length === 1, 'still the one session')
+    // Control on at Studio, taken on the phone: a tap is a click; turned off again, nothing is.
+    await studio.api('/remote/control', { on: true })
+    const control = f.locator('.rs-bar').getByRole('button', { name: 'Control', exact: true })
+    await control.waitFor({ timeout: 10000 })
+    await control.click()
+    await f.locator('.rs-bar').getByRole('button', { name: 'Controlling' }).waitFor({ timeout: 8000 })
+    x = await boxes(f)
+    let n = lines(inputs).length
+    const mid = await onPhone(r, x.canvas.x + x.canvas.w / 2, x.canvas.y + x.canvas.h / 2)
+    await p.touchscreen.tap(mid.x, mid.y)
+    const tap = await until(() => { const l = lines(inputs).slice(n); return l.some((y) => y.t === 'up') ? l : null }, 5000, 50)
+    ok(near(tap?.find((y) => y.t === 'down'), -540, 560), 'control on: a tap in the middle of the portrait screen is a click in its middle (left of and above the main one)', tap)
+    await f.locator('.rs-bar').getByRole('button', { name: 'Controlling' }).click()
+    await f.locator('.rs-bar').getByRole('button', { name: 'Control', exact: true }).waitFor({ timeout: 5000 })
+    n = lines(inputs).length
+    await p.touchscreen.tap(mid.x, mid.y)
+    await sleep(700)
+    ok(!lines(inputs).slice(n).some((y) => y.t === 'down'), 'control off again: a tap presses nothing')
+    await f.locator('.rs-bar').getByRole('button', { name: 'Stop viewing' }).click()
+    ok(!!(await until(async () => !(await studio.api('/remote')).sessions.length, 6000, 100)), 'Stop viewing: the session ends at Studio')
+    await studio.api('/remote/control', { on: false })
+    ok(!r.errs.length, 'no page errors on the phone', r.errs.slice(0, 3))
+    // Dark, the same question.
+    const d = await relayPhone('dark')
+    await devices(d.f)
+    await d.f.locator('.mch-row.here').getByRole('button', { name: 'View screen' }).click()
+    await enterPw(d.f)
+    await chooser(d.f).waitFor({ timeout: 15000 })
+    await until(async () => (await rows(d.f)).every((y) => y.still), 8000)
+    await shot(d.p, `${tag}remote-screen-relay-phone-which-dark`)
+    await d.f.locator('.rs-pick').getByRole('button', { name: 'Close' }).click()
+    await d.f.locator('.rs-bar').getByRole('button', { name: 'Stop viewing' }).click()
+    await d.ctx.close()
+    await r.ctx.close()
+  })
+
+  await part('a phone through its relay page, peer-to-peer: the capture page\'s screens, picked and switched', async () => {
+    // The screen is taken by the desktop app's capture page, which is Chromium (Electron) whatever the
+    // phone is: in a WebKit run, a Chromium of its own, its addresses not hidden behind names.
+    let cb = null
+    let capCtx
+    if (which === 'chromium') capCtx = (await page(b, `${studio.url}/?remote=capture&fake=1`)).ctx
+    else {
+      const pw = await import('playwright-core')
+      cb = await pw.chromium.launch({ args: ['--disable-features=WebRtcHideLocalIpsWithMdns'] })
+      capCtx = await cb.newContext()
+      const cookie = await b.newContext()
+      await capCtx.addCookies(await cookie.cookies())
+      await cookie.close()
+      await (await capCtx.newPage()).goto(`${studio.url}/?remote=capture&fake=1`)
+    }
+    try {
+      ok(!!(await until(async () => (await studio.api('/remote?sources=1')).screen.sources?.some((y) => y.name === 'LG UltraFine'), 10000)), 'the capture page on Studio says its screens')
+      const r = await relayPhone()
+      const { p, f } = r
+      await devices(f)
+      await f.locator('.mch-row.here').getByRole('button', { name: 'View screen' }).click()
+      await enterPw(f)
+      await chooser(f).waitFor({ timeout: 15000 })
+      const r0 = await until(async () => { const y = await rows(f); return y.length === 3 && y.every((z) => z.still) ? y : null }, 10000)
+      ok(!!r0 && r0[0].name === 'Built-in Retina Display' && r0[0].sub === '3024×1964 · Main screen' && r0[1].name === 'LG UltraFine' && r0[1].sub === '2560×1440' && r0[2].sub === '1080×1920', 'Which screen?: the capture page\'s three, by their names and sizes, with a still of each from it', r0 || await rows(f))
+      await shot(p, `${tag}remote-screen-relay-phone-which-p2p`)
+      await pickScreen(f, 'LG UltraFine')
+      const mode = await until(() => f.evaluate(() => { const v = document.querySelector('.rs-view video'); const i = document.querySelector('.rs-view img.rs-media'); return v && !v.hidden && v.videoWidth ? 'p2p' : i && !i.hidden && i.src.startsWith('blob:') ? 'relay' : null }), 25000)
+      const v = () => f.evaluate(() => { const x = document.querySelector('.rs-view video'); return { w: x.videoWidth, h: x.videoHeight } })
+      const img = () => f.evaluate(() => { const x = document.querySelector('.rs-view img.rs-media'); return { w: x.naturalWidth, h: x.naturalHeight } })
+      if (mode === 'p2p') {
+        ok(true, `${which}: Studio's capture page and the phone meet peer-to-peer`)
+        ok(!!(await until(async () => { const s = await v(); return s.w > s.h * 1.5 ? s : null }, 8000)), 'LG UltraFine plays as video, in its shape', await v())
+        await pickScreen(f, 'Portrait screen')
+        ok(!!(await until(async () => { const s = await v(); return s.h > s.w ? s : null }, 10000)), 'Portrait screen picked: the video turns tall, over the same connection', await v())
+      } else {
+        skip('peer-to-peer from the phone page', `${which} here didn't connect peer-to-peer to Chromium's capture page`)
+        ok(mode === 'relay', 'peer-to-peer failing, the capture page\'s pictures come through the relay instead', mode)
+        await pickScreen(f, 'Portrait screen')
+        ok(!!(await until(async () => { const s = await img(); return s.h > s.w ? s : null }, 15000)), 'Portrait screen picked: its pictures tall', await img())
+      }
+      ok((await studio.api('/remote')).sessions.length === 1, 'one session throughout')
+      await shot(p, `${tag}remote-screen-relay-phone-p2p`)
+      await f.locator('.rs-bar').getByRole('button', { name: 'Stop viewing' }).click()
+      ok(!!(await until(async () => !(await studio.api('/remote')).sessions.length, 6000, 100)), 'Stop viewing: ended at Studio')
+      ok((await studio.api('/remote')).log[0].via === mode, 'and its record says how it came', (await studio.api('/remote')).log[0].via)
+      await r.ctx.close()
+    } finally {
+      await capCtx?.close().catch(() => {})
+      await cb?.close().catch(() => {})
+    }
   })
 
   await part('the agent\'s Preview tab on Laptop', async () => {

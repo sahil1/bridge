@@ -3,7 +3,9 @@
 //                           with Stop
 //   Remote Access           the Remote Access Password, "Let my other devices control this computer"
 //                           (which needs it; on a Mac, macOS's Accessibility question then), Ask Here
-//                           First, which devices may connect, and who's locked out, with Unlock
+//                           First, which devices may connect, and who's locked out, with Unlock; and
+//                           Screen Sharing Notifications: on or off, where they go, and the way to set
+//                           one up when nothing would hear of it (server/screentell.js)
 //   Screen Activity         the record of every session, and every one turned away
 // Each is changed here, at this computer, only: elsewhere (another computer's window, a phone) the
 // password and Ask Here First are shown as they are, saying where they're changed; the devices and
@@ -94,6 +96,43 @@ function Password({ access, here, name, refresh }) {
         </div>
       )}
       {err && <p className="error-text small" role="alert">{err}</p>}
+    </div>
+  )
+}
+
+// Screen Sharing Notifications: on unless turned off here (at this computer only); where they go (the
+// devices that get this computer's notifications, and each linked computer's, which it passes them
+// on to); and, when that's nowhere, saying so with the way to set one up.
+function Notify({ nt, here, name, set }) {
+  if (!nt) return null
+  const devices = nt.devices || []
+  const through = (nt.computers || []).filter((c) => c.devices > 0)
+  // (Where they go is said at this computer only.)
+  const nowhere = !!nt.devices && !devices.length && !through.length
+  const setUp = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'notifications' } }))
+  return (
+    <div className="rs-block" data-setting="remote-notify">
+      <label className="st-check">
+        <input type="checkbox" role="switch" checked={!!nt.on} disabled={!here} onChange={(e) => set(e.target.checked)} />
+        <span>
+          <b>{t('Screen Sharing Notifications')}</b><br />
+          <small className="muted">{t('When any device starts viewing this screen, takes control or waits on Ask Here First, your other devices are told, with Stop and Block This Device. Every window of Bridge AI shows it too, while it lasts. The device doing the viewing isn\'t told of its own session.')}</small>
+        </span>
+      </label>
+      {nt.on && !nowhere && (
+        <ul className="rs-goes small">
+          {devices.length > 0 && <li><Icon name="bell" size={12} /> {t('On this computer: {list}.', { list: devices.map((d) => d.label).join(', ') })}</li>}
+          {through.map((c) => <li key={c.id}><Icon name="laptop" size={12} /> {c.devices === 1 ? t('Through {name}: 1 device.', { name: c.name }) : t('Through {name}: {n} devices.', { name: c.name, n: c.devices })}</li>)}
+        </ul>
+      )}
+      {nt.on && nowhere && (
+        <div className="st-row between rs-nowhere">
+          <p className="small"><Icon name="alert" size={12} /> {t('No notification channel is set up on this computer or your other computers, so nobody would be told. Screen Activity and the notice on this computer still say each time.')}</p>
+          <button type="button" className="btn small primary" onClick={setUp}>{t('Set Up Notifications')}</button>
+        </div>
+      )}
+      {!nt.on && <p className="small rs-no"><Icon name="info" size={12} /> {t('Off: your other devices aren\'t told when this screen is viewed. Screen Activity and the notice on this computer still say each time.')}</p>}
+      {!here && <p className="muted small">{t('Turned on and off at {name} itself.', { name })}</p>}
     </div>
   )
 }
@@ -202,6 +241,7 @@ export function RemoteSettings() {
           ))}
           {!here && elsewhere}
         </div>
+        <Notify nt={data.notify} here={here} name={name} set={(on) => access('/notify', { on })} />
         {aErr && <p className="error-text small" role="alert">{aErr}</p>}
       </section>
 

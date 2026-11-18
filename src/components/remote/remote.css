@@ -12,7 +12,11 @@
 .rs-title { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; min-width: 0; flex: 0 1 auto; }
 .rs-title > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rs-title svg { flex: none; color: var(--ink-3); }
-.rs-source { height: 28px; max-width: 240px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: 12.5px var(--font); min-width: 0; }
+/* Which screen: the one showing, by name; a tap opens Which screen? (the chooser, in the middle). */
+.rs-source { display: inline-flex; align-items: center; gap: 5px; max-width: 260px; min-width: 0; white-space: nowrap; }
+.rs-source > span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.rs-source > svg { flex: none; }
+.rs-source.on { border-color: var(--accent); color: var(--accent); }
 .rs-mode { font-size: 11.5px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); white-space: nowrap; }
 .rs-mode.m-p2p { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent); }
 .rs-mode.m-relay { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 40%, transparent); }
@@ -53,12 +57,33 @@
 .rs-card-bad { color: var(--critical); font-size: 12.5px; }
 .rs-card-btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 2px; }
 .rs-card-btns .btn { min-width: 96px; }
+/* Which screen?: a row a screen, a still of it in its own shape, its name, size and whether it's the
+   main one; the one showing ticked. Over the picture, the stage dims behind it. */
+.rs-over.dim { background: rgb(0 0 0 / .5); }
+.rs-pick { justify-items: stretch; text-align: left; max-height: 100%; overflow: auto; }
+.rs-pick h3, .rs-pick > p { text-align: center; }
+.rs-pick-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.rs-pick-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.rs-pick-item:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line-2)); }
+.rs-pick-item.on { border-color: var(--accent); background: var(--accent-soft); }
+.rs-pick-item.win { min-height: 48px; }
+.rs-thumb { flex: none; width: 72px; height: 46px; display: grid; place-items: center; }
+.rs-thumb > span { display: grid; place-items: center; overflow: hidden; border-radius: 4px; background: var(--letterbox, #0b0c0f); color: #c9ced8; box-shadow: 0 0 0 1px var(--line-2); }
+.rs-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rs-pick-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.rs-pick-text b { font-size: 13.5px; overflow-wrap: anywhere; }
+.rs-pick-text small { font-size: 12px; color: var(--ink-2); }
+.rs-showing { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--accent); }
+.rs-pick-wins summary { cursor: pointer; font-size: 12.5px; color: var(--ink-2); padding: 6px 2px; min-height: 32px; display: flex; align-items: center; }
+.rs-pick-wins[open] summary { margin-bottom: 4px; }
+.rs-view.phone .rs-pick-item { min-height: 64px; }
+.rs-view.phone .rs-pick-wins summary { min-height: 40px; }
 .rs-type { flex: none; display: flex; align-items: center; gap: 4px; padding: 6px 8px 6px 12px; padding-bottom: max(6px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--pane); }
 .rs-type input { flex: 1; min-width: 0; width: auto; font-size: 16px; }
 /* A phone: one row, the title giving way, each button a whole 40 px target. */
 .rs-view.phone .rs-bar { gap: 4px; min-height: 52px; padding: 6px 6px 6px 12px; padding-top: max(6px, var(--safe-top, 0px)); }
 .rs-view.phone .rs-tools { gap: 2px; }
-.rs-view.phone .rs-source { max-width: 120px; height: 40px; font-size: 13px; }
+.rs-view.phone .rs-source { max-width: 132px; height: 40px; padding: 0 9px; font-size: 13px; }
 .rs-view.phone .rs-mode { display: none; }
 .rs-view.phone .win-btn, .rs-view.phone .rs-tools .ghost-btn { width: 40px; height: 40px; }
 .rs-view.phone .rs-tools .ghost-btn { width: auto; padding: 0 10px; }
@@ -84,10 +109,21 @@
 .rs-badge .btn { flex: none; }
 .btn.danger { color: #fff; background: var(--critical); border-color: var(--critical); }
 .btn.danger:hover { background: color-mix(in srgb, var(--critical) 85%, #000); }
+/* (The same where it's shown, as a sheet loaded later can give .btn.danger a colour of its own.) */
+:is(.rs-here, .rs-live, .rs-badge, .rs-settings) .btn.danger { color: #fff; background: var(--critical-fill, var(--critical)); border-color: transparent; }
 .rs-capture { padding: 12px; font-size: 12px; color: var(--ink-2); }
 
-/* In the window of the computer being seen. */
-.rs-here { border-color: color-mix(in srgb, var(--critical) 35%, transparent); background: color-mix(in srgb, var(--critical) 8%, var(--pane)); }
+/* In the window of the computer being seen; and in every other window, while one of your screens is
+   being viewed (ScreenLive). */
+.ask-banner.rs-here, .ask-banner.rs-live, .rs-here, .rs-live { border-color: color-mix(in srgb, var(--critical) 35%, transparent); background: color-mix(in srgb, var(--critical) 8%, var(--pane)); }
+.rs-live .ask-row > span:first-of-type b { font-weight: 600; }
+.rs-live .rs-dot { margin-left: 2px; }
+.rs-live .ask-btns { flex-wrap: wrap; }
+.rs-live .ask-btns .btn { gap: 5px; }
+.rs-live > p { margin: 0; }
+.rs-untold { color: var(--critical); }
+.rs-untold .link-btn { font-size: inherit; padding: 0; background: none; border: 0; cursor: pointer; }
+@media (max-width: 760px) { .rs-live .ask-btns .btn, .rs-here .ask-btns .btn { min-height: 40px; } }
 
 /* Settings. */
 .rs-settings .rs-ok { color: var(--good); display: flex; align-items: center; gap: 6px; margin: 0; }
@@ -107,6 +143,10 @@
 .rs-devices .st-check { flex: 1; min-width: 180px; align-items: center; }
 .rs-devices .st-check input { margin-top: 0; }
 .rs-devices .st-check svg { vertical-align: -1px; color: var(--ink-3); }
+.rs-goes { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.rs-goes li { display: flex; align-items: baseline; gap: 6px; overflow-wrap: anywhere; }
+.rs-goes svg { flex: none; align-self: center; color: var(--ink-3); }
+.rs-nowhere p { margin: 0; color: var(--critical); flex: 1 1 260px; }
 .rs-locked { display: inline-flex; align-items: center; gap: 4px; color: var(--critical); }
 p.rs-locked { margin: 0; }
 .rs-now { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
@@ -119,6 +159,9 @@ p.rs-locked { margin: 0; }
 .rs-log li.rs-log-seen { border: 0; padding: 2px 0; display: block; }
 .rs-log li.rs-log-refused { border-color: color-mix(in srgb, var(--critical) 30%, var(--line)); }
 .rs-log li.rs-log-refused > svg { color: var(--critical); }
+.rs-log-told { display: inline-flex; align-items: baseline; gap: 4px; font-size: 12px; color: var(--ink-2); }
+.rs-log-told svg { flex: none; align-self: center; }
+.rs-log-told.none { color: var(--critical); }
 
 /* A project's app on a phone, drawn on the computer that runs it (PageView). */
 .pv-pages { position: relative; height: 100%; display: grid; grid-template-rows: auto 1fr auto; background: var(--pane-2); }

@@ -31,6 +31,33 @@ function fitWindow(area, w, h, chrome = { w: 0, h: 0 }, { margin = 0.9, min = { 
 }
 const meets = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
 
+// Which display each of desktopCapturer's screens is, and its name. The display: by display_id (a
+// Mac, Windows, X11), else in the same order as the displays when there are as many, else by the
+// number in its id (a Mac's CGDirectDisplayID), else the main one when it's the only screen (Wayland's
+// one portal stream). Its name: the system's (Electron's label: "Built-in Retina Display", "LG
+// UltraFine" on a Mac, the monitor's own on Windows, often none on Linux), else "Built-in Display"
+// for a laptop's own, else desktopCapturer's when it isn't "Screen 1" or "Entire Screen", else
+// "Display 2" by its place. Two of the same model are numbered, as macOS does: "LG UltraFine (1)".
+const GENERIC = /^(entire screen|screen(\s*\d+)?)$/i
+function displayFor(screens, displays, primary) {
+  const out = new Map()
+  const used = new Set()
+  const free = (d) => (d && !used.has(d) ? d : null)
+  const byId = (v) => free(displays.find((x) => v != null && v !== '' && String(x.id) === String(v)))
+  screens.forEach((s, i) => {
+    const d = byId(s.display_id) || (screens.length === displays.length ? free(displays[i]) : null) || byId(String(s.id).split(':')[1]) || (screens.length === 1 ? free(primary) : null)
+    if (d) used.add(d)
+    const label = String(d?.label || '').trim()
+    const own = String(s.name || '').trim()
+    out.set(s, { d, name: (label || (d?.internal ? 'Built-in Display' : own && !GENERIC.test(own) ? own : `Display ${i + 1}`)).slice(0, 80) })
+  })
+  const count = {}
+  for (const x of out.values()) count[x.name] = (count[x.name] || 0) + 1
+  const nth = {}
+  for (const x of out.values()) if (count[x.name] > 1) { nth[x.name] = (nth[x.name] || 0) + 1; x.name = `${x.name} (${nth[x.name]})` }
+  return out
+}
+
 function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload, fetch, platform = process.platform, keyFor, sizes = null }) {
   const MAC = platform === 'darwin'
   let capture = null
@@ -56,25 +83,37 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     return { x: Math.round(d.bounds.x * k), y: Math.round(d.bounds.y * k), width: Math.round(d.bounds.width * k), height: Math.round(d.bounds.height * k) }
   }
   // The screens and windows, for the capture page. The first time, macOS asks about Screen Recording
-  // here (someone looked: first use).
+  // here (someone looked: first use). Each screen by its display's own name and size (displayFor).
   async function sources() {
     let list = []
     try { list = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false }) } catch { list = [] }
     const displays = screen.getAllDisplays()
     const primary = screen.getPrimaryDisplay()
+    const shown = displayFor(list.filter((s) => s.id.startsWith('screen:')), displays, primary)
     const out = []
     for (const s of list) {
       const kind = s.id.startsWith('screen:') ? 'screen' : 'window'
       if (kind === 'window' && OWN_TITLES.test(s.name || '')) continue
-      const d = kind === 'screen' ? displays.find((x) => String(x.id) === String(s.display_id)) || (list.filter((x) => x.id.startsWith('screen:')).length === 1 ? primary : null) : null
+      const { d = null, name = '' } = kind === 'screen' ? shown.get(s) || {} : {}
       out.push({
-        id: s.id, name: kind === 'screen' ? (s.name || 'Screen') : (s.name || 'Window').slice(0, 80), kind,
+        id: s.id, name: kind === 'screen' ? name || 'Screen' : (s.name || 'Window').slice(0, 80), kind,
         w: d ? Math.round(d.size.width * d.scaleFactor) : 0, h: d ? Math.round(d.size.height * d.scaleFactor) : 0,
         primary: !!d && d.id === primary.id, scale: d ? d.scaleFactor : null,
         bounds: d ? { ...d.bounds, ...(pixelsOf(d) ? { px: pixelsOf(d) } : {}) } : null,
       })
     }
     return { sources: out.slice(0, 40), permission: permission() }
+  }
+  // A small still of each screen, for the viewer's Which screen? (asked only during a session, once
+  // the guardrails let it in: server/remote.js): JPEG, inside 320 x 320, its shape kept.
+  async function thumbs() {
+    let list = []
+    try { list = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 320, height: 320 }, fetchWindowIcons: false }) } catch { return [] }
+    return list.map((s) => {
+      const img = s.thumbnail
+      if (!img || img.isEmpty?.()) return null
+      return { id: s.id, data: `data:image/jpeg;base64,${img.toJPEG(70).toString('base64')}` }
+    }).filter(Boolean).slice(0, 12)
   }
 
   // ---------- the capture page ----------
@@ -232,7 +271,7 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     else if (ev.t === 'page-go') pageGo(ev)
     else if (ev.t === 'page-stop') pageStop(ev)
   }
-  return { onEvent, sources, permission, view, fit, isView: (w) => [...views.values()].includes(w), controlOn: () => control, setControl: (on) => { control = !!on }, windows: () => [capture, badge, ...views.values()].filter(Boolean) }
+  return { onEvent, sources, thumbs, permission, view, fit, isView: (w) => [...views.values()].includes(w), controlOn: () => control, setControl: (on) => { control = !!on }, windows: () => [capture, badge, ...views.values()].filter(Boolean) }
 }
 
-module.exports = { create, fitWindow }
+module.exports = { create, fitWindow, displayFor }

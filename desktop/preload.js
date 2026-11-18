@@ -56,6 +56,7 @@ if (!own) {
   // computer's screen in a window of its own, and that window fitted to its shape.
   remote: {
     sources: () => ipcRenderer.invoke('bridge:remote-sources'),
+    thumbs: () => ipcRenderer.invoke('bridge:remote-thumbs'),
     controlAsk: () => ipcRenderer.invoke('bridge:remote-control-ask'),
     controlAccess: () => ipcRenderer.invoke('bridge:remote-control-access'),
     view: (o) => ipcRenderer.invoke('bridge:remote-view', o),
