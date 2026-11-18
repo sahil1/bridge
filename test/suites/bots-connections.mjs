@@ -448,7 +448,7 @@ try {
       const id = (await kit.api('/bots')).bots.find((x) => x.name === 'Leave Desk')?.id
       ok(/make your shared connection there: once, for all your bots/.test(await textOf(p, '.bc li[data-kind="created"]')), 'and says so', await textOf(p, '.bc li[data-kind="created"]'))
       const input = p.locator('.bc-connect [data-setting="teams-make-shared"] input')
-      ok(await input.inputValue() === 'tester_bot', 'its name to start from: your first name\'s', await input.inputValue())
+      ok(!!(await until(async () => (await input.inputValue()) === 'tester_bot', 8000, 200)), 'its name to start from: your first name\'s (once it\'s come)', await input.inputValue())
       await p.waitForTimeout(300)
       await shot(p, `${tag}bots-connections-make-shared`)
       await p.locator('.bc-connect [data-setting="teams-make-shared"] button[type="submit"]').click()

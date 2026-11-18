@@ -121,7 +121,7 @@ export async function serversFor(root, { exclude = [] } = {}) {
 async function parents() {
   const out = new Map()
   const lines = IS_WIN
-    ? await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }'], 15000)
+    ? await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }'], 15000)
     : await run('ps', ['-A', '-o', 'pid=,ppid='])
   for (const l of lines.split(/\r?\n/)) {
     const m = l.trim().match(/^(\d+)\s+(\d+)$/)

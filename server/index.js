@@ -2875,7 +2875,9 @@ app.post('/api/machines/:id/preview', async (req, res) => {
     const port = Number(req.body?.port)
     if (!m) return res.status(404).json({ error: 'That computer isn\'t linked to this one any more' })
     if (!(port > 1023 && port < 65536)) return res.status(400).json({ error: 'Which port?' })
-    try { await machines.callOn(m.id, 'GET', `/api/remote/preview-check?port=${port}`, undefined, 12000) } catch (e) {
+    // (Given longer than the check can take there: on Windows, its list of processes alone can take
+    // 15 s, servers.js parents.)
+    try { await machines.callOn(m.id, 'GET', `/api/remote/preview-check?port=${port}`, undefined, 25000) } catch (e) {
       const old = /^(Not found|.*answered 404)$/.test(e.message)
       // gate: its password (or Allow there) first, in a session for that app (Preview.jsx).
       return res.status(e.code === 'offline' ? 503 : 409).json({ error: old ? `Update Bridge AI on ${m.name} to see its apps here.` : e.message, code: e.code === 'offline' ? 'offline' : old ? 'update' : e.said === 'gate' ? 'gate' : 'refused' })
