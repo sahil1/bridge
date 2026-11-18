@@ -9,11 +9,10 @@
 // share sheet (Save to Files); the Android app can't save a file from a page yet, so there it's kept
 // on the computer, as from a computer.
 import { api, apiUrl, viaRelay, onThisComputer } from '../../api.js'
+import { iosApp, androidApp, download, toIphone } from '../../download.js'
 import { t } from '../../i18n/index.js'
 
 const TYPES = { docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pdf: 'application/pdf' }
-const iosApp = (() => { try { return window.bridgeNative?.platform === 'ios' && typeof window.bridgeNative.post === 'function' ? window.bridgeNative : null } catch { return null } })()
-const androidApp = (() => { try { return typeof window.bridgeAndroid === 'object' && !!window.bridgeAndroid } catch { return false } })()
 const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 const revealLabel = () => (/Mac/.test(navigator.userAgent) ? t('Show in Finder') : /Windows/.test(navigator.userAgent) ? t('Show in Explorer') : t('Show in file manager'))
 
@@ -88,37 +87,6 @@ async function docOf(id, r) {
   }
   const prune = (n) => { if (n.content) n.content = n.content.filter((k) => !k.lost).map(prune); return n }
   return { doc: prune(doc), lost }
-}
-
-// To this device, from the relay's page when this is in its frame (see above).
-function download(data, name, type) {
-  let w = window
-  try { if (window.parent !== window && window.parent.document) w = window.parent } catch { /* not the relay's */ }
-  const url = w.URL.createObjectURL(new w.Blob([data], { type }))
-  const a = w.document.createElement('a')
-  a.href = url
-  a.download = name
-  w.document.body.append(a)
-  a.click()
-  a.remove()
-  setTimeout(() => w.URL.revokeObjectURL(url), 60_000)
-}
-// The iPhone app takes the file from the computer, then shows its share sheet: done, or why not.
-function toIphone(url, name) {
-  return new Promise((resolve, reject) => {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    let quiet
-    const off = () => { clearTimeout(quiet); window.removeEventListener('bridge-save', on) }
-    const wait = () => { clearTimeout(quiet); quiet = setTimeout(() => { off(); reject(new Error(t("The iPhone app didn't answer. Update it from the App Store and try again."))) }, 30_000) }
-    const on = (e) => {
-      const d = e.detail || {}
-      if (d.id !== id) return
-      if (d.error) { off(); reject(new Error(d.error)) } else if (d.done) { off(); resolve() } else wait()
-    }
-    window.addEventListener('bridge-save', on)
-    wait()
-    iosApp.post({ type: 'save', id, url: new URL(url, location.href).href, name })
-  })
 }
 
 // Make it and keep it: { file } on the computer, or { name, phone } on this phone, with lost
