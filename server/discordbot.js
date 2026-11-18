@@ -35,7 +35,10 @@
 // Replies: a question at the top of a channel gets a thread started from it, named after it, and
 // the answer goes in there (so a follow-up is in the thread, needing no mention); a question in a
 // thread or a direct message, a reply there. A reply over 2,000 characters (Discord's longest) goes
-// in parts. Nothing posted can ping anyone (allowed_mentions: none). The REST API's rate limits are
+// in parts. On a shared connection (connhub.js), an answer goes through the channel's webhook, made
+// once and kept with the token, with the bot's name and picture; where the app can't make one (no
+// Manage Webhooks), and in direct messages, it starts with the bot's name. Nothing posted can ping
+// anyone (allowed_mentions: none). The REST API's rate limits are
 // kept: each route's bucket as Discord's headers say, and a 429 waits as long as it says (a global
 // one for every route), then says so.
 //

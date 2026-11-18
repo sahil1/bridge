@@ -9,6 +9,13 @@
 // (Block Kit, modals, Socket Mode's envelopes) stays in this file: the desk sees plain questions,
 // replies and decisions, so another platform can be a channel the same way.
 //
+// It's one app, a connection (connections.js): a bot's own, or the shared one many bots are reached
+// through (connhub.js). A shared one's answers are posted as the bot answering (its name and icon:
+// username and icon_emoji or icon_url, chat:write.customize, on chat.postMessage and on
+// chat.startStream, which takes them too; from an app without that scope yet, its name in bold
+// first), its Home tab lists each bot and how to ask it, and a question it can't tell the bot of is
+// asked back with a button for each (choose, bb_pick).
+//
 // Socket Mode: apps.connections.open, with the app-level token (xapp-, scope connections:write),
 // gives a WebSocket address good for a while. Slack says hello on it, then sends each event in an
 // envelope, acknowledged at once (Slack wants it within 3 seconds), and now and then asks for a

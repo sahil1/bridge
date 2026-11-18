@@ -258,8 +258,13 @@ export function makeBotSetup({ ask, context, you = () => 'the owner' }) {
       const p = await think(s, text)
       if (!p && from !== 'chief') return { setup: s, bot: null }
       const b = store.createDraft({ name: name || p?.name || 'New Bot', from })
-      s.proposal = p ? { ...p, name: b.name } : { ...sanitize({}, { ctx: await context(), words: text }).proposal, name: b.name, description: clean(text, store.DESCRIPTION_MAX) }
+      const ctx = await context()
+      s.proposal = p ? { ...p, name: b.name } : { ...sanitize({}, { ctx, words: text }).proposal, name: b.name, description: clean(text, store.DESCRIPTION_MAX) }
       s.platform = s.proposal.platform
+      // (Reached through a shared connection there: nothing to set up on the platform, so it asks
+      // how people reach it instead.)
+      const via = !s.proposal.own && (ctx.connections || []).find((c) => c.platform === s.proposal.platform)
+      if (via) note(s, 'reach', { name: via.name, platform: via.platform })
       return { setup: save(b.id, s), bot: b }
     },
     // More words for a bot: a draft's proposal made again with them; a bot's change, to confirm.

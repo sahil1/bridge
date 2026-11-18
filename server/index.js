@@ -3983,9 +3983,10 @@ app.all('/mcp', async (req, res) => {
 })
 
 // ---------- Bots (a beta feature, its id slack-bot) ----------
-// Your own bots in Slack, each its own Slack app with the name you give it (slackbot.js, through
-// Socket Mode from this computer: never through the relay or Bold Bridge), answering people you
-// choose from the folders you give it, each answer by a read-only agent (frontdesk.js), waiting in
+// Your own bots in Slack, Discord and Teams, reached through apps you make there (connections.js: a
+// platform's shared one, made once for them all, or a bot's own; Slack's through Socket Mode from
+// this computer, never through the relay or Bold Bridge), each answering people you choose from the
+// folders you give it, each answer by a read-only agent (frontdesk.js), waiting in
 // Needs You to send or discard unless you said it may go without asking. Each bot's settings,
 // instructions, tokens and record in its own folder, bots/<id>/ (bots.js, trace.js), changed only
 // from this computer.

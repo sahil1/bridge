@@ -17,6 +17,9 @@
 // recipient_user_id and recipient_team_id needed outside a direct message), files.getUploadURLExternal
 // (an address here, /upload/<id>, taking the raw bytes) and files.completeUploadExternal (the file
 // shared in the thread), files.info; with the bot token, each checking its scope as Slack does.
+// chat.postMessage and chat.startStream post as someone else (username, icon_emoji or icon_url: one
+// app reaching several bots, server/connhub.js) only for an app with chat:write.customize, and
+// ignore them otherwise, as Slack does; what they posted as is on posted and streams.
 // apps.connections.open with the app-level token, giving ws://…/link?app=<id>, where Socket Mode
 // says hello, sends events in envelopes and expects each one acknowledged. A wrong token:
 // invalid_auth. Each call goes in the log, as { method, params, app }. A file attached to a message
@@ -51,19 +54,20 @@
 //   POST /_test/home { app?, user, tab? }   its Home tab opened (app_home_opened)
 //   POST /_test/stop { app?, user, channel, thread }   Slack's Stop pressed (agent_session_stopped)
 //   GET  /_test/state  { connections, hellos, envelopes, acks, ackPayloads: [{ envelope_id, payload }],
-//                      posted: [{ app, channel, text, thread_ts, ts, blocks?, streamed? }],
+//                      posted: [{ app, channel, text, thread_ts, ts, blocks?, streamed?, username?,
+//                      icon_emoji?, icon_url? }],
 //                      reactions: [{ app, channel, ts, name }] (those on now), updated: [{ app,
 //                      channel, ts, text, blocks }], ephemeral: [{ app, channel, user, text,
 //                      thread_ts }], views: [{ app, kind: 'open' | 'publish', user, trigger, view }],
 //                      statuses: [{ app, method, channel, thread, status }], streams: [{ app,
-//                      channel, thread, ts, text, stopped, calls }], files: [{ id, name, size,
+//                      channel, thread, ts, text, stopped, calls, username? }], files: [{ id, name, size,
 //                      channel, thread, app, title, content }], dms: [{ app, users, channel }] }
 import http from 'node:http'
 import fs from 'node:fs'
 import { WebSocketServer } from 'ws'
 
 const [port, log] = process.argv.slice(2)
-const ALL = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write', 'users:read', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write']
+const ALL = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write', 'users:read', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write', 'chat:write.customize']
 const APPS = {
   A1: { app: 'xapp-test', bot: 'xoxb-test', who: { team_id: 'T0TEST', team: 'Acme Test', url: 'https://acme-test.slack.com/', user_id: 'UBOT', bot_id: 'BBOT', user: 'bridge_ai' }, scopes: ALL },
   A2: { app: 'xapp-two', bot: 'xoxb-two', who: { team_id: 'T0TEST', team: 'Acme Test', url: 'https://acme-test.slack.com/', user_id: 'UBOT2', bot_id: 'BBOT2', user: 'atlas' }, scopes: ALL },
@@ -291,6 +295,8 @@ const server = http.createServer(async (req, res) => {
   const mine = (channel) => CHANNELS[channel]?.apps.includes(a)
   const needs = (scope) => (app.scopes.includes(scope) ? null : no('missing_scope', { needed: scope, provided: app.scopes.join(',') }))
   const botMsg = (text, extra = {}) => ({ type: 'message', user: app.who.user_id, bot_id: app.who.bot_id, text, ts: ts(), ...extra })
+  // (Posted as someone else: only with chat:write.customize.)
+  const as = app.scopes.includes('chat:write.customize') ? Object.fromEntries(['username', 'icon_emoji', 'icon_url'].filter((k) => params[k]).map((k) => [k, params[k]])) : {}
   if (method === 'auth.test') return ok(app.who)
   if (method === 'users.list') return ok({ members: PEOPLE, response_metadata: { next_cursor: '' } })
   if (method === 'users.info') { const u = [...PEOPLE, ...STRANGERS].find((x) => x.id === params.user); return u ? ok({ user: u }) : no('user_not_found') }
@@ -344,9 +350,9 @@ const server = http.createServer(async (req, res) => {
     if (lacks) return lacks
     if (!mine(params.channel)) return no(CHANNELS[params.channel] ? 'not_in_channel' : 'channel_not_found')
     const blocks = params.blocks ? json(params.blocks) : null
-    const out = { app: a, channel: params.channel, text: params.text, thread_ts: params.thread_ts || null, ts: ts(), ...(blocks ? { blocks } : {}) }
+    const out = { app: a, channel: params.channel, text: params.text, thread_ts: params.thread_ts || null, ts: ts(), ...(blocks ? { blocks } : {}), ...as }
     posted.push(out)
-    put(params.channel, { ...botMsg(params.text), ts: out.ts, ...(params.thread_ts ? { thread_ts: params.thread_ts } : {}), ...(blocks ? { blocks } : {}) })
+    put(params.channel, { ...botMsg(params.text), ts: out.ts, ...(params.thread_ts ? { thread_ts: params.thread_ts } : {}), ...(blocks ? { blocks } : {}), ...as })
     return ok({ channel: params.channel, ts: out.ts, message: { text: params.text, user: app.who.user_id, bot_id: app.who.bot_id } })
   }
   if (method === 'chat.update') {
@@ -402,11 +408,11 @@ const server = http.createServer(async (req, res) => {
     if (!CHANNELS[params.channel].is_im && (!params.recipient_user_id || !params.recipient_team_id)) return no('invalid_arguments')
     const text = params.markdown_text || ''
     if (text.length > 12000) return no('msg_too_long')
-    const s = { app: a, channel: params.channel, thread: params.thread_ts, ts: ts(), text, stopped: false, calls: 1, at: Date.now(), recipient: params.recipient_user_id || null }
+    const s = { app: a, channel: params.channel, thread: params.thread_ts, ts: ts(), text, stopped: false, calls: 1, at: Date.now(), recipient: params.recipient_user_id || null, ...as }
     streams.push(s)
-    const p = { app: a, channel: params.channel, text, thread_ts: params.thread_ts, ts: s.ts, streamed: true }
+    const p = { app: a, channel: params.channel, text, thread_ts: params.thread_ts, ts: s.ts, streamed: true, ...as }
     posted.push(p)
-    put(params.channel, { ...botMsg(text), ts: s.ts, thread_ts: params.thread_ts })
+    put(params.channel, { ...botMsg(text), ts: s.ts, thread_ts: params.thread_ts, ...as })
     return ok({ channel: params.channel, ts: s.ts })
   }
   if (method === 'chat.appendStream' || method === 'chat.stopStream') {

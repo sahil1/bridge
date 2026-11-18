@@ -18,8 +18,13 @@
 // users/@me/guilds, channels/:id, its messages (before, after, limit; newest first), one message,
 // its pins (messages/pins), posting, editing and deleting a message, starting a thread from one
 // (once: again is 160004), reactions (PUT and DELETE …/@me), typing, guilds/:id/members/:user (not
-// one: 10007), and listing a server's members (403, 50001, without Server Members Intent). Each
-// call goes in the log, as { method, route, app, body } (never a token).
+// one: 10007), and listing a server's members (403, 50001, without Server Members Intent). Webhooks,
+// for one app posting as several bots (server/connhub.js): making one in a channel (POST
+// /channels/:id/webhooks: 403, 50013, while webhooks aren't allowed), and posting through one (POST
+// /webhooks/:id/:token, no bot token needed: wait=true answers the message; thread_id posts in that
+// thread of its channel) with the username and avatar_url asked for; its message carries webhook_id,
+// and is sent to the bots as any message is. Each call goes in the log, as { method, route, app,
+// body } (never a token, a webhook's included).
 // And, for tests:
 //   POST /_test/say { user, text, channel?, dm?, app?, thread?, reply? }   someone writes: in a
 //        channel (#launch unless said; a thread by its id), or directly to a bot (app: D1 unless
@@ -40,9 +45,12 @@
 //                             (route as "POST /channels/:id/messages": ids as :id, an emoji :emoji)
 //   POST /_test/nothreads { channel }   the bots may not start threads there (403, 50013)
 //   POST /_test/heartbeat { ms }   the heartbeat interval Hello gives (1000 unless said)
+//   POST /_test/webhooks { allow }  whether the bots may make webhooks (Manage Webhooks; allowed
+//                             unless said)
 //   GET  /_test/state  { connections, hellos, identifies, resumes, heartbeats, acks, identified:
-//                      [{ app, intents, properties }], posted, edited, deleted, reactions (on now),
-//                      typing, threads }
+//                      [{ app, intents, properties }], posted (a webhook's with webhook: true,
+//                      username, avatar_url), edited, deleted, reactions (on now), typing, threads,
+//                      webhooks: [{ id, channel, app, name }] }
 import http from 'node:http'
 import fs from 'node:fs'
 import { WebSocketServer } from 'ws'
@@ -94,6 +102,8 @@ let reactions = []
 const typing = []
 const threads = []
 const noThreads = new Set()
+const hooks = {} // webhook id -> { id, token, channel, guild, app, name }
+let hooksAllowed = true
 const limits = {}
 const fails = {}
 let HB = 1000
@@ -240,7 +250,8 @@ const server = http.createServer(async (req, res) => {
     if (what === 'fail') { fails[j.route] = { n: j.n ?? 1, after: j.after || 0, status: j.status || 500, code: j.code ?? 0, message: j.message || 'test' }; return answer(res, 200, { ok: true }) }
     if (what === 'nothreads') { noThreads.add(String(j.channel)); return answer(res, 200, { ok: true }) }
     if (what === 'heartbeat') { HB = Number(j.ms) || 1000; return answer(res, 200, { ok: true }) }
-    if (what === 'state') return answer(res, 200, { connections: [...sockets].filter((s) => s.readyState === 1 && !s.dead).length, ...count, identified, sessions: sessions.size, posted, edited, deleted, reactions, typing, threads, messages })
+    if (what === 'webhooks') { hooksAllowed = j.allow !== false; return answer(res, 200, { ok: true }) }
+    if (what === 'state') return answer(res, 200, { connections: [...sockets].filter((s) => s.readyState === 1 && !s.dead).length, ...count, identified, sessions: sessions.size, posted, edited, deleted, reactions, typing, threads, messages, webhooks: Object.values(hooks).map(({ token, ...h }) => h) }) // eslint-disable-line no-unused-vars
     return answer(res, 404, { error: 'no such control' })
   }
   // ---------- REST ----------
@@ -251,8 +262,27 @@ const server = http.createServer(async (req, res) => {
   const key = appOf(String(req.headers.authorization || '').replace(/^Bot\s+/, ''))
   let j = {}
   try { j = raw ? JSON.parse(raw) : {} } catch { return answer(res, 400, { message: 'Invalid JSON', code: 50109 }) }
-  note({ method, route, path: p, app: key, ...(raw ? { body: j } : {}) })
+  // A webhook's token is in its address: logged without it.
+  const hook = /^\/webhooks\/(\d+)\/([^/]+)$/.exec(p)
+  note({ method, route: hook ? `${method} /webhooks/:id/:token` : route, path: hook ? `/webhooks/${hook[1]}/…` : p, app: hook ? hooks[hook[1]]?.app || null : key, ...(raw ? { body: j } : {}) })
   if (away) return req.socket.destroy()
+  // ---------- Posting through a webhook (no bot token) ----------
+  if (hook) {
+    const h = hooks[hook[1]]
+    if (!h || h.token !== hook[2]) return answer(res, 404, { message: 'Unknown Webhook', code: 10015 })
+    if (method !== 'POST') return answer(res, 405, { message: '405: Method Not Allowed', code: 0 })
+    const thread = url.searchParams.get('thread_id')
+    const target = CHANNELS[thread || h.channel]
+    if (!target || (thread && target.parent_id !== h.channel)) return answer(res, 400, { message: 'Unknown Channel', code: 10003 })
+    const content = String(j.content || '')
+    if (!content.trim()) return answer(res, 400, { message: 'Cannot send an empty message', code: 50006 })
+    if (content.length > 2000) return answer(res, 400, { message: 'Invalid Form Body', code: 50035 })
+    const m = { id: snow(), type: 0, channel_id: target.id, guild: target.guild_id || null, author: { id: h.id, username: String(j.username || h.name), avatar: null, bot: true }, webhook_id: h.id, content, timestamp: new Date().toISOString(), mentions: [], attachments: [] }
+    messages[target.id].push(m)
+    posted.push({ app: h.app, channel: target.id, id: m.id, content, webhook: true, username: j.username || null, avatar_url: j.avatar_url || null, allowed_mentions: j.allowed_mentions || null, in_thread: target.type === 11 ? target.parent_id : null })
+    deliver(m)
+    return url.searchParams.get('wait') === 'true' ? answer(res, 200, wire(m)) : answer(res, 204, null)
+  }
   if (!key) return answer(res, 401, { message: '401: Unauthorized', code: 0 })
   if (limits[route]?.n > 0) {
     const l = limits[route]
@@ -332,6 +362,13 @@ const server = http.createServer(async (req, res) => {
       return answer(res, 204, null)
     }
     if (route === 'POST /channels/:id/typing') { typing.push({ app: key, channel: ch.id }); return answer(res, 204, null) }
+    if (route === 'POST /channels/:id/webhooks') {
+      if (!hooksAllowed) return no(403, 50013, 'Missing Permissions')
+      if (ch.type !== 0) return no(400, 50024, 'Cannot execute action on this channel type')
+      const h = { id: snow(), token: `whtok-${Math.random().toString(36).slice(2)}`, channel: ch.id, guild: ch.guild_id, app: key, name: String(j.name || 'Webhook').slice(0, 80) }
+      hooks[h.id] = h
+      return answer(res, 200, { id: h.id, type: 1, token: h.token, channel_id: ch.id, guild_id: ch.guild_id, name: h.name, application_id: a.user.id })
+    }
   }
   return no(404, 0, '404: Not Found')
 })

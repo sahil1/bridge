@@ -43,6 +43,7 @@ function noteOf(m) {
     case 'unreadable': return t('AI Assist\'s answer couldn\'t be read as a bot. Say it again in other words, or set it up with the form.')
     case 'left': return [v.folders?.length ? t('Left out {folders}: not among the folders Bridge AI knows. Add a folder by its path if you meant one.', { folders: names(v.folders) }) : null, v.mcp?.length ? t('Left out {servers}: not among your MCP servers in Claude Code.', { servers: names(v.mcp) }) : null].filter(Boolean).join(' ')
     case 'chief': return t('The Chief of Staff drafted this from what you asked it for. Look it over, change what you like, and Create.')
+    case 'reach': return t('It\'s reached through {name}, your shared {platform} connection, so there\'s nothing to set up there. How should people reach it? Name the channels it answers in, or one where it\'s the default bot, or leave it to its name and AI Assist\'s pick: it\'s on the card below.', { name: v.name, platform: platName(v.platform) })
     case 'created': {
       const later = v.people?.length || v.channels?.length ? ` ${t('Once it\'s connected, I\'ll find {names} there.', { names: [...(v.people || []), ...(v.channels || []).map((c) => `#${c}`)].join(', ') })}` : ''
       const found = v.found?.people?.length || v.found?.channels?.length ? ` ${t('Found {names} there already.', { names: [...(v.found.people || []), ...(v.found.channels || []).map((c) => `#${c}`)].join(', ') })}` : ''
@@ -369,7 +370,8 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
   const create = async () => {
     setBusy('create')
     setError(null)
-    try { await api(`/bots/${id}/create`, { method: 'POST' }); onCreated?.() } catch (e) { setError(e.message) }
+    // (The chat stays open once it's made, on its page, to carry on: Bots.jsx Bot.)
+    try { await api(`/bots/${id}/create`, { method: 'POST' }); try { localStorage.setItem(`cc-bot-assist-${id}`, 'open') } catch { /* private window */ } onCreated?.() } catch (e) { setError(e.message) }
     setBusy(null)
   }
   const discardDraft = async () => {

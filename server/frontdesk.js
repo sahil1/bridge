@@ -3,9 +3,11 @@
 // edit only its own copy of a repository), the answer a draft you send, edit or discard, in Bridge
 // AI or from your Slack direct messages (or sent at once, where you said it may be and the limits
 // hold), and what nothing could answer passed to you. The questions come in through a channel, one
-// per bot: its Slack app (slackbot.js), and its Discord and Teams apps (discordbot.js, teamsbot.js),
-// made one channel by connector.js combine(), which keeps their ids apart (discord:…, teams:…; Slack's
-// as Slack gives them) and says what each platform can do (capsOf). Slack's own features (drafts in
+// per bot: its connection on Slack (slackbot.js), Discord and Teams (discordbot.js, teamsbot.js),
+// each the platform's shared one or one of the bot's own (connections.js; on a shared one,
+// connhub.js says which bot a question is for, and the bot's rules here apply after that), made one
+// channel by connector.js combine(), which keeps their ids apart (discord:…, teams:…; Slack's as
+// Slack gives them) and says what each platform can do (capsOf). Slack's own features (drafts in
 // your direct messages with buttons, its working status and Stop, streaming, files, the slash command,
 // the shortcut, the Home tab) are for questions asked in Slack only; who may ask, the commands,
 // memory, limits, pause, changes and the record are the same on all three.
@@ -516,6 +518,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     : why === 'unknown' ? `Sorry, I couldn't check who's asking, so I can't answer. Ask ${you()} directly.`
       : `Sorry, I don't answer guests or people from other organizations. Ask ${you()} directly.`)
   const COMMAND = /^\s*!\s*([a-z][a-z ?']*)\s*$/i
+  // How to say !unmute to it: after its name, through a shared connection's app (connhub.js).
+  const unmuteOf = (bot, m) => (m?.routed?.connection ? `@${m.routed.connection} ${bot.name}: !unmute` : `@${bot.name} !unmute`)
 
   async function hear(id, m) {
     if (!on()) return
@@ -566,7 +570,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // Muted in this channel (!mute): nothing, but the one who asked is told how to turn it back on.
     if (!m.dm && !m.try && (bot.muted || []).some((x) => x.id === m.channel)) {
       record(id, 'refused', at(q, { why: 'muted', person: e.person }))
-      if (!followUp && !listen) chan(b, q).whisper?.(q.reply, m.from?.id, `I'm muted in this channel. Say @${bot.name} !unmute to turn me back on.`).catch(() => {})
+      if (!followUp && !listen) chan(b, q).whisper?.(q.reply, m.from?.id, `I'm muted in this channel. Say ${unmuteOf(bot, m)} to turn me back on.`).catch(() => {})
       changed()
       return
     }
@@ -658,7 +662,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         store.save(id, { muted: next })
         record(id, 'settings.changed', { ...at(q), setting: 'muted', old: was.map((x) => x.name || x.id), new: next.map((x) => x.name || x.id), by: q.from?.name || q.from?.id || null })
       }
-      return say(cmd === 'mute' ? `Muted in ${where(q.place)}: I won't answer here until someone says @${bot.name} !unmute.` : `Back on in ${where(q.place)}.`)
+      return say(cmd === 'mute' ? `Muted in ${where(q.place)}: I won't answer here until someone says ${unmuteOf(bot, m)}.` : `Back on in ${where(q.place)}.`)
     }
     if (cmd === 'stop') {
       const n = await stopWhere(id, { conv: q.conv, person: q.place?.kind === 'dm' ? q.from?.id : null }, { by: q.from?.name || q.from?.id || 'someone', why: '!stop' })

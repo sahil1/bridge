@@ -363,3 +363,4 @@
 .bc-via { display: flex; align-items: flex-start; gap: 6px; margin: 4px 0 0; }
 .bc-via > .icon, .bc-via > svg { flex: none; margin-top: 2px; }
 .bp-conns .bp-main { max-width: 860px; }
+.cn-part > p, .cn-card > p { margin: 0; }

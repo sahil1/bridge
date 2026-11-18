@@ -62,6 +62,8 @@
 //   first screenshot in the list it was sent as its example, an Installers folder, and two steps.
 //   AI Assist setting up a bot ("Known folders…"): the bot from the owner's words (botSetup below);
 //   and a bot's question asked of a model with Bridge AI's tools: what it reads with them (botAnswer).
+//   AI Assist routing a question on a shared connection to one of its bots ("The bots (an id…"): the
+//   one bot whose name or description shares a word with the question, else none (routeBot below).
 //   Anything else: "echo: <the last thing said>".
 //   A key of sk-bad is turned down (HTTP 401), as a provider would.
 import http from 'node:http'
@@ -199,6 +201,21 @@ function botSetup(first) {
   return `\`\`\`json\n${JSON.stringify({ say, bot: b })}\n\`\`\``
 }
 
+// AI Assist routing a question to one of the bots on a shared connection (server/connhub.js router):
+// {"bot": "<id>"} for the one bot whose name or description shares a word with the question (what's
+// in [brackets] left out, and words any question has), else {"bot": null}; "pick b9" picks b9, an id
+// it wasn't given, as a model led astray might.
+const PLAIN = new Set(['answers', 'answer', 'question', 'questions', 'about', 'what', 'with', 'from', 'that', 'this', 'have', 'does', 'your', 'please', 'tell', 'know', 'something', 'help', 'they', 'them', 'there', 'their', 'where', 'when', 'which', 'would', 'could', 'should', 'some', 'more', 'than', 'just', 'like'])
+function routeBot(first) {
+  const bots = [...first.matchAll(/^- (b\d+): (.*)$/gm)].map((m) => ({ id: m[1], text: m[2] }))
+  const q = (/\n-----\n([\s\S]*?)\n-----\s*$/.exec(first) || [])[1] || ''
+  if (/\bpick b9\b/i.test(q)) return JSON.stringify({ bot: 'b9' })
+  const wordsOf = (s) => new Set(s.replace(/\[[^\]]*\]/g, ' ').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !PLAIN.has(w)).map((w) => w.replace(/s$/, '')))
+  const asked = wordsOf(q)
+  const hits = bots.filter((b) => [...wordsOf(b.text)].some((w) => asked.has(w)))
+  return JSON.stringify({ bot: hits.length === 1 ? hits[0].id : null })
+}
+
 // A bot's question, answered with Bridge AI's tools (botanswer.js runChat), as the question asks:
 // [read <path>] reads that file, [mcp <server> <tool>] calls that tool when it was offered, else it
 // lists its folder and reads README.md; then [answer <text>] is its answer, or what it read ("It says:
@@ -231,6 +248,7 @@ function answer(b) {
   const last = words([...m].reverse().find((x) => x.role === 'user')?.content)
   const first = words(m.find((x) => x.role === 'user')?.content)
   if (/^Known folders/.test(first) && /\nWhat .+ said:\n-----\n/.test(first)) return say(botSetup(first))
+  if (/^The bots \(an id, its name, and what it answers\):/.test(first)) return say(routeBot(first))
   if (b.tools?.length && /----- question from/.test(first)) return botAnswer(b, first)
   if (/^sonar/.test(b.model || '')) {
     const q = /: ([^\n]*)$/.exec(last)?.[1] || last
