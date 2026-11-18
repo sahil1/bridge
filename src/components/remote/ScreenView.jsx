@@ -7,14 +7,16 @@
 //   The picture fills what's under the toolbar, on a dark letterbox: Fit (its shape kept, the
 //   default), Actual Size (one of its pixels to one of this screen's, scrolled or dragged about) or
 //   Full Screen; on a phone, fitted, and pinched to zoom. Another of its screens is picked in the
-//   same session (nothing to connect again).
+//   same session (nothing to connect again), from Which screen?: each by its display's own name and
+//   size, the main one marked, with a still of each. On a phone it asks at the start when there are
+//   several; everywhere it's one tap from the toolbar. The one picked is kept for that computer.
 //   Before anything shows, that computer may ask for its Remote Access Password, or ask someone
 //   there to allow it; each step, a lockout and a no say so here, with why.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { useMedia, store } from '../layout.jsx'
 import { t, tn, locale } from '../../i18n/index.js'
-import { baseFor, remoteStatus, connect, pointOn } from './remote.js'
+import { baseFor, remoteStatus, connect, pointOn, setViewing } from './remote.js'
 import { hostApi, viaRelay } from '../../api.js'
 import { SWAP, swapsKeys, RATE, ACCESS, fitIn } from '../../../shared/remote.js'
 import './remote.css'
@@ -25,6 +27,55 @@ const fsElement = () => document.fullscreenElement || document.webkitFullscreenE
 const canFull = () => !!app()?.fullScreen || !!(document.fullscreenEnabled || document.webkitFullscreenEnabled)
 const timeOf = (iso) => new Date(iso).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })
 const ZOOM_MAX = 6
+// The screen last picked for each computer (its id), for the next time.
+const PICKED = 'cc-remote-screen'
+const sizeOf = (x) => (x?.w && x?.h ? `${x.w}×${x.h}` : '')
+const onCard = (e) => !!e.target?.closest?.('.rs-card')
+
+// Which screen?: that computer's screens, each by its display's name and size, the main one marked,
+// with a still of each once it comes (thumbs: id -> picture), the one showing ticked; its windows
+// folded away under them. start: asked as the session starts (a phone, with several screens).
+function Chooser({ name, list, cur, thumbs, start, onPick, onClose }) {
+  const screens = list.filter((x) => x.kind === 'screen')
+  const windows = list.filter((x) => x.kind === 'window')
+  const on = (x) => cur?.kind === x.kind && cur?.id === x.id
+  return (
+    <div className="rs-card rs-pick" role="dialog" aria-label={t('Which screen?')}>
+      <h3>{t('Which screen?')}</h3>
+      <p className="muted small">{start ? t('{name} has {n} screens. Pick the one to view; you can switch any time from the toolbar.', { name, n: screens.length }) : t('{name} has {n} screens.', { name, n: screens.length })}</p>
+      <ul className="rs-pick-list">
+        {screens.map((x) => {
+          const box = fitIn(72, 46, x.w || 16, x.h || 10)
+          return (
+            <li key={x.id}>
+              <button type="button" className={`rs-pick-item${on(x) ? ' on' : ''}`} aria-pressed={on(x)} onClick={() => onPick(`screen:${x.id}`)}>
+                <span className="rs-thumb"><span style={{ width: `${Math.round(box.w)}px`, height: `${Math.round(box.h)}px` }}>{thumbs[x.id] ? <img src={thumbs[x.id]} alt="" draggable={false} /> : <Icon name="screen" size={14} />}</span></span>
+                <span className="rs-pick-text"><b>{x.name}</b><small>{[sizeOf(x), x.primary && t('Main screen')].filter(Boolean).join(' · ')}</small></span>
+                {on(x) && <span className="rs-showing"><Icon name="check" size={13} /> <span>{t('Showing')}</span></span>}
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+      {windows.length > 0 && (
+        <details className="rs-pick-wins">
+          <summary>{t('Windows ({n})', { n: windows.length })}</summary>
+          <ul className="rs-pick-list">
+            {windows.map((x) => (
+              <li key={x.id}>
+                <button type="button" className={`rs-pick-item win${on(x) ? ' on' : ''}`} aria-pressed={on(x)} onClick={() => onPick(`window:${x.id}`)}>
+                  <span className="rs-pick-text"><b>{x.name}</b><small>{t('View only: control works on a whole screen')}</small></span>
+                  {on(x) && <span className="rs-showing"><Icon name="check" size={13} /> <span>{t('Showing')}</span></span>}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      <div className="rs-card-btns"><button type="button" className="btn" onClick={onClose}>{t('Close')}</button></div>
+    </div>
+  )
+}
 
 // windowed: the desktop app's window of its own (closing it is the window's own button too).
 export default function ScreenView({ machine, name, onClose, windowed = false }) {
@@ -45,6 +96,8 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   const [zoom, setZoom] = useState(1) // a phone's pinch, over Fit
   const [full, setFull] = useState(false)
   const [box, setBox] = useState({ w: 0, h: 0 }) // the room for the picture
+  const [choose, setChoose] = useState(null) // Which screen? up: 'start' (as the session starts) | 'pick'
+  const [thumbs, setThumbs] = useState({}) // a still of each screen: id -> picture
   const [, tick] = useState(0)
   const root = useRef(null)
   const bar = useRef(null)
@@ -61,6 +114,9 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   const touch = useRef(null)
   const pinch = useRef(null)
   const fitted = useRef('')
+  const session = useRef(null)
+  const askedAtStart = useRef(false)
+  const pickedKey = machine || 'here'
   const setMode = (m) => { setModeState(m); setZoom(1); store.set('cc-remote-size', m) }
 
   // The window's own title (the Dock's and the Window menu's list of windows).
@@ -103,15 +159,18 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
       if (m.control && !m.control.allowed) setControlling(false)
       if (m.source.w && m.source.h) setSize({ w: m.source.w, h: m.source.h })
       setZoom(1)
-    } else if (m.t === 'clip') {
+    } else if (m.t === 'thumb' && typeof m.id === 'string' && typeof m.data === 'string') setThumbs((x) => ({ ...x, [m.id]: m.data }))
+    else if (m.t === 'clip') {
       const text = String(m.text ?? '')
       navigator.clipboard?.writeText(text).then(() => setNote({ text: t("Copied {name}'s clipboard here ({n} characters).", { name, n: text.length }) }), () => setNote({ text: t("This browser didn't let Bridge AI write to the clipboard. {name}'s clipboard says: {text}", { name, text: text.slice(0, 200) }) }))
     } else if (m.t === 'clip-sent') setNote({ text: t("This clipboard is on {name}'s now ({n} characters).", { name, n: Number(m.n) || 0 }) })
-    else if (m.t === 'error') { if (m.keep) setNote({ text: m.why, bad: true }); else { setErr({ why: m.why, code: m.code, until: m.until || null }); setGate(null); setSess((x) => ({ ...x, phase: 'ended' })) } }
-    else if (m.t === 'ended') setSess((x) => ({ ...x, phase: 'ended', text: m.text }))
+    else if (m.t === 'error') { if (m.keep) setNote({ text: m.why, bad: true }); else { setErr({ why: m.why, code: m.code, until: m.until || null, by: m.by || null, at: m.at || null }); setGate(null); setSess((x) => ({ ...x, phase: 'ended' })) } }
+    else if (m.t === 'ended') setSess((x) => ({ ...x, phase: 'ended', text: m.why === 'here' ? t('Stopped on {name}.', { name }) : m.why === 'stopped' ? t('Stopped from {device}.', { device: m.by || t('another of your devices') }) : m.text }))
   }
 
-  // The session: as long as this is open. Another of its screens goes over the same one.
+  // The session: as long as this is open. Another of its screens goes over the same one. It starts on
+  // the screen picked last time for this computer, while it's still there, else the main one; on a
+  // phone, with several screens, Which screen? asks first.
   const can = !!st?.screen?.can
   useEffect(() => {
     if (!can) return
@@ -121,10 +180,22 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
     setPaused(false)
     setControlling(false)
     setNote(null)
+    setChoose(null)
+    setThumbs({})
+    askedAtStart.current = false
+    const last = store.get(PICKED, {})?.[pickedKey]
+    const was = (st.screen?.sources || []).find((x) => x.kind === 'screen' && x.id === last)
     const c = connect({
-      base, source: 'screen:', control: !!st.control?.on, slow: !!st.slow,
+      base, source: was ? `screen:${was.id}` : 'screen:', control: !!st.control?.on, slow: !!st.slow,
       on: {
-        hello: (m) => { setGate(null); setSess((x) => ({ ...x, phase: 'live', hello: m })); if (m.source?.w && m.source?.h) setSize({ w: m.source.w, h: m.source.h }) },
+        hello: (m) => {
+          setGate(null)
+          setSess((x) => ({ ...x, phase: 'live', hello: m }))
+          if (m.source?.w && m.source?.h) setSize({ w: m.source.w, h: m.source.h })
+          session.current = m.session
+          setViewing(m.session, true)
+          if (phone && !askedAtStart.current && (m.sources || []).filter((x) => x.kind === 'screen').length > 1) { askedAtStart.current = true; setChoose('start') }
+        },
         mode: (mode) => setSess((x) => ({ ...x, mode })),
         track: (stream) => { const v = video.current; if (v) { v.srcObject = stream; v.play().catch(() => {}) } },
         frame: show,
@@ -133,8 +204,10 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
       },
     })
     conn.current = c
-    return () => { c.close(); conn.current = null; if (lastUrl.current) { URL.revokeObjectURL(lastUrl.current); lastUrl.current = null } }
+    return () => { c.close(); conn.current = null; setViewing(session.current, false); session.current = null; if (lastUrl.current) { URL.revokeObjectURL(lastUrl.current); lastUrl.current = null } }
   }, [can, base, run]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Which screen? up: a still of each, asked for (that computer sends them only in a session).
+  useEffect(() => { if (choose && sess.phase === 'live') conn.current?.send({ t: 'thumbs?' }) }, [choose, sess.phase])
 
   const hello = sess.hello
   const ctl = hello?.control
@@ -169,7 +242,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   // The desktop app's window takes that screen's shape, once for each screen shown, and for its main
   // screen as soon as that computer says it (before the password, when it does), unless you've sized
   // it yourself: desktop/remote.js remembers that for this computer.
-  const main = st?.screen?.sources?.find((x) => x.kind === 'screen' && x.primary)
+  const main = st?.screen?.sources?.find((x) => x.kind === 'screen' && x.id === store.get(PICKED, {})?.[pickedKey]) || st?.screen?.sources?.find((x) => x.kind === 'screen' && x.primary)
   const shape = live && size.w && size.h ? { ...size, id: hello?.source?.id || '' } : main?.w && main?.h ? { w: main.w, h: main.h, id: main.id } : null
   useEffect(() => {
     if (!windowed || !shape) return
@@ -209,7 +282,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
     const el = stage.current
     if (!el) return
     const wheel = (e) => {
-      if (!controlling || !allowed) return
+      if (!controlling || !allowed || onCard(e)) return
       e.preventDefault()
       const p = pointOn(media(), size.w, size.h, e.clientX, e.clientY)
       send([{ t: 'wheel', dx: e.deltaX, dy: e.deltaY, ...(p || {}) }])
@@ -217,7 +290,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
     const dist = (ts) => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY)
     const mid = (ts) => ({ x: (ts[0].clientX + ts[1].clientX) / 2, y: (ts[0].clientY + ts[1].clientY) / 2 })
     const start = (e) => {
-      if (e.touches.length !== 2 || actual) return
+      if (e.touches.length !== 2 || actual || onCard(e)) return
       const r = el.getBoundingClientRect()
       const m = mid(e.touches)
       pinch.current = { d: dist(e.touches), zoom, at: { x: m.x - r.left + el.scrollLeft, y: m.y - r.top + el.scrollTop } }
@@ -243,10 +316,12 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
     el.addEventListener('touchcancel', endPinch)
     return () => { el.removeEventListener('wheel', wheel); el.removeEventListener('touchstart', start); el.removeEventListener('touchmove', move); el.removeEventListener('touchend', endPinch); el.removeEventListener('touchcancel', endPinch) }
   })
-  // Escape closes, unless it's going to that computer (or the window is full screen: it leaves that).
+  // Escape closes, unless it's going to that computer (or Which screen? is up, or the window is full
+  // screen: it leaves that).
   useEffect(() => {
     const key = (e) => {
       if (e.key !== 'Escape' || controlling || e.target.closest?.('input, select')) return
+      if (choose) { setChoose(null); return }
       if (full) { toggleFull(); return }
       if (!windowed) onClose()
     }
@@ -258,6 +333,8 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   // On the stage's own scroll bars, not the picture.
   const onBars = (e) => { const el = stage.current; if (!el) return false; const r = el.getBoundingClientRect(); return e.clientX >= r.left + el.clientLeft + el.clientWidth || e.clientY >= r.top + el.clientTop + el.clientHeight }
   const pointer = (kind) => (e) => {
+    // On a card over the picture (Which screen?, the password): that card's, never that computer's.
+    if (onCard(e)) return
     // Not controlling, bigger than the room: dragged about with the mouse (a finger scrolls by itself).
     if (!controlling || !allowed) {
       const el = stage.current
@@ -334,8 +411,16 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
     taking.current = true
     conn.current?.send({ t: 'control', on: true })
   }
-  // Keys held go up first; control carries on where the screen picked allows it (not a window).
-  const pick = (v) => { setNote(null); releaseAll(); conn.current?.send({ t: 'source', source: v }) }
+  // Keys held go up first; control carries on where the screen picked allows it (not a window). A
+  // screen is kept as this computer's for next time.
+  const pick = (v) => {
+    setChoose(null)
+    if (cur && v === `${cur.kind}:${cur.id}`) return
+    setNote(null)
+    releaseAll()
+    conn.current?.send({ t: 'source', source: v })
+    if (v.startsWith('screen:')) store.set(PICKED, { ...(store.get(PICKED, {}) || {}), [pickedKey]: v.slice(7) })
+  }
   const retry = () => { setErr(null); setGate(null); setRun((n) => n + 1) }
   const sendPassword = (e) => {
     e.preventDefault()
@@ -366,10 +451,12 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         denied: t('Someone at {name} said no to this.', { name }),
         unanswered: t("Nobody at {name} answered within {n} seconds, so it wasn't allowed.", { name, n: limits.askSeconds }),
         device: t("{name} doesn't let this device connect. That's changed at {name} itself, in Settings › Account & Devices › Computers.", { name }),
+        blocked: t("{name} doesn't let this device connect. That's changed at {name} itself, in Settings › Account & Devices › Computers.", { name: err.at || name }),
+        stopped: t('Stopped from {device}.', { device: err.by || t('another of your devices') }),
         timeout: t("The password wasn't typed in time. Try again."),
         screenPermission: t("macOS doesn't let Bridge AI record the screen on {name}. On {name}, turn on Bridge AI in System Settings › Privacy & Security › Screen & System Audio Recording, then open Bridge AI again there.", { name }),
       }
-      const icon = err.code === 'locked' ? 'lock' : err.code === 'denied' || err.code === 'unanswered' || err.code === 'device' ? 'ban' : 'alert'
+      const icon = err.code === 'locked' ? 'lock' : ['denied', 'unanswered', 'device', 'blocked', 'stopped'].includes(err.code) ? 'ban' : 'alert'
       return (
         <div className={`rs-card c-${err.code || 'error'}`} role="alert">
           <Icon name={icon} size={22} />
@@ -420,6 +507,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         </div>
       )
     }
+    if (choose && live) return <Chooser name={name} list={sources} cur={cur} thumbs={thumbs} start={choose === 'start'} onPick={pick} onClose={() => setChoose(null)} />
     if (!live || !sess.mode || sess.mode === 'connecting' || !size.w) {
       return (
         <div className="rs-card c-wait" role="status">
@@ -438,9 +526,10 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
       <header className="rs-bar" ref={bar}>
         <b className="rs-title" title={t("{name}'s Screen", { name })}><Icon name="screen" size={14} /> <span>{t("{name}'s Screen", { name })}</span></b>
         {live && sources.length > 1 && (
-          <select className="rs-source" value={cur ? `${cur.kind}:${cur.id}` : ''} onChange={(e) => pick(e.target.value)} aria-label={t('Which screen')}>
-            {sources.map((x) => <option key={`${x.kind}:${x.id}`} value={`${x.kind}:${x.id}`}>{x.kind === 'window' ? t('Window: {name}', { name: x.name }) : x.primary ? t('{name} (main)', { name: x.name }) : x.name}</option>)}
-          </select>
+          <button type="button" className={`btn small rs-source${choose ? ' on' : ''}`} aria-haspopup="dialog" aria-expanded={!!choose} onClick={() => setChoose(choose ? null : 'pick')}
+            aria-label={t('Which screen? Showing {name}', { name: cur?.name || '' })} title={t('Which screen?')}>
+            <Icon name="screen" size={12} /> <span>{cur?.name || t('Which screen?')}</span> <Icon name="down" size={11} />
+          </button>
         )}
         {live && sess.mode && sess.mode !== 'connecting' && (
           <span className={`rs-mode m-${sess.mode}`} title={sess.mode === 'p2p' ? t('Straight between the two devices, end-to-end encrypted.') : t("The network between the two doesn't allow a direct connection, so the screen comes through the relay as pictures, end-to-end encrypted. It's slower: about {n} a second.", { n: rate })}>
@@ -490,7 +579,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
           <video ref={video} className="rs-media" muted playsInline autoPlay hidden={sess.mode !== 'p2p'} />
           <img ref={img} className="rs-media" alt="" hidden={sess.mode === 'p2p'} draggable={false} />
         </div>
-        {card && <div className="rs-over">{card}</div>}
+        {card && <div className={`rs-over${choose && viewing ? ' dim' : ''}`}>{card}</div>}
       </div>
       {phone && live && allowed && controlling && (
         <div className="rs-type">

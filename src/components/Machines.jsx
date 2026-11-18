@@ -191,14 +191,15 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
     if (goMachine(id, { own })) setGoing(nameOf(id))
   }
   const go = (m) => { const c = pairedTo(m); if (c && m.id !== machineId) { setOpen(false); setGoing(m.name); relayComputers.open(c.relay) } else pick(m.id) }
-  const row = (key, name, sub, on, here, onClick, id) => (
+  // screen: its View screen (a linked computer's, and on a phone the one it's connected to).
+  const row = (key, name, sub, on, here, onClick, id, screen = !!id && canReach(id)) => (
     <div key={key} className={`mc-row ${here ? 'on' : ''}`}>
       <button type="button" role="menuitem" className="mc-item" onClick={onClick}>
         <span className={`mc-dot ${on === true ? 'on' : on == null ? 'unknown' : ''}`} />
         <span className="mc-text"><b>{name}</b><small>{sub}</small></span>
         {here && <Icon name="check" size={13} />}
       </button>
-      {screens && id && on === true && canReach(id) && <button type="button" className="win-btn" onClick={() => { setOpen(false); viewScreen(id, name) }} aria-label={t("View {name}'s screen", { name })} title={t('View screen')}><Icon name="screen" size={13} /></button>}
+      {screens && screen && on === true && <button type="button" className="win-btn" onClick={() => { setOpen(false); viewScreen(id || null, name) }} aria-label={t("View {name}'s screen", { name })} title={t('View screen')}><Icon name="screen" size={13} /></button>}
       {!here && id && window.bridgeApp?.openMachine && <button type="button" className="win-btn" onClick={() => pick(id, true)} aria-label={t('Open {name} in a window of its own', { name })} title={t('In a window of its own')}><Icon name="popout" size={13} /></button>}
     </div>
   )
@@ -214,7 +215,7 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
       {open && (
         <div className={`menu left mc-menu ${phone ? 'phone' : ''}`} role="menu" aria-label={t('Your Devices')}>
           <div className="mc-head">{t('Your Devices')}</div>
-          {row('here', data.here.name, `${OS_LABEL[data.here.os] || ''}${machineId ? '' : ` · ${t('this one')}`}`, true, !machineId, () => pick(null))}
+          {row('here', data.here.name, `${OS_LABEL[data.here.os] || ''}${machineId ? '' : ` · ${t('this one')}`}`, true, !machineId, () => pick(null), null, viaRelay && !machineId)}
           {linked.map((m) => row(m.id, m.name, [OS_LABEL[m.os], m.online ? counts(m.counts) || t('Online') : m.lastSeen ? t('Offline, seen {when}', { when: ago(m.lastSeen) }) : t('Offline')].filter(Boolean).join(' · '), m.online, m.id === machineId, () => go(m), m.id))}
           {paired.filter((c) => !linked.some((m) => bare(m.relay) === bare(c.relay))).map((c) => row(c.relay, c.name, t('Paired on this phone'), null, false, close(() => relayComputers.open(c.relay))))}
           <div className="menu-sep" />
@@ -577,7 +578,11 @@ export function MachinesSettings({ embedded = false, focus = false }) {
           <div className="mch-row here">
             <span className="mc-dot on" />
             <div className="mch-main"><b>{data.here.name}</b><small className="muted">{OS_LABEL[data.here.os]} · Bridge AI {data.here.version} · {t('this device')}</small></div>
-            <span className="mch-btns"><button type="button" className="ghost-btn small" aria-expanded={shown === 'here'} onClick={() => setShown(shown === 'here' ? null : 'here')}>{t('Details')}</button></span>
+            <span className="mch-btns">
+              {/* A phone sees the screen of the computer it's connected to as well as the others'. */}
+              {screens && viaRelay && !machineId && <button type="button" className="btn small" onClick={() => viewScreen(null, data.here.name)} title={t("See {name}'s screen, and control it once {name} allows that", { name: data.here.name })}><Icon name="screen" size={12} /> {t('View screen')}</button>}
+              <button type="button" className="ghost-btn small" aria-expanded={shown === 'here'} onClick={() => setShown(shown === 'here' ? null : 'here')}>{t('Details')}</button>
+            </span>
             {shown === 'here' && <DeviceDetails m={data.here} here readOnly={readOnly} onChanged={() => { refresh(); machinesChanged() }} />}
           </div>
           {list.map((m) => (

@@ -12,6 +12,7 @@ import { makeAuth } from './apiauth.js'
 import { localKey } from './apitoken.js'
 import * as machinePages from './machinepages.js'
 import { makeRemote } from './remote.js'
+import { makeTell } from './screentell.js'
 import * as devPreview from './devpreview.js'
 import { usage } from './usage.js'
 import { usageStats } from './usagestats.js'
@@ -205,10 +206,17 @@ const isDevPort = async (port) => {
   const roots = [...new Set(((await rt.fleet().catch(() => null))?.panes || []).map((p) => p.cwd).filter(Boolean))]
   return servers.ownedBy(port, roots, { exclude: [cfg.port, cfg.port + 1, ...pages.ports(), ...previewPorts.portsOpen()] })
 }
+// Your devices told when this screen is shared, and every window shown what's live here and on
+// your other computers (screentell.js, event: screen on /api/events).
+const screenTell = makeTell({
+  remote: () => remote, notify, machines, relay, pushDevices: () => push.devices(),
+  onLive: (list) => { for (const c of clients) c.write(`event: screen\ndata: ${JSON.stringify({ list })}\n\n`) },
+})
 const remote = makeRemote({
   trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), thisName: () => relay.thisName(), os: machines.OS,
   hosted: () => !!relay.status().hosted, isDevPort, screenAllowed: () => (IS_MAC ? calls.screen() : Promise.resolve(null)),
   devices: () => relay.status().devices,
+  tell: (ev) => screenTell.tell(ev), onChange: () => screenTell.changed(), notifyTo: () => screenTell.notifyTo(), blockThere: (hop, id) => screenTell.blockThere(hop, id),
 })
 const servePreview = devPreview.serve({ trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), allows: (id) => remote.allows(id), isDevPort, thisName: () => relay.thisName() })
 const app = express()
@@ -1565,6 +1573,8 @@ app.get('/api/events', (req, res) => {
   res.flushHeaders()
   clients.add(res)
   if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(lastFleet)}\n\n`)
+  // Who's viewing a screen of yours now, here or on another of your computers (screentell.js).
+  res.write(`event: screen\ndata: ${JSON.stringify({ list: screenTell.list() })}\n\n`)
   // The desktop app's own feed (desktop/main.js says so): it also hears when another of your devices
   // asks this computer to allow something (fixes.js askHere).
   const off = req.headers['x-bridge-desktop'] && !req.headers['x-bridge-relay'] ? fixes.onAsk((a) => res.write(`event: fix-ask\ndata: ${JSON.stringify(a)}\n\n`)) : null
@@ -2752,8 +2762,9 @@ app.post('/api/agents/:pane/mute', wrap(async (req) => {
   pushFleet()
   return { ok: true, muted: !!req.body?.muted }
 }))
-// A notification's answer button (the token says which agent, question and answer).
-app.post('/api/notify/answer', wrap((req) => notify.answer(req.body?.token)))
+// A notification's answer button (the token says which agent, question and answer), or another
+// kind's (Remote Screen's Stop and Block This Device), saying which device it was pressed on.
+app.post('/api/notify/answer', wrap((req) => notify.answer(req.body?.token, { by: whoAsks(req) })))
 // You're using Bridge AI on this computer: phones stay quiet meanwhile. Phones can't say this.
 app.post('/api/presence', wrap((req) => { if (fromHere(req)) notify.presence(req.body || {}); return { ok: true } }))
 
@@ -2847,6 +2858,14 @@ app.post('/api/machines/:id/preview', async (req, res) => {
 // devices may connect, a lockout lifted, stopping a session, and what you've seen of who looked.
 // The password goes no further than remote.js, which keeps only its hash; it's never in a log.
 const atThisComputer = (req) => !req.headers['x-bridge-relay'] && !req.machinePage
+// Who a Stop or Block came from, for the record: this computer, a device paired here, or one of
+// another computer's devices, as that computer says (from).
+const whoAsks = (req, from) => {
+  const d = relay.deviceOf(req.headers['x-bridge-relay'])
+  if (!d) return req.headers['x-bridge-relay'] ? 'a device' : relay.thisName()
+  const f = typeof from === 'string' ? from.replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim().slice(0, 60) : ''
+  return d.kind === 'computer' && f && f !== d.name ? `${f}, through ${d.name}` : d.name
+}
 const remoteHere = (req) => { if (!atThisComputer(req)) throw Object.assign(new Error(`Do this at ${relay.thisName()} itself.`), { status: 403, code: 'here' }) }
 const sayErr = (res, e) => res.status(e.status || 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) })
 app.get('/api/remote', async (req, res) => { try { res.json({ ...(await remote.status({ sources: req.query.sources === '1', device: atThisComputer(req) ? null : String(req.headers['x-bridge-relay'] || '') || 'page' })), here: atThisComputer(req) }) } catch (e) { sayErr(res, e) } })
@@ -2859,6 +2878,32 @@ app.post('/api/remote/ask-first', (req, res) => { try { remoteHere(req); res.jso
 app.post('/api/remote/asks/:id', (req, res) => { try { remoteHere(req); res.json({ ok: remote.answer(req.params.id, req.body?.allow === true) }) } catch (e) { sayErr(res, e) } })
 app.post('/api/remote/devices', (req, res) => { try { remoteHere(req); res.json(remote.setDevice(String(req.body?.id || ''), req.body?.allowed !== false)) } catch (e) { sayErr(res, e) } })
 app.post('/api/remote/locks/:id/clear', (req, res) => { try { remoteHere(req); res.json(remote.unlock(req.params.id)) } catch (e) { sayErr(res, e) } })
+app.post('/api/remote/notify', (req, res) => { try { remoteHere(req); res.json(remote.setNotify(req.body?.on !== false)) } catch (e) { sayErr(res, e) } })
+// Your devices told (screentell.js). Stop, or Block This Device, from any of your devices: carried out
+// here (remote.js endFrom), as it only narrows who may connect; letting a device back in is above,
+// here only. From another computer, it says which of its devices it came from, for the record.
+app.post('/api/remote/sessions/:id/end', async (req, res) => { try { res.json(await remote.endFrom(req.params.id, { block: req.body?.block === true, by: whoAsks(req, req.body?.from) })) } catch (e) { sayErr(res, e) } })
+// A device that came through this computer to another of yours, blocked from there (Block This
+// Device on that one's session): unticked here, so it reaches none of them through this one.
+app.post('/api/remote/devices/block', (req, res) => { try { if (!viaMachine(req)) throw Object.assign(new Error('Only another of your computers asks this'), { status: 403 }); res.json(remote.setDevice(String(req.body?.id || ''), false)) } catch (e) { sayErr(res, e) } })
+// What's live here and on your other computers (the cards), and Stop or Block from a window here,
+// for this computer's sessions or, through its link, another's (one hop: not for another computer).
+app.get('/api/remote/live', (req, res) => res.json({ list: screenTell.list() }))
+app.post('/api/remote/live/end', async (req, res) => {
+  try {
+    const machine = typeof req.body?.machine === 'string' && req.body.machine ? req.body.machine : null
+    if (machine && viaMachine(req)) throw Object.assign(new Error('Not through another device'), { status: 403 })
+    res.json(await screenTell.end({ machine, id: String(req.body?.id || ''), block: req.body?.block === true }, whoAsks(req)))
+  } catch (e) { sayErr(res, e) }
+})
+// Another of your computers saying what's live there, and passing on its notification (from it only).
+app.post('/api/remote/heard', async (req, res) => {
+  try {
+    const m = machines.ofDevice(relay.deviceOf(req.headers['x-bridge-relay']))
+    if (!m) throw Object.assign(new Error('Only another of your computers says this'), { status: 403 })
+    res.json(await screenTell.heard(m, req.body || {}))
+  } catch (e) { sayErr(res, e) }
+})
 // A picture of a project's app, drawn off screen by the desktop app here for a phone (desktop/remote.js).
 app.post('/api/remote/sessions/:id/frame', express.raw({ type: () => true, limit: '2mb' }), (req, res) => {
   if (!atThisComputer(req)) return res.status(403).json({ error: 'Only the desktop app here sends these' })
@@ -2885,7 +2930,7 @@ machines.useSummary(async ({ home: withHome = false } = {}) => {
   // quiet: the agents waiting on you whose wait has gone quiet (shared/focus.js), not counted as
   // needing you in the devices menu.
   const quiet = needs.filter((i) => blocking(i) && isQuiet(i)).length
-  return { runtime: rt.name, counts: { ...f.counts, quiet }, agents: await runs.agents(f, { cloudSaid: cloud.previews() }), needs, ...(withHome ? { home: await homeList.items().catch(() => null) } : {}) }
+  return { runtime: rt.name, counts: { ...f.counts, quiet }, agents: await runs.agents(f, { cloudSaid: cloud.previews() }), needs, notifies: push.devices().length, ...(withHome ? { home: await homeList.items().catch(() => null) } : {}) }
 })
 machines.askHome(() => trialOn('home'))
 // The agent map: every computer's agents, this one's from here and the others' from what each last

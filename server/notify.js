@@ -2,9 +2,9 @@
 // you on every channel you've set up (phone and browser push today; chat apps can plug in the same
 // way). Each channel is { name, ready(), send(note) }.
 //
-// A note is { kind: 'needs-you' | 'finished' | 'quota' | 'routine' | 'test', title, body, paneId?, url, tag,
-// actions?, onlyHere? }. actions are answer buttons ({ action, title, token }); onlyHere means
-// you're at the computer, so only its own devices get it.
+// A note is { kind: 'needs-you' | 'finished' | 'quota' | 'routine' | 'screen' | 'test', title, body, paneId?,
+// url, tag, actions?, onlyHere?, skip? }. actions are answer buttons ({ action, title, token }); onlyHere
+// means you're at the computer, so only its own devices get it; skip, devices left out (push.js).
 // Settings: "notify": { "needsYou": true, "finished": true, "quotaBelow": 15 (percent left; 0 = off),
 // "phoneAtComputer": false, "actions": true }.
 import fs from 'node:fs'
@@ -138,10 +138,29 @@ export function alsoWaiting(agents, a) {
   return more ? `\n${more === 1 ? '1 more waits on you' : `${more} more wait on you`}` : ''
 }
 
+// ---------- Other buttons ----------
+// A notification's buttons for something besides an agent's question (Remote Screen's Stop and
+// Block This Device, screentell.js): signed the same way, each carried out by what registered its
+// kind (onButton: fn(args, { by }) gives { ok, said }), once, within its time.
+const doers = new Map()
+export const onButton = (kind, fn) => { doers.set(kind, fn) }
+export const button = (kind, args, { action, title, ms = 12 * 3600 * 1000 }) => ({ action, title, token: token({ b: kind, a: args, i: crypto.randomBytes(9).toString('base64url'), x: Date.now() + ms }) })
+async function pressed(c, ctx) {
+  const now = Date.now()
+  for (const [k, x] of used) if (x < now) used.delete(k)
+  if (c.x < now) return { ok: false, why: 'expired', url: '/' }
+  if (used.has(c.i)) return { ok: false, why: 'used', url: '/' }
+  const fn = doers.get(c.b)
+  if (!fn) return { ok: false, why: 'not-valid', url: '/' }
+  used.set(c.i, c.x)
+  try { return { url: '/', ...(await fn(c.a || {}, ctx)) } } catch (e) { return { ok: false, why: 'changed', said: e.message, url: '/' } }
+}
+
 // A button was pressed: type that answer if the same question is still waiting, else say why
-// (and where to open the app instead).
-export async function answer(t) {
+// (and where to open the app instead). ctx: { by }, the device it was pressed on, for another kind.
+export async function answer(t, ctx = {}) {
   const c = claimsOf(t)
+  if (c?.b) return pressed(c, ctx)
   if (!c || !rt) return { ok: false, why: 'not-valid', url: c ? linkTo(c.p) : '/' }
   const url = linkTo(c.p)
   const now = Date.now()

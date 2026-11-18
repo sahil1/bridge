@@ -476,6 +476,8 @@ export function list() {
       needs: s?.needs || null, at: s?.at ? new Date(s.at).toISOString() : null,
       // Everything Home lists from there (null unless Home asked, or from a Bridge AI too old to say).
       home: s?.home || null,
+      // How many devices get its notifications (null from a Bridge AI too old to say).
+      notifies: s?.notifies ?? null,
       about: s?.about || null, systemName: s?.systemName || null, safety: safety(m.hostKey),
     }
   })
@@ -484,6 +486,11 @@ export const here = () => ({ name: relay.thisName(), systemName: relay.systemNam
 // The port its pages have on this computer (machinepages.js), kept with it so what they save in the
 // browser stays theirs across restarts (the desktop app reads it here too: desktop/main.js).
 export const portOf = (id) => byId(id)?.port || null
+// The linked computer a request came through (relay.js's device for it), or null.
+export function ofDevice(d) {
+  const m = d?.kind === 'computer' && d.relay ? byRelay(relay.cleanRelay(d.relay)) : null
+  return m && m.state === 'linked' ? { id: m.id, name: kept.get(m.id)?.name || m.name, relay: m.relay } : null
+}
 export function keepPort(id, port) {
   const m = byId(id)
   if (m && m.port !== port) { m.port = port; save() }
@@ -793,7 +800,7 @@ async function refreshNow(m, asked = Date.now()) {
   if (!l?.session) return
   const s = await l.call('GET', `/api/machines/summary${wantHome() ? '?home=1' : ''}`, undefined, 12000)
   if ((kept.get(m.id)?.asked || 0) > asked) return // a later one came first
-  keep(m.id, { asked, name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: Array.isArray(s.agents) ? s.agents.slice(0, 40) : [], needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, home: Array.isArray(s.home) ? s.home.slice(0, 100) : null, about: s.about || null, systemName: s.systemName || null, at: Date.now() })
+  keep(m.id, { asked, name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: Array.isArray(s.agents) ? s.agents.slice(0, 40) : [], needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, home: Array.isArray(s.home) ? s.home.slice(0, 100) : null, about: s.about || null, systemName: s.systemName || null, notifies: Number.isFinite(s.notifies) ? s.notifies : null, at: Date.now() })
   if (s.name && s.name !== m.name) { m.name = String(s.name).slice(0, 60); save() }
   if (s.os !== m.os || s.version !== m.version) { m.os = s.os; m.version = s.version; save() }
 }
@@ -1016,13 +1023,16 @@ export function upgrade(req, socket, head) {
     let open = false
     const pending = [] // what the page sent before the other end was open
     // A screen seen through this computer (Remote Screen and Preview): that computer's log says for
-    // which of your devices, as this one says (a name only; it counts nothing).
+    // which of your devices, as this one says (a name only; it counts nothing), and its id here, so
+    // what that computer tells this one of it leaves that device out (screentell.js).
     let u = hit[2] || '/'
     const asker = relay.deviceOf(req.headers['x-bridge-relay'])
     if (/^\/api\/remote\/view(\?|$)/.test(u)) {
       const x = new URL(u, 'http://x')
       x.searchParams.delete('for') // only this computer says it
-      if (asker) x.searchParams.set('for', String(asker.name || '').slice(0, 60))
+      x.searchParams.delete('forId')
+      x.searchParams.delete('forKind')
+      if (asker) { x.searchParams.set('for', String(asker.name || '').slice(0, 60)); x.searchParams.set('forId', asker.id); x.searchParams.set('forKind', asker.kind === 'computer' ? 'computer' : 'phone') }
       u = `${x.pathname}${x.search}`
     }
     l.ready(12000).then(() => {

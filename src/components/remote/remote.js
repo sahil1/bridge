@@ -18,6 +18,11 @@ export const viewScreen = (machine, name) => {
   window.dispatchEvent(new CustomEvent('bridge-view-screen', { detail: { machine: machine || null, name: name || '' } }))
 }
 
+// The sessions this page is viewing (ScreenView): the card in this window leaves them out, as it's
+// showing them (Here.jsx ScreenLive). Each change said with bridge-viewing.
+export const viewing = new Set()
+export const setViewing = (id, on) => { if (!id) return; if (on) viewing.add(id); else viewing.delete(id); window.dispatchEvent(new Event('bridge-viewing')) }
+
 // That computer's word on its screen, its control and its sessions (GET /api/remote).
 export async function remoteStatus(base, { sources = false } = {}) {
   const res = await fetch(`${base}/api/remote${sources ? '?sources=1' : ''}`, { headers: { Accept: 'application/json' } })

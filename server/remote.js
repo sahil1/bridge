@@ -24,6 +24,12 @@
 // which device, what, when, how long, whether it controlled anything, and how it came), and every
 // one turned away (a lockout, a no here, a device not allowed), is kept in ~/.bridge-ai/remote.json,
 // the last 200, and shown in Settings.
+// Your other devices are told too (on unless it's turned off here): a session starting, control
+// taken and an ask waiting each go to your phones as a notification, and to your other computers,
+// which pass it on to theirs and show it in every window they have open (screentell.js), with Stop
+// and Block This Device. Either is carried out here (endFrom), and only narrows who may connect: a
+// device is let back in only at the computer it was unticked on. Each notification, and where it
+// went, is in the record.
 //
 // The picture: the desktop app's capture page (src/components/remote/Capture.jsx, in a window of
 // its own that never shows) takes the screen and sends it peer-to-peer (WebRTC; the offer, answer
@@ -60,10 +66,11 @@ const read = () => {
       password: d.password && typeof d.password.hash === 'string' && typeof d.password.salt === 'string' ? d.password : null,
       askFirst: d.askFirst === true,
       blocked: Array.isArray(d.blocked) ? d.blocked.filter((x) => typeof x === 'string').slice(0, 500) : [],
+      notify: d.notify !== false,
       locks: d.locks && typeof d.locks === 'object' && !Array.isArray(d.locks) ? d.locks : {},
       log: Array.isArray(d.log) ? d.log.slice(-LOG_MAX) : [],
     }
-  } catch { return { control: false, password: null, askFirst: false, blocked: [], locks: {}, log: [] } }
+  } catch { return { control: false, password: null, askFirst: false, blocked: [], notify: true, locks: {}, log: [] } }
 }
 
 // ---------- the Remote Access Password ----------
@@ -87,7 +94,10 @@ async function passwordMatches(stored, pw) {
 // this computer's dev servers (servers.js). screenAllowed(): on a Mac, whether macOS lets Bridge AI
 // record the screen, looked at without asking (calls.js screen). devices(): the phones and computers
 // paired here ({ id, name, kind }, relay.js). onChange(): what Bridge AI shows of this changed.
-export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => false, isDevPort = async () => false, screenAllowed = async () => null, devices = () => [], onChange = () => {} }) {
+// tell(event): your other devices told of a session, control taken or an ask (screentell.js), and
+// what became of it ({ sent, computers }). notifyTo(): where that goes, for Settings. blockThere(hop,
+// id): a device that came through another of your computers (hop, its device here) blocked there.
+export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => false, isDevPort = async () => false, screenAllowed = async () => null, devices = () => [], onChange = () => {}, tell: tellDevices = async () => null, notifyTo = () => ({}), blockThere = async () => null }) {
   let conf = read()
   const save = () => { ensureDir(path.dirname(FILE)); writeFileAtomic(FILE, JSON.stringify(conf, null, 2), { mode: 0o600 }) }
   // Control turned on before it needed a password: off, so setting one later doesn't turn it back on.
@@ -159,6 +169,8 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       screen,
       control: await controlStatus(),
       access: accessStatus(),
+      // Where its notifications go, at this computer only (a device is told whether they're on).
+      notify: { on: conf.notify, ...(device ? {} : notifyTo()) },
       asks: [...asks.values()].map(shownAsk),
       preview: { can: trialOn() && (desktopOpen() || FAKE), why: !trialOn() ? null : desktopOpen() || FAKE ? null : desktopNeeded() },
       paused: pausedUntil > Date.now(),
@@ -167,7 +179,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       unseen: conf.log.filter((e) => !e.seen && e.kind === 'screen' && e.ended).reverse(),
     }
   }
-  const shown = (s) => ({ id: s.id, kind: s.kind, by: s.by, for: s.for, source: { kind: s.source.kind, name: s.source.name, port: s.source.port }, control: ctl(s), controlled: s.controlled, via: s.via, started: new Date(s.started).toISOString() })
+  const shown = (s) => ({ id: s.id, kind: s.kind, by: s.by, for: s.for, source: { kind: s.source.kind, name: s.source.name, port: s.source.port }, control: ctl(s), controlled: s.controlled, via: s.via, started: new Date(s.started).toISOString(), told: s.told })
   const shownAsk = (a) => ({ id: a.id, by: a.by, for: a.for, control: a.control, at: new Date(a.at).toISOString(), until: new Date(a.until).toISOString() })
 
   // ---------- the capture page ----------
@@ -222,6 +234,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       if (m.t === 'offer' || m.t === 'ice') return tell(s.viewer, { t: m.t, ...(m.sdp ? { sdp: String(m.sdp) } : {}), ...(m.c ? { c: m.c } : {}) })
       if (m.t === 'started') { s.size = { w: m.w | 0, h: m.h | 0 }; return tell(s.viewer, { t: 'size', w: s.size.w, h: s.size.h }) }
       if (m.t === 'input') return applyInput(s, m.evs)
+      if (m.t === 'thumbs') return thumbsOut(s, m.list)
       if (m.t === 'error') return end(s, 'error', clean(m.why, 300) || 'The screen couldn\'t be shared')
     })
     ws.on('close', () => {
@@ -238,6 +251,25 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   }
   const sourceList = () => capture?.sources || FAKE_SOURCES
   const forViewer = ({ id, name, kind, w, h, primary, scale }) => ({ id, name, kind, w, h, primary, scale })
+
+  // ---------- a still of each screen, for the viewer's Which screen? ----------
+  // Only in a session (past the guardrails), at most every few seconds, each one a picture of its own
+  // (a JPEG the desktop app made, or the stand-in's drawing) of a screen that's there.
+  const THUMB = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/
+  function askThumbs(s) {
+    if (Date.now() - (s.thumbsAt || 0) < 3000) return
+    s.thumbsAt = Date.now()
+    if (s.provider === 'capture') return tell(capture?.ws, { t: 'thumbs', session: s.id })
+    for (const x of sourceList().filter((y) => y.kind === 'screen')) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${x.w}" height="${x.h}" viewBox="0 0 ${x.w} ${x.h}"><rect width="100%" height="100%" fill="hsl(${Math.round(x.w / 7) % 360},55%,42%)"/><text x="50%" y="50%" font-family="sans-serif" font-size="${Math.round(Math.min(x.w, x.h) / 8)}" fill="#fff" text-anchor="middle">${x.name.replace(/[<&>]/g, '')}</text></svg>`
+      tell(s.viewer, { t: 'thumb', id: x.id, data: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}` })
+    }
+  }
+  function thumbsOut(s, list) {
+    if (!Array.isArray(list)) return
+    const screens = new Set(sourceList().filter((x) => x.kind === 'screen').map((x) => x.id))
+    for (const x of list.slice(0, 12)) if (x && screens.has(x.id) && typeof x.data === 'string' && x.data.length <= 80000 && THUMB.test(x.data)) tell(s.viewer, { t: 'thumb', id: x.id, data: x.data })
+  }
 
   // ---------- the guardrails ----------
   const allows = (id) => !!id && !conf.blocked.includes(id)
@@ -256,7 +288,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   // A session turned away, kept in the record as the ones that ran are.
   function record(s, end, more = {}) {
     const now = new Date().toISOString()
-    conf.log = [...conf.log, { id: s.id, kind: 'screen', by: s.by, for: s.for, source: null, control: false, controlled: false, via: null, started: new Date(s.started).toISOString(), ended: now, seconds: 0, end, ...more, seen: false }].slice(-LOG_MAX)
+    conf.log = [...conf.log, { id: s.id, kind: 'screen', by: s.by, for: s.for, source: null, control: false, controlled: false, via: null, started: new Date(s.started).toISOString(), ended: now, seconds: 0, end, ...(s.told.length ? { told: s.told } : {}), ...more, seen: false }].slice(-LOG_MAX)
     save()
     onChange()
   }
@@ -304,6 +336,13 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       tell(ws, { t: 'asking', ms: ASK_MS, until: new Date(Date.now() + ASK_MS).toISOString() })
       const said = await askHere(s)
       if (said === 'gone') return false
+      // Stopped (or the device blocked) from another of your devices meanwhile: endFrom.
+      if (said === 'stopped' || said === 'blocked') {
+        record(s, said, { stoppedBy: s.stoppedBy })
+        if (said === 'blocked') fail(`${s.blockedAt || thisName()} stopped letting this device connect.`, 'blocked', s.blockedAt ? { at: s.blockedAt } : {})
+        else fail(`Stopped from ${s.stoppedBy}.`, 'stopped', { by: s.stoppedBy })
+        return false
+      }
       if (said !== 'allow') {
         record(s, said === 'deny' ? 'denied' : 'unanswered')
         fail(said === 'deny' ? `Someone at ${thisName()} said no to this.` : `Nobody at ${thisName()} answered within ${Math.round(ASK_MS / 1000)} seconds, so it wasn't allowed.`, said === 'deny' ? 'denied' : 'unanswered')
@@ -326,8 +365,10 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
         resolve(v)
       }
       a.timer = setTimeout(() => a.done('timeout'), ASK_MS)
+      a.s = s
       s.viewer.on('close', gone)
       asks.set(a.id, a)
+      announce(s, 'ask', a.id)
       toBadge()
       onChange()
     })
@@ -354,7 +395,10 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       id: randomBytes(8).toString('base64url'), viewer: ws, started: Date.now(),
       by: { id: dev.id, name: clean(dev.name) || 'A device', kind: dev.kind || 'phone' },
       for: dev.kind === 'computer' ? clean(q.get('for')) || null : null,
-      kind: kind === 'page' ? 'page' : 'screen', via: null, controlled: false, frames: 0, acked: true, pending: null, sent: 0,
+      // The device it's for, as the computer it came through knows it: that one's notifications leave it out.
+      forId: dev.kind === 'computer' ? clean(q.get('forId'), 40) || null : null,
+      forKind: dev.kind === 'computer' && q.get('for') ? (q.get('forKind') === 'computer' ? 'computer' : 'phone') : null,
+      kind: kind === 'page' ? 'page' : 'screen', via: null, controlled: false, frames: 0, acked: true, pending: null, sent: 0, told: [],
       slow: q.get('slow') === '1', p2p: q.get('p2p') === '1', wants: q.get('control') === '1', lastInput: Date.now(),
     }
     if (!allows(dev.id)) { record(s, 'device'); return fail(`${thisName()} doesn't let ${s.by.name} connect. That's changed at ${thisName()} itself, in Settings › Account & Devices › Computers.`, 'device') }
@@ -390,9 +434,10 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     if (ws.readyState !== 1) return
     sessions.set(s.id, s)
     clearTimeout(idleTimer)
-    s.entry = { id: s.id, kind: s.kind, by: s.by, for: s.for, source: { kind: s.source.kind, name: s.source.name, ...(s.source.port ? { port: s.source.port } : {}) }, control: ctl(s), controlled: false, via: null, started: new Date(s.started).toISOString(), ended: null, seconds: 0, end: null, seen: false }
+    s.entry = { id: s.id, kind: s.kind, by: s.by, for: s.for, source: { kind: s.source.kind, name: s.source.name, ...(s.source.port ? { port: s.source.port } : {}) }, control: ctl(s), controlled: false, via: null, started: new Date(s.started).toISOString(), ended: null, seconds: 0, end: null, told: s.told, seen: false }
     conf.log = [...conf.log, s.entry].slice(-LOG_MAX)
     save()
+    if (s.kind === 'screen') announce(s, 'view', s.id)
     if (ctl(s) && s.kind === 'screen') startSink()
     if (s.kind === 'screen') { s.idleCheck = setInterval(() => idleBack(s), Math.min(30000, Math.max(200, CONTROL_IDLE_MS / 5))); s.idleCheck.unref?.() }
     ws.on('message', (data, binary) => { if (!binary) { let m; try { m = JSON.parse(String(data)) } catch { return } fromViewer(s, m) } })
@@ -425,6 +470,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     if (m.t === 'input') return applyInput(s, m.evs)
     if (m.t === 'clip' || m.t === 'clip?') return clip(s, m)
     if (m.t === 'source' && s.kind === 'screen') return switchTo(s, String(m.source || ''))
+    if (m.t === 'thumbs?' && s.kind === 'screen') return askThumbs(s)
     if (m.t === 'control' && s.kind === 'screen' && m.on === true) return takeControl(s)
     if (m.t === 'go' && s.kind === 'page' && typeof m.path === 'string' && m.path.startsWith('/') && !m.path.startsWith('//')) { s.path = m.path.slice(0, 2000); if (s.provider === 'desktop') toDesktop({ t: 'page-go', session: s.id, path: s.path }); return }
     if (m.t === 'resize' && s.kind === 'page') { s.page = { w: Math.min(1600, Math.max(320, Number(m.w) || s.page.w)), h: Math.min(2400, Math.max(320, Number(m.h) || s.page.h)) }; if (s.provider === 'desktop') toDesktop({ t: 'page-resize', session: s.id, ...s.page }) }
@@ -530,7 +576,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     const list = evs.slice(0, 200).map(cleanInput).filter(Boolean)
     if (!list.length) return
     s.lastInput = Date.now()
-    if (!s.controlled) { s.controlled = true; s.entry.controlled = true; save(); if (s.kind === 'screen') toBadge() }
+    if (!s.controlled) { s.controlled = true; s.entry.controlled = true; save(); if (s.kind === 'screen') { toBadge(); announce(s, 'control', s.id) } }
     if (s.kind === 'page') {
       if (s.provider === 'desktop') toDesktop({ t: 'page-input', session: s.id, evs: list })
       else if (process.env.BRIDGE_TEST_INPUT) for (const ev of list) fs.appendFileSync(process.env.BRIDGE_TEST_INPUT, `${JSON.stringify({ page: s.source.port, ...ev })}\n`)
@@ -553,14 +599,15 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     clearTimeout(s.fakeTimer)
     clearTimeout(s.waitTimer)
     clearInterval(s.idleCheck)
-    if (error) tell(s.viewer, { t: 'error', why: error, code: why })
+    if (error) tell(s.viewer, { t: 'error', why: error, code: why, ...(s.blockedAt ? { at: s.blockedAt } : {}) })
     if (why === 'here') tell(s.viewer, { t: 'ended', why: 'here', text: `Stopped on ${thisName()}.` })
+    if (why === 'stopped') tell(s.viewer, { t: 'ended', why: 'stopped', by: s.stoppedBy, text: `Stopped from ${s.stoppedBy}.` })
     try { if (s.viewer.readyState <= 1) s.viewer.close(1000, why) } catch { /* closed */ }
     if (s.provider === 'capture') tell(capture?.ws, { t: 'stop', session: s.id })
     if (s.provider === 'desktop') toDesktop({ t: 'page-stop', session: s.id })
     if (s.kind === 'screen' && s.may) sink?.releaseAll(s.source.bounds)
     stopSinkIfIdle()
-    Object.assign(s.entry, { ended: new Date().toISOString(), seconds: Math.round((Date.now() - s.started) / 1000), end: why, ...(error ? { error: clean(error, 300) } : {}), controlled: s.controlled, via: s.via })
+    Object.assign(s.entry, { ended: new Date().toISOString(), seconds: Math.round((Date.now() - s.started) / 1000), end: why, ...(error && why !== 'blocked' ? { error: clean(error, 300) } : {}), ...(s.stoppedBy ? { stoppedBy: s.stoppedBy } : {}), controlled: s.controlled, via: s.via })
     save()
     idleLater()
     toBadge()
@@ -568,6 +615,51 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   }
   const stop = (id) => { const s = sessions.get(id); if (!s) throw Object.assign(new Error('That session has ended'), { status: 404 }); end(s, 'here'); return true }
   const stopAll = () => { for (const s of [...sessions.values()]) end(s, 'here'); for (const a of [...asks.values()]) a.done('deny') }
+  // Stop, or Block This Device, from another of your devices (a notification's button, the card in
+  // a window), carried out here: the session ends (an ask waiting is a no), and Block unticks that
+  // device in Which Devices May Connect, which ends anything else of its too; one that came through
+  // another of your computers is unticked there, the computer it came through (blockThere), not that
+  // computer here. by: who did it, for the record. Either only narrows who may connect; a device is
+  // let back in at the computer it's unticked on, only (setDevice).
+  async function endFrom(id, { block = false, by = '' } = {}) {
+    const s = sessions.get(id)
+    const a = asks.get(id)
+    if (!s && !a) throw Object.assign(new Error('That session has ended'), { status: 404 })
+    const x = s || a.s
+    const who = x.by
+    const from = clean(by) || 'another of your devices'
+    const hop = who.kind === 'computer' && x.forId ? who : null
+    if (block && hop) x.blockedAt = hop.name
+    if (s) { s.stoppedBy = from; end(s, block ? 'blocked' : 'stopped', block ? `${hop?.name || thisName()} stopped letting this device connect.` : null) }
+    if (a) { a.s.stoppedBy = from; a.done(block ? 'blocked' : 'stopped') }
+    if (!block) return { ok: true, said: `Stopped: ${x.for || who.name} isn't viewing ${thisName()}'s screen now.` }
+    if (hop) {
+      try { await blockThere(hop.id, x.forId) } catch (e) { return { ok: false, said: `Stopped, but ${x.for} couldn't be blocked on ${hop.name}: ${e.message}` } }
+      return { ok: true, said: `${x.for} can't connect through ${hop.name} any more.` }
+    }
+    if (devices().some((d) => d.id === who.id)) setDevice(who.id, false)
+    return { ok: true, said: `${who.name} can't connect to ${thisName()} any more.` }
+  }
+
+  // ---------- your other devices, told ----------
+  // A session starting (view), control taken (control) or an ask waiting (ask), told to your other
+  // devices (tell, screentell.js) unless that's off here. What became of each goes in the record
+  // with the session: when, and how many of your devices it reached, here and through each computer.
+  function announce(s, what, id) {
+    const told = { at: new Date().toISOString(), what }
+    s.told.push(told)
+    if (!conf.notify) { told.off = true; save(); return }
+    const ev = { what, id, by: s.by, for: s.for, forId: s.forId, forKind: s.forKind, control: what === 'ask' ? !!s.wants && controlOn() : ctl(s), started: new Date(s.started).toISOString() }
+    Promise.resolve().then(() => tellDevices(ev)).then((r) => Object.assign(told, r || {}), (e) => { told.error = clean(e.message, 200) })
+      .finally(() => { save(); onChange() })
+  }
+  function setNotify(on) { conf.notify = !!on; save(); onChange(); return { on: conf.notify, ...notifyTo() } }
+  // What's going on here now, for your other devices' cards (screentell.js): who views or controls
+  // this screen, and who asks to; never what's on it.
+  const live = () => ({
+    sessions: watchers().map((s) => ({ id: s.id, by: { name: s.by.name, kind: s.by.kind }, for: s.for, forKind: s.forKind, control: ctl(s), controlled: s.controlled, started: new Date(s.started).toISOString() })),
+    asks: [...asks.values()].map((a) => ({ id: a.id, by: { name: a.by.name, kind: a.by.kind }, for: a.for, forKind: a.s.forKind, control: a.control, at: new Date(a.at).toISOString(), until: new Date(a.until).toISOString() })),
+  })
 
   // ---------- set here: control, the password, Ask Here First, which devices ----------
   async function setControl(on) {
@@ -672,7 +764,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     for (const a of [...asks.values()]) a.done('deny')
   }
 
-  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, unlock, answer, allows, stop, stopAll, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, active: () => sessions.size }
+  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, setNotify, unlock, answer, allows, stop, stopAll, endFrom, live, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, active: () => sessions.size }
 }
 
 // The test stand-in's screens: its main one, one beside it, a 5K one at twice its points (as a
