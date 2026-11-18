@@ -3,18 +3,19 @@
 // (stand-ins/relay.mjs), with a phone paired and "Studio", another computer, linked; in the browser
 // named by BRIDGE_TEST_BROWSER.
 //   The phone page, paired through the relay, 390 px wide: Settings › Bots from no bot to one made
-//   from a template, its name, who may ask, its Slack tokens pasted and connected, a folder to read
-//   from and its instructions file picked from Desk's own folders, its limits, paused and resumed,
-//   Try It answered, a memory taught, its export and its record downloaded to the phone, its links
-//   out opening in the phone's browser, and Activity naming the phone; every section, tab and place
-//   it answers in with nothing too small, off the screen or cut short, light and dark. The iPhone app
-//   (its bridgeNative stood in for) takes the export to its share sheet; the Android app says it
-//   can't save files yet.
+//   from a template, its name, who may ask, its Slack tokens pasted and connected, You in Slack found
+//   among its people, a folder to read from and its instructions file picked from Desk's own folders,
+//   its limits, paused and resumed, Try It answered, a memory taught, its export and its record
+//   downloaded to the phone, its links out opening in the phone's browser, and Activity naming the
+//   phone; every section, tab and place it answers in with nothing too small, off the screen or cut
+//   short, light and dark. The iPhone app (its bridgeNative stood in for) takes the export to its
+//   share sheet; the Android app says it can't save files yet.
 //   Through the phone's link (lib/linkclient.mjs): a bot made from a template, each of its settings,
 //   its folders and instructions file (inside your home folder only, never Bridge AI's own, a link to
 //   it included), its Slack tokens, Discord token and server, Teams IDs, tunnel, Check and Teams app,
-//   Try It, its memory, its export, an import, Disconnect, deleted and its history deleted. Its record
-//   names the phone for each; no token ever comes back.
+//   its people and channels to pick from, You in Slack, Discord and Teams, who may ask by name, a
+//   channel it answers in without a mention, Try It, its memory, its export, an import, Disconnect,
+//   deleted and its history deleted. Its record names the phone for each; no token ever comes back.
 //   Through Studio's link (/m/<id>/): the same for another bot, its record naming Studio; and Studio's
 //   window on Desk, its Bots working there, a folder picked from Desk's, the export downloaded.
 //   Bots off: none of it there, from the phone or Studio.
@@ -176,6 +177,12 @@ try {
     await tokens.locator('button[type="submit"]').click()
     ok(!!(await until(async () => (await botOf(harbor.id)).state === 'connected', 20000)), 'its Slack tokens pasted on the phone: connected')
     ok(!!(await until(async () => /xoxb-…test|…test/.test(await sec('slack-connect').innerText()) && !leaked(await sec('slack-connect').innerText()).length, 8000)), 'and shown only by their last four', await sec('slack-connect').innerText())
+    // You in Slack, found among the workspace's people.
+    const find = sec('slack-owner').locator('.sb-search input')
+    await find.waitFor({ timeout: 15000 })
+    await find.fill('Test')
+    await sec('slack-owner').locator('.sb-found button', { hasText: 'Tester' }).click({ timeout: 10000 })
+    ok(!!(await until(async () => (await botOf(harbor.id)).settings.owner?.id === 'U0OWNER', 8000)), 'You in Slack, picked from the workspace\'s people on the phone')
 
     // A folder to read from, picked from Desk's own folders.
     const folders = sec('slack-folders')
@@ -288,6 +295,11 @@ try {
     // Where it answers.
     r = await ask('POST', `/bots/${id}/tokens`, { appToken: 'xapp-two', botToken: 'xoxb-two' })
     ok(okay(r) && !!(await until(async () => (await botOf(id)).state === 'connected', 20000)), 'its Slack tokens, from the phone: connected', r.json?.error)
+    const people = await ask('GET', `/bots/${id}/people`)
+    const channels = await ask('GET', `/bots/${id}/channels`)
+    ok(okay(people) && people.json.people.some((p) => p.id === 'U0DANA') && okay(channels) && channels.json.channels.some((c) => c.id === 'C0LAUNCH'), 'the workspace\'s people and its channels, to pick from on the phone', { people: people.status, channels: channels.status })
+    r = await ask('POST', `/bots/${id}/settings`, { owner: { id: 'U0OWNER', name: 'Tester' }, askers: [{ id: 'U0DANA', name: 'Dana' }], listen: [{ id: 'C0LAUNCH', name: 'launch' }], muted: [] })
+    ok(okay(r) && r.json.settings.owner?.id === 'U0OWNER' && r.json.settings.askers[0]?.id === 'U0DANA' && r.json.settings.listen[0]?.id === 'C0LAUNCH', 'You in Slack, who may ask by name, a channel it answers in without a mention', r.json?.settings)
     r = await ask('POST', `/bots/${id}/discord`, { token: 'dtest.bot-one.0123456789abcdef' })
     ok(okay(r), 'its Discord token, checked and kept', r.json?.error)
     const guilds = await until(async () => { const v = await botOf(id); return v.where?.discord?.guilds?.length > 1 && v.where.discord.guilds }, 20000)
@@ -301,6 +313,8 @@ try {
     ok(okay(r) && okay(checked) && checked.json?.where?.teams?.endpoint?.ok === true, 'its tunnel\'s address saved, and Check reaches it', checked.json?.where?.teams?.endpoint)
     const zip = await phone.request('GET', `/api/bots/${id}/teams/app.zip`)
     ok(zip.status === 200, 'its Teams app, downloaded through the link', zip.status)
+    r = await ask('POST', `/bots/${id}/settings`, { owners: { discord: { id: 'discord:2004', name: 'Tester' }, teams: { id: 'teams:aad-tester-0004', name: 'Tester' } } })
+    ok(okay(r) && r.json.settings.owners?.discord?.id === 'discord:2004' && r.json.settings.owners?.teams?.id === 'teams:aad-tester-0004', 'You in Discord and You in Teams, from the phone', r.json?.settings?.owners)
     // Try It, its memory.
     r = await ask('POST', `/bots/${id}/try`, { text: 'Is the launch on? [answer Yes, on the 3rd.]' })
     const answered = r.json?.q && await until(async () => { const x = (await ask('GET', `/bots/${id}/try/${encodeURIComponent(r.json.q)}`)).json; return x?.item?.draft && x }, 40000)
@@ -328,7 +342,7 @@ try {
     ok(okay(r) && okay(hist) && (await desk.api('/bots')).deleted.find((x) => x.id === imp.json?.id)?.cleared, 'the imported one deleted, then its history', hist.json)
     // The record: each change, by you, on Pocket.
     const changes = events(id).filter((e) => e.type === 'settings.changed' && e.device === 'Pocket').map((e) => e.setting)
-    const want = ['created', 'description', 'who', 'readsFrom', 'instructionsFile', 'changes', 'paused', 'name', 'instructions', 'tokens', 'discord', 'discord.server', 'teams', 'teams.endpoint', 'teams.app', 'exported']
+    const want = ['created', 'description', 'who', 'readsFrom', 'instructionsFile', 'changes', 'paused', 'name', 'instructions', 'tokens', 'discord', 'discord.server', 'teams', 'teams.endpoint', 'teams.app', 'owner', 'owners', 'askers', 'listen', 'exported']
     ok(want.every((k) => changes.includes(k)) && events(id).filter((e) => e.type === 'settings.changed').every((e) => e.by === 'Tester'), 'its record: each change by Tester, on Pocket', { missing: want.filter((k) => !changes.includes(k)) })
     ok(['memory.kept', 'memory.edited', 'memory.deleted'].every((t) => events(id).some((e) => e.type === t && e.device === 'Pocket')), 'what it remembers, changed on Pocket')
     ok(events(imp.json?.id).some((e) => e.type === 'trace.deleted' && e.all && e.device === 'Pocket'), 'the imported one\'s history deleted on Pocket, which its record keeps')
