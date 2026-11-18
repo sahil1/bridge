@@ -18,6 +18,7 @@ Bots answer the people you choose in Slack, Discord and Microsoft Teams, from fo
   - **Activity** keeps every question, what it read, what it sent and who approved it, in a record that shows if anything in it was changed. **Export** saves a copy.
   - **In Slack** it shows its status and Stop, streams answers it sends without asking, and takes `/<name>`, a message shortcut and files. It also has a Home tab.
   - It runs in Docker too, and `bridge-ai bots` lists, imports and exports bots.
+  - **From your phone and your other computers:** everything in Bots can be set up and changed there too, with folders picked from that computer's own. Activity names the device each change came from.
 - **Remote Screen and Preview** (a Beta Feature): Settings › Account & Devices › Computers › **View screen**, from another of your computers or your phone, shows that computer's screen.
   - **How it connects:** peer-to-peer when it can, finding its way with stun.cloudflare.com, and through the relay when it can't.
   - **The computer being seen** always says so, with Stop, and lists who looked and for how long. macOS asks for Screen Recording the first time.
