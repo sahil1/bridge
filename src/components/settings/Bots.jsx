@@ -5,6 +5,7 @@ import { api, apiUrl, BASE, onThisComputer, viaRelay } from '../../api.js'
 import { canDownload, toPhone } from '../../download.js'
 import { useFolder } from '../files/fsapi.js'
 import { ago } from '../Machines.jsx'
+import AiAssist from '../AiAssist.jsx'
 import { t } from '../../i18n/index.js'
 import './bots.css'
 
@@ -201,7 +202,7 @@ function Browse({ files = false, tops = null, onPick, onClose }) {
 }
 
 // ---------- Set Up ----------
-function Status({ d, onAgain }) {
+export function Status({ d, onAgain }) {
   const s = d.state
   const line = s === 'connected' ? t('Connected to {team} as @{bot}.', { team: d.team?.name || '', bot: d.bot?.name || '' })
     : s === 'connecting' ? t('Connecting to Slack…')
@@ -316,7 +317,7 @@ function Identity({ d, save, onDelete }) {
 }
 
 // Making the app and connecting it: the steps, the manifest, the two tokens.
-function Connect({ d, reload }) {
+export function Connect({ d, reload }) {
   const [app, setApp] = useState('')
   const [bot, setBot] = useState('')
   const [busy, setBusy] = useState(null)
@@ -391,7 +392,7 @@ function Connect({ d, reload }) {
 // You in Slack: which of the workspace's people is you, so its drafts and what it would like to
 // remember come to your direct messages, with buttons to act on them from your phone; and so it
 // knows you may always ask.
-function Owner({ d, save }) {
+export function Owner({ d, save }) {
   const { people, error, connected } = usePeople(d)
   const o = d.settings.owner
   const guess = !o && d.ownerGuess
@@ -418,9 +419,9 @@ function Owner({ d, save }) {
 // ---------- Where it answers ----------
 // Slack, Discord and Microsoft Teams: a bot answers in any of them at once, each through an app you
 // make there. The names are the services' own (not translated).
-const PLATFORMS = [['slack', 'Slack'], ['discord', 'Discord'], ['teams', 'Microsoft Teams']]
+export const PLATFORMS = [['slack', 'Slack'], ['discord', 'Discord'], ['teams', 'Microsoft Teams']]
 const platOfId = (id) => (/^discord:/.test(String(id || '')) ? 'discord' : /^teams:/.test(String(id || '')) ? 'teams' : 'slack')
-const platName = (p) => (PLATFORMS.find(([k]) => k === p) || [])[1] || 'Slack'
+export const platName = (p) => (PLATFORMS.find(([k]) => k === p) || [])[1] || 'Slack'
 // A small tag saying which a person or place is in, for those not in Slack.
 const PlatTag = ({ id, platform }) => { const p = platform || platOfId(id); return p === 'slack' ? null : <span className={`sb-plat p-${p}`}>{platName(p)}</span> }
 const stateOf = (d, p) => (p === 'slack' ? { state: d.state, why: d.why } : d.where?.[p] || { state: 'no-tokens' })
@@ -482,7 +483,7 @@ function PlatformOwner({ d, save, platform }) {
 }
 
 // Discord: a bot of its own, made in Discord's Developer Portal, connecting from this computer.
-function DiscordSetup({ d, save, reload, again }) {
+export function DiscordSetup({ d, save, reload, again }) {
   const s = d.where?.discord || { state: 'no-tokens' }
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(null)
@@ -565,7 +566,7 @@ function DiscordSetup({ d, save, reload, again }) {
 
 // Microsoft Teams: an Azure Bot of yours, reached through a tunnel of yours to this computer, and the
 // Teams app made here to upload.
-function TeamsSetup({ d, save, reload, again }) {
+export function TeamsSetup({ d, save, reload, again }) {
   const s = d.where?.teams || { state: 'no-tokens' }
   const [app, setApp] = useState('')
   const [tenant, setTenant] = useState('')
@@ -712,7 +713,7 @@ function stepsFor(d, p) {
     answered,
   ]
 }
-function Guide({ d, platform }) {
+export function Guide({ d, platform }) {
   const steps = stepsFor(d, platform)
   const n = steps.filter((s) => s.done).length
   const all = n === steps.length
@@ -900,6 +901,61 @@ function ReadsFrom({ d, save }) {
   )
 }
 
+// Its MCP servers: which of yours (Claude Code's own, Settings › MCP Servers) its runs get, each with
+// its tools, asked of the server on the computer it runs on, and which of them only read. Those may be
+// used for anyone who may ask; the others only when you, or someone you named under Who Can Ask, ask.
+// Only with Claude Code answering, which holds a run to them.
+function McpServers({ d, save }) {
+  const [x, setX] = useState(null)
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const load = (fresh = false) => { setBusy(true); return api(`/bots/${d.id}/mcp${fresh ? '?fresh=1' : ''}`).then((r) => { setX(r); setError(null) }, (e) => setError(e.message)).finally(() => setBusy(false)) }
+  useEffect(() => { load() }, [d.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const picked = d.settings.mcp || []
+  const toggle = (name, on) => save({ mcp: on ? [...picked, name] : picked.filter((n) => n !== name) })
+  const servers = x?.servers || []
+  const gone = picked.filter((n) => x && !servers.some((sv) => sv.name === n))
+  const notClaude = d.answerer?.kind === 'codex'
+  return (
+    <section className="st-sec" data-setting="bots-mcp">
+      <h4>{t('MCP Servers')}</h4>
+      <p className="muted small">{t('The tools of your own MCP servers its answers may use, from Claude Code\'s list (Settings › MCP Servers): only the ones ticked here, with Claude Code or a model answering. A tool that says it only reads may be used for anyone who may ask; any other only when you, or someone you named under Who Can Ask, asks.')}</p>
+      {notClaude && <p className="st-note warn"><Icon name="info" size={13} /><span>{t('Codex answers first here, and its runs don\'t get MCP servers: put Claude Code or a model first under What Answers.')}</span></p>}
+      {error && <p className="error-text small" role="alert">{error}</p>}
+      {!x && !error && <div className="skeleton-rows"><div /></div>}
+      {x && !servers.length && <p className="small sb-none">{t('Claude Code has no MCP servers of yours yet: add one in Settings › MCP Servers.')}</p>}
+      {servers.length > 0 && (
+        <ul className="sb-mcp">
+          {servers.map((sv) => {
+            const on = picked.includes(sv.name)
+            const ro = (sv.tools || []).filter((tl) => tl.readOnly)
+            return (
+              <li key={sv.name} className={on ? 'on' : ''}>
+                <label className="st-check">
+                  <input type="checkbox" checked={on} onChange={(e) => toggle(sv.name, e.target.checked)} />
+                  <span>
+                    <b>{sv.name}</b> <span className="muted small mono">{sv.where}</span>
+                    <span className="muted small sb-mcp-tools">{sv.tools
+                      ? (sv.tools.length === 1 ? t('1 tool, {r} only reading', { r: ro.length }) : t('{n} tools, {r} only reading', { n: sv.tools.length, r: ro.length }))
+                      : t('Its tools couldn\'t be listed ({why}): none counts as only reading.', { why: sv.problem || '' })}</span>
+                  </span>
+                </label>
+                {sv.tools?.length > 0 && (
+                  <details className="sb-ctx"><summary><Icon name="chevron" size={11} />{t('Its tools')}</summary>
+                    <ul className="sb-mcp-list">{sv.tools.map((tl) => <li key={tl.name} className="small"><code>{tl.name}</code> <span className={`sb-plat ${tl.readOnly ? 'p-ro' : 'p-rw'}`}>{tl.readOnly ? t('Only reads') : t('Does more than read')}</span></li>)}</ul>
+                  </details>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {gone.length > 0 && <p className="st-note warn"><Icon name="alert" size={13} /><span>{t('{servers}: not in Claude Code\'s list any more, so its answers don\'t have it.', { servers: gone.join(', ') })}</span><button type="button" className="link-btn" onClick={() => save({ mcp: picked.filter((n) => !gone.includes(n)) })}>{t('Take it out')}</button></p>}
+      {x && <div className="st-row"><button type="button" className="ghost-btn" disabled={busy} onClick={() => load(true)}><Icon name="refresh" size={12} /> {busy ? t('Asking…') : t('Ask them for their tools again')}</button></div>}
+    </section>
+  )
+}
+
 // Changes: none, a diff you approve before a draft pull request opens, or a draft pull request at
 // once. The agent edits only its own copy (a git worktree), and Bridge AI does the git and GitHub
 // part with your own gh. Only the people named, and you, may ask for one.
@@ -1016,13 +1072,91 @@ function Channels({ d, save }) {
   )
 }
 
-// How answers go, which agent answers (and a note on its terms when it answers through a personal
-// plan), copies of your agents' conversations, what your agents are doing, and approvals in Slack.
+// What answers (server/botanswer.js), in order: Automatic (the best here, then the others, the ones on
+// this computer last), or a list of your own, its first choice and then its fallbacks, each an agent
+// that can only read (on its usual model, or one of its own) or any model you reach, Local or Cloud;
+// and whether the next is tried when one can't answer. Here in Set Up, and on AI Assist's card.
+//   value     the list (ids), or null for Automatic
+//   options   [{ id, label, local, installed, changes }]: what can be picked
+//   automatic the ids Automatic would use, in order
+//   state     [{ id, why }]: why one can't answer now
+export function AnswererList({ value, options = [], automatic = [], fallback = true, state = [], onChange }) {
+  const auto = !value?.length
+  const ids = auto ? automatic : value
+  const opt = (id) => options.find((o) => o.id === id) || { id, label: id.replace(/^(agent|model):/, ''), local: /^model:(ollama|lmstudio|bridge):/.test(id) }
+  const set = (list, fb = fallback) => onChange({ answerers: list?.length ? list : null, fallback: fb })
+  const move = (i, by) => { const l = [...ids]; const [x] = l.splice(i, 1); l.splice(i + by, 0, x); set(l) }
+  const free = options.filter((o) => !ids.includes(o.id) && o.installed !== false)
+  return (
+    <div className="sb-answerers">
+      <div className="seg" role="radiogroup" aria-label={t('What Answers')}>
+        <button type="button" role="radio" aria-checked={auto} className={auto ? 'on' : ''} onClick={() => set(null)}>{t('Automatic')}</button>
+        <button type="button" role="radio" aria-checked={!auto} className={!auto ? 'on' : ''} onClick={() => auto && set(automatic.length ? automatic : options.filter((o) => o.installed !== false).slice(0, 1).map((o) => o.id))}>{t('Your own list')}</button>
+      </div>
+      <p className="muted small">{auto ? t('The best that\'s here answers first, then the others, the ones on this computer last: Automatic never goes from a model on this computer to one elsewhere.') : t('Its first choice answers; when it can\'t (not installed, not signed in, at its usage limit, its provider says no, its server isn\'t running), the next is tried at once. Only these, in this order.')}</p>
+      {ids.length > 0
+        ? (
+          <ol className="sb-ans-list">
+            {ids.map((id, i) => {
+              const o = opt(id)
+              const why = state.find((x) => x.id === id)?.why
+              return (
+                <li key={id} className={why ? 'bad' : ''}>
+                  <span className="sb-ans-n">{i + 1}</span>
+                  <span className="sb-ans-text">
+                    <b className="small">{o.label}</b>
+                    <span className={`sb-plat ${o.local ? 'p-local' : 'p-cloud'}`}>{o.local ? t('Local') : t('Cloud')}</span>
+                    {i === 0 ? <span className="muted small"> {t('first choice')}</span> : <span className="muted small"> {fallback ? t('fallback') : t('not tried: fallback is off')}</span>}
+                    {why && <span className="error-text small sb-full">{why}</span>}
+                  </span>
+                  {!auto && (
+                    <span className="sb-ans-acts">
+                      <button type="button" className="icon-btn" disabled={i === 0} onClick={() => move(i, -1)} aria-label={t('Move {name} up', { name: o.label })}><Icon name="up" size={12} /></button>
+                      <button type="button" className="icon-btn" disabled={i === ids.length - 1} onClick={() => move(i, 1)} aria-label={t('Move {name} down', { name: o.label })}><Icon name="down" size={12} /></button>
+                      <button type="button" className="icon-btn" disabled={ids.length === 1} onClick={() => set(ids.filter((x) => x !== id))} aria-label={t('Remove {name}', { name: o.label })}><Icon name="x" size={12} /></button>
+                    </span>
+                  )}
+                </li>
+              )
+            })}
+          </ol>
+        )
+        : <p className="error-text small">{t('Nothing here can answer for it: install Claude Code or Codex (Settings › Agents), or add a model in Settings › Model Providers.')}</p>}
+      {!auto && free.length > 0 && (
+        <select className="st-input sb-ans-add" value="" onChange={(e) => e.target.value && set([...ids, e.target.value])} aria-label={t('Add one to fall back on')}>
+          <option value="">{t('Add one to fall back on…')}</option>
+          {free.map((o) => <option key={o.id} value={o.id}>{`${o.label} · ${o.local ? t('Local') : t('Cloud')}`}</option>)}
+        </select>
+      )}
+      <label className="st-check"><input type="checkbox" checked={fallback !== false} onChange={(e) => set(auto ? null : ids, e.target.checked)} /><span className="small">{t('When one can\'t answer, try the next')}</span></label>
+    </div>
+  )
+}
+
+// What answers it, in Set Up: AnswererList, with what's here to pick from.
+function Answerers({ d, save }) {
+  const [x, setX] = useState(null)
+  useEffect(() => { api(`/bots/${d.id}/answerers?fresh=1`).then(setX, () => setX({ options: [], automatic: [] })) }, [d.id, d.settings.answerers?.join(), d.settings.fallback])
+  const st = d.answerers?.list || []
+  const changes = d.settings.changes && d.settings.changes !== 'none'
+  const list = d.settings.answerers?.length ? d.settings.answerers : x?.automatic || []
+  return (
+    <section className="st-sec" data-setting="bots-answerers">
+      <h4>{t('What Answers')}</h4>
+      {!x ? <div className="skeleton-rows"><div /></div> : <AnswererList value={d.settings.answerers} options={x.options} automatic={x.automatic} fallback={d.settings.fallback !== false} state={st} onChange={(v) => save(v)} />}
+      {changes && x && !list.some((id) => /^agent:claude/.test(id)) && <p className="st-note warn"><Icon name="info" size={13} /><span>{t('Changes need Claude Code in this list: until it\'s there, a question asking for a change comes to you.')}</span></p>}
+      <p className="muted small">{t('A model answers through Bridge AI\'s own tools, which only read, search and list inside its folders, and its MCP servers as they allow: so it\'s kept to its folders, as Claude Code is. Codex reads anywhere, so its answers always wait for you.')}</p>
+    </section>
+  )
+}
+
+// How answers go (and a note on its terms when it answers through a personal plan), copies of your
+// agents' conversations, what your agents are doing, and approvals in Slack.
 function Replies({ d, save }) {
   const s = d.settings
   const agents = d.agents.filter((a) => a.installed)
   const by = d.answerer
-  const label = agents.find((a) => a.kind === by?.kind)?.label || by?.kind
+  const label = agents.find((a) => a.kind === by?.kind)?.label || (by?.kind === 'model' ? t('A model') : by?.kind)
   const sign = d.signIn
   const terms = !sign ? null
     : sign.kind === 'subscription' ? t('{bot} answers other people through your {account} account{plan}. If that\'s a personal plan, check {provider}\'s terms allow it; an API key is the usual choice for a shared bot.', { bot: d.name, account: sign.account, provider: sign.provider, plan: sign.plan ? ` (${sign.plan})` : '' })
@@ -1038,22 +1172,12 @@ function Replies({ d, save }) {
         </label>
         <label className={`sb-mode ${s.auto ? 'on' : ''}`}>
           <input type="radio" name={`sb-auto-${d.id}`} checked={!!s.auto} onChange={() => save({ auto: true })} />
-          <span><b>{t('Answer without asking')}</b><span className="muted small">{t('An answer goes straight to Slack when the agent is held to its folders (Claude Code). An answer from a copy of an agent\'s conversation, or from Codex, which can read anywhere, still waits for you.')}</span></span>
+          <span><b>{t('Answer without asking')}</b><span className="muted small">{t('An answer goes straight to Slack when what answered is held to its folders (Claude Code, or a model through Bridge AI\'s tools). An answer from a copy of an agent\'s conversation, or from Codex, which can read anywhere, still waits for you.')}</span></span>
         </label>
       </div>
       {s.auto && by && !by.confined && <p className="st-note warn"><Icon name="alert" size={13} />{t('{agent} answers here and isn\'t held to its folder, so every answer still waits for you.', { agent: label })}</p>}
       {s.auto && <p className="muted small">{t('Answers sent without asking are streamed into Slack as they\'re posted. One for a public channel that quotes a file it read waits for you all the same.')}</p>}
       <p className="muted small sb-approvals">{s.owner ? t('Drafts also come to your Slack direct messages, to send, edit or discard from your phone.') : t('Set You in Slack, above, to approve its drafts from Slack too.')}</p>
-      <div className="st-row">
-        <span className="small">{t('Answered by')}</span>
-        {agents.length
-          ? (
-            <div className="seg" role="radiogroup" aria-label={t('Answered by')}>
-              {agents.map((a) => <button key={a.kind} type="button" role="radio" aria-checked={by?.kind === a.kind} className={by?.kind === a.kind ? 'on' : ''} onClick={() => save({ agent: a.kind })}>{a.label}</button>)}
-            </div>
-          )
-          : <span className="error-text small">{t('No agent here can answer read-only: install Claude Code or Codex (Settings › Agents).')}</span>}
-      </div>
       {terms && <p className="st-note warn sb-terms" data-setting="slack-terms"><Icon name="info" size={13} /><span>{terms}</span></p>}
       <label className="st-check">
         <input type="checkbox" checked={!!s.agentCopies} onChange={(e) => save({ agentCopies: e.target.checked })} />
@@ -1168,9 +1292,11 @@ function SetUp({ d, save, reload, onDelete, again }) {
       <Askers d={d} save={save} />
       <Instructions d={d} save={save} />
       <ReadsFrom d={d} save={save} />
+      <McpServers d={d} save={save} />
       <Changes d={d} save={save} />
       <Limits d={d} save={save} />
       <Channels d={d} save={save} />
+      <Answerers d={d} save={save} />
       <Replies d={d} save={save} />
       <Scheduled d={d} reload={reload} />
     </>
@@ -1211,8 +1337,11 @@ function eventLine(e) {
     case 'refused': return t('Refused: {why}', { why: REFUSED()[e.why] || e.why })
     case 'queued': return t('Waiting its turn, behind {n} of their questions', { n: e.ahead ?? 1 })
     case 'context': return e.problem ? t('Read the conversation: {why}', { why: e.problem }) : t('Read {n} earlier messages and {pins} pinned, as context', { n: e.messages?.length || 0, pins: e.pins?.length || 0 })
-    case 'run.started': return t('{agent} started, reading {folders}{from}; instructions {version} from {source}', { agent: e.agent === 'codex' ? 'Codex' : 'Claude Code', folders: e.folders?.length ? e.folders.join(', ') : t('no folders'), from: e.from ? t(', going on from its earlier conversation') : '', version: e.instructions?.hash || '', source: e.instructions?.source === 'file' ? e.instructions.path : t('Settings') }) + (e.instructions?.problem ? ` (${e.instructions.problem})` : '')
+    case 'run.started': return t('{agent} started, reading {folders}{from}; instructions {version} from {source}', { agent: e.answerer?.label || (e.agent === 'codex' ? 'Codex' : e.agent === 'model' ? e.model || '' : 'Claude Code'), folders: e.folders?.length ? e.folders.join(', ') : t('no folders'), from: e.from ? t(', going on from its earlier conversation') : '', version: e.instructions?.hash || '', source: e.instructions?.source === 'file' ? e.instructions.path : t('Settings') }) + (e.instructions?.problem ? ` (${e.instructions.problem})` : '')
     case 'run.read': return t('Opened {files}', { files: (e.files || []).map((f) => f.what).join(', ') })
+    case 'run.tools': return t('Used the MCP tools {tools}', { tools: (e.tools || []).map((x) => `${x.server}: ${x.tool}${x.n > 1 ? ` ×${x.n}` : ''}`).join(', ') })
+    case 'run.skipped': return t('{name} passed over: {why}', { name: e.answerer?.label || e.answerer?.id || '', why: e.why || '' })
+    case 'run.passed': return t('{name} couldn\'t answer: {why}. Trying the next.', { name: e.answerer?.label || e.answerer?.id || '', why: e.why || '' })
     case 'run.finished':
       if (e.end === 'finished') return t('Finished in {s} s', { s: Math.round((e.took || 0) / 1000) })
       if (e.end === 'timeout') return t('Stopped after {n} minutes, its longest run', { n: e.minutes ?? '' })
@@ -1220,6 +1349,7 @@ function eventLine(e) {
       return t('Ended: {why}', { why: e.error || e.end })
     case 'draft': {
       const base = e.needsOwner ? t('Passed on to you: {why}', { why: e.why || '' }) : e.auto ? t('Answered: “{text}”', { text: e.text }) : t('Drafted for you to check: “{text}”', { text: e.text })
+      if (e.by && !e.needsOwner) return `${base} (${t('by {name}', { name: e.by })})`
       const more = [e.files?.length ? t('with {files}', { files: e.files.map((f) => f.name).join(', ') }) : null, e.warn || null].filter(Boolean)
       return more.length ? `${base} (${more.join('; ')})` : base
     }
@@ -1256,7 +1386,7 @@ function eventLine(e) {
     default: return e.type
   }
 }
-const isBad = (e) => e.ok === false || ['posted.failed', 'refused', 'approval.failed', 'change.failed'].includes(e.type) || (e.type === 'run.finished' && e.end === 'timeout')
+const isBad = (e) => e.ok === false || ['posted.failed', 'refused', 'approval.failed', 'change.failed', 'run.skipped', 'run.passed'].includes(e.type) || (e.type === 'run.finished' && e.end === 'timeout')
 
 // A conversation's events, in order, as kept.
 function Events({ d, events }) {
@@ -1421,8 +1551,41 @@ const FilesOf = ({ files }) => (files?.length ? <p className="muted small sb-fil
 
 // ---------- Try It ----------
 // A question asked here as someone would in Slack: the same agent, folders, instructions and memory,
-// its draft, what it read and its record, and nothing sent to Slack.
+// its draft, what it read and its record, and nothing sent to Slack. While it's answered, the run as
+// it goes (live, from the server: starting, what it's reading, anything it's waiting on, the MCP
+// tools it used), the time so far and Stop; its answer the moment it's there.
 const WORKING = new Set(['received', 'answering', 'queued'])
+// m:ss since a moment, ticking.
+function Since({ at }) {
+  const [, tick] = useState(0)
+  useEffect(() => { const id = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(id) }, [])
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(at || 0)) / 1000))
+  return <span className="sb-since" aria-label={t('{n} seconds so far', { n: s })}>{`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`}</span>
+}
+function Live({ live, item, onStop, stopping }) {
+  const at = live?.since || item.heardAt || item.at
+  const ph = live?.phase || (item.state === 'queued' ? 'queued' : 'starting')
+  const what = ph === 'queued' ? t('Waiting its turn: they have as many questions running as their limit allows.')
+    : ph === 'place' ? t('Waiting for a free place: as many questions as it answers at once are being answered.')
+      : ph === 'starting' ? t('Starting its agent…')
+        : ph === 'waiting' ? t('Waiting on: {what}', { what: live.asking })
+          : live?.reading?.length ? t('Reading {file}', { file: String(live.reading.at(-1)).replace(/^\w+: /, '') })
+            : live?.doing ? t('Working: {what}', { what: live.doing }) : t('Its agent is reading and answering…')
+  return (
+    <div className={`sb-live ph-${ph}`} role="status" data-setting="slack-try-live">
+      <div className="sb-live-row">
+        <Icon name={ph === 'waiting' ? 'alert' : ph === 'queued' || ph === 'place' ? 'clock' : 'working'} size={13} />
+        <span className="small sb-live-what">{what}</span>
+        <Since at={at} />
+        <button type="button" className="btn small" disabled={stopping} onClick={onStop}><Icon name="stop" size={12} /> {t('Stop')}</button>
+      </div>
+      {live?.by && <p className="muted small">{t('Answering: {name}', { name: live.by })}</p>}
+      {ph === 'waiting' && <p className="muted small">{t('Its agent is held up until that\'s answered: answer it in its terminal on this computer, or Stop.')}</p>}
+      {live?.reading?.length > 1 && <p className="muted small sb-live-read">{t('Read so far: {files}', { files: live.reading.join(', ') })}</p>}
+      {live?.tools?.length > 0 && <p className="muted small">{t('MCP tools used: {tools}', { tools: live.tools.map((x) => `${x.server}: ${x.tool}`).join(', ') })}</p>}
+    </div>
+  )
+}
 function TryIt({ d }) {
   const key = `cc-bot-try-${d.id}`
   const [as, setAs] = useState('')
@@ -1444,7 +1607,7 @@ function TryIt({ d }) {
     } catch (err) { setError(err.message) }
     setBusy(false)
   }
-  // Looked at every moment and a half while it's being answered, then twice more for what follows.
+  // Looked at every second while it's being answered, then twice more for what follows.
   useEffect(() => {
     if (!q) return undefined
     let live = true
@@ -1454,7 +1617,7 @@ function TryIt({ d }) {
       if (!live) return
       setX(r)
       setError(null)
-      if (WORKING.has(r.item?.state) || after-- > 0) timer = setTimeout(load, 1500)
+      if (WORKING.has(r.item?.state) || after-- > 0) timer = setTimeout(load, WORKING.has(r.item?.state) ? 1000 : 1500)
     }, (err) => {
       if (!live) return
       if (err.status === 404) { setQ(null); saved(key, '') } else setError(err.message)
@@ -1464,6 +1627,12 @@ function TryIt({ d }) {
   }, [d.id, q]) // eslint-disable-line react-hooks/exhaustive-deps
   const me = d.settings.owner?.name ? t('{name} (you)', { name: d.settings.owner.name }) : t('You')
   const it = x?.item
+  const [stopping, setStopping] = useState(false)
+  const stop = async () => {
+    setStopping(true)
+    try { await api(`/bots/${d.id}/try/${encodeURIComponent(it.id)}/stop`, { method: 'POST' }) } catch (err) { setError(err.message) }
+    setStopping(false)
+  }
   return (
     <section className="st-sec" data-setting="slack-try">
       <h4>{t('Try It')}</h4>
@@ -1483,14 +1652,13 @@ function TryIt({ d }) {
       {it && (
         <div className="sb-try-out" role="region" aria-label={t('Its answer')}>
           <p className="small"><b>{it.from?.name || me}</b> <span className="muted">{t('asked')}</span> “{it.text}”</p>
-          {it.state === 'queued' && <p className="muted small"><Icon name="clock" size={12} /> {t('Waiting its turn: they have as many questions running as their limit allows.')}</p>}
-          {(it.state === 'received' || it.state === 'answering') && <p className="muted small sb-working"><Icon name="working" size={12} /> {t('Its agent is reading and answering…')}</p>}
+          {WORKING.has(it.state) && <Live live={x.live} item={it} onStop={stop} stopping={stopping} />}
           {it.state === 'refused' && <p className="st-note warn"><Icon name="blocked" size={13} /><span>{t('It wouldn\'t answer: {why}', { why: REFUSED()[it.refused] || it.refused || '' })}</span></p>}
           {it.state === 'stopped' && <p className="st-note warn"><Icon name="stop" size={13} /><span>{t('Stopped before it answered.')}</span></p>}
           {it.needsOwner && it.state !== 'answering' && <p className="st-note warn"><Icon name="info" size={13} /><span>{t('It would pass this to you: {why}', { why: it.why || '' })}</span></p>}
           {!it.needsOwner && it.draft != null && it.draft !== '' && (
             <>
-              <p className="small muted">{it.auto ? t('Would be sent without asking:') : t('Its draft, for you to check before it\'s sent:')}</p>
+              <p className="small muted">{it.auto ? t('Would be sent without asking:') : t('Its draft, for you to check before it\'s sent:')}{it.by ? ` ${t('Answered by {name}.', { name: it.by })}` : ''}</p>
               <blockquote className="sb-try-draft">{it.draft}</blockquote>
             </>
           )}
@@ -1666,8 +1834,13 @@ function Memory({ d, save, reload }) {
 }
 
 // ---------- One bot ----------
+// Its tabs, here in Settings and on its page in the main area (page: bots/BotPage.jsx), where its
+// name and how it stands are over them, with AI Assist (the wand) opening its chat beside them
+// (assist(ctx): the chat, given the bot as it stands and how to change it). On a phone the chat takes
+// the page while it's open. It opens by itself until the bot is connected somewhere.
 const TABS = ['setup', 'try', 'memory', 'activity']
-function Bot({ id, onGone, onChanged, notice }) {
+const STATUS_SAID = () => ({ on: t('Answering'), needs: t('Needs you'), paused: t('Paused'), off: t('Not connected yet') })
+export function Bot({ id, onGone, onChanged, notice, page = false, phone = false, status = null, assist = null }) {
   const [d, setD] = useState(null)
   const [error, setError] = useState(null)
   const [note, setNote] = useState(null)
@@ -1702,10 +1875,19 @@ function Bot({ id, onGone, onChanged, notice }) {
   const again = async () => { try { await api(`/bots/${id}/connect`, { method: 'POST' }) } catch (e) { setNote(e.message) } load() }
   const remove = async (history) => { try { await api(`/bots/${id}${history ? '?history=1' : ''}`, { method: 'DELETE' }); onGone() } catch (e) { setNote(e.message) } }
   const pickTab = (x) => { setTab(x); saved('cc-bot-tab', x) }
+  // (Its chat: open as you left it on this device; a bot not connected anywhere yet has it open, and
+  // kept open as it's connected, until you close it.)
+  const [chat, setChat] = useState(() => { const x = saved(`cc-bot-assist-${id}`); return x ? x === 'open' : null })
+  const showChat = (on) => { setChat(on); saved(`cc-bot-assist-${id}`, on ? 'open' : 'shut') }
+  useEffect(() => { if (page && assist && chat == null && d && !anyTokens(d)) showChat(true) }, [d]) // eslint-disable-line react-hooks/exhaustive-deps
+  // (How it stands, as its page says it: the sidebar's dot told at once when that changes.)
+  const now = !d ? null : d.paused ? 'paused' : d.waiting > 0 || d.state === 'error' ? 'needs' : d.connected || d.state === 'connected' ? 'on' : 'off'
+  useEffect(() => { if (page && now && status && now !== status) onChanged?.() }, [now]) // eslint-disable-line react-hooks/exhaustive-deps
   if (error && !d) return <p className="st-note bad"><Icon name="alert" size={13} /> {error}</p>
   if (!d) return <div className="skeleton-rows"><div /><div /><div /></div>
   const proposed = d.memoryCount?.proposed || 0
-  return (
+  const chatOpen = !!assist && !!chat
+  const body = (
     <>
       <div className="seg sb-tabs" role="tablist" aria-label={d.name}>
         <button type="button" role="tab" aria-selected={tab === 'setup'} className={tab === 'setup' ? 'on' : ''} onClick={() => pickTab('setup')}>{t('Set Up')}</button>
@@ -1721,10 +1903,36 @@ function Bot({ id, onGone, onChanged, notice }) {
       {tab === 'activity' && <Activity d={d} save={save} />}
     </>
   )
+  if (!page) {
+    return (
+      <>
+        <div className="st-row sb-page-link"><button type="button" className="link-btn" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-bot', { detail: { id } }))}><Icon name="external" size={12} /> {t('Open {bot} as a page', { bot: d.name })}</button></div>
+        {body}
+      </>
+    )
+  }
+  const st = d.paused ? 'paused' : d.waiting > 0 || d.state === 'error' ? 'needs' : d.connected || d.state === 'connected' ? 'on' : 'off'
+  return (
+    <div className={`bp-cols${chatOpen ? ' with-chat' : ''}`}>
+      <div className="bp-main sb" hidden={phone && chatOpen}>
+        <header className="bp-head">
+          <span className={`bt-dot bt-${st}`} style={{ '--d': '9px' }} aria-hidden="true" />
+          <h2 className="bp-name">{d.name}</h2>
+          <span className="muted small bp-said">{STATUS_SAID()[st]}{d.waiting > 0 ? ` · ${t('{n} waiting in Needs You', { n: d.waiting })}` : ''}</span>
+          <span className="sb-grow" />
+          {assist && <AiAssist on={chatOpen} compact={phone} items={[{ label: t('Set it up or change it in words'), hint: t('Say what you want: AI Assist shows what would change first'), on: chatOpen, run: () => showChat(!chatOpen) }]} />}
+        </header>
+        {d.description && <p className="muted small bp-about">{d.description}</p>}
+        {body}
+      </div>
+      {chatOpen && <aside className="bp-chat" aria-label={t('AI Assist')}>{assist({ d, save, reload: load, again, onClose: () => showChat(false) })}</aside>}
+    </div>
+  )
 }
 
 // A new bot, by its name, from a template or blank; or one exported from another computer.
-function NewBot({ onMade }) {
+// form: shown on its own, as AI Assist's chat offers it (without the way back into the chat).
+export function NewBot({ onMade, form = false }) {
   const [name, setName] = useState('')
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -1757,6 +1965,12 @@ function NewBot({ onMade }) {
   const cards = [{ id: '', name: t('Start blank'), description: t('Write its instructions yourself.') }, ...(templates || [])]
   return (
     <div className="sb-newbot">
+      {!form && (
+        <div className="sb-assist-start" data-setting="bots-assist-start">
+          <button type="button" className="btn small ai-assist" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-bot', { detail: { id: 'new' } }))}><Icon name="wand" size={13} /> {t('Say what it should do')}</button>
+          <span className="muted small">{t('AI Assist sets the whole bot up from your words: you look it over and Create. Or make it yourself, below.')}</span>
+        </div>
+      )}
       <div className="sb-templates" role="radiogroup" aria-label={t('What it does')}>
         {cards.map((c) => (
           <button key={c.id || 'blank'} type="button" role="radio" aria-checked={tpl === c.id} className={`sb-tpl ${tpl === c.id ? 'on' : ''}`} onClick={() => setTpl(c.id)}>
@@ -1827,19 +2041,27 @@ export default function Bots() {
   if (error && !list) return <p className="st-note bad"><Icon name="alert" size={13} /> {error}</p>
   if (!list) return <div className="skeleton-rows"><div /><div /><div /></div>
   const old = gone.find((b) => b.id === at) || null
-  const shown = old ? null : list.find((b) => b.id === at) ? at : list[0]?.id || null
+  // (A draft is its chat with AI Assist, on its page: its chip opens that.)
+  const live = list.filter((b) => !b.draft)
+  const shown = old ? null : live.find((b) => b.id === at) ? at : live[0]?.id || null
   const left = () => { setAt(null); saved('cc-bot', ''); load() }
   return (
     <div className="st-sections sb">
       <div className="sb-bots" role="tablist" aria-label={t('Your bots')}>
-        {list.map((b) => (
+        {list.map((b) => (b.draft
+          ? (
+            <button key={b.id} type="button" className="sb-chip" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-bot', { detail: { id: b.id } }))}>
+              <span className="sb-chip-name">{b.name}</span><span className="sb-tag">{t('Draft')}</span>
+            </button>
+          )
+          : (
           <button key={b.id} type="button" role="tab" aria-selected={b.id === shown && !adding} className={`sb-chip ${b.id === shown && !adding ? 'on' : ''}`} onClick={() => pick(b.id)}>
             <span className={`sb-dot ${b.paused ? 'warn' : b.connected || b.state === 'connected' ? 'ok' : b.state === 'error' ? 'bad' : 'warn'}`} aria-hidden="true" />
             <span className="sb-chip-name">{b.name}</span>
             {b.paused && <Icon name="pause" size={11} />}
             {b.waiting > 0 && <span className="sb-count" aria-label={t('{n} waiting in Needs You', { n: b.waiting })}>{b.waiting}</span>}
           </button>
-        ))}
+          )))}
         {gone.map((b) => (
           <button key={b.id} type="button" role="tab" aria-selected={b.id === old?.id && !adding} className={`sb-chip gone ${b.id === old?.id && !adding ? 'on' : ''}`} onClick={() => pick(b.id)}>
             <Icon name="archive" size={12} />
@@ -1849,7 +2071,7 @@ export default function Bots() {
         {(list.length > 0 || gone.length > 0) && <button type="button" className={`sb-chip add ${adding ? 'on' : ''}`} onClick={() => setAdding(true)}><Icon name="plus" size={12} /> {t('New Bot')}</button>}
       </div>
       {!list.length && !gone.length && !adding && <FirstBot onStart={() => setAdding(true)} />}
-      {((!list.length && gone.length > 0 && !old) || adding) && <NewBot onMade={(id, problems) => { setImported(problems?.length ? { id, problems } : null); pick(id); load() }} />}
+      {((!live.length && (gone.length > 0 || list.length > 0) && !old) || adding) && <NewBot onMade={(id, problems) => { setImported(problems?.length ? { id, problems } : null); pick(id); load() }} />}
       {old && !adding && <DeletedBot key={`${old.id}-${old.cleared || ''}`} d={old} reload={load} />}
       {shown && !adding && !old && <Bot key={shown} id={shown} onChanged={load} onGone={left} notice={imported?.id === shown ? imported.problems : null} />}
     </div>

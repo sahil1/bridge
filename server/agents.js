@@ -64,6 +64,27 @@ const CLAUDE_BUSY = new RegExp(`${ESC_INTERRUPT.source}|^\\s*[✻✳✶✢✽·*
 // Claude Code's permission rule for edits in its own folder and all below it: Edit(./ then two
 // stars). (Written in two, so nothing reading this file takes it for a comment.)
 const EDIT_HERE = 'Edit(./' + '**)'
+// A bot's MCP servers for one run (botmcp.js runFolder): a folder of the desk's among the folders it's
+// given (front-desk/mcp/<run>/), with the servers' config (config.json) and which of their tools it
+// may use (rules.json: { allow, deny }). Never a folder it may read: it comes out of dirs, and the
+// rest stay as they were. Its files gone (Bridge AI started again since), it gives none.
+const MCP_RUNS = dataFile('front-desk', 'mcp')
+export function mcpOf(dirs = []) {
+  const runs = (dirs || []).filter((d) => path.resolve(String(d)).startsWith(MCP_RUNS + path.sep))
+  let mcp = null
+  for (const d of runs) {
+    try {
+      const r = JSON.parse(fs.readFileSync(path.join(d, 'rules.json'), 'utf8'))
+      if (fs.existsSync(path.join(d, 'config.json'))) mcp = { config: path.join(d, 'config.json'), allow: (r.allow || []).map(String), deny: (r.deny || []).map(String) }
+    } catch { /* gone: none */ }
+  }
+  return { dirs: (dirs || []).filter((d) => !runs.includes(d)), mcp }
+}
+// Its flags, with the rules it allows already (allowed). Each takes a list, so another flag follows.
+const mcpFlags = (m, allowed) => {
+  const allow = [...allowed, ...(m ? m.allow : [])]
+  return [...(m ? ['--mcp-config', m.config] : []), ...(allow.length ? ['--allowedTools', ...allow] : []), ...(m?.deny.length ? ['--disallowedTools', ...m.deny] : [])]
+}
 
 export const AGENTS = [
   {
@@ -86,8 +107,14 @@ export const AGENTS = [
     // and all in it, which covers every tool that edits), anything else refused (dontAsk), so it
     // can't run a command, fetch a page or edit outside it; the other folders it may read added as
     // for read.
-    access: (lvl, o = {}) => (lvl === 'edits' ? ['--permission-mode', 'acceptEdits'] : lvl === 'full' ? ['--permission-mode', 'bypassPermissions'] : lvl === 'read' ? ['--tools', 'Read,Grep,Glob', ...(o.dirs?.length ? ['--add-dir', ...o.dirs] : []), '--permission-mode', 'dontAsk', '--strict-mcp-config']
-      : lvl === 'change' ? ['--tools', 'Read,Grep,Glob,Edit,Write', '--allowedTools', EDIT_HERE, ...(o.dirs?.length ? ['--add-dir', ...o.dirs] : []), '--permission-mode', 'dontAsk', '--strict-mcp-config'] : []),
+    // Either way a bot's MCP servers, when it has some (mcpOf below): only those, --mcp-config with
+    // --strict-mcp-config, and of their tools only the ones allowed for whoever asked (--allowedTools);
+    // the rest refused by dontAsk, and named in --disallowedTools too where they're known.
+    access: (lvl, o = {}) => {
+      if (lvl !== 'read' && lvl !== 'change') return lvl === 'edits' ? ['--permission-mode', 'acceptEdits'] : lvl === 'full' ? ['--permission-mode', 'bypassPermissions'] : []
+      const { dirs, mcp } = mcpOf(o.dirs)
+      return [...(lvl === 'read' ? ['--tools', 'Read,Grep,Glob'] : ['--tools', 'Read,Grep,Glob,Edit,Write']), ...(dirs.length ? ['--add-dir', ...dirs] : []), ...mcpFlags(mcp, lvl === 'change' ? [EDIT_HERE] : []), '--permission-mode', 'dontAsk', '--strict-mcp-config']
+    },
     confined: true,
     // A copy of a conversation under a new id (the original stays as it is).
     fork: (id, newId) => ['--resume', id, '--fork-session', ...(newId ? ['--session-id', newId] : [])],

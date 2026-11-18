@@ -60,6 +60,8 @@
 //   free times it was given, a nudge, and the draft shorter, warmer or more direct.
 //   Ask a Model in AI Assist's look at a folder ("Suggest how to organize this folder."): a Screenshots folder with the
 //   first screenshot in the list it was sent as its example, an Installers folder, and two steps.
+//   AI Assist setting up a bot ("Known folders…"): the bot from the owner's words (botSetup below);
+//   and a bot's question asked of a model with Bridge AI's tools: what it reads with them (botAnswer).
 //   Anything else: "echo: <the last thing said>".
 //   A key of sk-bad is turned down (HTTP 401), as a provider would.
 import http from 'node:http'
@@ -152,10 +154,84 @@ function bookOf(text) {
   ] })}\n\`\`\``
 }
 
+// AI Assist setting up a bot (server/botsetup.js): the bot from the owner's words, as JSON in a code
+// fence. Its name from "called <Name>" (else the first known folder it names, as "<Folder> Desk"); the
+// known folders and ~/paths it names; the people after "for" (capitalised names) and in "let <Name>
+// ask"; #channels, every message there with "without a mention"; the MCP servers it names; Discord
+// or Teams when it says so; everyone in its channels for "anyone" or "everyone"; answering without
+// asking when it says "without asking". Given the bot so far, the words change it: what they name is
+// added, "don't use <server>" takes one out, "rename it <Name>" renames it. "gibberish" gets an
+// answer that isn't JSON.
+function botSetup(first) {
+  const section = (re) => { const i = first.split('\n').findIndex((l) => re.test(l)); if (i < 0) return []; const out = []; for (const l of first.split('\n').slice(i + 1)) { if (!l.startsWith('- ')) break; out.push(l.slice(2)) } return out }
+  const known = section(/^Known folders/).map((l) => { const i = l.lastIndexOf(': '); return { name: l.slice(0, i), path: l.slice(i + 2) } })
+  const servers = section(/'s MCP servers/)
+  const said = (/\n-----\n([\s\S]*?)\n-----\s*$/.exec(first) || [])[1] || ''
+  const cur = (() => { const m = /^The bot (?:as it is now|as proposed so far):\n(.*)$/m.exec(first); try { return m ? JSON.parse(m[1]) : null } catch { return null } })()
+  if (/gibberish/i.test(said)) return 'I am not sure what you mean by that.'
+  const words = said.toLowerCase()
+  const folders = known.filter((f) => new RegExp(`\\b${f.name.toLowerCase().replace(/[^a-z0-9]+/g, '.?')}\\b`).test(words)).map((f) => f.path)
+  const paths = [...said.matchAll(/(~\/[\w./-]*\w|~(?=[\s,.]|$))/g)].map((m) => m[1])
+  const people = [...((/\bfor ((?:[A-Z][a-z]+)(?:(?:, | and )(?:[A-Z][a-z]+))*)/.exec(said) || [])[1] || '').split(/, | and /), ...[...said.matchAll(/\blet ([A-Z][a-z]+) ask/g)].map((m) => m[1])].filter((n) => n && !/^(Slack|Discord|Teams|Microsoft)$/.test(n))
+  const listen = /without (?:a )?mention|every message/i.test(said)
+  const channels = [...said.matchAll(/#([\w-]+)/g)].map((m) => ({ name: m[1], listen }))
+  const mcp = servers.filter((s) => new RegExp(`\\b${s}\\b`, 'i').test(said) && !new RegExp(`don't use (the )?${s}`, 'i').test(said))
+  const platform = /discord/i.test(said) ? 'discord' : /\bteams\b/i.test(said) ? 'teams' : null
+  const can = section(/^What can answer here/).map((l) => ({ id: l.split(': ')[0], local: /\(Local\)$/.test(l) }))
+  const answerers = /local model if claude/i.test(said) ? ['agent:claude', can.find((x) => x.local)?.id].filter(Boolean) : null
+  const named = (/\b(?:called|named|rename it) "?([A-Z][\w]*(?: [A-Z][\w]*)*)"?/.exec(said) || [])[1]
+  const fromFolder = known.find((f) => folders.includes(f.path))
+  const b = cur ? { ...cur } : { name: named || (fromFolder ? `${fromFolder.name[0].toUpperCase()}${fromFolder.name.slice(1)} Desk` : 'Helper'), description: `Answers questions from ${fromFolder ? fromFolder.name : 'what it knows'}`, instructions: '', platform: 'slack', folders: [], who: 'named', people: [], channels: [], template: null, agent: 'claude', limits: { day: 30, atOnce: 2, minutes: 10 }, auto: false, mcp: [] }
+  if (cur && named) b.name = named
+  if (!cur) b.instructions = `# ${b.name}\n\nAnswer what's asked from the folders you can read, and name the files an answer comes from. If nothing there answers it, say so.\n`
+  b.folders = [...new Set([...(b.folders || []), ...folders, ...paths])]
+  b.people = [...new Set([...(b.people || []), ...people])]
+  b.channels = [...(b.channels || []).filter((c) => !channels.some((x) => x.name === c.name)), ...channels]
+  b.mcp = [...new Set([...(b.mcp || []).filter((s) => !new RegExp(`don't use (the )?${s}`, 'i').test(said)), ...mcp])]
+  if (platform) b.platform = platform
+  if (/\b(anyone|everyone)\b/i.test(said)) b.who = 'channels'
+  if (/without asking/i.test(said)) b.auto = true
+  if (answerers) b.answerers = answerers
+  if (/don't fall back/i.test(said)) b.fallback = false
+  const post = /\bpost (?:a |an )?(.+?) in #([\w-]+),? (every [^.]+)/i.exec(said)
+  b.posts = [...(cur?.posts || []), ...(post ? [{ what: post[1], channel: post[2], when: post[3] }] : [])]
+  const say = cur ? `Changed ${b.name} as you asked.` : `Here's ${b.name}: it reads ${b.folders.join(', ') || 'no folders'}${b.people.length ? `, for ${b.people.join(' and ')}` : ''}.`
+  return `\`\`\`json\n${JSON.stringify({ say, bot: b })}\n\`\`\``
+}
+
+// A bot's question, answered with Bridge AI's tools (botanswer.js runChat), as the question asks:
+// [read <path>] reads that file, [mcp <server> <tool>] calls that tool when it was offered, else it
+// lists its folder and reads README.md; then [answer <text>] is its answer, or what it read ("It says:
+// <the file's first line that isn't a heading>", or why it couldn't), or what the tool said. [change]
+// with the brief's CHANGE NEEDED: CHANGE NEEDED. [noanswer]: NO ANSWER.
+function botAnswer(b, first) {
+  const m = b.messages || []
+  const q = (/----- question from.*? -----\n([\s\S]*?)\n----- end of question -----/.exec(first) || [])[1] || ''
+  const offered = (b.tools || []).map((t) => t.function?.name)
+  const names = Object.fromEntries(m.filter((x) => x.role === 'assistant').flatMap((x) => x.tool_calls || []).map((c) => [c.id, c.function?.name]))
+  const results = m.filter((x) => x.role === 'tool' && names[x.tool_call_id] !== 'list_files').map((x) => String(x.content || ''))
+  if (!m.some((x) => x.role === 'tool')) {
+    const calls = []
+    const read = /\[read ([^\]]+)\]/.exec(q)
+    if (read) calls.push(['read_file', { path: read[1] }])
+    for (const mm of q.matchAll(/\[mcp ([\w.-]+) ([\w.-]+)\]/g)) if (offered.includes(`mcp__${mm[1]}__${mm[2]}`)) calls.push([`mcp__${mm[1]}__${mm[2]}`, {}])
+    if (!calls.length && !/\[(noanswer|change)\]/.test(q)) calls.push(['list_files', {}], ['read_file', { path: 'README.md' }])
+    if (calls.length) return { choices: [{ finish_reason: 'tool_calls', message: { role: 'assistant', content: null, tool_calls: calls.map(([name, args], i) => ({ id: `call_${i}`, type: 'function', function: { name, arguments: JSON.stringify(args) } })) } }] }
+  }
+  if (/\[noanswer\]/.test(q)) return say('NO ANSWER\nNothing in these folders says.')
+  if (/\[change\]/.test(q) && /CHANGE NEEDED/.test(first)) return say(`CHANGE NEEDED\n${q.replace(/\[[^\]]*\]/g, '').trim()}`)
+  const a = /\[answer ([^\]]+)\]/.exec(q)
+  const refused = [...q.matchAll(/\[mcp ([\w.-]+) ([\w.-]+)\]/g)].filter((mm) => !offered.includes(`mcp__${mm[1]}__${mm[2]}`)).map((mm) => `${mm[1]}'s ${mm[2]} wasn't offered to me.`)
+  const said = results.map((r) => (/^\d+\t/.test(r) ? `It says: ${(r.split('\n').map((l) => l.replace(/^\d+\t/, '')).find((l) => l.trim() && !l.startsWith('#')) || '').trim()}` : r)).filter(Boolean)
+  return say(a ? a[1] : [...said, ...refused].join(' ') || 'Here is what I found.')
+}
+
 function answer(b) {
   const m = b.messages || []
   const last = words([...m].reverse().find((x) => x.role === 'user')?.content)
   const first = words(m.find((x) => x.role === 'user')?.content)
+  if (/^Known folders/.test(first) && /\nWhat .+ said:\n-----\n/.test(first)) return say(botSetup(first))
+  if (b.tools?.length && /----- question from/.test(first)) return botAnswer(b, first)
   if (/^sonar/.test(b.model || '')) {
     const q = /: ([^\n]*)$/.exec(last)?.[1] || last
     return { ...say(`**On the web**: ${q.replace(/\?\s*$/, '')}, says the official text.[1] The guidance has the dates.[2] A third sentence. A fourth one, left out.`), citations: ['https://example.com/eu-ai-act', 'https://example.org/guidance'], search_results: [{ title: 'EU AI Act: the timeline', url: 'https://example.com/eu-ai-act' }, { title: 'Guidance', url: 'https://example.org/guidance' }, { title: 'Not a page', url: 'javascript:alert(1)' }] }

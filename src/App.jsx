@@ -11,7 +11,8 @@ import Board from './components/Board.jsx'
 import TabStrip from './components/TabStrip.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty, showChat, showView } from './components/Console.jsx'
-import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, StudioHome, StudioPage, UsageStats, preloadViews } from './lazy.jsx'
+import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, StudioHome, StudioPage, UsageStats, BotPage, PhoneBots, preloadViews } from './lazy.jsx'
+import { useBots, statusOf, BOT_VIEW, botView } from './components/bots/bots.js'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
 import { MeetingsProvider, RecordingPill, CallPrompt, useMeetings } from './components/meetings/recording.jsx'
@@ -410,9 +411,12 @@ function App() {
   // Home and meetings in tabs too: always there while their tab is open.
   const meetingTabs = W.tabs.some((id) => id.startsWith('view:meeting:'))
   const meetingList = usePoll(meetingTabs ? '/meetings' : null, 20 * 1000).data?.meetings || []
+  // A bot's page (Bots, a beta feature): named as the sidebar names it.
+  const bots = useBots()
   const views = [...new Set([...W.tabs, mobileAgent].filter(isView))].map((id) => {
     const m = id.startsWith('view:meeting:') ? meetingList.find((x) => x.id === id.slice(13)) : null
     if (id.startsWith(STUDIO)) return { paneId: id, view: true, title: studioOf(id).path.split('/').pop(), icon: studioOf(id).root === 'board' ? 'shapes' : 'layers' }
+    if (id.startsWith(BOT_VIEW)) return { paneId: id, view: true, title: id === botView('new') ? t('New bot') : bots.list?.find((b) => botView(b.id) === id)?.name || t('Bot'), icon: 'bot' }
     return { paneId: id, view: true, title: VIEWS[id] ? t(VIEWS[id].title) : m?.title || t('Meeting'), icon: VIEWS[id]?.icon || 'mic' }
   })
   // Agents on your other devices, in tabs here: named from what each device last said about them
@@ -551,6 +555,8 @@ function App() {
       // file or whiteboard in it) in its More tab.
       if (typeof paneId === 'string' && paneId.startsWith('view:meeting')) { setMtab('meetings'); setMobileMeeting(paneId === 'view:meetings' ? null : paneId); return }
       if (typeof paneId === 'string' && paneId.startsWith('view:studio')) { setMtab('more'); setMoreView(paneId); return }
+      // A bot's page in More, under Bots.
+      if (typeof paneId === 'string' && paneId.startsWith(BOT_VIEW)) { setMtab('more'); setMoreView(paneId); return }
       if (paneId === 'view:home' || paneId === 'view:everything') { setMtab('home'); setHomeView(paneId === 'view:home' ? 'home' : 'everything'); return }
       if (a?.chief) { setMtab('mate'); setMobileAgent(null); setMateId(paneId) } else { setMtab('agents'); setMobileAgent(paneId) }
       return
@@ -639,6 +645,13 @@ function App() {
     }
     window.addEventListener('bridge-open-meeting', on)
     return () => window.removeEventListener('bridge-open-meeting', on)
+  }, [])
+  // A bot's page, from anywhere (Settings › Bots, Needs You): replace, the tab it takes the place of
+  // (the new bot's chat, once its draft is made).
+  useEffect(() => {
+    const on = (e) => { if (e.detail?.id) { setSettings(null); openAgentRef.current?.(botView(e.detail.id), { replace: e.detail.replace || null }) } }
+    window.addEventListener('bridge-open-bot', on)
+    return () => window.removeEventListener('bridge-open-bot', on)
   }, [])
   // Dictations, from Memory (with one to open) or anywhere else: Meetings at Dictations.
   useEffect(() => {
@@ -934,6 +947,7 @@ function App() {
     { id: 'a:accounts', label: t('Accounts…'), icon: 'users', keywords: 'account switch work personal sign in login claude codex auto', run: () => setSettings('accounts') },
     { id: 'a:add-account', label: t('Add another account…'), icon: 'plus', keywords: 'account second work personal sign in login claude codex both two', run: () => setAddAcct({}) },
     { id: 'a:mcp', label: t('MCP Servers'), icon: 'tool', keywords: 'tools mcp github playwright', run: () => setSettings('mcp') },
+    bots.on && { id: 'a:new-bot', label: t('New bot'), sub: t('Say what it should do'), icon: 'bot', keywords: 'bot bots slack discord teams answer questions people colleagues front desk assistant', run: () => openAgent(botView('new')) },
     { id: 'a:config', label: t('Edit config file'), icon: 'braces', keywords: 'json config.json settings', run: () => setSettings('config') },
     // The chief of staff's one place in ⌘K (its Main thread isn't listed again among the agents).
     { id: 'a:mate', label: t('Chief of Staff'), sub: t('Hands work to the right agent'), status: mate?.status, icon: 'helm', keywords: 'chief staff dispatch route go to open start', run: () => (mate ? openAgent(mate.paneId) : mateLaunch.launch()) },
@@ -1098,6 +1112,7 @@ function App() {
         : id === 'view:meetings' ? <section className="pane view-pane"><MeetingsHome onOpen={(mid) => openAgent(`view:meeting:${mid}`, wide ? { replace: 'view:meetings' } : {})} /></section>
         : id === 'view:studio' && StudioHome ? <section className="pane view-pane"><StudioHome onOpen={(f) => openAgent(studioId(f), wide ? { replace: 'view:studio' } : {})} /></section>
         : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f, o) => openAgent(studioId(f), o?.replace ? { replace: id } : {})} /></section>
+        : id.startsWith(BOT_VIEW) ? <section className="pane view-pane">{bots.on ? <BotPage id={id.slice(BOT_VIEW.length)} phone={!wide} onOpen={(bid, o) => openAgent(botView(bid), o?.replace ? { replace: id } : {})} onGone={() => (wide ? closeTab(id) : setMoreView('bots'))} /> : conf && <TrialOff name={t('Bots')} />}</section>
         : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
     </ErrorBoundary>
   )
@@ -1206,6 +1221,8 @@ function App() {
       StudioHome && { id: 'studio', icon: 'layers', label: t('Studio'), hint: t('Every file on your computers, and documents, sheets, decks and whiteboards'), run: () => setMoreView('view:studio') },
       { id: 'terminals', icon: 'terminal', label: t('Terminals'), hint: t("Every agent's terminal, live"), run: () => setMoreView('terminals') },
       { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
+      // Your bots (a beta feature), as the computer's sidebar lists them.
+      bots.on && { id: 'bots', icon: 'bot', label: t('Bots'), hint: t('Your bots in Slack, Discord and Teams, and a new one'), count: (bots.list || []).filter((b) => statusOf(b) === 'needs').length, run: () => setMoreView('bots') },
       { id: 'needs', icon: 'bell', label: t('Needs You'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
       { id: 'history', icon: 'clock', label: t('History'), hint: t('Every conversation, and closed agents'), run: () => setHistory(true) },
       { id: 'settings', icon: 'settings', label: t('Settings'), hint: t('Devices, voice, appearance and more'), run: () => setSettings('all') },
@@ -1236,8 +1253,11 @@ function App() {
             ? (
               <div className="m-view m-more-view">
                 {/* A file in Studio has its own way back, to Studio. */}
-                {!moreView.startsWith(STUDIO) && <button type="button" className="ghost-btn m-view-back" onClick={() => setMoreView(null)}><Icon name="back" size={14} /> {t('More')}</button>}
+                {!moreView.startsWith(STUDIO) && (moreView.startsWith(BOT_VIEW)
+                  ? <button type="button" className="ghost-btn m-view-back" onClick={() => setMoreView('bots')}><Icon name="back" size={14} /> {t('Bots')}</button>
+                  : <button type="button" className="ghost-btn m-view-back" onClick={() => setMoreView(null)}><Icon name="back" size={14} /> {t('More')}</button>)}
                 {moreView === 'terminals' ? <Terminals key={fleet?.session || ''} onChat={(id) => openAgent(id)} />
+                  : moreView === 'bots' ? <ErrorBoundary name="Bots"><PhoneBots onOpen={(id) => setMoreView(botView(id))} /></ErrorBoundary>
                   : moreView === 'today' ? <div className="m-today"><TodayTabs tab={todayTab} setTab={setTodayTab} compact /><div className={`m-today-body tab-${todayTab}`}><TodayBody phone onOpenAgent={openAgent} tab={todayTab} setTab={setTodayTab} stackClass="m-stack" /></div></div>
                     : moreView === 'usage' ? <ErrorBoundary name="Usage"><UsageStats phone /></ErrorBoundary>
                     : viewFor(moreView)}

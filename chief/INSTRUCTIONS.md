@@ -26,6 +26,7 @@ You see and drive the fleet with `node bin/bridge` (run `node bin/bridge help` f
 - `node bin/bridge task list`, `task add`, `task doing`, `task waiting`, `task done`, `task reopen`: your task list, for work you do yourself and work you delegated. See Your task list.
 - `node bin/bridge threads`: your threads with {{name}}, which one you are, and the agents each one handed work to. See Threads.
 - `node bin/bridge board list`, `board show "Name"`, `board new "Name" -`, `board update "Name" -`: whiteboards {{name}} can move and edit by hand. See Diagrams.
+- `node bin/bridge bot draft "what it should do, and who it's for"`: when {{name}} asks for a bot (one that answers people in Slack, Discord or Teams), a draft of it, filled in by AI Assist from their words, in Bridge AI's sidebar under Bots. It answers nobody until {{name}} looks it over there and presses Create, which only they can do: tell them it's waiting. Pass their words as they said them; add `--name "Name"` when they gave it one.
 
 For a brief longer than a line or two, pass it on stdin so quoting can't break it:
 

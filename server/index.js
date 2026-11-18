@@ -106,8 +106,11 @@ import { makeSlack, manifest as slackManifest, SCOPES as SLACK_SCOPES, SCOPE_FOR
 import { makeDiscord } from './discordbot.js'
 import { makeTeams, PORT as TEAMS_PORT } from './teamsbot.js'
 import { combine, platformOf, PLATFORMS } from './connector.js'
-import { listTemplates } from './bottemplates.js'
+import { listTemplates, templateOf } from './bottemplates.js'
 import * as botsStore from './bots.js'
+import { makeBotSetup, patchOf, proposalOf, linesOf, postSaid } from './botsetup.js'
+import * as botMcp from './botmcp.js'
+import * as botAnswer from './botanswer.js'
 import { keepOf } from './trace.js'
 import { makeMcp, connection, MODERN, LEGACY } from './mcpproto.js'
 import * as notify from './notify.js'
@@ -1064,7 +1067,7 @@ app.post('/api/chief/delegate/:task/retry', wrap((req) => delegate.retry(req.par
 // named, as New agent starts one. Either way in the Helpers space, a tab each (the bots' answers in
 // their own space). Read-only (access 'read'): started so. fork: a copy of an agent's conversation, in
 // its folder.
-async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs, fork }) {
+async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs, fork, model }) {
   const f = await fleetView()
   const ws = (f.workspaces || []).find((w) => w.label.toLowerCase() === String(space).toLowerCase())
   const where = ws ? { workspaceId: ws.id } : { newSpace: space }
@@ -1074,7 +1077,7 @@ async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs
   // work of yours to remember the folder for.)
   if (!own && !fork && access !== 'read' && access !== 'change') return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest', access })), session: f.session || '' }
   if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
-  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: access === 'read' || access === 'change' ? dirs : undefined, fork, effort: 'suggest' })
+  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: access === 'read' || access === 'change' ? dirs : undefined, fork, effort: 'suggest', ...(model ? { model, pinModel: true } : {}) })
   pushFleet()
   return { ...out, session: f.session || '' }
 }
@@ -3271,7 +3274,7 @@ async function servedUi() {
 const localAsk = (req) => !req.headers['x-bridge-relay'] && /^(::1|127\.\d+\.\d+\.\d+|::ffff:127\.\d+\.\d+\.\d+)$/.test(String(req.socket?.remoteAddress || ''))
 app.get('/api/health', (req, res) => res.json({
   ok: true, app: 'Bridge AI', version: VERSION, in: auth.allowed(req),
-  ...(localAsk(req) && trialOn('slack-bot') ? { bots: botsStore.list().map((b) => { const st = desk.channel(b.id)?.state() || { state: 'off' }; return { id: b.id, name: b.name, state: st.state, why: st.why || null, paused: b.paused, where: Object.fromEntries(Object.entries(st.platforms || {}).filter(([, x]) => x.state !== 'no-tokens').map(([k, x]) => [k, { state: x.state, why: x.why || null }])) } }) } : {}),
+  ...(localAsk(req) && trialOn('slack-bot') ? { bots: botsStore.live().map((b) => { const st = desk.channel(b.id)?.state() || { state: 'off' }; return { id: b.id, name: b.name, state: st.state, why: st.why || null, paused: b.paused, where: Object.fromEntries(Object.entries(st.platforms || {}).filter(([, x]) => x.state !== 'no-tokens').map(([k, x]) => [k, { state: x.state, why: x.why || null }])) } }) } : {}),
 }))
 // A one-time link that lets a browser on this computer in (apiauth.js): View › Open in Browser in
 // the desktop app, and `bridge-ai open`. to: where it lands ("/", "/?window=…").
@@ -3990,10 +3993,26 @@ async function readsOf(h) {
 }
 // The file its agent keeps its conversation in, to keep beside its record (D4).
 const transcriptOf = (h) => { try { return h.sessionId ? locate(h.kind, h.sessionId, h.cwd) : null } catch { return null } }
+// The tools its agent called in its run, by name (the MCP tools it used, botmcp.js usedOf).
+async function toolsOf(h) {
+  if (!h.sessionId) return []
+  const since = Date.parse(h.startedAt || 0) - 2000
+  return (transcript({ kind: h.kind, sessionId: h.sessionId, cwd: h.cwd }).messages || []).filter((m) => m.role === 'tool' && (!m.ts || Date.parse(m.ts) >= since)).map((m) => m.tool)
+}
+// What its agent is doing now, for Try It: how it stands, what it waits on, and its last tool.
+async function helperNow(h) {
+  const f = lastFleet || await fleetView().catch(() => null)
+  const a = (f?.agents || []).find((x) => x.paneId === h.paneId)
+  if (!a) return null
+  let p = null
+  try { p = preview(a) } catch { /* no transcript yet */ }
+  return { status: a.status, asking: a.asking?.title ? String(a.asking.title).slice(0, 200) : a.status === 'blocked' ? 'its terminal' : null, doing: a.status === 'working' && p?.tool ? String(p.tool).slice(0, 200) : null }
+}
 const desk = makeFrontDesk({
   delegate, fleet: fleetView, resolve: (p) => places.resolveDir(p), installed, on: botsOn,
   you: () => String(cfg.name || '').trim() || 'the owner', changed: () => pushFleet(), close: closePane, told: deskTold, readsOf, transcriptOf, modelOf: (kind) => modelFor(kind), computer: () => relay.thisName(),
-  commandOf: (b) => slackCommand(b.name), shortcutOf: (b) => slackShortcut(b.name),
+  commandOf: (b) => slackCommand(b.name), shortcutOf: (b) => slackShortcut(b.name), toolsOf, nowOf: helperNow,
+  models: () => chatModels.models(), reply: (id, msgs, o) => chatModels.reply(id, msgs, o), signedIn: (kind) => accounts.signInOf(kind),
 })
 // A bot's Slack app, Discord bot and Teams app, as one channel of the desk (connector.js combine):
 // the channels it answers in without a mention, and what Slack's Home tab says. Each is idle until
@@ -4018,7 +4037,7 @@ const partOf = (id, p) => connectBot(id).parts?.[p] || null
 // The Slack Bot (#216), carried over once as the first bot; then each bot's channel.
 {
   const was = botsStore.carryOver(cfg.slackBot, { you: String(cfg.name || '').trim(), unset: () => { settings.patch({ slackBot: null }); applyConfigSoon() } })
-  for (const b of botsStore.list()) connectBot(b.id)
+  for (const b of botsStore.live()) connectBot(b.id)
   // A deleted bot's record, still to look at until its time runs out.
   for (const d of botsStore.deleted()) desk.add(d.id, null)
   if (was) {
@@ -4027,7 +4046,13 @@ const partOf = (id, p) => connectBot(id).parts?.[p] || null
   }
 }
 function applyConfigSoon() { setTimeout(() => { try { applyConfig() } catch { /* next change */ } }, 0) }
-const botOr404 = (id) => { const b = botsStore.get(id); if (!b) throw Object.assign(new Error('No such bot'), { status: 404 }); return b }
+// (A draft, only where it's asked for: nothing else of it is there until you press Create.)
+const botOr404 = (id, { draft = false } = {}) => {
+  const b = botsStore.get(id)
+  if (!b) throw Object.assign(new Error('No such bot'), { status: 404 })
+  if (b.draft && !draft) throw Object.assign(new Error(`${b.name} is a draft: look it over and press Create first`), { status: 409 })
+  return b
+}
 // A bot, or a deleted one whose record is kept: what Activity and its export look at.
 const recordOr404 = (id) => { const b = botsStore.get(id) || botsStore.deletedOf(id); if (!b || !desk.has(b.id)) throw Object.assign(new Error('No such bot'), { status: 404 }); return b }
 const wrapBot = (fn) => async (req, res) => { try { res.json(await fn(req, res)) } catch (e) { res.status(e.status >= 400 && e.status < 500 ? e.status : 502).json({ error: e.message }) } }
@@ -4054,6 +4079,8 @@ async function signInKind(kind) {
 // settings and instructions, its folders as they stand, which agent answers and how it's signed in,
 // the manifest to make or update its app with, and how many questions wait.
 async function botView(b, { brief = false } = {}) {
+  // A draft: its name and who asked for it; what it would be is its setup chat's (botsetup.js).
+  if (b.draft) return { id: b.id, name: b.name, description: b.description, draft: true, from: b.from === 'chief' ? 'chief' : 'you', state: 'draft', where: {}, connected: false, waiting: 0, paused: false }
   const ch = desk.channel(b.id)
   const all = ch?.state() || { state: 'off' }
   // (Its Slack app's state at the top, as before; Discord's and Teams' under where.)
@@ -4062,7 +4089,7 @@ async function botView(b, { brief = false } = {}) {
   for (const k of ['discord', 'teams']) { const x = all.platforms?.[k]; if (x) where[k] = { ...x, owner: b.owners?.[k] || null } }
   const base = { id: b.id, name: b.name, description: b.description, state: s.state, why: s.why || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null, appId: s.appId || null, where, connected: all.state === 'connected' }
   const v = await desk.view(b.id)
-  if (brief) return { ...base, waiting: v?.waiting || 0 }
+  if (brief) return { ...base, waiting: v?.waiting || 0, answering: v?.answering || 0, paused: b.paused }
   // How many channels its Slack app is in (Set Up's checklist: invited to one), asked of Slack once
   // a minute at most.
   if (s.state === 'connected' && ch?.parts?.slack?.channels) {
@@ -4090,11 +4117,11 @@ async function botView(b, { brief = false } = {}) {
   const routinesNow = await routines.list().catch(() => ({ routines: [] }))
   return {
     ...base, ...v,
-    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus },
+    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback },
     paused: b.paused,
     instructions: { text: botsStore.readOwn(b.id), file },
     agents: ['claude', 'codex'].map((k) => ({ kind: k, label: adapter(k).label, installed: have.has(k), confined: !!readOnly(k)?.confined, canChange: canChange(k) })),
-    signIn: kind ? await signInKind(kind) : null,
+    signIn: kind === 'claude' || kind === 'codex' ? await signInKind(kind) : null,
     manifest: slackManifest(b, cfg.name), scopesWanted: SLACK_SCOPES, you: me || null,
     updateApp: { missing, needs: missing.map((x) => ({ scope: x, for: String(SLACK_SCOPE_FOR[x] || '').replace('<command>', slackCommand(b.name).slice(1)) })) },
     command: slackCommand(b.name), shortcut: slackShortcut(b.name), ownerGuess,
@@ -4138,19 +4165,230 @@ app.post('/api/bots', botsGuard, wrapBot(async (req) => {
 }))
 // What a new bot can start from.
 app.get('/api/bots/templates', botsGuard, wrapBot(async () => ({ templates: listTemplates(String(cfg.name || '').trim()) })))
-app.get('/api/bots/:id', botsGuard, wrapBot(async (req) => botView(botOr404(req.params.id))))
+
+// ---------- Setting a bot up by saying what it's for (botsetup.js) ----------
+// AI Assist's model (the one picked for Studio, else the one AI Assist reaches first: studioModel),
+// asked for a bot from your words, with the folders, MCP servers, templates and agents it may pick from.
+const NO_MODEL = 'There\'s no model for AI Assist to set it up with. Sign in to an agent like Claude Code, or add a model in Settings › Model Providers.'
+async function setupAsk(system, prompt) {
+  let model
+  try { model = await studioModel(prompt) } catch (e) { throw Object.assign(e, { code: e.code === 'local_missing' ? 'no-model' : e.code }) }
+  if (!model) throw Object.assign(new Error(NO_MODEL), { code: 'no-model' })
+  return (await chatModels.reply(model, [{ role: 'user', text: prompt }], { system, feature: 'assist' }))?.text
+}
+// What a bot can be given: the projects and places Bridge AI knows (and the folders bots read
+// already), your MCP servers in Claude Code, the templates, and the agents here that answer read-only.
+async function setupContext() {
+  const seen = new Map()
+  const add = (p, name) => { if (!p) return; const short = String(p).replace(os.homedir(), '~'); if (!seen.has(short)) seen.set(short, { name: String(name || path.basename(short)).slice(0, 80), path: short }) }
+  for (const p of await projects.list().catch(() => [])) add(p.path, p.name)
+  for (const p of places.pickedPlaces()) add(p.path, p.name)
+  for (const b of botsStore.list()) for (const f of b.readsFrom) add(f)
+  const have = new Set((await installed()).map((k) => k.kind))
+  return {
+    folders: [...seen.values()].slice(0, 80),
+    mcp: botMcp.names(),
+    templates: listTemplates(botOwnerName()).map(({ id, name, description }) => ({ id, name, description })),
+    agents: ['claude', 'codex'].filter((k) => have.has(k) && readOnly(k)).map((k) => ({ kind: k, label: adapter(k).label })),
+    // (What can answer: each agent here, and each model, Local or Cloud.)
+    answerers: botAnswer.options(await answerHere({ fresh: true })).filter((x) => x.installed !== false),
+  }
+}
+const botSetup = makeBotSetup({ ask: setupAsk, context: setupContext, you: botOwnerName })
+// Which model AI Assist would set it up with, by its name, or why there's none (a reason past there
+// being none at all: one set to stay on this computer that can't).
+async function assistState() {
+  try {
+    const id = await studioModel()
+    if (!id) return { model: null, why: null }
+    return { model: { id, label: (await chatModels.models().catch(() => [])).find((m) => m.id === id)?.label || String(id).split(':').slice(1).join(':') || id } }
+  } catch (e) { return { model: null, why: e.message } }
+}
+// Its steps of connecting where it answers, each done or not (Set Up's checklist ticks the same:
+// Bots.jsx stepsFor): its app and its token, connected, you there, invited or added, its first answer.
+const STEPS = ['app', 'connected', 'you', 'invited', 'answered']
+function stepsOf(v, platform) {
+  const r = v.reached?.[platform] || {}
+  if (platform === 'discord') { const d = v.where?.discord || {}; return { app: !!d.tokens, connected: d.state === 'connected', you: !!v.settings?.owners?.discord, invited: !!(d.guild || r.asked), answered: !!r.answered } }
+  if (platform === 'teams') { const m = v.where?.teams || {}; return { app: !!m.tokens, connected: m.state === 'connected' && !!(m.endpoint?.ok || m.lastEvent), you: !!v.settings?.owners?.teams, invited: !!(m.lastEvent || r.asked), answered: !!r.answered } }
+  return { app: !!v.tokens, connected: v.state === 'connected', you: !!v.settings?.owner, invited: !!(v.where?.slack?.channels || r.asked), answered: !!r.answered }
+}
+// The chat carries on by itself: a step newly done is said; once it's connected, the people and
+// channels you named before it could look them up are found, and offered as a change to confirm.
+const sameName = (x, n) => [String(x.name || '').toLowerCase(), String(x.name || '').toLowerCase().split(' ')[0]].includes(String(n).toLowerCase())
+async function seeSteps(b, s, v) {
+  let changed = false
+  const at = s.platform || 'slack'
+  const done = stepsOf(v, at)
+  for (const k of STEPS) {
+    const key = `${at}:${k}`
+    if (!done[k] || s.ticks.includes(key)) continue
+    s.ticks.push(key)
+    const where = v.where?.[at] || {}
+    botSetup.note(s, 'tick', { step: k, platform: at, team: v.team?.name || where.guild?.name || null, bot: v.bot?.name || where.bot?.name || b.name })
+    changed = true
+  }
+  const pend = { people: [], channels: [], posts: [], ...(s.pending || {}) }
+  const ch = desk.channel(b.id)
+  // Posts asked for before it could post: offered once it's connected, and Scheduled Routines is on.
+  if (!s.change && pend.posts.length && ch?.state().state === 'connected' && trialOn('routines')) {
+    const was = proposalOf(b, { instructions: botsStore.readOwn(b.id), platform: at })
+    const to = { ...was, posts: pend.posts }
+    s.change = { id: randomUUID().slice(0, 8), at: new Date().toISOString(), lines: linesOf(was, to), proposal: to, found: true }
+    s.pending = { ...pend, posts: [] }
+    botSetup.note(s, 'posts', { n: to.posts.length })
+    return true
+  }
+  if (!s.change && (pend.people.length || pend.channels.length) && ch?.state().state === 'connected') {
+    const known = { people: await ch.people().catch(() => []), channels: await ch.channels().catch(() => []) }
+    const was = proposalOf(b, { instructions: botsStore.readOwn(b.id), platform: at })
+    const people = pend.people.filter((n) => known.people.some((x) => sameName(x, n)))
+    const inside = pend.channels.filter((c) => known.channels.some((x) => String(x.name || '').toLowerCase() === c.name))
+    // (One it's in that it doesn't answer in without a mention only needed it to be invited: said.)
+    if (inside.some((c) => !c.listen)) botSetup.note(s, 'in', { channels: inside.filter((c) => !c.listen).map((c) => c.name) })
+    const listen = inside.filter((c) => c.listen)
+    s.pending = { ...pend, people: pend.people.filter((n) => !people.includes(n)), channels: pend.channels.filter((c) => !inside.includes(c)) }
+    if (people.length || listen.length) {
+      const to = { ...was, people: [...new Set([...was.people, ...people])], channels: [...was.channels, ...listen.filter((c) => !was.channels.some((x) => x.name === c.name))] }
+      const lines = linesOf(was, to)
+      if (lines.length) {
+        s.change = { id: randomUUID().slice(0, 8), at: new Date().toISOString(), lines, proposal: to, found: true }
+        botSetup.note(s, 'found', { people, channels: listen.map((c) => c.name) })
+      }
+    }
+    if (people.length || inside.length) changed = true
+  }
+  return changed
+}
+const setupShown = async (b, s) => ({ messages: s.messages, proposal: s.proposal, change: s.change ? { id: s.change.id, lines: s.change.lines, found: !!s.change.found } : null, pending: s.pending, platform: s.platform, draft: !!b?.draft, from: b?.from || 'you', options: b?.draft || !b ? await setupContext() : null, assist: await assistState() })
+// A new chat: what AI Assist would set it up with, and what it can pick from.
+app.get('/api/bots/assist', botsGuard, wrapBot(async () => setupShown(null, botSetup.read('-'))))
+// Your words: a draft, with what AI Assist proposes (or the chat saying why there's none, and
+// nothing made). From the Chief of Staff (`bridge bot`, from: chief) a draft is made either way.
+app.post('/api/bots/assist', botsGuard, wrapBot(async (req) => {
+  const r = await botSetup.draft(req.body?.text, { from: req.body?.from === 'chief' ? 'chief' : 'you', name: String(req.body?.name || '') })
+  return { bot: r.bot ? await botView(r.bot) : null, setup: await setupShown(r.bot, r.setup) }
+}))
+// A bot's chat: as kept, with what's happened since said (a draft: and what it can pick from).
+app.get('/api/bots/:id/assist', botsGuard, wrapBot(async (req) => {
+  const b = botOr404(req.params.id, { draft: true })
+  const s = botSetup.read(b.id)
+  if (!b.draft && await seeSteps(b, s, await botView(b))) botSetup.save(b.id, s)
+  return setupShown(b, s)
+}))
+// More words: a draft proposed again, or a change to a bot, shown for you to confirm.
+app.post('/api/bots/:id/assist', botsGuard, wrapBot(async (req) => {
+  const b = botOr404(req.params.id, { draft: true })
+  return setupShown(b, await botSetup.more(b, req.body?.text, { instructions: botsStore.readOwn(b.id) }))
+}))
+// A draft's card, changed in place.
+app.patch('/api/bots/:id/assist', botsGuard, wrapBot(async (req) => {
+  const b = botOr404(req.params.id, { draft: true })
+  const s = await botSetup.edit(b, req.body?.proposal || {})
+  if (s.proposal?.name && s.proposal.name !== b.name) botsStore.save(b.id, { name: s.proposal.name })
+  return setupShown(botsStore.get(b.id), s)
+}))
+// Create: the draft as proposed, through Settings' own checks (all or nothing), made a bot and
+// connected; the people and channels named are found once it's connected (seeSteps).
+app.post('/api/bots/:id/create', botsGuard, wrapBot(async (req) => {
+  const b = botOr404(req.params.id, { draft: true })
+  if (!b.draft) throw Object.assign(new Error(`${b.name} is made already`), { status: 409 })
+  const s = botSetup.read(b.id)
+  const p = s.proposal
+  if (!p) throw Object.assign(new Error('Say what it should do first'), { status: 400 })
+  const you = botOwnerName()
+  const tpl = p.template ? templateOf(p.template) : null
+  const instructions = String(p.instructions || '').trim() ? p.instructions : tpl ? tpl.instructions(p.name, you) : botsStore.defaultInstructions(p.name, you === 'the owner' ? '' : you)
+  const { patch, pending } = patchOf(p)
+  const { instructions: _, ...rest } = patch // eslint-disable-line no-unused-vars
+  const next = await checkSettings(b, { ...rest, instructions }, req)
+  botsStore.undraft(b.id, instructions)
+  const { after } = botsStore.save(b.id, { ...next, template: tpl?.id || null })
+  connectBot(b.id)
+  desk.record(b.id, 'settings.changed', { setting: 'created', old: null, new: { name: after.name, with: 'AI Assist', ...(b.from === 'chief' ? { draftedBy: 'Chief of Staff' } : {}), ...(tpl ? { template: tpl.id } : {}) }, ...changedBy(req) })
+  desk.sync()
+  s.pending = { ...pending, posts: p.posts || [] }
+  s.platform = p.platform
+  botSetup.note(s, 'created', { bot: after.name, platform: p.platform, people: pending.people, channels: pending.channels.map((c) => c.name) })
+  botSetup.save(b.id, s)
+  pushFleet()
+  return botView(after)
+}))
+// The change waiting in its chat: applied through Settings' own checks, or discarded.
+const SETTING_OF = { name: 'name', description: 'description', instructions: 'instructions', folders: 'readsFrom', who: 'who', people: 'askers', channels: 'listen', answerers: 'answerers', fallback: 'fallback', limits: 'limits', auto: 'auto', mcp: 'mcp' }
+app.post('/api/bots/:id/assist/apply', botsGuard, wrapBot(async (req) => {
+  const b = botOr404(req.params.id)
+  const s = botSetup.read(b.id)
+  if (!s.change || s.change.id !== String(req.body?.change || '')) throw Object.assign(new Error('That change isn\'t waiting any more'), { status: 409 })
+  const ch = desk.channel(b.id)
+  const known = ch?.state().state === 'connected' ? { people: await ch.people().catch(() => []), channels: await ch.channels().catch(() => []) } : { people: [], channels: [] }
+  const { patch, pending } = patchOf(s.change.proposal, { bot: b, known })
+  const x = {}
+  for (const l of s.change.lines) { const k = SETTING_OF[l.key]; if (k && patch[k] !== undefined) x[k] = patch[k] }
+  // Posts on a schedule (Scheduled Routines): each in a channel it's in, checked before anything's kept.
+  const posts = s.change.lines.some((l) => l.key === 'posts') ? s.change.proposal.posts || [] : []
+  if (posts.length && !trialOn('routines')) throw new Error('Scheduled posts need Scheduled Routines: turn it on in Settings › About & Updates › Beta Features')
+  const where = posts.map((pp) => ({ pp, c: known.channels.find((c) => String(c.name || '').toLowerCase() === pp.channel) }))
+  const notIn = where.filter((w) => !w.c).map((w) => `#${w.pp.channel}`)
+  if (notIn.length) throw new Error(`${b.name} isn't in ${notIn.join(', ')}${known.channels.length ? '' : ' (it isn\'t connected yet)'}: invite it there first, then say it again`)
+  const after = await applySettings(b, x, req)
+  for (const { pp, c } of where) {
+    const r = await routines.add({ name: pp.what.length > 60 ? `${pp.what.slice(0, 59)}…` : pp.what, command: pp.what, to: 'bot', bot: b.id, channel: { id: c.id, name: c.name }, schedule: pp.when })
+    desk.record(b.id, 'settings.changed', { setting: 'scheduled', old: null, new: { post: postSaid(pp), routine: r?.id || null }, ...changedBy(req) })
+  }
+  const keys = s.change.lines.map((l) => l.key)
+  if (keys.includes('platform')) s.platform = s.change.proposal.platform
+  // Named before it could find them: looked up again once it's connected.
+  const later = { people: keys.includes('people') ? pending.people : [], channels: keys.includes('channels') ? pending.channels : [] }
+  s.pending = { people: [...new Set([...(s.pending?.people || []), ...later.people])], channels: [...(s.pending?.channels || []), ...later.channels.filter((c) => !(s.pending?.channels || []).some((x) => x.name === c.name))] }
+  botSetup.note(s, 'applied', { keys })
+  if (later.people.length || later.channels.length) botSetup.note(s, 'pending', { people: later.people, channels: later.channels.map((c) => c.name) })
+  s.change = null
+  botSetup.save(b.id, s)
+  return { bot: await botView(after), setup: await setupShown(after, s) }
+}))
+app.post('/api/bots/:id/assist/discard', botsGuard, wrapBot(async (req) => {
+  const b = botOr404(req.params.id)
+  const s = botSetup.read(b.id)
+  if (s.change) { s.change = null; botSetup.note(s, 'discarded', {}); botSetup.save(b.id, s) }
+  return setupShown(b, s)
+}))
+// Its MCP servers to pick from: yours in Claude Code, each with its tools and which only read.
+app.get('/api/bots/:id/mcp', botsGuard, wrapBot(async (req) => {
+  const b = botOr404(req.params.id, { draft: true })
+  return { servers: (await botMcp.servers({ tools: true, fresh: req.query.fresh === '1' })).map((x) => ({ ...x, tools: x.tools?.map(({ name, title, readOnly: ro }) => ({ name, title, readOnly: ro })) || null })), picked: b.mcp, answerer: (await answererOf(b)).kind }
+}))
+// What can answer for it here, to pick its list from: each agent that can only read (on its usual
+// model, or one of its own) and each model you reach, Local or Cloud, and what Automatic would be.
+app.get('/api/bots/:id/answerers', botsGuard, wrapBot(async (req) => {
+  const b = botOr404(req.params.id, { draft: true })
+  const h = await answerHere({ fresh: req.query.fresh === '1' })
+  return { options: botAnswer.options(h), automatic: botAnswer.listOf({ ...b, answerers: null }, h).list.map((e) => e.id), list: b.answerers, fallback: b.fallback }
+}))
+app.get('/api/bots/:id', botsGuard, wrapBot(async (req) => botView(botOr404(req.params.id, { draft: true }))))
+// What's here to answer with (botanswer.js): the agents installed, and the models Bridge AI reaches.
+// (fresh: the models asked for again, as when you're picking from them.)
+const answerHere = async ({ fresh = false } = {}) => ({ installed: (await installed()).map((k) => k.kind), models: await chatModels.models({ fresh }).catch(() => []) })
+// The agent that would answer first, as the desk picks it from a bot's list (b, with what's changing
+// in it): an agent's kind, or 'model'; and whether any in its list can make a change.
+async function answererOf(b) {
+  const h = await answerHere()
+  const { list } = botAnswer.listOf(b, h)
+  const first = list.find((e) => !botAnswer.notReady(e, h))
+  return { kind: first ? (first.kind === 'agent' ? first.agent : 'model') : null, changes: list.some((e) => botAnswer.canMakeChanges(e) && !botAnswer.notReady(e, h)) }
+}
 // Its settings, each checked: its name and description (its name in Slack), who may ask (Slack's
 // ids, with the names you picked them by, or everyone in its channels), what anyone else gets, the
 // folders it reads from (each one there, inside your home folder, not Bridge AI's own), its
 // instructions (written here, or a file in one of its folders), answering without asking, copies of
-// your agents' conversations, which agent answers, how many at once, and how long its record is kept.
+// your agents' conversations, which agent answers, how many at once, how long its record is kept,
+// and its MCP servers (yours, in Claude Code's own list, and only with Claude Code answering).
 // From your phone or another of your computers too: a folder or file macOS hasn't let Bridge AI into
-// yet isn't looked at from there (it would ask on this computer, with nobody at it).
-app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
-  const b = botOr404(req.params.id)
-  const x = req.body || {}
+// yet isn't looked at from there (it would ask on this computer, with nobody at it). Every one is
+// checked before any is kept, so what AI Assist's setup chat applies (Create, a change you confirm)
+// goes through the same checks, or none of it does.
+async function checkSettings(b, x, req) {
   const next = {}
-  const who = changedBy(req)
   const here = !req.headers['x-bridge-relay']
   const lexical = (f) => path.resolve(String(f || '').replace(/^~(?=$|[\\/])/, os.homedir()))
   if (x.name !== undefined) { if (!String(x.name).trim()) throw new Error('Give it a name: it\'s its name in Slack'); next.name = String(x.name) }
@@ -4169,6 +4407,16 @@ app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
     next.agent = x.agent ? String(x.agent) : null
   }
   if (x.max !== undefined) next.max = Math.max(1, Math.min(5, Math.round(Number(x.max)) || 2))
+  // What answers: an ordered list of agents (agent:claude, agent:claude:opus) and models
+  // (model:ollama:qwen3), or none for Automatic; and whether the next is tried when one can't answer.
+  if (x.answerers !== undefined) {
+    if (x.answerers !== null && !Array.isArray(x.answerers)) throw new Error('answerers is a list, or null for Automatic')
+    const want = [...new Set((x.answerers || []).map((n) => String(n || '').trim()).filter(Boolean))].slice(0, 12)
+    const bad = want.filter((n) => !botAnswer.validId(n))
+    if (bad.length) throw new Error(`${bad.join(', ')} can't answer for a bot: pick an agent that can only read, or a model from Model Providers`)
+    next.answerers = want.length ? want : null
+  }
+  if (x.fallback !== undefined) next.fallback = x.fallback !== false
   // You in Slack, so its drafts come to your direct messages, and you may always ask.
   if (x.owner !== undefined) {
     if (x.owner && !/^[UW][A-Z0-9]{2,20}$/.test(String(x.owner.id || ''))) throw new Error('Pick yourself from your workspace\'s people')
@@ -4189,8 +4437,7 @@ app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
   if (x.changes !== undefined) {
     const v = ['suggest', 'pr'].includes(x.changes) ? x.changes : 'none'
     if (v !== 'none') {
-      const kind = (await desk.view(b.id))?.answerer?.kind
-      if (!kind || !canChange(kind)) throw new Error('Changes need Claude Code, which keeps its edits to its own copy of the repository: pick it under Answered By')
+      if (!(await answererOf({ ...b, ...next })).changes) throw new Error('Changes need Claude Code in what answers, which keeps its edits to its own copy of the repository: add it under What Answers')
     }
     next.changes = v
   }
@@ -4238,6 +4485,25 @@ app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
       next.instructionsFile = full.replace(os.homedir(), '~')
     }
   }
+  if (x.instructions !== undefined && String(x.instructions ?? '').length > botsStore.INSTRUCTIONS_MAX) throw new Error(`Keep the instructions under ${botsStore.INSTRUCTIONS_MAX.toLocaleString('en')} characters`)
+  // Its MCP servers: yours, from Claude Code's own list (Settings › MCP Servers), with Claude Code
+  // answering, which holds a run to them and to the tools allowed. (One it has that's gone from that
+  // list since stays, doing nothing, until it's taken out.)
+  if (x.mcp !== undefined) {
+    if (!Array.isArray(x.mcp)) throw new Error('mcp is a list')
+    const want = [...new Set(x.mcp.map((n) => String(n || '').trim()).filter(Boolean))].slice(0, 20)
+    const have = botMcp.names()
+    const bad = want.filter((n) => !have.includes(n) && !(b.mcp || []).includes(n))
+    if (bad.length) throw new Error(`${bad.join(', ')} ${bad.length === 1 ? 'isn\'t one of your MCP servers' : 'aren\'t among your MCP servers'} in Claude Code (Settings › MCP Servers)`)
+    next.mcp = want
+  }
+  return next
+}
+// Checked, then kept: its instructions, its settings, each change in its record (as you, and the
+// device you made it on), its record's keeping and pause seen to. The bot as it is now.
+async function applySettings(b, x, req) {
+  const next = await checkSettings(b, x, req)
+  const who = changedBy(req)
   if (x.instructions !== undefined) {
     const before = botsStore.readOwn(b.id)
     const text = botsStore.writeInstructions(b.id, x.instructions)
@@ -4249,8 +4515,9 @@ app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => {
   // Paused: what it's answering is stopped at once.
   if (after.paused && !before.paused) await desk.pause(b.id)
   pushFleet()
-  return botView(after)
-}))
+  return after
+}
+app.post('/api/bots/:id/settings', botsGuard, wrapBot(async (req) => botView(await applySettings(botOr404(req.params.id), req.body || {}, req))))
 // Its tokens, checked with Slack before they're kept; and forgotten (Disconnect). Only their kind
 // and last four in the record.
 app.post('/api/bots/:id/tokens', botsGuard, wrapBot(async (req) => {
@@ -4342,7 +4609,7 @@ app.get('/api/bots/:id/people', botsGuard, wrapBot(async (req) => ({ people: awa
 // look at and export under its name, until the time it's kept for runs out; with history=1, its
 // activity history is deleted too, the record keeping only that it was.
 app.delete('/api/bots/:id', botsGuard, wrapBot(async (req) => {
-  const b = botOr404(req.params.id)
+  const b = botOr404(req.params.id, { draft: true }) // (a draft: gone whole, there's nothing of it to keep)
   const history = req.query.history === '1'
   desk.channel(b.id)?.forget()
   desk.remove(b.id, { history, device: deviceOfReq(req) })
@@ -4445,8 +4712,10 @@ app.get('/api/bots/:id/try/:q', botsGuard, wrapBot(async (req) => {
   const b = botOr404(req.params.id)
   const item = desk.get(req.params.q)
   if (!item || item.bot.id !== b.id || !item.try) throw Object.assign(new Error('No such question'), { status: 404 })
-  return { item, events: desk.timeline(b.id, item.conv)?.events || [] }
+  return { item, events: desk.timeline(b.id, item.conv)?.events || [], live: await desk.live(item.id) }
 }))
+// Its Stop, while it's being answered.
+app.post('/api/bots/:id/try/:q/stop', botsGuard, wrapBot(async (req) => desk.stopTry(botOr404(req.params.id).id, req.params.q)))
 
 // ---------- Whiteboards (boards.js) ----------
 // Home: a whiteboard you opened, saved, made or renamed here is yours as it is; one an agent drew or
