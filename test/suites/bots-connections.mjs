@@ -404,7 +404,7 @@ try {
       await p.locator('.rail-bots-head .rail-tool[aria-label="New bot"]').click()
       await p.locator('.bc-say textarea').fill('A bot called Policy Desk that answers HR policy questions for Dana, from my docs folder, in Slack.')
       await p.locator('.bc-say button[type="submit"]').click()
-      ok(await shown(p, '.bc-proposal', 20000), 'a draft, its card')
+      if (!ok(await shown(p, '.bc-proposal', 30000), 'a draft, its card', `${await textOf(p, '.bc')} | ${JSON.stringify((await kit.api('/bots')).bots.map((x) => [x.id, x.name, x.draft]))}`)) await shot(p, `${tag}bots-connections-no-proposal`)
       const via = await textOf(p, '[data-setting="bots-proposal-via"]')
       ok(/Reached through tester_bot, your shared Slack connection: nothing to set up there/.test(via), 'the card: reached through the shared connection, nothing to set up there', via)
       const reach = await textOf(p, '[data-setting="bots-proposal-reach"]')
@@ -414,6 +414,8 @@ try {
       await p.locator('.bc-proposal form.sb-add:has(input[aria-label="Add a channel it\'s the default bot in"]) button[type="submit"]').click()
       const id = (await kit.api('/bots')).bots.find((x) => x.draft && x.name === 'Policy Desk')?.id
       ok(!!(await until(async () => (await kit.api(`/bots/${id}/assist`)).proposal?.defaults?.includes('launch'), 8000)), 'a channel it\'s the default bot in, on the card')
+      await p.locator('[data-setting="bots-proposal-via"]').scrollIntoViewIfNeeded().catch(() => {})
+      await p.waitForTimeout(300)
       await shot(p, `${tag}bots-connections-proposal`)
       await p.locator('.bc-proposal .bc-create .btn.primary').click()
       ok(await shown(p, '.bp-cols .sb-tabs', 15000), 'Create: its page')

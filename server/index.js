@@ -4395,7 +4395,7 @@ app.post('/api/bots/:id/create', botsGuard, wrapBot(async (req) => {
   s.pending = { ...pending, posts: p.posts || [] }
   s.platform = p.platform
   // (On a shared connection set up already, its steps are done: not said again, one by one.)
-  if (via) { const done = stepsOf(await botView(after), p.platform); s.ticks = STEPS.filter((k) => done[k] && k !== 'answered').map((k) => `${p.platform}:${k}`) }
+  if (via) { const done = stepsOf(await botView(after), p.platform); s.ticks = STEPS.filter((k) => k !== 'answered' && (done[k] || (known && k === 'invited'))).map((k) => `${p.platform}:${k}`) }
   botSetup.note(s, 'created', { bot: after.name, platform: p.platform, people: pending.people, channels: [...pending.channels.map((c) => c.name), ...pending.defaults], via: via ? { name: via.name, shared: true, connected: !!known, command: p.platform === 'slack' ? `${slackCommand(via.name)} ${after.name.toLowerCase().split(/\s+/)[0]}` : null } : p.own ? { own: true } : null, found: known ? { people: (patch.askers || []).map((x) => x.name), channels: [...(patch.listen || []).map((x) => x.name), ...defaults.map((x) => x.name)] } : null })
   botSetup.save(b.id, s)
   pushFleet()
