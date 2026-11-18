@@ -215,8 +215,9 @@ const isDevPort = async (port) => {
 const remote = makeRemote({
   trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), thisName: () => relay.thisName(), os: machines.OS,
   hosted: () => !!relay.status().hosted, isDevPort, screenAllowed: () => (IS_MAC ? calls.screen() : Promise.resolve(null)),
+  devices: () => relay.status().devices,
 })
-const servePreview = devPreview.serve({ trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), isDevPort, thisName: () => relay.thisName() })
+const servePreview = devPreview.serve({ trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), allows: (id) => remote.allows(id), isDevPort, thisName: () => relay.thisName() })
 const app = express()
 app.use(guard.http)
 app.use(auth.http)
@@ -2860,15 +2861,22 @@ app.post('/api/machines/:id/preview', async (req, res) => {
 
 // ---------- Remote Screen and Preview: this computer (remote.js) ----------
 // Seen from anywhere you are (your devices ask it before they look); changed only here, at this
-// computer itself: control, stopping a session, and what you've seen of who looked.
+// computer itself: control, the Remote Access Password, Ask Here First (and each answer), which
+// devices may connect, a lockout lifted, stopping a session, and what you've seen of who looked.
+// The password goes no further than remote.js, which keeps only its hash; it's never in a log.
 const atThisComputer = (req) => !req.headers['x-bridge-relay'] && !req.machinePage
 const remoteHere = (req) => { if (!atThisComputer(req)) throw Object.assign(new Error(`Do this at ${relay.thisName()} itself.`), { status: 403, code: 'here' }) }
 const sayErr = (res, e) => res.status(e.status || 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) })
-app.get('/api/remote', async (req, res) => { try { res.json({ ...(await remote.status({ sources: req.query.sources === '1' })), here: atThisComputer(req) }) } catch (e) { sayErr(res, e) } })
+app.get('/api/remote', async (req, res) => { try { res.json({ ...(await remote.status({ sources: req.query.sources === '1', device: atThisComputer(req) ? null : String(req.headers['x-bridge-relay'] || '') || 'page' })), here: atThisComputer(req) }) } catch (e) { sayErr(res, e) } })
 app.post('/api/remote/control', async (req, res) => { try { remoteHere(req); res.json(await remote.setControl(req.body?.on === true)) } catch (e) { sayErr(res, e) } })
 app.post('/api/remote/sessions/:id/stop', (req, res) => { try { remoteHere(req); res.json({ ok: remote.stop(req.params.id) }) } catch (e) { sayErr(res, e) } })
 app.post('/api/remote/stop', (req, res) => { try { remoteHere(req); remote.stopAll(); res.json({ ok: true }) } catch (e) { sayErr(res, e) } })
 app.post('/api/remote/seen', (req, res) => { try { remoteHere(req); res.json(remote.seen()) } catch (e) { sayErr(res, e) } })
+app.post('/api/remote/password', async (req, res) => { try { remoteHere(req); res.json(req.body?.remove === true ? remote.clearPassword() : await remote.setPassword(req.body?.password)) } catch (e) { sayErr(res, e) } })
+app.post('/api/remote/ask-first', (req, res) => { try { remoteHere(req); res.json(remote.setAskFirst(req.body?.on === true)) } catch (e) { sayErr(res, e) } })
+app.post('/api/remote/asks/:id', (req, res) => { try { remoteHere(req); res.json({ ok: remote.answer(req.params.id, req.body?.allow === true) }) } catch (e) { sayErr(res, e) } })
+app.post('/api/remote/devices', (req, res) => { try { remoteHere(req); res.json(remote.setDevice(String(req.body?.id || ''), req.body?.allowed !== false)) } catch (e) { sayErr(res, e) } })
+app.post('/api/remote/locks/:id/clear', (req, res) => { try { remoteHere(req); res.json(remote.unlock(req.params.id)) } catch (e) { sayErr(res, e) } })
 // A picture of a project's app, drawn off screen by the desktop app here for a phone (desktop/remote.js).
 app.post('/api/remote/sessions/:id/frame', express.raw({ type: () => true, limit: '2mb' }), (req, res) => {
   if (!atThisComputer(req)) return res.status(403).json({ error: 'Only the desktop app here sends these' })

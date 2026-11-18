@@ -89,6 +89,8 @@ export const SETTINGS = [
   ...at('machines', [
     ['machines', tx('Your Devices'), 'devices computers other computers'],
     ['link-device', tx('Link a device'), 'link pair computer address code'],
+    ['remote-access', tx('Remote Access'), 'remote access password screen control lock locked out unlock ask here first allow deny which devices', { when: 'remote-screen' }],
+    ['remote-sessions', tx('Screen Activity'), 'screen activity record sessions who viewed controlled lockout denied', { when: 'remote-screen' }],
   ]),
   ...at('notifications', [
     ['this-device', tx('Notifications on this device'), 'notifications push turn on test'],

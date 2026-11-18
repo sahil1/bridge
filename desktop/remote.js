@@ -12,17 +12,32 @@
 //                                permission: it's this app's own window, not the computer)
 //   control                      "Let my other devices control this computer" is on or off here: the
 //                                Accessibility question is then about it too (permissions.js)
+// And on the computer looking: another computer's screen in a window of its own (view, ?remote=view),
+// opened inside the work area of the display it opens on, in that screen's shape (fit, once the page
+// knows it), at the size you left it for that computer when you've sized it yourself.
 // Everything it uses comes in (create's options), so the tests can stand in for Electron.
 const MAX_FRAME = 180 * 1024
 // The page's own window titles, left out of the windows it can show.
 const OWN_TITLES = /^Bridge AI (screen sharing|is being viewed)$/
 
-function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload, fetch, platform = process.platform, keyFor }) {
+// A window for a picture w x h, with chrome (the toolbar, a frame) around it, as big as fits in
+// most of area (a display's work area, { x, y, width, height }), its shape kept, centred there.
+function fitWindow(area, w, h, chrome = { w: 0, h: 0 }, { margin = 0.9, min = { width: 520, height: 360 } } = {}) {
+  const room = { w: Math.floor(area.width * margin) - chrome.w, h: Math.floor(area.height * margin) - chrome.h }
+  const s = w > 0 && h > 0 ? Math.min(room.w / w, room.h / h) : 0
+  const width = Math.min(area.width, Math.max(min.width, Math.round(w * s + chrome.w)))
+  const height = Math.min(area.height, Math.max(min.height, Math.round(h * s + chrome.h)))
+  return { x: area.x + Math.round((area.width - width) / 2), y: area.y + Math.round((area.height - height) / 2), width, height }
+}
+const meets = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+
+function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload, fetch, platform = process.platform, keyFor, sizes = null }) {
   const MAC = platform === 'darwin'
   let capture = null
   let badge = null
   let control = false
   const pages = new Map() // session -> { win, w, h, timer, latest, sent }
+  const views = new Map() // another computer's screen: machine ('' for this one's own) -> BrowserWindow
 
   // ---------- what can be seen ----------
   // macOS's word on Screen Recording, without asking: 'ok', 'ask' or 'denied'. (macOS says denied
@@ -31,6 +46,14 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     if (!MAC) return 'ok'
     const s = systemPreferences.getMediaAccessStatus('screen')
     return s === 'granted' ? 'ok' : s === 'restricted' ? 'restricted' : s === 'not-determined' ? 'ask' : 'denied'
+  }
+  // Where a display is in the pixels the system presses at: on a Mac, points (as its bounds are);
+  // Windows and Linux (X11) move the pointer in pixels, so a display scaled up is told in those.
+  const pixelsOf = (d) => {
+    if (MAC || !d || d.scaleFactor === 1) return null
+    if (screen.dipToScreenRect) { try { return screen.dipToScreenRect(null, d.bounds) } catch { /* not here */ } }
+    const k = d.scaleFactor
+    return { x: Math.round(d.bounds.x * k), y: Math.round(d.bounds.y * k), width: Math.round(d.bounds.width * k), height: Math.round(d.bounds.height * k) }
   }
   // The screens and windows, for the capture page. The first time, macOS asks about Screen Recording
   // here (someone looked: first use).
@@ -44,12 +67,11 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
       const kind = s.id.startsWith('screen:') ? 'screen' : 'window'
       if (kind === 'window' && OWN_TITLES.test(s.name || '')) continue
       const d = kind === 'screen' ? displays.find((x) => String(x.id) === String(s.display_id)) || (list.filter((x) => x.id.startsWith('screen:')).length === 1 ? primary : null) : null
-      const px = d && platform === 'win32' && screen.dipToScreenRect ? screen.dipToScreenRect(null, d.bounds) : null
       out.push({
         id: s.id, name: kind === 'screen' ? (s.name || 'Screen') : (s.name || 'Window').slice(0, 80), kind,
         w: d ? Math.round(d.size.width * d.scaleFactor) : 0, h: d ? Math.round(d.size.height * d.scaleFactor) : 0,
-        primary: !!d && d.id === primary.id,
-        bounds: d ? { ...d.bounds, ...(px ? { px } : {}) } : null,
+        primary: !!d && d.id === primary.id, scale: d ? d.scaleFactor : null,
+        bounds: d ? { ...d.bounds, ...(pixelsOf(d) ? { px: pixelsOf(d) } : {}) } : null,
       })
     }
     return { sources: out.slice(0, 40), permission: permission() }
@@ -67,12 +89,13 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
   function captureIdle() { if (capture && !capture.isDestroyed()) capture.destroy(); capture = null }
 
   // ---------- the badge ----------
-  function sessions(list) {
-    const any = Array.isArray(list) && list.length > 0
+  // While anyone sees this screen, or asks to (Ask Here First, answered on it).
+  function sessions(list, asks) {
+    const any = (Array.isArray(list) && list.length > 0) || (Array.isArray(asks) && asks.length > 0)
     if (!any) { if (badge && !badge.isDestroyed()) badge.destroy(); badge = null; return }
-    if (badge && !badge.isDestroyed()) return
+    if (badge && !badge.isDestroyed()) { if (asks?.length) badge.showInactive?.(); return }
     const wa = screen.getPrimaryDisplay().workArea
-    const W = 460
+    const W = 520
     badge = new BrowserWindow({
       width: W, height: 58, x: Math.round(wa.x + (wa.width - W) / 2), y: wa.y + 10,
       frame: false, resizable: false, minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true,
@@ -110,9 +133,9 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
       if (wait > 0) { p.timer = setTimeout(flush, wait); return }
       const image = p.latest
       p.latest = null
-      let q = 72
+      let q = 84
       let jpg = image.toJPEG(q)
-      while (jpg.length > MAX_FRAME && q > 25) { q -= 16; jpg = image.toJPEG(q) }
+      while (jpg.length > MAX_FRAME && q > 30) { q -= 12; jpg = image.toJPEG(q) }
       const { width, height } = image.getSize()
       p.busy = true
       p.sent = Date.now()
@@ -147,11 +170,55 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     }
   }
 
+  // ---------- another computer's screen, in a window of its own ----------
+  // sizes: where each was left ({ get(key), set(key, bounds) }, kept in the app's own folder).
+  function view({ machine = null, name = '', near = null } = {}) {
+    const key = machine || ''
+    const have = views.get(key)
+    if (have && !have.isDestroyed()) { have.show(); have.focus(); return have }
+    const display = near ? screen.getDisplayMatching(near) : screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+    const was = sizes?.get(key)
+    // Left somewhere that's still on a display: there again, as you sized it.
+    const kept = was && Number.isFinite(was.width) && screen.getAllDisplays().some((d) => meets(d.workArea, was)) ? was : null
+    const at = kept || fitWindow(display.workArea, 16, 10, { w: 0, h: 52 })
+    const w = new BrowserWindow({
+      x: at.x, y: at.y, width: at.width, height: at.height, minWidth: 480, minHeight: 320,
+      title: `${String(name || 'Screen').slice(0, 60)}'s Screen · Bridge AI`,
+      ...(MAC ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 14, y: 17 } } : { autoHideMenuBar: true }),
+      backgroundColor: nativeTheme.shouldUseDarkColors ? '#0f1115' : '#eef0f3',
+      show: false,
+      webPreferences: { preload, contextIsolation: true, sandbox: true },
+    })
+    w.userSized = !!kept
+    // A resize of your own (not the fit below): kept, and the window isn't fitted again.
+    w.on('will-resize', () => { w.userSized = true })
+    const keep = () => { if (!w.isDestroyed() && !w.isMinimized() && !w.isFullScreen?.()) sizes?.set(key, w.getNormalBounds ? w.getNormalBounds() : w.getBounds()) }
+    w.on('resized', () => { if (w.userSized) keep() })
+    w.on('moved', () => { if (w.userSized) keep() })
+    w.on('close', keep)
+    w.once('ready-to-show', () => w.show())
+    w.on('closed', () => { if (views.get(key) === w) views.delete(key) })
+    w.loadURL(`${URL_BASE}/?remote=view&${new URLSearchParams({ ...(machine ? { machine } : {}), name: String(name || '').slice(0, 80) })}`).catch(() => {})
+    views.set(key, w)
+    return w
+  }
+  // The page knows that screen's shape (w x h, its toolbar chrome px tall): the window takes it, on
+  // the display it's on, unless you've sized it yourself.
+  function fit(win, { w, h, chrome = 52 } = {}) {
+    if (!win || win.isDestroyed() || win.userSized || win.isFullScreen?.() || win.isMaximized?.() || !(w > 0) || !(h > 0)) return false
+    const outer = win.getBounds()
+    const inner = win.getContentBounds ? win.getContentBounds() : outer
+    const frame = { w: outer.width - inner.width, h: outer.height - inner.height }
+    const area = screen.getDisplayMatching(outer).workArea
+    win.setBounds(fitWindow(area, w, h, { w: frame.w, h: frame.h + Math.max(0, Math.min(200, Number(chrome) || 0)) }))
+    return true
+  }
+
   function onEvent(ev) {
     if (!ev || typeof ev.t !== 'string') return
     if (ev.t === 'need-capture') needCapture()
     else if (ev.t === 'capture-idle') captureIdle()
-    else if (ev.t === 'sessions') sessions(ev.list)
+    else if (ev.t === 'sessions') sessions(ev.list, ev.asks)
     else if (ev.t === 'control') control = !!ev.on
     else if (ev.t === 'page-start') pageStart(ev)
     else if (ev.t === 'page-input') pageInput(ev)
@@ -159,7 +226,7 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     else if (ev.t === 'page-go') pageGo(ev)
     else if (ev.t === 'page-stop') pageStop(ev)
   }
-  return { onEvent, sources, permission, controlOn: () => control, setControl: (on) => { control = !!on }, windows: () => [capture, badge].filter(Boolean) }
+  return { onEvent, sources, permission, view, fit, isView: (w) => [...views.values()].includes(w), controlOn: () => control, setControl: (on) => { control = !!on }, windows: () => [capture, badge, ...views.values()].filter(Boolean) }
 }
 
-module.exports = { create }
+module.exports = { create, fitWindow }

@@ -307,9 +307,13 @@ you send either way go over that link too. A project's app goes over it to an ad
 127.0.0.1 of the computer looking (only an app an agent's project serves, never Bridge AI itself), or
 on a phone as pictures of it drawn on the computer that runs it. None of it goes to the project. The
 computer being seen shows that it is, and keeps who looked, from which device, at what, when, for
-how long, whether they controlled it and how it came (the last 200) in `~/.bridge-ai/remote.json`,
-readable by you only, shown in Settings. On a Mac, macOS asks about Screen Recording the first time
-one of your devices looks, and about Accessibility when you turn control on; never when you install.
+how long, whether they controlled it and how it came, and each one it turned away and why (the last
+200) in `~/.bridge-ai/remote.json`, readable by you only, shown in Settings. A Remote Access Password,
+when you set one at that computer, is kept there only as a salted scrypt hash in that same file: the
+password you type on the device looking goes to that computer over the end-to-end encrypted link to
+be checked, and is never kept, logged or sent anywhere else. On a Mac, macOS asks about Screen
+Recording the first time one of your devices looks, and about Accessibility when you turn control on;
+never when you install.
 
 Studio, in the sidebar, also shows your home folder, your cloud drives and this computer's drives,
 read-only, to you and to your own linked computers and paired phones over that same encrypted link. Bridge AI's own folder and your keys' folders (`~/.ssh`,

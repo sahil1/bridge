@@ -26,13 +26,15 @@ const PROTO = '__bridge_proto' // a WebSocket's subprotocol (Vite's hot reload a
 const json = (res, status, o) => { if (!res.headersSent) { res.statusCode = status; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(o)) } else res.destroy() }
 
 // ---------- the computer serving it ----------
-// trialOn(), deviceOf(id) (relay.js), isDevPort(port), thisName().
-export function serve({ trialOn, deviceOf, isDevPort, thisName }) {
+// trialOn(), deviceOf(id) (relay.js), allows(id): that device may connect (remote.js, Which Devices
+// May Connect), isDevPort(port), thisName().
+export function serve({ trialOn, deviceOf, allows = () => true, isDevPort, thisName }) {
   // Whether this request may reach that port: { port, path } or why not.
   async function check(req, url) {
     const m = PREVIEW.exec(new URL(url, 'http://x').pathname)
     if (!m) return { status: 404, error: 'Not found' }
     if (!deviceOf(req.headers['x-bridge-relay'])) return { status: 403, error: 'Previews are for your other devices, through their link to this computer.' }
+    if (!allows(req.headers['x-bridge-relay'])) return { status: 403, error: `${thisName()} doesn't let this device connect. That's changed at ${thisName()} itself, in Settings › Account & Devices › Computers.`, code: 'device' }
     if (!trialOn()) return { status: 404, error: `Remote Screen and Preview is off on ${thisName()}. Turn it on there in Settings › About & Updates › Beta Features.`, trial: 'remote-screen' }
     const port = Number(m[1])
     if (!(port > 1023 && port < 65536) || !(await isDevPort(port))) return { status: 403, error: `Port ${port} isn't one of the apps ${thisName()} serves (only a server an agent's project started there is shown).`, code: 'port' }
