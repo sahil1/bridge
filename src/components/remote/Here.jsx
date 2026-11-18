@@ -35,8 +35,9 @@ const clockOf = (iso) => new Date(iso).toLocaleTimeString(locale(), { hour: 'num
 const watching = (list) => (list || []).filter((s) => s.kind === 'screen')
 const left = (iso) => Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 1000))
 // Turned away: a lockout, a no here, nobody answering, a wrong password, a device not allowed, and
-// an ask stopped (or its device blocked) from another of your devices.
-const REFUSED = new Set(['locked', 'denied', 'unanswered', 'password', 'device', 'stopped', 'blocked'])
+// an ask stopped (or its device blocked) from another of your devices; and Bridge AI reopened here
+// from a device that found no screens (server/remote.js noScreens).
+const REFUSED = new Set(['locked', 'denied', 'unanswered', 'password', 'device', 'stopped', 'blocked', 'reopened'])
 export const refused = (e) => REFUSED.has(e?.end) && !e.source
 function refusedText(e, when = timeOf(e.ended || e.started)) {
   const who = whoOf(e)
@@ -45,6 +46,7 @@ function refusedText(e, when = timeOf(e.ended || e.started)) {
   if (e.end === 'unanswered') return t('{who} asked to see this screen at {when}. Nobody answered, so it wasn\'t allowed.', { who, when })
   if (e.end === 'password') return e.tries === 1 ? t('{who} typed a wrong password at {when}.', { who, when }) : t('{who} typed {n} wrong passwords at {when}.', { who, n: e.tries || 2, when })
   if (e.end === 'stopped') return t('{who} asked to see this screen at {when}, and it was stopped from {device}.', { who, when, device: e.stoppedBy || t('another of your devices') })
+  if (e.end === 'reopened') return t('{who} found no screens to share at {when}, and reopened Bridge AI here.', { who, when })
   if (e.end === 'blocked') return t('{who} asked to see this screen at {when}, and was blocked from {device}.', { who, when, device: e.stoppedBy || t('another of your devices') })
   return t('{who} tried to connect at {when}, but isn\'t allowed to.', { who, when })
 }

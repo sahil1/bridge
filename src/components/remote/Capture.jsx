@@ -99,7 +99,7 @@ export default function Capture() {
     let ws = null
     let closed = false
     const send = (m) => { if (ws?.readyState === 1) ws.send(JSON.stringify(m)) }
-    const hello = async (t) => { const r = await list(); send({ t, sources: r.sources, permission: r.permission, p2p: typeof RTCPeerConnection === 'function' }) }
+    const hello = async (t) => { const r = await list(); send({ t, sources: r.sources, permission: r.permission, ...(r.none ? { none: r.none, problem: r.problem || null } : {}), p2p: typeof RTCPeerConnection === 'function' }) }
     const stop = (id) => {
       starting.delete(id)
       const s = sessions.get(id)

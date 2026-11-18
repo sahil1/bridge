@@ -911,6 +911,18 @@ try {
     })
     const src = await desk.sources()
     ok(src.permission === 'ok' && src.sources.length === 2 && src.sources[0].kind === 'screen' && src.sources[0].w === 3024 && src.sources[0].primary && src.sources[0].bounds.width === 1512 && src.sources[1].name === 'Notes', 'its screens (in pixels, with where each sits, in points) and windows, never its own', src)
+    // Screens apart from windows: windows that can't be listed don't hide them. No screens at all, with
+    // Screen Recording turned on since the app started: 'reopen' (macOS lets it record once reopened).
+    const deskOf = (getSources, at = 'granted') => { access = at; const d = create({ BrowserWindow: Win, desktopCapturer: { getSources }, screen: { getAllDisplays: () => [main, ext], getPrimaryDisplay: () => main }, systemPreferences: { getMediaAccessStatus: () => access }, session: { fromPartition: () => ({ setPermissionRequestHandler: () => {} }) }, nativeTheme: { shouldUseDarkColors: false }, URL_BASE: 'http://127.0.0.1:1', preload: '/preload.js', platform: 'darwin', keyFor, fetch: async () => ({ status: 200 }) }); access = 'granted'; return d }
+    const noWindows = await deskOf(async (o) => { if (o.types.includes('window')) throw new Error('window list failed'); return [{ id: 'screen:1:0', name: 'Entire Screen', display_id: '1' }] }).sources()
+    ok(noWindows.sources.length === 1 && noWindows.sources[0].kind === 'screen' && !noWindows.none, 'windows that can\'t be listed: the screens are still there', noWindows)
+    let asked = 0
+    const late = await deskOf(async (o) => (o.types.includes('screen') && ++asked >= 2 ? [{ id: 'screen:1:0', name: 'Entire Screen', display_id: '1' }] : [])).sources()
+    ok(late.sources.length === 1 && asked === 2, 'none at first: asked again a moment later, and there', { asked, n: late.sources.length })
+    const since = await deskOf(async () => [], 'denied').sources()
+    ok(since.sources.length === 0 && since.none === 'reopen' && since.permission === 'ok', 'none, and Screen Recording turned on since it opened: reopen', since)
+    const never = await deskOf(async () => { throw new Error('no capture here') }).sources()
+    ok(never.none === 'none' && /no capture here/.test(never.problem || ''), 'none, and on from the start: none, with what macOS said', never)
     access = 'not-determined'
     ok(desk.permission() === 'ask', 'macOS not asked yet: said so (asked the first time someone looks)')
     access = 'granted'

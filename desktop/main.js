@@ -1157,7 +1157,7 @@ app.whenReady().then(async () => {
   createWindow()
   // Remote Screen and Preview's windows: the capture page, the badge, a project's app drawn off screen.
   try { remoteShared = await import(require('node:url').pathToFileURL(path.join(ROOT, 'shared', 'remote.js')).href) } catch (e) { console.error('remote:', e.message) }
-  remote = remoteDesk.create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload: path.join(__dirname, 'preload.js'), fetch, keyFor: (c, os) => remoteShared?.keyFor(c, os) ?? null, sizes: viewSizes })
+  remote = remoteDesk.create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload: path.join(__dirname, 'preload.js'), fetch, keyFor: (c, os) => remoteShared?.keyFor(c, os) ?? null, sizes: viewSizes, restart: () => { app.relaunch(); stopServer(); app.quit() } })
   watchFleet()
   watchCalls()
   startUpdatingWhileAway()

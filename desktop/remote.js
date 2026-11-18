@@ -58,7 +58,8 @@ function displayFor(screens, displays, primary) {
   return out
 }
 
-function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload, fetch, platform = process.platform, keyFor, sizes = null }) {
+// restart(): reopen this app (main.js), asked for by a device that found no screens to share.
+function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload, fetch, platform = process.platform, keyFor, sizes = null, restart = () => {} }) {
   const MAC = platform === 'darwin'
   let capture = null
   let badge = null
@@ -74,6 +75,9 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     const s = systemPreferences.getMediaAccessStatus('screen')
     return s === 'granted' ? 'ok' : s === 'restricted' ? 'restricted' : s === 'not-determined' ? 'ask' : 'denied'
   }
+  // macOS's word when this app started: Screen Recording turned on after that takes effect only once
+  // the app is reopened (macOS says so when it's turned on), and until then there are no screens.
+  const startedWith = permission()
   // Where a display is in the pixels the system presses at: on a Mac, points (as its bounds are);
   // Windows and Linux (X11) move the pointer in pixels, so a display scaled up is told in those.
   const pixelsOf = (d) => {
@@ -84,9 +88,21 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
   }
   // The screens and windows, for the capture page. The first time, macOS asks about Screen Recording
   // here (someone looked: first use). Each screen by its display's own name and size (displayFor).
+  // Screens apart from windows, so a window that can't be listed never hides them, and again a moment
+  // later when there are none at first. None at all: why, as far as can be told (none: 'reopen' when
+  // Screen Recording was turned on since this app started), and what getSources said.
   async function sources() {
-    let list = []
-    try { list = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false }) } catch { list = [] }
+    const get = async (type) => (await desktopCapturer.getSources({ types: [type], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false })).filter((s) => String(s.id).startsWith(`${type}:`))
+    let screens = []
+    let problem = null
+    for (const wait of [0, 400, 1200]) {
+      if (wait) await new Promise((r) => setTimeout(r, wait))
+      try { screens = await get('screen'); problem = null } catch (e) { screens = []; problem = String(e?.message || e).slice(0, 200) }
+      if (screens.length) break
+    }
+    let windows = []
+    try { windows = await get('window') } catch { windows = [] }
+    const list = [...screens, ...windows]
     const displays = screen.getAllDisplays()
     const primary = screen.getPrimaryDisplay()
     const shown = displayFor(list.filter((s) => s.id.startsWith('screen:')), displays, primary)
@@ -102,7 +118,9 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
         bounds: d ? { ...d.bounds, ...(pixelsOf(d) ? { px: pixelsOf(d) } : {}) } : null,
       })
     }
-    return { sources: out.slice(0, 40), permission: permission() }
+    const now = permission()
+    const none = screens.length ? null : MAC && now === 'ok' && startedWith !== 'ok' ? 'reopen' : 'none'
+    return { sources: out.slice(0, 40), permission: now, ...(none ? { none, ...(problem ? { problem } : {}) } : {}) }
   }
   // A small still of each screen, for the viewer's Which screen? (asked only during a session, once
   // the guardrails let it in: server/remote.js): JPEG, inside 320 x 320, its shape kept.
@@ -262,6 +280,7 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
   function onEvent(ev) {
     if (!ev || typeof ev.t !== 'string') return
     if (ev.t === 'need-capture') needCapture()
+    else if (ev.t === 'reopen') setTimeout(restart, 500) // (the server tells the device first)
     else if (ev.t === 'capture-idle') captureIdle()
     else if (ev.t === 'sessions') sessions(ev.list, ev.asks)
     else if (ev.t === 'control') control = !!ev.on

@@ -172,7 +172,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
       const text = String(m.text ?? '')
       navigator.clipboard?.writeText(text).then(() => setNote({ text: t("Copied {name}'s clipboard here ({n} characters).", { name, n: text.length }) }), () => setNote({ text: t("This browser didn't let Bridge AI write to the clipboard. {name}'s clipboard says: {text}", { name, text: text.slice(0, 200) }) }))
     } else if (m.t === 'clip-sent') setNote({ text: t("This clipboard is on {name}'s now ({n} characters).", { name, n: Number(m.n) || 0 }) })
-    else if (m.t === 'error') { if (m.keep) setNote({ text: m.why, bad: true }); else { setErr({ why: m.why, code: m.code, until: m.until || null, by: m.by || null, at: m.at || null }); setGate(null); setSess((x) => ({ ...x, phase: 'ended' })) } }
+    else if (m.t === 'error') { if (m.keep) setNote({ text: m.why, bad: true }); else { setErr({ why: m.why, code: m.code, until: m.until || null, by: m.by || null, at: m.at || null, reopen: !!m.reopen }); setGate(null); setSess((x) => ({ ...x, phase: 'ended' })) } }
     else if (m.t === 'ended') setSess((x) => ({ ...x, phase: 'ended', text: m.why === 'here' ? t('Stopped on {name}.', { name }) : m.why === 'stopped' ? t('Stopped from {device}.', { device: m.by || t('another of your devices') }) : m.text }))
   }
 
@@ -469,6 +469,9 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         stopped: t('Stopped from {device}.', { device: err.by || t('another of your devices') }),
         timeout: t("The password wasn't typed in time. Try again."),
         screenPermission: t("macOS doesn't let Bridge AI record the screen on {name}. On {name}, turn on Bridge AI in System Settings › Privacy & Security › Screen & System Audio Recording, then open Bridge AI again there.", { name }),
+        reopen: t("Screen Recording was turned on for Bridge AI on {name} after it opened, and macOS lets it record only once it's reopened.", { name }),
+        noScreens: t("macOS on {name} gave Bridge AI no screens to share. If it's asking there whether Bridge AI may record the screen, answer it there; if not, reopening Bridge AI there usually sorts it.", { name }),
+        reopening: t('Bridge AI is reopening on {name}. Try again in a few seconds.', { name }),
       }
       const icon = err.code === 'locked' ? 'lock' : ['denied', 'unanswered', 'device', 'blocked', 'stopped'].includes(err.code) ? 'ban' : 'alert'
       return (
@@ -477,7 +480,8 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
           <p>{words[err.code] || err.why}</p>
           <div className="rs-card-btns">
             {!windowed && <button type="button" className="btn" onClick={onClose}>{t('Close')}</button>}
-            {err.code !== 'trial' && <button type="button" className="btn primary" disabled={lockedUntil > Date.now()} onClick={retry}>{t('Try again')}</button>}
+            {err.reopen ? <button type="button" className="btn primary" onClick={() => { conn.current?.send({ t: 'reopen' }); setErr((x) => ({ ...x, reopen: false })) }}>{t('Reopen Bridge AI on {name}', { name })}</button>
+              : err.code !== 'trial' && <button type="button" className="btn primary" disabled={lockedUntil > Date.now()} onClick={retry}>{t('Try again')}</button>}
           </div>
         </div>
       )

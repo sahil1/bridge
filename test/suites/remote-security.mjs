@@ -591,6 +591,36 @@ try {
     await idle()
   })
 
+  // macOS gives an app no screens until it's reopened after Screen Recording is turned on for it:
+  // said as that, and Reopen offered to the session, which the guardrails let in, and only to it.
+  await part('no screens to share: why, and Reopen Bridge AI from the session', async () => {
+    const ac = new AbortController()
+    const heard = []
+    const feed = fetch(`${studio.url}/api/events`, { headers: { Accept: 'text/event-stream', 'x-bridge-desktop': '3.21.0', authorization: `Bearer ${studio.key}` }, signal: ac.signal }).then(async (r) => {
+      const dec = new TextDecoder()
+      for await (const c of r.body) heard.push(dec.decode(c))
+    }).catch(() => {})
+    const cap = local(studio, '/api/remote/capture')
+    await until(() => cap.ws.readyState === 1, 4000, 50)
+    cap.send({ t: 'hello', sources: [], permission: 'ok', none: 'reopen', p2p: false })
+    const v = ph.socket(V)
+    await through(v)
+    await v.wait((s) => msg(s, 'error'), 12000)
+    const e = msg(v, 'error')
+    ok(e?.code === 'reopen' && e.reopen === true && /only once it's reopened/.test(e.why) && !v.closed, 'turned on since Bridge AI opened there: said so, with Reopen offered, the session kept open for it', e)
+    ok(cap.msgs.some((m) => m.t === 'sources?'), 'its screens asked for again before that was said')
+    await v.send({ t: 'reopen' })
+    await v.wait((s) => msgs(s, 'error').length >= 2, 4000)
+    ok(msgs(v, 'error')[1]?.code === 'reopening', 'Reopen: the device is told it\'s reopening', msgs(v, 'error')[1])
+    ok(!!(await until(() => /event: remote\ndata: \{"t":"reopen"\}/.test(heard.join('')), 4000, 100)), 'and the desktop app here is asked to reopen')
+    const rec = await until(async () => (await studio.api('/remote')).log?.find((x) => x.end === 'reopened'), 4000, 100)
+    ok(rec?.by?.name === 'Phone', 'Screen Activity says who reopened it', rec)
+    ac.abort()
+    await feed
+    cap.close()
+    await idle()
+  })
+
   await part('the password\'s hash: OWASP\'s cost, and an older one made again once it\'s typed', async () => {
     const stored = JSON.parse(fs.readFileSync(path.join(studio.data, 'remote.json'), 'utf8')).password
     ok(stored.kdf === 'scrypt' && stored.N * stored.p >= 2 ** 17 && stored.r === 8, 'N=2^17, r=8, p=1 (or its equal at less memory)', { N: stored.N, r: stored.r, p: stored.p })

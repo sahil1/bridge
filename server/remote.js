@@ -270,6 +270,10 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       if (m.t === 'hello' || m.t === 'sources') {
         c.sources = Array.isArray(m.sources) ? m.sources.slice(0, 40).map(cleanSource).filter(Boolean) : []
         c.permission = typeof m.permission === 'string' ? m.permission : null
+        // No screens: why, as far as the app could tell ('reopen': Screen Recording turned on since it
+        // started), and what macOS said.
+        c.none = m.none === 'reopen' || m.none === 'none' ? m.none : null
+        c.problem = clean(m.problem, 200) || null
         c.p2p = m.p2p === true
         if (m.t === 'hello') { for (const w of captureWaiters.splice(0)) w.resolve(c); idleLater() }
         for (const w of sourceWaiters.splice(0)) w()
@@ -572,9 +576,12 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
         if (!after.can) return fail(after.why, after.code)
         if (!allows(dev.id)) { refuse(s, 'device'); return fail(notAllowed(s), 'device') }
       }
-      const list = sourceList()
+      let list = sourceList()
+      // No screens yet: asked for again (the app looks a few times) before saying so.
+      if (!sid && !list.some((x) => x.kind === 'screen') && capture) { await askSources(); list = sourceList() }
       const src = list.find((x) => x.id === sid && x.kind === (kind === 'window' ? 'window' : 'screen')) || (!sid ? list.find((x) => x.kind === 'screen' && x.primary) || list.find((x) => x.kind === 'screen') : null)
-      if (!src) return fail(sid ? 'That screen or window isn\'t there any more. Pick another.' : `${thisName()} didn't say which screens it has. Try again in a moment.`, 'source')
+      if (!src && sid) return fail('That screen or window isn\'t there any more. Pick another.', 'source')
+      if (!src) return noScreens(ws, s)
       s.source = { kind: src.kind, id: src.id, name: src.name, bounds: src.bounds, w: src.w, h: src.h }
       s.provider = capture ? 'capture' : 'fake'
       // Control when it's on here and asked for (of a whole screen: where the pointer goes is known
@@ -809,6 +816,31 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     }
     if (devices().some((d) => d.id === who.id)) setDevice(who.id, false)
     return { ok: true, said: `${who.name} can't connect to ${thisName()} any more.` }
+  }
+
+  // ---------- no screens ----------
+  // The app here had no screens to share: on a Mac, nearly always Screen Recording turned on since it
+  // opened (macOS lets it record only once it's reopened), or macOS asking there whether it may go on
+  // recording. Said, with Reopen Bridge AI offered to this session, which the guardrails let in: it
+  // answers { t: 'reopen' } within a minute, and the app here reopens (agents keep running).
+  async function noScreens(ws, s) {
+    const name = thisName()
+    const none = capture?.none || 'none'
+    const why = none === 'reopen'
+      ? `Screen Recording was turned on for Bridge AI on ${name} after it opened, and macOS lets it record only once it's reopened.`
+      : process.platform === 'darwin'
+        ? `macOS on ${name} gave Bridge AI no screens to share. If it's asking there whether Bridge AI may record the screen, answer it there; if not, reopening Bridge AI there usually sorts it.`
+        : `${name} gave Bridge AI no screens to share${capture?.problem ? `: ${capture.problem}` : ''}.`
+    const reopen = desktopOpen()
+    const code = none === 'reopen' ? 'reopen' : process.platform === 'darwin' ? 'noScreens' : 'source'
+    tell(ws, { t: 'error', why, code, ...(reopen ? { reopen: true } : {}) })
+    const m = reopen ? await answerOf(ws, 'reopen', 60 * 1000) : null
+    if (m && ws.readyState === 1) {
+      refuse(s, 'reopened')
+      toDesktop({ t: 'reopen' })
+      tell(ws, { t: 'error', why: `Bridge AI is reopening on ${name}. Try again in a few seconds.`, code: 'reopening' })
+    }
+    setTimeout(() => { try { ws.close(1008, 'refused') } catch { /* closed */ } }, 50)
   }
 
   // ---------- your other devices, told ----------
