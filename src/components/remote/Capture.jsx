@@ -66,11 +66,14 @@ export default function Capture() {
   const [said, setSaid] = useState('')
   useEffect(() => {
     const sessions = new Map() // session -> { stream, pc, dc, video, timer, q, scale }
+    // Each start on its way (the screen asked for, not yet taken): stopped meanwhile, it isn't taken.
+    const starting = new Map() // session -> a token of that start
     let ws = null
     let closed = false
     const send = (m) => { if (ws?.readyState === 1) ws.send(JSON.stringify(m)) }
     const hello = async (t) => { const r = await list(); send({ t, sources: r.sources, permission: r.permission, p2p: typeof RTCPeerConnection === 'function' }) }
     const stop = (id) => {
+      starting.delete(id)
       const s = sessions.get(id)
       if (!s) return
       sessions.delete(id)
@@ -122,18 +125,26 @@ export default function Capture() {
     }
     const start = async (m) => {
       stop(m.session)
+      const token = {}
+      starting.set(m.session, token)
+      const gone = () => starting.get(m.session) !== token
       let stream
       try { stream = await streamOf(m.source) } catch (e) {
+        if (gone()) return
         const r = await list().catch(() => ({}))
         send({ t: 'error', session: m.session, why: r.permission && r.permission !== 'ok' ? 'macOS hasn\'t allowed Bridge AI to record the screen here yet. Allow it at this computer in System Settings › Privacy & Security › Screen & System Audio Recording, then open Bridge AI again.' : `The screen couldn't be shared: ${e.message}` })
         send({ t: 'sources', sources: r.sources || [], permission: r.permission || null, p2p: typeof RTCPeerConnection === 'function' })
         return
       }
+      const drop = () => { stream.getTracks().forEach((x) => x.stop()); stream.stopDraw?.() }
+      if (gone()) return drop()
       const video = document.createElement('video')
       video.muted = true
       video.playsInline = true
       video.srcObject = stream
       await video.play().catch(() => {})
+      if (gone()) return drop()
+      starting.delete(m.session)
       const s = { stream, video, q: PICTURE.quality, width: PICTURE.width, timer: null }
       sessions.set(m.session, s)
       setSaid(String(sessions.size))

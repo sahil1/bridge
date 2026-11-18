@@ -97,6 +97,9 @@
 .rs-block:first-of-type { border-top: 0; padding-top: 2px; }
 .rs-block > p { margin: 0; }
 .rs-needs { display: flex; align-items: center; gap: 6px; }
+.rs-guards { display: flex; align-items: flex-start; gap: 6px; }
+.rs-guards svg { flex: none; margin-top: 3px; }
+.rs-new { margin-left: 6px; height: 18px; }
 .rs-pw-form { display: grid; gap: 8px; max-width: 420px; }
 .rs-pw-form .st-input { width: 100%; }
 .rs-devices { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }

@@ -1,11 +1,13 @@
 // A project's app in the Preview tab on a phone (Remote Screen and Preview, a Beta Feature): drawn by
 // the desktop app on the computer that runs it, in a window of its own off screen, and sent here as
 // pictures through the link; taps, scrolling and typing go back to that page alone. Nothing of the
-// app runs on the phone, so it can't reach anything of Bridge AI's there.
+// app runs on the phone, so it can't reach anything of Bridge AI's there. That computer may ask for
+// its Remote Access Password first, or for someone there to allow it (Gate).
 import { useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { t } from '../../i18n/index.js'
 import { connect, pointOn } from './remote.js'
+import Gate, { gateOf } from './Gate.jsx'
 import './remote.css'
 
 export default function PageView({ base, port, path = '/', name }) {
@@ -34,7 +36,11 @@ export default function PageView({ base, port, path = '/', name }) {
           i.src = url
           if (f.w && f.h) setSize({ w: f.w, h: f.h })
         },
-        message: (m) => { if (m.t === 'error') setState({ phase: 'error', why: m.why }); else if (m.t === 'size' && m.w) setSize({ w: m.w, h: m.h }) },
+        message: (m) => {
+          if (m.t === 'error') setState({ phase: 'error', why: m.why })
+          else if (gateOf(m)) setState({ phase: 'gate', gate: gateOf(m) })
+          else if (m.t === 'size' && m.w) setSize({ w: m.w, h: m.h })
+        },
         closed: () => setState((x) => (x.phase === 'error' ? x : { phase: 'ended' })),
       },
     })
@@ -46,7 +52,7 @@ export default function PageView({ base, port, path = '/', name }) {
   // A tap is a click there; a drag scrolls it.
   const drag = useRef(null)
   const at = (e) => pointOn(img.current, size.w, size.h, e.clientX, e.clientY)
-  const down = (e) => { const p = at(e); if (!p) return; drag.current = { p, x: e.clientX, y: e.clientY, moved: false }; try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* not here */ } }
+  const down = (e) => { const p = state.phase === 'live' && at(e); if (!p) return; drag.current = { p, x: e.clientX, y: e.clientY, moved: false }; try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* not here */ } }
   const move = (e) => {
     const d = drag.current
     if (!d) return
@@ -71,7 +77,8 @@ export default function PageView({ base, port, path = '/', name }) {
       <div className="pv-pages-note"><Icon name="info" size={12} /> {t('Drawn on {name} and shown here as pictures. Tap to click, drag to scroll.', { name })}</div>
       <div className="pv-pages-stage" ref={stage} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => { drag.current = null }}>
         <img ref={img} alt={t('The app on port {port}', { port })} hidden={state.phase !== 'live'} draggable={false} />
-        {state.phase !== 'live' && (
+        {state.phase === 'gate' && <Gate gate={state.gate} name={name} onPassword={(p) => conn.current?.send({ t: 'password', p })} onCancel={() => { conn.current?.close(); setState({ phase: 'ended' }) }} />}
+        {state.phase !== 'live' && state.phase !== 'gate' && (
           <div className="viewer-empty">
             <Icon name={state.phase === 'connecting' ? 'refresh' : 'alert'} size={20} className={state.phase === 'connecting' ? 'spin' : undefined} />
             <p>{state.phase === 'connecting' ? t('Asking {name} for the app…', { name }) : state.why || t('Not showing the app any more.')}</p>

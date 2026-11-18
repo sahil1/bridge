@@ -57,11 +57,19 @@ const NO_BODY = new Set([101, 103, 204, 205, 304])
 // computer's address on the same relay is the same site to a browser, and could otherwise frame
 // yours (or a page of yours framed by another site could be clicked through unseen).
 const FRAMES = { 'Content-Security-Policy': "frame-ancestors 'self'", 'X-Frame-Options': 'SAMEORIGIN' }
+// A project's app (/_preview/, or another computer's /m/<id>/_preview/) never runs as this page: in a
+// sandbox, an origin of no one's, it can't reach your computer through the link.
+const PREVIEW = /^(\/m\/[\w-]{1,20})?\/_preview(\/|$)/
 function framed(head, req) {
   const h = new Headers(head.h)
   if (req.mode === 'navigate' || /html|xml|svg/i.test(h.get('content-type') || '')) {
     h.append('Content-Security-Policy', FRAMES['Content-Security-Policy'])
     h.set('X-Frame-Options', FRAMES['X-Frame-Options'])
+  }
+  if (PREVIEW.test(new URL(req.url).pathname)) {
+    h.append('Content-Security-Policy', 'sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads')
+    h.delete('Clear-Site-Data')
+    h.delete('Service-Worker-Allowed')
   }
   return h
 }

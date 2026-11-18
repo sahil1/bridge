@@ -12,10 +12,16 @@ import { useTrial } from '../../trials.js'
 import { t, locale } from '../../i18n/index.js'
 import { useRemote, remoteDo } from './remote.js'
 import { onFor } from '../Machines.jsx'
+import { plainName } from '../../../shared/remote.js'
 import './remote.css'
 
-// Who: a device, and the one it was for when it came through another of your computers.
-export const whoOf = (s) => (s.for ? t('{name} (for {device})', { name: s.by?.name || t('A device'), device: s.for }) : s.by?.name || t('A device'))
+// Who: a device, and the one it was for when it came through another of your computers. Names as
+// they're shown nowhere else either: nothing in them that turns text around or hides.
+const nameOf = (s) => plainName(s?.by?.name) || t('A device')
+export const whoOf = (s) => (s.for ? t('{name} (for {device})', { name: nameOf(s), device: plainName(s.for) || t('A device') }) : nameOf(s))
+// In an ask, what kind of device too, and how it came: straight here, or through which computer.
+const askerOf = (a) => (a.for ? t('{device} (a phone, through {name})', { device: plainName(a.for) || t('A device'), name: nameOf(a) })
+  : a.by?.kind === 'computer' ? t('{name} (a computer, connected directly)', { name: nameOf(a) }) : t('{name} (a phone, connected directly)', { name: nameOf(a) }))
 const since = (iso) => Math.max(1, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
 const timeOf = (iso) => new Date(iso).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const clockOf = (iso) => new Date(iso).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })
@@ -32,7 +38,9 @@ function refusedText(e, when = timeOf(e.ended || e.started)) {
   if (e.end === 'password') return e.tries === 1 ? t('{who} typed a wrong password at {when}.', { who, when }) : t('{who} typed {n} wrong passwords at {when}.', { who, n: e.tries || 2, when })
   return t('{who} tried to connect at {when}, but isn\'t allowed to.', { who, when })
 }
-const askText = (a) => (a.control ? t('{who} asks to see and control this screen', { who: whoOf(a) }) : t('{who} asks to see this screen', { who: whoOf(a) }))
+const askText = (a) => (a.port ? t('{who} asks to see the app on port {port}', { who: askerOf(a), port: a.port }) : a.control ? t('{who} asks to see and control this screen', { who: askerOf(a) }) : t('{who} asks to see this screen', { who: askerOf(a) }))
+// The same turned away again soon after, counted on one line.
+const again = (e) => (e.count > 2 ? ` ${t('(and {n} times before)', { n: e.count - 1 })}` : e.count === 2 ? ` ${t('(and once before)')}` : '')
 
 function useTick(ms, on) {
   const [, set] = useState(0)
@@ -129,13 +137,15 @@ export function RemoteHere() {
 export function Sessions({ log, here }) {
   if (!log?.length) return <p className="muted small">{t('Nobody has viewed this computer\'s screen yet.')}</p>
   const how = (e) => (e.end === 'here' ? t('stopped here') : e.end === 'device' ? t('stopped: not allowed any more') : e.end === 'error' || e.end === 'lost' ? t('ended with an error') : null)
+  // The sessions, and apart from them a few of the latest turned away (each line counting repeats).
+  const shown = [...log.filter((e) => !refused(e)).slice(0, 30), ...log.filter(refused).slice(0, 10)].sort((a, b) => log.indexOf(a) - log.indexOf(b))
   return (
     <ul className="rs-log" aria-label={t('Screen Activity')}>
-      {log.slice(0, 30).map((e) => (refused(e) ? (
+      {shown.map((e) => (refused(e) ? (
         <li key={e.id} className="rs-log-refused">
           <Icon name={e.end === 'locked' ? 'lock' : 'ban'} size={12} />
           <span className="rs-log-who"><b>{whoOf(e)}</b> <span className="muted">{e.by?.kind === 'computer' ? t('computer') : t('phone')}</span></span>
-          <span className="rs-log-what">{refusedText(e, clockOf(e.ended || e.started))}</span>
+          <span className="rs-log-what">{refusedText(e, clockOf(e.ended || e.started))}{again(e)}</span>
           <span className="rs-log-when muted">{timeOf(e.started)}</span>
         </li>
       ) : (

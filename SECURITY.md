@@ -32,6 +32,21 @@ Only the latest release gets security fixes. Bridge AI tells you when a newer ve
 - Usage stats and crash reports are on unless you turn them off (Settings › About & Updates, or **Turn off** on the card that says they're on; `DO_NOT_TRACK=1` or `BRIDGE_TELEMETRY=0` keeps them off; see [PRIVACY.md](PRIVACY.md#usage-stats-on-unless-you-turn-them-off)): weekly and daily counts in ranges, and crash reports with names, folders, emails and keys taken out, with no ID and nothing you typed.
 - The outside requests Bridge AI makes itself are for what it shows you: the weather (Open-Meteo, with only the coordinates you picked), market prices and news headlines (Yahoo Finance, the Federal Reserve, and public news feeds), and a check on GitHub for a newer version (Settings › About & Updates turns it off). Unless you turn them off, also the usage stats, to `counts.boldbridge.ai`, and crash reports, to `crashes.boldbridge.ai` (both in `shared/telemetry-schema.json`). Your agents talk to their own providers with your own sign-ins.
 
+## Remote access
+
+Your paired phones and linked computers are trusted with this computer: they can start agents, read files and type into terminals here, as you can. Remove a device you don't trust in Settings › Account & Devices.
+
+Remote Screen and Preview (a Beta Feature, off until you turn it on) adds guardrails, each set at the computer itself, never from another device or through Tailscale:
+
+- **Remote Access Password.** Asked before a device sees this computer's screen or one of the apps its agents serve (as pictures on a phone, or at an address of its own on another computer), and checked here. It's kept only as a salted scrypt hash at OWASP's recommended cost; an older hash is made again at that cost the next time the password is typed. Five wrong tries lock that device out for 15 minutes: each try is counted before it's checked, one is checked at a time, a device has at most two sessions waiting at the password, and a lockout is never ended early except by Unlock at the computer. Changing or removing the password ends every session.
+- **Control** needs the password, and goes back to view-only after 10 minutes without input. Taking it back then asks for the password again.
+- **Ask Here First.** Allow or Deny at the computer for each session, saying which device asks, what kind it is and how it's connected (directly, or through which of your computers). Allowed to view, a device that then takes control is asked about again; after control went idle, Allow is asked for again too.
+- **Which Devices May Connect.** A device unticked here can't see the screen or the apps, and its sessions end, including one waiting at the password. A device coming through another of your computers is checked against that computer's own list and lockout first, and this computer keeps its lockout for that computer and that device together. Once any guardrail is set, a phone or computer paired after that starts unticked until you tick it at the computer.
+- A device asking is told only its own standing and the screens it may pick: never who else looked, the record, what's being asked at the computer, or the other devices.
+- **Previews.** Only a server one of your agents' terminals started counts as an app (never one started from the home folder or Bridge AI's data folder). An app never runs as a Bridge AI page: another computer shows it at an address of its own, and next to a phone's page it comes in a sandbox with no origin of its own. The page drawn off screen for a phone stays on its own app, and its redirects and frames can't reach anything else on the computer.
+
+The guardrails cover seeing and controlling the screen and the apps. They don't stop a paired device from running agents and terminals; that's what removing a device is for.
+
 ## What it doesn't protect against
 
 - **Other accounts on the same computer, as an administrator.** Someone who can read your files (an administrator of the computer) can read Bridge AI's key too. Don't run Bridge AI on a computer you share with people you don't trust.

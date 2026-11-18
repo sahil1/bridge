@@ -57,6 +57,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   const held = useRef(new Set())
   const buttons = useRef(new Set())
   const taking = useRef(false)
+  const clipAsked = useRef(false) // Get clipboard pressed: the answer it waits for
   const pan = useRef(null)
   const touch = useRef(null)
   const pinch = useRef(null)
@@ -89,10 +90,14 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   const setControl = (c) => setSess((x) => ({ ...x, hello: x.hello && { ...x.hello, control: { on: !!c.on, allowed: !!c.allowed, idle: !!c.idle, why: c.why || null } } }))
   const onMessage = (m) => {
     if (m.t === 'size' && m.w && m.h) setSize({ w: m.w, h: m.h })
-    else if (m.t === 'password') { setGate({ t: 'password', wrong: !!m.wrong, left: Number(m.left) || 0, lockMinutes: Number(m.lockMinutes) || ACCESS.lockMinutes }); setSess((x) => ({ ...x, phase: 'password' })) }
-    else if (m.t === 'asking') { setGate({ t: 'asking', until: m.until || new Date(Date.now() + (Number(m.ms) || 30000)).toISOString() }); setSess((x) => ({ ...x, phase: 'asking' })) }
+    // (again: in the session, to take control back: Cancel goes on view-only.)
+    else if (m.t === 'password') { setGate({ t: 'password', wrong: !!m.wrong, left: Number(m.left) || 0, lockMinutes: Number(m.lockMinutes) || ACCESS.lockMinutes, again: !!m.again }); setSess((x) => ({ ...x, phase: 'password' })) }
+    else if (m.t === 'asking') { setGate({ t: 'asking', until: m.until || new Date(Date.now() + (Number(m.ms) || 30000)).toISOString(), again: !!m.control }); setSess((x) => ({ ...x, phase: 'asking' })) }
     else if (m.t === 'paused') { setPaused(true); clearTimeout(onMessage.pause); onMessage.pause = setTimeout(() => setPaused(false), Number(m.ms) || 3000) }
     else if (m.t === 'control') {
+      // Control asked for in the session (the password again, Allow there): answered.
+      setGate(null)
+      setSess((x) => (x.hello && (x.phase === 'password' || x.phase === 'asking') ? { ...x, phase: 'live' } : x))
       setControl(m)
       if (!m.allowed) setControlling(false)
       if (m.allowed && taking.current) { setControlling(true); setTimeout(() => stage.current?.focus({ preventScroll: true }), 0) }
@@ -104,6 +109,9 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
       if (m.source.w && m.source.h) setSize({ w: m.source.w, h: m.source.h })
       setZoom(1)
     } else if (m.t === 'clip') {
+      // Only what this device asked for: nothing put on its clipboard otherwise.
+      if (!clipAsked.current) return
+      clipAsked.current = false
       const text = String(m.text ?? '')
       navigator.clipboard?.writeText(text).then(() => setNote({ text: t("Copied {name}'s clipboard here ({n} characters).", { name, n: text.length }) }), () => setNote({ text: t("This browser didn't let Bridge AI write to the clipboard. {name}'s clipboard says: {text}", { name, text: text.slice(0, 200) }) }))
     } else if (m.t === 'clip-sent') setNote({ text: t("This clipboard is on {name}'s now ({n} characters).", { name, n: Number(m.n) || 0 }) })
@@ -326,7 +334,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
     setNote(null)
     try { const text = await navigator.clipboard.readText(); conn.current?.send({ t: 'clip', text }) } catch { setNote({ text: t("This browser didn't let Bridge AI read the clipboard. Paste into {name} with the keyboard instead.", { name }), bad: true }) }
   }
-  const clipGet = () => { setNote(null); conn.current?.send({ t: 'clip?' }) }
+  const clipGet = () => { setNote(null); clipAsked.current = true; conn.current?.send({ t: 'clip?' }) }
   const toggleControl = () => {
     if (allowed) { setControlling(!controlling); if (!controlling) setTimeout(() => stage.current?.focus({ preventScroll: true }), 0); return }
     // Back to view-only after a while, or turned on there since: taken (again) from here.
@@ -337,6 +345,8 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   // Keys held go up first; control carries on where the screen picked allows it (not a window).
   const pick = (v) => { setNote(null); releaseAll(); conn.current?.send({ t: 'source', source: v }) }
   const retry = () => { setErr(null); setGate(null); setRun((n) => n + 1) }
+  // Taking control back, asked for the password or Allow: Cancel, and it goes on view-only.
+  const stayViewing = () => { conn.current?.send({ t: 'control', on: false }); setGate(null); setPw(''); setSess((x) => ({ ...x, phase: 'live' })) }
   const sendPassword = (e) => {
     e.preventDefault()
     if (!pw) return
@@ -386,11 +396,11 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         <form className="rs-card c-password" onSubmit={sendPassword}>
           <Icon name="lock" size={22} />
           <h3>{t('Remote Access Password')}</h3>
-          <p>{t('{name} asks for its password before it shows its screen.', { name })}</p>
+          <p>{gate.again ? t('{name} asks for its password again before this device controls it.', { name }) : t('{name} asks for its password before it shows its screen.', { name })}</p>
           <input className="st-input" type="password" name="bridge-remote-access" autoComplete="off" autoFocus value={pw} onChange={(e) => setPw(e.target.value)} disabled={!!gate.checking} aria-label={t('Remote Access Password')} placeholder={t('Password')} />
           {gate.wrong && !gate.checking && <p className="rs-card-bad" role="alert">{gate.left === 1 ? t('Wrong password. One more wrong try locks this device out for {m} minutes.', { m: gate.lockMinutes }) : t('Wrong password. {n} more wrong tries lock this device out for {m} minutes.', { n: gate.left, m: gate.lockMinutes })}</p>}
           <div className="rs-card-btns">
-            <button type="button" className="btn" onClick={onClose}>{t('Cancel')}</button>
+            <button type="button" className="btn" onClick={gate.again ? stayViewing : onClose}>{t('Cancel')}</button>
             <button type="submit" className="btn primary" disabled={!pw || !!gate.checking}>{gate.checking ? t('Checking…') : t('Connect')}</button>
           </div>
           <small className="muted">{record}</small>
@@ -404,7 +414,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
           <Icon name="refresh" size={20} className="spin" />
           <p>{t('Waiting for someone at {name} to allow this…', { name })}</p>
           <small className="muted">{t("{n} seconds left. No answer is a no.", { n: left })}</small>
-          <div className="rs-card-btns"><button type="button" className="btn" onClick={onClose}>{t('Cancel')}</button></div>
+          <div className="rs-card-btns"><button type="button" className="btn" onClick={gate.again ? stayViewing : onClose}>{t('Cancel')}</button></div>
         </div>
       )
     }

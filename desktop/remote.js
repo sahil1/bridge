@@ -123,8 +123,14 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     pages.set(sid, p)
     const wc = win.webContents
     wc.setWindowOpenHandler(() => ({ action: 'deny' }))
-    // It stays on its own app: a link elsewhere isn't followed.
-    wc.on('will-navigate', (e, url) => { try { if (new URL(url).origin !== origin && new URL(url).origin !== `http://127.0.0.1:${port}`) e.preventDefault() } catch { e.preventDefault() } })
+    // It stays on its own app: a link elsewhere isn't followed, nor a redirect; and nothing in it (a
+    // frame) goes to anything else on this computer (Bridge AI's own page, another local server).
+    const own = (url) => { try { const o = new URL(url).origin; return o === origin || o === `http://127.0.0.1:${port}` } catch { return false } }
+    const local = (url) => { try { return /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0|\[::\])$/i.test(new URL(url).hostname) } catch { return true } }
+    const away = (url, main) => (main ? !own(url) : local(url) && !own(url))
+    wc.on('will-navigate', (e, url) => { if (!own(e.url || url)) e.preventDefault() })
+    wc.on('will-redirect', (e, url, _inPlace, main) => { if (away(e.url || url, e.isMainFrame ?? main)) e.preventDefault() })
+    wc.on('will-frame-navigate', (e) => { if (away(e.url, e.isMainFrame)) e.preventDefault() })
     wc.setFrameRate(Math.min(30, p.rate * 4))
     const flush = () => {
       p.timer = null

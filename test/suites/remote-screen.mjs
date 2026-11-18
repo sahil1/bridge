@@ -358,7 +358,11 @@ try {
     await v.send({ t: 'input', evs: [{ t: 'move', x: 0.2, y: 0.2 }] })
     await sleep(400)
     ok(lines(inputs).length === n, 'nothing it sends is pressed then')
+    const pw0 = msgs(v, 'password').length
     await v.send({ t: 'control', on: true })
+    await v.wait((s) => msgs(s, 'password').length > pw0, 5000)
+    ok(msgs(v, 'password').at(-1)?.again === true, 'taken again from the viewer, the password first', msgs(v, 'password').at(-1))
+    await v.send({ t: 'password', p: PW })
     await v.wait((s) => msgs(s, 'control').at(-1)?.allowed === true, 5000)
     await v.send({ t: 'input', evs: [{ t: 'move', x: 0.3, y: 0.3 }] })
     ok(!!(await until(() => lines(inputs).length > n, 3000, 100)), 'Control again from the viewer: it is')
@@ -554,8 +558,11 @@ try {
   await studio.api('/agents/catalog')
   const pane = (await studio.api('/agents/launch', { kind: 'claude', cwd: project, label: 'Web app', newSpace: 'Web app' })).paneId
   const dport = await freePort()
-  const dev = spawn(process.execPath, [path.join(project, 'dev.mjs'), String(dport), laptop.url], { cwd: project, stdio: 'ignore', env: { ...process.env, NODE_PATH: path.join(ROOT, 'node_modules') } })
-  procs.push(dev)
+  // Started in a terminal of the agent's, as its `npm run dev` would be (only what an agent's terminal
+  // starts is one of its apps)...
+  const devPane = (await studio.api('/agents/launch', { kind: 'shell', cwd: project, label: 'Dev server' })).paneId
+  await sleep(800)
+  await studio.api(`/panes/${enc(devPane)}/text`, { text: `NODE_PATH="${path.join(ROOT, 'node_modules')}" "${process.execPath}" "${path.join(project, 'dev.mjs')}" ${dport} ${laptop.url}`, enter: true })
   // ...and one that isn't any agent's (started elsewhere).
   const elsewhere = path.join(studio.home, 'elsewhere')
   fs.mkdirSync(elsewhere, { recursive: true })
@@ -568,6 +575,10 @@ try {
   ok(!!listed, 'Studio lists it as the agent\'s', listed)
 
   let addr = null
+  // With a password set at Studio, its apps are seen while a session for that app is open (past the
+  // password), as the Preview tab keeps one.
+  const grant = local(laptop, `/m/${S.id}/api/remote/view?source=preview:${dport}`)
+  await through(grant)
   await part('a project\'s app at an address of its own on Laptop', async () => {
     addr = await laptop.api(`/machines/${S.id}/preview`, { port: dport })
     ok(/^http:\/\/127\.0\.0\.1:\d+\/$/.test(addr.url) && addr.port !== dport, 'Laptop gives it an address on 127.0.0.1, a port of its own', addr)
@@ -598,28 +609,30 @@ try {
     ok(api.status === 403, 'Laptop\'s API refuses a request from its page', api.status)
   })
 
+  grant.close()
   await part('only an agent\'s dev servers', async () => {
     const own = await fetch(`${laptop.url}/api/machines/${S.id}/preview`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${laptop.key}` }, body: JSON.stringify({ port: studio.port }) })
     const ownJ = await own.json()
     ok(own.status === 409 && new RegExp(`Port ${studio.port} isn't one of the apps Studio serves`).test(ownJ.error), 'Bridge AI\'s own port on Studio: refused, saying why', ownJ)
-    if (IS_WIN) skip('a server started outside every agent\'s folder is refused', 'Windows can\'t tell which folder a process started in, so every local web server is listed there')
-    else {
-      const o = await fetch(`${laptop.url}/api/machines/${S.id}/preview`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${laptop.key}` }, body: JSON.stringify({ port: oport }) })
-      ok(o.status === 409, 'a server started outside every agent\'s folder: refused', await o.json())
-    }
+    const o = await fetch(`${laptop.url}/api/machines/${S.id}/preview`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${laptop.key}` }, body: JSON.stringify({ port: oport }) })
+    ok(o.status === 409, 'a server no agent\'s terminal started: refused', await o.json())
     const direct = await ph.request('GET', `/_preview/${studio.port}/api/config`)
     ok(direct.status === 403, 'nor straight through the link', direct.json)
     const local1 = await fetch(`${studio.url}/_preview/${dport}/`, { headers: { authorization: `Bearer ${studio.key}` } })
     ok(local1.status === 403, 'Studio\'s /_preview/ is for its other devices only, not a page of its own', local1.status)
+    const pg = ph.socket(`/api/remote/view?source=preview:${dport}`)
+    await through(pg)
     const viaLink = await ph.request('GET', `/_preview/${dport}/go`)
     const loc = viaLink.headers.find(([k]) => k === 'location')?.[1]
     ok(viaLink.status === 302 && loc === `/_preview/${dport}/landed?x=1`, 'through the link beside Bridge AI\'s page, a redirect stays under its own path', loc)
     const cookieBack = (await ph.request('GET', `/_preview/${dport}/login`)).headers.find(([k]) => k === 'x-bridge-preview-set-cookie')
     ok(!!cookieBack && JSON.parse(cookieBack[1]).length === 2, 'and its cookies come in a header of their own (the link carries no Set-Cookie)', cookieBack)
+    await pg.close()
   })
 
   await part('on a phone: pictures drawn at Studio', async () => {
     const v = ph.socket(`/api/remote/view?source=page:${dport}&w=390&h=700`)
+    await through(v)
     await v.wait((s) => msg(s, 'hello') && s.frames.length)
     ok(msg(v, 'hello')?.source.kind === 'page' && /Preview of port/.test(Buffer.from(v.frames[0].f.bytes).toString('utf8')), 'the phone gets the app as pictures (the stand-in\'s)', msg(v, 'hello'))
     await v.send({ t: 'input', evs: [{ t: 'down', b: 0, x: 0.2, y: 0.2 }, { t: 'text', s: 'typed' }] })
@@ -1069,7 +1082,7 @@ try {
     await p.locator('.rs-card.c-asking').waitFor({ timeout: 8000 })
     const allow = badge.p.getByRole('button', { name: 'Allow' })
     await allow.waitFor({ timeout: 5000 })
-    ok(/Laptop asks to see this screen/.test(await badge.p.locator('.rs-badge').innerText()) && await badge.p.getByRole('button', { name: 'Deny' }).isVisible(), 'the badge: who asks, with Deny and Allow', await badge.p.locator('.rs-badge').innerText())
+    ok(/Laptop \(a computer, connected directly\) asks to see (and control )?this screen/.test(await badge.p.locator('.rs-badge').innerText()) && await badge.p.getByRole('button', { name: 'Deny' }).isVisible(), 'the badge: who asks (what kind of device, and how it came), with Deny and Allow', await badge.p.locator('.rs-badge').innerText())
     await shot(badge.p, `${tag}remote-screen-badge-ask`)
     await allow.click()
     ok(!!(await picture(p)), 'Allow there: the screen comes')
@@ -1118,7 +1131,8 @@ try {
     const rs = el.p.locator('[data-setting=remote-access]')
     await rs.waitFor({ timeout: 15000 })
     const said = await rs.innerText()
-    ok(/The password is set at Studio itself, never from another device/.test(said) && /Changed at Studio itself/.test(said) && !(await rs.getByRole('button', { name: /Set Password|Change Password/ }).count()) && await rs.getByRole('switch', { name: /Ask Here First/ }).isDisabled() && await rs.locator('.rs-devices input').first().isDisabled(), 'from another computer\'s window: shown as it is (Ask Here First on, Phone unticked), nothing changed there, saying where it is', said.slice(0, 400))
+    ok(/The password is set at Studio itself, never from another device/.test(said) && /Changed at Studio itself/.test(said) && !(await rs.getByRole('button', { name: /Set Password|Change Password/ }).count()) && await rs.getByRole('switch', { name: /Ask Here First/ }).isDisabled() && await rs.getByRole('switch', { name: /Ask Here First/ }).isChecked(), 'from another computer\'s window: shown as it is (Ask Here First on), nothing changed there, saying where it is', said.slice(0, 400))
+    ok(!(await rs.locator('.rs-devices').count()) && /Kept at Studio itself/.test(await el.p.locator('[data-setting=remote-sessions]').innerText()), 'Studio\'s devices and its record aren\'t shown there: they\'re Studio\'s own to see')
     await rs.scrollIntoViewIfNeeded()
     await shot(el.p, `${tag}remote-screen-remote-access-elsewhere`)
     await el.ctx.close()
@@ -1160,6 +1174,36 @@ try {
     await p.context().close()
   })
 
+  // A viewed computer can't put anything on the viewer's clipboard it didn't ask for; the capture page
+  // told to stop a session while it was still starting doesn't take the screen for it after all.
+  await part('nothing put on the clipboard unasked, nor a screen taken after a stop', async () => {
+    const { p } = await page(b, laptop.url)
+    await ready(p)
+    let viewer = null
+    await p.routeWebSocket(/\/api\/remote\/view/, (ws) => { viewer = ws; ws.connectToServer() })
+    await viewOn(p)
+    await enterPw(p)
+    await picture(p)
+    viewer.send(JSON.stringify({ t: 'clip', text: 'put there unasked' }))
+    await sleep(800)
+    const note = await p.locator('.rs-note').innerText().catch(() => '')
+    ok(!/clipboard/i.test(note) && !note.includes('put there unasked'), 'a clipboard Studio sends unasked: not put on this device\'s', note)
+    await p.locator('.rs-bar').getByRole('button', { name: 'Stop viewing' }).click()
+    await p.context().close()
+    await until(async () => !(await studio.api('/remote')).sessions.length, 5000, 100)
+    const cap = await page(b, `${studio.url}/?remote=capture&fake=1`)
+    const said = []
+    let to = null
+    await cap.p.routeWebSocket(/\/api\/remote\/capture/, (ws) => { to = ws; const server = ws.connectToServer(); ws.onMessage((m) => { said.push(String(m)); server.send(m) }) })
+    await cap.p.reload()
+    await until(() => to && said.some((m) => /"t":"hello"/.test(m)), 8000, 50)
+    to.send(JSON.stringify({ t: 'start', session: 'stopped-1', source: { kind: 'screen', id: 'fake-1', name: 'Test screen', w: 640, h: 400 }, p2p: null, rate: 1, max: 180000 }))
+    to.send(JSON.stringify({ t: 'stop', session: 'stopped-1' }))
+    await sleep(1500)
+    ok(!said.some((m) => /"started"/.test(m) && /stopped-1/.test(m)) && !(await cap.p.locator('.rs-capture').getAttribute('data-sessions')), 'stopped while it started: the screen isn\'t taken for it', said.filter((m) => /stopped-1/.test(m)))
+    await cap.ctx.close()
+  })
+
   await part('the agent\'s Preview tab on Laptop', async () => {
     const port = (await laptop.api('/machines')).machines.find((m) => m.id === S.id)?.port
     const { p, errors: e2 } = await page(b, `http://127.0.0.1:${port}/m/${S.id}/?window=${enc(pane)}`)
@@ -1169,6 +1213,8 @@ try {
     const chip = p.locator('.preview-chip', { hasText: `:${dport}` })
     await chip.waitFor({ timeout: 20000 })
     await chip.click()
+    // Studio asks for its password first, in the tab.
+    await enterPw(p)
     const frame = p.locator('iframe.preview-frame')
     await frame.waitFor({ timeout: 20000 })
     await until(async () => (await frame.getAttribute('src'))?.startsWith(addr?.url || 'http://127.0.0.1:'), 10000)

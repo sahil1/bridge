@@ -108,7 +108,7 @@ async function call(url, opts = {}) {
 export async function hostApi(path, opts = {}) {
   const res = await fetch(`/api${path}`, { ...opts, headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) }, body: opts.body ? JSON.stringify(opts.body) : undefined })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status, code: typeof data.code === 'string' ? data.code : undefined })
   return data
 }
 

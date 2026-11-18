@@ -201,19 +201,21 @@ const pages = machinePages.make({
 })
 // Remote Screen and Preview (a Beta Feature): this computer's screen and its agents' apps for your
 // other devices (remote.js, devpreview.js serve), and theirs shown here at addresses of their own
-// (devpreview.js ports). A port is a dev server's when a process started in an agent's folder
-// listens on it, and never one of Bridge AI's own.
+// (devpreview.js ports). A port is a dev server's when an agent's terminal started what listens on
+// it (not one in the home folder or Bridge AI's data folder), and never one of Bridge AI's own.
 const previewPorts = devPreview.ports({ machines, linked: () => machines.list().filter((m) => m.state === 'linked') })
 const isDevPort = async (port) => {
-  const roots = [...new Set(((await rt.fleet().catch(() => null))?.panes || []).map((p) => p.cwd).filter(Boolean))]
-  return servers.ownedBy(port, roots, { exclude: [cfg.port, cfg.port + 1, ...pages.ports(), ...previewPorts.portsOpen()] })
+  const panes = rt.processes ? rt.processes() : ((await rt.fleet().catch(() => null))?.panes || []).map((p) => ({ cwd: p.cwd }))
+  return servers.ownedBy(port, panes.filter((p) => p.cwd), { exclude: [cfg.port, cfg.port + 1, ...pages.ports(), ...previewPorts.portsOpen()], never: [os.homedir()], noneIn: [DATA] })
 }
 const remote = makeRemote({
   trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), thisName: () => relay.thisName(), os: machines.OS,
   hosted: () => !!relay.status().hosted, isDevPort, screenAllowed: () => (IS_MAC ? calls.screen() : Promise.resolve(null)),
-  devices: () => relay.status().devices,
+  devices: () => relay.status().devices, onBlocked: (id) => machines.endOnward(id, `${relay.thisName()} stopped letting this device connect.`),
 })
-const servePreview = devPreview.serve({ trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), allows: (id) => remote.allows(id), isDevPort, thisName: () => relay.thisName() })
+// A device of this computer's going on through it to another's screen: this computer's own list and lockout first.
+machines.usePassCheck((asker) => remote.mayPass(asker.id))
+const servePreview = devPreview.serve({ trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), may: (id, port) => remote.mayPreview(id, port), isDevPort, thisName: () => relay.thisName() })
 const app = express()
 app.use(guard.http)
 app.use(auth.http)
@@ -2849,7 +2851,8 @@ app.post('/api/machines/:id/preview', async (req, res) => {
     if (!(port > 1023 && port < 65536)) return res.status(400).json({ error: 'Which port?' })
     try { await machines.callOn(m.id, 'GET', `/api/remote/preview-check?port=${port}`, undefined, 12000) } catch (e) {
       const old = /^(Not found|.*answered 404)$/.test(e.message)
-      return res.status(e.code === 'offline' ? 503 : 409).json({ error: old ? `Update Bridge AI on ${m.name} to see its apps here.` : e.message, code: e.code === 'offline' ? 'offline' : old ? 'update' : 'refused' })
+      // gate: its password (or Allow there) first, in a session for that app (Preview.jsx).
+      return res.status(e.code === 'offline' ? 503 : 409).json({ error: old ? `Update Bridge AI on ${m.name} to see its apps here.` : e.message, code: e.code === 'offline' ? 'offline' : old ? 'update' : e.said === 'gate' ? 'gate' : 'refused' })
     }
     res.json(await previewPorts.address(m.id, port))
   } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
