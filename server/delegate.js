@@ -34,9 +34,15 @@ const KEEP = 80 // helpers remembered, newest first; the ones still going are al
 // done and said nothing, never got going (its CLI ended at once, say). A test makes both shorter.
 const GONE_MS = Number(process.env.BRIDGE_HELPER_GONE_MS) || 90 * 1000
 const STALL_MS = Number(process.env.BRIDGE_HELPER_STALL_MS) || 3 * 60 * 1000
+// A bot's helper stopped on a question in its terminal this long ends, saying what it asked: nobody
+// is there to answer it (a test makes it shorter).
+const ASK_MS = Number(process.env.BRIDGE_HELPER_ASK_MS) || 60 * 1000
 const RETRY_MS = 30 * 1000 // a report that couldn't go (no chief running) is tried again
 const AGAIN_MS = 24 * 3600 * 1000 // a follow-up within a day of its report is watched again
 const NOT_HELPERS = new Set(['shell', 'chat']) // a terminal or a plain chat can't take a brief
+// First-run screens with one sensible answer, as the app answers them (FirstRun.jsx): the look, the
+// offer to change your terminal app, the notes after signing in. Trusting its folder: its own keys.
+const HARMLESS = { theme: ['enter'], terminal: ['esc'], continue: ['enter'] }
 const clip = (s, n) => { const t = String(s || '').trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t }
 const oneLine = (s, n) => clip(String(s || '').replace(/\s+/g, ' '), n)
 
@@ -56,7 +62,9 @@ const titleOf = (brief) => {
 // Main's ({ sent, queued } back). said(h): what it said last ({ text, from: 'chat'|'screen' }).
 // replied(agent, since): it has said something since then (its conversation's last message is its
 // own). held(paneId): how many messages wait in the queue for it. changed(): the board has news.
-export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve, launch, link, tell, said, replied = () => false, held = () => 0, changed = () => {} }) {
+// setupOf(agent): the first-run screen its terminal shows ({ step, keys }, firstrun.js), for a
+// runtime that doesn't say. press(paneId, keys): keys to its terminal. labelOf(kind): its CLI's name.
+export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve, launch, link, tell, said, replied = () => false, held = () => 0, changed = () => {}, setupOf = async () => null, press = async () => {}, labelOf = (k) => k }) {
   let data = { next: 1, helpers: [] }
   try { data = { ...data, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) } } catch { /* none yet */ }
   // Starting when the server stopped: it goes again (its launch may not have happened). A report
@@ -254,6 +262,27 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
         if (a.sessionId && a.sessionId !== h.sessionId) { h.sessionId = a.sessionId; dirty = true }
         const asking = a.status === 'blocked' || !!a.asking
         if (asking !== !!h.blocked) { if (asking) h.blocked = true; else delete h.blocked; dirty = true; changed() }
+        // In a folder of its own, or answering for a bot (in the folders you gave it, which is
+        // trusting them): its CLI asking whether to trust the folder, and its other harmless
+        // first-run screens, are answered here as you would, since no one sees its terminal. One it
+        // can't get past (signing in) ends it, saying so, and a bot's left asking anything else ends
+        // after ASK_MS, rather than waiting out its longest run.
+        if (asking && (h.own || h.list)) {
+          const setup = a.setup ? { step: a.setup, keys: a.setupKeys } : await setupOf(a).catch(() => null)
+          const keys = setup?.step === 'trust' ? setup.keys : HARMLESS[setup?.step]
+          if (keys?.length && (h.setupTries || 0) < 6) {
+            if (!h.setupAt || now - h.setupAt > 5000) { h.setupTries = (h.setupTries || 0) + 1; h.setupAt = now; dirty = true; await press(a.paneId, keys).catch(() => {}) }
+            continue
+          }
+          if (setup) { await end(h, 'failed', { error: setupError(h.kind, setup.step) }); continue }
+          if (h.list) {
+            if (!h.askedAt) { h.askedAt = now; dirty = true } else if (now - h.askedAt > ASK_MS) {
+              const what = a.asking?.title ? `: "${oneLine(a.asking.title, 160)}"` : ''
+              await end(h, 'failed', { error: `it stopped to ask something in its terminal, and no one answers there for a bot${what}` })
+              continue
+            }
+          }
+        } else if (h.askedAt) { delete h.askedAt; dirty = true }
         if (a.status === 'working' && !h.worked) { h.worked = true; dirty = true }
         if (asking || held(a.paneId) || (a.status !== 'done' && a.status !== 'idle')) continue
         const since = h.againAt || h.startedAt
@@ -267,6 +296,14 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
       if (waiting().length) await fill()
       await flush()
     } finally { looking = false }
+  }
+
+  // Why a helper stopped at its CLI's first-run screen.
+  function setupError(kind, step) {
+    const cli = labelOf(kind)
+    if (step === 'trust') return `${cli} kept asking whether to trust its folder, and didn't take the answer`
+    const what = step === 'login' || step === 'browser' ? 'its sign-in' : 'its first-run screens'
+    return `${cli} isn't set up on this computer yet: it's showing ${what}. Open ${cli} once in Agents and finish there, then try again`
   }
 
   // The helper's card on the board: its state, and what its agent is doing now (the agent map's

@@ -1344,7 +1344,7 @@ function eventLine(e) {
     case 'run.passed': return t('{name} couldn\'t answer: {why}. Trying the next.', { name: e.answerer?.label || e.answerer?.id || '', why: e.why || '' })
     case 'run.finished':
       if (e.end === 'finished') return t('Finished in {s} s', { s: Math.round((e.took || 0) / 1000) })
-      if (e.end === 'timeout') return t('Stopped after {n} minutes, its longest run', { n: e.minutes ?? '' })
+      if (e.end === 'timeout') return t('Stopped after {n} minutes, its longest run', { n: e.minutes ?? (e.took ? Math.round(e.took / 60000) : '?') })
       if (e.end === 'stopped' && (e.by || e.why)) return e.by ? t('Stopped by {name}', { name: e.by }) + (e.why ? ` (${e.why})` : '') : t('Stopped: {why}', { why: e.why })
       return t('Ended: {why}', { why: e.error || e.end })
     case 'draft': {

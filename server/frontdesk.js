@@ -1189,7 +1189,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (!b || q.state !== 'answering') return false
     const h = q.helper ? delegate.get(q.helper) : null
     const run = q.runs.find((r) => r.helper === q.helper)
-    record(id, 'run.finished', at(q, { helper: q.helper, end: why === 'timeout' ? 'timeout' : 'stopped', why, by, took: run?.at ? Date.now() - Date.parse(run.at) : null, agent: h?.kind || run?.agent || null }))
+    record(id, 'run.finished', at(q, { helper: q.helper, end: why === 'timeout' ? 'timeout' : 'stopped', why, by, took: run?.at ? Date.now() - Date.parse(run.at) : null, ...(why === 'timeout' ? { minutes: botOf(id)?.limits.minutes ?? null } : {}), agent: h?.kind || run?.agent || null }))
     if (h?.paneId) await close(h.paneId).catch(() => {})
     if (h) await delegate.drop(h.id).catch(() => {})
     if (run?.change) await changes.tidy({ ...run.change, dir: h?.cwd }).catch(() => {})
