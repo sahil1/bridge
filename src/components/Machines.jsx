@@ -4,6 +4,9 @@ import { api, hostApi, machineId, machineUrl, apart, relayComputers, phoneApp, v
 import { passOn } from '../passed.js'
 import { t, tx, locale, tn } from '../i18n/index.js'
 import { useDevicesName } from './settings/search.js'
+import { useTrial } from '../trials.js'
+import { viewScreen, canReach } from './remote/remote.js'
+import { RemoteSettings, useControl } from './remote/Settings.jsx'
 
 // Your other devices (server/machines.js): Macs, Windows and Linux computers running Bridge AI,
 // linked to this one. The top bar's machine menu switches the window to one (its own Bridge AI,
@@ -172,6 +175,8 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
     return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key) }
   }, [open])
   const app = phone ? phoneApp : null
+  const screens = useTrial('remote-screen')
+  const ctl = useControl(open)
   const linked = (data?.machines || []).filter((m) => m.state === 'linked')
   if (!data || (!linked.length && !machineId && !app)) return null
   const cur = machineId ? linked.find((m) => m.id === machineId) : null
@@ -193,6 +198,7 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
         <span className="mc-text"><b>{name}</b><small>{sub}</small></span>
         {here && <Icon name="check" size={13} />}
       </button>
+      {screens && id && on === true && canReach(id) && <button type="button" className="win-btn" onClick={() => { setOpen(false); viewScreen(id, name) }} aria-label={t("View {name}'s screen", { name })} title={t('View screen')}><Icon name="screen" size={13} /></button>}
       {!here && id && window.bridgeApp?.openMachine && <button type="button" className="win-btn" onClick={() => pick(id, true)} aria-label={t('Open {name} in a window of its own', { name })} title={t('In a window of its own')}><Icon name="popout" size={13} /></button>}
     </div>
   )
@@ -218,6 +224,13 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
           <button type="button" role="menuitem" className="menu-item" onClick={close(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))}>
             <Icon name="link" size={13} /> {t('Link a device…')}
           </button>
+          {screens && ctl.here && ctl.data && (
+            <button type="button" role="menuitemcheckbox" aria-checked={!!ctl.data.control?.on} className="menu-item" disabled={ctl.busy || (!ctl.data.control?.can && !ctl.data.control?.on)}
+              title={ctl.data.control?.can === false ? ctl.data.control.why : t('Their mouse and keyboard work on this screen while they view it, and the clipboard goes both ways. Anyone here moving the mouse or pressing a key pauses them for a moment.')}
+              onClick={() => ctl.set(!ctl.data.control?.on)}>
+              <Icon name={ctl.data.control?.on ? 'check' : 'keyboard'} size={13} /> {t('Let my other devices control this computer')}
+            </button>
+          )}
           {app && (
             <>
               <div className="menu-sep" />
@@ -497,6 +510,7 @@ function DeviceDetails({ m, here = false, readOnly = false, onChanged }) {
 // (from the devices menu's Link a device…).
 export function MachinesSettings({ embedded = false, focus = false }) {
   const devices = useDevicesName()
+  const screens = useTrial('remote-screen')
   const { data, refresh } = useMachines(4000)
   const [link, setLink] = useState('')
   const [busy, setBusy] = useState(null)
@@ -594,6 +608,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
               <span className="mch-btns">
                 {m.state === 'linked' && <button type="button" className="btn small" disabled={!m.online} onClick={() => goMachine(m.id)}>{t('Open')}</button>}
                 {m.state === 'linked' && <button type="button" className="btn small" disabled={!m.online} onClick={() => goMachine(m.id, { own: true })} title={t('Open {name} in a window of its own, beside this one', { name: m.name })}><Icon name="popout" size={12} /> {t('New window')}</button>}
+                {screens && m.state === 'linked' && canReach(m.id) && <button type="button" className="btn small" disabled={!m.online} onClick={() => viewScreen(m.id, m.name)} title={m.online ? t("See {name}'s screen, and control it once {name} allows that", { name: m.name }) : t('{name} is offline', { name: m.name })}><Icon name="screen" size={12} /> {t('View screen')}</button>}
                 {m.state === 'linked' && <button type="button" className="ghost-btn small" aria-expanded={shown === m.id} onClick={() => setShown(shown === m.id ? null : m.id)}>{t('Details')}</button>}
                 {m.state === 'asking' && relayComputers?.list?.().some((c) => c.relay === m.relay) && <button type="button" className="btn small" onClick={() => relayComputers.open(m.relay)}>{t('Go to {name}', { name: m.name })}</button>}
                 {!readOnly && <>
@@ -622,6 +637,8 @@ export function MachinesSettings({ embedded = false, focus = false }) {
           ))}
         </div>
       </section>
+
+      <RemoteSettings />
 
       {!readOnly && phoneOthers.length > 0 && (
         <section className="st-sec">

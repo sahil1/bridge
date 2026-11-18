@@ -117,6 +117,36 @@ export async function serversFor(root, { exclude = [] } = {}) {
   return out.filter(Boolean).sort((a, b) => a.port - b.port)
 }
 
+// Whether a port is one of the web servers running from any of `roots` (the agents' folders): what a
+// preview from another of your devices may reach (devpreview.js), and nothing else on this computer.
+// On Windows, which can't tell where a process was started, any local web server but Bridge AI's.
+// `exclude`: ports never to count (Bridge AI's own). Asked again at most every few seconds per port.
+const owned = new Map() // `${port}` -> { at, p }
+export function ownedBy(port, roots, { exclude = [], ms = 5000 } = {}) {
+  port = Number(port)
+  if (!(port >= 1024 && port < 65536) || exclude.includes(port)) return Promise.resolve(false)
+  const key = `${port} ${roots.join('\0')}`
+  const hit = owned.get(key)
+  if (hit && Date.now() - hit.at < ms) return hit.p
+  const p = (async () => {
+    const socks = (await listening()).filter((s) => s.port === port && s.pid !== process.pid)
+    if (!socks.length) return false
+    // As the Preview tab lists them: a web server (it answers), from an agent's folder.
+    let mine = IS_WIN
+    if (!mine) {
+      const info = await procInfo([...new Set(socks.map((s) => s.pid))])
+      for (const i of info.values()) {
+        const real = await realOr(i.cwd || '')
+        for (const r of roots) if (i.cwd && inside(real, await realOr(r))) mine = true
+      }
+    }
+    return mine && (await probe(port)).http
+  })().catch(() => false)
+  owned.set(key, { at: Date.now(), p })
+  if (owned.size > 200) owned.delete(owned.keys().next().value)
+  return p
+}
+
 // How this project starts a server, best guesses first: [{ label, command }]
 export async function startCommands(root) {
   const out = []

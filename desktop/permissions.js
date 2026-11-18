@@ -31,17 +31,18 @@ const TCC = { microphone: ['Microphone'], accessibility: ['Accessibility', 'Post
 // (or Windows Settings). tccutil(args): runs /usr/bin/tccutil. bundleId(): this app's, or null (from
 // source it's Electron's, whose answers aren't Bridge AI's to forget). showTile(kind): the tile beside
 // System Settings. paste(): whether pasting where you're typing can work here (dictation.js), which
-// is all Accessibility is for. lone(): a lone dictation key (Fn, the right ⌥) is picked, which is all
+// is what Accessibility is for, with control() (Remote Screen and Preview: your other devices may
+// control this computer). lone(): a lone dictation key (Fn, the right ⌥) is picked, which is all
 // Input Monitoring is for; listen: { access(), ask() } (native/bridgekeys listen-access and listen-ask:
 // whether macOS lets the app listen to keys, and asking it). onChange(): something may have changed
 // (main.js tells the server).
-function create({ platform = process.platform, systemPreferences, openExternal, tccutil, bundleId = () => null, showTile = async () => false, paste = () => false, lone = () => false, listen = null, onChange = () => {} }) {
+function create({ platform = process.platform, systemPreferences, openExternal, tccutil, bundleId = () => null, showTile = async () => false, paste = () => false, control = () => false, lone = () => false, listen = null, onChange = () => {} }) {
   const MAC = platform === 'darwin'
   const WIN = platform === 'win32'
   // macOS shows its Accessibility (and Input Monitoring) question once per run at most; after that, its page.
   let askedAx = false
   let askedListen = false
-  const kinds = () => (MAC ? ['microphone', ...(paste() ? ['accessibility'] : []), ...(lone() && listen ? ['input-monitoring'] : []), 'notifications'] : WIN ? ['microphone', 'notifications'] : [])
+  const kinds = () => (MAC ? ['microphone', ...(paste() || control() ? ['accessibility'] : []), ...(lone() && listen ? ['input-monitoring'] : []), 'notifications'] : WIN ? ['microphone', 'notifications'] : [])
   // Listening to keys is allowed with Input Monitoring, or Accessibility, which covers it.
   const listening = async () => systemPreferences.isTrustedAccessibilityClient(false) || !!(await listen.access().catch(() => false))
   const media = () => {

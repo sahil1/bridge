@@ -11,6 +11,8 @@ import { makeGuard } from './guard.js'
 import { makeAuth } from './apiauth.js'
 import { localKey } from './apitoken.js'
 import * as machinePages from './machinepages.js'
+import { makeRemote } from './remote.js'
+import * as devPreview from './devpreview.js'
 import { usage } from './usage.js'
 import { usageStats } from './usagestats.js'
 import { everywhere } from './usageall.js'
@@ -194,6 +196,20 @@ const pages = machinePages.make({
   port: cfg.port, host: cfg.host, thisName: () => relay.thisName(), linked: () => machines.list().filter((m) => m.state === 'linked'),
   nameOf: (id) => machines.list().find((m) => m.id === id)?.name || null, portOf: machines.portOf, keepPort: machines.keepPort,
 })
+// Remote Screen and Preview (a Beta Feature): this computer's screen and its agents' apps for your
+// other devices (remote.js, devpreview.js serve), and theirs shown here at addresses of their own
+// (devpreview.js ports). A port is a dev server's when a process started in an agent's folder
+// listens on it, and never one of Bridge AI's own.
+const previewPorts = devPreview.ports({ machines, linked: () => machines.list().filter((m) => m.state === 'linked') })
+const isDevPort = async (port) => {
+  const roots = [...new Set(((await rt.fleet().catch(() => null))?.panes || []).map((p) => p.cwd).filter(Boolean))]
+  return servers.ownedBy(port, roots, { exclude: [cfg.port, cfg.port + 1, ...pages.ports(), ...previewPorts.portsOpen()] })
+}
+const remote = makeRemote({
+  trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), thisName: () => relay.thisName(), os: machines.OS,
+  hosted: () => !!relay.status().hosted, isDevPort, screenAllowed: () => (IS_MAC ? calls.screen() : Promise.resolve(null)),
+})
+const servePreview = devPreview.serve({ trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), isDevPort, thisName: () => relay.thisName() })
 const app = express()
 app.use(guard.http)
 app.use(auth.http)
@@ -202,6 +218,8 @@ app.use(pages.http)
 app.use(perf.timing)
 // Your other devices' Bridge AI, through this one (machines.js), before anything reads the body.
 app.use('/m', (req, res) => machines.proxy(req, res, { frames: pages.frames, ui: UI_DIR }))
+// A project's app on this computer, for another of your devices (devpreview.js), before anything reads the body.
+app.use('/_preview', (req, res) => { servePreview.http(req, res).catch((e) => { if (!res.headersSent) res.status(502).json({ error: e.message }) }) })
 // Saving a file from the viewer can send more than the usual 1 MB.
 const jsonSmall = express.json({ limit: '1mb' })
 const jsonFile = express.json({ limit: '6mb' })
@@ -468,7 +486,7 @@ const rootOf = async (pane) => {
 // One that's no longer a beta stays in older configs, read by nothing: Memory, now a page for
 // everyone; Studio, Sign PDFs, Comments and @bridge, Make a Sheet, Back and Forward, Tab Groups,
 // Files (Folders, now Studio's home) and Recommended Settings, part of the app since 3.19.0.
-const TRIALS = ['home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'routines', 'mcp-server', 'meeting-board', 'assist-answers', 'call-video', 'slack-bot']
+const TRIALS = ['home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'routines', 'mcp-server', 'meeting-board', 'assist-answers', 'call-video', 'slack-bot', 'remote-screen']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
 
@@ -1549,7 +1567,10 @@ app.get('/api/events', (req, res) => {
   // The desktop app's own feed (desktop/main.js says so): it also hears when another of your devices
   // asks this computer to allow something (fixes.js askHere).
   const off = req.headers['x-bridge-desktop'] && !req.headers['x-bridge-relay'] ? fixes.onAsk((a) => res.write(`event: fix-ask\ndata: ${JSON.stringify(a)}\n\n`)) : null
-  req.on('close', () => { clients.delete(res); off?.() })
+  // ...and what Remote Screen and Preview needs of it (remote.js): its capture window, a project's
+  // app drawn off screen for a phone, and the badge that says this screen is being seen.
+  const offRemote = req.headers['x-bridge-desktop'] && !req.headers['x-bridge-relay'] ? remote.onDesktop((ev) => res.write(`event: remote\ndata: ${JSON.stringify(ev)}\n\n`)) : null
+  req.on('close', () => { clients.delete(res); off?.(); offRemote?.() })
 })
 // A switch to another herdr session: a fleet read before it is dropped, not shown or announced.
 let fleetGen = 0
@@ -2801,6 +2822,46 @@ app.post('/api/machines/unlinked', wrap((req) => {
 }))
 app.delete('/api/machines/:id', wrap((req) => { notByMachine(req); return machines.remove(req.params.id) }))
 app.post('/api/machines/asks/:id', wrap((req) => { relay.answerAsk(req.params.id, !!req.body?.allow); return { asks: relay.status().asks } }))
+// A project's app on one of your other computers, at an address of its own on this one
+// (devpreview.js ports): that computer is asked first whether it may (its Beta Feature, and the
+// port one of its dev servers), so what's wrong is said here rather than as a blank page.
+app.post('/api/machines/:id/preview', async (req, res) => {
+  try {
+    notByMachine(req)
+    const m = machines.list().find((x) => x.id === req.params.id && x.state === 'linked')
+    const port = Number(req.body?.port)
+    if (!m) return res.status(404).json({ error: 'That computer isn\'t linked to this one any more' })
+    if (!(port > 1023 && port < 65536)) return res.status(400).json({ error: 'Which port?' })
+    try { await machines.callOn(m.id, 'GET', `/api/remote/preview-check?port=${port}`, undefined, 12000) } catch (e) {
+      const old = /^(Not found|.*answered 404)$/.test(e.message)
+      return res.status(e.code === 'offline' ? 503 : 409).json({ error: old ? `Update Bridge AI on ${m.name} to see its apps here.` : e.message, code: e.code === 'offline' ? 'offline' : old ? 'update' : 'refused' })
+    }
+    res.json(await previewPorts.address(m.id, port))
+  } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
+})
+
+// ---------- Remote Screen and Preview: this computer (remote.js) ----------
+// Seen from anywhere you are (your devices ask it before they look); changed only here, at this
+// computer itself: control, stopping a session, and what you've seen of who looked.
+const atThisComputer = (req) => !req.headers['x-bridge-relay'] && !req.machinePage
+const remoteHere = (req) => { if (!atThisComputer(req)) throw Object.assign(new Error(`Do this at ${relay.thisName()} itself.`), { status: 403, code: 'here' }) }
+const sayErr = (res, e) => res.status(e.status || 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) })
+app.get('/api/remote', async (req, res) => { try { res.json({ ...(await remote.status({ sources: req.query.sources === '1' })), here: atThisComputer(req) }) } catch (e) { sayErr(res, e) } })
+app.post('/api/remote/control', async (req, res) => { try { remoteHere(req); res.json(await remote.setControl(req.body?.on === true)) } catch (e) { sayErr(res, e) } })
+app.post('/api/remote/sessions/:id/stop', (req, res) => { try { remoteHere(req); res.json({ ok: remote.stop(req.params.id) }) } catch (e) { sayErr(res, e) } })
+app.post('/api/remote/stop', (req, res) => { try { remoteHere(req); remote.stopAll(); res.json({ ok: true }) } catch (e) { sayErr(res, e) } })
+app.post('/api/remote/seen', (req, res) => { try { remoteHere(req); res.json(remote.seen()) } catch (e) { sayErr(res, e) } })
+// A picture of a project's app, drawn off screen by the desktop app here for a phone (desktop/remote.js).
+app.post('/api/remote/sessions/:id/frame', express.raw({ type: () => true, limit: '2mb' }), (req, res) => {
+  if (!atThisComputer(req)) return res.status(403).json({ error: 'Only the desktop app here sends these' })
+  const ok = remote.pageFrame(req.params.id, { type: String(req.headers['content-type'] || 'image/jpeg').slice(0, 40), w: Number(req.headers['x-frame-w']) || 0, h: Number(req.headers['x-frame-h']) || 0, body: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0) })
+  res.status(ok ? 200 : 404).json({ ok })
+})
+// May another of your computers show this port of this computer's (devpreview.js)? It asks first.
+app.get('/api/remote/preview-check', async (req, res) => {
+  const r = await servePreview.may(req, req.query.port)
+  res.status(r.ok ? 200 : r.trial ? 409 : 403).json(r)
+})
 // An ask reaches your phones too, so you can allow it from there. Its six digits stay in Bridge AI
 // (a notification goes through Apple's or Google's servers, and shows on a locked screen).
 relay.whenAsked((a) => notify.send({ kind: 'machine', title: `${a.name} asks to link`, body: 'Open Bridge AI to check the six digits on both devices, then allow it.', url: '/#settings/machines', tag: `machine-ask-${a.id}` }).catch(() => {}))
@@ -3286,6 +3347,7 @@ const afterChange = (changed) => {
   // Beta Features on or off: every open window shows or hides them at once (the live feed), not at
   // its next look at /config, which can be minutes away.
   if (changed.includes('trials')) for (const c of clients) c.write('event: config\ndata: {}\n\n')
+  if (changed.includes('trials')) remote.trialChanged()
   syncCalls()
   rt.setKeep?.(cfg.keepAgents !== false) // applies right away
   const restart = changed.filter((k) => settings.RESTART_KEYS.includes(k))
@@ -4471,6 +4533,8 @@ const onUpgrade = async (req, socket, head) => {
   if (!(await guard.upgrade(req)) || !pages.upgrade(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy() }
   if (!auth.upgrade(req)) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy() }
   if (machines.isMachinePath(req.url)) return machines.upgrade(req, socket, head) // a terminal on another of your devices
+  if (servePreview.isPath(req.url)) return servePreview.upgrade(req, socket, head).catch(() => socket.destroy()) // a project's app's hot reload, for another of your devices
+  if (remote.isPath(req.url)) return remote.upgrade(req, socket, head) // this screen, seen from another of your devices
   const hit = upgrades.find(([prefix]) => req.url.startsWith(prefix))
   if (!hit) return socket.destroy()
   hit[1](req, socket, head)

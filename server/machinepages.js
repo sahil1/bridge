@@ -9,7 +9,7 @@
 //     (Docker), it stays at /m/<id>/ beside this computer's page, as those can't reach its port.
 //   - At its port, its own pages, API and terminals go through to it as before. Of this computer,
 //     only what its page shows of it (HOST): your devices, Home, Needs you, the agent map and copies
-//     with that computer. Never this computer's agents, terminals, files or settings, nor another
+//     with that computer, and an address here for an app of its (a preview). Never this computer's agents, terminals, files or settings, nor another
 //     computer through this one: refused, saying where to do it. A page of this computer's (or of
 //     another computer's) asked for there is sent to its own address.
 import http from 'node:http'
@@ -24,6 +24,8 @@ const HOST = [
   // those under way stopped, tried again or cleared from the list.
   ['GET', /^\/api\/transfers\/plan$/, (req, id) => req.query.from === id && !req.query.to],
   ['POST', /^\/api\/transfers(\/clear|\/[\w-]{1,80}\/(stop|retry))?$/],
+  // A project's app on that computer (its Preview tab), at an address of its own here (devpreview.js).
+  ['POST', /^\/api\/machines\/[A-Za-z0-9_-]{1,20}\/preview$/, (req, id) => req.path.split('/')[3] === id],
 ]
 // What a window showing another computer can't do here, said where it's tried.
 export const elsewhere = (name) => `Switch this window to ${name} to do this: a window showing another computer can't act on ${name}.`
@@ -126,5 +128,7 @@ export function make({ port: mainPort, host, thisName, linked, nameOf, portOf, k
     if (!servers.has(id) && app && linked().some((x) => x.id === id)) await ensure(id).catch(() => {})
     return servers.get(id)?.port || null
   }
-  return { http: http_, upgrade, frames, start, sync, portFor, at }
+  // Every port a linked computer's pages have here (never a preview's: devpreview.js).
+  const ports = () => [...servers.values()].map((x) => x.port)
+  return { http: http_, upgrade, frames, start, sync, portFor, at, ports }
 }

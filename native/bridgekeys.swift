@@ -391,8 +391,120 @@ func loneKey(_ which: String) -> Never {
 }
 if args.count >= 3 && args[1] == "modifier" { loneKey(args[2]) }
 
+// ---------- Control from your other devices (Remote Screen and Preview) ----------
+//   bridgekeys control-access                 whether macOS lets Bridge AI press keys and move the
+//                                             pointer (Accessibility), without asking: {"allowed":true}
+//   bridgekeys control                        one action a line on stdin (server/remoteinput.js):
+//     {"t":"move","x":…,"y":…}                the pointer to that point of the whole desktop (points)
+//     {"t":"down"|"up","b":0|1|2,"x":…,"y":…} a button (left, middle, right) there
+//     {"t":"wheel","dx":…,"dy":…}             scrolled, in pixels
+//     {"t":"key","k":<virtual key code>,"down":true|false}
+//     {"t":"text","s":"…"}                    typed as it is (a phone's keyboard)
+//   It says {"ready":true}, or {"error":"accessibility"} and exits, then {"local":<ms>} whenever
+//   someone at this Mac moves the mouse, clicks, scrolls or presses a key (a listen-only event tap,
+//   which Accessibility allows; what this helper posts is marked, and isn't counted), so the server
+//   holds remote input back a moment. It exits when stdin closes or the process that started it goes.
+let MARK: Int64 = 0x4252_4944 // "BRID": an event posted here
+var lastLocalAt: Int64 = 0
+func mayControl() -> Bool { AXIsProcessTrusted() || CGPreflightPostEventAccess() }
+if args.count >= 2 && args[1] == "control-access" { say("{\"allowed\":\(mayControl())}"); exit(0) }
+func control() -> Never {
+  if !mayControl() { say("{\"error\":\"accessibility\"}"); exit(1) }
+  let source = CGEventSource(stateID: .privateState)
+  var buttons = Set<Int>() // held, so a move drags
+  var flags = CGEventFlags() // held modifiers, so ⌘C is ⌘C
+  var lastClick: (at: Double, b: Int, x: Double, y: Double, n: Int64) = (0, -1, 0, 0, 0)
+  func post(_ e: CGEvent?) {
+    guard let e = e else { return }
+    e.setIntegerValueField(.eventSourceUserData, value: MARK)
+    e.post(tap: .cghidEventTap)
+  }
+  func num(_ d: [String: Any], _ k: String) -> Double { (d[k] as? NSNumber)?.doubleValue ?? 0 }
+  let downs: [CGEventType] = [.leftMouseDown, .otherMouseDown, .rightMouseDown]
+  let ups: [CGEventType] = [.leftMouseUp, .otherMouseUp, .rightMouseUp]
+  let drags: [CGEventType] = [.leftMouseDragged, .otherMouseDragged, .rightMouseDragged]
+  let cgButton: [CGMouseButton] = [.left, .center, .right]
+  let modBits: [Int: CGEventFlags] = [56: .maskShift, 60: .maskShift, 59: .maskControl, 62: .maskControl, 58: .maskAlternate, 61: .maskAlternate, 55: .maskCommand, 54: .maskCommand, 57: .maskAlphaShift]
+  func act(_ d: [String: Any]) {
+    let t = d["t"] as? String ?? ""
+    let p = CGPoint(x: num(d, "x"), y: num(d, "y"))
+    switch t {
+    case "move":
+      let b = buttons.min() ?? -1
+      post(CGEvent(mouseEventSource: source, mouseType: b >= 0 ? drags[b] : .mouseMoved, mouseCursorPosition: p, mouseButton: b >= 0 ? cgButton[b] : .left))
+    case "down", "up":
+      let b = max(0, min(2, Int(num(d, "b"))))
+      let e = CGEvent(mouseEventSource: source, mouseType: t == "down" ? downs[b] : ups[b], mouseCursorPosition: p, mouseButton: cgButton[b])
+      if t == "down" {
+        let at = Date().timeIntervalSince1970
+        let again = lastClick.b == b && at - lastClick.at < NSEvent.doubleClickInterval && abs(lastClick.x - p.x) < 5 && abs(lastClick.y - p.y) < 5
+        lastClick = (at, b, p.x, p.y, again ? lastClick.n + 1 : 1)
+        buttons.insert(b)
+      } else { buttons.remove(b) }
+      e?.setIntegerValueField(.mouseEventClickState, value: lastClick.n)
+      e?.flags = flags
+      post(e)
+    case "wheel":
+      post(CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2, wheel1: Int32(-num(d, "dy")), wheel2: Int32(-num(d, "dx")), wheel3: 0))
+    case "key":
+      let k = Int(num(d, "k"))
+      let down = (d["down"] as? Bool) ?? false
+      if let bit = modBits[k] { if down { flags.insert(bit) } else { flags.remove(bit) } }
+      let e = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(k), keyDown: down)
+      e?.flags = flags
+      post(e)
+    case "text":
+      let units = Array((d["s"] as? String ?? "").utf16)
+      var i = 0
+      while i < units.count {
+        let chunk = Array(units[i..<min(units.count, i + 16)])
+        for down in [true, false] {
+          let e = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down)
+          e?.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: chunk)
+          post(e)
+        }
+        i += 16
+      }
+    default: break
+    }
+  }
+  // Someone at this Mac: anything not posted here.
+  let kinds: [CGEventType] = [.mouseMoved, .leftMouseDown, .rightMouseDown, .otherMouseDown, .leftMouseDragged, .scrollWheel, .keyDown]
+  let mask = kinds.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << CGEventMask($1.rawValue)) }
+  let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly, eventsOfInterest: mask, callback: { _, type, event, _ in
+    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { return Unmanaged.passUnretained(event) }
+    if event.getIntegerValueField(.eventSourceUserData) != MARK {
+      let t = now()
+      if t - lastLocalAt > 250 { lastLocalAt = t; say("{\"local\":\(t)}") }
+    }
+    return Unmanaged.passUnretained(event)
+  }, userInfo: nil)
+  if let tap = tap {
+    let loop = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+    CFRunLoopAddSource(CFRunLoopGetMain(), loop, .commonModes)
+    CGEvent.tapEnable(tap: tap, enable: true)
+  }
+  say(tap == nil ? "{\"ready\":true,\"watch\":false}" : "{\"ready\":true}")
+  Thread {
+    while let line = readLine() {
+      guard let data = line.data(using: .utf8), let d = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+      DispatchQueue.main.async { act(d) }
+    }
+    exit(0) // stdin closed
+  }.start()
+  let parent = getppid()
+  let watch = DispatchSource.makeTimerSource(queue: .main)
+  watch.schedule(deadline: .now() + 1, repeating: 1)
+  watch.setEventHandler { if getppid() != parent { exit(0) } }
+  watch.resume()
+  NSApplication.shared.setActivationPolicy(.prohibited)
+  NSApplication.shared.run()
+  exit(0)
+}
+if args.count >= 2 && args[1] == "control" { control() }
+
 guard args.count >= 4, args[1] == "hotkey", let code = UInt32(args[2]), let mods = UInt32(args[3]) else {
-  FileHandle.standardError.write("usage: bridgekeys hotkey <keycode> <modifiers> | bridgekeys modifier fn|ralt | bridgekeys listen-access | bridgekeys listen-ask | bridgekeys front | bridgekeys paste [--pid <pid>]\n".data(using: .utf8)!)
+  FileHandle.standardError.write("usage: bridgekeys hotkey <keycode> <modifiers> | bridgekeys modifier fn|ralt | bridgekeys listen-access | bridgekeys listen-ask | bridgekeys front | bridgekeys paste [--pid <pid>] | bridgekeys control-access | bridgekeys control\n".data(using: .utf8)!)
   exit(2)
 }
 // An app with no Dock icon or menu, so the key's events reach it.

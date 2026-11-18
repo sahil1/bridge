@@ -1,10 +1,13 @@
 // The Preview tab: the app an agent's project serves, like an editor's built-in browser. Lists the
 // web servers running from the agent's folder; shows the one you pick, with an address bar. When
 // none is running, offers the project's own start commands, run in a terminal tab you can watch.
+// An agent on another of your computers serves its app on that computer's localhost, never this
+// one's: its app is shown through the link (Remote Screen and Preview, server/devpreview.js).
 import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import { usePersisted } from './layout.jsx'
-import { api, usePoll, viaRelay, BASE } from '../api.js'
+import { api, hostApi, usePoll, viaRelay, machineId, BASE } from '../api.js'
+import PageView from './remote/PageView.jsx'
 import { t, tn } from '../i18n/index.js'
 
 const enc = encodeURIComponent
@@ -13,6 +16,14 @@ const enc = encodeURIComponent
 const LOOPBACK = /^(localhost|127\.0\.0\.1|\[::1\])$/
 const remote = typeof location !== 'undefined' && !LOOPBACK.test(location.hostname)
 const urlOf = (port, p = '/') => `http://${remote ? location.hostname : 'localhost'}:${port}${p.startsWith('/') ? p : `/${p}`}`
+// How the app is shown:
+//   here    this computer's own, at its address (localhost here; its name through Tailscale)
+//   port    another computer's (this page shows one of your other computers): at an address of its
+//           own on this computer, through the link, as if it ran here (server/devpreview.js)
+//   frames  through a phone's relay, or where that address can't be reached (Tailscale, Docker): drawn
+//           by the computer that runs it and shown as pictures (remote/PageView.jsx)
+const HOW = viaRelay ? 'frames' : machineId ? (remote ? 'frames' : 'port') : 'here'
+const path1 = (p) => (p.startsWith('/') ? p.slice(1) : p)
 
 // A picture of the preview, for the agent. The desktop app takes it from its own window; a
 // browser asks to share this tab (once per picture) and crops a frame of it.
@@ -53,6 +64,18 @@ export default function PreviewView({ agent, onSendToAgent }) {
   const [msg, setMsg] = useState(null)
   const list = data?.servers || []
   const current = list.find((s) => s.port === picked) || list[0] || null
+  // That computer's name, where the app runs elsewhere.
+  const comp = usePoll(HOW === 'here' ? null : '/version', 10 * 60 * 1000).data?.computer || t('that computer')
+  // Another computer's app: its address here (asked of the computer this page comes from).
+  const [addr, setAddr] = useState(null)
+  useEffect(() => {
+    if (HOW !== 'port' || !current) return
+    let live = true
+    setAddr(null)
+    hostApi(`/machines/${encodeURIComponent(machineId)}/preview`, { method: 'POST', body: { port: current.port } }).then((a) => live && setAddr(a), (e) => live && setAddr({ error: e.message }))
+    return () => { live = false }
+  }, [current?.port, reload]) // eslint-disable-line react-hooks/exhaustive-deps
+  const hrefOf = (p) => (HOW === 'here' ? urlOf(current.port, p) : HOW === 'port' && addr?.url ? `${addr.url}${path1(p)}` : null)
 
   // After Start: pick the first new server as soon as it answers (or give up after 90 seconds).
   useEffect(() => {
@@ -115,13 +138,13 @@ export default function PreviewView({ agent, onSendToAgent }) {
             <span className="muted mono small">:{current.port}</span>
             <input className="mono" value={address} onChange={(e) => setAddress(e.target.value)} aria-label={t('Path')} spellCheck={false} />
           </form>
-          {onSendToAgent && current.framable !== false && !(remote && current.localOnly) && (
+          {onSendToAgent && HOW !== 'frames' && current.framable !== false && !(HOW === 'here' && remote && current.localOnly) && (
             <button className="btn small" onClick={sendPicture} disabled={busy === 'picture'} title={t('Take a picture of the app and attach it to a message for the agent')}>
               <Icon name="image" size={12} /> {busy === 'picture' ? t('Taking…') : t('Send to agent')}
             </button>
           )}
           <button className="win-btn" onClick={() => setReload((k) => k + 1)} title={t('Reload')} aria-label={t('Reload')}><Icon name="refresh" size={13} /></button>
-          <a className="win-btn" href={urlOf(current.port, shown)} target="_blank" rel="noreferrer" title={t('Open in your browser')} aria-label={t('Open in your browser')}><Icon name="external" size={13} /></a>
+          {hrefOf(shown) && <a className="win-btn" href={hrefOf(shown)} target="_blank" rel="noreferrer" title={HOW === 'port' ? t('Open in a browser on this computer') : t('Open in your browser')} aria-label={HOW === 'port' ? t('Open in a browser on this computer') : t('Open in your browser')}><Icon name="external" size={13} /></a>}
           <button className="win-btn" onClick={() => stop(current)} title={t('Stop this server')} aria-label={t('Stop this server')}><Icon name="stop" size={13} /></button>
         </>}
       </div>
@@ -143,10 +166,14 @@ export default function PreviewView({ agent, onSendToAgent }) {
             <Starters />
           </div>
         )}
-        {current && (current.framable === false
-          ? <div className="viewer-empty"><Icon name="external" size={22} /><p>{t('This app doesn\'t allow being shown inside another page.')}</p><a className="btn small" href={urlOf(current.port, shown)} target="_blank" rel="noreferrer">{t('Open it in your browser')}</a></div>
-          : viaRelay
-          ? <div className="viewer-empty"><Icon name="phone" size={22} /><p>{t('Previews aren\'t sent through your relay yet.')}</p><p className="muted small">{t('Open it on the computer, or through Tailscale.')}</p></div>
+        {current && (current.framable === false && HOW !== 'frames'
+          ? <div className="viewer-empty"><Icon name="external" size={22} /><p>{t('This app doesn\'t allow being shown inside another page.')}</p>{hrefOf(shown) && <a className="btn small" href={hrefOf(shown)} target="_blank" rel="noreferrer">{t('Open it in your browser')}</a>}</div>
+          : HOW === 'frames'
+          ? <PageView key={`${current.port}-${reload}`} base={BASE} port={current.port} path={shown} name={comp} />
+          : HOW === 'port'
+          ? (addr?.url ? <Frame key={`${current.port}-${reload}`} src={hrefOf(shown)} title={current.title || t('Port {port}', { port: current.port })} />
+            : addr?.error ? <div className="viewer-empty"><Icon name="alert" size={22} /><p>{addr.error}</p><button type="button" className="btn small" onClick={() => setReload((k) => k + 1)}>{t('Try again')}</button></div>
+              : <div className="viewer-empty"><Icon name="refresh" size={20} className="spin" /><p>{t('Asking {name} for the app…', { name: comp })}</p></div>)
           : remote && current.localOnly
           ? <div className="viewer-empty"><Icon name="phone" size={22} /><p>{t('This server only answers on the computer itself, so it can\'t be shown on this device.')}</p><p className="muted small">{tn('Restart it listening on all addresses (for Vite, {flag}), or open it on the computer.', { flag: <code>--host</code> })}</p></div>
           : <Frame key={`${current.port}-${reload}`} src={urlOf(current.port, shown)} title={current.title || t('Port {port}', { port: current.port })} />)}

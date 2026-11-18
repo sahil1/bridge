@@ -1,0 +1,65 @@
+/* Remote Screen and Preview: another computer's screen here (ScreenView), a project's app drawn there
+   (PageView), and on the computer being seen, the badge, the line in its window and Settings. */
+.rs-view { position: fixed; inset: 0; z-index: 140; display: grid; grid-template-rows: auto auto 1fr auto auto; background: var(--bg, #0f1115); color: var(--ink); }
+.rs-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; padding-top: max(8px, var(--safe-top, 0px)); border-bottom: 1px solid var(--line); background: var(--pane); }
+.rs-title { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.rs-source { max-width: 240px; height: 28px; padding: 2px 8px; font-size: 12.5px; }
+.rs-mode { font-size: 11.5px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); white-space: nowrap; }
+.rs-mode.m-p2p { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent); }
+.rs-mode.m-relay { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 40%, transparent); }
+.rs-why { display: inline-flex; align-items: center; gap: 4px; }
+.rs-swap { font-size: 12px; align-items: center; }
+.rs-swap input { margin-top: 0; }
+.rs-note { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12.5px; background: var(--accent-soft); border-bottom: 1px solid var(--line); }
+.rs-note > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.rs-note.bad { background: color-mix(in srgb, var(--critical) 12%, var(--pane)); }
+.rs-stage { position: relative; min-height: 0; overflow: hidden; display: grid; place-items: center; background: #000; outline: none; touch-action: auto; }
+.rs-stage.controlling { cursor: default; touch-action: none; box-shadow: inset 0 0 0 2px var(--accent); }
+.rs-media { grid-area: 1 / 1; width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+.rs-media[hidden] { display: none; }
+.rs-wait { grid-area: 1 / 1; display: grid; justify-items: center; gap: 8px; max-width: 460px; padding: 16px; text-align: center; color: #e6e8ee; font-size: 13.5px; line-height: 1.5; }
+.rs-wait p { margin: 0; overflow-wrap: anywhere; }
+.rs-type { padding: 6px 12px; border-top: 1px solid var(--line); background: var(--pane); }
+.rs-type input { width: 100%; }
+.rs-foot { padding: 6px 12px; padding-bottom: max(6px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--pane); overflow-wrap: anywhere; }
+.rs-view.phone .rs-bar { gap: 6px; padding: 6px 10px; padding-top: max(6px, var(--safe-top, 0px)); }
+.rs-view.phone .rs-source { max-width: 150px; }
+
+/* The badge: a small window of its own over everything (desktop/remote.js). */
+.is-badge, .is-badge body { background: var(--pane); overflow: hidden; }
+.rs-badge { display: flex; align-items: center; gap: 10px; height: 100vh; padding: 0 12px; font-size: 13px; -webkit-app-region: drag; }
+.rs-badge button { -webkit-app-region: no-drag; }
+.rs-badge-text { flex: 1; min-width: 0; display: grid; }
+.rs-badge-text b, .rs-badge-text small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rs-badge-text small { color: var(--ink-2); }
+.rs-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line-2, #888); flex: none; }
+.rs-dot.on { background: var(--critical); box-shadow: 0 0 0 3px color-mix(in srgb, var(--critical) 25%, transparent); animation: rs-pulse 1.6s ease-in-out infinite; }
+@keyframes rs-pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .rs-dot.on { animation: none; } }
+.btn.danger { color: #fff; background: var(--critical); border-color: var(--critical); }
+.btn.danger:hover { background: color-mix(in srgb, var(--critical) 85%, #000); }
+.rs-capture { padding: 12px; font-size: 12px; color: var(--ink-2); }
+
+/* In the window of the computer being seen. */
+.rs-here { border-color: color-mix(in srgb, var(--critical) 35%, transparent); background: color-mix(in srgb, var(--critical) 8%, var(--pane)); }
+
+/* Settings. */
+.rs-settings .rs-ok { color: var(--good); display: flex; align-items: center; gap: 6px; margin: 0; }
+.rs-settings .rs-no { display: flex; align-items: flex-start; gap: 6px; margin: 0; }
+.rs-control { margin-top: 4px; }
+.rs-now { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
+.rs-now li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.rs-now li > span:nth-child(2) { flex: 1; min-width: 0; }
+.rs-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.rs-log li { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; align-items: baseline; font-size: 12.5px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); }
+.rs-log li > span { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
+.rs-log li > svg { grid-row: 1 / span 3; align-self: start; margin-top: 2px; }
+.rs-log li.rs-log-seen { border: 0; padding: 2px 0; display: block; }
+
+/* A project's app on a phone, drawn on the computer that runs it (PageView). */
+.pv-pages { position: relative; height: 100%; display: grid; grid-template-rows: auto 1fr auto; background: var(--pane-2); }
+.pv-pages-stage { position: relative; min-height: 0; overflow: hidden; display: grid; place-items: center; touch-action: none; }
+.pv-pages-stage img { width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+.pv-pages-note { display: flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 12px; color: var(--ink-2); border-bottom: 1px solid var(--line); }
+.pv-pages-type { padding: 6px 10px; border-top: 1px solid var(--line); }
+.pv-pages-type input { width: 100%; }

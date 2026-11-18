@@ -84,7 +84,7 @@ const ALL = {
 // Beta Features: only those still in beta, in order (Studio, Sign PDFs, Comments and @bridge, Make a
 // Sheet, Back and Forward, Tab Groups, Files and Recommended Settings are part of the app since
 // 3.19.0); Speakers From the Call's Video only where the server runs on a Mac.
-const BETAS = ['Home', 'Tidy what I say', 'Usage Across Every Provider', 'Meeting Insights', 'Scheduled Routines', 'Live Meeting Board', 'Answers in AI Assist', 'Bots', 'Bridge AI as an MCP Server', ...(IS_MAC ? ["Speakers From the Call's Video"] : [])]
+const BETAS = ['Home', 'Tidy what I say', 'Usage Across Every Provider', 'Meeting Insights', 'Scheduled Routines', 'Live Meeting Board', 'Answers in AI Assist', 'Bots', 'Bridge AI as an MCP Server', 'Remote Screen and Preview', ...(IS_MAC ? ["Speakers From the Call's Video"] : [])]
 
 // Every control's name in the panel, every fold opened (as kind|name).
 const names = (p) => p.evaluate(() => {

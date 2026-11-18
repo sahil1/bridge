@@ -43,6 +43,8 @@ const CATEGORIES = {
   discord: { says: /Discord: the bot connects from your computer to Discord's Gateway, through `discord\.com`[\s\S]{0,200}nothing reaches\s+your computer from the internet/, hosts: ['discord.com'] },
   teams: { says: /a tunnel of your own[\s\S]{0,400}keys\s+Microsoft publishes at `login\.botframework\.com`[\s\S]{0,300}Microsoft Entra ID \(`login\.microsoftonline\.com`\)/, hosts: ['login.botframework.com', 'login.microsoftonline.com'] },
   self: { says: /It listens only on\s+your computer/, hosts: [] },
+  // Remote Screen and Preview: the STUN server each end asks its own public address of (stun:, no //).
+  stun: { says: /Cloudflare's STUN\s+server, `stun\.cloudflare\.com`, which sees that address and nothing else/, hosts: ['stun.cloudflare.com'] },
 }
 // Addresses made at run time from what someone set, by file: which category covers them.
 const SET_BY_YOU = {
@@ -63,6 +65,7 @@ const NOT_FETCHED = [
   ['https://opencode.ai/config.json', 'the $schema line of a config file Bridge AI writes for opencode'],
   ['https://developer.microsoft.com/en-us/json-schemas/teams/', 'the $schema line of the Teams app manifest a bot\'s Teams app is made with'],
   ['https://api.botframework.com', 'the Bot Framework\'s name for itself: the issuer of Teams\' tokens, and the scope a bot\'s own token is asked for'],
+  ['http://www.w3.org/2000/svg', 'an SVG picture\'s namespace (the test stand-in\'s screen, server/remote.js)'],
 ]
 // Run when the desktop app is built, on the computer building it, not by the app.
 const BUILD_ONLY = new Set(['desktop/notarize-app.js', 'desktop/notarize-dmg.js', 'desktop/sign.js', 'desktop/after-pack.js', 'desktop/stage.js', 'desktop/render-icons.js'])
@@ -82,10 +85,11 @@ function files() {
 // Comments out: /* … */ and // to the end of the line (a // in an address follows a colon).
 const uncomment = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[\s;,{}()])\/\/.*$/gm, '$1')
 
-// Each web address's host, with ${…} kept where it's made at run time.
+// Each web address's host, with ${…} kept where it's made at run time. A STUN or TURN server's
+// address (stun:host:port, a WebRTC peer's way to learn its own public address) counts too.
 function hosts(text) {
   const out = []
-  for (const m of text.matchAll(/\b(?:https?|wss?):\/\//g)) {
+  for (const m of text.matchAll(/\b(?:(?:https?|wss?):\/\/|(?:stuns?|turns?):(?!\/))/g)) {
     let i = m.index + m[0].length
     let h = ''
     while (i < text.length) {
@@ -160,6 +164,7 @@ code['server/feeds.js'] += "\nconst more = await fetch('https://api.tracker-of-e
 const fake = uncovered(code)
 ok(fake.length === 1 && /server\/feeds\.js: api\.tracker-of-everything\.io isn't in PRIVACY\.md/.test(fake[0]), 'one made-up new host in it: it fails, naming the file and the host', fake)
 ok(!uncovered({ 'server/feeds.js': '// see https://api.tracker-of-everything.io for why\nconst a = 1' }).length, 'the same address in a comment isn\'t contacted, so it passes', null)
+ok(found.has('stun.cloudflare.com') && uncovered({ 'shared/remote.js': "export const STUN = 'stun:stun.l.google.com:19302'" }).some((x) => /stun\.l\.google\.com isn't in PRIVACY\.md/.test(x)), 'a STUN server is a host too: Cloudflare\'s, in the policy, is found; another one fails', null)
 ok(uncovered({ 'server/newthing.js': 'fetch(`https://${host}/v1`)' }).some((x) => /made at run time/.test(x)), 'an address made at run time in a file with no category for it fails too', null)
 ok(uncovered({ 'server/chatmodels.js': 'fetch(`https://${h}/v1`)' }).length === 0, 'one in a file whose category covers it (a model server you set) passes, by category, not by name', null)
 ok(uncovered({ 'server/x.js': "fetch('https://api.open-meteo.com/v1')" }, PRIVACY.replace('the weather (Open-Meteo', 'the weather (')).length === 1, 'and taking a category\'s words out of PRIVACY.md fails it', null)

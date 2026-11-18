@@ -51,6 +51,13 @@ if (!own) {
   idle: () => ipcRenderer.invoke('bridge:idle'),
   // After you allow something in System Settings: restart so it takes effect.
   restart: () => ipcRenderer.invoke('bridge:restart'),
+  // Remote Screen and Preview (desktop/remote.js): the screens and windows this computer can show
+  // (the capture page), and Accessibility asked for when control is turned on here.
+  remote: {
+    sources: () => ipcRenderer.invoke('bridge:remote-sources'),
+    controlAsk: () => ipcRenderer.invoke('bridge:remote-control-ask'),
+    controlAccess: () => ipcRenderer.invoke('bridge:remote-control-access'),
+  },
   // What the app itself asks the system for (desktop/permissions.js): the microphone, Accessibility,
   // notifications. Its question first, else System Settings and the tile; whether it's on, without
   // asking; and an answer that doesn't take, forgotten and asked again.
