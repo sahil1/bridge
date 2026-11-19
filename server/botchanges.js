@@ -150,7 +150,7 @@ export async function collect(c0, { message, checked = null }) {
   if (checked) {
     const real = fs.realpathSync.native(c.dir)
     const unseen = st.out.split('\0').filter(Boolean).filter((l) => !l.slice(0, 2).includes('D')).map((l) => l.slice(3)).filter((rel) => !checked('w', path.join(real, ...rel.split('/'))))
-    if (unseen.length) throw Object.assign(new Error(`It changed ${unseen.slice(0, 3).join(', ')} without going through the checks every change goes through, so nothing was taken`), { step: 'commit' })
+    if (unseen.length) throw Object.assign(new Error(`It changed ${unseen.slice(0, 3).join(', ')} without going through the checks every change goes through, so nothing was taken`), { step: 'commit', code: 'unchecked' })
   }
   if (st.out) {
     await wt(c, ['add', '-A'])

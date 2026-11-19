@@ -33,6 +33,14 @@ for (let i = 1; i < argv.length; i++) {
   else if (argv[i] === '--key' && argv[i + 1]) keyFile = argv[++i]
 }
 const no = (why) => { process.stderr.write(`Refused: ${why}. You can only change files in your own copy, ${root}.\n`); process.exit(2) }
+// (That it ran at all, written down first with the run's key, whatever it then says: so a run whose
+// hook never ran is told from one whose hook refused everything, botwrite.js guardCheck. It lets
+// nothing through.)
+if (log && keyFile) {
+  let k = ''
+  try { k = fs.readFileSync(keyFile, 'utf8').trim() } catch { /* none: nothing written */ }
+  if (/^[0-9a-f]{64}$/.test(k)) { try { fs.appendFileSync(log, `${crypto.createHmac('sha256', k).update('ran\n').digest('hex')}\n`, { mode: 0o600 }) } catch { /* said below, when it lets anything through */ } }
+}
 // (Its real path as the system names it, as each path's below is: on Windows the long name, and the
 // case it has on disk.)
 const realRoot = (() => { try { return fs.realpathSync.native(root) } catch { return null } })()

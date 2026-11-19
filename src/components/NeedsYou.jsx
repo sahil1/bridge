@@ -5,6 +5,7 @@ import { hostApi } from '../api.js'
 import { ago } from './Machines.jsx'
 import { t, tx } from '../i18n/index.js'
 import { sentTo } from '../sendbox.js'
+import { guardWhy } from './bots/access.js'
 import { split, reason, isQuiet, activeAt, projectOf, QUIET_DAYS, TOP } from '../../shared/focus.js'
 import './needsyou.css'
 
@@ -427,7 +428,7 @@ function WriteOf({ it, onUndo, busy, whole = null, onMore = null }) {
   const files = (w.files || []).map((f) => `${f.path}${f.op === 'add' ? ` (${t('new')})` : f.op === 'remove' ? ` (${t('deleted')})` : f.op === 'move' ? ` (${t('moved from {from}', { from: f.from })})` : ''}`)
   const line = w.state === 'waiting' ? t('It changed {files} in its copy. Approve it, and Bridge AI makes the change, then sends the reply.', { files: files.join(', ') })
     : w.state === 'applied' ? t('It changed {files}, without asking you.', { files: files.join(', ') })
-      : w.state === 'refused' ? t('Its change was refused, so nothing was changed.')
+      : w.state === 'refused' ? (w.guard ? t('The folder guard didn\'t run, so nothing was changed: {why}', { why: guardWhy(w.guard) }) : t('Its change was refused, so nothing was changed.'))
         : w.state === 'undone' ? t('Its change was undone.') : w.state === 'failed' ? t('Its change couldn\'t be made: {why}', { why: w.error || '' }) : null
   return (
     <div className="ny-write" data-setting="ny-write">
