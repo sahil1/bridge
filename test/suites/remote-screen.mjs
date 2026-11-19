@@ -148,7 +148,15 @@ async function through(v, pw = PW) {
 const movesSince = (f, n) => lines(f).slice(n).filter((x) => x.t === 'move')
 // Once the app is there (its top bar), Settings › Devices › Computers.
 const ready = (p) => p.locator('.settings-btn').waitFor({ timeout: 20000 })
-const devices = async (p) => { await ready(p); await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } }))) }
+// One of the app's own events, sent again until what it opens is there: the app listens from an
+// effect, after it's first drawn, so one sent the moment the top bar shows can come before that.
+const sendUntil = async (p, name, detail, shows) => {
+  for (let i = 0; i < 20; i++) {
+    await p.evaluate(([n, d]) => window.dispatchEvent(new CustomEvent(n, { detail: d })), [name, detail])
+    if (await p.locator(shows).first().waitFor({ timeout: 500 }).then(() => true, () => false)) return
+  }
+}
+const devices = async (p) => { await ready(p); await sendUntil(p, 'bridge-open-settings', { section: 'machines' }, '.modal.settings') }
 const lines = (f) => { try { return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } }
 
 // A tap between a phone and its relay: every message, both ways, as the relay carries it.
@@ -1046,7 +1054,7 @@ try {
   })
   const downSince = (n) => lines(inputs).slice(n).find((x) => x.t === 'down')
   const near = (a, x, y, d = 3) => !!a && Math.abs(a.x - x) <= d && Math.abs(a.y - y) <= d
-  const viewOn = (p) => p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-view-screen', { detail: { machine: id, name: 'Studio' } })), S.id)
+  const viewOn = (p) => sendUntil(p, 'bridge-view-screen', { machine: S.id, name: 'Studio' }, '.rs-view')
   // Which screen?: opened from the toolbar (unless it's up already), and a screen picked by its name.
   const chooser = (p) => p.locator('.rs-pick')
   const pickScreen = async (p, name) => {
