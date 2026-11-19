@@ -156,6 +156,7 @@ const FILE_IN_MAX = 20 * 1024 * 1024 // a file attached, at most
 const FILES_IN = 5 // files attached to one question, at most
 const FILE_OUT_MAX = 1024 * 1024 // a file an answer sends back, at most
 const OUT_KINDS = /\.(svg|csv|tsv|md|txt|json|html|xml|yaml|yml|mermaid|mmd)$/i
+const OUT_LIST = 'svg, csv, tsv, md, txt, json, html, xml, yaml, mmd'
 const STREAM_MAX = 12000 // what a stream may hold (Slack)
 // How long a draft waits before the asker hears it's being checked (D8), and a minute's length, for
 // the longest run (tests make both short).
@@ -185,6 +186,10 @@ const NO_ANSWER = /^\s*\**NO ANSWER\b\**[:.\s-]*/i
 const NOT_FOR_ME = /^\s*\**NOT FOR ME\b/i
 const CHANGE_NEEDED = /^\s*\**CHANGE NEEDED\b\**[:.\s-]*/i
 const REMEMBER = /^\s*\**REMEMBER(?:\s+about\s+([^:*]{1,60}))?\**\s*:\s*(.+)$/i
+// (In capitals, as its brief says it, so a line of the answer that starts "Attach:" stays a line.)
+const ATTACH_LINE = /^[ \t]*[*_]*ATTACH[*_]*[ \t]*:[ \t]*(\S.*?)[ \t]*$/
+// (A path in quotes, backticks or <>, as it may be written: without them.)
+const unwrap = (s) => { const m = /^(`+|"|'|<)(.*)(\1|>)$/.exec(s); return m && (m[1] !== '<' || m[3] === '>') && (m[1] === '<' || m[3] !== '>') ? m[2].trim() : s }
 const TEACH = /^\s*(?:please\s+)?remember\s+(?:that\s+)?(.{3,})$/i
 const clip = (s, n) => { const t = String(s || '').trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t }
 const oneLine = (s, n) => clip(String(s || '').replace(/\s+/g, ' '), n)
@@ -224,25 +229,32 @@ export function pick(text, { agents = [] } = {}) {
 
 // ---------- What an answer says ----------
 // An answer as the agent wrote it, taken apart: the reply itself; the things it proposes to remember
-// (REMEMBER: …, REMEMBER about this channel: …, REMEMBER about <name>: …); and the files it sends
-// back (a line FILE: <name>, then the file in a fenced block).
+// (REMEMBER: …, REMEMBER about this channel: …, REMEMBER about <name>: …); the files it sends back
+// (a line FILE: <name>, then the file in a fenced block); and the files in its folders it sends as
+// they are (a line ATTACH: <path>, outside a fenced block: only their paths here, each checked and
+// copied once the answer is in, botfiles.js collect).
 export function parseAnswer(raw) {
   const remember = []
   const files = []
+  const attach = []
   let text = String(raw || '').replace(/\r\n/g, '\n')
   text = text.replace(/^[ \t]*\**FILE\**\s*:\s*`?([^\n`]+?)`?\s*\n```[^\n]*\n([\s\S]*?)\n```[ \t]*$/gim, (_, name, body) => {
     const n = safeName(path.basename(name.trim()))
     if (OUT_KINDS.test(n) && Buffer.byteLength(body) <= FILE_OUT_MAX && files.length < 5) { files.push({ name: n, content: `${body}\n` }); return '' }
     return _
   })
+  let fenced = false
   text = text.split('\n').filter((l) => {
+    if (/^\s*(```|~~~)/.test(l)) fenced = !fenced
+    const a = !fenced && ATTACH_LINE.exec(l)
+    if (a) { if (attach.length < 10 && unwrap(a[1])) attach.push(unwrap(a[1])); return false }
     const m = REMEMBER.exec(l)
     if (!m) return true
     const about = String(m[1] || '').trim()
     remember.push({ about: about || null, text: m[2].trim() })
     return false
   }).join('\n').replace(/\n{3,}/g, '\n\n').trim()
-  return { text, remember: remember.slice(0, 5), files }
+  return { text, remember: remember.slice(0, 5), files, attach: [...new Set(attach)] }
 }
 // The words of an answer that are a file's own (ten words in a row, word for word): which files.
 // For an answer to a public channel, which waits for you when it quotes one of the bot's files.
@@ -276,16 +288,40 @@ export function quotes(answer, files) {
 // instructions; and it's said in the record (cut, below), and in the brief where the instructions
 // were cut.
 export const BRIEF_MAX = 19000
-export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, memory = [], attached = [], agents = null, scheduled = null, github = [], noChange = false, outbox = null, turns = [], earlier = [], resumed = null }, max = BRIEF_MAX) {
+// What it's told about the files it can send back with its answer, as it can here: a file it makes
+// (save_file, into its outbox; else, with no outbox, a FILE: block, which takes text only), and a
+// file in its folders as it is, PDFs, documents and pictures too (attach_file; a model, which may not
+// call tools well, an ATTACH: line too; with no tool, an ATTACH: line), with the limits all of them
+// have and the platform's own. Said after its memory and the conversation, and saying it holds
+// whatever they say: a note kept from an earlier answer that it "can't send PDFs" doesn't.
+// attach: it has folders to send from.
+function sendsOf({ plat, you, outbox, attach, kind }) {
+  const out = []
+  const tool = outbox && (kind === 'claude' || kind === 'model')
+  if (tool) out.push('To send back a file you make (a chart, a spreadsheet, a PDF, a picture), save it with your save_file tool. It\'s the one way you can make a file.')
+  else if (CAPS[plat].files) out.push(`To send back a file you make (a chart made from data, a table), put it after your answer: a line FILE: <name>, then the file in a fenced block. That way takes text files only (${OUT_LIST}), up to ${botfiles.sizeOf(FILE_OUT_MAX)} each.`)
+  if (attach) {
+    const how = tool ? `attach it with your attach_file tool and its path${kind === 'model' ? ', or put a line ATTACH: <its path> after your answer' : ''}` : 'put a line ATTACH: <its path> after your answer, one for each file'
+    out.push(`To send back a file that's in your folders as it is (a PDF, a Word document, a spreadsheet, a presentation, a picture), ${how}. PDFs and documents go this way as they are.`)
+  }
+  if (!tool && !attach && !CAPS[plat].files) return out
+  const l = botfiles.LIMITS[plat] || botfiles.LIMITS.slack
+  const there = !l.count ? ` ${PLATFORMS[plat]} doesn't let a bot attach a file to a reply: a file you send back stays with ${you} in Bridge AI, and your reply says so.`
+    : l.each < botfiles.EACH ? ` ${PLATFORMS[plat]} takes a file of up to ${botfiles.sizeOf(l.each)} from a bot: a bigger one stays with ${you} in Bridge AI, and your reply says so.` : ''
+  out.push(`What goes with an answer: ${botfiles.MAX} files at most, none over ${botfiles.sizeOf(botfiles.EACH)}, and only pictures, PDFs, tables, text and documents (${botfiles.KINDS.join(', ')}); never a hidden file, nor one that holds keys, passwords or credentials.${there} That's what you can send, whatever your memory or an earlier answer says.`)
+  return out
+}
+export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, memory = [], attached = [], agents = null, scheduled = null, github = [], noChange = false, outbox = null, attach = false, turns = [], earlier = [], resumed = null }, max = BRIEF_MAX) {
   const who = (p) => p?.name || 'someone'
   // (Where it was asked: Slack, Discord or Microsoft Teams, and what people call the place there.)
   const plat = q.try ? 'slack' : platOf(q)
   const app = PLATFORMS[plat]
   const home = plat === 'discord' ? `${you}'s Discord server` : plat === 'teams' ? `${you}'s organization in Microsoft Teams` : `${you}'s Slack workspace`
+  const sends = sendsOf({ plat, you, outbox, attach, kind: route.kind })
   const head = route.to === 'change'
     ? [`You're ${bot.name}, ${you}'s bot in ${app}, set up in Bridge AI: you answer people in ${home} for them. You can read, and you can change files only in your own copy of the repository, ${route.cwd} (on its own branch, ${route.change.branch}): you have no way to run commands or reach the network.`, '',
       `If they ask for a change to it, and it's clear what they want, make it there with your edit tools, change nothing they didn't ask for, then say in a sentence or two what you changed. Bridge AI commits it and opens a draft pull request for ${you}${bot.changes === 'suggest' ? ' once they approve the change' : ''}; you don't. If it isn't clear, ask rather than guess. If they only ask a question, answer it and change nothing.`, '']
-    : [`You're ${bot.name}, ${you}'s bot in ${app}, set up in Bridge AI: you answer people in ${home} for them. You can only read: you have no way to change files, run commands or send anything, and no need to.`, '']
+    : [`You're ${bot.name}, ${you}'s bot in ${app}, set up in Bridge AI: you answer people in ${home} for them. ${sends.length ? 'You can only read: you have no way to change files or run commands, and nothing goes out but your answer and the files you send back with it (below).' : 'You can only read: you have no way to change files, run commands or send anything, and no need to.'}`, '']
   if (route.to === 'agent') head.push(`This is a copy of the conversation of ${you}'s agent working on "${route.name}" in this folder: answer from what it knows and what's here. Don't carry on with its work.${folders.length > 1 ? ` You can read these folders too: ${folders.slice(1).join(', ')}.` : ''}`, '')
   else if (folders.length) head.push(`You can read ${folders.length > 1 ? 'these folders' : 'this folder'}: ${folders.join(', ')}${folders.length > 1 ? ' (the first is the one you\'re in)' : ''}. Answer from what's in ${folders.length > 1 ? 'them' : 'it'}, and name the files an answer comes from.`, '')
   else head.push('You have no files: answer from what you know.', '')
@@ -348,9 +384,7 @@ export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, 
   ]
   for (const a of asks) tail.push(`----- question from ${who(a.person)} -----`, clip(fence(a.text), share) || '(No words with the mention: they called you into this conversation. Answer what it\'s asking.)', '----- end of question -----', '')
   tail.push(`Reply with the answer alone, as it should appear in ${app}: plain and short, in the language it was asked in. ${auto ? `It goes to ${app} as you write it.` : `${you} reads it before it's sent.`} If what you can read doesn't answer it, reply with NO ANSWER on the first line and why on the next.`)
-  if (CAPS[plat].files) tail.push('To send back a file (a chart made from data, a table), put it after your answer: a line FILE: <name>, then the file in a fenced block. A chart as SVG; text files only (svg, csv, md, txt, json, html), up to 1 MB.')
-  // (Its outbox, botfiles.js: the one place it may write.)
-  if (outbox) tail.push(`To send back a file you make (a chart, a spreadsheet, a PDF, a picture), save it with your save_file tool: each file you save goes with your answer, ${botfiles.MAX} at most and none over ${botfiles.sizeOf(botfiles.EACH)}, and only pictures, PDFs, tables, text and documents (${botfiles.KINDS.join(', ')}). It's the one way you can make a file.`)
+  tail.push(...sends)
   // (Someone who may ask for a change, with nothing here that can make one: said, for you to make.)
   if (noChange) tail.push(`You can't change anything here. If they ask you to change something (a file, the code, a document), reply with CHANGE NEEDED on the first line and what they want changed on the next, and nothing else.`)
   if (bot.memory !== 'off') tail.push(`If you learn something worth knowing for later questions (someone's role, what they prefer, a fact about this channel), add it at the very end as a line REMEMBER: … (in general), REMEMBER about this channel: …, or REMEMBER about ${who(q.from)}: …. It's kept only if ${you} keeps it.`)
@@ -1120,10 +1154,13 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // only there: Claude Code's from Bridge AI's own MCP server (botmcp.js), a model's from Bridge AI.
     // (Codex's read-only sandbox calls no tool of ours, so a run of it has none.)
     const outbox = route.kind === 'claude' || route.kind === 'model' ? botfiles.outboxFor(`${q.id}-${q.runs.length + 1}`) : null
+    // (And the folders a file in them may be attached from, sent as it is: the ones it reads from,
+    // botattach.js. Checked again against them once the answer is in: botfiles.js collect.)
+    const attachFrom = ok.length ? { folders: ok.map((f) => f.path), cwd: route.cwd || null } : null
     let mcp = null
     const all = mayAct(bot, q.from)
     if ((bot.mcp?.length || outbox) && route.kind === 'claude') {
-      try { mcp = await botmcp.runFolder(bot, { all, key: `${q.id}-${q.runs.length + 1}`, outbox }) } catch (e) { mcp = { dir: null, servers: [], missing: [], problem: oneLine(e.message, 200) } }
+      try { mcp = await botmcp.runFolder(bot, { all, key: `${q.id}-${q.runs.length + 1}`, outbox, attach: attachFrom }) } catch (e) { mcp = { dir: null, servers: [], missing: [], problem: oneLine(e.message, 200) } }
       if (mcp?.dir) route.dirs = [...route.dirs, mcp.dir]
     } else if (bot.mcp?.length && route.kind === 'model') {
       // (A model calls them through Bridge AI, under the same rules: botanswer.js runChat.)
@@ -1145,7 +1182,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // this run's outbox, sent with this answer under the same limits and holds. Started again, not.)
     if (outbox && how !== 'again' && q.runs.length) botfiles.carry(`${q.id}-${q.runs.length}`, outbox)
     const at0 = route.cwd ? [route.cwd, ...route.dirs] : route.dirs
-    let { text: brief, cut } = briefOf({ bot, you: ownerName(bot), q, route, folders: at0.filter((d) => !inside(d, FILES) && !inside(d, botmcp.RUNS) && !inside(d, botfiles.OUTBOX)).map(shown), ins, ctx, pending, auto, memory, attached, agents: agentsNow, scheduled: q.routine ? { where: where(q.place) } : null, github, noChange: !!noChange, outbox, turns, earlier, resumed: resume ? { ran: resume.ran, minutes: resume.minutes, fork: resumed } : null })
+    let { text: brief, cut } = briefOf({ bot, you: ownerName(bot), q, route, folders: at0.filter((d) => !inside(d, FILES) && !inside(d, botmcp.RUNS) && !inside(d, botfiles.OUTBOX)).map(shown), ins, ctx, pending, auto, memory, attached, agents: agentsNow, scheduled: q.routine ? { where: where(q.place) } : null, github, noChange: !!noChange, outbox: outbox && (route.kind === 'model' || mcp?.dir) ? outbox : null, attach: !!attachFrom, turns, earlier, resumed: resume ? { ran: resume.ran, minutes: resume.minutes, fork: resumed } : null })
     // On Windows (and when a test asks), the brief goes in a file of its own the agent is pointed to.
     let briefFile = null
     if (BRIEF_FILE && kind !== 'model') {
@@ -1192,7 +1229,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       // (Its conversation as it goes, kept here so a run stopped at its time limit can be picked up.)
       const log = history ? [...history, { role: 'user', text: `You reached your time limit here, after ${mins(resume.ran)}, and were paused. ${ownerName(bot)} has let you carry on for ${mins(resume.minutes)} more: carry on from where you stopped, without starting over, and answer as your brief says.` }] : [{ role: 'user', text: brief }]
       chatRuns.set(hid, { ctl, since: startedAt, reading: [], doing: null, tools: [], log })
-      botanswer.runChat({ reply, model: entry.model, brief, messages: log, folders: [route.cwd, ...route.dirs].filter((d) => d && !inside(d, FILES)), also: attached.length ? [path.join(FILES, q.id)] : [], mcp: mcp?.configs ? { servers: mcp.configs, all } : null, outbox, signal: ctl.signal, onStep: (x) => Object.assign(chatRuns.get(hid) || {}, x) })
+      botanswer.runChat({ reply, model: entry.model, brief, messages: log, folders: [route.cwd, ...route.dirs].filter((d) => d && !inside(d, FILES)), also: attached.length ? [path.join(FILES, q.id)] : [], mcp: mcp?.configs ? { servers: mcp.configs, all } : null, outbox, attach: attachFrom, signal: ctl.signal, onStep: (x) => Object.assign(chatRuns.get(hid) || {}, x) })
         .then((r) => ({ id: hid, chat: true, end: 'finished', said: { text: r.text, from: 'chat' }, kind: 'model', model: entry.model, reads: r.reads, tools: r.tools, messages: r.messages, startedAt, cwd: route.cwd }),
           (e) => ({ id: hid, chat: true, end: ctl.signal.aborted ? 'stopped' : 'failed', error: oneLine(e.message, 300), kind: 'model', model: entry.model, startedAt, cwd: route.cwd }))
         .then((x) => { clearInterval(watch); chatRuns.delete(hid); if (x.end !== 'stopped' || mine()) return heard(x) }).catch(() => {})
@@ -1350,9 +1387,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
       for (const f of said.files) { const p = path.join(dir, f.name); fs.writeFileSync(p, f.content, { mode: 0o600 }); outFiles.push({ name: f.name, size: Buffer.byteLength(f.content) }) }
     }
-    // And the files it made in its outbox (botfiles.js): each taken kept beside its record, and sent
-    // with the answer; each refused named, with why, in the record and the reply.
-    const made = await madeBy(id, q, run, h, outFiles)
+    // And the files it made in its outbox, and the ones it attached from its folders (botfiles.js):
+    // each taken kept beside its record, and sent with the answer; each refused named, with why, in
+    // the record and the reply.
+    const made = await madeBy(id, q, run, h, outFiles, said.attach)
     let text = clip(said.text || (outFiles.length ? 'Here it is.' : ''), KEPT)
     if (made.note) text = clip(`${text}\n\n${made.note}`, KEPT)
     // A change it made: committed by Bridge AI, its diff kept beside the record; its pull request
@@ -1386,10 +1424,11 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     }
     // (Files it sends back, for a public channel, whichever way it made them: they could hold anything
     // it read, so they wait for you.)
-    if (auto && isPublic(q.place) && outFiles.length) { auto = false; warn = `It made ${outFiles.map((f) => f.name).join(', ')} for ${where(q.place)}, a public channel, so it waits for you` }
+    const verb = (list) => (list.every((f) => f.from) ? 'attached' : list.some((f) => f.from) ? 'made and attached' : 'made')
+    if (auto && isPublic(q.place) && outFiles.length) { auto = false; warn = `It ${verb(outFiles)} ${outFiles.map((f) => f.name).join(', ')} for ${where(q.place)}, a public channel, so it waits for you` }
     // (A page, a drawing or XML can run a script where it's opened: anywhere, it waits for you.)
     const active = outFiles.filter((f) => /\.(html?|svg|xml)$/i.test(f.name))
-    if (auto && active.length) { auto = false; warn = `It made ${active.map((f) => f.name).join(', ')}, which can run a script where it's opened, so it waits for you` }
+    if (auto && active.length) { auto = false; warn = `It ${verb(active)} ${active.map((f) => f.name).join(', ')}, which can run a script where it's opened, so it waits for you` }
     // (A file read in its copy of a repository is named as it is in the repository.)
     const copyOf = tree ? [h.cwd || tree.dir, shown(h.cwd || tree.dir)] : []
     const named = (w) => { for (const pre of copyOf) if (pre && String(w).startsWith(pre)) return `${shown(tree.top)}${String(w).slice(pre.length)}`; return w }
@@ -1403,28 +1442,34 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       told(viewOf(q))
     }
   }
-  // What a run left in its outbox: { files, refused, note }. Each file taken is copied beside the
-  // record and among the answer's files (one by a name it has already is left out, said); the
-  // outbox goes.
-  async function madeBy(id, q, run, h, outFiles) {
+  // What a run left in its outbox, and the files it attached from its folders: { files, refused,
+  // note }. Each file taken is copied beside the record and among the answer's files (one by a name
+  // it has already is left out, said), one attached with where it came from (from, ~/…); the outbox
+  // goes. attach: the paths its answer's ATTACH: lines name. What may be attached is checked here,
+  // against the folders it reads from now (botfiles.js collect), whatever its run's tool said.
+  async function madeBy(id, q, run, h, outFiles, attach = []) {
     const n = q.runs.indexOf(run) + 1
     const none = { files: [], refused: [], note: null }
     if (n < 1) return none
     const key = `${q.id}-${n}`
+    const bot = botOf(id)
+    const folders = bot ? (await foldersOf(bot)).filter((f) => f.ok).map((f) => f.path) : []
+    // (A run with no outbox of its own, Codex's, has one for what its ATTACH: lines name.)
+    if (attach.length) fs.mkdirSync(botfiles.outboxOf(key), { recursive: true, mode: 0o700 })
     let got
-    try { got = await botfiles.collect(botfiles.outboxOf(key)) } catch (e) { got = { files: [], refused: [{ name: 'its outbox', why: e.message }] } }
+    try { got = await botfiles.collect(botfiles.outboxOf(key), { attach, folders, cwd: h.cwd || null }) } catch (e) { got = { files: [], refused: [{ name: 'its outbox', why: e.message }] } }
     const files = []
     const refused = [...got.refused]
-    for (const f of got.files) { if (outFiles.some((x) => x.name === f.name)) refused.push({ name: f.name, why: 'a file by that name came with its answer already' }); else files.push(f) }
+    for (const f of got.files) { if (outFiles.some((x) => x.name === f.name)) refused.push({ name: f.name, why: 'a file by that name came with its answer already', ...(f.from ? { from: f.from } : {}) }); else files.push(f) }
     if (files.length) {
       const kept = await botfiles.keep(id, key, files).catch(() => files.map(() => null))
       const dir = path.join(OUT, q.id)
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
       for (const [i, f] of files.entries()) {
-        try { fs.copyFileSync(f.path, path.join(dir, f.name)); outFiles.push({ name: f.name, size: f.size, made: true, ...(kept[i] ? { kept: kept[i] } : {}) }) } catch (e) { refused.push({ name: f.name, why: `it couldn't be read (${e.code || e.message})` }) }
+        try { fs.copyFileSync(f.path, path.join(dir, f.name)); outFiles.push({ name: f.name, size: f.size, made: true, ...(kept[i] ? { kept: kept[i] } : {}), ...(f.from ? { from: f.from } : {}) }) } catch (e) { refused.push({ name: f.name, why: `it couldn't be read (${e.code || e.message})`, ...(f.from ? { from: f.from } : {}) }) }
       }
     }
-    if (files.length || refused.length) record(id, 'files.made', at(q, { helper: h.id, files: outFiles.filter((f) => f.made).map((f) => ({ name: f.name, size: f.size, kept: f.kept || null })), ...(refused.length ? { refused: refused.map((r) => ({ name: r.name, why: oneLine(r.why, 200) })) } : {}) }))
+    if (files.length || refused.length) record(id, 'files.made', at(q, { helper: h.id, files: outFiles.filter((f) => f.made).map((f) => ({ name: f.name, size: f.size, kept: f.kept || null, ...(f.from ? { from: f.from } : {}) })), ...(refused.length ? { refused: refused.map((r) => ({ name: r.name, why: oneLine(r.why, 200), ...(r.from ? { from: oneLine(r.from, 300) } : {}) })) } : {}) }))
     botfiles.drop(key)
     const note = refused.length ? `Not sent: ${refused.map((r) => `${r.name} (${r.why})`).join('; ')}.` : null
     return { files, refused, note }
@@ -1797,7 +1842,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // where. (A long answer as a file is Slack's: Discord's goes in parts, Teams' whole.)
   function outgoing(q, text) {
     const all = (q.outFiles || []).map((f) => { try { return { name: f.name, size: f.size, content: fs.readFileSync(path.join(OUT, q.id, f.name)) } } catch { return null } }).filter(Boolean)
-    const plan = botfiles.attachPlan(platOf(q), all, { where: `${you()} has ${all.length > 1 ? 'them' : 'it'} in Bridge AI on ${computer()}.` })
+    const plan = botfiles.attachPlan(platOf(q), all, { where: (n) => `${you()} has ${n > 1 ? 'them' : 'it'} in Bridge AI on ${computer()}.` })
     if (plan.notes.length) text = `${text}\n\n${plan.notes.join(' ')}`
     const files = plan.attach
     if (platOf(q) !== 'slack' || text.length <= LONGEST) return { text, files, failed: plan.failed }

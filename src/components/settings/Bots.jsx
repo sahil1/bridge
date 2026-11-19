@@ -1442,7 +1442,13 @@ function eventLine(e) {
     case 'change.approved': return e.via === 'slack' ? t('{name} approved the change from Slack', { name: by }) : t('{name} approved the change', { name: by })
     case 'change.failed': return t('The change couldn\'t go through ({step}): {why}', { step: e.step || '', why: e.error || '' })
     case 'pr.opened': return t('Opened a draft pull request')
-    case 'files.made': return e.files?.length ? t('Made {files}', { files: e.files.map((f) => f.name).join(', ') }) : t('Made no file it could send')
+    case 'files.made': {
+      // (A file it attached from its folders, with where it came from.)
+      const made = (e.files || []).filter((f) => !f.from)
+      const attached = (e.files || []).filter((f) => f.from)
+      if (!made.length && !attached.length) return e.refused?.length && e.refused.every((r) => r.from) ? t('Attached no file it could send') : t('Made no file it could send')
+      return [made.length ? t('Made {files}', { files: made.map((f) => f.name).join(', ') }) : null, attached.length ? t('Attached {files}', { files: attached.map((f) => t('{name} from {path}', { name: f.name, path: f.from })).join(', ') }) : null].filter(Boolean).join('; ')
+    }
     case 'file.uploaded': return e.ok === false ? t('Couldn\'t send the file {name}: {why}', { name: e.name, why: e.error || '' }) : t('Sent the file {name} ({size})', { name: e.name, size: sizeOf(e.size) })
     case 'context.noted': return e.ok === false ? t('Couldn\'t keep this in {name}\'s running context: {why}', { name: who, why: e.error || '' }) : e.state === 'kept' ? t('Kept in {name}\'s running context', { name: who }) : t('In {name}\'s running context once you keep it', { name: who })
     case 'context.kept': return t('{name} kept {n} of {person}\'s conversations in their running context', { name: by, n: e.n ?? 0, person: who })

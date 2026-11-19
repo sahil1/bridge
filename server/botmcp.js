@@ -13,14 +13,17 @@
 // A run's servers go in a folder of the desk's, front-desk/mcp/<run>/ (agents.js mcpOf), readable by
 // you only: config.json (the servers as Claude Code's config has them, with their env and headers)
 // and rules.json. With them, a run with an outbox (botfiles.js) gets Bridge AI's own server for it,
-// bridge_outbox (outboxmcp.js), its save_file allowed: the one way that run can put a file anywhere. The folder goes once the run has ended (frontdesk.js), and any left from before
-// Bridge AI started again a day later.
+// bridge_outbox (outboxmcp.js), its save_file allowed: the one way that run can put a file anywhere;
+// and, for a bot with folders, its attach_file too, with the folders a file may be attached from in
+// attach.json beside them (botattach.js). The folder goes once the run has ended (frontdesk.js), and
+// any left from before Bridge AI started again a day later.
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { dataFile, writeFileAtomic, HOME, ROOT, NODE } from './paths.js'
 import { loginPath } from './agents.js'
 import { claudeServers, claudeServerView } from './mcp.js'
+import { keptOut } from './botattach.js'
 
 export const RUNS = dataFile('front-desk', 'mcp')
 const LIST_MS = 15000 // a server that hasn't listed its tools by then can't be asked
@@ -162,9 +165,10 @@ export const configsOf = (bot) => { const have = claudeServers(); return Object.
 // used (you, or someone you named), else only the tools that say they only read. Written in a folder
 // of its own (key: the question's and run's), whose path goes with the run's other folders. null when
 // it has none (or none of them is in Claude Code's config any more). What it was given is said back
-// for the record: { dir, servers: [{ name, all, tools, problem }], missing }.
+// for the record: { dir, servers: [{ name, all, tools, problem }], missing }. attach: { folders, cwd },
+// the bot's folders a file may be attached from (with an outbox), as Settings has them.
 export const OUTBOX_SERVER = 'bridge_outbox'
-export async function runFolder(bot, { all = false, key, outbox = null }) {
+export async function runFolder(bot, { all = false, key, outbox = null, attach = null }) {
   const want = (bot.mcp || []).filter((n) => n !== OUTBOX_SERVER)
   if (!want.length && !outbox) return null
   const have = claudeServers()
@@ -186,8 +190,19 @@ export async function runFolder(bot, { all = false, key, outbox = null }) {
   const dir = path.join(RUNS, String(key).replace(/[^\w.-]+/g, '-'))
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
   const servers = Object.fromEntries(picked.map((n) => [n, have[n]]))
-  // (Its outbox's: this app's Node, on this run's outbox alone.)
-  if (outbox) { servers[OUTBOX_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'outboxmcp.js'), outbox], env: { ...NODE.env } }; allow.push(toolName(OUTBOX_SERVER, 'save_file')) }
+  // (Its outbox's: this app's Node, on this run's outbox alone; the folders it may attach from in a
+  // file of its own, readable by you only, never on its command line.)
+  if (outbox) {
+    const args = [path.join(ROOT, 'server', 'outboxmcp.js'), outbox]
+    allow.push(toolName(OUTBOX_SERVER, 'save_file'))
+    if (attach?.folders?.length) {
+      const file = path.join(dir, 'attach.json')
+      writeFileAtomic(file, JSON.stringify({ folders: attach.folders.map(String), cwd: attach.cwd || null, keptOut: keptOut() }, null, 2), { mode: 0o600 })
+      args.push(file)
+      allow.push(toolName(OUTBOX_SERVER, 'attach_file'))
+    }
+    servers[OUTBOX_SERVER] = { type: 'stdio', command: NODE.bin, args, env: { ...NODE.env } }
+  }
   writeFileAtomic(path.join(dir, 'config.json'), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 })
   writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny }, null, 2), { mode: 0o600 })
   return { dir, servers: said, missing }

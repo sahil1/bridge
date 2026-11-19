@@ -21,17 +21,32 @@
 //   its Activity lists the files it made with Open and Send to… (Send to… across two computers is
 //   in backup-move); one that could run something as it opens (a drawing, a page) is shown in
 //   Finder instead; nothing writes through a bot's files (Studio's routes, a copy into them).
+// And a file already in its folders, sent as it is (server/botattach.js), PDFs and documents too:
+//   its brief says it can (attach_file; a model's ATTACH: line too), not "text files only", and what
+//   it can send holds whatever its memory says; its agent gets attach_file (the folders it may
+//   attach from in a file of the run's, readable by you only);
+//   two resume PDFs in a folder it reads, attached and held with the answer until you send it, then
+//   in Slack, the same bytes; each kept, and the record saying where it came from;
+//   refused, with why in the reply in one line: a file outside its folders, through a link (to a
+//   file or a folder), hidden or in a hidden folder, whose name says it holds credentials, with a
+//   private key in it, over 25 MB, or of a kind that doesn't go;
+//   a model answering (the stand-in, with Bridge AI's tools): attach_file, and ATTACH: lines checked
+//   the same way, one outside its folders refused; held in Needs You on a phone, with the files as
+//   any are; Try It on a phone shows an attached PDF as a made one;
+//   Discord: one over the 10 MB it takes from a bot stays here, said in the reply; Teams, which takes
+//   none, says so; its Activity's timeline: what it attached, from where.
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { checks, until, browser, page, shot, startDiscord, startTeams, IS_WIN, IS_MAC, TEST } from '../lib/harness.mjs'
+import { checks, until, browser, page, shot, startDiscord, startTeams, startModel, phoneFaults, IS_WIN, IS_MAC, TEST } from '../lib/harness.mjs'
 import { botKit, openSettings, M } from '../lib/bots.mjs'
 
 const { ok, skip, done } = checks('bots-files')
 const dc = await startDiscord('bots-files')
 await dc.heartbeat({ ms: 800 })
 const tm = await startTeams('bots-files')
+const model = await startModel('bots-files')
 const T1 = 'dtest.bot-one.0123456789abcdef'
 // (A "minute" is 3 seconds and the wait at a time limit 4, for a run picked up after its time limit.)
 const { slack, kit, needs, draftOf, startOf, startsOf, briefOf, botOf, connected, events, posted, postedLike } = await botKit('bots-files', {
@@ -46,6 +61,33 @@ const send = (d) => kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { sen
 const madeOf = (q) => events().find((e) => e.type === 'files.made' && e.q === q) || null
 const SECRET = path.join(kit.home, 'notes', 'secret.md')
 fs.writeFileSync(SECRET, '# Secret\n\nThe launch is on the ninth.\n')
+// Files in its folder to attach as they are (two resume books, a plan), and ones that never go:
+// outside its folder, through a link to a file or a folder, hidden, named as credentials, with a
+// private key in them, over 25 MB (a sparse file), of a kind that doesn't go.
+const NOTES = path.join(kit.home, 'notes')
+const HIRING = path.join(NOTES, 'hiring')
+const ELSEWHERE = path.join(kit.home, 'elsewhere')
+const pdf = (kb, seed) => Buffer.concat([Buffer.from(`%PDF-1.4\n% ${seed}\n`), crypto.createHash('sha512').update(seed).digest(), Buffer.alloc(kb * 1024, seed.charCodeAt(0)), Buffer.from('\n%%EOF\n')])
+const CMU = pdf(300, 'cmu')
+const UCB = pdf(200, 'ucb')
+const PLAN = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(4096, 7)])
+const ATTACHABLE = { 'CMU_All_Resumes.pdf': CMU, 'UCB_All_Resumes.pdf': UCB, 'plan.docx': PLAN }
+fs.mkdirSync(HIRING, { recursive: true })
+for (const [n, body] of Object.entries(ATTACHABLE)) fs.writeFileSync(path.join(HIRING, n), body)
+fs.writeFileSync(path.join(HIRING, 'deck.pdf'), pdf(12 * 1024, 'deck')) // (over Discord's 10 MB)
+fs.mkdirSync(ELSEWHERE, { recursive: true })
+fs.writeFileSync(path.join(ELSEWHERE, 'outside.pdf'), pdf(4, 'outside'))
+fs.mkdirSync(path.join(NOTES, '.private'), { recursive: true })
+fs.writeFileSync(path.join(NOTES, '.private', 'notes.pdf'), pdf(4, 'private'))
+fs.writeFileSync(path.join(NOTES, '.hidden.pdf'), pdf(4, 'hidden'))
+fs.writeFileSync(path.join(NOTES, 'credentials.json'), '{"user":"dana","password":"hunter2"}\n')
+fs.writeFileSync(path.join(NOTES, 'server-key.txt'), '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----\n') // private-ok: a made-up key's first lines, which a bot must refuse to send
+fs.writeFileSync(path.join(NOTES, 'tools.zip'), Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(64, 1)]))
+{ const fd = fs.openSync(path.join(NOTES, 'big.pdf'), 'w'); fs.writeSync(fd, '%PDF-1.4\n'); fs.ftruncateSync(fd, 26 * 1024 * 1024); fs.closeSync(fd) }
+// (Links: not on Windows, where making one needs more than a test has.)
+let links = false
+try { fs.symlinkSync(path.join(ELSEWHERE, 'outside.pdf'), path.join(NOTES, 'linked.pdf')); fs.symlinkSync(ELSEWHERE, path.join(NOTES, 'via'), 'dir'); links = true } catch { /* none */ }
+const ORIGINALS = () => Object.entries(ATTACHABLE).every(([n, body]) => sha(fs.readFileSync(path.join(HIRING, n))) === sha(body))
 // Open, in tests: macOS's open and Linux's xdg-open stood in for (opened.log beside them).
 kit.program('open', fs.readFileSync(path.join(TEST, 'stand-ins', 'open.cjs'), 'utf8'))
 kit.program('xdg-open', fs.readFileSync(path.join(TEST, 'stand-ins', 'open.cjs'), 'utf8'))
@@ -69,7 +111,7 @@ try {
     let server = null
     try { server = JSON.parse(fs.readFileSync(cfg, 'utf8')).mcpServers?.bridge_outbox } catch { /* gone already */ }
     const box = server?.args?.[1] || ''
-    ok(/save it with your save_file tool: each file you save goes with your answer, 5 at most and none over 25\.0 MB, and only pictures, PDFs, tables, text and documents/.test(brief) && !brief.includes(path.join('front-desk', 'outbox')), 'its brief offers save_file, and says what may go', brief.slice(-900))
+    ok(/To send back a file you make \(a chart, a spreadsheet, a PDF, a picture\), save it with your save_file tool\. It's the one way you can make a file\./.test(brief) && /What goes with an answer: 5 files at most, none over 25\.0 MB, and only pictures, PDFs, tables, text and documents/.test(brief) && !brief.includes(path.join('front-desk', 'outbox')), 'its brief offers save_file, and says what may go', brief.slice(-1400))
     ok(args.includes('--tools Read,Grep,Glob ') && s.args.includes('--strict-mcp-config') && s.args.includes('mcp__bridge_outbox__save_file') && args.includes('--permission-mode dontAsk') && !/Write|Edit|Bash|acceptEdits|bypassPermissions/.test(args), 'its agent gets save_file and no tool that writes files: Read, Grep and Glob, its outbox\'s MCP server, dontAsk', s?.args)
     ok(!!server && /outboxmcp\.js$/.test(server.args?.[0] || '') && path.resolve(box).startsWith(path.join(kit.data, 'front-desk', 'outbox')) && !s.args.includes(box), 'its outbox\'s server: Bridge AI\'s own, on that run\'s outbox alone (not a folder it may read)', server)
     const d = await draftOf('Totals by region')
@@ -87,6 +129,67 @@ try {
     ok(ev?.ok === true && ev.name === 'totals.csv' && ev.size === 13, 'and in the record', ev)
     const list = (await kit.api('/bots/b1/files')).files
     ok(list.some((f) => f.name === 'totals.csv' && f.path === kept && f.q === d.id), 'its files, listed for its Activity', list)
+  })
+
+  // ---------- A file in its folders, attached as it is: two resume PDFs, to Slack ----------
+  await part('attached from its folders, to Slack', async () => {
+    // (What it remembers says it can't: a note, which what its brief says it can send overrides.)
+    await kit.api('/bots/b1/memory', { kind: 'bot', text: 'Reports can\'t attach PDFs in Slack, only text files like csv, html or txt.' }).catch(() => null)
+    const q = await slack.ask({ user: 'U0DANA', text: `${M} The CMU and UCB resume books please [attach ~/notes/hiring/CMU_All_Resumes.pdf] [attach ${path.join(HIRING, 'UCB_All_Resumes.pdf')}] [answer Here are both resume books.]` })
+    const s = await startOf('The CMU and UCB resume books')
+    const brief = briefOf(s)
+    const tail = brief.slice(brief.lastIndexOf('----- end of question -----'))
+    ok(!/text files only/.test(brief) && /To send back a file that's in your folders as it is \(a PDF, a Word document, a spreadsheet, a presentation, a picture\), attach it with your attach_file tool and its path\. PDFs and documents go this way as they are\./.test(tail)
+      && /What goes with an answer: 5 files at most, none over 25\.0 MB, and only pictures, PDFs, tables, text and documents \(png, jpg, .*pdf.*docx, pptx\); never a hidden file, nor one that holds keys, passwords or credentials\. That's what you can send, whatever your memory or an earlier answer says\./.test(tail),
+    'its brief: not "text files only"; it can attach a file from its folders, PDFs and documents too, with the limits, whatever its memory says (and said after it)', tail)
+    ok(!/ATTACH:/.test(brief) && !/FILE:/.test(brief), 'Claude Code, with its tools: no ATTACH: or FILE: lines offered')
+    const memo = brief.indexOf('----- end of memory -----')
+    ok(memo < 0 || memo < brief.indexOf('attach it with your attach_file tool'), 'what it can send comes after what it remembers', memo)
+    ok(s.args.includes('mcp__bridge_outbox__save_file') && s.args.includes('mcp__bridge_outbox__attach_file') && s.args.includes('--strict-mcp-config') && !/Write|Edit|Bash/.test(s.args.join(' ')), 'its agent gets attach_file, and still no tool that writes files', s.args)
+    const cfg = s.args[s.args.indexOf('--mcp-config') + 1]
+    let server = null
+    try { server = JSON.parse(fs.readFileSync(cfg, 'utf8')).mcpServers?.bridge_outbox } catch { /* gone already */ }
+    const d = await draftOf('The CMU and UCB resume books')
+    ok(d?.files?.map((f) => `${f.name}:${f.size}`).sort().join() === `CMU_All_Resumes.pdf:${CMU.length},UCB_All_Resumes.pdf:${UCB.length}` && /I attached CMU_All_Resumes\.pdf\. I attached UCB_All_Resumes\.pdf\. Here are both resume books\./.test(d.draft) && !/Not sent|can't/.test(d.draft), 'its draft, with both PDFs attached', d && { draft: d.draft, files: d.files })
+    ok(!server || (server.args.length === 3 && /attach\.json$/.test(server.args[2]) && !s.args.includes(server.args[2])), 'the folders it may attach from: a file of the run\'s, not on its command line', server?.args)
+    // Review first: held with the answer, nothing in Slack yet.
+    ok(d?.state === 'draft' && !(await slack.state()).files.some((f) => /Resumes\.pdf$/.test(f.name)), 'held with the answer until you send it')
+    const made = madeOf(d.id)
+    const from = Object.fromEntries((made?.files || []).map((f) => [f.name, f.from]))
+    ok(from['CMU_All_Resumes.pdf'] === '~/notes/hiring/CMU_All_Resumes.pdf'.replace(/\//g, path.sep) && from['UCB_All_Resumes.pdf'] === '~/notes/hiring/UCB_All_Resumes.pdf'.replace(/\//g, path.sep) && made.files.every((f) => f.kept), 'its record: each attached file kept, with where it came from', made)
+    const kept = made?.files?.find((f) => f.name === 'CMU_All_Resumes.pdf')?.kept
+    ok(!!kept && sha(fs.readFileSync(path.join(kit.data, 'bots', 'b1', 'trace', 'files', ...kept.split('/')))) === sha(CMU), 'kept as it is, the same bytes')
+    await send(d)
+    const up = await until(async () => { const f = (await slack.state()).files; return f.find((x) => x.name === 'CMU_All_Resumes.pdf') && f.find((x) => x.name === 'UCB_All_Resumes.pdf') ? f : null }, 15000)
+    const cmu = up?.find((x) => x.name === 'CMU_All_Resumes.pdf')
+    const ucb = up?.find((x) => x.name === 'UCB_All_Resumes.pdf')
+    ok(cmu?.thread === q.ts && cmu.sha256 === sha(CMU) && cmu.size === CMU.length && ucb?.sha256 === sha(UCB), 'sent once you said so: both PDFs in the question\'s thread, the same bytes', { cmu, ucb })
+    ok(ORIGINALS() && fs.existsSync(path.join(HIRING, 'CMU_All_Resumes.pdf')), 'the files in its folder as they were')
+  })
+
+  // ---------- Refused: what can't be attached, and why, in the reply ----------
+  await part('attaching refused', async () => {
+    const asks = ['~/elsewhere/outside.pdf', '../elsewhere/outside.pdf', '~/notes/.private/notes.pdf', '~/notes/.hidden.pdf', '~/notes/credentials.json', '~/notes/server-key.txt', '~/notes/big.pdf', '~/notes/tools.zip', ...(links ? ['~/notes/linked.pdf', '~/notes/via/outside.pdf'] : [])]
+    await slack.ask({ user: 'U0DANA', text: `${M} Everything private please ${asks.map((a) => `[attach ${a}]`).join(' ')} [answer Done.]` })
+    const d = await draftOf('Everything private please', 60000)
+    const line = (d?.draft || '').split('\n').find((l) => l.startsWith('Not sent:')) || ''
+    const why = {
+      outside: /outside\.pdf \(it isn't in the folders the bot reads from\); outside\.pdf \(it isn't in the folders the bot reads from\)/,
+      hidden: /notes\.pdf \(it's in a hidden folder\)/,
+      hiddenFile: /hidden\.pdf \(it's a hidden file\)/,
+      credentials: /credentials\.json \(its name says it holds keys, passwords or credentials\)/,
+      key: /server-key\.txt \(it holds a private key\)/,
+      big: /big\.pdf \(it's 26\.0 MB, over the 25\.0 MB a bot sends\)/,
+      kind: /tools\.zip \(a \.zip file isn't one a bot sends/,
+      ...(links ? { link: /linked\.pdf \(it's a link to somewhere else, and only a file itself goes\)/, via: /outside\.pdf \(it's reached through a link to somewhere else\)/ } : {}),
+    }
+    const missing = Object.entries(why).filter(([, re]) => !re.test(line)).map(([k]) => k)
+    ok(d && !d.files?.length && !missing.length && d.draft.split('\n').filter((l) => l.startsWith('Not sent:')).length === 1, `none sent, and the reply says why for each, in one line: outside its folders (and by ../), hidden, in a hidden folder, named as credentials, a private key in it, over 25 MB, a kind that doesn't go${links ? ', through a link to a file or a folder' : ''}`, { missing, draft: d?.draft })
+    ok(!/can't (send|attach) PDFs/i.test(d?.draft || '') && /^Done\./.test(d?.draft || ''), 'and it doesn\'t claim it can\'t send PDFs', d?.draft)
+    const made = madeOf(d.id)
+    ok((made?.refused || []).some((r) => r.name === 'big.pdf' && r.from === '~/notes/big.pdf'), 'each refused in the record, with where it was asked from', made?.refused)
+    if (!links) skip('a link to a file or a folder', 'links can\'t be made here')
+    await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: false })
   })
 
   // ---------- Refused: what isn't a picture, a PDF, a table, text or a document ----------
@@ -167,6 +270,59 @@ try {
     await kit.api('/bots/b1/settings', { auto: false, limits: { minutes: 10 } })
   })
 
+  // ---------- A model answering: attach_file, and ATTACH: lines ----------
+  await part('a model attaches', async () => {
+    await kit.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
+    await kit.api('/bots/b1/settings', { answerers: ['model:openai:gpt-5'] })
+    await slack.ask({ user: 'U0DANA', text: `${M} The UCB book and the plan, from a model [attach ~/notes/hiring/UCB_All_Resumes.pdf] [attach-line ~/notes/hiring/plan.docx] [attach-line \`~/elsewhere/outside.pdf\`] [answer Here they are.]` })
+    const d = await draftOf('from a model')
+    const req = model.requests().find((x) => x.tools?.length && x.messages.some((m) => /from a model/.test(typeof m.content === 'string' ? m.content : '')))
+    const brief = model.asked(/from a model/)[0] || ''
+    const tail = brief.slice(brief.lastIndexOf('----- end of question -----'))
+    ok(!/text files only/.test(brief) && /attach it with your attach_file tool and its path, or put a line ATTACH: <its path> after your answer/.test(tail) && /save it with your save_file tool/.test(tail), 'a model\'s brief: attach_file, or an ATTACH: line; not "text files only"', tail)
+    ok(!!req && ['save_file', 'attach_file'].every((n) => req.tools.includes(n)), 'and Bridge AI\'s attach_file among its tools', req?.tools)
+    ok(d?.by && /gpt-5/i.test(d.by) && d.files?.map((f) => `${f.name}:${f.size}`).sort().join() === `UCB_All_Resumes.pdf:${UCB.length},plan.docx:${PLAN.length}`, 'its draft: the PDF it attached with its tool, and the document its ATTACH: line named', d && { by: d.by, files: d.files })
+    ok(/^Here they are\./.test(d?.draft || '') && !/ATTACH:/.test(d?.draft || '') && /Not sent: outside\.pdf \(it isn't in the folders the bot reads from\)\./.test(d?.draft || ''), 'the ATTACH: lines out of its words, and the one outside its folders refused, saying why', d?.draft)
+    const made = madeOf(d.id)
+    ok((made?.files || []).find((f) => f.name === 'plan.docx')?.from === '~/notes/hiring/plan.docx'.replace(/\//g, path.sep), 'in the record, with where each came from', made)
+
+    // Held for you, in Needs You on a phone, with its files as any answer's are.
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'dark', theme: 'midnight', phone: true })
+    await p.locator('.topbar, .tabbar').first().waitFor({ timeout: 20000 })
+    await p.locator('.needs-chip').click({ timeout: 15000 })
+    const card = p.locator('.ny-item.t-slack', { hasText: 'from a model' }).first()
+    await card.waitFor({ timeout: 15000 })
+    const words = await until(async () => { const w = await card.innerText(); return /With .*UCB_All_Resumes\.pdf/.test(w) ? w : null }, 10000) || await card.innerText()
+    ok(/With plan\.docx \(4 KB\), UCB_All_Resumes\.pdf \(200 KB\)/.test(words), 'Needs You on a phone: the attached files, as made ones show', words)
+    const faults = await phoneFaults(p, '.ny-item.t-slack')
+    ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults)
+    await shot(p, `${tag}bots-files-attached-phone`)
+    ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+    await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: false })
+    await kit.api('/bots/b1/settings', { answerers: [] })
+  })
+
+  // ---------- Try It, on a phone ----------
+  await part('Try It on a phone', async () => {
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', phone: true })
+    await openSettings(p)
+    await p.locator('.sb-tabs [role="tab"]', { hasText: 'Try It' }).click()
+    const sec = p.locator('[data-setting="slack-try"]')
+    await sec.waitFor({ timeout: 10000 })
+    const n0 = (await slack.state()).files.length
+    await sec.locator('textarea').fill('The CMU book, tried [attach ~/notes/hiring/CMU_All_Resumes.pdf] [answer Here it is.]')
+    await sec.getByRole('button', { name: /^Ask Reports/ }).click()
+    const files = await until(async () => (await sec.locator('.sb-files').innerText().catch(() => '')) || null, 30000)
+    ok(/With CMU_All_Resumes\.pdf \(300 KB\)/.test(files || ''), 'Try It: the attached PDF with its draft, as a made file shows', files)
+    const record = await until(async () => { const t = await sec.innerText(); return /Attached CMU_All_Resumes\.pdf from/.test(t) ? t : null }, 10000)
+    ok(/Attached CMU_All_Resumes\.pdf from ~[\\/]notes[\\/]hiring[\\/]CMU_All_Resumes\.pdf/.test(record || '') && await sec.locator('.bf-made [data-file="CMU_All_Resumes.pdf"] .bf-from').count() === 1, 'and its record: what it attached, from where, with Open and Send to…', record)
+    ok((await slack.state()).files.length === n0, 'and nothing went to Slack')
+    await shot(p, `${tag}bots-files-try-phone`)
+    ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+  })
+
   // ---------- Discord ----------
   await part('to Discord', async () => {
     await kit.api('/bots/b1/discord', { token: T1, guild: '3001' })
@@ -179,6 +335,17 @@ try {
     const words = (await dc.state()).posted.find((x) => /Here is the plan/.test(x.content || ''))
     ok(!!p && p.channel === words?.channel && p.channel === q.id && p.files[0].sha256 === sha(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>\n')), 'attached in Discord after its words, in the question\'s thread, the same bytes', { p, words })
     ok(!!(await until(() => events().find((e) => e.type === 'file.uploaded' && e.q === d.id && e.ok), 8000)), 'and in the record')
+    // Attached from its folder: what Discord takes goes; one over the 10 MB it takes from a bot stays here, said.
+    const qa = await dc.say({ user: '2001', text: '<@1001> The plan and the deck please [attach ~/notes/hiring/plan.docx] [attach ~/notes/hiring/deck.pdf] [answer Both here.]' })
+    const s = await startOf('The plan and the deck please')
+    ok(/Discord takes a file of up to 10\.0 MB from a bot: a bigger one stays with Tester in Bridge AI, and your reply says so\./.test(briefOf(s)), 'its brief in Discord says the 10 MB Discord takes')
+    const da = await draftOf('The plan and the deck please')
+    ok(da?.files?.map((f) => f.name).sort().join() === 'deck.pdf,plan.docx', 'its draft: both attached (each under 25 MB)', da?.files)
+    await send(da)
+    const pa = await until(async () => (await dc.state()).posted.find((x) => x.files?.some((f) => f.name === 'plan.docx')), 15000)
+    const said = await until(async () => (await dc.state()).posted.find((x) => /Both here\./.test(x.content || '')), 15000)
+    ok(!!pa && pa.channel === qa.id && pa.files.length === 1 && pa.files[0].sha256 === sha(PLAN), 'the document attached in Discord, the same bytes; the deck not', pa?.files)
+    ok(/I couldn't attach deck\.pdf \(12\.0 MB\) \(it's 12\.0 MB, over the 10\.0 MB Discord takes from a bot\)\. Tester has it in Bridge AI on /.test(said?.content || ''), 'the reply says why the deck didn\'t go, and who has it', said?.content)
   })
 
   // ---------- Microsoft Teams: none attached, said ----------
@@ -198,6 +365,15 @@ try {
     ok(/I couldn't attach summary\.md \(\d+ bytes\) \(Microsoft Teams doesn't let a bot attach a file to a reply\)\. Tester has it in Bridge AI on /.test(p?.text || ''), 'the reply says Teams took no file, and who has it, where', p?.text)
     const ev = await until(() => events().find((e) => e.type === 'file.uploaded' && e.q === d.id), 8000)
     ok(ev?.ok === false && /Microsoft Teams/.test(ev.error || ''), 'and the record says so', ev)
+    // Attached from its folder: its brief says Teams takes none, and the reply says so.
+    await tm.say({ user: 'dana', text: 'The UCB book in Teams please [attach ~/notes/hiring/UCB_All_Resumes.pdf] [answer Here it is, in Teams.]' })
+    const s = await startOf('The UCB book in Teams please')
+    ok(/attach it with your attach_file tool/.test(briefOf(s)) && /Microsoft Teams doesn't let a bot attach a file to a reply: a file you send back stays with Tester in Bridge AI, and your reply says so\./.test(briefOf(s)) && !/FILE:/.test(briefOf(s)), 'its brief in Teams: it may attach, and Teams takes none from a bot, which the reply says')
+    const da = await draftOf('The UCB book in Teams please')
+    ok(da?.files?.some((f) => f.name === 'UCB_All_Resumes.pdf'), 'its draft, with the PDF', da?.files)
+    await send(da)
+    const pa = await until(async () => (await tm.state()).posted.find((x) => /Here it is, in Teams/.test(x.text || '')), 15000)
+    ok(/I couldn't attach UCB_All_Resumes\.pdf \(200 KB\) \(Microsoft Teams doesn't let a bot attach a file to a reply\)\. Tester has it in Bridge AI on /.test(pa?.text || ''), 'the reply says Teams took no file, and who has it', pa?.text)
   })
 
   // ---------- Its Activity ----------
@@ -207,13 +383,14 @@ try {
     await p.locator('.sb-tabs [role="tab"]', { hasText: 'Activity' }).click()
     const files = p.locator('[data-setting="bots-files"]')
     await files.waitFor({ timeout: 15000 })
-    ok(/Files It Made/.test(await files.innerText()) && await files.locator('[data-file="totals.csv"]').count() === 1, 'its Activity lists the files it made', await files.innerText())
-    const row = files.locator('[data-file="totals.csv"]')
+    // (The latest, newest first: one it made in Teams, and a PDF it attached in Discord, listed as any.)
+    ok(/Files It Made/.test(await files.innerText()) && await files.locator('[data-file="summary.md"]').count() === 1 && await files.locator('[data-file="deck.pdf"]').count() === 1, 'its Activity lists the files it made, and a PDF it attached as a made one is', await files.innerText())
+    const row = files.locator('[data-file="deck.pdf"]')
     ok(await row.locator('button', { hasText: 'Open' }).count() === 1 && await row.locator('button', { hasText: 'Send to…' }).count() === 1, 'each with Open and Send to…')
     if (IS_WIN) skip('Open in its app', 'nothing stands in for Windows\' Explorer')
     else {
       await row.locator('button', { hasText: 'Open' }).click()
-      const opened = await until(() => { try { return fs.readFileSync(path.join(kit.bin, 'opened.log'), 'utf8').includes('totals.csv') } catch { return false } }, 8000)
+      const opened = await until(() => { try { return fs.readFileSync(path.join(kit.bin, 'opened.log'), 'utf8').includes('deck.pdf') } catch { return false } }, 8000)
       ok(!!opened, `Open: in its app on this computer (${IS_MAC ? 'open' : 'xdg-open'})`)
     }
     // A drawing could run a script where it opens (a browser): shown in Finder instead, whatever's asked.

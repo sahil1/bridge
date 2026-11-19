@@ -61,9 +61,10 @@
 //                      thread_ts }], views: [{ app, kind: 'open' | 'publish', user, trigger, view }],
 //                      statuses: [{ app, method, channel, thread, status }], streams: [{ app,
 //                      channel, thread, ts, text, stopped, calls, username? }], files: [{ id, name, size,
-//                      channel, thread, app, title, content }], dms: [{ app, users, channel }] }
+//                      channel, thread, app, title, content, sha256 }], dms: [{ app, users, channel }] }
 import http from 'node:http'
 import fs from 'node:fs'
+import crypto from 'node:crypto'
 import { WebSocketServer } from 'ws'
 
 const [port, log] = process.argv.slice(2)
@@ -452,7 +453,7 @@ const server = http.createServer(async (req, res) => {
       const u = uploads[f.id]
       if (!u || u.app !== a || !u.bytes) return no('file_not_found')
       attachments[f.id] = { name: u.name, type: 'application/octet-stream', bytes: u.bytes }
-      const shared = { id: f.id, name: u.name, title: f.title || u.name, size: u.bytes.length, channel: params.channel_id || null, thread: params.thread_ts || null, app: a, content: textLike(u.name) ? u.bytes.toString('utf8').slice(0, 20000) : null }
+      const shared = { id: f.id, name: u.name, title: f.title || u.name, size: u.bytes.length, channel: params.channel_id || null, thread: params.thread_ts || null, app: a, content: textLike(u.name) ? u.bytes.toString('utf8').slice(0, 20000) : null, sha256: crypto.createHash('sha256').update(u.bytes).digest('hex') }
       files.push(shared)
       done.push({ id: f.id, title: shared.title })
       if (params.channel_id) put(params.channel_id, { ...botMsg(params.initial_comment || ''), subtype: 'file_share', ...(params.thread_ts ? { thread_ts: params.thread_ts } : {}), files: [{ id: f.id, name: u.name, title: shared.title, size: shared.size }] })

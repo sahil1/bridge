@@ -21,12 +21,15 @@
 // servers' tools under the same rules as Claude Code's runs (botmcp.js). It can't change a file, run a
 // command or reach anything else, so it's kept to its folders as Claude Code is. Its one way to make
 // a file is save_file, into its run's outbox (botfiles.js) and nowhere else, to send back with its
-// answer.
+// answer; and attach_file sends one that's in the bot's folders as it is (botattach.js: checked, and
+// noted in its outbox, the file copied in and checked again once the answer is in), as Claude Code's
+// run has them from Bridge AI's MCP server (outboxmcp.js).
 import fs from 'node:fs'
 import path from 'node:path'
 import { adapter, readOnly, canChange } from './agents.js'
 import { HOME } from './paths.js'
 import * as botmcp from './botmcp.js'
+import * as botattach from './botattach.js'
 
 const AGENTS = ['claude', 'codex']
 const ID = /^(agent:(claude|codex)(:[\w.-]{1,60})?|model:[a-z][\w-]*:[^\s]{1,200})$/
@@ -100,8 +103,8 @@ const TOOLS = [
   { name: 'list_files', description: 'List a folder you can read: its files, and its folders ending in /.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'The folder; the first of yours if not given' } } } },
   { name: 'search', description: 'Search the files in your folders for text or a regular expression. Returns "path:line: text" for each match.', parameters: { type: 'object', properties: { pattern: { type: 'string', description: 'Text or a JavaScript regular expression' }, path: { type: 'string', description: 'A folder or file to search in; all your folders if not given' } }, required: ['pattern'] } },
 ]
-const SAVE = { name: 'save_file', description: 'Save a file to send back with your answer (a chart, a table, a document). It goes in your outbox, the only place you can write.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'Its name, with its extension: chart.svg, totals.csv' }, content: { type: 'string', description: 'What it holds' }, base64: { type: 'boolean', description: 'true when content is base64 (a picture, a PDF)' } }, required: ['name', 'content'] } }
-const SAVE_MAX = 25 * 1024 * 1024
+const SAVE = { name: 'save_file', description: 'Save a file you make to send back with your answer (a chart, a table, a document). It goes in your outbox, the only place you can write.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'Its name, with its extension: chart.svg, totals.csv' }, content: { type: 'string', description: 'What it holds' }, base64: { type: 'boolean', description: 'true when content is base64 (a picture, a PDF)' } }, required: ['name', 'content'] } }
+const ATTACH = { name: 'attach_file', description: `Send back a file that's in your folders as it is, with your answer: a PDF, a Word document, a spreadsheet, a picture. Give its path. ${botattach.MAX} files at most with an answer, none over ${botattach.sizeOf(botattach.EACH)}; never a hidden file or one that holds keys, passwords or credentials.`, parameters: { type: 'object', properties: { path: { type: 'string', description: 'The file: a path in one of your folders, or relative to the first' } }, required: ['path'] } }
 const tilde = (p) => (p === HOME || p.startsWith(HOME + path.sep) ? `~${p.slice(HOME.length)}` : p)
 const refused = (why) => Object.assign(new Error(why), { refused: true })
 
@@ -109,11 +112,12 @@ const refused = (why) => Object.assign(new Error(why), { refused: true })
 // the folders it may read (the first, where a relative path starts); also: other folders of its own
 // (the files attached to the question); mcp: { servers: { name: config }, all } (its MCP servers, and
 // whether every tool may be used, else only those that only read). outbox: its run's, where
-// save_file writes (botfiles.js); none, no save_file. onStep({ doing, reading, tools }): as it goes,
-// for Try It. signal: stop it. messages: its conversation, added to as it goes, so the caller has it
-// when it's stopped (frontdesk.js: a run stopped at its time limit is picked up from it); with none,
-// it starts from the brief.
-export async function runChat({ reply, model, brief, folders = [], also = [], mcp = null, outbox = null, signal, onStep = () => {}, messages = null }) {
+// save_file writes (botfiles.js); none, no save_file. attach: { folders, cwd }, the bot's folders a
+// file may be attached from (with an outbox); none, no attach_file. onStep({ doing, reading, tools }):
+// as it goes, for Try It. signal: stop it. messages: its conversation, added to as it goes, so the
+// caller has it when it's stopped (frontdesk.js: a run stopped at its time limit is picked up from
+// it); with none, it starts from the brief.
+export async function runChat({ reply, model, brief, folders = [], also = [], mcp = null, outbox = null, attach = null, signal, onStep = () => {}, messages = null }) {
   const real = async (p) => fs.promises.realpath(p).catch(() => null)
   const roots = (await Promise.all(folders.map(real))).filter(Boolean)
   const allowed = [...roots, ...(await Promise.all(also.map(real))).filter(Boolean)]
@@ -148,23 +152,21 @@ export async function runChat({ reply, model, brief, folders = [], also = [], mc
     const r = await botmcp.toolsOf(server, raw)
     for (const t of r.tools || []) if (mcp.all || t.readOnly) mcpTools.set(botmcp.toolName(server, t.name), { server, tool: t.name, raw, description: t.description || t.title || t.name, schema: t.schema || { type: 'object', properties: {} } })
   }
-  const tools = [...TOOLS, ...(outbox ? [SAVE] : []), ...[...mcpTools].map(([name, x]) => ({ name, description: `${x.description} (MCP server ${x.server})`, parameters: x.schema }))]
+  const attaching = !!(outbox && attach?.folders?.length)
+  const tools = [...TOOLS, ...(outbox ? [SAVE] : []), ...(attaching ? [ATTACH] : []), ...[...mcpTools].map(([name, x]) => ({ name, description: `${x.description} (MCP server ${x.server})`, parameters: x.schema }))]
   async function run(c) {
     const a = c.args || {}
-    // (Its name only: a path in it goes nowhere but the outbox.)
+    // (Its name only: a path in it goes nowhere but the outbox. As many as a run sends, all told,
+    // with what it attached.)
     if (c.name === 'save_file' && outbox) {
-      const name = path.basename(String(a.name || '').replace(/\\/g, '/')).replace(/\p{Cf}/gu, '').replace(/[:*?"<>|\x00-\x1f]+/g, '-').replace(/^\.+/, '').slice(0, 120) // eslint-disable-line no-control-regex
-      if (!name) throw refused('Give the file a name.')
-      const body = a.base64 === true ? Buffer.from(String(a.content || ''), 'base64') : Buffer.from(String(a.content ?? ''), 'utf8')
-      if (body.length > SAVE_MAX) throw refused('That file is too big to send back.')
-      // (As many as a run sends, all told: 5, 25 MB each.)
-      const there = (await fs.promises.readdir(outbox).catch(() => [])).filter((n) => n !== name)
-      const sizes = await Promise.all(there.map((n) => fs.promises.lstat(path.join(outbox, n)).then((x) => x.size, () => 0)))
-      if (there.length >= 5) throw refused('You\'ve saved 5 files already, the most that go with an answer.')
-      if (sizes.reduce((a, b) => a + b, 0) + body.length > 5 * SAVE_MAX) throw refused('That\'s more than an answer can send back, all told.')
-      await fs.promises.writeFile(path.join(outbox, name), body, { mode: 0o600 })
-      status(`save_file: ${name}`)
-      return `Saved ${name} (${body.length} bytes): it goes with your answer.`
+      const said = botattach.save(outbox, a)
+      status(`save_file: ${botattach.nameOf(a.name)}`)
+      return said
+    }
+    // (Checked, and noted for Bridge AI to copy in once the answer is in, checking it again.)
+    if (c.name === 'attach_file' && attaching) {
+      status(`attach_file: ${botattach.nameOf(a.path)}`)
+      return botattach.attach(outbox, a.path, attach)
     }
     if (c.name === 'read_file') {
       const p = await place(a.path)

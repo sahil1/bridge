@@ -54,6 +54,13 @@
 //     [make-big <name> <MB>]                 saves a file that many MB big so
 //     [make-early <name> <text>]             as [make], but at once, before it works (not again
 //                                            once it's picked up after its time limit)
+//     [attach <path>]                        attaches a file in its folders, as it is, with the
+//                                            attach_file tool of bridge_outbox (as [make]: only with
+//                                            mcp__bridge_outbox__attach_file allowed, else it says it
+//                                            couldn't); one refused it doesn't mention, as the tool
+//                                            says Bridge AI does
+//     [attach-line <path>]                   ends with a line ATTACH: <path>, as an agent with no tool
+//                                            for it would
 //     [remember <text>]                      ends with REMEMBER: <text>
 //     [remember-me <text>]                   ends with REMEMBER about <the asker>: <text>
 //     [recall]                               says what its brief's memory gave it
@@ -202,20 +209,34 @@ function answerTurn(text) {
   // call it, the server started as its config says and asked over stdin and stdout.
   const outboxServer = (() => { for (const c of configs) { try { const x = JSON.parse(fs.readFileSync(c, 'utf8')).mcpServers?.bridge_outbox; if (x) return x } catch { /* unreadable */ } } return null })()
   const mayMake = !!outboxServer && args.includes('--strict-mcp-config') && allowed.includes('mcp__bridge_outbox__save_file')
-  const makeTo = (out) => (name, body) => {
-    if (!mayMake) { tried('make', false); out.push(`I couldn't save ${name}: I have no tool for it.`); return }
-    const buf = Buffer.isBuffer(body) ? body : Buffer.from(String(body))
+  const mayAttach = !!outboxServer && args.includes('--strict-mcp-config') && allowed.includes('mcp__bridge_outbox__attach_file')
+  // One of its tools called, as Claude Code calls one: { ok, text }.
+  const callOutbox = (name, input) => {
     const asks = [
       { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.312' } } },
       { jsonrpc: '2.0', method: 'notifications/initialized' },
-      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'save_file', arguments: { name, content: buf.toString('base64'), base64: true } } },
+      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name, arguments: input } },
     ]
     const r = require('node:child_process').spawnSync(outboxServer.command, outboxServer.args || [], { input: asks.map((x) => JSON.stringify(x)).join('\n') + '\n', env: { ...process.env, ...(outboxServer.env || {}) }, encoding: 'utf8', timeout: 20000, maxBuffer: 1 << 20 })
     const said = String(r.stdout || '').split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).find((x) => x?.id === 2)
-    const ok = said?.result && !said.result.isError
+    return { ok: !!(said?.result && !said.result.isError), text: said?.result?.content?.[0]?.text || said?.error?.message || r.error?.message || 'no answer' }
+  }
+  const makeTo = (out) => (name, body) => {
+    if (!mayMake) { tried('make', false); out.push(`I couldn't save ${name}: I have no tool for it.`); return }
+    const buf = Buffer.isBuffer(body) ? body : Buffer.from(String(body))
+    const r = callOutbox('save_file', { name, content: buf.toString('base64'), base64: true })
     tool('mcp__bridge_outbox__save_file', { name })
-    tried('make', !!ok)
-    out.push(ok ? `I made ${name}.` : `I couldn't save ${name}: ${said?.result?.content?.[0]?.text || said?.error?.message || r.error?.message || 'no answer'}.`)
+    tried('make', r.ok)
+    out.push(r.ok ? `I made ${name}.` : `I couldn't save ${name}: ${r.text}.`)
+  }
+  const attachTo = (out) => (p) => {
+    const name = path.basename(p)
+    if (!mayAttach) { tried('attach', false); out.push(`I couldn't attach ${name}: I have no tool for it.`); return }
+    const r = callOutbox('attach_file', { path: p })
+    tool('mcp__bridge_outbox__attach_file', { path: p })
+    tried('attach', r.ok)
+    if (r.ok) out.push(`I attached ${name}.`)
+    else if (!/no need to say it again/.test(r.text)) out.push(`I couldn't attach ${name}: ${r.text}`)
   }
   // ([make-early]: saved at once, before it works, so a run stopped at its time limit has saved it
   // already; not again once it's picked up.)
@@ -256,6 +277,9 @@ function answerTurn(text) {
     for (const m of q.matchAll(/\[make-exe ([^\s\]]+)\]/g)) make(m[1], Buffer.concat([Buffer.from('MZ'), Buffer.alloc(62, 1)]))
     for (const m of q.matchAll(/\[make-script ([^\s\]]+)\]/g)) make(m[1], '#!/bin/sh\necho hello\n')
     for (const m of q.matchAll(/\[make-big ([^\s\]]+) (\d+)\]/g)) make(m[1], Buffer.alloc(Number(m[2]) * 1024 * 1024, 65))
+    const attach = attachTo(out)
+    for (const m of q.matchAll(/\[attach ([^\]]+)\]/g)) attach(m[1].trim())
+    const attachLines = [...q.matchAll(/\[attach-line ([^\]]+)\]/g)].map((m) => `ATTACH: ${m[1].trim()}`)
     const memo = (/----- memory -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of memory -----/.exec(text) || [])[1] || ''
     if (/\[recall\]/.test(q)) out.push(memo ? `I remember: ${memo.replace(/\n| · /g, ' ').trim()}` : 'I remember nothing.')
     if (/\[agents\]/.test(q)) out.push((/What .*?'s agents are doing now[^\n]*\n((?:- .*\n?)*)/.exec(text) || [])[1]?.trim().replace(/\n/g, ' ') || 'No agents said.')
@@ -276,7 +300,7 @@ function answerTurn(text) {
     const remember = [...q.matchAll(/\[remember ([^\]]+)\]/g)].map((m) => `REMEMBER: ${m[1]}`).concat([...q.matchAll(/\[remember-me ([^\]]+)\]/g)].map((m) => `REMEMBER about ${(/----- question from (.*?) -----/.exec(text) || [])[1] || 'them'}: ${m[1]}`))
     const a = /\[answer ([^\]]+)\]/.exec(q)
     const long = /\[long\]/.test(q) ? `\n\n${Array.from({ length: 60 }, (_, i) => `Point ${i + 1}: the details of this part of the answer, said at some length.`).join('\n\n')}` : ''
-    const answer = /\[noanswer\]/.test(q) ? 'NO ANSWER\nNothing in this folder says.' : /\[notforme\]/.test(q) ? 'NOT FOR ME' : [[...out, a ? a[1] : 'Here is what I found.', ...(sign ? [sign] : [])].join(' ') + long, ...files, ...remember].join('\n\n')
+    const answer = /\[noanswer\]/.test(q) ? 'NO ANSWER\nNothing in this folder says.' : /\[notforme\]/.test(q) ? 'NOT FOR ME' : [[...out, a ? a[1] : 'Here is what I found.', ...(sign ? [sign] : [])].join(' ') + long, ...files, ...remember, ...(attachLines.length ? [attachLines.join('\n')] : [])].join('\n\n')
     said = answer
     reply(answer)
     state = 'idle'

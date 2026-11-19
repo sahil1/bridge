@@ -38,6 +38,7 @@ function FileRow({ bot, f }) {
       <Icon name="file" size={12} />
       <span className="bf-name">{f.name}</span>
       <span className="muted small">{sizeOf(f.size)}</span>
+      {f.from && <span className="muted small bf-from" title={f.from}>{t('from {path}', { path: f.from })}</span>}
       {(onThisComputer() || canDownload) && <button type="button" className="link-btn small" disabled={!!st?.busy} onClick={open}>{onThisComputer() && !OPENS.test(f.name) ? revealLabel() : t('Open')}</button>}
       <button type="button" className="link-btn small" onClick={() => setSending(true)}>{t('Send to…')}</button>
       {st?.ok && <span className="muted small" role="status">{st.ok}</span>}
@@ -47,14 +48,14 @@ function FileRow({ bot, f }) {
   )
 }
 
-// One run's files, in a conversation's timeline (its files.made event): those kept, and those that
-// weren't sent, with why.
+// One run's files, in a conversation's timeline (its files.made event): those kept (one attached from
+// its folders saying where from), and those that weren't sent, with why.
 export function MadeFiles({ bot, e }) {
   const kept = (e.files || []).filter((f) => f.kept)
   if (!kept.length && !e.refused?.length) return null
   return (
     <div className="bf-made">
-      {kept.length > 0 && <ul className="bf-list">{kept.map((f) => <FileRow key={f.kept} bot={bot} f={{ name: f.name, size: f.size, path: f.kept }} />)}</ul>}
+      {kept.length > 0 && <ul className="bf-list">{kept.map((f) => <FileRow key={f.kept} bot={bot} f={{ name: f.name, size: f.size, path: f.kept, from: f.from || null }} />)}</ul>}
       {e.refused?.length > 0 && <p className="muted small">{t('Not sent: {list}', { list: e.refused.map((r) => `${r.name} (${r.why})`).join('; ') })}</p>}
     </div>
   )
