@@ -1404,7 +1404,9 @@ export function carryOn({ event } = {}, now = Date.now()) {
   const hit = all.filter((m) => {
     if (!m.interrupted || !mergeable(m)) return false
     const cut = Date.parse(m.interrupted.at)
-    if (all.some((x) => x.id !== m.id && Date.parse(x.startedAt) > cut)) return false
+    // Recorded since: started between then and now (a meeting whose time was set by hand to later
+    // today, or another day, wasn't).
+    if (all.some((x) => x.id !== m.id && Date.parse(x.startedAt) > cut && Date.parse(x.startedAt) <= now)) return false
     const soon = now >= cut && now - cut <= MERGE_GAP_MS
     const on = !!m.event?.end && now >= Date.parse(m.event.start || m.startedAt) - 10 * 60_000 && now <= Date.parse(m.event.end)
     if (ev && m.event?.title) return sameEvent(ev, m) && (on || soon)
