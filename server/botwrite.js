@@ -223,14 +223,16 @@ export async function screenWith(ask, text, { bot = 'the bot', folders = [], ms 
 
 // ---------- Walking a folder ----------
 // Each entry under root, without following a link: onFile(rel, full, lstat) for a file, onDir(rel)
-// for a folder, onOther(rel, full, lstat, kind) for a link or anything else, .git skipped (onGit).
-// Stops (throws) past max.
+// for a folder whose entries could be read (one that can't be listed, a drop box say, or one too
+// deep, isn't one: a copy doesn't have it, so a new file in it waits for you), onOther(rel, full,
+// lstat, kind) for a link or anything else, .git skipped (onGit). Stops (throws) past max.
 async function walk(root, { onFile = () => {}, onDir = () => {}, onOther = () => {}, onGit = () => {}, max = Infinity } = {}) {
   let n = 0
-  const go = async (dir, depth) => {
+  const go = async (dir, depth, rel = null) => {
     if (depth > DEPTH) return
     let ents
     try { ents = await fs.promises.readdir(dir, { withFileTypes: true }) } catch { return }
+    if (rel != null) await onDir(rel)
     for (const e of ents) {
       const full = path.join(dir, e.name)
       const rel = relOf(root, full)
@@ -239,7 +241,7 @@ async function walk(root, { onFile = () => {}, onDir = () => {}, onOther = () =>
       const st = await fs.promises.lstat(full).catch(() => null)
       if (!st) continue
       if (st.isSymbolicLink()) await onOther(rel, full, st, 'link')
-      else if (st.isDirectory()) { await onDir(rel); await go(full, depth + 1) }
+      else if (st.isDirectory()) await go(full, depth + 1, rel)
       else if (st.isFile()) await onFile(rel, full, st)
       else await onOther(rel, full, st, 'other')
     }
@@ -517,8 +519,9 @@ export async function collect(st, { into, by = null, instructions = [], checked 
     const k = `${i}\n${dir}`
     if (!partly.has(k)) {
       const have = kids[i].get(dir) || new Set()
-      const ents = await fs.promises.readdir(dir ? onDisk(st.parts[i].folder, dir) : st.parts[i].folder, { withFileTypes: true }).catch(() => [])
-      partly.set(k, ents.some((d) => !d.isSymbolicLink() && !gitLike(d.name) && !OS_OWN.test(d.name) && !have.has(nameKey(d.name))))
+      // (One that can't be listed now is one it can't see: never taken as nothing there.)
+      const ents = await fs.promises.readdir(dir ? onDisk(st.parts[i].folder, dir) : st.parts[i].folder, { withFileTypes: true }).catch(() => null)
+      partly.set(k, !ents || ents.some((d) => !d.isSymbolicLink() && !gitLike(d.name) && !OS_OWN.test(d.name) && !have.has(nameKey(d.name))))
     }
     return partly.get(k)
   }
