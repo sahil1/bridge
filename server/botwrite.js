@@ -726,13 +726,15 @@ export function diffOf(c, blob, unshown = []) {
 // hook that couldn't start, or one your Claude Code's settings turned off) leaves nothing, so
 // nothing of that run is made.
 // The hook also writes down that it ran at all (guardLine(key, 'ran', '')), first, whatever it then
-// says: checked.ran says whether it did, for a run whose files were all refused as unchecked to be
-// said as one whose hook never ran.
+// says: checked.ran says whether it did (null when its log couldn't be read, so nothing is said
+// either way), for a run whose files were all refused as unchecked to be said as one whose hook
+// never ran.
 export const guardLine = (key, kind, p) => crypto.createHmac('sha256', String(key)).update(`${kind}\n${p}`).digest('hex')
 export async function guardCheck(log, key) {
-  const seen = new Set(String(await fs.promises.readFile(log, 'utf8').catch(() => '')).split('\n').filter((l) => /^[0-9a-f]{64}$/.test(l)))
+  const text = await fs.promises.readFile(log, 'utf8').catch(() => null)
+  const seen = new Set(String(text ?? '').split('\n').filter((l) => /^[0-9a-f]{64}$/.test(l)))
   const checked = (kind, p) => (kind === 'w' || kind === 'd') && seen.has(guardLine(key, kind, p))
-  checked.ran = seen.has(guardLine(key, 'ran', ''))
+  checked.ran = text == null ? null : seen.has(guardLine(key, 'ran', ''))
   return checked
 }
 

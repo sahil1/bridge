@@ -726,8 +726,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   const guards = new Map()
   async function checkedOf(hid) {
     const g = guards.get(hid)
-    guards.delete(hid)
-    return g ? botwrite.guardCheck(g.log, g.key) : () => false
+    // (Its guard kept until its log has been read: while it's here, its folder stays: the ticker.)
+    try { return g ? await botwrite.guardCheck(g.log, g.key) : () => false } finally { guards.delete(hid) }
   }
   // Your Claude Code's managed settings turning off the hook that every run changing files needs
   // (disableAllHooks, or only its own hooks: allowManagedHooksOnly), said; null when they don't.
@@ -2497,10 +2497,11 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // (Stopped, or out of time. Not one whose own checks haven't been read yet (guards): its log is in
     // that folder, and its answer is heard a moment after it ends (heard()), so the folder goes then;
     // gone first, every file it changed would be refused as unchecked. One never heard goes after
-    // GUARD_WAIT_MS.)
+    // GUARD_WAIT_MS, and one its helper's record no longer has (dropped, or pruned among many) at once:
+    // it won't be heard.)
     for (const hid of mcpDirs.keys()) {
       const h = delegate.get(hid)
-      if (h?.state === 'ended' && (!guards.has(hid) || Date.now() - Date.parse(h.endedAt || 0) > GUARD_WAIT_MS)) { guards.delete(hid); dropMcp(hid) }
+      if (!h || (h.state === 'ended' && (!guards.has(hid) || Date.now() - Date.parse(h.endedAt || 0) > GUARD_WAIT_MS))) { guards.delete(hid); dropMcp(hid) }
     }
     for (const [id, b] of bots) {
       const bot = botOf(id)
