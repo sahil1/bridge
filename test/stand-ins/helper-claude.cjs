@@ -50,6 +50,10 @@
 //                                            JSON on stdin; exit 2 refuses it (each in ~/hooks.log)
 //     [edit-anywhere <path> <text>]          writes a file anywhere, as if your own settings allowed
 //                                            every edit: only its hooks can stop it
+//     [force-write <path> <text>]            writes <text> (\n a new line, \t a tab, {{ and }} brackets)
+//                                            to <path> in its folder, past its hooks and permissions,
+//                                            as if its hook never ran
+//     [edit-lines <path> <n>]                writes a file of n lines to <path> in its folder
 //     [edit-many <n> <folder>]               writes n new files, <folder>/1.md … <folder>/<n>.md
 //                                            (many/ if not said)
 //     [delete <name>], [move <from> <to>]    deletes or moves a file with the delete_file or
@@ -220,8 +224,9 @@ function preTool(name, input) {
 
 // An answer for the Slack Bot: what it can do is what it was started with.
 function answerTurn(text) {
-  // (On Windows its lines come as one, joined by " · ": runtime/spawn.js forCommandLine.)
-  const q = (/----- question from.*? -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of question -----/.exec(text) || [])[1] || ''
+  // (On Windows its lines come as one, joined by " · ": runtime/spawn.js forCommandLine. Every
+  // question block its brief has, as one: what someone added while it worked is asked of it too.)
+  const q = [...text.matchAll(/----- question from.*? -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of question -----/g)].map((m) => m[1]).join('\n')
   const told = (/----- instructions -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of instructions -----/.exec(text) || [])[1] || ''
   const sign = (/\[sign ([^\]]+)\]/.exec(told) || [])[1] || null
   const tools = opt('--tools')
@@ -300,8 +305,17 @@ function answerTurn(text) {
       const inHere = f.startsWith(process.cwd() + path.sep)
       if (can('Edit') && (!dontAsk || (inHere && editsHere))) { fs.writeFileSync(f, `${m[2]}\n`); tried('edit-outside', true); out.push(`I wrote ${m[1]}.`) } else { tried('edit-outside', false); out.push(`I couldn't write ${m[1]}: that was refused.`) }
     }
+    // (As if its hook never ran: written whatever its checks would say.)
+    for (const m of q.matchAll(/\[force-write ([^\s\]]+) ([^\]]+)\]/g)) {
+      const f = path.resolve(process.cwd(), m[1])
+      try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${m[2].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\{\{/g, '[').replace(/\}\}/g, ']')}\n`); tried('force-write', true); out.push(`I wrote ${m[1]}.`) } catch (e) { tried('force-write', false); out.push(`I couldn't write ${m[1]}: ${e.code || e.message}.`) }
+    }
     // (As if your own settings allowed every edit: its hooks are all that stand in the way.)
     for (const m of q.matchAll(/\[edit-anywhere ([^\s\]]+) ([^\]]+)\]/g)) write(path.resolve(process.cwd(), m[1].replace(/^~/, home)), `${m[2]}\n`, m[1], 'edit-anywhere')
+    for (const m of q.matchAll(/\[edit-lines ([\w./-]+) (\d+)\]/g)) {
+      const f = path.resolve(process.cwd(), m[1])
+      if (editsHere && f.startsWith(process.cwd() + path.sep)) write(f, Array.from({ length: Number(m[2]) }, (_, i) => `row ${i}`).join('\n'), m[1], 'edit')
+    }
     const many = /\[edit-many (\d+)(?: ([\w./-]+))?\]/.exec(q)
     if (many && editsHere) for (let i = 1; i <= Number(many[1]); i++) write(path.join(process.cwd(), many[2] || 'many', `${i}.md`), `File ${i}\n`, `${many[2] || 'many'}/${i}.md`, 'edit')
     // Deleting and moving: only with bridge_files's tools, as Claude Code calls an MCP server's.

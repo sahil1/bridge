@@ -65,7 +65,7 @@
 //   AI Assist routing a question on a shared connection to one of its bots ("The bots (an id…"): the
 //   one bot whose name or description shares a word with the question, else none (routeBot below).
 //   A request to a bot that changes files, screened before it starts: one with [odd] in it held for
-//   its owner, any other fine.
+//   its owner, one with [garbled] answered in words rather than the object asked for, any other fine.
 //   Anything else: "echo: <the last thing said>".
 //   A key of sk-bad is turned down (HTTP 401), as a provider would.
 import http from 'node:http'
@@ -253,7 +253,7 @@ function answer(b) {
   if (/^The bots \(an id, its name, and what it answers\):/.test(first)) return say(routeBot(first))
   // A request to a bot that changes files, screened before it starts (server/botwrite.js screenWith):
   // one that says [odd] is for its owner to look at first; any other is fine.
-  if (/^Screen this request, between the lines:/.test(first)) return say(/\[odd\]/i.test(first) ? '{"ok": false, "why": "it asks for something odd"}' : '{"ok": true}')
+  if (/^Screen this request, between the lines:/.test(first)) return say(/\[odd\]/i.test(first) ? '{"ok": false, "why": "it asks for something odd"}' : /\[garbled\]/i.test(first) ? 'Sure, that looks fine to me.' : '{"ok": true}')
   if (b.tools?.length && /----- question from/.test(first)) return botAnswer(b, first)
   if (/^sonar/.test(b.model || '')) {
     const q = /: ([^\n]*)$/.exec(last)?.[1] || last
