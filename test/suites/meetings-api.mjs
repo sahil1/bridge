@@ -1012,6 +1012,86 @@ process.exit(1)`)
   ok((await tryApi(`/meetings/${W4.id}`)).error && !(await kit.api(`/meetings/${M2}`)).combined && !meetingJson(M2).partOf, 'one of its two deleted: it\'s separated by itself, and the other stays')
   }
 
+  // ---------- One meeting recorded as two ----------
+  // Bridge AI closing while a meeting records: on the next start it's stopped where it had got to,
+  // with what was transcribed, and says it was cut short; recording again during its calendar event
+  // carries on in it (carry-on) rather than making a second meeting. A second recording of one event
+  // is suggested to merge with the first; merged, it's the first one's next part (its lines, audio,
+  // notes and pictures at their times after it, and the summary written again), and Separate puts
+  // both back as they were. Not while one still records, which it says.
+  {
+  const meetingJson = (id) => JSON.parse(fs.readFileSync(path.join(dirOf(id), 'meeting.json'), 'utf8'))
+  const audioOf = (id) => fs.readdirSync(dirOf(id)).filter((f) => /^audio-/.test(f)).sort()
+  const two = (n) => Math.round(n * 100) / 100
+  await kit.api('/settings', { meetings: { autoSummary: false, cleanup: false } }, 'PATCH')
+  const t0 = Date.now()
+  const ev = { title: 'Weekly sync', start: new Date(t0 - 5 * 60e3).toISOString(), end: new Date(t0 + 55 * 60e3).toISOString(), attendees: ['Priya Shah', 'Tester'] }
+  const X = await kit.api('/meetings', { title: 'Weekly sync', event: ev, call: false })
+  await send(X.id, Buffer.concat([pcm(0.5), pcm(2, true), pcm(3.5)]))
+  ok(!!(await until(async () => (await kit.api(`/meetings/${X.id}`)).transcript.length >= 1, 15000)), 'a meeting records, during its calendar event')
+  await kit.api(`/meetings/${X.id}/note`, { text: 'pricing first' })
+  await kit.restart()
+  let x = await kit.api(`/meetings/${X.id}`)
+  ok(x.status === 'done' && !!x.interrupted?.at && !x.interrupted.seen && Date.parse(x.endedAt) > Date.parse(x.startedAt) && x.endedAt === x.interrupted.at && x.transcript.length >= 1 && x.seconds >= 5, 'Bridge AI closed while it recorded: on the next start it\'s stopped where it had got to, with what was transcribed, and says it was cut short', x && { status: x.status, interrupted: x.interrupted, startedAt: x.startedAt, endedAt: x.endedAt, seconds: x.seconds, lines: x.transcript.length })
+  ok(!!(await kit.api('/meetings')).meetings.find((m) => m.id === X.id)?.interrupted, 'the list says so too, for the notice at the top of the window')
+  let c = await kit.api('/meetings/carry-on', { event: ev })
+  ok(c.meeting?.id === X.id && c.meeting.title === 'Weekly sync' && c.meeting.at === x.interrupted.at, 'recording again while its event is on: it offers to carry on in it', c)
+  ok((await kit.api('/meetings/carry-on', { event: { title: 'Another meeting', start: ev.end, end: new Date(t0 + 90 * 60e3).toISOString() } })).meeting === null, 'not when the recording is for another event')
+  ok((await kit.api('/meetings/carry-on', {})).meeting?.id === X.id, 'nor without an event, while its own is on')
+  ok((await kit.api(`/meetings/${X.id}/interrupted`, {})).interrupted?.seen === true, 'the notice, once read, isn\'t said again')
+  r = await tryApi(`/meetings/${X.id}/reopen`, {})
+  ok(r.id === X.id && r.status === 'recording' && r.interrupted === null && r.resumedFrom >= 5, 'Resume recording carries on in the same meeting, and it\'s no longer said to be cut short', r)
+  await send(X.id, Buffer.concat([pcm(0.5), pcm(2, true), pcm(1.5)]))
+  await kit.api(`/meetings/${X.id}/stop`, {})
+  x = await until(async () => { const m = await kit.api(`/meetings/${X.id}`); return m.status === 'done' && m.transcript.length >= 2 && m }, 20000)
+  ok(!!x && x.transcript.at(-1).t0 >= x.resumedFrom && (await kit.api('/meetings')).meetings.filter((m) => m.title === 'Weekly sync').length === 1 && (await kit.api('/meetings/carry-on', { event: ev })).meeting === null, 'one meeting, its new lines after the first; nothing left to carry on', x && x.transcript.map((l) => l.t0))
+
+  // A second recording of the same event, after the first stopped: suggested, then merged.
+  fs.writeFileSync(path.join(dirOf(X.id), 'summary.md'), '## Summary\n- Pricing first.\n')
+  const xFiles = audioOf(X.id)
+  const xNotes = notes(X.id)
+  const xLines = x.transcript.length
+  const at = Math.max(x.seconds, Math.ceil(Math.max(...x.transcript.map((l) => l.t1))))
+  const Y = await kit.api('/meetings', { title: 'Weekly sync', event: ev, call: false })
+  await send(Y.id, Buffer.concat([pcm(0.5), pcm(2, true), pcm(2.5)]))
+  await kit.api(`/meetings/${Y.id}/note`, { text: 'rollout dates' })
+  await kit.api(`/meetings/${Y.id}/stop`, {})
+  const y = await until(async () => { const m = await kit.api(`/meetings/${Y.id}`); return m.status === 'done' && m.transcript.length >= 1 && m }, 20000)
+  await fetch(`${kit.url}/api/meetings/${Y.id}/captures?kind=paste&t=3`, { method: 'POST', headers: { 'content-type': 'image/png' }, body: PNG })
+  await kit.api(`/meetings/${Y.id}/lines`, { key: y.transcript[0].key, text: 'Rollout starts Monday.' }, 'PATCH')
+  const listed = (await kit.api('/meetings')).meetings
+  const hint = listed.find((m) => m.id === Y.id)?.mergeHint
+  ok(hint?.id === X.id && hint.why === 'event' && hint.title === 'Weekly sync' && !listed.find((m) => m.id === X.id).mergeHint && (await kit.api(`/meetings/${Y.id}`)).mergeHint?.id === X.id && !(await kit.api(`/meetings/${X.id}`)).mergeHint, 'two recordings of one calendar event: the later one is suggested to merge into the earlier, in the list and on its page (and not the other way)', hint)
+  const Z = await kit.api('/meetings', { title: 'Weekly sync', event: ev, call: false })
+  ok(/"Weekly sync" is still recording\. Stop it first\./.test(await err(`/meetings/${Y.id}/merge`, { id: Z.id }) || ''), 'one still recording isn\'t merged, and it says why')
+  await kit.api(`/meetings/${Z.id}/stop`, {})
+  await until(async () => (await kit.api(`/meetings/${Z.id}`)).status === 'done', 10000)
+  ok((await kit.api(`/meetings/${Z.id}/merge-hint`, { not: Y.id })).mergeDismissed?.includes(Y.id) && !(await kit.api(`/meetings/${Z.id}`)).mergeHint && !(await kit.api('/meetings')).meetings.find((m) => m.id === Z.id).mergeHint, 'Not the same meeting: it isn\'t suggested again')
+  await kit.api(`/meetings/${Z.id}`, null, 'DELETE')
+  await kit.api('/settings', { meetings: { autoSummary: true } }, 'PATCH')
+  const s0 = model.asked(/Write meeting notes in Markdown/).length
+  r = await tryApi(`/meetings/${Y.id}/merge`, { id: X.id })
+  await kit.api('/settings', { meetings: { autoSummary: false } }, 'PATCH')
+  const later = (r.transcript || []).filter((l) => l.t0 >= at)
+  ok(r.id === X.id && !!(await tryApi(`/meetings/${Y.id}`)).error && !(await kit.api('/meetings')).meetings.some((m) => m.id === Y.id), 'merged from the later one\'s page: the earlier one is the meeting, and the later one isn\'t one of its own any more', r.error || r.id)
+  ok(r.transcript?.length === xLines + y.transcript.length && later.length === y.transcript.length && later[0].t0 === two(y.transcript[0].t0 + at) && later[0].text === 'Rollout starts Monday.' && later[0].edited, 'its lines come after the earlier one\'s, at their times carried on, with the edit made to them', r.transcript?.map((l) => [l.t0, l.text]))
+  ok(r.seconds === at + y.seconds && r.merged?.[0]?.id === Y.id && r.merged[0].kept && r.merged[0].at === at && !r.mergeHint, 'as long as both, and it says what was merged in, to separate', r.merged)
+  ok(audioOf(X.id).length === xFiles.length + 1 && audioOf(X.id).some((f) => /^audio-you-3\.(ogg|wav)$/.test(f)) && meetingJson(X.id).audioFrom?.['audio-you-3'] === at, 'its audio is the next part, with where it starts', [audioOf(X.id), meetingJson(X.id).audioFrom])
+  const stamp = /- \[(\d+):(\d\d)\] rollout dates/.exec(notes(X.id))
+  ok(notes(X.id).startsWith(xNotes.trim()) && !!stamp && Number(stamp[1]) * 60 + Number(stamp[2]) >= at, 'your notes on it come after yours, their times carried on', notes(X.id))
+  const pic = (r.captures || []).find((cp) => cp.kind === 'paste')
+  ok(!!pic && pic.t === at + 3 && fs.existsSync(path.join(dirOf(X.id), pic.file)), 'and its pictures, at their times', r.captures)
+  const sum = await until(async () => { const m = await kit.api(`/meetings/${X.id}`); return !m.summarizing && model.asked(/Write meeting notes in Markdown/).length > s0 && m.summary && !/Pricing first/.test(m.summary) && m }, 20000)
+  const asked = model.asked(/Write meeting notes in Markdown/).slice(s0)[0] || ''
+  ok(!!sum && /Rollout starts Monday/.test(asked) && /pricing first/.test(asked) && /rollout dates/.test(asked) && !sum.summaryStale, 'the summary is written again, from both', asked.slice(-500))
+  r = await tryApi(`/meetings/${X.id}/separate`, { id: Y.id })
+  ok(r.separated === Y.id && r.transcript?.length === xLines && r.seconds === x.seconds && !r.merged?.length && audioOf(X.id).join() === xFiles.join() && notes(X.id) === xNotes && /Pricing first/.test(r.summary || ''), 'Separate: the earlier one is as it was, with its own audio, notes and summary', r.error || { lines: r.transcript?.length, seconds: r.seconds, audio: audioOf(X.id) })
+  const y2 = await tryApi(`/meetings/${Y.id}`)
+  ok(y2.transcript?.length === y.transcript.length && y2.transcript[0].t0 === y.transcript[0].t0 && y2.transcript[0].text === 'Rollout starts Monday.' && /^- \[0:0\d\] rollout dates\n$/.test(y2.notes) && y2.captures?.length === 1 && y2.captures[0].t === 3 && y2.seconds === y.seconds && audioOf(Y.id).length === 1, 'and the later one is back as it was, with its own lines, edit, notes, picture and audio', y2.error || { lines: y2.transcript, notes: y2.notes, captures: y2.captures })
+  ok(!y2.mergeHint && !(await kit.api('/meetings')).meetings.find((m) => m.id === Y.id)?.mergeHint, 'separated, they aren\'t suggested again')
+  ok(/wasn't merged into this meeting/.test(await err(`/meetings/${X.id}/separate`, { id: Y.id }) || ''), 'and there\'s nothing more to separate')
+  }
+
   // ---------- The calendar (macOS Calendar, through icalBuddy) ----------
   if (IS_MAC) {
     kit.program('icalBuddy', `const d = new Date(), p = (n) => String(n).padStart(2, '0'), hm = (t) => p(t.getHours()) + ':' + p(t.getMinutes())

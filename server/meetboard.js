@@ -228,6 +228,25 @@ export async function settle(mid, id, key, state) {
   return { kept, discarded }
 }
 
+// A meeting merged into another (meetings.js merge), or separated again: what's on a board from the
+// one (from) is the other's (to) from then on, each item's time in the meeting moved by shift
+// seconds. Nothing else on the board changes.
+export async function retag(id, from, to, shift = 0) {
+  await boards.edit(id, (data) => {
+    data.elements = (data.elements || []).map((e) => {
+      const m = markOf(e)
+      if (m?.id !== from) return e
+      const meeting = { ...m, id: to, ...(typeof m.t === 'number' ? { t: Math.max(0, Math.round(m.t + shift)) } : {}) }
+      return { ...e, customData: { ...e.customData, bridge: { ...e.customData.bridge, meeting } }, version: (e.version || 1) + 1, versionNonce: rnd(), updated: Date.now() }
+    })
+    return data
+  })
+  found.delete(from)
+  found.delete(to)
+  briefs.delete(from)
+  briefs.delete(to)
+}
+
 // For the meeting's page and the floating card: the board, what's on it from the meeting and how
 // much of each, read again only when its file changed.
 const briefs = new Map() // meeting -> { id, mtime, brief }

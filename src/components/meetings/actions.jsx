@@ -4,11 +4,13 @@ import { Menu } from '../FileExtras.jsx'
 import { api, refetch, onThisComputer } from '../../api.js'
 import { Dialog, FixWord, TranscribeAgain, openMemory } from './tools.jsx'
 import { exportAndSay } from './exporting.js'
+import { MergePick } from './merge.jsx'
 import { t } from '../../i18n/index.js'
 
 // What can be done to a meeting from a list (right-click a meeting in the sidebar or on the
 // Meetings page), the same as its own ⋯ menu: save it (as Markdown, or as one file to share, Word or
-// PDF: exporting.js), fix a word, transcribe it again, put it in a folder, archive it, delete it.
+// PDF: exporting.js), fix a word, transcribe it again, merge it with another (merge.jsx), put it in a
+// folder, archive it, delete it.
 // Deleting asks first, and offers the archive instead.
 
 const deleted = (n) => (n === 1 ? t('Deleted {n} meeting.', { n }) : t('Deleted {n} meetings.', { n }))
@@ -132,6 +134,7 @@ export function useMeetingMenu({ list, onOpen, onGone }) {
     'sep',
     !m.parts && { icon: 'edit', label: t('Fix a word everywhere'), run: () => setDialog({ kind: 'fix', items: [m] }) },
     m.status === 'done' && !m.parts && { icon: 'refresh', label: t('Transcribe again…'), run: () => setDialog({ kind: 'again', items: [m] }) },
+    m.status === 'done' && !m.parts && { icon: 'branch', label: t('Merge with…'), run: () => setDialog({ kind: 'merge', items: [m] }) },
     { icon: 'book', label: t('Open Memory'), run: openMemory },
     'sep',
     { icon: 'folder', label: m.folder ? t('Move to another folder…') : t('Move to a folder…'), run: () => setDialog({ kind: 'folder', items: [m] }) },
@@ -151,6 +154,7 @@ export function useMeetingMenu({ list, onOpen, onGone }) {
       {dialog?.kind === 'fix' && <FixWord id={dialog.items[0].id} onClose={shut} onDone={(text) => { say(text); refetch('/meetings') }} />}
       {dialog?.kind === 'again' && <TranscribeAgain ids={dialog.items.map((x) => x.id)} onClose={shut} onDone={say} />}
       {dialog?.kind === 'folder' && <FolderPick items={dialog.items} folders={foldersOf(list)} onClose={shut} onDone={say} />}
+      {dialog?.kind === 'merge' && <MergePick m={dialog.items[0]} list={list} onClose={shut} onDone={(r) => { say(t('Merged into {title}. Separate on its page puts them back as two, for 7 days.', { title: r.title })); onOpen(r.id) }} />}
       {dialog?.kind === 'delete' && <ConfirmDelete items={dialog.items} onClose={shut} onDone={(action, r) => { if (action === 'delete') { onGone?.(r.done); say(dialog.items.length === 1 && dialog.items[0].parts ? t('Separated. Its meetings are as they were.') : deleted(r.done.length)) } else say(archivedN(r.done.length)) }} />}
     </>
   )

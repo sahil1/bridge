@@ -263,6 +263,42 @@ try {
     await p.locator('.mt-dialog input').waitFor({ timeout: 4000 })
     await fits('naming someone else')
     await p.keyboard.press('Escape')
+
+    // One meeting recorded as two, on the phone: the list says which is the rest of another, its page
+    // suggests merging, ⋯ has Merge with…, and the merged one has Separate. A recording that stopped
+    // when Bridge AI closed is said at the top, with Resume recording. Each fits the phone.
+    const ev = { title: `Roadmap check ${w}`, start: new Date(Date.now() - 20 * 60e3).toISOString(), end: new Date(Date.now() + 40 * 60e3).toISOString(), attendees: ['Priya Shah', 'Tester'] }
+    const halves = []
+    for (const text of ['First half of the roadmap.', 'Second half of the roadmap.']) {
+      const m = await kit.api('/meetings', { title: ev.title, call: false, event: ev })
+      await kit.api(`/meetings/${m.id}/stop`, {})
+      said(m.id, [['you', 1, text]])
+      await ended(m.id)
+      halves.push(m.id)
+    }
+    await tab.locator('.win-btn.back').click()
+    const rest = tab.locator('.mt-row-open', { hasText: `The rest of Roadmap check ${w}` })
+    ok(!!(await until(() => rest.isVisible().catch(() => false), 12000)), `${at}: the list says which recording is the rest of another`, await tab.locator('.mt-home').innerText().catch(() => ''))
+    await rest.click()
+    const hint = tab.locator('.mt-merge-hint')
+    ok(!!(await until(() => hint.isVisible().catch(() => false), 8000)), `${at}: its page suggests merging them into one meeting`)
+    await fits('merging two recordings of one meeting', 'meeting-merge-hint')
+    await tab.locator('.pane-head button[aria-label="More actions"]').click()
+    await p.locator('.menu button', { hasText: 'Merge with…' }).click()
+    await p.locator('.mt-dialog .mt-merge-pick').waitFor({ timeout: 4000 })
+    await fits('Merge with…', 'meeting-merge-with')
+    await p.locator('.mt-dialog .mt-pick-opt').first().click()
+    ok(!!(await until(async () => !(await kit.api('/meetings')).meetings.some((x) => x.id === halves[1]) && (await kit.api(`/meetings/${halves[0]}`)).transcript.length === 2, 10000)), `${at}: merged from the phone`)
+    ok(!!(await until(() => tab.locator('.mt-merged button', { hasText: 'Separate' }).isVisible().catch(() => false), 10000)), `${at}: the merged meeting opens, with Separate`)
+    await fits('a merged meeting', 'meeting-merged')
+    // As Bridge AI starting again marks a recording it closed in the middle of (server meetings.js recover).
+    const file = path.join(kit.data, 'meetings', halves[0], 'meeting.json')
+    await until(async () => { fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), interrupted: { at: new Date().toISOString() } })); await sleep(300); return !!JSON.parse(fs.readFileSync(file, 'utf8')).interrupted }, 8000)
+    await p.reload()
+    const stopped = p.locator('.call-prompt.mt-stopped')
+    ok(!!(await until(() => stopped.isVisible().catch(() => false), 12000)) && (await stopped.locator('button', { hasText: 'Resume recording' }).count()) === 1, `${at}: a recording that stopped when Bridge AI closed is said at the top, with Resume recording`, await stopped.innerText().catch(() => ''))
+    await fits('a recording that stopped when Bridge AI closed', 'meeting-stopped')
+    await stopped.locator('button[aria-label="Got it"]').click()
     ok(errors.length === 0, `${at}: no page errors`, errors)
     await ctx.close()
   }
