@@ -1,6 +1,7 @@
 // Remote Screen and Preview (a Beta Feature): your devices told when a screen is shared. remote.js
-// says when a session of this computer's screen starts, when control is taken, and when an ask waits
-// on Ask Here First; this tells:
+// says when a session of this computer's screen starts, when control is taken, when an ask waits on
+// Ask Here First, and when a device that couldn't see it had Bridge AI opened or reopened there, or
+// Screen Recording asked for there (open, reopen, allow); this tells:
 //   your phones          a notification (notify.js: each device that turned notifications on here),
 //                        with Stop and Block This Device, leaving out the device doing the viewing
 //   your other computers each linked one (machines.js), which passes the notification on to the
@@ -21,12 +22,14 @@ const AGAIN_MS = 30000 // while anything's live here, said to the others again t
 const clip = (v, n = 60) => plainName(v, n)
 const iso = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null)
 const kindOf = (k) => (k === 'computer' ? 'computer' : 'phone')
+const WHATS = ['view', 'control', 'ask', 'open', 'reopen', 'allow']
 const byOf = (b) => ({ name: clip(b?.name) || 'A device', kind: kindOf(b?.kind) })
 // A session or an ask as the cards show it, whoever said it: who, the device it's for and its kind.
 const cleanOne = (x) => ({ id: clip(x.id, 40), by: byOf(x.by), for: clip(x.for) || null, forKind: x.for ? kindOf(x.forKind) : null, control: !!x.control })
+// (waiting: past the guardrails there, its screen not showing yet.)
 const cleanLive = (b) => ({
   sessions: (Array.isArray(b?.sessions) ? b.sessions : []).filter((x) => typeof x?.id === 'string').slice(0, 20)
-    .map((x) => ({ ...cleanOne(x), controlled: !!x.controlled, started: iso(x.started) })),
+    .map((x) => ({ ...cleanOne(x), controlled: !!x.controlled, started: iso(x.started), ...(x.waiting === true ? { waiting: true } : {}) })),
   asks: (Array.isArray(b?.asks) ? b.asks : []).filter((x) => typeof x?.id === 'string').slice(0, 20)
     .map((x) => ({ ...cleanOne(x), at: iso(x.at), until: iso(x.until) })),
 })
@@ -52,7 +55,13 @@ export function makeTell({ remote, notify, machines, relay, pushDevices = () => 
       ? { title: ev.control ? `${who} asks to see and control ${computer}'s screen` : `${who} asks to see ${computer}'s screen`, body: `It's allowed or denied at ${computer} itself. ${not}` }
       : ev.what === 'control'
         ? { title: `${computer} is being controlled`, body: `From ${who}, with its mouse and keyboard. ${not}` }
-        : { title: `${computer}'s screen is being viewed`, body: `From ${who}${ev.control ? ', who may control it too' : ''}. ${not}` }
+        : ev.what === 'open'
+          ? { title: `Bridge AI was opened on ${computer}`, body: `From ${who}, to see its screen. ${not}` }
+          : ev.what === 'reopen'
+            ? { title: `Bridge AI is reopening on ${computer}`, body: `From ${who}, to see its screen. ${not}` }
+            : ev.what === 'allow'
+              ? { title: `${computer} was asked to allow Screen Recording`, body: `From ${who}: System Settings opened there at it. ${not}` }
+              : { title: `${computer}'s screen is being viewed`, body: `From ${who}${ev.control ? ', who may control it too' : ''}. ${not}` }
     const actions = [
       notify.button(kind, { ...args, k: 'stop' }, { action: 'stop', title: ev.what === 'ask' ? 'Deny' : 'Stop' }),
       notify.button(kind, { ...args, k: 'block' }, { action: 'block', title: 'Block This Device' }),
@@ -87,7 +96,7 @@ export function makeTell({ remote, notify, machines, relay, pushDevices = () => 
     there.set(m.id, { name: m.name, at: Date.now(), ...cleanLive(body) })
     shown()
     const t = body.tell
-    if (!t || !['view', 'control', 'ask'].includes(t.what) || typeof t.id !== 'string') return { ok: true, sent: 0 }
+    if (!t || !WHATS.includes(t.what) || typeof t.id !== 'string') return { ok: true, sent: 0 }
     const ev = { what: t.what, ...cleanOne(t) }
     const forId = clip(t.forId, 40)
     // (Nor any device of this computer's that computer keeps out: machines.js keptFrom.)

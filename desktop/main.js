@@ -4,7 +4,7 @@
 //                                     so the person using it needs nothing else installed
 //   from source (npm run desktop)     your clone, with `node scripts/start.js`
 const electron = require('electron')
-const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, session, nativeTheme, ipcMain, powerMonitor, screen, nativeImage, systemPreferences, dialog, desktopCapturer } = electron
+const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, session, nativeTheme, ipcMain, powerMonitor, powerSaveBlocker, screen, nativeImage, systemPreferences, dialog, desktopCapturer } = electron
 const dictation = require('./dictation.js')
 const contextMenu = require('./contextmenu.js')
 const permissions = require('./permissions.js')
@@ -381,6 +381,7 @@ ipc.handle('bridge:idle', (e) => (fromApp(e) ? powerMonitor.getSystemIdleTime() 
 // running in the terminal host meanwhile, unless Keep agents running is off.
 ipc.handle('bridge:restart', (e) => {
   if (!fromApp(e)) return false
+  relaunching = true
   app.relaunch()
   stopServer()
   app.quit()
@@ -405,6 +406,8 @@ const TILE_STEPS = {
   accessibility: { text: `Turn on ${APP_NAME} in the list above` },
   // A call's sound for meeting notes: listed once a recording has asked.
   audio: { text: `Under System Audio Recording Only, turn on ${APP_NAME}` },
+  // This screen, seen from another of your devices (remote.js): listed once it has looked.
+  screen: { text: `Under Screen & System Audio Recording, turn on ${APP_NAME}, then Quit & Reopen` },
   // Fn or the right ⌥ as the dictation key (dictation.js): listed already, by macOS's own question.
   'input-monitoring': { text: `Turn on ${APP_NAME} in the list above` },
 }
@@ -418,6 +421,7 @@ function closeTile() {
 // Access on yet? The server answers for the folders it reads; the app asks macOS for the mic and
 // Accessibility (without asking you).
 async function tileDone(pane) {
+  if (pane === 'screen') return systemPreferences.getMediaAccessStatus('screen') === 'granted'
   if (perms.kinds().includes(pane)) { const s = await perms.status(pane); if (s === 'ok') reportPerms(); return s === 'ok' }
   try {
     const r = await fetch(`${URL_BASE}/api/fix/check?pane=${encodeURIComponent(pane)}`, { signal: AbortSignal.timeout(20000) })
@@ -714,6 +718,9 @@ async function watchFleet() {
         }
       }
     } catch { /* server down or restarting; retry */ }
+    // The feed gone: nobody is known to be viewing this screen until it says so again (it does as it
+    // connects), so the display may sleep, and the badge goes.
+    remote?.onEvent({ t: 'sessions', list: [], asks: [] })
     await new Promise((r) => setTimeout(r, 3000))
   }
 }
@@ -1118,7 +1125,23 @@ ipc.handle('bridge:float-open', async (e, { meeting, meetings, paneId, event, bo
 })
 ipc.handle('bridge:recording', (e, on) => { if (fromApp(e) && e.sender === win?.webContents) recording = !!on; return true })
 
-app.on('before-quit', () => { quitting = true })
+// Quit because you quit it (the menu, ⌘Q, the Dock), not to reopen nor as the computer shuts down:
+// the server is told first (a moment at most), so none of your devices opens Bridge AI here again
+// until it's opened here (server/remote.js appQuit). An update stops the app another way.
+let relaunching = false
+let systemGoing = false
+let quitTold = false
+app.on('before-quit', (e) => {
+  quitting = true
+  if (quitTold || relaunching || systemGoing) return
+  quitTold = true
+  e.preventDefault()
+  // (Not said, the server down or slow: a mark in the data folder it takes as it starts.)
+  fetch(`${URL_BASE}/api/remote/app-quit`, { method: 'POST', signal: AbortSignal.timeout(800) })
+    .then((r) => { if (!r.ok) throw new Error(String(r.status)) })
+    .catch(() => { try { fs.writeFileSync(path.join(DATA, 'remote-quit.json'), JSON.stringify({ at: new Date().toISOString() })) } catch { /* not this time */ } })
+    .finally(() => app.quit())
+})
 // The graphics process went away (Chromium starts it again): written down, to offer a report.
 app.on('child-process-gone', (_e, d) => { if (!quitting) crashes.note(crashes.fromChildGone(d), { base: URL_BASE, data: DATA, version: app.getVersion(), fetch }).catch(() => {}) })
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus() } })
@@ -1130,6 +1153,7 @@ app.on('will-quit', () => { globalShortcut.unregisterAll(); floatShare.stop() })
 // the middle of something, to reopen afterwards, before their terminals end (Windows warns Bridge
 // AI's background processes of nothing; on a Mac this is earlier than they hear).
 function shuttingDown() {
+  systemGoing = true
   fetch(`${URL_BASE}/api/system/stopping`, { method: 'POST', signal: AbortSignal.timeout(2000) }).catch(() => {})
 }
 
@@ -1160,7 +1184,16 @@ app.whenReady().then(async () => {
   createWindow()
   // Remote Screen and Preview's windows: the capture page, the badge, a project's app drawn off screen.
   try { remoteShared = await import(require('node:url').pathToFileURL(path.join(ROOT, 'shared', 'remote.js')).href) } catch (e) { console.error('remote:', e.message) }
-  remote = remoteDesk.create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload: path.join(__dirname, 'preload.js'), fetch, keyFor: (c, os) => remoteShared?.keyFor(c, os) ?? null, sizes: viewSizes, restart: () => { app.relaunch(); stopServer(); app.quit() } })
+  // Reopened from a device (Screen Recording takes effect once the app reopens): the app only, as
+  // macOS's own Quit & Reopen does; the server goes on, and so does the device's session there.
+  // Allow Screen Recording from a device: its page of System Settings here, with the tile.
+  remote = remoteDesk.create({
+    BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload: path.join(__dirname, 'preload.js'), fetch, keyFor: (c, os) => remoteShared?.keyFor(c, os) ?? null, sizes: viewSizes,
+    restart: () => { relaunching = true; app.relaunch(); app.quit() },
+    allowScreen: () => { shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture').catch(() => {}); showTile('screen').catch(() => {}) },
+    power: powerSaveBlocker,
+    wake: () => { if (IS_MAC) execFile('/usr/bin/caffeinate', ['-u', '-t', '2'], { timeout: 5000 }, () => {}) },
+  })
   watchFleet()
   watchCalls()
   startUpdatingWhileAway()

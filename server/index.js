@@ -248,6 +248,7 @@ const remote = makeRemote({
   hosted: () => !!relay.status().hosted, isDevPort, screenAllowed: () => (IS_MAC ? calls.screen() : Promise.resolve(null)),
   devices: () => relay.status().devices, byKey: (key) => relay.deviceByKey(key), onBlocked: shutOut,
   tell: (ev) => screenTell.tell(ev), onChange: () => screenTell.changed(), notifyTo: () => screenTell.notifyTo(), blockThere: (hop, id) => screenTell.blockThere(hop, id),
+  version: VERSION, openApp: (go) => fixes.openBridge(go), here: (req) => atThisComputer(req),
 })
 // ...and nothing else of this computer's for one not let in, from the first thing it asks (letin.js),
 // nor its notifications.
@@ -1677,10 +1678,12 @@ app.get('/api/events', (req, res) => {
   res.write(`event: screen\ndata: ${JSON.stringify({ list: screensFor(res.bridgeDevice) })}\n\n`)
   // The desktop app's own feed (desktop/main.js says so): it also hears when another of your devices
   // asks this computer to allow something (fixes.js askHere).
-  const off = req.headers['x-bridge-desktop'] && !req.headers['x-bridge-relay'] ? fixes.onAsk((a) => res.write(`event: fix-ask\ndata: ${JSON.stringify(a)}\n\n`)) : null
+  // (Only from this computer itself: never a device's, nor a browser through Tailscale.)
+  const appFeed = req.headers['x-bridge-desktop'] && atThisComputer(req)
+  const off = appFeed ? fixes.onAsk((a) => res.write(`event: fix-ask\ndata: ${JSON.stringify(a)}\n\n`)) : null
   // ...and what Remote Screen and Preview needs of it (remote.js): its capture window, a project's
   // app drawn off screen for a phone, and the badge that says this screen is being seen.
-  const offRemote = req.headers['x-bridge-desktop'] && !req.headers['x-bridge-relay'] ? remote.onDesktop((ev) => res.write(`event: remote\ndata: ${JSON.stringify(ev)}\n\n`)) : null
+  const offRemote = appFeed ? remote.onDesktop((ev) => res.write(`event: remote\ndata: ${JSON.stringify(ev)}\n\n`)) : null
   req.on('close', () => { clients.delete(res); off?.(); offRemote?.() })
 })
 // A switch to another herdr session: a fleet read before it is dropped, not shown or announced.
@@ -3101,6 +3104,19 @@ app.post('/api/remote/asks/:id', (req, res) => { try { remoteHere(req); res.json
 app.post('/api/remote/devices', (req, res) => { try { remoteHere(req); res.json(remote.setDevice(String(req.body?.id || ''), req.body?.allowed !== false)) } catch (e) { sayErr(res, e) } })
 app.post('/api/remote/locks/:id/clear', (req, res) => { try { remoteHere(req); res.json(remote.unlock(req.params.id)) } catch (e) { sayErr(res, e) } })
 app.post('/api/remote/notify', (req, res) => { try { remoteHere(req); res.json(remote.setNotify(req.body?.on !== false)) } catch (e) { sayErr(res, e) } })
+// The desktop app here quitting because you quit it (desktop/main.js), not to reopen nor for an
+// update (one this server started, until the app reports in again after it): Open Bridge AI isn't
+// offered to a device until it's opened here again.
+app.post('/api/remote/app-quit', (req, res) => {
+  try {
+    remoteHere(req)
+    const update = updates.installStarted()
+    res.json(update && Date.now() - update < 10 * 60000 && remote.desktopSince() < update ? { ok: true, update: true } : remote.appQuit())
+  } catch (e) { sayErr(res, e) }
+})
+// Another computer's screen that didn't show here, or on a device of this one's (ScreenView.jsx): a
+// line in this log, with why, as that computer's own log has one.
+app.post('/api/remote/didnt-show', (req, res) => { const b = req.body || {}; res.json(remote.didntShow({ name: b.name, code: b.code, cause: b.cause, why: b.why, version: b.version }, atThisComputer(req) ? null : relay.deviceOf(req.headers['x-bridge-relay'])?.name || 'a device')) })
 // Your devices told (screentell.js). Stop, or Block This Device, from any of your devices: carried out
 // here (remote.js endFrom), as it only narrows who may connect; letting a device back in is above,
 // here only. From another computer, it says which of its devices it came from, for the record.
@@ -3446,6 +3462,12 @@ const channelKept = (req, next) => { if (!fromHere(req) && channelOf(next) !== c
 // auto: by itself while you're away, asked by the desktop app on this computer only.
 app.post('/api/updates/install', wrap((req) => {
   if (req.body?.auto === true && !fromHere(req)) throw Object.assign(new Error('Only the desktop app updates by itself'), { status: 403 })
+  // From one of your devices: not one locked out of Remote Access here, nor one that typed a wrong
+  // Remote Access Password since it last typed the right one (remote.js mayUpdate).
+  const d = relay.deviceOf(req.headers['x-bridge-relay'])
+  const forId = d?.kind === 'computer' && /^[\w-]{1,40}$/.test(String(req.headers['x-bridge-for-id'] || '')) ? String(req.headers['x-bridge-for-id']) : null
+  const no = d ? remote.mayUpdate(d.id, forId) : null
+  if (no) throw Object.assign(new Error(no), { status: 403, code: 'remoteAccess' })
   return updates.install({ app: req.body?.app === true, auto: req.body?.auto === true })
 }))
 // Updating by itself while you're away (updates.js autoView): whether it's the time, and what it
@@ -3516,6 +3538,10 @@ async function personalNames() {
   const out = [[cfg.name, '<name>'], [cfg.location?.label, '<place>'], [os.hostname().replace(/\.local$/, ''), '<computer>'], [relay.thisName(), '<computer>']]
   try { out.push([os.userInfo().username, '<user>']) } catch { /* no user */ }
   for (const m of machines.list()) out.push([m.name, '<computer>'], [m.systemName, '<computer>'])
+  // Your phones and other devices too (Remote Screen's lines in the log name them), paired here or
+  // seen through another of your computers.
+  for (const d of relay.status().devices || []) out.push([d.name, d.kind === 'computer' ? '<computer>' : '<device>'])
+  for (const n of remote.throughNames()) out.push([n, '<device>'])
   for (const p of await projects.list().catch(() => [])) out.push([p.name, '<project>'], [path.basename(p.path), '<project>'])
   for (const w of lastFleet?.workspaces || []) out.push([w.label, '<project>'])
   return out

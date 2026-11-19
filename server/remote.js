@@ -51,6 +51,17 @@
 // comes as pictures from a window of the desktop app's that's drawn off screen (desktop/remote.js).
 // Tests stand in for both: BRIDGE_TEST_SCREEN=fake draws pictures here, and the capture page takes
 // a canvas instead of a screen with ?fake=1.
+// Starting it: the desktop app is waited for while it's expected (just started, reopening), and the
+// capture page for as long as a cold start takes (it connects, then says which screens there are),
+// a fresh one asked for once when it doesn't. What can't be got past is said to the device as it is,
+// with what fixes it (Open or Reopen Bridge AI here, Allow Screen Recording here), carried out once
+// it's past the guardrails and chosen (screenFor), only while it's still let in as it was then, one
+// of each at a time, and told to your other devices as a session is; and a line in this server's
+// log (a few a minute from one device, none for one not let in). Meanwhile the session is shown here
+// with Stop, and ends as one viewing does (Stop, a new password, Ask Here First turned on, Remote
+// Screen off). Open Bridge AI only with a Remote Access Password set, and not once you quit the app
+// here yourself, until it's opened here. The capture page comes in with a token given to the app
+// for it, once, and only from this computer.
 import fs from 'node:fs'
 import { totalmem } from 'node:os'
 import path from 'node:path'
@@ -66,7 +77,31 @@ const REFUSED_MAX = 100
 const REPEAT_MS = 10 * 60000 // turned away again within this, for the same reason: counted on the last
 const REFUSALS = new Set(['locked', 'denied', 'unanswered', 'password', 'device', 'stopped', 'blocked'])
 const FAKE = process.env.BRIDGE_TEST_SCREEN === 'fake'
-const CAPTURE_WAIT_MS = Number(process.env.BRIDGE_REMOTE_CAPTURE_WAIT_MS) || 8000
+// The capture page starting: this long for it to connect, and as long again, once it has, for it to
+// say which screens there are (a cold start opens a window and loads Bridge AI's page in it first,
+// and macOS can be slow to list the screens).
+const CAPTURE_WAIT_MS = Number(process.env.BRIDGE_REMOTE_CAPTURE_WAIT_MS) || 10000
+// The desktop app reporting in when it's expected to (this server just started or its feed just
+// dropped: the app connects again every few seconds), and after it was asked to reopen or opened.
+const APP_BACK_MS = Number(process.env.BRIDGE_REMOTE_APP_BACK_MS) || 20000
+const REOPEN_MS = Number(process.env.BRIDGE_REMOTE_REOPEN_MS) || 60000
+// A fix offered in a session (Reopen Bridge AI there, say): chosen within this, or the session goes.
+const FIX_MS = 60000
+// Someone at this computer turning on Screen Recording for Bridge AI, once a device asked for it.
+const ALLOW_MS = Number(process.env.BRIDGE_REMOTE_ALLOW_MS) || 3 * 60000
+// What a session ends with when a guardrail turned it away, or this computer said no (said in Screen
+// Activity, not the log).
+const GUARDED = new Set([...REFUSALS, 'timeout', 'busy', 'here', 'changed', 'trial', 'off'])
+// The capture page's way in (a token in need-capture, put in its window's address): good this long,
+// once. BRIDGE_TEST_CAPTURE_TOKEN: the tests' own, good every time.
+const TOKEN_MS = 2 * 60000
+const TEST_TOKEN = process.env.BRIDGE_FIX_DRYRUN === '1' ? process.env.BRIDGE_TEST_CAPTURE_TOKEN || null : null
+// Lines a device's tries can put in the log: this many a minute, each device; and through another of
+// your computers, its own and all it speaks for together, this many.
+const LOG_PER_MINUTE = 10
+const LOG_PER_HOP = 20
+// You quit the desktop app here and it couldn't say so to this server (desktop/main.js): it left this.
+const QUIT_MARK = dataFile('remote-quit.json')
 const IDLE_MS = 5 * 60000 // the capture window, with nothing to capture, closes after this long
 // The guardrails' times (shared/remote.js ACCESS), shorter in tests.
 const LOCK_MS = Number(process.env.BRIDGE_REMOTE_LOCK_MS) || ACCESS.lockMinutes * 60000
@@ -101,11 +136,14 @@ const read = () => {
       outKeys: Array.isArray(d.outKeys) ? d.outKeys.filter((v) => typeof v === 'string' && v.length <= 200).slice(-500) : [],
       through: Object.fromEntries(Object.entries(through).filter(([k, v]) => /^[\w-]{1,40}\/[\w-]{1,40}$/.test(k) && v && typeof v === 'object').slice(-100)),
       notify: d.notify !== false,
+      // When you quit the desktop app here yourself: Open Bridge AI isn't offered to a device until
+      // it's opened here again.
+      quit: typeof d.quit === 'string' ? d.quit : null,
       locks: d.locks && typeof d.locks === 'object' && !Array.isArray(d.locks) ? d.locks : {},
       log: all.filter((e) => !turned(e)).slice(-LOG_MAX),
       refused: [...all.filter(turned), ...(Array.isArray(d.refused) ? d.refused : [])].slice(-REFUSED_MAX),
     }
-  } catch { return { control: false, password: null, askFirst: false, blocked: [], known: null, fresh: [], outKeys: [], through: {}, notify: true, locks: {}, log: [], refused: [] } }
+  } catch { return { control: false, password: null, askFirst: false, blocked: [], known: null, fresh: [], outKeys: [], through: {}, notify: true, quit: null, locks: {}, log: [], refused: [] } }
 }
 
 // ---------- the Remote Access Password ----------
@@ -140,24 +178,79 @@ async function passwordMatches(stored, pw) {
 // tell(event): your other devices told of a session, control taken or an ask (screentell.js), and
 // what became of it ({ sent, computers }). notifyTo(): where that goes, for Settings. blockThere(hop,
 // id): a device that came through another of your computers (hop, its device here) blocked there.
-export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => false, isDevPort = async () => false, screenAllowed = async () => null, devices = () => [], byKey = () => null, onChange = () => {}, onBlocked = () => {}, tell: tellDevices = async () => null, notifyTo = () => ({}), blockThere = async () => null }) {
+// version: this Bridge AI's (a device offers Update to one older than its own). openApp(): the
+// desktop app opened here when it isn't (index.js), or null where there's none to open (from a
+// terminal); log(line): a line in this server's log. here(req): the request is this computer's own
+// page (not a device's, nor Tailscale's): index.js atThisComputer.
+export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => false, isDevPort = async () => false, screenAllowed = async () => null, devices = () => [], byKey = () => null, onChange = () => {}, onBlocked = () => {}, tell: tellDevices = async () => null, notifyTo = () => ({}), blockThere = async () => null, version = null, openApp = null, log: logOut = (line) => console.log(line), here = (req) => !req.headers['x-bridge-relay'] }) {
+  // One line each, whatever is in it: nothing in it starts another.
+  const log = (line) => logOut(String(line).replace(/[\r\n\u2028\u2029]+/g, ' '))
   let conf = read()
   const save = () => { ensureDir(path.dirname(FILE)); writeFileAtomic(FILE, JSON.stringify(conf, null, 2), { mode: 0o600 }) }
   // Control turned on before it needed a password: off, so setting one later doesn't turn it back on.
   if (conf.control && !conf.password) { conf.control = false; save() }
   const sessions = new Map() // id -> session
   const desktops = new Set() // the desktop app's own feeds (index.js /api/events): fn(event)
-  let capture = null // the capture page: { ws, sources, permission, p2p, at }
-  let captureWaiters = []
+  // The capture page once it's connected: { ws, ready (it said which screens there are), old (its app
+  // went, or is going: reopening, quitting, or its window closing as idle), sources, permission,
+  // none, problem, p2p, listed (how many times it has said), at }. Only one ready and not old is used.
+  let capture = null
+  const readyPage = () => (capture && capture.ready && !capture.old ? capture : null)
   let idleTimer = null
   let sink = null // what presses keys here, while anything controls this computer
   let sinkError = null
   let pausedUntil = 0
   const asks = new Map() // Ask Here First, waiting on an answer here: id -> ask
   const pending = new Set() // sessions at the password, or waiting for Allow
+  // Sessions past the guardrails, their screen not started yet (waiting on the capture page, or on
+  // a fix): what ends sessions ends these too, and they're shown with Stop as the others are.
+  const opening = new Set()
 
-  const desktopOpen = () => desktops.size > 0
+  // What waits on the capture page or the desktop app (until): each is looked at again on any change.
+  const waits = new Set()
+  const poke = () => { for (const fn of [...waits]) fn() }
+  const until = (test, ms) => new Promise((resolve) => {
+    if (test()) return resolve(true)
+    const done = (v) => { clearTimeout(tm); waits.delete(look); resolve(v) }
+    const look = () => { if (test()) done(true) }
+    const tm = setTimeout(() => done(!!test()), Math.max(0, ms))
+    waits.add(look)
+  })
+  // The desktop app: open while its feed is, except a feed of the app that was asked to reopen,
+  // until it's gone (or it didn't go within REOPEN_MS: then it's open after all). Expected to report
+  // in soon: this server just started (the app connects its feed again every few seconds), its feed
+  // just dropped, or it was asked to reopen, or opened, a moment ago.
+  const started = Date.now()
+  const app = { gone: 0, reopen: 0, opened: 0, came: 0 }
+  const leaving = new Set()
+  const desktopOpen = () => {
+    if (leaving.size && Date.now() - app.reopen > REOPEN_MS) leaving.clear()
+    return [...desktops].some((fn) => !leaving.has(fn))
+  }
+  const backBy = () => Math.max(started + APP_BACK_MS, app.gone + APP_BACK_MS, app.reopen + REOPEN_MS, app.opened + REOPEN_MS)
+  const expected = () => !desktopOpen() && Date.now() < backBy()
+  const appBack = () => (desktopOpen() ? Promise.resolve(true) : until(desktopOpen, backBy() - Date.now()))
   const toDesktop = (ev) => { for (const fn of desktops) { try { fn(ev) } catch { /* gone */ } } }
+  // One line in this server's log for each start that didn't work, and each thing done to make one
+  // work: who (when it's for a device), and what it was. (Never what's on the screen, nor the password.)
+  const whoSaid = (s) => (s.for ? `${s.by.name} (for ${s.for})` : s.by.name)
+  const note = (s, what) => log(`${new Date().toISOString()} Remote Screen: ${s ? `${whoSaid(s)}: ` : ''}${what}`)
+  // A device's tries: LOG_PER_MINUTE lines a minute each, at most, and LOG_PER_HOP for a computer
+  // and every device it says it speaks for (s.key hop/id), by that computer (s.by.id, the one paired
+  // here). The oldest kept go first past 500.
+  const saidBy = new Map() // device key -> when it put a line in, the last minute's
+  const recent = (k, now) => (saidBy.get(k) || []).filter((x) => now - x < 60000)
+  const mayNote = (s) => {
+    const now = Date.now()
+    const hop = s.by.id
+    const mine = recent(s.key, now)
+    const all = [...saidBy.keys()].filter((k) => k === hop || k.startsWith(`${hop}/`)).reduce((n, k) => n + recent(k, now).length, 0)
+    if (mine.length >= LOG_PER_MINUTE || all >= LOG_PER_HOP) return false
+    saidBy.delete(s.key)
+    saidBy.set(s.key, [...mine, now])
+    while (saidBy.size > 500) saidBy.delete(saidBy.keys().next().value)
+    return true
+  }
   const tell = (ws, msg) => { if (ws?.readyState === 1) ws.send(JSON.stringify(msg)) }
   const rate = (s) => Math.min(s.slow || hosted() ? RATE.hosted : RATE.own, s.kind === 'page' ? RATE.own : 99)
   // Control is on only with a password set (an older remote.json may have it on without one).
@@ -167,18 +260,27 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   const ctl = (s) => (s.kind === 'page' ? !s.grant : !!s.may && s.source?.kind === 'screen')
   const watchers = () => [...sessions.values()].filter((x) => x.kind === 'screen')
   // The desktop app's badge: who sees this screen, and who asks to (Ask Here First).
-  const toBadge = () => toDesktop({ t: 'sessions', list: watchers().map(shown), asks: [...asks.values()].map(shownAsk) })
+  // (With those still connecting: past the guardrails, the screen not started yet, or waiting on a fix.)
+  const badgeList = () => [...watchers().map(shown), ...[...opening].map(shownWaiting)]
+  const toBadge = () => toDesktop({ t: 'sessions', list: badgeList(), asks: [...asks.values()].map(shownAsk) })
 
   // ---------- what can be seen and done here ----------
   const desktopNeeded = () => `Open the Bridge AI app on ${thisName()}: its screen can be seen while the app runs there.`
+  // What fixes each, from another of your devices, past the guardrails: Open Bridge AI here (it
+  // isn't running, and there's an app to open: only with a Remote Access Password set, as control
+  // asks, and never once you quit the app here yourself, until it's opened here again), Allow
+  // Screen Recording (System Settings, opened here for someone at this computer), Reopen Bridge AI here.
+  const canOpen = () => !!conf.password && !conf.quit && typeof openApp === 'function' && !!openApp(false)
+  const permissionWhy = () => `macOS doesn't let Bridge AI record the screen on ${thisName()}. On ${thisName()}, turn on Bridge AI in System Settings › Privacy & Security › Screen & System Audio Recording, then open Bridge AI again there.`
   function screenStatus() {
     if (!trialOn()) return { can: false, code: 'trial', why: `Remote Screen and Preview is off on ${thisName()}. Turn it on there in Settings › About & Updates › Beta Features.` }
     if (os === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY && !FAKE && !capture) return { can: false, code: 'noDisplay', why: `${thisName()} has no screen to show (Bridge AI runs there without a desktop, as on a server or in Docker).` }
     const permission = capture?.permission || null
-    if (permission === 'denied' || permission === 'restricted') return { can: false, code: 'screenPermission', permission, why: `macOS doesn't let Bridge AI record the screen on ${thisName()}. On ${thisName()}, turn on Bridge AI in System Settings › Privacy & Security › Screen & System Audio Recording, then open Bridge AI again there.` }
-    if (capture || FAKE) return { can: true, permission, sources: capture?.sources || (FAKE ? FAKE_SOURCES : null), p2p: !!capture?.p2p }
-    if (desktopOpen()) return { can: true, permission, sources: null, p2p: true }
-    return { can: false, code: 'noApp', why: desktopNeeded() }
+    if (permission === 'denied' || permission === 'restricted') return { can: false, code: 'screenPermission', permission, why: permissionWhy(), ...(permission === 'denied' && os === 'mac' && desktopOpen() ? { fix: 'allow' } : {}) }
+    if (capture || FAKE) return { can: true, permission, sources: readyPage() ? capture.sources : FAKE && !capture ? FAKE_SOURCES : null, p2p: !!capture?.p2p }
+    // (The app just started, or is reopening: it's waited for, in the session.)
+    if (desktopOpen() || expected()) return { can: true, permission, sources: null, p2p: true }
+    return { can: false, code: 'noApp', why: desktopNeeded(), ...(canOpen() ? { fix: 'open' } : {}) }
   }
   const passwordFirst = () => `Control needs a Remote Access Password on ${thisName()}. Set one there in Settings › Account & Devices › Computers, then turn on "Let my other devices control this computer".`
   async function controlStatus(o) {
@@ -225,8 +327,9 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   // looking, what's asked here, nor the other devices.
   async function status({ sources = false, device = null } = {}) {
     const guarded = !!device && (!!conf.password || conf.askFirst || !allows(device))
-    if (sources && !guarded && trialOn() && !capture && desktopOpen()) await needCapture().catch(() => {})
-    else if (sources && !guarded && capture) await askSources().catch(() => {})
+    // (Started, and waited for a while: a session waits on the same start for the rest.)
+    if (sources && !guarded && trialOn() && !readyPage() && desktopOpen()) await Promise.race([needCapture().catch(() => {}), new Promise((r) => { setTimeout(r, CAPTURE_WAIT_MS).unref?.() })])
+    else if (sources && !guarded && readyPage()) await askSources().catch(() => {})
     // macOS asks about Screen Recording the first time the screen is taken (someone looks), never
     // before; until then, whether it's allowed, as macOS says without asking.
     const screen = screenStatus()
@@ -234,7 +337,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     if (device && screen.sources) screen.sources = guarded ? [] : screen.sources.map(forViewer)
     if (os === 'mac' && !screen.permission && trialOn()) { const a = await screenAllowed().catch(() => null); if (a != null) screen.permission = a ? 'ok' : 'ask' }
     const base = {
-      on: trialOn(), name: thisName(), os,
+      on: trialOn(), name: thisName(), os, ...(version ? { version } : {}),
       screen,
       control: await controlStatus(),
       preview: { can: trialOn() && (desktopOpen() || FAKE), why: !trialOn() ? null : desktopOpen() || FAKE ? null : desktopNeeded() },
@@ -252,44 +355,92 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       notify: { on: conf.notify, ...notifyTo() },
       asks: [...asks.values()].map(shownAsk),
       paused: pausedUntil > Date.now(),
-      sessions: [...sessions.values()].map(shown),
+      sessions: [...[...sessions.values()].map(shown), ...[...opening].map(shownWaiting)],
       log: newest([...conf.log.slice(-50), ...conf.refused.slice(-50)]),
       unseen: newest([...conf.log.filter((e) => !e.seen && e.kind === 'screen' && e.ended), ...conf.refused.filter((e) => !e.seen)]),
     }
   }
   const shown = (s) => ({ id: s.id, kind: s.kind, by: s.by, for: s.for, source: { kind: s.source.kind, name: s.source.name, port: s.source.port }, control: ctl(s), controlled: s.controlled, via: s.via, started: new Date(s.started).toISOString(), told: s.told })
+  const shownWaiting = (s) => ({ id: s.id, kind: 'screen', by: s.by, for: s.for, source: null, control: false, controlled: false, via: null, started: new Date(s.started).toISOString(), told: s.told, waiting: true })
   // Who asks, what kind of device and how it came (straight, or through which of your computers),
   // and what for: the screen (and control), or an app.
   const shownAsk = (a) => ({ id: a.id, by: a.by, for: a.for, ...(a.for ? { forKind: a.s?.forKind || 'phone' } : {}), control: a.control, ...(a.port ? { port: a.port } : {}), at: new Date(a.at).toISOString(), until: new Date(a.until).toISOString() })
 
   // ---------- the capture page ----------
   // The desktop app opens it when it's needed, and closes it once nothing has been seen for a while.
+  // Ready once it has said which screens there are: before that, nothing is taken from it (nor is
+  // the tests' stand-in's list used in its place). One start at a time, however many sessions wait on
+  // it. Each try waits CAPTURE_WAIT_MS for the page to connect, and as long again once it has, for it
+  // to list the screens; a try that gets neither asks the app for a fresh window (one that never
+  // loaded, or hangs, closed first). The app not open: waited for while it's expected (expected).
+  // Rejects with why: code noApp, or noCapture with cause window (the page never connected) or list
+  // (it connected and never said which screens).
+  // The capture page's way in: a token for each ask (need-capture), good once and for TOKEN_MS.
+  const tokens = new Map() // token -> when it was given
+  const tokenFor = () => {
+    const now = Date.now()
+    for (const [k, at] of tokens) if (now - at > TOKEN_MS) tokens.delete(k)
+    while (tokens.size >= 8) tokens.delete(tokens.keys().next().value)
+    const k = randomBytes(18).toString('base64url')
+    tokens.set(k, now)
+    return k
+  }
+  const needs = (more = {}) => ({ t: 'need-capture', token: tokenFor(), ...more })
+  let starting = null
   function needCapture() {
-    if (capture) return Promise.resolve(capture)
-    if (!desktopOpen()) return Promise.reject(Object.assign(new Error(desktopNeeded()), { code: 'noApp' }))
-    toDesktop({ t: 'need-capture' })
-    return new Promise((resolve, reject) => {
-      const w = { resolve, reject }
-      captureWaiters.push(w)
-      setTimeout(() => { captureWaiters = captureWaiters.filter((x) => x !== w); reject(Object.assign(new Error(`The Bridge AI app on ${thisName()} didn't start sharing its screen. Try again; if it keeps happening, restart Bridge AI there.`), { code: 'noCapture' })) }, CAPTURE_WAIT_MS)
-    })
+    if (readyPage()) return Promise.resolve(capture)
+    starting ||= startCapture().finally(() => { starting = null; poke(); idleLater() })
+    return starting
   }
-  let sourceWaiters = []
-  function askSources() {
-    tell(capture?.ws, { t: 'sources?' })
-    return new Promise((resolve) => { sourceWaiters.push(resolve); setTimeout(resolve, 4000) })
+  async function startCapture() {
+    let connected = false
+    let tries = [false, true]
+    // A page connected already, its screens on their way: those first, and a fresh one after.
+    const was = capture && !capture.old ? capture : null
+    if (was) {
+      if (await until(() => was.ready || capture !== was, CAPTURE_WAIT_MS) && readyPage() === was) return was
+      if (capture === was) { connected = true; tries = [true] }
+    }
+    for (const fresh of tries) {
+      if (!(await appBack())) throw Object.assign(new Error(desktopNeeded()), { code: 'noApp' })
+      const stale = fresh ? capture : null
+      if (fresh) note(null, `the capture window didn't ${connected ? 'list the screens' : 'connect'} within ${Math.round(CAPTURE_WAIT_MS / 1000)} seconds: asked the app for a fresh one`)
+      toDesktop(needs(fresh ? { fresh: true } : {}))
+      const page = () => (capture && capture !== stale && !capture.old ? capture : null)
+      await until(() => page() || !desktopOpen(), CAPTURE_WAIT_MS)
+      const c = page()
+      if (c) {
+        connected = true
+        if (await until(() => c.ready || capture !== c, CAPTURE_WAIT_MS) && readyPage() === c) return c
+      }
+      // (The app went meanwhile, reopening say: waited for, then asked again.)
+      if (!desktopOpen()) { if (await appBack()) return startCapture(); throw Object.assign(new Error(desktopNeeded()), { code: 'noApp' }) }
+    }
+    throw Object.assign(new Error(connected ? `Bridge AI on ${thisName()} opened its screen sharing but never said which screens there are: ${os === 'mac' ? 'macOS' : os === 'windows' ? 'Windows' : 'the system'} didn't list them in time.` : `The Bridge AI app on ${thisName()} didn't open its screen sharing.`), { code: 'noCapture', cause: connected ? 'list' : 'window' })
   }
+  // Its screens again: true once it has said (or false after ms).
+  function askSources(ms = 4000) {
+    const c = readyPage()
+    if (!c) return Promise.resolve(false)
+    const n = c.listed
+    tell(c.ws, { t: 'sources?' })
+    return until(() => capture !== c || c.listed > n, ms)
+  }
+  // Nothing to capture for a while: the window closes. Not while a session is starting (its screen
+  // about to be taken), and from then on the page isn't ready (a session after it gets a new one).
   function idleLater() {
     clearTimeout(idleTimer)
-    if ([...sessions.values()].some((s) => s.provider === 'capture')) return
-    idleTimer = setTimeout(() => { if (![...sessions.values()].some((s) => s.provider === 'capture')) toDesktop({ t: 'capture-idle' }) }, IDLE_MS)
+    const busy = () => [...sessions.values()].some((s) => s.provider === 'capture') || opening.size > 0 || !!starting
+    if (busy()) return
+    idleTimer = setTimeout(() => { if (busy()) return; if (capture) capture.old = true; toDesktop({ t: 'capture-idle' }) }, IDLE_MS)
     idleTimer.unref?.()
   }
   function onCapture(ws) {
     const was = capture
-    const c = { ws, sources: null, permission: null, p2p: false, at: Date.now(), next: null }
+    const c = { ws, ready: false, sources: null, permission: null, p2p: false, listed: 0, at: Date.now(), next: null }
     capture = c
     if (was && was.ws !== ws) try { was.ws.close(1000, 'replaced') } catch { /* closed */ }
+    poke()
     ws.on('message', (data, binary) => {
       if (capture !== c) return
       if (binary) {
@@ -307,8 +458,10 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
         c.none = m.none === 'reopen' || m.none === 'none' ? m.none : null
         c.problem = clean(m.problem, 200) || null
         c.p2p = m.p2p === true
-        if (m.t === 'hello') { for (const w of captureWaiters.splice(0)) w.resolve(c); idleLater() }
-        for (const w of sourceWaiters.splice(0)) w()
+        c.ready = true
+        c.listed++
+        if (m.t === 'hello') idleLater()
+        poke()
         onChange()
         return
       }
@@ -326,6 +479,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       if (capture !== c) return
       capture = null
       for (const s of [...sessions.values()]) if (s.provider === 'capture') end(s, 'lost', `The Bridge AI app on ${thisName()} stopped sharing its screen.`)
+      poke()
       onChange()
     })
   }
@@ -334,7 +488,8 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     const b = x.bounds && Number.isFinite(x.bounds.width) ? { x: +x.bounds.x || 0, y: +x.bounds.y || 0, width: +x.bounds.width, height: +x.bounds.height, ...(x.bounds.px && Number.isFinite(x.bounds.px.width) ? { px: { x: +x.bounds.px.x || 0, y: +x.bounds.px.y || 0, width: +x.bounds.px.width, height: +x.bounds.px.height } } : {}) } : null
     return { id: x.id.slice(0, 120), name: clean(x.name, 80) || 'Screen', kind: x.kind === 'window' ? 'window' : 'screen', w: x.w | 0, h: x.h | 0, primary: !!x.primary, scale: Number.isFinite(x.scale) ? Math.min(8, Math.max(0.5, x.scale)) : null, bounds: b }
   }
-  const sourceList = () => capture?.sources || FAKE_SOURCES
+  // (The tests' stand-in's only with no capture page: one that hasn't said yet has none.)
+  const sourceList = () => (capture ? readyPage()?.sources || [] : FAKE ? FAKE_SOURCES : [])
   const forViewer = ({ id, name, kind, w, h, primary, scale }) => ({ id, name, kind, w, h, primary, scale })
 
   // ---------- a still of each screen, for the viewer's Which screen? ----------
@@ -510,10 +665,12 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     checking = run.catch(() => {})
     return run
   }
+  // { ok, at: the password it was right for (its at) } | ...
   async function check(s, pw) {
     const lock = lockedFor(s)
     if (lock) return { locked: lock.until }
-    if (!conf.password) return { ok: true }
+    const stored = conf.password
+    if (!stored) return { ok: true, at: null }
     const keys = lockKeys(s)
     const most = (i) => (i === 0 ? ACCESS.tries : HOP_TRIES)
     const ls = keys.map((k, i) => { conf.locks[k] ||= { name: s.by.name, ...(i === 0 && s.for ? { for: s.for } : {}), fails: 0 }; return conf.locks[k] })
@@ -525,14 +682,15 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     if (ls.some((l, i) => l.fails >= most(i))) return { locked: lockNow(), now: true }
     for (const l of ls) { l.fails++; l.at = Date.now() }
     save()
-    const m = await passwordMatches(conf.password, pw)
+    const m = await passwordMatches(stored, pw)
     if (m.ok) {
       // Right: that device starts again, and this try isn't counted against the computer it came through.
       delete conf.locks[keys[0]]
       if (keys[1] && conf.locks[keys[1]] && !conf.locks[keys[1]].until) conf.locks[keys[1]].fails = Math.max(0, conf.locks[keys[1]].fails - 1)
-      if (m.stale) conf.password = { ...(await makePassword(pw)), at: conf.password.at }
+      // (Made again with today's settings, unless it was changed here meanwhile.)
+      if (m.stale) { const again = await makePassword(pw); if (conf.password === stored) conf.password = { ...again, at: stored.at } }
       save()
-      return { ok: true }
+      return { ok: true, at: stored.at }
     }
     s.tries = (s.tries || 0) + 1
     if (ls.some((l, i) => l.fails >= most(i))) return { locked: lockNow(), now: true }
@@ -545,6 +703,8 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     const ws = s.viewer
     const lock = lockedFor(s)
     if (lock) { lockedSay(fail, lock.until); return false }
+    // (Which password it got past: the one it typed was right for, or none.)
+    s.pwAt = conf.password?.at || null
     if (conf.password && !(await passwordFrom(s, fail))) return false
     if (conf.askFirst) {
       tell(ws, { t: 'asking', ms: ASK_MS, until: new Date(Date.now() + ASK_MS).toISOString() })
@@ -565,8 +725,25 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       }
       s.okControl = control
     } else s.okControl = true
+    // The password changed while it waited here (on Allow, say): not let in on the one it typed.
+    if ((conf.password?.at || null) !== s.pwAt) { fail(changedWhy(), 'changed'); return false }
+    // What it got past: a session that waits to start is let in only while it's so.
+    s.guards = { pw: s.pwAt, ask: !!conf.askFirst }
     return true
   }
+  // Still let in as it was at the gate: Remote Screen on, the device allowed and not locked out, the
+  // password neither set nor changed since, nor Ask Here First turned on; not ended here meanwhile.
+  // Else said (it connects again, past the guardrails as they are now), and false.
+  function stillIn(s, mayView, fail) {
+    if (s.over) return false
+    if (!trialOn()) { fail('Remote Screen and Preview was turned off on this computer.', 'off'); return false }
+    if (!mayView()) { refuse(s, 'device'); fail(notAllowed(s), 'device'); return false }
+    const lock = lockedFor(s)
+    if (lock) { lockedSay(fail, lock.until); return false }
+    if (s.guards && ((conf.password?.at || null) !== s.guards.pw || (conf.askFirst && !s.guards.ask))) { fail(changedWhy(), 'changed'); return false }
+    return true
+  }
+  const changedWhy = () => `Remote Access changed on ${thisName()}. Connect again.`
   // The password from the viewer; again: to take control back after it went idle, in a session that
   // goes on view-only if it isn't (or { t: 'control', on: false }, Cancel). True once it's right.
   async function passwordFrom(s, fail, { again = false } = {}) {
@@ -577,9 +754,9 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       const m = await answerOf(ws, again ? (x) => x.t === 'password' || (x.t === 'control' && x.on === false) : 'password', PASSWORD_WAIT_MS)
       if (!m) { if (s.tries) refuse(s, 'password', { tries: s.tries }); if (!again && ws.readyState === 1) fail('The password wasn\'t typed in time. Try again.', 'timeout'); return false }
       if (m.t === 'control') return false
-      if (!conf.password) return true // taken off here meanwhile
+      if (!conf.password) { s.pwAt = null; return true } // taken off here meanwhile
       const r = await checkPassword(s, m.p)
-      if (r.ok) return true
+      if (r.ok) { s.pwAt = r.at; return true }
       if (r.locked) {
         if (r.now) refuse(s, 'locked', { tries: s.tries, until: new Date(r.locked).toISOString() })
         lockedSay(fail, r.locked)
@@ -635,10 +812,23 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   // preview: an app at an address of its own on that computer, whose requests may come while this is
   // open (mayPreview). Through another of your computers, it says which of its devices it's for
   // (for, forId: machines.js), having checked that device may.
+  // fixes=1: this device takes what fixes a screen that can't be shown (Open Bridge AI, Allow Screen
+  // Recording, Reopen Bridge AI: screenFor), and fix=<one>: the one it chose from what it was told
+  // before it connected. Each is carried out only past the guardrails.
   async function view(ws, req) {
     const q = new URL(req.url, 'http://x').searchParams
-    const fail = (why, code, more = {}) => { tell(ws, { t: 'error', why, code, ...more }); setTimeout(() => { try { ws.close(1008, 'refused') } catch { /* closed */ } }, 50) }
+    let who = null
+    // Said, and the session goes. One that didn't start for a reason of its own (not a guardrail
+    // turning it away): a line in the log too, with why; only for a device let in here and not
+    // locked out, LOG_PER_MINUTE a minute at most.
+    const fail = (why, code, more = {}) => {
+      if (!GUARDED.has(code) && who && allows(who.by.id) && !lockedFor(who) && mayNote(who)) note(who, `couldn't see this screen (${code}${more.cause ? `, ${more.cause}` : ''}): ${why}`)
+      tell(ws, { t: 'error', why, code, ...more })
+      setTimeout(() => { try { ws.close(1008, 'refused') } catch { /* closed */ } }, 50)
+    }
+    const fixes = q.get('fixes') === '1'
     const dev = deviceOf(req.headers['x-bridge-relay'])
+    if (dev) who = { by: { id: dev.id, name: clean(dev.name) || 'A device' }, key: dev.id, for: dev.kind === 'computer' ? clean(q.get('for')) || null : null }
     if (!dev) return fail(`This is ${thisName()} itself: view its screen from another of your devices.`, 'here')
     if (!trialOn()) return fail(screenStatus().why, 'trial')
     const [kind, ...rest] = String(q.get('source') || 'screen:').split(':')
@@ -656,23 +846,27 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       kind: kind === 'page' || kind === 'preview' ? 'page' : 'screen', grant: kind === 'preview', via: null, controlled: false, frames: 0, acked: true, pending: null, sent: 0, told: [],
       slow: q.get('slow') === '1', p2p: q.get('p2p') === '1', wants: q.get('control') === '1', lastInput: Date.now(),
     }
+    who = s
     // Ticked here; through another of your computers, the device it's for too (shutFor).
     const forKey = dev.kind === 'computer' && typeof req.headers['x-bridge-for-key'] === 'string' ? req.headers['x-bridge-for-key'] : null
     const mayView = () => allows(dev.id) && !(s.forId && shutFor(dev.id, { id: s.forId, name: s.for, kind: s.forKind, key: forKey }))
     if (!mayView()) { refuse(s, 'device'); return fail(notAllowed(s), 'device') }
     if (s.kind === 'page') {
       const port = Number(sid)
-      if (!(port > 1023 && port < 65536) || !(await isDevPort(port))) return fail(`Port ${sid} isn't one of the apps ${thisName()} serves.`, 'port')
+      if (!(port > 1023 && port < 65536) || !(await isDevPort(port))) return fail(`${Number.isInteger(port) ? `Port ${port}` : 'That'} isn't one of the apps ${thisName()} serves.`, 'port')
       if (!s.grant && !desktopOpen() && !FAKE) return fail(`Open the Bridge AI app on ${thisName()} to see its apps on a phone: they're drawn there.`, 'noApp')
       s.port = port
     } else {
       const st = screenStatus()
-      if (!st.can) return fail(st.why, st.code)
+      // (What fixes it, chosen before it connected: carried out past the guardrails.)
+      if (!st.can && !(fixes && st.fix && q.get('fix') === st.fix)) return fail(st.why, st.code, fixes && st.fix ? { fix: st.fix } : {})
     }
     // Nothing is taken (nor macOS asked about the screen) before the guardrails let it in; a few at
     // a time from one device. Unticked here meanwhile, it ends (setDevice).
-    if ([...pending].filter((x) => x.key === s.key).length >= PENDING_MAX) return fail(`This device is already waiting to connect to ${thisName()}. Finish that first, or close it.`, 'busy')
+    // (Those waiting on the screen to start, or on a fix, are counted too.)
+    if ([...pending, ...opening].filter((x) => x.key === s.key).length >= PENDING_MAX) return fail(`This device is already waiting to connect to ${thisName()}. Finish that first, or close it.`, 'busy')
     s.fail = fail
+    s.mayView = mayView
     pending.add(s)
     let passed = false
     try { passed = await gate(s, fail) } finally { pending.delete(s) }
@@ -684,28 +878,26 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       s.page = { w: Math.min(1600, Math.max(320, Number(q.get('w')) || 390)), h: Math.min(2400, Math.max(320, Number(q.get('h')) || 800)) }
       s.may = !s.grant // a page drawn off screen: what's clicked is that page, not this computer
     } else {
-      if (!FAKE || capture) {
-        try { await needCapture() } catch (e) { return fail(e.message, e.code) }
-        // The capture page's first look is when macOS asks about Screen Recording (first use): turned
-        // down, or not answered yet, it's said, and the question is on that screen.
-        const after = screenStatus()
-        if (!after.can) return fail(after.why, after.code)
-        if (!mayView()) { refuse(s, 'device'); return fail(notAllowed(s), 'device') }
-      }
-      let list = sourceList()
-      // No screens yet: asked for again (the app looks a few times) before saying so.
-      if (!sid && !list.some((x) => x.kind === 'screen') && capture) { await askSources(); list = sourceList() }
-      const src = list.find((x) => x.id === sid && x.kind === (kind === 'window' ? 'window' : 'screen')) || (!sid ? list.find((x) => x.kind === 'screen' && x.primary) || list.find((x) => x.kind === 'screen') : null)
-      if (!src && sid) return fail('That screen or window isn\'t there any more. Pick another.', 'source')
-      if (!src) return noScreens(ws, s)
-      s.source = { kind: src.kind, id: src.id, name: src.name, bounds: src.bounds, w: src.w, h: src.h }
-      s.provider = capture ? 'capture' : 'fake'
-      // Control when it's on here and asked for (of a whole screen: where the pointer goes is known
-      // there), and allowed here when Ask Here First asked.
-      s.may = s.wants && s.okControl && controlOn() && (await input.status()).can
+      // (Listed as connecting until it starts, or goes: no gap between the two in what's shown.)
+      waitStart(s, true)
+      let src = null
+      let found = false
+      try {
+        src = await screenFor(s, { kind, sid, fixes, want: q.get('fix'), fail, mayView })
+        if (src) {
+          s.source = { kind: src.kind, id: src.id, name: src.name, bounds: src.bounds, w: src.w, h: src.h }
+          s.provider = capture ? 'capture' : 'fake'
+          // Control when it's on here and asked for (of a whole screen: where the pointer goes is
+          // known there), and allowed here when Ask Here First asked.
+          s.may = s.wants && s.okControl && controlOn() && (await input.status()).can
+          found = true
+        }
+      } finally { if (!found && opening.has(s)) waitStart(s, false); idleLater() }
+      if (!found) return
     }
-    // The viewer went while this was being worked out: nothing to start.
-    if (ws.readyState !== 1) return
+    // The viewer went while this was being worked out: nothing to start. Nor for one no longer let in.
+    if (ws.readyState !== 1 || !stillIn(s, mayView, fail)) { if (opening.has(s)) waitStart(s, false); return }
+    opening.delete(s)
     sessions.set(s.id, s)
     clearTimeout(idleTimer)
     s.entry = { id: s.id, kind: s.kind, by: s.by, for: s.for, source: { kind: s.source.kind, name: s.source.name, ...(s.source.port ? { port: s.source.port } : {}) }, control: ctl(s), controlled: false, via: null, started: new Date(s.started).toISOString(), ended: null, seconds: 0, end: null, told: s.told, seen: false }
@@ -906,8 +1098,17 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     toBadge()
     onChange()
   }
-  const stop = (id) => { const s = sessions.get(id); if (!s) throw Object.assign(new Error('That session has ended'), { status: 404 }); end(s, 'here'); return true }
-  const stopAll = () => { for (const s of [...sessions.values()]) end(s, 'here'); for (const a of [...asks.values()]) a.done('deny') }
+  const waitingOne = (id) => [...opening].find((x) => x.id === id) || null
+  const stopWaiting = (s, by = thisName()) => { s.stoppedBy = by; refuse(s, 'stopped', { stoppedBy: by }); endWaiting(s, 'stopped', `Stopped from ${by}.`, { by }) }
+  const stop = (id) => {
+    const s = sessions.get(id)
+    const w = !s && waitingOne(id)
+    if (!s && !w) throw Object.assign(new Error('That session has ended'), { status: 404 })
+    if (s) end(s, 'here')
+    else stopWaiting(w)
+    return true
+  }
+  const stopAll = () => { for (const s of [...sessions.values()]) end(s, 'here'); for (const s of [...opening]) stopWaiting(s); for (const a of [...asks.values()]) a.done('deny') }
   // Stop, or Block This Device, from another of your devices (a notification's button, the card in
   // a window), carried out here: the session ends (an ask waiting is a no), and Block unticks that
   // device in Which Devices May Connect, which ends anything else of its too; one that came through
@@ -917,13 +1118,20 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   async function endFrom(id, { block = false, by = '' } = {}) {
     const s = sessions.get(id)
     const a = asks.get(id)
-    if (!s && !a) throw Object.assign(new Error('That session has ended'), { status: 404 })
-    const x = s || a.s
+    const w = !s && !a ? waitingOne(id) : null
+    if (!s && !a && !w) throw Object.assign(new Error('That session has ended'), { status: 404 })
+    const x = s || w || a.s
     const who = x.by
     const from = clean(by) || 'another of your devices'
     const hop = who.kind === 'computer' && x.forId ? who : null
     if (block && hop) x.blockedAt = hop.name
     if (s) { s.stoppedBy = from; end(s, block ? 'blocked' : 'stopped', block ? `${hop?.name || thisName()} stopped letting this device connect.` : null) }
+    if (w) {
+      w.stoppedBy = from
+      refuse(w, block ? 'blocked' : 'stopped', { stoppedBy: from })
+      if (block) endWaiting(w, 'blocked', `${hop?.name || thisName()} stopped letting this device connect.`, hop ? { at: hop.name } : {})
+      else endWaiting(w, 'stopped', `Stopped from ${from}.`, { by: from })
+    }
     if (a) { a.s.stoppedBy = from; a.done(block ? 'blocked' : 'stopped') }
     if (!block) return { ok: true, said: `Stopped: ${x.for || who.name} isn't viewing ${thisName()}'s screen now.` }
     if (hop) {
@@ -934,29 +1142,157 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     return { ok: true, said: `${who.name} can't connect to ${thisName()} any more.` }
   }
 
-  // ---------- no screens ----------
-  // The app here had no screens to share: on a Mac, nearly always Screen Recording turned on since it
-  // opened (macOS lets it record only once it's reopened), or macOS asking there whether it may go on
-  // recording. Said, with Reopen Bridge AI offered to this session, which the guardrails let in: it
-  // answers { t: 'reopen' } within a minute, and the app here reopens (agents keep running).
-  async function noScreens(ws, s) {
+  // ---------- the screen a session asked for ----------
+  // Its screen (sid, or the main one) once the capture page is ready. What goes wrong on the way is
+  // said with what fixes it, when something here can (problem: { why, code, cause, fix }), and, once
+  // the device chooses it ({ t: 'fix' }, within FIX_MS; or before it connected: want), carried out
+  // here and the screen asked for again, in the same session: nothing to connect again, nor the
+  // password asked again. Each fix once in a session. null when it's said and over.
+  async function screenFor(s, { kind, sid, fixes, want, fail, mayView }) {
+    const ws = s.viewer
+    const used = new Set()
+    for (;;) {
+      const p = await screenNow(kind, sid)
+      if (ws.readyState !== 1 || s.over) return null
+      if (!mayView()) { refuse(s, 'device'); fail(notAllowed(s), 'device'); return null }
+      if (p.src) return p.src
+      const fix = p.fix && !used.has(p.fix) ? p.fix : null
+      // A device from before fixes: Reopen as it knows it, after which it connects again.
+      if (fix === 'reopen' && !fixes) return oldReopen(s, p)
+      if (!fix || !fixes) { fail(p.why, p.code, p.cause ? { cause: p.cause } : {}); return null }
+      if (want !== fix) {
+        note(s, `couldn't see this screen (${p.code}${p.cause ? `, ${p.cause}` : ''}): ${p.why} Offered: ${fix}.`)
+        tell(ws, { t: 'error', why: p.why, code: p.code, fix, waits: true, ...(p.cause ? { cause: p.cause } : {}) })
+        const m = await answerOf(ws, (x) => x.t === 'fix' && x.fix === fix, FIX_MS)
+        if (!m || ws.readyState !== 1) { setTimeout(() => { try { ws.close(1008, 'refused') } catch { /* closed */ } }, 50); return null }
+      }
+      want = null
+      used.add(fix)
+      // (Still let in as at the gate, right before it's carried out.)
+      if (!stillIn(s, mayView, fail)) return null
+      if (!(await doFix(s, fix, fail))) return null
+    }
+  }
+  // { src }, or the problem.
+  async function screenNow(kind, sid) {
+    if (!FAKE || capture) {
+      try { await needCapture() } catch (e) { return { why: e.message, code: e.code || 'noCapture', cause: e.cause, fix: e.code === 'noApp' ? (canOpen() ? 'open' : null) : desktopOpen() ? 'reopen' : null } }
+      // The capture page's first look is when macOS asks about Screen Recording (first use): turned
+      // down, or not answered yet, it's said, and the question is on that screen.
+      const after = screenStatus()
+      if (!after.can) return { why: after.why, code: after.code, fix: after.fix }
+    }
+    let list = sourceList()
+    // No screens yet: asked for again (the app looks a few times) before saying so.
+    if (!sid && !list.some((x) => x.kind === 'screen') && capture) { await askSources(); list = sourceList() }
+    const src = list.find((x) => x.id === sid && x.kind === (kind === 'window' ? 'window' : 'screen')) || (!sid ? list.find((x) => x.kind === 'screen' && x.primary) || list.find((x) => x.kind === 'screen') : null)
+    if (!src && sid) return { why: 'That screen or window isn\'t there any more. Pick another.', code: 'source' }
+    return src ? { src } : noScreens()
+  }
+  // The app here had no screens to share: on a Mac, macOS asking there whether Bridge AI may record
+  // the screen (the first look), or nearly always Screen Recording turned on since it opened (macOS
+  // lets it record only once it's reopened), or macOS giving none.
+  function noScreens() {
     const name = thisName()
-    const none = capture?.none || 'none'
-    const why = none === 'reopen'
-      ? `Screen Recording was turned on for Bridge AI on ${name} after it opened, and macOS lets it record only once it's reopened.`
-      : process.platform === 'darwin'
-        ? `macOS on ${name} gave Bridge AI no screens to share. If it's asking there whether Bridge AI may record the screen, answer it there; if not, reopening Bridge AI there usually sorts it.`
-        : `${name} gave Bridge AI no screens to share${capture?.problem ? `: ${capture.problem}` : ''}.`
-    const reopen = desktopOpen()
-    const code = none === 'reopen' ? 'reopen' : process.platform === 'darwin' ? 'noScreens' : 'source'
-    tell(ws, { t: 'error', why, code, ...(reopen ? { reopen: true } : {}) })
-    const m = reopen ? await answerOf(ws, 'reopen', 60 * 1000) : null
-    if (m && ws.readyState === 1) {
+    const reopen = desktopOpen() ? 'reopen' : null
+    if (os === 'mac' && capture?.permission === 'ask') return { code: 'screenPermission', why: permissionWhy(), fix: reopen && 'allow' }
+    if ((capture?.none || 'none') === 'reopen') return { code: 'reopen', why: `Screen Recording was turned on for Bridge AI on ${name} after it opened, and macOS lets it record only once it's reopened.`, fix: reopen }
+    if (os === 'mac') return { code: 'noScreens', why: `macOS on ${name} gave Bridge AI no screens to share. If it's asking there whether Bridge AI may record the screen, answer it there; if not, reopening Bridge AI there usually sorts it.`, fix: reopen }
+    return { code: 'source', why: `${name} gave Bridge AI no screens to share${capture?.problem ? `: ${capture.problem}` : ''}.`, fix: reopen }
+  }
+  // As a device from before fixes knows it: Reopen offered ({ reopen: true }), answered { t: 'reopen' }
+  // within FIX_MS; the app here reopens, and the device is told to try again.
+  async function oldReopen(s, p) {
+    const ws = s.viewer
+    note(s, `couldn't see this screen (${p.code}): ${p.why} Offered: reopen.`)
+    tell(ws, { t: 'error', why: p.why, code: p.code, reopen: true })
+    const m = await answerOf(ws, 'reopen', FIX_MS)
+    if (m && ws.readyState === 1 && stillIn(s, s.mayView, s.fail)) {
+      if (!reopening()) { announce(s, 'reopen', s.id); reopenApp(s) }
       refuse(s, 'reopened')
-      toDesktop({ t: 'reopen' })
-      tell(ws, { t: 'error', why: `Bridge AI is reopening on ${name}. Try again in a few seconds.`, code: 'reopening' })
+      tell(ws, { t: 'error', why: `Bridge AI is reopening on ${thisName()}. Try again in a few seconds.`, code: 'reopening' })
     }
     setTimeout(() => { try { ws.close(1008, 'refused') } catch { /* closed */ } }, 50)
+    return null
+  }
+  // A fix the device chose, carried out here and kept in Screen Activity with who chose it; the
+  // device told what it's waiting for meanwhile ({ t: 'wait', why }). False when that's over.
+  // One of each at a time on this computer, however many sessions choose it: one on its way is
+  // waited for, not done again (so is a window of System Settings already asked for). Each one done
+  // is told to your other devices, as a session starting is.
+  let allowUntil = 0
+  const reopening = () => leaving.size > 0 && Date.now() - app.reopen < REOPEN_MS
+  async function doFix(s, fix, fail) {
+    const ws = s.viewer
+    if (fix === 'reopen') {
+      if (!reopening()) { announce(s, 'reopen', s.id); reopenApp(s) }
+      refuse(s, 'reopened')
+      tell(ws, { t: 'wait', why: 'reopen' })
+      return true
+    }
+    if (fix === 'open') {
+      // (Only while it may be: a password set, and not quit here since it was offered.)
+      if (!canOpen() && !desktopOpen()) { fail(desktopNeeded(), 'noApp'); return false }
+      if (!desktopOpen() && Date.now() - app.opened > REOPEN_MS) {
+        try { await openApp(true) } catch (e) { fail(`Bridge AI couldn't be opened on ${thisName()}: ${clean(e.message, 200)}`, 'noApp'); return false }
+        app.opened = Date.now()
+        note(s, 'opened the Bridge AI app here')
+        announce(s, 'open', s.id)
+      }
+      refuse(s, 'opened')
+      tell(ws, { t: 'wait', why: 'open' })
+      return true
+    }
+    if (fix === 'allow') {
+      if (Date.now() >= allowUntil) {
+        allowUntil = Date.now() + ALLOW_MS
+        note(s, 'asked for Screen Recording here: System Settings opened at it')
+        announce(s, 'allow', s.id)
+        toDesktop({ t: 'allow-screen' })
+      }
+      refuse(s, 'allow')
+      const end = allowUntil
+      tell(ws, { t: 'wait', why: 'allow', until: new Date(end).toISOString() })
+      // Someone here turns it on, and macOS offers Quit & Reopen: the app going (or a new one
+      // reporting in), or the page saying it's allowed (asked every few seconds), is what's waited for.
+      const feeds = new Set(desktops)
+      const done = () => ws.readyState !== 1 || s.over || readyPage()?.permission === 'ok' || [...desktops].some((fn) => !feeds.has(fn)) || !desktopOpen()
+      while (Date.now() < end && !(await until(done, Math.min(3000, end - Date.now())))) askSources().catch(() => {})
+      return ws.readyState === 1 && !s.over
+    }
+    return false
+  }
+  // A session past the guardrails, its screen not started yet: listed (the badge, Settings, your other
+  // devices' cards), with Stop, until it starts or goes.
+  function waitStart(s, on) {
+    if (on) opening.add(s)
+    else opening.delete(s)
+    toBadge()
+    onChange()
+  }
+  // One of those ended here (Stop, the password changed, Remote Screen off, Ask Here First turned on,
+  // the device unticked) or from another of your devices: said to it (code, why), and it goes; what
+  // it waited on stops there (screenFor, doFix look at s.over).
+  function endWaiting(s, code, why, more = {}) {
+    if (s.over) return
+    s.over = code
+    opening.delete(s)
+    s.fail(why, code, more)
+    poke()
+    toBadge()
+    onChange()
+  }
+
+  // The desktop app here asked to reopen (it does in a moment: desktop/remote.js). Its feed isn't
+  // counted as open from now, nor its capture page as ready, so what waits on it waits for the app
+  // to come back (REOPEN_MS at most).
+  function reopenApp(s) {
+    note(s, 'reopened the Bridge AI app here')
+    app.reopen = Date.now()
+    for (const fn of desktops) leaving.add(fn)
+    if (capture) capture.old = true
+    toDesktop({ t: 'reopen' })
+    poke()
   }
 
   // ---------- your other devices, told ----------
@@ -975,7 +1311,10 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   // What's going on here now, for your other devices' cards (screentell.js): who views or controls
   // this screen, and who asks to; never what's on it.
   const live = () => ({
-    sessions: watchers().map((s) => ({ id: s.id, by: { name: s.by.name, kind: s.by.kind }, for: s.for, forKind: s.forKind, control: ctl(s), controlled: s.controlled, started: new Date(s.started).toISOString() })),
+    sessions: [
+      ...watchers().map((s) => ({ id: s.id, by: { name: s.by.name, kind: s.by.kind }, for: s.for, forKind: s.forKind, control: ctl(s), controlled: s.controlled, started: new Date(s.started).toISOString() })),
+      ...[...opening].map((s) => ({ id: s.id, by: { name: s.by.name, kind: s.by.kind }, for: s.for, forKind: s.forKind, control: false, controlled: false, started: new Date(s.started).toISOString(), waiting: true })),
+    ],
     asks: [...asks.values()].filter((a) => !a.port).map((a) => ({ id: a.id, by: { name: a.by.name, kind: a.by.kind }, for: a.for, forKind: a.s.forKind, control: a.control, at: new Date(a.at).toISOString(), until: new Date(a.until).toISOString() })),
   })
 
@@ -1021,10 +1360,22 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     return accessStatus()
   }
   // Changed or taken off: every session ends, to connect again as it is now.
+  // So does one at the password or waiting for Allow here (its ask goes too).
   function passwordChanged() {
-    for (const s of [...sessions.values()]) end(s, 'changed', `The Remote Access Password changed on ${thisName()}. Connect again.`)
+    const why = `The Remote Access Password changed on ${thisName()}. Connect again.`
+    for (const s of [...sessions.values()]) end(s, 'changed', why)
+    for (const s of [...opening]) endWaiting(s, 'changed', why)
+    for (const s of [...pending]) if (!s.over) { s.over = 'changed'; pending.delete(s); s.fail(why, 'changed') }
+    for (const a of [...asks.values()]) if (!sessions.has(a.s?.id)) a.done('gone')
   }
-  function setAskFirst(on) { conf.askFirst = !!on; save(); onChange(); return accessStatus() }
+  // Turned on: a session still connecting goes, to be asked here when it connects again.
+  function setAskFirst(on) {
+    conf.askFirst = !!on
+    save()
+    if (on) for (const s of [...opening]) endWaiting(s, 'changed', changedWhy())
+    onChange()
+    return accessStatus()
+  }
   // Unticked: it can't connect, and a session of its going now ends, as does one at the password or
   // waiting for Allow; and the rest of what it has open here (its terminals, what it's fetching or
   // sending) and through this computer to another (onBlocked). Ticked or not, it isn't New any more.
@@ -1045,6 +1396,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       for (const s of [...sessions.values()]) if (its(s)) end(s, 'device', why)
       for (const a of [...asks.values()]) if (a.s ? its(a.s) : a.by.id === id) a.done('gone')
       for (const s of [...pending]) if (its(s)) { pending.delete(s); refuse(s, 'device'); s.fail(why, 'device') }
+      for (const s of [...opening]) if (its(s)) { refuse(s, 'device'); endWaiting(s, 'device', why) }
       onBlocked(id)
     }
     onChange()
@@ -1074,10 +1426,17 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 })
   const VIEW = /^(?:\/m\/[A-Za-z0-9_-]{1,20})?\/api\/remote\/(view|capture)(?:\?|$)/
   const isPath = (u) => VIEW.test(String(u || ''))
-  // capture: only this computer's own page (the desktop app's capture window), never a device's.
+  // capture: only this computer's own page (the desktop app's capture window), never a device's nor
+  // one through Tailscale, and only with a token the app was given for it (need-capture), once.
   function upgrade(req, socket, head) {
     const kind = VIEW.exec(req.url)?.[1]
-    if (kind === 'capture' && req.headers['x-bridge-relay']) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy() }
+    if (kind === 'capture') {
+      let token = null
+      try { token = new URL(req.url, 'http://x').searchParams.get('token') } catch { /* none */ }
+      const good = !!token && (tokens.has(token) ? Date.now() - tokens.get(token) <= TOKEN_MS : !!TEST_TOKEN && token === TEST_TOKEN)
+      if (!here(req) || !good) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy() }
+      tokens.delete(token)
+    }
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws.on('error', () => {})
       if (kind === 'capture') onCapture(ws)
@@ -1086,13 +1445,45 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   }
 
   // ---------- the desktop app's feed ----------
+  let quitSaid = 0 // when the app here last said you quit it (appQuit), until its feed goes
+  // Who's viewing, said each time it connects, nobody too: an app that heard of a session that ended
+  // while its feed was down lets the display sleep again, and takes its badge down. Opened here again
+  // (not by a device): Open Bridge AI may be offered once more.
   function onDesktop(fn) {
     desktops.add(fn)
+    app.came = Date.now()
+    takeQuitMark()
     fn({ t: 'control', on: controlOn() })
-    if (sessions.size || asks.size) fn({ t: 'sessions', list: watchers().map(shown), asks: [...asks.values()].map(shownAsk) })
+    fn({ t: 'sessions', list: badgeList(), asks: [...asks.values()].map(shownAsk) })
+    // A start waiting on the app (it just started, or reopened): its capture page, asked for now.
+    if (starting) fn(needs())
+    quitSaid = 0
+    if (conf.quit && Date.now() - app.opened > REOPEN_MS) { conf.quit = null; save() }
+    poke()
     onChange()
-    return () => { desktops.delete(fn); onChange() }
+    // (Its capture page goes with it: not used meanwhile, the app's next one is waited for. Gone
+    // just after it said you quit it: kept, so Open Bridge AI isn't offered until it's opened here.)
+    return () => {
+      desktops.delete(fn)
+      leaving.delete(fn)
+      app.gone = Date.now()
+      if (capture && !desktopOpen()) capture.old = true
+      if (!desktopOpen() && app.gone - quitSaid < 15000) { quitSaid = 0; conf.quit = new Date().toISOString(); save() }
+      poke()
+      onChange()
+    }
   }
+  // The desktop app here, quitting because you quit it (desktop/main.js: not to reopen or update).
+  function appQuit() { quitSaid = Date.now(); return { ok: true } }
+  // ...or, when it couldn't say so (this server down then: Quit and Stop Agents, say), the mark it left
+  // in the data folder, taken as this server starts (and as the app connects, which is it opened again).
+  function takeQuitMark() {
+    let at = null
+    try { at = JSON.parse(fs.readFileSync(QUIT_MARK, 'utf8'))?.at } catch { return }
+    try { fs.rmSync(QUIT_MARK, { force: true }) } catch { /* taken next time */ }
+    if (!desktopOpen() && typeof at === 'string') { conf.quit = new Date(Date.parse(at) || Date.now()).toISOString(); save() }
+  }
+  takeQuitMark()
 
   // Trial turned off: every session ends, and every ask is a no. Turned on: what a New device has
   // open here ends, as when it's unticked (it waits to be let in from now); one you kept out was
@@ -1100,6 +1491,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   function trialChanged() {
     if (trialOn()) { sync(); for (const id of [...conf.fresh, ...conf.blocked]) if (devices().some((d) => d.id === id)) onBlocked(id); return }
     for (const s of [...sessions.values()]) end(s, 'off', 'Remote Screen and Preview was turned off on this computer.')
+    for (const s of [...opening]) endWaiting(s, 'off', 'Remote Screen and Preview was turned off on this computer.')
     for (const a of [...asks.values()]) a.done('deny')
   }
 
@@ -1111,7 +1503,34 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     return lock ? { code: 'locked', why: lockedWhy(lock.until), until: new Date(lock.until).toISOString() } : null
   }
 
-  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, setNotify, unlock, answer, allows, admits, shutFor, outVia, viaList, turnedAway, waiting, mayPass, mayPreview, stop, stopAll, endFrom, live, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, active: () => sessions.size }
+  // Whether a device may have Bridge AI here updated (Update Bridge AI, offered to one that can't see
+  // this screen: ScreenView): not one locked out, nor one that typed a wrong password since it last
+  // typed the right one, while that still counts. null, or why not. forId: the device it's for,
+  // through another of your computers.
+  function mayUpdate(id, forId = null) {
+    const s = { key: forId ? `${id}/${forId}` : id, by: { id } }
+    const lock = lockedFor(s)
+    if (lock) return lockedWhy(lock.until)
+    const l = conf.locks[s.key]
+    if (l?.fails > 0 && Date.now() - (l.at || 0) < LOCK_MS) return `Type ${thisName()}'s Remote Access Password first: a wrong one was typed from this device.`
+    return null
+  }
+  // The names of the devices seen through your other computers, for what a crash report takes out.
+  const throughNames = () => Object.values(conf.through).map((v) => clean(v.name)).filter(Boolean)
+
+  // Another computer's screen that didn't show on this one, or on one of its devices (ScreenView.jsx
+  // says what it showed instead): a line in this log too, so it says next time. 20 a minute at most.
+  let saidAt = []
+  function didntShow({ name, code, cause, why, version: theirs } = {}, on = null) {
+    const now = Date.now()
+    saidAt = saidAt.filter((x) => now - x < 60000)
+    if (saidAt.length >= 20) return { ok: false }
+    saidAt.push(now)
+    log(`${new Date(now).toISOString()} Remote Screen: ${clean(name) || 'Another computer'}'s screen didn't show ${on ? `on ${clean(on)}` : 'here'} (${clean(code, 40) || 'error'}${cause ? `, ${clean(cause, 20)}` : ''}${theirs ? `; it has Bridge AI ${clean(theirs, 40)}` : ''}): ${clean(why, 300) || 'it said no more'}`)
+    return { ok: true }
+  }
+
+  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, setNotify, unlock, answer, allows, admits, shutFor, outVia, viaList, turnedAway, waiting, mayPass, mayPreview, stop, stopAll, endFrom, live, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, didntShow, appQuit, mayUpdate, throughNames, desktopSince: () => app.came, active: () => sessions.size }
 }
 
 // The test stand-in's screens: its main one, one beside it, a 5K one at twice its points (as a
