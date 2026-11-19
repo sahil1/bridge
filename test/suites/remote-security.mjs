@@ -624,6 +624,11 @@ try {
     ok(msg(pg, 'error')?.code === 'device' && msg(sc, 'error')?.code === 'device' && !msg(sc, 'password'), 'a page session and the screen: turned away by the screen itself, as before', [msg(pg, 'error'), msg(sc, 'error')])
     const later = await ph2.request('GET', '/api/a-route-added-later')
     ok(shut(later), 'and a route nobody has written yet: refused too, not a 404', later.status)
+    // Routes added beside this one (bots' routing dry-run, conversations and time-limit answers,
+    // meetings merged or carried on): refused the same.
+    const NEWER = [['POST', '/api/connections/c1/try', { text: 'hi' }], ['POST', '/api/bots/questions/q1/limit', { act: 'stop' }], ['GET', '/api/bots/b1/conversations'], ['POST', '/api/meetings/m1/merge', { id: 'm2' }], ['POST', '/api/meetings/carry-on', {}]]
+    const newer = await Promise.all(NEWER.map(([m, u, b]) => ph2.request(m, u, b)))
+    ok(newer.every((r) => shut(r)), 'bots\' routing dry-run, conversations and time-limit answers, meetings merged or carried on: refused too', newer.map((r) => r.status))
     // The app's own files are let through by their plain names only: not a route in other capitals
     // that ends in one, encoded; nor, with no key at all, as if public.
     const odd = ['/API/crashes/sent/..%2F..%2F..%2Fsw.js', '/API/meetings/nope/captures/..%2F..%2F..%2F..%2Fsw.js', '/assets/..%2Fsw.js']
@@ -659,6 +664,8 @@ try {
     const p5 = over(await linkAs(ra.url, { code: (await studio.api('/relay/pair', {})).pairing.code, name: 'Phone5', about: { name: 'Phone5' } }))
     const d5 = await until(async () => (await studio.api('/remote')).access.devices.find((x) => x.name === 'Phone5'), 8000, 200)
     ok(d5?.fresh && !d5.out && shut(await p5.request('GET', '/api/fleet')), 'Phone5, paired with a password set: New, waiting')
+    const newerNew = await Promise.all(NEWER.map(([m, u, b]) => p5.request(m, u, b)))
+    ok(newerNew.every((r) => shut(r)), 'and refused on those newer routes too', newerNew.map((r) => r.status))
     await studio.api('/settings', { trials: { 'remote-screen': false } }, 'PATCH')
     const off = await ph2.request('GET', '/api/fleet')
     const offFile = await ph2.request('GET', `/api/agents/${encodeURIComponent(SHELL)}/file?path=notes.txt`)
