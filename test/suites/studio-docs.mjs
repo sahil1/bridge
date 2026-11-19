@@ -269,7 +269,7 @@ try {
   await p.locator('.fx-side-sec h3', { hasText: 'Places' }).waitFor({ timeout: 10000 }).catch(() => {})
   const shelves = await p.locator('.fx-side-row[data-shelf] .fx-side-name').allInnerTexts()
   const folders = await p.locator('.fx-side-row[data-label]').evaluateAll((els) => els.map((e) => e.dataset.label))
-  ok(JSON.stringify(shelves) === '["Recent","Documents","Presentations","Sheets","PDFs","Pages","Whiteboards","Design Packs","Your Signature"]' && [cloudName, 'plans', 'Home'].every((x) => folders.includes(x)),
+  ok(JSON.stringify(shelves) === '["Recent","Documents","Presentations","Sheets","PDFs","Pages","Whiteboards","Design Packs","Your Signature","Shared"]' && [cloudName, 'plans', 'Home'].every((x) => folders.includes(x)),
     'shown by Recent and by kind in the sidebar\'s first lists, with your folders under them (the cloud drive, a place, Home)', { shelves, folders })
   // New, in the header beside Files and Preview: no cards on a page that has files.
   ok(await p.locator('.sd-new-btn').count() === 0, "with files, New's cards aren't on the page")
