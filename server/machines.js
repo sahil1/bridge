@@ -469,6 +469,7 @@ export function list() {
       id: m.id, name: s?.name || m.name, relay: m.relay, os: s?.os || m.os || null, version: s?.version || m.version || null,
       state: m.state, online: !!l?.session, lastSeen: m.lastSeen || null, addedAt: m.addedAt,
       held: !!m.held, // linked back to it, and it meets your others once you keep it here (onLinked)
+      notLetIn: shut.has(m.id), // it hasn't let this computer in (Which Devices May Connect there)
       code: m.state === 'asking' ? m.ask?.code || null : null,
       error: m.state === 'linked' && l?.session ? null : m.norelay ? `${m.name} stopped using its relay, so this computer can't reach it until it has one again. It can still reach this one, and says where it is once it does.` : l?.error || null,
       counts: s?.counts || {}, agents: s?.agents || [],
@@ -721,8 +722,9 @@ export function strays() {
 // linked to this one with Pair a device's code: it meets the others only once you've kept it here
 // (Keep, where the app says it paired), so a code that got out reaches this computer at most.
 // (Introduced: only a computer kept here can introduce one: index.js.)
-function onLinked(m) {
-  const via = links.get(m.id)?.via || 'you'
+// Not let in there yet (Which Devices May Connect, with a guardrail set there): it's done once it
+// is, which the next word from there shows (refreshNow).
+function onLinked(m, via = links.get(m.id)?.via || 'you') {
   if (via === 'back' && !relay.kept(m.relay)) {
     m.held = true
     save()
@@ -730,8 +732,9 @@ function onLinked(m) {
     return
   }
   ;(async () => {
-    if (via !== 'back') await linkBack(m).catch((e) => console.error(`machines: linking back from ${m.name}:`, e.message))
-    if (via !== 'intro') await introduce(m).catch((e) => console.error(`machines: introducing ${m.name}:`, e.message))
+    const later = (what) => (e) => { if (e.said === 'notLetIn') { m.waitIn = via; save() } else console.error(`machines: ${what} ${m.name}:`, e.message) }
+    if (via !== 'back') await linkBack(m).catch(later('linking back from'))
+    if (via !== 'intro' && !m.waitIn) await introduce(m).catch(later('introducing'))
     await refresh(m).catch(() => {})
   })()
 }
@@ -795,10 +798,18 @@ function refresh(m, since = 0) {
   asking.set(m.id, { at, p })
   return p
 }
+// A computer that hasn't let this one in (Which Devices May Connect there), as its last word said.
+const shut = new Set()
 async function refreshNow(m, asked = Date.now()) {
   const l = links.get(m.id)
   if (!l?.session) return
-  const s = await l.call('GET', `/api/machines/summary${wantHome() ? '?home=1' : ''}`, undefined, 12000)
+  let s
+  try { s = await l.call('GET', `/api/machines/summary${wantHome() ? '?home=1' : ''}`, undefined, 12000) } catch (e) {
+    if (e.said === 'notLetIn') shut.add(m.id)
+    throw e
+  }
+  shut.delete(m.id)
+  if (m.waitIn) { const via = m.waitIn; delete m.waitIn; save(); onLinked(m, via) }
   if ((kept.get(m.id)?.asked || 0) > asked) return // a later one came first
   keep(m.id, { asked, name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: Array.isArray(s.agents) ? s.agents.slice(0, 40) : [], needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, home: Array.isArray(s.home) ? s.home.slice(0, 100) : null, about: s.about || null, systemName: s.systemName || null, notifies: Number.isFinite(s.notifies) ? s.notifies : null, at: Date.now() })
   if (s.name && s.name !== m.name) { m.name = String(s.name).slice(0, 60); save() }
@@ -945,6 +956,8 @@ export async function proxy(req, res, { frames = null, ui = null } = {}) {
   const u = hit[2] || '/'
   const h = Object.entries(req.headers).filter(([k]) => PASS.has(k)).map(([k, v]) => [k, String(v)])
   h.push(['x-bridge-machine', relay.thisName()])
+  // For a device of this computer's: the answer from there says this computer when it isn't let in (letin.js).
+  if (req.headers['x-bridge-relay']) h.push(['x-bridge-for', '1'])
   const hasBody = !['GET', 'HEAD'].includes(req.method)
   let done = false
   let r = null

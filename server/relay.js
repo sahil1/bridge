@@ -910,6 +910,21 @@ export function removeDevice(id) {
   setTimeout(() => { for (const c of [...conns.values(), ...prior.conns.values()]) if (c.device?.id === id) c.close() }, 500)
   return status()
 }
+// Unticked in Which Devices May Connect (remote.js): what it has open here ends now, through each of
+// its connections. A WebSocket (a terminal, a screen) is closed from this end, so what this computer
+// said on it first (why) still reaches it; a request on its way (a file coming or going, the app's
+// event feed) is stopped, and the device told why. What it asks next is turned away (letin.js).
+export function endFor(id, why) {
+  for (const c of [...conns.values(), ...prior.conns.values()]) {
+    if (c.device?.id !== id) continue
+    for (const [sid, s] of [...c.streams]) {
+      if (s.ws) { try { s.ws.close(1008, 'notLetIn') } catch { /* closed */ } continue }
+      c.streams.delete(sid)
+      c.send(K.ERR, sid, utf8(why)).catch(() => {})
+      s.abort?.abort()
+    }
+  }
+}
 // A removed device's key, kept a while (and the keys it had before it moved: was): when it connects
 // again it's told, sealed, that it was removed (GONE), which is the only word that unpairs it there.
 function tombstone(devices) {

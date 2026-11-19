@@ -21,8 +21,11 @@
 //                           seconds is a no. Allowed to view, control is asked for again; taken back
 //                           after it went idle, the password and Allow again.
 //   which devices           every paired phone and linked computer may, until it's unticked here;
-//                           once any guardrail is set, one paired after that starts unticked. Through
-//                           another of your computers, that computer checks its own list first.
+//                           once any guardrail is set, one paired after that starts unticked (New,
+//                           in Needs You with Allow). One unticked can't use this computer at all
+//                           while this Beta Feature is on here: no agents, terminals, files,
+//                           previews or screen (letin.js). Through another of your computers, that
+//                           computer checks its own list first.
 // What a device is told (status): its own standing and the screens it may pick, never who else
 // looked or what at; only this computer itself sees that.
 // Viewing needs nobody at this computer otherwise (it's yours): it shows that it's being viewed (the
@@ -123,7 +126,8 @@ async function passwordMatches(stored, pw) {
 // this computer's dev servers (servers.js). screenAllowed(): on a Mac, whether macOS lets Bridge AI
 // record the screen, looked at without asking (calls.js screen). devices(): the phones and computers
 // paired here ({ id, name, kind }, relay.js). onChange(): what Bridge AI shows of this changed.
-// onBlocked(id): a device unticked here, whose sessions through this computer to another end too.
+// onBlocked(id): a device unticked here, whose terminals, copies and sessions through this computer
+// to another end too.
 // tell(event): your other devices told of a session, control taken or an ask (screentell.js), and
 // what became of it ({ sent, computers }). notifyTo(): where that goes, for Settings. blockThere(hop,
 // id): a device that came through another of your computers (hop, its device here) blocked there.
@@ -342,7 +346,26 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     save()
     onChange()
   }
-  const allows = (id) => { sync(); return !!id && !conf.blocked.includes(id) }
+  // (Looked at on every request a device makes: the list of devices is asked for only when this
+  // one hasn't been seen here yet.)
+  const allows = (id) => { if (!id) return false; if (!conf.known?.includes(id)) sync(); return !conf.blocked.includes(id) }
+  // Which Devices May Connect for everything a device does here (letin.js), not only the screen:
+  // while this Beta Feature is on, one unticked gets nothing. Off, nothing's asked of anyone (no
+  // screen, no guardrails), and what's ticked is kept as it is for when it's on again; a device seen
+  // meanwhile is still known from then (sync). A computer nobody set up for this unticks no one:
+  // only you do, or a guardrail you set.
+  const admits = (id) => allows(id) || !trialOn()
+  // One not let in that asked for something here: when, for Needs You.
+  const tried = new Map() // device id -> when
+  const turnedAway = (id) => { tried.set(id, Date.now()) }
+  // Devices waiting to be let in, for Needs You here: paired once a guardrail was set (New), not
+  // ticked yet, and when each last tried (null: not since Bridge AI started).
+  function waiting() {
+    if (!trialOn()) return []
+    sync()
+    return devices().filter((d) => conf.fresh.includes(d.id) && conf.blocked.includes(d.id))
+      .map((d) => ({ id: d.id, name: clean(d.name) || 'A device', kind: d.kind === 'computer' ? 'computer' : 'phone', paired: d.addedAt || null, tried: tried.has(d.id) ? new Date(tried.get(d.id)).toISOString() : null }))
+  }
   // Who's asking, as the lockout counts it (s.key): the device, or, through another of your computers,
   // that computer and the device there it speaks for, each on its own; and all of those through that
   // computer together too, so it can't speak for a new one each time.
@@ -360,7 +383,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   const clock = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
   const lockedWhy = (until) => `Too many wrong passwords: ${thisName()} won't let this device try again until ${clock(until)}.`
   const lockedSay = (fail, until) => fail(lockedWhy(until), 'locked', { until: new Date(until).toISOString() })
-  const notAllowed = (s) => `${thisName()} doesn't let ${s.by.name} connect. That's changed at ${thisName()} itself, in Settings › Account & Devices › Computers.`
+  const notAllowed = (s) => `${thisName()} doesn't let ${s.by.name} connect. That's changed at ${thisName()} itself, in Settings › Remote Access › Which Devices May Connect.`
   // A session turned away, kept apart from the sessions that ran, so many can't push those out of
   // the record; the same again soon after (that device, the same why) is counted on the last one.
   function refuse(s, end, more = {}) {
@@ -910,12 +933,14 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   }
   function setAskFirst(on) { conf.askFirst = !!on; save(); onChange(); return accessStatus() }
   // Unticked: it can't connect, and a session of its going now ends, as does one at the password or
-  // waiting for Allow, and one through this computer to another (onBlocked).
+  // waiting for Allow; and the rest of what it has open here (its terminals, what it's fetching or
+  // sending) and through this computer to another (onBlocked). Ticked or not, it isn't New any more.
   function setDevice(id, allowed) {
     sync()
     if (!devices().some((d) => d.id === id)) throw Object.assign(new Error('That device isn\'t paired with this computer.'), { status: 404 })
     conf.blocked = allowed ? conf.blocked.filter((x) => x !== id) : [...new Set([...conf.blocked, id])]
     conf.fresh = conf.fresh.filter((x) => x !== id)
+    tried.delete(id)
     save()
     if (!allowed) {
       const why = `${thisName()} stopped letting this device connect.`
@@ -971,9 +996,10 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     return () => { desktops.delete(fn); onChange() }
   }
 
-  // Trial turned off: every session ends, and every ask is a no.
+  // Trial turned off: every session ends, and every ask is a no. Turned on: what a device unticked
+  // here has open ends, as when it's unticked (it's let in to nothing from now).
   function trialChanged() {
-    if (trialOn()) return
+    if (trialOn()) { sync(); for (const id of conf.blocked) if (devices().some((d) => d.id === id)) onBlocked(id); return }
     for (const s of [...sessions.values()]) end(s, 'off', 'Remote Screen and Preview was turned off on this computer.')
     for (const a of [...asks.values()]) a.done('deny')
   }
@@ -986,7 +1012,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     return lock ? { code: 'locked', why: lockedWhy(lock.until), until: new Date(lock.until).toISOString() } : null
   }
 
-  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, setNotify, unlock, answer, allows, mayPass, mayPreview, stop, stopAll, endFrom, live, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, active: () => sessions.size }
+  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, setNotify, unlock, answer, allows, admits, turnedAway, waiting, mayPass, mayPreview, stop, stopAll, endFrom, live, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, active: () => sessions.size }
 }
 
 // The test stand-in's screens: its main one, one beside it, a 5K one at twice its points (as a

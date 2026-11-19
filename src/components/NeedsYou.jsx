@@ -425,6 +425,43 @@ export function SlackItem({ it, onDone, setNote }) {
   )
 }
 
+// A phone or computer paired once Remote Access had a guardrail, waiting to be let in here (Which
+// Devices May Connect, server/remote.js): until then it can't use this computer at all. Allow lets
+// it in; Keep Out leaves it out, and not New any more (Settings › Remote Access changes either).
+// Only in this computer's own window, where it's changed.
+export function LetInItem({ it, onDone, setNote }) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState(null)
+  const kind = it.kind === 'computer' ? t('computer') : t('phone')
+  const decide = async (allowed) => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      await onDevice(null, '/remote/devices', { id: it.id, allowed })
+      onDone(it)
+      setNote({ text: allowed ? t('{name} may use this computer now', { name: it.name }) : t('{name} stays out. Settings › Remote Access lets it in later.', { name: it.name }) })
+    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <article className="ny-item t-letin" aria-label={t('{name} waits to be let in', { name: it.name })}>
+      <div className="ny-top">
+        <Icon name={it.kind === 'computer' ? 'laptop' : 'phone'} size={12} />
+        <span className="ny-kind">{t('New device')}</span>
+        {it.paired && <span className="ny-age" title={new Date(it.paired).toLocaleString()}>{ago(it.paired)}</span>}
+        <span className="ny-grow" />
+        <span className="ny-device here" title={t('Settings › Remote Access › Which Devices May Connect')}><Icon name="lock" size={11} />{t('Remote Access')}</span>
+      </div>
+      <p className="ny-text">{t('{name} ({kind}) is paired with this computer and waits to be let in. Until you allow it, it can\'t use this computer at all.', { name: it.name, kind })}</p>
+      {it.tried && <p className="muted small ny-from">{t('Last tried to connect: {when}.', { when: ago(it.tried) })}</p>}
+      {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
+      <div className="ny-acts">
+        <button type="button" className="btn small primary" disabled={busy} onClick={() => decide(true)}><Icon name="check" size={12} /> {t('Allow')}</button>
+        <button type="button" className="btn small" disabled={busy} onClick={() => decide(false)}>{t('Keep Out')}</button>
+      </div>
+    </article>
+  )
+}
+
 // The inbox itself: a panel under the chip on a computer, the whole screen on a phone.
 // focus: { paneId, machine } to show first (from a notification).
 export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onClose, onOpen }) {
@@ -486,7 +523,8 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
   const focusId = focused ? uid(focused) : null
   const outside = (data?.outside || []).filter((x) => !gone[`outside|${x.id}`])
   const slack = (data?.slack || []).filter((x) => !gone[`slack|${x.id}`])
-  const waiting = all.filter((i) => isAsk(i) && i.online && !isQuiet(i)).length + outside.length + slack.length
+  const letIn = (data?.letIn || []).filter((x) => !gone[`letin|${x.id}`])
+  const waiting = all.filter((i) => isAsk(i) && i.online && !isQuiet(i)).length + outside.length + slack.length + letIn.length
   const list = (rows) => rows.map((it) => <NeedsItem key={uid(it)} it={it} focused={uid(it) === focusId} top={top.has(uid(it))} onOpen={onOpen} onGone={onGone} setNote={setNote} />)
   // Clear all that have gone quiet, each on its own device: off the list at once, and back with a
   // note for any its device couldn't clear.
@@ -531,6 +569,12 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
       {note && <p className="ny-note" role="status">{note.text}</p>}
       <div className="ny-list">
         {!data && <div className="skeleton-rows pad"><div /><div /></div>}
+        {letIn.length > 0 && (
+          <section className="ny-group" aria-label={t('Waiting to Be Let In')}>
+            <h3>{t('Waiting to Be Let In')}<span className="fcount">{letIn.length}</span></h3>
+            {letIn.map((x) => <LetInItem key={x.id} it={x} setNote={setNote} onDone={(o) => { setGone((g) => ({ ...g, [`letin|${o.id}`]: Date.now() })); for (const ms of [0, 1500]) setTimeout(() => refresh(''), ms) }} />)}
+          </section>
+        )}
         {slack.length > 0 && (
           <section className="ny-group" aria-label={t('From Slack')}>
             <h3>{t('From Slack')}<span className="fcount">{slack.length}</span></h3>
@@ -543,7 +587,7 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
             {outside.map((x) => <OutsideItem key={x.id} it={x} setNote={setNote} onDone={(o) => { setGone((g) => ({ ...g, [`outside|${o.id}`]: Date.now() })); for (const ms of [0, 1500]) setTimeout(() => refresh(''), ms) }} />)}
           </section>
         )}
-        {data && !items.length && !outside.length && !slack.length && (
+        {data && !items.length && !outside.length && !slack.length && !letIn.length && (
           <div className="ny-empty"><Icon name="check" size={20} /><p>{t('Nothing needs you right now.')}</p><small className="muted">{quiet.length ? t('Only what has been quiet for a while, folded below.') : t('Questions, permissions, failed runs and finished work from all your devices show here.')}</small></div>
         )}
         {by === 'urgent'

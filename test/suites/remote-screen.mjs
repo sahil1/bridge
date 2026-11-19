@@ -521,7 +521,7 @@ try {
     ok(msg(again, 'error').code === 'device' && !msg(again, 'password') && /doesn't let Laptop connect/.test(msg(again, 'error').why), 'and it can\'t connect again, not even asked for the password', msg(again, 'error'))
     await studio.api('/remote/devices', { id: P.id, allowed: false })
     const pv = await ph.request('GET', '/_preview/5173/')
-    ok(pv.status === 403 && pv.json?.code === 'device', 'nor see its apps', pv.json)
+    ok(pv.status === 403 && pv.json?.code === 'notLetIn', 'nor see its apps', pv.json)
     const st = await studio.api('/remote')
     ok(!st.access.devices.find((d) => d.id === L.id).allowed && st.log.some((x) => x.end === 'device' && x.by.name === 'Laptop' && !x.source) && st.log.some((x) => x.end === 'device' && x.source), 'Studio\'s record: the session cut off, and the try after it', st.log.slice(0, 3).map((x) => [x.by.name, x.end]))
     await studio.api('/remote/devices', { id: L.id, allowed: true })
@@ -1590,10 +1590,15 @@ try {
     await p.goto((await studio.api('/relay/pair', {})).pairing.link, { waitUntil: 'commit' })
     await p.locator('#pair-go').click({ timeout: 20000 })
     const f = await until(() => p.frames().find((x) => x !== p.mainFrame() && x.url().startsWith(ra.url)), 30000, 100)
-    await f.locator('.settings-btn').waitFor({ timeout: 30000 })
-    // Paired once Studio has a password: it starts unticked there, and is ticked at Studio.
-    const fresh = await until(async () => { const l = (await studio.api('/remote')).access.devices.filter((d) => d.fresh && !d.allowed); return l.length ? l : null }, 8000, 200)
+    // Paired once Studio has a password: it starts unticked there, and gets nothing until it's
+    // ticked at Studio; then its page opens by itself.
+    const fresh = await until(async () => {
+      if (await f.locator('.settings-btn').isVisible().catch(() => false)) return []
+      const l = (await studio.api('/remote')).access.devices.filter((d) => d.fresh && !d.allowed)
+      return l.length ? l : null
+    }, 30000, 200)
     for (const d of fresh || []) await studio.api('/remote/devices', { id: d.id, allowed: true })
+    await f.locator('.settings-btn').waitFor({ timeout: 30000 })
     const at = await (await f.frameElement()).boundingBox()
     return { ctx, p, f, errs, at }
   }

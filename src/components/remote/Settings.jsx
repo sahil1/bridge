@@ -3,7 +3,8 @@
 //                           with Stop
 //   Remote Access           the Remote Access Password, "Let my other devices control this computer"
 //                           (which needs it; on a Mac, macOS's Accessibility question then), Ask Here
-//                           First, which devices may connect, and who's locked out, with Unlock; and
+//                           First, which devices may connect (one unticked may use nothing here),
+//                           and who's locked out, with Unlock; and
 //                           Screen Sharing Notifications: on or off, where they go, and the way to set
 //                           one up when nothing would hear of it (server/screentell.js)
 //   Screen Activity         the record of every session, and every one turned away
@@ -65,7 +66,7 @@ function Password({ access, here, name, refresh }) {
     <div className="rs-block" data-setting="remote-password">
       <b>{t('Remote Access Password')}</b>
       <p className="muted small">{t('Asked before any of your devices sees this screen, from a computer or a phone, and checked here. {n} wrong tries lock that device out for {m} minutes. It\'s kept on this computer only, scrambled, and never sent anywhere.', { n: access.limits?.tries || ACCESS.tries, m: access.limits?.lockMinutes || ACCESS.lockMinutes })}</p>
-      <p className="muted small rs-guards"><Icon name="info" size={12} /> {t('It guards seeing and controlling this computer\'s screen, and the apps its agents serve. Any paired device can still run agents and terminals here, so remove a device you don\'t trust.')}</p>
+      <p className="muted small rs-guards"><Icon name="info" size={12} /> {t('It guards seeing and controlling this computer\'s screen, and the apps its agents serve. Which Devices May Connect, below, decides which of your devices may use this computer at all.')}</p>
       {access.password
         ? <p className="small rs-ok"><Icon name="lock" size={12} /> {access.passwordAt ? t('Set on {date}.', { date: dayOf(access.passwordAt) }) : t('Set.')}</p>
         : <p className="small rs-no"><Icon name="info" size={12} /> {t('No password yet: your devices see this screen without one.')}</p>}
@@ -218,8 +219,8 @@ export function RemoteSettings() {
 
         <div className="rs-block" data-setting="remote-devices">
           <b>{t('Which Devices May Connect')}</b>
-          <p className="muted small">{t('Every phone paired with this computer and every computer linked to it, unless you untick it. A phone paired with another of your computers comes through that computer.')}</p>
-          {here && <p className="muted small">{t('Once a password, Ask Here First or an unticked device is set, a phone or computer paired after that starts unticked: tick it here to let it connect.')}</p>}
+          <p className="muted small">{t('Every phone paired with this computer and every computer linked to it, unless you untick it. One unticked can\'t use this computer at all: no agents, terminals, files, previews or screen, and what it has open here ends. A phone paired with another of your computers comes through that computer.')}</p>
+          {here && <p className="muted small">{t('Once a password, Ask Here First or an unticked device is set, a phone or computer paired after that starts unticked, and waits in Needs You: tick it here, or Allow it there, to let it in.')}</p>}
           {!here ? null : ac.devices?.length
             ? (
               <ul className="rs-devices">

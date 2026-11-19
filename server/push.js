@@ -68,6 +68,10 @@ export function unsubscribe({ id, endpoint }) {
 // note.skip: devices left out (Remote Screen's: the one doing the viewing, screentell.js), as
 // { devices: [the paired devices they came through], here: this computer's own browsers too }.
 const skipped = (note, dev) => !!note.skip && ((!!dev.device && !!note.skip.devices?.includes(dev.device)) || (!!note.skip.here && isHere(dev)))
+// A device not let in here (Which Devices May Connect, remote.js) gets none: what it turned on
+// through it is kept for when it's let in again. out(id): it isn't (index.js).
+let out = () => false
+export const keepOut = (fn) => { out = fn }
 
 // The notification channel (see notify.js). BRIDGE_TEST_PUSH (tests): what would go to each device
 // is written to that file instead, a JSON line each, and counts as sent.
@@ -80,7 +84,7 @@ export const channel = {
     const payload = JSON.stringify({ title: note.title, body: note.body, url: note.url || '/', tag: note.tag, kind: note.kind, actions: note.actions?.length ? note.actions : undefined, silent: note.silent || undefined })
     let sent = 0
     const gone = []
-    await Promise.all(d.devices.filter((dev) => (!note.onlyHere || isHere(dev)) && !skipped(note, dev)).map(async (dev) => {
+    await Promise.all(d.devices.filter((dev) => (!note.onlyHere || isHere(dev)) && !skipped(note, dev) && !(dev.device && out(dev.device))).map(async (dev) => {
       if (process.env.BRIDGE_TEST_PUSH) {
         fs.appendFileSync(process.env.BRIDGE_TEST_PUSH, `${JSON.stringify({ to: dev.label, device: dev.device || null, here: isHere(dev), note: JSON.parse(payload) })}\n`)
         dev.lastOk = new Date().toISOString()

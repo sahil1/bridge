@@ -38,6 +38,17 @@ const CODE_MS = 2 * 60_000
 const COOKIE_DAYS = 400 // as long as browsers keep one
 const PUBLIC_API = new Set(['/api/health'])
 
+// A file of the built UI in the folder ui (not its page, nor anything else here): public, and the
+// same for everyone with this version (letin.js lets a device not let in have these too).
+export function builtFile(ui, p) {
+  try {
+    if (p === '/' || p.endsWith('.html') || p.startsWith('/api/') || p.startsWith('/m/')) return false
+    const file = path.resolve(ui, `.${decodeURIComponent(p)}`)
+    if (!file.startsWith(path.resolve(ui) + path.sep)) return false
+    return fs.statSync(file).isFile()
+  } catch { return false }
+}
+
 // port: this server's own (the cookie is named for it); token(): the key; ui: the built UI's folder;
 // viaTailnet(req): it came through Tailscale (guard.js), for what the page saying how to get in says.
 export function makeAuth({ port, token, ui, viaTailnet = () => false }) {
@@ -55,14 +66,7 @@ export function makeAuth({ port, token, ui, viaTailnet = () => false }) {
   const allowed = (req) => keyed(req)
   const siteKey = (pane) => crypto.createHmac('sha256', token()).update(`site\n${pane}`).digest('base64url').slice(0, 32)
 
-  // A file of the built UI (not its page): public.
-  const builtFile = (p) => {
-    if (p === '/' || p.endsWith('.html') || p.startsWith('/api/') || p.startsWith('/m/')) return false
-    const file = path.resolve(ui(), `.${decodeURIComponent(p)}`)
-    if (!file.startsWith(path.resolve(ui()) + path.sep)) return false
-    try { return fs.statSync(file).isFile() } catch { return false }
-  }
-  const isPublic = (req) => (req.method === 'GET' || req.method === 'HEAD') && (PUBLIC_API.has(req.path) || (() => { try { return builtFile(req.path) } catch { return false } })())
+  const isPublic = (req) => (req.method === 'GET' || req.method === 'HEAD') && (PUBLIC_API.has(req.path) || builtFile(ui(), req.path))
   // A page to show, not something a page fetches (as machinepages.js reads it).
   const h = (req, k) => String(req.headers[`sec-fetch-${k}`] || '')
   const page = (req) => req.method === 'GET' && !req.path.startsWith('/api/') && (h(req, 'mode') === 'navigate' || /^(document|iframe|frame)$/.test(h(req, 'dest')) || (!h(req, 'mode') && /text\/html/.test(req.headers.accept || '')))

@@ -83,6 +83,21 @@ const signedOut = () => {
   try { if (Date.now() - Number(sessionStorage.getItem('cc-signed-out') || 0) < 60_000) return; sessionStorage.setItem('cc-signed-out', String(Date.now())) } catch { return }
   location.reload()
 }
+// This device isn't let in by the computer this window shows, or the one it comes through (Which
+// Devices May Connect there, server/letin.js): heard once, from that computer's answer ({ computer,
+// through }) and where it came from, for the card over the whole window (remote/NotLetIn.jsx). Only
+// from this window's own computer: one another of yours turns away (a copy, Needs You there) says
+// so where it's tried.
+let shut = null
+const shutSubs = new Set()
+export const notLetIn = { get: () => shut, subscribe: (fn) => { shutSubs.add(fn); return () => shutSubs.delete(fn) } }
+function shutOut(url, data) {
+  const at = url.startsWith(`${BASE}/api/`) ? BASE : url.startsWith('/api/') ? '' : null
+  if (shut || at == null || data?.code !== 'notLetIn') return
+  shut = { computer: String(data.computer || ''), through: data.through ? String(data.through) : null, at }
+  for (const f of shutSubs) f(shut)
+}
+
 const SETTLE = 1500
 async function call(url, opts = {}) {
   const later = LATER.test(url)
@@ -97,6 +112,7 @@ async function call(url, opts = {}) {
   // This browser isn't let in any more (its cookie was cleared, or Bridge AI's key changed): loaded
   // again, once, the server says how to get back in (server/apiauth.js).
   if (res.status === 401 && data.code === 'apiKey') signedOut()
+  if (res.status === 403) shutOut(url, data)
   // code: set when the app can offer a fix (EPERM, noBrew, calendarAccess...). status: there was an
   // answer (a failed fetch has none). data: all of it (what came with it: the account's devices...).
   if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status, data }, data.code ? { code: data.code } : {})
@@ -108,6 +124,7 @@ async function call(url, opts = {}) {
 export async function hostApi(path, opts = {}) {
   const res = await fetch(`/api${path}`, { ...opts, headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) }, body: opts.body ? JSON.stringify(opts.body) : undefined })
   const data = await res.json().catch(() => ({}))
+  if (res.status === 403) shutOut(`/api${path}`, data)
   if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status, code: typeof data.code === 'string' ? data.code : undefined })
   return data
 }

@@ -353,7 +353,8 @@ const passing = (e) => !e.fatal && e.status !== 404
 
 // Start a copy. pull: { from: machine id, src: { pane, path }, to } here; push: { to: machine id,
 // src: { pane, path } here, into: where there }. move: put the original in the Trash once it's in.
-export async function start(body = {}, { here = false } = {}) {
+// by: the device that asked for it (relay.js id), when it wasn't this computer.
+export async function start(body = {}, { here = false, by = null } = {}) {
   const pull = !!body.from
   const machine = String(pull ? body.from : body.to || '')
   const m = machines.list().find((x) => x.id === machine)
@@ -361,7 +362,7 @@ export async function start(body = {}, { here = false } = {}) {
   const src = { pane: String(body.src?.pane || ''), path: String(body.src?.path ?? '') }
   if (!src.pane) throw fail('Which file?')
   const job = {
-    id: newId(), kind: pull ? 'pull' : 'push', machine, device: m.name, here,
+    id: newId(), kind: pull ? 'pull' : 'push', machine, device: m.name, here, ...(by ? { by: String(by).slice(0, 40) } : {}),
     src, to: pull ? (body.into || { where: 'downloads' }) : (body.into || { where: 'downloads' }),
     move: !!body.move, name: (src.path.split('/').filter(Boolean).pop()) || null,
     state: 'going', got: 0, total: null, at: Date.now(), resumes: 0,
@@ -604,6 +605,13 @@ export function retry(id) {
   kick()
   return shownJob(j)
 }
+// A device unticked in Which Devices May Connect (remote.js): the copies it's sending here are let
+// go (what came so far thrown away), and those it asked this computer to make stop.
+export async function endFor(id) {
+  for (const j of st.jobs.filter((x) => x.by === id && ['going', 'waiting', 'queued'].includes(x.state))) stop(j.id)
+  for (const x of st.incoming.filter((y) => y.from.id === id && y.state === 'coming')) await drop(x.id, { id }).catch(() => {})
+}
+
 // Finished ones out of the list.
 export function clear() {
   st.jobs = st.jobs.filter((j) => !['done', 'failed', 'stopped'].includes(j.state))

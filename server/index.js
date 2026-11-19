@@ -12,6 +12,7 @@ import { makeAuth } from './apiauth.js'
 import { localKey } from './apitoken.js'
 import * as machinePages from './machinepages.js'
 import { makeRemote } from './remote.js'
+import { makeLetIn } from './letin.js'
 import { makeTell } from './screentell.js'
 import { plainName } from '../shared/remote.js'
 import * as devPreview from './devpreview.js'
@@ -217,22 +218,39 @@ const isDevPort = async (port) => {
 }
 // Your devices told when this screen is shared, and every window shown what's live here and on
 // your other computers (screentell.js, event: screen on /api/events).
+// (A linked computer not let in here is told nothing: as a device here, it's the one with its relay.)
+const machineOut = (m) => { const d = relay.status().devices.find((x) => x.kind === 'computer' && x.relay === m.relay); return !!d && !remote.admits(d.id) }
 const screenTell = makeTell({
-  remote: () => remote, notify, machines, relay, pushDevices: () => push.devices(),
+  remote: () => remote, notify, machines, relay, pushDevices: () => push.devices(), out: machineOut,
   onLive: (list) => { for (const c of clients) c.write(`event: screen\ndata: ${JSON.stringify({ list })}\n\n`) },
 })
+// A device unticked in Which Devices May Connect: everything it has open here ends now (its
+// terminals and screens, what it's fetching or sending through its link, the copies it's sending or
+// asked for, and what it reaches through this computer on another), told why.
+const shutOut = (id) => {
+  const why = `${relay.thisName()} stopped letting this device connect.`
+  machines.endOnward(id, why)
+  relay.endFor(id, why)
+  transfers.endFor(id).catch(() => {})
+}
 const remote = makeRemote({
   trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), thisName: () => relay.thisName(), os: machines.OS,
   hosted: () => !!relay.status().hosted, isDevPort, screenAllowed: () => (IS_MAC ? calls.screen() : Promise.resolve(null)),
-  devices: () => relay.status().devices, onBlocked: (id) => machines.endOnward(id, `${relay.thisName()} stopped letting this device connect.`),
+  devices: () => relay.status().devices, onBlocked: shutOut,
   tell: (ev) => screenTell.tell(ev), onChange: () => screenTell.changed(), notifyTo: () => screenTell.notifyTo(), blockThere: (hop, id) => screenTell.blockThere(hop, id),
 })
+// ...and nothing else of this computer's for one not let in, from the first thing it asks (letin.js),
+// nor its notifications.
+const letIn = makeLetIn({ admits: (id) => remote.admits(id), turnedAway: (id) => remote.turnedAway(id), deviceOf: (id) => relay.deviceOf(id), thisName: () => relay.thisName(), ui: () => UI_DIR })
+push.keepOut((id) => !remote.admits(id))
 // A device of this computer's going on through it to another's screen: this computer's own list and lockout first.
 machines.usePassCheck((asker) => remote.mayPass(asker.id))
 const servePreview = devPreview.serve({ trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), may: (id, port) => remote.mayPreview(id, port), isDevPort, thisName: () => relay.thisName() })
 const app = express()
 app.use(guard.http)
 app.use(auth.http)
+// Which Devices May Connect, for everything after this (letin.js).
+app.use(letIn.http)
 app.use(pages.http)
 // Each request timed, for how Bridge AI itself is doing (perf.js).
 app.use(perf.timing)
@@ -879,7 +897,7 @@ app.post('/api/transfers', tx((req) => {
   // From a window showing another computer (machinepages.js): only that computer's files copied here.
   if (req.machinePage && (req.body?.from !== req.machinePage || req.body?.to)) throw Object.assign(new Error(machinePages.elsewhere(relay.thisName())), { status: 403, code: 'machinePage' })
   counts.add('files.sent')
-  return transfers.start(req.body || {}, { here: fromHere(req) })
+  return transfers.start(req.body || {}, { here: fromHere(req), by: req.headers['x-bridge-relay'] || null })
 }))
 app.post('/api/transfers/clear', tx(() => transfers.clear()))
 app.post('/api/transfers/:id/stop', tx((req) => transfers.stop(req.params.id)))
@@ -2952,7 +2970,11 @@ app.get('/api/remote/preview-check', async (req, res) => {
 // An ask reaches your phones too, so you can allow it from there. Its six digits stay in Bridge AI
 // (a notification goes through Apple's or Google's servers, and shows on a locked screen).
 relay.whenAsked((a) => notify.send({ kind: 'machine', title: `${a.name} asks to link`, body: 'Open Bridge AI to check the six digits on both devices, then allow it.', url: '/#settings/machines', tag: `machine-ask-${a.id}` }).catch(() => {}))
-relay.whenPaired((d) => notify.send({ kind: 'machine', title: `${d.name} is paired`, body: 'If that wasn\'t you, remove it in Bridge AI.', url: '/#settings/machines', tag: `paired-${d.id}` }).catch(() => {}))
+// One paired once Remote Access had a guardrail starts not let in (remote.js): it says how to let it in.
+relay.whenPaired((d) => {
+  const out = !remote.admits(d.id)
+  notify.send({ kind: 'machine', title: `${d.name} is paired`, body: out ? `It can't use ${relay.thisName()} until you allow it there, in Needs You. If that wasn't you, remove it in Bridge AI.` : 'If that wasn\'t you, remove it in Bridge AI.', url: '/#settings/machines', tag: `paired-${d.id}` }).catch(() => {})
+})
 // A device removed: its notifications stop too.
 relay.whenRemoved((id) => push.forgetDevice(id))
 // What this device tells the others: its agents, for their sidebars and agent maps (agentmap.js),
@@ -2999,6 +3021,9 @@ app.get('/api/needs-you', wrap(async (req) => {
     outside: outside.waiting().map((x) => ({ ...x, change: outsideView(x) })),
     // The bots' answers to send or discard, and what nothing could answer (frontdesk.js).
     slack: desk.waiting(),
+    // Devices paired since Remote Access had a guardrail, waiting to be let in (remote.js): Allow is
+    // at this computer only, so only it is told.
+    letIn: atThisComputer(req) ? remote.waiting() : [],
   }
 }))
 // What Needs You shows of an ask: the change itself, cut to what fits on its card.
@@ -3038,9 +3063,10 @@ app.get('/api/home', trialOff('home', 'Home'), wrap(async (req) => {
     devices: [{ id: null, name, os: machines.OS, online: true, here: true }, ...linked.map((m) => ({ id: m.id, name: m.name, os: m.os, online: !!m.online, lastSeen: m.lastSeen, at: m.at, partial: !Array.isArray(m.home) }))],
     pins: homeList.pins(),
     layouts: homeList.layouts(),
-    // What other apps ask of you here, and the bots' answers, as in Needs You.
+    // What other apps ask of you here, the bots' answers and the devices waiting to be let in, as in Needs You.
     outside: outside.waiting().map((x) => ({ ...x, change: outsideView(x) })),
     slack: desk.waiting(),
+    letIn: atThisComputer(req) ? remote.waiting() : [],
   }
 }))
 // Pin one to the top of Home, or unpin it: kept here, for every page and phone this computer serves.
@@ -5163,6 +5189,7 @@ const upgrades = [
 const onUpgrade = async (req, socket, head) => {
   if (!(await guard.upgrade(req)) || !pages.upgrade(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy() }
   if (!auth.upgrade(req)) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy() }
+  if (letIn.upgrade(req, socket, head)) return // a device not let in here (letin.js)
   if (machines.isMachinePath(req.url)) return machines.upgrade(req, socket, head) // a terminal on another of your devices
   if (servePreview.isPath(req.url)) return servePreview.upgrade(req, socket, head).catch(() => socket.destroy()) // a project's app's hot reload, for another of your devices
   if (remote.isPath(req.url)) return remote.upgrade(req, socket, head) // this screen, seen from another of your devices

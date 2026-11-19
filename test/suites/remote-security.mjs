@@ -22,9 +22,18 @@
 //   previews: only a server an agent's terminal started (not one in the home folder, nor one no
 //     terminal started), past the password (a session for the app), in a sandbox beside a phone's
 //     page, at an address of its own on Laptop, never under Laptop's own address;
+//   unticked, a device gets nothing of Studio's (letin.js): no launch, terminal, file, copy, event
+//     feed, preview or notification, nor a route written later; told only that Studio hasn't let it
+//     in and where, it can still load the page that says so and unpair itself; Studio itself never
+//     is refused, Tailscale isn't Studio, and the list applies while the Beta Feature is on;
+//     unticked with a terminal, the app's feed and a copy open, each ends then; through Laptop,
+//     Laptop's list first, then Studio's for Laptop, saying which one isn't let in;
 //   the password changed or taken off ends sessions; a picture for a session that isn't there goes
 //     to no other; the password's hash at OWASP's cost, an older one made again once typed; an app
-//     drawn off screen follows no redirect or frame to anything else on the computer.
+//     drawn off screen follows no redirect or frame to anything else on the computer;
+//   in the app (Chromium, or WebKit as the iPhone app): a phone paired once a password is set is
+//     one card saying Studio hasn't let it in and where; Allow in Studio's Needs You lets it in, and
+//     its page opens by itself.
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
@@ -32,7 +41,7 @@ import crypto from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import WebSocket from 'ws'
-import { startKit, startRelay, checks, until, sleep, freePort, stopTree, TEST, ROOT, IS_WIN } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, sleep, freePort, stopTree, browser, page, TEST, ROOT, IS_WIN } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 import { K, json, text } from '../../relay/web/link.js'
 import { unpackFrame, packFrame, ACCESS } from '../../shared/remote.js'
@@ -106,12 +115,18 @@ function over(c) {
       if (body) { await c.send(K.BODY, id, new TextEncoder().encode(JSON.stringify(body))); await c.send(K.END, id) }
     })()
   })
-  const socket = (u) => {
+  // term: a terminal's, whose output (text or not) is kept as text, apart from what's JSON.
+  const socket = (u, { term = false } = {}) => {
     const id = ids++
-    const s = { msgs: [], frames: [], opened: false, closed: null }
+    const s = { msgs: [], frames: [], text: '', opened: false, closed: null }
     by.set(id, (r) => {
       if (r.kind === K.WS_OPENED) s.opened = true
-      else if (r.kind === K.WS_MSG) { const bin = r.body[0] !== 1; const d = Buffer.from(r.body.subarray(1)); if (bin) s.frames.push({ at: Date.now(), f: unpackFrame(new Uint8Array(d)) }); else { try { s.msgs.push(JSON.parse(d.toString('utf8'))) } catch { s.msgs.push(d.toString('utf8')) } } } else if (r.kind === K.WS_CLOSE) { s.closed = json(r.body); by.delete(id) }
+      else if (r.kind === K.WS_MSG) {
+        const bin = r.body[0] !== 1
+        const d = Buffer.from(r.body.subarray(1))
+        if (bin && !term) s.frames.push({ at: Date.now(), f: unpackFrame(new Uint8Array(d)) })
+        else { try { s.msgs.push(JSON.parse(d.toString('utf8'))) } catch { if (term) s.text += d.toString('utf8'); else s.msgs.push(d.toString('utf8')) } }
+      } else if (r.kind === K.WS_CLOSE) { s.closed = json(r.body); by.delete(id) }
     })
     s.send = (m) => c.send(K.WS_MSG, id, Buffer.concat([Buffer.from([1]), Buffer.from(JSON.stringify(m))]))
     s.close = () => c.send(K.WS_CLOSE, id, { c: 1000, r: '' })
@@ -159,8 +174,10 @@ try {
   }
   const inputs = path.join(TEST, '.out', `remote-security-input-${process.pid}.jsonl`)
   fs.rmSync(inputs, { force: true })
+  const pushed = path.join(TEST, '.out', `remote-security-push-${process.pid}.jsonl`)
+  fs.rmSync(pushed, { force: true })
   // Ask Here First waits 3 s for an answer here, and control idles back to view-only after 4 s.
-  const studio = await kitWith('Studio', ra, { BRIDGE_TEST_SCREEN: 'fake', BRIDGE_TEST_INPUT: inputs, BRIDGE_TAILNET_OWNER: OWNER, BRIDGE_REMOTE_ASK_MS: '3000', BRIDGE_REMOTE_CONTROL_IDLE_MS: '4000' })
+  const studio = await kitWith('Studio', ra, { BRIDGE_TEST_SCREEN: 'fake', BRIDGE_TEST_INPUT: inputs, BRIDGE_TEST_PUSH: pushed, BRIDGE_TAILNET_OWNER: OWNER, BRIDGE_REMOTE_ASK_MS: '3000', BRIDGE_REMOTE_CONTROL_IDLE_MS: '4000' })
   studio.program('tailscale', TAILSCALE)
 
   // ---------- Tailscale's headers, sent by a program on this computer ----------
@@ -558,6 +575,130 @@ try {
     await q.close()
   })
 
+  // ---------- Which Devices May Connect, for everything ----------
+  // A terminal of Studio's own, in a folder with a file in it.
+  const shellDir = path.join(studio.home, 'letin')
+  fs.mkdirSync(shellDir, { recursive: true })
+  fs.writeFileSync(path.join(shellDir, 'notes.txt'), 'only for devices let in')
+  const SHELL = (await studio.api('/agents/launch', { kind: 'shell', cwd: shellDir, label: 'Shell' })).paneId
+  const ATTACH = `/api/panes/${encodeURIComponent(SHELL)}/attach?cols=80&rows=24`
+  // Studio's answer to a device it hasn't let in: which computer and where, nothing more.
+  const shut = (r, computer = 'Studio') => r.status === 403 && r.json?.code === 'notLetIn' && r.json.computer === computer && /hasn't let/.test(r.json.error) && /Settings › Remote Access › Which Devices May Connect/.test(r.json.error)
+
+  await part('unticked, a device gets nothing of this computer\'s: agents, terminals, files, events, previews', async () => {
+    await studio.api('/remote/devices', { id: PHONE2, allowed: false })
+    const launch = await ph2.request('POST', '/api/agents/launch', { kind: 'shell', cwd: shellDir, label: 'Unticked try' })
+    ok(shut(launch) && launch.json.error === "Studio hasn't let this device in. On Studio: Settings › Remote Access › Which Devices May Connect.", 'launch: refused, saying Studio hasn\'t let it in and where that\'s changed', launch.json)
+    ok(!JSON.stringify(await studio.api('/fleet')).includes('Unticked try'), 'and nothing was launched')
+    const t = ph2.socket(ATTACH, { term: true })
+    await t.wait((x) => x.closed, 6000)
+    ok(t.msgs.length === 1 && t.msgs[0].type === 'error' && t.msgs[0].code === 'notLetIn' && !t.text, 'attach: its terminal says why and closes, with nothing of the pane', [t.msgs, t.text.slice(0, 80)])
+    const file = await ph2.request('GET', `/api/agents/${encodeURIComponent(SHELL)}/file?path=notes.txt`)
+    const dl = await ph2.request('GET', `/api/agents/${encodeURIComponent(SHELL)}/raw?path=notes.txt`)
+    const list = await ph2.request('GET', `/api/agents/${encodeURIComponent(SHELL)}/files?path=`)
+    ok(shut(file) && shut(dl) && shut(list) && ![file, dl, list].some((r) => r.text.includes('only for devices')), 'files: not read, downloaded or listed', [file.status, dl.status, list.status])
+    const send = await ph2.request('POST', '/api/transfers/in', { key: 'unticked-send', name: 'in.txt', files: [{ size: 3 }], to: { where: 'pane', pane: SHELL } })
+    const copy = await ph2.request('POST', '/api/transfers', { from: S.id, src: { pane: 'x', path: 'y' } })
+    ok(shut(send) && shut(copy) && !fs.readdirSync(shellDir).some((f) => f.includes('in.txt')), 'Send to and Copy to this computer: refused, nothing written', [send.status, copy.status])
+    // (A feed let through never ends: it's given 5 s.)
+    const ev = await Promise.race([ph2.request('GET', '/api/events'), sleep(5000).then(() => ({ status: 'still open' }))])
+    ok(shut(ev), 'events: refused, not a feed', ev.status)
+    const pv = await ph2.request('GET', '/_preview/5173/')
+    ok(shut(pv), 'previews: refused', pv.json)
+    const pg = ph2.socket('/api/remote/view?source=page:5173&w=390&h=700')
+    const sc = ph2.socket(V)
+    await Promise.all([pg, sc].map((x) => x.wait((y) => msg(y, 'error'))))
+    ok(msg(pg, 'error')?.code === 'device' && msg(sc, 'error')?.code === 'device' && !msg(sc, 'password'), 'a page session and the screen: turned away by the screen itself, as before', [msg(pg, 'error'), msg(sc, 'error')])
+    const later = await ph2.request('GET', '/api/a-route-added-later')
+    ok(shut(later), 'and a route nobody has written yet: refused too, not a 404', later.status)
+    // What it may still do: load the app's page (to say so), be told, and unpair itself.
+    const pageOf = await ph2.request('GET', '/')
+    ok(pageOf.status === 200 && /<div id="root">/.test(pageOf.text), 'the app\'s own page still loads, to show why', pageOf.status)
+    const told = await ph2.request('GET', '/api/relay')
+    ok(shut(told) && told.json.here === PHONE2 && Object.keys(told.json).sort().join() === 'code,computer,error,here', 'GET /api/relay: told it isn\'t let in, with its own id (to forget Studio), nothing of the relay', told.json && Object.keys(told.json))
+    // This computer itself never is; a browser through Tailscale isn't a paired device, but one
+    // that says it's an unticked device is that device.
+    ok(!!(await studio.api('/fleet')), 'Studio itself: never refused')
+    const ts = { host: TS, 'tailscale-user-login': OWNER, authorization: `Bearer ${studio.key}` }
+    const tsOwn = await raw(studio, 'GET', '/api/fleet', { headers: ts })
+    const tsAs = await raw(studio, 'GET', '/api/fleet', { headers: { ...ts, 'x-bridge-relay': PHONE2 } })
+    ok(tsOwn.status === 200 && shut(tsAs), 'through Tailscale: not this computer, and as an unticked device, refused', [tsOwn.status, tsAs.status])
+    // Only while Remote Screen and Preview is on here; the list is kept for when it's on again.
+    await studio.api('/settings', { trials: { 'remote-screen': false } }, 'PATCH')
+    const off = await ph2.request('GET', '/api/fleet')
+    await studio.api('/settings', { trials: { 'remote-screen': true } }, 'PATCH')
+    const on = await ph2.request('GET', '/api/fleet')
+    ok(off.status === 200 && shut(on), 'the list applies while Remote Screen and Preview is on here, and is kept while it\'s off', [off.status, on.status])
+    // None of Studio's notifications either.
+    await ph.request('POST', '/api/push/subscribe', { subscription: { endpoint: 'https://push.example/phone', keys: { p256dh: 'p', auth: 'a' } }, label: 'Phone' })
+    await studio.api('/remote/devices', { id: PHONE2, allowed: true })
+    await ph2.request('POST', '/api/push/subscribe', { subscription: { endpoint: 'https://push.example/phone2', keys: { p256dh: 'p', auth: 'a' } }, label: 'Phone2' })
+    await studio.api('/remote/devices', { id: PHONE2, allowed: false })
+    const n0 = lines(pushed).length
+    await studio.api('/push/test', {})
+    const sent = lines(pushed).slice(n0).map((x) => x.device)
+    ok(sent.includes(PHONE) && !sent.includes(PHONE2), 'a notification goes to Phone, not to Phone2 while it\'s unticked', sent)
+    // Unpaired by itself: its Bridge AI asks for its id, then removes itself.
+    const gone = await ph2.request('DELETE', `/api/relay/devices/${encodeURIComponent(PHONE2)}`)
+    ok(gone.status === 200 && !(await studio.api('/relay')).devices.some((d) => d.id === PHONE2), 'and it can still unpair itself', gone.status)
+    ph2.stop()
+  })
+
+  await part('unticked while a terminal, the app\'s feed and a copy are open: each ends then', async () => {
+    const t = ph.socket(ATTACH, { term: true })
+    await t.wait((x) => x.opened, 6000)
+    await t.send({ type: 'input', data: 'echo letin-on\r' })
+    const screen = async () => JSON.stringify(await studio.api(`/agents/${encodeURIComponent(SHELL)}/screen?lines=40`))
+    ok(!!(await t.wait((x) => /letin-on/.test(x.text), 10000)) && !!(await until(async () => (await screen()).includes('letin-on'), 5000, 200)), 'Phone, let in: its terminal on Studio is live, and what it types is on the pane', t.text.slice(-120))
+    let fed = null
+    ph.request('GET', '/api/events').then((r) => { fed = r })
+    const begun = await ph.request('POST', '/api/transfers/in', { key: 'letin-copy', name: 'photo.txt', files: [{ size: 10 }], to: { where: 'pane', pane: SHELL } })
+    const parts = () => fs.readdirSync(shellDir).filter((f) => f.endsWith('.part'))
+    ok(begun.status === 200 && parts().length === 1, 'a copy from it is coming in', begun.json)
+    await sleep(500)
+    const t0 = Date.now()
+    await studio.api('/remote/devices', { id: PHONE, allowed: false })
+    await t.wait((x) => x.closed, 5000)
+    ok(!!t.closed && Date.now() - t0 < 5000, 'unticked: its terminal closes then', t.closed)
+    await t.send({ type: 'input', data: 'echo letin-after\r' })
+    await sleep(500)
+    ok(!(await screen()).includes('letin-after'), 'and nothing typed after reaches the pane')
+    ok(!!(await until(() => fed, 5000, 50)) && !!fed.error, 'the app\'s feed through its link ends, told why', fed)
+    ok(!!(await until(() => !parts().length, 5000, 100)) && !(await studio.api('/transfers')).incoming.some((x) => x.name === 'photo.txt'), 'the copy it was sending is let go, and what came of it thrown away', parts())
+    const again = ph.socket(ATTACH, { term: true })
+    await again.wait((x) => x.closed, 6000)
+    ok(again.msgs[0]?.code === 'notLetIn' && !again.text, 'opened again: refused', again.msgs)
+    await studio.api('/remote/devices', { id: PHONE, allowed: true })
+    const back = await ph.request('GET', '/api/fleet')
+    ok(back.status === 200, 'ticked again: it may', back.status)
+  })
+
+  await part('through a linked computer: its own list first, then this one checks that computer', async () => {
+    // Pocket, unticked at Laptop: nothing of Laptop's, nor of Studio's through Laptop.
+    await laptop.api('/remote/devices', { id: POCKET, allowed: false })
+    const own = await pk.request('GET', '/api/fleet')
+    const on = await pk.request('GET', `/m/${S.id}/api/fleet`)
+    const term = pk.socket(`/m/${S.id}${ATTACH}`, { term: true })
+    await term.wait((x) => x.closed, 6000)
+    ok(shut(own, 'Laptop') && shut(on, 'Laptop') && term.msgs[0]?.code === 'notLetIn' && term.msgs[0].computer === 'Laptop' && !term.text, 'Pocket, unticked at Laptop: Laptop turns it away, from Laptop\'s things and from Studio\'s through it', [own.json, on.json, term.msgs])
+    await laptop.api('/remote/devices', { id: POCKET, allowed: true })
+    // Laptop unticked at Studio: Laptop gets nothing of Studio's, nor does Pocket through it.
+    await studio.api('/remote/devices', { id: LAPTOP, allowed: false })
+    const via = await pk.request('GET', `/m/${S.id}/api/fleet`)
+    ok(shut(via) && via.json.through === 'Laptop' && /Studio hasn't let Laptop in, which this device comes through/.test(via.json.error), 'Pocket through Laptop: Studio says it hasn\'t let Laptop in, which Pocket comes through', via.json)
+    const mine = await fetch(`${laptop.url}/m/${S.id}/api/fleet`, { headers: { authorization: `Bearer ${laptop.key}` } }).then(async (r) => ({ status: r.status, json: await r.json() }))
+    ok(shut(mine) && !mine.json.through, 'Laptop\'s own window on Studio: Studio hasn\'t let this device in', mine.json)
+    ok((await pk.request('GET', '/api/fleet')).status === 200, 'Pocket still uses Laptop itself')
+    const lt = local(laptop, `/m/${S.id}${ATTACH}`)
+    await lt.wait((x) => x.closed, 6000)
+    ok(lt.msgs.some((m) => m?.code === 'notLetIn' && m.computer === 'Studio'), 'nor a terminal of Studio\'s from Laptop', lt.msgs)
+    const said = await until(async () => { await laptop.api(`/needs-you?fresh=${S.id}`); return (await laptop.api('/machines')).machines.find((m) => m.id === S.id && m.notLetIn) }, 15000, 500)
+    ok(!!said, 'Laptop\'s list of its computers says Studio hasn\'t let it in', said && { name: said.name, notLetIn: said.notLetIn })
+    await studio.api('/remote/devices', { id: LAPTOP, allowed: true })
+    const back = await until(async () => { await laptop.api(`/needs-you?fresh=${S.id}`); return !(await laptop.api('/machines')).machines.find((m) => m.id === S.id)?.notLetIn }, 15000, 500)
+    ok(!!back && (await pk.request('GET', `/m/${S.id}/api/fleet`)).status === 200, 'ticked again at Studio: Laptop, and Pocket through it, may again')
+  })
+
   // ---------- smaller ones ----------
   await part('the password changed or taken off: sessions end', async () => {
     const v = ph.socket(V)
@@ -672,6 +813,38 @@ try {
     ok(stops('will-redirect', { url: 'http://127.0.0.1:7420/' }, 'http://127.0.0.1:7420/', false, true) && !stops('will-redirect', { url: 'http://localhost:5173/next' }, 'http://localhost:5173/next', false, true), 'a redirect elsewhere isn\'t followed (to its own app, it is)')
     ok(stops('will-frame-navigate', { url: 'http://127.0.0.1:7420/api/relay', isMainFrame: false }) && !stops('will-frame-navigate', { url: 'http://localhost:5173/frame', isMainFrame: false }), 'nor a frame in it to anything else on this computer')
     ok(stops('will-frame-navigate', { url: 'https://elsewhere.example/', isMainFrame: true }), 'nor the page itself, any way it goes')
+  })
+
+  // ---------- in the app: the phone told, and Allow at the computer ----------
+  // A phone paired through its relay page (the apps' page) once Studio has a password: it starts
+  // unticked, so its page is one card saying so; Studio's Needs You lists it with Allow, and once
+  // it's allowed there the phone's page opens by itself.
+  await part('the card on a phone not let in, and Allow from the computer', async () => {
+    const { b, which } = await browser()
+    try {
+      const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: which === 'chromium', hasTouch: true, deviceScaleFactor: 2 })
+      await ctx.addInitScript(() => { try { localStorage.setItem('cc-toured', JSON.stringify({ desktop: true, phone: true })) } catch { /* no storage */ } })
+      const p = await ctx.newPage()
+      await p.goto((await studio.api('/relay/pair', {})).pairing.link, { waitUntil: 'commit' })
+      await p.locator('#pair-go').click({ timeout: 20000 })
+      const f = await until(() => p.frames().find((x) => x !== p.mainFrame() && x.url().startsWith(ra.url)), 30000, 100)
+      const card = f.locator('.letin-screen')
+      await card.waitFor({ timeout: 30000 })
+      const said = (await card.innerText()).replace(/\s+/g, ' ')
+      ok(/Studio hasn't let this device in/.test(said) && /On Studio: Settings › Remote Access › Which Devices May Connect\./.test(said), `${which}: the phone's page is one card, saying Studio hasn't let it in and where that's changed`, said)
+      ok(!(await f.locator('.settings-btn, .error-text').count()), 'and none of the app behind it, nor its panels failing')
+      const d = (await studio.api('/remote')).access.devices.find((x) => x.fresh && !x.allowed && x.kind === 'phone')
+      const s = await page(b, studio.url)
+      await s.p.locator('.top-right .needs-chip').click({ timeout: 20000 })
+      const item = s.p.locator('.ny-panel .t-letin', { hasText: d?.name || 'none' })
+      await item.waitFor({ timeout: 15000 })
+      ok(/waits to be let in/.test(await item.innerText()), 'Studio\'s Needs You lists it, waiting to be let in, with Allow', (await item.innerText()).replace(/\s+/g, ' '))
+      await item.getByRole('button', { name: 'Allow' }).click()
+      ok(!!(await until(async () => (await studio.api('/remote')).access.devices.find((x) => x.id === d.id)?.allowed, 5000, 100)), 'Allow lets it in: ticked in Which Devices May Connect')
+      ok(!!(await f.locator('.settings-btn').waitFor({ timeout: 20000 }).then(() => true, () => false)), 'and the phone\'s page opens Bridge AI by itself')
+      await s.ctx.close()
+      await ctx.close()
+    } finally { await b.close() }
   })
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

@@ -32,8 +32,9 @@ const cleanLive = (b) => ({
 })
 
 // remote(): remote.js's (made after this, with this one's tell). pushDevices(): the devices that
-// get this computer's notifications (push.js). onLive(list): what's live changed.
-export function makeTell({ remote, notify, machines, relay, pushDevices = () => [], onLive = () => {} }) {
+// get this computer's notifications (push.js). onLive(list): what's live changed. out(m): a linked
+// computer not let in here (Which Devices May Connect), which is told nothing.
+export function makeTell({ remote, notify, machines, relay, pushDevices = () => [], onLive = () => {}, out = () => false }) {
   const there = new Map() // machine id -> { name, at, sessions, asks }: what each said last
   const name = () => relay.thisName()
   const linked = () => machines.list().filter((m) => m.state === 'linked')
@@ -66,7 +67,7 @@ export function makeTell({ remote, notify, machines, relay, pushDevices = () => 
   async function tell(ev) {
     const viewer = relay.deviceOf(ev.by?.id)
     const mine = notify.send({ ...noteFor(ev, name(), 'screen', { id: ev.id }), skip: { devices: ev.by?.id ? [ev.by.id] : [] } }).then(sentOf, () => 0)
-    const others = linked().map(async (m) => {
+    const others = linked().filter((m) => !out(m)).map(async (m) => {
       // The viewer is that computer itself, or a device paired with it: it leaves that one out.
       const byYou = machines.ofDevice(viewer)?.id === m.id
       const told = { what: ev.what, id: ev.id, by: byOf(ev.by), for: ev.for || null, forKind: ev.forKind || null, forId: byYou ? ev.forId || null : null, byYou, control: !!ev.control }
@@ -132,7 +133,7 @@ export function makeTell({ remote, notify, machines, relay, pushDevices = () => 
   function say() {
     clearTimeout(againTimer)
     const now = own()
-    for (const m of linked()) machines.callOn(m.id, 'POST', '/api/remote/heard', now, 10000).catch(() => {})
+    for (const m of linked().filter((x) => !out(x))) machines.callOn(m.id, 'POST', '/api/remote/heard', now, 10000).catch(() => {})
     if (now.sessions.length || now.asks.length) { againTimer = setTimeout(say, AGAIN_MS); againTimer.unref?.() }
   }
 

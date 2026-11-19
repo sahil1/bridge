@@ -599,6 +599,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
                 </small>
                 {m.state === 'asking' && m.code && <small>{tn('On {name}, allow it if it shows {code}.', { name: m.name, code: <b className="ask-code">{m.code}</b> })}</small>}
                 {m.error && m.state === 'linked' && !m.online && !fixes[m.id] && <small className="muted">{m.error}</small>}
+                {m.notLetIn && m.state === 'linked' && m.online && <small className="muted"><Icon name="lock" size={11} /> {t('{name} hasn\'t let {here} in. On {name}: Settings › Remote Access › Which Devices May Connect.', { name: m.name, here: data.here.name })}</small>}
                 {m.state === 'changed' && <small className="muted">{t('{name} doesn\'t have the key it was linked with: it was set up again, or something is in between. On {name}, choose Pair a device and paste its link in Link a device below, to check it\'s really {name}.', { name: m.name })}</small>}
                 {m.state === 'removed' && <small className="muted">{t('{name} forgot this device. Link again asks it; allow it there after checking both show the same six digits.', { name: m.name })}</small>}
                 {newOf(m) && <small className="muted">{t('Linked with this device\'s code. Keep it if it\'s yours, and it meets your other computers too.')}</small>}
