@@ -35,9 +35,20 @@
 //   any are; Try It on a phone shows an attached PDF as a made one;
 //   Discord: one over the 10 MB it takes from a bot stays here, said in the reply; Teams, which takes
 //   none, says so; its Activity's timeline: what it attached, from where.
+// And what keeps files from its folders in: by default an answer with one waits for you even
+// answering without asking, and where you let it go it goes only in a direct message with someone
+// you named, or a private channel everyone in which may ask it (not with a guest in it, nor once it's
+// shared with another organization); what you review says where each file is from (Needs You on a
+// phone with Open, the Slack direct message); keys, passwords and tokens found in what it would send
+// (lower case, base64 at any offset, UTF-16 either way, inside a PDF's compressed streams or past
+// 4 MB, inside Word and Excel files, config files when let through) and in its words; Claude Code's
+// Read rules from the same list of secret names; a folder that leads somewhere else than when it was
+// picked (or, kept before that, than its name says) isn't read until you say Keep reading it, one
+// made again where it was is, and a run says which folders it didn't read.
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import zlib from 'node:zlib'
 import { spawnSync } from 'node:child_process'
 import { checks, until, browser, page, shot, startDiscord, startTeams, startModel, phoneFaults, IS_WIN, IS_MAC, TEST } from '../lib/harness.mjs'
 import { botKit, openSettings, M, OWNER } from '../lib/bots.mjs'
@@ -102,6 +113,58 @@ fs.writeFileSync(path.join(NOTES, 'settings.json'), '{"theme": "dark"}\n')
 fs.writeFileSync(path.join(NOTES, '.env'), 'API_TOKEN=abcdef123456\n')
 fs.mkdirSync(path.join(NOTES, '.git'), { recursive: true })
 fs.writeFileSync(path.join(NOTES, '.git', 'config'), '[remote] needle-in-dot-folder\n')
+// And what's harder to see: a password in lower case, an AWS credentials file, Stripe's, Google's,
+// Hugging Face's, npm's and SendGrid's keys, a key in base64 a byte or two in, UTF-16 with no byte
+// order mark, a key in a PDF's compressed stream or more than 4 MB into one, in a Word document's
+// words, a spreadsheet with a password column; config files with a password (when they may go).
+const zipOf = (parts) => {
+  const local = []
+  const central = []
+  let off = 0
+  for (const [name, text] of Object.entries(parts)) {
+    const raw = Buffer.from(text)
+    const data = zlib.deflateRawSync(raw)
+    const n = Buffer.from(name)
+    const lh = Buffer.alloc(30)
+    lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(8, 8); lh.writeUInt32LE(data.length, 18); lh.writeUInt32LE(raw.length, 22); lh.writeUInt16LE(n.length, 26)
+    const ch = Buffer.alloc(46)
+    ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 4); ch.writeUInt16LE(20, 6); ch.writeUInt16LE(8, 10); ch.writeUInt32LE(data.length, 20); ch.writeUInt32LE(raw.length, 24); ch.writeUInt16LE(n.length, 28); ch.writeUInt32LE(off, 42)
+    local.push(lh, n, data)
+    central.push(ch, n)
+    off += 30 + n.length + data.length
+  }
+  const cd = Buffer.concat(central)
+  const end = Buffer.alloc(22)
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(central.length / 2, 8); end.writeUInt16LE(central.length / 2, 10); end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(off, 16)
+  return Buffer.concat([...local, cd, end])
+}
+const flatePdf = (text) => { const s = zlib.deflateSync(Buffer.from(`BT /F1 12 Tf (${text.replace(/\n/g, ') Tj T* (')}) Tj ET`)); return Buffer.concat([Buffer.from(`%PDF-1.4\n1 0 obj << /Length ${s.length} /Filter /FlateDecode >> stream\n`), s, Buffer.from('\nendstream endobj\n%%EOF\n')]) }
+// (Made-up tokens in the shapes those services use, put together here so no whole one is in this file.)
+const fake = (prefix, n) => `${prefix}${'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789'.repeat(2).slice(0, n)}`
+const HARD = {
+  'wifi.txt': 'Home wifi\nnetwork: Home5G\npassword: Hunter2Hunter2!\n',
+  'aws-notes.txt': `[default]\naws_secret_access_key = ${['wJalrXUtnFEMI', 'K7MDENG', 'bPxRfiCYEXAMPLEKEY'].join('/')}\n`,
+  'stripe.md': `Live key: ${fake(['sk', 'live', ''].join('_'), 24)}\n`,
+  'db.md': 'db_password=s3cr3tPassw0rd\n',
+  'more-tokens.txt': `${fake(['GOCSPX', ''].join('-'), 28)}\n${fake(['hf', ''].join('_'), 30)}\n`,
+  'npm-sg.txt': `${fake(['npm', ''].join('_'), 36)}\n${fake('SG.', 20)}.${fake('', 30)}\n`,
+  'b64-one.txt': Buffer.from(`x${PEM}`).toString('base64'),
+  'b64-two.txt': Buffer.from(`xy${PEM}`).toString('base64'),
+  'utf16be.txt': Buffer.from(PEM, 'utf16le').swap16(),
+  'packed.pdf': flatePdf(PEM),
+  'late.pdf': Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(5 * 1024 * 1024, 0x20), Buffer.from(PEM), Buffer.from('%%EOF\n')]),
+  'memo.docx': zipOf({ '[Content_Types].xml': '<Types/>', 'word/document.xml': `<w:document><w:body><w:p><w:r><w:t>${PEM}</w:t></w:r></w:p></w:body></w:document>` }),
+  'sites.xlsx': zipOf({ '[Content_Types].xml': '<Types/>', 'xl/sharedStrings.xml': '<sst><si><t>Site</t></si><si><t>Password</t></si><si><t>bank.example</t></si><si><t>Hunter2Hunter2!</t></si></sst>' }),
+  'appsettings.json': '{"ConnectionStrings":{"Main":"Server=db;User Id=sa;Password=Pr0dPassw0rd;"}}\n',
+  'database.yaml': 'database:\n  password: Pr0dPassw0rd\n',
+  // (And what's fine: a plan in Word, a sheet of figures, a document about keys that holds none.)
+  'roadmap.docx': zipOf({ '[Content_Types].xml': '<Types/>', 'word/document.xml': '<w:document><w:body><w:p><w:r><w:t>Q3: ship the bot. The password field is required.</w:t></w:r></w:p></w:body></w:document>' }),
+  'figures.xlsx': zipOf({ '[Content_Types].xml': '<Types/>', 'xl/sharedStrings.xml': '<sst><si><t>Region</t></si><si><t>Total</t></si></sst>' }),
+  'keys-howto.md': '# Keys\n\nSet OPENAI_API_KEY=<your key> in your shell. The password: required. sk-learn is a library.\n',
+}
+fs.mkdirSync(path.join(NOTES, 'hard'), { recursive: true })
+for (const [n, body] of Object.entries(HARD)) fs.writeFileSync(path.join(NOTES, 'hard', n), body)
+fs.writeFileSync(path.join(NOTES, 'token.json'), '{"t": 1}\n')
 // A folder it reads that's swapped for a link once it's picked (to your home folder, or elsewhere).
 const TEAM = path.join(kit.home, 'team')
 fs.mkdirSync(TEAM, { recursive: true })
@@ -181,7 +244,7 @@ try {
     let deny = []
     try { deny = JSON.parse(fs.readFileSync(settingsFile, 'utf8')).permissions.deny } catch { /* gone already */ }
     const notesRule = `//${fs.realpathSync(NOTES).replace(/\\/g, '/').replace(/^\/+/, '')}`
-    ok(!!settingsFile && (!deny.length || (deny.includes(`Read(${notesRule}/**/.*)`) && deny.includes(`Read(${notesRule}/**/.*/**)`) && deny.some((r) => r.startsWith(`Read(${notesRule}/**/*[sS][eE][cC][rR][eE][tT]*`)))), 'Claude Code is given Read rules for its folder (--settings): no hidden file or folder, nothing named as a secret', { settingsFile, deny: deny.slice(0, 4) })
+    ok(!!settingsFile && (!deny.length || (deny.includes(`Read(${notesRule}/**/.*)`) && deny.includes(`Read(${notesRule}/**/.*/**)`) && deny.includes(`Read(${notesRule}/**/[sS][eE][cC][rR][eE][tT])`) && deny.includes(`Read(${notesRule}/**/[tT][oO][kK][eE][nN].*)`))), 'Claude Code is given Read rules for its folder (--settings): no hidden file or folder, nothing named as a secret', { settingsFile, deny: deny.slice(0, 4) })
     const cfg = s.args[s.args.indexOf('--mcp-config') + 1]
     let server = null
     try { server = JSON.parse(fs.readFileSync(cfg, 'utf8')).mcpServers?.bridge_outbox } catch { /* gone already */ }
@@ -221,8 +284,9 @@ try {
     ok(/ATTACH: ~\/notes\/hiring\/plan\.docx/.test(d?.draft || '') && !d?.files?.length, 'an ATTACH: line from Claude Code, which has its tool: left as words, nothing attached', d?.draft)
     await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: false })
     // attach_file twenty times a run at most.
-    await slack.ask({ user: 'U0DANA', text: `${M} Many tries please ${Array.from({ length: 21 }, (_, i) => `[attach ~/notes/none-${i + 1}.pdf]`).join(' ')} [answer Done.]` })
+    await slack.ask({ user: 'U0DANA', text: `${M} Many tries please ${Array.from({ length: 21 }, (_, i) => `[attach ~/notes/none-${i + 1}.pdf]`).join(' ')} [try-read ~/notes/token.json] [answer Done.]` })
     const many = await draftOf('Many tries please', 60000)
+    ok(/I couldn't read ~\/notes\/token\.json: a rule in my settings refused it\./.test(many?.draft || ''), 'a file named as a token in its folder: refused by its Read rules, made from the same list attaching uses', many?.draft)
     ok(/I couldn't attach none-21\.pdf: Not attached: you've asked to attach 20 files already, the most a run may/.test(many?.draft || '') && (many?.draft.match(/none-\d+\.pdf \(/g) || []).length === 10, 'attach_file twenty times a run at most; ten refusals said in the reply at most', many?.draft)
     await kit.api(`/bots/questions/${encodeURIComponent(many.id)}`, { send: false })
   })
@@ -283,6 +347,27 @@ try {
     await kit.api('/bots/b1/settings', { attachConfig: false })
   })
 
+  // ---------- What's harder to see: inside PDFs and Office files, in lower case, a byte or two in ----------
+  await part('keys and passwords harder to see', async () => {
+    const looks = 'it holds what looks like a key, a password or a token'
+    const ask = async (words, names) => {
+      await slack.ask({ user: 'U0DANA', text: `${M} ${words} ${names.map((n) => `[attach ~/notes/hard/${n}]`).join(' ')} [answer Done.]` })
+      const d = await draftOf(words, 60000)
+      await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: false })
+      return { d, line: (d?.draft || '').split('\n').find((l) => l.startsWith('Not sent:')) || '' }
+    }
+    const one = ['wifi.txt', 'aws-notes.txt', 'stripe.md', 'db.md', 'more-tokens.txt', 'npm-sg.txt', 'b64-one.txt', 'b64-two.txt', 'utf16be.txt', 'packed.pdf']
+    const a = await ask('Hard ones please', one)
+    const missed = one.filter((n) => !a.line.includes(`${n} (${looks})`))
+    ok(a.d && !a.d.files?.length && !missed.length, 'refused, saying why: a lower-case password, an AWS credentials file, Stripe\'s, Google\'s, Hugging Face\'s, npm\'s and SendGrid\'s keys, a key in base64 a byte or two in, UTF-16 with no byte order mark, a key in a PDF\'s compressed stream', { missed, draft: a.d?.draft })
+    const b = await ask('Office ones please', ['late.pdf', 'memo.docx', 'sites.xlsx', 'roadmap.docx', 'figures.xlsx', 'keys-howto.md'])
+    ok(b.line.includes(`late.pdf (${looks})`) && b.line.includes(`memo.docx (${looks})`) && b.line.includes('sites.xlsx (it\'s a table with a column of passwords)') && b.d?.files?.map((f) => f.name).sort().join() === 'figures.xlsx,keys-howto.md,roadmap.docx', 'a key more than 4 MB into a PDF, in a Word document\'s words, a spreadsheet with a password column: refused; a plan, a sheet of figures and a how-to about keys go', { files: b.d?.files, line: b.line })
+    await kit.api('/bots/b1/settings', { attachConfig: true })
+    const c = await ask('Config ones please', ['appsettings.json', 'database.yaml'])
+    ok(c.line.includes(`appsettings.json (${looks})`) && c.line.includes(`database.yaml (${looks})`) && !c.d?.files?.length, 'with config files let through: a connection string\'s Password=… and a YAML password: refused', c.line)
+    await kit.api('/bots/b1/settings', { attachConfig: false })
+  })
+
   // ---------- A folder that isn't the one you picked any more, or where settings are kept ----------
   await part('folders swapped or kept out', async () => {
     await kit.api('/bots/b1/settings', { readsFrom: ['~/notes', '~/team'] })
@@ -298,13 +383,42 @@ try {
     await slack.ask({ user: 'U0DANA', text: `${M} The tax return please [attach ~/team/Private/tax-return.pdf] [answer Done.]` })
     const d = await draftOf('The tax return please')
     ok(d && !d.files?.length && /tax-return\.pdf \(it isn't in the folders the bot reads from\)/.test(d.draft) && !(await slack.state()).files.some((f) => f.name === 'tax-return.pdf'), 'and nothing is attached through it', d?.draft)
+    const started = events().find((e) => e.type === 'run.started' && e.q === d.id)
+    ok(started?.notRead?.some((x) => x.folder === '~/team' && /whole home folder/.test(x.why)), 'its run goes ahead with the rest, and its record says which folder it didn\'t read, and why', started?.notRead)
     await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: false })
+    // Swapped for a link to another folder: not read until you say so; Keep reading it, and it is.
     fs.rmSync(TEAM)
     fs.symlinkSync(ELSEWHERE, TEAM, 'dir')
-    const v2 = await until(async () => { const x = await botOf(); return /isn't the folder it was when you picked it/.test(x.folders?.find((f) => f.shown === '~/team')?.problem || '') ? x : null }, 8000)
-    ok(!!v2, 'swapped for a link to another folder: not read, said', v2?.folders)
+    const v2 = await until(async () => { const x = await botOf(); const f = x.folders?.find((y) => y.shown === '~/team'); return f?.confirm && /~\/team now leads to ~\/elsewhere, not ~\/team as when you picked it, so it isn't read until you say: keep reading it\?/.test(f.problem || '') ? x : null }, 8000)
+    ok(!!v2, 'swapped for a link to another folder: not read, and Settings asks whether to keep reading it', v2?.folders)
+    await kit.api('/bots/b1/settings', { keepFolder: '~/team' })
+    const v3 = await botOf()
+    ok(v3.folders?.find((f) => f.shown === '~/team')?.ok && events().some((e) => e.type === 'settings.changed' && e.setting === 'keep reading ~/team' && e.new === '~/elsewhere'), 'Keep reading it: read again, where it leads now, and said in its record', v3.folders)
     fs.rmSync(TEAM)
     fs.renameSync(`${TEAM}.was`, TEAM)
+    // A bot from before folders were kept by where they lead: one that leads where its name says is
+    // kept so at once; one that's a link now (to ~/Private) isn't read until you say.
+    const botFile = path.join(kit.data, 'bots', 'b1', 'bot.json')
+    const unkept = () => { const j = JSON.parse(fs.readFileSync(botFile, 'utf8')); delete j.folderIds; fs.writeFileSync(botFile, JSON.stringify(j, null, 2)) }
+    unkept()
+    fs.renameSync(TEAM, `${TEAM}.was`)
+    fs.symlinkSync(path.join(kit.home, 'Private'), TEAM, 'dir')
+    const v4 = await until(async () => { const x = await botOf(); const f = x.folders?.find((y) => y.shown === '~/team'); return f?.confirm ? x : null }, 8000)
+    ok(/~\/team leads to ~\/Private, so it isn't read until you say: keep reading it\?/.test(v4?.folders?.find((f) => f.shown === '~/team')?.problem || '') && !JSON.parse(fs.readFileSync(botFile, 'utf8')).folderIds?.['~/team'] && JSON.parse(fs.readFileSync(botFile, 'utf8')).folderIds?.['~/notes'], 'a folder kept before, a link now (to ~/Private): not taken as it is, but asked; one that leads where its name says (~/notes): kept', v4?.folders)
+    await slack.ask({ user: 'U0DANA', text: `${M} The other tax return please [attach ~/team/tax-return.pdf] [answer Done.]` })
+    const d2 = await draftOf('The other tax return please')
+    ok(d2 && !d2.files?.length && /tax-return\.pdf \(it isn't in the folders the bot reads from\)/.test(d2.draft), 'and nothing is attached through it meanwhile', d2?.draft)
+    await kit.api(`/bots/questions/${encodeURIComponent(d2.id)}`, { send: false })
+    fs.rmSync(TEAM)
+    fs.renameSync(`${TEAM}.was`, TEAM)
+    // Made again where it was (a sync, a restore: a new folder at the same path): the same folder.
+    await until(async () => (await botOf()).folders?.find((f) => f.shown === '~/team')?.ok, 8000)
+    fs.renameSync(TEAM, `${TEAM}.old`)
+    fs.mkdirSync(TEAM)
+    fs.copyFileSync(path.join(`${TEAM}.old`, 'plan.pdf'), path.join(TEAM, 'plan.pdf'))
+    ok((await botOf()).folders?.find((f) => f.shown === '~/team')?.ok, 'a folder made again where it was is read as before')
+    fs.rmSync(TEAM, { recursive: true })
+    fs.renameSync(`${TEAM}.old`, TEAM)
     await kit.api('/bots/b1/settings', { readsFrom: ['~/notes'] })
   })
 
@@ -470,6 +584,10 @@ try {
     const dk = await draftOf('Auto key')
     ok(dk?.state === 'draft' && /what looks like a key, a password or a token/.test(dk.warn || ''), 'an answer whose words look like a key or a token waits for you', dk && { state: dk.state, warn: dk.warn })
     await discard(dk)
+    await slack.ask({ user: 'U0DANA', dm: true, text: 'Auto wifi [answer The wifi password: Hunter2Hunter2]' })
+    const dw = await draftOf('Auto wifi')
+    ok(dw?.state === 'draft' && /what looks like a key, a password or a token/.test(dw.warn || ''), 'and one that gives a password in lower case', dw && { state: dw.state, warn: dw.warn })
+    await discard(dw)
     // To people you named: in a direct message with Dana it goes; Eve, who may ask but isn't named,
     // and Dana in a private channel, wait.
     await kit.api('/bots/b1/settings', { attachAuto: 'named' })
@@ -489,11 +607,33 @@ try {
     await slack.ask({ user: 'U0EVE', dm: true, text: 'Auto five [attach ~/notes/hiring/plan.docx] [answer Here.]' })
     ok((await inSlack('plan.docx', 'D0EVE'))?.sha256 === sha(PLAN), 'to everyone who may ask: Eve\'s direct message goes without asking')
     await slack.ask({ user: 'U0EVE', channel: 'C0PRIV', text: `${M} Auto six [attach ~/notes/hiring/plan.docx] [answer Here.]` })
-    ok((await inSlack('plan.docx', 'C0PRIV'))?.sha256 === sha(PLAN), 'and a private channel')
+    ok((await inSlack('plan.docx', 'C0PRIV'))?.sha256 === sha(PLAN), 'and a private channel everyone in which may ask it')
     await slack.ask({ user: 'U0EVE', text: `${M} Auto seven [attach ~/notes/hiring/plan.docx] [answer Here.]` })
     const d7 = await draftOf('Auto seven')
     ok(d7?.state === 'draft' && /public channel, so it waits for you/.test(d7.warn || ''), 'a public channel waits for you all the same', d7?.warn)
     await discard(d7)
+    // Everyone in a private channel gets the file: with a guest in it, it waits.
+    await slack.channel({ channel: 'C0PRIV', members: ['U0DANA', 'U0EVE', 'U0OWNER', 'U0GUS', 'UBOT'] })
+    await slack.ask({ user: 'U0EVE', channel: 'C0PRIV', text: `${M} Auto eight [attach ~/notes/hiring/plan.docx] [answer Here.]` })
+    const d8 = await draftOf('Auto eight')
+    ok(d8?.state === 'draft' && /where one person in it may not ask it \(a guest, someone from another organization, or someone you haven't named\), so it waits for you/.test(d8.warn || ''), 'with a guest in the private channel, it waits for you', d8?.warn)
+    await discard(d8)
+    await slack.channel({ channel: 'C0PRIV', members: ['U0DANA', 'U0EVE', 'U0OWNER', 'UBOT'] })
+    // Only people you named may ask: Eve's in the channel, so Dana's answer there waits.
+    await kit.api('/bots/b1/settings', { who: 'named' })
+    await slack.ask({ user: 'U0DANA', channel: 'C0PRIV', text: `${M} Auto nine [attach ~/notes/hiring/plan.docx] [answer Here.]` })
+    const d9 = await draftOf('Auto nine')
+    ok(d9?.state === 'draft' && /people in it may not ask it/.test(d9.warn || ''), 'with only people you named asking, someone not named in it: it waits for you', d9?.warn)
+    await discard(d9)
+    await kit.api('/bots/b1/settings', { who: 'channels' })
+    // Shared with another organization since: Slack says so, and it waits at once.
+    await slack.channel({ channel: 'C0PRIV', shared: true })
+    await new Promise((r) => setTimeout(r, 1500))
+    await slack.ask({ user: 'U0EVE', channel: 'C0PRIV', text: `${M} Auto ten [attach ~/notes/hiring/plan.docx] [answer Here.]` })
+    const d10 = await draftOf('Auto ten')
+    ok(d10?.state === 'draft' && /only in a direct message or a private channel where everyone may ask it/.test(d10.warn || ''), 'a private channel shared with another organization since: it waits, as soon as Slack says so', d10?.warn)
+    await discard(d10)
+    await slack.channel({ channel: 'C0PRIV', shared: false })
     await kit.api('/bots/b1/settings', { auto: false, who: 'named', attachAuto: 'no' })
   })
 

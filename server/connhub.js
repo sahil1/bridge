@@ -458,6 +458,8 @@ export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner'
       settle: pass('settle'), download: pass('download'), dm: pass('dm'), missed: pass('missed'),
       masked: (...a) => con()?.masked?.(...a),
       people: (o) => must().people(o), channels: () => must().channels(), person: (id) => con()?.person?.(id),
+      // Who's in a channel, where the platform can say (Slack); null where it can't.
+      members: async (channel) => (con()?.members ? con().members(channel) : null),
       // Its own connection's tokens: set and forgotten here (a shared one's, in Connections).
       setTokens: pass('setTokens'), setToken: pass('setToken'), setGuild: pass('setGuild'), setCredentials: pass('setCredentials'), setEndpoint: pass('setEndpoint'), checkEndpoint: pass('checkEndpoint'), teamsApp: pass('teamsApp'),
       forget() { const c = conn(); if (c && !c.shared) hubOf(c).connector.forget?.() },

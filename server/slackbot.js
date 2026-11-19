@@ -91,6 +91,8 @@ const MARK_MS = 2000 // where it got to, written this long after it moved
 const STREAM_MAX = 12000 // a streamed message's words, all told (Slack's limit)
 const FILE_MAX = 20 * 1024 * 1024 // a file attached to a question, read at most this big
 const FILES_MAX = 10 // and this many of them
+const PLACE_MS = 10 * 60 * 1000 // what a channel is (private, shared with another company), looked up again after this
+const MEMBERS_MAX = 2000 // a channel with more members than this is taken as one whose members can't be checked
 const SLASH_WAIT = 2000 // /<name>'s acknowledgement waits this long for its question to be posted
 const HOME_DAYS = 30 // who opened its Home tab, remembered this long (to say it's offline)
 const HOME_MAX = 50
@@ -153,7 +155,8 @@ const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').rep
 // manifest can't carry an icon: that's set in Slack's app page.) An app made from an earlier one
 // lacks some scopes: Settings says which, from auth.test, and what each would let it do.
 export const SCOPES = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write', 'users:read', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write']
-export const EVENTS = ['app_mention', 'message.channels', 'message.groups', 'message.im', 'message.mpim', 'app_home_opened', 'agent_session_stopped']
+// (And a channel shared with another organization, or no longer: told at once, not at the next look.)
+export const EVENTS = ['app_mention', 'message.channels', 'message.groups', 'message.im', 'message.mpim', 'app_home_opened', 'agent_session_stopped', 'channel_shared', 'channel_unshared']
 // What each scope lets it do, for "your app lacks …".
 export const SCOPE_FOR = {
   'app_mentions:read': 'hear when it\'s mentioned',
@@ -437,22 +440,38 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   // ---------- What comes in ----------
   const names = {} // user id -> name, from users.list and users.info
   const users = {} // user id -> { guest, team, stranger }, the same
-  const places = {} // channel id -> { kind, id, name, private, shared }
+  const places = {} // channel id -> { kind, id, name, private, shared, at }
   // Where a message was: a direct message, or a channel by its name and whether it's private or
   // shared with another company (a lookup that fails says neither, and is tried again next time).
+  // Looked up again after PLACE_MS, and at once when Slack says it's been shared or unshared.
   async function placeOf(channel, type) {
     if (type === 'im' || String(channel).startsWith('D')) return { kind: 'dm', id: channel, name: null, private: true, shared: false }
-    if (places[channel]) return places[channel]
+    if (places[channel] && Date.now() - places[channel].at < PLACE_MS) return places[channel]
     try {
       const c = (await call('conversations.info', { channel })).channel || {}
-      places[channel] = { kind: 'channel', id: channel, name: c.name || null, private: !!(c.is_private || c.is_im || c.is_mpim), shared: !!(c.is_ext_shared || c.is_shared) }
+      places[channel] = { kind: 'channel', id: channel, name: c.name || null, private: !!(c.is_private || c.is_im || c.is_mpim), shared: !!(c.is_ext_shared || c.is_shared), at: Date.now() }
       return places[channel]
     } catch { return { kind: 'channel', id: channel, name: null, private: false, shared: false } }
   }
   const learn = (u) => {
     if (!u?.id) return
     names[u.id] = u.profile?.display_name || u.profile?.real_name || u.real_name || u.name || u.id
-    users[u.id] = { guest: !!(u.is_restricted || u.is_ultra_restricted), team: u.team_id || null, stranger: u.is_stranger === true }
+    users[u.id] = { guest: !!(u.is_restricted || u.is_ultra_restricted), team: u.team_id || null, stranger: u.is_stranger === true, bot: !!(u.is_bot || u.id === 'USLACKBOT') }
+  }
+  // Who's in a channel (conversations.members), each as person() has them (a guest, someone from
+  // another company, a bot); null when Slack can't say, or there are more than MEMBERS_MAX.
+  async function members(channel) {
+    const ids = []
+    let cursor
+    do {
+      const j = await call('conversations.members', { channel, limit: 200, cursor })
+      ids.push(...(j.members || []))
+      cursor = j.response_metadata?.next_cursor || undefined
+    } while (cursor && ids.length < MEMBERS_MAX)
+    if (cursor) return null
+    const out = []
+    for (const u of ids) out.push(u === kept.bot?.userId ? { id: u, bot: true } : { ...(await person({ user: u })), bot: !!users[u]?.bot })
+    return out
   }
   // Who wrote it: a member of this workspace, a guest, or someone from another company (Slack
   // Connect: the event says another team, or Slack does), from the members listed, else asked of
@@ -487,6 +506,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     if (!e || !hear) return
     if (e.type === 'app_home_opened') return home(e)
     if (e.type === 'agent_session_stopped') return stopped(e, team)
+    if (e.type === 'channel_shared' || e.type === 'channel_unshared') { delete places[e.channel]; return }
     if (e.type === 'message' && (e.subtype === 'message_changed' || e.subtype === 'message_deleted')) return altered(e)
     if (e.type !== 'message' && e.type !== 'app_mention') return
     const dm = e.channel_type === 'im' || String(e.channel).startsWith('D')
@@ -1135,7 +1155,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     do {
       const j = await call('users.conversations', { types: 'public_channel,private_channel', exclude_archived: true, limit: 200, cursor })
       for (const c of j.channels || []) {
-        places[c.id] = { kind: 'channel', id: c.id, name: c.name || null, private: !!c.is_private, shared: !!(c.is_ext_shared || c.is_shared) }
+        places[c.id] = { kind: 'channel', id: c.id, name: c.name || null, private: !!c.is_private, shared: !!(c.is_ext_shared || c.is_shared), at: Date.now() }
         out.push({ id: c.id, name: c.name || c.id, private: !!c.is_private })
       }
       cursor = j.response_metadata?.next_cursor || undefined
@@ -1195,5 +1215,5 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     set({ state: 'no-tokens', why: null })
   }
 
-  return { id, label: 'Slack', start, stop, state, post, react, context, people, channels, setTokens, forget, missed, masked, whisper, status, askOwner, settle, dm, download, choose }
+  return { id, label: 'Slack', start, stop, state, post, react, context, people, channels, members, setTokens, forget, missed, masked, whisper, status, askOwner, settle, dm, download, choose }
 }

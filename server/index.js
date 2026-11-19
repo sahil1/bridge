@@ -4782,14 +4782,29 @@ async function checkSettings(b, x, req) {
       const t = full.replace(os.homedir(), '~')
       if (!next.readsFrom.includes(t)) next.readsFrom.push(t)
     }
-    // Each as it is now (its real path, device and inode), so one that leads somewhere else later
-    // isn't read (frontdesk.js foldersOf); one it had already, as it was when it was picked (to pick
-    // one again, take it out and add it).
+    // A new one as it is now (its real path: you've just picked it), so one that leads somewhere else
+    // later isn't read until you say so (frontdesk.js foldersOf, keepFolder below); one it had
+    // already, as it was when it was picked (none kept yet: foldersOf looks at it).
     next.folderIds = {}
     for (const t of next.readsFrom) {
-      const id = (had.has(t) && b.folderIds?.[t]) || await botattach.folderId(lexical(t))
+      const id = had.has(t) ? b.folderIds?.[t] : await botattach.folderId(lexical(t))
       if (id) next.folderIds[t] = id
     }
+  }
+  // Keep reading one of its folders that leads somewhere else now than it did when you picked it (or,
+  // picked before that was kept, than its name says): where it leads now kept as its own, once it's
+  // passed what a new one has to (inside your home folder, not Bridge AI's own, not where apps keep
+  // their settings and keys).
+  if (x.keepFolder !== undefined) {
+    const t = String(x.keepFolder || '')
+    if (!(next.readsFrom || b.readsFrom).includes(t)) throw new Error('Pick one of the folders it reads from')
+    const id = await botattach.folderId(lexical(t))
+    if (!id) throw new Error(`Folder not found: ${t}`)
+    if (botattach.folderSays(id.real)) throw new Error(`${t} can't be read: ${botattach.folderSays(id.real)}`)
+    if (await ownFolder(id.real)) throw new Error('Bridge AI\'s own folder can\'t be read from')
+    const where = botattach.rootSays(id.real)
+    if (where) throw new Error(`${t} leads ${where === 'a hidden folder' ? 'to a hidden folder' : where}, where apps keep their settings and keys: pick another folder`)
+    next.folderIds = { ...(next.folderIds || b.folderIds || {}), [t]: id }
   }
   if (x.instructionsFile !== undefined) {
     const f = String(x.instructionsFile || '').trim()
@@ -4836,6 +4851,8 @@ async function applySettings(b, x, req) {
   for (const k of ['discord', 'teams']) if (x.owners?.[k] !== undefined) { const c = conns.of(b.id, k); if (c) conns.save(c.id, { owner: next.owners[k] || null }) }
   if (before.name !== after.name) for (const c of conns.list().filter((y) => y.bot === b.id && y.name === before.name)) conns.save(c.id, { name: after.name })
   recordChanges(b.id, before, after, who)
+  // (A folder kept reading where it leads now: said in its record, with where.)
+  if (x.keepFolder !== undefined) { const t = String(x.keepFolder); const home = (p) => (p ? String(p).replace(os.homedir(), '~') : null); desk.record(b.id, 'settings.changed', { setting: `keep reading ${t}`, old: home(before.folderIds?.[t]?.real), new: home(after.folderIds?.[t]?.real), ...who }) }
   if (before.retention !== after.retention) desk.prune(b.id)
   // Paused: what it's answering is stopped at once.
   if (after.paused && !before.paused) await desk.pause(b.id)

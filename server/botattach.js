@@ -15,13 +15,17 @@
 //   - the folder itself isn't where settings and keys are kept (a hidden folder, ~/Library but for
 //     iCloud Drive and cloud storage, AppData: rootSays);
 //   - neither it nor a folder on the way is hidden (a name that starts with a dot; on Windows, marked
-//     hidden or system), nor has a name that says it holds keys, passwords or credentials (SECRET),
-//     nor is in a folder that holds them (keptOut: Bridge AI's own, ~/.ssh, ~/.aws and the like);
+//     hidden or system, read by their real long names, and one whose marks can't be read is as if
+//     hidden), nor has a name that says it holds keys, passwords or credentials (SECRET_TERMS,
+//     SECRET_STEMS, SECRET_KINDS, which Claude Code's Read rules are made from too), nor is in a
+//     folder that holds them (keptOut: Bridge AI's own, ~/.ssh, ~/.aws and the like);
 //   - it's a document or a picture (DOCS: PDFs, Word, Excel and PowerPoint files, pictures, CSV,
 //     text, Markdown), or, only when you let it, a data or config file (JSON, YAML, XML, HTML);
 //   - it isn't a program or a script by its first bytes, and has nothing in it that looks like a key,
-//     a password or a token (secretIn: a private key, as text or in base64, in any encoding; the
-//     tokens mcp.js redacts; KEY=value and "password": "…"; a table with a password column);
+//     a password or a token (secretIn: a private key, as text or in base64 at any offset, in UTF-16
+//     either way, in a PDF's compressed streams or an Office file's parts; the tokens mcp.js redacts
+//     and more; a password, a token or a key set to something like one; a table with a password
+//     column);
 //   - it isn't empty, nor over EACH, nor more than what's left of TOTAL, nor a hard link.
 // And it's read without a gap between the look and the read (TOCTOU): opened without following a
 // link (O_NOFOLLOW) or waiting on a pipe (O_NONBLOCK), the file opened is the one looked at (its
@@ -32,6 +36,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import zlib from 'node:zlib'
 import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
@@ -66,42 +71,133 @@ export const safe = (s) => String(s || '').replace(/\p{Cf}/gu, '').replace(/[\\/
 // Names that say a file (or a folder on the way to it) holds keys, passwords or credentials: by its
 // kind (a key, a certificate's private half, a password manager's file) or its words (secrets.json,
 // passwords.xlsx, client_secret.json, id_rsa.txt, logins.csv, a kubeconfig, recovery codes), whatever
-// kind of file it is.
-const SECRET_KINDS = new Set(['pem', 'key', 'p12', 'pfx', 'jks', 'keystore', 'kdbx', 'kdb', 'keychain', 'keychain-db', 'gpg', 'pgp', 'asc', 'ovpn', 'ppk', 'env', '1pux', 'opvault'])
-const SECRET_WORDS = /(?:^|[-_. ])(?:secrets?|credentials?|creds|passwords?|passwd|logins|api[-_ ]?keys?|private[-_ ]?keys?|(?:access|auth|refresh|bearer|oauth|bot|api)[-_ ]?tokens?|client[-_ ]?secrets?|service[-_ ]?accounts?|id_(?:rsa|dsa|ecdsa|ed25519)|keychains?|keystores?|vaults?|bitwarden|1password|lastpass|keepass(?:xc)?|(?:recovery|backup)[-_ ]?codes?|kubeconfig|wallets?|seed[-_ ]?(?:phrase|words)|mnemonics?)(?:[-_. ]|$)|^tokens?(?:\.|$)|^auth(?:\.|$)|^\.?env(?:\.|$)/i
-export const secretLike = (name) => SECRET_KINDS.has(extOf(name)) || SECRET_WORDS.test(String(name))
-// What in a file looks like a key, a password or a token: a private key (PEM, OpenSSH, PGP), or one in
-// base64 (a kubeconfig's client-key-data); the tokens mcp.js redacts (GitHub, OpenAI and Anthropic,
-// Slack, AWS, Google, GitLab, Sentry, Linear) and a JWT; NAME_PASSWORD=… or POSTGRES_PASSWORD: … as
-// config files set them; "password": "…" as JSON has it; a table with a column of passwords.
+// kind of file it is. One list, which Claude Code's Read rules for a bot's run are made from too
+// (botmcp.js readDenies): SECRET_TERMS, each a word as a name may have it (a separator inside it or
+// none, one or more), found between separators or the name's ends; SECRET_STEMS, names that are a
+// secret's on their own (token.json, auth.json); SECRET_KINDS, by kind.
+export const SECRET_KINDS = ['pem', 'key', 'p12', 'pfx', 'jks', 'keystore', 'kdbx', 'kdb', 'keychain', 'keychain-db', 'gpg', 'pgp', 'asc', 'ovpn', 'ppk', 'env', '1pux', 'opvault']
+const both = (w) => [w, `${w}s`]
+const joined = (a, b, plural = true) => ['', '-', '_', ' '].flatMap((s) => (plural ? both(`${a}${s}${b}`) : [`${a}${s}${b}`]))
+export const SECRET_TERMS = [...new Set([
+  ...both('secret'), ...both('credential'), 'creds', ...both('password'), 'passwd', 'logins',
+  ...joined('api', 'key'), ...joined('private', 'key'),
+  ...['access', 'auth', 'refresh', 'bearer', 'oauth', 'bot', 'api'].flatMap((x) => joined(x, 'token')),
+  ...joined('client', 'secret'), ...joined('service', 'account'),
+  'id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519', ...both('keychain'), ...both('keystore'), ...both('vault'),
+  'bitwarden', '1password', 'lastpass', 'keepass', 'keepassxc',
+  ...joined('recovery', 'code'), ...joined('backup', 'code'), 'kubeconfig', ...both('wallet'),
+  ...joined('seed', 'phrase'), ...joined('seed', 'words', false), ...both('mnemonic'),
+])]
+export const SECRET_STEMS = ['token', 'tokens', 'auth', 'env', '.env']
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const SECRET_WORDS = new RegExp(`(?:^|[-_. ])(?:${SECRET_TERMS.map(esc).join('|')})(?:[-_. ]|$)|^(?:${SECRET_STEMS.map(esc).join('|')})(?:\\.|$)`, 'i')
+export const secretLike = (name) => SECRET_KINDS.includes(extOf(name)) || SECRET_WORDS.test(String(name))
+
+// What in a file looks like a key, a password or a token: a private key (PEM, OpenSSH, PGP), or one
+// in base64 (a kubeconfig's client-key-data), wherever its first byte falls; the tokens mcp.js
+// redacts (GitHub, OpenAI and Anthropic, Slack, AWS, Google, GitLab, Sentry, Linear) and Stripe's,
+// Google OAuth's, Hugging Face's, npm's and SendGrid's, and a JWT; a password, a token or a key set to
+// something that looks like one (password: Hunter2Hunter2, db_password=…, aws_secret_access_key =
+// …, Password=…; in a connection string, "password": "…"); a table with a column of passwords.
 const LOOKS = [
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----/,
-  /LS0tLS1CRUdJTi/,
-  /\b(?:gh[pousr]_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,}|sk-(?:ant-|proj-)?(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{20,}|xox[abeprs]-[A-Za-z0-9-]{10,}|xapp-\d-[A-Za-z0-9-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,}|glpat-[A-Za-z0-9_-]{10,}|sntrys_[A-Za-z0-9_]{10,}|lin_api_[A-Za-z0-9]{10,})/,
+  /LS0tLS1CRUdJTi|0tLS0tQkVHSU4|tLS0tLUJFR0lO/,
+  /\b(?:gh[pousr]_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,}|sk-(?:ant-|proj-)?(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{20,}|xox[abeprs]-[A-Za-z0-9-]{10,}|xapp-\d-[A-Za-z0-9-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,}|glpat-[A-Za-z0-9_-]{10,}|sntrys_[A-Za-z0-9_]{10,}|lin_api_[A-Za-z0-9]{10,}|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|GOCSPX-[A-Za-z0-9_-]{16,}|hf_[A-Za-z0-9]{24,}|npm_[A-Za-z0-9]{30,}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,})/,
   /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\./,
-  /\b[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY|CREDENTIALS?)[A-Z0-9_]*["']?[ \t]*[:=][ \t]*["']?(?![<$*{[]|your|xxx|changeme|example|placeholder|none\b|null\b|true\b|false\b)[A-Za-z0-9+/_.~@!%-]{6,}/,
   /"(?:password|passwd|passphrase|secret|client_secret|token|access_token|refresh_token|id_token|api_?key|private_key|totp)"[ \t]*:[ \t]*"[^"]{4,}"/i,
 ]
+// A password, a token or a key set to a value that looks like one: letters with a digit or a sign in
+// it, six or more, not a placeholder (<your key>, ${VAR}, changeme, xxxx).
+const SET = /(?:^|[^A-Za-z0-9])([A-Za-z0-9_.-]*?(?:password|passwd|passphrase|pwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key|credentials?))["']?[ \t]*[:=][ \t]*["']?([^\s"'`,;<>(){}]{6,})/gi
+const PLACEHOLDER = /^(?:\$|\*|x{3,}|your|changeme|example|placeholder|redacted|none$|null$|true$|false$|required$|optional$)/i
+const looksSet = (t) => { for (const m of t.matchAll(SET)) { const v = m[2]; if (!PLACEHOLDER.test(v) && /[A-Za-z]/.test(v) && /[0-9!@#$%^&*+/=~?]/.test(v)) return true } return false }
 const PASSWORD_COLUMN = /^[^\n]*?(?:^|[,\t;"])[ \t]*(?:password|passwd|passphrase|secret|token)[ \t]*(?:"|[,\t;]|\r?$)/im
-// A file's bytes as text to look through: UTF-16 by its byte order mark (or the zeros between its
-// letters), else byte for byte.
+const PASSWORD_CELL = /<t[^>]*>\s*(?:passwords?|passwd|passphrase|pwd|pin)\s*<\/t>/i
+// A file's bytes as text to look through: UTF-16 by its byte order mark, or by the zeros between its
+// letters (either order); else byte for byte.
 function textOf(buf) {
-  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return buf.subarray(2).toString('utf16le')
-  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) { const b = Buffer.from(buf.subarray(2, 2 + ((buf.length - 2) & ~1))); return b.swap16().toString('utf16le') }
-  if (buf.length >= 8 && buf[1] === 0 && buf[3] === 0 && buf[5] === 0 && buf[0] && buf[2]) return buf.toString('utf16le')
+  const even = (b) => b.subarray(0, b.length & ~1)
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return even(buf.subarray(2)).toString('utf16le')
+  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) return Buffer.from(even(buf.subarray(2))).swap16().toString('utf16le')
+  if (buf.length >= 8 && buf[1] === 0 && buf[3] === 0 && buf[5] === 0 && buf[0] && buf[2]) return even(buf).toString('utf16le')
+  if (buf.length >= 8 && buf[0] === 0 && buf[2] === 0 && buf[4] === 0 && buf[1] && buf[3]) return Buffer.from(even(buf)).swap16().toString('utf16le')
   return buf.toString('latin1')
 }
 // Whether words (an answer, a file as text) look like they hold a key, a password or a token: why, or null.
 export function secretInText(s) {
   const t = String(s || '')
-  return LOOKS.some((re) => re.test(t)) ? 'it holds what looks like a key, a password or a token' : null
+  return LOOKS.some((re) => re.test(t)) || looksSet(t) ? 'it holds what looks like a key, a password or a token' : null
 }
-// The same of a file's bytes: a text file all through, any other the first few MB of it (a key
-// pasted into a PDF shows there); and a table whose first line has a password column.
+// Inflating what's packed inside a file to look through it: as much as INFLATED all told; one that
+// would take more isn't looked through, so it doesn't go.
+const INFLATED = 64 * 1024 * 1024
+const tooPacked = () => Object.assign(new Error('it\'s packed too tightly to be looked through'), { refused: true })
+function inflate(data, raw, left) {
+  try { return (raw ? zlib.inflateRawSync : zlib.inflateSync)(data, { maxOutputLength: Math.max(1, left), finishFlush: zlib.constants.Z_SYNC_FLUSH }) } catch (e) { if (e.code === 'ERR_BUFFER_TOO_LARGE' || e instanceof RangeError) throw tooPacked(); return null }
+}
+// A PDF's compressed streams (FlateDecode), each inflated: where a key pasted into a document is.
+function* pdfStreams(buf) {
+  let left = INFLATED
+  for (let at = buf.indexOf('stream', 0, 'latin1'); at >= 0; at = buf.indexOf('stream', at + 6, 'latin1')) {
+    if (buf.toString('latin1', at - 3, at) === 'end') continue
+    const dict = buf.toString('latin1', Math.max(0, at - 600), at)
+    if (!/\/FlateDecode/.test(dict.slice(dict.lastIndexOf('<<')))) continue
+    let start = at + 6
+    if (buf[start] === 0x0d) start++
+    if (buf[start] === 0x0a) start++
+    const end = buf.indexOf('endstream', start, 'latin1')
+    if (end < 0) break
+    const out = inflate(buf.subarray(start, end), false, left)
+    if (!out) continue
+    left -= out.length
+    yield out
+  }
+}
+// An Office file's XML parts (it's a zip), each read (inflated): the words of a document, a sheet's
+// cells, a deck's slides. A zip's central directory, read as office.js reads it.
+function* officeParts(buf) {
+  let eocd = -1
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break }
+  if (eocd < 0) return
+  const count = buf.readUInt16LE(eocd + 10)
+  let p = buf.readUInt32LE(eocd + 16)
+  let left = INFLATED
+  for (let n = 0; n < count && n < 5000 && p + 46 <= buf.length && buf.readUInt32LE(p) === 0x02014b50; n++) {
+    const method = buf.readUInt16LE(p + 10)
+    const size = buf.readUInt32LE(p + 20)
+    const nameLen = buf.readUInt16LE(p + 28)
+    const local = buf.readUInt32LE(p + 42)
+    const name = buf.toString('utf8', p + 46, p + 46 + nameLen)
+    p += 46 + nameLen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32)
+    if (!/\.(xml|rels|txt|json|csv)$/i.test(name) || local + 30 > buf.length) continue
+    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28)
+    const data = buf.subarray(start, start + size)
+    const out = method === 0 ? data : method === 8 ? inflate(data, true, left) : null
+    if (!out) continue
+    left -= out.length
+    yield { name, text: out.toString('utf8') }
+  }
+}
+// The same of a file's bytes: a text file and a PDF all through (a PDF's compressed streams too), an
+// Office file's parts (its words and cells, a spreadsheet with a password column too), any other the
+// first few MB of it; a table whose first line has a password column. Why, or null. (One packed too
+// tightly to look through throws, refused.)
 export function secretIn(buf, name) {
-  const text = textOf(TEXT.has(extOf(name)) ? buf : buf.subarray(0, SCAN))
-  if (['csv', 'tsv'].includes(extOf(name)) && PASSWORD_COLUMN.test(text.slice(0, text.indexOf('\n') >= 0 ? text.indexOf('\n') + 1 : 4096))) return 'it\'s a table with a column of passwords'
-  return secretInText(text)
+  const ext = extOf(name)
+  const text = textOf(TEXT.has(ext) || ext === 'pdf' ? buf : buf.subarray(0, SCAN))
+  if (['csv', 'tsv'].includes(ext) && PASSWORD_COLUMN.test(text.slice(0, text.indexOf('\n') >= 0 ? text.indexOf('\n') + 1 : 4096))) return 'it\'s a table with a column of passwords'
+  const said = secretInText(text)
+  if (said) return said
+  if (ext === 'pdf') for (const s of pdfStreams(buf)) { const w = secretInText(textOf(s)); if (w) return w }
+  if (['docx', 'xlsx', 'pptx'].includes(ext)) {
+    for (const part of officeParts(buf)) {
+      if (ext === 'xlsx' && PASSWORD_CELL.test(part.text)) return 'it\'s a table with a column of passwords'
+      const words = part.text.replace(/<[^>]+>/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, '\'').replace(/&amp;/g, '&')
+      const w = secretInText(part.text) || secretInText(words) || secretInText(words.replace(/\s+/g, ''))
+      if (w) return w
+    }
+  }
+  return null
 }
 // Folders that hold keys, never sent from whatever folder a bot reads: Bridge AI's own (BRIDGE_HOME,
 // ~/.bridge-ai) and the ones your keys and sign-ins are kept in (files.js keeps out of the first few too).
@@ -142,13 +238,20 @@ export function rootSays(root) {
   }
   return null
 }
-// A folder a bot reads, as it is now: its real path, and its device and inode (as text), so one that
-// leads somewhere else since it was picked (made a link to another folder, say) is told apart
-// (frontdesk.js foldersOf). null when it isn't there.
+// A folder a bot reads, as it is now: { real }, its real path, so one that leads somewhere else since
+// it was picked (made a link to another folder, say) is told apart (frontdesk.js foldersOf); one
+// made again where it was (a sync, a restore) is the same folder. null when it isn't there.
 export async function folderId(p) {
-  try { const real = await fsp.realpath(p); const st = await fsp.stat(real, BIG); return st.isDirectory() ? { real, dev: String(st.dev), ino: String(st.ino) } : null } catch { return null }
+  try { const real = await fsp.realpath(p); return (await fsp.stat(real)).isDirectory() ? { real } : null } catch { return null }
 }
-export const sameFolder = (a, b) => !!a && !!b && a.real === b.real && a.dev === b.dev && a.ino === b.ino
+export const sameFolder = (a, b) => !!a?.real && !!b?.real && cmp(a.real) === cmp(b.real)
+// Where a folder, as it's named, would be with no link on the way: your home folder's real path and
+// the names after it. A folder whose real path is that has no link in the way out of your home folder.
+export function asNamed(p) {
+  const full = path.resolve(String(p))
+  const home = os.homedir()
+  return within(full, home) ? path.join(homes()[1], full.slice(home.length)) : full
+}
 // Whether a folder's real path is one a bot never reads: your whole home folder or a folder it's in,
 // or Bridge AI's own. Why, or null.
 export function folderSays(real) {
@@ -159,31 +262,40 @@ export function folderSays(real) {
   if ([data, realData].some((d) => within(real, d) || within(d, real))) return 'it\'s Bridge AI\'s own folder now'
   return null
 }
-// On Windows, whether a file or folder is marked hidden or system (attrib); elsewhere, no. One whose
-// marks can't be read is taken as not marked: its name was looked at already.
-const ATTRIB = () => path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'attrib.exe')
-function marked(p) {
-  if (process.platform !== 'win32') return Promise.resolve(false)
-  return new Promise((resolve) => execFile(ATTRIB(), [p], { timeout: 5000, windowsHide: true }, (err, out) => {
-    const s = String(out || '')
-    const i = s.toLowerCase().indexOf(p.toLowerCase())
-    const flags = i > 0 ? s.slice(0, i) : ''
-    resolve(!err && /^[A-Z ]+$/.test(flags) && /[HS]/.test(flags))
+// On Windows, which of these (a file's real path, and each folder on the way to it, by their long
+// names) are marked hidden or system: [true | false], read with PowerShell (the paths given in its
+// environment, so any name comes through whole, and the marks back as numbers). Elsewhere, none.
+// One that can't be read throws: as if hidden (refused), never taken as not marked.
+const POWERSHELL = () => path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+const MARKS = "$ErrorActionPreference='Stop'; foreach ($p in ($env:BRIDGE_ATTR_PATHS | ConvertFrom-Json)) { [int][IO.File]::GetAttributes($p) }"
+function marked(paths) {
+  if (process.platform !== 'win32' || !paths.length) return Promise.resolve(paths.map(() => false))
+  return new Promise((resolve, reject) => execFile(POWERSHELL(), ['-NoProfile', '-NonInteractive', '-Command', MARKS], { timeout: 15000, windowsHide: true, env: { ...process.env, BRIDGE_ATTR_PATHS: JSON.stringify(paths) } }, (err, out) => {
+    const nums = String(out || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+    if (err || nums.length !== paths.length || !nums.every((n) => /^\d+$/.test(n))) return reject(no('Bridge AI couldn\'t tell whether it\'s hidden'))
+    resolve(nums.map((n) => (Number(n) & 0x6) !== 0)) // (Hidden 0x2, System 0x4)
   }))
 }
 
 // Where a path the agent named is: a folder of the bot's (its real path) and the names under it, to
 // the file. Never anything outside: what's opened is that folder's real path and those names, none
-// of them "..". ctx: { folders, cwd } (a relative path is from cwd when that's in one of them, else
-// from the first).
+// of them "..". ctx: { folders (paths, or { path, real }), cwd } (a relative path is from cwd when
+// that's in one of them, else from the first).
 async function locate(raw, { folders = [], cwd = null } = {}) {
   let s = String(raw ?? '').trim().replace(/^[`'"<]+|[`'">]+$/g, '').trim()
   if (!s || s.includes('\0')) throw no('there\'s no path to a file')
   if (/^file:\/\//i.test(s)) { try { s = fileURLToPath(s) } catch { throw no('there\'s no path to a file') } }
   s = s.replace(/^~(?=$|[\\/])/, os.homedir())
+  // (A folder given with the real path it was checked to have, frontdesk.js foldersOf: one that
+  // doesn't have it any more, in the moment since, isn't one.)
   const roots = []
   for (const f of folders) {
-    try { roots.push({ given: path.resolve(String(f)), real: await fsp.realpath(String(f)) }) } catch { /* gone: not one */ }
+    const given = path.resolve(String(f?.path ?? f))
+    try {
+      const real = await fsp.realpath(given)
+      if (f?.real && cmp(real) !== cmp(f.real)) continue
+      roots.push({ given, real })
+    } catch { /* gone: not one */ }
   }
   if (!roots.length) throw no('the bot has no folders to send a file from')
   const at = cwd && roots.some((r) => within(path.resolve(cwd), r.real) || within(path.resolve(cwd), r.given)) ? path.resolve(cwd) : roots[0].real
@@ -251,7 +363,6 @@ export async function readChecked(raw, ctx = {}) {
   const file = path.join(root, ...names)
   if (kept.some((d) => within(file, d))) throw no('it\'s in a folder that holds keys')
   const seen = await walk(root, names)
-  for (let i = 1; i <= names.length; i++) if (await marked(path.join(root, ...names.slice(0, i)))) throw no(i === names.length ? 'it\'s a hidden file' : 'it\'s in a hidden folder')
   let fh
   try { fh = await fsp.open(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0)) } catch (e) { throw no(e.code === 'ELOOP' ? 'it\'s a link to somewhere else, and only a file itself goes' : `it couldn't be read (${e.code || e.message})`) }
   try {
@@ -272,6 +383,9 @@ export async function readChecked(raw, ctx = {}) {
     if (!really.length) throw no('it\'s a folder, not a file')
     const again2 = namesSay(really, ctx)
     if (again2) throw no(again2)
+    // (On Windows, marked hidden or system: by those real, long names.)
+    const marks = await marked(really.map((_, i) => path.join(root, ...really.slice(0, i + 1))))
+    if (marks.includes(true)) throw no(marks.indexOf(true) === really.length - 1 ? 'it\'s a hidden file' : 'it\'s in a hidden folder')
     const its = really[really.length - 1]
     if (kept.some((d) => within(real, d))) throw no('it\'s in a folder that holds keys')
     // (Sent by its own name, as the folder has it.)

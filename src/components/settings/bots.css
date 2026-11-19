@@ -369,3 +369,6 @@
 .sb-attach > label.st-row { display: grid; gap: 6px; align-items: start; }
 .sb-attach select.st-input { max-width: 100%; }
 .sb-attach > p { margin: 0; }
+@media (max-width: 760px) {
+  .sb-keep-folder { min-height: 40px; min-width: 40px; }
+}

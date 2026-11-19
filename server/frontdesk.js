@@ -526,7 +526,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       case 'run.started':
         // (A run picked up after its time limit has the minutes you gave it; any other, its bot's.)
         Object.assign(q, { state: 'answering', helper: e.helper, route: e.route || null, runAt: e.at, until: e.resumed ? e.until || null : null, ask: null, paused: null, resume: null })
-        q.runs.push({ helper: e.helper, agent: e.agent, model: e.model || null, from: e.from || null, folders: e.folders || [], with: e.with || [], at: e.at, instructions: e.instructions || null, change: e.change || null, mcp: e.mcp || null, answerer: e.answerer || null, try: e.try ?? null, noChange: e.noChange || null, earlier: e.earlier || null, attaches: e.attaches || null, attachFrom: e.attachFrom || [] })
+        q.runs.push({ helper: e.helper, agent: e.agent, model: e.model || null, from: e.from || null, folders: e.folders || [], with: e.with || [], at: e.at, instructions: e.instructions || null, change: e.change || null, mcp: e.mcp || null, answerer: e.answerer || null, try: e.try ?? null, noChange: e.noChange || null, earlier: e.earlier || null, attaches: e.attaches || null, attachFrom: e.attachFrom || [], notRead: e.notRead || [] })
         if (c) { c.answered = true; c.route = e.route || null }
         break
       case 'run.read': if (run) run.reads = e.files || []; break
@@ -662,10 +662,13 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   const chatRuns = new Map()
   let chatSeq = 0
   // The folders it reads from, each checked (one that's gone is said, and skipped), and shown from
-  // your home folder (~/…). Each is still the folder it was when you picked it (its real path, device
-  // and inode, kept with it: bots.js folderIds), so one made a link to somewhere else since (your
-  // home folder, say) isn't read, and Settings says so; and never your whole home folder or Bridge
-  // AI's own, by its real path. One picked before that was kept has it kept now.
+  // your home folder (~/…), with the real path each was checked to have (real). Each still leads where
+  // it did when you picked it (its real path, kept with it: bots.js folderIds), so one made a link to
+  // somewhere else since isn't read until you say so (Keep reading it: index.js keepFolder), and
+  // Settings says why (confirm); one made again where it was (a sync, a restore) is the same folder.
+  // Never your whole home folder or Bridge AI's own, by its real path. One picked before its real path
+  // was kept has it kept now, but only where it leads where its name says (no link on the way): one
+  // that leads elsewhere waits for you to say, as one that's changed does.
   const home = os.homedir()
   const shown = (p) => (p === home || p.startsWith(home + path.sep) ? `~${p.slice(home.length)}` : p)
   async function foldersOf(bot) {
@@ -679,10 +682,11 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         const why = botattach.folderSays(id.real)
         if (why) throw new Error(`${f} isn't read: ${why}`)
         const was = bot.folderIds?.[String(f)]
-        if (was && !botattach.sameFolder(was, id)) throw new Error(`${f} isn't the folder it was when you picked it (it leads to ${shown(id.real)} now), so it isn't read: pick it again if that's right`)
+        if (was && !botattach.sameFolder(was, id)) throw Object.assign(new Error(`${f} now leads to ${shown(id.real)}, not ${shown(was.real)} as when you picked it, so it isn't read until you say: keep reading it?`), { confirm: true })
+        if (!was && !botattach.sameFolder({ real: botattach.asNamed(p) }, id)) throw Object.assign(new Error(`${f} leads to ${shown(id.real)}, so it isn't read until you say: keep reading it?`), { confirm: true })
         if (!was) learnt[String(f)] = id
-        out.push({ path: p, shown: shown(p), name: path.basename(p), ok: true })
-      } catch (e) { out.push({ path: String(f), shown: String(f), name: path.basename(String(f)), ok: false, problem: e.message }) }
+        out.push({ path: p, real: id.real, shown: shown(p), name: path.basename(p), ok: true })
+      } catch (e) { out.push({ path: String(f), shown: String(f), name: path.basename(String(f)), ok: false, problem: e.message, ...(e.confirm ? { confirm: true } : {}) }) }
     }
     if (Object.keys(learnt).length && store.get(bot.id)) { try { store.save(bot.id, { folderIds: { ...(store.get(bot.id).folderIds || {}), ...learnt } }) } catch { /* next time */ } }
     return out
@@ -717,9 +721,13 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // go so, or why it waits for you (Send Files From Its Folders Without Asking: attachAuto). 'no', the
   // default: it waits. 'named': only in a direct message with one person, you or someone you named,
   // everyone whose words it answers that same person. 'everyone': in a direct message with one person,
-  // or a private channel that isn't shared with another organization, never a public one; everyone
-  // whose words it answers someone who may ask it. (Files it makes itself go by the usual rules.)
-  function attachHold(bot, q, files) {
+  // or a private channel that isn't shared with another organization (a group direct message is one
+  // too), never a public one, and only where everyone in it may ask it (its members, asked of the
+  // platform: none a guest or from another organization, and with only people you named asking, none
+  // you haven't named), since everyone in it gets the file; and everyone whose words it answers may
+  // ask it. A platform that can't say who's in a channel (Discord, Teams): it waits. (Files it makes
+  // itself go by the usual rules.)
+  async function attachHold(id, bot, q, files) {
     const att = files.filter((f) => f.from)
     if (!att.length) return null
     const names = att.map((f) => f.name).join(', ')
@@ -730,7 +738,14 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const dm = place.kind === 'dm' && !!q.from?.id && people.every((p) => p?.id === q.from.id)
     if (mode === 'named') return dm && people.every((p) => mayAct(bot, p)) ? null : `It attached ${names} from its folders for ${where(place)}; files from its folders go without asking only in a direct message with you or someone you named, so it waits for you`
     const priv = dm || (place.kind === 'channel' && place.private === true && place.shared !== true && !isPublic(place))
-    return priv && people.every((p) => p?.id && refusal(bot, p) === null) ? null : `It attached ${names} from its folders for ${where(place)}; files from its folders go without asking only in a direct message or a private channel, so it waits for you`
+    const wait = `It attached ${names} from its folders for ${where(place)}; files from its folders go without asking only in a direct message or a private channel where everyone may ask it, so it waits for you`
+    if (!priv || !people.every((p) => p?.id && refusal(bot, p) === null)) return wait
+    if (dm) return null
+    const ch = bots.get(id)?.channel
+    const members = ch?.members ? await ch.members(q.channel).catch(() => null) : null
+    if (!members) return `It attached ${names} from its folders for ${where(place)}, and who's in it couldn't be checked, so it waits for you`
+    const out = members.filter((m) => !m.bot && refusal(bot, m) !== null)
+    return out.length ? `It attached ${names} from its folders for ${where(place)}, where ${out.length === 1 ? 'one person in it' : `${out.length} people in it`} may not ask it (a guest, someone from another organization, or someone you haven't named), so it waits for you` : null
   }
   // A run's MCP folder (botmcp.js), by its helper, gone once the run's over.
   const mcpDirs = new Map()
@@ -1101,7 +1116,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (resume && !from) from = resume.try || 0
     const folders = await foldersOf(bot)
     const ok = folders.filter((f) => f.ok)
-    if (folders.length && !ok.length) return toYou(id, q, `None of the folders it reads from is there: ${folders.map((f) => f.shown).join(', ')}`)
+    if (folders.length && !ok.length) return toYou(id, q, `None of the folders it reads from can be read now: ${folders.map((f) => f.problem || f.shown).join('; ')}`)
     let paths = ok.map((f) => f.path)
     const { list, fallback } = await answerersOf(bot)
     const have = new Set((await installed()).map((k) => k.kind))
@@ -1218,7 +1233,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // (And the folders a file in them may be attached from, sent as it is: the ones of its folders this
     // run reads, never the repository a change's copy came from, botattach.js; data and config files
     // only as you let it. Checked again against them once the answer is in: botfiles.js collect.)
-    const attachFrom = paths.length ? { folders: [...paths], cwd: route.cwd || null, config: bot.attachConfig === true } : null
+    const attachFrom = paths.length ? { folders: ok.filter((f) => paths.includes(f.path)).map((f) => ({ path: f.path, real: f.real })), cwd: route.cwd || null, config: bot.attachConfig === true } : null
     // (The folders it reads, for Claude Code's Read rules: nothing hidden or named as keys in them.)
     const reads = [route.cwd, ...route.dirs].filter((d) => d && !inside(d, FILES) && !inside(d, BRIEFS) && !inside(d, botmcp.RUNS) && !inside(d, ANSWERS))
     let mcp = null
@@ -1276,6 +1291,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       helper: out.helper.id, agent: route.kind, model: chat ? entry.model : entry.model || modelOf(route.kind), session: h.sessionId || null, from: route.fork || null,
       answerer: label(entry), try: pickd.i, ...(noChange ? { noChange } : {}),
       folders: [h.cwd || route.cwd, ...route.dirs].filter((d) => d && !inside(d, FILES) && !inside(d, BRIEFS) && !inside(d, botmcp.RUNS) && !inside(d, botfiles.OUTBOX)).map(shown),
+      // (Its folders that aren't read this time, and why: it goes ahead with the rest.)
+      ...(folders.some((f) => !f.ok) ? { notRead: folders.filter((f) => !f.ok).map((f) => ({ folder: f.shown, why: oneLine(f.problem || '', 300) })) } : {}),
       route: { to: route.to, name: route.name || null, matched: route.matched || [], enforced: route.enforced, followUp: !!route.followUp },
       instructions: { hash: ins.hash, source: ins.source, path: ins.path, problem: cut?.instructions ? [ins.problem, `its last ${cut.instructions} characters were cut, to fit in the agent's opening message`].filter(Boolean).join('; ') : ins.problem }, ...(b.st.versions.has(ins.hash) ? {} : { instructionsText: ins.text }),
       ...(cut ? { cut } : {}), briefChars: brief.length, ...(briefFile ? { briefFile: true } : {}),
@@ -1286,7 +1303,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       limit: { minutes: resume ? resume.minutes : bot.limits.minutes, atLimit: bot.limits.atLimit, longest: bot.limits.longest },
       ...(resume ? { resumed: { how, ran: resume.ran, minutes: resume.minutes, by: resume.by || null }, until: new Date(Date.now() + resume.minutes * MINUTE_MS).toISOString() } : {}),
       with: pending ? pending.map((x) => x.ts) : [q.ts, ...q.more.map((x) => x.ts)],
-      ...(attaches ? { attaches, attachFrom: attachFrom.folders.map(shown) } : {}),
+      ...(attaches ? { attaches, attachFrom: attachFrom.folders.map((f) => shown(f.path)) } : {}),
       ...(mcp && bot.mcp?.length ? { mcp: { servers: mcp.servers, may: all ? 'all' : 'read-only', ...(mcp.missing.length ? { missing: mcp.missing } : {}), ...(mcp.problem ? { problem: mcp.problem } : {}) } } : bot.mcp?.length && route.kind !== 'claude' && route.kind !== 'model' ? { mcp: { servers: [], problem: `MCP servers need Claude Code or a model answering, not ${adapter(route.kind).label}` } } : {}),
     }))
     if (chat) {
@@ -1458,7 +1475,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       const dir = path.join(OUT, q.id)
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
       for (const f of said.files) {
-        const holds = botattach.secretIn(Buffer.from(f.content), f.name)
+        let holds = null
+        try { holds = botattach.secretIn(Buffer.from(f.content), f.name) } catch (e) { holds = e.message }
         if (holds) { blocked.push({ name: f.name, why: holds }); continue }
         fs.writeFileSync(path.join(dir, f.name), f.content, { mode: 0o600 })
         outFiles.push({ name: f.name, size: Buffer.byteLength(f.content) })
@@ -1507,7 +1525,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const active = outFiles.filter((f) => /\.(html?|svg|xml)$/i.test(f.name))
     if (auto && active.length) { auto = false; warn = `It ${verb(active)} ${active.map((f) => f.name).join(', ')}, which can run a script where it's opened, so it waits for you` }
     // (Files from its folders wait for you, unless you said otherwise, and then only where you said.)
-    const held = auto ? attachHold(bot, q, outFiles) : null
+    const held = auto ? await attachHold(id, bot, q, outFiles) : null
     if (held) { auto = false; warn = held }
     // (Words that look like a key, a password or a token wait for you, said either way.)
     if (botattach.secretInText(text)) { auto = false; warn = warn || 'Its answer has what looks like a key, a password or a token in it, so it waits for you' }
@@ -1537,7 +1555,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (n < 1) return none
     const key = `${q.id}-${n}`
     const bot = botOf(id)
-    const folders = bot ? (await foldersOf(bot)).filter((f) => f.ok && (run.attachFrom || []).includes(f.shown)).map((f) => f.path) : []
+    const folders = bot ? (await foldersOf(bot)).filter((f) => f.ok && (run.attachFrom || []).includes(f.shown)).map((f) => ({ path: f.path, real: f.real })) : []
     // (A run with no outbox of its own, Codex's, has one for what its ATTACH: lines name.)
     if (attach.length) fs.mkdirSync(botfiles.outboxOf(key), { recursive: true, mode: 0o700 })
     let got

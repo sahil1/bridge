@@ -172,7 +172,7 @@ export async function collect(dir, { attach = [], folders = [], cwd = null, conf
     if (files.length >= MAX) { refused.push({ name, why: `a bot sends ${MAX} files with an answer at most` }); continue }
     // (One attached was looked through as it was read; one it made, here.)
     if (!from.has(name)) {
-      const holds = await fs.promises.readFile(real).then((b) => secretIn(b, name), () => 'it couldn\'t be read')
+      const holds = await fs.promises.readFile(real).then((b) => secretIn(b, name)).catch((e) => (e.refused ? e.message : 'it couldn\'t be read'))
       if (holds) { refused.push({ name, why: holds }); continue }
     }
     files.push({ name, size: st.size, path: real, type: typeOf(name), ...(from.has(name) ? { from: from.get(name) } : {}) })

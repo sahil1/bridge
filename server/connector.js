@@ -224,6 +224,9 @@ export function combine({ id = 'bot', say = () => {}, threads = () => [], follow
     whisper: (reply, user, text) => { const p = where(reply); const c = of(p); if (!c.whisper) throw failure(`${PLATFORMS[p]} has no way to tell one person only`, 'not_supported'); return c.whisper(own(reply), bare(user), text) },
     typing: (reply) => of(where(reply)).typing?.(own(reply)),
     context: ({ channel, ...rest }) => of(platformOf(channel)).context({ channel: bare(channel), ...rest }),
+    // Who's in a channel, where the platform says ([{ id, guest, external, unknown, bot }]); null
+    // where it can't (only Slack's say).
+    members: async (channel) => { const p = platformOf(channel); const c = parts[p]; if (!c?.members) return null; const list = await c.members(bare(channel)); return list ? list.map((m) => ({ ...m, id: idOf(p, m.id) })) : null },
     // Slack's own: your direct messages' buttons, files attached.
     ...(parts.slack ? {
       askOwner: (owner, item) => parts.slack.askOwner(owner, item),

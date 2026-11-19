@@ -28,7 +28,7 @@ const box = process.argv[2] ? path.resolve(process.argv[2]) : null
 const ctx = (() => {
   try {
     const j = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'))
-    const folders = (Array.isArray(j.folders) ? j.folders : []).map(String).filter(Boolean)
+    const folders = (Array.isArray(j.folders) ? j.folders : []).map((f) => (f && typeof f === 'object' ? { path: String(f.path || ''), real: f.real ? String(f.real) : null } : { path: String(f || '') })).filter((f) => f.path)
     return folders.length ? { folders, cwd: j.cwd ? String(j.cwd) : null, config: j.config === true, ...(Array.isArray(j.keptOut) ? { keptOut: j.keptOut.map(String) } : {}) } : null
   } catch { return null }
 })()

@@ -393,7 +393,7 @@ export async function startSlack(name) {
   const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
   return {
     url, port, calls,
-    ask: (o) => ctl('ask', o), edit: (o) => ctl('edit', o), remove: (o) => ctl('delete', o), pin: (o) => ctl('pin', o), scopes: (o) => ctl('scopes', o),
+    ask: (o) => ctl('ask', o), edit: (o) => ctl('edit', o), remove: (o) => ctl('delete', o), pin: (o) => ctl('pin', o), scopes: (o) => ctl('scopes', o), channel: (o) => ctl('channel', o),
     drop: () => ctl('drop'), away: () => ctl('away'), back: () => ctl('back'), refresh: () => ctl('refresh'),
     limit: (o) => ctl('limit', o), fail: (o) => ctl('fail', o), state: () => ctl('state'),
     // Interactivity, /<name>, the shortcut, the Home tab and Slack's Stop button (stand-ins/slack.mjs

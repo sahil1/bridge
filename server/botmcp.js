@@ -23,7 +23,7 @@ import path from 'node:path'
 import { dataFile, writeFileAtomic, HOME, ROOT, NODE } from './paths.js'
 import { loginPath } from './agents.js'
 import { claudeServers, claudeServerView } from './mcp.js'
-import { keptOut } from './botattach.js'
+import { keptOut, SECRET_TERMS, SECRET_STEMS, SECRET_KINDS } from './botattach.js'
 
 export const RUNS = dataFile('front-desk', 'mcp')
 const LIST_MS = 15000 // a server that hasn't listed its tools by then can't be asked
@@ -198,7 +198,7 @@ export async function runFolder(bot, { all = false, key, outbox = null, attach =
     allow.push(toolName(OUTBOX_SERVER, 'save_file'))
     if (attach?.folders?.length) {
       const file = path.join(dir, 'attach.json')
-      writeFileAtomic(file, JSON.stringify({ folders: attach.folders.map(String), cwd: attach.cwd || null, config: attach.config === true, keptOut: keptOut() }, null, 2), { mode: 0o600 })
+      writeFileAtomic(file, JSON.stringify({ folders: attach.folders.map((f) => (f && typeof f === 'object' ? { path: String(f.path), real: f.real || null } : String(f))), cwd: attach.cwd || null, config: attach.config === true, keptOut: keptOut() }, null, 2), { mode: 0o600 })
       args.push(file)
       allow.push(toolName(OUTBOX_SERVER, 'attach_file'))
     }
@@ -213,13 +213,17 @@ export async function runFolder(bot, { all = false, key, outbox = null, attach =
 }
 // Claude Code's Read rules for a bot's run (gitignore-style patterns; // starts at the root), for each
 // folder it reads, as named and as its real path: no hidden file, nor anything in a hidden folder,
-// nor a name that says it holds keys, passwords or credentials (as botattach.js secretLike has them,
-// whatever their case). Read rules hold for Grep and Glob too, as far as Claude Code can.
-const anyCase = (w) => w.replace(/[a-z]/g, (c) => `[${c}${c.toUpperCase()}]`)
-const SECRET_GLOBS = [
-  ...['secret', 'credential', 'password', 'passwd', 'apikey', 'api_key', 'api-key', 'private_key', 'private-key', 'kubeconfig', 'bitwarden', '1password', 'lastpass', 'keepass', 'recovery-codes', 'recovery_codes', 'backup-codes', 'backup_codes', 'logins', 'id_rsa', 'id_ed25519', 'id_ecdsa', 'id_dsa', 'service-account', 'service_account', 'client_secret'].map((w) => `*${anyCase(w)}*`),
-  ...['pem', 'key', 'p12', 'pfx', 'jks', 'keystore', 'kdbx', 'ppk', 'ovpn', 'env'].map((e) => `*.${anyCase(e)}`),
-]
+// nor a name that says it holds keys, passwords or credentials, made from botattach.js's own lists
+// (SECRET_TERMS between separators or a name's ends, SECRET_STEMS, SECRET_KINDS), whatever their
+// case, so it reads none of what attaching refuses. Read rules hold for Grep and Glob too, as far as
+// Claude Code can.
+const anyCase = (w) => w.replace(/[a-z]/gi, (c) => `[${c.toLowerCase()}${c.toUpperCase()}]`)
+const SEP = '[-_. ]'
+const SECRET_GLOBS = [...new Set([
+  ...SECRET_TERMS.map((t) => anyCase(t).replace(/[-_ ]/g, '[-_ ]')).flatMap((t) => [t, `${t}${SEP}*`, `*${SEP}${t}`, `*${SEP}${t}${SEP}*`]),
+  ...SECRET_STEMS.flatMap((t) => [anyCase(t), `${anyCase(t)}.*`]),
+  ...SECRET_KINDS.map((e) => `*.${anyCase(e)}`),
+])]
 export function readDenies(folders) {
   const out = []
   const real = (f) => { try { return fs.realpathSync(f) } catch { return f } }

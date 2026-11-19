@@ -64,7 +64,7 @@ const tilde = (p) => (p === HOME || p.startsWith(HOME + path.sep) ? `~${p.slice(
 // someone you named; 'everyone', to anyone who may ask, in a direct message or a private channel,
 // never a public one: frontdesk.js), and whether data and config files may go as well as documents
 // and pictures (attachConfig). And each folder it reads as it was when you picked it (folderIds: its
-// real path, device and inode), so one that leads somewhere else since isn't read.
+// real path), so one that leads somewhere else since isn't read until you say it may be.
 // At the Time Limit (atLimit): a run that reaches its minutes asks you whether it may go on ('ask',
 // every bot's unless you say otherwise, ones made before there was a choice too), or is stopped
 // there and comes to you ('stop', as every run was before). Asking, it goes on for a few minutes
@@ -148,7 +148,7 @@ function shape(id, j) {
   b.answerIn = b.answerIn === 'channel' ? 'channel' : 'thread'
   b.attachAuto = ATTACH_AUTO.includes(b.attachAuto) ? b.attachAuto : 'no'
   b.attachConfig = b.attachConfig === true
-  b.folderIds = Object.fromEntries(Object.entries(b.folderIds && typeof b.folderIds === 'object' ? b.folderIds : {}).filter(([k, v]) => b.readsFrom.includes(k) && v && typeof v.real === 'string' && typeof v.dev === 'string' && typeof v.ino === 'string').map(([k, v]) => [k, { real: v.real, dev: v.dev, ino: v.ino }]))
+  b.folderIds = Object.fromEntries(Object.entries(b.folderIds && typeof b.folderIds === 'object' ? b.folderIds : {}).filter(([k, v]) => b.readsFrom.includes(k) && typeof v?.real === 'string' && v.real).map(([k, v]) => [k, { real: v.real }]))
   return b
 }
 
