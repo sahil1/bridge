@@ -719,7 +719,9 @@ try {
   })
 
   // ---------- Bridge AI's relay, with its share domain ----------
-  await hostedPart('Bridge AI\'s relay: a site and an app at addresses of their own', async () => {
+  // (Hosted signed in and on Bridge AI's relay, for every part below: whether or not this browser can
+  // open the relay's addresses.)
+  await part('Bridge AI\'s relay: Hosted on it', async () => {
     await hk.api('/setup', { name: 'Kim' })
     await hk.api('/account/code', { email: 'kim@example.com' })
     await hk.api('/account/verify', { email: 'kim@example.com', code: await accounts.code('kim@example.com') })
@@ -727,6 +729,9 @@ try {
     await until(async () => (await hk.api('/account?fresh=1').catch(() => null))?.relay?.on, 15000)
     await hk.api('/relay/deploy', { method: 'hosted' })
     ok(!!(await until(async () => (await hk.api('/relay')).online, 20000)), 'Hosted is on Bridge AI\'s relay')
+  })
+
+  await hostedPart('Bridge AI\'s relay: a site and an app at addresses of their own', async () => {
     const id = new URL((await hk.api('/relay')).url).hostname.split('.')[0]
     // A site: its pages, its relative links and its own absolute paths, its scripts running.
     const site = path.join(hk.home, 'site')
