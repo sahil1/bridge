@@ -1030,6 +1030,8 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       const why = [...(w.held || []).map((h) => `:warning: Waits for you whoever asks: ${md(h.said)}`), ...(w.refused || []).slice(0, 3).map((r) => `:no_entry: ${md(r.file)}: ${md(r.said)}`)]
       if (why.length) blocks.push({ type: 'context', elements: why.slice(0, 10).map((n) => ({ type: 'mrkdwn', text: clip(n, 2000) })) })
       if (w.diff) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `\`\`\`${clip(md(w.diff).replace(/```/g, '`​``'), 2500)}\`\`\`` } })
+      // (Only its start fits in Slack: the whole diff is in Needs You and its Activity.)
+      if (w.diffCut || md(w.diff || '').length > 2500) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: 'Only the start of the diff fits here: Needs You and its Activity in Bridge AI have all of it.' }] })
     }
     const approve = it.change && it.change.mode === 'suggest'
     const waits = w?.state === 'waiting' && w.value

@@ -532,7 +532,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       case 'write.screened': Object.assign(q, { state: 'screened', screen: { why: e.why || null, by: e.by || 'rules', at: e.at, allowed: null, handle: null } }); break
       case 'write.allowed': if (q.screen) q.screen.allowed = { by: e.by || null, via: e.via || null, at: e.at }; q.state = 'starting'; break
       case 'write.proposed': {
-        const w = { id: e.change, q: q.id, hash: e.hash, files: e.files || [], held: e.held || [], refused: e.refused || [], diff: e.diff || '', diffFile: e.diffFile || null, by: e.by || null, try: !!e.try, direct: !!e.direct, state: e.try ? 'tried' : e.refused?.length ? 'refused' : e.waits ? 'waiting' : 'proposed', at: e.at, handles: [], applied: null, denied: null, undone: null, error: null }
+        const w = { id: e.change, q: q.id, hash: e.hash, files: e.files || [], held: e.held || [], refused: e.refused || [], diff: e.diff || '', diffChars: e.diffChars ?? null, diffFile: e.diffFile || null, by: e.by || null, try: !!e.try, direct: !!e.direct, state: e.try ? 'tried' : e.refused?.length ? 'refused' : e.waits ? 'waiting' : 'proposed', at: e.at, handles: [], applied: null, denied: null, undone: null, error: null }
         st.writes.set(e.change, w)
         q.write = w
         break
@@ -1678,7 +1678,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // (Made: what changed, and in Discord and Teams how to put it back, in words.)
   const changedNote = (q) => `Changed: ${filesSaid(q.write?.files)}.${platOf(q) !== 'slack' ? ` To put ${q.write?.files?.length === 1 ? 'it' : 'them'} back as before, say “undo ${numOf(q)}”.` : ''}`
   const writeView = (w) => (w ? {
-    id: w.id, q: w.q, hash: w.hash, code: String(w.hash || '').slice(0, 8), state: w.state, files: w.files, diff: w.diff, by: w.by, try: !!w.try, direct: !!w.direct, at: w.at,
+    // (diffCut: the diff here is its start; the whole of it is the change's own, botwrite.js.)
+    id: w.id, q: w.q, hash: w.hash, code: String(w.hash || '').slice(0, 8), state: w.state, files: w.files, diff: w.diff, diffCut: (w.diffChars || 0) > String(w.diff || '').length, by: w.by, try: !!w.try, direct: !!w.direct, at: w.at,
     held: (w.held || []).map((x) => ({ why: x.why, files: x.files, said: botwrite.HELD_SAID[x.why] || x.why })), refused: (w.refused || []).map((x) => ({ ...x, said: REFUSED[x.why] || x.why })),
     applied: w.applied || null, denied: w.denied || null, undone: w.undone || null, error: w.error || null,
   } : null)
@@ -1782,7 +1783,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const waits = !q.try && !c.refused.length && !direct
     let diffFile = null
     try { diffFile = b.trace.keep('changes', `${q.id}-${c.id}.diff`, c.diff) } catch { /* the change keeps it too */ }
-    record(id, 'write.proposed', at(q, { change: c.id, hash: c.hash, files: c.files.slice(0, 200), held: c.held, refused: c.refused.slice(0, 50), diff: clip(c.diff, 6000), diffFile, by: q.from || null, ...(q.try ? { try: true } : {}), direct, waits }))
+    record(id, 'write.proposed', at(q, { change: c.id, hash: c.hash, files: c.files.slice(0, 200), held: c.held, refused: c.refused.slice(0, 50), diff: clip(c.diff, 6000), diffChars: c.diff.length, diffFile, by: q.from || null, ...(q.try ? { try: true } : {}), direct, waits }))
     if (q.try) {
       await botwrite.close(writesDir(id), c.id, 'tried')
       return { note: `(Try It: nothing was changed. Asked in Slack, it would change ${filesSaid(q.write.files)}${c.refused.length ? `, but it would be refused: ${refusedSaid(c.refused)}` : c.held.length ? `, once you approve it: ${botwrite.heldSaid(c.held)}` : ''}.)` }
@@ -1913,6 +1914,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const bot = botOf(id)
     const q = x && b?.st.questions.get(`${id}-q${x[2]}`)
     if (!q || !bot) return false
+    // (Someone it doesn't answer gets what they always get, nothing about a question of anyone's.)
+    if (!isOwner(bot, m.from) && refusal(bot, m.from)) return false
     const act = x[1].toLowerCase()
     const about = q.state === 'screened' ? (act === 'allow' || act === 'deny') : act === 'undo' ? q.write?.state === 'applied' : (act === 'approve' || act === 'deny') && q.write?.state === 'waiting' && q.state === 'draft'
     if (!about) return false

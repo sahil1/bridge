@@ -421,7 +421,10 @@ function ScreenItem({ it, onDone, setNote }) {
 // its diff; made already, Undo.
 function WriteOf({ it, onUndo, busy }) {
   const w = it.write
+  const [whole, setWhole] = useState(null)
   if (!w) return null
+  // (Its diff as the record has it is its start, when it's long: the whole of it, on asking.)
+  const more = () => onDevice(null, `/bots/${encodeURIComponent(it.bot?.id || '')}/writes/${encodeURIComponent(w.id)}`).then((r) => setWhole(r.write?.diff ?? ''), () => {})
   const files = (w.files || []).map((f) => `${f.path}${f.op === 'add' ? ` (${t('new')})` : f.op === 'remove' ? ` (${t('deleted')})` : f.op === 'move' ? ` (${t('moved from {from}', { from: f.from })})` : ''}`)
   const line = w.state === 'waiting' ? t('It changed {files} in its copy. Approve it, and Bridge AI makes the change, then sends the reply.', { files: files.join(', ') })
     : w.state === 'applied' ? t('It changed {files}, without asking you.', { files: files.join(', ') })
@@ -432,7 +435,8 @@ function WriteOf({ it, onUndo, busy }) {
       {line && <p className="muted small ny-from"><Icon name="file" size={11} /> {line}</p>}
       {(w.held || []).map((h) => <p key={h.why} className="muted small ny-from ny-held"><Icon name="alert" size={11} /> {t('It waits for you whoever asks: {why}', { why: h.said })}</p>)}
       {(w.refused || []).slice(0, 5).map((r, i) => <p key={i} className="muted small ny-from ny-held"><Icon name="alert" size={11} /> {r.file}: {r.said}</p>)}
-      {w.diff && <pre className="ny-change" aria-label={t('The diff')}>{w.diff}</pre>}
+      {w.diff && <pre className="ny-change" aria-label={t('The diff')}>{whole ?? w.diff}</pre>}
+      {w.diffCut && whole == null && <div className="ny-acts"><button type="button" className="btn small" onClick={more}><Icon name="file" size={12} /> {t('Show the whole diff')}</button></div>}
       {w.state === 'applied' && onUndo && <div className="ny-acts"><button type="button" className="btn small" disabled={busy} onClick={onUndo}><Icon name="undo" size={12} /> {t('Undo the change')}</button></div>}
     </div>
   )

@@ -193,6 +193,8 @@ try {
     const q2 = await slack.ask({ user: 'U0DANA', text: `${M} Hiring: add an offer for Gus [edit Hiring/offers/gus.md Offer for Gus] [answer Done.]` })
     const it = await waitingOf('add an offer for Gus')
     const n = it.id.replace(/^.*-q/, '')
+    await slack.ask({ user: 'U0EVE', dm: true, text: `approve ${n} ${it.write.code}` })
+    ok(!!(await until(async () => (await posted()).find((x) => x.channel === 'D0EVE' && /I only answer questions from people Tester has added/.test(x.text || '')), 15000)) && !fs.existsSync(H('offers', 'gus.md')) && !(await posted()).some((x) => x.channel === 'D0EVE' && /approve|change/i.test(x.text || '')), 'Eve, who may not ask it, saying approve: the polite no, nothing about the change, and nothing made')
     await slack.ask({ user: OWNER.id, dm: true, text: `approve ${n}` })
     ok(!!(await until(async () => (await posted()).find((x) => x.channel === 'D0OWNER' && new RegExp(`Say “approve ${n} ${it.write.code}”`).test(x.text || '')), 15000)) && !fs.existsSync(H('offers', 'gus.md')), 'approve in words without its code: you\'re told the code, and nothing is made')
     await slack.ask({ user: OWNER.id, dm: true, text: `approve ${n} ${it.write.code}` })
