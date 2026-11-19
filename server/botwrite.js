@@ -12,8 +12,8 @@
 //     changed and not committed yet laid over it, then its .git file taken away and the worktree
 //     forgotten by the repository (git worktree prune), so it's a plain folder git knows nothing of;
 //   any other on a Mac: an APFS clone (cp -c), which costs nothing until a file in it changes;
-//   anywhere else: a copy, of COPY_FILES files and COPY_BYTES at most (a bigger folder isn't copied,
-//     and the run says why).
+//   anywhere else: a copy of its files and folders (an empty one too), of COPY_FILES and COPY_BYTES
+//     at most (a bigger folder isn't copied, and the run says why).
 // Then every link in it is taken out (and anything else that isn't a file or a folder), and so is
 // every .git, so nothing in it leads anywhere else, and git's own files are never shown or changed.
 // The agent is started in the staging folder with edits allowed there only (agents.js access
@@ -40,8 +40,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { execFile } from 'node:child_process'
-import { gitReady } from './gitready.js'
+import { execFile, execFileSync } from 'node:child_process'
+import { gitReady, gitNothing } from './gitready.js'
 
 export const MAX_FILES = 20 // more files than this in one change: it waits for you
 export const LARGE = 1024 * 1024 // more than this, in one file or all told: it waits for you
@@ -58,10 +58,16 @@ const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex')
 const run = (bin, args, { cwd, timeout = 60000, env = {} } = {}) => new Promise((resolve) => {
   execFile(bin, args, { cwd, timeout, maxBuffer: 64 * 1024 * 1024, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...env } }, (err, stdout, stderr) => resolve({ ok: !err, out: String(stdout || ''), err: String(stderr || err?.message || '').trim() }))
 })
-// git, for making a copy of your repository's folder: none of its hooks, no file-system monitor and
-// no Git LFS download, for a copy made on each request.
-export const GIT_SAFE = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false']
-const git = async (dir, args, o = {}) => (await gitReady() ? run('git', [...GIT_SAFE, '-C', dir, ...args], { ...o, env: { GIT_LFS_SKIP_SMUDGE: '1', ...(o.env || {}) } }) : { ok: false, out: '', err: 'git isn\'t here' })
+// git, for making a copy of your repository's folder: none of its hooks (an empty folder of Bridge
+// AI's own as its hooks folder: gitready.js gitNothing), no file-system monitor and no Git LFS
+// download, for a copy made on each request.
+const gitSafe = () => ['-c', `core.hooksPath=${gitNothing().hooks}`, '-c', 'core.fsmonitor=false']
+const git = async (dir, args, o = {}) => {
+  if (!(await gitReady())) return { ok: false, out: '', err: 'git isn\'t here' }
+  let safe
+  try { safe = gitSafe() } catch (e) { return { ok: false, out: '', err: e.message } }
+  return run('git', [...safe, '-C', dir, ...args], { ...o, env: { GIT_LFS_SKIP_SMUDGE: '1', ...(o.env || {}) } })
+}
 const firstLine = (s) => String(s || '').split('\n').map((l) => l.trim()).filter(Boolean)[0]?.slice(0, 200) || ''
 const fail = (message, step) => Object.assign(new Error(message), { step })
 // A path inside a folder, as kept (its parts joined by /), and back to one on this computer.
@@ -217,14 +223,16 @@ export async function screenWith(ask, text, { bot = 'the bot', folders = [], ms 
 
 // ---------- Walking a folder ----------
 // Each entry under root, without following a link: onFile(rel, full, lstat) for a file, onDir(rel)
-// for a folder, onOther(rel, full, lstat, kind) for a link or anything else, .git skipped (onGit).
-// Stops (throws) past max.
+// for a folder whose entries could be read (one that can't be listed, a drop box say, or one too
+// deep, isn't one: a copy doesn't have it, so a new file in it waits for you), onOther(rel, full,
+// lstat, kind) for a link or anything else, .git skipped (onGit). Stops (throws) past max.
 async function walk(root, { onFile = () => {}, onDir = () => {}, onOther = () => {}, onGit = () => {}, max = Infinity } = {}) {
   let n = 0
-  const go = async (dir, depth) => {
+  const go = async (dir, depth, rel = null) => {
     if (depth > DEPTH) return
     let ents
     try { ents = await fs.promises.readdir(dir, { withFileTypes: true }) } catch { return }
+    if (rel != null) await onDir(rel)
     for (const e of ents) {
       const full = path.join(dir, e.name)
       const rel = relOf(root, full)
@@ -233,7 +241,7 @@ async function walk(root, { onFile = () => {}, onDir = () => {}, onOther = () =>
       const st = await fs.promises.lstat(full).catch(() => null)
       if (!st) continue
       if (st.isSymbolicLink()) await onOther(rel, full, st, 'link')
-      else if (st.isDirectory()) { await onDir(rel); await go(full, depth + 1) }
+      else if (st.isDirectory()) await go(full, depth + 1, rel)
       else if (st.isFile()) await onFile(rel, full, st)
       else await onOther(rel, full, st, 'other')
     }
@@ -307,8 +315,12 @@ async function copy(real, to) {
   }
   let bytes = 0
   const files = []
-  await walk(real, { onFile: (rel, full, st) => { bytes += st.size; files.push(rel); if (bytes > COPY_BYTES) throw fail(`it's over ${Math.round(COPY_BYTES / 1048576)} MB`, 'stage') }, max: COPY_FILES })
+  const dirs = []
+  await walk(real, { onFile: (rel, full, st) => { bytes += st.size; files.push(rel); if (bytes > COPY_BYTES) throw fail(`it's over ${Math.round(COPY_BYTES / 1048576)} MB`, 'stage') }, onDir: (rel) => { dirs.push(rel) }, max: COPY_FILES })
   await fs.promises.mkdir(to, { recursive: true })
+  // (Every folder, an empty one too, as a clone has it: a folder that's there and isn't in the copy
+  // is one it couldn't see, and a new file in it waits for you, collect.)
+  for (const rel of dirs) await fs.promises.mkdir(onDisk(to, rel), { recursive: true })
   for (const rel of files) {
     const there = onDisk(to, rel)
     await fs.promises.mkdir(path.dirname(there), { recursive: true })
@@ -327,13 +339,34 @@ async function sweep(root) {
   return links
 }
 
+// Its top, so nothing new can be made in it, and back. On a Mac and Linux: read-only (0555). On
+// Windows a folder's read-only mark doesn't stop anything being made in it, so the same is said in
+// its access list: nobody may add a file or a folder to it (add-file and add-subfolder denied to
+// everyone, on that folder alone, not inherited by the copies in it, which stay the agent's to
+// change); one that can't be set means no copy (it throws).
+const ICACLS = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe')
+const EVERYONE = '*S-1-1-0'
+async function lockTop(dir) {
+  if (process.platform !== 'win32') return fs.promises.chmod(dir, 0o555).catch(() => {})
+  const r = await run(ICACLS, [dir, '/deny', `${EVERYONE}:(WD,AD)`], { timeout: 30000 })
+  if (!r.ok) throw fail(`Its copy's folder couldn't be set so nothing new can be made in it: ${firstLine(r.err || r.out) || 'icacls said no'}`, 'stage')
+}
+async function unlockTop(dir) {
+  if (process.platform !== 'win32') return fs.promises.chmod(dir, 0o700).catch(() => {})
+  if (fs.existsSync(dir)) await run(ICACLS, [dir, '/remove:d', EVERYONE], { timeout: 30000 })
+}
+function unlockTopSync(dir) {
+  if (process.platform !== 'win32') { try { fs.chmodSync(dir, 0o700) } catch { /* gone */ } return }
+  try { execFileSync(ICACLS, [dir, '/remove:d', EVERYONE], { timeout: 30000, windowsHide: true, stdio: 'ignore' }) } catch { /* gone */ }
+}
+
 // A staging copy of each write folder ([{ path: its real path, shown }]) in dir, made new: { dir,
 // parts: [{ folder, shown, name, copy, how, base, dirs, real, links }] } (base: each file of the copy
 // as it was made, dirs: each folder of it, real: each file of the folder as it was then, by size, time
 // and inode). Kept by the desk for its run (never in dir, where its agent works). Throws, saying why,
 // when one can't be copied.
 export async function stage({ folders, dir }) {
-  await fs.promises.chmod(dir, 0o700).catch(() => {})
+  await unlockTop(dir)
   await fs.promises.rm(dir, { recursive: true, force: true })
   await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 })
   const parts = []
@@ -361,13 +394,13 @@ export async function stage({ folders, dir }) {
   }
   // (Its top holds its folders' copies and nothing else, and nothing new can be made there: no project
   // settings of an agent's own, say. Each copy below is the agent's to change.)
-  await fs.promises.chmod(dir, 0o555).catch(() => {})
+  try { await lockTop(dir) } catch (e) { await tidy({ dir }); throw e }
   return { dir, parts, at: new Date().toISOString() }
 }
 // Its staging copy gone.
 export async function tidy(st) {
   if (!st?.dir) return
-  await fs.promises.chmod(st.dir, 0o700).catch(() => {})
+  await unlockTop(st.dir)
   await fs.promises.rm(st.dir, { recursive: true, force: true }).catch(() => {})
 }
 // Staging copies left from before Bridge AI started again, a day old.
@@ -375,7 +408,7 @@ export function sweepOld(root) {
   try {
     for (const d of fs.readdirSync(root)) {
       const p = path.join(root, d)
-      if (Date.now() - fs.statSync(p).mtimeMs > 86400000) { try { fs.chmodSync(p, 0o700) } catch { /* gone */ } fs.rmSync(p, { recursive: true, force: true }) }
+      if (Date.now() - fs.statSync(p).mtimeMs > 86400000) { unlockTopSync(p); fs.rmSync(p, { recursive: true, force: true }) }
     }
   } catch { /* none */ }
 }
@@ -486,8 +519,9 @@ export async function collect(st, { into, by = null, instructions = [], checked 
     const k = `${i}\n${dir}`
     if (!partly.has(k)) {
       const have = kids[i].get(dir) || new Set()
-      const ents = await fs.promises.readdir(dir ? onDisk(st.parts[i].folder, dir) : st.parts[i].folder, { withFileTypes: true }).catch(() => [])
-      partly.set(k, ents.some((d) => !d.isSymbolicLink() && !gitLike(d.name) && !OS_OWN.test(d.name) && !have.has(nameKey(d.name))))
+      // (One that can't be listed now is one it can't see: never taken as nothing there.)
+      const ents = await fs.promises.readdir(dir ? onDisk(st.parts[i].folder, dir) : st.parts[i].folder, { withFileTypes: true }).catch(() => null)
+      partly.set(k, !ents || ents.some((d) => !d.isSymbolicLink() && !gitLike(d.name) && !OS_OWN.test(d.name) && !have.has(nameKey(d.name))))
     }
     return partly.get(k)
   }
@@ -691,10 +725,17 @@ export function diffOf(c, blob, unshown = []) {
 // away, and the path's real path). collect() takes only what's there; a check that didn't run (a
 // hook that couldn't start, or one your Claude Code's settings turned off) leaves nothing, so
 // nothing of that run is made.
+// The hook also writes down that it ran at all (guardLine(key, 'ran', '')), first, whatever it then
+// says: checked.ran says whether it did (null when its log couldn't be read, so nothing is said
+// either way), for a run whose files were all refused as unchecked to be said as one whose hook
+// never ran.
 export const guardLine = (key, kind, p) => crypto.createHmac('sha256', String(key)).update(`${kind}\n${p}`).digest('hex')
 export async function guardCheck(log, key) {
-  const seen = new Set(String(await fs.promises.readFile(log, 'utf8').catch(() => '')).split('\n').filter((l) => /^[0-9a-f]{64}$/.test(l)))
-  return (kind, p) => seen.has(guardLine(key, kind, p))
+  const text = await fs.promises.readFile(log, 'utf8').catch(() => null)
+  const seen = new Set(String(text ?? '').split('\n').filter((l) => /^[0-9a-f]{64}$/.test(l)))
+  const checked = (kind, p) => (kind === 'w' || kind === 'd') && seen.has(guardLine(key, kind, p))
+  checked.ran = text == null ? null : seen.has(guardLine(key, 'ran', ''))
+  return checked
 }
 
 // ---------- Made, and undone ----------

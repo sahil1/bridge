@@ -7,7 +7,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
-import { IS_MAC } from './paths.js'
+import { IS_MAC, IS_WIN, dataFile } from './paths.js'
 
 export const NO_GIT = 'Git needs Apple\'s command line developer tools, which aren\'t on this Mac yet.'
 
@@ -50,4 +50,32 @@ export function devTools() {
     return ok
   }, () => { toolsMemo.pending = null; return true })
   return toolsMemo.pending
+}
+
+// What git is pointed at where it must run none of a repository's hooks and read no attributes file
+// of yours (a bot's copy of your folders and of your repository: botwrite.js, botchanges.js): a folder
+// with nothing in it and a file with nothing in it, Bridge AI's own (git/none/ in its data folder,
+// yours alone). The same on every system: /dev/null isn't a path Git for Windows takes for these
+// (one starting with / is read as in its own install folder, or on the drive git runs from, where
+// anyone could make that folder). Each is checked before it's given (a folder that isn't a link and
+// has nothing in it, a file that isn't a link and is empty) and made again when it isn't, so git
+// finds nothing there. { hooks, attributes }, as git takes them (/ between their parts on Windows
+// too); throws when they can't be made.
+const NONE = dataFile('git', 'none')
+export function gitNothing() {
+  const hooks = path.join(NONE, 'hooks')
+  const attributes = path.join(NONE, 'attributes')
+  const ok = () => {
+    const h = fs.lstatSync(hooks, { throwIfNoEntry: false })
+    const a = fs.lstatSync(attributes, { throwIfNoEntry: false })
+    return !!h && h.isDirectory() && !h.isSymbolicLink() && fs.readdirSync(hooks).length === 0 && !!a && a.isFile() && !a.isSymbolicLink() && a.size === 0
+  }
+  if (!ok()) {
+    fs.rmSync(NONE, { recursive: true, force: true })
+    fs.mkdirSync(hooks, { recursive: true, mode: 0o700 })
+    fs.writeFileSync(attributes, '', { mode: 0o600, flag: 'wx' })
+    if (!ok()) throw new Error('Bridge AI couldn\'t make the empty folder it runs git with')
+  }
+  const said = (p) => (IS_WIN ? p.split(path.sep).join('/') : p)
+  return { hooks: said(hooks), attributes: said(attributes) }
 }

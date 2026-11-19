@@ -33,3 +33,9 @@ export function accessParts(a, { start = false } = {}) {
 }
 const cap = (s) => (s ? s.charAt(0).toLocaleUpperCase() + s.slice(1) : s)
 export const accessSaid = (a, o) => cap(accessParts(a, o).join(' · '))
+// Why the hook that checks each file a change writes didn't run, or couldn't (server/frontdesk.js
+// guardNotRun, the record's guard: { why, need, have }): your Claude Code too old for it on Windows,
+// its version unknown there, or Claude Code not running it. For Activity and Needs You.
+export const guardWhy = (g) => (g?.why === 'claude-old' ? t('changing files on Windows needs Claude Code {need} or later, and this computer has {have}', { need: g.need || '', have: g.have || '' })
+  : g?.why === 'claude-unknown' ? t('changing files on Windows needs Claude Code {need} or later, and its version here couldn\'t be read', { need: g.need || '' })
+    : t('Claude Code didn\'t run it: settings of yours or your organization\'s may turn hooks off, or it couldn\'t start'))

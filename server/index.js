@@ -1171,7 +1171,7 @@ app.post('/api/chief/delegate/:task/retry', wrap((req) => delegate.retry(req.par
 // named, as New agent starts one. Either way in the Helpers space, a tab each (the bots' answers in
 // their own space). Read-only (access 'read'): started so. fork: a copy of an agent's conversation, in
 // its folder.
-async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs, fork, model }) {
+async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs, fork, model, env }) {
   const f = await fleetView()
   const ws = (f.workspaces || []).find((w) => w.label.toLowerCase() === String(space).toLowerCase())
   const where = ws ? { workspaceId: ws.id } : { newSpace: space }
@@ -1181,7 +1181,7 @@ async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs
   // work of yours to remember the folder for.)
   if (!own && !fork && access !== 'read' && access !== 'change') return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest', access })), session: f.session || '' }
   if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
-  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: access === 'read' || access === 'change' ? dirs : undefined, fork, effort: 'suggest', ...(model ? { model, pinModel: true } : {}) })
+  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: access === 'read' || access === 'change' ? dirs : undefined, fork, effort: 'suggest', ...(model ? { model, pinModel: true } : {}), ...(access === 'change' && env ? { env } : {}) })
   pushFleet()
   return { ...out, session: f.session || '' }
 }

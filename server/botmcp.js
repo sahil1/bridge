@@ -19,9 +19,11 @@ import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { dataFile, writeFileAtomic, HOME, ROOT, NODE } from './paths.js'
-import { loginPath } from './agents.js'
+import { dataFile, writeFileAtomic, HOME, ROOT, NODE, IS_WIN } from './paths.js'
+import { loginPath, which } from './agents.js'
 import { claudeServers, claudeServerView } from './mcp.js'
+import { launch } from './consult.js'
+import { compare } from '../shared/version.js'
 
 export const RUNS = dataFile('front-desk', 'mcp')
 const LIST_MS = 15000 // a server that hasn't listed its tools by then can't be asked
@@ -176,6 +178,43 @@ export const OUTBOX_SERVER = 'bridge_outbox'
 // log } } back, for Bridge AI to take only what they saw (botwrite.js guardCheck).
 export const FILES_SERVER = 'bridge_files'
 const sh = (s) => `'${String(s).replace(/'/g, '\'\\\'\'')}'`
+// Whether a run's hook is given as a program and its arguments (Claude Code's exec form, below): on
+// Windows. (BRIDGE_HOOK_EXEC=1 gives it so on any system, in a test's kit only: BRIDGE_FIX_DRYRUN.)
+export const execHooks = () => IS_WIN || (process.env.BRIDGE_HOOK_EXEC === '1' && process.env.BRIDGE_FIX_DRYRUN === '1')
+// The oldest Claude Code that runs a hook given so. From Claude Code's own changelog (CHANGELOG.md in
+// github.com/anthropics/claude-code), 2.1.139: "Added hook `args: string[]` field (exec form) that
+// spawns the command directly without a shell". One older than that doesn't run it as given, so the
+// hook checks nothing and every file such a run changes is refused.
+export const EXEC_HOOKS_MIN = '2.1.139'
+// The Claude Code here: its version ('2.1.312'), or null when it can't be told (none found, or it
+// didn't say). claude --version, asked again only once the program found is another or has changed
+// (an update), or an hour on.
+let claudeMemo = null
+export async function claudeVersion() {
+  const PATH = await loginPath()
+  const bin = await which('claude', PATH)
+  if (!bin) return null
+  const st = await fs.promises.stat(bin).catch(() => null)
+  if (!st) return null
+  const key = `${await fs.promises.realpath(bin).catch(() => bin)}\n${st.mtimeMs}\n${st.size}`
+  if (claudeMemo?.key === key && Date.now() - claudeMemo.at < 3600000) return claudeMemo.version
+  const out = await new Promise((resolve) => {
+    const p = launch(bin, ['--version'], { timeout: 15000, maxBuffer: 1024 * 1024, windowsHide: true, env: { ...process.env, PATH } }, (err, stdout) => resolve(err ? '' : String(stdout || '')))
+    p.stdin?.on('error', () => {})
+    p.stdin?.end()
+  })
+  const version = /(\d+\.\d+\.\d+)/.exec(out)?.[1] || null
+  claudeMemo = { key, version, at: Date.now() }
+  return version
+}
+// Whether a run that changes files can have its hook run as it's given here: null, or why not, a
+// Claude Code too old for it ({ need, have }). One whose version can't be told isn't held back (a
+// run whose hook didn't run is said once it's over: frontdesk.js).
+export async function hookTooOld() {
+  if (!execHooks()) return null
+  const have = await claudeVersion()
+  return have && compare(have, EXEC_HOOKS_MIN) < 0 ? { need: EXEC_HOOKS_MIN, have } : null
+}
 export async function runFolder(bot, { all = false, key, outbox = null, write = null }) {
   const want = (bot.mcp || []).filter((n) => n !== OUTBOX_SERVER && n !== FILES_SERVER)
   if (!want.length && !outbox && !write) return null
@@ -202,6 +241,7 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
   if (outbox) { servers[OUTBOX_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'outboxmcp.js'), outbox], env: { ...NODE.env } }; allow.push(toolName(OUTBOX_SERVER, 'save_file')) }
   let settings = null
   let guard = null
+  let agentEnv = null
   if (write?.root) {
     guard = { key: crypto.randomBytes(32).toString('hex'), log: path.join(dir, 'guard.log') }
     fs.writeFileSync(guard.log, '', { mode: 0o600 })
@@ -213,14 +253,23 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
       servers[FILES_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'filesmcp.js'), ...args], env: { ...NODE.env } }
       allow.push(toolName(FILES_SERVER, 'delete_file'), toolName(FILES_SERVER, 'move_file'))
     }
-    const env = Object.entries({ ...NODE.env }).map(([k, v]) => `${k}=${sh(v)} `).join('')
-    const command = `${env}${sh(NODE.bin)} ${[path.join(ROOT, 'server', 'botguard.mjs'), ...args].map(sh).join(' ')}`
+    // Its hook, as Claude Code runs one. On a Mac and Linux: a command for sh, each part quoted, with
+    // the variables Node needs before it. On Windows, where Claude Code runs a command in Git Bash, or
+    // in PowerShell when there's no Git Bash, each quoting its own way: the program and its arguments
+    // as they are (args, which Claude Code starts with no shell at all, so nothing in a path is read
+    // as anything but itself), and the variables Node needs in its agent's environment (agentEnv,
+    // back: a hook has its agent's, and no other).
+    const guardArgs = [path.join(ROOT, 'server', 'botguard.mjs'), ...args]
+    const hook = execHooks()
+      ? { type: 'command', command: NODE.bin, args: guardArgs, timeout: 30 }
+      : { type: 'command', command: `${Object.entries({ ...NODE.env }).map(([k, v]) => `${k}=${sh(v)} `).join('')}${sh(NODE.bin)} ${guardArgs.map(sh).join(' ')}`, timeout: 30 }
+    if (execHooks() && Object.keys(NODE.env).length) agentEnv = { ...NODE.env }
     settings = path.join(dir, 'settings.json')
-    writeFileAtomic(settings, JSON.stringify({ disableAllHooks: false, hooks: { PreToolUse: [{ matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command, timeout: 30 }] }] } }, null, 2), { mode: 0o600 })
+    writeFileAtomic(settings, JSON.stringify({ disableAllHooks: false, hooks: { PreToolUse: [{ matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [hook] }] } }, null, 2), { mode: 0o600 })
   }
   writeFileAtomic(path.join(dir, 'config.json'), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 })
   writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny, ...(settings ? { settings } : {}) }, null, 2), { mode: 0o600 })
-  return { dir, servers: said, missing, ...(guard ? { guard } : {}) }
+  return { dir, servers: said, missing, ...(guard ? { guard } : {}), ...(agentEnv ? { agentEnv } : {}) }
 }
 // A run's folder gone (it ended), or every one older than a day (left from before a restart).
 export function drop(dir) { if (dir && path.resolve(dir).startsWith(RUNS + path.sep)) fs.rmSync(dir, { recursive: true, force: true }) }

@@ -51,7 +51,8 @@
 //                                            in ~/hooks.log)
 //     [edit-anywhere <path> <text>]          writes a file anywhere, as if your own settings allowed
 //                                            every edit: only its hooks can stop it
-//     [force-write <path> <text>]            writes <text> (\n a new line, \t a tab, {{ and }} brackets)
+//     [force-write <path> <text>]            writes <text> (\n a new line, \t a tab, \r a carriage
+//                                            return, {{ and }} brackets)
 //                                            to <path> in its folder, past its hooks and permissions,
 //                                            as if its hook never ran
 //     [edit-lines <path> <n>]                writes a file of n lines to <path> in its folder
@@ -101,7 +102,13 @@ const os = require('node:os')
 const path = require('node:path')
 
 const args = process.argv.slice(2)
-if (args.includes('--version')) { console.log('2.1.312 (Claude Code)'); process.exit(0) }
+// (Its version: 2.1.312, or what ~/claude-version says, for a test of an older one.)
+if (args.includes('--version')) {
+  let v = '2.1.312'
+  try { v = fs.readFileSync(path.join(os.homedir(), 'claude-version'), 'utf8').trim() || v } catch { /* none: its own */ }
+  console.log(`${v} (Claude Code)`)
+  process.exit(0)
+}
 // Signed in with a Max plan (BRIDGE_STANDIN_CLAUDE_PLAN: another, team say).
 if (args[0] === 'auth') { console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: process.env.BRIDGE_STANDIN_CLAUDE_PLAN || 'max' })); process.exit(0) }
 const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode', '--effort', '--tools', '--settings'])
@@ -200,8 +207,10 @@ function turn(text, answer, ms, made) {
 }
 
 // Its PreToolUse hooks, from --settings (a file, or JSON), as Claude Code runs them: each one whose
-// matcher takes the tool, run through the shell with the tool call on stdin; exit 2 refuses it, its
-// stderr the reason. None with disableAllHooks.
+// matcher takes the tool, with the tool call on stdin; exit 2 refuses it, its stderr the reason. One
+// with args (exec form) is started as it is, with no shell; any other through a shell: sh on a Mac
+// and Linux; on Windows Git Bash (CLAUDE_CODE_GIT_BASH_PATH, or the bash beside git on the PATH),
+// else PowerShell, or PowerShell when its shell says so. None with disableAllHooks.
 const hooks = (() => {
   const s = opt('--settings')
   if (!s) return []
@@ -209,15 +218,33 @@ const hooks = (() => {
   try { j = JSON.parse(s.trim().startsWith('{') ? s : fs.readFileSync(s, 'utf8')) } catch { return [] }
   return j?.disableAllHooks === true ? [] : j?.hooks?.PreToolUse || []
 })()
+const gitBash = () => {
+  if (process.env.CLAUDE_CODE_GIT_BASH_PATH) return process.env.CLAUDE_CODE_GIT_BASH_PATH
+  for (const d of String(process.env.PATH || '').split(path.delimiter)) {
+    if (!d || !fs.existsSync(path.join(d, 'git.exe'))) continue
+    const bash = path.join(d, '..', 'bin', 'bash.exe')
+    if (fs.existsSync(bash)) return bash
+  }
+  return null
+}
+function hookRun(h, input) {
+  const { spawnSync } = require('node:child_process')
+  const o = { input, encoding: 'utf8', timeout: (h.timeout || 60) * 1000, windowsHide: true }
+  if (Array.isArray(h.args)) return spawnSync(h.command, h.args.map(String), o)
+  if (process.platform !== 'win32') return spawnSync('/bin/sh', ['-c', h.command], o)
+  const bash = h.shell === 'powershell' ? null : gitBash()
+  return bash ? spawnSync(bash, ['-c', h.command], o) : spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', h.command], o)
+}
 function preTool(name, input) {
   for (const m of hooks) {
     if (m.matcher && !new RegExp(`^(?:${m.matcher})$`).test(name)) continue
     for (const h of m.hooks || []) {
       if (h.type !== 'command') continue
-      const r = require('node:child_process').spawnSync(process.platform === 'win32' ? 'bash' : '/bin/sh', ['-c', h.command], { input: JSON.stringify({ hook_event_name: 'PreToolUse', session_id: id, cwd: process.cwd(), tool_name: name, tool_input: input }), encoding: 'utf8', timeout: (h.timeout || 60) * 1000 })
+      const r = hookRun(h, JSON.stringify({ hook_event_name: 'PreToolUse', session_id: id, cwd: process.cwd(), tool_name: name, tool_input: input }))
       const why = String(r.stderr || '').trim()
-      // (Its command too: Claude Code may quote it back to the agent when it refuses.)
-      note('hooks.log', { tool: name, path: input.file_path || null, status: r.status, why: why.slice(0, 300), command: String(h.command).slice(0, 4000) })
+      // (Its command too, and its arguments: Claude Code may quote them back to the agent when it
+      // refuses.)
+      note('hooks.log', { tool: name, path: input.file_path || null, status: r.status, why: why.slice(0, 300), command: String(h.command).slice(0, 4000), ...(Array.isArray(h.args) ? { args: h.args.map(String) } : {}), ...(r.error ? { error: r.error.code || r.error.message } : {}) })
       if (r.status === 2) return { ok: false, why }
     }
   }
@@ -291,8 +318,8 @@ function answerTurn(text) {
     const write = (f, body, label, kind) => {
       const h = preTool('Write', { file_path: f, content: body })
       if (!h.ok) { tried(kind, false); out.push(`I couldn't write ${label}: ${h.why.split('\n')[0]}`); return }
-      fs.mkdirSync(path.dirname(f), { recursive: true })
-      fs.writeFileSync(f, body)
+      // (One the file system refuses, as Claude Code's Write says: on Windows, git's hidden .git file.)
+      try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, body) } catch (e) { tried(kind, false); out.push(`I couldn't write ${label}: ${e.code || e.message}.`); return }
       tool('Write', { file_path: f })
       tried(kind, true)
       out.push(`I changed ${label}.`)
@@ -310,7 +337,7 @@ function answerTurn(text) {
     // (As if its hook never ran: written whatever its checks would say.)
     for (const m of q.matchAll(/\[force-write ([^\s\]]+) ([^\]]+)\]/g)) {
       const f = path.resolve(process.cwd(), m[1])
-      try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${m[2].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\{\{/g, '[').replace(/\}\}/g, ']')}\n`); tried('force-write', true); out.push(`I wrote ${m[1]}.`) } catch (e) { tried('force-write', false); out.push(`I couldn't write ${m[1]}: ${e.code || e.message}.`) }
+      try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${m[2].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r').replace(/\{\{/g, '[').replace(/\}\}/g, ']')}\n`); tried('force-write', true); out.push(`I wrote ${m[1]}.`) } catch (e) { tried('force-write', false); out.push(`I couldn't write ${m[1]}: ${e.code || e.message}.`) }
     }
     // (As if your own settings allowed every edit: its hooks are all that stand in the way.)
     for (const m of q.matchAll(/\[edit-anywhere ([^\s\]]+) ([^\]]+)\]/g)) write(path.resolve(process.cwd(), m[1].replace(/^~/, home)), `${m[2]}\n`, m[1], 'edit-anywhere')

@@ -14,24 +14,38 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
-import { gitReady, NO_GIT } from './gitready.js'
+import { gitReady, gitNothing, NO_GIT } from './gitready.js'
 import { loginPath, which } from './agents.js'
 import { launch } from './consult.js'
+import { IS_WIN } from './paths.js'
 
-// (raw: what it said as it said it, for a -z list, whose first line can start with a space.)
-const run = (bin, args, { cwd, input = '', env, timeout = 60000, raw = false } = {}) => new Promise((resolve) => {
-  const p = (bin === 'git' ? execFile : launch)(bin, args, { cwd, env, timeout, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => resolve({ ok: !err, out: raw ? String(stdout || '') : String(stdout || '').trim(), err: String(stderr || err?.message || '').trim() }))
+// (raw: what it said as it said it, for a -z list, whose first line can start with a space; bytes:
+// that as a Buffer, byte for byte.)
+const run = (bin, args, { cwd, input = '', env, timeout = 60000, raw = false, bytes = false } = {}) => new Promise((resolve) => {
+  const p = (bin === 'git' ? execFile : launch)(bin, args, { cwd, env, timeout, maxBuffer: 32 * 1024 * 1024, windowsHide: true, ...(bytes ? { encoding: 'buffer' } : {}) }, (err, stdout, stderr) => resolve({ ok: !err, out: bytes ? Buffer.from(stdout || '') : raw ? String(stdout || '') : String(stdout || '').trim(), err: String(stderr || err?.message || '').trim() }))
   p.stdin?.on('error', () => {})
   p.stdin?.end(input)
 })
-// (Whatever git is run on: none of the repository's hooks, no file-system monitor, no attributes but
-// the repository's own.)
-const SAFE = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'core.attributesFile=/dev/null']
+// (Whatever git is run on: none of the repository's hooks (an empty folder of Bridge AI's own as its
+// hooks folder), no file-system monitor, no attributes but the repository's own (an empty file as
+// yours, none of the system's). gitNothing throws when they can't be made: then git isn't run.)
+const SAFE = () => { const none = gitNothing(); return ['-c', `core.hooksPath=${none.hooks}`, '-c', 'core.fsmonitor=false', '-c', `core.attributesFile=${none.attributes}`] }
 const ENV = () => ({ ...process.env, GIT_ATTR_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' })
-const git = async (dir, args, o = {}) => (!(await gitReady()) ? { ok: false, out: '', err: NO_GIT } : run('git', [...SAFE, '-C', dir, ...args], { env: ENV(), ...o }))
+const safely = async (args, o) => {
+  if (!(await gitReady())) return { ok: false, out: '', err: NO_GIT }
+  let safe
+  try { safe = SAFE() } catch (e) { return { ok: false, out: '', err: e.message } }
+  return run('git', [...safe, ...args], { env: ENV(), ...o })
+}
+const git = (dir, args, o = {}) => safely(['-C', dir, ...args], o)
 // git on the agent's worktree: its own folder in your repository named outright, so a .git file the
 // agent wrote is never followed. c: { dir, admin } (adminOf).
-const wt = async (c, args, o = {}) => (!(await gitReady()) ? { ok: false, out: '', err: NO_GIT } : run('git', [...SAFE, `--git-dir=${c.admin}`, `--work-tree=${c.dir}`, '-C', c.dir, ...args], { env: ENV(), ...o }))
+const wt = (c, args, o = {}) => safely([`--git-dir=${c.admin}`, `--work-tree=${c.dir}`, '-C', c.dir, ...args], o)
+// (Two paths to the same place, as the file system says: each by its real path, so a drive letter's
+// case, an 8.3 short name or / for \ on Windows, or a link on the way, is the same place. One that
+// isn't there is no place.)
+const realOf = (p) => { try { return fs.realpathSync.native(p) } catch { return null } }
+const samePlace = (a, b) => { const x = realOf(a); return !!x && x === realOf(b) }
 // The worktree's own folder in the repository it's a worktree of (<repository>/.git/worktrees/<name>),
 // found from the repository's side: the one whose gitdir names this worktree. null when there's none.
 export async function adminOf(top, dir) {
@@ -41,7 +55,7 @@ export async function adminOf(top, dir) {
   const want = path.resolve(dir, '.git')
   for (const name of fs.existsSync(path.join(root, 'worktrees')) ? fs.readdirSync(path.join(root, 'worktrees')) : []) {
     const admin = path.join(root, 'worktrees', name)
-    try { if (path.resolve(admin, fs.readFileSync(path.join(admin, 'gitdir'), 'utf8').trim()) === want) return admin } catch { /* not this one */ }
+    try { if (samePlace(path.resolve(admin, fs.readFileSync(path.join(admin, 'gitdir'), 'utf8').trim()), want)) return admin } catch { /* not this one */ }
   }
   return null
 }
@@ -53,7 +67,7 @@ async function trusted(c) {
   const st = fs.lstatSync(path.join(c.dir, '.git'), { throwIfNoEntry: false })
   if (!st?.isFile()) fail('.git isn\'t the file git made')
   const said = /^gitdir:\s*(.+)$/.exec(fs.readFileSync(path.join(c.dir, '.git'), 'utf8').trim())?.[1]
-  if (!said || path.resolve(c.dir, said) !== path.resolve(c.admin)) fail('.git points somewhere else')
+  if (!said || !samePlace(path.resolve(c.dir, said), c.admin)) fail('.git points somewhere else')
   const found = []
   const look = (d, depth = 0) => {
     if (depth > 30) return
@@ -65,9 +79,15 @@ async function trusted(c) {
     }
   }
   look(c.dir)
+  // (Byte for byte as the repository has it. Only where git checks files out with \r\n for \n (on
+  // Windows, or with core.autocrlf true), a line ending \r\n where the repository's ends \n is the
+  // same: git reads a \r before a line's end as nothing. Anything else, a \r anywhere else or a
+  // space at either end, is a change.)
+  const crlf = IS_WIN || /^true$/i.test((await git(c.top, ['config', '--get', 'core.autocrlf'])).out)
+  const same = (a, b) => (crlf ? a.toString('latin1').replace(/\r\n/g, '\n') === b.toString('latin1').replace(/\r\n/g, '\n') : a.equals(b))
   for (const rel of found) {
-    const was = await wt(c, ['cat-file', 'blob', `HEAD:${rel}`])
-    if (!was.ok || was.out !== fs.readFileSync(path.join(c.dir, ...rel.split('/')), 'utf8').trim()) fail(`${rel} was added or changed`)
+    const was = await wt(c, ['cat-file', 'blob', `HEAD:${rel}`], { bytes: true })
+    if (!was.ok || !same(was.out, fs.readFileSync(path.join(c.dir, ...rel.split('/'))))) fail(`${rel} was added or changed`)
   }
 }
 const slug = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'bot'
@@ -134,7 +154,7 @@ export async function collect(c0, { message, checked = null }) {
   if (checked) {
     const real = fs.realpathSync.native(c.dir)
     const unseen = st.out.split('\0').filter(Boolean).filter((l) => !l.slice(0, 2).includes('D')).map((l) => l.slice(3)).filter((rel) => !checked('w', path.join(real, ...rel.split('/'))))
-    if (unseen.length) throw Object.assign(new Error(`It changed ${unseen.slice(0, 3).join(', ')} without going through the checks every change goes through, so nothing was taken`), { step: 'commit' })
+    if (unseen.length) throw Object.assign(new Error(`It changed ${unseen.slice(0, 3).join(', ')} without going through the checks every change goes through, so nothing was taken`), { step: 'commit', code: 'unchecked' })
   }
   if (st.out) {
     await wt(c, ['add', '-A'])

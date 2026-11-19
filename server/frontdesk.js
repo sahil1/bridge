@@ -167,6 +167,7 @@ const STREAM_MAX = 12000 // what a stream may hold (Slack)
 // How long a draft waits before the asker hears it's being checked (D8), and a minute's length, for
 // the longest run (tests make both short).
 const HOLD_MS = Number(process.env.BRIDGE_BOT_HOLD_MS) || 2 * 60 * 1000
+const GUARD_WAIT_MS = 10 * 60 * 1000 // a run that changed files, ended and never heard: its checks' folder goes then
 const MINUTE_MS = Number(process.env.BRIDGE_BOT_MINUTE_MS) || 60 * 1000
 // How soon after a conversation's last word the same person asking again there carries it on
 // (bots.js CARRY_ON_MIN; tests that ask one question after another, each its own, make it 0).
@@ -532,7 +533,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       case 'write.screened': Object.assign(q, { state: 'screened', screen: { why: e.why || null, by: e.by || 'rules', at: e.at, allowed: null, handle: null } }); break
       case 'write.allowed': if (q.screen) q.screen.allowed = { by: e.by || null, via: e.via || null, at: e.at }; q.state = 'starting'; break
       case 'write.proposed': {
-        const w = { id: e.change, q: q.id, hash: e.hash, files: e.files || [], held: e.held || [], refused: e.refused || [], diff: e.diff || '', diffChars: e.diffChars ?? null, diffFile: e.diffFile || null, by: e.by || null, also: e.also || [], try: !!e.try, direct: !!e.direct, state: e.try ? 'tried' : e.refused?.length ? 'refused' : e.waits ? 'waiting' : 'proposed', at: e.at, handles: [], applied: null, denied: null, undone: null, error: null }
+        const w = { id: e.change, q: q.id, hash: e.hash, files: e.files || [], held: e.held || [], refused: e.refused || [], diff: e.diff || '', diffChars: e.diffChars ?? null, diffFile: e.diffFile || null, by: e.by || null, also: e.also || [], try: !!e.try, direct: !!e.direct, guard: e.guard || null, state: e.try ? 'tried' : e.refused?.length ? 'refused' : e.waits ? 'waiting' : 'proposed', at: e.at, handles: [], applied: null, denied: null, undone: null, error: null }
         st.writes.set(e.change, w)
         q.write = w
         break
@@ -660,7 +661,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // The folders it changes files in (changes: edit), each checked as it is now, by its real path:
   // there, inside your home folder, nothing in its path hidden, and one of, or inside, a folder it reads
   // from. [{ path: its real path, shown, ok, problem }]
-  const realHome = (() => { try { return fs.realpathSync(home) } catch { return home } })()
+  // (By the system's own real path, as each folder's is below: on Windows the long name and the case
+  // it has on disk.)
+  const realHome = (() => { try { return fs.realpathSync.native(home) } catch { return home } })()
   async function writesOf(bot, folders = null) {
     const reads = (folders || await foldersOf(bot)).filter((f) => f.ok)
     const out = []
@@ -723,8 +726,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   const guards = new Map()
   async function checkedOf(hid) {
     const g = guards.get(hid)
-    guards.delete(hid)
-    return g ? botwrite.guardCheck(g.log, g.key) : () => false
+    // (Its guard kept until its log has been read: while it's here, its folder stays: the ticker.)
+    try { return g ? await botwrite.guardCheck(g.log, g.key) : () => false } finally { guards.delete(hid) }
   }
   // Your Claude Code's managed settings turning off the hook that every run changing files needs
   // (disableAllHooks, or only its own hooks: allowManagedHooksOnly), said; null when they don't.
@@ -744,6 +747,22 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     }
     return null
   }
+  // Your Claude Code too old to run the hook as a run that changes files is given it (on Windows:
+  // botmcp.js hookTooOld), in words.
+  const tooOldSaid = (o) => `Changing files on Windows needs Claude Code ${o.need} or later, and this computer has ${o.have}: update it with claude update in a terminal`
+  // A run whose hook never ran (checked.ran: botwrite.js guardCheck), every file it changed refused as
+  // unchecked: why it likely didn't, for the record ({ why, need, have }) and in words (said).
+  async function guardNotRun() {
+    if (botmcp.execHooks()) {
+      const have = await botmcp.claudeVersion()
+      const need = botmcp.EXEC_HOOKS_MIN
+      if (!have) return { why: 'claude-unknown', need, have: null, said: `changing files on Windows needs Claude Code ${need} or later, and its version here couldn't be read` }
+      const old = await botmcp.hookTooOld()
+      if (old) return { why: 'claude-old', need, have, said: tooOldSaid(old) }
+    }
+    return { why: 'hooks-off', need: null, have: null, said: 'Claude Code didn\'t run it: settings of yours or your organization\'s may turn hooks off, or it couldn\'t start' }
+  }
+  const NOT_RUN = 'The folder guard didn\'t run, so nothing was changed'
   botwrite.sweepOld(WRITES)
   // Each bot's changes to files, kept beside its record (botwrite.js).
   const writesDir = (id) => path.join(store.DIR, id, 'writes')
@@ -1157,6 +1176,14 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // (Neither, when your Claude Code's managed settings turn off the hook every such run needs.)
     const managed = editing || wantsChange ? hooksOff() : null
     if (managed) { next(id); return toYou(id, q, `It can't change files here: ${managed}`) }
+    // (Nor where your Claude Code is too old to run that hook as it's given: on Windows. Said in the
+    // record, Needs You and its Access, never left to fail as every file refused.)
+    const old = editing || wantsChange ? await botmcp.hookTooOld() : null
+    if (old) {
+      record(id, 'changes.blocked', at(q, { why: 'claude-old', need: old.need, have: old.have }))
+      next(id)
+      return toYou(id, q, tooOldSaid(old))
+    }
     const tries = list.map((e, i) => ({ e, i })).filter(({ i }) => i >= from && (fallback || i === 0))
     let pickd = wantsChange ? tries.find(({ e }) => botanswer.canMakeChanges(e) && !e.why) : null
     const changer = !!pickd
@@ -1339,6 +1366,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       : await delegate.add({
         list: 'desk', role: 'answer', title: `${bot.name}: question ${q.id.replace(/^.*q/, '')}`, kind: route.kind, readOnly: !tree && !stage, change: !!tree || !!stage, space: SPACE, from: id,
         ...(route.cwd ? { cwd: route.cwd } : {}), ...(route.fork ? { fork: route.fork } : {}), ...(route.dirs.length ? { dirs: route.dirs } : {}), brief, ...(entry.model && route.kind === entry.agent ? { model: entry.model } : {}),
+        // (What its hook needs to run, where its agent has to give it: botmcp.js runFolder.)
+        ...(mcp?.agentEnv && (tree || stage) ? { env: mcp.agentEnv } : {}),
       })
     const h = chat ? { cwd: route.cwd } : delegate.get(out.helper.id) || {}
     if (mcp?.dir) mcpDirs.set(out.helper.id, mcp.dir)
@@ -1573,8 +1602,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
           } else holdChange = true
         } else await changes.tidy({ ...tree, dir: h.cwd || tree.dir })
       } catch (e) {
-        record(id, 'change.failed', at(q, { step: e.step || 'commit', error: oneLine(e.message, 300) }))
-        warn = `Its change couldn't be kept: ${oneLine(e.message, 200)}`
+        // (What it changed, none of it through its hook, which never ran: said as that, with why.)
+        const notRun = e.code === 'unchecked' && checked?.ran === false ? await guardNotRun() : null
+        record(id, 'change.failed', at(q, { step: e.step || 'commit', error: oneLine(notRun ? `${NOT_RUN}: ${notRun.said}` : e.message, 300), ...(notRun ? { guard: { ran: false, why: notRun.why, need: notRun.need, have: notRun.have } } : {}) }))
+        warn = notRun ? `${NOT_RUN}: ${notRun.said}` : `Its change couldn't be kept: ${oneLine(e.message, 200)}`
         holdChange = true
       }
     }
@@ -1746,7 +1777,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   const changedNote = (q) => `Changed: ${filesSaid(q.write?.files)}.${platOf(q) !== 'slack' ? ` To put ${q.write?.files?.length === 1 ? 'it' : 'them'} back as before, say “undo ${numOf(q)}”.` : ''}`
   const writeView = (w) => (w ? {
     // (diffCut: the diff here is its start; the whole of it is the change's own, botwrite.js.)
-    id: w.id, q: w.q, hash: w.hash, code: String(w.hash || '').slice(0, 8), state: w.state, files: w.files, diff: w.diff, diffCut: (w.diffChars || 0) > String(w.diff || '').length, by: w.by, also: w.also || [], try: !!w.try, direct: !!w.direct, at: w.at,
+    id: w.id, q: w.q, hash: w.hash, code: String(w.hash || '').slice(0, 8), state: w.state, files: w.files, diff: w.diff, diffCut: (w.diffChars || 0) > String(w.diff || '').length, by: w.by, also: w.also || [], try: !!w.try, direct: !!w.direct, guard: w.guard || null, at: w.at,
     held: (w.held || []).map((x) => ({ why: x.why, files: x.files, said: botwrite.HELD_SAID[x.why] || x.why })), refused: (w.refused || []).map((x) => ({ ...x, said: REFUSED[x.why] || x.why })),
     applied: w.applied || null, denied: w.denied || null, undone: w.undone || null, error: w.error || null,
   } : null)
@@ -1858,6 +1889,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       return { hold: true, warn: `What it changed couldn't be taken, so nothing was changed: ${oneLine(e.message, 200)}` }
     } finally { await botwrite.tidy(st) }
     if (!c.entries.length && !c.refused.length) return {}
+    // (Every file refused as unchecked, and its hook never ran: said as that, with why, not as a
+    // refusal of each.)
+    const notRun = c.refused.length && c.refused.every((r) => r.why === 'unchecked') && checked?.ran === false ? await guardNotRun() : null
     // (A newer change in this conversation takes the place of one still waiting for you.)
     for (const x of [...b.st.questions.values()]) if (x.conv === q.conv && x.write?.state === 'waiting') await replaceWrite(id, x, c.id)
     const people = voices(q)
@@ -1866,14 +1900,14 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     let diffFile = null
     try { diffFile = b.trace.keep('changes', `${q.id}-${c.id}.diff`, c.diff) } catch { /* the change keeps it too */ }
     const also = people.filter((p) => p.id !== q.from?.id).map((p) => ({ id: p.id, name: p.name || null }))
-    record(id, 'write.proposed', at(q, { change: c.id, hash: c.hash, files: c.files.slice(0, 200), held: c.held, refused: c.refused.slice(0, 50), diff: clip(c.diff, 6000), diffChars: c.diff.length, diffFile, by: q.from || null, ...(also.length ? { also } : {}), ...(q.try ? { try: true } : {}), direct, waits }))
+    record(id, 'write.proposed', at(q, { change: c.id, hash: c.hash, files: c.files.slice(0, 200), held: c.held, refused: c.refused.slice(0, 50), diff: clip(c.diff, 6000), diffChars: c.diff.length, diffFile, by: q.from || null, ...(also.length ? { also } : {}), ...(q.try ? { try: true } : {}), ...(notRun ? { guard: { ran: false, why: notRun.why, need: notRun.need, have: notRun.have } } : {}), direct, waits }))
     if (q.try) {
       await botwrite.close(writesDir(id), c.id, 'tried')
-      return { note: `(Try It: nothing was changed. Asked in Slack, it would change ${filesSaid(q.write.files)}${c.refused.length ? `, but it would be refused: ${refusedSaid(c.refused)}` : c.held.length ? `, once you approve it: ${botwrite.heldSaid(c.held)}` : ''}.)` }
+      return { note: `(Try It: nothing was changed. Asked in Slack, it would change ${filesSaid(q.write.files)}${notRun ? `, but ${NOT_RUN.charAt(0).toLowerCase()}${NOT_RUN.slice(1)}: ${notRun.said}` : c.refused.length ? `, but it would be refused: ${refusedSaid(c.refused)}` : c.held.length ? `, once you approve it: ${botwrite.heldSaid(c.held)}` : ''}.)` }
     }
     if (c.refused.length) {
       await botwrite.close(writesDir(id), c.id, 'refused')
-      return { hold: true, warn: `Its change was refused, so nothing was changed: ${refusedSaid(c.refused)}` }
+      return { hold: true, warn: notRun ? `${NOT_RUN}: ${notRun.said}` : `Its change was refused, so nothing was changed: ${refusedSaid(c.refused)}` }
     }
     if (direct) {
       const r = await applyWrite(id, q, { via: 'direct' })
@@ -2460,7 +2494,15 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // hear they're being checked with you (D8); runs at their time limit (atLimit).
   const ticker = setInterval(() => {
     if (data.outbox.some((x) => x.next <= Date.now())) flush().catch(() => {})
-    for (const hid of mcpDirs.keys()) if (delegate.get(hid)?.state === 'ended') dropMcp(hid) // (stopped, or out of time)
+    // (Stopped, or out of time. Not one whose own checks haven't been read yet (guards): its log is in
+    // that folder, and its answer is heard a moment after it ends (heard()), so the folder goes then;
+    // gone first, every file it changed would be refused as unchecked. One never heard goes after
+    // GUARD_WAIT_MS, and one its helper's record no longer has (dropped, or pruned among many) at once:
+    // it won't be heard.)
+    for (const hid of mcpDirs.keys()) {
+      const h = delegate.get(hid)
+      if (!h || (h.state === 'ended' && (!guards.has(hid) || Date.now() - Date.parse(h.endedAt || 0) > GUARD_WAIT_MS))) { guards.delete(hid); dropMcp(hid) }
+    }
     for (const [id, b] of bots) {
       const bot = botOf(id)
       if (!bot || !b.channel) continue
@@ -3061,6 +3103,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         reached: qs.filter((q) => !q.try && !q.migrated && q.how !== 'scheduled').reduce((r, q) => { const p = platOf(q); r[p] ||= { asked: false, answered: false }; r[p].asked = true; if (q.state === 'sent') r[p].answered = true; return r }, {}),
         changes: {
           repos, repo: repo?.folder?.shown || null, gh: await changes.hasGh(), agentOk: who.list.some((e) => botanswer.canMakeChanges(e) && !e.why), writes, screen: !!screenAsk,
+          // (Your Claude Code too old to run the hook a change needs, as it's given here: { need, have }.)
+          hook: bot.changes !== 'none' ? await botmcp.hookTooOld() : null,
           problem: bot.changes === 'none' ? null : !who.list.some((e) => botanswer.canMakeChanges(e) && !e.why) ? (bot.changes === 'edit' ? 'Changing files needs Claude Code in what answers, which keeps its edits to its own copy of the folders' : 'Changes need Claude Code in what answers, which keeps its edits to its own copy of the repository')
             : bot.changes === 'edit' ? (!writes.length ? 'Pick the folders it changes files in: until then it changes nothing' : !writes.some((w) => w.ok) ? writes[0].problem : null) : repo?.problem || null,
         },

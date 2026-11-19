@@ -8,7 +8,7 @@ import { ago } from '../Machines.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { Connections, BotReach } from '../bots/Connections.jsx'
 import Access, { AccessLine } from '../bots/Access.jsx'
-import { accessSaid } from '../bots/access.js'
+import { accessSaid, guardWhy } from '../bots/access.js'
 import Conversations, { AnswerIn } from '../bots/Conversations.jsx'
 import BotFiles, { MadeFiles } from '../bots/BotFiles.jsx'
 import { t } from '../../i18n/index.js'
@@ -1026,6 +1026,7 @@ export function Changes({ d, save }) {
       )}
       {pr && repos.length === 1 && <p className="small">{t('In the repository {repo}.', { repo: repos[0].shown || repos[0].path })}</p>}
       {c.problem && <p className={`small ${mode !== 'none' ? 'error-text' : 'muted'}`} role={mode !== 'none' ? 'alert' : undefined}>{c.problem}</p>}
+      {mode !== 'none' && c.hook && <p className="error-text small" role="alert" data-setting="bots-changes-hook">{t('Changing files on Windows needs Claude Code {need} or later, and this computer has {have}: update it with claude update in a terminal. Until then it changes nothing.', { need: c.hook.need, have: c.hook.have })}</p>}
       {pr && c.gh === false && <p className="error-text small">{t('GitHub\'s gh isn\'t installed here, so no pull request can open: install it, and sign in with gh auth login.')}</p>}
       {pr && <p className="muted small">{t('Only the people you named under Who Can Ask, and you, can ask for one; anyone else gets an answer only.')}</p>}
       {mode === 'edit' && <EditsFiles d={d} save={save} />}
@@ -1593,7 +1594,8 @@ function eventLine(e) {
     case 'memory.deleted': return e.device ? t('{name} deleted from its memory, on {device}: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} deleted from its memory: “{text}”', { name: by, text: wordsOf(e.item?.text) })
     case 'change.proposed': return t('Changed {n} files on {branch}', { n: e.files?.length || 0, branch: e.branch || '' })
     case 'change.approved': return e.via === 'slack' ? t('{name} approved the change from Slack', { name: by }) : t('{name} approved the change', { name: by })
-    case 'change.failed': return t('The change couldn\'t go through ({step}): {why}', { step: e.step || '', why: e.error || '' })
+    case 'change.failed': return e.guard ? t('The folder guard didn\'t run, so nothing was changed: {why}', { why: guardWhy(e.guard) }) : t('The change couldn\'t go through ({step}): {why}', { step: e.step || '', why: e.error || '' })
+    case 'changes.blocked': return t('Didn\'t start: {why}', { why: guardWhy(e) })
     case 'pr.opened': return t('Opened a draft pull request')
     // (Changes to files.)
     case 'write.screened': return t('Held for you before it started: {why}', { why: e.why || '' })
@@ -1601,6 +1603,7 @@ function eventLine(e) {
     case 'write.allowed': { const from = fromSaid(e); return `${t('{name} allowed it once', { name: by })}${from ? ` (${from})` : ''}` }
     case 'write.proposed':
       if (e.try) return t('Try It: it would change {files}', { files: filesLine(e.files) })
+      if (e.guard) return t('Changed {files} in its copy, but the folder guard didn\'t run, so nothing was changed: {why}', { files: filesLine(e.files), why: guardWhy(e.guard) })
       if (e.refused?.length) return t('Changed {files} in its copy: refused, so nothing was changed', { files: filesLine(e.files || e.refused.map((r) => r.file)) })
       return e.waits ? t('Changed {files} in its copy: waiting for you', { files: filesLine(e.files) }) : t('Changed {files} in its copy', { files: filesLine(e.files) })
     case 'write.applied': { const from = fromSaid(e); return e.direct ? t('Made the change, without asking you: {files}', { files: filesLine(e.files) }) : `${t('{name} approved the change, and it was made: {files}', { name: by, files: filesLine(e.files) })}${from ? ` (${from})` : ''}` }

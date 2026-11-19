@@ -54,6 +54,9 @@ const TOOLS = [
 ]
 
 const within = (p) => p === real || p.startsWith(real + path.sep)
+// (A path's case, on Windows, where it doesn't matter, for finding the copy it's given in; each file
+// is then named by its real path, as the system has it, which is what's written down.)
+const fold = (s) => (process.platform === 'win32' ? String(s).toLowerCase() : String(s))
 // A path in the copy, checked: { full, rel, missing: the folders it needs made, in order }, or throws,
 // saying why. there: a file that's there (to delete or move); else a place nothing is yet.
 function placeOf(p, { there = true } = {}) {
@@ -63,7 +66,7 @@ function placeOf(p, { there = true } = {}) {
   const abs = path.isAbsolute(s) ? s : path.join(real, s)
   if (abs.split(/[\\/]+/).includes('..')) throw new Error(`${s} has .. in it`)
   const norm = path.resolve(abs)
-  const top = [real, root].find((r) => norm.startsWith(r + path.sep))
+  const top = [real, root].find((r) => fold(norm).startsWith(fold(r) + path.sep))
   if (!top) throw new Error(`${s} is outside your copy`)
   const rel = path.relative(top, norm)
   const segs = rel.split(path.sep)
@@ -91,13 +94,16 @@ function placeOf(p, { there = true } = {}) {
   const up = missing.length ? real : fs.realpathSync.native(path.dirname(full))
   if (!within(up)) throw new Error(`${s} is outside your copy`)
   if (path.relative(real, up).split(path.sep).some(gitLike)) throw new Error(`${s} is git's own`)
-  return { full, rel: rel.split(path.sep).join('/'), missing }
+  // (Written down by its folder's real path, as the system has it, and its own name; what's done is
+  // done to the path as it was checked, never to wherever a link might lead.)
+  const named = missing.length ? full : path.join(up, path.basename(full))
+  return { full, named, rel: rel.split(path.sep).join('/'), missing }
 }
 
 function call(name, a) {
   if (name === 'delete_file') {
     const p = placeOf(a?.path)
-    noted('d', p.full)
+    noted('d', p.named)
     fs.unlinkSync(p.full)
     return `Deleted ${p.rel} in your copy. Bridge AI shows the owner, who approves it before it's deleted for real.`
   }
@@ -105,9 +111,13 @@ function call(name, a) {
     const from = placeOf(a?.from)
     const to = placeOf(a?.to, { there: false })
     // (The folders its new place needs, made one by one inside the copy.)
-    for (const d of to.missing) { fs.mkdirSync(d); if (fs.lstatSync(d).isSymbolicLink() || !within(fs.realpathSync(d))) throw new Error(`${path.relative(real, d)} is outside your copy`) }
-    noted('d', from.full)
-    noted('w', to.full)
+    for (const d of to.missing) { fs.mkdirSync(d); if (fs.lstatSync(d).isSymbolicLink() || !within(fs.realpathSync.native(d))) throw new Error(`${path.relative(real, d)} is outside your copy`) }
+    // (Once its folders are made, written down by their real path too: a folder named in another case
+    // than one that's there, on a Mac or Windows, is that one.)
+    const up = to.missing.length ? fs.realpathSync.native(path.dirname(to.full)) : null
+    if (up && (!within(up) || path.relative(real, up).split(path.sep).some(gitLike))) throw new Error(`${to.rel} is outside your copy`)
+    noted('d', from.named)
+    noted('w', up ? path.join(up, path.basename(to.full)) : to.named)
     fs.renameSync(from.full, to.full)
     return `Moved ${from.rel} to ${to.rel} in your copy. Bridge AI shows the owner, who approves it before it's moved for real.`
   }
