@@ -26,6 +26,15 @@ try {
   const dir = path.join(kit.home, 'billing')
   fs.mkdirSync(dir, { recursive: true })
   const agentOf = async (pred) => ((await kit.api('/fleet')).agents || []).find(pred)
+  // A Claude Code agent done working, its conversation in its log. A new pane is listed idle, with
+  // the session it's given, from the moment it opens, before its Claude Code has started (on
+  // Windows, a second or more): one moved, handed off or closed then has no conversation to go on
+  // with, and Resume starts a new one.
+  const settled = async (paneId) => {
+    const a = await until(() => agentOf((x) => x.paneId === paneId && x.sessionId && x.status !== 'working' && x.status !== 'unknown'), 60000, 1000)
+    const logged = a && await until(async () => (await kit.api(`/agents/${encodeURIComponent(paneId)}/transcript`).catch(() => null))?.messages?.length > 0, 30000, 300)
+    return logged ? a : null
+  }
   // A draft typed in an agent's message box, with a mark on the window that a reload would take away.
   const typeDraft = async (p, pane, text) => {
     await p.locator(`textarea[data-composer="${pane}"]`).fill(text)
@@ -43,7 +52,7 @@ try {
     const t = look.theme
     const label = `Billing ${t}`
     const one = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label, newSpace: label, prompt: 'idle' })
-    const first = await until(() => agentOf((a) => a.paneId === one.paneId && a.sessionId && a.status !== 'working' && a.status !== 'unknown'), 60000, 1000)
+    const first = await settled(one.paneId)
     ok(!!first, `${t}: a Claude Code agent with a conversation, done working`, await agentOf((a) => a.paneId === one.paneId))
     const { ctx, p, errors } = await page(b, kit.url, look)
     p.on('dialog', (d) => d.accept())
@@ -210,7 +219,7 @@ try {
     ok(restarted.ok, "restarted: what was in its message box is in the new one's, and the window didn't load again", restarted)
 
     const h = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Handover', newSpace: 'Handover', prompt: 'idle' })
-    const cl = await until(() => agentOf((a) => a.paneId === h.paneId && a.sessionId && a.status !== 'working' && a.status !== 'unknown'), 60000, 1000)
+    const cl = await settled(h.paneId)
     ok(!!cl, 'a Claude Code agent to hand off, done working', await agentOf((a) => a.paneId === h.paneId))
     await p.locator('.tab-main', { hasText: 'Handover' }).first().click({ timeout: 20000 })
     await typeDraft(p, h.paneId, 'Then the April ledger')
@@ -232,7 +241,7 @@ try {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
     p.on('dialog', (d) => d.accept())
     const l = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Payroll', newSpace: 'Payroll', prompt: 'idle' })
-    const was = await until(() => agentOf((a) => a.paneId === l.paneId && a.sessionId && a.status !== 'working' && a.status !== 'unknown'), 60000, 1000)
+    const was = await settled(l.paneId)
     ok(!!was, 'a Claude Code agent to close, done working', await agentOf((a) => a.paneId === l.paneId))
     await p.locator('.tab-main', { hasText: 'Payroll' }).first().click({ timeout: 20000 })
     await typeDraft(p, l.paneId, 'Then the June payroll')
