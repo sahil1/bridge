@@ -13,3 +13,5 @@
 .bk-conn > span { min-width: 0; overflow-wrap: anywhere; }
 .bk .st-note.bad .btn { margin-left: auto; }
 .bk-plan > .btn { justify-self: start; }
+.bk-sub { display: block; color: var(--ink-2); overflow-wrap: anywhere; }
+.bk-sub.is-bad { color: var(--critical); }

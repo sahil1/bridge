@@ -282,7 +282,7 @@ export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, 
   tail.push(`Reply with the answer alone, as it should appear in ${app}: plain and short, in the language it was asked in. ${auto ? `It goes to ${app} as you write it.` : `${you} reads it before it's sent.`} If what you can read doesn't answer it, reply with NO ANSWER on the first line and why on the next.`)
   if (CAPS[plat].files) tail.push('To send back a file (a chart made from data, a table), put it after your answer: a line FILE: <name>, then the file in a fenced block. A chart as SVG; text files only (svg, csv, md, txt, json, html), up to 1 MB.')
   // (Its outbox, botfiles.js: the one place it may write.)
-  if (outbox) tail.push(`To send back a file you make (a chart, a spreadsheet, a PDF, a picture), save it in your outbox, ${outbox}: each file there goes with your answer, ${botfiles.MAX} at most and none over ${botfiles.sizeOf(botfiles.EACH)}, and never a program or a script. It's the one place you can write.`)
+  if (outbox) tail.push(`To send back a file you make (a chart, a spreadsheet, a PDF, a picture), save it with your save_file tool: each file you save goes with your answer, ${botfiles.MAX} at most and none over ${botfiles.sizeOf(botfiles.EACH)}, and only pictures, PDFs, tables, text and documents (${botfiles.KINDS.join(', ')}). It's the one way you can make a file.`)
   // (Someone who may ask for a change, with nothing here that can make one: said, for you to make.)
   if (noChange) tail.push(`You can't change anything here. If they ask you to change something (a file, the code, a document), reply with CHANGE NEEDED on the first line and what they want changed on the next, and nothing else.`)
   if (bot.memory !== 'off') tail.push(`If you learn something worth knowing for later questions (someone's role, what they prefer, a fact about this channel), add it at the very end as a line REMEMBER: … (in general), REMEMBER about this channel: …, or REMEMBER about ${who(q.from)}: …. It's kept only if ${you} keeps it.`)
@@ -884,10 +884,14 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const ins = await store.instructionsOf(bot, ok.map((f) => f.path))
     // Its MCP servers, with the tools whoever asked may use: only with Claude Code, which holds a run
     // to them. (Its folder goes with the run's others, and is never one it may read: agents.js mcpOf.)
+    // Its outbox (botfiles.js): where it may save files to send back, with a save_file tool that writes
+    // only there: Claude Code's from Bridge AI's own MCP server (botmcp.js), a model's from Bridge AI.
+    // (Codex's read-only sandbox calls no tool of ours, so a run of it has none.)
+    const outbox = route.kind === 'claude' || route.kind === 'model' ? botfiles.outboxFor(`${q.id}-${q.runs.length + 1}`) : null
     let mcp = null
     const all = mayAct(bot, q.from)
-    if (bot.mcp?.length && route.kind === 'claude') {
-      try { mcp = await botmcp.runFolder(bot, { all, key: `${q.id}-${q.runs.length + 1}` }) } catch (e) { mcp = { dir: null, servers: [], missing: [], problem: oneLine(e.message, 200) } }
+    if ((bot.mcp?.length || outbox) && route.kind === 'claude') {
+      try { mcp = await botmcp.runFolder(bot, { all, key: `${q.id}-${q.runs.length + 1}`, outbox }) } catch (e) { mcp = { dir: null, servers: [], missing: [], problem: oneLine(e.message, 200) } }
       if (mcp?.dir) route.dirs = [...route.dirs, mcp.dir]
     } else if (bot.mcp?.length && route.kind === 'model') {
       // (A model calls them through Bridge AI, under the same rules: botanswer.js runChat.)
@@ -896,10 +900,6 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     }
     const github = []
     for (const f of ok.slice(0, 10)) { const url = await changes.githubOf(f.path).catch(() => null); if (url) github.push({ folder: shown(f.path), url }) }
-    // Its outbox (botfiles.js): where Claude Code or a model may save files to send back. (Codex's
-    // read-only sandbox writes nowhere, so a run of it has none.)
-    const outbox = route.kind === 'claude' || route.kind === 'model' ? botfiles.outboxFor(`${q.id}-${q.runs.length + 1}`) : null
-    if (outbox && route.kind !== 'model') route.dirs = [...route.dirs, outbox]
     const at0 = route.cwd ? [route.cwd, ...route.dirs] : route.dirs
     let { text: brief, cut } = briefOf({ bot, you: ownerName(bot), q, route, folders: at0.filter((d) => !inside(d, FILES) && !inside(d, botmcp.RUNS) && !inside(d, botfiles.OUTBOX)).map(shown), ins, ctx, pending, auto, memory, attached, agents: agentsNow, scheduled: q.routine ? { where: where(q.place) } : null, github, noChange: !!noChange, outbox })
     // On Windows (and when a test asks), the brief goes in a file of its own the agent is pointed to.
@@ -935,7 +935,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       ...(tree ? { change: { branch: tree.branch, base: tree.base, dir: shown(tree.dir), top: tree.top, remote: tree.remote, from: tree.from, again: tree.again } } : problem ? { changeProblem: problem } : {}),
       limit: { minutes: bot.limits.minutes },
       with: pending ? pending.map((x) => x.ts) : [q.ts, ...q.more.map((x) => x.ts)],
-      ...(mcp ? { mcp: { servers: mcp.servers, may: all ? 'all' : 'read-only', ...(mcp.missing.length ? { missing: mcp.missing } : {}), ...(mcp.problem ? { problem: mcp.problem } : {}) } } : bot.mcp?.length ? { mcp: { servers: [], problem: `MCP servers need Claude Code or a model answering, not ${adapter(route.kind).label}` } } : {}),
+      ...(mcp && bot.mcp?.length ? { mcp: { servers: mcp.servers, may: all ? 'all' : 'read-only', ...(mcp.missing.length ? { missing: mcp.missing } : {}), ...(mcp.problem ? { problem: mcp.problem } : {}) } } : bot.mcp?.length && route.kind !== 'claude' && route.kind !== 'model' ? { mcp: { servers: [], problem: `MCP servers need Claude Code or a model answering, not ${adapter(route.kind).label}` } } : {}),
     }))
     if (chat) {
       const hid = out.helper.id
@@ -1129,8 +1129,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       const quoted = quotes(text, read)
       if (quoted.length) { auto = false; warn = `It quotes ${quoted.slice(0, 3).join(', ')} in ${where(q.place)}, a public channel, so it waits for you` }
     }
-    // (Files it made, for a public channel: they could hold anything it read, so they wait for you.)
-    if (auto && isPublic(q.place) && made.files.length) { auto = false; warn = `It made ${made.files.map((f) => f.name).join(', ')} for ${where(q.place)}, a public channel, so it waits for you` }
+    // (Files it sends back, for a public channel, whichever way it made them: they could hold anything
+    // it read, so they wait for you.)
+    if (auto && isPublic(q.place) && outFiles.length) { auto = false; warn = `It made ${outFiles.map((f) => f.name).join(', ')} for ${where(q.place)}, a public channel, so it waits for you` }
     // (A file read in its copy of a repository is named as it is in the repository.)
     const copyOf = tree ? [h.cwd || tree.dir, shown(h.cwd || tree.dir)] : []
     const named = (w) => { for (const pre of copyOf) if (pre && String(w).startsWith(pre)) return `${shown(tree.top)}${String(w).slice(pre.length)}`; return w }

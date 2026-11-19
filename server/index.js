@@ -262,6 +262,15 @@ const jsonFor = (req) => (req.method === 'PUT' && /^\/api\/agents\/[^/]+\/file$/
   : req.method === 'POST' && req.path === '/api/studio/deck/ai' ? jsonDeckAi
   : jsonSmall)
 app.use((req, res, next) => jsonFor(req)(req, res, next))
+// A bot's files (botfiles: roots, botfiles.js) are only opened, shown in Finder and sent on: any
+// route that would write through one of them (Studio's, signing's, a file's save) is turned away
+// here, before it's reached, whichever names the root (its query or its body).
+app.use((req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method) || /^\/api\/agents\/[^/]+\/fileop$/.test(req.path) || req.path === '/api/transfers') return next()
+  const named = [req.query?.root, req.query?.pane, req.body?.root, req.body?.pane, req.body?.from?.root, req.body?.to?.pane, req.body?.into?.pane]
+  if (named.some((r) => String(r || '').startsWith('botfiles:'))) return res.status(403).json({ error: 'A bot\'s files are only to open and send on from here', code: 'readOnly' })
+  next()
+})
 
 const wrap = (fn) => async (req, res) => {
   try {
@@ -554,7 +563,12 @@ app.use('/api/agents/:pane', async (req, res, next) => {
 app.use('/api/agents/:pane', (req, res, next) => {
   if (!String(req.params.pane).startsWith('botfiles:')) return next()
   if (!trialOn('slack-bot')) return res.status(404).json({ error: 'Bots is a beta feature. Turn it on in Settings › About & Updates › Beta Features.', trial: 'slack-bot' })
-  if (['GET', 'HEAD'].includes(req.method) || (req.method === 'POST' && req.path === '/fileop' && LOOK_ONLY.has(req.body?.op))) return next()
+  if (['GET', 'HEAD'].includes(req.method)) return next()
+  if (req.method === 'POST' && req.path === '/fileop' && LOOK_ONLY.has(req.body?.op)) {
+    // (Opened in its app only when it can't run anything as it opens; the rest shown in Finder.)
+    if (req.body.op === 'open' && !botfiles.opensSafely(req.body.path)) req.body.op = 'reveal'
+    return next()
+  }
   return res.status(403).json({ error: 'A bot\'s files are only to open and send on from here', code: 'readOnly' })
 })
 // A request a page of this server's made: its Referer is this server.
@@ -893,8 +907,9 @@ app.post('/api/transfers', tx((req) => {
   // From a window showing another computer (machinepages.js): only that computer's files copied here.
   if (req.machinePage && (req.body?.from !== req.machinePage || req.body?.to)) throw Object.assign(new Error(machinePages.elsewhere(relay.thisName())), { status: 403, code: 'machinePage' })
   counts.add('files.sent')
-  // (A bot's file is sent on, never moved: it stays beside its record.)
+  // (A bot's file is sent on, never moved: it stays beside its record. Nothing is copied into one.)
   if (String(req.body?.src?.pane || '').startsWith('botfiles:')) req.body.move = false
+  if (String(req.body?.into?.pane || '').startsWith('botfiles:')) throw Object.assign(new Error('A bot\'s files are only to open and send on from here'), { status: 403, code: 'readOnly' })
   return transfers.start(req.body || {}, { here: fromHere(req) })
 }))
 app.post('/api/transfers/clear', tx(() => transfers.clear()))
@@ -4957,15 +4972,12 @@ app.delete('/api/connections/:cid', botsGuard, wrapBot(async (req) => {
 // computers over the link between them; and one from another computer, applied here once you say so,
 // its connections paused until the one it came from has stopped its bots (or you Start them).
 backup.use({
-  computer: () => relay.thisName(), installed,
+  computer: () => relay.thisName(), installed, chiefDir: CHIEF_DIR,
   memoryOf: (id) => desk.memory.list(id).filter((x) => x.state === 'kept').map(({ id: mid, kind, of, ofName, text, state }) => ({ id: mid, kind, of, ofName, text, state })),
-  // A bot from another computer, as an imported one is (/api/bots/import), saying where it came from.
-  bring: (bundle, { paused = false, why = null } = {}) => {
-    const r = botsStore.fromBundle(bundle, botOwnerName())
-    if (paused) botsStore.save(r.bot.id, { paused: true })
-    connectBot(r.bot.id)
-    const kept = desk.memory.bring(r.bot.id, r.memory)
-    desk.record(r.bot.id, 'settings.changed', { setting: 'imported', old: null, new: { name: r.bot.name, memory: kept, from: String(bundle?.exportedAt || '') || null }, by: 'Bridge AI', ...(why ? { why: String(why).split(':')[0] } : {}) })
+  // A bot from another computer, checked as an imported one is (bringBot), saying where it came from.
+  bring: async (bundle, { req, paused = false, auto = false, owners = false, why = null } = {}) => {
+    const r = await bringBot(bundle, req, { auto, owners, why: why ? String(why).split(':')[0] : null })
+    if (paused && !r.bot.paused) r.bot = botsStore.save(r.bot.id, { paused: true }).after
     return r
   },
   pauseBot: (id, why) => { const { before, after } = botsStore.save(id, { paused: true }); desk.record(id, 'settings.changed', { setting: 'paused', old: before.paused, new: after.paused, by: 'Bridge AI', why }); desk.pause(id).catch(() => {}) },
@@ -4976,6 +4988,8 @@ backup.use({
 })
 backup.routes(app, {
   here: (req) => fromHere(req), viaMachine: (req) => viaMachine(req),
+  // (A device paired a moment ago with a code counts once it's kept here: Keep, in the app.)
+  kept: (req) => !req.headers['x-bridge-relay'] || relay.isKept(req.headers['x-bridge-relay']), deviceOf: (req) => relay.deviceOf(req.headers['x-bridge-relay'])?.name || null,
   machineOf: (req) => (viaMachine(req) ? machines.ofDevice(relay.deviceOf(req.headers['x-bridge-relay'])) : null),
   notify: (o) => notify.send(o).catch(() => {}),
 })
@@ -5076,16 +5090,45 @@ app.get('/api/bots/:id/export', botsGuard, (req, res) => {
 // Your answer to one, from Needs You: send (as edited) or discard; for a change waiting on you,
 // Send approves it and opens its pull request first.
 app.post('/api/bots/questions/:id', botsGuard, wrapBot((req) => desk.decide(req.params.id, { send: req.body?.send === true, text: req.body?.text })))
+// A bot from another computer: its own export, a backup or a move (backup.js). Made with its plain
+// settings, then each of the rest checked as Settings checks it (checkSettings: a folder there, inside
+// your home folder and not Bridge AI's own; people by their ids; what answers; its MCP servers here)
+// and kept only if it passes, one at a time, so one that doesn't is left out and said and the rest
+// stand. From a file it doesn't answer without asking at first (auto: false), and who you are on
+// each platform isn't taken from it (owners: false: drafts would go to whoever the file names):
+// both are set here, once you've looked it over. { bot, renamed, problems, memory }
+const BRING_WHAT = { who: 'who can ask', askers: 'who can ask', owner: 'you in Slack', owners: 'you in Discord and Teams', instructionsFile: 'its instructions file', repo: 'its repository', agent: 'what answers', answerers: 'what answers', changes: 'its changes', mcp: 'its MCP servers', muted: 'its muted channels', listen: 'the channels it listens in', agentCopies: 'copies of your agents\' conversations' }
+async function bringBot(bundle, asked, { auto = false, owners = false, why = null } = {}) {
+  const req = asked || { headers: {} }
+  const r = botsStore.fromBundle(bundle, botOwnerName(), { held: true })
+  const problems = []
+  const next = {}
+  for (const k of botsStore.CHECKED) {
+    if (!Object.hasOwn(r.held, k)) continue
+    const v = r.held[k]
+    if (k === 'auto') { if (v === true && !auto) problems.push(`${r.bot.name} doesn't answer without asking here: turn that on in its settings once you've looked it over`); else if (v === true) next.auto = true; continue }
+    if ((k === 'owner' || k === 'owners') && !owners) { if (k === 'owner' && (v?.id || Object.keys(r.held.owners || {}).length)) problems.push(`Who you are in Slack, Discord and Teams isn't taken from a file: set it again in ${r.bot.name}'s settings`); continue }
+    if (k === 'readsFrom') {
+      for (const f of (Array.isArray(v) ? v : []).slice(0, 50)) {
+        try { next.readsFrom = (await checkSettings({ ...r.bot, ...next, readsFrom: next.readsFrom || [] }, { readsFrom: [...(next.readsFrom || []), String(f)] }, req)).readsFrom } catch (e) { problems.push(`${r.bot.name} doesn't read ${String(f).slice(0, 200)}: ${e.message}`) }
+      }
+      continue
+    }
+    try { Object.assign(next, await checkSettings({ ...r.bot, ...next }, { [k]: v }, req)) } catch (e) { problems.push(`${r.bot.name}: ${BRING_WHAT[k] || k} left out: ${e.message}`) }
+  }
+  const bot = Object.keys(next).length ? botsStore.save(r.bot.id, next).after : r.bot
+  connectBot(bot.id)
+  const kept = desk.memory.bring(bot.id, r.memory)
+  desk.record(bot.id, 'settings.changed', { setting: 'imported', old: null, new: { name: bot.name, memory: kept, from: String(bundle?.exportedAt || '') || null, ...(problems.length ? { leftOut: problems.length } : {}) }, ...(asked ? changedBy(req) : { by: 'Bridge AI' }), ...(why ? { why } : {}) })
+  return { bot, renamed: r.renamed, problems, memory: kept }
+}
 // A bot from a file exported on another computer (instructions, memory and settings; never tokens).
 app.post('/api/bots/import', botsGuard, wrapBot(async (req) => {
-  const r = botsStore.fromBundle(req.body?.bundle, String(cfg.name || '').trim())
-  connectBot(r.bot.id)
-  const kept = desk.memory.bring(r.bot.id, r.memory)
-  desk.record(r.bot.id, 'settings.changed', { setting: 'imported', old: null, new: { name: r.bot.name, memory: kept, from: String(req.body?.bundle?.exportedAt || '') || null }, ...changedBy(req) })
+  const r = await bringBot(req.body?.bundle, req)
   desk.sync()
   const v = await botView(r.bot)
   const problems = [
-    ...(v.folders || []).filter((f) => !f.ok).map((f) => `${f.shown} isn't on this computer: ${f.problem}`),
+    ...r.problems,
     ...(r.renamed ? [`There's a bot called ${r.bot.name.replace(/ \(\d+\)$/, '')} here already, so this one is ${r.bot.name}`] : []),
     'Connect its Slack app here: paste its two tokens under Your Slack App. (A bot\'s tokens never go in its file.)',
     'If it answered in Discord or Teams too, connect those here under Where It Answers.',

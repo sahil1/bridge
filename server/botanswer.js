@@ -151,7 +151,7 @@ export async function runChat({ reply, model, brief, folders = [], also = [], mc
     const a = c.args || {}
     // (Its name only: a path in it goes nowhere but the outbox.)
     if (c.name === 'save_file' && outbox) {
-      const name = path.basename(String(a.name || '').replace(/\\/g, '/')).replace(/[:*?"<>|\x00-\x1f]+/g, '-').replace(/^\.+/, '').slice(0, 120) // eslint-disable-line no-control-regex
+      const name = path.basename(String(a.name || '').replace(/\\/g, '/')).replace(/\p{Cf}/gu, '').replace(/[:*?"<>|\x00-\x1f]+/g, '-').replace(/^\.+/, '').slice(0, 120) // eslint-disable-line no-control-regex
       if (!name) throw refused('Give the file a name.')
       const body = a.base64 === true ? Buffer.from(String(a.content || ''), 'base64') : Buffer.from(String(a.content ?? ''), 'utf8')
       if (body.length > SAVE_MAX) throw refused('That file is too big to send back.')

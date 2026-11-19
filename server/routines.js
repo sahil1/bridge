@@ -394,32 +394,54 @@ export function remove(id) {
 }
 
 // ---------- From another computer (Back Up & Move: backup.js) ----------
-// Routines as another computer had them, added here: each under an id not taken here, and its name
-// with a number after it when one here has that name. A bot's post goes to that bot as it's called
-// here (bots: its id there -> its id here; one not brought along is left out). A scheduled one that
-// runs by itself arrives paused when asked (paused: it runs on one computer at a time). What was
-// added, and what wasn't and why: [{ from, id, name, renamed, paused }, { from, name, skipped }].
+// A routine as another computer had it, made again here as add() makes one (its name and command,
+// an agent's folder that's on this computer, its agent, the Chief of Staff, or a bot's post in a
+// channel, and its schedule), anything else in it left out: { def } or { why } it can't be.
+const BOT_CHANNEL = /^([CG][A-Z0-9]{2,20}|discord:\d{1,25}|teams:[^\s"<>]{3,300})$/
+export function checkBrought(r, { bots = null } = {}) {
+  if (!r || typeof r !== 'object') return { why: 'it isn\'t a routine' }
+  const name = String(r.name || '').trim().slice(0, 120)
+  const command = String(r.command || '').trim()
+  if (!name || !command) return { why: 'a routine needs a name and a command' }
+  let def
+  if (r.to === 'bot') {
+    const to = bots ? bots[r.bot] : r.bot
+    if (!to || !/^b\d{1,4}$/.test(String(to))) return { why: 'its bot isn\'t among what was brought' }
+    if (!BOT_CHANNEL.test(String(r.channel?.id || ''))) return { why: 'its channel isn\'t one a bot can post in' }
+    def = { name, detail: String(r.detail || '').slice(0, 500), every: String(r.every || 'day').slice(0, 20), cwd: '', workspace: '', command: command.slice(0, 4000), detect: {}, to: 'bot', bot: String(to), channel: { id: String(r.channel.id), name: String(r.channel.name || '').replace(/^#/, '').slice(0, 80) || null } }
+  } else {
+    const chief = r.to === 'chief'
+    const cwd = chief ? '' : String(r.cwd || '~').slice(0, 500)
+    if (!chief && !fs.existsSync(expand(cwd))) return { why: `its folder, ${cwd}, isn't on this computer` }
+    const cmd = /^\/([\w:-]+)/.exec(command)?.[1]
+    def = { name, detail: String(r.detail || '').slice(0, 500), every: String(r.every || 'week').slice(0, 20), cwd, workspace: String(r.workspace || '').slice(0, 80), command: command.slice(0, 4000), detect: cmd ? { command: cmd.split(':').pop() } : {} }
+    if (r.kind && !chief) def.kind = String(r.kind).slice(0, 40)
+    if (chief) def.to = 'chief'
+  }
+  if (r.schedule) {
+    try { Object.assign(def, clean(scheduleFrom(r.schedule)), { auto: r.auto !== false }) } catch { return { why: `its schedule, "${String(r.schedule).slice(0, 80)}", isn't one this computer understands` } }
+  }
+  return { def }
+}
+// Routines from another computer, added here, each checked as above: under an id not taken here,
+// and its name with a number after it when one here has that name. A bot's post goes to that bot as
+// it's called here (bots: its id there -> its id here). A scheduled one that runs by itself arrives
+// paused when asked (paused: it runs on one computer at a time), its times counted from now. What
+// was added, and what wasn't and why: [{ from, id, name, renamed, paused }, { from, name, skipped }].
 export function bring(list, { paused = false, bots = null } = {}) {
   const defs = readDefs()
   const out = []
   for (const r of Array.isArray(list) ? list : []) {
-    if (!r || typeof r !== 'object' || !String(r.name || '').trim()) continue
-    const def = { ...r }
-    if (def.to === 'bot') {
-      const to = bots?.[def.bot]
-      if (!to) { out.push({ from: r.id, name: r.name, skipped: 'its bot isn\'t among what was brought' }); continue }
-      def.bot = to
-    }
+    const { def, why } = checkBrought(r, { bots: bots || {} })
+    if (!def) { out.push({ from: r?.id || null, name: String(r?.name || '').slice(0, 120) || 'A routine', skipped: why }); continue }
     let id = slug(def.name)
     while (defs.some((d) => d.id === id)) id += '-2'
-    const want = String(def.name).slice(0, 120)
+    const want = def.name
     let name = want
     for (let i = 2; defs.some((d) => d.name.toLowerCase() === name.toLowerCase()) && i < 100; i++) name = `${want} (${i})`
     Object.assign(def, { id, name })
-    const pause = paused && !!scheduleOf(def) && def.auto && !def.paused
+    const pause = paused && !!scheduleOf(def) && def.auto
     if (pause) def.paused = true
-    // (Its times count from now here, so one that was due there isn't run here at once.)
-    if (scheduleOf(def)) def.since = new Date().toISOString()
     defs.push(def)
     out.push({ from: r.id, id, name, renamed: name !== want, paused: pause, scheduled: !!scheduleOf(def) && !!def.auto })
   }

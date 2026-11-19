@@ -378,11 +378,12 @@ function hasUserServer(kind, name) {
   return !!(map && typeof map === 'object' && Object.hasOwn(map, name))
 }
 
-async function addTo(agent, s) {
+// (fileOnly: by a file edit even where the agent's command line could add it: Back Up & Move.)
+async function addTo(agent, s, { fileOnly = false } = {}) {
   const spec = SPECS[agent.kind]
   if (!spec.transports.includes(s.transport)) throw new Error(`${agent.label} doesn't support ${s.transport.toUpperCase()} servers`)
   if (hasUserServer(agent.kind, s.name)) throw new Error(`Already has a server named ${s.name}`)
-  if (usesCli(agent) && (!spec.cliAdds || spec.cliAdds(s))) {
+  if (!fileOnly && usesCli(agent) && (!spec.cliAdds || spec.cliAdds(s))) {
     try { await runCli(agent.path, spec.cli.add(s), Object.values(s.env)) } catch (e) {
       // Codex adds an HTTP server, then tries to sign in and exits non-zero without a browser.
       if (hasUserServer(agent.kind, s.name)) return { via: 'cli', note: spec.loginHint?.(s.name) || 'Added; sign in from the agent' }
@@ -484,32 +485,40 @@ export async function userServersRaw(installed) {
 // The agents here that take servers (their kind and name), for what a backup would add.
 export const agentsHere = async (installed) => (await agentsWithMcp(installed).catch(() => [])).map((a) => ({ kind: a.kind, label: a.label }))
 export const hasServer = (kind, name) => { try { return hasUserServer(kind, name) } catch { return false } }
-// One of those as Settings shows a server: how it's reached, no secret's value.
-export const viewRaw = (kind, name, raw) => (SPECS[kind] ? serverView(name, raw, SPECS[kind].read) : null)
-// One of those added here to the same agent, as it was: a file edit in that agent's own format
-// (never its command line, which would need the entry taken apart), and only when it has none by
-// that name. { ok, error }
-export async function addRaw(installed, { kind, name, raw }) {
+// One of those as it would be added here: the form Settings › MCP Servers takes (validate: its name,
+// how it's reached, its command and arguments, its env), from the agent's own format. Headers aren't
+// carried. { s, kinds } or { error }.
+const RISKY_ENV = /^(NODE_OPTIONS|BASH_ENV|ENV|PYTHONSTARTUP|PYTHONPATH|PERL5OPT|RUBYOPT|LD_\w+|DYLD_\w+)$/
+function fromRaw(kind, name, raw) {
   const spec = SPECS[kind]
-  if (!spec || !NAME_RE.test(String(name)) || !raw || typeof raw !== 'object') return { ok: false, error: 'Not a server Bridge AI can add' }
+  if (!spec) return { error: 'Bridge AI doesn\'t manage MCP servers for that agent' }
+  const r = spec.read(raw && typeof raw === 'object' ? raw : {})
+  const env = raw?.env && typeof raw.env === 'object' ? raw.env : raw?.environment && typeof raw.environment === 'object' ? raw.environment : {}
+  try { return validate({ name, transport: r.transport, command: r.command, args: Array.isArray(r.args) ? r.args.map(String) : [], url: r.url, env: Object.fromEntries(Object.entries(env).map(([k, v]) => [k, String(v)])), agents: [kind] }) } catch (e) { return { error: e.message } }
+}
+// What it would run, shown in full before it's added: its command and arguments (or its address),
+// the names of its env (never their values), and those among them that make a program run more
+// than it was asked (NODE_OPTIONS, LD_ and DYLD_, BASH_ENV and the like). { transport, command, args,
+// url, envKeys, risky, error }
+export function viewRaw(kind, name, raw) {
+  const v = fromRaw(kind, name, raw)
+  if (v.error) return { error: v.error }
+  const envKeys = Object.keys(v.s.env)
+  return { transport: v.s.transport, command: v.s.command || null, args: v.s.args, url: v.s.url || null, envKeys, risky: envKeys.filter((k) => RISKY_ENV.test(k)) }
+}
+// One of those added here to the same agent, as Settings › MCP Servers adds one (validate, then the
+// entry it writes, in that agent's own format), by a file edit, only when it has none by that name.
+// { ok, error }
+export async function addRaw(installed, { kind, name, raw }) {
+  const v = fromRaw(kind, name, raw)
+  if (v.error) return { ok: false, error: v.error }
   const agent = (await agentsWithMcp(installed).catch(() => [])).find((a) => a.kind === kind)
   if (!agent) return { ok: false, error: `${adapter(kind).label || kind} isn't on this computer` }
   try {
     if (hasUserServer(kind, name)) return { ok: false, error: `${agent.label} has a server named ${name} already` }
-    if (spec.format === 'toml') {
-      await editToml(spec.file(), (text, data) => {
-        if (data?.mcp_servers?.[name]) throw new Error(`Already has a server named ${name}`)
-        return (text.trim() ? text.replace(/\s*$/, '\n\n') : '') + stringifyToml({ mcp_servers: { [name]: raw } }).trimEnd() + '\n'
-      })
-    } else {
-      await editJson(spec.file(), spec.format, spec.key, (map, root) => {
-        if (Object.hasOwn(map, name)) throw new Error(`Already has a server named ${name}`)
-        if (spec.newFile && !Object.keys(root).length) Object.assign(root, spec.newFile)
-        map[name] = raw
-      })
-    }
+    await addTo(agent, v.s, { fileOnly: true })
     return { ok: true, label: agent.label }
-  } catch (e) { return { ok: false, error: redactText(e.message).slice(0, 300) } }
+  } catch (e) { return { ok: false, error: scrub(e.message, Object.values(v.s.env)) } }
 }
 
 // ---------- Bridge AI itself, as a server for other apps ----------

@@ -43,12 +43,13 @@
 //                                            under --permission-mode dontAsk (Edit(./**) is only
 //                                            its folder)
 //     [make <name> <text>]                   saves <name> (with <text>, or a line saying what it
-//                                            is) in the outbox its brief names, to send back: only
-//                                            when --tools lets it Write and --allowedTools has
-//                                            Edit(//<outbox>/**), else it says it couldn't
-//     [make-exe <name>], [make-script <name>]   saves a Windows program (MZ…) or a script (#!…) there
-//     [make-big <name> <MB>]                 saves a file that many MB big there
-//     [make-link <name> <path>]              puts a link to <path> there
+//                                            is) to send back, with the save_file tool of its MCP
+//                                            server bridge_outbox (the server started as its
+//                                            --mcp-config says, and asked as Claude Code asks one):
+//                                            only with --strict-mcp-config and --allowedTools letting
+//                                            it (mcp__bridge_outbox__save_file), else it says it couldn't
+//     [make-exe <name>], [make-script <name>]   saves a Windows program (MZ…) or a script (#!…) so
+//     [make-big <name> <MB>]                 saves a file that many MB big so
 //     [remember <text>]                      ends with REMEMBER: <text>
 //     [remember-me <text>]                   ends with REMEMBER about <the asker>: <text>
 //     [recall]                               says what its brief's memory gave it
@@ -70,7 +71,8 @@
 //   claude --resume <id> --fork-session --session-id <new> "<brief>"   a copy of a conversation:
 //                                            <id>'s, then the brief as above
 //   --model <m>, --effort <level>, --permission-mode <mode>, --tools <list>, --add-dir <dirs...>,
-//   --strict-mcp-config                      taken, as Claude Code takes them
+//   --mcp-config <files...>, --disallowedTools <list>, --strict-mcp-config   taken, as Claude Code
+//                                            takes them
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -86,9 +88,12 @@ const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1
 // --add-dir takes folders until the next flag; anything else that isn't a flag or a flag's value is
 // the opening message.
 const added = []
+const configs = []
 let message = ''
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--add-dir') { while (args[i + 1] && !args[i + 1].startsWith('--')) added.push(args[++i]); continue }
+  if (args[i] === '--mcp-config') { while (args[i + 1] && !args[i + 1].startsWith('--')) configs.push(args[++i]); continue }
+  if (args[i] === '--disallowedTools') { while (args[i + 1] && !args[i + 1].startsWith('--')) i++; continue }
   if (args[i] === '--allowedTools') { while (args[i + 1] && !args[i + 1].startsWith('--')) allowed.push(args[++i]); continue }
   if (WITH_VALUE.has(args[i])) { i++; continue }
   if (!args[i].startsWith('--') && !message) message = args[i]
@@ -217,27 +222,29 @@ function answerTurn(text) {
       const inHere = f.startsWith(process.cwd() + path.sep)
       if (can('Edit') && (!dontAsk || (inHere && editsHere))) { fs.writeFileSync(f, `${m[2]}\n`); tried('edit-outside', true); out.push(`I wrote ${m[1]}.`) } else { tried('edit-outside', false); out.push(`I couldn't write ${m[1]}: that was refused.`) }
     }
-    // Files to send back: only in the outbox its brief names, and only when it was started able to
-    // write there, as Claude Code would be.
-    const box = (/save it in your outbox, (.+?): each file there goes/.exec(text.replace(/ · /g, '\n')) || [])[1] || null
-    const posix = (d) => { const p = path.resolve(d).replace(/\\/g, '/'); return /^[A-Za-z]:\//.test(p) ? `/${p[0].toLowerCase()}${p.slice(2)}` : p }
-    const mayMake = !!box && can('Write') && allowed.includes(`Edit(/${posix(box)}/` + '**)')
+    // Files to send back: only through its MCP server bridge_outbox's save_file, as Claude Code would
+    // call it, the server started as its config says and asked over stdin and stdout.
+    const outboxServer = (() => { for (const c of configs) { try { const x = JSON.parse(fs.readFileSync(c, 'utf8')).mcpServers?.bridge_outbox; if (x) return x } catch { /* unreadable */ } } return null })()
+    const mayMake = !!outboxServer && args.includes('--strict-mcp-config') && allowed.includes('mcp__bridge_outbox__save_file')
     const make = (name, body) => {
-      if (!mayMake) { tried('make', false); out.push(`I couldn't save ${name}: I have nowhere to write.`); return }
-      const f = path.join(box, name)
-      fs.writeFileSync(f, body)
-      tool('Write', { file_path: f })
-      tried('make', true)
-      out.push(`I made ${name}.`)
+      if (!mayMake) { tried('make', false); out.push(`I couldn't save ${name}: I have no tool for it.`); return }
+      const buf = Buffer.isBuffer(body) ? body : Buffer.from(String(body))
+      const asks = [
+        { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.312' } } },
+        { jsonrpc: '2.0', method: 'notifications/initialized' },
+        { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'save_file', arguments: { name, content: buf.toString('base64'), base64: true } } },
+      ]
+      const r = require('node:child_process').spawnSync(outboxServer.command, outboxServer.args || [], { input: asks.map((x) => JSON.stringify(x)).join('\n') + '\n', env: { ...process.env, ...(outboxServer.env || {}) }, encoding: 'utf8', timeout: 20000, maxBuffer: 1 << 20 })
+      const said = String(r.stdout || '').split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).find((x) => x?.id === 2)
+      const ok = said?.result && !said.result.isError
+      tool('mcp__bridge_outbox__save_file', { name })
+      tried('make', !!ok)
+      out.push(ok ? `I made ${name}.` : `I couldn't save ${name}: ${said?.result?.content?.[0]?.text || said?.error?.message || r.error?.message || 'no answer'}.`)
     }
-    for (const m of q.matchAll(/\[make ([\w.-]+)(?: ([^\]]+))?\]/g)) make(m[1], `${m[2] || `The ${m[1]} you asked for.`}\n`)
-    for (const m of q.matchAll(/\[make-exe ([\w.-]+)\]/g)) make(m[1], Buffer.concat([Buffer.from('MZ'), Buffer.alloc(62, 1)]))
-    for (const m of q.matchAll(/\[make-script ([\w.-]+)\]/g)) make(m[1], '#!/bin/sh\necho hello\n')
-    for (const m of q.matchAll(/\[make-big ([\w.-]+) (\d+)\]/g)) make(m[1], Buffer.alloc(Number(m[2]) * 1024 * 1024, 65))
-    for (const m of q.matchAll(/\[make-link ([\w.-]+) ([^\s\]]+)\]/g)) {
-      if (!mayMake) { out.push(`I couldn't link ${m[1]}.`); continue }
-      try { fs.symlinkSync(path.resolve(m[2].replace(/^~/, home)), path.join(box, m[1])); out.push(`I linked ${m[1]}.`) } catch (e) { out.push(`I couldn't link ${m[1]}: ${e.code}.`) }
-    }
+    for (const m of q.matchAll(/\[make ([^\s\]]+)(?: ([^\]]+))?\]/g)) make(m[1], `${m[2] || `The ${m[1]} you asked for.`}\n`)
+    for (const m of q.matchAll(/\[make-exe ([^\s\]]+)\]/g)) make(m[1], Buffer.concat([Buffer.from('MZ'), Buffer.alloc(62, 1)]))
+    for (const m of q.matchAll(/\[make-script ([^\s\]]+)\]/g)) make(m[1], '#!/bin/sh\necho hello\n')
+    for (const m of q.matchAll(/\[make-big ([^\s\]]+) (\d+)\]/g)) make(m[1], Buffer.alloc(Number(m[2]) * 1024 * 1024, 65))
     const memo = (/----- memory -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of memory -----/.exec(text) || [])[1] || ''
     if (/\[recall\]/.test(q)) out.push(memo ? `I remember: ${memo.replace(/\n| · /g, ' ').trim()}` : 'I remember nothing.')
     if (/\[agents\]/.test(q)) out.push((/What .*?'s agents are doing now[^\n]*\n((?:- .*\n?)*)/.exec(text) || [])[1]?.trim().replace(/\n/g, ' ') || 'No agents said.')

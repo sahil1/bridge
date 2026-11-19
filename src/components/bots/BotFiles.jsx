@@ -12,6 +12,10 @@ import './botfiles.css'
 // Files has (Transfers.jsx). In its Activity: the latest, and each conversation's in its timeline.
 const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`)
 const enc = encodeURIComponent
+// What opens in its app on this computer: what can't run anything as it opens (server/botfiles.js
+// OPENS, which the server holds to as well). Anything else is shown in Finder instead.
+const OPENS = /\.(png|jpe?g|gif|webp|pdf|csv|tsv|md|txt|json|ya?ml|xlsx|docx|pptx)$/i
+const revealLabel = () => (/Mac/.test(navigator.userAgent) ? t('Show in Finder') : /Windows/.test(navigator.userAgent) ? t('Show in Explorer') : t('Show in file manager'))
 
 function FileRow({ bot, f }) {
   const [sending, setSending] = useState(false)
@@ -21,7 +25,7 @@ function FileRow({ bot, f }) {
   const open = async () => {
     setSt({ busy: true })
     try {
-      if (onThisComputer()) { await api(`/agents/${enc(pane)}/fileop`, { method: 'POST', body: { op: 'open', path: f.path } }); setSt(null); return }
+      if (onThisComputer()) { await api(`/agents/${enc(pane)}/fileop`, { method: 'POST', body: { op: OPENS.test(f.name) ? 'open' : 'reveal', path: f.path } }); setSt(null); return }
       if (viaRelay) { setSt({ ok: await toPhone(raw, f.name) }); return }
       const r = await fetch(raw)
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`)
@@ -34,7 +38,7 @@ function FileRow({ bot, f }) {
       <Icon name="file" size={12} />
       <span className="bf-name">{f.name}</span>
       <span className="muted small">{sizeOf(f.size)}</span>
-      {(onThisComputer() || canDownload) && <button type="button" className="link-btn small" disabled={!!st?.busy} onClick={open}>{t('Open')}</button>}
+      {(onThisComputer() || canDownload) && <button type="button" className="link-btn small" disabled={!!st?.busy} onClick={open}>{onThisComputer() && !OPENS.test(f.name) ? revealLabel() : t('Open')}</button>}
       <button type="button" className="link-btn small" onClick={() => setSending(true)}>{t('Send to…')}</button>
       {st?.ok && <span className="muted small" role="status">{st.ok}</span>}
       {st?.error && <span className="error-text small" role="alert">{st.error}</span>}

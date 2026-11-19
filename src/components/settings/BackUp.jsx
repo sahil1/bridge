@@ -18,11 +18,16 @@ const PLATFORM = { slack: 'Slack', discord: 'Discord', teams: 'Microsoft Teams' 
 const PARTS = () => [['bots', t('Bots')], ['connections', t('Connections')], ['routines', t('Routines')], ['chief', t('Chief of Staff')], ['mcp', t('MCP Servers')], ['settings', t('Settings')]]
 const when = (iso) => (iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '')
 
-// What a backup or a move would add here, each part to tick, and Apply.
+// What a backup or a move would add here, each part to tick, and Apply. Shown in full, as a file
+// could have been made by someone else: what each bot reads and who may ask it, each routine's
+// command, folder and agent, each MCP server's whole command and its env's names (those that make a
+// program run more than it's asked marked). From a file, routines and MCP servers (they run things on
+// this computer) are unticked until you tick them.
 function Plan({ plan, onApply, onCancel, busy, cancelLabel }) {
-  const [parts, setParts] = useState(Object.fromEntries(PARTS().map(([k]) => [k, true])))
+  const [parts, setParts] = useState(Object.fromEntries(PARTS().map(([k]) => [k, !(plan.optIn || []).includes(k)])))
   const has = { bots: plan.bots.length, connections: plan.connections.length, routines: plan.routines.length, chief: plan.chief.length, mcp: plan.mcp.length, settings: plan.settings.keys.length }
-  const box = (k, label) => (has[k] ? <label className="bk-part"><input type="checkbox" checked={parts[k]} onChange={(e) => setParts((p) => ({ ...p, [k]: e.target.checked }))} /> <b>{label}</b></label> : null)
+  const box = (k, label) => (has[k] ? <label className="bk-part" data-part={k}><input type="checkbox" checked={parts[k]} onChange={(e) => setParts((p) => ({ ...p, [k]: e.target.checked }))} /> <b>{label}</b>{(plan.optIn || []).includes(k) && <span className="muted small"> · {t('off unless you tick it: it runs things on this computer')}</span>}</label> : null)
+  const sub = (text, bad = false) => <span className={`bk-sub ${bad ? 'is-bad' : ''}`}>{text}</span>
   return (
     <div className="bk-plan" role="region" aria-label={t('What comes')}>
       <p className="small">{t('From {name}, as it was on {date}. Nothing changes here until you apply it.', { name: plan.from, date: when(plan.madeAt) })}</p>
@@ -31,9 +36,15 @@ function Plan({ plan, onApply, onCancel, busy, cancelLabel }) {
       {parts.bots && plan.bots.length > 0 && (
         <ul className="bk-list small">
           {plan.bots.map((b) => (
-            <li key={b.key}>
+            <li key={b.key} data-bot={b.as}>
               {b.renamed ? t('{name}, as {as}: there\'s a bot called {name} here already', { name: b.name, as: b.as }) : b.name}
-              {b.missing.length > 0 && <span className="muted"> · {t('reads {folders}, not on this computer', { folders: b.missing.join(', ') })}</span>}
+              {b.reads.filter((f) => !f.refused).length > 0 && sub(t('reads {folders}', { folders: b.reads.filter((f) => !f.refused).map((f) => f.path).join(', ') }))}
+              {b.reads.filter((f) => f.refused).map((f) => <span key={f.path}>{sub(t('won\'t read {folder}: {why}', { folder: f.path, why: f.refused }), true)}</span>)}
+              {sub(b.who === 'channels' ? t('who can ask: everyone in its channels') : b.askers.length ? t('who can ask: {people}', { people: b.askers.join(', ') }) : t('who can ask: no one yet'))}
+              {b.owners.length > 0 && sub(t('you there: {people}', { people: b.owners.join(', ') }))}
+              {b.ownersLeft?.length > 0 && sub(t('you there, in the file: {people}. Not taken from a file: set it again here', { people: b.ownersLeft.join(', ') }), true)}
+              {b.auto && sub(b.autoHere ? t('answers without asking') : t('answered without asking there: here it waits for you until you turn that on'), !b.autoHere)}
+              {b.people && sub(t('with what it keeps about each person'))}
             </li>
           ))}
         </ul>
@@ -41,13 +52,24 @@ function Plan({ plan, onApply, onCancel, busy, cancelLabel }) {
       {box('connections', t('Connections'))}
       {parts.connections && plan.connections.length > 0 && (
         <ul className="bk-list small">
-          {plan.connections.map((c) => <li key={c.key} className={c.skip ? 'muted' : ''}>{t('{name} ({platform})', { name: c.name, platform: PLATFORM[c.platform] || c.platform })}{c.skip ? ` · ${t('not added: {why}', { why: c.skip })}` : c.tokens ? ` · ${t('with its tokens, paused until you Start it')}` : ''}</li>)}
+          {plan.connections.map((c) => (
+            <li key={c.key} className={c.skip ? 'muted' : ''}>
+              {t('{name} ({platform})', { name: c.name, platform: PLATFORM[c.platform] || c.platform })}{c.skip ? ` · ${t('not added: {why}', { why: c.skip })}` : c.tokens ? ` · ${t('with its tokens, paused until you Start it')}` : ''}
+              {!c.skip && c.owner && sub(t('you there: {people}', { people: c.owner }))}
+            </li>
+          ))}
         </ul>
       )}
       {box('routines', t('Routines'))}
       {parts.routines && plan.routines.length > 0 && (
         <ul className="bk-list small">
-          {plan.routines.map((r) => <li key={r.key} className={r.skip ? 'muted' : ''}>{r.renamed ? t('{name}, as {as}', { name: r.name, as: r.as }) : r.name}{r.skip ? ` · ${t('not added: {why}', { why: r.skip })}` : r.scheduled ? ` · ${t('runs by itself: paused until you Start it')}` : ''}</li>)}
+          {plan.routines.map((r) => (
+            <li key={r.key} className={r.skip ? 'muted' : ''} data-routine={r.name}>
+              {r.renamed ? t('{name}, as {as}', { name: r.name, as: r.as }) : r.name}{r.skip ? ` · ${t('not added: {why}', { why: r.skip })}` : r.scheduled ? ` · ${t('runs by itself: paused until you Start it')}` : ''}
+              {sub(t('runs {command}', { command: r.command }))}
+              {r.to?.chief ? sub(t('for the Chief of Staff')) : r.to?.bot ? sub(t('posted by {bot} in {channel}', { bot: r.to.bot, channel: r.to.channel || '' })) : r.folder ? sub(r.agent ? t('in {folder}, with {agent}', { folder: r.folder, agent: r.agent }) : t('in {folder}', { folder: r.folder })) : null}
+            </li>
+          ))}
         </ul>
       )}
       {box('chief', t('Chief of Staff'))}
@@ -55,7 +77,14 @@ function Plan({ plan, onApply, onCancel, busy, cancelLabel }) {
       {box('mcp', t('MCP Servers'))}
       {parts.mcp && plan.mcp.length > 0 && (
         <ul className="bk-list small">
-          {plan.mcp.map((s) => <li key={`${s.kind}-${s.name}`} className={s.skip ? 'muted' : ''}>{t('{name} for {agent}', { name: s.name, agent: s.agent })}{s.runs ? ` · ${t('runs {command}', { command: s.runs })}` : s.at ? ` · ${t('at {url}', { url: s.at })}` : ''}{s.skip ? ` · ${t('not added: {why}', { why: s.skip })}` : ''}</li>)}
+          {plan.mcp.map((s) => (
+            <li key={`${s.kind}-${s.name}`} className={s.skip ? 'muted' : ''} data-server={s.name}>
+              {t('{name} for {agent}', { name: s.name, agent: s.agent })}{s.skip ? ` · ${t('not added: {why}', { why: s.skip })}` : ''}
+              {s.command ? sub(t('runs {command}', { command: s.command })) : s.url ? sub(t('at {url}', { url: s.url })) : null}
+              {s.envKeys?.length > 0 && sub(t('with {keys} set', { keys: s.envKeys.join(', ') }))}
+              {s.risky?.length > 0 && sub(t('{keys} can make it run more than its command', { keys: s.risky.join(', ') }), true)}
+            </li>
+          ))}
         </ul>
       )}
       {box('settings', t('Settings'))}
@@ -178,10 +207,10 @@ export default function BackUp() {
           {s.paused.connections.map((c) => (
             <div key={c.id} className="st-row bk-conn">
               <span className="small"><b>{t('{name} ({platform})', { name: c.name, platform: PLATFORM[c.platform] || c.platform })}</b>{c.why ? <span className="muted"> · {c.why}</span> : null}</span>
-              {c.movedTo ? <button type="button" className="btn small" disabled={!!busy} onClick={() => undo(c.move)}><Icon name="play" size={12} /> {t('Start Here Again')}</button> : <button type="button" className="btn small" disabled={!!busy} onClick={() => start([c.id])}><Icon name="play" size={12} /> {t('Start')}</button>}
+              {c.movedTo ? <button type="button" className="btn small" disabled={!!busy} onClick={() => undo(c.move)}><Icon name="play" size={12} /> {t('Start Here Again')}</button> : c.takenBack || c.by === 'move' ? null : <button type="button" className="btn small" disabled={!!busy} onClick={() => start([c.id])}><Icon name="play" size={12} /> {t('Start')}</button>}
             </div>
           ))}
-          {s.paused.connections.filter((c) => !c.movedTo).length > 1 && <button type="button" className="btn small" disabled={!!busy} onClick={() => start(null)}><Icon name="play" size={12} /> {t('Start All')}</button>}
+          {s.paused.connections.filter((c) => !c.movedTo && !c.takenBack && c.by !== 'move').length > 1 && <button type="button" className="btn small" disabled={!!busy} onClick={() => start(null)}><Icon name="play" size={12} /> {t('Start All')}</button>}
         </section>
       )}
 

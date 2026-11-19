@@ -1,20 +1,26 @@
 // Files a bot makes (server/botfiles.js), with the stand-in Slack, Discord, Teams and Claude Code
 // (stand-ins/slack.mjs, discord.mjs, teams.mjs, helper-claude.cjs), in the browser named by BRIDGE_TEST_BROWSER:
-//   each run gets an outbox of its own, named in its brief, and its agent may write there and only
-//   there (Write, allowed by an Edit rule for that folder alone; its folders still read-only);
+//   each run gets an outbox of its own, and its agent a save_file tool that writes only there (an MCP
+//   server of Bridge AI's own, outboxmcp.js, which the stand-in starts and calls as Claude Code
+//   would); it's given no tool that writes files, so its folders stay read-only;
 //   a file it makes there goes with its answer: Slack's upload API (files.getUploadURLExternal and
 //   completeUploadExternal, in the question's thread), Discord's attachments (multipart, after its
 //   words), and in Microsoft Teams, which takes none from a bot, the reply says so and who has it;
 //   kept beside its record, listed in its Activity;
-//   a program or a script (by its name or its first bytes), a link out of the outbox, and anything
-//   it writes outside it, refused: not sent, and said in the reply and the record;
+//   only pictures, PDFs, tables, text and documents go: a program, a script, a Terminal file, a disk
+//   image (by its kind, or a script's first bytes in a .txt), refused, not sent, and said in the reply
+//   and the record; a name with characters that hide what it is (a right-to-left mark) has them taken
+//   out; kept files are marked as from elsewhere on a Mac (com.apple.quarantine);
 //   an upload Slack turns away is said in the thread and in the record, not dropped;
-//   for a public channel, an answer with files waits for you even where it may go without asking;
+//   for a public channel, an answer with files waits for you even where it may go without asking,
+//   whichever way it made them (its outbox, or a FILE: block);
 //   its Activity lists the files it made with Open and Send to… (Send to… across two computers is
-//   in backup-move).
+//   in backup-move); one that could run something as it opens (a drawing, a page) is shown in
+//   Finder instead; nothing writes through a bot's files (Studio's routes, a copy into them).
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { checks, until, browser, page, shot, startDiscord, startTeams, IS_WIN, IS_MAC, TEST } from '../lib/harness.mjs'
 import { botKit, openSettings, M } from '../lib/bots.mjs'
 
@@ -53,18 +59,22 @@ try {
     q1 = await slack.ask({ user: 'U0DANA', text: `${M} Totals by region, as a CSV please [make totals.csv Region,Total] [answer Here are the totals.]` })
     const s = await startOf('Totals by region')
     const brief = briefOf(s)
-    const box = /save it in your outbox, (.+?): each file there goes/.exec(brief)?.[1] || ''
     const args = s?.args.join(' ') || ''
-    const rule = `Edit(/${path.resolve(box).replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`)}/**)`
-    ok(!!box && path.resolve(box).startsWith(path.join(kit.data, 'front-desk', 'outbox')) && /none over 25\.0 MB, and never a program or a script/.test(brief), 'its brief names an outbox of its own, and what may go from it', brief.slice(-900))
-    ok(args.includes('--tools Read,Grep,Glob,Write ') && s.args.includes(box) && s.args.includes(rule) && args.includes('--permission-mode dontAsk') && !/acceptEdits|bypassPermissions|Edit\(\.\/|Bash/.test(args), 'its agent may write there alone: Write, allowed by an Edit rule for its outbox, and nothing else changed (dontAsk)', s?.args)
-    ok(!(brief.match(/You can read th(is folder|ese folders): ([^\n]*)/)?.[2] || '').includes('outbox'), 'and the outbox isn\'t one of the folders it\'s told it reads')
+    const cfg = s?.args[s.args.indexOf('--mcp-config') + 1]
+    let server = null
+    try { server = JSON.parse(fs.readFileSync(cfg, 'utf8')).mcpServers?.bridge_outbox } catch { /* gone already */ }
+    const box = server?.args?.[1] || ''
+    ok(/save it with your save_file tool: each file you save goes with your answer, 5 at most and none over 25\.0 MB, and only pictures, PDFs, tables, text and documents/.test(brief) && !brief.includes(path.join('front-desk', 'outbox')), 'its brief offers save_file, and says what may go', brief.slice(-900))
+    ok(args.includes('--tools Read,Grep,Glob ') && s.args.includes('--strict-mcp-config') && s.args.includes('mcp__bridge_outbox__save_file') && args.includes('--permission-mode dontAsk') && !/Write|Edit|Bash|acceptEdits|bypassPermissions/.test(args), 'its agent gets save_file and no tool that writes files: Read, Grep and Glob, its outbox\'s MCP server, dontAsk', s?.args)
+    ok(!!server && /outboxmcp\.js$/.test(server.args?.[0] || '') && path.resolve(box).startsWith(path.join(kit.data, 'front-desk', 'outbox')) && !s.args.includes(box), 'its outbox\'s server: Bridge AI\'s own, on that run\'s outbox alone (not a folder it may read)', server)
     const d = await draftOf('Totals by region')
     ok(d?.files?.some((f) => f.name === 'totals.csv' && f.size === 13) && /I made totals\.csv\. Here are the totals\./.test(d.draft), 'its draft, with the file it made', d && { draft: d.draft, files: d.files })
     const made = madeOf(d.id)
     const kept = made?.files?.[0]?.kept
-    ok(kept === `${month()}/${d.id}-1/totals.csv` && fs.readFileSync(path.join(kit.data, 'bots', 'b1', 'trace', 'files', ...kept.split('/')), 'utf8') === 'Region,Total\n', 'kept beside its record, as it was made', made)
-    ok(!fs.existsSync(box), 'its outbox gone once its answer was in')
+    const keptAt = kept ? path.join(kit.data, 'bots', 'b1', 'trace', 'files', ...kept.split('/')) : ''
+    ok(kept === `${month()}/${d.id}-1/totals.csv` && fs.readFileSync(keptAt, 'utf8') === 'Region,Total\n', 'kept beside its record, as it was made', made)
+    if (IS_MAC) ok(/Bridge AI/.test(spawnSync('xattr', ['-p', 'com.apple.quarantine', keptAt], { encoding: 'utf8' }).stdout || ''), 'marked as from elsewhere, as a download is (com.apple.quarantine)')
+    ok(!box || !fs.existsSync(box), 'its outbox gone once its answer was in')
     await send(d)
     const up = await until(async () => (await slack.state()).files.find((f) => f.name === 'totals.csv'), 15000)
     ok(up?.thread === q1.ts && up.content === 'Region,Total\n' && slack.calls().some((c) => c.method === 'files.getUploadURLExternal') && slack.calls().some((c) => c.method === 'files.completeUploadExternal'), 'sent with the answer, in the question\'s thread, through Slack\'s upload API', up)
@@ -74,22 +84,22 @@ try {
     ok(list.some((f) => f.name === 'totals.csv' && f.path === kept && f.q === d.id), 'its files, listed for its Activity', list)
   })
 
-  // ---------- Refused: programs, scripts, links out, and writing elsewhere ----------
+  // ---------- Refused: what isn't a picture, a PDF, a table, text or a document ----------
   await part('refused', async () => {
-    const q = await slack.ask({ user: 'U0DANA', text: `${M} The tools please [make-exe setup.exe] [make-script run.sh] [make-script tool.txt] [make-link leak.md ~/notes/secret.md] [make notes.txt Fine.] [edit-outside ~/notes/hack.md nope] [answer Done.]` })
+    const RLO = '\u202e'
+    await slack.ask({ user: 'U0DANA', text: `${M} The tools please [make-exe setup.exe] [make-script run.sh] [make-script tool.txt] [make setup.terminal <plist/>] [make tool.py import os] [make game.iso data] [make inv${RLO}dm.txt Fine.] [make notes.txt Fine.] [try-write hack.md] [answer Done.]` })
     const d = await draftOf('The tools please')
     const made = madeOf(d.id)
     const why = Object.fromEntries((made?.refused || []).map((r) => [r.name, r.why]))
-    ok(d?.files?.map((f) => f.name).join() === 'notes.txt', 'only the plain file goes with it', d?.files)
-    ok(/program or a script/.test(why['setup.exe']) && /program or a script/.test(why['run.sh']) && /program or a script/.test(why['tool.txt']), 'a program and a script refused, by its name and by its first bytes (#! in a .txt)', why)
-    ok(IS_WIN ? true : /link/.test(why['leak.md'] || ''), 'a link out of the outbox refused', why)
-    ok(!fs.existsSync(path.join(kit.home, 'notes', 'hack.md')), 'and nothing written outside its outbox')
-    ok(/Not sent: .*setup\.exe \(it's a program or a script, which a bot doesn't send\)/.test(d.draft) && /run\.sh/.test(d.draft), 'the reply says what wasn\'t sent, and why', d.draft)
+    ok(d?.files?.map((f) => f.name).sort().join() === 'invdm.txt,notes.txt', 'only text goes with it, a name\'s right-to-left mark taken out', d?.files)
+    ok(['setup.exe', 'run.sh', 'setup.terminal', 'tool.py', 'game.iso'].every((n) => /isn't one a bot sends/.test(why[n] || '')) && /program or a script/.test(why['tool.txt'] || ''), 'refused: a program, a script, a Terminal file, Python and a disk image by their kind, and a script\'s first bytes in a .txt', why)
+    ok(!fs.existsSync(path.join(kit.home, 'notes', 'hack.md')), 'and nothing written in its folders')
+    ok(/Not sent: .*setup\.exe \(a \.exe file isn't one a bot sends/.test(d.draft) && /setup\.terminal/.test(d.draft), 'the reply says what wasn\'t sent, and why', d.draft)
+    ok(!JSON.stringify(events().filter((e) => ['files.made', 'file.uploaded'].includes(e.type))).includes(RLO) && !(await kit.api('/bots/b1/files')).files.some((f) => f.name.includes(RLO)), 'no right-to-left mark in a file\'s name, kept or sent')
     await send(d)
     await until(async () => (await slack.state()).files.some((f) => f.name === 'notes.txt'), 15000)
     const names = (await slack.state()).files.map((f) => f.name)
-    ok(names.includes('notes.txt') && !names.some((n) => /setup\.exe|run\.sh|tool\.txt|leak\.md/.test(n)) && !(await slack.state()).files.some((f) => /launch is on the ninth/.test(f.content || '')), 'Slack got the plain file and nothing else', names)
-    ok(!JSON.stringify(events()).includes('The launch is on the ninth'), 'what the link pointed to is nowhere in the record')
+    ok(names.includes('notes.txt') && !names.some((n) => /setup\.exe|run\.sh|tool\.txt|terminal|tool\.py|game\.iso/.test(n)), 'Slack got the text files and nothing else', names)
   })
 
   // ---------- An upload Slack turns away ----------
@@ -111,6 +121,10 @@ try {
     const d = await draftOf('Public totals')
     ok(d?.state === 'draft' && /public channel, so it waits for you/.test(d.warn || ''), 'its answer with a file it made waits for you in a public channel, even where it may go without asking', d && { state: d.state, warn: d.warn })
     await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: false })
+    await slack.ask({ user: 'U0DANA', text: `${M} Public chart [chart]`, files: [{ name: 'sales.csv', type: 'text/csv', content: 'month,sales\nJan,10\nFeb,30\n' }] })
+    const c = await draftOf('Public chart')
+    ok(c?.state === 'draft' && c.files?.some((f) => f.name === 'chart.svg') && /public channel, so it waits for you/.test(c.warn || ''), 'and so does one with a file in a FILE: block', c && { state: c.state, files: c.files, warn: c.warn })
+    await kit.api(`/bots/questions/${encodeURIComponent(c.id)}`, { send: false })
     await kit.api('/bots/b1/settings', { auto: false })
   })
 
@@ -163,6 +177,17 @@ try {
       const opened = await until(() => { try { return fs.readFileSync(path.join(kit.bin, 'opened.log'), 'utf8').includes('totals.csv') } catch { return false } }, 8000)
       ok(!!opened, `Open: in its app on this computer (${IS_MAC ? 'open' : 'xdg-open'})`)
     }
+    // A drawing could run a script where it opens (a browser): shown in Finder instead, whatever's asked.
+    const svg = (await kit.api('/bots/b1/files')).files.find((f) => f.name === 'chart.svg')
+    if (IS_MAC) {
+      const srow = files.locator('[data-file="chart.svg"]')
+      ok(await srow.locator('button', { hasText: 'Show in Finder' }).count() === 1, 'a drawing: Show in Finder, not Open')
+    }
+    if (!IS_WIN && svg) {
+      await fetch(`${kit.url}/api/agents/${encodeURIComponent('botfiles:b1')}/fileop`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op: 'open', path: svg.path }) })
+      const last = await until(() => { try { const l = fs.readFileSync(path.join(kit.bin, 'opened.log'), 'utf8').trim().split('\n').at(-1); return /chart\.svg|\d{4}-\d{2}[\\/]/.test(l) ? l : null } catch { return null } }, 8000)
+      ok(!!last && (IS_MAC ? /^-R .*chart\.svg$/.test(last) : !/chart\.svg$/.test(last)), 'and asked to open one, the server shows it in its folder instead', last)
+    }
     await row.locator('button', { hasText: 'Send to…' }).click()
     ok(!!(await until(async () => /None of your other devices is linked/.test(await p.locator('.xfer-dialog').innerText().catch(() => '')), 8000)), 'Send to… opens the dialog Files has (no other computer linked here)')
     await p.locator('.xfer-dialog button', { hasText: 'Cancel' }).click()
@@ -172,6 +197,10 @@ try {
     ok(await p.locator('.sb-timeline .bf-made [data-file="totals.csv"]').count() === 1 && /Made totals\.csv/.test(await p.locator('.sb-timeline').innerText()), 'and in the conversation\'s timeline, where it was made')
     const r = await fetch(`${kit.url}/api/agents/${encodeURIComponent('botfiles:b1')}/fileop`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op: 'trash', path: (await kit.api('/bots/b1/files')).files[0].path }) })
     ok(r.status === 403, 'a bot\'s files are only to open and send on: nothing changed through them', r.status)
+    const dir = path.posix.dirname((await kit.api('/bots/b1/files')).files[0].path)
+    const viaStudio = await fetch(`${kit.url}/api/studio/new`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: 'botfiles:b1', dir, name: 'invoice.html', text: '<p>planted</p>' }) })
+    const into = await fetch(`${kit.url}/api/transfers/in`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: 'k1', name: 'x.txt', files: [{ size: 3 }], to: { where: 'pane', pane: 'botfiles:b1', dir } }) })
+    ok(viaStudio.status === 403 && into.status === 403 && !(await kit.api('/bots/b1/files')).files.some((f) => /invoice|x\.txt/.test(f.name)), 'nor through Studio\'s routes, nor a copy into them', { studio: viaStudio.status, into: into.status })
     await shot(p, `${tag}bots-files-activity`)
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()

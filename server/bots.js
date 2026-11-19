@@ -185,20 +185,29 @@ export function bundleOf(id, memory = []) {
   if (!b) throw Object.assign(new Error('No such bot'), { status: 404 })
   return { kind: BUNDLE_KIND, v: 1, exportedAt: new Date().toISOString(), name: b.name, settings: Object.fromEntries(CARRIED.map((k) => [k, b[k]])), instructions: readOwn(id), memory }
 }
+// The settings a bot from a file (its export, a backup, a move) takes only once they've passed the
+// checks Settings makes (index.js checkSettings): the folders it reads and its instructions' file
+// (there, inside your home folder, not Bridge AI's own), who may ask and you there (people by their
+// ids), answering without asking, what it may change and where, what answers, its MCP servers, and
+// its channels. Held back from the bot as it's made (held), so nothing in a file is ever kept unchecked.
+export const CHECKED = ['who', 'askers', 'owner', 'owners', 'readsFrom', 'instructionsFile', 'repo', 'agent', 'answerers', 'changes', 'mcp', 'muted', 'listen', 'agentCopies', 'auto']
 // A bot from such a file: a new one, by its name (with a number after it when that's taken here),
 // answering as it did once its Slack app is connected here. Anything in the file that isn't one of
-// its settings is left out, so a token in it never is kept.
-export function fromBundle(j, you = '') {
+// its settings is left out, so a token in it never is kept. held: the CHECKED settings aren't kept
+// here but given back ({ held }), to be checked and saved one by one.
+export function fromBundle(j, you = '', { held: hold = false } = {}) {
   if (!j || typeof j !== 'object' || j.kind !== BUNDLE_KIND) throw new Error('That isn\'t a bot exported from Bridge AI')
   const want = clean(j.name, NAME_MAX) || 'Imported bot'
   const taken = new Set(list().map((b) => b.name.toLowerCase()))
   let n = want
   for (let i = 2; taken.has(n.toLowerCase()) && i < 100; i++) n = `${want.slice(0, NAME_MAX - 4)} (${i})`
   const settings = Object.fromEntries(CARRIED.filter((k) => j.settings && Object.hasOwn(j.settings, k)).map((k) => [k, j.settings[k]]))
+  const held = hold ? Object.fromEntries(CHECKED.filter((k) => Object.hasOwn(settings, k)).map((k) => [k, settings[k]])) : {}
+  for (const k of Object.keys(held)) delete settings[k]
   const b = shape(nextId(), { ...DEFAULTS, ...settings, name: n, createdAt: new Date().toISOString(), importedAt: new Date().toISOString() })
   write(b)
   writeInstructions(b.id, typeof j.instructions === 'string' ? j.instructions.slice(0, INSTRUCTIONS_MAX) : defaultInstructions(n, you))
-  return { bot: b, memory: Array.isArray(j.memory) ? j.memory.slice(0, 2000) : [], renamed: n !== want }
+  return { bot: b, memory: Array.isArray(j.memory) ? j.memory.slice(0, 2000) : [], renamed: n !== want, held }
 }
 
 // Its settings changed: what they were and are, for the record.
