@@ -660,7 +660,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // The folders it changes files in (changes: edit), each checked as it is now, by its real path:
   // there, inside your home folder, nothing in its path hidden, and one of, or inside, a folder it reads
   // from. [{ path: its real path, shown, ok, problem }]
-  const realHome = (() => { try { return fs.realpathSync(home) } catch { return home } })()
+  // (By the system's own real path, as each folder's is below: on Windows the long name and the case
+  // it has on disk.)
+  const realHome = (() => { try { return fs.realpathSync.native(home) } catch { return home } })()
   async function writesOf(bot, folders = null) {
     const reads = (folders || await foldersOf(bot)).filter((f) => f.ok)
     const out = []
@@ -1339,6 +1341,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       : await delegate.add({
         list: 'desk', role: 'answer', title: `${bot.name}: question ${q.id.replace(/^.*q/, '')}`, kind: route.kind, readOnly: !tree && !stage, change: !!tree || !!stage, space: SPACE, from: id,
         ...(route.cwd ? { cwd: route.cwd } : {}), ...(route.fork ? { fork: route.fork } : {}), ...(route.dirs.length ? { dirs: route.dirs } : {}), brief, ...(entry.model && route.kind === entry.agent ? { model: entry.model } : {}),
+        // (What its hook needs to run, where its agent has to give it: botmcp.js runFolder.)
+        ...(mcp?.agentEnv && (tree || stage) ? { env: mcp.agentEnv } : {}),
       })
     const h = chat ? { cwd: route.cwd } : delegate.get(out.helper.id) || {}
     if (mcp?.dir) mcpDirs.set(out.helper.id, mcp.dir)

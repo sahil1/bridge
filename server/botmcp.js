@@ -19,7 +19,7 @@ import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { dataFile, writeFileAtomic, HOME, ROOT, NODE } from './paths.js'
+import { dataFile, writeFileAtomic, HOME, ROOT, NODE, IS_WIN } from './paths.js'
 import { loginPath } from './agents.js'
 import { claudeServers, claudeServerView } from './mcp.js'
 
@@ -202,6 +202,7 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
   if (outbox) { servers[OUTBOX_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'outboxmcp.js'), outbox], env: { ...NODE.env } }; allow.push(toolName(OUTBOX_SERVER, 'save_file')) }
   let settings = null
   let guard = null
+  let agentEnv = null
   if (write?.root) {
     guard = { key: crypto.randomBytes(32).toString('hex'), log: path.join(dir, 'guard.log') }
     fs.writeFileSync(guard.log, '', { mode: 0o600 })
@@ -213,14 +214,23 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
       servers[FILES_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'filesmcp.js'), ...args], env: { ...NODE.env } }
       allow.push(toolName(FILES_SERVER, 'delete_file'), toolName(FILES_SERVER, 'move_file'))
     }
-    const env = Object.entries({ ...NODE.env }).map(([k, v]) => `${k}=${sh(v)} `).join('')
-    const command = `${env}${sh(NODE.bin)} ${[path.join(ROOT, 'server', 'botguard.mjs'), ...args].map(sh).join(' ')}`
+    // Its hook, as Claude Code runs one. On a Mac and Linux: a command for sh, each part quoted, with
+    // the variables Node needs before it. On Windows, where Claude Code runs a command in Git Bash, or
+    // in PowerShell when there's no Git Bash, each quoting its own way: the program and its arguments
+    // as they are (args, which Claude Code starts with no shell at all, so nothing in a path is read
+    // as anything but itself), and the variables Node needs in its agent's environment (agentEnv,
+    // back: a hook has its agent's, and no other).
+    const guardArgs = [path.join(ROOT, 'server', 'botguard.mjs'), ...args]
+    const hook = IS_WIN
+      ? { type: 'command', command: NODE.bin, args: guardArgs, timeout: 30 }
+      : { type: 'command', command: `${Object.entries({ ...NODE.env }).map(([k, v]) => `${k}=${sh(v)} `).join('')}${sh(NODE.bin)} ${guardArgs.map(sh).join(' ')}`, timeout: 30 }
+    if (IS_WIN && Object.keys(NODE.env).length) agentEnv = { ...NODE.env }
     settings = path.join(dir, 'settings.json')
-    writeFileAtomic(settings, JSON.stringify({ disableAllHooks: false, hooks: { PreToolUse: [{ matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command, timeout: 30 }] }] } }, null, 2), { mode: 0o600 })
+    writeFileAtomic(settings, JSON.stringify({ disableAllHooks: false, hooks: { PreToolUse: [{ matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [hook] }] } }, null, 2), { mode: 0o600 })
   }
   writeFileAtomic(path.join(dir, 'config.json'), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 })
   writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny, ...(settings ? { settings } : {}) }, null, 2), { mode: 0o600 })
-  return { dir, servers: said, missing, ...(guard ? { guard } : {}) }
+  return { dir, servers: said, missing, ...(guard ? { guard } : {}), ...(agentEnv ? { agentEnv } : {}) }
 }
 // A run's folder gone (it ended), or every one older than a day (left from before a restart).
 export function drop(dir) { if (dir && path.resolve(dir).startsWith(RUNS + path.sep)) fs.rmSync(dir, { recursive: true, force: true }) }

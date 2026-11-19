@@ -54,6 +54,9 @@ const TOOLS = [
 ]
 
 const within = (p) => p === real || p.startsWith(real + path.sep)
+// (A path's case, on Windows, where it doesn't matter, for finding the copy it's given in; each file
+// is then named by its real path, as the system has it, which is what's written down.)
+const fold = (s) => (process.platform === 'win32' ? String(s).toLowerCase() : String(s))
 // A path in the copy, checked: { full, rel, missing: the folders it needs made, in order }, or throws,
 // saying why. there: a file that's there (to delete or move); else a place nothing is yet.
 function placeOf(p, { there = true } = {}) {
@@ -63,7 +66,7 @@ function placeOf(p, { there = true } = {}) {
   const abs = path.isAbsolute(s) ? s : path.join(real, s)
   if (abs.split(/[\\/]+/).includes('..')) throw new Error(`${s} has .. in it`)
   const norm = path.resolve(abs)
-  const top = [real, root].find((r) => norm.startsWith(r + path.sep))
+  const top = [real, root].find((r) => fold(norm).startsWith(fold(r) + path.sep))
   if (!top) throw new Error(`${s} is outside your copy`)
   const rel = path.relative(top, norm)
   const segs = rel.split(path.sep)
@@ -91,7 +94,9 @@ function placeOf(p, { there = true } = {}) {
   const up = missing.length ? real : fs.realpathSync.native(path.dirname(full))
   if (!within(up)) throw new Error(`${s} is outside your copy`)
   if (path.relative(real, up).split(path.sep).some(gitLike)) throw new Error(`${s} is git's own`)
-  return { full, rel: rel.split(path.sep).join('/'), missing }
+  // (Named as the system has it: a file that's there by its real path, a new one by its folder's.)
+  const named = missing.length ? full : there ? fs.realpathSync.native(full) : path.join(up, path.basename(full))
+  return { full: named, rel: rel.split(path.sep).join('/'), missing }
 }
 
 function call(name, a) {
@@ -105,7 +110,7 @@ function call(name, a) {
     const from = placeOf(a?.from)
     const to = placeOf(a?.to, { there: false })
     // (The folders its new place needs, made one by one inside the copy.)
-    for (const d of to.missing) { fs.mkdirSync(d); if (fs.lstatSync(d).isSymbolicLink() || !within(fs.realpathSync(d))) throw new Error(`${path.relative(real, d)} is outside your copy`) }
+    for (const d of to.missing) { fs.mkdirSync(d); if (fs.lstatSync(d).isSymbolicLink() || !within(fs.realpathSync.native(d))) throw new Error(`${path.relative(real, d)} is outside your copy`) }
     noted('d', from.full)
     noted('w', to.full)
     fs.renameSync(from.full, to.full)
