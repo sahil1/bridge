@@ -158,12 +158,19 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     if (on && napless == null) napless = power.start('prevent-app-suspension')
     else if (!on && napless != null) { try { power.stop(napless) } catch { /* stopped */ } napless = null }
   }
+  // A new token for a window that's open (its own spent: the server restarted, say): its page loads
+  // again with it, and connects straight away.
+  const pageAt = (token) => `${URL_BASE}/?${new URLSearchParams({ remote: 'capture', token: String(token || '').slice(0, 80) })}`
   function needCapture({ fresh = false, token = '' } = {}) {
-    if (capture && !capture.isDestroyed()) { if (!fresh) return; try { capture.destroy() } catch { /* gone */ } }
+    if (capture && !capture.isDestroyed()) {
+      if (!fresh) { if (token && token !== capture.token) { capture.token = token; capture.loadURL(pageAt(token)).catch(() => {}) } return }
+      try { capture.destroy() } catch { /* gone */ }
+    }
     const w = new BrowserWindow({ show: false, width: 480, height: 320, title: 'Bridge AI screen sharing', skipTaskbar: true, webPreferences: { preload, contextIsolation: true, sandbox: true, backgroundThrottling: false } })
     capture = w
+    w.token = token
     keepUp(true)
-    const url = `${URL_BASE}/?${new URLSearchParams({ remote: 'capture', token: String(token || '').slice(0, 80) })}`
+    const url = () => pageAt(w.token)
     const gone = () => { try { if (!w.isDestroyed()) w.destroy() } catch { /* gone */ } }
     let tries = 0
     w.on('page-title-updated', (e) => e.preventDefault())
@@ -173,9 +180,9 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     w.webContents.on('did-fail-load', (_e, code, _desc, _url, main) => {
       if (main === false || code === -3) return // a frame's, or a load that was replaced
       if (++tries > 3) return gone()
-      setTimeout(() => { if (!w.isDestroyed()) w.loadURL(url).catch(() => {}) }, 1000 * tries)
+      setTimeout(() => { if (!w.isDestroyed()) w.loadURL(url()).catch(() => {}) }, 1000 * tries)
     })
-    w.loadURL(url).catch(() => {})
+    w.loadURL(url()).catch(() => {})
   }
   function captureIdle() { if (capture && !capture.isDestroyed()) capture.destroy(); capture = null; keepUp(false) }
 

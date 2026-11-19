@@ -28,13 +28,15 @@
 //     is refused, Tailscale isn't Studio, and the list applies while the Beta Feature is on;
 //     unticked with a terminal, the app's feed and a copy open, each ends then; through Laptop,
 //     Laptop's list first, then Studio's for Laptop, saying which one isn't let in;
-//   the password changed or taken off ends sessions; a picture for a session that isn't there goes
-//     to no other; a capture page that hasn't said its screens yet is waited for, never another
-//     list taken in their place; the capture page is this computer's own, with its token only
-//     (never the key alone, nor through Tailscale); a device's tries put none of its own text in
-//     the log, a few lines a minute, none when it isn't let in; one locked out can't have this
-//     computer updated; the password's hash at OWASP's cost, an older one made again once typed; an app
-//     drawn off screen follows no redirect or frame to anything else on the computer;
+//   the password changed or taken off ends sessions, and one at the password or waiting for Allow
+//     (its ask too); the desktop app's feed is this computer's own; a picture for a session that
+//     isn't there goes to no other; a capture page that hasn't said its screens yet is waited
+//     for, never another list taken in their place; the capture page is this computer's own, with
+//     its token only (never the key alone, nor through Tailscale); a device's tries put none of its
+//     own text in the log, a few lines a minute, none when it isn't let in; one locked out can't
+//     have this computer updated; the password's hash at OWASP's cost, an older one made again
+//     once typed; an app drawn off screen follows no redirect or frame to anything else on the
+//     computer;
 //   in the app (Chromium, or WebKit as the iPhone app): a phone paired once a password is set is
 //     one card saying Studio hasn't let it in and where; Allow in Studio's Needs You lets it in, and
 //     its page opens by itself.
@@ -938,6 +940,44 @@ try {
     ok(msg(w, 'error')?.code === 'changed', 'taken off: the same', msg(w, 'error'))
     await studio.api('/remote/password', { password: PW })
     await idle()
+    // At the password, or past it and waiting for Allow (Ask Here First): changed meanwhile, it ends
+    // too, its ask with it; Allow can't let it in on the password it typed.
+    const at = ph.socket(V)
+    await at.wait((s) => msg(s, 'password'))
+    await studio.api('/remote/password', { password: `${PW}!` })
+    await at.wait((s) => msg(s, 'error') && s.closed, 4000)
+    ok(msg(at, 'error')?.code === 'changed', 'at the password: changed meanwhile, it ends, told why', msg(at, 'error'))
+    await studio.api('/remote/ask-first', { on: true })
+    const asking = ph.socket(V)
+    await asking.wait((s) => msg(s, 'password'))
+    await asking.send({ t: 'password', p: `${PW}!` })
+    await asking.wait((s) => msg(s, 'asking') || msg(s, 'error'), 4000)
+    await studio.api('/remote/password', { password: PW })
+    await asking.wait((s) => msg(s, 'error') && s.closed, 4000)
+    const asks = (await studio.api('/remote')).asks
+    ok(msg(asking, 'error')?.code === 'changed' && !asks.length && !msg(asking, 'hello'), 'waiting for Allow: changed meanwhile, it ends and its ask goes (nothing to Allow it in on the old password)', { said: msg(asking, 'error'), asks })
+    await studio.api('/remote/ask-first', { on: false })
+    await idle()
+  })
+
+  // The desktop app's own feed is from this computer itself: a browser through Tailscale saying it's
+  // the app (x-bridge-desktop) gets nothing of the app's (its capture tokens, its asks).
+  await part('the desktop app\'s feed: this computer\'s own only', async () => {
+    const heard = { own: '', ts: '', status: {} }
+    // (A request as it comes, any Host: Tailscale's name and your login, with the key, is let in.)
+    const feed = (headers, k) => {
+      const r = http.request({ host: '127.0.0.1', port: studio.port, path: '/api/events', headers: { accept: 'text/event-stream', 'x-bridge-desktop': '3.22.0', authorization: `Bearer ${studio.key}`, ...headers } }, (res) => { heard.status[k] = res.statusCode; res.on('data', (c) => { heard[k] += String(c) }) })
+      r.on('error', () => {})
+      r.end()
+      return r
+    }
+    const own = feed({}, 'own')
+    const ts = feed({ host: TS, 'tailscale-user-login': OWNER }, 'ts')
+    await until(() => /event: remote/.test(heard.own) && heard.status.ts, 4000, 50)
+    await sleep(300)
+    ok(/event: remote/.test(heard.own) && heard.status.ts === 200 && /event: screen/.test(heard.ts) && !/event: remote/.test(heard.ts), 'this computer\'s own feed hears what the app does; one through Tailscale, let in, doesn\'t', { own: /event: remote/.test(heard.own), ts: heard.status.ts, tsRemote: /event: remote/.test(heard.ts) })
+    own.destroy()
+    ts.destroy()
   })
 
   await part('pictures go only to the session they\'re for', async () => {

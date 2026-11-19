@@ -1673,10 +1673,12 @@ app.get('/api/events', (req, res) => {
   res.write(`event: screen\ndata: ${JSON.stringify({ list: screensFor(res.bridgeDevice) })}\n\n`)
   // The desktop app's own feed (desktop/main.js says so): it also hears when another of your devices
   // asks this computer to allow something (fixes.js askHere).
-  const off = req.headers['x-bridge-desktop'] && !req.headers['x-bridge-relay'] ? fixes.onAsk((a) => res.write(`event: fix-ask\ndata: ${JSON.stringify(a)}\n\n`)) : null
+  // (Only from this computer itself: never a device's, nor a browser through Tailscale.)
+  const appFeed = req.headers['x-bridge-desktop'] && atThisComputer(req)
+  const off = appFeed ? fixes.onAsk((a) => res.write(`event: fix-ask\ndata: ${JSON.stringify(a)}\n\n`)) : null
   // ...and what Remote Screen and Preview needs of it (remote.js): its capture window, a project's
   // app drawn off screen for a phone, and the badge that says this screen is being seen.
-  const offRemote = req.headers['x-bridge-desktop'] && !req.headers['x-bridge-relay'] ? remote.onDesktop((ev) => res.write(`event: remote\ndata: ${JSON.stringify(ev)}\n\n`)) : null
+  const offRemote = appFeed ? remote.onDesktop((ev) => res.write(`event: remote\ndata: ${JSON.stringify(ev)}\n\n`)) : null
   req.on('close', () => { clients.delete(res); off?.(); offRemote?.() })
 })
 // A switch to another herdr session: a fleet read before it is dropped, not shown or announced.
@@ -3009,9 +3011,15 @@ app.post('/api/remote/devices', (req, res) => { try { remoteHere(req); res.json(
 app.post('/api/remote/locks/:id/clear', (req, res) => { try { remoteHere(req); res.json(remote.unlock(req.params.id)) } catch (e) { sayErr(res, e) } })
 app.post('/api/remote/notify', (req, res) => { try { remoteHere(req); res.json(remote.setNotify(req.body?.on !== false)) } catch (e) { sayErr(res, e) } })
 // The desktop app here quitting because you quit it (desktop/main.js), not to reopen nor for an
-// update (one this server started a moment ago): Open Bridge AI isn't offered to a device until it's
-// opened here again.
-app.post('/api/remote/app-quit', (req, res) => { try { remoteHere(req); res.json(Date.now() - updates.installStarted() < 10 * 60000 ? { ok: true, update: true } : remote.appQuit()) } catch (e) { sayErr(res, e) } })
+// update (one this server started, until the app reports in again after it): Open Bridge AI isn't
+// offered to a device until it's opened here again.
+app.post('/api/remote/app-quit', (req, res) => {
+  try {
+    remoteHere(req)
+    const update = updates.installStarted()
+    res.json(update && Date.now() - update < 10 * 60000 && remote.desktopSince() < update ? { ok: true, update: true } : remote.appQuit())
+  } catch (e) { sayErr(res, e) }
+})
 // Another computer's screen that didn't show here, or on a device of this one's (ScreenView.jsx): a
 // line in this log, with why, as that computer's own log has one.
 app.post('/api/remote/didnt-show', (req, res) => { const b = req.body || {}; res.json(remote.didntShow({ name: b.name, code: b.code, cause: b.cause, why: b.why, version: b.version }, atThisComputer(req) ? null : relay.deviceOf(req.headers['x-bridge-relay'])?.name || 'a device')) })

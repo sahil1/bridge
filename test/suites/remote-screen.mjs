@@ -36,7 +36,8 @@
 //     counted as waiting; a session waiting on a fix listed with Stop, and ended by Stop, a new
 //     password, Ask Here First, Remote Screen off or a lockout, nothing carried out after; the
 //     capture page's token good once; the app told nobody is viewing when its feed comes back;
-//     a crash report without the phone's name;
+//     a quit it couldn't say (the mark it leaves) taken as Desk starts; a crash report without the
+//     phone's name;
 //   a project's app on Studio, at an address of its own on Laptop: its page, its absolute paths, a
 //     redirect to itself, its cookies (never Bridge AI's own), a POST, its hot reload's WebSocket (with
 //     the subprotocol it asks for); only a port Studio lists as one of an agent's dev servers, never
@@ -44,8 +45,9 @@
 //     can't use Laptop's API; on a phone, as pictures drawn at Studio, taps going to that page;
 //   the desktop app's side: the badge for an ask, the viewer's window of its own on the display it's
 //     asked from, fitted to the screen's shape, sized by hand kept for that computer; the capture
-//     window opened fresh when asked, loaded again or closed when it doesn't load or hangs, the app
-//     kept from napping meanwhile, the display woken and kept awake while viewed;
+//     window opened fresh when asked, loaded again with a new token, or closed when it doesn't
+//     load or hangs, the app kept from napping meanwhile, the display woken and kept awake while
+//     viewed;
 //   in the browser (BRIDGE_TEST_BROWSER): Settings › Devices › Computers on Laptop, View screen, the
 //     password asked for (a wrong one said), the pictures through the relay (said slower), filling the
 //     stage with their shape kept, another screen picked in the session, Control once Studio allows
@@ -1128,6 +1130,15 @@ try {
       app()
       await appOpen()
 
+      // You quit it while Desk's server was down (Quit and Stop Agents): the app leaves a mark, which
+      // Desk takes as it starts: Open isn't offered.
+      for (const a of apps) a.quit()
+      fs.writeFileSync(path.join(desk.data, 'remote-quit.json'), JSON.stringify({ at: new Date().toISOString() }))
+      await desk.restart()
+      await sleep(2700)
+      const sm = (await desk.api('/remote?sources=1')).screen
+      ok(sm.code === 'noApp' && !sm.fix && !fs.existsSync(path.join(desk.data, 'remote-quit.json')), 'quit while Desk\'s server was down: taken as it starts, Open not offered', sm)
+
       // A crash report from Desk names neither its phone nor its computers.
       const cr = await desk.api('/crashes/report', { message: 'Pocket and Laptop were connected when it broke' })
       ok(!/Pocket/.test(JSON.stringify(cr)) && /<device> and Laptop were connected/.test(JSON.stringify(cr)), 'a crash report takes out the name of a phone paired with it (the log lines name them)', cr.details?.slice?.(0, 300))
@@ -1400,6 +1411,13 @@ try {
     ok(c2.gone && c3 !== c2 && !c3.gone, 'asked for a fresh one (the server never heard from that one): closed, and another opened')
     c3.on_.unresponsive()
     ok(c3.gone && !blocked('prevent-app-suspension'), 'one that hangs: closed, and the app may nap again')
+    d2.onEvent({ t: 'need-capture', token: 'tok-a' })
+    const c4 = caps().at(-1)
+    const loads = c4.loads
+    d2.onEvent({ t: 'need-capture', token: 'tok-b' })
+    ok(caps().at(-1) === c4 && !c4.gone && c4.loads === loads + 1 && /[?&]token=tok-b(&|$)/.test(c4.url), 'asked with a new token while its window is open (its own spent: the server restarted): its page loads again with it, at once', c4.url)
+    d2.onEvent({ t: 'need-capture', token: 'tok-b' })
+    ok(c4.loads === loads + 1, 'the same token again: left as it is', c4.loads - loads)
     d2.onEvent({ t: 'sessions', list: [{ id: 'a', kind: 'screen' }] })
     ok(woke === 1 && blocked('prevent-display-sleep'), 'someone viewing: the display woken, and kept awake')
     d2.onEvent({ t: 'sessions', list: [{ id: 'a', kind: 'screen' }, { id: 'b', kind: 'screen' }] })

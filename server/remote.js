@@ -95,9 +95,13 @@ const GUARDED = new Set([...REFUSALS, 'timeout', 'busy', 'here', 'changed', 'tri
 // The capture page's way in (a token in need-capture, put in its window's address): good this long,
 // once. BRIDGE_TEST_CAPTURE_TOKEN: the tests' own, good every time.
 const TOKEN_MS = 2 * 60000
-const TEST_TOKEN = process.env.BRIDGE_TEST_CAPTURE_TOKEN || null
-// Lines a device's tries can put in the log: this many a minute, each device.
+const TEST_TOKEN = process.env.BRIDGE_FIX_DRYRUN === '1' ? process.env.BRIDGE_TEST_CAPTURE_TOKEN || null : null
+// Lines a device's tries can put in the log: this many a minute, each device; and through another of
+// your computers, its own and all it speaks for together, this many.
 const LOG_PER_MINUTE = 10
+const LOG_PER_HOP = 20
+// You quit the desktop app here and it couldn't say so to this server (desktop/main.js): it left this.
+const QUIT_MARK = dataFile('remote-quit.json')
 const IDLE_MS = 5 * 60000 // the capture window, with nothing to capture, closes after this long
 // The guardrails' times (shared/remote.js ACCESS), shorter in tests.
 const LOCK_MS = Number(process.env.BRIDGE_REMOTE_LOCK_MS) || ACCESS.lockMinutes * 60000
@@ -217,7 +221,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   // in soon: this server just started (the app connects its feed again every few seconds), its feed
   // just dropped, or it was asked to reopen, or opened, a moment ago.
   const started = Date.now()
-  const app = { gone: 0, reopen: 0, opened: 0 }
+  const app = { gone: 0, reopen: 0, opened: 0, came: 0 }
   const leaving = new Set()
   const desktopOpen = () => {
     if (leaving.size && Date.now() - app.reopen > REOPEN_MS) leaving.clear()
@@ -231,14 +235,20 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   // work: who (when it's for a device), and what it was. (Never what's on the screen, nor the password.)
   const whoSaid = (s) => (s.for ? `${s.by.name} (for ${s.for})` : s.by.name)
   const note = (s, what) => log(`${new Date().toISOString()} Remote Screen: ${s ? `${whoSaid(s)}: ` : ''}${what}`)
-  // A device's tries: LOG_PER_MINUTE lines a minute each, at most.
-  const saidBy = new Map() // device key -> when it last put a line in, the last minute's
-  const mayNote = (key) => {
+  // A device's tries: LOG_PER_MINUTE lines a minute each, at most, and LOG_PER_HOP for a computer
+  // and every device it says it speaks for (s.key hop/id), by that computer (s.by.id, the one paired
+  // here). The oldest kept go first past 500.
+  const saidBy = new Map() // device key -> when it put a line in, the last minute's
+  const recent = (k, now) => (saidBy.get(k) || []).filter((x) => now - x < 60000)
+  const mayNote = (s) => {
     const now = Date.now()
-    const list = (saidBy.get(key) || []).filter((x) => now - x < 60000)
-    if (saidBy.size > 500) saidBy.clear()
-    if (list.length >= LOG_PER_MINUTE) { saidBy.set(key, list); return false }
-    saidBy.set(key, [...list, now])
+    const hop = s.by.id
+    const mine = recent(s.key, now)
+    const all = [...saidBy.keys()].filter((k) => k === hop || k.startsWith(`${hop}/`)).reduce((n, k) => n + recent(k, now).length, 0)
+    if (mine.length >= LOG_PER_MINUTE || all >= LOG_PER_HOP) return false
+    saidBy.delete(s.key)
+    saidBy.set(s.key, [...mine, now])
+    while (saidBy.size > 500) saidBy.delete(saidBy.keys().next().value)
     return true
   }
   const tell = (ws, msg) => { if (ws?.readyState === 1) ws.send(JSON.stringify(msg)) }
@@ -655,10 +665,12 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     checking = run.catch(() => {})
     return run
   }
+  // { ok, at: the password it was right for (its at) } | ...
   async function check(s, pw) {
     const lock = lockedFor(s)
     if (lock) return { locked: lock.until }
-    if (!conf.password) return { ok: true }
+    const stored = conf.password
+    if (!stored) return { ok: true, at: null }
     const keys = lockKeys(s)
     const most = (i) => (i === 0 ? ACCESS.tries : HOP_TRIES)
     const ls = keys.map((k, i) => { conf.locks[k] ||= { name: s.by.name, ...(i === 0 && s.for ? { for: s.for } : {}), fails: 0 }; return conf.locks[k] })
@@ -670,14 +682,15 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     if (ls.some((l, i) => l.fails >= most(i))) return { locked: lockNow(), now: true }
     for (const l of ls) { l.fails++; l.at = Date.now() }
     save()
-    const m = await passwordMatches(conf.password, pw)
+    const m = await passwordMatches(stored, pw)
     if (m.ok) {
       // Right: that device starts again, and this try isn't counted against the computer it came through.
       delete conf.locks[keys[0]]
       if (keys[1] && conf.locks[keys[1]] && !conf.locks[keys[1]].until) conf.locks[keys[1]].fails = Math.max(0, conf.locks[keys[1]].fails - 1)
-      if (m.stale) conf.password = { ...(await makePassword(pw)), at: conf.password.at }
+      // (Made again with today's settings, unless it was changed here meanwhile.)
+      if (m.stale) { const again = await makePassword(pw); if (conf.password === stored) conf.password = { ...again, at: stored.at } }
       save()
-      return { ok: true }
+      return { ok: true, at: stored.at }
     }
     s.tries = (s.tries || 0) + 1
     if (ls.some((l, i) => l.fails >= most(i))) return { locked: lockNow(), now: true }
@@ -690,6 +703,8 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     const ws = s.viewer
     const lock = lockedFor(s)
     if (lock) { lockedSay(fail, lock.until); return false }
+    // (Which password it got past: the one it typed was right for, or none.)
+    s.pwAt = conf.password?.at || null
     if (conf.password && !(await passwordFrom(s, fail))) return false
     if (conf.askFirst) {
       tell(ws, { t: 'asking', ms: ASK_MS, until: new Date(Date.now() + ASK_MS).toISOString() })
@@ -710,8 +725,10 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       }
       s.okControl = control
     } else s.okControl = true
-    // What it got past, as it was then: a session that waits to start is let in only while it's so.
-    s.guards = { pw: conf.password?.at || null, ask: !!conf.askFirst }
+    // The password changed while it waited here (on Allow, say): not let in on the one it typed.
+    if ((conf.password?.at || null) !== s.pwAt) { fail(changedWhy(), 'changed'); return false }
+    // What it got past: a session that waits to start is let in only while it's so.
+    s.guards = { pw: s.pwAt, ask: !!conf.askFirst }
     return true
   }
   // Still let in as it was at the gate: Remote Screen on, the device allowed and not locked out, the
@@ -737,9 +754,9 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       const m = await answerOf(ws, again ? (x) => x.t === 'password' || (x.t === 'control' && x.on === false) : 'password', PASSWORD_WAIT_MS)
       if (!m) { if (s.tries) refuse(s, 'password', { tries: s.tries }); if (!again && ws.readyState === 1) fail('The password wasn\'t typed in time. Try again.', 'timeout'); return false }
       if (m.t === 'control') return false
-      if (!conf.password) return true // taken off here meanwhile
+      if (!conf.password) { s.pwAt = null; return true } // taken off here meanwhile
       const r = await checkPassword(s, m.p)
-      if (r.ok) return true
+      if (r.ok) { s.pwAt = r.at; return true }
       if (r.locked) {
         if (r.now) refuse(s, 'locked', { tries: s.tries, until: new Date(r.locked).toISOString() })
         lockedSay(fail, r.locked)
@@ -805,7 +822,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     // turning it away): a line in the log too, with why; only for a device let in here and not
     // locked out, LOG_PER_MINUTE a minute at most.
     const fail = (why, code, more = {}) => {
-      if (!GUARDED.has(code) && who && allows(who.by.id) && !lockedFor(who) && mayNote(who.key)) note(who, `couldn't see this screen (${code}${more.cause ? `, ${more.cause}` : ''}): ${why}`)
+      if (!GUARDED.has(code) && who && allows(who.by.id) && !lockedFor(who) && mayNote(who)) note(who, `couldn't see this screen (${code}${more.cause ? `, ${more.cause}` : ''}): ${why}`)
       tell(ws, { t: 'error', why, code, ...more })
       setTimeout(() => { try { ws.close(1008, 'refused') } catch { /* closed */ } }, 50)
     }
@@ -1343,10 +1360,13 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     return accessStatus()
   }
   // Changed or taken off: every session ends, to connect again as it is now.
+  // So does one at the password or waiting for Allow here (its ask goes too).
   function passwordChanged() {
     const why = `The Remote Access Password changed on ${thisName()}. Connect again.`
     for (const s of [...sessions.values()]) end(s, 'changed', why)
     for (const s of [...opening]) endWaiting(s, 'changed', why)
+    for (const s of [...pending]) if (!s.over) { s.over = 'changed'; pending.delete(s); s.fail(why, 'changed') }
+    for (const a of [...asks.values()]) if (!sessions.has(a.s?.id)) a.done('gone')
   }
   // Turned on: a session still connecting goes, to be asked here when it connects again.
   function setAskFirst(on) {
@@ -1431,6 +1451,8 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   // (not by a device): Open Bridge AI may be offered once more.
   function onDesktop(fn) {
     desktops.add(fn)
+    app.came = Date.now()
+    takeQuitMark()
     fn({ t: 'control', on: controlOn() })
     fn({ t: 'sessions', list: badgeList(), asks: [...asks.values()].map(shownAsk) })
     // A start waiting on the app (it just started, or reopened): its capture page, asked for now.
@@ -1453,6 +1475,15 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   }
   // The desktop app here, quitting because you quit it (desktop/main.js: not to reopen or update).
   function appQuit() { quitSaid = Date.now(); return { ok: true } }
+  // ...or, when it couldn't say so (this server down then: Quit and Stop Agents, say), the mark it left
+  // in the data folder, taken as this server starts (and as the app connects, which is it opened again).
+  function takeQuitMark() {
+    let at = null
+    try { at = JSON.parse(fs.readFileSync(QUIT_MARK, 'utf8'))?.at } catch { return }
+    try { fs.rmSync(QUIT_MARK, { force: true }) } catch { /* taken next time */ }
+    if (!desktopOpen() && typeof at === 'string') { conf.quit = new Date(Date.parse(at) || Date.now()).toISOString(); save() }
+  }
+  takeQuitMark()
 
   // Trial turned off: every session ends, and every ask is a no. Turned on: what a New device has
   // open here ends, as when it's unticked (it waits to be let in from now); one you kept out was
@@ -1499,7 +1530,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     return { ok: true }
   }
 
-  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, setNotify, unlock, answer, allows, admits, shutFor, outVia, viaList, turnedAway, waiting, mayPass, mayPreview, stop, stopAll, endFrom, live, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, didntShow, appQuit, mayUpdate, throughNames, active: () => sessions.size }
+  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, setNotify, unlock, answer, allows, admits, shutFor, outVia, viaList, turnedAway, waiting, mayPass, mayPreview, stop, stopAll, endFrom, live, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, didntShow, appQuit, mayUpdate, throughNames, desktopSince: () => app.came, active: () => sessions.size }
 }
 
 // The test stand-in's screens: its main one, one beside it, a 5K one at twice its points (as a

@@ -1136,7 +1136,11 @@ app.on('before-quit', (e) => {
   if (quitTold || relaunching || systemGoing) return
   quitTold = true
   e.preventDefault()
-  fetch(`${URL_BASE}/api/remote/app-quit`, { method: 'POST', signal: AbortSignal.timeout(800) }).catch(() => {}).finally(() => app.quit())
+  // (Not said, the server down or slow: a mark in the data folder it takes as it starts.)
+  fetch(`${URL_BASE}/api/remote/app-quit`, { method: 'POST', signal: AbortSignal.timeout(800) })
+    .then((r) => { if (!r.ok) throw new Error(String(r.status)) })
+    .catch(() => { try { fs.writeFileSync(path.join(DATA, 'remote-quit.json'), JSON.stringify({ at: new Date().toISOString() })) } catch { /* not this time */ } })
+    .finally(() => app.quit())
 })
 // The graphics process went away (Chromium starts it again): written down, to offer a report.
 app.on('child-process-gone', (_e, d) => { if (!quitting) crashes.note(crashes.fromChildGone(d), { base: URL_BASE, data: DATA, version: app.getVersion(), fetch }).catch(() => {}) })
