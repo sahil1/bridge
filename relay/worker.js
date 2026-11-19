@@ -31,12 +31,17 @@
 const TYPES = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', webmanifest: 'application/manifest+json', png: 'image/png', svg: 'image/svg+xml' }
 const MAX_PHONES = 16
 // People with a Share Link open on one computer at once (each page is one connection), apart from its
-// phones, so they never crowd out yours; any one link, VIEWERS_PER_LINK of them. A page the computer
-// has welcomed (the link's secret proved) or let in keeps its place; one that hasn't yet waits in a
-// room of its own, VIEW_WAITING at once and VIEW_WAITING_PER_IP from one address, the oldest (those
-// that haven't said which link first) making room for the next.
+// phones, so they never crowd out yours: MAX_VIEWERS let in (vouched for), VIEWERS_PER_LINK of them on
+// any one link (the computer's count). A page the computer has welcomed (the link's secret proved) but
+// not let in yet (its password or code to come) keeps its place, within VIEW_HELD_PER_LINK on its link
+// and VIEW_HELD_PER_IP from one address there (that address's oldest making room); the computer lets
+// it go if it waits too long. One not welcomed yet waits in a room of its own, VIEW_WAITING at once and
+// VIEW_WAITING_PER_IP from one address, the oldest (those that haven't said which link first) making
+// room for the next.
 const MAX_VIEWERS = 32
 const VIEWERS_PER_LINK = 10
+const VIEW_HELD_PER_LINK = 6
+const VIEW_HELD_PER_IP = 2
 const VIEW_WAITING = 16
 const VIEW_WAITING_PER_IP = 4
 // What a share's address serves, and only that: the page, its worker, the link, the mark.
@@ -291,7 +296,7 @@ const offText = (env, phone) => (!env.HOSTED_OFF || env.HOSTED_OFF === '0' || en
 // deleted, token).
 const ACCOUNT_WHY = new Set(['suspended', 'relay', 'deleted', 'token'])
 const REFUSED_MS = 10 * 60000 // how long a computer whose account is stopped waits before it asks again
-const linkFull = `As many people as the relay takes for one link (${VIEWERS_PER_LINK}) have this link open. This page tries again in a minute.`
+const linkFull = `As many people as the relay takes for one link are opening this link right now (${VIEW_HELD_PER_LINK} at once, besides the ${VIEWERS_PER_LINK} it lets in). This page tries again in a minute.`
 const OWN = 'For no limits, put the relay on your own Cloudflare account (Settings › Devices, on the computer).'
 const OTHER = 'A relay on your own Cloudflare account, or Tailscale, still works (Settings › Devices, on the computer).'
 function limitText(why, l, end) {
@@ -647,11 +652,12 @@ export class Hub {
       // address only a few of those; a welcomed one is never made to make room.
       let ip = null
       if (view) {
-        ip = (await sha(`view ip ${req.headers.get('CF-Connecting-IP') || ''}`)).slice(0, 16)
+        const from = req.headers.get('CF-Connecting-IP')
+        ip = from ? (await sha(`view ip ${from}`)).slice(0, 16) : null
         const all = this.ctx.getWebSockets('view').map((w) => [w, w.deserializeAttachment() || {}])
-        if (all.filter(([, a]) => a.ok || a.welcomed).length >= (this.lim?.viewers ?? MAX_VIEWERS)) return this.fullViews()
+        if (all.filter(([, a]) => a.ok).length >= (this.lim?.viewers ?? MAX_VIEWERS)) return this.fullViews()
         const waiting = all.filter(([, a]) => !a.ok && !a.welcomed).sort((a, b) => (!!a[1].link - !!b[1].link) || (a[1].at || 0) - (b[1].at || 0))
-        const mine = waiting.filter(([, a]) => a.ip === ip)
+        const mine = ip ? waiting.filter(([, a]) => a.ip === ip) : []
         const out = mine.length >= VIEW_WAITING_PER_IP ? mine[0] : waiting.length >= VIEW_WAITING ? waiting[0] : null
         if (out) try { out[0].close(4004, 'make room') } catch { /* gone */ }
       } else {
@@ -1200,15 +1206,19 @@ export class Hub {
     return true
   }
   // The computer's first word to a Share Link's page, in the clear: welcomed (the link's secret proved
-  // both ways), it keeps its place from now on, within VIEWERS_PER_LINK for its link; false: it's let go.
+  // both ways), it keeps its place from now on, within VIEW_HELD_PER_LINK and VIEW_HELD_PER_IP on its link; false: it's let go.
   welcomed(ws, body) {
     const a = ws.deserializeAttachment() || {}
     if (a.welcomed || a.ok) return true
     let m = null
     try { m = JSON.parse(new TextDecoder().decode(body)) } catch { return true }
     if (m?.t !== 'welcome') return true
-    const same = this.ctx.getWebSockets('view').filter((w) => w !== ws && (w.deserializeAttachment() || {}).link === a.link && (w.deserializeAttachment().welcomed || w.deserializeAttachment().ok))
-    if (a.link && same.length >= VIEWERS_PER_LINK) {
+    // Held on its link (welcomed, not let in yet): a few, and from one address fewer, its oldest going.
+    const held = this.ctx.getWebSockets('view').filter((w) => w !== ws).map((w) => [w, w.deserializeAttachment() || {}]).filter(([, x]) => a.link && x.link === a.link && x.welcomed && !x.ok).sort((x, y) => (x[1].at || 0) - (y[1].at || 0))
+    const mine = a.ip ? held.filter(([, x]) => x.ip === a.ip) : []
+    if (mine.length >= VIEW_HELD_PER_IP) {
+      try { mine[0][0].close(4004, 'make room') } catch { /* gone */ }
+    } else if (held.length >= VIEW_HELD_PER_LINK) {
       const until = Date.now() + 60000
       try { ws.send(JSON.stringify(this.lim ? this.limit('link-viewers', until) : { t: 'limit', why: 'link-viewers', text: linkFull, until })); ws.close(4005, 'limit') } catch { /* gone */ }
       try { this.host()?.send(frame(OP.CLOSE, a.id)) } catch { /* gone */ }

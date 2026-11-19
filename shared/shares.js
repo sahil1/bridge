@@ -18,7 +18,7 @@ export const LAST_DEFAULT = 'day'
 //   streams      answers one page may have on their way at once, and a link (all its pages)
 //   listed       entries a folder's list shows
 export const LIMITS = {
-  shares: 50, viewers: 10, fileMB: 1024, people: 30,
+  shares: 50, viewers: 10, waiting: 6, wait: { seconds: 60, codeSeconds: 180, maxMinutes: 10 }, fileMB: 1024, people: 30,
   password: { min: 8, tries: 5, linkTries: 20, lockMinutes: 15 },
   code: { digits: 8, minutes: 10, tries: 5, perHour: 5, perDay: 10, wrongPerDay: 20, linkPerDay: 60 },
   perSecond: 40, streams: { page: 8, link: 32 }, listed: 2000,

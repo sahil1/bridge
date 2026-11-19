@@ -107,7 +107,7 @@ const kits = []
 const procs = []
 const kit = await startKit('share-links', {
   config: { account: accounts.accountConfig },
-  env: (d) => { fs.writeFileSync(path.join(d.data, 'relay.json'), JSON.stringify(relay.relayFile)); return { BRIDGE_TEST_PUSH: push, BRIDGE_TEST_SHARE_HOUR_MS: String(HOUR), BRIDGE_COMPUTER_NAME: 'Studio', BRIDGE_VIEW_IDLE_MS: '3000' } },
+  env: (d) => { fs.writeFileSync(path.join(d.data, 'relay.json'), JSON.stringify(relay.relayFile)); return { BRIDGE_TEST_PUSH: push, BRIDGE_TEST_SHARE_HOUR_MS: String(HOUR), BRIDGE_COMPUTER_NAME: 'Studio', BRIDGE_VIEW_IDLE_MS: '3000', BRIDGE_VIEW_WAIT_MS: '4000' } },
 })
 kits.push(kit)
 const hk = await startKit('share-links-hosted', { config: { account: accounts.accountConfig, relay: { hostedUrl: hosted.url } }, env: { BRIDGE_COMPUTER_NAME: 'Hosted' } })
@@ -307,7 +307,31 @@ try {
     ok(fromOne <= 4 && open <= 16, 'those that haven\'t proved a link wait in a small room of their own: 4 from one address, 16 in all, the oldest making room', { fromOne, open })
     for (const w of ws) w.terminate()
     v.close()
+    // Someone with the link and not the password, many times over from one address: a few places
+    // held for them, never the link's.
+    const held = []
+    for (let i = 0; i < 8; i++) { const h = await viewAs(s.link, { headers: { 'CF-Connecting-IP': '198.51.100.99' } }); if (h.request) { await h.request('GET', '/.share/about').catch(() => {}); held.push(h) } }
+    await sleep(500)
+    const stillHeld = held.filter((h) => !h.closed).length
+    const next = await viewAs(s.link, { headers: { 'CF-Connecting-IP': '203.0.113.50' } })
+    const nextIn = next.request ? await next.request('POST', '/.share/password', { password: 'right-pass-77' }) : next
+    ok(stillHeld <= 2 && nextIn.status === 200, 'pages without the password, from one address, hold 2 places on the link at most; the next viewer gets in', { stillHeld, next: nextIn.status ?? nextIn.refused })
+    // ...and a page that waits without the password is let go a while after its last try, said.
+    const slow = await viewAs(s.link, { headers: { 'CF-Connecting-IP': '203.0.113.51' } })
+    await slow.request('GET', '/.share/about')
+    const gone = await until(async () => { try { const r = await slow.next(1000); return r.kind === K.GONE ? JSON.parse(Buffer.from(r.body).toString('utf8')) : null } catch { return null } }, 9000, 0)
+    ok(/let go after waiting a while without the password/.test(gone?.text || ''), 'a page waiting without the password is let go after a while (60 seconds; 4 here), saying why', gone)
+    for (const h of [...held, next, slow]) h.close?.()
     await kit.api(`/shares/${s.id}/stop`, {})
+    // A link's 10 places are for pages let in: the 11th is told so.
+    const noGate = await share({ kind: 'file', root: 'home', path: 'outside.txt' })
+    const ten = []
+    for (let i = 0; i < 10; i++) { const x = await viewAs(noGate.link); await x.request('GET', '/.share/about'); ten.push(x) }
+    const eleventh = await viewAs(noGate.link)
+    const r11 = eleventh.request ? await eleventh.request('GET', '/.share/about') : null
+    ok(r11?.status === 429 && /takes at once \(10\)/.test(r11.json?.error || ''), 'a link open on 10 devices: the 11th is told it\'s full', r11?.json || eleventh)
+    for (const x of [...ten, eleventh]) x.close?.()
+    await kit.api(`/shares/${noGate.id}/stop`, {})
   })
 
   // ---------- the relay never sees what's shown ----------
@@ -745,6 +769,18 @@ try {
     await sleep(1500)
     ok((await reach?.locator('#cap').innerText()) === 'not captured', 'reaching into the page around it, it never gets the port to the link\'s page')
     ok(new URL(p.url()).host === v1.host && !!(await p.locator('#view').count()), 'and never takes the tab anywhere, with a click or without', p.url())
+    // Back through the tab's history, without a click: the link's page stays.
+    const pb = await ctx.newPage()
+    await pb.goto(`${EX}/before`)
+    await pb.goto(s.link)
+    await pb.locator('#password-input').waitFor({ timeout: 15000 })
+    await pb.fill('#password-input', 'site-pass-1')
+    await pb.click('#password-go')
+    const bf = await until(async () => { const f = pb.frames().find((x) => /\/_c\//.test(x.url())); return f && (await f.locator('#h').count()) ? f : null }, 20000, 200)
+    await bf.evaluate(() => { let n = 0; const t = setInterval(() => { history.back(); if (++n >= 4) clearInterval(t) }, 250) }).catch(() => {})
+    await sleep(2500)
+    ok(new URL(pb.url()).host === v1.host && !!(await pb.locator('#view').count()), 'what\'s shown going back through the tab\'s history leaves the link\'s page where it is', pb.url())
+    await pb.close()
     // (WebKit reports each navigation of the tab it stopped as an error of the page.)
     ok(!errors.filter((e) => !/sandboxed/.test(e)).length, 'no page errors', errors)
     await shot(p, `${tag}share-site`)

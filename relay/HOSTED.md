@@ -51,8 +51,10 @@ this:
   proved, and its password or code given); then what it carries counts against the account, within
   what links may carry apart from the phones (`VIEW_*`), at a pace of their own, never drawing on
   the phones' `MESSAGES_PER_SECOND`. Each computer has `MAX_VIEWERS` such pages open at once that it
-  has welcomed (the link's secret proved: the relay sees the computer's welcome, in the clear), 10
-  for any one link, counted apart from its phones, and a welcomed page keeps its place. Pages not
+  has let in (vouched for), 10 for any one link (the computer's count), apart from its phones. A
+  page it has welcomed (the link's secret proved: the relay sees the computer's welcome, in the
+  clear) but not let in yet keeps its place, 6 such on a link and 2 from one address there (its
+  oldest making room), and the computer lets it go a while after its last try. Pages not
   welcomed yet wait in a room of their own, 16 at once and 4 from one IP address (kept as a hash with
   the connection while it's open), the oldest (first those that haven't said which link) making room
   for the next, so nobody can push out a page that's waiting for its password. The relay tells the
@@ -266,7 +268,7 @@ per computer unless it says it's per account or for the whole relay.
 | `ACCOUNTS_PUBLIC_KEY` | `FqJDwoi18T2Ip2TSLiPxhoP0L56mGOOu_0Zfu4jjr_s` | The accounts service's public key, which every relay token is checked with; while its key is being changed, the old and the new, comma separated, the old first (a token says which key signed it: account/README.md, Changing the signing key). Empty, no computer can register or connect. |
 | `HOSTED_OFF` | `0` | The kill switch (below). |
 | `MAX_PHONES` | `16` | Connections to one computer at once: the same as a personal relay. Strangers who haven't paired make room for paired phones. |
-| `MAX_VIEWERS` | `32` | Share Link pages open on one computer at once that it has welcomed, apart from its phones (each page is a connection), and 10 for any one link. Pages not welcomed yet wait apart (16 at once, 4 from one address) and never push out a welcomed one; full, one more is told so and tries again in a minute. |
+| `MAX_VIEWERS` | `32` | Share Link pages let in on one computer at once, apart from its phones (each page is a connection), and 10 for any one link. Pages still to give a password or code are held apart (6 on a link, 2 from one address there), and pages not welcomed yet wait apart (16 at once, 4 from one address); neither ever pushes out a page let in. Full, one more is told so and tries again in a minute. |
 | `SHARE_DOMAIN` | | What Share Links show, at `<id>-<8 letters>.<share domain>`: a registrable domain of its own on the Public Suffix List (Going live). Unset, computers share no sites or apps here. |
 | `VIEW_WINDOW_MESSAGES` | `60000` | Per computer, in its account's window: messages all its Share Links' pages may carry, so people viewing links never use up what the phones need. |
 | `VIEW_LINK_WINDOW_MESSAGES` | `30000` | The same for any one link. |
@@ -352,8 +354,8 @@ a paired phone uses is cut off without a word; a connection the computer hasn't 
 - **Too many connected**: with `MAX_PHONES` paired phones and tabs connected (strangers make room
   first), one more is told so ("Bridge AI's relay takes 16 connections to one computer at once…")
   and tries again a minute later; the computer is told a phone was turned away, and why. A Share
-  Link's page the same with `MAX_VIEWERS` welcomed (counted as `viewers` in `/_relay/stats`), or 10
-  for its link.
+  Link's page the same with `MAX_VIEWERS` let in (counted as `viewers` in `/_relay/stats`), or 6
+  held on its link.
 - **The account's window or week used up**: every computer of the account, and its phones, hear
   `{ t: "limit", why: "window" | "week", until }`, with words: "This computer's Bold Bridge account
   has used its allowance on Bridge AI's relay for now (150,000 messages in 8 hours). It resets at

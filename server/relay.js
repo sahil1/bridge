@@ -628,9 +628,26 @@ class Conn {
     }
     // Vouched for to the relay (so on Bridge AI's relay it counts as this account's) only once it's let
     // in: until then it's a stranger there, with a stranger's small allowance.
-    this.view = shares.viewer(id, { country: this.as.country, onLetIn: () => { if (!this.vouched) { this.vouched = true; this.via.send(OP.OK, this.id) } } })
+    this.view = shares.viewer(id, { country: this.as.country, onLetIn: () => { clearTimeout(this.waitTimer); if (!this.vouched) { this.vouched = true; this.via.send(OP.OK, this.id) } } })
     this.via.send(OP.DATA, this.id, plainFrame(r.welcome))
     this.session = r.session
+    this.wait()
+  }
+
+  // A page not let in yet is let go a while after its last try (shares.waitMs; BRIDGE_VIEW_WAIT_MS
+  // in tests) and LIMITS.wait.maxMinutes after it came, said, so it never holds its link's room.
+  wait() {
+    if (!this.view || this.view.passed) return
+    const base = Number(process.env.BRIDGE_VIEW_WAIT_MS) || 0
+    const ms = base ? (shares.waitMs(this.view.id) > SHARE_LIMITS.wait.seconds * 1000 ? base * 3 : base) : shares.waitMs(this.view.id)
+    this.waitFrom ||= Date.now()
+    clearTimeout(this.waitTimer)
+    const until = Math.min(Date.now() + ms, this.waitFrom + (base ? base * 10 : SHARE_LIMITS.wait.maxMinutes * 60000))
+    this.waitTimer = setTimeout(() => {
+      if (this.view.passed || this.gone) return
+      this.endView({ title: 'Open the link again', text: 'This page was let go after waiting a while without the password or the code, to make room for others. Open the link again to try again.' })
+    }, Math.max(0, until - Date.now()))
+    this.waitTimer.unref?.()
   }
 
   // A sealed record from it: its requests, each answered by shares.js, within what a page may have
@@ -655,6 +672,7 @@ class Conn {
       this.request(id, r)
       const s = this.streams.get(id)
       if (s) s.cap = ask ? VIEW_ASK_BYTES : VIEW_BODY_BYTES
+      if (ask && r.m === 'POST') this.wait()
       if (this.view.rejects > 50) this.close()
       return
     }
@@ -965,7 +983,9 @@ export function shareAt() {
 }
 // The pages open on a link: how many, and each ended (told why, sealed).
 const viewing = (id) => [...conns.values(), ...prior.conns.values()].filter((c) => c.view?.id === id && c.session && !c.gone)
-export const viewersOf = (id) => viewing(id).length
+// Pages let in on a link, and those still to give its password or code.
+export const viewersOf = (id) => viewing(id).filter((c) => c.view?.passed).length
+export const waitingOf = (id) => viewing(id).filter((c) => !c.view?.passed).length
 export function endViewers(id, said) { for (const c of viewing(id)) c.endView(said) }
 
 // A one-time code for another of your devices: when one links to this one, it hands this one a

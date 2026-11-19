@@ -357,7 +357,15 @@ async function letIn(again = false) {
 
 // What's shared at its own address: its page there (share-frame.js) is given a port, and every
 // request it passes on comes in here (tunnel), and nothing else does.
+let guarded = false
 function showFrame() {
+  // What's shown can run scripts here, and some browsers let a page in a frame send the tab back
+  // through its history: this page keeps an entry of its own on top, and stays.
+  if (!guarded) {
+    guarded = true
+    history.pushState(null, '', location.href)
+    addEventListener('popstate', () => { if (!ended) history.pushState(null, '', location.href) })
+  }
   let origin
   try { origin = new URL(about.frame).origin } catch { return waitScreen('This link doesn\'t open', 'The computer sharing it gave an address that isn\'t one.', { retry: true }) }
   const f = $('view')

@@ -65,7 +65,7 @@ const save = () => { ensureDir(path.dirname(FILE)); writeFileAtomic(FILE, JSON.s
 // can be sent at all (canEmail).
 let hooks = {
   shareAt: () => ({ why: 'relay' }), ready: async () => {}, relayLimits: () => null, owner: () => '', computer: () => 'This computer', isDevPort: async () => false, ownPorts: () => [],
-  endViewers: () => {}, viewersOf: () => 0, notify: () => {}, namePeople: async () => { throw new Error('No email') }, forgetPeople: async () => {}, sendCode: async () => { throw new Error('No email') }, canEmail: () => false, changed: () => {},
+  endViewers: () => {}, viewersOf: () => 0, waitingOf: () => 0, notify: () => {}, namePeople: async () => { throw new Error('No email') }, forgetPeople: async () => {}, sendCode: async () => { throw new Error('No email') }, canEmail: () => false, changed: () => {},
 }
 export const use = (h) => { hooks = { ...hooks, ...h } }
 
@@ -258,7 +258,14 @@ export const exists = (id) => typeof id === 'string' && !!secretOf(id)
 export const secretOf = (id) => { const s = byId(String(id)); return s && live(s) && s.secret ? s.secret : null }
 // Room for one more page on it, and for its hello: each link counts its own, so pages opening one
 // link never keep another's out.
-export const room = (id) => hooks.viewersOf(id) < LIMITS.viewers
+// Room for one more page on a link: those let in are counted apart (LIMITS.viewers, at letting in),
+// so pages that haven't given the password or code (LIMITS.waiting at once) never hold the link's places.
+export const room = (id) => hooks.waitingOf(id) < LIMITS.waiting
+const full = (s) => hooks.viewersOf(s.id) >= LIMITS.viewers
+const FULL = `As many people as this link takes at once (${LIMITS.viewers}) have it open now. Try again in a minute.`
+// How long a page may wait to be let in after its last try (relay.js lets it go then): a code takes
+// longer to come than a password to type.
+export const waitMs = (id) => (byId(id)?.who === 'people' ? LIMITS.wait.codeSeconds : LIMITS.wait.seconds) * 1000
 const hellos = new Map() // link -> times of its last hellos
 export function helloRoom(id) {
   const t = now()
@@ -393,7 +400,7 @@ export async function answer(v, { m, u, h = [], body = null, content = false }) 
   v.tokens--
   v.rejects = 0
   // A link with no password and naming no one: the link is all it takes (the handshake proved it).
-  if (!v.passed && !s.password && s.who !== 'people') letIn(s, v)
+  if (!v.passed && !s.password && s.who !== 'people') { if (full(s)) return json(429, { error: FULL }); letIn(s, v) }
   const url = new URL(String(u || '/'), 'http://share')
   const p = url.pathname
   const method = String(m || 'GET').toUpperCase()
@@ -407,6 +414,8 @@ export async function answer(v, { m, u, h = [], body = null, content = false }) 
     const needs = v.passed ? null : s.password ? 'password' : s.who === 'people' ? 'email' : null
     return json(200, needs ? { needs, name: owner } : { title: s.title, kind: s.kind, name: owner, needs, ends: s.ends, entry: entryOf(s), live: s.kind === 'doc', frame: s.content || null })
   }
+  // The link's places all taken by pages let in: said before a password or a code is spent.
+  if (!v.passed && full(s) && ['/.share/pass', '/.share/password', '/.share/code'].includes(p) && method === 'POST') return json(429, { error: FULL })
   if (p === '/.share/pass' && method === 'POST') {
     const h2 = sha(`${s.id} ${String(said.pass || '')}`)
     const ok = (s.passes || []).find((x) => x.until > now() && same(x.h, h2))
