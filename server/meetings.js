@@ -1349,8 +1349,9 @@ setInterval(() => { try { tidyMerged() } catch { /* a meeting gone */ } }, 6 * 3
 // The meeting a later one is the rest of: recorded during the same calendar event, or soon after the
 // earlier one ended (within MERGE_GAP_MS) with the same name or after Bridge AI closed while the
 // earlier one recorded. It started after the earlier one ended (a minute's grace for clocks), on the
-// same day. Neither archived, combined or in a combined meeting; and none for one you said isn't the
-// rest of another (Not the same meeting, or separated: mergeDismissed). The nearest before it, or null.
+// same day. Never two for different calendar events. Neither archived, combined or in a combined
+// meeting; and none for one you said isn't the rest of another (Not the same meeting, or separated:
+// mergeDismissed). The nearest before it, or null.
 const MERGE_GAP_MS = Number(process.env.BRIDGE_MERGE_GAP_MS) || 15 * 60_000
 const sameEvent = (a, b) => !!a.event?.title && !!b.event?.title && a.event.title === b.event.title && (a.event.start || null) === (b.event.start || null)
 const sameTitle = (a, b) => clean(a.title, 200).toLowerCase() === clean(b.title, 200).toLowerCase()
@@ -1361,6 +1362,7 @@ function restOf(b, all) {
   let best = null
   for (const a of all) {
     if (a.id === b.id || !mergeable(a) || String(a.startedAt) >= String(b.startedAt)) continue
+    if (a.event?.title && b.event?.title && !sameEvent(a, b)) continue
     const gap = t - endOf(a)
     if (gap < -60_000 || t - Date.parse(a.startedAt) > 864e5) continue
     const why = sameEvent(a, b) ? 'event' : gap <= MERGE_GAP_MS && a.interrupted ? 'closed' : gap <= MERGE_GAP_MS && sameTitle(a, b) ? 'title' : null
