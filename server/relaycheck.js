@@ -25,7 +25,7 @@ import http from 'node:http'
 import https from 'node:https'
 import { ROOT } from './paths.js'
 import * as relay from './relay.js'
-import { TEXT, SHARE, linkSw, pageFiles } from '../relay/build.js'
+import { TEXT, SHARE, FRAME, linkSw, pageFiles } from '../relay/build.js'
 import { RELEASE_VERSION } from '../shared/version.js'
 
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
@@ -66,7 +66,7 @@ function get(url) {
 
 // What each file of a version should be, by its SHA-256: this computer's own, or a release's.
 let own = null
-const ownPage = () => (own ||= Object.fromEntries([...PAGE, ...SHARE].map((n) => [n, sha(Buffer.from(pageFiles()[n].text, 'utf8'))])))
+const ownPage = () => (own ||= Object.fromEntries([...PAGE, ...SHARE, ...FRAME].map((n) => [n, sha(Buffer.from(pageFiles()[n].text, 'utf8'))])))
 const releases = new Map() // version -> its files' hashes (a release's never change)
 async function released(version) {
   if (releases.has(version)) return releases.get(version)
@@ -75,7 +75,7 @@ async function released(version) {
   const out = Object.fromEntries(TEXT.map((n) => [n, sha(text[n])]))
   out['link-sw.js'] = sha(Buffer.from(linkSw(text['link.js'].toString('utf8')), 'utf8'))
   // A release from before Share Links has no page for them: none (null).
-  for (const n of SHARE) out[n] = await get(`${at}/${n}`).then(sha, (e) => { if (e.status === 404) return null; throw e })
+  for (const n of [...SHARE, ...FRAME]) out[n] = await get(`${at}/${n}`).then(sha, (e) => { if (e.status === 404) return null; throw e })
   releases.set(version, out)
   return out
 }
@@ -97,6 +97,10 @@ export async function check() {
       const served = Object.fromEntries(await Promise.all(PAGE.map(async (n) => [n, sha(await get(`${base}${pathOf(n)}`))])))
       const at = shareBase(base)
       for (const n of SHARE) served[n] = await get(`${at}/${n}`).then(sha, (e) => { if (e.status === 404) return null; throw e })
+      // With its share domain: the page what a link shows runs in, from a link's content address.
+      const domain = typeof health?.shareDomain === 'string' && /^[a-z0-9.-]{3,200}$/.test(health.shareDomain) ? health.shareDomain : null
+      const content = domain ? (() => { const u = new URL(at); return `${u.protocol}//${u.hostname.split('.')[0]}.${domain}${u.port ? `:${u.port}` : ''}` })() : null
+      for (const n of FRAME) served[n] = content ? await get(`${content}${n === 'share-frame.html' ? '/_relay/frame' : `/${n}`}`).then(sha, (e) => { if (e.status === 404) return null; throw e }) : undefined
       let want = null
       let why = null
       // No version said (a relay from before it did): it's this computer's own, or it's changed.
@@ -108,7 +112,7 @@ export async function check() {
           throw e
         })
       }
-      const differs = want ? [...PAGE, ...SHARE].filter((n) => served[n] !== want[n]) : []
+      const differs = want ? [...PAGE, ...SHARE, ...FRAME].filter((n) => served[n] !== undefined && served[n] !== want[n]) : []
       if (differs.length) why = 'differs'
       last = { on: true, at: Date.now(), version: version || VERSION, own: VERSION, ok: !why, differs, why, error: null }
     } catch (e) {

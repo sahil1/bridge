@@ -213,11 +213,18 @@ export async function followed(keep) {
 export function follow() { delete conf.declined; save(); return status() }
 
 // ---------- the account ----------
-// A code for someone one of this computer's Share Links names (shares.js), emailed by the accounts
-// service from this account: their email and the code go there, never what's shared.
-export async function shareCode(to, code) {
-  if (!conf.deviceToken) throw Object.assign(new Error('This computer isn\'t signed in to Bold Bridge'), { code: 'account-signed-out' })
-  return call('POST', '/v1/share-code', { to, code })
+// The people one of this computer's Share Links names (shares.js), told to the accounts service when
+// the link is made (it keeps a hash of each, with the link's id, until the link ends), and then a
+// code for one of them, emailed by it from this account, only to an email that link named: their
+// email and the code go there, never what's shared.
+const signedIn = () => { if (!conf.deviceToken) throw Object.assign(new Error('This computer isn\'t signed in to Bold Bridge'), { code: 'account-signed-out' }) }
+export async function sharePeople(link, emails, until) {
+  signedIn()
+  return call('POST', '/v1/share-people', { link, emails, until: Math.round(until) })
+}
+export async function shareCode(link, to, code) {
+  signedIn()
+  return call('POST', '/v1/share-code', { link, to, code })
 }
 
 export async function request(kind, note = '') {

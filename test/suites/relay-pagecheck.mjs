@@ -15,7 +15,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
 import { ROOT, OUT, checks } from '../lib/harness.mjs'
-import { pageFiles, TEXT, SHARE } from '../../relay/build.js'
+import { pageFiles, TEXT, SHARE, FRAME } from '../../relay/build.js'
 
 const { ok, done } = checks('relay-pagecheck')
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
@@ -85,14 +85,14 @@ try {
 
   // ---------- Another version: the release's, from GitHub ----------
   says = '99.0.0'
-  releases['99.0.0'] = Object.fromEntries([...TEXT, ...SHARE].map((n) => [n, n === 'shell.js' ? `${files[n].text}\n// 99.0.0's own\n` : files[n].text]))
+  releases['99.0.0'] = Object.fromEntries([...TEXT, ...SHARE, ...FRAME].map((n) => [n, n === 'shell.js' ? `${files[n].text}\n// 99.0.0's own\n` : files[n].text]))
   served = { 'shell.js': releases['99.0.0']['shell.js'] }
   fromGitHub.length = 0
   c = await run()
   ok(c.ok && c.version === '99.0.0' && c.own === VERSION && !c.why, 'a newer release: its files are compared with that release\'s, and match', c)
-  ok(fromGitHub.length === TEXT.length + SHARE.length && fromGitHub.every((u) => u.startsWith('/v99.0.0/relay/web/')), 'from GitHub at its tag, its source files (link-sw.js made from its link.js as the relay makes it)', fromGitHub)
+  ok(fromGitHub.length === TEXT.length + SHARE.length + FRAME.length && fromGitHub.every((u) => u.startsWith('/v99.0.0/relay/web/')), 'from GitHub at its tag, its source files (link-sw.js made from its link.js as the relay makes it)', fromGitHub)
   await run()
-  ok(fromGitHub.length === TEXT.length + SHARE.length, 'and kept: a release\'s files never change, so GitHub isn\'t asked again', fromGitHub.length)
+  ok(fromGitHub.length === TEXT.length + SHARE.length + FRAME.length, 'and kept: a release\'s files never change, so GitHub isn\'t asked again', fromGitHub.length)
   served = { 'shell.js': releases['99.0.0']['shell.js'], 'index.html': `${files['index.html'].text}<script src="https://example.com/x.js"></script>` }
   c = await run()
   ok(!c.ok && c.why === 'differs' && JSON.stringify(c.differs) === JSON.stringify(['index.html']) && c.version === '99.0.0', 'and a file that isn\'t that release\'s is said', c)

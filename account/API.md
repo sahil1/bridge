@@ -135,14 +135,22 @@ if it's new). Only this route answers another origin (`SITE`, CORS).
 
 ### Codes for Share Links
 
-`POST /v1/share-code { to, code }` (a computer's device token) emails a 6-digit code to someone one
-of that computer's Share Links names (Bridge AI's server/shares.js), from the account: the email
-says whose link it is (the account's email) and the code, nothing about what's shared. The code is
-made and checked on the computer; the service only sends it, and keeps neither the address nor the
-code (only a hash of each address for an hour, to limit them). `200 { sent: true }`. Errors:
-`invalid` (not an email, or not 6 digits), `computer` (a phone's token), `suspended`, `too-many`
-(with `retryAfter`: 30 codes an hour for an account's links, 5 an hour to one address), and
-`unsent` (502) when the email couldn't be sent; Bridge AI then sends the code to the owner's
+`POST /v1/share-people { link, emails, until }` (a computer's device token), when a Share Link that
+names people is made (Bridge AI's server/shares.js): the link's id (22 characters), the 1 to 30
+emails it names, and when it ends (at most 8 days on). Each is kept as a hash keyed with a secret
+of the service's own (made from `SIGNING_KEY`), with the account and the link's id, until the link
+ends (`share_people`); told again, the link's list is replaced. `200 { ok: true, people }`.
+Errors: `invalid`, `computer` (a phone's token), `suspended`.
+
+`POST /v1/share-code { link, to, code }` (a computer's device token) emails an 8-digit code to
+someone that link names, from the account, and only to an email `share-people` was told for it: the
+email says whose link it is (the account's email) and the code, nothing about what's shared. The
+code is made and checked on the computer; the service only sends it, and keeps neither the address
+nor the code (only a keyed hash of each address for an hour, to limit them). `200 { sent: true }`.
+Errors: `invalid` (not an email or a link's id, or not 8 digits or more), `not-named` (403: that
+link doesn't name this email, or it has ended), `computer` (a phone's token), `suspended`,
+`too-many` (with `retryAfter`: 30 codes an hour for an account's links, 5 an hour to one address),
+and `unsent` (502) when the email couldn't be sent; Bridge AI then sends the code to the owner's
 devices, to pass on.
 
 ### Devices and leaving

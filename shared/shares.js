@@ -9,11 +9,20 @@ export const LAST_DEFAULT = 'day'
 //   viewers      pages open on one link at once
 //   fileMB       the biggest file a link sends (a bigger one is said, not sent)
 //   people       emails one link may name
-//   password     at least min characters; tries wrong ones in a row lock it for lockMinutes
-//   code         a code sent to an email lasts minutes, allows tries, and an email gets perHour an hour
+//   password     at least min characters; tries wrong ones in a row lock that page out for
+//                lockMinutes, and linkTries from anyone in lockMinutes lock the link itself
+//   code         a code sent to an email has digits, lasts minutes and allows tries; an email gets
+//                perHour an hour and perDay a day, and after wrongPerDay wrong ones none that day; a
+//                link sends linkPerDay a day in all
 //   perSecond    requests one page may make a second, on average (a site's or an app's)
+//   streams      answers one page may have on their way at once, and a link (all its pages)
 //   listed       entries a folder's list shows
-export const LIMITS = { shares: 50, viewers: 10, fileMB: 1024, people: 30, password: { min: 4, tries: 5, lockMinutes: 15 }, code: { minutes: 10, tries: 5, perHour: 5 }, perSecond: 40, listed: 2000 }
+export const LIMITS = {
+  shares: 50, viewers: 10, fileMB: 1024, people: 30,
+  password: { min: 8, tries: 5, linkTries: 20, lockMinutes: 15 },
+  code: { digits: 8, minutes: 10, tries: 5, perHour: 5, perDay: 10, wrongPerDay: 20, linkPerDay: 60 },
+  perSecond: 40, streams: { page: 8, link: 32 }, listed: 2000,
+}
 
 // An email as it's compared: trimmed, lowercase.
 export const cleanEmail = (e) => String(e ?? '').trim().toLowerCase()

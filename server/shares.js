@@ -7,17 +7,20 @@
 // opens (relay/web/share.js) proves it holds the secret, and this computer proves it does too
 // (relay/web/link.js, share links), so the relay passes on bytes it can't read. Who may open it is
 // asked here, inside that link, never of the relay: anyone with the link (and its password, when it
-// has one: 5 wrong tries lock it for 15 minutes), or only the people named, by a 6-digit code sent to
-// their email (Bold Bridge's accounts service sends it for a computer signed in to its account: it
-// sees that email and the code, never what's shared; without that, your devices get the code to pass
-// on). A page let in gets a pass for this tab, kept hashed here, so a reload doesn't ask again.
+// has one), or only the people named, by a code sent to their email (Bold Bridge's accounts service
+// sends it for a computer signed in to its account, only to emails this link named: it sees those
+// emails and the code, never what's shared; without that, your devices get the code to pass on). A
+// page let in gets a pass, kept hashed here and only in that page's memory there, for when its
+// connection drops; the relay is told it's ours (vouched for) only then.
 //
 // What a link reaches, and nothing else: one file; inside one folder (no name starting with a dot, no
 // link that leads out of it, nothing written); one Studio document, shown as a page made here from
 // its latest version; or one app's port, while an agent's terminal still serves it (servers.js
 // ownedBy), never Bridge AI's own ports, its cookies and Bridge AI's never passed on. Never /api nor
 // anything else of Bridge AI: what a link's page asks for is answered here (answer()), never by this
-// server. Everything shown is sandboxed (CSP), at the share's own address.
+// server. What a link shows never runs where the page holding its secret does: a site or an app is
+// shown at an address of its own (content: Bridge AI's relay with its share domain), and anything
+// else, anywhere, runs no scripts. A link whose relay has no such address can't share a site or an app.
 //
 // Kept in ~/.bridge-ai/shares.json (only you can read it): each link, its secret until it ends, a hash
 // of its password, who it names, and when it was opened, from where (the country the relay says) and
@@ -27,7 +30,6 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import http from 'node:http'
-import { Readable } from 'node:stream'
 import { randomBytes, randomInt, scrypt, timingSafeEqual, createHash } from 'node:crypto'
 import { totalmem } from 'node:os'
 import QRCode from 'qrcode'
@@ -40,23 +42,30 @@ import { plainName } from '../shared/remote.js'
 const FILE = dataFile('shares.json')
 // An hour, as links count it (tests make it seconds).
 const HOUR = Number(process.env.BRIDGE_TEST_SHARE_HOUR_MS) || 3600000
-const KEEP_ENDED = 30 * 24 * 3600000
+const DAY = 24 * 3600000
+const KEEP_ENDED = 30 * DAY
 const MAX_OPENS = 100
 const MAX_PASSES = 100
+const PASS_MS = 12 * 3600000 // a page's pass, at most (and never past its link's end)
 const MAX_BODY = 10 * 1024 * 1024 // what a page sends an app at once
+const HELLOS = { n: 20, ms: 10000 } // pages opening one link, in that long
 const sha = (s) => createHash('sha256').update(s).digest('base64url')
 const now = () => Date.now()
+const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k)
 
 let conf = (() => { try { const d = JSON.parse(fs.readFileSync(FILE, 'utf8')); return Array.isArray(d?.shares) ? d : { shares: [] } } catch { return { shares: [] } } })()
+for (const s of conf.shares) { s.codes ||= {}; s.sent ||= {}; s.wrong ||= {}; s.passes ||= [] }
 const save = () => { ensureDir(path.dirname(FILE)); writeFileAtomic(FILE, JSON.stringify(conf, null, 2), { mode: 0o600 }) }
 
-// What the rest of Bridge AI gives this (index.js): where links open (relay.js shareAt), who shares
-// (your name, else this computer's), an app's port checked (isDevPort), the pages open on a link
-// ended (endViewers) and counted (viewersOf), your devices told (notify), a code emailed (sendCode,
-// account.js), and whether an email can be sent at all (canEmail).
+// What the rest of Bridge AI gives this (index.js): where links open (relay.js shareAt: the link's
+// page, and its content address when the relay has one), who shares (your name, else this
+// computer's), an app's port checked (isDevPort), the pages open on a link ended (endViewers) and
+// counted (viewersOf), your devices told (notify), the emails a link names told to the accounts
+// service (namePeople) and a code emailed to one of them (sendCode, account.js), and whether an email
+// can be sent at all (canEmail).
 let hooks = {
-  shareAt: () => ({ why: 'relay' }), owner: () => '', computer: () => 'This computer', isDevPort: async () => false, ownPorts: () => [],
-  endViewers: () => {}, viewersOf: () => 0, notify: () => {}, sendCode: async () => { throw new Error('No email') }, canEmail: () => false, changed: () => {},
+  shareAt: () => ({ why: 'relay' }), ready: async () => {}, owner: () => '', computer: () => 'This computer', isDevPort: async () => false, ownPorts: () => [],
+  endViewers: () => {}, viewersOf: () => 0, notify: () => {}, namePeople: async () => { throw new Error('No email') }, sendCode: async () => { throw new Error('No email') }, canEmail: () => false, changed: () => {},
 }
 export const use = (h) => { hooks = { ...hooks, ...h } }
 
@@ -65,21 +74,23 @@ const active = () => conf.shares.filter(live)
 const byId = (id) => conf.shares.find((s) => s.id === id) || null
 
 // ---------- the list, for you ----------
-// What Settings › Sharing and Studio's Shared show: each link (and its QR code) while it works, what
-// it shows, who may open it, when it ends, how many have it open, and its last opens.
-export async function list() {
+// What Settings › Sharing and Studio's Shared show: each link while it works, what it shows, who may
+// open it, when it ends, how many have it open, and its last opens. The link itself (its secret) and
+// its QR code only to this computer, or to the device that made it: asker { here, device }.
+export async function list(asker = { here: true }) {
   sweep()
   const out = []
-  for (const s of [...conf.shares].sort((a, b) => b.createdAt - a.createdAt)) out.push(await view(s))
+  for (const s of [...conf.shares].sort((a, b) => b.createdAt - a.createdAt)) out.push(await view(s, asker))
   return { shares: out, can: can(), limits: LIMITS, email: hooks.canEmail() }
 }
-async function view(s) {
+const mayRead = (s, asker) => !!asker?.here || (!!asker?.device && asker.device === s.byDevice)
+async function view(s, asker) {
   const on = live(s)
-  const link = on && s.secret ? linkOf(s) : null
+  const link = on && s.secret && mayRead(s, asker) ? linkOf(s) : null
   return {
     id: s.id, kind: s.kind, title: s.title, what: s.what || null, who: s.who, emails: s.who === 'people' ? s.emails : [], password: !!s.password,
     createdAt: s.createdAt, ends: s.ends, endedAt: s.endedAt || null, ended: s.endedAt ? s.why || 'stopped' : on ? null : 'expired',
-    by: s.by || null, link, qr: link ? await QRCode.toString(link, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }) : null,
+    by: s.by || null, link, hidden: on && !link, scripts: !!s.content, qr: link ? await QRCode.toString(link, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }) : null,
     open: on ? hooks.viewersOf(s.id) : 0, locked: s.tries?.until > now() ? s.tries.until : null,
     opens: (s.opens || []).slice(-20).reverse(),
   }
@@ -93,14 +104,16 @@ export function can() {
   if (at.why === 'hosted') return { ok: false, why: 'hosted', text: 'Bridge AI\'s relay doesn\'t open Share Links yet: links work there once it\'s updated. A relay on your own Cloudflare account opens them now (Settings › Devices).' }
   if (at.why === 'update') return { ok: false, why: 'update', text: `Your relay needs updating for Share Links: Update relay, in Settings › Devices.${at.error ? ` (Last try: ${at.error})` : ''}` }
   if (active().length >= LIMITS.shares) return { ok: false, why: 'full', text: `${LIMITS.shares} links are shared at once already. Stop one first.` }
-  return { ok: true }
+  return { ok: true, scripts: !!at.content }
 }
 
 // ---------- making one ----------
 // o: { kind, real (the file or folder, its real path), title, port, pane, folder (an app's), who:
-// 'link' | 'people', password, emails, lasts: 'hour' | 'day' | 'week', by (the device it was made on) }.
+// 'link' | 'people', password, emails, lasts: 'hour' | 'day' | 'week', by (the device it was made on:
+// its name), byDevice (its id, so only it and this computer can read the link again) }.
 export async function create(o) {
   sweep()
+  await hooks.ready().catch(() => {})
   const c = can()
   if (!c.ok) throw Object.assign(new Error(c.text), { status: 409, code: c.why })
   const kind = ['file', 'folder', 'doc', 'app'].includes(o.kind) ? o.kind : null
@@ -118,11 +131,16 @@ export async function create(o) {
   }
   const pw = who === 'link' && typeof o.password === 'string' && o.password ? o.password : null
   if (pw && (pw.length < LIMITS.password.min || pw.length > 200)) throw bad(`A password needs at least ${LIMITS.password.min} characters`)
+  const where = hooks.shareAt().at()
+  // A site's or an app's scripts run only at an address of their own, apart from the page holding
+  // the link's secret: a relay without one can't share them.
+  const scriptsAway = (what) => Object.assign(new Error(`${what} can't be shared through this relay: their scripts would run beside the page holding the link, and ${where.hosted ? 'Bridge AI\'s relay doesn\'t have the separate address they need yet' : 'a relay of your own has no separate address for them'}. A file, a folder without web pages, or a Studio document can be shared, shown without scripts.`), { status: 403, code: 'scripts' })
   let target
   let title
   if (kind === 'app') {
     const port = Number(o.port)
     if (!(port > 1023 && port < 65536) || hooks.ownPorts().includes(port) || !(await hooks.isDevPort(port))) throw Object.assign(new Error(`Port ${port} isn't an app one of your agents' terminals started, so it can't be shared.`), { status: 403 })
+    if (!where.content) throw scriptsAway('Apps')
     target = { port, pane: String(o.pane || ''), folder: String(o.folder || '') }
     title = plainName(o.title, 80) || `Port ${port}`
   } else {
@@ -132,26 +150,47 @@ export async function create(o) {
     if (kind === 'folder' ? !st.isDirectory() : !st.isFile()) throw bad(kind === 'folder' ? 'That isn\'t a folder' : 'That isn\'t a file')
     const why = await keptOut(real, kind === 'folder')
     if (why) throw Object.assign(new Error(why), { status: 403 })
+    if (kind === 'folder' && !where.content && await hasSite(real)) throw scriptsAway('Folders with web pages in them (sites)')
     target = { path: real }
     title = plainName(o.title, 80) || path.basename(real) || real
   }
-  const at = hooks.shareAt()
   const secret = newShareSecret()
   const s = {
-    id: await shareId(secret), secret, at: at.at(), kind, title, what: kind === 'app' ? `Port ${target.port}` : null, target, who, emails,
-    password: pw ? await makePassword(pw) : null, createdAt: now(), ends: now() + lasts.hours * HOUR, by: plainName(o.by, 60) || null,
-    passes: [], tries: { n: 0, until: 0 }, codes: {}, sent: {}, opens: [],
+    id: await shareId(secret), secret, at: where.view, content: where.content || null, kind, title, what: kind === 'app' ? `Port ${target.port}` : null, target, who, emails,
+    password: pw ? await makePassword(pw) : null, createdAt: now(), ends: now() + lasts.hours * HOUR, by: plainName(o.by, 60) || null, byDevice: o.byDevice ? String(o.byDevice).slice(0, 40) : null,
+    passes: [], tries: { until: 0, wrong: [] }, codes: {}, sent: {}, wrong: {}, day: null, opens: [],
   }
+  // The emails a link names are told to the accounts service (as hashes only it can make), so it
+  // sends codes to those and nobody else. Not there: your devices get each code instead.
+  if (who === 'people' && hooks.canEmail()) s.mailed = await hooks.namePeople(s.id, emails, s.ends).then(() => true, () => false)
   conf.shares.push(s)
   save()
   schedule()
   hooks.changed()
-  return { share: await view(s), shares: (await list()).shares }
+  // The link just made, to whoever made it; the others as that device may see them.
+  return { share: await view(s, { here: true }), shares: (await list({ here: !!o.here, device: s.byDevice })).shares }
 }
 const bad = (msg) => Object.assign(new Error(msg), { status: 400 })
 
+// A folder with a site in it: a web page anywhere inside (names starting with a dot left out; at most
+// a few thousand looked at, in a few levels).
+async function hasSite(root) {
+  let seen = 0
+  const walk = async (dir, depth) => {
+    if (depth > 8 || seen > 5000) return false
+    const list = await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])
+    for (const e of list) {
+      if (++seen > 5000 || e.name.startsWith('.')) continue
+      if (e.isFile() && /\.(html?|xhtml)$/i.test(e.name)) return true
+      if (e.isDirectory() && await walk(path.join(dir, e.name), depth + 1)) return true
+    }
+    return false
+  }
+  return walk(root, 0)
+}
+
 // What can't be shared: anything in Bridge AI's own folder or your keys' (or a folder holding one),
-// your home folder or a drive itself, or a name starting with a dot (and a folder in one).
+// your home folder or a drive itself, or a name starting with a dot.
 async function keptOut(real, folder) {
   const realOf = (p) => fsp.realpath(p).catch(() => path.resolve(p))
   const within = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep)
@@ -166,20 +205,20 @@ async function keptOut(real, folder) {
 // ---------- ending ----------
 // Stop Sharing: its open pages end at once (told so, sealed), and its secret goes, so nothing opens
 // it again.
-export async function stop(id, why = 'stopped') {
+export async function stop(id, why = 'stopped', asker = { here: true }) {
   const s = byId(id)
   if (!s) throw Object.assign(new Error('No such link'), { status: 404 })
   if (!s.endedAt) end(s, why)
-  return list()
+  return list(asker)
 }
 // An ended link off the list.
-export async function forget(id) {
+export async function forget(id, asker = { here: true }) {
   const s = byId(id)
   if (s && live(s)) end(s, 'stopped')
   conf.shares = conf.shares.filter((x) => x.id !== id)
   save()
   hooks.changed()
-  return list()
+  return list(asker)
 }
 function end(s, why) {
   s.endedAt = now()
@@ -211,14 +250,30 @@ function schedule() {
 export function start() { sweep(); schedule() }
 
 // ---------- the link's page: in ----------
-// The relay's connection said it holds this link's secret (the handshake): its secret, for that.
+// Is there such a link, still: asked before anything else of a page's hello, so one naming none
+// costs nothing (relay.js). Then its secret, for the handshake.
+export const exists = (id) => typeof id === 'string' && !!secretOf(id)
 export const secretOf = (id) => { const s = byId(String(id)); return s && live(s) && s.secret ? s.secret : null }
-// Room for one more page on it.
+// Room for one more page on it, and for its hello: each link counts its own, so pages opening one
+// link never keep another's out.
 export const room = (id) => hooks.viewersOf(id) < LIMITS.viewers
+const hellos = new Map() // link -> times of its last hellos
+export function helloRoom(id) {
+  const t = now()
+  const list = (hellos.get(id) || []).filter((x) => x > t - HELLOS.ms)
+  if (list.length >= HELLOS.n) return false
+  list.push(t)
+  hellos.set(id, list)
+  if (hellos.size > 500) hellos.delete(hellos.keys().next().value)
+  return true
+}
+// Whether the link takes what a page sends (a body): only an app's, once the page is let in.
+export const takesBodies = (id) => byId(id)?.kind === 'app'
 
 // One page with the link open (relay.js keeps it with its connection): let in yet, and as whom.
-export function viewer(id, { country = null } = {}) {
-  return { id, passed: false, email: null, country: /^[A-Z]{2}$/.test(String(country || '')) ? country : null, tokens: 200, at: now(), asks: [] }
+// onLetIn: told once when it is (relay.js vouches for it to the relay then).
+export function viewer(id, { country = null, onLetIn = () => {} } = {}) {
+  return { id, passed: false, email: null, country: /^[A-Z]{2}$/.test(String(country || '')) ? country : null, tokens: 200, at: now(), asks: [], tries: 0, lockedUntil: 0, rejects: 0, onLetIn }
 }
 
 // What each try and open was, for you: when, from roughly where, and which email.
@@ -229,7 +284,9 @@ function opened(s, v, what, email = v.email) {
 }
 // Let in: the first time anyone is, your devices hear it.
 function letIn(s, v) {
+  if (v.passed) return
   v.passed = true
+  v.onLetIn()
   opened(s, v, 'opened')
   if (!s.first) {
     s.first = now()
@@ -239,12 +296,13 @@ function letIn(s, v) {
   }
 }
 const countryName = (c) => { if (!c) return null; try { return new Intl.DisplayNames(['en'], { type: 'region' }).of(c) || c } catch { return c } }
-function passFor(s) {
+function passFor(s, v) {
   const pass = randomBytes(24).toString('base64url')
-  s.passes = [...(s.passes || []), { h: sha(`${s.id} ${pass}`), at: now() }].slice(-MAX_PASSES)
+  s.passes = [...(s.passes || []).filter((x) => x.until > now()), { h: sha(`${s.id} ${pass}`), until: Math.min(now() + PASS_MS, s.ends), ...(v.email ? { email: v.email } : {}) }].slice(-MAX_PASSES)
   save()
   return pass
 }
+const same = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b))
 
 // The password: scrypt, salted, as the Remote Access Password is kept (remote.js).
 const GB = 2 ** 30
@@ -258,42 +316,63 @@ async function matches(stored, pw) {
   return !!got && got.length === want.length && timingSafeEqual(got, want)
 }
 // Checked one at a time (scrypt takes memory). Each try is counted before it's checked, so tries at
-// once can't get past the limit; at the limit there's no check at all until the lock is over.
+// once can't get past a limit, and at a limit there's no check at all until it's over. Two limits:
+// a page's own (LIMITS.password.tries wrong in a row lock it out; its right one resets only its own
+// count), and the link's (linkTries wrong from anyone in lockMinutes lock the link itself, and no
+// one's right password resets that).
 let checking = Promise.resolve()
 function checkPassword(s, v, pw) {
   const run = checking.then(async () => {
-    const t = s.tries || (s.tries = { n: 0, until: 0 })
-    if (t.until > now()) return { locked: t.until }
-    if (t.until) { t.n = 0; t.until = 0 }
-    t.n++
-    save()
-    if (await matches(s.password, pw)) { t.n = 0; save(); return { ok: true } }
+    const L = LIMITS.password
+    const t = s.tries || (s.tries = { until: 0, wrong: [] })
+    t.wrong = (t.wrong || []).filter((x) => x > now() - L.lockMinutes * 60000)
+    if (t.until > now()) return { locked: t.until, link: true }
+    if (v.lockedUntil > now()) return { locked: v.lockedUntil }
+    v.tries++
+    if (await matches(s.password, pw)) { v.tries = 0; return { ok: true } }
+    t.wrong.push(now())
     opened(s, v, 'wrong password')
-    if (t.n >= LIMITS.password.tries) {
-      t.until = now() + LIMITS.password.lockMinutes * 60000
+    if (t.wrong.length >= L.linkTries) {
+      t.until = now() + L.lockMinutes * 60000
       save()
       opened(s, v, 'locked')
-      hooks.notify({ kind: 'share', title: `${s.title}: wrong password ${LIMITS.password.tries} times`, body: `It's locked for ${LIMITS.password.lockMinutes} minutes. If that wasn't someone you shared it with, Stop Sharing in Settings › Sharing.`, url: '/?settings=sharing', tag: `share-lock-${s.id}` })
-      return { locked: t.until, now: true }
+      hooks.notify({ kind: 'share', title: `${s.title}: ${L.linkTries} wrong passwords`, body: `It's locked for ${L.lockMinutes} minutes. If that wasn't someone you shared it with, Stop Sharing in Settings › Sharing.`, url: '/?settings=sharing', tag: `share-lock-${s.id}` })
+      return { locked: t.until, link: true }
     }
-    return { wrong: LIMITS.password.tries - t.n }
+    save()
+    if (v.tries >= L.tries) { v.lockedUntil = now() + L.lockMinutes * 60000; return { locked: v.lockedUntil } }
+    return { wrong: L.tries - v.tries }
   })
   checking = run.catch(() => {})
   return run
 }
 
-// A code for an email the link names: 6 digits, kept hashed, CODE minutes and tries; perHour an hour
-// to one email. Emailed by Bold Bridge's accounts service when this computer is signed in to it;
-// otherwise (or when it can't be sent just now) your devices get it, to pass on yourself.
-// Sent after the page has its answer, so how long that takes says nothing of whether the link names
-// the email.
+// A code for an email the link names: LIMITS.code.digits digits, kept hashed, for minutes and tries;
+// perHour an hour and perDay a day to one email, linkPerDay a day from one link, and an email with
+// wrongPerDay wrong ones gets none more that day. Emailed by Bold Bridge's accounts service when the
+// link's emails were told to it; otherwise (or when it can't be sent just now) your devices get it,
+// to pass on yourself. Sent after the page has its answer, so how long that takes says nothing of
+// whether the link names the email.
+const today = () => new Date().toISOString().slice(0, 10)
+function dayOf(s) { if (s.day?.d !== today()) s.day = { d: today(), codes: 0, wrong: 0 }; return s.day }
+function mayCode(s, email) {
+  const L = LIMITS.code
+  const d = dayOf(s)
+  const sent = (own(s.sent, email) ? s.sent[email] : []).filter((x) => x > now() - DAY)
+  const wrong = (own(s.wrong, email) ? s.wrong[email] : []).filter((x) => x > now() - DAY)
+  if (d.codes >= L.linkPerDay || wrong.length >= L.wrongPerDay || sent.length >= L.perDay || sent.filter((x) => x > now() - 3600000).length >= L.perHour) return false
+  s.sent[email] = [...sent, now()]
+  d.codes++
+  return true
+}
 function sendCode(s, v, email) {
-  const code = String(randomInt(0, 1000000)).padStart(6, '0')
-  s.codes[email] = { h: sha(`${s.id} ${email} ${code}`), until: now() + LIMITS.code.minutes * 60000, tries: 0 }
+  const L = LIMITS.code
+  const code = String(randomInt(0, 10 ** L.digits)).padStart(L.digits, '0')
+  s.codes[email] = { h: sha(`${s.id} ${email} ${code}`), until: now() + L.minutes * 60000, tries: 0 }
   save()
   opened(s, v, 'code asked', email)
-  const toOwner = () => hooks.notify({ kind: 'share', title: `${email} asked to open ${s.title}`, body: `Their code is ${code} (for ${LIMITS.code.minutes} minutes). It couldn't be emailed, so pass it on if that's who you shared it with.`, url: '/?settings=sharing', tag: `share-code-${s.id}` })
-  setImmediate(() => { if (!hooks.canEmail()) return toOwner(); Promise.resolve().then(() => hooks.sendCode(email, code, s.title)).catch(toOwner) })
+  const toOwner = () => hooks.notify({ kind: 'share', title: `${email} asked to open ${s.title}`, body: `Their code is ${code} (for ${L.minutes} minutes). It couldn't be emailed, so pass it on if that's who you shared it with.`, url: '/?settings=sharing', tag: `share-code-${s.id}` })
+  setImmediate(() => { if (!s.mailed || !hooks.canEmail()) return toOwner(); Promise.resolve().then(() => hooks.sendCode(s.id, email, code)).catch(toOwner) })
 }
 
 // ---------- the link's page: what it asks ----------
@@ -302,36 +381,40 @@ function sendCode(s, v, email) {
 export async function answer(v, { m, u, h = [], body = null }) {
   const s = byId(v.id)
   if (!s || !live(s) || !s.secret) return json(410, { error: 'This link has ended.' })
-  // A page asking too much at once (a script in a loop): slowed to LIMITS.perSecond, said.
+  // A page asking too much at once (a script in a loop): slowed to LIMITS.perSecond, said; one that
+  // keeps on regardless is let go (v.rejects: relay.js closes it).
   const t = now()
   v.tokens = Math.min(200, v.tokens + ((t - (v.last || t)) * LIMITS.perSecond) / 1000)
   v.last = t
-  if (v.tokens < 1) return json(429, { error: 'Too many requests at once. Slow down a little.' })
+  if (v.tokens < 1) { v.rejects++; return json(429, { error: 'Too many requests at once. Slow down a little.' }) }
   v.tokens--
+  v.rejects = 0
   // A link with no password and naming no one: the link is all it takes (the handshake proved it).
   if (!v.passed && !s.password && s.who !== 'people') letIn(s, v)
   const url = new URL(String(u || '/'), 'http://share')
   const p = url.pathname
   const method = String(m || 'GET').toUpperCase()
-  const said = body ? (() => { try { return JSON.parse(Buffer.from(body).toString('utf8')) } catch { return {} } })() : {}
+  const said = body && p.startsWith('/.share/') ? (() => { try { const j = JSON.parse(Buffer.from(body).toString('utf8')); return j && typeof j === 'object' ? j : {} } catch { return {} } })() : {}
+  const owner = hooks.owner() || hooks.computer()
   if (p === '/.share/about' && method === 'GET') {
     // What it is, only once let in: before, a password or a code is all the page hears is needed.
     const needs = v.passed ? null : s.password ? 'password' : s.who === 'people' ? 'email' : null
-    return json(200, needs ? { needs, name: hooks.owner() || hooks.computer() } : { title: s.title, kind: s.kind, name: hooks.owner() || hooks.computer(), needs, ends: s.ends, entry: entryOf(s), live: s.kind === 'doc' })
+    return json(200, needs ? { needs, name: owner } : { title: s.title, kind: s.kind, name: owner, needs, ends: s.ends, entry: entryOf(s), live: s.kind === 'doc', frame: s.content || null })
   }
   if (p === '/.share/pass' && method === 'POST') {
     const h2 = sha(`${s.id} ${String(said.pass || '')}`)
-    const ok = (s.passes || []).some((x) => x.h.length === h2.length && timingSafeEqual(Buffer.from(x.h), Buffer.from(h2)))
+    const ok = (s.passes || []).find((x) => x.until > now() && same(x.h, h2))
     if (!ok) return json(403, { error: 'Not let in yet' })
-    v.passed = true
+    if (ok.email) v.email = ok.email
+    letIn(s, v)
     return json(200, { ok: true })
   }
   if (p === '/.share/password' && method === 'POST') {
     if (!s.password) return json(400, { error: 'This link has no password' })
     const r = await checkPassword(s, v, typeof said.password === 'string' ? said.password : '')
-    if (r.ok) { letIn(s, v); return json(200, { ok: true, pass: passFor(s) }) }
-    if (r.locked) return json(429, { error: `Too many wrong tries, so this link is locked for now. Try again in ${Math.max(1, Math.ceil((r.locked - now()) / 60000))} minutes.` })
-    return json(403, { error: `That isn't the password. ${r.wrong === 1 ? '1 more try' : `${r.wrong} more tries`} before it locks for ${LIMITS.password.lockMinutes} minutes.` })
+    if (r.ok) { letIn(s, v); return json(200, { ok: true, pass: passFor(s, v) }) }
+    if (r.locked) return json(429, { error: r.link ? `Too many wrong passwords for this link, so it's locked for now. Try again in ${Math.max(1, Math.ceil((r.locked - now()) / 60000))} minutes.` : `Too many wrong tries from this page, so it's locked out for now. Try again in ${Math.max(1, Math.ceil((r.locked - now()) / 60000))} minutes.` })
+    return json(403, { error: `That isn't the password. ${r.wrong === 1 ? '1 more try' : `${r.wrong} more tries`} before this page is locked out for ${LIMITS.password.lockMinutes} minutes.` })
   }
   if (p === '/.share/email' && method === 'POST') {
     if (s.who !== 'people') return json(400, { error: 'This link isn\'t for named people' })
@@ -341,38 +424,41 @@ export async function answer(v, { m, u, h = [], body = null }) {
     v.asks = v.asks.filter((x) => x > now() - 60000)
     if (v.asks.length >= 3) return json(429, { error: 'Wait a minute before asking for another code.' })
     v.asks.push(now())
-    // The same answer, and the same limit (LIMITS.code.perHour to one email), whether or not the link
-    // names it: the page can't tell who's on the list.
-    const sent = (s.sent[email] || []).filter((t) => t > now() - 3600000)
-    if (sent.length >= LIMITS.code.perHour) return json(429, { error: 'Too many codes for this email in the last hour. Try again later.' })
-    s.sent = Object.fromEntries([...Object.entries(s.sent).filter(([, x]) => x.some((t) => t > now() - 3600000)), [email, [...sent, now()]]].slice(-200))
-    const who = hooks.owner() || 'whoever shared it'
-    const said2 = `If ${email} is one this was shared with, a code to open it is on its way: by email, or from ${who}. It works for ${LIMITS.code.minutes} minutes.`
-    if (s.emails.includes(email)) sendCode(s, v, email)
-    else opened(s, v, 'not on the list', email)
+    // The same answer whatever happens next, so the page can't tell who the link names: a code goes
+    // only to an email it names, within that email's and the link's limits (said, as limits).
+    const L = LIMITS.code
+    const said2 = `If ${email} is one this was shared with, a code to open it is on its way: by email, or from ${hooks.owner() || 'whoever shared it'}. It works for ${L.minutes} minutes. (One email gets ${L.perHour} codes an hour at most.)`
+    if (s.emails.includes(email)) { if (mayCode(s, email)) sendCode(s, v, email); else opened(s, v, 'too many codes', email) } else opened(s, v, 'not on the list', email)
+    save()
     return json(200, { said: said2 })
   }
   if (p === '/.share/code' && method === 'POST') {
     if (s.who !== 'people') return json(400, { error: 'This link isn\'t for named people' })
     const email = cleanEmail(said.email)
-    const c = s.codes[email]
+    const L = LIMITS.code
+    const c = isEmail(email) && own(s.codes, email) ? s.codes[email] : null
     const given = String(said.code || '').replace(/\s+/g, '')
-    if (!c || c.until <= now() || c.tries >= LIMITS.code.tries) {
+    const d = dayOf(s)
+    if (!c || c.until <= now() || c.tries >= L.tries) {
       if (c) { delete s.codes[email]; save() }
-      return json(403, { error: 'That code doesn\'t work any more (a code lasts 10 minutes and allows 5 tries). Ask for a new one.' })
+      return json(403, { error: `That code doesn't work any more (a code lasts ${L.minutes} minutes and allows ${L.tries} tries). Ask for a new one.` })
     }
     c.tries++
-    save()
-    const h2 = sha(`${s.id} ${email} ${given}`)
-    if (!/^\d{6}$/.test(given) || h2.length !== c.h.length || !timingSafeEqual(Buffer.from(h2), Buffer.from(c.h))) {
+    if (!new RegExp(`^\\d{${L.digits}}$`).test(given) || !same(sha(`${s.id} ${email} ${given}`), c.h)) {
+      s.wrong[email] = [...(own(s.wrong, email) ? s.wrong[email] : []).filter((x) => x > now() - DAY), now()]
+      d.wrong++
+      // Too many wrong in a day, for this email: its code goes, and no more come today.
+      if (s.wrong[email].length >= L.wrongPerDay) delete s.codes[email]
+      save()
       opened(s, v, 'wrong code', email)
-      const left = LIMITS.code.tries - c.tries
-      return json(403, { error: left > 0 ? `That code isn't right. ${left === 1 ? '1 more try' : `${left} more tries`} with it.` : 'That was the last try with this code. Ask for a new one.' })
+      const left = Math.max(0, L.tries - c.tries)
+      return json(403, { error: left > 0 && own(s.codes, email) ? `That code isn't right. ${left === 1 ? '1 more try' : `${left} more tries`} with it.` : 'That was the last try with this code. Ask for a new one.' })
     }
     delete s.codes[email]
+    save()
     v.email = email
     letIn(s, v)
-    return json(200, { ok: true, pass: passFor(s) })
+    return json(200, { ok: true, pass: passFor(s, v) })
   }
   if (p.startsWith('/.share/')) return json(404, { error: 'Not found' })
   if (!v.passed) return page(401, 'Not let in yet: open the link again.')
@@ -394,14 +480,18 @@ const json = (status, o) => Promise.resolve(new Response(JSON.stringify(o), { st
 // ---------- what's shared ----------
 // Every answer shown in the page's frame: sandboxed (a PDF aside, which a sandbox stops showing),
 // framed only by the page's own address, never sniffed as something else, its address kept to the
-// page's own (Referrer-Policy), never cached.
+// page's own (Referrer-Policy), never cached. At a content address of its own, its scripts run and
+// may reach only that address (connect-src 'self'); anywhere else none runs at all.
 const SANDBOX = 'sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads'
+const WITH_SCRIPTS = `${SANDBOX}; connect-src 'self'`
+const NO_SCRIPTS = `${SANDBOX}; script-src 'none'; object-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'`
+const cspOf = (s) => (s.content ? WITH_SCRIPTS : NO_SCRIPTS)
 // A page made here (a document, a folder's list, why something didn't open): nothing in it runs
 // (script-src 'none'), and it loads nothing from anywhere else. (Its sandbox lets scripts as the
 // others' does, and script-src stops them: in WebKit, a frame whose page was sandboxed without
 // scripts goes past the service worker for the next page it opens.)
 const STATIC = "sandbox allow-scripts allow-same-origin allow-popups; default-src 'none'; script-src 'none'; img-src data: 'self'; style-src 'unsafe-inline'; font-src data:; media-src 'self'; form-action 'none'; base-uri 'none'"
-function shownHeaders(type, { csp = SANDBOX, more = {} } = {}) {
+function shownHeaders(type, { csp = NO_SCRIPTS, more = {} } = {}) {
   return { 'content-type': type, 'x-content-type-options': 'nosniff', 'referrer-policy': 'same-origin', 'cache-control': 'no-store', ...(/^application\/pdf\b/i.test(type) ? {} : { 'content-security-policy': csp }), ...more }
 }
 function page(status, text) {
@@ -445,15 +535,57 @@ const TYPES = {
 }
 const typeOf = (f) => TYPES[path.extname(f).toLowerCase()] || 'application/octet-stream'
 
-// A file, as it is: a part of it when asked (Range: a video), nothing written, and not one over
-// LIMITS.fileMB (said instead).
-async function send(file, method, h) {
-  const fh = await fsp.open(file, 'r')
+// A file's bytes as a stream read only as it's taken (pull), and closed when it ends or is let go
+// (cancel), whenever that is: nothing is read ahead, and a reader that stops never leaves it open.
+function fileStream(fh, start, end) {
+  let at = start
+  let closed = false
+  let cancelled = false
+  const close = () => { if (closed) return; closed = true; fh.close().catch(() => {}) }
+  return new ReadableStream({
+    async pull(c) {
+      if (cancelled) return
+      const n = Math.min(64 * 1024, end + 1 - at)
+      if (n <= 0) { close(); return c.close() }
+      const buf = Buffer.allocUnsafe(n)
+      let read = 0
+      try { read = (await fh.read(buf, 0, n, at)).bytesRead } catch (e) { close(); if (!cancelled) c.error(e); return }
+      if (cancelled) return
+      if (!read) { close(); return c.close() }
+      at += read
+      c.enqueue(new Uint8Array(buf.buffer, buf.byteOffset, read))
+    },
+    cancel() { cancelled = true; close() },
+  }, { highWaterMark: 0 })
+}
+// A Node stream (an app's answer) as the same: a piece only as it's taken, and let go at once.
+function nodeStream(r) {
+  const it = r[Symbol.asyncIterator]()
+  let done = false
+  return new ReadableStream({
+    async pull(c) {
+      if (done) return
+      let x
+      try { x = await it.next() } catch (e) { if (!done) { done = true; c.error(e) } return }
+      if (done) return
+      if (x.done) { done = true; return c.close() }
+      c.enqueue(new Uint8Array(x.value.buffer, x.value.byteOffset, x.value.byteLength))
+    },
+    cancel() { done = true; r.destroy(); it.return?.().catch(() => {}) },
+  }, { highWaterMark: 0 })
+}
+
+// A file, as it is: a part of it when asked (Range: a video), nothing written, only a regular file
+// (looked at before it's opened: a pipe or a device never is), and not one over LIMITS.fileMB.
+async function send(s, file, method, h) {
+  const st0 = await fsp.stat(file)
+  if (!st0.isFile()) throw notThere()
+  if (st0.size > LIMITS.fileMB * 1024 * 1024) return page(413, `${path.basename(file)} is bigger than a link sends (${LIMITS.fileMB / 1024} GB at most).`)
+  const fh = await fsp.open(file, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0))
   let handed = false
   try {
     const st = await fh.stat()
-    if (!st.isFile()) throw notThere()
-    if (st.size > LIMITS.fileMB * 1024 * 1024) return page(413, `${path.basename(file)} is bigger than a link sends (${LIMITS.fileMB / 1024} GB at most).`)
+    if (!st.isFile() || st.ino !== st0.ino) throw notThere()
     const type = typeOf(file)
     const range = /^bytes=(\d*)-(\d*)$/.exec(String(h.find(([k]) => String(k).toLowerCase() === 'range')?.[1] || ''))
     let start = 0
@@ -465,11 +597,10 @@ async function send(file, method, h) {
     }
     const part = !!range && st.size > 0
     const len = st.size ? end - start + 1 : 0
-    const headers = shownHeaders(type, { more: { 'accept-ranges': 'bytes', 'content-length': String(len), ...(part ? { 'content-range': `bytes ${start}-${end}/${st.size}` } : {}) } })
+    const headers = shownHeaders(type, { csp: cspOf(s), more: { 'accept-ranges': 'bytes', 'content-length': String(len), ...(part ? { 'content-range': `bytes ${start}-${end}/${st.size}` } : {}) } })
     if (method === 'HEAD' || !len) return new Response(null, { status: part ? 206 : 200, headers })
-    const stream = fh.createReadStream({ start, end, highWaterMark: 64 * 1024 })
     handed = true
-    return new Response(Readable.toWeb(stream), { status: part ? 206 : 200, headers })
+    return new Response(fileStream(fh, start, end), { status: part ? 206 : 200, headers })
   } finally { if (!handed) await fh.close().catch(() => {}) }
 }
 
@@ -479,19 +610,22 @@ async function fileOf(s, rest, method, h) {
   if (!parts || parts.length !== 1 || parts[0] !== name) throw notThere(`Only ${name} is shared here, not what it links to.`)
   const real = await fsp.realpath(s.target.path).catch(() => { throw notThere('It isn\'t there any more.') })
   if (real !== s.target.path) throw notThere('It isn\'t there any more.')
-  return send(real, method, h)
+  return send(s, real, method, h)
 }
 
 async function folderOf(s, rest, method, h) {
-  const root = s.target.path
+  // The folder as it was shared: one put in its place since (a link to somewhere else) isn't it.
+  const root = await fsp.realpath(s.target.path).catch(() => null)
+  if (root !== s.target.path) throw notThere('It isn\'t there any more.')
   const parts = partsOf(rest)
   const real = await inside(root, parts)
   const st = await fsp.stat(real)
-  if (!st.isDirectory()) return send(real, method, h)
-  // A folder asked for without its /: there, so its own links work.
-  if (rest && !rest.endsWith('/')) return new Response(null, { status: 302, headers: { location: `/_c/${s.id}/${rest}/`, 'cache-control': 'no-store' } })
+  if (!st.isDirectory()) return send(s, real, method, h)
+  // A folder asked for without its /: there, so its own links work (the page puts its own path in
+  // front of an address from the root of what's shared).
+  if (rest && !rest.endsWith('/')) return new Response(null, { status: 302, headers: { location: `/${rest}/`, 'cache-control': 'no-store' } })
   const index = path.join(real, 'index.html')
-  if (await fsp.stat(index).then((x) => x.isFile(), () => false)) return send(await inside(root, [...parts, 'index.html']), method, h)
+  if (await fsp.stat(index).then((x) => x.isFile(), () => false)) return send(s, await inside(root, [...parts, 'index.html']), method, h)
   return listing(s, real, parts)
 }
 
@@ -517,8 +651,9 @@ async function docOf(s, rest, method, h) {
   const real = await fsp.realpath(file).catch(() => { throw notThere('It isn\'t there any more.') })
   if (real !== file) throw notThere('It isn\'t there any more.')
   const ext = path.extname(file).toLowerCase()
-  if (ext === '.pdf' || ext === '.html' || ext === '.htm') return send(real, method, h)
+  if (ext === '.pdf' || ext === '.html' || ext === '.htm') return send({ ...s, content: null }, real, method, h)
   const st = await fsp.stat(real)
+  if (!st.isFile()) throw notThere('It isn\'t there any more.')
   if (st.size > 80 * 1024 * 1024) return page(413, 'This document is too big to show here.')
   const body = await rendered(real, ext, st)
   served.set(s.id, `${st.size}:${st.mtimeMs}`)
@@ -567,6 +702,7 @@ export function socket(v, u, sock) {
   const s = byId(v.id)
   if (!s || !live(s) || !v.passed || s.kind !== 'doc' || new URL(String(u || '/'), 'http://share').pathname !== '/.share/live') return sock.close(1008, s?.kind === 'app' ? 'A shared app\'s live connections aren\'t carried' : 'Not found')
   let w = watches.get(s.id)
+  if (w && w.socks.size >= LIMITS.viewers) return sock.close(1008, 'Too many at once')
   if (!w) {
     w = { socks: new Set(), key: served.get(s.id) || null }
     const look = async () => {
@@ -590,12 +726,13 @@ function stopWatch(id) { const w = watches.get(id); if (w) { clearInterval(w.tim
 // Its port on this computer, while an agent's terminal still serves it, as the Preview tab shows it:
 // what the page sends (no cookies, no Authorization, nothing of Bridge AI's), and its answer with its
 // cookies and anything that would reach past itself taken out, sandboxed, and a redirect to itself
-// kept under the link.
+// kept under the link (the page puts its own path in front of an address from the app's root).
 const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'proxy-connection', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'host', 'content-length', 'accept-encoding', 'cookie', 'authorization', 'origin', 'referer'])
 const AWAY = new Set(['set-cookie', 'clear-site-data', 'service-worker-allowed', 'content-length', 'strict-transport-security', 'alt-svc'])
 const NO_BODY = new Set([204, 205, 304])
 async function toApp(s, { method, rest, search, h, body }) {
   const port = s.target.port
+  if (!s.content) return page(403, 'An app is shown only at an address of its own, which this link doesn\'t have.')
   if (hooks.ownPorts().includes(port) || !(await hooks.isDevPort(port))) return page(503, 'The app isn\'t running from an agent\'s terminal any more, so it can\'t be shown. Ask whoever shared it to start it again.')
   if (body && body.byteLength > MAX_BODY) return page(413, 'That\'s more than a shared app takes at once (10 MB).')
   const headers = {}
@@ -606,6 +743,9 @@ async function toApp(s, { method, rest, search, h, body }) {
   }
   headers.host = `localhost:${port}`
   headers['accept-encoding'] = 'identity'
+  // What changes something comes from the app's own page (only the link's frame can ask: share-sw.js),
+  // so the app sees its own Origin, as it would at its own address.
+  if (!['GET', 'HEAD'].includes(method)) headers.origin = `http://localhost:${port}`
   const target = `/${rest}${search || ''}`
   return new Promise((resolve) => {
     const up = http.request({ host: 'localhost', port, method, path: target, headers, autoSelectFamily: true, timeout: 60000 }, (r) => {
@@ -616,26 +756,27 @@ async function toApp(s, { method, rest, search, h, body }) {
         if (k === 'content-security-policy') continue // put again below, after the sandbox
         for (const x of [].concat(v)) { try { out.append(k, x) } catch { /* not a header */ } }
       }
-      out.set('content-security-policy', SANDBOX)
+      out.set('content-security-policy', WITH_SCRIPTS)
       for (const x of [].concat(r.headers['content-security-policy'] || [])) out.append('content-security-policy', x)
       out.set('x-content-type-options', 'nosniff')
       out.set('referrer-policy', 'same-origin')
       const empty = NO_BODY.has(r.statusCode) || method === 'HEAD'
       if (empty) r.resume()
-      resolve(new Response(empty ? null : Readable.toWeb(r), { status: r.statusCode < 200 ? 502 : r.statusCode, headers: out }))
+      resolve(new Response(empty ? null : nodeStream(r), { status: r.statusCode < 200 ? 502 : r.statusCode, headers: out }))
     })
     up.on('error', (e) => resolve(page(502, `Nothing answered on the app's port (${e.code || e.message}). Is it still running?`)))
     up.on('timeout', () => up.destroy(new Error('it took too long')))
-    up.end(body ? Buffer.from(body) : undefined)
+    try { up.end(body ? Buffer.from(body) : undefined) } catch (e) { resolve(page(400, e.message)) }
   })
 }
-// A redirect to the app itself stays under the link; anywhere else, as it is.
+// A redirect to the app itself stays under the link: from the app's root, which the page puts its
+// own path in front of; anywhere else, as it is.
 function where(loc, s) {
   let u
   try { u = new URL(loc, `http://localhost:${s.target.port}/`) } catch { return loc }
-  const own = ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname) && Number(u.port || 80) === s.target.port
-  if (!own && /^[a-z]+:/i.test(loc)) return loc
-  return `/_c/${s.id}${u.pathname}${u.search}${u.hash}`
+  const own2 = ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname) && Number(u.port || 80) === s.target.port
+  if (!own2 && /^[a-z]+:/i.test(loc)) return loc
+  return `${u.pathname}${u.search}${u.hash}`
 }
 
 start()

@@ -4,12 +4,15 @@
 // shown can't reach anything a paired phone keeps there.
 //
 // The link's secret is in its fragment (#s=…), which the browser never sends anywhere. This page
-// opens an end-to-end encrypted link to the computer through the relay with it (link.js, share
-// links), so the relay passes on bytes it can't read. Then the computer asks for the share's
-// password, or for a code sent to the viewer's email, if it has one, inside that link, and shows
-// what's shared in a frame. Everything the frame asks for (a site's pictures and scripts, an app's
-// requests) goes to the service worker (share-sw.js), which hands it to this page, which sends it
-// over the link.
+// reads it, takes it out of the address at once, and keeps it only in memory; nothing it keeps is
+// stored (a reload asks for the link again). It opens an end-to-end encrypted link to the computer
+// through the relay with it (link.js, share links), so the relay passes on bytes it can't read. Then
+// the computer asks for the share's password, or for a code sent to the viewer's email, if it has
+// one, inside that link, and shows what's shared in a frame. Everything the frame asks for (a site's
+// pictures and scripts, an app's requests) goes to a service worker (share-sw.js), then to this page,
+// which sends it over the link. What's shared never runs where this page does: either at an address
+// of its own (Bridge AI's relay, with its share domain: share-frame.js, which this page gives only a
+// port for those requests), or here with its scripts turned off (script-src 'none').
 //
 // The computer says what's what: what's shared, who shares it, until when, and whether it ended;
 // what this page says before it has heard (a name from the link) is only shown, never believed.
@@ -35,7 +38,10 @@ let nextId = 1
 const streams = new Map()
 let passed = false // let in: the password or the code, or none needed
 let opened = false // the frame shows what's shared
-const PASS_KEY = () => `bridge-share-pass:${sid}`
+let pass = null // the computer's pass for this page, after a password or a code (memory only)
+// This page's key for its frame's requests, new each time it opens: only those under /_c/<k>/ are sent.
+const k = [...crypto.getRandomValues(new Uint8Array(18))].map((x) => 'abcdefghijklmnopqrstuvwxyz234567'[x & 31]).join('')
+let framePort = null // the content address's page (share-frame.js), when what's shared shows there
 
 // ---------- screens ----------
 const show = (id) => { for (const s of ['wait', 'password', 'email', 'code']) $(s).hidden = s !== id; $('view').hidden = id !== null; $('top').hidden = !about?.title }
@@ -62,11 +68,12 @@ function top() {
 
 // ---------- the link to the computer ----------
 async function start() {
+  if (!secret && /^\/v\//.test(location.pathname)) return waitScreen('Open the link again', 'This page doesn\'t keep the link once it has opened it, so a reload needs the link again.')
   if (!/^[\w-]{43}$/.test(secret)) return waitScreen('This link isn\'t complete', 'Part of it is missing. Ask whoever sent it to send it again, and open all of it.')
   try { sid = await shareId(secret) } catch { return waitScreen('This link isn\'t complete', 'Part of it is missing. Ask whoever sent it to send it again, and open all of it.') }
-  // The page's own address names the share, so the service worker knows which page a frame's
-  // requests go to; a reload opens the same.
-  if (location.pathname !== `/v/${sid}`) history.replaceState(null, '', `/v/${sid}${location.hash}`)
+  // The secret leaves the address at once. What stays names the share and this page's key, so the
+  // service worker knows which page a frame's requests are for.
+  history.replaceState(null, '', `/v/${sid}?k=${k}`)
   waitScreen('Opening…', `Connecting to ${theirs().replace(/^The/, 'the')}.`, { spin: true })
   connect()
 }
@@ -96,6 +103,8 @@ function lost(code) {
   dropSession()
   ws = null
   if (ended || hold) return
+  // Bridge AI's relay said to wait (its limits for links): until then.
+  if (limited?.until > Date.now()) { retryTimer = setTimeout(connect, Math.min(limited.until - Date.now(), 30 * 60000) + 1000); return }
   // The computer connected again (the relay starts its links over): at once. Otherwise less and
   // less often, and said.
   retryTimer = setTimeout(connect, code === 4001 ? 300 : backoff)
@@ -196,8 +205,9 @@ function end(m) {
   ended = m || {}
   clearTimeout(retryTimer)
   clearInterval(pinger)
-  try { sessionStorage.removeItem(PASS_KEY()) } catch { /* no storage */ }
+  pass = null
   opened = false
+  framePort = null
   $('view').src = 'about:blank'
   waitScreen(String(m?.title || 'This link has ended').slice(0, 120), String(m?.text || 'Whoever shared it stopped sharing it, or its time ran out.').slice(0, 400))
   try { ws?.close(1000) } catch { /* closed */ }
@@ -241,15 +251,15 @@ async function begin() {
   about = r.json
   owner = plain(about.name, 40) || owner
   if (!about.needs) return letIn()
-  // Let in earlier in this tab (a reload, the link dropping): the computer's pass, until the share ends.
-  let pass = null
-  try { pass = sessionStorage.getItem(PASS_KEY()) } catch { /* no storage */ }
+  // Let in earlier on this page (the link dropped, the computer came back): its pass, kept in memory.
   if (pass) {
     const p = await call('POST', '/.share/pass', { pass }).catch(() => null)
     if (p?.status === 200) return letIn(true)
-    try { sessionStorage.removeItem(PASS_KEY()) } catch { /* no storage */ }
+    pass = null
   }
-  if (opened) { opened = false; $('view').src = 'about:blank' }
+  if (opened) { opened = false; framePort = null; $('view').src = 'about:blank' }
+  // Waiting for a code already: still that.
+  if (about.needs === 'email' && emailAsked && !$('code').hidden) return
   if (about.needs === 'password') {
     show('password')
     $('password-text').textContent = `${about.name || 'Whoever shared it'} set a password for what they shared.`
@@ -260,7 +270,7 @@ async function begin() {
   }
 }
 
-const keepPass = (pass) => { try { if (pass) sessionStorage.setItem(PASS_KEY(), pass) } catch { /* no storage */ } }
+const keepPass = (p) => { if (typeof p === 'string') pass = p }
 const busy = (form, on) => { for (const el of $(form).querySelectorAll('button, input')) el.disabled = on }
 const sayErr = (id, msg) => { $(id).hidden = !msg; $(id).textContent = msg || '' }
 
@@ -311,6 +321,8 @@ async function worker() {
   try {
     await navigator.serviceWorker.register('/share-sw.js', { scope: '/' })
     sw = await Promise.race([navigator.serviceWorker.ready, new Promise((r) => setTimeout(() => r(null), 10000))])
+    // This page's key, told to it: only its frame's requests come here.
+    sw?.active?.postMessage({ t: 'host', k })
   } catch { sw = null }
   return sw
 }
@@ -324,6 +336,8 @@ async function letIn(again = false) {
   }
   passed = true
   top()
+  // At an address of its own (it may run its scripts there): that address's page, given a port.
+  if (about.frame) return showFrame()
   const reg = await worker()
   if (!session) return
   if (!reg) {
@@ -334,7 +348,31 @@ async function letIn(again = false) {
   }
   if (!opened) {
     opened = true
-    $('view').src = `/_c/${sid}/${about.entry || ''}`
+    $('view').src = `/_c/${k}/${about.entry || ''}`
+  }
+  show(null)
+  state('')
+  if (about.live) live()
+}
+
+// What's shared at its own address: its page there (share-frame.js) is given a port, and every
+// request it passes on comes in here (tunnel), and nothing else does.
+function showFrame() {
+  let origin
+  try { origin = new URL(about.frame).origin } catch { return waitScreen('This link doesn\'t open', 'The computer sharing it gave an address that isn\'t one.', { retry: true }) }
+  const f = $('view')
+  if (!opened) {
+    opened = true
+    f.onload = () => {
+      const ch = new MessageChannel()
+      framePort = ch.port1
+      framePort.onmessage = (e) => {
+        if (e.data?.type === 'fetch' && e.ports[0]) tunnel(e.data, e.ports[0])
+        else if (e.data?.t === 'nosw') state('This browser can\'t show it here')
+      }
+      f.contentWindow.postMessage({ t: 'port', k, entry: about.entry || '' }, origin, [ch.port2])
+    }
+    f.src = `${origin}/_relay/frame?k=${k}`
   }
   show(null)
   state('')
@@ -345,7 +383,7 @@ async function letIn(again = false) {
 async function whole() {
   const parts = []
   let head = null
-  await new Promise((resolve) => tunnel({ m: 'GET', u: `/_c/${sid}/${about.entry || ''}`, h: [] }, {
+  await new Promise((resolve) => tunnel({ m: 'GET', u: `/_c/${k}/${about.entry || ''}`, h: [] }, {
     postMessage: (x) => { if (x.head) head = x.head; else if (x.chunk) parts.push(new Uint8Array(x.chunk)); else if (x.end || x.error) resolve() },
     set onmessage(_) { /* nothing to cancel */ },
   }, false))
@@ -366,12 +404,14 @@ function live() {
   liveId = id
   streams.set(id, {
     onMessage: () => {
+      // At its own address: its page there shows it again.
+      if (framePort) return framePort.postMessage({ t: 'show', v: ++versions })
       const f = $('view')
       let y = 0
       try { y = f.contentWindow.scrollY } catch { /* not there */ }
       f.addEventListener('load', () => { try { f.contentWindow.scrollTo(0, y) } catch { /* not there */ } }, { once: true })
       // Opened again from here (a reload from inside the frame can skip the service worker).
-      f.src = `/_c/${sid}/${about.entry || ''}?v=${++versions}`
+      f.src = `/_c/${k}/${about.entry || ''}?v=${++versions}`
     },
     onClose: () => { if (liveId === id) liveId = 0 },
     onLost: () => { if (liveId === id) liveId = 0 },
@@ -379,14 +419,18 @@ function live() {
   send(K.WS_OPEN, id, { u: '/.share/live' }).catch(() => {})
 }
 
-// ---------- the frame's requests, from the service worker ----------
-navigator.serviceWorker?.addEventListener('message', (e) => { if (e.data?.type === 'fetch') tunnel(e.data, e.ports[0]) })
+// ---------- the frame's requests, from the service worker (here), or the port (its own address) ----------
+navigator.serviceWorker?.addEventListener('message', (e) => {
+  if (e.data?.type === 'fetch' && e.ports[0] && !about?.frame) tunnel(e.data, e.ports[0])
+  // The service worker asking which page has a key (it may not know this page's address changed).
+  else if (e.data?.t === 'who' && e.ports[0]) e.ports[0].postMessage({ k: e.data.k === k ? k : null })
+})
 navigator.serviceWorker?.startMessages?.()
 
 // One request over the link, its answer streamed back as the reader takes it in (acks: the service
 // worker says how much it took), so no more than WINDOW is ever on its way; without acks, as it comes.
 function tunnel({ m, u, h, body }, port, acks = true) {
-  const prefix = `/_c/${sid}`
+  const prefix = `/_c/${k}`
   if (!session || !passed) return port.postMessage({ error: session ? 'Not opened yet' : `${theirs()} is offline. The link works when it's back.` })
   if (!String(u).startsWith(`${prefix}/`)) return port.postMessage({ error: 'Not part of what was shared' })
   const id = nextId++
@@ -398,7 +442,8 @@ function tunnel({ m, u, h, body }, port, acks = true) {
   }
   const failed = (msg) => { if (over) return; over = true; streams.delete(id); port.postMessage({ error: msg }) }
   streams.set(id, {
-    onHead: (head) => port.postMessage({ head: { s: head.s, h: head.h } }),
+    // A redirect within what's shared (from its root) stays under this page's own path.
+    onHead: (head) => port.postMessage({ head: { s: head.s, h: (head.h || []).map(([n, v]) => (String(n).toLowerCase() === 'location' && /^\/(?![/\\])/.test(String(v)) && !String(v).startsWith(`${prefix}/`) ? [n, `${prefix}${v}`] : [n, v])) } }),
     onChunk: (c) => { if (over) return; const n = c.byteLength; port.postMessage({ chunk: c.buffer }, [c.buffer]); if (!acks) grant(n) },
     onEnd: () => { over = true; port.postMessage({ end: true }) },
     onError: failed,
@@ -406,7 +451,7 @@ function tunnel({ m, u, h, body }, port, acks = true) {
   })
   ;(async () => {
     const b = body ? new Uint8Array(body) : null
-    await send(K.REQ, id, { m, u: `/c${String(u).slice(prefix.length)}`, h, body: !!b, w: WINDOW })
+    await send(K.REQ, id, { m: String(m || 'GET').slice(0, 10), u: `/c${String(u).slice(prefix.length)}`, h: Array.isArray(h) ? h.slice(0, 64) : [], body: !!b, w: WINDOW })
     if (b) {
       for (let o = 0; o < b.byteLength; o += CHUNK) await send(K.BODY, id, b.subarray(o, o + CHUNK))
       await send(K.END, id)

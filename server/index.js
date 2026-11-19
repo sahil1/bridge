@@ -2917,18 +2917,21 @@ app.get('/api/relay/pagecheck', wrap((req) => relaycheck.ask({ now: req.query.no
 // through the relay. Made, seen and stopped here or on any of your devices (a phone too); what the
 // link's page asks never comes here (relay.js answers it with shares.js alone).
 shares.use({
-  shareAt: () => relay.shareAt(), owner: () => settings.cleanName(cfg.name), computer: () => relay.thisName(),
+  shareAt: () => relay.shareAt(), ready: () => relay.sharesReady(), owner: () => settings.cleanName(cfg.name), computer: () => relay.thisName(),
   isDevPort, ownPorts: () => [cfg.port, cfg.port + 1, ...pages.ports(), ...previewPorts.portsOpen()],
   endViewers: (id, said) => relay.endViewers(id, said), viewersOf: (id) => relay.viewersOf(id),
   notify: (note) => notify.send(note).catch(() => {}),
-  sendCode: (email, code) => account.shareCode(email, code), canEmail: () => account.status().signedIn === true,
+  namePeople: (link, emails, until) => account.sharePeople(link, emails, until), sendCode: (link, email, code) => account.shareCode(link, email, code), canEmail: () => account.status().signedIn === true,
   changed: () => { for (const c of clients) c.write('event: shares\ndata: {}\n\n') },
 })
-app.get('/api/shares', wrap(() => shares.list()))
+// A link itself (its secret) only to this computer and the device that made it: another of your
+// devices sees each link, who opened it, and Stop Sharing.
+const askerOf = (req) => ({ here: fromHere(req), device: typeof req.headers['x-bridge-relay'] === 'string' ? req.headers['x-bridge-relay'] : null })
+app.get('/api/shares', wrap((req) => shares.list(askerOf(req))))
 app.post('/api/shares', wrap(async (req) => {
   const b = req.body || {}
   const by = relay.deviceOf(req.headers['x-bridge-relay'])?.name || null
-  const o = { kind: String(b.kind || ''), who: b.who, password: b.password, emails: b.emails, lasts: b.lasts, title: b.title, by }
+  const o = { kind: String(b.kind || ''), who: b.who, password: b.password, emails: b.emails, lasts: b.lasts, title: b.title, by, byDevice: askerOf(req).device, here: askerOf(req).here }
   if (o.kind === 'app') {
     // An app one of this agent's terminals serves (the Preview tab's list); its folder, for you.
     const p = ((await rt.fleet().catch(() => null))?.panes || []).find((x) => x.paneId === String(b.pane || ''))
@@ -2940,8 +2943,8 @@ app.post('/api/shares', wrap(async (req) => {
   }
   return shares.create(o)
 }))
-app.post('/api/shares/:id/stop', wrap((req) => shares.stop(String(req.params.id))))
-app.delete('/api/shares/:id', wrap((req) => shares.forget(String(req.params.id))))
+app.post('/api/shares/:id/stop', wrap((req) => shares.stop(String(req.params.id), 'stopped', askerOf(req))))
+app.delete('/api/shares/:id', wrap((req) => shares.forget(String(req.params.id), askerOf(req))))
 
 // ---------- Your other devices (machines.js) ----------
 // Linking and unlinking: you, here or on a paired phone. Another device can link back, ask for a

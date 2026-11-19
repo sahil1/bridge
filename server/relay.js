@@ -61,6 +61,7 @@ import { bundle } from '../relay/build.js'
 import { computerWelcome, computerShareWelcome, newPairCode, splitCode, formatCode, plainFrame, readPlain, b64u, boxId, K, pack, unpack, json, utf8, CHUNK, moreOf } from '../relay/web/link.js'
 import * as inbox from './inbox.js'
 import * as shares from './shares.js'
+import { LIMITS as SHARE_LIMITS } from '../shared/shares.js'
 import { authHeaders, localKey } from './apitoken.js'
 import { plainName } from '../shared/remote.js'
 
@@ -414,6 +415,13 @@ const clear = async (conn) => { while (conn.via.buffered() > BULK && conn.sessio
 // An answer whose reader stopped taking it in (a video left paused) is let go after this long, so a
 // phone that went away without a word doesn't keep a file open here for good.
 const IDLE_MS = Number(process.env.BRIDGE_LINK_IDLE_MS) || 10 * 60000
+// ...and a Share Link's page, much sooner: it holds a file open here only while it reads.
+const VIEW_IDLE_MS = Number(process.env.BRIDGE_VIEW_IDLE_MS) || 30000
+// What a Share Link's page may send: a few small questions before it's let in, and after, only to an
+// app, and never more than this held here at once.
+const VIEW_ASK_BYTES = 8 * 1024
+const VIEW_BODY_BYTES = 10 * 1024 * 1024
+const VIEW_HELD_BYTES = 16 * 1024 * 1024
 
 // ---------- one phone ----------
 const DROP = new Set(['host', 'connection', 'origin', 'referer', 'cookie', 'content-length', 'accept-encoding', 'upgrade', 'keep-alive', 'transfer-encoding'])
@@ -441,17 +449,8 @@ const cleanName = (s) => plainName(s)
 const HELLO_WINDOW = 10000
 const HELLO_MAX = 60
 const STRANGER_MAX = 12
-// Share Links' pages (people opening a link you gave them) have room of their own, so they never
-// crowd out your phones, nor your phones them.
-const VIEW_MAX = 40
-const hellos = { all: [], strangers: [], views: [] }
-function viewRoom() {
-  const now = Date.now()
-  while (hellos.views.length && hellos.views[0] < now - HELLO_WINDOW) hellos.views.shift()
-  if (hellos.views.length >= VIEW_MAX) return false
-  hellos.views.push(now)
-  return true
-}
+// (Share Links' pages are counted by link, apart from these: shares.js helloRoom.)
+const hellos = { all: [], strangers: [] }
 function helloRoom(known) {
   const now = Date.now()
   for (const q of [hellos.all, hellos.strangers]) while (q.length && q[0] < now - HELLO_WINDOW) q.shift()
@@ -461,12 +460,13 @@ function helloRoom(known) {
   return true
 }
 
-// What the relay says with a new connection to its share address (a Share Link's page; a relay from
-// before says nothing): the country Cloudflare says it's from, kept only to show the link's owner (the
-// relay could say anything here). What the connection is, its hello says, and that's what counts.
+// What the relay says with a new connection to its share address (a Share Link's page): that it came
+// there (view), and the country Cloudflare says it's from, kept only to show the link's owner (the
+// relay could say anything here). A Share Link's hello is taken only on such a connection, and a
+// phone's never is.
 function openedAs(b) {
   if (b.byteLength <= 5) return {}
-  try { const o = JSON.parse(Buffer.from(b.buffer, b.byteOffset + 5, b.byteLength - 5).toString('utf8')); return { country: typeof o?.c === 'string' && /^[A-Z]{2}$/.test(o.c) ? o.c : null } } catch { return {} }
+  try { const o = JSON.parse(Buffer.from(b.buffer, b.byteOffset + 5, b.byteLength - 5).toString('utf8')); return { view: o?.view === 1, country: typeof o?.c === 'string' && /^[A-Z]{2}$/.test(o.c) ? o.c : null } } catch { return {} }
 }
 
 class Conn {
@@ -533,7 +533,11 @@ class Conn {
   async hello(buf) {
     let msg
     try { msg = readPlain(buf) } catch { msg = null }
-    if (msg?.view === 1) return this.viewHello(msg)
+    if (msg?.view === 1 || this.as.view) {
+      if (msg?.view === 1 && this.as.view) return this.viewHello(msg)
+      this.close()
+      return
+    }
     const devices = conf.devices || []
     // Hellos are counted: past a few a second (fewer from keys not paired here), the rest are let go
     // unanswered, so no one can keep this computer working out keys for them.
@@ -611,34 +615,63 @@ class Conn {
 
   // ---------- a Share Link's page ----------
   // It proves it holds a link's secret (and this computer that it does too): a session for that link
-  // alone, or turned away in the clear (no such link, or one that ended, or too many at once, said
-  // so the page tries again in a while). Counted, so no one can keep this computer working out keys.
+  // alone, or turned away in the clear. A link there's no such link of (or one that ended) is turned
+  // away first, with no work done and nothing counted; then each link has its own count of pages
+  // opening it, so pages opening one never keep another's out, nor your phones.
   async viewHello(msg) {
-    const r = !viewRoom() ? { refuse: 'busy' } : await computerShareWelcome(await key(), msg, (id) => shares.secretOf(id))
-    if (!r.refuse && !shares.room(msg.s)) r.refuse = 'busy'
+    const id = typeof msg?.s === 'string' ? msg.s : ''
+    const r = !shares.exists(id) ? { refuse: 'no-share' } : !shares.helloRoom(id) || !shares.room(id) ? { refuse: 'busy' } : await computerShareWelcome(await key(), msg, (x) => shares.secretOf(x))
     if (r.refuse) {
       this.via.send(OP.DATA, this.id, plainFrame({ t: 'refuse', why: r.refuse }))
       setTimeout(() => this.close(), 500)
       return
     }
-    this.view = shares.viewer(msg.s, { country: this.as.country })
+    // Vouched for to the relay (so on Bridge AI's relay it counts as this account's) only once it's let
+    // in: until then it's a stranger there, with a stranger's small allowance.
+    this.view = shares.viewer(id, { country: this.as.country, onLetIn: () => { if (!this.vouched) { this.vouched = true; this.via.send(OP.OK, this.id) } } })
     this.via.send(OP.DATA, this.id, plainFrame(r.welcome))
     this.session = r.session
   }
 
-  // A sealed record from it. The first shows it holds the link (the relay is told it's ours, so it's
-  // never dropped as a stranger's, and on Bridge AI's relay it counts against the account); then its
-  // requests, each answered by shares.js.
+  // A sealed record from it: its requests, each answered by shares.js, within what a page may have
+  // on its way at once (LIMITS.streams) and may send (nothing but small questions before it's let in;
+  // after, a body only to an app). One that asks too fast for too long, or pings without end, is let go.
   viewRecord(kind, id, body) {
-    if (!this.proven) { this.proven = true; clearTimeout(this.timer); this.via.send(OP.OK, this.id) }
+    if (!this.proven) { this.proven = true; clearTimeout(this.timer) }
     if (this.gone) return
-    if (kind === K.PING) return this.send(K.PONG, id)
-    if (kind === K.REQ) return this.request(id, json(body))
-    if (kind === K.BODY) { const s = this.streams.get(id); if (s?.body) { s.size = (s.size || 0) + body.byteLength; if (s.size > 16 * 1024 * 1024) { s.abort?.abort(); this.streams.delete(id); return this.send(K.ERR, id, utf8('Too big')) } s.body.push(Buffer.from(body)) } return }
-    if (kind === K.END) { const s = this.streams.get(id); if (s?.run) s.run(); return }
+    if (kind === K.PING) {
+      const t = Date.now()
+      this.pings = (this.pings || []).filter((x) => x > t - 10000)
+      this.pings.push(t)
+      if (this.pings.length > 5) return this.close()
+      return this.send(K.PONG, id)
+    }
+    if (kind === K.REQ) {
+      const r = json(body) || {}
+      const ask = String(r.u || '').startsWith('/.share/')
+      const linkStreams = viewing(this.view.id).reduce((n, c) => n + c.streams.size, 0)
+      if (this.streams.size >= SHARE_LIMITS.streams.page || linkStreams >= SHARE_LIMITS.streams.link) return this.send(K.ERR, id, utf8('Too many at once. Try again in a moment.'))
+      if (r.body && !ask && (!this.view.passed || !shares.takesBodies(this.view.id))) return this.send(K.ERR, id, utf8(this.view.passed ? 'What\'s shared here can only be looked at.' : 'Not let in yet.'))
+      this.request(id, r)
+      const s = this.streams.get(id)
+      if (s) s.cap = ask ? VIEW_ASK_BYTES : VIEW_BODY_BYTES
+      if (this.view.rejects > 50) this.close()
+      return
+    }
+    if (kind === K.BODY) {
+      const s = this.streams.get(id)
+      if (!s?.body) return
+      s.size = (s.size || 0) + body.byteLength
+      const held = [...this.streams.values()].reduce((n, x) => n + (x.body && !x.ran ? x.size || 0 : 0), 0)
+      if (s.size > (s.cap ?? VIEW_ASK_BYTES) || held > VIEW_HELD_BYTES) { s.abort?.abort(); this.streams.delete(id); return this.send(K.ERR, id, utf8('That\'s more than a link takes at once.')) }
+      s.body.push(Buffer.from(body))
+      return
+    }
+    if (kind === K.END) { const s = this.streams.get(id); if (s?.run) { s.ran = true; s.run() } return }
     if (kind === K.CANCEL) { this.streams.get(id)?.abort?.abort(); this.streams.delete(id); return }
     if (kind === K.MORE) { this.streams.get(id)?.more?.(moreOf(body)); return }
     if (kind === K.WS_OPEN) {
+      if (!this.view.passed || this.streams.size >= SHARE_LIMITS.streams.page) return this.send(K.WS_CLOSE, id, { c: 1008, r: 'Not now' })
       const sock = {
         opened: () => this.send(K.WS_OPENED, id),
         send: (t) => this.send(K.WS_MSG, id, Buffer.concat([Buffer.from([1]), Buffer.from(String(t))])),
@@ -754,7 +787,7 @@ class Conn {
     abort.signal.addEventListener('abort', () => wake?.())
     const room = async () => {
       while (credit <= 0 && !abort.signal.aborted) {
-        const idle = setTimeout(() => { s.idle = true; abort.abort() }, IDLE_MS)
+        const idle = setTimeout(() => { s.idle = true; abort.abort() }, this.view ? VIEW_IDLE_MS : IDLE_MS)
         await new Promise((r) => { wake = r })
         clearTimeout(idle)
         wake = null
@@ -784,9 +817,17 @@ class Conn {
         const whole = !zip && !res.headers.get('content-encoding')
         await this.send(K.HEAD, sid, { s: res.status, h: [...res.headers].filter(([k]) => !DROP_BACK.has(k) || (k === 'content-length' && whole)), ...(zip ? { z: 'gzip' } : {}) })
         if (res.body) {
+          // Read a piece only when it can go, and let go of the answer the moment it's called off (the
+          // reader cancelled at once, never another piece pulled after).
+          const src = zip ? pipeline(Readable.fromWeb(res.body), zlib.createGzip(), () => {})[Symbol.asyncIterator]() : res.body.getReader()
+          const next = () => (zip ? src.next() : src.read())
+          const stop = () => { try { const p = zip ? src.return?.() : src.cancel(); p?.catch?.(() => {}) } catch { /* let go already */ } }
+          abort.signal.addEventListener('abort', stop, { once: true })
+          if (abort.signal.aborted) stop()
           let sent = 0
-          for await (const chunk of zip ? pipeline(Readable.fromWeb(res.body), zlib.createGzip(), () => {}) : res.body) {
-            if (abort.signal.aborted) break
+          while (!abort.signal.aborted) {
+            const { value: chunk, done } = await next()
+            if (done || abort.signal.aborted) break
             for (let o = 0; o < chunk.byteLength && !abort.signal.aborted;) {
               const n = Math.min(CHUNK, chunk.byteLength - o, await room())
               if (abort.signal.aborted) break
@@ -799,7 +840,6 @@ class Conn {
           }
         }
         if (!abort.signal.aborted) await this.send(K.END, sid)
-        else res.body?.cancel?.().catch(() => {})
       } catch (e) {
         if (!abort.signal.aborted) await this.send(K.ERR, sid, utf8(e.message))
       }
@@ -882,21 +922,38 @@ export const hostPublic = async () => b64u((await key()).public)
 // ---------- Share Links ----------
 // Where this computer's links open (shares.js), never the phone page's address: on Bridge AI's relay,
 // an address of each link's own (<id>-<8 letters>.<domain>), so each is a site of its own to a
-// browser; on a relay of your own, the Worker deployed beside it (<script>-share, deployWith). at():
-// a new link's address. A relay of your own from before has none until it's updated (why: 'update');
-// no relay at all, why: 'relay'.
+// browser, and once the relay has its share domain (shareDomain, from /_relay/health), what each link
+// shows at <id>-<8 letters>.<share domain>, a site of its own apart from the page holding its secret;
+// on a relay of your own, the Worker deployed beside it (<script>-share, deployWith), with no address
+// apart for what's shown. at(): a new link's { view, content, hosted }. A relay of your own from
+// before has none until it's updated (why: 'update'); no relay at all, why: 'relay'.
 const B32 = 'abcdefghijklmnopqrstuvwxyz234567'
 let opensShares = null // whether Bridge AI's relay says it opens Share Links (/_relay/health): null until asked
-async function askShares() { if (conf.hosted) { const h = (await relayGet(`${conf.url}/_relay/health`, 8000))?.json; if (h?.ok) opensShares = h.share === 1 } }
+let shareDomain = null // ...and its share domain
+let asking = null
+function askShares() {
+  if (!conf.hosted) return Promise.resolve()
+  return (asking ||= (async () => {
+    const h = (await relayGet(`${conf.url}/_relay/health`, 8000))?.json
+    if (h?.ok) { opensShares = h.share === 1; shareDomain = typeof h.shareDomain === 'string' && /^[a-z0-9.-]{3,200}$/.test(h.shareDomain) ? h.shareDomain : null }
+  })().finally(() => { asking = null }))
+}
+export const sharesReady = () => (conf.hosted && opensShares === null ? askShares() : Promise.resolve())
 export function shareAt() {
   if (!conf.url || !conf.token) return { why: 'relay' }
   if (conf.hosted && opensShares === false) return { why: 'hosted' }
   if (conf.hosted) {
     const u = new URL(conf.url)
     const [id, ...rest] = u.host.split('.')
-    return { at: () => `${u.protocol}//${id}-${[...randomBytes(8)].map((x) => B32[x & 31]).join('')}.${rest.join('.')}` }
+    return {
+      content: !!shareDomain,
+      at: () => {
+        const label = `${id}-${[...randomBytes(8)].map((x) => B32[x & 31]).join('')}`
+        return { view: `${u.protocol}//${label}.${rest.join('.')}`, content: shareDomain ? `${u.protocol}//${label}.${shareDomain}${u.port ? `:${u.port}` : ''}` : null, hosted: true }
+      },
+    }
   }
-  return conf.shareUrl ? { at: () => conf.shareUrl.replace(/\/$/, '') } : { why: 'update', error: conf.shareError || null }
+  return conf.shareUrl ? { content: false, at: () => ({ view: conf.shareUrl.replace(/\/$/, ''), content: null, hosted: false }) } : { why: 'update', error: conf.shareError || null }
 }
 // The pages open on a link: how many, and each ended (told why, sealed).
 const viewing = (id) => [...conns.values(), ...prior.conns.values()].filter((c) => c.view?.id === id && c.session && !c.gone)

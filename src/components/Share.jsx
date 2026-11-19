@@ -22,7 +22,7 @@ const WHAT = { opened: tx('opened it'), 'wrong password': tx('typed a wrong pass
 // The limits, said where a link is made and in Settings › Sharing.
 export function limitsText(l) {
   if (!l) return ''
-  return t('Up to {shares} links at once, each open on {viewers} devices at once. A file up to {size} GB. A password locks the link for {minutes} minutes after {tries} wrong tries; a code lasts {codeMinutes} minutes.', { shares: l.shares, viewers: l.viewers, size: l.fileMB / 1024, minutes: l.password.lockMinutes, tries: l.password.tries, codeMinutes: l.code.minutes })
+  return t('Up to {shares} links at once, each open on {viewers} devices at once. A file up to {size} GB. {tries} wrong passwords in a row lock that page out, and {linkTries} lock the link for {minutes} minutes; a code lasts {codeMinutes} minutes.', { shares: l.shares, viewers: l.viewers, size: l.fileMB / 1024, minutes: l.password.lockMinutes, tries: l.password.tries, linkTries: l.password.linkTries, codeMinutes: l.code.minutes })
 }
 
 // what: { kind: 'file' | 'folder' | 'doc' | 'app', root, path, name, port, pane }, on the computer this
@@ -56,8 +56,12 @@ export function ShareDialog({ what, onClose }) {
     try { await call(`/shares/${encodeURIComponent(made.id)}/stop`, { method: 'POST' }); onClose() } catch (x) { setErr(x.message); setBusy(false) }
   }
   const html = what.kind === 'file' && /\.html?$/i.test(what.name || '')
+  // Through a relay with no address apart for what's shown (a relay of your own), nothing shown runs
+  // scripts: no sites, no apps (server/shares.js says so too).
+  const scripts = !info || info.can.scripts !== false
+  const noApp = what.kind === 'app' && !scripts
   const about = what.kind === 'app' ? null
-    : what.kind === 'folder' ? t('Its files are shared read-only, as a site: its index.html opens first, or a list of what\'s in it. Hidden files (names starting with a dot) aren\'t shared.')
+    : what.kind === 'folder' ? (scripts ? t('Its files are shared read-only, as a site: its index.html opens first, or a list of what\'s in it. Hidden files (names starting with a dot) aren\'t shared.') : t('Its files are shared read-only, with nothing in them run. Hidden files (names starting with a dot) aren\'t shared. This relay can\'t share a folder with web pages in it (a site).'))
       : what.kind === 'doc' ? t('View-only, and always its latest version: what you change shows on their screen as you save.')
         : html ? t('Only this file is shared, not what it links to. To share the pictures and pages it links to as well, share its folder.')
           : t('Only this file is shared, read-only.')
@@ -74,7 +78,13 @@ export function ShareDialog({ what, onClose }) {
             </div>
           </div>
         )}
-        {!made && (!info || info.can.ok) && (
+        {!made && info?.can.ok && noApp && (
+          <div className="share-body">
+            <p className="st-note warn" role="alert"><Icon name="alert" size={13} /> {t('This relay can\'t share apps: an app\'s scripts need an address of their own, apart from the page holding the link, which this relay doesn\'t have.')}</p>
+            <div className="modal-foot"><button type="button" className="btn small primary" onClick={onClose}>{t('Close')}</button></div>
+          </div>
+        )}
+        {!made && (!info || info.can.ok) && !noApp && (
           <form className="share-body" onSubmit={create}>
             <p className="muted small">{t('A link for people outside your devices. It goes through your relay, end-to-end encrypted, and works while this computer is on.')}</p>
             {about && <p className="muted small">{about}</p>}
@@ -92,7 +102,7 @@ export function ShareDialog({ what, onClose }) {
               {who === 'people' && (
                 <div className="share-sub">
                   <textarea className="st-input" rows={2} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder={t('Their emails, separated by commas')} aria-label={t('Their emails, separated by commas')} spellCheck={false} />
-                  <span className="muted small">{info?.email ? t('Each gets a 6-digit code by email before anything shows, sent by Bold Bridge from your account.') : t('Each asks for a 6-digit code before anything shows. This computer isn\'t signed in to Bold Bridge, so your devices get each code to pass on.')}</span>
+                  <span className="muted small">{info?.email ? t('Each gets an 8-digit code by email before anything shows, sent by Bold Bridge from your account.') : t('Each asks for an 8-digit code before anything shows. This computer isn\'t signed in to Bold Bridge, so your devices get each code to pass on.')}</span>
                 </div>
               )}
             </fieldset>
@@ -163,11 +173,15 @@ export function SharesList() {
           {s.locked && <> · {t('Locked until {when} after wrong passwords', { when: when(s.locked) })}</>}
           {s.by && <> · {t('Made on {device}', { device: s.by })}</>}
         </div>
-        {s.link && (
+        {!s.ended && (s.link || s.hidden) && (
           <div className="st-row share-row-link">
-            <input className="st-input mono" readOnly value={s.link} aria-label={t('The link')} onFocus={(e) => e.target.select()} />
-            <CopyButton text={s.link} label={t('Copy Link')} />
-            <button type="button" className="ghost-btn" onClick={() => setQr(qr === s.id ? null : s.id)} aria-pressed={qr === s.id}>{t('QR Code')}</button>
+            {s.link ? (
+              <>
+                <input className="st-input mono" readOnly value={s.link} aria-label={t('The link')} onFocus={(e) => e.target.select()} />
+                <CopyButton text={s.link} label={t('Copy Link')} />
+                <button type="button" className="ghost-btn" onClick={() => setQr(qr === s.id ? null : s.id)} aria-pressed={qr === s.id}>{t('QR Code')}</button>
+              </>
+            ) : <span className="muted small">{t('The link itself shows only on the computer sharing it and on the device that made it.')}</span>}
             <button type="button" className="ghost-btn share-stop" onClick={() => act(() => api(`/shares/${encodeURIComponent(s.id)}/stop`, { method: 'POST' }))}>{t('Stop Sharing')}</button>
           </div>
         )}

@@ -39,9 +39,17 @@ this:
   and from every other link. That address serves only the page a link opens (`share.html`,
   `share.js`, `share-sw.js`, `link.js`) and its connection, `/_relay/view`, which goes to the
   computer's Hub; never the phone page, `/_relay/host` or `/_relay/link`, and the computer's own
-  address never serves the link's page. A link's page is a stranger to the relay until the computer
-  vouches for it (once it has proved it holds the link's secret, which never reaches the relay); then
-  what it carries counts against the account, as a phone's does. Each computer has `MAX_VIEWERS`
+  address never serves the link's page. With a share domain (`SHARE_DOMAIN`), what a link shows is
+  at `https://<id>-<8 letters>.<share domain>`, a site apart from the link's page (which alone holds
+  its secret and its connection): that address serves only `/_relay/frame` (which only the link's
+  own page may frame), `share-frame.js` and `share-sw.js`, and no connection at all. The share
+  domain must be a registrable domain of its own on the Public Suffix List, never a name under
+  `HOSTED_DOMAIN`, so no link's content shares a site with a phone's page or another link's. Until
+  it's set, `/_relay/health` doesn't say one and computers share no site or app here (only files,
+  folders without web pages and Studio documents, shown with scripts off). A link's page is a
+  stranger to the relay until the computer vouches for it (once it's let in: the link's secret
+  proved, and its password or code given); then what it carries counts against the account, within
+  what links may carry apart from the phones (`VIEW_*`). Each computer has `MAX_VIEWERS`
   such pages open at once, counted apart from its phones, so people viewing its links never crowd
   out its phones. The relay tells the computer the country Cloudflare says a page is in, and nothing
   else about it.
@@ -126,6 +134,13 @@ belongs to the relay.
   default) covers `boldbridge.app` and `*.boldbridge.app`; carry on while it goes Active (often 5 to
   15 minutes). Edge Certificates lists both names once it is. (Nothing goes to an origin, so the
   SSL/TLS mode doesn't matter.)
+- [ ] **The share domain** (owner), for Share Links of sites and apps: a second domain of its own
+  (not a name under boldbridge.app or boldbridge.ai), added to Cloudflare as above with the same
+  two proxied records, then listed on the Public Suffix List (a pull request to
+  github.com/publicsuffix/list, in its private section, which takes weeks; browsers pick it up with
+  their next releases). Then a route for `*.<share domain>/*` in wrangler.hosted.toml and
+  `SHARE_DOMAIN` in `[vars]`. Until then, links work for files, folders without web pages and
+  Studio documents.
 - [ ] **DNSSEC and the registrar lock** (owner): boldbridge.app › DNS › Settings › DNSSEC › Enable.
   With Cloudflare Registrar the DS record goes to the registry by itself; bought elsewhere, add the
   DS record it shows at the registrar. And the registrar lock on (Cloudflare Registrar: Domain
@@ -248,6 +263,11 @@ per computer unless it says it's per account or for the whole relay.
 | `HOSTED_OFF` | `0` | The kill switch (below). |
 | `MAX_PHONES` | `16` | Connections to one computer at once: the same as a personal relay. Strangers who haven't paired make room for paired phones. |
 | `MAX_VIEWERS` | `32` | Share Link pages open on one computer at once, apart from its phones (each page is a connection). Pages its computer hasn't vouched for make room for those it has; full, one more is told so and tries again in a minute. |
+| `SHARE_DOMAIN` | | What Share Links show, at `<id>-<8 letters>.<share domain>`: a registrable domain of its own on the Public Suffix List (Going live). Unset, computers share no sites or apps here. |
+| `VIEW_WINDOW_MESSAGES` | `60000` | Per computer, in its account's window: messages all its Share Links' pages may carry, so people viewing links never use up what the phones need. |
+| `VIEW_LINK_WINDOW_MESSAGES` | `30000` | The same for any one link. |
+| `VIEW_MESSAGES_PER_SECOND` | `20` | One link's page, once let in: messages a second on average, with `VIEW_MESSAGE_BURST` at once (a site's first load is a few hundred). Past it, that page is told to wait and closed. |
+| `VIEW_MESSAGE_BURST` | `400` | How many may come at once before `VIEW_MESSAGES_PER_SECOND` applies. |
 | `MAX_MESSAGE_KB` | `256` | One message. Bridge AI's largest is 192 KB (a piece of a big file) plus a little; notes for an offline computer are 64 KB at most. |
 | `MESSAGES_PER_SECOND` | `200` | Incoming messages a second, on average, with `MESSAGE_BURST` at once. A phone watching an agent's terminal, the busiest normal use, sends and gets about 4 a second; opening the app for the first time is about 150 in a few seconds. This only stops floods. |
 | `MESSAGE_BURST` | `2000` | How many may come at once before `MESSAGES_PER_SECOND` applies. |
@@ -296,8 +316,8 @@ vouched for has a small allowance of its own (What happens at a limit) and costs
 nothing. An account at its limits every week costs about $0.06 a month past what's included; a
 typical one (an hour or two of phone use a day) under a cent. They're generous on purpose: nobody
 should meet one in normal use. A Share Link's page counts as a phone does once its computer vouches
-for it, within the same allowance, so links never add to what an account may use, nor to the bill's
-bounds below.
+for it (when it's let in), within the same allowance and within what links may carry (`VIEW_*`), so
+links never add to what an account may use, nor to the bill's bounds below, nor use up its phones'.
 
 Per-account limits alone don't bound the bill; with `MAX_ACCOUNTS` they do, and
 `RELAY_DAILY_REQUESTS` bounds it if `MAX_ACCOUNTS` is raised (Cost).

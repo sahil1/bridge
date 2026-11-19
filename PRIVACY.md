@@ -615,19 +615,25 @@ that it's the project's Cloudflare account.
 A Share Link gives someone outside your devices one file, folder, Studio document or app from your
 computer (Settings › Sharing lists them). It goes through your relay (your own, or Bridge AI's), end
 to end encrypted the same way your phone's link is: the link's secret is in the part of the link
-after `#`, which browsers never send, so the relay passes on bytes it can't read. As with your
+after `#`, which browsers never send, so the relay passes on bytes it can't read (the page takes it
+out of the address once it has read it, and keeps it only in memory). As with your
 phone's page in a browser, the page the link opens comes from the relay, so this rests on the relay
 serving it unchanged (on Bridge AI's relay, your computer checks it with the phone's page). The
 relay, and Cloudflare, see what they see of any connection: the viewer's IP address, when they
 connect and how much passes, and the link's id (made from its secret, not the secret). The relay
 tells your computer the country Cloudflare says a viewer is in, and nothing else about them. On
-Bridge AI's relay, what a link carries counts towards your account's allowance there.
+Bridge AI's relay, once a viewer is let in (the password or code given), what a link carries counts
+towards your account's allowance there, and what a link shows is at an address of its own under
+Bridge AI's share domain.
 
-For a link that names people, a person proves their email with a 6-digit code first. With your
+For a link that names people, a person proves their email with an 8-digit code first. With your
 computer signed in to your Bold Bridge account, the accounts service emails it to them from your
-account: their email address and the code go to it, never what's shared, and it keeps neither (it
-counts the codes sent to each address for an hour, as a hash, to limit them). Otherwise your
-devices get the code in a notification, to pass on yourself.
+account. When the link is made, your computer tells it the emails the link names, which it keeps
+only as hashes (keyed with a secret of its own, with the link's id) until the link ends, so it sends
+codes to those and nobody else. For each code, their email address and the code go to it, never
+what's shared, and it keeps neither (it counts the codes sent to each address for an hour, as a
+keyed hash, to limit them). Otherwise your devices get the code in a notification, to pass on
+yourself.
 
 On your computer, in `~/.bridge-ai/shares.json` (only you can read it): each link, its secret until
 it ends, a hash of its password, the emails it names, and each open and try (when, the country, and
