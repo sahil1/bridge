@@ -575,27 +575,28 @@ export function list() {
   }
 }
 
-export function stop(id) {
+// h: for a device of this computer's, which (machines.js forDevice), said to the other end too.
+export function stop(id, h = []) {
   const j = jobOf(id)
   if (!j) throw fail('No such copy', { status: 404 })
   const ctl = running.get(id)
   if (ctl) { ctl.stopped = true; ctl.cancel?.(); ctl.wake?.() } else if (['going', 'waiting', 'queued'].includes(j.state)) j.state = 'stopped'
   // What came so far is thrown away, there or here.
-  if (j.kind === 'push' && j.remote) machines.exchange(j.machine, { method: 'DELETE', u: `/api/transfers/in/${enc(j.remote)}`, ms: 8000 }).then((r) => r.json()).catch(() => {})
+  if (j.kind === 'push' && j.remote) machines.exchange(j.machine, { method: 'DELETE', u: `/api/transfers/in/${enc(j.remote)}`, headers: h, ms: 8000 }).then((r) => r.json()).catch(() => {})
   if (j.kind === 'pull' && j.inc) { const inc = j.inc; setTimeout(() => drop(inc, { id: 'here' }).catch(() => {}), 200) }
   for (const k of ['inc', 'remote', 'list', 'mtimes']) delete j[k]
   Object.assign(j, { got: 0, key: newId() })
   saveNow()
   return shownJob(j)
 }
-export function retry(id) {
+export function retry(id, h = []) {
   const j = jobOf(id)
   if (!j) throw fail('No such copy', { status: 404 })
   if (running.has(id) || j.state === 'done') return shownJob(j)
   // It changed where it was, or was stopped: from the top, as a new copy (what came of the old
   // one is let go). Otherwise from where it got to.
   if (j.code === 'changed' || j.state === 'stopped' || j.code === 'gone') {
-    if (j.kind === 'push' && j.remote) machines.exchange(j.machine, { method: 'DELETE', u: `/api/transfers/in/${enc(j.remote)}`, ms: 8000 }).then((r) => r.json()).catch(() => {})
+    if (j.kind === 'push' && j.remote) machines.exchange(j.machine, { method: 'DELETE', u: `/api/transfers/in/${enc(j.remote)}`, headers: h, ms: 8000 }).then((r) => r.json()).catch(() => {})
     if (j.kind === 'pull' && j.inc) drop(j.inc, { id: 'here' }).catch(() => {})
     for (const k of ['inc', 'remote', 'list', 'mtimes']) delete j[k]
     Object.assign(j, { key: newId(), got: 0 })

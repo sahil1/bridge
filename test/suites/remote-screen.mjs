@@ -593,6 +593,7 @@ try {
     await tbh.request('GET', `/m/${S.id}/api/fleet`)
     const tbS = await until(async () => (await studio.api('/remote')).access.devices.find((d) => d.name === 'Tablet' && d.through), 6000, 200)
     if (tbS && !tbS.allowed) await studio.api('/remote/devices', { id: tbS.id, allowed: true })
+    await laptop.api(`/needs-you?fresh=${S.id}`) // (Laptop hears from Studio that it's let in there)
     const sees = (s) => s.sessions.find((x) => x.by.name === 'Phone')
     // Nothing set up anywhere: never silent all the same.
     const v0 = ph.socket('/api/remote/view?source=screen:')

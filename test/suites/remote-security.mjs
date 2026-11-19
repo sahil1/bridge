@@ -234,7 +234,9 @@ try {
   // ---------- Laptop, linked; Phone and Phone2 paired with Studio, Pocket with Laptop ----------
   const rb = await startRelay('sec-laptop')
   relays.push(rb)
-  const laptop = await kitWith('Laptop', rb, { BRIDGE_TEST_SCREEN: 'fake' })
+  const pushedL = path.join(TEST, '.out', `remote-security-push-laptop-${process.pid}.jsonl`)
+  fs.rmSync(pushedL, { force: true })
+  const laptop = await kitWith('Laptop', rb, { BRIDGE_TEST_SCREEN: 'fake', BRIDGE_TEST_PUSH: pushedL })
   ok(!!(await until(async () => (await studio.api('/relay')).online && (await laptop.api('/relay')).online, 20000)), 'each is connected to its own relay')
   await laptop.api('/machines', { link: `${ra.url} ${(await studio.api('/relay/pair', {})).pairing.code}` })
   const S = await until(async () => (await laptop.api('/machines')).machines.find((m) => m.name === 'Studio' && m.online), 30000, 300)
@@ -796,8 +798,48 @@ try {
     const rn = await pk.request('POST', `/api/machines/${S.id}/name`, { name: 'Renamed-From-Pocket' })
     const pv = await pk.request('POST', `/api/machines/${S.id}/preview`, { port: 5173 })
     ok(rn.status >= 400 && (await studio.api('/machines')).here.name === name0 && pv.status >= 400 && /hasn't let this device in/.test(pv.json?.error || ''), 'nor can it rename Studio through Laptop, or ask Studio for a preview: Studio is told which device asks', [rn.status, rn.json?.error, pv.status, pv.json?.error])
+    const snd = await pk.request('POST', '/api/alerts/sound', { on: false })
+    ok(snd.status === 200 && (await studio.api('/settings')).effective.alertSounds !== false, 'turning alert sounds off from it changes Laptop\'s, not Studio\'s', snd.status)
+    await laptop.api('/alerts/sound', { on: true })
+    // A session on Studio's screen meanwhile: Laptop's event feed and its notifications leave it out
+    // for Pocket, and keep it for Laptop itself.
+    const feedOf = async (headers) => {
+      const ac = new AbortController()
+      let got = ''
+      fetch(`${laptop.url}/api/events`, { headers: { accept: 'text/event-stream', authorization: `Bearer ${laptop.key}`, ...headers }, signal: ac.signal })
+        .then(async (r) => { for await (const c of r.body) got += Buffer.from(c).toString('utf8') }).catch(() => {})
+      await until(() => /event: screen\ndata: /.test(got), 5000, 50)
+      ac.abort()
+      const line = /event: screen\ndata: (.*)\n/.exec(got)?.[1]
+      return line ? JSON.parse(line).list : null
+    }
+    await pk.request('POST', '/api/push/subscribe', { subscription: { endpoint: `https://push.example/pocket-${Date.now()}`, keys: { p256dh: 'p', auth: 'a' } }, label: 'Pocket' })
+    const n0 = lines(pushedL).length
+    const v = ph.socket(V)
+    await through(v)
+    await until(async () => (await laptop.api('/remote/live')).list.some((x) => x.machine === S.id), 8000, 200)
+    const asPocket = await feedOf({ 'x-bridge-relay': POCKET })
+    const asLaptop = await feedOf({})
+    const live = (await pk.request('GET', '/api/remote/live')).json?.list || []
+    await sleep(1500)
+    const toPocket = lines(pushedL).slice(n0).filter((x) => x.device === POCKET)
+    ok(asPocket && !asPocket.some((x) => x.machine === S.id) && asLaptop?.some((x) => x.machine === S.id) && !live.some((x) => x.machine === S.id), 'a session on Studio\'s screen: not in Laptop\'s event feed or cards for Pocket; in Laptop\'s own', { pocket: asPocket?.length, laptop: asLaptop?.length })
+    ok(!toPocket.length, 'nor is Pocket notified of it through Laptop', toPocket.map((x) => x.note?.title))
+    await v.close()
+    await idle()
     await studio.api('/remote/devices', { id: entry.id, allowed: true })
     ok(!!(await until(async () => { await laptop.api(`/needs-you?fresh=${S.id}`); return seen(pk) }, 15000, 500)), 'let in again: shown again')
+    // A device new at Laptop that hasn't asked Studio anything yet: with Studio's guardrails set,
+    // Laptop shows it nothing of Studio until Studio lets it in.
+    const nu = over(await linkAs(rb.url, { code: (await laptop.api('/relay/pair', {})).pairing.code, name: 'Newcomer', about: { name: 'Newcomer' } }))
+    const nd = await until(async () => (await laptop.api('/remote')).access.devices.find((d) => d.name === 'Newcomer'), 8000, 200)
+    if (nd && !nd.allowed) await laptop.api('/remote/devices', { id: nd.id, allowed: true })
+    await laptop.api(`/needs-you?fresh=${S.id}`)
+    const before = (await nu.request('GET', '/api/agent-map?live=1')).json?.devices?.find((d) => d.id === S.id)
+    ok(before?.notLetIn && !before.agents.length, 'a device new at Laptop, never seen at Studio: Laptop shows it nothing of Studio while Studio has a guardrail', before && { notLetIn: before.notLetIn, agents: before.agents.length })
+    await letInVia(nu, 'Newcomer')
+    ok(!!(await until(async () => { await laptop.api(`/needs-you?fresh=${S.id}`); return seen(nu) }, 15000, 500)), 'let in at Studio: Studio\'s agents shown to it')
+    nu.stop()
   })
 
   await part('a device first seen through Laptop, Laptop too old to say which, and one kept out pairing again', async () => {

@@ -430,6 +430,12 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   // through it, by that computer's ids for them: it hides what it shows of this computer from those
   // (its summary of this one, machines.js).
   const outVia = (hop) => (hop ? Object.keys(conf.through).filter((k) => k.startsWith(`${hop}/`) && throughOut(k)).map((k) => k.slice(hop.length + 1)) : [])
+  // ...or, with a guardrail set here while this Beta Feature is on, the ones it lets in, and no
+  // others: one of that computer's devices not seen here yet would start New, so it's shown nothing
+  // of this computer until it's let in. { keepOut } or { letIn }, for that computer's summary.
+  const viaList = (hop) => (!hop ? { keepOut: [] } : trialOn() && guarded()
+    ? { letIn: Object.keys(conf.through).filter((k) => k.startsWith(`${hop}/`) && !throughOut(k)).map((k) => k.slice(hop.length + 1)) }
+    : { keepOut: outVia(hop) })
   // One not let in that asked for something here: when, for Needs You.
   const tried = new Map() // device id -> when
   const turnedAway = (id) => { tried.set(id, Date.now()) }
@@ -1105,7 +1111,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     return lock ? { code: 'locked', why: lockedWhy(lock.until), until: new Date(lock.until).toISOString() } : null
   }
 
-  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, setNotify, unlock, answer, allows, admits, shutFor, outVia, turnedAway, waiting, mayPass, mayPreview, stop, stopAll, endFrom, live, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, active: () => sessions.size }
+  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, setNotify, unlock, answer, allows, admits, shutFor, outVia, viaList, turnedAway, waiting, mayPass, mayPreview, stop, stopAll, endFrom, live, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, active: () => sessions.size }
 }
 
 // The test stand-in's screens: its main one, one beside it, a 5K one at twice its points (as a

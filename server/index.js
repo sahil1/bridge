@@ -222,8 +222,11 @@ const isDevPort = async (port) => {
 const machineOut = (m) => { const d = relay.status().devices.find((x) => x.kind === 'computer' && x.relay === m.relay); return !!d && !remote.admits(d.id) }
 const screenTell = makeTell({
   remote: () => remote, notify, machines, relay, pushDevices: () => push.devices(), out: machineOut,
-  onLive: (list) => { for (const c of clients) c.write(`event: screen\ndata: ${JSON.stringify({ list })}\n\n`) },
+  onLive: () => { for (const c of clients) c.write(`event: screen\ndata: ${JSON.stringify({ list: screensFor(c.bridgeDevice) })}\n\n`) },
 })
+// The screens being viewed, here and on your other computers (screentell.js), as one of this
+// computer's devices may see them: none on a computer that keeps it out (machines.js keptFrom).
+const screensFor = (device) => { const hidden = machines.keptFrom(device); return screenTell.list().filter((x) => !x.machine || !hidden.has(x.machine)) }
 // What this computer asks of another for one of its devices says which (machines.js forDevice), so
 // that one can keep it out as it does what it asks itself; for this computer's own user, nothing.
 const onBehalf = (req) => machines.forDevice(req.headers['x-bridge-relay'])
@@ -903,8 +906,8 @@ app.post('/api/transfers', tx((req) => {
   return transfers.start(req.body || {}, { here: fromHere(req), by: req.headers['x-bridge-relay'] || null })
 }))
 app.post('/api/transfers/clear', tx(() => transfers.clear()))
-app.post('/api/transfers/:id/stop', tx((req) => transfers.stop(req.params.id)))
-app.post('/api/transfers/:id/retry', tx((req) => transfers.retry(req.params.id)))
+app.post('/api/transfers/:id/stop', tx((req) => transfers.stop(req.params.id, onBehalf(req))))
+app.post('/api/transfers/:id/retry', tx((req) => transfers.retry(req.params.id, onBehalf(req))))
 app.post('/api/transfers/:id/reveal', tx((req) => { hereOnly(req, 'Show it in Finder'); return transfers.reveal(req.params.id) }))
 // Where a copy can go here (another of your devices asks, for its dialog).
 app.get('/api/transfers/here', tx(() => transfers.destinations()))
@@ -1615,10 +1618,12 @@ let lastFleet = null
 app.get('/api/events', (req, res) => {
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
   res.flushHeaders()
+  // (Which device it's for: what another computer that keeps it out said is left out of its feed.)
+  res.bridgeDevice = req.headers['x-bridge-relay'] || null
   clients.add(res)
   if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(lastFleet)}\n\n`)
   // Who's viewing a screen of yours now, here or on another of your computers (screentell.js).
-  res.write(`event: screen\ndata: ${JSON.stringify({ list: screenTell.list() })}\n\n`)
+  res.write(`event: screen\ndata: ${JSON.stringify({ list: screensFor(res.bridgeDevice) })}\n\n`)
   // The desktop app's own feed (desktop/main.js says so): it also hears when another of your devices
   // asks this computer to allow something (fixes.js askHere).
   const off = req.headers['x-bridge-desktop'] && !req.headers['x-bridge-relay'] ? fixes.onAsk((a) => res.write(`event: fix-ask\ndata: ${JSON.stringify(a)}\n\n`)) : null
@@ -2809,7 +2814,7 @@ app.post('/api/agents/:pane/mute', wrap(async (req) => {
 }))
 // A notification's answer button (the token says which agent, question and answer), or another
 // kind's (Remote Screen's Stop and Block This Device), saying which device it was pressed on.
-app.post('/api/notify/answer', wrap((req) => notify.answer(req.body?.token, { by: whoAsks(req) })))
+app.post('/api/notify/answer', wrap((req) => notify.answer(req.body?.token, { by: whoAsks(req), h: onBehalf(req) })))
 // You're using Bridge AI on this computer: phones stay quiet meanwhile. Phones can't say this.
 app.post('/api/presence', wrap((req) => { if (fromHere(req)) notify.presence(req.body || {}); return { ok: true } }))
 
@@ -2867,9 +2872,10 @@ app.post('/api/machines/name', wrap((req) => {
 app.post('/api/machines/:id/name', wrap((req) => { notByMachine(req); return machines.rename(req.params.id, req.body?.name, onBehalf(req)) }))
 // Fix: where the connection to that device stops, starting it over on the way.
 app.post('/api/machines/:id/check', wrap((req) => { notByMachine(req); return machines.check(req.params.id) }))
-// keepOut: the asking computer's devices this one keeps out as they come through it (remote.js
-// outVia), from which it hides what it shows of this one.
-app.get('/api/machines/summary', wrap(async (req) => ({ ...(await machines.summary({ home: req.query.home === '1' })), keepOut: remote.outVia(req.headers['x-bridge-relay']) })))
+// keepOut, or letIn with a guardrail set here: the asking computer's devices this one keeps out, or
+// the only ones it lets in, as they come through it (remote.js viaList); it hides what it shows of
+// this one from the rest.
+app.get('/api/machines/summary', wrap(async (req) => ({ ...(await machines.summary({ home: req.query.home === '1' })), ...remote.viaList(req.headers['x-bridge-relay']) })))
 // Another computer introducing a third (intro) does so only once you've kept it here (Keep, where
 // the app said it paired): until then it reaches this computer, and no other through it.
 app.post('/api/machines', wrap((req) => {
@@ -2947,7 +2953,7 @@ app.post('/api/remote/sessions/:id/end', async (req, res) => { try { res.json(aw
 app.post('/api/remote/devices/block', (req, res) => { try { if (!viaMachine(req)) throw Object.assign(new Error('Only another of your computers asks this'), { status: 403 }); res.json(remote.setDevice(String(req.body?.id || ''), false)) } catch (e) { sayErr(res, e) } })
 // What's live here and on your other computers (the cards), and Stop or Block from a window here,
 // for this computer's sessions or, through its link, another's (one hop: not for another computer).
-app.get('/api/remote/live', (req, res) => { const hidden = machines.keptFrom(req.headers['x-bridge-relay']); res.json({ list: screenTell.list().filter((x) => !x.machine || !hidden.has(x.machine)) }) })
+app.get('/api/remote/live', (req, res) => res.json({ list: screensFor(req.headers['x-bridge-relay']) }))
 app.post('/api/remote/live/end', async (req, res) => {
   try {
     const machine = typeof req.body?.machine === 'string' && req.body.machine ? req.body.machine : null
@@ -3424,7 +3430,7 @@ app.get('/api/config', (req, res) => res.json({
 app.post('/api/alerts/sound', wrap((req) => {
   const on = req.body?.on !== false
   afterChange(settings.patch({ alertSounds: on ? null : false }))
-  if (!req.body?.here) machines.soundsEverywhere(on).catch(() => {})
+  if (!req.body?.here) machines.soundsEverywhere(on, onBehalf(req)).catch(() => {})
   return { on }
 }))
 

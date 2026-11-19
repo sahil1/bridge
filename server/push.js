@@ -66,8 +66,9 @@ export function unsubscribe({ id, endpoint }) {
 }
 
 // note.skip: devices left out (Remote Screen's: the one doing the viewing, screentell.js), as
-// { devices: [the paired devices they came through], here: this computer's own browsers too }.
-const skipped = (note, dev) => !!note.skip && ((!!dev.device && !!note.skip.devices?.includes(dev.device)) || (!!note.skip.here && isHere(dev)))
+// { devices: [the paired devices they came through], here: this computer's own browsers too,
+// hide(device): one a computer the note is about keeps out }.
+const skipped = (note, dev) => !!note.skip && ((!!dev.device && !!note.skip.devices?.includes(dev.device)) || (!!note.skip.here && isHere(dev)) || (!!dev.device && !!note.skip.hide?.(dev.device)))
 // A device not let in here (Which Devices May Connect, remote.js) gets none: what it turned on
 // through it is kept for when it's let in again. out(id): it isn't (index.js).
 let out = () => false

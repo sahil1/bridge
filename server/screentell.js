@@ -90,7 +90,8 @@ export function makeTell({ remote, notify, machines, relay, pushDevices = () => 
     if (!t || !['view', 'control', 'ask'].includes(t.what) || typeof t.id !== 'string') return { ok: true, sent: 0 }
     const ev = { what: t.what, ...cleanOne(t) }
     const forId = clip(t.forId, 40)
-    const skip = { devices: forId ? [forId] : [], here: t.byYou === true && !forId }
+    // (Nor any device of this computer's that computer keeps out: machines.js keptFrom.)
+    const skip = { devices: forId ? [forId] : [], here: t.byYou === true && !forId, hide: (device) => machines.keptFrom(device).has(m.id) }
     return { ok: true, sent: sentOf(await notify.send({ ...noteFor(ev, m.name, 'screen-there', { m: m.id, id: ev.id }), skip }).catch(() => [])) }
   }
 
@@ -158,7 +159,7 @@ export function makeTell({ remote, notify, machines, relay, pushDevices = () => 
   }
   // A notification's buttons: this computer's (remote.js), or another's (through its link).
   notify.onButton('screen', (a, ctx) => remote().endFrom(String(a.id), { block: a.k === 'block', by: ctx.by }))
-  notify.onButton('screen-there', (a, ctx) => end({ machine: String(a.m), id: String(a.id), block: a.k === 'block' }, ctx.by))
+  notify.onButton('screen-there', (a, ctx) => end({ machine: String(a.m), id: String(a.id), block: a.k === 'block' }, ctx.by, ctx.h))
 
   // Where this computer's notifications of its screen go, for Settings: the devices that get its
   // notifications, and each linked computer with how many get its own (null: too old to say).

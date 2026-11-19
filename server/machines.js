@@ -466,8 +466,11 @@ const keep = (id, s) => {
   seenTimer.unref?.()
 }
 // The computers that keep one of this computer's devices out as it comes through here (forDevice),
-// as each last said in its summary (keepOut): what this one shows of them, it hides from that device.
-export const keptFrom = (deviceId) => new Set(deviceId ? conf.machines.filter((m) => kept.get(m.id)?.keepOut?.includes(deviceId)).map((m) => m.id) : [])
+// as each last said in its summary: those it keeps out (keepOut), or, with a guardrail set there,
+// the only ones it lets in (letIn), so one it hasn't let in yet sees nothing of it either. What this
+// one shows of them, it hides from that device.
+const hides = (s, deviceId) => !!s && (s.keepOut?.includes(deviceId) || (Array.isArray(s.letIn) && !s.letIn.includes(deviceId)))
+export const keptFrom = (deviceId) => new Set(deviceId ? conf.machines.filter((m) => hides(kept.get(m.id), deviceId)).map((m) => m.id) : [])
 // for: the device of this computer's that asks (its id here), from whom what a computer that keeps it
 // out said is hidden (none of its agents, what waits there, its Home), said as not let in.
 export function list({ for: forId = null } = {}) {
@@ -552,8 +555,9 @@ export async function rename(id, name, by = []) {
 // Bridge AI's sounds on or off (the speaker in the top bar, on any of your devices) on the others
 // too, those online: each is told once, and doesn't pass it on. One offline, or on a Bridge AI from
 // before the speaker, keeps its own.
-export async function soundsEverywhere(on) {
-  await Promise.all(conf.machines.filter((m) => m.state === 'linked' && links.get(m.id)?.session).map((m) => links.get(m.id).call('POST', '/api/alerts/sound', { on, here: true }, 8000).catch(() => {})))
+// by: for a device of this computer's, which (forDevice), so each may keep it out.
+export async function soundsEverywhere(on, by = []) {
+  await Promise.all(conf.machines.filter((m) => m.state === 'linked' && links.get(m.id)?.session).map((m) => links.get(m.id).call('POST', '/api/alerts/sound', { on, here: true }, 8000, by).catch(() => {})))
 }
 
 // A pairing link (https://<relay>/#pair=XXXX-…), or its address and code typed in (with or without
@@ -823,7 +827,7 @@ async function refreshNow(m, asked = Date.now()) {
   shut.delete(m.id)
   if (m.waitIn) { const via = m.waitIn; delete m.waitIn; save(); onLinked(m, via) }
   if ((kept.get(m.id)?.asked || 0) > asked) return // a later one came first
-  keep(m.id, { asked, name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: Array.isArray(s.agents) ? s.agents.slice(0, 40) : [], needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, home: Array.isArray(s.home) ? s.home.slice(0, 100) : null, about: s.about || null, systemName: s.systemName || null, notifies: Number.isFinite(s.notifies) ? s.notifies : null, keepOut: Array.isArray(s.keepOut) ? s.keepOut.filter((x) => typeof x === 'string').slice(0, 200) : [], at: Date.now() })
+  keep(m.id, { asked, name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: Array.isArray(s.agents) ? s.agents.slice(0, 40) : [], needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, home: Array.isArray(s.home) ? s.home.slice(0, 100) : null, about: s.about || null, systemName: s.systemName || null, notifies: Number.isFinite(s.notifies) ? s.notifies : null, keepOut: Array.isArray(s.keepOut) ? s.keepOut.filter((x) => typeof x === 'string').slice(0, 200) : [], letIn: Array.isArray(s.letIn) ? s.letIn.filter((x) => typeof x === 'string').slice(0, 500) : null, at: Date.now() })
   if (s.name && s.name !== m.name) { m.name = String(s.name).slice(0, 60); save() }
   if (s.os !== m.os || s.version !== m.version) { m.os = s.os; m.version = s.version; save() }
 }
