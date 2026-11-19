@@ -84,6 +84,23 @@
 // each reason. A change goes only to one that can make it (Claude Code); with none, a question
 // asking for one comes to you, saying why.
 //
+// A run at its time limit (its minutes a run) asks you whether it may go on, unless its At the Time
+// Limit says to stop it there, as every run was stopped before (bots.js): in Needs You, on a computer
+// and the phone, and in your direct messages on the platform it was asked on (buttons in Slack;
+// words in Discord and Teams, "continue 10", "continue 30" or "stop", as nothing there has buttons),
+// with how long it has run and what it's doing; whoever asked is told once, in the bot's voice where
+// they asked, that it's taking longer. It goes on meanwhile, for the grace window (GRACE_MS, 5
+// minutes), so a Continue in time (10 or 30 more minutes) leaves no gap. With no answer in time it's
+// stopped and comes to you as before, and they're told; its agent's conversation is kept, so a
+// Continue within a day (RESUME_MS) picks it up where it stopped, in a copy of that conversation as a
+// follow-up goes on (--fork-session), told it was paused, answering where it was asked. A model's run
+// starts again with its conversation so far; one whose conversation can't be gone on from (a change,
+// its copy of the repository put away; an agent whose conversation wasn't found) starts again from
+// the question, and Needs You says which. Never past its Longest Run: there it's stopped, saying so,
+// and Continue isn't offered. Only you decide: anyone else's press, or their "continue", is refused
+// and said. A run that goes on is still one of that person's at once, and changes nothing in their
+// count for the day. Each Continue and Stop, by whom and from where, is in the record.
+//
 // Its MCP servers (botmcp.js): the ones you picked for it and nothing else, each tool that only reads
 // for anyone who may ask, the rest only for you and the people you named; which it used is in the
 // record.
@@ -146,6 +163,16 @@ const MINUTE_MS = Number(process.env.BRIDGE_BOT_MINUTE_MS) || 60 * 1000
 // How soon after a conversation's last word the same person asking again there carries it on
 // (bots.js CARRY_ON_MIN; tests that ask one question after another, each its own, make it 0).
 const CARRY_MS = /^\d+$/.test(process.env.BRIDGE_BOT_CARRY_MS || '') ? Number(process.env.BRIDGE_BOT_CARRY_MS) : store.CARRY_ON_MIN * 60000
+// At a run's time limit, asking you: how long it goes on while you decide (the grace window: tests
+// make it short), what Continue offers, and how long one stopped for want of an answer can still be
+// picked up where it stopped.
+const GRACE_MS = Number(process.env.BRIDGE_BOT_GRACE_MS) || 5 * MINUTE_MS
+const MORE = [10, 30]
+const RESUME_MS = 24 * 3600 * 1000
+// Your answer in words, in a direct message: "continue 10", "continue 30" or "stop", with the
+// question's number when more than one waits ("continue 30 #12").
+const DECIDE = /^\s*(continue|stop)(?:\s+(?:for\s+)?(\d{1,2})(?:\s+(?:more\s+)?min(?:ute)?s?)?)?(?:\s*#\s*(\d{1,5}))?\s*[.!]?\s*$/i
+const mins = (n) => `${n} ${n === 1 ? 'minute' : 'minutes'}`
 // The brief in a file rather than on the agent's command line: on Windows, where cmd takes a line
 // of 8,191 characters at most and the brief's lines would be joined into one (tests ask for it
 // elsewhere too).
@@ -248,7 +275,7 @@ export function quotes(answer, files) {
 // instructions; and it's said in the record (cut, below), and in the brief where the instructions
 // were cut.
 export const BRIEF_MAX = 19000
-export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, memory = [], attached = [], agents = null, scheduled = null, github = [], noChange = false, turns = [], earlier = [] }, max = BRIEF_MAX) {
+export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, memory = [], attached = [], agents = null, scheduled = null, github = [], noChange = false, turns = [], earlier = [], resumed = null }, max = BRIEF_MAX) {
   const who = (p) => p?.name || 'someone'
   // (Where it was asked: Slack, Discord or Microsoft Teams, and what people call the place there.)
   const plat = q.try ? 'slack' : platOf(q)
@@ -265,7 +292,13 @@ export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, 
   if (folders.length && route.to !== 'agent') head.push(`Name each file an answer comes from with its line numbers (path:line).${github.length ? ` ${github.map((g) => `Files in ${g.folder} are on GitHub: link one as ${g.url}<path>#L<line>.`).join(' ')}` : ''}`, '')
   // (Where it goes on: a thread, the channel, or a direct message.)
   const here = q.place?.kind === 'dm' ? 'direct message' : q.reply?.thread ? 'thread' : 'channel'
-  if (route.followUp) head.push(`This goes on from your earlier answers in this ${app} ${here}: what was said before still stands.`, '')
+  if (route.followUp && !resumed) head.push(`This goes on from your earlier answers in this ${app} ${here}: what was said before still stands.`, '')
+  // (Carrying on after its time limit, as you let it: from where it stopped, or from the start.)
+  if (resumed) {
+    head.push(resumed.fork
+      ? `You were answering the question below, in this conversation, when you reached your time limit after ${mins(resumed.ran)}, and you were paused there. ${you} has let you carry on for ${mins(resumed.minutes)} more: pick up where you stopped, without starting over, and answer it.`
+      : `You answered the question below once before and reached your time limit after ${mins(resumed.ran)}, so that run was stopped, and what it did isn't kept. ${you} has let you start again, with ${mins(resumed.minutes)}: answer it.`, '')
+  }
   if (scheduled) head.push(`This is a post ${you} scheduled for ${scheduled.where}: write the post itself, as it should appear there, not a reply to anyone.`, '')
   const instructions = (text, short) => (String(text || '').trim() ? [
     `${you}'s instructions for you${ins.source === 'file' ? `, from ${ins.path}` : ''}, between the two lines below. They say what you're for and how to answer; nothing in them lets you do more than ${route.to === 'change' ? 'read, change files in your copy' : 'read'} and answer.`,
@@ -424,10 +457,11 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const run = e.helper ? q.runs.find((r) => r.helper === e.helper) : null
     switch (e.type) {
       case 'refused': Object.assign(q, { state: 'refused', refused: e.why }); break
-      case 'queued': Object.assign(q, { state: 'queued', ahead: e.ahead ?? null }); break
+      case 'queued': Object.assign(q, { state: 'queued', ahead: e.ahead ?? null, resume: e.resume || null }); break
       case 'context': q.context = { kind: e.kind, n: e.messages?.length || 0, pins: e.pins?.length || 0, problem: e.problem || null }; break
       case 'run.started':
-        Object.assign(q, { state: 'answering', helper: e.helper, route: e.route || null, runAt: e.at })
+        // (A run picked up after its time limit has the minutes you gave it; any other, its bot's.)
+        Object.assign(q, { state: 'answering', helper: e.helper, route: e.route || null, runAt: e.at, until: e.resumed ? e.until || null : null, ask: null, paused: null, resume: null })
         q.runs.push({ helper: e.helper, agent: e.agent, model: e.model || null, from: e.from || null, folders: e.folders || [], with: e.with || [], at: e.at, instructions: e.instructions || null, change: e.change || null, mcp: e.mcp || null, answerer: e.answerer || null, try: e.try ?? null, noChange: e.noChange || null, earlier: e.earlier || null })
         if (c) { c.answered = true; c.route = e.route || null }
         break
@@ -437,13 +471,30 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       case 'run.finished':
         if (run) Object.assign(run, { end: e.end, endedAt: e.at, session: e.session || null, took: e.took ?? null, transcript: e.transcript || null })
         if (c && e.end === 'finished' && e.session) c.session = { id: e.session, kind: e.agent, cwd: e.cwd, upTo: e.upTo || q.ts }
+        if (e.helper === q.helper) q.ask = null
+        // (Stopped at its time limit for want of an answer: how a Continue would pick it up, and how
+        // long it had run, which counts toward its Longest Run.)
+        if (e.paused) {
+          q.ranBefore = (q.ranBefore || 0) + (e.took || 0)
+          q.paused = { at: e.at, helper: e.helper, how: e.resume || 'again', session: e.session || null, kind: e.agent || null, cwd: e.cwd || null, transcript: e.transcript?.file || null, try: run?.try ?? 0, ran: e.minutes ?? null }
+        }
         break
+      // At its time limit: you're asked, and what you decided.
+      case 'limit.asked': q.ask = { at: e.at, until: e.until, ran: e.ran ?? null, doing: e.doing || null, handle: null }; break
+      case 'limit.continued':
+        q.ask = null
+        if (e.until) q.until = e.until
+        if (e.resumed) Object.assign(q, { state: 'starting', paused: null })
+        break
+      case 'limit.stopped': q.ask = null; break
       // (A change whose pull request couldn't be opened says so on its draft.)
       case 'draft': Object.assign(q, { state: 'draft', by: e.by || null, draft: e.text ?? '', needsOwner: !!e.needsOwner, why: e.why || null, auto: !!e.auto, problem: q.change?.failed && !q.change.pr ? oneLine(q.change.failed, 300) : null, sources: e.sources || [], outFiles: e.files || [], warn: e.warn || null, draftAt: e.at }); break
       case 'skipped': q.state = 'skipped'; break
       case 'stopped': Object.assign(q, { state: 'stopped', stopped: { by: e.by || null, why: e.why || null } }); break
       case 'draft.edited': Object.assign(q, { edited: true, draft: e.after ?? q.draft }); break
-      case 'approval.asked': if (!e.memory) q.ownerAsked = { channel: e.channel, ts: e.ts }; break
+      case 'approval.asked':
+        if (e.limit) { if (q.ask) q.ask.handle = { via: e.via, channel: e.channel, ts: e.ts } } else if (!e.memory) q.ownerAsked = { channel: e.channel, ts: e.ts }
+        break
       case 'change.proposed': q.change = { mode: e.mode, branch: e.branch, base: e.base, files: e.files || [], stat: e.stat || '', diffFile: e.diffFile || null, diff: e.diff || '', dir: e.dir || null, top: e.top || null, remote: e.remote || null, from: e.from || null, pr: null }; break
       case 'change.approved': if (q.change) q.change.approved = { by: e.by, at: e.at }; break
       case 'change.failed': if (q.change) q.change.failed = e.error; q.problem = oneLine(e.error, 300); break
@@ -456,6 +507,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
           if (c && e.posted && !q.reply?.thread && q.place?.kind !== 'dm') st.posted.set(`${e.channel}:${e.posted}`, e.conv)
         } else if (e.kind === 'hold') q.held = true
         else if (e.kind === 'checking') q.checking = true
+        else if (e.kind === 'longer') q.longer = true
         else q.told = true
         break
       case 'discarded': Object.assign(q, { state: 'discarded', decidedAt: e.at }); break
@@ -615,6 +667,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (!b || !bot || !m?.ts || !m.channel) return
     const { st } = b
     if (st.keys.has(`${m.channel}:${m.ts}`)) return
+    // Your answer in words, in a direct message, to one of your bots' runs at its time limit: that,
+    // not a question (byWords).
+    if (m.dm && !m.try && DECIDE.test(String(m.text || '')) && await byWords(id, m)) { st.keys.add(`${m.channel}:${m.ts}`); return }
     // Where it's answered: a question at the top of a channel in the channel itself, where its Answer
     // In says so and the platform said how (top), else as it came (in a thread of its own); one that
     // carries on a conversation (carried(), at the top of a channel or in a direct message), where
@@ -647,7 +702,11 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       ...(m.attached?.length ? { notRead: m.attached.slice(0, 10).map((x) => clip(x, 120)) } : {}),
       ...(m.routed?.by ? { routed: m.routed } : {}), ...(goesOn ? { carried: true } : {}),
     }
-    const busy = !command && c && c.questions.map((x) => st.questions.get(x)).reverse().find((x) => x?.state === 'answering')
+    // Someone else's "continue" where a question of theirs, or of this conversation, waits at its
+    // time limit: refused, and said. Only you let a run go on.
+    const notYours = !why && !isOwner(bot, m.from) && /^\s*continue\b/i.test(String(m.text || '')) && DECIDE.test(String(m.text || ''))
+      && [...st.questions.values()].some((x) => waitsAtLimit(x) && (x.conv === conv || (x.from?.id && x.from.id === m.from?.id)))
+    const busy = !command && !notYours && c && c.questions.map((x) => st.questions.get(x)).reverse().find((x) => x?.state === 'answering')
     const qid = !why && busy ? busy.id : `${id}-q${st.next}`
     const e = record(id, 'received', { q: qid, ...fields, ...(qid === busy?.id ? { joined: true } : {}), ...(m.from?.why ? { lookup: oneLine(m.from.why, 200) } : {}) })
     const q = st.questions.get(qid)
@@ -658,6 +717,12 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (why) {
       record(id, 'refused', at(q, { why, person: e.person }))
       if (!followUp && bot.others !== 'silent') queue(id, q, 'refuse', politeNo(why))
+      changed()
+      return
+    }
+    if (notYours) {
+      record(id, 'refused', at(q, { why: 'not-owner', person: e.person }))
+      queue(id, q, 'refuse', `Only ${ownerName(bot)} can let me carry on, and I've asked them.`)
       changed()
       return
     }
@@ -925,14 +990,17 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // couldn't), the context, instructions and memory it's given, the files attached, and its agent
   // started, or its model asked; none that can, or folders that are all gone: to you, saying why.
   // pending: what came while an answer ran, now given to its conversation; after: that answer's helper.
+  // resume: a run stopped at its time limit, picked up as you let it (limitAct): { how, session, kind,
+  // cwd, transcript, try, minutes, ran }, the same answerer first.
   const label = (e) => ({ id: e.id, label: e.label, local: !!e.local })
-  async function answer(id, q, { pending = null, after = null, from = 0 } = {}) {
+  async function answer(id, q, { pending = null, after = null, from = 0, resume = null } = {}) {
     const bot = botOf(id)
     const b = bots.get(id)
     if (!bot || !b) return
     if (bot.paused) return toYou(id, q, `${bot.name} is paused`)
     const open = [...bots.values()].reduce((n, x) => n + [...x.st.questions.values()].filter((y) => y.state === 'answering' && y.helper).length, 0)
-    if (!after && !from && open >= MAX_OPEN) return toYou(id, q, `${MAX_OPEN} questions are being answered already`)
+    if (!after && !from && !resume && open >= MAX_OPEN) return toYou(id, q, `${MAX_OPEN} questions are being answered already`)
+    if (resume && !from) from = resume.try || 0
     const folders = await foldersOf(bot)
     const ok = folders.filter((f) => f.ok)
     if (folders.length && !ok.length) return toYou(id, q, `None of the folders it reads from is there: ${folders.map((f) => f.shown).join(', ')}`)
@@ -978,10 +1046,12 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     }
     // Going on from an answer in this conversation: a copy of its conversation, read-only, in its
     // folder, while that's still one it reads from (or its own empty one, or its copy of the
-    // repository for a change) and the same agent answers.
-    const was = after && !after.chat ? { id: after.sessionId, kind: after.kind, cwd: after.cwd, upTo: null } : c?.session
+    // repository for a change) and the same agent answers. A run stopped at its time limit goes on
+    // from its own conversation the same way (resumed); one that can't starts again.
+    const was = resume?.session ? { id: resume.session, kind: resume.kind, cwd: resume.cwd, upTo: null } : after && !after.chat ? { id: after.sessionId, kind: after.kind, cwd: after.cwd, upTo: null } : c?.session
     const goOn = kind !== 'model' && !!(was?.id && was.cwd && adapter(was.kind).fork && adapter(was.kind).caps?.fork && readOnly(was.kind) && have.has(was.kind)
       && (was.kind === kind || c?.route?.to === 'agent') && (tree ? was.cwd === tree.dir : (paths.some((p) => inside(was.cwd, p)) || inside(was.cwd, ANSWERS))))
+    const resumed = !!(resume?.session && goOn && was.id === resume.session)
     let route
     if (tree) route = { to: 'change', kind: 'claude', cwd: tree.dir, dirs: paths, enforced: true, change: tree, ...(goOn ? { fork: was.id, followUp: true } : {}) }
     else if (goOn) {
@@ -1003,9 +1073,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (!route) route = { to: 'throwaway', kind, cwd: null, dirs: [], enforced: kept }
     const auto = bot.auto === true && route.enforced && !q.try
 
-    // The conversation it was asked in (not for what came while it answered: that's given as is).
+    // The conversation it was asked in (not for what came while it answered: that's given as is; nor
+    // for a run going on from where it stopped, which has it).
     let ctx = null
-    if (!pending) {
+    if (!pending && !resumed) {
       const since = route.followUp && c?.session?.upTo ? c.session.upTo : null
       try { ctx = await chan(b, q).context({ channel: q.channel, thread: q.reply?.thread && q.reply.thread !== q.ts ? q.reply.thread : null, ts: q.ts, since, dm: q.place?.kind === 'dm' }) } catch (err) { ctx = { kind: q.thread ? 'thread' : 'channel', messages: [], pins: [], problem: `Couldn't read the conversation: ${err.message}` } }
       if (!q.routine) record(id, 'context', at(q, { kind: ctx.kind, since, messages: ctx.messages || [], pins: ctx.pins || [], problem: ctx.problem || null }))
@@ -1054,8 +1125,17 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     }
     const github = []
     for (const f of ok.slice(0, 10)) { const url = await changes.githubOf(f.path).catch(() => null); if (url) github.push({ folder: shown(f.path), url }) }
+    // A model's run picked up after its time limit, by the same model: its conversation as it was
+    // when it was stopped, to its last whole step, then a word that it may carry on. One that can't
+    // be read starts again, as a run whose conversation can't be gone on from does.
+    let history = null
+    if (resume?.how === 'messages' && kind === 'model' && resume.transcript && pickd.i === (resume.try || 0)) {
+      try { history = botanswer.wholeSteps(String(b.trace.readKept(resume.transcript) || '').split('\n').filter(Boolean).map((l) => JSON.parse(l))) } catch { history = null }
+      if (!history?.length) history = null
+    }
+    const how = resumed ? 'session' : history ? 'messages' : 'again'
     const at0 = route.cwd ? [route.cwd, ...route.dirs] : route.dirs
-    let { text: brief, cut } = briefOf({ bot, you: ownerName(bot), q, route, folders: at0.filter((d) => !inside(d, FILES) && !inside(d, botmcp.RUNS)).map(shown), ins, ctx, pending, auto, memory, attached, agents: agentsNow, scheduled: q.routine ? { where: where(q.place) } : null, github, noChange: !!noChange, turns, earlier })
+    let { text: brief, cut } = briefOf({ bot, you: ownerName(bot), q, route, folders: at0.filter((d) => !inside(d, FILES) && !inside(d, botmcp.RUNS)).map(shown), ins, ctx, pending, auto, memory, attached, agents: agentsNow, scheduled: q.routine ? { where: where(q.place) } : null, github, noChange: !!noChange, turns, earlier, resumed: resume ? { ran: resume.ran, minutes: resume.minutes, fork: resumed } : null })
     // On Windows (and when a test asks), the brief goes in a file of its own the agent is pointed to.
     let briefFile = null
     if (BRIEF_FILE && kind !== 'model') {
@@ -1088,7 +1168,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       ...(turns.length || earlier.length || unread.length ? { earlier: { turns: turns.length, person: earlier.length, ...(unread.length ? { problem: unread.join('; ') } : {}) } } : {}),
       ...(attached.length || fileProblems.length ? { attached: attached.map((f) => ({ name: f.name, size: f.size })), ...(fileProblems.length ? { problems: fileProblems } : {}) } : {}),
       ...(tree ? { change: { branch: tree.branch, base: tree.base, dir: shown(tree.dir), top: tree.top, remote: tree.remote, from: tree.from, again: tree.again } } : problem ? { changeProblem: problem } : {}),
-      limit: { minutes: bot.limits.minutes },
+      limit: { minutes: resume ? resume.minutes : bot.limits.minutes, atLimit: bot.limits.atLimit, longest: bot.limits.longest },
+      ...(resume ? { resumed: { how, ran: resume.ran, minutes: resume.minutes, by: resume.by || null }, until: new Date(Date.now() + resume.minutes * MINUTE_MS).toISOString() } : {}),
       with: pending ? pending.map((x) => x.ts) : [q.ts, ...q.more.map((x) => x.ts)],
       ...(mcp ? { mcp: { servers: mcp.servers, may: all ? 'all' : 'read-only', ...(mcp.missing.length ? { missing: mcp.missing } : {}), ...(mcp.problem ? { problem: mcp.problem } : {}) } } : bot.mcp?.length ? { mcp: { servers: [], problem: `MCP servers need Claude Code or a model answering, not ${adapter(route.kind).label}` } } : {}),
     }))
@@ -1098,8 +1179,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       const startedAt = now()
       const mine = () => { const x = locate(q.id)?.q; return x && x.state === 'answering' && x.helper === hid }
       const watch = setInterval(() => { if (!mine()) ctl.abort() }, 500)
-      chatRuns.set(hid, { ctl, since: startedAt, reading: [], doing: null, tools: [] })
-      botanswer.runChat({ reply, model: entry.model, brief, folders: [route.cwd, ...route.dirs].filter((d) => d && !inside(d, FILES)), also: attached.length ? [path.join(FILES, q.id)] : [], mcp: mcp?.configs ? { servers: mcp.configs, all } : null, signal: ctl.signal, onStep: (x) => Object.assign(chatRuns.get(hid) || {}, x) })
+      // (Its conversation as it goes, kept here so a run stopped at its time limit can be picked up.)
+      const log = history ? [...history, { role: 'user', text: `You reached your time limit here, after ${mins(resume.ran)}, and were paused. ${ownerName(bot)} has let you carry on for ${mins(resume.minutes)} more: carry on from where you stopped, without starting over, and answer as your brief says.` }] : [{ role: 'user', text: brief }]
+      chatRuns.set(hid, { ctl, since: startedAt, reading: [], doing: null, tools: [], log })
+      botanswer.runChat({ reply, model: entry.model, brief, messages: log, folders: [route.cwd, ...route.dirs].filter((d) => d && !inside(d, FILES)), also: attached.length ? [path.join(FILES, q.id)] : [], mcp: mcp?.configs ? { servers: mcp.configs, all } : null, signal: ctl.signal, onStep: (x) => Object.assign(chatRuns.get(hid) || {}, x) })
         .then((r) => ({ id: hid, chat: true, end: 'finished', said: { text: r.text, from: 'chat' }, kind: 'model', model: entry.model, reads: r.reads, tools: r.tools, messages: r.messages, startedAt, cwd: route.cwd }),
           (e) => ({ id: hid, chat: true, end: ctl.signal.aborted ? 'stopped' : 'failed', error: oneLine(e.message, 300), kind: 'model', model: entry.model, startedAt, cwd: route.cwd }))
         .then((x) => { clearInterval(watch); chatRuns.delete(hid); if (x.end !== 'stopped' || mine()) return heard(x) }).catch(() => {})
@@ -1127,11 +1210,12 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     else if (onOff && !b.statusSaid) { b.statusSaid = true; record(id, 'status', at(q, { on: onOff, ok: false, error: oneLine(r?.error || 'not shown', 200) })) }
   }
 
-  // To you, with nothing to send yet: you write the reply. The asker hears it's been passed on.
-  function toYou(id, q, why) {
+  // To you, with nothing to send yet: you write the reply. The asker hears it's been passed on (say:
+  // in other words than the usual).
+  function toYou(id, q, why, { say = null } = {}) {
     record(id, 'draft', at(q, { text: '', needsOwner: true, why: oneLine(why, 300) }))
     if (!q.try) {
-      queue(id, q, 'hold', `I've passed this on to ${you()}, who'll answer here.`)
+      queue(id, q, 'hold', say || `I've passed this on to ${you()}, who'll answer here.`)
       if (q.how !== 'scheduled') react(id, q, q.ts, 'hourglass_flowing_sand')
       askOwner(id, q)
       told(viewOf(q))
@@ -1162,14 +1246,17 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const bot = botOf(id)
     if (!bot?.owner || !b?.channel?.askOwner || q.try || platOf(q) !== 'slack') return
     if (!slackUp(b)) { record(id, 'approval.failed', at(q, { error: 'Not connected to Slack' })); return }
+    // (Stopped at its time limit for want of an answer: with Continue too, as in Needs You.)
+    const limit = q.paused ? limitView(q, bot) : null
     try {
       const h = await b.channel.askOwner(bot.owner, {
         kind: 'draft', q: q.id, bot: bot.name, who: q.from?.name || 'Someone', where: where(q.place), question: q.text, draft: q.draft || '', sources: q.sources || [], files: (q.outFiles || []).map((f) => ({ name: f.name, size: f.size })),
         why: q.why || null, warn: q.warn || null, needsOwner: !!q.needsOwner, change: q.change ? { mode: q.change.mode, branch: q.change.branch, stat: q.change.stat, diff: q.change.diff } : null,
+        limit: limit ? { ran: limit.ran, how: limit.how, choices: limit.choices } : null,
       })
       record(id, 'approval.asked', at(q, { via: 'slack', channel: h.channel, ts: h.ts }))
       // (Decided while it was on its way: settled at once.)
-      if (q.state !== 'draft' || sending(q)) settleOwner(id, q, q.state === 'discarded' ? 'discarded' : 'sent', { by: you() })
+      if (q.state !== 'draft' || sending(q)) settleOwner(id, q, q.state === 'discarded' ? 'discarded' : q.state === 'sent' || sending(q) ? 'sent' : 'Carrying on', { by: you() })
     } catch (e) { record(id, 'approval.failed', at(q, { error: oneLine(e.message, 300) })) }
   }
   function settleOwner(id, q, outcome, extra = {}) {
@@ -1204,7 +1291,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     }
     dropMcp(h.id)
     const upTo = [q.ts, ...(run.with || [])].reduce((a, x) => (laterTs(x, a) ? x : a), q.ts)
+    // (Done while you were being asked whether it may go on: nothing left to decide.)
+    const asked = q.ask
     record(id, 'run.finished', at(q, { helper: h.id, end: h.end, error: h.error || null, took: h.startedAt ? Date.now() - Date.parse(h.startedAt) : null, session: h.sessionId || null, agent: h.kind, ...(h.chat ? { model: h.model } : {}), cwd: h.cwd, upTo, transcript: keepTranscript(b, q, h) }))
+    if (asked) settleLimit(id, asked.handle, 'It finished before you decided: nothing to do')
     setStatus(id, q, false)
     const tree = run.change ? { ...run.change, dir: h.cwd } : null
     const pending = q.more.filter((x) => !q.runs.some((r) => (r.with || []).includes(x.ts)))
@@ -1357,31 +1447,49 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       if (bot.paused) { toYou(id, q, `${bot.name} is paused`); continue }
       if (running(q.from?.id) >= bot.limits.atOnce) continue
       q.state = 'starting' // (taken, so the next look doesn't start it twice)
-      answer(id, q).catch((err) => toYou(id, q, `It couldn't be handed on: ${err.message}`))
+      // (One you let carry on after its time limit, waiting its turn: picked up as you said.)
+      answer(id, q, q.resume ? { resume: q.resume } : {}).catch((err) => toYou(id, q, `It couldn't be handed on: ${err.message}`))
     }
   }
 
   // ---------- Stopping ----------
   // A run stopped: its agent's tab closed, and the question ends as you'd want: by !stop or Slack's
-  // Stop, stopped; out of time or paused, passed to you.
+  // Stop, stopped; out of time or paused, passed to you. Out of time is one of: its minutes, where
+  // its bot stops a run there (timeout); its Longest Run (longest); you asked, with no answer in
+  // time (expired: kept, to be picked up where it stopped); or your Stop when asked (limit).
   async function stopRun(id, q, { why, by = null }) {
     const b = bots.get(id)
-    if (!b || q.state !== 'answering') return false
-    const h = q.helper ? delegate.get(q.helper) : null
-    const run = q.runs.find((r) => r.helper === q.helper)
-    record(id, 'run.finished', at(q, { helper: q.helper, end: why === 'timeout' ? 'timeout' : 'stopped', why, by, took: run?.at ? Date.now() - Date.parse(run.at) : null, ...(why === 'timeout' ? { minutes: botOf(id)?.limits.minutes ?? null } : {}), agent: h?.kind || run?.agent || null }))
-    if (h?.paneId) await close(h.paneId).catch(() => {})
-    if (h) await delegate.drop(h.id).catch(() => {})
-    if (run?.change) await changes.tidy({ ...run.change, dir: h?.cwd }).catch(() => {})
-    setStatus(id, q, false)
-    react(id, q, q.ts, 'eyes', true)
-    const bot = botOf(id)
-    if (why === 'timeout') toYou(id, q, `It ran for ${bot?.limits.minutes} minutes, the longest a run may take, and was stopped`)
-    else if (why === 'paused') toYou(id, q, `${bot?.name || 'The bot'} was paused while it answered`)
-    else { record(id, 'stopped', at(q, { by, why })); if (why !== '!stop') queue(id, q, 'stopped', 'Stopped.') }
-    next(id)
-    changed()
-    return true
+    if (!b || q.state !== 'answering' || q.stopping) return false
+    q.stopping = true // (one stop at a time: the ticker looks again while this one waits)
+    try {
+      const h = q.helper ? delegate.get(q.helper) : null
+      const run = q.runs.find((r) => r.helper === q.helper)
+      const bot = botOf(id)
+      const asked = q.ask
+      const ran = ranOf(q)
+      const timed = ['timeout', 'longest', 'expired'].includes(why)
+      record(id, 'run.finished', at(q, {
+        helper: q.helper, end: timed ? 'timeout' : 'stopped', why, by, took: run?.at ? Date.now() - Date.parse(run.at) : null, ...(timed ? { minutes: why === 'timeout' ? bot?.limits.minutes ?? null : ran } : {}),
+        ...(why === 'expired' ? keptToGoOn(b, q, h, run) : {}), agent: h?.kind || run?.agent || null,
+      }))
+      if (h?.paneId) await close(h.paneId).catch(() => {})
+      if (h) await delegate.drop(h.id).catch(() => {})
+      if (run?.change) await changes.tidy({ ...run.change, dir: h?.cwd }).catch(() => {})
+      setStatus(id, q, false)
+      react(id, q, q.ts, 'eyes', true)
+      if (asked) settleLimit(id, asked.handle, why === 'expired' ? `No answer in time: stopped after ${mins(ran)}` : why === 'longest' ? `Stopped after ${mins(ran)}, its Longest Run` : why === 'paused' ? `${bot?.name || 'The bot'} was paused` : `Stopped${by ? ` by ${by}` : ''}`)
+      if (why === 'timeout') toYou(id, q, `It ran for ${bot?.limits.minutes} minutes, the longest a run may take, and was stopped`)
+      else if (why === 'longest') toYou(id, q, `It ran ${mins(ran)}, and its Longest Run is ${bot?.limits.longest} minutes, so it was stopped: it can't be continued past that`)
+      else if (why === 'limit') toYou(id, q, `Stopped by ${by} at its time limit, after ${mins(ran)}`)
+      else if (why === 'expired') {
+        toYou(id, q, `It ran ${mins(ran)}, past its time limit, and nobody said to carry on in time, so it was stopped`, { say: `I've stopped for now, as this was taking too long, and passed it on to ${you()}, who'll answer here.` })
+        askOwnerLimit(id, q).catch(() => {})
+      } else if (why === 'paused') toYou(id, q, `${bot?.name || 'The bot'} was paused while it answered`)
+      else { record(id, 'stopped', at(q, { by, why })); if (why !== '!stop') queue(id, q, 'stopped', 'Stopped.') }
+      next(id)
+      changed()
+      return true
+    } finally { q.stopping = false }
   }
   // Each run in a conversation (or for a person, in a direct message) stopped: how many.
   async function stopWhere(id, { conv = null, person = null }, o) {
@@ -1393,6 +1501,223 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       if (await stopRun(id, q, o)) n++
     }
     return n
+  }
+
+  // ---------- At the time limit ----------
+  // How long this answer has run, in minutes (its runs stopped at their time limit and picked up
+  // again, and this one); how long it has before its Longest Run, in milliseconds; and what Continue
+  // offers then (10 and 30 more minutes, fewer close to it).
+  const ranOf = (q) => Math.round(((q.state === 'answering' && q.runAt ? Date.now() - Date.parse(q.runAt) : 0) + (q.ranBefore || 0)) / MINUTE_MS)
+  const leftOf = (bot, q) => bot.limits.longest * MINUTE_MS - (q.ranBefore || 0) - (q.state === 'answering' && q.runAt ? Date.now() - Date.parse(q.runAt) : 0)
+  const choicesOf = (ms) => [...new Set(MORE.map((n) => Math.min(n, Math.floor(ms / MINUTE_MS))))].filter((n) => n >= 1)
+  // What a run stopped for want of your answer keeps, for a Continue to pick it up (limitView how):
+  // its agent's conversation ('session'); a model's conversation so far, kept beside the record
+  // ('messages'); or nothing to go on from ('again': a change, whose copy of the repository is put
+  // away as it stops, or an agent whose conversation wasn't found).
+  function keptToGoOn(b, q, h, run) {
+    const chat = chatRuns.get(q.helper)
+    if (run?.change) return { paused: true, resume: 'again' }
+    if (chat) {
+      const t = chat.log?.length ? keepTranscript(b, q, { chat: true, id: q.helper, messages: chat.log }) : null
+      return { paused: true, resume: t?.file ? 'messages' : 'again', ...(t ? { transcript: t } : {}) }
+    }
+    if (h?.sessionId && h.cwd) return { paused: true, resume: 'session', session: h.sessionId, cwd: h.cwd }
+    return { paused: true, resume: 'again' }
+  }
+  // Stopped for want of an answer, and still yours to let carry on (for a day, while it waits on you).
+  const resumable = (q) => q.state === 'draft' && !!q.paused && !q.try && !sending(q) && Date.now() - Date.parse(q.paused.at) < RESUME_MS
+  const waitsAtLimit = (q) => (q.state === 'answering' && !!q.ask) || resumable(q)
+
+  // Each tick, for a run going: past its Longest Run, stopped; asked about, stopped once the grace
+  // window is over with no answer; at its time limit, asked about, or stopped where its bot says so
+  // (and in Try It, with no one to ask), as every run was before.
+  function atLimit(id, bot, q) {
+    const now = Date.now()
+    const until = q.until ? Date.parse(q.until) : Date.parse(q.runAt) + bot.limits.minutes * MINUTE_MS
+    const stop = (why) => { stopRun(id, q, { why }).catch(() => {}) }
+    if (bot.limits.atLimit === 'stop' || q.try) { if (now > until) stop('timeout'); return }
+    const left = leftOf(bot, q)
+    if (left <= 0) return stop('longest')
+    if (q.ask) { if (now >= Date.parse(q.ask.until)) stop('expired'); return }
+    if (now <= until) return
+    if (left < MINUTE_MS) stop('longest')
+    else askLimit(id, q).catch(() => {})
+  }
+
+  // What a run is doing, from its last activity, in a few words for the question about it.
+  async function doingOf(q) {
+    const mine = chatRuns.get(q.helper)
+    const h = !mine && q.helper ? delegate.get(q.helper) : null
+    const [n, reads] = mine ? [{ doing: mine.doing }, (mine.reading || []).map((what) => ({ what }))] : h ? await Promise.all([nowOf(h).catch(() => null), readsOf(h).catch(() => [])]) : [null, []]
+    if (n?.asking) return `waiting on ${oneLine(n.asking, 120)}`
+    if (n?.doing) return `its last step was ${oneLine(n.doing, 160)}`
+    const last = (reads || []).at(-1)?.what
+    return last ? `it last read ${oneLine(last, 160)}` : 'still working, with nothing to show yet'
+  }
+
+  // A run at its time limit, its bot asking: you're asked whether it may go on (Needs You and its
+  // notification, and your direct messages on the platform it was asked on), and whoever asked is
+  // told, once a question, that it's taking longer. It goes on meanwhile, to the grace window's end.
+  async function askLimit(id, q) {
+    const bot = botOf(id)
+    if (!bot || q.asking || q.ask) return
+    q.asking = true
+    try {
+      const doing = await doingOf(q)
+      if (q.state !== 'answering' || q.ask || q.stopping) return
+      const left = leftOf(bot, q)
+      record(id, 'limit.asked', at(q, { helper: q.helper, ran: ranOf(q), doing, until: new Date(Date.now() + Math.min(GRACE_MS, left)).toISOString(), choices: choicesOf(left), longest: bot.limits.longest }))
+      if (!q.longer && q.how !== 'scheduled') {
+        q.longer = true
+        queue(id, q, 'longer', `This is taking me longer than usual: I'm checking with ${ownerName(bot)} that I can carry on.`)
+      }
+      told(viewOf(q))
+      changed()
+      await askOwnerLimit(id, q)
+    } finally { q.asking = false }
+  }
+
+  // The same in your direct messages on the platform it was asked on: with buttons in Slack (once
+  // it's stopped, the draft that comes to you there has them), in words in Discord and Teams
+  // (byWords). Nowhere to ask there (you aren't set there, it isn't connected): Needs You has it all
+  // the same; one that couldn't go is in the record.
+  async function askOwnerLimit(id, q) {
+    const b = bots.get(id)
+    const bot = botOf(id)
+    const v = bot && !q.try ? limitView(q, bot) : null
+    if (!b?.channel || !v) return
+    const plat = platOf(q)
+    if (plat === 'slack') {
+      if (v.phase !== 'asking' || !bot.owner || !b.channel.askOwner || !slackUp(b)) return
+      try {
+        const h = await b.channel.askOwner(bot.owner, { kind: 'limit', q: q.id, bot: bot.name, who: q.from?.name || 'Someone', where: where(q.place), question: q.text, ran: v.ran, doing: v.doing, choices: v.choices, grace: graceOf(v), left: v.left, longest: v.longest })
+        record(id, 'approval.asked', at(q, { limit: true, via: 'slack', channel: h.channel, ts: h.ts }))
+      } catch (e) { record(id, 'approval.failed', at(q, { limit: true, via: 'slack', error: oneLine(e.message, 300) })) }
+      return
+    }
+    const owner = bot.owners?.[plat]
+    if (!owner?.id || !b.channel.whisper) return
+    try {
+      const r = await b.channel.whisper({ platform: plat }, owner.id, limitWords(bot, q, v, owner))
+      record(id, 'approval.asked', at(q, { limit: true, via: plat, phase: v.phase, channel: r?.channel || null, ts: r?.ts || null }))
+    } catch (e) { record(id, 'approval.failed', at(q, { limit: true, via: plat, error: oneLine(e.message, 300) })) }
+  }
+  // The minutes left of the grace window, as said.
+  const graceOf = (v) => Math.max(1, Math.round((Date.parse(v.until) - Date.now()) / MINUTE_MS))
+  const numOf = (q) => String(q.id).replace(/^.*-q/, '')
+  // The question in words (Discord, Teams), with its number when another waits on you there too, so
+  // your answer can say which.
+  function limitWords(bot, q, v, owner) {
+    const tag = owedTo(owner, platOf(q)).length > 1 ? ` #${numOf(q)}` : ''
+    const who = q.from?.name || 'someone'
+    const say = (n) => `“continue ${n}${tag}”`
+    if (v.phase === 'asking') return `${bot.name}'s answer to ${who} in ${where(q.place)} has run ${mins(v.ran)}: ${v.doing}. It goes on for ${mins(graceOf(v))} more while you decide${v.left < MORE.at(-1) ? `, and for ${mins(v.left)} more at most: its Longest Run is ${v.longest} minutes` : ''}. Reply ${v.choices.map(say).join(', ')} or “stop${tag}”.`
+    return `Nobody said to carry on, so ${bot.name} stopped its answer to ${who} in ${where(q.place)} after ${mins(v.ran)}, and told them it's passed on to you. Reply ${v.choices.map(say).join(' or ')} within a day to ${v.how === 'session' ? 'pick it up where it stopped' : v.how === 'messages' ? 'start it again with what it had so far' : 'start it again from the question'}.`
+  }
+  // Its question in your Slack direct messages, settled: its buttons give way to what came of it.
+  function settleLimit(id, handle, text) {
+    const b = bots.get(id)
+    if (handle?.via !== 'slack' || !b?.channel?.settle) return
+    Promise.resolve(b.channel.settle(handle, { outcome: text })).catch(() => {})
+  }
+
+  // How a run at its time limit stands, for Needs You and the question about it: asking (it goes on
+  // until `until`), or stopped and still yours to let carry on (until `until`), with how long it has
+  // run, what it's doing (asking), what Continue offers and, stopped, how it would go on (how:
+  // 'session' where it stopped, 'messages' again with its conversation so far, 'again' from the
+  // question). null otherwise.
+  function limitView(q, bot = botOf(q.bot)) {
+    if (!bot) return null
+    const left = leftOf(bot, q)
+    const choices = choicesOf(left)
+    if (q.state === 'answering' && q.ask) return { phase: 'asking', ran: q.ask.ran, doing: q.ask.doing, at: q.ask.at, until: q.ask.until, choices, left: Math.max(0, Math.floor(left / MINUTE_MS)), longest: bot.limits.longest }
+    if (!resumable(q) || !choices.length) return null
+    return { phase: 'stopped', ran: q.paused.ran, how: q.paused.how, at: q.paused.at, until: new Date(Date.parse(q.paused.at) + RESUME_MS).toISOString(), choices, left: Math.floor(left / MINUTE_MS), longest: bot.limits.longest }
+  }
+
+  // Your decision about a run at its time limit, from Needs You, your Slack direct messages or your
+  // words in a direct message: Continue for 10 or 30 more minutes (never past its Longest Run), or
+  // Stop. One still going goes on with no gap; one stopped for want of an answer is picked up as it
+  // can be (limitView how), still one of that person's at once (it waits its turn when they're at
+  // it). Each is in the record, by whom and from where. { item, said: what it came to, in a sentence
+  // for your words' reply, already: nothing waited }.
+  async function limitAct(qid, act, { minutes = MORE[0], by = you(), via = 'app', device = null } = {}) {
+    const found = locate(qid)
+    if (!found) throw Object.assign(new Error('That isn\'t waiting any more'), { status: 404 })
+    const { id, q } = found
+    const bot = botOf(id)
+    if (!bot) throw Object.assign(new Error('That bot isn\'t here any more'), { status: 404 })
+    if (act !== 'continue' && act !== 'stop') throw Object.assign(new Error(`No such thing to do: ${act}`), { status: 400 })
+    const n = Math.round(Number(minutes) || MORE[0])
+    if (act === 'continue' && !(n >= 1 && n <= MORE.at(-1))) throw Object.assign(new Error(`Continue for ${MORE.join(' or ')} more minutes`), { status: 400 })
+    const from = device ? { device } : {}
+    const who = q.from?.name || 'them'
+    const asking = q.state === 'answering' && !!q.ask
+    if (act === 'stop') {
+      if (!asking) return { item: viewOf(q), already: true, said: resumable(q) ? 'It\'s stopped already, and waits for your reply in Needs You.' : 'That isn\'t waiting any more.' }
+      const handle = q.ask.handle
+      record(id, 'limit.stopped', at(q, { helper: q.helper, ran: ranOf(q), by, via, ...from }))
+      settleLimit(id, handle, `Stopped by ${by}`)
+      await stopRun(id, q, { why: 'limit', by })
+      return { item: viewOf(q), said: `Stopped. ${who} is told it's passed on to you.` }
+    }
+    const v = asking || resumable(q) ? limitView(q, bot) : null
+    if (!v) return { item: viewOf(q), already: true, said: 'That isn\'t waiting any more.' }
+    const given = Math.min(n, Math.floor(leftOf(bot, q) / MINUTE_MS))
+    if (given < 1) return { item: viewOf(q), already: true, said: `It has run its Longest Run, ${bot.limits.longest} minutes.` }
+    if (asking) {
+      const handle = q.ask.handle
+      record(id, 'limit.continued', at(q, { helper: q.helper, minutes: given, ...(given !== n ? { asked: n } : {}), until: new Date(Date.now() + given * MINUTE_MS).toISOString(), ran: ranOf(q), by, via, ...from }))
+      settleLimit(id, handle, `Continued by ${by}: ${mins(given)} more`)
+      changed()
+      return { item: viewOf(q), given, said: `${bot.name} carries on with its answer to ${who}, for ${mins(given)} more.` }
+    }
+    // Stopped: picked up as it can be, the same answerer first.
+    const p = q.paused
+    const resume = { how: p.how, session: p.session, kind: p.kind, cwd: p.cwd, transcript: p.transcript, try: p.try, minutes: given, ran: p.ran ?? Math.round((q.ranBefore || 0) / MINUTE_MS), by }
+    record(id, 'limit.continued', at(q, { minutes: given, ...(given !== n ? { asked: n } : {}), ran: resume.ran, resumed: true, how: p.how, by, via, ...from }))
+    settleOwner(id, q, `Continued by ${by}: ${mins(given)}`)
+    react(id, q, q.ts, 'hourglass_flowing_sand', true)
+    react(id, q, q.ts, 'eyes')
+    const running = [...bots.get(id).st.questions.values()].filter((x) => x !== q && x.from?.id && x.from.id === q.from?.id && (x.state === 'answering' || x.state === 'starting')).length
+    if (q.how !== 'scheduled' && running >= bot.limits.atOnce) record(id, 'queued', at(q, { ahead: [...bots.get(id).st.questions.values()].filter((x) => x.from?.id === q.from?.id && x.state === 'queued').length, atOnce: bot.limits.atOnce, resume }))
+    else answer(id, q, { resume }).catch((e) => toYou(id, q, `It couldn't be handed on: ${e.message}`))
+    changed()
+    const way = p.how === 'session' ? 'picks up its answer' : p.how === 'messages' ? 'starts its answer again with what it had so far' : 'starts its answer again'
+    return { item: viewOf(q), given, said: `${bot.name} ${way} to ${who}, with ${mins(given)}${running >= bot.limits.atOnce ? `, once one of their ${bot.limits.atOnce} at once is done` : ''}.` }
+  }
+
+  // Your "continue 10", "continue 30" or "stop" in a direct message to one of your bots (connhub.js
+  // routes it to the bot it's for on a shared connection): the run it answers, of any of your bots
+  // on that platform, waiting on you at its time limit; with more than one, the one its number
+  // names, else the latest asked about. You're told there what came of it. Not from you, or nothing
+  // waiting: false, and it's a message like any other.
+  function owedTo(from, plat) {
+    const out = []
+    if (!from?.id && from?.you !== true) return out
+    for (const [bid, b] of bots) {
+      const bot = botOf(bid)
+      if (!bot || !isOwner(bot, from)) continue
+      for (const q of b.st.questions.values()) if (!q.try && platOf(q) === plat && waitsAtLimit(q)) out.push({ id: bid, q })
+    }
+    const when = (q) => q.ask?.at || q.paused?.at || q.heardAt
+    return out.sort((x, y) => String(when(x.q)).localeCompare(String(when(y.q))))
+  }
+  async function byWords(id, m) {
+    const x = DECIDE.exec(String(m.text || ''))
+    const list = x ? owedTo(m.from, platOf(m.channel)) : []
+    if (!list.length) return false
+    const b = bots.get(id)
+    const reply = (text) => Promise.resolve(b?.channel?.post(m.reply, text)).catch(() => {})
+    const it = x[3] ? list.find((y) => numOf(y.q) === x[3]) : list.at(-1)
+    if (!it) { await reply(`Nothing waits on you as #${x[3]}: ${list.map((y) => `#${numOf(y.q)}`).join(', ')} ${list.length === 1 ? 'does' : 'do'}.`); return true }
+    const bot = botOf(it.id)
+    const by = (m.from?.name || '').trim() || ownerName(bot)
+    try {
+      const r = await limitAct(it.q.id, x[1].toLowerCase(), { minutes: Number(x[2]) || MORE[0], by, via: platOf(m.channel) })
+      await reply(r.said)
+    } catch (e) { await reply(e.message) }
+    return true
   }
 
   // ---------- What goes out ----------
@@ -1464,7 +1789,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     }
   }
   // Every few seconds: replies due to go again; drafts that have waited long enough for the asker to
-  // hear they're being checked with you (D8); runs past their longest.
+  // hear they're being checked with you (D8); runs at their time limit (atLimit).
   const ticker = setInterval(() => {
     if (data.outbox.some((x) => x.next <= Date.now())) flush().catch(() => {})
     for (const hid of mcpDirs.keys()) if (delegate.get(hid)?.state === 'ended') dropMcp(hid) // (stopped, or out of time)
@@ -1476,7 +1801,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
           q.checking = true
           queue(id, q, 'checking', `I'm checking this with ${you()}.`)
         }
-        if (q.state === 'answering' && q.runAt && Date.now() - Date.parse(q.runAt) > bot.limits.minutes * MINUTE_MS) stopRun(id, q, { why: 'timeout', by: null }).catch(() => {})
+        if (q.state === 'answering' && q.runAt && !q.stopping) atLimit(id, bot, q)
       }
     }
   }, Math.min(5000, Math.max(500, Math.floor(HOLD_MS / 4))))
@@ -1551,7 +1876,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   }
 
   // What someone did with its buttons, its modal or Stop (the channel's hear.act): only you decide a
-  // draft or a learning; Stop by whoever asked, or you.
+  // draft, a learning or a run at its time limit; Stop by whoever asked, or you.
   async function act(id, a) {
     const bot = botOf(id)
     const b = bots.get(id)
@@ -1575,9 +1900,14 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         memoryAct(id, mid, a.act, { by, via: 'slack' })
         return { ok: true }
       }
-      if (!['send', 'approve', 'edit', 'discard'].includes(a.act)) return { ok: false, error: `No such thing to do: ${a.act}` }
+      if (!['send', 'approve', 'edit', 'discard', 'continue', 'halt'].includes(a.act)) return { ok: false, error: `No such thing to do: ${a.act}` }
       const found = locate(a.q)
       if (!found || found.id !== id) return { ok: false, error: 'That isn\'t waiting any more' }
+      // (A run at its time limit: Continue, or Stop.)
+      if (a.act === 'continue' || a.act === 'halt') {
+        const r = await limitAct(a.q, a.act === 'halt' ? 'stop' : 'continue', { minutes: a.minutes, by, via: 'slack' })
+        return r.already ? { ok: false, error: r.said } : { ok: true }
+      }
       const r = await decide(a.q, { send: a.act !== 'discard', text: a.act === 'edit' ? a.text : undefined, by, via: 'slack' })
       if (r.already) return { ok: false, error: r.item.state === 'sent' ? 'It was sent already' : r.item.state === 'discarded' ? 'It was discarded already' : 'It isn\'t waiting any more' }
       if (r.item.state === 'draft' && r.item.problem) return { ok: false, error: r.item.problem }
@@ -1597,6 +1927,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       files: (q.outFiles || []).map((f) => ({ name: f.name, size: f.size })), warn: q.warn || null, try: !!q.try, queued: q.state === 'queued' || q.state === 'starting', stopped: q.state === 'stopped', ownerAsked: !!q.ownerAsked,
       change: q.change ? { mode: q.change.mode, branch: q.change.branch, stat: q.change.stat, diff: q.change.diff, files: q.change.files, pr: q.change.pr, approved: !!q.change.approved, failed: q.change.failed || null } : null,
       attached: (q.files || []).map((f) => ({ name: f.name, size: f.size })),
+      limit: waitsAtLimit(q) ? limitView(q) : null,
     }
   }
 
@@ -1962,8 +2293,18 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         return n
       },
     },
-    // What waits on you, for Needs You: drafts to send or discard, and what nothing could answer.
-    waiting: () => (on() ? [...bots.values()].flatMap((b) => [...b.st.questions.values()]).filter((q) => q.state === 'draft' && !q.try && !sending(q)).sort((a, b) => String(a.heardAt).localeCompare(String(b.heardAt))).map(viewOf) : []),
+    // What waits on you, for Needs You: drafts to send or discard, what nothing could answer, and runs
+    // at their time limit, to let carry on or stop.
+    waiting: () => (on() ? [...bots.values()].flatMap((b) => [...b.st.questions.values()]).filter((q) => (q.state === 'draft' || (q.state === 'answering' && q.ask)) && !q.try && !sending(q)).sort((a, b) => String(a.heardAt).localeCompare(String(b.heardAt))).map(viewOf) : []),
+    // Your decision about a run at its time limit (Needs You, on a computer or the phone).
+    limitAct,
+    // For a shared connection's routing (connhub.js): the bot your words in a direct message answer,
+    // a run of its at its time limit ("continue 10"), or null.
+    owes(from, platform, text) {
+      const x = DECIDE.exec(String(text || ''))
+      const list = x ? owedTo(from, platform) : []
+      return ((x?.[3] && list.find((y) => numOf(y.q) === x[3])) || list.at(-1))?.id || null
+    },
     // For Settings: its folders as they stand, which agent answers, and how many wait.
     async view(id) {
       const bot = botOf(id)
@@ -1982,7 +2323,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         folders,
         answerer: kind ? { kind, confined: kind === 'model' || !!readOnly(kind)?.confined } : null,
         answerers: { automatic: who.automatic, fallback: who.fallback, list: who.list.map((e) => ({ id: e.id, label: e.label, local: e.local, why: e.why, changes: botanswer.canMakeChanges(e) })) },
-        waiting: qs.filter((q) => q.state === 'draft' && !q.try && !sending(q)).length,
+        waiting: qs.filter((q) => (q.state === 'draft' || (q.state === 'answering' && q.ask)) && !q.try && !sending(q)).length,
         sending: data.outbox.filter((o) => o.bot === id).length,
         answering: qs.filter((q) => q.state === 'answering').length,
         // Questions asked of it since midnight here (not Try It's, nor its scheduled posts).

@@ -22,6 +22,8 @@
 //     [noanswer]                             says NO ANSWER, and why
 //     [notforme]                             says NOT FOR ME
 //     [work <s>]                             takes that many seconds (2 if not said)
+//     [then <s>]                             takes that many instead when its brief says it's
+//                                            picking up after its time limit
 //                                            and by what the bot's instructions say:
 //     [sign <text>]                          ends every answer with it
 //     [try-write <name>]                     tries to write <name> in its folder first: only when
@@ -176,8 +178,10 @@ function answerTurn(text) {
   state = 'working'
   began = Date.now()
   draw()
-  // (How long it takes is the question's to say: a [work] in the conversation around it isn't.)
-  const wait = Number((/\[work (\d+)\]/.exec(q) || [])[1] || 2)
+  // (How long it takes is the question's to say: a [work] in the conversation around it isn't. Picked
+  // up after its time limit, its brief says so, and [then] says how long it takes from there.)
+  const again = /reached your time limit after/.test(text) && /\[then (\d+)\]/.exec(q)
+  const wait = again ? Number(again[1]) : Number((/\[work (\d+)\]/.exec(q) || [])[1] || 2)
   setTimeout(() => {
     const out = []
     for (const f of fs.readdirSync(process.cwd()).filter((x) => /\.(md|txt)$/.test(x)).slice(0, 3)) tool('Read', { file_path: path.join(process.cwd(), f) })

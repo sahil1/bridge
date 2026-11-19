@@ -187,6 +187,7 @@ function whySaid(r, c) {
     case 'thread': return t('Rule {n}, a reply in a thread: {bot} answered there.', { n: n('thread'), bot })
     case 'last': return t('Rule {n}, a direct message: {bot} is the bot they asked last.', { n: n('last'), bot })
     case 'listen': return t('{bot} answers in that channel without a mention.', { bot })
+    case 'limit': return t('Your answer about {bot}\'s run at its time limit: it goes to {bot}.', { bot })
     case 'only': return t('Rule {n}: {bot} is the only bot they may ask here.', { n: n('among'), bot })
     case 'router': return t('Rule {n}: AI Assist picked {bot} from the bots\' descriptions.', { n: n('among'), bot })
     case 'unsure': return `${ai} ${t('Rule {n}: it goes to {bot}, as you set.', { n: n('unsure'), bot })}`.trim()

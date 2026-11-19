@@ -22,12 +22,14 @@
 //      may ask it; else it asks them: "Pricing Desk or Docs Helper?", with buttons in Slack, and in
 //      words elsewhere.
 // A message that only listens (a channel a bot answers in without a mention) goes to a bot that
-// listens there. Nothing in a question can pick a bot the asker may not ask: whatever it names, that
-// bot's rules apply after routing, as they always did (who may ask, channels, limits, folders, what
-// answers, MCP), so a question that names one it may not ask gets that bot's polite no. The routing
-// settings change only in Settings (and on its Routing page). Each decision is in the connection's
-// own record (which bot, and why: "#sales's default"), never the question's words; the question is
-// in that bot's record. Try a Message (dry) takes a message you make up through the same steps
+// listens there. Your "continue 10" or "stop" in a direct message, answering a bot whose run waits
+// on you at its time limit, goes to that bot before any of these (frontdesk.js owes). Nothing in a
+// question can pick a bot the asker may not ask: whatever it names, that bot's rules apply after
+// routing, as they always did (who may ask, channels, limits, folders, what answers, MCP), so a
+// question that names one it may not ask gets that bot's polite no. The routing settings change
+// only in Settings (and on its Routing page). Each decision is in the connection's own record
+// (which bot, and why: "#sales's default"), never the question's words; the question is in that
+// bot's record. Try a Message (dry) takes a message you make up through the same steps
 // (route) and only says where it would go: nothing posted, answered or kept, and no bot run.
 import { idOf, bare, failure, PLATFORMS as NAMES } from './connector.js'
 import * as conns from './connections.js'
@@ -204,6 +206,9 @@ export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner'
     // A reply in a thread without a mention: the bot that answered there, or no one.
     const thread = given !== undefined ? given : m.thread ? latestIn(list, channel, m.thread) : null
     if (!m.mention && !m.dm) return thread ? { to: thread, why: 'thread' } : null
+    // Your answer in a direct message to a bot's run at its time limit ("continue 10"): to that bot.
+    const owed = m.dm ? desk.owes?.(from, p, text) : null
+    if (owed) return { to: ids.includes(owed) ? owed : list[0].id, why: 'limit' }
     // 1. A command.
     if (m.command && m.command !== commandOf(c.name)) {
       const b = list.find((x) => commandOf(x.name) === m.command)
