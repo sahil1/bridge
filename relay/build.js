@@ -13,6 +13,12 @@ import { fileURLToPath } from 'node:url'
 const DIR = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(DIR, '..')
 export const TEXT = ['index.html', 'shell.js', 'sw.js', 'link.js', 'offline.js', 'manifest.webmanifest']
+// The page a Share Link opens (share.js), served only at a share's address, never the phone page's,
+// and the phone page's files never there (worker.js). link.js is both's.
+export const SHARE = ['share.html', 'share.js', 'share-sw.js']
+// ...and the page what a link shows runs in, at its own content address (Bridge AI's relay, with its
+// share domain), apart from the page holding the link's secret.
+export const FRAME = ['share-frame.html', 'share-frame.js']
 const ICONS = ['icon-512.png', 'apple-touch-icon.png', 'mark.svg']
 // The Bridge AI version these files are from, which the relay says at /_relay/health, so a computer
 // can check the page it serves against that version's (server/relaycheck.js).
@@ -25,10 +31,11 @@ export function linkSw(link) {
   return `self.bridgeLink = (() => {\n${link.replace(/^export /gm, '')}\nreturn { ${names.join(', ')} }\n})()\n`
 }
 
-// The page's files, as the relay serves them: { name: { text } | { b64 } }.
-export function pageFiles() {
+// The page's files, as the relay serves them: { name: { text } | { b64 } }. share: the Share Link
+// page's too (the relay serves both; the Android app's copy of the phone page has only its own).
+export function pageFiles({ share = true } = {}) {
   const files = {}
-  for (const f of TEXT) files[f] = { text: fs.readFileSync(path.join(DIR, 'web', f), 'utf8') }
+  for (const f of share ? [...TEXT, ...SHARE, ...FRAME] : TEXT) files[f] = { text: fs.readFileSync(path.join(DIR, 'web', f), 'utf8') }
   files['link-sw.js'] = { text: linkSw(files['link.js'].text) }
   for (const f of ICONS) {
     const p = [path.join(ROOT, 'dist', f), path.join(ROOT, 'public', f)].find((x) => fs.existsSync(x))
@@ -52,7 +59,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (!out) throw new Error('Usage: node relay/build.js --page <folder>')
     fs.rmSync(out, { recursive: true, force: true })
     fs.mkdirSync(out, { recursive: true })
-    const files = pageFiles()
+    const files = pageFiles({ share: false })
     for (const [name, f] of Object.entries(files)) fs.writeFileSync(path.join(out, name), f.b64 ? Buffer.from(f.b64, 'base64') : f.text)
     console.log(`${out} (the phone page, ${Object.keys(files).length} files, Bridge AI ${VERSION})`)
   } else {

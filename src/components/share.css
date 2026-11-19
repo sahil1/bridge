@@ -1,0 +1,34 @@
+/* Share Links (Share.jsx): the dialog that makes one, and the list in Settings › Sharing and Studio's Shared. */
+.share-dialog { width: min(600px, 100%); }
+.share-dialog h3 { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.share-body { display: grid; gap: 12px; }
+.share-body p { margin: 0; }
+.share-body fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; min-width: 0; }
+.share-body legend { font-weight: 600; font-size: 13px; margin-bottom: 6px; padding: 0; }
+.share-pick { display: flex; align-items: center; gap: 8px; min-height: 32px; cursor: pointer; }
+.share-sub { display: grid; gap: 6px; padding-left: 26px; }
+.share-sub .st-input { width: 100%; }
+.share-sub textarea.st-input { height: auto; min-height: 60px; padding: 8px 11px; resize: vertical; }
+.share-made { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.share-link { display: grid; gap: 8px; flex: 1 1 240px; min-width: 0; }
+.share-link .st-input, .share-row-link .st-input { width: 100%; min-width: 0; }
+.share-qr { width: 156px; height: 156px; }
+.btn.share-stop { color: var(--critical); background: transparent; border-color: color-mix(in srgb, var(--critical) 40%, var(--line-2)); }
+.btn.share-stop:not(:disabled):hover, .ghost-btn.share-stop:hover { background: color-mix(in srgb, var(--critical) 10%, transparent); }
+.ghost-btn.share-stop { color: var(--critical); }
+.shares { display: grid; gap: 12px; }
+.share-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.share-row { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--pane); min-width: 0; }
+.share-row.ended { opacity: .75; }
+.share-row-head { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.share-title { overflow-wrap: anywhere; min-width: 0; }
+.share-meta { overflow-wrap: anywhere; }
+.share-row-link { flex-wrap: wrap; }
+.share-row-link input { flex: 1 1 220px; }
+.share-opens ul, .share-ended ul { margin: 6px 0 0; padding-left: 18px; }
+.share-opens summary, .share-ended summary { cursor: pointer; min-height: 28px; display: list-item; }
+@media (max-width: 760px) {
+  .share-pick, .share-opens summary, .share-ended summary, .share-row .ghost-btn, .share-row .btn, .share-dialog .btn { min-height: 40px; min-width: 40px; }
+  .shares .share-row .st-input, .share-dialog .share-body .st-input { font-size: 16px; min-height: 40px; }
+  .share-dialog .seg button { height: 40px; }
+}

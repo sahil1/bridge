@@ -26,6 +26,11 @@ const CODE_TRIES = 5
 const WRONG_PER_DAY = 20 // wrong codes for an email in a day, past which it gets none for a day
 const CODES_PER_EMAIL = 5 // an hour
 const CODES_PER_NETWORK = 20 // an hour
+const SHARE_CODES_PER_ACCOUNT = 30 // codes for people its Share Links name, an hour
+const SHARE_PEOPLE = 30 // emails one Share Link names
+const SHARE_LINKS = 50 // an account's Share Links naming people at once (as many as Bridge AI keeps)
+const SHARE_PEOPLE_CALLS = 60 // times an account tells which people its links name, an hour
+const SHARE_CODES_PER_ADDRESS = 20 // codes to one address from every account's links together, an hour
 const FORMS_PER_NETWORK = 5 // requests from the website's form, an hour
 const MAX_DEVICES = 5
 const GRANT_MINUTES = 5
@@ -83,6 +88,9 @@ export const TABLES = [
   // What the relay last said of its limits (relayLimits), and codes sent each day.
   'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
   'CREATE TABLE IF NOT EXISTS daily (day TEXT NOT NULL, what TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, what))',
+  // The people a computer's Share Link names, each as a keyed hash of the link and their email (only
+  // this service can make it), until the link ends: codes go to those alone.
+  'CREATE TABLE IF NOT EXISTS share_people (account TEXT NOT NULL, link TEXT NOT NULL, hash TEXT NOT NULL, until INTEGER NOT NULL, PRIMARY KEY (account, link, hash))',
 ]
 const ready = new WeakMap() // a database whose tables are made
 function tables(db) {
@@ -99,6 +107,13 @@ const enc = new TextEncoder()
 const b64u = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 const unb64 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4)), (c) => c.charCodeAt(0))
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
+// A hash keyed with a secret of this service's own (made from SIGNING_KEY), so what's kept of an
+// email (a Share Link's people, how many codes went to one) can't be checked against a list of them.
+let keyedKey = null
+async function keyed(env, s) {
+  if (keyedKey?.[0] !== env.SIGNING_KEY) keyedKey = [env.SIGNING_KEY, await crypto.subtle.importKey('raw', await crypto.subtle.digest('SHA-256', enc.encode(`bridge keyed hash v1 ${env.SIGNING_KEY}`)), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])]
+  return hex(await crypto.subtle.sign('HMAC', keyedKey[1], enc.encode(s)))
+}
 const sha = async (s) => hex(await crypto.subtle.digest('SHA-256', enc.encode(s)))
 const iso = (t) => (t ? new Date(t).toISOString() : null)
 const ALNUM = 'abcdefghijklmnopqrstuvwxyz0123456789'
@@ -515,6 +530,68 @@ async function v1(req, env, url) {
     return json({ account: accountView(await ask(env, acct, kind, String(b.note ?? '').trim().slice(0, 500), 'app', dev.platform)) })
   }
   if (p === '/v1/request-public' && post) return requestPublic(req, env)
+  // The people a computer's Share Link names (Bridge AI's server/shares.js), when it's made: kept as
+  // keyed hashes of the link's id and each email, until the link ends (at most 8 days), so codes for
+  // that link go to them and nobody else. Told again, the link's list is replaced; told no one (the
+  // link stopped), it's forgotten. An account has SHARE_LINKS such links at once, and tells this
+  // SHARE_PEOPLE_CALLS times an hour.
+  const LINK = /^[\w-]{22}$/
+  if (p === '/v1/share-people' && post) {
+    const { acct, dev } = await signedIn(req, env)
+    active(acct)
+    if (dev.kind !== 'computer') refuse(403, 'computer', 'Only a computer names people for its links.')
+    const b = await body(req)
+    const link = String(b.link ?? '')
+    const emails = Array.isArray(b.emails) ? [...new Set(b.emails.map(clean))] : []
+    if (!LINK.test(link) || emails.length > SHARE_PEOPLE || emails.some((e) => e.length > 254 || !EMAIL.test(e))) refuse(400, 'invalid', `A link names 1 to ${SHARE_PEOPLE} email addresses.`)
+    const now = Date.now()
+    const calls = `p:${(await keyed(env, `share people ${acct.id}`)).slice(0, 32)}`
+    const r = await db.prepare('SELECT COUNT(*) AS n, MIN(at) AS first FROM sent WHERE key = ? AND at > ?').bind(calls, now - HOUR).first()
+    if ((r?.n || 0) >= SHARE_PEOPLE_CALLS) {
+      const retryAfter = Math.max(1, Math.ceil((r.first + HOUR - now) / 1000))
+      refuse(429, 'too-many', `Too many links named people in the last hour. Try again in ${minutes(retryAfter)}.`, { retryAfter })
+    }
+    await db.batch([db.prepare('DELETE FROM share_people WHERE until < ? OR (account = ? AND link = ?)').bind(now, acct.id, link), db.prepare('INSERT INTO sent (key, at) VALUES (?, ?)').bind(calls, now)])
+    if (!emails.length) return json({ ok: true, people: 0 })
+    const until = Math.min(Number(b.until) || 0, now + 8 * DAY)
+    if (!(until > now)) refuse(400, 'invalid', 'That link has ended.')
+    const live = await db.prepare('SELECT COUNT(DISTINCT link) AS links, COUNT(*) AS rows FROM share_people WHERE account = ?').bind(acct.id).first()
+    if ((live?.links || 0) >= SHARE_LINKS || (live?.rows || 0) + emails.length > SHARE_LINKS * SHARE_PEOPLE) refuse(429, 'too-many', `${SHARE_LINKS} links naming people are open at once already. Stop one first.`)
+    await db.batch(await Promise.all(emails.map(async (e) => db.prepare('INSERT INTO share_people (account, link, hash, until) VALUES (?, ?, ?, ?)').bind(acct.id, link, await keyed(env, `share person ${acct.id} ${link} ${e}`), until))))
+    return json({ ok: true, people: emails.length })
+  }
+  // A code for someone a computer's Share Link names: made and checked on that computer, never kept
+  // here, only emailed to them, saying whose link it is, and only to an email that link named
+  // (share-people). Nothing about what's shared comes here. An account sends SHARE_CODES_PER_ACCOUNT
+  // an hour, CODES_PER_EMAIL of them to one address, and one address gets SHARE_CODES_PER_ADDRESS an
+  // hour from every account together (apart from its sign-in codes), so no account uses up another's
+  // codes to it; the email is the same words each time.
+  if (p === '/v1/share-code' && post) {
+    const { acct, dev } = await signedIn(req, env)
+    active(acct)
+    if (dev.kind !== 'computer') refuse(403, 'computer', 'Only a computer sends codes for its links.')
+    const b = await body(req)
+    const to = clean(b.to)
+    const link = String(b.link ?? '')
+    if (to.length > 254 || !EMAIL.test(to) || !LINK.test(link)) refuse(400, 'invalid', 'That doesn\'t look like an email address.')
+    const code = String(b.code ?? '')
+    if (!/^\d{8,12}$/.test(code)) refuse(400, 'invalid', 'A code is 8 digits or more.')
+    const now = Date.now()
+    if (!(await db.prepare('SELECT 1 FROM share_people WHERE account = ? AND link = ? AND hash = ? AND until > ?').bind(acct.id, link, await keyed(env, `share person ${acct.id} ${link} ${to}`), now).first())) refuse(403, 'not-named', 'That link doesn\'t name this email.')
+    const limits = [[`s:${(await keyed(env, `share from ${acct.id}`)).slice(0, 32)}`, SHARE_CODES_PER_ACCOUNT, 'your links'], [`t:${(await keyed(env, `share to ${acct.id} ${to}`)).slice(0, 32)}`, CODES_PER_EMAIL, 'this email'], [`g:${(await keyed(env, `share to ${to}`)).slice(0, 32)}`, SHARE_CODES_PER_ADDRESS, 'this email']]
+    for (const [key, max, who] of limits) {
+      const r = await db.prepare('SELECT COUNT(*) AS n, MIN(at) AS first FROM sent WHERE key = ? AND at > ?').bind(key, now - HOUR).first()
+      if ((r?.n || 0) >= max) {
+        const retryAfter = Math.max(1, Math.ceil((r.first + HOUR - now) / 1000))
+        refuse(429, 'too-many', `Too many codes for ${who} in the last hour. Try again in ${minutes(retryAfter)}.`, { retryAfter })
+      }
+    }
+    try {
+      await mail(env, to, `${code} is your code to open a link from ${acct.email}`, `${acct.email} shared something with you from Bridge AI, and the link asked for your email. To open it, enter this code on that page:\n\n${code}\n\nIt works for ${CODE_MINUTES} minutes. If you didn't ask for it, ignore this email: nothing opens without the code.\n\nBold Bridge`)
+    } catch (e) { refuse(502, 'unsent', `The email with the code couldn't be sent just now (${e.message}).`) }
+    await db.batch([...limits.map(([k]) => db.prepare('INSERT INTO sent (key, at) VALUES (?, ?)').bind(k, now)), db.prepare('DELETE FROM sent WHERE at < ?').bind(now - HOUR)])
+    return json({ sent: true })
+  }
   const del = /^\/v1\/devices\/([a-z0-9]{12})$/.exec(p)
   if (del && req.method === 'DELETE') {
     const { acct, dev } = await signedIn(req, env)
@@ -541,7 +618,7 @@ async function v1(req, env, url) {
 // Everything kept for an account goes: the account, its devices, requests, history and counts.
 async function forget(db, acct) {
   await db.batch([
-    ...['devices', 'grants', 'requests', 'history', 'usage', 'usage_days'].map((t) => db.prepare(`DELETE FROM ${t} WHERE account = ?`).bind(acct.id)),
+    ...['devices', 'grants', 'requests', 'history', 'usage', 'usage_days', 'share_people'].map((t) => db.prepare(`DELETE FROM ${t} WHERE account = ?`).bind(acct.id)),
     db.prepare('DELETE FROM codes WHERE email = ?').bind(acct.email),
     db.prepare('DELETE FROM accounts WHERE id = ?').bind(acct.id),
   ])

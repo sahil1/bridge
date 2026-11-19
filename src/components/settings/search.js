@@ -29,6 +29,9 @@ export const SETTINGS = [
     ['keep-agents', tx('Keep agents running when Bridge AI quits'), 'quit stop agents running', { near: 'runtime' }],
     ['resume-work', tx('Pick up unfinished work after an update, a crash or a restart'), 'resume continue crash restart update', { near: 'default-agent' }],
   ]),
+  ...at('sharing', [
+    ['shares', tx('Share Links'), 'share link sharing shared public url outside people password email code expire stop qr'],
+  ]),
   ...at('agents', [
     ['agent-list', tx('Install an agent'), 'agents install sign in claude codex gemini copilot cursor opencode cli'],
     ['consult', tx('Your Chief of Staff can consult'), 'consult second opinion bridge ask models', { near: 'agent-list' }],

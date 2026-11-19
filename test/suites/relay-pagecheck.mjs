@@ -5,15 +5,17 @@
 // name. A newer release: compared with that release's files from GitHub (asked once, then kept),
 // fine when they match and said when they don't; a version with no release on GitHub, or one that
 // isn't a version at all (GitHub not asked), said as not a release. A relay from before it said
-// its version: compared with this computer's own. Nothing sent but GETs with no body, to the page's
-// own files and /_relay/health. The relay not answering: said as not checked, and a finding from
+// its version: compared with this computer's own. The Share Link page the same, from a share's
+// address (<id>-<8 letters>): a changed share.js said by name; a release from before Share Links,
+// serving none, fine; one serving a page its version never had, said. Nothing sent but GETs with no
+// body, to the page's own files and /_relay/health. The relay not answering: said as not checked, and a finding from
 // before isn't dropped for it. Settings opening checks again only when the last check is 10
 // minutes old; Check again at once.
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
 import { ROOT, OUT, checks } from '../lib/harness.mjs'
-import { pageFiles, TEXT } from '../../relay/build.js'
+import { pageFiles, TEXT, SHARE, FRAME } from '../../relay/build.js'
 
 const { ok, done } = checks('relay-pagecheck')
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
@@ -24,6 +26,7 @@ const listen = (srv) => new Promise((resolve) => srv.listen(0, '127.0.0.1', () =
 let served = {} // name -> text, in place of the real one
 let says = VERSION // the version /_relay/health says
 let down = false
+let noShare = false // the relay serves no Share Link page (one from before them)
 const asked = []
 const relaySrv = http.createServer((req, res) => {
   let n = 0
@@ -33,6 +36,7 @@ const relaySrv = http.createServer((req, res) => {
     if (down) { res.writeHead(503); return res.end() }
     if (req.url === '/_relay/health') { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ ok: true, build: 'abc', ...(says === undefined ? {} : { version: says }) })) }
     const name = req.url === '/' ? 'index.html' : req.url.slice(1)
+    if (noShare && SHARE.includes(name)) { res.writeHead(404); return res.end() }
     const text = served[name] ?? files[name]?.text
     if (text == null) { res.writeHead(404); return res.end() }
     res.end(text)
@@ -67,9 +71,12 @@ try {
   let c = await run()
   ok(c.on && c.ok && c.version === VERSION && !c.why && !c.differs.length && !c.error, 'the relay says this computer\'s version and serves its page: fine', c)
   ok(!fromGitHub.length, 'compared with this computer\'s own copy: GitHub isn\'t asked', fromGitHub)
-  ok(asked.every((a) => a.m === 'GET' && a.body === 0 && a.host === `${id}.localhost:${relayPort}`) && JSON.stringify([...new Set(asked.map((a) => a.u))].sort()) === JSON.stringify(['/', '/_relay/health', ...page.filter((n) => n !== 'index.html').map((n) => `/${n}`)].sort()), 'nothing sent but GETs with no body, to the page\'s own files and /_relay/health at this computer\'s address', asked)
+  const own = asked.filter((a) => a.host === `${id}.localhost:${relayPort}`)
+  const shared = asked.filter((a) => a.host !== `${id}.localhost:${relayPort}`)
+  ok(asked.every((a) => a.m === 'GET' && a.body === 0) && JSON.stringify([...new Set(own.map((a) => a.u))].sort()) === JSON.stringify(['/', '/_relay/health', ...page.filter((n) => n !== 'index.html').map((n) => `/${n}`)].sort()), 'nothing sent but GETs with no body, to the page\'s own files and /_relay/health at this computer\'s address', asked)
+  ok(shared.length === SHARE.length && shared.every((a) => new RegExp(`^${id}-[a-z2-7]{8}\\.localhost:${relayPort}$`).test(a.host)) && JSON.stringify(shared.map((a) => a.u).sort()) === JSON.stringify(SHARE.map((n) => `/${n}`).sort()), '...and the Share Link page\'s, at a share\'s address beside it', shared)
   ok(JSON.stringify(pc.PAGE.slice().sort()) === JSON.stringify(page.slice().sort()), 'every file the page runs is checked (the icons are pictures)', pc.PAGE)
-  for (const name of ['shell.js', 'sw.js', 'link-sw.js']) {
+  for (const name of ['shell.js', 'sw.js', 'link-sw.js', 'share.js', 'share-sw.js']) {
     served = { [name]: `${files[name].text}\n// changed for everyone\n` }
     c = await run()
     ok(!c.ok && c.why === 'differs' && JSON.stringify(c.differs) === JSON.stringify([name]) && c.version === VERSION, `${name} changed: said, by name`, c)
@@ -78,17 +85,27 @@ try {
 
   // ---------- Another version: the release's, from GitHub ----------
   says = '99.0.0'
-  releases['99.0.0'] = Object.fromEntries(TEXT.map((n) => [n, n === 'shell.js' ? `${files[n].text}\n// 99.0.0's own\n` : files[n].text]))
+  releases['99.0.0'] = Object.fromEntries([...TEXT, ...SHARE, ...FRAME].map((n) => [n, n === 'shell.js' ? `${files[n].text}\n// 99.0.0's own\n` : files[n].text]))
   served = { 'shell.js': releases['99.0.0']['shell.js'] }
   fromGitHub.length = 0
   c = await run()
   ok(c.ok && c.version === '99.0.0' && c.own === VERSION && !c.why, 'a newer release: its files are compared with that release\'s, and match', c)
-  ok(fromGitHub.length === TEXT.length && fromGitHub.every((u) => u.startsWith('/v99.0.0/relay/web/')), 'from GitHub at its tag, its source files (link-sw.js made from its link.js as the relay makes it)', fromGitHub)
+  ok(fromGitHub.length === TEXT.length + SHARE.length + FRAME.length && fromGitHub.every((u) => u.startsWith('/v99.0.0/relay/web/')), 'from GitHub at its tag, its source files (link-sw.js made from its link.js as the relay makes it)', fromGitHub)
   await run()
-  ok(fromGitHub.length === TEXT.length, 'and kept: a release\'s files never change, so GitHub isn\'t asked again', fromGitHub.length)
+  ok(fromGitHub.length === TEXT.length + SHARE.length + FRAME.length, 'and kept: a release\'s files never change, so GitHub isn\'t asked again', fromGitHub.length)
   served = { 'shell.js': releases['99.0.0']['shell.js'], 'index.html': `${files['index.html'].text}<script src="https://example.com/x.js"></script>` }
   c = await run()
   ok(!c.ok && c.why === 'differs' && JSON.stringify(c.differs) === JSON.stringify(['index.html']) && c.version === '99.0.0', 'and a file that isn\'t that release\'s is said', c)
+  // A release from before Share Links: no page for them there, and none served.
+  says = '98.0.0'
+  releases['98.0.0'] = Object.fromEntries(TEXT.map((n) => [n, files[n].text]))
+  served = {}
+  noShare = true
+  c = await run()
+  ok(c.ok && c.version === '98.0.0', 'a release from before Share Links, serving no page for them: fine', c)
+  noShare = false
+  c = await run()
+  ok(!c.ok && c.why === 'differs' && SHARE.every((n) => c.differs.includes(n)), '...and one serving a Share Link page its version never had: said', c)
   says = '99.1.0'
   served = {}
   c = await run()

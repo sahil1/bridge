@@ -11,6 +11,10 @@
 // relay can't change. A file that differs, or a version that was never released, and Settings ›
 // Devices says so, with what to do. Nothing is sent but those requests, and nothing waits on them.
 //
+// The page a Share Link opens (share.html, share.js, share-sw.js) is checked the same way, from a
+// share's address (one made up for the check: any opens the same page): a relay that serves none (one
+// from before Share Links) is fine, as long as that version had none either.
+//
 // What it catches: the page changed for everyone, by whoever runs the relay or took it over. What it
 // can't: a page changed only for some phones (the relay can tell this computer's requests from a
 // phone's). That's why the apps carry their own, and why a browser on the relay says so.
@@ -21,7 +25,7 @@ import http from 'node:http'
 import https from 'node:https'
 import { ROOT } from './paths.js'
 import * as relay from './relay.js'
-import { TEXT, linkSw, pageFiles } from '../relay/build.js'
+import { TEXT, SHARE, FRAME, linkSw, pageFiles } from '../relay/build.js'
 import { RELEASE_VERSION } from '../shared/version.js'
 
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
@@ -62,7 +66,7 @@ function get(url) {
 
 // What each file of a version should be, by its SHA-256: this computer's own, or a release's.
 let own = null
-const ownPage = () => (own ||= Object.fromEntries(PAGE.map((n) => [n, sha(Buffer.from(pageFiles()[n].text, 'utf8'))])))
+const ownPage = () => (own ||= Object.fromEntries([...PAGE, ...SHARE, ...FRAME].map((n) => [n, sha(Buffer.from(pageFiles()[n].text, 'utf8'))])))
 const releases = new Map() // version -> its files' hashes (a release's never change)
 async function released(version) {
   if (releases.has(version)) return releases.get(version)
@@ -70,9 +74,14 @@ async function released(version) {
   const text = Object.fromEntries(await Promise.all(TEXT.map(async (n) => [n, await get(`${at}/${n}`)])))
   const out = Object.fromEntries(TEXT.map((n) => [n, sha(text[n])]))
   out['link-sw.js'] = sha(Buffer.from(linkSw(text['link.js'].toString('utf8')), 'utf8'))
+  // A release from before Share Links has no page for them: none (null).
+  for (const n of [...SHARE, ...FRAME]) out[n] = await get(`${at}/${n}`).then(sha, (e) => { if (e.status === 404) return null; throw e })
   releases.set(version, out)
   return out
 }
+// A share's address beside a computer's on Bridge AI's relay: <id>-<8 letters>.<domain>.
+const B32 = 'abcdefghijklmnopqrstuvwxyz234567'
+const shareBase = (base) => { const u = new URL(base); const [id, ...rest] = u.host.split('.'); return `${u.protocol}//${id}-${[...crypto.randomBytes(8)].map((x) => B32[x & 31]).join('')}.${rest.join('.')}` }
 
 // One check, now: the relay's page against the version it says it runs.
 export async function check() {
@@ -86,6 +95,12 @@ export async function check() {
       const health = JSON.parse((await get(`${base}/_relay/health`)).toString('utf8'))
       const version = typeof health?.version === 'string' ? health.version.slice(0, 40) : null
       const served = Object.fromEntries(await Promise.all(PAGE.map(async (n) => [n, sha(await get(`${base}${pathOf(n)}`))])))
+      const at = shareBase(base)
+      for (const n of SHARE) served[n] = await get(`${at}/${n}`).then(sha, (e) => { if (e.status === 404) return null; throw e })
+      // With its share domain: the page what a link shows runs in, from a link's content address.
+      const domain = typeof health?.shareDomain === 'string' && /^[a-z0-9.-]{3,200}$/.test(health.shareDomain) ? health.shareDomain : null
+      const content = domain ? (() => { const u = new URL(at); return `${u.protocol}//${u.hostname.split('.')[0]}.${domain}${u.port ? `:${u.port}` : ''}` })() : null
+      for (const n of FRAME) served[n] = content ? await get(`${content}${n === 'share-frame.html' ? '/_relay/frame' : `/${n}`}`).then(sha, (e) => { if (e.status === 404) return null; throw e }) : undefined
       let want = null
       let why = null
       // No version said (a relay from before it did): it's this computer's own, or it's changed.
@@ -97,7 +112,7 @@ export async function check() {
           throw e
         })
       }
-      const differs = want ? PAGE.filter((n) => served[n] !== want[n]) : []
+      const differs = want ? [...PAGE, ...SHARE, ...FRAME].filter((n) => served[n] !== undefined && served[n] !== want[n]) : []
       if (differs.length) why = 'differs'
       last = { on: true, at: Date.now(), version: version || VERSION, own: VERSION, ok: !why, differs, why, error: null }
     } catch (e) {

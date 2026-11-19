@@ -143,7 +143,7 @@ export function Menu({ x, y, items, onClose, className = '', heading = null }) {
 // What the menu offers for a file or folder. `act(op, entry)` does it.
 // send: another device is linked, so it can be sent there; copyHere: its label, when this is another
 // device's file in a computer's window (Copy to this computer).
-export function menuItems(entry, act, { onMention, send = false, copyHere = null, assist = null } = {}) {
+export function menuItems(entry, act, { onMention, send = false, copyHere = null, assist = null, share = false } = {}) {
   const dir = !!entry.dir
   const root = entry.path === ''
   return [
@@ -159,7 +159,8 @@ export function menuItems(entry, act, { onMention, send = false, copyHere = null
     'sep',
     copyHere && { label: copyHere, icon: 'download', run: () => act('copyHere', entry) },
     send && { label: t('Send to…'), icon: 'send', run: () => act('send', entry) },
-    (copyHere || send) && 'sep',
+    share && { label: t('Share Link…'), icon: 'link', run: () => act('share', entry) },
+    (copyHere || send || share) && 'sep',
     { label: t('Copy path'), icon: 'copy', run: () => act('copyPath', entry) },
     !root && { label: t('Copy relative path'), icon: 'copy', run: () => act('copyRel', entry) },
     !root && 'sep',

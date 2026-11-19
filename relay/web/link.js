@@ -127,6 +127,66 @@ export async function computerWelcome(host, hello, { known, pairing }) {
   return { welcome, session: await sessionKeys(ikm, th, 'computer'), newDevice: !device && { key: hello.d, name: hello.name, pairId: hello.pair.id }, device }
 }
 
+// ---------- share links ----------
+// A link the computer's owner gave someone (Share Links, server/shares.js): its secret, 32 random
+// bytes, is in the link's fragment (#…), which a browser never sends anywhere, so the relay never
+// has it. The viewer's page (share.js) and the computer each prove they hold it, as a pairing code
+// does (an HMAC over the handshake, under keys of their own: a share's secret can never pass for a
+// pairing code), and the session keys come from fresh keys on both ends, the computer's own key and
+// the secret, so the relay, which sees the handshake, can neither read nor step in. The share is
+// named by an id made from the secret (not the secret), which is all the relay sees of it.
+//   viewer:   { t: 'hello', v: 1, view: 1, e, s: shareId, proof: HMAC(k, 'viewer' | e) }
+//   computer: { t: 'welcome', e: eH, h: H, proof: HMAC(k, 'computer' | th) }, th = SHA-256(e | eH | H)
+//   keys:     HKDF(ECDH(eV,eH) | ECDH(eV,H) | HKDF(secret, 'bridge share psk v1'), th)
+// There's no viewer's own key: the secret is what lets someone in, and the computer then asks for
+// the share's password or a code sent to the viewer's email, inside the sealed session.
+export const newShareSecret = () => b64u(globalThis.crypto.getRandomValues(new Uint8Array(32)))
+const shareBytes = (secret) => { const b = unb64u(secret); if (b.byteLength !== 32) throw new Error('Not a share link'); return b }
+const shareMac = (secret) => hkdf(shareBytes(secret), new Uint8Array(32), 'bridge share v1', 'hmac')
+export const shareId = async (secret) => b64u((await hkdf(shareBytes(secret), new Uint8Array(32), 'bridge share id v1', 'bits')).subarray(0, 16))
+const sharePsk = (secret) => hkdf(shareBytes(secret), new Uint8Array(32), 'bridge share psk v1', 'bits')
+const shareSession = async (ikm, th, mine) => {
+  const v2h = await hkdf(ikm, th, 'bridge share v1 viewer to computer')
+  const h2v = await hkdf(ikm, th, 'bridge share v1 computer to viewer')
+  return mine === 'viewer' ? new Session(v2h, h2v) : new Session(h2v, v2h)
+}
+
+// Viewer, step 1.
+export async function viewerHello(secret) {
+  const eph = await newKey(true)
+  const e = await rawPublic(eph)
+  const hello = { t: 'hello', v: 1, view: 1, e: b64u(e), s: await shareId(secret), proof: b64u(await mac(await shareMac(secret), 'viewer', e)) }
+  return { hello, eph, e }
+}
+
+// Viewer, step 2: the computer's answer checked (it holds the secret too), and the session.
+export async function viewerFinish(state, secret, welcome) {
+  if (welcome?.t !== 'welcome') throw new Error(welcome?.why || 'refused')
+  const eH = unb64u(welcome.e)
+  const H = unb64u(welcome.h)
+  const th = await sha256(cat(state.e, eH, H))
+  if (!welcome.proof || !(await macOk(await shareMac(secret), 'computer', th, unb64u(welcome.proof)))) throw new Error('unchecked')
+  const ikm = cat(await dh(state.eph.privateKey, eH), await dh(state.eph.privateKey, H), await sharePsk(secret))
+  return shareSession(ikm, th, 'viewer')
+}
+
+// Computer: answer a viewer's hello. `secretOf(id)` gives the share's secret, or null for none
+// (ended, stopped, never made): refused then, in the clear, as is a proof that doesn't check out.
+export async function computerShareWelcome(host, hello, secretOf) {
+  if (hello?.t !== 'hello' || hello.v !== 1 || hello.view !== 1 || typeof hello.s !== 'string' || typeof hello.e !== 'string' || typeof hello.proof !== 'string') return { refuse: 'unsupported' }
+  const e = unb64u(hello.e)
+  if (e.byteLength !== 65) return { refuse: 'bad-key' }
+  const secret = secretOf(hello.s)
+  if (!secret) return { refuse: 'no-share' }
+  const k = await shareMac(secret)
+  if (!(await macOk(k, 'viewer', e, unb64u(hello.proof)))) return { refuse: 'no-share' }
+  const eph = await newKey(true)
+  const eH = await rawPublic(eph)
+  const th = await sha256(cat(e, eH, host.public))
+  const ikm = cat(await dh(eph.privateKey, e), await dh(host.privateKey, e), await sharePsk(secret))
+  return { welcome: { t: 'welcome', e: b64u(eH), h: b64u(host.public), proof: b64u(await mac(k, 'computer', th)) }, session: await shareSession(ikm, th, 'computer') }
+}
+
 // ---------- sealed records ----------
 // AES-256-GCM, a key each way, the nonce a counter: the link is ordered, so a record replayed,
 // dropped or reordered by the relay fails to open and ends the session.
