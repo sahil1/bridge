@@ -21,6 +21,14 @@ export const IS_WIN = process.platform === 'win32'
 export const IS_MAC = process.platform === 'darwin'
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+// Windows: PowerShell's module cache that every kit shares (startKit), made once as a suite starts,
+// so a kit's first process list doesn't build it while a test waits.
+if (IS_WIN) {
+  const warm = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Import-Module CimCmdlets; Get-CimInstance Win32_Process -Property ProcessId | Out-Null'], { env: { ...process.env, PSModuleAnalysisCachePath: path.join(os.tmpdir(), 'bridge-tests-ModuleAnalysisCache') }, stdio: 'ignore', windowsHide: true })
+  warm.on('error', () => {})
+  warm.unref()
+}
+
 // Each kit's server needs its key (server/apiauth.js), which it makes in its data folder as it starts.
 // Every test gets it without asking: fetch to a kit's address sends it (unless the call gives an
 // Authorization of its own), and each browser context has each kit's cookie, as the desktop app's
@@ -219,7 +227,10 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   // stand-in instead (stand-ins/calltap.cjs, its loudness in bin/calltap.json). Only on a Mac, as
   // in the app: elsewhere a meeting records the mic only.
   if (process.platform === 'darwin') base.BRIDGE_CALLTAP = program('calltap', fs.readFileSync(path.join(TEST, 'stand-ins', 'calltap.cjs'), 'utf8'))
-  if (IS_WIN) Object.assign(base, { USERPROFILE: home, APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'), SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec, PATHEXT: process.env.PATHEXT, TEMP: os.tmpdir(), TMP: os.tmpdir() })
+  // (PowerShell's module cache, which lives in LOCALAPPDATA, shared by every kit: built from scratch in
+  // each kit's own home it made the process list Preview and Share Links ask for take 15 s and more,
+  // where a computer's own, kept from earlier, takes a moment.)
+  if (IS_WIN) Object.assign(base, { USERPROFILE: home, APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'), SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec, PATHEXT: process.env.PATHEXT, TEMP: os.tmpdir(), TMP: os.tmpdir(), PSModuleAnalysisCachePath: path.join(os.tmpdir(), 'bridge-tests-ModuleAnalysisCache') })
   else base.BRIDGE_SHELL = base.SHELL = '/bin/sh'
   const log = fs.openSync(path.join(dir, 'server.log'), 'w')
   const more = typeof env === 'function' ? env({ bin, data, home, PATH }) : env
