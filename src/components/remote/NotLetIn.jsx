@@ -32,10 +32,18 @@ export default function NotLetIn({ children }) {
     <div className="crash-screen letin-screen" role="alert">
       <div className="crash-card">
         <Icon name="lock" size={28} />
-        <h1>{out.through ? t('{computer} hasn\'t let {through} in', { computer, through: out.through }) : t('{computer} hasn\'t let this device in', { computer })}</h1>
-        {out.through && <p className="muted">{t('This device comes through {through}.', { through: out.through })}</p>}
-        <p>{t('On {computer}: Settings › Remote Access › Which Devices May Connect.', { computer })}</p>
-        <p className="muted small">{t('This opens by itself once it does.')}</p>
+        {out.update != null
+          ? <>
+            {/* The computer it comes through is too old to say which of its devices it's for. */}
+            <h1>{t('Update Bridge AI on {through}', { through: out.through || t('That computer') })}</h1>
+            <p>{t('{computer} is used from the devices of {through} only once Bridge AI there is newer.', { computer, through: out.through || t('That computer') })}{out.update ? ` ${t('It has {version}.', { version: out.update })}` : ''}</p>
+          </>
+          : <>
+            <h1>{out.through ? t('{computer} hasn\'t let {through} in', { computer, through: out.through }) : t('{computer} hasn\'t let this device in', { computer })}</h1>
+            {out.through && <p className="muted">{t('This device comes through {through}.', { through: out.through })}</p>}
+            <p>{t('On {computer}: Settings › Remote Access › Which Devices May Connect.', { computer })}</p>
+            <p className="muted small">{t('This opens by itself once it does.')}</p>
+          </>}
         <div className="crash-acts">
           {home && <button type="button" className="btn" onClick={() => goMachine(null)}><Icon name="back" size={12} /> {t('Back to {name}', { name: home })}</button>}
           {phoneApp && <button type="button" className="btn" onClick={phoneApp.start}><Icon name="phone" size={12} /> {t('Start screen')}</button>}

@@ -94,7 +94,7 @@ export const notLetIn = { get: () => shut, subscribe: (fn) => { shutSubs.add(fn)
 function shutOut(url, data) {
   const at = url.startsWith(`${BASE}/api/`) ? BASE : url.startsWith('/api/') ? '' : null
   if (shut || at == null || data?.code !== 'notLetIn') return
-  shut = { computer: String(data.computer || ''), through: data.through ? String(data.through) : null, at }
+  shut = { computer: String(data.computer || ''), through: data.through ? String(data.through) : null, update: typeof data.update === 'string' ? data.update : null, at }
   for (const f of shutSubs) f(shut)
 }
 

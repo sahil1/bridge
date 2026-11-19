@@ -412,7 +412,7 @@ const DROP = new Set(['host', 'connection', 'origin', 'referer', 'cookie', 'cont
 const DROP_BACK = new Set(['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'keep-alive', 'set-cookie'])
 // Which of its own devices another of your computers says a request is for (machines.js): taken
 // from a computer only, dropped from anything else's.
-const FOR = /^x-bridge-for-(id|name|kind|key)$/i
+const FOR = /^x-bridge-for(-(id|name|kind|key))?$/i
 const forOf = (h) => {
   const get = (k) => { const v = (Array.isArray(h) ? h : []).find(([x]) => String(x).toLowerCase() === k)?.[1]; return typeof v === 'string' && v ? v : null }
   const forId = get('x-bridge-for-id')

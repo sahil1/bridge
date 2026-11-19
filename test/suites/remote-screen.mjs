@@ -541,6 +541,11 @@ try {
     // A phone paired with Laptop, looking at Studio through it.
     const lp = await linkAs(rb.url, { code: (await laptop.api('/relay/pair', {})).pairing.code, name: 'Pocket', about: { name: 'Pocket' } })
     const lph = over(lp)
+    // First seen at Studio through Laptop with a password set there: New, let in at Studio.
+    await lph.request('GET', `/m/${S.id}/api/fleet`)
+    const pkS = await until(async () => (await studio.api('/remote')).access.devices.find((d) => d.name === 'Pocket' && d.through), 6000, 200)
+    ok(pkS?.fresh === true, 'Pocket, first seen at Studio through Laptop: New there', pkS)
+    if (pkS && !pkS.allowed) await studio.api('/remote/devices', { id: pkS.id, allowed: true })
     const v2 = lph.socket(`/m/${S.id}/api/remote/view?source=screen:`)
     await through(v2)
     ok(!!msg(v2, 'password') && !!msg(v2, 'hello'), 'a phone paired with Laptop sees Studio through it, asked for the password too')
@@ -582,6 +587,12 @@ try {
   await part('your other devices told: each session, control taken and an ask, with Stop and Block This Device', async () => {
     const tb = await linkAs(rb.url, { code: (await laptop.api('/relay/pair', {})).pairing.code, name: 'Tablet', about: { name: 'Tablet' } })
     const tbh = over(tb)
+    // Let in at Laptop, and at Studio, where it's first seen through Laptop with a password set (New).
+    const tbL = await until(async () => (await laptop.api('/remote')).access.devices.find((d) => d.name === 'Tablet'), 8000, 200)
+    if (tbL && !tbL.allowed) await laptop.api('/remote/devices', { id: tbL.id, allowed: true })
+    await tbh.request('GET', `/m/${S.id}/api/fleet`)
+    const tbS = await until(async () => (await studio.api('/remote')).access.devices.find((d) => d.name === 'Tablet' && d.through), 6000, 200)
+    if (tbS && !tbS.allowed) await studio.api('/remote/devices', { id: tbS.id, allowed: true })
     const sees = (s) => s.sessions.find((x) => x.by.name === 'Phone')
     // Nothing set up anywhere: never silent all the same.
     const v0 = ph.socket('/api/remote/view?source=screen:')

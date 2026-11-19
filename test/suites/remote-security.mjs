@@ -251,6 +251,14 @@ try {
   await studio.api('/remote/password', { password: PW })
   const idle = () => until(async () => !(await studio.api('/remote')).sessions.length, 6000, 100)
   const V = '/api/remote/view?source=screen:'
+  // A device of Laptop's, seen at Studio through Laptop (once it asks something there), and let in
+  // there when it's New: its entry as it was first listed.
+  const letInVia = async (dev, name) => {
+    await dev.request('GET', `/m/${S.id}/api/fleet`)
+    const e = await until(async () => (await studio.api('/remote')).access.devices.find((d) => d.name === name && d.through === 'Laptop'), 6000, 200)
+    if (e && !e.allowed) await studio.api('/remote/devices', { id: e.id, allowed: true })
+    return e
+  }
 
   // ---------- the lockout, raced ----------
   await part('wrong passwords at once can\'t get past the lockout', async () => {
@@ -311,6 +319,9 @@ try {
     ok(msg(v, 'error')?.code === 'device' && /Laptop doesn't let Pocket connect/.test(msg(v, 'error').why) && !msg(v, 'password'), 'Pocket, unticked at Laptop, can\'t reach Studio\'s screen through it', msg(v, 'error'))
     ok(!(await studio.api('/remote')).log.some((e) => e.for === 'Pocket'), 'it never reached Studio')
     await laptop.api('/remote/devices', { id: POCKET, allowed: true })
+    // First seen at Studio through Laptop, with Studio's password set: New there, let in at Studio.
+    const pkAt = await letInVia(pk, 'Pocket')
+    ok(pkAt?.fresh === true && pkAt.through === 'Laptop', 'Pocket, first seen at Studio through Laptop with a password set: New there, until let in at Studio', pkAt)
     // Wrong passwords through Laptop: that device locked out through it, never Laptop itself.
     for (let i = 0; i < ACCESS.tries; i++) {
       const x = pk.socket(`/m/${S.id}${V}`)
@@ -723,6 +734,8 @@ try {
     ok(lt.msgs.some((m) => m?.code === 'notLetIn' && m.computer === 'Studio'), 'nor a terminal of Studio\'s from Laptop', lt.msgs)
     const said = await until(async () => { await laptop.api(`/needs-you?fresh=${S.id}`); return (await laptop.api('/machines')).machines.find((m) => m.id === S.id && m.notLetIn) }, 15000, 500)
     ok(!!said, 'Laptop\'s list of its computers says Studio hasn\'t let it in', said && { name: said.name, notLetIn: said.notLetIn })
+    const mapped = (await laptop.api('/agent-map')).devices.find((d) => d.id === S.id)
+    ok(!said.agents?.length && !said.needs?.length && mapped?.notLetIn && !mapped.agents.length, 'and keeps nothing Studio told it before: no agents, nothing waiting, said as not let in', { agents: said.agents?.length, map: mapped && { notLetIn: mapped.notLetIn, agents: mapped.agents.length } })
     await studio.api('/remote/devices', { id: LAPTOP, allowed: true })
     const back = await until(async () => { await laptop.api(`/needs-you?fresh=${S.id}`); return !(await laptop.api('/machines')).machines.find((m) => m.id === S.id)?.notLetIn }, 15000, 500)
     ok(!!back && (await pk.request('GET', `/m/${S.id}/api/fleet`)).status === 200, 'ticked again at Studio: Laptop, and Pocket through it, may again')
@@ -760,6 +773,77 @@ try {
     ok((await bothL.request('GET', '/api/fleet')).status === 200, 'it still uses Laptop itself')
     bothS.stop()
     bothL.stop()
+  })
+
+  await part('kept out through Laptop: none of Studio through Laptop\'s own routes either', async () => {
+    // An agent on Studio (the stand-in Claude), which Laptop's agent map and devices list show.
+    studio.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
+    await studio.api('/agents/catalog')
+    const proj = path.join(studio.home, 'code', 'studio-project')
+    fs.mkdirSync(proj, { recursive: true })
+    await studio.api('/agents/launch', { kind: 'claude', cwd: proj, label: 'Studio-Agent', newSpace: 'studio-project', prompt: 'idle' })
+    const seen = async (dev) => JSON.stringify((await dev.request('GET', '/api/agent-map?live=1')).json?.devices?.find((d) => d.id === S.id) || {}).includes('Studio-Agent')
+    ok(!!(await until(() => seen(pk), 20000, 500)), 'Pocket, let in at Studio through Laptop: Laptop\'s agent map shows Studio\'s agent')
+    const entry = (await studio.api('/remote')).access.devices.find((d) => d.id === `${LAPTOP}/${POCKET}`)
+    await studio.api('/remote/devices', { id: entry.id, allowed: false })
+    await laptop.api(`/needs-you?fresh=${S.id}`)
+    const map = (await pk.request('GET', '/api/agent-map?live=1')).json?.devices?.find((d) => d.id === S.id)
+    const ms = (await pk.request('GET', '/api/machines')).json?.machines?.find((m) => m.id === S.id)
+    const ny = (await pk.request('GET', '/api/needs-you')).json
+    ok(map?.notLetIn && !map.agents.length && ms?.notLetIn && !ms.agents.length && !(ny?.items || []).some((i) => i.machine === S.id), 'kept out at Studio as it comes through Laptop: Laptop shows it nothing of Studio (agent map, devices, Needs You), said as not let in', { map: map && { notLetIn: map.notLetIn, agents: map.agents.length }, ms: ms && { notLetIn: ms.notLetIn, agents: ms.agents.length } })
+    ok(JSON.stringify((await laptop.api('/agent-map')).devices.find((d) => d.id === S.id) || {}).includes('Studio-Agent'), 'Laptop\'s own window still shows Studio\'s agent')
+    const name0 = (await studio.api('/machines')).here.name
+    const rn = await pk.request('POST', `/api/machines/${S.id}/name`, { name: 'Renamed-From-Pocket' })
+    const pv = await pk.request('POST', `/api/machines/${S.id}/preview`, { port: 5173 })
+    ok(rn.status >= 400 && (await studio.api('/machines')).here.name === name0 && pv.status >= 400 && /hasn't let this device in/.test(pv.json?.error || ''), 'nor can it rename Studio through Laptop, or ask Studio for a preview: Studio is told which device asks', [rn.status, rn.json?.error, pv.status, pv.json?.error])
+    await studio.api('/remote/devices', { id: entry.id, allowed: true })
+    ok(!!(await until(async () => { await laptop.api(`/needs-you?fresh=${S.id}`); return seen(pk) }, 15000, 500)), 'let in again: shown again')
+  })
+
+  await part('a device first seen through Laptop, Laptop too old to say which, and one kept out pairing again', async () => {
+    // Dual, paired with Laptop only (a key of its own): New at Studio the first time it comes through.
+    const dual = over(await linkAs(rb.url, { code: (await laptop.api('/relay/pair', {})).pairing.code, name: 'Dual', about: { name: 'Dual' } }))
+    const dl = await until(async () => (await laptop.api('/remote')).access.devices.find((d) => d.name === 'Dual'), 8000, 200)
+    if (!dl.allowed) await laptop.api('/remote/devices', { id: dl.id, allowed: true })
+    const first = await dual.request('GET', `/m/${S.id}/api/fleet`)
+    const e = await until(async () => (await studio.api('/remote')).access.devices.find((d) => d.name === 'Dual' && d.through === 'Laptop'), 6000, 200)
+    const waits = (await studio.api('/needs-you')).letIn.find((x) => x.id === e?.id)
+    ok(shut(first) && e?.fresh && !e.allowed && waits?.through === 'Laptop', 'Dual, first seen at Studio through Laptop with a password set: New, refused, and waiting in Studio\'s Needs You', [first.status, e, waits])
+    await studio.api('/remote/devices', { id: e.id, allowed: true })
+    ok((await dual.request('GET', `/m/${S.id}/api/fleet`)).status === 200, 'allowed at Studio: in')
+    // Paired with Studio directly too, with a key of its own: listed twice, each offered as the other.
+    const dualS = over(await linkAs(ra.url, { code: (await studio.api('/relay/pair', {})).pairing.code, name: 'Dual', about: { name: 'Dual' } }))
+    const both = await until(async () => { const l = (await studio.api('/remote')).access.devices.filter((d) => d.name === 'Dual'); return l.length === 2 ? l : null }, 8000, 200)
+    const direct = both?.find((d) => !d.through)
+    ok(!!direct && direct.same.includes(e.id) && both.find((d) => d.through).same.includes(direct.id), 'the same phone, paired here and through Laptop: two entries, each naming the other as maybe the same', both?.map((d) => ({ id: d.id, through: d.through, same: d.same })))
+    await dualS.request('DELETE', `/api/relay/devices/${encodeURIComponent(direct.id)}`)
+    dualS.stop()
+    dual.stop()
+    // A computer too old to say which of its devices it's for: its devices are told to update it;
+    // what it asks as itself goes on.
+    const old = over(await linkAs(ra.url, { code: (await studio.api('/relay/pair', {})).pairing.code, name: 'OldBox', about: { name: 'OldBox', kind: 'computer' }, hello: { kind: 'computer' } }))
+    const od = await until(async () => (await studio.api('/remote')).access.devices.find((d) => d.name === 'OldBox'), 8000, 200)
+    if (!od.allowed) await studio.api('/remote/devices', { id: od.id, allowed: true })
+    const itself = await old.request('GET', '/api/fleet')
+    const forOne = await old.request('GET', '/api/fleet', null, [['x-bridge-for', '1']])
+    ok(od.kind === 'computer' && itself.status === 200 && forOne.status === 403 && forOne.json?.code === 'notLetIn' && forOne.json.through === 'OldBox' && /Update Bridge AI on OldBox to use Studio from its devices/.test(forOne.json.error), 'a computer that says a request is for one of its devices but not which: refused, saying to update it; as itself, in', [itself.status, forOne.json])
+    await old.request('DELETE', `/api/relay/devices/${encodeURIComponent(od.id)}`)
+    old.stop()
+    // Kept out, then unpairing and pairing again with the same key: kept out again, with the switch off too.
+    const key = await newKey(true)
+    const k1 = over(await linkAs(ra.url, { device: key, code: (await studio.api('/relay/pair', {})).pairing.code, name: 'Again', about: { name: 'Again' } }))
+    const a1 = await until(async () => (await studio.api('/remote')).access.devices.find((d) => d.name === 'Again'), 8000, 200)
+    await studio.api('/remote/devices', { id: a1.id, allowed: false })
+    await k1.request('DELETE', `/api/relay/devices/${encodeURIComponent(a1.id)}`)
+    k1.stop()
+    const k2 = over(await linkAs(ra.url, { device: key, code: (await studio.api('/relay/pair', {})).pairing.code, name: 'Again', about: { name: 'Again' } }))
+    const a2 = await until(async () => (await studio.api('/remote')).access.devices.find((d) => d.name === 'Again'), 8000, 200)
+    await studio.api('/settings', { trials: { 'remote-screen': false } }, 'PATCH')
+    const off = await k2.request('GET', '/api/fleet')
+    await studio.api('/settings', { trials: { 'remote-screen': true } }, 'PATCH')
+    ok(a2?.out && !a2.fresh && shut(off), 'kept out, it unpairs and pairs again with the same key: kept out again (not New), with Remote Screen and Preview off too', [a2, off.status])
+    await k2.request('DELETE', `/api/relay/devices/${encodeURIComponent(a2.id)}`)
+    k2.stop()
   })
 
   await part('an unticked device that unpairs itself leaves the guardrail', async () => {
@@ -912,7 +996,7 @@ try {
       const said = (await card.innerText()).replace(/\s+/g, ' ')
       ok(/Studio hasn't let this device in/.test(said) && /On Studio: Settings › Remote Access › Which Devices May Connect\./.test(said), `${which}: the phone's page is one card, saying Studio hasn't let it in and where that's changed`, said)
       ok(!(await f.locator('.settings-btn, .error-text').count()), 'and none of the app behind it, nor its panels failing')
-      const d = (await studio.api('/remote')).access.devices.find((x) => x.fresh && !x.allowed && x.kind === 'phone')
+      const d = (await studio.api('/remote')).access.devices.filter((x) => x.fresh && !x.allowed && x.kind === 'phone' && !x.through).at(-1)
       const s = await page(b, studio.url)
       await s.p.locator('.top-right .needs-chip').click({ timeout: 20000 })
       const item = s.p.locator('.ny-panel .t-letin', { hasText: d?.name || 'none' })

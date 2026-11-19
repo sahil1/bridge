@@ -216,7 +216,7 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
         <div className={`menu left mc-menu ${phone ? 'phone' : ''}`} role="menu" aria-label={t('Your Devices')}>
           <div className="mc-head">{t('Your Devices')}</div>
           {row('here', data.here.name, `${OS_LABEL[data.here.os] || ''}${machineId ? '' : ` · ${t('this one')}`}`, true, !machineId, () => pick(null), null, viaRelay && !machineId)}
-          {linked.map((m) => row(m.id, m.name, [OS_LABEL[m.os], m.online ? counts(m.counts) || t('Online') : m.lastSeen ? t('Offline, seen {when}', { when: ago(m.lastSeen) }) : t('Offline')].filter(Boolean).join(' · '), m.online, m.id === machineId, () => go(m), m.id))}
+          {linked.map((m) => row(m.id, m.name, [OS_LABEL[m.os], m.notLetIn ? t('Not let in') : m.online ? counts(m.counts) || t('Online') : m.lastSeen ? t('Offline, seen {when}', { when: ago(m.lastSeen) }) : t('Offline')].filter(Boolean).join(' · '), m.online, m.id === machineId, () => go(m), m.id))}
           {paired.filter((c) => !linked.some((m) => bare(m.relay) === bare(c.relay))).map((c) => row(c.relay, c.name, t('Paired on this phone'), null, false, close(() => relayComputers.open(c.relay))))}
           <div className="menu-sep" />
           <button type="button" role="menuitem" className="menu-item" onClick={close(openMap)}>

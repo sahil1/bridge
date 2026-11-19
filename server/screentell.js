@@ -139,11 +139,12 @@ export function makeTell({ remote, notify, machines, relay, pushDevices = () => 
 
   // ---------- Stop and Block ----------
   // From a window here (the card): this computer's own session, or one on another of your computers,
-  // through its link. by: who it came from, for that computer's record.
-  async function end({ machine = null, id, block = false }, by) {
+  // through its link. by: who it came from, for that computer's record; h: for a device of this
+  // computer's, which (machines.js forDevice).
+  async function end({ machine = null, id, block = false }, by, h = []) {
     if (!machine) return remote().endFrom(String(id), { block: !!block, by })
     if (!linked().some((m) => m.id === machine)) throw Object.assign(new Error('That computer isn\'t linked to this one any more'), { status: 404 })
-    const r = await machines.callOn(machine, 'POST', `/api/remote/sessions/${encodeURIComponent(String(id))}/end`, { block: !!block, from: by }, 12000)
+    const r = await machines.callOn(machine, 'POST', `/api/remote/sessions/${encodeURIComponent(String(id))}/end`, { block: !!block, from: by }, 12000, h)
     const t = there.get(machine)
     if (t) { t.sessions = t.sessions.filter((x) => x.id !== id); t.asks = t.asks.filter((x) => x.id !== id); shown() }
     return r

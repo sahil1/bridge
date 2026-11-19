@@ -97,13 +97,15 @@ const read = () => {
       blocked: ids(d.blocked).filter((x) => !fresh.includes(x)),
       known: Array.isArray(d.known) ? ids(d.known) : null,
       fresh,
+      // The keys of the devices you kept out: one paired again with the same key is kept out again.
+      outKeys: Array.isArray(d.outKeys) ? d.outKeys.filter((v) => typeof v === 'string' && v.length <= 200).slice(-500) : [],
       through: Object.fromEntries(Object.entries(through).filter(([k, v]) => /^[\w-]{1,40}\/[\w-]{1,40}$/.test(k) && v && typeof v === 'object').slice(-100)),
       notify: d.notify !== false,
       locks: d.locks && typeof d.locks === 'object' && !Array.isArray(d.locks) ? d.locks : {},
       log: all.filter((e) => !turned(e)).slice(-LOG_MAX),
       refused: [...all.filter(turned), ...(Array.isArray(d.refused) ? d.refused : [])].slice(-REFUSED_MAX),
     }
-  } catch { return { control: false, password: null, askFirst: false, blocked: [], known: null, fresh: [], through: {}, notify: true, locks: {}, log: [], refused: [] } }
+  } catch { return { control: false, password: null, askFirst: false, blocked: [], known: null, fresh: [], outKeys: [], through: {}, notify: true, locks: {}, log: [], refused: [] } }
 }
 
 // ---------- the Remote Access Password ----------
@@ -195,15 +197,21 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     const list = devices()
     const lockOf_ = (id) => locks.find((l) => l.id === id)?.until || null
     const kindOf = (k) => (k === 'computer' ? 'computer' : 'phone')
-    const own = list.map((d) => ({ id: d.id, name: clean(d.name) || 'A device', kind: kindOf(d.kind), allowed: !conf.blocked.includes(d.id) && !conf.fresh.includes(d.id), fresh: conf.fresh.includes(d.id), out: conf.blocked.includes(d.id), locked: lockOf_(d.id) }))
+    const own = list.map((d) => ({ id: d.id, name: clean(d.name) || 'A device', kind: kindOf(d.kind), allowed: !conf.blocked.includes(d.id) && !conf.fresh.includes(d.id), fresh: conf.fresh.includes(d.id), out: conf.blocked.includes(d.id), locked: lockOf_(d.id), k: deviceOf(d.id)?.key || null }))
     const via = Object.entries(conf.through).map(([key, v]) => {
       const hop = list.find((d) => d.id === key.split('/')[0])
-      return hop && { id: key, name: clean(v.name) || 'A device', kind: kindOf(v.kind), through: clean(hop.name) || 'Another computer', allowed: !conf.blocked.includes(key), fresh: false, out: conf.blocked.includes(key), locked: lockOf_(key) }
+      return hop && { id: key, name: clean(v.name) || 'A device', kind: kindOf(v.kind), through: clean(hop.name) || 'Another computer', allowed: !conf.blocked.includes(key) && !conf.fresh.includes(key), fresh: conf.fresh.includes(key), out: conf.blocked.includes(key), locked: lockOf_(key), k: v.key || null }
     }).filter(Boolean)
+    // The same phone can be listed more than once (paired here, and through each of your other
+    // computers it's paired with): same, the others that may be it, by its key or its name, for
+    // Settings to offer keeping them out too. (Never the key itself.)
+    const all = [...own, ...via]
+    const named = (x) => x.name.trim().toLowerCase()
+    const devicesShown = all.map(({ k, ...d }) => ({ ...d, same: all.filter((x) => x !== d && x.id !== d.id && ((k && x.k === k) || named(x) === named(d))).map((x) => x.id) }))
     return {
       password: !!conf.password, passwordAt: conf.password?.at || null,
       askFirst: !!conf.askFirst,
-      devices: [...own, ...via],
+      devices: devicesShown,
       locks,
       limits: limits(),
     }
@@ -359,7 +367,10 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     if (!fresh.length) return
     const block = guarded()
     conf.known = [...conf.known, ...fresh.map((d) => d.id)].slice(-500)
-    if (block) conf.fresh = [...new Set([...conf.fresh, ...fresh.map((d) => d.id)])].slice(-500)
+    // Paired again with a key you kept out: kept out again. Else New, once a guardrail is set.
+    const out = fresh.filter((d) => conf.outKeys.includes(deviceOf(d.id)?.key))
+    if (out.length) conf.blocked = [...new Set([...conf.blocked, ...out.map((d) => d.id)])].slice(-500)
+    if (block) conf.fresh = [...new Set([...conf.fresh, ...fresh.filter((d) => !out.includes(d)).map((d) => d.id)])].slice(-500)
     save()
     onChange()
   }
@@ -379,22 +390,44 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   // it is here. A phone keeps a key of its own for each computer it's paired with (a browser, the
   // Android app), so most aren't known here as the same device: those are kept out through each
   // computer apart.
+  // One seen through a computer for the first time once a guardrail is set here starts New, as one
+  // paired here would; one with a key you kept out, kept out.
+  // A computer too old to say which of its devices it's for (via.unknown), once a guardrail is set
+  // here: 'update', as its devices can't be told apart (its own requests, as itself, go on as before).
   function shutFor(hop, via = null) {
     if (!admits(hop)) return via ? 'computer' : 'device'
+    if (via?.unknown && deviceOf(hop)?.kind === 'computer') return guarded() ? 'update' : null
     if (!via?.id || deviceOf(hop)?.kind !== 'computer') return null
     const key = `${hop}/${via.id}`
     const was = conf.through[key]
     const name = clean(via.name) || 'A device'
     const kind = via.kind === 'computer' ? 'computer' : 'phone'
-    if (!was || was.name !== name || was.kind !== kind) {
-      conf.through = Object.fromEntries([...Object.entries(conf.through).filter(([k]) => k !== key), [key, { name, kind, at: new Date().toISOString() }]].slice(-100))
+    const vkey = typeof via.key === 'string' && via.key.length <= 200 ? via.key : null
+    if (!was || was.name !== name || was.kind !== kind || (vkey && was.key !== vkey)) {
+      conf.through = Object.fromEntries([...Object.entries(conf.through).filter(([k]) => k !== key), [key, { name, kind, ...(vkey ? { key: vkey } : {}), at: was?.at || new Date().toISOString() }]].slice(-100))
+      // (Known here by its key as one you let in: the same device, not New.)
+      const twin = vkey ? byKey(vkey) : null
+      if (!was && vkey && conf.outKeys.includes(vkey)) conf.blocked = [...new Set([...conf.blocked, key])]
+      else if (!was && guarded() && !(twin && allows(twin.id))) conf.fresh = [...new Set([...conf.fresh, key])].slice(-500)
       save()
       onChange()
     }
-    if (conf.blocked.includes(key)) return 'device'
-    const same = via.key ? byKey(via.key) : null
-    return same && !admits(same.id) ? 'device' : null
+    return throughOut(key) ? 'device' : null
   }
+  // Whether a device through another of your computers (hop/id) is kept out here: you kept it out
+  // that way, it's New while this Beta Feature is on, or it's known here by its key as one you kept out.
+  function throughOut(key) {
+    if (conf.blocked.includes(key) || (trialOn() && conf.fresh.includes(key))) return true
+    const k = conf.through[key]?.key
+    if (!k) return false
+    if (conf.outKeys.includes(k)) return true
+    const same = byKey(k)
+    return !!same && !admits(same.id)
+  }
+  // The devices of another of your computers (hop, a computer paired here) kept out here as they come
+  // through it, by that computer's ids for them: it hides what it shows of this computer from those
+  // (its summary of this one, machines.js).
+  const outVia = (hop) => (hop ? Object.keys(conf.through).filter((k) => k.startsWith(`${hop}/`) && throughOut(k)).map((k) => k.slice(hop.length + 1)) : [])
   // One not let in that asked for something here: when, for Needs You.
   const tried = new Map() // device id -> when
   const turnedAway = (id) => { tried.set(id, Date.now()) }
@@ -403,8 +436,16 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   function waiting() {
     if (!trialOn()) return []
     sync()
-    return devices().filter((d) => conf.fresh.includes(d.id))
-      .map((d) => ({ id: d.id, name: clean(d.name) || 'A device', kind: d.kind === 'computer' ? 'computer' : 'phone', paired: d.addedAt || null, tried: tried.has(d.id) ? new Date(tried.get(d.id)).toISOString() : null }))
+    const list = devices()
+    const when = (id) => (tried.has(id) ? new Date(tried.get(id)).toISOString() : null)
+    const own = list.filter((d) => conf.fresh.includes(d.id))
+      .map((d) => ({ id: d.id, name: clean(d.name) || 'A device', kind: d.kind === 'computer' ? 'computer' : 'phone', paired: d.addedAt || null, tried: when(d.id) }))
+    // (Through another of your computers: first seen then, and when it last tried through it.)
+    const via = Object.entries(conf.through).filter(([k]) => conf.fresh.includes(k)).map(([k, v]) => {
+      const hop = list.find((d) => d.id === k.split('/')[0])
+      return hop && { id: k, name: clean(v.name) || 'A device', kind: v.kind === 'computer' ? 'computer' : 'phone', through: clean(hop.name) || 'Another computer', paired: v.at || null, tried: when(hop.id) }
+    }).filter(Boolean)
+    return [...own, ...via]
   }
   // Who's asking, as the lockout counts it (s.key): the device, or, through another of your computers,
   // that computer and the device there it speaks for, each on its own; and all of those through that
@@ -985,6 +1026,9 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     if (!devices().some((d) => d.id === id) && !(conf.through[id] && devices().some((d) => d.id === id.split('/')[0]))) throw Object.assign(new Error('That device isn\'t paired with this computer.'), { status: 404 })
     conf.blocked = allowed ? conf.blocked.filter((x) => x !== id) : [...new Set([...conf.blocked, id])]
     conf.fresh = conf.fresh.filter((x) => x !== id)
+    // Its key too (one it pairs with again, or comes through another computer with, is the same).
+    const k = deviceOf(id)?.key || conf.through[id]?.key
+    if (k) conf.outKeys = allowed ? conf.outKeys.filter((x) => x !== k) : [...new Set([...conf.outKeys, k])].slice(-500)
     tried.delete(id)
     save()
     if (!allowed) {
@@ -1059,7 +1103,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     return lock ? { code: 'locked', why: lockedWhy(lock.until), until: new Date(lock.until).toISOString() } : null
   }
 
-  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, setNotify, unlock, answer, allows, admits, shutFor, turnedAway, waiting, mayPass, mayPreview, stop, stopAll, endFrom, live, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, active: () => sessions.size }
+  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, setNotify, unlock, answer, allows, admits, shutFor, outVia, turnedAway, waiting, mayPass, mayPreview, stop, stopAll, endFrom, live, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, active: () => sessions.size }
 }
 
 // The test stand-in's screens: its main one, one beside it, a 5K one at twice its points (as a

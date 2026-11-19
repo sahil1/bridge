@@ -451,7 +451,9 @@ export function LetInItem({ it, onDone, setNote }) {
         <span className="ny-grow" />
         <span className="ny-device here" title={t('Settings › Remote Access › Which Devices May Connect')}><Icon name="lock" size={11} />{t('Remote Access')}</span>
       </div>
-      <p className="ny-text">{t('{name} ({kind}) is paired with this computer and waits to be let in. Until you allow it, it can\'t use this computer at all.', { name: it.name, kind })}</p>
+      <p className="ny-text">{it.through
+        ? t('{name} ({kind}) comes through {computer} and waits to be let in here. Until you allow it, it can\'t use this computer at all.', { name: it.name, kind, computer: it.through })
+        : t('{name} ({kind}) is paired with this computer and waits to be let in. Until you allow it, it can\'t use this computer at all.', { name: it.name, kind })}</p>
       {it.tried && <p className="muted small ny-from">{t('Last tried to connect: {when}.', { when: ago(it.tried) })}</p>}
       {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
       <div className="ny-acts">

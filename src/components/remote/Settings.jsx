@@ -47,6 +47,19 @@ export function useControl(active = true) {
 // A device in Which Devices May Connect: its name, and for one through another of your computers, which.
 const deviceName = (d) => (d.through ? t('{name}, through {computer}', { name: whoOf({ by: d }), computer: d.through }) : whoOf({ by: d }))
 
+// Unticked: the other entries that may be the same device (paired with the same key, or of the
+// same name: server/remote.js accessStatus same), still let in, offered to keep out too.
+function SameToo({ d, all, keep }) {
+  const others = (d.same || []).map((id) => all.find((x) => x.id === id)).filter((x) => x && x.allowed)
+  if (!others.length) return null
+  return (
+    <span className="small rs-same">
+      {t('It may be the same device as {others}.', { others: others.map(deviceName).join(', ') })}{' '}
+      <button type="button" className="ghost-btn small" onClick={async () => { for (const x of others) await keep(x.id) }}>{others.length === 1 ? t('Keep That Out Too') : t('Keep Those Out Too')}</button>
+    </span>
+  )
+}
+
 // With Remote Screen and Preview off, the devices you unticked here are still kept out of this
 // computer (server/remote.js): listed with Allow where the Beta Feature's settings would be, at this
 // computer only, which is where they're let back in.
@@ -259,8 +272,8 @@ export function RemoteSettings() {
         <div className="rs-block" data-setting="remote-devices">
           <b>{t('Which Devices May Connect')}</b>
           <p className="muted small">{t('Every phone paired with this computer and every computer linked to it, unless you untick it. One unticked can\'t use this computer at all, with Remote Screen and Preview on or off: no agents, terminals, files, previews or screen, and what it has open here ends.')}</p>
-          {here && <p className="muted small">{t('A device of another of your computers comes through that computer, which checks its own list first; once it has, it\'s listed here too, as coming through it, to untick here. It\'s known as a device paired here only if it paired with both using the same key, which a phone\'s browser and the Android app don\'t: untick it each way it comes.')}</p>}
-          {here && <p className="muted small">{t('Once you set a password or Ask Here First, or untick a device, a phone or computer paired after that starts New, and waits in Needs You while Remote Screen and Preview is on: tick it here, or Allow it there, to let it in.')}</p>}
+          {here && <p className="muted small">{t('A device of another of your computers comes through that computer, which checks its own list first; once it has, it\'s listed here too, as coming through it, to untick here. So the same phone can be here more than once: paired here, and through each of your other computers it\'s paired with. It\'s known as the same device only if it paired with both using the same key, which a phone\'s browser and the Android app don\'t: untick it each way it comes.')}</p>}
+          {here && <p className="muted small">{t('Once you set a password or Ask Here First, or untick a device, a phone or computer paired after that, or first seen through another of your computers, starts New, and waits in Needs You while Remote Screen and Preview is on: tick it here, or Allow it there, to let it in.')}</p>}
           {!here ? null : ac.devices?.length
             ? (
               <ul className="rs-devices">
@@ -271,6 +284,7 @@ export function RemoteSettings() {
                       <span><Icon name={d.kind === 'computer' ? 'laptop' : 'phone'} size={12} /> {deviceName(d)} <span className="muted">{d.kind === 'computer' ? t('computer') : t('phone')}</span>{d.fresh && !d.allowed && <span className="st-chip rs-new">{t('New')}</span>}</span>
                     </label>
                     {d.locked && <span className="rs-locked small"><Icon name="lock" size={11} /> {t('Locked out until {time}', { time: clockOf(d.locked) })}</span>}
+                    {d.out && <SameToo d={d} all={ac.devices} keep={(id) => access('/devices', { id, allowed: false })} />}
                     {d.locked && here && <button type="button" className="ghost-btn small" onClick={() => access(`/locks/${encodeURIComponent(d.id)}/clear`)}>{t('Unlock')}</button>}
                   </li>
                 ))}

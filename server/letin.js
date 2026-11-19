@@ -30,15 +30,19 @@ const SCREEN = /^(?:\/m\/[A-Za-z0-9_-]{1,20})?\/api\/remote\/view(?:\?|$)/
 const STATIC = /^\/(assets\/[\w-][\w.-]*|[\w-][\w.-]*)$/
 
 // shutFor(id, via): null when that device may use this computer, else who isn't let in ('device',
-// or 'computer': the one it came through); via: which device of that computer's it's for (remote.js).
-// turnedAway(id): it asked while it may not. deviceOf(id): the device paired here (relay.js).
-// thisName(): this computer's name. ui(): the built app's folder.
-export function makeLetIn({ shutFor, turnedAway = () => {}, deviceOf, thisName, ui }) {
+// 'computer': the one it came through, or 'update': that one is too old to say which of its devices
+// it's for); via: which device of that computer's it's for (remote.js). turnedAway(id): it asked
+// while it may not. deviceOf(id): the device paired here (relay.js). versionOf(id): the Bridge AI a
+// computer paired here has, as it last said. thisName(): this computer's name. ui(): the built
+// app's folder.
+export function makeLetIn({ shutFor, turnedAway = () => {}, deviceOf, versionOf = () => null, thisName, ui }) {
   const idOf = (req) => { const v = req.headers['x-bridge-relay']; return typeof v === 'string' && v ? v : null }
   // Which device of another computer's it's for, as that computer says (none from anything else).
+  // Said to be for one of its devices without which (x-bridge-for alone): { unknown }.
   const viaOf = (req, d) => {
     const id = req.headers['x-bridge-for-id']
-    if (d?.kind !== 'computer' || typeof id !== 'string' || !/^[\w-]{1,40}$/.test(id)) return null
+    if (d?.kind !== 'computer') return null
+    if (typeof id !== 'string' || !/^[\w-]{1,40}$/.test(id)) return req.headers['x-bridge-for'] != null ? { unknown: true } : null
     let name = ''
     try { name = decodeURIComponent(String(req.headers['x-bridge-for-name'] || '')) } catch { /* as it came */ }
     const key = req.headers['x-bridge-for-key']
@@ -53,10 +57,15 @@ export function makeLetIn({ shutFor, turnedAway = () => {}, deviceOf, thisName, 
     if (no) turnedAway(id)
     return no ? { no, hop: d } : null
   }
-  // What it's told: through, the computer it came through when that's the one not let in here.
+  // What it's told: through, the computer it came through when that's the one not let in here, or
+  // too old to say which of its devices it is (update: its version, as this computer last heard it).
   function said(o) {
     const computer = thisName()
-    const through = o.no === 'computer' ? plainName(o.hop?.name) || 'Another computer' : null
+    const through = o.no === 'computer' || o.no === 'update' ? plainName(o.hop?.name) || 'Another computer' : null
+    if (o.no === 'update') {
+      const v = versionOf(o.hop?.id) || ''
+      return { error: `Update Bridge AI on ${through} to use ${computer} from its devices.${v ? ` It has ${v}.` : ''}`, code: CODE, computer, through, update: v }
+    }
     const where = `On ${computer}: Settings › Remote Access › Which Devices May Connect.`
     return { error: through ? `${computer} hasn't let ${through} in, which this device comes through. ${where}` : `${computer} hasn't let this device in. ${where}`, code: CODE, computer, ...(through ? { through } : {}) }
   }
