@@ -57,6 +57,7 @@ import path from 'node:path'
 import zlib from 'node:zlib'
 import { dataFile, writeFileAtomic, ROOT, HOME, DATA } from './paths.js'
 import * as store from './bots.js'
+import { rootSays } from './botattach.js'
 import * as conns from './connections.js'
 import * as routines from './routines.js'
 import * as settings from './settings.js'
@@ -216,7 +217,11 @@ function folderSays(p) {
   if (full === path.resolve(HOME)) return 'your whole home folder'
   if (full === DATA || full.startsWith(DATA + path.sep) || DATA.startsWith(full + path.sep)) return 'Bridge AI\'s own folder'
   if (!full.startsWith(path.resolve(HOME) + path.sep)) return 'outside your home folder'
-  return null
+  // (Where apps keep their settings and keys, by its real path: Settings won't take one either.)
+  let real = full
+  try { real = fs.realpathSync(full) } catch { /* as it's named */ }
+  const where = rootSays(real)
+  return where ? `${where}, where apps keep their settings and keys` : null
 }
 const personOf = (p) => (p?.id ? `${clean(p.name, 80) || p.id}${p.name ? ` (${String(p.id).slice(0, 40)})` : ''}` : null)
 // Each bot by its name, with a number after it when that's taken here (as a bot's own import), what

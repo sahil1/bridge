@@ -7,11 +7,12 @@
 // sandbox calls no tool of ours, so a run of Codex has none.
 //
 // A file that's in the bot's folders already (a PDF, a Word document, a picture) goes as it is: the
-// agent attaches it (attach_file, or a line ATTACH: <path> after its answer, which any run has), and
-// it's copied into the outbox here once the answer is in (collect), checked first as botattach.js
-// says (in the bot's folders with no link on the way, nothing hidden or that holds keys, a kind that
-// goes, not too big), against the folders the bot reads from now. What the agent's tool said is a
-// convenience: this is the gate.
+// agent attaches it (attach_file, or a line ATTACH: <path> after its answer where its brief offers
+// that), and it's copied into the outbox here once the answer is in (collect), checked first as
+// botattach.js says (in the folders its run reads with no link on the way, nothing hidden or that
+// holds keys, a document or a picture unless you let it send data and config files, not too big),
+// against those folders as Bridge AI has them now. What the agent's tool said is a convenience: this
+// is the gate. (Whether its answer then waits for you: frontdesk.js.)
 //
 // Once its answer is in, what's in the outbox is looked at (collect): plain files only, at the top
 // of it, as many as MAX and none bigger than EACH, of a kind on the list (botattach.js TYPES:
@@ -35,7 +36,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { dataFile } from './paths.js'
 import { DIR as BOTS } from './bots.js'
-import { TYPES, KINDS, MAX, EACH, extOf, isProgram, notAKind, safe, sizeOf, readChecked, attachedIn, nameOf, keptOut } from './botattach.js'
+import { TYPES, KINDS, MAX, EACH, TOTAL, extOf, isProgram, notAKind, safe, sizeOf, readChecked, attachedIn, nameOf, keptOut, secretIn, dropManifest, carryManifest } from './botattach.js'
 
 // (The kinds that go, how many and how big, and a name made safe: botattach.js, which the outbox's
 // MCP server shares.)
@@ -50,20 +51,23 @@ export const opensSafely = (name) => OPENS.has(extOf(path.basename(String(name))
 export const typeOf = (name) => TYPES[extOf(name)] || 'application/octet-stream'
 
 // A run's outbox, made empty (only you can read it). key: the question's id and the run's number.
+// (What a run attached is noted beside it, never in it: botattach.js manifestOf.)
 export function outboxFor(key) {
   const d = path.join(OUTBOX, safe(key))
   fs.rmSync(d, { recursive: true, force: true })
+  dropManifest(d)
   fs.mkdirSync(d, { recursive: true, mode: 0o700 })
   return d
 }
 export const outboxOf = (key) => path.join(OUTBOX, safe(key))
-export const drop = (key) => { try { fs.rmSync(outboxOf(key), { recursive: true, force: true }) } catch { /* in use: next time */ } }
+export const drop = (key) => { try { fs.rmSync(outboxOf(key), { recursive: true, force: true }) } catch { /* in use: next time */ } dropManifest(outboxOf(key)) }
 // A run that picks up where an earlier one was stopped (at its time limit: frontdesk.js): what that
-// one saved goes on in this one's outbox, as if saved there, so it goes with this answer and counts
-// toward this run's limits, and is checked as every file is when it's collected. Plain files only;
-// the earlier outbox goes. How many came.
+// one saved goes on in this one's outbox, as if saved there, and what it attached with it, so they go
+// with this answer and count toward this run's limits, and are checked as every file is when they're
+// collected. Plain files only; the earlier outbox goes. How many came.
 export function carry(fromKey, to) {
   const from = outboxOf(fromKey)
+  carryManifest(from, to)
   let names = []
   try { names = fs.readdirSync(from) } catch { return 0 }
   let n = 0
@@ -89,35 +93,42 @@ export async function runs(p, name, mode = 0) {
   return null
 }
 
-// The files attached from the bot's folders (its agent's attach_file, noted in the outbox, and the
-// ATTACH: lines of its answer: attach), each checked again here against the folders it reads from
-// now (botattach.js readChecked) and copied in from the file as it was read, made new (never through
-// a link, never over a file there): by its name in the outbox, where it came from (~/…). One that
-// can't go is in refused, with why (and where it was asked from, for the record).
-async function bringIn(root, { attach = [], folders = [], cwd = null }, refused) {
+// The files attached from the bot's folders (its agent's attach_file, noted beside the outbox, and the
+// ATTACH: lines of its answer: attach), each checked again here against the folders its run reads
+// (botattach.js readChecked) and copied in from the file as it was read, made new (never through a
+// link, never over a file there): by its name in the outbox, where it came from (~/…). None is read
+// once as many as go are in, nor one bigger than what's left of all an answer sends. One that can't
+// go is in refused, with why (and where it was asked from, for the record).
+const refuse = (why) => Object.assign(new Error(why), { refused: true })
+async function bringIn(dir, root, { attach = [], folders = [], cwd = null, config = false }, refused) {
   const from = new Map()
-  const asked = [...attachedIn(root), ...attach.map((p) => ({ path: String(p) }))]
+  const asked = [...attachedIn(dir), ...attach.slice(0, MAX * 2).map((p) => ({ path: String(p) }))]
   if (!asked.length) return from
   const paths = new Set()
   const taken = new Set()
   const kept = keptOut()
   const NEW = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0)
-  for (const a of asked.slice(0, 30)) {
+  const there = async () => {
+    const names = (await fs.promises.readdir(root)).filter((n) => !n.startsWith('.'))
+    const sizes = await Promise.all(names.map((n) => fs.promises.lstat(path.join(root, n)).then((x) => x.size, () => 0)))
+    return { n: names.length, bytes: sizes.reduce((a, b) => a + b, 0) }
+  }
+  for (const a of asked) {
     if (paths.has(a.path)) continue
     paths.add(a.path)
     const said = String(a.path).slice(0, 300)
     if (a.refused) { refused.push({ name: a.name || nameOf(a.path), why: String(a.refused).slice(0, 300), from: said }); continue }
     try {
-      // (None read once as many as go are in already.)
-      if ((await fs.promises.readdir(root)).filter((n) => !n.startsWith('.')).length >= MAX) throw Object.assign(new Error(`a bot sends ${MAX} files with an answer at most`), { refused: true })
-      const got = await readChecked(a.path, { folders, cwd, keptOut: kept })
+      const now = await there()
+      if (now.n >= MAX) throw refuse(`a bot sends ${MAX} files with an answer at most`)
+      const got = await readChecked(a.path, { folders, cwd, keptOut: kept, config, budget: TOTAL - now.bytes })
       if (taken.has(got.file)) continue // (the same file, asked for by another path)
       taken.add(got.file)
       const to = path.join(root, got.name)
       let fh
-      try { fh = await fs.promises.open(to, NEW, 0o600) } catch (e) { throw Object.assign(new Error(e.code === 'EEXIST' ? `a file called ${got.name} is with the answer already` : `it couldn't be copied (${e.code || e.message})`), { refused: true }) }
+      try { fh = await fs.promises.open(to, NEW, 0o600) } catch (e) { throw refuse(e.code === 'EEXIST' ? `a file called ${got.name} is with the answer already` : `it couldn't be copied (${e.code || e.message})`) }
       // (One not copied whole doesn't stay to be sent in part.)
-      try { await fh.writeFile(got.body) } catch (e) { await fh.close().catch(() => {}); await fs.promises.rm(to, { force: true }).catch(() => {}); throw Object.assign(new Error(`it couldn't be copied (${e.code || e.message})`), { refused: true }) }
+      try { await fh.writeFile(got.body) } catch (e) { await fh.close().catch(() => {}); await fs.promises.rm(to, { force: true }).catch(() => {}); throw refuse(`it couldn't be copied (${e.code || e.message})`) }
       await fh.close()
       from.set(got.name, got.from)
     } catch (e) { refused.push({ name: nameOf(a.path), why: e.refused ? e.message : `it couldn't be read (${e.code || e.message})`, from: said }) }
@@ -127,16 +138,18 @@ async function bringIn(root, { attach = [], folders = [], cwd = null }, refused)
 
 // What a run left in its outbox: { files: [{ name, size, path, type, from }], refused: [{ name, why,
 // from }] } (from: where a file attached came from). Only what's really in it: its real path is
-// checked against the outbox's, so nothing outside it, however it's named, is taken. attach: the
-// paths its answer's ATTACH: lines name; folders: the ones the bot reads from (their paths, as
-// Settings has them), the only ones a file may be attached from; cwd: its run's folder, where a
-// relative path starts.
-export async function collect(dir, { attach = [], folders = [], cwd = null } = {}) {
+// checked against the outbox's, so nothing outside it, however it's named, is taken; and nothing in
+// it that looks like a key, a password or a token, whether it was attached or the agent made it
+// (botattach.js secretIn: a key it read can't go as a file it "made"). attach: the paths its answer's
+// ATTACH: lines name; folders: the ones its run reads (their paths, as Settings has them), the only
+// ones a file may be attached from; cwd: its run's folder, where a relative path starts; config:
+// data and config files may be attached too.
+export async function collect(dir, { attach = [], folders = [], cwd = null, config = false } = {}) {
   const files = []
   const refused = []
   let root
   try { root = await fs.promises.realpath(dir) } catch { return { files, refused } }
-  const from = await bringIn(root, { attach, folders, cwd }, refused)
+  const from = await bringIn(dir, root, { attach, folders, cwd, config }, refused)
   let ents = []
   try { ents = await fs.promises.readdir(root, { withFileTypes: true }) } catch { return { files, refused } }
   ents.sort((a, b) => a.name.localeCompare(b.name))
@@ -157,6 +170,11 @@ export async function collect(dir, { attach = [], folders = [], cwd = null } = {
     if (st.size === 0) { refused.push({ name, why: 'it\'s empty' }); continue }
     if (st.size > EACH) { refused.push({ name, why: `it's ${sizeOf(st.size)}, over ${sizeOf(EACH)}` }); continue }
     if (files.length >= MAX) { refused.push({ name, why: `a bot sends ${MAX} files with an answer at most` }); continue }
+    // (One attached was looked through as it was read; one it made, here.)
+    if (!from.has(name)) {
+      const holds = await fs.promises.readFile(real).then((b) => secretIn(b, name), () => 'it couldn\'t be read')
+      if (holds) { refused.push({ name, why: holds }); continue }
+    }
     files.push({ name, size: st.size, path: real, type: typeOf(name), ...(from.has(name) ? { from: from.get(name) } : {}) })
   }
   for (const r of refused) if (!r.from && from.has(r.name)) r.from = from.get(r.name)

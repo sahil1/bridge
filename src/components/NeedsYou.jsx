@@ -6,6 +6,7 @@ import { ago } from './Machines.jsx'
 import { t, tx } from '../i18n/index.js'
 import { sentTo } from '../sendbox.js'
 import { split, reason, isQuiet, activeAt, projectOf, QUIET_DAYS, TOP } from '../../shared/focus.js'
+import { FileRow } from './bots/BotFiles.jsx'
 import './needsyou.css'
 
 // The needs-you inbox: everything waiting on you, on this computer, your other devices and the
@@ -467,6 +468,12 @@ function DraftItem({ it, onDone, setNote }) {
       <p className="muted small ny-from">{from}</p>
       {it.warn && <p className="muted small ny-from"><Icon name="info" size={11} /> {it.warn}</p>}
       {it.files?.length > 0 && <p className="muted small ny-from"><Icon name="paperclip" size={11} /> {t('With {files}', { files: it.files.map((f) => `${f.name}${f.size != null ? ` (${sizeOf(f.size)})` : ''}`).join(', ') })}</p>}
+      {it.files?.some((f) => f.from && f.kept) && (
+        <div className="ny-attached" data-setting="ny-attached">
+          <p className="muted small">{t('From its folders, to look at before it goes:')}</p>
+          <ul className="bf-list">{it.files.filter((f) => f.from && f.kept).map((f) => <FileRow key={f.kept} bot={it.bot?.id} f={{ name: f.name, size: f.size, path: f.kept, from: f.from }} send={false} />)}</ul>
+        </div>
+      )}
       {change && (
         <>
           <p className="muted small ny-from"><Icon name="branch" size={11} /> {change.pr?.url ? t('A draft pull request opened on {branch}:', { branch: change.branch || '' }) : approve ? t('It made a change on {branch}: approve the diff, and a draft pull request opens.', { branch: change.branch || '' }) : t('It made a change on {branch}.', { branch: change.branch || '' })}{change.pr?.url && <> <a href={change.pr.url} target="_blank" rel="noreferrer">{change.pr.url}</a></>}</p>

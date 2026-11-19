@@ -35,7 +35,8 @@
 //     [try-read <path>]                      tries to read a file: one in its folder or a folder
 //                                            --add-dir gave it is read; one outside them is refused
 //                                            under --permission-mode dontAsk, as Claude Code
-//                                            refuses what would have asked
+//                                            refuses what would have asked; and one a Read rule in
+//                                            its --settings file denies is refused
 //                                            Each try goes in ~/answer-tries.log ({ try, done }).
 //     [edit <name> <text>]                   writes <text> into <name> in its folder: only when
 //                                            --tools lets it Edit and --allowedTools Edit(./**)
@@ -92,7 +93,7 @@ const args = process.argv.slice(2)
 if (args.includes('--version')) { console.log('2.1.312 (Claude Code)'); process.exit(0) }
 // Signed in with a Max plan (BRIDGE_STANDIN_CLAUDE_PLAN: another, team say).
 if (args[0] === 'auth') { console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: process.env.BRIDGE_STANDIN_CLAUDE_PLAN || 'max' })); process.exit(0) }
-const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode', '--effort', '--tools'])
+const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode', '--effort', '--tools', '--settings'])
 // (--allowedTools, like --add-dir, takes a list.)
 const allowed = []
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null }
@@ -116,6 +117,26 @@ if (pointed) {
   const ok = [process.cwd(), ...added].some((d) => path.resolve(f).startsWith(path.resolve(d) + path.sep))
   try { if (ok) message = fs.readFileSync(f, 'utf8') } catch { /* not there */ }
 }
+// Its settings' Read rules (--settings <file>: permissions.deny, Read(//<absolute path pattern>)), as
+// Claude Code holds a read to them: gitignore-style, ** any folders, * within a name, [] a class.
+const globRe = (g) => {
+  let s = ''
+  for (let i = 0; i < g.length; i++) {
+    if (g.startsWith('/**/', i)) { s += '/(?:.*/)?'; i += 3; continue }
+    if (g.startsWith('/**', i) && i + 3 === g.length) { s += '/.*'; i += 2; continue }
+    const c = g[i]
+    if (c === '*') s += '[^/]*'
+    else if (c === '[' && g.indexOf(']', i) > i) { const j = g.indexOf(']', i); s += g.slice(i, j + 1); i = j } else s += c.replace(/[.+^${}()|\\?]/g, '\\$&')
+  }
+  return new RegExp(`^/${s}$`)
+}
+const denyRules = (() => {
+  try {
+    const j = JSON.parse(fs.readFileSync(opt('--settings'), 'utf8'))
+    return (j.permissions?.deny || []).map((r) => /^Read\(\/\/(.+)\)$/.exec(String(r))?.[1]).filter(Boolean).map(globRe)
+  } catch { return [] }
+})()
+const denied = (p) => { const f = path.resolve(p).replace(/\\/g, '/').replace(/^([A-Za-z]):/, '$1:'); return denyRules.some((re) => re.test(f.startsWith('/') ? f : `/${f}`)) }
 const id = opt('--session-id') || opt('--resume') || `s-${process.pid}`
 const home = os.homedir()
 const note = (file, o) => fs.appendFileSync(path.join(home, file), JSON.stringify(o) + '\n')
@@ -259,7 +280,7 @@ function answerTurn(text) {
       const want = path.resolve(r[1].replace(/^~/, home))
       const real = (p) => { try { return fs.realpathSync(p) } catch { return p } }
       const here = [process.cwd(), ...added].some((d) => want.startsWith(d + path.sep) || real(want).startsWith(real(d) + path.sep))
-      if (!can('Read') || (!here && dontAsk)) { tried('read', false); out.push(`I couldn't read ${r[1]}: reading outside my folders was refused.`) } else { let c = ''; try { c = fs.readFileSync(want, 'utf8').trim() } catch { /* none */ } tool('Read', { file_path: want }); tried('read', true); out.push(`It says: ${c}`) }
+      if (!can('Read') || (!here && dontAsk)) { tried('read', false); out.push(`I couldn't read ${r[1]}: reading outside my folders was refused.`) } else if (denied(want)) { tried('read', false); out.push(`I couldn't read ${r[1]}: a rule in my settings refused it.`) } else { let c = ''; try { c = fs.readFileSync(want, 'utf8').trim() } catch { /* none */ } tool('Read', { file_path: want }); tried('read', true); out.push(`It says: ${c}`) }
     }
     // Edits: only in its folder, and only when it was started able to (a bot's change).
     const editsHere = can('Edit') && can('Write') && allowed.some((x) => /^Edit\(\.\/\*\*\)$/.test(x))

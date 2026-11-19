@@ -66,8 +66,10 @@ const CLAUDE_BUSY = new RegExp(`${ESC_INTERRUPT.source}|^\\s*[✻✳✶✢✽·*
 const EDIT_HERE = 'Edit(./' + '**)'
 // A bot's MCP servers for one run (botmcp.js runFolder): a folder of the desk's among the folders it's
 // given (front-desk/mcp/<run>/), with the servers' config (config.json) and which of their tools it
-// may use (rules.json: { allow, deny }). Never a folder it may read: it comes out of dirs, and the
-// rest stay as they were. Its files gone (Bridge AI started again since), it gives none.
+// may use (rules.json: { allow, deny }), and Claude Code's own settings for it (settings.json: its
+// Read rules, kept from what's hidden or named as keys in its folders), given with --settings. Never
+// a folder it may read: it comes out of dirs, and the rest stay as they were. Its files gone (Bridge
+// AI started again since), it gives none.
 const MCP_RUNS = dataFile('front-desk', 'mcp')
 export function mcpOf(dirs = []) {
   const runs = (dirs || []).filter((d) => path.resolve(String(d)).startsWith(MCP_RUNS + path.sep))
@@ -75,7 +77,7 @@ export function mcpOf(dirs = []) {
   for (const d of runs) {
     try {
       const r = JSON.parse(fs.readFileSync(path.join(d, 'rules.json'), 'utf8'))
-      if (fs.existsSync(path.join(d, 'config.json'))) mcp = { config: path.join(d, 'config.json'), allow: (r.allow || []).map(String), deny: (r.deny || []).map(String) }
+      if (fs.existsSync(path.join(d, 'config.json'))) mcp = { config: path.join(d, 'config.json'), allow: (r.allow || []).map(String), deny: (r.deny || []).map(String), settings: fs.existsSync(path.join(d, 'settings.json')) ? path.join(d, 'settings.json') : null }
     } catch { /* gone: none */ }
   }
   return { dirs: (dirs || []).filter((d) => !runs.includes(d)), mcp }
@@ -85,6 +87,8 @@ export function mcpOf(dirs = []) {
 const mcpFlags = (m, { allowed = true } = {}) => (m
   ? ['--mcp-config', m.config, ...(allowed && m.allow.length ? ['--allowedTools', ...m.allow] : []), ...(m.deny.length ? ['--disallowedTools', ...m.deny] : [])]
   : [])
+// (Its settings file: a value of its own, so it goes anywhere.)
+const settingsFlags = (m) => (m?.settings ? ['--settings', m.settings] : [])
 
 export const AGENTS = [
   {
@@ -114,8 +118,8 @@ export const AGENTS = [
       if (lvl !== 'read' && lvl !== 'change') return lvl === 'edits' ? ['--permission-mode', 'acceptEdits'] : lvl === 'full' ? ['--permission-mode', 'bypassPermissions'] : []
       const { dirs, mcp } = mcpOf(o.dirs)
       const add = dirs.length ? ['--add-dir', ...dirs] : []
-      return lvl === 'read' ? ['--tools', 'Read,Grep,Glob', ...add, ...mcpFlags(mcp), '--permission-mode', 'dontAsk', '--strict-mcp-config']
-        : ['--tools', 'Read,Grep,Glob,Edit,Write', '--allowedTools', EDIT_HERE, ...(mcp ? mcp.allow : []), ...add, ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config']
+      return lvl === 'read' ? ['--tools', 'Read,Grep,Glob', ...add, ...mcpFlags(mcp), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...settingsFlags(mcp)]
+        : ['--tools', 'Read,Grep,Glob,Edit,Write', '--allowedTools', EDIT_HERE, ...(mcp ? mcp.allow : []), ...add, ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...settingsFlags(mcp)]
     },
     confined: true,
     // A copy of a conversation under a new id (the original stays as it is).

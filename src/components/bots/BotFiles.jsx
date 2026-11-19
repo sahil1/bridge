@@ -17,7 +17,7 @@ const enc = encodeURIComponent
 const OPENS = /\.(png|jpe?g|gif|webp|pdf|csv|tsv|md|txt|json|ya?ml|xlsx|docx|pptx)$/i
 const revealLabel = () => (/Mac/.test(navigator.userAgent) ? t('Show in Finder') : /Windows/.test(navigator.userAgent) ? t('Show in Explorer') : t('Show in file manager'))
 
-function FileRow({ bot, f }) {
+export function FileRow({ bot, f, send = true }) {
   const [sending, setSending] = useState(false)
   const [st, setSt] = useState(null)
   const pane = `botfiles:${bot}`
@@ -40,7 +40,7 @@ function FileRow({ bot, f }) {
       <span className="muted small">{sizeOf(f.size)}</span>
       {f.from && <span className="muted small bf-from" title={f.from}>{t('from {path}', { path: f.from })}</span>}
       {(onThisComputer() || canDownload) && <button type="button" className="link-btn small" disabled={!!st?.busy} onClick={open}>{onThisComputer() && !OPENS.test(f.name) ? revealLabel() : t('Open')}</button>}
-      <button type="button" className="link-btn small" onClick={() => setSending(true)}>{t('Send to…')}</button>
+      {send && <button type="button" className="link-btn small" onClick={() => setSending(true)}>{t('Send to…')}</button>}
       {st?.ok && <span className="muted small" role="status">{st.ok}</span>}
       {st?.error && <span className="error-text small" role="alert">{st.error}</span>}
       {sending && <SendDialog src={{ pane, path: f.path, name: f.name, size: f.size }} onClose={() => setSending(false)} />}

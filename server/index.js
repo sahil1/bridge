@@ -130,6 +130,7 @@ import { osVersion, chipOf, memoryRange, coreRange } from './system.js'
 import * as transfers from './transfers.js'
 import * as backup from './backup.js'
 import * as botfiles from './botfiles.js'
+import * as botattach from './botattach.js'
 import { mediaNamed } from '../shared/media.js'
 import * as counts from './counts.js'
 import * as updates from './updates.js'
@@ -4363,7 +4364,7 @@ async function botView(b, { brief = false } = {}) {
   const routinesNow = await routines.list().catch(() => ({ routines: [] }))
   return {
     ...base, ...v,
-    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback, answerIn: b.answerIn },
+    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback, answerIn: b.answerIn, attachAuto: b.attachAuto, attachConfig: b.attachConfig },
     carryOn: botsStore.CARRY_ON_MIN,
     paused: b.paused,
     instructions: { text: botsStore.readOwn(b.id), file },
@@ -4391,7 +4392,7 @@ async function ownFolder(p) {
 }
 function recordChanges(id, before, after, who) {
   for (const k of Object.keys(after)) {
-    if (['id', 'createdAt'].includes(k) || JSON.stringify(before[k]) === JSON.stringify(after[k])) continue
+    if (['id', 'createdAt', 'folderIds'].includes(k) || JSON.stringify(before[k]) === JSON.stringify(after[k])) continue
     desk.record(id, 'settings.changed', { setting: k, old: settingSaid(before[k]), new: settingSaid(after[k]), ...who })
   }
 }
@@ -4691,6 +4692,11 @@ async function checkSettings(b, x, req) {
   // Its icon, where a shared connection posts as it: an emoji's Slack name, or a picture's https address.
   if (x.icon !== undefined) { const v = String(x.icon || '').trim(); if (v && !botsStore.ICON.test(v)) throw new Error('An icon is an emoji\'s name, like :moneybag:, or a picture\'s https address'); next.icon = v || null }
   if (x.who !== undefined) next.who = x.who === 'channels' ? 'channels' : 'named'
+  // Files from its folders: whether an answer with one may go without asking (no, the default; in a
+  // direct message with you or someone you named; to anyone who may ask, in a direct message or a
+  // private channel), and whether data and config files may go as well as documents and pictures.
+  if (x.attachAuto !== undefined) next.attachAuto = botsStore.ATTACH_AUTO.includes(x.attachAuto) ? x.attachAuto : 'no'
+  if (x.attachConfig !== undefined) next.attachConfig = x.attachConfig === true
   if (x.askers !== undefined) {
     if (!Array.isArray(x.askers)) throw new Error('askers is a list')
     next.askers = x.askers.slice(0, 200).map((p) => ({ id: String(p?.id || '').trim(), name: String(p?.name || '').replace(/\s+/g, ' ').trim().slice(0, 80) })).filter((p) => botsStore.PERSON_ID.test(p.id))
@@ -4766,8 +4772,23 @@ async function checkSettings(b, x, req) {
       const full = await places.resolveDir(String(f || ''))
       if (full === os.homedir() || full === path.resolve(os.homedir())) throw new Error('Pick a folder inside your home folder, not the whole of it')
       if (await ownFolder(full)) throw new Error('Bridge AI\'s own folder can\'t be read from')
+      // (By its real path too: a link to your home folder or a folder it's in isn't one either; nor,
+      // for a new one, a folder where apps keep their settings and keys.)
+      const id = await botattach.folderId(full)
+      if (id && botattach.folderSays(id.real) === 'it\'s your whole home folder now') throw new Error('Pick a folder inside your home folder, not the whole of it')
+      if (id && await ownFolder(id.real)) throw new Error('Bridge AI\'s own folder can\'t be read from')
+      const where = id && !had.has(String(f)) ? botattach.rootSays(id.real) : null
+      if (where) throw new Error(`Pick another folder: ${String(f)} is ${where}, where apps keep their settings and keys`)
       const t = full.replace(os.homedir(), '~')
       if (!next.readsFrom.includes(t)) next.readsFrom.push(t)
+    }
+    // Each as it is now (its real path, device and inode), so one that leads somewhere else later
+    // isn't read (frontdesk.js foldersOf); one it had already, as it was when it was picked (to pick
+    // one again, take it out and add it).
+    next.folderIds = {}
+    for (const t of next.readsFrom) {
+      const id = (had.has(t) && b.folderIds?.[t]) || await botattach.folderId(lexical(t))
+      if (id) next.folderIds[t] = id
     }
   }
   if (x.instructionsFile !== undefined) {
@@ -5269,8 +5290,8 @@ app.post('/api/bots/questions/:id/limit', botsGuard, wrapBot((req) => desk.limit
 // and their repository, your MCP servers, copies of your agents' conversations, saying what
 // your agents are doing, keeping what it learns without asking): each said. A move between your own
 // computers keeps them (backup.js shows them first). { bot, renamed, problems, memory }
-const BRING_WHAT = { who: 'who can ask', askers: 'who can ask', owner: 'you in Slack', owners: 'you in Discord and Teams', instructionsFile: 'its instructions file', repo: 'its repository', agent: 'what answers', answerers: 'what answers', changes: 'its changes', mcp: 'its MCP servers', muted: 'its muted channels', listen: 'the channels it listens in', agentCopies: 'copies of your agents\' conversations', agentsStatus: 'saying what your agents are doing', memory: 'what it remembers' }
-const HELD = { auto: false, owner: null, owners: null, agent: null, answerers: null, changes: 'none', repo: null, mcp: [], agentCopies: false, agentsStatus: false, memory: 'approve' }
+const BRING_WHAT = { who: 'who can ask', askers: 'who can ask', owner: 'you in Slack', owners: 'you in Discord and Teams', instructionsFile: 'its instructions file', repo: 'its repository', agent: 'what answers', answerers: 'what answers', changes: 'its changes', mcp: 'its MCP servers', muted: 'its muted channels', listen: 'the channels it listens in', agentCopies: 'copies of your agents\' conversations', agentsStatus: 'saying what your agents are doing', memory: 'what it remembers', attachAuto: 'sending files from its folders without asking', attachConfig: 'sending data and config files from its folders' }
+const HELD = { auto: false, owner: null, owners: null, agent: null, answerers: null, changes: 'none', repo: null, mcp: [], agentCopies: false, agentsStatus: false, memory: 'approve', attachAuto: 'no', attachConfig: false }
 const heldSays = (name, k, v, all = {}) => ({
   auto: `${name} doesn't answer without asking here: turn that on in its settings once you've looked it over`,
   owner: `Who you are in Slack, Discord and Teams isn't taken from a file: set it again in ${name}'s settings`,
@@ -5279,6 +5300,8 @@ const heldSays = (name, k, v, all = {}) => ({
   mcp: `${name} uses none of your MCP servers here (the file asked for ${(Array.isArray(v) ? v : []).join(', ')}): pick them in its settings`,
   agentCopies: `${name} doesn't answer from copies of your agents' conversations here: turn that on in its settings`,
   agentsStatus: `${name} doesn't say what your agents are doing here: turn that on in its settings`,
+  attachAuto: `${name}'s answers with files from its folders wait for you here: change that in its settings once you've looked it over`,
+  attachConfig: `${name} doesn't send data and config files from its folders here: turn that on in its settings once you've looked it over`,
   memory: `${name} asks you before it keeps what it learns here (the file asked for ${v === 'off' ? 'none kept' : 'kept straight away'}): change it in its settings`,
 }[k] || null)
 const heldDiffers = (k, v) => (k === 'owner' ? !!v?.id : k === 'owners' ? Object.keys(v || {}).length > 0 : ['mcp', 'answerers'].includes(k) ? Array.isArray(v) && v.length > 0 : k === 'agent' ? !!v : k === 'repo' ? false : JSON.stringify(v) !== JSON.stringify(HELD[k]))

@@ -1205,11 +1205,26 @@ function Replies({ d, save }) {
         </label>
         <label className={`sb-mode ${s.auto ? 'on' : ''}`}>
           <input type="radio" name={`sb-auto-${d.id}`} checked={!!s.auto} onChange={() => save({ auto: true })} />
-          <span><b>{t('Answer without asking')}</b><span className="muted small">{t('An answer goes straight to Slack when what answered is held to its folders (Claude Code, or a model through Bridge AI\'s tools). An answer from a copy of an agent\'s conversation, or from Codex, which can read anywhere, still waits for you.')}</span></span>
+          <span><b>{t('Answer without asking')}</b><span className="muted small">{t('An answer goes straight to Slack when what answered is held to its folders (Claude Code, or a model through Bridge AI\'s tools). An answer from a copy of an agent\'s conversation, or from Codex, which can read anywhere, still waits for you, and so does one with a file from its folders unless you say otherwise below.')}</span></span>
         </label>
       </div>
       {s.auto && by && !by.confined && <p className="st-note warn"><Icon name="alert" size={13} />{t('{agent} answers here and isn\'t held to its folder, so every answer still waits for you.', { agent: label })}</p>}
       {s.auto && <p className="muted small">{t('Answers sent without asking are streamed into Slack as they\'re posted. One for a public channel that quotes a file it read waits for you all the same.')}</p>}
+      <div className="sb-attach" data-setting="bots-attach">
+        <label className="st-row">
+          <span><b>{t('Send Files From Its Folders Without Asking')}</b> <span className="muted small">{t('It can attach a file from the folders it reads, a PDF or a spreadsheet say, as it is. Whoever gets the answer gets the whole file.')}</span></span>
+          <select className="st-input" value={s.attachAuto || 'no'} onChange={(e) => save({ attachAuto: e.target.value })} aria-label={t('Send Files From Its Folders Without Asking')}>
+            <option value="no">{t('No: each answer with one waits for you')}</option>
+            <option value="named">{t('To people you named, in a direct message')}</option>
+            <option value="everyone">{t('To everyone who may ask, in a direct message or a private channel')}</option>
+          </select>
+        </label>
+        <p className="muted small">{!s.auto ? t('Every answer waits for you now, files and all.') : (s.attachAuto || 'no') === 'no' ? t('An answer with a file from its folders waits in Needs You, which shows where each file is from, until you send it.') : s.attachAuto === 'named' ? t('An answer with a file from its folders goes without asking only in a direct message with you or someone you named, when everyone it answers is one of them. Anywhere else, it waits for you.') : t('An answer with a file from its folders goes without asking only in a direct message or a private channel, to people who may ask it. In a public channel, it waits for you.')}</p>
+        <label className="st-check">
+          <input type="checkbox" checked={!!s.attachConfig} onChange={(e) => save({ attachConfig: e.target.checked })} />
+          <span><b>{t('Data and config files too')}</b> <span className="muted small">{t('Off: it attaches PDFs, Word, Excel and PowerPoint files, pictures, CSV, text and Markdown only. On: JSON, YAML, XML and HTML files too, where settings and keys are often kept. A file that looks like it holds a key, a password or a token never goes.')}</span></span>
+        </label>
+      </div>
       <p className="muted small sb-approvals">{s.owner ? t('Drafts also come to your Slack direct messages, to send, edit or discard from your phone.') : t('Set You in Slack, above, to approve its drafts from Slack too.')}</p>
       {terms && <p className="st-note warn sb-terms" data-setting="slack-terms"><Icon name="info" size={13} /><span>{terms}</span></p>}
       <label className="st-check">
@@ -1624,7 +1639,7 @@ function ChangeOf({ c }) {
     </div>
   )
 }
-const FilesOf = ({ files }) => (files?.length ? <p className="muted small sb-files"><Icon name="paperclip" size={12} /> {t('With {files}', { files: files.map((f) => `${f.name}${f.size != null ? ` (${sizeOf(f.size)})` : ''}`).join(', ') })}</p> : null)
+const FilesOf = ({ files }) => (files?.length ? <p className="muted small sb-files"><Icon name="paperclip" size={12} /> {t('With {files}', { files: files.map((f) => `${f.name}${f.size != null ? ` (${sizeOf(f.size)})` : ''}${f.from ? ` ${t('from {path}', { path: f.from })}` : ''}`).join(', ') })}</p> : null)
 
 // ---------- Try It ----------
 // A question asked here as someone would in Slack: the same agent, folders, instructions and memory,

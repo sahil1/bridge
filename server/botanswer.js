@@ -121,28 +121,49 @@ export async function runChat({ reply, model, brief, folders = [], also = [], mc
   const real = async (p) => fs.promises.realpath(p).catch(() => null)
   const roots = (await Promise.all(folders.map(real))).filter(Boolean)
   const allowed = [...roots, ...(await Promise.all(also.map(real))).filter(Boolean)]
-  const within = (p) => allowed.some((r) => p === r || p.startsWith(r + path.sep))
-  // A path it asked for, as the real path it is, only inside its folders.
+  const given = [...folders, ...also].map((f) => path.resolve(String(f)))
+  const keptOut = await Promise.all(botattach.keptOut().map(async (d) => (await real(d)) || path.resolve(d)))
+  const rootOf = (p) => allowed.find((r) => p === r || p.startsWith(r + path.sep))
+  // What under one of its folders isn't for it to read, as botattach.js has it for what's sent: a
+  // hidden file or folder, a name that says it holds keys, passwords or credentials, or a folder that
+  // holds keys (but where its folder is in one itself: the files attached to the question, in Bridge
+  // AI's own). Why, or null.
+  const closed = (p, root) => {
+    const names = p.slice(root.length).split(/[\\/]+/).filter(Boolean)
+    if (names.some((n) => n.startsWith('.'))) return 'is hidden, or in a hidden folder'
+    if (names.some(botattach.secretLike)) return 'has a name that says it holds keys, passwords or credentials'
+    if (keptOut.some((k) => botattach.within(p, k) && !botattach.within(root, k))) return 'is in a folder that holds keys'
+    return null
+  }
+  // A path it asked for, as the real path it is, only inside its folders: inside them as it's written
+  // before anything is asked of the system (a path elsewhere, \\host\\share or /net/host say, is never
+  // looked up), then as its real path, and nothing under them that isn't for it to read.
   async function place(p, { dir = false } = {}) {
     const raw = String(p || '').trim().replace(/^~(?=$|[\\/])/, HOME)
     if (!raw && dir && roots[0]) return roots[0]
     if (!roots.length && !raw) throw refused('You have no folders to read.')
-    const full = path.isAbsolute(raw) ? raw : path.join(roots[0] || HOME, raw)
+    const full = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(roots[0] || HOME, raw)
+    if (![...given, ...allowed].some((r) => botattach.within(full, r))) throw refused(`${tilde(full)} is outside the folders you can read: refused.`)
     const r = await real(full)
     if (!r) throw refused(`${tilde(full)} isn't there.`)
-    if (!within(r)) throw refused(`${tilde(full)} is outside the folders you can read: refused.`)
+    const root = rootOf(r)
+    if (!root) throw refused(`${tilde(full)} is outside the folders you can read: refused.`)
+    const why = closed(r, root)
+    if (why) throw refused(`${tilde(full)} ${why}: refused.`)
     return r
   }
   const reads = []
   const used = new Map()
   const status = (doing) => onStep({ doing, reading: reads.map((x) => x.what).slice(-5), tools: [...used.values()] })
-  async function walk(dir, fn, depth = 0) {
+  // (Never into what isn't for it to read: hidden, named as keys, a folder that holds keys.)
+  async function walk(dir, fn, depth = 0, root = dir) {
     let ents = []
     try { ents = await fs.promises.readdir(dir, { withFileTypes: true }) } catch { return }
     for (const e of ents) {
       if (SKIP.has(e.name) || e.isSymbolicLink()) continue
       const p = path.join(dir, e.name)
-      if (e.isDirectory()) { if (depth < 8) { if (await walk(p, fn, depth + 1) === false) return false } } else if (e.isFile() && (await fn(p)) === false) return false
+      if (closed(p, root)) continue
+      if (e.isDirectory()) { if (depth < 8) { if (await walk(p, fn, depth + 1, root) === false) return false } } else if (e.isFile() && (await fn(p)) === false) return false
     }
     return true
   }
@@ -185,7 +206,7 @@ export async function runChat({ reply, model, brief, folders = [], also = [], mc
       reads.push({ tool: 'Glob', what: tilde(p) })
       status(`list_files: ${tilde(p)}`)
       const ents = await fs.promises.readdir(p, { withFileTypes: true })
-      return ents.filter((e) => !e.name.startsWith('.')).slice(0, 500).map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).join('\n') || '(empty)'
+      return ents.filter((e) => !e.name.startsWith('.') && !botattach.secretLike(e.name)).slice(0, 500).map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).join('\n') || '(empty)'
     }
     if (c.name === 'search') {
       let re

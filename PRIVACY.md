@@ -237,9 +237,16 @@ What else a bot sends to Slack, and keeps:
   read, and deleted once the question is done. A file its answer sends back (a chart or a table it
   made, or a file in the folders it reads, such as a PDF, as it is), and a long answer as a file, go
   up to the address Slack gives for each upload; until they're sent they're kept in
-  `~/.bridge-ai/front-desk/out/`. A file from its folders goes only from the folders you gave it, never
-  a hidden one, one reached through a link, one whose name says it holds keys, passwords or
-  credentials, or a text file with a private key in it.
+  `~/.bridge-ai/front-desk/out/`. A file from its folders goes only from the folders you gave it (and
+  only while each is still the folder you picked), never a hidden one, one reached through a link,
+  one whose name says it holds keys, passwords or credentials, or one that looks like it holds a key,
+  a password or a token. It sends documents and pictures (PDFs, Word, Excel and PowerPoint files,
+  pictures, CSV, text and Markdown); data and config files (JSON, YAML, XML, HTML) only once you turn
+  on "Data and config files too" (Settings › Bots). Whoever gets the answer gets the whole file, so
+  an answer with a file from its folders waits for you in Needs You, which says where the file is
+  from, even when it answers without asking, unless you change Send Files From Its Folders Without
+  Asking: to people you named, in a direct message with them; or to everyone who may ask, in a direct
+  message or a private channel. Never without asking in a public channel.
 - In a channel you pick for it to answer without a mention, Bridge AI keeps the top-level messages
   of the people who may ask it; everyone else's are dropped as they arrive, as in any channel.
 

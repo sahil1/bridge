@@ -9,8 +9,9 @@
 //   attach_file  a file in the bot's folders, sent as it is (a PDF, a Word document, a picture), only
 //                with attach.json: the folders it may be in, as Bridge AI has them (a file of the run's
 //                MCP folder, readable by you only, which its agent can't read). It's checked here as
-//                botattach.js says, so the agent hears at once why one can't go, and noted in the
-//                outbox; nothing is copied here.
+//                botattach.js says, so the agent hears at once why one can't go, and noted beside the
+//                outbox (never in it); nothing is copied here. Data and config files only when you
+//                let the bot send them (config in attach.json).
 // What's in the outbox is looked at again once the answer is in, and each file attached checked
 // again and copied in then (botfiles.js collect): that's the gate, this a convenience.
 //
@@ -28,7 +29,7 @@ const ctx = (() => {
   try {
     const j = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'))
     const folders = (Array.isArray(j.folders) ? j.folders : []).map(String).filter(Boolean)
-    return folders.length ? { folders, cwd: j.cwd ? String(j.cwd) : null, ...(Array.isArray(j.keptOut) ? { keptOut: j.keptOut.map(String) } : {}) } : null
+    return folders.length ? { folders, cwd: j.cwd ? String(j.cwd) : null, config: j.config === true, ...(Array.isArray(j.keptOut) ? { keptOut: j.keptOut.map(String) } : {}) } : null
   } catch { return null }
 })()
 const SAVE = {
@@ -41,7 +42,7 @@ const SAVE = {
 const ATTACH = {
   name: 'attach_file',
   title: 'Attach a file from your folders',
-  description: `Send back a file that's in your folders as it is, with your answer: a PDF, a Word document, a spreadsheet, a picture. Give its path. ${MAX} files at most with an answer, none over ${sizeOf(EACH)}; never a hidden file or one that holds keys, passwords or credentials.`,
+  description: `Send back a file that's in your folders as it is, with your answer: a PDF, a Word document, a spreadsheet, a presentation, a picture${ctx?.config ? ', or a data or config file' : ''}. Give its path. ${MAX} files at most with an answer, none over ${sizeOf(EACH)}; never a hidden file or one that holds keys, passwords, tokens or credentials.`,
   inputSchema: { type: 'object', properties: { path: { type: 'string', description: 'The file\'s path, in one of your folders' } }, required: ['path'] },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 }

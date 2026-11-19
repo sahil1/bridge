@@ -992,7 +992,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     else blocks.push({ type: 'section', text: { type: 'mrkdwn', text: clip(`*Draft:*\n${md(it.draft || '')}`, 3000) } })
     const notes = [
       it.sources?.length ? `From ${it.sources.slice(0, 6).map(md).join(', ')}` : null,
-      it.files?.length ? `Files: ${it.files.map((f) => `${md(f.name)}${f.size ? ` (${sized(f.size)})` : ''}`).join(', ')}` : null,
+      it.files?.length ? `Files: ${it.files.map((f) => `${md(f.name)}${f.size ? ` (${sized(f.size)})` : ''}${f.from ? ` from ${md(f.from)}` : ''}`).join(', ')}` : null,
       it.warn ? `:warning: ${md(it.warn)}` : null,
       !it.needsOwner && it.why ? md(it.why) : null,
     ].filter(Boolean)

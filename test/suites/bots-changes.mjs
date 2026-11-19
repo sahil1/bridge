@@ -69,6 +69,8 @@ try {
     const s1 = await startOf('fix the typo in the README')
     const a1 = s1?.args.join(' ') || ''
     ok(real(s1?.cwd || '').startsWith(real(path.join(kit.data, 'front-desk', 'changes'))) && a1.includes('--tools Read,Grep,Glob,Edit,Write --allowedTools Edit(./**)') && a1.includes('--permission-mode dontAsk') && !a1.includes(APP) && !/acceptEdits|bypassPermissions/.test(a1), 'its agent works in its own copy of the repository, edits allowed only there, nothing asked', s1 && { cwd: s1.cwd, args: s1.args })
+    // (Nothing attached from your own repository in a change's run: it reads its copy, so it has no attach_file.)
+    ok(!s1?.args.includes('mcp__bridge_outbox__attach_file') && s1?.args.includes('mcp__bridge_outbox__save_file'), 'a change\'s run gets no attach_file: the repository its copy came from isn\'t one it reads', s1?.args)
     const d1 = await draftOf('fix the typo in the README')
     const tries = logOf('answer-tries.log')
     ok(tries.some((x) => x.try === 'edit' && x.done) && tries.some((x) => x.try === 'edit-outside' && !x.done) && tries.some((x) => x.try === 'run' && !x.done), 'it edits its copy; writing outside it and running a command are refused', tries)

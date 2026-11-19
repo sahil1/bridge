@@ -136,3 +136,9 @@
 .ny-draft:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 /* (16 px on a phone, so the reply box doesn't zoom the page when it's tapped.) */
 .ny-panel.phone .ny-draft { font-size: 16px; }
+/* Files attached from a bot's folders, to look at before its answer goes (BotFiles.jsx FileRow). */
+.ny-attached { margin: 4px 0 2px; }
+.ny-attached .bf-list { margin-top: 2px; }
+@media (max-width: 760px) {
+  .ny-attached .link-btn { min-height: 40px; min-width: 40px; }
+}

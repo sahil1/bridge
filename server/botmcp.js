@@ -165,10 +165,11 @@ export const configsOf = (bot) => { const have = claudeServers(); return Object.
 // used (you, or someone you named), else only the tools that say they only read. Written in a folder
 // of its own (key: the question's and run's), whose path goes with the run's other folders. null when
 // it has none (or none of them is in Claude Code's config any more). What it was given is said back
-// for the record: { dir, servers: [{ name, all, tools, problem }], missing }. attach: { folders, cwd },
-// the bot's folders a file may be attached from (with an outbox), as Settings has them.
+// for the record: { dir, servers: [{ name, all, tools, problem }], missing }. attach: { folders, cwd,
+// config }, the folders its run reads that a file may be attached from (with an outbox), and whether
+// data and config files may be; reads: the folders it reads, for its Read rules.
 export const OUTBOX_SERVER = 'bridge_outbox'
-export async function runFolder(bot, { all = false, key, outbox = null, attach = null }) {
+export async function runFolder(bot, { all = false, key, outbox = null, attach = null, reads = [] }) {
   const want = (bot.mcp || []).filter((n) => n !== OUTBOX_SERVER)
   if (!want.length && !outbox) return null
   const have = claudeServers()
@@ -197,7 +198,7 @@ export async function runFolder(bot, { all = false, key, outbox = null, attach =
     allow.push(toolName(OUTBOX_SERVER, 'save_file'))
     if (attach?.folders?.length) {
       const file = path.join(dir, 'attach.json')
-      writeFileAtomic(file, JSON.stringify({ folders: attach.folders.map(String), cwd: attach.cwd || null, keptOut: keptOut() }, null, 2), { mode: 0o600 })
+      writeFileAtomic(file, JSON.stringify({ folders: attach.folders.map(String), cwd: attach.cwd || null, config: attach.config === true, keptOut: keptOut() }, null, 2), { mode: 0o600 })
       args.push(file)
       allow.push(toolName(OUTBOX_SERVER, 'attach_file'))
     }
@@ -205,7 +206,28 @@ export async function runFolder(bot, { all = false, key, outbox = null, attach =
   }
   writeFileAtomic(path.join(dir, 'config.json'), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 })
   writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny }, null, 2), { mode: 0o600 })
+  // (And Claude Code's own settings for the run, its Read rules: nothing hidden in the folders it
+  // reads, nor anything named as keys, passwords or credentials. agents.js gives them with --settings.)
+  if (reads.length) writeFileAtomic(path.join(dir, 'settings.json'), JSON.stringify({ permissions: { deny: readDenies(reads) } }, null, 2), { mode: 0o600 })
   return { dir, servers: said, missing }
+}
+// Claude Code's Read rules for a bot's run (gitignore-style patterns; // starts at the root), for each
+// folder it reads, as named and as its real path: no hidden file, nor anything in a hidden folder,
+// nor a name that says it holds keys, passwords or credentials (as botattach.js secretLike has them,
+// whatever their case). Read rules hold for Grep and Glob too, as far as Claude Code can.
+const anyCase = (w) => w.replace(/[a-z]/g, (c) => `[${c}${c.toUpperCase()}]`)
+const SECRET_GLOBS = [
+  ...['secret', 'credential', 'password', 'passwd', 'apikey', 'api_key', 'api-key', 'private_key', 'private-key', 'kubeconfig', 'bitwarden', '1password', 'lastpass', 'keepass', 'recovery-codes', 'recovery_codes', 'backup-codes', 'backup_codes', 'logins', 'id_rsa', 'id_ed25519', 'id_ecdsa', 'id_dsa', 'service-account', 'service_account', 'client_secret'].map((w) => `*${anyCase(w)}*`),
+  ...['pem', 'key', 'p12', 'pfx', 'jks', 'keystore', 'kdbx', 'ppk', 'ovpn', 'env'].map((e) => `*.${anyCase(e)}`),
+]
+export function readDenies(folders) {
+  const out = []
+  const real = (f) => { try { return fs.realpathSync(f) } catch { return f } }
+  for (const f of [...new Set(folders.flatMap((x) => [path.resolve(String(x)), real(path.resolve(String(x)))]))]) {
+    const g = `//${f.replace(/\\/g, '/').replace(/^\/+/, '')}`
+    out.push(`Read(${g}/**/.*)`, `Read(${g}/**/.*/**)`, ...SECRET_GLOBS.map((p) => `Read(${g}/**/${p})`))
+  }
+  return out
 }
 // A run's folder gone (it ended), or every one older than a day (left from before a restart).
 export function drop(dir) { if (dir && path.resolve(dir).startsWith(RUNS + path.sep)) fs.rmSync(dir, { recursive: true, force: true }) }
