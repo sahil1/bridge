@@ -371,9 +371,11 @@ try {
     // A bot's run: only your own settings and Bridge AI's, which keep its reads to its folder.
     let x = await ask('What does the safe say? [try-read ~/outside.txt] [answer That is all.]')
     const s = logOf('helpers-started.log').find((y) => /What does the safe say/.test(y.message))
-    const kept = s?.args[s.args.indexOf('--settings') + 1] || ''
+    const kept = s?.args.includes('--settings') ? s.args[s.args.indexOf('--settings') + 1] : ''
     ok(real(s?.cwd || '') === real(dir) && (s?.args.join(' ') || '').includes('--setting-sources user --settings ') && fwd(kept).endsWith('/front-desk/claude-settings.json'), 'a bot\'s run in that folder loads only your own settings and Bridge AI\'s (--setting-sources user, --settings)', s && { cwd: s.cwd, args: s.args })
-    ok(JSON.parse(fs.readFileSync(kept, 'utf8')).permissions?.blockReadsOutsideWorkingDirectories === true, 'Bridge AI\'s: no read outside its folders, whatever an allow rule says')
+    let given = null
+    try { given = JSON.parse(fs.readFileSync(kept, 'utf8')) } catch { /* none */ }
+    ok(given?.permissions?.blockReadsOutsideWorkingDirectories === true, 'Bridge AI\'s: no read outside its folders, whatever an allow rule says', given)
     ok(!!s && !s.settings.some((f) => real(f).startsWith(real(dir))), 'none of its folder\'s own settings loaded', s?.settings)
     ok(!/4321/.test(x?.item.draft || '') && /reading outside my folders was refused/.test(x?.item.draft || '') && logOf('answer-tries.log').some((y) => y.try === 'read' && y.done === false && real(y.cwd) === real(dir)), 'a file outside its folder isn\'t read, though its folder\'s settings and your own allow it', x?.item.draft)
     ok(!fs.existsSync(marker), 'and its folder\'s hooks never run', fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8') : null)
