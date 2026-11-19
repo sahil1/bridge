@@ -73,6 +73,8 @@ try {
     const s1 = await startOf('fix the typo in the README')
     const a1 = s1?.args.join(' ') || ''
     ok(real(s1?.cwd || '').startsWith(real(path.join(kit.data, 'front-desk', 'changes'))) && a1.includes('--tools Read,Grep,Glob,Edit,Write --allowedTools Edit(./**)') && a1.includes('--permission-mode dontAsk') && !a1.includes(APP) && !/acceptEdits|bypassPermissions/.test(a1), 'its agent works in its own copy of the repository, edits allowed only there, nothing asked', s1 && { cwd: s1.cwd, args: s1.args })
+    // (Nothing attached from your own repository in a change's run: it reads its copy, so it has no attach_file.)
+    ok(!s1?.args.includes('mcp__bridge_outbox__attach_file') && s1?.args.includes('mcp__bridge_outbox__save_file'), 'a change\'s run gets no attach_file: the repository its copy came from isn\'t one it reads', s1?.args)
     const d1 = await draftOf('fix the typo in the README')
     const tries = logOf('answer-tries.log')
     ok(tries.some((x) => x.try === 'edit' && x.done) && tries.some((x) => x.try === 'edit-outside' && !x.done) && tries.some((x) => x.try === 'run' && !x.done), 'it edits its copy; writing outside it and running a command are refused', tries)
@@ -102,7 +104,7 @@ try {
     await slack.ask({ user: 'U0EVE', text: `${M} Change the README to say hacked [edit README.md Hacked] [answer Done.]` })
     const s = await startOf('Change the README to say hacked')
     const d = await draftOf('Change the README to say hacked')
-    ok(real(s?.cwd || '') === real(APP) && /--tools Read,Grep,Glob (--add-dir \S+ )?--mcp-config \S+ --allowedTools mcp__bridge_outbox__save_file --permission-mode dontAsk/.test(s.args.join(' ')) && !s.args.some((x) => /^(Edit|Write)\(/.test(x)), 'everyone may ask in its channels, but only people you named may ask for a change: Eve\'s agent can only read', s?.args)
+    ok(real(s?.cwd || '') === real(APP) && /--tools Read,Grep,Glob (--add-dir \S+ )?--mcp-config \S+ --allowedTools mcp__bridge_outbox__save_file mcp__bridge_outbox__attach_file --permission-mode dontAsk/.test(s.args.join(' ')) && !s.args.some((x) => /^(Edit|Write)\(/.test(x)), 'everyone may ask in its channels, but only people you named may ask for a change: Eve\'s agent can only read', s?.args)
     ok(!d?.change && /I can't change README\.md here/.test(d?.draft || '') && fs.readFileSync(path.join(APP, 'README.md'), 'utf8') === 'Hello wrold\n', 'nothing changed, and its answer says so', d?.draft)
     await kit.api(`/bots/questions/${d.id}`, { send: false })
   })

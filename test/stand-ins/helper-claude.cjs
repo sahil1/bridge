@@ -35,7 +35,8 @@
 //     [try-read <path>]                      tries to read a file: one in its folder or a folder
 //                                            --add-dir gave it is read; one outside them is refused
 //                                            under --permission-mode dontAsk, as Claude Code
-//                                            refuses what would have asked
+//                                            refuses what would have asked; and one a Read rule in
+//                                            its settings denies (permissions.deny) is refused
 //                                            Each try goes in ~/answer-tries.log ({ try, done }).
 //     [edit <name> <text>]                   writes <text> into <name> in its folder: only when
 //                                            --tools lets it Edit and --allowedTools Edit(./**)
@@ -74,6 +75,13 @@
 //     [make-big <name> <MB>]                 saves a file that many MB big so
 //     [make-early <name> <text>]             as [make], but at once, before it works (not again
 //                                            once it's picked up after its time limit)
+//     [attach <path>]                        attaches a file in its folders, as it is, with the
+//                                            attach_file tool of bridge_outbox (as [make]: only with
+//                                            mcp__bridge_outbox__attach_file allowed, else it says it
+//                                            couldn't); one refused it doesn't mention, as the tool
+//                                            says Bridge AI does
+//     [attach-line <path>]                   ends with a line ATTACH: <path>, as an agent with no tool
+//                                            for it would
 //     [remember <text>]                      ends with REMEMBER: <text>
 //     [remember-me <text>]                   ends with REMEMBER about <the asker>: <text>
 //     [recall]                               says what its brief's memory gave it
@@ -102,7 +110,8 @@
 //                                            (project: .claude/settings.json; local:
 //                                            .claude/settings.local.json), the ones the list names
 //                                            (all three without it), and --settings always. What they
-//                                            say holds: permissions.allow rules for Read (Read, or
+//                                            say holds: permissions.deny rules for Read refuse
+//                                            [try-read] there, permissions.allow rules for Read (Read, or
 //                                            Read(<path>) ending /** for all in it) let [try-read]
 //                                            read outside its folders under dontAsk, as do the
 //                                            folders permissions.additionalDirectories adds, unless
@@ -178,6 +187,23 @@ const ruleAllows = (rule, p) => {
   at = at.startsWith('//') ? path.resolve(process.platform === 'win32' ? at.slice(2) : at.slice(1)) : at.startsWith('~/') || at === '~' ? path.join(home, at.slice(2)) : path.resolve(at)
   return p === at || (all && p.startsWith(at + path.sep))
 }
+// Their Read rules (permissions.deny, Read(//<absolute path pattern>), from each it loaded:
+// --settings among them), as Claude Code holds a read to them: gitignore-style, ** any folders, *
+// within a name, ? one character, [] a class.
+const globRe = (g) => {
+  let s = ''
+  for (let i = 0; i < g.length; i++) {
+    if (g.startsWith('/**/', i)) { s += '/(?:.*/)?'; i += 3; continue }
+    if (g.startsWith('/**', i) && i + 3 === g.length) { s += '/.*'; i += 2; continue }
+    const c = g[i]
+    if (c === '*') s += '[^/]*'
+    else if (c === '?') s += '[^/]'
+    else if (c === '[' && g.indexOf(']', i) > i) { const j = g.indexOf(']', i); s += g.slice(i, j + 1); i = j } else s += c.replace(/[.+^${}()|\\]/g, '\\$&')
+  }
+  return new RegExp(`^/${s}$`)
+}
+const denyRules = loaded.flatMap((x) => x.s.permissions?.deny || []).map((r) => /^Read\(\/\/(.+)\)$/.exec(String(r))?.[1]).filter(Boolean).map(globRe)
+const denied = (p) => { const f = path.resolve(p).replace(/\\/g, '/').replace(/^([A-Za-z]):/, '$1:'); return denyRules.some((re) => re.test(f.startsWith('/') ? f : `/${f}`)) }
 // (What --settings gave it, as it read it: the run's file goes once the run has, so it's kept here.)
 const given = flagSettings ? loaded.findLast((x) => x.file === flagSettings)?.s || null : null
 if (message) note('helpers-started.log', { args, cwd: process.cwd(), message, secrets, settings: loaded.map((x) => x.file), given, ...(pointed ? { briefFile: pointed[1] } : {}) })
@@ -322,20 +348,34 @@ function answerTurn(text) {
   // call it, the server started as its config says and asked over stdin and stdout.
   const outboxServer = (() => { for (const c of configs) { try { const x = JSON.parse(fs.readFileSync(c, 'utf8')).mcpServers?.bridge_outbox; if (x) return x } catch { /* unreadable */ } } return null })()
   const mayMake = !!outboxServer && args.includes('--strict-mcp-config') && allowed.includes('mcp__bridge_outbox__save_file')
-  const makeTo = (out) => (name, body) => {
-    if (!mayMake) { tried('make', false); out.push(`I couldn't save ${name}: I have no tool for it.`); return }
-    const buf = Buffer.isBuffer(body) ? body : Buffer.from(String(body))
+  const mayAttach = !!outboxServer && args.includes('--strict-mcp-config') && allowed.includes('mcp__bridge_outbox__attach_file')
+  // One of its tools called, as Claude Code calls one: { ok, text }.
+  const callOutbox = (name, input) => {
     const asks = [
       { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.312' } } },
       { jsonrpc: '2.0', method: 'notifications/initialized' },
-      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'save_file', arguments: { name, content: buf.toString('base64'), base64: true } } },
+      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name, arguments: input } },
     ]
     const r = require('node:child_process').spawnSync(outboxServer.command, outboxServer.args || [], { input: asks.map((x) => JSON.stringify(x)).join('\n') + '\n', env: { ...process.env, ...(outboxServer.env || {}) }, encoding: 'utf8', timeout: 20000, maxBuffer: 1 << 20 })
     const said = String(r.stdout || '').split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).find((x) => x?.id === 2)
-    const ok = said?.result && !said.result.isError
+    return { ok: !!(said?.result && !said.result.isError), text: said?.result?.content?.[0]?.text || said?.error?.message || r.error?.message || 'no answer' }
+  }
+  const makeTo = (out) => (name, body) => {
+    if (!mayMake) { tried('make', false); out.push(`I couldn't save ${name}: I have no tool for it.`); return }
+    const buf = Buffer.isBuffer(body) ? body : Buffer.from(String(body))
+    const r = callOutbox('save_file', { name, content: buf.toString('base64'), base64: true })
     tool('mcp__bridge_outbox__save_file', { name })
-    tried('make', !!ok)
-    out.push(ok ? `I made ${name}.` : `I couldn't save ${name}: ${said?.result?.content?.[0]?.text || said?.error?.message || r.error?.message || 'no answer'}.`)
+    tried('make', r.ok)
+    out.push(r.ok ? `I made ${name}.` : `I couldn't save ${name}: ${r.text}.`)
+  }
+  const attachTo = (out) => (p) => {
+    const name = path.basename(p)
+    if (!mayAttach) { tried('attach', false); out.push(`I couldn't attach ${name}: I have no tool for it.`); return }
+    const r = callOutbox('attach_file', { path: p })
+    tool('mcp__bridge_outbox__attach_file', { path: p })
+    tried('attach', r.ok)
+    if (r.ok) out.push(`I attached ${name}.`)
+    else if (!/no need to say it again/.test(r.text)) out.push(`I couldn't attach ${name}: ${r.text}`)
   }
   // ([make-early]: saved at once, before it works, so a run stopped at its time limit has saved it
   // already; not again once it's picked up.)
@@ -358,9 +398,10 @@ function answerTurn(text) {
       const want = path.resolve(r[1].replace(/^~/, home))
       const real = (p) => { try { return fs.realpathSync(p) } catch { return p } }
       const here = [process.cwd(), ...added, ...moreDirs].some((d) => want.startsWith(d + path.sep) || real(want).startsWith(real(d) + path.sep))
-      // (Outside them: refused under dontAsk unless an allow rule lets it, and always when blockReadsOutsideWorkingDirectories says so.)
+      // (Outside them: refused under dontAsk unless an allow rule lets it, and always when blockReadsOutsideWorkingDirectories says so;
+      // and anywhere, what a Read rule its settings deny.)
       const ruled = readRules.some((x) => ruleAllows(x, want) || ruleAllows(x, real(want)))
-      if (!can('Read') || (!here && (blockOutside || (dontAsk && !ruled)))) { tried('read', false); out.push(`I couldn't read ${r[1]}: reading outside my folders was refused.`) } else { let c = ''; try { c = fs.readFileSync(want, 'utf8').trim() } catch { /* none */ } tool('Read', { file_path: want }); tried('read', true); out.push(`It says: ${c}`) }
+      if (!can('Read') || (!here && (blockOutside || (dontAsk && !ruled)))) { tried('read', false); out.push(`I couldn't read ${r[1]}: reading outside my folders was refused.`) } else if (denied(want)) { tried('read', false); out.push(`I couldn't read ${r[1]}: a rule in my settings refused it.`) } else { let c = ''; try { c = fs.readFileSync(want, 'utf8').trim() } catch { /* none */ } tool('Read', { file_path: want }); tried('read', true); out.push(`It says: ${c}`) }
     }
     // Edits: only in its folder, and only when it was started able to (a bot's change), and only
     // what its hooks let through.
@@ -418,6 +459,9 @@ function answerTurn(text) {
     for (const m of q.matchAll(/\[make-exe ([^\s\]]+)\]/g)) make(m[1], Buffer.concat([Buffer.from('MZ'), Buffer.alloc(62, 1)]))
     for (const m of q.matchAll(/\[make-script ([^\s\]]+)\]/g)) make(m[1], '#!/bin/sh\necho hello\n')
     for (const m of q.matchAll(/\[make-big ([^\s\]]+) (\d+)\]/g)) make(m[1], Buffer.alloc(Number(m[2]) * 1024 * 1024, 65))
+    const attach = attachTo(out)
+    for (const m of q.matchAll(/\[attach ([^\]]+)\]/g)) attach(m[1].trim())
+    const attachLines = [...q.matchAll(/\[attach-line ([^\]]+)\]/g)].map((m) => `ATTACH: ${m[1].trim()}`)
     const memo = (/----- memory -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of memory -----/.exec(text) || [])[1] || ''
     if (/\[recall\]/.test(q)) out.push(memo ? `I remember: ${memo.replace(/\n| · /g, ' ').trim()}` : 'I remember nothing.')
     if (/\[agents\]/.test(q)) out.push((/What .*?'s agents are doing now[^\n]*\n((?:- .*\n?)*)/.exec(text) || [])[1]?.trim().replace(/\n/g, ' ') || 'No agents said.')
@@ -439,7 +483,7 @@ function answerTurn(text) {
     const a = /\[answer ([^\]]+)\]/.exec(q)
     const long = /\[long\]/.test(q) ? `\n\n${Array.from({ length: 60 }, (_, i) => `Point ${i + 1}: the details of this part of the answer, said at some length.`).join('\n\n')}` : ''
     const hand = /reply with HAND TO and that bot's name/.test(text) && /\[hand ([^\]]+)\]/.exec(q)
-    const answer = hand ? `HAND TO ${hand[1]}` : /\[noanswer\]/.test(q) ? 'NO ANSWER\nNothing in this folder says.' : /\[notforme\]/.test(q) ? 'NOT FOR ME' : [[...out, a ? a[1] : 'Here is what I found.', ...(sign ? [sign] : [])].join(' ') + long, ...files, ...remember].join('\n\n')
+    const answer = hand ? `HAND TO ${hand[1]}` : /\[noanswer\]/.test(q) ? 'NO ANSWER\nNothing in this folder says.' : /\[notforme\]/.test(q) ? 'NOT FOR ME' : [[...out, a ? a[1] : 'Here is what I found.', ...(sign ? [sign] : [])].join(' ') + long, ...files, ...remember, ...(attachLines.length ? [attachLines.join('\n')] : [])].join('\n\n')
     said = answer
     reply(answer)
     state = 'idle'

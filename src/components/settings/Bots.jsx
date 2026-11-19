@@ -908,6 +908,7 @@ export function ReadsFrom({ d, save }) {
               <div className="sb-folder-text">
                 <code title={f.path}>{f.shown}</code>
                 {!f.ok && <span className="error-text small">{f.problem}</span>}
+                {f.confirm && <button type="button" className="link-btn small sb-keep-folder" onClick={() => save({ keepFolder: f.shown, ...(f.leadsTo ? { keepAt: f.leadsTo } : {}) })}>{t('Keep reading it')}</button>}
               </div>
               <button type="button" className="icon-btn" onClick={() => drop(f)} aria-label={t('Stop reading from {folder}', { folder: f.name })}><Icon name="x" size={12} /></button>
             </li>
@@ -1353,11 +1354,26 @@ function Replies({ d, save }) {
         </label>
         <label className={`sb-mode ${s.auto ? 'on' : ''}`}>
           <input type="radio" name={`sb-auto-${d.id}`} checked={!!s.auto} onChange={() => save({ auto: true })} />
-          <span><b>{t('Answer without asking')}</b><span className="muted small">{t('An answer goes straight to Slack when what answered is held to its folders (Claude Code, or a model through Bridge AI\'s tools). An answer from a copy of an agent\'s conversation, or from Codex, which can read anywhere, still waits for you.')}</span></span>
+          <span><b>{t('Answer without asking')}</b><span className="muted small">{t('An answer goes straight to Slack when what answered is held to its folders (Claude Code, or a model through Bridge AI\'s tools). An answer from a copy of an agent\'s conversation, or from Codex, which can read anywhere, still waits for you, and so does one with a file from its folders unless you say otherwise below.')}</span></span>
         </label>
       </div>
       {s.auto && by && !by.confined && <p className="st-note warn"><Icon name="alert" size={13} />{t('{agent} answers here and isn\'t held to its folder, so every answer still waits for you.', { agent: label })}</p>}
       {s.auto && <p className="muted small">{t('Answers sent without asking are streamed into Slack as they\'re posted. One for a public channel that quotes a file it read waits for you all the same.')}</p>}
+      <div className="sb-attach" data-setting="bots-attach">
+        <label className="st-row">
+          <span><b>{t('Send Files From Its Folders Without Asking')}</b> <span className="muted small">{t('It can attach a file from the folders it reads, a PDF or a spreadsheet say, as it is. Whoever gets the answer gets the whole file.')}</span></span>
+          <select className="st-input" value={s.attachAuto || 'no'} onChange={(e) => save({ attachAuto: e.target.value })} aria-label={t('Send Files From Its Folders Without Asking')}>
+            <option value="no">{t('No: each answer with one waits for you')}</option>
+            <option value="named">{t('To people you named, in a direct message')}</option>
+            <option value="everyone">{t('To everyone who may ask, in a direct message or a private channel they\'re all in')}</option>
+          </select>
+        </label>
+        <p className="muted small">{!s.auto ? t('Every answer waits for you now, files and all.') : (s.attachAuto || 'no') === 'no' ? t('An answer with a file from its folders waits in Needs You, which shows where each file is from, until you send it.') : s.attachAuto === 'named' ? t('An answer with a file from its folders goes without asking only in a direct message with you or someone you named, when everyone it answers is one of them. Anywhere else, it waits for you.') : t('An answer with a file from its folders goes without asking only in a direct message, or in a private channel where everyone may ask it (no guest, no one from another organization, and with only people you named asking, no one else): everyone in that channel gets the file. Anywhere else, it waits for you.')}</p>
+        <label className="st-check">
+          <input type="checkbox" checked={!!s.attachConfig} onChange={(e) => save({ attachConfig: e.target.checked })} />
+          <span><b>{t('Data and config files too')}</b> <span className="muted small">{t('Off: it attaches PDFs, Word, Excel and PowerPoint files, pictures, CSV, text and Markdown only. On: JSON, YAML, XML and HTML files too, where settings and keys are often kept. A file that looks like it holds a key, a password or a token never goes.')}</span></span>
+        </label>
+      </div>
       <p className="muted small sb-approvals">{s.owner ? t('Drafts also come to your Slack direct messages, to send, edit or discard from your phone.') : t('Set You in Slack, above, to approve its drafts from Slack too.')}</p>
       {terms && <p className="st-note warn sb-terms" data-setting="slack-terms"><Icon name="info" size={13} /><span>{terms}</span></p>}
       <label className="st-check">
@@ -1538,6 +1554,7 @@ function eventLine(e) {
     case 'queued': return t('Waiting its turn, behind {n} of their questions', { n: e.ahead ?? 1 })
     case 'context': return e.problem ? t('Read the conversation: {why}', { why: e.problem }) : t('Read {n} earlier messages and {pins} pinned, as context', { n: e.messages?.length || 0, pins: e.pins?.length || 0 })
     case 'run.started': return t('{agent} started, reading {folders}{from}; instructions {version} from {source}', { agent: e.answerer?.label || (e.agent === 'codex' ? 'Codex' : e.agent === 'model' ? e.model || '' : 'Claude Code'), folders: e.folders?.length ? e.folders.join(', ') : t('no folders'), from: e.from ? t(', going on from its earlier conversation') : '', version: e.instructions?.hash || '', source: e.instructions?.source === 'file' ? e.instructions.path : t('Settings') }) + (e.instructions?.problem ? ` (${e.instructions.problem})` : '') + (e.earlier?.problem ? ` (${e.earlier.problem})` : '')
+        + (e.notRead?.length ? ` ${t('(not reading {folders})', { folders: e.notRead.map((x) => `${x.folder}: ${x.why}`).join('; ') })}` : '')
         + (e.resumed ? ` ${e.resumed.how === 'session' ? t('(picking up where it stopped at its time limit, for {n} minutes)', { n: e.resumed.minutes }) : e.resumed.how === 'messages' ? t('(starting again after its time limit with what it had so far, for {n} minutes)', { n: e.resumed.minutes }) : t('(starting again after its time limit, for {n} minutes)', { n: e.resumed.minutes })}` : '')
     case 'limit.asked': return t('At its time limit, after {n} minutes: asked you whether it may carry on ({doing})', { n: e.ran ?? '?', doing: e.doing || '' })
     case 'limit.continued': {
@@ -1612,7 +1629,13 @@ function eventLine(e) {
     case 'write.replaced': return t('A newer change in this conversation took its place')
     case 'write.failed': return t('The change couldn\'t be made ({step}): {why}', { step: e.step || '', why: e.error || '' })
     case 'handed': return t('Handed it on to {name}, which takes it from there under its own rules', { name: e.to?.name || '' })
-    case 'files.made': return e.files?.length ? t('Made {files}', { files: e.files.map((f) => f.name).join(', ') }) : t('Made no file it could send')
+    case 'files.made': {
+      // (A file it attached from its folders, with where it came from.)
+      const made = (e.files || []).filter((f) => !f.from)
+      const attached = (e.files || []).filter((f) => f.from)
+      if (!made.length && !attached.length) return e.refused?.length && e.refused.every((r) => r.from) ? t('Attached no file it could send') : t('Made no file it could send')
+      return [made.length ? t('Made {files}', { files: made.map((f) => f.name).join(', ') }) : null, attached.length ? t('Attached {files}', { files: attached.map((f) => t('{name} from {path}', { name: f.name, path: f.from })).join(', ') }) : null].filter(Boolean).join('; ')
+    }
     case 'file.uploaded': return e.ok === false ? t('Couldn\'t send the file {name}: {why}', { name: e.name, why: e.error || '' }) : t('Sent the file {name} ({size})', { name: e.name, size: sizeOf(e.size) })
     case 'context.noted': return e.ok === false ? t('Couldn\'t keep this in {name}\'s running context: {why}', { name: who, why: e.error || '' }) : e.state === 'kept' ? t('Kept in {name}\'s running context', { name: who }) : t('In {name}\'s running context once you keep it', { name: who })
     case 'context.kept': return t('{name} kept {n} of {person}\'s conversations in their running context', { name: by, n: e.n ?? 0, person: who })
@@ -1822,7 +1845,7 @@ function ChangeOf({ c }) {
     </div>
   )
 }
-const FilesOf = ({ files }) => (files?.length ? <p className="muted small sb-files"><Icon name="paperclip" size={12} /> {t('With {files}', { files: files.map((f) => `${f.name}${f.size != null ? ` (${sizeOf(f.size)})` : ''}`).join(', ') })}</p> : null)
+const FilesOf = ({ files }) => (files?.length ? <p className="muted small sb-files"><Icon name="paperclip" size={12} /> {t('With {files}', { files: files.map((f) => `${f.name}${f.size != null ? ` (${sizeOf(f.size)})` : ''}${f.from ? ` ${t('from {path}', { path: f.from })}` : ''}`).join(', ') })}</p> : null)
 
 // ---------- Try It ----------
 // A question asked here as someone would in Slack: the same agent, folders, instructions and memory,

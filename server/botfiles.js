@@ -6,15 +6,24 @@
 // stays what it was (read-only, or its own copy of a repository for a change). Codex's read-only
 // sandbox calls no tool of ours, so a run of Codex has none.
 //
+// A file that's in the bot's folders already (a PDF, a Word document, a picture) goes as it is: the
+// agent attaches it (attach_file, or a line ATTACH: <path> after its answer where its brief offers
+// that), and it's copied into the outbox here once the answer is in (collect), checked first as
+// botattach.js says (in the folders its run reads with no link on the way, nothing hidden or that
+// holds keys, a document or a picture unless you let it send data and config files, not too big),
+// against those folders as Bridge AI has them now. What the agent's tool said is a convenience: this
+// is the gate. (Whether its answer then waits for you: frontdesk.js.)
+//
 // Once its answer is in, what's in the outbox is looked at (collect): plain files only, at the top
-// of it, as many as MAX and none bigger than EACH, of a kind on the list below (KINDS: pictures,
-// PDFs, tables, text, documents; nothing that runs), and never a link (which could point anywhere),
-// a folder, or anything that runs by its first bytes or its mode, nor a name with characters that
-// hide what it is (right-to-left marks and the like). Each one taken is kept beside the bot's record
-// (bots/<id>/trace/files/<month>/<question>-<run>/, readable by you only, gone with its month:
-// trace.js), marked on a Mac as from elsewhere (com.apple.quarantine, as a download is), and each
-// refused is named with why, in the record and in the reply. Then it
-// goes with the answer as the platform takes files (attachPlan): Slack's upload API, Discord's
+// of it, as many as MAX and none bigger than EACH, of a kind on the list (botattach.js TYPES:
+// pictures, PDFs, tables, text, documents; nothing that runs), and never a link (which could point
+// anywhere), a folder, or anything that runs by its first bytes or its mode, nor a name with
+// characters that hide what it is (right-to-left marks and the like). Each one taken is kept beside
+// the bot's record (bots/<id>/trace/files/<month>/<question>-<run>/, readable by you only, gone with
+// its month: trace.js), marked on a Mac as from elsewhere (com.apple.quarantine, as a download is),
+// and each refused is named with why, in the record and in the reply (one attached, with where it
+// came from). Then it goes with the answer as the platform takes files (attachPlan): Slack's upload
+// API, Discord's
 // attachments, and in Microsoft Teams, which has no way for a bot to attach a file to a reply in a
 // channel or a chat (only a one-to-one consent card that puts it in the person's OneDrive, not used
 // here), the reply says so and where it is.
@@ -27,45 +36,38 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { dataFile } from './paths.js'
 import { DIR as BOTS } from './bots.js'
+import { TYPES, KINDS, MAX, EACH, TOTAL, extOf, isProgram, notAKind, safe, sizeOf, readChecked, attachedIn, nameOf, keptOut, secretIn, dropManifest, carryManifest } from './botattach.js'
 
+// (The kinds that go, how many and how big, and a name made safe: botattach.js, which the outbox's
+// MCP server shares.)
+export { KINDS, MAX, EACH, safe, sizeOf }
 export const OUTBOX = dataFile('front-desk', 'outbox')
-export const MAX = 5 // files a run sends back, at most
-export const EACH = 25 * 1024 * 1024 // each at most
 const ID = /^b\d{1,4}$/
 const RUN = /^[\w-]{1,80}$/
-// The kinds of file a bot may send, by their name, and what each is: pictures, PDFs, tables, text,
-// and Office documents without macros. Anything else (a program, a script, a disk image, a link
-// file, an archive) isn't sent.
-const TYPES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', pdf: 'application/pdf', csv: 'text/csv', tsv: 'text/tab-separated-values', md: 'text/markdown', txt: 'text/plain', json: 'application/json', yaml: 'text/yaml', yml: 'text/yaml', html: 'text/html', xml: 'application/xml', mmd: 'text/plain', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }
-const extOf = (name) => path.extname(String(name)).slice(1).toLowerCase()
-export const KINDS = Object.keys(TYPES)
-// Of those, what's opened in its app from Bridge AI: what can't run anything as it opens (a page, a
-// drawing or XML could, in a browser).
+// Of the kinds that go, what's opened in its app from Bridge AI: what can't run anything as it
+// opens (a page, a drawing or XML could, in a browser).
 const OPENS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf', 'csv', 'tsv', 'md', 'txt', 'json', 'yaml', 'yml', 'xlsx', 'docx', 'pptx'])
 export const opensSafely = (name) => OPENS.has(extOf(path.basename(String(name))))
-// And by its first bytes: a Windows program (MZ), Linux's (ELF), a Mac's (Mach-O, either order, and
-// universal), and a script (#!), whatever it's called.
-const MAGIC = [Buffer.from('MZ'), Buffer.from([0x7f, 0x45, 0x4c, 0x46]), Buffer.from([0xfe, 0xed, 0xfa, 0xce]), Buffer.from([0xfe, 0xed, 0xfa, 0xcf]), Buffer.from([0xce, 0xfa, 0xed, 0xfe]), Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.from([0xca, 0xfe, 0xba, 0xbe]), Buffer.from('#!')]
-// (Format characters, \p{Cf}, go too: a right-to-left mark makes "fdp.exe" look like "exe.pdf".)
-export const safe = (s) => String(s || '').replace(/\p{Cf}/gu, '').replace(/[\\/:*?"<>|\x00-\x1f]+/g, '-').replace(/^\.+/, '').trim().slice(0, 120) // eslint-disable-line no-control-regex
-export const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`)
 export const typeOf = (name) => TYPES[extOf(name)] || 'application/octet-stream'
 
 // A run's outbox, made empty (only you can read it). key: the question's id and the run's number.
+// (What a run attached is noted beside it, never in it: botattach.js manifestOf.)
 export function outboxFor(key) {
   const d = path.join(OUTBOX, safe(key))
   fs.rmSync(d, { recursive: true, force: true })
+  dropManifest(d)
   fs.mkdirSync(d, { recursive: true, mode: 0o700 })
   return d
 }
 export const outboxOf = (key) => path.join(OUTBOX, safe(key))
-export const drop = (key) => { try { fs.rmSync(outboxOf(key), { recursive: true, force: true }) } catch { /* in use: next time */ } }
+export const drop = (key) => { try { fs.rmSync(outboxOf(key), { recursive: true, force: true }) } catch { /* in use: next time */ } dropManifest(outboxOf(key)) }
 // A run that picks up where an earlier one was stopped (at its time limit: frontdesk.js): what that
-// one saved goes on in this one's outbox, as if saved there, so it goes with this answer and counts
-// toward this run's limits, and is checked as every file is when it's collected. Plain files only;
-// the earlier outbox goes. How many came.
+// one saved goes on in this one's outbox, as if saved there, and what it attached with it, so they go
+// with this answer and count toward this run's limits, and are checked as every file is when they're
+// collected. Plain files only; the earlier outbox goes. How many came.
 export function carry(fromKey, to) {
   const from = outboxOf(fromKey)
+  carryManifest(from, to)
   let names = []
   try { names = fs.readdirSync(from) } catch { return 0 }
   let n = 0
@@ -83,22 +85,71 @@ export function carry(fromKey, to) {
 // Whether a file is something that may not go: a kind not on the list, or something that runs by its
 // first bytes or (not on Windows) its mode.
 export async function runs(p, name, mode = 0) {
-  if (!TYPES[extOf(name)]) return `${extOf(name) ? `a .${extOf(name)} file` : 'a file with no kind in its name'} isn't one a bot sends (only pictures, PDFs, tables, text and documents)`
+  if (!TYPES[extOf(name)]) return notAKind(name)
   if (process.platform !== 'win32' && (mode & 0o111)) return 'it can be run as a program, which a bot doesn\'t send'
   let head = Buffer.alloc(0)
   try { const fh = await fs.promises.open(p, 'r'); try { const b = Buffer.alloc(8); const { bytesRead } = await fh.read(b, 0, 8, 0); head = b.subarray(0, bytesRead) } finally { await fh.close() } } catch { /* unreadable: said below */ }
-  if (MAGIC.some((m) => head.length >= m.length && head.subarray(0, m.length).equals(m))) return 'it\'s a program or a script, which a bot doesn\'t send'
+  if (isProgram(head)) return 'it\'s a program or a script, which a bot doesn\'t send'
   return null
 }
 
-// What a run left in its outbox: { files: [{ name, size, path, type }], refused: [{ name, why }] }.
-// Only what's really in it: its real path is checked against the outbox's, so nothing outside it,
-// however it's named, is taken.
-export async function collect(dir) {
+// The files attached from the bot's folders (its agent's attach_file, noted beside the outbox, and the
+// ATTACH: lines of its answer: attach), each checked again here against the folders its run reads
+// (botattach.js readChecked) and copied in from the file as it was read, made new (never through a
+// link, never over a file there): by its name in the outbox, where it came from (~/…). None is read
+// once as many as go are in, nor one bigger than what's left of all an answer sends. One that can't
+// go is in refused, with why (and where it was asked from, for the record).
+const refuse = (why) => Object.assign(new Error(why), { refused: true })
+async function bringIn(dir, root, { attach = [], folders = [], cwd = null, config = false }, refused) {
+  const from = new Map()
+  const asked = [...attachedIn(dir), ...attach.slice(0, MAX * 2).map((p) => ({ path: String(p) }))]
+  if (!asked.length) return from
+  const paths = new Set()
+  const taken = new Set()
+  const kept = keptOut()
+  const NEW = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0)
+  const there = async () => {
+    const names = (await fs.promises.readdir(root)).filter((n) => !n.startsWith('.'))
+    const sizes = await Promise.all(names.map((n) => fs.promises.lstat(path.join(root, n)).then((x) => x.size, () => 0)))
+    return { n: names.length, bytes: sizes.reduce((a, b) => a + b, 0) }
+  }
+  for (const a of asked) {
+    if (paths.has(a.path)) continue
+    paths.add(a.path)
+    const said = String(a.path).slice(0, 300)
+    if (a.refused) { refused.push({ name: a.name || nameOf(a.path), why: String(a.refused).slice(0, 300), from: said }); continue }
+    try {
+      const now = await there()
+      if (now.n >= MAX) throw refuse(`a bot sends ${MAX} files with an answer at most`)
+      const got = await readChecked(a.path, { folders, cwd, keptOut: kept, config, budget: TOTAL - now.bytes })
+      if (taken.has(got.file)) continue // (the same file, asked for by another path)
+      taken.add(got.file)
+      const to = path.join(root, got.name)
+      let fh
+      try { fh = await fs.promises.open(to, NEW, 0o600) } catch (e) { throw refuse(e.code === 'EEXIST' ? `a file called ${got.name} is with the answer already` : `it couldn't be copied (${e.code || e.message})`) }
+      // (One not copied whole doesn't stay to be sent in part.)
+      try { await fh.writeFile(got.body) } catch (e) { await fh.close().catch(() => {}); await fs.promises.rm(to, { force: true }).catch(() => {}); throw refuse(`it couldn't be copied (${e.code || e.message})`) }
+      await fh.close()
+      from.set(got.name, got.from)
+    } catch (e) { refused.push({ name: nameOf(a.path), why: e.refused ? e.message : `it couldn't be read (${e.code || e.message})`, from: said }) }
+  }
+  return from
+}
+
+// What a run left in its outbox: { files: [{ name, size, path, type, from }], refused: [{ name, why,
+// from }] } (from: where a file attached came from). Only what's really in it: its real path is
+// checked against the outbox's, so nothing outside it, however it's named, is taken; and nothing in
+// it that looks like a key, a password or a token, whether it was attached or the agent made it
+// (botattach.js secretIn: a key it read can't go as a file it "made"). attach: the paths its answer's
+// ATTACH: lines name; folders: the ones its run reads (their paths, as Settings has them), the only
+// ones a file may be attached from; cwd: its run's folder, where a relative path starts; config:
+// data and config files may be attached too.
+export async function collect(dir, { attach = [], folders = [], cwd = null, config = false } = {}) {
   const files = []
   const refused = []
   let root
   try { root = await fs.promises.realpath(dir) } catch { return { files, refused } }
+  const from = await bringIn(dir, root, { attach, folders, cwd, config }, refused)
   let ents = []
   try { ents = await fs.promises.readdir(root, { withFileTypes: true }) } catch { return { files, refused } }
   ents.sort((a, b) => a.name.localeCompare(b.name))
@@ -119,8 +170,14 @@ export async function collect(dir) {
     if (st.size === 0) { refused.push({ name, why: 'it\'s empty' }); continue }
     if (st.size > EACH) { refused.push({ name, why: `it's ${sizeOf(st.size)}, over ${sizeOf(EACH)}` }); continue }
     if (files.length >= MAX) { refused.push({ name, why: `a bot sends ${MAX} files with an answer at most` }); continue }
-    files.push({ name, size: st.size, path: real, type: typeOf(name) })
+    // (One attached was looked through as it was read; one it made, here.)
+    if (!from.has(name)) {
+      const holds = await fs.promises.readFile(real).then((b) => secretIn(b, name)).catch((e) => (e.refused ? e.message : 'it couldn\'t be read'))
+      if (holds) { refused.push({ name, why: holds }); continue }
+    }
+    files.push({ name, size: st.size, path: real, type: typeOf(name), ...(from.has(name) ? { from: from.get(name) } : {}) })
   }
+  for (const r of refused) if (!r.from && from.has(r.name)) r.from = from.get(r.name)
   return { files, refused }
 }
 
@@ -177,7 +234,7 @@ export const LIMITS = {
 const PLACE = { slack: 'Slack', discord: 'Discord', teams: 'Microsoft Teams' }
 // Which of an answer's files go with it there, and what's said in the reply about the rest:
 // { attach: [file], notes: ['report.pdf (2.1 MB) …'], failed: [{ name, size, error }] }. where: who
-// has it, and where (you, on this computer, in the bot's Activity).
+// has it, and where (you, on this computer, in the bot's Activity), or what says so for that many.
 export function attachPlan(platform, files, { where = '' } = {}) {
   const l = LIMITS[platform] || LIMITS.slack
   const attach = []
@@ -189,7 +246,7 @@ export function attachPlan(platform, files, { where = '' } = {}) {
     else if (attach.length >= l.count) failed.push({ name: f.name, size, error: `${PLACE[platform]} takes ${l.count} files with a message at most` })
     else attach.push(f)
   }
-  return { attach, failed, notes: failed.length ? [noteOf(failed, where)] : [] }
+  return { attach, failed, notes: failed.length ? [noteOf(failed, typeof where === 'function' ? where(failed.length) : where)] : [] }
 }
 // The words the reply carries for files that couldn't go with it.
 export function noteOf(failed, where = '') {

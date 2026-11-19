@@ -67,10 +67,10 @@ const EDIT_HERE = 'Edit(./' + '**)'
 // A bot's MCP servers for one run (botmcp.js runFolder): a folder of the desk's among the folders it's
 // given (front-desk/mcp/<run>/), with the servers' config (config.json) and which of their tools it
 // may use (rules.json: { allow, deny }), and Claude Code's own settings for the run (rules.json
-// settings: its settings.json, KEPT_SETTINGS below with the rest of the run's, a change's hook that
-// checks each path it writes among them, given with --settings: keptFlags). Never a folder it may
-// read: it comes out of dirs, and the rest stay as they were. Its files gone (Bridge AI started again
-// since), it gives none.
+// settings: its settings.json, KEPT_SETTINGS below with the rest of the run's: its Read rules, kept
+// from what's hidden or named as keys in its folders, and a change's hook that checks each path it
+// writes, given with --settings: keptFlags). Never a folder it may read: it comes out of dirs, and the
+// rest stay as they were. Its files gone (Bridge AI started again since), it gives none.
 const MCP_RUNS = dataFile('front-desk', 'mcp')
 export function mcpOf(dirs = []) {
   const runs = (dirs || []).filter((d) => path.resolve(String(d)).startsWith(MCP_RUNS + path.sep))

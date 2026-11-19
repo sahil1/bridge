@@ -380,3 +380,11 @@
 .bc-via > .icon, .bc-via > svg { flex: none; margin-top: 2px; }
 .bp-conns .bp-main { max-width: 860px; }
 .cn-part > p, .cn-card > p { margin: 0; }
+/* Files from its folders: whether they go without asking, and which kinds. */
+.sb-attach { display: grid; gap: 6px; margin: 10px 0 6px; }
+.sb-attach > label.st-row { display: grid; gap: 6px; align-items: start; }
+.sb-attach select.st-input { max-width: 100%; }
+.sb-attach > p { margin: 0; }
+@media (max-width: 760px) {
+  .sb-keep-folder { min-height: 40px; min-width: 40px; }
+}

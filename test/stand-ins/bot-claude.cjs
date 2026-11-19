@@ -16,8 +16,8 @@
 // auth status` says it isn't signed in; with ~/claude-limited there, a bot's question is answered
 // as Claude Code at its usage limit answers ("You've hit your usage limit · resets 5pm").
 // --mcp-config and --disallowedTools are taken here, as helper-claude doesn't know them (it takes
-// the rest, --setting-sources and --settings among them, and says its version). Each start
-// goes in ~/claude-args.log ({ args, cwd, message }) with its arguments as they came and its brief
+// the rest, --setting-sources and --settings with its file among them, and says its version). Each
+// start goes in ~/claude-args.log ({ args, cwd, message }) with its arguments as they came and its brief
 // (from the file it's pointed to, on Windows).
 // HELPER_CLAUDE is where helper-claude.cjs is (the test puts it in).
 const fs = require('node:fs')

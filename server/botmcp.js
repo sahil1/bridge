@@ -13,8 +13,10 @@
 // A run's servers go in a folder of the desk's, front-desk/mcp/<run>/ (agents.js mcpOf), readable by
 // you only: config.json (the servers as Claude Code's config has them, with their env and headers)
 // and rules.json. With them, a run with an outbox (botfiles.js) gets Bridge AI's own server for it,
-// bridge_outbox (outboxmcp.js), its save_file allowed: the one way that run can put a file anywhere. The folder goes once the run has ended (frontdesk.js), and any left from before
-// Bridge AI started again a day later.
+// bridge_outbox (outboxmcp.js), its save_file allowed: the one way that run can put a file anywhere;
+// and, for a bot with folders, its attach_file too, with the folders a file may be attached from in
+// attach.json beside them (botattach.js). The folder goes once the run has ended (frontdesk.js), and
+// any left from before Bridge AI started again a day later.
 import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -24,6 +26,7 @@ import { loginPath, which, KEPT_SETTINGS, KEPT_MIN } from './agents.js'
 import { claudeServers, claudeServerView } from './mcp.js'
 import { launch } from './consult.js'
 import { compare } from '../shared/version.js'
+import { keptOut, SECRET_TERMS, SECRET_BROAD, BROAD_KINDS, SECRET_STEMS, SECRET_KINDS } from './botattach.js'
 
 export const RUNS = dataFile('front-desk', 'mcp')
 const LIST_MS = 15000 // a server that hasn't listed its tools by then can't be asked
@@ -165,7 +168,9 @@ export const configsOf = (bot) => { const have = claudeServers(); return Object.
 // used (you, or someone you named), else only the tools that say they only read. Written in a folder
 // of its own (key: the question's and run's), whose path goes with the run's other folders. null when
 // it has none (or none of them is in Claude Code's config any more). What it was given is said back
-// for the record: { dir, servers: [{ name, all, tools, problem }], missing }.
+// for the record: { dir, servers: [{ name, all, tools, problem }], missing }. attach: { folders, cwd,
+// config }, the folders its run reads that a file may be attached from (with an outbox), and whether
+// data and config files may be; reads: the folders it reads, for its Read rules.
 export const OUTBOX_SERVER = 'bridge_outbox'
 // A run that changes files (write: { root, parts, files }: its copy, the names of its folders' copies
 // in it, botwrite.js, or a copy of a repository with no parts, botchanges.js) has in its settings for
@@ -220,7 +225,7 @@ export async function hookTooOld() {
   const need = hookMin()
   return have && compare(have, need) < 0 ? { need, have } : null
 }
-export async function runFolder(bot, { all = false, key, outbox = null, write = null }) {
+export async function runFolder(bot, { all = false, key, outbox = null, write = null, attach = null, reads = [], own = [] }) {
   const want = (bot.mcp || []).filter((n) => n !== OUTBOX_SERVER && n !== FILES_SERVER)
   if (!want.length && !outbox && !write) return null
   const have = claudeServers()
@@ -242,8 +247,19 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
   const dir = path.join(RUNS, String(key).replace(/[^\w.-]+/g, '-'))
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
   const servers = Object.fromEntries(picked.map((n) => [n, have[n]]))
-  // (Its outbox's: this app's Node, on this run's outbox alone.)
-  if (outbox) { servers[OUTBOX_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'outboxmcp.js'), outbox], env: { ...NODE.env } }; allow.push(toolName(OUTBOX_SERVER, 'save_file')) }
+  // (Its outbox's: this app's Node, on this run's outbox alone; the folders it may attach from in a
+  // file of its own, readable by you only, never on its command line.)
+  if (outbox) {
+    const args = [path.join(ROOT, 'server', 'outboxmcp.js'), outbox]
+    allow.push(toolName(OUTBOX_SERVER, 'save_file'))
+    if (attach?.folders?.length) {
+      const file = path.join(dir, 'attach.json')
+      writeFileAtomic(file, JSON.stringify({ folders: attach.folders.map((f) => (f && typeof f === 'object' ? { path: String(f.path), real: f.real || null } : String(f))), cwd: attach.cwd || null, config: attach.config === true, keptOut: keptOut() }, null, 2), { mode: 0o600 })
+      args.push(file)
+      allow.push(toolName(OUTBOX_SERVER, 'attach_file'))
+    }
+    servers[OUTBOX_SERVER] = { type: 'stdio', command: NODE.bin, args, env: { ...NODE.env } }
+  }
   let hooks = null
   let guard = null
   let agentEnv = null
@@ -272,12 +288,83 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
     hooks = { disableAllHooks: false, hooks: { PreToolUse: [{ matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [hook] }] } }
   }
   // (Claude Code's settings for the run, in one file, as it takes one --settings: Bridge AI's for
-  // every run kept to its folders, agents.js KEPT_SETTINGS, with its hook when it changes files.)
+  // every run kept to its folders, agents.js KEPT_SETTINGS; its Read rules, nothing hidden in the
+  // folders it reads nor anything named as keys, passwords or credentials, kept off its own folders
+  // (own: its copy, the files attached, its brief); and its hook when it changes files.)
+  const readDeny = reads.length ? readDenies(reads, { own }) : []
   const settings = path.join(dir, 'settings.json')
-  writeFileAtomic(settings, JSON.stringify({ ...KEPT_SETTINGS, ...(hooks || {}) }, null, 2), { mode: 0o600 })
+  writeFileAtomic(settings, JSON.stringify({ ...KEPT_SETTINGS, permissions: { ...KEPT_SETTINGS.permissions, ...(readDeny.length ? { deny: readDeny } : {}) }, ...(hooks || {}) }, null, 2), { mode: 0o600 })
   writeFileAtomic(path.join(dir, 'config.json'), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 })
   writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny, settings }, null, 2), { mode: 0o600 })
   return { dir, servers: said, missing, ...(guard ? { guard } : {}), ...(agentEnv ? { agentEnv } : {}) }
+}
+// Claude Code's Read rules for a bot's run (gitignore-style patterns; // starts at the root), for each
+// folder it reads, as named and as its real path: no hidden file, nor anything in a hidden folder,
+// nor a name that says it holds keys, passwords or credentials, made from botattach.js's own lists
+// (SECRET_TERMS between separators or a name's ends, SECRET_BROAD in a file's name with a kind that
+// keeps data, SECRET_STEMS as a file's name before its kind, SECRET_KINDS), whatever their case, so
+// it reads none of what attaching refuses, and a vault of notes or a folder of code called auth as
+// it is. Read rules hold for Grep and Glob too, as far as Claude Code can.
+const anyCase = (w) => w.replace(/[a-z]/gi, (c) => `[${c.toLowerCase()}${c.toUpperCase()}]`)
+const SEP = '[-_. ]'
+const SECRET_GLOBS = [...new Set([
+  ...SECRET_TERMS.map((t) => anyCase(t).replace(/[-_ ]/g, '[-_ ]')).flatMap((t) => [t, `${t}${SEP}*`, `*${SEP}${t}`, `*${SEP}${t}${SEP}*`]),
+  // (A broad word only in a file's name with a kind that keeps data, as attaching has it: vault.json, not a
+  // vault of notes; a stem only as a file's whole name before its kind, not an auth folder of code.)
+  ...[...new Set(SECRET_BROAD.map((t) => (t.endsWith('s') && SECRET_BROAD.includes(t.slice(0, -1)) ? t.slice(0, -1) : t)))].flatMap((t) => BROAD_KINDS.map((k) => `*${anyCase(t)}*.${anyCase(k)}`)),
+  ...SECRET_STEMS.map((t) => `${anyCase(t)}.*`),
+  ...SECRET_KINDS.map((e) => `*.${anyCase(e)}`),
+])]
+// Kept off the run's own folders (own: its copy of the folders it changes files in or of a
+// repository, the files attached, its brief), each wholly readable to it even inside a folder it reads
+// from: they're in Bridge AI's own folder, ~/.bridge-ai, which is hidden, so a folder it reads that
+// has them, your home folder say, has its rule for what's hidden made around them (hiddenAround).
+const glob = (f) => `//${f.replace(/\\/g, '/').replace(/^\/+/, '')}`
+const hiddenName = (n) => n.startsWith('.')
+// (A name as a pattern: anything a pattern would take as more than itself matches one character.)
+const lit = (n) => n.replace(/[*?[\]\\!{}]/g, '?')
+const AROUND_MAX = 5000 // names in one folder on the way to its own, at most
+// Within f, everything hidden (now, or made later where it can be said so) but the way to each of its
+// own folders (ways: the names from f to each) and what's in them. null when a folder on the way
+// can't be listed whole.
+function hiddenAround(f, ways, inHidden = false) {
+  if (ways.some((w) => !w.length)) return [] // one of its own: nothing in it is ruled out here
+  const next = [...new Set(ways.map((w) => w[0]))]
+  const out = []
+  // (Outside anything hidden, with no hidden name on the way on: every hidden name here, made later too.)
+  const open = !inHidden && !next.some(hiddenName)
+  if (open) out.push(`${glob(f)}/.*`, `${glob(f)}/.*/**`)
+  let names
+  try { names = fs.readdirSync(f) } catch { return null }
+  if (names.length > AROUND_MAX) return null
+  for (const n of names) {
+    if (next.includes(n)) continue
+    const at = `${glob(f)}/${lit(n)}`
+    // (One whose pattern would take a name on the way too is left: the run's own come first.)
+    const same = new RegExp(`^${lit(n).split('?').map((x) => x.replace(/[.+^$()|]/g, '\\$&')).join('.')}$`)
+    if (next.some((x) => same.test(x))) continue
+    if (inHidden || hiddenName(n)) { if (!open) out.push(at, `${at}/**`) } else out.push(`${at}/**/.*`, `${at}/**/.*/**`)
+  }
+  for (const n of next) {
+    const r = hiddenAround(path.join(f, n), ways.filter((w) => w[0] === n).map((w) => w.slice(1)), inHidden || hiddenName(n))
+    if (!r) return null
+    out.push(...r)
+  }
+  return out
+}
+export function readDenies(folders, { own = [] } = {}) {
+  const out = []
+  const real = (f) => { try { return fs.realpathSync(f) } catch { return f } }
+  const both = (list) => [...new Set(list.filter(Boolean).flatMap((x) => [path.resolve(String(x)), real(path.resolve(String(x)))]))]
+  const mine = both(own)
+  for (const f of both(folders)) {
+    const g = glob(f)
+    // (The way from f to each of its own folders inside it, where a hidden name is on it.)
+    const ways = mine.map((o) => path.relative(f, o)).filter((r) => r && !r.startsWith('..') && !path.isAbsolute(r)).map((r) => r.split(path.sep)).filter((w) => w.some(hiddenName))
+    const around = ways.length ? hiddenAround(f, ways) : null
+    out.push(...(around ? around.map((x) => `Read(${x})`) : [`Read(${g}/**/.*)`, `Read(${g}/**/.*/**)`]), ...SECRET_GLOBS.map((p) => `Read(${g}/**/${p})`))
+  }
+  return [...new Set(out)]
 }
 // A run's folder gone (it ended), or every one older than a day (left from before a restart).
 export function drop(dir) { if (dir && path.resolve(dir).startsWith(RUNS + path.sep)) fs.rmSync(dir, { recursive: true, force: true }) }
