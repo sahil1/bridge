@@ -253,11 +253,11 @@ try {
     ok(await until(async () => /looks like a token/.test(await p.locator('.bc').innerText()), 5000), 'a token pasted as words: refused, saying where it goes')
     ok(model.asked(/Known folders/).length === before && !(await assist(id)).messages.some((m) => /xoxb-/.test(m.text || '')), 'not sent to the model, not kept in the chat')
     await p.locator('.bc-say textarea').fill('')
-    await p.locator('.bp-main .sb-tabs [role="tab"]', { hasText: 'Set Up' }).click()
+    await p.locator('.bp-main .sb-tabs [role="tab"]', { hasText: 'Access' }).click()
     const sec = p.locator('[data-setting="bots-answerers"]')
     await sec.scrollIntoViewIfNeeded()
     const said = await sec.innerText()
-    ok(/Your own list/.test(said) && /Claude Code/.test(said) && /llama3.1:8b/.test(said) && /Local/.test(said) && /Cloud/.test(said), 'Set Up: What Answers, in order, each Local or Cloud', said)
+    ok(/Your own list/.test(said) && /Claude Code/.test(said) && /llama3.1:8b/.test(said) && /Local/.test(said) && /Cloud/.test(said), 'its Access: What Answers, in order, each Local or Cloud', said)
     await shot(p, `${tag}bots-setup-what-answers`)
   })
 

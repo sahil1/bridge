@@ -14,7 +14,9 @@ import './bots-page.css'
 // (the steps you do on Slack's, Discord's or Microsoft's own site, each ticked as it's done, with
 // where to paste what they give you), says each step as it's done, offers the people and channels you
 // named once it can find them, and takes changes in words, each shown as what would change and
-// applied only when you say so. With no model to ask, it says so and offers the form. Where the
+// applied only when you say so. With no model to ask, it says so and offers the form; a new one
+// also offers a starting point for each use case (Hiring, Marketing…), which opens the form with
+// that one picked, the access it starts with said (Bots.jsx NewBot). Where the
 // platform has a shared connection (Connections.jsx), there's nothing to connect: the card says how
 // people reach it (its name first, its command, the channels it answers in or is the default bot
 // in); with none yet, the chat walks through making the shared one, once; or it gets its own.
@@ -332,6 +334,7 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(null) // 'ask' | 'edit' | 'create' | 'apply'
   const [form, setForm] = useState(false)
+  const [start, setStart] = useState('') // a use case's starting point, picked for the form
   const [mine, setMine] = useState([]) // a new chat's words, before there's a draft to keep them
   const end = useRef(null)
   const path = id ? `/bots/${id}/assist` : '/bots/assist'
@@ -405,6 +408,13 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
           {!id && !said && !noModel && (
             <div className="bc-examples">{EXAMPLES().map((x) => <button key={x} type="button" className="bc-example" onClick={() => setText(x)}>{x}</button>)}</div>
           )}
+          {/* Or a starting point for its use case (Hiring, Marketing…), with the access it needs: the form, with it picked. */}
+          {!id && !said && !noModel && (s?.options?.templates || []).length > 0 && (
+            <div className="bc-starts" data-setting="bots-use-cases">
+              <span className="muted small">{t('Or start from a use case, with the access it needs:')}</span>
+              <div className="bc-examples">{s.options.templates.map((x) => <button key={x.id} type="button" className={`bc-example bc-start${start === x.id && form ? ' on' : ''}`} data-template={x.id} title={x.description} onClick={() => { setStart(x.id); setForm(true) }}>{x.name}</button>)}</div>
+            </div>
+          )}
         </li>
         {noModel && !msgs.some((m) => m.kind === 'no-model') && (
           <li className="bc-msg bc-note bad" data-kind="no-model">
@@ -421,13 +431,13 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
           </li>
         ))}
         {busy === 'ask' && <li className="bc-msg bc-assist bc-thinking" role="status"><p><Icon name="wand" size={12} /> {t('AI Assist is setting it up…')}</p></li>}
-        {(noModel || msgs.some((m) => ['no-model', 'unreadable', 'failed'].includes(m.kind))) && (
+        {(noModel || (!id && form) || msgs.some((m) => ['no-model', 'unreadable', 'failed'].includes(m.kind))) && (
           <li className="bc-msg bc-form" data-kind="form">
             <div className="st-row">
               <button type="button" className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))}><Icon name="layers" size={12} /> {t('Model Providers')}</button>
               {!id && !form && !noModel && <button type="button" className="btn small" onClick={() => setForm(true)}>{t('Set it up with the form')}</button>}
             </div>
-            {!id && (form || noModel) && <NewBot form onMade={(bid) => onMade?.(bid)} />}
+            {!id && (form || noModel) && <NewBot form start={start} onMade={(bid) => onMade?.(bid)} />}
           </li>
         )}
         {draft && s?.proposal && <li className="bc-msg bc-card-row"><ProposalCard p={s.proposal} options={s.options} onEdit={edit} onCreate={create} onDiscard={discardDraft} busy={busy === 'create'} error={busy !== 'ask' ? error : null} /></li>}

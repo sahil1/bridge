@@ -111,7 +111,7 @@ import { combine, platformOf, PLATFORMS } from './connector.js'
 import { listTemplates, templateOf } from './bottemplates.js'
 import * as botsStore from './bots.js'
 import * as conns from './connections.js'
-import { makeHubs } from './connhub.js'
+import { makeHubs, RULES } from './connhub.js'
 import { makeBotSetup, patchOf, proposalOf, linesOf, postSaid } from './botsetup.js'
 import * as botMcp from './botmcp.js'
 import * as botAnswer from './botanswer.js'
@@ -4204,9 +4204,14 @@ async function signInKind(kind) {
   if (kind === 'codex') return { kind: s.plan === 'ChatGPT' ? 'subscription' : s.plan === 'API key' ? 'api' : 'unknown', ...provider }
   return { kind: 'unknown', ...provider }
 }
+// What a bot may do, in brief, for the line that sums up its Access and the Bots overview's cards
+// (src/components/bots/access.js says it): who may ask (how many named), its folders, its memory,
+// what it may change, how many MCP servers, what answers, its limits. Never who the people are.
+const accessOf = (b) => ({ who: b.who, askers: b.askers.length, readsFrom: b.readsFrom, memory: b.memory, changes: b.changes, mcp: b.mcp.length, answerers: b.answerers, limits: b.limits })
 // A bot as Settings shows it: how it's connected and why not (and the scopes its app lacks), its
 // settings and instructions, its folders as they stand, which agent answers and how it's signed in,
-// the manifest to make or update its app with, and how many questions wait.
+// the manifest to make or update its app with, and how many questions wait. Brief (the list): how
+// it stands, how many questions today and what waits for you, and its access in brief.
 async function botView(b, { brief = false } = {}) {
   // A draft: its name and who asked for it; what it would be is its setup chat's (botsetup.js).
   if (b.draft) return { id: b.id, name: b.name, description: b.description, draft: true, from: b.from === 'chief' ? 'chief' : 'you', state: 'draft', where: {}, connected: false, waiting: 0, paused: false }
@@ -4224,7 +4229,7 @@ async function botView(b, { brief = false } = {}) {
   const shared = Object.fromEntries(conns.PLATFORMS.map((p) => { const c = conns.sharedOf(p); return [p, c ? { id: c.id, name: c.name } : null] }))
   const base = { id: b.id, name: b.name, description: b.description, icon: b.icon || null, state: s.state, why: s.why || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null, appId: s.appId || null, where, connected: all.state === 'connected', connections: via, shared }
   const v = await desk.view(b.id)
-  if (brief) return { ...base, waiting: v?.waiting || 0, answering: v?.answering || 0, paused: b.paused }
+  if (brief) return { ...base, waiting: v?.waiting || 0, answering: v?.answering || 0, paused: b.paused, today: v?.today || 0, proposed: v?.memoryCount?.proposed || 0, access: accessOf(b) }
   // How many channels its Slack app is in (Set Up's checklist: invited to one), asked of Slack once
   // a minute at most.
   if (s.state === 'connected' && ch?.parts?.slack?.channels) {
@@ -4290,16 +4295,34 @@ app.get('/api/bots', botsGuard, wrapBot(async () => ({
   deleted: botsStore.deleted().filter((d) => desk.has(d.id)).map((d) => ({ ...d, cleared: desk.cleared(d.id) })),
   you: String(cfg.name || '').trim() || null,
 })))
-// A new bot, by its name.
+// A new bot, by its name. From a starting point (a template), the access it starts with is its own
+// from the start, with the folder you picked (readsFrom), through the same checks as any change:
+// one they turn down makes nothing. What it may change only where something here can make a change
+// (Claude Code in what answers): else it changes nothing, and that's said (notes: ['changes']).
 app.post('/api/bots', botsGuard, wrapBot(async (req) => {
+  const tpl = req.body?.template ? templateOf(String(req.body.template)) : null
   const b = botsStore.create({ name: req.body?.name, description: req.body?.description, template: req.body?.template || null }, String(cfg.name || '').trim())
+  const want = { ...(tpl?.access || {}), ...(Array.isArray(req.body?.readsFrom) && req.body.readsFrom.length ? { readsFrom: req.body.readsFrom } : {}) }
+  const notes = []
+  let made = b
+  if (Object.keys(want).length) {
+    try {
+      if (want.changes && want.changes !== 'none' && !(await answererOf({ ...b, ...want })).changes) { want.changes = 'none'; notes.push('changes') }
+      made = botsStore.save(b.id, await checkSettings(b, want, req)).after
+    } catch (e) { botsStore.remove(b.id); throw e }
+  }
   connectBot(b.id)
-  desk.record(b.id, 'settings.changed', { setting: 'created', old: null, new: { name: b.name, ...(b.template ? { template: b.template } : {}) }, ...changedBy(req) })
+  desk.record(b.id, 'settings.changed', { setting: 'created', old: null, new: { name: b.name, ...(b.template ? { template: b.template, access: settingSaid(accessOf(made)) } : {}) }, ...changedBy(req) })
   desk.sync()
-  return botView(b)
+  return { ...(await botView(made)), ...(notes.length ? { notes } : {}) }
 }))
-// What a new bot can start from.
-app.get('/api/bots/templates', botsGuard, wrapBot(async () => ({ templates: listTemplates(String(cfg.name || '').trim()) })))
+// What a new bot can start from: each with the access it starts with, its folder when that's here,
+// and whether something here can make a change (Claude Code), for one that starts suggesting them.
+app.get('/api/bots/templates', botsGuard, wrapBot(async () => {
+  const here = async (f) => (f ? fs.promises.stat(path.resolve(String(f).replace(/^~(?=$|[\\/])/, os.homedir()))).then((s) => s.isDirectory(), () => false) : false)
+  const list = listTemplates(String(cfg.name || '').trim())
+  return { templates: await Promise.all(list.map(async (x) => ({ ...x, folderHere: await here(x.folder) }))), canChange: (await answererOf({ answerers: null, agent: null })).changes }
+}))
 
 // ---------- Setting a bot up by saying what it's for (botsetup.js) ----------
 // AI Assist's model (the one picked for Studio, else the one AI Assist reaches first: studioModel),
@@ -4802,7 +4825,7 @@ async function connView(c) {
     ownerGuess,
     id: c.id, name: c.name, platform: c.platform, shared: c.shared, own: c.bot ? { id: c.bot, name: botsStore.get(c.bot)?.name || c.bot } : null,
     bots: on.map((b) => ({ id: b.id, name: b.name, description: b.description || '', paused: b.paused, command: slack && c.perBot ? slackCommand(b.name) : null })),
-    owner: c.owner, defaults: c.defaults, perBot: c.perBot, createdAt: c.createdAt || null,
+    owner: c.owner, defaults: c.defaults, perBot: c.perBot, assist: c.assist, unsure: c.unsure, createdAt: c.createdAt || null,
     state: s.state, why: s.why || null, since: s.since || null, lastEvent: s.lastEvent || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null, appId: s.appId || null,
     // (Discord's server, intents and invite; Teams' endpoint, port and app: as each says them.)
     status: slack ? null : s,
@@ -4831,7 +4854,30 @@ app.post('/api/connections', botsGuard, wrapBot(async (req) => {
 }))
 app.get('/api/connections/:cid', botsGuard, wrapBot(async (req) => connView(connOr404(req.params.cid))))
 app.get('/api/connections/:cid/activity', botsGuard, wrapBot(async (req) => ({ routed: conns.routed(connOr404(req.params.cid).id, 200) })))
-// Its name, you there, which bot answers in which channel, and a slash command for each bot.
+// How a shared connection hands each question to one of its bots (the Routing page): its rules in
+// connhub's order, its bots with what AI Assist picks them by (their descriptions) and the channels
+// each is the default bot in, and which model AI Assist would pick with (none: it can't, so it
+// asks, or goes to the bot you set for that).
+app.get('/api/connections/:cid/routing', botsGuard, wrapBot(async (req) => {
+  const c = connOr404(req.params.cid)
+  return { ...(await connView(c)), rules: c.shared ? RULES : [], assistModel: await assistState() }
+}))
+// Try a Message: which bot a message would go to, and why (connhub.js dry), with nothing sent,
+// answered or kept, and no bot run. Who asks: you, someone picked from there ({ id, name }), or
+// someone not named (null); where: a channel there, or a direct message; a reply in a thread a
+// bot answered in (thread: that bot); with a mention or without.
+app.post('/api/connections/:cid/try', botsGuard, wrapBot(async (req) => {
+  const c = connOr404(req.params.cid)
+  const x = req.body || {}
+  const text = String(x.text ?? '')
+  if (!text.trim()) throw new Error('Type a message to try')
+  const p = x.person
+  const from = p === 'you' ? { you: true, id: c.owner?.id || null, name: botOwnerName() } : p && botsStore.PERSON_ID.test(String(p.id || '')) ? { id: String(p.id), name: String(p.name || '').replace(/\s+/g, ' ').trim().slice(0, 80) || null } : null
+  const channel = x.channel && botsStore.CHANNEL_ID.test(String(x.channel)) ? String(x.channel) : null
+  return hubs.dry(c.id, { text, channel, channelName: x.channelName ? String(x.channelName).replace(/^#/, '').slice(0, 80) : null, dm: x.dm === true, from, mention: x.mention !== false, thread: /^b\d{1,4}$/.test(String(x.thread || '')) ? String(x.thread) : null })
+}))
+// Its name, you there, which bot answers in which channel, a slash command for each bot, whether
+// AI Assist picks, and the bot for a question nothing else places.
 app.patch('/api/connections/:cid', botsGuard, wrapBot(async (req) => {
   const c = connOr404(req.params.cid)
   const x = req.body || {}
@@ -4857,8 +4903,15 @@ app.patch('/api/connections/:cid', botsGuard, wrapBot(async (req) => {
       next.defaults.push({ id, name: String(d?.name || '').replace(/^#/, '').trim().slice(0, 80) || null, bot: String(d.bot) })
     }
   }
+  // Whether AI Assist picks among the bots someone may ask, and the bot a question goes to when
+  // nothing says which (null: they're asked): one of the bots on it.
+  if (x.assist !== undefined) next.assist = x.assist !== false
+  if (x.unsure !== undefined) {
+    if (x.unsure && !conns.botsOn(c, botsStore.live()).some((b) => b.id === String(x.unsure))) throw new Error('Pick one of the bots on this connection')
+    next.unsure = x.unsure ? String(x.unsure) : null
+  }
   const { before, after } = conns.save(c.id, next)
-  const said = (k, v) => settingSaid(k === 'defaults' ? v.map((d) => `${d.name || d.id}: ${botsStore.get(d.bot)?.name || d.bot}`) : v)
+  const said = (k, v) => settingSaid(k === 'defaults' ? v.map((d) => `${d.name || d.id}: ${botsStore.get(d.bot)?.name || d.bot}`) : k === 'unsure' && v ? botsStore.get(v)?.name || v : v)
   for (const k of Object.keys(next)) if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) conns.note(c.id, { event: 'settings', what: k, old: said(k, before[k]), new: said(k, after[k]), ...changedBy(req) })
   pushFleet()
   return connView(after)
