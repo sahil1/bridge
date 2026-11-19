@@ -40,8 +40,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { execFile } from 'node:child_process'
-import { gitReady } from './gitready.js'
+import { execFile, execFileSync } from 'node:child_process'
+import { gitReady, gitNothing } from './gitready.js'
 
 export const MAX_FILES = 20 // more files than this in one change: it waits for you
 export const LARGE = 1024 * 1024 // more than this, in one file or all told: it waits for you
@@ -58,10 +58,16 @@ const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex')
 const run = (bin, args, { cwd, timeout = 60000, env = {} } = {}) => new Promise((resolve) => {
   execFile(bin, args, { cwd, timeout, maxBuffer: 64 * 1024 * 1024, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...env } }, (err, stdout, stderr) => resolve({ ok: !err, out: String(stdout || ''), err: String(stderr || err?.message || '').trim() }))
 })
-// git, for making a copy of your repository's folder: none of its hooks, no file-system monitor and
-// no Git LFS download, for a copy made on each request.
-export const GIT_SAFE = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false']
-const git = async (dir, args, o = {}) => (await gitReady() ? run('git', [...GIT_SAFE, '-C', dir, ...args], { ...o, env: { GIT_LFS_SKIP_SMUDGE: '1', ...(o.env || {}) } }) : { ok: false, out: '', err: 'git isn\'t here' })
+// git, for making a copy of your repository's folder: none of its hooks (an empty folder of Bridge
+// AI's own as its hooks folder: gitready.js gitNothing), no file-system monitor and no Git LFS
+// download, for a copy made on each request.
+const gitSafe = () => ['-c', `core.hooksPath=${gitNothing().hooks}`, '-c', 'core.fsmonitor=false']
+const git = async (dir, args, o = {}) => {
+  if (!(await gitReady())) return { ok: false, out: '', err: 'git isn\'t here' }
+  let safe
+  try { safe = gitSafe() } catch (e) { return { ok: false, out: '', err: e.message } }
+  return run('git', [...safe, '-C', dir, ...args], { ...o, env: { GIT_LFS_SKIP_SMUDGE: '1', ...(o.env || {}) } })
+}
 const firstLine = (s) => String(s || '').split('\n').map((l) => l.trim()).filter(Boolean)[0]?.slice(0, 200) || ''
 const fail = (message, step) => Object.assign(new Error(message), { step })
 // A path inside a folder, as kept (its parts joined by /), and back to one on this computer.
@@ -331,13 +337,34 @@ async function sweep(root) {
   return links
 }
 
+// Its top, so nothing new can be made in it, and back. On a Mac and Linux: read-only (0555). On
+// Windows a folder's read-only mark doesn't stop anything being made in it, so the same is said in
+// its access list: nobody may add a file or a folder to it (add-file and add-subfolder denied to
+// everyone, on that folder alone, not inherited by the copies in it, which stay the agent's to
+// change); one that can't be set means no copy (it throws).
+const ICACLS = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe')
+const EVERYONE = '*S-1-1-0'
+async function lockTop(dir) {
+  if (process.platform !== 'win32') return fs.promises.chmod(dir, 0o555).catch(() => {})
+  const r = await run(ICACLS, [dir, '/deny', `${EVERYONE}:(WD,AD)`], { timeout: 30000 })
+  if (!r.ok) throw fail(`Its copy's folder couldn't be set so nothing new can be made in it: ${firstLine(r.err || r.out) || 'icacls said no'}`, 'stage')
+}
+async function unlockTop(dir) {
+  if (process.platform !== 'win32') return fs.promises.chmod(dir, 0o700).catch(() => {})
+  if (fs.existsSync(dir)) await run(ICACLS, [dir, '/remove:d', EVERYONE], { timeout: 30000 })
+}
+function unlockTopSync(dir) {
+  if (process.platform !== 'win32') { try { fs.chmodSync(dir, 0o700) } catch { /* gone */ } return }
+  try { execFileSync(ICACLS, [dir, '/remove:d', EVERYONE], { timeout: 30000, windowsHide: true, stdio: 'ignore' }) } catch { /* gone */ }
+}
+
 // A staging copy of each write folder ([{ path: its real path, shown }]) in dir, made new: { dir,
 // parts: [{ folder, shown, name, copy, how, base, dirs, real, links }] } (base: each file of the copy
 // as it was made, dirs: each folder of it, real: each file of the folder as it was then, by size, time
 // and inode). Kept by the desk for its run (never in dir, where its agent works). Throws, saying why,
 // when one can't be copied.
 export async function stage({ folders, dir }) {
-  await fs.promises.chmod(dir, 0o700).catch(() => {})
+  await unlockTop(dir)
   await fs.promises.rm(dir, { recursive: true, force: true })
   await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 })
   const parts = []
@@ -365,13 +392,13 @@ export async function stage({ folders, dir }) {
   }
   // (Its top holds its folders' copies and nothing else, and nothing new can be made there: no project
   // settings of an agent's own, say. Each copy below is the agent's to change.)
-  await fs.promises.chmod(dir, 0o555).catch(() => {})
+  try { await lockTop(dir) } catch (e) { await tidy({ dir }); throw e }
   return { dir, parts, at: new Date().toISOString() }
 }
 // Its staging copy gone.
 export async function tidy(st) {
   if (!st?.dir) return
-  await fs.promises.chmod(st.dir, 0o700).catch(() => {})
+  await unlockTop(st.dir)
   await fs.promises.rm(st.dir, { recursive: true, force: true }).catch(() => {})
 }
 // Staging copies left from before Bridge AI started again, a day old.
@@ -379,7 +406,7 @@ export function sweepOld(root) {
   try {
     for (const d of fs.readdirSync(root)) {
       const p = path.join(root, d)
-      if (Date.now() - fs.statSync(p).mtimeMs > 86400000) { try { fs.chmodSync(p, 0o700) } catch { /* gone */ } fs.rmSync(p, { recursive: true, force: true }) }
+      if (Date.now() - fs.statSync(p).mtimeMs > 86400000) { unlockTopSync(p); fs.rmSync(p, { recursive: true, force: true }) }
     }
   } catch { /* none */ }
 }
