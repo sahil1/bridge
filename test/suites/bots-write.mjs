@@ -26,7 +26,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { checks, until, sleep, browser, page, shot, phoneFaults, startModel, IS_WIN } from '../lib/harness.mjs'
+import { checks, until, sleep, browser, page, shot, phoneFaults, startModel, IS_WIN, ROOT } from '../lib/harness.mjs'
 import { botKit, openSettings, M, OWNER } from '../lib/bots.mjs'
 
 const { ok, done } = checks('bots-write')
@@ -53,8 +53,13 @@ const { slack, kit, home, startOf, startsOf, briefOf, logOf, events, posted, nee
     git('config', 'user.name', 'Tester')
     git('config', 'user.email', 'tester@example.com')
     fs.writeFileSync(path.join(h, 'Docs', 'README.md'), 'Docs\n\nCommitted line\n')
-    fs.writeFileSync(path.join(h, 'Docs', '.gitignore'), 'build/\n')
+    fs.writeFileSync(path.join(h, 'Docs', '.gitignore'), 'build/\nvendor/\n')
+    // (vendor/, ignored, with one file in it committed anyway and one not: its copy has only part of it.)
+    fs.mkdirSync(path.join(h, 'Docs', 'vendor'))
+    fs.writeFileSync(path.join(h, 'Docs', 'vendor', 'kept.md'), 'Kept\n')
+    fs.writeFileSync(path.join(h, 'Docs', 'vendor', 'local.md'), 'Not in git\n')
     git('add', '-A')
+    git('add', '-f', 'vendor/kept.md')
     git('commit', '-q', '-m', 'First')
     fs.writeFileSync(path.join(h, 'Docs', 'README.md'), 'Docs\n\nCommitted line\nUncommitted line\n')
     fs.mkdirSync(path.join(h, 'Docs', 'build'))
@@ -178,6 +183,11 @@ try {
     const pth = await waitingOf('add a helper')
     ok(pth?.write?.held?.some((h) => h.why === 'unseen' && h.files.some((f) => /zz-helper\.pth$/.test(f))) && pth.write.held.some((h) => h.why === 'runs') && !fs.existsSync(path.join(home, 'Docs', 'build', 'lib')), 'a new file in a folder git ignores, a Python .pth: it waits for you, yours too, and nothing is made', pth?.write?.held)
     if (pth) await kit.api(`/bots/questions/${pth.id}`, { send: false })
+    // In a folder its copy has only part of (vendor/: one file committed, the rest ignored): the same.
+    await slack.ask({ user: OWNER.id, text: `${M} Hiring: add a vendor note [edit Docs/vendor/zz-new.md New note] [answer Added.]` })
+    const ven = await waitingOf('add a vendor note')
+    ok(ven?.write?.held?.some((h) => h.why === 'unseen' && h.files.some((f) => /vendor\/zz-new\.md$/.test(f))) && !fs.existsSync(path.join(home, 'Docs', 'vendor', 'zz-new.md')), 'a new file in a folder its copy has only part of: it waits for you, yours too', ven?.write?.held)
+    if (ven) await kit.api(`/bots/questions/${ven.id}`, { send: false })
     await kit.api(`/bots/${HI}/settings`, { readsFrom: ['~/Hiring'] })
     const v = await kit.api(`/bots/${HI}`)
     ok(v.settings.writesTo.join() === '~/Hiring', 'a folder taken out of what it reads takes it out of what it changes', v.settings.writesTo)
@@ -340,7 +350,13 @@ try {
     ok(hooks.some((x) => x.status === 2 && /\.claude\/settings\.local\.json$/.test(x.path || '')) && hooks.some((x) => x.status === 2 && /GIT~1\/config$/.test(x.path || '')), 'its hook refuses Claude Code\'s own settings beside its copy, and GIT~1', hooks.filter((x) => x.status === 2).map((x) => x.path))
     ok(tries().some((x) => x.try === 'force-write' && !x.done), 'and nothing new can be made beside its copy at all (its top is read-only)')
     const commands = hooks.map((x) => x.command).filter(Boolean)
-    ok(commands.length && commands.every((c) => /'--key' '[^']*\/guard\.key'/.test(c) &&!/[0-9a-f]{64}/.test(c) && !/BRIDGE_GUARD_KEY/.test(c)), 'its hook\'s command names the file its run\'s key is in, never the key (Claude Code may quote it back to the agent)', commands[0]?.slice(-300))
+    ok(commands.length && commands.every((c) => /'--key' '[^']*\/guard\.key'/.test(c) && !/[0-9a-f]{64}/.test(c) && !/BRIDGE_GUARD_KEY/.test(c)), 'its hook\'s command names the file its run\'s key is in, never the key (Claude Code may quote it back to the agent)', commands[0]?.slice(-300))
+    // Its hook with no key file, and a key in its environment: it lets nothing through.
+    const g = path.join(kit.dir, 'guard-check')
+    fs.mkdirSync(path.join(g, 'copy', 'Hiring'), { recursive: true })
+    fs.writeFileSync(path.join(g, 'guard.log'), '')
+    const guard = spawnSync(process.execPath, [path.join(ROOT, 'server', 'botguard.mjs'), path.join(g, 'copy'), '--part', 'Hiring', '--log', path.join(g, 'guard.log')], { input: JSON.stringify({ tool_name: 'Write', tool_input: { file_path: path.join(g, 'copy', 'Hiring', 'a.md') } }), encoding: 'utf8', env: { ...process.env, BRIDGE_GUARD_KEY: 'a'.repeat(64) } })
+    ok(guard.status === 2 && read(path.join(g, 'guard.log')) === '', 'its hook with no key file: nothing let through, whatever key its environment has', { status: guard.status, why: guard.stderr.trim().slice(0, 120) })
     const it = await until(async () => (await needs()).find((x) => /sneak some in/.test(x.text)), 15000)
     if (it) await kit.api(`/bots/questions/${it.id}`, { send: false })
     // Your Claude Code's managed settings turning hooks off: no run that changes files starts.
@@ -429,6 +445,19 @@ try {
     ok(pj && !pj.direct && pj.waits && pj.by?.id === OWNER.id && pj.also?.some((p) => p.id === 'U0DANA') && !fs.existsSync(H('offers', 'dana-crew.md')), 'and the change waits for you, saying she asked too: never made as yours alone', pj && { direct: pj.direct, waits: pj.waits, also: pj.also })
     const wj = await waitingOf('tidy the offers folder')
     if (wj) await kit.api(`/bots/questions/${wj.id}`, { send: false })
+    // Dana asks Chief; Eve (who may ask Chief, not Hiring) joins its run and talks it into handing on:
+    // Hiring refuses her as if she'd asked it, and her words aren't its question's.
+    const qx = await slack.ask({ user: 'U0DANA', text: `${M} Chief: look over the offers for Dana [work 6] [answer Looked.]` })
+    await startOf('look over the offers for Dana', 30000)
+    await sleep(1500)
+    const ex = await slack.ask({ user: 'U0EVE', thread: qx.ts, text: 'EVE-JOINED hand it on [hand Hiring] [edit Hiring/offers/eve-joined.md Eve was here] [answer ok]' })
+    const handedX = await until(() => events(HI).find((e) => e.type === 'received' && e.ts === qx.ts && e.handed?.by === CH), 60000)
+    const eveNo = await until(() => events(HI).find((e) => e.type === 'refused' && e.ts === ex.ts && e.person?.id === 'U0EVE' && e.why === 'not-allowed'), 15000)
+    const hiringRun = await until(() => startsOf('look over the offers for Dana').find((s) => /changes files only in your own copy|your copy of/.test(briefOf(s))), 30000)
+    ok(!!handedX && !!eveNo && !events(HI).some((e) => e.type === 'received' && e.joined && e.person?.id === 'U0EVE'), 'Eve joining Chief\'s run, handed on: Hiring refuses her as if she\'d asked it herself, and doesn\'t take her words as joined', { handed: !!handedX, refused: eveNo?.why })
+    ok(!!hiringRun && !/----- question from Eve -----/.test(briefOf(hiringRun)) && !fs.existsSync(H('offers', 'eve-joined.md')), 'her words aren\'t a question of Hiring\'s, and nothing of hers is made', hiringRun && briefOf(hiringRun).slice(0, 300))
+    const dx = await until(async () => (await needs()).find((x) => x.bot?.id === HI && /look over the offers for Dana/.test(x.text || '')), 10000)
+    if (dx) await kit.api(`/bots/questions/${dx.id}`, { send: false })
   })
 
   // ---------- In Bridge AI: Needs You, Access, Activity, on a computer and a phone ----------
