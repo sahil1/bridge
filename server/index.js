@@ -371,6 +371,21 @@ async function fleetView() {
   return f
 }
 
+// The fleet as the sidebar and your phone are shown it: all but the bots' answering agents (a
+// question each, frontdesk.js), which are a bot's runs, seen on its page under Conversations, never a
+// chat of their own; nor their tabs, nor the space they run in while only they are in it. What
+// watches agents here (the helpers' ends, notifications, Try It) sees them all, and so does
+// /api/fleet?all=1 (a look at every agent, for tests and diagnosis).
+function shownFleet(f) {
+  const runs = new Set((f?.agents || []).filter((a) => a.helper?.list === 'desk').map((a) => a.paneId))
+  const theirs = (t) => t.panes?.length > 0 && t.panes.every((p) => runs.has(p.paneId))
+  const tabs = new Set((f?.tabs || []).filter(theirs).map((t) => t.tabId))
+  const spaces = new Set((f?.workspaces || []).filter((w) => { const own = f.tabs.filter((t) => t.workspaceId === w.id); return own.length ? own.every((t) => tabs.has(t.tabId)) : w.label === BOT_RUNS }).map((w) => w.id))
+  if (!runs.size && !spaces.size) return f
+  const agents = f.agents.filter((a) => !runs.has(a.paneId))
+  return { ...f, agents, tabs: f.tabs.filter((t) => !tabs.has(t.tabId)), workspaces: f.workspaces.filter((w) => !spaces.has(w.id)), counts: agents.reduce((c, a) => ({ ...c, [a.status]: (c[a.status] || 0) + 1 }), {}) }
+}
+
 async function findAgent(paneId) {
   const f = await rt.fleet()
   const a = f.agents.find((x) => x.paneId === paneId)
@@ -378,7 +393,7 @@ async function findAgent(paneId) {
   return a
 }
 
-app.get('/api/fleet', wrap(fleetView))
+app.get('/api/fleet', wrap(async (req) => (req.query.all === '1' ? fleetView() : shownFleet(await fleetView()))))
 // How Bridge AI is doing: its CPU, how long its event loop was held up, the slowest requests
 // (perf.js). reset=1: count afresh from now.
 app.get('/api/perf', wrap((req) => perf.snapshot({ reset: req.query.reset === '1' })))
@@ -1594,7 +1609,7 @@ app.get('/api/events', (req, res) => {
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
   res.flushHeaders()
   clients.add(res)
-  if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(lastFleet)}\n\n`)
+  if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(shownFleet(lastFleet))}\n\n`)
   // Who's viewing a screen of yours now, here or on another of your computers (screentell.js).
   res.write(`event: screen\ndata: ${JSON.stringify({ list: screenTell.list() })}\n\n`)
   // The desktop app's own feed (desktop/main.js says so): it also hears when another of your devices
@@ -1631,7 +1646,8 @@ async function pollFleet() {
         if (!f.down) notify.onFleet(f, cfg)
         if (key !== lastFleetKey) {
           lastFleetKey = key
-          for (const c of clients) c.write(`event: fleet\ndata: ${JSON.stringify(f)}\n\n`)
+          const shown = JSON.stringify(shownFleet(f))
+          for (const c of clients) c.write(`event: fleet\ndata: ${shown}\n\n`)
         }
       }
     } catch { /* runtime briefly unavailable */ }
@@ -1644,7 +1660,8 @@ const pushFleet = async () => {
     const f = await fleetView()
     if (gen !== fleetGen) return // a newer push follows
     lastFleetKey = ''; lastFleet = f
-    for (const c of clients) c.write(`event: fleet\ndata: ${JSON.stringify(f)}\n\n`)
+    const shown = JSON.stringify(shownFleet(f))
+    for (const c of clients) c.write(`event: fleet\ndata: ${shown}\n\n`)
   } catch { /* next poll */ }
 }
 pollFleet()
@@ -4237,7 +4254,8 @@ async function botView(b, { brief = false } = {}) {
   const routinesNow = await routines.list().catch(() => ({ routines: [] }))
   return {
     ...base, ...v,
-    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback },
+    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback, answerIn: b.answerIn },
+    carryOn: botsStore.CARRY_ON_MIN,
     paused: b.paused,
     instructions: { text: botsStore.readOwn(b.id), file },
     agents: ['claude', 'codex'].map((k) => ({ kind: k, label: adapter(k).label, installed: have.has(k), confined: !!readOnly(k)?.confined, canChange: canChange(k) })),
@@ -4569,6 +4587,8 @@ async function checkSettings(b, x, req) {
     next.answerers = want.length ? want : null
   }
   if (x.fallback !== undefined) next.fallback = x.fallback !== false
+  // Where a question at the top of a channel is answered: in the channel, or a thread of its own.
+  if (x.answerIn !== undefined) next.answerIn = x.answerIn === 'channel' ? 'channel' : 'thread'
   // You in Slack, so its drafts come to your direct messages, and you may always ask.
   if (x.owner !== undefined) {
     if (x.owner && !/^[UW][A-Z0-9]{2,20}$/.test(String(x.owner.id || ''))) throw new Error('Pick yourself from your workspace\'s people')
@@ -5005,6 +5025,25 @@ app.get('/api/bots/:id/activity', botsGuard, wrapBot(async (req) => {
     integrity: desk.check(b.id), retention: b.retention, deleted: b.deleted ? { at: b.deletedAt } : null,
     changes: desk.changes(b.id),
   }
+}))
+// Conversations: one row for each person who asked it something, or each place (by=place), the
+// latest first; one person's or place's turns, each with what ran for it, and a person's running
+// context, which you keep, let go of, or forget all of at once.
+app.get('/api/bots/:id/conversations', botsGuard, wrapBot(async (req) => {
+  const b = recordOr404(req.params.id)
+  const by = req.query.by === 'place' ? 'place' : 'person'
+  return { by, rows: desk.talks(b.id, { by }).slice(0, 300), memory: b.memory || null, carryOn: botsStore.CARRY_ON_MIN }
+}))
+app.get('/api/bots/:id/conversations/:by/:key', botsGuard, wrapBot(async (req) => {
+  const b = recordOr404(req.params.id)
+  const key = String(req.params.key)
+  return desk.turnsIn(b.id, req.params.by === 'place' ? { place: key } : { person: key })
+}))
+app.post('/api/bots/:id/people/:pid/:act', botsGuard, wrapBot(async (req) => {
+  const b = recordOr404(req.params.id)
+  const act = String(req.params.act)
+  if (!['keep', 'drop', 'forget'].includes(act)) throw Object.assign(new Error('Keep, drop or forget'), { status: 400 })
+  return { context: desk.context[act](b.id, String(req.params.pid), { device: deviceOfReq(req) }) }
 }))
 app.get('/api/bots/:id/activity/:conv', botsGuard, wrapBot(async (req) => {
   const b = recordOr404(req.params.id)

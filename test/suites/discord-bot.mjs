@@ -7,7 +7,8 @@
 //   Discord's people (with their platform), and you in Discord. A mention: one read-only agent,
 //   briefed as a bot in Discord with the question as someone else's words, its draft in Needs You
 //   (👀, then ⏳), sent into a thread started from the question (✅); a reply in that thread with no
-//   mention goes on from that answer. Refused, with no agent started: someone not named, someone
+//   mention goes on from that answer. Answering in the channel (Answer In), a message there and no
+//   thread. Refused, with no agent started: someone not named, someone
 //   still to pass the server's screening, a guest, someone not in the server (directly) and a lookup
 //   that failed; you in Discord always answered. The commands (!help says how to ask in Discord;
 //   !what do you know about me only to them, in a direct message), "remember that" kept from
@@ -31,7 +32,8 @@ const kit = await startKit('discord-bot', {
   config: { name: 'Tester', trials: { 'slack-bot': true, routines: true } },
   env: ({ home, PATH }) => {
     for (const d of ['pricing', 'code']) fs.mkdirSync(path.join(home, d), { recursive: true })
-    return { BRIDGE_DISCORD_URL: dc.url, BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_BOT_HOLD_MS: '3000', ...(gitDir ? { PATH: `${PATH}${path.delimiter}${gitDir}`, BRIDGE_PATH: `${PATH}${path.delimiter}${gitDir}` } : {}) }
+    // (Each question its own conversation: the same person asking again soon after carries none on.)
+    return { BRIDGE_DISCORD_URL: dc.url, BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_BOT_HOLD_MS: '3000', BRIDGE_BOT_CARRY_MS: '0', ...(gitDir ? { PATH: `${PATH}${path.delimiter}${gitDir}`, BRIDGE_PATH: `${PATH}${path.delimiter}${gitDir}` } : {}) }
   },
 })
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'helper-claude.cjs'), 'utf8'))
@@ -52,7 +54,7 @@ try {
   await kit.api('/setup', { name: 'Tester' })
   await kit.api('/agents/catalog')
   await kit.api('/bots', { name: 'Atlas' })
-  await kit.api('/bots/b1/settings', { readsFrom: ['~/pricing'] })
+  await kit.api('/bots/b1/settings', { readsFrom: ['~/pricing'], answerIn: 'thread' })
 
   // ---------- Set up in Settings ----------
   await part('connecting in Settings', async () => {
@@ -119,6 +121,17 @@ try {
     const d2 = await draftOf('500 seats')
     await kit.api(`/bots/questions/${encodeURIComponent(d2.id)}`, { send: true })
     ok(!!(await postedLike(/Same price at 500/)) && (await st()).posted.filter((x) => x.channel === q1.id).length === 2, 'answered in the same thread')
+  })
+
+  // ---------- Answer In: The Channel ----------
+  await part('answered in the channel', async () => {
+    await kit.api('/bots/b1/settings', { answerIn: 'channel' })
+    const q = await dc.say({ user: '2001', text: `${M} is there a startup discount? [answer Yes, half off for a year.]` })
+    const d = await draftOf('startup discount')
+    await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: true })
+    const p = await postedLike(/half off for a year/)
+    ok(p?.channel === '4001' && !(await st()).threads.some((t) => t.id === q.id), 'The Channel: answered in the channel itself, with no thread started', { p, threads: (await st()).threads })
+    await kit.api('/bots/b1/settings', { answerIn: 'thread' })
   })
 
   // ---------- Who's refused ----------

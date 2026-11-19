@@ -462,6 +462,9 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
       ts: String(a.id), channel: p.base, thread, mention, dm: p.dm, from, text, ...(listen ? { via: 'listen' } : {}),
       place: p.dm ? { kind: 'dm', id: p.base, name: null } : { kind: 'channel', id: p.base, name: nameOfPlace(a, p), within: p.kind === 'channel' ? a.channelData?.team?.name || null : null, ...(p.kind !== 'channel' ? { private: true } : {}) },
       at, late: false, attachments: files, reply,
+      // (A post at the top of a channel, answered with a post of its own there instead of in its
+      // reply chain, where the bot answers in the channel: the desk picks. newPost below.)
+      ...(p.kind === 'channel' && !thread ? { top: { channel: p.base, thread: null } } : {}),
     })
   }
   async function altered(a, p) {
@@ -559,7 +562,8 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
   }
   // Teams has no reactions for bots: for 👀, "typing…"; for the rest, nothing, said so.
   async function react({ ts, name, off = false, reply = null }) {
-    const r = reply || refs.get(String(ts))
+    // (An answer going in the channel itself has no activity to type under: the question's own.)
+    const r = reply?.serviceUrl ? reply : refs.get(String(ts)) || reply
     if (name === 'eyes' && !off && r) { await typing(r); return { shown: 'typing' } }
     return { skipped: 'Teams doesn\'t let a bot react to a message' }
   }

@@ -7,6 +7,7 @@ import { useFolder } from '../files/fsapi.js'
 import { ago } from '../Machines.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { Connections, BotReach } from '../bots/Connections.jsx'
+import Conversations, { AnswerIn } from '../bots/Conversations.jsx'
 import { t } from '../../i18n/index.js'
 import './bots.css'
 
@@ -16,7 +17,7 @@ import './bots.css'
 // it, replying in its threads, with its /command or the message shortcut, each question answered by
 // an agent that can only read (server/frontdesk.js) and the answer waiting in Needs You, and in your
 // Slack direct messages, for you to send, edit or discard. At the top, your bots and New Bot (from
-// a template, or a bot exported elsewhere). For the one picked, four tabs:
+// a template, or a bot exported elsewhere). For the one picked, five tabs:
 //   Set Up: whether it's connected and, when it isn't, why (and when its Slack app needs the new
 //     manifest); pausing it; its name and description, which are its name in Slack, and its export;
 //     making the app (the manifest to paste, the two tokens) and connecting it; you in Slack (whose
@@ -25,6 +26,8 @@ import './bots.css'
 //     pull request, after you approve the diff or at once); the limits for each person; the channels
 //     it answers in without a mention, and those it's muted in; how answers go, which agent answers,
 //     and a note when that agent answers through a personal plan; and its scheduled posts.
+//   Conversations: everyone it talked with and everywhere, one row each, each opening to its turns
+//     and what ran for them, and a person's running context (bots/Conversations.jsx).
 //   Try It: a question asked here as someone would in Slack, its draft, what it read and its record,
 //     with nothing sent to Slack.
 //   Memory: what it has learned, about itself, each channel and each person, the learnings waiting
@@ -1313,6 +1316,7 @@ function SetUp({ d, save, reload, onDelete, again }) {
       <Changes d={d} save={save} />
       <Limits d={d} save={save} />
       <Channels d={d} save={save} />
+      <AnswerIn d={d} save={save} />
       <Answerers d={d} save={save} />
       <Replies d={d} save={save} />
       <Scheduled d={d} reload={reload} />
@@ -1349,12 +1353,13 @@ function eventLine(e) {
                   : e.how === 'try' ? t('{name} asked in Try It: “{text}”', { name: who, text })
                     : e.how === 'command' ? t('{name} gave it a command: {text}', { name: who, text })
                       : t('{name} mentioned it: “{text}”', { name: who, text })
-      return e.files?.length ? `${line} ${t('(with {files})', { files: e.files.map((f) => f.name).join(', ') })}` : line
+      const on = e.carried ? `${line} ${t('(carrying on the conversation)')}` : line
+      return e.files?.length ? `${on} ${t('(with {files})', { files: e.files.map((f) => f.name).join(', ') })}` : on
     }
     case 'refused': return t('Refused: {why}', { why: REFUSED()[e.why] || e.why })
     case 'queued': return t('Waiting its turn, behind {n} of their questions', { n: e.ahead ?? 1 })
     case 'context': return e.problem ? t('Read the conversation: {why}', { why: e.problem }) : t('Read {n} earlier messages and {pins} pinned, as context', { n: e.messages?.length || 0, pins: e.pins?.length || 0 })
-    case 'run.started': return t('{agent} started, reading {folders}{from}; instructions {version} from {source}', { agent: e.answerer?.label || (e.agent === 'codex' ? 'Codex' : e.agent === 'model' ? e.model || '' : 'Claude Code'), folders: e.folders?.length ? e.folders.join(', ') : t('no folders'), from: e.from ? t(', going on from its earlier conversation') : '', version: e.instructions?.hash || '', source: e.instructions?.source === 'file' ? e.instructions.path : t('Settings') }) + (e.instructions?.problem ? ` (${e.instructions.problem})` : '')
+    case 'run.started': return t('{agent} started, reading {folders}{from}; instructions {version} from {source}', { agent: e.answerer?.label || (e.agent === 'codex' ? 'Codex' : e.agent === 'model' ? e.model || '' : 'Claude Code'), folders: e.folders?.length ? e.folders.join(', ') : t('no folders'), from: e.from ? t(', going on from its earlier conversation') : '', version: e.instructions?.hash || '', source: e.instructions?.source === 'file' ? e.instructions.path : t('Settings') }) + (e.instructions?.problem ? ` (${e.instructions.problem})` : '') + (e.earlier?.problem ? ` (${e.earlier.problem})` : '')
     case 'run.read': return t('Opened {files}', { files: (e.files || []).map((f) => f.what).join(', ') })
     case 'run.tools': return t('Used the MCP tools {tools}', { tools: (e.tools || []).map((x) => `${x.server}: ${x.tool}${x.n > 1 ? ` ×${x.n}` : ''}`).join(', ') })
     case 'run.skipped': return t('{name} passed over: {why}', { name: e.answerer?.label || e.answerer?.id || '', why: e.why || '' })
@@ -1396,6 +1401,10 @@ function eventLine(e) {
     case 'change.failed': return t('The change couldn\'t go through ({step}): {why}', { step: e.step || '', why: e.error || '' })
     case 'pr.opened': return t('Opened a draft pull request')
     case 'file.uploaded': return e.ok === false ? t('Couldn\'t send the file {name}: {why}', { name: e.name, why: e.error || '' }) : t('Sent the file {name} ({size})', { name: e.name, size: sizeOf(e.size) })
+    case 'context.noted': return e.ok === false ? t('Couldn\'t keep this in {name}\'s running context: {why}', { name: who, why: e.error || '' }) : e.state === 'kept' ? t('Kept in {name}\'s running context', { name: who }) : t('In {name}\'s running context once you keep it', { name: who })
+    case 'context.kept': return t('{name} kept {n} of {person}\'s conversations in their running context', { name: by, n: e.n ?? 0, person: who })
+    case 'context.dropped': return t('{name} let go of {n} of {person}\'s conversations', { name: by, n: e.n ?? 0, person: who })
+    case 'context.forgotten': return t('{name} forgot {person}\'s running context', { name: by, person: who })
     case 'forgotten': return t('{name} asked it to forget them: {memory} things it remembered deleted, their words blanked in {events} events', { name: who, memory: e.memory ?? 0, events: e.events ?? 0 })
     case 'status': return e.ok === false ? t('Couldn\'t set Slack\'s working status: {why}', { why: e.error || '' }) : e.on ? t('Showed Slack\'s working status') : t('Cleared Slack\'s working status')
     case 'trace.deleted': return e.all ? (e.device ? t('Its activity history was deleted, on {device}', { device: e.device }) : t('Its activity history was deleted')) : t('Months deleted for their age: {months}', { months: (e.months || []).join(', ') })
@@ -1855,7 +1864,7 @@ function Memory({ d, save, reload }) {
 // name and how it stands are over them, with AI Assist (the wand) opening its chat beside them
 // (assist(ctx): the chat, given the bot as it stands and how to change it). On a phone the chat takes
 // the page while it's open. It opens by itself until the bot is connected somewhere.
-const TABS = ['setup', 'try', 'memory', 'activity']
+const TABS = ['setup', 'conversations', 'try', 'memory', 'activity']
 const STATUS_SAID = () => ({ on: t('Answering'), needs: t('Needs you'), paused: t('Paused'), off: t('Not connected yet') })
 export function Bot({ id, onGone, onChanged, notice, page = false, phone = false, status = null, assist = null }) {
   const [d, setD] = useState(null)
@@ -1911,6 +1920,7 @@ export function Bot({ id, onGone, onChanged, notice, page = false, phone = false
     <>
       <div className="seg sb-tabs" role="tablist" aria-label={d.name}>
         <button type="button" role="tab" aria-selected={tab === 'setup'} className={tab === 'setup' ? 'on' : ''} onClick={() => pickTab('setup')}>{t('Set Up')}</button>
+        <button type="button" role="tab" aria-selected={tab === 'conversations'} className={tab === 'conversations' ? 'on' : ''} onClick={() => pickTab('conversations')}>{t('Conversations')}</button>
         <button type="button" role="tab" aria-selected={tab === 'try'} className={tab === 'try' ? 'on' : ''} onClick={() => pickTab('try')}>{t('Try It')}</button>
         <button type="button" role="tab" aria-selected={tab === 'memory'} className={tab === 'memory' ? 'on' : ''} onClick={() => pickTab('memory')}>{t('Memory')}{proposed > 0 && <span className="sb-tag">{t('{n} to keep', { n: proposed })}</span>}</button>
         <button type="button" role="tab" aria-selected={tab === 'activity'} className={tab === 'activity' ? 'on' : ''} onClick={() => pickTab('activity')}>{t('Activity')}{d.waiting > 0 && <span className="sb-tag">{t('{n} waiting in Needs You', { n: d.waiting })}</span>}</button>
@@ -1918,6 +1928,7 @@ export function Bot({ id, onGone, onChanged, notice, page = false, phone = false
       {notice?.length > 0 && <div className="st-note warn" role="status"><Icon name="info" size={13} /><span>{t('Imported. Check these here:')} {notice.join(' · ')}</span></div>}
       {note && <p className="st-note bad" role="alert"><Icon name="alert" size={13} /> {note}</p>}
       {tab === 'setup' && <SetUp d={d} save={save} reload={load} onDelete={remove} again={again} />}
+      {tab === 'conversations' && <Conversations d={d} />}
       {tab === 'try' && <TryIt d={d} />}
       {tab === 'memory' && <Memory d={d} save={save} reload={load} />}
       {tab === 'activity' && <Activity d={d} save={save} />}

@@ -1,0 +1,34 @@
+/* A bot's Conversations (Conversations.jsx): a row for each person or place, opening to its turns
+   and a person's running context; and Answer In. The app's tokens, so it follows light and dark
+   mode; on a phone nothing wider than the screen, every control a whole 40 px target. */
+.bcv-by button { display: inline-flex; align-items: center; gap: 5px; }
+.bcv-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; min-width: 0; }
+.bcv-row { border-bottom: 1px solid var(--line); min-width: 0; }
+.bcv-row:last-child { border-bottom: 0; }
+.bcv-head { display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 8px 4px; text-align: left; color: var(--ink); border-radius: 7px; min-width: 0; }
+.bcv-head:hover, .bcv-head:focus-visible { background: var(--pane-2); }
+.bcv-head time { flex: none; white-space: nowrap; }
+.bcv-av { flex: none; width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font: 600 11px var(--font); color: var(--ink-2); background: var(--pane-2); border: 1px solid var(--line-2); }
+.bcv-text { flex: 1; min-width: 0; display: grid; gap: 1px; overflow-wrap: anywhere; }
+.bcv-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.bcv-out.good { color: var(--good); }
+.bcv-open { margin: 2px 0 10px 32px; padding: 8px 10px; border-left: 2px solid var(--line-2); display: grid; gap: 10px; min-width: 0; }
+.bcv-turns { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; min-width: 0; }
+.bcv-turn { display: grid; gap: 3px; min-width: 0; }
+.bcv-turn p { margin: 0; line-height: 1.45; overflow-wrap: anywhere; }
+.bcv-asked { font-size: 13px; color: var(--ink); white-space: pre-wrap; }
+.bcv-asked.more { font-size: 12.5px; color: var(--ink-2); }
+.bcv-answer { font-size: 12.5px; color: var(--ink-2); padding: 6px 9px; border-radius: var(--r-sm); background: var(--pane-2); border: 1px solid var(--line); white-space: pre-wrap; }
+.bcv-answer.sent { border-color: color-mix(in srgb, var(--good) 30%, var(--line)); }
+.bcv-ran ul { list-style: none; padding-left: 4px; }
+.bcv-running { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--pane); min-width: 0; }
+.bcv-running .sb-sub { margin: 0; }
+.bcv-running p { margin: 0; }
+.bcv-ctx { margin: 0; padding-left: 16px; display: grid; gap: 3px; overflow-wrap: anywhere; color: var(--ink-2); line-height: 1.45; }
+.bcv-waiting { display: grid; gap: 4px; padding: 6px 8px; border-radius: var(--r-sm); border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--line-2)); background: color-mix(in srgb, var(--warning) 5%, var(--pane)); }
+.bcv-running .st-row { margin: 0; flex-wrap: wrap; gap: 6px; }
+.bcv-running :is(.btn, .ghost-btn) { display: inline-flex; align-items: center; gap: 5px; }
+@container (max-width: 520px) {
+  .bcv-open { margin-left: 4px; }
+}
+:is(.modal.settings.phone, .bp.phone) .sb :is(.bcv-head, .bcv-ran summary) { min-height: 40px; }

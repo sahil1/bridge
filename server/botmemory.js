@@ -22,12 +22,19 @@ const clean = (s, n) => String(s ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/
 export function makeMemory(dir) {
   const FILE = path.join(dir, 'memory.json')
   let data = null
+  let problem = null
+  // (A file that's there but can't be read is said, in the record of each run it would have been
+  // given to, and set aside before anything is written over it.)
   const load = () => {
     if (data) return data
-    try { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); data = { next: Number(j.next) || 1, items: Array.isArray(j.items) ? j.items : [] } } catch { data = { next: 1, items: [] } }
+    try { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); data = { next: Number(j.next) || 1, items: Array.isArray(j.items) ? j.items : [] }; problem = null } catch (e) { data = { next: 1, items: [] }; problem = e.code === 'ENOENT' ? null : `memory.json couldn't be read (${e.code || e.message})` }
     return data
   }
-  const save = () => { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); writeFileAtomic(FILE, JSON.stringify(load(), null, 2), { mode: 0o600 }) }
+  const save = () => {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+    if (problem) { try { fs.renameSync(FILE, path.join(dir, `memory.broken-${Date.now()}.json`)) } catch { /* gone already */ } problem = null }
+    writeFileAtomic(FILE, JSON.stringify(load(), null, 2), { mode: 0o600 })
+  }
   const find = (id) => load().items.find((x) => x.id === String(id)) || null
 
   // A new item: proposed, or kept at once (keep). One with the same words about the same one, kept
@@ -84,5 +91,5 @@ export function makeMemory(dir) {
   // What's given with a question: kept items only, the bot's, this channel's and this person's.
   const given = ({ channel = null, person = null } = {}) => load().items.filter((x) => x.state === 'kept' && (x.kind === 'bot' || (x.kind === 'channel' && x.of === channel) || (x.kind === 'person' && x.of === person)))
   const ofPerson = (personId, { kept = true } = {}) => load().items.filter((x) => x.kind === 'person' && x.of === String(personId) && (!kept || x.state === 'kept'))
-  return { list: () => [...load().items], get: find, add, keep, edit, remove, forgetPerson, given, ofPerson, file: FILE, reset: () => { data = null } }
+  return { list: () => [...load().items], get: find, add, keep, edit, remove, forgetPerson, given, ofPerson, problem: () => { load(); return problem }, file: FILE, reset: () => { data = null } }
 }
