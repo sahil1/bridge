@@ -21,7 +21,9 @@ const { ok, done } = checks('bots-changes')
 // Its server needs git, as Bridge AI does for a change: on Windows the kit's PATH has only the
 // system's folders, so git's own is added (where this test finds it).
 const gitDir = IS_WIN ? path.dirname(String(spawnSync('where', ['git'], { encoding: 'utf8' }).stdout || '').split(/\r?\n/)[0] || 'C:\\Program Files\\Git\\cmd\\git.exe') : null
-const { slack, kit, draftOf, startOf, logOf, botOf, connected, timelineOf, events, posted } = await botKit('bots-changes', { folders: ['code'], env: ({ PATH }) => (gitDir ? { PATH: `${PATH}${path.delimiter}${gitDir}`, BRIDGE_PATH: `${PATH}${path.delimiter}${gitDir}` } : {}) })
+// (Its hook given as Windows has it on every system, BRIDGE_HOOK_EXEC: a program and its arguments,
+// which needs a Claude Code new enough to run it so.)
+const { slack, kit, draftOf, startOf, startsOf, logOf, botOf, connected, timelineOf, events, posted } = await botKit('bots-changes', { folders: ['code'], env: ({ PATH }) => ({ BRIDGE_HOOK_EXEC: '1', ...(gitDir ? { PATH: `${PATH}${path.delimiter}${gitDir}`, BRIDGE_PATH: `${PATH}${path.delimiter}${gitDir}` } : {}) }) })
 kit.program('gh', fs.readFileSync(path.join(TEST, 'stand-ins', 'gh.cjs'), 'utf8'))
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -130,6 +132,41 @@ try {
     fs.rmSync(path.join(kit.home, 'gh-signed-out'))
     const r = await kit.api(`/bots/questions/${d.id}`, { send: true, text: d.draft })
     ok(!!(await until(async () => (await inThread(q.ts)).find((x) => /Bumped\.[\s\S]*Draft pull request: https:/.test(x.text)), 20000)), 'signed in again: Send opens it, and sends the link', r.item?.state)
+  })
+
+  // ---------- A Claude Code too old for its hook ----------
+  // Its hook given as a program and its arguments (as on Windows) needs Claude Code 2.1.139 or later:
+  // an older one (the stand-in saying 2.1.100, the program changed as an update changes it) is said
+  // on its Access card, and a change asked for isn't started, said in Needs You and the record; once
+  // it's new again, a change goes through.
+  let bumps = 0
+  const claudeIs = (v) => {
+    const f = path.join(kit.home, 'claude-version')
+    if (v) fs.writeFileSync(f, `${v}\n`); else fs.rmSync(f, { force: true })
+    for (const n of ['claude', 'claude.cmd']) { const p = path.join(kit.dir, 'bin', n); if (fs.existsSync(p)) fs.utimesSync(p, new Date(), new Date(Date.now() + ++bumps * 60000)) }
+  }
+  await part('Claude Code too old for its hook', async () => {
+    claudeIs('2.1.100')
+    const v = await botOf()
+    ok(v.changes?.hook?.need === '2.1.139' && v.changes.hook.have === '2.1.100', 'its Access says Claude Code is too old for its hook, and which it needs', v.changes?.hook)
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    await openSettings(p)
+    const said = await p.locator('[data-setting="bots-changes-hook"]').first().innerText({ timeout: 15000 }).catch(() => '')
+    ok(/needs Claude Code 2\.1\.139 or later, and this computer has 2\.1\.100: update it with claude update/.test(said), 'and its Changes say so, with how to update it', said)
+    ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+    const before = startsOf('Fix the footer').length
+    await slack.ask({ user: 'U0DANA', text: `${M} Fix the footer [edit README.md Footer fixed] [answer Fixed.]` })
+    const d = await until(async () => (await kit.api('/needs-you')).slack?.find((x) => /Fix the footer/.test(x.text || '') && x.needsOwner), 30000)
+    ok(/Changing files on Windows needs Claude Code 2\.1\.139 or later, and this computer has 2\.1\.100: update it with claude update in a terminal/.test(d?.why || '') && startsOf('Fix the footer').length === before && !d.change, 'a change asked for: not started, and you\'re told why in Needs You', d?.why)
+    ok((await timelineOf('b1', 'Fix the footer')).some((e) => e.type === 'changes.blocked' && e.why === 'claude-old' && e.need === '2.1.139' && e.have === '2.1.100'), 'and in its record')
+    if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })
+    claudeIs(null)
+    ok(!(await botOf()).changes?.hook, 'updated: nothing said')
+    await slack.ask({ user: 'U0DANA', text: `${M} Fix the header [edit README.md Header fixed] [answer Fixed.]` })
+    const e = await draftOf('Fix the header')
+    ok(!!e?.change?.branch && logOf('hooks.log').some((x) => x.status === 0 && Array.isArray(x.args) && /README\.md$/.test(x.path || '')), 'and a change goes through again, its hook run as a program and its arguments', e?.change)
+    if (e) await kit.api(`/bots/questions/${e.id}`, { send: false })
   })
 
   // ---------- Git's own files in its copy, written by its agent ----------

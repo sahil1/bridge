@@ -378,6 +378,16 @@ try {
     fs.rmSync(managed, { force: true })
     if (held) await kit.api(`/bots/questions/${held.id}`, { send: false })
   })
+  // Its hook never ran at all (nothing in its log, not even that it ran), every file written past it:
+  // said as that, with why, not as a refusal of each file.
+  await part('its hook never ran', async () => {
+    const q = await slack.ask({ user: OWNER.id, text: `${M} Hiring: one past its hook [force-write Hiring/unguarded.md not checked] [answer ok]` })
+    const prop = await until(() => events(HI).find((e) => e.type === 'write.proposed' && e.ts === q.ts), 40000)
+    ok(prop?.guard?.ran === false && prop.guard.why === 'hooks-off' && prop.refused?.length && prop.refused.every((r) => r.why === 'unchecked') && !fs.existsSync(H('unguarded.md')), 'a run whose hook never ran: nothing changed, and the record says its hook didn\'t run, and why', prop && { guard: prop.guard, refused: prop.refused })
+    const it = await until(async () => (await needs()).find((x) => /one past its hook/.test(x.text) && x.write), 15000)
+    ok(/^The folder guard didn't run, so nothing was changed: Claude Code didn't run it/.test(it?.warn || '') && it.write.guard?.ran === false, 'and Needs You says so, not that each file was refused', it && { warn: it.warn, guard: it.write.guard })
+    if (it) await kit.api(`/bots/questions/${it.id}`, { send: false })
+  })
   await part('the screen, reworded, and AI Assist\'s unreadable answer', async () => {
     await slack.ask({ user: 'U0DANA', text: `${M} Hiring: clear out the Hiring folder please` })
     const a = await until(async () => (await needs()).find((x) => x.state === 'screened' && /clear out the Hiring/.test(x.text)), 20000)
