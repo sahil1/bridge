@@ -75,6 +75,7 @@ import * as insights from './insights.js'
 import * as chatModels from './chatmodels.js'
 import * as llm from './llm.js'
 import * as modelJobs from './modeljobs.js'
+import * as modelList from './modellist.js'
 import * as meetings from './meetings.js'
 import * as meetVideo from './meetvideo.js'
 import * as boards from './boards.js'
@@ -122,6 +123,7 @@ import * as notify from './notify.js'
 import * as push from './push.js'
 import * as phone from './phone.js'
 import * as relay from './relay.js'
+import * as shares from './shares.js'
 import * as relaycheck from './relaycheck.js'
 import * as account from './account.js'
 import * as machines from './machines.js'
@@ -246,6 +248,7 @@ const remote = makeRemote({
   hosted: () => !!relay.status().hosted, isDevPort, screenAllowed: () => (IS_MAC ? calls.screen() : Promise.resolve(null)),
   devices: () => relay.status().devices, byKey: (key) => relay.deviceByKey(key), onBlocked: shutOut,
   tell: (ev) => screenTell.tell(ev), onChange: () => screenTell.changed(), notifyTo: () => screenTell.notifyTo(), blockThere: (hop, id) => screenTell.blockThere(hop, id),
+  version: VERSION, openApp: (go) => fixes.openBridge(go), here: (req) => atThisComputer(req),
 })
 // ...and nothing else of this computer's for one not let in, from the first thing it asks (letin.js),
 // nor its notifications.
@@ -704,7 +707,7 @@ app.post('/api/studio/ask', wrap(async (req) => {
 // picked one, else AI Assist's (pickFor), then signed in a copy in _signed beside it. A scan is read
 // on a Mac (doctext.js).
 signing.setHelpers({
-  reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: (text) => (cfg.meetings?.model ? Promise.resolve(cfg.meetings.model) : pickModelFor('assist', { text })),
+  reply: replyFor('assist'), pickModel: (text) => (cfg.meetings?.model ? Promise.resolve(cfg.meetings.model) : pickModelFor('assist', { text })),
   describe: (id) => chatModels.describe(id), via: async (id) => (await chatModels.models().catch(() => [])).find((m) => m.id === id)?.via || null,
   contextOf: (id) => chatModels.contextOf(id), scanText: doctext.ocrBin() ? (file) => doctext.textOf(file, 200_000) : null,
 })
@@ -755,8 +758,9 @@ const byName = async (id) => (await chatModels.models().catch(() => [])).find((x
 app.post('/api/studio/rewrite', async (req, res) => {
   try {
     const model = String(req.body?.model || '') || await studioModel(jobText(req.body))
-    const out = await studioFound.rewrite({ ...req.body, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
-    res.json({ ...out, model, by: await byName(model) })
+    const reply = replyFor('assist')
+    const out = await studioFound.rewrite({ ...req.body, model, reply })
+    res.json({ ...out, model: reply.used || model, by: await byName(reply.used || model) })
   } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
 })
 // @bridge in a document's comment (Comments and @bridge): AI Assist's reply for the thread and,
@@ -764,8 +768,9 @@ app.post('/api/studio/rewrite', async (req, res) => {
 app.post('/api/studio/comment-assist', async (req, res) => {
   try {
     const model = String(req.body?.model || '') || await studioModel(jobText(req.body))
-    const out = await commentAssist.assist({ ...req.body, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
-    res.json({ ...out, model, by: await byName(model) })
+    const reply = replyFor('assist')
+    const out = await commentAssist.assist({ ...req.body, model, reply })
+    res.json({ ...out, model: reply.used || model, by: await byName(reply.used || model) })
   } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
 })
 // @bridge in a comment on a PowerPoint's slide, or a shape on it (Comments and @bridge): a reply,
@@ -773,8 +778,9 @@ app.post('/api/studio/comment-assist', async (req, res) => {
 app.post('/api/studio/deck/comment', async (req, res) => {
   try {
     const model = String(req.body?.model || '') || await studioModel(jobText(req.body))
-    const out = await commentAssist.deckAssist({ ...req.body, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
-    res.json({ ...out, model, by: await byName(model) })
+    const reply = replyFor('assist')
+    const out = await commentAssist.deckAssist({ ...req.body, model, reply })
+    res.json({ ...out, model: reply.used || model, by: await byName(reply.used || model) })
   } catch (e) { res.status(e.status || 502).json({ error: e.message, code: e.code || 'failed' }) }
 })
 // The change an agent asked in place wrote beside the file, taken once (studio.takeProposal).
@@ -791,8 +797,8 @@ app.post('/api/studio/deck/ai', wrap(async (req) => {
   const ask = studio.deckAsk({ mode, prompt: b.prompt, slides: Array.isArray(b.slides) ? b.slides.map(String) : [], at: b.at, source: source?.text, sourceName: source?.name, count: b.count })
   const use = String(b.model || '') || cfg.meetings?.model || await pickModelFor('assist', { text: ask.prompt })
   if (!use) throw Object.assign(new Error('No model to write with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers.'), { code: 'noModel' })
-  const r = await chatModels.reply(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, feature: 'studio' })
-  return { ...studio.deckAnswer(r?.text), model: use, by: await byName(use) }
+  const r = await replyFor('assist')(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, feature: 'studio' })
+  return { ...studio.deckAnswer(r?.text), model: r.model, by: await byName(r.model) }
 }))
 // A sheet's AI Assist (studio.sheetAsk): the cells picked and what to do with them, answered by
 // Studio's model (the one picked for it, else AI Assist's) as a change the page shows on the sheet
@@ -804,9 +810,9 @@ const sheetAi = async (req, thread = null) => {
   const ask = book ? studio.bookAsk({ instruction: b.instruction, rel: sq(req).path }) : studio.sheetAsk({ rel: sq(req).path, instruction: b.instruction, selection: b.selection, where: b.where, sheet: b.sheet, sheets: b.sheets, used: b.used, thread })
   const use = String(b.model || '') || await studioModel(ask.prompt)
   if (!use) throw Object.assign(new Error('No model to answer with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers.'), { code: 'noModel' })
-  const r = await chatModels.reply(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, json: book ? studio.BOOK_SCHEMA : studio.SHEET_SCHEMA, feature: 'studio' })
-  const d = (await chatModels.models().catch(() => [])).find((x) => x.id === use)
-  return { ...(book ? studio.bookAnswer(r?.text) : studio.sheetAnswer(r?.text)), model: use, by: d?.label || String(use).split(':').slice(1).join(':') || use }
+  const r = await replyFor('assist')(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, json: book ? studio.BOOK_SCHEMA : studio.SHEET_SCHEMA, feature: 'studio' })
+  const d = (await chatModels.models().catch(() => [])).find((x) => x.id === r.model)
+  return { ...(book ? studio.bookAnswer(r?.text) : studio.sheetAnswer(r?.text)), model: r.model, by: d?.label || String(r.model).split(':').slice(1).join(':') || r.model }
 }
 app.post('/api/studio/sheet/ai', wrap((req) => sheetAi(req)))
 // @bridge in a comment on a sheet's cells (Comments and @bridge): the same fast path, with the
@@ -839,7 +845,7 @@ app.post('/api/agents/:pane/commit', wrap(async (req) => files.commit(await root
 app.post('/api/agents/:pane/push', wrap(async (req) => files.push(await rootOf(req.params.pane))))
 // The branch's pull request (cached; gh goes over the network), a drafted title and body, and opening one.
 app.get('/api/agents/:pane/pr', wrap(async (req) => pr.status(await rootOf(req.params.pane), { refresh: req.query.refresh === '1' })))
-app.post('/api/agents/:pane/pr/draft', wrap(async (req) => pr.draft(await rootOf(req.params.pane), { base: req.body?.base, route: (text) => pickFor('tidy', { text }) })))
+app.post('/api/agents/:pane/pr/draft', wrap(async (req) => pr.draft(await rootOf(req.params.pane), { base: req.body?.base, route: (text) => pickFor('tidy', { text }), reply: replyFor('tidy') })))
 app.post('/api/agents/:pane/pr', wrap(async (req) => { const out = await pr.create(await rootOf(req.params.pane), req.body || {}); counts.add('prs.opened'); return out }))
 app.get('/api/agents/:pane/diff', wrap(async (req) => files.gitDiff(await rootOf(req.params.pane), String(req.query.path || ''))))
 // A file in the agent's folder as it is: in parts when asked (Range: a video's player asks for the
@@ -1672,10 +1678,12 @@ app.get('/api/events', (req, res) => {
   res.write(`event: screen\ndata: ${JSON.stringify({ list: screensFor(res.bridgeDevice) })}\n\n`)
   // The desktop app's own feed (desktop/main.js says so): it also hears when another of your devices
   // asks this computer to allow something (fixes.js askHere).
-  const off = req.headers['x-bridge-desktop'] && !req.headers['x-bridge-relay'] ? fixes.onAsk((a) => res.write(`event: fix-ask\ndata: ${JSON.stringify(a)}\n\n`)) : null
+  // (Only from this computer itself: never a device's, nor a browser through Tailscale.)
+  const appFeed = req.headers['x-bridge-desktop'] && atThisComputer(req)
+  const off = appFeed ? fixes.onAsk((a) => res.write(`event: fix-ask\ndata: ${JSON.stringify(a)}\n\n`)) : null
   // ...and what Remote Screen and Preview needs of it (remote.js): its capture window, a project's
   // app drawn off screen for a phone, and the badge that says this screen is being seen.
-  const offRemote = req.headers['x-bridge-desktop'] && !req.headers['x-bridge-relay'] ? remote.onDesktop((ev) => res.write(`event: remote\ndata: ${JSON.stringify(ev)}\n\n`)) : null
+  const offRemote = appFeed ? remote.onDesktop((ev) => res.write(`event: remote\ndata: ${JSON.stringify(ev)}\n\n`)) : null
   req.on('close', () => { clients.delete(res); off?.(); offRemote?.() })
 })
 // A switch to another herdr session: a fleet read before it is dropped, not shown or announced.
@@ -1970,12 +1978,21 @@ async function localLimit(local) {
   return modelJobs.shortLimit({ ctx, readPerSecond: sp?.read || null })
 }
 // The model for a job of that kind with none picked for it where it's used: { id, label, where,
-// auto, kept, why, cloud } (modeljobs.js route). text (or tokens): what the job sends, for its size;
-// with neither, Auto takes it as long. cloudBetter: Auto keeps this one on your cloud model (the
-// transcript cleanup, which small models do poorly). Throws, saying why, when the job is set to stay
-// on this computer and no model can run here.
+// auto, kept, why, cloud, own } (modeljobs.js). Its own list first (fromList: the first in it that
+// can run now; own, the list to fall back along; passed, the ones before it that can't, and why),
+// else route()'s. text (or tokens): what the job sends, for its size; with neither, Auto takes it as
+// long. cloudBetter: Auto keeps this one on your cloud model (the transcript cleanup, which small
+// models do poorly). Throws, saying why, when none in its own list can run, or the job is set to
+// stay on this computer and no model can run here.
+const providerName = (route) => chatModels.routeInfo(route).label
 async function pickFor(job, { text = null, tokens = null, cloudBetter = false } = {}) {
   const list = await ranked()
+  const own = modelJobs.listOf(cfg, job)
+  if (own) {
+    const r = modelJobs.fromList({ job, own, models: list, provider: providerName })
+    if (r.error) throw r.error
+    return { ...r, job, label: list.find((m) => m.id === r.id)?.label || llm.labelOf(r.id) || null, cloud: null }
+  }
   const set = modelJobs.setting(cfg, job)
   const first = list[0]?.id || null
   const cloud = list.find((m) => m.via !== 'local')?.id || null
@@ -1991,11 +2008,49 @@ async function pickFor(job, { text = null, tokens = null, cloudBetter = false } 
   const missing = set === 'local' && !here ? await llm.whyNot().catch(() => null) : null
   const r = modelJobs.route({ job, set, first, cloud, local, here, need, limit, seconds, missing, better: cloudBetter })
   if (r.error) throw r.error
-  return { ...r, job, label: list.find((m) => m.id === r.id)?.label || llm.labelOf(r.id) || null, cloud }
+  return { ...r, job, label: list.find((m) => m.id === r.id)?.label || llm.labelOf(r.id) || null, cloud, own: null }
+}
+// Every call of a job's model goes through here (meetings.js's through its replyAny, the same way):
+// chatmodels.js's reply, and when the model is in the job's own list and can't answer, the next in
+// it that can, at once (modellist.js inTurn), so a list goes where it says and nowhere else. Each run
+// is noted for the job (modeljobs.js ran): what answered, and what was passed over and why (the ones
+// before it in the list that can't run now, and one that failed). The answer says which model it
+// was (model; fellBack and why when another stood in); reply.used, the one that answered last.
+const stopped = (e) => e?.name === 'AbortError' || e?.code === 'too_long'
+function replyFor(job) {
+  const reply = async (id, msgs, opts = {}) => {
+    const own = modelJobs.listOf(cfg, job)
+    const at = own ? own.indexOf(id) : -1
+    const ready = at >= 0 ? await chatModels.models().catch(() => []) : []
+    const before = at > 0 ? own.slice(0, at).map((x) => ({ id: x, why: modelList.whyNot(x, ready, providerName) })).filter((x) => x.why) : []
+    try {
+      const r = await chatModels.reply(id, msgs, opts)
+      modelJobs.ran(job, { model: id, passed: before })
+      reply.used = id
+      return { ...r, model: id }
+    } catch (first) {
+      const rest = stopped(first) ? null : modelList.after(own, id)
+      const failed = modelList.failed(id, first, ready)
+      if (!rest?.length) { modelJobs.ran(job, { passed: [...before, failed], error: failed.why }); throw first }
+      try {
+        const r = await modelList.inTurn(rest, (n) => chatModels.reply(n, msgs, { ...opts, instead: { of: id, why: first.message } }), { ready, stop: stopped, provider: providerName })
+        modelJobs.ran(job, { model: r.model, passed: [...before, failed, ...r.passed] })
+        reply.used = r.model
+        return { ...r, fellBack: id, why: first.message }
+      } catch (e) {
+        modelJobs.ran(job, { passed: [...before, failed, ...(e.passed || [])], error: failed.why })
+        throw first
+      }
+    }
+  }
+  return reply
 }
 const pickModelFor = async (job, o) => (await pickFor(job, o)).id
 // What each kind of job runs on now, for Settings › Model Providers: its setting, what Auto does
-// with it on this computer, and whether it can stay here (live suggestions need a GPU here).
+// with it on this computer, and whether it can stay here (live suggestions need a GPU here); its own
+// list, each with why it can't run now, and its last run (Mail's only where there's Mail: a Mac).
+// models: every model reached now, to pick from; unkeyed: the providers a key would reach, with none
+// yet (chatmodels.js unkeyed).
 app.get('/api/model-jobs', wrap(async () => {
   const list = await ranked()
   const local = await localFor(list)
@@ -2004,15 +2059,23 @@ app.get('/api/model-jobs', wrap(async () => {
   const limit = local ? await localLimit(local) : null
   const name = (m) => (m ? { id: m.id, label: m.label, provider: m.provider || null } : null)
   const anyHere = !!(await localFor(list, { any: true }))
+  const entry = (id) => { const m = list.find((x) => x.id === id); return { id, label: m?.label || modelList.labelOf(id), provider: m?.provider || providerName(id.split(':')[0]), route: id.split(':')[0], local: modelList.isLocal(id), why: modelList.whyNot(id, list, providerName) } }
   return {
-    jobs: modelJobs.JOBS.map((j) => ({ id: j.id, label: j.label, about: j.about, set: modelJobs.setting(cfg, j.id), cloudBetter: !!j.cloud, canLocal: j.id !== 'live' || !!st?.onGpu || !!(local && !local.builtin) })),
+    jobs: modelJobs.JOBS.filter((j) => j.id !== 'mail' || IS_MAC).map((j) => ({
+      id: j.id, label: j.label, about: j.about, set: modelJobs.setting(cfg, j.id), cloudBetter: !!j.cloud, canLocal: j.id !== 'live' || !!st?.onGpu || !!(local && !local.builtin),
+      own: modelJobs.listOf(cfg, j.id)?.map(entry) || null, last: modelJobs.runs(j.id)[0] || null,
+    })),
     local: name(local), cloud: name(cloud), anyHere,
     limit: limit ? { tokens: limit.tokens, minutes: Math.floor(limit.tokens / modelJobs.PER_MINUTE), by: limit.by } : null,
     offered: !!st?.offered, missing: await llm.whyNot().catch(() => null),
+    models: list.map((m) => ({ id: m.id, label: m.label, provider: m.provider, via: m.via, route: m.id.split(':')[0] })), unkeyed: chatModels.unkeyed(), most: modelJobs.MOST,
   }
 }))
 meetings.setHelpers({
   reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, pickFor, models: meetingModels, mailRelated: (o) => mail.related(o), mailMessage: (id) => mail.message(id),
+  // A kind of job's own list, and each of its runs, for its row in Settings › Model Providers
+  // (modeljobs.js).
+  ownOf: (job) => modelJobs.listOf(cfg, job), ran: (job, r) => modelJobs.ran(job, r),
   // How much a model on this computer takes at a time, and how long it takes here.
   context: (id) => chatModels.contextOf(id), tokens: chatModels.tokensOf, estimate: (id, text, out) => chatModels.estimate(id, text, out),
   // A look at the call's window, when Screen Recording allows it (calls.js).
@@ -2101,7 +2164,7 @@ meetInsights.setHelpers({ calendar: (from, to) => calendar.range(from, to) })
 // Meeting prep (meetprep.js): before a meeting, who's coming, last time, the invite, your mail with
 // them and a few goals from the model that writes your notes. Read only, like the calendar.
 meetPrep.configure(cfg)
-meetPrep.setHelpers({ calendar: () => calendar.cached(), mail: IS_MAC ? () => mail() : null, reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: (text) => pickModelFor('notes', { text }), models: () => chatModels.models() })
+meetPrep.setHelpers({ calendar: () => calendar.cached(), mail: IS_MAC ? () => mail() : null, reply: replyFor('notes'), pickModel: (text) => pickModelFor('notes', { text }), models: () => chatModels.models() })
 meetPrep.start()
 app.post('/api/prep', wrap((req) => meetPrep.prep(req.body?.event || {})))
 app.post('/api/prep/suggest', wrap((req) => meetPrep.suggest(req.body?.event || {}, { again: !!req.body?.again })))
@@ -2620,7 +2683,7 @@ app.post('/api/mail/mark', wrap((req) => { const r = setMark(req.body || {}); ma
 // AI Assist in Mail (mailassist.js): a reply, How You Write and free times. Text and times only.
 makeMailAssist({
   cfg, mail, calendar, meetings, zone: () => TZ,
-  chat: { pick: (text) => pickModelFor('mail', { text }), reply: (id, msgs, o) => chatModels.reply(id, msgs, o), describe: (id) => chatModels.describe(id), isLocal: (id) => chatModels.isLocal(id) },
+  chat: { pick: (text) => pickModelFor('mail', { text }), reply: replyFor('mail'), describe: (id) => chatModels.describe(id), isLocal: (id) => chatModels.isLocal(id) },
 }).routes(app, wrap)
 // A span of days for Today › Calendar: every calendar's events (the hidden ones too, for the legend
 // to bring back), each with the meeting recorded for it.
@@ -2911,6 +2974,40 @@ app.get('/api/relay', wrap((req) => ({ ...relay.status(), here: req.headers['x-b
 // again when the last check is a while old, without waiting for it.
 app.get('/api/relay/pagecheck', wrap((req) => relaycheck.ask({ now: req.query.now === '1' })))
 
+// ---------- Share Links (shares.js) ----------
+// A link for people outside your devices, to a file, a folder, a Studio document or an agent's app,
+// through the relay. Made, seen and stopped here or on any of your devices (a phone too); what the
+// link's page asks never comes here (relay.js answers it with shares.js alone).
+shares.use({
+  shareAt: () => relay.shareAt(), ready: () => relay.sharesReady(), relayLimits: () => relay.shareLimits(), owner: () => settings.cleanName(cfg.name), computer: () => relay.thisName(),
+  isDevPort, devPortWhy: (port) => servers.ownedWhy(port), ownPorts: () => [cfg.port, cfg.port + 1, ...pages.ports(), ...previewPorts.portsOpen()],
+  endViewers: (id, said) => relay.endViewers(id, said), viewersOf: (id) => relay.viewersOf(id), waitingOf: (id) => relay.waitingOf(id),
+  notify: (note) => notify.send(note).catch(() => {}),
+  namePeople: (link, emails, until) => account.sharePeople(link, emails, until), forgetPeople: (link) => account.shareForget(link), sendCode: (link, email, code) => account.shareCode(link, email, code), canEmail: () => account.status().signedIn === true,
+  changed: () => { for (const c of clients) c.write('event: shares\ndata: {}\n\n') },
+})
+// A link itself (its secret) only to this computer and the device that made it: another of your
+// devices sees each link, who opened it, and Stop Sharing.
+const askerOf = (req) => ({ here: fromHere(req), device: typeof req.headers['x-bridge-relay'] === 'string' ? req.headers['x-bridge-relay'] : null })
+app.get('/api/shares', wrap((req) => shares.list(askerOf(req))))
+app.post('/api/shares', wrap(async (req) => {
+  const b = req.body || {}
+  const by = relay.deviceOf(req.headers['x-bridge-relay'])?.name || null
+  const o = { kind: String(b.kind || ''), who: b.who, password: b.password, emails: b.emails, lasts: b.lasts, title: b.title, by, byDevice: askerOf(req).device, here: askerOf(req).here }
+  if (o.kind === 'app') {
+    // An app one of this agent's terminals serves (the Preview tab's list); its folder, for you.
+    const p = ((await rt.fleet().catch(() => null))?.panes || []).find((x) => x.paneId === String(b.pane || ''))
+    Object.assign(o, { port: Number(b.port), pane: p?.paneId || null, folder: p?.cwd || null })
+  } else {
+    const { real } = await files.safePath(await rootOf(String(b.root || '')), String(b.path || ''))
+    if (o.kind === 'doc' && !studio.opens(real)) throw Object.assign(new Error('Studio doesn\'t open this kind of file, so share it as a file instead'), { status: 400 })
+    o.real = real
+  }
+  return shares.create(o)
+}))
+app.post('/api/shares/:id/stop', wrap((req) => shares.stop(String(req.params.id), 'stopped', askerOf(req))))
+app.delete('/api/shares/:id', wrap((req) => shares.forget(String(req.params.id), askerOf(req))))
+
 // ---------- Your other devices (machines.js) ----------
 // Linking and unlinking: you, here or on a paired phone. Another device can link back, ask for a
 // code to introduce a third, say it unlinked this one, and pass on your answer to an ask (you,
@@ -3007,6 +3104,19 @@ app.post('/api/remote/asks/:id', (req, res) => { try { remoteHere(req); res.json
 app.post('/api/remote/devices', (req, res) => { try { remoteHere(req); res.json(remote.setDevice(String(req.body?.id || ''), req.body?.allowed !== false)) } catch (e) { sayErr(res, e) } })
 app.post('/api/remote/locks/:id/clear', (req, res) => { try { remoteHere(req); res.json(remote.unlock(req.params.id)) } catch (e) { sayErr(res, e) } })
 app.post('/api/remote/notify', (req, res) => { try { remoteHere(req); res.json(remote.setNotify(req.body?.on !== false)) } catch (e) { sayErr(res, e) } })
+// The desktop app here quitting because you quit it (desktop/main.js), not to reopen nor for an
+// update (one this server started, until the app reports in again after it): Open Bridge AI isn't
+// offered to a device until it's opened here again.
+app.post('/api/remote/app-quit', (req, res) => {
+  try {
+    remoteHere(req)
+    const update = updates.installStarted()
+    res.json(update && Date.now() - update < 10 * 60000 && remote.desktopSince() < update ? { ok: true, update: true } : remote.appQuit())
+  } catch (e) { sayErr(res, e) }
+})
+// Another computer's screen that didn't show here, or on a device of this one's (ScreenView.jsx): a
+// line in this log, with why, as that computer's own log has one.
+app.post('/api/remote/didnt-show', (req, res) => { const b = req.body || {}; res.json(remote.didntShow({ name: b.name, code: b.code, cause: b.cause, why: b.why, version: b.version }, atThisComputer(req) ? null : relay.deviceOf(req.headers['x-bridge-relay'])?.name || 'a device')) })
 // Your devices told (screentell.js). Stop, or Block This Device, from any of your devices: carried out
 // here (remote.js endFrom), as it only narrows who may connect; letting a device back in is above,
 // here only. From another computer, it says which of its devices it came from, for the record.
@@ -3352,6 +3462,12 @@ const channelKept = (req, next) => { if (!fromHere(req) && channelOf(next) !== c
 // auto: by itself while you're away, asked by the desktop app on this computer only.
 app.post('/api/updates/install', wrap((req) => {
   if (req.body?.auto === true && !fromHere(req)) throw Object.assign(new Error('Only the desktop app updates by itself'), { status: 403 })
+  // From one of your devices: not one locked out of Remote Access here, nor one that typed a wrong
+  // Remote Access Password since it last typed the right one (remote.js mayUpdate).
+  const d = relay.deviceOf(req.headers['x-bridge-relay'])
+  const forId = d?.kind === 'computer' && /^[\w-]{1,40}$/.test(String(req.headers['x-bridge-for-id'] || '')) ? String(req.headers['x-bridge-for-id']) : null
+  const no = d ? remote.mayUpdate(d.id, forId) : null
+  if (no) throw Object.assign(new Error(no), { status: 403, code: 'remoteAccess' })
   return updates.install({ app: req.body?.app === true, auto: req.body?.auto === true })
 }))
 // Updating by itself while you're away (updates.js autoView): whether it's the time, and what it
@@ -3422,6 +3538,10 @@ async function personalNames() {
   const out = [[cfg.name, '<name>'], [cfg.location?.label, '<place>'], [os.hostname().replace(/\.local$/, ''), '<computer>'], [relay.thisName(), '<computer>']]
   try { out.push([os.userInfo().username, '<user>']) } catch { /* no user */ }
   for (const m of machines.list()) out.push([m.name, '<computer>'], [m.systemName, '<computer>'])
+  // Your phones and other devices too (Remote Screen's lines in the log name them), paired here or
+  // seen through another of your computers.
+  for (const d of relay.status().devices || []) out.push([d.name, d.kind === 'computer' ? '<computer>' : '<device>'])
+  for (const n of remote.throughNames()) out.push([n, '<device>'])
   for (const p of await projects.list().catch(() => [])) out.push([p.name, '<project>'], [path.basename(p.path), '<project>'])
   for (const w of lastFleet?.workspaces || []) out.push([w.label, '<project>'])
   return out
@@ -3949,7 +4069,7 @@ const CHAT_NOTE = `# Chat\n\nThis is a plain conversation with the user, not a p
 // this computer that writes short ones, and up to how many minutes.
 app.get('/api/chat/models', wrap(async (req) => {
   const models = await chatModels.models({ fresh: !!req.query.refresh })
-  const automatic = await pickModelFor('notes').catch(() => pickMeetingModel())
+  const automatic = await pickModelFor('notes').catch((e) => (e.code === 'not_ready' ? null : pickMeetingModel()))
   let short = null
   if (modelJobs.setting(cfg, 'notes') === 'auto' && automatic && !chatModels.isLocal(automatic)) {
     const local = await localFor(await ranked()).catch(() => null)
@@ -4439,7 +4559,7 @@ async function setupAsk(system, prompt) {
   let model
   try { model = await studioModel(prompt) } catch (e) { throw Object.assign(e, { code: e.code === 'local_missing' ? 'no-model' : e.code }) }
   if (!model) throw Object.assign(new Error(NO_MODEL), { code: 'no-model' })
-  return (await chatModels.reply(model, [{ role: 'user', text: prompt }], { system, feature: 'assist' }))?.text
+  return (await replyFor('assist')(model, [{ role: 'user', text: prompt }], { system, feature: 'assist' }))?.text
 }
 // What a bot can be given: the projects and places Bridge AI knows (and the folders bots read
 // already), your MCP servers in Claude Code, the templates, and the agents here that answer read-only.
@@ -5378,7 +5498,7 @@ app.use('/api/boards', (req, res, next) => {
 // draws better than a small one here). contextOf: how much a model on this computer reads at a time
 // (chatmodels.js).
 boards.setHelpers({
-  reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: () => pickModelFor('diagrams'), models: () => chatModels.models(), canSee: (id) => chatModels.canSee(id),
+  reply: replyFor('diagrams'), pickModel: () => pickModelFor('diagrams'), models: () => chatModels.models(), canSee: (id) => chatModels.canSee(id),
   contextOf: (id) => chatModels.contextOf(id), agentWork: async (pane) => transcript(await findAgent(pane)),
 })
 // @bridge in a comment on a board (Comments and @bridge): Change it on what the comment is on.

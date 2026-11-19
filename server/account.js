@@ -213,6 +213,25 @@ export async function followed(keep) {
 export function follow() { delete conf.declined; save(); return status() }
 
 // ---------- the account ----------
+// The people one of this computer's Share Links names (shares.js), told to the accounts service when
+// the link is made (it keeps a hash of each, with the link's id, until the link ends), and then a
+// code for one of them, emailed by it from this account, only to an email that link named: their
+// email and the code go there, never what's shared.
+const signedIn = () => { if (!conf.deviceToken) throw Object.assign(new Error('This computer isn\'t signed in to Bold Bridge'), { code: 'account-signed-out' }) }
+export async function sharePeople(link, emails, until) {
+  signedIn()
+  return call('POST', '/v1/share-people', { link, emails, until: Math.round(until) })
+}
+// ...and forgotten there when the link stops early.
+export async function shareForget(link) {
+  signedIn()
+  return call('POST', '/v1/share-people', { link, emails: [] })
+}
+export async function shareCode(link, to, code) {
+  signedIn()
+  return call('POST', '/v1/share-code', { link, to, code })
+}
+
 export async function request(kind, note = '') {
   const r = await call('POST', '/v1/request', { kind, note: String(note || '').slice(0, 500) })
   took({ ...r, devices: conf.devices, earlyAccess: conf.earlyAccess, relay: conf.relay })

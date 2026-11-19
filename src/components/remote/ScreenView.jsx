@@ -12,12 +12,17 @@
 //   several; everywhere it's one tap from the toolbar. The one picked is kept for that computer.
 //   Before anything shows, that computer may ask for its Remote Access Password, or ask someone
 //   there to allow it; each step, a lockout and a no say so here, with why.
+//   What keeps its screen from showing is said as it is, with the button that fixes it from here
+//   when there is one (Open, Reopen or Update Bridge AI there, Allow Screen Recording there), and
+//   what it's waiting for meanwhile; never a bare Try again when the reason is known. Each one also
+//   goes in this computer's log (server/remote.js didntShow), as that computer's has it.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { useMedia, store } from '../layout.jsx'
 import { t, tn, locale } from '../../i18n/index.js'
 import { baseFor, remoteStatus, connect, pointOn, setViewing } from './remote.js'
 import { hostApi, viaRelay } from '../../api.js'
+import { newer } from '../../../shared/version.js'
 import { SWAP, swapsKeys, RATE, ACCESS, fitIn } from '../../../shared/remote.js'
 import './remote.css'
 
@@ -31,6 +36,12 @@ const ZOOM_MAX = 6
 const PICKED = 'cc-remote-screen'
 const sizeOf = (x) => (x?.w && x?.h ? `${x.w}×${x.h}` : '')
 const onCard = (e) => !!e.target?.closest?.('.rs-card')
+// What can't show for a reason of that computer's own (not a guardrail): an older Bridge AI there is
+// offered Update for these, as a newer one fixes them by itself.
+const TECHNICAL = new Set(['noCapture', 'noScreens', 'source'])
+// An update there: looked at this often, for this long, before it's said it hasn't come back.
+const UPDATE_LOOK_MS = 5000
+const UPDATE_MS = 10 * 60 * 1000
 
 // Which screen?: that computer's screens, each by its display's name and size, the main one marked,
 // with a still of each once it comes (thumbs: id -> picture), the one showing ticked; its windows
@@ -82,7 +93,9 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   const phone = useMedia('(max-width: 760px)')
   const base = baseFor(machine)
   const [st, setSt] = useState(null) // that computer's word on its screen (GET /api/remote)
-  const [err, setErr] = useState(null) // { why, code, until }: nothing to show, and why
+  const [err, setErr] = useState(null) // { why, code, cause, until, fix, waits }: nothing to show, why, and what fixes it
+  const [wait, setWait] = useState(null) // what a fix being carried out waits for: { why: reopen | open | allow | update, until }
+  const [fixing, setFixing] = useState(null) // a fix chosen before connecting (noApp: open; screenPermission: allow)
   const [run, setRun] = useState(0)
   const [sess, setSess] = useState({ phase: 'loading' }) // phase: loading | connecting | password | asking | live | ended; mode: p2p | relay; hello
   const [gate, setGate] = useState(null) // what that computer asks before it shows anything: { t: 'password', wrong, left, lockMinutes } | { t: 'asking', until }
@@ -117,6 +130,10 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   const fitted = useRef('')
   const session = useRef(null)
   const askedAtStart = useRef(false)
+  const heard = useRef(false) // the session said anything yet
+  const retried = useRef(false) // closed before it said anything: connected again once, by itself
+  const said = useRef(null) // the last error put in the log
+  const updateLook = useRef(null) // an update there, looked at until it's back
   const pickedKey = machine || 'here'
   const setMode = (m) => { setModeState(m); setZoom(1); store.set('cc-remote-size', m) }
 
@@ -129,8 +146,8 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
     // A phone on Bridge AI's relay: what comes through it counts against the account's allowance,
     // so the pictures come at that relay's pace (shared/remote.js RATE).
     const slow = viaRelay ? hostApi('/relay').then((r) => !!r?.hosted, () => false) : Promise.resolve(false)
-    Promise.all([remoteStatus(base, { sources: true }), slow]).then(([d, sl]) => { if (!live) return; setSt({ ...d, slow: sl }); if (!d.screen?.can) setErr({ why: d.screen?.why || t("{name}'s screen can't be seen from here.", { name }), code: d.screen?.code }) },
-      (e) => live && setErr({ why: e.message === 'update' ? t('Update Bridge AI on {name} to see its screen from here.', { name }) : e.message }))
+    Promise.all([remoteStatus(base, { sources: true }), slow]).then(([d, sl]) => { if (!live) return; setSt({ ...d, slow: sl }); if (!d.screen?.can && !fixing) setErr({ why: d.screen?.why || t("{name}'s screen can't be seen from here.", { name }), code: d.screen?.code, fix: d.screen?.fix || null }) },
+      (e) => live && setErr(e.message === 'update' ? { code: 'update', why: t('Update Bridge AI on {name} to see its screen from here.', { name }) } : { why: e.message }))
     return () => { live = false }
   }, [base, name, run])
 
@@ -172,16 +189,19 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
       const text = String(m.text ?? '')
       navigator.clipboard?.writeText(text).then(() => setNote({ text: t("Copied {name}'s clipboard here ({n} characters).", { name, n: text.length }) }), () => setNote({ text: t("This browser didn't let Bridge AI write to the clipboard. {name}'s clipboard says: {text}", { name, text: text.slice(0, 200) }) }))
     } else if (m.t === 'clip-sent') setNote({ text: t("This clipboard is on {name}'s now ({n} characters).", { name, n: Number(m.n) || 0 }) })
-    else if (m.t === 'error') { if (m.keep) setNote({ text: m.why, bad: true }); else { setErr({ why: m.why, code: m.code, until: m.until || null, by: m.by || null, at: m.at || null, reopen: !!m.reopen }); setGate(null); setSess((x) => ({ ...x, phase: 'ended' })) } }
-    else if (m.t === 'ended') setSess((x) => ({ ...x, phase: 'ended', text: m.why === 'here' ? t('Stopped on {name}.', { name }) : m.why === 'stopped' ? t('Stopped from {device}.', { device: m.by || t('another of your devices') }) : m.text }))
+    else if (m.t === 'error') { if (m.keep) setNote({ text: m.why, bad: true }); else { setWait(null); setErr({ why: m.why, code: m.code, cause: m.cause || null, until: m.until || null, by: m.by || null, at: m.at || null, reopen: !!m.reopen, fix: m.fix || null, waits: !!m.waits }); setGate(null); setSess((x) => ({ ...x, phase: 'ended' })) } }
+    // A fix being carried out there: what it waits for, until the screen (or why not) comes.
+    else if (m.t === 'wait') { setErr(null); setWait({ why: m.why, until: m.until || null }); setSess((x) => ({ ...x, phase: 'connecting' })) }
+    else if (m.t === 'ended') { setWait(null); setSess((x) => ({ ...x, phase: 'ended', text: m.why === 'here' ? t('Stopped on {name}.', { name }) : m.why === 'stopped' ? t('Stopped from {device}.', { device: m.by || t('another of your devices') }) : m.text })) }
   }
 
   // The session: as long as this is open. Another of its screens goes over the same one. It starts on
   // the screen picked last time for this computer, while it's still there, else the main one; on a
   // phone, with several screens, Which screen? asks first.
-  const can = !!st?.screen?.can
+  const can = !!st?.screen?.can || !!fixing
   useEffect(() => {
     if (!can) return
+    heard.current = false
     setSess({ phase: 'connecting' })
     setGate(null)
     setPw('')
@@ -194,10 +214,12 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
     const last = store.get(PICKED, {})?.[pickedKey]
     const was = (st.screen?.sources || []).find((x) => x.kind === 'screen' && x.id === last)
     const c = connect({
-      base, source: was ? `screen:${was.id}` : 'screen:', control: !!st.control?.on, slow: !!st.slow,
+      base, source: was ? `screen:${was.id}` : 'screen:', control: !!st.control?.on, slow: !!st.slow, fix: fixing,
       on: {
         hello: (m) => {
+          heard.current = true
           setGate(null)
+          setWait(null)
           setSess((x) => ({ ...x, phase: 'live', hello: m }))
           if (m.source?.w && m.source?.h) setSize({ w: m.source.w, h: m.source.h })
           session.current = m.session
@@ -211,8 +233,15 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         mode: (mode) => setSess((x) => ({ ...x, mode })),
         track: (stream) => { const v = video.current; if (v) { v.srcObject = stream; v.play().catch(() => {}) } },
         frame: show,
-        message: onMessage,
-        closed: () => setSess((x) => (x.phase === 'ended' ? x : { ...x, phase: 'ended' })),
+        message: (m) => { heard.current = true; onMessage(m) },
+        // Closed before it said anything (the link dropped a moment): connected again once, by
+        // itself; again, said. A fix offered in the session can't be chosen any more once it's closed.
+        closed: (code, reason) => {
+          if (!heard.current && !retried.current) { retried.current = true; setRun((n) => n + 1); return }
+          setWait(null)
+          setErr((x) => (x ? (x.waits ? { ...x, fix: null, waits: false } : x) : heard.current ? x : { code: 'closed', why: reason || '' }))
+          setSess((x) => (x.phase === 'ended' ? x : { ...x, phase: 'ended' }))
+        },
       },
     })
     conn.current = c
@@ -433,7 +462,34 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
     conn.current?.send({ t: 'source', source: v })
     if (v.startsWith('screen:')) store.set(PICKED, { ...(store.get(PICKED, {}) || {}), [pickedKey]: v.slice(7) })
   }
-  const retry = () => { setErr(null); setGate(null); setRun((n) => n + 1) }
+  const retry = () => { setErr(null); setWait(null); setFixing(null); setGate(null); retried.current = false; setRun((n) => n + 1) }
+  // The fix for what keeps the screen from showing: in the session that offered it (it waits for
+  // the answer), or a new one that carries it out once past the password (one told before connecting).
+  const doFix = (fix) => {
+    if (err?.waits) { conn.current?.send({ t: 'fix', fix }); setErr(null); setWait({ why: fix }); setSess((x) => ({ ...x, phase: 'connecting' })); return }
+    setErr(null); setGate(null); setWait(null); setFixing(fix); retried.current = false; setRun((n) => n + 1)
+  }
+  // Update Bridge AI there (an older one: what it can't fix by itself, a newer one does), and its
+  // screen asked for again once it's back: newer, or answering again after it went away to update.
+  const updateThere = async () => {
+    setErr(null)
+    setWait({ why: 'update' })
+    const res = await fetch(`${base}/api/updates/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => null)
+    const data = await res?.json().catch(() => ({}))
+    if (!res?.ok) { setWait(null); setErr({ code: 'updateFailed', why: data?.error || t("{name} didn't answer. Try again in a moment.", { name }) }); return }
+    const from = st?.version || null
+    const end = Date.now() + UPDATE_MS
+    let away = false
+    const look = async () => {
+      const d = await remoteStatus(base).catch(() => null)
+      if (!d) away = true
+      else if (away || (d.version && (!from || newer(d.version, from)))) { retry(); return }
+      if (Date.now() > end) { setWait(null); setErr({ code: 'updateSlow' }); return }
+      updateLook.current = setTimeout(look, UPDATE_LOOK_MS)
+    }
+    updateLook.current = setTimeout(look, UPDATE_LOOK_MS)
+  }
+  useEffect(() => () => clearTimeout(updateLook.current), [])
   // Taking control back, asked for the password or Allow: Cancel, and it goes on view-only.
   const stayViewing = () => { conn.current?.send({ t: 'control', on: false }); setGate(null); setPw(''); setSess((x) => ({ ...x, phase: 'live' })) }
   const sendPassword = (e) => {
@@ -443,6 +499,16 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
     setPw('')
     setGate((g) => ({ ...g, checking: true }))
   }
+
+  // Each reason the screen didn't show, in this computer's log too (not a guardrail's: a password,
+  // a no there), once.
+  useEffect(() => {
+    if (!err || ['locked', 'denied', 'unanswered', 'device', 'blocked', 'stopped', 'timeout', 'busy'].includes(err.code)) return
+    const key = `${err.code}|${err.why}`
+    if (said.current === key) return
+    said.current = key
+    hostApi('/remote/didnt-show', { method: 'POST', body: { name, code: err.code || 'error', cause: err.cause || undefined, why: err.why || '', version: st?.version || undefined } }).catch(() => {})
+  }, [err]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Locked out: Try again once it's over.
   const lockedUntil = err?.code === 'locked' && err.until ? new Date(err.until).getTime() : 0
@@ -472,17 +538,51 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         reopen: t("Screen Recording was turned on for Bridge AI on {name} after it opened, and macOS lets it record only once it's reopened.", { name }),
         noScreens: t("macOS on {name} gave Bridge AI no screens to share. If it's asking there whether Bridge AI may record the screen, answer it there; if not, reopening Bridge AI there usually sorts it.", { name }),
         reopening: t('Bridge AI is reopening on {name}. Try again in a few seconds.', { name }),
+        noCapture: err.cause === 'list' ? t("Bridge AI on {name} opened its screen sharing, but the list of its screens didn't come in time.", { name })
+          : err.cause === 'window' ? t("The Bridge AI app on {name} didn't open its screen sharing, even with a second try.", { name }) : null,
+        noApp: err.fix === 'open' ? t("The Bridge AI app isn't open on {name}. Its screen can be seen while the app runs there.", { name }) : null,
+        offline: t("{name} isn't reachable just now: it may be asleep, or offline.", { name }),
+        closed: t('The connection to {name} closed before its screen showed.', { name }),
+        updateSlow: t("Bridge AI on {name} hasn't come back from its update yet. Try again in a minute.", { name }),
       }
       const icon = err.code === 'locked' ? 'lock' : ['denied', 'unanswered', 'device', 'blocked', 'stopped'].includes(err.code) ? 'ban' : 'alert'
+      // The button that fixes it, when there's one; an older Bridge AI there, Update (it's what fixes
+      // what one can't fix by itself), beside Try again.
+      const fixWords = { open: t('Open Bridge AI on {name}', { name }), allow: t('Allow Screen Recording on {name}', { name }), reopen: t('Reopen Bridge AI on {name}', { name }) }
+      const fix = err.fix && fixWords[err.fix] ? err.fix : null
+      const older = !!st && !st.version && TECHNICAL.has(err.code || 'error')
+      const update = err.code === 'update' || older
       return (
         <div className={`rs-card c-${err.code || 'error'}`} role="alert">
           <Icon name={icon} size={22} />
           <p>{words[err.code] || err.why}</p>
+          {older && <p className="muted small">{t('{name} has an older Bridge AI. Updating it reopens it there, which usually sorts this.', { name })}</p>}
           <div className="rs-card-btns">
             {!windowed && <button type="button" className="btn" onClick={onClose}>{t('Close')}</button>}
-            {err.reopen ? <button type="button" className="btn primary" onClick={() => { conn.current?.send({ t: 'reopen' }); setErr((x) => ({ ...x, reopen: false })) }}>{t('Reopen Bridge AI on {name}', { name })}</button>
-              : err.code !== 'trial' && <button type="button" className="btn primary" disabled={lockedUntil > Date.now()} onClick={retry}>{t('Try again')}</button>}
+            {update && !fix && !err.reopen && <button type="button" className="btn" onClick={retry}>{t('Try again')}</button>}
+            {fix ? <button type="button" className="btn primary" onClick={() => doFix(fix)}>{fixWords[fix]}</button>
+              : err.reopen ? <button type="button" className="btn primary" onClick={() => { conn.current?.send({ t: 'reopen' }); setErr((x) => ({ ...x, reopen: false })) }}>{t('Reopen Bridge AI on {name}', { name })}</button>
+                : update ? <button type="button" className="btn primary" onClick={updateThere}>{t('Update Bridge AI on {name}', { name })}</button>
+                  : err.code !== 'trial' && <button type="button" className="btn primary" disabled={lockedUntil > Date.now()} onClick={retry}>{t('Try again')}</button>}
           </div>
+        </div>
+      )
+    }
+    // A fix being carried out there: what it waits for (someone there turning Screen Recording on,
+    // the app opening, reopening or updating), with Close; the screen shows by itself after.
+    if (wait && sess.phase !== 'live') {
+      const words = {
+        reopen: t('Reopening Bridge AI on {name}…', { name }),
+        open: t('Opening Bridge AI on {name}…', { name }),
+        update: t('Updating Bridge AI on {name}…', { name }),
+        allow: t('System Settings is open on {name} at Screen & System Audio Recording. Waiting for someone there to turn on Bridge AI…', { name }),
+      }
+      return (
+        <div className={`rs-card c-wait w-${wait.why}`} role="status">
+          <Icon name="refresh" size={20} className="spin" />
+          <p>{words[wait.why] || t('Connecting to {name}…', { name })}</p>
+          {wait.why === 'update' && <small className="muted">{t("It reopens by itself when it's done, and its screen shows here then.")}</small>}
+          {!windowed && <div className="rs-card-btns"><button type="button" className="btn" onClick={onClose}>{t('Close')}</button></div>}
         </div>
       )
     }

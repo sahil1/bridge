@@ -21,8 +21,9 @@
 //   command line), thinking off, kept a while and let go when idle, started again when it stops,
 //   and a request it stopped in the middle of asked again. Remove stops it and takes the file away.
 //   Settings › Model Providers: the one recommended and why, a row for each model this computer
-//   runs with its size and what it's good for, Download with progress, In use and Remove; which jobs
-//   run here, each with what Auto does now; none of it on a computer with 4 GB of memory.
+//   runs with its size and what it's good for, Download with progress, In use and Remove; where each
+//   task runs (Models for Each Task), with what Auto does now; none of it on a computer with 4 GB of
+//   memory, where the tasks have no On this computer to put them on.
 // BRIDGE_REAL_LLAMA=1: also the real thing, once, by hand: this computer's llama-server (node
 // scripts/llama.js native/llama puts it there) and the real Gemma 4 E2B (downloaded from Hugging Face
 // into test/.out/real-models, kept for next time), asked to rewrite a sentence and for JSON.
@@ -30,7 +31,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
 import crypto from 'node:crypto'
-import { startKit, startModel, startLocalModel, checks, until, sleep, OUT, TEST, ROOT, freePort, browser, page, shot } from '../lib/harness.mjs'
+import { startKit, startModel, startLocalModel, checks, until, sleep, OUT, TEST, ROOT, IS_MAC, freePort, browser, page, shot } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('builtin-model')
 const STAND_IN = path.join(TEST, 'stand-ins', 'llama-server.mjs')
@@ -241,7 +242,7 @@ try {
   const kept = await notesBy(kit)
   ok(kept.error === 'Meeting notes is set to run on this computer, but Gemma 4 E4B isn\'t downloaded yet. Download it in Settings › Model Providers, or set Meeting notes to Auto there.' && kept.model === null, 'Meeting notes set to On this computer, with no model here: the meeting says why they weren\'t written', kept)
   const jobsHere = await kit.api('/model-jobs')
-  ok(jobsHere.jobs.length === 6 && jobsHere.jobs.find((j) => j.id === 'notes').set === 'local' && jobsHere.jobs.filter((j) => j.id !== 'notes').every((j) => j.set === 'cloud') && jobsHere.missing?.code === 'not_downloaded' && jobsHere.offered, 'Settings is told which jobs are set how (the rest Cloud first, the default), and what\'s missing here', jobsHere)
+  ok(jobsHere.jobs.length === (process.platform === 'darwin' ? 6 : 5) && jobsHere.jobs.find((j) => j.id === 'notes').set === 'local' && jobsHere.jobs.filter((j) => j.id !== 'notes').every((j) => j.set === 'cloud') && jobsHere.missing?.code === 'not_downloaded' && jobsHere.offered, 'Settings is told which jobs are set how (the rest Cloud first, the default), and what\'s missing here', jobsHere)
   await kit.api('/settings', { modelJobs: null }, 'PATCH')
   // (A meeting starting gets the speech model ready, from the same stand-in for Hugging Face: not this.)
   const ours = () => files.asked.filter((a) => a.id === 'gemma-4-e2b')
@@ -455,7 +456,7 @@ try {
   // Which jobs run here: each kind, Auto, and what Auto does with no model here yet.
   const jobsBox = p.locator('[data-model-jobs]')
   await jobsBox.waitFor({ timeout: 10000 })
-  ok((await jobsBox.locator('li[data-job]').count()) === 6 && (await jobsBox.locator('li[data-job] select').evaluateAll((s) => s.every((x) => x.value === 'cloud'))) && /Meeting notes/.test(await jobsBox.innerText()) && /Diagrams/.test(await jobsBox.innerText()), 'Which jobs run here: six kinds, each on Cloud first to start', await jobsBox.innerText())
+  ok((await jobsBox.locator('li[data-job]').count()) === (IS_MAC ? 6 : 5) && (await jobsBox.locator('li[data-job] select').evaluateAll((s) => s.every((x) => x.value === 'cloud'))) && /Meeting notes/.test(await jobsBox.innerText()) && /Diagrams/.test(await jobsBox.innerText()), 'Models for Each Task: each kind (Mail where there\'s Mail, a Mac), each on Cloud first to start', await jobsBox.innerText())
   ok((await jobsBox.locator('li[data-job="live"] option[value="local"]').count()) === 1, 'On this computer offered for live suggestions here (it has a GPU)')
   await row.scrollIntoViewIfNeeded()
   await shot(p, `${which}-builtin-1-offered`)
@@ -483,8 +484,9 @@ try {
   const s2 = await page(b, small.url)
   await openProviders(s2.p)
   await s2.p.locator('.pv-group', { hasText: /run locally/i }).first().waitFor({ timeout: 10000 }).catch(() => {})
+  await s2.p.locator('[data-model-jobs] li[data-job]').first().waitFor({ timeout: 10000 }).catch(() => {})
   await sleep(800)
-  ok((await s2.p.locator('[data-builtin-model]').count()) === 0 && (await s2.p.locator('[data-model-jobs]').count()) === 0, 'a computer with 4 GB of memory: no row for it at all, and no jobs to put on it')
+  ok((await s2.p.locator('[data-builtin-model]').count()) === 0 && (await s2.p.locator('[data-model-jobs] li[data-job]').count()) === (IS_MAC ? 6 : 5) && (await s2.p.locator('[data-model-jobs] select').count()) === 0, 'a computer with 4 GB of memory: no row for it at all, and the tasks with no On this computer to put them on')
   await s2.ctx.close()
 } finally {
   await b.close()

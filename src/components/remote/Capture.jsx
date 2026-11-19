@@ -16,6 +16,8 @@ import { openSocket } from '../../api.js'
 import { packFrame, MAX_FRAME, PICTURE, captureSize, bitrateFor, sdpBitrate } from '../../../shared/remote.js'
 
 const FAKE = new URLSearchParams(location.search).get('fake') === '1'
+// Its way in: the token the server gave the desktop app for this window (server/remote.js), good once.
+const TOKEN = new URLSearchParams(location.search).get('token') || ''
 // The tests' screens: a laptop's own at twice its points (the main one), one beside it at its own
 // pixels, and one turned on its side, each drawn on a canvas of its shape.
 const FAKE_SOURCES = [
@@ -98,6 +100,7 @@ export default function Capture() {
     const starting = new Map() // session -> a token of that start
     let ws = null
     let closed = false
+    let refused = 0 // connections turned away in a row
     const send = (m) => { if (ws?.readyState === 1) ws.send(JSON.stringify(m)) }
     const hello = async (t) => { const r = await list(); send({ t, sources: r.sources, permission: r.permission, ...(r.none ? { none: r.none, problem: r.problem || null } : {}), p2p: typeof RTCPeerConnection === 'function' }) }
     const stop = (id) => {
@@ -221,9 +224,10 @@ export default function Capture() {
     }
     const connect = () => {
       if (closed) return
-      ws = openSocket('/api/remote/capture')
+      ws = openSocket(`/api/remote/capture?${new URLSearchParams({ token: TOKEN })}`)
+      let opened = false
       ws.binaryType = 'arraybuffer'
-      ws.onopen = () => { hello('hello').catch(() => {}) }
+      ws.onopen = () => { opened = true; refused = 0; hello('hello').catch(() => {}) }
       ws.onmessage = async (e) => {
         let m
         try { m = JSON.parse(e.data) } catch { return }
@@ -239,7 +243,13 @@ export default function Capture() {
         else if (m.t === 'fallback' && s) { try { s.pc?.close() } catch { /* closed */ } s.pc = null; frames(m.session, m.rate) }
         else if (m.t === 'smaller' && s) { s.q = Math.max(PICTURE.worst, s.q - 0.1); s.width = Math.max(PICTURE.narrowest, Math.round(s.width * 0.85)) }
       }
-      ws.onclose = () => { for (const id of [...sessions.keys()]) stop(id); if (!closed) setTimeout(connect, 2000) }
+      // (Another capture page took this one's place: it doesn't take it back. Turned away a few times
+      // running, its token used or too old: it stops, and the app opens a new window when asked.)
+      ws.onclose = (e) => {
+        for (const id of [...sessions.keys()]) stop(id)
+        if (e?.reason === 'replaced' || (!opened && ++refused >= 3)) closed = true
+        if (!closed) setTimeout(connect, 2000)
+      }
     }
     connect()
     return () => { closed = true; for (const id of [...sessions.keys()]) stop(id); try { ws?.close() } catch { /* closed */ } }

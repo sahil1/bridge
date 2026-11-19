@@ -23,6 +23,7 @@ import QuickLook from './QuickLook.jsx'
 import Info from './Info.jsx'
 import Assist, { folderAssist } from './Assist.jsx'
 import AiAssist from '../AiAssist.jsx'
+import { ShareDialog } from '../Share.jsx'
 import { baseOf, getJson, postJson, useFolder, sorted, grouped, enc, joinFull, parentOf, nameOf, kindName, fmtSize, fmtWhen, WHERE_KEY, SHELF } from './fsapi.js'
 import { sayPlace, takePlace, onPlaceShow, useNav, keyDir } from '../../backForward.js'
 import './explorer.css'
@@ -103,6 +104,7 @@ export default function Explorer({ head = null, className = '', shelves = null, 
   const [sel, setSel] = useState(null)
   const [ql, setQl] = useState(false)
   const [info, setInfo] = useState(null) // the entry Get Info is on
+  const [sharing, setSharing] = useState(null) // what a Share Link is being made for (Share.jsx)
   const [menu, setMenu] = useState(null) // { x, y, entry }
   const [opts, setOpts] = useState(false) // View Options open
   const [q, setQ] = useState('')
@@ -261,6 +263,9 @@ export default function Explorer({ head = null, className = '', shelves = null, 
       { label: t('Get Info'), icon: 'info', hint: '⌘I', run: () => setInfo(e) },
       !e.dir && studioOpens(e) && appOpens(e) && { label: t('Open in its app'), icon: 'external', run: () => openInApp(e) },
       here && { label: revealLabel, icon: 'folder-open', run: () => reveal(e) },
+      // A Share Link (Share.jsx): a document Studio opens as a Studio document (its latest, as a page);
+      // anything else as it is. On this computer's files (another's are shared from that one).
+      !machine && { label: t('Share Link…'), icon: 'link', run: () => setSharing({ kind: e.dir ? 'folder' : studioOpens(e) && !/\.(html?|pdf)$/i.test(e.name) ? 'doc' : 'file', root: loc.root, path: e.path, name: e.name }) },
       'sep',
       { label: t('Copy path'), icon: 'copy', run: () => copy(fullOf(e)) },
       isFolderHere && { label: hidden ? t('Hide hidden files') : t('Show hidden files'), icon: hidden ? 'eye-off' : 'eye', hint: '⌘⇧.', run: () => setHidden(!hidden) },
@@ -552,6 +557,7 @@ export default function Explorer({ head = null, className = '', shelves = null, 
           openLabel={openLabel(current)} onOpen={() => { setQl(false); openEntry(current) }} onOpenPath={showPath} />
       )}
       {menu && <Menu x={menu.x} y={menu.y} items={menuFor(menu.entry)} heading={menu.entry.name} onClose={() => setMenu(null)} className="fx-menu" />}
+      {sharing && <ShareDialog what={sharing} onClose={() => setSharing(null)} />}
       {toast && <div className="fx-toast" role="status">{toast}</div>}
     </div>
   )

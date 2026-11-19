@@ -29,6 +29,9 @@ export const SETTINGS = [
     ['keep-agents', tx('Keep agents running when Bridge AI quits'), 'quit stop agents running', { near: 'runtime' }],
     ['resume-work', tx('Pick up unfinished work after an update, a crash or a restart'), 'resume continue crash restart update', { near: 'default-agent' }],
   ]),
+  ...at('sharing', [
+    ['shares', tx('Share Links'), 'share link sharing shared public url outside people password email code expire stop qr'],
+  ]),
   ...at('agents', [
     ['agent-list', tx('Install an agent'), 'agents install sign in claude codex gemini copilot cursor opencode cli'],
     ['consult', tx('Your Chief of Staff can consult'), 'consult second opinion bridge ask models', { near: 'agent-list' }],
@@ -37,6 +40,7 @@ export const SETTINGS = [
     ['providers-labs', tx('API keys'), 'api key anthropic openai gemini xai grok mistral cohere perplexity meta'],
     ['accounts', tx('Accounts'), 'account switch work personal sign in login auto default', { near: 'providers-labs' }],
     ['providers-local', tx('Models on this computer'), 'local model ollama lm studio gemma offline download'],
+    ['model-jobs', tx('Models for Each Task'), 'model task job meeting notes ai assist mail titles diagrams live fallback auto cloud first together groq openrouter fireworks cerebras hugging face'],
     ['cloud', tx('Cloud Agents'), 'cloud agents cursor copilot jules claude managed keys'],
     ['providers-clouds', tx('Clouds'), 'azure aws bedrock vertex google cloud'],
     ['providers-hosted', tx('Hosted open models'), 'openrouter groq together fireworks cerebras hugging face'],
@@ -153,7 +157,7 @@ export const SETTINGS = [
 // Each tab's section, by its name; Devices' tabs by devicesName (below).
 const PLACES = {
   general: tx('General'), agents: tx('Agents'), providers: tx('Model Providers'), voice: tx('Voice & Meetings'), dictation: tx('Voice & Meetings'), meetings: tx('Voice & Meetings'), mail: tx('Mail'),
-  mcp: tx('MCP Servers'), 'slack-bot': tx('Bots'), backup: tx('Back Up & Move'), appearance: tx('Appearance'), config: tx('Config File'), about: tx('About & Updates'),
+  mcp: tx('MCP Servers'), 'slack-bot': tx('Bots'), sharing: tx('Sharing'), backup: tx('Back Up & Move'), appearance: tx('Appearance'), config: tx('Config File'), about: tx('About & Updates'),
 }
 const DEVICES = ['phone', 'machines', 'notifications', 'account']
 export const placeOf = (x) => (DEVICES.includes(x.section) ? devicesName(x) : t(PLACES[x.section]))

@@ -271,10 +271,12 @@ export async function explain(root, rel, { pages: given, total, model, lang } = 
   const msgs = [{ role: 'user', text: ask }]
   const o = { system: SYSTEM, feature: 'studio' }
   let r = await helpers.reply(info.id, msgs, o)
+  // (Another in AI Assist's own list, when that one couldn't answer: index.js replyFor.)
+  const by = r.model && r.model !== info.id ? await modelInfo(r.model) : info
   let v = parsed(r.text)
-  if (!v) { r = await helpers.reply(info.id, msgs, { ...o, json: SCHEMA }); v = parsed(r.text) }
-  if (!v) throw new Error(`${info.label} answered, but not in a form Bridge AI can read. Try again, or pick another model.`)
-  return { model: info, explained: tidy(v, all || pages.length), pagesRead: scanned ? all || 1 : read, pagesAll: scanned ? all || 1 : all, cut, scanned, at: new Date().toISOString() }
+  if (!v) { r = await helpers.reply(by.id, msgs, { ...o, json: SCHEMA }); v = parsed(r.text) }
+  if (!v) throw new Error(`${by.label} answered, but not in a form Bridge AI can read. Try again, or pick another model.`)
+  return { model: by, explained: tidy(v, all || pages.length), pagesRead: scanned ? all || 1 : read, pagesAll: scanned ? all || 1 : all, cut, scanned, at: new Date().toISOString() }
 }
 
 // ---------- Routes ----------

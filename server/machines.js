@@ -1102,7 +1102,11 @@ export function upgrade(req, socket, head) {
         onClose: (c) => { try { client.close(c?.c >= 1000 && c.c < 5000 && c.c !== 1005 && c.c !== 1006 ? c.c : 1011, String(c?.r || '').slice(0, 120)) } catch { /* closed */ } },
         onError: () => { try { client.close(1011) } catch { /* closed */ } },
       }, forHeaders(asker))
-    }).catch((e) => { try { client.close(1011, String(e.message).slice(0, 120)) } catch { /* closed */ } })
+    }).catch((e) => {
+      // A screen: said as the viewer says the rest (it shows why, rather than that it ended).
+      if (view && client.readyState === 1) client.send(JSON.stringify({ t: 'error', code: 'offline', why: e.message.includes(m.name) ? e.message : `${m.name} isn't reachable just now: ${e.message}` }))
+      try { client.close(1011, String(e.message).slice(0, 120)) } catch { /* closed */ }
+    })
     client.on('message', (data, binary) => { const d = Buffer.isBuffer(data) ? data : Buffer.from(data); if (open) remote.send(d, binary); else pending.push([d, binary]) })
     client.on('close', (c, r) => remote?.close(c, String(r || '')))
   })

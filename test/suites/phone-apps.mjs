@@ -44,7 +44,7 @@ let host = null
 let b = null
 try {
   // ---------- Android: the page is the app's own ----------
-  const files = pageFiles()
+  const files = pageFiles({ share: false })
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-page-'))
   const built = spawnSync(process.execPath, [path.join(ROOT, 'relay', 'build.js'), '--page', path.join(out, 'relay')], { encoding: 'utf8' })
   const wrote = built.status === 0 ? fs.readdirSync(path.join(out, 'relay')).sort() : []

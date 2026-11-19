@@ -183,6 +183,16 @@ export default function FloatCard() {
     ch.postMessage({ type: 'hello' })
     return () => ch.close()
   }, [])
+  // Watch screen clicked here (asked: when): the window recording answers by picking, watching or
+  // saying why (an error on the channel). No answer in a few seconds is said too, not nothing.
+  const [asked, setAsked] = useState(0)
+  useEffect(() => {
+    if (!asked) return
+    if (live?.picking || live?.screen || err) { setAsked(0); return }
+    const late = setTimeout(() => { setAsked(0); setErr(t("The window recording this meeting didn't answer. Open the meeting and click Watch a screen there.")) }, Math.max(0, asked + 5000 - Date.now()))
+    return () => clearTimeout(late)
+  }, [asked, live?.picking, live?.screen, err])
+  const watch = () => { setErr(null); setAsked(Date.now()); Promise.resolve(app().floatWatch()).catch((e) => setErr(e.message)) }
   // The window fits the card (the desktop app makes it the card's size times its zoom). Open, what's
   // under the bar (a meeting's prep, before it starts) scrolls past what's left of the screen: the screen's height in the page's pixels
   // (its points over the zoom), less the desktop app's 8 points above and below the window, the 12
@@ -374,7 +384,9 @@ export default function FloatCard() {
                   {/* Sharing a screen: the card out of its way, said in words, not only the small button below. */}
                   {toBar && <button type="button" className="fc-chip" onClick={() => app().floatHide()} title={t('Move to the menu bar, out of the way of a screen you share')}><Icon name="minimize" size={12} /> {t('To the menu bar')}</button>}
                 </>
-                : live.canWatch && app().floatWatch && <button type="button" className="fc-chip" onClick={() => app().floatWatch()} title={t('Pick the window or screen being shared. A picture is kept each time it changes.')}><Icon name="screen" size={12} /> {t('Watch screen')}</button>)}
+                : live.picking
+                  ? <button type="button" className="fc-chip fc-picking" aria-disabled="true" aria-busy="true" title={t("Pick the window or screen to watch in the picker. It may be behind other windows.")}><Icon name="screen" size={12} /> {t('Picking…')}</button>
+                  : live.canWatch && app().floatWatch && <button type="button" className="fc-chip" onClick={watch} title={t('Pick the window or screen being shared. A picture is kept each time it changes.')}><Icon name="screen" size={12} /> {t('Watch screen')}</button>)}
             </div>
             {/* AI Assist's live board (a beta feature): how much is on it, a click from opening it. */}
             {m?.liveBoard?.id && <button type="button" className="fc-board" onClick={() => app().floatOpen?.({ meeting: r.id, board: m.liveBoard.id })} title={t('Open "{name}", the whiteboard of this meeting', { name: m.liveBoard.id })}><Icon name="shapes" size={12} /><span>{boardWords(m.liveBoard) ? t('Board: {what}', { what: boardWords(m.liveBoard) }) : t('Board')}</span></button>}

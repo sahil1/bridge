@@ -15,6 +15,7 @@ import { useBusy } from '../../busy.js'
 import { YourFiles, useYourFiles, kindsHere, KIND_ICON } from './HomeFiles.jsx'
 import Explorer from '../files/Explorer.jsx'
 import AiAssist from '../AiAssist.jsx'
+import { ShareDialog, SharesList } from '../Share.jsx'
 import './studio.css'
 import './home.css'
 
@@ -263,8 +264,10 @@ export function StudioHome({ onOpen }) {
       ...kindsHere.map(([k, label]) => ({ id: `kind:${k}`, icon: KIND_ICON[k], label: t(label), n: files.found ? files.kindCount[k] : null })),
       { id: 'packs', icon: 'palette', label: t('Design Packs'), hint: t('Your colours, fonts and logo, for the decks, documents and pages Studio makes') },
       { id: 'signature', icon: 'signature', label: t('Your Signature'), hint: t("Your signature and initials, for AI Assist's Sign this on a PDF") },
+      { id: 'shared', icon: 'link', label: t('Shared'), hint: t('Share Links you gave people outside your devices: who opened them, and Stop Sharing') },
     ],
     render: (id, { q, tap, keys, focus }) => (id === 'packs' ? <PacksSection packs={packs} />
+      : id === 'shared' ? <section className="sd-shared"><p className="muted small sd-home-say">{t('What you shared with people outside your devices, from here, Files and the Preview tab. Each link goes through your relay, end-to-end encrypted, while this computer is on.')}</p><SharesList /></section>
       : id === 'signature' ? <Suspense fallback={null}><SignatureHome /></Suspense>
         : <>
           {id === 'recent' && !q && <p className="muted small sd-home-say">{t('Your folders on every computer, and these lists of your documents. Documents, sheets, decks, PDFs and pages open here to edit, by you or your agents, with every version kept; anything else opens in Quick Look or its own app.')}</p>}
@@ -352,6 +355,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   const [note, setNote] = useState(null) // { text, error, info, brief }
   const [conflict, setConflict] = useState(null) // { by, name } changed on disk while yours is unsaved
   const [panel, setPanel] = useState(null) // 'versions'
+  const [sharing, setSharing] = useState(false) // making a Share Link for it (Share.jsx)
   const [ask, setAsk] = useState(null) // { selection }
   const [warn, setWarn] = useState(null) // the first save of a Word file (to say what's kept), or { text } what a save can't keep
   const [gen, setGen] = useState(0) // a new load (not a save): the editor starts again from it
@@ -582,11 +586,13 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
           <span className="sd-head-icons">
             <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-pressed={panel === 'versions'} title={t('Versions: yours, your agents\' and changes from outside')} aria-label={t('Versions')} disabled={!meta}><Icon name="clock" size={15} /></button>
             <a className="win-btn sd-dl-btn" href={rawUrl(f)} download={name} title={t('Download {name}', { name })} aria-label={t('Download')}><Icon name="download" size={15} /></a>
+            {f.root !== 'board' && <button type="button" className="win-btn sd-share-btn" onClick={() => setSharing(true)} disabled={!meta} title={t('Share Link: view-only, always its latest, for people outside your devices')} aria-label={t('Share Link')}><Icon name="link" size={15} /></button>}
             <button type="button" className="win-btn sd-focus-btn" onClick={focus.enter} disabled={!meta} title={focusTip} aria-label={t('Focus')}><Icon name="focus" size={15} /></button>
           </span>
           {assist && assist('btn small sd-head-btn', { labelClass: 'sd-btn-label' })}
         </PaneHeader>
       )}
+      {sharing && <ShareDialog what={{ kind: 'doc', root, path: rel, name }} onClose={() => setSharing(false)} />}
       {note && (
         <div className={`sd-bar sd-note-bar${note.error || note.bad ? ' bad' : ''}`} role={note.error || note.bad ? 'alert' : 'status'}>
           {note.info && <Icon name="info" size={13} />}

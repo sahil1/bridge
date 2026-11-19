@@ -21,6 +21,14 @@ export const IS_WIN = process.platform === 'win32'
 export const IS_MAC = process.platform === 'darwin'
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+// Windows: PowerShell's module cache that every kit shares (startKit), made once as a suite starts,
+// so a kit's first process list doesn't build it while a test waits.
+if (IS_WIN) {
+  const warm = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Import-Module CimCmdlets; Get-CimInstance Win32_Process -Property ProcessId | Out-Null'], { env: { ...process.env, PSModuleAnalysisCachePath: path.join(os.tmpdir(), 'bridge-tests-ModuleAnalysisCache') }, stdio: 'ignore', windowsHide: true })
+  warm.on('error', () => {})
+  warm.unref()
+}
+
 // Each kit's server needs its key (server/apiauth.js), which it makes in its data folder as it starts.
 // Every test gets it without asking: fetch to a kit's address sends it (unless the call gives an
 // Authorization of its own), and each browser context has each kit's cookie, as the desktop app's
@@ -219,7 +227,10 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   // stand-in instead (stand-ins/calltap.cjs, its loudness in bin/calltap.json). Only on a Mac, as
   // in the app: elsewhere a meeting records the mic only.
   if (process.platform === 'darwin') base.BRIDGE_CALLTAP = program('calltap', fs.readFileSync(path.join(TEST, 'stand-ins', 'calltap.cjs'), 'utf8'))
-  if (IS_WIN) Object.assign(base, { USERPROFILE: home, APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'), SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec, PATHEXT: process.env.PATHEXT, TEMP: os.tmpdir(), TMP: os.tmpdir() })
+  // (PowerShell's module cache, which lives in LOCALAPPDATA, shared by every kit: built from scratch in
+  // each kit's own home it made the process list Preview and Share Links ask for take 15 s and more,
+  // where a computer's own, kept from earlier, takes a moment.)
+  if (IS_WIN) Object.assign(base, { USERPROFILE: home, APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'), SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec, PATHEXT: process.env.PATHEXT, TEMP: os.tmpdir(), TMP: os.tmpdir(), PSModuleAnalysisCachePath: path.join(os.tmpdir(), 'bridge-tests-ModuleAnalysisCache') })
   else base.BRIDGE_SHELL = base.SHELL = '/bin/sh'
   const log = fs.openSync(path.join(dir, 'server.log'), 'w')
   const more = typeof env === 'function' ? env({ bin, data, home, PATH }) : env
@@ -274,20 +285,23 @@ export function devToolsStandIn(bin, { tools = false } = {}) {
 
 // A relay on this computer (stand-ins/relay.mjs: the real relay, run in Node), for pairing and
 // linking devices with nothing leaving the machine. relayFile: what a kit's relay.json needs to use
-// it. freeze/thaw/drop: what a sleeping Mac or a changed network does to its connections.
+// it. freeze/thaw/drop: what a sleeping Mac or a changed network does to its connections. shareUrl:
+// the address its Share Links open at (the Worker beside a relay of your own), on a port of its own.
 export async function startRelay(name) {
   const port = await freePort()
+  const sharePort = await freePort()
   const token = `test-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
   const log = path.join(OUT, 'kits', `${name}-relay-${port}.log`)
   fs.mkdirSync(path.dirname(log), { recursive: true })
   const out = fs.openSync(log, 'w')
-  const p = spawn(process.execPath, [path.join(TEST, 'stand-ins', 'relay.mjs'), String(port), token], { stdio: ['ignore', out, out] })
+  const p = spawn(process.execPath, [path.join(TEST, 'stand-ins', 'relay.mjs'), String(port), token, String(sharePort)], { stdio: ['ignore', out, out] })
   const url = `http://127.0.0.1:${port}`
-  if (!await until(async () => (await fetch(`${url}/_relay/health`)).ok, 15000, 150)) throw new Error(`the relay stand-in didn't start: ${fs.readFileSync(log, 'utf8').slice(-800)}`)
+  const shareUrl = `http://127.0.0.1:${sharePort}`
+  if (!await until(async () => (await fetch(`${url}/_relay/health`)).ok && (await fetch(`${shareUrl}/_relay/health`)).ok, 15000, 150)) throw new Error(`the relay stand-in didn't start: ${fs.readFileSync(log, 'utf8').slice(-800)}`)
   const ctl = (what) => fetch(`${url}/_test/${what}`, { method: what === 'state' ? 'GET' : 'POST' }).then((r) => r.json())
   return {
-    url, port, token,
-    relayFile: { url, token },
+    url, port, token, shareUrl,
+    relayFile: { url, token, shareUrl },
     freeze: () => ctl('freeze'), thaw: () => ctl('thaw'), drop: () => ctl('drop'), state: () => ctl('state'),
     stop: () => stopTree(p),
   }
@@ -543,6 +557,13 @@ export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440
 // again once it's back: src/lazy.jsx).
 const OWN_FILE = /\/assets\/[\w.-]+\.(js|css)\.$/
 export const withoutCutOff = (errors) => errors.filter((e, i) => !/\/api\/\S+ due to access control checks/.test(e) && !OWN_FILE.test(e) && !(e === 'TypeError: Load failed' && OWN_FILE.test(errors[i + 1] || '')))
+// A reload of a page from page(), for a test that counts every page error: what WebKit reports for
+// the requests the reload cut off (as withoutCutOff) is left out, only what it reported while it
+// reloaded. Anything else then, and everything before and after, stays in errors.
+export async function reload(p, errors, options) {
+  const from = errors.length
+  try { return await p.reload(options) } finally { errors.splice(from, Infinity, ...withoutCutOff(errors.slice(from))) }
+}
 // No service worker, as in the desktop app: WebKit's test build doesn't route what a page fetches
 // through one, so a test that stands in for an API with ctx.route needs this (in its before).
 // Answers a request with the real answer, changed by `change`. A page can close while the real

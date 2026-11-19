@@ -9,6 +9,9 @@ What an account holds is the email, its devices, whether it's a tester, whether 
 relay, and the relay's use of it. Never anything from the person's computer: their meetings, mail,
 code, voice and files stay there.
 
+It also emails the codes a computer's Share Links send to the people they name (Codes for Share
+Links, below), keeping neither the address nor the code.
+
 Three parts keep to this file:
 
 - **The accounts service**, [worker.js](worker.js) in this folder: a Cloudflare Worker at
@@ -129,6 +132,29 @@ relay. `200 { account }`. It's kept for the admin view, and the admins' emails g
 without a sign-in. It's limited per network, and the email gets a code to confirm before the request
 counts: `200 { sent: true }`, then the same with `code` gives `200 { account }` (the account is made
 if it's new). Only this route answers another origin (`SITE`, CORS).
+
+### Codes for Share Links
+
+`POST /v1/share-people { link, emails, until }` (a computer's device token), when a Share Link that
+names people is made (Bridge AI's server/shares.js): the link's id (22 characters), the 1 to 30
+emails it names, and when it ends (at most 8 days on). Each is kept as a hash keyed with a secret
+of the service's own (made from `SIGNING_KEY`), with the account and the link's id, until the link
+ends (`share_people`); told again, the link's list is replaced, and told `emails: []` (the link
+stopped early), it's forgotten. An account has 50 such links at once (1,500 rows), and calls this
+60 times an hour. `200 { ok: true, people }`. Errors: `invalid`, `computer` (a phone's token),
+`suspended`, `too-many` (50 links already, or 60 calls in the last hour, with `retryAfter`).
+
+`POST /v1/share-code { link, to, code }` (a computer's device token) emails an 8-digit code to
+someone that link names, from the account, and only to an email `share-people` was told for it: the
+email says whose link it is (the account's email) and the code, nothing about what's shared. The
+code is made and checked on the computer; the service only sends it, and keeps neither the address
+nor the code (only a keyed hash of each address for an hour, to limit them). `200 { sent: true }`.
+Errors: `invalid` (not an email or a link's id, or not 8 digits or more), `not-named` (403: that
+link doesn't name this email, or it has ended), `computer` (a phone's token), `suspended`,
+`too-many` (with `retryAfter`: 30 codes an hour for an account's links, 5 an hour from one account
+to one address, and 20 an hour to one address from every account together),
+and `unsent` (502) when the email couldn't be sent; Bridge AI then sends the code to the owner's
+devices, to pass on.
 
 ### Devices and leaving
 

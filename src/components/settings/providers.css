@@ -158,17 +158,50 @@
 .pv-builtin-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .pv-builtin-title b { font-size: 12.5px; }
 
-/* Which jobs run on it: a row each, its setting, and what Auto does here now. */
-.pv-jobs { margin: 0 0 10px; display: grid; gap: 6px; min-width: 0; }
-.pv-jobs-head { font-size: 12.5px; color: var(--ink); }
+/* Models for Each Task: a row each, its model (Automatic, with where it runs and what Auto does here
+   now, or its own with the ones to fall back on), the picker and a provider's key form in place, and
+   its last run. */
 .pv-jobs-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; min-width: 0; }
-.pv-jobs-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 12px; padding: 6px 0; border-top: 1px solid var(--line); min-width: 0; }
-.pv-jobs-list li:first-child { border-top: 0; }
+.pv-jobs-list > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--line); min-width: 0; }
+.pv-jobs-list > li:first-child { border-top: 0; }
+.pv-jobs-list > li > :nth-child(n + 3) { grid-column: 1 / -1; }
 .pv-job-name { display: grid; gap: 1px; min-width: 0; }
 .pv-job-name b { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--ink); }
 .pv-job-name .muted { overflow-wrap: anywhere; }
-.pv-jobs-list select { max-width: 100%; }
-.pv-job-now { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.pv-job-acts { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.pv-job-acts select { width: auto; max-width: 100%; }
+.pv-job-model { display: inline-flex; align-items: center; gap: 6px; max-width: min(260px, 100%); min-width: 0; }
+.pv-pick-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-job-now, .pv-job-last { overflow-wrap: anywhere; }
+.pv-job-add { justify-self: start; }
+/* Its own list: the model first, then each to fall back on. */
+.pv-job-own { list-style: none; margin: 2px 0 0; padding: 0; display: grid; gap: 4px; min-width: 0; }
+.pv-job-own li { display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border-radius: var(--r-sm); background: var(--pane-2); border: 1px solid var(--line); min-width: 0; }
+.pv-job-own li.bad { border-color: color-mix(in srgb, var(--warning) 45%, var(--line)); }
+.pv-job-n { flex: none; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 600; background: var(--pane-3); color: var(--ink-2); }
+.pv-job-entry { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; flex: 1; min-width: 0; }
+.pv-job-entry b { min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
+.pv-job-full { flex-basis: 100%; overflow-wrap: anywhere; }
+.pv-job-entry-acts { display: flex; align-items: center; gap: 2px; flex: none; }
+/* The picker: a search, then the models by provider. */
+.pv-pick { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--line-2); border-radius: var(--r); background: var(--pane); min-width: 0; }
+.pv-pick-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pv-pick-top .st-input { flex: 1; width: auto; min-width: 0; height: 32px; }
+.pv-pick-top .st-input::-webkit-search-cancel-button { display: none; }
+.pv-pick-list { display: grid; gap: 6px; max-height: 300px; overflow: auto; overscroll-behavior: contain; min-width: 0; }
+.pv-pick-group { display: grid; gap: 1px; min-width: 0; }
+.pv-pick-head { font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--ink-3); padding: 4px 8px 2px; }
+.pv-pick-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 4px 8px; border-radius: var(--r-sm); text-align: left; font-size: 12.5px; color: var(--ink); min-width: 0; }
+.pv-pick-item:hover:not(:disabled), .pv-pick-item:focus-visible { background: var(--pane-3); outline: none; }
+.pv-pick-item.on { background: var(--accent-soft); }
+.pv-pick-item:disabled { opacity: .5; cursor: default; }
+.pv-pick-item .pv-chip { margin-left: auto; flex: none; }
+/* A provider's key form, opened from a model that needs its key. */
+.pv-job-key { border: 1px solid var(--accent); border-radius: var(--r); background: var(--pane); box-shadow: 0 0 0 2px var(--accent-soft); min-width: 0; }
+.pv-job-key-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; }
+.pv-job-key-head .icon-btn { margin-left: auto; }
 @container (max-width: 430px) {
-  .pv-jobs-list li { grid-template-columns: minmax(0, 1fr); }
+  .pv-jobs-list > li { grid-template-columns: minmax(0, 1fr); }
+  .pv-job-acts { justify-content: flex-start; }
+  .pv-job-model { max-width: 100%; }
 }

@@ -4,12 +4,13 @@
 //                                     so the person using it needs nothing else installed
 //   from source (npm run desktop)     your clone, with `node scripts/start.js`
 const electron = require('electron')
-const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, session, nativeTheme, ipcMain, powerMonitor, screen, nativeImage, systemPreferences, dialog, desktopCapturer } = electron
+const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, session, nativeTheme, ipcMain, powerMonitor, powerSaveBlocker, screen, nativeImage, systemPreferences, dialog, desktopCapturer } = electron
 const dictation = require('./dictation.js')
 const contextMenu = require('./contextmenu.js')
 const permissions = require('./permissions.js')
 const remoteDesk = require('./remote.js')
 const senders = require('./senders.js')
+const screenpick = require('./screenpick.js')
 const { execFile } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -62,6 +63,8 @@ let win = null
 let startedServer = false
 // A meeting recording in the window: closing it hides it instead, so the recording goes on.
 let recording = false
+let recorder = null // the webContents of the window recording a meeting (bridge:recording)
+let screenPick = null // what the app answers a page asking for a screen (screenpick.js)
 let quitting = false
 let reopened = 0 // when the window was last opened again after its page went away
 
@@ -381,6 +384,7 @@ ipc.handle('bridge:idle', (e) => (fromApp(e) ? powerMonitor.getSystemIdleTime() 
 // running in the terminal host meanwhile, unless Keep agents running is off.
 ipc.handle('bridge:restart', (e) => {
   if (!fromApp(e)) return false
+  relaunching = true
   app.relaunch()
   stopServer()
   app.quit()
@@ -405,6 +409,8 @@ const TILE_STEPS = {
   accessibility: { text: `Turn on ${APP_NAME} in the list above` },
   // A call's sound for meeting notes: listed once a recording has asked.
   audio: { text: `Under System Audio Recording Only, turn on ${APP_NAME}` },
+  // This screen, seen from another of your devices (remote.js): listed once it has looked.
+  screen: { text: `Under Screen & System Audio Recording, turn on ${APP_NAME}, then Quit & Reopen` },
   // Fn or the right ⌥ as the dictation key (dictation.js): listed already, by macOS's own question.
   'input-monitoring': { text: `Turn on ${APP_NAME} in the list above` },
 }
@@ -418,6 +424,7 @@ function closeTile() {
 // Access on yet? The server answers for the folders it reads; the app asks macOS for the mic and
 // Accessibility (without asking you).
 async function tileDone(pane) {
+  if (pane === 'screen') return systemPreferences.getMediaAccessStatus('screen') === 'granted'
   if (perms.kinds().includes(pane)) { const s = await perms.status(pane); if (s === 'ok') reportPerms(); return s === 'ok' }
   try {
     const r = await fetch(`${URL_BASE}/api/fix/check?pane=${encodeURIComponent(pane)}`, { signal: AbortSignal.timeout(20000) })
@@ -714,6 +721,9 @@ async function watchFleet() {
         }
       }
     } catch { /* server down or restarting; retry */ }
+    // The feed gone: nobody is known to be viewing this screen until it says so again (it does as it
+    // connects), so the display may sleep, and the badge goes.
+    remote?.onEvent({ t: 'sessions', list: [], asks: [] })
     await new Promise((r) => setTimeout(r, 3000))
   }
 }
@@ -1088,10 +1098,17 @@ const tellMain = async (js, show, gesture = false) => {
   if (show) { if (w.isMinimized()) w.restore(); w.show(); w.focus() }
   return w.webContents.executeJavaScript(js, gesture).catch(() => {})
 }
-// Watch a screen, from the card: the main window records, so it asks which screen.
+// Watch a screen, from the card: the window recording the meeting asks which screen (the main one,
+// or this computer in a window of its own), as if you'd clicked there. It says how that went once
+// it has (the page, recording.jsx): focus, the picker wants a click in that window itself, which is
+// brought to the front to say so. Not waited on for ever: a picker can stay open a while.
+const WATCH_JS = `new Promise((done) => window.dispatchEvent(new CustomEvent('bridge-watch-screen', { detail: { done } })))`
 ipc.handle('bridge:float-watch', async (e) => {
   if (!fromFloat(e)) return false
-  await tellMain(`window.dispatchEvent(new CustomEvent('bridge-watch-screen'))`, false, true)
+  const w = recorder && !recorder.isDestroyed() ? BrowserWindow.fromWebContents(recorder) : await mainReady()
+  if (!w || w.isDestroyed()) return false
+  const said = await Promise.race([w.webContents.executeJavaScript(WATCH_JS, true).catch(() => null), new Promise((r) => setTimeout(() => r(null), 120_000))])
+  if (said?.focus && !w.isDestroyed()) { if (w.isMinimized()) w.restore(); w.show(); w.focus() }
   return true
 })
 // Take notes for the call: the recording runs in the main window (it has the mic), shown or not.
@@ -1116,9 +1133,35 @@ ipc.handle('bridge:float-open', async (e, { meeting, meetings, paneId, event, bo
   else if (typeof paneId === 'string' && paneId.length < 200) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: ${JSON.stringify(paneId)}, view: 'chat' } }))`, true)
   return true
 })
-ipc.handle('bridge:recording', (e, on) => { if (fromApp(e) && e.sender === win?.webContents) recording = !!on; return true })
+// Which window records: closing the main one mid-meeting hides it instead (recording), and the
+// floating card's Watch screen goes to the one recording (recorder), whichever that is.
+ipc.handle('bridge:recording', (e, on) => {
+  if (!fromApp(e)) return true
+  if (on) recorder = e.sender
+  else if (recorder === e.sender) recorder = null
+  if (e.sender === win?.webContents) recording = !!on
+  return true
+})
+// Why the app just said no to a screen this page asked for (screenpick.js), for it to say.
+ipc.handle('bridge:screen-why', (e) => (fromApp(e) && screenPick ? screenPick.why(e.sender.id) : null))
 
-app.on('before-quit', () => { quitting = true })
+// Quit because you quit it (the menu, ⌘Q, the Dock), not to reopen nor as the computer shuts down:
+// the server is told first (a moment at most), so none of your devices opens Bridge AI here again
+// until it's opened here (server/remote.js appQuit). An update stops the app another way.
+let relaunching = false
+let systemGoing = false
+let quitTold = false
+app.on('before-quit', (e) => {
+  quitting = true
+  if (quitTold || relaunching || systemGoing) return
+  quitTold = true
+  e.preventDefault()
+  // (Not said, the server down or slow: a mark in the data folder it takes as it starts.)
+  fetch(`${URL_BASE}/api/remote/app-quit`, { method: 'POST', signal: AbortSignal.timeout(800) })
+    .then((r) => { if (!r.ok) throw new Error(String(r.status)) })
+    .catch(() => { try { fs.writeFileSync(path.join(DATA, 'remote-quit.json'), JSON.stringify({ at: new Date().toISOString() })) } catch { /* not this time */ } })
+    .finally(() => app.quit())
+})
 // The graphics process went away (Chromium starts it again): written down, to offer a report.
 app.on('child-process-gone', (_e, d) => { if (!quitting) crashes.note(crashes.fromChildGone(d), { base: URL_BASE, data: DATA, version: app.getVersion(), fetch }).catch(() => {}) })
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus() } })
@@ -1130,6 +1173,7 @@ app.on('will-quit', () => { globalShortcut.unregisterAll(); floatShare.stop() })
 // the middle of something, to reopen afterwards, before their terminals end (Windows warns Bridge
 // AI's background processes of nothing; on a Mac this is earlier than they hear).
 function shuttingDown() {
+  systemGoing = true
   fetch(`${URL_BASE}/api/system/stopping`, { method: 'POST', signal: AbortSignal.timeout(2000) }).catch(() => {})
 }
 
@@ -1147,11 +1191,10 @@ app.whenReady().then(async () => {
   // window being shared. Before macOS 15: the whole main screen, which macOS asks to allow (Screen
   // Recording) the first time. Recording the screen too, on Windows: with what the computer plays
   // (the call's sound), which the page asks for there (src/components/meetings/recording.jsx).
-  session.defaultSession.setDisplayMediaRequestHandler((req, cb) => {
-    if (!req.frame || req.frame.parent || !pages.permits('display-capture', { url: req.frame.url })) return cb({})
-    const sound = req.audioRequested && process.platform === 'win32' ? { audio: 'loopback' } : {}
-    desktopCapturer.getSources({ types: ['screen'] }).then((s) => cb(s[0] ? { video: s[0], ...sound } : {}), () => cb({}))
-  }, { useSystemPicker: true })
+  // A no says why to the page that asked (screenpick.js, bridge:screen-why).
+  screenPick = screenpick.create({ desktopCapturer, systemPreferences, permits: pages.permits })
+  const askedBy = (f) => { try { return f ? electron.webContents.fromFrame(f)?.id ?? null : null } catch { return null } }
+  session.defaultSession.setDisplayMediaRequestHandler((req, cb) => screenPick.handler(req, cb, askedBy(req.frame)), { useSystemPicker: true })
   // Right-click: spelling suggestions, Cut, Copy and Paste, in every window from here on.
   contextMenu.attach({ app, Menu, clipboard: electron.clipboard, session })
   buildMenu()
@@ -1160,7 +1203,16 @@ app.whenReady().then(async () => {
   createWindow()
   // Remote Screen and Preview's windows: the capture page, the badge, a project's app drawn off screen.
   try { remoteShared = await import(require('node:url').pathToFileURL(path.join(ROOT, 'shared', 'remote.js')).href) } catch (e) { console.error('remote:', e.message) }
-  remote = remoteDesk.create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload: path.join(__dirname, 'preload.js'), fetch, keyFor: (c, os) => remoteShared?.keyFor(c, os) ?? null, sizes: viewSizes, restart: () => { app.relaunch(); stopServer(); app.quit() } })
+  // Reopened from a device (Screen Recording takes effect once the app reopens): the app only, as
+  // macOS's own Quit & Reopen does; the server goes on, and so does the device's session there.
+  // Allow Screen Recording from a device: its page of System Settings here, with the tile.
+  remote = remoteDesk.create({
+    BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload: path.join(__dirname, 'preload.js'), fetch, keyFor: (c, os) => remoteShared?.keyFor(c, os) ?? null, sizes: viewSizes,
+    restart: () => { relaunching = true; app.relaunch(); app.quit() },
+    allowScreen: () => { shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture').catch(() => {}); showTile('screen').catch(() => {}) },
+    power: powerSaveBlocker,
+    wake: () => { if (IS_MAC) execFile('/usr/bin/caffeinate', ['-u', '-t', '2'], { timeout: 5000 }, () => {}) },
+  })
   watchFleet()
   watchCalls()
   startUpdatingWhileAway()

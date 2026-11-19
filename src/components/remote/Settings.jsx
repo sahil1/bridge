@@ -1,16 +1,16 @@
 // Settings › Account & Devices › Computers, with Remote Screen and Preview on (a Beta Feature):
 //   This Computer's Screen  whether your other devices can see it, and if not why; who's looking now,
 //                           with Stop
-//   Remote Access           the Remote Access Password, "Let my other devices control this computer"
-//                           (which needs it; on a Mac, macOS's Accessibility question then), Ask Here
-//                           First, which devices may connect (one unticked may use nothing here),
-//                           and who's locked out, with Unlock; and
+//   Remote Access           1. the Remote Access Password, 2. "Let my other devices control this
+//                           computer" (which needs it; on a Mac, macOS's Accessibility question then),
+//                           as two steps of one block; Ask Here First, which devices may connect (one
+//                           unticked may use nothing here), and who's locked out, with Unlock; and
 //                           Screen Sharing Notifications: on or off, where they go, and the way to set
 //                           one up when nothing would hear of it (server/screentell.js)
 //   Screen Activity         the record of every session, and every one turned away
 // Each is changed here, at this computer, only: elsewhere (another computer's window, a phone) the
 // password and Ask Here First are shown as they are, saying where they're changed; the devices and
-// the record are this computer's own to see.
+// the record are this computer's own to see. Each says what it does in a line; the rest is under More.
 import { useState } from 'react'
 import Icon from '../Icon.jsx'
 import { BASE, api, onThisComputer, usePoll } from '../../api.js'
@@ -104,7 +104,10 @@ export function StaysOut() {
   return <p className="muted small ab-trial-go"><Icon name="lock" size={11} /> {n === 1 ? t('The device you unticked stays out of this computer while this is off. Settings › Account & Devices › Computers lets it back in.') : t('The {n} devices you unticked stay out of this computer while this is off. Settings › Account & Devices › Computers lets them back in.', { n })}</p>
 }
 
-// The Remote Access Password: set, changed or taken off here; elsewhere, whether there is one.
+// What a setting does in full, folded away under its one line.
+const More = ({ children }) => <details className="rs-more"><summary><Icon name="chevron" size={11} />{t('More')}</summary>{children}</details>
+
+// Step 1, the Remote Access Password: set, changed or taken off here; elsewhere, whether there is one.
 function Password({ access, here, name, refresh }) {
   const [edit, setEdit] = useState(null) // null | 'set' | 'remove'
   const [a, setA] = useState('')
@@ -123,40 +126,42 @@ function Password({ access, here, name, refresh }) {
   }
   const remove = async () => { setBusy(true); setErr(null); try { await remoteDo(BASE, '/password', { remove: true }); close(); refresh() } catch (x) { setErr(x.message) } finally { setBusy(false) } }
   return (
-    <div className="rs-block" data-setting="remote-password">
-      <b>{t('Remote Access Password')}</b>
-      <p className="muted small">{t('Asked before any of your devices sees this screen, from a computer or a phone, and checked here. {n} wrong tries lock that device out for {m} minutes. It\'s kept on this computer only, scrambled, and never sent anywhere.', { n: access.limits?.tries || ACCESS.tries, m: access.limits?.lockMinutes || ACCESS.lockMinutes })}</p>
-      <p className="muted small rs-guards"><Icon name="info" size={12} /> {t('It guards seeing and controlling this computer\'s screen, and the apps its agents serve. Which Devices May Connect, below, decides which of your devices may use this computer at all.')}</p>
-      {access.password
-        ? <p className="small rs-ok"><Icon name="lock" size={12} /> {access.passwordAt ? t('Set on {date}.', { date: dayOf(access.passwordAt) }) : t('Set.')}</p>
-        : <p className="small rs-no"><Icon name="info" size={12} /> {t('No password yet: your devices see this screen without one.')}</p>}
-      {!here && <p className="muted small">{t('The password is set at {name} itself, never from another device.', { name })}</p>}
-      {here && !edit && (
-        <div className="st-row">
-          <button type="button" className="btn small" onClick={() => setEdit('set')}>{access.password ? t('Change Password') : t('Set Password')}</button>
-          {access.password && <button type="button" className="ghost-btn small" onClick={() => setEdit('remove')}>{t('Remove')}</button>}
-        </div>
-      )}
-      {here && edit === 'set' && (
-        <form className="rs-pw-form" onSubmit={save}>
-          <input className="st-input" type="password" name="bridge-remote-new" autoComplete="new-password" autoFocus value={a} onChange={(e) => setA(e.target.value)} placeholder={t('New password')} aria-label={t('New password')} />
-          <input className="st-input" type="password" name="bridge-remote-again" autoComplete="new-password" value={b} onChange={(e) => setB(e.target.value)} placeholder={t('The same again')} aria-label={t('The same again')} />
+    <div className="rs-step" data-setting="remote-password">
+      <span className={`rs-step-n${access.password ? ' done' : ''}`} aria-hidden="true">{access.password ? <Icon name="check" size={11} /> : '1'}</span>
+      <div className="rs-step-body">
+        <b>{t('Remote Access Password')}</b>
+        <p className="muted small">{t('Asked of each of your devices before it sees this screen.')}</p>
+        {access.password
+          ? <p className="small rs-ok"><Icon name="lock" size={12} /> {access.passwordAt ? t('Set on {date}.', { date: dayOf(access.passwordAt) }) : t('Set.')}</p>
+          : <p className="small rs-no"><Icon name="info" size={12} /> {t('No password yet: your devices see this screen without one.')}</p>}
+        {!here && <p className="muted small">{t('The password is set at {name} itself, never from another device.', { name })}</p>}
+        {here && !edit && (
           <div className="st-row">
-            <button type="submit" className="btn small primary" disabled={busy || !a || !b}>{t('Save Password')}</button>
-            <button type="button" className="ghost-btn small" onClick={close}>{t('Cancel')}</button>
+            <button type="button" className="btn small" onClick={() => setEdit('set')}>{access.password ? t('Change Password') : t('Set Password')}</button>
+            {access.password && <button type="button" className="ghost-btn small" onClick={() => setEdit('remove')}>{t('Remove')}</button>}
           </div>
-        </form>
-      )}
-      {here && edit === 'remove' && (
-        <div className="st-row between">
-          <p className="small">{t('Remove the password? Control goes off with it, as it needs one.')}</p>
-          <span className="st-row">
-            <button type="button" className="btn small danger" disabled={busy} onClick={remove}>{t('Remove Password')}</button>
-            <button type="button" className="ghost-btn small" onClick={close}>{t('Cancel')}</button>
-          </span>
-        </div>
-      )}
-      {err && <p className="error-text small" role="alert">{err}</p>}
+        )}
+        {here && edit === 'set' && (
+          <form className="rs-pw-form" onSubmit={save}>
+            <input className="st-input" type="password" name="bridge-remote-new" autoComplete="new-password" autoFocus value={a} onChange={(e) => setA(e.target.value)} placeholder={t('New password')} aria-label={t('New password')} />
+            <input className="st-input" type="password" name="bridge-remote-again" autoComplete="new-password" value={b} onChange={(e) => setB(e.target.value)} placeholder={t('The same again')} aria-label={t('The same again')} />
+            <div className="st-row">
+              <button type="submit" className="btn small primary" disabled={busy || !a || !b}>{t('Save Password')}</button>
+              <button type="button" className="ghost-btn small" onClick={close}>{t('Cancel')}</button>
+            </div>
+          </form>
+        )}
+        {here && edit === 'remove' && (
+          <div className="st-row between">
+            <p className="small">{t('Remove the password? Control goes off with it, as it needs one.')}</p>
+            <span className="st-row">
+              <button type="button" className="btn small danger" disabled={busy} onClick={remove}>{t('Remove Password')}</button>
+              <button type="button" className="ghost-btn small" onClick={close}>{t('Cancel')}</button>
+            </span>
+          </div>
+        )}
+        {err && <p className="error-text small" role="alert">{err}</p>}
+      </div>
     </div>
   )
 }
@@ -177,7 +182,7 @@ function Notify({ nt, here, name, set }) {
         <input type="checkbox" role="switch" checked={!!nt.on} disabled={!here} onChange={(e) => set(e.target.checked)} />
         <span>
           <b>{t('Screen Sharing Notifications')}</b><br />
-          <small className="muted">{t('When any device starts viewing this screen, takes control or waits on Ask Here First, your other devices are told, with Stop and Block This Device. Every window of Bridge AI shows it too, while it lasts. The device doing the viewing isn\'t told of its own session.')}</small>
+          <small className="muted">{t('Your other devices are told when this screen is viewed, with Stop and Block This Device.')}</small>
         </span>
       </label>
       {nt.on && !nowhere && (
@@ -194,6 +199,7 @@ function Notify({ nt, here, name, set }) {
       )}
       {!nt.on && <p className="small rs-no"><Icon name="info" size={12} /> {t('Off: your other devices aren\'t told when this screen is viewed. Screen Activity and the notice on this computer still say each time.')}</p>}
       {!here && <p className="muted small">{t('Turned on and off at {name} itself.', { name })}</p>}
+      <More><p className="muted small">{t('When any device starts viewing this screen, takes control or waits on Ask Here First, your other devices are told, with Stop and Block This Device. Every window of Bridge AI shows it too, while it lasts. The device doing the viewing isn\'t told of its own session.')}</p></More>
     </div>
   )
 }
@@ -234,7 +240,7 @@ export function RemoteSettings() {
             {watching.map((s) => (
               <li key={s.id}>
                 <span className="rs-dot on" aria-hidden="true" />
-                <span>{s.controlled ? t('{who} is controlling this screen', { who: whoOf(s) }) : t('{who} is viewing this screen', { who: whoOf(s) })}</span>
+                <span>{s.waiting ? t('{who} is connecting to this screen', { who: whoOf(s) }) : s.controlled ? t('{who} is controlling this screen', { who: whoOf(s) }) : t('{who} is viewing this screen', { who: whoOf(s) })}</span>
                 {here && <button type="button" className="btn small danger" onClick={() => remoteDo(BASE, `/sessions/${encodeURIComponent(s.id)}/stop`).then(refresh, () => {})}>{t('Stop')}</button>}
               </li>
             ))}
@@ -244,26 +250,36 @@ export function RemoteSettings() {
 
       <section className="st-sec rs-settings" data-setting="remote-access">
         <h4>{t('Remote Access')}</h4>
-        <Password access={ac} here={here} name={name} refresh={refresh} />
-
-        <div className="rs-block" data-setting="remote-control">
-          <label className="st-check rs-control">
-            <input type="checkbox" role="switch" checked={!!c.on} disabled={!here || busy || (!c.on && (needsPassword || !c.can))} onChange={(e) => set(e.target.checked)} />
-            <span>
-              <b>{t('Let my other devices control this computer')}</b><br />
-              <small className="muted">{t('Their mouse and keyboard work on this screen while they view it, and the clipboard goes both ways. Anyone here moving the mouse or pressing a key pauses them for a moment, and after {n} minutes without input they\'re back to view-only.', { n: ac.limits?.idleMinutes || ACCESS.idleMinutes })}</small>
-            </span>
-          </label>
-          {needsPassword && <p className="muted small rs-needs"><Icon name="lock" size={12} /> {t('Set a Remote Access Password first: control needs one.')}</p>}
-          {!here && <p className="muted small">{t('Control is turned on and off at {name} itself.', { name })}</p>}
-          {here && !needsPassword && !c.can && c.why && <p className="muted small"><Icon name="info" size={12} /> {c.why}</p>}
-          {here && c.on && c.asks === 'accessibility' && c.allowed === false && (
-            <div className="st-row between">
-              <p className="small">{t("macOS doesn't let Bridge AI control this Mac yet: turn on Bridge AI in System Settings › Privacy & Security › Accessibility.")}</p>
-              {desktop() && <button type="button" className="btn small" onClick={allowAx}>{t('Open Accessibility')}</button>}
+        {/* One block, in order: the password, then control, which needs it. */}
+        <div className="rs-steps">
+          <Password access={ac} here={here} name={name} refresh={refresh} />
+          <div className={`rs-step${needsPassword ? ' off' : ''}`} data-setting="remote-control">
+            <span className={`rs-step-n${c.on ? ' done' : ''}`} aria-hidden="true">{c.on ? <Icon name="check" size={11} /> : '2'}</span>
+            <div className="rs-step-body">
+              <label className="st-check rs-control">
+                <input type="checkbox" role="switch" checked={!!c.on} disabled={!here || busy || (!c.on && (needsPassword || !c.can))} onChange={(e) => set(e.target.checked)} />
+                <span>
+                  <b>{t('Let my other devices control this computer')}</b><br />
+                  <small className="muted">{t('Their mouse and keyboard work here while they view this screen.')}</small>
+                </span>
+              </label>
+              {needsPassword && <p className="muted small rs-needs"><Icon name="lock" size={12} /> {t('Set a Remote Access Password first: control needs one.')}</p>}
+              {!here && <p className="muted small">{t('Control is turned on and off at {name} itself.', { name })}</p>}
+              {here && !needsPassword && !c.can && c.why && <p className="muted small"><Icon name="info" size={12} /> {c.why}</p>}
+              {here && c.on && c.asks === 'accessibility' && c.allowed === false && (
+                <div className="st-row between">
+                  <p className="small">{t("macOS doesn't let Bridge AI control this Mac yet: turn on Bridge AI in System Settings › Privacy & Security › Accessibility.")}</p>
+                  {desktop() && <button type="button" className="btn small" onClick={allowAx}>{t('Open Accessibility')}</button>}
+                </div>
+              )}
+              {err && <p className="error-text small">{err}</p>}
             </div>
-          )}
-          {err && <p className="error-text small">{err}</p>}
+          </div>
+          <More>
+            <p className="muted small">{t('Asked before any of your devices sees this screen, from a computer or a phone, and checked here. {n} wrong tries lock that device out for {m} minutes. It\'s kept on this computer only, scrambled, and never sent anywhere.', { n: ac.limits?.tries || ACCESS.tries, m: ac.limits?.lockMinutes || ACCESS.lockMinutes })}</p>
+            <p className="muted small">{t('It guards seeing and controlling this computer\'s screen, and the apps its agents serve. Which Devices May Connect, below, decides which of your devices may use this computer at all.')}</p>
+            <p className="muted small">{t('Their mouse and keyboard work on this screen while they view it, and the clipboard goes both ways. Anyone here moving the mouse or pressing a key pauses them for a moment, and after {n} minutes without input they\'re back to view-only.', { n: ac.limits?.idleMinutes || ACCESS.idleMinutes })}</p>
+          </More>
         </div>
 
         <div className="rs-block" data-setting="remote-ask-first">
@@ -279,9 +295,7 @@ export function RemoteSettings() {
 
         <div className="rs-block" data-setting="remote-devices">
           <b>{t('Which Devices May Connect')}</b>
-          <p className="muted small">{t('Every phone paired with this computer and every computer linked to it, unless you untick it. One unticked can\'t use this computer at all, with Remote Screen and Preview on or off: no agents, terminals, files, previews or screen, and what it has open here ends.')}</p>
-          {here && <p className="muted small">{t('A device of another of your computers comes through that computer, which checks its own list first; once it has, it\'s listed here too, as coming through it, to untick here. So the same phone can be here more than once: paired here, and through each of your other computers it\'s paired with. It\'s known as the same device only if it paired with both using the same key, which a phone\'s browser and the Android app don\'t: untick it each way it comes.')}</p>}
-          {here && <p className="muted small">{t('Once you set a password or Ask Here First, or untick a device, a phone or computer paired after that, or first seen through another of your computers, starts New, and waits in Needs You while Remote Screen and Preview is on: tick it here, or Allow it there, to let it in.')}</p>}
+          <p className="muted small">{t('A device you untick can\'t use this computer at all.')}</p>
           {!here ? null : ac.devices?.length
             ? (
               <ul className="rs-devices">
@@ -304,6 +318,11 @@ export function RemoteSettings() {
             <p key={l.id} className="small rs-locked"><Icon name="lock" size={11} /> {t('{name} is locked out until {time}', { name: whoOf({ by: { name: l.name }, for: l.for }), time: clockOf(l.until) })} {here && <button type="button" className="ghost-btn small" onClick={() => access(`/locks/${encodeURIComponent(l.id)}/clear`)}>{t('Unlock')}</button>}</p>
           ))}
           {!here && elsewhere}
+          <More>
+            <p className="muted small">{t('Every phone paired with this computer and every computer linked to it, unless you untick it. One unticked can\'t use this computer at all, with Remote Screen and Preview on or off: no agents, terminals, files, previews or screen, and what it has open here ends.')}</p>
+            {here && <p className="muted small">{t('A device of another of your computers comes through that computer, which checks its own list first; once it has, it\'s listed here too, as coming through it, to untick here. So the same phone can be here more than once: paired here, and through each of your other computers it\'s paired with. It\'s known as the same device only if it paired with both using the same key, which a phone\'s browser and the Android app don\'t: untick it each way it comes.')}</p>}
+            {here && <p className="muted small">{t('Once you set a password or Ask Here First, or untick a device, a phone or computer paired after that, or first seen through another of your computers, starts New, and waits in Needs You while Remote Screen and Preview is on: tick it here, or Allow it there, to let it in.')}</p>}
+          </More>
         </div>
         <Notify nt={data.notify} here={here} name={name} set={(on) => access('/notify', { on })} />
         {aErr && <p className="error-text small" role="alert">{aErr}</p>}

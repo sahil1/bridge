@@ -53,12 +53,14 @@ export function useRemote(base, ms = 3000, on = true) {
 }
 
 // ---------- a session ----------
-// connect({ base, source, control, slow, on }): the WebSocket, then peer-to-peer when both ends can
-// and the network lets them within P2P_WAIT_MS, else pictures over it. on: { hello(m), mode(m),
-// track(stream), frame(f), message(m), closed(code) }. Returns { input(evs), send(m), ack(), close() }.
-export function connect({ base, source, control = false, slow = false, page = null, on }) {
+// connect({ base, source, control, slow, fix, on }): the WebSocket, then peer-to-peer when both ends
+// can and the network lets them within P2P_WAIT_MS, else pictures over it. A screen's session takes
+// what fixes one that can't be shown (fixes=1: server/remote.js screenFor); fix: the one chosen
+// before connecting. on: { hello(m), mode(m), track(stream), frame(f), message(m), closed(code,
+// reason) }. Returns { input(evs), send(m), ack(), close() }.
+export function connect({ base, source, control = false, slow = false, page = null, fix = null, on }) {
   const p2p = typeof RTCPeerConnection === 'function' && !page
-  const q = new URLSearchParams({ source, ...(control ? { control: '1' } : {}), ...(p2p ? { p2p: '1' } : {}), ...(slow ? { slow: '1' } : {}), ...(page ? { w: String(page.w), h: String(page.h) } : {}) })
+  const q = new URLSearchParams({ source, ...(control ? { control: '1' } : {}), ...(p2p ? { p2p: '1' } : {}), ...(slow ? { slow: '1' } : {}), ...(page ? { w: String(page.w), h: String(page.h) } : { fixes: '1', ...(fix ? { fix } : {}) }) })
   const ws = openSocketAt(base, `/api/remote/view?${q}`)
   ws.binaryType = 'arraybuffer'
   let pc = null
@@ -106,7 +108,7 @@ export function connect({ base, source, control = false, slow = false, page = nu
     if (m.t === 'ice' && pc) { pc.addIceCandidate(m.c).catch(() => {}); return }
     on.message?.(m)
   }
-  ws.onclose = (e) => { closed = true; clearTimeout(timer); try { pc?.close() } catch { /* closed */ } on.closed?.(e.code) }
+  ws.onclose = (e) => { closed = true; clearTimeout(timer); try { pc?.close() } catch { /* closed */ } on.closed?.(e.code, e.reason) }
   // What you press: over the peer-to-peer channel when there is one, else over the link, a few
   // times a second at most, moves in between joined into the last.
   let queue = []

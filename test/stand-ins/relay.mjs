@@ -1,7 +1,10 @@
 // A relay for tests: relay/worker.js itself (its Hub, the phone page), run in Node on this
 // computer instead of on Cloudflare, so devices pair and link for real, end to end, with nothing
 // leaving the machine. Cloudflare's WebSocket hibernation is stood in for by a few lines over `ws`.
-//   node relay.mjs <port> <token>
+//   node relay.mjs <port> <token> [share port]
+// With a share port, the Worker beside it that Share Links open at (SHARE_HOST, the same Hub) is
+// there too, at 127.0.0.1:<share port>, as <script>-share.<subdomain>.workers.dev is beside a relay of
+// your own. X-Test-Country on a request stands in for the country Cloudflare says it's from.
 // And, for tests, what a real network does to a connection:
 //   POST /_test/freeze   connections stay open but nothing gets through (a Mac that slept)
 //   POST /_test/thaw     as before
@@ -31,7 +34,7 @@ import { createECDH } from 'node:crypto'
 import { WebSocketServer } from 'ws'
 import { bundle } from '../../relay/build.js'
 
-const [port, token] = process.argv.slice(2)
+const [port, token, sharePort] = process.argv.slice(2)
 const { build, version, code } = bundle()
 // The bundle starts with its files and build; the worker after them is a module of its own.
 globalThis.FILES = JSON.parse(code.slice('const FILES = '.length, code.indexOf('\nconst RELAY_BUILD')))
@@ -96,6 +99,7 @@ const ctx = {
 const worker = await import('../../relay/worker.js')
 const hub = new worker.Hub(ctx, {})
 const env = { HOST_TOKEN: token, HUB: { idFromName: () => 'hub', get: () => hub } }
+const shareEnv = { ...env, HOST_TOKEN: undefined, SHARE_HOST: '1' }
 
 let frozen = false
 let away = false // the computer has no network (POST /_test/away)
@@ -137,7 +141,12 @@ function pipe(end) {
 }
 const later = (ms) => (ms ? new Promise((r) => setTimeout(r, ms)) : null)
 const wss = new WebSocketServer({ noServer: true })
-const request = (req) => new Request(`http://127.0.0.1:${port}${req.url}`, { method: req.method, headers: Object.entries(req.headers).filter(([, v]) => typeof v === 'string') })
+const request = (req, at = port) => {
+  const r = new Request(`http://127.0.0.1:${at}${req.url}`, { method: req.method, headers: Object.entries(req.headers).filter(([k, v]) => typeof v === 'string' && k !== 'x-test-country') })
+  const c = req.headers['x-test-country']
+  if (c) Object.defineProperty(r, 'cf', { value: { country: String(c) } })
+  return r
+}
 
 const server = http.createServer(async (req, res) => {
   if (req.url.startsWith('/_test/')) {
@@ -171,21 +180,25 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json')
     return res.end(JSON.stringify({ frozen, net, sent, computers: ctx.getWebSockets('host').length, phones: ctx.getWebSockets('phone').length }))
   }
-  const r = await worker.default.fetch(request(req), env)
+  await serve(req, res, env, port)
+})
+async function serve(req, res, e, at) {
+  const r = await worker.default.fetch(request(req, at), e)
   const body = Buffer.from(await r.arrayBuffer())
   sent.page += body.byteLength
   // A file of the page, over the phone's network: there and back, and its bytes.
   await later(net.ms * 2 + (net.kbps ? (body.byteLength * 8) / net.kbps : 0))
   res.writeHead(r.status, Object.fromEntries(r.headers))
   res.end(body)
-})
+}
 
-server.on('upgrade', async (req, socket, head) => {
+server.on('upgrade', (req, socket, head) => upgrade(req, socket, head, env, port))
+async function upgrade(req, socket, head, e, at) {
   // A computer with no network doesn't get here.
   if (away && req.url.startsWith('/_relay/host')) return socket.destroy()
   // Connecting takes a trip there and back.
   await later((req.url.startsWith('/_relay/host') ? net.host : net.ms) * 2)
-  const r = await worker.default.fetch(request(req), env)
+  const r = await worker.default.fetch(request(req, at), e)
   if (!r.upgrade) { socket.end(`HTTP/1.1 ${r.status} ${http.STATUS_CODES[r.status] || ''}\r\n\r\n`); return }
   const end = r.webSocket.server
   wss.handleUpgrade(req, socket, head, (real) => {
@@ -216,6 +229,11 @@ server.on('upgrade', async (req, socket, head) => {
     })
     real.on('error', () => {})
   })
-})
+}
 
 server.listen(Number(port), '127.0.0.1', () => console.log(`relay stand-in on ${port}`))
+if (sharePort) {
+  const share = http.createServer((req, res) => serve(req, res, shareEnv, sharePort))
+  share.on('upgrade', (req, socket, head) => upgrade(req, socket, head, shareEnv, sharePort))
+  share.listen(Number(sharePort), '127.0.0.1', () => console.log(`its share address on ${sharePort}`))
+}

@@ -13,7 +13,8 @@
 // installed, not signed in, at its usage limit, a provider's error (a key turned down, a 429, a 5xx,
 // no network), a server on this computer that isn't running, or a command line that never got going.
 // An answer, or NO ANSWER, is an answer. When none can, the question is passed to you with each one's
-// reason (frontdesk.js).
+// reason (frontdesk.js). A model's name and why it can't run now are modellist.js's, as they are for
+// each kind of job's own list (modeljobs.js).
 //
 // A model answers through Bridge AI's own tools (runChat below): it reads, searches and lists only
 // inside the bot's folders (their real paths, so a link out of them is refused, as Claude Code's
@@ -27,6 +28,7 @@ import path from 'node:path'
 import { adapter, readOnly, canChange } from './agents.js'
 import { HOME } from './paths.js'
 import * as botmcp from './botmcp.js'
+import * as modelList from './modellist.js'
 
 const AGENTS = ['claude', 'codex']
 const ID = /^(agent:(claude|codex)(:[\w.-]{1,60})?|model:[a-z][\w-]*:[^\s]{1,200})$/
@@ -39,14 +41,13 @@ export function entryOf(id) {
   return { id: s, kind: 'model', model: s.slice(6) }
 }
 // Whether it runs on this computer (a model here), or elsewhere (an agent's provider, a key's).
-export const isLocal = (e) => e?.kind === 'model' && /^(ollama|lmstudio|bridge):/.test(e.model)
+export const isLocal = (e) => e?.kind === 'model' && modelList.isLocal(e.model)
 export const canMakeChanges = (e) => e?.kind === 'agent' && canChange(e.agent)
 // Its name, as it's shown and said: Claude Code (opus), or a model as Model Providers names it.
 export function labelOf(e, models = []) {
   if (!e) return ''
   if (e.kind === 'agent') return `${adapter(e.agent).label}${e.model ? ` (${e.model})` : ''}`
-  const m = models.find((x) => x.id === e.model)
-  return m ? `${m.label}${m.provider ? ` · ${m.provider}` : ''}` : e.model.split(':').slice(1).join(':') || e.model
+  return modelList.labelOf(e.model, models)
 }
 
 // What can be picked here: each agent that can only read (on its usual model, or one of its own),
@@ -84,8 +85,7 @@ export function notReady(e, { installed = [], models = [], signedIn = {} }) {
     if (signedIn[e.agent] === false) return `${adapter(e.agent).label} isn't signed in here`
     return null
   }
-  if (models.some((m) => m.id === e.model)) return null
-  return isLocal(e) ? `${labelOf(e, models)} isn't running on this computer` : `${labelOf(e, models)} isn't set up here: no key for it in Model Providers`
+  return modelList.whyNot(e.model, models)
 }
 
 // ---------- A model answering ----------

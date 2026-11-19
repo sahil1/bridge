@@ -489,7 +489,8 @@ async function ask(model, messages, system, more = {}) {
   const use = model || await helpers.pickModel?.()
   if (!use) throw Object.assign(new Error('No model to draw with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers'), { code: 'noModel' })
   const r = await helpers.reply(use, messages, { system, ...more, feature: 'board' })
-  return { text: String(r?.text || '').trim(), model: use }
+  // (Another in Diagrams' own list, when that one couldn't answer: index.js replyFor.)
+  return { text: String(r?.text || '').trim(), model: r?.model || use }
 }
 
 // The Mermaid in a model's answer: a ```mermaid block, else the first fenced block, else the answer

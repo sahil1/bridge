@@ -34,6 +34,31 @@ this:
   Android apps carry their own copy, and a pairing link opens them when they're installed (Pairing
   links open the apps, below). One address per computer keeps each pairing, service worker and
   saved copy apart, as before.
+- Share Links (server/shares.js) open at an address of each link's own, `https://<id>-<8 letters>.<domain>`
+  (still one level down), so each link is a site of its own to a browser, apart from the phone page
+  and from every other link. That address serves only the page a link opens (`share.html`,
+  `share.js`, `share-sw.js`, `link.js`) and its connection, `/_relay/view`, which goes to the
+  computer's Hub; never the phone page, `/_relay/host` or `/_relay/link`, and the computer's own
+  address never serves the link's page. With a share domain (`SHARE_DOMAIN`), what a link shows is
+  at `https://<id>-<8 letters>.<share domain>`, a site apart from the link's page (which alone holds
+  its secret and its connection): that address serves only `/_relay/frame` (which only the link's
+  own page may frame), `share-frame.js` and `share-sw.js`, and no connection at all. The share
+  domain must be a registrable domain of its own on the Public Suffix List, never a name under
+  `HOSTED_DOMAIN`, so no link's content shares a site with a phone's page or another link's. Until
+  it's set, `/_relay/health` doesn't say one and computers share no site or app here (only files,
+  folders without web pages and Studio documents, shown with scripts off). A link's page is a
+  stranger to the relay until the computer vouches for it (once it's let in: the link's secret
+  proved, and its password or code given); then what it carries counts against the account, within
+  what links may carry apart from the phones (`VIEW_*`), at a pace of their own, never drawing on
+  the phones' `MESSAGES_PER_SECOND`. Each computer has `MAX_VIEWERS` such pages open at once that it
+  has let in (vouched for), 10 for any one link (the computer's count), apart from its phones. A
+  page it has welcomed (the link's secret proved: the relay sees the computer's welcome, in the
+  clear) but not let in yet keeps its place, 6 such on a link and 2 from one address there (its
+  oldest making room), and the computer lets it go a while after its last try. Pages not
+  welcomed yet wait in a room of their own, 16 at once and 4 from one IP address (kept as a hash with
+  the connection while it's open), the oldest (first those that haven't said which link) making room
+  for the next, so nobody can push out a page that's waiting for its password. The relay tells the
+  computer the country Cloudflare says a page is in, and nothing else about it.
 - Any other name under the domain gets a plain 404: names that aren't an id, reserved names (www,
   api, relay, admin and a few more), names two levels down, and ids that aren't registered (or were
   removed). Ids end in two checksum characters keyed with a secret only the relay has (`ID_SECRET`),
@@ -115,6 +140,13 @@ belongs to the relay.
   default) covers `boldbridge.app` and `*.boldbridge.app`; carry on while it goes Active (often 5 to
   15 minutes). Edge Certificates lists both names once it is. (Nothing goes to an origin, so the
   SSL/TLS mode doesn't matter.)
+- [ ] **The share domain** (owner), for Share Links of sites and apps: a second domain of its own
+  (not a name under boldbridge.app or boldbridge.ai), added to Cloudflare as above with the same
+  two proxied records, then listed on the Public Suffix List (a pull request to
+  github.com/publicsuffix/list, in its private section, which takes weeks; browsers pick it up with
+  their next releases). Then a route for `*.<share domain>/*` in wrangler.hosted.toml and
+  `SHARE_DOMAIN` in `[vars]`. Until then, links work for files, folders without web pages and
+  Studio documents.
 - [ ] **DNSSEC and the registrar lock** (owner): boldbridge.app › DNS › Settings › DNSSEC › Enable.
   With Cloudflare Registrar the DS record goes to the registry by itself; bought elsewhere, add the
   DS record it shows at the registrar. And the registrar lock on (Cloudflare Registrar: Domain
@@ -236,6 +268,16 @@ per computer unless it says it's per account or for the whole relay.
 | `ACCOUNTS_PUBLIC_KEY` | `FqJDwoi18T2Ip2TSLiPxhoP0L56mGOOu_0Zfu4jjr_s` | The accounts service's public key, which every relay token is checked with; while its key is being changed, the old and the new, comma separated, the old first (a token says which key signed it: account/README.md, Changing the signing key). Empty, no computer can register or connect. |
 | `HOSTED_OFF` | `0` | The kill switch (below). |
 | `MAX_PHONES` | `16` | Connections to one computer at once: the same as a personal relay. Strangers who haven't paired make room for paired phones. |
+| `MAX_VIEWERS` | `32` | Share Link pages let in on one computer at once, apart from its phones (each page is a connection), and 10 for any one link. Pages still to give a password or code are held apart (6 on a link, 2 from one address there), and pages not welcomed yet wait apart (16 at once, 4 from one address); neither ever pushes out a page let in. Full, one more is told so and tries again in a minute. |
+| `SHARE_DOMAIN` | | What Share Links show, at `<id>-<8 letters>.<share domain>`: a registrable domain of its own on the Public Suffix List (Going live). Unset, computers share no sites or apps here. |
+| `VIEW_WINDOW_MESSAGES` | `60000` | Per computer, in its account's window: messages all its Share Links' pages may carry, so people viewing links never use up what the phones need. |
+| `VIEW_LINK_WINDOW_MESSAGES` | `30000` | The same for any one link. |
+| `VIEW_MESSAGES_PER_SECOND` | `20` | One link's page, once let in: messages a second on average, with `VIEW_MESSAGE_BURST` at once (a site's first load is a few hundred). Past it, that page is told to wait and closed. |
+| `VIEW_MESSAGE_BURST` | `400` | How many may come at once before `VIEW_MESSAGES_PER_SECOND` applies. |
+| `VIEW_ALL_MESSAGES_PER_SECOND` | `50` | All of one computer's link pages together, a pace of their own, well below `MESSAGES_PER_SECOND`, which they never draw on. |
+| `VIEW_ALL_MESSAGE_BURST` | `1000` | How many may come at once before `VIEW_ALL_MESSAGES_PER_SECOND` applies. |
+| `VIEW_WEEK_MESSAGES` | `250000` | Per computer, in a week from its links' first message: what all its links may carry, a quarter of `ACCOUNT_WEEK_MESSAGES`, so links never use up the account's week. |
+| `VIEW_LINK_WEEK_MESSAGES` | `100000` | The same for any one link. |
 | `MAX_MESSAGE_KB` | `256` | One message. Bridge AI's largest is 192 KB (a piece of a big file) plus a little; notes for an offline computer are 64 KB at most. |
 | `MESSAGES_PER_SECOND` | `200` | Incoming messages a second, on average, with `MESSAGE_BURST` at once. A phone watching an agent's terminal, the busiest normal use, sends and gets about 4 a second; opening the app for the first time is about 150 in a few seconds. This only stops floods. |
 | `MESSAGE_BURST` | `2000` | How many may come at once before `MESSAGES_PER_SECOND` applies. |
@@ -283,7 +325,9 @@ allowance; what it does stop is anyone else using that allowance: a connection t
 vouched for has a small allowance of its own (What happens at a limit) and costs the account
 nothing. An account at its limits every week costs about $0.06 a month past what's included; a
 typical one (an hour or two of phone use a day) under a cent. They're generous on purpose: nobody
-should meet one in normal use.
+should meet one in normal use. A Share Link's page counts as a phone does once its computer vouches
+for it (when it's let in), within the same allowance and within what links may carry (`VIEW_*`), so
+links never add to what an account may use, nor to the bill's bounds below, nor use up its phones'.
 
 Per-account limits alone don't bound the bill; with `MAX_ACCOUNTS` they do, and
 `RELAY_DAILY_REQUESTS` bounds it if `MAX_ACCOUNTS` is raised (Cost).
@@ -309,7 +353,9 @@ a paired phone uses is cut off without a word; a connection the computer hasn't 
   is told too, and Settings › Account & Devices shows it while it lasts.
 - **Too many connected**: with `MAX_PHONES` paired phones and tabs connected (strangers make room
   first), one more is told so ("Bridge AI's relay takes 16 connections to one computer at once…")
-  and tries again a minute later; the computer is told a phone was turned away, and why.
+  and tries again a minute later; the computer is told a phone was turned away, and why. A Share
+  Link's page the same with `MAX_VIEWERS` let in (counted as `viewers` in `/_relay/stats`), or 6
+  held on its link.
 - **The account's window or week used up**: every computer of the account, and its phones, hear
   `{ t: "limit", why: "window" | "week", until }`, with words: "This computer's Bold Bridge account
   has used its allowance on Bridge AI's relay for now (150,000 messages in 8 hours). It resets at
