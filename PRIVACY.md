@@ -262,6 +262,16 @@ branch) to the repository's own remote, and opens a draft pull request there wit
 description) are then on GitHub, as any pull request you open is. It never merges and never pushes to
 your default branch. With Suggest, none of that happens until you approve the diff.
 
+If you let a bot edit files in its folders (Settings › Bots › Changes › Edits Files in Its Folders),
+its agent edits only a copy of the folders you picked for it, in `~/.bridge-ai/front-desk/writes/`
+(deleted when it's done), with no commands and no network. Bridge AI takes what changed there and
+makes it in your folders itself, on your computer: at once for you and the people you listed, and
+for anyone else once you approve it, from Needs You or your direct messages. What waits for you is
+shown there with its diff. Each change, and the files before and after it, are kept with the bot's
+record in `~/.bridge-ai/bots/<bot>/writes/`, readable by you only, for Undo, and deleted with its
+record. A request to such a bot may be read first by AI Assist's model, if you have one, to say
+whether it looks odd; it goes nowhere else for that.
+
 A bot's file (Settings › Bots › Export, or `bridge-ai bots export`) holds its instructions, the
 settings you gave it (with the Slack names and ids of the people who may ask) and what it remembers,
 never its tokens; it goes where you save it. A scheduled post is a routine in

@@ -372,8 +372,70 @@ export function OutsideItem({ it, onDone, setNote }) {
 const sizeOf = (n) => (n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 const whereOf = (it) => (it.place?.kind === 'dm' ? t('in a direct message') : it.place?.name ? t('in #{channel}', { channel: it.place.name }) : t('in a channel'))
 const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+// A request to a bot that changes files, held before it started, is a card of its own (ScreenItem);
+// a change to files with a draft shows in it, with Approve and Send or Deny while it waits, and Undo
+// once it's made.
 export function SlackItem(props) {
-  return props.it.limit?.phase === 'asking' ? <LimitItem {...props} /> : <DraftItem {...props} />
+  return props.it.state === 'screened' ? <ScreenItem {...props} /> : props.it.limit?.phase === 'asking' ? <LimitItem {...props} /> : <DraftItem {...props} />
+}
+
+// A request held before it started (server/frontdesk.js screenAct): who asked, where and what, why it
+// was held, and Allow Once (it goes ahead, under every limit as always) or Deny (they're told).
+function ScreenItem({ it, onDone, setNote }) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState(null)
+  const who = it.from?.name || t('Someone')
+  const bot = it.bot?.name || t('Your bot')
+  const go = async (allow) => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      const out = await onDevice(null, `/bots/questions/${encodeURIComponent(it.id)}/screen`, { allow })
+      onDone(it)
+      setNote({ text: out.already ? t('That isn\'t waiting any more') : allow ? t('{bot} goes ahead with it, once', { bot }) : t('Denied: {name} is told', { name: who }) })
+    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <article className="ny-item t-slack t-screen yours" aria-label={t('{name} asked {bot} {where}, held for you', { name: who, bot, where: whereOf(it) })}>
+      <div className="ny-top">
+        <Icon name="alert" size={12} />
+        <span className="ny-kind">{t('Held before it started')}</span>
+        <span className="ny-age" title={new Date(it.at).toLocaleString()}>{ago(it.at)}</span>
+        <span className="ny-grow" />
+        <span className="ny-device here" title={t('Through {bot} (Settings › Bots)', { bot })}><Icon name="chat" size={11} />{bot}</span>
+      </div>
+      <p className="ny-text">{t('{name} asked {where}:', { name: who, where: whereOf(it) })}</p>
+      <p className="ny-said">“{it.text}”</p>
+      {(it.more || []).map((m, i) => <p key={i} className="ny-said ny-more"><span className="muted small">{t('Then {name}:', { name: m.from?.name || t('Someone') })}</span> “{m.text}”</p>)}
+      <p className="muted small ny-from"><Icon name="info" size={11} /> {t('It wasn\'t started, as {why}. Allow it once to let it go ahead: every limit still holds, and a change still shows you its diff.', { why: it.screen?.why || t('it looks odd') })}</p>
+      {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
+      <div className="ny-acts">
+        <button type="button" className="btn small" disabled={busy} onClick={() => go(true)}><Icon name="play" size={12} /> {t('Allow Once')}</button>
+        <button type="button" className="btn small primary" disabled={busy} onClick={() => go(false)}><Icon name="x" size={12} /> {t('Deny')}</button>
+      </div>
+    </article>
+  )
+}
+
+// A change to files with a draft: what it changes, who asked, why it waits for you whoever asks, and
+// its diff; made already, Undo.
+function WriteOf({ it, onUndo, busy }) {
+  const w = it.write
+  if (!w) return null
+  const files = (w.files || []).map((f) => `${f.path}${f.op === 'add' ? ` (${t('new')})` : f.op === 'remove' ? ` (${t('deleted')})` : f.op === 'move' ? ` (${t('moved from {from}', { from: f.from })})` : ''}`)
+  const line = w.state === 'waiting' ? t('It changed {files} in its copy. Approve it, and Bridge AI makes the change, then sends the reply.', { files: files.join(', ') })
+    : w.state === 'applied' ? t('It changed {files}, without asking you.', { files: files.join(', ') })
+      : w.state === 'refused' ? t('Its change was refused, so nothing was changed.')
+        : w.state === 'undone' ? t('Its change was undone.') : w.state === 'failed' ? t('Its change couldn\'t be made: {why}', { why: w.error || '' }) : null
+  return (
+    <div className="ny-write" data-setting="ny-write">
+      {line && <p className="muted small ny-from"><Icon name="file" size={11} /> {line}</p>}
+      {(w.held || []).map((h) => <p key={h.why} className="muted small ny-from ny-held"><Icon name="alert" size={11} /> {t('It waits for you whoever asks: {why}', { why: h.said })}</p>)}
+      {(w.refused || []).slice(0, 5).map((r, i) => <p key={i} className="muted small ny-from ny-held"><Icon name="alert" size={11} /> {r.file}: {r.said}</p>)}
+      {w.diff && <pre className="ny-change" aria-label={t('The diff')}>{w.diff}</pre>}
+      {w.state === 'applied' && onUndo && <div className="ny-acts"><button type="button" className="btn small" disabled={busy} onClick={onUndo}><Icon name="undo" size={12} /> {t('Undo the change')}</button></div>}
+    </div>
+  )
 }
 
 // Continue or Stop, for a run at its time limit (server/frontdesk.js limitAct): on the computer it
@@ -438,6 +500,8 @@ function DraftItem({ it, onDone, setNote }) {
   const bot = it.bot?.name || t('Your bot')
   const change = it.change || null
   const approve = change?.mode === 'suggest' && !change.pr?.url
+  // (A change to files waiting on you: Send approves that change, named by its hash, and Discard denies it.)
+  const writes = it.write?.state === 'waiting'
   const from = it.needsOwner ? t('Nothing could answer it: {why}. {name} was told it\'s passed on to you.', { why: it.why || '', name: who })
     : r?.to === 'agent' ? t('Answered by a read-only copy of {agent}\'s conversation.', { agent: r.name })
       : r?.to === 'throwaway' ? t('{bot} answered from what it knows: it reads no folders.', { bot })
@@ -446,17 +510,25 @@ function DraftItem({ it, onDone, setNote }) {
     setBusy(true)
     setProblem(null)
     try {
-      const out = await onDevice(null, `/bots/questions/${encodeURIComponent(it.id)}`, { send, text })
+      const out = await onDevice(null, `/bots/questions/${encodeURIComponent(it.id)}`, { send, text, ...(writes ? { write: { id: it.write.id, hash: it.write.hash } } : {}) })
       if (out.item?.state === 'draft') { setProblem(out.item.problem || null); return }
       onDone(it)
-      setNote({ text: !send ? t('Discarded: nothing sent') : out.item?.state === 'sent' ? t('Sent to {name} in Slack', { name: who }) : t('Sending to Slack: {why}', { why: out.item?.problem || t('in a moment') }) })
+      setNote({ text: writes ? (send ? t('Approved: the change is made, and the reply is on its way to {name}', { name: who }) : t('Denied: nothing was changed, and {name} is told', { name: who })) : !send ? t('Discarded: nothing sent') : out.item?.state === 'sent' ? t('Sent to {name} in Slack', { name: who }) : t('Sending to Slack: {why}', { why: out.item?.problem || t('in a moment') }) })
+    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
+  }
+  const undo = async () => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      await onDevice(null, `/bots/${encodeURIComponent(it.bot?.id || '')}/writes/${encodeURIComponent(it.write.id)}/undo`, {})
+      setNote({ text: t('Undone: the files are back as they were.') })
     } catch (e) { setProblem(e.message) } finally { setBusy(false) }
   }
   return (
     <article className={`ny-item t-slack ${it.needsOwner ? 'yours' : ''}`} aria-label={t('{name} asked {where}', { name: who, where })}>
       <div className="ny-top">
         <Icon name="chat" size={12} />
-        <span className="ny-kind">{it.needsOwner ? t('Needs your reply') : t('Answer to check')}</span>
+        <span className="ny-kind">{it.needsOwner ? t('Needs your reply') : writes ? t('A change to approve') : t('Answer to check')}</span>
         <span className="ny-age" title={new Date(it.at).toLocaleString()}>{ago(it.at)}</span>
         <span className="ny-grow" />
         <span className="ny-device here" title={t('Through {bot} (Settings › Bots)', { bot })}><Icon name="chat" size={11} />{bot}</span>
@@ -474,12 +546,13 @@ function DraftItem({ it, onDone, setNote }) {
           {change.diff && <pre className="ny-change" aria-label={t('The diff')}>{change.diff}</pre>}
         </>
       )}
+      <WriteOf it={it} onUndo={undo} busy={busy} />
       {it.ownerAsked && <p className="muted small ny-from"><Icon name="chat" size={11} /> {t('Also in your Slack direct messages: answer it there or here.')}</p>}
       <textarea className="ny-draft" value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(8, Math.max(3, text.split('\n').length + 1))} placeholder={t('Write the reply…')} aria-label={t('Reply to {name}', { name: who })} disabled={busy || limit.busy} />
       {(problem || limit.problem) && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem || limit.problem}</p>}
       <div className="ny-acts">
-        <button type="button" className="btn small primary" disabled={busy || limit.busy || !text.trim()} onClick={() => decide(true)}><Icon name={approve ? 'branch' : 'send'} size={12} /> {busy ? t('Sending…') : approve ? t('Approve and open a pull request') : t('Send')}</button>
-        <button type="button" className="btn small" disabled={busy || limit.busy} onClick={() => decide(false)}>{t('Discard')}</button>
+        <button type="button" className="btn small primary" disabled={busy || limit.busy || !text.trim()} onClick={() => decide(true)}><Icon name={approve ? 'branch' : writes ? 'check' : 'send'} size={12} /> {busy ? t('Sending…') : approve ? t('Approve and open a pull request') : writes ? t('Approve and Send') : t('Send')}</button>
+        <button type="button" className="btn small" disabled={busy || limit.busy} onClick={() => decide(false)}>{writes ? t('Deny') : t('Discard')}</button>
       </div>
       {it.limit?.phase === 'stopped' && (
         <div className="ny-limit">
