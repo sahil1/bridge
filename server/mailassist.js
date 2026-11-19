@@ -130,14 +130,14 @@ export function makeMailAssist({ cfg, mail, calendar, meetings, chat, zone }) {
       const j = objectIn(r.text)
       const bullets = Array.isArray(j?.profile) ? j.profile.map((x) => String(x).trim()).filter(Boolean)
         : String(r.text || '').split('\n').map((x) => x.replace(/^\s*[-*•]\s*/, '').trim()).filter((x) => x && !/^[{}[\]]/.test(x))
-      if (!bullets.length) throw fail(`${chat.describe(use)} answered, but not with a profile Bridge AI can read. Try Learn again.`)
+      if (!bullets.length) throw fail(`${chat.describe(r.model || use)} answered, but not with a profile Bridge AI can read. Try Learn again.`)
       const picked = (Array.isArray(j?.examples) ? j.examples : []).map((x) => Number(/(\d+)/.exec(String(x))?.[1]) - 1).filter((n) => sent.items[n])
       const chosen = (picked.length ? [...new Set(picked)].map((n) => sent.items[n]) : [...sent.items].sort((a, b) => a.text.length - b.text.length).slice(0, 3)).slice(0, 3)
       const v = {
         profile: bullets.slice(0, 10).map((b) => `- ${clip(b, 240)}`).join('\n'),
         examples: chosen.map((e) => ({ text: clip(e.text, 700), to: e.to, subject: clip(e.subject, 120), at: e.sent })),
         learntAt: new Date().toISOString(),
-        model: use,
+        model: r.model || use,
         from: { replies: sent.items.length, lines: said.items.length, meetings: said.meetings },
       }
       saveVoice(v)
@@ -210,13 +210,15 @@ export function makeMailAssist({ cfg, mail, calendar, meetings, chat, zone }) {
       throw fail(`${chat.describe(use)} couldn't write it: ${e.message}`, e.code === 'limit' ? 'limit' : null)
     }
     const out = plain(r.text)
-    if (!out) throw fail(`${chat.describe(use)} sent back an empty answer. Try again.`)
+    // (Another in Mail's own list, when that one couldn't answer: modeljobs.js.)
+    const by = r.model || use
+    if (!out) throw fail(`${chat.describe(by)} sent back an empty answer. Try again.`)
     // Learnt again now and then, while you use it, unless you changed it yourself.
     if (voice && v?.learntAt && !v.editedAt && Date.now() - Date.parse(v.learntAt) > STALE && cfg.mail?.learn !== false) learn().catch(() => {})
     const reTo = nudge ? msg.to : msg.replyTo || msg.from || (row?.address ? `${row.from} <${row.address}>` : '')
     return {
       draft: out,
-      model: use, modelLabel: chat.describe(use), local: chat.isLocal(use),
+      model: by, modelLabel: chat.describe(by), local: chat.isLocal(by),
       sent: { email: !!latest, quoted: !!quoted, profile: !!v?.profile, examples: examples.length, times: slots.length, draft: !!(tweak && text) },
       prompt: `${DRAFT_SYSTEM}\n\n${ask}`,
       reply: { to: addrOf(reTo) ? [{ name: nameOf(reTo), address: addrOf(reTo) }] : [], cc: nudge ? [] : String(msg.cc || '').split(',').map((x) => addrOf(x)).filter(Boolean), subject: /^(re|aw|sv|antw?):/i.test(subject) ? subject : `Re: ${subject}` },

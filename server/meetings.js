@@ -31,6 +31,7 @@ import { DECK_RULES } from './studio.js'
 import { canOpen } from './files.js'
 import { mayLook, noteAsked } from './projects.js'
 import { isLimit, search as searchWeb, searchVia } from './consult.js'
+import * as modelList from './modellist.js'
 
 const DIR = path.join(DATA, 'meetings')
 const RATE = 16000
@@ -1461,15 +1462,15 @@ const SEEN_SAYS = 'A line may say who the call\'s video showed talking while it 
 // while someone on the call talked shows who that was: glance; and, from its video, whose mouth was
 // moving as each line was said: sights.js) and who was invited. A line it can't place stays Them;
 // the ones you named yourself are left as they are.
-// anywhere: with model, as choose() says it for the summary that asked.
-export async function nameSpeakers(id, { model, anywhere = false } = {}) {
+// anywhere: with model, as choose() says it for the summary that asked; or pick, that whole.
+export async function nameSpeakers(id, { model, anywhere = false, pick: given = null } = {}) {
   const m = meta(id)
-  const pick = model ? { id: model, anywhere } : await choose(m, null, 'notes', transcriptText(id))
+  const pick = given || (model ? { id: model, anywhere } : await choose(m, null, 'notes', transcriptText(id)))
   const use = pick.id
   if (!use) throw noModel()
   const told = voices.of(id)
-  if (told?.speakers >= 2 && (told.src || 'you') === 'you' && !transcript(id).some((l) => l.src === 'them' && l.text)) return nameVoices(id, use, { anywhere: pick.anywhere })
-  if ((told?.src === 'them' || told?.src === 'both') && told.speakers >= 2) return nameVoices(id, use, { call: true, anywhere: pick.anywhere })
+  if (told?.speakers >= 2 && (told.src || 'you') === 'you' && !transcript(id).some((l) => l.src === 'them' && l.text)) return nameVoices(id, use, { pick })
+  if ((told?.src === 'them' || told?.src === 'both') && told.speakers >= 2) return nameVoices(id, use, { call: true, pick })
   const said = transcript(id).filter((l) => l.text)
   if (!said.some((l) => l.src === 'them')) throw new Error('Nobody on the call was heard in this meeting')
   const me = String(cfg.name || '').trim()
@@ -1496,7 +1497,7 @@ export async function nameSpeakers(id, { model, anywhere = false } = {}) {
   let used = use
   await roomy(use, 'working out who said what')
   await inPieces(rows.join('\n'), (await budget(use, rows.join('\n'))) - ask.length - 2000, async (part) => {
-    const r = await jsonReply(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You work out who said what in a meeting transcript. You are careful and say null when unsure.', anywhere: pick.anywhere }, { schema: NAMES_SCHEMA, check: namesOk })
+    const r = await jsonReply(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You work out who said what in a meeting transcript. You are careful and say null when unsure.', ...how(pick) }, { schema: NAMES_SCHEMA, check: namesOk })
     used = r.model
     Object.assign(got, r.value || {}) // not JSON: nothing from this part
   })
@@ -1521,7 +1522,7 @@ export async function nameSpeakers(id, { model, anywhere = false } = {}) {
 // they talked (glances) and whose mouth moved on its video (sights.js). A room on a call (src both)
 // has the call's voices and your mic's, and one of your mic's is you. A voice you named yourself is
 // left as it is; one it can't place stays Speaker n.
-async function nameVoices(id, use, { call = false, anywhere = false } = {}) {
+async function nameVoices(id, use, { call = false, pick = null } = {}) {
   const m = meta(id)
   const said = transcript(id).filter((l) => l.text)
   const room = voices.of(id)
@@ -1549,7 +1550,7 @@ async function nameVoices(id, use, { call = false, anywhere = false } = {}) {
   let used = use
   await roomy(use, 'working out who said what')
   await inPieces(rows.join('\n'), (await budget(use, rows.join('\n'))) - ask.length - 2000, async (part) => {
-    const r = await jsonReply(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You work out who said what in a meeting transcript. You are careful and say null when unsure.', anywhere }, { schema: NAMES_SCHEMA, check: namesOk })
+    const r = await jsonReply(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You work out who said what in a meeting transcript. You are careful and say null when unsure.', ...how(pick) }, { schema: NAMES_SCHEMA, check: namesOk })
     used = r.model
     for (const [k, v] of Object.entries(r.value || {})) if (got[k] == null) got[k] = v // not JSON: nothing from this part
   })
@@ -1632,7 +1633,7 @@ export function cleanup(id, { model } = {}) {
     const ctx = await contextOf(use)
     const room = (await budget(use, rows.join('\n'), { answer: ctx ? Math.floor(ctx / 3) : undefined })) - ask.length - 2000
     await inPieces(rows.join('\n'), ctx ? Math.min(60_000, room) : Math.max(8000, Math.min(60_000, room)), async (part) => {
-      const r = await jsonReply(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You correct speech-to-text transcripts. You change only what was clearly misheard, and say so with JSON.', anywhere: pick.anywhere }, { schema: CLEANUP_SCHEMA, check: cleanupOk })
+      const r = await jsonReply(used, [{ role: 'user', text: `${ask}\n\nTranscript:\n${part}` }], { system: 'You correct speech-to-text transcripts. You change only what was clearly misheard, and say so with JSON.', ...how(pick) }, { schema: CLEANUP_SCHEMA, check: cleanupOk })
       used = r.model
       if (!r.value) return // not JSON: nothing from this part
       Object.assign(got.fix, r.value.fix && typeof r.value.fix === 'object' ? r.value.fix : {})
@@ -2235,39 +2236,47 @@ function marksFor(notes, captures = []) {
 
 // ---------- Summary, questions, saving ----------
 // index.js hands over the model call (chatmodels.reply), the pick of model and the models there
-// are, best first, and the model for a kind of job by its size (pickFor, modeljobs.js) (setHelpers).
-let helpers = { reply: null, pickModel: null, pickFor: null, models: null, mailRelated: null, mailMessage: null }
+// are, best first, the model for a kind of job by its size (pickFor, modeljobs.js), its own list
+// (ownOf) and where each of its runs is noted (ran) (setHelpers).
+let helpers = { reply: null, pickModel: null, pickFor: null, models: null, ownOf: null, ran: null, mailRelated: null, mailMessage: null }
 export const setHelpers = (h) => { helpers = { ...helpers, ...h } }
 
 // The model for a job on a meeting: the one asked for, the meeting's own pick, Settings › Voice &
 // Meetings' pick, else the one for that kind of job (Settings › Model Providers) by what it reads
-// (text): with Auto, the local model for a short one. { id, anywhere, auto }: anywhere, it may go to
-// a model elsewhere when the one here can't run it (Auto put it here; you didn't); auto: how
-// pickFor chose. Set to stay on this computer and it can't: the error says why.
+// (text): its own model, or with Auto the local model for a short one. { id, anywhere, auto, own,
+// passed, job }: anywhere, it may go to a model elsewhere when the one here can't run it (Auto put it
+// here; you didn't); auto: how pickFor chose; own: the job's own list, which a model in it falls back
+// along instead (passed: the ones in it passed over first, and why). Set to stay on this computer,
+// or a list none of which can run now: the error says why.
 async function choose(m, model, job, text, o = {}) {
   const set = model || m?.summaryModelPick || cfg.meetings?.model
-  if (set) return { id: set, anywhere: false, auto: null }
-  if (!helpers.pickFor) return { id: await helpers.pickModel(), anywhere: false, auto: null }
+  const own = helpers.ownOf?.(job) || null
+  if (set) return { id: set, anywhere: false, auto: null, own, passed: [], job }
+  if (!helpers.pickFor) return { id: await helpers.pickModel(), anywhere: false, auto: null, own, passed: [], job }
   const r = await helpers.pickFor(job, { text, ...o })
-  return { id: r.id, anywhere: !r.kept, auto: r }
+  return { id: r.id, anywhere: !r.kept, auto: r, own, passed: r.passed || [], job }
 }
+// What replyAny goes on with from a pick.
+const how = (pick) => ({ anywhere: !!pick?.anywhere, own: pick?.own || null, passed: pick?.passed || [], job: pick?.job || null, picked: pick?.id || null })
 
 // A model call that a dropped connection doesn't end: the same model again (twice, a few seconds
 // apart, when it looks like the network or a busy service), then up to three of the other models
 // you have. The answer says which model wrote it. Only when none can is it an error. A model on
 // this computer is only ever followed by another on this computer: what you kept here stays here.
 // Unless Auto put it here (o.anywhere: a short job, with your cloud model there too): then your
-// cloud model is next. A prompt too long for the model isn't passed on either: it goes again in
-// smaller pieces (inPieces).
+// cloud model is next. A job with a list of its own (o.own) goes on along the rest of it instead, as
+// it says (modellist.js). A prompt too long for the model isn't passed on either: it goes again in
+// smaller pieces (inPieces). Each call is noted for its job (o.job: modeljobs.js ran), with what was
+// passed over and why.
 const RETRY_MS = Number(process.env.BRIDGE_MODEL_RETRY_MS || 3000)
 const passing = (e) => /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|EPIPE|socket hang up|fetch failed|network|connection|overloaded|rate.?limit|too many requests|timed? ?out|\b(429|500|502|503|504|529)\b/i.test(String(e?.message || e))
-const isLocal = (id) => /^(ollama|lmstudio|bridge):/.test(String(id || ''))
+const isLocal = modelList.isLocal
 // o.feature: what's noted with what each answer took (usagelog.js): meeting notes unless said.
-async function replyAny(use, msgs, { anywhere = false, ...o0 } = {}) {
+async function replyAny(use, msgs, { anywhere = false, own = null, passed = [], job = null, picked = null, ...o0 } = {}) {
   const o = { feature: 'meetings', ...o0 }
-  const once = async (id) => {
+  const once = async (id, more = {}) => {
     for (let i = 0; ; i++) {
-      try { return { ...(await helpers.reply(id, msgs, o)), model: id } } catch (e) {
+      try { return { ...(await helpers.reply(id, msgs, { ...o, ...more })), model: id } } catch (e) {
         // A model on this computer that ran out of time was working, not cut off: no second go.
         // At its usage limit (on every account it has): not something a few seconds fix.
         if (i >= 2 || !passing(e) || e.code === 'too_long' || e.code === 'limit' || (isLocal(id) && /Timeout|Abort/.test(e.name))) throw e
@@ -2275,12 +2284,23 @@ async function replyAny(use, msgs, { anywhere = false, ...o0 } = {}) {
       }
     }
   }
-  try { return await once(use) } catch (first) {
-    if (first.code === 'too_long' && !(anywhere && isLocal(use))) throw first
-    const others = ((await helpers.models?.().catch(() => [])) || []).filter((id) => id !== use && (anywhere || !isLocal(use) || isLocal(id))).slice(0, 3)
-    for (const id of others) { try { return { ...(await once(id)), fellBack: use, why: first.message } } catch { /* next */ } }
-    first.tried = [use, ...others]
-    throw first
+  const ran = (r) => { if (job) helpers.ran?.(job, r) }
+  const before = use === picked ? passed : []
+  try { const r = await once(use); ran({ model: use, passed: before }); return r } catch (first) {
+    const failed = modelList.failed(use, first)
+    const rest = modelList.after(own, use)
+    if (first.code === 'too_long' && (rest || !(anywhere && isLocal(use)))) { ran({ passed: [...before, failed], error: failed.why }); throw first }
+    const all = (await helpers.models?.().catch(() => [])) || []
+    const others = rest || all.filter((id) => id !== use && (anywhere || !isLocal(use) || isLocal(id))).slice(0, 3)
+    try {
+      const r = await modelList.inTurn(others, (id) => once(id, { instead: { of: use, why: first.message } }), { ready: all })
+      ran({ model: r.model, passed: [...before, failed, ...r.passed] })
+      return { ...r, fellBack: use, why: first.message }
+    } catch (e) {
+      ran({ passed: [...before, failed, ...(e.passed || [])], error: failed.why })
+      first.tried = [use, ...others]
+      throw first
+    }
   }
 }
 const noModel = () => Object.assign(new Error('No model to write with. Sign in to an agent, or add an API key or a local model in Settings › Model Providers.'), { code: 'no_model' })
@@ -2433,7 +2453,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     // turn it off): from who was invited, names said ("Hi, Priya"), the meeting's name and the screen.
     // The summary can then say who's doing what. With one other person invited, it's them.
     if (cfg.meetings?.nameSpeakers !== false && !m.namedAt && ((!onlyGuest(m) && transcript(id).some((l) => l.src === 'them' && l.text)) || voices.of(id)?.speakers >= 2)) {
-      await nameSpeakers(id, { model: use, anywhere: pick.anywhere }).catch(() => patchMeta(id, { namedAt: new Date().toISOString() }))
+      await nameSpeakers(id, { pick }).catch(() => patchMeta(id, { namedAt: new Date().toISOString() }))
     }
     // A picture still being read (one captured or pasted just before the end) is waited for, a little.
     if ((meta(id).captures || []).some((c) => c.read === 'reading')) await Promise.race([reading, new Promise((r) => setTimeout(r, 20_000))])
@@ -2478,7 +2498,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
       let got = []
       await inPieces(text, size - partAsk(99, 99).length, async (part, i, n) => {
         await progress(id, used, i + 1, n + 1, `${partAsk(i, n)}${part}`)
-        const r = await replyAny(used, [{ role: 'user', text: `${partAsk(i, n)}${part}` }], { system: 'You take accurate meeting notes.', anywhere: pick.anywhere })
+        const r = await replyAny(used, [{ role: 'user', text: `${partAsk(i, n)}${part}` }], { system: 'You take accurate meeting notes.', ...how(pick) })
         used = r.model
         got.push(r.text)
       })
@@ -2487,7 +2507,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
       for (let round = 0; got.length > 1 && got.map((g, i) => `### Part ${i + 1}\n${g}`).join('\n\n').length > room && round < 3; round++) {
         const merged = []
         await inPieces(got.map((g, i) => `### Part ${i + 1}\n${g}`).join('\n\n'), size - 600, async (chunk) => {
-          const r = await replyAny(used, [{ role: 'user', text: `${about}\n\nThese are the key points of consecutive parts of one meeting, in order. Merge them into one list of its key points, decisions, action items (who and what) and open questions, as short bullets, in order. Keep every name, number and date. Only what is there.\n\n${chunk}` }], { system: 'You take accurate meeting notes.', anywhere: pick.anywhere })
+          const r = await replyAny(used, [{ role: 'user', text: `${about}\n\nThese are the key points of consecutive parts of one meeting, in order. Merge them into one list of its key points, decisions, action items (who and what) and open questions, as short bullets, in order. Keep every name, number and date. Only what is there.\n\n${chunk}` }], { system: 'You take accurate meeting notes.', ...how(pick) })
           used = r.model
           merged.push(r.text)
         })
@@ -2497,7 +2517,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     }
     const prompt = `${head(files)}\n\n${whole ? 'The meetings' : 'Transcript'}:\n${body}`
     await progress(id, used, parts > 1 ? parts + 1 : 1, parts > 1 ? parts + 1 : 1, prompt)
-    const r = await replyAny(used, [{ role: 'user', text: prompt }], { system: 'You take accurate, useful meeting notes.', anywhere: pick.anywhere })
+    const r = await replyAny(used, [{ role: 'user', text: prompt }], { system: 'You take accurate, useful meeting notes.', ...how(pick) })
     let out = String(r.text || '').trim()
     // The names it found go to meeting memory; the block isn't part of the notes.
     const block = /```terms\s*\n([\s\S]*?)```/.exec(out)
@@ -2523,7 +2543,9 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     // minutes, when a smaller one would be quicker.
     const said = [
       pick.auto?.why === 'short' && r.model === use ? `Written on this computer by ${r.model}: with Auto, a meeting this short stays here (Settings › Model Providers).` : '',
-      r.fellBack ? `${r.fellBack} ${isLocal(r.fellBack) ? 'couldn\'t write it here' : 'couldn\'t be reached'} (${String(r.why).slice(0, 120)}), so ${r.model} wrote it.` : '',
+      // (Ones of Meeting notes' own list passed over before it was tried.)
+      pick.passed?.length ? `${pick.passed.map((x) => String(x.why).slice(0, 160)).join('; ')}, so ${use}, next in Meeting notes' list, wrote it.` : '',
+      r.fellBack ?`${r.fellBack} ${isLocal(r.fellBack) ? 'couldn\'t write it here' : 'couldn\'t be reached'} (${String(r.why).slice(0, 120)}), so ${r.model} wrote it.` : '',
     ]
     if (isLocal(r.model) && parts > 1) said.push(`${r.model} takes ${await contextOf(r.model)} tokens at a time, so it read the meeting in ${parts} parts.`)
     const took = (Date.now() - t0) / 1000
@@ -2560,7 +2582,7 @@ export async function ask(id, question, { model } = {}) {
   const left = isLocal(use) ? Math.max(1000, size - summary.length - notes.length - more.length - q.length - 2000) : size
   const context = text.length > left ? `${summary}\n\n(Transcript, the end of it:)\n${text.slice(-left)}` : text
   const mem = memory.about(`${m.title}\n${notes}\n${context}`)
-  const r = await replyAny(use, [{ role: 'user', text: `Meeting: ${m.title}, ${new Date(m.startedAt).toDateString()}\n${mem ? `\n${mem}\n` : ''}${notes ? `\nMy notes:\n${notes}\n` : ''}${more ? `\n${more}\n` : ''}\nTranscript ("You" is me, "Them" the others):\n${context}\n\nQuestion: ${q}\n\nAnswer from the meeting only, briefly. When asked to write something (a follow-up email, an update), write it ready to send, from what was said. Say so if it wasn't covered.` }], { system: 'You answer questions about a meeting from its transcript. Be accurate and brief.', anywhere: pick.anywhere })
+  const r = await replyAny(use, [{ role: 'user', text: `Meeting: ${m.title}, ${new Date(m.startedAt).toDateString()}\n${mem ? `\n${mem}\n` : ''}${notes ? `\nMy notes:\n${notes}\n` : ''}${more ? `\n${more}\n` : ''}\nTranscript ("You" is me, "Them" the others):\n${context}\n\nQuestion: ${q}\n\nAnswer from the meeting only, briefly. When asked to write something (a follow-up email, an update), write it ready to send, from what was said. Say so if it wasn't covered.` }], { system: 'You answer questions about a meeting from its transcript. Be accurate and brief.', ...how(pick) })
   return { answer: String(r.text || '').trim(), model: r.model, note: r.fellBack ? `${r.fellBack} ${isLocal(r.fellBack) ? 'couldn\'t answer here' : 'couldn\'t be reached'}, so ${r.model} answered.` : null }
 }
 
@@ -2745,7 +2767,7 @@ export function assist(id, { now = false, model } = {}) {
     const schema = asked.length ? { ...ASSIST_SCHEMA, properties: { ...ASSIST_SCHEMA.properties, answers: answersSchema(from) }, required: ['items', 'answers'] } : ASSIST_SCHEMA
     let r
     try {
-      r = await jsonReply(use, [{ role: 'user', text: `${ask}\n\nTranscript so far:\n${recent || '(nothing yet)'}` }], { system: `You quietly help someone during a live meeting with a few sharp, specific suggestions${asked.length ? ', and short answers to questions raised in it' : ''}. You are brief and never make things up.`, feature: 'assist' }, { schema, check: asked.length ? answersOk : assistOk, schemaFirst: true })
+      r = await jsonReply(use, [{ role: 'user', text: `${ask}\n\nTranscript so far:\n${recent || '(nothing yet)'}` }], { system: `You quietly help someone during a live meeting with a few sharp, specific suggestions${asked.length ? ', and short answers to questions raised in it' : ''}. You are brief and never make things up.`, feature: 'assist', ...how(pick) }, { schema, check: asked.length ? answersOk : assistOk, schemaFirst: true })
     } catch (e) {
       assistSave(id, (x) => ({ ...x, at: new Date().toISOString(), error: e.message }))
       throw e
@@ -2881,8 +2903,9 @@ export function setBoard(id, on) {
   return { on: !!m.board, ...boardOf(id) }
 }
 // The model it uses: the meeting's own pick for its notes, Settings', or Diagrams' (with Auto, your
-// cloud model: small models here draw weaker diagrams).
-export const boardModel = async (m) => (await choose(m, null, 'diagrams', null)).id || null
+// cloud model: small models here draw weaker diagrams). boardPick: as choose() says it.
+const boardPick = (m) => choose(m, null, 'diagrams', null)
+export const boardModel = async (m) => (await boardPick(m)).id || null
 // One look: what's new since the last, onto the board. now: Update now (whatever was said since).
 // last: the meeting's last look, once every line is in. Resolves with board.json as it is then.
 export function boardLook(id, { now = false, last = false, model } = {}) {
@@ -2894,7 +2917,8 @@ export function boardLook(id, { now = false, last = false, model } = {}) {
     const fresh = said.filter((l) => l.t1 > (b.upTo || 0))
     const n = fresh.reduce((k, l) => k + tokens(l.text).length, 0)
     if (!fresh.length || (!now && n < (last ? 8 : BOARD_WORDS))) return b
-    const use = model || await boardModel(m)
+    const pick = model ? { id: model, job: 'diagrams' } : await boardPick(m)
+    const use = pick.id || null
     const fail = (e) => { writeFileAtomic(boardFile(id), JSON.stringify({ ...b, at: new Date().toISOString(), error: e.message }, null, 1)); throw e }
     if (!use) fail(noModel())
     try { await roomy(use, 'a live board') } catch (e) { fail(e) }
@@ -2929,7 +2953,7 @@ export function boardLook(id, { now = false, last = false, model } = {}) {
     ].filter((x) => x !== '').join('\n')
     const msg = `${ask}${before ? `\n\nSaid before (already looked at, for context):\n${clip(before, local ? 1500 : 4000)}` : ''}\n\nSaid since the board was last updated:\n${freshIn}`
     let r
-    try { r = await jsonReply(use, [{ role: 'user', text: msg }], { system: 'You keep a meeting\'s board up to date as it goes: its decisions, timeline, action items and open questions, from what was said. You are brief and never make things up.', feature: 'board' }, { schema: BOARD_SCHEMA, check: boardOk, schemaFirst: true }) } catch (e) { fail(e) }
+    try { r = await jsonReply(use, [{ role: 'user', text: msg }], { system: 'You keep a meeting\'s board up to date as it goes: its decisions, timeline, action items and open questions, from what was said. You are brief and never make things up.', feature: 'board', ...how(pick) }, { schema: BOARD_SCHEMA, check: boardOk, schemaFirst: true }) } catch (e) { fail(e) }
     // What's new: each part's items, in plain words, none that's on the board already, was taken
     // off it, or came twice in this answer.
     const seen = [...scene.items.map((x) => x.label), ...scene.items.map((x) => x.text), ...scene.other, ...gone.map((x) => x.text)]
@@ -3076,7 +3100,8 @@ export async function askAll(question, { ids, model } = {}) {
   const q = String(question || '').trim()
   if (!q) throw new Error('Ask something')
   // Several meetings' notes: long, so with Auto your cloud model when you have one.
-  const use = (await choose(null, model, 'notes', null)).id
+  const pick = await choose(null, model, 'notes', null)
+  const use = pick.id
   if (!use) throw noModel()
   let pool = list()
   if (ids?.length) { const want = new Set(ids.map(String)); pool = pool.filter((m) => want.has(m.id)) } else pool = likely(q).map((x) => x.m)
@@ -3100,7 +3125,7 @@ export async function askAll(question, { ids, model } = {}) {
   }
   if (!parts.length) throw new Error('Nothing was transcribed in those meetings yet')
   const mem = memory.about(parts.join('\n'))
-  const r = await replyAny(use, [{ role: 'user', text: `These are my meetings, each with a number.${mem ? `\n\n${mem}` : ''}\n\n${parts.join('\n\n---\n\n')}\n\nQuestion: ${q}\n\nAnswer from these meetings only, briefly, in plain words. After each point, cite the meeting it came from as [1], [2]. When asked to write something (an update, an email), write it ready to send, with the citations after it instead of in it. Say so if they don't cover it. Today is ${new Date().toDateString()}.` }], { system: 'You answer questions about the user\'s meetings from their notes and transcripts. Be accurate and brief, and cite the meetings.' })
+  const r = await replyAny(use, [{ role: 'user', text: `These are my meetings, each with a number.${mem ? `\n\n${mem}` : ''}\n\n${parts.join('\n\n---\n\n')}\n\nQuestion: ${q}\n\nAnswer from these meetings only, briefly, in plain words. After each point, cite the meeting it came from as [1], [2]. When asked to write something (an update, an email), write it ready to send, with the citations after it instead of in it. Say so if they don't cover it. Today is ${new Date().toDateString()}.` }], { system: 'You answer questions about the user\'s meetings from their notes and transcripts. Be accurate and brief, and cite the meetings.', ...how(pick) })
   return { answer: String(r.text || '').trim(), model: r.model, sources, note: r.fellBack ? `${r.fellBack} couldn't be reached, so ${r.model} answered.` : null }
 }
 
@@ -3438,7 +3463,8 @@ export async function deck(id, { model } = {}) {
   const notes = filled(readText(path.join(dirOf(id), 'notes.md')), m.sections).trim()
   const said = summary ? '' : transcriptText(id).slice(0, 30_000)
   if (!summary && !notes && !said) throw new Error('This meeting has nothing to make a deck from yet')
-  const use = (await choose(m, model, 'notes', `${summary}\n${notes}\n${said}`)).id
+  const pick = await choose(m, model, 'notes', `${summary}\n${notes}\n${said}`)
+  const use = pick.id
   if (!use) throw noModel()
   const people = (m.event?.attendees || []).join(', ')
   const ask = [
@@ -3448,7 +3474,7 @@ export async function deck(id, { model } = {}) {
     DECK_RULES,
     'Answer with the deck and nothing else: a front matter block (---, marp: true, paginate: true, ---), then its slides.',
   ].filter(Boolean).join('\n')
-  const r = await replyAny(use, [{ role: 'user', text: ask }], { system: 'You turn meeting notes into clear, short slide decks in Marp Markdown.' })
+  const r = await replyAny(use, [{ role: 'user', text: ask }], { system: 'You turn meeting notes into clear, short slide decks in Marp Markdown.', ...how(pick) })
   let md = String(r.text || '').trim().replace(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/, '$1').trim()
   if (!/^---\s*\n[\s\S]*?\bmarp:\s*true\b/.test(md)) md = `---\nmarp: true\npaginate: true\n---\n\n${md.replace(/^---\s*\n[\s\S]*?\n---\s*\n/, '')}`
   const dir = path.join(DATA, 'studio', 'files')

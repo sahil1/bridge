@@ -1,7 +1,7 @@
 // Settings › Providers: which agents are signed in, and the model providers Bridge AI can hand
 // keys for. Cards in a grid by group; clicking one opens its editor in place. The model labs and
-// the models on this computer first; under Advanced, cloud agents' keys, the clouds, hosted open
-// models, more models and speech to text services.
+// the models on this computer first, then the model for each task; under Advanced, cloud agents'
+// keys, the clouds, hosted open models, more models and speech to text services.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, refetch, settingsChanged } from '../../api.js'
 import Icon from '../Icon.jsx'
@@ -12,6 +12,7 @@ import ProviderIcon, { AgentIcon } from './ProviderIcon.jsx'
 import { GROUPS, AGENT_LABEL, providerChip, agentChip } from './providerCatalog.js'
 import CloudKeys from './CloudKeys.jsx'
 import { Advanced } from './Advanced.jsx'
+import { ago } from '../Machines.jsx'
 import './providers.css'
 
 // The groups that are under Advanced, and where.
@@ -407,10 +408,13 @@ function BuiltinModel({ onChange }) {
   )
 }
 
-// Which jobs run on the local model (server/modeljobs.js), for each kind: Auto (short ones here, long
-// meetings and diagrams on your cloud model), On this computer, or Cloud first, with what Auto does
-// on this computer now. On this computer is offered for live suggestions only with a GPU here.
-// Shown once there's a model on this computer, or one can be downloaded here.
+// Models for Each Task (server/modeljobs.js): each kind of job on Automatic, where it runs as it has
+// (Auto: short ones here, long meetings and diagrams on your cloud model; On this computer; Cloud
+// first, with what Auto does on this computer now: offered where a model can run here, and for live
+// suggestions only with a GPU), or on a model of its own from any provider, with others to fall back
+// on, in order (ModelPick). One from a provider with no key yet opens that provider's key form
+// (Editor) right there, and the row says it can't run until there's one. Under each, its last run:
+// the model that answered, and what was passed over first and why.
 const JOB_TEXT = {
   notes: [tx('Meeting notes'), tx('Summaries, who said what, questions about a meeting, meeting prep')],
   assist: [tx('AI Assist'), tx('Rewrites, @bridge in comments, PDFs to sign, sheets and decks')],
@@ -419,49 +423,174 @@ const JOB_TEXT = {
   live: [tx('Live AI Assist'), tx('Suggestions during a meeting')],
   diagrams: [tx('Diagrams'), tx('Draw this and Change it on the whiteboard')],
 }
-function ModelJobs({ stamp }) {
+const isLocalId = (id) => /^(ollama|lmstudio|bridge):/.test(String(id || ''))
+
+// Every model to pick from, by provider, searchable: the ones you reach now, then the providers a key
+// would reach (a model they use unless told, marked No key yet, or Add a key). taken: in the list
+// already. onPick(model): { id, label, provider, route, nokey }; onAuto: back to Automatic (the
+// main pick only); onKey(route): a provider's key form, for one with no model to name yet.
+function ModelPick({ d, taken = [], auto = false, onPick, onAuto = null, onKey, onClose }) {
+  const [q, setQ] = useState('')
+  const words = q.trim().toLowerCase()
+  const hits = (...s) => !words || s.some((x) => String(x || '').toLowerCase().includes(words))
+  const groups = []
+  const group = (name, local) => { let g = groups.find((x) => x.name === name); if (!g) { g = { name, local, items: [] }; groups.push(g) } return g }
+  for (const m of d.models || []) if (hits(m.label, m.provider, m.id)) group(m.provider, m.via === 'local').items.push({ id: m.id, label: m.label, provider: m.provider, route: m.route })
+  for (const u of d.unkeyed || []) if (hits(u.label, u.model, u.route)) group(u.label, false).items.push(u.model ? { id: u.model, label: u.model.split(':').slice(1).join(':'), provider: u.label, route: u.route, nokey: true } : { id: null, provider: u.label, route: u.route, nokey: true })
+  const showAuto = onAuto && hits(t('Automatic'))
+  return (
+    <div className="pv-pick" data-model-pick onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}>
+      <div className="pv-pick-top">
+        <input type="search" className="st-input" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search models')} aria-label={t('Search models')} autoFocus spellCheck={false} />
+        <button type="button" className="icon-btn" onClick={onClose} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button>
+      </div>
+      <div className="pv-pick-list">
+        {showAuto && <button type="button" className={`pv-pick-item${auto ? ' on' : ''}`} onClick={onAuto} data-pick="auto"><b>{t('Automatic')}</b></button>}
+        {groups.map((g) => (
+          <div key={g.name} className="pv-pick-group">
+            <span className="pv-pick-head">{g.name}</span>
+            {g.items.map((m) => (m.id
+              ? <button key={m.id} type="button" className="pv-pick-item" data-pick={m.id} disabled={taken.includes(m.id)} onClick={() => onPick(m)}>
+                  <span className="pv-pick-label">{m.label}</span>
+                  {m.nokey && <span className="pv-chip pv-chip-warn">{t('No key yet')}</span>}
+                </button>
+              : <button key={`key-${m.route}`} type="button" className="pv-pick-item" data-key={m.route} onClick={() => onKey(m.route)}>
+                  <span className="pv-pick-label muted">{t('Add a key to see its models')}</span>
+                </button>))}
+          </div>
+        ))}
+        {!showAuto && !groups.length && <p className="muted small">{t('No model matches.')}</p>}
+      </div>
+    </div>
+  )
+}
+
+function ModelJobs({ stamp, providers = [], labels, installedSet, onSaved }) {
   const [d, setD] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [pick, setPick] = useState(null) // { job, add }: the picker open, for its model or one more to fall back on
+  const [keyOf, setKeyOf] = useState(null) // { job, route }: a provider's key form open
   const load = useCallback(() => api('/model-jobs').then(setD).catch(() => setD(null)), [])
   useEffect(() => { load() }, [load, stamp])
-  if (!d || (!d.offered && !d.anyHere)) return null
-  const set = async (job, v) => {
-    setBusy(true)
-    try { await api('/settings', { method: 'PATCH', body: { modelJobs: { [job]: v } } }); settingsChanged(); await load() } finally { setBusy(false) }
+  if (!d) return null
+  const save = async (body) => {
+    setBusy(true); setErr(null)
+    try { await api('/settings', { method: 'PATCH', body }); settingsChanged(); await load() } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
+  const set = (job, v) => save({ modelJobs: { [job]: v } })
+  const setList = (job, ids) => save({ jobModels: { [job]: ids.length ? ids.slice(0, d.most || 6) : null } })
+  const provider = (route) => providers.find((p) => p.id === route) || null
+  // A provider that needs a key it hasn't got: its key form can be opened.
+  const keyless = (route) => { const p = provider(route); return p && !p.local && p.status !== 'connected' ? p : null }
+  const here = d.offered || d.anyHere
   const local = d.local?.label
   const cloud = d.cloud?.label
   const now = (j) => {
+    if (!here) return cloud ? t('{model}, the first model you reach.', { model: cloud }) : t('No model yet: sign in to an agent or add a key above.')
     if (j.set === 'local') return local ? t('Always on this computer, with {model}.', { model: local }) : d.anyHere ? t('Always on this computer.') : t('Set to stay here, but {why}: it says so instead of running.', { why: d.missing?.why || t('there\'s no model on this computer') })
     if (j.set === 'cloud') return cloud ? t('{model} first, as before.', { model: cloud }) : t('Your sign-in or key first; there isn\'t one yet, so a model here.')
-    if (!local) return cloud ? t('{model}. Download a local model above to run short ones here.', { model: cloud }) : t('No model yet: download one above, or add one below.')
+    if (!local) return cloud ? t('{model}. Download a local model above to run short ones here.', { model: cloud }) : t('No model yet: download one above, or add a key.')
     if (!cloud) return t('{model}, on this computer: there\'s no other model.', { model: local })
     if (j.cloudBetter) return t('{model}: small models are weaker at this.', { model: cloud })
     if (j.id === 'notes' && d.limit) return t('Meetings up to about {n} minutes on {local}, here; longer ones on {cloud}.', { n: d.limit.minutes, local, cloud })
     if (j.id === 'tidy') return t('Short ones on {local}, here; transcript cleanup on {cloud}, which fixes misheard names better.', { local, cloud })
     return t('Short ones on {local}, here; longer ones on {cloud}.', { local, cloud })
   }
+  const nameOf = (id) => d.models?.find((m) => m.id === id)?.label || String(id || '').split(':').slice(1).join(':') || id
+  // Its last run, in a line: the model that answered, and why the first passed over couldn't (each
+  // says which it was); or why none could.
+  const lastRun = (r) => {
+    if (!r.model) return t('Last run {when}: none could run. {why}', { when: ago(r.at), why: r.error || r.passed?.[0]?.why || '' })
+    if (r.passed?.length) return t('Last run {when} on {model}: {why}', { when: ago(r.at), model: nameOf(r.model), why: r.passed[0].why })
+    return t('Last run {when} on {model}.', { when: ago(r.at), model: nameOf(r.model) })
+  }
+  const chosen = async (j, m, add) => {
+    const ids = (j.own || []).map((e) => e.id)
+    setPick(null)
+    if (m.nokey && keyless(m.route)) setKeyOf({ job: j.id, route: m.route })
+    await setList(j.id, add ? [...ids, m.id] : [m.id, ...ids.slice(1).filter((x) => x !== m.id)])
+  }
   return (
-    <div className="pv-jobs" data-model-jobs>
-      <b className="pv-jobs-head">{t('Which jobs run here')}</b>
+    <section className="pv-sec pv-jobs" data-setting="model-jobs" data-model-jobs>
+      <h4>{t('Models for Each Task')}</h4>
+      {err && <p className="pv-note pv-err">{err}</p>}
       <ul className="pv-jobs-list">
         {d.jobs.map((j) => {
           const [label, about] = JOB_TEXT[j.id] || [j.label, j.about]
+          const own = j.own || null
+          const ids = (own || []).map((e) => e.id)
+          const ready = own?.find((e) => !e.why)
+          const first = own?.[0]
+          const firstKey = first && keyless(first.route)
+          const picking = pick?.job === j.id
+          const key = keyOf?.job === j.id ? provider(keyOf.route) : null
+          // (Under its model's button, or under its list for one more to fall back on.)
+          const picker = picking && <ModelPick d={d} auto={!own} taken={pick.add ? ids : []} onAuto={pick.add ? null : () => { setPick(null); setKeyOf(null); setList(j.id, []) }} onPick={(m) => chosen(j, m, pick.add)} onKey={(route) => { setPick(null); setKeyOf({ job: j.id, route }) }} onClose={() => setPick(null)} />
           return (
-            <li key={j.id} data-job={j.id} data-set={j.set}>
+            <li key={j.id} data-job={j.id} data-set={j.set} data-own={own ? ids.join(' ') : undefined}>
               <span className="pv-job-name"><b>{(j.id === 'assist' || j.id === 'live') && <Icon name="wand" size={12} />}{t(label)}</b><span className="muted small">{t(about)}</span></span>
-              <select className="st-input" value={j.set} disabled={busy} onChange={(e) => set(j.id, e.target.value)} aria-label={t('Where {job} runs', { job: t(label) })}>
-                <option value="auto">{t('Auto')}</option>
-                {(j.canLocal || j.set === 'local') && <option value="local">{t('On this computer')}</option>}
-                <option value="cloud">{t('Cloud first')}</option>
-              </select>
-              <span className={`small pv-job-now${j.set === 'local' && !local && !d.anyHere ? ' pv-local-warn' : ' muted'}`} data-job-now>{now(j)}</span>
+              <span className="pv-job-acts">
+                <button type="button" className="btn small pv-job-model" disabled={busy} aria-expanded={picking && !pick.add} onClick={() => setPick(picking && !pick.add ? null : { job: j.id, add: false })} aria-label={`${t('Model for {job}', { job: t(label) })}: ${own ? first.label : t('Automatic')}`}>
+                  <span className="pv-pick-label">{own ? first.label : t('Automatic')}</span><Icon name="down" size={11} />
+                </button>
+                {!own && here && (
+                  <select className="st-input" value={j.set} disabled={busy} onChange={(e) => set(j.id, e.target.value)} aria-label={t('Where {job} runs', { job: t(label) })}>
+                    <option value="auto">{t('Auto')}</option>
+                    {(j.canLocal || j.set === 'local') && <option value="local">{t('On this computer')}</option>}
+                    <option value="cloud">{t('Cloud first')}</option>
+                  </select>
+                )}
+              </span>
+              {picking && !pick.add && picker}
+              {!own && <span className={`small pv-job-now${here && j.set === 'local' && !local && !d.anyHere ? ' pv-local-warn' : ' muted'}`} data-job-now>{now(j)}</span>}
+              {own && (
+                <>
+                  <ol className="pv-job-own">
+                    {own.map((e, i) => {
+                      const nokey = e.why && keyless(e.route)
+                      const leaves = !e.local && own.slice(0, i).some((x) => x.local)
+                      return (
+                        <li key={e.id} data-model={e.id} className={e.why ? 'bad' : ''}>
+                          <span className="pv-job-n">{i + 1}</span>
+                          <span className="pv-job-entry">
+                            <b className="small">{e.label}</b>
+                            <span className="muted small">{e.provider}</span>
+                            <span className={`pv-chip${e.local ? ' pv-chip-local' : ''}`}>{e.local ? t('Local') : t('Cloud')}</span>
+                            <span className="muted small">{i === 0 ? t('first choice') : t('fallback')}</span>
+                            {leaves && <span className="muted small pv-job-full">{t('Leaves this computer only when the ones above can\'t run.')}</span>}
+                            {e.why && <span className="small pv-local-warn pv-job-full" data-why>{nokey ? t('No {provider} key yet.', { provider: nokey.name }) : e.why}</span>}
+                          </span>
+                          <span className="pv-job-entry-acts">
+                            {nokey && <button type="button" className="ghost-btn strong" onClick={() => setKeyOf(keyOf?.job === j.id && keyOf.route === e.route ? null : { job: j.id, route: e.route })} aria-expanded={!!key && keyOf.route === e.route}>{t('Add a key')}</button>}
+                            <button type="button" className="icon-btn" disabled={busy || i === 0} onClick={() => { const l = [...ids]; l.splice(i - 1, 0, l.splice(i, 1)[0]); setList(j.id, l) }} aria-label={t('Move {name} up', { name: e.label })}><Icon name="up" size={12} /></button>
+                            <button type="button" className="icon-btn" disabled={busy || i === own.length - 1} onClick={() => { const l = [...ids]; l.splice(i + 1, 0, l.splice(i, 1)[0]); setList(j.id, l) }} aria-label={t('Move {name} down', { name: e.label })}><Icon name="down" size={12} /></button>
+                            <button type="button" className="icon-btn" disabled={busy} onClick={() => setList(j.id, ids.filter((x) => x !== e.id))} aria-label={t('Remove {name}', { name: e.label })}><Icon name="x" size={12} /></button>
+                          </span>
+                        </li>
+                      )
+                    })}
+                  </ol>
+                  {!ready
+                    ? <span className="small pv-local-warn pv-job-now" data-job-now>{firstKey && own.length === 1 ? t('Can\'t run until there\'s a {provider} key.', { provider: firstKey.name }) : t('Can\'t run until one of these can.')}</span>
+                    : ready.id !== first.id && <span className="small muted pv-job-now" data-job-now>{t('{model} runs for now.', { model: ready.label })}</span>}
+                  {picking && pick.add && picker}
+                  {own.length < (d.most || 6) && <button type="button" className="ghost-btn pv-job-add" disabled={busy} aria-expanded={picking && pick.add} onClick={() => setPick(picking && pick.add ? null : { job: j.id, add: true })}><Icon name="plus" size={12} />{t('Add one to fall back on…')}</button>}
+                </>
+              )}
+              {key && (
+                <div className="pv-job-key" data-key-form={key.id}>
+                  <span className="pv-job-key-head"><ProviderIcon id={key.id} name={key.name} size={20} /><b className="small">{key.name}</b><button type="button" className="icon-btn" onClick={() => setKeyOf(null)} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button></span>
+                  <Editor p={key} labels={labels} installedSet={installedSet} onSaved={(next) => { onSaved(next); load() }} />
+                </div>
+              )}
+              {j.last && <span className={`small pv-job-last${j.last.model ? ' muted' : ' pv-local-warn'}`} data-job-last>{lastRun(j.last)}</span>}
             </li>
           )
         })}
       </ul>
       <p className="pv-note">{t('Edit by voice and Tidy what I say stay on this computer unless you pick a model for them in Settings › Voice & Meetings, and so does AI Assist\'s look at a folder unless you pick one there.')}</p>
-    </div>
+    </section>
   )
 }
 
@@ -578,7 +707,6 @@ export default function Providers() {
               <section key={g.id} className="pv-sec" data-setting={`providers-${g.id}`}>
                 <h4 className="pv-group">{t(g.name)}</h4>
                 {g.id === 'local' && <BuiltinModel onChange={() => setLocalStamp((n) => n + 1)} />}
-                {g.id === 'local' && <ModelJobs stamp={`${items.filter((p) => p.status === 'connected').map((p) => p.id).join()}:${localStamp}`} />}
                 <div className="pv-grid">
                   {items.map((p) => (
                     <Card key={p.id} p={p} open={open === p.id} onToggle={() => setOpen((o) => (o === p.id ? null : p.id))}>
@@ -591,6 +719,7 @@ export default function Providers() {
             )
             return LATER[g.id] ? <Advanced key={g.id} order={LATER[g.id]}>{group}</Advanced> : group
           })}
+          <ModelJobs stamp={`${providers.filter((p) => p.status === 'connected').map((p) => p.id).join()}:${localStamp}`} providers={providers} labels={labels} installedSet={installedSet} onSaved={onSaved} />
           {more != null && (
             <Advanced order={55}>
               <section className="pv-sec pv-extra" data-setting="more-models">

@@ -249,6 +249,20 @@ export async function models({ fresh = false } = {}) {
   return list
 }
 
+// The providers a key would reach, with none saved yet, for a job's model to be picked from before
+// its key is there (Settings › Model Providers): [{ route, label, model }], model the one it uses
+// unless told ("groq:llama-3.3-70b-versatile"), or null where only its key's list says.
+export function unkeyed() {
+  const e = env()
+  const out = []
+  for (const [id, a] of Object.entries(API)) if (!a.local && !keyFor(a)) out.push({ route: id, label: PROVIDER[id] || a.label, model: `${id}:${a.model}` })
+  for (const [id, m] of Object.entries(MORE)) {
+    const first = (m.fixed || m.fallback || [])[0]
+    if (!e[m.key]) out.push({ route: id, label: m.label, model: first ? `${id}:${first}` : null })
+  }
+  return out.filter((x) => !hiddenModel(x.model || `${x.route}:`))
+}
+
 // A route by the name people know it, and how it's reached: { label, via } ('key', 'cloud', 'local').
 export const routeInfo = (route) => ({ label: (PROVIDER[route] || MORE[route]?.label || API[route]?.label || route).replace(/, on this computer$/, ''), via: /^(ollama|lmstudio|bridge)$/.test(route) ? 'local' : /^(azure|bedrock|vertex)$/.test(route) ? 'cloud' : 'key' })
 
@@ -660,12 +674,13 @@ export const SMALLEST = 8192
 // json: a JSON Schema to hold the answer to, where the provider takes one (Ollama's format, LM
 // Studio's and OpenAI-style APIs' response_format); others answer in plain text, as asked.
 // think: let a model that thinks before answering do so (a chat); Bridge AI's own jobs don't wait.
-// feature: the part of Bridge AI asking (usagelog.js FEATURES), noted with what the answer took.
-export async function reply(id, messages, { signal, tools, system = SYSTEM, json = null, think = false, feature = null } = {}) {
+// feature: the part of Bridge AI asking (usagelog.js FEATURES), noted with what the answer took;
+// instead: { of, why }, the model it answers for, which couldn't (a job's fallback: modeljobs.js).
+export async function reply(id, messages, { signal, tools, system = SYSTEM, json = null, think = false, feature = null, instead = null } = {}) {
   if (hiddenModel(id)) throw new Error(OFF)
   const started = Date.now()
   const { usage, ...r } = await answer(id, messages, { signal, tools: canUseTools(id) ? tools : null, system, json, think })
-  usagelog.record({ id, feature, usage, ms: Date.now() - started })
+  usagelog.record({ id, feature, usage, ms: Date.now() - started, instead })
   // The usage counts, when they're shared: the model's family, how it was reached, what asked.
   counts.answered(id, feature, usage?.model).catch(() => {})
   return r

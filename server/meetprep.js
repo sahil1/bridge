@@ -27,8 +27,9 @@ let cfg = {}
 export const configure = (c) => { cfg = c || {} }
 // calendar(): today's and tomorrow's events as last read for the app (calendar.js's cache, never a
 // read of its own), or null; mail(): the inbox as mail.js reads it, or
-// null where there's no Mail (not a Mac); reply(id, msgs, o), models(): as meetings.js has them
-// (chatmodels.js); pickModel(text): the model meeting notes use for that much text (index.js pickFor).
+// null where there's no Mail (not a Mac); reply(id, msgs, o): Meeting notes' (index.js replyFor,
+// which says the model that answered); models(): chatmodels.js's; pickModel(text): the model meeting
+// notes use for that much text (index.js pickFor).
 let helpers = { calendar: null, mail: null, reply: null, pickModel: async () => null, models: async () => [] }
 export const setHelpers = (h) => { helpers = { ...helpers, ...h } }
 
@@ -213,13 +214,15 @@ export function suggest(raw, { again = false } = {}) {
     const entry = { start: e.start, title: e.title, at: new Date().toISOString(), model: w.id, label: w.label, basis, items: [], error: null }
     try {
       let r = await helpers.reply(w.id, msgs, o)
+      // (Another in Meeting notes' own list, when that one couldn't answer.)
+      if (r.model && r.model !== w.id) Object.assign(entry, { model: r.model, label: (await helpers.models().catch(() => [])).find((m) => m.id === r.model)?.label || r.model })
       let v = parsed(r.text)
       // Held to the shape asked for when the first answer isn't it.
-      if (!v) { r = await helpers.reply(w.id, msgs, { ...o, json: SCHEMA }).catch(() => r); v = parsed(r.text) }
+      if (!v) { r = await helpers.reply(entry.model, msgs, { ...o, json: SCHEMA }).catch(() => r); v = parsed(r.text) }
       entry.items = (v?.items || []).filter((x) => x && typeof x.text === 'string' && x.text.trim()).slice(0, 4)
         .map((x) => ({ kind: KINDS.has(x.kind) ? x.kind : 'goal', text: clip(x.text, 400), why: clip(x.why, 240) || null }))
-      if (!v) entry.error = `${w.label} answered, but not in a form Bridge AI can read. Try again.`
-      else if (!entry.items.length) entry.error = `${w.label} found nothing to suggest from what there is.`
+      if (!v) entry.error = `${entry.label} answered, but not in a form Bridge AI can read. Try again.`
+      else if (!entry.items.length) entry.error = `${entry.label} found nothing to suggest from what there is.`
     } catch (x) {
       entry.error = x.message || String(x)
     }
