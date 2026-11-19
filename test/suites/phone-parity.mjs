@@ -110,6 +110,7 @@ const PATHS = {
   // follows it on a phone, and each way into the section and its tabs.)
   'settings:account': { phone: 'Settings › Account & Devices › Account', accounts: true },
   'settings:sharing': { phone: 'Settings › Sharing' },
+  'settings:backup': { phone: 'Settings › Back Up & Move' },
   'settings:appearance': { phone: 'Settings › Appearance' },
   'settings:config': { phone: 'Settings › Config File' },
   'settings:about': { phone: 'Settings › About & Updates' },
