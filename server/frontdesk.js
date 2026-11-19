@@ -167,6 +167,7 @@ const STREAM_MAX = 12000 // what a stream may hold (Slack)
 // How long a draft waits before the asker hears it's being checked (D8), and a minute's length, for
 // the longest run (tests make both short).
 const HOLD_MS = Number(process.env.BRIDGE_BOT_HOLD_MS) || 2 * 60 * 1000
+const GUARD_WAIT_MS = 10 * 60 * 1000 // a run that changed files, ended and never heard: its checks' folder goes then
 const MINUTE_MS = Number(process.env.BRIDGE_BOT_MINUTE_MS) || 60 * 1000
 // How soon after a conversation's last word the same person asking again there carries it on
 // (bots.js CARRY_ON_MIN; tests that ask one question after another, each its own, make it 0).
@@ -2464,7 +2465,14 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // hear they're being checked with you (D8); runs at their time limit (atLimit).
   const ticker = setInterval(() => {
     if (data.outbox.some((x) => x.next <= Date.now())) flush().catch(() => {})
-    for (const hid of mcpDirs.keys()) if (delegate.get(hid)?.state === 'ended') dropMcp(hid) // (stopped, or out of time)
+    // (Stopped, or out of time. Not one whose own checks haven't been read yet (guards): its log is in
+    // that folder, and its answer is heard a moment after it ends (heard()), so the folder goes then;
+    // gone first, every file it changed would be refused as unchecked. One never heard goes after
+    // GUARD_WAIT_MS.)
+    for (const hid of mcpDirs.keys()) {
+      const h = delegate.get(hid)
+      if (h?.state === 'ended' && (!guards.has(hid) || Date.now() - Date.parse(h.endedAt || 0) > GUARD_WAIT_MS)) { guards.delete(hid); dropMcp(hid) }
+    }
     for (const [id, b] of bots) {
       const bot = botOf(id)
       if (!bot || !b.channel) continue
