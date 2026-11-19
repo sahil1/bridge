@@ -444,10 +444,10 @@ Your computer has to be on and Bridge AI running. **Keep this computer awake whi
 If you already use [Tailscale](https://tailscale.com), a free private network between your own devices:
 
 1. On the computer: install Tailscale and sign in. In Bridge AI, open **Settings › Account & Devices › Phone** and click **Turn on phone access**. It shows a QR code.
-2. On the phone: install Tailscale and sign in with the same account. Scan the QR code with the camera.
+2. On the phone: install Tailscale and sign in with the same account. Scan the QR code with the camera. It lets that phone in, as View › Open in Browser lets in a browser on the computer: each code works once, within two minutes, and a new one shows every minute.
 3. Add it to the Home Screen and turn on notifications, as above.
 
-Only devices signed in to your Tailscale account can reach Bridge AI; nothing is opened to the internet.
+Only devices signed in to your Tailscale account can reach Bridge AI, and only a phone let in with a code gets in; nothing is opened to the internet.
 
 Either way, choose what you're notified about in Settings › Account & Devices › Notifications: an agent needs you, an agent finished, and usage running low (5 to 25% left). Notifications are encrypted end to end to your phone. iPhone needs iOS 16.4 or later for notifications.
 

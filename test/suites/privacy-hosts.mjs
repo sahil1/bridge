@@ -37,7 +37,7 @@ const CATEGORIES = {
   },
   insights: { says: /\/insights report[\s\S]{0,120}Google Fonts/, hosts: ['fonts.googleapis.com', 'fonts.gstatic.com'] },
   // Bots: Slack's Web API, and the Socket Mode address it gives (in no code: from Slack).
-  slack: { says: /Bots \(a beta feature[\s\S]{0,300}Socket Mode, a connection your computer opens to\s+`slack\.com` and then to the `wss-\*\.slack\.com`\s+address[\s\S]{0,120}None of it goes through Bold Bridge or your relay/, hosts: ['slack.com'] },
+  slack: { says: /Bots \(a beta feature[\s\S]{0,600}Socket Mode, a connection\s+your\s+computer\s+opens\s+to\s+`slack\.com`\s+and\s+then\s+to\s+the\s+`wss-\*\.slack\.com`\s+address[\s\S]{0,120}None\s+of\s+it\s+goes\s+through\s+Bold\s+Bridge\s+or\s+your\s+relay/, hosts: ['slack.com'] },
   // ...and in Discord, through its Gateway (the address it gives, in no code), and in Teams, with
   // Microsoft's signing keys and Entra ID's sign-in (Teams' own addresses come with each message).
   discord: { says: /Discord: the bot connects from your computer to Discord's Gateway, through `discord\.com`[\s\S]{0,200}nothing reaches\s+your computer from the internet/, hosts: ['discord.com'] },

@@ -94,7 +94,8 @@ try {
     await ctx.route(/^http:\/\/[a-z2-7]{12}\.localhost:\d+\//, (r) => r.fulfill({ contentType: 'text/html', body: '<p>Bridge AI at its new address</p>' }))
     const p = await ctx.newPage()
     const x = { ctx, p, errors: [] }
-    p.on('pageerror', (e) => x.errors.push(e.message))
+    // (Where it came from too, after the message the filter below reads.)
+    p.on('pageerror', (e) => x.errors.push(`${e.message}${e.stack ? ` @ ${String(e.stack).split('\n').slice(0, 3).join(' | ')} (${p.url().slice(0, 80)})` : ''}`))
     pages.push(x)
     await p.goto((await a.api('/relay/pair', {})).pairing.link)
     await p.locator('#pair-go').click({ timeout: 15000 })

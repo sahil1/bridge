@@ -25,6 +25,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { startKit, startSlack, checks, until, sleep, browser, page, shot, phoneFaults, TEST, ROOT, IS_WIN } from '../lib/harness.mjs'
+import { ownFile } from '../lib/bots.mjs'
 
 const { ok, done } = checks('slack-bot')
 const slack = await startSlack('slack-bot')
@@ -116,8 +117,9 @@ try {
   const b1 = await connected()
   ok(!!b1 && JSON.stringify(b1.settings.askers) === JSON.stringify(legacy.askers) && b1.settings.readsFrom.join() === '~/pricing,~/launch' && b1.settings.who === 'named' && b1.settings.others === 'polite', 'its askers carried over, and its folders are what it reads from', b1?.settings)
   ok(/- ~\/pricing: pricing, enterprise plans/.test(b1?.instructions.text || '') && /- ~\/launch: launch/.test(b1?.instructions.text || ''), 'the folders\' topics are lines in its instructions', b1?.instructions.text)
-  const tokens = path.join(kit.data, 'bots', 'b1', 'slack.json')
-  ok(fs.existsSync(tokens) && !fs.existsSync(path.join(kit.data, 'slack-bot.json')) && JSON.parse(fs.readFileSync(tokens, 'utf8')).botToken === 'xoxb-test' && (IS_WIN || (fs.statSync(tokens).mode & 0o777) === 0o600), 'its tokens moved into its own folder, yours only, and it connects with them', IS_WIN ? null : (fs.statSync(tokens).mode & 0o777).toString(8))
+  // (Carried over into its folder, then made a connection of its own: connections.js migrate.)
+  const tokens = ownFile(kit, 'b1', 'slack')
+  ok(fs.existsSync(tokens) && !fs.existsSync(path.join(kit.data, 'slack-bot.json')) && !fs.existsSync(path.join(kit.data, 'bots', 'b1', 'slack.json')) && JSON.parse(fs.readFileSync(tokens, 'utf8')).botToken === 'xoxb-test' && (IS_WIN || (fs.statSync(tokens).mode & 0o777) === 0o600), 'its tokens moved to a connection of its own, yours only, and it connects with them', IS_WIN ? null : (fs.statSync(tokens).mode & 0o777).toString(8))
   const conf = fs.readFileSync(path.join(kit.data, 'config.json'), 'utf8')
   ok(!conf.includes('slackBot') && !conf.includes('xoxb-'), 'its old settings are out of config.json, and no token is there', conf.slice(0, 300))
   const old = (await needs()).find((x) => x.text.includes('Old question'))

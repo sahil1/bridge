@@ -6,6 +6,7 @@ import { api, usePoll, fmtRelative, openInTerminal } from '../api.js'
 import { CloudMark, linkOf, whereOf } from './cloudBits.jsx'
 import SessionSwitcher from './Sessions.jsx'
 import RailMeetings from './meetings/RailMeetings.jsx'
+import RailBots, { MiniBots } from './bots/RailBots.jsx'
 import { RailMachines } from './Machines.jsx'
 import { Quiet } from './ErrorBoundary.jsx'
 import { openMeeting, useMeetings } from './meetings/recording.jsx'
@@ -133,7 +134,8 @@ function HoverCard({ row, rect, git, preview }) {
   )
 }
 
-// New (Home: start something) and Meetings sit above the spaces; a red dot while a meeting records.
+// New (Home: start something) and Meetings sit above the spaces, and Bots (a beta feature) just over
+// them; a red dot while a meeting records.
 // With Home on (a beta feature), Home is the first row, with what needs you on every device (needs).
 // Dictations are a tab of Meetings (Meetings.jsx), so Meetings is marked while they show.
 export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onNewTerminal, onHistory, onMeetings, recording, needs = 0 }) {
@@ -303,6 +305,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         {!fleet?.down && <button className={`mini-nav ${chiefOn ? 'on' : ''}`} data-tour="chief" onClick={goChief} disabled={launching} aria-label={t('Chief of Staff')} title={`${t('Chief of Staff')}\n${chiefWhat}`}><Icon name="helm" size={15} />{(chief?.status === 'blocked' || threads.some((a) => a.status === 'blocked')) && <span className="mini-needs" />}</button>}
         <button className={`mini-nav ${String(selected || '').startsWith('view:meeting') ? 'on' : ''}`} onClick={() => onMeetings?.()} aria-label={recording ? t('Meetings (recording)') : t('Meetings')} title={t('Meetings')}><Icon name="mic" size={15} />{recording && <span className="rec-dot mini-rec" />}</button>
         {whiteboards && <button className={`mini-nav ${inStudio ? 'on' : ''}`} onClick={() => onOpen('view:studio')} aria-label={t('Studio')} title={t('Studio')}><Icon name="layers" size={15} /></button>}
+        <Quiet name="Bots"><MiniBots selected={selected} onExpand={onToggle} /></Quiet>
         <div className="rail-mini">
           {groups.filter((g) => rowsOf(g).length).map((g) => (
             <div key={g.id} className="mini-ws">
@@ -396,6 +399,8 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
           )}
           <Quiet name="Devices"><RailMachines /></Quiet>
         </div>
+        {/* Your bots (a beta feature): each a page of its own, and + to make one by saying what it's for. */}
+        <Quiet name="Bots"><RailBots selected={selected} onOpen={onOpen} /></Quiet>
         <div className="rail-head rail-spaces-head">
           <button type="button" className="rail-sec" onClick={() => setSpacesOpen(!spacesOpen)} {...fold(spacesOpen, t('Spaces'))}>
             <Icon name="chevron" size={10} className={`caret ${spacesOpen ? 'rot90' : ''}`} />

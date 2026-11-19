@@ -4,8 +4,12 @@
 //
 // On the computer serving it (serve): /_preview/<port>/<path> is that port on its localhost, for
 // your other devices only (each request comes through its link, relay.js, which says which paired
-// device asked), only while the Beta Feature is on there, and only for a port it lists as one of its
-// own dev servers (servers.js: a process started in an agent's folder), never Bridge AI's own ports.
+// device asked), only while the Beta Feature is on there, only for a port it lists as one of its
+// own dev servers (servers.js: a process an agent's terminal started), never Bridge AI's own ports,
+// and with a Remote Access Password or Ask Here First set there, only while that device has a session
+// for it open that got past them (remote.js mayPreview). What it serves never runs as a Bridge AI
+// page: only another computer showing it at an address of its own gets it as it is; anywhere else
+// (beside a phone's page) it comes in a sandbox, an origin of no one's.
 // Requests and WebSockets (hot reload) both; redirects to itself kept on it; cookies, which the link
 // carries none of, go in headers of their own (shared/remote.js PREVIEW_HEADERS).
 //
@@ -23,24 +27,33 @@ import { PREVIEW, PREVIEW_HEADERS as H } from '../shared/remote.js'
 const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'proxy-connection', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'host', 'content-length', 'accept-encoding', 'cookie', 'authorization', 'origin', 'referer'])
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]'])
 const PROTO = '__bridge_proto' // a WebSocket's subprotocol (Vite's hot reload asks for one), carried in its address over the link
+// What an app's answer never sets where it's shown: clearing a site's cookies or storage (127.0.0.1's
+// are Bridge AI's too), or a service worker over more than itself.
+const AWAY = new Set(['clear-site-data', 'service-worker-allowed'])
+export const SANDBOX = 'sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads'
 const json = (res, status, o) => { if (!res.headersSent) { res.statusCode = status; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(o)) } else res.destroy() }
 
 // ---------- the computer serving it ----------
-// trialOn(), deviceOf(id) (relay.js), allows(id): that device may connect (remote.js, Which Devices
-// May Connect), isDevPort(port), thisName().
-export function serve({ trialOn, deviceOf, allows = () => true, isDevPort, thisName }) {
+// trialOn(), deviceOf(id) (relay.js), may(id, port): null when that device may see that app now, or
+// { code, why } (remote.js mayPreview: Which Devices May Connect, a lockout, the password), isDevPort(port), thisName().
+export function serve({ trialOn, deviceOf, may: maySee = () => null, isDevPort, thisName }) {
   // Whether this request may reach that port: { port, path } or why not.
   async function check(req, url) {
     const m = PREVIEW.exec(new URL(url, 'http://x').pathname)
     if (!m) return { status: 404, error: 'Not found' }
-    if (!deviceOf(req.headers['x-bridge-relay'])) return { status: 403, error: 'Previews are for your other devices, through their link to this computer.' }
-    if (!allows(req.headers['x-bridge-relay'])) return { status: 403, error: `${thisName()} doesn't let this device connect. That's changed at ${thisName()} itself, in Settings › Account & Devices › Computers.`, code: 'device' }
+    const dev = deviceOf(req.headers['x-bridge-relay'])
+    if (!dev) return { status: 403, error: 'Previews are for your other devices, through their link to this computer.' }
     if (!trialOn()) return { status: 404, error: `Remote Screen and Preview is off on ${thisName()}. Turn it on there in Settings › About & Updates › Beta Features.`, trial: 'remote-screen' }
     const port = Number(m[1])
-    if (!(port > 1023 && port < 65536) || !(await isDevPort(port))) return { status: 403, error: `Port ${port} isn't one of the apps ${thisName()} serves (only a server an agent's project started there is shown).`, code: 'port' }
+    const no = maySee(dev.id, port)
+    if (no?.code === 'device') return { status: 403, error: no.why, code: 'device' }
+    if (!(port > 1023 && port < 65536) || !(await isDevPort(port))) return { status: 403, error: `Port ${port} isn't one of the apps ${thisName()} serves (only a server one of its agents' terminals started is shown).`, code: 'port' }
+    if (no) return { status: 403, error: no.why, code: no.code }
     const u = new URL(url, 'http://x')
     u.searchParams.delete(PROTO)
-    return { port, path: `${m[2] || '/'}${u.search}`, root: req.headers[H.root] === '1' }
+    // At its root: shown by another computer at an address of its own (ports, below); a phone's
+    // never is, beside its page.
+    return { port, path: `${m[2] || '/'}${u.search}`, root: req.headers[H.root] === '1' && dev.kind === 'computer' }
   }
   // The headers the dev server gets: the request's own (what the link carried), with what a browser
   // keeps for a site (its cookies, Authorization) from their own headers, and its Origin as the
@@ -73,8 +86,12 @@ export function serve({ trialOn, deviceOf, allows = () => true, isDevPort, thisN
     if (c.error) return json(res, c.status, { error: c.error, ...(c.trial ? { trial: c.trial } : {}), ...(c.code ? { code: c.code } : {}) })
     const up = http.request({ host: 'localhost', port: c.port, method: req.method, path: c.path, headers: toServer(req, c.port), autoSelectFamily: true, timeout: 60000 }, (r) => {
       res.statusCode = r.statusCode
+      // Beside a page of Bridge AI's (a phone's), in a sandbox: an origin of no one's, so it can't
+      // use Bridge AI's API, nor keep anything there.
+      if (!c.root) res.setHeader('content-security-policy', SANDBOX)
       for (const [k, v] of Object.entries(r.headers)) {
-        if (HOP.has(k) && k !== 'content-length') continue
+        if ((HOP.has(k) && k !== 'content-length') || AWAY.has(k)) continue
+        if (k === 'content-security-policy' && !c.root) { res.setHeader(k, [SANDBOX, ...[].concat(v)]); continue }
         if (k === 'set-cookie') { res.setHeader(H['set-cookie'], JSON.stringify([].concat(v))); continue }
         if (k === 'location') { res.setHeader(k, where(String(v), c.port, c.root)); continue }
         res.setHeader(k, v)
@@ -170,7 +187,7 @@ export function ports({ machines, linked }) {
           res.setHeader('set-cookie', (Array.isArray(list) ? list : []).map((c) => String(c).split(';').filter((x) => !/^\s*domain=/i.test(x)).join(';')))
           continue
         }
-        if (HOP.has(key) && key !== 'content-length') continue
+        if ((HOP.has(key) && key !== 'content-length') || AWAY.has(key)) continue
         if (key.startsWith('x-bridge-')) continue
         res.appendHeader?.(k, v) ?? res.setHeader(k, v)
       }

@@ -8,6 +8,8 @@ import Icon from './Icon.jsx'
 import { usePersisted } from './layout.jsx'
 import { api, hostApi, usePoll, viaRelay, machineId, BASE } from '../api.js'
 import PageView from './remote/PageView.jsx'
+import Gate, { gateOf } from './remote/Gate.jsx'
+import { connect } from './remote/remote.js'
 import { t, tn } from '../i18n/index.js'
 
 const enc = encodeURIComponent
@@ -68,11 +70,15 @@ export default function PreviewView({ agent, onSendToAgent }) {
   const comp = usePoll(HOW === 'here' ? null : '/version', 10 * 60 * 1000).data?.computer || t('that computer')
   // Another computer's app: its address here (asked of the computer this page comes from).
   const [addr, setAddr] = useState(null)
+  // That computer asks for its password (or Allow) before it shows its apps: a session for the app,
+  // open while it shows here (Granted).
+  const [gated, setGated] = useState(false)
+  useEffect(() => { setGated(false) }, [current?.port])
   useEffect(() => {
     if (HOW !== 'port' || !current) return
     let live = true
     setAddr(null)
-    hostApi(`/machines/${encodeURIComponent(machineId)}/preview`, { method: 'POST', body: { port: current.port } }).then((a) => live && setAddr(a), (e) => live && setAddr({ error: e.message }))
+    hostApi(`/machines/${encodeURIComponent(machineId)}/preview`, { method: 'POST', body: { port: current.port } }).then((a) => live && setAddr(a), (e) => { if (!live) return; setAddr({ error: e.message, code: e.code }); if (e.code === 'gate') setGated(true) })
     return () => { live = false }
   }, [current?.port, reload]) // eslint-disable-line react-hooks/exhaustive-deps
   const hrefOf = (p) => (HOW === 'here' ? urlOf(current.port, p) : HOW === 'port' && addr?.url ? `${addr.url}${path1(p)}` : null)
@@ -171,15 +177,44 @@ export default function PreviewView({ agent, onSendToAgent }) {
           : HOW === 'frames'
           ? <PageView key={`${current.port}-${reload}`} base={BASE} port={current.port} path={shown} name={comp} />
           : HOW === 'port'
-          ? (addr?.url ? <Frame key={`${current.port}-${reload}`} src={hrefOf(shown)} title={current.title || t('Port {port}', { port: current.port })} />
-            : addr?.error ? <div className="viewer-empty"><Icon name="alert" size={22} /><p>{addr.error}</p><button type="button" className="btn small" onClick={() => setReload((k) => k + 1)}>{t('Try again')}</button></div>
-              : <div className="viewer-empty"><Icon name="refresh" size={20} className="spin" /><p>{t('Asking {name} for the app…', { name: comp })}</p></div>)
+          ? (() => {
+            const shownHere = addr?.url ? <Frame key={`${current.port}-${reload}`} src={hrefOf(shown)} title={current.title || t('Port {port}', { port: current.port })} />
+              : addr?.error && addr.code !== 'gate' ? <div className="viewer-empty"><Icon name="alert" size={22} /><p>{addr.error}</p><button type="button" className="btn small" onClick={() => setReload((k) => k + 1)}>{t('Try again')}</button></div>
+                : <div className="viewer-empty"><Icon name="refresh" size={20} className="spin" /><p>{t('Asking {name} for the app…', { name: comp })}</p></div>
+            return gated ? <Granted key={current.port} port={current.port} name={comp} onOpen={() => setReload((k) => k + 1)}>{shownHere}</Granted> : shownHere
+          })()
           : remote && current.localOnly
           ? <div className="viewer-empty"><Icon name="phone" size={22} /><p>{t('This server only answers on the computer itself, so it can\'t be shown on this device.')}</p><p className="muted small">{tn('Restart it listening on all addresses (for Vite, {flag}), or open it on the computer.', { flag: <code>--host</code> })}</p></div>
           : <Frame key={`${current.port}-${reload}`} src={urlOf(current.port, shown)} title={current.title || t('Port {port}', { port: current.port })} />)}
       </div>
     </div>
   )
+}
+
+// An app of a computer that asks for its password (or someone there to allow it) first: a session
+// for it (server/remote.js view, source=preview:<port>), open as long as it shows here; its requests
+// are let through while it is (mayPreview). onOpen: let in, so its address can be asked for again.
+function Granted({ port, name, onOpen, children }) {
+  const conn = useRef(null)
+  const [st, setSt] = useState({ phase: 'connecting' })
+  const [run, setRun] = useState(0)
+  useEffect(() => {
+    setSt({ phase: 'connecting' })
+    const c = connect({
+      base: BASE, source: `preview:${port}`, page: { w: 390, h: 800 },
+      on: {
+        hello: () => { setSt({ phase: 'open' }); onOpen() },
+        message: (m) => { if (m.t === 'error') setSt({ phase: 'error', why: m.why }); else if (gateOf(m)) setSt({ phase: 'gate', gate: gateOf(m) }) },
+        closed: () => setSt((x) => (x.phase === 'error' ? x : { phase: 'ended' })),
+      },
+    })
+    conn.current = c
+    return () => { c.close(); conn.current = null }
+  }, [port, run]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (st.phase === 'open') return children
+  if (st.phase === 'gate') return <div className="viewer-empty"><Gate gate={st.gate} name={name} onPassword={(p) => conn.current?.send({ t: 'password', p })} onCancel={() => { conn.current?.close(); setSt({ phase: 'ended' }) }} /></div>
+  if (st.phase === 'connecting') return <div className="viewer-empty"><Icon name="refresh" size={20} className="spin" /><p>{t('Asking {name} for the app…', { name })}</p></div>
+  return <div className="viewer-empty"><Icon name="alert" size={22} /><p>{st.why || t('Not showing the app any more.')}</p><button type="button" className="btn small" onClick={() => setRun((n) => n + 1)}>{t('Try again')}</button></div>
 }
 
 function Frame({ src, title }) {

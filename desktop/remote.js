@@ -31,7 +31,35 @@ function fitWindow(area, w, h, chrome = { w: 0, h: 0 }, { margin = 0.9, min = { 
 }
 const meets = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
 
-function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload, fetch, platform = process.platform, keyFor, sizes = null }) {
+// Which display each of desktopCapturer's screens is, and its name. The display: by display_id (a
+// Mac, Windows, X11), else in the same order as the displays when there are as many, else by the
+// number in its id (a Mac's CGDirectDisplayID), else the main one when it's the only screen (Wayland's
+// one portal stream). Its name: the system's (Electron's label: "Built-in Retina Display", "LG
+// UltraFine" on a Mac, the monitor's own on Windows, often none on Linux), else "Built-in Display"
+// for a laptop's own, else desktopCapturer's when it isn't "Screen 1" or "Entire Screen", else
+// "Display 2" by its place. Two of the same model are numbered, as macOS does: "LG UltraFine (1)".
+const GENERIC = /^(entire screen|screen(\s*\d+)?)$/i
+function displayFor(screens, displays, primary) {
+  const out = new Map()
+  const used = new Set()
+  const free = (d) => (d && !used.has(d) ? d : null)
+  const byId = (v) => free(displays.find((x) => v != null && v !== '' && String(x.id) === String(v)))
+  screens.forEach((s, i) => {
+    const d = byId(s.display_id) || (screens.length === displays.length ? free(displays[i]) : null) || byId(String(s.id).split(':')[1]) || (screens.length === 1 ? free(primary) : null)
+    if (d) used.add(d)
+    const label = String(d?.label || '').trim()
+    const own = String(s.name || '').trim()
+    out.set(s, { d, name: (label || (d?.internal ? 'Built-in Display' : own && !GENERIC.test(own) ? own : `Display ${i + 1}`)).slice(0, 80) })
+  })
+  const count = {}
+  for (const x of out.values()) count[x.name] = (count[x.name] || 0) + 1
+  const nth = {}
+  for (const x of out.values()) if (count[x.name] > 1) { nth[x.name] = (nth[x.name] || 0) + 1; x.name = `${x.name} (${nth[x.name]})` }
+  return out
+}
+
+// restart(): reopen this app (main.js), asked for by a device that found no screens to share.
+function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload, fetch, platform = process.platform, keyFor, sizes = null, restart = () => {} }) {
   const MAC = platform === 'darwin'
   let capture = null
   let badge = null
@@ -47,6 +75,9 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     const s = systemPreferences.getMediaAccessStatus('screen')
     return s === 'granted' ? 'ok' : s === 'restricted' ? 'restricted' : s === 'not-determined' ? 'ask' : 'denied'
   }
+  // macOS's word when this app started: Screen Recording turned on after that takes effect only once
+  // the app is reopened (macOS says so when it's turned on), and until then there are no screens.
+  const startedWith = permission()
   // Where a display is in the pixels the system presses at: on a Mac, points (as its bounds are);
   // Windows and Linux (X11) move the pointer in pixels, so a display scaled up is told in those.
   const pixelsOf = (d) => {
@@ -56,25 +87,51 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     return { x: Math.round(d.bounds.x * k), y: Math.round(d.bounds.y * k), width: Math.round(d.bounds.width * k), height: Math.round(d.bounds.height * k) }
   }
   // The screens and windows, for the capture page. The first time, macOS asks about Screen Recording
-  // here (someone looked: first use).
+  // here (someone looked: first use). Each screen by its display's own name and size (displayFor).
+  // Screens apart from windows, so a window that can't be listed never hides them, and again a moment
+  // later when there are none at first. None at all: why, as far as can be told (none: 'reopen' when
+  // Screen Recording was turned on since this app started), and what getSources said.
   async function sources() {
-    let list = []
-    try { list = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false }) } catch { list = [] }
+    const get = async (type) => (await desktopCapturer.getSources({ types: [type], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false })).filter((s) => String(s.id).startsWith(`${type}:`))
+    let screens = []
+    let problem = null
+    for (const wait of [0, 400, 1200]) {
+      if (wait) await new Promise((r) => setTimeout(r, wait))
+      try { screens = await get('screen'); problem = null } catch (e) { screens = []; problem = String(e?.message || e).slice(0, 200) }
+      if (screens.length) break
+    }
+    let windows = []
+    try { windows = await get('window') } catch { windows = [] }
+    const list = [...screens, ...windows]
     const displays = screen.getAllDisplays()
     const primary = screen.getPrimaryDisplay()
+    const shown = displayFor(list.filter((s) => s.id.startsWith('screen:')), displays, primary)
     const out = []
     for (const s of list) {
       const kind = s.id.startsWith('screen:') ? 'screen' : 'window'
       if (kind === 'window' && OWN_TITLES.test(s.name || '')) continue
-      const d = kind === 'screen' ? displays.find((x) => String(x.id) === String(s.display_id)) || (list.filter((x) => x.id.startsWith('screen:')).length === 1 ? primary : null) : null
+      const { d = null, name = '' } = kind === 'screen' ? shown.get(s) || {} : {}
       out.push({
-        id: s.id, name: kind === 'screen' ? (s.name || 'Screen') : (s.name || 'Window').slice(0, 80), kind,
+        id: s.id, name: kind === 'screen' ? name || 'Screen' : (s.name || 'Window').slice(0, 80), kind,
         w: d ? Math.round(d.size.width * d.scaleFactor) : 0, h: d ? Math.round(d.size.height * d.scaleFactor) : 0,
         primary: !!d && d.id === primary.id, scale: d ? d.scaleFactor : null,
         bounds: d ? { ...d.bounds, ...(pixelsOf(d) ? { px: pixelsOf(d) } : {}) } : null,
       })
     }
-    return { sources: out.slice(0, 40), permission: permission() }
+    const now = permission()
+    const none = screens.length ? null : MAC && now === 'ok' && startedWith !== 'ok' ? 'reopen' : 'none'
+    return { sources: out.slice(0, 40), permission: now, ...(none ? { none, ...(problem ? { problem } : {}) } : {}) }
+  }
+  // A small still of each screen, for the viewer's Which screen? (asked only during a session, once
+  // the guardrails let it in: server/remote.js): JPEG, inside 320 x 320, its shape kept.
+  async function thumbs() {
+    let list = []
+    try { list = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 320, height: 320 }, fetchWindowIcons: false }) } catch { return [] }
+    return list.map((s) => {
+      const img = s.thumbnail
+      if (!img || img.isEmpty?.()) return null
+      return { id: s.id, data: `data:image/jpeg;base64,${img.toJPEG(70).toString('base64')}` }
+    }).filter(Boolean).slice(0, 12)
   }
 
   // ---------- the capture page ----------
@@ -123,8 +180,14 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     pages.set(sid, p)
     const wc = win.webContents
     wc.setWindowOpenHandler(() => ({ action: 'deny' }))
-    // It stays on its own app: a link elsewhere isn't followed.
-    wc.on('will-navigate', (e, url) => { try { if (new URL(url).origin !== origin && new URL(url).origin !== `http://127.0.0.1:${port}`) e.preventDefault() } catch { e.preventDefault() } })
+    // It stays on its own app: a link elsewhere isn't followed, nor a redirect; and nothing in it (a
+    // frame) goes to anything else on this computer (Bridge AI's own page, another local server).
+    const own = (url) => { try { const o = new URL(url).origin; return o === origin || o === `http://127.0.0.1:${port}` } catch { return false } }
+    const local = (url) => { try { return /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0|\[::\])$/i.test(new URL(url).hostname) } catch { return true } }
+    const away = (url, main) => (main ? !own(url) : local(url) && !own(url))
+    wc.on('will-navigate', (e, url) => { if (!own(e.url || url)) e.preventDefault() })
+    wc.on('will-redirect', (e, url, _inPlace, main) => { if (away(e.url || url, e.isMainFrame ?? main)) e.preventDefault() })
+    wc.on('will-frame-navigate', (e) => { if (away(e.url, e.isMainFrame)) e.preventDefault() })
     wc.setFrameRate(Math.min(30, p.rate * 4))
     const flush = () => {
       p.timer = null
@@ -217,6 +280,7 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
   function onEvent(ev) {
     if (!ev || typeof ev.t !== 'string') return
     if (ev.t === 'need-capture') needCapture()
+    else if (ev.t === 'reopen') setTimeout(restart, 500) // (the server tells the device first)
     else if (ev.t === 'capture-idle') captureIdle()
     else if (ev.t === 'sessions') sessions(ev.list, ev.asks)
     else if (ev.t === 'control') control = !!ev.on
@@ -226,7 +290,7 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     else if (ev.t === 'page-go') pageGo(ev)
     else if (ev.t === 'page-stop') pageStop(ev)
   }
-  return { onEvent, sources, permission, view, fit, isView: (w) => [...views.values()].includes(w), controlOn: () => control, setControl: (on) => { control = !!on }, windows: () => [capture, badge, ...views.values()].filter(Boolean) }
+  return { onEvent, sources, thumbs, permission, view, fit, isView: (w) => [...views.values()].includes(w), controlOn: () => control, setControl: (on) => { control = !!on }, windows: () => [capture, badge, ...views.values()].filter(Boolean) }
 }
 
-module.exports = { create, fitWindow }
+module.exports = { create, fitWindow, displayFor }

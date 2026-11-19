@@ -271,6 +271,33 @@ const cmds = {
     }
   },
 
+  // A bot (Bots, a beta feature) from what you were asked for: a draft AI Assist sets up from the
+  // words, waiting in the sidebar's Bots for them to look over and Create. Nothing of it answers,
+  // connects or changes until they do; you can't make one live.
+  async bot(args) {
+    const [sub, ...rest] = args
+    const opt = (k) => { const i = rest.indexOf(k); if (i < 0) return null; const v = rest[i + 1]; rest.splice(i, 2); return v }
+    const name = opt('--name')
+    let words = rest.join(' ')
+    if (words === '-' || (!words && !process.stdin.isTTY)) words = fs.readFileSync(0, 'utf8')
+    if (sub !== 'draft' || !words.trim()) throw new Error('Usage: bridge bot draft [--name "Name"] "what it should do, and who it\'s for"   (- reads stdin)')
+    const r = await api('/bots/assist', { method: 'POST', body: { text: words.trim(), from: 'chief', ...(name ? { name } : {}) } })
+    const you = SETTINGS.name && SETTINGS.name !== 'the user' ? SETTINGS.name : 'the user'
+    const p = r.setup?.proposal || {}
+    const said = (r.setup?.messages || []).filter((m) => m.who === 'assist').map((m) => m.text).pop()
+    const noModel = (r.setup?.messages || []).find((m) => m.kind === 'no-model' || m.kind === 'failed' || m.kind === 'unreadable')
+    console.log(`Drafted the bot ${r.bot.name} (${r.bot.id}). It waits in Bridge AI's sidebar under Bots for ${you} to look over and Create: nothing of it answers until they do.`)
+    if (noModel) console.log(`AI Assist couldn't fill it in${noModel.vars?.why ? ` (${noModel.vars.why})` : ''}: ${you} sets it up on its page, in words or with the form.`)
+    else {
+      if (said) console.log(`AI Assist: ${said}`)
+      const where = { slack: 'Slack', discord: 'Discord', teams: 'Microsoft Teams' }[p.platform] || 'Slack'
+      // (Through the platform's shared connection, unless it's to have an app of its own.)
+      const via = (r.setup?.options?.connections || []).find((c) => c.platform === p.platform)
+      console.log(`Proposed: answers in ${where}${p.own ? ' with an app of its own there' : via ? ` through ${via.name}, the shared connection there (no app to make)` : ', through a shared connection made once there'}${p.folders?.length ? `, reading ${p.folders.join(', ')}` : ', from what the model knows (no folders)'}${p.people?.length ? `, for ${p.people.join(', ')}` : ''}${p.mcp?.length ? `, with the MCP servers ${p.mcp.join(', ')}` : ''}.`)
+    }
+    console.log(`Tell ${you} it's there to review: its page shows the whole proposal, each part changeable, and Create.`)
+  },
+
   // A one-off question to another model: a second opinion, a fact check, live news.
   async ask(args) {
     if (!args.length || args[0] === '--list') {
@@ -404,6 +431,9 @@ const cmds = {
   bridge wait <pane>… [--timeout s] block until those agents stop working: finished or blocked (run in the background)
   bridge threads                    your threads with ${SETTINGS.name && SETTINGS.name !== 'the user' ? SETTINGS.name : 'the user'} (Main and the others), which one is you,
                                     and the agents each one handed work to
+  bridge bot draft [--name "Name"] "what it should do, and who it's for"
+                                    draft a bot (Bots, a beta feature) for ${SETTINGS.name && SETTINGS.name !== 'the user' ? SETTINGS.name : 'the user'} to look over and Create in
+                                    the sidebar's Bots; AI Assist fills it in from the words (- reads stdin)
   bridge ask --list                 who you can consult (other models), and how each is reached
   bridge ask <who> [--model m] "question"
                                     a one-off question to another model (grok, muse, gemini, gpt, claude, perplexity, ...)

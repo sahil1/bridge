@@ -108,7 +108,7 @@ async function call(url, opts = {}) {
 export async function hostApi(path, opts = {}) {
   const res = await fetch(`/api${path}`, { ...opts, headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) }, body: opts.body ? JSON.stringify(opts.body) : undefined })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status, code: typeof data.code === 'string' ? data.code : undefined })
   return data
 }
 
@@ -183,6 +183,13 @@ export function usePoll(path, intervalMs, { enabled = true } = {}) {
   return { ...rest, stale: !!state.data && of !== path, refresh }
 }
 
+// Who's viewing one of your screens now, on this computer or another of yours (event: screen,
+// server/screentell.js), for the card in every window (remote/Here.jsx ScreenLive).
+let screens = []
+const screenSubs = new Set()
+export const screensLive = { get: () => screens, subscribe: (fn) => { screenSubs.add(fn); return () => screenSubs.delete(fn) } }
+const screensHeard = (list) => { screens = Array.isArray(list) ? list : []; for (const f of screenSubs) f(screens) }
+
 // Live fleet over server-sent events, with a polling fallback.
 export function useFleet() {
   const [fleet, setFleet] = useState(null)
@@ -195,6 +202,7 @@ export function useFleet() {
       es.addEventListener('fleet', (e) => { setFleet(JSON.parse(e.data)); setLive(true) })
       // The config changed on the server (a Beta Feature turned on or off, here or on another device).
       es.addEventListener('config', () => refetch('/config'))
+      es.addEventListener('screen', (e) => { try { screensHeard(JSON.parse(e.data).list) } catch { /* not that */ } })
       es.onerror = () => { setLive(false); es.close(); timer = setTimeout(connect, 3000) }
     }
     connect()

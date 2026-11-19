@@ -3,9 +3,11 @@
 // edit only its own copy of a repository), the answer a draft you send, edit or discard, in Bridge
 // AI or from your Slack direct messages (or sent at once, where you said it may be and the limits
 // hold), and what nothing could answer passed to you. The questions come in through a channel, one
-// per bot: its Slack app (slackbot.js), and its Discord and Teams apps (discordbot.js, teamsbot.js),
-// made one channel by connector.js combine(), which keeps their ids apart (discord:…, teams:…; Slack's
-// as Slack gives them) and says what each platform can do (capsOf). Slack's own features (drafts in
+// per bot: its connection on Slack (slackbot.js), Discord and Teams (discordbot.js, teamsbot.js),
+// each the platform's shared one or one of the bot's own (connections.js; on a shared one,
+// connhub.js says which bot a question is for, and the bot's rules here apply after that), made one
+// channel by connector.js combine(), which keeps their ids apart (discord:…, teams:…; Slack's as
+// Slack gives them) and says what each platform can do (capsOf). Slack's own features (drafts in
 // your direct messages with buttons, its working status and Stop, streaming, files, the slash command,
 // the shortcut, the Home tab) are for questions asked in Slack only; who may ask, the commands,
 // memory, limits, pause, changes and the record are the same on all three.
@@ -66,6 +68,18 @@
 // copy of an agent's conversation knows what that agent read anywhere, and Codex reads anywhere, so
 // those always wait for you.
 //
+// What answers is a list, its first choice and fallbacks (botanswer.js): an agent's command line, or
+// any model Bridge AI reaches, answering through its own tools kept to the bot's folders. One that
+// can't answer (not installed, not signed in, at its usage limit, a provider's error, a server here
+// that isn't running, a command line that never got going) is passed over for the next at once, and
+// why is in the record; the draft says which answered; when none can, the question comes to you with
+// each reason. A change goes only to one that can make it (Claude Code); with none, a question
+// asking for one comes to you, saying why.
+//
+// Its MCP servers (botmcp.js): the ones you picked for it and nothing else, each tool that only reads
+// for anyone who may ask, the rest only for you and the people you named; which it used is in the
+// record.
+//
 // What it remembers (botmemory.js) is given with each question: its own, the channel's and the
 // asker's, only once you've kept them. Commands after a mention or in a direct message: !help,
 // !status, !mute, !unmute, !stop, !what do you know about me, !forget me.
@@ -84,11 +98,14 @@ import os from 'node:os'
 import path from 'node:path'
 import { dataFile, ensureDir, writeFileAtomic, IS_WIN } from './paths.js'
 import { makeTasks } from './chieftasks.js'
-import { adapter, readOnly, canChange } from './agents.js'
+import { adapter, readOnly } from './agents.js'
 import { makeTrace, KEEP, toCsv, toMarkdown } from './trace.js'
 import { makeMemory } from './botmemory.js'
 import * as changes from './botchanges.js'
 import * as store from './bots.js'
+import * as botmcp from './botmcp.js'
+import * as botanswer from './botanswer.js'
+import { isLimit } from './consult.js'
 import { platformOf, PLATFORMS, CAPS, laterTs } from './connector.js'
 
 const FILE = dataFile('front-desk.json')
@@ -117,9 +134,12 @@ const MINUTE_MS = Number(process.env.BRIDGE_BOT_MINUTE_MS) || 60 * 1000
 // of 8,191 characters at most and the brief's lines would be joined into one (tests ask for it
 // elsewhere too).
 const BRIEF_FILE = IS_WIN || process.env.BRIDGE_BOT_BRIEF_FILE === '1'
-const SPACE = 'Bots'
+// The space its answering agents' tabs are in ("Bots" before 3.22, the name of the sidebar's own
+// section now: index.js fleetView shows an older one by this name).
+export const SPACE = 'Bot Runs'
 const NO_ANSWER = /^\s*\**NO ANSWER\b\**[:.\s-]*/i
 const NOT_FOR_ME = /^\s*\**NOT FOR ME\b/i
+const CHANGE_NEEDED = /^\s*\**CHANGE NEEDED\b\**[:.\s-]*/i
 const REMEMBER = /^\s*\**REMEMBER(?:\s+about\s+([^:*]{1,60}))?\**\s*:\s*(.+)$/i
 const TEACH = /^\s*(?:please\s+)?remember\s+(?:that\s+)?(.{3,})$/i
 const clip = (s, n) => { const t = String(s || '').trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t }
@@ -210,7 +230,7 @@ export function quotes(answer, files) {
 // pinned, then the end of the instructions; and it's said in the record (cut, below), and in the
 // brief where the instructions were cut.
 export const BRIEF_MAX = 19000
-export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, memory = [], attached = [], agents = null, scheduled = null, github = [] }, max = BRIEF_MAX) {
+export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, memory = [], attached = [], agents = null, scheduled = null, github = [], noChange = false }, max = BRIEF_MAX) {
   const who = (p) => p?.name || 'someone'
   // (Where it was asked: Slack, Discord or Microsoft Teams, and what people call the place there.)
   const plat = q.try ? 'slack' : platOf(q)
@@ -260,6 +280,8 @@ export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, 
   for (const a of asks) tail.push(`----- question from ${who(a.person)} -----`, clip(fence(a.text), share) || '(No words with the mention: they called you into this conversation. Answer what it\'s asking.)', '----- end of question -----', '')
   tail.push(`Reply with the answer alone, as it should appear in ${app}: plain and short, in the language it was asked in. ${auto ? `It goes to ${app} as you write it.` : `${you} reads it before it's sent.`} If what you can read doesn't answer it, reply with NO ANSWER on the first line and why on the next.`)
   if (CAPS[plat].files) tail.push('To send back a file (a chart made from data, a table), put it after your answer: a line FILE: <name>, then the file in a fenced block. A chart as SVG; text files only (svg, csv, md, txt, json, html), up to 1 MB.')
+  // (Someone who may ask for a change, with nothing here that can make one: said, for you to make.)
+  if (noChange) tail.push(`You can't change anything here. If they ask you to change something (a file, the code, a document), reply with CHANGE NEEDED on the first line and what they want changed on the next, and nothing else.`)
   if (bot.memory !== 'off') tail.push(`If you learn something worth knowing for later questions (someone's role, what they prefer, a fact about this channel), add it at the very end as a line REMEMBER: … (in general), REMEMBER about this channel: …, or REMEMBER about ${who(q.from)}: …. It's kept only if ${you} keeps it.`)
   if ((q.how === 'follow-up' || q.how === 'listen') && !pending?.length) tail.push(q.how === 'listen' ? 'It was written in the channel without mentioning you: if it isn\'t a question for you (people talking among themselves, news, a thank-you), reply with NOT FOR ME alone.' : 'It was written in the thread without mentioning you: if it isn\'t for you (people talking among themselves, a thank-you), reply with NOT FOR ME alone.')
 
@@ -295,19 +317,30 @@ const TRY = {
 // transcriptOf(h): the file its agent keeps its conversation in (kept in the trace). modelOf(kind):
 // the model an agent starts on. computer(): this computer's name. commandOf(bot), shortcutOf(bot):
 // how it's called in Slack besides a mention (/pricing-desk, "Ask Pricing Desk"). delegate: the
-// helpers.
-export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => true, you = () => 'the owner', changed = () => {}, close = async () => {}, told = () => {}, readsOf = async () => [], transcriptOf = () => null, modelOf = () => null, computer = () => os.hostname(), commandOf = () => null, shortcutOf = () => null }) {
+// helpers. toolsOf(h): the tools a helper's agent called (for the MCP tools a run used). nowOf(h):
+// what its agent is doing now, for Try It ({ status, asking, doing }).
+// models(): the models Bridge AI reaches (chatmodels.js models), reply: its reply(), signedIn(kind):
+// whether an agent is signed in here (false when it says not), for what answers (botanswer.js).
+// ownersOf(bot): you on each platform as its connections have you ({ slack, discord, teams }:
+// connections.js), ahead of the bot's own. synced(): its bots' channels started or stopped (sync()).
+export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => true, you = () => 'the owner', changed = () => {}, close = async () => {}, told = () => {}, readsOf = async () => [], transcriptOf = () => null, modelOf = () => null, computer = () => os.hostname(), commandOf = () => null, shortcutOf = () => null, toolsOf = async () => [], nowOf = async () => null, models = async () => [], reply = null, signedIn = async () => null, ownersOf = () => ({}), synced = () => {} }) {
   let data = { v: 2, outbox: [] }
   let old = null // the Slack Bot's questions (#216), to carry over
   try { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); if (Array.isArray(j.questions)) old = j; else if (Array.isArray(j.outbox)) data = { v: 2, outbox: j.outbox } } catch { /* none yet */ }
   const save = () => { try { ensureDir(path.dirname(FILE)); writeFileAtomic(FILE, JSON.stringify(data), { mode: 0o600 }) } catch (e) { console.log(`Bots couldn't save what's still to post: ${e.message}`) } }
   const tasks = makeTasks(ensureDir(DIR), you)
   const bots = new Map() // id -> { channel, trace, st, memory } (a deleted bot's: no channel, its record only)
-  const botOf = (id) => store.get(id)
+  // A bot's settings, with you on each platform as its connection there has you, else as it has.
+  const botOf = (id) => {
+    const b = store.get(id)
+    if (!b) return b
+    const o = ownersOf(b) || {}
+    return { ...b, owner: o.slack || b.owner, owners: { ...b.owners, ...(o.discord ? { discord: o.discord } : {}), ...(o.teams ? { teams: o.teams } : {}) } }
+  }
   // Its name and how long its record is kept, whether it's a bot still or one deleted.
   const keptOf = (id) => store.get(id) || store.deletedOf(id)
   // The desk's own task list for its helpers, as many at once as its bots allow (2 unless set).
-  delegate.list('desk', { tasks, dir: ensureDir(ANSWERS), also: [CHANGES, FILES, BRIEFS], max: () => Math.max(1, Math.min(5, ...[...bots.keys()].map((id) => botOf(id)?.max || 2))), heard: (h) => heard(h) })
+  delegate.list('desk', { tasks, dir: ensureDir(ANSWERS), also: [CHANGES, FILES, BRIEFS, botmcp.RUNS], max: () => Math.max(1, Math.min(5, ...[...bots.keys()].map((id) => botOf(id)?.max || 2))), heard: (h) => heard(h) })
   const chan = (b, q) => (q?.try ? TRY : b?.channel)
   // You: you in Slack, or you in Discord or Teams (owners), whichever you were asked by.
   // (you: asked as you in Try It, or posted for you by a routine, before You in Slack is set.)
@@ -353,16 +386,18 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       case 'context': q.context = { kind: e.kind, n: e.messages?.length || 0, pins: e.pins?.length || 0, problem: e.problem || null }; break
       case 'run.started':
         Object.assign(q, { state: 'answering', helper: e.helper, route: e.route || null, runAt: e.at })
-        q.runs.push({ helper: e.helper, agent: e.agent, from: e.from || null, folders: e.folders || [], with: e.with || [], at: e.at, instructions: e.instructions || null, change: e.change || null })
+        q.runs.push({ helper: e.helper, agent: e.agent, from: e.from || null, folders: e.folders || [], with: e.with || [], at: e.at, instructions: e.instructions || null, change: e.change || null, mcp: e.mcp || null, answerer: e.answerer || null, try: e.try ?? null, noChange: e.noChange || null })
         if (c) { c.answered = true; c.route = e.route || null }
         break
       case 'run.read': if (run) run.reads = e.files || []; break
+      case 'run.tools': if (run) run.tools = e.tools || []; break
+      case 'run.skipped': case 'run.passed': (q.skips ||= []).push({ label: e.answerer?.label || e.answerer?.id || '', why: e.why || '' }); break
       case 'run.finished':
         if (run) Object.assign(run, { end: e.end, endedAt: e.at, session: e.session || null, took: e.took ?? null, transcript: e.transcript || null })
         if (c && e.end === 'finished' && e.session) c.session = { id: e.session, kind: e.agent, cwd: e.cwd, upTo: e.upTo || q.ts }
         break
       // (A change whose pull request couldn't be opened says so on its draft.)
-      case 'draft': Object.assign(q, { state: 'draft', draft: e.text ?? '', needsOwner: !!e.needsOwner, why: e.why || null, auto: !!e.auto, problem: q.change?.failed && !q.change.pr ? oneLine(q.change.failed, 300) : null, sources: e.sources || [], outFiles: e.files || [], warn: e.warn || null, draftAt: e.at }); break
+      case 'draft': Object.assign(q, { state: 'draft', by: e.by || null, draft: e.text ?? '', needsOwner: !!e.needsOwner, why: e.why || null, auto: !!e.auto, problem: q.change?.failed && !q.change.pr ? oneLine(q.change.failed, 300) : null, sources: e.sources || [], outFiles: e.files || [], warn: e.warn || null, draftAt: e.at }); break
       case 'skipped': q.state = 'skipped'; break
       case 'stopped': Object.assign(q, { state: 'stopped', stopped: { by: e.by || null, why: e.why || null } }); break
       case 'draft.edited': Object.assign(q, { edited: true, draft: e.after ?? q.draft }); break
@@ -400,11 +435,29 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   const sending = (q) => data.outbox.some((o) => o.q === q.id && o.kind === 'answer')
 
   // ---------- Who answers ----------
-  // The agent that answers, by its setting, else the first one here that can only read.
-  async function answerer(bot) {
-    const have = new Set((await installed()).map((k) => k.kind))
-    return [bot.agent, 'claude', 'codex'].filter(Boolean).find((k) => have.has(k) && readOnly(k)) || null
+  // What's here to answer with: the agents installed, the models reached, and which agents say
+  // they aren't signed in (botanswer.js).
+  async function here() {
+    const kinds = (await installed()).map((k) => k.kind)
+    const list = await models().catch(() => [])
+    const signed = {}
+    for (const k of ['claude', 'codex']) if (kinds.includes(k)) { const s = await signedIn(k).catch(() => null); if (s?.signedIn === false) signed[k] = false }
+    return { installed: kinds, models: list, signedIn: signed }
   }
+  // Its list, each entry with why it can't answer now (or null).
+  async function answerersOf(bot) {
+    const h = await here()
+    const r = botanswer.listOf(bot, h)
+    return { ...r, list: r.list.map((e) => ({ ...e, why: botanswer.notReady(e, h) })) }
+  }
+  // The first that can answer now: an agent's kind, or 'model'.
+  async function answerer(bot) {
+    const e = (await answerersOf(bot)).list.find((x) => !x.why)
+    return e ? (e.kind === 'agent' ? e.agent : 'model') : null
+  }
+  // A model's runs, by their id (m…): stopping them, and what each is doing now (Try It).
+  const chatRuns = new Map()
+  let chatSeq = 0
   // The folders it reads from, each checked (one that's gone is said, and skipped), and shown from
   // your home folder (~/…).
   const home = os.homedir()
@@ -440,6 +493,12 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   }
   // May this person ask for a change: you, or someone you named (never "everyone in its channels").
   const mayChange = (bot, p) => bot.changes !== 'none' && (isOwner(bot, p) || (bot.askers || []).some((x) => x?.id === p?.id))
+  // May its MCP tools that do more than read be used for this person: the same people.
+  const mayAct = (bot, p) => isOwner(bot, p) || (bot.askers || []).some((x) => x?.id === p?.id)
+  // A run's MCP folder (botmcp.js), by its helper, gone once the run's over.
+  const mcpDirs = new Map()
+  const dropMcp = (hid) => { botmcp.drop(mcpDirs.get(hid)); mcpDirs.delete(hid) }
+  botmcp.sweep()
   // Agents of yours working in those folders, by the name you see them by: not the Chief of Staff,
   // a helper (the desk's own among them), a terminal, a plain chat or a cloud agent.
   async function agentsIn(folders) {
@@ -459,6 +518,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     : why === 'unknown' ? `Sorry, I couldn't check who's asking, so I can't answer. Ask ${you()} directly.`
       : `Sorry, I don't answer guests or people from other organizations. Ask ${you()} directly.`)
   const COMMAND = /^\s*!\s*([a-z][a-z ?']*)\s*$/i
+  // How to say !unmute to it: after its name, through a shared connection's app (connhub.js).
+  const unmuteOf = (bot, m) => (m?.routed?.connection ? `@${m.routed.connection} ${bot.name}: !unmute` : `@${bot.name} !unmute`)
 
   async function hear(id, m) {
     if (!on()) return
@@ -489,6 +550,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       ...(m.files?.length ? { files: m.files.slice(0, 10).map((f) => ({ id: f.id || null, name: clip(f.name, 120), type: f.type || null, size: Number(f.size) || 0 })) } : {}),
       ...(m.via ? { via: m.via } : {}), ...(m.try ? { try: true } : { platform: m.platform || platOf(m.channel) }), ...(m.routine ? { routine: m.routine } : {}),
       ...(m.attached?.length ? { notRead: m.attached.slice(0, 10).map((x) => clip(x, 120)) } : {}),
+      ...(m.routed?.by ? { routed: m.routed } : {}),
     }
     const busy = !command && c && c.questions.map((x) => st.questions.get(x)).reverse().find((x) => x?.state === 'answering')
     const qid = !why && busy ? busy.id : `${id}-q${st.next}`
@@ -508,7 +570,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // Muted in this channel (!mute): nothing, but the one who asked is told how to turn it back on.
     if (!m.dm && !m.try && (bot.muted || []).some((x) => x.id === m.channel)) {
       record(id, 'refused', at(q, { why: 'muted', person: e.person }))
-      if (!followUp && !listen) chan(b, q).whisper?.(q.reply, m.from?.id, `I'm muted in this channel. Say @${bot.name} !unmute to turn me back on.`).catch(() => {})
+      if (!followUp && !listen) chan(b, q).whisper?.(q.reply, m.from?.id, `I'm muted in this channel. Say ${unmuteOf(bot, m)} to turn me back on.`).catch(() => {})
       changed()
       return
     }
@@ -574,10 +636,13 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const slack = platOf(q) === 'slack'
     const cmdName = slack ? commandOf(bot) : null
     const cut = shortcutOf(bot) || `Ask ${bot.name} about this`
+    // (Asked through a shared connection: reached by its name through that app.)
+    const via = m?.routed?.connection || null
     if (cmd === 'help') {
       return say([
         `I'm ${bot.name}, ${ownerName(bot)}'s bot${bot.description ? `: ${bot.description.replace(/\.$/, '')}` : ''}. I answer from what's on ${ownerName(bot)}'s computer, and ${bot.auto ? 'some answers go out straight away' : `${ownerName(bot)} checks each answer before it's sent`}.`,
-        slack ? `Ask me by mentioning me, in a direct message${cmdName ? `, with ${cmdName}` : ''}, or with "${cut}" in a message's menu. A reply in a thread I answered in needs no mention.` : 'Ask me by mentioning me, or in a direct message. A reply in a thread I answered in needs no mention.',
+        via ? `Ask me through @${via}: start with "${bot.name}:"${m.routed.command ? `, or type ${m.routed.command} ${bot.name.toLowerCase().split(/\s+/)[0]} and your question` : ''}. A reply in a thread I answered in comes to me.`
+          : slack ? `Ask me by mentioning me, in a direct message${cmdName ? `, with ${cmdName}` : ''}, or with "${cut}" in a message's menu. A reply in a thread I answered in needs no mention.` : 'Ask me by mentioning me, or in a direct message. A reply in a thread I answered in needs no mention.',
         'Commands: !status, !mute and !unmute (this channel), !stop, !what do you know about me, !forget me.',
       ].join('\n'))
     }
@@ -597,7 +662,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         store.save(id, { muted: next })
         record(id, 'settings.changed', { ...at(q), setting: 'muted', old: was.map((x) => x.name || x.id), new: next.map((x) => x.name || x.id), by: q.from?.name || q.from?.id || null })
       }
-      return say(cmd === 'mute' ? `Muted in ${where(q.place)}: I won't answer here until someone says @${bot.name} !unmute.` : `Back on in ${where(q.place)}.`)
+      return say(cmd === 'mute' ? `Muted in ${where(q.place)}: I won't answer here until someone says ${unmuteOf(bot, m)}.` : `Back on in ${where(q.place)}.`)
     }
     if (cmd === 'stop') {
       const n = await stopWhere(id, { conv: q.conv, person: q.place?.kind === 'dm' ? q.from?.id : null }, { by: q.from?.name || q.from?.id || 'someone', why: '!stop' })
@@ -704,65 +769,86 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   }
 
   // ---------- A run ----------
-  // A run of an agent for it: who answers, the context, instructions and memory it's given, the files
-  // attached, and its agent started; nothing that can answer read-only, or folders that are all
-  // gone: to you. pending: what came while an answer ran, now given to its conversation; after: that
-  // answer's helper.
-  async function answer(id, q, { pending = null, after = null } = {}) {
+  // A run for it: who answers (the first in its list that can, from `from`: the one after one that
+  // couldn't), the context, instructions and memory it's given, the files attached, and its agent
+  // started, or its model asked; none that can, or folders that are all gone: to you, saying why.
+  // pending: what came while an answer ran, now given to its conversation; after: that answer's helper.
+  const label = (e) => ({ id: e.id, label: e.label, local: !!e.local })
+  async function answer(id, q, { pending = null, after = null, from = 0 } = {}) {
     const bot = botOf(id)
     const b = bots.get(id)
     if (!bot || !b) return
     if (bot.paused) return toYou(id, q, `${bot.name} is paused`)
-    const kind = await answerer(bot)
-    if (!kind) return toYou(id, q, 'No agent here can answer read-only: install Claude Code or Codex')
     const open = [...bots.values()].reduce((n, x) => n + [...x.st.questions.values()].filter((y) => y.state === 'answering' && y.helper).length, 0)
-    if (!after && open >= MAX_OPEN) return toYou(id, q, `${MAX_OPEN} questions are being answered already`)
+    if (!after && !from && open >= MAX_OPEN) return toYou(id, q, `${MAX_OPEN} questions are being answered already`)
     const folders = await foldersOf(bot)
     const ok = folders.filter((f) => f.ok)
     if (folders.length && !ok.length) return toYou(id, q, `None of the folders it reads from is there: ${folders.map((f) => f.shown).join(', ')}`)
     let paths = ok.map((f) => f.path)
+    const { list, fallback } = await answerersOf(bot)
     const have = new Set((await installed()).map((k) => k.kind))
     const c = b.st.convs.get(q.conv)
+    // Which answers: for someone who may ask for a change, the first that can make one and can answer
+    // now; else the first that can answer now, each one passed over said in the record. Fallback off:
+    // its first choice, or none.
+    const wantsChange = !q.try && !q.routine && mayChange(bot, q.from)
+    const tries = list.map((e, i) => ({ e, i })).filter(({ i }) => i >= from && (fallback || i === 0))
+    let pickd = wantsChange ? tries.find(({ e }) => botanswer.canMakeChanges(e) && !e.why) : null
+    const changer = !!pickd
+    if (!pickd) {
+      for (const t of tries) {
+        if (!t.e.why) { pickd = t; break }
+        record(id, 'run.skipped', at(q, { answerer: label(t.e), why: t.e.why, try: t.i }))
+      }
+    }
+    if (!pickd) {
+      next(id)
+      const why = (q.skips || []).map((x) => `${x.label}: ${x.why}`)
+      return toYou(id, q, !list.length ? 'Nothing here can answer for it: install Claude Code or Codex, or add a model in Settings › Model Providers' : `Nothing could answer it${!fallback ? ' (fallback is off)' : ''}: ${why.join('; ') || 'none of its list is here'}`)
+    }
+    const entry = pickd.e
+    const kind = entry.kind === 'agent' ? entry.agent : 'model'
+    // A change asked for, with nothing that can make one: answered, and told to say so (heard()).
+    const noChange = wantsChange && !changer ? (list.some(botanswer.canMakeChanges) ? `${list.filter(botanswer.canMakeChanges).map((e) => e.label).join(', ')} can't answer now` : 'nothing in its list can make one: changes need Claude Code') : null
     // A change someone who may ask for one could be asking for: its own copy of the repository.
     let tree = null
-    let problem = null
-    if (!q.try && !q.routine && mayChange(bot, q.from)) {
-      if (!canChange(kind) || !have.has('claude')) problem = 'Changes need Claude Code, which keeps its edits to its own copy of the repository'
+    let problem = noChange
+    if (changer) {
+      const r = await repoFor(bot, folders)
+      if (!r.top) problem = r.problem
       else {
-        const r = await repoFor(bot, folders)
-        if (!r.top) problem = r.problem
-        else {
-          try {
-            tree = await changes.prepare({ repo: r.top, dir: path.join(CHANGES, `${id}-${keyOf(q.conv)}`), branch: changes.branchOf(bot.name, c?.branch ? c.branch.split('/').pop() : q.conv.split(':')[1] || q.ts) })
-            if (c?.branch && tree.branch !== c.branch) tree.branch = c.branch
-            paths = paths.filter((p) => !inside(p, r.top))
-          } catch (e) { problem = e.message; record(id, 'change.failed', at(q, { step: e.step || 'worktree', error: oneLine(e.message, 300) })) }
-        }
+        try {
+          tree = await changes.prepare({ repo: r.top, dir: path.join(CHANGES, `${id}-${keyOf(q.conv)}`), branch: changes.branchOf(bot.name, c?.branch ? c.branch.split('/').pop() : q.conv.split(':')[1] || q.ts) })
+          if (c?.branch && tree.branch !== c.branch) tree.branch = c.branch
+          paths = paths.filter((p) => !inside(p, r.top))
+        } catch (e) { problem = e.message; record(id, 'change.failed', at(q, { step: e.step || 'worktree', error: oneLine(e.message, 300) })) }
       }
     }
     // Going on from an answer in this conversation: a copy of its conversation, read-only, in its
     // folder, while that's still one it reads from (or its own empty one, or its copy of the
     // repository for a change) and the same agent answers.
-    const from = after ? { id: after.sessionId, kind: after.kind, cwd: after.cwd, upTo: null } : c?.session
-    const goOn = !!(from?.id && from.cwd && adapter(from.kind).fork && adapter(from.kind).caps?.fork && readOnly(from.kind) && have.has(from.kind)
-      && (from.kind === kind || c?.route?.to === 'agent') && (tree ? from.cwd === tree.dir : (paths.some((p) => inside(from.cwd, p)) || inside(from.cwd, ANSWERS))))
+    const was = after && !after.chat ? { id: after.sessionId, kind: after.kind, cwd: after.cwd, upTo: null } : c?.session
+    const goOn = kind !== 'model' && !!(was?.id && was.cwd && adapter(was.kind).fork && adapter(was.kind).caps?.fork && readOnly(was.kind) && have.has(was.kind)
+      && (was.kind === kind || c?.route?.to === 'agent') && (tree ? was.cwd === tree.dir : (paths.some((p) => inside(was.cwd, p)) || inside(was.cwd, ANSWERS))))
     let route
-    if (tree) route = { to: 'change', kind: 'claude', cwd: tree.dir, dirs: paths, enforced: true, change: tree, ...(goOn ? { fork: from.id, followUp: true } : {}) }
+    if (tree) route = { to: 'change', kind: 'claude', cwd: tree.dir, dirs: paths, enforced: true, change: tree, ...(goOn ? { fork: was.id, followUp: true } : {}) }
     else if (goOn) {
-      const was = c?.route?.to === 'change' ? 'folders' : c?.route?.to || (inside(from.cwd, ANSWERS) ? 'throwaway' : 'folders')
-      route = { to: was, name: c?.route?.name || null, kind: from.kind, cwd: from.cwd, fork: from.id, dirs: paths.filter((p) => p !== from.cwd), enforced: was !== 'agent' && !!readOnly(from.kind)?.confined, followUp: true }
+      const to = c?.route?.to === 'change' ? 'folders' : c?.route?.to || (inside(was.cwd, ANSWERS) ? 'throwaway' : 'folders')
+      route = { to, name: c?.route?.name || null, kind: was.kind, cwd: was.cwd, fork: was.id, dirs: paths.filter((p) => p !== was.cwd), enforced: to !== 'agent' && !!readOnly(was.kind)?.confined, followUp: true }
     } else if (after) {
       // (Its conversation can't be copied: a fresh one, given the question, what came after it and
       // the thread as context.)
       pending = null
     }
-    if (!route && bot.agentCopies && ok.length) {
+    if (!route && kind !== 'model' && bot.agentCopies && ok.length) {
       const best = pick([q.text, ...q.more.map((x) => x.text)].join(' '), { agents: await agentsIn(ok) })
       const a = best?.agent
       if (a?.sessionId && adapter(a.kind).fork && adapter(a.kind).caps?.fork && readOnly(a.kind) && have.has(a.kind)) route = { to: 'agent', name: a.name, matched: best.matched, kind: a.kind, cwd: a.cwd, fork: a.sessionId, dirs: paths.filter((p) => p !== a.cwd), enforced: false }
     }
-    if (!route && paths.length) route = { to: 'folders', kind, cwd: paths[0], dirs: paths.slice(1), enforced: !!readOnly(kind)?.confined }
-    if (!route) route = { to: 'throwaway', kind, cwd: null, dirs: [], enforced: !!readOnly(kind)?.confined }
+    // (A model answers through Bridge AI's tools, kept to its folders: as Claude Code is.)
+    const kept = kind === 'model' || !!readOnly(kind)?.confined
+    if (!route && paths.length) route = { to: 'folders', kind, cwd: paths[0], dirs: paths.slice(1), enforced: kept }
+    if (!route) route = { to: 'throwaway', kind, cwd: null, dirs: [], enforced: kept }
     const auto = bot.auto === true && route.enforced && !q.try
 
     // The conversation it was asked in (not for what came while it answered: that's given as is).
@@ -793,13 +879,25 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const memory = bot.memory !== 'off' ? b.memory.given({ channel: q.channel, person: q.from?.id }) : []
     const agentsNow = bot.agentsStatus ? (await agentsIn(ok)).map((a) => ({ name: a.name, label: adapter(a.kind).label, folder: shown(a.cwd), status: STATUS[a.status] || a.status || 'idle' })) : null
     const ins = await store.instructionsOf(bot, ok.map((f) => f.path))
+    // Its MCP servers, with the tools whoever asked may use: only with Claude Code, which holds a run
+    // to them. (Its folder goes with the run's others, and is never one it may read: agents.js mcpOf.)
+    let mcp = null
+    const all = mayAct(bot, q.from)
+    if (bot.mcp?.length && route.kind === 'claude') {
+      try { mcp = await botmcp.runFolder(bot, { all, key: `${q.id}-${q.runs.length + 1}` }) } catch (e) { mcp = { dir: null, servers: [], missing: [], problem: oneLine(e.message, 200) } }
+      if (mcp?.dir) route.dirs = [...route.dirs, mcp.dir]
+    } else if (bot.mcp?.length && route.kind === 'model') {
+      // (A model calls them through Bridge AI, under the same rules: botanswer.js runChat.)
+      const cfgs = botmcp.configsOf(bot)
+      mcp = { dir: null, configs: cfgs, servers: Object.keys(cfgs).map((name) => ({ name, all })), missing: bot.mcp.filter((n) => !cfgs[n]) }
+    }
     const github = []
     for (const f of ok.slice(0, 10)) { const url = await changes.githubOf(f.path).catch(() => null); if (url) github.push({ folder: shown(f.path), url }) }
     const at0 = route.cwd ? [route.cwd, ...route.dirs] : route.dirs
-    let { text: brief, cut } = briefOf({ bot, you: ownerName(bot), q, route, folders: at0.filter((d) => !inside(d, FILES)).map(shown), ins, ctx, pending, auto, memory, attached, agents: agentsNow, scheduled: q.routine ? { where: where(q.place) } : null, github })
+    let { text: brief, cut } = briefOf({ bot, you: ownerName(bot), q, route, folders: at0.filter((d) => !inside(d, FILES) && !inside(d, botmcp.RUNS)).map(shown), ins, ctx, pending, auto, memory, attached, agents: agentsNow, scheduled: q.routine ? { where: where(q.place) } : null, github, noChange: !!noChange })
     // On Windows (and when a test asks), the brief goes in a file of its own the agent is pointed to.
     let briefFile = null
-    if (BRIEF_FILE) {
+    if (BRIEF_FILE && kind !== 'model') {
       const dir = path.join(BRIEFS, `${q.id}-${q.runs.length + 1}`)
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
       briefFile = path.join(dir, 'brief.md')
@@ -807,14 +905,21 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       route.dirs = [...route.dirs, dir]
       brief = `Your brief is in ${briefFile}. Read it first, all of it, and do what it says. (It's in a file because this computer's command line is too short for it.)`
     }
-    const out = await delegate.add({
-      list: 'desk', role: 'answer', title: `${bot.name}: question ${q.id.replace(/^.*q/, '')}`, kind: route.kind, readOnly: !tree, change: !!tree, space: SPACE, from: id,
-      ...(route.cwd ? { cwd: route.cwd } : {}), ...(route.fork ? { fork: route.fork } : {}), ...(route.dirs.length ? { dirs: route.dirs } : {}), brief,
-    })
-    const h = delegate.get(out.helper.id) || {}
+    // A model: asked here, through Bridge AI's tools (botanswer.js), stopped once its question isn't
+    // its to answer any more (Stop, paused, out of time). An agent: a helper of the desk's.
+    const chat = kind === 'model'
+    const out = chat
+      ? { helper: { id: `m${++chatSeq}${Date.now().toString(36)}`, state: 'working' } }
+      : await delegate.add({
+        list: 'desk', role: 'answer', title: `${bot.name}: question ${q.id.replace(/^.*q/, '')}`, kind: route.kind, readOnly: !tree, change: !!tree, space: SPACE, from: id,
+        ...(route.cwd ? { cwd: route.cwd } : {}), ...(route.fork ? { fork: route.fork } : {}), ...(route.dirs.length ? { dirs: route.dirs } : {}), brief, ...(entry.model && route.kind === entry.agent ? { model: entry.model } : {}),
+      })
+    const h = chat ? { cwd: route.cwd } : delegate.get(out.helper.id) || {}
+    if (mcp?.dir) mcpDirs.set(out.helper.id, mcp.dir)
     record(id, 'run.started', at(q, {
-      helper: out.helper.id, agent: route.kind, model: modelOf(route.kind), session: h.sessionId || null, from: route.fork || null,
-      folders: [h.cwd || route.cwd, ...route.dirs].filter((d) => d && !inside(d, FILES) && !inside(d, BRIEFS)).map(shown),
+      helper: out.helper.id, agent: route.kind, model: chat ? entry.model : entry.model || modelOf(route.kind), session: h.sessionId || null, from: route.fork || null,
+      answerer: label(entry), try: pickd.i, ...(noChange ? { noChange } : {}),
+      folders: [h.cwd || route.cwd, ...route.dirs].filter((d) => d && !inside(d, FILES) && !inside(d, BRIEFS) && !inside(d, botmcp.RUNS)).map(shown),
       route: { to: route.to, name: route.name || null, matched: route.matched || [], enforced: route.enforced, followUp: !!route.followUp },
       instructions: { hash: ins.hash, source: ins.source, path: ins.path, problem: cut?.instructions ? [ins.problem, `its last ${cut.instructions} characters were cut, to fit in the agent's opening message`].filter(Boolean).join('; ') : ins.problem }, ...(b.st.versions.has(ins.hash) ? {} : { instructionsText: ins.text }),
       ...(cut ? { cut } : {}), briefChars: brief.length, ...(briefFile ? { briefFile: true } : {}),
@@ -823,12 +928,27 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       ...(tree ? { change: { branch: tree.branch, base: tree.base, dir: shown(tree.dir), top: tree.top, remote: tree.remote, from: tree.from, again: tree.again } } : problem ? { changeProblem: problem } : {}),
       limit: { minutes: bot.limits.minutes },
       with: pending ? pending.map((x) => x.ts) : [q.ts, ...q.more.map((x) => x.ts)],
+      ...(mcp ? { mcp: { servers: mcp.servers, may: all ? 'all' : 'read-only', ...(mcp.missing.length ? { missing: mcp.missing } : {}), ...(mcp.problem ? { problem: mcp.problem } : {}) } } : bot.mcp?.length ? { mcp: { servers: [], problem: `MCP servers need Claude Code or a model answering, not ${adapter(route.kind).label}` } } : {}),
     }))
-    // Couldn't start at once (its agent isn't installed, the folder's gone): to you, saying why.
+    if (chat) {
+      const hid = out.helper.id
+      const ctl = new AbortController()
+      const startedAt = now()
+      const mine = () => { const x = locate(q.id)?.q; return x && x.state === 'answering' && x.helper === hid }
+      const watch = setInterval(() => { if (!mine()) ctl.abort() }, 500)
+      chatRuns.set(hid, { ctl, since: startedAt, reading: [], doing: null, tools: [] })
+      botanswer.runChat({ reply, model: entry.model, brief, folders: [route.cwd, ...route.dirs].filter((d) => d && !inside(d, FILES)), also: attached.length ? [path.join(FILES, q.id)] : [], mcp: mcp?.configs ? { servers: mcp.configs, all } : null, signal: ctl.signal, onStep: (x) => Object.assign(chatRuns.get(hid) || {}, x) })
+        .then((r) => ({ id: hid, chat: true, end: 'finished', said: { text: r.text, from: 'chat' }, kind: 'model', model: entry.model, reads: r.reads, tools: r.tools, messages: r.messages, startedAt, cwd: route.cwd }),
+          (e) => ({ id: hid, chat: true, end: ctl.signal.aborted ? 'stopped' : 'failed', error: oneLine(e.message, 300), kind: 'model', model: entry.model, startedAt, cwd: route.cwd }))
+        .then((x) => { clearInterval(watch); chatRuns.delete(hid); if (x.end !== 'stopped' || mine()) return heard(x) }).catch(() => {})
+      return
+    }
+    // Couldn't start at once (its agent isn't installed, the folder's gone): the next, or to you.
     if (out.helper.state === 'ended' && out.helper.end === 'failed') {
+      dropMcp(out.helper.id)
       record(id, 'run.finished', at(q, { helper: out.helper.id, end: 'failed', error: out.helper.error || null, agent: route.kind }))
       if (tree) await changes.tidy(tree)
-      return toYou(id, q, `Its agent couldn't start: ${out.helper.error}`)
+      return passOn(id, q, { answerer: label(entry), try: pickd.i }, `it couldn't start: ${out.helper.error || 'it stopped before doing anything'}`, { pending })
     }
     if (q.reply?.thread && !q.try) setStatus(id, q, true)
     if (early.has(out.helper.id)) { const x = early.get(out.helper.id); early.delete(out.helper.id); heard(x) }
@@ -912,19 +1032,37 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const b = bots.get(id)
     const run = q.runs.find((r) => r.helper === h.id) || {}
     let reads = []
-    try { reads = (await readsOf(h)) || [] } catch { /* not readable */ }
+    try { reads = (h.chat ? h.reads : await readsOf(h)) || [] } catch { /* not readable */ }
     if (reads.length) record(id, 'run.read', at(q, { helper: h.id, files: reads.slice(0, 200) }))
+    // The MCP tools it used, by server, and its MCP folder gone.
+    if (run.mcp?.servers?.length) {
+      let used = []
+      try { used = h.chat ? h.tools || [] : botmcp.usedOf(await toolsOf(h), run.mcp.servers.map((x) => x.name)) } catch { /* not readable */ }
+      if (used.length) record(id, 'run.tools', at(q, { helper: h.id, tools: used.slice(0, 100) }))
+    }
+    dropMcp(h.id)
     const upTo = [q.ts, ...(run.with || [])].reduce((a, x) => (laterTs(x, a) ? x : a), q.ts)
-    record(id, 'run.finished', at(q, { helper: h.id, end: h.end, error: h.error || null, took: h.startedAt ? Date.now() - Date.parse(h.startedAt) : null, session: h.sessionId || null, agent: h.kind, cwd: h.cwd, upTo, transcript: keepTranscript(b, q, h) }))
+    record(id, 'run.finished', at(q, { helper: h.id, end: h.end, error: h.error || null, took: h.startedAt ? Date.now() - Date.parse(h.startedAt) : null, session: h.sessionId || null, agent: h.kind, ...(h.chat ? { model: h.model } : {}), cwd: h.cwd, upTo, transcript: keepTranscript(b, q, h) }))
     setStatus(id, q, false)
     const tree = run.change ? { ...run.change, dir: h.cwd } : null
     const pending = q.more.filter((x) => !q.runs.some((r) => (r.with || []).includes(x.ts)))
     if (pending.length && h.end === 'finished') { next(id); return answer(id, q, { pending, after: h }).catch((e) => toYou(id, q, `It couldn't be handed on: ${e.message}`)) }
     const raw = String(h.said?.text || '').trim()
-    if (h.end !== 'finished' || !raw || (h.said?.from === 'screen')) {
+    // Couldn't answer (it never got going, its provider said no, it's at its usage limit, it ended
+    // with nothing to read): the next in its list, at once.
+    const why = h.end === 'failed' ? (h.chat ? h.error || 'its provider gave no answer' : `it couldn't start: ${h.error || 'it stopped before doing anything'}`)
+      : h.end === 'finished' && (!raw || h.said?.from === 'screen') ? 'it finished without an answer to read'
+        : h.end === 'finished' && isLimit(raw) ? `it's at its usage limit: ${oneLine(raw, 160)}` : null
+    if (why) { if (tree) await changes.tidy(tree); return passOn(id, q, { answerer: run.answerer, try: run.try }, why) }
+    if (h.end !== 'finished') {
       if (tree) await changes.tidy(tree)
       next(id)
-      return toYou(id, q, h.end === 'failed' ? `Its agent couldn't start: ${h.error || 'it stopped before doing anything'}` : h.end === 'stopped' ? 'Its agent was closed before it answered' : 'Its agent finished without an answer to read')
+      return toYou(id, q, 'Its agent was closed before it answered')
+    }
+    // A change asked for, with nothing here that can make one: to you, saying so.
+    if (run.noChange && CHANGE_NEEDED.test(raw)) {
+      next(id)
+      return toYou(id, q, `They asked for a change, and ${run.noChange}${raw.replace(CHANGE_NEEDED, '').trim() ? `: ${oneLine(raw.replace(CHANGE_NEEDED, ''), 240)}` : ''}`)
     }
     if ((q.how === 'follow-up' || q.how === 'listen') && !q.more.length && NOT_FOR_ME.test(raw)) {
       record(id, 'skipped', at(q, { why: q.how === 'listen' ? 'Not for it: a message in the channel that wasn\'t a question for it' : 'Not for it: people talking in its thread' }))
@@ -983,7 +1121,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // (A file read in its copy of a repository is named as it is in the repository.)
     const copyOf = tree ? [h.cwd || tree.dir, shown(h.cwd || tree.dir)] : []
     const named = (w) => { for (const pre of copyOf) if (pre && String(w).startsWith(pre)) return `${shown(tree.top)}${String(w).slice(pre.length)}`; return w }
-    record(id, 'draft', at(q, { text, auto, sources: [...new Set(reads.map((r) => named(r.what)).filter(Boolean))].slice(0, 50), ...(outFiles.length ? { files: outFiles } : {}), ...(warn ? { warn } : {}) }))
+    record(id, 'draft', at(q, { text, auto, ...(run.answerer?.label ? { by: run.answerer.label } : {}), sources: [...new Set(reads.map((r) => named(r.what)).filter(Boolean))].slice(0, 50), ...(outFiles.length ? { files: outFiles } : {}), ...(warn ? { warn } : {}) }))
     if (auto) queue(id, q, 'answer', text)
     next(id)
     changed()
@@ -993,8 +1131,20 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       told(viewOf(q))
     }
   }
-  // Its agent's transcript, kept beside the record (D4): its path there, or null.
+  // One in its list couldn't answer: said in the record, and the next tried at once (or, none left, to
+  // you with every reason).
+  function passOn(id, q, run, why, { pending = null } = {}) {
+    record(id, 'run.passed', at(q, { answerer: run.answerer || null, why: oneLine(why, 300), try: run.try ?? null }))
+    return answer(id, q, { pending, from: (run.try ?? 0) + 1 }).catch((e) => toYou(id, q, `It couldn't be handed on: ${e.message}`))
+  }
+  // Its agent's transcript, kept beside the record (D4): its path there, or null. A model's: its
+  // conversation as it went, a message a line.
   function keepTranscript(b, q, h) {
+    if (h.chat) {
+      if (!h.messages?.length) return null
+      const body = h.messages.map((m) => JSON.stringify(m)).join('\n')
+      try { return { file: b.trace.keep('runs', `${q.id}-${h.id}.jsonl`, body), bytes: Buffer.byteLength(body) } } catch { return null }
+    }
     try {
       const f = transcriptOf(h)
       if (!f) return null
@@ -1154,6 +1304,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // hear they're being checked with you (D8); runs past their longest.
   const ticker = setInterval(() => {
     if (data.outbox.some((x) => x.next <= Date.now())) flush().catch(() => {})
+    for (const hid of mcpDirs.keys()) if (delegate.get(hid)?.state === 'ended') dropMcp(hid) // (stopped, or out of time)
     for (const [id, b] of bots) {
       const bot = botOf(id)
       if (!bot || !b.channel) continue
@@ -1275,7 +1426,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   const viewOf = (q) => {
     const bot = keptOf(q.bot)
     return {
-      id: q.id, bot: { id: q.bot, name: bot?.name || null }, conv: q.conv, how: q.how, from: q.from, text: q.text, more: q.more.map((x) => ({ from: x.person, text: x.text })), place: q.place, at: q.at, heardAt: q.heardAt, late: q.late, migrated: q.migrated,
+      id: q.id, bot: { id: q.bot, name: bot?.name || null }, by: q.by || null, conv: q.conv, how: q.how, from: q.from, text: q.text, more: q.more.map((x) => ({ from: x.person, text: x.text })), place: q.place, at: q.at, heardAt: q.heardAt, late: q.late, migrated: q.migrated,
       state: sending(q) ? 'sending' : q.state === 'starting' ? 'queued' : q.state,
       route: q.route ? { to: q.route.to, name: q.route.name, matched: q.route.matched || [], enforced: !!q.route.enforced, followUp: !!q.route.followUp, kind: q.runs.at(-1)?.agent || null } : null,
       draft: q.draft ?? null, needsOwner: !!q.needsOwner, why: q.why || null, problem: q.problem || null, refused: q.refused || null, sources: q.sources || [],
@@ -1480,6 +1631,17 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     follows: (id, channel, thread) => { const c = bots.get(id)?.st.convs.get(`${channel}:${thread}`); return !!(c?.answered && Date.now() - Date.parse(c.last) < IDLE_DAYS * 86400000) },
     // Whether it answers in that channel without a mention.
     listens: (id, channel) => (botOf(id)?.listen || []).some((x) => x.id === channel),
+    // For a shared connection's routing (connhub.js): why it wouldn't answer this person there (who
+    // may ask, muted there), or null; when it was last busy in a thread; the polite no.
+    mayAsk(id, from, channel = null) {
+      const bot = botOf(id)
+      if (!bot || bot.draft) return 'not-allowed'
+      const why = refusal(bot, from)
+      if (why) return why
+      return channel && (bot.muted || []).some((x) => x.id === channel) ? 'muted' : null
+    },
+    lastIn: (id, channel, thread) => bots.get(id)?.st.convs.get(`${channel}:${thread}`)?.last || null,
+    politeNo: (why) => politeNo(why),
     // What its channel shows of it (Slack's Home tab).
     info(id) {
       const bot = botOf(id)
@@ -1501,6 +1663,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
           }))
         } else channel.stop()
       }
+      synced()
     },
     // What its channel says happened (connected, dropped, caught up, scopes missing), in its record.
     note: (id, e) => record(id, 'connection', { what: e.what, ok: !!e.ok, why: e.why ? oneLine(e.why, 300) : null, ...(e.missing ? { missing: e.missing } : {}), ...(e.platform ? { platform: e.platform } : {}) }),
@@ -1513,6 +1676,35 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     prune,
     tryIt,
     scheduled,
+    // A question as it's being answered (Try It shows it live): where it is (waiting its turn,
+    // starting its agent, at work, or waiting on something), since when, what its agent is reading
+    // or doing now and what it's waiting on, and the MCP tools it used so far. null once it's over.
+    async live(qid) {
+      const f = locate(qid)
+      if (!f) return null
+      const { q } = f
+      if (q.state === 'queued' || q.state === 'starting') return { phase: 'queued', since: q.heardAt }
+      if (q.state === 'received') return { phase: 'starting', since: q.heardAt }
+      if (q.state !== 'answering') return null
+      const run = q.runs.find((r) => r.helper === q.helper) || {}
+      const by = run.answerer?.label || null
+      const mine = chatRuns.get(q.helper)
+      if (mine) return { phase: 'working', since: mine.since, by, doing: mine.doing || null, reading: mine.reading || [], tools: mine.tools || [], asking: null }
+      const h = q.helper ? delegate.get(q.helper) : null
+      if (!h?.paneId || h.state === 'queued' || h.state === 'starting') return { phase: h?.state === 'queued' ? 'place' : 'starting', since: run.at || q.runAt || q.heardAt, by }
+      const since = h.startedAt || run.at || q.runAt
+      const [now, reads, calls] = await Promise.all([nowOf(h).catch(() => null), readsOf(h).catch(() => []), run.mcp?.servers?.length ? toolsOf(h).catch(() => []) : []])
+      return {
+        phase: now?.asking ? 'waiting' : 'working', since, by, asking: now?.asking || null, doing: now?.doing || null,
+        reading: [...new Set((reads || []).map((r) => r.what).filter(Boolean))].slice(-5), tools: botmcp.usedOf(calls, (run.mcp?.servers || []).map((x) => x.name)),
+      }
+    },
+    // Stop for a question asked in Try It: as !stop would, by you.
+    async stopTry(id, qid) {
+      const f = locate(qid)
+      if (!f || f.id !== id || !f.q.try) throw Object.assign(new Error('No such question'), { status: 404 })
+      return { stopped: await stopWhere(id, { conv: f.q.conv }, { by: you(), why: 'Stop' }) }
+    },
     // Paused (Settings, or !pause one day): each answer running stopped at once, and what waits its
     // turn passed to you.
     async pause(id, by = you()) {
@@ -1567,9 +1759,11 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       if (bot.changes !== 'none' || bot.repo) repo = await repoFor(bot, folders).catch((e) => ({ problem: e.message }))
       const repos = []
       for (const f of folders.filter((x) => x.ok)) { const r = await repoSeen(f.path); if (r.top) repos.push({ path: f.shown, shown: f.shown, ok: !r.problem, problem: r.problem || null }) }
+      const who = await answerersOf(bot)
       return {
         folders,
-        answerer: kind ? { kind, confined: !!readOnly(kind)?.confined } : null,
+        answerer: kind ? { kind, confined: kind === 'model' || !!readOnly(kind)?.confined } : null,
+        answerers: { automatic: who.automatic, fallback: who.fallback, list: who.list.map((e) => ({ id: e.id, label: e.label, local: e.local, why: e.why, changes: botanswer.canMakeChanges(e) })) },
         waiting: qs.filter((q) => q.state === 'draft' && !q.try && !sending(q)).length,
         sending: data.outbox.filter((o) => o.bot === id).length,
         answering: qs.filter((q) => q.state === 'answering').length,
@@ -1579,7 +1773,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         // On each platform: whether anyone's asked it anything there yet, and whether an answer's gone
         // (Set Up's checklist ticks its last steps from these).
         reached: qs.filter((q) => !q.try && !q.migrated && q.how !== 'scheduled').reduce((r, q) => { const p = platOf(q); r[p] ||= { asked: false, answered: false }; r[p].asked = true; if (q.state === 'sent') r[p].answered = true; return r }, {}),
-        changes: { repos, repo: repo?.folder?.shown || null, gh: await changes.hasGh(), agentOk: !!kind && canChange(kind), problem: bot.changes === 'none' ? null : !kind || !canChange(kind) ? 'Changes need Claude Code, which keeps its edits to its own copy of the repository' : repo?.problem || null },
+        changes: { repos, repo: repo?.folder?.shown || null, gh: await changes.hasGh(), agentOk: who.list.some((e) => botanswer.canMakeChanges(e) && !e.why), problem: bot.changes === 'none' ? null : !who.list.some((e) => botanswer.canMakeChanges(e) && !e.why) ? 'Changes need Claude Code in what answers, which keeps its edits to its own copy of the repository' : repo?.problem || null },
       }
     },
     conversations,

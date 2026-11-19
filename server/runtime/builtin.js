@@ -374,6 +374,10 @@ function statusOf(p) {
   return s
 }
 
+// Each terminal's own process and the folder it started in: what a dev server must have been
+// started by to be shown on your other devices (servers.js ownedBy).
+export const processes = () => [...panes.values()].filter((p) => p.proc?.pid).map((p) => ({ pid: p.proc.pid, cwd: p.cwd }))
+
 export async function fleet() {
   const order = (wsId) => spaces.findIndex((w) => w.id === wsId)
   const live = [...panes.values()]

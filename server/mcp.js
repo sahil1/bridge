@@ -303,6 +303,18 @@ async function readAgent(kind, label) {
   return { kind, label, file: short(file), found, error }
 }
 
+// Claude Code's own servers (user scope), each as its config has it, env values and headers too:
+// for a bot's runs only (botmcp.js), which get the ones picked for it in a file of their own.
+// Never sent to the app. {} when there's no config, or it can't be read.
+export function claudeServers() {
+  try {
+    const map = readConfig(SPECS.claude.file(), 'json').data?.mcpServers
+    return Object.fromEntries(Object.entries(map && typeof map === 'object' ? map : {}).filter(([name, raw]) => NAME_RE.test(name) && raw && typeof raw === 'object' && raw.disabled !== true))
+  } catch { return {} }
+}
+// One as Settings › MCP Servers shows it: how it's reached, with no value of a secret.
+export const claudeServerView = (name, raw) => serverView(name, raw, readStd)
+
 async function agentsWithMcp(installed) {
   const list = await installed()
   const have = new Map(list.map((a) => [a.kind, a]))

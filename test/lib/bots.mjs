@@ -55,6 +55,14 @@ export function lookers(kit, slack) {
   }
 }
 
+// A bot's own connection's file (server/connections.js): its tokens (<platform>.json) or its settings
+// (connection.json), in connections/<c>/; where there's none, a path that isn't there.
+export function ownFile(kit, bot, platform, name = `${platform}.json`) {
+  const d = path.join(kit.data, 'connections')
+  const c = (fs.existsSync(d) ? fs.readdirSync(d) : []).find((x) => { try { const j = JSON.parse(fs.readFileSync(path.join(d, x, 'connection.json'), 'utf8')); return j.bot === bot && j.platform === platform } catch { return false } })
+  return path.join(d, c || 'none', name)
+}
+
 // Settings at a section, once the app is up to hear it (asked again until it opens).
 export async function openSettings(p, section = 'slack-bot', ready = '.modal.settings .sb') {
   await p.locator('.topbar, .tabbar').first().waitFor({ timeout: 20000 })

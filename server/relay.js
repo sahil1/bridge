@@ -56,6 +56,7 @@ import { bundle } from '../relay/build.js'
 import { computerWelcome, newPairCode, splitCode, formatCode, plainFrame, readPlain, b64u, boxId, K, pack, unpack, json, utf8, CHUNK, moreOf } from '../relay/web/link.js'
 import * as inbox from './inbox.js'
 import { authHeaders, localKey } from './apitoken.js'
+import { plainName } from '../shared/remote.js'
 
 const FILE = dataFile('relay.json')
 const WRANGLER = 'wrangler@4.149.0'
@@ -411,7 +412,8 @@ const DROP = new Set(['host', 'connection', 'origin', 'referer', 'cookie', 'cont
 const DROP_BACK = new Set(['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'keep-alive', 'set-cookie'])
 // Worth compressing: text (pictures and fonts are compressed already).
 const PACKS = /javascript|css|json|svg|html|text\/|wasm|xml/
-const cleanName = (s) => (typeof s === 'string' ? s.trim().slice(0, 60) : '')
+// A device's name as it says it: no control characters, nor ones that turn text around (bidi).
+const cleanName = (s) => plainName(s)
 
 // Hellos in the last 10 seconds, all of them and those from keys not paired here (a pairing, an
 // ask, or a stranger). Your phones and computers connecting again at once (after the relay or the

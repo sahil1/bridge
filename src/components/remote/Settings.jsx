@@ -3,10 +3,13 @@
 //                           with Stop
 //   Remote Access           the Remote Access Password, "Let my other devices control this computer"
 //                           (which needs it; on a Mac, macOS's Accessibility question then), Ask Here
-//                           First, which devices may connect, and who's locked out, with Unlock
+//                           First, which devices may connect, and who's locked out, with Unlock; and
+//                           Screen Sharing Notifications: on or off, where they go, and the way to set
+//                           one up when nothing would hear of it (server/screentell.js)
 //   Screen Activity         the record of every session, and every one turned away
-// Each is changed here, at this computer, only: elsewhere (another computer's window, a phone) it's
-// shown as it is, saying where it's changed.
+// Each is changed here, at this computer, only: elsewhere (another computer's window, a phone) the
+// password and Ask Here First are shown as they are, saying where they're changed; the devices and
+// the record are this computer's own to see.
 import { useState } from 'react'
 import Icon from '../Icon.jsx'
 import { BASE, api, onThisComputer } from '../../api.js'
@@ -62,6 +65,7 @@ function Password({ access, here, name, refresh }) {
     <div className="rs-block" data-setting="remote-password">
       <b>{t('Remote Access Password')}</b>
       <p className="muted small">{t('Asked before any of your devices sees this screen, from a computer or a phone, and checked here. {n} wrong tries lock that device out for {m} minutes. It\'s kept on this computer only, scrambled, and never sent anywhere.', { n: access.limits?.tries || ACCESS.tries, m: access.limits?.lockMinutes || ACCESS.lockMinutes })}</p>
+      <p className="muted small rs-guards"><Icon name="info" size={12} /> {t('It guards seeing and controlling this computer\'s screen, and the apps its agents serve. Any paired device can still run agents and terminals here, so remove a device you don\'t trust.')}</p>
       {access.password
         ? <p className="small rs-ok"><Icon name="lock" size={12} /> {access.passwordAt ? t('Set on {date}.', { date: dayOf(access.passwordAt) }) : t('Set.')}</p>
         : <p className="small rs-no"><Icon name="info" size={12} /> {t('No password yet: your devices see this screen without one.')}</p>}
@@ -92,6 +96,43 @@ function Password({ access, here, name, refresh }) {
         </div>
       )}
       {err && <p className="error-text small" role="alert">{err}</p>}
+    </div>
+  )
+}
+
+// Screen Sharing Notifications: on unless turned off here (at this computer only); where they go (the
+// devices that get this computer's notifications, and each linked computer's, which it passes them
+// on to); and, when that's nowhere, saying so with the way to set one up.
+function Notify({ nt, here, name, set }) {
+  if (!nt) return null
+  const devices = nt.devices || []
+  const through = (nt.computers || []).filter((c) => c.devices > 0)
+  // (Where they go is said at this computer only.)
+  const nowhere = !!nt.devices && !devices.length && !through.length
+  const setUp = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'notifications' } }))
+  return (
+    <div className="rs-block" data-setting="remote-notify">
+      <label className="st-check">
+        <input type="checkbox" role="switch" checked={!!nt.on} disabled={!here} onChange={(e) => set(e.target.checked)} />
+        <span>
+          <b>{t('Screen Sharing Notifications')}</b><br />
+          <small className="muted">{t('When any device starts viewing this screen, takes control or waits on Ask Here First, your other devices are told, with Stop and Block This Device. Every window of Bridge AI shows it too, while it lasts. The device doing the viewing isn\'t told of its own session.')}</small>
+        </span>
+      </label>
+      {nt.on && !nowhere && (
+        <ul className="rs-goes small">
+          {devices.length > 0 && <li><Icon name="bell" size={12} /> {t('On this computer: {list}.', { list: devices.map((d) => d.label).join(', ') })}</li>}
+          {through.map((c) => <li key={c.id}><Icon name="laptop" size={12} /> {c.devices === 1 ? t('Through {name}: 1 device.', { name: c.name }) : t('Through {name}: {n} devices.', { name: c.name, n: c.devices })}</li>)}
+        </ul>
+      )}
+      {nt.on && nowhere && (
+        <div className="st-row between rs-nowhere">
+          <p className="small"><Icon name="alert" size={12} /> {t('No notification channel is set up on this computer or your other computers, so nobody would be told. Screen Activity and the notice on this computer still say each time.')}</p>
+          <button type="button" className="btn small primary" onClick={setUp}>{t('Set Up Notifications')}</button>
+        </div>
+      )}
+      {!nt.on && <p className="small rs-no"><Icon name="info" size={12} /> {t('Off: your other devices aren\'t told when this screen is viewed. Screen Activity and the notice on this computer still say each time.')}</p>}
+      {!here && <p className="muted small">{t('Turned on and off at {name} itself.', { name })}</p>}
     </div>
   )
 }
@@ -178,14 +219,15 @@ export function RemoteSettings() {
         <div className="rs-block" data-setting="remote-devices">
           <b>{t('Which Devices May Connect')}</b>
           <p className="muted small">{t('Every phone paired with this computer and every computer linked to it, unless you untick it. A phone paired with another of your computers comes through that computer.')}</p>
-          {ac.devices.length
+          {here && <p className="muted small">{t('Once a password, Ask Here First or an unticked device is set, a phone or computer paired after that starts unticked: tick it here to let it connect.')}</p>}
+          {!here ? null : ac.devices?.length
             ? (
               <ul className="rs-devices">
                 {ac.devices.map((d) => (
                   <li key={d.id}>
                     <label className="st-check">
                       <input type="checkbox" checked={d.allowed} disabled={!here} onChange={(e) => access('/devices', { id: d.id, allowed: e.target.checked })} />
-                      <span><Icon name={d.kind === 'computer' ? 'laptop' : 'phone'} size={12} /> {d.name} <span className="muted">{d.kind === 'computer' ? t('computer') : t('phone')}</span></span>
+                      <span><Icon name={d.kind === 'computer' ? 'laptop' : 'phone'} size={12} /> {whoOf({ by: d })} <span className="muted">{d.kind === 'computer' ? t('computer') : t('phone')}</span>{d.fresh && !d.allowed && <span className="st-chip rs-new">{t('New')}</span>}</span>
                     </label>
                     {d.locked && <span className="rs-locked small"><Icon name="lock" size={11} /> {t('Locked out until {time}', { time: clockOf(d.locked) })}</span>}
                     {d.locked && here && <button type="button" className="ghost-btn small" onClick={() => access(`/locks/${encodeURIComponent(d.id)}/clear`)}>{t('Unlock')}</button>}
@@ -194,18 +236,19 @@ export function RemoteSettings() {
               </ul>
             )
             : <p className="muted small">{t('No phone or computer is paired with this one yet.')}</p>}
-          {ac.locks.filter((l) => !ac.devices.some((d) => d.id === l.id)).map((l) => (
-            <p key={l.id} className="small rs-locked"><Icon name="lock" size={11} /> {t('{name} is locked out until {time}', { name: l.name, time: clockOf(l.until) })} {here && <button type="button" className="ghost-btn small" onClick={() => access(`/locks/${encodeURIComponent(l.id)}/clear`)}>{t('Unlock')}</button>}</p>
+          {(ac.locks || []).filter((l) => !ac.devices?.some((d) => d.id === l.id)).map((l) => (
+            <p key={l.id} className="small rs-locked"><Icon name="lock" size={11} /> {t('{name} is locked out until {time}', { name: whoOf({ by: { name: l.name }, for: l.for }), time: clockOf(l.until) })} {here && <button type="button" className="ghost-btn small" onClick={() => access(`/locks/${encodeURIComponent(l.id)}/clear`)}>{t('Unlock')}</button>}</p>
           ))}
           {!here && elsewhere}
         </div>
+        <Notify nt={data.notify} here={here} name={name} set={(on) => access('/notify', { on })} />
         {aErr && <p className="error-text small" role="alert">{aErr}</p>}
       </section>
 
       <section className="st-sec" data-setting="remote-sessions">
         <h4>{t('Screen Activity')}</h4>
         <p className="muted small">{t('Who connected to this computer, from which device, when, for how long and whether they used control; and each one turned away, and why. Kept on this computer only, the last 200.')}</p>
-        <Sessions log={data.log} here={here} />
+        {here ? <Sessions log={data.log} here={here} /> : <p className="muted small">{t('Kept at {name} itself: see it there.', { name })}</p>}
       </section>
     </>
   )

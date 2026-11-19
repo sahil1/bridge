@@ -90,6 +90,7 @@ export const SETTINGS = [
     ['machines', tx('Your Devices'), 'devices computers other computers'],
     ['link-device', tx('Link a device'), 'link pair computer address code'],
     ['remote-access', tx('Remote Access'), 'remote access password screen control lock locked out unlock ask here first allow deny which devices', { when: 'remote-screen' }],
+    ['remote-notify', tx('Screen Sharing Notifications'), 'screen sharing notifications notify phone told stop block', { when: 'remote-screen', near: 'remote-access' }],
     ['remote-sessions', tx('Screen Activity'), 'screen activity record sessions who viewed controlled lockout denied', { when: 'remote-screen' }],
   ]),
   ...at('notifications', [
@@ -105,6 +106,7 @@ export const SETTINGS = [
   ]),
   ...at('slack-bot', [
     ['slack-status', tx('Bots'), 'slack bot bots questions answers connect tokens socket mode manifest name', { when: 'slack-bot' }],
+    ['bots-connections-chip', tx('Connections'), 'slack discord teams connection connections shared app one app tokens routing channel default bot command webhook', { when: 'slack-bot' }],
     ['slack-askers', tx('Who Can Ask'), 'slack people askers members refuse guests everyone channels', { when: 'slack-bot' }],
     ['slack-instructions', tx('Instructions'), 'slack bot instructions markdown file bot.md steer', { when: 'slack-bot' }],
     ['slack-folders', tx('Reads From'), 'slack folders read only reads from', { when: 'slack-bot' }],

@@ -1,5 +1,5 @@
-/* Settings › Bots. The app's tokens, so it follows light and dark mode; nothing wider than the
-   panel on a phone. */
+/* Settings › Bots, and a bot's page (bots/BotPage.jsx: .bp). The app's tokens, so it follows light
+   and dark mode; nothing wider than the panel on a phone, in Settings or on the page. */
 .sb { container-type: inline-size; min-width: 0; }
 .sb-status { display: grid; gap: 4px; min-width: 0; padding-bottom: 6px; }
 .sb-status .st-note { margin: 0; align-items: flex-start; }
@@ -78,13 +78,13 @@
 .sb-log-out { overflow-wrap: anywhere; }
 .sb-log time { flex: none; white-space: nowrap; }
 /* On a phone: every control a whole 40 px target, and fields at 16 px so iOS doesn't zoom into them. */
-.modal.settings.phone .sb :is(.btn, .ghost-btn, .seg button, .link-btn, summary) { min-height: 40px; min-width: 40px; }
-.modal.settings.phone .sb .icon-btn { min-width: 40px; min-height: 40px; }
-.modal.settings.phone .sb :is(.st-input, .sb-search input) { font-size: 16px; }
-.modal.settings.phone .sb .st-input, .modal.settings.phone .sb .sb-add .st-input { height: 42px; }
-.modal.settings.phone .sb .sb-search { height: 44px; }
-.modal.settings.phone .sb .sb-found button { min-height: 44px; }
-.modal.settings.phone .sb .sb-askers li { padding-right: 0; }
+:is(.modal.settings.phone, .bp.phone) .sb :is(.btn, .ghost-btn, .seg button, .link-btn, summary) { min-height: 40px; min-width: 40px; }
+:is(.modal.settings.phone, .bp.phone) .sb .icon-btn { min-width: 40px; min-height: 40px; }
+:is(.modal.settings.phone, .bp.phone) .sb :is(.st-input, .sb-search input) { font-size: 16px; }
+:is(.modal.settings.phone, .bp.phone) .sb .st-input, :is(.modal.settings.phone, .bp.phone) .sb .sb-add .st-input { height: 42px; }
+:is(.modal.settings.phone, .bp.phone) .sb .sb-search { height: 44px; }
+:is(.modal.settings.phone, .bp.phone) .sb .sb-found button { min-height: 44px; }
+:is(.modal.settings.phone, .bp.phone) .sb .sb-askers li { padding-right: 0; }
 .ny-panel.phone .ny-draft { font-size: 16px; }
 .sb-log-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .sb-tag { flex: none; white-space: nowrap; font: 600 10px var(--font); text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 5px; color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
@@ -160,9 +160,9 @@
   .sb-tl-type { display: none; }
   .sb-timeline { margin-left: 4px; }
 }
-.modal.settings.phone .sb :is(select.st-input, .sb-date .st-input, .sb-ins) { font-size: 16px; }
-.modal.settings.phone .sb :is(select.st-input, .sb-date .st-input) { height: 42px; }
-.modal.settings.phone .sb :is(.sb-chip, .sb-conv, .sb-ctx summary, .sb-export .btn, .sb-tl-head .ghost-btn) { min-height: 40px; }
+:is(.modal.settings.phone, .bp.phone) .sb :is(select.st-input, .sb-date .st-input, .sb-ins) { font-size: 16px; }
+:is(.modal.settings.phone, .bp.phone) .sb :is(select.st-input, .sb-date .st-input) { height: 42px; }
+:is(.modal.settings.phone, .bp.phone) .sb :is(.sb-chip, .sb-conv, .sb-ctx summary, .sb-export .btn, .sb-tl-head .ghost-btn) { min-height: 40px; }
 
 /* Pausing it, and what its Slack app lacks. */
 .sb-pause { align-items: center; margin: 0; }
@@ -226,11 +226,11 @@
 .sb-tpl-ins { margin: 4px 0 0; max-height: 220px; overflow-y: auto; overflow-x: hidden; padding: 8px 10px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--pane-2); font: 11.5px/1.45 var(--font-mono); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* On a phone, the new controls are whole targets too. */
-.modal.settings.phone .sb .st-check { min-height: 40px; }
-.modal.settings.phone .sb :is(.sb-tpl, .sb-sched .ghost-btn, .sb-mem-acts .ghost-btn, .sb-mem-acts .btn) { min-height: 40px; }
-.modal.settings.phone .sb :is(.sb-repo .st-input, .sb-pick-channel, .sb-limits .st-input, .sb-sched-add .st-input, .sb-mem-add select.st-input, .sb-try select.st-input) { height: 42px; font-size: 16px; }
-.modal.settings.phone .sb .sb-try-q { font-size: 16px; }
-.modal.settings.phone .sb .sb-link { display: inline-block; min-height: 40px; line-height: 40px; max-width: 100%; }
+:is(.modal.settings.phone, .bp.phone) .sb .st-check { min-height: 40px; }
+:is(.modal.settings.phone, .bp.phone) .sb :is(.sb-tpl, .sb-sched .ghost-btn, .sb-mem-acts .ghost-btn, .sb-mem-acts .btn) { min-height: 40px; }
+:is(.modal.settings.phone, .bp.phone) .sb :is(.sb-repo .st-input, .sb-pick-channel, .sb-limits .st-input, .sb-sched-add .st-input, .sb-mem-add select.st-input, .sb-try select.st-input) { height: 42px; font-size: 16px; }
+:is(.modal.settings.phone, .bp.phone) .sb .sb-try-q { font-size: 16px; }
+:is(.modal.settings.phone, .bp.phone) .sb .sb-link { display: inline-block; min-height: 40px; line-height: 40px; max-width: 100%; }
 
 /* Where It Answers: Slack, Discord and Microsoft Teams, each with its connection's dot. */
 .sb-where-tabs { flex-wrap: wrap; }
@@ -246,8 +246,8 @@
 .sb-tunnel { display: grid; gap: 6px; margin-top: 6px; min-width: 0; }
 .sb-endpoint, .sb-rejected { margin-top: 6px; }
 .sb-server { max-width: 360px; }
-.modal.settings.phone .sb .sb-where-tabs button { min-height: 40px; }
-.modal.settings.phone .sb :is(.sb-tunnel .st-input, .sb-server select) { height: 42px; font-size: 16px; }
+:is(.modal.settings.phone, .bp.phone) .sb .sb-where-tabs button { min-height: 40px; }
+:is(.modal.settings.phone, .bp.phone) .sb :is(.sb-tunnel .st-input, .sb-server select) { height: 42px; font-size: 16px; }
 
 /* Set Up in Slack, Discord or Teams: a checklist that ticks itself; done, a line. */
 .sb-guide-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
@@ -264,8 +264,8 @@
 .sb-first { display: grid; gap: 8px; max-width: 640px; }
 .sb-first p { margin: 0; }
 .sb-first .st-row { margin-top: 4px; }
-.modal.settings.phone .sb .sb-guide-step .btn, .modal.settings.phone .sb .sb-first .btn { min-height: 40px; }
-.modal.settings.phone .sb .sb-guide-done .link-btn { min-height: 40px; }
+:is(.modal.settings.phone, .bp.phone) .sb .sb-guide-step .btn, :is(.modal.settings.phone, .bp.phone) .sb .sb-first .btn { min-height: 40px; }
+:is(.modal.settings.phone, .bp.phone) .sb .sb-guide-done .link-btn { min-height: 40px; }
 
 /* Picking a folder or its instructions file from the computer's own listing (from a phone or another
    computer as well), and the changes made to it, in Activity. */
@@ -283,11 +283,84 @@
 .sb-changes { margin-top: 4px; }
 .sb-changes .sb-tl { margin-top: 4px; }
 .sb-changes .sb-tl li { grid-template-columns: auto minmax(0, 1fr); }
-.modal.settings.phone .sb .sb-browse-head .icon-btn { width: 40px; height: 40px; }
+:is(.modal.settings.phone, .bp.phone) .sb .sb-browse-head .icon-btn { width: 40px; height: 40px; }
 /* On a phone, a choice with no words under it is a whole target too, and a command wraps rather than
    scrolling sideways (Copy copies it whole). */
-.modal.settings.phone .sb .sb-mode { min-height: 44px; }
+:is(.modal.settings.phone, .bp.phone) .sb .sb-mode { min-height: 44px; }
 .sb :is(.sb-integrity, .sb-endpoint, .sb-rejected) > span { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
-.modal.settings.phone .sb .sb-cmd { align-items: flex-start; }
-.modal.settings.phone .sb .sb-cmd code { white-space: normal; overflow-wrap: anywhere; overflow-x: visible; }
-.modal.settings.phone .sb .sb-browse-list button { min-height: 44px; font-size: 14px; }
+:is(.modal.settings.phone, .bp.phone) .sb .sb-cmd { align-items: flex-start; }
+:is(.modal.settings.phone, .bp.phone) .sb .sb-cmd code { white-space: normal; overflow-wrap: anywhere; overflow-x: visible; }
+:is(.modal.settings.phone, .bp.phone) .sb .sb-browse-list button { min-height: 44px; font-size: 14px; }
+
+/* ---------- Try It, as it goes ---------- */
+.sb-live { display: grid; gap: 4px; padding: 9px 11px; border-radius: var(--r-sm); border: 1px solid color-mix(in srgb, var(--working) 35%, var(--line-2)); background: color-mix(in srgb, var(--working) 6%, var(--pane)); }
+.sb-live.ph-waiting { border-color: color-mix(in srgb, var(--warning) 45%, var(--line-2)); background: color-mix(in srgb, var(--warning) 7%, var(--pane)); }
+.sb-live-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.sb-live-row > .icon { flex: none; color: var(--working); }
+.sb-live.ph-waiting .sb-live-row > .icon { color: var(--warning); }
+.sb-live-what { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
+.sb-since { flex: none; font: 600 12px var(--font-mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.sb-live p { margin: 0; overflow-wrap: anywhere; }
+
+/* ---------- Its MCP servers (Set Up) ---------- */
+.sb-mcp { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.sb-mcp > li { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--pane); min-width: 0; }
+.sb-mcp > li.on { border-color: var(--accent); }
+.sb-mcp .st-check > span { display: grid; gap: 1px; }
+.sb-mcp .mono { font-family: var(--font-mono); overflow-wrap: anywhere; }
+.sb-mcp-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 3px; }
+.sb-plat.p-ro { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
+.sb-plat.p-rw { color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent); }
+.sb-assist-start { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-radius: var(--r-sm); border: 1px solid color-mix(in srgb, var(--ai) 30%, var(--line-2)); background: color-mix(in srgb, var(--ai) 5%, var(--pane)); }
+.sb-assist-start .btn { display: inline-flex; align-items: center; gap: 6px; }
+.sb-assist-start .icon { color: var(--ai); }
+.sb-assist-start > span { flex: 1 1 220px; min-width: 0; }
+
+/* ---------- What answers (Set Up, and AI Assist's card) ---------- */
+.sb-answerers { display: grid; gap: 8px; min-width: 0; }
+.sb-answerers > .seg { justify-self: start; }
+.sb-ans-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.sb-ans-list li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 6px 6px 8px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--pane); }
+.sb-ans-list li.bad { border-color: color-mix(in srgb, var(--critical) 40%, var(--line-2)); }
+.sb-ans-n { flex: none; width: 20px; height: 20px; border-radius: 999px; display: grid; place-items: center; font: 700 11px var(--font); color: var(--ink-2); background: var(--pane-2); }
+.sb-ans-text { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 4px; overflow-wrap: anywhere; }
+.sb-ans-acts { flex: none; display: flex; gap: 2px; }
+.sb-ans-acts .icon-btn { width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: 7px; color: var(--ink-3); }
+.sb-ans-acts .icon-btn:disabled { opacity: .35; }
+.sb-ans-add { width: min(420px, 100%); height: 34px; font-size: 12.5px; }
+.sb-plat.p-local { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
+.sb-plat.p-cloud { color: var(--accent); background: var(--accent-soft); }
+:is(.modal.settings.phone, .bp.phone) :is(.sb-ans-acts .icon-btn) { width: 40px; height: 40px; }
+:is(.modal.settings.phone, .bp.phone) .sb-ans-add { height: 42px; font-size: 16px; }
+
+/* Connections (bots/Connections.jsx): a card a connection, its bots, its channels' bots, and how a
+   bot is reached on each platform (its Set Up). */
+.cn { display: grid; gap: 12px; min-width: 0; }
+.cn-about { margin: 0; }
+.cn-card { display: grid; gap: 10px; min-width: 0; }
+.cn-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+.cn-name { margin: 0; font: 600 14px var(--font); overflow-wrap: anywhere; min-width: 0; }
+.cn-kind { color: var(--ink-2); background: var(--pane-2); }
+.cn-state { margin: 0; }
+.cn-part { display: grid; gap: 6px; min-width: 0; }
+.cn-bots { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.cn-add-default { flex-wrap: wrap; }
+.cn-add-default select { flex: 1 1 140px; min-width: 0; }
+.cn-app { display: grid; gap: 8px; }
+.cn-app[open] > .st-sec { padding-left: 0; padding-right: 0; }
+.cn-rename { max-width: 360px; }
+.cn-routed-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.cn-routed-list li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 10px; min-width: 0; overflow-wrap: anywhere; }
+.cn-make { display: grid; gap: 6px; min-width: 0; }
+.cn-make .sb-add { flex-wrap: wrap; }
+.cn-make .sb-add input { flex: 1 1 180px; min-width: 0; }
+.cn-new-one > summary { font-weight: 500; }
+.cn-own-head { margin: 8px 0 0; }
+.cn-reach { display: grid; gap: 6px; }
+.cn-reach > p { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; }
+.cn-reach .sb-dot { display: inline-block; }
+.cn-chip > .icon { flex: none; }
+.bc-via { display: flex; align-items: flex-start; gap: 6px; margin: 4px 0 0; }
+.bc-via > .icon, .bc-via > svg { flex: none; margin-top: 2px; }
+.bp-conns .bp-main { max-width: 860px; }
+.cn-part > p, .cn-card > p { margin: 0; }

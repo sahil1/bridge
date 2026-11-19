@@ -11,13 +11,17 @@
 //     preview, which load from its sandbox and can't be read back;
 //   - through Tailscale (a *.ts.net name), only you: Tailscale says who's asking (Tailscale-User-Login,
 //     which it sets itself), and it has to be who this computer belongs to. Someone else on the
-//     tailnet, a shared or tagged device, or a visitor through Funnel isn't.
+//     tailnet, a shared or tagged device, or a visitor through Funnel isn't. That only turns people
+//     away, never lets anyone in: Tailscale passes requests on to 127.0.0.1, where any program on
+//     this computer can send the same headers.
 // What gets past this still needs the key (apiauth.js), which keeps out the other programs on this
 // computer: they send no Origin, as Bridge AI's own programs don't.
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 const DEFAULT_PORT = { 'http:': '80', 'https:': '443' }
 const API = /^(\/m\/[A-Za-z0-9_-]{1,20})?\/api\//
+// What Tailscale adds to a request it passes on from your tailnet (tailscale.com/kb/1312/serve).
+const TAILSCALE = ['tailscale-user-login', 'tailscale-user-name', 'tailscale-user-profile-pic', 'tailscale-headers-info']
 const PREVIEW_FILES = /^(\/m\/[A-Za-z0-9_-]{1,20})?\/api\/agents\/[^/]+\/site\//
 
 // tailnetOwner: () => this computer's Tailscale login, or null (phone.js).
@@ -61,8 +65,8 @@ export function makeGuard(cfg = {}, { tailnetOwner = async () => null } = {}) {
   // WebSockets: a browser always sends Origin, so a page from another site or port is refused. No
   // Origin means a program on this device (the `bridge-ai attach` terminal client), which is allowed.
   const upgrade = async (req) => hostOk(req.headers.host) && originOk(req.headers.origin, req.headers.host) && !elsewhere(req) && await you(req)
-  // Through Tailscale (a *.ts.net name): after http or upgrade above, that's you (apiauth.js lets it
-  // in without the key while Tailscale publishes this server, as before).
-  const viaTailnet = (req) => tailnetName(req.headers.host) || tailnetName(req.headers['x-forwarded-host'])
+  // Through Tailscale: its name for this computer (as the Host, or the one it says it passed on), or
+  // anything Tailscale adds. Never this computer itself (index.js), and never in without the key.
+  const viaTailnet = (req) => tailnetName(req.headers.host) || tailnetName(req.headers['x-forwarded-host']) || TAILSCALE.some((h) => req.headers[h] != null)
   return { http, upgrade, viaTailnet }
 }

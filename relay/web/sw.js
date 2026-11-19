@@ -57,11 +57,19 @@ const NO_BODY = new Set([101, 103, 204, 205, 304])
 // computer's address on the same relay is the same site to a browser, and could otherwise frame
 // yours (or a page of yours framed by another site could be clicked through unseen).
 const FRAMES = { 'Content-Security-Policy': "frame-ancestors 'self'", 'X-Frame-Options': 'SAMEORIGIN' }
+// A project's app (/_preview/, or another computer's /m/<id>/_preview/) never runs as this page: in a
+// sandbox, an origin of no one's, it can't reach your computer through the link.
+const PREVIEW = /^(\/m\/[\w-]{1,20})?\/_preview(\/|$)/
 function framed(head, req) {
   const h = new Headers(head.h)
   if (req.mode === 'navigate' || /html|xml|svg/i.test(h.get('content-type') || '')) {
     h.append('Content-Security-Policy', FRAMES['Content-Security-Policy'])
     h.set('X-Frame-Options', FRAMES['X-Frame-Options'])
+  }
+  if (PREVIEW.test(new URL(req.url).pathname)) {
+    h.append('Content-Security-Policy', 'sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads')
+    h.delete('Clear-Site-Data')
+    h.delete('Service-Worker-Allowed')
   }
   return h
 }
@@ -143,7 +151,7 @@ self.addEventListener('push', (e) => {
       badge: '/icon-512.png',
       data: { url: n.url || '/', actions },
       ...(actions.length ? { actions: actions.map(({ action, title }) => ({ action, title })) } : {}),
-      requireInteraction: n.kind === 'needs-you',
+      requireInteraction: n.kind === 'needs-you' || n.kind === 'screen', // (a screen being viewed: stays until seen)
       silent: !!n.silent, // Bridge AI's sounds are off
     })
   })())
@@ -162,7 +170,7 @@ async function clicked(n, action) {
   let url = d.url || '/'
   if (pick) {
     const r = await answer(pick.token).catch(() => null)
-    if (r?.ok) return answered(n, pick)
+    if (r?.ok) return answered(n, pick, r)
     url = r?.url || url
   }
   return openApp(new URL(url, location.origin).href, n)
@@ -218,10 +226,11 @@ async function answer(token) {
   })
 }
 
-// Says it went through, briefly and without a sound.
-async function answered(n, pick) {
+// Says it went through, briefly and without a sound: in its own words when it has them (a screen's
+// Stop or Block This Device, carried out by the computer being viewed).
+async function answered(n, pick, r) {
   const tag = `${n.tag || 'bridge'}-answered`
-  await self.registration.showNotification(n.title, { body: `Answered: ${pick.title}`, tag, silent: true, icon: '/icon-512.png', badge: '/icon-512.png', data: { url: n.data?.url || '/' } })
+  await self.registration.showNotification(n.title, { body: typeof r?.said === 'string' ? r.said.slice(0, 200) : `Answered: ${pick.title}`, tag, silent: true, icon: '/icon-512.png', badge: '/icon-512.png', data: { url: n.data?.url || '/' } })
   await new Promise((r) => setTimeout(r, 4000))
   for (const x of await self.registration.getNotifications({ tag })) x.close()
 }

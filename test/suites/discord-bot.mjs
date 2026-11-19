@@ -20,7 +20,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { startKit, startDiscord, checks, until, sleep, browser, page, shot, phoneFaults, TEST, IS_WIN } from '../lib/harness.mjs'
-import { lookers, openSettings } from '../lib/bots.mjs'
+import { lookers, openSettings, ownFile } from '../lib/bots.mjs'
 
 const { ok, done } = checks('discord-bot')
 const dc = await startDiscord('discord-bot')
@@ -83,8 +83,8 @@ try {
   })
   const w = await where()
   ok(w.state === 'connected' && w.guild?.name === 'Acme' && w.intents?.content === true, 'connected, in Acme, with Message Content', w)
-  const file = path.join(kit.data, 'bots', 'b1', 'discord.json')
-  ok(fs.existsSync(file) && (IS_WIN || (fs.statSync(file).mode & 0o777) === 0o600), 'its token in its own folder, yours only', IS_WIN ? null : (fs.statSync(file).mode & 0o777).toString(8))
+  const file = ownFile(kit, 'b1', 'discord')
+  ok(fs.existsSync(file) && (IS_WIN || (fs.statSync(file).mode & 0o777) === 0o600), 'its token with its own connection, yours only', IS_WIN ? null : (fs.statSync(file).mode & 0o777).toString(8))
   ok((await botOf()).state === 'no-tokens', 'Slack, not set up, as it was')
 
   // ---------- Who may ask ----------

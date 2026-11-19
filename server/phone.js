@@ -1,7 +1,8 @@
 // "Use on your phone": publish Bridge AI over HTTPS to your own devices with Tailscale (free), so
 // your phone can open it, add it to the Home Screen as an app, and get notifications. Only devices
-// signed in to your tailnet can reach it, and Bridge AI answers only you (guard.js checks who
-// Tailscale says is asking); nothing is opened to the internet.
+// signed in to your tailnet can reach it, and Bridge AI answers only you: a browser it let in, with
+// the code Settings shows (apiauth.js), and never someone else Tailscale names (guard.js); nothing
+// is opened to the internet.
 //
 // Bridge AI asks Tailscale to serve https://<this-computer>.<tailnet>.ts.net:<port> from the local
 // server. The port is the first free one from 8443 up, so another app already published there (an
@@ -69,6 +70,9 @@ export async function status(localPort) {
   const url = `https://${name}${mine[0] === '443' ? '' : `:${mine[0]}`}/`
   return { ...base, enabled: true, port: Number(mine[0]), url, qr: await QRCode.toString(url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }) }
 }
+
+// A link as a QR code, for the phone's camera.
+export const qr = (url) => QRCode.toString(url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' })
 
 export async function enable(localPort) {
   const b = await bin()

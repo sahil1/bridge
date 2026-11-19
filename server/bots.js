@@ -1,6 +1,7 @@
-// Bots (a beta feature, Settings › Bots, its id slack-bot): each one your own Slack app, with the
-// name you give it, answering people you choose from the folders you give it (frontdesk.js). Several
-// can run on one computer, each its own app, connection and record.
+// Bots (a beta feature, Settings › Bots, its id slack-bot): each answering people you choose, in
+// Slack, Discord or Microsoft Teams, from the folders you give it (frontdesk.js). Several can run on
+// one computer, each with its own record, reached through the platform's shared connection (one app
+// for them all) or a connection of its own (connections.js).
 //
 // What must hold is a setting, kept here and enforced in code: who may ask, which folders it reads
 // (readsFrom), that it can only read, and which agent answers. How it answers is its instructions:
@@ -11,11 +12,13 @@
 // Each bot in its own folder in the data folder, readable by you only:
 //   bots/<id>/bot.json          its settings
 //   bots/<id>/instructions.md   its instructions, as written in Settings
-//   bots/<id>/slack.json        its Slack app's tokens (slackbot.js), never in config.json
-//   bots/<id>/discord.json      its Discord bot's token (discordbot.js), the same way
-//   bots/<id>/teams.json        its Azure Bot's app ID, client secret and tenant (teamsbot.js)
+//   (its app's tokens were in bots/<id>/slack.json, discord.json and teams.json before
+//   connections: each is a connection of its own now, connections/<c>/, connections.js migrate)
 //   bots/<id>/memory.json       what it remembers (botmemory.js)
+//   bots/<id>/setup.json        its setup chat with AI Assist and what it proposes (botsetup.js)
 //   bots/<id>/trace/            its record (trace.js)
+// A draft (draft: true) is a bot AI Assist proposed, from the setup chat or the Chief of Staff's
+// `bridge bot`: listed, but nothing of it applies, connects or answers until you press Create.
 // A bot deleted leaves its record, until the time it's kept for runs out, with deleted.json naming
 // it (its name, when, how long its record is kept); with its activity history deleted too, the
 // record keeps only that it was (frontdesk.js clear()).
@@ -47,12 +50,22 @@ const tilde = (p) => (p === HOME || p.startsWith(HOME + path.sep) ? `~${p.slice(
 // what it may change (changes: none, suggest or pr, in repo, one of its folders), the limits per
 // person (30 questions a day, 2 at once, 10 minutes a run), memory (kept once you approve, straight
 // away, or off), paused, the channels muted with !mute, the channels it answers in without a
-// mention (listen), and whether it may say what your agents are doing (agentsStatus).
+// mention (listen), whether it may say what your agents are doing (agentsStatus), and which of your
+// MCP servers its runs get (mcp, by name: Settings › MCP Servers, through Claude Code's own config),
+// and what answers (answerers: its first choice and fallbacks, botanswer.js ids, or null for
+// Automatic; fallback: whether the next is tried when one can't answer).
 export const LIMITS = { day: 30, atOnce: 2, minutes: 10 }
 const DEFAULTS = {
   name: 'Bridge AI', description: '', who: 'named', askers: [], others: 'polite', readsFrom: [], instructionsFile: null, agent: null, auto: false, agentCopies: false, retention: '1y', max: 2,
-  owner: null, owners: {}, changes: 'none', repo: null, limits: LIMITS, memory: 'approve', paused: false, muted: [], listen: [], agentsStatus: false, template: null,
+  owner: null, owners: {}, changes: 'none', repo: null, limits: LIMITS, memory: 'approve', paused: false, muted: [], listen: [], agentsStatus: false, template: null, mcp: [], answerers: null, fallback: true, draft: false, icon: null,
 }
+// Its icon where a shared connection posts as it (connhub.js): an emoji's Slack name, or a picture's
+// https address.
+export const ICON = /^(:[\w+-]{1,60}:|https:\/\/\S{1,500})$/
+// An MCP server's name, as the agents' configs take it (mcp.js).
+export const MCP_NAME = /^[A-Za-z0-9_.-]{1,64}$/
+// What may answer: an agent (agent:claude, agent:claude:opus) or a model (model:ollama:qwen3).
+const answererId = (x) => /^(agent:(claude|codex)(:[\w.-]{1,60})?|model:[a-z][\w-]*:[^\s]{1,200})$/.test(x) && !/^model:cli:/.test(x)
 // People and places by their ids: Slack's as Slack gives them; Discord's and Teams' with their
 // platform before them (connector.js combine).
 const SLACK_ID = /^[UW][A-Z0-9]{2,20}$/
@@ -96,6 +109,12 @@ function shape(id, j) {
   b.listen = (Array.isArray(b.listen) ? b.listen : []).map(place).filter(Boolean)
   b.agentsStatus = b.agentsStatus === true
   b.template = b.template ? clean(b.template, 40) : null
+  b.mcp = [...new Set((Array.isArray(b.mcp) ? b.mcp : []).map(String).filter((x) => MCP_NAME.test(x)))].slice(0, 20)
+  b.answerers = Array.isArray(b.answerers) ? [...new Set(b.answerers.map(String).filter(answererId))].slice(0, 12) : null
+  if (!b.answerers?.length) b.answerers = null
+  b.fallback = b.fallback !== false
+  b.draft = b.draft === true
+  b.icon = ICON.test(String(b.icon || '')) ? String(b.icon) : null
   return b
 }
 
@@ -105,6 +124,8 @@ export function list() {
   return ids.map((id) => shape(id, read(fileOf(id, 'bot.json')))).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')) || a.id.localeCompare(b.id, 'en', { numeric: true }))
 }
 export const get = (id) => (ID.test(String(id)) && fs.existsSync(fileOf(id, 'bot.json')) ? shape(id, read(fileOf(id, 'bot.json'))) : null)
+// The bots that are there to answer: not a draft waiting for Create.
+export const live = () => list().filter((b) => !b.draft)
 
 function write(b) {
   fs.mkdirSync(path.join(DIR, b.id), { recursive: true, mode: 0o700 })
@@ -112,6 +133,14 @@ function write(b) {
   writeFileAtomic(fileOf(b.id, 'bot.json'), JSON.stringify(rest, null, 2), { mode: 0o600 })
 }
 const nextId = () => { const have = new Set(list().map((b) => b.id)); let n = 1; while (have.has(`b${n}`) || fs.existsSync(path.join(DIR, `b${n}`))) n++; return `b${n}` }
+// A name no other bot has: this one, or with a number after it.
+export function freeName(want, skip = null) {
+  const w = clean(want, NAME_MAX) || 'New Bot'
+  const taken = new Set(list().filter((b) => b.id !== skip).map((b) => b.name.toLowerCase()))
+  let n = w
+  for (let i = 2; taken.has(n.toLowerCase()) && i < 100; i++) n = `${w.slice(0, NAME_MAX - 4)} (${i})`
+  return n
+}
 
 // A new bot, with its name, and its instructions to start from: a template's (bottemplates.js), or
 // the plain ones.
@@ -127,13 +156,30 @@ export function create({ name, description = '', template = null } = {}, you = '
   return b
 }
 
+// A draft: a bot by a name AI Assist gave it (or New Bot), nothing else of it kept until you press
+// Create (botsetup.js has what it proposes). from: who asked for it, you (+ in the sidebar) or the
+// Chief of Staff.
+export function createDraft({ name = '', from = 'you' } = {}) {
+  const b = shape(nextId(), { ...DEFAULTS, name: freeName(name), draft: true, from: from === 'chief' ? 'chief' : 'you', createdAt: new Date().toISOString() })
+  write(b)
+  return b
+}
+// A draft made a bot (Create): it's there to answer from now on, with the instructions it was given.
+export function undraft(id, instructions) {
+  const b = get(id)
+  if (!b?.draft) throw Object.assign(new Error('That isn\'t a draft'), { status: 409 })
+  writeInstructions(id, instructions)
+  write(shape(id, { ...b, draft: false, createdAt: new Date().toISOString() }))
+  return get(id)
+}
+
 // ---------- Export and import ----------
 // A bot as a file, to take to another computer (the Docker image on an always-on machine, say):
 // its settings, its instructions and what it remembers, never its tokens (its Slack app is
 // connected again there, with tokens pasted there). Its folders go as they're named here (~/…),
 // and are checked where it's brought in.
 export const BUNDLE_KIND = 'bridge-ai-bot'
-const CARRIED = ['description', 'who', 'askers', 'others', 'readsFrom', 'instructionsFile', 'agent', 'auto', 'agentCopies', 'retention', 'max', 'owner', 'owners', 'changes', 'repo', 'limits', 'memory', 'muted', 'listen', 'agentsStatus', 'template']
+const CARRIED = ['icon', 'description', 'who', 'askers', 'others', 'readsFrom', 'instructionsFile', 'agent', 'auto', 'agentCopies', 'retention', 'max', 'owner', 'owners', 'changes', 'repo', 'limits', 'memory', 'muted', 'listen', 'agentsStatus', 'template', 'mcp', 'answerers', 'fallback']
 export function bundleOf(id, memory = []) {
   const b = get(id)
   if (!b) throw Object.assign(new Error('No such bot'), { status: 404 })
@@ -172,9 +218,9 @@ export function remove(id) {
   if (!ID.test(String(id))) throw new Error('No such bot')
   const b = get(id)
   const D = path.join(DIR, id)
-  if (!fs.existsSync(path.join(D, 'trace'))) { fs.rmSync(D, { recursive: true, force: true }); return }
+  if (!fs.existsSync(path.join(D, 'trace')) || b?.draft) { fs.rmSync(D, { recursive: true, force: true }); return }
   writeFileAtomic(path.join(D, 'deleted.json'), JSON.stringify({ name: b?.name || id, deletedAt: new Date().toISOString(), retention: b?.retention || '1y' }, null, 2), { mode: 0o600 })
-  for (const f of ['bot.json', 'instructions.md', 'slack.json', 'discord.json', 'teams.json', 'memory.json']) fs.rmSync(path.join(D, f), { force: true })
+  for (const f of ['bot.json', 'instructions.md', 'slack.json', 'discord.json', 'teams.json', 'memory.json', 'setup.json']) fs.rmSync(path.join(D, f), { force: true })
 }
 // The bots deleted whose record is kept: [{ id, name, deletedAt, retention }].
 export function deleted() {

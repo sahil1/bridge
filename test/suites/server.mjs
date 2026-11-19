@@ -50,7 +50,7 @@ try {
 
   // Only Bridge AI's own pages: a request as a browser would send it, and a terminal's WebSocket.
   // Each with Bridge AI's key (as the page's cookie, or the CLI, sends it), unless it says
-  // Authorization: null (through Tailscale, which needs none).
+  // Authorization: null. Through Tailscale too: what it says about who's asking only turns away.
   const keyed = (headers) => Object.fromEntries(Object.entries({ Authorization: `Bearer ${kit.key}`, ...headers }).filter(([, v]) => v != null))
   const send = (path, headers = {}, method = 'GET') => new Promise((resolve) => {
     const r = http.request({ host: '127.0.0.1', port: kit.port, path, method, headers: keyed({ Host: `127.0.0.1:${kit.port}`, ...headers }) }, (res) => { res.resume(); resolve(res.statusCode) })
@@ -68,7 +68,8 @@ try {
   ok(await send('/api/config', { Origin: `http://127.0.0.1:${kit.port + 1}` }) === 403, 'the same address on another port is refused')
   ok(await send('/api/config', { Origin: 'https://example.tail1234.ts.net' }) === 403, 'another Tailscale site is refused')
   const ts = { Host: 'my-mac.tail1234.ts.net', Origin: 'https://my-mac.tail1234.ts.net', Authorization: null }
-  ok(await send('/api/config', { ...ts, 'Tailscale-User-Login': 'me@example.com' }) === 200, 'its own Tailscale address is answered for you, signed in on your phone')
+  ok(await send('/api/config', { ...ts, 'Tailscale-User-Login': 'me@example.com', Authorization: `Bearer ${kit.key}` }) === 200, 'its own Tailscale address is answered for you, signed in on your phone and let in')
+  ok(await send('/api/config', { ...ts, 'Tailscale-User-Login': 'me@example.com' }) === 401, 'but not without the key: any program on this computer can send what Tailscale says')
   ok(await send('/api/config', { ...ts, 'Tailscale-User-Login': 'someone@example.com' }) === 403 && await send('/api/config', ts) === 403, 'not for someone else on the tailnet, or a visitor Tailscale can\'t name (Funnel, a tagged device)')
   ok(await send('/api/config', { Host: `127.0.0.1:${kit.port + 1}`, Origin: `http://127.0.0.1:${kit.port + 1}` }) === 200, 'the hot-reloading UI is answered (npm start -- dev, whose proxy keeps the Host)')
   ok(await send('/api/config', { Host: 'evil.example:80' }) === 403, 'another Host is refused (DNS rebinding)')
@@ -77,12 +78,13 @@ try {
   ok(![0, 403].includes(await send(`/api/agents/${encodeURIComponent(sh.paneId)}/site/index.html`, { 'Sec-Fetch-Site': 'cross-site' })), 'an HTML preview\'s own files still load from its sandbox')
   ok(await send(`/api/agents/${encodeURIComponent(sh.paneId)}/site/index.html`, { 'Sec-Fetch-Site': 'cross-site' }, 'POST') === 403, 'but nothing else from another site')
   const framed = await Promise.all(['/', '/index.html'].map((p) => fetch(`${kit.url}${p}`).then((r) => r.headers.get('content-security-policy'))))
-  ok(await send('/api/config', { Authorization: null }) === 401 && await send('/api/config', ts) === 403, 'without the key: refused (a program on this computer); through Tailscale, only for someone else')
+  ok(await send('/api/config', { Authorization: null }) === 401 && await send('/api/config', ts) === 403, 'without the key: refused (a program on this computer); through Tailscale with no one named, too')
   ok(framed.every((c) => /frame-ancestors 'self'/.test(c || '')), 'the page can\'t be framed by another site', framed)
   ok(await socket({ Origin: own }) === 101 && await socket() === 101, 'a terminal\'s WebSocket opens from its own page and from the CLI')
   ok(await socket({ Origin: 'http://localhost:8000' }) !== 101, 'a page on another localhost port can\'t type into a terminal')
   ok(await socket({ Origin: 'https://example.tail1234.ts.net' }) !== 101, 'nor can another Tailscale site')
-  ok(await socket({ ...ts, 'Tailscale-User-Login': 'someone@example.com' }) !== 101 && await socket({ ...ts, 'Tailscale-User-Login': 'me@example.com' }) === 101, 'through Tailscale, only you can open a terminal')
+  ok(await socket({ ...ts, 'Tailscale-User-Login': 'someone@example.com', Authorization: `Bearer ${kit.key}` }) !== 101 && await socket({ ...ts, 'Tailscale-User-Login': 'me@example.com', Authorization: `Bearer ${kit.key}` }) === 101, 'through Tailscale, only you can open a terminal')
+  ok(await socket({ ...ts, 'Tailscale-User-Login': 'me@example.com' }) === 401, 'and only once let in')
   ok(await socket({ Authorization: null }) === 401 && await socket({ Origin: own, Authorization: 'Bearer not-the-key' }) === 401, 'without Bridge AI\'s key, or with a wrong one, no terminal opens')
 
   // Discard throws a new file away, but never one a link in the repo leads out to. (On Windows the

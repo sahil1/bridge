@@ -18,6 +18,7 @@ const LOADERS = {
   UsageStats: () => import('./components/UsageStats.jsx'),
   Meetings: () => import('./components/meetings/Meetings.jsx'),
   Dictations: () => import('./components/dictations/Dictations.jsx'),
+  BotPage: () => import('./components/bots/BotPage.jsx'),
 }
 
 // A view's styles that didn't come (the computer out of reach as they loaded): Vite's loader asks for
@@ -73,6 +74,9 @@ export const ChangesView = wrap(LOADERS.Files, 'ChangesView')
 export const PreviewView = wrap(LOADERS.Preview)
 export const CalendarView = wrap(LOADERS.CalendarView)
 export const UsageStats = wrap(LOADERS.UsageStats)
+// A bot's page, and the phone's list of them (Bots, a beta feature).
+export const BotPage = wrap(LOADERS.BotPage)
+export const PhoneBots = wrap(LOADERS.BotPage, 'PhoneBots')
 
 // Whiteboards load only when one is opened, never ahead (Excalidraw is the biggest part of the app),
 // and aren't in the demo or the phone apps' Cloud agents.

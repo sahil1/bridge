@@ -65,6 +65,8 @@ const PATHS = {
   'a:accounts': { phone: 'Settings › Model Providers' },
   'a:add-account': { phone: 'Search › Add another account' },
   'a:mcp': { phone: 'Settings › MCP Servers' },
+  // A beta feature's (Bots): a phone's way to them is More › Bots, its bots and New bot.
+  'a:new-bot': { phone: 'More › Bots', shows: '[data-setting="phone-bots"]', trial: 'slack-bot' },
   'a:config': { phone: 'Settings › Config File' },
   'a:mate': { phone: 'Chief', shows: '.mate-hero, .console' },
   'a:view': { none: 'The live Herdr view needs a wide screen; a phone has every terminal in More › Terminals' },
@@ -120,6 +122,8 @@ const PATHS = {
   'rail:New space': { phone: 'Search › New agent with all the options' },
   'rail:New terminal': { phone: 'Search › New terminal' },
   'rail:History': { phone: 'More › History', shows: '.modal.history' },
+  // The sidebar's Bots (a beta feature): its bots and + are More › Bots on a phone.
+  'rail:New bot': { phone: 'More › Bots', shows: '[data-setting="phone-bots"]', trial: 'slack-bot' },
   'rail:Collapse all spaces': { none: 'Spaces fold in the sidebar; a phone lists the agents in Agents' },
   'rail:Expand all spaces': { none: 'Spaces fold in the sidebar; a phone lists the agents in Agents' },
 }
