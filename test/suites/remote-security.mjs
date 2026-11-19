@@ -29,7 +29,8 @@
 //     unticked with a terminal, the app's feed and a copy open, each ends then; through Laptop,
 //     Laptop's list first, then Studio's for Laptop, saying which one isn't let in;
 //   the password changed or taken off ends sessions; a picture for a session that isn't there goes
-//     to no other; the password's hash at OWASP's cost, an older one made again once typed; an app
+//     to no other; a capture page that hasn't said its screens yet is waited for, never another
+//     list taken in their place; the password's hash at OWASP's cost, an older one made again once typed; an app
 //     drawn off screen follows no redirect or frame to anything else on the computer;
 //   in the app (Chromium, or WebKit as the iPhone app): a phone paired once a password is set is
 //     one card saying Studio hasn't let it in and where; Allow in Studio's Needs You lets it in, and
@@ -945,6 +946,26 @@ try {
     cap.ws.send(Buffer.from(packFrame('image/svg+xml', 1, 1, Buffer.from('<svg>not yours</svg>'))))
     await sleep(800)
     ok(v.frames.length === 1, 'a picture for a session that isn\'t there goes to no other', v.frames.map((f) => Buffer.from(f.f.bytes).toString()))
+    await v.close()
+    cap.close()
+    await idle()
+  })
+
+  // A capture page that has connected but not said its screens yet (a cold start, or one connecting
+  // again after the server restarted): a session waits for them, and never takes a screen that
+  // isn't one of its (the tests' stand-in's list, or none).
+  await part('a capture page that hasn\'t said its screens yet: waited for, never another list', async () => {
+    const cap = local(studio, '/api/remote/capture')
+    await until(() => cap.ws.readyState === 1, 4000, 50)
+    const v = ph.socket(V)
+    await v.wait((s) => msg(s, 'password'))
+    await v.send({ t: 'password', p: PW })
+    await sleep(1500)
+    cap.send({ t: 'hello', sources: [{ id: 'cap-late', name: 'Late screen', kind: 'screen', w: 640, h: 400, primary: true }], permission: 'ok', p2p: false })
+    await v.wait((s) => msg(s, 'hello') || msg(s, 'error'), 8000)
+    await cap.wait((s) => s.msgs.some((m) => m.t === 'start'), 4000)
+    const start = cap.msgs.find((m) => m.t === 'start')
+    ok(msg(v, 'hello')?.source?.id === 'cap-late' && start?.source?.id === 'cap-late' && !msg(v, 'error'), 'the screen it says once it does, not one it never had', { hello: msg(v, 'hello')?.source, start: start?.source, error: msg(v, 'error') })
     await v.close()
     cap.close()
     await idle()

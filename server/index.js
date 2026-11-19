@@ -246,6 +246,7 @@ const remote = makeRemote({
   hosted: () => !!relay.status().hosted, isDevPort, screenAllowed: () => (IS_MAC ? calls.screen() : Promise.resolve(null)),
   devices: () => relay.status().devices, byKey: (key) => relay.deviceByKey(key), onBlocked: shutOut,
   tell: (ev) => screenTell.tell(ev), onChange: () => screenTell.changed(), notifyTo: () => screenTell.notifyTo(), blockThere: (hop, id) => screenTell.blockThere(hop, id),
+  version: VERSION, openApp: (go) => fixes.openBridge(go),
 })
 // ...and nothing else of this computer's for one not let in, from the first thing it asks (letin.js),
 // nor its notifications.
@@ -3007,6 +3008,9 @@ app.post('/api/remote/asks/:id', (req, res) => { try { remoteHere(req); res.json
 app.post('/api/remote/devices', (req, res) => { try { remoteHere(req); res.json(remote.setDevice(String(req.body?.id || ''), req.body?.allowed !== false)) } catch (e) { sayErr(res, e) } })
 app.post('/api/remote/locks/:id/clear', (req, res) => { try { remoteHere(req); res.json(remote.unlock(req.params.id)) } catch (e) { sayErr(res, e) } })
 app.post('/api/remote/notify', (req, res) => { try { remoteHere(req); res.json(remote.setNotify(req.body?.on !== false)) } catch (e) { sayErr(res, e) } })
+// Another computer's screen that didn't show here, or on a device of this one's (ScreenView.jsx): a
+// line in this log, with why, as that computer's own log has one.
+app.post('/api/remote/didnt-show', (req, res) => { const b = req.body || {}; res.json(remote.didntShow({ name: b.name, code: b.code, cause: b.cause, why: b.why, version: b.version }, atThisComputer(req) ? null : relay.deviceOf(req.headers['x-bridge-relay'])?.name || 'a device')) })
 // Your devices told (screentell.js). Stop, or Block This Device, from any of your devices: carried out
 // here (remote.js endFrom), as it only narrows who may connect; letting a device back in is above,
 // here only. From another computer, it says which of its devices it came from, for the record.

@@ -7,7 +7,7 @@
 // on the PATH (so a test with a made-up PATH never finds this Mac's own Homebrew).
 import fs from 'node:fs'
 import path from 'node:path'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { IS_MAC, IS_WIN, HOME, ROOT, brewInstall } from './paths.js'
 import { loginPath, which } from './agents.js'
 
@@ -249,6 +249,27 @@ export function openApp(which) {
   const name = APPS[which]
   if (!name) throw new Error('No such app')
   return open(['-a', name])
+}
+
+// Bridge AI's desktop app, opened (one of your devices found it closed: remote.js, Open Bridge AI):
+// on a Mac the app this server runs in, elsewhere its program, started without what makes it run
+// as this server. go false: only whether there's one to open (none from a terminal: null). In a dry
+// run (tests) it's said in the log instead, and BRIDGE_TEST_APP=1 stands in for an app there.
+export function openBridge(go = true) {
+  const a = app()
+  const exe = !IS_MAC && process.versions.electron ? process.execPath : null
+  if (!a.desktop && !exe && !(DRYRUN && process.env.BRIDGE_TEST_APP === '1')) return null
+  if (!go) return true
+  if (DRYRUN) { console.log('[fix dry-run] open Bridge AI'); return Promise.resolve({ ok: true, dryRun: true }) }
+  if (a.desktop) return new Promise((resolve, reject) => execFile('open', [a.bundle], { timeout: 15000 }, (err) => (err ? reject(new Error(String(err.message).split('\n')[0])) : resolve({ ok: true }))))
+  return new Promise((resolve, reject) => {
+    const env = { ...process.env }
+    delete env.ELECTRON_RUN_AS_NODE
+    const c = spawn(exe, [], { detached: true, stdio: 'ignore', env })
+    c.once('error', (e) => reject(e))
+    c.unref()
+    setTimeout(() => resolve({ ok: true }), 500)
+  })
 }
 
 // Bridge AI in Finder, selected, so you can drag it into the list in System Settings.

@@ -25,13 +25,21 @@
 //     display at twice its points, a portrait one left of the main one, and a 1440 x 900 one, with
 //     fitting and pointer maths at those sizes, the capture size, bitrate and the answer's codecs;
 //   the Beta Feature off at Studio: nothing seen, and said why;
+//   a screen that doesn't start ("Desk", its desktop app stood in for): a cold start slower than one
+//     wait, a capture window that never loads, the app's feed coming back, each waited for and
+//     healed with nothing said; no capture page, one that never lists its screens, the app closed,
+//     Screen Recording turned down, each said exactly, with the fix (Reopen, Open, Allow Screen
+//     Recording) carried out in the same session, the password not asked again; Reopen as a device
+//     from before fixes knows it; each in Desk's log, and what the viewer showed in its own;
 //   a project's app on Studio, at an address of its own on Laptop: its page, its absolute paths, a
 //     redirect to itself, its cookies (never Bridge AI's own), a POST, its hot reload's WebSocket (with
 //     the subprotocol it asks for); only a port Studio lists as one of an agent's dev servers, never
 //     Bridge AI's own nor one started elsewhere; a Host that isn't the address turned away; its page
 //     can't use Laptop's API; on a phone, as pictures drawn at Studio, taps going to that page;
 //   the desktop app's side: the badge for an ask, the viewer's window of its own on the display it's
-//     asked from, fitted to the screen's shape, sized by hand kept for that computer;
+//     asked from, fitted to the screen's shape, sized by hand kept for that computer; the capture
+//     window opened fresh when asked, loaded again or closed when it doesn't load or hangs, the app
+//     kept from napping meanwhile, the display woken and kept awake while viewed;
 //   in the browser (BRIDGE_TEST_BROWSER): Settings › Devices › Computers on Laptop, View screen, the
 //     password asked for (a wrong one said), the pictures through the relay (said slower), filling the
 //     stage with their shape kept, another screen picked in the session, Control once Studio allows
@@ -39,7 +47,9 @@
 //     states centred and readable (macOS not allowing it, with Try again); at a phone's width, fitted,
 //     pinched to zoom, locked out and told no with why; the badge's Allow; on Studio, the line saying
 //     it's being seen, Stop, the notice after, Remote Access set in Settings (and shown, not changed,
-//     from another computer's window) and Screen Activity; peer-to-peer between two pages where the
+//     from another computer's window) and Screen Activity; each reason a screen doesn't
+//     show, said with the button that fixes it (Reopen, Open, Allow Screen Recording, Update), on a
+//     computer and a phone; peer-to-peer between two pages where the
 //     browser can (the capture page on Studio, with a canvas), said Direct; the agent's Preview tab
 //     on Laptop showing Studio's app at its own address, never Laptop's localhost;
 //   Which screen?: each display by its own name and size (desktop/remote.js, Electron stood in for, as
@@ -55,7 +65,7 @@ import http from 'node:http'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import WebSocket, { WebSocketServer } from 'ws'
-import { startKit, startRelay, checks, until, browser, page, sleep, shot, changeAnswer, phoneFaults, ROOT, TEST, IS_WIN, freePort, stopTree } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, page, sleep, shot, changeAnswer, noServiceWorker, phoneFaults, ROOT, TEST, IS_WIN, freePort, stopTree } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 import { K, json, text } from '../../relay/web/link.js'
 import { unpackFrame, keyFor, fitIn, pointAt, captureSize, bitrateFor, sdpBitrate } from '../../shared/remote.js'
@@ -121,6 +131,7 @@ function over(c) {
 function local(kit, u) {
   const s = { msgs: [], frames: [], closed: null }
   const ws = new WebSocket(`${kit.url.replace(/^http/, 'ws')}${u}`, { headers: { authorization: `Bearer ${kit.key}` } })
+  s.ws = ws
   ws.on('message', (d, bin) => { if (bin) s.frames.push({ at: Date.now(), f: unpackFrame(new Uint8Array(d)) }); else { try { s.msgs.push(JSON.parse(String(d))) } catch { s.msgs.push(String(d)) } } })
   ws.on('close', (c) => { s.closed = { c } })
   ws.on('error', () => {})
@@ -131,6 +142,54 @@ function local(kit, u) {
 }
 const msg = (s, t) => s.msgs.find((m) => m.t === t)
 const msgs = (s, t) => s.msgs.filter((m) => m.t === t)
+
+// The desktop app on a computer being seen, stood in for (desktop/remote.js and main.js): its own
+// feed (/api/events, as the app's), and on need-capture its capture page (/api/remote/capture),
+// as how says: after (ms before the page connects), list (ms before it says its screens), hang (it
+// never connects), hangFirst (only the first time it's asked), mute (it connects and never says),
+// and the permission and screens it says. drop(): the page gone (its window closed); quit(): the
+// app gone. events: what the server told the app.
+const DESK_SCREENS = [{ id: 'screen:1:0', name: 'Built-in Retina Display', kind: 'screen', w: 3024, h: 1964, primary: true, scale: 2, bounds: { x: 0, y: 0, width: 1512, height: 982 } }]
+function deskApp(kit, how = {}) {
+  const d = { how, events: [], page: null, gone: false, asked: 0 }
+  const ac = new AbortController()
+  let opening = false
+  const say = (cap, t) => cap.send({ t, sources: d.how.sources || DESK_SCREENS, permission: d.how.permission || 'ok', ...(d.how.none ? { none: d.how.none } : {}), p2p: false })
+  const open = () => {
+    if (d.how.hang || (d.how.hangFirst && d.asked === 1)) return
+    opening = true
+    setTimeout(() => {
+      opening = false
+      if (d.gone) return
+      const cap = local(kit, '/api/remote/capture')
+      d.page = cap
+      cap.ws.on('open', () => { if (!d.how.mute) setTimeout(() => say(cap, 'hello'), d.how.list || 0) })
+      cap.ws.on('message', (m) => { let x = null; try { x = JSON.parse(String(m)) } catch { /* not JSON */ } if (x?.t === 'sources?' && !d.how.mute) say(cap, 'sources') })
+    }, d.how.after || 0)
+  }
+  d.drop = () => { const p = d.page; d.page = null; p?.close() }
+  d.quit = () => { d.gone = true; ac.abort(); d.drop() }
+  fetch(`${kit.url}/api/events`, { headers: { Accept: 'text/event-stream', 'x-bridge-desktop': '3.22.0', authorization: `Bearer ${kit.key}` }, signal: ac.signal }).then(async (r) => {
+    const dec = new TextDecoder()
+    let buf = ''
+    for await (const c of r.body) {
+      buf += dec.decode(c, { stream: true })
+      for (let i = buf.indexOf('\n\n'); i >= 0; i = buf.indexOf('\n\n')) {
+        const block = buf.slice(0, i)
+        buf = buf.slice(i + 2)
+        if (!/^event: remote$/m.test(block)) continue
+        let ev = null
+        try { ev = JSON.parse(block.split('\n').filter((l) => l.startsWith('data: ')).map((l) => l.slice(6)).join('\n')) } catch { continue }
+        d.events.push(ev)
+        if (ev.t !== 'need-capture') continue
+        d.asked++
+        if (ev.fresh) d.drop()
+        if (!opening && (!d.page || d.page.closed)) open()
+      }
+    }
+  }).catch(() => {})
+  return d
+}
 // Studio's Remote Access Password, once it's set.
 const PW = 'correct horse 42'
 // A session past the password when Studio asks for one: its hello, or null (what it was told is in
@@ -787,6 +846,160 @@ try {
     await studio.api('/settings', { trials: { 'remote-screen': true } }, 'PATCH')
   })
 
+  // ---------- a screen that doesn't start: self-healed, or said with the fix ----------
+  // "Desk", a computer whose screen is taken by its desktop app (stood in for: deskApp), with short
+  // waits: 1.5 s for the capture page to connect and as long to list its screens, 2.5 s for the app
+  // to report in, 10 s to reopen. A phone ("Pocket") views it through its relay, past its password.
+  // Each way it can stall: self-healed before anything is said when it can be (a cold start slower
+  // than one wait, a window that never loads, the app's feed coming back), and otherwise said as it
+  // is, with the fix (Open, Reopen, Allow Screen Recording) carried out in the same session, the
+  // password not asked again; a line in Desk's log for each.
+  await part('a screen that doesn\'t start: self-healed, or said with the fix, in the same session', async () => {
+    const rd = await startRelay('remote-screen-desk')
+    relays.push(rd)
+    const desk = await kitWith('Desk', rd, { BRIDGE_REMOTE_CAPTURE_WAIT_MS: '1500', BRIDGE_REMOTE_APP_BACK_MS: '2500', BRIDGE_REMOTE_REOPEN_MS: '10000', BRIDGE_REMOTE_ALLOW_MS: '8000', BRIDGE_TEST_APP: '1', ...(process.platform === 'linux' ? { DISPLAY: ':0' } : {}) })
+    ok(!!(await until(async () => (await desk.api('/relay')).online, 20000)), 'Desk is on its relay')
+    const pocket = await linkAs(rd.url, { code: (await desk.api('/relay/pair', {})).pairing.code, name: 'Pocket', about: { name: 'Pocket' } })
+    const dp = over(pocket)
+    await until(async () => (await desk.api('/remote')).access.devices.some((x) => x.name === 'Pocket'), 8000, 100)
+    await desk.api('/remote/password', { password: PW })
+    const FX = '/api/remote/view?source=screen:&fixes=1'
+    const ended = () => until(async () => !(await desk.api('/remote')).sessions.length, 6000, 100)
+    const logged = (re) => until(() => re.test(desk.log()), 4000, 100)
+    const apps = []
+    const app = (how) => { const a = deskApp(desk, how); apps.push(a); return a }
+    const appOpen = () => until(async () => (await desk.api('/remote')).preview.can, 6000, 100)
+    try {
+      // No app at all: said with Open Bridge AI there; chosen, it's opened (past the password) and
+      // the screen shows when it reports in.
+      await sleep(2600)
+      const st = (await dp.request('GET', '/api/remote?sources=1')).json
+      ok(st?.screen?.can === false && st.screen.code === 'noApp' && st.screen.fix === 'open' && !!st.version, 'the app closed on Desk: the phone is told so, with Open Bridge AI there (and Desk\'s version)', st?.screen)
+      const v0 = dp.socket(FX)
+      await v0.wait((s) => msg(s, 'error'))
+      ok(msg(v0, 'error')?.code === 'noApp' && msg(v0, 'error').fix === 'open' && !msg(v0, 'error').waits && !msg(v0, 'password'), 'a session for it: said before the password, with Open offered (connecting again with it chosen)', msg(v0, 'error'))
+      const v1 = dp.socket(`${FX}&fix=open`)
+      await v1.wait((s) => msg(s, 'password') || msg(s, 'error'))
+      await v1.send({ t: 'password', p: PW })
+      await v1.wait((s) => msg(s, 'wait') || msg(s, 'error'))
+      ok(msg(v1, 'wait')?.why === 'open' && !!(await logged(/\[fix dry-run\] open Bridge AI/)), 'Open chosen: past the password, Bridge AI is opened on Desk, and the phone told it\'s opening', msg(v1, 'wait'))
+      const a1 = app()
+      await v1.wait((s) => msg(s, 'hello'), 8000)
+      ok(msg(v1, 'hello')?.source?.id === 'screen:1:0' && msgs(v1, 'password').length === 1, 'the app reports in: its screen, in the same session, the password not asked again', msg(v1, 'hello')?.source)
+      const rec = await until(async () => (await desk.api('/remote')).log.find((x) => x.end === 'opened'), 4000, 100)
+      ok(rec?.by?.name === 'Pocket' && !!(await logged(/Remote Screen: Pocket: opened the Bridge AI app here/)), 'Screen Activity and the log say who opened it', rec)
+      await v1.close()
+      await ended()
+
+      // A cold start slower than one wait (the window loads for 0.9 s, macOS lists the screens 1.3 s
+      // later): waited for, once the page has connected, not said as a failure.
+      a1.drop()
+      a1.how = { after: 900, list: 1300 }
+      await until(async () => !(await desk.api('/remote')).screen.sources, 3000, 100)
+      const fresh0 = a1.events.filter((e) => e.fresh).length
+      const t0 = Date.now()
+      const v2 = dp.socket(FX)
+      await through(v2)
+      await v2.wait((s) => msg(s, 'hello') || msg(s, 'error'), 8000)
+      ok(!!msg(v2, 'hello') && !msg(v2, 'error') && a1.events.filter((e) => e.fresh).length === fresh0, 'a cold start longer than one wait: the screen shows, nothing said, no second window', { took: Date.now() - t0, error: msg(v2, 'error') })
+      await v2.close()
+      await ended()
+
+      // A window that never loads the first time (the server restarting just then): a fresh one is
+      // asked for, and the screen shows.
+      a1.drop()
+      a1.how = { hangFirst: true }
+      a1.asked = 0
+      const v3 = dp.socket(FX)
+      await through(v3)
+      await v3.wait((s) => msg(s, 'hello') || msg(s, 'error'), 10000)
+      ok(!!msg(v3, 'hello') && a1.events.some((e) => e.t === 'need-capture' && e.fresh) && !!(await logged(/the capture window didn't connect within 2 seconds: asked the app for a fresh one/)), 'the capture window never connects: a fresh one is asked for, and the screen shows; the log says so', { error: msg(v3, 'error'), events: a1.events.slice(-3) })
+      await v3.close()
+      await ended()
+
+      // The app's feed gone a moment (its server restarted, the app connecting again): waited for.
+      a1.quit()
+      const v4 = dp.socket(FX)
+      setTimeout(() => app(), 1200)
+      await through(v4)
+      await v4.wait((s) => msg(s, 'hello') || msg(s, 'error'), 10000)
+      ok(!!msg(v4, 'hello') && !msg(v4, 'error'), 'the app reporting in again after its feed dropped: waited for, not said as closed', msg(v4, 'error'))
+      await v4.close()
+      await ended()
+
+      // Never a capture page: said exactly so, with Reopen Bridge AI there; chosen, the app reopens
+      // and the screen shows in the same session.
+      const a2 = apps.at(-1)
+      a2.drop()
+      a2.how = { hang: true }
+      const v5 = dp.socket(FX)
+      await through(v5)
+      await v5.wait((s) => msg(s, 'error'), 10000)
+      const e5 = msg(v5, 'error')
+      ok(e5?.code === 'noCapture' && e5.cause === 'window' && e5.fix === 'reopen' && e5.waits && e5.why === 'The Bridge AI app on Desk didn\'t open its screen sharing.' && !v5.closed, 'no capture page even with a fresh window: said exactly so, with Reopen Bridge AI there, the session kept for it', e5)
+      ok(!!(await logged(/Remote Screen: Pocket: couldn't see this screen \(noCapture, window\): The Bridge AI app on Desk didn't open its screen sharing\. Offered: reopen\./)), 'and a line in Desk\'s log, with the cause')
+      await v5.send({ t: 'fix', fix: 'reopen' })
+      ok(!!(await until(() => a2.events.some((e) => e.t === 'reopen'), 4000, 50)), 'Reopen: Desk\'s app is asked to reopen')
+      a2.quit()
+      const a3 = app()
+      await v5.wait((s) => msg(s, 'hello') || msgs(s, 'error').length > 1, 10000)
+      ok(msg(v5, 'wait')?.why === 'reopen' && !!msg(v5, 'hello') && msgs(v5, 'password').length === 1, 'the phone told it\'s reopening, then the screen, in the same session (no password again)', { wait: msg(v5, 'wait'), errors: msgs(v5, 'error') })
+      ok(!!(await until(async () => (await desk.api('/remote')).log.find((x) => x.end === 'reopened' && x.by?.name === 'Pocket'), 4000, 100)), 'Screen Activity says who reopened it')
+      await v5.close()
+      await ended()
+
+      // A page that connects and never lists its screens: said so, with Reopen; one from before
+      // fixes (no fixes=1) gets Reopen as it knows it.
+      a3.drop()
+      a3.how = { mute: true }
+      const v6 = dp.socket(FX)
+      await through(v6)
+      await v6.wait((s) => msg(s, 'error'), 12000)
+      ok(msg(v6, 'error')?.code === 'noCapture' && msg(v6, 'error').cause === 'list' && msg(v6, 'error').fix === 'reopen' && /never said which screens there are/.test(msg(v6, 'error').why), 'a page that never says its screens: said so, with Reopen', msg(v6, 'error'))
+      await v6.close()
+      await ended()
+      a3.drop()
+      const v7 = dp.socket('/api/remote/view?source=screen:')
+      await through(v7)
+      await v7.wait((s) => msg(s, 'error'), 12000)
+      ok(msg(v7, 'error')?.code === 'noCapture' && msg(v7, 'error').reopen === true && !msg(v7, 'error').fix, 'a device from before fixes: the same, with Reopen as it knows it', msg(v7, 'error'))
+      await v7.close()
+      await ended()
+
+      // macOS turned Screen Recording down there: said, with Allow Screen Recording there; chosen,
+      // System Settings opens there, and once it's on (the app reopening, as macOS has it) the screen.
+      a3.how = { permission: 'denied', sources: [] }
+      a3.drop()
+      const v8 = dp.socket(FX)
+      await through(v8)
+      await v8.wait((s) => msg(s, 'error'), 10000)
+      const e8 = msg(v8, 'error')
+      if (process.platform !== 'darwin') ok(e8?.code === 'screenPermission' && !e8.fix, 'not a Mac: no Screen Recording to allow, said as it is', e8)
+      else {
+        ok(e8?.code === 'screenPermission' && e8.fix === 'allow' && e8.waits && /System Settings › Privacy & Security › Screen & System Audio Recording/.test(e8.why), 'Screen Recording turned down on Desk: said, with Allow Screen Recording there', e8)
+        const st8 = (await dp.request('GET', '/api/remote')).json
+        ok(st8?.screen?.code === 'screenPermission' && st8.screen.fix === 'allow', 'and the phone\'s next look says it too, with the same fix', st8?.screen)
+        await v8.send({ t: 'fix', fix: 'allow' })
+        ok(!!(await until(() => a3.events.some((e) => e.t === 'allow-screen'), 4000, 50)) && !!(await v8.wait((s) => msg(s, 'wait')?.why === 'allow', 4000)), 'Allow: Desk opens System Settings there, and the phone waits for someone there', msg(v8, 'wait'))
+        a3.quit()
+        app()
+        await v8.wait((s) => msg(s, 'hello') || msgs(s, 'error').length > 1, 10000)
+        ok(!!msg(v8, 'hello') && msgs(v8, 'password').length === 1, 'turned on there and Bridge AI reopened: the screen, in the same session', msgs(v8, 'error'))
+        ok(!!(await until(async () => (await desk.api('/remote')).log.find((x) => x.end === 'allow' && x.by?.name === 'Pocket'), 4000, 100)), 'Screen Activity says who asked for it')
+      }
+      await v8.close()
+      await ended()
+      ok(!!(await appOpen()), 'and Desk\'s app is there at the end')
+
+      // What the viewer showed, in its own computer's log too (ScreenView.jsx says).
+      await laptop.api('/remote/didnt-show', { name: 'Desk', code: 'noCapture', cause: 'window', why: 'The Bridge AI app on Desk didn\'t open its screen sharing.\nInjected line', version: '3.21.0' })
+      ok(/Remote Screen: Desk's screen didn't show here \(noCapture, window; it has Bridge AI 3\.21\.0\): The Bridge AI app on Desk didn't open its screen sharing\. ?Injected line\n/.test(laptop.log()), 'the viewer\'s computer logs what it showed, on one line', laptop.log().split('\n').filter((l) => /Remote Screen/.test(l)).slice(-2))
+    } finally {
+      for (const a of apps) a.quit()
+      dp.stop()
+    }
+  })
+
   // ---------- a project's app ----------
   const project = path.join(studio.home, 'webapp')
   fs.mkdirSync(project, { recursive: true })
@@ -899,7 +1112,7 @@ try {
         const wc = { on_: {}, on: (e, f) => { wc.on_[e] = f }, setWindowOpenHandler: (f) => { wc.open = f }, setFrameRate: (r) => { wc.rate = r }, sendInputEvent: (ev) => sent.push(ev) }
         this.webContents = wc
       }
-      loadURL(u) { this.url = u; return Promise.resolve() }
+      loadURL(u) { this.url = u; this.loads = (this.loads || 0) + 1; return Promise.resolve() }
       on(e, f) { this.on_[e] = f }
       once(e, f) { this.on_[e] = f }
       isDestroyed() { return !!this.gone }
@@ -1015,6 +1228,43 @@ try {
     ok(shape(f5, 5120, 2880, 52) && inside(area, f5) && Math.abs(f5.x + f5.width / 2 - 720) <= 1 && f5.width >= 1290, '5K on a 1440 x 900 Mac: 90% of it, centred, its shape kept', f5)
     ok(inside(area, fp) && fp.width >= 520 && fp.height <= area.height, 'portrait: within the height, never narrower than the toolbar needs', fp)
     ok(Math.abs((fa.height - 80) / (fa.width - 2) - 900 / 1440) < 0.01 && inside(area, fa), 'a window frame and a taller toolbar counted', fa)
+    // The capture window kept working: a fresh one when the server asks (the last never connected),
+    // one that doesn't load loaded again and then closed, one that hangs closed; macOS kept from
+    // napping the app while it's open; the display woken and kept awake while someone views; macOS
+    // never listing the screens said within a moment; Allow Screen Recording opening it there.
+    const blocks = []
+    let woke = 0
+    let allowed = 0
+    const power = { start: (kind) => { blocks.push({ kind, on: true }); return blocks.length - 1 }, stop: (id) => { blocks[id].on = false } }
+    const blocked = (kind) => blocks.some((x) => x.kind === kind && x.on)
+    const d2 = create({ BrowserWindow: Win, desktopCapturer: { getSources: () => new Promise(() => {}) }, screen: { getAllDisplays: () => [main, ext], getPrimaryDisplay: () => main }, systemPreferences: { getMediaAccessStatus: () => 'granted' }, session: { fromPartition: () => ({ setPermissionRequestHandler: () => {} }) }, nativeTheme: { shouldUseDarkColors: false }, URL_BASE: 'http://127.0.0.1:1', preload: '/preload.js', platform: 'darwin', keyFor, fetch: async () => ({ status: 200 }), power, wake: () => { woke++ }, allowScreen: () => { allowed++ }, listMs: 200 })
+    const hung = await d2.sources()
+    ok(hung.sources.length === 0 && hung.none === 'none' && /macOS didn't list the screens within/.test(hung.problem || ''), 'macOS never listing the screens: said within a moment, with why', hung)
+    const caps = () => wins.filter((w) => /remote=capture/.test(w.url || ''))
+    const before = caps().length
+    d2.onEvent({ t: 'need-capture' })
+    const c1 = caps().at(-1)
+    ok(caps().length === before + 1 && blocked('prevent-app-suspension'), 'a capture window, and macOS doesn\'t nap the app meanwhile')
+    c1.webContents.on_['did-fail-load']({}, -102, 'refused', c1.url, true)
+    ok(!!(await until(() => c1.loads >= 2, 3000, 50)) && !c1.gone, 'its page not loading (the server restarting just then): loaded again a moment later', c1.loads)
+    for (let i = 0; i < 3; i++) c1.webContents.on_['did-fail-load']({}, -102, 'refused', c1.url, true)
+    ok(c1.gone, 'and closed when it still doesn\'t, for the next ask to open another')
+    d2.onEvent({ t: 'need-capture' })
+    const c2 = caps().at(-1)
+    d2.onEvent({ t: 'need-capture' })
+    ok(c2 !== c1 && caps().at(-1) === c2, 'asked again: a new one, once')
+    d2.onEvent({ t: 'need-capture', fresh: true })
+    const c3 = caps().at(-1)
+    ok(c2.gone && c3 !== c2 && !c3.gone, 'asked for a fresh one (the server never heard from that one): closed, and another opened')
+    c3.on_.unresponsive()
+    ok(c3.gone && !blocked('prevent-app-suspension'), 'one that hangs: closed, and the app may nap again')
+    d2.onEvent({ t: 'sessions', list: [{ id: 'a', kind: 'screen' }] })
+    ok(woke === 1 && blocked('prevent-display-sleep'), 'someone viewing: the display woken, and kept awake')
+    d2.onEvent({ t: 'sessions', list: [{ id: 'a', kind: 'screen' }, { id: 'b', kind: 'screen' }] })
+    d2.onEvent({ t: 'sessions', list: [] })
+    ok(woke === 1 && !blocked('prevent-display-sleep'), 'and let sleep once nobody is')
+    d2.onEvent({ t: 'allow-screen' })
+    ok(allowed === 1, 'Allow Screen Recording from a device: System Settings there, with the tile')
   })
 
   // ---------- the picture's size and the pointer, as maths ----------
@@ -1223,6 +1473,134 @@ try {
       await shot(q.p, `${tag}remote-screen-permission${sfx}`)
       await q.ctx.close()
     }
+  })
+
+  // Each reason Studio's screen doesn't show, as Studio would say it (its status, and its session's
+  // messages, stood in for): said as it is, with the button that fixes it, which does; on a computer
+  // and at a phone's width. Never a bare Try again when the reason is known.
+  await part('each reason the screen doesn\'t show: said, with the button that fixes it, on a computer and a phone', async () => {
+    const H = { t: 'hello', session: 'x1', name: 'Studio', os: 'mac', source: { kind: 'screen', id: 'fake-1', name: 'Test screen', w: 1280, h: 800 }, sources: [{ id: 'fake-1', name: 'Test screen', kind: 'screen', w: 1280, h: 800, primary: true }], p2p: null, rate: 2, control: { on: false, allowed: false, why: null } }
+    const OLD_SOURCE = "Studio didn't say which screens it has. Try again in a moment."
+    const OLD_CAPTURE = "The Bridge AI app on Studio didn't start sharing its screen. Try again; if it keeps happening, restart Bridge AI there."
+    const PERMISSION = "macOS doesn't let Bridge AI record the screen on Studio. On Studio, turn on Bridge AI in System Settings › Privacy & Security › Screen & System Audio Recording, then open Bridge AI again there."
+    for (const phone of [false, true]) {
+      const sfx = phone ? '-phone' : ''
+      let status = (j) => j
+      let statusCode = 0
+      let onView = () => {}
+      let onSent = () => {}
+      const urls = []
+      const sent = []
+      let installs = 0
+      const q = await page(b, laptop.url, {
+        phone,
+        before: async (ctx) => {
+          // (The later route first: a 404 when asked, else Studio's real answer, changed.)
+          // (No service worker, as in the desktop app: WebKit's test build doesn't route what one fetches.)
+          await noServiceWorker(ctx)
+          await changeAnswer(ctx, /\/api\/remote\?sources=1/, (j) => status(j))
+          await ctx.route(/\/api\/remote\?sources=1/, (r) => (statusCode ? r.fulfill({ status: statusCode, json: { error: 'Not found' } }) : r.fallback()))
+          await ctx.route(/\/api\/updates\/install/, (r) => { installs++; return r.fulfill({ json: { started: true } }) })
+          // (One handler for what the page sends: Playwright keeps the last one given.)
+          await ctx.routeWebSocket(/\/api\/remote\/view/, (ws) => {
+            urls.push(ws.url())
+            ws.onMessage((m) => { let x = null; try { x = JSON.parse(String(m)) } catch { /* not JSON */ } if (x) { sent.push(x); onSent(ws, x) } })
+            onView(ws)
+          })
+        },
+      })
+      errors.push(...q.errors)
+      const p = q.p
+      await ready(p)
+      const say = (ws, m, ms = 80) => setTimeout(() => ws.send(JSON.stringify(m)), ms)
+      const card = () => p.locator('.rs-view .rs-card').first()
+      // One reason: Studio's view stood in for, the card it shows, then Stop viewing.
+      const shows = async (name, set, check) => {
+        status = set.status || ((j) => j)
+        statusCode = set.code || 0
+        onView = set.view || (() => {})
+        onSent = set.sent || (() => {})
+        urls.length = 0
+        sent.length = 0
+        await viewOn(p)
+        await card().waitFor({ timeout: 10000 }).catch(() => {})
+        await p.locator('.rs-view .rs-card[role=alert]').waitFor({ timeout: 8000 }).catch(() => {})
+        await shot(p, `${tag}remote-screen-why-${name}${sfx}`)
+        await check()
+        await p.locator('.rs-view').getByRole('button', { name: 'Stop viewing' }).click()
+        await p.locator('.rs-view').waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
+      }
+      const text = async (sel) => (await p.locator(sel).first().innerText({ timeout: 8000 }).catch(() => '')).replace(/\s+/g, ' ').trim()
+      // (What a card says once it says it: the one saying it's connecting comes first.)
+      const says = async (sel, re) => !!(await until(async () => re.test(await text(sel)), 6000, 100))
+      const button = (name) => p.locator('.rs-view .rs-card').getByRole('button', { name, exact: true })
+
+      // No capture page even with a second window: said so, with Reopen; chosen, it's carried out
+      // in the same session, and the screen follows.
+      await shows('no-capture', {
+        view: (ws) => say(ws, { t: 'error', code: 'noCapture', cause: 'window', fix: 'reopen', waits: true, why: "The Bridge AI app on Studio didn't open its screen sharing." }),
+        sent: (ws, m) => { if (m.t === 'fix') { say(ws, { t: 'wait', why: 'reopen' }); say(ws, H, 900) } },
+      }, async () => {
+        ok(/The Bridge AI app on Studio didn't open its screen sharing, even with a second try\./.test(await text('.rs-card.c-noCapture p')) && await button('Reopen Bridge AI on Studio').isVisible() && !(await button('Try again').count()), `${phone ? 'phone' : 'computer'}: no capture page: said so, with Reopen Bridge AI on Studio (no bare Try again)`, await text('.rs-card'))
+        ok(/fixes=1/.test(urls[0] || ''), 'its session takes fixes', urls)
+        await button('Reopen Bridge AI on Studio').click()
+        ok(await says('.rs-card.c-wait', /Reopening Bridge AI on Studio…/) && sent.some((m) => m.t === 'fix' && m.fix === 'reopen'), 'Reopen: asked of Studio in the session, and said while it reopens', sent)
+        ok(!!(await until(async () => (await p.locator('.rs-view .rs-mode').count()) && !(await p.locator('.rs-view .rs-card').count()), 8000)), 'and the screen, in the same session')
+      })
+      await shows('no-list', {
+        view: (ws) => say(ws, { t: 'error', code: 'noCapture', cause: 'list', fix: 'reopen', waits: true, why: 'Bridge AI on Studio opened its screen sharing but never said which screens there are: macOS didn\'t list them in time.' }),
+      }, async () => {
+        ok(/Bridge AI on Studio opened its screen sharing, but the list of its screens didn't come in time\./.test(await text('.rs-card.c-noCapture p')) && await button('Reopen Bridge AI on Studio').isVisible(), 'the screens never listed: said so, with Reopen', await text('.rs-card'))
+      })
+      // The app closed there: said before connecting, with Open Bridge AI there, which connects with it.
+      await shows('no-app', {
+        status: (j) => ({ ...j, screen: { can: false, code: 'noApp', fix: 'open', why: 'Open the Bridge AI app on Studio: its screen can be seen while the app runs there.' } }),
+        view: (ws) => say(ws, { t: 'wait', why: 'open' }),
+      }, async () => {
+        ok(/The Bridge AI app isn't open on Studio\. Its screen can be seen while the app runs there\./.test(await text('.rs-card.c-noApp p')) && await button('Open Bridge AI on Studio').isVisible() && !urls.length, 'the app closed on Studio: said so, with Open Bridge AI on Studio, nothing connected yet', { card: await text('.rs-card'), urls })
+        await button('Open Bridge AI on Studio').click()
+        ok(await says('.rs-card.c-wait', /Opening Bridge AI on Studio…/) && /fixes=1/.test(urls[0] || '') && /fix=open/.test(urls[0] || ''), 'Open: a session that carries it out past the password, said while it opens', urls)
+      })
+      // Screen Recording turned down there: said, with Allow Screen Recording there.
+      await shows('permission', {
+        status: (j) => ({ ...j, screen: { can: false, code: 'screenPermission', permission: 'denied', fix: 'allow', why: PERMISSION } }),
+        view: (ws) => say(ws, { t: 'wait', why: 'allow', until: new Date(Date.now() + 180000).toISOString() }),
+      }, async () => {
+        ok((await text('.rs-card.c-screenPermission p')) === PERMISSION && await button('Allow Screen Recording on Studio').isVisible(), 'Screen Recording turned down on Studio: said, with Allow Screen Recording on Studio', await text('.rs-card'))
+        await button('Allow Screen Recording on Studio').click()
+        ok(await says('.rs-card.c-wait', /System Settings is open on Studio at Screen & System Audio Recording\. Waiting for someone there to turn on Bridge AI…/) && /fix=allow/.test(urls[0] || ''), 'Allow: System Settings opened there, and waited for', await text('.rs-card'))
+      })
+      // An older Bridge AI there (no version said): what it said, and Update Bridge AI there, which
+      // fixes it (it reopens), beside Try again.
+      for (const [name, code, why] of [['old-no-screens', 'source', OLD_SOURCE], ['old-no-capture', 'noCapture', OLD_CAPTURE]]) {
+        await shows(name, {
+          status: ({ version, ...j }) => j,
+          view: (ws) => say(ws, { t: 'error', code, why }),
+        }, async () => {
+          const said = await text(`.rs-card.c-${code}`)
+          ok(said.includes(why) && /Studio has an older Bridge AI\. Updating it reopens it there, which usually sorts this\./.test(said) && await button('Update Bridge AI on Studio').isVisible() && await button('Try again').isVisible(), `an older Bridge AI on Studio (${code}): what it said, with Update Bridge AI on Studio`, said)
+          if (code !== 'source') return
+          await button('Update Bridge AI on Studio').click()
+          ok(!!(await until(() => installs > 0, 4000, 50)) && await says('.rs-card.c-wait', /Updating Bridge AI on Studio….*It reopens by itself when it's done/), 'Update: Studio is asked to update, and the viewer says so while it does', installs)
+        })
+      }
+      await shows('too-old', { code: 404 }, async () => {
+        ok(/Update Bridge AI on Studio to see its screen from here\./.test(await text('.rs-card.c-update')) && await button('Update Bridge AI on Studio').isVisible(), 'a Bridge AI there too old for this at all: Update Bridge AI on Studio', await text('.rs-card'))
+      })
+      await shows('offline', {
+        view: (ws) => say(ws, { t: 'error', code: 'offline', why: 'Studio is offline' }),
+      }, async () => {
+        ok(/Studio isn't reachable just now: it may be asleep, or offline\./.test(await text('.rs-card.c-offline p')) && await button('Try again').isVisible(), 'not reachable: said so', await text('.rs-card'))
+      })
+      // Closed before it said anything: connected again once by itself, then said.
+      await shows('closed', {
+        view: (ws) => setTimeout(() => ws.close(), 50),
+      }, async () => {
+        ok(/The connection to Studio closed before its screen showed\./.test(await text('.rs-card.c-closed p')) && urls.length === 2, 'closed before anything was said: tried again once by itself, then said so', { urls: urls.length, said: await text('.rs-card') })
+      })
+      await q.ctx.close()
+    }
+    ok(/Remote Screen: Studio's screen didn't show here \(noCapture, window; it has Bridge AI [\w.-]+\): The Bridge AI app on Studio didn't open its screen sharing\./.test(laptop.log()), 'each reason in the viewer\'s own log too', laptop.log().split('\n').filter((l) => /Remote Screen/.test(l)).slice(-3))
   })
 
   await part('the desktop app\'s window of its own: its toolbar the title bar, clear of the window\'s buttons', async () => {

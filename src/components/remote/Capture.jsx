@@ -239,7 +239,8 @@ export default function Capture() {
         else if (m.t === 'fallback' && s) { try { s.pc?.close() } catch { /* closed */ } s.pc = null; frames(m.session, m.rate) }
         else if (m.t === 'smaller' && s) { s.q = Math.max(PICTURE.worst, s.q - 0.1); s.width = Math.max(PICTURE.narrowest, Math.round(s.width * 0.85)) }
       }
-      ws.onclose = () => { for (const id of [...sessions.keys()]) stop(id); if (!closed) setTimeout(connect, 2000) }
+      // (Another capture page took this one's place: it doesn't take it back.)
+      ws.onclose = (e) => { for (const id of [...sessions.keys()]) stop(id); if (e?.reason === 'replaced') closed = true; if (!closed) setTimeout(connect, 2000) }
     }
     connect()
     return () => { closed = true; for (const id of [...sessions.keys()]) stop(id); try { ws?.close() } catch { /* closed */ } }

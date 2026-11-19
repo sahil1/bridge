@@ -4,7 +4,7 @@
 //                                     so the person using it needs nothing else installed
 //   from source (npm run desktop)     your clone, with `node scripts/start.js`
 const electron = require('electron')
-const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, session, nativeTheme, ipcMain, powerMonitor, screen, nativeImage, systemPreferences, dialog, desktopCapturer } = electron
+const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, session, nativeTheme, ipcMain, powerMonitor, powerSaveBlocker, screen, nativeImage, systemPreferences, dialog, desktopCapturer } = electron
 const dictation = require('./dictation.js')
 const contextMenu = require('./contextmenu.js')
 const permissions = require('./permissions.js')
@@ -405,6 +405,8 @@ const TILE_STEPS = {
   accessibility: { text: `Turn on ${APP_NAME} in the list above` },
   // A call's sound for meeting notes: listed once a recording has asked.
   audio: { text: `Under System Audio Recording Only, turn on ${APP_NAME}` },
+  // This screen, seen from another of your devices (remote.js): listed once it has looked.
+  screen: { text: `Under Screen & System Audio Recording, turn on ${APP_NAME}, then Quit & Reopen` },
   // Fn or the right ⌥ as the dictation key (dictation.js): listed already, by macOS's own question.
   'input-monitoring': { text: `Turn on ${APP_NAME} in the list above` },
 }
@@ -418,6 +420,7 @@ function closeTile() {
 // Access on yet? The server answers for the folders it reads; the app asks macOS for the mic and
 // Accessibility (without asking you).
 async function tileDone(pane) {
+  if (pane === 'screen') return systemPreferences.getMediaAccessStatus('screen') === 'granted'
   if (perms.kinds().includes(pane)) { const s = await perms.status(pane); if (s === 'ok') reportPerms(); return s === 'ok' }
   try {
     const r = await fetch(`${URL_BASE}/api/fix/check?pane=${encodeURIComponent(pane)}`, { signal: AbortSignal.timeout(20000) })
@@ -1160,7 +1163,16 @@ app.whenReady().then(async () => {
   createWindow()
   // Remote Screen and Preview's windows: the capture page, the badge, a project's app drawn off screen.
   try { remoteShared = await import(require('node:url').pathToFileURL(path.join(ROOT, 'shared', 'remote.js')).href) } catch (e) { console.error('remote:', e.message) }
-  remote = remoteDesk.create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload: path.join(__dirname, 'preload.js'), fetch, keyFor: (c, os) => remoteShared?.keyFor(c, os) ?? null, sizes: viewSizes, restart: () => { app.relaunch(); stopServer(); app.quit() } })
+  // Reopened from a device (Screen Recording takes effect once the app reopens): the app only, as
+  // macOS's own Quit & Reopen does; the server goes on, and so does the device's session there.
+  // Allow Screen Recording from a device: its page of System Settings here, with the tile.
+  remote = remoteDesk.create({
+    BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload: path.join(__dirname, 'preload.js'), fetch, keyFor: (c, os) => remoteShared?.keyFor(c, os) ?? null, sizes: viewSizes,
+    restart: () => { app.relaunch(); app.quit() },
+    allowScreen: () => { shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture').catch(() => {}); showTile('screen').catch(() => {}) },
+    power: powerSaveBlocker,
+    wake: () => { if (IS_MAC) execFile('/usr/bin/caffeinate', ['-u', '-t', '2'], { timeout: 5000 }, () => {}) },
+  })
   watchFleet()
   watchCalls()
   startUpdatingWhileAway()

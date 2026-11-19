@@ -12,11 +12,17 @@
 //                                permission: it's this app's own window, not the computer)
 //   control                      "Let my other devices control this computer" is on or off here: the
 //                                Accessibility question is then about it too (permissions.js)
+//   reopen / allow-screen        chosen by a device that can't see this screen: the app reopens (as
+//                                macOS's Quit & Reopen does), or System Settings opens at Screen &
+//                                System Audio Recording, with the tile, for someone here
 // And on the computer looking: another computer's screen in a window of its own (view, ?remote=view),
 // opened inside the work area of the display it opens on, in that screen's shape (fit, once the page
 // knows it), at the size you left it for that computer when you've sized it yourself.
 // Everything it uses comes in (create's options), so the tests can stand in for Electron.
 const MAX_FRAME = 180 * 1024
+// macOS listing the screens (or the windows) for the capture page: given this long, so a list that
+// never comes can't keep the page from saying it has none (and why).
+const LIST_MS = 8000
 // The page's own window titles, left out of the windows it can show.
 const OWN_TITLES = /^Bridge AI (screen sharing|is being viewed)$/
 
@@ -59,7 +65,10 @@ function displayFor(screens, displays, primary) {
 }
 
 // restart(): reopen this app (main.js), asked for by a device that found no screens to share.
-function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload, fetch, platform = process.platform, keyFor, sizes = null, restart = () => {} }) {
+// allowScreen(): System Settings at Screen & System Audio Recording, with the tile beside it, asked for
+// by a device macOS doesn't let see this screen. power: Electron's powerSaveBlocker (none in tests);
+// wake(): the display woken if it's asleep (main.js), as someone starts viewing it.
+function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload, fetch, platform = process.platform, keyFor, sizes = null, restart = () => {}, allowScreen = () => {}, power = null, wake = () => {}, listMs = LIST_MS }) {
   const MAC = platform === 'darwin'
   let capture = null
   let badge = null
@@ -92,7 +101,10 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
   // later when there are none at first. None at all: why, as far as can be told (none: 'reopen' when
   // Screen Recording was turned on since this app started), and what getSources said.
   async function sources() {
-    const get = async (type) => (await desktopCapturer.getSources({ types: [type], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false })).filter((s) => String(s.id).startsWith(`${type}:`))
+    const get = async (type) => (await Promise.race([
+      desktopCapturer.getSources({ types: [type], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false }),
+      new Promise((_, no) => setTimeout(() => no(new Error(`${MAC ? 'macOS' : 'The system'} didn't list the ${type === 'screen' ? 'screens' : 'windows'} within ${Math.round(listMs / 1000)} seconds`)), listMs)),
+    ])).filter((s) => String(s.id).startsWith(`${type}:`))
     let screens = []
     let problem = null
     for (const wait of [0, 400, 1200]) {
@@ -135,19 +147,48 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
   }
 
   // ---------- the capture page ----------
-  function needCapture() {
-    if (capture && !capture.isDestroyed()) return
-    capture = new BrowserWindow({ show: false, width: 480, height: 320, title: 'Bridge AI screen sharing', skipTaskbar: true, webPreferences: { preload, contextIsolation: true, sandbox: true, backgroundThrottling: false } })
-    capture.on('page-title-updated', (e) => e.preventDefault())
-    capture.on('closed', () => { capture = null })
-    capture.webContents.on('render-process-gone', () => { try { capture?.destroy() } catch { /* gone */ } })
-    capture.loadURL(`${URL_BASE}/?remote=capture`).catch(() => {})
+  // fresh: the server's page didn't connect (or say its screens) in time, so this one is closed and
+  // another opened. A page that doesn't load (the server restarting just then) is loaded again a few
+  // times, then closed; one that crashes or hangs is closed, and the next ask opens another. While
+  // it's open, macOS doesn't put the app to sleep (App Nap) with its windows hidden.
+  let napless = null
+  const keepUp = (on) => {
+    if (!power) return
+    if (on && napless == null) napless = power.start('prevent-app-suspension')
+    else if (!on && napless != null) { try { power.stop(napless) } catch { /* stopped */ } napless = null }
   }
-  function captureIdle() { if (capture && !capture.isDestroyed()) capture.destroy(); capture = null }
+  function needCapture({ fresh = false } = {}) {
+    if (capture && !capture.isDestroyed()) { if (!fresh) return; try { capture.destroy() } catch { /* gone */ } }
+    const w = new BrowserWindow({ show: false, width: 480, height: 320, title: 'Bridge AI screen sharing', skipTaskbar: true, webPreferences: { preload, contextIsolation: true, sandbox: true, backgroundThrottling: false } })
+    capture = w
+    keepUp(true)
+    const url = `${URL_BASE}/?remote=capture`
+    const gone = () => { try { if (!w.isDestroyed()) w.destroy() } catch { /* gone */ } }
+    let tries = 0
+    w.on('page-title-updated', (e) => e.preventDefault())
+    w.on('closed', () => { if (capture === w) { capture = null; keepUp(false) } })
+    w.on('unresponsive', gone)
+    w.webContents.on('render-process-gone', gone)
+    w.webContents.on('did-fail-load', (_e, code, _desc, _url, main) => {
+      if (main === false || code === -3) return // a frame's, or a load that was replaced
+      if (++tries > 3) return gone()
+      setTimeout(() => { if (!w.isDestroyed()) w.loadURL(url).catch(() => {}) }, 1000 * tries)
+    })
+    w.loadURL(url).catch(() => {})
+  }
+  function captureIdle() { if (capture && !capture.isDestroyed()) capture.destroy(); capture = null; keepUp(false) }
 
   // ---------- the badge ----------
+  // Someone viewing: the display woken when it's asleep (they'd see nothing, or the screen locked
+  // as it is), and kept awake while they do.
+  let awake = null
+  function viewing(on) {
+    if (on && awake == null) { try { wake() } catch { /* not here */ } awake = power ? power.start('prevent-display-sleep') : -1 }
+    else if (!on && awake != null) { if (awake >= 0) try { power.stop(awake) } catch { /* stopped */ } awake = null }
+  }
   // While anyone sees this screen, or asks to (Ask Here First, answered on it).
   function sessions(list, asks) {
+    viewing(Array.isArray(list) && list.length > 0)
     const any = (Array.isArray(list) && list.length > 0) || (Array.isArray(asks) && asks.length > 0)
     if (!any) { if (badge && !badge.isDestroyed()) badge.destroy(); badge = null; return }
     if (badge && !badge.isDestroyed()) { if (asks?.length) badge.showInactive?.(); return }
@@ -279,8 +320,9 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
 
   function onEvent(ev) {
     if (!ev || typeof ev.t !== 'string') return
-    if (ev.t === 'need-capture') needCapture()
+    if (ev.t === 'need-capture') needCapture({ fresh: ev.fresh === true })
     else if (ev.t === 'reopen') setTimeout(restart, 500) // (the server tells the device first)
+    else if (ev.t === 'allow-screen') { if (MAC) allowScreen() }
     else if (ev.t === 'capture-idle') captureIdle()
     else if (ev.t === 'sessions') sessions(ev.list, ev.asks)
     else if (ev.t === 'control') control = !!ev.on
