@@ -1963,9 +1963,15 @@ app.get('/api/meetings', wrap(() => {
   const list = meetings.list()
   insightsByItself(list)
   const auto = trialOn('meeting-insights') && meetInsights.autoOn()
-  return { meetings: list.map(({ captures, links, ...m }) => ({ ...m, pictures: captures?.length || 0, files: links?.length || 0 })), folder: meetings.folder(), kinds: Object.entries(meetings.KINDS).map(([id, k]) => ({ id, label: k.label })), ...(auto && !auto.said ? { insightsOn: { at: auto.at, meetings: auto.meetings } } : {}) }
+  // mergeHint: the meeting one is the rest of (recorded during the same event, or just after), to
+  // offer merging them.
+  const hints = meetings.mergeHints(list)
+  return { meetings: list.map(({ captures, links, ...m }) => ({ ...m, pictures: captures?.length || 0, files: links?.length || 0, ...(hints[m.id] ? { mergeHint: hints[m.id] } : {}) })), folder: meetings.folder(), kinds: Object.entries(meetings.KINDS).map(([id, k]) => ({ id, label: k.label })), ...(auto && !auto.said ? { insightsOn: { at: auto.at, meetings: auto.meetings } } : {}) }
 }))
 app.post('/api/meetings', wrap(async (req) => { prompt = null; const m = await meetings.start({ ...(req.body || {}), callApps: calls.now().calls.map((c) => c.app) }); counts.add('meetings.recorded'); return m }))
+// Before a recording starts: the meeting it would carry on, one that stopped when Bridge AI closed
+// (meetings.js carryOn), for the app to offer Resume recording first. event: the one it's for.
+app.post('/api/meetings/carry-on', wrap((req) => ({ meeting: meetings.carryOn({ event: req.body?.event || null }) })))
 // Several meetings as one (meetings.js combine): a combined meeting with an overview across them;
 // they stay as they are.
 app.post('/api/meetings/combine', wrap((req) => meetings.combine([].concat(req.body?.ids || []).map(String).slice(0, 100), { title: req.body?.title })))
@@ -2111,6 +2117,8 @@ app.get('/api/calls', wrap(() => {
     capturing: calls.capturing(),
     ...calls.now(), detect: cfg.meetings?.detect !== false, float: cfg.meetings?.floatCard || 'meetings', floatHover: cfg.meetings?.floatHover !== false, floatHide: ['always', 'never'].includes(cfg.meetings?.floatHide) ? cfg.meetings.floatHide : 'sharing',
     prompt: rec ? null : prompt,
+    // A call's notes would carry on a meeting that stopped when Bridge AI closed: Resume recording first.
+    carryOn: !rec && prompt ? meetings.carryOn() : null,
     recording: rec && { id: rec.id, title: rec.title, status: rec.status, startedAt: rec.startedAt, resumedAt: rec.resumedAt || null, resumedFrom: rec.resumedFrom || 0, seconds: Math.round(meetings.elapsed(rec.id) || 0), talking: meetings.talking(rec.id), callApps: rec.callApps || [], callEnded: rec.callEnded || null, callEndedApp: rec.callEndedApp || null, endWhy: rec.endWhy || (rec.callEnded ? 'call' : null), stopsAt: rec.stopsAt || null, callQuiet: meetings.callQuiet(rec.id), callAccess: meetings.callAccess(rec.id) },
   }
 }))
@@ -2214,6 +2222,13 @@ app.post('/api/meetings/:id/reopen', wrap((req) => { const m = meetings.reopen(r
 // A combined meeting's meetings: one more, or one taken out (the last but one separates it).
 app.post('/api/meetings/:id/parts', wrap((req) => meetings.addPart(req.params.id, String(req.body?.id || ''))))
 app.delete('/api/meetings/:id/parts/:pid', wrap((req) => meetings.removePart(req.params.id, req.params.pid)))
+// One meeting recorded as two (meetings.js merge): the later one becomes the next part of the
+// earlier, and Separate puts them back as two for a week. "Not the same meeting" stops suggesting
+// it; and the notice that a recording stopped when Bridge AI closed, once read.
+app.post('/api/meetings/:id/merge', wrap((req) => meetings.merge(req.params.id, String(req.body?.id || ''))))
+app.post('/api/meetings/:id/separate', wrap((req) => meetings.separate(req.params.id, String(req.body?.id || ''))))
+app.post('/api/meetings/:id/merge-hint', wrap((req) => meetings.notRestOf(req.params.id, String(req.body?.not || ''))))
+app.post('/api/meetings/:id/interrupted', wrap((req) => meetings.seenInterrupted(req.params.id)))
 app.patch('/api/meetings/:id', wrap((req) => {
   if (req.body?.archived != null) meetings.archive(req.params.id, !!req.body.archived)
   if (req.body?.folder !== undefined) meetings.setFolder(req.params.id, req.body.folder)
@@ -5112,6 +5127,7 @@ meetings.setHelpers({
   board: {
     scene: async (m, hint) => { const id = await meetBoard.find(m.id, hint || m.boardId || null); return id ? meetBoard.itemsOf((await boards.read(id)).data, m.id) : { items: [], other: [] } },
     add: (m, items, o) => meetBoard.add(m, items, o),
+    retag: (id, from, to, shift) => meetBoard.retag(id, from, to, shift),
     labelOf: meetBoard.labelOf,
     nameOf: async (id) => (await chatModels.models().catch(() => [])).find((x) => x.id === id)?.label || id,
   },

@@ -402,16 +402,24 @@ export default function FloatCard() {
           <span className="fc-badge"><Icon name="mic" size={15} /></span>
           <span className="fc-ask-text">
             <b className="fc-title">{what}</b>
-            <span className="fc-sub" title={ev?.title || undefined}>{ev ? tn('Take notes for {event}?', { event: <b>{ev.title}</b> }) : `${t('Take notes?')} ${t('Your mic and the call, transcribed as you go.')}`}</span>
+            {/* A meeting Bridge AI closed in the middle of, which these notes would carry on: Resume recording first. */}
+            {c.carryOn
+              ? <span className="fc-sub" title={c.carryOn.title}>{t('Recording of {title} stopped when Bridge AI closed at {time}. Carry on in that meeting, or start a new one?', { title: c.carryOn.title, time: new Date(c.carryOn.at).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }) })}</span>
+              : <span className="fc-sub" title={ev?.title || undefined}>{ev ? tn('Take notes for {event}?', { event: <b>{ev.title}</b> }) : `${t('Take notes?')} ${t('Your mic and the call, transcribed as you go.')}`}</span>}
           </span>
           {hide}
         </div>
         <div className="fc-acts fc-end">
           {/* Not now always works, even while Take notes is still starting. */}
-          <Among n={evs.n} i={evs.i} onStep={evs.step} disabled={busy} what={ev ? t('These notes are for {event}', { event: ev.title }) : null} />
+          {!c.carryOn && <Among n={evs.n} i={evs.i} onStep={evs.step} disabled={busy} what={ev ? t('These notes are for {event}', { event: ev.title }) : null} />}
           <span className="fc-grow" />
           <button type="button" className="btn small" onClick={() => { setErr(null); api('/calls/dismiss', { method: 'POST' }).catch((e) => setErr(e.message)).finally(refresh) }}>{t('Not now')}</button>
-          <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => app().floatStart?.({ app: c.prompt.app, ...(evs.n > 1 ? { event: ev } : {}) }))} title={t('Your mic and the call, transcribed as you go.')}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Take notes')}</button>
+          {c.carryOn
+            ? <>
+              <button type="button" className="btn small" disabled={busy} onClick={() => act(() => app().floatStart?.({ app: c.prompt.app, fresh: true, ...(evs.n > 1 ? { event: ev } : {}) }))}>{t('New meeting')}</button>
+              <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => app().floatStart?.({ app: c.prompt.app, resume: c.carryOn.id }))}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Resume recording')}</button>
+            </>
+            : <button type="button" className="btn small primary" disabled={busy} onClick={() => act(() => app().floatStart?.({ app: c.prompt.app, ...(evs.n > 1 ? { event: ev } : {}) }))} title={t('Your mic and the call, transcribed as you go.')}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Take notes')}</button>}
         </div>
       </>
     )

@@ -29,6 +29,7 @@ import { useCropping, CropButton } from './cropping.jsx'
 import './meetings.css'
 import SpeechSetup, { MeetingsSetup } from './SpeechSetup.jsx'
 import { ActionItems, SinceLastTime } from './work.jsx'
+import { MergePick, MergeHint, Merged } from './merge.jsx'
 import { useTrial } from '../../trials.js'
 import { InsightsView } from './insights.jsx'
 import { PeopleView } from './people.jsx'
@@ -284,7 +285,8 @@ export function MeetingsHome({ onOpen }) {
   const list = all.filter((x) => (place === ':archived' ? x.archived : !x.archived && (!place || x.folder === place))).filter((x) => !q.trim() || !hits || hits.results.has(x.id))
   // What was asked for last, to carry on once the mic is allowed (MicFix).
   const last = useRef(null)
-  const go = async (o) => { setErr(null); last.current = o; try { const id = await m.start(o); onOpen?.(id) } catch (e) { setErr(e) } }
+  // Put away (carrying on a meeting that stopped when Bridge AI closed was asked, and closed): nothing opens.
+  const go = async (o) => { setErr(null); last.current = o; try { const id = await m.start(o); if (id) onOpen?.(id) } catch (e) { setErr(e) } }
   const groups = byDay(list)
   const selection = useSelection(list)
   const { sel, toggle } = selection
@@ -372,7 +374,7 @@ export function MeetingsHome({ onOpen }) {
                 <button type="button" className="mt-row-open" onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) { toggle(x.id, { range: e.shiftKey }); return } onOpen?.(x.id) }} onContextMenu={(e) => menu.open(e, x)}>
                   <span className="mt-row-main">
                     <b>{hit?.where === 'title' ? <Marked text={x.title} terms={hits.terms} /> : x.title}</b>
-                    <span className="muted small">{timeOf(x.startedAt)} · {x.status === 'recording' ? t('recording') : x.status === 'paused' ? t('paused') : length(x.seconds)}{x.event?.attendees?.length ? ` · ${t('{n} people', { n: x.event.attendees.length })}` : ''}{!place && x.folder ? <span className="mt-in"> · <Icon name="folder" size={10} /> {x.folder}</span> : null}{x.parts ? <span className="mt-in mt-nparts"> · <Icon name="layers" size={10} /> {t('{n} parts', { n: x.parts.length })}</span> : null}</span>
+                    <span className="muted small">{timeOf(x.startedAt)} · {x.status === 'recording' ? t('recording') : x.status === 'paused' ? t('paused') : length(x.seconds)}{x.event?.attendees?.length ? ` · ${t('{n} people', { n: x.event.attendees.length })}` : ''}{!place && x.folder ? <span className="mt-in"> · <Icon name="folder" size={10} /> {x.folder}</span> : null}{x.parts ? <span className="mt-in mt-nparts"> · <Icon name="layers" size={10} /> {t('{n} parts', { n: x.parts.length })}</span> : null}{x.mergeHint ? <span className="mt-in mt-rest" title={t('Open it to merge them into one meeting')}> · <Icon name="branch" size={10} /> {t('The rest of {title}', { title: x.mergeHint.title })}</span> : null}</span>
                     {hit?.snippet && <span className="mt-hit small"><b>{hit.where === 'transcript' ? `${hit.who} ${hit.t}` : t(WHERE[hit.where])}</b> <Marked text={hit.snippet} terms={hits.terms} /></span>}
                   </span>
                   {x.status === 'recording' && <span className="rec-dot" aria-label={t('Recording')} />}
@@ -614,7 +616,7 @@ export function MeetingPage({ id, onBack }) {
   const [saveMenu, setSaveMenu] = useState(false) // the header's download button's menu
   const [fix, setFix] = useState(null) // { from } while fixing a word
   const [sel, setSel] = useState(null) // { text, top, left }: words picked in the transcript
-  const [dialog, setDialog] = useState(null) // 'again' | 'calendar' | 'delete' | 'folder' | 'add'
+  const [dialog, setDialog] = useState(null) // 'again' | 'calendar' | 'delete' | 'folder' | 'add' | 'merge'
   const [micErr, setMicErr] = useState(null) // Resume recording, and macOS is blocking the mic
   const [whoAt, setWhoAt] = useState(null) // { x, y, l }: the menu for who said a line
   const [naming, setNaming] = useState(null) // { l, name }: a name typed for a line
@@ -770,6 +772,14 @@ export function MeetingPage({ id, onBack }) {
       refetch('/meetings')
       if (r.separated) onBack?.()
     })
+  }
+  // Merged (the suggestion, or Merge with…): the meeting they're one of now, which says so (Merged)
+  // with its summary being written or out of date. When that's the other one, this one has gone into
+  // it, so it opens in this one's place.
+  const merged = (r) => {
+    if (r.id === id) { refresh(); return }
+    onBack?.()
+    openMeeting(r.id)
   }
   const archive = (on) => act('archive', async () => { await api(`/meetings/${encodeURIComponent(id)}`, { method: 'PATCH', body: { archived: on } }); setMsg({ text: on ? t("Archived. It's under Archived in the list, and left out of search.") : t('Back in the list.') }) })
   // Who said a line: a name (null: back to You or Them). The first one named offers the same name
@@ -1037,6 +1047,7 @@ export function MeetingPage({ id, onBack }) {
           atActions(data.summary) && { icon: 'helm', label: t('Send action items to Chief of Staff'), run: toChief },
           '-',
           canResume && { icon: 'mic', label: t('Resume recording'), run: resumeRec },
+          done && !combined && { icon: 'branch', label: t('Merge with…'), run: () => setDialog('merge') },
           combined && { icon: 'plus', label: t('Add a meeting…'), run: () => setDialog('add') },
           !combined && { icon: 'edit', label: t('Fix a word everywhere'), run: () => setFix({ from: '' }) },
           done && !combined && { icon: 'refresh', label: t('Transcribe again…'), run: () => setDialog('again') },
@@ -1160,9 +1171,9 @@ export function MeetingPage({ id, onBack }) {
         <span className="mt-grow" />
         {data.summary && <button type="button" className="ghost-btn" onClick={() => copy(data.summary, t('Copied the summary.'))} title={t('Copy the summary')}><Icon name="copy" size={12} /> {t('Copy')}</button>}
       </div>
-      {/* Written before more was recorded (Resume recording), or before a combined meeting's meetings changed. */}
+      {/* Written before more was recorded (Resume recording, or a recording merged in), or before a combined meeting's meetings changed. */}
       {data.summary && data.summaryStale && !data.summarizing && (
-        <p className="mt-stale small" role="status"><Icon name="alert" size={12} /> <span>{data.summaryStale === 'parts' ? t('This summary is out of date: a meeting in it was added, taken out or summarized again since it was written.') : t('This summary is out of date: more was recorded since it was written.')}</span> <button type="button" className="link-btn" onClick={summarize} disabled={busy === 'summary'}>{t('Regenerate')}</button></p>
+        <p className="mt-stale small" role="status"><Icon name="alert" size={12} /> <span>{data.summaryStale === 'parts' ? t('This summary is out of date: a meeting in it was added, taken out or summarized again since it was written.') : data.summaryStale === 'merged' ? t('This summary is out of date: another recording was merged into this meeting since it was written.') : t('This summary is out of date: more was recorded since it was written.')}</span> <button type="button" className="link-btn" onClick={summarize} disabled={busy === 'summary'}>{t('Regenerate')}</button></p>
       )}
       {data.summary ? (todo ? (
         <>
@@ -1217,6 +1228,10 @@ export function MeetingPage({ id, onBack }) {
         {(data.status === 'recording' || data.status === 'paused') && <SpeechSetup recording />}
         {!live && (data.status === 'recording' || data.status === 'paused') && <p className="muted small">{t('This meeting is recording in another window.')}</p>}
         {canResume && recent && phone && <div className="mt-resume-row">{resumeBtn}</div>}
+        {/* Bridge AI closed while it recorded (server meetings.js recover): said here until it carries on. */}
+        {done && data.interrupted && <p className="mt-interrupted small" role="status"><Icon name="alert" size={12} /> <span>{t('Recording stopped when Bridge AI closed at {time}. What was recorded until then is kept.', { time: timeOf(data.interrupted.at) })}</span>{canResume && <button type="button" className="link-btn" onClick={resumeRec} disabled={busy === 'resume'}>{t('Resume recording')}</button>}</p>}
+        {!combined && <MergeHint data={data} onMerged={merged} onMsg={setMsg} />}
+        {!combined && <Merged data={data} onDone={refresh} onMsg={setMsg} />}
         {micErr && <MicFix stale={micErr.stale} onClose={() => setMicErr(null)} onAllowed={resumeRec} />}
         {msg && <p className={`small mt-msg ${msg.error ? 'error-text' : 'muted'}`} role="status">{msg.text}{msg.act && <> <button type="button" className="link-btn" onClick={msg.act.run}>{msg.act.label}</button></>}</p>}
         {/* A video of the screen that ended early, or wasn't kept: why (the Video view says it too). */}
@@ -1249,6 +1264,7 @@ export function MeetingPage({ id, onBack }) {
           </Dialog>
         )}
         {dialog === 'folder' && <FolderPick items={[data]} folders={foldersOf(list?.meetings)} onClose={() => setDialog(null)} onDone={(t) => { setMsg({ text: t }); refresh() }} />}
+        {dialog === 'merge' && <MergePick m={data} list={list?.meetings} onClose={() => setDialog(null)} onDone={merged} />}
         {whoAt && (sheet
           ? <PickSheet title={t('Who said it?')} items={whoItems(whoAt.l)} onClose={() => setWhoAt(null)} />
           : <AtMenu x={whoAt.x} y={whoAt.y} items={whoItems(whoAt.l)} onClose={() => setWhoAt(null)} />)}

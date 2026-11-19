@@ -1034,6 +1034,9 @@ process.exit(1)`)
   { // names of its own, apart from the ones above
   for (const x of (await api('/meetings')).meetings.filter((x) => x.status === 'recording' || x.status === 'paused')) await api(`/meetings/${x.id}/stop`, {})
   await until(async () => !(await api('/meetings')).meetings.some((x) => x.status !== 'done'), 15000)
+  // One left recording by a restart above is said to have stopped then, at the top of the window:
+  // read, so it's out of the way here (the notice is checked below).
+  for (const x of (await api('/meetings')).meetings.filter((x) => x.interrupted && !x.interrupted.seen)) await api(`/meetings/${x.id}/interrupted`, {})
   await api('/settings', { meetings: { autoSummary: false } }, 'PATCH')
   const dirOf = (id) => path.join(kit.data, 'meetings', id)
   const metaOf = (id) => JSON.parse(fs.readFileSync(path.join(dirOf(id), 'meeting.json'), 'utf8'))
@@ -1145,7 +1148,88 @@ process.exit(1)`)
   await sep.locator('.btn.danger', { hasText: 'Separate' }).click()
   ok(!!(await until(async () => { const l = (await api('/meetings')).meetings; return !l.some((x) => x.parts) && l.some((x) => x.id === W1) && l.some((x) => x.id === W2) && !metaOf(W1).partOf }, 8000)) && /Themes agreed/.test((await api(`/meetings/${W1}`)).summary), 'separated: it goes, and its meetings are as they were')
 
-  ok(withoutCutOff(cb.errors).length === 0, 'resume and combine: no page errors', cb.errors)
+  // ---------- One meeting recorded as two ----------
+  // Bridge AI closed while a meeting recorded: opened again, the top of the window says so, with
+  // Resume recording, Open and OK (which puts it away for good), and so does the meeting's page.
+  // Recording again from Meetings while its calendar event is on asks first, Resume recording the
+  // default, and carries on in the same meeting. Two recordings of one event: the sidebar marks the
+  // later one and its page suggests merging, in one click; Separate puts them back, and ⋯ (and the
+  // sidebar's menu) has Merge with…, with that day's meetings, closest first.
+  const t0 = Date.now()
+  const ev = { title: 'Design sync', start: new Date(t0 - 5 * 60e3).toISOString(), end: new Date(t0 + 55 * 60e3).toISOString(), attendees: ['Priya Shah', 'Tester'] }
+  const K = await api('/meetings', { title: 'Design sync', event: ev, call: false })
+  await send(K.id, Buffer.concat([tone(0.5), tone(2, true), tone(3.5)]))
+  await until(async () => (await api(`/meetings/${K.id}`)).transcript.length >= 1, 15000)
+  await kit.restart()
+  await cp.reload()
+  await cp.waitForSelector('.rail-nav-row', { timeout: 15000 }).catch(() => {})
+  const notice = cp.locator('.call-prompt.mt-stopped')
+  ok(!!(await until(() => notice.isVisible().catch(() => false), 10000)) && /^Recording of Design sync stopped when Bridge AI closed at \d/.test(await notice.locator('b').innerText().catch(() => '')) && (await notice.locator('button', { hasText: 'Resume recording' }).count()) === 1, 'Bridge AI closed while a meeting recorded: opened again, the top of the window says so, with Resume recording', await notice.innerText().catch(() => ''))
+  await shot(cp, `${tag}recording-stopped`)
+  await openIt(K.id)
+  ok(!!(await until(async () => /^Recording stopped when Bridge AI closed at \d.*What was recorded until then is kept\.\s*Resume recording$/s.test((await cp.locator('.mt-interrupted').innerText().catch(() => '')).trim()), 8000)), 'its page says so too, with Resume recording', await cp.locator('.mt-interrupted').innerText().catch(() => ''))
+  await notice.locator('button[aria-label="Got it"]').click()
+  ok(!!(await until(async () => (await notice.count()) === 0 && (await api(`/meetings/${K.id}`)).interrupted?.seen === true, 6000)), 'OK puts the notice away, on every device')
+  await cp.locator('.rail-nav-btn', { hasText: 'Meetings' }).click()
+  await cp.locator('.mt-view .pane-head button', { hasText: 'Start recording' }).click()
+  const carry = cp.locator('.call-prompt.mt-carry')
+  ok(!!(await until(() => carry.isVisible().catch(() => false), 8000)) && /^Recording of Design sync stopped when Bridge AI closed at .+Carry on in that meeting, or start a new one\?/s.test(await carry.innerText().catch(() => '')) && await carry.locator('button', { hasText: 'Resume recording' }).evaluate((e) => e === document.activeElement).catch(() => false) && (await carry.locator('button', { hasText: 'New meeting' }).count()) === 1, 'starting to record during its calendar event asks first: Resume recording, the default, or a new meeting', await carry.innerText().catch(() => ''))
+  await shot(cp, `${tag}carry-on`)
+  if (which === 'chromium') {
+    await carry.locator('button', { hasText: 'Resume recording' }).click()
+    const back = await until(async () => { const m = await api(`/meetings/${K.id}`); return m.status === 'recording' && m }, 10000)
+    ok(!!back && back.resumedFrom >= 5 && !back.interrupted && (await api('/meetings')).meetings.filter((x) => x.title === 'Design sync').length === 1 && await cp.locator('.mt-recbar').isVisible().catch(() => false), 'Resume recording carries on in the same meeting: no second one', back && [back.status, back.resumedFrom])
+    await sleep(2000)
+    await cp.locator('.mt-recbar button', { hasText: 'Stop' }).click()
+    await until(async () => (await api(`/meetings/${K.id}`)).status === 'done', 15000)
+  } else {
+    await carry.locator('button[aria-label="Cancel"]').click()
+    await sleep(1500)
+    ok((await carry.count()) === 0 && !(await api('/meetings')).meetings.some((x) => x.status === 'recording') && (await api('/meetings')).meetings.filter((x) => x.title === 'Design sync').length === 1, 'put away, nothing starts')
+    skip('Resume recording from there carries on in the same meeting', `${which} has no fake mic`)
+  }
+  // Two recordings of one calendar event, the second just after the first.
+  const ev2 = { title: 'Pricing call', start: new Date(t0 - 30 * 60e3).toISOString(), end: new Date(t0 + 30 * 60e3).toISOString(), attendees: ['Dan Ruiz', 'Tester'] }
+  const rec = async (text) => {
+    const x = await api('/meetings', { title: 'Pricing call', event: ev2, call: false })
+    await api(`/meetings/${x.id}/stop`, {})
+    await until(async () => (await api(`/meetings/${x.id}`)).status === 'done', 10000)
+    said(x.id, [['you', 1, text]])
+    return x.id
+  }
+  const P1 = await rec('We start with the price list.')
+  const P2 = await rec('Then the discounts for schools.')
+  ok(!!(await until(async () => (await cp.locator('.rail-meetings .rm-row', { hasText: 'Pricing call' }).locator('.rm-rest').count()) === 1, 12000)), 'the sidebar marks the later recording as the rest of the first', await cp.locator('.rail-meetings').innerText().catch(() => ''))
+  await openIt(P2)
+  const hintBox = cp.locator('.mt-merge-hint')
+  ok(!!(await until(() => hintBox.isVisible().catch(() => false), 8000)) && /^The rest of Pricing call, \d.*–\d/.test(await hintBox.locator('b').innerText().catch(() => '')) && /Both were recorded during Pricing call on your calendar\./.test(await hintBox.innerText()), 'its page says it\'s the rest of the first, from when to when, and why', await hintBox.innerText().catch(() => ''))
+  await shot(cp, `${tag}merge-hint`)
+  await api('/settings', { meetings: { autoSummary: true } }, 'PATCH')
+  const s0 = model.asked(/Write meeting notes in Markdown/).length
+  await hintBox.locator('button', { hasText: 'Merge into one meeting' }).click()
+  ok(!!(await until(async () => !(await api('/meetings')).meetings.some((x) => x.id === P2) && /Merged with the recording from \d.*Separate puts them back as two meetings, until/s.test(await cp.locator('.mt-merged').innerText().catch(() => '')), 10000)), 'one click: merged into the first, which opens in its place, with Separate', await cp.locator('.mt-view').innerText().catch(() => '').then((x) => x.slice(0, 400)))
+  await cp.locator('.mt-view .seg button[data-view="transcript"]').click({ timeout: 8000 }).catch(() => {})
+  ok(!!(await until(async () => /We start with the price list[\s\S]*Then the discounts for schools/.test(await cp.locator('.mt-transcript').innerText().catch(() => '')), 8000)), 'its transcript carries on with the second one\'s lines', await cp.locator('.mt-transcript').innerText().catch(() => ''))
+  ok(!!(await until(async () => { const asked = model.asked(/Write meeting notes in Markdown/).slice(s0); return asked.some((x) => /price list[\s\S]*discounts for schools/.test(x)) && !!(await api(`/meetings/${P1}`)).summary }, 15000)), 'and the summary is written again, from both')
+  await api('/settings', { meetings: { autoSummary: false } }, 'PATCH')
+  await shot(cp, `${tag}merged`)
+  await cp.locator('.mt-merged button', { hasText: 'Separate' }).click()
+  ok(!!(await until(async () => (await api('/meetings')).meetings.filter((x) => x.title === 'Pricing call').length === 2 && /Separated: Pricing call is a meeting of its own again\./.test(await cp.locator('.mt-msg').innerText().catch(() => '')), 10000)) && (await api(`/meetings/${P2}`)).transcript.length === 1, 'Separate: two meetings again, each as it was, and it says so', await cp.locator('.mt-msg').innerText().catch(() => ''))
+  await cp.locator('.rail-meetings .rm-row', { hasText: 'Pricing call' }).first().click({ button: 'right' })
+  ok(!!(await until(async () => (await cp.locator('.ctx-menu button', { hasText: 'Merge with…' }).count()) === 1, 4000)), 'the sidebar\'s menu has Merge with… too')
+  await cp.keyboard.press('Escape')
+  await openIt(P1)
+  ok(!!(await until(async () => (await cp.locator('.mt-transcript').innerText().catch(() => '')).includes('price list') && (await cp.locator('.mt-merge-hint').count()) === 0, 8000)), 'separated, the first one doesn\'t suggest merging (it\'s the earlier of the two)')
+  await cp.locator('.mt-view .win-btn[aria-label="More actions"]').click()
+  await cp.locator('.menu-anchor .menu button', { hasText: 'Merge with…' }).click()
+  const pick = cp.locator('.mt-dialog', { hasText: 'Merge with another meeting' })
+  const opts = await until(async () => { const o = await pick.locator('.mt-pick-opt').allInnerTexts(); return o.length && o }, 5000)
+  ok(!!opts && /^Pricing call/.test(opts[0]) && opts.some((x) => /^Design sync/.test(x)) && /You can separate them again for 7 days\./.test(await pick.innerText()), '⋯ Merge with…: that day\'s meetings, closest first, saying what it does', opts)
+  await shot(cp, `${tag}merge-with`)
+  await pick.locator('.mt-pick-opt').first().click()
+  ok(!!(await until(async () => (await api('/meetings')).meetings.filter((x) => x.title === 'Pricing call').length === 1 && (await api(`/meetings/${P1}`)).transcript.length === 2, 10000)), 'picking one merges them')
+
+  ok(withoutCutOff(cb.errors).length === 0, 'resume, combine and merge: no page errors', cb.errors)
   await cb.ctx.close()
   }
 } catch (e) {
