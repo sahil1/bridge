@@ -44,6 +44,20 @@
 //     [edit-outside <path> <text>]           tries to write a file outside its folder: refused
 //                                            under --permission-mode dontAsk (Edit(./**) is only
 //                                            its folder)
+//                                            Every edit first goes through the PreToolUse hooks its
+//                                            --settings give (a file or JSON), as Claude Code runs
+//                                            them: each matching command run with the tool call as
+//                                            JSON on stdin; exit 2 refuses it (each in ~/hooks.log)
+//     [edit-anywhere <path> <text>]          writes a file anywhere, as if your own settings allowed
+//                                            every edit: only its hooks can stop it
+//     [edit-many <n> <folder>]               writes n new files, <folder>/1.md … <folder>/<n>.md
+//                                            (many/ if not said)
+//     [delete <name>], [move <from> <to>]    deletes or moves a file with the delete_file or
+//                                            move_file tool of its MCP server bridge_files (as
+//                                            [make] calls bridge_outbox's): only when --allowedTools
+//                                            lets it, else it says it couldn't
+//     [hand <name>]                          answers HAND TO <name>, when its brief says it may hand
+//                                            changes to files on (else it's ignored)
 //     [make <name> <text>]                   saves <name> (with <text>, or a line saying what it
 //                                            is) to send back, with the save_file tool of its MCP
 //                                            server bridge_outbox (the server started as its
@@ -75,8 +89,8 @@
 //   claude --resume <id> --fork-session --session-id <new> "<brief>"   a copy of a conversation:
 //                                            <id>'s, then the brief as above
 //   --model <m>, --effort <level>, --permission-mode <mode>, --tools <list>, --add-dir <dirs...>,
-//   --mcp-config <files...>, --disallowedTools <list>, --strict-mcp-config   taken, as Claude Code
-//                                            takes them
+//   --mcp-config <files...>, --disallowedTools <list>, --strict-mcp-config, --settings <file>
+//                                            taken, as Claude Code takes them
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -85,7 +99,7 @@ const args = process.argv.slice(2)
 if (args.includes('--version')) { console.log('2.1.312 (Claude Code)'); process.exit(0) }
 // Signed in with a Max plan (BRIDGE_STANDIN_CLAUDE_PLAN: another, team say).
 if (args[0] === 'auth') { console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: process.env.BRIDGE_STANDIN_CLAUDE_PLAN || 'max' })); process.exit(0) }
-const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode', '--effort', '--tools'])
+const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode', '--effort', '--tools', '--settings'])
 // (--allowedTools, like --add-dir, takes a list.)
 const allowed = []
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null }
@@ -180,6 +194,30 @@ function turn(text, answer, ms, made) {
   const look = setInterval(() => { if (fs.existsSync(go)) { clearInterval(look); finish() } }, 200)
 }
 
+// Its PreToolUse hooks, from --settings (a file, or JSON), as Claude Code runs them: each one whose
+// matcher takes the tool, run through the shell with the tool call on stdin; exit 2 refuses it, its
+// stderr the reason. None with disableAllHooks.
+const hooks = (() => {
+  const s = opt('--settings')
+  if (!s) return []
+  let j
+  try { j = JSON.parse(s.trim().startsWith('{') ? s : fs.readFileSync(s, 'utf8')) } catch { return [] }
+  return j?.disableAllHooks === true ? [] : j?.hooks?.PreToolUse || []
+})()
+function preTool(name, input) {
+  for (const m of hooks) {
+    if (m.matcher && !new RegExp(`^(?:${m.matcher})$`).test(name)) continue
+    for (const h of m.hooks || []) {
+      if (h.type !== 'command') continue
+      const r = require('node:child_process').spawnSync(process.platform === 'win32' ? 'bash' : '/bin/sh', ['-c', h.command], { input: JSON.stringify({ hook_event_name: 'PreToolUse', session_id: id, cwd: process.cwd(), tool_name: name, tool_input: input }), encoding: 'utf8', timeout: (h.timeout || 60) * 1000 })
+      const why = String(r.stderr || '').trim()
+      note('hooks.log', { tool: name, path: input.file_path || null, status: r.status, why: why.slice(0, 300) })
+      if (r.status === 2) return { ok: false, why }
+    }
+  }
+  return { ok: true }
+}
+
 // An answer for the Slack Bot: what it can do is what it was started with.
 function answerTurn(text) {
   // (On Windows its lines come as one, joined by " · ": runtime/spawn.js forCommandLine.)
@@ -240,17 +278,48 @@ function answerTurn(text) {
       const here = [process.cwd(), ...added].some((d) => want.startsWith(d + path.sep) || real(want).startsWith(real(d) + path.sep))
       if (!can('Read') || (!here && dontAsk)) { tried('read', false); out.push(`I couldn't read ${r[1]}: reading outside my folders was refused.`) } else { let c = ''; try { c = fs.readFileSync(want, 'utf8').trim() } catch { /* none */ } tool('Read', { file_path: want }); tried('read', true); out.push(`It says: ${c}`) }
     }
-    // Edits: only in its folder, and only when it was started able to (a bot's change).
+    // Edits: only in its folder, and only when it was started able to (a bot's change), and only
+    // what its hooks let through.
     const editsHere = can('Edit') && can('Write') && allowed.some((x) => /^Edit\(\.\/\*\*\)$/.test(x))
+    const write = (f, body, label, kind) => {
+      const h = preTool('Write', { file_path: f, content: body })
+      if (!h.ok) { tried(kind, false); out.push(`I couldn't write ${label}: ${h.why.split('\n')[0]}`); return }
+      fs.mkdirSync(path.dirname(f), { recursive: true })
+      fs.writeFileSync(f, body)
+      tool('Write', { file_path: f })
+      tried(kind, true)
+      out.push(`I changed ${label}.`)
+    }
     for (const m of q.matchAll(/\[edit ([\w./-]+) ([^\]]+)\]/g)) {
       const f = path.resolve(process.cwd(), m[1])
-      if (editsHere && f.startsWith(process.cwd() + path.sep)) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${m[2]}\n`); tool('Edit', { file_path: f }); tried('edit', true); out.push(`I changed ${m[1]}.`) } else { tried('edit', false); out.push(`I can't change ${m[1]} here.`) }
+      if (editsHere && f.startsWith(process.cwd() + path.sep)) write(f, `${m[2]}\n`, m[1], 'edit')
+      else { tried('edit', false); out.push(`I can't change ${m[1]} here.`) }
     }
     for (const m of q.matchAll(/\[edit-outside ([^\s\]]+) ([^\]]+)\]/g)) {
       const f = path.resolve(m[1].replace(/^~/, home))
       const inHere = f.startsWith(process.cwd() + path.sep)
       if (can('Edit') && (!dontAsk || (inHere && editsHere))) { fs.writeFileSync(f, `${m[2]}\n`); tried('edit-outside', true); out.push(`I wrote ${m[1]}.`) } else { tried('edit-outside', false); out.push(`I couldn't write ${m[1]}: that was refused.`) }
     }
+    // (As if your own settings allowed every edit: its hooks are all that stand in the way.)
+    for (const m of q.matchAll(/\[edit-anywhere ([^\s\]]+) ([^\]]+)\]/g)) write(path.resolve(process.cwd(), m[1].replace(/^~/, home)), `${m[2]}\n`, m[1], 'edit-anywhere')
+    const many = /\[edit-many (\d+)(?: ([\w./-]+))?\]/.exec(q)
+    if (many && editsHere) for (let i = 1; i <= Number(many[1]); i++) write(path.join(process.cwd(), many[2] || 'many', `${i}.md`), `File ${i}\n`, `${many[2] || 'many'}/${i}.md`, 'edit')
+    // Deleting and moving: only with bridge_files's tools, as Claude Code calls an MCP server's.
+    const fileTool = (tl, a) => {
+      const srv = (() => { for (const c of configs) { try { const x = JSON.parse(fs.readFileSync(c, 'utf8')).mcpServers?.bridge_files; if (x) return x } catch { /* unreadable */ } } return null })()
+      if (!srv || !args.includes('--strict-mcp-config') || !allowed.includes(`mcp__bridge_files__${tl}`)) return { ok: false, text: 'I have no tool for it' }
+      const asks = [
+        { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.312' } } },
+        { jsonrpc: '2.0', method: 'notifications/initialized' },
+        { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: tl, arguments: a } },
+      ]
+      const r = require('node:child_process').spawnSync(srv.command, srv.args || [], { input: asks.map((x) => JSON.stringify(x)).join('\n') + '\n', env: { ...process.env, ...(srv.env || {}) }, encoding: 'utf8', timeout: 20000 })
+      const said = String(r.stdout || '').split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).find((x) => x?.id === 2)
+      tool(`mcp__bridge_files__${tl}`, a)
+      return { ok: !!said?.result && !said.result.isError, text: said?.result?.content?.[0]?.text || said?.error?.message || 'no answer' }
+    }
+    for (const m of q.matchAll(/\[delete ([^\s\]]+)\]/g)) { const r = fileTool('delete_file', { path: m[1] }); tried('delete', r.ok); out.push(r.ok ? `I deleted ${m[1]}.` : `I couldn't delete ${m[1]}: ${r.text}.`) }
+    for (const m of q.matchAll(/\[move ([^\s\]]+) ([^\s\]]+)\]/g)) { const r = fileTool('move_file', { from: m[1], to: m[2] }); tried('move', r.ok); out.push(r.ok ? `I moved ${m[1]} to ${m[2]}.` : `I couldn't move ${m[1]}: ${r.text}.`) }
     const make = makeTo(out)
     for (const m of q.matchAll(/\[make ([^\s\]]+)(?: ([^\]]+))?\]/g)) make(m[1], `${m[2] || `The ${m[1]} you asked for.`}\n`)
     for (const m of q.matchAll(/\[make-exe ([^\s\]]+)\]/g)) make(m[1], Buffer.concat([Buffer.from('MZ'), Buffer.alloc(62, 1)]))
@@ -276,7 +345,8 @@ function answerTurn(text) {
     const remember = [...q.matchAll(/\[remember ([^\]]+)\]/g)].map((m) => `REMEMBER: ${m[1]}`).concat([...q.matchAll(/\[remember-me ([^\]]+)\]/g)].map((m) => `REMEMBER about ${(/----- question from (.*?) -----/.exec(text) || [])[1] || 'them'}: ${m[1]}`))
     const a = /\[answer ([^\]]+)\]/.exec(q)
     const long = /\[long\]/.test(q) ? `\n\n${Array.from({ length: 60 }, (_, i) => `Point ${i + 1}: the details of this part of the answer, said at some length.`).join('\n\n')}` : ''
-    const answer = /\[noanswer\]/.test(q) ? 'NO ANSWER\nNothing in this folder says.' : /\[notforme\]/.test(q) ? 'NOT FOR ME' : [[...out, a ? a[1] : 'Here is what I found.', ...(sign ? [sign] : [])].join(' ') + long, ...files, ...remember].join('\n\n')
+    const hand = /reply with HAND TO and that bot's name/.test(text) && /\[hand ([^\]]+)\]/.exec(q)
+    const answer = hand ? `HAND TO ${hand[1]}` : /\[noanswer\]/.test(q) ? 'NO ANSWER\nNothing in this folder says.' : /\[notforme\]/.test(q) ? 'NOT FOR ME' : [[...out, a ? a[1] : 'Here is what I found.', ...(sign ? [sign] : [])].join(' ') + long, ...files, ...remember].join('\n\n')
     said = answer
     reply(answer)
     state = 'idle'
