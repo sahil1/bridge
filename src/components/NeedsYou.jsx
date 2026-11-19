@@ -367,13 +367,73 @@ export function OutsideItem({ it, onDone, setNote }) {
 // file in a public channel), and a change it made: the diff to approve before a draft pull request
 // opens, or the pull request opened already. The same draft is in your Slack direct messages when
 // you set You in Slack; whichever you answer first, the other is settled.
+// A run at its time limit is a card of its own (LimitItem); one stopped there for want of your
+// answer is a draft to write, with Continue as well, for a day.
 const sizeOf = (n) => (n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`)
-export function SlackItem({ it, onDone, setNote }) {
+const whereOf = (it) => (it.place?.kind === 'dm' ? t('in a direct message') : it.place?.name ? t('in #{channel}', { channel: it.place.name }) : t('in a channel'))
+const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+export function SlackItem(props) {
+  return props.it.limit?.phase === 'asking' ? <LimitItem {...props} /> : <DraftItem {...props} />
+}
+
+// Continue or Stop, for a run at its time limit (server/frontdesk.js limitAct): on the computer it
+// runs on, or from the phone through it. { item, said, already } back.
+function useLimitAct(it, onDone, setNote) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState(null)
+  const go = async (act, minutes = null) => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      const out = await onDevice(null, `/bots/questions/${encodeURIComponent(it.id)}/limit`, { act, ...(minutes ? { minutes } : {}) })
+      onDone(it)
+      const bot = it.bot?.name || t('Your bot')
+      const who = it.from?.name || t('Someone')
+      setNote({ text: out.already ? t('That isn\'t waiting any more') : act === 'stop' ? t('Stopped: {name} is told it\'s passed on to you', { name: who }) : t('{bot} carries on for {n} more minutes', { bot, n: out.given ?? minutes }) })
+    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
+  }
+  return { busy, problem, go }
+}
+
+// A run at its time limit, going on while you decide: how long it has run and what it's doing, the
+// question, until when it goes on, and Continue (10 or 30 more minutes, fewer near its Longest Run)
+// or Stop. Also in your direct messages on the platform it was asked on; whichever you answer first,
+// the other is settled.
+function LimitItem({ it, onDone, setNote }) {
+  const { busy, problem, go } = useLimitAct(it, onDone, setNote)
+  const l = it.limit
+  const who = it.from?.name || t('Someone')
+  const bot = it.bot?.name || t('Your bot')
+  const ran = l.ran === 1 ? t('1 minute') : t('{n} minutes', { n: l.ran })
+  return (
+    <article className="ny-item t-slack t-limit yours" aria-label={t('{bot}\'s answer to {name} {where} has run {ran}', { bot, name: who, where: whereOf(it), ran })}>
+      <div className="ny-top">
+        <Icon name="clock" size={12} />
+        <span className="ny-kind">{t('At its time limit')}</span>
+        <span className="ny-age" title={new Date(l.at).toLocaleString()}>{ago(l.at)}</span>
+        <span className="ny-grow" />
+        <span className="ny-device here" title={t('Through {bot} (Settings › Bots)', { bot })}><Icon name="chat" size={11} />{bot}</span>
+      </div>
+      <p className="ny-text">{t('{bot}\'s answer to {name} {where} has run {ran}: {doing}.', { bot, name: who, where: whereOf(it), ran, doing: l.doing || t('still working') })}</p>
+      <p className="ny-said">“{it.text}”</p>
+      <p className="muted small ny-from"><Icon name="clock" size={11} /> {t('It goes on until {time} while you decide. With no answer by then it\'s stopped and comes to you, and Continue still picks it up where it stopped.', { time: timeOf(l.until) })}</p>
+      {l.left < 30 && <p className="muted small ny-from">{t('At most {n} more minutes: its Longest Run is {longest} minutes.', { n: l.left, longest: l.longest })}</p>}
+      {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
+      <div className="ny-acts">
+        {(l.choices || []).map((n, i) => <button key={n} type="button" className={`btn small ${i === 0 ? 'primary' : ''}`} disabled={busy} onClick={() => go('continue', n)}><Icon name="play" size={12} /> {t('Continue {n} more minutes', { n })}</button>)}
+        <button type="button" className="btn small" disabled={busy} onClick={() => go('stop')}><Icon name="stop" size={12} /> {t('Stop')}</button>
+      </div>
+    </article>
+  )
+}
+
+function DraftItem({ it, onDone, setNote }) {
   const [text, setText] = useState(it.draft || '')
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState(it.problem || null)
+  const limit = useLimitAct(it, onDone, setNote)
   const who = it.from?.name || t('Someone')
-  const where = it.place?.kind === 'dm' ? t('in a direct message') : it.place?.name ? t('in #{channel}', { channel: it.place.name }) : t('in a channel')
+  const where = whereOf(it)
   const r = it.route
   const bot = it.bot?.name || t('Your bot')
   const change = it.change || null
@@ -415,11 +475,60 @@ export function SlackItem({ it, onDone, setNote }) {
         </>
       )}
       {it.ownerAsked && <p className="muted small ny-from"><Icon name="chat" size={11} /> {t('Also in your Slack direct messages: answer it there or here.')}</p>}
-      <textarea className="ny-draft" value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(8, Math.max(3, text.split('\n').length + 1))} placeholder={t('Write the reply…')} aria-label={t('Reply to {name}', { name: who })} disabled={busy} />
+      <textarea className="ny-draft" value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(8, Math.max(3, text.split('\n').length + 1))} placeholder={t('Write the reply…')} aria-label={t('Reply to {name}', { name: who })} disabled={busy || limit.busy} />
+      {(problem || limit.problem) && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem || limit.problem}</p>}
+      <div className="ny-acts">
+        <button type="button" className="btn small primary" disabled={busy || limit.busy || !text.trim()} onClick={() => decide(true)}><Icon name={approve ? 'branch' : 'send'} size={12} /> {busy ? t('Sending…') : approve ? t('Approve and open a pull request') : t('Send')}</button>
+        <button type="button" className="btn small" disabled={busy || limit.busy} onClick={() => decide(false)}>{t('Discard')}</button>
+      </div>
+      {it.limit?.phase === 'stopped' && (
+        <div className="ny-limit">
+          <p className="muted small ny-from"><Icon name="clock" size={11} /> {(it.limit.how === 'session' ? t('Or let it carry on: Continue picks it up where it stopped, until {time} tomorrow.', { time: timeOf(it.limit.until) })
+            : it.limit.how === 'messages' ? t('Or let it carry on: Continue starts it again with what it had so far, until {time} tomorrow.', { time: timeOf(it.limit.until) })
+              : t('Or let it carry on: Continue starts it again from the question (what it did couldn\'t be kept), until {time} tomorrow.', { time: timeOf(it.limit.until) }))}</p>
+          <div className="ny-acts">
+            {(it.limit.choices || []).map((n) => <button key={n} type="button" className="btn small" disabled={busy || limit.busy} onClick={() => limit.go('continue', n)}><Icon name="play" size={12} /> {t('Continue {n} more minutes', { n })}</button>)}
+          </div>
+        </div>
+      )}
+    </article>
+  )
+}
+
+// A phone or computer paired once Remote Access had a guardrail, waiting to be let in here (Which
+// Devices May Connect, server/remote.js): until then it can't use this computer at all. Allow lets
+// it in; Keep Out leaves it out, and not New any more (Settings › Remote Access changes either).
+// Only in this computer's own window, where it's changed.
+export function LetInItem({ it, onDone, setNote }) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState(null)
+  const kind = it.kind === 'computer' ? t('computer') : t('phone')
+  const decide = async (allowed) => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      await onDevice(null, '/remote/devices', { id: it.id, allowed })
+      onDone(it)
+      setNote({ text: allowed ? t('{name} may use this computer now', { name: it.name }) : t('{name} stays out. Settings › Remote Access lets it in later.', { name: it.name }) })
+    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <article className="ny-item t-letin" aria-label={t('{name} waits to be let in', { name: it.name })}>
+      <div className="ny-top">
+        <Icon name={it.kind === 'computer' ? 'laptop' : 'phone'} size={12} />
+        <span className="ny-kind">{t('New device')}</span>
+        {it.paired && <span className="ny-age" title={new Date(it.paired).toLocaleString()}>{ago(it.paired)}</span>}
+        <span className="ny-grow" />
+        <span className="ny-device here" title={t('Settings › Remote Access › Which Devices May Connect')}><Icon name="lock" size={11} />{t('Remote Access')}</span>
+      </div>
+      <p className="ny-text">{it.through
+        ? t('{name} ({kind}) comes through {computer} and waits to be let in here. Until you allow it, it can\'t use this computer at all.', { name: it.name, kind, computer: it.through })
+        : t('{name} ({kind}) is paired with this computer and waits to be let in. Until you allow it, it can\'t use this computer at all.', { name: it.name, kind })}</p>
+      {it.tried && <p className="muted small ny-from">{t('Last tried to connect: {when}.', { when: ago(it.tried) })}</p>}
       {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
       <div className="ny-acts">
-        <button type="button" className="btn small primary" disabled={busy || !text.trim()} onClick={() => decide(true)}><Icon name={approve ? 'branch' : 'send'} size={12} /> {busy ? t('Sending…') : approve ? t('Approve and open a pull request') : t('Send')}</button>
-        <button type="button" className="btn small" disabled={busy} onClick={() => decide(false)}>{t('Discard')}</button>
+        <button type="button" className="btn small primary" disabled={busy} onClick={() => decide(true)}><Icon name="check" size={12} /> {t('Allow')}</button>
+        <button type="button" className="btn small" disabled={busy} onClick={() => decide(false)}>{t('Keep Out')}</button>
       </div>
     </article>
   )
@@ -486,7 +595,8 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
   const focusId = focused ? uid(focused) : null
   const outside = (data?.outside || []).filter((x) => !gone[`outside|${x.id}`])
   const slack = (data?.slack || []).filter((x) => !gone[`slack|${x.id}`])
-  const waiting = all.filter((i) => isAsk(i) && i.online && !isQuiet(i)).length + outside.length + slack.length
+  const letIn = (data?.letIn || []).filter((x) => !gone[`letin|${x.id}`])
+  const waiting = all.filter((i) => isAsk(i) && i.online && !isQuiet(i)).length + outside.length + slack.length + letIn.length
   const list = (rows) => rows.map((it) => <NeedsItem key={uid(it)} it={it} focused={uid(it) === focusId} top={top.has(uid(it))} onOpen={onOpen} onGone={onGone} setNote={setNote} />)
   // Clear all that have gone quiet, each on its own device: off the list at once, and back with a
   // note for any its device couldn't clear.
@@ -531,6 +641,12 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
       {note && <p className="ny-note" role="status">{note.text}</p>}
       <div className="ny-list">
         {!data && <div className="skeleton-rows pad"><div /><div /></div>}
+        {letIn.length > 0 && (
+          <section className="ny-group" aria-label={t('Waiting to Be Let In')}>
+            <h3>{t('Waiting to Be Let In')}<span className="fcount">{letIn.length}</span></h3>
+            {letIn.map((x) => <LetInItem key={x.id} it={x} setNote={setNote} onDone={(o) => { setGone((g) => ({ ...g, [`letin|${o.id}`]: Date.now() })); for (const ms of [0, 1500]) setTimeout(() => refresh(''), ms) }} />)}
+          </section>
+        )}
         {slack.length > 0 && (
           <section className="ny-group" aria-label={t('From Slack')}>
             <h3>{t('From Slack')}<span className="fcount">{slack.length}</span></h3>
@@ -543,7 +659,7 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
             {outside.map((x) => <OutsideItem key={x.id} it={x} setNote={setNote} onDone={(o) => { setGone((g) => ({ ...g, [`outside|${o.id}`]: Date.now() })); for (const ms of [0, 1500]) setTimeout(() => refresh(''), ms) }} />)}
           </section>
         )}
-        {data && !items.length && !outside.length && !slack.length && (
+        {data && !items.length && !outside.length && !slack.length && !letIn.length && (
           <div className="ny-empty"><Icon name="check" size={20} /><p>{t('Nothing needs you right now.')}</p><small className="muted">{quiet.length ? t('Only what has been quiet for a while, folded below.') : t('Questions, permissions, failed runs and finished work from all your devices show here.')}</small></div>
         )}
         {by === 'urgent'

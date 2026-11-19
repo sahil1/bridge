@@ -1,0 +1,18 @@
+/* Settings › Back Up & Move (BackUp.jsx). */
+.bk .st-sec p + p { margin-top: 6px; }
+.bk .st-note { margin-top: 8px; flex-wrap: nowrap; align-items: flex-start; }
+.bk .st-note .icon { flex: none; margin-top: 2px; }
+.bk .st-note > span { flex: 1; min-width: 0; }
+.bk-pass { flex-wrap: wrap; }
+.bk-pass .st-input { flex: 1 1 180px; min-width: 0; }
+.bk-plan { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--pane-2); display: grid; gap: 6px; }
+.bk-part { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-top: 4px; }
+.bk-list { margin: 0 0 0 22px; padding: 0; display: grid; gap: 2px; overflow-wrap: anywhere; }
+.bk-list li.bad { color: var(--critical); }
+.bk-conn { justify-content: space-between; gap: 8px; }
+.bk-conn > span { min-width: 0; overflow-wrap: anywhere; }
+.bk .st-note.bad .btn { margin-left: auto; }
+.bk-plan > .btn { justify-self: start; }
+.bk-sub { display: block; color: var(--ink-2); overflow-wrap: anywhere; }
+.bk-sub.is-bad { color: var(--critical); }
+.bk-values code { font: 11.5px var(--font-mono); }

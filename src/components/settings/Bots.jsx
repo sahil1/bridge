@@ -10,6 +10,7 @@ import { Connections, BotReach } from '../bots/Connections.jsx'
 import Access, { AccessLine } from '../bots/Access.jsx'
 import { accessSaid } from '../bots/access.js'
 import Conversations, { AnswerIn } from '../bots/Conversations.jsx'
+import BotFiles, { MadeFiles } from '../bots/BotFiles.jsx'
 import { t } from '../../i18n/index.js'
 import './bots.css'
 
@@ -1016,30 +1017,44 @@ export function Changes({ d, save }) {
   )
 }
 
-// The limits for each person who asks: questions a day, at once, and how long a run may take. You
-// aren't limited.
+// The limits for each person who asks: questions a day (you have none), at once, and how long a run
+// may take; and what a run does at that time limit, At the Time Limit: Ask Me (every bot's to start:
+// you're asked whether it may carry on, up to its Longest Run) or Stop (it's stopped there and comes
+// to you, as before). Saved as one setting, through the server's checks.
 const LIMITS = () => [['day', t('Questions a day'), 1, 1000], ['atOnce', t('At once'), 1, 5], ['minutes', t('Minutes a run'), 1, 60]]
+const LONGEST = () => ['longest', t('Longest Run, in minutes'), 1, 1440]
 export function Limits({ d, save }) {
-  const l = d.settings.limits || { day: 30, atOnce: 2, minutes: 10 }
+  const l = { day: 30, atOnce: 2, minutes: 10, atLimit: 'ask', longest: 120, ...(d.settings.limits || {}) }
+  const ask = l.atLimit !== 'stop'
   const [v, setV] = useState(l)
-  useEffect(() => { setV(l) }, [l.day, l.atOnce, l.minutes]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setV(l) }, [l.day, l.atOnce, l.minutes, l.longest]) // eslint-disable-line react-hooks/exhaustive-deps
+  const fields = [...LIMITS(), ...(ask ? [LONGEST()] : [])]
   const keep = () => {
-    const next = Object.fromEntries(LIMITS().map(([k]) => [k, Math.round(Number(v[k])) || l[k]]))
-    if (LIMITS().some(([k]) => next[k] !== l[k])) save({ limits: next })
+    const next = Object.fromEntries(fields.map(([k]) => [k, Math.round(Number(v[k])) || l[k]]))
+    if (fields.some(([k]) => next[k] !== l[k])) save({ limits: next })
     else setV(l)
   }
+  const field = ([k, label, min, max]) => (
+    <label key={k} className="sb-field">
+      <span>{label}</span>
+      <input className="st-input" type="number" inputMode="numeric" min={min} max={max} value={v[k] ?? ''} onChange={(e) => setV((x) => ({ ...x, [k]: e.target.value }))} onBlur={keep} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); keep() } }} />
+    </label>
+  )
   return (
     <section className="st-sec" data-setting="slack-limits">
       <h4>{t('Limits')}</h4>
-      <p className="muted small">{t('For each person who asks. A question over the day\'s limit gets a polite no; one over the at-once limit waits its turn; a run that goes past its minutes is stopped, and the question comes to you. You aren\'t limited.')}</p>
-      <div className="sb-limits">
-        {LIMITS().map(([k, label, min, max]) => (
-          <label key={k} className="sb-field">
-            <span>{label}</span>
-            <input className="st-input" type="number" inputMode="numeric" min={min} max={max} value={v[k] ?? ''} onChange={(e) => setV((x) => ({ ...x, [k]: e.target.value }))} onBlur={keep} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); keep() } }} />
-          </label>
-        ))}
+      <p className="muted small">{t('For each person who asks. A question over the day\'s limit gets a polite no; one over the at-once limit waits its turn. You have no limit a day.')}</p>
+      <div className="sb-limits">{LIMITS().map(field)}</div>
+      <div className="st-row sb-at-limit" data-setting="slack-at-limit">
+        <span className="small">{t('At the Time Limit')}</span>
+        <div className="seg" role="radiogroup" aria-label={t('At the Time Limit')}>
+          {[['ask', t('Ask Me')], ['stop', t('Stop')]].map(([k, label]) => <button key={k} type="button" role="radio" aria-checked={l.atLimit === k} className={l.atLimit === k ? 'on' : ''} onClick={() => { if (l.atLimit !== k) save({ limits: { atLimit: k } }) }}>{label}</button>)}
+        </div>
       </div>
+      <p className="muted small">{ask
+        ? t('A run that goes past its minutes asks you whether it may carry on, in Needs You and your direct messages, and whoever asked is told it\'s taking longer. It goes on for 5 minutes while you decide; Continue gives it 10 or 30 more, never past its Longest Run. With no answer in time it\'s stopped and comes to you, and for a day Continue still picks it up where it stopped.')
+        : t('A run that goes past its minutes is stopped, and the question comes to you.')}</p>
+      {ask && <div className="sb-limits">{field(LONGEST())}</div>}
     </section>
   )
 }
@@ -1341,7 +1356,11 @@ const OUTCOMES = () => [
 const REFUSED = () => ({
   'not-allowed': t('not someone it answers'), guest: t('a guest'), external: t('from another company'), unknown: t('Slack couldn\'t say who they are'), empty: t('no question with the mention'),
   muted: t('it\'s muted in that channel'), paused: t('it\'s paused'), 'over-limit': t('over their limit for the day'),
+  'not-owner': t('only you can let a run carry on'),
 })
+// Where a decision about a run at its time limit was made: on another of your devices, or from your
+// direct messages on a platform.
+const fromSaid = (e) => (e.device ? t('on {device}', { device: e.device }) : e.via && e.via !== 'app' ? t('from {app}', { app: platName(e.via) }) : null)
 // A setting's value, short, for the record's line.
 const valueOf = (v) => { const s = v == null || v === '' ? '—' : typeof v === 'string' ? v : JSON.stringify(v); return s.length > 80 ? `${s.slice(0, 79)}…` : s }
 // One event of a conversation, as a line of its timeline. A change made on another of your devices
@@ -1368,13 +1387,24 @@ function eventLine(e) {
     case 'queued': return t('Waiting its turn, behind {n} of their questions', { n: e.ahead ?? 1 })
     case 'context': return e.problem ? t('Read the conversation: {why}', { why: e.problem }) : t('Read {n} earlier messages and {pins} pinned, as context', { n: e.messages?.length || 0, pins: e.pins?.length || 0 })
     case 'run.started': return t('{agent} started, reading {folders}{from}; instructions {version} from {source}', { agent: e.answerer?.label || (e.agent === 'codex' ? 'Codex' : e.agent === 'model' ? e.model || '' : 'Claude Code'), folders: e.folders?.length ? e.folders.join(', ') : t('no folders'), from: e.from ? t(', going on from its earlier conversation') : '', version: e.instructions?.hash || '', source: e.instructions?.source === 'file' ? e.instructions.path : t('Settings') }) + (e.instructions?.problem ? ` (${e.instructions.problem})` : '') + (e.earlier?.problem ? ` (${e.earlier.problem})` : '')
+        + (e.resumed ? ` ${e.resumed.how === 'session' ? t('(picking up where it stopped at its time limit, for {n} minutes)', { n: e.resumed.minutes }) : e.resumed.how === 'messages' ? t('(starting again after its time limit with what it had so far, for {n} minutes)', { n: e.resumed.minutes }) : t('(starting again after its time limit, for {n} minutes)', { n: e.resumed.minutes })}` : '')
+    case 'limit.asked': return t('At its time limit, after {n} minutes: asked you whether it may carry on ({doing})', { n: e.ran ?? '?', doing: e.doing || '' })
+    case 'limit.continued': {
+      const line = t('{name} let it carry on for {n} more minutes', { name: by, n: e.minutes ?? '?' })
+      const from = fromSaid(e)
+      return `${line}${e.resumed ? ` ${t('(after it was stopped)')}` : ''}${from ? ` (${from})` : ''}`
+    }
+    case 'limit.stopped': { const from = fromSaid(e); return `${t('{name} stopped it at its time limit, after {n} minutes', { name: by, n: e.ran ?? '?' })}${from ? ` (${from})` : ''}` }
     case 'run.read': return t('Opened {files}', { files: (e.files || []).map((f) => f.what).join(', ') })
     case 'run.tools': return t('Used the MCP tools {tools}', { tools: (e.tools || []).map((x) => `${x.server}: ${x.tool}${x.n > 1 ? ` ×${x.n}` : ''}`).join(', ') })
     case 'run.skipped': return t('{name} passed over: {why}', { name: e.answerer?.label || e.answerer?.id || '', why: e.why || '' })
     case 'run.passed': return t('{name} couldn\'t answer: {why}. Trying the next.', { name: e.answerer?.label || e.answerer?.id || '', why: e.why || '' })
     case 'run.finished':
       if (e.end === 'finished') return t('Finished in {s} s', { s: Math.round((e.took || 0) / 1000) })
+      if (e.end === 'timeout' && e.why === 'expired') return t('Stopped after {n} minutes: nobody said to carry on in time. Kept, to be picked up again', { n: e.minutes ?? '?' })
+      if (e.end === 'timeout' && e.why === 'longest') return t('Stopped after {n} minutes, its Longest Run', { n: e.minutes ?? '?' })
       if (e.end === 'timeout') return t('Stopped after {n} minutes, its longest run', { n: e.minutes ?? (e.took ? Math.round(e.took / 60000) : '?') })
+      if (e.end === 'stopped' && e.why === 'limit') return t('Stopped by {name} at its time limit', { name: e.by || t('you') })
       if (e.end === 'stopped' && (e.by || e.why)) return e.by ? t('Stopped by {name}', { name: e.by }) + (e.why ? ` (${e.why})` : '') : t('Stopped: {why}', { why: e.why })
       return t('Ended: {why}', { why: e.error || e.end })
     case 'draft': {
@@ -1391,6 +1421,7 @@ function eventLine(e) {
       }
       if (e.kind === 'hold') return t('Told them it\'s passed on to you')
       if (e.kind === 'checking') return t('Told them it\'s being checked with you')
+      if (e.kind === 'longer') return t('Told them it\'s taking longer, and that you\'re asked whether it may carry on')
       return t('Told them: “{text}”', { text: e.text })
     case 'discarded': return e.via === 'slack' ? t('Discarded by {name} from Slack: nothing sent', { name: by }) : t('Discarded: nothing sent')
     case 'skipped': return t('Not for it: no answer')
@@ -1398,8 +1429,10 @@ function eventLine(e) {
     case 'reaction': return e.ok ? (e.removed ? t('Took :{name}: off', { name: e.name }) : t('Reacted :{name}:', { name: e.name })) : t('Couldn\'t react :{name}:: {why}', { name: e.name, why: e.error })
     case 'message.changed': return t('{name} edited a message: “{text}”', { name: who, text: wordsOf(e.text) })
     case 'message.deleted': return t('{name} deleted a message', { name: who })
-    case 'approval.asked': return e.memory ? t('Asked you in your Slack direct messages whether to keep it') : t('Sent to your Slack direct messages, to send, edit or discard')
-    case 'approval.failed': return t('Couldn\'t send it to your Slack direct messages: {why}', { why: e.error })
+    case 'approval.asked':
+      if (e.limit) return e.phase === 'stopped' ? t('Told you in your {app} direct messages it was stopped, and how to let it carry on', { app: platName(e.via) }) : t('Asked you in your {app} direct messages whether it may carry on', { app: platName(e.via) })
+      return e.memory ? t('Asked you in your Slack direct messages whether to keep it') : t('Sent to your Slack direct messages, to send, edit or discard')
+    case 'approval.failed': return e.limit ? t('Couldn\'t ask you in your {app} direct messages: {why}', { app: platName(e.via), why: e.error }) : t('Couldn\'t send it to your Slack direct messages: {why}', { why: e.error })
     case 'memory.proposed': return t('Would like to remember: “{text}”', { text: wordsOf(e.item?.text) })
     case 'memory.kept': return e.imported ? t('Imported with {n} things it remembers', { n: e.imported }) : e.device ? t('{name} kept in its memory, on {device}: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} kept in its memory: “{text}”', { name: by, text: wordsOf(e.item?.text) })
     case 'memory.edited': return e.device ? t('{name} changed what it remembers, on {device}, to: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} changed what it remembers to: “{text}”', { name: by, text: wordsOf(e.item?.text) })
@@ -1409,6 +1442,7 @@ function eventLine(e) {
     case 'change.approved': return e.via === 'slack' ? t('{name} approved the change from Slack', { name: by }) : t('{name} approved the change', { name: by })
     case 'change.failed': return t('The change couldn\'t go through ({step}): {why}', { step: e.step || '', why: e.error || '' })
     case 'pr.opened': return t('Opened a draft pull request')
+    case 'files.made': return e.files?.length ? t('Made {files}', { files: e.files.map((f) => f.name).join(', ') }) : t('Made no file it could send')
     case 'file.uploaded': return e.ok === false ? t('Couldn\'t send the file {name}: {why}', { name: e.name, why: e.error || '' }) : t('Sent the file {name} ({size})', { name: e.name, size: sizeOf(e.size) })
     case 'context.noted': return e.ok === false ? t('Couldn\'t keep this in {name}\'s running context: {why}', { name: who, why: e.error || '' }) : e.state === 'kept' ? t('Kept in {name}\'s running context', { name: who }) : t('In {name}\'s running context once you keep it', { name: who })
     case 'context.kept': return t('{name} kept {n} of {person}\'s conversations in their running context', { name: by, n: e.n ?? 0, person: who })
@@ -1435,6 +1469,7 @@ function Events({ d, events }) {
           {e.type === 'context' && (e.messages?.length > 0 || e.pins?.length > 0) && (
             <details className="sb-ctx"><summary><Icon name="chevron" size={11} />{t('What it read')}</summary><ul>{[...(e.messages || []), ...(e.pins || [])].map((m, k) => <li key={k} className="small"><b>{m.you ? d.name : m.person?.name || m.person?.id}</b>: {wordsOf(m.text)}</li>)}</ul></details>
           )}
+          {e.type === 'files.made' && <MadeFiles bot={d.id} e={e} />}
           {e.type === 'change.proposed' && (e.stat || e.diff) && (
             <details className="sb-ctx"><summary><Icon name="chevron" size={11} />{t('The diff')}</summary>{e.stat && <p className="small mono sb-stat">{e.stat}</p>}{e.diff && <pre className="sb-diff">{e.diff}</pre>}</details>
           )}
@@ -1551,6 +1586,7 @@ function Activity({ d, save }) {
           ))}
         </ul>
       )}
+      <BotFiles d={d} />
       {x?.changes?.length > 0 && (
         <details className="sb-ctx sb-changes" data-setting="bots-changes">
           <summary><Icon name="chevron" size={11} />{t('Changes to it ({n})', { n: x.changes.length })}</summary>

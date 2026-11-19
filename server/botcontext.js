@@ -11,7 +11,8 @@
 // exchange waits until you keep it (in Bridge AI, on the person's row of the bot's Conversations,
 // where you can also forget all of it at once); straight away, it's kept as it happens. Someone's
 // !forget me forgets theirs too. It's bounded (the latest exchanges, a few thousand characters a
-// person, a few hundred people), and it stays on this computer: it isn't in a bot's export, nor
+// person, a few hundred people), and it stays with you: it isn't in a bot's export (only your own
+// backup, sealed with your passphrase, and a Move to your own computer carry it: backup.js), nor
 // shown anywhere but to you.
 //
 //   { v: 1, people: { <person id>: { name, at, kept: [exchange], proposed: [exchange] } } }

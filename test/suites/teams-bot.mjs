@@ -13,7 +13,9 @@
 //   post of its own there. Refused, with no agent started: someone
 //   not named, a guest, someone from another organization, someone Teams didn't say who they are;
 //   a message not signed by Microsoft for this bot never heard, and counted in Settings. !help says
-//   how to ask in Teams; !what do you know about me only to them, in a chat of their own. Every
+//   how to ask in Teams; !what do you know about me only to them, in a chat of their own. A run at
+//   its time limit: you're asked in your own chat with it, in words, the asker told once, and your
+//   "continue 30" there lets it go on with no gap, in the record. Every
 //   event names Teams, and the client secret is in no log, record, command line or agent's
 //   environment. Settings in light and dark, on a computer and a phone.
 import fs from 'node:fs'
@@ -29,8 +31,9 @@ const kit = await startKit('teams-bot', {
   config: { name: 'Tester', trials: { 'slack-bot': true } },
   env: ({ home }) => {
     fs.mkdirSync(path.join(home, 'pricing'), { recursive: true })
-    // (Each question its own conversation: the same person asking again soon after carries none on.)
-    return { BRIDGE_TEAMS_URL: tm.url, BRIDGE_TEAMS_PORT: '0', BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_BOT_HOLD_MS: '3000', BRIDGE_BOT_CARRY_MS: '0' }
+    // (Each question its own conversation: the same person asking again soon after carries none on.
+    // A "minute" of a run's time limit is 3 seconds, and the grace window 9.)
+    return { BRIDGE_TEAMS_URL: tm.url, BRIDGE_TEAMS_PORT: '0', BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_BOT_HOLD_MS: '3000', BRIDGE_BOT_CARRY_MS: '0', BRIDGE_BOT_MINUTE_MS: '3000', BRIDGE_BOT_GRACE_MS: '9000' }
   },
 })
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'helper-claude.cjs'), 'utf8'))
@@ -175,6 +178,24 @@ try {
     await tm.say({ user: 'dana', kind: 'channel', mention: true, text: '!what do you know about me' })
     const told = await postedLike(/I don't remember anything about you|Here's what I remember/)
     ok(told?.conversation === 'a:personal-dana', 'asked in a channel: told only her, in a chat of her own', told)
+  })
+
+  // ---------- At the time limit: asked in your chat with it, in words ----------
+  await part('at the time limit', async () => {
+    await kit.api('/bots/b1/settings', { limits: { minutes: 1 } })
+    const q = await tm.say({ user: 'dana', text: 'compare every plan [work 14] [answer All alike.]' })
+    const a = await until(async () => (await st()).posted.find((x) => x.conversation === 'a:personal-tester' && /^Atlas's answer to Dana Reyes in a direct message has run \d+ minutes?: .+ Reply “continue 10”, “continue 30” or “stop”\.$/.test(x.text || '')), 20000)
+    ok(!!a, 'at its time limit: you\'re asked in your own chat with it, in words', (await st()).posted.slice(-3).map((x) => x.text))
+    const told = await postedLike(/^This is taking me longer than usual: I'm checking with Tester that I can carry on\.$/)
+    ok(told?.conversation === q.conversation, 'Dana is told it\'s taking longer, in her chat with it', told)
+    await tm.say({ user: 'tester', text: 'continue 30' })
+    const ack = await postedLike(/^Atlas carries on with its answer to Dana Reyes, for 30 minutes more\.$/)
+    const c = await until(() => events().find((e) => e.type === 'limit.continued'), 8000)
+    ok(ack?.conversation === 'a:personal-tester' && c?.via === 'teams' && c.by === 'Tester' && c.minutes === 30, 'your "continue 30" there: it goes on, you\'re told so, and it\'s in the record, by you from Teams', c)
+    const d = await draftOf('compare every plan', 30000)
+    ok(d?.draft === 'All alike.' && events().filter((e) => e.type === 'run.started' && e.q === d.id).length === 1, 'with no gap: one run, to its answer')
+    await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: false })
+    await kit.api('/bots/b1/settings', { limits: { minutes: 10 } })
   })
 
   // ---------- The record, and no secret anywhere ----------

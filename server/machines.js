@@ -49,7 +49,8 @@ const byRelay = (r) => conf.machines.find((m) => m.relay === r) || null
 // What this device says about itself to each of the others, sealed, as its first record (ABOUT):
 // its name, that it's a computer, where it's reached (null: nowhere now), so a move to another relay
 // is followed, and its key there, so a new one (Stop using the relay makes one) is too.
-const aboutMe = () => ({ name: relay.thisName(), kind: 'computer', relay: relay.relayUrl(), host: relay.publicKey(), os: OS, version: VERSION })
+// forDevices: what it passes on for its devices says which (forHeaders).
+const aboutMe = () => ({ name: relay.thisName(), kind: 'computer', relay: relay.relayUrl(), host: relay.publicKey(), os: OS, version: VERSION, forDevices: true })
 
 // This device's key for one of yours (made when they link, kept here).
 async function deviceKey(m) {
@@ -405,14 +406,15 @@ class Link {
   }
 
   // { status, json } of an API call on that device.
-  async call(method, u, body, ms = 20000) {
+  // h: headers of its own (which device of this one's it's for: forDevice).
+  async call(method, u, body, ms = 20000, h = []) {
     await this.ready(ms)
     return new Promise((resolve, reject) => {
       let head = null
       const parts = []
       const t = setTimeout(() => { r.cancel(); reject(new Error(`${this.m.name} didn't answer`)) }, ms)
       const b = body === undefined ? null : utf8(JSON.stringify(body))
-      const r = this.request({ m: method, u, h: [['content-type', 'application/json'], ['x-bridge-machine', relay.thisName()]], body: !!b }, {
+      const r = this.request({ m: method, u, h: [['content-type', 'application/json'], ['x-bridge-machine', relay.thisName()], ...h], body: !!b }, {
         onHead: (x) => { head = x },
         onChunk: (c) => parts.push(c),
         onEnd: () => {
@@ -428,11 +430,11 @@ class Link {
     })
   }
 
-  // A WebSocket on that device (a live terminal).
-  socket(u, handlers) {
+  // A WebSocket on that device (a live terminal). h: which device of this one's it's for (forHeaders).
+  socket(u, handlers, h = []) {
     const id = this.next++
     this.streams.set(id, handlers)
-    this.send(K.WS_OPEN, id, { u }).catch((e) => { this.streams.delete(id); handlers.onClose?.({ c: 1011, r: e.message }) })
+    this.send(K.WS_OPEN, id, { u, ...(h.length ? { h } : {}) }).catch((e) => { this.streams.delete(id); handlers.onClose?.({ c: 1011, r: e.message }) })
     return {
       send: (data, binary) => this.send(K.WS_MSG, id, Buffer.concat([Buffer.from([binary ? 0 : 1]), Buffer.isBuffer(data) ? data : Buffer.from(String(data))])).catch(() => {}),
       close: (c = 1000, r = '') => { if (this.streams.delete(id)) this.send(K.WS_CLOSE, id, { c, r }).catch(() => {}) },
@@ -453,22 +455,34 @@ const SEEN = cacheFile('machines-seen.json')
 const kept = new Map() // machine id -> its last summary
 try { for (const [id, s] of Object.entries(JSON.parse(fs.readFileSync(SEEN, 'utf8')))) if (s && typeof s === 'object') kept.set(id, s) } catch { /* none yet */ }
 let seenTimer = null
+// s: null, to forget what it last said (it hasn't let this computer in).
 const keep = (id, s) => {
-  kept.set(id, s)
+  if (s) kept.set(id, s)
+  else kept.delete(id)
   clearTimeout(seenTimer)
   seenTimer = setTimeout(() => {
     try { ensureDir(path.dirname(SEEN)); writeFileAtomic(SEEN, JSON.stringify(Object.fromEntries([...kept].filter(([k]) => byId(k))))) } catch { /* next time */ }
   }, 2000)
   seenTimer.unref?.()
 }
-export function list() {
+// The computers that keep one of this computer's devices out as it comes through here (forDevice),
+// as each last said in its summary: those it keeps out (keepOut), or, with a guardrail set there,
+// the only ones it lets in (letIn), so one it hasn't let in yet sees nothing of it either. What this
+// one shows of them, it hides from that device.
+const hides = (s, deviceId) => !!s && (s.keepOut?.includes(deviceId) || (Array.isArray(s.letIn) && !s.letIn.includes(deviceId)))
+export const keptFrom = (deviceId) => new Set(deviceId ? conf.machines.filter((m) => hides(kept.get(m.id), deviceId)).map((m) => m.id) : [])
+// for: the device of this computer's that asks (its id here), from whom what a computer that keeps it
+// out said is hidden (none of its agents, what waits there, its Home), said as not let in.
+export function list({ for: forId = null } = {}) {
+  const hidden = keptFrom(forId)
   return conf.machines.map((m) => {
     const l = links.get(m.id)
-    const s = kept.get(m.id)
+    const s = hidden.has(m.id) ? null : kept.get(m.id)
     return {
       id: m.id, name: s?.name || m.name, relay: m.relay, os: s?.os || m.os || null, version: s?.version || m.version || null,
       state: m.state, online: !!l?.session, lastSeen: m.lastSeen || null, addedAt: m.addedAt,
       held: !!m.held, // linked back to it, and it meets your others once you keep it here (onLinked)
+      notLetIn: shut.has(m.id) || hidden.has(m.id), // it hasn't let this computer (or that device) in
       code: m.state === 'asking' ? m.ask?.code || null : null,
       error: m.state === 'linked' && l?.session ? null : m.norelay ? `${m.name} stopped using its relay, so this computer can't reach it until it has one again. It can still reach this one, and says where it is once it does.` : l?.error || null,
       counts: s?.counts || {}, agents: s?.agents || [],
@@ -489,7 +503,7 @@ export const portOf = (id) => byId(id)?.port || null
 // The linked computer a request came through (relay.js's device for it), or null.
 export function ofDevice(d) {
   const m = d?.kind === 'computer' && d.relay ? byRelay(relay.cleanRelay(d.relay)) : null
-  return m && m.state === 'linked' ? { id: m.id, name: kept.get(m.id)?.name || m.name, relay: m.relay } : null
+  return m && m.state === 'linked' ? { id: m.id, name: kept.get(m.id)?.name || m.name, relay: m.relay, version: m.version || null } : null
 }
 export function keepPort(id, port) {
   const m = byId(id)
@@ -522,13 +536,14 @@ export async function about() {
 
 // A new name for one of your devices, given on that device itself so it's the same everywhere: in
 // its own Bridge AI, on your other devices and on your phones. '' goes back to the computer's own.
-export async function rename(id, name) {
+// by: the device of this one's that asked (forDevice), told to that one.
+export async function rename(id, name, by = []) {
   const m = byId(id)
   if (!m) throw Object.assign(new Error('No such device'), { status: 404 })
   const l = links.get(m.id)
   if (m.state !== 'linked' || !l?.session) throw new Error(`${m.name} is offline. Rename it once it's back, or in Bridge AI on ${m.name}.`)
   try {
-    await l.call('POST', '/api/machines/name', { name: String(name ?? '').slice(0, 60) }, 12000)
+    await l.call('POST', '/api/machines/name', { name: String(name ?? '').slice(0, 60) }, 12000, by)
   } catch (e) {
     if (/\b404\b|Cannot POST/.test(e.message)) throw new Error(`Update Bridge AI on ${m.name} to rename it from here.`)
     throw e
@@ -540,8 +555,9 @@ export async function rename(id, name) {
 // Bridge AI's sounds on or off (the speaker in the top bar, on any of your devices) on the others
 // too, those online: each is told once, and doesn't pass it on. One offline, or on a Bridge AI from
 // before the speaker, keeps its own.
-export async function soundsEverywhere(on) {
-  await Promise.all(conf.machines.filter((m) => m.state === 'linked' && links.get(m.id)?.session).map((m) => links.get(m.id).call('POST', '/api/alerts/sound', { on, here: true }, 8000).catch(() => {})))
+// by: for a device of this computer's, which (forDevice), so each may keep it out.
+export async function soundsEverywhere(on, by = []) {
+  await Promise.all(conf.machines.filter((m) => m.state === 'linked' && links.get(m.id)?.session).map((m) => links.get(m.id).call('POST', '/api/alerts/sound', { on, here: true }, 8000, by).catch(() => {})))
 }
 
 // A pairing link (https://<relay>/#pair=XXXX-…), or its address and code typed in (with or without
@@ -721,8 +737,9 @@ export function strays() {
 // linked to this one with Pair a device's code: it meets the others only once you've kept it here
 // (Keep, where the app says it paired), so a code that got out reaches this computer at most.
 // (Introduced: only a computer kept here can introduce one: index.js.)
-function onLinked(m) {
-  const via = links.get(m.id)?.via || 'you'
+// Not let in there yet (Which Devices May Connect, with a guardrail set there): it's done once it
+// is, which the next word from there shows (refreshNow).
+function onLinked(m, via = links.get(m.id)?.via || 'you') {
   if (via === 'back' && !relay.kept(m.relay)) {
     m.held = true
     save()
@@ -730,8 +747,9 @@ function onLinked(m) {
     return
   }
   ;(async () => {
-    if (via !== 'back') await linkBack(m).catch((e) => console.error(`machines: linking back from ${m.name}:`, e.message))
-    if (via !== 'intro') await introduce(m).catch((e) => console.error(`machines: introducing ${m.name}:`, e.message))
+    const later = (what) => (e) => { if (e.said === 'notLetIn') { m.waitIn = via; save() } else console.error(`machines: ${what} ${m.name}:`, e.message) }
+    if (via !== 'back') await linkBack(m).catch(later('linking back from'))
+    if (via !== 'intro' && !m.waitIn) await introduce(m).catch(later('introducing'))
     await refresh(m).catch(() => {})
   })()
 }
@@ -795,12 +813,21 @@ function refresh(m, since = 0) {
   asking.set(m.id, { at, p })
   return p
 }
+// A computer that hasn't let this one in (Which Devices May Connect there), as its last word said.
+const shut = new Set()
 async function refreshNow(m, asked = Date.now()) {
   const l = links.get(m.id)
   if (!l?.session) return
-  const s = await l.call('GET', `/api/machines/summary${wantHome() ? '?home=1' : ''}`, undefined, 12000)
+  let s
+  try { s = await l.call('GET', `/api/machines/summary${wantHome() ? '?home=1' : ''}`, undefined, 12000) } catch (e) {
+    // Not let in there: nothing it said before is shown any more either.
+    if (e.said === 'notLetIn') { shut.add(m.id); keep(m.id, null) }
+    throw e
+  }
+  shut.delete(m.id)
+  if (m.waitIn) { const via = m.waitIn; delete m.waitIn; save(); onLinked(m, via) }
   if ((kept.get(m.id)?.asked || 0) > asked) return // a later one came first
-  keep(m.id, { asked, name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: Array.isArray(s.agents) ? s.agents.slice(0, 40) : [], needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, home: Array.isArray(s.home) ? s.home.slice(0, 100) : null, about: s.about || null, systemName: s.systemName || null, notifies: Number.isFinite(s.notifies) ? s.notifies : null, at: Date.now() })
+  keep(m.id, { asked, name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: Array.isArray(s.agents) ? s.agents.slice(0, 40) : [], needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, home: Array.isArray(s.home) ? s.home.slice(0, 100) : null, about: s.about || null, systemName: s.systemName || null, notifies: Number.isFinite(s.notifies) ? s.notifies : null, keepOut: Array.isArray(s.keepOut) ? s.keepOut.filter((x) => typeof x === 'string').slice(0, 200) : [], letIn: Array.isArray(s.letIn) ? s.letIn.filter((x) => typeof x === 'string').slice(0, 500) : null, at: Date.now() })
   if (s.name && s.name !== m.name) { m.name = String(s.name).slice(0, 60); save() }
   if (s.os !== m.os || s.version !== m.version) { m.os = s.os; m.version = s.version; save() }
 }
@@ -866,12 +893,13 @@ export async function socketOn(id, u, handlers, ms = 12000) {
 // An API call on that device, through the link (index.js: whether it's signed in to your Bold
 // Bridge account, and a grant to sign it in): its answer, or why not (code offline when it isn't
 // reachable just now).
-export async function callOn(id, method, u, body, ms = 15000) {
+// h: for one of this computer's devices, which (forDevice).
+export async function callOn(id, method, u, body, ms = 15000, h = []) {
   const m = byId(id)
   if (!m || m.state !== 'linked') throw Object.assign(new Error('That device isn\'t linked to this one any more'), { status: 404 })
   const l = links.get(m.id)
   if (!l?.session) throw Object.assign(new Error(`${m.name} is offline`), { code: 'offline' })
-  return l.call(method, u, body, ms)
+  return l.call(method, u, body, ms, h)
 }
 
 // Whether the link to that device goes through Bridge AI's hosted relay, which carries only so much
@@ -945,6 +973,7 @@ export async function proxy(req, res, { frames = null, ui = null } = {}) {
   const u = hit[2] || '/'
   const h = Object.entries(req.headers).filter(([k]) => PASS.has(k)).map(([k, v]) => [k, String(v)])
   h.push(['x-bridge-machine', relay.thisName()])
+  h.push(...forHeaders(relay.deviceOf(req.headers['x-bridge-relay'])))
   const hasBody = !['GET', 'HEAD'].includes(req.method)
   let done = false
   let r = null
@@ -1021,6 +1050,14 @@ export async function proxy(req, res, { frames = null, ui = null } = {}) {
 let passCheck = () => null
 export const usePassCheck = (fn) => { passCheck = fn }
 const onward = new Map() // device id -> its sockets gone on to another computer's screen
+// Which of this computer's devices a request or WebSocket going on to another computer is for: that
+// computer checks it as well as this one (letin.js, remote.js shutFor), keeps it out apart, and
+// knows it as the same device it's paired with when the key is the same. What the device sent of
+// these never goes on (only PASS does, above). Its name, which may be any text, goes encoded.
+const forHeaders = (d) => (d ? [['x-bridge-for', '1'], ['x-bridge-for-id', d.id], ['x-bridge-for-name', encodeURIComponent(String(d.name || '').slice(0, 60))], ['x-bridge-for-kind', d.kind === 'computer' ? 'computer' : 'phone'], ...(d.key ? [['x-bridge-for-key', d.key]] : [])] : [])
+// The same for what this computer asks of another for one of its devices (a copy it asked for, a
+// meeting it mentions): id, its id here (none: for this computer's own user).
+export const forDevice = (id) => forHeaders(relay.deviceOf(id))
 export function endOnward(id, why) {
   for (const c of onward.get(id) || []) { try { c.send(JSON.stringify({ t: 'error', code: 'device', why })); c.close(1008, 'refused') } catch { /* closed */ } }
 }
@@ -1064,7 +1101,7 @@ export function upgrade(req, socket, head) {
         onMessage: (data, binary) => { if (client.readyState === 1) client.send(data, { binary }) },
         onClose: (c) => { try { client.close(c?.c >= 1000 && c.c < 5000 && c.c !== 1005 && c.c !== 1006 ? c.c : 1011, String(c?.r || '').slice(0, 120)) } catch { /* closed */ } },
         onError: () => { try { client.close(1011) } catch { /* closed */ } },
-      })
+      }, forHeaders(asker))
     }).catch((e) => { try { client.close(1011, String(e.message).slice(0, 120)) } catch { /* closed */ } })
     client.on('message', (data, binary) => { const d = Buffer.isBuffer(data) ? data : Buffer.from(data); if (open) remote.send(d, binary); else pending.push([d, binary]) })
     client.on('close', (c, r) => remote?.close(c, String(r || '')))

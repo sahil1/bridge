@@ -32,8 +32,9 @@ const cleanLive = (b) => ({
 })
 
 // remote(): remote.js's (made after this, with this one's tell). pushDevices(): the devices that
-// get this computer's notifications (push.js). onLive(list): what's live changed.
-export function makeTell({ remote, notify, machines, relay, pushDevices = () => [], onLive = () => {} }) {
+// get this computer's notifications (push.js). onLive(list): what's live changed. out(m): a linked
+// computer not let in here (Which Devices May Connect), which is told nothing.
+export function makeTell({ remote, notify, machines, relay, pushDevices = () => [], onLive = () => {}, out = () => false }) {
   const there = new Map() // machine id -> { name, at, sessions, asks }: what each said last
   const name = () => relay.thisName()
   const linked = () => machines.list().filter((m) => m.state === 'linked')
@@ -66,7 +67,7 @@ export function makeTell({ remote, notify, machines, relay, pushDevices = () => 
   async function tell(ev) {
     const viewer = relay.deviceOf(ev.by?.id)
     const mine = notify.send({ ...noteFor(ev, name(), 'screen', { id: ev.id }), skip: { devices: ev.by?.id ? [ev.by.id] : [] } }).then(sentOf, () => 0)
-    const others = linked().map(async (m) => {
+    const others = linked().filter((m) => !out(m)).map(async (m) => {
       // The viewer is that computer itself, or a device paired with it: it leaves that one out.
       const byYou = machines.ofDevice(viewer)?.id === m.id
       const told = { what: ev.what, id: ev.id, by: byOf(ev.by), for: ev.for || null, forKind: ev.forKind || null, forId: byYou ? ev.forId || null : null, byYou, control: !!ev.control }
@@ -89,7 +90,8 @@ export function makeTell({ remote, notify, machines, relay, pushDevices = () => 
     if (!t || !['view', 'control', 'ask'].includes(t.what) || typeof t.id !== 'string') return { ok: true, sent: 0 }
     const ev = { what: t.what, ...cleanOne(t) }
     const forId = clip(t.forId, 40)
-    const skip = { devices: forId ? [forId] : [], here: t.byYou === true && !forId }
+    // (Nor any device of this computer's that computer keeps out: machines.js keptFrom.)
+    const skip = { devices: forId ? [forId] : [], here: t.byYou === true && !forId, hide: (device) => machines.keptFrom(device).has(m.id) }
     return { ok: true, sent: sentOf(await notify.send({ ...noteFor(ev, m.name, 'screen-there', { m: m.id, id: ev.id }), skip }).catch(() => [])) }
   }
 
@@ -132,17 +134,18 @@ export function makeTell({ remote, notify, machines, relay, pushDevices = () => 
   function say() {
     clearTimeout(againTimer)
     const now = own()
-    for (const m of linked()) machines.callOn(m.id, 'POST', '/api/remote/heard', now, 10000).catch(() => {})
+    for (const m of linked().filter((x) => !out(x))) machines.callOn(m.id, 'POST', '/api/remote/heard', now, 10000).catch(() => {})
     if (now.sessions.length || now.asks.length) { againTimer = setTimeout(say, AGAIN_MS); againTimer.unref?.() }
   }
 
   // ---------- Stop and Block ----------
   // From a window here (the card): this computer's own session, or one on another of your computers,
-  // through its link. by: who it came from, for that computer's record.
-  async function end({ machine = null, id, block = false }, by) {
+  // through its link. by: who it came from, for that computer's record; h: for a device of this
+  // computer's, which (machines.js forDevice).
+  async function end({ machine = null, id, block = false }, by, h = []) {
     if (!machine) return remote().endFrom(String(id), { block: !!block, by })
     if (!linked().some((m) => m.id === machine)) throw Object.assign(new Error('That computer isn\'t linked to this one any more'), { status: 404 })
-    const r = await machines.callOn(machine, 'POST', `/api/remote/sessions/${encodeURIComponent(String(id))}/end`, { block: !!block, from: by }, 12000)
+    const r = await machines.callOn(machine, 'POST', `/api/remote/sessions/${encodeURIComponent(String(id))}/end`, { block: !!block, from: by }, 12000, h)
     const t = there.get(machine)
     if (t) { t.sessions = t.sessions.filter((x) => x.id !== id); t.asks = t.asks.filter((x) => x.id !== id); shown() }
     return r
@@ -156,7 +159,7 @@ export function makeTell({ remote, notify, machines, relay, pushDevices = () => 
   }
   // A notification's buttons: this computer's (remote.js), or another's (through its link).
   notify.onButton('screen', (a, ctx) => remote().endFrom(String(a.id), { block: a.k === 'block', by: ctx.by }))
-  notify.onButton('screen-there', (a, ctx) => end({ machine: String(a.m), id: String(a.id), block: a.k === 'block' }, ctx.by))
+  notify.onButton('screen-there', (a, ctx) => end({ machine: String(a.m), id: String(a.id), block: a.k === 'block' }, ctx.by, ctx.h))
 
   // Where this computer's notifications of its screen go, for Settings: the devices that get its
   // notifications, and each linked computer with how many get its own (null: too old to say).

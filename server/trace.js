@@ -28,7 +28,8 @@
 //
 // Beside the lines, files the events point to: each answering agent's transcript (runs/) and the
 // diff of each change (changes/), in a folder a month, readable by you only, gzipped once they're a
-// month old, and deleted with their month.
+// month old, and deleted with their month; and the files its runs made and sent back (files/,
+// botfiles.js), deleted with their month too but never gzipped, so each still opens as it is.
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -40,7 +41,8 @@ export const KEEP = { '90d': 90, '1y': 365, forever: null }
 export const keepOf = (v) => (Object.hasOwn(KEEP, v) ? v : '1y')
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex')
 const MONTH = /^(\d{4})-(\d{2})\.jsonl$/
-const BESIDE = ['runs', 'changes'] // the files the events point to, a folder a month in each
+const BESIDE = ['runs', 'changes', 'files'] // the files the events point to, a folder a month in each
+const GZIPPED = ['runs', 'changes'] // (a file a run made stays as it was)
 const GZIP_DAYS = 30
 
 // ---------- What a line's hash covers ----------
@@ -230,7 +232,7 @@ export function makeTrace(dir, base = () => ({})) {
   function gzipOld() {
     const cut = Date.now() - GZIP_DAYS * 86400000
     let n = 0
-    for (const kind of BESIDE) {
+    for (const kind of GZIPPED) {
       let ms = []
       try { ms = fs.readdirSync(path.join(tdir, kind)) } catch { continue }
       for (const m of ms) {
