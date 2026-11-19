@@ -66,3 +66,6 @@ https://huggingface.co/google/gemma-4-E4B-it, https://huggingface.co/google/gemm
 the GGUF form made by the llama.cpp project (https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF,
 https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF, https://huggingface.co/ggml-org/gemma-4-26B-A4B-it-GGUF),
 are each downloaded from Hugging Face when you ask for that one.
+
+Scan QR code in a phone's browser reads the code with jsQR (https://github.com/cozmo/jsQR, Apache
+License 2.0) where the browser has no QR code reader of its own.

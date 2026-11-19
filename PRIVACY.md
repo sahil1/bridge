@@ -627,7 +627,8 @@ and, through it, end to end to your computer.
 - **The demo**: Try the demo runs inside the app on made-up data and sends nothing anywhere.
 - **Camera**: to scan the pairing QR code, and to take a photo when you attach one to a message.
   The scanner's pictures stay on the phone; a photo you attach goes end-to-end encrypted to your
-  computer, like the message.
+  computer, like the message. Bridge AI in a phone's browser uses the camera only while you Scan QR
+  code, after the browser asks, and reads the code on the phone too.
 - **Microphone**: only while you dictate a message, record a voice note or take notes in a
   meeting. The sound goes end-to-end encrypted to your computer, which turns it into text there
   (or, for a meeting, with the speech service you picked on it). The phone asks for the microphone

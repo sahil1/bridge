@@ -243,7 +243,7 @@ Link your other computers running Bridge AI (Mac, Windows or Linux) and switch b
 
 1. Each device needs its relay (Settings › Account & Devices, below).
 2. On one, Settings › Account & Devices › Phone › **Pair a device**. It shows a QR code, a link and a code, the same for a phone or a computer, for 15 minutes and one device (**Add another device** makes a new one). A pairing link opened on a phone asks "Pair with <name>?" first.
-3. On the other computer, Settings › Account & Devices › Computers › **Link a device**: paste the link, or type the address and code. They link both ways. The first one says the new device paired, with **Keep** and **Remove**; once you keep it, it's introduced to your other devices too.
+3. On the other computer, Settings › Account & Devices › Computers › **Link a device**: paste the link, or type the address and code; from a phone showing it, **Scan QR code** reads the code instead. They link both ways. The first one says the new device paired, with **Keep** and **Remove**; once you keep it, it's introduced to your other devices too.
 
 Or let your phone do it: scan the new computer's code with the Bridge AI app on a phone that's paired with another of your computers. The phone offers to link the two, asks, and takes you to the other one to allow it after checking both show the same six digits. A device's relay address alone asks the same way.
 
