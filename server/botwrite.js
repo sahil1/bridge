@@ -93,9 +93,10 @@ export const secretLike = (rel) => String(rel || '').split(SEP).some((x) => x.st
 const STEERS = /^(claude|agents|gemini|copilot-instructions|bot|instructions|system[-_]?prompt)\.md$|^\.?(cursorrules|windsurfrules|clinerules|aider\.conf\.ya?ml)$|^(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|makefile|gnumakefile|justfile|rakefile|gemfile|dockerfile|containerfile|docker-compose\.ya?ml|compose\.ya?ml|vagrantfile|procfile|cmakelists\.txt|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|pom\.xml|cargo\.toml|pyproject\.toml|setup\.py|setup\.cfg|tox\.ini|noxfile\.py|conftest\.py|manifest\.json|\.pre-commit-config\.yaml|lefthook\.ya?ml)$/i
 export const steers = (rel) => { const p = String(rel || '').split(SEP); const name = p.at(-1); return STEERS.test(name) || p.some((x) => /^(\.github|\.husky|\.circleci|\.gitlab|\.vscode|\.idea|\.claude|\.cursor)$/i.test(x)) }
 // A file a computer runs or opens as a program: a script, a launch agent or login item, a shortcut
-// or a Windows program (besides one marked runnable already).
-const LAUNCHES = /\.(sh|bash|zsh|fish|ksh|csh|command|tool|plist|fileloc|webloc|inetloc|workflow|scpt|scptd|applescript|terminal|desktop|service|timer|lnk|url|bat|cmd|ps1|psm1|psd1|vbs|vbe|js[e]?|wsf|wsh|hta|exe|com|scr|msi|msp|reg|cpl|jar|app|pkg|dmg|deb|rpm|appimage)$/i
-export const launches = (rel) => LAUNCHES.test(String(rel || '').split(SEP).pop())
+// or a Windows program (besides one marked runnable already). A .js file only on Windows, where
+// opening one runs it.
+const LAUNCHES = /\.(sh|bash|zsh|fish|ksh|csh|command|tool|plist|fileloc|webloc|inetloc|workflow|scpt|scptd|applescript|terminal|desktop|service|timer|lnk|url|bat|cmd|ps1|psm1|psd1|vbs|vbe|jse|wsf|wsh|hta|exe|com|scr|msi|msp|reg|cpl|jar|app|pkg|dmg|deb|rpm|appimage)$/i
+export const launches = (rel) => { const name = String(rel || '').split(SEP).pop(); return LAUNCHES.test(name) || (process.platform === 'win32' && /\.js$/i.test(name)) }
 // A folder your computer runs things from, which a bot never changes files in (rel: its real path
 // from your home folder, its parts joined by /): anything hidden (~/.config/autostart, ~/.local/bin),
 // ~/Library but iCloud Drive's (launch agents, login items, services), ~/Applications, ~/bin, and
@@ -675,7 +676,10 @@ async function rootOf(c, part, roots) {
 }
 // A file written whole: a new file beside it, checked against what should be there still (expect: a
 // hash, or 'none') just before it's renamed over it, the folders it needs made first (each checked to
-// be inside root as it really is).
+// be inside root as it really is). What's left (the security review's 13th): a program of yours that
+// swaps a folder on the way for a link between that check and the rename could have the file land
+// through it. Node has no openat/renameat to pin the folder; anything able to do that already runs as
+// you, so the window is a fraction of a millisecond against something with your rights already.
 async function put(root, place, buf, mode, expect) {
   for (const d of place.missing) {
     await fs.promises.mkdir(d).catch((e) => { if (e.code !== 'EEXIST') throw e })
