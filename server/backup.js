@@ -242,7 +242,7 @@ export async function planOf(x, { kind = 'file', from = null } = {}) {
     // (From a file, who you are there isn't taken: drafts would go to whoever it names. Said instead.)
     // (And what would let it act for you or say more than it's asked, as the file asks: from a file,
     // held here until you turn it on, index.js bringBot.)
-    const asks = { changes: ['suggest', 'pr'].includes(st.changes) ? st.changes : 'none', repo: st.repo ? clean(st.repo, 300) : null, mcp: (Array.isArray(st.mcp) ? st.mcp : []).map((n) => clean(n, 64)).slice(0, 20), agentCopies: st.agentCopies === true, agentsStatus: st.agentsStatus === true, memory: ['auto', 'off'].includes(st.memory) ? st.memory : 'approve' }
+    const asks = { answerers: (Array.isArray(st.answerers) ? st.answerers : st.agent ? [`agent:${st.agent}`] : []).map((x) => clean(x, 120)).slice(0, 12), changes: ['suggest', 'pr'].includes(st.changes) ? st.changes : 'none', repo: st.repo ? clean(st.repo, 300) : null, mcp: (Array.isArray(st.mcp) ? st.mcp : []).map((n) => clean(n, 64)).slice(0, 20), agentCopies: st.agentCopies === true, agentsStatus: st.agentsStatus === true, memory: ['auto', 'off'].includes(st.memory) ? st.memory : 'approve' }
     return { key: b.id, name: want, as, renamed: as !== want, reads, who: st.who === 'channels' ? 'channels' : 'named', askers, owners: kind === 'move' ? owners : [], ownersLeft: kind === 'file' ? owners : [], auto: st.auto === true, autoHere: st.auto === true && kind === 'move', asks, held: kind === 'file', people: typeof b.people === 'string' }
   })
   const botName = (id) => bots.find((b) => b.key === id)?.as || null
@@ -445,7 +445,7 @@ async function moveNow(machineId) {
   const id = newId()
   const rec = {
     id, to: m.id, toName: m.name, at: new Date().toISOString(), state: 'sending',
-    bots: x.bots.map((b) => b.id), connections: x.connections.map((c) => c.id),
+    bots: x.bots.map((b) => b.id), connections: x.connections.map((c) => c.id), live: x.connections.filter((c) => !c.paused).map((c) => c.id),
     routines: x.routines.filter((r) => routines.scheduleOf(r) && r.auto && !r.paused).map((r) => r.id),
   }
   state.moves = [rec, ...state.moves].slice(0, 50)
@@ -482,6 +482,8 @@ export function moved(m, body = {}) {
   if (rec.state === 'moved') return { ok: true, already: true, ...viewMove(rec) }
   const other = state.moves.find((y) => y.state === 'moved' && y.id !== rec.id)
   if (other) throw fail(`This setup moved to ${other.toName} already`, 409, 'moved')
+  // (Given back to the computer it came from since it was sent: it answers there, not here to pass on.)
+  if ((rec.live || rec.connections || []).some((id) => /^back:/.test(String(conns.get(id)?.pausedBy || '')))) throw fail(`${h.computer?.() || 'That computer'} gave it back to the computer it came from, where it answers now`, 409, 'given-back')
   if (rec.state !== 'sent') throw fail(`That move was ${rec.state === 'cancelled' ? 'called off' : rec.state} on ${h.computer?.() || 'that computer'}`, 409, 'not-waiting')
   const why = `Moved to ${rec.toName}: it answers there now`
   const paused = { bots: [], connections: [], routines: [] }
@@ -529,6 +531,13 @@ export function giveBack(m, body = {}) {
   const on = (r.connections || []).map((id) => /^move:(.+)$/.exec(String(conns.get(id)?.pausedBy || ''))?.[1]).find(Boolean)
   const onward = on && moveOf(on)
   if (onward?.state === 'moved') throw fail(`${h.computer?.() || 'That computer'} moved it on to ${onward.toName}, where it answers now: Start Here Again on ${h.computer?.() || 'it'} first, then here`, 409, 'moved-on')
+  // (A move of it on from here still waiting there is called off, and that computer told, so it can't
+  // be applied there now it's given back.)
+  const mine = new Set(r.connections || [])
+  for (const y of state.moves.filter((z) => (z.state === 'sending' || z.state === 'sent') && (z.connections || []).some((id) => mine.has(id)))) {
+    y.state = 'cancelled'
+    machines.callOn(y.to, 'POST', '/api/backup/withdrawn', { id: y.id }, 15000).catch(() => {})
+  }
   const why = `${r.from} took it back: it answers there now`
   for (const id of r.connections || []) { const c = conns.get(id); if (c && !(c.paused && /^back:/.test(c.pausedBy || ''))) conns.save(id, { paused: true, pausedWhy: why, pausedBy: `back:${r.move}` }) }
   for (const id of r.bots || []) { try { if (store.get(id) && !store.get(id).paused) h.pauseBot?.(id, why) } catch { /* gone */ } }

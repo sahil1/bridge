@@ -19,6 +19,7 @@ const PARTS = () => [['bots', t('Bots')], ['connections', t('Connections')], ['r
 const when = (iso) => (iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '')
 // What a bot's file asks for that would let it act for you or say more than it's asked, in words.
 const asksOf = (a = {}) => [
+  a.answerers?.length > 0 && t('answered by {list}', { list: a.answerers.join(', ') }),
   a.changes === 'pr' && t('opens draft pull requests in {repo}', { repo: a.repo || t('its repository') }),
   a.changes === 'suggest' && t('suggests changes in {repo}', { repo: a.repo || t('its repository') }),
   a.mcp?.length > 0 && t('uses your MCP servers {names}', { names: a.mcp.join(', ') }),

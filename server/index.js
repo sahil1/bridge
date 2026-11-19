@@ -5097,21 +5097,23 @@ app.post('/api/bots/questions/:id', botsGuard, wrapBot((req) => desk.decide(req.
 // stand. From a file (fromFile: its own export, a backup) what would let it act for you or say
 // more than it's asked is held, as a new bot has it, until you turn it on here once you've looked it
 // over (HELD: answering without asking, who you are on each platform, which drafts would go to,
-// changes and their repository, your MCP servers, copies of your agents' conversations, saying what
+// what answers (Automatic: a file can't pick Codex, whose sandbox reads beyond its folders), changes
+// and their repository, your MCP servers, copies of your agents' conversations, saying what
 // your agents are doing, keeping what it learns without asking): each said. A move between your own
 // computers keeps them (backup.js shows them first). { bot, renamed, problems, memory }
 const BRING_WHAT = { who: 'who can ask', askers: 'who can ask', owner: 'you in Slack', owners: 'you in Discord and Teams', instructionsFile: 'its instructions file', repo: 'its repository', agent: 'what answers', answerers: 'what answers', changes: 'its changes', mcp: 'its MCP servers', muted: 'its muted channels', listen: 'the channels it listens in', agentCopies: 'copies of your agents\' conversations', agentsStatus: 'saying what your agents are doing', memory: 'what it remembers' }
-const HELD = { auto: false, owner: null, owners: null, changes: 'none', repo: null, mcp: [], agentCopies: false, agentsStatus: false, memory: 'approve' }
+const HELD = { auto: false, owner: null, owners: null, agent: null, answerers: null, changes: 'none', repo: null, mcp: [], agentCopies: false, agentsStatus: false, memory: 'approve' }
 const heldSays = (name, k, v, all = {}) => ({
   auto: `${name} doesn't answer without asking here: turn that on in its settings once you've looked it over`,
   owner: `Who you are in Slack, Discord and Teams isn't taken from a file: set it again in ${name}'s settings`,
+  answerers: `${name} is answered by what's here (Automatic): the file asked for ${[...(Array.isArray(all.answerers) ? all.answerers : []), ...(all.agent ? [`agent:${all.agent}`] : [])].join(', ')}; pick it in its settings once you've looked it over`,
   changes: `${name} doesn't make changes here (the file asked for ${v === 'pr' ? 'draft pull requests' : 'suggested changes'}${all.repo ? ` in ${String(all.repo).slice(0, 200)}` : ''}): turn that on in its settings once you've looked it over`,
   mcp: `${name} uses none of your MCP servers here (the file asked for ${(Array.isArray(v) ? v : []).join(', ')}): pick them in its settings`,
   agentCopies: `${name} doesn't answer from copies of your agents' conversations here: turn that on in its settings`,
   agentsStatus: `${name} doesn't say what your agents are doing here: turn that on in its settings`,
   memory: `${name} asks you before it keeps what it learns here (the file asked for ${v === 'off' ? 'none kept' : 'kept straight away'}): change it in its settings`,
 }[k] || null)
-const heldDiffers = (k, v) => (k === 'owner' ? !!v?.id : k === 'owners' ? Object.keys(v || {}).length > 0 : k === 'mcp' ? Array.isArray(v) && v.length > 0 : k === 'repo' ? false : JSON.stringify(v) !== JSON.stringify(HELD[k]))
+const heldDiffers = (k, v) => (k === 'owner' ? !!v?.id : k === 'owners' ? Object.keys(v || {}).length > 0 : ['mcp', 'answerers'].includes(k) ? Array.isArray(v) && v.length > 0 : k === 'agent' ? !!v : k === 'repo' ? false : JSON.stringify(v) !== JSON.stringify(HELD[k]))
 async function bringBot(bundle, asked, { fromFile = true, why = null } = {}) {
   const req = asked || { headers: {} }
   const r = botsStore.fromBundle(bundle, botOwnerName(), { held: true })
@@ -5121,7 +5123,7 @@ async function bringBot(bundle, asked, { fromFile = true, why = null } = {}) {
     if (!Object.hasOwn(r.held, k)) continue
     const v = r.held[k]
     if (fromFile && Object.hasOwn(HELD, k)) {
-      const said = heldDiffers(k, v) ? heldSays(r.bot.name, k === 'owners' ? 'owner' : k, v, r.held) : null
+      const said = heldDiffers(k, v) ? heldSays(r.bot.name, k === 'owners' ? 'owner' : k === 'agent' ? 'answerers' : k, v, r.held) : null
       if (said && !problems.includes(said)) problems.push(said)
       continue
     }
