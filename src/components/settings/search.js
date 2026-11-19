@@ -37,6 +37,7 @@ export const SETTINGS = [
     ['providers-labs', tx('API keys'), 'api key anthropic openai gemini xai grok mistral cohere perplexity meta'],
     ['accounts', tx('Accounts'), 'account switch work personal sign in login auto default', { near: 'providers-labs' }],
     ['providers-local', tx('Models on this computer'), 'local model ollama lm studio gemma offline download'],
+    ['model-jobs', tx('Models for Each Task'), 'model task job meeting notes ai assist mail titles diagrams live fallback auto cloud first together groq openrouter fireworks cerebras hugging face'],
     ['cloud', tx('Cloud Agents'), 'cloud agents cursor copilot jules claude managed keys'],
     ['providers-clouds', tx('Clouds'), 'azure aws bedrock vertex google cloud'],
     ['providers-hosted', tx('Hosted open models'), 'openrouter groq together fireworks cerebras hugging face'],

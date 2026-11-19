@@ -3,8 +3,8 @@
 // (answers-2026-11.jsonl). A line: when, the route and model ("openai", "gpt-5"; "cli", "claude"
 // for a sign-in's one-shot mode), the model the provider says answered when that's another name,
 // which part of Bridge AI asked (feature), tokens in (everything read, cached included) and out, the
-// cached and cache-written part, and the seconds it took. in and out are null when the answer
-// doesn't say. It stays on this computer: the usage counts sent (counts.js) never read it.
+// cached and cache-written part, and the seconds it took; for a job's fallback, the model it answered
+// for and why that one couldn't (instead, why). in and out are null when the answer doesn't say. It stays on this computer: the usage counts sent (counts.js) never read it.
 // Kept for this month and the twelve before; a month's file stops at MAX (and says so) so nothing
 // can grow it without bound. Appends are queued and never awaited by an answer, and a failure is
 // kept to be shown (status()), not thrown.
@@ -54,8 +54,8 @@ const sizes = new Map() // month -> bytes, once looked at
 let made = false
 
 // One answer: id is the model as chatmodels.js names it ("openai:gpt-5", "cli:claude"), usage what
-// usageOf() read (or null), ms how long it took.
-export function record({ id, feature, usage, ms }) {
+// usageOf() read (or null), ms how long it took, instead { of, why } when it stood in for another.
+export function record({ id, feature, usage, ms, instead = null }) {
   const [route, ...rest] = String(id || '').split(':')
   const model = rest.join(':')
   if (!route) return
@@ -66,6 +66,7 @@ export function record({ id, feature, usage, ms }) {
     ...(usage?.model && usage.model !== model ? { served: String(usage.model).slice(0, 120) } : {}),
     ...(typeof usage?.cost === 'number' ? { cost: usage.cost } : {}),
     s: Math.round(ms || 0) / 1000,
+    ...(instead?.of ? { instead: String(instead.of).slice(0, 200), why: String(instead.why || '').slice(0, 200) } : {}),
   }
   queue = queue.then(() => append(line)).catch((e) => { state.error = e.message; state.errorAt = new Date().toISOString() })
 }
