@@ -132,30 +132,6 @@ try {
     ok(!!(await until(async () => (await inThread(q.ts)).find((x) => /Bumped\.[\s\S]*Draft pull request: https:/.test(x.text)), 20000)), 'signed in again: Send opens it, and sends the link', r.item?.state)
   })
 
-  // ---------- Git's own files in its copy, written by its agent ----------
-  // Its hook refuses .git; one written past it (as if the hook never ran) pointing git at a folder of
-  // the agent's own, with a file-system monitor or a filter that would run a command, and a
-  // .gitattributes naming it: Bridge AI's git never follows it, nothing runs, nothing is taken.
-  await part('git\'s own files', async () => {
-    const marker = path.join(kit.home, 'PWNED')
-    const evil = [
-      '[edit-anywhere .git gitdir: elsewhere]', '[edit-anywhere .claude./settings.json x]', '[edit-anywhere CLAUDE~1/settings.json x]', '[edit-anywhere .mcp.json:x y]',
-      '[force-write .git gitdir: evil]', '[force-write evil/HEAD ref: refs/heads/main]', '[force-write evil/objects/.keep x]', '[force-write evil/refs/heads/.keep x]',
-      `[force-write evil/config {{core}}\\n\\trepositoryformatversion = 0\\n\\tbare = false\\n\\tfsmonitor = "touch '${marker}'; false"\\n{{filter "x"}}\\n\\tclean = "touch '${marker}'; cat"]`,
-      '[force-write .gitattributes * filter=x]', '[edit README.md Hello evil]', '[answer Done.]',
-    ].join(' ')
-    await slack.ask({ user: 'U0DANA', text: `${M} Please tidy the readme ${evil}` })
-    const d = await draftOf('Please tidy the readme')
-    const failed = (await timelineOf('b1', 'Please tidy the readme')).find((e) => e.type === 'change.failed')
-    ok(!fs.existsSync(marker), 'nothing the agent wrote in git\'s own files ran', fs.existsSync(marker))
-    ok(/git files were changed/.test(failed?.error || '') && !d?.change, 'the change isn\'t taken, and that\'s said', failed?.error)
-    ok(logOf('hooks.log').some((x) => x.status === 2 && /\.git$/.test(x.path || '')), 'its hook refused .git', logOf('hooks.log').filter((x) => x.status === 2))
-    const refusedTop = logOf('hooks.log').filter((x) => x.status === 2).map((x) => x.path || '')
-    ok([/\.claude\.\/settings\.json$/, /CLAUDE~1\/settings\.json$/, /\.mcp\.json:x$/].every((re) => refusedTop.some((p) => re.test(p))), 'and Claude Code\'s own files at its top by the names Windows gives them too (.claude., CLAUDE~1, .mcp.json:stream)', refusedTop)
-    ok(fs.readFileSync(path.join(APP, 'README.md'), 'utf8') === 'Hello wrold\n' && git(APP, 'rev-parse', 'main') === MAIN, 'your checkout untouched')
-    if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })
-  })
-
   // ---------- In Bridge AI ----------
   await kit.api('/bots/b1/settings', { changes: 'suggest' })
   await slack.ask({ user: 'U0DANA', text: `${M} Fix the title [edit README.md Hello there] [answer Retitled.]` })

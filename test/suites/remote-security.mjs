@@ -637,12 +637,11 @@ try {
     ok(msg(pg, 'error')?.code === 'device' && msg(sc, 'error')?.code === 'device' && !msg(sc, 'password'), 'a page session and the screen: turned away by the screen itself, as before', [msg(pg, 'error'), msg(sc, 'error')])
     const later = await ph2.request('GET', '/api/a-route-added-later')
     ok(shut(later), 'and a route nobody has written yet: refused too, not a 404', later.status)
-    // Routes added beside this one (bots' routing dry-run, conversations and time-limit answers, a
-    // held request allowed, a bot's changes to files and their Undo, meetings merged or carried on):
-    // refused the same.
-    const NEWER = [['POST', '/api/connections/c1/try', { text: 'hi' }], ['POST', '/api/bots/questions/q1/limit', { act: 'stop' }], ['GET', '/api/bots/b1/conversations'], ['POST', '/api/bots/questions/q1/screen', { allow: true }], ['GET', '/api/bots/b1/writes'], ['POST', '/api/bots/b1/writes/w1/undo', {}], ['POST', '/api/meetings/m1/merge', { id: 'm2' }], ['POST', '/api/meetings/carry-on', {}]]
+    // Routes added beside this one (bots' routing dry-run, conversations and time-limit answers,
+    // meetings merged or carried on): refused the same.
+    const NEWER = [['POST', '/api/connections/c1/try', { text: 'hi' }], ['POST', '/api/bots/questions/q1/limit', { act: 'stop' }], ['GET', '/api/bots/b1/conversations'], ['POST', '/api/meetings/m1/merge', { id: 'm2' }], ['POST', '/api/meetings/carry-on', {}]]
     const newer = await Promise.all(NEWER.map(([m, u, b]) => ph2.request(m, u, b)))
-    ok(newer.every((r) => shut(r)), 'bots\' routing dry-run, conversations, time-limit answers, held requests and changes to files, meetings merged or carried on: refused too', newer.map((r) => r.status))
+    ok(newer.every((r) => shut(r)), 'bots\' routing dry-run, conversations and time-limit answers, meetings merged or carried on: refused too', newer.map((r) => r.status))
     // The app's own files are let through by their plain names only: not a route in other capitals
     // that ends in one, encoded; nor, with no key at all, as if public.
     const odd = ['/API/crashes/sent/..%2F..%2F..%2Fsw.js', '/API/meetings/nope/captures/..%2F..%2F..%2F..%2Fsw.js', '/assets/..%2Fsw.js']

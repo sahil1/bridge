@@ -66,10 +66,8 @@ const CLAUDE_BUSY = new RegExp(`${ESC_INTERRUPT.source}|^\\s*[✻✳✶✢✽·*
 const EDIT_HERE = 'Edit(./' + '**)'
 // A bot's MCP servers for one run (botmcp.js runFolder): a folder of the desk's among the folders it's
 // given (front-desk/mcp/<run>/), with the servers' config (config.json) and which of their tools it
-// may use (rules.json: { allow, deny }), and for a run that changes files, settings of its own
-// (rules.json settings: its settings.json, with the hook that checks each path it writes, given with
-// --settings). Never a folder it may read: it comes out of dirs, and the rest stay as they were. Its
-// files gone (Bridge AI started again since), it gives none.
+// may use (rules.json: { allow, deny }). Never a folder it may read: it comes out of dirs, and the
+// rest stay as they were. Its files gone (Bridge AI started again since), it gives none.
 const MCP_RUNS = dataFile('front-desk', 'mcp')
 export function mcpOf(dirs = []) {
   const runs = (dirs || []).filter((d) => path.resolve(String(d)).startsWith(MCP_RUNS + path.sep))
@@ -77,8 +75,7 @@ export function mcpOf(dirs = []) {
   for (const d of runs) {
     try {
       const r = JSON.parse(fs.readFileSync(path.join(d, 'rules.json'), 'utf8'))
-      const settings = r.settings && path.resolve(String(r.settings)) === path.join(d, 'settings.json') && fs.existsSync(path.join(d, 'settings.json')) ? path.join(d, 'settings.json') : null
-      if (fs.existsSync(path.join(d, 'config.json'))) mcp = { config: path.join(d, 'config.json'), allow: (r.allow || []).map(String), deny: (r.deny || []).map(String), settings }
+      if (fs.existsSync(path.join(d, 'config.json'))) mcp = { config: path.join(d, 'config.json'), allow: (r.allow || []).map(String), deny: (r.deny || []).map(String) }
     } catch { /* gone: none */ }
   }
   return { dirs: (dirs || []).filter((d) => !runs.includes(d)), mcp }
@@ -88,8 +85,6 @@ export function mcpOf(dirs = []) {
 const mcpFlags = (m, { allowed = true } = {}) => (m
   ? ['--mcp-config', m.config, ...(allowed && m.allow.length ? ['--allowedTools', ...m.allow] : []), ...(m.deny.length ? ['--disallowedTools', ...m.deny] : [])]
   : [])
-// (A bot's change's own settings: the hook that checks every path it writes.)
-const settingsFlags = (m) => (m?.settings ? ['--settings', m.settings] : [])
 
 export const AGENTS = [
   {
@@ -111,9 +106,7 @@ export const AGENTS = [
     // and Edit and Write allowed without asking only inside its folder (an Edit rule for its folder
     // and all in it, which covers every tool that edits), anything else refused (dontAsk), so it
     // can't run a command, fetch a page or edit outside it; the other folders it may read added as
-    // for read. A bot's change to files in its write folders (botwrite.js) is the same in a staging
-    // copy of them, with its own settings besides (--settings): the PreToolUse hook that checks every
-    // path it writes, and refuses one outside its copy, whatever your own settings allow.
+    // for read.
     // Either way a bot's MCP servers, when it has some (mcpOf below): only those, --mcp-config with
     // --strict-mcp-config, and of their tools only the ones allowed for whoever asked (--allowedTools);
     // the rest refused by dontAsk, and named in --disallowedTools too where they're known.
@@ -122,7 +115,7 @@ export const AGENTS = [
       const { dirs, mcp } = mcpOf(o.dirs)
       const add = dirs.length ? ['--add-dir', ...dirs] : []
       return lvl === 'read' ? ['--tools', 'Read,Grep,Glob', ...add, ...mcpFlags(mcp), '--permission-mode', 'dontAsk', '--strict-mcp-config']
-        : ['--tools', 'Read,Grep,Glob,Edit,Write', '--allowedTools', EDIT_HERE, ...(mcp ? mcp.allow : []), ...add, ...mcpFlags(mcp, { allowed: false }), ...settingsFlags(mcp), '--permission-mode', 'dontAsk', '--strict-mcp-config']
+        : ['--tools', 'Read,Grep,Glob,Edit,Write', '--allowedTools', EDIT_HERE, ...(mcp ? mcp.allow : []), ...add, ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config']
     },
     confined: true,
     // A copy of a conversation under a new id (the original stays as it is).

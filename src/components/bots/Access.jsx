@@ -8,9 +8,7 @@ import './bots-page.css'
 // A bot's Access, a tab of its own page (BotPage.jsx, on a computer and on the phone): what this
 // bot may do, as its own settings, edited here. The line that sums it up is over its tabs, and in
 // Settings › Bots, which keeps the same sections in Set Up and links here. Who may ask, the folders
-// it reads, what it may change (with Edits Files in Its Folders, the folders it changes files in,
-// whose changes are made without asking you, and its latest changes with Undo; with none, the bots
-// it hands a change to files to), its memory, its MCP servers, what answers
+// it reads (it only ever reads them), what it may change, its memory, its MCP servers, what answers
 // and what it falls back on, and its limits: each the section Settings has (settings/Bots.jsx),
 // saved through the server's checks as any setting is, so its instructions, or a question, never
 // widen them. How questions reach it on a shared connection is that connection's Routing
