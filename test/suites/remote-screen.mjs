@@ -1590,12 +1590,13 @@ try {
     await p.goto((await studio.api('/relay/pair', {})).pairing.link, { waitUntil: 'commit' })
     await p.locator('#pair-go').click({ timeout: 20000 })
     const f = await until(() => p.frames().find((x) => x !== p.mainFrame() && x.url().startsWith(ra.url)), 30000, 100)
-    // Paired once Studio has a password: it starts unticked there, and gets nothing until it's
-    // ticked at Studio; then its page opens by itself.
+    // Paired once Studio has a password: it starts unticked there (from its first request, its page),
+    // and gets nothing until it's ticked at Studio; then its page opens by itself. (The app's top bar
+    // can show for a moment before the card does, so the list is looked at first.)
     const fresh = await until(async () => {
-      if (await f.locator('.settings-btn').isVisible().catch(() => false)) return []
       const l = (await studio.api('/remote')).access.devices.filter((d) => d.fresh && !d.allowed)
-      return l.length ? l : null
+      if (l.length) return l
+      return (await f.locator('.settings-btn').isVisible().catch(() => false)) ? [] : null
     }, 30000, 200)
     for (const d of fresh || []) await studio.api('/remote/devices', { id: d.id, allowed: true })
     await f.locator('.settings-btn').waitFor({ timeout: 30000 })
