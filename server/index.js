@@ -4092,13 +4092,19 @@ async function closePane(paneId) {
   pushFleet()
 }
 // A question that waits on you is a notification, as an agent's question is: which bot, who asked
-// and where, not what (it opens Needs You, where the question is).
+// and where, not what (it opens Needs You, where the question is). A run at its time limit says
+// how long it has run, for you to let it carry on or stop it.
 const deskTold = (q) => {
   if (cfg.notify?.needsYou === false) return
   const who = q.from?.name || 'Someone'
   const plat = platformOf(q.place?.id || q.conv)
   const where = `${q.place?.kind === 'dm' ? 'a direct message' : q.place?.name ? (plat === 'teams' ? q.place.name : `#${q.place.name}`) : PLATFORMS[plat]}${plat !== 'slack' ? ` (${PLATFORMS[plat]})` : ''}`
-  notify.send({ kind: 'needs-you', title: `${q.bot?.name || 'Your bot'}: ${who} asked in ${where}`, body: q.needsOwner ? 'Nothing could answer it: write the reply in Needs You.' : 'An answer waits for you to send or discard.', url: `/?agent=${encodeURIComponent(`slack:${q.id}`)}&inbox=1`, tag: `bot-${q.id}` }).catch(() => {})
+  const asking = q.limit?.phase === 'asking'
+  notify.send({
+    kind: 'needs-you', title: asking ? `${q.bot?.name || 'Your bot'}: its answer to ${who} in ${where} has run ${q.limit.ran} ${q.limit.ran === 1 ? 'minute' : 'minutes'}` : `${q.bot?.name || 'Your bot'}: ${who} asked in ${where}`,
+    body: asking ? 'Let it carry on, or stop it, in Needs You.' : q.needsOwner ? 'Nothing could answer it: write the reply in Needs You.' : 'An answer waits for you to send or discard.',
+    url: `/?agent=${encodeURIComponent(`slack:${q.id}`)}&inbox=1`, tag: `bot-${q.id}`,
+  }).catch(() => {})
 }
 // The files an answering agent opened in its run, from its conversation (for the record).
 const READS = new Set(['Read', 'Grep', 'Glob', 'read_file', 'shell', 'exec_command'])
@@ -5135,6 +5141,9 @@ app.get('/api/bots/:id/export', botsGuard, (req, res) => {
 // Your answer to one, from Needs You: send (as edited) or discard; for a change waiting on you,
 // Send approves it and opens its pull request first.
 app.post('/api/bots/questions/:id', botsGuard, wrapBot((req) => desk.decide(req.params.id, { send: req.body?.send === true, text: req.body?.text })))
+// Your decision about a run at its time limit, from Needs You (on a computer, or the phone through
+// the relay, which says which device): Continue (minutes: 10 or 30) or Stop.
+app.post('/api/bots/questions/:id/limit', botsGuard, wrapBot((req) => desk.limitAct(req.params.id, String(req.body?.act || ''), { minutes: req.body?.minutes, via: 'app', ...changedBy(req) })))
 // A bot from a file exported on another computer (instructions, memory and settings; never tokens).
 app.post('/api/bots/import', botsGuard, wrapBot(async (req) => {
   const r = botsStore.fromBundle(req.body?.bundle, String(cfg.name || '').trim())

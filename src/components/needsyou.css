@@ -129,6 +129,8 @@
 .ny-item.t-slack.yours { border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
 .ny-item.t-slack .ny-top > .icon { color: var(--accent); }
 .ny-item.t-slack.yours .ny-top > .icon { color: var(--warning); }
+/* A draft stopped at its time limit: Continue, below the reply, set apart from Send. */
+.ny-limit { margin-top: 9px; padding-top: 7px; border-top: 1px dashed var(--line-2); }
 .ny-from { margin: 4px 0 0; line-height: 1.4; overflow-wrap: anywhere; }
 .ny-draft { display: block; box-sizing: border-box; width: 100%; margin-top: 7px; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 13px/1.45 var(--font); resize: vertical; min-height: 64px; }
 .ny-draft:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }

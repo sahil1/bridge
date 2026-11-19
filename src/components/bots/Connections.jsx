@@ -47,6 +47,7 @@ function routedSaid(e) {
     case 'last': return t('to {bot}: the bot they asked last', { bot })
     case 'only': return t('to {bot}: the only one they may ask', { bot })
     case 'listen': return t('to {bot}: it answers there without a mention', { bot })
+    case 'limit': return t('to {bot}: your answer about its run at its time limit', { bot })
     case 'router': return e.bot ? t('to {bot}: AI Assist picked it', { bot }) : e.detail === 'no-model' ? t('AI Assist couldn\'t pick: there\'s no model') : t('AI Assist couldn\'t tell which')
     case 'picked': return t('to {bot}: picked by whoever asked', { bot })
     case 'unsure': return t('to {bot}: the bot for when nothing says which', { bot })
