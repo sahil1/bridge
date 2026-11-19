@@ -242,7 +242,7 @@ try {
   const kept = await notesBy(kit)
   ok(kept.error === 'Meeting notes is set to run on this computer, but Gemma 4 E4B isn\'t downloaded yet. Download it in Settings › Model Providers, or set Meeting notes to Auto there.' && kept.model === null, 'Meeting notes set to On this computer, with no model here: the meeting says why they weren\'t written', kept)
   const jobsHere = await kit.api('/model-jobs')
-  ok(jobsHere.jobs.length === 6 && jobsHere.jobs.find((j) => j.id === 'notes').set === 'local' && jobsHere.jobs.filter((j) => j.id !== 'notes').every((j) => j.set === 'cloud') && jobsHere.missing?.code === 'not_downloaded' && jobsHere.offered, 'Settings is told which jobs are set how (the rest Cloud first, the default), and what\'s missing here', jobsHere)
+  ok(jobsHere.jobs.length === (process.platform === 'darwin' ? 6 : 5) && jobsHere.jobs.find((j) => j.id === 'notes').set === 'local' && jobsHere.jobs.filter((j) => j.id !== 'notes').every((j) => j.set === 'cloud') && jobsHere.missing?.code === 'not_downloaded' && jobsHere.offered, 'Settings is told which jobs are set how (the rest Cloud first, the default), and what\'s missing here', jobsHere)
   await kit.api('/settings', { modelJobs: null }, 'PATCH')
   // (A meeting starting gets the speech model ready, from the same stand-in for Hugging Face: not this.)
   const ours = () => files.asked.filter((a) => a.id === 'gemma-4-e2b')
