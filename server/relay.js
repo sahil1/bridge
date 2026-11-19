@@ -212,7 +212,8 @@ export function status() {
     // fresh: paired with Pair a device's code and not kept yet (Keep or Remove, said in the app).
     // moving: not seen at this address yet since this computer moved here (it finds it through the
     // old one, moved).
-    devices: (conf.devices || []).map(({ id, name, kind, relay, addedAt, lastSeen, fresh }) => ({ id, name, kind: kind || 'phone', relay: relay || null, addedAt, lastSeen, connected: live.has(id), fresh: !!fresh, moving: !!m?.left?.includes(id) })),
+    // A computer's version and whether it says which of its devices a request is for (builtOf).
+    devices: (conf.devices || []).map(({ id, name, kind, relay, addedAt, lastSeen, fresh, version, forDevices }) => ({ id, name, kind: kind || 'phone', relay: relay || null, addedAt, lastSeen, connected: live.has(id), fresh: !!fresh, moving: !!m?.left?.includes(id), ...(kind === 'computer' ? { version: version || null, forDevices: !!forDevices } : {}) })),
     // Moved here from another relay: which, until when this computer stays connected there for the
     // devices not seen here yet, and whether it is now.
     moved: m ? { from: m.url, hosted: !!m.hosted, at: m.at, until: m.until, connected: prior.ws?.readyState === 1 } : null,
@@ -410,8 +411,20 @@ const IDLE_MS = Number(process.env.BRIDGE_LINK_IDLE_MS) || 10 * 60000
 // ---------- one phone ----------
 const DROP = new Set(['host', 'connection', 'origin', 'referer', 'cookie', 'content-length', 'accept-encoding', 'upgrade', 'keep-alive', 'transfer-encoding'])
 const DROP_BACK = new Set(['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'keep-alive', 'set-cookie'])
+// Which of its own devices another of your computers says a request is for (machines.js): taken
+// from a computer only, dropped from anything else's.
+const FOR = /^x-bridge-for(-(id|name|kind|key))?$/i
+const forOf = (h) => {
+  const get = (k) => { const v = (Array.isArray(h) ? h : []).find(([x]) => String(x).toLowerCase() === k)?.[1]; return typeof v === 'string' && v ? v : null }
+  const forId = get('x-bridge-for-id')
+  return forId ? { forId, forKey: get('x-bridge-for-key') } : {}
+}
 // Worth compressing: text (pictures and fonts are compressed already).
 const PACKS = /javascript|css|json|svg|html|text\/|wasm|xml/
+// What another of your computers says, sealed, of its Bridge AI: its version, and whether it says
+// which of its own devices a request it passes on is for (machines.js forHeaders), which one from
+// before this doesn't, so its devices can't be told apart from it (remote.js, Settings say so).
+const builtOf = (said) => ({ version: typeof said?.version === 'string' && /^[\w.+-]{1,40}$/.test(said.version) ? said.version : null, forDevices: said?.forDevices === true })
 // A device's name as it says it: no control characters, nor ones that turn text around (bidi).
 const cleanName = (s) => plainName(s)
 
@@ -597,7 +610,7 @@ class Conn {
       // as Link a device on another computer uses the same code.
       const s = said || p.told
       const computer = p.by === 'invite' || s.kind === 'computer'
-      device = { id: p.id, key: p.key, name: cleanName(s.name) || (computer ? 'Another computer' : 'Phone'), ...(computer ? { kind: 'computer', relay: cleanRelay(s.relay) } : {}), addedAt: new Date().toISOString(), ...(p.by === 'code' ? { fresh: true } : {}) }
+      device = { id: p.id, key: p.key, name: cleanName(s.name) || (computer ? 'Another computer' : 'Phone'), ...(computer ? { kind: 'computer', relay: cleanRelay(s.relay), ...builtOf(said) } : {}), addedAt: new Date().toISOString(), ...(p.by === 'code' ? { fresh: true } : {}) }
       conf.devices = [...(conf.devices || []), device]
       conf.removed = (conf.removed || []).filter((x) => x.key !== p.key)
       roster().catch(() => {})
@@ -607,6 +620,7 @@ class Conn {
       // asked for, sealed, which machines.js follows). Never its kind.
       if (cleanName(said.name)) device.name = cleanName(said.name)
       if (device.kind === 'computer') {
+        Object.assign(device, builtOf(said))
         // Its own key, when it has a new one (it stopped using its relay, which makes one): said
         // sealed by the device itself, so what this computer reaches it with is put right, before
         // the move below takes this computer to its new address.
@@ -648,7 +662,10 @@ class Conn {
     const target = new URL(String(u || '/'), base)
     if (target.origin !== new URL(base).origin) return this.send(K.ERR, sid, utf8('Not allowed'))
     const abort = new AbortController()
-    const s = { abort, body: body ? [] : null }
+    // For one of its own devices, as another of your computers says (machines.js): which, so it's
+    // ended with that device (endFor). Only a computer's say counts.
+    const computer = this.device?.kind === 'computer'
+    const s = { abort, body: body ? [] : null, ...(computer ? forOf(h) : {}) }
     this.streams.set(sid, s)
     // How much of the answer may be on its way (w, then MORE as the phone takes it in). The file is
     // read only as it goes, so none of it waits here in memory either.
@@ -670,7 +687,7 @@ class Conn {
         // Its own x-bridge-relay and Authorization go, in any capitals: fetch would join them to the
         // real ones below. It's run here as you, with this server's key (apiauth.js): the device has
         // shown its own key to get this far.
-        const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$|authorization$)/i.test(k)))
+        const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$|authorization$)/i.test(k) && (computer || !FOR.test(k))))
         headers['x-bridge-relay'] = this.device.id
         Object.assign(headers, authHeaders(localKey()))
         const res = await fetch(target, { method: m || 'GET', headers, body: s.body ? Buffer.concat(s.body) : undefined, signal: abort.signal, redirect: 'manual' })
@@ -708,13 +725,15 @@ class Conn {
     if (!body) s.run()
   }
 
-  // A WebSocket from the phone (the live terminal), opened here.
-  socket(sid, { u }) {
+  // A WebSocket from the phone (the live terminal), opened here. h: from another of your computers,
+  // which of its devices it's for (machines.js), passed on as for a request.
+  socket(sid, { u, h }) {
     if (this.removed()) return this.send(K.WS_CLOSE, sid, { c: 1008, r: 'This device was removed from this computer' })
     const target = new URL(String(u || '/'), base)
     if (target.origin !== new URL(base).origin) return this.send(K.WS_CLOSE, sid, { c: 1008, r: 'Not allowed' })
-    const ws = new WebSocket(target.href.replace(/^http/, 'ws'), { headers: { 'x-bridge-relay': this.device.id, ...authHeaders(localKey()) } })
-    this.streams.set(sid, { ws })
+    const said = this.device?.kind === 'computer' ? (Array.isArray(h) ? h : []).filter(([k, v]) => FOR.test(String(k)) && typeof v === 'string').map(([k, v]) => [String(k).toLowerCase(), v.slice(0, 200)]) : []
+    const ws = new WebSocket(target.href.replace(/^http/, 'ws'), { headers: { ...Object.fromEntries(said), 'x-bridge-relay': this.device.id, ...authHeaders(localKey()) } })
+    this.streams.set(sid, { ws, ...forOf(said) })
     ws.on('open', () => this.send(K.WS_OPENED, sid))
     ws.on('message', (data, isBinary) => {
       const b = Buffer.isBuffer(data) ? data : Buffer.from(data)
@@ -892,6 +911,9 @@ export function removeMachine(relayAt) {
 }
 // Which of the paired devices are machines (requests through the relay say which device).
 export const deviceOf = (id) => (id && (conf.devices || []).find((d) => d.id === id)) || null
+// The device paired here with that key (one paired with another of your computers with the same
+// key is the same device: remote.js shutFor).
+export const deviceByKey = (key) => (key && (conf.devices || []).find((d) => d.key === key)) || null
 // The address a device moved here from, with this computer (the phone app there can let go of it).
 export const movedFrom = (id) => deviceOf(id)?.movedFrom || null
 export const isMachine = (deviceId) => !!deviceId && (conf.devices || []).some((d) => d.id === deviceId && d.kind === 'computer')
@@ -909,6 +931,28 @@ export function removeDevice(id) {
   // meanwhile is turned down: Conn.removed).
   setTimeout(() => { for (const c of [...conns.values(), ...prior.conns.values()]) if (c.device?.id === id) c.close() }, 500)
   return status()
+}
+// Unticked in Which Devices May Connect (remote.js): what it has open here ends now, through each of
+// its connections. A WebSocket (a terminal, a screen) is closed from this end, so what this computer
+// said on it first (why) still reaches it; a request on its way (a file coming or going, the app's
+// event feed) is stopped, and the device told why. What it asks next is turned away (letin.js).
+// id: a device paired here, or hop/id for one through another of your computers (that computer's
+// streams for it); one paired here is ended through any of your computers that says it's for a
+// device with its key too.
+export function endFor(id, why) {
+  const [hop, forId] = id.includes('/') ? id.split('/') : [id, null]
+  const key = forId ? null : deviceOf(id)?.key || null
+  for (const c of [...conns.values(), ...prior.conns.values()]) {
+    if (!c.device) continue
+    const all = !forId && c.device.id === hop
+    for (const [sid, s] of [...c.streams]) {
+      if (!all && !(forId && c.device.id === hop && s.forId === forId) && !(key && s.forKey === key)) continue
+      if (s.ws) { try { s.ws.close(1008, 'notLetIn') } catch { /* closed */ } continue }
+      c.streams.delete(sid)
+      c.send(K.ERR, sid, utf8(why)).catch(() => {})
+      s.abort?.abort()
+    }
+  }
 }
 // A removed device's key, kept a while (and the keys it had before it moved: was): when it connects
 // again it's told, sealed, that it was removed (GONE), which is the only word that unpairs it there.

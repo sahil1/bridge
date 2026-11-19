@@ -12,6 +12,7 @@ import { makeAuth } from './apiauth.js'
 import { localKey } from './apitoken.js'
 import * as machinePages from './machinepages.js'
 import { makeRemote } from './remote.js'
+import { makeLetIn } from './letin.js'
 import { makeTell } from './screentell.js'
 import { plainName } from '../shared/remote.js'
 import * as devPreview from './devpreview.js'
@@ -219,22 +220,45 @@ const isDevPort = async (port) => {
 }
 // Your devices told when this screen is shared, and every window shown what's live here and on
 // your other computers (screentell.js, event: screen on /api/events).
+// (A linked computer not let in here is told nothing: as a device here, it's the one with its relay.)
+const machineOut = (m) => { const d = relay.status().devices.find((x) => x.kind === 'computer' && x.relay === m.relay); return !!d && !remote.admits(d.id) }
 const screenTell = makeTell({
-  remote: () => remote, notify, machines, relay, pushDevices: () => push.devices(),
-  onLive: (list) => { for (const c of clients) c.write(`event: screen\ndata: ${JSON.stringify({ list })}\n\n`) },
+  remote: () => remote, notify, machines, relay, pushDevices: () => push.devices(), out: machineOut,
+  onLive: () => { for (const c of clients) c.write(`event: screen\ndata: ${JSON.stringify({ list: screensFor(c.bridgeDevice) })}\n\n`) },
 })
+// The screens being viewed, here and on your other computers (screentell.js), as one of this
+// computer's devices may see them: none on a computer that keeps it out (machines.js keptFrom).
+const screensFor = (device) => { const hidden = machines.keptFrom(device); return screenTell.list().filter((x) => !x.machine || !hidden.has(x.machine)) }
+// What this computer asks of another for one of its devices says which (machines.js forDevice), so
+// that one can keep it out as it does what it asks itself; for this computer's own user, nothing.
+const onBehalf = (req) => machines.forDevice(req.headers['x-bridge-relay'])
+// A device unticked in Which Devices May Connect: everything it has open here ends now (its
+// terminals and screens, what it's fetching or sending through its link, the copies it's sending or
+// asked for, and what it reaches through this computer on another), told why.
+const shutOut = (id) => {
+  const why = `${relay.thisName()} stopped letting this device connect.`
+  machines.endOnward(id, why)
+  relay.endFor(id, why)
+  transfers.endFor(id).catch(() => {})
+}
 const remote = makeRemote({
   trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), thisName: () => relay.thisName(), os: machines.OS,
   hosted: () => !!relay.status().hosted, isDevPort, screenAllowed: () => (IS_MAC ? calls.screen() : Promise.resolve(null)),
-  devices: () => relay.status().devices, onBlocked: (id) => machines.endOnward(id, `${relay.thisName()} stopped letting this device connect.`),
+  devices: () => relay.status().devices, byKey: (key) => relay.deviceByKey(key), onBlocked: shutOut,
   tell: (ev) => screenTell.tell(ev), onChange: () => screenTell.changed(), notifyTo: () => screenTell.notifyTo(), blockThere: (hop, id) => screenTell.blockThere(hop, id),
 })
+// ...and nothing else of this computer's for one not let in, from the first thing it asks (letin.js),
+// nor its notifications.
+const letIn = makeLetIn({ shutFor: (id, via) => remote.shutFor(id, via), turnedAway: (id) => remote.turnedAway(id), deviceOf: (id) => relay.deviceOf(id), versionOf: (id) => machines.ofDevice(relay.deviceOf(id))?.version || null, thisName: () => relay.thisName(), ui: () => UI_DIR })
+push.keepOut((id) => !remote.admits(id))
 // A device of this computer's going on through it to another's screen: this computer's own list and lockout first.
 machines.usePassCheck((asker) => remote.mayPass(asker.id))
 const servePreview = devPreview.serve({ trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), may: (id, port) => remote.mayPreview(id, port), isDevPort, thisName: () => relay.thisName() })
 const app = express()
 app.use(guard.http)
 app.use(auth.http)
+// Which Devices May Connect, for everything after this (letin.js).
+app.use(letIn.http)
 app.use(pages.http)
 // Each request timed, for how Bridge AI itself is doing (perf.js).
 app.use(perf.timing)
@@ -925,19 +949,20 @@ app.post('/api/transfers', tx((req) => {
   // (A bot's file is sent on, never moved: it stays beside its record. Nothing is copied into one.)
   if (String(req.body?.src?.pane || '').startsWith('botfiles:')) req.body.move = false
   if (String(req.body?.into?.pane || '').startsWith('botfiles:')) throw Object.assign(new Error('A bot\'s files are only to open and send on from here'), { status: 403, code: 'readOnly' })
-  return transfers.start(req.body || {}, { here: fromHere(req) })
+  return transfers.start(req.body || {}, { here: fromHere(req), by: req.headers['x-bridge-relay'] || null })
 }))
 app.post('/api/transfers/clear', tx(() => transfers.clear()))
-app.post('/api/transfers/:id/stop', tx((req) => transfers.stop(req.params.id)))
-app.post('/api/transfers/:id/retry', tx((req) => transfers.retry(req.params.id)))
+app.post('/api/transfers/:id/stop', tx((req) => transfers.stop(req.params.id, onBehalf(req))))
+app.post('/api/transfers/:id/retry', tx((req) => transfers.retry(req.params.id, onBehalf(req))))
 app.post('/api/transfers/:id/reveal', tx((req) => { hereOnly(req, 'Show it in Finder'); return transfers.reveal(req.params.id) }))
 // Where a copy can go here (another of your devices asks, for its dialog).
 app.get('/api/transfers/here', tx(() => transfers.destinations()))
 // For the dialog: where it can go (here, or on the device it's sent to), how big it is, and
 // whether it goes through Bridge AI's relay (so much a day). to: it's sent there; from: it's
 // copied here from there.
-const remoteJson = async (id, u) => {
-  const r = await machines.exchange(id, { u })
+// (For a device of this computer's, the other computer is told which: it may keep that one out.)
+const remoteJson = async (id, u, req) => {
+  const r = await machines.exchange(id, { u, headers: onBehalf(req) })
   const j = await r.json()
   if (r.status === 404 && j?.error === 'Not found' && !j.missing) throw Object.assign(new Error('Update Bridge AI on that device to copy files with it.'), { status: 409, code: 'update' })
   if (r.status >= 400) throw Object.assign(new Error(j?.error || `It answered ${r.status}`), { status: r.status })
@@ -951,8 +976,8 @@ app.get('/api/transfers/plan', tx(async (req) => {
   const pane = req.query.pane ? String(req.query.pane) : null
   const p = String(req.query.path || '')
   const [what, destinations] = await Promise.all([
-    pane ? (from ? remoteJson(from, `/api/agents/${encodeURIComponent(pane)}/tree?path=${encodeURIComponent(p)}`) : files.copyList(await rootOf(pane), p)) : null,
-    to ? remoteJson(to, '/api/transfers/here') : transfers.destinations(),
+    pane ? (from ? remoteJson(from, `/api/agents/${encodeURIComponent(pane)}/tree?path=${encodeURIComponent(p)}`, req) : files.copyList(await rootOf(pane), p)) : null,
+    to ? remoteJson(to, '/api/transfers/here', req) : transfers.destinations(),
   ])
   // A phone's copy to this computer goes through this computer's relay; a copy with another device,
   // through that one's.
@@ -1639,10 +1664,12 @@ let lastFleet = null
 app.get('/api/events', (req, res) => {
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
   res.flushHeaders()
+  // (Which device it's for: what another computer that keeps it out said is left out of its feed.)
+  res.bridgeDevice = req.headers['x-bridge-relay'] || null
   clients.add(res)
   if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(shownFleet(lastFleet))}\n\n`)
   // Who's viewing a screen of yours now, here or on another of your computers (screentell.js).
-  res.write(`event: screen\ndata: ${JSON.stringify({ list: screenTell.list() })}\n\n`)
+  res.write(`event: screen\ndata: ${JSON.stringify({ list: screensFor(res.bridgeDevice) })}\n\n`)
   // The desktop app's own feed (desktop/main.js says so): it also hears when another of your devices
   // asks this computer to allow something (fixes.js askHere).
   const off = req.headers['x-bridge-desktop'] && !req.headers['x-bridge-relay'] ? fixes.onAsk((a) => res.write(`event: fix-ask\ndata: ${JSON.stringify(a)}\n\n`)) : null
@@ -2212,12 +2239,13 @@ const fromMachine = async (m, opts, ms) => {
   } finally { clearTimeout(t) }
 }
 const isOld = (r) => r.status === 404 && r.j?.error === 'Not found' && !r.j.missing
-async function mentionsElsewhere(q, n) {
+// by: for a device of this computer's, which (machines.forDevice), so the others may keep it out.
+async function mentionsElsewhere(q, n, by = []) {
   const out = { meetings: [], unreachable: [], update: [], from: [] }
   await Promise.all(machines.list().filter((m) => m.state === 'linked').map(async (m) => {
     if (!m.online) { out.unreachable.push(m.name); return }
     let r
-    try { r = await fromMachine(m, { u: `/api/meetings/mentions?here=1&n=${n}&q=${encodeURIComponent(q)}` }, MENTION_MS) } catch { out.unreachable.push(m.name); return }
+    try { r = await fromMachine(m, { u: `/api/meetings/mentions?here=1&n=${n}&q=${encodeURIComponent(q)}`, headers: by }, MENTION_MS) } catch { out.unreachable.push(m.name); return }
     if (isOld(r)) { out.update.push(m.name); return }
     if (r.status >= 400 || !Array.isArray(r.j?.meetings)) { out.unreachable.push(m.name); return }
     if (!r.j.agentText) out.update.push(m.name)
@@ -2234,7 +2262,7 @@ app.get('/api/meetings/mentions', wrap(async (req) => {
   const n = Math.min(30, Math.max(1, Number(req.query.n) || 8))
   const mine = meetings.mentionable(q, n).map((m) => ({ ...m, machine: null, device: null }))
   if (req.query.here) return { meetings: mine, agentText: true }
-  const there = await mentionsElsewhere(q, n)
+  const there = await mentionsElsewhere(q, n, onBehalf(req))
   const all = [...mine, ...there.meetings].sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt))).slice(0, n)
   return { meetings: all, here: relay.thisName(), from: there.from, unreachable: there.unreachable, update: there.update, agentText: true }
 }))
@@ -2248,7 +2276,7 @@ app.post('/api/meetings/:id/for-agents', wrap(async (req) => {
   if (!m) throw Object.assign(new Error('That computer isn\'t linked to this one any more'), { status: 404 })
   const update = () => Object.assign(new Error(`Update Bridge AI on ${m.name} to mention its meetings here`), { status: 409, code: 'update' })
   let r
-  try { r = await fromMachine(m, { method: 'POST', u: `/api/meetings/${encodeURIComponent(req.params.id)}/for-agents?text=1` }, 20000) } catch { throw Object.assign(new Error(`${m.name} isn't reachable`), { status: 503, code: 'offline' }) }
+  try { r = await fromMachine(m, { method: 'POST', u: `/api/meetings/${encodeURIComponent(req.params.id)}/for-agents?text=1`, headers: onBehalf(req) }, 20000) } catch { throw Object.assign(new Error(`${m.name} isn't reachable`), { status: 503, code: 'offline' }) }
   if (isOld(r)) throw update()
   if (r.status >= 400) throw Object.assign(new Error(r.j?.error || `${m.name} answered ${r.status}`), { status: r.status })
   if (typeof r.j?.text !== 'string') throw update()
@@ -2849,7 +2877,7 @@ app.post('/api/agents/:pane/mute', wrap(async (req) => {
 }))
 // A notification's answer button (the token says which agent, question and answer), or another
 // kind's (Remote Screen's Stop and Block This Device), saying which device it was pressed on.
-app.post('/api/notify/answer', wrap((req) => notify.answer(req.body?.token, { by: whoAsks(req) })))
+app.post('/api/notify/answer', wrap((req) => notify.answer(req.body?.token, { by: whoAsks(req), h: onBehalf(req) })))
 // You're using Bridge AI on this computer: phones stay quiet meanwhile. Phones can't say this.
 app.post('/api/presence', wrap((req) => { if (fromHere(req)) notify.presence(req.body || {}); return { ok: true } }))
 
@@ -2894,7 +2922,7 @@ const notByMachine = (req) => { if (viaMachine(req)) throw Object.assign(new Err
 // newDevices: phones and computers paired with Pair a device's code and not kept yet, said in the
 // app with Keep and Remove (Machines.jsx).
 const newDevices = () => relay.status().devices.filter((d) => d.fresh).map(({ id, name, kind, relay: at, addedAt }) => ({ id, name, kind, relay: at, addedAt, machine: kind === 'computer' ? machines.list().find((m) => m.relay === at)?.id || null : null }))
-app.get('/api/machines', wrap(async (req) => ({ here: { ...machines.here(), about: { ...(await machines.about()), runtime: rt.name } }, machines: await Promise.all(machines.list().map(async (m) => ({ ...m, port: await pages.portFor(req, m.id) }))), machinePage: req.machinePage || null, strays: machines.strays(), asks: relay.status().asks, newDevices: newDevices(), canBeLinked: !!relay.relayUrl(), hostedAvailable: relay.status().hostedAvailable })))
+app.get('/api/machines', wrap(async (req) => ({ here: { ...machines.here(), about: { ...(await machines.about()), runtime: rt.name } }, machines: await Promise.all(machines.list({ for: req.headers['x-bridge-relay'] || null }).map(async (m) => ({ ...m, port: await pages.portFor(req, m.id) }))), machinePage: req.machinePage || null, strays: machines.strays(), asks: relay.status().asks, newDevices: newDevices(), canBeLinked: !!relay.relayUrl(), hostedAvailable: relay.status().hostedAvailable })))
 // This device's name, as your devices and phones show it: set here, or from one of your other
 // devices (through its link). '' goes back to the computer's own name.
 relay.useName(() => cfg.deviceName)
@@ -2904,10 +2932,13 @@ app.post('/api/machines/name', wrap((req) => {
   return machines.here()
 }))
 // One of your other devices, renamed (on that device, so it's the same everywhere).
-app.post('/api/machines/:id/name', wrap((req) => { notByMachine(req); return machines.rename(req.params.id, req.body?.name) }))
+app.post('/api/machines/:id/name', wrap((req) => { notByMachine(req); return machines.rename(req.params.id, req.body?.name, onBehalf(req)) }))
 // Fix: where the connection to that device stops, starting it over on the way.
 app.post('/api/machines/:id/check', wrap((req) => { notByMachine(req); return machines.check(req.params.id) }))
-app.get('/api/machines/summary', wrap((req) => machines.summary({ home: req.query.home === '1' })))
+// keepOut, or letIn with a guardrail set here: the asking computer's devices this one keeps out, or
+// the only ones it lets in, as they come through it (remote.js viaList); it hides what it shows of
+// this one from the rest.
+app.get('/api/machines/summary', wrap(async (req) => ({ ...(await machines.summary({ home: req.query.home === '1' })), ...remote.viaList(req.headers['x-bridge-relay']) })))
 // Another computer introducing a third (intro) does so only once you've kept it here (Keep, where
 // the app said it paired): until then it reaches this computer, and no other through it.
 app.post('/api/machines', wrap((req) => {
@@ -2940,7 +2971,7 @@ app.post('/api/machines/:id/preview', async (req, res) => {
     if (!(port > 1023 && port < 65536)) return res.status(400).json({ error: 'Which port?' })
     // (Given longer than the check can take there: on Windows, its list of processes alone can take
     // 15 s, servers.js parents.)
-    try { await machines.callOn(m.id, 'GET', `/api/remote/preview-check?port=${port}`, undefined, 25000) } catch (e) {
+    try { await machines.callOn(m.id, 'GET', `/api/remote/preview-check?port=${port}`, undefined, 25000, onBehalf(req)) } catch (e) {
       const old = /^(Not found|.*answered 404)$/.test(e.message)
       // gate: its password (or Allow there) first, in a session for that app (Preview.jsx).
       return res.status(e.code === 'offline' ? 503 : 409).json({ error: old ? `Update Bridge AI on ${m.name} to see its apps here.` : e.message, code: e.code === 'offline' ? 'offline' : old ? 'update' : e.said === 'gate' ? 'gate' : 'refused' })
@@ -2985,12 +3016,12 @@ app.post('/api/remote/sessions/:id/end', async (req, res) => { try { res.json(aw
 app.post('/api/remote/devices/block', (req, res) => { try { if (!viaMachine(req)) throw Object.assign(new Error('Only another of your computers asks this'), { status: 403 }); res.json(remote.setDevice(String(req.body?.id || ''), false)) } catch (e) { sayErr(res, e) } })
 // What's live here and on your other computers (the cards), and Stop or Block from a window here,
 // for this computer's sessions or, through its link, another's (one hop: not for another computer).
-app.get('/api/remote/live', (req, res) => res.json({ list: screenTell.list() }))
+app.get('/api/remote/live', (req, res) => res.json({ list: screensFor(req.headers['x-bridge-relay']) }))
 app.post('/api/remote/live/end', async (req, res) => {
   try {
     const machine = typeof req.body?.machine === 'string' && req.body.machine ? req.body.machine : null
     if (machine && viaMachine(req)) throw Object.assign(new Error('Not through another device'), { status: 403 })
-    res.json(await screenTell.end({ machine, id: String(req.body?.id || ''), block: req.body?.block === true }, whoAsks(req)))
+    res.json(await screenTell.end({ machine, id: String(req.body?.id || ''), block: req.body?.block === true }, whoAsks(req), onBehalf(req)))
   } catch (e) { sayErr(res, e) }
 })
 // Another of your computers saying what's live there, and passing on its notification (from it only).
@@ -3015,7 +3046,11 @@ app.get('/api/remote/preview-check', async (req, res) => {
 // An ask reaches your phones too, so you can allow it from there. Its six digits stay in Bridge AI
 // (a notification goes through Apple's or Google's servers, and shows on a locked screen).
 relay.whenAsked((a) => notify.send({ kind: 'machine', title: `${a.name} asks to link`, body: 'Open Bridge AI to check the six digits on both devices, then allow it.', url: '/#settings/machines', tag: `machine-ask-${a.id}` }).catch(() => {}))
-relay.whenPaired((d) => notify.send({ kind: 'machine', title: `${d.name} is paired`, body: 'If that wasn\'t you, remove it in Bridge AI.', url: '/#settings/machines', tag: `paired-${d.id}` }).catch(() => {}))
+// One paired once Remote Access had a guardrail starts not let in (remote.js): it says how to let it in.
+relay.whenPaired((d) => {
+  const out = !remote.admits(d.id)
+  notify.send({ kind: 'machine', title: `${d.name} is paired`, body: out ? `It can't use ${relay.thisName()} until you allow it there, in Needs You. If that wasn't you, remove it in Bridge AI.` : 'If that wasn\'t you, remove it in Bridge AI.', url: '/#settings/machines', tag: `paired-${d.id}` }).catch(() => {})
+})
 // A device removed: its notifications stop too.
 relay.whenRemoved((id) => push.forgetDevice(id))
 // What this device tells the others: its agents, for their sidebars and agent maps (agentmap.js),
@@ -3036,8 +3071,8 @@ app.get('/api/agent-map', wrap(async (req) => {
   await machines.fresh({ maxAge: req.query.live ? 4000 : 10000 })
   const f = await fleetView()
   const here = { id: null, name: relay.thisName(), os: machines.OS, version: VERSION, runtime: rt.name, here: true, online: true, at: new Date().toISOString(), agents: f.down ? [] : await runs.agents(f, { cloudSaid: cloud.previews() }) }
-  const linked = machines.list().filter((m) => m.state === 'linked')
-    .map((m) => ({ id: m.id, name: m.name, os: m.os, version: m.version, runtime: m.about?.runtime || null, online: !!m.online, lastSeen: m.lastSeen, at: m.at, agents: Array.isArray(m.agents) ? m.agents : [] }))
+  const linked = machines.list({ for: req.headers['x-bridge-relay'] || null }).filter((m) => m.state === 'linked')
+    .map((m) => ({ id: m.id, name: m.name, os: m.os, version: m.version, runtime: m.about?.runtime || null, online: !!m.online, lastSeen: m.lastSeen, at: m.at, agents: Array.isArray(m.agents) ? m.agents : [], ...(m.notLetIn ? { notLetIn: true } : {}) }))
   return { devices: [here, ...linked] }
 }))
 
@@ -3051,17 +3086,21 @@ app.get('/api/needs-you', wrap(async (req) => {
   await machines.fresh(fresh ? { only: fresh, maxAge: 0, wait: 4000 } : { maxAge: req.query.live ? 2500 : 6000 })
   const name = relay.thisName()
   const here = (await waiting.items()).map((i) => ({ ...i, machine: null, device: name, online: true }))
-  const linked = machines.list().filter((m) => m.state === 'linked')
+  // (What a computer that keeps the asking device out said is left out for it: machines.js list.)
+  const linked = machines.list({ for: req.headers['x-bridge-relay'] || null }).filter((m) => m.state === 'linked')
   const there = linked.flatMap((m) => (Array.isArray(m.needs) ? m.needs : needsYou.fromAgents(m.agents))
     .map((i) => ({ ...i, machine: m.id, device: m.name, online: !!m.online, asOf: m.at, old: !Array.isArray(m.needs) })))
   return {
     items: needsYou.order([...here, ...there]),
-    devices: [{ id: null, name, online: true }, ...linked.map((m) => ({ id: m.id, name: m.name, online: !!m.online, lastSeen: m.lastSeen, at: m.at }))],
+    devices: [{ id: null, name, online: true }, ...linked.map((m) => ({ id: m.id, name: m.name, online: !!m.online, lastSeen: m.lastSeen, at: m.at, ...(m.notLetIn ? { notLetIn: true } : {}) }))],
     // What other apps ask of you through Bridge AI's MCP server, here: a change to keep or discard,
     // a message for an agent to send or not (outside.js).
     outside: outside.waiting().map((x) => ({ ...x, change: outsideView(x) })),
     // The bots' answers to send or discard, and what nothing could answer (frontdesk.js).
     slack: desk.waiting(),
+    // Devices paired since Remote Access had a guardrail, waiting to be let in (remote.js): Allow is
+    // at this computer only, so only it is told.
+    letIn: atThisComputer(req) ? remote.waiting() : [],
   }
 }))
 // What Needs You shows of an ask: the change itself, cut to what fits on its card.
@@ -3090,7 +3129,7 @@ app.get('/api/home', trialOff('home', 'Home'), wrap(async (req) => {
   await machines.fresh({ maxAge: req.query.live ? 2500 : 8000 })
   const name = relay.thisName()
   const mine = (await homeList.items()).map((i) => ({ ...i, machine: null, device: name, online: true }))
-  const linked = machines.list().filter((m) => m.state === 'linked')
+  const linked = machines.list({ for: req.headers['x-bridge-relay'] || null }).filter((m) => m.state === 'linked')
   const there = linked.flatMap((m) => {
     const own = Array.isArray(m.home)
     const from = own ? m.home : (Array.isArray(m.needs) ? m.needs : needsYou.fromAgents(m.agents)).map(home.fromNeeds)
@@ -3098,12 +3137,13 @@ app.get('/api/home', trialOff('home', 'Home'), wrap(async (req) => {
   })
   return {
     items: home.tidy([...mine, ...there]),
-    devices: [{ id: null, name, os: machines.OS, online: true, here: true }, ...linked.map((m) => ({ id: m.id, name: m.name, os: m.os, online: !!m.online, lastSeen: m.lastSeen, at: m.at, partial: !Array.isArray(m.home) }))],
+    devices: [{ id: null, name, os: machines.OS, online: true, here: true }, ...linked.map((m) => ({ id: m.id, name: m.name, os: m.os, online: !!m.online, lastSeen: m.lastSeen, at: m.at, partial: !Array.isArray(m.home), ...(m.notLetIn ? { notLetIn: true } : {}) }))],
     pins: homeList.pins(),
     layouts: homeList.layouts(),
-    // What other apps ask of you here, and the bots' answers, as in Needs You.
+    // What other apps ask of you here, the bots' answers and the devices waiting to be let in, as in Needs You.
     outside: outside.waiting().map((x) => ({ ...x, change: outsideView(x) })),
     slack: desk.waiting(),
+    letIn: atThisComputer(req) ? remote.waiting() : [],
   }
 }))
 // Pin one to the top of Home, or unpin it: kept here, for every page and phone this computer serves.
@@ -3174,19 +3214,19 @@ app.post('/api/account/followed', yours((req) => account.followed(req.body?.keep
 app.post('/api/account/follow', yours(() => account.follow()))
 // Your other computers (linked to this one), and whether each is signed in: to offer signing them
 // in too. One that's offline, or too old to say, is listed as such.
-async function othersOf() {
+async function othersOf(by = []) {
   const me = account.status().account
   const linked = machines.list().filter((m) => m.state === 'linked')
   return Promise.all(linked.map(async (m) => {
     const base = { id: m.id, name: m.name }
     if (!m.online) return { ...base, state: 'offline' }
     try {
-      const b = await machines.callOn(m.id, 'GET', '/api/account/brief', undefined, 8000)
+      const b = await machines.callOn(m.id, 'GET', '/api/account/brief', undefined, 8000, by)
       return { ...base, state: !b?.available ? 'none' : b.signedIn ? (b.account === me?.id ? 'signed-in' : 'other') : b.declined ? 'declined' : 'not-signed-in' }
     } catch (e) { return { ...base, state: /\b404\b|Cannot GET/.test(e.message) ? 'old' : 'offline' } }
   }))
 }
-app.get('/api/account/others', wrap(async (req) => { notByMachine(req); return { others: account.status().signedIn ? await othersOf() : [] } }))
+app.get('/api/account/others', wrap(async (req) => { notByMachine(req); return { others: account.status().signedIn ? await othersOf(onBehalf(req)) : [] } }))
 // Sign them in too: a grant from the account for each, handed over its link. Each says how it went.
 app.post('/api/account/others', wrap(async (req) => {
   notByMachine(req)
@@ -3198,11 +3238,11 @@ app.post('/api/account/others', wrap(async (req) => {
     if (!m) { results.push({ id, ok: false, text: 'It isn\'t linked to this computer any more.' }); continue }
     try {
       const { grant } = await account.grant()
-      const r = await machines.callOn(m.id, 'POST', '/api/account/offer', { grant }, 30000)
+      const r = await machines.callOn(m.id, 'POST', '/api/account/offer', { grant }, 30000, onBehalf(req))
       results.push({ id, name: m.name, ...r })
     } catch (e) { results.push({ id, name: m.name, ok: false, why: e.code === 'offline' ? 'offline' : 'error', text: e.message }) }
   }
-  return { results, others: await othersOf() }
+  return { results, others: await othersOf(onBehalf(req)) }
 }))
 // Asked by another of your devices: whether this one is signed in, and to which account (its id).
 app.get('/api/account/brief', wrap(() => {
@@ -3453,7 +3493,7 @@ app.get('/api/config', (req, res) => res.json({
 app.post('/api/alerts/sound', wrap((req) => {
   const on = req.body?.on !== false
   afterChange(settings.patch({ alertSounds: on ? null : false }))
-  if (!req.body?.here) machines.soundsEverywhere(on).catch(() => {})
+  if (!req.body?.here) machines.soundsEverywhere(on, onBehalf(req)).catch(() => {})
   return { on }
 }))
 
@@ -3496,15 +3536,27 @@ const afterChange = (changed) => {
   fixes.noteRestart(settings.RESTART_KEYS.filter((k) => JSON.stringify(now[k]) !== atStart[k]))
   return { ok: true, changed, restart, settings: settingsView() }
 }
+// Remote Screen and Preview on or off is a guardrail too (with it on, a New device waits to be let
+// in: remote.js), so it's changed at this computer only, as the others are (remoteHere): never from
+// a device, another computer's window or through Tailscale, by either way of changing the settings.
+// What's compared is the setting as it would be saved, the very object written.
+const remoteTrialOf = (s) => JSON.stringify((s?.trials && typeof s.trials === 'object' && !Array.isArray(s.trials) ? s.trials['remote-screen'] : null) ?? null)
+const remoteTrialKept = (req, next) => { if (remoteTrialOf(next) !== remoteTrialOf(settings.readUser())) remoteHere(req) }
 app.get('/api/settings', wrap(() => settingsView()))
-app.patch('/api/settings', wrap((req) => {
-  if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) channelKept(req, settings.merged(settings.readUser(), req.body))
-  return afterChange(settings.patch(req.body || {}))
-}))
+app.patch('/api/settings', (req, res) => {
+  try {
+    if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
+      const next = settings.merged(settings.readUser(), req.body)
+      channelKept(req, next)
+      remoteTrialKept(req, next)
+    }
+    res.json(afterChange(settings.patch(req.body || {})))
+  } catch (e) { res.status(e.status >= 400 && e.status < 500 ? e.status : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) }) }
+})
 app.put('/api/settings/raw', async (req, res) => {
   try {
     const text = String(req.body?.text ?? '')
-    try { channelKept(req, JSON.parse(text)) } catch (e) { if (e.status) throw e }
+    try { const next = JSON.parse(text); channelKept(req, next); remoteTrialKept(req, next) } catch (e) { if (e.status) throw e }
     res.json(afterChange(settings.replaceRaw(text)))
   } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
@@ -5392,6 +5444,8 @@ const upgrades = [
 const onUpgrade = async (req, socket, head) => {
   if (!(await guard.upgrade(req)) || !pages.upgrade(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy() }
   if (!auth.upgrade(req)) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy() }
+  // A device not let in here (letin.js). Anything that goes wrong deciding: the socket goes, never the server.
+  try { if (letIn.upgrade(req, socket, head)) return } catch { return socket.destroy() }
   if (machines.isMachinePath(req.url)) return machines.upgrade(req, socket, head) // a terminal on another of your devices
   if (servePreview.isPath(req.url)) return servePreview.upgrade(req, socket, head).catch(() => socket.destroy()) // a project's app's hot reload, for another of your devices
   if (remote.isPath(req.url)) return remote.upgrade(req, socket, head) // this screen, seen from another of your devices

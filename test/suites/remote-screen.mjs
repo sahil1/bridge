@@ -521,7 +521,7 @@ try {
     ok(msg(again, 'error').code === 'device' && !msg(again, 'password') && /doesn't let Laptop connect/.test(msg(again, 'error').why), 'and it can\'t connect again, not even asked for the password', msg(again, 'error'))
     await studio.api('/remote/devices', { id: P.id, allowed: false })
     const pv = await ph.request('GET', '/_preview/5173/')
-    ok(pv.status === 403 && pv.json?.code === 'device', 'nor see its apps', pv.json)
+    ok(pv.status === 403 && pv.json?.code === 'notLetIn', 'nor see its apps', pv.json)
     const st = await studio.api('/remote')
     ok(!st.access.devices.find((d) => d.id === L.id).allowed && st.log.some((x) => x.end === 'device' && x.by.name === 'Laptop' && !x.source) && st.log.some((x) => x.end === 'device' && x.source), 'Studio\'s record: the session cut off, and the try after it', st.log.slice(0, 3).map((x) => [x.by.name, x.end]))
     await studio.api('/remote/devices', { id: L.id, allowed: true })
@@ -541,6 +541,11 @@ try {
     // A phone paired with Laptop, looking at Studio through it.
     const lp = await linkAs(rb.url, { code: (await laptop.api('/relay/pair', {})).pairing.code, name: 'Pocket', about: { name: 'Pocket' } })
     const lph = over(lp)
+    // First seen at Studio through Laptop with a password set there: New, let in at Studio.
+    await lph.request('GET', `/m/${S.id}/api/fleet`)
+    const pkS = await until(async () => (await studio.api('/remote')).access.devices.find((d) => d.name === 'Pocket' && d.through), 6000, 200)
+    ok(pkS?.fresh === true, 'Pocket, first seen at Studio through Laptop: New there', pkS)
+    if (pkS && !pkS.allowed) await studio.api('/remote/devices', { id: pkS.id, allowed: true })
     const v2 = lph.socket(`/m/${S.id}/api/remote/view?source=screen:`)
     await through(v2)
     ok(!!msg(v2, 'password') && !!msg(v2, 'hello'), 'a phone paired with Laptop sees Studio through it, asked for the password too')
@@ -582,6 +587,13 @@ try {
   await part('your other devices told: each session, control taken and an ask, with Stop and Block This Device', async () => {
     const tb = await linkAs(rb.url, { code: (await laptop.api('/relay/pair', {})).pairing.code, name: 'Tablet', about: { name: 'Tablet' } })
     const tbh = over(tb)
+    // Let in at Laptop, and at Studio, where it's first seen through Laptop with a password set (New).
+    const tbL = await until(async () => (await laptop.api('/remote')).access.devices.find((d) => d.name === 'Tablet'), 8000, 200)
+    if (tbL && !tbL.allowed) await laptop.api('/remote/devices', { id: tbL.id, allowed: true })
+    await tbh.request('GET', `/m/${S.id}/api/fleet`)
+    const tbS = await until(async () => (await studio.api('/remote')).access.devices.find((d) => d.name === 'Tablet' && d.through), 6000, 200)
+    if (tbS && !tbS.allowed) await studio.api('/remote/devices', { id: tbS.id, allowed: true })
+    await laptop.api(`/needs-you?fresh=${S.id}`) // (Laptop hears from Studio that it's let in there)
     const sees = (s) => s.sessions.find((x) => x.by.name === 'Phone')
     // Nothing set up anywhere: never silent all the same.
     const v0 = ph.socket('/api/remote/view?source=screen:')
@@ -1381,7 +1393,7 @@ try {
     ok(!!(await until(async () => (await studio.api('/remote')).access.password && await sw.isEnabled(), 6000)), 'Set Password: set, and control can be turned on')
     await sec.getByRole('switch', { name: /^Ask Here First/ }).click()
     ok(!!(await until(async () => (await studio.api('/remote')).access.askFirst, 5000)), 'Ask Here First turned on there')
-    await sec.locator('.rs-devices li', { hasText: 'Phone' }).getByRole('checkbox').click()
+    await sec.locator('.rs-devices').getByRole('checkbox', { name: 'Phone phone', exact: true }).click()
     ok(!!(await until(async () => (await studio.api('/remote')).access.devices.find((d) => d.name === 'Phone')?.allowed === false, 5000)), 'a device unticked there')
     await shot(p, `${tag}remote-screen-remote-access`)
     const dk = await page(b, studio.url, { mode: 'dark' })
@@ -1405,7 +1417,7 @@ try {
     await shot(el.p, `${tag}remote-screen-remote-access-elsewhere`)
     await el.ctx.close()
     await sec.getByRole('switch', { name: /^Ask Here First/ }).click()
-    await sec.locator('.rs-devices li', { hasText: 'Phone' }).getByRole('checkbox').click()
+    await sec.locator('.rs-devices').getByRole('checkbox', { name: 'Phone phone', exact: true }).click()
     ok(!!(await until(async () => { const a = (await studio.api('/remote')).access; return !a.askFirst && a.devices.every((d) => d.allowed) }, 5000)), 'and back as they were')
     await p.context().close()
   })
@@ -1591,10 +1603,16 @@ try {
     await p.goto((await studio.api('/relay/pair', {})).pairing.link, { waitUntil: 'commit' })
     await p.locator('#pair-go').click({ timeout: 20000 })
     const f = await until(() => p.frames().find((x) => x !== p.mainFrame() && x.url().startsWith(ra.url)), 30000, 100)
-    await f.locator('.settings-btn').waitFor({ timeout: 30000 })
-    // Paired once Studio has a password: it starts unticked there, and is ticked at Studio.
-    const fresh = await until(async () => { const l = (await studio.api('/remote')).access.devices.filter((d) => d.fresh && !d.allowed); return l.length ? l : null }, 8000, 200)
+    // Paired once Studio has a password: it starts unticked there (from its first request, its page),
+    // and gets nothing until it's ticked at Studio; then its page opens by itself. (The app's top bar
+    // can show for a moment before the card does, so the list is looked at first.)
+    const fresh = await until(async () => {
+      const l = (await studio.api('/remote')).access.devices.filter((d) => d.fresh && !d.allowed)
+      if (l.length) return l
+      return (await f.locator('.settings-btn').isVisible().catch(() => false)) ? [] : null
+    }, 30000, 200)
     for (const d of fresh || []) await studio.api('/remote/devices', { id: d.id, allowed: true })
+    await f.locator('.settings-btn').waitFor({ timeout: 30000 })
     const at = await (await f.frameElement()).boundingBox()
     return { ctx, p, f, errs, at }
   }

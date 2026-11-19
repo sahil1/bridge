@@ -49,6 +49,7 @@ const WHY = {
   gone: 'the agent was closed',
   question: 'the question had already been answered or changed',
   'not-allowed': 'your computer only takes messages and answers while it\'s away',
+  'not-let-in': 'your computer hasn\'t let this phone in (Settings › Remote Access › Which Devices May Connect there)',
   unsure: 'Bridge AI stopped while sending it. Check the agent',
 }
 const fail = (why, text) => ({ ok: false, why, text: text || WHY[why] || why })
@@ -117,6 +118,7 @@ async function deliver(plain, device, base) {
   let agent = null
   for (let i = 0; i < 8; i++) {
     const fleet = await call('GET', '/api/fleet')
+    if (fleet.status === 403 && fleet.json?.code === 'notLetIn') return fail('not-let-in')
     agent = fleet.json?.agents?.find((a) => a.paneId === pane) || null
     if ((agent && (say || agent.status === 'blocked')) || process.uptime() > 30) break
     await new Promise((r) => setTimeout(r, 3000))

@@ -20,9 +20,13 @@
 //   Ask Here First          (off by default) Allow or Deny here for each session; no answer in 30
 //                           seconds is a no. Allowed to view, control is asked for again; taken back
 //                           after it went idle, the password and Allow again.
-//   which devices           every paired phone and linked computer may, until it's unticked here;
-//                           once any guardrail is set, one paired after that starts unticked. Through
-//                           another of your computers, that computer checks its own list first.
+//   which devices           every paired phone and linked computer may, until it's unticked here.
+//                           One you untick can't use this computer at all (no agents, terminals,
+//                           files, previews or screen: letin.js), with this Beta Feature on or off.
+//                           Once any guardrail is set, one paired after that starts New (in Needs
+//                           You with Allow), and waits while this Beta Feature is on. Through
+//                           another of your computers, that computer checks its own list first,
+//                           then this one checks that computer and the device it's for (shutFor).
 // What a device is told (status): its own standing and the screens it may pick, never who else
 // looked or what at; only this computer itself sees that.
 // Viewing needs nobody at this computer otherwise (it's yours): it shows that it's being viewed (the
@@ -82,19 +86,26 @@ const read = () => {
     // (One from before kept those turned away in its log too.)
     const all = Array.isArray(d.log) ? d.log.filter((e) => e && typeof e === 'object') : []
     const turned = (e) => !e.source && REFUSALS.has(e.end)
+    // Kept apart: blocked, kept out by you (in the list, Keep Out, Block This Device); fresh, New
+    // (paired once a guardrail was set, not let in yet). One from before kept both in blocked.
+    const fresh = ids(d.fresh)
+    const through = d.through && typeof d.through === 'object' && !Array.isArray(d.through) ? d.through : {}
     return {
       control: d.control === true,
       password: d.password && typeof d.password.hash === 'string' && typeof d.password.salt === 'string' ? d.password : null,
       askFirst: d.askFirst === true,
-      blocked: ids(d.blocked),
+      blocked: ids(d.blocked).filter((x) => !fresh.includes(x)),
       known: Array.isArray(d.known) ? ids(d.known) : null,
-      fresh: ids(d.fresh),
+      fresh,
+      // The keys of the devices you kept out: one paired again with the same key is kept out again.
+      outKeys: Array.isArray(d.outKeys) ? d.outKeys.filter((v) => typeof v === 'string' && v.length <= 200).slice(-500) : [],
+      through: Object.fromEntries(Object.entries(through).filter(([k, v]) => /^[\w-]{1,40}\/[\w-]{1,40}$/.test(k) && v && typeof v === 'object').slice(-100)),
       notify: d.notify !== false,
       locks: d.locks && typeof d.locks === 'object' && !Array.isArray(d.locks) ? d.locks : {},
       log: all.filter((e) => !turned(e)).slice(-LOG_MAX),
       refused: [...all.filter(turned), ...(Array.isArray(d.refused) ? d.refused : [])].slice(-REFUSED_MAX),
     }
-  } catch { return { control: false, password: null, askFirst: false, blocked: [], known: null, fresh: [], notify: true, locks: {}, log: [], refused: [] } }
+  } catch { return { control: false, password: null, askFirst: false, blocked: [], known: null, fresh: [], outKeys: [], through: {}, notify: true, locks: {}, log: [], refused: [] } }
 }
 
 // ---------- the Remote Access Password ----------
@@ -122,12 +133,14 @@ async function passwordMatches(stored, pw) {
 // is Bridge AI's (each message counts against the account's allowance). isDevPort(port): one of
 // this computer's dev servers (servers.js). screenAllowed(): on a Mac, whether macOS lets Bridge AI
 // record the screen, looked at without asking (calls.js screen). devices(): the phones and computers
-// paired here ({ id, name, kind }, relay.js). onChange(): what Bridge AI shows of this changed.
-// onBlocked(id): a device unticked here, whose sessions through this computer to another end too.
+// paired here ({ id, name, kind }, relay.js); byKey(key): the one paired with that key, or null.
+// onChange(): what Bridge AI shows of this changed. onBlocked(id): a device unticked here (an id, or
+// hop/id for one through another of your computers), whose terminals, copies and sessions through
+// this computer to another end too.
 // tell(event): your other devices told of a session, control taken or an ask (screentell.js), and
 // what became of it ({ sent, computers }). notifyTo(): where that goes, for Settings. blockThere(hop,
 // id): a device that came through another of your computers (hop, its device here) blocked there.
-export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => false, isDevPort = async () => false, screenAllowed = async () => null, devices = () => [], onChange = () => {}, onBlocked = () => {}, tell: tellDevices = async () => null, notifyTo = () => ({}), blockThere = async () => null }) {
+export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => false, isDevPort = async () => false, screenAllowed = async () => null, devices = () => [], byKey = () => null, onChange = () => {}, onBlocked = () => {}, tell: tellDevices = async () => null, notifyTo = () => ({}), blockThere = async () => null }) {
   let conf = read()
   const save = () => { ensureDir(path.dirname(FILE)); writeFileAtomic(FILE, JSON.stringify(conf, null, 2), { mode: 0o600 }) }
   // Control turned on before it needed a password: off, so setting one later doesn't turn it back on.
@@ -174,14 +187,33 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   }
   const limits = () => ({ tries: ACCESS.tries, lockMinutes: Math.round(LOCK_MS / 60000) || 1, askSeconds: Math.round(ASK_MS / 1000), idleMinutes: Math.round(CONTROL_IDLE_MS / 60000) || 1, passwordMin: ACCESS.passwordMin })
   // The guardrails, as this computer itself sees them (never the password itself, nor its hash).
-  // fresh: paired since a guardrail was set, so unticked until it's ticked here.
+  // fresh: paired since a guardrail was set (New), so unticked until it's let in here. out: kept out
+  // by you, which holds with this Beta Feature off too. Then the devices seen coming through another
+  // of your computers (through: its name), each by that computer and its id there, as the lockout
+  // keeps them (hop/id).
   function accessStatus() {
     sync()
     const locks = activeLocks()
+    const list = devices()
+    const lockOf_ = (id) => locks.find((l) => l.id === id)?.until || null
+    const kindOf = (k) => (k === 'computer' ? 'computer' : 'phone')
+    // older: a computer on a Bridge AI from before its devices were told apart from it (relay.js
+    // builtOf), whose devices this list can't keep out apart from it; with its version.
+    const own = list.map((d) => ({ id: d.id, name: clean(d.name) || 'A device', kind: kindOf(d.kind), allowed: !conf.blocked.includes(d.id) && !conf.fresh.includes(d.id), fresh: conf.fresh.includes(d.id), out: conf.blocked.includes(d.id), locked: lockOf_(d.id), ...(d.kind === 'computer' && !d.forDevices ? { older: true, version: d.version || null } : {}), k: deviceOf(d.id)?.key || null }))
+    const via = Object.entries(conf.through).map(([key, v]) => {
+      const hop = list.find((d) => d.id === key.split('/')[0])
+      return hop && { id: key, name: clean(v.name) || 'A device', kind: kindOf(v.kind), through: clean(hop.name) || 'Another computer', allowed: !conf.blocked.includes(key) && !conf.fresh.includes(key), fresh: conf.fresh.includes(key), out: conf.blocked.includes(key), locked: lockOf_(key), k: v.key || null }
+    }).filter(Boolean)
+    // The same phone can be listed more than once (paired here, and through each of your other
+    // computers it's paired with): same, the others that may be it, by its key or its name, for
+    // Settings to offer keeping them out too. (Never the key itself.)
+    const all = [...own, ...via]
+    const named = (x) => x.name.trim().toLowerCase()
+    const devicesShown = all.map(({ k, ...d }) => ({ ...d, same: all.filter((x) => x !== d && x.id !== d.id && ((k && x.k === k) || named(x) === named(d))).map((x) => x.id) }))
     return {
       password: !!conf.password, passwordAt: conf.password?.at || null,
       askFirst: !!conf.askFirst,
-      devices: devices().map((d) => ({ id: d.id, name: clean(d.name) || 'A device', kind: d.kind === 'computer' ? 'computer' : 'phone', allowed: !conf.blocked.includes(d.id), fresh: conf.fresh.includes(d.id), locked: locks.find((l) => l.id === d.id)?.until || null })),
+      devices: devicesShown,
       locks,
       limits: limits(),
     }
@@ -325,9 +357,11 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   }
 
   // ---------- the guardrails ----------
-  // Once any is set (a password, Ask Here First, a device unticked), a device paired after that
-  // starts unticked: ticked here, it may connect. The devices paired before this was kept are known.
-  const guarded = () => !!conf.password || conf.askFirst || devices().some((d) => conf.blocked.includes(d.id))
+  // Once any is set (a password, Ask Here First, a device you kept out), a device paired after that
+  // starts unticked (New): let in here, it may connect. One you kept out stays counted when it unpairs
+  // itself (its id stays in blocked), so the guardrail is yours to take off, not its. The devices
+  // paired before this was kept are known.
+  const guarded = () => !!conf.password || conf.askFirst || conf.blocked.length > 0
   function sync() {
     const list = devices()
     if (!conf.known) { conf.known = list.map((d) => d.id); save(); return }
@@ -335,14 +369,92 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     if (!fresh.length) return
     const block = guarded()
     conf.known = [...conf.known, ...fresh.map((d) => d.id)].slice(-500)
-    if (block) {
-      conf.blocked = [...new Set([...conf.blocked, ...fresh.map((d) => d.id)])]
-      conf.fresh = [...new Set([...conf.fresh, ...fresh.map((d) => d.id)])].slice(-50)
-    }
+    // Paired again with a key you kept out: kept out again. Else New, once a guardrail is set.
+    const out = fresh.filter((d) => conf.outKeys.includes(deviceOf(d.id)?.key))
+    if (out.length) conf.blocked = [...new Set([...conf.blocked, ...out.map((d) => d.id)])].slice(-500)
+    if (block) conf.fresh = [...new Set([...conf.fresh, ...fresh.filter((d) => !out.includes(d)).map((d) => d.id)])].slice(-500)
     save()
     onChange()
   }
-  const allows = (id) => { sync(); return !!id && !conf.blocked.includes(id) }
+  // Ticked: neither kept out nor New. (Looked at on every request a device makes: the list of
+  // devices is asked for only when this one hasn't been seen here yet.)
+  const allows = (id) => { if (!id) return false; if (!conf.known?.includes(id)) sync(); return !conf.blocked.includes(id) && !conf.fresh.includes(id) }
+  // Which Devices May Connect for everything a device does here (letin.js), not only the screen. One
+  // you kept out gets nothing, whether this Beta Feature is on or not. One New (paired once a
+  // guardrail was set) waits to be let in while it's on; off, nothing else is asked of anyone (no
+  // screen, no password), and it's still New for when it's on again. A computer nobody set up for
+  // this keeps no one out: only you do, or a guardrail you set.
+  const admits = (id) => { if (!id) return false; if (!conf.known?.includes(id)) sync(); return !conf.blocked.includes(id) && !(trialOn() && conf.fresh.includes(id)) }
+  // A device through another of your computers (hop, a computer paired here; via: { id, name, kind,
+  // key } as that computer says): null when it may, else who isn't let in here, 'computer' (the
+  // hop) or 'device'. That device is kept out when you kept it out here as it comes through that
+  // computer (hop/id, as the lockout keeps it), or, when it's paired here too with the same key, as
+  // it is here. A phone keeps a key of its own for each computer it's paired with (a browser, the
+  // Android app), so most aren't known here as the same device: those are kept out through each
+  // computer apart.
+  // One seen through a computer for the first time once a guardrail is set here starts New, as one
+  // paired here would; one with a key you kept out, kept out.
+  // A computer too old to say which of its devices it's for (via.unknown), once a guardrail is set
+  // here: 'update', as its devices can't be told apart (its own requests, as itself, go on as before).
+  function shutFor(hop, via = null) {
+    if (!admits(hop)) return via ? 'computer' : 'device'
+    if (via?.unknown && deviceOf(hop)?.kind === 'computer') return guarded() ? 'update' : null
+    if (!via?.id || deviceOf(hop)?.kind !== 'computer') return null
+    const key = `${hop}/${via.id}`
+    const was = conf.through[key]
+    const name = clean(via.name) || 'A device'
+    const kind = via.kind === 'computer' ? 'computer' : 'phone'
+    const vkey = typeof via.key === 'string' && via.key.length <= 200 ? via.key : null
+    if (!was || was.name !== name || was.kind !== kind || (vkey && was.key !== vkey)) {
+      conf.through = Object.fromEntries([...Object.entries(conf.through).filter(([k]) => k !== key), [key, { name, kind, ...(vkey ? { key: vkey } : {}), at: was?.at || new Date().toISOString() }]].slice(-100))
+      // (Known here by its key as one you let in: the same device, not New.)
+      const twin = vkey ? byKey(vkey) : null
+      if (!was && vkey && conf.outKeys.includes(vkey)) conf.blocked = [...new Set([...conf.blocked, key])]
+      else if (!was && guarded() && !(twin && allows(twin.id))) conf.fresh = [...new Set([...conf.fresh, key])].slice(-500)
+      save()
+      onChange()
+    }
+    return throughOut(key) ? 'device' : null
+  }
+  // Whether a device through another of your computers (hop/id) is kept out here: you kept it out
+  // that way, it's New while this Beta Feature is on, or it's known here by its key as one you kept out.
+  function throughOut(key) {
+    if (conf.blocked.includes(key) || (trialOn() && conf.fresh.includes(key))) return true
+    const k = conf.through[key]?.key
+    if (!k) return false
+    if (conf.outKeys.includes(k)) return true
+    const same = byKey(k)
+    return !!same && !admits(same.id)
+  }
+  // The devices of another of your computers (hop, a computer paired here) kept out here as they come
+  // through it, by that computer's ids for them: it hides what it shows of this computer from those
+  // (its summary of this one, machines.js).
+  const outVia = (hop) => (hop ? Object.keys(conf.through).filter((k) => k.startsWith(`${hop}/`) && throughOut(k)).map((k) => k.slice(hop.length + 1)) : [])
+  // ...or, with a guardrail set here while this Beta Feature is on, the ones it lets in, and no
+  // others: one of that computer's devices not seen here yet would start New, so it's shown nothing
+  // of this computer until it's let in. { keepOut } or { letIn }, for that computer's summary.
+  const viaList = (hop) => (!hop ? { keepOut: [] } : trialOn() && guarded()
+    ? { letIn: Object.keys(conf.through).filter((k) => k.startsWith(`${hop}/`) && !throughOut(k)).map((k) => k.slice(hop.length + 1)) }
+    : { keepOut: outVia(hop) })
+  // One not let in that asked for something here: when, for Needs You.
+  const tried = new Map() // device id -> when
+  const turnedAway = (id) => { tried.set(id, Date.now()) }
+  // Devices waiting to be let in, for Needs You here: paired once a guardrail was set (New), not
+  // ticked yet, and when each last tried (null: not since Bridge AI started).
+  function waiting() {
+    if (!trialOn()) return []
+    sync()
+    const list = devices()
+    const when = (id) => (tried.has(id) ? new Date(tried.get(id)).toISOString() : null)
+    const own = list.filter((d) => conf.fresh.includes(d.id))
+      .map((d) => ({ id: d.id, name: clean(d.name) || 'A device', kind: d.kind === 'computer' ? 'computer' : 'phone', paired: d.addedAt || null, tried: when(d.id) }))
+    // (Through another of your computers: first seen then, and when it last tried through it.)
+    const via = Object.entries(conf.through).filter(([k]) => conf.fresh.includes(k)).map(([k, v]) => {
+      const hop = list.find((d) => d.id === k.split('/')[0])
+      return hop && { id: k, name: clean(v.name) || 'A device', kind: v.kind === 'computer' ? 'computer' : 'phone', through: clean(hop.name) || 'Another computer', paired: v.at || null, tried: when(hop.id) }
+    }).filter(Boolean)
+    return [...own, ...via]
+  }
   // Who's asking, as the lockout counts it (s.key): the device, or, through another of your computers,
   // that computer and the device there it speaks for, each on its own; and all of those through that
   // computer together too, so it can't speak for a new one each time.
@@ -360,7 +472,8 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   const clock = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
   const lockedWhy = (until) => `Too many wrong passwords: ${thisName()} won't let this device try again until ${clock(until)}.`
   const lockedSay = (fail, until) => fail(lockedWhy(until), 'locked', { until: new Date(until).toISOString() })
-  const notAllowed = (s) => `${thisName()} doesn't let ${s.by.name} connect. That's changed at ${thisName()} itself, in Settings › Account & Devices › Computers.`
+  // (Through another of your computers, the device it's for, when that computer itself may.)
+  const notAllowed = (s) => `${thisName()} doesn't let ${s.forId && s.by.id && allows(s.by.id) ? s.for || 'this device' : s.by.name} connect. That's changed at ${thisName()} itself, in Settings › Remote Access › Which Devices May Connect.`
   // A session turned away, kept apart from the sessions that ran, so many can't push those out of
   // the record; the same again soon after (that device, the same why) is counted on the last one.
   function refuse(s, end, more = {}) {
@@ -543,7 +656,10 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       kind: kind === 'page' || kind === 'preview' ? 'page' : 'screen', grant: kind === 'preview', via: null, controlled: false, frames: 0, acked: true, pending: null, sent: 0, told: [],
       slow: q.get('slow') === '1', p2p: q.get('p2p') === '1', wants: q.get('control') === '1', lastInput: Date.now(),
     }
-    if (!allows(dev.id)) { refuse(s, 'device'); return fail(notAllowed(s), 'device') }
+    // Ticked here; through another of your computers, the device it's for too (shutFor).
+    const forKey = dev.kind === 'computer' && typeof req.headers['x-bridge-for-key'] === 'string' ? req.headers['x-bridge-for-key'] : null
+    const mayView = () => allows(dev.id) && !(s.forId && shutFor(dev.id, { id: s.forId, name: s.for, kind: s.forKind, key: forKey }))
+    if (!mayView()) { refuse(s, 'device'); return fail(notAllowed(s), 'device') }
     if (s.kind === 'page') {
       const port = Number(sid)
       if (!(port > 1023 && port < 65536) || !(await isDevPort(port))) return fail(`Port ${sid} isn't one of the apps ${thisName()} serves.`, 'port')
@@ -561,7 +677,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     let passed = false
     try { passed = await gate(s, fail) } finally { pending.delete(s) }
     if (!passed || ws.readyState !== 1) return
-    if (!allows(dev.id)) { refuse(s, 'device'); return fail(notAllowed(s), 'device') }
+    if (!mayView()) { refuse(s, 'device'); return fail(notAllowed(s), 'device') }
     if (s.kind === 'page') {
       s.source = { kind: 'page', port: s.port, name: `:${s.port}` }
       s.provider = s.grant ? 'none' : FAKE && !desktopOpen() ? 'fake' : 'desktop'
@@ -574,7 +690,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
         // down, or not answered yet, it's said, and the question is on that screen.
         const after = screenStatus()
         if (!after.can) return fail(after.why, after.code)
-        if (!allows(dev.id)) { refuse(s, 'device'); return fail(notAllowed(s), 'device') }
+        if (!mayView()) { refuse(s, 'device'); return fail(notAllowed(s), 'device') }
       }
       let list = sourceList()
       // No screens yet: asked for again (the app looks a few times) before saying so.
@@ -910,18 +1026,25 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   }
   function setAskFirst(on) { conf.askFirst = !!on; save(); onChange(); return accessStatus() }
   // Unticked: it can't connect, and a session of its going now ends, as does one at the password or
-  // waiting for Allow, and one through this computer to another (onBlocked).
+  // waiting for Allow; and the rest of what it has open here (its terminals, what it's fetching or
+  // sending) and through this computer to another (onBlocked). Ticked or not, it isn't New any more.
+  // id: a device paired here, or one seen through another of your computers (hop/id).
   function setDevice(id, allowed) {
     sync()
-    if (!devices().some((d) => d.id === id)) throw Object.assign(new Error('That device isn\'t paired with this computer.'), { status: 404 })
+    if (!devices().some((d) => d.id === id) && !(conf.through[id] && devices().some((d) => d.id === id.split('/')[0]))) throw Object.assign(new Error('That device isn\'t paired with this computer.'), { status: 404 })
     conf.blocked = allowed ? conf.blocked.filter((x) => x !== id) : [...new Set([...conf.blocked, id])]
     conf.fresh = conf.fresh.filter((x) => x !== id)
+    // Its key too (one it pairs with again, or comes through another computer with, is the same).
+    const k = deviceOf(id)?.key || conf.through[id]?.key
+    if (k) conf.outKeys = allowed ? conf.outKeys.filter((x) => x !== k) : [...new Set([...conf.outKeys, k])].slice(-500)
+    tried.delete(id)
     save()
     if (!allowed) {
       const why = `${thisName()} stopped letting this device connect.`
-      for (const s of [...sessions.values()]) if (s.by.id === id) end(s, 'device', why)
-      for (const a of [...asks.values()]) if (a.by.id === id) a.done('gone')
-      for (const s of [...pending]) if (s.by.id === id) { pending.delete(s); refuse(s, 'device'); s.fail(why, 'device') }
+      const its = (s) => s.by.id === id || s.key === id
+      for (const s of [...sessions.values()]) if (its(s)) end(s, 'device', why)
+      for (const a of [...asks.values()]) if (a.s ? its(a.s) : a.by.id === id) a.done('gone')
+      for (const s of [...pending]) if (its(s)) { pending.delete(s); refuse(s, 'device'); s.fail(why, 'device') }
       onBlocked(id)
     }
     onChange()
@@ -971,9 +1094,11 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     return () => { desktops.delete(fn); onChange() }
   }
 
-  // Trial turned off: every session ends, and every ask is a no.
+  // Trial turned off: every session ends, and every ask is a no. Turned on: what a New device has
+  // open here ends, as when it's unticked (it waits to be let in from now); one you kept out was
+  // let in to nothing meanwhile either.
   function trialChanged() {
-    if (trialOn()) return
+    if (trialOn()) { sync(); for (const id of [...conf.fresh, ...conf.blocked]) if (devices().some((d) => d.id === id)) onBlocked(id); return }
     for (const s of [...sessions.values()]) end(s, 'off', 'Remote Screen and Preview was turned off on this computer.')
     for (const a of [...asks.values()]) a.done('deny')
   }
@@ -986,7 +1111,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     return lock ? { code: 'locked', why: lockedWhy(lock.until), until: new Date(lock.until).toISOString() } : null
   }
 
-  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, setNotify, unlock, answer, allows, mayPass, mayPreview, stop, stopAll, endFrom, live, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, active: () => sessions.size }
+  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, setNotify, unlock, answer, allows, admits, shutFor, outVia, viaList, turnedAway, waiting, mayPass, mayPreview, stop, stopAll, endFrom, live, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, active: () => sessions.size }
 }
 
 // The test stand-in's screens: its main one, one beside it, a 5K one at twice its points (as a

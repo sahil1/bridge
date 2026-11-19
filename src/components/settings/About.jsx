@@ -14,6 +14,7 @@ import { TRIALS } from '../../trials.js'
 import { AWAY_MINUTES, RELEASE_HOURS, waitingLong } from '../../../shared/autoupdate.js'
 import { isPre } from '../../../shared/version.js'
 import { Advanced } from './Advanced.jsx'
+import { StaysOut } from '../remote/Settings.jsx'
 
 const REPO = 'https://github.com/sahil1/bridge'
 
@@ -256,10 +257,14 @@ function Trials() {
       <p className="muted small" title={t("New parts of Bridge AI, in beta. Each stays hidden until you turn it on here, and turning it off hides it again; what you made with it stays where it is.")}>{t('Each stays hidden until you turn it on here.')}</p>
       {TRIALS.filter((x) => !x.mac || conf?.platform === 'darwin').map((x) => (
         <Fragment key={x.id}>
-          <label className="st-check"><input type="checkbox" checked={on(x.id)} disabled={!s} onChange={(e) => set(x.id, e.target.checked)} />
+          <label className="st-check"><input type="checkbox" checked={on(x.id)} disabled={!s || (x.id === 'remote-screen' && !onThisComputer())} onChange={(e) => set(x.id, e.target.checked)} />
             <span title={t(x.hint)}><b>{t(x.label)}</b> <span className="muted small">{SHORT[x.id] ? t(SHORT[x.id]) : t(x.hint)}</span>{auto[x.id] && on(x.id) && <span className="muted small ab-auto-on"> {t('Turned on by itself on {date}, once there were meetings to add up.', { date: new Date(auto[x.id]).toLocaleDateString(locale(), { month: 'long', day: 'numeric' }) })}</span>}</span></label>
           {/* (Bots on: where to start, right there.) */}
           {x.id === 'slack-bot' && on(x.id) && <StartBots />}
+          {/* Remote Screen and Preview guards which devices may connect: changed at the computer itself,
+              and off, the devices unticked there still stay out (server/remote.js). */}
+          {x.id === 'remote-screen' && !onThisComputer() && <p className="muted small ab-trial-go">{t('Turned on and off at the computer itself.')}</p>}
+          {x.id === 'remote-screen' && !on(x.id) && <StaysOut />}
         </Fragment>
       ))}
     </section>

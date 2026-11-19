@@ -19,10 +19,11 @@
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 const DEFAULT_PORT = { 'http:': '80', 'https:': '443' }
-const API = /^(\/m\/[A-Za-z0-9_-]{1,20})?\/api\//
+// (In any capitals, as the routes take them.)
+const API = /^(\/m\/[A-Za-z0-9_-]{1,20})?\/api\//i
 // What Tailscale adds to a request it passes on from your tailnet (tailscale.com/kb/1312/serve).
 const TAILSCALE = ['tailscale-user-login', 'tailscale-user-name', 'tailscale-user-profile-pic', 'tailscale-headers-info']
-const PREVIEW_FILES = /^(\/m\/[A-Za-z0-9_-]{1,20})?\/api\/agents\/[^/]+\/site\//
+const PREVIEW_FILES = /^(\/m\/[A-Za-z0-9_-]{1,20})?\/api\/agents\/[^/]+\/site\//i
 
 // tailnetOwner: () => this computer's Tailscale login, or null (phone.js).
 export function makeGuard(cfg = {}, { tailnetOwner = async () => null } = {}) {

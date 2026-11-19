@@ -6,7 +6,7 @@ import { t, tx, locale, tn } from '../i18n/index.js'
 import { useDevicesName } from './settings/search.js'
 import { useTrial } from '../trials.js'
 import { viewScreen, canReach } from './remote/remote.js'
-import { RemoteSettings, useControl } from './remote/Settings.jsx'
+import { RemoteSettings, KeptOut, useControl } from './remote/Settings.jsx'
 import { canScan, scan } from '../scan.js'
 
 // Your other devices (server/machines.js): Macs, Windows and Linux computers running Bridge AI,
@@ -219,7 +219,7 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
         <div className={`menu left mc-menu ${phone ? 'phone' : ''}`} role="menu" aria-label={t('Your Devices')}>
           <div className="mc-head">{t('Your Devices')}</div>
           {row('here', data.here.name, `${OS_LABEL[data.here.os] || ''}${machineId ? '' : ` · ${t('this one')}`}`, true, !machineId, () => pick(null), null, viaRelay && !machineId)}
-          {linked.map((m) => row(m.id, m.name, [OS_LABEL[m.os], m.online ? counts(m.counts) || t('Online') : m.lastSeen ? t('Offline, seen {when}', { when: ago(m.lastSeen) }) : t('Offline')].filter(Boolean).join(' · '), m.online, m.id === machineId, () => go(m), m.id))}
+          {linked.map((m) => row(m.id, m.name, [OS_LABEL[m.os], m.notLetIn ? t('Not let in') : m.online ? counts(m.counts) || t('Online') : m.lastSeen ? t('Offline, seen {when}', { when: ago(m.lastSeen) }) : t('Offline')].filter(Boolean).join(' · '), m.online, m.id === machineId, () => go(m), m.id))}
           {paired.filter((c) => !linked.some((m) => bare(m.relay) === bare(c.relay))).map((c) => row(c.relay, c.name, t('Paired on this phone'), null, false, close(() => relayComputers.open(c.relay))))}
           <div className="menu-sep" />
           <button type="button" role="menuitem" className="menu-item" onClick={close(openMap)}>
@@ -611,6 +611,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
                 </small>
                 {m.state === 'asking' && m.code && <small>{tn('On {name}, allow it if it shows {code}.', { name: m.name, code: <b className="ask-code">{m.code}</b> })}</small>}
                 {m.error && m.state === 'linked' && !m.online && !fixes[m.id] && <small className="muted">{m.error}</small>}
+                {m.notLetIn && m.state === 'linked' && m.online && <small className="muted"><Icon name="lock" size={11} /> {t('{name} hasn\'t let {here} in. On {name}: Settings › Remote Access › Which Devices May Connect.', { name: m.name, here: data.here.name })}</small>}
                 {m.state === 'changed' && <small className="muted">{t('{name} doesn\'t have the key it was linked with: it was set up again, or something is in between. On {name}, choose Pair a device and paste its link in Link a device below, to check it\'s really {name}.', { name: m.name })}</small>}
                 {m.state === 'removed' && <small className="muted">{t('{name} forgot this device. Link again asks it; allow it there after checking both show the same six digits.', { name: m.name })}</small>}
                 {newOf(m) && <small className="muted">{t('Linked with this device\'s code. Keep it if it\'s yours, and it meets your other computers too.')}</small>}
@@ -656,6 +657,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
       </section>
 
       <RemoteSettings />
+      <KeptOut />
 
       {!readOnly && phoneOthers.length > 0 && (
         <section className="st-sec">
