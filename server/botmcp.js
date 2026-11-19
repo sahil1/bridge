@@ -20,7 +20,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { dataFile, writeFileAtomic, HOME, ROOT, NODE, IS_WIN } from './paths.js'
-import { loginPath, which } from './agents.js'
+import { loginPath, which, KEPT_SETTINGS, KEPT_MIN } from './agents.js'
 import { claudeServers, claudeServerView } from './mcp.js'
 import { launch } from './consult.js'
 import { compare } from '../shared/version.js'
@@ -168,8 +168,8 @@ export const configsOf = (bot) => { const have = claudeServers(); return Object.
 // for the record: { dir, servers: [{ name, all, tools, problem }], missing }.
 export const OUTBOX_SERVER = 'bridge_outbox'
 // A run that changes files (write: { root, parts, files }: its copy, the names of its folders' copies
-// in it, botwrite.js, or a copy of a repository with no parts, botchanges.js) gets settings of its own
-// for Claude Code (settings.json, --settings: agents.js): its PreToolUse hook, botguard.mjs, that
+// in it, botwrite.js, or a copy of a repository with no parts, botchanges.js) has in its settings for
+// Claude Code (settings.json, every run's, --settings: agents.js) its PreToolUse hook, botguard.mjs, that
 // checks every path a tool that writes is given, with hooks on whatever your own settings say; and
 // with files, Bridge AI's own bridge_files (filesmcp.js, delete_file and move_file in that copy
 // alone). Both write each path they let through to the run's log (guard.log) with a key of the run's
@@ -186,6 +186,10 @@ export const execHooks = () => IS_WIN || (process.env.BRIDGE_HOOK_EXEC === '1' &
 // spawns the command directly without a shell". One older than that doesn't run it as given, so the
 // hook checks nothing and every file such a run changes is refused.
 export const EXEC_HOOKS_MIN = '2.1.139'
+// What a run that changes files needs where its hook is given so: that, or the oldest Claude Code
+// that starts any run kept to its folders (agents.js KEPT_MIN), whichever is the higher, so you're
+// told the one version that lets it run.
+export const hookMin = () => (compare(KEPT_MIN.claude.version, EXEC_HOOKS_MIN) > 0 ? KEPT_MIN.claude.version : EXEC_HOOKS_MIN)
 // The Claude Code here: its version ('2.1.312'), or null when it can't be told (none found, or it
 // didn't say). claude --version, asked again only once the program found is another or has changed
 // (an update), or an hour on.
@@ -213,7 +217,8 @@ export async function claudeVersion() {
 export async function hookTooOld() {
   if (!execHooks()) return null
   const have = await claudeVersion()
-  return have && compare(have, EXEC_HOOKS_MIN) < 0 ? { need: EXEC_HOOKS_MIN, have } : null
+  const need = hookMin()
+  return have && compare(have, need) < 0 ? { need, have } : null
 }
 export async function runFolder(bot, { all = false, key, outbox = null, write = null }) {
   const want = (bot.mcp || []).filter((n) => n !== OUTBOX_SERVER && n !== FILES_SERVER)
@@ -239,7 +244,7 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
   const servers = Object.fromEntries(picked.map((n) => [n, have[n]]))
   // (Its outbox's: this app's Node, on this run's outbox alone.)
   if (outbox) { servers[OUTBOX_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'outboxmcp.js'), outbox], env: { ...NODE.env } }; allow.push(toolName(OUTBOX_SERVER, 'save_file')) }
-  let settings = null
+  let hooks = null
   let guard = null
   let agentEnv = null
   if (write?.root) {
@@ -264,11 +269,14 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
       ? { type: 'command', command: NODE.bin, args: guardArgs, timeout: 30 }
       : { type: 'command', command: `${Object.entries({ ...NODE.env }).map(([k, v]) => `${k}=${sh(v)} `).join('')}${sh(NODE.bin)} ${guardArgs.map(sh).join(' ')}`, timeout: 30 }
     if (execHooks() && Object.keys(NODE.env).length) agentEnv = { ...NODE.env }
-    settings = path.join(dir, 'settings.json')
-    writeFileAtomic(settings, JSON.stringify({ disableAllHooks: false, hooks: { PreToolUse: [{ matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [hook] }] } }, null, 2), { mode: 0o600 })
+    hooks = { disableAllHooks: false, hooks: { PreToolUse: [{ matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [hook] }] } }
   }
+  // (Claude Code's settings for the run, in one file, as it takes one --settings: Bridge AI's for
+  // every run kept to its folders, agents.js KEPT_SETTINGS, with its hook when it changes files.)
+  const settings = path.join(dir, 'settings.json')
+  writeFileAtomic(settings, JSON.stringify({ ...KEPT_SETTINGS, ...(hooks || {}) }, null, 2), { mode: 0o600 })
   writeFileAtomic(path.join(dir, 'config.json'), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 })
-  writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny, ...(settings ? { settings } : {}) }, null, 2), { mode: 0o600 })
+  writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny, settings }, null, 2), { mode: 0o600 })
   return { dir, servers: said, missing, ...(guard ? { guard } : {}), ...(agentEnv ? { agentEnv } : {}) }
 }
 // A run's folder gone (it ended), or every one older than a day (left from before a restart).

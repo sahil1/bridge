@@ -95,8 +95,24 @@
 //   claude --resume <id> --fork-session --session-id <new> "<brief>"   a copy of a conversation:
 //                                            <id>'s, then the brief as above
 //   --model <m>, --effort <level>, --permission-mode <mode>, --tools <list>, --add-dir <dirs...>,
-//   --mcp-config <files...>, --disallowedTools <list>, --strict-mcp-config, --settings <file>
-//                                            taken, as Claude Code takes them
+//   --mcp-config <files...>, --disallowedTools <list>, --strict-mcp-config   taken, as Claude Code
+//                                            takes them
+//   --setting-sources <list>, --settings <file or JSON>   its settings, as Claude Code loads them:
+//                                            your own (user: ~/.claude/settings.json) and its folder's
+//                                            (project: .claude/settings.json; local:
+//                                            .claude/settings.local.json), the ones the list names
+//                                            (all three without it), and --settings always. What they
+//                                            say holds: permissions.allow rules for Read (Read, or
+//                                            Read(<path>) ending /** for all in it) let [try-read]
+//                                            read outside its folders under dontAsk, as do the
+//                                            folders permissions.additionalDirectories adds, unless
+//                                            permissions.blockReadsOutsideWorkingDirectories says no;
+//                                            the commands of their SessionStart hooks run as it
+//                                            starts (its folder trusted), and their PreToolUse hooks
+//                                            before each edit (above). The files it loaded go in its
+//                                            line in ~/helpers-started.log (settings), with what
+//                                            --settings gave it (given: the file's JSON as it read it)
+//   claude --version                         2.1.312, or what ~/claude-version says
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -111,7 +127,7 @@ if (args.includes('--version')) {
 }
 // Signed in with a Max plan (BRIDGE_STANDIN_CLAUDE_PLAN: another, team say).
 if (args[0] === 'auth') { console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', subscriptionType: process.env.BRIDGE_STANDIN_CLAUDE_PLAN || 'max' })); process.exit(0) }
-const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode', '--effort', '--tools', '--settings'])
+const WITH_VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode', '--effort', '--tools', '--setting-sources', '--settings'])
 // (--allowedTools, like --add-dir, takes a list.)
 const allowed = []
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null }
@@ -140,7 +156,41 @@ const home = os.homedir()
 const note = (file, o) => fs.appendFileSync(path.join(home, file), JSON.stringify(o) + '\n')
 // (And any Slack token it was given in its environment, by name: there should never be one.)
 const secrets = Object.entries(process.env).filter(([, v]) => /^(xox[abp]|xapp)-|^dtest\.|^teams-secret/.test(String(v))).map(([k]) => k)
-if (message) note('helpers-started.log', { args, cwd: process.cwd(), message, secrets, ...(pointed ? { briefFile: pointed[1] } : {}) })
+// Its settings: the sources --setting-sources names (all three without it), and --settings.
+const sources = opt('--setting-sources') == null ? ['user', 'project', 'local'] : opt('--setting-sources').split(',').map((x) => x.trim())
+const flagSettings = opt('--settings')
+const loaded = [
+  ...(sources.includes('user') ? [path.join(home, '.claude', 'settings.json')] : []),
+  ...(sources.includes('project') ? [path.join(process.cwd(), '.claude', 'settings.json')] : []),
+  ...(sources.includes('local') ? [path.join(process.cwd(), '.claude', 'settings.local.json')] : []),
+  ...(flagSettings ? [flagSettings] : []),
+].map((f) => { try { return { file: f, s: JSON.parse(f.trim().startsWith('{') ? f : fs.readFileSync(f, 'utf8')) } } catch { return null } }).filter(Boolean)
+const readRules = loaded.flatMap((x) => x.s.permissions?.allow || []).map(String).filter((r) => /^Read(\(.*\))?$/.test(r))
+const moreDirs = loaded.flatMap((x) => x.s.permissions?.additionalDirectories || []).map((d) => path.resolve(String(d).replace(/^~(?=$|[\\/])/, home)))
+const blockOutside = loaded.some((x) => x.s.permissions?.blockReadsOutsideWorkingDirectories === true)
+// (A Read rule: Read for anything, or Read(<path>): //<absolute>, ~/<in your home>, ending /** for all in it.)
+const ruleAllows = (rule, p) => {
+  const m = /^Read\((.*)\)$/.exec(rule)
+  if (!m) return true
+  let at = m[1].replace(/\\/g, '/')
+  const all = at.endsWith('/**')
+  if (all) at = at.slice(0, -3)
+  at = at.startsWith('//') ? path.resolve(process.platform === 'win32' ? at.slice(2) : at.slice(1)) : at.startsWith('~/') || at === '~' ? path.join(home, at.slice(2)) : path.resolve(at)
+  return p === at || (all && p.startsWith(at + path.sep))
+}
+// (What --settings gave it, as it read it: the run's file goes once the run has, so it's kept here.)
+const given = flagSettings ? loaded.findLast((x) => x.file === flagSettings)?.s || null : null
+if (message) note('helpers-started.log', { args, cwd: process.cwd(), message, secrets, settings: loaded.map((x) => x.file), given, ...(pointed ? { briefFile: pointed[1] } : {}) })
+// Their SessionStart hooks' commands, run as it starts (once its folder is trusted, as Claude Code holds them till then).
+const sessionStart = () => {
+  for (const x of loaded) {
+    for (const group of x.s.hooks?.SessionStart || []) {
+      for (const hook of group.hooks || []) {
+        if (hook.type === 'command' && hook.command) { try { require('node:child_process').execSync(hook.command, { stdio: 'ignore', timeout: 10000 }) } catch { /* it failed */ } }
+      }
+    }
+  }
+}
 if (/\[exit\]/.test(message)) process.exit(0)
 
 // Its conversation, where Bridge AI reads Claude Code's.
@@ -206,17 +256,15 @@ function turn(text, answer, ms, made) {
   const look = setInterval(() => { if (fs.existsSync(go)) { clearInterval(look); finish() } }, 200)
 }
 
-// Its PreToolUse hooks, from --settings (a file, or JSON), as Claude Code runs them: each one whose
-// matcher takes the tool, with the tool call on stdin; exit 2 refuses it, its stderr the reason. One
-// with args (exec form) is started as it is, with no shell; any other through a shell: sh on a Mac
-// and Linux; on Windows Git Bash (CLAUDE_CODE_GIT_BASH_PATH, or the bash beside git on the PATH),
-// else PowerShell, or PowerShell when its shell says so. None with disableAllHooks.
+// Its PreToolUse hooks, from the settings it loaded (above: --settings, a file or JSON, among them),
+// as Claude Code runs them: each one whose matcher takes the tool, with the tool call on stdin; exit
+// 2 refuses it, its stderr the reason. One with args (exec form) is started as it is, with no shell;
+// any other through a shell: sh on a Mac and Linux; on Windows Git Bash (CLAUDE_CODE_GIT_BASH_PATH,
+// or the bash beside git on the PATH), else PowerShell, or PowerShell when its shell says so. None
+// with disableAllHooks (as the last of them to say it has it: --settings over your own).
 const hooks = (() => {
-  const s = opt('--settings')
-  if (!s) return []
-  let j
-  try { j = JSON.parse(s.trim().startsWith('{') ? s : fs.readFileSync(s, 'utf8')) } catch { return [] }
-  return j?.disableAllHooks === true ? [] : j?.hooks?.PreToolUse || []
+  const off = loaded.map((x) => x.s.disableAllHooks).filter((v) => typeof v === 'boolean').at(-1)
+  return off === true ? [] : loaded.flatMap((x) => x.s.hooks?.PreToolUse || [])
 })()
 const gitBash = () => {
   if (process.env.CLAUDE_CODE_GIT_BASH_PATH) return process.env.CLAUDE_CODE_GIT_BASH_PATH
@@ -309,8 +357,10 @@ function answerTurn(text) {
     if (r) {
       const want = path.resolve(r[1].replace(/^~/, home))
       const real = (p) => { try { return fs.realpathSync(p) } catch { return p } }
-      const here = [process.cwd(), ...added].some((d) => want.startsWith(d + path.sep) || real(want).startsWith(real(d) + path.sep))
-      if (!can('Read') || (!here && dontAsk)) { tried('read', false); out.push(`I couldn't read ${r[1]}: reading outside my folders was refused.`) } else { let c = ''; try { c = fs.readFileSync(want, 'utf8').trim() } catch { /* none */ } tool('Read', { file_path: want }); tried('read', true); out.push(`It says: ${c}`) }
+      const here = [process.cwd(), ...added, ...moreDirs].some((d) => want.startsWith(d + path.sep) || real(want).startsWith(real(d) + path.sep))
+      // (Outside them: refused under dontAsk unless an allow rule lets it, and always when blockReadsOutsideWorkingDirectories says so.)
+      const ruled = readRules.some((x) => ruleAllows(x, want) || ruleAllows(x, real(want)))
+      if (!can('Read') || (!here && (blockOutside || (dontAsk && !ruled)))) { tried('read', false); out.push(`I couldn't read ${r[1]}: reading outside my folders was refused.`) } else { let c = ''; try { c = fs.readFileSync(want, 'utf8').trim() } catch { /* none */ } tool('Read', { file_path: want }); tried('read', true); out.push(`It says: ${c}`) }
     }
     // Edits: only in its folder, and only when it was started able to (a bot's change), and only
     // what its hooks let through.
@@ -398,6 +448,7 @@ function answerTurn(text) {
 }
 
 function begin() {
+  sessionStart()
   if (message && /----- question from/.test(message) && /\[signin\]/.test(message)) { state = 'signin'; draw() }
   else if (message && /----- question from/.test(message) && /\[stuck\]/.test(message)) { user(message); state = 'asking'; draw() }
   else if (message && /----- question from/.test(message)) answerTurn(message)

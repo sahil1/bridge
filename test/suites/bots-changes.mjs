@@ -137,8 +137,9 @@ try {
   })
 
   // ---------- A Claude Code too old for its hook ----------
-  // Its hook given as a program and its arguments (as on Windows) needs Claude Code 2.1.139 or later:
-  // an older one (the stand-in saying 2.1.100, the program changed as an update changes it) is said
+  // Its hook given as a program and its arguments (as on Windows) needs Claude Code 2.1.139 or later,
+  // and any run kept to its folders 2.1.257, so it's the higher that's said: an older one (the
+  // stand-in saying 2.1.100, the program changed as an update changes it) is said
   // on its Access card, and a change asked for isn't started, said in Needs You and the record; once
   // it's new again, a change goes through.
   let bumps = 0
@@ -150,18 +151,18 @@ try {
   await part('Claude Code too old for its hook', async () => {
     claudeIs('2.1.100')
     const v = await botOf()
-    ok(v.changes?.hook?.need === '2.1.139' && v.changes.hook.have === '2.1.100', 'its Access says Claude Code is too old for its hook, and which it needs', v.changes?.hook)
+    ok(v.changes?.hook?.need === '2.1.257' && v.changes.hook.have === '2.1.100', 'its Access says Claude Code is too old for its hook, and which it needs', v.changes?.hook)
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
     await openSettings(p)
     const said = await p.locator('[data-setting="bots-changes-hook"]').first().innerText({ timeout: 15000 }).catch(() => '')
-    ok(/needs Claude Code 2\.1\.139 or later, and this computer has 2\.1\.100: update it with claude update/.test(said), 'and its Changes say so, with how to update it', said)
+    ok(/needs Claude Code 2\.1\.257 or later, and this computer has 2\.1\.100: update it with claude update/.test(said), 'and its Changes say so, with how to update it', said)
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
     const before = startsOf('Fix the footer').length
     await slack.ask({ user: 'U0DANA', text: `${M} Fix the footer [edit README.md Footer fixed] [answer Fixed.]` })
     const d = await until(async () => (await kit.api('/needs-you')).slack?.find((x) => /Fix the footer/.test(x.text || '') && x.needsOwner), 30000)
-    ok(/Changing files on Windows needs Claude Code 2\.1\.139 or later, and this computer has 2\.1\.100: update it with claude update in a terminal/.test(d?.why || '') && startsOf('Fix the footer').length === before && !d.change, 'a change asked for: not started, and you\'re told why in Needs You', d?.why)
-    ok((await timelineOf('b1', 'Fix the footer')).some((e) => e.type === 'changes.blocked' && e.why === 'claude-old' && e.need === '2.1.139' && e.have === '2.1.100'), 'and in its record')
+    ok(/Changing files on Windows needs Claude Code 2\.1\.257 or later, and this computer has 2\.1\.100: update it with claude update in a terminal/.test(d?.why || '') && startsOf('Fix the footer').length === before && !d.change, 'a change asked for: not started, and you\'re told why in Needs You', d?.why)
+    ok((await timelineOf('b1', 'Fix the footer')).some((e) => e.type === 'changes.blocked' && e.why === 'claude-old' && e.need === '2.1.257' && e.have === '2.1.100'), 'and in its record')
     if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })
     claudeIs(null)
     ok(!(await botOf()).changes?.hook, 'updated: nothing said')

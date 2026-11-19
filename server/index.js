@@ -58,7 +58,7 @@ import { makeNews } from './news.js'
 import { pickRuntime, fellBack } from './runtime/index.js'
 import { sessionName as herdrSession, useSession as useHerdrSession } from './runtime/herdr-cli.js'
 import * as herdrSessions from './runtime/herdr-sessions.js'
-import { AGENTS, installed, caps, adapter, readOnly, canChange, catalog as agentCatalog, installCommand, installNeeds, installTools, clearInstalledCache, forgetLoginPath, loginPath, which } from './agents.js'
+import { AGENTS, installed, caps, adapter, readOnly, canChange, catalog as agentCatalog, installCommand, installNeeds, installTools, clearInstalledCache, forgetLoginPath, loginPath, which, keptProblem, writeKeptSettings } from './agents.js'
 import * as nodejs from './nodejs.js'
 import { devTools } from './gitready.js'
 import { quoteCommand } from './runtime/spawn.js'
@@ -186,6 +186,9 @@ const delegate = makeDelegate({
   press: (paneId, keys) => rt.keys(paneId, keys),
   labelOf: (k) => adapter(k).label || k,
 })
+// Bridge AI's own Claude Code settings for a bot's runs (agents.js keptFlags), there before any run
+// it starts again now finds them missing.
+try { writeKeptSettings() } catch (e) { console.log(`Couldn't write the settings for bots' runs: ${e.message}`) }
 // Where agents run: herdr, or Bridge AI's own terminals (see runtime/index.js).
 const rt = await pickRuntime(cfg)
 if (fellBack()) console.log(`Agents run in Bridge AI itself, not herdr: ${fellBack().why}. Update herdr (herdr update) and restart Bridge AI.`)
@@ -1177,6 +1180,13 @@ async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs
   const where = ws ? { workspaceId: ws.id } : { newSpace: space }
   if (access === 'read' && !readOnly(kind)) throw new Error(`${adapter(kind).label} can't be started read-only: answer with Claude Code or Codex`)
   if (access === 'change' && !canChange(kind)) throw new Error(`${adapter(kind).label} can't make a bot's change held to its folder: changes need Claude Code`)
+  // (Kept to its folders: only on a CLI that loads none of their own settings, with Bridge AI's for
+  // it in their file: agents.js keptFlags.)
+  if (access === 'read' || access === 'change') {
+    const old = await keptProblem(kind)
+    if (old) throw new Error(old)
+    writeKeptSettings()
+  }
   // (A read-only one, a bot's answer, is started as it is: its folders were checked, and it isn't
   // work of yours to remember the folder for.)
   if (!own && !fork && access !== 'read' && access !== 'change') return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest', access })), session: f.session || '' }
@@ -4790,14 +4800,22 @@ app.get('/api/bots/:id/answerers', botsGuard, wrapBot(async (req) => {
 app.get('/api/bots/:id', botsGuard, wrapBot(async (req) => botView(botOr404(req.params.id, { draft: true }))))
 // What's here to answer with (botanswer.js): the agents installed, and the models Bridge AI reaches.
 // (fresh: the models asked for again, as when you're picking from them.)
-const answerHere = async ({ fresh = false } = {}) => ({ installed: (await installed()).map((k) => k.kind), models: await chatModels.models({ fresh }).catch(() => []) })
+// (And which agents are too old to be kept to its folders, saying why: agents.js keptProblem.)
+const answerHere = async ({ fresh = false } = {}) => {
+  const kinds = (await installed()).map((k) => k.kind)
+  const tooOld = {}
+  for (const k of kinds) { const old = await keptProblem(k); if (old) tooOld[k] = old }
+  return { installed: kinds, models: await chatModels.models({ fresh }).catch(() => []), tooOld }
+}
 // The agent that would answer first, as the desk picks it from a bot's list (b, with what's changing
-// in it): an agent's kind, or 'model'; and whether any in its list can make a change.
+// in it): an agent's kind, or 'model'; whether any in its list can make a change, and if not because
+// the one that could is too old, why.
 async function answererOf(b) {
   const h = await answerHere()
   const { list } = botAnswer.listOf(b, h)
   const first = list.find((e) => !botAnswer.notReady(e, h))
-  return { kind: first ? (first.kind === 'agent' ? first.agent : 'model') : null, changes: list.some((e) => botAnswer.canMakeChanges(e) && !botAnswer.notReady(e, h)) }
+  const old = list.find((e) => botAnswer.canMakeChanges(e) && h.tooOld[e.agent])
+  return { kind: first ? (first.kind === 'agent' ? first.agent : 'model') : null, changes: list.some((e) => botAnswer.canMakeChanges(e) && !botAnswer.notReady(e, h)), old: old ? h.tooOld[old.agent] : null }
 }
 // Its settings, each checked: its name and description (its name in Slack), who may ask (Slack's
 // ids, with the names you picked them by, or everyone in its channels), what anyone else gets, the
@@ -4865,7 +4883,8 @@ async function checkSettings(b, x, req) {
   if (x.changes !== undefined) {
     const v = botsStore.CHANGES.includes(x.changes) ? x.changes : 'none'
     if (v !== 'none') {
-      if (!(await answererOf({ ...b, ...next })).changes) throw new Error(v === 'edit' ? 'Changing files needs Claude Code in what answers, which keeps its edits to its own copy of the folders: add it under What Answers' : 'Changes need Claude Code in what answers, which keeps its edits to its own copy of the repository: add it under What Answers')
+      const who = await answererOf({ ...b, ...next })
+      if (!who.changes) throw new Error(who.old || (v === 'edit' ? 'Changing files needs Claude Code in what answers, which keeps its edits to its own copy of the folders: add it under What Answers' : 'Changes need Claude Code in what answers, which keeps its edits to its own copy of the repository: add it under What Answers'))
     }
     next.changes = v
   }

@@ -130,7 +130,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { dataFile, ensureDir, writeFileAtomic, IS_WIN } from './paths.js'
 import { makeTasks } from './chieftasks.js'
-import { adapter, readOnly } from './agents.js'
+import { adapter, readOnly, keptProblem } from './agents.js'
 import { makeTrace, KEEP, toCsv, toMarkdown } from './trace.js'
 import { makeMemory } from './botmemory.js'
 import { makeContext } from './botcontext.js'
@@ -624,20 +624,27 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   const alone = (q, pending) => [...q.more, ...(pending || [])].every((x) => x.person?.id && x.person.id === q.from?.id)
 
   // ---------- Who answers ----------
-  // What's here to answer with: the agents installed, the models reached, and which agents say
-  // they aren't signed in (botanswer.js).
+  // What's here to answer with: the agents installed, the models reached, which agents say they
+  // aren't signed in, and which are too old to be kept to its folders, saying why (botanswer.js).
   async function here() {
     const kinds = (await installed()).map((k) => k.kind)
     const list = await models().catch(() => [])
     const signed = {}
-    for (const k of ['claude', 'codex']) if (kinds.includes(k)) { const s = await signedIn(k).catch(() => null); if (s?.signedIn === false) signed[k] = false }
-    return { installed: kinds, models: list, signedIn: signed }
+    const tooOld = {}
+    for (const k of ['claude', 'codex']) {
+      if (!kinds.includes(k)) continue
+      const s = await signedIn(k).catch(() => null)
+      if (s?.signedIn === false) signed[k] = false
+      const old = await keptProblem(k)
+      if (old) tooOld[k] = old
+    }
+    return { installed: kinds, models: list, signedIn: signed, tooOld }
   }
   // Its list, each entry with why it can't answer now (or null).
   async function answerersOf(bot) {
     const h = await here()
     const r = botanswer.listOf(bot, h)
-    return { ...r, list: r.list.map((e) => ({ ...e, why: botanswer.notReady(e, h) })) }
+    return { ...r, list: r.list.map((e) => ({ ...e, why: botanswer.notReady(e, h), ...(e.kind === 'agent' && h.tooOld[e.agent] ? { old: true } : {}) })) }
   }
   // The first that can answer now: an agent's kind, or 'model'.
   async function answerer(bot) {
@@ -755,7 +762,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   async function guardNotRun() {
     if (botmcp.execHooks()) {
       const have = await botmcp.claudeVersion()
-      const need = botmcp.EXEC_HOOKS_MIN
+      const need = botmcp.hookMin()
       if (!have) return { why: 'claude-unknown', need, have: null, said: `changing files on Windows needs Claude Code ${need} or later, and its version here couldn't be read` }
       const old = await botmcp.hookTooOld()
       if (old) return { why: 'claude-old', need, have, said: tooOldSaid(old) }
@@ -3105,7 +3112,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
           repos, repo: repo?.folder?.shown || null, gh: await changes.hasGh(), agentOk: who.list.some((e) => botanswer.canMakeChanges(e) && !e.why), writes, screen: !!screenAsk,
           // (Your Claude Code too old to run the hook a change needs, as it's given here: { need, have }.)
           hook: bot.changes !== 'none' ? await botmcp.hookTooOld() : null,
-          problem: bot.changes === 'none' ? null : !who.list.some((e) => botanswer.canMakeChanges(e) && !e.why) ? (bot.changes === 'edit' ? 'Changing files needs Claude Code in what answers, which keeps its edits to its own copy of the folders' : 'Changes need Claude Code in what answers, which keeps its edits to its own copy of the repository')
+          // (Or too old to be kept to its folders at all, saying why: agents.js keptProblem.)
+          problem: bot.changes === 'none' ? null : !who.list.some((e) => botanswer.canMakeChanges(e) && !e.why) ? who.list.find((e) => botanswer.canMakeChanges(e) && e.old)?.why || (bot.changes === 'edit' ? 'Changing files needs Claude Code in what answers, which keeps its edits to its own copy of the folders' : 'Changes need Claude Code in what answers, which keeps its edits to its own copy of the repository')
             : bot.changes === 'edit' ? (!writes.length ? 'Pick the folders it changes files in: until then it changes nothing' : !writes.some((w) => w.ok) ? writes[0].problem : null) : repo?.problem || null,
         },
         // Its changes to files lately, for its Access card (Activity has them all).

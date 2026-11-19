@@ -15,7 +15,8 @@
 // And, as Claude Code on a computer where it can't answer: with ~/claude-signed-out there, `claude
 // auth status` says it isn't signed in; with ~/claude-limited there, a bot's question is answered
 // as Claude Code at its usage limit answers ("You've hit your usage limit · resets 5pm").
-// --mcp-config and --disallowedTools are taken here, as helper-claude doesn't know them. Each start
+// --mcp-config and --disallowedTools are taken here, as helper-claude doesn't know them (it takes
+// the rest, --setting-sources and --settings among them, and says its version). Each start
 // goes in ~/claude-args.log ({ args, cwd, message }) with its arguments as they came and its brief
 // (from the file it's pointed to, on Windows).
 // HELPER_CLAUDE is where helper-claude.cjs is (the test puts it in).
@@ -43,7 +44,7 @@ const added = listOf('--add-dir')
 const strict = argv.includes('--strict-mcp-config')
 const servers = {}
 for (const c of configs) { try { Object.assign(servers, JSON.parse(fs.readFileSync(c, 'utf8')).mcpServers || {}) } catch { /* unreadable */ } }
-const VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode', '--effort', '--tools'])
+const VALUE = new Set(['--session-id', '--resume', '--model', '--permission-mode', '--effort', '--tools', '--setting-sources', '--settings'])
 let at = -1
 for (let i = 2; i < argv.length; i++) {
   if (argv[i] === '--add-dir' || argv[i] === '--allowedTools') { while (argv[i + 1] && !argv[i + 1].startsWith('--')) i++; continue }

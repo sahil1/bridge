@@ -264,7 +264,8 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
         if (asking !== !!h.blocked) { if (asking) h.blocked = true; else delete h.blocked; dirty = true; changed() }
         // In a folder of its own, or answering for a bot (in the folders you gave it, which is
         // trusting them): its CLI asking whether to trust the folder, and its other harmless
-        // first-run screens, are answered here as you would, since no one sees its terminal. One it
+        // first-run screens, are answered here as you would, since no one sees its terminal. (A bot's
+        // run loads none of its folders' own settings all the same: agents.js keptFlags.) One it
         // can't get past (signing in) ends it, saying so, and a bot's left asking anything else ends
         // after ASK_MS, rather than waiting out its longest run.
         if (asking && (h.own || h.list)) {
