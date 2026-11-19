@@ -1457,7 +1457,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const guarded = stage ? { root: stage.dir, parts: stage.parts.map((p) => p.name), files: true } : tree ? { root: tree.dir, parts: [], files: false } : null
     // (Every folder it's given stays readable to it, whatever the Read rules of another it reads say:
     // its copy, the files attached and its brief are in Bridge AI's own folder, which is hidden, and
-    // in your home folder when that's one it reads.)
+    // may be inside a folder it reads: botmcp.js readDenies.)
     const own = [route.cwd, ...route.dirs, ...(BRIEF_FILE && kind !== 'model' ? [path.join(BRIEFS, `${q.id}-${q.runs.length + 1}`)] : [])].filter(Boolean)
     if ((bot.mcp?.length || outbox || guarded) && route.kind === 'claude') {
       try { mcp = await botmcp.runFolder(bot, { all, key: `${q.id}-${q.runs.length + 1}`, outbox, write: guarded, attach: attachFrom, reads, own }) } catch (e) { mcp = { dir: null, servers: [], missing: [], problem: oneLine(e.message, 200) } }

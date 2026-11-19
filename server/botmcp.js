@@ -316,9 +316,10 @@ const SECRET_GLOBS = [...new Set([
   ...SECRET_KINDS.map((e) => `*.${anyCase(e)}`),
 ])]
 // Kept off the run's own folders (own: its copy of the folders it changes files in or of a
-// repository, the files attached, its brief), each wholly readable to it even inside a folder it reads
-// from: they're in Bridge AI's own folder, ~/.bridge-ai, which is hidden, so a folder it reads that
-// has them, your home folder say, has its rule for what's hidden made around them (hiddenAround).
+// repository, the files attached, its brief, and every other folder it's given), each wholly readable
+// to it even inside a folder it reads from: they're in Bridge AI's own folder, which is hidden
+// (~/.bridge-ai), so a folder it reads that has that folder in it (one it was moved into with
+// BRIDGE_HOME, say) has its rule for what's hidden made around them (hiddenAround).
 const glob = (f) => `//${f.replace(/\\/g, '/').replace(/^\/+/, '')}`
 const hiddenName = (n) => n.startsWith('.')
 // (A name as a pattern: anything a pattern would take as more than itself matches one character.)
