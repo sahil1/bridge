@@ -101,6 +101,8 @@ if (!own) {
   pickFiles: () => ipcRenderer.invoke('bridge:pick-files'),
   pathOf: (file) => { try { return webUtils.getPathForFile(file) || null } catch { return null } },
   watching: (on) => ipcRenderer.invoke('bridge:watching', !!on),
+  // Why the app just said no to a screen asked for here ({ why, problem } or null: desktop/screenpick.js).
+  screenWhy: () => ipcRenderer.invoke('bridge:screen-why'),
   // Studio's Focus: this window full screen (true) or back (false), or whether it is (nothing).
   fullScreen: (on) => ipcRenderer.invoke('bridge:full-screen', typeof on === 'boolean' ? on : null),
   // Dictation's key from other apps (Settings › Voice & Meetings), and its window (?dictate=1): what was

@@ -6,7 +6,7 @@ import { Menu } from '../Rail.jsx'
 import { api, usePoll, onThisComputer, refetch } from '../../api.js'
 import { t, tx, locale, tn } from '../../i18n/index.js'
 import { usePersisted, Handle, PaneHeader, useMedia, store } from '../layout.jsx'
-import { useMeetings, clock, length, ScreenButton, SectionButton, openMeeting } from './recording.jsx'
+import { useMeetings, clock, length, ScreenButton, ScreenWhy, SectionButton, openMeeting } from './recording.jsx'
 import { byDay, day, timeOf, useSelection, BulkBar } from './bulk.jsx'
 import { useMeetingMenu, foldersOf, ConfirmDelete, FolderPick, chiefSaid } from './actions.jsx'
 import { exportAndSay } from './exporting.js'
@@ -129,7 +129,7 @@ function RecordingBar({ id, data }) {
       <span className="mt-grow" />
       {/* Record the screen too: before a screen is watched, the choice; while one is, without a video of it, one from now. */}
       {!m.screen && <VideoChoice m={m} />}
-      {m.screen && !m.screen.video && canRecordScreen() && <button type="button" className="btn small" onClick={() => m.watchScreen({ video: true }).catch(() => {})} title={t("Keep a video of {name} from now, with the meeting's sound, on this computer", { name: m.screen.label })}><Icon name="record" size={12} /> {t('Record the screen')}</button>}
+      {m.screen && !m.screen.video && canRecordScreen() && <button type="button" className="btn small" onClick={() => m.watchScreen({ video: true }).catch(m.noteScreen)} title={t("Keep a video of {name} from now, with the meeting's sound, on this computer", { name: m.screen.label })}><Icon name="record" size={12} /> {t('Record the screen')}</button>}
       <ScreenButton m={m} />
       <SectionButton m={m} />
       {r.paused
@@ -137,7 +137,7 @@ function RecordingBar({ id, data }) {
         : <button type="button" className="btn small" onClick={m.pause}><Icon name="pause" size={13} /> {t('Pause')}</button>}
       <button type="button" className="btn small danger-soft" onClick={m.stop}><Icon name="stop" size={13} /> {t('Stop')}</button>
       {r.trouble && <p className="mt-trouble small" role="status">{r.trouble}</p>}
-      {m.screenNote && <p className="mt-trouble small mt-screen-note" role="status">{m.screenNote} <button type="button" className="link-btn" onClick={m.clearScreenNote}>{t('OK')}</button></p>}
+      {m.screenNote && <p className="mt-trouble small mt-screen-note" role="status"><ScreenWhy e={m.screenNote} recording className="" role={null} /> <button type="button" className="link-btn" onClick={m.clearScreenNote}>{t('OK')}</button></p>}
       {r.missed > 0 && <p className="mt-trouble small mt-missed" role="status">{phone ? t('Not recorded: {time}, while the phone was locked or another app was in front. It carried on after.', { time: span(r.missed) }) : t('Not recorded: {time}, while the computer was asleep or the mic was taken. It carried on after.', { time: span(r.missed) })}</p>}
       {phone && !r.missed && <p className="mt-hint-call muted small">{t('Keep Bridge AI in front while it records: a phone stops the mic of an app in the background.')}</p>}
       {data?.callError && <p className="mt-trouble small" role="status">{data.callError} {t('Your mic still records.')}</p>}

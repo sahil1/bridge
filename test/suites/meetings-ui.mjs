@@ -1232,6 +1232,164 @@ process.exit(1)`)
   ok(withoutCutOff(cb.errors).length === 0, 'resume, combine and merge: no page errors', cb.errors)
   await cb.ctx.close()
   }
+
+  // ---------- Watch a screen that can't be watched: why, every way, and what to do ----------
+  // The picker's answer stood in for (a canvas, or a no as Chromium, WebKit and Electron give one),
+  // and the desktop app's own reason for its no (bridgeApp.screenWhy: desktop/screenpick.js, which
+  // screen-watch checks) with it. A click on Watch a screen always ends in a screen watched, the
+  // picker up (saying where), or why not with what to do: on the button's line, on the meeting for a
+  // click on the floating card, and on the card. WebKit's mic is a tone.
+  {
+    const sw = await page(b, kit.url, { store: { 'cc-rail-meetings': true }, before: async (c) => {
+      await c.route('**/api/calls/screen*', (r) => r.fulfill({ json: { allowed: false, started: new Date().toISOString(), picker: false } }))
+      await c.addInitScript((tone) => {
+        // On the prototype: WebKit doesn't keep one set on navigator.mediaDevices.
+        const md = window.MediaDevices?.prototype
+        if (!md) return
+        if (tone) md.getUserMedia = async () => { const ac = new AudioContext(); const o = ac.createOscillator(); const d = ac.createMediaStreamDestination(); o.connect(d); o.start(); return d.stream }
+        window.__screenAsks = 0
+        window.__screenFail = []
+        const canvas = () => {
+          const cv = document.createElement('canvas')
+          cv.width = 640
+          cv.height = 360
+          const x = cv.getContext('2d')
+          const draw = () => { x.fillStyle = '#fff'; x.fillRect(0, 0, 640, 360); x.fillStyle = '#123'; x.font = '36px sans-serif'; x.fillText('Quarterly numbers', 40, 180) }
+          draw()
+          setInterval(draw, 500)
+          return cv.captureStream(4)
+        }
+        // A no as the browser gives it ({ name, message }), or { hang }: the picker up until __screenGive().
+        md.getDisplayMedia = async () => {
+          window.__screenAsks++
+          const f = window.__screenFail.shift()
+          if (f?.hang) return new Promise((resolve) => { window.__screenGive = () => { window.__given = canvas(); resolve(window.__given) } })
+          if (f) throw new DOMException(f.message, f.name)
+          return canvas()
+        }
+      }, which === 'webkit')
+    } })
+    const q = sw.p
+    const bar = q.locator('.mt-recbar')
+    const why = bar.locator('.mt-screen-why')
+    const shows = async (re, where = why) => !!(await until(async () => re.test((await where.innerText().catch(() => '')).trim()), 6000))
+    const text = (where = why) => where.innerText().catch(() => '')
+    // app: the desktop app stood in for ({ platform, why }: its reason for the no), or none (a browser).
+    const setUp = (fail, app) => q.evaluate(({ fail, app }) => {
+      window.__screenFail = fail ? [fail] : []
+      if (app) window.bridgeApp = { desktop: true, platform: app.platform, screenWhy: async () => (app.why ? { why: app.why, ...(app.problem ? { problem: app.problem } : {}) } : null), restart: async () => true }
+      else delete window.bridgeApp
+    }, { fail, app })
+    const click = async (fail, app = null) => { await setUp(fail, app); await bar.locator('button', { hasText: 'Watch a screen' }).click() }
+    await q.waitForSelector('.rail-nav-row', { timeout: 15000 }).catch(() => {})
+    await until(async () => { await q.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { list: true } }))); return q.locator('.mt-home').isVisible() }, 10000, 1000)
+    await q.locator('.pane-head button', { hasText: 'Start recording' }).click()
+    const R = await until(async () => (await api('/meetings')).meetings.find((x) => x.status === 'recording'), 15000)
+    ok(!!R && !!(await until(() => bar.locator('button', { hasText: 'Watch a screen' }).isVisible(), 10000)), 'a meeting records, with Watch a screen', await text(bar))
+    const ABORT = { name: 'AbortError', message: 'Invalid capture constraints' } // Electron's, whatever the app's no was for
+    const DENIED = { name: 'NotAllowedError', message: 'Permission denied' }
+    const mac = (w, problem) => ({ platform: 'darwin', why: w, problem })
+
+    // A browser: the picker closed with nothing picked, and macOS not letting the browser see the screen.
+    await click(DENIED)
+    ok(await shows(/^Nothing was picked in the browser's picker\. Click Watch a screen to pick the window or tab being shared\.$/), "a browser's picker closed with nothing picked: said, not nothing", await text())
+    await click({ name: 'NotAllowedError', message: 'Permission denied by system' })
+    ok(await shows(/^macOS isn't letting this browser see the screen\. Turn on your browser under System Settings/), 'macOS not letting the browser see the screen: what to turn on', await text())
+
+    // The desktop app on a Mac before macOS 15 (no picker of its own: the whole screen, which needs
+    // Screen Recording): off, turned on since Bridge AI started, on and still no screen, a profile.
+    await click(ABORT, mac('off'))
+    ok(await shows(/^Screen Recording is off for Bridge AI\. Turn it on under System Settings › Privacy & Security › Screen & System Audio Recording, then watch a screen again\./) && await why.locator('button', { hasText: 'Open it' }).isVisible(), 'the desktop app on a Mac with Screen Recording off: says so, where to turn it on, and Open it', await text())
+    await shot(q, `${tag}watch-screen-off`)
+    await click(ABORT, mac('reopen'))
+    ok(await shows(/^Screen Recording is on for Bridge AI, and macOS applies it once Bridge AI restarts\./) && await why.locator('button', { hasText: 'Restart Bridge AI' }).isVisible(), 'turned on since Bridge AI started: macOS applies it once it restarts, with Restart Bridge AI', await text())
+    await why.locator('button', { hasText: 'Restart Bridge AI' }).click()
+    ok(await shows(/Restarting stops this recording\./) && await why.locator('button', { hasText: 'Restart now' }).isVisible(), 'which says first that restarting stops the recording', await text())
+    await why.locator('button', { hasText: 'Not now' }).click()
+    await click(ABORT, mac('none'))
+    ok(await shows(/^macOS lists no screen for Bridge AI to watch, though Screen Recording is on for it\. macOS can keep an answer that shows as on and doesn't take\./) && (await why.locator('button', { hasText: 'Reset and ask again' }).count() === 1 || /remove Bridge AI from Screen Recording with −/.test(await text())), "on, and still no screen: an answer that doesn't take, with Reset and ask again (or how to in System Settings)", await text())
+    await click(ABORT, mac('restricted'))
+    ok(await shows(/^A profile on this Mac turns off Screen Recording for Bridge AI, so it can't watch a screen here\.$/), 'Screen Recording turned off by a profile: said', await text())
+    await click(ABORT, mac('page'))
+    ok(await shows(/^This window shows another of your computers\. Watch a screen from a Bridge AI window on this computer\.$/), "a window showing another computer: watch from one on this computer", await text())
+    await click(ABORT, mac('frame'))
+    ok(await shows(/^Watch a screen from Bridge AI's own window: this page is inside another one\.$/), 'a page inside another one: watch from its own window', await text())
+    // macOS 15 and later: macOS's own picker, closed with nothing picked, or the screen not starting.
+    await click(DENIED, mac(null))
+    ok(await shows(/^Nothing was picked in macOS's picker\. Click Watch a screen to pick the window being shared\.$/), "macOS's picker closed with nothing picked: said", await text())
+    await click({ name: 'NotReadableError', message: 'Could not start video source' }, mac(null))
+    ok(await shows(/^Couldn't start watching the screen \(Could not start video source\)\. Click Watch a screen to try again\.$/), "the screen picked didn't start: said, and to try again", await text())
+    await click({ name: 'InvalidStateError', message: 'getDisplayMedia() requires transient activation (user gesture).' }, mac(null))
+    ok(await shows(/^Click Watch a screen here: the picker opens only from a click in this window\.$/), 'asked without a click: click it here', await text())
+    // Windows and Linux: the whole screen, none listed, or listing them failing.
+    await click(ABORT, { platform: 'win32', why: 'none' })
+    ok(await shows(/^Bridge AI found no screen to watch on this computer\.$/), 'Windows with no screen listed: said', await text())
+    await click(ABORT, { platform: 'linux', why: 'none' })
+    ok(await shows(/^No screen to watch: none was picked in the system's dialog, or none was found\. Click Watch a screen to try again\.$/), "Linux with none (the system's dialog closed): said", await text())
+    await click(ABORT, { platform: 'linux', why: 'error', problem: 'Failed to get sources.' })
+    ok(await shows(/^Couldn't list this computer's screens: Failed to get sources\.$/), "listing the screens failed: said, with what it said", await text())
+
+    // The picker up: Picking a screen…, where to pick, and Cancel; a screen picked after Cancel isn't kept.
+    await click({ hang: true }, mac(null))
+    const busy = bar.locator('button', { hasText: 'Picking a screen…' })
+    ok(!!(await until(() => busy.isVisible(), 5000)) && (await busy.getAttribute('aria-disabled')) === 'true' && await shows(/^Pick the window or screen to watch in macOS's picker\. Cancel$/, bar.locator('.mt-picking')), "while macOS's picker is up: Picking a screen…, where to pick, and Cancel", await text(bar))
+    await shot(q, `${tag}watch-screen-picking`)
+    await bar.locator('.mt-picking button', { hasText: 'Cancel' }).click()
+    ok(!!(await until(() => bar.locator('button', { hasText: 'Watch a screen' }).isVisible(), 4000)), 'Cancel: Watch a screen again')
+    await q.evaluate(() => window.__screenGive())
+    ok(!!(await until(() => q.evaluate(() => window.__given?.getVideoTracks()[0]?.readyState === 'ended'), 4000)) && (await bar.locator('button', { hasText: 'Capture' }).count()) === 0, 'a screen picked after Cancel is let go, not watched')
+
+    // From the floating card (the desktop app sends the click to the window recording): why, on the
+    // meeting with what to do, and to the card; the picker wanting a click in this window: it's
+    // brought to the front (done says so to the app) and says to click there.
+    await q.evaluate(() => { window.__card = []; const ch = new BroadcastChannel('bridge-meetings'); ch.onmessage = (e) => { if (e.data?.type === 'error') window.__card.push(e.data.text) } })
+    const fromCard = () => q.evaluate(() => new Promise((done) => window.dispatchEvent(new CustomEvent('bridge-watch-screen', { detail: { done } }))))
+    const note = bar.locator('.mt-screen-note')
+    await setUp(ABORT, mac('off'))
+    const d1 = await fromCard()
+    ok(d1 === null && await shows(/^Screen Recording is off for Bridge AI\./, note) && await note.locator('button', { hasText: 'Open it' }).isVisible() && !!(await until(() => q.evaluate(() => window.__card.some((x) => /^Screen Recording is off for Bridge AI\./.test(x))), 3000)), "Watch screen on the floating card: why on the meeting, with Open it, and on the card", { note: await text(note), card: await q.evaluate(() => window.__card) })
+    await setUp({ name: 'InvalidStateError', message: 'getDisplayMedia() requires transient activation (user gesture).' }, mac(null))
+    const d2 = await fromCard()
+    ok(d2?.focus === true && await shows(/^Click Watch a screen here: the picker opens only from a click in this window\./, note) && !!(await until(() => q.evaluate(() => window.__card.includes('Click Watch a screen in the Bridge AI window: the picker opens only from a click there.')), 3000)), "the picker wanting a click here: this window to the front, Click Watch a screen here, and the card says so", { d2, note: await text(note), card: await q.evaluate(() => window.__card) })
+    await note.locator('button', { hasText: 'OK' }).click()
+
+    // The card itself: what the window says, Picking… while the picker is up, and a click no window
+    // answers said too.
+    const card = await sw.ctx.newPage()
+    card.on('pageerror', (e) => sw.errors.push(`card: ${e.message}`))
+    await card.addInitScript(() => { window.bridgeApp = { floatWatch: async () => { window.__asked = (window.__asked || 0) + 1; return true } } })
+    await card.setViewportSize({ width: 360, height: 520 })
+    await card.goto(`${kit.url}/?float=1`)
+    await card.waitForSelector('.float-card', { timeout: 10000 }).catch(() => {})
+    await card.hover('.float-card .fc-head')
+    const chip = card.locator('.fc-modes .fc-chip', { hasText: 'Watch screen' })
+    ok(!!(await until(() => chip.isVisible(), 10000)), "the card's Watch screen")
+    const cardErr = card.locator('.float-card > .error-text')
+    await chip.click()
+    ok(!!(await until(async () => /^The window recording this meeting didn't answer\. Open the meeting and click Watch a screen there\.$/.test(await cardErr.innerText().catch(() => '')), 9000)), "a click on the card that no window answers: said on the card, not nothing", await cardErr.innerText().catch(() => ''))
+    await setUp(ABORT, mac('off'))
+    await chip.click()
+    await fromCard()
+    ok(!!(await until(async () => /^Screen Recording is off for Bridge AI\./.test(await cardErr.innerText().catch(() => '')), 5000)), "the window's why, on the card", await cardErr.innerText().catch(() => ''))
+    await setUp({ hang: true }, mac(null))
+    await chip.click()
+    const card3 = fromCard()
+    ok(!!(await until(() => card.locator('.fc-modes .fc-chip', { hasText: 'Picking…' }).isVisible(), 5000)), "the card while macOS's picker is up: Picking…")
+    await q.evaluate(() => window.__screenGive())
+    await card3
+    ok(!!(await until(() => card.locator('.fc-modes .fc-chip', { hasText: 'Watching' }).isVisible(), 6000)) && (await cardErr.count()) === 0, 'and once a screen is picked, Watching', await card.locator('.float-card').innerText({ timeout: 1000 }).catch(() => ''))
+    await card.close()
+
+    // Picked: watched, and nothing left saying why not.
+    await bar.locator('button', { hasText: 'Stop watching the screen' }).click()
+    const asks = await q.evaluate(() => window.__screenAsks)
+    await click(null, null)
+    ok(!!(await until(() => bar.locator('button', { hasText: 'Capture' }).isVisible(), 6000)) && (await why.count()) === 0 && (await note.count()) === 0 && (await q.evaluate(() => window.__screenAsks)) === asks + 1, 'a screen picked: watched, with Capture, and no why left', await text(bar))
+    await bar.locator('button.danger-soft', { hasText: 'Stop' }).click()
+    await until(async () => (await api(`/meetings/${R.id}`)).status !== 'recording', 10000)
+    ok(withoutCutOff(sw.errors).length === 0, 'Watch a screen refused: no page errors', sw.errors)
+    await sw.ctx.close()
+  }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))

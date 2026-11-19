@@ -74,6 +74,11 @@
 .mt-meter i.on { background: var(--good); }
 .mt-meter small { margin-left: 5px; font-size: 11.5px; color: var(--ink-3); align-self: center; }
 .mt-trouble, .mt-hint-call { flex-basis: 100%; margin: 0; }
+/* Why a screen isn't watched, and what to do (recording.jsx ScreenWhy), and where to pick one while the picker is up. */
+.mt-recbar > .mt-screen-why, .mt-recbar > .mt-picking { flex-basis: 100%; order: 1; }
+.mt-screen-why .link-btn, .mt-screen-why .btn { margin-left: 4px; }
+/* Picking a screen…: shown as waiting, and kept focusable (disabled, the floating card would lose focus and close). */
+.btn.mt-picking-btn, .fc-chip.fc-picking { opacity: .6; cursor: progress; }
 .mt-ask-screen { flex-basis: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 2px 0 0; padding: 7px 10px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 8%, var(--pane)); color: var(--ink-2); }
 .mt-ask-screen > span { flex: 1 1 260px; min-width: 0; }
 /* A call's switches in System Settings (allowcall.jsx): what next, and its buttons side by side. */
