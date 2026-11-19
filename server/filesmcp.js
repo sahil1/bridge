@@ -94,15 +94,16 @@ function placeOf(p, { there = true } = {}) {
   const up = missing.length ? real : fs.realpathSync.native(path.dirname(full))
   if (!within(up)) throw new Error(`${s} is outside your copy`)
   if (path.relative(real, up).split(path.sep).some(gitLike)) throw new Error(`${s} is git's own`)
-  // (Named as the system has it: a file that's there by its real path, a new one by its folder's.)
-  const named = missing.length ? full : there ? fs.realpathSync.native(full) : path.join(up, path.basename(full))
-  return { full: named, rel: rel.split(path.sep).join('/'), missing }
+  // (Written down by its folder's real path, as the system has it, and its own name; what's done is
+  // done to the path as it was checked, never to wherever a link might lead.)
+  const named = missing.length ? full : path.join(up, path.basename(full))
+  return { full, named, rel: rel.split(path.sep).join('/'), missing }
 }
 
 function call(name, a) {
   if (name === 'delete_file') {
     const p = placeOf(a?.path)
-    noted('d', p.full)
+    noted('d', p.named)
     fs.unlinkSync(p.full)
     return `Deleted ${p.rel} in your copy. Bridge AI shows the owner, who approves it before it's deleted for real.`
   }
@@ -111,8 +112,8 @@ function call(name, a) {
     const to = placeOf(a?.to, { there: false })
     // (The folders its new place needs, made one by one inside the copy.)
     for (const d of to.missing) { fs.mkdirSync(d); if (fs.lstatSync(d).isSymbolicLink() || !within(fs.realpathSync.native(d))) throw new Error(`${path.relative(real, d)} is outside your copy`) }
-    noted('d', from.full)
-    noted('w', to.full)
+    noted('d', from.named)
+    noted('w', to.named)
     fs.renameSync(from.full, to.full)
     return `Moved ${from.rel} to ${to.rel} in your copy. Bridge AI shows the owner, who approves it before it's moved for real.`
   }
