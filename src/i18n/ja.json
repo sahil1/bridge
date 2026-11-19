@@ -3696,6 +3696,7 @@
   "Oldest first": "古い順",
   "On": "オン",
   "On Bridge AI's relay": "Bridge AI のリレーを使用",
+  "On Bridge AI's relay, your links have an allowance apart from your phones': {window} messages in {hours} hours and {week} a week ({linkWindow} and {linkWeek} for one link), at up to {perSecond} a second.": "Bridge AI のリレーでは、リンクにはスマートフォンとは別の割り当てがあります: {hours} 時間で {window} 件、1 週間で {week} 件のメッセージ (1 つのリンクでは {linkWindow} 件と {linkWeek} 件)、毎秒 {perSecond} 件まで。",
   "On Chief of Staff's list. It isn't running: it reads them when it starts.": "チーフ・オブ・スタッフのリストに追加しました。起動していないので、起動時に読みます。",
   "On Chief of Staff's task list": "チーフ・オブ・スタッフのタスクリストにあります",
   "On Chief of Staff's task list. Start Chief of Staff and it picks it up.": "チーフ・オブ・スタッフのタスクリストにあります。チーフ・オブ・スタッフを起動すると取りかかります。",

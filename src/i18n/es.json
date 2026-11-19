@@ -3698,6 +3698,7 @@
   "Oldest first": "Más antiguas primero",
   "On": "Activado",
   "On Bridge AI's relay": "En el relé de Bridge AI",
+  "On Bridge AI's relay, your links have an allowance apart from your phones': {window} messages in {hours} hours and {week} a week ({linkWindow} and {linkWeek} for one link), at up to {perSecond} a second.": "En el relay de Bridge AI, tus enlaces tienen un margen aparte del de tus teléfonos: {window} mensajes en {hours} horas y {week} a la semana ({linkWindow} y {linkWeek} para un enlace), hasta {perSecond} por segundo.",
   "On Chief of Staff's list. It isn't running: it reads them when it starts.": "En la lista del jefe de gabinete. No está en marcha: las leerá cuando arranque.",
   "On Chief of Staff's task list": "En la lista de tareas del jefe de gabinete",
   "On Chief of Staff's task list. Start Chief of Staff and it picks it up.": "En la lista de tareas del jefe de gabinete. Inicia el jefe de gabinete y se encargará.",

@@ -16,6 +16,11 @@ const CONTENT = /^\/_c\/([\w-]{16,64})(\/.*)$/
 const HOSTS = /^\/(_relay\/frame|v\/[\w-]{22})$/
 const FRAMES = "frame-ancestors 'self'"
 const SANDBOX = 'sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads'
+// What's shown loads only from its own address (and data: and blob: it makes): its scripts there (at a
+// content address of its own), nothing at all anywhere else. Nothing from another site, so nothing it
+// asks for says it was opened, or what it holds.
+const WITH_SCRIPTS = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; object-src 'none'; form-action 'self'; base-uri 'self'"
+const NO_SCRIPTS = "default-src 'self' data: blob:; style-src 'self' data: blob: 'unsafe-inline'; script-src 'none'; object-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'"
 
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()))
@@ -103,7 +108,7 @@ function headersOf(head, scripts, parent) {
   h.delete('service-worker-allowed')
   if (!/^application\/pdf\b/i.test(h.get('content-type') || '')) {
     h.append('Content-Security-Policy', SANDBOX)
-    h.append('Content-Security-Policy', scripts ? "connect-src 'self'" : "script-src 'none'; object-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'")
+    h.append('Content-Security-Policy', scripts ? WITH_SCRIPTS : NO_SCRIPTS)
   }
   // Framed only by its own page here, and (at a content address of its own) the link's page around that.
   h.append('Content-Security-Policy', scripts ? `${FRAMES} ${parent}` : FRAMES)

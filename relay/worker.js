@@ -31,8 +31,14 @@
 const TYPES = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', webmanifest: 'application/manifest+json', png: 'image/png', svg: 'image/svg+xml' }
 const MAX_PHONES = 16
 // People with a Share Link open on one computer at once (each page is one connection), apart from its
-// phones, so they never crowd out yours.
+// phones, so they never crowd out yours; any one link, VIEWERS_PER_LINK of them. A page the computer
+// has welcomed (the link's secret proved) or let in keeps its place; one that hasn't yet waits in a
+// room of its own, VIEW_WAITING at once and VIEW_WAITING_PER_IP from one address, the oldest (those
+// that haven't said which link first) making room for the next.
 const MAX_VIEWERS = 32
+const VIEWERS_PER_LINK = 10
+const VIEW_WAITING = 16
+const VIEW_WAITING_PER_IP = 4
 // What a share's address serves, and only that: the page, its worker, the link, the mark.
 const SHARE_FILES = new Set(['share.html', 'share.js', 'share-sw.js', 'link.js', 'mark.svg'])
 // ...and what a link's content address serves (Bridge AI's relay, with SHARE_DOMAIN): its frame page.
@@ -71,7 +77,8 @@ export default {
 // Bridge AI's relay checks them against (server/relaycheck.js). share: it opens Share Links, so a
 // computer can say so before anyone is given one a relay from before couldn't open; shareDomain:
 // where what links show is kept apart (Bridge AI's relay, once it has one).
-const health = (shareDomain = null) => new Response(JSON.stringify({ ok: true, build: RELAY_BUILD, version: typeof RELAY_VERSION === 'string' ? RELAY_VERSION : null, share: 1, ...(shareDomain ? { shareDomain } : {}) }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+// views: on Bridge AI's relay, what links may carry (Settings › Sharing says it).
+const health = (shareDomain = null, l = null) => new Response(JSON.stringify({ ok: true, build: RELAY_BUILD, version: typeof RELAY_VERSION === 'string' ? RELAY_VERSION : null, share: 1, ...(shareDomain ? { shareDomain } : {}), ...(l ? { views: { hours: l.windowHours, window: l.viewWindow, linkWindow: l.viewLinkWindow, week: l.viewWeek, linkWeek: l.viewLinkWeek, perSecond: l.viewsRate, viewers: l.viewers, perLink: VIEWERS_PER_LINK } } : {}) }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
 const domainOf = (v) => String(v || '').toLowerCase().replace(/^\.+|\.+$/g, '')
 
 // ---------- Pairing links open the phone apps (Bridge AI's hosted relay) ----------
@@ -257,6 +264,12 @@ function limits(env) {
     viewLinkWindow: n('VIEW_LINK_WINDOW_MESSAGES', 30000),
     viewRate: n('VIEW_MESSAGES_PER_SECOND', 20),
     viewBurst: n('VIEW_MESSAGE_BURST', 400),
+    // ...all its link pages together: a pace of their own, well below the phones' (MESSAGES_PER_SECOND),
+    // and in a week (from their first message), all its links and any one link.
+    viewsRate: n('VIEW_ALL_MESSAGES_PER_SECOND', 50),
+    viewsBurst: n('VIEW_ALL_MESSAGE_BURST', 1000),
+    viewWeek: n('VIEW_WEEK_MESSAGES', 250000),
+    viewLinkWeek: n('VIEW_LINK_WEEK_MESSAGES', 100000),
     messageKB: n('MAX_MESSAGE_KB', 256), // one message
     rate: n('MESSAGES_PER_SECOND', 200), // incoming messages to one computer, on average…
     burst: n('MESSAGE_BURST', 2000), // …with this many at once
@@ -278,6 +291,7 @@ const offText = (env, phone) => (!env.HOSTED_OFF || env.HOSTED_OFF === '0' || en
 // deleted, token).
 const ACCOUNT_WHY = new Set(['suspended', 'relay', 'deleted', 'token'])
 const REFUSED_MS = 10 * 60000 // how long a computer whose account is stopped waits before it asks again
+const linkFull = `As many people as the relay takes for one link (${VIEWERS_PER_LINK}) have this link open. This page tries again in a minute.`
 const OWN = 'For no limits, put the relay on your own Cloudflare account (Settings › Devices, on the computer).'
 const OTHER = 'A relay on your own Cloudflare account, or Tailscale, still works (Settings › Devices, on the computer).'
 function limitText(why, l, end) {
@@ -294,7 +308,8 @@ function limitText(why, l, end) {
     size: `That was too big for Bridge AI's relay (over ${l.messageKB} KB at once). Connecting again in a moment.`,
     phones: `Bridge AI's relay takes ${l.phones} connections to one computer at once, and this computer has that many paired phones and tabs connected. Close Bridge AI on one you're not using; this one tries again in a minute.`,
     viewers: `As many people as Bridge AI's relay takes at once (${l.viewers}) have links from this computer open. This page tries again in a minute.`,
-    views: `Links from this computer have carried all Bridge AI's relay lets them for now (${n(l.viewWindow)} messages in ${l.windowHours} hours, ${n(l.viewLinkWindow)} for one link), so its owner's phones keep the rest. It opens again at ${when}.`,
+    'link-viewers': linkFull,
+    views: `Links from this computer have carried all Bridge AI's relay lets them for now (${n(l.viewWindow)} messages in ${l.windowHours} hours and ${n(l.viewWeek)} in a week; ${n(l.viewLinkWindow)} and ${n(l.viewLinkWeek)} for one link), so its owner's phones keep the rest. It opens again at ${when}.`,
     'views-rate': 'This page sent more at once than Bridge AI\'s relay takes. It connects again in a moment.',
     suspended: `This computer's Bold Bridge account is suspended, so Bridge AI's relay doesn't carry it for now. ${OTHER}`,
     relay: `This computer's Bold Bridge account doesn't have Bridge AI's relay any more. ${OTHER}`,
@@ -431,7 +446,7 @@ async function hosted(req, env) {
   }
   if (host === domain) {
     if (p === '/_relay/register') return req.method === 'POST' ? register(req, env, url) : new Response('Use POST', { status: 405 })
-    if (p === '/_relay/health') return health(shareDomain || null)
+    if (p === '/_relay/health') return health(shareDomain || null, limits(env))
     if (p === '/_relay/stats') return stats(req, env, url)
     if (p === '/') return new Response(LANDING, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=3600', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; frame-ancestors 'none'", 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' } })
     if (p === '/mark.svg') return page(req, url)
@@ -454,7 +469,7 @@ async function hosted(req, env) {
     return hub(env, id).fetch(req) // the Hub checks the computer's token, and its account
   }
   if (p === '/_relay/forget') return req.method === 'POST' ? hub(env, id).fetch(req) : new Response('Use POST', { status: 405 })
-  if (p === '/_relay/health') return health(shareDomain || null)
+  if (p === '/_relay/health') return health(shareDomain || null, limits(env))
   return page(req, url, domain)
 }
 
@@ -601,6 +616,7 @@ export class Hub {
         this.pend = (await ctx.storage.get('pend')) || null
         this.acctPend = (await ctx.storage.get('acct')) || 0
         this.views = (await ctx.storage.get('vw')) || null
+        this.vweek = (await ctx.storage.get('vk')) || null
       })
     }
   }
@@ -627,15 +643,28 @@ export class Hub {
       // room of its own, so people viewing your links never crowd out your phones either.
       const view = url.pathname === '/_relay/view'
       const tag = view ? 'view' : 'phone'
-      const all = this.ctx.getWebSockets(tag)
-      if (all.length >= (view ? this.lim?.viewers ?? MAX_VIEWERS : this.lim?.phones ?? MAX_PHONES)) {
-        const stranger = all.map((w) => [w, w.deserializeAttachment() || {}]).filter(([, a]) => !a.ok).sort((a, b) => (a[1].at || 0) - (b[1].at || 0))[0]
-        if (!stranger) return view ? this.fullViews() : this.lim ? this.full() : new Response('Too many connections', { status: 429 })
-        try { stranger[0].close(4004, 'make room') } catch { /* gone */ }
+      // A Share Link's page: its own room (VIEW_WAITING) until the computer welcomes it, and from one
+      // address only a few of those; a welcomed one is never made to make room.
+      let ip = null
+      if (view) {
+        ip = (await sha(`view ip ${req.headers.get('CF-Connecting-IP') || ''}`)).slice(0, 16)
+        const all = this.ctx.getWebSockets('view').map((w) => [w, w.deserializeAttachment() || {}])
+        if (all.filter(([, a]) => a.ok || a.welcomed).length >= (this.lim?.viewers ?? MAX_VIEWERS)) return this.fullViews()
+        const waiting = all.filter(([, a]) => !a.ok && !a.welcomed).sort((a, b) => (!!a[1].link - !!b[1].link) || (a[1].at || 0) - (b[1].at || 0))
+        const mine = waiting.filter(([, a]) => a.ip === ip)
+        const out = mine.length >= VIEW_WAITING_PER_IP ? mine[0] : waiting.length >= VIEW_WAITING ? waiting[0] : null
+        if (out) try { out[0].close(4004, 'make room') } catch { /* gone */ }
+      } else {
+        const all = this.ctx.getWebSockets(tag)
+        if (all.length >= (this.lim?.phones ?? MAX_PHONES)) {
+          const stranger = all.map((w) => [w, w.deserializeAttachment() || {}]).filter(([, a]) => !a.ok).sort((a, b) => (a[1].at || 0) - (b[1].at || 0))[0]
+          if (!stranger) return this.lim ? this.full() : new Response('Too many connections', { status: 429 })
+          try { stranger[0].close(4004, 'make room') } catch { /* gone */ }
+        }
       }
       const id = crypto.getRandomValues(new Uint32Array(1))[0]
       this.ctx.acceptWebSocket(server, [tag, `p${id}`])
-      server.serializeAttachment({ id, at: Date.now() })
+      server.serializeAttachment({ id, at: Date.now(), ...(ip ? { ip } : {}) })
       if (this.lim) this.connected()
       const h = await this.live()
       // q: this relay keeps notes (older pages ignore it); a Share Link's page leaves none.
@@ -655,7 +684,8 @@ export class Hub {
       let link = '?'
       if (b[0] === 0) try { const m = JSON.parse(new TextDecoder().decode(b.subarray(1))); if (/^[\w-]{22}$/.test(m?.s || '')) link = m.s } catch { /* not a hello */ }
       ws.serializeAttachment({ ...ws.deserializeAttachment(), link })
-      if (this.lim && this.viewsOver(link, Date.now())) return void this.cutView(ws, 'views', this.views.start + this.lim.windowHours * HOUR)
+      const until = this.lim ? this.viewsOver(link, Date.now()) : 0
+      if (until) return void this.cutView(ws, 'views', until)
     }
     if (this.lim && !(await this.meter(ws, msg))) return
     if (this.ctx.getTags(ws).includes('host')) this.heardFrom(ws)
@@ -665,6 +695,7 @@ export class Hub {
       const id = new DataView(b.buffer, b.byteOffset).getUint32(1)
       const ph = this.ctx.getWebSockets(`p${id}`)[0]
       if (!ph) { if (b[0] !== OP.CLOSE) ws.send(frame(OP.CLOSE, id)); return }
+      if (b[0] === OP.DATA && b[5] === 0 && this.ctx.getTags(ph).includes('view') && this.welcomed(ph, b.subarray(6)) === false) return
       if (b[0] === OP.DATA) ph.send(b.subarray(5))
       else if (b[0] === OP.OK) this.vouch(ph)
       else if (b[0] === OP.CLOSE) try { ph.close(4003, 'closed by the computer') } catch { /* gone */ }
@@ -1016,7 +1047,7 @@ export class Hub {
     d.sb = d.bytes
     d.sm = d.msgs
     this.unsaved = false
-    await this.ctx.storage.put({ day: d, pend: this.pend || null, acct: this.acctPend || 0, vw: this.views || null })
+    await this.ctx.storage.put({ day: d, pend: this.pend || null, acct: this.acctPend || 0, vw: this.views || null, vk: this.vweek || null })
   }
 
   // This computer's use since its last tally, for the registry's counts (/_relay/stats): sent when
@@ -1094,10 +1125,13 @@ export class Hub {
     // For a phone that's just been let go: nowhere to go (its computer hears it's gone).
     if (fromHost && phone && phone.readyState !== 1) return false
     if (!housekeeping && size > this.lim.messageKB * 1024) return this.cut(phone, 'size', now + 5000)
-    this.tokens = Math.min(this.lim.burst, (this.tokens ?? this.lim.burst) + ((now - (this.tokAt ?? now)) * this.lim.rate) / 1000)
-    this.tokAt = now
-    if (!housekeeping && this.tokens < 1) return this.cut(phone, 'rate', now + 10000)
-    this.tokens--
+    // (A Share Link page's go at their own pace, above: never the phones'.)
+    if (!(phone && this.ctx.getTags(phone).includes('view'))) {
+      this.tokens = Math.min(this.lim.burst, (this.tokens ?? this.lim.burst) + ((now - (this.tokAt ?? now)) * this.lim.rate) / 1000)
+      this.tokAt = now
+      if (!housekeeping && this.tokens < 1) return this.cut(phone, 'rate', now + 10000)
+      this.tokens--
+    }
     const why = this.blocked(now)
     if (why) {
       if (this.told !== why) await this.stopPhones(why)
@@ -1122,7 +1156,7 @@ export class Hub {
     const s = a.s || { n: 0, b: 0, at: now, tk: L.BURST, t: now }
     const tk = Math.min(L.BURST, s.tk + ((now - s.t) * L.RATE) / 1000)
     const next = { n: s.n + 1, b: s.b + size, at: s.at, tk: tk - 1, t: now }
-    if (next.n > L.MSGS || next.b > L.BYTES || now - s.at > L.MS || tk < 1) {
+    if (next.n > L.MSGS || next.b > L.BYTES || (now - s.at > L.MS && !a.welcomed) || tk < 1) {
       try { ws.close(4005, 'not vouched for') } catch { /* gone */ }
       try { if (a.id != null) this.host()?.send(frame(OP.CLOSE, a.id)) } catch { /* gone */ }
       return false
@@ -1136,22 +1170,51 @@ export class Hub {
   // in the account's window, what all this computer's links may carry (VIEW_WINDOW_MESSAGES) and any
   // one of them (VIEW_LINK_WINDOW_MESSAGES), so whoever has a link never uses up what its owner's
   // phones need. Past either, that page is told why and let go.
+  // In a week too (VIEW_WEEK_MESSAGES, VIEW_LINK_WEEK_MESSAGES), so links never use up the account's
+  // week; and all its link pages together at VIEW_ALL_MESSAGES_PER_SECOND, apart from the phones'
+  // MESSAGES_PER_SECOND. viewsOver: when the link may carry on (0: now).
   viewsOver(link, now) {
     const l = this.lim
-    if (!this.views || now >= this.views.start + l.windowHours * HOUR) return false
-    return this.views.msgs >= l.viewWindow || (this.views.links[link] || 0) >= l.viewLinkWindow
+    const w = this.views && now < this.views.start + l.windowHours * HOUR ? this.views : null
+    const k = this.vweek && now < this.vweek.start + 7 * DAY ? this.vweek : null
+    if (k && (k.msgs >= l.viewWeek || (k.links[link] || 0) >= l.viewLinkWeek)) return k.start + 7 * DAY
+    if (w && (w.msgs >= l.viewWindow || (w.links[link] || 0) >= l.viewLinkWindow)) return w.start + l.windowHours * HOUR
+    return 0
   }
   viewMeter(ws, now) {
     const l = this.lim
     const a = ws.deserializeAttachment() || {}
     const tk = Math.min(l.viewBurst, (a.vt ?? l.viewBurst) + ((now - (a.vtAt ?? now)) * l.viewRate) / 1000)
     if (tk < 1) return this.cutView(ws, 'views-rate', now + 10000)
+    this.vtk = Math.min(l.viewsBurst, (this.vtk ?? l.viewsBurst) + ((now - (this.vtkAt ?? now)) * l.viewsRate) / 1000)
+    this.vtkAt = now
+    if (this.vtk < 1) return this.cutView(ws, 'views-rate', now + 10000)
     if (!this.views || now >= this.views.start + l.windowHours * HOUR) this.views = { start: now, msgs: 0, links: {} }
+    if (!this.vweek || now >= this.vweek.start + 7 * DAY) this.vweek = { start: now, msgs: 0, links: {} }
     const link = a.link || '?'
-    if (this.viewsOver(link, now)) return this.cutView(ws, 'views', this.views.start + l.windowHours * HOUR)
-    this.views.msgs++
-    this.views.links[link] = (this.views.links[link] || 0) + 1
+    const until = this.viewsOver(link, now)
+    if (until) return this.cutView(ws, 'views', until)
+    this.vtk--
+    for (const c of [this.views, this.vweek]) { c.msgs++; c.links[link] = (c.links[link] || 0) + 1 }
     ws.serializeAttachment({ ...a, vt: tk - 1, vtAt: now })
+    return true
+  }
+  // The computer's first word to a Share Link's page, in the clear: welcomed (the link's secret proved
+  // both ways), it keeps its place from now on, within VIEWERS_PER_LINK for its link; false: it's let go.
+  welcomed(ws, body) {
+    const a = ws.deserializeAttachment() || {}
+    if (a.welcomed || a.ok) return true
+    let m = null
+    try { m = JSON.parse(new TextDecoder().decode(body)) } catch { return true }
+    if (m?.t !== 'welcome') return true
+    const same = this.ctx.getWebSockets('view').filter((w) => w !== ws && (w.deserializeAttachment() || {}).link === a.link && (w.deserializeAttachment().welcomed || w.deserializeAttachment().ok))
+    if (a.link && same.length >= VIEWERS_PER_LINK) {
+      const until = Date.now() + 60000
+      try { ws.send(JSON.stringify(this.lim ? this.limit('link-viewers', until) : { t: 'limit', why: 'link-viewers', text: linkFull, until })); ws.close(4005, 'limit') } catch { /* gone */ }
+      try { this.host()?.send(frame(OP.CLOSE, a.id)) } catch { /* gone */ }
+      return false
+    }
+    ws.serializeAttachment({ ...a, welcomed: true })
     return true
   }
   cutView(ws, why, until) {
@@ -1215,7 +1278,7 @@ export class Hub {
   }
 
   // As many Share Link pages are open on this computer as the relay takes at once, each one the
-  // computer let in: this one is turned away, saying so (the page tries again in a while).
+  // computer welcomed: this one is turned away, saying so (the page tries again in a while).
   fullViews() {
     const until = Date.now() + 60000
     if (!this.lim) return refuse({ t: 'limit', why: 'viewers', text: `As many people as this relay takes at once (${MAX_VIEWERS}) have links from this computer open. This page tries again in a minute.`, until }, 4005)

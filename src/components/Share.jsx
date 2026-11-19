@@ -210,6 +210,7 @@ export function SharesList() {
         </details>
       )}
       <p className="muted small">{limitsText(data.limits)}</p>
+      {data.relay && <p className="muted small share-relay-limits">{t('On Bridge AI\'s relay, your links have an allowance apart from your phones\': {window} messages in {hours} hours and {week} a week ({linkWindow} and {linkWeek} for one link), at up to {perSecond} a second.', { hours: data.relay.hours, window: data.relay.window.toLocaleString(), week: data.relay.week.toLocaleString(), linkWindow: data.relay.linkWindow.toLocaleString(), linkWeek: data.relay.linkWeek.toLocaleString(), perSecond: data.relay.perSecond })}</p>}
     </div>
   )
 }

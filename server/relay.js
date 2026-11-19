@@ -648,7 +648,7 @@ class Conn {
     }
     if (kind === K.REQ) {
       const r = json(body) || {}
-      const ask = String(r.u || '').startsWith('/.share/')
+      const ask = !r.c && String(r.u || '').startsWith('/.share/')
       const linkStreams = viewing(this.view.id).reduce((n, c) => n + c.streams.size, 0)
       if (this.streams.size >= SHARE_LIMITS.streams.page || linkStreams >= SHARE_LIMITS.streams.link) return this.send(K.ERR, id, utf8('Too many at once. Try again in a moment.'))
       if (r.body && !ask && (!this.view.passed || !shares.takesBodies(this.view.id))) return this.send(K.ERR, id, utf8(this.view.passed ? 'What\'s shared here can only be looked at.' : 'Not let in yet.'))
@@ -769,7 +769,7 @@ class Conn {
 
   // A request from the phone, run against this server; or from a Share Link's page, answered by
   // shares.js alone (never this server).
-  request(sid, { m, u, h, body, z, w }) {
+  request(sid, { m, u, h, body, z, w, c }) {
     if (!this.view && this.removed()) return this.send(K.ERR, sid, utf8('This device was removed from this computer'))
     const target = this.view ? null : new URL(String(u || '/'), base)
     if (target && target.origin !== new URL(base).origin) return this.send(K.ERR, sid, utf8('Not allowed'))
@@ -800,7 +800,7 @@ class Conn {
         // real ones below. It's run here as you, with this server's key (apiauth.js): the device has
         // shown its own key to get this far.
         let res
-        if (this.view) res = await shares.answer(this.view, { m, u, h: Array.isArray(h) ? h.filter((x) => Array.isArray(x) && x.length === 2) : [], body: s.body ? Buffer.concat(s.body) : null })
+        if (this.view) res = await shares.answer(this.view, { m, u, h: Array.isArray(h) ? h.filter((x) => Array.isArray(x) && x.length === 2) : [], body: s.body ? Buffer.concat(s.body) : null, content: c === 1 })
         else {
           const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$|authorization$)/i.test(k) && (computer || !FOR.test(k))))
           headers['x-bridge-relay'] = this.device.id
@@ -930,15 +930,23 @@ export const hostPublic = async () => b64u((await key()).public)
 const B32 = 'abcdefghijklmnopqrstuvwxyz234567'
 let opensShares = null // whether Bridge AI's relay says it opens Share Links (/_relay/health): null until asked
 let shareDomain = null // ...and its share domain
+let viewCaps = null // ...and what links may carry there (Settings › Sharing says it)
 let asking = null
 function askShares() {
   if (!conf.hosted) return Promise.resolve()
   return (asking ||= (async () => {
     const h = (await relayGet(`${conf.url}/_relay/health`, 8000))?.json
-    if (h?.ok) { opensShares = h.share === 1; shareDomain = typeof h.shareDomain === 'string' && /^[a-z0-9.-]{3,200}$/.test(h.shareDomain) ? h.shareDomain : null }
+    if (h?.ok) {
+      opensShares = h.share === 1
+      shareDomain = typeof h.shareDomain === 'string' && /^[a-z0-9.-]{3,200}$/.test(h.shareDomain) ? h.shareDomain : null
+      const v = h.views && typeof h.views === 'object' ? h.views : null
+      const n = (x) => (Number.isFinite(Number(x)) && Number(x) >= 0 ? Math.round(Number(x)) : null)
+      viewCaps = v && ['hours', 'window', 'linkWindow', 'week', 'linkWeek', 'perSecond'].every((k) => n(v[k]) != null) ? { hours: n(v.hours), window: n(v.window), linkWindow: n(v.linkWindow), week: n(v.week), linkWeek: n(v.linkWeek), perSecond: n(v.perSecond) } : null
+    }
   })().finally(() => { asking = null }))
 }
 export const sharesReady = () => (conf.hosted && opensShares === null ? askShares() : Promise.resolve())
+export const shareLimits = () => (conf.hosted ? viewCaps : null)
 export function shareAt() {
   if (!conf.url || !conf.token) return { why: 'relay' }
   if (conf.hosted && opensShares === false) return { why: 'hosted' }

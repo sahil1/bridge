@@ -64,8 +64,8 @@ const save = () => { ensureDir(path.dirname(FILE)); writeFileAtomic(FILE, JSON.s
 // service (namePeople) and a code emailed to one of them (sendCode, account.js), and whether an email
 // can be sent at all (canEmail).
 let hooks = {
-  shareAt: () => ({ why: 'relay' }), ready: async () => {}, owner: () => '', computer: () => 'This computer', isDevPort: async () => false, ownPorts: () => [],
-  endViewers: () => {}, viewersOf: () => 0, notify: () => {}, namePeople: async () => { throw new Error('No email') }, sendCode: async () => { throw new Error('No email') }, canEmail: () => false, changed: () => {},
+  shareAt: () => ({ why: 'relay' }), ready: async () => {}, relayLimits: () => null, owner: () => '', computer: () => 'This computer', isDevPort: async () => false, ownPorts: () => [],
+  endViewers: () => {}, viewersOf: () => 0, notify: () => {}, namePeople: async () => { throw new Error('No email') }, forgetPeople: async () => {}, sendCode: async () => { throw new Error('No email') }, canEmail: () => false, changed: () => {},
 }
 export const use = (h) => { hooks = { ...hooks, ...h } }
 
@@ -81,7 +81,7 @@ export async function list(asker = { here: true }) {
   sweep()
   const out = []
   for (const s of [...conf.shares].sort((a, b) => b.createdAt - a.createdAt)) out.push(await view(s, asker))
-  return { shares: out, can: can(), limits: LIMITS, email: hooks.canEmail() }
+  return { shares: out, can: can(), limits: LIMITS, email: hooks.canEmail(), relay: hooks.relayLimits() }
 }
 const mayRead = (s, asker) => !!asker?.here || (!!asker?.device && asker.device === s.byDevice)
 async function view(s, asker) {
@@ -228,6 +228,8 @@ function end(s, why) {
   s.codes = {}
   const text = why === 'expired' ? 'This link\'s time ran out.' : `${hooks.owner() || 'Whoever shared it'} stopped sharing it.`
   hooks.endViewers(s.id, { title: 'This link has ended', text: `${text} Ask for a new link if you still need it.` })
+  // Stopped early: the accounts service forgets who it named (it would at its end anyway).
+  if (s.mailed && why !== 'expired') hooks.forgetPeople(s.id).catch(() => {})
   stopWatch(s.id)
   save()
   hooks.changed()
@@ -377,8 +379,9 @@ function sendCode(s, v, email) {
 
 // ---------- the link's page: what it asks ----------
 // The page's own requests (/.share/…), and what's shared (/c/…): a WHATWG Response, never anything
-// of this server's. v: the page (viewer()); req: { m, u, h, body }.
-export async function answer(v, { m, u, h = [], body = null }) {
+// of this server's. v: the page (viewer()); req: { m, u, h, body, content }: content, a request from
+// what's shared (its frame), which is answered only from /c/, never one of the page's own questions.
+export async function answer(v, { m, u, h = [], body = null, content = false }) {
   const s = byId(v.id)
   if (!s || !live(s) || !s.secret) return json(410, { error: 'This link has ended.' })
   // A page asking too much at once (a script in a loop): slowed to LIMITS.perSecond, said; one that
@@ -394,6 +397,9 @@ export async function answer(v, { m, u, h = [], body = null }) {
   const url = new URL(String(u || '/'), 'http://share')
   const p = url.pathname
   const method = String(m || 'GET').toUpperCase()
+  // Asked as it is, or not at all: a path that would read as another once tidied (.., however it's
+  // written) isn't taken; and from what's shared, nothing but what's shared.
+  if (p !== String(u || '/').split(/[?#]/)[0] || (content && p !== '/c' && !p.startsWith('/c/'))) return page(404, 'This isn\'t part of what was shared.')
   const said = body && p.startsWith('/.share/') ? (() => { try { const j = JSON.parse(Buffer.from(body).toString('utf8')); return j && typeof j === 'object' ? j : {} } catch { return {} } })() : {}
   const owner = hooks.owner() || hooks.computer()
   if (p === '/.share/about' && method === 'GET') {
@@ -480,11 +486,12 @@ const json = (status, o) => Promise.resolve(new Response(JSON.stringify(o), { st
 // ---------- what's shared ----------
 // Every answer shown in the page's frame: sandboxed (a PDF aside, which a sandbox stops showing),
 // framed only by the page's own address, never sniffed as something else, its address kept to the
-// page's own (Referrer-Policy), never cached. At a content address of its own, its scripts run and
-// may reach only that address (connect-src 'self'); anywhere else none runs at all.
+// page's own (Referrer-Policy), never cached. It loads only from its own address (and data: and blob:
+// it makes), nothing from another site. At a content address of its own, its scripts run there;
+// anywhere else none runs at all.
 const SANDBOX = 'sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads'
-const WITH_SCRIPTS = `${SANDBOX}; connect-src 'self'`
-const NO_SCRIPTS = `${SANDBOX}; script-src 'none'; object-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'`
+const WITH_SCRIPTS = `${SANDBOX}; default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; object-src 'none'; form-action 'self'; base-uri 'self'`
+const NO_SCRIPTS = `${SANDBOX}; default-src 'self' data: blob:; style-src 'self' data: blob: 'unsafe-inline'; script-src 'none'; object-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'`
 const cspOf = (s) => (s.content ? WITH_SCRIPTS : NO_SCRIPTS)
 // A page made here (a document, a folder's list, why something didn't open): nothing in it runs
 // (script-src 'none'), and it loads nothing from anywhere else. (Its sandbox lets scripts as the

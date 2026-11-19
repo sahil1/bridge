@@ -28,6 +28,9 @@ const CODES_PER_EMAIL = 5 // an hour
 const CODES_PER_NETWORK = 20 // an hour
 const SHARE_CODES_PER_ACCOUNT = 30 // codes for people its Share Links name, an hour
 const SHARE_PEOPLE = 30 // emails one Share Link names
+const SHARE_LINKS = 50 // an account's Share Links naming people at once (as many as Bridge AI keeps)
+const SHARE_PEOPLE_CALLS = 60 // times an account tells which people its links name, an hour
+const SHARE_CODES_PER_ADDRESS = 20 // codes to one address from every account's links together, an hour
 const FORMS_PER_NETWORK = 5 // requests from the website's form, an hour
 const MAX_DEVICES = 5
 const GRANT_MINUTES = 5
@@ -529,7 +532,9 @@ async function v1(req, env, url) {
   if (p === '/v1/request-public' && post) return requestPublic(req, env)
   // The people a computer's Share Link names (Bridge AI's server/shares.js), when it's made: kept as
   // keyed hashes of the link's id and each email, until the link ends (at most 8 days), so codes for
-  // that link go to them and nobody else. Told again, the link's list is replaced.
+  // that link go to them and nobody else. Told again, the link's list is replaced; told no one (the
+  // link stopped), it's forgotten. An account has SHARE_LINKS such links at once, and tells this
+  // SHARE_PEOPLE_CALLS times an hour.
   const LINK = /^[\w-]{22}$/
   if (p === '/v1/share-people' && post) {
     const { acct, dev } = await signedIn(req, env)
@@ -538,21 +543,29 @@ async function v1(req, env, url) {
     const b = await body(req)
     const link = String(b.link ?? '')
     const emails = Array.isArray(b.emails) ? [...new Set(b.emails.map(clean))] : []
-    if (!LINK.test(link) || !emails.length || emails.length > SHARE_PEOPLE || emails.some((e) => e.length > 254 || !EMAIL.test(e))) refuse(400, 'invalid', `A link names 1 to ${SHARE_PEOPLE} email addresses.`)
+    if (!LINK.test(link) || emails.length > SHARE_PEOPLE || emails.some((e) => e.length > 254 || !EMAIL.test(e))) refuse(400, 'invalid', `A link names 1 to ${SHARE_PEOPLE} email addresses.`)
     const now = Date.now()
+    const calls = `p:${(await keyed(env, `share people ${acct.id}`)).slice(0, 32)}`
+    const r = await db.prepare('SELECT COUNT(*) AS n, MIN(at) AS first FROM sent WHERE key = ? AND at > ?').bind(calls, now - HOUR).first()
+    if ((r?.n || 0) >= SHARE_PEOPLE_CALLS) {
+      const retryAfter = Math.max(1, Math.ceil((r.first + HOUR - now) / 1000))
+      refuse(429, 'too-many', `Too many links named people in the last hour. Try again in ${minutes(retryAfter)}.`, { retryAfter })
+    }
+    await db.batch([db.prepare('DELETE FROM share_people WHERE until < ? OR (account = ? AND link = ?)').bind(now, acct.id, link), db.prepare('INSERT INTO sent (key, at) VALUES (?, ?)').bind(calls, now)])
+    if (!emails.length) return json({ ok: true, people: 0 })
     const until = Math.min(Number(b.until) || 0, now + 8 * DAY)
     if (!(until > now)) refuse(400, 'invalid', 'That link has ended.')
-    await db.batch([
-      db.prepare('DELETE FROM share_people WHERE until < ? OR (account = ? AND link = ?)').bind(now, acct.id, link),
-      ...(await Promise.all(emails.map(async (e) => db.prepare('INSERT INTO share_people (account, link, hash, until) VALUES (?, ?, ?, ?)').bind(acct.id, link, await keyed(env, `share person ${acct.id} ${link} ${e}`), until)))),
-    ])
+    const live = await db.prepare('SELECT COUNT(DISTINCT link) AS links, COUNT(*) AS rows FROM share_people WHERE account = ?').bind(acct.id).first()
+    if ((live?.links || 0) >= SHARE_LINKS || (live?.rows || 0) + emails.length > SHARE_LINKS * SHARE_PEOPLE) refuse(429, 'too-many', `${SHARE_LINKS} links naming people are open at once already. Stop one first.`)
+    await db.batch(await Promise.all(emails.map(async (e) => db.prepare('INSERT INTO share_people (account, link, hash, until) VALUES (?, ?, ?, ?)').bind(acct.id, link, await keyed(env, `share person ${acct.id} ${link} ${e}`), until))))
     return json({ ok: true, people: emails.length })
   }
   // A code for someone a computer's Share Link names: made and checked on that computer, never kept
   // here, only emailed to them, saying whose link it is, and only to an email that link named
   // (share-people). Nothing about what's shared comes here. An account sends SHARE_CODES_PER_ACCOUNT
-  // an hour, and one address gets CODES_PER_EMAIL an hour (apart from its sign-in codes); the email
-  // is the same words each time.
+  // an hour, CODES_PER_EMAIL of them to one address, and one address gets SHARE_CODES_PER_ADDRESS an
+  // hour from every account together (apart from its sign-in codes), so no account uses up another's
+  // codes to it; the email is the same words each time.
   if (p === '/v1/share-code' && post) {
     const { acct, dev } = await signedIn(req, env)
     active(acct)
@@ -565,7 +578,7 @@ async function v1(req, env, url) {
     if (!/^\d{8,12}$/.test(code)) refuse(400, 'invalid', 'A code is 8 digits or more.')
     const now = Date.now()
     if (!(await db.prepare('SELECT 1 FROM share_people WHERE account = ? AND link = ? AND hash = ? AND until > ?').bind(acct.id, link, await keyed(env, `share person ${acct.id} ${link} ${to}`), now).first())) refuse(403, 'not-named', 'That link doesn\'t name this email.')
-    const limits = [[`s:${(await keyed(env, `share from ${acct.id}`)).slice(0, 32)}`, SHARE_CODES_PER_ACCOUNT, 'your links'], [`t:${(await keyed(env, `share to ${to}`)).slice(0, 32)}`, CODES_PER_EMAIL, 'this email']]
+    const limits = [[`s:${(await keyed(env, `share from ${acct.id}`)).slice(0, 32)}`, SHARE_CODES_PER_ACCOUNT, 'your links'], [`t:${(await keyed(env, `share to ${acct.id} ${to}`)).slice(0, 32)}`, CODES_PER_EMAIL, 'this email'], [`g:${(await keyed(env, `share to ${to}`)).slice(0, 32)}`, SHARE_CODES_PER_ADDRESS, 'this email']]
     for (const [key, max, who] of limits) {
       const r = await db.prepare('SELECT COUNT(*) AS n, MIN(at) AS first FROM sent WHERE key = ? AND at > ?').bind(key, now - HOUR).first()
       if ((r?.n || 0) >= max) {

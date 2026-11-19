@@ -222,6 +222,11 @@ export async function sharePeople(link, emails, until) {
   signedIn()
   return call('POST', '/v1/share-people', { link, emails, until: Math.round(until) })
 }
+// ...and forgotten there when the link stops early.
+export async function shareForget(link) {
+  signedIn()
+  return call('POST', '/v1/share-people', { link, emails: [] })
+}
 export async function shareCode(link, to, code) {
   signedIn()
   return call('POST', '/v1/share-code', { link, to, code })

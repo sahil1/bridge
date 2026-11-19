@@ -3696,6 +3696,7 @@
   "Oldest first": "最早的在前",
   "On": "已打开",
   "On Bridge AI's relay": "使用 Bridge AI 中继",
+  "On Bridge AI's relay, your links have an allowance apart from your phones': {window} messages in {hours} hours and {week} a week ({linkWindow} and {linkWeek} for one link), at up to {perSecond} a second.": "在 Bridge AI 的中继上，你的链接有一份独立于手机的额度：{hours} 小时内 {window} 条消息、每周 {week} 条（单个链接 {linkWindow} 条和 {linkWeek} 条），每秒最多 {perSecond} 条。",
   "On Chief of Staff's list. It isn't running: it reads them when it starts.": "已加入幕僚长的列表。它没有运行：启动时会读取。",
   "On Chief of Staff's task list": "在幕僚长的任务列表上",
   "On Chief of Staff's task list. Start Chief of Staff and it picks it up.": "在幕僚长的任务列表上。启动幕僚长，它会接手。",

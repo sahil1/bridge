@@ -3696,6 +3696,7 @@
   "Oldest first": "पुराने पहले",
   "On": "चालू",
   "On Bridge AI's relay": "Bridge AI के रिले पर",
+  "On Bridge AI's relay, your links have an allowance apart from your phones': {window} messages in {hours} hours and {week} a week ({linkWindow} and {linkWeek} for one link), at up to {perSecond} a second.": "Bridge AI के रिले पर आपके लिंक का अपना हिस्सा है, आपके फ़ोन से अलग: {hours} घंटे में {window} मैसेज और हफ़्ते में {week} (एक लिंक के लिए {linkWindow} और {linkWeek}), एक सेकंड में {perSecond} तक।",
   "On Chief of Staff's list. It isn't running: it reads them when it starts.": "चीफ़ ऑफ़ स्टाफ़ की सूची में है। वह अभी नहीं चल रहा: शुरू होने पर उन्हें पढ़ेगा।",
   "On Chief of Staff's task list": "चीफ़ ऑफ़ स्टाफ़ की काम की सूची में",
   "On Chief of Staff's task list. Start Chief of Staff and it picks it up.": "चीफ़ ऑफ़ स्टाफ़ की काम की सूची में। चीफ़ ऑफ़ स्टाफ़ शुरू करें, वह इसे उठा लेगा।",

@@ -621,7 +621,9 @@ phone's page in a browser, the page the link opens comes from the relay, so this
 serving it unchanged (on Bridge AI's relay, your computer checks it with the phone's page). The
 relay, and Cloudflare, see what they see of any connection: the viewer's IP address, when they
 connect and how much passes, and the link's id (made from its secret, not the secret). The relay
-tells your computer the country Cloudflare says a viewer is in, and nothing else about them. On
+tells your computer the country Cloudflare says a viewer is in, and nothing else about them; while
+a viewer's page is connecting, the relay keeps a hash of their IP address with that connection (to
+limit how many connect from one address), and nothing of it once it closes. On
 Bridge AI's relay, once a viewer is let in (the password or code given), what a link carries counts
 towards your account's allowance there, and what a link shows is at an address of its own under
 Bridge AI's share domain.

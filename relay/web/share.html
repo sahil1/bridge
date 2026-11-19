@@ -91,7 +91,8 @@
       </form>
     </div>
   </section>
-  <iframe id="view" title="Shared with you" hidden referrerpolicy="no-referrer" allow="fullscreen; clipboard-write"></iframe>
+  <!-- What's shown never takes this tab anywhere: no top navigation, from it or anything in it. -->
+  <iframe id="view" title="Shared with you" hidden referrerpolicy="no-referrer" allow="fullscreen; clipboard-write" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"></iframe>
   <script type="module" src="/share.js"></script>
 </body>
 </html>

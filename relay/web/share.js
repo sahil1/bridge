@@ -390,6 +390,8 @@ async function whole() {
   if (!head || head.s !== 200) return waitScreen('This didn\'t open', 'The computer sharing it couldn\'t send it just now. Try again.', { retry: true })
   const type = (head.h.find(([k]) => k.toLowerCase() === 'content-type') || [])[1] || 'application/octet-stream'
   opened = true
+  // Shown from here, so nothing in it runs at all.
+  $('view').setAttribute('sandbox', 'allow-popups allow-downloads')
   $('view').src = URL.createObjectURL(new Blob(parts, { type }))
   show(null)
 }
@@ -432,7 +434,10 @@ navigator.serviceWorker?.startMessages?.()
 function tunnel({ m, u, h, body }, port, acks = true) {
   const prefix = `/_c/${k}`
   if (!session || !passed) return port.postMessage({ error: session ? 'Not opened yet' : `${theirs()} is offline. The link works when it's back.` })
-  if (!String(u).startsWith(`${prefix}/`)) return port.postMessage({ error: 'Not part of what was shared' })
+  // Only under this page's key, with nothing in it that leads anywhere else (.., or one written
+  // another way), and asked as what's shared (c): never one of this page's own questions.
+  const path = String(u).split(/[?#]/)[0]
+  if (!path.startsWith(`${prefix}/`) || /(^|\/)\.\.?(\/|$)|%2e|%2f|%5c|\\/i.test(path.slice(prefix.length)) || new URL(path, location.origin).pathname !== path) return port.postMessage({ error: 'Not part of what was shared' })
   const id = nextId++
   let over = false
   const grant = granter((n) => { if (streams.has(id)) send(K.MORE, id, more(n)).catch(() => {}) })
@@ -451,7 +456,7 @@ function tunnel({ m, u, h, body }, port, acks = true) {
   })
   ;(async () => {
     const b = body ? new Uint8Array(body) : null
-    await send(K.REQ, id, { m: String(m || 'GET').slice(0, 10), u: `/c${String(u).slice(prefix.length)}`, h: Array.isArray(h) ? h.slice(0, 64) : [], body: !!b, w: WINDOW })
+    await send(K.REQ, id, { m: String(m || 'GET').slice(0, 10), u: `/c${String(u).slice(prefix.length)}`, h: Array.isArray(h) ? h.slice(0, 64) : [], body: !!b, w: WINDOW, c: 1 })
     if (b) {
       for (let o = 0; o < b.byteLength; o += CHUNK) await send(K.BODY, id, b.subarray(o, o + CHUNK))
       await send(K.END, id)

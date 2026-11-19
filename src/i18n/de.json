@@ -3697,6 +3697,7 @@
   "Oldest first": "Älteste zuerst",
   "On": "An",
   "On Bridge AI's relay": "Über das Relay von Bridge AI",
+  "On Bridge AI's relay, your links have an allowance apart from your phones': {window} messages in {hours} hours and {week} a week ({linkWindow} and {linkWeek} for one link), at up to {perSecond} a second.": "Auf dem Relay von Bridge AI haben deine Links ein eigenes Kontingent, getrennt von deinen Handys: {window} Nachrichten in {hours} Stunden und {week} pro Woche ({linkWindow} und {linkWeek} für einen Link), bis zu {perSecond} pro Sekunde.",
   "On Chief of Staff's list. It isn't running: it reads them when it starts.": "Auf der Liste des Stabschefs. Er läuft gerade nicht: Er liest sie beim Start.",
   "On Chief of Staff's task list": "Auf der Aufgabenliste des Stabschefs",
   "On Chief of Staff's task list. Start Chief of Staff and it picks it up.": "Auf der Aufgabenliste des Stabschefs. Starte den Stabschef, und er übernimmt sie.",

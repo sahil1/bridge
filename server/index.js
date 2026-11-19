@@ -2917,11 +2917,11 @@ app.get('/api/relay/pagecheck', wrap((req) => relaycheck.ask({ now: req.query.no
 // through the relay. Made, seen and stopped here or on any of your devices (a phone too); what the
 // link's page asks never comes here (relay.js answers it with shares.js alone).
 shares.use({
-  shareAt: () => relay.shareAt(), ready: () => relay.sharesReady(), owner: () => settings.cleanName(cfg.name), computer: () => relay.thisName(),
+  shareAt: () => relay.shareAt(), ready: () => relay.sharesReady(), relayLimits: () => relay.shareLimits(), owner: () => settings.cleanName(cfg.name), computer: () => relay.thisName(),
   isDevPort, ownPorts: () => [cfg.port, cfg.port + 1, ...pages.ports(), ...previewPorts.portsOpen()],
   endViewers: (id, said) => relay.endViewers(id, said), viewersOf: (id) => relay.viewersOf(id),
   notify: (note) => notify.send(note).catch(() => {}),
-  namePeople: (link, emails, until) => account.sharePeople(link, emails, until), sendCode: (link, email, code) => account.shareCode(link, email, code), canEmail: () => account.status().signedIn === true,
+  namePeople: (link, emails, until) => account.sharePeople(link, emails, until), forgetPeople: (link) => account.shareForget(link), sendCode: (link, email, code) => account.shareCode(link, email, code), canEmail: () => account.status().signedIn === true,
   changed: () => { for (const c of clients) c.write('event: shares\ndata: {}\n\n') },
 })
 // A link itself (its secret) only to this computer and the device that made it: another of your
