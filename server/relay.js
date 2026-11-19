@@ -410,6 +410,14 @@ const IDLE_MS = Number(process.env.BRIDGE_LINK_IDLE_MS) || 10 * 60000
 // ---------- one phone ----------
 const DROP = new Set(['host', 'connection', 'origin', 'referer', 'cookie', 'content-length', 'accept-encoding', 'upgrade', 'keep-alive', 'transfer-encoding'])
 const DROP_BACK = new Set(['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'keep-alive', 'set-cookie'])
+// Which of its own devices another of your computers says a request is for (machines.js): taken
+// from a computer only, dropped from anything else's.
+const FOR = /^x-bridge-for-(id|name|kind|key)$/i
+const forOf = (h) => {
+  const get = (k) => { const v = (Array.isArray(h) ? h : []).find(([x]) => String(x).toLowerCase() === k)?.[1]; return typeof v === 'string' && v ? v : null }
+  const forId = get('x-bridge-for-id')
+  return forId ? { forId, forKey: get('x-bridge-for-key') } : {}
+}
 // Worth compressing: text (pictures and fonts are compressed already).
 const PACKS = /javascript|css|json|svg|html|text\/|wasm|xml/
 // A device's name as it says it: no control characters, nor ones that turn text around (bidi).
@@ -648,7 +656,10 @@ class Conn {
     const target = new URL(String(u || '/'), base)
     if (target.origin !== new URL(base).origin) return this.send(K.ERR, sid, utf8('Not allowed'))
     const abort = new AbortController()
-    const s = { abort, body: body ? [] : null }
+    // For one of its own devices, as another of your computers says (machines.js): which, so it's
+    // ended with that device (endFor). Only a computer's say counts.
+    const computer = this.device?.kind === 'computer'
+    const s = { abort, body: body ? [] : null, ...(computer ? forOf(h) : {}) }
     this.streams.set(sid, s)
     // How much of the answer may be on its way (w, then MORE as the phone takes it in). The file is
     // read only as it goes, so none of it waits here in memory either.
@@ -670,7 +681,7 @@ class Conn {
         // Its own x-bridge-relay and Authorization go, in any capitals: fetch would join them to the
         // real ones below. It's run here as you, with this server's key (apiauth.js): the device has
         // shown its own key to get this far.
-        const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$|authorization$)/i.test(k)))
+        const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$|authorization$)/i.test(k) && (computer || !FOR.test(k))))
         headers['x-bridge-relay'] = this.device.id
         Object.assign(headers, authHeaders(localKey()))
         const res = await fetch(target, { method: m || 'GET', headers, body: s.body ? Buffer.concat(s.body) : undefined, signal: abort.signal, redirect: 'manual' })
@@ -708,13 +719,15 @@ class Conn {
     if (!body) s.run()
   }
 
-  // A WebSocket from the phone (the live terminal), opened here.
-  socket(sid, { u }) {
+  // A WebSocket from the phone (the live terminal), opened here. h: from another of your computers,
+  // which of its devices it's for (machines.js), passed on as for a request.
+  socket(sid, { u, h }) {
     if (this.removed()) return this.send(K.WS_CLOSE, sid, { c: 1008, r: 'This device was removed from this computer' })
     const target = new URL(String(u || '/'), base)
     if (target.origin !== new URL(base).origin) return this.send(K.WS_CLOSE, sid, { c: 1008, r: 'Not allowed' })
-    const ws = new WebSocket(target.href.replace(/^http/, 'ws'), { headers: { 'x-bridge-relay': this.device.id, ...authHeaders(localKey()) } })
-    this.streams.set(sid, { ws })
+    const said = this.device?.kind === 'computer' ? (Array.isArray(h) ? h : []).filter(([k, v]) => FOR.test(String(k)) && typeof v === 'string').map(([k, v]) => [String(k).toLowerCase(), v.slice(0, 200)]) : []
+    const ws = new WebSocket(target.href.replace(/^http/, 'ws'), { headers: { ...Object.fromEntries(said), 'x-bridge-relay': this.device.id, ...authHeaders(localKey()) } })
+    this.streams.set(sid, { ws, ...forOf(said) })
     ws.on('open', () => this.send(K.WS_OPENED, sid))
     ws.on('message', (data, isBinary) => {
       const b = Buffer.isBuffer(data) ? data : Buffer.from(data)
@@ -892,6 +905,9 @@ export function removeMachine(relayAt) {
 }
 // Which of the paired devices are machines (requests through the relay say which device).
 export const deviceOf = (id) => (id && (conf.devices || []).find((d) => d.id === id)) || null
+// The device paired here with that key (one paired with another of your computers with the same
+// key is the same device: remote.js shutFor).
+export const deviceByKey = (key) => (key && (conf.devices || []).find((d) => d.key === key)) || null
 // The address a device moved here from, with this computer (the phone app there can let go of it).
 export const movedFrom = (id) => deviceOf(id)?.movedFrom || null
 export const isMachine = (deviceId) => !!deviceId && (conf.devices || []).some((d) => d.id === deviceId && d.kind === 'computer')
@@ -914,10 +930,17 @@ export function removeDevice(id) {
 // its connections. A WebSocket (a terminal, a screen) is closed from this end, so what this computer
 // said on it first (why) still reaches it; a request on its way (a file coming or going, the app's
 // event feed) is stopped, and the device told why. What it asks next is turned away (letin.js).
+// id: a device paired here, or hop/id for one through another of your computers (that computer's
+// streams for it); one paired here is ended through any of your computers that says it's for a
+// device with its key too.
 export function endFor(id, why) {
+  const [hop, forId] = id.includes('/') ? id.split('/') : [id, null]
+  const key = forId ? null : deviceOf(id)?.key || null
   for (const c of [...conns.values(), ...prior.conns.values()]) {
-    if (c.device?.id !== id) continue
+    if (!c.device) continue
+    const all = !forId && c.device.id === hop
     for (const [sid, s] of [...c.streams]) {
+      if (!all && !(forId && c.device.id === hop && s.forId === forId) && !(key && s.forKey === key)) continue
       if (s.ws) { try { s.ws.close(1008, 'notLetIn') } catch { /* closed */ } continue }
       c.streams.delete(sid)
       c.send(K.ERR, sid, utf8(why)).catch(() => {})

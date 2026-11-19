@@ -428,11 +428,11 @@ class Link {
     })
   }
 
-  // A WebSocket on that device (a live terminal).
-  socket(u, handlers) {
+  // A WebSocket on that device (a live terminal). h: which device of this one's it's for (forHeaders).
+  socket(u, handlers, h = []) {
     const id = this.next++
     this.streams.set(id, handlers)
-    this.send(K.WS_OPEN, id, { u }).catch((e) => { this.streams.delete(id); handlers.onClose?.({ c: 1011, r: e.message }) })
+    this.send(K.WS_OPEN, id, { u, ...(h.length ? { h } : {}) }).catch((e) => { this.streams.delete(id); handlers.onClose?.({ c: 1011, r: e.message }) })
     return {
       send: (data, binary) => this.send(K.WS_MSG, id, Buffer.concat([Buffer.from([binary ? 0 : 1]), Buffer.isBuffer(data) ? data : Buffer.from(String(data))])).catch(() => {}),
       close: (c = 1000, r = '') => { if (this.streams.delete(id)) this.send(K.WS_CLOSE, id, { c, r }).catch(() => {}) },
@@ -956,8 +956,7 @@ export async function proxy(req, res, { frames = null, ui = null } = {}) {
   const u = hit[2] || '/'
   const h = Object.entries(req.headers).filter(([k]) => PASS.has(k)).map(([k, v]) => [k, String(v)])
   h.push(['x-bridge-machine', relay.thisName()])
-  // For a device of this computer's: the answer from there says this computer when it isn't let in (letin.js).
-  if (req.headers['x-bridge-relay']) h.push(['x-bridge-for', '1'])
+  h.push(...forHeaders(relay.deviceOf(req.headers['x-bridge-relay'])))
   const hasBody = !['GET', 'HEAD'].includes(req.method)
   let done = false
   let r = null
@@ -1034,6 +1033,14 @@ export async function proxy(req, res, { frames = null, ui = null } = {}) {
 let passCheck = () => null
 export const usePassCheck = (fn) => { passCheck = fn }
 const onward = new Map() // device id -> its sockets gone on to another computer's screen
+// Which of this computer's devices a request or WebSocket going on to another computer is for: that
+// computer checks it as well as this one (letin.js, remote.js shutFor), keeps it out apart, and
+// knows it as the same device it's paired with when the key is the same. What the device sent of
+// these never goes on (only PASS does, above). Its name, which may be any text, goes encoded.
+const forHeaders = (d) => (d ? [['x-bridge-for-id', d.id], ['x-bridge-for-name', encodeURIComponent(String(d.name || '').slice(0, 60))], ['x-bridge-for-kind', d.kind === 'computer' ? 'computer' : 'phone'], ...(d.key ? [['x-bridge-for-key', d.key]] : [])] : [])
+// The same for what this computer asks of another for one of its devices (a copy it asked for, a
+// meeting it mentions): id, its id here (none: for this computer's own user).
+export const forDevice = (id) => forHeaders(relay.deviceOf(id))
 export function endOnward(id, why) {
   for (const c of onward.get(id) || []) { try { c.send(JSON.stringify({ t: 'error', code: 'device', why })); c.close(1008, 'refused') } catch { /* closed */ } }
 }
@@ -1077,7 +1084,7 @@ export function upgrade(req, socket, head) {
         onMessage: (data, binary) => { if (client.readyState === 1) client.send(data, { binary }) },
         onClose: (c) => { try { client.close(c?.c >= 1000 && c.c < 5000 && c.c !== 1005 && c.c !== 1006 ? c.c : 1011, String(c?.r || '').slice(0, 120)) } catch { /* closed */ } },
         onError: () => { try { client.close(1011) } catch { /* closed */ } },
-      })
+      }, forHeaders(asker))
     }).catch((e) => { try { client.close(1011, String(e.message).slice(0, 120)) } catch { /* closed */ } })
     client.on('message', (data, binary) => { const d = Buffer.isBuffer(data) ? data : Buffer.from(data); if (open) remote.send(d, binary); else pending.push([d, binary]) })
     client.on('close', (c, r) => remote?.close(c, String(r || '')))

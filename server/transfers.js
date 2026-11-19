@@ -425,7 +425,7 @@ async function run(job) {
 // A request to the other device, its answer as JSON; a refusal there is thrown with its words (and
 // a 4xx stops the copy: it won't go better by itself).
 async function ask(job, method, u, body, ms = 30000) {
-  const r = await machines.exchange(job.machine, { method, u, headers: [['content-type', body && !Buffer.isBuffer(body) ? 'application/json' : 'application/octet-stream']], body: body == null ? null : Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body)), ms })
+  const r = await machines.exchange(job.machine, { method, u, headers: [['content-type', body && !Buffer.isBuffer(body) ? 'application/json' : 'application/octet-stream'], ...machines.forDevice(job.by)], body: body == null ? null : Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body)), ms })
   const j = await r.json()
   if (r.status >= 400) {
     // Its answer to an address it doesn't have: a Bridge AI from before copies.
@@ -470,7 +470,7 @@ async function pull(job, ctl) {
 async function pullFile(job, inc, i, ctl) {
   const f = inc.files[i]
   const from = f.have
-  const r = await machines.exchange(job.machine, { u: `/api/agents/${enc(job.src.pane)}/raw?path=${enc(srcPath(job, f))}`, headers: from ? [['range', `bytes=${from}-`]] : [], window: PULL_WINDOW, ms: 30000 })
+  const r = await machines.exchange(job.machine, { u: `/api/agents/${enc(job.src.pane)}/raw?path=${enc(srcPath(job, f))}`, headers: [...(from ? [['range', `bytes=${from}-`]] : []), ...machines.forDevice(job.by)], window: PULL_WINDOW, ms: 30000 })
   ctl.cancel = () => r.cancel()
   try {
     if (r.status === 404) throw fail(`${f.rel || job.name} isn't on ${job.device} any more`, { status: 404 })

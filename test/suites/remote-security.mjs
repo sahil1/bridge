@@ -43,7 +43,7 @@ import { createRequire } from 'node:module'
 import WebSocket from 'ws'
 import { startKit, startRelay, checks, until, sleep, freePort, stopTree, browser, page, TEST, ROOT, IS_WIN } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
-import { K, json, text } from '../../relay/web/link.js'
+import { K, json, text, newKey } from '../../relay/web/link.js'
 import { unpackFrame, packFrame, ACCESS } from '../../shared/remote.js'
 
 const { ok, skip, done } = checks('remote-security')
@@ -611,6 +611,15 @@ try {
     ok(msg(pg, 'error')?.code === 'device' && msg(sc, 'error')?.code === 'device' && !msg(sc, 'password'), 'a page session and the screen: turned away by the screen itself, as before', [msg(pg, 'error'), msg(sc, 'error')])
     const later = await ph2.request('GET', '/api/a-route-added-later')
     ok(shut(later), 'and a route nobody has written yet: refused too, not a 404', later.status)
+    // The app's own files are let through by their plain names only: not a route in other capitals
+    // that ends in one, encoded; nor, with no key at all, as if public.
+    const odd = ['/API/crashes/sent/..%2F..%2F..%2Fsw.js', '/API/meetings/nope/captures/..%2F..%2F..%2F..%2Fsw.js', '/assets/..%2Fsw.js']
+    const odds = await Promise.all(odd.map((u) => ph2.request('GET', u)))
+    ok(odds.every((r) => shut(r)), 'a route in other capitals ending in an encoded built file: refused', odds.map((r) => [r.status, r.json]))
+    const sw = await ph2.request('GET', '/sw.js')
+    ok(sw.status === 200, 'a built file by its own name still loads', sw.status)
+    const nokey = await Promise.all([{}, { 'sec-fetch-site': 'cross-site' }].map((h) => raw(studio, 'GET', odd[0], { headers: { host: `127.0.0.1:${studio.port}`, ...h } })))
+    ok(nokey.every((r) => r.status === 401 || r.status === 403), 'and with no key, it isn\'t public', nokey.map((r) => r.status))
     // What it may still do: load the app's page (to say so), be told, and unpair itself.
     const pageOf = await ph2.request('GET', '/')
     ok(pageOf.status === 200 && /<div id="root">/.test(pageOf.text), 'the app\'s own page still loads, to show why', pageOf.status)
@@ -623,12 +632,32 @@ try {
     const tsOwn = await raw(studio, 'GET', '/api/fleet', { headers: ts })
     const tsAs = await raw(studio, 'GET', '/api/fleet', { headers: { ...ts, 'x-bridge-relay': PHONE2 } })
     ok(tsOwn.status === 200 && shut(tsAs), 'through Tailscale: not this computer, and as an unticked device, refused', [tsOwn.status, tsAs.status])
-    // Only while Remote Screen and Preview is on here; the list is kept for when it's on again.
+    // The Beta Feature is a guardrail too: switched at Studio itself only, by either way of changing
+    // the settings, from a device, another computer's window or Tailscale.
+    const trial = async () => (await studio.api('/settings')).effective.trials['remote-screen']
+    const fromPhone = await ph.request('PATCH', '/api/settings', { trials: { 'remote-screen': false } })
+    const gone0 = await ph.request('PATCH', '/api/settings', { trials: null })
+    const rawOff = await ph.request('PUT', '/api/settings/raw', { text: JSON.stringify({ ...(await studio.api('/settings')).user, trials: {} }) })
+    const fromLaptop = await fetch(`${laptop.url}/m/${S.id}/api/settings`, { method: 'PATCH', headers: { 'content-type': 'application/json', authorization: `Bearer ${laptop.key}` }, body: JSON.stringify({ trials: { 'remote-screen': false } }) })
+    const fromTs = await raw(studio, 'PATCH', '/api/settings', { headers: ts, body: { trials: { 'remote-screen': false } } })
+    ok([fromPhone.status, gone0.status, rawOff.status, fromLaptop.status, fromTs.status].every((x) => x === 403) && await trial() === true, 'Remote Screen and Preview can\'t be turned off from a phone (nor its settings file, nor trials taken away), Laptop\'s window or Tailscale', [fromPhone.status, gone0.status, rawOff.status, fromLaptop.status, fromTs.status])
+    ok((await ph.request('PATCH', '/api/settings', { trials: { home: false } })).status === 200, 'another Beta Feature still changes from a phone')
+    // Turned off at Studio: one you unticked stays out; a New one is let in until it's on again.
+    const p5 = over(await linkAs(ra.url, { code: (await studio.api('/relay/pair', {})).pairing.code, name: 'Phone5', about: { name: 'Phone5' } }))
+    const d5 = await until(async () => (await studio.api('/remote')).access.devices.find((x) => x.name === 'Phone5'), 8000, 200)
+    ok(d5?.fresh && !d5.out && shut(await p5.request('GET', '/api/fleet')), 'Phone5, paired with a password set: New, waiting')
     await studio.api('/settings', { trials: { 'remote-screen': false } }, 'PATCH')
     const off = await ph2.request('GET', '/api/fleet')
+    const offFile = await ph2.request('GET', `/api/agents/${encodeURIComponent(SHELL)}/file?path=notes.txt`)
+    const offNew = await p5.request('GET', '/api/fleet')
+    const listed = (await studio.api('/remote')).access.devices.find((x) => x.id === PHONE2)
     await studio.api('/settings', { trials: { 'remote-screen': true } }, 'PATCH')
     const on = await ph2.request('GET', '/api/fleet')
-    ok(off.status === 200 && shut(on), 'the list applies while Remote Screen and Preview is on here, and is kept while it\'s off', [off.status, on.status])
+    const onNew = await p5.request('GET', '/api/fleet')
+    ok(shut(off) && shut(offFile) && listed?.out === true && shut(on), 'Phone2, unticked: still refused with Remote Screen and Preview off at Studio, and listed as kept out (for Settings to show with Allow)', [off.status, offFile.status, listed])
+    ok(offNew.status === 200 && shut(onNew), 'Phone5, New: let in while it\'s off, waiting again once it\'s on', [offNew.status, onNew.status])
+    await p5.request('DELETE', `/api/relay/devices/${encodeURIComponent(d5.id)}`)
+    p5.stop()
     // None of Studio's notifications either.
     await ph.request('POST', '/api/push/subscribe', { subscription: { endpoint: 'https://push.example/phone', keys: { p256dh: 'p', auth: 'a' } }, label: 'Phone' })
     await studio.api('/remote/devices', { id: PHONE2, allowed: true })
@@ -697,6 +726,56 @@ try {
     await studio.api('/remote/devices', { id: LAPTOP, allowed: true })
     const back = await until(async () => { await laptop.api(`/needs-you?fresh=${S.id}`); return !(await laptop.api('/machines')).machines.find((m) => m.id === S.id)?.notLetIn }, 15000, 500)
     ok(!!back && (await pk.request('GET', `/m/${S.id}/api/fleet`)).status === 200, 'ticked again at Studio: Laptop, and Pocket through it, may again')
+  })
+
+  await part('a device through a linked computer is checked as itself too', async () => {
+    // Pocket, seen at Studio through Laptop: listed there as coming through it, and kept out that way.
+    const entry = await until(async () => (await studio.api('/remote')).access.devices.find((d) => d.name === 'Pocket' && d.through === 'Laptop'), 6000, 200)
+    ok(entry?.id === `${LAPTOP}/${POCKET}` && entry.allowed, 'Studio lists Pocket, through Laptop (Laptop and its id there, as the lockout keeps it)', entry)
+    await studio.api('/remote/devices', { id: entry.id, allowed: false })
+    const via = await pk.request('GET', `/m/${S.id}/api/agents/${encodeURIComponent(SHELL)}/file?path=notes.txt`)
+    const term = pk.socket(`/m/${S.id}${ATTACH}`, { term: true })
+    await term.wait((x) => x.closed, 6000)
+    ok(shut(via) && !via.json.through && !via.text.includes('only for devices') && term.msgs[0]?.code === 'notLetIn' && !term.text, 'unticked at Studio as it comes through Laptop: refused there, files and terminal', [via.json, term.msgs])
+    const fake = await pk.request('GET', `/m/${S.id}/api/fleet`, null, [['x-bridge-for-id', 'someone-else'], ['x-bridge-for-key', 'nobody']])
+    ok(shut(fake), 'saying it\'s for another device doesn\'t help: Laptop says which one it is', fake.status)
+    const lv = await fetch(`${laptop.url}/m/${S.id}/api/fleet`, { headers: { authorization: `Bearer ${laptop.key}` } })
+    ok((await pk.request('GET', '/api/fleet')).status === 200 && lv.status === 200, 'Pocket still uses Laptop, and Laptop still uses Studio')
+    await studio.api('/remote/devices', { id: entry.id, allowed: true })
+    ok((await pk.request('GET', `/m/${S.id}/api/fleet`)).status === 200, 'ticked again: in again')
+    // Paired with both with the same key: unticked at Studio, it's kept out through Laptop as well,
+    // and what it has open through Laptop ends then.
+    const key = await newKey(true)
+    const bothS = over(await linkAs(ra.url, { device: key, code: (await studio.api('/relay/pair', {})).pairing.code, name: 'Both', about: { name: 'Both' } }))
+    const bothL = over(await linkAs(rb.url, { device: key, code: (await laptop.api('/relay/pair', {})).pairing.code, name: 'Both', about: { name: 'Both' } }))
+    const atS = await until(async () => (await studio.api('/remote')).access.devices.find((d) => d.name === 'Both' && !d.through), 8000, 200)
+    const atL = await until(async () => (await laptop.api('/remote')).access.devices.find((d) => d.name === 'Both'), 8000, 200)
+    for (const [k, d] of [[studio, atS], [laptop, atL]]) if (d && !d.allowed) await k.api('/remote/devices', { id: d.id, allowed: true })
+    const t = bothL.socket(`/m/${S.id}${ATTACH}`, { term: true })
+    ok(!!(await t.wait((x) => x.opened, 8000)) && (await bothL.request('GET', `/m/${S.id}/api/fleet`)).status === 200, 'Both, let in at each: Studio through Laptop', t.msgs)
+    await studio.api('/remote/devices', { id: atS.id, allowed: false })
+    await t.wait((x) => x.closed, 5000)
+    const viaL = await bothL.request('GET', `/m/${S.id}/api/fleet`)
+    ok(!!t.closed && shut(viaL) && shut(await bothS.request('GET', '/api/fleet')), 'unticked at Studio: refused there through Laptop too, as the same device, and its terminal through Laptop ends', [t.closed, viaL.json])
+    ok((await bothL.request('GET', '/api/fleet')).status === 200, 'it still uses Laptop itself')
+    bothS.stop()
+    bothL.stop()
+  })
+
+  await part('an unticked device that unpairs itself leaves the guardrail', async () => {
+    const was = JSON.parse(fs.readFileSync(path.join(laptop.data, 'remote.json'), 'utf8'))
+    ok(!was.password && !was.askFirst && !(was.blocked || []).length, 'Laptop: no password, no Ask Here First, nobody kept out', { password: !!was.password, askFirst: was.askFirst, blocked: was.blocked })
+    const x = over(await linkAs(rb.url, { code: (await laptop.api('/relay/pair', {})).pairing.code, name: 'Xphone', about: { name: 'Xphone' } }))
+    const xd = await until(async () => (await laptop.api('/remote')).access.devices.find((d) => d.name === 'Xphone'), 8000, 200)
+    ok(xd?.allowed && !xd.fresh, 'Xphone, paired at Laptop with no guardrail: let in', xd)
+    await laptop.api('/remote/devices', { id: xd.id, allowed: false })
+    const gone = await x.request('DELETE', `/api/relay/devices/${encodeURIComponent(xd.id)}`)
+    const z = over(await linkAs(rb.url, { code: (await laptop.api('/relay/pair', {})).pairing.code, name: 'Zphone', about: { name: 'Zphone' } }))
+    const zd = await until(async () => (await laptop.api('/remote')).access.devices.find((d) => d.name === 'Zphone'), 8000, 200)
+    ok(gone.status === 200 && zd?.fresh && !zd.allowed && shut(await z.request('GET', '/api/fleet'), 'Laptop'), 'kept out, then unpairing itself: the next one paired at Laptop still starts New', [gone.status, zd])
+    await laptop.api('/remote/devices', { id: zd.id, allowed: true })
+    x.stop()
+    z.stop()
   })
 
   // ---------- smaller ones ----------
@@ -842,6 +921,17 @@ try {
       await item.getByRole('button', { name: 'Allow' }).click()
       ok(!!(await until(async () => (await studio.api('/remote')).access.devices.find((x) => x.id === d.id)?.allowed, 5000, 100)), 'Allow lets it in: ticked in Which Devices May Connect')
       ok(!!(await f.locator('.settings-btn').waitFor({ timeout: 20000 }).then(() => true, () => false)), 'and the phone\'s page opens Bridge AI by itself')
+      // Unticked, then Remote Screen and Preview turned off at Studio: it stays out, and Studio's
+      // Settings lists it with Allow where the Beta Feature's settings were.
+      await studio.api('/remote/devices', { id: d.id, allowed: false })
+      await studio.api('/settings', { trials: { 'remote-screen': false } }, 'PATCH')
+      await s.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))
+      const kept = s.p.locator('[data-setting="remote-kept-out"]')
+      await kept.waitFor({ timeout: 15000 })
+      ok((await kept.innerText()).includes(d.name), 'with Remote Screen and Preview off, Studio\'s Settings lists it as kept out', (await kept.innerText()).replace(/\s+/g, ' '))
+      await kept.locator('li', { hasText: d.name }).getByRole('button', { name: 'Allow' }).click()
+      ok(!!(await until(async () => !(await studio.api('/remote')).access.devices.find((x) => x.id === d.id)?.out, 5000, 100)), 'and Allow there lets it back in')
+      await studio.api('/settings', { trials: { 'remote-screen': true } }, 'PATCH')
       await s.ctx.close()
       await ctx.close()
     } finally { await b.close() }

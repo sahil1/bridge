@@ -13,7 +13,7 @@
 // the record are this computer's own to see.
 import { useState } from 'react'
 import Icon from '../Icon.jsx'
-import { BASE, api, onThisComputer } from '../../api.js'
+import { BASE, api, onThisComputer, usePoll } from '../../api.js'
 import { useTrial } from '../../trials.js'
 import { t, locale } from '../../i18n/index.js'
 import { ACCESS } from '../../../shared/remote.js'
@@ -42,6 +42,45 @@ export function useControl(active = true) {
     } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
   return { on, here, data: r.data, error: r.error, busy, err, set, refresh: r.refresh }
+}
+
+// A device in Which Devices May Connect: its name, and for one through another of your computers, which.
+const deviceName = (d) => (d.through ? t('{name}, through {computer}', { name: whoOf({ by: d }), computer: d.through }) : whoOf({ by: d }))
+
+// With Remote Screen and Preview off, the devices you unticked here are still kept out of this
+// computer (server/remote.js): listed with Allow where the Beta Feature's settings would be, at this
+// computer only, which is where they're let back in.
+export function KeptOut() {
+  const here = onThisComputer()
+  const on = useTrial('remote-screen')
+  const { data, refresh } = usePoll('/remote', 15000, { enabled: here && !on })
+  const [err, setErr] = useState(null)
+  const out = (data?.access?.devices || []).filter((d) => d.out)
+  if (on || !here || !out.length) return null
+  const allow = async (id) => { setErr(null); try { await remoteDo(BASE, '/devices', { id, allowed: true }); refresh() } catch (e) { setErr(e.message) } }
+  return (
+    <section className="st-sec rs-settings" data-setting="remote-kept-out">
+      <h4>{t('Kept Out of This Computer')}</h4>
+      <p className="muted small">{t('You unticked these in Which Devices May Connect. They can\'t use this computer at all, with Remote Screen and Preview on or off.')}</p>
+      <ul className="rs-devices">
+        {out.map((d) => (
+          <li key={d.id}>
+            <span><Icon name={d.kind === 'computer' ? 'laptop' : 'phone'} size={12} /> {deviceName(d)} <span className="muted">{d.kind === 'computer' ? t('computer') : t('phone')}</span></span>
+            <button type="button" className="btn small" onClick={() => allow(d.id)}>{t('Allow')}</button>
+          </li>
+        ))}
+      </ul>
+      {err && <p className="error-text small" role="alert">{err}</p>}
+    </section>
+  )
+}
+// Under the Beta Feature, once it's off here: that the devices you unticked stay out.
+export function StaysOut() {
+  const here = onThisComputer()
+  const { data } = usePoll('/remote', 15000, { enabled: here })
+  const n = (data?.access?.devices || []).filter((d) => d.out).length
+  if (!here || !n) return null
+  return <p className="muted small ab-trial-go"><Icon name="lock" size={11} /> {n === 1 ? t('The device you unticked stays out of this computer while this is off. Settings › Account & Devices › Computers lets it back in.') : t('The {n} devices you unticked stay out of this computer while this is off. Settings › Account & Devices › Computers lets them back in.', { n })}</p>
 }
 
 // The Remote Access Password: set, changed or taken off here; elsewhere, whether there is one.
@@ -219,8 +258,9 @@ export function RemoteSettings() {
 
         <div className="rs-block" data-setting="remote-devices">
           <b>{t('Which Devices May Connect')}</b>
-          <p className="muted small">{t('Every phone paired with this computer and every computer linked to it, unless you untick it. One unticked can\'t use this computer at all: no agents, terminals, files, previews or screen, and what it has open here ends. A phone paired with another of your computers comes through that computer.')}</p>
-          {here && <p className="muted small">{t('Once a password, Ask Here First or an unticked device is set, a phone or computer paired after that starts unticked, and waits in Needs You: tick it here, or Allow it there, to let it in.')}</p>}
+          <p className="muted small">{t('Every phone paired with this computer and every computer linked to it, unless you untick it. One unticked can\'t use this computer at all, with Remote Screen and Preview on or off: no agents, terminals, files, previews or screen, and what it has open here ends.')}</p>
+          {here && <p className="muted small">{t('A device of another of your computers comes through that computer, which checks its own list first; once it has, it\'s listed here too, as coming through it, to untick here. It\'s known as a device paired here only if it paired with both using the same key, which a phone\'s browser and the Android app don\'t: untick it each way it comes.')}</p>}
+          {here && <p className="muted small">{t('Once you set a password or Ask Here First, or untick a device, a phone or computer paired after that starts New, and waits in Needs You while Remote Screen and Preview is on: tick it here, or Allow it there, to let it in.')}</p>}
           {!here ? null : ac.devices?.length
             ? (
               <ul className="rs-devices">
@@ -228,7 +268,7 @@ export function RemoteSettings() {
                   <li key={d.id}>
                     <label className="st-check">
                       <input type="checkbox" checked={d.allowed} disabled={!here} onChange={(e) => access('/devices', { id: d.id, allowed: e.target.checked })} />
-                      <span><Icon name={d.kind === 'computer' ? 'laptop' : 'phone'} size={12} /> {whoOf({ by: d })} <span className="muted">{d.kind === 'computer' ? t('computer') : t('phone')}</span>{d.fresh && !d.allowed && <span className="st-chip rs-new">{t('New')}</span>}</span>
+                      <span><Icon name={d.kind === 'computer' ? 'laptop' : 'phone'} size={12} /> {deviceName(d)} <span className="muted">{d.kind === 'computer' ? t('computer') : t('phone')}</span>{d.fresh && !d.allowed && <span className="st-chip rs-new">{t('New')}</span>}</span>
                     </label>
                     {d.locked && <span className="rs-locked small"><Icon name="lock" size={11} /> {t('Locked out until {time}', { time: clockOf(d.locked) })}</span>}
                     {d.locked && here && <button type="button" className="ghost-btn small" onClick={() => access(`/locks/${encodeURIComponent(d.id)}/clear`)}>{t('Unlock')}</button>}

@@ -39,11 +39,14 @@ const COOKIE_DAYS = 400 // as long as browsers keep one
 const PUBLIC_API = new Set(['/api/health'])
 
 // A file of the built UI in the folder ui (not its page, nor anything else here): public, and the
-// same for everyone with this version (letin.js lets a device not let in have these too).
+// same for everyone with this version (letin.js lets a device not let in have these too). Only as
+// it's named there: nothing encoded, no folder climbed, and never under /api/ or /m/ in any
+// capitals (the routes take those in any).
 export function builtFile(ui, p) {
   try {
-    if (p === '/' || p.endsWith('.html') || p.startsWith('/api/') || p.startsWith('/m/')) return false
-    const file = path.resolve(ui, `.${decodeURIComponent(p)}`)
+    const low = String(p).toLowerCase()
+    if (p === '/' || low.endsWith('.html') || low.startsWith('/api/') || low.startsWith('/m/') || /[%\\]|\/\.\.?(\/|$)/.test(p)) return false
+    const file = path.resolve(ui, `.${p}`)
     if (!file.startsWith(path.resolve(ui) + path.sep)) return false
     return fs.statSync(file).isFile()
   } catch { return false }

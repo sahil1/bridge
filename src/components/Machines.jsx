@@ -6,7 +6,7 @@ import { t, tx, locale, tn } from '../i18n/index.js'
 import { useDevicesName } from './settings/search.js'
 import { useTrial } from '../trials.js'
 import { viewScreen, canReach } from './remote/remote.js'
-import { RemoteSettings, useControl } from './remote/Settings.jsx'
+import { RemoteSettings, KeptOut, useControl } from './remote/Settings.jsx'
 
 // Your other devices (server/machines.js): Macs, Windows and Linux computers running Bridge AI,
 // linked to this one. The top bar's machine menu switches the window to one (its own Bridge AI,
@@ -645,6 +645,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
       </section>
 
       <RemoteSettings />
+      <KeptOut />
 
       {!readOnly && phoneOthers.length > 0 && (
         <section className="st-sec">

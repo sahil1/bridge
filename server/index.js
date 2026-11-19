@@ -236,12 +236,12 @@ const shutOut = (id) => {
 const remote = makeRemote({
   trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), thisName: () => relay.thisName(), os: machines.OS,
   hosted: () => !!relay.status().hosted, isDevPort, screenAllowed: () => (IS_MAC ? calls.screen() : Promise.resolve(null)),
-  devices: () => relay.status().devices, onBlocked: shutOut,
+  devices: () => relay.status().devices, byKey: (key) => relay.deviceByKey(key), onBlocked: shutOut,
   tell: (ev) => screenTell.tell(ev), onChange: () => screenTell.changed(), notifyTo: () => screenTell.notifyTo(), blockThere: (hop, id) => screenTell.blockThere(hop, id),
 })
 // ...and nothing else of this computer's for one not let in, from the first thing it asks (letin.js),
 // nor its notifications.
-const letIn = makeLetIn({ admits: (id) => remote.admits(id), turnedAway: (id) => remote.turnedAway(id), deviceOf: (id) => relay.deviceOf(id), thisName: () => relay.thisName(), ui: () => UI_DIR })
+const letIn = makeLetIn({ shutFor: (id, via) => remote.shutFor(id, via), turnedAway: (id) => remote.turnedAway(id), deviceOf: (id) => relay.deviceOf(id), thisName: () => relay.thisName(), ui: () => UI_DIR })
 push.keepOut((id) => !remote.admits(id))
 // A device of this computer's going on through it to another's screen: this computer's own list and lockout first.
 machines.usePassCheck((asker) => remote.mayPass(asker.id))
@@ -908,8 +908,9 @@ app.get('/api/transfers/here', tx(() => transfers.destinations()))
 // For the dialog: where it can go (here, or on the device it's sent to), how big it is, and
 // whether it goes through Bridge AI's relay (so much a day). to: it's sent there; from: it's
 // copied here from there.
-const remoteJson = async (id, u) => {
-  const r = await machines.exchange(id, { u })
+// (For a device of this computer's, the other computer is told which: it may keep that one out.)
+const remoteJson = async (id, u, req) => {
+  const r = await machines.exchange(id, { u, headers: machines.forDevice(req.headers['x-bridge-relay']) })
   const j = await r.json()
   if (r.status === 404 && j?.error === 'Not found' && !j.missing) throw Object.assign(new Error('Update Bridge AI on that device to copy files with it.'), { status: 409, code: 'update' })
   if (r.status >= 400) throw Object.assign(new Error(j?.error || `It answered ${r.status}`), { status: r.status })
@@ -923,8 +924,8 @@ app.get('/api/transfers/plan', tx(async (req) => {
   const pane = req.query.pane ? String(req.query.pane) : null
   const p = String(req.query.path || '')
   const [what, destinations] = await Promise.all([
-    pane ? (from ? remoteJson(from, `/api/agents/${encodeURIComponent(pane)}/tree?path=${encodeURIComponent(p)}`) : files.copyList(await rootOf(pane), p)) : null,
-    to ? remoteJson(to, '/api/transfers/here') : transfers.destinations(),
+    pane ? (from ? remoteJson(from, `/api/agents/${encodeURIComponent(pane)}/tree?path=${encodeURIComponent(p)}`, req) : files.copyList(await rootOf(pane), p)) : null,
+    to ? remoteJson(to, '/api/transfers/here', req) : transfers.destinations(),
   ])
   // A phone's copy to this computer goes through this computer's relay; a copy with another device,
   // through that one's.
@@ -2174,12 +2175,13 @@ const fromMachine = async (m, opts, ms) => {
   } finally { clearTimeout(t) }
 }
 const isOld = (r) => r.status === 404 && r.j?.error === 'Not found' && !r.j.missing
-async function mentionsElsewhere(q, n) {
+// by: for a device of this computer's, which (machines.forDevice), so the others may keep it out.
+async function mentionsElsewhere(q, n, by = []) {
   const out = { meetings: [], unreachable: [], update: [], from: [] }
   await Promise.all(machines.list().filter((m) => m.state === 'linked').map(async (m) => {
     if (!m.online) { out.unreachable.push(m.name); return }
     let r
-    try { r = await fromMachine(m, { u: `/api/meetings/mentions?here=1&n=${n}&q=${encodeURIComponent(q)}` }, MENTION_MS) } catch { out.unreachable.push(m.name); return }
+    try { r = await fromMachine(m, { u: `/api/meetings/mentions?here=1&n=${n}&q=${encodeURIComponent(q)}`, headers: by }, MENTION_MS) } catch { out.unreachable.push(m.name); return }
     if (isOld(r)) { out.update.push(m.name); return }
     if (r.status >= 400 || !Array.isArray(r.j?.meetings)) { out.unreachable.push(m.name); return }
     if (!r.j.agentText) out.update.push(m.name)
@@ -2196,7 +2198,7 @@ app.get('/api/meetings/mentions', wrap(async (req) => {
   const n = Math.min(30, Math.max(1, Number(req.query.n) || 8))
   const mine = meetings.mentionable(q, n).map((m) => ({ ...m, machine: null, device: null }))
   if (req.query.here) return { meetings: mine, agentText: true }
-  const there = await mentionsElsewhere(q, n)
+  const there = await mentionsElsewhere(q, n, machines.forDevice(req.headers['x-bridge-relay']))
   const all = [...mine, ...there.meetings].sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt))).slice(0, n)
   return { meetings: all, here: relay.thisName(), from: there.from, unreachable: there.unreachable, update: there.update, agentText: true }
 }))
@@ -2210,7 +2212,7 @@ app.post('/api/meetings/:id/for-agents', wrap(async (req) => {
   if (!m) throw Object.assign(new Error('That computer isn\'t linked to this one any more'), { status: 404 })
   const update = () => Object.assign(new Error(`Update Bridge AI on ${m.name} to mention its meetings here`), { status: 409, code: 'update' })
   let r
-  try { r = await fromMachine(m, { method: 'POST', u: `/api/meetings/${encodeURIComponent(req.params.id)}/for-agents?text=1` }, 20000) } catch { throw Object.assign(new Error(`${m.name} isn't reachable`), { status: 503, code: 'offline' }) }
+  try { r = await fromMachine(m, { method: 'POST', u: `/api/meetings/${encodeURIComponent(req.params.id)}/for-agents?text=1`, headers: machines.forDevice(req.headers['x-bridge-relay']) }, 20000) } catch { throw Object.assign(new Error(`${m.name} isn't reachable`), { status: 503, code: 'offline' }) }
   if (isOld(r)) throw update()
   if (r.status >= 400) throw Object.assign(new Error(r.j?.error || `${m.name} answered ${r.status}`), { status: r.status })
   if (typeof r.j?.text !== 'string') throw update()
@@ -3459,15 +3461,27 @@ const afterChange = (changed) => {
   fixes.noteRestart(settings.RESTART_KEYS.filter((k) => JSON.stringify(now[k]) !== atStart[k]))
   return { ok: true, changed, restart, settings: settingsView() }
 }
+// Remote Screen and Preview on or off is a guardrail too (with it on, a New device waits to be let
+// in: remote.js), so it's changed at this computer only, as the others are (remoteHere): never from
+// a device, another computer's window or through Tailscale, by either way of changing the settings.
+// What's compared is the setting as it would be saved, the very object written.
+const remoteTrialOf = (s) => JSON.stringify((s?.trials && typeof s.trials === 'object' && !Array.isArray(s.trials) ? s.trials['remote-screen'] : null) ?? null)
+const remoteTrialKept = (req, next) => { if (remoteTrialOf(next) !== remoteTrialOf(settings.readUser())) remoteHere(req) }
 app.get('/api/settings', wrap(() => settingsView()))
-app.patch('/api/settings', wrap((req) => {
-  if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) channelKept(req, settings.merged(settings.readUser(), req.body))
-  return afterChange(settings.patch(req.body || {}))
-}))
+app.patch('/api/settings', (req, res) => {
+  try {
+    if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
+      const next = settings.merged(settings.readUser(), req.body)
+      channelKept(req, next)
+      remoteTrialKept(req, next)
+    }
+    res.json(afterChange(settings.patch(req.body || {})))
+  } catch (e) { res.status(e.status >= 400 && e.status < 500 ? e.status : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) }) }
+})
 app.put('/api/settings/raw', async (req, res) => {
   try {
     const text = String(req.body?.text ?? '')
-    try { channelKept(req, JSON.parse(text)) } catch (e) { if (e.status) throw e }
+    try { const next = JSON.parse(text); channelKept(req, next); remoteTrialKept(req, next) } catch (e) { if (e.status) throw e }
     res.json(afterChange(settings.replaceRaw(text)))
   } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
@@ -5189,7 +5203,8 @@ const upgrades = [
 const onUpgrade = async (req, socket, head) => {
   if (!(await guard.upgrade(req)) || !pages.upgrade(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy() }
   if (!auth.upgrade(req)) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy() }
-  if (letIn.upgrade(req, socket, head)) return // a device not let in here (letin.js)
+  // A device not let in here (letin.js). Anything that goes wrong deciding: the socket goes, never the server.
+  try { if (letIn.upgrade(req, socket, head)) return } catch { return socket.destroy() }
   if (machines.isMachinePath(req.url)) return machines.upgrade(req, socket, head) // a terminal on another of your devices
   if (servePreview.isPath(req.url)) return servePreview.upgrade(req, socket, head).catch(() => socket.destroy()) // a project's app's hot reload, for another of your devices
   if (remote.isPath(req.url)) return remote.upgrade(req, socket, head) // this screen, seen from another of your devices
