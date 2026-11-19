@@ -51,7 +51,8 @@
 //                                            in ~/hooks.log)
 //     [edit-anywhere <path> <text>]          writes a file anywhere, as if your own settings allowed
 //                                            every edit: only its hooks can stop it
-//     [force-write <path> <text>]            writes <text> (\n a new line, \t a tab, {{ and }} brackets)
+//     [force-write <path> <text>]            writes <text> (\n a new line, \t a tab, \r a carriage
+//                                            return, {{ and }} brackets)
 //                                            to <path> in its folder, past its hooks and permissions,
 //                                            as if its hook never ran
 //     [edit-lines <path> <n>]                writes a file of n lines to <path> in its folder
@@ -336,7 +337,7 @@ function answerTurn(text) {
     // (As if its hook never ran: written whatever its checks would say.)
     for (const m of q.matchAll(/\[force-write ([^\s\]]+) ([^\]]+)\]/g)) {
       const f = path.resolve(process.cwd(), m[1])
-      try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${m[2].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\{\{/g, '[').replace(/\}\}/g, ']')}\n`); tried('force-write', true); out.push(`I wrote ${m[1]}.`) } catch (e) { tried('force-write', false); out.push(`I couldn't write ${m[1]}: ${e.code || e.message}.`) }
+      try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${m[2].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r').replace(/\{\{/g, '[').replace(/\}\}/g, ']')}\n`); tried('force-write', true); out.push(`I wrote ${m[1]}.`) } catch (e) { tried('force-write', false); out.push(`I couldn't write ${m[1]}: ${e.code || e.message}.`) }
     }
     // (As if your own settings allowed every edit: its hooks are all that stand in the way.)
     for (const m of q.matchAll(/\[edit-anywhere ([^\s\]]+) ([^\]]+)\]/g)) write(path.resolve(process.cwd(), m[1].replace(/^~/, home)), `${m[2]}\n`, m[1], 'edit-anywhere')

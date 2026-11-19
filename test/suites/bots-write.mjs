@@ -26,6 +26,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
 import { checks, until, sleep, browser, page, shot, phoneFaults, startModel, IS_WIN, ROOT } from '../lib/harness.mjs'
 import { botKit, openSettings, M, OWNER } from '../lib/bots.mjs'
 
@@ -367,6 +368,21 @@ try {
     fs.writeFileSync(path.join(g, 'guard.log'), '')
     const guard = spawnSync(process.execPath, [path.join(ROOT, 'server', 'botguard.mjs'), path.join(g, 'copy'), '--part', 'Hiring', '--log', path.join(g, 'guard.log')], { input: JSON.stringify({ tool_name: 'Write', tool_input: { file_path: path.join(g, 'copy', 'Hiring', 'a.md') } }), encoding: 'utf8', env: { ...process.env, BRIDGE_GUARD_KEY: 'a'.repeat(64) } })
     ok(guard.status === 2 && read(path.join(g, 'guard.log')) === '', 'its hook with no key file: nothing let through, whatever key its environment has', { status: guard.status, why: guard.stderr.trim().slice(0, 120) })
+    // With its key: that it ran and what it let through, as Bridge AI reads them (botwrite.js
+    // guardCheck, in a Node of its own with a data folder of the test's); a log that's empty says it
+    // never ran, and one that can't be read says neither (ran null, so "didn't run" is never claimed
+    // for a log taken away).
+    const key = 'b'.repeat(64)
+    fs.writeFileSync(path.join(g, 'guard.key'), key)
+    const a = path.join(g, 'copy', 'Hiring', 'a.md')
+    const withKey = spawnSync(process.execPath, [path.join(ROOT, 'server', 'botguard.mjs'), path.join(g, 'copy'), '--part', 'Hiring', '--log', path.join(g, 'guard.log'), '--key', path.join(g, 'guard.key')], { input: JSON.stringify({ tool_name: 'Write', tool_input: { file_path: a } }), encoding: 'utf8' })
+    fs.writeFileSync(path.join(g, 'empty.log'), '')
+    const readBack = (log) => {
+      const r = spawnSync(process.execPath, ['--input-type=module', '-e', `const bw = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'server', 'botwrite.js')).href)}); const c = await bw.guardCheck(process.argv[1], process.argv[2]); console.log(JSON.stringify({ ran: c.ran, wrote: c('w', process.argv[3]), asRan: c('ran', '') }))`, log, key, path.join(fs.realpathSync.native(path.dirname(a)), 'a.md')], { encoding: 'utf8', env: { ...process.env, BRIDGE_HOME: path.join(g, 'data') } })
+      try { return JSON.parse(r.stdout) } catch { return { error: (r.stderr || '').slice(0, 300) } }
+    }
+    const seen = { written: readBack(path.join(g, 'guard.log')), empty: readBack(path.join(g, 'empty.log')), gone: readBack(path.join(g, 'gone', 'guard.log')) }
+    ok(withKey.status === 0 && seen.written.ran === true && seen.written.wrote === true && seen.written.asRan === false && seen.empty.ran === false && seen.gone.ran === null, 'its hook writes down that it ran and what it let through; an empty log: it never ran; a log that can\'t be read: neither said', { status: withKey.status, seen })
     const it = await until(async () => (await needs()).find((x) => /sneak some in/.test(x.text)), 15000)
     if (it) await kit.api(`/bots/questions/${it.id}`, { send: false })
     // Your Claude Code's managed settings turning hooks off: no run that changes files starts.
@@ -388,6 +404,25 @@ try {
     ok(/^The folder guard didn't run, so nothing was changed: Claude Code didn't run it/.test(it?.warn || '') && it.write.guard?.ran === false, 'and Needs You says so, not that each file was refused', it && { warn: it.warn, guard: it.write.guard })
     if (it) await kit.api(`/bots/questions/${it.id}`, { send: false })
   })
+  // A folder in ~/Hiring that can be written in but not listed (a drop box, 0300): its copy can't
+  // have what's in it, so a new file there waits for you, yours too. (Windows: no such mode.)
+  if (!IS_WIN) {
+    await part('a folder it can\'t list', async () => {
+      const drop = H('drop')
+      fs.mkdirSync(drop, { recursive: true })
+      fs.writeFileSync(path.join(drop, 'already.md'), 'Someone else put this here.\n')
+      fs.chmodSync(drop, 0o300)
+      try {
+        await slack.ask({ user: OWNER.id, text: `${M} Hiring: drop a note [edit Hiring/drop/new.md A note] [answer Dropped.]` })
+        const w = await waitingOf('drop a note')
+        ok(w?.write?.held?.some((h) => h.why === 'unseen' && h.files.includes('drop/new.md')) && !fs.existsSync(path.join(drop, 'new.md')), 'a new file in a folder it can\'t list: it waits for you, yours too, and nothing is made', w?.write?.held)
+        if (w) await kit.api(`/bots/questions/${w.id}`, { send: false })
+      } finally {
+        fs.chmodSync(drop, 0o700)
+        fs.rmSync(drop, { recursive: true, force: true })
+      }
+    })
+  }
   await part('the screen, reworded, and AI Assist\'s unreadable answer', async () => {
     await slack.ask({ user: 'U0DANA', text: `${M} Hiring: clear out the Hiring folder please` })
     const a = await until(async () => (await needs()).find((x) => x.state === 'screened' && /clear out the Hiring/.test(x.text)), 20000)

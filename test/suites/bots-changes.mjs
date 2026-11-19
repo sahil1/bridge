@@ -42,6 +42,8 @@ git(APP, 'config', 'user.name', 'Tester')
 git(APP, 'config', 'user.email', 'tester@example.com')
 fs.writeFileSync(path.join(APP, 'README.md'), 'Hello wrold\n')
 fs.writeFileSync(path.join(APP, 'CHANGELOG.md'), '# Changes\n')
+// (A .gitattributes of its own, which a change may never alter: checked out with \r\n on Windows.)
+fs.writeFileSync(path.join(APP, '.gitattributes'), '*.txt text\n')
 git(APP, 'add', '-A')
 git(APP, 'commit', '-q', '-m', 'First')
 git(APP, 'remote', 'add', 'origin', ORIGIN)
@@ -191,6 +193,25 @@ try {
     ok([/\.claude\.\/settings\.json$/, /CLAUDE~1\/settings\.json$/, /\.mcp\.json:x$/].every((re) => refusedTop.some((p) => re.test(p))), 'and Claude Code\'s own files at its top by the names Windows gives them too (.claude., CLAUDE~1, .mcp.json:stream)', refusedTop)
     ok(fs.readFileSync(path.join(APP, 'README.md'), 'utf8') === 'Hello wrold\n' && git(APP, 'rev-parse', 'main') === MAIN, 'your checkout untouched')
     if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })
+  })
+
+  // ---------- Its .gitattributes, byte for byte ----------
+  // The repository's own .gitattributes rewritten by its agent past its hook: with a space (a
+  // non-breaking one) before its first rule, which git then doesn't read as that rule, nothing is
+  // taken; with \r\n for its line's end, nothing is taken either, but on Windows, where git checks
+  // files out so and reads the \r as nothing.
+  await part('its .gitattributes', async () => {
+    const tried = async (words, body) => {
+      await slack.ask({ user: 'U0DANA', text: `${M} ${words} [force-write .gitattributes ${body}] [edit README.md ${words}] [answer Done.]` })
+      const d = await draftOf(words)
+      const failed = (await timelineOf('b1', words)).find((e) => e.type === 'change.failed')
+      if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })
+      return failed?.error || ''
+    }
+    const nbsp = await tried('Spaced attributes', ' *.txt text')
+    ok(/git files were changed.*\.gitattributes was added or changed/.test(nbsp), 'a space before its first rule: nothing taken', nbsp)
+    const crlf = await tried('Windows line ends', '*.txt text\\r')
+    ok(IS_WIN ? !/git files were changed/.test(crlf) : /\.gitattributes was added or changed/.test(crlf), IS_WIN ? 'its line ending \\r\\n on Windows: the same file, taken' : 'its line ending \\r\\n off Windows: nothing taken', crlf)
   })
 
   // ---------- In Bridge AI ----------
