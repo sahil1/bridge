@@ -5094,7 +5094,7 @@ app.get('/api/bots/:id/channels', botsGuard, wrapBot(async (req) => {
 app.get('/api/bots/:id/bundle', botsGuard, (req, res) => {
   try {
     const b = botOr404(req.params.id)
-    const out = botsStore.bundleOf(b.id, desk.memory.list(b.id).filter((x) => x.state === 'kept').map(({ id, kind, of, ofName, text, state }) => ({ id, kind, of, ofName, text, state })))
+    const out = botsStore.bundleOf(b.id, desk.memory.list(b.id).filter((x) => x.state === 'kept').map(({ id, kind, of, ofName, text, state, private: priv, place }) => ({ id, kind, of, ofName, text, state, ...(priv ? { private: true, place } : {}) })))
     desk.record(b.id, 'settings.changed', { setting: 'exported', old: null, new: { memory: out.memory.length }, ...changedBy(req) })
     res.setHeader('content-type', 'application/json; charset=utf-8')
     res.setHeader('content-disposition', `attachment; filename="${b.name.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || b.id}.bridge-bot.json"`)
@@ -5108,6 +5108,8 @@ app.patch('/api/bots/:id/memory/:mid', botsGuard, wrapBot(async (req) => {
   const b = botOr404(req.params.id)
   const from = { device: deviceOfReq(req) }
   if (req.body?.keep === true) desk.memory.keep(b.id, req.params.mid, from)
+  // (A place's own learning, used everywhere: only when you say so.)
+  if (req.body?.widen === true) desk.memory.widen(b.id, req.params.mid, from)
   return req.body?.text !== undefined ? desk.memory.edit(b.id, req.params.mid, req.body.text, from) : desk.memory.list(b.id).find((x) => x.id === req.params.mid) || null
 }))
 app.delete('/api/bots/:id/memory/:mid', botsGuard, wrapBot(async (req) => { desk.memory.remove(botOr404(req.params.id).id, req.params.mid, { device: deviceOfReq(req) }); return { ok: true } }))

@@ -1395,6 +1395,7 @@ function eventLine(e) {
     case 'memory.proposed': return t('Would like to remember: “{text}”', { text: wordsOf(e.item?.text) })
     case 'memory.kept': return e.imported ? t('Imported with {n} things it remembers', { n: e.imported }) : e.device ? t('{name} kept in its memory, on {device}: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} kept in its memory: “{text}”', { name: by, text: wordsOf(e.item?.text) })
     case 'memory.edited': return e.device ? t('{name} changed what it remembers, on {device}, to: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} changed what it remembers to: “{text}”', { name: by, text: wordsOf(e.item?.text) })
+    case 'memory.widened': return t('{name} let this be used everywhere, not only where it was said: “{text}”', { name: by, text: wordsOf(e.item?.text) })
     case 'memory.deleted': return e.device ? t('{name} deleted from its memory, on {device}: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} deleted from its memory: “{text}”', { name: by, text: wordsOf(e.item?.text) })
     case 'change.proposed': return t('Changed {n} files on {branch}', { n: e.files?.length || 0, branch: e.branch || '' })
     case 'change.approved': return e.via === 'slack' ? t('{name} approved the change from Slack', { name: by }) : t('{name} approved the change', { name: by })
@@ -1708,8 +1709,12 @@ function TryIt({ d }) {
 // What it has learned: about itself in general, each channel, each person. Learnings come from
 // REMEMBER lines in its answers, your edits to its drafts and people saying "remember that…"; each
 // is kept only once you keep it, unless you said straight away. You see, edit and delete each one.
+// One from a direct message or a private channel is that place's: it always waits for you, says where
+// it came from, and is used only there until you use it everywhere.
 const SOURCE = () => ({ remember: t('from one of its answers'), edit: t('from your edit to a draft'), asked: t('someone asked it to remember'), owner: t('added by you'), import: t('imported') })
-function MemItem({ it, onSave, onDelete, onKeep, about = null }) {
+// (Where a place's own learning came from: a direct message with someone, or a private channel.)
+const fromPlace = (it) => (it.place?.kind === 'dm' ? t('Direct messages with {name}', { name: it.place.name || t('someone') }) : `#${it.ofName || it.of}`)
+function MemItem({ it, onSave, onDelete, onKeep, onWiden, about = null }) {
   const [edit, setEdit] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -1728,11 +1733,13 @@ function MemItem({ it, onSave, onDelete, onKeep, about = null }) {
           <div className="sb-mem-text">
             <span className="small">{about && <b>{about}: </b>}{it.text}</span>
             <span className="muted small">{[SOURCE()[it.source] || it.source, it.by && it.source !== 'owner' ? it.by : null, it.at ? ago(it.at) : null].filter(Boolean).join(' · ')}</span>
+            {it.private && <span className="small sb-mem-only">{it.place?.kind === 'dm' ? t('From a direct message with {name}: used only there until you use it everywhere.', { name: it.place.name || t('someone') }) : t('From {channel}, a private channel: used only there until you use it everywhere.', { channel: `#${it.ofName || it.of}` })}</span>}
           </div>
         )}
       {edit == null && (
         <div className="st-row sb-mem-acts">
           {onKeep && <button type="button" className="btn small" disabled={busy} onClick={() => run(onKeep)}><Icon name="check" size={12} /> {t('Keep')}</button>}
+          {onWiden && it.private && it.state === 'kept' && <button type="button" className="ghost-btn" disabled={busy} onClick={() => run(onWiden)}><Icon name="unlock" size={12} /> {t('Use everywhere')}</button>}
           <button type="button" className="ghost-btn" disabled={busy} onClick={() => setEdit(it.text)}><Icon name="edit" size={12} /> {t('Edit')}</button>
           <button type="button" className="ghost-btn danger" disabled={busy} onClick={() => run(onDelete)}><Icon name="trash" size={12} /> {it.state === 'proposed' ? t('Discard') : t('Delete')}</button>
         </div>
@@ -1763,6 +1770,7 @@ function Memory({ d, save, reload }) {
   const edit = (it) => (words) => done(() => api(`/bots/${d.id}/memory/${encodeURIComponent(it.id)}`, { method: 'PATCH', body: { text: words } }))
   const drop = (it) => () => done(() => api(`/bots/${d.id}/memory/${encodeURIComponent(it.id)}`, { method: 'DELETE' }))
   const keep = (it) => () => done(() => api(`/bots/${d.id}/memory/${encodeURIComponent(it.id)}`, { method: 'PATCH', body: { keep: true } }))
+  const widen = (it) => () => done(() => api(`/bots/${d.id}/memory/${encodeURIComponent(it.id)}`, { method: 'PATCH', body: { widen: true } }))
   const proposed = items.filter((i) => i.state === 'proposed')
   const kept = items.filter((i) => i.state !== 'proposed')
   // Kept items in groups: about it in general, about each channel, about each person.
@@ -1774,7 +1782,8 @@ function Memory({ d, save, reload }) {
     for (const i of kept.filter((y) => y.kind === k)) { if (!by.has(i.of)) by.set(i.of, []); by.get(i.of).push(i) }
     for (const [id, list] of by) {
       const name = list.find((i) => i.ofName)?.ofName || id
-      groups.push({ key: `${k}:${id}`, title: k === 'channel' ? t('About #{channel}', { channel: name }) : t('About {name}', { name }), list })
+      const dm = list.find((i) => i.place?.kind === 'dm')
+      groups.push({ key: `${k}:${id}`, title: dm ? fromPlace(dm) : k === 'channel' ? t('About #{channel}', { channel: name }) : t('About {name}', { name }), list })
     }
   }
   // Whom a new item can be about: its channels, and the people it knows (those named, you, and the
@@ -1810,7 +1819,7 @@ function Memory({ d, save, reload }) {
           <p className="small sb-sub"><b>{t('Waiting for you')}</b></p>
           <ul className="sb-mem">
             {proposed.map((it) => (
-              <MemItem key={it.id} it={it} about={it.kind === 'channel' ? `#${it.ofName || it.of}` : it.kind === 'person' ? it.ofName || it.of : null} onSave={edit(it)} onDelete={drop(it)} onKeep={keep(it)} />
+              <MemItem key={it.id} it={it} about={it.private ? fromPlace(it) : it.kind === 'channel' ? `#${it.ofName || it.of}` : it.kind === 'person' ? it.ofName || it.of : null} onSave={edit(it)} onDelete={drop(it)} onKeep={keep(it)} />
             ))}
           </ul>
         </>
@@ -1818,7 +1827,7 @@ function Memory({ d, save, reload }) {
       {groups.map((g) => (
         <div key={g.key} className="sb-mem-group">
           <p className="small sb-sub"><b>{g.title}</b></p>
-          <ul className="sb-mem">{g.list.map((it) => <MemItem key={it.id} it={it} onSave={edit(it)} onDelete={drop(it)} />)}</ul>
+          <ul className="sb-mem">{g.list.map((it) => <MemItem key={it.id} it={it} onSave={edit(it)} onDelete={drop(it)} onWiden={widen(it)} />)}</ul>
         </div>
       ))}
       {x && !items.length && <p className="small sb-none">{t('Nothing yet.')}</p>}

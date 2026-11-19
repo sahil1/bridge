@@ -394,7 +394,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   const fresh = () => ({ questions: new Map(), convs: new Map(), keys: new Set(), next: 1, versions: new Set(), memAsked: new Map(), changes: [], posted: new Map() })
   // Changes to it that aren't part of a conversation (its settings, its memory, someone's running
   // context, its record deleted): the latest, for Activity, each with who made it and on which device.
-  const CHANGED = new Set(['settings.changed', 'memory.kept', 'memory.edited', 'memory.deleted', 'context.kept', 'context.dropped', 'context.forgotten', 'trace.deleted'])
+  const CHANGED = new Set(['settings.changed', 'memory.kept', 'memory.edited', 'memory.deleted', 'memory.widened', 'context.kept', 'context.dropped', 'context.forgotten', 'trace.deleted'])
   function apply(st, e) {
     if (!e.conv && CHANGED.has(e.type)) { st.changes.push(e); if (st.changes.length > 50) st.changes.shift() }
     if (e.type === 'received') {
@@ -787,13 +787,21 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
 
   // ---------- Memory ----------
   // A learning proposed: kept straight away when you said so, else waiting for you (in Settings ›
-  // Bots › Memory and your Slack direct messages). Memory off: none is kept.
+  // Bots › Memory and your Slack direct messages). Memory off: none is kept. One for anywhere that
+  // comes from a direct message or a private channel (your edit to a draft there, its agent's
+  // REMEMBER) holds what was said there: it's that place's, waits for you whatever the setting, and
+  // is used only there until you say it may be used everywhere (botmemory.js widen).
   function propose(id, x) {
     const b = bots.get(id)
     const bot = botOf(id)
     if (!b || !bot || bot.memory === 'off') return null
+    const q = x.q
+    const priv = x.kind === 'bot' && !!q && !q.try && !isPublic(q.place)
+    const dm = q?.place?.kind === 'dm'
+    const y = priv ? { ...x, kind: 'channel', of: q.channel, ofName: dm ? null : q.place?.name || null, private: true, place: { kind: dm ? 'dm' : 'channel', name: dm ? q.from?.name || null : q.place?.name || null } } : x
+    const keep = bot.memory === 'auto' && !priv
     let r
-    try { r = b.memory.add({ ...x, keep: bot.memory === 'auto', by: bot.memory === 'auto' ? 'kept straight away' : null }) } catch (e) { record(id, 'memory.proposed', { ...(x.q ? at(x.q) : {}), ok: false, error: e.message }); return null }
+    try { r = b.memory.add({ ...y, keep, by: keep ? 'kept straight away' : null }) } catch (e) { record(id, 'memory.proposed', { ...(x.q ? at(x.q) : {}), ok: false, error: e.message }); return null }
     if (!r.added) return r.item
     const item = pub(r.item)
     record(id, 'memory.proposed', { ...(x.q ? at(x.q) : {}), item, by: x.by || null })
@@ -802,7 +810,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     changed()
     return r.item
   }
-  const pub = (x) => ({ id: x.id, kind: x.kind, of: x.of, ofName: x.ofName, text: x.text, source: x.source, state: x.state })
+  const pub = (x) => ({ id: x.id, kind: x.kind, of: x.of, ofName: x.ofName, text: x.text, source: x.source, state: x.state, ...(x.private ? { private: true, place: x.place } : {}) })
+  // Where a place's own learning came from, as your Slack direct messages say it.
+  const placeSaid = (x) => (x.place?.kind === 'dm' ? `a direct message with ${x.place.name || 'someone'}` : `#${x.ofName || x.of}`)
   // "@bot remember that …": about them when it's about "I" or "my", else about the channel (or them,
   // in a direct message).
   function teach(id, q, words) {
@@ -819,7 +829,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (!bot?.owner || !b?.channel?.askOwner || !slackUp(b)) return
     if (item.from?.conv && platOf(item.from.conv) !== 'slack') return // (asked in Discord or Teams: kept or not in Settings)
     try {
-      const h = await b.channel.askOwner(bot.owner, { kind: 'memory', memory: `${id}/${item.id}`, bot: bot.name, text: item.text, about: item.kind === 'person' ? item.ofName || 'someone' : item.kind === 'channel' ? `#${item.ofName || item.of}` : null })
+      const h = await b.channel.askOwner(bot.owner, { kind: 'memory', memory: `${id}/${item.id}`, bot: bot.name, text: item.text, about: item.private ? `${placeSaid(item)}, used only there` : item.kind === 'person' ? item.ofName || 'someone' : item.kind === 'channel' ? `#${item.ofName || item.of}` : null })
       record(id, 'approval.asked', { memory: item.id, via: 'slack', channel: h.channel, ts: h.ts })
     } catch (e) { record(id, 'approval.failed', { memory: item.id, error: oneLine(e.message, 300) }) }
   }
@@ -833,6 +843,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const from = device ? { device } : {}
     if (act === 'keep') { const r = b.memory.keep(mid, by); if (r.changed) { record(id, 'memory.kept', { item: pub(r.item), by, via, ...from }); settle('kept') } return r.item }
     if (act === 'edit') { const r = b.memory.edit(mid, text, by); if (r.changed) record(id, 'memory.edited', { item: pub(r.item), before: r.before, by, via, ...from }); return r.item }
+    // (A place's own, used everywhere from now: only ever because you said so.)
+    if (act === 'widen') { const was = b.memory.get(mid); const place = was?.private ? { kind: was.place?.kind || 'channel', of: was.of, name: was.place?.name || was.ofName || null } : null; const r = b.memory.widen(mid, by); if (r.changed) record(id, 'memory.widened', { item: pub(r.item), from: place, by, via, ...from }); return r.item }
     if (act === 'drop') { const x = b.memory.remove(mid); record(id, 'memory.deleted', { item: pub(x), by, via, ...from }); settle('discarded'); return x }
     throw new Error(`No such thing to do: ${act}`)
   }
@@ -1937,13 +1949,14 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       keep: (id, mid, o = {}) => memoryAct(id, mid, 'keep', o),
       edit: (id, mid, text, o = {}) => memoryAct(id, mid, 'edit', { ...o, text }),
       remove: (id, mid, o = {}) => memoryAct(id, mid, 'drop', o),
+      widen: (id, mid, o = {}) => memoryAct(id, mid, 'widen', o),
       // Brought in with a bot from another computer: kept as they were there.
       bring(id, items) {
         const b = bots.get(id)
         if (!b) return 0
         let n = 0
         for (const x of items || []) {
-          try { const r = b.memory.add({ kind: x.kind, of: x.of, ofName: x.ofName, text: x.text, source: 'import', keep: x.state !== 'proposed', by: 'imported' }); if (r.added) n++ } catch { /* not a memory */ }
+          try { const r = b.memory.add({ kind: x.kind, of: x.of, ofName: x.ofName, text: x.text, source: 'import', keep: x.state !== 'proposed', by: 'imported', private: x.private === true, place: x.place || null }); if (r.added) n++ } catch { /* not a memory */ }
         }
         if (n) record(id, 'memory.kept', { item: null, imported: n, by: you() })
         return n

@@ -32,3 +32,6 @@
   .bcv-open { margin-left: 4px; }
 }
 :is(.modal.settings.phone, .bp.phone) .sb :is(.bcv-head, .bcv-ran summary) { min-height: 40px; }
+
+/* A learning that's one place's own (Memory, settings/Bots.jsx): where it came from. */
+.sb-mem-only { color: var(--ink-2); }

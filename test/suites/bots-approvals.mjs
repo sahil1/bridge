@@ -315,11 +315,17 @@ try {
     await slack.ask({ user: 'U0DANA', dm: true, text: 'Which floor is support on? [answer The third floor.]' })
     await send('Which floor is support on', 'The third floor, by the lifts.')
     await postedLike(/by the lifts/)
-    // (Your edit is offered as a learning of its own, kept at once here: not what this is about.)
-    for (const x of (await mem()).filter((y) => y.source === 'edit' && /Which floor/.test(y.text))) await kit.api(`/bots/b1/memory/${x.id}`, null, 'DELETE')
+    // Your edit there is offered as a learning: that direct message's own, waiting for your Keep even
+    // with learnings kept straight away, and never given anywhere else.
+    const fix = await until(async () => (await mem()).find((y) => y.source === 'edit' && /Which floor/.test(y.text)), 8000)
+    ok(fix?.state === 'proposed' && fix.private === true && fix.kind === 'channel' && fix.of === 'D0DANA' && fix.place?.kind === 'dm' && fix.place.name === 'Dana', 'your correction of a draft in a direct message: that place\'s own, waiting for your Keep, though learnings are kept straight away', fix)
+    const asked = await until(() => dmOf('used only there'), 10000)
+    ok(/a direct message with Dana, used only there/.test(JSON.stringify(asked?.blocks || [])) && /Which floor/.test(JSON.stringify(asked?.blocks || [])), 'your Slack DM asks, saying where it came from', asked?.blocks)
+    await kit.api(`/bots/b1/memory/${fix.id}`, { keep: true }, 'PATCH')
     await slack.ask({ user: 'U0DANA', dm: true, text: 'Is it open at lunch? [answer Yes, all day.]' })
     const s2 = await startOf('Is it open at lunch')
     ok(/----- earlier turns -----\nDana: Which floor is support on\? \[answer The third floor\.\]\nyou \(Helpdesk\): The third floor, by the lifts\.\n----- end of earlier turns -----/.test(briefOf(s2)) && !s2.args.join(' ').includes('--fork-session'), 'a direct message, one running conversation: its earlier turns given from the record, the answer as it was sent', briefOf(s2).slice(0, 1600))
+    ok(/----- memory -----[^]*Which floor is support on[^]*----- end of memory -----/.test(briefOf(s2)), 'the correction you kept, given in that direct message', briefOf(s2).slice(0, 1600))
     await send('Is it open at lunch')
     const lunch = await postedLike(/Yes, all day/)
     ok(lunch?.channel === 'D0DANA' && !lunch.thread_ts, 'answered plainly in the direct message', lunch)
@@ -327,7 +333,7 @@ try {
     // Asked in a public channel: what she said in her direct messages isn't given there.
     await slack.ask({ user: 'U0DANA', text: `${M} Where do I get a badge? [answer At reception.]` })
     const s3 = await startOf('Where do I get a badge')
-    ok(earlier(s3) === null && !/third floor/.test(briefOf(s3)), 'in a channel, nothing from her direct messages', briefOf(s3).slice(0, 1200))
+    ok(earlier(s3) === null && !/third floor/.test(briefOf(s3)), 'in a public channel, nothing from her direct messages: not her running context, nor your kept correction', briefOf(s3).slice(0, 1200))
     await send('Where do I get a badge')
     await postedLike(/At reception/)
     // Someone else: never hers.
@@ -415,6 +421,11 @@ try {
       }
       await shot(p, `${tag}bots-approvals-memory-${mode}${phone ? '-phone' : ''}`)
       if (mode === 'light' && !phone) {
+        // A direct message's own learning: where it came from, and used everywhere only once you say so.
+        const only = box.locator('li', { hasText: 'Which floor is support on' })
+        ok(/From a direct message with Dana: used only there until you use it everywhere/.test(await only.innerText()), 'Memory: a correction from a direct message says it\'s used only there', await only.innerText())
+        await only.getByRole('button', { name: 'Use everywhere' }).click()
+        ok(!!(await until(async () => { const x = (await mem()).find((y) => /Which floor/.test(y.text)); return x?.kind === 'bot' && !x.private }, 8000)) && events().some((e) => e.type === 'memory.widened' && e.from?.kind === 'dm' && e.by === 'Tester'), 'Use everywhere: yours to say, and in the record')
         // Kept from the page, and one edited there.
         const row = box.locator('li', { hasText: 'printer is on floor 2' })
         await row.getByRole('button', { name: 'Keep' }).click()
