@@ -9,7 +9,8 @@
 //   Who may ask, by Teams' people, and you in Teams. A message in a chat with the bot and a mention
 //   in a channel: one read-only agent briefed as a bot in Microsoft Teams, its draft in Needs You,
 //   sent as a reply in that chat or that post's thread ("typing…" for 👀, no reactions); a reply in
-//   that thread without a mention goes on from that answer. Refused, with no agent started: someone
+//   that thread without a mention goes on from that answer. Answering in the channel (Answer In), a
+//   post of its own there. Refused, with no agent started: someone
 //   not named, a guest, someone from another organization, someone Teams didn't say who they are;
 //   a message not signed by Microsoft for this bot never heard, and counted in Settings. !help says
 //   how to ask in Teams; !what do you know about me only to them, in a chat of their own. Every
@@ -28,7 +29,8 @@ const kit = await startKit('teams-bot', {
   config: { name: 'Tester', trials: { 'slack-bot': true } },
   env: ({ home }) => {
     fs.mkdirSync(path.join(home, 'pricing'), { recursive: true })
-    return { BRIDGE_TEAMS_URL: tm.url, BRIDGE_TEAMS_PORT: '0', BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_BOT_HOLD_MS: '3000' }
+    // (Each question its own conversation: the same person asking again soon after carries none on.)
+    return { BRIDGE_TEAMS_URL: tm.url, BRIDGE_TEAMS_PORT: '0', BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_BOT_HOLD_MS: '3000', BRIDGE_BOT_CARRY_MS: '0' }
   },
 })
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'helper-claude.cjs'), 'utf8'))
@@ -46,7 +48,7 @@ try {
   await kit.api('/setup', { name: 'Tester' })
   await kit.api('/agents/catalog')
   await kit.api('/bots', { name: 'Atlas' })
-  await kit.api('/bots/b1/settings', { readsFrom: ['~/pricing'] })
+  await kit.api('/bots/b1/settings', { readsFrom: ['~/pricing'], answerIn: 'thread' })
 
   // ---------- Set up in Settings ----------
   let port = null
@@ -129,6 +131,17 @@ try {
     const d3 = await draftOf('what time')
     await kit.api(`/bots/questions/${encodeURIComponent(d3.id)}`, { send: true })
     ok((await postedLike(/At 10/))?.conversation === `${CHANNEL};messageid=${q2.id}`, 'in the same thread')
+  })
+
+  // ---------- Answer In: The Channel ----------
+  await part('answered in the channel', async () => {
+    await kit.api('/bots/b1/settings', { answerIn: 'channel' })
+    const q = await tm.say({ user: 'dana', kind: 'channel', mention: true, text: 'is the demo ready? [answer Yes, since Monday.]' })
+    const d = await draftOf('demo ready')
+    await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: true })
+    const p = await postedLike(/since Monday/)
+    ok(p?.newPost === true && p.channel === CHANNEL && p.conversation !== `${CHANNEL};messageid=${q.id}`, 'The Channel: a post of its own in the channel, not a reply in the question\'s reply chain', p)
+    await kit.api('/bots/b1/settings', { answerIn: 'thread' })
   })
 
   // ---------- Refused, and turned away ----------

@@ -479,7 +479,8 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   // What comes in: a mention of the bot in a channel, a direct message to it, a reply in a thread
   // (the desk keeps only those in threads it answers in), or a message at the top of a channel it
   // answers without a mention, from a person; an edit or deletion; its Home tab opened; Stop
-  // pressed. A thread's reply goes in that thread, a channel's message in a thread of its own, a
+  // pressed. A thread's reply goes in that thread, a channel's message in a thread of its own or,
+  // where the bot answers in the channel (its Answer In: the desk picks), in the channel (top), a
   // direct message plainly back.
   async function heard(e, { late = false, team = null } = {}) {
     if (!e || !hear) return
@@ -518,6 +519,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       at: new Date(Number(e.ts) * 1000).toISOString(),
       late,
       reply: { channel: e.channel, thread: dm && !e.thread_ts ? null : e.thread_ts || e.ts, user: e.user },
+      ...(!dm && !thread ? { top: { channel: e.channel, thread: null, user: e.user } } : {}),
     })
   }
   // An edit or a deletion, handed over as one (the desk keeps those in its threads).
@@ -639,8 +641,9 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   }
 
   // A question put through /<name> or the shortcut: posted where it was asked, as the bot, so the
-  // conversation shows it, then handed over as a mention is, its answer in that post's thread (the
-  // shortcut's in the message's own thread). { ts } back, or why not.
+  // conversation shows it, then handed over as a mention is, its answer in that post's thread, or in
+  // the channel where the bot answers there (the shortcut's in the message's own thread). { ts }
+  // back, or why not.
   async function asked({ user, team, channel, thread = null, text, via = 'shortcut', command = null }) {
     if (!hear || !channel || !USER.test(String(user?.id || ''))) return { error: 'Slack didn\'t say who or where' }
     const dmd = String(channel).startsWith('D')
@@ -661,6 +664,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       text: plainText(text, { bot: kept.bot?.userId, names }),
       place, at: new Date(Number(posted.ts) * 1000).toISOString(), late: false,
       reply: { channel, thread: top, user: user.id },
+      ...(!dmd && !thread ? { top: { channel, thread: null, user: user.id } } : {}),
     })?.catch?.((e) => say({ what: 'event', ok: false, why: e.message }))
     return { ts: posted.ts }
   }

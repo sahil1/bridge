@@ -9,6 +9,7 @@ import AiAssist from '../AiAssist.jsx'
 import { Connections, BotReach } from '../bots/Connections.jsx'
 import Access, { AccessLine } from '../bots/Access.jsx'
 import { accessSaid } from '../bots/access.js'
+import Conversations, { AnswerIn } from '../bots/Conversations.jsx'
 import { t } from '../../i18n/index.js'
 import './bots.css'
 
@@ -18,7 +19,7 @@ import './bots.css'
 // it, replying in its threads, with its /command or the message shortcut, each question answered by
 // an agent that can only read (server/frontdesk.js) and the answer waiting in Needs You, and in your
 // Slack direct messages, for you to send, edit or discard. At the top, your bots and New Bot (from
-// a template, or a bot exported elsewhere). For the one picked, four tabs:
+// a template, or a bot exported elsewhere). For the one picked, five tabs:
 //   Set Up: whether it's connected and, when it isn't, why (and when its Slack app needs the new
 //     manifest); pausing it; its name and description, which are its name in Slack, and its export;
 //     making the app (the manifest to paste, the two tokens) and connecting it; you in Slack (whose
@@ -27,6 +28,8 @@ import './bots.css'
 //     pull request, after you approve the diff or at once); the limits for each person; the channels
 //     it answers in without a mention, and those it's muted in; how answers go, which agent answers,
 //     and a note when that agent answers through a personal plan; and its scheduled posts.
+//   Conversations: everyone it talked with and everywhere, one row each, each opening to its turns
+//     and what ran for them, and a person's running context (bots/Conversations.jsx).
 //   Try It: a question asked here as someone would in Slack, its draft, what it read and its record,
 //     with nothing sent to Slack.
 //   Memory: what it has learned, about itself, each channel and each person, the learnings waiting
@@ -1321,6 +1324,7 @@ function SetUp({ d, save, reload, onDelete, again, access = true }) {
         </>
       )}
       <Channels d={d} save={save} />
+      <AnswerIn d={d} save={save} />
       {access && <Answerers d={d} save={save} />}
       <Replies d={d} save={save} />
       <Scheduled d={d} reload={reload} />
@@ -1357,12 +1361,13 @@ function eventLine(e) {
                   : e.how === 'try' ? t('{name} asked in Try It: “{text}”', { name: who, text })
                     : e.how === 'command' ? t('{name} gave it a command: {text}', { name: who, text })
                       : t('{name} mentioned it: “{text}”', { name: who, text })
-      return e.files?.length ? `${line} ${t('(with {files})', { files: e.files.map((f) => f.name).join(', ') })}` : line
+      const on = e.carried ? `${line} ${t('(carrying on the conversation)')}` : line
+      return e.files?.length ? `${on} ${t('(with {files})', { files: e.files.map((f) => f.name).join(', ') })}` : on
     }
     case 'refused': return t('Refused: {why}', { why: REFUSED()[e.why] || e.why })
     case 'queued': return t('Waiting its turn, behind {n} of their questions', { n: e.ahead ?? 1 })
     case 'context': return e.problem ? t('Read the conversation: {why}', { why: e.problem }) : t('Read {n} earlier messages and {pins} pinned, as context', { n: e.messages?.length || 0, pins: e.pins?.length || 0 })
-    case 'run.started': return t('{agent} started, reading {folders}{from}; instructions {version} from {source}', { agent: e.answerer?.label || (e.agent === 'codex' ? 'Codex' : e.agent === 'model' ? e.model || '' : 'Claude Code'), folders: e.folders?.length ? e.folders.join(', ') : t('no folders'), from: e.from ? t(', going on from its earlier conversation') : '', version: e.instructions?.hash || '', source: e.instructions?.source === 'file' ? e.instructions.path : t('Settings') }) + (e.instructions?.problem ? ` (${e.instructions.problem})` : '')
+    case 'run.started': return t('{agent} started, reading {folders}{from}; instructions {version} from {source}', { agent: e.answerer?.label || (e.agent === 'codex' ? 'Codex' : e.agent === 'model' ? e.model || '' : 'Claude Code'), folders: e.folders?.length ? e.folders.join(', ') : t('no folders'), from: e.from ? t(', going on from its earlier conversation') : '', version: e.instructions?.hash || '', source: e.instructions?.source === 'file' ? e.instructions.path : t('Settings') }) + (e.instructions?.problem ? ` (${e.instructions.problem})` : '') + (e.earlier?.problem ? ` (${e.earlier.problem})` : '')
     case 'run.read': return t('Opened {files}', { files: (e.files || []).map((f) => f.what).join(', ') })
     case 'run.tools': return t('Used the MCP tools {tools}', { tools: (e.tools || []).map((x) => `${x.server}: ${x.tool}${x.n > 1 ? ` ×${x.n}` : ''}`).join(', ') })
     case 'run.skipped': return t('{name} passed over: {why}', { name: e.answerer?.label || e.answerer?.id || '', why: e.why || '' })
@@ -1398,12 +1403,17 @@ function eventLine(e) {
     case 'memory.proposed': return t('Would like to remember: “{text}”', { text: wordsOf(e.item?.text) })
     case 'memory.kept': return e.imported ? t('Imported with {n} things it remembers', { n: e.imported }) : e.device ? t('{name} kept in its memory, on {device}: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} kept in its memory: “{text}”', { name: by, text: wordsOf(e.item?.text) })
     case 'memory.edited': return e.device ? t('{name} changed what it remembers, on {device}, to: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} changed what it remembers to: “{text}”', { name: by, text: wordsOf(e.item?.text) })
+    case 'memory.widened': return t('{name} let this be used everywhere, not only where it was said: “{text}”', { name: by, text: wordsOf(e.item?.text) })
     case 'memory.deleted': return e.device ? t('{name} deleted from its memory, on {device}: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} deleted from its memory: “{text}”', { name: by, text: wordsOf(e.item?.text) })
     case 'change.proposed': return t('Changed {n} files on {branch}', { n: e.files?.length || 0, branch: e.branch || '' })
     case 'change.approved': return e.via === 'slack' ? t('{name} approved the change from Slack', { name: by }) : t('{name} approved the change', { name: by })
     case 'change.failed': return t('The change couldn\'t go through ({step}): {why}', { step: e.step || '', why: e.error || '' })
     case 'pr.opened': return t('Opened a draft pull request')
     case 'file.uploaded': return e.ok === false ? t('Couldn\'t send the file {name}: {why}', { name: e.name, why: e.error || '' }) : t('Sent the file {name} ({size})', { name: e.name, size: sizeOf(e.size) })
+    case 'context.noted': return e.ok === false ? t('Couldn\'t keep this in {name}\'s running context: {why}', { name: who, why: e.error || '' }) : e.state === 'kept' ? t('Kept in {name}\'s running context', { name: who }) : t('In {name}\'s running context once you keep it', { name: who })
+    case 'context.kept': return t('{name} kept {n} of {person}\'s conversations in their running context', { name: by, n: e.n ?? 0, person: who })
+    case 'context.dropped': return t('{name} let go of {n} of {person}\'s conversations', { name: by, n: e.n ?? 0, person: who })
+    case 'context.forgotten': return t('{name} forgot {person}\'s running context', { name: by, person: who })
     case 'forgotten': return t('{name} asked it to forget them: {memory} things it remembered deleted, their words blanked in {events} events', { name: who, memory: e.memory ?? 0, events: e.events ?? 0 })
     case 'status': return e.ok === false ? t('Couldn\'t set Slack\'s working status: {why}', { why: e.error || '' }) : e.on ? t('Showed Slack\'s working status') : t('Cleared Slack\'s working status')
     case 'trace.deleted': return e.all ? (e.device ? t('Its activity history was deleted, on {device}', { device: e.device }) : t('Its activity history was deleted')) : t('Months deleted for their age: {months}', { months: (e.months || []).join(', ') })
@@ -1707,8 +1717,12 @@ function TryIt({ d }) {
 // What it has learned: about itself in general, each channel, each person. Learnings come from
 // REMEMBER lines in its answers, your edits to its drafts and people saying "remember that…"; each
 // is kept only once you keep it, unless you said straight away. You see, edit and delete each one.
+// One from a direct message or a private channel is that place's: it always waits for you, says where
+// it came from, and is used only there until you use it everywhere.
 const SOURCE = () => ({ remember: t('from one of its answers'), edit: t('from your edit to a draft'), asked: t('someone asked it to remember'), owner: t('added by you'), import: t('imported') })
-function MemItem({ it, onSave, onDelete, onKeep, about = null }) {
+// (Where a place's own learning came from: a direct message with someone, or a private channel.)
+const fromPlace = (it) => (it.place?.kind === 'dm' ? t('Direct messages with {name}', { name: it.place.name || t('someone') }) : `#${it.ofName || it.of}`)
+function MemItem({ it, onSave, onDelete, onKeep, onWiden, about = null }) {
   const [edit, setEdit] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -1727,11 +1741,13 @@ function MemItem({ it, onSave, onDelete, onKeep, about = null }) {
           <div className="sb-mem-text">
             <span className="small">{about && <b>{about}: </b>}{it.text}</span>
             <span className="muted small">{[SOURCE()[it.source] || it.source, it.by && it.source !== 'owner' ? it.by : null, it.at ? ago(it.at) : null].filter(Boolean).join(' · ')}</span>
+            {it.private && <span className="small sb-mem-only">{it.place?.kind === 'dm' ? t('From a direct message with {name}: used only there until you use it everywhere.', { name: it.place.name || t('someone') }) : t('From {channel}, a private channel: used only there until you use it everywhere.', { channel: `#${it.ofName || it.of}` })}</span>}
           </div>
         )}
       {edit == null && (
         <div className="st-row sb-mem-acts">
           {onKeep && <button type="button" className="btn small" disabled={busy} onClick={() => run(onKeep)}><Icon name="check" size={12} /> {t('Keep')}</button>}
+          {onWiden && it.private && it.state === 'kept' && <button type="button" className="ghost-btn" disabled={busy} onClick={() => run(onWiden)}><Icon name="unlock" size={12} /> {t('Use everywhere')}</button>}
           <button type="button" className="ghost-btn" disabled={busy} onClick={() => setEdit(it.text)}><Icon name="edit" size={12} /> {t('Edit')}</button>
           <button type="button" className="ghost-btn danger" disabled={busy} onClick={() => run(onDelete)}><Icon name="trash" size={12} /> {it.state === 'proposed' ? t('Discard') : t('Delete')}</button>
         </div>
@@ -1762,6 +1778,7 @@ function Memory({ d, save, reload }) {
   const edit = (it) => (words) => done(() => api(`/bots/${d.id}/memory/${encodeURIComponent(it.id)}`, { method: 'PATCH', body: { text: words } }))
   const drop = (it) => () => done(() => api(`/bots/${d.id}/memory/${encodeURIComponent(it.id)}`, { method: 'DELETE' }))
   const keep = (it) => () => done(() => api(`/bots/${d.id}/memory/${encodeURIComponent(it.id)}`, { method: 'PATCH', body: { keep: true } }))
+  const widen = (it) => () => done(() => api(`/bots/${d.id}/memory/${encodeURIComponent(it.id)}`, { method: 'PATCH', body: { widen: true } }))
   const proposed = items.filter((i) => i.state === 'proposed')
   const kept = items.filter((i) => i.state !== 'proposed')
   // Kept items in groups: about it in general, about each channel, about each person.
@@ -1773,7 +1790,8 @@ function Memory({ d, save, reload }) {
     for (const i of kept.filter((y) => y.kind === k)) { if (!by.has(i.of)) by.set(i.of, []); by.get(i.of).push(i) }
     for (const [id, list] of by) {
       const name = list.find((i) => i.ofName)?.ofName || id
-      groups.push({ key: `${k}:${id}`, title: k === 'channel' ? t('About #{channel}', { channel: name }) : t('About {name}', { name }), list })
+      const dm = list.find((i) => i.place?.kind === 'dm')
+      groups.push({ key: `${k}:${id}`, title: dm ? fromPlace(dm) : k === 'channel' ? t('About #{channel}', { channel: name }) : t('About {name}', { name }), list })
     }
   }
   // Whom a new item can be about: its channels, and the people it knows (those named, you, and the
@@ -1809,7 +1827,7 @@ function Memory({ d, save, reload }) {
           <p className="small sb-sub"><b>{t('Waiting for you')}</b></p>
           <ul className="sb-mem">
             {proposed.map((it) => (
-              <MemItem key={it.id} it={it} about={it.kind === 'channel' ? `#${it.ofName || it.of}` : it.kind === 'person' ? it.ofName || it.of : null} onSave={edit(it)} onDelete={drop(it)} onKeep={keep(it)} />
+              <MemItem key={it.id} it={it} about={it.private ? fromPlace(it) : it.kind === 'channel' ? `#${it.ofName || it.of}` : it.kind === 'person' ? it.ofName || it.of : null} onSave={edit(it)} onDelete={drop(it)} onKeep={keep(it)} />
             ))}
           </ul>
         </>
@@ -1817,7 +1835,7 @@ function Memory({ d, save, reload }) {
       {groups.map((g) => (
         <div key={g.key} className="sb-mem-group">
           <p className="small sb-sub"><b>{g.title}</b></p>
-          <ul className="sb-mem">{g.list.map((it) => <MemItem key={it.id} it={it} onSave={edit(it)} onDelete={drop(it)} />)}</ul>
+          <ul className="sb-mem">{g.list.map((it) => <MemItem key={it.id} it={it} onSave={edit(it)} onDelete={drop(it)} onWiden={widen(it)} />)}</ul>
         </div>
       ))}
       {x && !items.length && <p className="small sb-none">{t('Nothing yet.')}</p>}
@@ -1865,8 +1883,8 @@ function Memory({ d, save, reload }) {
 // the page while it's open. It opens by itself until the bot is connected somewhere. Its page has
 // Access too (bots/Access.jsx): what this bot may do, summed up in a line over the tabs; Settings
 // keeps those sections in Set Up, with the same line and a way to its page's Access.
-const TABS = ['setup', 'try', 'memory', 'activity']
-const PAGE_TABS = ['setup', 'access', 'try', 'memory', 'activity']
+const TABS = ['setup', 'conversations', 'try', 'memory', 'activity']
+const PAGE_TABS = ['setup', 'access', 'conversations', 'try', 'memory', 'activity']
 const STATUS_SAID = () => ({ on: t('Answering'), needs: t('Needs you'), paused: t('Paused'), off: t('Not connected yet') })
 export function Bot({ id, onGone, onChanged, notice, page = false, phone = false, status = null, assist = null }) {
   const [d, setD] = useState(null)
@@ -1923,6 +1941,7 @@ export function Bot({ id, onGone, onChanged, notice, page = false, phone = false
       <div className="seg sb-tabs" role="tablist" aria-label={d.name}>
         <button type="button" role="tab" aria-selected={tab === 'setup'} className={tab === 'setup' ? 'on' : ''} onClick={() => pickTab('setup')}>{t('Set Up')}</button>
         {page && <button type="button" role="tab" aria-selected={tab === 'access'} className={tab === 'access' ? 'on' : ''} onClick={() => pickTab('access')} data-tab="access">{t('Access')}</button>}
+        <button type="button" role="tab" aria-selected={tab === 'conversations'} className={tab === 'conversations' ? 'on' : ''} onClick={() => pickTab('conversations')}>{t('Conversations')}</button>
         <button type="button" role="tab" aria-selected={tab === 'try'} className={tab === 'try' ? 'on' : ''} onClick={() => pickTab('try')}>{t('Try It')}</button>
         <button type="button" role="tab" aria-selected={tab === 'memory'} className={tab === 'memory' ? 'on' : ''} onClick={() => pickTab('memory')}>{t('Memory')}{proposed > 0 && <span className="sb-tag">{t('{n} to keep', { n: proposed })}</span>}</button>
         <button type="button" role="tab" aria-selected={tab === 'activity'} className={tab === 'activity' ? 'on' : ''} onClick={() => pickTab('activity')}>{t('Activity')}{d.waiting > 0 && <span className="sb-tag">{t('{n} waiting in Needs You', { n: d.waiting })}</span>}</button>
@@ -1931,6 +1950,7 @@ export function Bot({ id, onGone, onChanged, notice, page = false, phone = false
       {note && <p className="st-note bad" role="alert"><Icon name="alert" size={13} /> {note}</p>}
       {tab === 'setup' && <SetUp d={d} save={save} reload={load} onDelete={remove} again={again} access={!page} />}
       {tab === 'access' && page && <Access d={d} save={save} onTab={pickTab} />}
+      {tab === 'conversations' && <Conversations d={d} />}
       {tab === 'try' && <TryIt d={d} />}
       {tab === 'memory' && <Memory d={d} save={save} reload={load} />}
       {tab === 'activity' && <Activity d={d} save={save} />}

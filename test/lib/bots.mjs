@@ -11,7 +11,9 @@ export const M2 = '<@UBOT2>'
 export const OWNER = { id: 'U0OWNER', name: 'Tester' }
 
 // A stand-in Slack (or one given) and a kit: its config (Bots on), env, and the folders made in its
-// home. Short waits for what a test would otherwise wait minutes for.
+// home. Short waits for what a test would otherwise wait minutes for, and each question its own
+// conversation (BRIDGE_BOT_CARRY_MS 0: the same person asking again soon after doesn't carry one on,
+// unless a test says it does).
 export async function botKit(name, { config = {}, env = {}, slack = null, folders = [] } = {}) {
   const s = slack || await startSlack(name)
   let home = null
@@ -20,7 +22,7 @@ export async function botKit(name, { config = {}, env = {}, slack = null, folder
     env: (x) => {
       home = x.home
       for (const f of folders) fs.mkdirSync(path.join(x.home, f), { recursive: true })
-      return { BRIDGE_SLACK_URL: s.url, BRIDGE_SLACK_PING_MS: '1000', BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', ...(typeof env === 'function' ? env(x) : env) }
+      return { BRIDGE_SLACK_URL: s.url, BRIDGE_SLACK_PING_MS: '1000', BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_BOT_CARRY_MS: '0', ...(typeof env === 'function' ? env(x) : env) }
     },
   })
   kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'helper-claude.cjs'), 'utf8'))

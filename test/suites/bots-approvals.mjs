@@ -19,6 +19,9 @@
 //   to you), and pause, which stops a running answer at once and passes questions to you.
 //   Answering without asking: for a public channel, an answer that quotes one of its files waits for
 //   you; in a private channel, or not quoting, it goes.
+//   A direct message's earlier turns given from the record, as sent; each person's running context,
+//   kept straight away, given only for them (what was said in a direct message, only there), none
+//   with memory off, and none once you forget them.
 //   All of it in the record and its export; Settings in light and dark, on a computer and a phone.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -28,7 +31,7 @@ import { botKit, openSettings, M, OWNER } from '../lib/bots.mjs'
 const { ok, done } = checks('bots-approvals')
 const HOLD = 4000 // how long a draft waits before "I'm checking this" (BRIDGE_BOT_HOLD_MS)
 const MINUTE = 3000 // a "minute", for the longest run (BRIDGE_BOT_MINUTE_MS)
-const { slack, kit, draftOf, startOf, startsOf, logOf, botOf, connected, convs, timelineOf, events, posted, postedLike, reacted } = await botKit('bots-approvals', {
+const { slack, kit, draftOf, startOf, startsOf, briefOf, logOf, botOf, connected, convs, timelineOf, events, posted, postedLike, reacted } = await botKit('bots-approvals', {
   folders: ['notes'], env: { BRIDGE_BOT_HOLD_MS: String(HOLD), BRIDGE_BOT_MINUTE_MS: String(MINUTE) },
 })
 const { b, which } = await browser()
@@ -48,7 +51,7 @@ try {
   await kit.api('/agents/catalog')
   await kit.api('/bots', { name: 'Helpdesk' })
   await kit.api('/bots/b1/tokens', { appToken: 'xapp-test', botToken: 'xoxb-test' })
-  await kit.api('/bots/b1/settings', { askers: [{ id: 'U0DANA', name: 'Dana' }, { id: 'U0SAM', name: 'Sam' }], readsFrom: ['~/notes'] })
+  await kit.api('/bots/b1/settings', { answerIn: 'thread', askers: [{ id: 'U0DANA', name: 'Dana' }, { id: 'U0SAM', name: 'Sam' }], readsFrom: ['~/notes'] })
   ok(!!(await connected()), 'a bot, connected')
   const guess = await until(async () => (await botOf()).ownerGuess, 10000)
   ok(guess?.id === OWNER.id, 'it offers the member with your name as you in Slack', guess)
@@ -194,12 +197,12 @@ try {
     // !stop, on an answer still running.
     const long = await slack.ask({ user: 'U0SAM', text: `${M} Summarize every FAQ entry [work 30] [answer Done.]` })
     await startOf('Summarize every FAQ entry')
-    const going = await until(async () => (await kit.api('/fleet')).agents.find((a) => a.helper?.list === 'desk' && a.status === 'working'), 10000)
+    const going = await until(async () => (await kit.api('/fleet?all=1')).agents.find((a) => a.helper?.list === 'desk' && a.status === 'working'), 10000)
     await slack.ask({ user: 'U0SAM', thread: long.ts, text: `${M} !stop` })
     const stopped = await until(async () => (await inThread(long.ts)).find((x) => x.text === 'Stopped.'), 15000)
     const tl = await timelineOf('b1', 'Summarize every FAQ entry')
     ok(!!stopped && tl.some((e) => e.type === 'run.finished' && e.end === 'stopped' && e.why === '!stop' && e.by === 'Sam'), '!stop: the answer running in that thread is stopped, and said', tl.filter((e) => e.type === 'run.finished'))
-    ok(!!(await until(async () => !(await kit.api('/fleet')).agents.some((a) => a.paneId === going?.paneId), 10000)), 'its agent\'s tab is closed')
+    ok(!!going && !!(await until(async () => !(await kit.api('/fleet?all=1')).agents.some((a) => a.paneId === going?.paneId), 10000)), 'its agent\'s tab is closed')
 
     // !forget me (D3).
     const runsDir = path.join(kit.data, 'bots', 'b1', 'trace', 'runs')
@@ -298,6 +301,73 @@ try {
     await kit.api('/bots/b1/settings', { agentsStatus: false })
   })
 
+  // ---------- A direct message's turns, and each person's running context ----------
+  // (Each question its own conversation here: BRIDGE_BOT_CARRY_MS 0, so what was said before comes
+  // from the record, not from going on in the agent's own conversation.)
+  await part('running context', async () => {
+    try { await context() } finally { await kit.api('/bots/b1/settings', { memory: 'approve', limits: { day: 30, atOnce: 2, minutes: 10 } }) }
+  })
+  async function context() {
+    await kit.api('/bots/b1/settings', { memory: 'auto', limits: { day: 200, atOnce: 2, minutes: 10 } })
+    const people = () => { try { return JSON.parse(fs.readFileSync(path.join(kit.data, 'bots', 'b1', 'people.json'), 'utf8')).people } catch { return {} } }
+    const earlier = (x) => (/----- earlier conversations -----([\s\S]*?)----- end of earlier conversations -----/.exec(briefOf(x)) || [])[1] ?? null
+    const send = async (words, text) => { const d = await draftOf(words); await kit.api(`/bots/questions/${d.id}`, { send: true, ...(text ? { text } : {}) }); return d }
+    await slack.ask({ user: 'U0DANA', dm: true, text: 'Which floor is support on? [answer The third floor.]' })
+    await send('Which floor is support on', 'The third floor, by the lifts.')
+    await postedLike(/by the lifts/)
+    // Your edit there is offered as a learning: that direct message's own, waiting for your Keep even
+    // with learnings kept straight away, and never given anywhere else.
+    const fix = await until(async () => (await mem()).find((y) => y.source === 'edit' && /Which floor/.test(y.text)), 8000)
+    ok(fix?.state === 'proposed' && fix.private === true && fix.kind === 'channel' && fix.of === 'D0DANA' && fix.place?.kind === 'dm' && fix.place.name === 'Dana', 'your correction of a draft in a direct message: that place\'s own, waiting for your Keep, though learnings are kept straight away', fix)
+    const asked = await until(() => dmOf('used only there'), 10000)
+    ok(/a direct message with Dana, used only there/.test(JSON.stringify(asked?.blocks || [])) && /Which floor/.test(JSON.stringify(asked?.blocks || [])), 'your Slack DM asks, saying where it came from', asked?.blocks)
+    await kit.api(`/bots/b1/memory/${fix.id}`, { keep: true }, 'PATCH')
+    await slack.ask({ user: 'U0DANA', dm: true, text: 'Is it open at lunch? [answer Yes, all day.]' })
+    const s2 = await startOf('Is it open at lunch')
+    ok(/----- earlier turns -----\nDana: Which floor is support on\? \[answer The third floor\.\]\nyou \(Helpdesk\): The third floor, by the lifts\.\n----- end of earlier turns -----/.test(briefOf(s2)) && !s2.args.join(' ').includes('--fork-session'), 'a direct message, one running conversation: its earlier turns given from the record, the answer as it was sent', briefOf(s2).slice(0, 1600))
+    ok(/----- memory -----[^]*Which floor is support on[^]*----- end of memory -----/.test(briefOf(s2)), 'the correction you kept, given in that direct message', briefOf(s2).slice(0, 1600))
+    await send('Is it open at lunch')
+    const lunch = await postedLike(/Yes, all day/)
+    ok(lunch?.channel === 'D0DANA' && !lunch.thread_ts, 'answered plainly in the direct message', lunch)
+    ok(people().U0DANA?.kept.length === 2 && people().U0DANA.kept.every((x) => x.where?.kind === 'dm' && x.where.private) && events().some((e) => e.type === 'context.noted' && e.person?.id === 'U0DANA' && e.state === 'kept'), 'kept straight away in her running context: her words and its answers, marked private', people().U0DANA)
+    // Asked in a public channel: what she said in her direct messages isn't given there.
+    await slack.ask({ user: 'U0DANA', text: `${M} Where do I get a badge? [answer At reception.]` })
+    const s3 = await startOf('Where do I get a badge')
+    ok(earlier(s3) === null && !/third floor/.test(briefOf(s3)), 'in a public channel, nothing from her direct messages: not her running context, nor your kept correction', briefOf(s3).slice(0, 1200))
+    await send('Where do I get a badge')
+    await postedLike(/At reception/)
+    // Someone else: never hers.
+    await slack.ask({ user: 'U0SAM', dm: true, text: 'What is the wifi called? [answer Acme-Guest.]' })
+    const s4 = await startOf('wifi called')
+    ok(!/third floor|by the lifts|badge|At reception|Which floor/.test(briefOf(s4)), 'Sam\'s question: none of Dana\'s running context', briefOf(s4).slice(0, 1200))
+    await send('wifi called')
+    await postedLike(/Acme-Guest/)
+    // Hers, when she asks again: what she said where others could read it, besides this conversation's turns.
+    await slack.ask({ user: 'U0DANA', dm: true, text: 'Anything else I should know? [answer No.]' })
+    const s5 = await startOf('Anything else I should know')
+    ok(/Where do I get a badge\?[\s\S]*At reception\./.test(earlier(s5) || '') && !/Acme-Guest|wifi/.test(briefOf(s5)) && /They're Dana's alone/.test(briefOf(s5)), 'Dana again: given her earlier conversation in #launch, as hers alone, and nothing of Sam\'s', earlier(s5))
+    ok((await timelineOf('b1', 'Anything else I should know')).find((e) => e.type === 'run.started')?.earlier?.person === 1, 'and the run says what it was given', (await timelineOf('b1', 'Anything else I should know')).find((e) => e.type === 'run.started')?.earlier)
+    await kit.api(`/bots/questions/${(await draftOf('Anything else I should know')).id}`, { send: false })
+    // Memory off: none given, none kept.
+    await kit.api('/bots/b1/settings', { memory: 'off' })
+    const had = people().U0DANA.kept.length
+    await slack.ask({ user: 'U0DANA', dm: true, text: 'One more question? [answer Go ahead.]' })
+    const s6 = await startOf('One more question')
+    ok(earlier(s6) === null, 'memory off: no running context given', briefOf(s6).slice(0, 1200))
+    const d6 = await send('One more question')
+    await postedLike(/Go ahead/)
+    await sleep(800)
+    ok(people().U0DANA.kept.length === had && !events().some((e) => e.type === 'context.noted' && e.q === d6.id), 'and none kept')
+    // Forgotten, by you: gone, and not given again; Sam's untouched.
+    await kit.api('/bots/b1/settings', { memory: 'auto' })
+    const f = await kit.api('/bots/b1/people/U0DANA/forget', {})
+    ok(f.context === null && !people().U0DANA && people().U0SAM?.kept.length >= 1 && events().some((e) => e.type === 'context.forgotten' && e.person?.id === 'U0DANA' && e.by === 'Tester'), 'forgetting Dana: hers gone, in the record; Sam\'s still kept', Object.keys(people()))
+    await slack.ask({ user: 'U0DANA', text: `${M} Last one: where is the kitchen? [answer Next to support.]` })
+    const s7 = await startOf('where is the kitchen')
+    ok(earlier(s7) === null && !/you answered “At reception/.test(briefOf(s7)), 'and her next question is given none of it (only the channel\'s own messages, as anyone\'s is)', briefOf(s7).slice(0, 1200))
+    await kit.api(`/bots/questions/${(await draftOf('where is the kitchen')).id}`, { send: false })
+  }
+
   // ---------- No secrets, and transcripts gzipped after a month ----------
   const started = logOf('helpers-started.log')
   ok(started.length > 10 && started.every((x) => !x.secrets?.length && !JSON.stringify(x.args).match(/xox[bp]-|xapp-/)), 'no answering agent was ever given a Slack token, in its environment or on its command line', started.filter((x) => x.secrets?.length).map((x) => x.secrets))
@@ -351,6 +421,11 @@ try {
       }
       await shot(p, `${tag}bots-approvals-memory-${mode}${phone ? '-phone' : ''}`)
       if (mode === 'light' && !phone) {
+        // A direct message's own learning: where it came from, and used everywhere only once you say so.
+        const only = box.locator('li', { hasText: 'Which floor is support on' })
+        ok(/From a direct message with Dana: used only there until you use it everywhere/.test(await only.innerText()), 'Memory: a correction from a direct message says it\'s used only there', await only.innerText())
+        await only.getByRole('button', { name: 'Use everywhere' }).click()
+        ok(!!(await until(async () => { const x = (await mem()).find((y) => /Which floor/.test(y.text)); return x?.kind === 'bot' && !x.private }, 8000)) && events().some((e) => e.type === 'memory.widened' && e.from?.kind === 'dm' && e.by === 'Tester'), 'Use everywhere: yours to say, and in the record')
         // Kept from the page, and one edited there.
         const row = box.locator('li', { hasText: 'printer is on floor 2' })
         await row.getByRole('button', { name: 'Keep' }).click()

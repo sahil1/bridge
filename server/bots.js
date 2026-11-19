@@ -15,6 +15,8 @@
 //   (its app's tokens were in bots/<id>/slack.json, discord.json and teams.json before
 //   connections: each is a connection of its own now, connections/<c>/, connections.js migrate)
 //   bots/<id>/memory.json       what it remembers (botmemory.js)
+//   bots/<id>/people.json       each person's running context: their earlier conversations with it
+//                               (botcontext.js), never carried anywhere with the bot
 //   bots/<id>/setup.json        its setup chat with AI Assist and what it proposes (botsetup.js)
 //   bots/<id>/trace/            its record (trace.js)
 // A draft (draft: true) is a bot AI Assist proposed, from the setup chat or the Chief of Staff's
@@ -52,9 +54,18 @@ const tilde = (p) => (p === HOME || p.startsWith(HOME + path.sep) ? `~${p.slice(
 // away, or off), paused, the channels muted with !mute, the channels it answers in without a
 // mention (listen), whether it may say what your agents are doing (agentsStatus), and which of your
 // MCP servers its runs get (mcp, by name: Settings › MCP Servers, through Claude Code's own config),
-// and what answers (answerers: its first choice and fallbacks, botanswer.js ids, or null for
-// Automatic; fallback: whether the next is tried when one can't answer).
+// what answers (answerers: its first choice and fallbacks, botanswer.js ids, or null for
+// Automatic; fallback: whether the next is tried when one can't answer), and where it answers a
+// question asked at the top of a channel (answerIn: in the channel, or in a thread of its own).
 export const LIMITS = { day: 30, atOnce: 2, minutes: 10 }
+// Answer In (answerIn): where the answer to a question at the top of a channel goes, in the channel
+// itself ('channel', a new bot's) or in a thread started from the question ('thread', as every bot
+// answered before there was a choice, so one made before keeps it). Either way, the same person
+// asking again in the same place within CARRY_ON_MIN minutes of the conversation's last word carries
+// it on: answered where its last answer went, given what was said before (frontdesk.js). A direct
+// message is one running conversation with that person, its earlier turns given as they go.
+export const ANSWER_IN = ['channel', 'thread']
+export const CARRY_ON_MIN = 30
 const DEFAULTS = {
   name: 'Bridge AI', description: '', who: 'named', askers: [], others: 'polite', readsFrom: [], instructionsFile: null, agent: null, auto: false, agentCopies: false, retention: '1y', max: 2,
   owner: null, owners: {}, changes: 'none', repo: null, limits: LIMITS, memory: 'approve', paused: false, muted: [], listen: [], agentsStatus: false, template: null, mcp: [], answerers: null, fallback: true, draft: false, icon: null,
@@ -115,6 +126,7 @@ function shape(id, j) {
   b.fallback = b.fallback !== false
   b.draft = b.draft === true
   b.icon = ICON.test(String(b.icon || '')) ? String(b.icon) : null
+  b.answerIn = b.answerIn === 'channel' ? 'channel' : 'thread'
   return b
 }
 
@@ -150,7 +162,7 @@ export function create({ name, description = '', template = null } = {}, you = '
   if (list().some((b) => b.name.toLowerCase() === n.toLowerCase())) throw new Error(`There's a bot called ${n} already`)
   const tpl = template ? templateOf(String(template)) : null
   if (template && !tpl) throw new Error(`No such template: ${template}`)
-  const b = shape(nextId(), { ...DEFAULTS, name: n, description: description || tpl?.description || '', template: tpl?.id || null, createdAt: new Date().toISOString() })
+  const b = shape(nextId(), { ...DEFAULTS, name: n, description: description || tpl?.description || '', template: tpl?.id || null, answerIn: 'channel', createdAt: new Date().toISOString() })
   write(b)
   writeInstructions(b.id, tpl ? tpl.instructions(n, you || 'my') : defaultInstructions(n, you))
   return b
@@ -160,7 +172,7 @@ export function create({ name, description = '', template = null } = {}, you = '
 // Create (botsetup.js has what it proposes). from: who asked for it, you (+ in the sidebar) or the
 // Chief of Staff.
 export function createDraft({ name = '', from = 'you' } = {}) {
-  const b = shape(nextId(), { ...DEFAULTS, name: freeName(name), draft: true, from: from === 'chief' ? 'chief' : 'you', createdAt: new Date().toISOString() })
+  const b = shape(nextId(), { ...DEFAULTS, name: freeName(name), draft: true, from: from === 'chief' ? 'chief' : 'you', answerIn: 'channel', createdAt: new Date().toISOString() })
   write(b)
   return b
 }
@@ -176,10 +188,10 @@ export function undraft(id, instructions) {
 // ---------- Export and import ----------
 // A bot as a file, to take to another computer (the Docker image on an always-on machine, say):
 // its settings, its instructions and what it remembers, never its tokens (its Slack app is
-// connected again there, with tokens pasted there). Its folders go as they're named here (~/…),
-// and are checked where it's brought in.
+// connected again there, with tokens pasted there) nor anyone's running context (people.json). Its
+// folders go as they're named here (~/…), and are checked where it's brought in.
 export const BUNDLE_KIND = 'bridge-ai-bot'
-const CARRIED = ['icon', 'description', 'who', 'askers', 'others', 'readsFrom', 'instructionsFile', 'agent', 'auto', 'agentCopies', 'retention', 'max', 'owner', 'owners', 'changes', 'repo', 'limits', 'memory', 'muted', 'listen', 'agentsStatus', 'template', 'mcp', 'answerers', 'fallback']
+const CARRIED = ['icon', 'description', 'who', 'askers', 'others', 'readsFrom', 'instructionsFile', 'agent', 'auto', 'agentCopies', 'retention', 'max', 'owner', 'owners', 'changes', 'repo', 'limits', 'memory', 'muted', 'listen', 'agentsStatus', 'template', 'mcp', 'answerers', 'fallback', 'answerIn']
 export function bundleOf(id, memory = []) {
   const b = get(id)
   if (!b) throw Object.assign(new Error('No such bot'), { status: 404 })
@@ -220,7 +232,7 @@ export function remove(id) {
   const D = path.join(DIR, id)
   if (!fs.existsSync(path.join(D, 'trace')) || b?.draft) { fs.rmSync(D, { recursive: true, force: true }); return }
   writeFileAtomic(path.join(D, 'deleted.json'), JSON.stringify({ name: b?.name || id, deletedAt: new Date().toISOString(), retention: b?.retention || '1y' }, null, 2), { mode: 0o600 })
-  for (const f of ['bot.json', 'instructions.md', 'slack.json', 'discord.json', 'teams.json', 'memory.json', 'setup.json']) fs.rmSync(path.join(D, f), { force: true })
+  for (const f of ['bot.json', 'instructions.md', 'slack.json', 'discord.json', 'teams.json', 'memory.json', 'people.json', 'setup.json']) fs.rmSync(path.join(D, f), { force: true })
 }
 // The bots deleted whose record is kept: [{ id, name, deletedAt, retention }].
 export function deleted() {

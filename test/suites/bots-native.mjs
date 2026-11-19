@@ -36,7 +36,7 @@ try {
   await kit.api('/bots', { name: 'Pricing Desk' })
   await slack.scopes({ app: 'A1', scopes: OLD })
   await kit.api('/bots/b1/tokens', { appToken: 'xapp-test', botToken: 'xoxb-test' })
-  await kit.api('/bots/b1/settings', { askers: [{ id: 'U0DANA', name: 'Dana' }], readsFrom: ['~/pricing'], owner: OWNER })
+  await kit.api('/bots/b1/settings', { answerIn: 'thread', askers: [{ id: 'U0DANA', name: 'Dana' }], readsFrom: ['~/pricing'], owner: OWNER })
   ok(!!(await connected()), 'a bot, connected')
 
   // ---------- The manifest, and an app made from an older one ----------

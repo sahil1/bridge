@@ -31,7 +31,9 @@ async function api(path, { method = 'GET', body } = {}) {
   return data
 }
 
-const fleet = () => api('/fleet')
+// (Every agent, the bots' answering agents too, which the sidebar's fleet leaves out: so they're known
+// here, to be left alone.)
+const fleet = () => api('/fleet?all=1')
 // Not the Slack Bot's answering agents (a.helper.list): they answer questions from outside, which the
 // Chief of Staff doesn't read, send to or wait on (server/frontdesk.js).
 const outside = (a) => !!a?.helper?.list
