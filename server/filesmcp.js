@@ -28,8 +28,8 @@ for (let i = 1; i < argv.length; i++) {
   else if (argv[i] === '--log' && argv[i + 1]) log = argv[++i]
   else if (argv[i] === '--key' && argv[i + 1]) keyFile = argv[++i]
 }
-// (The run's key, from its file: botguard.mjs. With no key, nothing is taken away or moved.)
-const key = (() => { if (!keyFile) return process.env.BRIDGE_GUARD_KEY || ''; try { return fs.readFileSync(keyFile, 'utf8').trim() } catch { return '' } })()
+// (The run's key, from its file alone: botguard.mjs. With none, nothing is taken away or moved.)
+const key = (() => { try { return fs.readFileSync(keyFile, 'utf8').trim() } catch { return '' } })()
 const real = (() => { try { return fs.realpathSync.native(root) } catch { return null } })()
 const gitLike = (name) => { const n = String(name || '').toLowerCase().replace(/:.*$/, '').replace(/[. ]+$/, ''); return n === '.git' || /^git~\d+$/.test(n) }
 const noted = (kind, p) => {
@@ -68,7 +68,7 @@ function placeOf(p, { there = true } = {}) {
   const rel = path.relative(top, norm)
   const segs = rel.split(path.sep)
   if (segs.some(gitLike)) throw new Error(`${s} is git's own`)
-  if (parts.length ? segs.length < 2 || !parts.includes(segs[0]) : /^(\.claude|\.mcp\.json)$/.test(segs[0].toLowerCase().replace(/:.*$/, '').replace(/[. ]+$/, '')) || /~\d/.test(segs[0])) throw new Error(`${s} isn't in a copy of one of your folders`)
+  if (parts.length ? segs.length < 2 || !parts.includes(segs[0]) : /^(\.claude|\.mcp\.json)$/.test(segs[0].toLowerCase().replace(/:.*$/, '').replace(/[. ]+$/, '')) || /^(claude|mcp)[^~]{0,6}~\d/i.test(segs[0])) throw new Error(`${s} isn't in a copy of one of your folders`)
   const missing = []
   let at = real
   for (const [i, x] of segs.entries()) {

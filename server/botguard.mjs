@@ -37,11 +37,18 @@ const realRoot = (() => { try { return fs.realpathSync(root) } catch { return nu
 // (git's own folder by any name a file system gives it, as git refuses them: botwrite.js gitLike.)
 const gitLike = (name) => { const n = String(name || '').toLowerCase().replace(/:.*$/, '').replace(/[. ]+$/, ''); return n === '.git' || /^git~\d+$/.test(n) }
 // (Claude Code's own, at the top of the folder it runs in, by any name a file system gives it: a
-// trailing dot or space, a stream, or a short name such as CLAUDE~1, as gitLike. Only CLAUDE.md
-// spelled as it is may be changed, in a repository's copy.)
+// trailing dot or space, a stream, or a short name such as CLAUDE~1 or MCP~1.JSO, as gitLike; and on
+// the real path, where Windows gives any short name its long one. Only CLAUDE.md spelled as it is may
+// be changed, in a repository's copy.)
 const ownName = (name) => String(name || '').toLowerCase().replace(/:.*$/, '').replace(/[. ]+$/, '')
 const OWN = /^(\.claude|\.mcp\.json|claude\.md|claude\.local\.md)$/
-const own = (name) => OWN.test(ownName(name)) || (/~\d/.test(name) && !parts.includes(name))
+const own = (name) => OWN.test(ownName(name)) || /^(claude|mcp)[^~]{0,6}~\d/i.test(name)
+// (The top of a path in the copy, from it: Claude Code's own, or for a copy of folders, not one of
+// their copies, refused.)
+const top = (p, rel) => {
+  if (own(rel[0]) && (parts.length || rel.length > 1 || rel[0].toLowerCase() !== 'claude.md')) no(`${p} is Claude Code's own, not part of your copy`)
+  if (parts.length && (rel.length < 2 || !parts.includes(rel[0]))) no(`${p} isn't in a copy of one of your folders (${parts.join(', ')})`)
+}
 const allowed = []
 
 function check(p, cwd) {
@@ -55,8 +62,7 @@ function check(p, cwd) {
   if (norm === under) no(`${p} is your copy's own folder, not a file in it`)
   const rel = path.relative(under, norm).split(path.sep)
   if (rel.some(gitLike)) no(`${p} is git's own`)
-  if (own(rel[0]) && (parts.length || rel.length > 1 || rel[0].toLowerCase() !== 'claude.md')) no(`${p} is Claude Code's own, not part of your copy`)
-  if (parts.length && (rel.length < 2 || !parts.includes(rel[0]))) no(`${p} isn't in a copy of one of your folders (${parts.join(', ')})`)
+  top(p, rel)
   // Each part below the copy that's there: a folder, never a link (nor the file itself a link).
   let at = under
   for (const x of rel) {
@@ -73,7 +79,9 @@ function check(p, cwd) {
     try { real = path.join(fs.realpathSync.native(real), ...rest.reverse()); break } catch { const up = path.dirname(real); if (up === real) break; rest.push(path.basename(real)); real = up }
   }
   if (!realRoot || (real !== realRoot && !real.startsWith(realRoot + path.sep))) no(`${p} is outside your copy`)
-  if (path.relative(realRoot, real).split(path.sep).some(gitLike)) no(`${p} is git's own`)
+  const realRel = path.relative(realRoot, real).split(path.sep)
+  if (realRel.some(gitLike)) no(`${p} is git's own`)
+  top(p, realRel)
   allowed.push(real)
 }
 
@@ -90,9 +98,9 @@ process.stdin.on('end', () => {
   for (const p of paths) check(p, j?.cwd)
   // (What it let through, for Bridge AI to take: a log it can't write, it lets nothing through.)
   if (log) {
-    // (Its file, or for a check run by hand, BRIDGE_GUARD_KEY in its environment.)
-    let key = keyFile ? '' : process.env.BRIDGE_GUARD_KEY || ''
-    try { if (keyFile) key = fs.readFileSync(keyFile, 'utf8').trim() } catch { /* none */ }
+    // (From its file alone: none, nothing is let through.)
+    let key = ''
+    try { key = fs.readFileSync(keyFile, 'utf8').trim() } catch { /* none */ }
     if (!/^[0-9a-f]{64}$/.test(key)) no('its checks have no key to write them down with')
     try { fs.appendFileSync(log, allowed.map((p) => `${crypto.createHmac('sha256', key).update(`w\n${p}`).digest('hex')}\n`).join(''), { mode: 0o600 }) } catch { no('its checks couldn\'t be written down') }
   }

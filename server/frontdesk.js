@@ -472,7 +472,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       if (laterTs(e.ts, c.lastTs || 0)) c.lastTs = e.ts
       st.convs.set(e.conv, c)
       const had = st.questions.get(e.q)
-      if (had) { had.more.push({ person: e.person, text: e.text || '', ts: e.ts, at: e.at, files: e.files || [] }); return }
+      if (had) { had.more.push({ person: e.person, text: e.text || '', ts: e.ts, at: e.at, files: e.files || [], ...(e.flags ? { flags: e.flags } : {}) });return }
       st.questions.set(e.q, { id: e.q, bot: e.bot, conv: e.conv, how: e.how, from: e.person || null, text: e.text || '', channel: e.channel, place: e.place || null, thread: e.thread_ts || null, ts: e.ts, reply: e.reply || null, at: e.asked || e.at, heardAt: e.at, late: !!e.late, migrated: !!e.migrated, state: e.how === 'command' ? 'command' : 'received', more: [], runs: [], files: e.files || [], try: !!e.try, routine: e.routine || null, carried: !!e.carried })
       c.questions.push(e.q)
       return
@@ -761,6 +761,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // Who may ask, as its settings say: you always; never a guest or someone from another company,
   // nor anyone Slack couldn't say who they are; then the people you named, or everyone in its
   // channels.
+  // (What the platform said of someone that a bot turns away: a guest, someone outside, unknown.)
+  const flagsOf = (from) => { const f = ['guest', 'external', 'unknown'].filter((k) => from?.[k] === true); return f.length ? Object.fromEntries(f.map((k) => [k, true])) : null }
   const refusal = (bot, from) => (isOwner(bot, from) ? null : from?.unknown ? 'unknown' : from?.external ? 'external' : from?.guest ? 'guest' : bot.who === 'channels' || (bot.askers || []).some((x) => x?.id === from?.id) ? null : 'not-allowed')
   const politeNo = (why) => (why === 'not-allowed' ? `Sorry, I only answer questions from people ${you()} has added. Ask ${you()} directly.`
     : why === 'unknown' ? `Sorry, I couldn't check who's asking, so I can't answer. Ask ${you()} directly.`
@@ -822,13 +824,24 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       && [...st.questions.values()].some((x) => waitsAtLimit(x) && (x.conv === conv || (x.from?.id && x.from.id === m.from?.id)))
     const busy = !command && !notYours && c && c.questions.map((x) => st.questions.get(x)).reverse().find((x) => x?.state === 'answering')
     const qid = !why && busy ? busy.id : `${id}-q${st.next}`
-    const e = record(id, 'received', { q: qid, ...fields, ...(qid === busy?.id ? { joined: true } : {}), ...(m.from?.why ? { lookup: oneLine(m.from.why, 200) } : {}) })
+    const e = record(id, 'received', { q: qid, ...fields, ...(qid === busy?.id ? { joined: true, ...(flagsOf(m.from) ? { flags: flagsOf(m.from) } : {}) } : {}), ...(m.from?.why ? { lookup: oneLine(m.from.why, 200) } : {}) })
     const q = st.questions.get(qid)
     // (Who asked, as the platform said: a bot that hands this on gives it to the other bot as theirs.)
-    if (q && qid !== busy?.id) q.asker = m.from?.id ? { id: m.from.id, name: m.from.name || null, ...['guest', 'external', 'unknown'].reduce((o, k) => (m.from[k] ? { ...o, [k]: true } : o), {}) } : null
-    // (Handed on from another bot's run: whoever joined that run, with their words, joined to this one.)
+    if (q && qid !== busy?.id) q.asker = m.from?.id ? { id: m.from.id, name: m.from.name || null, ...(flagsOf(m.from) || {}) } : null
+    // (Handed on from another bot's run: whoever joined that run, with their words, joined to this one,
+    // if this bot answers them, as when they join a run of its own. Anyone it doesn't answer (who may
+    // not ask it, a guest, someone outside, someone unknown) is refused here as they would be asking
+    // it themselves, and their words aren't its question's.)
     if (q && qid !== busy?.id && !why && m.handed?.by) {
-      for (const x of (m.handed.also || []).slice(0, 50)) record(id, 'received', { q: qid, ...fields, person: { id: x.person?.id || null, name: x.person?.name || null }, text: clip(x.text, 4000), ts: x.ts || m.ts, asked: x.at || now(), how: 'follow-up', joined: true })
+      for (const x of (m.handed.also || []).slice(0, 50)) {
+        const who = { id: x.person?.id || null, name: x.person?.name || null, ...(flagsOf(x.flags) || {}) }
+        const said = { ...fields, person: { id: who.id, name: who.name }, text: clip(x.text, 4000), ts: x.ts || m.ts, asked: x.at || now(), how: 'follow-up', ...(flagsOf(who) ? { flags: flagsOf(who) } : {}) }
+        const no = refusal(bot, who)
+        if (!no) { record(id, 'received', { q: qid, ...said, joined: true }); continue }
+        const rq = `${id}-q${st.next}`
+        record(id, 'received', { q: rq, ...said })
+        record(id, 'refused', at(st.questions.get(rq), { why: no, person: said.person }))
+      }
     }
     if (q && m.files?.length && qid !== busy?.id) q.attach = m.files
     else if (busy && m.files?.length) busy.attachMore = [...(busy.attachMore || []), ...m.files]
@@ -1988,9 +2001,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     react(id, q, q.ts, 'eyes', true)
     done(q)
     changed()
-    // (And whoever joined its run in the thread, with their words: the other bot hears them as joined
-    // to the same question, so a change it makes counts them too.)
-    const also = q.more.filter((x) => x.person?.id).map((x) => ({ person: { id: x.person.id, name: x.person.name || null }, text: x.text || '', ts: x.ts, at: x.at }))
+    // (And whoever joined its run in the thread, with their words and whatever the platform said of
+    // them: the other bot hears those it answers as joined to the same question, so a change it makes
+    // counts them too, and refuses the rest.)
+    const also = q.more.filter((x) => x.person?.id).map((x) => ({ person: { id: x.person.id, name: x.person.name || null }, text: x.text || '', ts: x.ts, at: x.at, ...(flagsOf(x.flags) ? { flags: flagsOf(x.flags) } : {}) }))
     await hear(to.id, { ts: q.ts, channel: q.channel, thread: q.thread, mention: true, dm: q.place?.kind === 'dm', from: asker, text: q.text, place: q.place, at: q.at, late: false, reply: q.reply, platform: plat, handed: { by: id, name: bot.name, also } })
   }
 

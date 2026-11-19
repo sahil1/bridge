@@ -393,6 +393,10 @@ const newId = () => `w${Date.now().toString(36)}${crypto.randomBytes(5).toString
 // after. An approval names it; anything different is another change.
 export const hashOf = (folders, entries) => sha(JSON.stringify({ folders: folders.map((f) => f.path), entries: entries.map((e) => [e.part, e.rel, e.op, e.from || null, e.before?.hash || null, e.after?.hash || null]) }))
 
+// (A name as the file systems compare them: one form of its accents, and on a Mac or Windows any
+// case. A system's own files a folder may have that a copy needn't: Finder's, Explorer's.)
+const nameKey = (n) => { const s = String(n).normalize('NFC'); return process.platform === 'linux' ? s : s.toLowerCase() }
+const OS_OWN = /^(\.ds_store|\.localized|thumbs\.db|desktop\.ini|icon\r)$/i
 // What its agent changed in the staging copy, taken and kept in `into` (a folder of its own, made
 // here): { id, hash, folders, entries, held, refused, diff, files, at }, entries empty when nothing
 // changed. Nothing is made in the real folders here. instructions: every bot's instructions file (real
@@ -463,18 +467,43 @@ export async function collect(st, { into, by = null, instructions = [], checked 
   // made. And each one the run's checks let through, as they said.)
   const realCopies = await Promise.all(st.parts.map((p) => fs.promises.realpath(p.copy).catch(() => p.copy)))
   // (A new file in a folder the real one has and its copy didn't, one git ignores say (a project's
-  // venv, its node_modules): it couldn't see what's there, nor you in the diff, so it waits for you.)
+  // venv, its node_modules), or in one its copy has only part of (a folder git ignores with a file in
+  // it committed anyway): it couldn't see what's there, nor you in the diff, so it waits for you. What
+  // the copy leaves out on purpose doesn't count: links, git's own, a system's own files there.)
   const seen = st.parts.map((p) => new Set(p.dirs || []))
+  const kids = st.parts.map((p) => {
+    const m = new Map()
+    for (const rel of [...p.base.map(([r]) => r), ...(p.dirs || [])]) {
+      const i = rel.lastIndexOf(SEP)
+      const dir = i < 0 ? '' : rel.slice(0, i)
+      if (!m.has(dir)) m.set(dir, new Set())
+      m.get(dir).add(nameKey(rel.slice(i + 1)))
+    }
+    return m
+  })
+  const partly = new Map()
+  const partlySeen = async (i, dir) => {
+    const k = `${i}\n${dir}`
+    if (!partly.has(k)) {
+      const have = kids[i].get(dir) || new Set()
+      const ents = await fs.promises.readdir(dir ? onDisk(st.parts[i].folder, dir) : st.parts[i].folder, { withFileTypes: true }).catch(() => [])
+      partly.set(k, ents.some((d) => !d.isSymbolicLink() && !gitLike(d.name) && !OS_OWN.test(d.name) && !have.has(nameKey(d.name))))
+    }
+    return partly.get(k)
+  }
   const unseen = []
   for (const e of entries) {
     if (e.op !== 'add' && e.op !== 'move') continue
     const segs = e.rel.split(SEP)
+    let deepest = ''
+    let hidden = false
     for (let k = 1; k < segs.length; k++) {
       const up = segs.slice(0, k).join(SEP)
-      if (seen[e.part].has(up)) continue
-      if (await fs.promises.lstat(onDisk(st.parts[e.part].folder, up)).catch(() => null)) unseen.push(e.rel)
-      break
+      if (!(await fs.promises.lstat(onDisk(st.parts[e.part].folder, up)).catch(() => null))) break
+      if (!seen[e.part].has(up)) { hidden = true; break }
+      deepest = up
     }
+    if (hidden || await partlySeen(e.part, deepest)) unseen.push(e.rel)
   }
   for (const e of entries) {
     const p = st.parts[e.part]
