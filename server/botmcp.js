@@ -179,8 +179,8 @@ export const OUTBOX_SERVER = 'bridge_outbox'
 export const FILES_SERVER = 'bridge_files'
 const sh = (s) => `'${String(s).replace(/'/g, '\'\\\'\'')}'`
 // Whether a run's hook is given as a program and its arguments (Claude Code's exec form, below): on
-// Windows. (BRIDGE_HOOK_EXEC=1 gives it so on any system: tests.)
-export const execHooks = () => IS_WIN || process.env.BRIDGE_HOOK_EXEC === '1'
+// Windows. (BRIDGE_HOOK_EXEC=1 gives it so on any system, in a test's kit only: BRIDGE_FIX_DRYRUN.)
+export const execHooks = () => IS_WIN || (process.env.BRIDGE_HOOK_EXEC === '1' && process.env.BRIDGE_FIX_DRYRUN === '1')
 // The oldest Claude Code that runs a hook given so. From Claude Code's own changelog (CHANGELOG.md in
 // github.com/anthropics/claude-code), 2.1.139: "Added hook `args: string[]` field (exec form) that
 // spawns the command directly without a shell". One older than that doesn't run it as given, so the

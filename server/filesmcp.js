@@ -112,8 +112,12 @@ function call(name, a) {
     const to = placeOf(a?.to, { there: false })
     // (The folders its new place needs, made one by one inside the copy.)
     for (const d of to.missing) { fs.mkdirSync(d); if (fs.lstatSync(d).isSymbolicLink() || !within(fs.realpathSync.native(d))) throw new Error(`${path.relative(real, d)} is outside your copy`) }
+    // (Once its folders are made, written down by their real path too: a folder named in another case
+    // than one that's there, on a Mac or Windows, is that one.)
+    const up = to.missing.length ? fs.realpathSync.native(path.dirname(to.full)) : null
+    if (up && (!within(up) || path.relative(real, up).split(path.sep).some(gitLike))) throw new Error(`${to.rel} is outside your copy`)
     noted('d', from.named)
-    noted('w', to.named)
+    noted('w', up ? path.join(up, path.basename(to.full)) : to.named)
     fs.renameSync(from.full, to.full)
     return `Moved ${from.rel} to ${to.rel} in your copy. Bridge AI shows the owner, who approves it before it's moved for real.`
   }
