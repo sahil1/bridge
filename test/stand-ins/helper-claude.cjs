@@ -47,7 +47,8 @@
 //                                            Every edit first goes through the PreToolUse hooks its
 //                                            --settings give (a file or JSON), as Claude Code runs
 //                                            them: each matching command run with the tool call as
-//                                            JSON on stdin; exit 2 refuses it (each in ~/hooks.log)
+//                                            JSON on stdin; exit 2 refuses it (each, with its command,
+//                                            in ~/hooks.log)
 //     [edit-anywhere <path> <text>]          writes a file anywhere, as if your own settings allowed
 //                                            every edit: only its hooks can stop it
 //     [force-write <path> <text>]            writes <text> (\n a new line, \t a tab, {{ and }} brackets)
@@ -215,7 +216,8 @@ function preTool(name, input) {
       if (h.type !== 'command') continue
       const r = require('node:child_process').spawnSync(process.platform === 'win32' ? 'bash' : '/bin/sh', ['-c', h.command], { input: JSON.stringify({ hook_event_name: 'PreToolUse', session_id: id, cwd: process.cwd(), tool_name: name, tool_input: input }), encoding: 'utf8', timeout: (h.timeout || 60) * 1000 })
       const why = String(r.stderr || '').trim()
-      note('hooks.log', { tool: name, path: input.file_path || null, status: r.status, why: why.slice(0, 300) })
+      // (Its command too: Claude Code may quote it back to the agent when it refuses.)
+      note('hooks.log', { tool: name, path: input.file_path || null, status: r.status, why: why.slice(0, 300), command: String(h.command).slice(0, 4000) })
       if (r.status === 2) return { ok: false, why }
     }
   }
