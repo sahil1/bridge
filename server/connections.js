@@ -11,7 +11,9 @@
 //                                      one bot's own: that bot), owner (you there), defaults (the
 //                                      channels each go to one bot: [{ id, name, bot }]), perBot
 //                                      (a slash command for each bot, besides its own), teamsPort,
-//                                      migratedFrom, createdAt }
+//                                      migratedFrom, createdAt, paused (not connected until Start:
+//                                      one brought from another computer, or moved to one, as an
+//                                      app can't be connected from two at once; pausedWhy says so) }
 //   connections/<id>/slack.json        its tokens, as the platform's connector keeps them
 //   connections/<id>/discord.json      (slackbot.js, discordbot.js, teamsbot.js): never in
 //   connections/<id>/teams.json        config.json, never given to a model, nor shown back in full
@@ -48,6 +50,8 @@ function shape(id, j) {
   c.defaults = (Array.isArray(c.defaults) ? c.defaults : []).map(place).filter(Boolean).slice(0, 200)
   c.perBot = c.perBot === true
   c.teamsPort = Number.isInteger(c.teamsPort) ? c.teamsPort : null
+  c.paused = c.paused === true
+  c.pausedWhy = c.paused ? clean(c.pausedWhy, 300) || null : null
   return c
 }
 // (Read again at most once a second: a question asks which connection a bot is on many times.)
@@ -82,13 +86,13 @@ export const botsOn = (c, bots) => (c.bot ? bots.filter((b) => b.id === c.bot) :
 export const suggestName = (you = '') => `${String(you || '').trim().split(/\s+/)[0].toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '') || 'my'}_bot`
 
 // A new connection: a platform's shared one (one a platform), or a bot's own.
-export function create({ platform, name, shared = true, bot = null, owner = null, teamsPort = null, migratedFrom = null } = {}) {
+export function create({ platform, name, shared = true, bot = null, owner = null, teamsPort = null, migratedFrom = null, paused = false, pausedWhy = null } = {}) {
   if (!PLATFORMS.includes(platform)) throw new Error('Pick Slack, Discord or Microsoft Teams')
   const n = clean(name, NAME_MAX)
   if (!n) throw new Error('Give it a name: it\'s the app\'s name there')
   if (!bot && shared && sharedOf(platform)) throw Object.assign(new Error(`There's a shared ${platform === 'teams' ? 'Microsoft Teams' : platform === 'discord' ? 'Discord' : 'Slack'} connection already`), { status: 409 })
   if (bot && ownOf(bot, platform)) throw Object.assign(new Error('That bot has a connection of its own there already'), { status: 409 })
-  const c = shape(nextId(), { name: n, platform, shared: !bot, bot, owner, teamsPort, migratedFrom, createdAt: new Date().toISOString() })
+  const c = shape(nextId(), { name: n, platform, shared: !bot, bot, owner, teamsPort, migratedFrom, paused, pausedWhy, createdAt: new Date().toISOString() })
   write(c)
   return c
 }

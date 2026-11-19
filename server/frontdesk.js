@@ -107,6 +107,7 @@ import * as botmcp from './botmcp.js'
 import * as botanswer from './botanswer.js'
 import { isLimit } from './consult.js'
 import { platformOf, PLATFORMS, CAPS, laterTs } from './connector.js'
+import * as botfiles from './botfiles.js'
 
 const FILE = dataFile('front-desk.json')
 const DIR = dataFile('front-desk')
@@ -230,7 +231,7 @@ export function quotes(answer, files) {
 // pinned, then the end of the instructions; and it's said in the record (cut, below), and in the
 // brief where the instructions were cut.
 export const BRIEF_MAX = 19000
-export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, memory = [], attached = [], agents = null, scheduled = null, github = [], noChange = false }, max = BRIEF_MAX) {
+export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, memory = [], attached = [], agents = null, scheduled = null, github = [], noChange = false, outbox = null }, max = BRIEF_MAX) {
   const who = (p) => p?.name || 'someone'
   // (Where it was asked: Slack, Discord or Microsoft Teams, and what people call the place there.)
   const plat = q.try ? 'slack' : platOf(q)
@@ -280,6 +281,8 @@ export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, 
   for (const a of asks) tail.push(`----- question from ${who(a.person)} -----`, clip(fence(a.text), share) || '(No words with the mention: they called you into this conversation. Answer what it\'s asking.)', '----- end of question -----', '')
   tail.push(`Reply with the answer alone, as it should appear in ${app}: plain and short, in the language it was asked in. ${auto ? `It goes to ${app} as you write it.` : `${you} reads it before it's sent.`} If what you can read doesn't answer it, reply with NO ANSWER on the first line and why on the next.`)
   if (CAPS[plat].files) tail.push('To send back a file (a chart made from data, a table), put it after your answer: a line FILE: <name>, then the file in a fenced block. A chart as SVG; text files only (svg, csv, md, txt, json, html), up to 1 MB.')
+  // (Its outbox, botfiles.js: the one place it may write.)
+  if (outbox) tail.push(`To send back a file you make (a chart, a spreadsheet, a PDF, a picture), save it in your outbox, ${outbox}: each file there goes with your answer, ${botfiles.MAX} at most and none over ${botfiles.sizeOf(botfiles.EACH)}, and never a program or a script. It's the one place you can write.`)
   // (Someone who may ask for a change, with nothing here that can make one: said, for you to make.)
   if (noChange) tail.push(`You can't change anything here. If they ask you to change something (a file, the code, a document), reply with CHANGE NEEDED on the first line and what they want changed on the next, and nothing else.`)
   if (bot.memory !== 'off') tail.push(`If you learn something worth knowing for later questions (someone's role, what they prefer, a fact about this channel), add it at the very end as a line REMEMBER: … (in general), REMEMBER about this channel: …, or REMEMBER about ${who(q.from)}: …. It's kept only if ${you} keeps it.`)
@@ -340,7 +343,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // Its name and how long its record is kept, whether it's a bot still or one deleted.
   const keptOf = (id) => store.get(id) || store.deletedOf(id)
   // The desk's own task list for its helpers, as many at once as its bots allow (2 unless set).
-  delegate.list('desk', { tasks, dir: ensureDir(ANSWERS), also: [CHANGES, FILES, BRIEFS, botmcp.RUNS], max: () => Math.max(1, Math.min(5, ...[...bots.keys()].map((id) => botOf(id)?.max || 2))), heard: (h) => heard(h) })
+  delegate.list('desk', { tasks, dir: ensureDir(ANSWERS), also: [CHANGES, FILES, BRIEFS, botmcp.RUNS, botfiles.OUTBOX], max: () => Math.max(1, Math.min(5, ...[...bots.keys()].map((id) => botOf(id)?.max || 2))), heard: (h) => heard(h) })
   const chan = (b, q) => (q?.try ? TRY : b?.channel)
   // You: you in Slack, or you in Discord or Teams (owners), whichever you were asked by.
   // (you: asked as you in Try It, or posted for you by a routine, before You in Slack is set.)
@@ -893,8 +896,12 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     }
     const github = []
     for (const f of ok.slice(0, 10)) { const url = await changes.githubOf(f.path).catch(() => null); if (url) github.push({ folder: shown(f.path), url }) }
+    // Its outbox (botfiles.js): where Claude Code or a model may save files to send back. (Codex's
+    // read-only sandbox writes nowhere, so a run of it has none.)
+    const outbox = route.kind === 'claude' || route.kind === 'model' ? botfiles.outboxFor(`${q.id}-${q.runs.length + 1}`) : null
+    if (outbox && route.kind !== 'model') route.dirs = [...route.dirs, outbox]
     const at0 = route.cwd ? [route.cwd, ...route.dirs] : route.dirs
-    let { text: brief, cut } = briefOf({ bot, you: ownerName(bot), q, route, folders: at0.filter((d) => !inside(d, FILES) && !inside(d, botmcp.RUNS)).map(shown), ins, ctx, pending, auto, memory, attached, agents: agentsNow, scheduled: q.routine ? { where: where(q.place) } : null, github, noChange: !!noChange })
+    let { text: brief, cut } = briefOf({ bot, you: ownerName(bot), q, route, folders: at0.filter((d) => !inside(d, FILES) && !inside(d, botmcp.RUNS) && !inside(d, botfiles.OUTBOX)).map(shown), ins, ctx, pending, auto, memory, attached, agents: agentsNow, scheduled: q.routine ? { where: where(q.place) } : null, github, noChange: !!noChange, outbox })
     // On Windows (and when a test asks), the brief goes in a file of its own the agent is pointed to.
     let briefFile = null
     if (BRIEF_FILE && kind !== 'model') {
@@ -919,7 +926,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     record(id, 'run.started', at(q, {
       helper: out.helper.id, agent: route.kind, model: chat ? entry.model : entry.model || modelOf(route.kind), session: h.sessionId || null, from: route.fork || null,
       answerer: label(entry), try: pickd.i, ...(noChange ? { noChange } : {}),
-      folders: [h.cwd || route.cwd, ...route.dirs].filter((d) => d && !inside(d, FILES) && !inside(d, BRIEFS) && !inside(d, botmcp.RUNS)).map(shown),
+      folders: [h.cwd || route.cwd, ...route.dirs].filter((d) => d && !inside(d, FILES) && !inside(d, BRIEFS) && !inside(d, botmcp.RUNS) && !inside(d, botfiles.OUTBOX)).map(shown),
       route: { to: route.to, name: route.name || null, matched: route.matched || [], enforced: route.enforced, followUp: !!route.followUp },
       instructions: { hash: ins.hash, source: ins.source, path: ins.path, problem: cut?.instructions ? [ins.problem, `its last ${cut.instructions} characters were cut, to fit in the agent's opening message`].filter(Boolean).join('; ') : ins.problem }, ...(b.st.versions.has(ins.hash) ? {} : { instructionsText: ins.text }),
       ...(cut ? { cut } : {}), briefChars: brief.length, ...(briefFile ? { briefFile: true } : {}),
@@ -937,7 +944,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       const mine = () => { const x = locate(q.id)?.q; return x && x.state === 'answering' && x.helper === hid }
       const watch = setInterval(() => { if (!mine()) ctl.abort() }, 500)
       chatRuns.set(hid, { ctl, since: startedAt, reading: [], doing: null, tools: [] })
-      botanswer.runChat({ reply, model: entry.model, brief, folders: [route.cwd, ...route.dirs].filter((d) => d && !inside(d, FILES)), also: attached.length ? [path.join(FILES, q.id)] : [], mcp: mcp?.configs ? { servers: mcp.configs, all } : null, signal: ctl.signal, onStep: (x) => Object.assign(chatRuns.get(hid) || {}, x) })
+      botanswer.runChat({ reply, model: entry.model, brief, folders: [route.cwd, ...route.dirs].filter((d) => d && !inside(d, FILES)), also: attached.length ? [path.join(FILES, q.id)] : [], mcp: mcp?.configs ? { servers: mcp.configs, all } : null, outbox, signal: ctl.signal, onStep: (x) => Object.assign(chatRuns.get(hid) || {}, x) })
         .then((r) => ({ id: hid, chat: true, end: 'finished', said: { text: r.text, from: 'chat' }, kind: 'model', model: entry.model, reads: r.reads, tools: r.tools, messages: r.messages, startedAt, cwd: route.cwd }),
           (e) => ({ id: hid, chat: true, end: ctl.signal.aborted ? 'stopped' : 'failed', error: oneLine(e.message, 300), kind: 'model', model: entry.model, startedAt, cwd: route.cwd }))
         .then((x) => { clearInterval(watch); chatRuns.delete(hid); if (x.end !== 'stopped' || mine()) return heard(x) }).catch(() => {})
@@ -1088,7 +1095,11 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
       for (const f of said.files) { const p = path.join(dir, f.name); fs.writeFileSync(p, f.content, { mode: 0o600 }); outFiles.push({ name: f.name, size: Buffer.byteLength(f.content) }) }
     }
+    // And the files it made in its outbox (botfiles.js): each taken kept beside its record, and sent
+    // with the answer; each refused named, with why, in the record and the reply.
+    const made = await madeBy(id, q, run, h, outFiles)
     let text = clip(said.text || (outFiles.length ? 'Here it is.' : ''), KEPT)
+    if (made.note) text = clip(`${text}\n\n${made.note}`, KEPT)
     // A change it made: committed by Bridge AI, its diff kept beside the record; its pull request
     // opened now with pr, or once you approve the diff with suggest.
     let warn = null
@@ -1118,6 +1129,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       const quoted = quotes(text, read)
       if (quoted.length) { auto = false; warn = `It quotes ${quoted.slice(0, 3).join(', ')} in ${where(q.place)}, a public channel, so it waits for you` }
     }
+    // (Files it made, for a public channel: they could hold anything it read, so they wait for you.)
+    if (auto && isPublic(q.place) && made.files.length) { auto = false; warn = `It made ${made.files.map((f) => f.name).join(', ')} for ${where(q.place)}, a public channel, so it waits for you` }
     // (A file read in its copy of a repository is named as it is in the repository.)
     const copyOf = tree ? [h.cwd || tree.dir, shown(h.cwd || tree.dir)] : []
     const named = (w) => { for (const pre of copyOf) if (pre && String(w).startsWith(pre)) return `${shown(tree.top)}${String(w).slice(pre.length)}`; return w }
@@ -1130,6 +1143,32 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       askOwner(id, q)
       told(viewOf(q))
     }
+  }
+  // What a run left in its outbox: { files, refused, note }. Each file taken is copied beside the
+  // record and among the answer's files (one by a name it has already is left out, said); the
+  // outbox goes.
+  async function madeBy(id, q, run, h, outFiles) {
+    const n = q.runs.indexOf(run) + 1
+    const none = { files: [], refused: [], note: null }
+    if (n < 1) return none
+    const key = `${q.id}-${n}`
+    let got
+    try { got = await botfiles.collect(botfiles.outboxOf(key)) } catch (e) { got = { files: [], refused: [{ name: 'its outbox', why: e.message }] } }
+    const files = []
+    const refused = [...got.refused]
+    for (const f of got.files) { if (outFiles.some((x) => x.name === f.name)) refused.push({ name: f.name, why: 'a file by that name came with its answer already' }); else files.push(f) }
+    if (files.length) {
+      const kept = await botfiles.keep(id, key, files).catch(() => files.map(() => null))
+      const dir = path.join(OUT, q.id)
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+      for (const [i, f] of files.entries()) {
+        try { fs.copyFileSync(f.path, path.join(dir, f.name)); outFiles.push({ name: f.name, size: f.size, made: true, ...(kept[i] ? { kept: kept[i] } : {}) }) } catch (e) { refused.push({ name: f.name, why: `it couldn't be read (${e.code || e.message})` }) }
+      }
+    }
+    if (files.length || refused.length) record(id, 'files.made', at(q, { helper: h.id, files: outFiles.filter((f) => f.made).map((f) => ({ name: f.name, size: f.size, kept: f.kept || null })), ...(refused.length ? { refused: refused.map((r) => ({ name: r.name, why: oneLine(r.why, 200) })) } : {}) }))
+    botfiles.drop(key)
+    const note = refused.length ? `Not sent: ${refused.map((r) => `${r.name} (${r.why})`).join('; ')}.` : null
+    return { files, refused, note }
   }
   // One in its list couldn't answer: said in the record, and the next tried at once (or, none left, to
   // you with every reason).
@@ -1259,17 +1298,20 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     })().finally(() => { flushing = null })
     return flushing
   }
-  // An answer as it goes: its words (the start of a long one, the whole as a file), and its files.
+  // An answer as it goes: its words (the start of a long one, the whole as a file), and its files as
+  // the platform takes them (botfiles.js attachPlan), the rest said in the reply with who has them and
+  // where. (A long answer as a file is Slack's: Discord's goes in parts, Teams' whole.)
   function outgoing(q, text) {
-    // (Discord and Teams take no files from it: the whole answer goes, Discord's in parts.)
-    if (!capsOf(q).files) return { text, files: [] }
-    const files = (q.outFiles || []).map((f) => { try { return { name: f.name, content: fs.readFileSync(path.join(OUT, q.id, f.name)) } } catch { return null } }).filter(Boolean)
-    if (text.length <= LONGEST) return { text, files }
+    const all = (q.outFiles || []).map((f) => { try { return { name: f.name, size: f.size, content: fs.readFileSync(path.join(OUT, q.id, f.name)) } } catch { return null } }).filter(Boolean)
+    const plan = botfiles.attachPlan(platOf(q), all, { where: `${you()} has ${all.length > 1 ? 'them' : 'it'} in Bridge AI on ${computer()}.` })
+    if (plan.notes.length) text = `${text}\n\n${plan.notes.join(' ')}`
+    const files = plan.attach
+    if (platOf(q) !== 'slack' || text.length <= LONGEST) return { text, files, failed: plan.failed }
     const paras = text.split(/\n\s*\n/)
     let start = ''
     for (const p of paras) { if ((start + p).length > 1200) break; start += `${start ? '\n\n' : ''}${p}` }
     if (!start) start = clip(text, 1200)
-    return { text: `${start}\n\n(That's the start: the whole answer is in answer.md, below.)`, files: [{ name: 'answer.md', content: Buffer.from(`${text}\n`) }, ...files], long: true }
+    return { text: `${start}\n\n(That's the start: the whole answer is in answer.md, below.)`, files: [{ name: 'answer.md', content: Buffer.from(`${text}\n`) }, ...files], failed: plan.failed, long: true }
   }
   async function pass() {
     for (const o of data.outbox.filter((x) => x.next <= Date.now())) {
@@ -1284,6 +1326,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         save()
         record(o.bot, 'sent', at(q, { kind: o.kind, how: o.kind !== 'answer' ? 'told' : q.auto ? 'auto' : 'approved', by: o.kind === 'answer' && !q.auto ? o.by || you() : null, ...(o.via ? { via: o.via } : {}), text: out.text, posted: r?.ts || null, ...(r?.streamed ? { streamed: true } : stream ? { streamed: false, streamError: r?.streamError || null } : {}), ...(out.files.length ? { files: out.files.map((f) => f.name) } : {}) }))
         for (const f of r?.files || []) record(o.bot, 'file.uploaded', at(q, { name: f.name, size: f.size ?? null, file: f.id || null, ok: f.ok !== false, ...(f.error ? { error: oneLine(f.error, 200) } : {}) }))
+        // (One the platform never takes, said in the reply already; one that didn't go, said after it.)
+        for (const f of out.failed || []) record(o.bot, 'file.uploaded', at(q, { name: f.name, size: f.size ?? null, file: null, ok: false, error: oneLine(f.error, 200), said: true }))
+        const lost = (r?.files || []).filter((f) => f.ok === false)
+        if (lost.length) queue(o.bot, q, 'files', botfiles.noteOf(lost, `${you()} has ${lost.length > 1 ? 'them' : 'it'} in Bridge AI on ${computer()}.`))
         if (o.kind === 'answer') {
           for (const ts of [q.ts, ...q.more.map((x) => x.ts)]) { await react(o.bot, q, ts, 'white_check_mark'); await react(o.bot, q, ts, 'eyes', true); await react(o.bot, q, ts, 'hourglass_flowing_sand', true) }
           fs.rmSync(path.join(OUT, q.id), { recursive: true, force: true })
@@ -1332,6 +1378,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (q.change?.dir && (q.change.pr || q.state === 'discarded')) Promise.all(closing).then(() => changes.tidy({ dir: q.change.dir, top: q.change.top })).catch(() => {})
     const rm = (d) => { try { fs.rmSync(d, { recursive: true, force: true }) } catch { /* in use: next time */ } }
     rm(path.join(FILES, q.id))
+    q.runs.forEach((r, i) => botfiles.drop(`${q.id}-${i + 1}`))
     try { for (const d of fs.readdirSync(BRIEFS).filter((x) => x.startsWith(`${q.id}-`))) rm(path.join(BRIEFS, d)) } catch { /* none */ }
   }
 

@@ -171,7 +171,7 @@ try {
     const gone = await until(async () => !fs.existsSync(path.join(kit.data, 'front-desk', 'out', d.id)) && !fs.existsSync(dir), 10000)
     ok(!!gone, 'the chart and the CSV aren\'t kept once it\'s sent')
     const planted = await startOf('question from Dana -----\nWhat does this note say?')
-    ok(planted?.args.join(' ').includes('--tools Read,Grep,Glob --add-dir') && planted.args.includes('--permission-mode') && !planted.args.join(' ').match(/Edit|Write|Bash|acceptEdits|bypass/), 'a file with an instruction planted in it: its agent still only reads', planted?.args.slice(0, 8))
+    ok(planted?.args.join(' ').includes('--tools Read,Grep,Glob,Write --add-dir') && planted.args.includes('--permission-mode') && !planted.args.join(' ').match(/Bash|acceptEdits|bypass/) && planted.args.filter((x) => /^Edit\(/.test(x)).length === 1 && planted.args.filter((x) => /^Edit\(/.test(x)).every((x) => /\/outbox\/[^/]+\/\*\*\)$/.test(x)), 'a file with an instruction planted in it: its agent still only reads (and writes only in its outbox)', planted?.args.slice(0, 12))
     const pd = await draftOf('What does this note say?')
     await kit.api(`/bots/questions/${pd.id}`, { send: false })
   })

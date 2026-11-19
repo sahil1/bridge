@@ -134,12 +134,12 @@ export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner'
   }
 
   // Each connection's connector running while a bot on it listens (a shared one's while Bots is on),
-  // and stopped once none does.
+  // and stopped once none does. A paused one isn't (connections.js): it runs on another computer.
   function sync() {
     const all = conns.list()
     for (const c of all) {
       const h = hubOf(c)
-      const any = on(c).length > 0 || (c.shared && enabled())
+      const any = !c.paused && (on(c).length > 0 || (c.shared && enabled()))
       if (any && !h.started) { h.started = true; h.connector.start(dispatch(c.id)) } else if (!any && h.started) { h.started = false; h.connector.stop() }
     }
     for (const [id, h] of hubs) if (!all.some((c) => c.id === id)) { if (h.started) h.connector.stop(); hubs.delete(id) }
@@ -358,6 +358,7 @@ export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner'
       state() {
         const c = conn()
         if (!c) return { state: 'no-tokens', why: null, connection: null }
+        if (c.paused) return { ...hubOf(c).connector.state(), state: 'off', why: c.pausedWhy || `${c.name} is paused`, paused: true, connection: { id: c.id, name: c.name, shared: c.shared } }
         return { ...hubOf(c).connector.state(), connection: { id: c.id, name: c.name, shared: c.shared } }
       },
       async post(reply, text, o = {}) {

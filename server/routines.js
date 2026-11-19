@@ -393,6 +393,56 @@ export function remove(id) {
   invalidate()
 }
 
+// ---------- From another computer (Back Up & Move: backup.js) ----------
+// Routines as another computer had them, added here: each under an id not taken here, and its name
+// with a number after it when one here has that name. A bot's post goes to that bot as it's called
+// here (bots: its id there -> its id here; one not brought along is left out). A scheduled one that
+// runs by itself arrives paused when asked (paused: it runs on one computer at a time). What was
+// added, and what wasn't and why: [{ from, id, name, renamed, paused }, { from, name, skipped }].
+export function bring(list, { paused = false, bots = null } = {}) {
+  const defs = readDefs()
+  const out = []
+  for (const r of Array.isArray(list) ? list : []) {
+    if (!r || typeof r !== 'object' || !String(r.name || '').trim()) continue
+    const def = { ...r }
+    if (def.to === 'bot') {
+      const to = bots?.[def.bot]
+      if (!to) { out.push({ from: r.id, name: r.name, skipped: 'its bot isn\'t among what was brought' }); continue }
+      def.bot = to
+    }
+    let id = slug(def.name)
+    while (defs.some((d) => d.id === id)) id += '-2'
+    const want = String(def.name).slice(0, 120)
+    let name = want
+    for (let i = 2; defs.some((d) => d.name.toLowerCase() === name.toLowerCase()) && i < 100; i++) name = `${want} (${i})`
+    Object.assign(def, { id, name })
+    const pause = paused && !!scheduleOf(def) && def.auto && !def.paused
+    if (pause) def.paused = true
+    // (Its times count from now here, so one that was due there isn't run here at once.)
+    if (scheduleOf(def)) def.since = new Date().toISOString()
+    defs.push(def)
+    out.push({ from: r.id, id, name, renamed: name !== want, paused: pause, scheduled: !!scheduleOf(def) && !!def.auto })
+  }
+  writeDefs(defs)
+  invalidate()
+  return out
+}
+// Those routines paused, or started again, by id, without the beta feature's say (a Move hands
+// them from one computer to the other): the ones changed.
+export function setPaused(ids, on) {
+  const want = new Set(ids)
+  const defs = readDefs()
+  const changed = []
+  for (const d of defs) {
+    if (!want.has(d.id) || !!d.paused === !!on) continue
+    if (on) d.paused = true
+    else { delete d.paused; d.since = new Date().toISOString() }
+    changed.push(d.id)
+  }
+  if (changed.length) { writeDefs(defs); invalidate() }
+  return changed
+}
+
 export const resolveCwd = (def) => expand(def.cwd || '~')
 
 // ---------- Claude Code's own /insights report (insights.js links to it) ----------

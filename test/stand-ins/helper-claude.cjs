@@ -25,7 +25,9 @@
 //                                            and by what the bot's instructions say:
 //     [sign <text>]                          ends every answer with it
 //     [try-write <name>]                     tries to write <name> in its folder first: only when
-//                                            --tools lets it Write, else it says it couldn't
+//                                            --tools lets it Write and, under --permission-mode
+//                                            dontAsk, --allowedTools allows it there (Edit(./**)),
+//                                            else it says it couldn't
 //     [try-run]                              tries to run a command (touch ran.txt): only when
 //                                            --tools lets it use Bash
 //     [try-read <path>]                      tries to read a file: one in its folder or a folder
@@ -40,6 +42,13 @@
 //     [edit-outside <path> <text>]           tries to write a file outside its folder: refused
 //                                            under --permission-mode dontAsk (Edit(./**) is only
 //                                            its folder)
+//     [make <name> <text>]                   saves <name> (with <text>, or a line saying what it
+//                                            is) in the outbox its brief names, to send back: only
+//                                            when --tools lets it Write and --allowedTools has
+//                                            Edit(//<outbox>/**), else it says it couldn't
+//     [make-exe <name>], [make-script <name>]   saves a Windows program (MZ…) or a script (#!…) there
+//     [make-big <name> <MB>]                 saves a file that many MB big there
+//     [make-link <name> <path>]              puts a link to <path> there
 //     [remember <text>]                      ends with REMEMBER: <text>
 //     [remember-me <text>]                   ends with REMEMBER about <the asker>: <text>
 //     [recall]                               says what its brief's memory gave it
@@ -183,7 +192,9 @@ function answerTurn(text) {
     for (const f of fs.readdirSync(process.cwd()).filter((x) => /\.(md|txt)$/.test(x)).slice(0, 3)) tool('Read', { file_path: path.join(process.cwd(), f) })
     const w = /\[try-write ([\w.-]+)\]/.exec(q)
     if (w) {
-      if (can('Write')) { tool('Write', { file_path: path.join(process.cwd(), w[1]) }); fs.writeFileSync(path.join(process.cwd(), w[1]), 'Written.\n'); tried('write', true); out.push(`I wrote ${w[1]}.`) } else { tried('write', false); out.push(`I can't write ${w[1]}: I have no tool that writes files.`) }
+      // (Its folder isn't one it may write in without asking, unless it's allowed there: dontAsk refuses.)
+      const mayHere = can('Write') && (!dontAsk || allowed.some((x) => /^Edit\(\.\/\*\*\)$/.test(x)))
+      if (mayHere) { tool('Write', { file_path: path.join(process.cwd(), w[1]) }); fs.writeFileSync(path.join(process.cwd(), w[1]), 'Written.\n'); tried('write', true); out.push(`I wrote ${w[1]}.`) } else { tried('write', false); out.push(can('Write') ? `I can't write ${w[1]}: writing there was refused.` : `I can't write ${w[1]}: I have no tool that writes files.`) }
     }
     if (/\[try-run\]/.test(q)) {
       if (can('Bash')) { fs.writeFileSync(path.join(process.cwd(), 'ran.txt'), ''); tried('run', true); out.push('I ran it.') } else { tried('run', false); out.push('I can\'t run commands here.') }
@@ -205,6 +216,27 @@ function answerTurn(text) {
       const f = path.resolve(m[1].replace(/^~/, home))
       const inHere = f.startsWith(process.cwd() + path.sep)
       if (can('Edit') && (!dontAsk || (inHere && editsHere))) { fs.writeFileSync(f, `${m[2]}\n`); tried('edit-outside', true); out.push(`I wrote ${m[1]}.`) } else { tried('edit-outside', false); out.push(`I couldn't write ${m[1]}: that was refused.`) }
+    }
+    // Files to send back: only in the outbox its brief names, and only when it was started able to
+    // write there, as Claude Code would be.
+    const box = (/save it in your outbox, (.+?): each file there goes/.exec(text.replace(/ · /g, '\n')) || [])[1] || null
+    const posix = (d) => { const p = path.resolve(d).replace(/\\/g, '/'); return /^[A-Za-z]:\//.test(p) ? `/${p[0].toLowerCase()}${p.slice(2)}` : p }
+    const mayMake = !!box && can('Write') && allowed.includes(`Edit(/${posix(box)}/` + '**)')
+    const make = (name, body) => {
+      if (!mayMake) { tried('make', false); out.push(`I couldn't save ${name}: I have nowhere to write.`); return }
+      const f = path.join(box, name)
+      fs.writeFileSync(f, body)
+      tool('Write', { file_path: f })
+      tried('make', true)
+      out.push(`I made ${name}.`)
+    }
+    for (const m of q.matchAll(/\[make ([\w.-]+)(?: ([^\]]+))?\]/g)) make(m[1], `${m[2] || `The ${m[1]} you asked for.`}\n`)
+    for (const m of q.matchAll(/\[make-exe ([\w.-]+)\]/g)) make(m[1], Buffer.concat([Buffer.from('MZ'), Buffer.alloc(62, 1)]))
+    for (const m of q.matchAll(/\[make-script ([\w.-]+)\]/g)) make(m[1], '#!/bin/sh\necho hello\n')
+    for (const m of q.matchAll(/\[make-big ([\w.-]+) (\d+)\]/g)) make(m[1], Buffer.alloc(Number(m[2]) * 1024 * 1024, 65))
+    for (const m of q.matchAll(/\[make-link ([\w.-]+) ([^\s\]]+)\]/g)) {
+      if (!mayMake) { out.push(`I couldn't link ${m[1]}.`); continue }
+      try { fs.symlinkSync(path.resolve(m[2].replace(/^~/, home)), path.join(box, m[1])); out.push(`I linked ${m[1]}.`) } catch (e) { out.push(`I couldn't link ${m[1]}: ${e.code}.`) }
     }
     const memo = (/----- memory -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of memory -----/.exec(text) || [])[1] || ''
     if (/\[recall\]/.test(q)) out.push(memo ? `I remember: ${memo.replace(/\n| · /g, ' ').trim()}` : 'I remember nothing.')

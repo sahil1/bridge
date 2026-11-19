@@ -466,6 +466,52 @@ async function forEachAgent(installed, kinds, fn) {
   return results
 }
 
+// ---------- To another computer (Back Up & Move: backup.js) ----------
+// Each agent's user-level servers, each entry as its config has it, values and all: for a backup,
+// sealed with your passphrase, or a move over the link between your computers; never sent to the
+// app. Bridge AI itself (bridge-ai) stays: it's written for each computer. [{ kind, name, raw }]
+export async function userServersRaw(installed) {
+  const out = []
+  for (const a of await agentsWithMcp(installed).catch(() => [])) {
+    const spec = SPECS[a.kind]
+    try {
+      const map = readConfig(spec.file(), spec.format).data?.[spec.key]
+      for (const [name, raw] of Object.entries(map && typeof map === 'object' ? map : {})) if (NAME_RE.test(name) && name !== BRIDGE && raw && typeof raw === 'object') out.push({ kind: a.kind, name, raw })
+    } catch { /* unreadable: said in Settings › MCP Servers */ }
+  }
+  return out
+}
+// The agents here that take servers (their kind and name), for what a backup would add.
+export const agentsHere = async (installed) => (await agentsWithMcp(installed).catch(() => [])).map((a) => ({ kind: a.kind, label: a.label }))
+export const hasServer = (kind, name) => { try { return hasUserServer(kind, name) } catch { return false } }
+// One of those as Settings shows a server: how it's reached, no secret's value.
+export const viewRaw = (kind, name, raw) => (SPECS[kind] ? serverView(name, raw, SPECS[kind].read) : null)
+// One of those added here to the same agent, as it was: a file edit in that agent's own format
+// (never its command line, which would need the entry taken apart), and only when it has none by
+// that name. { ok, error }
+export async function addRaw(installed, { kind, name, raw }) {
+  const spec = SPECS[kind]
+  if (!spec || !NAME_RE.test(String(name)) || !raw || typeof raw !== 'object') return { ok: false, error: 'Not a server Bridge AI can add' }
+  const agent = (await agentsWithMcp(installed).catch(() => [])).find((a) => a.kind === kind)
+  if (!agent) return { ok: false, error: `${adapter(kind).label || kind} isn't on this computer` }
+  try {
+    if (hasUserServer(kind, name)) return { ok: false, error: `${agent.label} has a server named ${name} already` }
+    if (spec.format === 'toml') {
+      await editToml(spec.file(), (text, data) => {
+        if (data?.mcp_servers?.[name]) throw new Error(`Already has a server named ${name}`)
+        return (text.trim() ? text.replace(/\s*$/, '\n\n') : '') + stringifyToml({ mcp_servers: { [name]: raw } }).trimEnd() + '\n'
+      })
+    } else {
+      await editJson(spec.file(), spec.format, spec.key, (map, root) => {
+        if (Object.hasOwn(map, name)) throw new Error(`Already has a server named ${name}`)
+        if (spec.newFile && !Object.keys(root).length) Object.assign(root, spec.newFile)
+        map[name] = raw
+      })
+    }
+    return { ok: true, label: agent.label }
+  } catch (e) { return { ok: false, error: redactText(e.message).slice(0, 300) } }
+}
+
 // ---------- Bridge AI itself, as a server for other apps ----------
 // Settings › MCP Servers' "Bridge AI as an MCP Server": `bridge-ai mcp` added, in one click, to the
 // apps that take it, each as its own docs say (read November 2026):

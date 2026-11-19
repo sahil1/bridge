@@ -101,7 +101,7 @@ try {
     const s = await startOf('enterprise price')
     const brief = briefOf(s)
     ok(/You're Atlas, Tester's bot in Discord/.test(brief) && /Tester's Discord server/.test(brief) && /as Dana wrote it in Discord/.test(brief) && /as it should appear in Discord/.test(brief), 'one agent, briefed as a bot in Discord, the question as Dana wrote it there', brief.slice(0, 600))
-    ok(!/FILE:/.test(brief), 'and not offered files to send back (Slack\'s own)')
+    ok(/FILE:/.test(brief) && /save it in your outbox/.test(brief), 'and offered files to send back, which Discord takes as attachments')
     ok(s?.args.includes('--add-dir') || s?.cwd?.endsWith('pricing'), 'reading its folder', s?.args)
     ok(!!(await until(() => reacted(q1.id, '👀'), 8000)), '👀 on the question as it starts')
     const d = await draftOf('enterprise price')

@@ -19,7 +19,9 @@
 // inside the bot's folders (their real paths, so a link out of them is refused, as Claude Code's
 // --add-dir with dontAsk refuses it), and the files attached to the question; and calls the bot's MCP
 // servers' tools under the same rules as Claude Code's runs (botmcp.js). It can't change a file, run a
-// command or reach anything else, so it's kept to its folders as Claude Code is.
+// command or reach anything else, so it's kept to its folders as Claude Code is. Its one way to make
+// a file is save_file, into its run's outbox (botfiles.js) and nowhere else, to send back with its
+// answer.
 import fs from 'node:fs'
 import path from 'node:path'
 import { adapter, readOnly, canChange } from './agents.js'
@@ -98,15 +100,18 @@ const TOOLS = [
   { name: 'list_files', description: 'List a folder you can read: its files, and its folders ending in /.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'The folder; the first of yours if not given' } } } },
   { name: 'search', description: 'Search the files in your folders for text or a regular expression. Returns "path:line: text" for each match.', parameters: { type: 'object', properties: { pattern: { type: 'string', description: 'Text or a JavaScript regular expression' }, path: { type: 'string', description: 'A folder or file to search in; all your folders if not given' } }, required: ['pattern'] } },
 ]
+const SAVE = { name: 'save_file', description: 'Save a file to send back with your answer (a chart, a table, a document). It goes in your outbox, the only place you can write.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'Its name, with its extension: chart.svg, totals.csv' }, content: { type: 'string', description: 'What it holds' }, base64: { type: 'boolean', description: 'true when content is base64 (a picture, a PDF)' } }, required: ['name', 'content'] } }
+const SAVE_MAX = 25 * 1024 * 1024
 const tilde = (p) => (p === HOME || p.startsWith(HOME + path.sep) ? `~${p.slice(HOME.length)}` : p)
 const refused = (why) => Object.assign(new Error(why), { refused: true })
 
 // A question answered by a model: { text, reads, tools, steps }. reply: chatmodels.js's. folders:
 // the folders it may read (the first, where a relative path starts); also: other folders of its own
 // (the files attached to the question); mcp: { servers: { name: config }, all } (its MCP servers, and
-// whether every tool may be used, else only those that only read). onStep({ doing, reading, tools }):
-// as it goes, for Try It. signal: stop it.
-export async function runChat({ reply, model, brief, folders = [], also = [], mcp = null, signal, onStep = () => {} }) {
+// whether every tool may be used, else only those that only read). outbox: its run's, where
+// save_file writes (botfiles.js); none, no save_file. onStep({ doing, reading, tools }): as it goes,
+// for Try It. signal: stop it.
+export async function runChat({ reply, model, brief, folders = [], also = [], mcp = null, outbox = null, signal, onStep = () => {} }) {
   const real = async (p) => fs.promises.realpath(p).catch(() => null)
   const roots = (await Promise.all(folders.map(real))).filter(Boolean)
   const allowed = [...roots, ...(await Promise.all(also.map(real))).filter(Boolean)]
@@ -141,9 +146,19 @@ export async function runChat({ reply, model, brief, folders = [], also = [], mc
     const r = await botmcp.toolsOf(server, raw)
     for (const t of r.tools || []) if (mcp.all || t.readOnly) mcpTools.set(botmcp.toolName(server, t.name), { server, tool: t.name, raw, description: t.description || t.title || t.name, schema: t.schema || { type: 'object', properties: {} } })
   }
-  const tools = [...TOOLS, ...[...mcpTools].map(([name, x]) => ({ name, description: `${x.description} (MCP server ${x.server})`, parameters: x.schema }))]
+  const tools = [...TOOLS, ...(outbox ? [SAVE] : []), ...[...mcpTools].map(([name, x]) => ({ name, description: `${x.description} (MCP server ${x.server})`, parameters: x.schema }))]
   async function run(c) {
     const a = c.args || {}
+    // (Its name only: a path in it goes nowhere but the outbox.)
+    if (c.name === 'save_file' && outbox) {
+      const name = path.basename(String(a.name || '').replace(/\\/g, '/')).replace(/[:*?"<>|\x00-\x1f]+/g, '-').replace(/^\.+/, '').slice(0, 120) // eslint-disable-line no-control-regex
+      if (!name) throw refused('Give the file a name.')
+      const body = a.base64 === true ? Buffer.from(String(a.content || ''), 'base64') : Buffer.from(String(a.content ?? ''), 'utf8')
+      if (body.length > SAVE_MAX) throw refused('That file is too big to send back.')
+      await fs.promises.writeFile(path.join(outbox, name), body, { mode: 0o600 })
+      status(`save_file: ${name}`)
+      return `Saved ${name} (${body.length} bytes): it goes with your answer.`
+    }
     if (c.name === 'read_file') {
       const p = await place(a.path)
       const st = await fs.promises.stat(p)

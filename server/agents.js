@@ -80,6 +80,17 @@ export function mcpOf(dirs = []) {
   }
   return { dirs: (dirs || []).filter((d) => !runs.includes(d)), mcp }
 }
+// A bot's run's outbox (botfiles.js): a folder of the desk's among the folders it's given
+// (front-desk/outbox/<run>/), the one place it may write, to send files back with its answer. It
+// stays among the folders it's given (--add-dir), and gets a rule of its own: Edit, which covers
+// every tool that writes a file, for that folder and what's in it (an absolute path in Claude
+// Code's rules starts with //; Windows' C:\ is /c/).
+const OUTBOXES = dataFile('front-desk', 'outbox')
+const absRule = (dir) => { const p = path.resolve(dir).replace(/\\/g, '/'); return `Edit(/${/^[A-Za-z]:\//.test(p) ? `/${p[0].toLowerCase()}${p.slice(2)}` : p}/` + '**)' }
+export const outboxOf = (dirs = []) => {
+  const box = (dirs || []).find((d) => path.dirname(path.resolve(String(d))) === OUTBOXES)
+  return box ? { dir: path.resolve(String(box)), rule: absRule(box) } : null
+}
 // Its flags (allowed: with its own --allowedTools; a bot's change has put its tools in its own).
 // Each takes a list, so another flag follows.
 const mcpFlags = (m, { allowed = true } = {}) => (m
@@ -110,12 +121,16 @@ export const AGENTS = [
     // Either way a bot's MCP servers, when it has some (mcpOf below): only those, --mcp-config with
     // --strict-mcp-config, and of their tools only the ones allowed for whoever asked (--allowedTools);
     // the rest refused by dontAsk, and named in --disallowedTools too where they're known.
+    // A bot's run with an outbox (outboxOf above): Write too in read, allowed there alone, so it
+    // can save a file to send back and change nothing else.
     access: (lvl, o = {}) => {
       if (lvl !== 'read' && lvl !== 'change') return lvl === 'edits' ? ['--permission-mode', 'acceptEdits'] : lvl === 'full' ? ['--permission-mode', 'bypassPermissions'] : []
       const { dirs, mcp } = mcpOf(o.dirs)
+      const box = outboxOf(dirs)
       const add = dirs.length ? ['--add-dir', ...dirs] : []
-      return lvl === 'read' ? ['--tools', 'Read,Grep,Glob', ...add, ...mcpFlags(mcp), '--permission-mode', 'dontAsk', '--strict-mcp-config']
-        : ['--tools', 'Read,Grep,Glob,Edit,Write', '--allowedTools', EDIT_HERE, ...(mcp ? mcp.allow : []), ...add, ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config']
+      const allow = [...(box ? [box.rule] : []), ...(mcp ? mcp.allow : [])]
+      return lvl === 'read' ? ['--tools', box ? 'Read,Grep,Glob,Write' : 'Read,Grep,Glob', ...add, ...(allow.length ? ['--allowedTools', ...allow] : []), ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config']
+        : ['--tools', 'Read,Grep,Glob,Edit,Write', '--allowedTools', EDIT_HERE, ...allow, ...add, ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config']
     },
     confined: true,
     // A copy of a conversation under a new id (the original stays as it is).

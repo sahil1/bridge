@@ -1,0 +1,5 @@
+/* The files a bot made, in its Activity (BotFiles.jsx). */
+.bf-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 3px; }
+.bf-file { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; min-width: 0; }
+.bf-name { font-weight: 500; overflow-wrap: anywhere; min-width: 0; }
+.bf-made { margin: 4px 0 2px; grid-column: 1 / -1; }

@@ -7,6 +7,7 @@ import { useFolder } from '../files/fsapi.js'
 import { ago } from '../Machines.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { Connections, BotReach } from '../bots/Connections.jsx'
+import BotFiles, { MadeFiles } from '../bots/BotFiles.jsx'
 import { t } from '../../i18n/index.js'
 import './bots.css'
 
@@ -1395,6 +1396,7 @@ function eventLine(e) {
     case 'change.approved': return e.via === 'slack' ? t('{name} approved the change from Slack', { name: by }) : t('{name} approved the change', { name: by })
     case 'change.failed': return t('The change couldn\'t go through ({step}): {why}', { step: e.step || '', why: e.error || '' })
     case 'pr.opened': return t('Opened a draft pull request')
+    case 'files.made': return e.files?.length ? t('Made {files}', { files: e.files.map((f) => f.name).join(', ') }) : t('Made no file it could send')
     case 'file.uploaded': return e.ok === false ? t('Couldn\'t send the file {name}: {why}', { name: e.name, why: e.error || '' }) : t('Sent the file {name} ({size})', { name: e.name, size: sizeOf(e.size) })
     case 'forgotten': return t('{name} asked it to forget them: {memory} things it remembered deleted, their words blanked in {events} events', { name: who, memory: e.memory ?? 0, events: e.events ?? 0 })
     case 'status': return e.ok === false ? t('Couldn\'t set Slack\'s working status: {why}', { why: e.error || '' }) : e.on ? t('Showed Slack\'s working status') : t('Cleared Slack\'s working status')
@@ -1417,6 +1419,7 @@ function Events({ d, events }) {
           {e.type === 'context' && (e.messages?.length > 0 || e.pins?.length > 0) && (
             <details className="sb-ctx"><summary><Icon name="chevron" size={11} />{t('What it read')}</summary><ul>{[...(e.messages || []), ...(e.pins || [])].map((m, k) => <li key={k} className="small"><b>{m.you ? d.name : m.person?.name || m.person?.id}</b>: {wordsOf(m.text)}</li>)}</ul></details>
           )}
+          {e.type === 'files.made' && <MadeFiles bot={d.id} e={e} />}
           {e.type === 'change.proposed' && (e.stat || e.diff) && (
             <details className="sb-ctx"><summary><Icon name="chevron" size={11} />{t('The diff')}</summary>{e.stat && <p className="small mono sb-stat">{e.stat}</p>}{e.diff && <pre className="sb-diff">{e.diff}</pre>}</details>
           )}
@@ -1533,6 +1536,7 @@ function Activity({ d, save }) {
           ))}
         </ul>
       )}
+      <BotFiles d={d} />
       {x?.changes?.length > 0 && (
         <details className="sb-ctx sb-changes" data-setting="bots-changes">
           <summary><Icon name="chevron" size={11} />{t('Changes to it ({n})', { n: x.changes.length })}</summary>

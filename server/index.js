@@ -127,6 +127,8 @@ import * as machines from './machines.js'
 import { machine } from './machine.js'
 import { osVersion, chipOf, memoryRange, coreRange } from './system.js'
 import * as transfers from './transfers.js'
+import * as backup from './backup.js'
+import * as botfiles from './botfiles.js'
 import { mediaNamed } from '../shared/media.js'
 import * as counts from './counts.js'
 import * as updates from './updates.js'
@@ -254,6 +256,8 @@ const jsonFor = (req) => (req.method === 'PUT' && /^\/api\/agents\/[^/]+\/file$/
   // An outside app's new file or suggestion, through MCP (mcptools.js takes up to 2 MB of text).
   : /^\/(mcp|api\/mcp-server\/call)$/.test(req.path) ? jsonFile
   : /^\/api\/boards(\/|$)/.test(req.path) ? jsonBoard
+  // A backup opened, or a move from another of your computers: a whole setup (backup.js).
+  : req.method === 'POST' && /^\/api\/backup\/(open|incoming)$/.test(req.path) ? jsonBoard
   : req.method === 'POST' && /^\/api\/studio\/(new|picture)$/.test(req.path) ? jsonStudio
   : req.method === 'POST' && req.path === '/api/studio/deck/ai' ? jsonDeckAi
   : jsonSmall)
@@ -503,6 +507,8 @@ const rootOf = async (pane) => {
   }
   // A folder Studio's home found one of your files in (studiofound.js).
   if (String(pane).startsWith('found:')) return studioFound.foundDir(String(pane).slice(6))
+  // The files a bot's runs made, kept beside its record (botfiles.js): only to open and send on.
+  if (String(pane).startsWith('botfiles:')) { const d = botfiles.filesDir(String(pane).slice(9)); if (!d) throw new Error('No such bot'); return d }
   // Studio's home: your home folder (home) and this computer's drives (drive:<key>).
   if (explorer.isFilesRoot(pane)) return explorer.rootDir(String(pane))
   const p = ((await rt.fleet()).panes || []).find((x) => x.paneId === pane)
@@ -542,6 +548,14 @@ app.use('/api/agents/:pane', async (req, res, next) => {
     if (site && !req.headers['x-bridge-relay'] && req.headers['sec-fetch-site'] === 'cross-site' && !sameServer(req)) return res.status(403).json({ error: 'Not from another site' })
     next()
   } catch (e) { res.status(e.status || 502).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }) }
+})
+// A bot's files (botfiles: roots): opened, shown in Finder and sent on (Send to…), never changed
+// through these routes; and only while Bots is on.
+app.use('/api/agents/:pane', (req, res, next) => {
+  if (!String(req.params.pane).startsWith('botfiles:')) return next()
+  if (!trialOn('slack-bot')) return res.status(404).json({ error: 'Bots is a beta feature. Turn it on in Settings › About & Updates › Beta Features.', trial: 'slack-bot' })
+  if (['GET', 'HEAD'].includes(req.method) || (req.method === 'POST' && req.path === '/fileop' && LOOK_ONLY.has(req.body?.op))) return next()
+  return res.status(403).json({ error: 'A bot\'s files are only to open and send on from here', code: 'readOnly' })
 })
 // A request a page of this server's made: its Referer is this server.
 const sameServer = (req) => { try { return new URL(req.headers.referer || '').host === req.headers.host } catch { return false } }
@@ -879,6 +893,8 @@ app.post('/api/transfers', tx((req) => {
   // From a window showing another computer (machinepages.js): only that computer's files copied here.
   if (req.machinePage && (req.body?.from !== req.machinePage || req.body?.to)) throw Object.assign(new Error(machinePages.elsewhere(relay.thisName())), { status: 403, code: 'machinePage' })
   counts.add('files.sent')
+  // (A bot's file is sent on, never moved: it stays beside its record.)
+  if (String(req.body?.src?.pane || '').startsWith('botfiles:')) req.body.move = false
   return transfers.start(req.body || {}, { here: fromHere(req) })
 }))
 app.post('/api/transfers/clear', tx(() => transfers.clear()))
@@ -4788,7 +4804,9 @@ async function connView(c) {
     id: c.id, name: c.name, platform: c.platform, shared: c.shared, own: c.bot ? { id: c.bot, name: botsStore.get(c.bot)?.name || c.bot } : null,
     bots: on.map((b) => ({ id: b.id, name: b.name, description: b.description || '', paused: b.paused, command: slack && c.perBot ? slackCommand(b.name) : null })),
     owner: c.owner, defaults: c.defaults, perBot: c.perBot, createdAt: c.createdAt || null,
-    state: s.state, why: s.why || null, since: s.since || null, lastEvent: s.lastEvent || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null, appId: s.appId || null,
+    // (Paused: brought from another computer, or moved to one; Settings › Back Up & Move starts it.)
+    paused: c.paused ? { why: c.pausedWhy || null } : null,
+    state: c.paused ? 'off' : s.state, why: c.paused ? c.pausedWhy || null : s.why || null, since: s.since || null, lastEvent: s.lastEvent || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null, appId: s.appId || null,
     // (Discord's server, intents and invite; Teams' endpoint, port and app: as each says them.)
     status: slack ? null : s,
     reached, you: String(cfg.name || '').trim() || null,
@@ -4934,6 +4952,36 @@ app.delete('/api/connections/:cid', botsGuard, wrapBot(async (req) => {
   pushFleet()
   return { ok: true }
 }))
+// ---------- Back Up & Move (backup.js) ----------
+// This computer's setup as one file sealed with a passphrase, or straight to another of your
+// computers over the link between them; and one from another computer, applied here once you say so,
+// its connections paused until the one it came from has stopped its bots (or you Start them).
+backup.use({
+  computer: () => relay.thisName(), installed,
+  memoryOf: (id) => desk.memory.list(id).filter((x) => x.state === 'kept').map(({ id: mid, kind, of, ofName, text, state }) => ({ id: mid, kind, of, ofName, text, state })),
+  // A bot from another computer, as an imported one is (/api/bots/import), saying where it came from.
+  bring: (bundle, { paused = false, why = null } = {}) => {
+    const r = botsStore.fromBundle(bundle, botOwnerName())
+    if (paused) botsStore.save(r.bot.id, { paused: true })
+    connectBot(r.bot.id)
+    const kept = desk.memory.bring(r.bot.id, r.memory)
+    desk.record(r.bot.id, 'settings.changed', { setting: 'imported', old: null, new: { name: r.bot.name, memory: kept, from: String(bundle?.exportedAt || '') || null }, by: 'Bridge AI', ...(why ? { why: String(why).split(':')[0] } : {}) })
+    return r
+  },
+  pauseBot: (id, why) => { const { before, after } = botsStore.save(id, { paused: true }); desk.record(id, 'settings.changed', { setting: 'paused', old: before.paused, new: after.paused, by: 'Bridge AI', why }); desk.pause(id).catch(() => {}) },
+  unpauseBot: (id) => { const { before, after } = botsStore.save(id, { paused: false }); desk.record(id, 'settings.changed', { setting: 'paused', old: before.paused, new: after.paused, by: botOwnerName() }) },
+  saveSettings: (p) => afterChange(settings.patch(p)),
+  teamsPort: () => freeTeamsPort(),
+  synced: () => { hubs.sync(); desk.sync(); pushFleet() },
+})
+backup.routes(app, {
+  here: (req) => fromHere(req), viaMachine: (req) => viaMachine(req),
+  machineOf: (req) => (viaMachine(req) ? machines.ofDevice(relay.deviceOf(req.headers['x-bridge-relay'])) : null),
+  notify: (o) => notify.send(o).catch(() => {}),
+})
+// The files a bot's runs made and sent back, newest first (its Activity lists them, with Open and
+// Send to…).
+app.get('/api/bots/:id/files', botsGuard, wrapBot(async (req) => ({ files: await botfiles.list(recordOr404(req.params.id).id) })))
 // A bot given a connection of its own there (an app of its own, named as it is: its steps then);
 // and moved back to the shared one, its own connection's tokens deleted (its app can be deleted on
 // the platform afterwards).

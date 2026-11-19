@@ -16,6 +16,7 @@ import Mail from './settings/Mail.jsx'
 import Voice from './settings/Voice.jsx'
 import Dictation from './settings/Dictation.jsx'
 import CloudKeys from './settings/CloudKeys.jsx'
+import BackUp from './settings/BackUp.jsx'
 import ErrorBoundary from './ErrorBoundary.jsx'
 import { SettingsAt } from './settings/where.js'
 import { AdvancedFrame, reveal } from './settings/Advanced.jsx'
@@ -51,6 +52,7 @@ export const SECTIONS = [
   { id: 'devices', label: tx('Devices'), icon: 'phone', hint: tx('Your phone and your other computers, through your relay or Tailscale; what to notify you about'),
     accountsLabel: tx('Account & Devices'), accountsHint: tx('Your Bold Bridge account and Bridge AI\'s relay, your phone and your other computers; what to notify you about'),
     tabs: [{ id: 'account', label: tx('Account'), accounts: true }, { id: 'phone', label: tx('Phone') }, { id: 'machines', label: tx('Computers') }, { id: 'notifications', label: tx('Notifications') }] },
+  { id: 'backup', label: tx('Back Up & Move'), icon: 'archive', hint: tx('Your setup here, to another computer: a file sealed with a passphrase, or straight to a linked one') },
   { id: 'appearance', label: tx('Appearance'), icon: 'palette', hint: tx('Theme, text size, density') },
   { id: 'config', label: tx('Config File'), icon: 'braces', hint: tx('Every setting, as JSON') },
   { id: 'about', label: tx('About & Updates'), icon: 'info', hint: tx('Version, updates, beta features, the tour, reporting a problem') },
@@ -140,6 +142,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
     {at === 'mail' && <Mail />}
     {at === 'mcp' && <Mcp />}
     {at === 'slack-bot' && <Bots />}
+    {at === 'backup' && <BackUp />}
     {at === 'appearance' && <Appearance />}
     {at === 'config' && <ConfigFile />}
     {cur.id === 'devices' && at !== 'account' && <Phone tab={at} focus={section === 'machines' ? 'machines' : null} />}

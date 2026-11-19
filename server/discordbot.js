@@ -35,8 +35,10 @@
 // Replies: a question at the top of a channel gets a thread started from it, named after it, and
 // the answer goes in there (so a follow-up is in the thread, needing no mention); a question in a
 // thread or a direct message, a reply there. A reply over 2,000 characters (Discord's longest) goes
-// in parts. On a shared connection (connhub.js), an answer goes through the channel's webhook, made
-// once and kept with the token, with the bot's name and picture; where the app can't make one (no
+// in parts. Files a bot made (botfiles.js) go after its words, as attachments of a message of their
+// own (multipart, as Discord takes files), so a file Discord turns away (too big, say) never keeps
+// the words from going: it's said in what post() gives back. On a shared connection (connhub.js),
+// an answer goes through the channel's webhook, made once and kept with the token, with the bot's name and picture; where the app can't make one (no
 // Manage Webhooks), and in direct messages, it starts with the bot's name. Nothing posted can ping
 // anyone (allowed_mentions: none). The REST API's rate limits are
 // kept: each route's bucket as Discord's headers say, and a 429 waits as long as it says (a global
@@ -185,7 +187,7 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
   const buckets = new Map()
   let globalUntil = 0
   const bucketOf = (method, route) => `${method} ${route.replace(/^\/(channels|guilds)\/(\d+)/, '/$1/<$2>').replace(/\/\d+/g, '/:id').replace(/\/reactions\/[^/]+/, '/reactions/:e')}`
-  async function call(method, route, { body = null, query = null, token = kept.token, waits = 3, hook = false } = {}) {
+  async function call(method, route, { body = null, form = null, query = null, token = kept.token, waits = 3, hook = false } = {}) {
     if (!token && !hook) throw failure('No bot token yet', 'not_authed')
     const url = new URL(API() + route)
     for (const [k, v] of Object.entries(query || {})) if (v != null) url.searchParams.set(k, String(v))
@@ -195,7 +197,7 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
       if (hold > 0) await sleep(Math.min(hold, 60000))
       let res
       try {
-        res = await fetch(url, { method, headers: { ...(hook ? {} : { authorization: `Bot ${token}` }), 'user-agent': AGENT, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000) })
+        res = await fetch(url, { method, headers: { ...(hook ? {} : { authorization: `Bot ${token}` }), 'user-agent': AGENT, ...(body ? { 'content-type': 'application/json' } : {}) }, body: form || (body ? JSON.stringify(body) : undefined), signal: AbortSignal.timeout(form ? 120000 : 20000) })
       } catch (e) {
         throw failure(`Couldn't reach Discord: ${e.cause?.code || e.message}`, 'offline')
       }
@@ -610,7 +612,23 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
       return null
     }
   }
-  function post(reply, text, { as = null } = {}) {
+  // Files, as a message of their own after the words (where they went: hook, target): each said in
+  // what comes back, { name, size, ok, error }, never thrown.
+  async function attach(files, { hook, target, as }) {
+    const fd = new FormData()
+    const named = files.map((f) => String(f.name || 'file').replace(/[\\/:*?"<>|\r\n\t]+/g, '-').slice(0, 120) || 'file')
+    fd.append('payload_json', JSON.stringify({ content: '', attachments: named.map((n, i) => ({ id: i, filename: n })), allowed_mentions: { parse: [] }, ...(hook ? { username: clip(as.name, 80), ...(/^https:\/\/\S{1,500}$/.test(String(as.icon || '')) ? { avatar_url: as.icon } : {}) } : {}) }))
+    const sizes = []
+    files.forEach((f, i) => { const b = Buffer.isBuffer(f.content) ? f.content : Buffer.from(String(f.content ?? ''), 'utf8'); sizes.push(b.length); fd.append(`files[${i}]`, new Blob([b]), named[i]) })
+    try {
+      const j = hook
+        ? await call('POST', `/webhooks/${hook.id}/${hook.token}`, { hook: true, query: { wait: 'true', ...(target !== parentOf(target) ? { thread_id: target } : {}) }, form: fd, waits: 1 })
+        : await call('POST', `/channels/${target}/messages`, { form: fd, waits: 1 })
+      if (j?.id) remember(where, j.id, target)
+      return named.map((n, i) => ({ id: j?.attachments?.[i]?.id || null, name: n, size: sizes[i], ok: true }))
+    } catch (e) { return named.map((n, i) => ({ id: null, name: n, size: sizes[i], ok: false, error: e.message, code: e.code || null })) }
+  }
+  function post(reply, text, { as = null, files = [] } = {}) {
     const go = line.then(async () => {
       if (!reply?.channel) throw failure('Nowhere to reply to', 'invalid_arguments')
       const key = `${reply.message}:${String(text).length}`
@@ -649,7 +667,8 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
         throw e
       }
       partial.delete(key)
-      return { ts: ids[0], channel: target, parts: ids, ...(hook ? { hook: true } : {}) }
+      const sent = files.length ? await attach(files.slice(0, 10), { hook, target, as }) : []
+      return { ts: ids[0], channel: target, parts: ids, files: sent, ...(hook ? { hook: true } : {}) }
     })
     line = go.catch(() => {})
     return go
