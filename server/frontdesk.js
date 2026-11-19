@@ -728,7 +728,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   }
   // Your Claude Code's managed settings turning off the hook that every run changing files needs
   // (disableAllHooks, or only its own hooks: allowManagedHooksOnly), said; null when they don't.
-  // BRIDGE_CLAUDE_MANAGED: another file to read as them (tests).
+  // BRIDGE_CLAUDE_MANAGED: another file to read as them (tests). Only the managed-settings.json file
+  // is read: settings an organization pushes some other way (a Mac's configuration profile) aren't
+  // seen here, and a hook they turn off lets nothing through anyway: the run's log has nothing in it,
+  // so every file it changed is refused (botwrite.js guardCheck).
   const MANAGED = process.env.BRIDGE_CLAUDE_MANAGED ? [process.env.BRIDGE_CLAUDE_MANAGED]
     : process.platform === 'darwin' ? ['/Library/Application Support/ClaudeCode/managed-settings.json']
       : IS_WIN ? ['C:\\ProgramData\\ClaudeCode\\managed-settings.json', 'C:\\Program Files\\ClaudeCode\\managed-settings.json'] : ['/etc/claude-code/managed-settings.json']
@@ -823,6 +826,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const q = st.questions.get(qid)
     // (Who asked, as the platform said: a bot that hands this on gives it to the other bot as theirs.)
     if (q && qid !== busy?.id) q.asker = m.from?.id ? { id: m.from.id, name: m.from.name || null, ...['guest', 'external', 'unknown'].reduce((o, k) => (m.from[k] ? { ...o, [k]: true } : o), {}) } : null
+    // (Handed on from another bot's run: whoever joined that run, with their words, joined to this one.)
+    if (q && qid !== busy?.id && !why && m.handed?.by) {
+      for (const x of (m.handed.also || []).slice(0, 50)) record(id, 'received', { q: qid, ...fields, person: { id: x.person?.id || null, name: x.person?.name || null }, text: clip(x.text, 4000), ts: x.ts || m.ts, asked: x.at || now(), how: 'follow-up', joined: true })
+    }
     if (q && m.files?.length && qid !== busy?.id) q.attach = m.files
     else if (busy && m.files?.length) busy.attachMore = [...(busy.attachMore || []), ...m.files]
     // Not someone it answers: a polite no, or nothing, as you said (and nothing for a reply in a
@@ -1920,9 +1927,14 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     q.checking = true // (told it's being checked: nothing more to say while it waits)
     queue(id, q, 'waits', text, { change: w.id, ...(platOf(q) === 'slack' ? { buttons: [{ id: 'bb_wok', label: 'Approve', value, style: 'primary' }, { id: 'bb_wno', label: 'Deny', value, style: 'danger' }] } : {}) })
     if (platOf(q) !== 'slack') {
+      // (Its code only with all of it shown: one cut, or with a file that can't be shown, is approved
+      // in Needs You, which shows all of it.)
+      const plat = platOf(q)
       const diff = String(c.diff || w.diff || '')
-      const cut = diff.length > 900
-      await askOwnerWords(id, q, `${bot.name}: ${q.from?.name || 'someone'} asked in ${where(q.place)} for a change: “${oneLine(q.text, 200)}”. It changes ${filesSaid(w.files)}${w.held.length ? ` (${botwrite.heldSaid(w.held)})` : ''}:\n\`\`\`\n${clip(diff, 900).replace(/```/g, '`​``')}\n\`\`\`\n${cut ? `That's cut: the whole diff is in Needs You, which shows all of it before you approve. ` : ''}Reply “approve ${n} ${w.hash.slice(0, 8)}” to make it, or “deny ${n}”.`, { write: w.id })
+      const how = botwrite.shownWhole(plat, c)
+        ? `Reply “approve ${n} ${w.hash.slice(0, 8)}” to make it, or “deny ${n}”.`
+        : `${botwrite.unshownIn(c) ? 'Part of it can\'t be shown in a message' : 'That\'s cut, as all of it doesn\'t fit here'}: approve it in Needs You, which shows all of it, or reply “deny ${n}”.`
+      await askOwnerWords(id, q, `${bot.name}: ${q.from?.name || 'someone'} asked in ${where(q.place)} for a change: “${oneLine(q.text, 200)}”. It changes ${filesSaid(w.files)}${w.held.length ? ` (${botwrite.heldSaid(w.held)})` : ''}:\n\`\`\`\n${clip(diff, botwrite.SHOWN[plat] || 900).replace(/```/g, '`​``')}\n\`\`\`\n${how}`, { write: w.id })
     }
   }
   // Undo on its reply in Slack, for a change made: its button's code, only for this change.
@@ -1976,7 +1988,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     react(id, q, q.ts, 'eyes', true)
     done(q)
     changed()
-    await hear(to.id, { ts: q.ts, channel: q.channel, thread: q.thread, mention: true, dm: q.place?.kind === 'dm', from: asker, text: q.text, place: q.place, at: q.at, late: false, reply: q.reply, platform: plat, handed: { by: id, name: bot.name } })
+    // (And whoever joined its run in the thread, with their words: the other bot hears them as joined
+    // to the same question, so a change it makes counts them too.)
+    const also = q.more.filter((x) => x.person?.id).map((x) => ({ person: { id: x.person.id, name: x.person.name || null }, text: x.text || '', ts: x.ts, at: x.at }))
+    await hear(to.id, { ts: q.ts, channel: q.channel, thread: q.thread, mention: true, dm: q.place?.kind === 'dm', from: asker, text: q.text, place: q.place, at: q.at, late: false, reply: q.reply, platform: plat, handed: { by: id, name: bot.name, also } })
   }
 
   // Your words about a change or a held request ("approve 12 ab3f19c2", "deny 12", "allow 12",
@@ -2006,6 +2021,14 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (!isOwner(bot, m.from)) { await reply(`Only ${ownerName(bot)} can ${act === 'allow' ? 'allow' : act === 'approve' ? 'approve' : 'decide'} that, and they've been asked.`); return true }
     if (q.state === 'screened') { await screenAct(q.id, act === 'allow', { by, via }); await reply(act === 'allow' ? `Allowed once: ${bot.name} starts on it now.` : 'Denied: they\'re told.'); return true }
     if (act === 'deny') { await decide(q.id, { send: false, by, via }); await reply('Denied: nothing was changed, and they\'re told.'); return true }
+    // (Only a change shown whole where you're approving it, in words: else where it can be, and its
+    // code isn't given.)
+    const c = await botwrite.load(writesDir(id), q.write.id)
+    if (!botwrite.shownWhole(via, c)) {
+      const why = botwrite.unshownIn(c) ? 'Part of this change can\'t be shown in a message (a binary file, or one too long)' : 'All of this change doesn\'t fit in a message here'
+      await reply(`${why}, so it isn't approved in words: ${via === 'slack' && !botwrite.unshownIn(c) ? 'press Approve on its card, which shows you all of it first, or ' : ''}approve it in Needs You in Bridge AI, which shows all of it.`)
+      return true
+    }
     const code = String(x[3] || '').toLowerCase()
     if (!code || !q.write.hash.startsWith(code)) { await reply(`Say “approve ${numOf(q)} ${q.write.hash.slice(0, 8)}”: that code is this change's, so it's the change you were shown${code ? '. The one you gave isn\'t' : ''}.`); return true }
     try {
@@ -2039,11 +2062,13 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       if (q.write.state !== 'waiting' || q.state !== 'draft') return { ok: false, error: q.write.state === 'applied' ? 'It was made already' : q.write.state === 'denied' ? 'It was denied already' : 'It isn\'t waiting any more' }
       const c = await botwrite.load(writesDir(id), q.write.id)
       if (!c?.nonce || typeof a.nonce !== 'string' || a.nonce.length !== c.nonce.length || !crypto.timingSafeEqual(Buffer.from(a.nonce), Buffer.from(c.nonce))) return { ok: false, error: 'That approval isn\'t this change\'s' }
-      return { ok: true, view: { q: q.id, change: c.id, nonce: a.nonce, bot: bot.name, who: [q.from, ...(q.write.also || [])].map((p) => p?.name || 'someone').join(' and '), where: where(q.place), files: c.files, held: botwrite.heldSaid(c.held || []), diff: c.diff || '' } }
+      return { ok: true, view: { q: q.id, change: c.id, nonce: a.nonce, bot: bot.name, who: [q.from, ...(q.write.also || [])].map((p) => p?.name || 'someone').join(' and '), where: where(q.place), files: c.files, held: botwrite.heldSaid(c.held || []), diff: c.diff || '', unshown: botwrite.unshownIn(c) } }
     }
     if (a.act === 'sok' || a.act === 'sno') { const r = await screenAct(q.id, a.act === 'sok', { by, via: 'slack' }); return r.already ? { ok: false, error: 'That isn\'t waiting any more' } : { ok: true } }
     if (!q.write || q.write.id !== a.change) return { ok: false, error: 'A newer change took this one\'s place: look at that one' }
     if (q.write.state !== 'waiting' || q.state !== 'draft') return { ok: false, error: q.write.state === 'applied' ? 'It was made already' : q.write.state === 'denied' ? 'It was denied already' : 'It isn\'t waiting any more' }
+    // (A file in it that can't be shown in Slack at all: approved in Needs You, where it can be seen.)
+    if (a.act === 'wok' && botwrite.unshownIn(await botwrite.load(writesDir(id), q.write.id))) return { ok: false, error: 'Part of this change can\'t be shown in Slack (a binary file, or one too long): approve it in Needs You in Bridge AI' }
     try {
       const r = await decide(q.id, { send: a.act === 'wok', by, via: 'slack', write: { id: a.change, nonce: a.nonce || '' } })
       if (r.item?.problem && r.item.state === 'draft') return { ok: false, error: r.item.problem }

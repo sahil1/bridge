@@ -91,11 +91,16 @@ export const secretLike = (rel) => String(rel || '').split(SEP).some((x) => x.st
 // (CLAUDE.md, AGENTS.md, a bot's BOT.md…), a project's scripts and build files (package.json, a
 // Makefile, a Dockerfile, CI workflows, git hooks' configs).
 const STEERS = /^(claude|agents|gemini|copilot-instructions|bot|instructions|system[-_]?prompt)\.md$|^\.?(cursorrules|windsurfrules|clinerules|aider\.conf\.ya?ml)$|^(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|makefile|gnumakefile|justfile|rakefile|gemfile|dockerfile|containerfile|docker-compose\.ya?ml|compose\.ya?ml|vagrantfile|procfile|cmakelists\.txt|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|pom\.xml|cargo\.toml|pyproject\.toml|setup\.py|setup\.cfg|tox\.ini|noxfile\.py|conftest\.py|manifest\.json|\.pre-commit-config\.yaml|lefthook\.ya?ml)$/i
-export const steers = (rel) => { const p = String(rel || '').split(SEP); const name = p.at(-1); return STEERS.test(name) || p.some((x) => /^(\.github|\.husky|\.circleci|\.gitlab|\.vscode|\.idea|\.claude|\.cursor)$/i.test(x)) }
+// (And a tool's config that editors, linters and builds run as code (eslint.config.js, vite.config.ts,
+// jest.config.js…), gulp's, grunt's and jake's files, Cargo's build.rs, a Taskfile, an editor's
+// workspace (whose tasks can run when it's opened), and anything in an editor's or CI's own folder.)
+const STEERS_ALSO = /^([\w.-]+\.config\.(js|cjs|mjs|ts|cts|mts)|(gulpfile|gruntfile|jakefile)(\.[\w.]+)?|build\.rs|taskfile\.ya?ml|[^/]*\.code-workspace)$/i
+export const steers = (rel) => { const p = String(rel || '').split(SEP); const name = p.at(-1); return STEERS.test(name) || STEERS_ALSO.test(name) || p.some((x) => /^(\.github|\.husky|\.circleci|\.gitlab|\.vscode|\.idea|\.claude|\.cursor|\.devcontainer|\.zed|\.fleet)$/i.test(x)) }
 // A file a computer runs or opens as a program: a script, a launch agent or login item, a shortcut
-// or a Windows program (besides one marked runnable already). A .js file only on Windows, where
-// opening one runs it.
-const LAUNCHES = /\.(sh|bash|zsh|fish|ksh|csh|command|tool|plist|fileloc|webloc|inetloc|workflow|scpt|scptd|applescript|terminal|desktop|service|timer|lnk|url|bat|cmd|ps1|psm1|psd1|vbs|vbe|jse|wsf|wsh|hta|exe|com|scr|msi|msp|reg|cpl|jar|app|pkg|dmg|deb|rpm|appimage)$/i
+// or a Windows program (besides one marked runnable already), and what Python runs each time it
+// starts (a .pth file, sitecustomize.py, usercustomize.py). A .js file only on Windows, where opening
+// one runs it.
+const LAUNCHES = /\.(sh|bash|zsh|fish|ksh|csh|command|tool|plist|fileloc|webloc|inetloc|workflow|scpt|scptd|applescript|terminal|desktop|service|timer|lnk|url|bat|cmd|ps1|psm1|psd1|vbs|vbe|jse|wsf|wsh|hta|exe|com|scr|msi|msp|reg|cpl|jar|app|pkg|dmg|deb|rpm|appimage|pth)$|^(sitecustomize|usercustomize)\.py$/i
 export const launches = (rel) => { const name = String(rel || '').split(SEP).pop(); return LAUNCHES.test(name) || (process.platform === 'win32' && /\.js$/i.test(name)) }
 // A folder your computer runs things from, which a bot never changes files in (rel: its real path
 // from your home folder, its parts joined by /): anything hidden (~/.config/autostart, ~/.local/bin),
@@ -136,8 +141,22 @@ export function heldOf(entries, { folders = [], instructions = [] } = {}) {
 export const HELD_SAID = {
   delete: 'it deletes files', move: 'it moves or renames files', many: `it changes more than ${MAX_FILES} files`, large: 'it\'s a very large change',
   secret: 'it touches a file that may hold a secret or a setting (a dotfile, a key, credentials)', runs: 'it changes a file that can be run or opened as a program',
-  instructions: 'it changes a bot\'s instructions', steers: 'it changes a file that steers an agent or builds code (CLAUDE.md, package.json, a Makefile…)',
+  instructions: 'it changes a bot\'s instructions', steers: 'it changes a file that steers an agent or builds code (CLAUDE.md, package.json, a Makefile, a tool\'s config…)',
   unshown: 'its diff can\'t be shown in full (a binary file, or one too long to show)',
+  unseen: 'it adds a file in a folder its copy didn\'t have (one git ignores, say), so it couldn\'t see what\'s there',
+}
+// How much of a diff a message shows where a change can be approved in words: Slack's card (its
+// three escapes counted, as slackbot.js posts it), and the direct message in Discord and Teams. A
+// change is approved there, or with one press in Slack, only when all of it is shown: a diff that
+// doesn't fit, or a file that can't be shown at all (unshown), is approved where it can be seen
+// whole: Slack's Approve, which opens all of it, or Needs You.
+export const SHOWN = { slack: 2500, discord: 900, teams: 900 }
+const slackLength = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/```/g, '`​``').length
+export const unshownIn = (c) => (c?.held || []).some((h) => h.why === 'unshown')
+export function shownWhole(plat, c) {
+  if (!c || unshownIn(c)) return false
+  const d = String(c.diff || '')
+  return plat === 'slack' ? slackLength(d) <= SHOWN.slack : d.length <= (SHOWN[plat] || 0)
 }
 // Why, in words: with the files (for you), or without (kinds only, for whoever asked).
 export const heldSaid = (held, { files = true } = {}) => held.map((h) => (files ? `${HELD_SAID[h.why] || h.why} (${h.files.slice(0, 3).join(', ')}${h.files.length > 3 ? ', …' : ''})` : HELD_SAID[h.why] || h.why)).join('; ')
@@ -197,9 +216,10 @@ export async function screenWith(ask, text, { bot = 'the bot', folders = [], ms 
 }
 
 // ---------- Walking a folder ----------
-// Each entry under root, without following a link: onFile(rel, full, lstat) for a file, onOther(rel,
-// full, lstat, kind) for a link or anything else, .git skipped (onGit). Stops (throws) past max.
-async function walk(root, { onFile = () => {}, onOther = () => {}, onGit = () => {}, max = Infinity } = {}) {
+// Each entry under root, without following a link: onFile(rel, full, lstat) for a file, onDir(rel)
+// for a folder, onOther(rel, full, lstat, kind) for a link or anything else, .git skipped (onGit).
+// Stops (throws) past max.
+async function walk(root, { onFile = () => {}, onDir = () => {}, onOther = () => {}, onGit = () => {}, max = Infinity } = {}) {
   let n = 0
   const go = async (dir, depth) => {
     if (depth > DEPTH) return
@@ -213,7 +233,7 @@ async function walk(root, { onFile = () => {}, onOther = () => {}, onGit = () =>
       const st = await fs.promises.lstat(full).catch(() => null)
       if (!st) continue
       if (st.isSymbolicLink()) await onOther(rel, full, st, 'link')
-      else if (st.isDirectory()) await go(full, depth + 1)
+      else if (st.isDirectory()) { await onDir(rel); await go(full, depth + 1) }
       else if (st.isFile()) await onFile(rel, full, st)
       else await onOther(rel, full, st, 'other')
     }
@@ -222,9 +242,9 @@ async function walk(root, { onFile = () => {}, onOther = () => {}, onGit = () =>
 }
 const statOf = (st) => ({ size: st.size, mtimeMs: st.mtimeMs, ino: st.ino, mode: st.mode & 0o7777 })
 const same = (a, b) => !!a && !!b && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ino === b.ino
-async function stats(root, max) {
+async function stats(root, max, dirs = null) {
   const out = new Map()
-  await walk(root, { onFile: (rel, full, st) => { out.set(rel, statOf(st)) }, max })
+  await walk(root, { onFile: (rel, full, st) => { out.set(rel, statOf(st)) }, onDir: (rel) => { dirs?.push(rel) }, max })
   return out
 }
 
@@ -308,9 +328,10 @@ async function sweep(root) {
 }
 
 // A staging copy of each write folder ([{ path: its real path, shown }]) in dir, made new: { dir,
-// parts: [{ folder, shown, name, copy, how, base, real, links }] } (base: each file of the copy as it
-// was made, real: each file of the folder as it was then, by size, time and inode). Kept by the desk
-// for its run (never in dir, where its agent works). Throws, saying why, when one can't be copied.
+// parts: [{ folder, shown, name, copy, how, base, dirs, real, links }] } (base: each file of the copy
+// as it was made, dirs: each folder of it, real: each file of the folder as it was then, by size, time
+// and inode). Kept by the desk for its run (never in dir, where its agent works). Throws, saying why,
+// when one can't be copied.
 export async function stage({ folders, dir }) {
   await fs.promises.chmod(dir, 0o700).catch(() => {})
   await fs.promises.rm(dir, { recursive: true, force: true })
@@ -331,7 +352,9 @@ export async function stage({ folders, dir }) {
       const top = await repoOf(real)
       const how = top && await checkout(real, top, to, dir) ? 'git' : await copy(real, to)
       const links = await sweep(to)
-      parts.push({ folder: real, shown: f.shown, name, copy: to, how, base: [...await stats(to, CLONE_FILES)], real: [...realStats], links })
+      const dirs = []
+      const base = await stats(to, CLONE_FILES, dirs)
+      parts.push({ folder: real, shown: f.shown, name, copy: to, how, base: [...base], dirs, real: [...realStats], links })
     } catch (e) {
       throw fail(`${f.shown} couldn't be copied for it to work on: ${e.message}`, e.step || 'stage')
     }
@@ -439,6 +462,20 @@ export async function collect(st, { into, by = null, instructions = [], checked 
   // git's own folder by whatever name the file system gives it, it's refused now, not only when it's
   // made. And each one the run's checks let through, as they said.)
   const realCopies = await Promise.all(st.parts.map((p) => fs.promises.realpath(p.copy).catch(() => p.copy)))
+  // (A new file in a folder the real one has and its copy didn't, one git ignores say (a project's
+  // venv, its node_modules): it couldn't see what's there, nor you in the diff, so it waits for you.)
+  const seen = st.parts.map((p) => new Set(p.dirs || []))
+  const unseen = []
+  for (const e of entries) {
+    if (e.op !== 'add' && e.op !== 'move') continue
+    const segs = e.rel.split(SEP)
+    for (let k = 1; k < segs.length; k++) {
+      const up = segs.slice(0, k).join(SEP)
+      if (seen[e.part].has(up)) continue
+      if (await fs.promises.lstat(onDisk(st.parts[e.part].folder, up)).catch(() => null)) unseen.push(e.rel)
+      break
+    }
+  }
   for (const e of entries) {
     const p = st.parts[e.part]
     for (const rel of [e.rel, e.from].filter(Boolean)) {
@@ -457,7 +494,9 @@ export async function collect(st, { into, by = null, instructions = [], checked 
   entries.sort((a, b) => a.part - b.part || a.rel.localeCompare(b.rel))
   const folders = st.parts.map((p) => ({ path: p.folder, shown: p.shown }))
   const id = newId()
-  const change = { id, v: 1, at: new Date().toISOString(), by, folders, entries, held: heldOf(entries, { folders, instructions }), refused, hash: hashOf(folders, entries), nonce: crypto.randomBytes(16).toString('hex'), undoNonce: crypto.randomBytes(16).toString('hex'), state: 'proposed' }
+  const held = heldOf(entries, { folders, instructions })
+  if (unseen.length) held.push({ why: 'unseen', files: unseen.slice(0, 20) })
+  const change = { id, v: 1, at: new Date().toISOString(), by, folders, entries, held, refused, hash: hashOf(folders, entries), nonce: crypto.randomBytes(16).toString('hex'), undoNonce: crypto.randomBytes(16).toString('hex'), state: 'proposed' }
   if (!entries.length && !refused.length) return { ...change, diff: '', files: [] }
   // (A change whose diff can't be shown in full waits for you, whoever asked.)
   const unshown = []

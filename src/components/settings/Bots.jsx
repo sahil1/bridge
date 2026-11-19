@@ -1089,6 +1089,8 @@ function EditsFiles({ d, save }) {
         <li>{t('More than 20 files, or a very large change')}</li>
         <li>{t('A dotfile, or a file like a secret (.env, keys, credentials)')}</li>
         <li>{t('A file that can be run')}</li>
+        <li>{t('A bot\'s instructions, or a file that steers an agent or builds code (CLAUDE.md, package.json, a tool\'s config)')}</li>
+        <li>{t('A file it can\'t show you in full, or a new one in a folder git ignores')}</li>
         <li>{d.changes?.screen ? t('A request that looks destructive, sweeping or odd, read before it starts (by its own rules and AI Assist)') : t('A request that looks destructive or sweeping, read before it starts')}</li>
       </ul>
       <p className="muted small">{t('Anything outside these folders, or through a link, is never changed, and it never runs a command.')}</p>

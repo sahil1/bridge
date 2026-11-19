@@ -10,8 +10,8 @@
 // git's own folder by no name, no link anywhere on the way, a file (never a folder), inside the copy as
 // it really is and in one of its folders' copies (--part); a move's new place not there yet. What it
 // takes away and puts is written to the run's log as the hook's is (botguard.mjs: an HMAC with the
-// run's key, BRIDGE_GUARD_KEY), for Bridge AI to take only that. node filesmcp.js <copy> [--part
-// <name>]… [--log <file>]
+// run's key, from its file), for Bridge AI to take only that. node filesmcp.js <copy> [--part
+// <name>]… [--log <file> --key <file>]
 import fs from 'node:fs'
 import path from 'node:path'
 import readline from 'node:readline'
@@ -22,14 +22,21 @@ const argv = process.argv.slice(2)
 const root = argv[0] ? path.resolve(argv[0]) : null
 const parts = []
 let log = null
+let keyFile = null
 for (let i = 1; i < argv.length; i++) {
   if (argv[i] === '--part' && argv[i + 1]) parts.push(argv[++i])
   else if (argv[i] === '--log' && argv[i + 1]) log = argv[++i]
+  else if (argv[i] === '--key' && argv[i + 1]) keyFile = argv[++i]
 }
-const key = process.env.BRIDGE_GUARD_KEY || ''
+// (The run's key, from its file: botguard.mjs. With no key, nothing is taken away or moved.)
+const key = (() => { if (!keyFile) return process.env.BRIDGE_GUARD_KEY || ''; try { return fs.readFileSync(keyFile, 'utf8').trim() } catch { return '' } })()
 const real = (() => { try { return fs.realpathSync.native(root) } catch { return null } })()
 const gitLike = (name) => { const n = String(name || '').toLowerCase().replace(/:.*$/, '').replace(/[. ]+$/, ''); return n === '.git' || /^git~\d+$/.test(n) }
-const noted = (kind, p) => { if (log) fs.appendFileSync(log, `${crypto.createHmac('sha256', key).update(`${kind}\n${p}`).digest('hex')}\n`, { mode: 0o600 }) }
+const noted = (kind, p) => {
+  if (!log) return
+  if (!/^[0-9a-f]{64}$/.test(key)) throw new Error('Its checks have no key to write them down with, so nothing was done')
+  fs.appendFileSync(log, `${crypto.createHmac('sha256', key).update(`${kind}\n${p}`).digest('hex')}\n`, { mode: 0o600 })
+}
 const PATH = { type: 'string', description: 'The file: a path in your copy, from its top (Hiring/old.md), or the whole path' }
 const TOOLS = [
   {
@@ -61,7 +68,7 @@ function placeOf(p, { there = true } = {}) {
   const rel = path.relative(top, norm)
   const segs = rel.split(path.sep)
   if (segs.some(gitLike)) throw new Error(`${s} is git's own`)
-  if (parts.length ? segs.length < 2 || !parts.includes(segs[0]) : /^(\.claude|\.mcp\.json)$/i.test(segs[0])) throw new Error(`${s} isn't in a copy of one of your folders`)
+  if (parts.length ? segs.length < 2 || !parts.includes(segs[0]) : /^(\.claude|\.mcp\.json)$/.test(segs[0].toLowerCase().replace(/:.*$/, '').replace(/[. ]+$/, '')) || /~\d/.test(segs[0])) throw new Error(`${s} isn't in a copy of one of your folders`)
   const missing = []
   let at = real
   for (const [i, x] of segs.entries()) {

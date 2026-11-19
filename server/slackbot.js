@@ -646,7 +646,8 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   // A change to files' Approve, pressed (in your direct messages or where it was asked): the desk says
   // whether it's yours to approve and gives the whole change; a modal shows all of it (who asked,
   // why it waits, every line of its diff) with Approve, which makes it. One too long for Slack to show
-  // whole has no Approve there: Needs You has it. Anyone else is told, privately, that only you can.
+  // whole, or with a file that can't be shown at all, has no Approve there: Needs You has it. Anyone
+  // else is told, privately, that only you can.
   async function approver(p, a, where) {
     const r = await act({ act: 'wview', ...a }, where)
     if (!r?.ok || !r.view) return
@@ -657,13 +658,16 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     const chunks = []
     for (let i = 0; i < text.length; i += 2800) chunks.push(text.slice(i, i + 2800))
     const fits = chunks.length <= 90
-    const blocks = [head, ...why, ...(fits ? chunks.map((c) => ({ type: 'section', text: { type: 'mrkdwn', text: `\`\`\`${c}\`\`\`` } })) : [{ type: 'section', text: { type: 'mrkdwn', text: 'Its diff is too long to show here: approve it in Needs You in Bridge AI, which shows all of it.' } }])]
+    // (A file in it that can't be shown at all, binary or too long: no Approve here either.)
+    const approvable = fits && !v.unshown
+    const blocks = [head, ...why, ...(fits ? chunks.map((c) => ({ type: 'section', text: { type: 'mrkdwn', text: `\`\`\`${c}\`\`\`` } })) : [{ type: 'section', text: { type: 'mrkdwn', text: 'Its diff is too long to show here: approve it in Needs You in Bridge AI, which shows all of it.' } }]),
+      ...(fits && v.unshown ? [{ type: 'section', text: { type: 'mrkdwn', text: 'Part of it can\'t be shown here (a binary file, or one too long): approve it in Needs You in Bridge AI, where its files can be opened.' } }] : [])]
     try {
       await call('views.open', {
         trigger_id: p.trigger_id,
         view: {
           type: 'modal', callback_id: 'bb_wapprove', private_metadata: JSON.stringify({ q: v.q, change: v.change, nonce: v.nonce, channel: where?.channel || null, thread: where?.thread || null }),
-          title: { type: 'plain_text', text: 'Approve the change' }, ...(fits ? { submit: { type: 'plain_text', text: 'Approve' } } : {}), close: { type: 'plain_text', text: 'Cancel' }, blocks,
+          title: { type: 'plain_text', text: 'Approve the change' }, ...(approvable ? { submit: { type: 'plain_text', text: 'Approve' } } : {}), close: { type: 'plain_text', text: 'Cancel' }, blocks,
         },
       }, { waits: 0 })
     } catch (e) { await tell(where, a.user.id, `Couldn't show the change: ${e.message}`) }

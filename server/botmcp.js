@@ -171,7 +171,8 @@ export const OUTBOX_SERVER = 'bridge_outbox'
 // checks every path a tool that writes is given, with hooks on whatever your own settings say; and
 // with files, Bridge AI's own bridge_files (filesmcp.js, delete_file and move_file in that copy
 // alone). Both write each path they let through to the run's log (guard.log) with a key of the run's
-// own (BRIDGE_GUARD_KEY in its settings and config, which the agent can't read): { guard: { key,
+// own, in a file beside it (guard.key, yours alone, in this folder, which the agent can't read; never
+// on a command line or in its settings, which Claude Code may quote back to it): { guard: { key,
 // log } } back, for Bridge AI to take only what they saw (botwrite.js guardCheck).
 export const FILES_SERVER = 'bridge_files'
 const sh = (s) => `'${String(s).replace(/'/g, '\'\\\'\'')}'`
@@ -204,12 +205,15 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
   if (write?.root) {
     guard = { key: crypto.randomBytes(32).toString('hex'), log: path.join(dir, 'guard.log') }
     fs.writeFileSync(guard.log, '', { mode: 0o600 })
-    const args = [write.root, ...(write.parts || []).flatMap((p) => ['--part', p]), '--log', guard.log]
+    const keyFile = path.join(dir, 'guard.key')
+    fs.writeFileSync(keyFile, guard.key, { mode: 0o600 })
+    fs.chmodSync(keyFile, 0o600)
+    const args = [write.root, ...(write.parts || []).flatMap((p) => ['--part', p]), '--log', guard.log, '--key', keyFile]
     if (write.files) {
-      servers[FILES_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'filesmcp.js'), ...args], env: { ...NODE.env, BRIDGE_GUARD_KEY: guard.key } }
+      servers[FILES_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'filesmcp.js'), ...args], env: { ...NODE.env } }
       allow.push(toolName(FILES_SERVER, 'delete_file'), toolName(FILES_SERVER, 'move_file'))
     }
-    const env = Object.entries({ ...NODE.env, BRIDGE_GUARD_KEY: guard.key }).map(([k, v]) => `${k}=${sh(v)} `).join('')
+    const env = Object.entries({ ...NODE.env }).map(([k, v]) => `${k}=${sh(v)} `).join('')
     const command = `${env}${sh(NODE.bin)} ${[path.join(ROOT, 'server', 'botguard.mjs'), ...args].map(sh).join(' ')}`
     settings = path.join(dir, 'settings.json')
     writeFileAtomic(settings, JSON.stringify({ disableAllHooks: false, hooks: { PreToolUse: [{ matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command, timeout: 30 }] }] } }, null, 2), { mode: 0o600 })

@@ -8,14 +8,16 @@
 // can't read a path from is refused too.
 //
 // Each path it lets through is written to the run's log (--log) as an HMAC, with a key of the run's
-// own (BRIDGE_GUARD_KEY, in the run's settings, which the agent is never given): Bridge AI takes only
-// what's there (botwrite.js guardCheck), so a hook that couldn't run lets nothing through.
+// own read from a file (--key, beside the log in the run's own folder, which the agent can neither
+// read nor write; never on its command line, which Claude Code may quote back to the agent): Bridge
+// AI takes only what's there (botwrite.js guardCheck), so a hook that couldn't run lets nothing
+// through.
 //
 // It's a lock of its own, beside Claude Code's permissions (edits allowed in its folder only, anything
 // else refused: agents.js access 'change'), so settings of yours that allow edits anywhere don't let
 // a bot's run write outside its copy; and Bridge AI checks every path again when it takes what
 // changed and when it makes it (botwrite.js). Given to the run in its settings (botmcp.js runFolder),
-// with disableAllHooks off. node botguard.mjs <copy> [--part <name>]… [--log <file>]
+// with disableAllHooks off. node botguard.mjs <copy> [--part <name>]… [--log <file> --key <file>]
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -24,17 +26,22 @@ const argv = process.argv.slice(2)
 const root = argv[0] ? path.resolve(argv[0]) : null
 const parts = []
 let log = null
+let keyFile = null
 for (let i = 1; i < argv.length; i++) {
   if (argv[i] === '--part' && argv[i + 1]) parts.push(argv[++i])
   else if (argv[i] === '--log' && argv[i + 1]) log = argv[++i]
+  else if (argv[i] === '--key' && argv[i + 1]) keyFile = argv[++i]
 }
-const key = process.env.BRIDGE_GUARD_KEY || ''
 const no = (why) => { process.stderr.write(`Refused: ${why}. You can only change files in your own copy, ${root}.\n`); process.exit(2) }
 const realRoot = (() => { try { return fs.realpathSync(root) } catch { return null } })()
 // (git's own folder by any name a file system gives it, as git refuses them: botwrite.js gitLike.)
 const gitLike = (name) => { const n = String(name || '').toLowerCase().replace(/:.*$/, '').replace(/[. ]+$/, ''); return n === '.git' || /^git~\d+$/.test(n) }
-// (Claude Code's own, at the top of the folder it runs in.)
-const OWN = /^(\.claude|\.mcp\.json|claude\.md|claude\.local\.md)$/i
+// (Claude Code's own, at the top of the folder it runs in, by any name a file system gives it: a
+// trailing dot or space, a stream, or a short name such as CLAUDE~1, as gitLike. Only CLAUDE.md
+// spelled as it is may be changed, in a repository's copy.)
+const ownName = (name) => String(name || '').toLowerCase().replace(/:.*$/, '').replace(/[. ]+$/, '')
+const OWN = /^(\.claude|\.mcp\.json|claude\.md|claude\.local\.md)$/
+const own = (name) => OWN.test(ownName(name)) || (/~\d/.test(name) && !parts.includes(name))
 const allowed = []
 
 function check(p, cwd) {
@@ -48,7 +55,7 @@ function check(p, cwd) {
   if (norm === under) no(`${p} is your copy's own folder, not a file in it`)
   const rel = path.relative(under, norm).split(path.sep)
   if (rel.some(gitLike)) no(`${p} is git's own`)
-  if (OWN.test(rel[0]) && (parts.length || rel[0].toLowerCase() !== 'claude.md')) no(`${p} is Claude Code's own, not part of your copy`)
+  if (own(rel[0]) && (parts.length || rel.length > 1 || rel[0].toLowerCase() !== 'claude.md')) no(`${p} is Claude Code's own, not part of your copy`)
   if (parts.length && (rel.length < 2 || !parts.includes(rel[0]))) no(`${p} isn't in a copy of one of your folders (${parts.join(', ')})`)
   // Each part below the copy that's there: a folder, never a link (nor the file itself a link).
   let at = under
@@ -83,6 +90,10 @@ process.stdin.on('end', () => {
   for (const p of paths) check(p, j?.cwd)
   // (What it let through, for Bridge AI to take: a log it can't write, it lets nothing through.)
   if (log) {
+    // (Its file, or for a check run by hand, BRIDGE_GUARD_KEY in its environment.)
+    let key = keyFile ? '' : process.env.BRIDGE_GUARD_KEY || ''
+    try { if (keyFile) key = fs.readFileSync(keyFile, 'utf8').trim() } catch { /* none */ }
+    if (!/^[0-9a-f]{64}$/.test(key)) no('its checks have no key to write them down with')
     try { fs.appendFileSync(log, allowed.map((p) => `${crypto.createHmac('sha256', key).update(`w\n${p}`).digest('hex')}\n`).join(''), { mode: 0o600 }) } catch { no('its checks couldn\'t be written down') }
   }
   process.exit(0)
