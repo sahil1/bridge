@@ -103,8 +103,6 @@ try {
   docker.kit.stop()
 
   // ---------- Scheduled posts, through Routines ----------
-  const at = new Date(Date.now() + 60000)
-  const hhmm = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
   let timed = null
   await part('scheduled posts', async () => {
     const made = await kit.api('/routines', { name: 'Morning post', command: 'Write the morning post [answer Good morning, team.]', to: 'bot', bot: 'b1', channel: { id: 'C0LAUNCH', name: 'launch' } })
@@ -116,9 +114,6 @@ try {
     const top = await until(async () => (await slack.state()).posted.find((x) => x.text === 'Good morning, team. — Atlas'), 15000)
     ok(top && !top.thread_ts && top.channel === 'C0LAUNCH', 'sent: posted at the top of the channel, not in a thread', top)
     ok(mac.events().some((e) => e.type === 'received' && e.how === 'scheduled' && e.routine?.id === made.id), 'its record says which routine it was')
-    // At its time, by itself.
-    timed = await kit.api('/routines', { name: 'Noon post', command: 'Write the noon post [answer Lunch is at noon.]', to: 'bot', bot: 'b1', channel: { id: 'C0LAUNCH', name: 'launch' }, schedule: `every day at ${hhmm}` })
-    ok(timed.auto && timed.at === hhmm, 'one with a time of its own', { at: timed.at, auto: timed.auto })
     const list = (await kit.api('/routines')).routines.find((r) => r.id === made.id)
     ok(list?.to === 'bot', 'and it\'s in Routines with the rest')
   })
@@ -157,6 +152,17 @@ try {
     for (const w of ['First, in a DM', 'Second, a mention', 'Third, in its thread']) await mac.draftOf(w, 60000)
     const got = mac.events().filter((e) => e.type === 'received' && /^(First, in a DM|Second, a mention|Third, in its thread)/.test(e.text || ''))
     ok(got.map((e) => e.text.split(',')[0]).join() === 'First,Second,Third' && got.every((e) => e.late) && got.map((e) => e.how).join() === 'dm,mention,follow-up', 'back after being away: a DM, a mention and a reply in its thread, each answered, oldest first', got.map((e) => [e.text.slice(0, 20), e.how, e.late]))
+  })
+
+  // ---------- A post with a time of its own ----------
+  // Set once the bot is back (its time can't come while it's away from Slack), for the first whole
+  // minute at least 15 s off: a schedule counts from when it's saved, so a time already gone by then
+  // isn't run until tomorrow.
+  await part('a post at its time, set', async () => {
+    const slot = new Date(Math.ceil((Date.now() + 15000) / 60000) * 60000)
+    const hhmm = `${String(slot.getHours()).padStart(2, '0')}:${String(slot.getMinutes()).padStart(2, '0')}`
+    timed = await kit.api('/routines', { name: 'Noon post', command: 'Write the noon post [answer Lunch is at noon.]', to: 'bot', bot: 'b1', channel: { id: 'C0LAUNCH', name: 'launch' }, schedule: `every day at ${hhmm}` })
+    ok(timed.auto && timed.at === hhmm && Date.parse(timed.since) < slot, 'one with a time of its own, still to come today', { at: timed.at, auto: timed.auto, since: timed.since, slot: slot.toISOString() })
   })
 
   // ---------- Settings ----------
