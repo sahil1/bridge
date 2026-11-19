@@ -246,10 +246,10 @@ try {
     ok(s.args.includes('mcp__bridge_outbox__save_file') && s.args.includes('mcp__bridge_outbox__attach_file') && s.args.includes('--strict-mcp-config') && !/Write|Edit|Bash/.test(s.args.join(' ')), 'its agent gets attach_file, and still no tool that writes files', s.args)
     // Claude Code's own Read rules for the run: nothing hidden or named as keys in its folders.
     const settingsFile = s.args.includes('--settings') ? s.args[s.args.indexOf('--settings') + 1] : null
-    let deny = []
-    try { deny = JSON.parse(fs.readFileSync(settingsFile, 'utf8')).permissions.deny } catch { /* gone already */ }
+    // (As the stand-in read them: the run's file goes once the run has.)
+    const deny = s.given?.permissions?.deny || []
     const notesRule = `//${fs.realpathSync(NOTES).replace(/\\/g, '/').replace(/^\/+/, '')}`
-    ok(!!settingsFile && (!deny.length || (deny.includes(`Read(${notesRule}/**/.*)`) && deny.includes(`Read(${notesRule}/**/.*/**)`) && deny.includes(`Read(${notesRule}/**/[sS][eE][cC][rR][eE][tT])`) && deny.includes(`Read(${notesRule}/**/[tT][oO][kK][eE][nN].*)`))), 'Claude Code is given Read rules for its folder (--settings): no hidden file or folder, nothing named as a secret', { settingsFile, deny: deny.slice(0, 4) })
+    ok(!!settingsFile && ((deny.includes(`Read(${notesRule}/**/.*)`) && deny.includes(`Read(${notesRule}/**/.*/**)`) && deny.includes(`Read(${notesRule}/**/[sS][eE][cC][rR][eE][tT])`) && deny.includes(`Read(${notesRule}/**/[tT][oO][kK][eE][nN].*)`))), 'Claude Code is given Read rules for its folder (--settings): no hidden file or folder, nothing named as a secret', { settingsFile, deny: deny.slice(0, 4) })
     const cfg = s.args[s.args.indexOf('--mcp-config') + 1]
     let server = null
     try { server = JSON.parse(fs.readFileSync(cfg, 'utf8')).mcpServers?.bridge_outbox } catch { /* gone already */ }

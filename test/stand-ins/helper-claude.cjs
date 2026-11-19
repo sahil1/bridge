@@ -32,12 +32,14 @@
 //                                            else it says it couldn't
 //     [try-run]                              tries to run a command (touch ran.txt): only when
 //                                            --tools lets it use Bash
-//     [try-read <path>]                      tries to read a file: one in its folder or a folder
+//     [try-read <path>]                      tries to read a file (each one it's given, a path in
+//                                            its folder relative to it): one in its folder or a folder
 //                                            --add-dir gave it is read; one outside them is refused
 //                                            under --permission-mode dontAsk, as Claude Code
 //                                            refuses what would have asked; and one a Read rule in
 //                                            its settings denies (permissions.deny) is refused
-//                                            Each try goes in ~/answer-tries.log ({ try, done }).
+//                                            Each try goes in ~/answer-tries.log ({ try, done, cwd;
+//                                            a read's path, and rule: a Read rule refused it }).
 //     [edit <name> <text>]                   writes <text> into <name> in its folder: only when
 //                                            --tools lets it Edit and --allowedTools Edit(./**)
 //                                            lets it there without asking (a bot's change, in its
@@ -335,7 +337,7 @@ function answerTurn(text) {
   const tools = opt('--tools')
   const can = (t) => tools == null || tools.split(',').map((x) => x.trim()).includes(t)
   const dontAsk = opt('--permission-mode') === 'dontAsk'
-  const tried = (what, done) => note('answer-tries.log', { try: what, done, cwd: process.cwd() })
+  const tried = (what, done, more = {}) => note('answer-tries.log', { try: what, done, cwd: process.cwd(), ...more })
   user(text)
   state = 'working'
   began = Date.now()
@@ -393,15 +395,14 @@ function answerTurn(text) {
     if (/\[try-run\]/.test(q)) {
       if (can('Bash')) { fs.writeFileSync(path.join(process.cwd(), 'ran.txt'), ''); tried('run', true); out.push('I ran it.') } else { tried('run', false); out.push('I can\'t run commands here.') }
     }
-    const r = /\[try-read ([^\]]+)\]/.exec(q)
-    if (r) {
+    for (const r of q.matchAll(/\[try-read ([^\]]+)\]/g)) {
       const want = path.resolve(r[1].replace(/^~/, home))
       const real = (p) => { try { return fs.realpathSync(p) } catch { return p } }
       const here = [process.cwd(), ...added, ...moreDirs].some((d) => want.startsWith(d + path.sep) || real(want).startsWith(real(d) + path.sep))
       // (Outside them: refused under dontAsk unless an allow rule lets it, and always when blockReadsOutsideWorkingDirectories says so;
       // and anywhere, what a Read rule its settings deny.)
       const ruled = readRules.some((x) => ruleAllows(x, want) || ruleAllows(x, real(want)))
-      if (!can('Read') || (!here && (blockOutside || (dontAsk && !ruled)))) { tried('read', false); out.push(`I couldn't read ${r[1]}: reading outside my folders was refused.`) } else if (denied(want)) { tried('read', false); out.push(`I couldn't read ${r[1]}: a rule in my settings refused it.`) } else { let c = ''; try { c = fs.readFileSync(want, 'utf8').trim() } catch { /* none */ } tool('Read', { file_path: want }); tried('read', true); out.push(`It says: ${c}`) }
+      if (!can('Read') || (!here && (blockOutside || (dontAsk && !ruled)))) { tried('read', false, { path: r[1] }); out.push(`I couldn't read ${r[1]}: reading outside my folders was refused.`) } else if (denied(want)) { tried('read', false, { path: r[1], rule: true }); out.push(`I couldn't read ${r[1]}: a rule in my settings refused it.`) } else { let c = ''; try { c = fs.readFileSync(want, 'utf8').trim() } catch { /* none */ } tool('Read', { file_path: want }); tried('read', true, { path: r[1] }); out.push(`It says: ${c}`) }
     }
     // Edits: only in its folder, and only when it was started able to (a bot's change), and only
     // what its hooks let through.

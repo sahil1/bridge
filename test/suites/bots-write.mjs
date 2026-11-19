@@ -23,6 +23,11 @@
 //   (who may ask it, not Hiring) refused by Hiring; Dana's handed change waiting for you; yours made.
 //   Needs You, Settings › Bots (Access and Activity) in light and dark, on a computer and a phone,
 //   where a change waiting is approved.
+//   Every kind of run (an answer, a change in a copy of a repository, a change to files, Try It of
+//   each): one --settings, its run's own file, with --setting-sources user and --strict-mcp-config;
+//   in it the read block, the Read rules for each folder it reads and, for a change, its hook; its
+//   own copy readable to it, what's hidden in it not, even with Bridge AI's own folder inside one it
+//   reads.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -434,7 +439,10 @@ try {
     await kit.api(`/bots/questions/${b2.id}/screen`, { allow: false })
   })
   await part('places your computer runs things from', async () => {
-    await kit.api(`/bots/${HI}/settings`, { readsFrom: ['~/Hiring', '~/Library'] })
+    // (~/Library isn't a folder it may read from, where apps keep their settings and keys; nor is
+    // ~/Library/LaunchAgents one it changes files in, whatever it reads: that's checked first.)
+    const reads = await kit.api(`/bots/${HI}/settings`, { readsFrom: ['~/Hiring', '~/Library'] }).then(() => null, (e) => e.message)
+    ok(/where apps keep their settings and keys/.test(reads || ''), '~/Library: refused as a folder it reads from', reads)
     const no = await kit.api(`/bots/${HI}/settings`, { writesTo: ['~/Hiring', '~/Library/LaunchAgents'] }).then(() => null, (e) => e.message)
     ok(/~\/Library is where your Mac starts and runs things from/.test(no || ''), '~/Library/LaunchAgents: refused as a folder it changes files in', no)
     await kit.api(`/bots/${HI}/settings`, { readsFrom: ['~/Hiring'] })
@@ -552,6 +560,88 @@ try {
     const r = await kit.api(`/bots/${HI}/writes`)
     ok(r.writes.some((w) => w.state === 'applied' && w.by?.id === 'U0DANA' && w.applied?.by === 'Tester') && r.writes.some((w) => w.state === 'undone') && r.writes.some((w) => w.state === 'denied') && r.writes.some((w) => w.state === 'refused'), 'Activity has each change: who asked, who approved it, made, undone, denied, refused', r.writes.map((w) => w.state))
     ok((await kit.api(`/bots/${HI}/activity`)).integrity?.ok, 'and its record holds')
+  })
+
+  // ---------- One settings file for every run ----------
+  // Claude Code takes one --settings, so each kind of run (an answer, a change in a copy of a
+  // repository, a change to files in its folders, and Try It of each) is started with exactly one,
+  // the run's own file, beside --setting-sources user and --strict-mcp-config. That file has Bridge
+  // AI's read block, the Read rules for each folder it reads and, for a run that changes files, the
+  // hook that checks each path it writes; and none of it shuts the run out of its own copy.
+  await part('one settings file for every run', async () => {
+    fs.writeFileSync(H('.notes.md'), 'Private notes.\n')
+    const glob = (p) => `//${slashed(p).replace(/^\/+/, '')}`
+    const triesOf = (cwd) => tries().filter((x) => x.try === 'read' && real(x.cwd) === real(cwd))
+    const check = (label, s, { folders, write }) => {
+      const a = s?.args || []
+      const file = a[a.indexOf('--settings') + 1] || ''
+      const g = s?.given || null
+      const deny = g?.permissions?.deny || []
+      const hook = (g?.hooks?.PreToolUse || []).flatMap((m) => m.hooks || []).find((h) => /botguard\.mjs/.test([h.command, ...(h.args || [])].join(' ')))
+      ok(!!s && a.filter((x) => x === '--settings').length === 1 && a[a.indexOf('--setting-sources') + 1] === 'user' && a.filter((x) => x === '--setting-sources').length === 1 && a.includes('--strict-mcp-config') && /front-desk[\\/]mcp[\\/][^\\/]+[\\/]settings\.json$/.test(file),
+        `${label}: one --settings (its run's own file), with --setting-sources user and --strict-mcp-config`, s && { args: a })
+      ok(g?.permissions?.blockReadsOutsideWorkingDirectories === true, `${label}: its settings keep its reads to its folders`, g?.permissions && { ...g.permissions, deny: deny.length })
+      ok(folders.length > 0 && folders.every((f) => [f, real(f)].every((x) => deny.includes(`Read(${glob(x)}/**/.*)`) && deny.includes(`Read(${glob(x)}/**/.*/**)`) && deny.some((r) => r.startsWith(`Read(${glob(x)}/**/`) && /\[cC\]\[rR\]\[eE\]\[dD\]/.test(r)))),
+        `${label}: and the Read rules for each folder it reads (nothing hidden, nothing named as keys)`, { folders, deny: deny.slice(0, 3), n: deny.length })
+      ok(write ? !!hook && g.disableAllHooks === false : !g?.hooks, write ? `${label}: and the hook that checks each path it writes` : `${label}: and no hook, as it changes nothing`, g?.hooks || null)
+    }
+    // A change to files in its folders, from you: in its copy, which it reads (but what's hidden there).
+    await slack.ask({ user: OWNER.id, text: `${M} Hiring: settings-check-write [try-read Hiring/roles.md] [try-read Hiring/.notes.md] [edit Hiring/offers/zz-kept.md Kept] [answer Checked.]` })
+    let s = await startOf('settings-check-write')
+    check('a change to files', s, { folders: [s?.cwd].filter(Boolean), write: true })
+    ok(!!(await until(() => triesOf(s?.cwd).filter((x) => /Hiring\//.test(x.path || '')).length >= 2, 30000)) && triesOf(s?.cwd).some((x) => x.path === 'Hiring/roles.md' && x.done) && triesOf(s?.cwd).some((x) => x.path === 'Hiring/.notes.md' && !x.done && x.rule),
+      'its own copy stays readable to it, and what\'s hidden in it isn\'t', triesOf(s?.cwd || ''))
+    ok(!!(await until(() => read(H('offers', 'zz-kept.md')) === 'Kept\n', 40000)), 'and its change is made, its hook having let it through')
+    // Try It of it: the same, shown and never made.
+    let t = await kit.api(`/bots/${HI}/try`, { text: 'settings-check-try-write [edit Hiring/offers/zz-tried.md Tried] [answer Tried.]' })
+    await until(async () => { const x = await kit.api(`/bots/${HI}/try/${encodeURIComponent(t.q)}`); return x.item.state === 'draft' || x.item.state === 'stopped' ? x : null }, 45000, 400)
+    s = await startOf('settings-check-try-write')
+    check('Try It of a change to files', s, { folders: [s?.cwd].filter(Boolean), write: true })
+    ok(!fs.existsSync(H('offers', 'zz-tried.md')), 'and nothing is made')
+    // An answer: reading ~/Hiring, the hidden file there refused.
+    await slack.ask({ user: OWNER.id, text: `${M} Chief: settings-check-read [try-read ~/Hiring/roles.md] [try-read ~/Hiring/.notes.md] [answer Read.]` })
+    s = await startOf('settings-check-read')
+    check('an answer', s, { folders: [H()], write: false })
+    ok(!!(await until(() => triesOf(H()).filter((x) => /Hiring\//.test(x.path || '')).length >= 2, 30000)) && triesOf(H()).some((x) => /roles\.md$/.test(x.path) && x.done) && triesOf(H()).some((x) => /\.notes\.md$/.test(x.path) && !x.done && x.rule),
+      'it reads its folder, but not what\'s hidden there', triesOf(H()))
+    // Try It of it.
+    t = await kit.api(`/bots/${CH}/try`, { text: 'settings-check-try-read [answer Tried.]' })
+    await until(async () => { const x = await kit.api(`/bots/${CH}/try/${encodeURIComponent(t.q)}`); return x.item.state === 'draft' || x.item.state === 'stopped' ? x : null }, 45000, 400)
+    check('Try It of an answer', await startOf('settings-check-try-read'), { folders: [H()], write: false })
+    // A change in a copy of a repository (Suggest): Chief, for now, on ~/Docs.
+    await kit.api(`/bots/${CH}/settings`, { readsFrom: ['~/Docs'], handsTo: [], changes: 'suggest' })
+    await slack.ask({ user: OWNER.id, text: `${M} Chief: settings-check-change [try-read README.md] [try-read .gitignore] [edit README.md Tidied docs] [answer Tidied.]` })
+    s = await startOf('settings-check-change')
+    check('a change in a copy of a repository', s, { folders: [s?.cwd].filter(Boolean), write: true })
+    ok(real(s?.cwd || '').startsWith(real(path.join(kit.data, 'front-desk', 'changes'))) && !!(await until(() => triesOf(s.cwd).length >= 2, 30000)) && triesOf(s.cwd).some((x) => x.path === 'README.md' && x.done) && triesOf(s.cwd).some((x) => x.path === '.gitignore' && !x.done && x.rule),
+      'its copy of the repository stays readable to it, and what\'s hidden in it isn\'t', triesOf(s?.cwd || ''))
+    const d = await until(async () => (await needs()).find((x) => /settings-check-change/.test(x.text || '') && x.state === 'draft'), 40000)
+    ok(/\+Tidied docs/.test(JSON.stringify(d?.change || {})), 'and its change is there for you, its hook having let it through', d?.change)
+    if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })
+    await kit.api(`/bots/${CH}/settings`, { changes: 'none', readsFrom: ['~/Hiring'], handsTo: [HI] })
+    fs.rmSync(H('.notes.md'), { force: true })
+
+    // Bridge AI's own folder inside a folder it reads (moved there with BRIDGE_HOME, say): the rule for
+    // what's hidden there is made around the run's own copy, so its copy stays readable, and
+    // everything else hidden, Bridge AI's own files and another run's copy among them, doesn't.
+    const T = path.join(kit.dir, 'around', 'home')
+    const D = path.join(T, '.bridge-ai')
+    const stage = path.join(D, 'front-desk', 'writes', 'q1-1')
+    const put = (p, text = 'x\n') => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, text) }
+    for (const p of [path.join(stage, 'Hiring', 'roles.md'), path.join(stage, 'Hiring', '.hidden.md'), path.join(D, 'config.json'), path.join(D, 'front-desk', 'writes', 'q2-1', 'other.md'), path.join(D, 'front-desk', 'front-desk.json'), path.join(T, '.ssh', 'id_ed25519'), path.join(T, 'notes', 'a.md'), path.join(T, 'notes', '.env'), path.join(T, 'notes', 'credentials.json'), path.join(T, 'notes', 'deep', '.cache', 'x.md')]) put(p)
+    const js = `import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'server', 'botmcp.js')).href)}).then((m) => process.stdout.write(JSON.stringify(m.readDenies(${JSON.stringify([T, stage])}, { own: ${JSON.stringify([stage])} }))))`
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', js], { encoding: 'utf8', env: { ...process.env, HOME: kit.home, USERPROFILE: kit.home, BRIDGE_HOME: D }, timeout: 30000 })
+    let rules = []
+    try { rules = JSON.parse(r.stdout) } catch { /* said below */ }
+    // (As Claude Code holds a read to them, and the stand-in does: gitignore-style.)
+    const re = (g) => new RegExp(`^${g.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\/\*\*\//g, '\u0001').replace(/\/\*\*$/, '\u0002').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\u0001/g, '/(?:.*/)?').replace(/\u0002/g, '/.*')}$`)
+    const res = rules.map((x) => /^Read\(\/\/(.+)\)$/.exec(x)?.[1]).filter(Boolean).map((g) => re(`/${g}`))
+    const refused = (p) => res.some((x) => x.test(slashed(path.resolve(p)).replace(/^([A-Za-z]):/, '/$1:')))
+    const no = [path.join(D, 'config.json'), path.join(D, 'front-desk', 'writes', 'q2-1', 'other.md'), path.join(D, 'front-desk', 'front-desk.json'), path.join(T, '.ssh', 'id_ed25519'), path.join(T, 'notes', '.env'), path.join(T, 'notes', 'credentials.json'), path.join(T, 'notes', 'deep', '.cache', 'x.md'), path.join(stage, 'Hiring', '.hidden.md')]
+    const yes = [path.join(stage, 'Hiring', 'roles.md'), path.join(T, 'notes', 'a.md')]
+    ok(rules.length > 0 && yes.every((p) => !refused(p)), 'a run\'s own copy inside a hidden folder of one it reads: still readable to it, as the rest of that folder is', { out: r.stderr?.slice(0, 500), refused: yes.filter(refused) })
+    ok(no.every(refused), 'and everything else hidden there isn\'t: Bridge AI\'s own files, another run\'s copy, ~/.ssh, a hidden file in its copy, what\'s named as keys', no.filter((p) => !refused(p)))
+    ok(Buffer.byteLength(JSON.stringify(rules)) < 1024 * 1024, 'its rules are well within what Claude Code takes in a settings file', Buffer.byteLength(JSON.stringify(rules)))
   })
   void sleep
 } catch (e) {
