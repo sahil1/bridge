@@ -65,7 +65,15 @@ const kitWith = async (name, rel) => {
   return k
 }
 const other = async (k, name) => (await k.api('/machines')).machines.find((m) => m.name === name) || null
-const devices = (p, tab = 'machines') => p.evaluate((section) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section } })), tab)
+// Settings › Devices (at one of its tabs), asked again if it doesn't open: just after a reload the
+// page can show its tabs a moment before it listens for this (once in CI's macOS WebKit, after
+// "after a reload, Desk's agent is still in its tab", Settings never opened in 10 s).
+const devices = async (p, tab = 'machines') => {
+  for (let i = 0; i < 4; i++) {
+    await p.evaluate((section) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section } })), tab)
+    if (await until(() => p.locator('.modal.settings').count(), 2500, 100)) return
+  }
+}
 
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''

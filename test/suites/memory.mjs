@@ -422,12 +422,14 @@ try {
   const DESK = { id: 'desk', name: 'Desk', relay: null, os: 'darwin', version: '3.12.0', state: 'linked', online: true, lastSeen: new Date().toISOString(), addedAt: ago(30), code: null, error: null, counts: {}, agents: [], needs: null, at: null, home: null, about: null, systemName: 'Desk', safety: null }
   const both = await page(b, kit.url, { mode: 'light', before: async (ctx) => {
     await changeAnswer(ctx, `${kit.url}/api/machines`, (r) => ({ ...r, machines: [...(r.machines || []), DESK] }))
+    // A request the window gave up on while Desk answered (it went to another page, or reloaded)
+    // has nothing left to answer: its answer is thrown away, which isn't the suite's to fail on.
     await ctx.route(/\/m\/desk\//, async (r) => {
       const u = new URL(r.request().url())
       const rest = u.pathname.slice('/m/desk'.length)
-      if (rest === '/api/events') return r.abort()
+      if (rest === '/api/events') return r.abort().catch(() => {})
       const res = await r.fetch({ url: `${rest.startsWith('/api/') ? desk.url : kit.url}${rest}${u.search}` }).catch(() => null)
-      return res ? r.fulfill({ response: res }) : r.abort()
+      return (res ? r.fulfill({ response: res }) : r.abort()).catch(() => {})
     })
   } })
   pages.push(both)

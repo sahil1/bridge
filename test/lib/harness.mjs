@@ -546,6 +546,13 @@ export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440
 // again once it's back: src/lazy.jsx).
 const OWN_FILE = /\/assets\/[\w.-]+\.(js|css)\.$/
 export const withoutCutOff = (errors) => errors.filter((e, i) => !/\/api\/\S+ due to access control checks/.test(e) && !OWN_FILE.test(e) && !(e === 'TypeError: Load failed' && OWN_FILE.test(errors[i + 1] || '')))
+// A reload of a page from page(), for a test that counts every page error: what WebKit reports for
+// the requests the reload cut off (as withoutCutOff) is left out, only what it reported while it
+// reloaded. Anything else then, and everything before and after, stays in errors.
+export async function reload(p, errors, options) {
+  const from = errors.length
+  try { return await p.reload(options) } finally { errors.splice(from, Infinity, ...withoutCutOff(errors.slice(from))) }
+}
 // No service worker, as in the desktop app: WebKit's test build doesn't route what a page fetches
 // through one, so a test that stands in for an API with ctx.route needs this (in its before).
 // Answers a request with the real answer, changed by `change`. A page can close while the real

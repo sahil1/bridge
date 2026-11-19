@@ -20,7 +20,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import JSZip from 'jszip'
 import { PDFDocument, PDFName, PDFRawStream, PDFArray, decodePDFRawStream } from 'pdf-lib'
-import { startKit, startRelay, checks, until, browser, page, shot, browserNotice, phoneNotes, phoneSaw, ROOT } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, page, reload, shot, browserNotice, phoneNotes, phoneSaw, ROOT } from '../lib/harness.mjs'
 import { chartPng } from '../lib/wordfile.mjs'
 
 const { ok, done } = checks('meeting-export')
@@ -52,7 +52,9 @@ try {
   ok(!!(wide.id && tall.id && pasted.id), 'a meeting with three pictures: two of the screen, one pasted in its notes', { wide, tall, pasted })
 
   // ---------- The right-click menu ----------
-  await p.reload()
+  // Reloaded for the pictures and notes, often while the page is still asking for what it first
+  // shows: what WebKit reports for those requests then isn't an error in the page.
+  await reload(p, errors)
   const row = p.locator('.rail-meetings .rm-row', { hasText: 'Pricing review' }).first()
   await row.waitFor({ timeout: 15000 }).catch(() => {})
   await row.click({ button: 'right' })
@@ -291,7 +293,7 @@ try {
   await api(`/meetings/${B.id}/stop`, {})
   const lostPic = await (await fetch(`${kit.url}/api/meetings/${B.id}/captures?kind=screen&t=3`, { method: 'POST', headers: { 'content-type': 'image/png' }, body: chartPng(300, 200) })).json()
   fs.rmSync(path.join(kit.data, 'meetings', B.id, lostPic.file), { force: true })
-  await p.reload()
+  await reload(p, errors)
   const rowB = p.locator('.rail-meetings .rm-row', { hasText: 'Vendor call' }).first()
   await rowB.waitFor({ timeout: 15000 }).catch(() => {})
   await rowB.click({ button: 'right' })
