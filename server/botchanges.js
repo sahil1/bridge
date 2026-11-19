@@ -17,10 +17,12 @@ import { execFile } from 'node:child_process'
 import { gitReady, gitNothing, NO_GIT } from './gitready.js'
 import { loginPath, which } from './agents.js'
 import { launch } from './consult.js'
+import { IS_WIN } from './paths.js'
 
-// (raw: what it said as it said it, for a -z list, whose first line can start with a space.)
-const run = (bin, args, { cwd, input = '', env, timeout = 60000, raw = false } = {}) => new Promise((resolve) => {
-  const p = (bin === 'git' ? execFile : launch)(bin, args, { cwd, env, timeout, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => resolve({ ok: !err, out: raw ? String(stdout || '') : String(stdout || '').trim(), err: String(stderr || err?.message || '').trim() }))
+// (raw: what it said as it said it, for a -z list, whose first line can start with a space; bytes:
+// that as a Buffer, byte for byte.)
+const run = (bin, args, { cwd, input = '', env, timeout = 60000, raw = false, bytes = false } = {}) => new Promise((resolve) => {
+  const p = (bin === 'git' ? execFile : launch)(bin, args, { cwd, env, timeout, maxBuffer: 32 * 1024 * 1024, windowsHide: true, ...(bytes ? { encoding: 'buffer' } : {}) }, (err, stdout, stderr) => resolve({ ok: !err, out: bytes ? Buffer.from(stdout || '') : raw ? String(stdout || '') : String(stdout || '').trim(), err: String(stderr || err?.message || '').trim() }))
   p.stdin?.on('error', () => {})
   p.stdin?.end(input)
 })
@@ -77,13 +79,15 @@ async function trusted(c) {
     }
   }
   look(c.dir)
-  // (Its lines' ends aside: git on Windows checks a file out with \r\n where the repository has \n
-  // (core.autocrlf), and reads a \r before a line's end as nothing, so those alone aren't a change.
-  // Any other \r is.)
-  const lines = (s) => String(s).replace(/\r\n/g, '\n').trim()
+  // (Byte for byte as the repository has it. Only where git checks files out with \r\n for \n (on
+  // Windows, or with core.autocrlf true), a line ending \r\n where the repository's ends \n is the
+  // same: git reads a \r before a line's end as nothing. Anything else, a \r anywhere else or a
+  // space at either end, is a change.)
+  const crlf = IS_WIN || /^true$/i.test((await git(c.top, ['config', '--get', 'core.autocrlf'])).out)
+  const same = (a, b) => (crlf ? a.toString('latin1').replace(/\r\n/g, '\n') === b.toString('latin1').replace(/\r\n/g, '\n') : a.equals(b))
   for (const rel of found) {
-    const was = await wt(c, ['cat-file', 'blob', `HEAD:${rel}`])
-    if (!was.ok || lines(was.out) !== lines(fs.readFileSync(path.join(c.dir, ...rel.split('/')), 'utf8'))) fail(`${rel} was added or changed`)
+    const was = await wt(c, ['cat-file', 'blob', `HEAD:${rel}`], { bytes: true })
+    if (!was.ok || !same(was.out, fs.readFileSync(path.join(c.dir, ...rel.split('/'))))) fail(`${rel} was added or changed`)
   }
 }
 const slug = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'bot'
