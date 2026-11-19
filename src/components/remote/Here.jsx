@@ -6,7 +6,9 @@
 //   RemoteHere  the same in Bridge AI's own window here (a browser here too), and the notice after
 //   Sessions    Settings' record of every session and every one turned away (Machines.jsx shows it)
 // And on every other window, on a computer or a phone (ScreenLive): a card while one of your screens
-// is being viewed, or asked to be, with Stop and Block This Device (server/screentell.js).
+// is being viewed, or asked to be, with Stop and Block This Device (server/screentell.js). One still
+// connecting (past the guardrails, its screen not showing yet: waiting) is shown the same way, with
+// Stop.
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { BASE, onThisComputer, screensLive } from '../../api.js'
@@ -91,7 +93,7 @@ export function Badge() {
     <main className="rs-badge" role="status">
       <span className="rs-dot on" aria-hidden="true" />
       <span className="rs-badge-text">
-        <b>{list.length === 1 ? (s.controlled ? t('{who} is controlling this screen', { who: whoOf(s) }) : t('{who} is viewing this screen', { who: whoOf(s) })) : t('{n} of your devices are viewing this screen', { n: list.length })}</b>
+        <b>{list.length === 1 ? (s.waiting ? t('{who} is connecting to this screen', { who: whoOf(s) }) : s.controlled ? t('{who} is controlling this screen', { who: whoOf(s) }) : t('{who} is viewing this screen', { who: whoOf(s) })) : t('{n} of your devices are viewing this screen', { n: list.length })}</b>
         <small>{err || onFor(since(s.started))}</small>
       </span>
       <button type="button" className="btn small danger" onClick={() => act('/stop')}>{t('Stop')}</button>
@@ -128,7 +130,7 @@ export function RemoteHere() {
       {list.map((s) => (
         <div key={s.id} className="ask-row">
           <Icon name="screen" size={14} />
-          <span>{s.controlled ? t('{who} is controlling this screen ({source}), for {time} now.', { who: whoOf(s), source: s.source?.name || t('a screen'), time: onFor(since(s.started)) }) : t('{who} is viewing this screen ({source}), for {time} now.', { who: whoOf(s), source: s.source?.name || t('a screen'), time: onFor(since(s.started)) })}
+          <span>{s.waiting ? t('{who} is connecting to this screen, for {time} now.', { who: whoOf(s), time: onFor(since(s.started)) }) : s.controlled ? t('{who} is controlling this screen ({source}), for {time} now.', { who: whoOf(s), source: s.source?.name || t('a screen'), time: onFor(since(s.started)) }) : t('{who} is viewing this screen ({source}), for {time} now.', { who: whoOf(s), source: s.source?.name || t('a screen'), time: onFor(since(s.started)) })}
             {untold(s.told) && <span className="rs-untold"> {t('Your other devices weren\'t told: no notification channel is set up.')} <button type="button" className="link-btn" onClick={notifications}>{t('Set Up Notifications')}</button></span>}</span>
           <span className="ask-btns"><button type="button" className="btn small danger" onClick={() => act(`/sessions/${encodeURIComponent(s.id)}/stop`)}>{t('Stop')}</button></span>
         </div>
@@ -156,7 +158,7 @@ const reached = (x) => (Number(x?.sent) || 0) + (x?.computers || []).reduce((n, 
 const untold = (told) => Array.isArray(told) && told.length > 0 && told.every((x) => !x.off && ('sent' in x || x.error) && !reached(x))
 function Told({ told }) {
   if (!Array.isArray(told) || !told.length) return null
-  const what = { view: t('Viewing'), control: t('Control'), ask: t('The ask') }
+  const what = { view: t('Viewing'), control: t('Control'), ask: t('The ask'), open: t('Bridge AI opened'), reopen: t('Bridge AI reopened'), allow: t('Allow Screen Recording') }
   return told.map((x, i) => {
     const away = (x.computers || []).filter((c) => c.error)
     const text = x.off ? t('No notification: they\'re off for screen sharing on this computer.')
@@ -199,7 +201,8 @@ export function ScreenLive() {
         const who = fromWho(x)
         const computer = plainName(x.computer)
         const text = x.ask ? (x.control ? t('{who} asks to see and control {computer}\'s screen', { who, computer }) : t('{who} asks to see {computer}\'s screen', { who, computer }))
-          : x.controlled ? t('{computer} is being controlled from {who}', { computer, who }) : t('{computer}\'s screen is being viewed from {who}', { computer, who })
+          : x.waiting ? t('{who} is connecting to {computer}\'s screen', { who, computer })
+            : x.controlled ? t('{computer} is being controlled from {who}', { computer, who }) : t('{computer}\'s screen is being viewed from {who}', { computer, who })
         return (
           <div key={k} className="ask-row">
             <i className="rs-dot on" aria-hidden="true" />

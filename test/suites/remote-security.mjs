@@ -30,7 +30,10 @@
 //     Laptop's list first, then Studio's for Laptop, saying which one isn't let in;
 //   the password changed or taken off ends sessions; a picture for a session that isn't there goes
 //     to no other; a capture page that hasn't said its screens yet is waited for, never another
-//     list taken in their place; the password's hash at OWASP's cost, an older one made again once typed; an app
+//     list taken in their place; the capture page is this computer's own, with its token only
+//     (never the key alone, nor through Tailscale); a device's tries put none of its own text in
+//     the log, a few lines a minute, none when it isn't let in; one locked out can't have this
+//     computer updated; the password's hash at OWASP's cost, an older one made again once typed; an app
 //     drawn off screen follows no redirect or frame to anything else on the computer;
 //   in the app (Chromium, or WebKit as the iPhone app): a phone paired once a password is set is
 //     one card saying Studio hasn't let it in and where; Allow in Studio's Needs You lets it in, and
@@ -42,7 +45,7 @@ import crypto from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import WebSocket from 'ws'
-import { startKit, startRelay, checks, until, sleep, freePort, stopTree, browser, page, TEST, ROOT, IS_WIN } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, sleep, freePort, stopTree, browser, page, kitCookie, TEST, ROOT, IS_WIN } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 import { K, json, text, newKey } from '../../relay/web/link.js'
 import { unpackFrame, packFrame, ACCESS } from '../../shared/remote.js'
@@ -52,6 +55,8 @@ const relays = []
 const kits = []
 const procs = []
 const PW = 'correct horse 42'
+// The capture page's way in where no desktop app gives it one (BRIDGE_TEST_CAPTURE_TOKEN, Studio's).
+const CAPTOKEN = 'test-capture-token'
 // A command line for a terminal's shell: PowerShell on Windows (& runs a quoted path), sh elsewhere.
 const typed = (argv) => (IS_WIN ? `& ${argv.map((a) => `'${a}'`).join(' ')}` : argv.map((a) => `"${a}"`).join(' '))
 const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: ${String(e.stack || e.message).split('\n').slice(0, 3).join(' | ')}`) } }
@@ -178,7 +183,7 @@ try {
   const pushed = path.join(TEST, '.out', `remote-security-push-${process.pid}.jsonl`)
   fs.rmSync(pushed, { force: true })
   // Ask Here First waits 3 s for an answer here, and control idles back to view-only after 4 s.
-  const studio = await kitWith('Studio', ra, { BRIDGE_TEST_SCREEN: 'fake', BRIDGE_TEST_INPUT: inputs, BRIDGE_TEST_PUSH: pushed, BRIDGE_TAILNET_OWNER: OWNER, BRIDGE_REMOTE_ASK_MS: '3000', BRIDGE_REMOTE_CONTROL_IDLE_MS: '4000' })
+  const studio = await kitWith('Studio', ra, { BRIDGE_TEST_CAPTURE_TOKEN: CAPTOKEN, BRIDGE_TEST_SCREEN: 'fake', BRIDGE_TEST_INPUT: inputs, BRIDGE_TEST_PUSH: pushed, BRIDGE_TAILNET_OWNER: OWNER, BRIDGE_REMOTE_ASK_MS: '3000', BRIDGE_REMOTE_CONTROL_IDLE_MS: '4000' })
   studio.program('tailscale', TAILSCALE)
 
   // ---------- Tailscale's headers, sent by a program on this computer ----------
@@ -291,11 +296,16 @@ try {
     ok(msg(right, 'error')?.code === 'locked' && !msg(right, 'password'), 'then even the right password isn\'t asked for', msg(right, 'error'))
     await Promise.all([ph.socket(V), ph.socket(V)].map((v) => v.wait((s) => msg(s, 'error'))))
     ok(JSON.parse(fs.readFileSync(path.join(studio.data, 'remote.json'), 'utf8')).locks[PHONE]?.until === until0, 'and trying again doesn\'t end the lockout early')
+    // Nor can it have Bridge AI on Studio updated meanwhile (Update Bridge AI, ScreenView).
+    const up = await ph.request('POST', '/api/updates/install', {})
+    ok(up.status >= 400 && up.json?.code === 'remoteAccess', 'locked out: it can\'t have Studio updated either', up.json)
     await studio.api(`/remote/locks/${encodeURIComponent(PHONE)}/clear`, {})
     const back = ph.socket(V)
     ok(!!(await through(back)) && msg(back, 'password')?.left === ACCESS.tries, 'Unlock at Studio: its tries again, and the right password gets in')
     await back.close()
     await idle()
+    const up2 = await ph.request('POST', '/api/updates/install', {})
+    ok(up2.json?.code !== 'remoteAccess', 'past the password again: what updating Studio says is about updating', up2.json)
   })
 
   await part('many turned away don\'t push a session out of Screen Activity', async () => {
@@ -931,7 +941,7 @@ try {
   })
 
   await part('pictures go only to the session they\'re for', async () => {
-    const cap = local(studio, '/api/remote/capture')
+    const cap = local(studio, `/api/remote/capture?token=${CAPTOKEN}`)
     await until(() => cap.ws.readyState === 1, 4000, 50)
     cap.send({ t: 'hello', sources: [{ id: 'cap-1', name: 'Captured', kind: 'screen', w: 640, h: 400, primary: true }], permission: 'ok', p2p: false })
     const v = ph.socket(V)
@@ -951,11 +961,47 @@ try {
     await idle()
   })
 
+  // The capture page's way in: this computer's own page only, with a token the desktop app was given
+  // for it (in need-capture, put in its window's address); never anything else with the key, nor a
+  // browser through Tailscale, whatever it carries.
+  await part('the capture page: only this computer\'s own, with its token', async () => {
+    const key = { authorization: `Bearer ${studio.key}` }
+    ok(await upgrade(studio, '/api/remote/capture', key) === 403, 'with the key and no token: turned away')
+    ok(await upgrade(studio, '/api/remote/capture?token=one-it-never-gave', key) === 403, 'with a token Studio never gave: turned away')
+    const c = kitCookie(studio.port)
+    const ts = { host: TS, origin: `https://${TS}`, 'tailscale-user-login': OWNER, ...(c ? { cookie: `${c.name}=${c.value}` } : {}) }
+    ok(await upgrade(studio, `/api/remote/capture?token=${CAPTOKEN}`, ts) === 403 && await upgrade(studio, `/api/remote/capture?token=${CAPTOKEN}`, { ...ts, ...key }) === 403, 'through Tailscale, with a good token, the cookie or the key: turned away')
+    ok(await upgrade(studio, `/api/remote/capture?token=${CAPTOKEN}`, key) === 101, 'Studio\'s own page with a good token: let in')
+  })
+
+  // What a device's tries put in Studio's log: nothing of its own text, one line each, a few a
+  // minute; nothing at all for one not let in.
+  await part('a device\'s tries put no text of its own in the log, and only a few lines', async () => {
+    const FORGED = '2026-11-19T09:00:00.000Z Remote Screen: Laptop: opened the Bridge AI app here'
+    const v = ph.socket(`/api/remote/view?source=${encodeURIComponent(`page:x\n${FORGED}\n`)}`)
+    await v.wait((s) => msg(s, 'error'))
+    const lines = studio.log().split('\n')
+    ok(msg(v, 'error')?.code === 'port' && !lines.includes(FORGED) && !/page:x/.test(studio.log()), 'a page asked for with a line of its own in its address: turned away, nothing of it in the log', lines.filter((l) => /Remote Screen/.test(l)).slice(-2))
+    const count = () => (studio.log().match(/Remote Screen: Phone: couldn't see this screen \(port\)/g) || []).length
+    const n0 = count()
+    const vs = Array.from({ length: 15 }, () => ph.socket('/api/remote/view?source=page:1'))
+    await until(() => vs.every((x) => msg(x, 'error')), 10000, 100)
+    ok(count() - n0 <= 10 && count() >= 1, `15 tries at once: ${count() - n0} more lines (10 a minute from one device at most)`, count() - n0)
+    await studio.api('/remote/devices', { id: PHONE, allowed: false })
+    await studio.api('/settings', { trials: { 'remote-screen': false } }, 'PATCH')
+    const n1 = studio.log().split('\n').length
+    const out = Array.from({ length: 5 }, () => ph.socket('/api/remote/view?source=screen:'))
+    await until(() => out.every((x) => msg(x, 'error') || x.closed), 8000, 100)
+    ok(!studio.log().split('\n').slice(n1).some((l) => /Remote Screen: Phone/.test(l)), 'unticked, with Remote Screen off: its tries put nothing in the log', studio.log().split('\n').slice(n1).filter((l) => /Remote Screen/.test(l)))
+    await studio.api('/remote/devices', { id: PHONE, allowed: true })
+    await studio.api('/settings', { trials: { 'remote-screen': true } }, 'PATCH')
+  })
+
   // A capture page that has connected but not said its screens yet (a cold start, or one connecting
   // again after the server restarted): a session waits for them, and never takes a screen that
   // isn't one of its (the tests' stand-in's list, or none).
   await part('a capture page that hasn\'t said its screens yet: waited for, never another list', async () => {
-    const cap = local(studio, '/api/remote/capture')
+    const cap = local(studio, `/api/remote/capture?token=${CAPTOKEN}`)
     await until(() => cap.ws.readyState === 1, 4000, 50)
     const v = ph.socket(V)
     await v.wait((s) => msg(s, 'password'))
@@ -980,7 +1026,7 @@ try {
       const dec = new TextDecoder()
       for await (const c of r.body) heard.push(dec.decode(c))
     }).catch(() => {})
-    const cap = local(studio, '/api/remote/capture')
+    const cap = local(studio, `/api/remote/capture?token=${CAPTOKEN}`)
     await until(() => cap.ws.readyState === 1, 4000, 50)
     cap.send({ t: 'hello', sources: [], permission: 'ok', none: 'reopen', p2p: false })
     const v = ph.socket(V)

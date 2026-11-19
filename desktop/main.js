@@ -381,6 +381,7 @@ ipc.handle('bridge:idle', (e) => (fromApp(e) ? powerMonitor.getSystemIdleTime() 
 // running in the terminal host meanwhile, unless Keep agents running is off.
 ipc.handle('bridge:restart', (e) => {
   if (!fromApp(e)) return false
+  relaunching = true
   app.relaunch()
   stopServer()
   app.quit()
@@ -717,6 +718,9 @@ async function watchFleet() {
         }
       }
     } catch { /* server down or restarting; retry */ }
+    // The feed gone: nobody is known to be viewing this screen until it says so again (it does as it
+    // connects), so the display may sleep, and the badge goes.
+    remote?.onEvent({ t: 'sessions', list: [], asks: [] })
     await new Promise((r) => setTimeout(r, 3000))
   }
 }
@@ -1121,7 +1125,19 @@ ipc.handle('bridge:float-open', async (e, { meeting, meetings, paneId, event, bo
 })
 ipc.handle('bridge:recording', (e, on) => { if (fromApp(e) && e.sender === win?.webContents) recording = !!on; return true })
 
-app.on('before-quit', () => { quitting = true })
+// Quit because you quit it (the menu, ⌘Q, the Dock), not to reopen nor as the computer shuts down:
+// the server is told first (a moment at most), so none of your devices opens Bridge AI here again
+// until it's opened here (server/remote.js appQuit). An update stops the app another way.
+let relaunching = false
+let systemGoing = false
+let quitTold = false
+app.on('before-quit', (e) => {
+  quitting = true
+  if (quitTold || relaunching || systemGoing) return
+  quitTold = true
+  e.preventDefault()
+  fetch(`${URL_BASE}/api/remote/app-quit`, { method: 'POST', signal: AbortSignal.timeout(800) }).catch(() => {}).finally(() => app.quit())
+})
 // The graphics process went away (Chromium starts it again): written down, to offer a report.
 app.on('child-process-gone', (_e, d) => { if (!quitting) crashes.note(crashes.fromChildGone(d), { base: URL_BASE, data: DATA, version: app.getVersion(), fetch }).catch(() => {}) })
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus() } })
@@ -1133,6 +1149,7 @@ app.on('will-quit', () => { globalShortcut.unregisterAll(); floatShare.stop() })
 // the middle of something, to reopen afterwards, before their terminals end (Windows warns Bridge
 // AI's background processes of nothing; on a Mac this is earlier than they hear).
 function shuttingDown() {
+  systemGoing = true
   fetch(`${URL_BASE}/api/system/stopping`, { method: 'POST', signal: AbortSignal.timeout(2000) }).catch(() => {})
 }
 
@@ -1168,7 +1185,7 @@ app.whenReady().then(async () => {
   // Allow Screen Recording from a device: its page of System Settings here, with the tile.
   remote = remoteDesk.create({
     BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload: path.join(__dirname, 'preload.js'), fetch, keyFor: (c, os) => remoteShared?.keyFor(c, os) ?? null, sizes: viewSizes,
-    restart: () => { app.relaunch(); app.quit() },
+    restart: () => { relaunching = true; app.relaunch(); app.quit() },
     allowScreen: () => { shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture').catch(() => {}); showTile('screen').catch(() => {}) },
     power: powerSaveBlocker,
     wake: () => { if (IS_MAC) execFile('/usr/bin/caffeinate', ['-u', '-t', '2'], { timeout: 5000 }, () => {}) },

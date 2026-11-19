@@ -213,6 +213,8 @@ export async function status({ force = false, byHand = false, disabled = false }
 // again with GitHub's answer as it is now (a release pulled meanwhile isn't installed), and nothing
 // starts unless it's still the time: { started: false, why } then.
 let lastRun = null // { at, log, failed: { code, line, auto } | null }
+// When this server last started installing an update (0: not since it started).
+export const installStarted = () => lastRun?.at || 0
 export async function install({ app = false, auto = false } = {}) {
   const forApp = app && how() === 'source' && (IS_MAC || IS_WIN)
   if (how() !== 'app' && !forApp) throw new Error('This copy updates from a terminal; see the command shown.')

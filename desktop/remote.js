@@ -1,8 +1,9 @@
 // Remote Screen and Preview (a Beta Feature; server/remote.js): the desktop app's part, on the
 // computer being seen. The server says what it needs on the app's own live feed (main.js watchFleet,
 // event: remote):
-//   need-capture / capture-idle  the capture page (src/components/remote/Capture.jsx, ?remote=capture)
-//                                in a window that never shows: it takes the screen (desktopCapturer's
+//   need-capture / capture-idle  the capture page (src/components/remote/Capture.jsx, ?remote=capture,
+//                                with the token the server gave for it: its only way in) in a
+//                                window that never shows: it takes the screen (desktopCapturer's
 //                                sources, asked of macOS the first time someone looks, never before) and
 //                                sends it peer-to-peer, or as pictures over the link
 //   sessions                     the badge: a small window over everything, while anyone sees this
@@ -157,12 +158,12 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     if (on && napless == null) napless = power.start('prevent-app-suspension')
     else if (!on && napless != null) { try { power.stop(napless) } catch { /* stopped */ } napless = null }
   }
-  function needCapture({ fresh = false } = {}) {
+  function needCapture({ fresh = false, token = '' } = {}) {
     if (capture && !capture.isDestroyed()) { if (!fresh) return; try { capture.destroy() } catch { /* gone */ } }
     const w = new BrowserWindow({ show: false, width: 480, height: 320, title: 'Bridge AI screen sharing', skipTaskbar: true, webPreferences: { preload, contextIsolation: true, sandbox: true, backgroundThrottling: false } })
     capture = w
     keepUp(true)
-    const url = `${URL_BASE}/?remote=capture`
+    const url = `${URL_BASE}/?${new URLSearchParams({ remote: 'capture', token: String(token || '').slice(0, 80) })}`
     const gone = () => { try { if (!w.isDestroyed()) w.destroy() } catch { /* gone */ } }
     let tries = 0
     w.on('page-title-updated', (e) => e.preventDefault())
@@ -320,7 +321,7 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
 
   function onEvent(ev) {
     if (!ev || typeof ev.t !== 'string') return
-    if (ev.t === 'need-capture') needCapture({ fresh: ev.fresh === true })
+    if (ev.t === 'need-capture') needCapture({ fresh: ev.fresh === true, token: typeof ev.token === 'string' ? ev.token : '' })
     else if (ev.t === 'reopen') setTimeout(restart, 500) // (the server tells the device first)
     else if (ev.t === 'allow-screen') { if (MAC) allowScreen() }
     else if (ev.t === 'capture-idle') captureIdle()

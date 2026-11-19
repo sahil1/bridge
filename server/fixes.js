@@ -261,7 +261,7 @@ export function openBridge(go = true) {
   if (!a.desktop && !exe && !(DRYRUN && process.env.BRIDGE_TEST_APP === '1')) return null
   if (!go) return true
   if (DRYRUN) { console.log('[fix dry-run] open Bridge AI'); return Promise.resolve({ ok: true, dryRun: true }) }
-  if (a.desktop) return new Promise((resolve, reject) => execFile('open', [a.bundle], { timeout: 15000 }, (err) => (err ? reject(new Error(String(err.message).split('\n')[0])) : resolve({ ok: true }))))
+  if (a.desktop) return new Promise((resolve, reject) => execFile('/usr/bin/open', [a.bundle], { timeout: 15000 }, (err) => (err ? reject(new Error(String(err.message).split('\n')[0])) : resolve({ ok: true }))))
   return new Promise((resolve, reject) => {
     const env = { ...process.env }
     delete env.ELECTRON_RUN_AS_NODE

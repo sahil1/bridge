@@ -240,7 +240,7 @@ export function RemoteSettings() {
             {watching.map((s) => (
               <li key={s.id}>
                 <span className="rs-dot on" aria-hidden="true" />
-                <span>{s.controlled ? t('{who} is controlling this screen', { who: whoOf(s) }) : t('{who} is viewing this screen', { who: whoOf(s) })}</span>
+                <span>{s.waiting ? t('{who} is connecting to this screen', { who: whoOf(s) }) : s.controlled ? t('{who} is controlling this screen', { who: whoOf(s) }) : t('{who} is viewing this screen', { who: whoOf(s) })}</span>
                 {here && <button type="button" className="btn small danger" onClick={() => remoteDo(BASE, `/sessions/${encodeURIComponent(s.id)}/stop`).then(refresh, () => {})}>{t('Stop')}</button>}
               </li>
             ))}

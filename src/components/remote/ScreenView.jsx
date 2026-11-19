@@ -192,7 +192,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
     else if (m.t === 'error') { if (m.keep) setNote({ text: m.why, bad: true }); else { setWait(null); setErr({ why: m.why, code: m.code, cause: m.cause || null, until: m.until || null, by: m.by || null, at: m.at || null, reopen: !!m.reopen, fix: m.fix || null, waits: !!m.waits }); setGate(null); setSess((x) => ({ ...x, phase: 'ended' })) } }
     // A fix being carried out there: what it waits for, until the screen (or why not) comes.
     else if (m.t === 'wait') { setErr(null); setWait({ why: m.why, until: m.until || null }); setSess((x) => ({ ...x, phase: 'connecting' })) }
-    else if (m.t === 'ended') setSess((x) => ({ ...x, phase: 'ended', text: m.why === 'here' ? t('Stopped on {name}.', { name }) : m.why === 'stopped' ? t('Stopped from {device}.', { device: m.by || t('another of your devices') }) : m.text }))
+    else if (m.t === 'ended') { setWait(null); setSess((x) => ({ ...x, phase: 'ended', text: m.why === 'here' ? t('Stopped on {name}.', { name }) : m.why === 'stopped' ? t('Stopped from {device}.', { device: m.by || t('another of your devices') }) : m.text })) }
   }
 
   // The session: as long as this is open. Another of its screens goes over the same one. It starts on
