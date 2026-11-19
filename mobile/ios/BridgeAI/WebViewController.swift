@@ -139,7 +139,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
         case "home": load(fragment: nil)
         case "res": tunnel.answer(m)
         case "relay": if let url = m["url"] as? String { relay = url }
-        case "scan": scan()
+        case "scan": scan(link: m["for"] as? String == "link")
         case "keep": keep(m["pairing"].flatMap { $0 is NSNull ? nil : $0 })
         case "name": if let name = m["name"] as? String { change(relay) { $0["name"] = String(name.prefix(60)) } }
         case "switch": if let url = m["url"] as? String { relay = url; load(fragment: nil) }
@@ -267,22 +267,45 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
         return String(data: data, encoding: .utf8) ?? "null"
     }
 
-    private func scan() {
+    // The scanner. What it reads pairs, as an opened pairing link does (the page asks first). Asked
+    // for a link to give back (link: Link a device, in Bridge AI on the page), it goes back to the
+    // page instead (bridge-scan): once, and only a Bridge AI pairing link, which the page uses as if it
+    // had been pasted.
+    private func scan(link: Bool = false) {
+        // One at a time: a page asking again meanwhile hears nothing was scanned for it.
+        guard !(top is ScannerViewController) else {
+            if link { giveScan(nil) }
+            return
+        }
         let scanner = ScannerViewController()
         scanner.onResult = { [weak self] text in
-            guard let self, let text else { return }
-            if !self.usePairingLink(text) { self.alert("That isn't a Bridge AI pairing code. On your computer, open Settings › Devices and click Pair a device.") }
+            guard let self else { return }
+            let ok = text.map { link ? Self.pairingLink($0) != nil : self.usePairingLink($0) } ?? false
+            if link { self.giveScan(ok ? text : nil) }
+            if text != nil && !ok { self.alert("That isn't a Bridge AI pairing code. On your computer, open Settings › Devices and click Pair a device.") }
         }
         top.present(scanner, animated: true)
     }
 
-    // A pairing link: https://<your relay>/#pair=<code>. The relay is remembered; the page pairs.
-    private func usePairingLink(_ text: String) -> Bool {
-        guard let link = URL(string: text), link.scheme == "https" || Self.testRelay(link), let host = link.host,
+    // ...the page that asked hears what was scanned: the link, or null (cancelled, or not a pairing code).
+    private func giveScan(_ link: String?) {
+        guard !showingBundled else { return }
+        web.evaluateJavaScript("window.dispatchEvent(new CustomEvent('bridge-scan', { detail: { link: \(Self.js(link)) } }))")
+    }
+
+    // A pairing link: https://<your relay>/#pair=<code>, as its relay and code.
+    private static func pairingLink(_ text: String) -> (relay: String, code: String)? {
+        guard let link = URL(string: text), link.scheme == "https" || testRelay(link), let host = link.host,
               let code = link.fragment.flatMap({ URLComponents(string: "x:?\($0)")?.queryItems?.first(where: { $0.name == "pair" })?.value })
-        else { return false }
-        relay = "\(link.scheme!)://\(host)\(link.port.map { ":\($0)" } ?? "")"
-        load(fragment: "pair=\(code)")
+        else { return nil }
+        return ("\(link.scheme!)://\(host)\(link.port.map { ":\($0)" } ?? "")", code)
+    }
+
+    // ...used: the relay is remembered; the page pairs.
+    private func usePairingLink(_ text: String) -> Bool {
+        guard let link = Self.pairingLink(text) else { return false }
+        relay = link.relay
+        load(fragment: "pair=\(link.code)")
         return true
     }
 

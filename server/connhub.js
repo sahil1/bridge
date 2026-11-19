@@ -16,19 +16,27 @@
 //   6. otherwise, among the bots that person may ask there (who may ask, not muted, not paused): with
 //      none, the polite no (or nothing, where every bot says nothing); with one, that one; with more,
 //      AI Assist's model picks from their names and descriptions only (never the question's
-//      context, never a setting), its answer taken only as one of their ids;
-//   7. when it can't say, or there's no model, it asks: "Pricing Desk or Docs Helper?", with buttons
-//      in Slack, and in words elsewhere.
+//      context, never a setting), its answer taken only as one of their ids, unless you turned that
+//      off for the connection (assist), when the question isn't sent to the model at all;
+//   7. when it can't say, it's off, or there's no model: the bot you set for that (unsure), if they
+//      may ask it; else it asks them: "Pricing Desk or Docs Helper?", with buttons in Slack, and in
+//      words elsewhere.
 // A message that only listens (a channel a bot answers in without a mention) goes to a bot that
-// listens there. Nothing in a question can pick a bot the asker may not ask: whatever it names, that
-// bot's rules apply after routing, as they always did (who may ask, channels, limits, folders, what
-// answers, MCP), so a question that names one it may not ask gets that bot's polite no. The routing
-// settings change only in Settings. Each decision is in the connection's own record (which bot, and
-// why: "#sales's default"), never the question's words; the question is in that bot's record.
+// listens there. Your "continue 10" or "stop" in a direct message, answering a bot whose run waits
+// on you at its time limit, goes to that bot before any of these (frontdesk.js owes). Nothing in a
+// question can pick a bot the asker may not ask: whatever it names, that bot's rules apply after
+// routing, as they always did (who may ask, channels, limits, folders, what answers, MCP), so a
+// question that names one it may not ask gets that bot's polite no. The routing settings change
+// only in Settings (and on its Routing page). Each decision is in the connection's own record
+// (which bot, and why: "#sales's default"), never the question's words; the question is in that
+// bot's record. Try a Message (dry) takes a message you make up through the same steps
+// (route) and only says where it would go: nothing posted, answered or kept, and no bot run.
 import { idOf, bare, failure, PLATFORMS as NAMES } from './connector.js'
 import * as conns from './connections.js'
 import { commandOf, shortcutOf } from './slackbot.js'
 
+// The steps above, in order, as the Routing page shows them (src/components/bots/Routing.jsx).
+export const RULES = ['command', 'default', 'name', 'thread', 'last', 'among', 'unsure']
 const PICK_MS = 24 * 3600 * 1000 // a question waiting for its asker to pick a bot
 const PICKS_MAX = 200
 const ROUTER_MS = 25000
@@ -173,12 +181,16 @@ export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner'
     }
     return each({ ...m, ...(text != null ? { text } : {}), ...(c.shared ? { routed: { by: why, connection: c.name, ...(c.platform === 'slack' ? { command: commandOf(c.name) } : {}), ...(detail ? { detail } : {}) } } : {}) })
   }
-  async function heard(cid, m) {
-    const c = conns.get(cid)
-    if (!c || !m) return
+  // Which bot a question is for, and why, by the rules above: { to, why, detail, text } to hand it
+  // to that bot (text: what it's asked, its name taken off); { help } to list the bots; { none,
+  // silent } when they may ask none; { ask, detail } to ask them which; null when it's for none.
+  // Nothing is done here: heard() acts on it, and Try a Message (dry) only says it. thread: the bot
+  // that answered in the thread it's a reply in, when that's given rather than looked up. dry:
+  // AI Assist's model is asked as it would be, and nothing is noted.
+  async function route(c, m, { dry = false, thread: given } = {}) {
     const list = on(c)
-    if (!list.length) return
-    if (!c.shared) return deliver(c, m, list[0].id, 'own')
+    if (!list.length) return null
+    if (!c.shared) return { to: list[0].id, why: 'own' }
     const p = c.platform
     const channel = idOf(p, m.channel)
     const from = m.from ? { ...m.from, id: m.from.id ? idOf(p, m.from.id) : null } : null
@@ -188,50 +200,62 @@ export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner'
     if (m.via === 'listen') {
       const there = list.filter((b) => desk.listens(b.id, channel))
       const may = there.filter((b) => !desk.mayAsk(b.id, from, channel))
-      const to = may.length === 1 ? may[0] : may.length ? await router(c, may, text).then((id) => may.find((b) => b.id === id) || may[0]) : there[0]
-      return to ? deliver(c, m, to.id, 'listen') : undefined
+      const to = may.length === 1 ? may[0].id : may.length ? (c.assist ? (await router(c, may, text, { dry })).id : null) || may[0].id : there[0]?.id
+      return to ? { to, why: 'listen' } : null
     }
     // A reply in a thread without a mention: the bot that answered there, or no one.
-    const thread = m.thread ? latestIn(list, channel, m.thread) : null
-    if (!m.mention && !m.dm) return thread ? deliver(c, m, thread, 'thread') : undefined
+    const thread = given !== undefined ? given : m.thread ? latestIn(list, channel, m.thread) : null
+    if (!m.mention && !m.dm) return thread ? { to: thread, why: 'thread' } : null
+    // Your answer in a direct message to a bot's run at its time limit ("continue 10"): to that bot.
+    const owed = m.dm ? desk.owes?.(from, p, text) : null
+    if (owed) return { to: ids.includes(owed) ? owed : list[0].id, why: 'limit' }
     // 1. A command.
     if (m.command && m.command !== commandOf(c.name)) {
       const b = list.find((x) => commandOf(x.name) === m.command)
-      if (b) return deliver(c, m, b.id, 'command', { detail: m.command })
+      if (b) return { to: b.id, why: 'command', detail: m.command }
     }
     const head = namedAt(text, list, { slash: m.via === 'slash' })
-    if (m.via === 'slash' && head) return deliver(c, m, head.bot, 'command', { text: head.rest, detail: commandOf(c.name) })
+    if (m.via === 'slash' && head) return { to: head.bot, why: 'command', text: head.rest, detail: commandOf(c.name) }
     // !help, naming no bot: the bots here, and how to ask each.
-    if (!head && /^\s*!\s*help\s*$/i.test(text)) return help(c, m, list)
+    if (!head && /^\s*!\s*help\s*$/i.test(text)) return { help: list }
     // 2. The channel's bot.
     const def = !m.dm ? c.defaults.find((d) => d.id === channel && ids.includes(d.bot)) : null
-    if (def) return deliver(c, m, def.bot, 'default', { detail: def.name || null })
+    if (def) return { to: def.bot, why: 'default', detail: def.name || null }
     // 3. A name at the start.
-    if (head) return deliver(c, m, head.bot, 'name', { text: head.rest })
+    if (head) return { to: head.bot, why: 'name', text: head.rest }
     // 4. The thread's bot.
-    if (thread) return deliver(c, m, thread, 'thread')
+    if (thread) return { to: thread, why: 'thread' }
     // 5. A direct message: the bot they used last, unless they name another.
     if (m.dm) {
       const said = namedIn(text, list)
-      if (said) return deliver(c, m, said, 'name')
+      if (said) return { to: said, why: 'name' }
       const last = from?.id ? conns.lastBot(c.id, m.from.id) : null
-      if (last && ids.includes(last)) return deliver(c, m, last, 'last')
+      if (last && ids.includes(last)) return { to: last, why: 'last' }
     }
     // A command naming no bot, where it's not clear which: the bots here.
-    if (/^\s*!/.test(text) && list.length > 1) return help(c, m, list)
-    // 6. Among those they may ask.
+    if (/^\s*!/.test(text) && list.length > 1) return { help: list }
+    // 6. Among those they may ask: AI Assist's pick, unless it's off here.
     const may = list.filter((b) => !desk.mayAsk(b.id, from, channel) && !b.paused)
-    if (!may.length) {
-      const why = desk.mayAsk(list[0].id, from, channel)
-      conns.note(c.id, { bot: null, why: 'none', detail: why, where: m.dm ? 'dm' : m.place?.name || null, who: m.from?.name || null })
-      if (list.every((b) => b.others === 'silent')) return undefined
-      return say(c, m, desk.politeNo(why === 'muted' || why === 'paused' ? 'not-allowed' : why))
-    }
-    if (may.length === 1) return deliver(c, m, may[0].id, 'only')
-    const picked = await router(c, may, text)
-    if (picked) return deliver(c, m, picked, 'router')
-    // 7. Ask them.
-    return choose(c, m, may)
+    if (!may.length) return { none: desk.mayAsk(list[0].id, from, channel), silent: list.every((b) => b.others === 'silent') }
+    if (may.length === 1) return { to: may[0].id, why: 'only' }
+    const picked = c.assist ? await router(c, may, text, { dry }) : { id: null, detail: 'off' }
+    if (picked.id) return { to: picked.id, why: 'router' }
+    // 7. The bot you set for this, if they may ask it; else ask them.
+    const fallback = c.unsure ? may.find((b) => b.id === c.unsure) : null
+    if (fallback) return { to: fallback.id, why: 'unsure', detail: picked.detail }
+    return { ask: may, detail: picked.detail }
+  }
+  async function heard(cid, m) {
+    const c = conns.get(cid)
+    if (!c || !m) return
+    const r = await route(c, m)
+    if (!r) return
+    if (r.to) return deliver(c, m, r.to, r.why, { text: r.text ?? null, detail: r.detail ?? null })
+    if (r.help) return help(c, m, r.help)
+    if (r.ask) return choose(c, m, r.ask)
+    conns.note(c.id, { bot: null, why: 'none', detail: r.none, where: m.dm ? 'dm' : m.place?.name || null, who: m.from?.name || null })
+    if (r.silent) return undefined
+    return say(c, m, desk.politeNo(r.none === 'muted' || r.none === 'paused' ? 'not-allowed' : r.none))
   }
   // The bot that answered in a thread, the latest when more than one did.
   function latestIn(list, channel, thread) {
@@ -244,10 +268,12 @@ export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner'
     return best?.id || null
   }
 
-  // AI Assist's model, asked which bot from their names and descriptions alone; null when it can't
-  // say, there's none, or its answer isn't one of them.
-  async function router(c, may, text) {
-    if (!ask) return null
+  // AI Assist's model, asked which bot from their names and descriptions alone: { id } of one of
+  // them, or { id: null, detail } when it can't say or its answer isn't one of them ('unsure'),
+  // there's no model ('no-model'), or it failed (why); that in the connection's record, unless it's
+  // a dry run.
+  async function router(c, may, text, { dry = false } = {}) {
+    if (!ask) return { id: null, detail: 'no-model' }
     const ids = may.map((b) => b.id)
     const system = [
       `You route a question to one of ${you()}'s bots, from what each is for. Answer with one JSON object and nothing else: {"bot": "<its id>"} when one bot clearly fits, or {"bot": null} when more than one could, or none clearly does.`,
@@ -259,15 +285,64 @@ export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner'
       '',
       'The question, between the lines:', '-----', clip(text.replace(/-{4,}/g, '—'), 2000), '-----',
     ].join('\n')
+    let r
     try {
       const out = await Promise.race([ask(system, prompt), new Promise((_, no) => { const t = setTimeout(() => no(new Error('took too long')), ROUTER_MS); t.unref?.() })])
       const id = pickedOf(out, ids)
-      if (!id) conns.note(c.id, { bot: null, why: 'router', detail: 'unsure' })
-      return id
+      r = id ? { id } : { id: null, detail: 'unsure' }
     } catch (e) {
-      conns.note(c.id, { bot: null, why: 'router', detail: e.code === 'no-model' ? 'no-model' : clip(e.message, 200) })
-      return null
+      r = { id: null, detail: e.code === 'no-model' ? 'no-model' : clip(e.message, 200) }
     }
+    if (!r.id && !dry) conns.note(c.id, { bot: null, why: 'router', detail: r.detail })
+    return r
+  }
+
+  // ---------- Try a Message ----------
+  // A message you make up on the Routing page, taken through route() as one from the platform
+  // would be, and only said: which bot would take it and by which rule, what that bot would be
+  // asked, and whether its own rules would then let them ask it (whatever a message names, the
+  // bot's who may ask, muted and paused still hold). Nothing is posted, answered or noted (the
+  // connection's record, a bot's, who used which bot last), and no bot runs; AI Assist's model is
+  // asked when it comes to that, as it would be. Yours only, as the routing settings are: an /api
+  // route, never anything a question reaches. from: who's asking ({ id, name } there, or { you }),
+  // null for someone not named; channel: its id there, or a direct message (dm); thread: the bot
+  // that answered in the thread it's a reply in; mention: whether it mentions the app.
+  async function dry(cid, { text = '', channel = null, channelName = null, dm = false, from = null, mention = true, thread = null } = {}) {
+    const c = conns.get(cid)
+    if (!c) return null
+    const p = c.platform
+    const list = on(c)
+    const one = (id) => ({ id, name: botOf(id)?.name || id })
+    const out = { connection: { id: c.id, name: c.name, platform: p, shared: c.shared }, connected: hubs.get(c.id)?.connector?.state?.().state === 'connected', bots: list.map((b) => one(b.id)) }
+    let words = String(text || '').slice(0, 4000)
+    // A slash command typed first: the connection's own, or a bot's own where there's one for each.
+    let via = null
+    let command = null
+    const slash = p === 'slack' ? /^\s*(\/[\w-]{1,32})(?:\s+([\s\S]*))?$/.exec(words) : null
+    if (slash) {
+      command = slash[1].toLowerCase()
+      if (command !== commandOf(c.name) && !(c.shared && c.perBot && list.some((b) => commandOf(b.name) === command))) return { ...out, rule: 'nothing', detail: 'no-command', command }
+      via = 'slash'
+      words = slash[2] || ''
+    }
+    // (Ids as the platform gives them, as a message from there has them.)
+    if (from?.id) from = { ...from, id: bare(from.id) }
+    const where = dm ? null : channel ? bare(channel) : null
+    const quiet = !via && !dm && mention === false
+    const listen = quiet && !thread && !!where && list.some((b) => desk.listens(b.id, idOf(p, where)))
+    const m = { text: words, channel: where, dm: !!dm, mention: !quiet, from, ...(via ? { via, command } : listen ? { via: 'listen' } : {}), ...(thread ? { thread: 'try' } : {}), place: dm ? { kind: 'dm' } : { name: channelName || null } }
+    const tb = thread && list.some((b) => b.id === thread) ? thread : null
+    const r = await route(c, m, { dry: true, thread: tb })
+    const who = from ? { ...from, id: from.id ? idOf(p, from.id) : null } : null
+    const chan = where ? idOf(p, where) : null
+    // Those they may ask there, as step 6 has them.
+    out.may = list.filter((b) => !desk.mayAsk(b.id, who, chan) && !b.paused).map((b) => one(b.id))
+    if (!r) return { ...out, rule: 'nothing', detail: !list.length ? 'no-bots' : 'no-mention' }
+    if (r.help) return { ...out, rule: 'help' }
+    if (r.ask) return { ...out, rule: 'asked', detail: r.detail || null, asks: r.ask.map((b) => one(b.id)) }
+    if (!r.to) return { ...out, rule: 'none', detail: r.none || null, silent: !!r.silent }
+    const b = botOf(r.to)
+    return { ...out, rule: r.why, detail: r.detail || null, bot: one(r.to), asked: r.text ?? words, then: { may: desk.mayAsk(r.to, who, chan), paused: !!b?.paused } }
   }
 
   // Said where it was asked, as the connection.
@@ -392,5 +467,5 @@ export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner'
 
   // Bridge AI closing: every connector stopped (a Slack app's Home tab says it's offline).
   const stopAll = () => { for (const h of hubs.values()) if (h.started) { h.started = false; try { h.connector.stop() } catch { /* going anyway */ } } }
-  return { view, sync, restart, drop, stopAll, connectorOf: (cid) => { const c = conns.get(cid); return c ? hubOf(c).connector : null }, infoOf, started: (cid) => !!hubs.get(cid)?.started, onNow: (c) => on(c) }
+  return { view, sync, restart, drop, stopAll, connectorOf: (cid) => { const c = conns.get(cid); return c ? hubOf(c).connector : null }, infoOf, started: (cid) => !!hubs.get(cid)?.started, onNow: (c) => on(c), dry }
 }

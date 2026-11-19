@@ -7,12 +7,16 @@
 //   Discord's people (with their platform), and you in Discord. A mention: one read-only agent,
 //   briefed as a bot in Discord with the question as someone else's words, its draft in Needs You
 //   (👀, then ⏳), sent into a thread started from the question (✅); a reply in that thread with no
-//   mention goes on from that answer. Refused, with no agent started: someone not named, someone
+//   mention goes on from that answer. Answering in the channel (Answer In), a message there and no
+//   thread. Refused, with no agent started: someone not named, someone
 //   still to pass the server's screening, a guest, someone not in the server (directly) and a lookup
 //   that failed; you in Discord always answered. The commands (!help says how to ask in Discord;
 //   !what do you know about me only to them, in a direct message), "remember that" kept from
 //   Settings and given with the next question, the limit a day, pause, and a change asked for in
-//   Discord opening a draft pull request. Slack's own stay Slack's: no draft in a Slack direct
+//   Discord opening a draft pull request. A run at its time limit: you're asked in your direct
+//   messages, in words, the asker told once in its thread; the asker's "continue 30" refused; your
+//   "continue 10" goes on with no gap; no answer stops it, you're told how to pick it up, and your
+//   "continue 30" later goes on from where it stopped; "stop". Slack's own stay Slack's: no draft in a Slack direct
 //   message, no status, no stream, a long answer whole (in parts). Every event names Discord, and
 //   the token is in no log, record, command line or agent's environment. Settings in light and dark,
 //   on a computer and a phone.
@@ -31,7 +35,9 @@ const kit = await startKit('discord-bot', {
   config: { name: 'Tester', trials: { 'slack-bot': true, routines: true } },
   env: ({ home, PATH }) => {
     for (const d of ['pricing', 'code']) fs.mkdirSync(path.join(home, d), { recursive: true })
-    return { BRIDGE_DISCORD_URL: dc.url, BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_BOT_HOLD_MS: '3000', ...(gitDir ? { PATH: `${PATH}${path.delimiter}${gitDir}`, BRIDGE_PATH: `${PATH}${path.delimiter}${gitDir}` } : {}) }
+    // (Each question its own conversation: the same person asking again soon after carries none on.)
+    // (A "minute" of a run's time limit is 3 seconds, and the grace window 9.)
+    return { BRIDGE_DISCORD_URL: dc.url, BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_BOT_HOLD_MS: '3000', BRIDGE_BOT_CARRY_MS: '0', BRIDGE_BOT_MINUTE_MS: '3000', BRIDGE_BOT_GRACE_MS: '9000', ...(gitDir ? { PATH: `${PATH}${path.delimiter}${gitDir}`, BRIDGE_PATH: `${PATH}${path.delimiter}${gitDir}` } : {}) }
   },
 })
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'helper-claude.cjs'), 'utf8'))
@@ -52,7 +58,7 @@ try {
   await kit.api('/setup', { name: 'Tester' })
   await kit.api('/agents/catalog')
   await kit.api('/bots', { name: 'Atlas' })
-  await kit.api('/bots/b1/settings', { readsFrom: ['~/pricing'] })
+  await kit.api('/bots/b1/settings', { readsFrom: ['~/pricing'], answerIn: 'thread' })
 
   // ---------- Set up in Settings ----------
   await part('connecting in Settings', async () => {
@@ -121,6 +127,17 @@ try {
     ok(!!(await postedLike(/Same price at 500/)) && (await st()).posted.filter((x) => x.channel === q1.id).length === 2, 'answered in the same thread')
   })
 
+  // ---------- Answer In: The Channel ----------
+  await part('answered in the channel', async () => {
+    await kit.api('/bots/b1/settings', { answerIn: 'channel' })
+    const q = await dc.say({ user: '2001', text: `${M} is there a startup discount? [answer Yes, half off for a year.]` })
+    const d = await draftOf('startup discount')
+    await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: true })
+    const p = await postedLike(/half off for a year/)
+    ok(p?.channel === '4001' && !(await st()).threads.some((t) => t.id === q.id), 'The Channel: answered in the channel itself, with no thread started', { p, threads: (await st()).threads })
+    await kit.api('/bots/b1/settings', { answerIn: 'thread' })
+  })
+
   // ---------- Who's refused ----------
   await part('refusals', async () => {
     const before = startsOf('').length
@@ -166,6 +183,52 @@ try {
     await dc.say({ user: '2001', text: `${M} while paused [answer No.]` })
     ok(!!(await postedLike(/passed this on to Tester/)) && events().some((e) => e.type === 'refused' && e.why === 'paused' && e.platform === 'discord'), 'paused: passed to you, the asker told')
     await kit.api('/bots/b1/settings', { paused: false })
+  })
+
+  // ---------- At the time limit: asked in your direct messages, in words ----------
+  await part('at the time limit', async () => {
+    await kit.api('/bots/b1/settings', { limits: { day: 200, minutes: 1 } })
+    const ask = (n) => until(async () => (await st()).posted.filter((x) => /^Atlas's answer to Dana in #launch has run \d+ minutes?: .+ Reply “continue 10”, “continue 30” or “stop”\.$/.test(x.content))[n], 20000)
+    const q = await dc.say({ user: '2001', text: `${M} compare every price [work 14] [answer All the same.]` })
+    const a = await ask(0)
+    ok(!!a && a.channel !== '4001' && a.channel !== q.id, 'at its time limit: you\'re asked in your Discord direct messages, how long it has run and what it\'s doing, and how to answer', a?.content)
+    const told = await postedLike(/^This is taking me longer than usual: I'm checking with Tester that I can carry on\.$/)
+    ok(told?.channel === q.id, 'Dana is told it\'s taking longer, in the question\'s thread', told)
+    // Hers isn't an answer: only yours is.
+    await dc.say({ user: '2001', dm: true, text: 'continue 30' })
+    ok(!!(await postedLike(/^Only Tester can let me carry on, and I've asked them\.$/)) && !events().some((e) => e.type === 'limit.continued'), 'Dana\'s "continue 30": refused, and said, and nothing goes on for it')
+    const mine = await dc.say({ user: '2004', dm: true, text: 'continue 10' })
+    ok(mine.channel_id === a.channel, '(the question was in your direct messages)')
+    const ack = await postedLike(/^Atlas carries on with its answer to Dana, for 10 minutes more\.$/)
+    const c = await until(() => events().find((e) => e.type === 'limit.continued'), 8000)
+    ok(ack?.channel === a.channel && c?.by === 'Tester' && c.via === 'discord' && c.minutes === 10 && c.platform === 'discord', 'your "continue 10": it goes on, you\'re told so, and it\'s in the record, by you from Discord', c)
+    const d = await draftOf('compare every price', 30000)
+    ok(d?.draft === 'All the same.' && events().filter((e) => e.type === 'run.started' && e.q === d.id).length === 1, 'with no gap: one run, to its answer')
+    ok((await st()).posted.filter((x) => /longer than usual/.test(x.content) && x.channel === q.id).length === 1, 'and Dana was told once')
+    await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: false })
+    // No answer in time: stopped, and you're told how to let it carry on; later, "continue 30".
+    const q2 = await dc.say({ user: '2001', text: `${M} list every discount [work 20] [then 2] [answer Two discounts.]` })
+    await ask(1)
+    const gone = await postedLike(/^Nobody said to carry on, so Atlas stopped its answer to Dana in #launch after \d+ minutes?, and told them it's passed on to you\. Reply “continue 10” or “continue 30” within a day to pick it up where it stopped\.$/, 30000)
+    ok(gone?.channel === a.channel, 'no answer in the grace window: stopped, and you\'re told in your direct messages how to pick it up', gone?.content)
+    ok(!!(await until(async () => (await st()).posted.find((x) => x.channel === q2.id && /I've stopped for now, as this was taking too long, and passed it on to Tester/.test(x.content)), 8000)), 'Dana is told it stopped, in its thread')
+    await dc.say({ user: '2004', dm: true, text: 'continue 30' })
+    ok(!!(await postedLike(/^Atlas picks up its answer to Dana, with 30 minutes\.$/)), 'your "continue 30" later: picked up, and said')
+    const again = await until(() => startsOf('list every discount')[1], 20000)
+    ok(again?.args.includes('--fork-session') && /you were paused there/.test(briefOf(again)), 'from where it stopped, in a copy of its conversation', again?.args)
+    const d2 = await until(async () => (await needs()).find((x) => x.text.includes('list every discount') && x.draft === 'Two discounts.'), 30000)
+    ok(d2?.place?.name === 'launch', 'and answered for the same place', d2?.place)
+    await kit.api(`/bots/questions/${encodeURIComponent(d2.id)}`, { send: true })
+    ok(!!(await until(async () => (await st()).posted.find((x) => x.channel === q2.id && x.content === 'Two discounts.'), 15000)), 'sent in its thread')
+    // "stop".
+    await dc.say({ user: '2001', text: `${M} audit every invoice [work 30] [answer Audited.]` })
+    await ask(2)
+    await dc.say({ user: '2004', dm: true, text: 'stop' })
+    ok(!!(await postedLike(/^Stopped\. Dana is told it's passed on to you\.$/)), 'your "stop": stopped, and said')
+    const d3 = await draftOf('audit every invoice', 15000)
+    ok(d3?.needsOwner && /Stopped by Tester at its time limit/.test(d3.why || '') && events().some((e) => e.type === 'limit.stopped' && e.via === 'discord' && e.by === 'Tester'), 'passed to you, and in the record', d3?.why)
+    await kit.api(`/bots/questions/${encodeURIComponent(d3.id)}`, { send: false })
+    await kit.api('/bots/b1/settings', { limits: { day: 30, minutes: 10 } })
   })
 
   // ---------- A scheduled post, in a Discord channel ----------
@@ -221,7 +284,7 @@ try {
     const p = await until(async () => { const list = (await st()).posted.filter((x) => x.channel === ql.id); return list.length >= 2 && list.reduce((n, x) => n + x.content.length, 0) > 3500 ? list : null }, 40000)
     ok(!!p && p.length >= 2 && p.every((x) => x.content.length <= 2000) && !(await st()).posted.some((x) => /answer\.md/.test(x.content)), 'a long answer sent without asking: whole, in parts, not as a file', p?.map((x) => x.content.length) || (await st()).posted.slice(-6).map((x) => [x.channel, x.content.length, ql.id]))
     const sent = events().filter((e) => e.type === 'sent' && e.platform === 'discord' && e.how === 'auto').at(-1)
-    ok(sent && !sent.streamed && !events().some((e) => e.type === 'status' && e.platform === 'discord') && !events().some((e) => e.type === 'approval.asked' && e.platform === 'discord'), 'no stream, no working status, no Slack direct message for it', sent)
+    ok(sent && !sent.streamed && !events().some((e) => e.type === 'status' && e.platform === 'discord') && !events().some((e) => e.type === 'approval.asked' && e.platform === 'discord' && e.via !== 'discord'), 'no stream, no working status, no Slack direct message for it (a run at its time limit asks in Discord\'s own)', sent)
     await kit.api('/bots/b1/settings', { auto: false })
   })
 

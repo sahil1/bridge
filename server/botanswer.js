@@ -110,8 +110,10 @@ const refused = (why) => Object.assign(new Error(why), { refused: true })
 // (the files attached to the question); mcp: { servers: { name: config }, all } (its MCP servers, and
 // whether every tool may be used, else only those that only read). outbox: its run's, where
 // save_file writes (botfiles.js); none, no save_file. onStep({ doing, reading, tools }): as it goes,
-// for Try It. signal: stop it.
-export async function runChat({ reply, model, brief, folders = [], also = [], mcp = null, outbox = null, signal, onStep = () => {} }) {
+// for Try It. signal: stop it. messages: its conversation, added to as it goes, so the caller has it
+// when it's stopped (frontdesk.js: a run stopped at its time limit is picked up from it); with none,
+// it starts from the brief.
+export async function runChat({ reply, model, brief, folders = [], also = [], mcp = null, outbox = null, signal, onStep = () => {}, messages = null }) {
   const real = async (p) => fs.promises.realpath(p).catch(() => null)
   const roots = (await Promise.all(folders.map(real))).filter(Boolean)
   const allowed = [...roots, ...(await Promise.all(also.map(real))).filter(Boolean)]
@@ -211,7 +213,7 @@ export async function runChat({ reply, model, brief, folders = [], also = [], mc
     used.set(k, { server: t.server, tool: t.tool, n: (used.get(k)?.n || 0) + 1 })
     return botmcp.callTool(t.server, t.raw, t.tool, a)
   }
-  const messages = [{ role: 'user', text: brief }]
+  if (!messages?.length) messages = [{ role: 'user', text: brief }]
   status(null)
   for (let step = 1; ; step++) {
     if (signal?.aborted) throw Object.assign(new Error('stopped'), { stopped: true })
@@ -224,4 +226,18 @@ export async function runChat({ reply, model, brief, folders = [], also = [], mc
       messages.push({ role: 'tool', id: c.id, name: c.name, text: res.text, ...(res.error ? { error: true } : {}) })
     }
   }
+}
+
+// A model's conversation as it stood when its run was stopped, to go on from: up to its last whole
+// step, so a reply whose tool calls didn't all get their results (stopped in the middle) is left
+// out, and asked again.
+export function wholeSteps(messages) {
+  const list = Array.isArray(messages) ? messages.filter((m) => m && typeof m === 'object' && m.role) : []
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i]
+    if (m.role !== 'assistant' || !m.calls?.length) continue
+    const got = list.slice(i + 1).filter((x) => x.role === 'tool').length
+    return got < m.calls.length ? list.slice(0, i) : list
+  }
+  return list
 }

@@ -7,9 +7,9 @@ import './bots-page.css'
 // Your bots in the sidebar, under Spaces' own kind of heading (a beta feature, there only while Bots
 // is on): each with a dot for how it stands (answering, needs you, paused, not connected yet, or a
 // draft waiting for Create) and how many of its answers wait for you; + for a new one, which opens a
-// chat with AI Assist. A bot opens as a page of its own in the main area (BotPage.jsx), and so does
-// Connections, the apps they're reached through (Connections.jsx). Folded like Spaces, kept on this
-// computer.
+// chat with AI Assist. A bot opens as a page of its own in the main area (BotPage.jsx), and so do
+// the Overview (Overview.jsx: each connection, its routing and its bots) and Connections, the apps
+// they're reached through (Connections.jsx). Folded like Spaces, kept on this computer.
 export function BotDot({ status, size = 8 }) {
   return <span className={`bt-dot bt-${status}`} style={{ '--d': `${size}px` }} role="img" aria-label={t(STATUS[status])} title={t(STATUS[status])} />
 }
@@ -38,6 +38,11 @@ export default function RailBots({ selected, onOpen }) {
           {list && !bots.length && (
             <button type="button" className={`rm-row bt-row bt-first${selected === botView('new') ? ' on' : ''}`} onClick={() => onOpen(botView('new'))}>
               <Icon name="plus" size={12} /><span className="rm-title">{t('Make your first bot')}</span>
+            </button>
+          )}
+          {list && bots.length > 0 && (
+            <button type="button" className={`rm-row bt-row bt-conns${selected === botView('overview') ? ' on' : ''}`} onClick={() => onOpen(botView('overview'))} title={t('Each connection, its routing and its bots, at a glance')} data-bot="overview">
+              <Icon name="grid" size={12} className="muted" /><span className="rm-title">{t('Overview')}</span>
             </button>
           )}
           {bots.map((b) => {

@@ -33,12 +33,14 @@
 // while no server is set, is unknown. Bots and webhooks are never heard.
 //
 // Replies: a question at the top of a channel gets a thread started from it, named after it, and
-// the answer goes in there (so a follow-up is in the thread, needing no mention); a question in a
-// thread or a direct message, a reply there. A reply over 2,000 characters (Discord's longest) goes
-// in parts. Files a bot made (botfiles.js) go after its words, as attachments of a message of their
-// own (multipart, as Discord takes files), so a file Discord turns away (too big, say) never keeps
-// the words from going: it's said in what post() gives back. On a shared connection (connhub.js),
-// an answer goes through the channel's webhook, made once and kept with the token, with the bot's name and picture; where the app can't make one (no
+// the answer goes in there (so a follow-up is in the thread, needing no mention), or, where the bot
+// answers in the channel (its Answer In), a message in the channel; a question in a thread or a
+// direct message, a reply there. A reply over 2,000 characters (Discord's longest) goes in parts.
+// Files a bot made (botfiles.js) go after its words, as attachments of a message of their own
+// (multipart, as Discord takes files), so a file Discord turns away (too big, say) never keeps the
+// words from going: it's said in what post() gives back. On a shared connection (connhub.js), an
+// answer goes through the channel's webhook, made once and kept with the token, with the bot's name
+// and picture; where the app can't make one (no
 // Manage Webhooks), and in direct messages, it starts with the bot's name. Nothing posted can ping
 // anyone (allowed_mentions: none). The REST API's rate limits are
 // kept: each route's bucket as Discord's headers say, and a 429 waits as long as it says (a global
@@ -490,6 +492,8 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
       late,
       attachments: (d.attachments || []).map((a) => ({ id: a.id, name: a.filename, type: a.content_type || null, size: a.size })),
       reply: { channel: d.channel_id, message: d.id, thread: dm ? null : inThread ? d.channel_id : d.id, ...(top ? { start: true, name: clip(text.replace(/\s+/g, ' ').trim() || `Question from ${from.name || 'someone'}`, 90) } : {}) },
+      // (Answered in the channel itself instead, where the bot answers there: the desk picks.)
+      ...(top ? { top: { channel: d.channel_id, message: d.id, thread: null } } : {}),
     })
   }
   // An edit or a deletion in a channel or thread, handed over as one (the desk keeps those in its

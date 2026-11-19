@@ -170,6 +170,9 @@ const SUITES = [
   // chat (with a stand-in model), the Chief of Staff's drafts, their MCP servers, Try It as it goes.
   { name: 'bots-connections', build: 'dist', browser: true, minutes: 8, covers: [/^server\/(connections|connhub|connector|slackbot|discordbot|teamsbot|frontdesk|botsetup|bots|index)\.js$/, /^src\/components\/bots\//, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^test\/stand-ins\/(slack|discord|teams|model)\.mjs$/, /^test\/stand-ins\/helper-claude\.cjs$/, /^test\/lib\/bots\.mjs$/] },
   { name: 'bots-setup', build: 'dist', browser: true, minutes: 8, covers: [/^server\/(frontdesk|bots|botsetup|botmcp|mcp|agents|index)\.js$/, /^src\/components\/bots\//, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^src\/components\/(Rail|AiAssist)\.jsx$/, /^src\/(App|lazy)\.jsx$/, /^chief\/(bin\/bridge|INSTRUCTIONS\.md)$/, /^test\/stand-ins\/(slack|model|mcp-server)\.mjs$/, /^test\/stand-ins\/(bot-claude|helper-claude)\.cjs$/, /^test\/lib\/bots\.mjs$/] },
+  // Bots per use case: each bot's Access on its page, starting points (Hiring, Marketing), a shared
+  // connection's Routing with Try a Message (a dry run: nothing kept, nothing run), the overview.
+  { name: 'bots-routing', build: 'dist', browser: true, minutes: 8, covers: [/^server\/(connections|connhub|bots|bottemplates|frontdesk|index)\.js$/, /^src\/components\/bots\//, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^src\/App\.jsx$/, /^test\/stand-ins\/(slack|model)\.mjs$/, /^test\/stand-ins\/helper-claude\.cjs$/, /^test\/lib\/bots\.mjs$/] },
   // Files a bot makes: its run's outbox, sent with its answer (Slack's upload API, Discord's
   // attachments, Teams' reply saying it can't), what's refused, and its Activity's files with Open
   // and Send to….

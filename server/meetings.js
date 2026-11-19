@@ -668,8 +668,9 @@ export function reopen(id, { call = true, callApps = [] } = {}) {
   // Past its last line too: the length kept is to the second.
   const from = Math.max(m.seconds || 0, Math.ceil(Math.max(0, ...lines(id).map((l) => l.t1 || 0))))
   const now = new Date().toISOString()
+  // One that stopped when Bridge AI closed carries on: that's no longer news.
   saveMeta({
-    ...m, status: 'recording', endedAt: null, seconds: from, resumedAt: now, resumedFrom: from, keptAt: now, archived: false, archivedAt: null,
+    ...m, status: 'recording', endedAt: null, seconds: from, resumedAt: now, resumedFrom: from, keptAt: now, archived: false, archivedAt: null, interrupted: null,
     callEnded: null, callEndedApp: null, endWhy: null, stopsAt: null, call: 'off', callWhy: null, callError: null, summaryRetryAt: null,
     callApps: [...new Set([].concat(callApps || []).map(String))].slice(0, 5),
   })
@@ -751,10 +752,35 @@ export function checkQuiet(now = Date.now()) {
 }
 setInterval(() => { try { checkQuiet() } catch { /* a meeting gone */ } }, Number(process.env.BRIDGE_QUIET_CHECK_MS || 10_000)).unref?.()
 
-// A recording left open when the app closed: what was transcribed stays; it's marked stopped.
+// A recording left open when the app closed (a crash, the computer restarting, an update): what was
+// transcribed stays, and it's marked stopped where it had got to, when its files were last written.
+// interrupted says so ({ at }), for the app to tell you once with Resume recording, and to carry on
+// in it when recording starts again during its calendar event or soon after (carryOn), rather than
+// make a second meeting. A WAV recording's samples (audio-you.pcm, made a WAV only as it stops) are
+// made a WAV now, so its audio plays and transcribes again like any other.
+const lastWritten = (m) => {
+  let at = Date.parse(m.startedAt) || 0
+  try { for (const f of fs.readdirSync(dirOf(m.id))) if (/^(meeting\.json|transcript\.jsonl|audio-.+)$/.test(f)) at = Math.max(at, fs.statSync(path.join(dirOf(m.id), f)).mtimeMs) } catch { /* gone */ }
+  return new Date(Math.min(Date.now(), at)).toISOString()
+}
+function pcmToWav(id) {
+  let files = []
+  try { files = fs.readdirSync(dirOf(id)).filter((f) => /^audio-(you|them)(-\d+)?\.pcm$/.test(f)) } catch { return }
+  for (const f of files) {
+    const base = path.join(dirOf(id), f.replace(/\.pcm$/, ''))
+    try {
+      if (!fs.existsSync(`${base}.wav`) && !fs.existsSync(`${base}.ogg`)) fs.writeFileSync(`${base}.wav`, wav(fs.readFileSync(`${base}.pcm`)))
+      fs.rmSync(`${base}.pcm`, { force: true })
+    } catch { /* left as it is */ }
+  }
+}
 export function recover() {
   for (const m of list()) {
-    if (m.status === 'recording' || m.status === 'paused' || m.status === 'transcribing') saveMeta({ ...m, status: 'done', endedAt: m.endedAt || m.startedAt })
+    if (m.status === 'recording' || m.status === 'paused') {
+      const at = lastWritten(m)
+      pcmToWav(m.id)
+      saveMeta({ ...m, status: 'done', endedAt: at, interrupted: { at } })
+    } else if (m.status === 'transcribing') saveMeta({ ...m, status: 'done', endedAt: m.endedAt || m.startedAt })
     // Notes that are only a model's "You've hit your weekly limit" (saved as the notes before 3.9.3,
     // when a command line's limit message passed for its answer): set aside (summary-limit.md) and
     // written again, as a summary that couldn't be.
@@ -772,6 +798,7 @@ export function recover() {
       later.set(m.id, setTimeout(() => { later.delete(m.id); summarize(m.id, { again: true }).catch(() => {}) }, Math.max(5000, Date.parse(m.summaryRetryAt) - Date.now())))
     }
   }
+  tidyMerged()
 }
 
 // ---------- Transcribing again ----------
@@ -877,7 +904,11 @@ export function get(id) {
   // A combined meeting's meetings, in order (partList); and for one of them, what it's part of.
   const whole = m.parts ? { partList: partsOf(m).map((p) => ({ id: p.id, title: p.title, startedAt: p.startedAt, seconds: p.seconds || 0, status: p.status, hasSummary: fs.existsSync(path.join(DIR, p.id, 'summary.md')) })) } : {}
   const inOne = combinedOf(m)
-  return { ...m, ...whole, combined: inOne ? { id: inOne.id, title: inOne.title } : null, voices: room ? { src: room.src || 'you', speakers: room.speakers, names: room.names || {}, side: room.side || null, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, callAccess: callAccess(id), partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20).map(stale), assistError: help.error || null, assistAt: help.at || null, assisting: assisting.has(id), assistLevel: assistLevel() }
+  // The meeting it's the rest of, for the page to offer merging; and the recordings merged into it,
+  // each with whether it can still be separated.
+  const mergeHint = mergeable(m) ? restOf(m, list()) : null
+  const merged = (m.merged || []).map((x) => ({ ...x, kept: fs.existsSync(path.join(keptOf(id, x.id), 'merge.json')) }))
+  return { ...m, ...whole, mergeHint, merged, combined: inOne ? { id: inOne.id, title: inOne.title } : null, voices: room ? { src: room.src || 'you', speakers: room.speakers, names: room.names || {}, side: room.side || null, at: room.at } : null, voicesWork: voices.working(id), links, captures: m.captures || [], canRead: !!doctext.ocrBin(), me: String(cfg.name || '').trim() || null, levels, callQuiet: quiet, callAccess: callAccess(id), partial: soFar(id), transcript: transcript(id, { dropped: true }), notes: readText(path.join(d, 'notes.md')), summary: readText(path.join(d, 'summary.md')), waiting: waiting(id), pending: pending.length, saved: m.saved || null, progress, assistItems: help.items.filter((x) => x.state !== 'dismissed').slice(-20).map(stale), assistError: help.error || null, assistAt: help.at || null, assisting: assisting.has(id), assistLevel: assistLevel() }
 }
 
 export function setKind(id, kind) { return patchMeta(id, { kind: KINDS[kind] ? kind : 'general', kindPicked: true }) }
@@ -1088,6 +1119,300 @@ export function removePart(id, pid) {
   try { patchMeta(String(pid), { partOf: null }) } catch { /* gone */ }
   saveMeta({ ...c, parts: c.parts.filter((x) => x !== String(pid)) })
   return recount(id, { stale: true }) ? get(id) : { separated: true }
+}
+
+// ---------- One meeting recorded as two ----------
+// Bridge AI closing while a meeting records (a crash, a restart), or Stop pressed by mistake, and
+// the rest of it is recorded as another meeting. Merge makes the later one the next part of the
+// earlier, as Resume recording would have: its audio as the next parts (audio-you-2, with where
+// each starts in audioFrom), its lines, pictures, videos, board and AI Assist's suggestions at their
+// times after where the earlier one had got to, your notes after yours (their times moved too), its
+// files and links with the earlier one's, and the summary written again (or said to be out of date,
+// with summaries waiting until you ask). Unlike a combined meeting, it's one meeting from then on.
+//   What the later one was, whole, and the earlier one's own files as they were, are kept in the
+// earlier one's folder (merged/<id>: meeting/ and before/), so Separate puts them back as two, for
+// MERGE_KEEP_DAYS; then they go (tidyMerged), and the merge stays. Merges come apart last first, and
+// not once it's recorded again. Line edits and names given since are kept by time (a line of the
+// later part goes back with it); your notes too, unless you changed them since: then they stay.
+const MERGE_KEEP_DAYS = 7
+const KEEP_FILES = ['meeting.json', 'transcript.jsonl', 'notes.md', 'summary.md', 'cleaned.json', 'board.json', 'assist.json', 'videos.json', 'glances.jsonl', 'voices.json', 'voices.jsonl']
+const keptOf = (id, bid) => path.join(dirOf(id), 'merged', bid)
+const endOf = (m) => Date.parse(m.endedAt || 0) || Date.parse(m.startedAt) + (m.seconds || 0) * 1000
+const readLines = (f) => readText(f).split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+// A line's key ("src:t0") moved by s seconds.
+const keyAt = (k, s) => { const i = k.indexOf(':'); return `${k.slice(0, i)}:${round(Number(k.slice(i + 1)) + s)}` }
+const keyT = (k) => Number(k.slice(k.indexOf(':') + 1))
+const moveKeys = (o, s) => Object.fromEntries(Object.entries(o || {}).map(([k, v]) => [keyAt(k, s), v]))
+// A note stamped with a time ("- [2:04] ...") moved by s seconds.
+const restamp = (text, s) => String(text || '').split('\n').map((x) => x.replace(/^(\s*[-*]\s*\[)((?:\d+:)?\d{1,2}:\d{2})(\])/, (all, a, c, b) => `${a}${clock(c.split(':').map(Number).reduce((p, n) => p * 60 + n, 0) + s)}${b}`)).join('\n')
+// Why a meeting can't be merged (or separated) now, said with its name.
+function canMerge(m) {
+  if (m.parts) throw new Error(`"${m.title}" is a combined meeting, which has no recording of its own. Merge one of its meetings.`)
+  if (m.status === 'recording' || m.status === 'paused') throw new Error(`"${m.title}" is still recording. Stop it first.`)
+  if (decoding.has(m.id) || (m.status === 'transcribing' && m.again && !m.again.done)) throw new Error(`"${m.title}" is being transcribed again. Try once that's done.`)
+  if (m.status === 'transcribing' || waiting(m.id)) throw new Error(`"${m.title}" is still being transcribed. Try in a moment.`)
+  if (summarizing.has(m.id)) throw new Error(`The summary of "${m.title}" is being written. Try once it's done.`)
+  if (cleaning.has(m.id)) throw new Error(`The transcript of "${m.title}" is being cleaned up. Try once that's done.`)
+}
+// Which of two meetings goes first: the one that started first.
+const inOrder = (x, y) => (String(x.startedAt) <= String(y.startedAt) ? [x, y] : [y, x])
+export async function merge(id, otherId) {
+  const one = meta(id)
+  const two = meta(String(otherId || ''))
+  if (one.id === two.id) throw new Error('Pick another meeting to merge with')
+  const [a, b] = inOrder(one, two)
+  canMerge(a); canMerge(b)
+  for (const tm of [later, resaving, termsLater, assistLater, boardLater]) { clearTimeout(tm.get(b.id)); tm.delete(b.id) }
+  const da = dirOf(a.id)
+  // Where the earlier one had got to, as Resume recording would carry on from.
+  const at = Math.max(a.seconds || 0, Math.ceil(Math.max(0, ...lines(a.id).map((l) => l.t1 || 0))))
+  const keep = keptOf(a.id, b.id)
+  fs.rmSync(keep, { recursive: true, force: true })
+  fs.mkdirSync(path.join(keep, 'before'), { recursive: true })
+  for (const f of [...KEEP_FILES, 'edits.json', 'speakers.json']) if (fs.existsSync(path.join(da, f))) fs.copyFileSync(path.join(da, f), path.join(keep, 'before', f))
+  const was = path.join(keep, 'meeting')
+  fs.renameSync(dirOf(b.id), was)
+  const inB = (f) => path.join(was, f)
+  // Its audio, as the earlier one's next parts.
+  const moved = []
+  const audioFrom = { ...(a.audioFrom || {}) }
+  for (const src of SOURCES) {
+    const parts = fs.readdirSync(was).filter((f) => new RegExp(`^audio-${src}(-\\d+)?\\.(ogg|wav)$`).test(f)).sort((x, y) => partOf(x) - partOf(y))
+    parts.forEach((f, i) => {
+      const base = path.basename(partFile(a.id, src))
+      const own = b.audioFrom?.[f.replace(/\.\w+$/, '')]
+      if (own != null || i === 0) audioFrom[base] = at + (own ?? 0)
+      fs.renameSync(inB(f), path.join(da, `${base}${path.extname(f)}`))
+      moved.push([f, `${base}${path.extname(f)}`])
+    })
+  }
+  // Its videos, numbered on from the earlier one's.
+  const vids = readJSON(path.join(da, 'videos.json'), []) || []
+  for (const v of readJSON(inB('videos.json'), []) || []) {
+    let n = vids.length + 1
+    const ext = path.extname(v.file)
+    while (vids.some((x) => x.id === String(n)) || fs.existsSync(path.join(da, `video-${n}${ext}`))) n++
+    if (fs.existsSync(inB(v.file))) { fs.renameSync(inB(v.file), path.join(da, `video-${n}${ext}`)); moved.push([v.file, `video-${n}${ext}`]) }
+    vids.push({ ...v, id: String(n), file: `video-${n}${ext}`, t: round((v.t || 0) + at), from: { id: v.id, file: v.file } })
+  }
+  if (vids.length) writeFileAtomic(path.join(da, 'videos.json'), JSON.stringify(vids, null, 2))
+  // Its pictures, each file by its own name (a picture's id is unique).
+  let caps = []
+  try { caps = fs.readdirSync(inB('captures')) } catch { /* none */ }
+  if (caps.length) fs.mkdirSync(path.join(da, 'captures'), { recursive: true })
+  for (const f of caps) fs.renameSync(inB(path.join('captures', f)), path.join(da, 'captures', f))
+  // What was said, at the meeting's time, and what's kept by line (edits, names, the cleanup, voices).
+  const said = readLines(inB('transcript.jsonl')).map((l) => ({ ...l, t0: round(l.t0 + at), t1: round(l.t1 + at) }))
+  if (said.length) fs.appendFileSync(path.join(da, 'transcript.jsonl'), `${said.map((l) => JSON.stringify(l)).join('\n')}\n`)
+  for (const f of ['edits.json', 'speakers.json']) {
+    const more = moveKeys(readJSON(inB(f), {}), at)
+    if (Object.keys(more).length) writeFileAtomic(path.join(da, f), JSON.stringify({ ...readJSON(path.join(da, f), {}), ...more }, null, 1))
+  }
+  const cb = readJSON(inB('cleaned.json'), null)
+  if (cb) {
+    const ca = readJSON(path.join(da, 'cleaned.json'), null) || { fix: {}, drop: [] }
+    writeFileAtomic(path.join(da, 'cleaned.json'), JSON.stringify({ ...ca, fix: { ...(ca.fix || {}), ...moveKeys(cb.fix, at) }, drop: [...(ca.drop || []), ...(cb.drop || []).map((k) => keyAt(k, at))], model: ca.model || cb.model, at: ca.at || cb.at }, null, 1))
+  }
+  const vl = readLines(inB('voices.jsonl'))
+  if (vl.length) fs.appendFileSync(path.join(da, 'voices.jsonl'), `${vl.map((x) => JSON.stringify({ ...x, key: keyAt(x.key, at) })).join('\n')}\n`)
+  // A room's voices told apart in one recording only: the merged one has them (each recording's
+  // speakers are numbered on their own, so with both, the earlier one's stay and Who spoke tells
+  // them apart again across the whole).
+  const vb = readJSON(inB('voices.json'), null)
+  if (vb && !fs.existsSync(path.join(da, 'voices.json'))) writeFileAtomic(path.join(da, 'voices.json'), JSON.stringify({ ...vb, line: moveKeys(vb.line, at) }, null, 2))
+  const gl = readLines(inB('glances.jsonl'))
+  if (gl.length) fs.appendFileSync(path.join(da, 'glances.jsonl'), `${gl.map((g) => JSON.stringify({ ...g, t: round((g.t || 0) + at) })).join('\n')}\n`)
+  // AI Assist's suggestions, at their times.
+  const sa = readJSON(inB('assist.json'), null)
+  if (sa?.items?.length) assistSave(a.id, (x) => ({ ...x, items: [...x.items, ...sa.items.map((it) => ({ ...it, t: Math.round((it.t || 0) + at) }))], upTo: at + (sa.upTo || 0) }))
+  // Its board: its notes are the merged meeting's from now on, on the board they're on. With no
+  // board of its own, the earlier one takes the later one's.
+  const bb = readJSON(inB('board.json'), null)
+  const boardId = bb?.board || b.boardId || null
+  if (boardId) await helpers.board?.retag?.(boardId, b.id, a.id, at).catch(() => {})
+  const ba = readJSON(path.join(da, 'board.json'), null)
+  if (bb && !ba) writeFileAtomic(path.join(da, 'board.json'), JSON.stringify({ ...bb, upTo: at + (bb.upTo || 0) }, null, 1))
+  else if (bb) writeFileAtomic(path.join(da, 'board.json'), JSON.stringify({ ...ba, added: [...(ba.added || []), ...(bb.added || [])].slice(-400) }, null, 1))
+  // Your notes, after yours.
+  const nb = restamp(readText(inB('notes.md')), at).trim()
+  const na = readText(path.join(da, 'notes.md'))
+  const notes = nb ? (na.trim() ? `${na.replace(/\s*$/, '')}\n\n${nb}\n` : `${nb}\n`) : na
+  if (nb) writeFileAtomic(path.join(da, 'notes.md'), notes)
+  const now = new Date()
+  writeFileAtomic(path.join(keep, 'merge.json'), JSON.stringify({ id: b.id, at, moved, notes, board: boardId, mergedAt: now.toISOString() }, null, 1))
+  const have = new Set((a.links || []).map((l) => l.url || l.path))
+  const hadSummary = fs.existsSync(path.join(da, 'summary.md')) || fs.existsSync(inB('summary.md'))
+  const auto = cfg.meetings?.autoSummary !== false
+  saveMeta({
+    ...meta(a.id),
+    seconds: at + (b.seconds || 0), endedAt: b.endedAt || new Date(endOf(b)).toISOString(), audioFrom,
+    sections: [...(a.sections || []), ...(b.sections || []).map((s) => ({ ...s, t: round(s.t + at) }))],
+    captures: [...(a.captures || []), ...(b.captures || []).map((c) => ({ ...c, t: round((c.t || 0) + at) }))],
+    links: [...(a.links || []), ...(b.links || []).filter((l) => !have.has(l.url || l.path))],
+    event: a.event || b.event || null,
+    ...(!a.board && b.board ? { board: true } : {}), ...(!a.boardId && b.boardId ? { boardId: b.boardId } : {}),
+    // Who said what is worked out again across both, at the summary.
+    namedAt: null, interrupted: b.interrupted || null, mergeDismissed: null,
+    merged: [...(a.merged || []), { id: b.id, title: b.title, startedAt: b.startedAt, endedAt: b.endedAt || null, at, seconds: b.seconds || 0, mergedAt: now.toISOString(), until: new Date(now.getTime() + MERGE_KEEP_DAYS * 864e5).toISOString() }],
+    ...(hadSummary && !auto ? { summaryStale: 'merged' } : {}),
+  })
+  // In a combined meeting: the later one has left it; the earlier one's is out of date.
+  if (b.partOf && b.partOf !== a.partOf) recount(b.partOf, { stale: true })
+  if (a.partOf) recount(a.partOf, { stale: true })
+  // The later one's saved notes go, unless you've changed them since (the merged one is saved).
+  for (const f of b.savedFiles || []) {
+    const text = await fs.promises.readFile(f, 'utf8').catch(() => null)
+    if (text != null && b.savedHashes?.[f] === hash(text)) await fs.promises.rm(f, { force: true }).catch(() => {})
+  }
+  if (auto && transcriptText(a.id)) summarize(a.id).catch(() => {})
+  else resave(a.id, 500)
+  return get(a.id)
+}
+
+// Separate: the later one back as it was, in a folder of its own, and the merged one as it was
+// before it came in. Not once what it was has gone (MERGE_KEEP_DAYS), not before the one merged
+// after it, and not once it's been recorded again (its new part would be lost).
+export async function separate(id, bid) {
+  const a = meta(id)
+  const rec = (a.merged || []).find((x) => x.id === String(bid))
+  if (!rec) throw new Error('That recording wasn\'t merged into this meeting')
+  const keep = keptOf(a.id, rec.id)
+  const info = readJSON(path.join(keep, 'merge.json'), null)
+  if (!info) throw new Error(`"${rec.title}" was merged ${MERGE_KEEP_DAYS} days ago or more, and what it was isn't kept any more, so they can't be separated.`)
+  const last = a.merged[a.merged.length - 1]
+  if (last.id !== rec.id) throw new Error(`"${last.title}" was merged in after it. Separate that one first.`)
+  canMerge(a)
+  if (a.resumedAt && a.resumedAt > rec.mergedAt) throw new Error('It was recorded again after they were merged, so they can\'t be separated: the new part would be lost.')
+  if (fs.existsSync(dirOf(rec.id))) throw new Error(`There's a meeting called ${rec.id} already`)
+  const da = dirOf(a.id)
+  const was = path.join(keep, 'meeting')
+  const before = (f) => path.join(keep, 'before', f)
+  const b = readJSON(path.join(was, 'meeting.json'), null)
+  if (!b) throw new Error(`What "${rec.title}" was isn't all there, so they can't be separated.`)
+  const at = info.at
+  // Its audio and videos back.
+  for (const [from, to] of [...info.moved].reverse()) if (fs.existsSync(path.join(da, to))) fs.renameSync(path.join(da, to), path.join(was, from))
+  // Its pictures back, as they are now (a note or a crop given since goes with them).
+  const theirs = new Set((b.captures || []).map((c) => c.id))
+  const now = meta(a.id)
+  const capsB = (now.captures || []).filter((c) => theirs.has(c.id)).map((c) => ({ ...c, t: round((c.t || 0) - at) }))
+  let files = []
+  try { files = fs.readdirSync(path.join(da, 'captures')) } catch { /* none */ }
+  if (capsB.length) fs.mkdirSync(path.join(was, 'captures'), { recursive: true })
+  for (const f of files) if (theirs.has(f.replace(/(-crop)?\.\w+$/, ''))) fs.renameSync(path.join(da, 'captures', f), path.join(was, 'captures', f))
+  // Edits and names given to a line, by its time: the later part's go back with it.
+  for (const f of ['edits.json', 'speakers.json']) {
+    const all = readJSON(path.join(da, f), {})
+    const mine = Object.fromEntries(Object.entries(all).filter(([k]) => keyT(k) < at))
+    const back = Object.fromEntries(Object.entries(all).filter(([k]) => keyT(k) >= at).map(([k, v]) => [keyAt(k, -at), v]))
+    writeFileAtomic(path.join(da, f), JSON.stringify(mine, null, 1))
+    if (Object.keys(back).length) writeFileAtomic(path.join(was, f), JSON.stringify({ ...readJSON(path.join(was, f), {}), ...back }, null, 1))
+  }
+  // The rest as it was before: what was added to it is the later one's, which has its own.
+  for (const f of KEEP_FILES.filter((x) => x !== 'meeting.json' && x !== 'notes.md')) {
+    if (fs.existsSync(before(f))) fs.copyFileSync(before(f), path.join(da, f))
+    else fs.rmSync(path.join(da, f), { force: true })
+  }
+  // Your notes as they were, unless you've changed them since the merge: then they stay.
+  if (readText(path.join(da, 'notes.md')) === info.notes) {
+    if (fs.existsSync(before('notes.md'))) fs.copyFileSync(before('notes.md'), path.join(da, 'notes.md'))
+    else fs.rmSync(path.join(da, 'notes.md'), { force: true })
+  }
+  if (info.board) await helpers.board?.retag?.(info.board, a.id, rec.id, -at).catch(() => {})
+  // As it was, with what you changed since that's its own: its name, folder, kind, archive, where
+  // it's saved, and the pictures that were its own.
+  const old = readJSON(before('meeting.json'), null) || a
+  const own = ['title', 'renamed', 'folder', 'kind', 'kindPicked', 'archived', 'archivedAt', 'saved', 'savedFiles', 'savedHashes', 'saveError', 'exported']
+  saveMeta({ ...old, ...Object.fromEntries(own.filter((k) => k in now).map((k) => [k, now[k]])), captures: (now.captures || []).filter((c) => !theirs.has(c.id)), status: 'done' })
+  writeFileAtomic(path.join(was, 'meeting.json'), JSON.stringify({ ...b, captures: capsB, partOf: null, mergeDismissed: [...new Set([...(b.mergeDismissed || []), a.id])] }, null, 2))
+  fs.renameSync(was, dirOf(rec.id))
+  fs.rmSync(keep, { recursive: true, force: true })
+  try { if (!fs.readdirSync(path.join(da, 'merged')).length) fs.rmSync(path.join(da, 'merged'), { recursive: true, force: true }) } catch { /* none */ }
+  if (meta(a.id).partOf) recount(meta(a.id).partOf, { stale: true })
+  resave(a.id, 500)
+  resave(rec.id, 500)
+  return { ...get(a.id), separated: rec.id }
+}
+
+// What a merge kept for Separate goes after MERGE_KEEP_DAYS; the merge stays, and says it can't be
+// separated any more.
+export function tidyMerged(now = Date.now()) {
+  for (const m of list()) {
+    for (const x of m.merged || []) {
+      if (Date.parse(x.until) > now) continue
+      try { fs.rmSync(keptOf(m.id, x.id), { recursive: true, force: true }) } catch { /* gone */ }
+    }
+  }
+}
+setInterval(() => { try { tidyMerged() } catch { /* a meeting gone */ } }, 6 * 3600e3).unref?.()
+
+// The meeting a later one is the rest of: recorded during the same calendar event, or soon after the
+// earlier one ended (within MERGE_GAP_MS) with the same name or after Bridge AI closed while the
+// earlier one recorded. It started after the earlier one ended (a minute's grace for clocks), on the
+// same day. Never two for different calendar events. Neither archived, combined or in a combined
+// meeting; and none for one you said isn't the rest of another (Not the same meeting, or separated:
+// mergeDismissed). The nearest before it, or null.
+const MERGE_GAP_MS = Number(process.env.BRIDGE_MERGE_GAP_MS) || 15 * 60_000
+const sameEvent = (a, b) => !!a.event?.title && !!b.event?.title && a.event.title === b.event.title && (a.event.start || null) === (b.event.start || null)
+const sameTitle = (a, b) => clean(a.title, 200).toLowerCase() === clean(b.title, 200).toLowerCase()
+const mergeable = (m) => !m.parts && !m.archived && !m.partOf && m.status === 'done'
+function restOf(b, all) {
+  if (!mergeable(b) || b.mergeDismissed?.length) return null
+  const t = Date.parse(b.startedAt)
+  let best = null
+  for (const a of all) {
+    if (a.id === b.id || !mergeable(a) || String(a.startedAt) >= String(b.startedAt)) continue
+    if (a.event?.title && b.event?.title && !sameEvent(a, b)) continue
+    const gap = t - endOf(a)
+    if (gap < -60_000 || t - Date.parse(a.startedAt) > 864e5) continue
+    const why = sameEvent(a, b) ? 'event' : gap <= MERGE_GAP_MS && a.interrupted ? 'closed' : gap <= MERGE_GAP_MS && sameTitle(a, b) ? 'title' : null
+    if (why && (!best || a.startedAt > best.a.startedAt)) best = { a, why }
+  }
+  return best && { id: best.a.id, title: best.a.title, startedAt: best.a.startedAt, endedAt: new Date(endOf(best.a)).toISOString(), why: best.why }
+}
+// For the list: each meeting that's the rest of another, by id. Each is looked for among the ones
+// that started in the day before it.
+export function mergeHints(all = list()) {
+  const out = {}
+  const by = all.filter(mergeable).sort((x, y) => String(x.startedAt).localeCompare(String(y.startedAt)))
+  by.forEach((m, i) => {
+    let j = i
+    while (j > 0 && Date.parse(m.startedAt) - Date.parse(by[j - 1].startedAt) <= 864e5) j--
+    const h = restOf(m, by.slice(j, i))
+    if (h) out[m.id] = h
+  })
+  return out
+}
+// "Not the same meeting": not suggested again for this one (which it was said not to be is kept).
+export function notRestOf(id, aid) {
+  const m = meta(id)
+  return patchMeta(id, { mergeDismissed: [...new Set([...(m.mergeDismissed || []), String(aid || '')])].filter(Boolean).slice(-20) })
+}
+// The notice that a recording stopped when Bridge AI closed, read: not said again.
+export function seenInterrupted(id) {
+  const m = meta(id)
+  return m.interrupted ? patchMeta(id, { interrupted: { ...m.interrupted, seen: true } }) : m
+}
+// The meeting a recording starting now carries on (Resume recording) rather than starting another:
+// one that stopped when Bridge AI closed, while its calendar event is still on (from ten minutes
+// before it), or within MERGE_GAP_MS of when it stopped, with nothing recorded since. event: the
+// calendar event the new one is for, when there's one: then only a meeting for that event, or one
+// without an event that stopped within the gap. null when there's none.
+export function carryOn({ event } = {}, now = Date.now()) {
+  const ev = event?.title ? { event: { title: clean(event.title, 200), start: event.start || null } } : null
+  const all = list()
+  const hit = all.filter((m) => {
+    if (!m.interrupted || !mergeable(m)) return false
+    const cut = Date.parse(m.interrupted.at)
+    // Recorded since: started between then and now (a meeting whose time was set by hand to later
+    // today, or another day, wasn't).
+    if (all.some((x) => x.id !== m.id && Date.parse(x.startedAt) > cut && Date.parse(x.startedAt) <= now)) return false
+    const soon = now >= cut && now - cut <= MERGE_GAP_MS
+    const on = !!m.event?.end && now >= Date.parse(m.event.start || m.startedAt) - 10 * 60_000 && now <= Date.parse(m.event.end)
+    if (ev && m.event?.title) return sameEvent(ev, m) && (on || soon)
+    return soon || (!ev && on)
+  }).sort((x, y) => Date.parse(y.interrupted.at) - Date.parse(x.interrupted.at))[0]
+  return hit ? { id: hit.id, title: hit.title, at: hit.interrupted.at, startedAt: hit.startedAt, event: hit.event?.title || null } : null
 }
 
 // ---------- Who said it ----------

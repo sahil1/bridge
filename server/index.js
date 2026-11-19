@@ -111,7 +111,7 @@ import { combine, platformOf, PLATFORMS } from './connector.js'
 import { listTemplates, templateOf } from './bottemplates.js'
 import * as botsStore from './bots.js'
 import * as conns from './connections.js'
-import { makeHubs } from './connhub.js'
+import { makeHubs, RULES } from './connhub.js'
 import { makeBotSetup, patchOf, proposalOf, linesOf, postSaid } from './botsetup.js'
 import * as botMcp from './botmcp.js'
 import * as botAnswer from './botanswer.js'
@@ -384,6 +384,21 @@ async function fleetView() {
   return f
 }
 
+// The fleet as the sidebar and your phone are shown it: all but the bots' answering agents (a
+// question each, frontdesk.js), which are a bot's runs, seen on its page under Conversations, never a
+// chat of their own; nor their tabs, nor the space they run in while only they are in it. What
+// watches agents here (the helpers' ends, notifications, Try It) sees them all, and so does
+// /api/fleet?all=1 (a look at every agent, for tests and diagnosis).
+function shownFleet(f) {
+  const runs = new Set((f?.agents || []).filter((a) => a.helper?.list === 'desk').map((a) => a.paneId))
+  const theirs = (t) => t.panes?.length > 0 && t.panes.every((p) => runs.has(p.paneId))
+  const tabs = new Set((f?.tabs || []).filter(theirs).map((t) => t.tabId))
+  const spaces = new Set((f?.workspaces || []).filter((w) => { const own = f.tabs.filter((t) => t.workspaceId === w.id); return own.length ? own.every((t) => tabs.has(t.tabId)) : w.label === BOT_RUNS }).map((w) => w.id))
+  if (!runs.size && !spaces.size) return f
+  const agents = f.agents.filter((a) => !runs.has(a.paneId))
+  return { ...f, agents, tabs: f.tabs.filter((t) => !tabs.has(t.tabId)), workspaces: f.workspaces.filter((w) => !spaces.has(w.id)), counts: agents.reduce((c, a) => ({ ...c, [a.status]: (c[a.status] || 0) + 1 }), {}) }
+}
+
 async function findAgent(paneId) {
   const f = await rt.fleet()
   const a = f.agents.find((x) => x.paneId === paneId)
@@ -391,7 +406,7 @@ async function findAgent(paneId) {
   return a
 }
 
-app.get('/api/fleet', wrap(fleetView))
+app.get('/api/fleet', wrap(async (req) => (req.query.all === '1' ? fleetView() : shownFleet(await fleetView()))))
 // How Bridge AI is doing: its CPU, how long its event loop was held up, the slowest requests
 // (perf.js). reset=1: count afresh from now.
 app.get('/api/perf', wrap((req) => perf.snapshot({ reset: req.query.reset === '1' })))
@@ -1625,7 +1640,7 @@ app.get('/api/events', (req, res) => {
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
   res.flushHeaders()
   clients.add(res)
-  if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(lastFleet)}\n\n`)
+  if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(shownFleet(lastFleet))}\n\n`)
   // Who's viewing a screen of yours now, here or on another of your computers (screentell.js).
   res.write(`event: screen\ndata: ${JSON.stringify({ list: screenTell.list() })}\n\n`)
   // The desktop app's own feed (desktop/main.js says so): it also hears when another of your devices
@@ -1662,7 +1677,8 @@ async function pollFleet() {
         if (!f.down) notify.onFleet(f, cfg)
         if (key !== lastFleetKey) {
           lastFleetKey = key
-          for (const c of clients) c.write(`event: fleet\ndata: ${JSON.stringify(f)}\n\n`)
+          const shown = JSON.stringify(shownFleet(f))
+          for (const c of clients) c.write(`event: fleet\ndata: ${shown}\n\n`)
         }
       }
     } catch { /* runtime briefly unavailable */ }
@@ -1675,7 +1691,8 @@ const pushFleet = async () => {
     const f = await fleetView()
     if (gen !== fleetGen) return // a newer push follows
     lastFleetKey = ''; lastFleet = f
-    for (const c of clients) c.write(`event: fleet\ndata: ${JSON.stringify(f)}\n\n`)
+    const shown = JSON.stringify(shownFleet(f))
+    for (const c of clients) c.write(`event: fleet\ndata: ${shown}\n\n`)
   } catch { /* next poll */ }
 }
 pollFleet()
@@ -1994,9 +2011,15 @@ app.get('/api/meetings', wrap(() => {
   const list = meetings.list()
   insightsByItself(list)
   const auto = trialOn('meeting-insights') && meetInsights.autoOn()
-  return { meetings: list.map(({ captures, links, ...m }) => ({ ...m, pictures: captures?.length || 0, files: links?.length || 0 })), folder: meetings.folder(), kinds: Object.entries(meetings.KINDS).map(([id, k]) => ({ id, label: k.label })), ...(auto && !auto.said ? { insightsOn: { at: auto.at, meetings: auto.meetings } } : {}) }
+  // mergeHint: the meeting one is the rest of (recorded during the same event, or just after), to
+  // offer merging them.
+  const hints = meetings.mergeHints(list)
+  return { meetings: list.map(({ captures, links, ...m }) => ({ ...m, pictures: captures?.length || 0, files: links?.length || 0, ...(hints[m.id] ? { mergeHint: hints[m.id] } : {}) })), folder: meetings.folder(), kinds: Object.entries(meetings.KINDS).map(([id, k]) => ({ id, label: k.label })), ...(auto && !auto.said ? { insightsOn: { at: auto.at, meetings: auto.meetings } } : {}) }
 }))
 app.post('/api/meetings', wrap(async (req) => { prompt = null; const m = await meetings.start({ ...(req.body || {}), callApps: calls.now().calls.map((c) => c.app) }); counts.add('meetings.recorded'); return m }))
+// Before a recording starts: the meeting it would carry on, one that stopped when Bridge AI closed
+// (meetings.js carryOn), for the app to offer Resume recording first. event: the one it's for.
+app.post('/api/meetings/carry-on', wrap((req) => ({ meeting: meetings.carryOn({ event: req.body?.event || null }) })))
 // Several meetings as one (meetings.js combine): a combined meeting with an overview across them;
 // they stay as they are.
 app.post('/api/meetings/combine', wrap((req) => meetings.combine([].concat(req.body?.ids || []).map(String).slice(0, 100), { title: req.body?.title })))
@@ -2142,6 +2165,8 @@ app.get('/api/calls', wrap(() => {
     capturing: calls.capturing(),
     ...calls.now(), detect: cfg.meetings?.detect !== false, float: cfg.meetings?.floatCard || 'meetings', floatHover: cfg.meetings?.floatHover !== false, floatHide: ['always', 'never'].includes(cfg.meetings?.floatHide) ? cfg.meetings.floatHide : 'sharing',
     prompt: rec ? null : prompt,
+    // A call's notes would carry on a meeting that stopped when Bridge AI closed: Resume recording first.
+    carryOn: !rec && prompt ? meetings.carryOn() : null,
     recording: rec && { id: rec.id, title: rec.title, status: rec.status, startedAt: rec.startedAt, resumedAt: rec.resumedAt || null, resumedFrom: rec.resumedFrom || 0, seconds: Math.round(meetings.elapsed(rec.id) || 0), talking: meetings.talking(rec.id), callApps: rec.callApps || [], callEnded: rec.callEnded || null, callEndedApp: rec.callEndedApp || null, endWhy: rec.endWhy || (rec.callEnded ? 'call' : null), stopsAt: rec.stopsAt || null, callQuiet: meetings.callQuiet(rec.id), callAccess: meetings.callAccess(rec.id) },
   }
 }))
@@ -2245,6 +2270,13 @@ app.post('/api/meetings/:id/reopen', wrap((req) => { const m = meetings.reopen(r
 // A combined meeting's meetings: one more, or one taken out (the last but one separates it).
 app.post('/api/meetings/:id/parts', wrap((req) => meetings.addPart(req.params.id, String(req.body?.id || ''))))
 app.delete('/api/meetings/:id/parts/:pid', wrap((req) => meetings.removePart(req.params.id, req.params.pid)))
+// One meeting recorded as two (meetings.js merge): the later one becomes the next part of the
+// earlier, and Separate puts them back as two for a week. "Not the same meeting" stops suggesting
+// it; and the notice that a recording stopped when Bridge AI closed, once read.
+app.post('/api/meetings/:id/merge', wrap((req) => meetings.merge(req.params.id, String(req.body?.id || ''))))
+app.post('/api/meetings/:id/separate', wrap((req) => meetings.separate(req.params.id, String(req.body?.id || ''))))
+app.post('/api/meetings/:id/merge-hint', wrap((req) => meetings.notRestOf(req.params.id, String(req.body?.not || ''))))
+app.post('/api/meetings/:id/interrupted', wrap((req) => meetings.seenInterrupted(req.params.id)))
 app.patch('/api/meetings/:id', wrap((req) => {
   if (req.body?.archived != null) meetings.archive(req.params.id, !!req.body.archived)
   if (req.body?.folder !== undefined) meetings.setFolder(req.params.id, req.body.folder)
@@ -4091,13 +4123,19 @@ async function closePane(paneId) {
   pushFleet()
 }
 // A question that waits on you is a notification, as an agent's question is: which bot, who asked
-// and where, not what (it opens Needs You, where the question is).
+// and where, not what (it opens Needs You, where the question is). A run at its time limit says
+// how long it has run, for you to let it carry on or stop it.
 const deskTold = (q) => {
   if (cfg.notify?.needsYou === false) return
   const who = q.from?.name || 'Someone'
   const plat = platformOf(q.place?.id || q.conv)
   const where = `${q.place?.kind === 'dm' ? 'a direct message' : q.place?.name ? (plat === 'teams' ? q.place.name : `#${q.place.name}`) : PLATFORMS[plat]}${plat !== 'slack' ? ` (${PLATFORMS[plat]})` : ''}`
-  notify.send({ kind: 'needs-you', title: `${q.bot?.name || 'Your bot'}: ${who} asked in ${where}`, body: q.needsOwner ? 'Nothing could answer it: write the reply in Needs You.' : 'An answer waits for you to send or discard.', url: `/?agent=${encodeURIComponent(`slack:${q.id}`)}&inbox=1`, tag: `bot-${q.id}` }).catch(() => {})
+  const asking = q.limit?.phase === 'asking'
+  notify.send({
+    kind: 'needs-you', title: asking ? `${q.bot?.name || 'Your bot'}: its answer to ${who} in ${where} has run ${q.limit.ran} ${q.limit.ran === 1 ? 'minute' : 'minutes'}` : `${q.bot?.name || 'Your bot'}: ${who} asked in ${where}`,
+    body: asking ? 'Let it carry on, or stop it, in Needs You.' : q.needsOwner ? 'Nothing could answer it: write the reply in Needs You.' : 'An answer waits for you to send or discard.',
+    url: `/?agent=${encodeURIComponent(`slack:${q.id}`)}&inbox=1`, tag: `bot-${q.id}`,
+  }).catch(() => {})
 }
 // The files an answering agent opened in its run, from its conversation (for the record).
 const READS = new Set(['Read', 'Grep', 'Glob', 'read_file', 'shell', 'exec_command'])
@@ -4220,9 +4258,14 @@ async function signInKind(kind) {
   if (kind === 'codex') return { kind: s.plan === 'ChatGPT' ? 'subscription' : s.plan === 'API key' ? 'api' : 'unknown', ...provider }
   return { kind: 'unknown', ...provider }
 }
+// What a bot may do, in brief, for the line that sums up its Access and the Bots overview's cards
+// (src/components/bots/access.js says it): who may ask (how many named), its folders, its memory,
+// what it may change, how many MCP servers, what answers, its limits. Never who the people are.
+const accessOf = (b) => ({ who: b.who, askers: b.askers.length, readsFrom: b.readsFrom, memory: b.memory, changes: b.changes, mcp: b.mcp.length, answerers: b.answerers, limits: b.limits })
 // A bot as Settings shows it: how it's connected and why not (and the scopes its app lacks), its
 // settings and instructions, its folders as they stand, which agent answers and how it's signed in,
-// the manifest to make or update its app with, and how many questions wait.
+// the manifest to make or update its app with, and how many questions wait. Brief (the list): how
+// it stands, how many questions today and what waits for you, and its access in brief.
 async function botView(b, { brief = false } = {}) {
   // A draft: its name and who asked for it; what it would be is its setup chat's (botsetup.js).
   if (b.draft) return { id: b.id, name: b.name, description: b.description, draft: true, from: b.from === 'chief' ? 'chief' : 'you', state: 'draft', where: {}, connected: false, waiting: 0, paused: false }
@@ -4240,7 +4283,7 @@ async function botView(b, { brief = false } = {}) {
   const shared = Object.fromEntries(conns.PLATFORMS.map((p) => { const c = conns.sharedOf(p); return [p, c ? { id: c.id, name: c.name } : null] }))
   const base = { id: b.id, name: b.name, description: b.description, icon: b.icon || null, state: s.state, why: s.why || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null, appId: s.appId || null, where, connected: all.state === 'connected', connections: via, shared }
   const v = await desk.view(b.id)
-  if (brief) return { ...base, waiting: v?.waiting || 0, answering: v?.answering || 0, paused: b.paused }
+  if (brief) return { ...base, waiting: v?.waiting || 0, answering: v?.answering || 0, paused: b.paused, today: v?.today || 0, proposed: v?.memoryCount?.proposed || 0, access: accessOf(b) }
   // How many channels its Slack app is in (Set Up's checklist: invited to one), asked of Slack once
   // a minute at most.
   if (s.state === 'connected' && ch?.parts?.slack?.channels) {
@@ -4268,7 +4311,8 @@ async function botView(b, { brief = false } = {}) {
   const routinesNow = await routines.list().catch(() => ({ routines: [] }))
   return {
     ...base, ...v,
-    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback },
+    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback, answerIn: b.answerIn },
+    carryOn: botsStore.CARRY_ON_MIN,
     paused: b.paused,
     instructions: { text: botsStore.readOwn(b.id), file },
     agents: ['claude', 'codex'].map((k) => ({ kind: k, label: adapter(k).label, installed: have.has(k), confined: !!readOnly(k)?.confined, canChange: canChange(k) })),
@@ -4306,16 +4350,34 @@ app.get('/api/bots', botsGuard, wrapBot(async () => ({
   deleted: botsStore.deleted().filter((d) => desk.has(d.id)).map((d) => ({ ...d, cleared: desk.cleared(d.id) })),
   you: String(cfg.name || '').trim() || null,
 })))
-// A new bot, by its name.
+// A new bot, by its name. From a starting point (a template), the access it starts with is its own
+// from the start, with the folder you picked (readsFrom), through the same checks as any change:
+// one they turn down makes nothing. What it may change only where something here can make a change
+// (Claude Code in what answers): else it changes nothing, and that's said (notes: ['changes']).
 app.post('/api/bots', botsGuard, wrapBot(async (req) => {
+  const tpl = req.body?.template ? templateOf(String(req.body.template)) : null
   const b = botsStore.create({ name: req.body?.name, description: req.body?.description, template: req.body?.template || null }, String(cfg.name || '').trim())
+  const want = { ...(tpl?.access || {}), ...(Array.isArray(req.body?.readsFrom) && req.body.readsFrom.length ? { readsFrom: req.body.readsFrom } : {}) }
+  const notes = []
+  let made = b
+  if (Object.keys(want).length) {
+    try {
+      if (want.changes && want.changes !== 'none' && !(await answererOf({ ...b, ...want })).changes) { want.changes = 'none'; notes.push('changes') }
+      made = botsStore.save(b.id, await checkSettings(b, want, req)).after
+    } catch (e) { botsStore.remove(b.id); throw e }
+  }
   connectBot(b.id)
-  desk.record(b.id, 'settings.changed', { setting: 'created', old: null, new: { name: b.name, ...(b.template ? { template: b.template } : {}) }, ...changedBy(req) })
+  desk.record(b.id, 'settings.changed', { setting: 'created', old: null, new: { name: b.name, ...(b.template ? { template: b.template, access: settingSaid(accessOf(made)) } : {}) }, ...changedBy(req) })
   desk.sync()
-  return botView(b)
+  return { ...(await botView(made)), ...(notes.length ? { notes } : {}) }
 }))
-// What a new bot can start from.
-app.get('/api/bots/templates', botsGuard, wrapBot(async () => ({ templates: listTemplates(String(cfg.name || '').trim()) })))
+// What a new bot can start from: each with the access it starts with, its folder when that's here,
+// and whether something here can make a change (Claude Code), for one that starts suggesting them.
+app.get('/api/bots/templates', botsGuard, wrapBot(async () => {
+  const here = async (f) => (f ? fs.promises.stat(path.resolve(String(f).replace(/^~(?=$|[\\/])/, os.homedir()))).then((s) => s.isDirectory(), () => false) : false)
+  const list = listTemplates(String(cfg.name || '').trim())
+  return { templates: await Promise.all(list.map(async (x) => ({ ...x, folderHere: await here(x.folder) }))), canChange: (await answererOf({ answerers: null, agent: null })).changes }
+}))
 
 // ---------- Setting a bot up by saying what it's for (botsetup.js) ----------
 // AI Assist's model (the one picked for Studio, else the one AI Assist reaches first: studioModel),
@@ -4600,6 +4662,8 @@ async function checkSettings(b, x, req) {
     next.answerers = want.length ? want : null
   }
   if (x.fallback !== undefined) next.fallback = x.fallback !== false
+  // Where a question at the top of a channel is answered: in the channel, or a thread of its own.
+  if (x.answerIn !== undefined) next.answerIn = x.answerIn === 'channel' ? 'channel' : 'thread'
   // You in Slack, so its drafts come to your direct messages, and you may always ask.
   if (x.owner !== undefined) {
     if (x.owner && !/^[UW][A-Z0-9]{2,20}$/.test(String(x.owner.id || ''))) throw new Error('Pick yourself from your workspace\'s people')
@@ -4818,7 +4882,7 @@ async function connView(c) {
     ownerGuess,
     id: c.id, name: c.name, platform: c.platform, shared: c.shared, own: c.bot ? { id: c.bot, name: botsStore.get(c.bot)?.name || c.bot } : null,
     bots: on.map((b) => ({ id: b.id, name: b.name, description: b.description || '', paused: b.paused, command: slack && c.perBot ? slackCommand(b.name) : null })),
-    owner: c.owner, defaults: c.defaults, perBot: c.perBot, createdAt: c.createdAt || null,
+    owner: c.owner, defaults: c.defaults, perBot: c.perBot, assist: c.assist, unsure: c.unsure, createdAt: c.createdAt || null,
     // (Paused: brought from another computer, or moved to one; Settings › Back Up & Move starts it.)
     paused: c.paused ? { why: c.pausedWhy || null } : null,
     state: c.paused ? 'off' : s.state, why: c.paused ? c.pausedWhy || null : s.why || null, since: s.since || null, lastEvent: s.lastEvent || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null, appId: s.appId || null,
@@ -4849,7 +4913,30 @@ app.post('/api/connections', botsGuard, wrapBot(async (req) => {
 }))
 app.get('/api/connections/:cid', botsGuard, wrapBot(async (req) => connView(connOr404(req.params.cid))))
 app.get('/api/connections/:cid/activity', botsGuard, wrapBot(async (req) => ({ routed: conns.routed(connOr404(req.params.cid).id, 200) })))
-// Its name, you there, which bot answers in which channel, and a slash command for each bot.
+// How a shared connection hands each question to one of its bots (the Routing page): its rules in
+// connhub's order, its bots with what AI Assist picks them by (their descriptions) and the channels
+// each is the default bot in, and which model AI Assist would pick with (none: it can't, so it
+// asks, or goes to the bot you set for that).
+app.get('/api/connections/:cid/routing', botsGuard, wrapBot(async (req) => {
+  const c = connOr404(req.params.cid)
+  return { ...(await connView(c)), rules: c.shared ? RULES : [], assistModel: await assistState() }
+}))
+// Try a Message: which bot a message would go to, and why (connhub.js dry), with nothing sent,
+// answered or kept, and no bot run. Who asks: you, someone picked from there ({ id, name }), or
+// someone not named (null); where: a channel there, or a direct message; a reply in a thread a
+// bot answered in (thread: that bot); with a mention or without.
+app.post('/api/connections/:cid/try', botsGuard, wrapBot(async (req) => {
+  const c = connOr404(req.params.cid)
+  const x = req.body || {}
+  const text = String(x.text ?? '')
+  if (!text.trim()) throw new Error('Type a message to try')
+  const p = x.person
+  const from = p === 'you' ? { you: true, id: c.owner?.id || null, name: botOwnerName() } : p && botsStore.PERSON_ID.test(String(p.id || '')) ? { id: String(p.id), name: String(p.name || '').replace(/\s+/g, ' ').trim().slice(0, 80) || null } : null
+  const channel = x.channel && botsStore.CHANNEL_ID.test(String(x.channel)) ? String(x.channel) : null
+  return hubs.dry(c.id, { text, channel, channelName: x.channelName ? String(x.channelName).replace(/^#/, '').slice(0, 80) : null, dm: x.dm === true, from, mention: x.mention !== false, thread: /^b\d{1,4}$/.test(String(x.thread || '')) ? String(x.thread) : null })
+}))
+// Its name, you there, which bot answers in which channel, a slash command for each bot, whether
+// AI Assist picks, and the bot for a question nothing else places.
 app.patch('/api/connections/:cid', botsGuard, wrapBot(async (req) => {
   const c = connOr404(req.params.cid)
   const x = req.body || {}
@@ -4875,8 +4962,15 @@ app.patch('/api/connections/:cid', botsGuard, wrapBot(async (req) => {
       next.defaults.push({ id, name: String(d?.name || '').replace(/^#/, '').trim().slice(0, 80) || null, bot: String(d.bot) })
     }
   }
+  // Whether AI Assist picks among the bots someone may ask, and the bot a question goes to when
+  // nothing says which (null: they're asked): one of the bots on it.
+  if (x.assist !== undefined) next.assist = x.assist !== false
+  if (x.unsure !== undefined) {
+    if (x.unsure && !conns.botsOn(c, botsStore.live()).some((b) => b.id === String(x.unsure))) throw new Error('Pick one of the bots on this connection')
+    next.unsure = x.unsure ? String(x.unsure) : null
+  }
   const { before, after } = conns.save(c.id, next)
-  const said = (k, v) => settingSaid(k === 'defaults' ? v.map((d) => `${d.name || d.id}: ${botsStore.get(d.bot)?.name || d.bot}`) : v)
+  const said = (k, v) => settingSaid(k === 'defaults' ? v.map((d) => `${d.name || d.id}: ${botsStore.get(d.bot)?.name || d.bot}`) : k === 'unsure' && v ? botsStore.get(v)?.name || v : v)
   for (const k of Object.keys(next)) if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) conns.note(c.id, { event: 'settings', what: k, old: said(k, before[k]), new: said(k, after[k]), ...changedBy(req) })
   pushFleet()
   return connView(after)
@@ -5068,6 +5162,25 @@ app.get('/api/bots/:id/activity', botsGuard, wrapBot(async (req) => {
     changes: desk.changes(b.id),
   }
 }))
+// Conversations: one row for each person who asked it something, or each place (by=place), the
+// latest first; one person's or place's turns, each with what ran for it, and a person's running
+// context, which you keep, let go of, or forget all of at once.
+app.get('/api/bots/:id/conversations', botsGuard, wrapBot(async (req) => {
+  const b = recordOr404(req.params.id)
+  const by = req.query.by === 'place' ? 'place' : 'person'
+  return { by, rows: desk.talks(b.id, { by }).slice(0, 300), memory: b.memory || null, carryOn: botsStore.CARRY_ON_MIN }
+}))
+app.get('/api/bots/:id/conversations/:by/:key', botsGuard, wrapBot(async (req) => {
+  const b = recordOr404(req.params.id)
+  const key = String(req.params.key)
+  return desk.turnsIn(b.id, req.params.by === 'place' ? { place: key } : { person: key })
+}))
+app.post('/api/bots/:id/people/:pid/:act', botsGuard, wrapBot(async (req) => {
+  const b = recordOr404(req.params.id)
+  const act = String(req.params.act)
+  if (!['keep', 'drop', 'forget'].includes(act)) throw Object.assign(new Error('Keep, drop or forget'), { status: 400 })
+  return { context: desk.context[act](b.id, String(req.params.pid), { device: deviceOfReq(req) }) }
+}))
 app.get('/api/bots/:id/activity/:conv', botsGuard, wrapBot(async (req) => {
   const b = recordOr404(req.params.id)
   const t = desk.timeline(b.id, String(req.params.conv))
@@ -5090,6 +5203,9 @@ app.get('/api/bots/:id/export', botsGuard, (req, res) => {
 // Your answer to one, from Needs You: send (as edited) or discard; for a change waiting on you,
 // Send approves it and opens its pull request first.
 app.post('/api/bots/questions/:id', botsGuard, wrapBot((req) => desk.decide(req.params.id, { send: req.body?.send === true, text: req.body?.text })))
+// Your decision about a run at its time limit, from Needs You (on a computer, or the phone through
+// the relay, which says which device): Continue (minutes: 10 or 30) or Stop.
+app.post('/api/bots/questions/:id/limit', botsGuard, wrapBot((req) => desk.limitAct(req.params.id, String(req.body?.act || ''), { minutes: req.body?.minutes, via: 'app', ...changedBy(req) })))
 // A bot from another computer: its own export, a backup or a move (backup.js). Made with its plain
 // settings, then each of the rest checked as Settings checks it (checkSettings: a folder there, inside
 // your home folder and not Bridge AI's own; people by their ids; what answers; its MCP servers here)
@@ -5165,7 +5281,7 @@ app.get('/api/bots/:id/channels', botsGuard, wrapBot(async (req) => {
 app.get('/api/bots/:id/bundle', botsGuard, (req, res) => {
   try {
     const b = botOr404(req.params.id)
-    const out = botsStore.bundleOf(b.id, desk.memory.list(b.id).filter((x) => x.state === 'kept').map(({ id, kind, of, ofName, text, state }) => ({ id, kind, of, ofName, text, state })))
+    const out = botsStore.bundleOf(b.id, desk.memory.list(b.id).filter((x) => x.state === 'kept').map(({ id, kind, of, ofName, text, state, private: priv, place }) => ({ id, kind, of, ofName, text, state, ...(priv ? { private: true, place } : {}) })))
     desk.record(b.id, 'settings.changed', { setting: 'exported', old: null, new: { memory: out.memory.length }, ...changedBy(req) })
     res.setHeader('content-type', 'application/json; charset=utf-8')
     res.setHeader('content-disposition', `attachment; filename="${b.name.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || b.id}.bridge-bot.json"`)
@@ -5179,6 +5295,8 @@ app.patch('/api/bots/:id/memory/:mid', botsGuard, wrapBot(async (req) => {
   const b = botOr404(req.params.id)
   const from = { device: deviceOfReq(req) }
   if (req.body?.keep === true) desk.memory.keep(b.id, req.params.mid, from)
+  // (A place's own learning, used everywhere: only when you say so.)
+  if (req.body?.widen === true) desk.memory.widen(b.id, req.params.mid, from)
   return req.body?.text !== undefined ? desk.memory.edit(b.id, req.params.mid, req.body.text, from) : desk.memory.list(b.id).find((x) => x.id === req.params.mid) || null
 }))
 app.delete('/api/bots/:id/memory/:mid', botsGuard, wrapBot(async (req) => { desk.memory.remove(botOr404(req.params.id).id, req.params.mid, { device: deviceOfReq(req) }); return { ok: true } }))
@@ -5222,6 +5340,7 @@ meetings.setHelpers({
   board: {
     scene: async (m, hint) => { const id = await meetBoard.find(m.id, hint || m.boardId || null); return id ? meetBoard.itemsOf((await boards.read(id)).data, m.id) : { items: [], other: [] } },
     add: (m, items, o) => meetBoard.add(m, items, o),
+    retag: (id, from, to, shift) => meetBoard.retag(id, from, to, shift),
     labelOf: meetBoard.labelOf,
     nameOf: async (id) => (await chatModels.models().catch(() => [])).find((x) => x.id === id)?.label || id,
   },

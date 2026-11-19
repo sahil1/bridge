@@ -60,6 +60,25 @@ export function outboxFor(key) {
 }
 export const outboxOf = (key) => path.join(OUTBOX, safe(key))
 export const drop = (key) => { try { fs.rmSync(outboxOf(key), { recursive: true, force: true }) } catch { /* in use: next time */ } }
+// A run that picks up where an earlier one was stopped (at its time limit: frontdesk.js): what that
+// one saved goes on in this one's outbox, as if saved there, so it goes with this answer and counts
+// toward this run's limits, and is checked as every file is when it's collected. Plain files only;
+// the earlier outbox goes. How many came.
+export function carry(fromKey, to) {
+  const from = outboxOf(fromKey)
+  let names = []
+  try { names = fs.readdirSync(from) } catch { return 0 }
+  let n = 0
+  for (const name of names) {
+    try {
+      if (!fs.lstatSync(path.join(from, name)).isFile() || fs.existsSync(path.join(to, name))) continue
+      fs.renameSync(path.join(from, name), path.join(to, name))
+      n++
+    } catch { /* left behind, and gone with it */ }
+  }
+  drop(fromKey)
+  return n
+}
 
 // Whether a file is something that may not go: a kind not on the list, or something that runs by its
 // first bytes or (not on Windows) its mode.

@@ -14,7 +14,8 @@ import { t } from '../../i18n/index.js'
 // stands, the bots on it, the channels that each go to one bot (a shared one's), a slash command
 // for each bot (Slack), you there, its app's steps, tokens and checklist (the same sections a bot
 // had for its own app: settings/Bots.jsx, given the connection as kind 'connection'), and which bot
-// each question went to, and why. BotReach is a bot's own line about it, on its Set Up.
+// each question went to, and why. A shared one's Routing (Routing.jsx) has its rules in order, with
+// Try a Message. BotReach is a bot's own line about it, on its Set Up.
 
 const STATE = { connected: 'ok', connecting: 'warn', reconnecting: 'warn', error: 'bad', 'no-tokens': 'warn', off: 'warn' }
 // A connection as the platform sections take a bot: its state where each looks for it, and you there.
@@ -46,8 +47,10 @@ function routedSaid(e) {
     case 'last': return t('to {bot}: the bot they asked last', { bot })
     case 'only': return t('to {bot}: the only one they may ask', { bot })
     case 'listen': return t('to {bot}: it answers there without a mention', { bot })
+    case 'limit': return t('to {bot}: your answer about its run at its time limit', { bot })
     case 'router': return e.bot ? t('to {bot}: AI Assist picked it', { bot }) : e.detail === 'no-model' ? t('AI Assist couldn\'t pick: there\'s no model') : t('AI Assist couldn\'t tell which')
     case 'picked': return t('to {bot}: picked by whoever asked', { bot })
+    case 'unsure': return t('to {bot}: the bot for when nothing says which', { bot })
     case 'asked': return t('Asked them which bot')
     case 'none': return t('Turned down: they may ask none of its bots')
     case 'help': return t('Listed its bots (!help)')
@@ -81,8 +84,9 @@ export function MakeShared({ platform, suggested = '', onMade, compact = false }
   )
 }
 
-// The channels that each go to one bot, whatever's asked of the app there (a shared one's).
-function Defaults({ c, reload }) {
+// The channels that each go to one bot, whatever's asked of the app there (a shared one's). bare:
+// without its own heading and words, as the Routing page's rule has them (Routing.jsx).
+export function Defaults({ c, reload, bare = false }) {
   const [channels, setChannels] = useState(null)
   const [chan, setChan] = useState('')
   const [bot, setBot] = useState('')
@@ -102,8 +106,8 @@ function Defaults({ c, reload }) {
   const nameOf = (id) => c.bots.find((b) => b.id === id)?.name || id
   return (
     <div className="cn-part" data-setting="connection-defaults">
-      <b className="small">{t('Channels\' Bots')}</b>
-      <p className="muted small">{t('In these channels, everything asked of {name} goes to one bot, whatever it names. Elsewhere it goes by the bot named first, the thread, or AI Assist\'s pick.', { name: c.name })}</p>
+      {!bare && <b className="small">{t('Channels\' Bots')}</b>}
+      {!bare && <p className="muted small">{t('In these channels, everything asked of {name} goes to one bot, whatever it names. Elsewhere it goes by the bot named first, the thread, or AI Assist\'s pick.', { name: c.name })}</p>}
       {c.defaults.length > 0
         ? (
           <ul className="sb-askers">
@@ -137,7 +141,7 @@ function Defaults({ c, reload }) {
 }
 
 // Which bot each question went to lately, and why.
-function Routed({ c }) {
+export function Routed({ c }) {
   const [list, setList] = useState(null)
   useEffect(() => {
     let live = true
@@ -189,6 +193,7 @@ export function ConnectionCard({ c, reload, open = null }) {
           : <p className="small sb-none">{t('None yet: every new bot is reached through it unless it has its own.')}</p>}
         {c.shared && c.platform === 'slack' && c.bots.length > 0 && <p className="muted small">{t('People ask one with its name first ({example}), with {command} and its name, or in a channel that goes to it; a reply in a thread goes to the bot that answered there. Otherwise AI Assist picks from each bot\'s description, or asks them which.', { example: `@${c.name} ${c.bots[0].name}: …`, command: c.command || '' })}</p>}
         {c.shared && c.platform !== 'slack' && c.bots.length > 0 && <p className="muted small">{t('People ask one with its name first ({example}); a reply in a thread goes to the bot that answered there. Otherwise AI Assist picks from each bot\'s description, or asks them which.', { example: `${c.bots[0].name}: …` })}</p>}
+        {c.shared && <div className="st-row"><button type="button" className="btn small" onClick={() => openBot(`routing:${c.id}`)} data-setting="connection-routing"><Icon name="branch" size={12} /> {t('Routing')}</button><span className="muted small">{t('Its rules in order, and Try a Message to see which bot takes one.')}</span></div>}
       </div>
       {c.shared && <Defaults c={c} reload={reload} />}
       {c.shared && c.platform === 'slack' && (

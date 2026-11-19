@@ -15,6 +15,9 @@
 //   save_file takes five files a run at most, and says so for one more;
 //   for a public channel, an answer with files waits for you even where it may go without asking,
 //   whichever way it made them (its outbox, or a FILE: block); a page, a drawing or XML anywhere;
+//   a run picked up after its time limit (Continue, in a copy of its conversation) has its save_file
+//   tool still, and what it saved before it was stopped goes with the answer, counted in its five;
+//   a page it makes after Continue waits for you as any does;
 //   its Activity lists the files it made with Open and Send to… (Send to… across two computers is
 //   in backup-move); one that could run something as it opens (a drawing, a page) is shown in
 //   Finder instead; nothing writes through a bot's files (Studio's routes, a copy into them).
@@ -30,8 +33,9 @@ const dc = await startDiscord('bots-files')
 await dc.heartbeat({ ms: 800 })
 const tm = await startTeams('bots-files')
 const T1 = 'dtest.bot-one.0123456789abcdef'
-const { slack, kit, draftOf, startOf, briefOf, botOf, connected, events, posted, postedLike } = await botKit('bots-files', {
-  folders: ['notes'], env: { BRIDGE_DISCORD_URL: dc.url, BRIDGE_TEAMS_URL: tm.url, BRIDGE_TEAMS_PORT: '0', BRIDGE_BOT_HOLD_MS: '60000' },
+// (A "minute" is 3 seconds and the wait at a time limit 4, for a run picked up after its time limit.)
+const { slack, kit, needs, draftOf, startOf, startsOf, briefOf, botOf, connected, events, posted, postedLike } = await botKit('bots-files', {
+  folders: ['notes'], env: { BRIDGE_DISCORD_URL: dc.url, BRIDGE_TEAMS_URL: tm.url, BRIDGE_TEAMS_PORT: '0', BRIDGE_BOT_HOLD_MS: '60000', BRIDGE_BOT_MINUTE_MS: '3000', BRIDGE_BOT_GRACE_MS: '4000' },
 })
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -51,7 +55,7 @@ try {
   await kit.api('/agents/catalog')
   await kit.api('/bots', { name: 'Reports' })
   await kit.api('/bots/b1/tokens', { appToken: 'xapp-test', botToken: 'xoxb-test' })
-  await kit.api('/bots/b1/settings', { askers: [{ id: 'U0DANA', name: 'Dana' }, { id: 'discord:2001', name: 'Dana' }], readsFrom: ['~/notes'] })
+  await kit.api('/bots/b1/settings', { answerIn: 'thread', askers: [{ id: 'U0DANA', name: 'Dana' }, { id: 'discord:2001', name: 'Dana' }], readsFrom: ['~/notes'] })
   ok(!!(await connected()), 'a bot, connected to Slack')
 
   // ---------- A file it makes, to Slack ----------
@@ -143,6 +147,24 @@ try {
     ok(pg?.state === 'draft' && pg.place?.kind === 'dm' && /page\.html, which can run a script where it's opened, so it waits for you/.test(pg.warn || ''), 'a page, a drawing or XML waits for you even in a direct message', pg && { state: pg.state, place: pg.place?.kind, warn: pg.warn })
     await kit.api(`/bots/questions/${encodeURIComponent(pg.id)}`, { send: false })
     await kit.api('/bots/b1/settings', { auto: false })
+  })
+
+  // ---------- Picked up after its time limit ----------
+  await part('picked up after its time limit', async () => {
+    await kit.api('/bots/b1/settings', { auto: true, limits: { minutes: 1, atLimit: 'ask' } })
+    await slack.ask({ user: 'U0DANA', dm: true, text: `Early and late files [make-early early.csv a,1] [work 40] [then 2] [make late.html <p>Late</p>] ${[3, 4, 5, 6].map((n) => `[make m${n}.txt Note ${n}.]`).join(' ')} [answer Both.]` })
+    const stopped = await until(async () => (await needs()).find((x) => x.text.includes('Early and late files') && x.limit?.phase === 'stopped'), 40000)
+    ok(stopped?.limit.how === 'session' && !madeOf(stopped.id), 'stopped at its time limit with a file saved, nothing sent yet', stopped?.limit)
+    await kit.api(`/bots/questions/${encodeURIComponent(stopped.id)}/limit`, { act: 'continue', minutes: 10 })
+    const again = await until(() => startsOf('Early and late files')[1], 20000)
+    const args = again?.args.join(' ') || ''
+    ok(args.includes('--fork-session') && again.args.includes('--strict-mcp-config') && again.args.includes('mcp__bridge_outbox__save_file') && args.includes('--tools Read,Grep,Glob ') && !/Write|Edit|Bash|acceptEdits|bypassPermissions/.test(args), 'picked up in a copy of its conversation, with its save_file tool and still nothing that writes', again?.args)
+    const d = await until(async () => (await needs()).find((x) => x.text.includes('Early and late files') && x.state === 'draft' && x.files?.length), 40000)
+    const names = (d?.files || []).map((f) => f.name).sort().join()
+    ok(names === 'early.csv,late.html,m3.txt,m4.txt,m5.txt' && /I couldn't save m6\.txt: You've saved 5 files already/.test(d.draft), 'what it saved before it was stopped goes with the answer, counted in its five', d && { files: names, draft: d.draft })
+    ok(/late\.html, which can run a script where it's opened, so it waits for you/.test(d?.warn || ''), 'a page it made after Continue waits for you, as any does', d?.warn)
+    await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: false })
+    await kit.api('/bots/b1/settings', { auto: false, limits: { minutes: 10 } })
   })
 
   // ---------- Discord ----------

@@ -22,6 +22,8 @@
 //     [noanswer]                             says NO ANSWER, and why
 //     [notforme]                             says NOT FOR ME
 //     [work <s>]                             takes that many seconds (2 if not said)
+//     [then <s>]                             takes that many instead when its brief says it's
+//                                            picking up after its time limit
 //                                            and by what the bot's instructions say:
 //     [sign <text>]                          ends every answer with it
 //     [try-write <name>]                     tries to write <name> in its folder first: only when
@@ -50,6 +52,8 @@
 //                                            it (mcp__bridge_outbox__save_file), else it says it couldn't
 //     [make-exe <name>], [make-script <name>]   saves a Windows program (MZ…) or a script (#!…) so
 //     [make-big <name> <MB>]                 saves a file that many MB big so
+//     [make-early <name> <text>]             as [make], but at once, before it works (not again
+//                                            once it's picked up after its time limit)
 //     [remember <text>]                      ends with REMEMBER: <text>
 //     [remember-me <text>]                   ends with REMEMBER about <the asker>: <text>
 //     [recall]                               says what its brief's memory gave it
@@ -190,10 +194,35 @@ function answerTurn(text) {
   state = 'working'
   began = Date.now()
   draw()
-  // (How long it takes is the question's to say: a [work] in the conversation around it isn't.)
-  const wait = Number((/\[work (\d+)\]/.exec(q) || [])[1] || 2)
+  // (How long it takes is the question's to say: a [work] in the conversation around it isn't. Picked
+  // up after its time limit, its brief says so, and [then] says how long it takes from there.)
+  const again = /reached your time limit after/.test(text) && /\[then (\d+)\]/.exec(q)
+  const wait = again ? Number(again[1]) : Number((/\[work (\d+)\]/.exec(q) || [])[1] || 2)
+  // Files to send back: only through its MCP server bridge_outbox's save_file, as Claude Code would
+  // call it, the server started as its config says and asked over stdin and stdout.
+  const outboxServer = (() => { for (const c of configs) { try { const x = JSON.parse(fs.readFileSync(c, 'utf8')).mcpServers?.bridge_outbox; if (x) return x } catch { /* unreadable */ } } return null })()
+  const mayMake = !!outboxServer && args.includes('--strict-mcp-config') && allowed.includes('mcp__bridge_outbox__save_file')
+  const makeTo = (out) => (name, body) => {
+    if (!mayMake) { tried('make', false); out.push(`I couldn't save ${name}: I have no tool for it.`); return }
+    const buf = Buffer.isBuffer(body) ? body : Buffer.from(String(body))
+    const asks = [
+      { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.312' } } },
+      { jsonrpc: '2.0', method: 'notifications/initialized' },
+      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'save_file', arguments: { name, content: buf.toString('base64'), base64: true } } },
+    ]
+    const r = require('node:child_process').spawnSync(outboxServer.command, outboxServer.args || [], { input: asks.map((x) => JSON.stringify(x)).join('\n') + '\n', env: { ...process.env, ...(outboxServer.env || {}) }, encoding: 'utf8', timeout: 20000, maxBuffer: 1 << 20 })
+    const said = String(r.stdout || '').split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).find((x) => x?.id === 2)
+    const ok = said?.result && !said.result.isError
+    tool('mcp__bridge_outbox__save_file', { name })
+    tried('make', !!ok)
+    out.push(ok ? `I made ${name}.` : `I couldn't save ${name}: ${said?.result?.content?.[0]?.text || said?.error?.message || r.error?.message || 'no answer'}.`)
+  }
+  // ([make-early]: saved at once, before it works, so a run stopped at its time limit has saved it
+  // already; not again once it's picked up.)
+  const early = []
+  if (!again) for (const m of q.matchAll(/\[make-early ([^\s\]]+)(?: ([^\]]+))?\]/g)) makeTo(early)(m[1], `${m[2] || `The ${m[1]} you asked for.`}\n`)
   setTimeout(() => {
-    const out = []
+    const out = [...early]
     for (const f of fs.readdirSync(process.cwd()).filter((x) => /\.(md|txt)$/.test(x)).slice(0, 3)) tool('Read', { file_path: path.join(process.cwd(), f) })
     const w = /\[try-write ([\w.-]+)\]/.exec(q)
     if (w) {
@@ -222,25 +251,7 @@ function answerTurn(text) {
       const inHere = f.startsWith(process.cwd() + path.sep)
       if (can('Edit') && (!dontAsk || (inHere && editsHere))) { fs.writeFileSync(f, `${m[2]}\n`); tried('edit-outside', true); out.push(`I wrote ${m[1]}.`) } else { tried('edit-outside', false); out.push(`I couldn't write ${m[1]}: that was refused.`) }
     }
-    // Files to send back: only through its MCP server bridge_outbox's save_file, as Claude Code would
-    // call it, the server started as its config says and asked over stdin and stdout.
-    const outboxServer = (() => { for (const c of configs) { try { const x = JSON.parse(fs.readFileSync(c, 'utf8')).mcpServers?.bridge_outbox; if (x) return x } catch { /* unreadable */ } } return null })()
-    const mayMake = !!outboxServer && args.includes('--strict-mcp-config') && allowed.includes('mcp__bridge_outbox__save_file')
-    const make = (name, body) => {
-      if (!mayMake) { tried('make', false); out.push(`I couldn't save ${name}: I have no tool for it.`); return }
-      const buf = Buffer.isBuffer(body) ? body : Buffer.from(String(body))
-      const asks = [
-        { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.312' } } },
-        { jsonrpc: '2.0', method: 'notifications/initialized' },
-        { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'save_file', arguments: { name, content: buf.toString('base64'), base64: true } } },
-      ]
-      const r = require('node:child_process').spawnSync(outboxServer.command, outboxServer.args || [], { input: asks.map((x) => JSON.stringify(x)).join('\n') + '\n', env: { ...process.env, ...(outboxServer.env || {}) }, encoding: 'utf8', timeout: 20000, maxBuffer: 1 << 20 })
-      const said = String(r.stdout || '').split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).find((x) => x?.id === 2)
-      const ok = said?.result && !said.result.isError
-      tool('mcp__bridge_outbox__save_file', { name })
-      tried('make', !!ok)
-      out.push(ok ? `I made ${name}.` : `I couldn't save ${name}: ${said?.result?.content?.[0]?.text || said?.error?.message || r.error?.message || 'no answer'}.`)
-    }
+    const make = makeTo(out)
     for (const m of q.matchAll(/\[make ([^\s\]]+)(?: ([^\]]+))?\]/g)) make(m[1], `${m[2] || `The ${m[1]} you asked for.`}\n`)
     for (const m of q.matchAll(/\[make-exe ([^\s\]]+)\]/g)) make(m[1], Buffer.concat([Buffer.from('MZ'), Buffer.alloc(62, 1)]))
     for (const m of q.matchAll(/\[make-script ([^\s\]]+)\]/g)) make(m[1], '#!/bin/sh\necho hello\n')

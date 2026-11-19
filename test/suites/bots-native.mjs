@@ -36,7 +36,7 @@ try {
   await kit.api('/bots', { name: 'Pricing Desk' })
   await slack.scopes({ app: 'A1', scopes: OLD })
   await kit.api('/bots/b1/tokens', { appToken: 'xapp-test', botToken: 'xoxb-test' })
-  await kit.api('/bots/b1/settings', { askers: [{ id: 'U0DANA', name: 'Dana' }], readsFrom: ['~/pricing'], owner: OWNER })
+  await kit.api('/bots/b1/settings', { answerIn: 'thread', askers: [{ id: 'U0DANA', name: 'Dana' }], readsFrom: ['~/pricing'], owner: OWNER })
   ok(!!(await connected()), 'a bot, connected')
 
   // ---------- The manifest, and an app made from an older one ----------
@@ -252,7 +252,7 @@ try {
   const tried = (await convs('b1')).filter((c) => c.outcome === 'try')
   ok(tried.length === 6 && tried.every((c) => c.place?.kind === 'try'), 'Try It\'s questions are in its record, marked as tried', tried.map((c) => c.asked.slice(0, 30)))
   const templates = (await kit.api('/bots/templates')).templates.map((x) => x.name)
-  ok(templates.join() === 'Code Expert,Team FAQ,Project Status,Meetings Q&A', 'the four templates', templates)
+  ok(templates.join() === 'Hiring,Marketing,Code Expert,Team FAQ,Project Status,Meetings Q&A', 'the starting points: Hiring and Marketing, then the four templates', templates)
   ok((await kit.api('/bots/b1/activity')).integrity?.ok, 'its record whole at the end')
   void sleep; void postedLike
 } catch (e) {

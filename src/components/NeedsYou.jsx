@@ -367,13 +367,73 @@ export function OutsideItem({ it, onDone, setNote }) {
 // file in a public channel), and a change it made: the diff to approve before a draft pull request
 // opens, or the pull request opened already. The same draft is in your Slack direct messages when
 // you set You in Slack; whichever you answer first, the other is settled.
+// A run at its time limit is a card of its own (LimitItem); one stopped there for want of your
+// answer is a draft to write, with Continue as well, for a day.
 const sizeOf = (n) => (n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`)
-export function SlackItem({ it, onDone, setNote }) {
+const whereOf = (it) => (it.place?.kind === 'dm' ? t('in a direct message') : it.place?.name ? t('in #{channel}', { channel: it.place.name }) : t('in a channel'))
+const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+export function SlackItem(props) {
+  return props.it.limit?.phase === 'asking' ? <LimitItem {...props} /> : <DraftItem {...props} />
+}
+
+// Continue or Stop, for a run at its time limit (server/frontdesk.js limitAct): on the computer it
+// runs on, or from the phone through it. { item, said, already } back.
+function useLimitAct(it, onDone, setNote) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState(null)
+  const go = async (act, minutes = null) => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      const out = await onDevice(null, `/bots/questions/${encodeURIComponent(it.id)}/limit`, { act, ...(minutes ? { minutes } : {}) })
+      onDone(it)
+      const bot = it.bot?.name || t('Your bot')
+      const who = it.from?.name || t('Someone')
+      setNote({ text: out.already ? t('That isn\'t waiting any more') : act === 'stop' ? t('Stopped: {name} is told it\'s passed on to you', { name: who }) : t('{bot} carries on for {n} more minutes', { bot, n: out.given ?? minutes }) })
+    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
+  }
+  return { busy, problem, go }
+}
+
+// A run at its time limit, going on while you decide: how long it has run and what it's doing, the
+// question, until when it goes on, and Continue (10 or 30 more minutes, fewer near its Longest Run)
+// or Stop. Also in your direct messages on the platform it was asked on; whichever you answer first,
+// the other is settled.
+function LimitItem({ it, onDone, setNote }) {
+  const { busy, problem, go } = useLimitAct(it, onDone, setNote)
+  const l = it.limit
+  const who = it.from?.name || t('Someone')
+  const bot = it.bot?.name || t('Your bot')
+  const ran = l.ran === 1 ? t('1 minute') : t('{n} minutes', { n: l.ran })
+  return (
+    <article className="ny-item t-slack t-limit yours" aria-label={t('{bot}\'s answer to {name} {where} has run {ran}', { bot, name: who, where: whereOf(it), ran })}>
+      <div className="ny-top">
+        <Icon name="clock" size={12} />
+        <span className="ny-kind">{t('At its time limit')}</span>
+        <span className="ny-age" title={new Date(l.at).toLocaleString()}>{ago(l.at)}</span>
+        <span className="ny-grow" />
+        <span className="ny-device here" title={t('Through {bot} (Settings › Bots)', { bot })}><Icon name="chat" size={11} />{bot}</span>
+      </div>
+      <p className="ny-text">{t('{bot}\'s answer to {name} {where} has run {ran}: {doing}.', { bot, name: who, where: whereOf(it), ran, doing: l.doing || t('still working') })}</p>
+      <p className="ny-said">“{it.text}”</p>
+      <p className="muted small ny-from"><Icon name="clock" size={11} /> {t('It goes on until {time} while you decide. With no answer by then it\'s stopped and comes to you, and Continue still picks it up where it stopped.', { time: timeOf(l.until) })}</p>
+      {l.left < 30 && <p className="muted small ny-from">{t('At most {n} more minutes: its Longest Run is {longest} minutes.', { n: l.left, longest: l.longest })}</p>}
+      {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
+      <div className="ny-acts">
+        {(l.choices || []).map((n, i) => <button key={n} type="button" className={`btn small ${i === 0 ? 'primary' : ''}`} disabled={busy} onClick={() => go('continue', n)}><Icon name="play" size={12} /> {t('Continue {n} more minutes', { n })}</button>)}
+        <button type="button" className="btn small" disabled={busy} onClick={() => go('stop')}><Icon name="stop" size={12} /> {t('Stop')}</button>
+      </div>
+    </article>
+  )
+}
+
+function DraftItem({ it, onDone, setNote }) {
   const [text, setText] = useState(it.draft || '')
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState(it.problem || null)
+  const limit = useLimitAct(it, onDone, setNote)
   const who = it.from?.name || t('Someone')
-  const where = it.place?.kind === 'dm' ? t('in a direct message') : it.place?.name ? t('in #{channel}', { channel: it.place.name }) : t('in a channel')
+  const where = whereOf(it)
   const r = it.route
   const bot = it.bot?.name || t('Your bot')
   const change = it.change || null
@@ -415,12 +475,22 @@ export function SlackItem({ it, onDone, setNote }) {
         </>
       )}
       {it.ownerAsked && <p className="muted small ny-from"><Icon name="chat" size={11} /> {t('Also in your Slack direct messages: answer it there or here.')}</p>}
-      <textarea className="ny-draft" value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(8, Math.max(3, text.split('\n').length + 1))} placeholder={t('Write the reply…')} aria-label={t('Reply to {name}', { name: who })} disabled={busy} />
-      {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
+      <textarea className="ny-draft" value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(8, Math.max(3, text.split('\n').length + 1))} placeholder={t('Write the reply…')} aria-label={t('Reply to {name}', { name: who })} disabled={busy || limit.busy} />
+      {(problem || limit.problem) && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem || limit.problem}</p>}
       <div className="ny-acts">
-        <button type="button" className="btn small primary" disabled={busy || !text.trim()} onClick={() => decide(true)}><Icon name={approve ? 'branch' : 'send'} size={12} /> {busy ? t('Sending…') : approve ? t('Approve and open a pull request') : t('Send')}</button>
-        <button type="button" className="btn small" disabled={busy} onClick={() => decide(false)}>{t('Discard')}</button>
+        <button type="button" className="btn small primary" disabled={busy || limit.busy || !text.trim()} onClick={() => decide(true)}><Icon name={approve ? 'branch' : 'send'} size={12} /> {busy ? t('Sending…') : approve ? t('Approve and open a pull request') : t('Send')}</button>
+        <button type="button" className="btn small" disabled={busy || limit.busy} onClick={() => decide(false)}>{t('Discard')}</button>
       </div>
+      {it.limit?.phase === 'stopped' && (
+        <div className="ny-limit">
+          <p className="muted small ny-from"><Icon name="clock" size={11} /> {(it.limit.how === 'session' ? t('Or let it carry on: Continue picks it up where it stopped, until {time} tomorrow.', { time: timeOf(it.limit.until) })
+            : it.limit.how === 'messages' ? t('Or let it carry on: Continue starts it again with what it had so far, until {time} tomorrow.', { time: timeOf(it.limit.until) })
+              : t('Or let it carry on: Continue starts it again from the question (what it did couldn\'t be kept), until {time} tomorrow.', { time: timeOf(it.limit.until) }))}</p>
+          <div className="ny-acts">
+            {(it.limit.choices || []).map((n) => <button key={n} type="button" className="btn small" disabled={busy || limit.busy} onClick={() => limit.go('continue', n)}><Icon name="play" size={12} /> {t('Continue {n} more minutes', { n })}</button>)}
+          </div>
+        </div>
+      )}
     </article>
   )
 }

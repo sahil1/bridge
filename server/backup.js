@@ -147,7 +147,7 @@ export async function collect() {
   })
   const ids = new Set(bots.map((b) => b.id))
   const connections = conns.list().filter((c) => !c.bot || ids.has(c.bot)).map((c) => ({
-    id: c.id, platform: c.platform, name: c.name, shared: c.shared, bot: c.bot, owner: c.owner, defaults: c.defaults.filter((d) => ids.has(d.bot)), perBot: c.perBot, ...(c.paused ? { paused: true } : {}),
+    id: c.id, platform: c.platform, name: c.name, shared: c.shared, bot: c.bot, owner: c.owner, defaults: c.defaults.filter((d) => ids.has(d.bot)), perBot: c.perBot, assist: c.assist !== false, unsure: ids.has(c.unsure) ? c.unsure : null, ...(c.paused ? { paused: true } : {}),
     tokens: pick(readJson(conns.tokensOf(c)) || {}, TOKEN_FIELDS[c.platform] || []),
   }))
   const chief = {}
@@ -331,7 +331,7 @@ export async function apply(x, { parts = {}, why = 'Paused', pausedBy = 'restore
         const made = conns.create({ platform: c.platform, name: c.name, shared: !c.bot, bot: c.bot ? map[c.bot] : null, owner: kind === 'move' ? ownerOf(c.platform, c.owner) : null, teamsPort: c.platform === 'teams' ? h.teamsPort?.() ?? null : null, paused: true, pausedWhy: was ? `Paused on ${clean(x.from, 80)} when it came: Start it here once it isn't connected anywhere else` : why, pausedBy: was ? 'restore' : pausedBy })
         // (Its tokens before anything can start it: it's paused, and nothing waits in between.)
         writeFileAtomic(conns.tokensOf(made), JSON.stringify(pick(c.tokens || {}, TOKEN_FIELDS[c.platform] || []), null, 2), { mode: 0o600 })
-        if (!c.bot) conns.save(made.id, { perBot: c.perBot === true, defaults: (c.defaults || []).map((d) => (map[d.bot] ? { ...d, bot: map[d.bot] } : null)).filter(Boolean) })
+        if (!c.bot) conns.save(made.id, { perBot: c.perBot === true, defaults: (c.defaults || []).map((d) => (map[d.bot] ? { ...d, bot: map[d.bot] } : null)).filter(Boolean), assist: c.assist !== false, unsure: map[c.unsure] || null })
         if (kind === 'move' && c.owner && !ownerOk(c.platform, c.owner)) out.problems.push(`You in ${PLATFORM[c.platform]} for ${clean(c.name, 35)} was left out: it isn't someone there`)
         out.connections.push({ from: c.id, id: made.id, name: made.name, platform: made.platform, shared: made.shared, ...(was ? { wasPaused: true } : {}) })
       } catch (e) { out.problems.push(`The ${PLATFORM[c.platform]} connection ${clean(c.name, 35)} couldn't be added: ${e.message}`) }
@@ -375,7 +375,11 @@ function peopleChecked(text) {
   const people = {}
   const exchange = (x) => (x && typeof x === 'object' ? {
     q: cut(x.q, 80) || '', conv: cut(x.conv, 200) || '', at: cut(x.at, 40), asked: cut(x.asked, 280) || '', answered: cut(x.answered, 400) || '',
-    where: x.where && typeof x.where === 'object' && ['dm', 'channel'].includes(x.where.kind) ? { kind: x.where.kind, id: cut(x.where.id, 300), name: cut(x.where.name, 80), private: x.where.private === true } : null,
+    // (Where it was said decides where it's given again: one that doesn't say, or isn't plainly not
+    // private, is taken as private, given only in their direct messages.)
+    where: x.where && typeof x.where === 'object' && ['dm', 'channel'].includes(x.where.kind)
+      ? { kind: x.where.kind, id: cut(x.where.id, 300), name: cut(x.where.name, 80), ...(x.where.within ? { within: cut(x.where.within, 80) } : {}), private: x.where.private !== false }
+      : { kind: 'dm', id: null, name: null, private: true },
   } : null)
   for (const [id, p] of Object.entries(j?.people && typeof j.people === 'object' ? j.people : {}).slice(0, 500)) {
     if (!store.PERSON_ID.test(id) || !p || typeof p !== 'object') continue

@@ -41,7 +41,7 @@ const kit = await startKit('bots-setup', {
     fs.writeFileSync(path.join(x.home, 'docs/handbook.md'), '# Handbook\n')
     // Claude Code's own list of MCP servers, with the tracker in it (and its token).
     fs.writeFileSync(path.join(x.home, '.claude.json'), JSON.stringify({ mcpServers: { tracker: { type: 'stdio', command: process.execPath, args: [MCP], env: { TRACKER_TOKEN: 'tok-tracker-123', MCP_LOG: path.join(x.home, 'mcp-server.log') } } } }))
-    return { BRIDGE_SLACK_URL: slack.url, BRIDGE_SLACK_PING_MS: '1000', BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', OLLAMA_HOST: ollama.url, LM_STUDIO_BASE_URL: 'http://127.0.0.1:9/v1' }
+    return { BRIDGE_SLACK_URL: slack.url, BRIDGE_SLACK_PING_MS: '1000', BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_BOT_CARRY_MS: '0', OLLAMA_HOST: ollama.url, LM_STUDIO_BASE_URL: 'http://127.0.0.1:9/v1' }
   },
 })
 const { botOf, events, connected } = lookers(kit, slack)
@@ -210,8 +210,10 @@ try {
     ok(args.includes('mcp__tracker__list_issues') && args.includes('mcp__tracker__search') && !args.includes('mcp__tracker') && args.slice(args.indexOf('--disallowedTools')).includes('mcp__tracker__create_issue'), 'allowed: the read-only tools; refused by name: the other', args)
     ok(!start.secrets?.length && !JSON.stringify(args).includes('tok-tracker-123'), 'its token not on its command line')
     ok(await until(() => fs.existsSync(cfg) ? null : true, 20000), 'its MCP folder gone once the run\'s over')
-    const spaces = ((await kit.api('/fleet')).workspaces || []).map((w) => w.label)
+    const spaces = ((await kit.api('/fleet?all=1')).workspaces || []).map((w) => w.label)
     ok(spaces.includes('Bot Runs') && !spaces.includes('Bots'), 'its answering agents run in the Bot Runs space, not one called Bots beside the sidebar\'s Bots', spaces)
+    const shown = await kit.api('/fleet')
+    ok(!shown.workspaces.some((w) => w.label === 'Bot Runs') && !shown.agents.some((a) => a.helper?.list === 'desk'), 'and none of it is in the sidebar: a bot\'s runs are on its page, under Conversations', shown.workspaces.map((w) => w.label))
     // Dana, named: every tool.
     await slack.ask({ user: 'U0DANA', text: '<@UBOT> file it please [mcp tracker create_issue]' })
     const dana = await until(() => logOf('mcp-tries.log').filter((x) => x.tool === 'create_issue').length >= 2 && logOf('mcp-tries.log').filter((x) => x.tool === 'create_issue').at(-1), 25000)
@@ -253,11 +255,11 @@ try {
     ok(await until(async () => /looks like a token/.test(await p.locator('.bc').innerText()), 5000), 'a token pasted as words: refused, saying where it goes')
     ok(model.asked(/Known folders/).length === before && !(await assist(id)).messages.some((m) => /xoxb-/.test(m.text || '')), 'not sent to the model, not kept in the chat')
     await p.locator('.bc-say textarea').fill('')
-    await p.locator('.bp-main .sb-tabs [role="tab"]', { hasText: 'Set Up' }).click()
+    await p.locator('.bp-main .sb-tabs [role="tab"]', { hasText: 'Access' }).click()
     const sec = p.locator('[data-setting="bots-answerers"]')
     await sec.scrollIntoViewIfNeeded()
     const said = await sec.innerText()
-    ok(/Your own list/.test(said) && /Claude Code/.test(said) && /llama3.1:8b/.test(said) && /Local/.test(said) && /Cloud/.test(said), 'Set Up: What Answers, in order, each Local or Cloud', said)
+    ok(/Your own list/.test(said) && /Claude Code/.test(said) && /llama3.1:8b/.test(said) && /Local/.test(said) && /Cloud/.test(said), 'its Access: What Answers, in order, each Local or Cloud', said)
     await shot(p, `${tag}bots-setup-what-answers`)
   })
 

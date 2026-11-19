@@ -11,7 +11,9 @@ import { t, locale } from '../../i18n/index.js'
 // open one marked, a dot on the one recording. Meetings in a folder are under it, and archived ones
 // under Archived, below the days; both start closed. Click opens one; ⌘ or Ctrl-click picks
 // several, Shift-click a run of them, for the actions under the list. Right-click one for the rest:
-// save, fix a word, a folder, archive, delete.
+// save, fix a word, merge it with another, a folder, archive, delete. One that's the rest of another
+// (the same calendar event, or recorded just after: server meetings.js restOf) has a mark, and its
+// page offers to merge them.
 //
 // As meetings pile up the list stays short, the way spaces fold: each of the last seven days is a
 // group of its own, the two most recent open; older ones are under Earlier, by week for the month
@@ -99,7 +101,7 @@ export default function RailMeetings({ selected, onOpen }) {
     const whole = x.partOf ? all.find((y) => y.id === x.partOf && y.parts?.includes(x.id)) : null
     return (
       <button type="button" key={x.id} className={`rm-row${on ? ' on' : ''}${sel.has(x.id) ? ' picked' : ''}`} aria-pressed={sel.has(x.id) || undefined}
-        title={`${x.title}\n${shortDate(x.startedAt)} ${timeOf(x.startedAt)}${x.seconds ? ` · ${length(x.seconds)}` : ''}${x.parts ? `\n${t('{n} meetings combined', { n: x.parts.length })}` : ''}${whole ? `\n${t('Part of {title}', { title: whole.title })}` : ''}\n${t('⌘-click to pick several, right-click for more')}`}
+        title={`${x.title}\n${shortDate(x.startedAt)} ${timeOf(x.startedAt)}${x.seconds ? ` · ${length(x.seconds)}` : ''}${x.parts ? `\n${t('{n} meetings combined', { n: x.parts.length })}` : ''}${whole ? `\n${t('Part of {title}', { title: whole.title })}` : ''}${x.mergeHint ? `\n${t('The rest of {title}', { title: x.mergeHint.title })}: ${t('Open it to merge them into one meeting')}` : ''}\n${t('⌘-click to pick several, right-click for more')}`}
         onClick={(e) => {
           if (e.metaKey || e.ctrlKey || e.shiftKey) { e.preventDefault(); toggle(x.id, { range: e.shiftKey }); return }
           clear(); onOpen(x.id)
@@ -109,6 +111,7 @@ export default function RailMeetings({ selected, onOpen }) {
         <span className="rm-title">{x.title}</span>
         {x.parts && <span className="rm-parts muted">{t('{n} parts', { n: x.parts.length })}</span>}
         {whole && <Icon name="layers" size={10} className="rm-partof muted" />}
+        {x.mergeHint && <Icon name="branch" size={10} className="rm-rest" />}
         <span className="rm-time muted">{when}</span>
       </button>
     )

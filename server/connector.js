@@ -70,10 +70,12 @@ export function person(p) {
 
 // A message put to the bot, as the desk takes it, or null when it's malformed (no id, no place):
 //   { platform, ts, channel, thread, mention, dm, via, from, text, place: { kind: 'dm' | 'channel',
-//     id, name, within, private }, at, late, reply, attachments: [{ id, name, type, size }] }
+//     id, name, within, private }, at, late, reply, top, attachments: [{ id, name, type, size }] }
 // ts and channel make it unique (one heard twice is one); thread the thread it's a reply in (null
 // at the top); via 'listen' for a channel it answers in without a mention; reply what post() needs
-// to answer it where it was; attachments named only, never fetched here.
+// to answer it where it was (in a thread of its own, for one at the top of a channel); top, for one
+// at the top of a channel, what post() needs to answer it in the channel itself instead (Answer In,
+// bots.js); attachments named only, never fetched here.
 export function heard(m, platform) {
   if (!m || typeof m !== 'object') return null
   const ts = m.ts != null ? String(m.ts) : ''
@@ -92,6 +94,7 @@ export function heard(m, platform) {
     place: { kind: dm ? 'dm' : 'channel', id: String(m.place?.id || channel), name: m.place?.name ? clip(m.place.name, 120) : null, ...(m.place?.within ? { within: clip(m.place.within, 120) } : {}), ...(m.place?.private ? { private: true } : {}) },
     at, late: m.late === true,
     reply: m.reply && typeof m.reply === 'object' ? m.reply : null,
+    ...(m.top && typeof m.top === 'object' && !dm ? { top: m.top } : {}),
     attachments: Array.isArray(m.attachments) ? m.attachments.slice(0, 20).map((a) => ({ id: a?.id != null ? String(a.id) : null, name: clip(a?.name || 'file', 200), type: a?.type ? String(a.type).slice(0, 100) : null, size: Number.isFinite(a?.size) ? a.size : null })) : [],
   }
 }
@@ -176,7 +179,7 @@ export function combine({ id = 'bot', say = () => {}, threads = () => [], follow
     const { attachments, ...rest } = x // (files are Slack's only: named in the record, never read)
     return {
       ...rest, channel: idOf(p, x.channel), from: { ...x.from, id: idOf(p, x.from.id) },
-      place: { ...x.place, id: idOf(p, x.place.id), platform: p }, reply: x.reply ? { ...x.reply, platform: p } : null,
+      place: { ...x.place, id: idOf(p, x.place.id), platform: p }, reply: x.reply ? { ...x.reply, platform: p } : null, ...(x.top ? { top: { ...x.top, platform: p } } : {}),
       ...(attachments.length ? { attached: attachments.map((a) => a.name) } : {}),
     }
   }

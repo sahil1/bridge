@@ -55,7 +55,7 @@ try {
   await kit.api('/agents/catalog')
   await kit.api('/bots', { name: 'Code Bot' })
   await kit.api('/bots/b1/tokens', { appToken: 'xapp-test', botToken: 'xoxb-test' })
-  await kit.api('/bots/b1/settings', { who: 'channels', askers: [{ id: 'U0DANA', name: 'Dana' }], readsFrom: ['~/code/app'], owner: OWNER })
+  await kit.api('/bots/b1/settings', { answerIn: 'thread', who: 'channels', askers: [{ id: 'U0DANA', name: 'Dana' }], readsFrom: ['~/code/app'], owner: OWNER })
   ok(!!(await connected()), 'a bot, connected, reading a repository')
   const bad = await kit.api('/bots/b1/settings', { repo: '~/elsewhere' }).then(() => null, (e) => e.message)
   ok(/one of the folders it reads from/.test(bad || ''), 'its changes\' repository has to be one of its folders', bad)

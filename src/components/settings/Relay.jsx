@@ -5,6 +5,7 @@ import { InstallNode, openSettings } from '../SignIn.jsx'
 import { SignIn } from './Account.jsx'
 import { useDevicesName } from './search.js'
 import { api, viaRelay, relayComputers } from '../../api.js'
+import { canScan, scan } from '../../scan.js'
 import { t, tn, tx, locale } from '../../i18n/index.js'
 import { Advanced } from './Advanced.jsx'
 
@@ -435,7 +436,11 @@ function Computers() {
         ))}
       </ul>
       <p className="muted small">{t('Bridge AI on another computer? On it, open Settings › {devices} and choose Pair a device, then add it here.', { devices })}</p>
-      <div><button type="button" className="btn small primary" onClick={() => relayComputers.add()}><Icon name="plus" size={12} /> {t('Add a computer')}</button></div>
+      <div className="st-row">
+        <button type="button" className="btn small primary" onClick={() => relayComputers.add()}><Icon name="plus" size={12} /> {t('Add a computer')}</button>
+        {/* Or its QR code, scanned here: the app pairs, asking first. */}
+        {canScan('pair') && <button type="button" className="btn small" onClick={() => scan('pair').catch((e) => window.alert(e.message))}><Icon name="scan" size={12} /> {t('Scan QR code')}</button>}
+      </div>
     </>
   )
 }
