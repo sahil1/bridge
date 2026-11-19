@@ -12,13 +12,48 @@
 // from Studio (on Desk itself), Studio renamed, and both back to their own names.
 // A code pairs one device: once a phone has paired with it, its QR code goes, Studio says which
 // device paired with Keep and Remove (without stopping anything), and Add another device makes a new
-// one.
+// one. Scan QR code, on a phone: in the app (its scanner stood in for), the phone's menu opens the
+// app's scanner, and Link a device links with the link it hands back; in a phone's browser, the
+// camera in the page (a stand-in camera) reads the code with jsQR, says when it's the wrong one or the
+// camera is turned down, and Link a device links with what it read, while the menu's opens the
+// pairing link, which asks first. On a computer there's none.
 import fs from 'node:fs'
 import path from 'node:path'
+import QRCode from 'qrcode'
 import { startKit, startRelay, checks, until, browser, page, shot, noServiceWorker, changeAnswer, TEST } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 
-const { ok, done } = checks('devices-ui')
+const { ok, skip, done } = checks('devices-ui')
+// A phone's browser with a stand-in camera (Scan QR code): Safari on an iPhone, its camera showing
+// window.__camera.svg on white (or turned down, with denied), and no BarcodeDetector, so jsQR reads it.
+const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1'
+const PHONE_CAMERA = (ua) => {
+  Object.defineProperty(Navigator.prototype, 'userAgent', { get: () => ua, configurable: true })
+  delete window.BarcodeDetector
+  window.__camera = { svg: null, denied: false, stream: null }
+  if (!navigator.mediaDevices) Object.defineProperty(Navigator.prototype, 'mediaDevices', { value: {}, configurable: true })
+  // On MediaDevices itself: WebKit can make navigator.mediaDevices afresh, without what was put on it.
+  const on = window.MediaDevices ? MediaDevices.prototype : navigator.mediaDevices
+  on.getUserMedia = async () => {
+    if (window.__camera.denied) throw new DOMException('Permission denied', 'NotAllowedError')
+    const cv = Object.assign(document.createElement('canvas'), { width: 480, height: 640 })
+    const g = cv.getContext('2d')
+    const img = new Image()
+    let shown = null
+    const draw = () => {
+      if (stream.getTracks().every((x) => x.readyState === 'ended')) return clearInterval(timer)
+      if (window.__camera.svg !== shown) { shown = window.__camera.svg; img.src = shown ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(shown)}` : '' }
+      g.fillStyle = '#fff'
+      g.fillRect(0, 0, cv.width, cv.height)
+      if (shown && img.complete) g.drawImage(img, 60, 140, 360, 360)
+    }
+    const stream = cv.captureStream(10)
+    window.__camera.stream = stream
+    const timer = setInterval(draw, 100)
+    draw()
+    return stream
+  }
+}
 const relays = []
 const kits = []
 const kitWith = async (name, rel) => {
@@ -118,9 +153,13 @@ try {
   const ph = await page(b, `${c.url}/api/config`, { phone: true, mode: 'dark', theme: 'midnight' })
   await ph.p.evaluate(({ desk, studio }) => {
     window.opened = []
+    // The app's scanner: what it was asked for, and (for Link a device) what it hands back.
+    window.scans = []
+    window.scanned = null
     window.bridgeRelay = {
       WebSocket: class extends WebSocket { constructor(u) { super(`ws://${location.host}${u}`) } },
       computers: { list: () => [{ relay: desk, name: 'Desk', current: true }, { relay: studio, name: 'Studio', current: false }], open: (r) => window.opened.push(r), add: () => {}, forget: async () => {} },
+      scan: { pair: () => { window.scans.push('pair') }, link: async () => { window.scans.push('link'); return window.scanned } },
     }
     document.open()
     document.write('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body,iframe{margin:0;border:0;width:100%;height:100%;display:block}</style><iframe id="app" src="/"></iframe>')
@@ -152,6 +191,40 @@ try {
     await w.ctx.close()
   }
   ok(!!(await until(async () => !(await app.locator('.ask-banner').count()), 15000)), 'and the phone stops offering')
+
+  // ---------- Scan QR code, in the app ----------
+  // The phone's menu: Scan QR code beside Add a computer, and the app's own scanner opens (a pairing
+  // link scanned there pairs, asking first: phone-link). Link a device: the app hands back the link
+  // scanned, and it links as if pasted (Studio's own code here: they're linked already, so it says so).
+  await app.locator('.mc-chip').click()
+  const onPhone = app.locator('.mc-menu .menu-item')
+  const items = (await onPhone.allInnerTexts()).map((x) => x.trim())
+  ok(items.indexOf('Scan QR code') === items.indexOf('Add a computer') + 1 && items.indexOf('Add a computer') > 0, 'in the app, the phone\'s menu has Scan QR code beside Add a computer', items)
+  await app.locator('.mc-menu .menu-item', { hasText: 'Scan QR code' }).click()
+  ok(!!(await until(() => ph.p.evaluate(() => window.scans.join() === 'pair'), 3000, 100)) && !(await app.locator('.mc-menu').count()), 'Scan QR code opens the app\'s scanner, to pair this phone', await ph.p.evaluate(() => window.scans))
+  const inApp = ph.p.frames().find((f) => f !== ph.p.mainFrame())
+  await inApp.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))
+  const linkSec = app.locator('[data-setting="link-device"]')
+  const scanBtn = linkSec.locator('button', { hasText: 'Scan QR code' })
+  await scanBtn.waitFor({ timeout: 10000 }).catch(() => {})
+  ok(await scanBtn.count() === 1 && /then scan its QR code or paste its link here/.test(await linkSec.innerText()), 'Settings › Devices › Link a device: Scan QR code beside the link', await linkSec.innerText().catch(() => ''))
+  await scanBtn.click()
+  await until(() => ph.p.evaluate(() => window.scans.includes('link')), 3000, 100)
+  await ph.p.waitForTimeout(500)
+  ok((await linkSec.locator('input').inputValue()) === '' && !/Linked|Asked/.test(await linkSec.innerText()), 'nothing scanned (the scanner closed): nothing changes', await linkSec.innerText())
+  const studioLink = (await a.api('/relay/pair', {})).pairing.link
+  await ph.p.evaluate((l) => { window.scanned = l }, studioLink)
+  await scanBtn.click()
+  ok(!!(await until(async () => /Linked with Studio\./.test(await linkSec.innerText()), 20000, 200)), 'Studio\'s code scanned: Desk links with it as with its link pasted (they\'re linked, so it says so)', await linkSec.innerText())
+  await shot(ph.p, `${tag}devices-phone-scan`)
+  // Settings › Devices › Phone, the app's computers: Scan QR code beside Add a computer too.
+  await app.locator('[role="tab"][data-tab="phone"]').click()
+  const theirs = app.locator('[data-setting="relay"] button', { hasText: 'Scan QR code' })
+  await theirs.waitFor({ timeout: 10000 }).catch(() => {})
+  ok(await theirs.count() === 1 && /Add a computer/.test(await app.locator('[data-setting="relay"]').innerText()), 'Settings › Devices › Phone: Scan QR code beside Add a computer', await app.locator('[data-setting="relay"]').innerText().catch(() => ''))
+  await theirs.click()
+  ok(!!(await until(() => ph.p.evaluate(() => window.scans.filter((x) => x === 'pair').length === 2), 3000, 100)), 'which opens the app\'s scanner to pair, as the menu\'s does', await ph.p.evaluate(() => window.scans))
+  await inApp.evaluate(() => document.querySelector('button[aria-label="Close settings"]')?.click())
 
   // ---------- the sidebar's Devices: the arrow says whether it's open ----------
   await s.p.reload()
@@ -272,7 +345,55 @@ try {
   await narrow.p.waitForSelector('.ph-pair', { timeout: 10000 })
   ok((await narrow.p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1, 'Pair a device fits a phone')
   await shot(narrow.p, `${tag}devices-pair-phone`)
-  const errs = [...fresh.errors, ...s.errors, ...narrow.errors, ...ph.errors].filter((e) => !/\/api\/\S+ due to access control checks|WebSocket|_relay/.test(e))
+
+  // ---------- Scan QR code, in a phone's browser ----------
+  // The camera in the page: a stand-in camera showing a QR code, read with jsQR (no BarcodeDetector,
+  // as in Safari). On a computer there's no Scan QR code: Copy link is the way.
+  const linkHere = s.p.locator('[data-setting="link-device"]')
+  ok(await linkHere.locator('input').count() === 1 && !(await linkHere.locator('button', { hasText: 'Scan QR code' }).count()), 'on a computer, Link a device has no Scan QR code', await linkHere.innerText().catch(() => ''))
+  const deskLink = (await c.api('/relay/pair', {})).pairing.link
+  const qr = async (text) => (await QRCode.toString(text, { type: 'svg', margin: 1 })).replace('<svg ', '<svg width="330" height="330" ')
+  const cam = await page(b, a.url, { phone: true, mode: 'light', theme: 'sky', before: (cx) => cx.addInitScript(PHONE_CAMERA, IPHONE) })
+  await cam.p.waitForSelector('.tabbar button', { timeout: 15000 })
+  if (!(await cam.p.evaluate(() => typeof HTMLCanvasElement.prototype.captureStream === 'function'))) skip('Scan QR code in a phone\'s browser', `${which} can't stand in a camera here (no canvas captureStream)`)
+  else {
+    await cam.p.evaluate((svg) => { window.__camera.svg = svg }, await qr('https://example.com/not-a-pairing-code'))
+    await devices(cam.p)
+    const sec = cam.p.locator('[data-setting="link-device"]')
+    const scanIt = sec.locator('button', { hasText: 'Scan QR code' })
+    await scanIt.waitFor({ timeout: 10000 }).catch(() => {})
+    ok(await scanIt.count() === 1, 'in a phone\'s browser, Link a device has Scan QR code', await sec.innerText().catch(() => ''))
+    await scanIt.click()
+    const sheet = cam.p.getByRole('dialog', { name: 'Scan QR code' })
+    ok(!!(await until(async () => /isn't a Bridge AI pairing code/.test(await sheet.innerText().catch(() => '')), 15000, 200)), 'it opens the camera in the page; another QR code is said to be the wrong one, and it keeps looking', await sheet.innerText().catch(() => ''))
+    ok((await cam.p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1, 'the camera fits the phone')
+    await shot(cam.p, `${tag}devices-scan-camera`)
+    await cam.p.evaluate((svg) => { window.__camera.svg = svg }, await qr(deskLink))
+    ok(!!(await until(async () => !(await sheet.count()) && /Linked with Desk\./.test(await sec.innerText()), 20000, 200)), 'Desk\'s code: read, the camera closes, and Studio links with it as with its link pasted (they\'re linked, so it says so)', await sec.innerText())
+    const off = () => cam.p.evaluate(() => window.__camera.stream.getTracks().map((x) => x.readyState))
+    ok((await off()).every((x) => x === 'ended'), 'and the camera is off once it has read it', await off())
+    await cam.p.evaluate(() => { window.__camera.denied = true })
+    await scanIt.click()
+    ok(!!(await until(async () => /camera wasn't allowed/.test(await sheet.innerText().catch(() => '')), 5000, 100)), 'the camera turned down: it says so, and what to do instead', await sheet.innerText().catch(() => ''))
+    await sheet.getByRole('button', { name: 'Cancel' }).click()
+    ok(!!(await until(async () => !(await sheet.count()), 3000, 100)), 'and Cancel closes it')
+    await cam.p.locator('button[aria-label="Close settings"]').first().click()
+    // The phone's menu: Scan QR code pairs this browser with the computer whose code it is, by opening
+    // its link as the phone's camera would, and the relay page there asks first. Read here with a
+    // BarcodeDetector, as Chrome on Android has.
+    await cam.p.evaluate((link) => {
+      window.__camera.denied = false
+      window.BarcodeDetector = class { static async getSupportedFormats() { return ['qr_code'] } async detect() { return [{ rawValue: link }] } }
+    }, deskLink)
+    await cam.p.locator('.mc-chip').click()
+    const scanMenu = cam.p.locator('.mc-menu .menu-item', { hasText: 'Scan QR code' })
+    ok(await scanMenu.count() === 1 && !(await cam.p.locator('.mc-menu .menu-item', { hasText: 'Add a computer' }).count()), 'the phone\'s menu has Scan QR code (a browser has no Add a computer)', await cam.p.locator('.mc-menu').innerText().catch(() => ''))
+    await scanMenu.click()
+    const asked = await until(async () => (cam.p.url().startsWith(rc.url) && await cam.p.locator('#pair').isVisible() ? await cam.p.locator('#pair h1').innerText() : null), 20000, 200)
+    ok(asked === 'Pair with Desk?' && /#pair=/.test(cam.p.url()), 'Desk\'s code from the menu: this browser goes to Desk\'s pairing link, which asks first (Pair with Desk?)', { asked, url: cam.p.url() })
+    await shot(cam.p, `${tag}devices-scan-pair`)
+  }
+  const errs = [...fresh.errors, ...s.errors, ...narrow.errors, ...ph.errors, ...cam.errors].filter((e) => !/\/api\/\S+ due to access control checks|WebSocket|_relay/.test(e))
   ok(errs.length === 0, 'no page errors', errs)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
