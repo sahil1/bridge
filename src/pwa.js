@@ -14,7 +14,8 @@ export function registerServiceWorker() {
 
 // ?agent=<pane> opens that agent (&ask=1: at its Chat, where its question card is; &inbox=1: the
 // needs-you inbox instead, at that agent's question; &file=<path>: its Files at that file, a video
-// it made, say, which plays there); ?card=<id> shows a Today card. Used by notifications.
+// it made, say, which plays there); ?card=<id> shows a Today card; ?settings=<section> opens Settings
+// there. Used by notifications.
 export function openLink(href = location.href) {
   const url = new URL(href, location.origin)
   const agent = url.searchParams.get('agent')
@@ -23,8 +24,11 @@ export function openLink(href = location.href) {
   if (agent && url.searchParams.get('inbox')) window.dispatchEvent(new CustomEvent('bridge-needs-you', { detail: { paneId: agent } }))
   else if (agent) window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: agent, view: file ? 'files' : url.searchParams.get('ask') ? 'chat' : undefined, path: file || undefined } }))
   if (card) window.dispatchEvent(new CustomEvent('bridge-open-card', { detail: { id: card } }))
+  // ?settings=<section>: Settings there (a Share Link opened: Settings › Sharing).
+  const settings = url.searchParams.get('settings')
+  if (settings && /^[\w-]{1,30}$/.test(settings)) window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: settings } }))
   // (What history keeps for this page stays: Back and Forward's step, src/backForward.js.)
-  if (agent || card) history.replaceState(history.state, '', url.pathname)
+  if (agent || card || settings) history.replaceState(history.state, '', url.pathname)
 }
 
 // Say when you're using Bridge AI on this computer (its window in front, or you typed or clicked in

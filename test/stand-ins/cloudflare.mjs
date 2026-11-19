@@ -2,7 +2,9 @@
 // (server/relay.js, deployWith), with an API token, and the Workers deployed with them, each run in
 // Node as the relay stand-in (stand-ins/relay.mjs) with the token it was deployed with. A Worker is
 // reached at <script>.<subdomain>.localhost on this stand-in's port, as workers.dev would have it at
-// <script>.<subdomain>.workers.dev. Nothing leaves the machine.
+// <script>.<subdomain>.workers.dev. Nothing leaves the machine. A Worker whose Hub is another's
+// (its HUB binding names that Worker: script_name), as the one Share Links open at is beside a relay,
+// is that Worker's relay stand-in's share address (SHARE_HOST).
 //   node cloudflare.mjs <port> <settings as JSON: { token, accounts: [{ id, name, subdomain }] }>
 //   GET /_test/state   the calls made ({ method, path }), each account's subdomain, and each Worker
 //                      { account, tag (its migration tag), token (its HOST_TOKEN), same (its code is
@@ -27,7 +29,7 @@ const RELAY = path.join(path.dirname(fileURLToPath(import.meta.url)), 'relay.mjs
 const built = bundle().code
 const calls = []
 const subs = new Map(accounts.filter((a) => a.subdomain).map((a) => [a.id, a.subdomain])) // account -> subdomain
-const workers = new Map() // `${account}/${name}` -> { account, name, tag, token, same, enabled, uploads, port, proc }
+const workers = new Map() // `${account}/${name}` -> { account, name, tag, token, same, enabled, uploads, port, sharePort, proc, of }
 
 const send = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
 const ok = (res, result) => send(res, 200, { success: true, errors: [], messages: [], result })
@@ -39,7 +41,8 @@ const freePort = () => new Promise((resolve) => { const s = net.createServer(); 
 async function run(w) {
   w.proc?.kill()
   w.port = await freePort()
-  w.proc = spawn(process.execPath, [RELAY, String(w.port), w.token], { stdio: 'inherit' })
+  w.sharePort = await freePort()
+  w.proc = spawn(process.execPath, [RELAY, String(w.port), w.token, String(w.sharePort)], { stdio: 'inherit' })
   for (let i = 0; i < 100; i++) {
     if (await fetch(`http://127.0.0.1:${w.port}/_relay/health`).then((r) => r.ok, () => false)) return
     await new Promise((r) => setTimeout(r, 150))
@@ -78,9 +81,21 @@ async function api(req, res, body) {
     const main = meta.main_module && form.get(meta.main_module)
     if (!main) return no(res, 400, 10021, 'No such module: the main module isn\'t in the upload')
     const b = meta.bindings || []
+    const key = `${acct.id}/${m[3]}`
+    // Another Worker's Hub: that Worker must be there, with the class.
+    const other = b.find((x) => x.type === 'durable_object_namespace' && x.name === 'HUB' && x.class_name === 'Hub' && x.script_name)
+    if (other) {
+      const of = workers.get(`${acct.id}/${other.script_name}`)
+      if (!of?.tag) return no(res, 400, 10021, `Cannot create binding for class Hub of script ${other.script_name}: no such script, or it doesn't implement it`)
+      if (meta.migrations) return no(res, 400, 10021, 'A Worker binding another\'s class needs no migration')
+      if (!b.some((x) => x.type === 'plain_text' && x.name === 'SHARE_HOST' && x.text === '1')) return no(res, 400, 10021, 'This stand-in only takes the share address beside a relay')
+      const w = workers.get(key) || { account: acct.id, name: m[3], enabled: false, uploads: 0 }
+      Object.assign(w, { of: other.script_name, same: (await main.text()) === built, at: new Date().toISOString(), uploads: w.uploads + 1 })
+      workers.set(key, w)
+      return ok(res, { id: w.name })
+    }
     const secret = b.find((x) => x.type === 'secret_text' && x.name === 'HOST_TOKEN')?.text
     if (!b.some((x) => x.type === 'durable_object_namespace' && x.name === 'HUB' && x.class_name === 'Hub') || !secret) return no(res, 400, 10021, 'A binding the relay needs is missing')
-    const key = `${acct.id}/${m[3]}`
     const was = workers.get(key)
     // A migration once: a new Worker's Durable Object class needs one, and the same tag again fails.
     const tag = meta.migrations?.new_tag
@@ -108,6 +123,7 @@ function workerOf(req) {
   if (!x) return null
   const acct = [...subs].find(([, s]) => s === x[2])?.[0]
   const w = acct && workers.get(`${acct}/${x[1]}`)
+  if (w?.of) { const of = workers.get(`${acct}/${w.of}`); return w.enabled && of?.sharePort ? { port: of.sharePort } : null }
   return w?.enabled && w.port ? w : null
 }
 
@@ -122,7 +138,7 @@ const server = http.createServer(async (req, res) => {
   for await (const c of req) chunks.push(c)
   const body = Buffer.concat(chunks)
   if (/^[\w-]+\.[\w-]+\.localhost(:\d+)?$/.test(String(req.headers.host || ''))) { res.writeHead(404, { 'content-type': 'text/plain' }); return res.end('There is nothing here yet') }
-  if (req.url === '/_test/state') return send(res, 200, { calls, subdomains: Object.fromEntries(subs), workers: Object.fromEntries([...workers].map(([k, x]) => [k, { account: x.account, name: x.name, tag: x.tag, token: x.token, same: x.same, enabled: x.enabled, uploads: x.uploads }])) })
+  if (req.url === '/_test/state') return send(res, 200, { calls, subdomains: Object.fromEntries(subs), workers: Object.fromEntries([...workers].map(([k, x]) => [k, { account: x.account, name: x.name, tag: x.tag, token: x.token, same: x.same, enabled: x.enabled, uploads: x.uploads, of: x.of || null }])) })
   if (req.url.startsWith('/client/v4/')) return api(req, res, body).catch((e) => no(res, 500, 10013, e.message))
   no(res, 404, 7000, 'No route for that URI')
 })

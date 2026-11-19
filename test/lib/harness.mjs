@@ -274,20 +274,23 @@ export function devToolsStandIn(bin, { tools = false } = {}) {
 
 // A relay on this computer (stand-ins/relay.mjs: the real relay, run in Node), for pairing and
 // linking devices with nothing leaving the machine. relayFile: what a kit's relay.json needs to use
-// it. freeze/thaw/drop: what a sleeping Mac or a changed network does to its connections.
+// it. freeze/thaw/drop: what a sleeping Mac or a changed network does to its connections. shareUrl:
+// the address its Share Links open at (the Worker beside a relay of your own), on a port of its own.
 export async function startRelay(name) {
   const port = await freePort()
+  const sharePort = await freePort()
   const token = `test-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
   const log = path.join(OUT, 'kits', `${name}-relay-${port}.log`)
   fs.mkdirSync(path.dirname(log), { recursive: true })
   const out = fs.openSync(log, 'w')
-  const p = spawn(process.execPath, [path.join(TEST, 'stand-ins', 'relay.mjs'), String(port), token], { stdio: ['ignore', out, out] })
+  const p = spawn(process.execPath, [path.join(TEST, 'stand-ins', 'relay.mjs'), String(port), token, String(sharePort)], { stdio: ['ignore', out, out] })
   const url = `http://127.0.0.1:${port}`
-  if (!await until(async () => (await fetch(`${url}/_relay/health`)).ok, 15000, 150)) throw new Error(`the relay stand-in didn't start: ${fs.readFileSync(log, 'utf8').slice(-800)}`)
+  const shareUrl = `http://127.0.0.1:${sharePort}`
+  if (!await until(async () => (await fetch(`${url}/_relay/health`)).ok && (await fetch(`${shareUrl}/_relay/health`)).ok, 15000, 150)) throw new Error(`the relay stand-in didn't start: ${fs.readFileSync(log, 'utf8').slice(-800)}`)
   const ctl = (what) => fetch(`${url}/_test/${what}`, { method: what === 'state' ? 'GET' : 'POST' }).then((r) => r.json())
   return {
-    url, port, token,
-    relayFile: { url, token },
+    url, port, token, shareUrl,
+    relayFile: { url, token, shareUrl },
     freeze: () => ctl('freeze'), thaw: () => ctl('thaw'), drop: () => ctl('drop'), state: () => ctl('state'),
     stop: () => stopTree(p),
   }

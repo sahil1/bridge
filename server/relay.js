@@ -32,6 +32,11 @@
 // to for MOVE_DAYS, or until each has been seen at the new one, and each is told there. Stop using
 // the relay (forget) is the one thing that forgets the phones, and it makes this computer a new key.
 //
+// Share Links (shares.js) come in the same way too, from the page a link opens at the relay's share
+// address: a hello that proves it holds a link's secret (link.js, share links) gets a session for that
+// link alone. Its requests are answered by shares.js, never run against this server: no /api, nothing
+// of Bridge AI's, only what the link shares.
+//
 // Your other devices connect the same way a phone does (machines.js): with a one-time code from
 // invite() (when one device links another, or introduces two), or by asking. An ask waits here
 // until you allow it, on this computer or a paired phone, after checking both devices show the
@@ -53,8 +58,9 @@ import { dataFile, ensureDir, ROOT, IS_MAC, IS_WIN, nodeShimDir } from './paths.
 import { hostedBase } from './hosted.js'
 import { loginPath, which } from './agents.js'
 import { bundle } from '../relay/build.js'
-import { computerWelcome, newPairCode, splitCode, formatCode, plainFrame, readPlain, b64u, boxId, K, pack, unpack, json, utf8, CHUNK, moreOf } from '../relay/web/link.js'
+import { computerWelcome, computerShareWelcome, newPairCode, splitCode, formatCode, plainFrame, readPlain, b64u, boxId, K, pack, unpack, json, utf8, CHUNK, moreOf } from '../relay/web/link.js'
 import * as inbox from './inbox.js'
+import * as shares from './shares.js'
 import { authHeaders, localKey } from './apitoken.js'
 import { plainName } from '../shared/remote.js'
 
@@ -286,6 +292,7 @@ function connect() {
     }, 5000)
     roster('take').catch(() => {})
     checkBuild().catch(() => {})
+    askShares().catch(() => {})
   })
   ws.on('message', (data, isBinary) => {
     heard = Date.now()
@@ -296,7 +303,7 @@ function connect() {
     }
     const b = new Uint8Array(data)
     const id = Buffer.from(b.buffer, b.byteOffset, b.byteLength).readUInt32BE(1)
-    if (b[0] === OP.OPEN) conns.set(id, new Conn(id))
+    if (b[0] === OP.OPEN) conns.set(id, new Conn(id, main, openedAs(b)))
     else if (b[0] === OP.CLOSE) { conns.get(id)?.end(); conns.delete(id) }
     else if (b[0] === OP.DATA) {
       let c = conns.get(id)
@@ -421,7 +428,17 @@ const cleanName = (s) => plainName(s)
 const HELLO_WINDOW = 10000
 const HELLO_MAX = 60
 const STRANGER_MAX = 12
-const hellos = { all: [], strangers: [] }
+// Share Links' pages (people opening a link you gave them) have room of their own, so they never
+// crowd out your phones, nor your phones them.
+const VIEW_MAX = 40
+const hellos = { all: [], strangers: [], views: [] }
+function viewRoom() {
+  const now = Date.now()
+  while (hellos.views.length && hellos.views[0] < now - HELLO_WINDOW) hellos.views.shift()
+  if (hellos.views.length >= VIEW_MAX) return false
+  hellos.views.push(now)
+  return true
+}
 function helloRoom(known) {
   const now = Date.now()
   for (const q of [hellos.all, hellos.strangers]) while (q.length && q[0] < now - HELLO_WINDOW) q.shift()
@@ -431,9 +448,18 @@ function helloRoom(known) {
   return true
 }
 
+// What the relay says with a new connection to its share address (a Share Link's page; a relay from
+// before says nothing): the country Cloudflare says it's from, kept only to show the link's owner (the
+// relay could say anything here). What the connection is, its hello says, and that's what counts.
+function openedAs(b) {
+  if (b.byteLength <= 5) return {}
+  try { const o = JSON.parse(Buffer.from(b.buffer, b.byteOffset + 5, b.byteLength - 5).toString('utf8')); return { country: typeof o?.c === 'string' && /^[A-Z]{2}$/.test(o.c) ? o.c : null } } catch { return {} }
+}
+
 class Conn {
-  constructor(id, via = main) {
+  constructor(id, via = main, as = {}) {
     this.id = id
+    this.as = as // what the relay said of it: the country, for a Share Link's page
     this.via = via // the relay it came in through (main, or the address this computer moved from)
     this.session = null
     this.device = null
@@ -475,6 +501,7 @@ class Conn {
   async handle(buf) {
     if (!this.session) return this.hello(buf)
     const { kind, id, body } = unpack(await this.session.open(buf))
+    if (this.view) return this.viewRecord(kind, id, body)
     if (this.gone) return // told it was removed: nothing it sends counts
     if (!this.proven) { this.prove(kind === K.ABOUT ? body : null); if (kind === K.ABOUT) return }
     else if (kind === K.ABOUT) return // once is enough
@@ -493,6 +520,7 @@ class Conn {
   async hello(buf) {
     let msg
     try { msg = readPlain(buf) } catch { msg = null }
+    if (msg?.view === 1) return this.viewHello(msg)
     const devices = conf.devices || []
     // Hellos are counted: past a few a second (fewer from keys not paired here), the rest are let go
     // unanswered, so no one can keep this computer working out keys for them.
@@ -566,6 +594,56 @@ class Conn {
     // ping: this computer answers PING (a phone checks it's still there with it).
     this.via.send(OP.DATA, this.id, plainFrame({ ...r.welcome, device: id, ping: 1 }))
     this.session = r.session
+  }
+
+  // ---------- a Share Link's page ----------
+  // It proves it holds a link's secret (and this computer that it does too): a session for that link
+  // alone, or turned away in the clear (no such link, or one that ended, or too many at once, said
+  // so the page tries again in a while). Counted, so no one can keep this computer working out keys.
+  async viewHello(msg) {
+    const r = !viewRoom() ? { refuse: 'busy' } : await computerShareWelcome(await key(), msg, (id) => shares.secretOf(id))
+    if (!r.refuse && !shares.room(msg.s)) r.refuse = 'busy'
+    if (r.refuse) {
+      this.via.send(OP.DATA, this.id, plainFrame({ t: 'refuse', why: r.refuse }))
+      setTimeout(() => this.close(), 500)
+      return
+    }
+    this.view = shares.viewer(msg.s, { country: this.as.country })
+    this.via.send(OP.DATA, this.id, plainFrame(r.welcome))
+    this.session = r.session
+  }
+
+  // A sealed record from it. The first shows it holds the link (the relay is told it's ours, so it's
+  // never dropped as a stranger's, and on Bridge AI's relay it counts against the account); then its
+  // requests, each answered by shares.js.
+  viewRecord(kind, id, body) {
+    if (!this.proven) { this.proven = true; clearTimeout(this.timer); this.via.send(OP.OK, this.id) }
+    if (this.gone) return
+    if (kind === K.PING) return this.send(K.PONG, id)
+    if (kind === K.REQ) return this.request(id, json(body))
+    if (kind === K.BODY) { const s = this.streams.get(id); if (s?.body) { s.size = (s.size || 0) + body.byteLength; if (s.size > 16 * 1024 * 1024) { s.abort?.abort(); this.streams.delete(id); return this.send(K.ERR, id, utf8('Too big')) } s.body.push(Buffer.from(body)) } return }
+    if (kind === K.END) { const s = this.streams.get(id); if (s?.run) s.run(); return }
+    if (kind === K.CANCEL) { this.streams.get(id)?.abort?.abort(); this.streams.delete(id); return }
+    if (kind === K.MORE) { this.streams.get(id)?.more?.(moreOf(body)); return }
+    if (kind === K.WS_OPEN) {
+      const sock = {
+        opened: () => this.send(K.WS_OPENED, id),
+        send: (t) => this.send(K.WS_MSG, id, Buffer.concat([Buffer.from([1]), Buffer.from(String(t))])),
+        close: (c, r) => { if (this.streams.delete(id)) this.send(K.WS_CLOSE, id, { c, r: String(r || '') }) },
+      }
+      this.streams.set(id, { ws: { close: () => {}, readyState: 1, send: () => {} } })
+      const h = shares.socket(this.view, json(body)?.u, sock)
+      if (h && this.streams.has(id)) this.streams.set(id, { ws: { close: () => h.close(), readyState: 1, send: () => {} } })
+      return
+    }
+    if (kind === K.WS_CLOSE) { const s = this.streams.get(id); this.streams.delete(id); try { s?.ws?.close() } catch { /* closed */ } }
+  }
+
+  // Its link ended (stopped, or its time ran out): it's told so, sealed, and let go.
+  endView(said) {
+    if (this.gone) return
+    this.gone = true
+    this.send(K.GONE, 0, said).catch(() => {}).finally(() => setTimeout(() => this.close(), 300))
   }
 
   // Its first sealed record opened: it holds its key. Only now is it connected, seen and kept, and
@@ -642,11 +720,12 @@ class Conn {
   // later, so a phone removing itself still gets the answer).
   removed() { return !deviceOf(this.device?.id) }
 
-  // A request from the phone, run against this server.
+  // A request from the phone, run against this server; or from a Share Link's page, answered by
+  // shares.js alone (never this server).
   request(sid, { m, u, h, body, z, w }) {
-    if (this.removed()) return this.send(K.ERR, sid, utf8('This device was removed from this computer'))
-    const target = new URL(String(u || '/'), base)
-    if (target.origin !== new URL(base).origin) return this.send(K.ERR, sid, utf8('Not allowed'))
+    if (!this.view && this.removed()) return this.send(K.ERR, sid, utf8('This device was removed from this computer'))
+    const target = this.view ? null : new URL(String(u || '/'), base)
+    if (target && target.origin !== new URL(base).origin) return this.send(K.ERR, sid, utf8('Not allowed'))
     const abort = new AbortController()
     const s = { abort, body: body ? [] : null }
     this.streams.set(sid, s)
@@ -670,15 +749,19 @@ class Conn {
         // Its own x-bridge-relay and Authorization go, in any capitals: fetch would join them to the
         // real ones below. It's run here as you, with this server's key (apiauth.js): the device has
         // shown its own key to get this far.
-        const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$|authorization$)/i.test(k)))
-        headers['x-bridge-relay'] = this.device.id
-        Object.assign(headers, authHeaders(localKey()))
-        const res = await fetch(target, { method: m || 'GET', headers, body: s.body ? Buffer.concat(s.body) : undefined, signal: abort.signal, redirect: 'manual' })
+        let res
+        if (this.view) res = await shares.answer(this.view, { m, u, h: Array.isArray(h) ? h.filter((x) => Array.isArray(x) && x.length === 2) : [], body: s.body ? Buffer.concat(s.body) : null })
+        else {
+          const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$|authorization$)/i.test(k)))
+          headers['x-bridge-relay'] = this.device.id
+          Object.assign(headers, authHeaders(localKey()))
+          res = await fetch(target, { method: m || 'GET', headers, body: s.body ? Buffer.concat(s.body) : undefined, signal: abort.signal, redirect: 'manual' })
+        }
         // The app's own files (dist/assets, the same for everyone with this version) go compressed
         // when the phone asks: a third of the size, and the first screen sooner. Nothing else does:
         // the relay sees how big each record is, and compressed, the size of something of yours
         // would say a little about what's in it.
-        const zip = z === 'gzip' && (m || 'GET') === 'GET' && target.pathname.startsWith('/assets/') && res.status === 200 && !!res.body && !res.headers.get('content-encoding') && PACKS.test(res.headers.get('content-type') || '')
+        const zip = !this.view && z === 'gzip' && (m || 'GET') === 'GET' && target.pathname.startsWith('/assets/') && res.status === 200 && !!res.body && !res.headers.get('content-encoding') && PACKS.test(res.headers.get('content-type') || '')
         // Its length too when it goes as it is: a download's progress, and a video's player, know
         // how much is coming.
         const whole = !zip && !res.headers.get('content-encoding')
@@ -699,6 +782,7 @@ class Conn {
           }
         }
         if (!abort.signal.aborted) await this.send(K.END, sid)
+        else res.body?.cancel?.().catch(() => {})
       } catch (e) {
         if (!abort.signal.aborted) await this.send(K.ERR, sid, utf8(e.message))
       }
@@ -708,7 +792,8 @@ class Conn {
     if (!body) s.run()
   }
 
-  // A WebSocket from the phone (the live terminal), opened here.
+  // A WebSocket from the phone (the live terminal), opened here. (A Share Link's page never gets here:
+  // viewRecord.)
   socket(sid, { u }) {
     if (this.removed()) return this.send(K.WS_CLOSE, sid, { c: 1008, r: 'This device was removed from this computer' })
     const target = new URL(String(u || '/'), base)
@@ -774,6 +859,30 @@ export function cleanRelay(u) {
 }
 export const relayUrl = () => (conf.url ? conf.url.replace(/\/$/, '') : null)
 export const hostPublic = async () => b64u((await key()).public)
+
+// ---------- Share Links ----------
+// Where this computer's links open (shares.js), never the phone page's address: on Bridge AI's relay,
+// an address of each link's own (<id>-<8 letters>.<domain>), so each is a site of its own to a
+// browser; on a relay of your own, the Worker deployed beside it (<script>-share, deployWith). at():
+// a new link's address. A relay of your own from before has none until it's updated (why: 'update');
+// no relay at all, why: 'relay'.
+const B32 = 'abcdefghijklmnopqrstuvwxyz234567'
+let opensShares = null // whether Bridge AI's relay says it opens Share Links (/_relay/health): null until asked
+async function askShares() { if (conf.hosted) { const h = (await relayGet(`${conf.url}/_relay/health`, 8000))?.json; if (h?.ok) opensShares = h.share === 1 } }
+export function shareAt() {
+  if (!conf.url || !conf.token) return { why: 'relay' }
+  if (conf.hosted && opensShares === false) return { why: 'hosted' }
+  if (conf.hosted) {
+    const u = new URL(conf.url)
+    const [id, ...rest] = u.host.split('.')
+    return { at: () => `${u.protocol}//${id}-${[...randomBytes(8)].map((x) => B32[x & 31]).join('')}.${rest.join('.')}` }
+  }
+  return conf.shareUrl ? { at: () => conf.shareUrl.replace(/\/$/, '') } : { why: 'update', error: conf.shareError || null }
+}
+// The pages open on a link: how many, and each ended (told why, sealed).
+const viewing = (id) => [...conns.values(), ...prior.conns.values()].filter((c) => c.view?.id === id && c.session && !c.gone)
+export const viewersOf = (id) => viewing(id).length
+export function endViewers(id, said) { for (const c of viewing(id)) c.endView(said) }
 
 // A one-time code for another of your devices: when one links to this one, it hands this one a
 // code to link back; when one introduces another, it asks this one for a code to hand on.
@@ -1178,6 +1287,19 @@ async function deployWith(token, account) {
   form.append('worker.js', new Blob([code], { type: 'application/javascript+module' }), 'worker.js')
   await cf(token, 'PUT', `/accounts/${acct.id}/workers/scripts/${script}`, form)
   await cf(token, 'POST', `/accounts/${acct.id}/workers/scripts/${script}/subdomain`, { enabled: true, previews_enabled: false })
+  // Beside it, the Worker Share Links open at (<script>-share): the same code and the same Hub,
+  // serving only the page a link opens, so nothing shown there is ever at the phone page's address.
+  // Not there (Cloudflare said no): the relay works as before, and Settings › Sharing says why.
+  let shareUrl = null
+  let shareError = null
+  try {
+    const shareForm = new FormData()
+    shareForm.append('metadata', new Blob([JSON.stringify({ main_module: 'worker.js', compatibility_date: '2025-06-01', bindings: [{ type: 'durable_object_namespace', name: 'HUB', class_name: 'Hub', script_name: script }, { type: 'plain_text', name: 'SHARE_HOST', text: '1' }] })], { type: 'application/json' }))
+    shareForm.append('worker.js', new Blob([code], { type: 'application/javascript+module' }), 'worker.js')
+    await cf(token, 'PUT', `/accounts/${acct.id}/workers/scripts/${script}-share`, shareForm)
+    await cf(token, 'POST', `/accounts/${acct.id}/workers/scripts/${script}-share/subdomain`, { enabled: true, previews_enabled: false })
+    shareUrl = workerAt(`${script}-share`, sub)
+  } catch (e) { shareError = String(e.message || e).slice(0, 300) }
 
   const url = workerAt(script, sub)
   const changed = conf.url !== url || conf.token !== hostToken
@@ -1185,7 +1307,8 @@ async function deployWith(token, account) {
   // Here already: the same address, updated. From another (Bridge AI's relay, say): this computer
   // moves once its own is answering, and its phones come along (moveTo).
   const moving = !!conf.url && conf.url !== url
-  if (!moving) { const { hosted: _, ...rest } = conf; conf = { ...rest, url, token: hostToken, cf: cfNow }; save() }
+  const shared = shareUrl ? { shareUrl } : { shareError }
+  if (!moving) { const { hosted: _, shareUrl: _s, shareError: _e, ...rest } = conf; conf = { ...rest, url, token: hostToken, cf: cfNow, ...shared }; save() }
 
   // A brand-new address can take a minute to start answering.
   busy = 'Waiting for your relay to come online…'
@@ -1194,7 +1317,7 @@ async function deployWith(token, account) {
     if (r?.status >= 200 && r.status < 300) break
     await new Promise((r) => setTimeout(r, 2000))
   }
-  if (moving) await moveTo({ url, token: hostToken, cf: cfNow })
+  if (moving) await moveTo({ url, token: hostToken, cf: cfNow, ...shared })
   else { if (changed) disconnect(); connect(); if (changed) onChanged() }
   relayBuild = build
   return {}
@@ -1307,9 +1430,10 @@ async function moveTo(next) {
     endMove({ keep: back })
   }
   const left = from ? (conf.devices || []).map((d) => d.id) : []
-  const { hosted: _, ...rest } = conf
+  const { hosted: _, shareUrl: _s, shareError: _e, ...rest } = conf
   conf = {
     ...rest, url: next.url, token: next.token, ...(next.hosted ? { hosted: next.hosted } : {}), ...(next.cf ? { cf: next.cf } : {}),
+    ...(next.shareUrl ? { shareUrl: next.shareUrl } : next.shareError ? { shareError: next.shareError } : {}),
     ...(from && left.length ? { moved: { ...from, at: new Date().toISOString(), until: Date.now() + MOVE_DAYS * 86400000, left } } : {}),
   }
   pairing = null
@@ -1371,7 +1495,7 @@ function connectPrior() {
     if (!isBinary) return
     const b = new Uint8Array(data)
     const id = Buffer.from(b.buffer, b.byteOffset, b.byteLength).readUInt32BE(1)
-    if (b[0] === OP.OPEN) prior.conns.set(id, new Conn(id, prior))
+    if (b[0] === OP.OPEN) prior.conns.set(id, new Conn(id, prior, openedAs(b)))
     else if (b[0] === OP.CLOSE) { prior.conns.get(id)?.end(); prior.conns.delete(id) }
     else if (b[0] === OP.DATA) {
       let c = prior.conns.get(id)

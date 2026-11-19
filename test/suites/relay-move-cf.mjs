@@ -98,8 +98,10 @@ try {
   ok(!conf.hosted && JSON.stringify(conf.cf) === JSON.stringify({ account: 'acct-cf', accountName: 'Mine', script, method: 'token', apiToken: TOKEN }) && /^bridge-[0-9a-f]{10}$/.test(script || ''), 'it keeps which Worker is its own, on which account, and how it signed in', conf.cf)
   const st = await cf.state()
   const asked = [...new Set(st.calls.map((c) => `${c.method} ${c.path.replace(script, '<script>')}`))]
-  const needed = ['GET /accounts', 'GET /accounts/acct-cf/workers/scripts', 'GET /accounts/acct-cf/workers/subdomain', 'PUT /accounts/acct-cf/workers/subdomain', 'PUT /accounts/acct-cf/workers/scripts/<script>', 'POST /accounts/acct-cf/workers/scripts/<script>/subdomain']
-  ok(asked.length === needed.length && needed.every((x) => asked.includes(x)), 'Cloudflare is asked only what deploying needs: the account, its Workers, a workers.dev subdomain (it had none), the Worker, then on workers.dev', asked)
+  const needed = ['GET /accounts', 'GET /accounts/acct-cf/workers/scripts', 'GET /accounts/acct-cf/workers/subdomain', 'PUT /accounts/acct-cf/workers/subdomain', 'PUT /accounts/acct-cf/workers/scripts/<script>', 'POST /accounts/acct-cf/workers/scripts/<script>/subdomain', 'PUT /accounts/acct-cf/workers/scripts/<script>-share', 'POST /accounts/acct-cf/workers/scripts/<script>-share/subdomain']
+  ok(asked.length === needed.length && needed.every((x) => asked.includes(x)), 'Cloudflare is asked only what deploying needs: the account, its Workers, a workers.dev subdomain (it had none), the Worker, then on workers.dev, and the Worker Share Links open at beside it', asked)
+  const sw = st.workers[`acct-cf/${script}-share`]
+  ok(sw?.same === true && sw.of === script && sw.enabled === true && !sw.tag && conf.shareUrl === `${new URL(conf.url).protocol}//${script}-share.${new URL(conf.url).host.split('.').slice(1).join('.')}`, 'beside it, the Worker Share Links open at: the same code, on its Hub, with no migration of its own, on workers.dev, kept as where links open', { sw, shareUrl: conf.shareUrl, url: conf.url })
   const w = st.workers[`acct-cf/${script}`]
   ok(w?.same === true && w.token === conf.token && w.tag === 'v1' && w.enabled === true && w.uploads === 1 && /^bridge-[0-9a-f]{8}$/.test(st.subdomains['acct-cf'] || ''), 'the Worker is the relay as built here, with this computer\'s token and its migration, on workers.dev', { ...w, token: w?.token === conf.token, sub: st.subdomains['acct-cf'] })
 

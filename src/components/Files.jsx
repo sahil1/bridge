@@ -26,6 +26,7 @@ import { api, usePoll, BASE, machineId } from '../api.js'
 import PermissionFix, { InstallFix, protectedFolder } from './PermissionFix.jsx'
 import { OfficeView, Menu, menuItems, NameDialog, fileOp, onComputer } from './FileExtras.jsx'
 import { MediaView, PictureView, OtherFile, useSave, canSave, saveLabel } from './FileMedia.jsx'
+import { ShareDialog } from './Share.jsx'
 import { SendDialog, UploadSheet, TransferStrip, PlacesMenu, usePlaces, canCopyHere, copyHereLabel, canAddPlace, canDrag, dragData, dropOk, onDrop } from './Transfers.jsx'
 import { locale, t, tn, tx } from '../i18n/index.js'
 import { FileDrawing } from '../lazy.jsx'
@@ -474,6 +475,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
   // Send to… shows once another device is linked; Copy to this computer, on another device's files.
   const linked = (usePoll('/machines', 30000).data?.machines || []).some((m) => m.state === 'linked')
   const [send, setSend] = useState(null) // { src, here }
+  const [sharing, setSharing] = useState(null) // what a Share Link is being made for (Share.jsx)
   const [picked, setPicked] = useState(null) // files picked on this device, to send
   const [dropAt, setDropAt] = useState(false)
   const pickRef = useRef(null)
@@ -570,6 +572,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
         moved(e.path, null); refresh()
         return say(t('{name} moved to the Trash', { name: e.name }))
       }
+      if (op === 'share') return setSharing({ kind: e.dir ? 'folder' : 'file', root: pane, path: e.path, name: e.path ? e.name : rootName })
       if (op === 'send' || op === 'copyHere') return setSend({ src: { pane, path: e.path, name: e.path ? e.name : rootName, dir: !!e.dir, size: e.size ?? null }, here: op === 'copyHere' })
       if (op === 'upload') { pickFor.current = e.path; pickRef.current?.click(); return }
       if (op === 'duplicate') {
@@ -661,10 +664,11 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
             onOpen={({ rel, dir }) => { if (dir) { if (rel) open(rel, true) } else open(rel); if (narrow) setAssist(null) }} />
         </div>
       )}
-      {menu && <Menu x={menu.x} y={menu.y} items={menuItems(menu.entry, act, { onMention: place ? null : onMention, send: linked, copyHere: canCopyHere ? copyHereLabel() : null, assist: assistOn ? (e) => setAssist(e.path) : null })} onClose={closeMenu} />}
+      {menu && <Menu x={menu.x} y={menu.y} items={menuItems(menu.entry, act, { onMention: place ? null : onMention, send: linked, copyHere: canCopyHere ? copyHereLabel() : null, assist: assistOn ? (e) => setAssist(e.path) : null, share: true })} onClose={closeMenu} />}
       {placesAt && <PlacesMenu x={placesAt.x} y={placesAt.y} agentName={agent.cwd.split(/[\\/]/).pop()} agentPath={agent.cwd.replace(/^\/Users\/[^/]+/, '~')} current={placeId} places={places}
         onPick={setPlaceId} onAdded={(p, gone) => { refreshPlaces(); if (p) setPlaceId(p.id); if (gone && gone.id === placeId) setPlaceId(null) }} onClose={() => setPlacesAt(null)} />}
       {send && <SendDialog src={send.src} here={send.here} onClose={() => setSend(null)} />}
+      {sharing && <ShareDialog what={sharing} onClose={() => setSharing(null)} />}
       {picked && <UploadSheet list={picked.list} folder={{ v: place ? `place:${place.id}` : `pane:${agent.paneId}`, dir: picked.dir, label: rootName }} onClose={() => setPicked(null)} />}
       {dialog && <NameDialog title={dialog.title} initial={dialog.initial} action={dialog.action} onSubmit={dialog.submit} onClose={() => setDialog(null)} />}
       {quick && <div className="qo-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setQuick(false) }}><QuickOpen pane={pane} onPick={open} onClose={() => setQuick(false)} initial={typeof quick === 'string' ? quick : ''} /></div>}

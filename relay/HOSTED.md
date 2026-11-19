@@ -34,6 +34,17 @@ this:
   Android apps carry their own copy, and a pairing link opens them when they're installed (Pairing
   links open the apps, below). One address per computer keeps each pairing, service worker and
   saved copy apart, as before.
+- Share Links (server/shares.js) open at an address of each link's own, `https://<id>-<8 letters>.<domain>`
+  (still one level down), so each link is a site of its own to a browser, apart from the phone page
+  and from every other link. That address serves only the page a link opens (`share.html`,
+  `share.js`, `share-sw.js`, `link.js`) and its connection, `/_relay/view`, which goes to the
+  computer's Hub; never the phone page, `/_relay/host` or `/_relay/link`, and the computer's own
+  address never serves the link's page. A link's page is a stranger to the relay until the computer
+  vouches for it (once it has proved it holds the link's secret, which never reaches the relay); then
+  what it carries counts against the account, as a phone's does. Each computer has `MAX_VIEWERS`
+  such pages open at once, counted apart from its phones, so people viewing its links never crowd
+  out its phones. The relay tells the computer the country Cloudflare says a page is in, and nothing
+  else about it.
 - Any other name under the domain gets a plain 404: names that aren't an id, reserved names (www,
   api, relay, admin and a few more), names two levels down, and ids that aren't registered (or were
   removed). Ids end in two checksum characters keyed with a secret only the relay has (`ID_SECRET`),
@@ -236,6 +247,7 @@ per computer unless it says it's per account or for the whole relay.
 | `ACCOUNTS_PUBLIC_KEY` | `FqJDwoi18T2Ip2TSLiPxhoP0L56mGOOu_0Zfu4jjr_s` | The accounts service's public key, which every relay token is checked with; while its key is being changed, the old and the new, comma separated, the old first (a token says which key signed it: account/README.md, Changing the signing key). Empty, no computer can register or connect. |
 | `HOSTED_OFF` | `0` | The kill switch (below). |
 | `MAX_PHONES` | `16` | Connections to one computer at once: the same as a personal relay. Strangers who haven't paired make room for paired phones. |
+| `MAX_VIEWERS` | `32` | Share Link pages open on one computer at once, apart from its phones (each page is a connection). Pages its computer hasn't vouched for make room for those it has; full, one more is told so and tries again in a minute. |
 | `MAX_MESSAGE_KB` | `256` | One message. Bridge AI's largest is 192 KB (a piece of a big file) plus a little; notes for an offline computer are 64 KB at most. |
 | `MESSAGES_PER_SECOND` | `200` | Incoming messages a second, on average, with `MESSAGE_BURST` at once. A phone watching an agent's terminal, the busiest normal use, sends and gets about 4 a second; opening the app for the first time is about 150 in a few seconds. This only stops floods. |
 | `MESSAGE_BURST` | `2000` | How many may come at once before `MESSAGES_PER_SECOND` applies. |
@@ -283,7 +295,9 @@ allowance; what it does stop is anyone else using that allowance: a connection t
 vouched for has a small allowance of its own (What happens at a limit) and costs the account
 nothing. An account at its limits every week costs about $0.06 a month past what's included; a
 typical one (an hour or two of phone use a day) under a cent. They're generous on purpose: nobody
-should meet one in normal use.
+should meet one in normal use. A Share Link's page counts as a phone does once its computer vouches
+for it, within the same allowance, so links never add to what an account may use, nor to the bill's
+bounds below.
 
 Per-account limits alone don't bound the bill; with `MAX_ACCOUNTS` they do, and
 `RELAY_DAILY_REQUESTS` bounds it if `MAX_ACCOUNTS` is raised (Cost).
@@ -309,7 +323,8 @@ a paired phone uses is cut off without a word; a connection the computer hasn't 
   is told too, and Settings › Account & Devices shows it while it lasts.
 - **Too many connected**: with `MAX_PHONES` paired phones and tabs connected (strangers make room
   first), one more is told so ("Bridge AI's relay takes 16 connections to one computer at once…")
-  and tries again a minute later; the computer is told a phone was turned away, and why.
+  and tries again a minute later; the computer is told a phone was turned away, and why. A Share
+  Link's page the same with `MAX_VIEWERS` of them (counted as `viewers` in `/_relay/stats`).
 - **The account's window or week used up**: every computer of the account, and its phones, hear
   `{ t: "limit", why: "window" | "week", until }`, with words: "This computer's Bold Bridge account
   has used its allowance on Bridge AI's relay for now (150,000 messages in 8 hours). It resets at

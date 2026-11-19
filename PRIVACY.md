@@ -542,7 +542,9 @@ no one else can leave messages there.
 
 What Cloudflare can see, as with any site it serves: the IP addresses of your phone and computer,
 when they connect and how much they send, your relay's address, and the user agent of the browser
-or app (the iPhone and Android apps add `BridgeAIApp` and its version). That's under your Cloudflare account
+or app (the iPhone and Android apps add `BridgeAIApp` and its version). The relay Bridge AI sets up
+is two Workers: the one your phone uses, and one beside it (`<name>-share`) where Share Links open
+(below), with the same code. That's under your Cloudflare account
 and Cloudflare's privacy policy, not the project's. The project never sees it.
 
 If you use Tailscale instead, your phone reaches your computer over your own tailnet, under
@@ -607,6 +609,30 @@ that hasn't connected for 90 days is deleted the same way, and deleting your Bol
 Bridge account deletes your account's counts and its computers there within a day. Everything else
 in this policy, including what Cloudflare sees, applies to it as to a relay of your own, except
 that it's the project's Cloudflare account.
+
+## Share Links
+
+A Share Link gives someone outside your devices one file, folder, Studio document or app from your
+computer (Settings › Sharing lists them). It goes through your relay (your own, or Bridge AI's), end
+to end encrypted the same way your phone's link is: the link's secret is in the part of the link
+after `#`, which browsers never send, so the relay passes on bytes it can't read. As with your
+phone's page in a browser, the page the link opens comes from the relay, so this rests on the relay
+serving it unchanged (on Bridge AI's relay, your computer checks it with the phone's page). The
+relay, and Cloudflare, see what they see of any connection: the viewer's IP address, when they
+connect and how much passes, and the link's id (made from its secret, not the secret). The relay
+tells your computer the country Cloudflare says a viewer is in, and nothing else about them. On
+Bridge AI's relay, what a link carries counts towards your account's allowance there.
+
+For a link that names people, a person proves their email with a 6-digit code first. With your
+computer signed in to your Bold Bridge account, the accounts service emails it to them from your
+account: their email address and the code go to it, never what's shared, and it keeps neither (it
+counts the codes sent to each address for an hour, as a hash, to limit them). Otherwise your
+devices get the code in a notification, to pass on yourself.
+
+On your computer, in `~/.bridge-ai/shares.json` (only you can read it): each link, its secret until
+it ends, a hash of its password, the emails it names, and each open and try (when, the country, and
+the email, for a link that names people). A link that ends forgets its secret at once, and is
+forgotten 30 days later. Nothing about a link or who opened it goes to the project.
 
 ## The phone apps
 

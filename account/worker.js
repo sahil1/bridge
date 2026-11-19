@@ -26,6 +26,7 @@ const CODE_TRIES = 5
 const WRONG_PER_DAY = 20 // wrong codes for an email in a day, past which it gets none for a day
 const CODES_PER_EMAIL = 5 // an hour
 const CODES_PER_NETWORK = 20 // an hour
+const SHARE_CODES_PER_ACCOUNT = 30 // codes for people its Share Links name, an hour
 const FORMS_PER_NETWORK = 5 // requests from the website's form, an hour
 const MAX_DEVICES = 5
 const GRANT_MINUTES = 5
@@ -515,6 +516,34 @@ async function v1(req, env, url) {
     return json({ account: accountView(await ask(env, acct, kind, String(b.note ?? '').trim().slice(0, 500), 'app', dev.platform)) })
   }
   if (p === '/v1/request-public' && post) return requestPublic(req, env)
+  // A code for someone a computer's Share Link names (Bridge AI's server/shares.js): made and checked
+  // on that computer, never kept here, only emailed to them, saying whose link it is. Nothing about
+  // what's shared comes here. An account sends SHARE_CODES_PER_ACCOUNT an hour, and one address gets
+  // CODES_PER_EMAIL an hour (apart from its sign-in codes); the email is the same words each time.
+  if (p === '/v1/share-code' && post) {
+    const { acct, dev } = await signedIn(req, env)
+    active(acct)
+    if (dev.kind !== 'computer') refuse(403, 'computer', 'Only a computer sends codes for its links.')
+    const b = await body(req)
+    const to = clean(b.to)
+    if (to.length > 254 || !EMAIL.test(to)) refuse(400, 'invalid', 'That doesn\'t look like an email address.')
+    const code = String(b.code ?? '')
+    if (!/^\d{6}$/.test(code)) refuse(400, 'invalid', 'A code is 6 digits.')
+    const now = Date.now()
+    const limits = [[`s:${(await sha(`share ${acct.id}`)).slice(0, 32)}`, SHARE_CODES_PER_ACCOUNT, 'your links'], [`t:${(await sha(`share to ${to}`)).slice(0, 32)}`, CODES_PER_EMAIL, 'this email']]
+    for (const [key, max, who] of limits) {
+      const r = await db.prepare('SELECT COUNT(*) AS n, MIN(at) AS first FROM sent WHERE key = ? AND at > ?').bind(key, now - HOUR).first()
+      if ((r?.n || 0) >= max) {
+        const retryAfter = Math.max(1, Math.ceil((r.first + HOUR - now) / 1000))
+        refuse(429, 'too-many', `Too many codes for ${who} in the last hour. Try again in ${minutes(retryAfter)}.`, { retryAfter })
+      }
+    }
+    try {
+      await mail(env, to, `${code} is your code to open a link from ${acct.email}`, `${acct.email} shared something with you from Bridge AI, and the link asked for your email. To open it, enter this code on that page:\n\n${code}\n\nIt works for ${CODE_MINUTES} minutes. If you didn't ask for it, ignore this email: nothing opens without the code.\n\nBold Bridge`)
+    } catch (e) { refuse(502, 'unsent', `The email with the code couldn't be sent just now (${e.message}).`) }
+    await db.batch([...limits.map(([k]) => db.prepare('INSERT INTO sent (key, at) VALUES (?, ?)').bind(k, now)), db.prepare('DELETE FROM sent WHERE at < ?').bind(now - HOUR)])
+    return json({ sent: true })
+  }
   const del = /^\/v1\/devices\/([a-z0-9]{12})$/.exec(p)
   if (del && req.method === 'DELETE') {
     const { acct, dev } = await signedIn(req, env)

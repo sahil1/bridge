@@ -21,6 +21,7 @@ Only the latest release gets security fixes. Bridge AI tells you when a newer ve
 - Your other computers link with a one-time code, or by asking. When one asks, you allow it on the other computer after checking that both show the same six digits. Each computer commits to a random number before it sees the other's, so a relay in between can't try keys until the digits match.
 - API keys you add are stored in `~/.bridge-ai/secrets.json`. The `~/.bridge-ai` folder is readable only by you. Keys are never sent anywhere except to the provider they're for.
 - Markdown and HTML from agents, files and meetings are cleaned before they're shown. HTML pages you preview run in a sandbox that can't reach the app.
+- **Share Links** give someone outside your devices one file, folder, Studio document or app, through your relay, end-to-end encrypted, checked on your computer and nothing more (below).
 - Installs and updates check each download against the release's `SHA256SUMS.txt`. Every release file also has a build attestation from GitHub Actions, so you can check where it was built:
 
   ```sh
@@ -46,6 +47,20 @@ Remote Screen and Preview (a Beta Feature, off until you turn it on) adds guardr
 - **Previews.** Only a server one of your agents' terminals started counts as an app (never one started from the home folder or Bridge AI's data folder). An app never runs as a Bridge AI page: another computer shows it at an address of its own, and next to a phone's page it comes in a sandbox with no origin of its own. The page drawn off screen for a phone stays on its own app, and its redirects and frames can't reach anything else on the computer.
 
 The guardrails cover seeing and controlling the screen and the apps. They don't stop a paired device from running agents and terminals; that's what removing a device is for.
+
+## Share Links
+
+A Share Link lets someone outside your devices see one file, one folder (as a site, read-only), one Studio document (view-only, always its latest) or one app an agent's terminal serves (usable, buttons included), for an hour, a day or a week. You make it from Files, Studio or the Preview tab, on the computer or a paired device, and see and stop it in Settings › Sharing.
+
+- **The link's secret** is in its fragment (`#s=…`), which browsers never send, so the relay never has it. The page the link opens and your computer each prove they hold it before anything else, and everything after is end-to-end encrypted with fresh keys, as a phone's link is. The relay sees the share's id (made from the secret, not the secret), sizes and times.
+- **Its own address.** The page opens at an address of its own: on Bridge AI's relay, one for each link; on a relay of your own, a second Worker beside it. Never the address of your phone's page, so nothing a link shows can reach a pairing kept there.
+- **Who may open it** is checked on your computer, never the relay: the link alone, the link and a password (kept only as a salted scrypt hash; 5 wrong tries in a row lock the link for 15 minutes, and your devices are told), or only the people you name, each proving their email with a 6-digit code first (10 minutes, 5 tries).
+- **Only what's shared.** A link's requests are answered by the share itself, never by Bridge AI's server: no `/api`, no pages or files of Bridge AI. A file link serves that file; a folder link serves only what's inside it, and never a name starting with a dot, a link (symlink) leading out of it, or Bridge AI's own folder or your keys'. Nothing is ever written. An app link reaches only that app's port, only while an agent's terminal still serves it, never Bridge AI's own ports, with no cookies or Authorization passed on either way.
+- **Contained.** What a link shows is sandboxed and can't take over the page it's in. A Studio document is shown as a page made on your computer with nothing in it that runs.
+- **Stop Sharing** (or the link's time running out) ends every open page at once, saying so, and forgets the link's secret, so nothing opens it again.
+- **Limits:** 50 links at once, each open on 10 devices at once, files up to 1 GB, and a page asking more than about 40 times a second is slowed. Your devices hear of each link's first open.
+
+What a link shows, whoever has the link can show to others: share a password or a named link for anything private, and stop it when it's done.
 
 ## What it doesn't protect against
 

@@ -60,6 +60,7 @@ const FIRST = {
   Notifications: ['Notifications on this device', 'What to notify about', 'An agent needs you'],
   Appearance: ['Color Mode', 'Theme', 'Text Size', 'Language'],
   'Config File': ['Copy path'],
+  Sharing: ['Share Links', /Nothing is shared now/],
   'About & Updates': ['Version', 'Check for new versions', 'Report a problem', 'Beta Features'],
 }
 // Every setting there was before Advanced, by its control's name (kind|name; a name the control's
@@ -149,7 +150,7 @@ try {
       const has = await adv(p).count() && await adv(p).isVisible()
       if (TABBED[section]) ok(await p.locator('.st-head p').count() === 0, `${name}: no line under the section's name, where its tabs are`)
       if (section === 'Devices' && tab === 'Phone') ok(JSON.stringify(await p.locator('.st-head .st-tabs [role="tab"]').allInnerTexts()) === JSON.stringify(TABBED.Devices), 'Devices: its tabs are Phone, Computers and Notifications', await p.locator('.st-tabs [role="tab"]').allInnerTexts())
-      if (name === 'Speech to Text' || name === 'Computers') ok(!has, `${name}: nothing under Advanced, so no Advanced`, { has })
+      if (name === 'Speech to Text' || name === 'Computers' || name === 'Sharing') ok(!has, `${name}: nothing under Advanced, so no Advanced`, { has })
       else if (name !== 'MCP Servers' && name !== 'Agents') ok(has && (await isOpen(p)) === false, `${name}: the rest under Advanced, at the end, closed`, { has, open: await isOpen(p) })
       if (ALL[name]) {
         const got = await names(p)

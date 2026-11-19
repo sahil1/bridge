@@ -58,6 +58,7 @@ ACCOUNTS_PUBLIC_KEY = "FqJDwoi18T2Ip2TSLiPxhoP0L56mGOOu_0Zfu4jjr_s"
 HOSTED_OFF = "0"
 # Each computer's limits. These are the defaults; HOSTED.md says why.
 MAX_PHONES = "16"
+MAX_VIEWERS = "32"
 MAX_MESSAGE_KB = "256"
 MESSAGES_PER_SECOND = "200"
 MESSAGE_BURST = "2000"

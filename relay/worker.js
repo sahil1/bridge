@@ -10,6 +10,14 @@
 // It also serves the small page your phone opens (web/), which pairs with your computer and then
 // shows Bridge AI from it, through the encrypted link.
 //
+// And Share Links (server/shares.js): what you share from your computer (a file, a folder, a Studio
+// document, an agent's app) opens at an address of its own, never the phone page's, so nothing shown
+// there can reach what a paired phone keeps at its address. The page there (web/share.html) connects
+// to /_relay/view, and is a stranger to the relay like any connection until your computer vouches for
+// it; what passes is end-to-end encrypted the same way (the link's secret is in its fragment, which
+// browsers never send). On a relay of your own that address is a second Worker beside this one,
+// <script>-share (SHARE_HOST, the same Hub); on Bridge AI's relay, <id>-<8 letters>.<domain>, one per share.
+//
 // Deployed by Bridge AI (Settings › Devices), as one module: FILES is filled in then.
 //
 // The same code also runs Bridge AI's hosted relay, for people who'd rather not set up their own:
@@ -19,6 +27,11 @@
 
 const TYPES = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', webmanifest: 'application/manifest+json', png: 'image/png', svg: 'image/svg+xml' }
 const MAX_PHONES = 16
+// People with a Share Link open on one computer at once (each page is one connection), apart from its
+// phones, so they never crowd out yours.
+const MAX_VIEWERS = 32
+// What a share's address serves, and only that: the page, its worker, the link, the mark.
+const SHARE_FILES = new Set(['share.html', 'share.js', 'share-sw.js', 'link.js', 'mark.svg'])
 const OP = { DATA: 1, OPEN: 2, CLOSE: 3, OK: 4 }
 // Messages waiting for your computer: how long, how big, how many.
 const Q = { DAYS: 7, NOTE: 64 * 1024, PER_BOX: 50, BOX_BYTES: 512 * 1024, BOXES: 16, RECEIPTS: 100 }
@@ -36,6 +49,8 @@ export default {
     if (on(env.HOSTED)) return appLinks(req, env) || hosted(req, env)
     const url = new URL(req.url)
     const p = url.pathname
+    // The Worker beside this one that Share Links open at (the same Hub): nothing else there.
+    if (on(env.SHARE_HOST)) return shareHost(req, url, () => env.HUB.get(env.HUB.idFromName('hub')))
     if (p === '/_relay/host' || p === '/_relay/link') {
       if (req.headers.get('Upgrade') !== 'websocket') return new Response('Expected a WebSocket', { status: 426 })
       if (p === '/_relay/host' && !(await tokenOk(req.headers.get('Authorization'), env.HOST_TOKEN))) return new Response('Not allowed', { status: 403 })
@@ -48,8 +63,9 @@ export default {
 }
 
 // version: the Bridge AI release the page's files are from (relay/build.js), which a computer on
-// Bridge AI's relay checks them against (server/relaycheck.js).
-const health = () => new Response(JSON.stringify({ ok: true, build: RELAY_BUILD, version: typeof RELAY_VERSION === 'string' ? RELAY_VERSION : null }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+// Bridge AI's relay checks them against (server/relaycheck.js). share: it opens Share Links, so a
+// computer can say so before anyone is given one a relay from before couldn't open.
+const health = () => new Response(JSON.stringify({ ok: true, build: RELAY_BUILD, version: typeof RELAY_VERSION === 'string' ? RELAY_VERSION : null, share: 1 }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
 
 // ---------- Pairing links open the phone apps (Bridge AI's hosted relay) ----------
 // With the iPhone or Android app installed, a pairing link (https://<id>.<domain>/#pair=…, the QR
@@ -84,7 +100,7 @@ const wellKnown = (body) => new Response(JSON.stringify(body), { headers: { 'Con
 function page(req, url, domain = null) {
   const p = url.pathname
   const name = p === '/' ? 'index.html' : p.slice(1)
-  const f = FILES[name]
+  const f = !SHARE_FILES.has(name) || name === 'link.js' || name === 'mark.svg' ? FILES[name] : null
   if (!f) {
     if (req.headers.get('Sec-Fetch-Dest') === 'document' || req.headers.get('Accept')?.includes('text/html')) return Response.redirect(`${url.origin}/`, 302)
     return new Response('Not found', { status: 404 })
@@ -104,6 +120,56 @@ function page(req, url, domain = null) {
     } : {}),
   }
   // (Cloudflare marks the tag weak, W/, when it compresses the file on the way.)
+  const has = (req.headers.get('If-None-Match') || '').split(',').some((t) => t.trim().replace(/^W\//, '') === headers.ETag)
+  if (has) return new Response(null, { status: 304, headers })
+  return new Response(f.b64 ? Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0)) : f.text, { headers })
+}
+
+// ---------- Share Links: a share's address ----------
+// Only the Share Link page and its connection (/_relay/view); never the phone page, nor a computer's
+// or a phone's connection. hubOf(): the computer's Hub. Anything else asked for here is a page the
+// share showed, asked for while its service worker wasn't there to take it (a forced reload): said
+// so, with nothing from it kept.
+async function shareHost(req, url, hubOf) {
+  const p = url.pathname
+  if (p === '/_relay/view') {
+    if (req.headers.get('Upgrade') !== 'websocket') return new Response('Expected a WebSocket', { status: 426 })
+    return (await hubOf()).fetch(viewRequest(req))
+  }
+  if (p === '/_relay/health') return health()
+  return sharePage(req, url)
+}
+// The viewer's country, as Cloudflare says it (nothing else about them), for the share's owner; one a
+// request says itself is dropped.
+function viewRequest(req) {
+  const c = req.cf?.country
+  const h = new Headers(req.headers)
+  h.delete('X-Bridge-Country')
+  if (typeof c === 'string' && /^[A-Z]{2}$/.test(c)) h.set('X-Bridge-Country', c)
+  return new Request(req, { headers: h })
+}
+function sharePage(req, url) {
+  const p = url.pathname
+  const name = p === '/' || /^\/v\/[\w-]{22}$/.test(p) ? 'share.html' : p.slice(1)
+  const f = SHARE_FILES.has(name) ? FILES[name] : null
+  if (!f) {
+    const text = 'This shows only inside the page its link opens. Open the link again.'
+    return new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Open the link again</title><body style="font:15px system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;text-align:center;color:#666"><p>${text}</p></body>`, { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'", 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' } })
+  }
+  const headers = {
+    'Content-Type': TYPES[name.split('.').pop()] || 'application/octet-stream',
+    'Cache-Control': 'no-cache',
+    ETag: `"${RELAY_BUILD}"`,
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+    ...(name === 'share.html' ? {
+      // Its own scripts only, connecting only to its own address; what's shared shows in a frame of
+      // its own address (or, without a service worker, from what this page fetched: blob:).
+      'Content-Security-Policy': `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ${url.protocol === 'http:' ? 'ws' : 'wss'}://${url.host}; frame-src 'self' blob:; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'X-Frame-Options': 'DENY',
+    } : {}),
+  }
   const has = (req.headers.get('If-None-Match') || '').split(',').some((t) => t.trim().replace(/^W\//, '') === headers.ETag)
   if (has) return new Response(null, { status: 304, headers })
   return new Response(f.b64 ? Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0)) : f.text, { headers })
@@ -159,6 +225,7 @@ function limits(env) {
   const n = (k, d) => (env[k] != null && env[k] !== '' && Number.isFinite(Number(env[k])) ? Number(env[k]) : d)
   return {
     phones: n('MAX_PHONES', MAX_PHONES), // connections to one computer at once
+    viewers: n('MAX_VIEWERS', MAX_VIEWERS), // ...and Share Link pages open on it at once, besides
     messageKB: n('MAX_MESSAGE_KB', 256), // one message
     rate: n('MESSAGES_PER_SECOND', 200), // incoming messages to one computer, on average…
     burst: n('MESSAGE_BURST', 2000), // …with this many at once
@@ -195,6 +262,7 @@ function limitText(why, l, end) {
     rate: 'Too much at once for Bridge AI\'s relay. Connecting again in a moment.',
     size: `That was too big for Bridge AI's relay (over ${l.messageKB} KB at once). Connecting again in a moment.`,
     phones: `Bridge AI's relay takes ${l.phones} connections to one computer at once, and this computer has that many paired phones and tabs connected. Close Bridge AI on one you're not using; this one tries again in a minute.`,
+    viewers: `As many people as Bridge AI's relay takes at once (${l.viewers}) have links from this computer open. This page tries again in a minute.`,
     suspended: `This computer's Bold Bridge account is suspended, so Bridge AI's relay doesn't carry it for now. ${OTHER}`,
     relay: `This computer's Bold Bridge account doesn't have Bridge AI's relay any more. ${OTHER}`,
     deleted: `This computer's Bold Bridge account was deleted, so Bridge AI's relay doesn't carry it any more. ${OTHER}`,
@@ -220,10 +288,11 @@ const idOk = async (env, s) => /^[a-z2-7]{12}$/.test(s) && !RESERVED.has(s) && (
 // limits.full: registrations turned away because MAX_ACCOUNTS accounts had a computer on it;
 // limits.all: computers stopped because the whole relay reached RELAY_DAILY_REQUESTS (at ceilingAt);
 // limits.shut: computers let go for sending on while stopped; limits.account: computers stopped for
-// their account (suspended, no relay any more, deleted, or no relay token).
+// their account (suspended, no relay any more, deleted, or no relay token); limits.viewers: Share
+// Link pages turned away because as many as MAX_VIEWERS were open on their computer.
 const KEEP_STATS_DAYS = 35
 const TOP = 10
-const blankDay = () => ({ registered: 0, refused: 0, computers: 0, connections: { computers: 0, phones: 0 }, messages: 0, bytes: 0, limits: { window: 0, week: 0, rate: 0, size: 0, phones: 0, full: 0, all: 0, shut: 0, account: 0 }, top: [], ceilingAt: null })
+const blankDay = () => ({ registered: 0, refused: 0, computers: 0, connections: { computers: 0, phones: 0 }, messages: 0, bytes: 0, limits: { window: 0, week: 0, rate: 0, size: 0, phones: 0, viewers: 0, full: 0, all: 0, shut: 0, account: 0 }, top: [], ceilingAt: null })
 // What a day's counts come to in Cloudflare requests: incoming messages at 20 to 1 (and a tally
 // to the registry and one to the account every 1,000), and about three for each connection or
 // computer set up (the Worker, its Hub, and the tally or the registry). Keepalives aren't in it.
@@ -323,13 +392,18 @@ async function hosted(req, env) {
     if (p === '/mark.svg') return page(req, url)
     return notFound()
   }
-  const id = host.endsWith(`.${domain}`) ? host.slice(0, -domain.length - 1) : ''
+  const name = host.endsWith(`.${domain}`) ? host.slice(0, -domain.length - 1) : ''
+  // A share's address: its computer's id and 8 letters of its own, so each share is a site of its own
+  // to a browser (apart from the phone page, and from every other share).
+  const shared = /^([a-z2-7]{12})-[a-z2-7]{8}$/.exec(name)
+  const id = shared ? shared[1] : name
   if (!(await idOk(env, id))) return notFound()
-  const sock = p === '/_relay/host' || p === '/_relay/link'
+  const sock = shared ? p === '/_relay/view' : p === '/_relay/host' || p === '/_relay/link'
   // Switched off: said before anything is asked of a Hub.
-  const off = sock && req.headers.get('Upgrade') === 'websocket' ? offText(env, p === '/_relay/link') : null
+  const off = sock && req.headers.get('Upgrade') === 'websocket' ? offText(env, p !== '/_relay/host') : null
   if (off) return refuse({ t: 'limit', why: 'off', text: off, until: Date.now() + 30 * 60000 }, 4009)
   if (!(await registered(env, id))) return notFound()
+  if (shared) return shareHost(req, url, () => hub(env, id))
   if (sock) {
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('Expected a WebSocket', { status: 426 })
     return hub(env, id).fetch(req) // the Hub checks the computer's token, and its account
@@ -492,9 +566,10 @@ export class Hub {
     if (this.lim) { const r = await this.gate(req, url); if (r) return r }
     const [client, server] = Object.values(new WebSocketPair())
     if (url.pathname === '/_relay/host') {
-      // A new connection from the computer replaces the old one; phones start over with it.
+      // A new connection from the computer replaces the old one; phones (and Share Link pages) start
+      // over with it.
       for (const old of this.ctx.getWebSockets('host')) try { old.close(4000, 'replaced') } catch { /* gone */ }
-      for (const ph of this.ctx.getWebSockets('phone')) try { ph.close(4001, 'computer reconnected') } catch { /* gone */ }
+      for (const ph of [...this.ctx.getWebSockets('phone'), ...this.ctx.getWebSockets('view')]) try { ph.close(4001, 'computer reconnected') } catch { /* gone */ }
       this.ctx.acceptWebSocket(server, ['host'])
       server.serializeAttachment({ at: Date.now() })
       await this.ctx.storage.put('seen', null)
@@ -502,21 +577,26 @@ export class Hub {
     } else {
       // The address is public, so anyone can connect; only your computer can tell a paired phone
       // (it says so with OK). When full, the oldest connection it hasn't vouched for makes room,
-      // so strangers can't crowd out your phones.
-      const phones = this.ctx.getWebSockets('phone')
-      if (phones.length >= (this.lim?.phones ?? MAX_PHONES)) {
-        const stranger = phones.map((w) => [w, w.deserializeAttachment() || {}]).filter(([, a]) => !a.ok).sort((a, b) => (a[1].at || 0) - (b[1].at || 0))[0]
-        if (!stranger) return this.lim ? this.full() : new Response('Too many connections', { status: 429 })
+      // so strangers can't crowd out your phones. A Share Link's page (view) is counted apart, with
+      // room of its own, so people viewing your links never crowd out your phones either.
+      const view = url.pathname === '/_relay/view'
+      const tag = view ? 'view' : 'phone'
+      const all = this.ctx.getWebSockets(tag)
+      if (all.length >= (view ? this.lim?.viewers ?? MAX_VIEWERS : this.lim?.phones ?? MAX_PHONES)) {
+        const stranger = all.map((w) => [w, w.deserializeAttachment() || {}]).filter(([, a]) => !a.ok).sort((a, b) => (a[1].at || 0) - (b[1].at || 0))[0]
+        if (!stranger) return view ? this.fullViews() : this.lim ? this.full() : new Response('Too many connections', { status: 429 })
         try { stranger[0].close(4004, 'make room') } catch { /* gone */ }
       }
       const id = crypto.getRandomValues(new Uint32Array(1))[0]
-      this.ctx.acceptWebSocket(server, ['phone', `p${id}`])
+      this.ctx.acceptWebSocket(server, [tag, `p${id}`])
       server.serializeAttachment({ id, at: Date.now() })
       if (this.lim) this.connected()
       const h = await this.live()
-      // q: this relay keeps notes (older pages ignore it).
-      server.send(JSON.stringify({ host: !!h, seen: (await this.ctx.storage.get('seen')) || null, q: 1 }))
-      if (h) h.send(frame(OP.OPEN, id))
+      // q: this relay keeps notes (older pages ignore it); a Share Link's page leaves none.
+      server.send(JSON.stringify({ host: !!h, seen: (await this.ctx.storage.get('seen')) || null, ...(view ? {} : { q: 1 }) }))
+      // The computer hears it's a Share Link's page, with the country Cloudflare says it's in (a
+      // computer from before ignores what comes with OPEN).
+      if (h) h.send(frame(OP.OPEN, id, view ? new TextEncoder().encode(JSON.stringify({ view: 1, c: req.headers.get('X-Bridge-Country') || null })) : null))
     }
     return new Response(null, { status: 101, webSocket: client })
   }
@@ -567,10 +647,10 @@ export class Hub {
     return this.host()
   }
 
-  // The computer's gone: phones hear so, and since when.
+  // The computer's gone: phones (and Share Link pages) hear so, and since when.
   async offline(seen) {
     await this.ctx.storage.put('seen', seen)
-    for (const ph of this.ctx.getWebSockets('phone')) try { ph.send(JSON.stringify({ host: false, seen })) } catch { /* gone */ }
+    for (const ph of [...this.ctx.getWebSockets('phone'), ...this.ctx.getWebSockets('view')]) try { ph.send(JSON.stringify({ host: false, seen })) } catch { /* gone */ }
   }
 
   async webSocketClose(ws, code) {
@@ -627,6 +707,8 @@ export class Hub {
       } else if (m.t === 'ack' && ID.test(m.box || '') && ID.test(m.id || '')) await this.ack(m)
       return
     }
+    // A Share Link's page leaves no notes, and has no box.
+    if (this.ctx.getTags(ws).includes('view')) return
     const a = ws.deserializeAttachment() || {}
     if (m.t === 'box' && ID.test(m.box || '')) {
       ws.serializeAttachment({ ...a, box: m.box })
@@ -753,7 +835,7 @@ export class Hub {
       // Let go for sending on past its account's limits: told so again, with when.
       return this.shutUntil > Date.now() ? refuse(this.limit('shut'), 4005) : null
     }
-    if (p === '/_relay/link') {
+    if (p === '/_relay/link' || p === '/_relay/view') {
       if (!this.acct || Date.now() - this.acct.at > 60000) await this.askAccount('check')
       const why = this.blocked()
       return why ? refuse(this.limit(why), 4005) : null
@@ -1042,6 +1124,15 @@ export class Hub {
     try { ws.send(JSON.stringify(this.limit(why, until))); ws.close(4005, 'limit') } catch { /* gone */ }
     this.tellHost(why, until)
     return false
+  }
+
+  // As many Share Link pages are open on this computer as the relay takes at once, each one the
+  // computer let in: this one is turned away, saying so (the page tries again in a while).
+  fullViews() {
+    const until = Date.now() + 60000
+    if (!this.lim) return refuse({ t: 'limit', why: 'viewers', text: `As many people as this relay takes at once (${MAX_VIEWERS}) have links from this computer open. This page tries again in a minute.`, until }, 4005)
+    this.limited('viewers')
+    return refuse(this.limit('viewers', until), 4005)
   }
 
   // Every connection to this computer is a paired phone's or tab's, as many as the relay takes at
