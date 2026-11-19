@@ -2,7 +2,11 @@
 // or page, and none for a call's own view of faces, a cursor, a notification or a slide sliding in.
 // The screens are drawn here as the small grey copies the page makes of a shared window, a look
 // every two seconds: a Meet gallery like one where 171 pictures were kept in 25 minutes, and a
-// presentation with the faces in a strip beside it.
+// presentation with the faces in a strip beside it. And the desktop app's answer when a page asks
+// for a screen (desktop/screenpick.js): every no said with null and why kept for the page, which
+// says it (meetings-ui).
+import fs from 'node:fs'
+import { createRequire } from 'node:module'
 import { judge, W, H } from '../../src/components/meetings/changes.js'
 import { checks } from '../lib/harness.mjs'
 
@@ -109,6 +113,88 @@ function run(frames) {
   const at = run(frames)
   const most = Math.max(...at.map((a) => at.filter((b) => b >= a && b < a + 90).length))
   ok(most <= 6 && at.length >= 6, 'slides flicked through every 12 seconds: six pictures at most in any three minutes', { pictures: at.length, mostIn3Min: most })
+}
+
+// ---------- The desktop app's answer to a page asking for a screen (desktop/screenpick.js) ----------
+// Electron stood in for: getSources as it answers on each system (a Mac without Screen Recording
+// rejects with "Failed to get sources."), and its callback as Electron 45's, which throws at an
+// answer with no video for a video asked for. Every no is said with null, never thrown, and why is
+// kept for the page that asked, once.
+{
+  const require = createRequire(import.meta.url)
+  const { create } = require('../../desktop/screenpick.js')
+  const OWN = 'http://127.0.0.1:7420/'
+  const permits = (perm, { url }) => perm === 'display-capture' && url === OWN
+  const screens = [{ id: 'window:7:0', name: 'Notes' }, { id: 'screen:1:0', name: 'Entire Screen', thumbnail: {} }]
+  // platform, access: what macOS says of Screen Recording (now, and when the app started), and
+  // sources(): what getSources does.
+  const make = ({ platform = 'darwin', access = ['granted'], sources = async () => screens, at = () => 1000 } = {}) => {
+    let i = 0
+    const asked = []
+    const pick = create({ platform, now: at, permits, desktopCapturer: { getSources: async (o) => { asked.push(o); return sources(o) } }, systemPreferences: { getMediaAccessStatus: (k) => (k === 'screen' ? access[Math.min(i++, access.length - 1)] : 'granted') } })
+    return { pick, asked }
+  }
+  // The page asking: its frame (null: gone), with Electron 45's callback.
+  const ask = async (pick, { frame = { url: OWN, parent: null }, audio = false, id = 1 } = {}) => {
+    let got
+    let thrown = null
+    const cb = (s) => { if (s && typeof s === 'object' && !s.video) { thrown = 'Video was requested, but no video stream was provided'; throw new TypeError(thrown) } got = s }
+    let rejected = null
+    try { await pick.handler({ frame, videoRequested: true, audioRequested: audio, userGesture: true }, cb, id) } catch (e) { rejected = e.message }
+    return { got, thrown, rejected, why: pick.why(id) }
+  }
+  let x = make()
+  let r = await ask(x.pick)
+  ok(r.got?.video?.id === 'screen:1:0' && !r.got.audio && !r.why && x.asked[0]?.types?.join() === 'screen', 'this computer\'s own page: its screen (not a window listed with it), and no why', r)
+  r = await ask(make({ platform: 'win32' }).pick, { audio: true })
+  ok(r.got?.audio === 'loopback', 'on Windows, with the sound asked for: what the computer plays', r.got)
+  r = await ask(make({ platform: 'darwin' }).pick, { audio: true })
+  ok(r.got?.video && !r.got.audio, 'on a Mac, no sound with it (Bridge AI records the call\'s itself)', r.got)
+  const nos = [
+    ['gone', { frame: null }, 'the page went away while it asked'],
+    ['frame', { frame: { url: OWN, parent: {} } }, 'a frame in a page (a project\'s app in Preview, an agent in a tab)'],
+    ['page', { frame: { url: 'http://127.0.0.1:7600/m/desk1/', parent: null } }, 'a window showing another computer'],
+  ]
+  for (const [w, o, what] of nos) {
+    x = make()
+    r = await ask(x.pick, o)
+    ok(r.got === null && !r.thrown && !r.rejected && r.why?.why === w && x.asked.length === 0, `${what}: no (null, nothing thrown), and why: ${w}`, r)
+  }
+  // A Mac before macOS 15, without Screen Recording: getSources fails.
+  const failing = async () => { throw new Error('Failed to get sources.') }
+  r = await ask(make({ access: ['denied'], sources: failing }).pick)
+  ok(r.got === null && !r.thrown && !r.rejected && r.why?.why === 'off', 'a Mac with Screen Recording off (getSources fails): no, and why: off', r)
+  r = await ask(make({ access: ['not-determined'], sources: failing }).pick)
+  ok(r.why?.why === 'off', 'not asked yet (macOS asks in its own window then): off too', r.why)
+  r = await ask(make({ access: ['restricted'], sources: async () => [] }).pick)
+  ok(r.why?.why === 'restricted', 'turned off by a profile: restricted', r.why)
+  r = await ask(make({ access: ['denied', 'granted'], sources: async () => [] }).pick)
+  ok(r.got === null && r.why?.why === 'reopen', 'turned on since the app started, no screens until it restarts: reopen', r)
+  r = await ask(make({ access: ['granted'], sources: async () => [] }).pick)
+  ok(r.got === null && r.why?.why === 'none', 'on all along and still no screen: none', r)
+  r = await ask(make({ platform: 'linux', sources: async () => [] }).pick)
+  ok(r.got === null && r.why?.why === 'none', 'Linux with no screen shared (the system\'s dialog closed): none', r)
+  r = await ask(make({ platform: 'win32', sources: failing }).pick)
+  ok(r.got === null && r.why?.why === 'error' && r.why.problem === 'Failed to get sources.', 'Windows, listing the screens failing: error, with what it said', r)
+  // Answered once, for the click it answers: asked again, nothing; a minute later, nothing.
+  let clock = 1000
+  x = make({ access: ['denied'], sources: failing, at: () => clock })
+  await ask(x.pick, { id: 5 })
+  ok(x.pick.why(5) === null && x.pick.why(6) === null, 'why is said once, to the page that asked')
+  await x.pick.handler({ frame: { url: OWN, parent: null }, videoRequested: true }, () => {}, 5)
+  clock += 60_000
+  ok(x.pick.why(5) === null, 'and not a minute later')
+  // A page gone by the time it's answered (Electron throws then): nothing thrown here.
+  x = make()
+  let threw = null
+  try { await x.pick.handler({ frame: { url: OWN, parent: null }, videoRequested: true }, () => { throw new Error('Object has been destroyed') }, 9) } catch (e) { threw = e.message }
+  ok(threw === null, 'answering a page that went away throws nothing', threw)
+
+  // The app uses it so, and the page can ask why.
+  const desktop = (f) => fs.readFileSync(new URL(`../../desktop/${f}`, import.meta.url), 'utf8')
+  const main = desktop('main.js')
+  ok(/setDisplayMediaRequestHandler\(\(req, cb\) => screenPick\.handler\(req, cb, askedBy\(req\.frame\)\), \{ useSystemPicker: true \}\)/.test(main) && !/cb\(\{\}\)/.test(main), "the app's handler is screenpick's, macOS's own picker kept, and no cb({}) left", main.match(/setDisplayMediaRequestHandler[^\n]*/)?.[0])
+  ok(/ipc\.handle\('bridge:screen-why'/.test(main) && /screenWhy: \(\) => ipcRenderer\.invoke\('bridge:screen-why'\)/.test(desktop('preload.js')) && JSON.parse(desktop('package.json')).build.files.includes('screenpick.js'), 'the page asks why (bridgeApp.screenWhy), and screenpick.js is in the built app')
 }
 
 process.exit(done().fail ? 1 : 0)

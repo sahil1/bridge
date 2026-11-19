@@ -10,6 +10,7 @@ const contextMenu = require('./contextmenu.js')
 const permissions = require('./permissions.js')
 const remoteDesk = require('./remote.js')
 const senders = require('./senders.js')
+const screenpick = require('./screenpick.js')
 const { execFile } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -62,6 +63,8 @@ let win = null
 let startedServer = false
 // A meeting recording in the window: closing it hides it instead, so the recording goes on.
 let recording = false
+let recorder = null // the webContents of the window recording a meeting (bridge:recording)
+let screenPick = null // what the app answers a page asking for a screen (screenpick.js)
 let quitting = false
 let reopened = 0 // when the window was last opened again after its page went away
 
@@ -1088,10 +1091,17 @@ const tellMain = async (js, show, gesture = false) => {
   if (show) { if (w.isMinimized()) w.restore(); w.show(); w.focus() }
   return w.webContents.executeJavaScript(js, gesture).catch(() => {})
 }
-// Watch a screen, from the card: the main window records, so it asks which screen.
+// Watch a screen, from the card: the window recording the meeting asks which screen (the main one,
+// or this computer in a window of its own), as if you'd clicked there. It says how that went once
+// it has (the page, recording.jsx): focus, the picker wants a click in that window itself, which is
+// brought to the front to say so. Not waited on for ever: a picker can stay open a while.
+const WATCH_JS = `new Promise((done) => window.dispatchEvent(new CustomEvent('bridge-watch-screen', { detail: { done } })))`
 ipc.handle('bridge:float-watch', async (e) => {
   if (!fromFloat(e)) return false
-  await tellMain(`window.dispatchEvent(new CustomEvent('bridge-watch-screen'))`, false, true)
+  const w = recorder && !recorder.isDestroyed() ? BrowserWindow.fromWebContents(recorder) : await mainReady()
+  if (!w || w.isDestroyed()) return false
+  const said = await Promise.race([w.webContents.executeJavaScript(WATCH_JS, true).catch(() => null), new Promise((r) => setTimeout(() => r(null), 120_000))])
+  if (said?.focus && !w.isDestroyed()) { if (w.isMinimized()) w.restore(); w.show(); w.focus() }
   return true
 })
 // Take notes for the call: the recording runs in the main window (it has the mic), shown or not.
@@ -1116,7 +1126,17 @@ ipc.handle('bridge:float-open', async (e, { meeting, meetings, paneId, event, bo
   else if (typeof paneId === 'string' && paneId.length < 200) await tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: ${JSON.stringify(paneId)}, view: 'chat' } }))`, true)
   return true
 })
-ipc.handle('bridge:recording', (e, on) => { if (fromApp(e) && e.sender === win?.webContents) recording = !!on; return true })
+// Which window records: closing the main one mid-meeting hides it instead (recording), and the
+// floating card's Watch screen goes to the one recording (recorder), whichever that is.
+ipc.handle('bridge:recording', (e, on) => {
+  if (!fromApp(e)) return true
+  if (on) recorder = e.sender
+  else if (recorder === e.sender) recorder = null
+  if (e.sender === win?.webContents) recording = !!on
+  return true
+})
+// Why the app just said no to a screen this page asked for (screenpick.js), for it to say.
+ipc.handle('bridge:screen-why', (e) => (fromApp(e) && screenPick ? screenPick.why(e.sender.id) : null))
 
 app.on('before-quit', () => { quitting = true })
 // The graphics process went away (Chromium starts it again): written down, to offer a report.
@@ -1147,11 +1167,10 @@ app.whenReady().then(async () => {
   // window being shared. Before macOS 15: the whole main screen, which macOS asks to allow (Screen
   // Recording) the first time. Recording the screen too, on Windows: with what the computer plays
   // (the call's sound), which the page asks for there (src/components/meetings/recording.jsx).
-  session.defaultSession.setDisplayMediaRequestHandler((req, cb) => {
-    if (!req.frame || req.frame.parent || !pages.permits('display-capture', { url: req.frame.url })) return cb({})
-    const sound = req.audioRequested && process.platform === 'win32' ? { audio: 'loopback' } : {}
-    desktopCapturer.getSources({ types: ['screen'] }).then((s) => cb(s[0] ? { video: s[0], ...sound } : {}), () => cb({}))
-  }, { useSystemPicker: true })
+  // A no says why to the page that asked (screenpick.js, bridge:screen-why).
+  screenPick = screenpick.create({ desktopCapturer, systemPreferences, permits: pages.permits })
+  const askedBy = (f) => { try { return f ? electron.webContents.fromFrame(f)?.id ?? null : null } catch { return null } }
+  session.defaultSession.setDisplayMediaRequestHandler((req, cb) => screenPick.handler(req, cb, askedBy(req.frame)), { useSystemPicker: true })
   // Right-click: spelling suggestions, Cut, Copy and Paste, in every window from here on.
   contextMenu.attach({ app, Menu, clipboard: electron.clipboard, session })
   buildMenu()
