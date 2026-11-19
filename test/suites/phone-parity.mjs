@@ -109,6 +109,7 @@ const PATHS = {
   // (Its Account tab, there only once Bold Bridge accounts exist, server/account.js: account-ui
   // follows it on a phone, and each way into the section and its tabs.)
   'settings:account': { phone: 'Settings › Account & Devices › Account', accounts: true },
+  'settings:backup': { phone: 'Settings › Back Up & Move' },
   'settings:appearance': { phone: 'Settings › Appearance' },
   'settings:config': { phone: 'Settings › Config File' },
   'settings:about': { phone: 'Settings › About & Updates' },
