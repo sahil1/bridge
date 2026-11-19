@@ -1447,7 +1447,9 @@ try {
       await c2.locator('.ask-row', { hasText: 'Phone' }).getByRole('button', { name: 'Block This Device' }).click()
       await v2.wait((s) => msg(s, 'error'), 8000)
       const P = (await studio.api('/remote')).access.devices.find((x) => x.name === 'Phone')
-      ok(msg(v2, 'error')?.code === 'blocked' && P.allowed === false && /Phone can't connect to Studio any more/.test(await c2.innerText().catch(() => '')), 'Block This Device on the card: the Phone is unticked at Studio, and the card says where it\'s let back in', [msg(v2, 'error'), await c2.innerText().catch(() => '')])
+      // (The card says so once Laptop has heard back from Studio, which can be after the phone was told.)
+      const said = !!(await until(async () => /Phone can't connect to Studio any more/.test(await c2.innerText().catch(() => '')), 8000, 100))
+      ok(msg(v2, 'error')?.code === 'blocked' && P.allowed === false && said, 'Block This Device on the card: the Phone is unticked at Studio, and the card says where it\'s let back in', [msg(v2, 'error'), await c2.innerText().catch(() => '')])
       await studio.api('/remote/devices', { id: P.id, allowed: true })
       await d.ctx.close()
     }

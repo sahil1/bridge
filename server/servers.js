@@ -164,8 +164,12 @@ export function ownedBy(port, panes, { exclude = [], never = [], noneIn = [], ms
     for (const x of panes) if (await fine(x.cwd)) ok.push(x)
     let mine = false
     const tops = new Set(ok.filter((x) => x.pid).map((x) => Number(x.pid)))
+    let up = new Map()
+    const began = Date.now()
     if (tops.size) {
-      const up = await parents()
+      // (Asked again once when none came: Windows' list, from PowerShell, can time out.)
+      up = await parents()
+      if (!up.size) up = await parents()
       mine = socks.some((s) => under(s.pid, tops, up))
     }
     const roots = ok.filter((x) => !x.pid).map((x) => x.cwd)
@@ -176,6 +180,9 @@ export function ownedBy(port, panes, { exclude = [], never = [], noneIn = [], ms
         for (const r of roots) if (i.cwd && inside(real, await realOr(r))) mine = true
       }
     }
+    // (Why one that's running isn't, in the log: what an agent's terminal started is told apart by its
+    // processes, and that's what a refusal can come down to.)
+    if (!mine) console.log(`Preview: port ${port} (process ${socks.map((s) => s.pid).join(', ')}) isn't from an agent's terminal: ${tops.size} terminal${tops.size === 1 ? '' : 's'} with a process, ${up.size} processes listed (${Date.now() - began} ms)`)
     return mine && (await probe(port)).http
   })().catch(() => false)
   owned.set(key, { at: Date.now(), p })
