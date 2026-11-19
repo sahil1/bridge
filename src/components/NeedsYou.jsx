@@ -506,6 +506,42 @@ function DraftItem({ it, onDone, setNote }) {
 // Devices May Connect, server/remote.js): until then it can't use this computer at all. Allow lets
 // it in; Keep Out leaves it out, and not New any more (Settings › Remote Access changes either).
 // Only in this computer's own window, where it's changed.
+// A bot that stopped reading one of its folders, which leads somewhere else now than when it was
+// picked (a link changed): Keep reading it where it leads now, or Stop reading it.
+export function FolderItem({ it, onDone, setNote }) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState(null)
+  const bot = it.bot?.name || t('Your bot')
+  const decide = async (keep) => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      await onDevice(null, `/bots/${encodeURIComponent(it.bot.id)}/settings`, keep ? { keepFolder: it.folder, keepAt: it.leadsTo } : { stopFolder: it.folder })
+      onDone(it)
+      setNote({ text: keep ? t('{bot} reads {folder} again, where it leads now', { bot, folder: it.folder }) : t('{bot} doesn\'t read {folder} any more', { bot, folder: it.folder }) })
+    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <article className="ny-item t-folder" data-folder={it.folder} aria-label={t('{bot} stopped reading {folder}', { bot, folder: it.folder })}>
+      <div className="ny-top">
+        <Icon name="folder" size={12} />
+        <span className="ny-kind">{t('Folder not read')}</span>
+        {it.since && <span className="ny-age" title={new Date(it.since).toLocaleString()}>{ago(it.since)}</span>}
+        <span className="ny-grow" />
+        <span className="ny-device here" title={t('Through {bot} (Settings › Bots)', { bot })}><Icon name="chat" size={11} />{bot}</span>
+      </div>
+      <p className="ny-text">{it.was
+        ? t('{bot} stopped reading {folder}: it leads to {now} now, not {was} as when you picked it. It reads it again only if you say so.', { bot, folder: it.folder, now: it.leadsTo, was: it.was })
+        : t('{bot} stopped reading {folder}: it leads to {now}, not where its name says. It reads it only if you say so.', { bot, folder: it.folder, now: it.leadsTo })}</p>
+      {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
+      <div className="ny-acts">
+        <button type="button" className="btn small primary" disabled={busy} onClick={() => decide(true)}><Icon name="check" size={12} /> {t('Keep reading it')}</button>
+        <button type="button" className="btn small" disabled={busy} onClick={() => decide(false)}>{t('Stop reading it')}</button>
+      </div>
+    </article>
+  )
+}
+
 export function LetInItem({ it, onDone, setNote }) {
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState(null)
@@ -603,7 +639,8 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
   const outside = (data?.outside || []).filter((x) => !gone[`outside|${x.id}`])
   const slack = (data?.slack || []).filter((x) => !gone[`slack|${x.id}`])
   const letIn = (data?.letIn || []).filter((x) => !gone[`letin|${x.id}`])
-  const waiting = all.filter((i) => isAsk(i) && i.online && !isQuiet(i)).length + outside.length + slack.length + letIn.length
+  const folders = (data?.folders || []).filter((x) => !gone[`folder|${x.id}`])
+  const waiting = all.filter((i) => isAsk(i) && i.online && !isQuiet(i)).length + outside.length + slack.length + letIn.length + folders.length
   const list = (rows) => rows.map((it) => <NeedsItem key={uid(it)} it={it} focused={uid(it) === focusId} top={top.has(uid(it))} onOpen={onOpen} onGone={onGone} setNote={setNote} />)
   // Clear all that have gone quiet, each on its own device: off the list at once, and back with a
   // note for any its device couldn't clear.
@@ -654,6 +691,12 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
             {letIn.map((x) => <LetInItem key={x.id} it={x} setNote={setNote} onDone={(o) => { setGone((g) => ({ ...g, [`letin|${o.id}`]: Date.now() })); for (const ms of [0, 1500]) setTimeout(() => refresh(''), ms) }} />)}
           </section>
         )}
+        {folders.length > 0 && (
+          <section className="ny-group" aria-label={t('Folders Not Read')}>
+            <h3>{t('Folders Not Read')}<span className="fcount">{folders.length}</span></h3>
+            {folders.map((x) => <FolderItem key={x.id} it={x} setNote={setNote} onDone={(o) => { setGone((g) => ({ ...g, [`folder|${o.id}`]: Date.now() })); for (const ms of [0, 1500]) setTimeout(() => refresh(''), ms) }} />)}
+          </section>
+        )}
         {slack.length > 0 && (
           <section className="ny-group" aria-label={t('From Slack')}>
             <h3>{t('From Slack')}<span className="fcount">{slack.length}</span></h3>
@@ -666,7 +709,7 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
             {outside.map((x) => <OutsideItem key={x.id} it={x} setNote={setNote} onDone={(o) => { setGone((g) => ({ ...g, [`outside|${o.id}`]: Date.now() })); for (const ms of [0, 1500]) setTimeout(() => refresh(''), ms) }} />)}
           </section>
         )}
-        {data && !items.length && !outside.length && !slack.length && !letIn.length && (
+        {data && !items.length && !outside.length && !slack.length && !letIn.length && !folders.length && (
           <div className="ny-empty"><Icon name="check" size={20} /><p>{t('Nothing needs you right now.')}</p><small className="muted">{quiet.length ? t('Only what has been quiet for a while, folded below.') : t('Questions, permissions, failed runs and finished work from all your devices show here.')}</small></div>
         )}
         {by === 'urgent'

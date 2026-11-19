@@ -23,7 +23,7 @@ import path from 'node:path'
 import { dataFile, writeFileAtomic, HOME, ROOT, NODE } from './paths.js'
 import { loginPath } from './agents.js'
 import { claudeServers, claudeServerView } from './mcp.js'
-import { keptOut, SECRET_TERMS, SECRET_STEMS, SECRET_KINDS } from './botattach.js'
+import { keptOut, SECRET_TERMS, SECRET_BROAD, BROAD_KINDS, SECRET_STEMS, SECRET_KINDS } from './botattach.js'
 
 export const RUNS = dataFile('front-desk', 'mcp')
 const LIST_MS = 15000 // a server that hasn't listed its tools by then can't be asked
@@ -214,14 +214,18 @@ export async function runFolder(bot, { all = false, key, outbox = null, attach =
 // Claude Code's Read rules for a bot's run (gitignore-style patterns; // starts at the root), for each
 // folder it reads, as named and as its real path: no hidden file, nor anything in a hidden folder,
 // nor a name that says it holds keys, passwords or credentials, made from botattach.js's own lists
-// (SECRET_TERMS between separators or a name's ends, SECRET_STEMS, SECRET_KINDS), whatever their
-// case, so it reads none of what attaching refuses. Read rules hold for Grep and Glob too, as far as
-// Claude Code can.
+// (SECRET_TERMS between separators or a name's ends, SECRET_BROAD in a file's name with a kind that
+// keeps data, SECRET_STEMS as a file's name before its kind, SECRET_KINDS), whatever their case, so
+// it reads none of what attaching refuses, and a vault of notes or a folder of code called auth as
+// it is. Read rules hold for Grep and Glob too, as far as Claude Code can.
 const anyCase = (w) => w.replace(/[a-z]/gi, (c) => `[${c.toLowerCase()}${c.toUpperCase()}]`)
 const SEP = '[-_. ]'
 const SECRET_GLOBS = [...new Set([
   ...SECRET_TERMS.map((t) => anyCase(t).replace(/[-_ ]/g, '[-_ ]')).flatMap((t) => [t, `${t}${SEP}*`, `*${SEP}${t}`, `*${SEP}${t}${SEP}*`]),
-  ...SECRET_STEMS.flatMap((t) => [anyCase(t), `${anyCase(t)}.*`]),
+  // (A broad word only in a file's name with a kind that keeps data, as attaching has it: vault.json, not a
+  // vault of notes; a stem only as a file's whole name before its kind, not an auth folder of code.)
+  ...[...new Set(SECRET_BROAD.map((t) => (t.endsWith('s') && SECRET_BROAD.includes(t.slice(0, -1)) ? t.slice(0, -1) : t)))].flatMap((t) => BROAD_KINDS.map((k) => `*${anyCase(t)}*.${anyCase(k)}`)),
+  ...SECRET_STEMS.map((t) => `${anyCase(t)}.*`),
   ...SECRET_KINDS.map((e) => `*.${anyCase(e)}`),
 ])]
 export function readDenies(folders) {

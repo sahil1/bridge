@@ -68,30 +68,46 @@ export const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : 
 export const safe = (s) => String(s || '').replace(/\p{Cf}/gu, '').replace(/[\\/:*?"<>|\x00-\x1f]+/g, '-').trim().replace(/^[.\s]+/, '').trim().slice(0, 120) // eslint-disable-line no-control-regex
 
 // ---------- What never goes ----------
-// Names that say a file (or a folder on the way to it) holds keys, passwords or credentials: by its
-// kind (a key, a certificate's private half, a password manager's file) or its words (secrets.json,
-// passwords.xlsx, client_secret.json, id_rsa.txt, logins.csv, a kubeconfig, recovery codes), whatever
-// kind of file it is. One list, which Claude Code's Read rules for a bot's run are made from too
-// (botmcp.js readDenies): SECRET_TERMS, each a word as a name may have it (a separator inside it or
-// none, one or more), found between separators or the name's ends; SECRET_STEMS, names that are a
-// secret's on their own (token.json, auth.json); SECRET_KINDS, by kind.
+// Names that say a file (or a folder on the way to it) holds keys, passwords or credentials. One set
+// of lists, which Claude Code's Read rules for a bot's run are made from too (botmcp.js readDenies):
+//   SECRET_TERMS   words that say so wherever they are, in a file's name or a folder's (secrets.json,
+//                  passwords.xlsx, client_secret.json, id_rsa.txt, a kubeconfig, recovery codes, a
+//                  seed phrase, a password manager's name), each as a name may have it (a separator
+//                  inside it or none, one or more), between separators or the name's ends;
+//   SECRET_BROAD   words that say so only in a file's name, and only with a kind that keeps data
+//                  (BROAD_KINDS: vault.json, wallet.dat, logins.csv, keychain.txt): a vault of notes
+//                  ("Work Vault/notes.md"), a folder of receipts called Wallet, or "Mnemonics.md"
+//                  don't;
+//   SECRET_STEMS   a file's whole name before its kind (token.json, auth.json), never a folder's (an
+//                  auth folder of code is code);
+//   SECRET_KINDS   by kind (a key, a certificate's private half, a password manager's file).
 export const SECRET_KINDS = ['pem', 'key', 'p12', 'pfx', 'jks', 'keystore', 'kdbx', 'kdb', 'keychain', 'keychain-db', 'gpg', 'pgp', 'asc', 'ovpn', 'ppk', 'env', '1pux', 'opvault']
 const both = (w) => [w, `${w}s`]
 const joined = (a, b, plural = true) => ['', '-', '_', ' '].flatMap((s) => (plural ? both(`${a}${s}${b}`) : [`${a}${s}${b}`]))
 export const SECRET_TERMS = [...new Set([
-  ...both('secret'), ...both('credential'), 'creds', ...both('password'), 'passwd', 'logins',
+  ...both('secret'), ...both('credential'), 'creds', ...both('password'), 'passwd',
   ...joined('api', 'key'), ...joined('private', 'key'),
   ...['access', 'auth', 'refresh', 'bearer', 'oauth', 'bot', 'api'].flatMap((x) => joined(x, 'token')),
   ...joined('client', 'secret'), ...joined('service', 'account'),
-  'id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519', ...both('keychain'), ...both('keystore'), ...both('vault'),
+  'id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519', 'kubeconfig',
   'bitwarden', '1password', 'lastpass', 'keepass', 'keepassxc',
-  ...joined('recovery', 'code'), ...joined('backup', 'code'), 'kubeconfig', ...both('wallet'),
-  ...joined('seed', 'phrase'), ...joined('seed', 'words', false), ...both('mnemonic'),
+  ...joined('recovery', 'code'), ...joined('backup', 'code'), ...joined('seed', 'phrase'), ...joined('seed', 'words', false),
 ])]
+export const SECRET_BROAD = [...both('vault'), ...both('wallet'), ...both('keychain'), ...both('keystore'), 'logins', ...both('mnemonic')]
+export const BROAD_KINDS = ['json', 'yaml', 'yml', 'xml', 'csv', 'tsv', 'txt', 'dat', 'db', 'sqlite', 'plist']
 export const SECRET_STEMS = ['token', 'tokens', 'auth', 'env', '.env']
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-const SECRET_WORDS = new RegExp(`(?:^|[-_. ])(?:${SECRET_TERMS.map(esc).join('|')})(?:[-_. ]|$)|^(?:${SECRET_STEMS.map(esc).join('|')})(?:\\.|$)`, 'i')
-export const secretLike = (name) => SECRET_KINDS.includes(extOf(name)) || SECRET_WORDS.test(String(name))
+const between = (list) => new RegExp(`(?:^|[-_. ])(?:${list.map(esc).join('|')})(?:[-_. ]|$)`, 'i')
+const TERM = between(SECRET_TERMS)
+const BROAD = between(SECRET_BROAD)
+const STEM = new RegExp(`^(?:${SECRET_STEMS.map(esc).join('|')})(?:\\.[^.]+)?$`, 'i')
+// Whether a name says so: a file's (by every list), or a folder's (folder: true, by SECRET_TERMS only).
+export const secretLike = (name, { folder = false } = {}) => {
+  const n = String(name)
+  if (folder) return TERM.test(n)
+  const ext = extOf(n)
+  return SECRET_KINDS.includes(ext) || TERM.test(n) || STEM.test(n) || (BROAD_KINDS.includes(ext) && BROAD.test(n.slice(0, n.length - ext.length - 1)))
+}
 
 // What in a file looks like a key, a password or a token: a private key (PEM, OpenSSH, PGP), or one
 // in base64 (a kubeconfig's client-key-data), wherever its first byte falls; the tokens mcp.js
@@ -336,7 +352,8 @@ async function walk(root, names) {
 function namesSay(names, { config = false } = {}) {
   const name = names[names.length - 1]
   if (names.some((n) => n.startsWith('.'))) return name.startsWith('.') ? 'it\'s a hidden file' : 'it\'s in a hidden folder'
-  if (names.some(secretLike)) return secretLike(name) ? 'its name says it holds keys, passwords or credentials' : 'it\'s in a folder whose name says it holds keys, passwords or credentials'
+  if (secretLike(name)) return 'its name says it holds keys, passwords or credentials'
+  if (names.slice(0, -1).some((n) => secretLike(n, { folder: true }))) return 'it\'s in a folder whose name says it holds keys, passwords or credentials'
   if (!TYPES[extOf(name)]) return notAKind(name)
   if (!config && !DOCS.has(extOf(name))) return `a .${extOf(name)} file is a data or config file, which the bot sends from its folders only when you let it (Settings › Bots)`
   return null

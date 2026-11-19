@@ -449,7 +449,9 @@ const TRY = {
 // fleet(): the agents now. resolve(p): a folder, checked (places.resolveDir). installed(): the
 // agents installed. on(): the beta feature is on. you(): your name. changed(): Needs You has news.
 // close(paneId): an answering agent's tab closed, its question done. told(q): a question waits on
-// you now (a notification). readsOf(h): the files a helper's agent opened ([{ tool, what }]).
+// you now (a notification). toldFolder({ bot, folder, leadsTo }): a bot stopped reading one of its
+// folders, which leads somewhere else now (a notification, once for each change).
+// readsOf(h): the files a helper's agent opened ([{ tool, what }]).
 // transcriptOf(h): the file its agent keeps its conversation in (kept in the trace). modelOf(kind):
 // the model an agent starts on. computer(): this computer's name. commandOf(bot), shortcutOf(bot):
 // how it's called in Slack besides a mention (/pricing-desk, "Ask Pricing Desk"). delegate: the
@@ -459,7 +461,7 @@ const TRY = {
 // whether an agent is signed in here (false when it says not), for what answers (botanswer.js).
 // ownersOf(bot): you on each platform as its connections have you ({ slack, discord, teams }:
 // connections.js), ahead of the bot's own. synced(): its bots' channels started or stopped (sync()).
-export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => true, you = () => 'the owner', changed = () => {}, close = async () => {}, told = () => {}, readsOf = async () => [], transcriptOf = () => null, modelOf = () => null, computer = () => os.hostname(), commandOf = () => null, shortcutOf = () => null, toolsOf = async () => [], nowOf = async () => null, models = async () => [], reply = null, signedIn = async () => null, ownersOf = () => ({}), synced = () => {} }) {
+export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => true, you = () => 'the owner', changed = () => {}, close = async () => {}, told = () => {}, toldFolder = () => {}, readsOf = async () => [], transcriptOf = () => null, modelOf = () => null, computer = () => os.hostname(), commandOf = () => null, shortcutOf = () => null, toolsOf = async () => [], nowOf = async () => null, models = async () => [], reply = null, signedIn = async () => null, ownersOf = () => ({}), synced = () => {} }) {
   let data = { v: 2, outbox: [] }
   let old = null // the Slack Bot's questions (#216), to carry over
   try { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); if (Array.isArray(j.questions)) old = j; else if (Array.isArray(j.outbox)) data = { v: 2, outbox: j.outbox } } catch { /* none yet */ }
@@ -671,6 +673,18 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // that leads elsewhere waits for you to say, as one that's changed does.
   const home = os.homedir()
   const shown = (p) => (p === home || p.startsWith(home + path.sep) ? `~${p.slice(home.length)}` : p)
+  // A folder that leads somewhere else now, first noticed: when, by bot, folder and where it leads,
+  // and you told then (toldFolder), once for each change (forgotten once it's read again, so the
+  // next change is told too); Needs You lists it (foldersWaiting).
+  const folderSeen = new Map()
+  function folderNoticed(bot, folder, leadsTo) {
+    const key = `${bot.id}|${folder}|${leadsTo}`
+    if (!folderSeen.has(key)) {
+      folderSeen.set(key, now())
+      if (on() && !bot.draft) { try { toldFolder({ bot: { id: bot.id, name: bot.name }, folder, leadsTo }) } catch { /* not told */ } }
+    }
+    return folderSeen.get(key)
+  }
   async function foldersOf(bot) {
     const out = []
     const learnt = {}
@@ -682,11 +696,14 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         const why = botattach.folderSays(id.real)
         if (why) throw new Error(`${f} isn't read: ${why}`)
         const was = bot.folderIds?.[String(f)]
-        if (was && !botattach.sameFolder(was, id)) throw Object.assign(new Error(`${f} now leads to ${shown(id.real)}, not ${shown(was.real)} as when you picked it, so it isn't read until you say: keep reading it?`), { confirm: true })
-        if (!was && !botattach.sameFolder({ real: botattach.asNamed(p) }, id)) throw Object.assign(new Error(`${f} leads to ${shown(id.real)}, so it isn't read until you say: keep reading it?`), { confirm: true })
+        if (was && !botattach.sameFolder(was, id)) throw Object.assign(new Error(`${f} now leads to ${shown(id.real)}, not ${shown(was.real)} as when you picked it, so it isn't read until you say: keep reading it?`), { confirm: true, leadsTo: shown(id.real), was: shown(was.real) })
+        if (!was && !botattach.sameFolder({ real: botattach.asNamed(p) }, id)) throw Object.assign(new Error(`${f} leads to ${shown(id.real)}, so it isn't read until you say: keep reading it?`), { confirm: true, leadsTo: shown(id.real), was: null })
         if (!was) learnt[String(f)] = id
+        for (const k of folderSeen.keys()) if (k.startsWith(`${bot.id}|${f}|`)) folderSeen.delete(k)
         out.push({ path: p, real: id.real, shown: shown(p), name: path.basename(p), ok: true })
-      } catch (e) { out.push({ path: String(f), shown: String(f), name: path.basename(String(f)), ok: false, problem: e.message, ...(e.confirm ? { confirm: true } : {}) }) }
+      } catch (e) {
+        out.push({ path: String(f), shown: String(f), name: path.basename(String(f)), ok: false, problem: e.message, ...(e.confirm ? { confirm: true, leadsTo: e.leadsTo, was: e.was, since: folderNoticed(bot, String(f), e.leadsTo) } : {}) })
+      }
     }
     if (Object.keys(learnt).length && store.get(bot.id)) { try { store.save(bot.id, { folderIds: { ...(store.get(bot.id).folderIds || {}), ...learnt } }) } catch { /* next time */ } }
     return out
@@ -2493,6 +2510,18 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         if (n) record(id, 'memory.kept', { item: null, imported: n, by: you() })
         return n
       },
+    },
+    // Its folders that lead somewhere else now, which it stopped reading, for Needs You: each with
+    // where it leads now (and did), to keep reading or stop: [{ id, bot, folder, leadsTo, was, since }].
+    async foldersWaiting() {
+      if (!on()) return []
+      const out = []
+      for (const { id } of store.live()) {
+        const bot = botOf(id)
+        if (!bot) continue
+        for (const f of await foldersOf(bot)) if (f.confirm) out.push({ id: `${id}|${f.shown}|${f.leadsTo}`, bot: { id, name: bot.name }, folder: f.shown, leadsTo: f.leadsTo, was: f.was, since: f.since })
+      }
+      return out
     },
     // What waits on you, for Needs You: drafts to send or discard, what nothing could answer, and runs
     // at their time limit, to let carry on or stop.

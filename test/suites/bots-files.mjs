@@ -165,6 +165,11 @@ const HARD = {
 fs.mkdirSync(path.join(NOTES, 'hard'), { recursive: true })
 for (const [n, body] of Object.entries(HARD)) fs.writeFileSync(path.join(NOTES, 'hard', n), body)
 fs.writeFileSync(path.join(NOTES, 'token.json'), '{"t": 1}\n')
+// A vault of notes (Obsidian's, say) is notes; a password manager's vault or export isn't.
+fs.mkdirSync(path.join(NOTES, 'Work Vault'), { recursive: true })
+fs.writeFileSync(path.join(NOTES, 'Work Vault', 'notes.md'), '# Notes\n\nThe offsite is in March.\n')
+fs.writeFileSync(path.join(NOTES, 'vault.json'), '{"items": []}\n')
+fs.writeFileSync(path.join(NOTES, 'bitwarden-export.json'), '{"items": []}\n')
 // A folder it reads that's swapped for a link once it's picked (to your home folder, or elsewhere).
 const TEAM = path.join(kit.home, 'team')
 fs.mkdirSync(TEAM, { recursive: true })
@@ -368,6 +373,23 @@ try {
     await kit.api('/bots/b1/settings', { attachConfig: false })
   })
 
+  // ---------- A vault of notes is notes ----------
+  await part('a vault of notes', async () => {
+    await kit.api('/bots/b1/settings', { attachConfig: true })
+    await slack.ask({ user: 'U0DANA', text: `${M} Vault please [attach ~/notes/Work Vault/notes.md] [attach ~/notes/vault.json] [attach ~/notes/bitwarden-export.json] [try-read ~/notes/Work Vault/notes.md] [answer Done.]` })
+    const d = await draftOf('Vault please')
+    const line = (d?.draft || '').split('\n').find((l) => l.startsWith('Not sent:')) || ''
+    ok(d?.files?.map((f) => f.name).join() === 'notes.md' && d.files[0].from === '~/notes/Work Vault/notes.md'.replace(/\//g, path.sep), 'a note in a folder called "Work Vault": attached', d?.files)
+    ok(line.includes('vault.json (its name says it holds keys, passwords or credentials)') && line.includes('bitwarden-export.json (its name says it holds keys, passwords or credentials)'), 'a vault.json and a Bitwarden export: refused, even with data and config files let through', line)
+    ok(/It says: # Notes\s+The offsite is in March\./.test(d?.draft || ''), 'and Claude Code\'s Read rules let it read the note', d?.draft)
+    await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: false })
+    await slack.ask({ user: 'U0DANA', text: `${M} Vault file please [try-read ~/notes/vault.json] [answer Done.]` })
+    const d2 = await draftOf('Vault file please')
+    ok(/I couldn't read ~\/notes\/vault\.json: a rule in my settings refused it\./.test(d2?.draft || ''), 'but not a vault.json', d2?.draft)
+    await kit.api(`/bots/questions/${encodeURIComponent(d2.id)}`, { send: false })
+    await kit.api('/bots/b1/settings', { attachConfig: false })
+  })
+
   // ---------- A folder that isn't the one you picked any more, or where settings are kept ----------
   await part('folders swapped or kept out', async () => {
     await kit.api('/bots/b1/settings', { readsFrom: ['~/notes', '~/team'] })
@@ -391,7 +413,37 @@ try {
     fs.symlinkSync(ELSEWHERE, TEAM, 'dir')
     const v2 = await until(async () => { const x = await botOf(); const f = x.folders?.find((y) => y.shown === '~/team'); return f?.confirm && /~\/team now leads to ~\/elsewhere, not ~\/team as when you picked it, so it isn't read until you say: keep reading it\?/.test(f.problem || '') ? x : null }, 8000)
     ok(!!v2, 'swapped for a link to another folder: not read, and Settings asks whether to keep reading it', v2?.folders)
-    await kit.api('/bots/b1/settings', { keepFolder: '~/team' })
+    // In Needs You too, once for the change, on the computer and the phone, with Keep reading it there.
+    const mine = async () => ((await kit.api('/needs-you')).folders || []).filter((x) => x.bot?.id === 'b1' && x.folder === '~/team')
+    const item = (await until(async () => (await mine()).length ? await mine() : null, 8000) || [])[0]
+    const again = await mine()
+    ok(item?.leadsTo === '~/elsewhere' && item.was === '~/team' && item.bot.name && again.length === 1 && again[0].id === item.id && again[0].since === item.since, 'and in Needs You: which bot, which folder, where it leads now and did, once for the change', { item, again })
+    // Kept only where you were shown it leads: one that's moved again since isn't kept.
+    const moved = await fetch(`${kit.url}/api/bots/b1/settings`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ keepFolder: '~/team', keepAt: '~/Private' }) })
+    ok(!moved.ok && /~\/team leads to ~\/elsewhere now, not ~\/Private: look again before you keep reading it/.test((await moved.json().catch(() => ({}))).error || '') && (await mine()).length === 1, 'Keep reading it for where you were shown it leads only: if it leads somewhere else since, not kept, and said', moved.status)
+    {
+      const { ctx, p, errors } = await page(b, kit.url, { mode: 'light' })
+      await p.locator('.top-right .needs-chip').click({ timeout: 20000 })
+      const card = p.locator('.ny-panel .ny-item.t-folder[data-folder="~/team"]')
+      ok(!!(await until(() => card.isVisible(), 15000)) && /stopped reading ~\/team: it leads to ~\/elsewhere now, not ~\/team as when you picked it/.test(await card.innerText()) && await card.locator('button', { hasText: 'Keep reading it' }).count() === 1, 'on the computer: in Needs You, saying where it leads, with Keep reading it', await card.innerText().catch(() => ''))
+      ok(errors.length === 0, 'no page errors', errors)
+      await ctx.close()
+    }
+    {
+      const { ctx, p, errors } = await page(b, kit.url, { mode: 'dark', theme: 'midnight', phone: true })
+      await p.locator('.topbar, .tabbar').first().waitFor({ timeout: 20000 })
+      await p.locator('.needs-chip').click({ timeout: 15000 })
+      const card = p.locator('.ny-item.t-folder[data-folder="~/team"]').first()
+      await card.waitFor({ timeout: 15000 })
+      ok(/stopped reading ~\/team/.test(await card.innerText()) && /~\/elsewhere/.test(await card.innerText()), 'on a phone: in Needs You, saying where it leads', await card.innerText())
+      const faults = await phoneFaults(p, '.ny-item.t-folder')
+      ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults)
+      await shot(p, `${tag}bots-files-folder-phone`)
+      await card.locator('button', { hasText: 'Keep reading it' }).click()
+      ok(!!(await until(async () => !(await mine()).length && await card.count() === 0, 10000)), 'Keep reading it from the phone: out of Needs You', await mine())
+      ok(errors.length === 0, 'no page errors', errors)
+      await ctx.close()
+    }
     const v3 = await botOf()
     ok(v3.folders?.find((f) => f.shown === '~/team')?.ok && events().some((e) => e.type === 'settings.changed' && e.setting === 'keep reading ~/team' && e.new === '~/elsewhere'), 'Keep reading it: read again, where it leads now, and said in its record', v3.folders)
     fs.rmSync(TEAM)
@@ -409,8 +461,16 @@ try {
     const d2 = await draftOf('The other tax return please')
     ok(d2 && !d2.files?.length && /tax-return\.pdf \(it isn't in the folders the bot reads from\)/.test(d2.draft), 'and nothing is attached through it meanwhile', d2?.draft)
     await kit.api(`/bots/questions/${encodeURIComponent(d2.id)}`, { send: false })
+    // In Needs You as well; Stop reading it there takes that one folder out, and the rest stay.
+    const legacy = await until(async () => (await mine()).find((x) => x.leadsTo === '~/Private'), 8000)
+    ok(legacy && legacy.was === null, 'in Needs You too, as one that leads where its name doesn\'t say', legacy)
+    await kit.api('/bots/b1/settings', { stopFolder: '~/team' })
+    const stopped = await botOf()
+    const said = events().filter((e) => e.type === 'settings.changed' && e.setting === 'readsFrom').at(-1)
+    ok(stopped.settings?.readsFrom?.join() === '~/notes' && !(await mine()).length && /~\/team/.test(JSON.stringify(said?.old)) && !/~\/team/.test(JSON.stringify(said?.new)), 'Stop reading it: that folder out, the rest kept, out of Needs You, and said in its record', { readsFrom: stopped.settings?.readsFrom, said })
     fs.rmSync(TEAM)
     fs.renameSync(`${TEAM}.was`, TEAM)
+    await kit.api('/bots/b1/settings', { readsFrom: ['~/notes', '~/team'] })
     // Made again where it was (a sync, a restore: a new folder at the same path): the same folder.
     await until(async () => (await botOf()).folders?.find((f) => f.shown === '~/team')?.ok, 8000)
     fs.renameSync(TEAM, `${TEAM}.old`)
@@ -546,6 +606,15 @@ try {
     const q3 = await draftOf('Search from a model')
     ok(/somehost[\\/]share[\\/]x\.txt is outside the folders you can read: refused\./.test(tool(/somehost/)), 'a path outside its folders (another computer\'s, /net/…) refused before it\'s looked up', tool(/somehost/))
     await kit.api(`/bots/questions/${encodeURIComponent(q3.id)}`, { send: false })
+    // A vault of notes is notes to its read tools too; a password manager's export isn't.
+    await slack.ask({ user: 'U0DANA', text: `${M} Vault notes from a model [read Work Vault/notes.md]` })
+    const q4 = await draftOf('Vault notes from a model')
+    ok(/It says: The offsite is in March\./.test(q4?.draft || ''), 'a model\'s read_file: a note in a folder called "Work Vault" read', q4?.draft)
+    await kit.api(`/bots/questions/${encodeURIComponent(q4.id)}`, { send: false })
+    await slack.ask({ user: 'U0DANA', text: `${M} Vault export from a model [read bitwarden-export.json] [answer Done.]` })
+    const q5 = await draftOf('Vault export from a model')
+    ok(/bitwarden-export\.json has a name that says it holds keys, passwords or credentials: refused\./.test(tool(/bitwarden-export/)), 'and a Bitwarden export refused', tool(/bitwarden-export/))
+    await kit.api(`/bots/questions/${encodeURIComponent(q5.id)}`, { send: false })
     await kit.api('/bots/b1/settings', { answerers: [] })
   })
 
@@ -747,5 +816,6 @@ try {
   slack.stop()
   dc.stop()
   tm.stop()
+  model.stop()
 }
 process.exit(done().fail ? 1 : 0)

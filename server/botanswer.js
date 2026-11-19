@@ -127,11 +127,11 @@ export async function runChat({ reply, model, brief, folders = [], also = [], mc
   // What under one of its folders isn't for it to read, as botattach.js has it for what's sent: a
   // hidden file or folder, a name that says it holds keys, passwords or credentials, or a folder that
   // holds keys (but where its folder is in one itself: the files attached to the question, in Bridge
-  // AI's own). Why, or null.
-  const closed = (p, root) => {
+  // AI's own). Why, or null. (file: it's a file, whose name is looked at as a file's; else a folder.)
+  const closed = (p, root, { file = true } = {}) => {
     const names = p.slice(root.length).split(/[\\/]+/).filter(Boolean)
     if (names.some((n) => n.startsWith('.'))) return 'is hidden, or in a hidden folder'
-    if (names.some(botattach.secretLike)) return 'has a name that says it holds keys, passwords or credentials'
+    if (names.some((n, i) => botattach.secretLike(n, { folder: !(file && i === names.length - 1) }))) return 'has a name that says it holds keys, passwords or credentials'
     if (keptOut.some((k) => botattach.within(p, k) && !botattach.within(root, k))) return 'is in a folder that holds keys'
     return null
   }
@@ -148,7 +148,7 @@ export async function runChat({ reply, model, brief, folders = [], also = [], mc
     if (!r) throw refused(`${tilde(full)} isn't there.`)
     const root = rootOf(r)
     if (!root) throw refused(`${tilde(full)} is outside the folders you can read: refused.`)
-    const why = closed(r, root)
+    const why = closed(r, root, { file: !!(await fs.promises.stat(r).catch(() => null))?.isFile() })
     if (why) throw refused(`${tilde(full)} ${why}: refused.`)
     return r
   }
@@ -162,7 +162,7 @@ export async function runChat({ reply, model, brief, folders = [], also = [], mc
     for (const e of ents) {
       if (SKIP.has(e.name) || e.isSymbolicLink()) continue
       const p = path.join(dir, e.name)
-      if (closed(p, root)) continue
+      if (closed(p, root, { file: !e.isDirectory() })) continue
       if (e.isDirectory()) { if (depth < 8) { if (await walk(p, fn, depth + 1, root) === false) return false } } else if (e.isFile() && (await fn(p)) === false) return false
     }
     return true
@@ -206,7 +206,7 @@ export async function runChat({ reply, model, brief, folders = [], also = [], mc
       reads.push({ tool: 'Glob', what: tilde(p) })
       status(`list_files: ${tilde(p)}`)
       const ents = await fs.promises.readdir(p, { withFileTypes: true })
-      return ents.filter((e) => !e.name.startsWith('.') && !botattach.secretLike(e.name)).slice(0, 500).map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).join('\n') || '(empty)'
+      return ents.filter((e) => !e.name.startsWith('.') && !botattach.secretLike(e.name, { folder: e.isDirectory() })).slice(0, 500).map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).join('\n') || '(empty)'
     }
     if (c.name === 'search') {
       let re

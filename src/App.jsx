@@ -457,7 +457,7 @@ function App() {
   const homeNeeds = homeOn && homeCount.data ? needCount(homeCount.data) : null
   // And what other apps ask of you here (Bridge AI as an MCP Server), the Slack Bot's answers and the
   // devices waiting to be let in, on this computer's window.
-  const needN = homeNeeds ? homeNeeds.here : needsYou.length + (machineId ? 0 : (ny.data?.outside?.length || 0) + (ny.data?.slack?.length || 0) + (ny.data?.letIn?.length || 0))
+  const needN = homeNeeds ? homeNeeds.here : needsYou.length + (machineId ? 0 : (ny.data?.outside?.length || 0) + (ny.data?.slack?.length || 0) + (ny.data?.letIn?.length || 0) + (ny.data?.folders?.length || 0))
   const needElse = homeNeeds ? homeNeeds.elsewhere : waiting - needsYou.length
 
   // herdr sessions each have their own agents (and number panes alike), so each keeps its own open

@@ -903,7 +903,7 @@ export function ReadsFrom({ d, save }) {
               <div className="sb-folder-text">
                 <code title={f.path}>{f.shown}</code>
                 {!f.ok && <span className="error-text small">{f.problem}</span>}
-                {f.confirm && <button type="button" className="link-btn small sb-keep-folder" onClick={() => save({ keepFolder: f.shown })}>{t('Keep reading it')}</button>}
+                {f.confirm && <button type="button" className="link-btn small sb-keep-folder" onClick={() => save({ keepFolder: f.shown, ...(f.leadsTo ? { keepAt: f.leadsTo } : {}) })}>{t('Keep reading it')}</button>}
               </div>
               <button type="button" className="icon-btn" onClick={() => drop(f)} aria-label={t('Stop reading from {folder}', { folder: f.name })}><Icon name="x" size={12} /></button>
             </li>

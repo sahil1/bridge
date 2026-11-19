@@ -3099,6 +3099,8 @@ app.get('/api/needs-you', wrap(async (req) => {
     outside: outside.waiting().map((x) => ({ ...x, change: outsideView(x) })),
     // The bots' answers to send or discard, and what nothing could answer (frontdesk.js).
     slack: desk.waiting(),
+    // The bots' folders that lead somewhere else now, which they stopped reading (frontdesk.js).
+    folders: await desk.foldersWaiting().catch(() => []),
     // Devices paired since Remote Access had a guardrail, waiting to be let in (remote.js): Allow is
     // at this computer only, so only it is told.
     letIn: atThisComputer(req) ? remote.waiting() : [],
@@ -3144,6 +3146,7 @@ app.get('/api/home', trialOff('home', 'Home'), wrap(async (req) => {
     // What other apps ask of you here, the bots' answers and the devices waiting to be let in, as in Needs You.
     outside: outside.waiting().map((x) => ({ ...x, change: outsideView(x) })),
     slack: desk.waiting(),
+    folders: await desk.foldersWaiting().catch(() => []),
     letIn: atThisComputer(req) ? remote.waiting() : [],
   }
 }))
@@ -4190,6 +4193,12 @@ const deskTold = (q) => {
     url: `/?agent=${encodeURIComponent(`slack:${q.id}`)}&inbox=1`, tag: `bot-${q.id}`,
   }).catch(() => {})
 }
+// A bot stopped reading one of its folders, which leads somewhere else now: you're told once for
+// each change, and it's in Needs You, to keep reading it or stop.
+const deskToldFolder = ({ bot, folder, leadsTo }) => {
+  if (cfg.notify?.needsYou === false) return
+  notify.send({ kind: 'needs-you', title: `${bot.name}: stopped reading ${folder}`, body: `It leads to ${leadsTo} now. Keep reading it, or not, in Needs You.`, url: '/?inbox=1', tag: `bot-folder-${bot.id}-${folder}` }).catch(() => {})
+}
 // The files an answering agent opened in its run, from its conversation (for the record).
 const READS = new Set(['Read', 'Grep', 'Glob', 'read_file', 'shell', 'exec_command'])
 async function readsOf(h) {
@@ -4217,7 +4226,7 @@ async function helperNow(h) {
 }
 const desk = makeFrontDesk({
   delegate, fleet: fleetView, resolve: (p) => places.resolveDir(p), installed, on: botsOn,
-  you: () => String(cfg.name || '').trim() || 'the owner', changed: () => pushFleet(), close: closePane, told: deskTold, readsOf, transcriptOf, modelOf: (kind) => modelFor(kind), computer: () => relay.thisName(),
+  you: () => String(cfg.name || '').trim() || 'the owner', changed: () => pushFleet(), close: closePane, told: deskTold, toldFolder: deskToldFolder, readsOf, transcriptOf, modelOf: (kind) => modelFor(kind), computer: () => relay.thisName(),
   commandOf: (b) => slackCommand(b.name), shortcutOf: (b) => slackShortcut(b.name), toolsOf, nowOf: helperNow,
   models: () => chatModels.models(), reply: (id, msgs, o) => chatModels.reply(id, msgs, o), signedIn: (kind) => accounts.signInOf(kind),
   ownersOf: (b) => Object.fromEntries(conns.PLATFORMS.map((p) => [p, conns.of(b.id, p)?.owner || null])),
@@ -4760,6 +4769,12 @@ async function checkSettings(b, x, req) {
     if (!Array.isArray(x[k])) throw new Error(`${k} is a list`)
     next[k] = x[k].slice(0, 100).map((c) => ({ id: String(c?.id || '').trim(), name: String(c?.name || '').replace(/^#/, '').trim().slice(0, 80) || null })).filter((c) => botsStore.CHANNEL_ID.test(c.id))
   }
+  // One folder it stops reading (Needs You's Stop reading it), the rest as they are now.
+  if (x.stopFolder !== undefined && x.readsFrom === undefined) {
+    const t = String(x.stopFolder || '')
+    if (!(b.readsFrom || []).includes(t)) throw new Error('Pick one of the folders it reads from')
+    x = { ...x, readsFrom: b.readsFrom.filter((f) => f !== t) }
+  }
   if (x.readsFrom !== undefined) {
     if (!Array.isArray(x.readsFrom)) throw new Error('readsFrom is a list')
     next.readsFrom = []
@@ -4794,12 +4809,15 @@ async function checkSettings(b, x, req) {
   // Keep reading one of its folders that leads somewhere else now than it did when you picked it (or,
   // picked before that was kept, than its name says): where it leads now kept as its own, once it's
   // passed what a new one has to (inside your home folder, not Bridge AI's own, not where apps keep
-  // their settings and keys).
+  // their settings and keys). (keepAt: where you were shown it leads; if it leads somewhere else again
+  // since, it isn't kept, and you're told.)
   if (x.keepFolder !== undefined) {
     const t = String(x.keepFolder || '')
     if (!(next.readsFrom || b.readsFrom).includes(t)) throw new Error('Pick one of the folders it reads from')
     const id = await botattach.folderId(lexical(t))
     if (!id) throw new Error(`Folder not found: ${t}`)
+    const tilde = (p) => (p === os.homedir() || p.startsWith(os.homedir() + path.sep) ? `~${p.slice(os.homedir().length)}` : p)
+    if (x.keepAt && tilde(id.real) !== String(x.keepAt)) throw new Error(`${t} leads to ${tilde(id.real)} now, not ${x.keepAt}: look again before you keep reading it`)
     if (botattach.folderSays(id.real)) throw new Error(`${t} can't be read: ${botattach.folderSays(id.real)}`)
     if (await ownFolder(id.real)) throw new Error('Bridge AI\'s own folder can\'t be read from')
     const where = botattach.rootSays(id.real)
