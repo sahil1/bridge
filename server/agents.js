@@ -53,7 +53,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { IS_WIN, withNodeShim, nodeShimDir, dataFile, brewInstall } from './paths.js'
+import { IS_WIN, withNodeShim, nodeShimDir, dataFile, brewInstall, writeFileAtomic } from './paths.js'
 import { hiddenAgent } from './labs.js'
 
 const ESC_INTERRUPT = /esc to (interrupt|cancel)|ctrl\+c to (interrupt|cancel|stop)|press esc to stop/i
@@ -85,6 +85,28 @@ export function mcpOf(dirs = []) {
 const mcpFlags = (m, { allowed = true } = {}) => (m
   ? ['--mcp-config', m.config, ...(allowed && m.allow.length ? ['--allowedTools', ...m.allow] : []), ...(m.deny.length ? ['--disallowedTools', ...m.deny] : [])]
   : [])
+// A run kept to its folders (a bot's answer or change) works for someone other than you, in folders
+// someone else may have written (a shared repository, a synced folder), and Bridge AI trusts them for
+// it (delegate.js). So Claude Code loads only your own settings for it (--setting-sources user): none
+// of a folder's own (.claude/settings.json, .claude/settings.local.json, .mcp.json, CLAUDE.md and its
+// rules), whose allow rules, other folders, hooks or env would let it read more or run something here
+// (code.claude.com/docs/en/permissions, What runs before you trust a folder). And Bridge AI's own
+// settings for it, KEPT_SETTINGS in a file of the desk's (--settings, a source of its own that
+// --setting-sources doesn't leave out; given once): its file tools refuse a read outside its folders
+// in any mode, whatever an allow rule says, yours too (permissions.blockReadsOutsideWorkingDirectories).
+// Your own hooks still run (herdr's, that say how it's doing, are among them).
+export const KEPT_SETTINGS = { permissions: { blockReadsOutsideWorkingDirectories: true } }
+export const KEPT_FILE = dataFile('front-desk', 'claude-settings.json')
+const keptFlags = () => ['--setting-sources', 'user', '--settings', KEPT_FILE]
+// The file, written as KEPT_SETTINGS has it (before a kept run starts, and as Bridge AI starts, for
+// one started again then). Throws when it can't be.
+export function writeKeptSettings() {
+  const text = `${JSON.stringify(KEPT_SETTINGS, null, 2)}\n`
+  try { if (fs.readFileSync(KEPT_FILE, 'utf8') === text) return KEPT_FILE } catch { /* not there yet */ }
+  fs.mkdirSync(path.dirname(KEPT_FILE), { recursive: true })
+  writeFileAtomic(KEPT_FILE, text)
+  return KEPT_FILE
+}
 
 export const AGENTS = [
   {
@@ -109,13 +131,14 @@ export const AGENTS = [
     // for read.
     // Either way a bot's MCP servers, when it has some (mcpOf below): only those, --mcp-config with
     // --strict-mcp-config, and of their tools only the ones allowed for whoever asked (--allowedTools);
-    // the rest refused by dontAsk, and named in --disallowedTools too where they're known.
+    // the rest refused by dontAsk, and named in --disallowedTools too where they're known. And only
+    // your own settings and Bridge AI's for it, never its folders' own (keptFlags above).
     access: (lvl, o = {}) => {
       if (lvl !== 'read' && lvl !== 'change') return lvl === 'edits' ? ['--permission-mode', 'acceptEdits'] : lvl === 'full' ? ['--permission-mode', 'bypassPermissions'] : []
       const { dirs, mcp } = mcpOf(o.dirs)
       const add = dirs.length ? ['--add-dir', ...dirs] : []
-      return lvl === 'read' ? ['--tools', 'Read,Grep,Glob', ...add, ...mcpFlags(mcp), '--permission-mode', 'dontAsk', '--strict-mcp-config']
-        : ['--tools', 'Read,Grep,Glob,Edit,Write', '--allowedTools', EDIT_HERE, ...(mcp ? mcp.allow : []), ...add, ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config']
+      return lvl === 'read' ? ['--tools', 'Read,Grep,Glob', ...add, ...mcpFlags(mcp), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...keptFlags()]
+        : ['--tools', 'Read,Grep,Glob,Edit,Write', '--allowedTools', EDIT_HERE, ...(mcp ? mcp.allow : []), ...add, ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...keptFlags()]
     },
     confined: true,
     // A copy of a conversation under a new id (the original stays as it is).
@@ -346,4 +369,38 @@ export async function catalog() {
   }))
 }
 // Look again (an agent was just installed): a look already under way may have missed it.
-export const clearInstalledCache = () => { installedCache = { at: 0, list: null }; installedInflight = null; installedRound++ }
+export const clearInstalledCache = () => { installedCache = { at: 0, list: null }; installedInflight = null; installedRound++; versions.clear() }
+
+// What version an agent's CLI says it is (`<program> --version`): '2.1.257', or null (not installed,
+// or it didn't say). Kept until its program changes (an update replaces it), ten minutes pass or
+// clearInstalledCache(); callers meanwhile share one look.
+const versions = new Map() // kind -> { key, at, look }
+export async function versionOf(kind) {
+  const bin = (await installed()).find((x) => x.kind === kind)?.path
+  if (!bin) return null
+  const st = await fs.promises.stat(bin).catch(() => null)
+  const key = [bin, await fs.promises.realpath(bin).catch(() => bin), st?.size, st?.mtimeMs].join('\n')
+  const hit = versions.get(kind)
+  if (hit && hit.key === key && Date.now() - hit.at < 10 * 60_000) return hit.look
+  const PATH = await loginPath()
+  // (Through cmd on Windows, for an npm install's claude.cmd.)
+  const look = new Promise((resolve) => execFile(IS_WIN ? `"${bin}"` : bin, ['--version'], { timeout: 15_000, env: { ...process.env, PATH }, windowsHide: true, shell: IS_WIN }, (err, out) => resolve(err ? null : (/\b\d+\.\d+\.\d+\b/.exec(String(out)) || [])[0] || null)))
+  versions.set(kind, { key, at: Date.now(), look })
+  return look
+}
+const atLeast = (v, min) => { const a = v.split('.').map(Number), b = min.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); return true }
+
+// The oldest CLI a run kept to its folders starts on, and how it's updated. Claude Code 2.1.257: the
+// first whose file tools take blockReadsOutsideWorkingDirectories (KEPT_SETTINGS), and past the
+// fixes to --setting-sources that matter here (2.1.69, a folder's skills found as it reads; 2.1.211,
+// rules in its nested folders). Code.claude.com's changelog and settings reference say when each came.
+export const KEPT_MIN = { claude: { version: '2.1.257', update: 'claude update' } }
+// Why an agent can't be started kept to its folders here, or null: its CLI is older than that. (One
+// whose version isn't known starts: a CLI too old for --setting-sources refuses it and ends at once,
+// so it never runs without it.)
+export async function keptProblem(kind) {
+  const min = KEPT_MIN[kind]
+  if (!min) return null
+  const v = await versionOf(kind).catch(() => null)
+  return v && !atLeast(v, min.version) ? `Bots need ${adapter(kind).label} ${min.version} or later: update it with ${min.update}` : null
+}

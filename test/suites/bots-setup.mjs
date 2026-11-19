@@ -16,8 +16,11 @@
 //   servers: their tools listed with which only read; a run gets only its servers (--mcp-config,
 //   --strict-mcp-config, never a folder it may read), every tool for you and the people named, only
 //   the read-only ones for anyone else, and Activity records the tools it used. Try It as it goes:
-//   what it's reading and the time so far, Stop, and the answer the moment it's there. Settings ›
-//   Bots opens the same page. The pages in light and dark, on a computer and a phone (More › Bots).
+//   what it's reading and the time so far, Stop, and the answer the moment it's there. Someone else's
+//   Claude Code settings in a bot's folder (reads anywhere, a command run as it starts): its run
+//   loads only your own and Bridge AI's, so neither holds; an agent of your own there loads them as
+//   before; a Claude Code too old for that starts no run, saying why. Settings › Bots opens the same
+//   page. The pages in light and dark, on a computer and a phone (More › Bots).
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -55,6 +58,7 @@ const shown = (p, sel, ms = 10000) => p.locator(sel).first().waitFor({ timeout: 
 // A folder as these checks spell it (on Windows the server says ~\code\pricing).
 const fwd = (x) => String(x ?? '').replace(/\\/g, '/')
 const fwds = (l) => (l || []).map(fwd)
+const real = (p) => { try { return fs.realpathSync(p) } catch { return p } }
 
 try {
   await kit.api('/setup', { name: 'Tester' })
@@ -343,6 +347,56 @@ try {
     await slack.ask({ user: 'U0DANA', text: '<@UBOT2> please make the Team plan $15 [change]' })
     const d = await until(async () => (await kit.api('/needs-you')).slack?.find((y) => /Team plan \$15/.test(y.text) && y.state === 'draft'), 30000)
     ok(d?.needsOwner && /asked for a change, and nothing in its list can make one: changes need Claude Code/.test(d.why || ''), 'a change asked for, nothing in its list can make it: passed to you, saying why', d)
+  })
+
+  // ---------- A folder's own Claude Code settings ----------
+  await part('a folder\'s own settings', async () => {
+    // Someone else's settings in a bot's folder (a shared repository's, say): reads allowed anywhere,
+    // your home added as a folder, and a command run as it starts, in .claude/settings.json and
+    // .claude/settings.local.json; and your own settings allowing reads anywhere in your home.
+    const dir = path.join(home, 'code', 'shared')
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'README.md'), '# Shared\n\nThe Team plan is $12 a seat.\n')
+    fs.writeFileSync(path.join(home, 'outside.txt'), 'The safe code is 4321.\n')
+    const marker = path.join(home, 'hook-ran.log')
+    const hook = (from) => ({ SessionStart: [{ hooks: [{ type: 'command', command: `"${process.execPath}" -e "require('fs').appendFileSync(process.argv[1], '${from}\\n')" "${marker}"` }] }] })
+    fs.writeFileSync(path.join(dir, '.claude', 'settings.json'), JSON.stringify({ permissions: { allow: ['Read(~/**)'], additionalDirectories: [home] }, hooks: hook('project') }))
+    fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), JSON.stringify({ permissions: { allow: ['Read'] }, hooks: hook('local') }))
+    const mine = path.join(home, '.claude', 'settings.json')
+    fs.mkdirSync(path.dirname(mine), { recursive: true })
+    fs.writeFileSync(mine, JSON.stringify({ permissions: { allow: ['Read(~/**)'] } }))
+    const sd = await kit.api('/bots', { name: 'Shared Desk' })
+    await kit.api(`/bots/${sd.id}/settings`, { readsFrom: ['~/code/shared'], answerers: ['agent:claude'] })
+    const ask = async (text) => { const r = await kit.api(`/bots/${sd.id}/try`, { text }); return until(async () => { const x = await kit.api(`/bots/${sd.id}/try/${encodeURIComponent(r.q)}`); return x.item.state === 'draft' || x.item.state === 'stopped' ? x : null }, 45000, 400) }
+    // A bot's run: only your own settings and Bridge AI's, which keep its reads to its folder.
+    let x = await ask('What does the safe say? [try-read ~/outside.txt] [answer That is all.]')
+    const s = logOf('helpers-started.log').find((y) => /What does the safe say/.test(y.message))
+    const kept = s?.args[s.args.indexOf('--settings') + 1] || ''
+    ok(real(s?.cwd || '') === real(dir) && (s?.args.join(' ') || '').includes('--setting-sources user --settings ') && fwd(kept).endsWith('/front-desk/claude-settings.json'), 'a bot\'s run in that folder loads only your own settings and Bridge AI\'s (--setting-sources user, --settings)', s && { cwd: s.cwd, args: s.args })
+    ok(JSON.parse(fs.readFileSync(kept, 'utf8')).permissions?.blockReadsOutsideWorkingDirectories === true, 'Bridge AI\'s: no read outside its folders, whatever an allow rule says')
+    ok(!!s && !s.settings.some((f) => real(f).startsWith(real(dir))), 'none of its folder\'s own settings loaded', s?.settings)
+    ok(!/4321/.test(x?.item.draft || '') && /reading outside my folders was refused/.test(x?.item.draft || '') && logOf('answer-tries.log').some((y) => y.try === 'read' && y.done === false && real(y.cwd) === real(dir)), 'a file outside its folder isn\'t read, though its folder\'s settings and your own allow it', x?.item.draft)
+    ok(!fs.existsSync(marker), 'and its folder\'s hooks never run', fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8') : null)
+    fs.rmSync(mine, { force: true })
+    // An agent of your own there loads them, as before.
+    const l = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Shared', newSpace: 'Shared' })
+    const ran = await until(() => { const t = fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8') : ''; return /project/.test(t) && /local/.test(t) ? t : null }, 15000)
+    ok(!!ran, 'an agent of your own in that folder loads its settings as before (their hooks run)', ran)
+    if (l?.tabId) await kit.api(`/tabs/${encodeURIComponent(l.tabId)}/close`, {}).catch(() => {})
+    // Claude Code older than 2.1.257 (Settings › Agents looks again): no run starts, and it says why.
+    fs.writeFileSync(path.join(home, 'claude-version'), '2.1.200')
+    await kit.api('/agents/catalog')
+    const n = logOf('helpers-started.log').length
+    x = await ask('Anything new? [answer Nothing new.]')
+    const why = 'Bots need Claude Code 2.1.257 or later: update it with claude update'
+    ok(x?.item.needsOwner && (x.item.why || '').includes(why) && !x.events.some((e) => e.type === 'run.started'), 'Claude Code too old: no run starts, and the question comes to you saying why', x?.item)
+    ok(x?.events.some((e) => e.type === 'run.skipped' && e.why === why), 'its record says why', x?.events.map((e) => e.type))
+    ok(logOf('helpers-started.log').length === n, 'no agent started', logOf('helpers-started.log').length - n)
+    ok((await botOf(sd.id)).answerers?.list.find((e) => e.id === 'agent:claude')?.why === why, 'and the bot\'s page says so, under What Answers', (await botOf(sd.id)).answerers)
+    fs.rmSync(path.join(home, 'claude-version'), { force: true })
+    await kit.api('/agents/catalog')
+    x = await ask('Once more? [answer Here again.]')
+    ok(/Here again\./.test(x?.item.draft || ''), 'updated: it answers again', x?.item)
   })
 
   // ---------- Settings › Bots opens the same ----------

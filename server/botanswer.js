@@ -76,11 +76,13 @@ export function listOf(bot, { installed = [], models = [] }) {
   return { list, automatic: !own, fallback: bot.fallback !== false }
 }
 // Why it can't answer now, before it's tried, or null: not installed, not one that can only read,
-// not signed in; a model no key or server here reaches.
-export function notReady(e, { installed = [], models = [], signedIn = {} }) {
+// too old to be kept to its folders (tooOld: agents.js keptProblem, by kind), not signed in; a model
+// no key or server here reaches.
+export function notReady(e, { installed = [], models = [], signedIn = {}, tooOld = {} }) {
   if (e.kind === 'agent') {
     if (!installed.includes(e.agent)) return `${adapter(e.agent).label} isn't installed here`
     if (!readOnly(e.agent)) return `${adapter(e.agent).label} can't answer read-only`
+    if (tooOld[e.agent]) return tooOld[e.agent]
     if (signedIn[e.agent] === false) return `${adapter(e.agent).label} isn't signed in here`
     return null
   }
