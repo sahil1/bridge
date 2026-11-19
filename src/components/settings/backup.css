@@ -15,3 +15,4 @@
 .bk-plan > .btn { justify-self: start; }
 .bk-sub { display: block; color: var(--ink-2); overflow-wrap: anywhere; }
 .bk-sub.is-bad { color: var(--critical); }
+.bk-values code { font: 11.5px var(--font-mono); }

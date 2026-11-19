@@ -155,6 +155,11 @@ export async function runChat({ reply, model, brief, folders = [], also = [], mc
       if (!name) throw refused('Give the file a name.')
       const body = a.base64 === true ? Buffer.from(String(a.content || ''), 'base64') : Buffer.from(String(a.content ?? ''), 'utf8')
       if (body.length > SAVE_MAX) throw refused('That file is too big to send back.')
+      // (As many as a run sends, all told: 5, 25 MB each.)
+      const there = (await fs.promises.readdir(outbox).catch(() => [])).filter((n) => n !== name)
+      const sizes = await Promise.all(there.map((n) => fs.promises.lstat(path.join(outbox, n)).then((x) => x.size, () => 0)))
+      if (there.length >= 5) throw refused('You\'ve saved 5 files already, the most that go with an answer.')
+      if (sizes.reduce((a, b) => a + b, 0) + body.length > 5 * SAVE_MAX) throw refused('That\'s more than an answer can send back, all told.')
       await fs.promises.writeFile(path.join(outbox, name), body, { mode: 0o600 })
       status(`save_file: ${name}`)
       return `Saved ${name} (${body.length} bytes): it goes with your answer.`

@@ -12,8 +12,9 @@
 //   and the record; a name with characters that hide what it is (a right-to-left mark) has them taken
 //   out; kept files are marked as from elsewhere on a Mac (com.apple.quarantine);
 //   an upload Slack turns away is said in the thread and in the record, not dropped;
+//   save_file takes five files a run at most, and says so for one more;
 //   for a public channel, an answer with files waits for you even where it may go without asking,
-//   whichever way it made them (its outbox, or a FILE: block);
+//   whichever way it made them (its outbox, or a FILE: block); a page, a drawing or XML anywhere;
 //   its Activity lists the files it made with Open and Send to… (Send to… across two computers is
 //   in backup-move); one that could run something as it opens (a drawing, a page) is shown in
 //   Finder instead; nothing writes through a bot's files (Studio's routes, a copy into them).
@@ -87,19 +88,30 @@ try {
   // ---------- Refused: what isn't a picture, a PDF, a table, text or a document ----------
   await part('refused', async () => {
     const RLO = '\u202e'
-    await slack.ask({ user: 'U0DANA', text: `${M} The tools please [make-exe setup.exe] [make-script run.sh] [make-script tool.txt] [make setup.terminal <plist/>] [make tool.py import os] [make game.iso data] [make inv${RLO}dm.txt Fine.] [make notes.txt Fine.] [try-write hack.md] [answer Done.]` })
+    // (Five a question, the most a run saves.)
+    await slack.ask({ user: 'U0DANA', text: `${M} The tools please [make-exe setup.exe] [make-script run.sh] [make-script tool.txt] [make setup.terminal <plist/>] [make notes.txt Fine.] [try-write hack.md] [answer Done.]` })
+    await slack.ask({ user: 'U0DANA', text: `${M} More tools please [make tool.py import os] [make game.iso data] [make inv${RLO}dm.txt Fine.] [answer Done.]` })
     const d = await draftOf('The tools please')
-    const made = madeOf(d.id)
-    const why = Object.fromEntries((made?.refused || []).map((r) => [r.name, r.why]))
-    ok(d?.files?.map((f) => f.name).sort().join() === 'invdm.txt,notes.txt', 'only text goes with it, a name\'s right-to-left mark taken out', d?.files)
+    const d2 = await draftOf('More tools please')
+    const why = Object.fromEntries([...(madeOf(d.id)?.refused || []), ...(madeOf(d2.id)?.refused || [])].map((r) => [r.name, r.why]))
+    ok(d?.files?.map((f) => f.name).join() === 'notes.txt' && d2?.files?.map((f) => f.name).join() === 'invdm.txt', 'only text goes with them, a name\'s right-to-left mark taken out', { one: d?.files, two: d2?.files })
     ok(['setup.exe', 'run.sh', 'setup.terminal', 'tool.py', 'game.iso'].every((n) => /isn't one a bot sends/.test(why[n] || '')) && /program or a script/.test(why['tool.txt'] || ''), 'refused: a program, a script, a Terminal file, Python and a disk image by their kind, and a script\'s first bytes in a .txt', why)
     ok(!fs.existsSync(path.join(kit.home, 'notes', 'hack.md')), 'and nothing written in its folders')
     ok(/Not sent: .*setup\.exe \(a \.exe file isn't one a bot sends/.test(d.draft) && /setup\.terminal/.test(d.draft), 'the reply says what wasn\'t sent, and why', d.draft)
     ok(!JSON.stringify(events().filter((e) => ['files.made', 'file.uploaded'].includes(e.type))).includes(RLO) && !(await kit.api('/bots/b1/files')).files.some((f) => f.name.includes(RLO)), 'no right-to-left mark in a file\'s name, kept or sent')
     await send(d)
     await until(async () => (await slack.state()).files.some((f) => f.name === 'notes.txt'), 15000)
+    await kit.api(`/bots/questions/${encodeURIComponent(d2.id)}`, { send: false })
     const names = (await slack.state()).files.map((f) => f.name)
-    ok(names.includes('notes.txt') && !names.some((n) => /setup\.exe|run\.sh|tool\.txt|terminal|tool\.py|game\.iso/.test(n)), 'Slack got the text files and nothing else', names)
+    ok(names.includes('notes.txt') && !names.some((n) => /setup\.exe|run\.sh|tool\.txt|terminal|tool\.py|game\.iso/.test(n)), 'Slack got the text file and nothing else', names)
+  })
+
+  // ---------- As many as a run sends back ----------
+  await part('five at most', async () => {
+    await slack.ask({ user: 'U0DANA', text: `${M} Six notes please ${[1, 2, 3, 4, 5, 6].map((n) => `[make n${n}.txt Note ${n}.]`).join(' ')} [answer Done.]` })
+    const d = await draftOf('Six notes please')
+    ok(d?.files?.length === 5 && !d.files.some((f) => f.name === 'n6.txt') && /I couldn't save n6\.txt: You've saved 5 files already, the most that go with an answer/.test(d.draft), 'save_file takes five files a run, and says so for the sixth', d && { files: d.files.map((f) => f.name), draft: d.draft })
+    await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: false })
   })
 
   // ---------- An upload Slack turns away ----------
@@ -125,6 +137,11 @@ try {
     const c = await draftOf('Public chart')
     ok(c?.state === 'draft' && c.files?.some((f) => f.name === 'chart.svg') && /public channel, so it waits for you/.test(c.warn || ''), 'and so does one with a file in a FILE: block', c && { state: c.state, files: c.files, warn: c.warn })
     await kit.api(`/bots/questions/${encodeURIComponent(c.id)}`, { send: false })
+    // A page, anywhere (a direct message here): it can run a script where it's opened, so it waits too.
+    await slack.ask({ user: 'U0DANA', dm: true, text: 'A page please [make page.html <p>Hello</p>] [answer Here.]' })
+    const pg = await draftOf('A page please')
+    ok(pg?.state === 'draft' && pg.place?.kind === 'dm' && /page\.html, which can run a script where it's opened, so it waits for you/.test(pg.warn || ''), 'a page, a drawing or XML waits for you even in a direct message', pg && { state: pg.state, place: pg.place?.kind, warn: pg.warn })
+    await kit.api(`/bots/questions/${encodeURIComponent(pg.id)}`, { send: false })
     await kit.api('/bots/b1/settings', { auto: false })
   })
 

@@ -4975,8 +4975,8 @@ backup.use({
   computer: () => relay.thisName(), installed, chiefDir: CHIEF_DIR,
   memoryOf: (id) => desk.memory.list(id).filter((x) => x.state === 'kept').map(({ id: mid, kind, of, ofName, text, state }) => ({ id: mid, kind, of, ofName, text, state })),
   // A bot from another computer, checked as an imported one is (bringBot), saying where it came from.
-  bring: async (bundle, { req, paused = false, auto = false, owners = false, why = null } = {}) => {
-    const r = await bringBot(bundle, req, { auto, owners, why: why ? String(why).split(':')[0] : null })
+  bring: async (bundle, { req, paused = false, fromFile = true, why = null } = {}) => {
+    const r = await bringBot(bundle, req, { fromFile, why: why ? String(why).split(':')[0] : null })
     if (paused && !r.bot.paused) r.bot = botsStore.save(r.bot.id, { paused: true }).after
     return r
   },
@@ -5094,11 +5094,25 @@ app.post('/api/bots/questions/:id', botsGuard, wrapBot((req) => desk.decide(req.
 // settings, then each of the rest checked as Settings checks it (checkSettings: a folder there, inside
 // your home folder and not Bridge AI's own; people by their ids; what answers; its MCP servers here)
 // and kept only if it passes, one at a time, so one that doesn't is left out and said and the rest
-// stand. From a file it doesn't answer without asking at first (auto: false), and who you are on
-// each platform isn't taken from it (owners: false: drafts would go to whoever the file names):
-// both are set here, once you've looked it over. { bot, renamed, problems, memory }
-const BRING_WHAT = { who: 'who can ask', askers: 'who can ask', owner: 'you in Slack', owners: 'you in Discord and Teams', instructionsFile: 'its instructions file', repo: 'its repository', agent: 'what answers', answerers: 'what answers', changes: 'its changes', mcp: 'its MCP servers', muted: 'its muted channels', listen: 'the channels it listens in', agentCopies: 'copies of your agents\' conversations' }
-async function bringBot(bundle, asked, { auto = false, owners = false, why = null } = {}) {
+// stand. From a file (fromFile: its own export, a backup) what would let it act for you or say
+// more than it's asked is held, as a new bot has it, until you turn it on here once you've looked it
+// over (HELD: answering without asking, who you are on each platform, which drafts would go to,
+// changes and their repository, your MCP servers, copies of your agents' conversations, saying what
+// your agents are doing, keeping what it learns without asking): each said. A move between your own
+// computers keeps them (backup.js shows them first). { bot, renamed, problems, memory }
+const BRING_WHAT = { who: 'who can ask', askers: 'who can ask', owner: 'you in Slack', owners: 'you in Discord and Teams', instructionsFile: 'its instructions file', repo: 'its repository', agent: 'what answers', answerers: 'what answers', changes: 'its changes', mcp: 'its MCP servers', muted: 'its muted channels', listen: 'the channels it listens in', agentCopies: 'copies of your agents\' conversations', agentsStatus: 'saying what your agents are doing', memory: 'what it remembers' }
+const HELD = { auto: false, owner: null, owners: null, changes: 'none', repo: null, mcp: [], agentCopies: false, agentsStatus: false, memory: 'approve' }
+const heldSays = (name, k, v, all = {}) => ({
+  auto: `${name} doesn't answer without asking here: turn that on in its settings once you've looked it over`,
+  owner: `Who you are in Slack, Discord and Teams isn't taken from a file: set it again in ${name}'s settings`,
+  changes: `${name} doesn't make changes here (the file asked for ${v === 'pr' ? 'draft pull requests' : 'suggested changes'}${all.repo ? ` in ${String(all.repo).slice(0, 200)}` : ''}): turn that on in its settings once you've looked it over`,
+  mcp: `${name} uses none of your MCP servers here (the file asked for ${(Array.isArray(v) ? v : []).join(', ')}): pick them in its settings`,
+  agentCopies: `${name} doesn't answer from copies of your agents' conversations here: turn that on in its settings`,
+  agentsStatus: `${name} doesn't say what your agents are doing here: turn that on in its settings`,
+  memory: `${name} asks you before it keeps what it learns here (the file asked for ${v === 'off' ? 'none kept' : 'kept straight away'}): change it in its settings`,
+}[k] || null)
+const heldDiffers = (k, v) => (k === 'owner' ? !!v?.id : k === 'owners' ? Object.keys(v || {}).length > 0 : k === 'mcp' ? Array.isArray(v) && v.length > 0 : k === 'repo' ? false : JSON.stringify(v) !== JSON.stringify(HELD[k]))
+async function bringBot(bundle, asked, { fromFile = true, why = null } = {}) {
   const req = asked || { headers: {} }
   const r = botsStore.fromBundle(bundle, botOwnerName(), { held: true })
   const problems = []
@@ -5106,8 +5120,11 @@ async function bringBot(bundle, asked, { auto = false, owners = false, why = nul
   for (const k of botsStore.CHECKED) {
     if (!Object.hasOwn(r.held, k)) continue
     const v = r.held[k]
-    if (k === 'auto') { if (v === true && !auto) problems.push(`${r.bot.name} doesn't answer without asking here: turn that on in its settings once you've looked it over`); else if (v === true) next.auto = true; continue }
-    if ((k === 'owner' || k === 'owners') && !owners) { if (k === 'owner' && (v?.id || Object.keys(r.held.owners || {}).length)) problems.push(`Who you are in Slack, Discord and Teams isn't taken from a file: set it again in ${r.bot.name}'s settings`); continue }
+    if (fromFile && Object.hasOwn(HELD, k)) {
+      const said = heldDiffers(k, v) ? heldSays(r.bot.name, k === 'owners' ? 'owner' : k, v, r.held) : null
+      if (said && !problems.includes(said)) problems.push(said)
+      continue
+    }
     if (k === 'readsFrom') {
       for (const f of (Array.isArray(v) ? v : []).slice(0, 50)) {
         try { next.readsFrom = (await checkSettings({ ...r.bot, ...next, readsFrom: next.readsFrom || [] }, { readsFrom: [...(next.readsFrom || []), String(f)] }, req)).readsFrom } catch (e) { problems.push(`${r.bot.name} doesn't read ${String(f).slice(0, 200)}: ${e.message}`) }

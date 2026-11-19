@@ -188,9 +188,11 @@ export function bundleOf(id, memory = []) {
 // The settings a bot from a file (its export, a backup, a move) takes only once they've passed the
 // checks Settings makes (index.js checkSettings): the folders it reads and its instructions' file
 // (there, inside your home folder, not Bridge AI's own), who may ask and you there (people by their
-// ids), answering without asking, what it may change and where, what answers, its MCP servers, and
-// its channels. Held back from the bot as it's made (held), so nothing in a file is ever kept unchecked.
-export const CHECKED = ['who', 'askers', 'owner', 'owners', 'readsFrom', 'instructionsFile', 'repo', 'agent', 'answerers', 'changes', 'mcp', 'muted', 'listen', 'agentCopies', 'auto']
+// ids), answering without asking, what it may change and where, what answers, its MCP servers, its
+// channels, copies of your agents' conversations, saying what your agents are doing, and keeping
+// what it learns without asking. Held back from the bot as it's made (held), so nothing in a file is
+// ever kept unchecked.
+export const CHECKED = ['who', 'askers', 'owner', 'owners', 'readsFrom', 'instructionsFile', 'repo', 'agent', 'answerers', 'changes', 'mcp', 'muted', 'listen', 'agentCopies', 'agentsStatus', 'memory', 'auto']
 // A bot from such a file: a new one, by its name (with a number after it when that's taken here),
 // answering as it did once its Slack app is connected here. Anything in the file that isn't one of
 // its settings is left out, so a token in it never is kept. held: the CHECKED settings aren't kept

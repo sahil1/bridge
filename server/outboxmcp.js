@@ -6,13 +6,17 @@
 // The Model Context Protocol over stdin and stdout, a JSON-RPC message a line: initialize,
 // tools/list and tools/call. A file's name is its name only (a path in it is cut to its last part,
 // and characters a name can't have, or that hide what it is, are taken out), it's written only into
-// the outbox as it is (its real path, checked), and none bigger than MAX. What it writes is looked
+// the outbox as it is (its real path, checked), none bigger than MAX, and FILES at most, TOTAL all
+// told. What it writes is looked
 // at again once the answer is in (botfiles.js collect), where what may not go is refused.
 import fs from 'node:fs'
 import path from 'node:path'
 import readline from 'node:readline'
 
 const MAX = 25 * 1024 * 1024
+// (As many as a run sends, all told: botfiles.js MAX and EACH.)
+const FILES = 5
+const TOTAL = FILES * MAX
 const PROTOCOL = '2025-06-18'
 const box = process.argv[2] ? path.resolve(process.argv[2]) : null
 const TOOL = {
@@ -33,6 +37,9 @@ function save(a) {
   const real = fs.realpathSync(box)
   const to = path.join(real, name)
   if (path.dirname(to) !== real) throw new Error('Only a name: the file goes in your outbox')
+  const there = fs.readdirSync(real).filter((n) => n !== name).map((n) => { try { return fs.lstatSync(path.join(real, n)).size } catch { return 0 } })
+  if (there.length >= FILES) throw new Error(`You've saved ${FILES} files already, the most that go with an answer`)
+  if (there.reduce((a, b) => a + b, 0) + body.length > TOTAL) throw new Error('That\'s more than an answer can send back, all told')
   // (Never through a link someone put there: the file is made new, or replaced as itself.)
   try { if (fs.lstatSync(to).isSymbolicLink()) fs.rmSync(to) } catch { /* not there */ }
   fs.writeFileSync(to, body, { mode: 0o600 })

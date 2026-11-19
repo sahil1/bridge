@@ -1132,6 +1132,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // (Files it sends back, for a public channel, whichever way it made them: they could hold anything
     // it read, so they wait for you.)
     if (auto && isPublic(q.place) && outFiles.length) { auto = false; warn = `It made ${outFiles.map((f) => f.name).join(', ')} for ${where(q.place)}, a public channel, so it waits for you` }
+    // (A page, a drawing or XML can run a script where it's opened: anywhere, it waits for you.)
+    const active = outFiles.filter((f) => /\.(html?|svg|xml)$/i.test(f.name))
+    if (auto && active.length) { auto = false; warn = `It made ${active.map((f) => f.name).join(', ')}, which can run a script where it's opened, so it waits for you` }
     // (A file read in its copy of a repository is named as it is in the repository.)
     const copyOf = tree ? [h.cwd || tree.dir, shown(h.cwd || tree.dir)] : []
     const named = (w) => { for (const pre of copyOf) if (pre && String(w).startsWith(pre)) return `${shown(tree.top)}${String(w).slice(pre.length)}`; return w }

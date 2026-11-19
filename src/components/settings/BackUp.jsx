@@ -17,12 +17,24 @@ import './backup.css'
 const PLATFORM = { slack: 'Slack', discord: 'Discord', teams: 'Microsoft Teams' }
 const PARTS = () => [['bots', t('Bots')], ['connections', t('Connections')], ['routines', t('Routines')], ['chief', t('Chief of Staff')], ['mcp', t('MCP Servers')], ['settings', t('Settings')]]
 const when = (iso) => (iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '')
+// What a bot's file asks for that would let it act for you or say more than it's asked, in words.
+const asksOf = (a = {}) => [
+  a.changes === 'pr' && t('opens draft pull requests in {repo}', { repo: a.repo || t('its repository') }),
+  a.changes === 'suggest' && t('suggests changes in {repo}', { repo: a.repo || t('its repository') }),
+  a.mcp?.length > 0 && t('uses your MCP servers {names}', { names: a.mcp.join(', ') }),
+  a.agentCopies && t('answers from copies of your agents\' conversations'),
+  a.agentsStatus && t('says what your agents are doing'),
+  a.memory === 'auto' && t('keeps what it learns without asking'),
+].filter(Boolean)
 
 // What a backup or a move would add here, each part to tick, and Apply. Shown in full, as a file
 // could have been made by someone else: what each bot reads and who may ask it, each routine's
 // command, folder and agent, each MCP server's whole command and its env's names (those that make a
-// program run more than it's asked marked). From a file, routines and MCP servers (they run things on
-// this computer) are unticked until you tick them.
+// program run more than it's asked marked), each setting's value. What would let a bot act for you
+// (changes, your MCP servers, copies of your agents' conversations, saying what they're doing,
+// keeping what it learns) is shown as the file asks, and from a file it's off here until you turn it
+// on. From a file, routines and MCP servers (they run things on this computer) and settings are
+// unticked until you tick them.
 function Plan({ plan, onApply, onCancel, busy, cancelLabel }) {
   const [parts, setParts] = useState(Object.fromEntries(PARTS().map(([k]) => [k, !(plan.optIn || []).includes(k)])))
   const has = { bots: plan.bots.length, connections: plan.connections.length, routines: plan.routines.length, chief: plan.chief.length, mcp: plan.mcp.length, settings: plan.settings.keys.length }
@@ -44,6 +56,7 @@ function Plan({ plan, onApply, onCancel, busy, cancelLabel }) {
               {b.owners.length > 0 && sub(t('you there: {people}', { people: b.owners.join(', ') }))}
               {b.ownersLeft?.length > 0 && sub(t('you there, in the file: {people}. Not taken from a file: set it again here', { people: b.ownersLeft.join(', ') }), true)}
               {b.auto && sub(b.autoHere ? t('answers without asking') : t('answered without asking there: here it waits for you until you turn that on'), !b.autoHere)}
+              {asksOf(b.asks).map((what) => <span key={what}>{sub(b.held ? t('{what}: asked for in the file, off here until you turn it on', { what }) : what, b.held)}</span>)}
               {b.people && sub(t('with what it keeps about each person'))}
             </li>
           ))}
@@ -88,7 +101,14 @@ function Plan({ plan, onApply, onCancel, busy, cancelLabel }) {
         </ul>
       )}
       {box('settings', t('Settings'))}
-      {parts.settings && has.settings > 0 && <p className="muted small bk-list">{plan.settings.changes.length ? t('{n} of its settings differ from this computer\'s: {keys}', { n: plan.settings.changes.length, keys: plan.settings.changes.join(', ') }) : t('The same as this computer\'s')}</p>}
+      {parts.settings && has.settings > 0 && (
+        <>
+          <p className="muted small bk-list">{plan.settings.changes.length ? t('{n} of its settings differ from this computer\'s: {keys}', { n: plan.settings.changes.length, keys: plan.settings.changes.join(', ') }) : t('The same as this computer\'s')}</p>
+          <ul className="bk-list small bk-values">
+            {plan.settings.keys.map((k) => <li key={k} data-setting-key={k} className={plan.settings.changes.includes(k) ? '' : 'muted'}><code>{k}</code>: {plan.settings.values?.[k]}</li>)}
+          </ul>
+        </>
+      )}
       <div className="st-row">
         <button type="button" className="btn small primary" disabled={busy} onClick={() => onApply(parts)}><Icon name="check" size={12} /> {busy ? t('Applying…') : t('Apply')}</button>
         <button type="button" className="btn small" disabled={busy} onClick={onCancel}>{cancelLabel}</button>

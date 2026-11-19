@@ -147,7 +147,7 @@ export async function collect() {
   })
   const ids = new Set(bots.map((b) => b.id))
   const connections = conns.list().filter((c) => !c.bot || ids.has(c.bot)).map((c) => ({
-    id: c.id, platform: c.platform, name: c.name, shared: c.shared, bot: c.bot, owner: c.owner, defaults: c.defaults.filter((d) => ids.has(d.bot)), perBot: c.perBot,
+    id: c.id, platform: c.platform, name: c.name, shared: c.shared, bot: c.bot, owner: c.owner, defaults: c.defaults.filter((d) => ids.has(d.bot)), perBot: c.perBot, ...(c.paused ? { paused: true } : {}),
     tokens: pick(readJson(conns.tokensOf(c)) || {}, TOKEN_FIELDS[c.platform] || []),
   }))
   const chief = {}
@@ -240,7 +240,10 @@ export async function planOf(x, { kind = 'file', from = null } = {}) {
     const askers = (Array.isArray(st.askers) ? st.askers : []).slice(0, 200).map(personOf).filter(Boolean)
     const owners = [personOf(st.owner), ...['discord', 'teams'].map((k) => personOf(st.owners?.[k]))].filter(Boolean)
     // (From a file, who you are there isn't taken: drafts would go to whoever it names. Said instead.)
-    return { key: b.id, name: want, as, renamed: as !== want, reads, who: st.who === 'channels' ? 'channels' : 'named', askers, owners: kind === 'move' ? owners : [], ownersLeft: kind === 'file' ? owners : [], auto: st.auto === true, autoHere: st.auto === true && kind === 'move', people: typeof b.people === 'string' }
+    // (And what would let it act for you or say more than it's asked, as the file asks: from a file,
+    // held here until you turn it on, index.js bringBot.)
+    const asks = { changes: ['suggest', 'pr'].includes(st.changes) ? st.changes : 'none', repo: st.repo ? clean(st.repo, 300) : null, mcp: (Array.isArray(st.mcp) ? st.mcp : []).map((n) => clean(n, 64)).slice(0, 20), agentCopies: st.agentCopies === true, agentsStatus: st.agentsStatus === true, memory: ['auto', 'off'].includes(st.memory) ? st.memory : 'approve' }
+    return { key: b.id, name: want, as, renamed: as !== want, reads, who: st.who === 'channels' ? 'channels' : 'named', askers, owners: kind === 'move' ? owners : [], ownersLeft: kind === 'file' ? owners : [], auto: st.auto === true, autoHere: st.auto === true && kind === 'move', asks, held: kind === 'file', people: typeof b.people === 'string' }
   })
   const botName = (id) => bots.find((b) => b.key === id)?.as || null
   const connections = x.connections.map((c) => {
@@ -276,22 +279,23 @@ export async function planOf(x, { kind = 'file', from = null } = {}) {
   const now = settings.readUser()
   const p = settingsOf(x.settings)
   const keys = Object.keys(p)
+  const said = (v) => { const t = JSON.stringify(v); return t.length > 300 ? `${t.slice(0, 299)}…` : t }
   return {
     from: clean(from || x.from, 80), madeAt: x.madeAt || null, app: x.app || null, kind,
-    // (From a file, what runs things on this computer is added only when you tick it.)
-    optIn: kind === 'file' ? ['routines', 'mcp'] : [],
+    // (From a file, what runs things on this computer, and its settings, are added only when you tick them.)
+    optIn: kind === 'file' ? ['routines', 'mcp', 'settings'] : [],
     bots, connections, routines: rs, chief, mcp: servers,
-    settings: { keys, changes: keys.filter((k) => JSON.stringify(now[k]) !== JSON.stringify(p[k])) },
+    settings: { keys, changes: keys.filter((k) => JSON.stringify(now[k]) !== JSON.stringify(p[k])), values: Object.fromEntries(keys.map((k) => [k, said(p[k])])) },
   }
 }
 
 // ---------- Applied here ----------
 // parts: which of it ({ bots, connections, routines, chief, mcp, settings }): each on unless false,
-// but from a file routines and MCP servers only when true. kind: 'file' or 'move'. why: what a
+// but from a file routines, MCP servers and settings only when true. kind: 'file' or 'move'. why: what a
 // connection brought here says while it's paused; pausedBy, what paused it. req: the request it's
 // applied by (a bot's folders are checked as Settings checks them, from where it's asked).
 export async function apply(x, { parts = {}, why = 'Paused', pausedBy = 'restore', kind = 'file', req = null } = {}) {
-  const on = (k) => (kind === 'file' && ['routines', 'mcp'].includes(k) ? parts[k] === true : parts[k] !== false)
+  const on = (k) => (kind === 'file' && ['routines', 'mcp', 'settings'].includes(k) ? parts[k] === true : parts[k] !== false)
   const out = { bots: [], connections: [], routines: [], chief: [], mcp: [], settings: [], problems: [] }
   // (Settings first: Bots, a beta feature, is on here once its setting is. Then MCP servers, so a
   // bot that uses one finds it.)
@@ -309,9 +313,10 @@ export async function apply(x, { parts = {}, why = 'Paused', pausedBy = 'restore
   if (on('bots')) {
     for (const b of x.bots) {
       try {
-        const r = await h.bring(b.bundle, { req, paused: b.paused === true, auto: kind === 'move', owners: kind === 'move', why: x.via })
+        const r = await h.bring(b.bundle, { req, paused: b.paused === true, fromFile: kind !== 'move', why: x.via })
         map[b.id] = r.bot.id
-        if (typeof b.people === 'string' && b.people.length <= PEOPLE_MAX) { try { writeFileAtomic(peopleOf(r.bot.id), b.people, { mode: 0o600 }) } catch (e) { out.problems.push(`What ${r.bot.name} keeps about people couldn't be written: ${e.message}`) } }
+        const people = typeof b.people === 'string' && b.people.length <= PEOPLE_MAX ? peopleChecked(b.people) : null
+        if (people) { try { writeFileAtomic(peopleOf(r.bot.id), JSON.stringify(people, null, 1), { mode: 0o600 }) } catch (e) { out.problems.push(`What ${r.bot.name} keeps about people couldn't be written: ${e.message}`) } }
         out.bots.push({ from: b.id, id: r.bot.id, name: r.bot.name, renamed: r.renamed })
         out.problems.push(...(r.problems || []))
       } catch (e) { out.problems.push(`${clean(b.bundle?.name, 40) || 'A bot'} couldn't be added: ${e.message}`) }
@@ -321,12 +326,14 @@ export async function apply(x, { parts = {}, why = 'Paused', pausedBy = 'restore
     for (const c of x.connections) {
       if (!PLATFORM[c.platform] || (c.bot && !map[c.bot]) || (!c.bot && conns.sharedOf(c.platform))) continue
       try {
-        const made = conns.create({ platform: c.platform, name: c.name, shared: !c.bot, bot: c.bot ? map[c.bot] : null, owner: kind === 'move' ? ownerOf(c.platform, c.owner) : null, teamsPort: c.platform === 'teams' ? h.teamsPort?.() ?? null : null, paused: true, pausedWhy: why, pausedBy })
+        // (One paused where it came from stays paused here until you Start it: it isn't the move's to start.)
+        const was = c.paused === true && kind === 'move'
+        const made = conns.create({ platform: c.platform, name: c.name, shared: !c.bot, bot: c.bot ? map[c.bot] : null, owner: kind === 'move' ? ownerOf(c.platform, c.owner) : null, teamsPort: c.platform === 'teams' ? h.teamsPort?.() ?? null : null, paused: true, pausedWhy: was ? `Paused on ${clean(x.from, 80)} when it came: Start it here once it isn't connected anywhere else` : why, pausedBy: was ? 'restore' : pausedBy })
         // (Its tokens before anything can start it: it's paused, and nothing waits in between.)
         writeFileAtomic(conns.tokensOf(made), JSON.stringify(pick(c.tokens || {}, TOKEN_FIELDS[c.platform] || []), null, 2), { mode: 0o600 })
         if (!c.bot) conns.save(made.id, { perBot: c.perBot === true, defaults: (c.defaults || []).map((d) => (map[d.bot] ? { ...d, bot: map[d.bot] } : null)).filter(Boolean) })
         if (kind === 'move' && c.owner && !ownerOk(c.platform, c.owner)) out.problems.push(`You in ${PLATFORM[c.platform]} for ${clean(c.name, 35)} was left out: it isn't someone there`)
-        out.connections.push({ from: c.id, id: made.id, name: made.name, platform: made.platform, shared: made.shared })
+        out.connections.push({ from: c.id, id: made.id, name: made.name, platform: made.platform, shared: made.shared, ...(was ? { wasPaused: true } : {}) })
       } catch (e) { out.problems.push(`The ${PLATFORM[c.platform]} connection ${clean(c.name, 35)} couldn't be added: ${e.message}`) }
     }
   }
@@ -355,6 +362,27 @@ export async function apply(x, { parts = {}, why = 'Paused', pausedBy = 'restore
   }
   h.synced?.()
   return out
+}
+
+// What a bot keeps about each person (people.json, botcontext.js), as it keeps it: { v: 1, people:
+// { <person id>: { name, at, kept: [exchange], proposed: [exchange] } } }, an exchange { q, conv, at,
+// where: { kind, id, name, private }, asked, answered }, each cut to what it keeps; anything else in
+// it, or past its bounds (500 people, 12 exchanges a person), left out. null when nothing's left.
+const cut = (s, n) => clean(s, n) || null
+function peopleChecked(text) {
+  let j
+  try { j = JSON.parse(text) } catch { return null }
+  const people = {}
+  const exchange = (x) => (x && typeof x === 'object' ? {
+    q: cut(x.q, 80) || '', conv: cut(x.conv, 200) || '', at: cut(x.at, 40), asked: cut(x.asked, 280) || '', answered: cut(x.answered, 400) || '',
+    where: x.where && typeof x.where === 'object' && ['dm', 'channel'].includes(x.where.kind) ? { kind: x.where.kind, id: cut(x.where.id, 300), name: cut(x.where.name, 80), private: x.where.private === true } : null,
+  } : null)
+  for (const [id, p] of Object.entries(j?.people && typeof j.people === 'object' ? j.people : {}).slice(0, 500)) {
+    if (!store.PERSON_ID.test(id) || !p || typeof p !== 'object') continue
+    const list = (v) => (Array.isArray(v) ? v : []).slice(-12).map(exchange).filter((x) => x && (x.asked || x.answered))
+    people[id] = { name: cut(p.name, 80), at: cut(p.at, 40), kept: list(p.kept), proposed: list(p.proposed) }
+  }
+  return Object.keys(people).length ? { v: 1, people } : null
 }
 
 // ---------- Started (one click), and paused ----------
@@ -396,7 +424,14 @@ const viewMove = (m) => ({ id: m.id, to: m.to, toName: m.toName, at: m.at, state
 // To another of your computers, over the link: what goes, and what it can pause here once it's
 // applied there. One at a time: a move applied there is undone first (Start Here Again), and one
 // still waiting there is called off (it's told so, and couldn't pause anything here now).
-export async function moveTo(machineId) {
+// (One after another, so two asked at once can't both be sent: the second calls the first off.)
+let moving = Promise.resolve()
+export function moveTo(machineId) {
+  const go = moving.then(() => moveNow(machineId))
+  moving = go.catch(() => {})
+  return go
+}
+async function moveNow(machineId) {
   const m = machines.list().find((x) => x.id === machineId && x.state === 'linked')
   if (!m) throw fail('That computer isn\'t linked to this one', 404)
   const done = state.moves.find((y) => y.state === 'moved')
@@ -445,6 +480,8 @@ export function moved(m, body = {}) {
   const rec = moveOf(String(body.id || ''))
   if (!rec || rec.to !== m.id) throw fail('No such move to that computer', 404)
   if (rec.state === 'moved') return { ok: true, already: true, ...viewMove(rec) }
+  const other = state.moves.find((y) => y.state === 'moved' && y.id !== rec.id)
+  if (other) throw fail(`This setup moved to ${other.toName} already`, 409, 'moved')
   if (rec.state !== 'sent') throw fail(`That move was ${rec.state === 'cancelled' ? 'called off' : rec.state} on ${h.computer?.() || 'that computer'}`, 409, 'not-waiting')
   const why = `Moved to ${rec.toName}: it answers there now`
   const paused = { bots: [], connections: [], routines: [] }
@@ -468,7 +505,11 @@ export function declined(m, body = {}) {
 export async function undo(id) {
   const rec = moveOf(String(id || ''))
   if (!rec || rec.state !== 'moved') throw fail('That move isn\'t one to undo', 404)
-  try { await machines.callOn(rec.to, 'POST', '/api/backup/return', { id: rec.id }, 30000) } catch (e) { throw fail(`${rec.toName} couldn't be reached to pause it there (${e.message}), so nothing starts here: open Bridge AI there, then Start Here Again`, 409, 'unreachable') }
+  try { await machines.callOn(rec.to, 'POST', '/api/backup/return', { id: rec.id }, 30000) } catch (e) {
+    // (Turned down there: said as it says it. Not reached: said so.)
+    if (e.said) throw fail(e.message, 409, e.said)
+    throw fail(`${rec.toName} couldn't be reached to pause it there (${e.message}), so nothing starts here: open Bridge AI there, then Start Here Again`, 409, 'unreachable')
+  }
   const p = rec.paused || {}
   for (const c of p.connections || []) { const x = conns.get(c); if (x?.paused && x.pausedBy === `move:${rec.id}`) conns.save(c, { paused: false, pausedWhy: null, pausedBy: null }) }
   for (const b of p.bots || []) { try { if (store.get(b)?.paused) h.unpauseBot?.(b) } catch { /* gone */ } }
@@ -483,6 +524,11 @@ export async function undo(id) {
 export function giveBack(m, body = {}) {
   const r = state.received.find((y) => y.move === String(body.id || '') && y.machine === m.id)
   if (!r) throw fail('Nothing here came with that move', 404)
+  // (Moved on from here to another computer: it answers there, so this one can't give it back. That
+  // one is to give it back here first: Start Here Again, here.)
+  const on = (r.connections || []).map((id) => /^move:(.+)$/.exec(String(conns.get(id)?.pausedBy || ''))?.[1]).find(Boolean)
+  const onward = on && moveOf(on)
+  if (onward?.state === 'moved') throw fail(`${h.computer?.() || 'That computer'} moved it on to ${onward.toName}, where it answers now: Start Here Again on ${h.computer?.() || 'it'} first, then here`, 409, 'moved-on')
   const why = `${r.from} took it back: it answers there now`
   for (const id of r.connections || []) { const c = conns.get(id); if (c && !(c.paused && /^back:/.test(c.pausedBy || ''))) conns.save(id, { paused: true, pausedWhy: why, pausedBy: `back:${r.move}` }) }
   for (const id of r.bots || []) { try { if (store.get(id) && !store.get(id).paused) h.pauseBot?.(id, why) } catch { /* gone */ } }
@@ -580,7 +626,7 @@ export function routes(app, x) {
     const move = p.kind === 'move'
     const why = move ? `Moved from ${p.from}: waiting for ${p.from} to stop its bots` : p.x.via
     const r = await apply(p.x, { parts: req.body?.parts || {}, why, pausedBy: move ? `in:${p.move}` : 'restore', kind: p.kind, req })
-    const got = { from: p.from, at: new Date().toISOString(), bots: r.bots.map((b) => b.id), connections: r.connections.map((c) => c.id), routines: r.routines.filter((y) => y.paused).map((y) => y.id) }
+    const got = { from: p.from, at: new Date().toISOString(), bots: r.bots.map((b) => b.id), connections: r.connections.filter((c) => !c.wasPaused).map((c) => c.id), routines: r.routines.filter((y) => y.paused).map((y) => y.id) }
     state.last = { kind: p.kind, ...got, ...(move ? { machine: p.machine, move: p.move, handoff: 'asking' } : {}) }
     if (move) state.received = [{ move: p.move, machine: p.machine, ...got }, ...state.received.filter((y) => y.move !== p.move)].slice(0, 20)
     saveState()

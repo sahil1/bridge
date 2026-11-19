@@ -488,7 +488,8 @@ export const hasServer = (kind, name) => { try { return hasUserServer(kind, name
 // One of those as it would be added here: the form Settings › MCP Servers takes (validate: its name,
 // how it's reached, its command and arguments, its env), from the agent's own format. Headers aren't
 // carried. { s, kinds } or { error }.
-const RISKY_ENV = /^(NODE_OPTIONS|BASH_ENV|ENV|PYTHONSTARTUP|PYTHONPATH|PERL5OPT|RUBYOPT|LD_\w+|DYLD_\w+)$/
+// (By prefix where a family of them does it: npm's config, pip's and uv's indexes, git's commands.)
+const RISKY_ENV = /^(PATH|NODE_OPTIONS|NODE_PATH|BASH_ENV|ENV|ZDOTDIR|PYTHONSTARTUP|PYTHONPATH|PYTHONHOME|PERL5OPT|PERL5LIB|RUBYOPT|RUBYLIB|JAVA_TOOL_OPTIONS|_JAVA_OPTIONS|JDK_JAVA_OPTIONS|CLASSPATH|LD_\w+|DYLD_\w+|NPM_CONFIG_\w+|YARN_\w+|PNPM_\w+|PIP_\w*INDEX\w*|PIP_CONFIG_FILE|UV_\w*INDEX\w*|GIT_\w+)$/i
 function fromRaw(kind, name, raw) {
   const spec = SPECS[kind]
   if (!spec) return { error: 'Bridge AI doesn\'t manage MCP servers for that agent' }
