@@ -12,8 +12,8 @@
 //     changed and not committed yet laid over it, then its .git file taken away and the worktree
 //     forgotten by the repository (git worktree prune), so it's a plain folder git knows nothing of;
 //   any other on a Mac: an APFS clone (cp -c), which costs nothing until a file in it changes;
-//   anywhere else: a copy, of COPY_FILES files and COPY_BYTES at most (a bigger folder isn't copied,
-//     and the run says why).
+//   anywhere else: a copy of its files and folders (an empty one too), of COPY_FILES and COPY_BYTES
+//     at most (a bigger folder isn't copied, and the run says why).
 // Then every link in it is taken out (and anything else that isn't a file or a folder), and so is
 // every .git, so nothing in it leads anywhere else, and git's own files are never shown or changed.
 // The agent is started in the staging folder with edits allowed there only (agents.js access
@@ -307,8 +307,12 @@ async function copy(real, to) {
   }
   let bytes = 0
   const files = []
-  await walk(real, { onFile: (rel, full, st) => { bytes += st.size; files.push(rel); if (bytes > COPY_BYTES) throw fail(`it's over ${Math.round(COPY_BYTES / 1048576)} MB`, 'stage') }, max: COPY_FILES })
+  const dirs = []
+  await walk(real, { onFile: (rel, full, st) => { bytes += st.size; files.push(rel); if (bytes > COPY_BYTES) throw fail(`it's over ${Math.round(COPY_BYTES / 1048576)} MB`, 'stage') }, onDir: (rel) => { dirs.push(rel) }, max: COPY_FILES })
   await fs.promises.mkdir(to, { recursive: true })
+  // (Every folder, an empty one too, as a clone has it: a folder that's there and isn't in the copy
+  // is one it couldn't see, and a new file in it waits for you, collect.)
+  for (const rel of dirs) await fs.promises.mkdir(onDisk(to, rel), { recursive: true })
   for (const rel of files) {
     const there = onDisk(to, rel)
     await fs.promises.mkdir(path.dirname(there), { recursive: true })
