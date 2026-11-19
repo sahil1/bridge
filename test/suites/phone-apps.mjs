@@ -6,7 +6,8 @@
 // with a 404 of its own, to the page and its service worker alike. window.bridgeAndroid is a message
 // channel offered only to the relay showing now and the bundled UIs, with every call the pages make,
 // and no JavaScript interface; the app answers the page only from its main frame, a frame only that
-// a meeting is recording. Both apps claim *.<the hosted relay's domain> (Android verified, iOS
+// a meeting is recording. The scanner a page asks for (both apps) pairs as an opened pairing link
+// does, or hands a pairing link alone back to the page that asked for one. Both apps claim *.<the hosted relay's domain> (Android verified, iOS
 // with #pair= alone), with the same app ids the relay names, and pair from the link. Then, in the
 // browser named by BRIDGE_TEST_BROWSER: the phone page on Bridge AI's relay (<id>.localhost, as
 // when it's tried on a computer) says before pairing that its code comes from the relay, with the
@@ -76,6 +77,23 @@ try {
   const missing = [...calls].filter((c) => !new RegExp(`\\b${c}[:,]`).test(js))
   ok(calls.size >= 12 && !missing.length, 'its script gives every call the pages make (relay/web/shell.js, Bridge AI\'s frame and the bundled UIs)', { calls: [...calls], missing })
   ok(/if \(window !== window\.top\) \{ window\.bridgeAndroid = \{ recording \}; return \}/.test(js) && /home: \(\) => post\('home'\), recording \}; return \}/.test(js), 'and a frame gets only recording, a bundled UI only home', null)
+
+  // ---------- The apps' scanner, for Bridge AI's Scan QR code ----------
+  // A page can open the scanner and no more: what's scanned pairs as an opened pairing link does
+  // (asking first), or, asked for a link (Link a device), goes back to the page that asked, and only a
+  // Bridge AI pairing link; anything else is said not to be one, and the page gets nothing.
+  const scanAt = handler.indexOf('"scan" ->')
+  ok(scanAt > handler.indexOf('if (origin == null || origin != relay) return') && /"scan" -> startScan\(if \(m\.optString\("for"\) == "link"\) reply else null\)/.test(handler), 'Android: the page showing now asks for a scan from its main frame, a link handed back only when it says so', null)
+  const give = main.slice(main.indexOf('private fun giveScan'), main.indexOf('private fun isPairingLink'))
+  ok(/val link = text\?\.takeIf \{ isPairingLink\(Uri\.parse\(it\)\) \}/.test(give) && /answer\.postMessage\(JSONObject\(\)\.put\("scanned", link \?: JSONObject\.NULL\)/.test(give) && /if \(answer != null\) giveScan\(answer, scanned\.contents\) else scanned\.contents\?\.let \{ usePairingLink\(it\) \}/.test(main) && /usePairingLink\(text: String\) \{\s+val uri = Uri\.parse\(text\)\s+if \(!isPairingLink\(uri\)\)/.test(main),
+    'Android: a scan for a link answers that page alone, with a pairing link or nothing; any other scan pairs from the link, as before', give)
+  ok(/'scanned' in m\) window\.dispatchEvent\(new CustomEvent\('bridge-scan'/.test(js) && /scanLink: \(\) => post\('scan', \{ for: 'link' \}\)/.test(js), 'and the page hears the answer as bridge-scan', null)
+  const iosScan = wvc.slice(wvc.indexOf('private func scan(link: Bool'), wvc.indexOf('// A pairing link: https://<your relay>/#pair=<code>, as its relay and code.'))
+  ok(/case "scan": scan\(link: m\["for"\] as\? String == "link"\)/.test(wvc) && /let ok = text\.map \{ link \? Self\.pairingLink\(\$0\) != nil : self\.usePairingLink\(\$0\) \} \?\? false/.test(iosScan) && /if link \{ self\.giveScan\(ok \? text : nil\) \}/.test(iosScan) && /CustomEvent\('bridge-scan', \{ detail: \{ link: \\\(Self\.js\(link\)\) \} \}\)/.test(iosScan),
+    'iPhone: the same: a scan for a link gives the page a pairing link or nothing, any other pairs', iosScan)
+  const pageAt = wvc.indexOf('let page = message.frameInfo.isMainFrame')
+  ok(pageAt > 0 && wvc.indexOf('case "scan"') > pageAt && /guard type == "log" \|\| page \|\| \(\(type == "recording" \|\| type == "save"\) && origin\.protocol == Self\.scheme\) else \{ return \}/.test(wvc), 'iPhone: only the app\'s own page (its main frame) can ask for one', null)
+  ok(/const scanner = native \|\| window\.bridgeAndroid\s+\?/.test(shell) && /scan: scanner,/.test(shell) && /\$\('scan'\)\.onclick = \(\) => scanner\.pair\(\)/.test(shell), 'the phone page offers Bridge AI the app\'s scanner (bridgeRelay.scan), as its own Scan the QR code uses it; in a browser, none', null)
 
   // ---------- Pairing links open the apps ----------
   ok(DOMAIN === 'boldbridge.app', 'the hosted relay\'s domain', DOMAIN)

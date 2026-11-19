@@ -120,11 +120,28 @@ export function MeetingsProvider({ children }) {
     openMeeting(m.id)
     return m.id
   }
+  // A meeting that stopped when Bridge AI closed, which a recording starting now would carry on
+  // (server meetings.js carryOn: its calendar event still on, or it stopped a moment ago): asked
+  // first, Resume recording the default, at the top of the window (CallPrompt). Resolves with
+  // 'resume', 'new', or null when the question was put away.
+  const [carry, setCarry] = useState(null) // { m, done }
+  const askCarry = (c) => new Promise((done) => {
+    setCarry({ m: c, done: (how) => { setCarry(null); done(how) } })
+    // The desktop app's window, when it's hidden (a call's notes taken from the menu bar).
+    if (document.hidden) window.bridgeApp?.focusMain?.()
+  })
   // picking: the screen to record (Record the screen too), asked for already (startNow), or here
-  // before anything is waited on: a browser shows its picker only straight after a click.
-  const start = async ({ title, event, kind, picking } = {}) => {
+  // before anything is waited on: a browser shows its picker only straight after a click. fresh:
+  // a new meeting, picked over carrying on one that stopped when Bridge AI closed.
+  const start = async ({ title, event, kind, picking, fresh = false } = {}) => {
     if (handle.current) { letGo(picking); openMeeting(rec.id); return rec.id }
     if (picking === undefined) picking = pickFirst()
+    if (!fresh && import.meta.env.MODE !== 'demo') {
+      const c = await api('/meetings/carry-on', { method: 'POST', body: { event: event || null } }).then((r) => r.meeting, () => null)
+      const how = c ? await askCarry(c) : 'new'
+      if (how === 'resume') return recordAgain(c.id, { picking })
+      if (how !== 'new') { letGo(picking); return null }
+    }
     let mic, m
     try {
       mic = await openMic()
@@ -137,11 +154,11 @@ export function MeetingsProvider({ children }) {
   }
   // Resume recording: a meeting that ended (stopped by mistake, or by itself) records again, the
   // same meeting from where it had got to. Not while another one records.
-  const recordAgain = async (id) => {
-    if (handle.current && rec.id === id) return id
+  const recordAgain = async (id, { picking } = {}) => {
+    if (handle.current && rec.id === id) { letGo(picking); return id }
     const other = handle.current ? rec : calls?.recording && calls.recording.id !== id ? calls.recording : null
-    if (other) throw new Error(t('"{title}" is recording. Stop it first.', { title: other.title }))
-    const picking = pickFirst()
+    if (other) { letGo(picking); throw new Error(t('"{title}" is recording. Stop it first.', { title: other.title })) }
+    if (picking === undefined) picking = pickFirst()
     let mic
     try { mic = await openMic() } catch (e) { letGo(picking); throw e }
     let m
@@ -284,10 +301,10 @@ export function MeetingsProvider({ children }) {
   }
   // Notes for a call that just started: named after the calendar event on now, if there is one
   // (picked: the one chosen in its prompt, with more than one on).
-  const startForCall = async (app, picked) => {
+  const startForCall = async (app, picked, { fresh = false } = {}) => {
     const picking = pickFirst()
     const event = picked?.title ? picked : await eventNow(app)
-    return start({ title: event?.title || `${app} call, ${when()}`, event, picking })
+    return start({ title: event?.title || `${app} call, ${when()}`, event, picking, fresh })
   }
   // Recording now, from the sidebar: for the calendar event on now (its name and people), if there
   // is one.
@@ -339,7 +356,9 @@ export function MeetingsProvider({ children }) {
       if (d.type === 'op' && handle.current && fns.current[d.op] && ['pause', 'resume', 'stop', 'section', 'capture', 'watchScreen', 'unwatch'].includes(d.op)) Promise.resolve().then(() => fns.current[d.op]()).catch((err) => ch.postMessage({ type: 'error', text: err.message }))
       if (d.type === 'hello') ch.postMessage({ type: 'hello-back' })
     }
-    const onStart = (e) => { const d = e.detail || {}; (d.app ? fns.current.startForCall(d.app, d.event) : fns.current.start(d)).catch((err) => ch.postMessage({ type: 'error', text: err.message })) }
+    // resume: carry on the meeting that stopped when Bridge AI closed (the floating card asked);
+    // fresh: a new meeting instead.
+    const onStart = (e) => { const d = e.detail || {}; (typeof d.resume === 'string' ? fns.current.recordAgain(d.resume) : d.app ? fns.current.startForCall(d.app, d.event, { fresh: !!d.fresh }) : fns.current.start(d)).catch((err) => ch.postMessage({ type: 'error', text: err.message })) }
     const onWatch = () => { fns.current.watchScreen().catch((err) => ch.postMessage({ type: 'error', text: err.message })) }
     // From the menu bar: done here when this window is recording that meeting, otherwise on the
     // server (a browser tab recording it stops its mic when it sees so).
@@ -382,7 +401,7 @@ export function MeetingsProvider({ children }) {
 
   const elapsed = rec ? Math.max(0, (rec.paused ? rec.pausedAt : now) - rec.startedAt - rec.pausedMs) / 1000 : 0
   useEffect(() => { chan.current?.postMessage({ type: 'state', rec: rec && { id: rec.id, title: rec.title, paused: rec.paused, section: rec.section || null }, elapsed, you: levels.you || 0, screen, canWatch: !!navigator.mediaDevices?.getDisplayMedia }) }, [rec, elapsed, levels, screen])
-  const value = useMemo(() => ({ rec, levels, elapsed, start, recordAgain, startNow, pause, resume, stop, section, calls, refreshCalls, startForCall, retitle, screen, watchScreen, capture, unwatch, video, recordScreen, screenNote, clearScreenNote: () => setScreenNote(null), stopVideo: () => film.current?.stop() }), [rec, levels, elapsed, calls, screen, video, screenNote]) // eslint-disable-line react-hooks/exhaustive-deps
+  const value = useMemo(() => ({ rec, levels, elapsed, start, recordAgain, startNow, pause, resume, stop, section, calls, refreshCalls, startForCall, retitle, screen, watchScreen, capture, unwatch, video, recordScreen, screenNote, clearScreenNote: () => setScreenNote(null), stopVideo: () => film.current?.stop(), carry }), [rec, levels, elapsed, calls, screen, video, screenNote, carry]) // eslint-disable-line react-hooks/exhaustive-deps
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 
@@ -502,10 +521,53 @@ export function ScreenButton({ m, small = true }) {
 // quiet, or nobody's said anything for a long while.
 export const endedWords = (r) => (r.endWhy === 'over' ? t("Its time on your calendar is up, and it's gone quiet.") : r.endWhy === 'quiet' ? t('Nobody has said anything for a while.') : r.callEndedApp ? t('The {app} call ended.', { app: r.callEndedApp }) : t('The call ended.'))
 
+// When it stopped, as a time of day (with the day, when that wasn't today).
+const stoppedAt = (iso) => { const d = new Date(iso); return d.toLocaleString(locale(), { ...(d.toDateString() === new Date().toDateString() ? {} : { weekday: 'short' }), hour: 'numeric', minute: '2-digit' }) }
+// A recording starting while one that stopped when Bridge AI closed could carry on (useMeetings'
+// carry): Resume recording, the default, or a new meeting.
+function CarryOn({ c }) {
+  return (
+    <div className="call-prompt mt-carry" role="alertdialog" aria-label={t('Carry on recording?')}>
+      <Icon name="mic" size={15} />
+      <span className="call-prompt-main"><b>{t('Recording of {title} stopped when Bridge AI closed at {time}', { title: c.m.title, time: stoppedAt(c.m.at) })}</b><small>{t('Carry on in that meeting, or start a new one?')}</small></span>
+      <button type="button" className="btn small primary" autoFocus onClick={() => c.done('resume')}><Icon name="mic" size={12} /> {t('Resume recording')}</button>
+      <button type="button" className="btn small" onClick={() => c.done('new')}>{t('New meeting')}</button>
+      <button type="button" className="ghost-btn" onClick={() => c.done(null)} aria-label={t('Cancel')} title={t('Cancel')}><Icon name="x" size={13} /></button>
+    </div>
+  )
+}
+// A recording Bridge AI closed in the middle of (server meetings.js recover): said at the top of the
+// window, with Resume recording, for a day after; Open or OK and it isn't said again on any device.
+// Not while something records.
+const NOTICE_MS = 24 * 3600e3
+function Stopped({ m }) {
+  const { data } = usePoll('/meetings', 30_000)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [gone, setGone] = useState(null)
+  const x = (data?.meetings || []).filter((y) => y.interrupted && !y.interrupted.seen && y.status === 'done' && y.id !== gone && Date.now() - Date.parse(y.interrupted.at) < NOTICE_MS)
+    .sort((a, b) => String(b.interrupted.at).localeCompare(String(a.interrupted.at)))[0]
+  if (!x || m?.rec) return null
+  const seen = () => { setGone(x.id); api(`/meetings/${encodeURIComponent(x.id)}/interrupted`, { method: 'POST' }).catch(() => {}).finally(() => refetch('/meetings')) }
+  const resume = async () => { setBusy(true); setErr(null); try { await m.recordAgain(x.id); seen() } catch (e) { setErr(e.message) } finally { setBusy(false) } }
+  return (
+    <div className="call-prompt mt-stopped" role="alertdialog" aria-label={t('A recording stopped')}>
+      <Icon name="alert" size={15} />
+      <span className="call-prompt-main"><b>{t('Recording of {title} stopped when Bridge AI closed at {time}', { title: x.title, time: stoppedAt(x.interrupted.at) })}</b><small>{t('What was recorded until then is kept. Resume recording carries on in the same meeting.')}</small></span>
+      {m?.recordAgain && <button type="button" className="btn small primary" disabled={busy} onClick={resume}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Resume recording')}</button>}
+      <button type="button" className="btn small" onClick={() => { seen(); openMeeting(x.id) }}>{t('Open')}</button>
+      <button type="button" className="ghost-btn" onClick={seen} aria-label={t('Got it')} title={t('Got it')}><Icon name="x" size={13} /></button>
+      {err && <span className="error-text small" role="alert">{err}</span>}
+    </div>
+  )
+}
+
 // When a call starts with nothing recording ("Zoom call started. Take notes?") and when the call a
 // meeting was on ends ("Stop recording?"), at the top of the window. The floating card asks too.
 // Not now always closes it, at once, even while Take notes is still starting (and then what was
-// starting stops again).
+// starting stops again). A call's notes that would carry on a meeting Bridge AI closed in the middle
+// of offer Resume recording first (carryOn), and New meeting. With nothing else to ask: a recording
+// that stopped when Bridge AI closed (Stopped).
 export function CallPrompt() {
   const m = useMeetings()
   const [busy, setBusy] = useState(false)
@@ -515,7 +577,8 @@ export function CallPrompt() {
   const c = m?.calls
   const evs = useCallEvents(c?.prompt && !m?.rec ? c.prompt.at : null, c?.prompt?.app)
   const ev = evs.ev
-  if (!c) return null
+  if (m?.carry) return <CarryOn c={m.carry} />
+  if (!c) return <Stopped m={m} />
   const r = c.recording
   const act = async (fn) => { setBusy(true); setErr(null); try { await fn() } catch (e) { setErr(e.message) } finally { setBusy(false); m.refreshCalls() } }
   const notNow = () => {
@@ -524,9 +587,15 @@ export function CallPrompt() {
     setGone(at); setErr(null)
     api('/calls/dismiss', { method: 'POST' }).catch(() => {}).finally(() => m.refreshCalls())
   }
-  const takeNotes = () => act(async () => {
+  const takeNotes = ({ fresh = false } = {}) => act(async () => {
     const at = c.prompt.at
-    const id = await m.startForCall(c.prompt.app, evs.n > 1 ? ev : null)
+    const id = await m.startForCall(c.prompt.app, evs.n > 1 ? ev : null, { fresh })
+    if (goneRef.current === at) { await m.stop(); return }
+    if (id) openMeeting(id)
+  })
+  const carryOn = () => act(async () => {
+    const at = c.prompt.at
+    const id = await m.recordAgain(c.carryOn.id)
     if (goneRef.current === at) { await m.stop(); return }
     if (id) openMeeting(id)
   })
@@ -542,6 +611,20 @@ export function CallPrompt() {
       </div>
     )
   }
+  if (c.prompt && !m.rec && gone !== c.prompt.at && c.carryOn) {
+    const what = c.prompt.browser ? t('A call in {app} started.', { app: c.prompt.app }) : t('{app} call started.', { app: c.prompt.app })
+    return (
+      <div className="call-prompt" role="alertdialog" aria-label={t('A call started')}>
+        <Icon name="mic" size={15} />
+        <span className="call-prompt-main"><b>{what}</b><small>{t('Recording of {title} stopped when Bridge AI closed at {time}. Carry on in that meeting, or start a new one?', { title: c.carryOn.title, time: stoppedAt(c.carryOn.at) })}</small></span>
+        <VideoChoice m={m} />
+        <button type="button" className="btn small primary" disabled={busy} onClick={carryOn}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Resume recording')}</button>
+        <button type="button" className="btn small" disabled={busy} onClick={() => takeNotes({ fresh: true })}>{t('New meeting')}</button>
+        <button type="button" className="ghost-btn" onClick={notNow}>{t('Not now')}</button>
+        {err && <span className="error-text small">{err}</span>}
+      </div>
+    )
+  }
   if (c.prompt && !m.rec && gone !== c.prompt.at) {
     const what = c.prompt.browser ? t('A call in {app} started.', { app: c.prompt.app }) : t('{app} call started.', { app: c.prompt.app })
     return (
@@ -551,11 +634,11 @@ export function CallPrompt() {
         {/* More than one meeting on: which one the notes are for. */}
         <Among n={evs.n} i={evs.i} onStep={evs.step} disabled={busy} what={ev ? t('These notes are for {event}', { event: ev.title }) : null} />
         <VideoChoice m={m} />
-        <button type="button" className="btn small primary" disabled={busy} onClick={takeNotes}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Take notes')}</button>
+        <button type="button" className="btn small primary" disabled={busy} onClick={() => takeNotes()}><Icon name="mic" size={12} /> {busy ? t('Starting…') : t('Take notes')}</button>
         <button type="button" className="ghost-btn" onClick={notNow}>{t('Not now')}</button>
         {err && <span className="error-text small">{err}</span>}
       </div>
     )
   }
-  return null
+  return <Stopped m={m} />
 }

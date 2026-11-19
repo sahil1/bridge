@@ -125,6 +125,8 @@ async function resolveDest(to = {}, { here = false } = {}) {
   if (where === 'pane' || where === 'place') {
     // Files' home folder and drives only look for now (explorer.js): nothing is copied into them.
     if (where === 'pane' && isFilesRoot(to.pane)) throw fail('Your home folder and drives are read-only here for now: pick an agent\'s folder or a place to copy into.', { status: 403 })
+    // (Nor a bot's files: botfiles.js, kept as it made them.)
+    if (where === 'pane' && String(to.pane || '').startsWith('botfiles:')) throw fail('A bot\'s files are only to open and send on: pick an agent\'s folder or a place to copy into.', { status: 403 })
     let root
     if (where === 'place') { const p = placeOf(String(to.place || '')); if (!p) throw fail('That place isn\'t in Files any more', { status: 404 }); root = p.path } else root = await rootOf(String(to.pane || '')).catch(() => { throw fail('That agent isn\'t there any more', { status: 404 }) })
     const { real } = await files.safePath(root, String(to.dir || '')).catch((e) => { throw fail(e.message, { status: 404 }) })
@@ -353,7 +355,8 @@ const passing = (e) => !e.fatal && e.status !== 404
 
 // Start a copy. pull: { from: machine id, src: { pane, path }, to } here; push: { to: machine id,
 // src: { pane, path } here, into: where there }. move: put the original in the Trash once it's in.
-export async function start(body = {}, { here = false } = {}) {
+// by: the device that asked for it (relay.js id), when it wasn't this computer.
+export async function start(body = {}, { here = false, by = null } = {}) {
   const pull = !!body.from
   const machine = String(pull ? body.from : body.to || '')
   const m = machines.list().find((x) => x.id === machine)
@@ -361,7 +364,7 @@ export async function start(body = {}, { here = false } = {}) {
   const src = { pane: String(body.src?.pane || ''), path: String(body.src?.path ?? '') }
   if (!src.pane) throw fail('Which file?')
   const job = {
-    id: newId(), kind: pull ? 'pull' : 'push', machine, device: m.name, here,
+    id: newId(), kind: pull ? 'pull' : 'push', machine, device: m.name, here, ...(by ? { by: String(by).slice(0, 40) } : {}),
     src, to: pull ? (body.into || { where: 'downloads' }) : (body.into || { where: 'downloads' }),
     move: !!body.move, name: (src.path.split('/').filter(Boolean).pop()) || null,
     state: 'going', got: 0, total: null, at: Date.now(), resumes: 0,
@@ -424,7 +427,7 @@ async function run(job) {
 // A request to the other device, its answer as JSON; a refusal there is thrown with its words (and
 // a 4xx stops the copy: it won't go better by itself).
 async function ask(job, method, u, body, ms = 30000) {
-  const r = await machines.exchange(job.machine, { method, u, headers: [['content-type', body && !Buffer.isBuffer(body) ? 'application/json' : 'application/octet-stream']], body: body == null ? null : Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body)), ms })
+  const r = await machines.exchange(job.machine, { method, u, headers: [['content-type', body && !Buffer.isBuffer(body) ? 'application/json' : 'application/octet-stream'], ...machines.forDevice(job.by)], body: body == null ? null : Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body)), ms })
   const j = await r.json()
   if (r.status >= 400) {
     // Its answer to an address it doesn't have: a Bridge AI from before copies.
@@ -469,7 +472,7 @@ async function pull(job, ctl) {
 async function pullFile(job, inc, i, ctl) {
   const f = inc.files[i]
   const from = f.have
-  const r = await machines.exchange(job.machine, { u: `/api/agents/${enc(job.src.pane)}/raw?path=${enc(srcPath(job, f))}`, headers: from ? [['range', `bytes=${from}-`]] : [], window: PULL_WINDOW, ms: 30000 })
+  const r = await machines.exchange(job.machine, { u: `/api/agents/${enc(job.src.pane)}/raw?path=${enc(srcPath(job, f))}`, headers: [...(from ? [['range', `bytes=${from}-`]] : []), ...machines.forDevice(job.by)], window: PULL_WINDOW, ms: 30000 })
   ctl.cancel = () => r.cancel()
   try {
     if (r.status === 404) throw fail(`${f.rel || job.name} isn't on ${job.device} any more`, { status: 404 })
@@ -574,27 +577,28 @@ export function list() {
   }
 }
 
-export function stop(id) {
+// h: for a device of this computer's, which (machines.js forDevice), said to the other end too.
+export function stop(id, h = []) {
   const j = jobOf(id)
   if (!j) throw fail('No such copy', { status: 404 })
   const ctl = running.get(id)
   if (ctl) { ctl.stopped = true; ctl.cancel?.(); ctl.wake?.() } else if (['going', 'waiting', 'queued'].includes(j.state)) j.state = 'stopped'
   // What came so far is thrown away, there or here.
-  if (j.kind === 'push' && j.remote) machines.exchange(j.machine, { method: 'DELETE', u: `/api/transfers/in/${enc(j.remote)}`, ms: 8000 }).then((r) => r.json()).catch(() => {})
+  if (j.kind === 'push' && j.remote) machines.exchange(j.machine, { method: 'DELETE', u: `/api/transfers/in/${enc(j.remote)}`, headers: h, ms: 8000 }).then((r) => r.json()).catch(() => {})
   if (j.kind === 'pull' && j.inc) { const inc = j.inc; setTimeout(() => drop(inc, { id: 'here' }).catch(() => {}), 200) }
   for (const k of ['inc', 'remote', 'list', 'mtimes']) delete j[k]
   Object.assign(j, { got: 0, key: newId() })
   saveNow()
   return shownJob(j)
 }
-export function retry(id) {
+export function retry(id, h = []) {
   const j = jobOf(id)
   if (!j) throw fail('No such copy', { status: 404 })
   if (running.has(id) || j.state === 'done') return shownJob(j)
   // It changed where it was, or was stopped: from the top, as a new copy (what came of the old
   // one is let go). Otherwise from where it got to.
   if (j.code === 'changed' || j.state === 'stopped' || j.code === 'gone') {
-    if (j.kind === 'push' && j.remote) machines.exchange(j.machine, { method: 'DELETE', u: `/api/transfers/in/${enc(j.remote)}`, ms: 8000 }).then((r) => r.json()).catch(() => {})
+    if (j.kind === 'push' && j.remote) machines.exchange(j.machine, { method: 'DELETE', u: `/api/transfers/in/${enc(j.remote)}`, headers: h, ms: 8000 }).then((r) => r.json()).catch(() => {})
     if (j.kind === 'pull' && j.inc) drop(j.inc, { id: 'here' }).catch(() => {})
     for (const k of ['inc', 'remote', 'list', 'mtimes']) delete j[k]
     Object.assign(j, { key: newId(), got: 0 })
@@ -604,6 +608,13 @@ export function retry(id) {
   kick()
   return shownJob(j)
 }
+// A device unticked in Which Devices May Connect (remote.js): the copies it's sending here are let
+// go (what came so far thrown away), and those it asked this computer to make stop.
+export async function endFor(id) {
+  for (const j of st.jobs.filter((x) => x.by === id && ['going', 'waiting', 'queued'].includes(x.state))) stop(j.id)
+  for (const x of st.incoming.filter((y) => y.from.id === id && y.state === 'coming')) await drop(x.id, { id }).catch(() => {})
+}
+
 // Finished ones out of the list.
 export function clear() {
   st.jobs = st.jobs.filter((j) => !['done', 'failed', 'stopped'].includes(j.state))

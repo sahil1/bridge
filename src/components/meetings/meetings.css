@@ -629,8 +629,21 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .mt-stale { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 7px 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warning, #b7791f) 35%, var(--line-2)); background: color-mix(in srgb, var(--warning, #b7791f) 6%, var(--pane)); }
 .mt-stale svg { flex: none; color: var(--warning, #b7791f); }
 .mt-resume-row { display: flex; }
+/* One meeting recorded as two (merge.jsx): the suggestion on the later one, what was merged into
+   one, and a recording that stopped when Bridge AI closed. */
+.mt-merge-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line-2)); background: color-mix(in srgb, var(--accent) 6%, var(--pane)); }
+.mt-merge-hint > svg { flex: none; color: var(--accent); }
+.mt-merge-text { display: grid; gap: 2px; flex: 1; min-width: 200px; }
+.mt-merge-text small { line-height: 1.45; }
+.mt-merge-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mt-merged, .mt-interrupted { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; }
+.mt-merged svg { flex: none; }
+.mt-interrupted { padding: 7px 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warning, #b7791f) 35%, var(--line-2)); background: color-mix(in srgb, var(--warning, #b7791f) 6%, var(--pane)); }
+.mt-interrupted svg { flex: none; color: var(--warning, #b7791f); }
+.mt-stopped > svg { color: var(--warning, #b7791f); }
 .rm-parts { flex: none; font-size: 11px; }
 .rm-partof { flex: none; }
+.rm-rest { flex: none; color: var(--accent); }
 .app.narrow .mt-view .mt-partof { height: auto; min-height: 32px; max-width: 40%; }
 .mt-archived svg { margin-right: 2px; }
 .mt-in svg { vertical-align: -1px; }

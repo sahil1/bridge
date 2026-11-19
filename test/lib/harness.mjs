@@ -548,13 +548,18 @@ export const withoutCutOff = (errors) => errors.filter((e, i) => !/\/api\/\S+ du
 // Answers a request with the real answer, changed by `change`. A page can close while the real
 // answer is on its way (as a test ends), and then there's nothing left to answer; anything else that
 // goes wrong lets the real answer through unchanged, for the test's own checks to see. `orElse` stands
-// in for a real answer that isn't JSON.
+// in for a real answer that isn't JSON. The real answer is asked for again once when it fails, and a
+// real answer let through says so in the suite's log: otherwise a test waiting for what its change
+// shows says only that it never came.
 export const changeAnswer = (ctx, url, change, { orElse } = {}) => ctx.route(url, async (r) => {
   try {
-    const res = await r.fetch()
+    const res = await r.fetch().catch(() => r.fetch())
     const real = await res.json().catch((e) => { if (orElse === undefined) throw e; return orElse })
     await r.fulfill({ json: await change(real) })
-  } catch { await r.continue().catch(() => {}) }
+  } catch (e) {
+    if (!/closed|disposed/i.test(e?.message || '')) console.log(`changeAnswer: ${r.request().url()} let through unchanged: ${String(e?.message || e).split('\n')[0]}`)
+    await r.continue().catch(() => {})
+  }
 })
 export const noServiceWorker = (ctx) => ctx.addInitScript(() => { try { delete Navigator.prototype.serviceWorker } catch { /* none */ } })
 // The phone page (relay/web) on its way to Bridge AI, for a test to say how far it got when Bridge AI

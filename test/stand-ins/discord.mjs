@@ -23,7 +23,10 @@
 // /channels/:id/webhooks: 403, 50013, while webhooks aren't allowed), and posting through one (POST
 // /webhooks/:id/:token, no bot token needed: wait=true answers the message; thread_id posts in that
 // thread of its channel) with the username and avatar_url asked for; its message carries webhook_id,
-// and is sent to the bots as any message is. Each call goes in the log, as { method, route, app,
+// and is sent to the bots as any message is. A message with files (multipart/form-data, as Discord
+// takes them: payload_json, then files[n]) to a channel or through a webhook: each file in posted's
+// files ({ name, size, sha256 }), none over 10 MB (413, 40005), and the message may then have no
+// words. Each call goes in the log, as { method, route, app,
 // body } (never a token, a webhook's included).
 // And, for tests:
 //   POST /_test/say { user, text, channel?, dm?, app?, thread?, reply? }   someone writes: in a
@@ -53,6 +56,7 @@
 //                      webhooks: [{ id, channel, app, name }] }
 import http from 'node:http'
 import fs from 'node:fs'
+import crypto from 'node:crypto'
 import { WebSocketServer } from 'ws'
 
 const [port, log] = process.argv.slice(2)
@@ -176,7 +180,20 @@ wss.on('connection', (ws) => {
 
 // ---------- The REST API ----------
 const answer = (res, status, body, headers = {}) => { res.writeHead(status, { 'content-type': 'application/json', 'x-ratelimit-limit': '5', 'x-ratelimit-remaining': '4', 'x-ratelimit-reset-after': '1', ...headers }); res.end(body == null ? undefined : JSON.stringify(body)) }
-const body = (req) => new Promise((r) => { let b = ''; req.on('data', (c) => { b += c }); req.on('end', () => r(b)) })
+const body = (req) => new Promise((r) => { const b = []; req.on('data', (c) => b.push(c)); req.on('end', () => r(Buffer.concat(b))) })
+const FILE_MAX = 10 * 1024 * 1024
+// A message's files, from multipart/form-data: its payload_json, and each files[n].
+async function formOf(buf, type) {
+  const fd = await new Response(buf, { headers: { 'content-type': type } }).formData()
+  const files = []
+  for (const [k, v] of fd.entries()) {
+    if (!/^files\[\d+\]$/.test(k) || typeof v === 'string') continue
+    const bytes = Buffer.from(await v.arrayBuffer())
+    files.push({ name: v.name, size: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') })
+  }
+  return { j: JSON.parse(String(fd.get('payload_json') || '{}')), files }
+}
+const attachmentsOf = (files) => files.map((f) => ({ id: snow(), filename: f.name, size: f.size, url: `http://127.0.0.1:${port}/attachments/${f.sha256.slice(0, 12)}/${encodeURIComponent(f.name)}` }))
 const routeOf = (method, p) => { const parts = p.split('/'); return `${method} ${parts.map((x, i) => (parts[i - 1] === 'reactions' ? ':emoji' : /^\d+$/.test(x) ? ':id' : x)).join('/')}` }
 const dmOf = (key, uid) => {
   const bot = APPS[key].user.id
@@ -202,7 +219,9 @@ function deliver(m, t = 'MESSAGE_CREATE') {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x')
-  const raw = await body(req)
+  const buf = await body(req)
+  const multipart = /^multipart\/form-data/i.test(String(req.headers['content-type'] || ''))
+  const raw = multipart ? '' : buf.toString('utf8')
   // ---------- test controls ----------
   if (url.pathname.startsWith('/_test/')) {
     const what = url.pathname.slice(7)
@@ -261,10 +280,16 @@ const server = http.createServer(async (req, res) => {
   const route = routeOf(method, p)
   const key = appOf(String(req.headers.authorization || '').replace(/^Bot\s+/, ''))
   let j = {}
-  try { j = raw ? JSON.parse(raw) : {} } catch { return answer(res, 400, { message: 'Invalid JSON', code: 50109 }) }
+  let sent = []
+  if (multipart) {
+    try { ({ j, files: sent } = await formOf(buf, String(req.headers['content-type']))) } catch { return answer(res, 400, { message: 'Invalid Form Body', code: 50035 }) }
+    if (sent.some((f) => f.size > FILE_MAX)) return answer(res, 413, { message: 'Request entity too large', code: 40005 })
+  } else {
+    try { j = raw ? JSON.parse(raw) : {} } catch { return answer(res, 400, { message: 'Invalid JSON', code: 50109 }) }
+  }
   // A webhook's token is in its address: logged without it.
   const hook = /^\/webhooks\/(\d+)\/([^/]+)$/.exec(p)
-  note({ method, route: hook ? `${method} /webhooks/:id/:token` : route, path: hook ? `/webhooks/${hook[1]}/…` : p, app: hook ? hooks[hook[1]]?.app || null : key, ...(raw ? { body: j } : {}) })
+  note({ method, route: hook ? `${method} /webhooks/:id/:token` : route, path: hook ? `/webhooks/${hook[1]}/…` : p, app: hook ? hooks[hook[1]]?.app || null : key, ...(raw || multipart ? { body: j } : {}), ...(sent.length ? { files: sent } : {}) })
   if (away) return req.socket.destroy()
   // ---------- Posting through a webhook (no bot token) ----------
   if (hook) {
@@ -275,11 +300,11 @@ const server = http.createServer(async (req, res) => {
     const target = CHANNELS[thread || h.channel]
     if (!target || (thread && target.parent_id !== h.channel)) return answer(res, 400, { message: 'Unknown Channel', code: 10003 })
     const content = String(j.content || '')
-    if (!content.trim()) return answer(res, 400, { message: 'Cannot send an empty message', code: 50006 })
+    if (!content.trim() && !sent.length) return answer(res, 400, { message: 'Cannot send an empty message', code: 50006 })
     if (content.length > 2000) return answer(res, 400, { message: 'Invalid Form Body', code: 50035 })
-    const m = { id: snow(), type: 0, channel_id: target.id, guild: target.guild_id || null, author: { id: h.id, username: String(j.username || h.name), avatar: null, bot: true }, webhook_id: h.id, content, timestamp: new Date().toISOString(), mentions: [], attachments: [] }
+    const m = { id: snow(), type: 0, channel_id: target.id, guild: target.guild_id || null, author: { id: h.id, username: String(j.username || h.name), avatar: null, bot: true }, webhook_id: h.id, content, timestamp: new Date().toISOString(), mentions: [], attachments: attachmentsOf(sent) }
     messages[target.id].push(m)
-    posted.push({ app: h.app, channel: target.id, id: m.id, content, webhook: true, username: j.username || null, avatar_url: j.avatar_url || null, allowed_mentions: j.allowed_mentions || null, in_thread: target.type === 11 ? target.parent_id : null })
+    posted.push({ app: h.app, channel: target.id, id: m.id, content, webhook: true, username: j.username || null, avatar_url: j.avatar_url || null, allowed_mentions: j.allowed_mentions || null, in_thread: target.type === 11 ? target.parent_id : null, ...(sent.length ? { files: sent } : {}) })
     deliver(m)
     return url.searchParams.get('wait') === 'true' ? answer(res, 200, wire(m)) : answer(res, 204, null)
   }
@@ -331,11 +356,11 @@ const server = http.createServer(async (req, res) => {
     if (route === 'GET /channels/:id/messages/:id') { const m = find(ch.id, seg[3]); return m ? answer(res, 200, wire(m)) : no(404, 10008, 'Unknown Message') }
     if (route === 'POST /channels/:id/messages') {
       const content = String(j.content || '')
-      if (!content.trim()) return no(400, 50006, 'Cannot send an empty message')
+      if (!content.trim() && !sent.length) return no(400, 50006, 'Cannot send an empty message')
       if (content.length > 2000) return no(400, 50035, 'Invalid Form Body')
-      const m = { id: snow(), type: j.message_reference ? 19 : 0, channel_id: ch.id, guild: ch.guild_id || null, author: a.user, content, timestamp: new Date().toISOString(), mentions: [], attachments: [], ...(j.message_reference ? { message_reference: j.message_reference } : {}) }
+      const m = { id: snow(), type: j.message_reference ? 19 : 0, channel_id: ch.id, guild: ch.guild_id || null, author: a.user, content, timestamp: new Date().toISOString(), mentions: [], attachments: attachmentsOf(sent), ...(j.message_reference ? { message_reference: j.message_reference } : {}) }
       list.push(m)
-      posted.push({ app: key, channel: ch.id, id: m.id, content, allowed_mentions: j.allowed_mentions || null, message_reference: j.message_reference || null, in_thread: ch.type === 11 ? ch.parent_id : null })
+      posted.push({ app: key, channel: ch.id, id: m.id, content, allowed_mentions: j.allowed_mentions || null, message_reference: j.message_reference || null, in_thread: ch.type === 11 ? ch.parent_id : null, ...(sent.length ? { files: sent } : {}) })
       deliver(m)
       return answer(res, 200, wire(m))
     }

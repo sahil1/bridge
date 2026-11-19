@@ -12,6 +12,7 @@ import { makeAuth } from './apiauth.js'
 import { localKey } from './apitoken.js'
 import * as machinePages from './machinepages.js'
 import { makeRemote } from './remote.js'
+import { makeLetIn } from './letin.js'
 import { makeTell } from './screentell.js'
 import { plainName } from '../shared/remote.js'
 import * as devPreview from './devpreview.js'
@@ -111,7 +112,7 @@ import { combine, platformOf, PLATFORMS } from './connector.js'
 import { listTemplates, templateOf } from './bottemplates.js'
 import * as botsStore from './bots.js'
 import * as conns from './connections.js'
-import { makeHubs } from './connhub.js'
+import { makeHubs, RULES } from './connhub.js'
 import { makeBotSetup, patchOf, proposalOf, linesOf, postSaid } from './botsetup.js'
 import * as botMcp from './botmcp.js'
 import * as botAnswer from './botanswer.js'
@@ -127,6 +128,8 @@ import * as machines from './machines.js'
 import { machine } from './machine.js'
 import { osVersion, chipOf, memoryRange, coreRange } from './system.js'
 import * as transfers from './transfers.js'
+import * as backup from './backup.js'
+import * as botfiles from './botfiles.js'
 import { mediaNamed } from '../shared/media.js'
 import * as counts from './counts.js'
 import * as updates from './updates.js'
@@ -217,22 +220,45 @@ const isDevPort = async (port) => {
 }
 // Your devices told when this screen is shared, and every window shown what's live here and on
 // your other computers (screentell.js, event: screen on /api/events).
+// (A linked computer not let in here is told nothing: as a device here, it's the one with its relay.)
+const machineOut = (m) => { const d = relay.status().devices.find((x) => x.kind === 'computer' && x.relay === m.relay); return !!d && !remote.admits(d.id) }
 const screenTell = makeTell({
-  remote: () => remote, notify, machines, relay, pushDevices: () => push.devices(),
-  onLive: (list) => { for (const c of clients) c.write(`event: screen\ndata: ${JSON.stringify({ list })}\n\n`) },
+  remote: () => remote, notify, machines, relay, pushDevices: () => push.devices(), out: machineOut,
+  onLive: () => { for (const c of clients) c.write(`event: screen\ndata: ${JSON.stringify({ list: screensFor(c.bridgeDevice) })}\n\n`) },
 })
+// The screens being viewed, here and on your other computers (screentell.js), as one of this
+// computer's devices may see them: none on a computer that keeps it out (machines.js keptFrom).
+const screensFor = (device) => { const hidden = machines.keptFrom(device); return screenTell.list().filter((x) => !x.machine || !hidden.has(x.machine)) }
+// What this computer asks of another for one of its devices says which (machines.js forDevice), so
+// that one can keep it out as it does what it asks itself; for this computer's own user, nothing.
+const onBehalf = (req) => machines.forDevice(req.headers['x-bridge-relay'])
+// A device unticked in Which Devices May Connect: everything it has open here ends now (its
+// terminals and screens, what it's fetching or sending through its link, the copies it's sending or
+// asked for, and what it reaches through this computer on another), told why.
+const shutOut = (id) => {
+  const why = `${relay.thisName()} stopped letting this device connect.`
+  machines.endOnward(id, why)
+  relay.endFor(id, why)
+  transfers.endFor(id).catch(() => {})
+}
 const remote = makeRemote({
   trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), thisName: () => relay.thisName(), os: machines.OS,
   hosted: () => !!relay.status().hosted, isDevPort, screenAllowed: () => (IS_MAC ? calls.screen() : Promise.resolve(null)),
-  devices: () => relay.status().devices, onBlocked: (id) => machines.endOnward(id, `${relay.thisName()} stopped letting this device connect.`),
+  devices: () => relay.status().devices, byKey: (key) => relay.deviceByKey(key), onBlocked: shutOut,
   tell: (ev) => screenTell.tell(ev), onChange: () => screenTell.changed(), notifyTo: () => screenTell.notifyTo(), blockThere: (hop, id) => screenTell.blockThere(hop, id),
 })
+// ...and nothing else of this computer's for one not let in, from the first thing it asks (letin.js),
+// nor its notifications.
+const letIn = makeLetIn({ shutFor: (id, via) => remote.shutFor(id, via), turnedAway: (id) => remote.turnedAway(id), deviceOf: (id) => relay.deviceOf(id), versionOf: (id) => machines.ofDevice(relay.deviceOf(id))?.version || null, thisName: () => relay.thisName(), ui: () => UI_DIR })
+push.keepOut((id) => !remote.admits(id))
 // A device of this computer's going on through it to another's screen: this computer's own list and lockout first.
 machines.usePassCheck((asker) => remote.mayPass(asker.id))
 const servePreview = devPreview.serve({ trialOn: () => trialOn('remote-screen'), deviceOf: (id) => relay.deviceOf(id), may: (id, port) => remote.mayPreview(id, port), isDevPort, thisName: () => relay.thisName() })
 const app = express()
 app.use(guard.http)
 app.use(auth.http)
+// Which Devices May Connect, for everything after this (letin.js).
+app.use(letIn.http)
 app.use(pages.http)
 // Each request timed, for how Bridge AI itself is doing (perf.js).
 app.use(perf.timing)
@@ -254,10 +280,21 @@ const jsonFor = (req) => (req.method === 'PUT' && /^\/api\/agents\/[^/]+\/file$/
   // An outside app's new file or suggestion, through MCP (mcptools.js takes up to 2 MB of text).
   : /^\/(mcp|api\/mcp-server\/call)$/.test(req.path) ? jsonFile
   : /^\/api\/boards(\/|$)/.test(req.path) ? jsonBoard
+  // A backup opened, or a move from another of your computers: a whole setup (backup.js).
+  : req.method === 'POST' && /^\/api\/backup\/(open|incoming)$/.test(req.path) ? jsonBoard
   : req.method === 'POST' && /^\/api\/studio\/(new|picture)$/.test(req.path) ? jsonStudio
   : req.method === 'POST' && req.path === '/api/studio/deck/ai' ? jsonDeckAi
   : jsonSmall)
 app.use((req, res, next) => jsonFor(req)(req, res, next))
+// A bot's files (botfiles: roots, botfiles.js) are only opened, shown in Finder and sent on: any
+// route that would write through one of them (Studio's, signing's, a file's save) is turned away
+// here, before it's reached, whichever names the root (its query or its body).
+app.use((req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method) || /^\/api\/agents\/[^/]+\/fileop$/.test(req.path) || req.path === '/api/transfers') return next()
+  const named = [req.query?.root, req.query?.pane, req.body?.root, req.body?.pane, req.body?.from?.root, req.body?.to?.pane, req.body?.into?.pane]
+  if (named.some((r) => String(r || '').startsWith('botfiles:'))) return res.status(403).json({ error: 'A bot\'s files are only to open and send on from here', code: 'readOnly' })
+  next()
+})
 
 const wrap = (fn) => async (req, res) => {
   try {
@@ -371,6 +408,21 @@ async function fleetView() {
   return f
 }
 
+// The fleet as the sidebar and your phone are shown it: all but the bots' answering agents (a
+// question each, frontdesk.js), which are a bot's runs, seen on its page under Conversations, never a
+// chat of their own; nor their tabs, nor the space they run in while only they are in it. What
+// watches agents here (the helpers' ends, notifications, Try It) sees them all, and so does
+// /api/fleet?all=1 (a look at every agent, for tests and diagnosis).
+function shownFleet(f) {
+  const runs = new Set((f?.agents || []).filter((a) => a.helper?.list === 'desk').map((a) => a.paneId))
+  const theirs = (t) => t.panes?.length > 0 && t.panes.every((p) => runs.has(p.paneId))
+  const tabs = new Set((f?.tabs || []).filter(theirs).map((t) => t.tabId))
+  const spaces = new Set((f?.workspaces || []).filter((w) => { const own = f.tabs.filter((t) => t.workspaceId === w.id); return own.length ? own.every((t) => tabs.has(t.tabId)) : w.label === BOT_RUNS }).map((w) => w.id))
+  if (!runs.size && !spaces.size) return f
+  const agents = f.agents.filter((a) => !runs.has(a.paneId))
+  return { ...f, agents, tabs: f.tabs.filter((t) => !tabs.has(t.tabId)), workspaces: f.workspaces.filter((w) => !spaces.has(w.id)), counts: agents.reduce((c, a) => ({ ...c, [a.status]: (c[a.status] || 0) + 1 }), {}) }
+}
+
 async function findAgent(paneId) {
   const f = await rt.fleet()
   const a = f.agents.find((x) => x.paneId === paneId)
@@ -378,7 +430,7 @@ async function findAgent(paneId) {
   return a
 }
 
-app.get('/api/fleet', wrap(fleetView))
+app.get('/api/fleet', wrap(async (req) => (req.query.all === '1' ? fleetView() : shownFleet(await fleetView()))))
 // How Bridge AI is doing: its CPU, how long its event loop was held up, the slowest requests
 // (perf.js). reset=1: count afresh from now.
 app.get('/api/perf', wrap((req) => perf.snapshot({ reset: req.query.reset === '1' })))
@@ -503,6 +555,8 @@ const rootOf = async (pane) => {
   }
   // A folder Studio's home found one of your files in (studiofound.js).
   if (String(pane).startsWith('found:')) return studioFound.foundDir(String(pane).slice(6))
+  // The files a bot's runs made, kept beside its record (botfiles.js): only to open and send on.
+  if (String(pane).startsWith('botfiles:')) { const d = botfiles.filesDir(String(pane).slice(9)); if (!d) throw new Error('No such bot'); return d }
   // Studio's home: your home folder (home) and this computer's drives (drive:<key>).
   if (explorer.isFilesRoot(pane)) return explorer.rootDir(String(pane))
   const p = ((await rt.fleet()).panes || []).find((x) => x.paneId === pane)
@@ -542,6 +596,19 @@ app.use('/api/agents/:pane', async (req, res, next) => {
     if (site && !req.headers['x-bridge-relay'] && req.headers['sec-fetch-site'] === 'cross-site' && !sameServer(req)) return res.status(403).json({ error: 'Not from another site' })
     next()
   } catch (e) { res.status(e.status || 502).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }) }
+})
+// A bot's files (botfiles: roots): opened, shown in Finder and sent on (Send to…), never changed
+// through these routes; and only while Bots is on.
+app.use('/api/agents/:pane', (req, res, next) => {
+  if (!String(req.params.pane).startsWith('botfiles:')) return next()
+  if (!trialOn('slack-bot')) return res.status(404).json({ error: 'Bots is a beta feature. Turn it on in Settings › About & Updates › Beta Features.', trial: 'slack-bot' })
+  if (['GET', 'HEAD'].includes(req.method)) return next()
+  if (req.method === 'POST' && req.path === '/fileop' && LOOK_ONLY.has(req.body?.op)) {
+    // (Opened in its app only when it can't run anything as it opens; the rest shown in Finder.)
+    if (req.body.op === 'open' && !botfiles.opensSafely(req.body.path)) req.body.op = 'reveal'
+    return next()
+  }
+  return res.status(403).json({ error: 'A bot\'s files are only to open and send on from here', code: 'readOnly' })
 })
 // A request a page of this server's made: its Referer is this server.
 const sameServer = (req) => { try { return new URL(req.headers.referer || '').host === req.headers.host } catch { return false } }
@@ -879,19 +946,23 @@ app.post('/api/transfers', tx((req) => {
   // From a window showing another computer (machinepages.js): only that computer's files copied here.
   if (req.machinePage && (req.body?.from !== req.machinePage || req.body?.to)) throw Object.assign(new Error(machinePages.elsewhere(relay.thisName())), { status: 403, code: 'machinePage' })
   counts.add('files.sent')
-  return transfers.start(req.body || {}, { here: fromHere(req) })
+  // (A bot's file is sent on, never moved: it stays beside its record. Nothing is copied into one.)
+  if (String(req.body?.src?.pane || '').startsWith('botfiles:')) req.body.move = false
+  if (String(req.body?.into?.pane || '').startsWith('botfiles:')) throw Object.assign(new Error('A bot\'s files are only to open and send on from here'), { status: 403, code: 'readOnly' })
+  return transfers.start(req.body || {}, { here: fromHere(req), by: req.headers['x-bridge-relay'] || null })
 }))
 app.post('/api/transfers/clear', tx(() => transfers.clear()))
-app.post('/api/transfers/:id/stop', tx((req) => transfers.stop(req.params.id)))
-app.post('/api/transfers/:id/retry', tx((req) => transfers.retry(req.params.id)))
+app.post('/api/transfers/:id/stop', tx((req) => transfers.stop(req.params.id, onBehalf(req))))
+app.post('/api/transfers/:id/retry', tx((req) => transfers.retry(req.params.id, onBehalf(req))))
 app.post('/api/transfers/:id/reveal', tx((req) => { hereOnly(req, 'Show it in Finder'); return transfers.reveal(req.params.id) }))
 // Where a copy can go here (another of your devices asks, for its dialog).
 app.get('/api/transfers/here', tx(() => transfers.destinations()))
 // For the dialog: where it can go (here, or on the device it's sent to), how big it is, and
 // whether it goes through Bridge AI's relay (so much a day). to: it's sent there; from: it's
 // copied here from there.
-const remoteJson = async (id, u) => {
-  const r = await machines.exchange(id, { u })
+// (For a device of this computer's, the other computer is told which: it may keep that one out.)
+const remoteJson = async (id, u, req) => {
+  const r = await machines.exchange(id, { u, headers: onBehalf(req) })
   const j = await r.json()
   if (r.status === 404 && j?.error === 'Not found' && !j.missing) throw Object.assign(new Error('Update Bridge AI on that device to copy files with it.'), { status: 409, code: 'update' })
   if (r.status >= 400) throw Object.assign(new Error(j?.error || `It answered ${r.status}`), { status: r.status })
@@ -905,8 +976,8 @@ app.get('/api/transfers/plan', tx(async (req) => {
   const pane = req.query.pane ? String(req.query.pane) : null
   const p = String(req.query.path || '')
   const [what, destinations] = await Promise.all([
-    pane ? (from ? remoteJson(from, `/api/agents/${encodeURIComponent(pane)}/tree?path=${encodeURIComponent(p)}`) : files.copyList(await rootOf(pane), p)) : null,
-    to ? remoteJson(to, '/api/transfers/here') : transfers.destinations(),
+    pane ? (from ? remoteJson(from, `/api/agents/${encodeURIComponent(pane)}/tree?path=${encodeURIComponent(p)}`, req) : files.copyList(await rootOf(pane), p)) : null,
+    to ? remoteJson(to, '/api/transfers/here', req) : transfers.destinations(),
   ])
   // A phone's copy to this computer goes through this computer's relay; a copy with another device,
   // through that one's.
@@ -1593,10 +1664,12 @@ let lastFleet = null
 app.get('/api/events', (req, res) => {
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
   res.flushHeaders()
+  // (Which device it's for: what another computer that keeps it out said is left out of its feed.)
+  res.bridgeDevice = req.headers['x-bridge-relay'] || null
   clients.add(res)
-  if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(lastFleet)}\n\n`)
+  if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(shownFleet(lastFleet))}\n\n`)
   // Who's viewing a screen of yours now, here or on another of your computers (screentell.js).
-  res.write(`event: screen\ndata: ${JSON.stringify({ list: screenTell.list() })}\n\n`)
+  res.write(`event: screen\ndata: ${JSON.stringify({ list: screensFor(res.bridgeDevice) })}\n\n`)
   // The desktop app's own feed (desktop/main.js says so): it also hears when another of your devices
   // asks this computer to allow something (fixes.js askHere).
   const off = req.headers['x-bridge-desktop'] && !req.headers['x-bridge-relay'] ? fixes.onAsk((a) => res.write(`event: fix-ask\ndata: ${JSON.stringify(a)}\n\n`)) : null
@@ -1631,7 +1704,8 @@ async function pollFleet() {
         if (!f.down) notify.onFleet(f, cfg)
         if (key !== lastFleetKey) {
           lastFleetKey = key
-          for (const c of clients) c.write(`event: fleet\ndata: ${JSON.stringify(f)}\n\n`)
+          const shown = JSON.stringify(shownFleet(f))
+          for (const c of clients) c.write(`event: fleet\ndata: ${shown}\n\n`)
         }
       }
     } catch { /* runtime briefly unavailable */ }
@@ -1644,7 +1718,8 @@ const pushFleet = async () => {
     const f = await fleetView()
     if (gen !== fleetGen) return // a newer push follows
     lastFleetKey = ''; lastFleet = f
-    for (const c of clients) c.write(`event: fleet\ndata: ${JSON.stringify(f)}\n\n`)
+    const shown = JSON.stringify(shownFleet(f))
+    for (const c of clients) c.write(`event: fleet\ndata: ${shown}\n\n`)
   } catch { /* next poll */ }
 }
 pollFleet()
@@ -1963,9 +2038,15 @@ app.get('/api/meetings', wrap(() => {
   const list = meetings.list()
   insightsByItself(list)
   const auto = trialOn('meeting-insights') && meetInsights.autoOn()
-  return { meetings: list.map(({ captures, links, ...m }) => ({ ...m, pictures: captures?.length || 0, files: links?.length || 0 })), folder: meetings.folder(), kinds: Object.entries(meetings.KINDS).map(([id, k]) => ({ id, label: k.label })), ...(auto && !auto.said ? { insightsOn: { at: auto.at, meetings: auto.meetings } } : {}) }
+  // mergeHint: the meeting one is the rest of (recorded during the same event, or just after), to
+  // offer merging them.
+  const hints = meetings.mergeHints(list)
+  return { meetings: list.map(({ captures, links, ...m }) => ({ ...m, pictures: captures?.length || 0, files: links?.length || 0, ...(hints[m.id] ? { mergeHint: hints[m.id] } : {}) })), folder: meetings.folder(), kinds: Object.entries(meetings.KINDS).map(([id, k]) => ({ id, label: k.label })), ...(auto && !auto.said ? { insightsOn: { at: auto.at, meetings: auto.meetings } } : {}) }
 }))
 app.post('/api/meetings', wrap(async (req) => { prompt = null; const m = await meetings.start({ ...(req.body || {}), callApps: calls.now().calls.map((c) => c.app) }); counts.add('meetings.recorded'); return m }))
+// Before a recording starts: the meeting it would carry on, one that stopped when Bridge AI closed
+// (meetings.js carryOn), for the app to offer Resume recording first. event: the one it's for.
+app.post('/api/meetings/carry-on', wrap((req) => ({ meeting: meetings.carryOn({ event: req.body?.event || null }) })))
 // Several meetings as one (meetings.js combine): a combined meeting with an overview across them;
 // they stay as they are.
 app.post('/api/meetings/combine', wrap((req) => meetings.combine([].concat(req.body?.ids || []).map(String).slice(0, 100), { title: req.body?.title })))
@@ -2111,6 +2192,8 @@ app.get('/api/calls', wrap(() => {
     capturing: calls.capturing(),
     ...calls.now(), detect: cfg.meetings?.detect !== false, float: cfg.meetings?.floatCard || 'meetings', floatHover: cfg.meetings?.floatHover !== false, floatHide: ['always', 'never'].includes(cfg.meetings?.floatHide) ? cfg.meetings.floatHide : 'sharing',
     prompt: rec ? null : prompt,
+    // A call's notes would carry on a meeting that stopped when Bridge AI closed: Resume recording first.
+    carryOn: !rec && prompt ? meetings.carryOn() : null,
     recording: rec && { id: rec.id, title: rec.title, status: rec.status, startedAt: rec.startedAt, resumedAt: rec.resumedAt || null, resumedFrom: rec.resumedFrom || 0, seconds: Math.round(meetings.elapsed(rec.id) || 0), talking: meetings.talking(rec.id), callApps: rec.callApps || [], callEnded: rec.callEnded || null, callEndedApp: rec.callEndedApp || null, endWhy: rec.endWhy || (rec.callEnded ? 'call' : null), stopsAt: rec.stopsAt || null, callQuiet: meetings.callQuiet(rec.id), callAccess: meetings.callAccess(rec.id) },
   }
 }))
@@ -2156,12 +2239,13 @@ const fromMachine = async (m, opts, ms) => {
   } finally { clearTimeout(t) }
 }
 const isOld = (r) => r.status === 404 && r.j?.error === 'Not found' && !r.j.missing
-async function mentionsElsewhere(q, n) {
+// by: for a device of this computer's, which (machines.forDevice), so the others may keep it out.
+async function mentionsElsewhere(q, n, by = []) {
   const out = { meetings: [], unreachable: [], update: [], from: [] }
   await Promise.all(machines.list().filter((m) => m.state === 'linked').map(async (m) => {
     if (!m.online) { out.unreachable.push(m.name); return }
     let r
-    try { r = await fromMachine(m, { u: `/api/meetings/mentions?here=1&n=${n}&q=${encodeURIComponent(q)}` }, MENTION_MS) } catch { out.unreachable.push(m.name); return }
+    try { r = await fromMachine(m, { u: `/api/meetings/mentions?here=1&n=${n}&q=${encodeURIComponent(q)}`, headers: by }, MENTION_MS) } catch { out.unreachable.push(m.name); return }
     if (isOld(r)) { out.update.push(m.name); return }
     if (r.status >= 400 || !Array.isArray(r.j?.meetings)) { out.unreachable.push(m.name); return }
     if (!r.j.agentText) out.update.push(m.name)
@@ -2178,7 +2262,7 @@ app.get('/api/meetings/mentions', wrap(async (req) => {
   const n = Math.min(30, Math.max(1, Number(req.query.n) || 8))
   const mine = meetings.mentionable(q, n).map((m) => ({ ...m, machine: null, device: null }))
   if (req.query.here) return { meetings: mine, agentText: true }
-  const there = await mentionsElsewhere(q, n)
+  const there = await mentionsElsewhere(q, n, onBehalf(req))
   const all = [...mine, ...there.meetings].sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt))).slice(0, n)
   return { meetings: all, here: relay.thisName(), from: there.from, unreachable: there.unreachable, update: there.update, agentText: true }
 }))
@@ -2192,7 +2276,7 @@ app.post('/api/meetings/:id/for-agents', wrap(async (req) => {
   if (!m) throw Object.assign(new Error('That computer isn\'t linked to this one any more'), { status: 404 })
   const update = () => Object.assign(new Error(`Update Bridge AI on ${m.name} to mention its meetings here`), { status: 409, code: 'update' })
   let r
-  try { r = await fromMachine(m, { method: 'POST', u: `/api/meetings/${encodeURIComponent(req.params.id)}/for-agents?text=1` }, 20000) } catch { throw Object.assign(new Error(`${m.name} isn't reachable`), { status: 503, code: 'offline' }) }
+  try { r = await fromMachine(m, { method: 'POST', u: `/api/meetings/${encodeURIComponent(req.params.id)}/for-agents?text=1`, headers: onBehalf(req) }, 20000) } catch { throw Object.assign(new Error(`${m.name} isn't reachable`), { status: 503, code: 'offline' }) }
   if (isOld(r)) throw update()
   if (r.status >= 400) throw Object.assign(new Error(r.j?.error || `${m.name} answered ${r.status}`), { status: r.status })
   if (typeof r.j?.text !== 'string') throw update()
@@ -2214,6 +2298,13 @@ app.post('/api/meetings/:id/reopen', wrap((req) => { const m = meetings.reopen(r
 // A combined meeting's meetings: one more, or one taken out (the last but one separates it).
 app.post('/api/meetings/:id/parts', wrap((req) => meetings.addPart(req.params.id, String(req.body?.id || ''))))
 app.delete('/api/meetings/:id/parts/:pid', wrap((req) => meetings.removePart(req.params.id, req.params.pid)))
+// One meeting recorded as two (meetings.js merge): the later one becomes the next part of the
+// earlier, and Separate puts them back as two for a week. "Not the same meeting" stops suggesting
+// it; and the notice that a recording stopped when Bridge AI closed, once read.
+app.post('/api/meetings/:id/merge', wrap((req) => meetings.merge(req.params.id, String(req.body?.id || ''))))
+app.post('/api/meetings/:id/separate', wrap((req) => meetings.separate(req.params.id, String(req.body?.id || ''))))
+app.post('/api/meetings/:id/merge-hint', wrap((req) => meetings.notRestOf(req.params.id, String(req.body?.not || ''))))
+app.post('/api/meetings/:id/interrupted', wrap((req) => meetings.seenInterrupted(req.params.id)))
 app.patch('/api/meetings/:id', wrap((req) => {
   if (req.body?.archived != null) meetings.archive(req.params.id, !!req.body.archived)
   if (req.body?.folder !== undefined) meetings.setFolder(req.params.id, req.body.folder)
@@ -2786,7 +2877,7 @@ app.post('/api/agents/:pane/mute', wrap(async (req) => {
 }))
 // A notification's answer button (the token says which agent, question and answer), or another
 // kind's (Remote Screen's Stop and Block This Device), saying which device it was pressed on.
-app.post('/api/notify/answer', wrap((req) => notify.answer(req.body?.token, { by: whoAsks(req) })))
+app.post('/api/notify/answer', wrap((req) => notify.answer(req.body?.token, { by: whoAsks(req), h: onBehalf(req) })))
 // You're using Bridge AI on this computer: phones stay quiet meanwhile. Phones can't say this.
 app.post('/api/presence', wrap((req) => { if (fromHere(req)) notify.presence(req.body || {}); return { ok: true } }))
 
@@ -2831,7 +2922,7 @@ const notByMachine = (req) => { if (viaMachine(req)) throw Object.assign(new Err
 // newDevices: phones and computers paired with Pair a device's code and not kept yet, said in the
 // app with Keep and Remove (Machines.jsx).
 const newDevices = () => relay.status().devices.filter((d) => d.fresh).map(({ id, name, kind, relay: at, addedAt }) => ({ id, name, kind, relay: at, addedAt, machine: kind === 'computer' ? machines.list().find((m) => m.relay === at)?.id || null : null }))
-app.get('/api/machines', wrap(async (req) => ({ here: { ...machines.here(), about: { ...(await machines.about()), runtime: rt.name } }, machines: await Promise.all(machines.list().map(async (m) => ({ ...m, port: await pages.portFor(req, m.id) }))), machinePage: req.machinePage || null, strays: machines.strays(), asks: relay.status().asks, newDevices: newDevices(), canBeLinked: !!relay.relayUrl(), hostedAvailable: relay.status().hostedAvailable })))
+app.get('/api/machines', wrap(async (req) => ({ here: { ...machines.here(), about: { ...(await machines.about()), runtime: rt.name } }, machines: await Promise.all(machines.list({ for: req.headers['x-bridge-relay'] || null }).map(async (m) => ({ ...m, port: await pages.portFor(req, m.id) }))), machinePage: req.machinePage || null, strays: machines.strays(), asks: relay.status().asks, newDevices: newDevices(), canBeLinked: !!relay.relayUrl(), hostedAvailable: relay.status().hostedAvailable })))
 // This device's name, as your devices and phones show it: set here, or from one of your other
 // devices (through its link). '' goes back to the computer's own name.
 relay.useName(() => cfg.deviceName)
@@ -2841,10 +2932,13 @@ app.post('/api/machines/name', wrap((req) => {
   return machines.here()
 }))
 // One of your other devices, renamed (on that device, so it's the same everywhere).
-app.post('/api/machines/:id/name', wrap((req) => { notByMachine(req); return machines.rename(req.params.id, req.body?.name) }))
+app.post('/api/machines/:id/name', wrap((req) => { notByMachine(req); return machines.rename(req.params.id, req.body?.name, onBehalf(req)) }))
 // Fix: where the connection to that device stops, starting it over on the way.
 app.post('/api/machines/:id/check', wrap((req) => { notByMachine(req); return machines.check(req.params.id) }))
-app.get('/api/machines/summary', wrap((req) => machines.summary({ home: req.query.home === '1' })))
+// keepOut, or letIn with a guardrail set here: the asking computer's devices this one keeps out, or
+// the only ones it lets in, as they come through it (remote.js viaList); it hides what it shows of
+// this one from the rest.
+app.get('/api/machines/summary', wrap(async (req) => ({ ...(await machines.summary({ home: req.query.home === '1' })), ...remote.viaList(req.headers['x-bridge-relay']) })))
 // Another computer introducing a third (intro) does so only once you've kept it here (Keep, where
 // the app said it paired): until then it reaches this computer, and no other through it.
 app.post('/api/machines', wrap((req) => {
@@ -2877,7 +2971,7 @@ app.post('/api/machines/:id/preview', async (req, res) => {
     if (!(port > 1023 && port < 65536)) return res.status(400).json({ error: 'Which port?' })
     // (Given longer than the check can take there: on Windows, its list of processes alone can take
     // 15 s, servers.js parents.)
-    try { await machines.callOn(m.id, 'GET', `/api/remote/preview-check?port=${port}`, undefined, 25000) } catch (e) {
+    try { await machines.callOn(m.id, 'GET', `/api/remote/preview-check?port=${port}`, undefined, 25000, onBehalf(req)) } catch (e) {
       const old = /^(Not found|.*answered 404)$/.test(e.message)
       // gate: its password (or Allow there) first, in a session for that app (Preview.jsx).
       return res.status(e.code === 'offline' ? 503 : 409).json({ error: old ? `Update Bridge AI on ${m.name} to see its apps here.` : e.message, code: e.code === 'offline' ? 'offline' : old ? 'update' : e.said === 'gate' ? 'gate' : 'refused' })
@@ -2922,12 +3016,12 @@ app.post('/api/remote/sessions/:id/end', async (req, res) => { try { res.json(aw
 app.post('/api/remote/devices/block', (req, res) => { try { if (!viaMachine(req)) throw Object.assign(new Error('Only another of your computers asks this'), { status: 403 }); res.json(remote.setDevice(String(req.body?.id || ''), false)) } catch (e) { sayErr(res, e) } })
 // What's live here and on your other computers (the cards), and Stop or Block from a window here,
 // for this computer's sessions or, through its link, another's (one hop: not for another computer).
-app.get('/api/remote/live', (req, res) => res.json({ list: screenTell.list() }))
+app.get('/api/remote/live', (req, res) => res.json({ list: screensFor(req.headers['x-bridge-relay']) }))
 app.post('/api/remote/live/end', async (req, res) => {
   try {
     const machine = typeof req.body?.machine === 'string' && req.body.machine ? req.body.machine : null
     if (machine && viaMachine(req)) throw Object.assign(new Error('Not through another device'), { status: 403 })
-    res.json(await screenTell.end({ machine, id: String(req.body?.id || ''), block: req.body?.block === true }, whoAsks(req)))
+    res.json(await screenTell.end({ machine, id: String(req.body?.id || ''), block: req.body?.block === true }, whoAsks(req), onBehalf(req)))
   } catch (e) { sayErr(res, e) }
 })
 // Another of your computers saying what's live there, and passing on its notification (from it only).
@@ -2952,7 +3046,11 @@ app.get('/api/remote/preview-check', async (req, res) => {
 // An ask reaches your phones too, so you can allow it from there. Its six digits stay in Bridge AI
 // (a notification goes through Apple's or Google's servers, and shows on a locked screen).
 relay.whenAsked((a) => notify.send({ kind: 'machine', title: `${a.name} asks to link`, body: 'Open Bridge AI to check the six digits on both devices, then allow it.', url: '/#settings/machines', tag: `machine-ask-${a.id}` }).catch(() => {}))
-relay.whenPaired((d) => notify.send({ kind: 'machine', title: `${d.name} is paired`, body: 'If that wasn\'t you, remove it in Bridge AI.', url: '/#settings/machines', tag: `paired-${d.id}` }).catch(() => {}))
+// One paired once Remote Access had a guardrail starts not let in (remote.js): it says how to let it in.
+relay.whenPaired((d) => {
+  const out = !remote.admits(d.id)
+  notify.send({ kind: 'machine', title: `${d.name} is paired`, body: out ? `It can't use ${relay.thisName()} until you allow it there, in Needs You. If that wasn't you, remove it in Bridge AI.` : 'If that wasn\'t you, remove it in Bridge AI.', url: '/#settings/machines', tag: `paired-${d.id}` }).catch(() => {})
+})
 // A device removed: its notifications stop too.
 relay.whenRemoved((id) => push.forgetDevice(id))
 // What this device tells the others: its agents, for their sidebars and agent maps (agentmap.js),
@@ -2973,8 +3071,8 @@ app.get('/api/agent-map', wrap(async (req) => {
   await machines.fresh({ maxAge: req.query.live ? 4000 : 10000 })
   const f = await fleetView()
   const here = { id: null, name: relay.thisName(), os: machines.OS, version: VERSION, runtime: rt.name, here: true, online: true, at: new Date().toISOString(), agents: f.down ? [] : await runs.agents(f, { cloudSaid: cloud.previews() }) }
-  const linked = machines.list().filter((m) => m.state === 'linked')
-    .map((m) => ({ id: m.id, name: m.name, os: m.os, version: m.version, runtime: m.about?.runtime || null, online: !!m.online, lastSeen: m.lastSeen, at: m.at, agents: Array.isArray(m.agents) ? m.agents : [] }))
+  const linked = machines.list({ for: req.headers['x-bridge-relay'] || null }).filter((m) => m.state === 'linked')
+    .map((m) => ({ id: m.id, name: m.name, os: m.os, version: m.version, runtime: m.about?.runtime || null, online: !!m.online, lastSeen: m.lastSeen, at: m.at, agents: Array.isArray(m.agents) ? m.agents : [], ...(m.notLetIn ? { notLetIn: true } : {}) }))
   return { devices: [here, ...linked] }
 }))
 
@@ -2988,17 +3086,21 @@ app.get('/api/needs-you', wrap(async (req) => {
   await machines.fresh(fresh ? { only: fresh, maxAge: 0, wait: 4000 } : { maxAge: req.query.live ? 2500 : 6000 })
   const name = relay.thisName()
   const here = (await waiting.items()).map((i) => ({ ...i, machine: null, device: name, online: true }))
-  const linked = machines.list().filter((m) => m.state === 'linked')
+  // (What a computer that keeps the asking device out said is left out for it: machines.js list.)
+  const linked = machines.list({ for: req.headers['x-bridge-relay'] || null }).filter((m) => m.state === 'linked')
   const there = linked.flatMap((m) => (Array.isArray(m.needs) ? m.needs : needsYou.fromAgents(m.agents))
     .map((i) => ({ ...i, machine: m.id, device: m.name, online: !!m.online, asOf: m.at, old: !Array.isArray(m.needs) })))
   return {
     items: needsYou.order([...here, ...there]),
-    devices: [{ id: null, name, online: true }, ...linked.map((m) => ({ id: m.id, name: m.name, online: !!m.online, lastSeen: m.lastSeen, at: m.at }))],
+    devices: [{ id: null, name, online: true }, ...linked.map((m) => ({ id: m.id, name: m.name, online: !!m.online, lastSeen: m.lastSeen, at: m.at, ...(m.notLetIn ? { notLetIn: true } : {}) }))],
     // What other apps ask of you through Bridge AI's MCP server, here: a change to keep or discard,
     // a message for an agent to send or not (outside.js).
     outside: outside.waiting().map((x) => ({ ...x, change: outsideView(x) })),
     // The bots' answers to send or discard, and what nothing could answer (frontdesk.js).
     slack: desk.waiting(),
+    // Devices paired since Remote Access had a guardrail, waiting to be let in (remote.js): Allow is
+    // at this computer only, so only it is told.
+    letIn: atThisComputer(req) ? remote.waiting() : [],
   }
 }))
 // What Needs You shows of an ask: the change itself, cut to what fits on its card.
@@ -3027,7 +3129,7 @@ app.get('/api/home', trialOff('home', 'Home'), wrap(async (req) => {
   await machines.fresh({ maxAge: req.query.live ? 2500 : 8000 })
   const name = relay.thisName()
   const mine = (await homeList.items()).map((i) => ({ ...i, machine: null, device: name, online: true }))
-  const linked = machines.list().filter((m) => m.state === 'linked')
+  const linked = machines.list({ for: req.headers['x-bridge-relay'] || null }).filter((m) => m.state === 'linked')
   const there = linked.flatMap((m) => {
     const own = Array.isArray(m.home)
     const from = own ? m.home : (Array.isArray(m.needs) ? m.needs : needsYou.fromAgents(m.agents)).map(home.fromNeeds)
@@ -3035,12 +3137,13 @@ app.get('/api/home', trialOff('home', 'Home'), wrap(async (req) => {
   })
   return {
     items: home.tidy([...mine, ...there]),
-    devices: [{ id: null, name, os: machines.OS, online: true, here: true }, ...linked.map((m) => ({ id: m.id, name: m.name, os: m.os, online: !!m.online, lastSeen: m.lastSeen, at: m.at, partial: !Array.isArray(m.home) }))],
+    devices: [{ id: null, name, os: machines.OS, online: true, here: true }, ...linked.map((m) => ({ id: m.id, name: m.name, os: m.os, online: !!m.online, lastSeen: m.lastSeen, at: m.at, partial: !Array.isArray(m.home), ...(m.notLetIn ? { notLetIn: true } : {}) }))],
     pins: homeList.pins(),
     layouts: homeList.layouts(),
-    // What other apps ask of you here, and the bots' answers, as in Needs You.
+    // What other apps ask of you here, the bots' answers and the devices waiting to be let in, as in Needs You.
     outside: outside.waiting().map((x) => ({ ...x, change: outsideView(x) })),
     slack: desk.waiting(),
+    letIn: atThisComputer(req) ? remote.waiting() : [],
   }
 }))
 // Pin one to the top of Home, or unpin it: kept here, for every page and phone this computer serves.
@@ -3111,19 +3214,19 @@ app.post('/api/account/followed', yours((req) => account.followed(req.body?.keep
 app.post('/api/account/follow', yours(() => account.follow()))
 // Your other computers (linked to this one), and whether each is signed in: to offer signing them
 // in too. One that's offline, or too old to say, is listed as such.
-async function othersOf() {
+async function othersOf(by = []) {
   const me = account.status().account
   const linked = machines.list().filter((m) => m.state === 'linked')
   return Promise.all(linked.map(async (m) => {
     const base = { id: m.id, name: m.name }
     if (!m.online) return { ...base, state: 'offline' }
     try {
-      const b = await machines.callOn(m.id, 'GET', '/api/account/brief', undefined, 8000)
+      const b = await machines.callOn(m.id, 'GET', '/api/account/brief', undefined, 8000, by)
       return { ...base, state: !b?.available ? 'none' : b.signedIn ? (b.account === me?.id ? 'signed-in' : 'other') : b.declined ? 'declined' : 'not-signed-in' }
     } catch (e) { return { ...base, state: /\b404\b|Cannot GET/.test(e.message) ? 'old' : 'offline' } }
   }))
 }
-app.get('/api/account/others', wrap(async (req) => { notByMachine(req); return { others: account.status().signedIn ? await othersOf() : [] } }))
+app.get('/api/account/others', wrap(async (req) => { notByMachine(req); return { others: account.status().signedIn ? await othersOf(onBehalf(req)) : [] } }))
 // Sign them in too: a grant from the account for each, handed over its link. Each says how it went.
 app.post('/api/account/others', wrap(async (req) => {
   notByMachine(req)
@@ -3135,11 +3238,11 @@ app.post('/api/account/others', wrap(async (req) => {
     if (!m) { results.push({ id, ok: false, text: 'It isn\'t linked to this computer any more.' }); continue }
     try {
       const { grant } = await account.grant()
-      const r = await machines.callOn(m.id, 'POST', '/api/account/offer', { grant }, 30000)
+      const r = await machines.callOn(m.id, 'POST', '/api/account/offer', { grant }, 30000, onBehalf(req))
       results.push({ id, name: m.name, ...r })
     } catch (e) { results.push({ id, name: m.name, ok: false, why: e.code === 'offline' ? 'offline' : 'error', text: e.message }) }
   }
-  return { results, others: await othersOf() }
+  return { results, others: await othersOf(onBehalf(req)) }
 }))
 // Asked by another of your devices: whether this one is signed in, and to which account (its id).
 app.get('/api/account/brief', wrap(() => {
@@ -3390,7 +3493,7 @@ app.get('/api/config', (req, res) => res.json({
 app.post('/api/alerts/sound', wrap((req) => {
   const on = req.body?.on !== false
   afterChange(settings.patch({ alertSounds: on ? null : false }))
-  if (!req.body?.here) machines.soundsEverywhere(on).catch(() => {})
+  if (!req.body?.here) machines.soundsEverywhere(on, onBehalf(req)).catch(() => {})
   return { on }
 }))
 
@@ -3433,15 +3536,27 @@ const afterChange = (changed) => {
   fixes.noteRestart(settings.RESTART_KEYS.filter((k) => JSON.stringify(now[k]) !== atStart[k]))
   return { ok: true, changed, restart, settings: settingsView() }
 }
+// Remote Screen and Preview on or off is a guardrail too (with it on, a New device waits to be let
+// in: remote.js), so it's changed at this computer only, as the others are (remoteHere): never from
+// a device, another computer's window or through Tailscale, by either way of changing the settings.
+// What's compared is the setting as it would be saved, the very object written.
+const remoteTrialOf = (s) => JSON.stringify((s?.trials && typeof s.trials === 'object' && !Array.isArray(s.trials) ? s.trials['remote-screen'] : null) ?? null)
+const remoteTrialKept = (req, next) => { if (remoteTrialOf(next) !== remoteTrialOf(settings.readUser())) remoteHere(req) }
 app.get('/api/settings', wrap(() => settingsView()))
-app.patch('/api/settings', wrap((req) => {
-  if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) channelKept(req, settings.merged(settings.readUser(), req.body))
-  return afterChange(settings.patch(req.body || {}))
-}))
+app.patch('/api/settings', (req, res) => {
+  try {
+    if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
+      const next = settings.merged(settings.readUser(), req.body)
+      channelKept(req, next)
+      remoteTrialKept(req, next)
+    }
+    res.json(afterChange(settings.patch(req.body || {})))
+  } catch (e) { res.status(e.status >= 400 && e.status < 500 ? e.status : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) }) }
+})
 app.put('/api/settings/raw', async (req, res) => {
   try {
     const text = String(req.body?.text ?? '')
-    try { channelKept(req, JSON.parse(text)) } catch (e) { if (e.status) throw e }
+    try { const next = JSON.parse(text); channelKept(req, next); remoteTrialKept(req, next) } catch (e) { if (e.status) throw e }
     res.json(afterChange(settings.replaceRaw(text)))
   } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
@@ -4060,13 +4175,19 @@ async function closePane(paneId) {
   pushFleet()
 }
 // A question that waits on you is a notification, as an agent's question is: which bot, who asked
-// and where, not what (it opens Needs You, where the question is).
+// and where, not what (it opens Needs You, where the question is). A run at its time limit says
+// how long it has run, for you to let it carry on or stop it.
 const deskTold = (q) => {
   if (cfg.notify?.needsYou === false) return
   const who = q.from?.name || 'Someone'
   const plat = platformOf(q.place?.id || q.conv)
   const where = `${q.place?.kind === 'dm' ? 'a direct message' : q.place?.name ? (plat === 'teams' ? q.place.name : `#${q.place.name}`) : PLATFORMS[plat]}${plat !== 'slack' ? ` (${PLATFORMS[plat]})` : ''}`
-  notify.send({ kind: 'needs-you', title: `${q.bot?.name || 'Your bot'}: ${who} asked in ${where}`, body: q.needsOwner ? 'Nothing could answer it: write the reply in Needs You.' : 'An answer waits for you to send or discard.', url: `/?agent=${encodeURIComponent(`slack:${q.id}`)}&inbox=1`, tag: `bot-${q.id}` }).catch(() => {})
+  const asking = q.limit?.phase === 'asking'
+  notify.send({
+    kind: 'needs-you', title: asking ? `${q.bot?.name || 'Your bot'}: its answer to ${who} in ${where} has run ${q.limit.ran} ${q.limit.ran === 1 ? 'minute' : 'minutes'}` : `${q.bot?.name || 'Your bot'}: ${who} asked in ${where}`,
+    body: asking ? 'Let it carry on, or stop it, in Needs You.' : q.needsOwner ? 'Nothing could answer it: write the reply in Needs You.' : 'An answer waits for you to send or discard.',
+    url: `/?agent=${encodeURIComponent(`slack:${q.id}`)}&inbox=1`, tag: `bot-${q.id}`,
+  }).catch(() => {})
 }
 // The files an answering agent opened in its run, from its conversation (for the record).
 const READS = new Set(['Read', 'Grep', 'Glob', 'read_file', 'shell', 'exec_command'])
@@ -4189,9 +4310,14 @@ async function signInKind(kind) {
   if (kind === 'codex') return { kind: s.plan === 'ChatGPT' ? 'subscription' : s.plan === 'API key' ? 'api' : 'unknown', ...provider }
   return { kind: 'unknown', ...provider }
 }
+// What a bot may do, in brief, for the line that sums up its Access and the Bots overview's cards
+// (src/components/bots/access.js says it): who may ask (how many named), its folders, its memory,
+// what it may change, how many MCP servers, what answers, its limits. Never who the people are.
+const accessOf = (b) => ({ who: b.who, askers: b.askers.length, readsFrom: b.readsFrom, memory: b.memory, changes: b.changes, mcp: b.mcp.length, answerers: b.answerers, limits: b.limits })
 // A bot as Settings shows it: how it's connected and why not (and the scopes its app lacks), its
 // settings and instructions, its folders as they stand, which agent answers and how it's signed in,
-// the manifest to make or update its app with, and how many questions wait.
+// the manifest to make or update its app with, and how many questions wait. Brief (the list): how
+// it stands, how many questions today and what waits for you, and its access in brief.
 async function botView(b, { brief = false } = {}) {
   // A draft: its name and who asked for it; what it would be is its setup chat's (botsetup.js).
   if (b.draft) return { id: b.id, name: b.name, description: b.description, draft: true, from: b.from === 'chief' ? 'chief' : 'you', state: 'draft', where: {}, connected: false, waiting: 0, paused: false }
@@ -4209,7 +4335,7 @@ async function botView(b, { brief = false } = {}) {
   const shared = Object.fromEntries(conns.PLATFORMS.map((p) => { const c = conns.sharedOf(p); return [p, c ? { id: c.id, name: c.name } : null] }))
   const base = { id: b.id, name: b.name, description: b.description, icon: b.icon || null, state: s.state, why: s.why || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null, appId: s.appId || null, where, connected: all.state === 'connected', connections: via, shared }
   const v = await desk.view(b.id)
-  if (brief) return { ...base, waiting: v?.waiting || 0, answering: v?.answering || 0, paused: b.paused }
+  if (brief) return { ...base, waiting: v?.waiting || 0, answering: v?.answering || 0, paused: b.paused, today: v?.today || 0, proposed: v?.memoryCount?.proposed || 0, access: accessOf(b) }
   // How many channels its Slack app is in (Set Up's checklist: invited to one), asked of Slack once
   // a minute at most.
   if (s.state === 'connected' && ch?.parts?.slack?.channels) {
@@ -4237,7 +4363,8 @@ async function botView(b, { brief = false } = {}) {
   const routinesNow = await routines.list().catch(() => ({ routines: [] }))
   return {
     ...base, ...v,
-    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback },
+    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback, answerIn: b.answerIn },
+    carryOn: botsStore.CARRY_ON_MIN,
     paused: b.paused,
     instructions: { text: botsStore.readOwn(b.id), file },
     agents: ['claude', 'codex'].map((k) => ({ kind: k, label: adapter(k).label, installed: have.has(k), confined: !!readOnly(k)?.confined, canChange: canChange(k) })),
@@ -4275,16 +4402,34 @@ app.get('/api/bots', botsGuard, wrapBot(async () => ({
   deleted: botsStore.deleted().filter((d) => desk.has(d.id)).map((d) => ({ ...d, cleared: desk.cleared(d.id) })),
   you: String(cfg.name || '').trim() || null,
 })))
-// A new bot, by its name.
+// A new bot, by its name. From a starting point (a template), the access it starts with is its own
+// from the start, with the folder you picked (readsFrom), through the same checks as any change:
+// one they turn down makes nothing. What it may change only where something here can make a change
+// (Claude Code in what answers): else it changes nothing, and that's said (notes: ['changes']).
 app.post('/api/bots', botsGuard, wrapBot(async (req) => {
+  const tpl = req.body?.template ? templateOf(String(req.body.template)) : null
   const b = botsStore.create({ name: req.body?.name, description: req.body?.description, template: req.body?.template || null }, String(cfg.name || '').trim())
+  const want = { ...(tpl?.access || {}), ...(Array.isArray(req.body?.readsFrom) && req.body.readsFrom.length ? { readsFrom: req.body.readsFrom } : {}) }
+  const notes = []
+  let made = b
+  if (Object.keys(want).length) {
+    try {
+      if (want.changes && want.changes !== 'none' && !(await answererOf({ ...b, ...want })).changes) { want.changes = 'none'; notes.push('changes') }
+      made = botsStore.save(b.id, await checkSettings(b, want, req)).after
+    } catch (e) { botsStore.remove(b.id); throw e }
+  }
   connectBot(b.id)
-  desk.record(b.id, 'settings.changed', { setting: 'created', old: null, new: { name: b.name, ...(b.template ? { template: b.template } : {}) }, ...changedBy(req) })
+  desk.record(b.id, 'settings.changed', { setting: 'created', old: null, new: { name: b.name, ...(b.template ? { template: b.template, access: settingSaid(accessOf(made)) } : {}) }, ...changedBy(req) })
   desk.sync()
-  return botView(b)
+  return { ...(await botView(made)), ...(notes.length ? { notes } : {}) }
 }))
-// What a new bot can start from.
-app.get('/api/bots/templates', botsGuard, wrapBot(async () => ({ templates: listTemplates(String(cfg.name || '').trim()) })))
+// What a new bot can start from: each with the access it starts with, its folder when that's here,
+// and whether something here can make a change (Claude Code), for one that starts suggesting them.
+app.get('/api/bots/templates', botsGuard, wrapBot(async () => {
+  const here = async (f) => (f ? fs.promises.stat(path.resolve(String(f).replace(/^~(?=$|[\\/])/, os.homedir()))).then((s) => s.isDirectory(), () => false) : false)
+  const list = listTemplates(String(cfg.name || '').trim())
+  return { templates: await Promise.all(list.map(async (x) => ({ ...x, folderHere: await here(x.folder) }))), canChange: (await answererOf({ answerers: null, agent: null })).changes }
+}))
 
 // ---------- Setting a bot up by saying what it's for (botsetup.js) ----------
 // AI Assist's model (the one picked for Studio, else the one AI Assist reaches first: studioModel),
@@ -4569,6 +4714,8 @@ async function checkSettings(b, x, req) {
     next.answerers = want.length ? want : null
   }
   if (x.fallback !== undefined) next.fallback = x.fallback !== false
+  // Where a question at the top of a channel is answered: in the channel, or a thread of its own.
+  if (x.answerIn !== undefined) next.answerIn = x.answerIn === 'channel' ? 'channel' : 'thread'
   // You in Slack, so its drafts come to your direct messages, and you may always ask.
   if (x.owner !== undefined) {
     if (x.owner && !/^[UW][A-Z0-9]{2,20}$/.test(String(x.owner.id || ''))) throw new Error('Pick yourself from your workspace\'s people')
@@ -4787,8 +4934,10 @@ async function connView(c) {
     ownerGuess,
     id: c.id, name: c.name, platform: c.platform, shared: c.shared, own: c.bot ? { id: c.bot, name: botsStore.get(c.bot)?.name || c.bot } : null,
     bots: on.map((b) => ({ id: b.id, name: b.name, description: b.description || '', paused: b.paused, command: slack && c.perBot ? slackCommand(b.name) : null })),
-    owner: c.owner, defaults: c.defaults, perBot: c.perBot, createdAt: c.createdAt || null,
-    state: s.state, why: s.why || null, since: s.since || null, lastEvent: s.lastEvent || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null, appId: s.appId || null,
+    owner: c.owner, defaults: c.defaults, perBot: c.perBot, assist: c.assist, unsure: c.unsure, createdAt: c.createdAt || null,
+    // (Paused: brought from another computer, or moved to one; Settings › Back Up & Move starts it.)
+    paused: c.paused ? { why: c.pausedWhy || null } : null,
+    state: c.paused ? 'off' : s.state, why: c.paused ? c.pausedWhy || null : s.why || null, since: s.since || null, lastEvent: s.lastEvent || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null, appId: s.appId || null,
     // (Discord's server, intents and invite; Teams' endpoint, port and app: as each says them.)
     status: slack ? null : s,
     reached, you: String(cfg.name || '').trim() || null,
@@ -4816,7 +4965,30 @@ app.post('/api/connections', botsGuard, wrapBot(async (req) => {
 }))
 app.get('/api/connections/:cid', botsGuard, wrapBot(async (req) => connView(connOr404(req.params.cid))))
 app.get('/api/connections/:cid/activity', botsGuard, wrapBot(async (req) => ({ routed: conns.routed(connOr404(req.params.cid).id, 200) })))
-// Its name, you there, which bot answers in which channel, and a slash command for each bot.
+// How a shared connection hands each question to one of its bots (the Routing page): its rules in
+// connhub's order, its bots with what AI Assist picks them by (their descriptions) and the channels
+// each is the default bot in, and which model AI Assist would pick with (none: it can't, so it
+// asks, or goes to the bot you set for that).
+app.get('/api/connections/:cid/routing', botsGuard, wrapBot(async (req) => {
+  const c = connOr404(req.params.cid)
+  return { ...(await connView(c)), rules: c.shared ? RULES : [], assistModel: await assistState() }
+}))
+// Try a Message: which bot a message would go to, and why (connhub.js dry), with nothing sent,
+// answered or kept, and no bot run. Who asks: you, someone picked from there ({ id, name }), or
+// someone not named (null); where: a channel there, or a direct message; a reply in a thread a
+// bot answered in (thread: that bot); with a mention or without.
+app.post('/api/connections/:cid/try', botsGuard, wrapBot(async (req) => {
+  const c = connOr404(req.params.cid)
+  const x = req.body || {}
+  const text = String(x.text ?? '')
+  if (!text.trim()) throw new Error('Type a message to try')
+  const p = x.person
+  const from = p === 'you' ? { you: true, id: c.owner?.id || null, name: botOwnerName() } : p && botsStore.PERSON_ID.test(String(p.id || '')) ? { id: String(p.id), name: String(p.name || '').replace(/\s+/g, ' ').trim().slice(0, 80) || null } : null
+  const channel = x.channel && botsStore.CHANNEL_ID.test(String(x.channel)) ? String(x.channel) : null
+  return hubs.dry(c.id, { text, channel, channelName: x.channelName ? String(x.channelName).replace(/^#/, '').slice(0, 80) : null, dm: x.dm === true, from, mention: x.mention !== false, thread: /^b\d{1,4}$/.test(String(x.thread || '')) ? String(x.thread) : null })
+}))
+// Its name, you there, which bot answers in which channel, a slash command for each bot, whether
+// AI Assist picks, and the bot for a question nothing else places.
 app.patch('/api/connections/:cid', botsGuard, wrapBot(async (req) => {
   const c = connOr404(req.params.cid)
   const x = req.body || {}
@@ -4842,8 +5014,15 @@ app.patch('/api/connections/:cid', botsGuard, wrapBot(async (req) => {
       next.defaults.push({ id, name: String(d?.name || '').replace(/^#/, '').trim().slice(0, 80) || null, bot: String(d.bot) })
     }
   }
+  // Whether AI Assist picks among the bots someone may ask, and the bot a question goes to when
+  // nothing says which (null: they're asked): one of the bots on it.
+  if (x.assist !== undefined) next.assist = x.assist !== false
+  if (x.unsure !== undefined) {
+    if (x.unsure && !conns.botsOn(c, botsStore.live()).some((b) => b.id === String(x.unsure))) throw new Error('Pick one of the bots on this connection')
+    next.unsure = x.unsure ? String(x.unsure) : null
+  }
   const { before, after } = conns.save(c.id, next)
-  const said = (k, v) => settingSaid(k === 'defaults' ? v.map((d) => `${d.name || d.id}: ${botsStore.get(d.bot)?.name || d.bot}`) : v)
+  const said = (k, v) => settingSaid(k === 'defaults' ? v.map((d) => `${d.name || d.id}: ${botsStore.get(d.bot)?.name || d.bot}`) : k === 'unsure' && v ? botsStore.get(v)?.name || v : v)
   for (const k of Object.keys(next)) if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) conns.note(c.id, { event: 'settings', what: k, old: said(k, before[k]), new: said(k, after[k]), ...changedBy(req) })
   pushFleet()
   return connView(after)
@@ -4934,6 +5113,35 @@ app.delete('/api/connections/:cid', botsGuard, wrapBot(async (req) => {
   pushFleet()
   return { ok: true }
 }))
+// ---------- Back Up & Move (backup.js) ----------
+// This computer's setup as one file sealed with a passphrase, or straight to another of your
+// computers over the link between them; and one from another computer, applied here once you say so,
+// its connections paused until the one it came from has stopped its bots (or you Start them).
+backup.use({
+  computer: () => relay.thisName(), installed, chiefDir: CHIEF_DIR,
+  memoryOf: (id) => desk.memory.list(id).filter((x) => x.state === 'kept').map(({ id: mid, kind, of, ofName, text, state }) => ({ id: mid, kind, of, ofName, text, state })),
+  // A bot from another computer, checked as an imported one is (bringBot), saying where it came from.
+  bring: async (bundle, { req, paused = false, fromFile = true, why = null } = {}) => {
+    const r = await bringBot(bundle, req, { fromFile, why: why ? String(why).split(':')[0] : null })
+    if (paused && !r.bot.paused) r.bot = botsStore.save(r.bot.id, { paused: true }).after
+    return r
+  },
+  pauseBot: (id, why) => { const { before, after } = botsStore.save(id, { paused: true }); desk.record(id, 'settings.changed', { setting: 'paused', old: before.paused, new: after.paused, by: 'Bridge AI', why }); desk.pause(id).catch(() => {}) },
+  unpauseBot: (id) => { const { before, after } = botsStore.save(id, { paused: false }); desk.record(id, 'settings.changed', { setting: 'paused', old: before.paused, new: after.paused, by: botOwnerName() }) },
+  saveSettings: (p) => afterChange(settings.patch(p)),
+  teamsPort: () => freeTeamsPort(),
+  synced: () => { hubs.sync(); desk.sync(); pushFleet() },
+})
+backup.routes(app, {
+  here: (req) => fromHere(req), viaMachine: (req) => viaMachine(req),
+  // (A device paired a moment ago with a code counts once it's kept here: Keep, in the app.)
+  kept: (req) => !req.headers['x-bridge-relay'] || relay.isKept(req.headers['x-bridge-relay']), deviceOf: (req) => relay.deviceOf(req.headers['x-bridge-relay'])?.name || null,
+  machineOf: (req) => (viaMachine(req) ? machines.ofDevice(relay.deviceOf(req.headers['x-bridge-relay'])) : null),
+  notify: (o) => notify.send(o).catch(() => {}),
+})
+// The files a bot's runs made and sent back, newest first (its Activity lists them, with Open and
+// Send to…).
+app.get('/api/bots/:id/files', botsGuard, wrapBot(async (req) => ({ files: await botfiles.list(recordOr404(req.params.id).id) })))
 // A bot given a connection of its own there (an app of its own, named as it is: its steps then);
 // and moved back to the shared one, its own connection's tokens deleted (its app can be deleted on
 // the platform afterwards).
@@ -5006,6 +5214,25 @@ app.get('/api/bots/:id/activity', botsGuard, wrapBot(async (req) => {
     changes: desk.changes(b.id),
   }
 }))
+// Conversations: one row for each person who asked it something, or each place (by=place), the
+// latest first; one person's or place's turns, each with what ran for it, and a person's running
+// context, which you keep, let go of, or forget all of at once.
+app.get('/api/bots/:id/conversations', botsGuard, wrapBot(async (req) => {
+  const b = recordOr404(req.params.id)
+  const by = req.query.by === 'place' ? 'place' : 'person'
+  return { by, rows: desk.talks(b.id, { by }).slice(0, 300), memory: b.memory || null, carryOn: botsStore.CARRY_ON_MIN }
+}))
+app.get('/api/bots/:id/conversations/:by/:key', botsGuard, wrapBot(async (req) => {
+  const b = recordOr404(req.params.id)
+  const key = String(req.params.key)
+  return desk.turnsIn(b.id, req.params.by === 'place' ? { place: key } : { person: key })
+}))
+app.post('/api/bots/:id/people/:pid/:act', botsGuard, wrapBot(async (req) => {
+  const b = recordOr404(req.params.id)
+  const act = String(req.params.act)
+  if (!['keep', 'drop', 'forget'].includes(act)) throw Object.assign(new Error('Keep, drop or forget'), { status: 400 })
+  return { context: desk.context[act](b.id, String(req.params.pid), { device: deviceOfReq(req) }) }
+}))
 app.get('/api/bots/:id/activity/:conv', botsGuard, wrapBot(async (req) => {
   const b = recordOr404(req.params.id)
   const t = desk.timeline(b.id, String(req.params.conv))
@@ -5028,16 +5255,67 @@ app.get('/api/bots/:id/export', botsGuard, (req, res) => {
 // Your answer to one, from Needs You: send (as edited) or discard; for a change waiting on you,
 // Send approves it and opens its pull request first.
 app.post('/api/bots/questions/:id', botsGuard, wrapBot((req) => desk.decide(req.params.id, { send: req.body?.send === true, text: req.body?.text })))
+// Your decision about a run at its time limit, from Needs You (on a computer, or the phone through
+// the relay, which says which device): Continue (minutes: 10 or 30) or Stop.
+app.post('/api/bots/questions/:id/limit', botsGuard, wrapBot((req) => desk.limitAct(req.params.id, String(req.body?.act || ''), { minutes: req.body?.minutes, via: 'app', ...changedBy(req) })))
+// A bot from another computer: its own export, a backup or a move (backup.js). Made with its plain
+// settings, then each of the rest checked as Settings checks it (checkSettings: a folder there, inside
+// your home folder and not Bridge AI's own; people by their ids; what answers; its MCP servers here)
+// and kept only if it passes, one at a time, so one that doesn't is left out and said and the rest
+// stand. From a file (fromFile: its own export, a backup) what would let it act for you or say
+// more than it's asked is held, as a new bot has it, until you turn it on here once you've looked it
+// over (HELD: answering without asking, who you are on each platform, which drafts would go to,
+// what answers (Automatic: a file can't pick Codex, whose sandbox reads beyond its folders), changes
+// and their repository, your MCP servers, copies of your agents' conversations, saying what
+// your agents are doing, keeping what it learns without asking): each said. A move between your own
+// computers keeps them (backup.js shows them first). { bot, renamed, problems, memory }
+const BRING_WHAT = { who: 'who can ask', askers: 'who can ask', owner: 'you in Slack', owners: 'you in Discord and Teams', instructionsFile: 'its instructions file', repo: 'its repository', agent: 'what answers', answerers: 'what answers', changes: 'its changes', mcp: 'its MCP servers', muted: 'its muted channels', listen: 'the channels it listens in', agentCopies: 'copies of your agents\' conversations', agentsStatus: 'saying what your agents are doing', memory: 'what it remembers' }
+const HELD = { auto: false, owner: null, owners: null, agent: null, answerers: null, changes: 'none', repo: null, mcp: [], agentCopies: false, agentsStatus: false, memory: 'approve' }
+const heldSays = (name, k, v, all = {}) => ({
+  auto: `${name} doesn't answer without asking here: turn that on in its settings once you've looked it over`,
+  owner: `Who you are in Slack, Discord and Teams isn't taken from a file: set it again in ${name}'s settings`,
+  answerers: `${name} is answered by what's here (Automatic): the file asked for ${[...(Array.isArray(all.answerers) ? all.answerers : []), ...(all.agent ? [`agent:${all.agent}`] : [])].join(', ')}; pick it in its settings once you've looked it over`,
+  changes: `${name} doesn't make changes here (the file asked for ${v === 'pr' ? 'draft pull requests' : 'suggested changes'}${all.repo ? ` in ${String(all.repo).slice(0, 200)}` : ''}): turn that on in its settings once you've looked it over`,
+  mcp: `${name} uses none of your MCP servers here (the file asked for ${(Array.isArray(v) ? v : []).join(', ')}): pick them in its settings`,
+  agentCopies: `${name} doesn't answer from copies of your agents' conversations here: turn that on in its settings`,
+  agentsStatus: `${name} doesn't say what your agents are doing here: turn that on in its settings`,
+  memory: `${name} asks you before it keeps what it learns here (the file asked for ${v === 'off' ? 'none kept' : 'kept straight away'}): change it in its settings`,
+}[k] || null)
+const heldDiffers = (k, v) => (k === 'owner' ? !!v?.id : k === 'owners' ? Object.keys(v || {}).length > 0 : ['mcp', 'answerers'].includes(k) ? Array.isArray(v) && v.length > 0 : k === 'agent' ? !!v : k === 'repo' ? false : JSON.stringify(v) !== JSON.stringify(HELD[k]))
+async function bringBot(bundle, asked, { fromFile = true, why = null } = {}) {
+  const req = asked || { headers: {} }
+  const r = botsStore.fromBundle(bundle, botOwnerName(), { held: true })
+  const problems = []
+  const next = {}
+  for (const k of botsStore.CHECKED) {
+    if (!Object.hasOwn(r.held, k)) continue
+    const v = r.held[k]
+    if (fromFile && Object.hasOwn(HELD, k)) {
+      const said = heldDiffers(k, v) ? heldSays(r.bot.name, k === 'owners' ? 'owner' : k === 'agent' ? 'answerers' : k, v, r.held) : null
+      if (said && !problems.includes(said)) problems.push(said)
+      continue
+    }
+    if (k === 'readsFrom') {
+      for (const f of (Array.isArray(v) ? v : []).slice(0, 50)) {
+        try { next.readsFrom = (await checkSettings({ ...r.bot, ...next, readsFrom: next.readsFrom || [] }, { readsFrom: [...(next.readsFrom || []), String(f)] }, req)).readsFrom } catch (e) { problems.push(`${r.bot.name} doesn't read ${String(f).slice(0, 200)}: ${e.message}`) }
+      }
+      continue
+    }
+    try { Object.assign(next, await checkSettings({ ...r.bot, ...next }, { [k]: v }, req)) } catch (e) { problems.push(`${r.bot.name}: ${BRING_WHAT[k] || k} left out: ${e.message}`) }
+  }
+  const bot = Object.keys(next).length ? botsStore.save(r.bot.id, next).after : r.bot
+  connectBot(bot.id)
+  const kept = desk.memory.bring(bot.id, r.memory)
+  desk.record(bot.id, 'settings.changed', { setting: 'imported', old: null, new: { name: bot.name, memory: kept, from: String(bundle?.exportedAt || '') || null, ...(problems.length ? { leftOut: problems.length } : {}) }, ...(asked ? changedBy(req) : { by: 'Bridge AI' }), ...(why ? { why } : {}) })
+  return { bot, renamed: r.renamed, problems, memory: kept }
+}
 // A bot from a file exported on another computer (instructions, memory and settings; never tokens).
 app.post('/api/bots/import', botsGuard, wrapBot(async (req) => {
-  const r = botsStore.fromBundle(req.body?.bundle, String(cfg.name || '').trim())
-  connectBot(r.bot.id)
-  const kept = desk.memory.bring(r.bot.id, r.memory)
-  desk.record(r.bot.id, 'settings.changed', { setting: 'imported', old: null, new: { name: r.bot.name, memory: kept, from: String(req.body?.bundle?.exportedAt || '') || null }, ...changedBy(req) })
+  const r = await bringBot(req.body?.bundle, req)
   desk.sync()
   const v = await botView(r.bot)
   const problems = [
-    ...(v.folders || []).filter((f) => !f.ok).map((f) => `${f.shown} isn't on this computer: ${f.problem}`),
+    ...r.problems,
     ...(r.renamed ? [`There's a bot called ${r.bot.name.replace(/ \(\d+\)$/, '')} here already, so this one is ${r.bot.name}`] : []),
     'Connect its Slack app here: paste its two tokens under Your Slack App. (A bot\'s tokens never go in its file.)',
     'If it answered in Discord or Teams too, connect those here under Where It Answers.',
@@ -5055,7 +5333,7 @@ app.get('/api/bots/:id/channels', botsGuard, wrapBot(async (req) => {
 app.get('/api/bots/:id/bundle', botsGuard, (req, res) => {
   try {
     const b = botOr404(req.params.id)
-    const out = botsStore.bundleOf(b.id, desk.memory.list(b.id).filter((x) => x.state === 'kept').map(({ id, kind, of, ofName, text, state }) => ({ id, kind, of, ofName, text, state })))
+    const out = botsStore.bundleOf(b.id, desk.memory.list(b.id).filter((x) => x.state === 'kept').map(({ id, kind, of, ofName, text, state, private: priv, place }) => ({ id, kind, of, ofName, text, state, ...(priv ? { private: true, place } : {}) })))
     desk.record(b.id, 'settings.changed', { setting: 'exported', old: null, new: { memory: out.memory.length }, ...changedBy(req) })
     res.setHeader('content-type', 'application/json; charset=utf-8')
     res.setHeader('content-disposition', `attachment; filename="${b.name.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || b.id}.bridge-bot.json"`)
@@ -5069,6 +5347,8 @@ app.patch('/api/bots/:id/memory/:mid', botsGuard, wrapBot(async (req) => {
   const b = botOr404(req.params.id)
   const from = { device: deviceOfReq(req) }
   if (req.body?.keep === true) desk.memory.keep(b.id, req.params.mid, from)
+  // (A place's own learning, used everywhere: only when you say so.)
+  if (req.body?.widen === true) desk.memory.widen(b.id, req.params.mid, from)
   return req.body?.text !== undefined ? desk.memory.edit(b.id, req.params.mid, req.body.text, from) : desk.memory.list(b.id).find((x) => x.id === req.params.mid) || null
 }))
 app.delete('/api/bots/:id/memory/:mid', botsGuard, wrapBot(async (req) => { desk.memory.remove(botOr404(req.params.id).id, req.params.mid, { device: deviceOfReq(req) }); return { ok: true } }))
@@ -5112,6 +5392,7 @@ meetings.setHelpers({
   board: {
     scene: async (m, hint) => { const id = await meetBoard.find(m.id, hint || m.boardId || null); return id ? meetBoard.itemsOf((await boards.read(id)).data, m.id) : { items: [], other: [] } },
     add: (m, items, o) => meetBoard.add(m, items, o),
+    retag: (id, from, to, shift) => meetBoard.retag(id, from, to, shift),
     labelOf: meetBoard.labelOf,
     nameOf: async (id) => (await chatModels.models().catch(() => [])).find((x) => x.id === id)?.label || id,
   },
@@ -5163,6 +5444,8 @@ const upgrades = [
 const onUpgrade = async (req, socket, head) => {
   if (!(await guard.upgrade(req)) || !pages.upgrade(req)) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); return socket.destroy() }
   if (!auth.upgrade(req)) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy() }
+  // A device not let in here (letin.js). Anything that goes wrong deciding: the socket goes, never the server.
+  try { if (letIn.upgrade(req, socket, head)) return } catch { return socket.destroy() }
   if (machines.isMachinePath(req.url)) return machines.upgrade(req, socket, head) // a terminal on another of your devices
   if (servePreview.isPath(req.url)) return servePreview.upgrade(req, socket, head).catch(() => socket.destroy()) // a project's app's hot reload, for another of your devices
   if (remote.isPath(req.url)) return remote.upgrade(req, socket, head) // this screen, seen from another of your devices

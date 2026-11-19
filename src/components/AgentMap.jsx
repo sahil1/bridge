@@ -122,7 +122,7 @@ function Lane({ d, list, cloud = false, filter, hl, onOpen, onShow }) {
           <b>{cloud ? t('Cloud Agents') : d.name}</b>
           <small className="muted">
             {cloud ? t("Running on each provider's computers")
-              : [OS[d.os], d.here ? t('this computer') : d.online ? t('Online') : (d.at || d.lastSeen) ? t('Offline · as of {when}', { when: ago(d.at || d.lastSeen) }) : t('Offline')].filter(Boolean).join(' · ')}
+              : [OS[d.os], d.here ? t('this computer') : d.notLetIn ? t('Not let in') : d.online ? t('Online') : (d.at || d.lastSeen) ? t('Offline · as of {when}', { when: ago(d.at || d.lastSeen) }) : t('Offline')].filter(Boolean).join(' · ')}
           </small>
         </div>
         <span className="am-lane-count" title={said}>{list.length}</span>

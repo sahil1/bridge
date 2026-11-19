@@ -7,6 +7,10 @@ import { useFolder } from '../files/fsapi.js'
 import { ago } from '../Machines.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { Connections, BotReach } from '../bots/Connections.jsx'
+import Access, { AccessLine } from '../bots/Access.jsx'
+import { accessSaid } from '../bots/access.js'
+import Conversations, { AnswerIn } from '../bots/Conversations.jsx'
+import BotFiles, { MadeFiles } from '../bots/BotFiles.jsx'
 import { t } from '../../i18n/index.js'
 import './bots.css'
 
@@ -16,7 +20,7 @@ import './bots.css'
 // it, replying in its threads, with its /command or the message shortcut, each question answered by
 // an agent that can only read (server/frontdesk.js) and the answer waiting in Needs You, and in your
 // Slack direct messages, for you to send, edit or discard. At the top, your bots and New Bot (from
-// a template, or a bot exported elsewhere). For the one picked, four tabs:
+// a template, or a bot exported elsewhere). For the one picked, five tabs:
 //   Set Up: whether it's connected and, when it isn't, why (and when its Slack app needs the new
 //     manifest); pausing it; its name and description, which are its name in Slack, and its export;
 //     making the app (the manifest to paste, the two tokens) and connecting it; you in Slack (whose
@@ -25,6 +29,8 @@ import './bots.css'
 //     pull request, after you approve the diff or at once); the limits for each person; the channels
 //     it answers in without a mention, and those it's muted in; how answers go, which agent answers,
 //     and a note when that agent answers through a personal plan; and its scheduled posts.
+//   Conversations: everyone it talked with and everywhere, one row each, each opening to its turns
+//     and what ran for them, and a person's running context (bots/Conversations.jsx).
 //   Try It: a question asked here as someone would in Slack, its draft, what it read and its record,
 //     with nothing sent to Slack.
 //   Memory: what it has learned, about itself, each channel and each person, the learnings waiting
@@ -784,7 +790,7 @@ function FirstBot({ onStart }) {
 // Who may ask: people picked from the workspace by name, or everyone in the channels it's in; never
 // guests or people from other companies. The people named are also the only ones (with you) who may
 // ask for a change. And what anyone else gets.
-function Askers({ d, save }) {
+export function Askers({ d, save }) {
   const { people, error, connected } = usePeople(d)
   const s = d.settings
   const askers = s.askers
@@ -871,7 +877,7 @@ function Instructions({ d, save }) {
 }
 
 // The folders it reads from: an agent that can only read, kept to them (with Claude Code).
-function ReadsFrom({ d, save }) {
+export function ReadsFrom({ d, save }) {
   const [where, setWhere] = useState('')
   const [browse, setBrowse] = useState(false)
   // The system's folder picker on the computer it runs on; anywhere else, that computer's folders,
@@ -918,7 +924,7 @@ function ReadsFrom({ d, save }) {
 // its tools, asked of the server on the computer it runs on, and which of them only read. Those may be
 // used for anyone who may ask; the others only when you, or someone you named under Who Can Ask, ask.
 // Only with Claude Code answering, which holds a run to them.
-function McpServers({ d, save }) {
+export function McpServers({ d, save }) {
   const [x, setX] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -972,7 +978,7 @@ function McpServers({ d, save }) {
 // Changes: none, a diff you approve before a draft pull request opens, or a draft pull request at
 // once. The agent edits only its own copy (a git worktree), and Bridge AI does the git and GitHub
 // part with your own gh. Only the people named, and you, may ask for one.
-function Changes({ d, save }) {
+export function Changes({ d, save }) {
   const s = d.settings
   const c = d.changes || {}
   const repos = c.repos || []
@@ -1011,30 +1017,44 @@ function Changes({ d, save }) {
   )
 }
 
-// The limits for each person who asks: questions a day, at once, and how long a run may take. You
-// aren't limited.
+// The limits for each person who asks: questions a day (you have none), at once, and how long a run
+// may take; and what a run does at that time limit, At the Time Limit: Ask Me (every bot's to start:
+// you're asked whether it may carry on, up to its Longest Run) or Stop (it's stopped there and comes
+// to you, as before). Saved as one setting, through the server's checks.
 const LIMITS = () => [['day', t('Questions a day'), 1, 1000], ['atOnce', t('At once'), 1, 5], ['minutes', t('Minutes a run'), 1, 60]]
-function Limits({ d, save }) {
-  const l = d.settings.limits || { day: 30, atOnce: 2, minutes: 10 }
+const LONGEST = () => ['longest', t('Longest Run, in minutes'), 1, 1440]
+export function Limits({ d, save }) {
+  const l = { day: 30, atOnce: 2, minutes: 10, atLimit: 'ask', longest: 120, ...(d.settings.limits || {}) }
+  const ask = l.atLimit !== 'stop'
   const [v, setV] = useState(l)
-  useEffect(() => { setV(l) }, [l.day, l.atOnce, l.minutes]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setV(l) }, [l.day, l.atOnce, l.minutes, l.longest]) // eslint-disable-line react-hooks/exhaustive-deps
+  const fields = [...LIMITS(), ...(ask ? [LONGEST()] : [])]
   const keep = () => {
-    const next = Object.fromEntries(LIMITS().map(([k]) => [k, Math.round(Number(v[k])) || l[k]]))
-    if (LIMITS().some(([k]) => next[k] !== l[k])) save({ limits: next })
+    const next = Object.fromEntries(fields.map(([k]) => [k, Math.round(Number(v[k])) || l[k]]))
+    if (fields.some(([k]) => next[k] !== l[k])) save({ limits: next })
     else setV(l)
   }
+  const field = ([k, label, min, max]) => (
+    <label key={k} className="sb-field">
+      <span>{label}</span>
+      <input className="st-input" type="number" inputMode="numeric" min={min} max={max} value={v[k] ?? ''} onChange={(e) => setV((x) => ({ ...x, [k]: e.target.value }))} onBlur={keep} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); keep() } }} />
+    </label>
+  )
   return (
     <section className="st-sec" data-setting="slack-limits">
       <h4>{t('Limits')}</h4>
-      <p className="muted small">{t('For each person who asks. A question over the day\'s limit gets a polite no; one over the at-once limit waits its turn; a run that goes past its minutes is stopped, and the question comes to you. You aren\'t limited.')}</p>
-      <div className="sb-limits">
-        {LIMITS().map(([k, label, min, max]) => (
-          <label key={k} className="sb-field">
-            <span>{label}</span>
-            <input className="st-input" type="number" inputMode="numeric" min={min} max={max} value={v[k] ?? ''} onChange={(e) => setV((x) => ({ ...x, [k]: e.target.value }))} onBlur={keep} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); keep() } }} />
-          </label>
-        ))}
+      <p className="muted small">{t('For each person who asks. A question over the day\'s limit gets a polite no; one over the at-once limit waits its turn. You have no limit a day.')}</p>
+      <div className="sb-limits">{LIMITS().map(field)}</div>
+      <div className="st-row sb-at-limit" data-setting="slack-at-limit">
+        <span className="small">{t('At the Time Limit')}</span>
+        <div className="seg" role="radiogroup" aria-label={t('At the Time Limit')}>
+          {[['ask', t('Ask Me')], ['stop', t('Stop')]].map(([k, label]) => <button key={k} type="button" role="radio" aria-checked={l.atLimit === k} className={l.atLimit === k ? 'on' : ''} onClick={() => { if (l.atLimit !== k) save({ limits: { atLimit: k } }) }}>{label}</button>)}
+        </div>
       </div>
+      <p className="muted small">{ask
+        ? t('A run that goes past its minutes asks you whether it may carry on, in Needs You and your direct messages, and whoever asked is told it\'s taking longer. It goes on for 5 minutes while you decide; Continue gives it 10 or 30 more, never past its Longest Run. With no answer in time it\'s stopped and comes to you, and for a day Continue still picks it up where it stopped.')
+        : t('A run that goes past its minutes is stopped, and the question comes to you.')}</p>
+      {ask && <div className="sb-limits">{field(LONGEST())}</div>}
     </section>
   )
 }
@@ -1147,7 +1167,7 @@ export function AnswererList({ value, options = [], automatic = [], fallback = t
 }
 
 // What answers it, in Set Up: AnswererList, with what's here to pick from.
-function Answerers({ d, save }) {
+export function Answerers({ d, save }) {
   const [x, setX] = useState(null)
   useEffect(() => { api(`/bots/${d.id}/answerers?fresh=1`).then(setX, () => setX({ options: [], automatic: [] })) }, [d.id, d.settings.answerers?.join(), d.settings.fallback])
   const st = d.answerers?.list || []
@@ -1282,7 +1302,9 @@ function Scheduled({ d, reload }) {
   )
 }
 
-function SetUp({ d, save, reload, onDelete, again }) {
+// access: what it may do is here too (Settings › Bots); on its page, Access is a tab of its own
+// (bots/Access.jsx), so it isn't said twice.
+function SetUp({ d, save, reload, onDelete, again, access = true }) {
   // (Where it answers: the one you looked at last for this bot, else the first set up, else Slack.)
   const [at, setAt] = useState(() => { const x = saved(`cc-bot-where-${d.id}`); return PLATFORMS.some(([k]) => k === x) ? x : (PLATFORMS.find(([k]) => stateOf(d, k).state !== 'no-tokens') || ['slack'])[0] })
   const pick = (k) => { setAt(k); saved(`cc-bot-where-${d.id}`, k) }
@@ -1306,14 +1328,19 @@ function SetUp({ d, save, reload, onDelete, again }) {
       {!shared && at === 'teams' && <TeamsSetup d={d} save={save} reload={reload} again={again} />}
       <Pause d={d} save={save} />
       <Identity d={d} save={save} onDelete={onDelete} />
-      <Askers d={d} save={save} />
+      {access && <Askers d={d} save={save} />}
       <Instructions d={d} save={save} />
-      <ReadsFrom d={d} save={save} />
-      <McpServers d={d} save={save} />
-      <Changes d={d} save={save} />
-      <Limits d={d} save={save} />
+      {access && (
+        <>
+          <ReadsFrom d={d} save={save} />
+          <McpServers d={d} save={save} />
+          <Changes d={d} save={save} />
+          <Limits d={d} save={save} />
+        </>
+      )}
       <Channels d={d} save={save} />
-      <Answerers d={d} save={save} />
+      <AnswerIn d={d} save={save} />
+      {access && <Answerers d={d} save={save} />}
       <Replies d={d} save={save} />
       <Scheduled d={d} reload={reload} />
     </>
@@ -1329,7 +1356,11 @@ const OUTCOMES = () => [
 const REFUSED = () => ({
   'not-allowed': t('not someone it answers'), guest: t('a guest'), external: t('from another company'), unknown: t('Slack couldn\'t say who they are'), empty: t('no question with the mention'),
   muted: t('it\'s muted in that channel'), paused: t('it\'s paused'), 'over-limit': t('over their limit for the day'),
+  'not-owner': t('only you can let a run carry on'),
 })
+// Where a decision about a run at its time limit was made: on another of your devices, or from your
+// direct messages on a platform.
+const fromSaid = (e) => (e.device ? t('on {device}', { device: e.device }) : e.via && e.via !== 'app' ? t('from {app}', { app: platName(e.via) }) : null)
 // A setting's value, short, for the record's line.
 const valueOf = (v) => { const s = v == null || v === '' ? '—' : typeof v === 'string' ? v : JSON.stringify(v); return s.length > 80 ? `${s.slice(0, 79)}…` : s }
 // One event of a conversation, as a line of its timeline. A change made on another of your devices
@@ -1349,19 +1380,31 @@ function eventLine(e) {
                   : e.how === 'try' ? t('{name} asked in Try It: “{text}”', { name: who, text })
                     : e.how === 'command' ? t('{name} gave it a command: {text}', { name: who, text })
                       : t('{name} mentioned it: “{text}”', { name: who, text })
-      return e.files?.length ? `${line} ${t('(with {files})', { files: e.files.map((f) => f.name).join(', ') })}` : line
+      const on = e.carried ? `${line} ${t('(carrying on the conversation)')}` : line
+      return e.files?.length ? `${on} ${t('(with {files})', { files: e.files.map((f) => f.name).join(', ') })}` : on
     }
     case 'refused': return t('Refused: {why}', { why: REFUSED()[e.why] || e.why })
     case 'queued': return t('Waiting its turn, behind {n} of their questions', { n: e.ahead ?? 1 })
     case 'context': return e.problem ? t('Read the conversation: {why}', { why: e.problem }) : t('Read {n} earlier messages and {pins} pinned, as context', { n: e.messages?.length || 0, pins: e.pins?.length || 0 })
-    case 'run.started': return t('{agent} started, reading {folders}{from}; instructions {version} from {source}', { agent: e.answerer?.label || (e.agent === 'codex' ? 'Codex' : e.agent === 'model' ? e.model || '' : 'Claude Code'), folders: e.folders?.length ? e.folders.join(', ') : t('no folders'), from: e.from ? t(', going on from its earlier conversation') : '', version: e.instructions?.hash || '', source: e.instructions?.source === 'file' ? e.instructions.path : t('Settings') }) + (e.instructions?.problem ? ` (${e.instructions.problem})` : '')
+    case 'run.started': return t('{agent} started, reading {folders}{from}; instructions {version} from {source}', { agent: e.answerer?.label || (e.agent === 'codex' ? 'Codex' : e.agent === 'model' ? e.model || '' : 'Claude Code'), folders: e.folders?.length ? e.folders.join(', ') : t('no folders'), from: e.from ? t(', going on from its earlier conversation') : '', version: e.instructions?.hash || '', source: e.instructions?.source === 'file' ? e.instructions.path : t('Settings') }) + (e.instructions?.problem ? ` (${e.instructions.problem})` : '') + (e.earlier?.problem ? ` (${e.earlier.problem})` : '')
+        + (e.resumed ? ` ${e.resumed.how === 'session' ? t('(picking up where it stopped at its time limit, for {n} minutes)', { n: e.resumed.minutes }) : e.resumed.how === 'messages' ? t('(starting again after its time limit with what it had so far, for {n} minutes)', { n: e.resumed.minutes }) : t('(starting again after its time limit, for {n} minutes)', { n: e.resumed.minutes })}` : '')
+    case 'limit.asked': return t('At its time limit, after {n} minutes: asked you whether it may carry on ({doing})', { n: e.ran ?? '?', doing: e.doing || '' })
+    case 'limit.continued': {
+      const line = t('{name} let it carry on for {n} more minutes', { name: by, n: e.minutes ?? '?' })
+      const from = fromSaid(e)
+      return `${line}${e.resumed ? ` ${t('(after it was stopped)')}` : ''}${from ? ` (${from})` : ''}`
+    }
+    case 'limit.stopped': { const from = fromSaid(e); return `${t('{name} stopped it at its time limit, after {n} minutes', { name: by, n: e.ran ?? '?' })}${from ? ` (${from})` : ''}` }
     case 'run.read': return t('Opened {files}', { files: (e.files || []).map((f) => f.what).join(', ') })
     case 'run.tools': return t('Used the MCP tools {tools}', { tools: (e.tools || []).map((x) => `${x.server}: ${x.tool}${x.n > 1 ? ` ×${x.n}` : ''}`).join(', ') })
     case 'run.skipped': return t('{name} passed over: {why}', { name: e.answerer?.label || e.answerer?.id || '', why: e.why || '' })
     case 'run.passed': return t('{name} couldn\'t answer: {why}. Trying the next.', { name: e.answerer?.label || e.answerer?.id || '', why: e.why || '' })
     case 'run.finished':
       if (e.end === 'finished') return t('Finished in {s} s', { s: Math.round((e.took || 0) / 1000) })
+      if (e.end === 'timeout' && e.why === 'expired') return t('Stopped after {n} minutes: nobody said to carry on in time. Kept, to be picked up again', { n: e.minutes ?? '?' })
+      if (e.end === 'timeout' && e.why === 'longest') return t('Stopped after {n} minutes, its Longest Run', { n: e.minutes ?? '?' })
       if (e.end === 'timeout') return t('Stopped after {n} minutes, its longest run', { n: e.minutes ?? (e.took ? Math.round(e.took / 60000) : '?') })
+      if (e.end === 'stopped' && e.why === 'limit') return t('Stopped by {name} at its time limit', { name: e.by || t('you') })
       if (e.end === 'stopped' && (e.by || e.why)) return e.by ? t('Stopped by {name}', { name: e.by }) + (e.why ? ` (${e.why})` : '') : t('Stopped: {why}', { why: e.why })
       return t('Ended: {why}', { why: e.error || e.end })
     case 'draft': {
@@ -1378,6 +1421,7 @@ function eventLine(e) {
       }
       if (e.kind === 'hold') return t('Told them it\'s passed on to you')
       if (e.kind === 'checking') return t('Told them it\'s being checked with you')
+      if (e.kind === 'longer') return t('Told them it\'s taking longer, and that you\'re asked whether it may carry on')
       return t('Told them: “{text}”', { text: e.text })
     case 'discarded': return e.via === 'slack' ? t('Discarded by {name} from Slack: nothing sent', { name: by }) : t('Discarded: nothing sent')
     case 'skipped': return t('Not for it: no answer')
@@ -1385,17 +1429,25 @@ function eventLine(e) {
     case 'reaction': return e.ok ? (e.removed ? t('Took :{name}: off', { name: e.name }) : t('Reacted :{name}:', { name: e.name })) : t('Couldn\'t react :{name}:: {why}', { name: e.name, why: e.error })
     case 'message.changed': return t('{name} edited a message: “{text}”', { name: who, text: wordsOf(e.text) })
     case 'message.deleted': return t('{name} deleted a message', { name: who })
-    case 'approval.asked': return e.memory ? t('Asked you in your Slack direct messages whether to keep it') : t('Sent to your Slack direct messages, to send, edit or discard')
-    case 'approval.failed': return t('Couldn\'t send it to your Slack direct messages: {why}', { why: e.error })
+    case 'approval.asked':
+      if (e.limit) return e.phase === 'stopped' ? t('Told you in your {app} direct messages it was stopped, and how to let it carry on', { app: platName(e.via) }) : t('Asked you in your {app} direct messages whether it may carry on', { app: platName(e.via) })
+      return e.memory ? t('Asked you in your Slack direct messages whether to keep it') : t('Sent to your Slack direct messages, to send, edit or discard')
+    case 'approval.failed': return e.limit ? t('Couldn\'t ask you in your {app} direct messages: {why}', { app: platName(e.via), why: e.error }) : t('Couldn\'t send it to your Slack direct messages: {why}', { why: e.error })
     case 'memory.proposed': return t('Would like to remember: “{text}”', { text: wordsOf(e.item?.text) })
     case 'memory.kept': return e.imported ? t('Imported with {n} things it remembers', { n: e.imported }) : e.device ? t('{name} kept in its memory, on {device}: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} kept in its memory: “{text}”', { name: by, text: wordsOf(e.item?.text) })
     case 'memory.edited': return e.device ? t('{name} changed what it remembers, on {device}, to: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} changed what it remembers to: “{text}”', { name: by, text: wordsOf(e.item?.text) })
+    case 'memory.widened': return t('{name} let this be used everywhere, not only where it was said: “{text}”', { name: by, text: wordsOf(e.item?.text) })
     case 'memory.deleted': return e.device ? t('{name} deleted from its memory, on {device}: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} deleted from its memory: “{text}”', { name: by, text: wordsOf(e.item?.text) })
     case 'change.proposed': return t('Changed {n} files on {branch}', { n: e.files?.length || 0, branch: e.branch || '' })
     case 'change.approved': return e.via === 'slack' ? t('{name} approved the change from Slack', { name: by }) : t('{name} approved the change', { name: by })
     case 'change.failed': return t('The change couldn\'t go through ({step}): {why}', { step: e.step || '', why: e.error || '' })
     case 'pr.opened': return t('Opened a draft pull request')
+    case 'files.made': return e.files?.length ? t('Made {files}', { files: e.files.map((f) => f.name).join(', ') }) : t('Made no file it could send')
     case 'file.uploaded': return e.ok === false ? t('Couldn\'t send the file {name}: {why}', { name: e.name, why: e.error || '' }) : t('Sent the file {name} ({size})', { name: e.name, size: sizeOf(e.size) })
+    case 'context.noted': return e.ok === false ? t('Couldn\'t keep this in {name}\'s running context: {why}', { name: who, why: e.error || '' }) : e.state === 'kept' ? t('Kept in {name}\'s running context', { name: who }) : t('In {name}\'s running context once you keep it', { name: who })
+    case 'context.kept': return t('{name} kept {n} of {person}\'s conversations in their running context', { name: by, n: e.n ?? 0, person: who })
+    case 'context.dropped': return t('{name} let go of {n} of {person}\'s conversations', { name: by, n: e.n ?? 0, person: who })
+    case 'context.forgotten': return t('{name} forgot {person}\'s running context', { name: by, person: who })
     case 'forgotten': return t('{name} asked it to forget them: {memory} things it remembered deleted, their words blanked in {events} events', { name: who, memory: e.memory ?? 0, events: e.events ?? 0 })
     case 'status': return e.ok === false ? t('Couldn\'t set Slack\'s working status: {why}', { why: e.error || '' }) : e.on ? t('Showed Slack\'s working status') : t('Cleared Slack\'s working status')
     case 'trace.deleted': return e.all ? (e.device ? t('Its activity history was deleted, on {device}', { device: e.device }) : t('Its activity history was deleted')) : t('Months deleted for their age: {months}', { months: (e.months || []).join(', ') })
@@ -1417,6 +1469,7 @@ function Events({ d, events }) {
           {e.type === 'context' && (e.messages?.length > 0 || e.pins?.length > 0) && (
             <details className="sb-ctx"><summary><Icon name="chevron" size={11} />{t('What it read')}</summary><ul>{[...(e.messages || []), ...(e.pins || [])].map((m, k) => <li key={k} className="small"><b>{m.you ? d.name : m.person?.name || m.person?.id}</b>: {wordsOf(m.text)}</li>)}</ul></details>
           )}
+          {e.type === 'files.made' && <MadeFiles bot={d.id} e={e} />}
           {e.type === 'change.proposed' && (e.stat || e.diff) && (
             <details className="sb-ctx"><summary><Icon name="chevron" size={11} />{t('The diff')}</summary>{e.stat && <p className="small mono sb-stat">{e.stat}</p>}{e.diff && <pre className="sb-diff">{e.diff}</pre>}</details>
           )}
@@ -1533,6 +1586,7 @@ function Activity({ d, save }) {
           ))}
         </ul>
       )}
+      <BotFiles d={d} />
       {x?.changes?.length > 0 && (
         <details className="sb-ctx sb-changes" data-setting="bots-changes">
           <summary><Icon name="chevron" size={11} />{t('Changes to it ({n})', { n: x.changes.length })}</summary>
@@ -1699,8 +1753,12 @@ function TryIt({ d }) {
 // What it has learned: about itself in general, each channel, each person. Learnings come from
 // REMEMBER lines in its answers, your edits to its drafts and people saying "remember that…"; each
 // is kept only once you keep it, unless you said straight away. You see, edit and delete each one.
+// One from a direct message or a private channel is that place's: it always waits for you, says where
+// it came from, and is used only there until you use it everywhere.
 const SOURCE = () => ({ remember: t('from one of its answers'), edit: t('from your edit to a draft'), asked: t('someone asked it to remember'), owner: t('added by you'), import: t('imported') })
-function MemItem({ it, onSave, onDelete, onKeep, about = null }) {
+// (Where a place's own learning came from: a direct message with someone, or a private channel.)
+const fromPlace = (it) => (it.place?.kind === 'dm' ? t('Direct messages with {name}', { name: it.place.name || t('someone') }) : `#${it.ofName || it.of}`)
+function MemItem({ it, onSave, onDelete, onKeep, onWiden, about = null }) {
   const [edit, setEdit] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -1719,11 +1777,13 @@ function MemItem({ it, onSave, onDelete, onKeep, about = null }) {
           <div className="sb-mem-text">
             <span className="small">{about && <b>{about}: </b>}{it.text}</span>
             <span className="muted small">{[SOURCE()[it.source] || it.source, it.by && it.source !== 'owner' ? it.by : null, it.at ? ago(it.at) : null].filter(Boolean).join(' · ')}</span>
+            {it.private && <span className="small sb-mem-only">{it.place?.kind === 'dm' ? t('From a direct message with {name}: used only there until you use it everywhere.', { name: it.place.name || t('someone') }) : t('From {channel}, a private channel: used only there until you use it everywhere.', { channel: `#${it.ofName || it.of}` })}</span>}
           </div>
         )}
       {edit == null && (
         <div className="st-row sb-mem-acts">
           {onKeep && <button type="button" className="btn small" disabled={busy} onClick={() => run(onKeep)}><Icon name="check" size={12} /> {t('Keep')}</button>}
+          {onWiden && it.private && it.state === 'kept' && <button type="button" className="ghost-btn" disabled={busy} onClick={() => run(onWiden)}><Icon name="unlock" size={12} /> {t('Use everywhere')}</button>}
           <button type="button" className="ghost-btn" disabled={busy} onClick={() => setEdit(it.text)}><Icon name="edit" size={12} /> {t('Edit')}</button>
           <button type="button" className="ghost-btn danger" disabled={busy} onClick={() => run(onDelete)}><Icon name="trash" size={12} /> {it.state === 'proposed' ? t('Discard') : t('Delete')}</button>
         </div>
@@ -1754,6 +1814,7 @@ function Memory({ d, save, reload }) {
   const edit = (it) => (words) => done(() => api(`/bots/${d.id}/memory/${encodeURIComponent(it.id)}`, { method: 'PATCH', body: { text: words } }))
   const drop = (it) => () => done(() => api(`/bots/${d.id}/memory/${encodeURIComponent(it.id)}`, { method: 'DELETE' }))
   const keep = (it) => () => done(() => api(`/bots/${d.id}/memory/${encodeURIComponent(it.id)}`, { method: 'PATCH', body: { keep: true } }))
+  const widen = (it) => () => done(() => api(`/bots/${d.id}/memory/${encodeURIComponent(it.id)}`, { method: 'PATCH', body: { widen: true } }))
   const proposed = items.filter((i) => i.state === 'proposed')
   const kept = items.filter((i) => i.state !== 'proposed')
   // Kept items in groups: about it in general, about each channel, about each person.
@@ -1765,7 +1826,8 @@ function Memory({ d, save, reload }) {
     for (const i of kept.filter((y) => y.kind === k)) { if (!by.has(i.of)) by.set(i.of, []); by.get(i.of).push(i) }
     for (const [id, list] of by) {
       const name = list.find((i) => i.ofName)?.ofName || id
-      groups.push({ key: `${k}:${id}`, title: k === 'channel' ? t('About #{channel}', { channel: name }) : t('About {name}', { name }), list })
+      const dm = list.find((i) => i.place?.kind === 'dm')
+      groups.push({ key: `${k}:${id}`, title: dm ? fromPlace(dm) : k === 'channel' ? t('About #{channel}', { channel: name }) : t('About {name}', { name }), list })
     }
   }
   // Whom a new item can be about: its channels, and the people it knows (those named, you, and the
@@ -1801,7 +1863,7 @@ function Memory({ d, save, reload }) {
           <p className="small sb-sub"><b>{t('Waiting for you')}</b></p>
           <ul className="sb-mem">
             {proposed.map((it) => (
-              <MemItem key={it.id} it={it} about={it.kind === 'channel' ? `#${it.ofName || it.of}` : it.kind === 'person' ? it.ofName || it.of : null} onSave={edit(it)} onDelete={drop(it)} onKeep={keep(it)} />
+              <MemItem key={it.id} it={it} about={it.private ? fromPlace(it) : it.kind === 'channel' ? `#${it.ofName || it.of}` : it.kind === 'person' ? it.ofName || it.of : null} onSave={edit(it)} onDelete={drop(it)} onKeep={keep(it)} />
             ))}
           </ul>
         </>
@@ -1809,7 +1871,7 @@ function Memory({ d, save, reload }) {
       {groups.map((g) => (
         <div key={g.key} className="sb-mem-group">
           <p className="small sb-sub"><b>{g.title}</b></p>
-          <ul className="sb-mem">{g.list.map((it) => <MemItem key={it.id} it={it} onSave={edit(it)} onDelete={drop(it)} />)}</ul>
+          <ul className="sb-mem">{g.list.map((it) => <MemItem key={it.id} it={it} onSave={edit(it)} onDelete={drop(it)} onWiden={widen(it)} />)}</ul>
         </div>
       ))}
       {x && !items.length && <p className="small sb-none">{t('Nothing yet.')}</p>}
@@ -1854,14 +1916,17 @@ function Memory({ d, save, reload }) {
 // Its tabs, here in Settings and on its page in the main area (page: bots/BotPage.jsx), where its
 // name and how it stands are over them, with AI Assist (the wand) opening its chat beside them
 // (assist(ctx): the chat, given the bot as it stands and how to change it). On a phone the chat takes
-// the page while it's open. It opens by itself until the bot is connected somewhere.
-const TABS = ['setup', 'try', 'memory', 'activity']
+// the page while it's open. It opens by itself until the bot is connected somewhere. Its page has
+// Access too (bots/Access.jsx): what this bot may do, summed up in a line over the tabs; Settings
+// keeps those sections in Set Up, with the same line and a way to its page's Access.
+const TABS = ['setup', 'conversations', 'try', 'memory', 'activity']
+const PAGE_TABS = ['setup', 'access', 'conversations', 'try', 'memory', 'activity']
 const STATUS_SAID = () => ({ on: t('Answering'), needs: t('Needs you'), paused: t('Paused'), off: t('Not connected yet') })
 export function Bot({ id, onGone, onChanged, notice, page = false, phone = false, status = null, assist = null }) {
   const [d, setD] = useState(null)
   const [error, setError] = useState(null)
   const [note, setNote] = useState(null)
-  const [tab, setTab] = useState(() => { const x = saved('cc-bot-tab'); return TABS.includes(x) ? x : 'setup' })
+  const [tab, setTab] = useState(() => { const x = saved('cc-bot-tab'); return (page ? PAGE_TABS : TABS).includes(x) ? x : 'setup' })
   const alive = useRef(true)
   // Each look is numbered: one overtaken by a newer look or a change, or back while a change is
   // still being saved (what it brings is from before), is dropped.
@@ -1911,13 +1976,17 @@ export function Bot({ id, onGone, onChanged, notice, page = false, phone = false
     <>
       <div className="seg sb-tabs" role="tablist" aria-label={d.name}>
         <button type="button" role="tab" aria-selected={tab === 'setup'} className={tab === 'setup' ? 'on' : ''} onClick={() => pickTab('setup')}>{t('Set Up')}</button>
+        {page && <button type="button" role="tab" aria-selected={tab === 'access'} className={tab === 'access' ? 'on' : ''} onClick={() => pickTab('access')} data-tab="access">{t('Access')}</button>}
+        <button type="button" role="tab" aria-selected={tab === 'conversations'} className={tab === 'conversations' ? 'on' : ''} onClick={() => pickTab('conversations')}>{t('Conversations')}</button>
         <button type="button" role="tab" aria-selected={tab === 'try'} className={tab === 'try' ? 'on' : ''} onClick={() => pickTab('try')}>{t('Try It')}</button>
         <button type="button" role="tab" aria-selected={tab === 'memory'} className={tab === 'memory' ? 'on' : ''} onClick={() => pickTab('memory')}>{t('Memory')}{proposed > 0 && <span className="sb-tag">{t('{n} to keep', { n: proposed })}</span>}</button>
         <button type="button" role="tab" aria-selected={tab === 'activity'} className={tab === 'activity' ? 'on' : ''} onClick={() => pickTab('activity')}>{t('Activity')}{d.waiting > 0 && <span className="sb-tag">{t('{n} waiting in Needs You', { n: d.waiting })}</span>}</button>
       </div>
       {notice?.length > 0 && <div className="st-note warn" role="status"><Icon name="info" size={13} /><span>{t('Imported. Check these here:')} {notice.join(' · ')}</span></div>}
       {note && <p className="st-note bad" role="alert"><Icon name="alert" size={13} /> {note}</p>}
-      {tab === 'setup' && <SetUp d={d} save={save} reload={load} onDelete={remove} again={again} />}
+      {tab === 'setup' && <SetUp d={d} save={save} reload={load} onDelete={remove} again={again} access={!page} />}
+      {tab === 'access' && page && <Access d={d} save={save} onTab={pickTab} />}
+      {tab === 'conversations' && <Conversations d={d} />}
       {tab === 'try' && <TryIt d={d} />}
       {tab === 'memory' && <Memory d={d} save={save} reload={load} />}
       {tab === 'activity' && <Activity d={d} save={save} />}
@@ -1927,6 +1996,7 @@ export function Bot({ id, onGone, onChanged, notice, page = false, phone = false
     return (
       <>
         <div className="st-row sb-page-link"><button type="button" className="link-btn" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-bot', { detail: { id } }))}><Icon name="external" size={12} /> {t('Open {bot} as a page', { bot: d.name })}</button></div>
+        <AccessLine d={d} onOpen={() => { saved('cc-bot-tab', 'access'); window.dispatchEvent(new CustomEvent('bridge-open-bot', { detail: { id } })) }} />
         {body}
       </>
     )
@@ -1943,6 +2013,7 @@ export function Bot({ id, onGone, onChanged, notice, page = false, phone = false
           {assist && <AiAssist on={chatOpen} compact={phone} items={[{ label: t('Set it up or change it in words'), hint: t('Say what you want: AI Assist shows what would change first'), on: chatOpen, run: () => showChat(!chatOpen) }]} />}
         </header>
         {d.description && <p className="muted small bp-about">{d.description}</p>}
+        <AccessLine d={d} onOpen={tab === 'access' ? null : () => pickTab('access')} />
         {body}
       </div>
       {chatOpen && <aside className="bp-chat" aria-label={t('AI Assist')}>{assist({ d, save, reload: load, again, onClose: () => showChat(false) })}</aside>}
@@ -1950,22 +2021,46 @@ export function Bot({ id, onGone, onChanged, notice, page = false, phone = false
   )
 }
 
-// A new bot, by its name, from a template or blank; or one exported from another computer.
+// A new bot, by its name, from a starting point for its use case (a template: Hiring, Marketing…)
+// or blank; or one exported from another computer. A starting point says the access it starts with
+// (who may ask, its memory, what it may change, its limits) and the folder it reads, picked here (its
+// own suggestion when that's on this computer); once made, its page opens at Access to adjust them.
 // form: shown on its own, as AI Assist's chat offers it (without the way back into the chat).
-export function NewBot({ onMade, form = false }) {
+// start: the starting point picked to begin with.
+export function NewBot({ onMade, form = false, start = '' }) {
   const [name, setName] = useState('')
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   const [templates, setTemplates] = useState(null)
+  const [canChange, setCanChange] = useState(true)
   const [tplError, setTplError] = useState(null)
-  const [tpl, setTpl] = useState('')
+  const [tpl, setTpl] = useState(start || '')
+  const [folder, setFolder] = useState('')
+  const [browse, setBrowse] = useState(false)
   const file = useRef(null)
-  useEffect(() => { api('/bots/templates').then((r) => setTemplates(r.templates || []), (e) => { setTemplates([]); setTplError(e.message) }) }, [])
+  const pickFolder = onThisComputer() ? window.bridgeApp?.pickFolder : null
+  useEffect(() => { api('/bots/templates').then((r) => { setTemplates(r.templates || []); setCanChange(r.canChange !== false) }, (e) => { setTemplates([]); setTplError(e.message) }) }, [])
+  // (A starting point picked: its name and its folder, where that's here, to begin from.)
+  const choose = (id) => {
+    const x = (templates || []).find((y) => y.id === id)
+    setTpl(id)
+    setFolder(x?.folderHere ? x.folder : '')
+    if (x?.access && (!name.trim() || (templates || []).some((y) => y.name === name.trim()))) setName(x.name)
+  }
+  useEffect(() => { if (start && templates) choose(start) }, [start, templates]) // eslint-disable-line react-hooks/exhaustive-deps
   const make = async (e) => {
     e.preventDefault()
     setBusy(true)
     setError(null)
-    try { const b = await api('/bots', { method: 'POST', body: { name, ...(tpl ? { template: tpl } : {}) } }); setName(''); onMade(b.id) } catch (err) { setError(err.message) }
+    const x = (templates || []).find((y) => y.id === tpl)
+    try {
+      const b = await api('/bots', { method: 'POST', body: { name, ...(tpl ? { template: tpl } : {}), ...(folder.trim() ? { readsFrom: [folder.trim()] } : {}) } })
+      setName('')
+      setFolder('')
+      // (Made from a starting point: its page opens at Access, to adjust what it starts with.)
+      if (x?.access) saved('cc-bot-tab', 'access')
+      onMade(b.id)
+    } catch (err) { setError(err.message) }
     setBusy(false)
   }
   const bring = async (f) => {
@@ -1993,7 +2088,7 @@ export function NewBot({ onMade, form = false }) {
       )}
       <div className="sb-templates" role="radiogroup" aria-label={t('What it does')}>
         {cards.map((c) => (
-          <button key={c.id || 'blank'} type="button" role="radio" aria-checked={tpl === c.id} className={`sb-tpl ${tpl === c.id ? 'on' : ''}`} onClick={() => setTpl(c.id)}>
+          <button key={c.id || 'blank'} type="button" role="radio" aria-checked={tpl === c.id} className={`sb-tpl ${tpl === c.id ? 'on' : ''}`} onClick={() => choose(c.id)} data-template={c.id || 'blank'}>
             <b className="small">{c.name}</b>
             {c.description && <span className="muted small">{c.description}</span>}
           </button>
@@ -2001,6 +2096,19 @@ export function NewBot({ onMade, form = false }) {
       </div>
       {tplError && <p className="muted small">{t('The templates couldn\'t be loaded ({error}): you can still start blank.', { error: tplError })}</p>}
       {picked?.hint && <p className="muted small">{picked.hint}</p>}
+      {picked?.access && (
+        <div className="sb-start" data-setting="bots-start">
+          <p className="small"><b>{t('It starts with')}</b> <span className="muted">{accessSaid({ ...picked.access, readsFrom: folder.trim() ? [folder.trim()] : [] }, { start: true })}</span></p>
+          {picked.access.changes !== 'none' && !canChange && <p className="st-note warn"><Icon name="info" size={13} /><span>{t('Changes need Claude Code, which isn\'t here: it starts changing nothing, until you add Claude Code under What Answers.')}</span></p>}
+          <div className="sb-add">
+            <input className="st-input mono" value={folder} onChange={(e) => setFolder(e.target.value)} placeholder={picked.folder || '~/code'} aria-label={t('The folder it reads from')} spellCheck={false} />
+            <button type="button" className="btn small" aria-expanded={browse} onClick={async () => { if (!pickFolder) return setBrowse((x) => !x); const p = await pickFolder().catch(() => null); if (p) setFolder(p) }}>{t('Choose…')}</button>
+          </div>
+          {!folder.trim() && <p className="muted small">{picked.folder ? t('{folder} isn\'t on this computer: pick the folder it reads from, or add one later under Access.', { folder: picked.folder }) : t('Pick the folder it reads from, or add one later under Access.')}</p>}
+          {browse && <Browse onPick={(f) => { setFolder(f); setBrowse(false) }} onClose={() => setBrowse(false)} />}
+          <p className="muted small">{form ? t('Once it\'s made, its page opens at Access: name who may ask, and change anything it starts with.') : t('Once it\'s made, name who may ask and change anything it starts with: here, or under Access on its page.')}</p>
+        </div>
+      )}
       {picked?.instructions && <details className="sb-how"><summary><Icon name="chevron" size={11} />{t('Its instructions, to change after')}</summary><pre className="sb-tpl-ins">{picked.instructions}</pre></details>}
       <form className="sb-new" onSubmit={make} data-setting="slack-new">
         <div className="sb-add">

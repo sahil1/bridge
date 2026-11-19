@@ -22,10 +22,14 @@
 //     [noanswer]                             says NO ANSWER, and why
 //     [notforme]                             says NOT FOR ME
 //     [work <s>]                             takes that many seconds (2 if not said)
+//     [then <s>]                             takes that many instead when its brief says it's
+//                                            picking up after its time limit
 //                                            and by what the bot's instructions say:
 //     [sign <text>]                          ends every answer with it
 //     [try-write <name>]                     tries to write <name> in its folder first: only when
-//                                            --tools lets it Write, else it says it couldn't
+//                                            --tools lets it Write and, under --permission-mode
+//                                            dontAsk, --allowedTools allows it there (Edit(./**)),
+//                                            else it says it couldn't
 //     [try-run]                              tries to run a command (touch ran.txt): only when
 //                                            --tools lets it use Bash
 //     [try-read <path>]                      tries to read a file: one in its folder or a folder
@@ -40,6 +44,16 @@
 //     [edit-outside <path> <text>]           tries to write a file outside its folder: refused
 //                                            under --permission-mode dontAsk (Edit(./**) is only
 //                                            its folder)
+//     [make <name> <text>]                   saves <name> (with <text>, or a line saying what it
+//                                            is) to send back, with the save_file tool of its MCP
+//                                            server bridge_outbox (the server started as its
+//                                            --mcp-config says, and asked as Claude Code asks one):
+//                                            only with --strict-mcp-config and --allowedTools letting
+//                                            it (mcp__bridge_outbox__save_file), else it says it couldn't
+//     [make-exe <name>], [make-script <name>]   saves a Windows program (MZ…) or a script (#!…) so
+//     [make-big <name> <MB>]                 saves a file that many MB big so
+//     [make-early <name> <text>]             as [make], but at once, before it works (not again
+//                                            once it's picked up after its time limit)
 //     [remember <text>]                      ends with REMEMBER: <text>
 //     [remember-me <text>]                   ends with REMEMBER about <the asker>: <text>
 //     [recall]                               says what its brief's memory gave it
@@ -61,7 +75,8 @@
 //   claude --resume <id> --fork-session --session-id <new> "<brief>"   a copy of a conversation:
 //                                            <id>'s, then the brief as above
 //   --model <m>, --effort <level>, --permission-mode <mode>, --tools <list>, --add-dir <dirs...>,
-//   --strict-mcp-config                      taken, as Claude Code takes them
+//   --mcp-config <files...>, --disallowedTools <list>, --strict-mcp-config   taken, as Claude Code
+//                                            takes them
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -77,9 +92,12 @@ const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1
 // --add-dir takes folders until the next flag; anything else that isn't a flag or a flag's value is
 // the opening message.
 const added = []
+const configs = []
 let message = ''
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--add-dir') { while (args[i + 1] && !args[i + 1].startsWith('--')) added.push(args[++i]); continue }
+  if (args[i] === '--mcp-config') { while (args[i + 1] && !args[i + 1].startsWith('--')) configs.push(args[++i]); continue }
+  if (args[i] === '--disallowedTools') { while (args[i + 1] && !args[i + 1].startsWith('--')) i++; continue }
   if (args[i] === '--allowedTools') { while (args[i + 1] && !args[i + 1].startsWith('--')) allowed.push(args[++i]); continue }
   if (WITH_VALUE.has(args[i])) { i++; continue }
   if (!args[i].startsWith('--') && !message) message = args[i]
@@ -176,14 +194,41 @@ function answerTurn(text) {
   state = 'working'
   began = Date.now()
   draw()
-  // (How long it takes is the question's to say: a [work] in the conversation around it isn't.)
-  const wait = Number((/\[work (\d+)\]/.exec(q) || [])[1] || 2)
+  // (How long it takes is the question's to say: a [work] in the conversation around it isn't. Picked
+  // up after its time limit, its brief says so, and [then] says how long it takes from there.)
+  const again = /reached your time limit after/.test(text) && /\[then (\d+)\]/.exec(q)
+  const wait = again ? Number(again[1]) : Number((/\[work (\d+)\]/.exec(q) || [])[1] || 2)
+  // Files to send back: only through its MCP server bridge_outbox's save_file, as Claude Code would
+  // call it, the server started as its config says and asked over stdin and stdout.
+  const outboxServer = (() => { for (const c of configs) { try { const x = JSON.parse(fs.readFileSync(c, 'utf8')).mcpServers?.bridge_outbox; if (x) return x } catch { /* unreadable */ } } return null })()
+  const mayMake = !!outboxServer && args.includes('--strict-mcp-config') && allowed.includes('mcp__bridge_outbox__save_file')
+  const makeTo = (out) => (name, body) => {
+    if (!mayMake) { tried('make', false); out.push(`I couldn't save ${name}: I have no tool for it.`); return }
+    const buf = Buffer.isBuffer(body) ? body : Buffer.from(String(body))
+    const asks = [
+      { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.312' } } },
+      { jsonrpc: '2.0', method: 'notifications/initialized' },
+      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'save_file', arguments: { name, content: buf.toString('base64'), base64: true } } },
+    ]
+    const r = require('node:child_process').spawnSync(outboxServer.command, outboxServer.args || [], { input: asks.map((x) => JSON.stringify(x)).join('\n') + '\n', env: { ...process.env, ...(outboxServer.env || {}) }, encoding: 'utf8', timeout: 20000, maxBuffer: 1 << 20 })
+    const said = String(r.stdout || '').split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).find((x) => x?.id === 2)
+    const ok = said?.result && !said.result.isError
+    tool('mcp__bridge_outbox__save_file', { name })
+    tried('make', !!ok)
+    out.push(ok ? `I made ${name}.` : `I couldn't save ${name}: ${said?.result?.content?.[0]?.text || said?.error?.message || r.error?.message || 'no answer'}.`)
+  }
+  // ([make-early]: saved at once, before it works, so a run stopped at its time limit has saved it
+  // already; not again once it's picked up.)
+  const early = []
+  if (!again) for (const m of q.matchAll(/\[make-early ([^\s\]]+)(?: ([^\]]+))?\]/g)) makeTo(early)(m[1], `${m[2] || `The ${m[1]} you asked for.`}\n`)
   setTimeout(() => {
-    const out = []
+    const out = [...early]
     for (const f of fs.readdirSync(process.cwd()).filter((x) => /\.(md|txt)$/.test(x)).slice(0, 3)) tool('Read', { file_path: path.join(process.cwd(), f) })
     const w = /\[try-write ([\w.-]+)\]/.exec(q)
     if (w) {
-      if (can('Write')) { tool('Write', { file_path: path.join(process.cwd(), w[1]) }); fs.writeFileSync(path.join(process.cwd(), w[1]), 'Written.\n'); tried('write', true); out.push(`I wrote ${w[1]}.`) } else { tried('write', false); out.push(`I can't write ${w[1]}: I have no tool that writes files.`) }
+      // (Its folder isn't one it may write in without asking, unless it's allowed there: dontAsk refuses.)
+      const mayHere = can('Write') && (!dontAsk || allowed.some((x) => /^Edit\(\.\/\*\*\)$/.test(x)))
+      if (mayHere) { tool('Write', { file_path: path.join(process.cwd(), w[1]) }); fs.writeFileSync(path.join(process.cwd(), w[1]), 'Written.\n'); tried('write', true); out.push(`I wrote ${w[1]}.`) } else { tried('write', false); out.push(can('Write') ? `I can't write ${w[1]}: writing there was refused.` : `I can't write ${w[1]}: I have no tool that writes files.`) }
     }
     if (/\[try-run\]/.test(q)) {
       if (can('Bash')) { fs.writeFileSync(path.join(process.cwd(), 'ran.txt'), ''); tried('run', true); out.push('I ran it.') } else { tried('run', false); out.push('I can\'t run commands here.') }
@@ -206,6 +251,11 @@ function answerTurn(text) {
       const inHere = f.startsWith(process.cwd() + path.sep)
       if (can('Edit') && (!dontAsk || (inHere && editsHere))) { fs.writeFileSync(f, `${m[2]}\n`); tried('edit-outside', true); out.push(`I wrote ${m[1]}.`) } else { tried('edit-outside', false); out.push(`I couldn't write ${m[1]}: that was refused.`) }
     }
+    const make = makeTo(out)
+    for (const m of q.matchAll(/\[make ([^\s\]]+)(?: ([^\]]+))?\]/g)) make(m[1], `${m[2] || `The ${m[1]} you asked for.`}\n`)
+    for (const m of q.matchAll(/\[make-exe ([^\s\]]+)\]/g)) make(m[1], Buffer.concat([Buffer.from('MZ'), Buffer.alloc(62, 1)]))
+    for (const m of q.matchAll(/\[make-script ([^\s\]]+)\]/g)) make(m[1], '#!/bin/sh\necho hello\n')
+    for (const m of q.matchAll(/\[make-big ([^\s\]]+) (\d+)\]/g)) make(m[1], Buffer.alloc(Number(m[2]) * 1024 * 1024, 65))
     const memo = (/----- memory -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of memory -----/.exec(text) || [])[1] || ''
     if (/\[recall\]/.test(q)) out.push(memo ? `I remember: ${memo.replace(/\n| · /g, ' ').trim()}` : 'I remember nothing.')
     if (/\[agents\]/.test(q)) out.push((/What .*?'s agents are doing now[^\n]*\n((?:- .*\n?)*)/.exec(text) || [])[1]?.trim().replace(/\n/g, ' ') || 'No agents said.')

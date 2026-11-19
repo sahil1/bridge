@@ -416,7 +416,10 @@ function App() {
   const views = [...new Set([...W.tabs, mobileAgent].filter(isView))].map((id) => {
     const m = id.startsWith('view:meeting:') ? meetingList.find((x) => x.id === id.slice(13)) : null
     if (id.startsWith(STUDIO)) return { paneId: id, view: true, title: studioOf(id).path.split('/').pop(), icon: studioOf(id).root === 'board' ? 'shapes' : 'layers' }
-    if (id.startsWith(BOT_VIEW)) return { paneId: id, view: true, title: id === botView('new') ? t('New bot') : id === botView('connections') ? t('Connections') : bots.list?.find((b) => botView(b.id) === id)?.name || t('Bot'), icon: id === botView('connections') ? 'link' : 'bot' }
+    if (id.startsWith(BOT_VIEW)) {
+      const routing = id.startsWith(botView('routing:'))
+      return { paneId: id, view: true, title: id === botView('new') ? t('New bot') : id === botView('connections') ? t('Connections') : id === botView('overview') ? t('Bots') : routing ? t('Routing') : bots.list?.find((b) => botView(b.id) === id)?.name || t('Bot'), icon: id === botView('connections') ? 'link' : id === botView('overview') ? 'grid' : routing ? 'branch' : 'bot' }
+    }
     return { paneId: id, view: true, title: VIEWS[id] ? t(VIEWS[id].title) : m?.title || t('Meeting'), icon: VIEWS[id]?.icon || 'mic' }
   })
   // Agents on your other devices, in tabs here: named from what each device last said about them
@@ -452,9 +455,9 @@ function App() {
   const toReview = (ny.data?.items || []).filter((i) => (i.type === 'review' || i.type === 'failed') && i.online && (i.machine || null) === (machineId || null) && !isQuiet(i)).length
   const homeCount = useHome(homeOn && !cloudOnly, 12000)
   const homeNeeds = homeOn && homeCount.data ? needCount(homeCount.data) : null
-  // And what other apps ask of you here (Bridge AI as an MCP Server) and the Slack Bot's answers,
-  // on this computer's window.
-  const needN = homeNeeds ? homeNeeds.here : needsYou.length + (machineId ? 0 : (ny.data?.outside?.length || 0) + (ny.data?.slack?.length || 0))
+  // And what other apps ask of you here (Bridge AI as an MCP Server), the Slack Bot's answers and the
+  // devices waiting to be let in, on this computer's window.
+  const needN = homeNeeds ? homeNeeds.here : needsYou.length + (machineId ? 0 : (ny.data?.outside?.length || 0) + (ny.data?.slack?.length || 0) + (ny.data?.letIn?.length || 0))
   const needElse = homeNeeds ? homeNeeds.elsewhere : waiting - needsYou.length
 
   // herdr sessions each have their own agents (and number panes alike), so each keeps its own open

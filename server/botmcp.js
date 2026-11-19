@@ -12,12 +12,13 @@
 //
 // A run's servers go in a folder of the desk's, front-desk/mcp/<run>/ (agents.js mcpOf), readable by
 // you only: config.json (the servers as Claude Code's config has them, with their env and headers)
-// and rules.json. The folder goes once the run has ended (frontdesk.js), and any left from before
+// and rules.json. With them, a run with an outbox (botfiles.js) gets Bridge AI's own server for it,
+// bridge_outbox (outboxmcp.js), its save_file allowed: the one way that run can put a file anywhere. The folder goes once the run has ended (frontdesk.js), and any left from before
 // Bridge AI started again a day later.
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { dataFile, writeFileAtomic, HOME } from './paths.js'
+import { dataFile, writeFileAtomic, HOME, ROOT, NODE } from './paths.js'
 import { loginPath } from './agents.js'
 import { claudeServers, claudeServerView } from './mcp.js'
 
@@ -162,13 +163,14 @@ export const configsOf = (bot) => { const have = claudeServers(); return Object.
 // of its own (key: the question's and run's), whose path goes with the run's other folders. null when
 // it has none (or none of them is in Claude Code's config any more). What it was given is said back
 // for the record: { dir, servers: [{ name, all, tools, problem }], missing }.
-export async function runFolder(bot, { all = false, key }) {
-  const want = bot.mcp || []
-  if (!want.length) return null
+export const OUTBOX_SERVER = 'bridge_outbox'
+export async function runFolder(bot, { all = false, key, outbox = null }) {
+  const want = (bot.mcp || []).filter((n) => n !== OUTBOX_SERVER)
+  if (!want.length && !outbox) return null
   const have = claudeServers()
   const picked = want.filter((n) => have[n])
   const missing = want.filter((n) => !have[n])
-  if (!picked.length) return { dir: null, servers: [], missing }
+  if (!picked.length && !outbox) return { dir: null, servers: [], missing }
   const allow = []
   const deny = []
   const said = []
@@ -183,7 +185,10 @@ export async function runFolder(bot, { all = false, key }) {
   }
   const dir = path.join(RUNS, String(key).replace(/[^\w.-]+/g, '-'))
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
-  writeFileAtomic(path.join(dir, 'config.json'), JSON.stringify({ mcpServers: Object.fromEntries(picked.map((n) => [n, have[n]])) }, null, 2), { mode: 0o600 })
+  const servers = Object.fromEntries(picked.map((n) => [n, have[n]]))
+  // (Its outbox's: this app's Node, on this run's outbox alone.)
+  if (outbox) { servers[OUTBOX_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'outboxmcp.js'), outbox], env: { ...NODE.env } }; allow.push(toolName(OUTBOX_SERVER, 'save_file')) }
+  writeFileAtomic(path.join(dir, 'config.json'), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 })
   writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny }, null, 2), { mode: 0o600 })
   return { dir, servers: said, missing }
 }

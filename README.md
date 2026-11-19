@@ -243,7 +243,7 @@ Link your other computers running Bridge AI (Mac, Windows or Linux) and switch b
 
 1. Each device needs its relay (Settings › Account & Devices, below).
 2. On one, Settings › Account & Devices › Phone › **Pair a device**. It shows a QR code, a link and a code, the same for a phone or a computer, for 15 minutes and one device (**Add another device** makes a new one). A pairing link opened on a phone asks "Pair with <name>?" first.
-3. On the other computer, Settings › Account & Devices › Computers › **Link a device**: paste the link, or type the address and code. They link both ways. The first one says the new device paired, with **Keep** and **Remove**; once you keep it, it's introduced to your other devices too.
+3. On the other computer, Settings › Account & Devices › Computers › **Link a device**: paste the link, or type the address and code; from a phone showing it, **Scan QR code** reads the code instead. They link both ways. The first one says the new device paired, with **Keep** and **Remove**; once you keep it, it's introduced to your other devices too.
 
 Or let your phone do it: scan the new computer's code with the Bridge AI app on a phone that's paired with another of your computers. The phone offers to link the two, asks, and takes you to the other one to allow it after checking both show the same six digits. A device's relay address alone asks the same way.
 
@@ -329,6 +329,7 @@ You rarely need to edit the file by hand. **Settings** (the gear in the top bar,
 | MCP Servers | The tools your agents can call, across all of them, with a catalog of 35 popular servers by category (web search, docs and notes, planning, Microsoft 365, deploy and monitoring, data, design); and Bridge AI as an MCP Server (a Beta Feature), so Claude Code, Claude Desktop, Cursor and Codex can read your whiteboards, files in your Places and meeting summaries, and suggest changes you keep in Needs You |
 | Devices | Three tabs. **Phone**: how your phone reaches this computer (Bridge AI's relay, a relay on your own Cloudflare, or Tailscale) and pairing a phone. **Computers**: linking your other computers. **Notifications**: what you're notified about, on which devices |
 | Account | Your Bold Bridge account, for Bridge AI's relay and Early Access: sign in with your email and a code, its devices, the relay's use, sign out, delete it. Bridge AI works the same without one |
+| Back Up & Move | Your setup here, to another computer. **Back Up**: one file sealed with a passphrase you pick, with your bots and their connections, routines, the Chief of Staff, MCP servers and the settings that mean the same there. **Restore**: everything in it shown before anything is added. **Move**: straight to a linked computer, and paused here once it runs there |
 | Appearance | Theme, color mode, text size, density, font, language |
 | Config File | Your `config.json`, editable, checked before it's saved, with the effective settings and defaults beside it |
 | About & Updates | The version and updates, the update channel (Stable, Early Access for betas, or Nightly for a build of main each day it changes, picked on the computer itself with no code), Beta Features, the tour, usage stats and crash reports, and reporting a problem |

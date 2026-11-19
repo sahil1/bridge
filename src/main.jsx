@@ -9,6 +9,7 @@ import Hud from './dictation/Hud.jsx'
 import Capture from './components/remote/Capture.jsx'
 import { Badge } from './components/remote/Here.jsx'
 import ScreenView from './components/remote/ScreenView.jsx'
+import NotLetIn from './components/remote/NotLetIn.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import './styles.css'
 import { apply } from './appearance.js'
@@ -55,7 +56,10 @@ loadLang().finally(() => createRoot(document.getElementById('root')).render(
   <StrictMode>
     <ErrorBoundary name="Bridge AI" full={!float && !hud && !remoteWin}>
       <TestCrash />
-      {remoteWin === 'capture' ? <Capture /> : remoteWin === 'badge' ? <Badge /> : remoteWin === 'view' ? <ScreenView {...viewOf()} windowed onClose={() => window.close()} /> : float ? <FloatCard /> : hud ? <Hud /> : solo ? <Solo paneId={solo} /> : <App />}
+      {/* A device the computer it shows hasn't let in: one card for the whole window (NotLetIn.jsx). */}
+      <NotLetIn>
+        {remoteWin === 'capture' ? <Capture /> : remoteWin === 'badge' ? <Badge /> : remoteWin === 'view' ? <ScreenView {...viewOf()} windowed onClose={() => window.close()} /> : float ? <FloatCard /> : hud ? <Hud /> : solo ? <Solo paneId={solo} /> : <App />}
+      </NotLetIn>
     </ErrorBoundary>
   </StrictMode>,
 ))

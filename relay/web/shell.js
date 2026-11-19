@@ -166,6 +166,24 @@ const openBundled = (name) => (native ? native.post({ type: 'open', name }) : wi
 for (const b of document.querySelectorAll('.demo-open')) b.onclick = () => openBundled('demo')
 for (const b of document.querySelectorAll('.cloud-open')) b.onclick = () => openBundled('cloud')
 
+// ---------- the apps' scanner ----------
+// Their Scan the QR code, on the pairing screen here and for Bridge AI in the frame (bridgeRelay.scan:
+// the phone's menu, and beside each place it takes a pairing link). pair(): what's scanned pairs as
+// an opened pairing link does, asking first. link(): for Link a device, the app hands back what was
+// scanned instead (bridge-scan), only a Bridge AI pairing link and only for the scan just asked for,
+// and Bridge AI uses it as if it had been pasted. So a page can open the scanner and no more: what a
+// scan does is what the person scanning points it at. In a browser there's none here, and Bridge AI
+// uses the camera itself (src/scan.js).
+const scanLink = native ? () => native.post({ type: 'scan', for: 'link' }) : typeof window.bridgeAndroid?.scanLink === 'function' ? () => window.bridgeAndroid.scanLink() : null
+let scanned = null // link(): waiting for what the app scanned
+addEventListener('bridge-scan', (e) => { const done = scanned; scanned = null; done?.(typeof e.detail?.link === 'string' ? e.detail.link : null) })
+const scanner = native || window.bridgeAndroid
+  ? {
+      pair: () => (native ? native.post({ type: 'scan' }) : window.bridgeAndroid.scan()),
+      link: scanLink && (() => new Promise((done) => { scanned?.(null); scanned = done; scanLink() })),
+    }
+  : null
+
 // Pair another computer: the pairing screen, for a link (a code alone doesn't say which relay).
 function addComputer() {
   adding = true
@@ -1206,6 +1224,8 @@ window.bridgeRelay = {
   start: apps || bundledUis.length ? () => startScreen() : null,
   // Cloud Agents, bundled in the apps (not in a browser).
   openCloud: bundledUis.includes('cloud') ? () => openBundled('cloud') : null,
+  // The apps' QR code scanner ({ pair, link }, above; null in a browser).
+  scan: scanner,
   // Bridge AI's new version, once the computer has one (src/fresh.js).
   reload: () => { reloadApp().catch(() => reloadFrame()) },
   // The relay this page reaches its computer through, and following the computer to another one,
@@ -1359,7 +1379,7 @@ $('pair-form').onsubmit = async (e) => {
   else connect() // (or the relay is about to say whether it's there: onStatus pairs)
 }
 $('code').oninput = (e) => { if (/[:/.]/.test(e.target.value)) return; const v = normCode(e.target.value).slice(0, 20); e.target.value = formatCode(v) }
-$('scan').onclick = () => (native ? native.post({ type: 'scan' }) : window.bridgeAndroid.scan())
+$('scan').onclick = () => scanner.pair()
 
 // A pairing link opened (the QR code, or a link from anywhere) asks first, "Pair with <name>?",
 // with its code ready: one tap pairs. So a page that opens such a link can't pair this phone with a

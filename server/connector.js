@@ -8,16 +8,19 @@
 // where, and what each platform can do (capsOf).
 //
 // Discord's and Teams' connectors do what Slack's does, less what's Slack's own: no buttons in your
-// direct messages (askOwner, settle), no "working" status and Stop, no streaming, no files in or
-// out, no /command, shortcut or Home tab. Each has:
+// direct messages (askOwner, settle), no "working" status and Stop, no streaming, no files in, no
+// /command, shortcut or Home tab; files out are Discord's attachments, and none in Teams (botfiles.js
+// says so in the reply). Each has:
 //   id, label, platform     the bot's id, 'Discord', 'discord'
 //   caps                    what the service lets a bot do: { react, edit, typing, threads, history }
 //   start(hear)             connect, and stay connected; hear(m) for each message put to the bot
 //                           (heard() below says what m is); hear.change(m) for an edit or deletion
 //   stop(), state(), forget()
-//   post(reply, text)       a reply where the question was asked, or at the top of a channel (a
-//                           scheduled post): { ts, channel, parts }; throws an Error with a code
-//                           (below) and, for 'ratelimited', retryAfter (seconds)
+//   post(reply, text, { files })   a reply where the question was asked, or at the top of a channel
+//                           (a scheduled post): { ts, channel, parts, files }; throws an Error with
+//                           a code (below) and, for 'ratelimited', retryAfter (seconds). files
+//                           (Discord's): attached after the words, each one that couldn't go said
+//                           in files[] ({ name, size, ok, error }), not thrown
 //   edit(posted, text)      a reply posted before (what post() gave), changed
 //   react({ channel, ts, name, off })   a reaction by its Slack name (eyes, white_check_mark,
 //                           hourglass_flowing_sand), or off it; Teams has none for bots: { skipped }
@@ -39,7 +42,7 @@ export const PLATFORMS = { slack: 'Slack', discord: 'Discord', teams: 'Microsoft
 // What each can do besides answering in place: Slack's own features are Slack's only.
 export const CAPS = {
   slack: { files: true, stream: true, status: true, owner: true, react: true },
-  discord: { files: false, stream: false, status: false, owner: false, react: true },
+  discord: { files: true, stream: false, status: false, owner: false, react: true },
   teams: { files: false, stream: false, status: false, owner: false, react: false },
 }
 // The errors the desk tries again, later (frontdesk.js TRY_AGAIN has the same).
@@ -67,10 +70,12 @@ export function person(p) {
 
 // A message put to the bot, as the desk takes it, or null when it's malformed (no id, no place):
 //   { platform, ts, channel, thread, mention, dm, via, from, text, place: { kind: 'dm' | 'channel',
-//     id, name, within, private }, at, late, reply, attachments: [{ id, name, type, size }] }
+//     id, name, within, private }, at, late, reply, top, attachments: [{ id, name, type, size }] }
 // ts and channel make it unique (one heard twice is one); thread the thread it's a reply in (null
 // at the top); via 'listen' for a channel it answers in without a mention; reply what post() needs
-// to answer it where it was; attachments named only, never fetched here.
+// to answer it where it was (in a thread of its own, for one at the top of a channel); top, for one
+// at the top of a channel, what post() needs to answer it in the channel itself instead (Answer In,
+// bots.js); attachments named only, never fetched here.
 export function heard(m, platform) {
   if (!m || typeof m !== 'object') return null
   const ts = m.ts != null ? String(m.ts) : ''
@@ -89,6 +94,7 @@ export function heard(m, platform) {
     place: { kind: dm ? 'dm' : 'channel', id: String(m.place?.id || channel), name: m.place?.name ? clip(m.place.name, 120) : null, ...(m.place?.within ? { within: clip(m.place.within, 120) } : {}), ...(m.place?.private ? { private: true } : {}) },
     at, late: m.late === true,
     reply: m.reply && typeof m.reply === 'object' ? m.reply : null,
+    ...(m.top && typeof m.top === 'object' && !dm ? { top: m.top } : {}),
     attachments: Array.isArray(m.attachments) ? m.attachments.slice(0, 20).map((a) => ({ id: a?.id != null ? String(a.id) : null, name: clip(a?.name || 'file', 200), type: a?.type ? String(a.type).slice(0, 100) : null, size: Number.isFinite(a?.size) ? a.size : null })) : [],
   }
 }
@@ -173,7 +179,7 @@ export function combine({ id = 'bot', say = () => {}, threads = () => [], follow
     const { attachments, ...rest } = x // (files are Slack's only: named in the record, never read)
     return {
       ...rest, channel: idOf(p, x.channel), from: { ...x.from, id: idOf(p, x.from.id) },
-      place: { ...x.place, id: idOf(p, x.place.id), platform: p }, reply: x.reply ? { ...x.reply, platform: p } : null,
+      place: { ...x.place, id: idOf(p, x.place.id), platform: p }, reply: x.reply ? { ...x.reply, platform: p } : null, ...(x.top ? { top: { ...x.top, platform: p } } : {}),
       ...(attachments.length ? { attached: attachments.map((a) => a.name) } : {}),
     }
   }
@@ -208,7 +214,7 @@ export function combine({ id = 'bot', say = () => {}, threads = () => [], follow
     capsOf: (channel) => CAPS[platformOf(channel)] || CAPS.slack,
     async post(reply, text, o = {}) {
       const p = where(reply)
-      const r = await of(p).post(own(reply), text, p === 'slack' ? o : {})
+      const r = await of(p).post(own(reply), text, p === 'slack' ? o : p === 'discord' && o.files?.length ? { files: o.files } : {})
       return r && typeof r === 'object' ? { files: [], ...r, platform: p } : r
     },
     edit: (posted, text) => of(where(posted)).edit?.(own(posted), text),

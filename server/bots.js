@@ -15,6 +15,9 @@
 //   (its app's tokens were in bots/<id>/slack.json, discord.json and teams.json before
 //   connections: each is a connection of its own now, connections/<c>/, connections.js migrate)
 //   bots/<id>/memory.json       what it remembers (botmemory.js)
+//   bots/<id>/people.json       each person's running context: their earlier conversations with it
+//                               (botcontext.js), never in its export (only your backup, sealed,
+//                               and a Move to your own computer carry it: backup.js)
 //   bots/<id>/setup.json        its setup chat with AI Assist and what it proposes (botsetup.js)
 //   bots/<id>/trace/            its record (trace.js)
 // A draft (draft: true) is a bot AI Assist proposed, from the setup chat or the Chief of Staff's
@@ -48,13 +51,28 @@ const tilde = (p) => (p === HOME || p.startsWith(HOME + path.sep) ? `~${p.slice(
 // Who you are in Slack (owner: so its drafts come to your direct messages, and you may always ask),
 // and in Discord and Teams (owners: so you may always ask there too),
 // what it may change (changes: none, suggest or pr, in repo, one of its folders), the limits per
-// person (30 questions a day, 2 at once, 10 minutes a run), memory (kept once you approve, straight
-// away, or off), paused, the channels muted with !mute, the channels it answers in without a
+// person (30 questions a day, 2 at once, 10 minutes a run, and at that time limit asking you whether
+// it may go on, up to its Longest Run), memory (kept once you approve, straight away, or off),
+// paused, the channels muted with !mute, the channels it answers in without a
 // mention (listen), whether it may say what your agents are doing (agentsStatus), and which of your
 // MCP servers its runs get (mcp, by name: Settings › MCP Servers, through Claude Code's own config),
-// and what answers (answerers: its first choice and fallbacks, botanswer.js ids, or null for
-// Automatic; fallback: whether the next is tried when one can't answer).
-export const LIMITS = { day: 30, atOnce: 2, minutes: 10 }
+// what answers (answerers: its first choice and fallbacks, botanswer.js ids, or null for
+// Automatic; fallback: whether the next is tried when one can't answer), and where it answers a
+// question asked at the top of a channel (answerIn: in the channel, or in a thread of its own).
+// At the Time Limit (atLimit): a run that reaches its minutes asks you whether it may go on ('ask',
+// every bot's unless you say otherwise, ones made before there was a choice too), or is stopped
+// there and comes to you ('stop', as every run was before). Asking, it goes on for a few minutes
+// while you decide, and each Continue gives it more, never past its Longest Run (longest, minutes),
+// where it's stopped without asking (frontdesk.js).
+export const LIMITS = { day: 30, atOnce: 2, minutes: 10, atLimit: 'ask', longest: 120 }
+// Answer In (answerIn): where the answer to a question at the top of a channel goes, in the channel
+// itself ('channel', a new bot's) or in a thread started from the question ('thread', as every bot
+// answered before there was a choice, so one made before keeps it). Either way, the same person
+// asking again in the same place within CARRY_ON_MIN minutes of the conversation's last word carries
+// it on: answered where its last answer went, given what was said before (frontdesk.js). A direct
+// message is one running conversation with that person, its earlier turns given as they go.
+export const ANSWER_IN = ['channel', 'thread']
+export const CARRY_ON_MIN = 30
 const DEFAULTS = {
   name: 'Bridge AI', description: '', who: 'named', askers: [], others: 'polite', readsFrom: [], instructionsFile: null, agent: null, auto: false, agentCopies: false, retention: '1y', max: 2,
   owner: null, owners: {}, changes: 'none', repo: null, limits: LIMITS, memory: 'approve', paused: false, muted: [], listen: [], agentsStatus: false, template: null, mcp: [], answerers: null, fallback: true, draft: false, icon: null,
@@ -75,7 +93,11 @@ const person = (p) => (p && SLACK_ID.test(String(p.id || '')) ? { id: String(p.i
 const someone = (p, platform) => (p && PERSON_ID.test(String(p.id || '')) && String(p.id).startsWith(`${platform}:`) ? { id: String(p.id), name: clean(p.name, 80) || null } : null)
 const place = (c) => (c && CHANNEL_ID.test(String(c.id || '')) ? { id: String(c.id), name: clean(c.name, 80) || null } : null)
 const int = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d }
-export const limitsOf = (l) => ({ day: int(l?.day, 1, 1000, LIMITS.day), atOnce: int(l?.atOnce, 1, 5, LIMITS.atOnce), minutes: int(l?.minutes, 1, 60, LIMITS.minutes) })
+// (Its Longest Run is never shorter than a run's minutes.)
+export function limitsOf(l) {
+  const minutes = int(l?.minutes, 1, 60, LIMITS.minutes)
+  return { day: int(l?.day, 1, 1000, LIMITS.day), atOnce: int(l?.atOnce, 1, 5, LIMITS.atOnce), minutes, atLimit: l?.atLimit === 'stop' ? 'stop' : 'ask', longest: Math.max(minutes, int(l?.longest, 1, 1440, LIMITS.longest)) }
+}
 export const defaultInstructions = (name, you) => [
   `# ${name}`,
   '',
@@ -115,6 +137,7 @@ function shape(id, j) {
   b.fallback = b.fallback !== false
   b.draft = b.draft === true
   b.icon = ICON.test(String(b.icon || '')) ? String(b.icon) : null
+  b.answerIn = b.answerIn === 'channel' ? 'channel' : 'thread'
   return b
 }
 
@@ -150,7 +173,7 @@ export function create({ name, description = '', template = null } = {}, you = '
   if (list().some((b) => b.name.toLowerCase() === n.toLowerCase())) throw new Error(`There's a bot called ${n} already`)
   const tpl = template ? templateOf(String(template)) : null
   if (template && !tpl) throw new Error(`No such template: ${template}`)
-  const b = shape(nextId(), { ...DEFAULTS, name: n, description: description || tpl?.description || '', template: tpl?.id || null, createdAt: new Date().toISOString() })
+  const b = shape(nextId(), { ...DEFAULTS, name: n, description: description || tpl?.description || '', template: tpl?.id || null, answerIn: 'channel', createdAt: new Date().toISOString() })
   write(b)
   writeInstructions(b.id, tpl ? tpl.instructions(n, you || 'my') : defaultInstructions(n, you))
   return b
@@ -160,7 +183,7 @@ export function create({ name, description = '', template = null } = {}, you = '
 // Create (botsetup.js has what it proposes). from: who asked for it, you (+ in the sidebar) or the
 // Chief of Staff.
 export function createDraft({ name = '', from = 'you' } = {}) {
-  const b = shape(nextId(), { ...DEFAULTS, name: freeName(name), draft: true, from: from === 'chief' ? 'chief' : 'you', createdAt: new Date().toISOString() })
+  const b = shape(nextId(), { ...DEFAULTS, name: freeName(name), draft: true, from: from === 'chief' ? 'chief' : 'you', answerIn: 'channel', createdAt: new Date().toISOString() })
   write(b)
   return b
 }
@@ -176,29 +199,40 @@ export function undraft(id, instructions) {
 // ---------- Export and import ----------
 // A bot as a file, to take to another computer (the Docker image on an always-on machine, say):
 // its settings, its instructions and what it remembers, never its tokens (its Slack app is
-// connected again there, with tokens pasted there). Its folders go as they're named here (~/…),
-// and are checked where it's brought in.
+// connected again there, with tokens pasted there) nor anyone's running context (people.json). Its
+// folders go as they're named here (~/…), and are checked where it's brought in.
 export const BUNDLE_KIND = 'bridge-ai-bot'
-const CARRIED = ['icon', 'description', 'who', 'askers', 'others', 'readsFrom', 'instructionsFile', 'agent', 'auto', 'agentCopies', 'retention', 'max', 'owner', 'owners', 'changes', 'repo', 'limits', 'memory', 'muted', 'listen', 'agentsStatus', 'template', 'mcp', 'answerers', 'fallback']
+const CARRIED = ['icon', 'description', 'who', 'askers', 'others', 'readsFrom', 'instructionsFile', 'agent', 'auto', 'agentCopies', 'retention', 'max', 'owner', 'owners', 'changes', 'repo', 'limits', 'memory', 'muted', 'listen', 'agentsStatus', 'template', 'mcp', 'answerers', 'fallback', 'answerIn']
 export function bundleOf(id, memory = []) {
   const b = get(id)
   if (!b) throw Object.assign(new Error('No such bot'), { status: 404 })
   return { kind: BUNDLE_KIND, v: 1, exportedAt: new Date().toISOString(), name: b.name, settings: Object.fromEntries(CARRIED.map((k) => [k, b[k]])), instructions: readOwn(id), memory }
 }
+// The settings a bot from a file (its export, a backup, a move) takes only once they've passed the
+// checks Settings makes (index.js checkSettings): the folders it reads and its instructions' file
+// (there, inside your home folder, not Bridge AI's own), who may ask and you there (people by their
+// ids), answering without asking, what it may change and where, what answers, its MCP servers, its
+// channels, copies of your agents' conversations, saying what your agents are doing, and keeping
+// what it learns without asking. Held back from the bot as it's made (held), so nothing in a file is
+// ever kept unchecked.
+export const CHECKED = ['who', 'askers', 'owner', 'owners', 'readsFrom', 'instructionsFile', 'repo', 'agent', 'answerers', 'changes', 'mcp', 'muted', 'listen', 'agentCopies', 'agentsStatus', 'memory', 'auto']
 // A bot from such a file: a new one, by its name (with a number after it when that's taken here),
 // answering as it did once its Slack app is connected here. Anything in the file that isn't one of
-// its settings is left out, so a token in it never is kept.
-export function fromBundle(j, you = '') {
+// its settings is left out, so a token in it never is kept. held: the CHECKED settings aren't kept
+// here but given back ({ held }), to be checked and saved one by one.
+export function fromBundle(j, you = '', { held: hold = false } = {}) {
   if (!j || typeof j !== 'object' || j.kind !== BUNDLE_KIND) throw new Error('That isn\'t a bot exported from Bridge AI')
   const want = clean(j.name, NAME_MAX) || 'Imported bot'
   const taken = new Set(list().map((b) => b.name.toLowerCase()))
   let n = want
   for (let i = 2; taken.has(n.toLowerCase()) && i < 100; i++) n = `${want.slice(0, NAME_MAX - 4)} (${i})`
   const settings = Object.fromEntries(CARRIED.filter((k) => j.settings && Object.hasOwn(j.settings, k)).map((k) => [k, j.settings[k]]))
+  const held = hold ? Object.fromEntries(CHECKED.filter((k) => Object.hasOwn(settings, k)).map((k) => [k, settings[k]])) : {}
+  for (const k of Object.keys(held)) delete settings[k]
   const b = shape(nextId(), { ...DEFAULTS, ...settings, name: n, createdAt: new Date().toISOString(), importedAt: new Date().toISOString() })
   write(b)
   writeInstructions(b.id, typeof j.instructions === 'string' ? j.instructions.slice(0, INSTRUCTIONS_MAX) : defaultInstructions(n, you))
-  return { bot: b, memory: Array.isArray(j.memory) ? j.memory.slice(0, 2000) : [], renamed: n !== want }
+  return { bot: b, memory: Array.isArray(j.memory) ? j.memory.slice(0, 2000) : [], renamed: n !== want, held }
 }
 
 // Its settings changed: what they were and are, for the record.
@@ -220,7 +254,7 @@ export function remove(id) {
   const D = path.join(DIR, id)
   if (!fs.existsSync(path.join(D, 'trace')) || b?.draft) { fs.rmSync(D, { recursive: true, force: true }); return }
   writeFileAtomic(path.join(D, 'deleted.json'), JSON.stringify({ name: b?.name || id, deletedAt: new Date().toISOString(), retention: b?.retention || '1y' }, null, 2), { mode: 0o600 })
-  for (const f of ['bot.json', 'instructions.md', 'slack.json', 'discord.json', 'teams.json', 'memory.json', 'setup.json']) fs.rmSync(path.join(D, f), { force: true })
+  for (const f of ['bot.json', 'instructions.md', 'slack.json', 'discord.json', 'teams.json', 'memory.json', 'people.json', 'setup.json']) fs.rmSync(path.join(D, f), { force: true })
 }
 // The bots deleted whose record is kept: [{ id, name, deletedAt, retention }].
 export function deleted() {

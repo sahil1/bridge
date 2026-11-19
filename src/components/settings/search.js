@@ -145,12 +145,15 @@ export const SETTINGS = [
     ['tour', tx('Take the tour'), 'tour help'],
     ['license', tx('License and Credits'), 'license terms privacy notices star'],
   ]),
+  ...at('backup', [
+    ['backup', tx('Back Up & Move'), 'backup back up restore move new computer migrate transfer passphrase bots connections tokens'],
+  ]),
 ]
 
 // Each tab's section, by its name; Devices' tabs by devicesName (below).
 const PLACES = {
   general: tx('General'), agents: tx('Agents'), providers: tx('Model Providers'), voice: tx('Voice & Meetings'), dictation: tx('Voice & Meetings'), meetings: tx('Voice & Meetings'), mail: tx('Mail'),
-  mcp: tx('MCP Servers'), 'slack-bot': tx('Bots'), appearance: tx('Appearance'), config: tx('Config File'), about: tx('About & Updates'),
+  mcp: tx('MCP Servers'), 'slack-bot': tx('Bots'), backup: tx('Back Up & Move'), appearance: tx('Appearance'), config: tx('Config File'), about: tx('About & Updates'),
 }
 const DEVICES = ['phone', 'machines', 'notifications', 'account']
 export const placeOf = (x) => (DEVICES.includes(x.section) ? devicesName(x) : t(PLACES[x.section]))

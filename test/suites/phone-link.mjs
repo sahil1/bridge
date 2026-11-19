@@ -19,6 +19,8 @@
 // says so, with Open (the other) on it. And this one away: offline, or its relay not answering. The
 // start screen says so in a few seconds, with the other computer a tap away, what it last sent, Cloud
 // Agents and the demo (it opened what it last sent instead, or waited on "Connecting…" for good).
+// What the page offers Bridge AI from the app: its computers, its start screen, Cloud Agents and its
+// QR code scanner (to pair, or a link handed back for Link a device); in a browser, none of them.
 // And the page in a browser, with its relay not answering: it says so (it waited for good).
 // What a relay in between can do changes nothing kept (stand-ins/relay.mjs forge and tamper): a
 // pairing link asks first; a refusal in the clear, or a welcome with keys of the relay's own, leaves
@@ -408,7 +410,21 @@ try {
   ok((await look(dk.p)).app, 'Back to Desk: Bridge AI again')
   await dk.p.evaluate(() => window.bridgeRelay.openCloud())
   ok((await dk.p.evaluate(() => window.__posts)).some((m) => m.type === 'open' && m.name === 'cloud'), 'bridgeRelay.openCloud(): the app opens Cloud Agents')
-  ok(await p.evaluate(() => window.bridgeRelay.openCloud === null && window.bridgeRelay.start === null && window.bridgeRelay.computers === null), 'in a browser, which has neither, the page offers no Cloud Agents or start screen to Bridge AI')
+  // The app's scanner, for Bridge AI's Scan QR code: pair() asks the app to scan as the pairing
+  // screen's own button does (what's scanned pairs, asking first); link() asks for what's scanned
+  // back, and has it once the app answers (bridge-scan): the link, or null when nothing was.
+  const scans = () => dk.p.evaluate(() => window.__posts.filter((m) => m.type === 'scan'))
+  await dk.p.evaluate(() => { window.bridgeRelay.scan.pair(); document.getElementById('scan').click() })
+  ok(JSON.stringify(await scans()) === JSON.stringify([{ type: 'scan' }, { type: 'scan' }]), 'bridgeRelay.scan.pair(), and the pairing screen\'s Scan the QR code: the app scans, to pair', await scans())
+  const scannedLink = `${relay.url}/#pair=ABCD-EFGH-JKMN-PQRS-TVWX&name=Studio`
+  await dk.p.evaluate(() => { window.__got = []; for (let i = 0; i < 2; i++) window.bridgeRelay.scan.link().then((l) => window.__got.push(l)) })
+  await dk.p.evaluate((l) => window.dispatchEvent(new CustomEvent('bridge-scan', { detail: { link: l } })), scannedLink)
+  const gotLinks = await until(() => dk.p.evaluate(() => (window.__got.length === 2 ? window.__got : null)), 3000, 100)
+  ok(JSON.stringify(gotLinks) === JSON.stringify([null, scannedLink]) && (await scans()).slice(2).every((m) => m.for === 'link') && (await scans()).length === 4, 'bridgeRelay.scan.link(): the app scans for a link, and the scan asked for last gets it (one asked for before it, nothing)', { gotLinks, scans: await scans() })
+  await dk.p.evaluate(() => { window.__got = []; window.bridgeRelay.scan.link().then((l) => window.__got.push(l)) })
+  await dk.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-scan', { detail: { link: null } })))
+  ok(JSON.stringify(await until(() => dk.p.evaluate(() => (window.__got.length ? window.__got : null)), 3000, 100)) === '[null]', 'nothing scanned (the scanner closed, or not a pairing code): null')
+  ok(await p.evaluate(() => window.bridgeRelay.openCloud === null && window.bridgeRelay.start === null && window.bridgeRelay.computers === null && window.bridgeRelay.scan === null), 'in a browser, which has none of them, the page offers no Cloud Agents, start screen or scanner to Bridge AI (it uses the camera itself)')
   await dk.c.close()
 
   // Studio's relay not answering (it takes the connection, then nothing gets through).
