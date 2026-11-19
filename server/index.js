@@ -2977,7 +2977,7 @@ app.get('/api/relay/pagecheck', wrap((req) => relaycheck.ask({ now: req.query.no
 // link's page asks never comes here (relay.js answers it with shares.js alone).
 shares.use({
   shareAt: () => relay.shareAt(), ready: () => relay.sharesReady(), relayLimits: () => relay.shareLimits(), owner: () => settings.cleanName(cfg.name), computer: () => relay.thisName(),
-  isDevPort, ownPorts: () => [cfg.port, cfg.port + 1, ...pages.ports(), ...previewPorts.portsOpen()],
+  isDevPort, devPortWhy: (port) => servers.ownedWhy(port), ownPorts: () => [cfg.port, cfg.port + 1, ...pages.ports(), ...previewPorts.portsOpen()],
   endViewers: (id, said) => relay.endViewers(id, said), viewersOf: (id) => relay.viewersOf(id), waitingOf: (id) => relay.waitingOf(id),
   notify: (note) => notify.send(note).catch(() => {}),
   namePeople: (link, emails, until) => account.sharePeople(link, emails, until), forgetPeople: (link) => account.shareForget(link), sendCode: (link, email, code) => account.shareCode(link, email, code), canEmail: () => account.status().signedIn === true,

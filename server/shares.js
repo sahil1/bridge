@@ -59,12 +59,12 @@ const save = () => { ensureDir(path.dirname(FILE)); writeFileAtomic(FILE, JSON.s
 
 // What the rest of Bridge AI gives this (index.js): where links open (relay.js shareAt: the link's
 // page, and its content address when the relay has one), who shares (your name, else this
-// computer's), an app's port checked (isDevPort), the pages open on a link ended (endViewers) and
-// counted (viewersOf), your devices told (notify), the emails a link names told to the accounts
-// service (namePeople) and a code emailed to one of them (sendCode, account.js), and whether an email
-// can be sent at all (canEmail).
+// computer's), an app's port checked (isDevPort; devPortWhy: why not, when this computer couldn't
+// tell), the pages open on a link ended (endViewers) and counted (viewersOf), your devices told
+// (notify), the emails a link names told to the accounts service (namePeople) and a code emailed to
+// one of them (sendCode, account.js), and whether an email can be sent at all (canEmail).
 let hooks = {
-  shareAt: () => ({ why: 'relay' }), ready: async () => {}, relayLimits: () => null, owner: () => '', computer: () => 'This computer', isDevPort: async () => false, ownPorts: () => [],
+  shareAt: () => ({ why: 'relay' }), ready: async () => {}, relayLimits: () => null, owner: () => '', computer: () => 'This computer', isDevPort: async () => false, devPortWhy: () => null, ownPorts: () => [],
   endViewers: () => {}, viewersOf: () => 0, waitingOf: () => 0, notify: () => {}, namePeople: async () => { throw new Error('No email') }, forgetPeople: async () => {}, sendCode: async () => { throw new Error('No email') }, canEmail: () => false, changed: () => {},
 }
 export const use = (h) => { hooks = { ...hooks, ...h } }
@@ -139,7 +139,11 @@ export async function create(o) {
   let title
   if (kind === 'app') {
     const port = Number(o.port)
-    if (!(port > 1023 && port < 65536) || hooks.ownPorts().includes(port) || !(await hooks.isDevPort(port))) throw Object.assign(new Error(`Port ${port} isn't an app one of your agents' terminals started, so it can't be shared.`), { status: 403 })
+    const ours = !(port > 1023 && port < 65536) || hooks.ownPorts().includes(port)
+    if (ours || !(await hooks.isDevPort(port))) {
+      if (!ours && hooks.devPortWhy(port) === 'processes') throw Object.assign(new Error(`${hooks.computer()} didn't list its programs in time, so Bridge AI couldn't check that an agent's terminal started what serves port ${port}. Nothing was shared: try again in a moment.`), { status: 503, code: 'processes' })
+      throw Object.assign(new Error(`Port ${port} isn't an app one of your agents' terminals started, so it can't be shared.`), { status: 403 })
+    }
     if (!where.content) throw scriptsAway('Apps')
     target = { port, pane: String(o.pane || ''), folder: String(o.folder || '') }
     title = plainName(o.title, 80) || `Port ${port}`
@@ -749,7 +753,8 @@ const NO_BODY = new Set([204, 205, 304])
 async function toApp(s, { method, rest, search, h, body }) {
   const port = s.target.port
   if (!s.content) return page(403, 'An app is shown only at an address of its own, which this link doesn\'t have.')
-  if (hooks.ownPorts().includes(port) || !(await hooks.isDevPort(port))) return page(503, 'The app isn\'t running from an agent\'s terminal any more, so it can\'t be shown. Ask whoever shared it to start it again.')
+  const ours = hooks.ownPorts().includes(port)
+  if (ours || !(await hooks.isDevPort(port))) return page(503, !ours && hooks.devPortWhy(port) === 'processes' ? 'The computer sharing this app couldn\'t check in time that it\'s still running from an agent\'s terminal, so it isn\'t shown just now. Try again in a moment.' : 'The app isn\'t running from an agent\'s terminal any more, so it can\'t be shown. Ask whoever shared it to start it again.')
   if (body && body.byteLength > MAX_BODY) return page(413, 'That\'s more than a shared app takes at once (10 MB).')
   const headers = {}
   for (const [k0, v] of h) {

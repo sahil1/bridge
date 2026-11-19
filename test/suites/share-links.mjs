@@ -871,6 +871,15 @@ try {
     const go = await v.request('GET', '/c/go')
     ok(go.status === 302 && go.headers.location === '/count', 'a redirect to itself stays on it (from its root, which the page puts its own path in front of)', go.headers)
     v.close()
+    // Asked again once the last answer is a few seconds old: its server still the one its terminal
+    // started, it answers at once, without every process listed again (Windows lists them through
+    // PowerShell, seconds each time, and the app's every request asks).
+    await sleep(5500)
+    const v3 = await viewAs(s.link)
+    const t0 = Date.now()
+    const again = await v3.request('GET', '/c/count')
+    ok(again.status === 200 && Date.now() - t0 < 5000, 'asked again a while later, it answers at once: its terminal isn\'t looked for through every process again', Date.now() - t0)
+    v3.close()
     stopTree(other)
     await hk.api(`/shares/${s.id}/stop`, {})
   })

@@ -19,7 +19,8 @@ const run = (cmd, args, ms = 4000) => new Promise((resolve) => {
 async function listening() {
   const out = []
   if (IS_WIN) {
-    for (const l of (await run('netstat', ['-ano', '-p', 'TCP'])).split(/\r?\n/)) {
+    // IPv4 and IPv6 both: a dev server at localhost often listens on [::1] only.
+    for (const l of (await Promise.all(['TCP', 'TCPv6'].map((p) => run('netstat', ['-ano', '-p', p])))).join('\n').split(/\r?\n/)) {
       const m = l.trim().match(/^TCP\s+(\S+):(\d+)\s+\S+\s+LISTENING\s+(\d+)/i)
       if (m) out.push({ host: m[1], port: Number(m[2]), pid: Number(m[3]) })
     }
@@ -117,11 +118,13 @@ export async function serversFor(root, { exclude = [] } = {}) {
   return out.filter(Boolean).sort((a, b) => a.port - b.port)
 }
 
-// Every process's parent: pid -> its parent's pid.
+// Every process's parent: pid -> its parent's pid. (On Windows its module named first: found by
+// name, PowerShell doesn't look through every module installed for it, which in a profile that
+// hasn't yet can take it many seconds.)
 async function parents() {
   const out = new Map()
   const lines = IS_WIN
-    ? await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }'], 15000)
+    ? await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Import-Module CimCmdlets; Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }'], 15000)
     : await run('ps', ['-A', '-o', 'pid=,ppid='])
   for (const l of lines.split(/\r?\n/)) {
     const m = l.trim().match(/^(\d+)\s+(\d+)$/)
@@ -129,10 +132,10 @@ async function parents() {
   }
   return out
 }
-// Whether pid is one of tops, or started (however far down) by one of them.
-const under = (pid, tops, up) => {
-  for (let p = pid, n = 0; p > 1 && n < 200; p = up.get(p), n++) if (tops.has(p)) return true
-  return false
+// Which of tops pid is, or was started by (however far down): that one, else 0.
+const topOf = (pid, tops, up) => {
+  for (let p = pid, n = 0; p > 1 && n < 200; p = up.get(p), n++) if (tops.has(p)) return p
+  return 0
 }
 
 // Whether a port is one of the agents' dev servers: what a preview from another of your devices may
@@ -142,16 +145,31 @@ const under = (pid, tops, up) => {
 // Bridge AI's data folder, anywhere in it or above it (noneIn): setup's Install and Sign-in
 // terminals open in the home folder. Terminals that don't say their process (herdr's): a server
 // started in one's folder (not those), where the system says it (macOS and Linux). `exclude`: ports
-// never to count (Bridge AI's own). Asked again at most every few seconds per port.
-const owned = new Map() // `${port}` -> { at, p }
+// never to count (Bridge AI's own). Asked again at most every few seconds per port, counted from its
+// answer (one still being worked out is waited for, not asked again beside it).
+//
+// A shared app and a preview ask at every request, and listing every process takes Windows seconds
+// (PowerShell; far more on a busy computer). So a process found under a terminal is remembered:
+// while it still listens on that port, that terminal is still an agent's, and it was asked about a
+// little while ago, it's still that terminal's, from the list of ports alone. Each ask sees it again;
+// one gone from the port, or not asked about for a while, is looked for in full again.
+const owned = new Map() // `${port} ${panes}` -> { at, done, p }
+const found = new Map() // port -> pid -> { top, seen }
+const FOUND_MS = 2 * 60000
+const said = new Map() // port -> why its last ask said no, when that wasn't the answer itself
+// Why a port wasn't counted, when it's this computer's doing: 'processes' (none could be listed).
+export const ownedWhy = (port) => said.get(Number(port)) || null
 export function ownedBy(port, panes, { exclude = [], never = [], noneIn = [], ms = 5000 } = {}) {
   port = Number(port)
   if (!(port >= 1024 && port < 65536) || exclude.includes(port)) return Promise.resolve(false)
   const key = `${port} ${panes.map((x) => `${x.pid || ''}:${x.cwd}`).join('\0')}`
   const hit = owned.get(key)
-  if (hit && Date.now() - hit.at < ms) return hit.p
-  const p = (async () => {
+  if (hit && Date.now() - hit.at < (hit.done ? ms : 45000)) return hit.p
+  const entry = { at: Date.now(), done: false, p: null }
+  entry.p = (async () => {
     const socks = (await listening()).filter((s) => s.port === port && s.pid !== process.pid)
+    const known = found.get(port)
+    if (known) for (const pid of [...known.keys()]) if (!socks.some((s) => s.pid === pid)) known.delete(pid)
     if (!socks.length) return false
     const nots = await Promise.all(never.filter(Boolean).map(realOr))
     const nones = await Promise.all(noneIn.filter(Boolean).map(realOr))
@@ -167,10 +185,23 @@ export function ownedBy(port, panes, { exclude = [], never = [], noneIn = [], ms
     let up = new Map()
     const began = Date.now()
     if (tops.size) {
-      // (Asked again once when none came: Windows' list, from PowerShell, can time out.)
-      up = await parents()
-      if (!up.size) up = await parents()
-      mine = socks.some((s) => under(s.pid, tops, up))
+      for (const s of socks) {
+        const k = known?.get(s.pid)
+        if (k && tops.has(k.top) && began - k.seen < FOUND_MS) { k.seen = began; mine = true }
+      }
+      if (!mine) {
+        // (Asked again once when none came: Windows' list, from PowerShell, can time out.)
+        up = await parents()
+        if (!up.size) up = await parents()
+        for (const s of socks) {
+          const top = topOf(s.pid, tops, up)
+          if (!top) continue
+          mine = true
+          if (!found.has(port)) found.set(port, new Map())
+          found.get(port).set(s.pid, { top, seen: Date.now() })
+          if (found.size > 200) found.delete(found.keys().next().value)
+        }
+      }
     }
     const roots = ok.filter((x) => !x.pid).map((x) => x.cwd)
     if (!mine && roots.length && !IS_WIN) {
@@ -181,13 +212,15 @@ export function ownedBy(port, panes, { exclude = [], never = [], noneIn = [], ms
       }
     }
     // (Why one that's running isn't, in the log: what an agent's terminal started is told apart by its
-    // processes, and that's what a refusal can come down to.)
+    // processes, and that's what a refusal can come down to. None listed at all: the refusal says so.)
+    if (!mine && tops.size && !up.size) said.set(port, 'processes')
     if (!mine) console.log(`Preview: port ${port} (process ${socks.map((s) => s.pid).join(', ')}) isn't from an agent's terminal: ${tops.size} terminal${tops.size === 1 ? '' : 's'} with a process, ${up.size} processes listed (${Date.now() - began} ms)`)
     return mine && (await probe(port)).http
-  })().catch(() => false)
-  owned.set(key, { at: Date.now(), p })
+  })().catch(() => false).then((r) => { entry.done = true; entry.at = Date.now(); return r })
+  said.delete(port)
+  owned.set(key, entry)
   if (owned.size > 200) owned.delete(owned.keys().next().value)
-  return p
+  return entry.p
 }
 
 // How this project starts a server, best guesses first: [{ label, command }]
