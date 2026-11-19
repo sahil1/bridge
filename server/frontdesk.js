@@ -1767,6 +1767,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         waiting: qs.filter((q) => q.state === 'draft' && !q.try && !sending(q)).length,
         sending: data.outbox.filter((o) => o.bot === id).length,
         answering: qs.filter((q) => q.state === 'answering').length,
+        // Questions asked of it since midnight here (not Try It's, nor its scheduled posts).
+        today: qs.filter((q) => !q.try && !q.migrated && q.how !== 'scheduled' && Date.parse(q.heardAt) >= new Date().setHours(0, 0, 0, 0)).length,
         queued: qs.filter((q) => q.state === 'queued').length,
         lastEvent: b.st.connection || null,
         memoryCount: { kept: mem.filter((x) => x.state === 'kept').length, proposed: mem.filter((x) => x.state === 'proposed').length },

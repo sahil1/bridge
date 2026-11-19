@@ -10,7 +10,10 @@
 //   connections/<id>/connection.json   its settings: { name, platform, shared, bot (a connection of
 //                                      one bot's own: that bot), owner (you there), defaults (the
 //                                      channels each go to one bot: [{ id, name, bot }]), perBot
-//                                      (a slash command for each bot, besides its own), teamsPort,
+//                                      (a slash command for each bot, besides its own), assist
+//                                      (AI Assist picks among the bots someone may ask: on unless
+//                                      you turn it off), unsure (the bot a question goes to when
+//                                      nothing else says which: null, to ask them), teamsPort,
 //                                      migratedFrom, createdAt }
 //   connections/<id>/slack.json        its tokens, as the platform's connector keeps them
 //   connections/<id>/discord.json      (slackbot.js, discordbot.js, teamsbot.js): never in
@@ -47,6 +50,8 @@ function shape(id, j) {
   c.owner = person(c.owner)
   c.defaults = (Array.isArray(c.defaults) ? c.defaults : []).map(place).filter(Boolean).slice(0, 200)
   c.perBot = c.perBot === true
+  c.assist = c.assist !== false
+  c.unsure = /^b\d{1,4}$/.test(String(c.unsure || '')) ? String(c.unsure) : null
   c.teamsPort = Number.isInteger(c.teamsPort) ? c.teamsPort : null
   return c
 }
@@ -92,7 +97,8 @@ export function create({ platform, name, shared = true, bot = null, owner = null
   write(c)
   return c
 }
-// Its settings changed (its name, you there, the channels' bots, per-bot commands).
+// Its settings changed (its name, you there, the channels' bots, per-bot commands, whether AI Assist
+// picks, and the bot for a question nothing else places).
 export function save(id, patch) {
   const before = get(id)
   if (!before) throw Object.assign(new Error('No such connection'), { status: 404 })

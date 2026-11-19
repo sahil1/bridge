@@ -7,6 +7,8 @@ import { useFolder } from '../files/fsapi.js'
 import { ago } from '../Machines.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { Connections, BotReach } from '../bots/Connections.jsx'
+import Access, { AccessLine } from '../bots/Access.jsx'
+import { accessSaid } from '../bots/access.js'
 import { t } from '../../i18n/index.js'
 import './bots.css'
 
@@ -784,7 +786,7 @@ function FirstBot({ onStart }) {
 // Who may ask: people picked from the workspace by name, or everyone in the channels it's in; never
 // guests or people from other companies. The people named are also the only ones (with you) who may
 // ask for a change. And what anyone else gets.
-function Askers({ d, save }) {
+export function Askers({ d, save }) {
   const { people, error, connected } = usePeople(d)
   const s = d.settings
   const askers = s.askers
@@ -871,7 +873,7 @@ function Instructions({ d, save }) {
 }
 
 // The folders it reads from: an agent that can only read, kept to them (with Claude Code).
-function ReadsFrom({ d, save }) {
+export function ReadsFrom({ d, save }) {
   const [where, setWhere] = useState('')
   const [browse, setBrowse] = useState(false)
   // The system's folder picker on the computer it runs on; anywhere else, that computer's folders,
@@ -918,7 +920,7 @@ function ReadsFrom({ d, save }) {
 // its tools, asked of the server on the computer it runs on, and which of them only read. Those may be
 // used for anyone who may ask; the others only when you, or someone you named under Who Can Ask, ask.
 // Only with Claude Code answering, which holds a run to them.
-function McpServers({ d, save }) {
+export function McpServers({ d, save }) {
   const [x, setX] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -972,7 +974,7 @@ function McpServers({ d, save }) {
 // Changes: none, a diff you approve before a draft pull request opens, or a draft pull request at
 // once. The agent edits only its own copy (a git worktree), and Bridge AI does the git and GitHub
 // part with your own gh. Only the people named, and you, may ask for one.
-function Changes({ d, save }) {
+export function Changes({ d, save }) {
   const s = d.settings
   const c = d.changes || {}
   const repos = c.repos || []
@@ -1014,7 +1016,7 @@ function Changes({ d, save }) {
 // The limits for each person who asks: questions a day, at once, and how long a run may take. You
 // aren't limited.
 const LIMITS = () => [['day', t('Questions a day'), 1, 1000], ['atOnce', t('At once'), 1, 5], ['minutes', t('Minutes a run'), 1, 60]]
-function Limits({ d, save }) {
+export function Limits({ d, save }) {
   const l = d.settings.limits || { day: 30, atOnce: 2, minutes: 10 }
   const [v, setV] = useState(l)
   useEffect(() => { setV(l) }, [l.day, l.atOnce, l.minutes]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1147,7 +1149,7 @@ export function AnswererList({ value, options = [], automatic = [], fallback = t
 }
 
 // What answers it, in Set Up: AnswererList, with what's here to pick from.
-function Answerers({ d, save }) {
+export function Answerers({ d, save }) {
   const [x, setX] = useState(null)
   useEffect(() => { api(`/bots/${d.id}/answerers?fresh=1`).then(setX, () => setX({ options: [], automatic: [] })) }, [d.id, d.settings.answerers?.join(), d.settings.fallback])
   const st = d.answerers?.list || []
@@ -1282,7 +1284,9 @@ function Scheduled({ d, reload }) {
   )
 }
 
-function SetUp({ d, save, reload, onDelete, again }) {
+// access: what it may do is here too (Settings › Bots); on its page, Access is a tab of its own
+// (bots/Access.jsx), so it isn't said twice.
+function SetUp({ d, save, reload, onDelete, again, access = true }) {
   // (Where it answers: the one you looked at last for this bot, else the first set up, else Slack.)
   const [at, setAt] = useState(() => { const x = saved(`cc-bot-where-${d.id}`); return PLATFORMS.some(([k]) => k === x) ? x : (PLATFORMS.find(([k]) => stateOf(d, k).state !== 'no-tokens') || ['slack'])[0] })
   const pick = (k) => { setAt(k); saved(`cc-bot-where-${d.id}`, k) }
@@ -1306,14 +1310,18 @@ function SetUp({ d, save, reload, onDelete, again }) {
       {!shared && at === 'teams' && <TeamsSetup d={d} save={save} reload={reload} again={again} />}
       <Pause d={d} save={save} />
       <Identity d={d} save={save} onDelete={onDelete} />
-      <Askers d={d} save={save} />
+      {access && <Askers d={d} save={save} />}
       <Instructions d={d} save={save} />
-      <ReadsFrom d={d} save={save} />
-      <McpServers d={d} save={save} />
-      <Changes d={d} save={save} />
-      <Limits d={d} save={save} />
+      {access && (
+        <>
+          <ReadsFrom d={d} save={save} />
+          <McpServers d={d} save={save} />
+          <Changes d={d} save={save} />
+          <Limits d={d} save={save} />
+        </>
+      )}
       <Channels d={d} save={save} />
-      <Answerers d={d} save={save} />
+      {access && <Answerers d={d} save={save} />}
       <Replies d={d} save={save} />
       <Scheduled d={d} reload={reload} />
     </>
@@ -1854,14 +1862,17 @@ function Memory({ d, save, reload }) {
 // Its tabs, here in Settings and on its page in the main area (page: bots/BotPage.jsx), where its
 // name and how it stands are over them, with AI Assist (the wand) opening its chat beside them
 // (assist(ctx): the chat, given the bot as it stands and how to change it). On a phone the chat takes
-// the page while it's open. It opens by itself until the bot is connected somewhere.
+// the page while it's open. It opens by itself until the bot is connected somewhere. Its page has
+// Access too (bots/Access.jsx): what this bot may do, summed up in a line over the tabs; Settings
+// keeps those sections in Set Up, with the same line and a way to its page's Access.
 const TABS = ['setup', 'try', 'memory', 'activity']
+const PAGE_TABS = ['setup', 'access', 'try', 'memory', 'activity']
 const STATUS_SAID = () => ({ on: t('Answering'), needs: t('Needs you'), paused: t('Paused'), off: t('Not connected yet') })
 export function Bot({ id, onGone, onChanged, notice, page = false, phone = false, status = null, assist = null }) {
   const [d, setD] = useState(null)
   const [error, setError] = useState(null)
   const [note, setNote] = useState(null)
-  const [tab, setTab] = useState(() => { const x = saved('cc-bot-tab'); return TABS.includes(x) ? x : 'setup' })
+  const [tab, setTab] = useState(() => { const x = saved('cc-bot-tab'); return (page ? PAGE_TABS : TABS).includes(x) ? x : 'setup' })
   const alive = useRef(true)
   // Each look is numbered: one overtaken by a newer look or a change, or back while a change is
   // still being saved (what it brings is from before), is dropped.
@@ -1911,13 +1922,15 @@ export function Bot({ id, onGone, onChanged, notice, page = false, phone = false
     <>
       <div className="seg sb-tabs" role="tablist" aria-label={d.name}>
         <button type="button" role="tab" aria-selected={tab === 'setup'} className={tab === 'setup' ? 'on' : ''} onClick={() => pickTab('setup')}>{t('Set Up')}</button>
+        {page && <button type="button" role="tab" aria-selected={tab === 'access'} className={tab === 'access' ? 'on' : ''} onClick={() => pickTab('access')} data-tab="access">{t('Access')}</button>}
         <button type="button" role="tab" aria-selected={tab === 'try'} className={tab === 'try' ? 'on' : ''} onClick={() => pickTab('try')}>{t('Try It')}</button>
         <button type="button" role="tab" aria-selected={tab === 'memory'} className={tab === 'memory' ? 'on' : ''} onClick={() => pickTab('memory')}>{t('Memory')}{proposed > 0 && <span className="sb-tag">{t('{n} to keep', { n: proposed })}</span>}</button>
         <button type="button" role="tab" aria-selected={tab === 'activity'} className={tab === 'activity' ? 'on' : ''} onClick={() => pickTab('activity')}>{t('Activity')}{d.waiting > 0 && <span className="sb-tag">{t('{n} waiting in Needs You', { n: d.waiting })}</span>}</button>
       </div>
       {notice?.length > 0 && <div className="st-note warn" role="status"><Icon name="info" size={13} /><span>{t('Imported. Check these here:')} {notice.join(' · ')}</span></div>}
       {note && <p className="st-note bad" role="alert"><Icon name="alert" size={13} /> {note}</p>}
-      {tab === 'setup' && <SetUp d={d} save={save} reload={load} onDelete={remove} again={again} />}
+      {tab === 'setup' && <SetUp d={d} save={save} reload={load} onDelete={remove} again={again} access={!page} />}
+      {tab === 'access' && page && <Access d={d} save={save} onTab={pickTab} />}
       {tab === 'try' && <TryIt d={d} />}
       {tab === 'memory' && <Memory d={d} save={save} reload={load} />}
       {tab === 'activity' && <Activity d={d} save={save} />}
@@ -1927,6 +1940,7 @@ export function Bot({ id, onGone, onChanged, notice, page = false, phone = false
     return (
       <>
         <div className="st-row sb-page-link"><button type="button" className="link-btn" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-bot', { detail: { id } }))}><Icon name="external" size={12} /> {t('Open {bot} as a page', { bot: d.name })}</button></div>
+        <AccessLine d={d} onOpen={() => { saved('cc-bot-tab', 'access'); window.dispatchEvent(new CustomEvent('bridge-open-bot', { detail: { id } })) }} />
         {body}
       </>
     )
@@ -1943,6 +1957,7 @@ export function Bot({ id, onGone, onChanged, notice, page = false, phone = false
           {assist && <AiAssist on={chatOpen} compact={phone} items={[{ label: t('Set it up or change it in words'), hint: t('Say what you want: AI Assist shows what would change first'), on: chatOpen, run: () => showChat(!chatOpen) }]} />}
         </header>
         {d.description && <p className="muted small bp-about">{d.description}</p>}
+        <AccessLine d={d} onOpen={tab === 'access' ? null : () => pickTab('access')} />
         {body}
       </div>
       {chatOpen && <aside className="bp-chat" aria-label={t('AI Assist')}>{assist({ d, save, reload: load, again, onClose: () => showChat(false) })}</aside>}
@@ -1950,22 +1965,46 @@ export function Bot({ id, onGone, onChanged, notice, page = false, phone = false
   )
 }
 
-// A new bot, by its name, from a template or blank; or one exported from another computer.
+// A new bot, by its name, from a starting point for its use case (a template: Hiring, Marketing…)
+// or blank; or one exported from another computer. A starting point says the access it starts with
+// (who may ask, its memory, what it may change, its limits) and the folder it reads, picked here (its
+// own suggestion when that's on this computer); once made, its page opens at Access to adjust them.
 // form: shown on its own, as AI Assist's chat offers it (without the way back into the chat).
-export function NewBot({ onMade, form = false }) {
+// start: the starting point picked to begin with.
+export function NewBot({ onMade, form = false, start = '' }) {
   const [name, setName] = useState('')
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   const [templates, setTemplates] = useState(null)
+  const [canChange, setCanChange] = useState(true)
   const [tplError, setTplError] = useState(null)
-  const [tpl, setTpl] = useState('')
+  const [tpl, setTpl] = useState(start || '')
+  const [folder, setFolder] = useState('')
+  const [browse, setBrowse] = useState(false)
   const file = useRef(null)
-  useEffect(() => { api('/bots/templates').then((r) => setTemplates(r.templates || []), (e) => { setTemplates([]); setTplError(e.message) }) }, [])
+  const pickFolder = onThisComputer() ? window.bridgeApp?.pickFolder : null
+  useEffect(() => { api('/bots/templates').then((r) => { setTemplates(r.templates || []); setCanChange(r.canChange !== false) }, (e) => { setTemplates([]); setTplError(e.message) }) }, [])
+  // (A starting point picked: its name and its folder, where that's here, to begin from.)
+  const choose = (id) => {
+    const x = (templates || []).find((y) => y.id === id)
+    setTpl(id)
+    setFolder(x?.folderHere ? x.folder : '')
+    if (x?.access && (!name.trim() || (templates || []).some((y) => y.name === name.trim()))) setName(x.name)
+  }
+  useEffect(() => { if (start && templates) choose(start) }, [start, templates]) // eslint-disable-line react-hooks/exhaustive-deps
   const make = async (e) => {
     e.preventDefault()
     setBusy(true)
     setError(null)
-    try { const b = await api('/bots', { method: 'POST', body: { name, ...(tpl ? { template: tpl } : {}) } }); setName(''); onMade(b.id) } catch (err) { setError(err.message) }
+    const x = (templates || []).find((y) => y.id === tpl)
+    try {
+      const b = await api('/bots', { method: 'POST', body: { name, ...(tpl ? { template: tpl } : {}), ...(folder.trim() ? { readsFrom: [folder.trim()] } : {}) } })
+      setName('')
+      setFolder('')
+      // (Made from a starting point: its page opens at Access, to adjust what it starts with.)
+      if (x?.access) saved('cc-bot-tab', 'access')
+      onMade(b.id)
+    } catch (err) { setError(err.message) }
     setBusy(false)
   }
   const bring = async (f) => {
@@ -1993,7 +2032,7 @@ export function NewBot({ onMade, form = false }) {
       )}
       <div className="sb-templates" role="radiogroup" aria-label={t('What it does')}>
         {cards.map((c) => (
-          <button key={c.id || 'blank'} type="button" role="radio" aria-checked={tpl === c.id} className={`sb-tpl ${tpl === c.id ? 'on' : ''}`} onClick={() => setTpl(c.id)}>
+          <button key={c.id || 'blank'} type="button" role="radio" aria-checked={tpl === c.id} className={`sb-tpl ${tpl === c.id ? 'on' : ''}`} onClick={() => choose(c.id)} data-template={c.id || 'blank'}>
             <b className="small">{c.name}</b>
             {c.description && <span className="muted small">{c.description}</span>}
           </button>
@@ -2001,6 +2040,19 @@ export function NewBot({ onMade, form = false }) {
       </div>
       {tplError && <p className="muted small">{t('The templates couldn\'t be loaded ({error}): you can still start blank.', { error: tplError })}</p>}
       {picked?.hint && <p className="muted small">{picked.hint}</p>}
+      {picked?.access && (
+        <div className="sb-start" data-setting="bots-start">
+          <p className="small"><b>{t('It starts with')}</b> <span className="muted">{accessSaid({ ...picked.access, readsFrom: folder.trim() ? [folder.trim()] : [] }, { start: true })}</span></p>
+          {picked.access.changes !== 'none' && !canChange && <p className="st-note warn"><Icon name="info" size={13} /><span>{t('Changes need Claude Code, which isn\'t here: it starts changing nothing, until you add Claude Code under What Answers.')}</span></p>}
+          <div className="sb-add">
+            <input className="st-input mono" value={folder} onChange={(e) => setFolder(e.target.value)} placeholder={picked.folder || '~/code'} aria-label={t('The folder it reads from')} spellCheck={false} />
+            <button type="button" className="btn small" aria-expanded={browse} onClick={async () => { if (!pickFolder) return setBrowse((x) => !x); const p = await pickFolder().catch(() => null); if (p) setFolder(p) }}>{t('Choose…')}</button>
+          </div>
+          {!folder.trim() && <p className="muted small">{picked.folder ? t('{folder} isn\'t on this computer: pick the folder it reads from, or add one later under Access.', { folder: picked.folder }) : t('Pick the folder it reads from, or add one later under Access.')}</p>}
+          {browse && <Browse onPick={(f) => { setFolder(f); setBrowse(false) }} onClose={() => setBrowse(false)} />}
+          <p className="muted small">{form ? t('Once it\'s made, its page opens at Access: name who may ask, and change anything it starts with.') : t('Once it\'s made, name who may ask and change anything it starts with: here, or under Access on its page.')}</p>
+        </div>
+      )}
       {picked?.instructions && <details className="sb-how"><summary><Icon name="chevron" size={11} />{t('Its instructions, to change after')}</summary><pre className="sb-tpl-ins">{picked.instructions}</pre></details>}
       <form className="sb-new" onSubmit={make} data-setting="slack-new">
         <div className="sb-add">
