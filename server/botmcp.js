@@ -164,13 +164,19 @@ export const configsOf = (bot) => { const have = claudeServers(); return Object.
 // it has none (or none of them is in Claude Code's config any more). What it was given is said back
 // for the record: { dir, servers: [{ name, all, tools, problem }], missing }.
 export const OUTBOX_SERVER = 'bridge_outbox'
-export async function runFolder(bot, { all = false, key, outbox = null }) {
-  const want = (bot.mcp || []).filter((n) => n !== OUTBOX_SERVER)
-  if (!want.length && !outbox) return null
+// A run that changes files (write: { root }, its staging copy: botwrite.js) gets Bridge AI's own
+// bridge_files too (filesmcp.js, delete_file and move_file in that copy alone), and settings of its
+// own for Claude Code (settings.json, --settings: agents.js): its PreToolUse hook, botguard.mjs, that
+// checks every path a tool that writes is given, with hooks on whatever your own settings say.
+export const FILES_SERVER = 'bridge_files'
+const sh = (s) => `'${String(s).replace(/'/g, '\'\\\'\'')}'`
+export async function runFolder(bot, { all = false, key, outbox = null, write = null }) {
+  const want = (bot.mcp || []).filter((n) => n !== OUTBOX_SERVER && n !== FILES_SERVER)
+  if (!want.length && !outbox && !write) return null
   const have = claudeServers()
   const picked = want.filter((n) => have[n])
   const missing = want.filter((n) => !have[n])
-  if (!picked.length && !outbox) return { dir: null, servers: [], missing }
+  if (!picked.length && !outbox && !write) return { dir: null, servers: [], missing }
   const allow = []
   const deny = []
   const said = []
@@ -188,9 +194,18 @@ export async function runFolder(bot, { all = false, key, outbox = null }) {
   const servers = Object.fromEntries(picked.map((n) => [n, have[n]]))
   // (Its outbox's: this app's Node, on this run's outbox alone.)
   if (outbox) { servers[OUTBOX_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'outboxmcp.js'), outbox], env: { ...NODE.env } }; allow.push(toolName(OUTBOX_SERVER, 'save_file')) }
+  let settings = null
+  if (write?.root) {
+    servers[FILES_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'filesmcp.js'), write.root], env: { ...NODE.env } }
+    allow.push(toolName(FILES_SERVER, 'delete_file'), toolName(FILES_SERVER, 'move_file'))
+    const env = Object.entries(NODE.env).map(([k, v]) => `${k}=${sh(v)} `).join('')
+    const guard = `${env}${sh(NODE.bin)} ${sh(path.join(ROOT, 'server', 'botguard.mjs'))} ${sh(write.root)}`
+    settings = path.join(dir, 'settings.json')
+    writeFileAtomic(settings, JSON.stringify({ disableAllHooks: false, hooks: { PreToolUse: [{ matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command: guard, timeout: 30 }] }] } }, null, 2), { mode: 0o600 })
+  }
   writeFileAtomic(path.join(dir, 'config.json'), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 })
-  writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny }, null, 2), { mode: 0o600 })
-  return { dir, servers: said, missing }
+  writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny, ...(settings ? { settings } : {}) }, null, 2), { mode: 0o600 })
+  return { dir, servers: said, missing, ...(settings ? { guard: true } : {}) }
 }
 // A run's folder gone (it ended), or every one older than a day (left from before a restart).
 export function drop(dir) { if (dir && path.resolve(dir).startsWith(RUNS + path.sep)) fs.rmSync(dir, { recursive: true, force: true }) }
