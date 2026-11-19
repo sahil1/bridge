@@ -212,7 +212,8 @@ export function status() {
     // fresh: paired with Pair a device's code and not kept yet (Keep or Remove, said in the app).
     // moving: not seen at this address yet since this computer moved here (it finds it through the
     // old one, moved).
-    devices: (conf.devices || []).map(({ id, name, kind, relay, addedAt, lastSeen, fresh }) => ({ id, name, kind: kind || 'phone', relay: relay || null, addedAt, lastSeen, connected: live.has(id), fresh: !!fresh, moving: !!m?.left?.includes(id) })),
+    // A computer's version and whether it says which of its devices a request is for (builtOf).
+    devices: (conf.devices || []).map(({ id, name, kind, relay, addedAt, lastSeen, fresh, version, forDevices }) => ({ id, name, kind: kind || 'phone', relay: relay || null, addedAt, lastSeen, connected: live.has(id), fresh: !!fresh, moving: !!m?.left?.includes(id), ...(kind === 'computer' ? { version: version || null, forDevices: !!forDevices } : {}) })),
     // Moved here from another relay: which, until when this computer stays connected there for the
     // devices not seen here yet, and whether it is now.
     moved: m ? { from: m.url, hosted: !!m.hosted, at: m.at, until: m.until, connected: prior.ws?.readyState === 1 } : null,
@@ -420,6 +421,10 @@ const forOf = (h) => {
 }
 // Worth compressing: text (pictures and fonts are compressed already).
 const PACKS = /javascript|css|json|svg|html|text\/|wasm|xml/
+// What another of your computers says, sealed, of its Bridge AI: its version, and whether it says
+// which of its own devices a request it passes on is for (machines.js forHeaders), which one from
+// before this doesn't, so its devices can't be told apart from it (remote.js, Settings say so).
+const builtOf = (said) => ({ version: typeof said?.version === 'string' && /^[\w.+-]{1,40}$/.test(said.version) ? said.version : null, forDevices: said?.forDevices === true })
 // A device's name as it says it: no control characters, nor ones that turn text around (bidi).
 const cleanName = (s) => plainName(s)
 
@@ -605,7 +610,7 @@ class Conn {
       // as Link a device on another computer uses the same code.
       const s = said || p.told
       const computer = p.by === 'invite' || s.kind === 'computer'
-      device = { id: p.id, key: p.key, name: cleanName(s.name) || (computer ? 'Another computer' : 'Phone'), ...(computer ? { kind: 'computer', relay: cleanRelay(s.relay) } : {}), addedAt: new Date().toISOString(), ...(p.by === 'code' ? { fresh: true } : {}) }
+      device = { id: p.id, key: p.key, name: cleanName(s.name) || (computer ? 'Another computer' : 'Phone'), ...(computer ? { kind: 'computer', relay: cleanRelay(s.relay), ...builtOf(said) } : {}), addedAt: new Date().toISOString(), ...(p.by === 'code' ? { fresh: true } : {}) }
       conf.devices = [...(conf.devices || []), device]
       conf.removed = (conf.removed || []).filter((x) => x.key !== p.key)
       roster().catch(() => {})
@@ -615,6 +620,7 @@ class Conn {
       // asked for, sealed, which machines.js follows). Never its kind.
       if (cleanName(said.name)) device.name = cleanName(said.name)
       if (device.kind === 'computer') {
+        Object.assign(device, builtOf(said))
         // Its own key, when it has a new one (it stopped using its relay, which makes one): said
         // sealed by the device itself, so what this computer reaches it with is put right, before
         // the move below takes this computer to its new address.

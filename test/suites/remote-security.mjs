@@ -827,6 +827,8 @@ try {
     const itself = await old.request('GET', '/api/fleet')
     const forOne = await old.request('GET', '/api/fleet', null, [['x-bridge-for', '1']])
     ok(od.kind === 'computer' && itself.status === 200 && forOne.status === 403 && forOne.json?.code === 'notLetIn' && forOne.json.through === 'OldBox' && /Update Bridge AI on OldBox to use Studio from its devices/.test(forOne.json.error), 'a computer that says a request is for one of its devices but not which: refused, saying to update it; as itself, in', [itself.status, forOne.json])
+    const lap = (await studio.api('/remote')).access.devices.find((d) => d.id === LAPTOP)
+    ok(od.older === true && !lap?.older, 'a computer on a Bridge AI from before (no word that it tells its devices apart) is listed as older; Laptop isn\'t', [od, lap && { older: lap.older }])
     await old.request('DELETE', `/api/relay/devices/${encodeURIComponent(od.id)}`)
     old.stop()
     // Kept out, then unpairing and pairing again with the same key: kept out again, with the switch off too.
@@ -1005,6 +1007,12 @@ try {
       await item.getByRole('button', { name: 'Allow' }).click()
       ok(!!(await until(async () => (await studio.api('/remote')).access.devices.find((x) => x.id === d.id)?.allowed, 5000, 100)), 'Allow lets it in: ticked in Which Devices May Connect')
       ok(!!(await f.locator('.settings-btn').waitFor({ timeout: 20000 }).then(() => true, () => false)), 'and the phone\'s page opens Bridge AI by itself')
+      // A computer on an older Bridge AI, paired with Studio: Settings says its devices can't be kept out apart from it.
+      const older = over(await linkAs(ra.url, { code: (await studio.api('/relay/pair', {})).pairing.code, name: 'OldBox2', about: { name: 'OldBox2', kind: 'computer', version: '3.21.0' }, hello: { kind: 'computer' } }))
+      await s.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))
+      const list = s.p.locator('[data-setting="remote-devices"]')
+      const oldSaid = /OldBox2 runs an older Bridge AI: devices reaching this computer through it can't be told apart from OldBox2 itself, so the list can't keep them out separately\. Update Bridge AI on OldBox2\./
+      ok(!!(await until(async () => oldSaid.test((await list.innerText().catch(() => '')).replace(/\s+/g, ' ')), 15000, 300)), 'Settings › Remote Access says a computer on an older Bridge AI can\'t have its devices kept out apart from it', (await list.innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 600))
       // Unticked, then Remote Screen and Preview turned off at Studio: it stays out, and Studio's
       // Settings lists it with Allow where the Beta Feature's settings were.
       await studio.api('/remote/devices', { id: d.id, allowed: false })
@@ -1015,6 +1023,9 @@ try {
       ok((await kept.innerText()).includes(d.name), 'with Remote Screen and Preview off, Studio\'s Settings lists it as kept out', (await kept.innerText()).replace(/\s+/g, ' '))
       await kept.locator('li', { hasText: d.name }).getByRole('button', { name: 'Allow' }).click()
       ok(!!(await until(async () => !(await studio.api('/remote')).access.devices.find((x) => x.id === d.id)?.out, 5000, 100)), 'and Allow there lets it back in')
+      const od2 = (await studio.api('/remote')).access.devices.find((x) => x.name === 'OldBox2')
+      if (od2) await older.request('DELETE', `/api/relay/devices/${encodeURIComponent(od2.id)}`)
+      older.stop()
       await studio.api('/settings', { trials: { 'remote-screen': true } }, 'PATCH')
       await s.ctx.close()
       await ctx.close()

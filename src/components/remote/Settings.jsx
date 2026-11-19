@@ -47,6 +47,13 @@ export function useControl(active = true) {
 // A device in Which Devices May Connect: its name, and for one through another of your computers, which.
 const deviceName = (d) => (d.through ? t('{name}, through {computer}', { name: whoOf({ by: d }), computer: d.through }) : whoOf({ by: d }))
 
+// A linked computer on a Bridge AI from before its devices were told apart from it (server/relay.js
+// builtOf): said, since this list can't keep its devices out apart from it.
+function Older({ d }) {
+  if (d.kind !== 'computer' || !d.older) return null
+  return <span className="small rs-older"><Icon name="info" size={11} /> {t('{name} runs an older Bridge AI: devices reaching this computer through it can\'t be told apart from {name} itself, so the list can\'t keep them out separately. Update Bridge AI on {name}.', { name: deviceName(d) })}</span>
+}
+
 // Unticked: the other entries that may be the same device (paired with the same key, or of the
 // same name: server/remote.js accessStatus same), still let in, offered to keep out too.
 function SameToo({ d, all, keep }) {
@@ -80,6 +87,7 @@ export function KeptOut() {
           <li key={d.id}>
             <span><Icon name={d.kind === 'computer' ? 'laptop' : 'phone'} size={12} /> {deviceName(d)} <span className="muted">{d.kind === 'computer' ? t('computer') : t('phone')}</span></span>
             <button type="button" className="btn small" onClick={() => allow(d.id)}>{t('Allow')}</button>
+            <Older d={d} />
           </li>
         ))}
       </ul>
@@ -285,6 +293,7 @@ export function RemoteSettings() {
                     </label>
                     {d.locked && <span className="rs-locked small"><Icon name="lock" size={11} /> {t('Locked out until {time}', { time: clockOf(d.locked) })}</span>}
                     {d.out && <SameToo d={d} all={ac.devices} keep={(id) => access('/devices', { id, allowed: false })} />}
+                    <Older d={d} />
                     {d.locked && here && <button type="button" className="ghost-btn small" onClick={() => access(`/locks/${encodeURIComponent(d.id)}/clear`)}>{t('Unlock')}</button>}
                   </li>
                 ))}

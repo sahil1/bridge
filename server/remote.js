@@ -197,7 +197,9 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     const list = devices()
     const lockOf_ = (id) => locks.find((l) => l.id === id)?.until || null
     const kindOf = (k) => (k === 'computer' ? 'computer' : 'phone')
-    const own = list.map((d) => ({ id: d.id, name: clean(d.name) || 'A device', kind: kindOf(d.kind), allowed: !conf.blocked.includes(d.id) && !conf.fresh.includes(d.id), fresh: conf.fresh.includes(d.id), out: conf.blocked.includes(d.id), locked: lockOf_(d.id), k: deviceOf(d.id)?.key || null }))
+    // older: a computer on a Bridge AI from before its devices were told apart from it (relay.js
+    // builtOf), whose devices this list can't keep out apart from it; with its version.
+    const own = list.map((d) => ({ id: d.id, name: clean(d.name) || 'A device', kind: kindOf(d.kind), allowed: !conf.blocked.includes(d.id) && !conf.fresh.includes(d.id), fresh: conf.fresh.includes(d.id), out: conf.blocked.includes(d.id), locked: lockOf_(d.id), ...(d.kind === 'computer' && !d.forDevices ? { older: true, version: d.version || null } : {}), k: deviceOf(d.id)?.key || null }))
     const via = Object.entries(conf.through).map(([key, v]) => {
       const hop = list.find((d) => d.id === key.split('/')[0])
       return hop && { id: key, name: clean(v.name) || 'A device', kind: kindOf(v.kind), through: clean(hop.name) || 'Another computer', allowed: !conf.blocked.includes(key) && !conf.fresh.includes(key), fresh: conf.fresh.includes(key), out: conf.blocked.includes(key), locked: lockOf_(key), k: v.key || null }

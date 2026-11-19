@@ -7289,6 +7289,7 @@
   "{name} picked": "{name} selecionado",
   "{name} replied in the thread: “{text}”": "{name} respondeu na thread: “{text}”",
   "{name} runs again from its next time": "{name} volta a rodar a partir do próximo horário",
+  "{name} runs an older Bridge AI: devices reaching this computer through it can't be told apart from {name} itself, so the list can't keep them out separately. Update Bridge AI on {name}.": "{name} usa uma versão mais antiga do Bridge AI: os dispositivos que chegam a este computador por ele não se distinguem do próprio {name}, então a lista não consegue deixá-los de fora separadamente. Atualize o Bridge AI em {name}.",
   "{name} said all {n} lines from the call": "{name} disse todas as {n} linhas da chamada",
   "{name} said not to be signed in from your other computers. Sign in there by hand, in Settings › Account & Devices.": "{name} pediu para não ser conectado a partir dos seus outros computadores. Entre lá manualmente, em Configurações › Conta e dispositivos.",
   "{name} said that.": "{name} disse isso.",

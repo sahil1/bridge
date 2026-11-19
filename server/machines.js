@@ -49,7 +49,8 @@ const byRelay = (r) => conf.machines.find((m) => m.relay === r) || null
 // What this device says about itself to each of the others, sealed, as its first record (ABOUT):
 // its name, that it's a computer, where it's reached (null: nowhere now), so a move to another relay
 // is followed, and its key there, so a new one (Stop using the relay makes one) is too.
-const aboutMe = () => ({ name: relay.thisName(), kind: 'computer', relay: relay.relayUrl(), host: relay.publicKey(), os: OS, version: VERSION })
+// forDevices: what it passes on for its devices says which (forHeaders).
+const aboutMe = () => ({ name: relay.thisName(), kind: 'computer', relay: relay.relayUrl(), host: relay.publicKey(), os: OS, version: VERSION, forDevices: true })
 
 // This device's key for one of yours (made when they link, kept here).
 async function deviceKey(m) {
