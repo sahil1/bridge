@@ -52,6 +52,8 @@ const kit = await startKit('bots-connections', {
     return {
       BRIDGE_SLACK_URL: slack.url, BRIDGE_DISCORD_URL: dc.url, BRIDGE_TEAMS_URL: tm.url, BRIDGE_TEAMS_PORT: '0',
       BRIDGE_SLACK_PING_MS: '1000', BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000',
+      // (Each question its own conversation: the same person asking again soon after carries none on.)
+      BRIDGE_BOT_CARRY_MS: '0',
       // (No model on this computer is reached: AI Assist's is the stand-in's, once it's given.)
       OLLAMA_HOST: 'http://127.0.0.1:9', LM_STUDIO_BASE_URL: 'http://127.0.0.1:9/v1',
     }
@@ -111,8 +113,8 @@ try {
   await kit.api(`/connections/${C}/tokens`, { appToken: 'xapp-test', botToken: 'xoxb-test' })
   await kit.api('/bots', { name: 'Pricing Desk', description: 'Answers pricing questions: plans, seats and enterprise prices' })
   await kit.api('/bots', { name: 'Docs Helper', description: 'Answers questions about the docs and the handbook' })
-  await kit.api('/bots/b2/settings', { askers: [{ id: 'U0DANA', name: 'Dana' }, { id: 'U0SAM', name: 'Sam' }, { id: 'discord:2001', name: 'Dana' }, { id: 'teams:aad-dana-0001', name: 'Dana Reyes' }], readsFrom: ['~/pricing'], icon: ':moneybag:' })
-  await kit.api('/bots/b3/settings', { askers: [{ id: 'U0DANA', name: 'Dana' }, { id: 'discord:2001', name: 'Dana' }, { id: 'teams:aad-dana-0001', name: 'Dana Reyes' }], readsFrom: ['~/docs'] })
+  await kit.api('/bots/b2/settings', { answerIn: 'thread', askers: [{ id: 'U0DANA', name: 'Dana' }, { id: 'U0SAM', name: 'Sam' }, { id: 'discord:2001', name: 'Dana' }, { id: 'teams:aad-dana-0001', name: 'Dana Reyes' }], readsFrom: ['~/pricing'], icon: ':moneybag:' })
+  await kit.api('/bots/b3/settings', { answerIn: 'thread', askers: [{ id: 'U0DANA', name: 'Dana' }, { id: 'discord:2001', name: 'Dana' }, { id: 'teams:aad-dana-0001', name: 'Dana Reyes' }], readsFrom: ['~/docs'] })
   const shared = await connectedConn(C)
   ok(shared?.team?.name === 'Acme Test' && shared.bot?.name === 'bridge_ai' && shared.bots.map((x) => x.name).join() === 'Pricing Desk,Docs Helper', 'connected once, reaching both new bots (not Atlas, which has its own)', shared && { bots: shared.bots, bot: shared.bot })
   ok((await botOf('b2')).connections?.slack?.id === C && (await botOf('b2')).state === 'connected', 'a new bot needs nothing set up in Slack: it\'s on the shared connection, connected', (await botOf('b2')).connections)

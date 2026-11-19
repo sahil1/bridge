@@ -32,7 +32,8 @@
 //                    (app_home_opened), or Slack's Stop pressed on a working answer
 //                    (agent_session_stopped). The same event sent twice (by its event id) is
 //                    taken once.
-//   interactive      a button pressed in your direct messages (Send, Edit, Discard, Approve, Keep),
+//   interactive      a button pressed in your direct messages (Send, Edit, Discard, Approve, Keep;
+//                    Continue and Stop for a run at its time limit),
 //                    a modal sent (the reply you edited, a question about a message), or the
 //                    message shortcut "Ask <name> about this" (message_action)
 //   slash_commands   /<name> and a question: posted in the conversation as the bot ("@Dana asked:
@@ -479,7 +480,8 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   // What comes in: a mention of the bot in a channel, a direct message to it, a reply in a thread
   // (the desk keeps only those in threads it answers in), or a message at the top of a channel it
   // answers without a mention, from a person; an edit or deletion; its Home tab opened; Stop
-  // pressed. A thread's reply goes in that thread, a channel's message in a thread of its own, a
+  // pressed. A thread's reply goes in that thread, a channel's message in a thread of its own or,
+  // where the bot answers in the channel (its Answer In: the desk picks), in the channel (top), a
   // direct message plainly back.
   async function heard(e, { late = false, team = null } = {}) {
     if (!e || !hear) return
@@ -518,6 +520,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       at: new Date(Number(e.ts) * 1000).toISOString(),
       late,
       reply: { channel: e.channel, thread: dm && !e.thread_ts ? null : e.thread_ts || e.ts, user: e.user },
+      ...(!dm && !thread ? { top: { channel: e.channel, thread: null, user: e.user } } : {}),
     })
   }
   // An edit or a deletion, handed over as one (the desk keeps those in its threads).
@@ -596,6 +599,9 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       const where = { channel: p.container?.channel_id || p.channel?.id || null, thread: p.container?.thread_ts || null }
       if (['bb_send', 'bb_discard', 'bb_approve'].includes(a.action_id)) return act({ act: a.action_id.slice(3), q: a.value, user, team }, where)
       if (a.action_id === 'bb_keep' || a.action_id === 'bb_drop') return act({ act: a.action_id.slice(3), memory: a.value, user, team }, where)
+      // (A run at its time limit: Continue, its value the question and the minutes; Stop.)
+      if (a.action_id === 'bb_continue') { const [q, n] = String(a.value || '').split(' '); return act({ act: 'continue', q, minutes: Number(n) || null, user, team }, where) }
+      if (a.action_id === 'bb_halt') return act({ act: 'halt', q: a.value, user, team }, where)
       if (a.action_id === 'bb_edit') return editor(p, a.value, user, where)
       // (A bot picked for a question on a shared connection: connhub.js.)
       if (a.action_id === 'bb_pick') { const [key, bot] = String(a.value || '').split(' '); return act({ act: 'pick', key, bot, user, team }, where) }
@@ -639,8 +645,9 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   }
 
   // A question put through /<name> or the shortcut: posted where it was asked, as the bot, so the
-  // conversation shows it, then handed over as a mention is, its answer in that post's thread (the
-  // shortcut's in the message's own thread). { ts } back, or why not.
+  // conversation shows it, then handed over as a mention is, its answer in that post's thread, or in
+  // the channel where the bot answers there (the shortcut's in the message's own thread). { ts }
+  // back, or why not.
   async function asked({ user, team, channel, thread = null, text, via = 'shortcut', command = null }) {
     if (!hear || !channel || !USER.test(String(user?.id || ''))) return { error: 'Slack didn\'t say who or where' }
     const dmd = String(channel).startsWith('D')
@@ -661,6 +668,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       text: plainText(text, { bot: kept.bot?.userId, names }),
       place, at: new Date(Number(posted.ts) * 1000).toISOString(), late: false,
       reply: { channel, thread: top, user: user.id },
+      ...(!dmd && !thread ? { top: { channel, thread: null, user: user.id } } : {}),
     })?.catch?.((e) => say({ what: 'event', ok: false, why: e.message }))
     return { ts: posted.ts }
   }
@@ -970,7 +978,8 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   }
 
   // A draft or something to remember, in your direct messages, with its buttons: Send, Edit and
-  // Discard (Approve and open a pull request, for a change waiting on you), or Keep and Discard.
+  // Discard (Approve and open a pull request, for a change waiting on you), or Keep and Discard; a
+  // run at its time limit, Continue or Stop.
   // Its blocks are remembered (the last 200) so settle() can put the outcome in their place.
   const asks = new Map()
   const md = (s) => escape(String(s ?? ''))
@@ -1001,8 +1010,27 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
         button('bb_discard', 'Discard', it.q, 'danger'),
       ],
     })
+    // (Stopped at its time limit for want of your answer: Continue, as long as it can be.)
+    if (it.limit?.choices?.length) {
+      const how = it.limit.how === 'session' ? 'picks it up where it stopped' : it.limit.how === 'messages' ? 'starts it again with what it had so far' : 'starts it again from the question'
+      blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: clip(`Stopped at its time limit, after ${minutes(it.limit.ran)}, as nobody said to carry on. Continue ${how}, for a day.`, 2000) }] })
+      blocks.push({ type: 'actions', block_id: `bb_lc_${String(it.q).slice(0, 200)}`, elements: it.limit.choices.slice(0, 3).map((n) => button('bb_continue', `Continue ${n} more minutes`, `${it.q} ${n}`)) })
+    }
     const text = clip(`${it.bot ? `${it.bot}: ` : ''}${it.who || 'Someone'} asked ${it.where || 'in Slack'}: ${it.question || ''}${it.needsOwner ? '' : ` — Draft: ${it.draft || ''}`}`, 300)
     return { text: escape(text), blocks }
+  }
+  const minutes = (n) => `${n} ${n === 1 ? 'minute' : 'minutes'}`
+  // A run at its time limit: how long it has run and what it's doing, the question, and Continue
+  // (10 or 30 more minutes, fewer near its Longest Run) or Stop.
+  function limitBlocks(it) {
+    const said = `*${md(it.bot || 'Your bot')}*'s answer to *${md(it.who || 'someone')}* in ${md(it.where || 'Slack')} has run ${minutes(it.ran)}: ${md(it.doing || 'still working')}.`
+    const notes = [`It goes on for ${minutes(it.grace || 1)} more while you decide; with no answer, it stops and comes to you, and Continue still picks it up where it stopped for a day.`, it.left < 30 ? `At most ${minutes(it.left)} more: its Longest Run is ${it.longest} minutes.` : null].filter(Boolean)
+    const blocks = [
+      { type: 'section', text: { type: 'mrkdwn', text: clip(`${said}\n${quote(it.question || '')}`, 3000) } },
+      { type: 'context', elements: notes.map((n) => ({ type: 'mrkdwn', text: clip(md(n), 2000) })) },
+      { type: 'actions', block_id: `bb_l_${String(it.q).slice(0, 200)}`, elements: [...(it.choices || []).slice(0, 3).map((n, i) => button('bb_continue', `Continue ${n} more minutes`, `${it.q} ${n}`, i === 0 ? 'primary' : null)), button('bb_halt', 'Stop', it.q, 'danger')] },
+    ]
+    return { text: escape(clip(`${it.bot || 'Your bot'}'s answer to ${it.who || 'someone'} in ${it.where || 'Slack'} has run ${minutes(it.ran)}: ${it.doing || 'still working'}`, 300)), blocks }
   }
   function memoryBlocks(it) {
     const about = it.about ? ` (about ${md(it.about)})` : ''
@@ -1015,7 +1043,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   async function askOwner(owner, item) {
     if (!owner?.id) throw new Error('Set who you are in Slack first')
     const channel = await openDm(owner.id)
-    const { text, blocks } = item?.kind === 'memory' ? memoryBlocks(item) : draftBlocks(item || {})
+    const { text, blocks } = item?.kind === 'memory' ? memoryBlocks(item) : item?.kind === 'limit' ? limitBlocks(item) : draftBlocks(item || {})
     const j = await inLine(() => call('chat.postMessage', { channel, text, blocks, unfurl_links: false, unfurl_media: false }, { waits: 1 }))
     const handle = { channel: j.channel || channel, ts: j.ts }
     asks.set(`${handle.channel}:${handle.ts}`, blocks)

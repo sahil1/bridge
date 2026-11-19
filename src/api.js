@@ -28,6 +28,8 @@ export const phoneApp = (() => {
 })()
 // ...which shows the agents at work on the phone's lock screen (older relay pages can't).
 export const relayActivity = relayPage?.activity || null
+// ...and the app's own QR code scanner ({ pair, link }: src/scan.js; none in a browser, or an older app).
+export const relayScan = relayPage?.scan || null
 // What the phone sent while your computer was offline, and how each is doing ({ list, subscribe, dismiss }).
 export const relayOutbox = relayPage?.outbox || null
 export function useOutbox(paneId) {

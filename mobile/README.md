@@ -71,7 +71,9 @@ Try the demo has made-up cloud agents too, one per provider.
 
 Each computer running Bridge AI has its own relay and its own pairing, and one app can be paired
 with all of them. Add one in Settings › Devices › Your computers › Add a computer (or scan its code
-from the pairing screen), and switch there. Forget removes a computer from the phone, and removes
+from the pairing screen, or with Scan QR code in the computer name menu at the top), and switch there.
+Link a device has Scan QR code too: what the app scans goes back to that page, only a pairing link,
+as if pasted. Forget removes a computer from the phone, and removes
 the phone from that computer when it's the one showing.
 
 The app opens on the computer you used last. If that one isn't there, the start screen says so

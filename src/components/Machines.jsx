@@ -7,6 +7,7 @@ import { useDevicesName } from './settings/search.js'
 import { useTrial } from '../trials.js'
 import { viewScreen, canReach } from './remote/remote.js'
 import { RemoteSettings, KeptOut, useControl } from './remote/Settings.jsx'
+import { canScan, scan } from '../scan.js'
 
 // Your other devices (server/machines.js): Macs, Windows and Linux computers running Bridge AI,
 // linked to this one. The top bar's machine menu switches the window to one (its own Bridge AI,
@@ -175,10 +176,12 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
     return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key) }
   }, [open])
   const app = phone ? phoneApp : null
+  // Scan QR code: on a phone, in the app or a browser, another computer's code pairs this phone.
+  const scans = canScan('pair')
   const screens = useTrial('remote-screen')
   const ctl = useControl(open)
   const linked = (data?.machines || []).filter((m) => m.state === 'linked')
-  if (!data || (!linked.length && !machineId && !app)) return null
+  if (!data || (!linked.length && !machineId && !app && !scans)) return null
   const cur = machineId ? linked.find((m) => m.id === machineId) : null
   const needs = elsewhere ?? linked.filter((m) => m.id !== machineId).reduce((n, m) => n + needing(m.counts), 0)
   // The computers this phone is paired with, besides the one it's connected to.
@@ -232,14 +235,15 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
               <Icon name={ctl.data.control?.on ? 'check' : 'keyboard'} size={13} /> {t('Let my other devices control this computer')}
             </button>
           )}
-          {app && (
+          {(app || scans) && (
             <>
               <div className="menu-sep" />
               <div className="mc-head">{t('On this phone')}</div>
               {/* Pairing this phone with another computer (its QR code), which Link a device above isn't. */}
-              <button type="button" role="menuitem" className="menu-item" onClick={close(() => relayComputers.add())}><Icon name="plus" size={13} /> {t('Add a computer')}</button>
-              {app.cloud && <button type="button" role="menuitem" className="menu-item" onClick={close(app.cloud)}><Icon name="cloud" size={13} /> {t('Cloud Agents')}</button>}
-              <button type="button" role="menuitem" className="menu-item" onClick={close(app.start)} title={t('Back to the start: pair or open a computer')}><Icon name="phone" size={13} /> {t('Start screen')}</button>
+              {app && <button type="button" role="menuitem" className="menu-item" onClick={close(() => relayComputers.add())}><Icon name="plus" size={13} /> {t('Add a computer')}</button>}
+              {scans && <button type="button" role="menuitem" className="menu-item" onClick={close(() => scan('pair').catch((e) => window.alert(e.message)))} title={t('Pair this phone with a computer: scan the QR code Pair a device shows on it')}><Icon name="scan" size={13} /> {t('Scan QR code')}</button>}
+              {app?.cloud && <button type="button" role="menuitem" className="menu-item" onClick={close(app.cloud)}><Icon name="cloud" size={13} /> {t('Cloud Agents')}</button>}
+              {app && <button type="button" role="menuitem" className="menu-item" onClick={close(app.start)} title={t('Back to the start: pair or open a computer')}><Icon name="phone" size={13} /> {t('Start screen')}</button>}
             </>
           )}
         </div>
@@ -541,15 +545,23 @@ export function MachinesSettings({ embedded = false, focus = false }) {
   if (!data) return <div className="skeleton-rows pad"><div /><div /></div>
   const Wrap = embedded ? Fragment : 'div'
   const list = data.machines || []
-  const add = (e) => {
-    e.preventDefault()
-    const v = link.trim()
+  const linkWith = (v) => {
     if (!v) return
     run('add', async () => {
       const r = await hostApi('/machines', { method: 'POST', body: { link: v } })
       setLink('')
       setMsg({ text: r.machine?.state !== 'asking' ? t('Linked with {name}.', { name: r.machine?.name }) : r.machine.code ? t('Asked. Allow it on {name} if it shows {code}.', { name: r.machine.name, code: r.machine.code }) : t('Asked. It shows on {name} as soon as it\'s online; allow it there.', { name: r.machine.name }) })
     })
+  }
+  const add = (e) => { e.preventDefault(); linkWith(link.trim()) }
+  // Scan QR code (a phone): the other device's code, linked with as its link pasted here would be.
+  const scanned = async () => {
+    setMsg(null)
+    let v = null
+    try { v = await scan('link') } catch (e) { return setMsg({ error: true, text: e.message }) }
+    if (!v) return
+    setLink(v)
+    linkWith(v)
   }
   // The phone's other computers (the iPhone and Android apps): link them in one tap.
   const phoneOthers = (relayComputers?.list?.() || []).filter((c) => !c.current && c.relay !== data.here.relay && !list.some((m) => m.relay === c.relay && m.state === 'linked'))
@@ -663,11 +675,12 @@ export function MachinesSettings({ embedded = false, focus = false }) {
 
       {!readOnly && <section className="st-sec" data-setting="link-device">
         <h4>{t('Link a device')}</h4>
-        <p className="muted small" title={t('On the other device, open Settings › {devices} and choose Pair a device. Paste its link here, or type its address and code. Its address alone asks instead, and waits for you to allow it there.', { devices })}>{t('On the other device, choose Pair a device in Settings › {devices}, then paste its link here.', { devices })}</p>
+        <p className="muted small" title={t('On the other device, open Settings › {devices} and choose Pair a device. Paste its link here, or type its address and code. Its address alone asks instead, and waits for you to allow it there.', { devices })}>{canScan('link') ? t('On the other device, choose Pair a device in Settings › {devices}, then scan its QR code or paste its link here.', { devices }) : t('On the other device, choose Pair a device in Settings › {devices}, then paste its link here.', { devices })}</p>
         <form className="mch-add" onSubmit={add}>
           <input className="st-input" value={link} onChange={(e) => setLink(e.target.value)} placeholder={t('Link, or address and code')} aria-label={t("The other device's link")} />
           <button type="submit" className="btn primary" disabled={!link.trim() || !!busy}>{busy === 'add' ? t('Linking…') : t('Link')}</button>
         </form>
+        {canScan('link') && <div className="mch-scan"><button type="button" className="btn" disabled={!!busy} onClick={scanned} title={t("Scan the other device's QR code from Pair a device, and link with it")}><Icon name="scan" size={14} /> {t('Scan QR code')}</button></div>}
         {data.canBeLinked && !machineId
           ? <p className="muted small">{t('To link this device from another one, choose Pair a device in the Phone tab and use its link or code there.')}</p>
           : !data.canBeLinked && <p className="muted small">{data.hostedAvailable

@@ -34,6 +34,13 @@ on:
 permissions:
   contents: read
 
+# A pull request's newer push calls off its older run, so the few macOS machines GitHub gives at once
+# go to what's current. Everything else (main, a nightly's or a release's tests, a run by hand) runs
+# to its end.
+concurrency:
+  group: tests-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Which tests this run needs (test/run.mjs --list), before any machine is set up for them.
   scope:

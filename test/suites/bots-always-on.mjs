@@ -45,7 +45,7 @@ try {
   for (const k of [kit, docker.kit]) { await k.api('/setup', { name: 'Tester' }); await k.api('/agents/catalog') }
   await kit.api('/bots', { name: 'Atlas' })
   await kit.api('/bots/b1/tokens', { appToken: 'xapp-test', botToken: 'xoxb-test' })
-  await kit.api('/bots/b1/settings', { askers: [{ id: 'U0DANA', name: 'Dana' }], readsFrom: ['~/docs'], owner: OWNER, instructions: '# Atlas\n\nAnswer from the handbook. [sign — Atlas]\n', limits: { day: 50, atOnce: 2, minutes: 10 } })
+  await kit.api('/bots/b1/settings', { answerIn: 'thread', askers: [{ id: 'U0DANA', name: 'Dana' }], readsFrom: ['~/docs'], owner: OWNER, instructions: '# Atlas\n\nAnswer from the handbook. [sign — Atlas]\n', limits: { day: 50, atOnce: 2, minutes: 10 } })
   await kit.api('/bots/b1/memory', { kind: 'bot', text: 'Atlas speaks for the people team.' })
   ok(!!(await mac.connected()), 'a bot on your computer, connected')
 

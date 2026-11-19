@@ -3590,6 +3590,9 @@ button.cb-main:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .mch-facts code { font-size: 12px; }
 .mch-add { display: flex; gap: 8px; margin-top: 8px; }
 .mch-add .st-input { flex: 1; min-width: 0; }
+/* Scan QR code, on a phone: the other device's code in place of its link pasted above. */
+.mch-scan { margin-top: 8px; }
+.mch-scan .btn { min-height: 40px; }
 .mch-mine { display: grid; gap: 4px; justify-items: start; margin-top: 10px; }
 .mch-link { max-width: 100%; overflow-wrap: anywhere; font-size: 11.5px; padding: 4px 6px; border-radius: 6px; background: var(--pane-2); }
 

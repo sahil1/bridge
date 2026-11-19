@@ -287,7 +287,14 @@ class MainActivity : Activity() {
         CloudCheck.schedule(this)
     }
 
-    private fun startScan() {
+    // The scanner. What it reads pairs, as an opened pairing link does (the page asks first). Asked
+    // for a link to give back (answer: Link a device, in Bridge AI on the page), it goes back to the
+    // page that asked instead: once, and only a Bridge AI pairing link, which the page uses as if it
+    // had been pasted.
+    private var scanAnswer: JavaScriptReplyProxy? = null
+    private fun startScan(answer: JavaScriptReplyProxy? = null) {
+        scanAnswer?.let { giveScan(it, null) }
+        scanAnswer = answer
         IntentIntegrator(this).apply {
             setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
             setPrompt("Point at the code on your computer")
@@ -297,13 +304,24 @@ class MainActivity : Activity() {
         }.initiateScan()
     }
 
-    // A pairing link: https://<your relay>/#pair=<code>. The relay is remembered; the page pairs.
+    // ...the page that asked hears what was scanned: the link, or null (cancelled, or not a pairing code).
+    private fun giveScan(answer: JavaScriptReplyProxy, text: String?) {
+        val link = text?.takeIf { isPairingLink(Uri.parse(it)) }
+        if (text != null && link == null) AlertDialog.Builder(this).setMessage("That isn't a Bridge AI pairing code.").setPositiveButton("OK", null).show()
+        runCatching { answer.postMessage(JSONObject().put("scanned", link ?: JSONObject.NULL).toString()) }
+    }
+
+    // A pairing link: https://<your relay>/#pair=<code>. Debug builds also take a relay running on
+    // the computer (wrangler dev, via adb reverse), for testing.
+    private fun isPairingLink(uri: Uri): Boolean {
+        val test = BuildConfig.DEBUG && uri.scheme == "http" && uri.host == "127.0.0.1"
+        return (uri.scheme == "https" || test) && uri.host != null && (uri.fragment ?: "").contains("pair=")
+    }
+
+    // ...used: the relay is remembered; the page pairs.
     private fun usePairingLink(text: String) {
         val uri = Uri.parse(text)
-        // Debug builds also take a relay running on the computer (wrangler dev, via adb reverse), for testing.
-        val test = BuildConfig.DEBUG && uri.scheme == "http" && uri.host == "127.0.0.1"
-        val ok = (uri.scheme == "https" || test) && uri.host != null && (uri.fragment ?: "").contains("pair=")
-        if (!ok) {
+        if (!isPairingLink(uri)) {
             if (web == null) showStart("That isn't a Bridge AI pairing link.")
             else AlertDialog.Builder(this).setMessage("That isn't a Bridge AI pairing code.").setPositiveButton("OK", null).show()
             return
@@ -463,11 +481,19 @@ class MainActivity : Activity() {
               if (window !== window.top) { window.bridgeAndroid = { recording }; return }
               if (location.origin !== ${JSONObject.quote(own ?: "")}) { window.bridgeAndroid = { home: () => post('home'), recording }; return }
               let list = ${computers}
-              port.addEventListener('message', (e) => { try { const m = JSON.parse(e.data); if (Array.isArray(m.computers)) list = m.computers } catch (_) {} })
+              port.addEventListener('message', (e) => {
+                try {
+                  const m = JSON.parse(e.data)
+                  if (Array.isArray(m.computers)) list = m.computers
+                  if ('scanned' in m) window.dispatchEvent(new CustomEvent('bridge-scan', { detail: { link: typeof m.scanned === 'string' ? m.scanned : null } }))
+                } catch (_) {}
+              })
               window.bridgeAndroid = {
                 computers: () => JSON.stringify(list),
                 bundled: () => ${JSONObject.quote(bundledUis)},
                 scan: () => post('scan'),
+                // For Link a device: what's scanned comes back to this page (bridge-scan) instead.
+                scanLink: () => post('scan', { for: 'link' }),
                 paired: () => post('paired'),
                 name: (name) => post('name', { name: String(name) }),
                 open: (url) => post('open', { url: String(url) }),
@@ -509,7 +535,7 @@ class MainActivity : Activity() {
             if (origin == null || origin != relay) return
             when (type) {
                 "hello" -> { pageReply = reply; tellPage() }
-                "scan" -> startScan()
+                "scan" -> startScan(if (m.optString("for") == "link") reply else null)
                 // The page showing now is connected to its computer (paired): it's on the list...
                 "paired" -> remember(null)
                 // ...and says what that computer is called.
@@ -570,7 +596,9 @@ class MainActivity : Activity() {
         }
         val scanned = IntentIntegrator.parseActivityResult(requestCode, resultCode, data)
         if (scanned != null) {
-            scanned.contents?.let { usePairingLink(it) }
+            val answer = scanAnswer
+            scanAnswer = null
+            if (answer != null) giveScan(answer, scanned.contents) else scanned.contents?.let { usePairingLink(it) }
             return
         }
         super.onActivityResult(requestCode, resultCode, data)
