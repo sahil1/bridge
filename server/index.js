@@ -117,6 +117,7 @@ import { makeHubs, RULES } from './connhub.js'
 import { makeBotSetup, patchOf, proposalOf, linesOf, postSaid } from './botsetup.js'
 import * as botMcp from './botmcp.js'
 import * as botAnswer from './botanswer.js'
+import * as botWrite from './botwrite.js'
 import { keepOf } from './trace.js'
 import { makeMcp, connection, MODERN, LEGACY } from './mcpproto.js'
 import * as notify from './notify.js'
@@ -4296,7 +4297,8 @@ async function closePane(paneId) {
 }
 // A question that waits on you is a notification, as an agent's question is: which bot, who asked
 // and where, not what (it opens Needs You, where the question is). A run at its time limit says
-// how long it has run, for you to let it carry on or stop it.
+// how long it has run, for you to let it carry on or stop it; a request held before it started, why;
+// a change to files, that it waits for you.
 const deskTold = (q) => {
   if (cfg.notify?.needsYou === false) return
   const who = q.from?.name || 'Someone'
@@ -4305,7 +4307,8 @@ const deskTold = (q) => {
   const asking = q.limit?.phase === 'asking'
   notify.send({
     kind: 'needs-you', title: asking ? `${q.bot?.name || 'Your bot'}: its answer to ${who} in ${where} has run ${q.limit.ran} ${q.limit.ran === 1 ? 'minute' : 'minutes'}` : `${q.bot?.name || 'Your bot'}: ${who} asked in ${where}`,
-    body: asking ? 'Let it carry on, or stop it, in Needs You.' : q.needsOwner ? 'Nothing could answer it: write the reply in Needs You.' : 'An answer waits for you to send or discard.',
+    body: asking ? 'Let it carry on, or stop it, in Needs You.' : q.state === 'screened' ? `It wasn't started, as ${q.screen?.why || 'it looks odd'}: allow it once, or deny it, in Needs You.`
+      : q.write?.state === 'waiting' ? 'A change to files waits for you to approve or deny, in Needs You.' : q.needsOwner ? 'Nothing could answer it: write the reply in Needs You.' : 'An answer waits for you to send or discard.',
     url: `/?agent=${encodeURIComponent(`slack:${q.id}`)}&inbox=1`, tag: `bot-${q.id}`,
   }).catch(() => {})
 }
@@ -4341,6 +4344,8 @@ const desk = makeFrontDesk({
   models: () => chatModels.models(), reply: (id, msgs, o) => chatModels.reply(id, msgs, o), signedIn: (kind) => accounts.signInOf(kind),
   ownersOf: (b) => Object.fromEntries(conns.PLATFORMS.map((p) => [p, conns.of(b.id, p)?.owner || null])),
   synced: () => hubs.sync(),
+  // (A request to a bot that changes files, read by AI Assist's model before it starts: botwrite.js.)
+  screenAsk: (system, prompt) => setupAsk(system, prompt),
 })
 // Connections (connections.js): each one app on Slack, Discord or Teams, its connector running while a
 // bot on it listens (connhub.js); a shared one says which bot each question is for, with AI Assist's
@@ -4433,7 +4438,7 @@ async function signInKind(kind) {
 // What a bot may do, in brief, for the line that sums up its Access and the Bots overview's cards
 // (src/components/bots/access.js says it): who may ask (how many named), its folders, its memory,
 // what it may change, how many MCP servers, what answers, its limits. Never who the people are.
-const accessOf = (b) => ({ who: b.who, askers: b.askers.length, readsFrom: b.readsFrom, memory: b.memory, changes: b.changes, mcp: b.mcp.length, answerers: b.answerers, limits: b.limits })
+const accessOf = (b) => ({ who: b.who, askers: b.askers.length, readsFrom: b.readsFrom, memory: b.memory, changes: b.changes, writesTo: b.writesTo, trusted: b.trusted.length, trustYou: b.trustYou, handsTo: b.handsTo.length, mcp: b.mcp.length, answerers: b.answerers, limits: b.limits })
 // A bot as Settings shows it: how it's connected and why not (and the scopes its app lacks), its
 // settings and instructions, its folders as they stand, which agent answers and how it's signed in,
 // the manifest to make or update its app with, and how many questions wait. Brief (the list): how
@@ -4483,7 +4488,9 @@ async function botView(b, { brief = false } = {}) {
   const routinesNow = await routines.list().catch(() => ({ routines: [] }))
   return {
     ...base, ...v,
-    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback, answerIn: b.answerIn },
+    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, writesTo: b.writesTo, trustYou: b.trustYou, trusted: b.trusted, handsTo: b.handsTo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback, answerIn: b.answerIn },
+    // (Its other bots, to hand a change to files to: each, and whether it changes files.)
+    otherBots: botsStore.live().filter((x) => x.id !== b.id).map((x) => ({ id: x.id, name: x.name, description: x.description, edits: x.changes === 'edit', writesTo: x.writesTo })),
     carryOn: botsStore.CARRY_ON_MIN,
     paused: b.paused,
     instructions: { text: botsStore.readOwn(b.id), file },
@@ -4797,7 +4804,9 @@ async function answererOf(b) {
 // folders it reads from (each one there, inside your home folder, not Bridge AI's own), its
 // instructions (written here, or a file in one of its folders), answering without asking, copies of
 // your agents' conversations, which agent answers, how many at once, how long its record is kept,
-// and its MCP servers (yours, in Claude Code's own list, and only with Claude Code answering).
+// its MCP servers (yours, in Claude Code's own list, and only with Claude Code answering), the
+// folders it changes files in (each inside one it reads from), whose changes to files are made
+// without asking you, and the bots it hands a change to files to.
 // From your phone or another of your computers too: a folder or file macOS hasn't let Bridge AI into
 // yet isn't looked at from there (it would ask on this computer, with nobody at it). Every one is
 // checked before any is kept, so what AI Assist's setup chat applies (Create, a change you confirm)
@@ -4854,9 +4863,9 @@ async function checkSettings(b, x, req) {
   }
   // What it may change: only with an agent that keeps its edits to its own copy (Claude Code).
   if (x.changes !== undefined) {
-    const v = ['suggest', 'pr'].includes(x.changes) ? x.changes : 'none'
+    const v = botsStore.CHANGES.includes(x.changes) ? x.changes : 'none'
     if (v !== 'none') {
-      if (!(await answererOf({ ...b, ...next })).changes) throw new Error('Changes need Claude Code in what answers, which keeps its edits to its own copy of the repository: add it under What Answers')
+      if (!(await answererOf({ ...b, ...next })).changes) throw new Error(v === 'edit' ? 'Changing files needs Claude Code in what answers, which keeps its edits to its own copy of the folders: add it under What Answers' : 'Changes need Claude Code in what answers, which keeps its edits to its own copy of the repository: add it under What Answers')
     }
     next.changes = v
   }
@@ -4903,6 +4912,57 @@ async function checkSettings(b, x, req) {
       if (await ownFolder(full)) throw new Error('Bridge AI\'s own folder can\'t be read from')
       next.instructionsFile = full.replace(os.homedir(), '~')
     }
+  }
+  // The folders it changes files in (botwrite.js): each there, inside your home folder (not the whole
+  // of it), nothing in its real path hidden (a dotfolder, or a link to one), not a place your computer
+  // runs things from (botwrite.js runsFrom: ~/Library, ~/Applications, ~/bin, AppData…), not Bridge
+  // AI's own, and one of, or inside, the folders it reads from (by their real paths). A folder it
+  // reads from taken out takes out the folders it changes in it.
+  const realOf = (p) => fs.promises.realpath(p).catch(() => p)
+  const readsReal = async (list) => (await Promise.all(list.map((p) => places.resolveDir(p).then(realOf, () => null)))).filter(Boolean)
+  if (x.writesTo !== undefined) {
+    if (!Array.isArray(x.writesTo)) throw new Error('writesTo is a list')
+    const reads = await readsReal(next.readsFrom || b.readsFrom)
+    const had = new Set(b.writesTo || [])
+    next.writesTo = []
+    for (const f of x.writesTo.slice(0, botsStore.WRITES_MAX + 5)) {
+      if (!had.has(String(f))) explorer.notFromAfar(lexical(f), { here })
+      const full = await places.resolveDir(String(f || ''))
+      const real = await realOf(full)
+      const home = await realOf(os.homedir())
+      if (real === home || full === os.homedir()) throw new Error('Pick a folder inside your home folder, not the whole of it')
+      if (!real.startsWith(home + path.sep)) throw new Error('Pick a folder inside your home folder')
+      const runs = botWrite.runsFrom(path.relative(home, real))
+      if (runs) throw new Error(runs.charAt(0).toUpperCase() + runs.slice(1))
+      if (await ownFolder(full)) throw new Error('Bridge AI\'s own folder can\'t be one it changes files in')
+      if (!reads.some((r) => real === r || real.startsWith(r + path.sep))) throw new Error(`${full.replace(os.homedir(), '~')} isn't one of, or inside, the folders it reads from: add it under Reads From first`)
+      const t = full.replace(os.homedir(), '~')
+      if (!next.writesTo.includes(t)) next.writesTo.push(t)
+    }
+    if (next.writesTo.length > botsStore.WRITES_MAX) throw new Error(`It can change files in ${botsStore.WRITES_MAX} folders at most`)
+  } else if (next.readsFrom && (b.writesTo || []).length) {
+    const reads = await readsReal(next.readsFrom)
+    const keep = []
+    for (const f of b.writesTo) { const real = await places.resolveDir(f).then(realOf, () => null); if (real && reads.some((r) => real === r || real.startsWith(r + path.sep))) keep.push(f) }
+    if (keep.length !== b.writesTo.length) next.writesTo = keep
+  }
+  // Whose changes to files are made without asking you: you (unless your own wait too), and the
+  // people listed, by their ids; anyone else who may ask, theirs wait for you.
+  if (x.trustYou !== undefined) next.trustYou = x.trustYou !== false
+  if (x.trusted !== undefined) {
+    if (!Array.isArray(x.trusted)) throw new Error('trusted is a list')
+    next.trusted = x.trusted.slice(0, 200).map((p) => ({ id: String(p?.id || '').trim(), name: String(p?.name || '').replace(/\s+/g, ' ').trim().slice(0, 80) })).filter((p) => botsStore.PERSON_ID.test(p.id))
+  }
+  // The bots it hands a change to files to: each a bot of yours here that changes files, never itself.
+  if (x.handsTo !== undefined) {
+    if (!Array.isArray(x.handsTo)) throw new Error('handsTo is a list')
+    const want = [...new Set(x.handsTo.map(String))].slice(0, 10)
+    for (const id of want) {
+      const o = botsStore.get(id)
+      if (!o || o.draft || o.id === b.id) throw new Error('Pick one of your other bots')
+      if (o.changes !== 'edit') throw new Error(`${o.name} doesn't change files: set its Changes to Edits Files in Its Folders first`)
+    }
+    next.handsTo = want
   }
   if (x.instructions !== undefined && String(x.instructions ?? '').length > botsStore.INSTRUCTIONS_MAX) throw new Error(`Keep the instructions under ${botsStore.INSTRUCTIONS_MAX.toLocaleString('en')} characters`)
   // Its MCP servers: yours, from Claude Code's own list (Settings › MCP Servers), with Claude Code
@@ -5374,7 +5434,22 @@ app.get('/api/bots/:id/export', botsGuard, (req, res) => {
 })
 // Your answer to one, from Needs You: send (as edited) or discard; for a change waiting on you,
 // Send approves it and opens its pull request first.
-app.post('/api/bots/questions/:id', botsGuard, wrapBot((req) => desk.decide(req.params.id, { send: req.body?.send === true, text: req.body?.text })))
+// (A change to files waiting on you goes with it: write names the one you were shown, { id, hash }, and
+// one that isn't the change waiting now isn't made: 409.)
+app.post('/api/bots/questions/:id', botsGuard, wrapBot((req) => {
+  const w = req.body?.write && typeof req.body.write === 'object' ? { id: String(req.body.write.id || ''), hash: String(req.body.write.hash || '') } : null
+  return desk.decide(req.params.id, { send: req.body?.send === true, text: req.body?.text, write: w && w.id && /^[0-9a-f]{64}$/.test(w.hash) ? w : null, ...changedBy(req) })
+}))
+// A request to a bot that changes files, held before it started: Allow Once, or Deny.
+app.post('/api/bots/questions/:id/screen', botsGuard, wrapBot((req) => desk.screenAct(req.params.id, req.body?.allow === true, { via: 'app', ...changedBy(req) })))
+// A bot's changes to files, for Activity (the latest first), one with its whole diff, and Undo.
+app.get('/api/bots/:id/writes', botsGuard, wrapBot(async (req) => ({ writes: desk.writes(recordOr404(req.params.id).id) })))
+app.get('/api/bots/:id/writes/:cid', botsGuard, wrapBot(async (req) => {
+  const w = await desk.write(recordOr404(req.params.id).id, String(req.params.cid))
+  if (!w) throw Object.assign(new Error('No such change'), { status: 404 })
+  return { write: w }
+}))
+app.post('/api/bots/:id/writes/:cid/undo', botsGuard, wrapBot((req) => desk.undoWrite(recordOr404(req.params.id).id, String(req.params.cid), { via: 'app', ...changedBy(req) })))
 // Your decision about a run at its time limit, from Needs You (on a computer, or the phone through
 // the relay, which says which device): Continue (minutes: 10 or 30) or Stop.
 app.post('/api/bots/questions/:id/limit', botsGuard, wrapBot((req) => desk.limitAct(req.params.id, String(req.body?.act || ''), { minutes: req.body?.minutes, via: 'app', ...changedBy(req) })))
@@ -5386,22 +5461,24 @@ app.post('/api/bots/questions/:id/limit', botsGuard, wrapBot((req) => desk.limit
 // more than it's asked is held, as a new bot has it, until you turn it on here once you've looked it
 // over (HELD: answering without asking, who you are on each platform, which drafts would go to,
 // what answers (Automatic: a file can't pick Codex, whose sandbox reads beyond its folders), changes
-// and their repository, your MCP servers, copies of your agents' conversations, saying what
+// and their repository, the folders it changes files in and who may change them without asking you,
+// your MCP servers, copies of your agents' conversations, saying what
 // your agents are doing, keeping what it learns without asking): each said. A move between your own
 // computers keeps them (backup.js shows them first). { bot, renamed, problems, memory }
-const BRING_WHAT = { who: 'who can ask', askers: 'who can ask', owner: 'you in Slack', owners: 'you in Discord and Teams', instructionsFile: 'its instructions file', repo: 'its repository', agent: 'what answers', answerers: 'what answers', changes: 'its changes', mcp: 'its MCP servers', muted: 'its muted channels', listen: 'the channels it listens in', agentCopies: 'copies of your agents\' conversations', agentsStatus: 'saying what your agents are doing', memory: 'what it remembers' }
-const HELD = { auto: false, owner: null, owners: null, agent: null, answerers: null, changes: 'none', repo: null, mcp: [], agentCopies: false, agentsStatus: false, memory: 'approve' }
+const BRING_WHAT = { who: 'who can ask', askers: 'who can ask', owner: 'you in Slack', owners: 'you in Discord and Teams', instructionsFile: 'its instructions file', repo: 'its repository', writesTo: 'the folders it changes files in', trusted: 'who may change files without asking you', trustYou: 'whether your own changes wait for you', agent: 'what answers', answerers: 'what answers', changes: 'its changes', mcp: 'its MCP servers', muted: 'its muted channels', listen: 'the channels it listens in', agentCopies: 'copies of your agents\' conversations', agentsStatus: 'saying what your agents are doing', memory: 'what it remembers' }
+const HELD = { auto: false, owner: null, owners: null, agent: null, answerers: null, changes: 'none', repo: null, writesTo: [], trusted: [], mcp: [], agentCopies: false, agentsStatus: false, memory: 'approve' }
 const heldSays = (name, k, v, all = {}) => ({
   auto: `${name} doesn't answer without asking here: turn that on in its settings once you've looked it over`,
   owner: `Who you are in Slack, Discord and Teams isn't taken from a file: set it again in ${name}'s settings`,
   answerers: `${name} is answered by what's here (Automatic): the file asked for ${[...(Array.isArray(all.answerers) ? all.answerers : []), ...(all.agent ? [`agent:${all.agent}`] : [])].join(', ')}; pick it in its settings once you've looked it over`,
-  changes: `${name} doesn't make changes here (the file asked for ${v === 'pr' ? 'draft pull requests' : 'suggested changes'}${all.repo ? ` in ${String(all.repo).slice(0, 200)}` : ''}): turn that on in its settings once you've looked it over`,
+  changes: `${name} doesn't make changes here (the file asked for ${v === 'pr' ? 'draft pull requests' : v === 'edit' ? `changes to files${Array.isArray(all.writesTo) && all.writesTo.length ? ` in ${all.writesTo.slice(0, 5).join(', ').slice(0, 200)}` : ''}` : 'suggested changes'}${all.repo && v !== 'edit' ? ` in ${String(all.repo).slice(0, 200)}` : ''}): turn that on in its settings once you've looked it over`,
+  trusted: `Nobody may change files through ${name} without asking you here (the file named ${(Array.isArray(v) ? v : []).length}): add them again in its settings`,
   mcp: `${name} uses none of your MCP servers here (the file asked for ${(Array.isArray(v) ? v : []).join(', ')}): pick them in its settings`,
   agentCopies: `${name} doesn't answer from copies of your agents' conversations here: turn that on in its settings`,
   agentsStatus: `${name} doesn't say what your agents are doing here: turn that on in its settings`,
   memory: `${name} asks you before it keeps what it learns here (the file asked for ${v === 'off' ? 'none kept' : 'kept straight away'}): change it in its settings`,
 }[k] || null)
-const heldDiffers = (k, v) => (k === 'owner' ? !!v?.id : k === 'owners' ? Object.keys(v || {}).length > 0 : ['mcp', 'answerers'].includes(k) ? Array.isArray(v) && v.length > 0 : k === 'agent' ? !!v : k === 'repo' ? false : JSON.stringify(v) !== JSON.stringify(HELD[k]))
+const heldDiffers = (k, v) => (k === 'owner' ? !!v?.id : k === 'owners' ? Object.keys(v || {}).length > 0 : ['mcp', 'answerers', 'trusted'].includes(k) ? Array.isArray(v) && v.length > 0 : k === 'agent' ? !!v : k === 'repo' || k === 'writesTo' ? false : JSON.stringify(v) !== JSON.stringify(HELD[k]))
 async function bringBot(bundle, asked, { fromFile = true, why = null } = {}) {
   const req = asked || { headers: {} }
   const r = botsStore.fromBundle(bundle, botOwnerName(), { held: true })

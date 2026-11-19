@@ -216,6 +216,27 @@ function thenSaid(r) {
   }
 }
 
+// And a change to files asked for (server/frontdesk.js writeVerdict): made without asking you, waiting
+// for you, held before it starts, or refused; for a bot that only reads, the same for each bot it
+// hands changes to, under that bot's own rules for whoever asked.
+function writeSaid(v) {
+  if (!v?.edits) return null
+  const folders = (v.folders || []).join(', ')
+  if (v.may === 'direct') return { bad: false, text: t('A change to files in {folders}: {bot} would make it without asking you, with Undo.', { folders, bot: v.name }) }
+  if (v.may === 'ask') return { bad: false, text: t('A change to files in {folders}: {bot} would make it in its copy, and it would wait for you to approve the diff.', { folders, bot: v.name }) }
+  if (v.may === 'screened') return { bad: true, text: t('{bot} wouldn\'t start on it: it would be held for you first, as {why}.', { bot: v.name, why: v.why || '' }) }
+  return { bad: true, text: t('{bot} would refuse a change for them: they may not ask it.', { bot: v.name }) }
+}
+function writesSaid(r) {
+  const w = r?.then?.write
+  if (!w) return []
+  const own = writeSaid(w)
+  return [...(own ? [own] : []), ...(w.handsTo || []).map((h) => {
+    const x = writeSaid(h)
+    return x ? { ...x, text: `${t('Asked to change files, {bot} would hand it on to {other}.', { bot: w.name, other: h.name })} ${x.text}` } : null
+  }).filter(Boolean)]
+}
+
 // Try a Message: which bot a message would go to, and why, with nothing sent, answered or kept.
 function TryMessage({ c }) {
   const [text, setText] = useState('')
@@ -284,6 +305,7 @@ function TryMessage({ c }) {
           <p className="ro-to">{out.bot ? <Icon name="bot" size={14} /> : <Icon name="info" size={14} />}<b>{lead}</b></p>
           <p className="small">{whySaid(out, c)}</p>
           {then && <p className={`small ${then.bad ? 'error-text' : ''}`}>{then.text}</p>}
+          {!then?.bad && writesSaid(out).map((x, i) => <p key={i} className={`small ro-write ${x.bad ? 'error-text' : ''}`} data-write={i}>{x.text}</p>)}
           {out.bot && out.asked != null && out.asked.trim() !== text.trim() && <p className="muted small">{t('It would be asked: “{text}”', { text: out.asked })}</p>}
           {!out.connected && <p className="muted small">{t('{name} isn\'t connected now: nothing reaches its bots until it is.', { name: c.name })}</p>}
           <p className="muted small">{t('A dry run: nothing was sent, answered or kept.')}</p>
