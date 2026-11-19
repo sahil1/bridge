@@ -74,6 +74,12 @@ const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: crashed: ${e.stack}`) } }
 const H = (...p) => path.join(home, 'Hiring', ...p)
+// A folder from your home folder as Bridge AI shows it (~\Hiring on Windows), and that as a pattern;
+// a path with / between its parts, wherever it's from.
+const tildeOf = (rel) => (IS_WIN ? `~\\${rel.replace(/\//g, '\\')}` : `~/${rel}`)
+const HIRING = tildeOf('Hiring')
+const HR = HIRING.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+const slashed = (p) => String(p || '').replace(/\\/g, '/')
 const read = (p) => { try { return fs.readFileSync(p, 'utf8') } catch { return null } }
 const real = (p) => { try { return fs.realpathSync(p) } catch { return p } }
 const state = () => slack.state()
@@ -130,9 +136,9 @@ try {
     ok(/hidden folder/.test(hidden || ''), 'a hidden folder: refused', hidden)
     await kit.api(`/bots/${HI}/settings`, { readsFrom: ['~/Hiring'] })
     const v = await kit.api(`/bots/${HI}/settings`, { changes: 'edit', writesTo: ['~/Hiring'], trusted: [SAM] })
-    ok(v.settings.changes === 'edit' && v.settings.writesTo.join() === '~/Hiring' && v.settings.trustYou === true && v.settings.trusted.map((x) => x.id).join() === 'U0SAM' && v.changes?.writes?.[0]?.ok && !v.changes.problem, 'Edits Files in Its Folders: ~/Hiring, made without asking for you and Sam', { s: v.settings, c: v.changes })
+    ok(v.settings.changes === 'edit' && v.settings.writesTo.join() === HIRING && v.settings.trustYou === true && v.settings.trusted.map((x) => x.id).join() === 'U0SAM' && v.changes?.writes?.[0]?.ok && !v.changes.problem, 'Edits Files in Its Folders: ~/Hiring, made without asking for you and Sam', { s: v.settings, c: v.changes })
     const brief = (await kit.api('/bots')).bots.find((x) => x.id === HI)
-    ok(brief.access.changes === 'edit' && brief.access.writesTo.join() === '~/Hiring' && brief.access.trusted === 1 && brief.access.trustYou === true, 'its access in brief says where it changes files, and how many are trusted with it (never who)', brief.access)
+    ok(brief.access.changes === 'edit' && brief.access.writesTo.join() === HIRING && brief.access.trusted === 1 && brief.access.trustYou === true, 'its access in brief says where it changes files, and how many are trusted with it (never who)', brief.access)
     const gone = await kit.api(`/bots/${CH}/settings`, { handsTo: [CH] }).then(() => null, (e) => e.message)
     ok(/other bots/.test(gone || ''), 'a bot can\'t hand changes to itself', gone)
     await kit.api(`/bots/${CH}/settings`, { who: 'channels', readsFrom: ['~/Hiring'], answerIn: 'thread', auto: true, handsTo: [HI] })
@@ -146,12 +152,12 @@ try {
     const brief = briefOf(s)
     ok(real(s?.cwd || '').startsWith(real(path.join(kit.data, 'front-desk', 'writes'))) && a.includes('--tools Read,Grep,Glob,Edit,Write --allowedTools Edit(./**)') && a.includes('mcp__bridge_files__delete_file') && /--settings \S+settings\.json/.test(a) && a.includes('--permission-mode dontAsk') && !s.args.includes(H()) && !s.args.includes(real(H())),
       'its agent works in a staging copy: edits there only, delete_file and move_file there, the hook in its settings, the real ~/Hiring not given to it', s && { cwd: s.cwd, args: s.args })
-    ok(/Hiring\/ is your copy of ~\/Hiring/.test(brief) && /Bridge AI checks what changed and makes it in ~\/Hiring itself/.test(brief), 'its brief says where its copy is, and that Bridge AI makes the change', brief.slice(0, 600))
+    ok(new RegExp(`Hiring/ is your copy of ${HR}`).test(brief) && new RegExp(`Bridge AI checks what changed and makes it in ${HR} itself`).test(brief),'its brief says where its copy is, and that Bridge AI makes the change', brief.slice(0, 600))
     ok(!!(await until(() => read(H('offers', 'dana.md')) === 'Offer for Dana\n', 40000)), 'made in ~/Hiring at once: you may change files without asking yourself')
     const hooks = logOf('hooks.log')
     ok(hooks.some((x) => x.status === 0 && /dana\.md$/.test(x.path || '')), 'its hook looked at the path before it was written', hooks)
     const reply = await cardIn(q.ts, 'bb_undo')
-    ok(/Added it\./.test(reply?.text || '') && /Changed: ~\/Hiring\/offers\/dana\.md \(new\)/.test(reply?.text || ''), 'the reply says what changed, with Undo', reply?.text)
+    ok(/Added it\./.test(reply?.text || '') && new RegExp(`Changed: ${HR}/offers/dana\\.md \\(new\\)`).test(reply?.text || ''),'the reply says what changed, with Undo', reply?.text)
     const ev = events(HI)
     ok(ev.some((e) => e.type === 'write.proposed' && e.direct && !e.waits) && ev.some((e) => e.type === 'write.applied' && e.direct && e.files?.some((f) => /dana\.md$/.test(f))), 'in its record: the change, made without asking you', ev.filter((e) => /^write\./.test(e.type)).map((e) => e.type))
     const n0 = await press('U0EVE', 'bb_undo', reply)
@@ -168,7 +174,7 @@ try {
     const q = await slack.ask({ user: OWNER.id, text: `${M} Hiring: fix the docs [edit Docs/README.md Fixed docs] [answer Fixed.]` })
     ok(!!(await until(() => read(path.join(home, 'Docs', 'README.md')) === 'Fixed docs\n', 40000)), '~/Docs changed at once, as you asked')
     const of = (type) => events(HI).find((e) => e.type === type && e.ts === q.ts)
-    ok(of('run.started')?.write?.folders?.some((f) => f.shown === '~/Docs' && f.how === 'git') && of('run.started').write.folders.some((f) => f.shown === '~/Hiring' && f.how !== 'git'), 'its copy of ~/Docs a git worktree, of ~/Hiring a copy', of('run.started')?.write)
+    ok(of('run.started')?.write?.folders?.some((f) => f.shown === tildeOf('Docs') && f.how === 'git') && of('run.started').write.folders.some((f) => f.shown === HIRING && f.how !== 'git'),'its copy of ~/Docs a git worktree, of ~/Hiring a copy', of('run.started')?.write)
     ok(/-Uncommitted line/.test(of('write.proposed')?.diff || ''), 'the copy has what was changed and not committed: the diff starts from it', of('write.proposed')?.diff)
     const q2 = await slack.ask({ user: OWNER.id, text: `${M} Hiring: rebuild the docs [edit Docs/build/out.txt rebuilt] [answer Rebuilt.]` })
     const prop = await until(() => events(HI).find((e) => e.type === 'write.proposed' && e.ts === q2.ts), 40000)
@@ -190,7 +196,7 @@ try {
     if (ven) await kit.api(`/bots/questions/${ven.id}`, { send: false })
     await kit.api(`/bots/${HI}/settings`, { readsFrom: ['~/Hiring'] })
     const v = await kit.api(`/bots/${HI}`)
-    ok(v.settings.writesTo.join() === '~/Hiring', 'a folder taken out of what it reads takes it out of what it changes', v.settings.writesTo)
+    ok(v.settings.writesTo.join() === HIRING, 'a folder taken out of what it reads takes it out of what it changes', v.settings.writesTo)
   })
 
   // ---------- Someone else: waits for you ----------
@@ -202,7 +208,7 @@ try {
     const dm = await dmCard('update the roles', 'bb_wok')
     ok(!!dm && /Roles: design, sales and support/.test(JSON.stringify(dm.blocks)) && /asked by \*Dana\*, waiting for you/.test(JSON.stringify(dm.blocks)), 'in your Slack DM: who asked, the diff, Approve and Send', dm && JSON.stringify(dm.blocks).slice(0, 400))
     const it = await waitingOf('update the roles')
-    ok(it?.write?.files?.[0]?.path === '~/Hiring/roles.md' && /\+Roles: design, sales and support/.test(it.write.diff) && /-Design/.test(it.write.diff) && it.write.by?.id === 'U0DANA' && /^[0-9a-f]{64}$/.test(it.write.hash), 'in Needs You: the file, its diff and who asked', it?.write)
+    ok(it?.write?.files?.[0]?.path === `${HIRING}/roles.md` &&/\+Roles: design, sales and support/.test(it.write.diff) && /-Design/.test(it.write.diff) && it.write.by?.id === 'U0DANA' && /^[0-9a-f]{64}$/.test(it.write.hash), 'in Needs You: the file, its diff and who asked', it?.write)
     for (const who of ['U0EVE', 'U0DANA']) {
       const n = await press(who, 'bb_wok', card)
       ok(!!(await told(who, /Only Tester can approve this change/, n)), `${who === 'U0EVE' ? 'Eve\'s' : 'Dana\'s own'} press of Approve: refused, and said to them alone`)
@@ -212,7 +218,7 @@ try {
     ok(/\+Roles: design, sales and support/.test(shown || '') && /-Design/.test(shown || '') && /Dana/.test(shown || '') && read(H('roles.md')) === '# Roles\n\nDesign\nSales\n', 'your press of Approve where it was asked: the whole change shown first (who asked, every line of its diff), nothing made yet', (shown || '').slice(0, 300))
     await approve(card)
     ok(!!(await until(() => read(H('roles.md')) === 'Roles: design, sales and support\n', 20000)), 'and its Approve there: the change is made')
-    const sent = await until(async () => (await inThread(q.ts)).find((x) => /Updated the roles\./.test(x.text || '') && /Changed: ~\/Hiring\/roles\.md/.test(x.text || '')), 15000)
+    const sent = await until(async () => (await inThread(q.ts)).find((x) => /Updated the roles\./.test(x.text || '') && new RegExp(`Changed: ${HR}/roles\\.md`).test(x.text || '')), 15000)
     ok(!!sent && events(HI).some((e) => e.type === 'write.applied' && e.by === 'Tester' && e.via === 'slack' && !e.direct), 'Dana gets the answer with what changed; approved by you, from Slack, in the record', sent?.text)
     const again = await press(OWNER.id, 'bb_wok', card)
     ok(!!(await told(OWNER.id, /isn't waiting any more|made already/, again)), 'pressed again: it isn\'t made twice')
@@ -223,7 +229,7 @@ try {
     const dm = await dmCard('add an offer for Sam', 'bb_wok')
     await approve(dm)
     ok(!!(await until(() => read(H('offers', 'sam.md')) === 'Offer for Sam\n', 20000)), 'approved from your Slack DM: made')
-    ok(!!(await until(async () => (await inThread(q.ts)).find((x) => /Changed: ~\/Hiring\/offers\/sam\.md/.test(x.text || '')), 15000)), 'and Dana is told')
+    ok(!!(await until(async () => (await inThread(q.ts)).find((x) => new RegExp(`Changed: ${HR}/offers/sam\\.md`).test(x.text || '')), 15000)), 'and Dana is told')
     // In words, in your direct message: only with the change's code.
     const q2 = await slack.ask({ user: 'U0DANA', text: `${M} Hiring: add an offer for Gus [edit Hiring/offers/gus.md Offer for Gus] [answer Done.]` })
     const it = await waitingOf('add an offer for Gus')
@@ -234,7 +240,7 @@ try {
     ok(!!(await until(async () => (await posted()).find((x) => x.channel === 'D0OWNER' && new RegExp(`Say “approve ${n} ${it.write.code}”`).test(x.text || '')), 15000)) && !fs.existsSync(H('offers', 'gus.md')), 'approve in words without its code: you\'re told the code, and nothing is made')
     await slack.ask({ user: OWNER.id, dm: true, text: `approve ${n} ${it.write.code}` })
     ok(!!(await until(() => read(H('offers', 'gus.md')) === 'Offer for Gus\n', 20000)), 'with its code: made')
-    ok(!!(await until(async () => (await inThread(q2.ts)).find((x) => /Changed: ~\/Hiring\/offers\/gus\.md/.test(x.text || '')), 15000)), 'and Dana is told')
+    ok(!!(await until(async () => (await inThread(q2.ts)).find((x) => new RegExp(`Changed: ${HR}/offers/gus\\.md`).test(x.text || '')), 15000)), 'and Dana is told')
     // Too long to show whole in your DM: never approved in words there, and its code isn't given.
     await slack.ask({ user: 'U0DANA', text: `${M} Hiring: add the long list [edit-lines Hiring/long-list.md 400] [answer Done.]` })
     const lw = await waitingOf('add the long list')
@@ -347,10 +353,14 @@ try {
     ok(why.some((x) => /^unchecked .*sneaky\.md$/.test(x)) && why.some((x) => /^git .*GIT~1/.test(x)), 'a file written past its checks, and git\'s own folder by its 8.3 name: the change is refused, not made', why)
     ok(!fs.existsSync(H('sneaky.md')) && !fs.existsSync(H('GIT~1')), 'nothing of it in ~/Hiring')
     const hooks = logOf('hooks.log')
-    ok(hooks.some((x) => x.status === 2 && /\.claude\/settings\.local\.json$/.test(x.path || '')) && hooks.some((x) => x.status === 2 && /GIT~1\/config$/.test(x.path || '')), 'its hook refuses Claude Code\'s own settings beside its copy, and GIT~1', hooks.filter((x) => x.status === 2).map((x) => x.path))
+    ok(hooks.some((x) => x.status === 2 && /\.claude\/settings\.local\.json$/.test(slashed(x.path))) && hooks.some((x) => x.status === 2 && /GIT~1\/config$/.test(slashed(x.path))),'its hook refuses Claude Code\'s own settings beside its copy, and GIT~1', hooks.filter((x) => x.status === 2).map((x) => x.path))
     ok(tries().some((x) => x.try === 'force-write' && !x.done), 'and nothing new can be made beside its copy at all (its top is read-only)')
-    const commands = hooks.map((x) => x.command).filter(Boolean)
-    ok(commands.length && commands.every((c) => /'--key' '[^']*\/guard\.key'/.test(c) && !/[0-9a-f]{64}/.test(c) && !/BRIDGE_GUARD_KEY/.test(c)), 'its hook\'s command names the file its run\'s key is in, never the key (Claude Code may quote it back to the agent)', commands[0]?.slice(-300))
+    // (On a Mac and Linux a command for sh; on Windows the program and its arguments, started with no
+    // shell, as Git Bash and PowerShell each quote their own way.)
+    const ran = hooks.filter((x) => x.command)
+    const all = (x) => [x.command, ...(x.args || [])].join(' ')
+    const keyed = (x) => (x.args ? /[\\/]guard\.key$/.test(x.args[x.args.indexOf('--key') + 1] || '') : /'--key' '[^']*\/guard\.key'/.test(x.command))
+    ok(ran.length && ran.every((x) => keyed(x) && !/[0-9a-f]{64}/.test(all(x)) && !/BRIDGE_GUARD_KEY/.test(all(x)) && (IS_WIN ? Array.isArray(x.args) : !x.args)), 'its hook\'s command names the file its run\'s key is in, never the key (Claude Code may quote it back to the agent)', all(ran[0] || {}).slice(-300))
     // Its hook with no key file, and a key in its environment: it lets nothing through.
     const g = path.join(kit.dir, 'guard-check')
     fs.mkdirSync(path.join(g, 'copy', 'Hiring'), { recursive: true })
@@ -484,9 +494,9 @@ try {
       await sec.waitFor({ timeout: 15000 })
       await sec.scrollIntoViewIfNeeded()
       const changes = await sec.innerText()
-      ok(/Edits Files in Its Folders/.test(changes) && /Changes Files In/.test(changes) && /~\/Hiring/.test(changes) && /May Change Files Without Asking Me/.test(changes) && /Sam/.test(changes) && /Always Waits for You/.test(changes), 'Settings › Bots › Changes: its folders, who may change files without asking you, and what always waits', changes.slice(0, 600))
+      ok(/Edits Files in Its Folders/.test(changes) && /Changes Files In/.test(changes) && new RegExp(HR).test(changes) &&/May Change Files Without Asking Me/.test(changes) && /Sam/.test(changes) && /Always Waits for You/.test(changes), 'Settings › Bots › Changes: its folders, who may change files without asking you, and what always waits', changes.slice(0, 600))
       const line = await p.locator('[data-setting="bots-access-line"]').first().innerText().catch(() => '')
-      ok(/changes files in ~\/Hiring for you and 1 named; asks you first for anyone else/i.test(line), 'its Access line says it in plain words', line)
+      ok(new RegExp(`changes files in ${HR} for you and 1 named; asks you first for anyone else`, 'i').test(line),'its Access line says it in plain words', line)
       if (phone) { const faults = await phoneFaults(p, '[data-setting="slack-changes"]'); ok(!Object.keys(faults).length, 'Changes on a phone: nothing too small to tap, off the screen or cut short', faults) }
       await shot(p, `${tag}bots-write-settings-${mode}${phone ? '-phone' : ''}`)
       ok(errors.length === 0, 'no page errors', errors)

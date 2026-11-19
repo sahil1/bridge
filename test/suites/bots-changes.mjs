@@ -150,7 +150,7 @@ try {
     ok(!fs.existsSync(marker), 'nothing the agent wrote in git\'s own files ran', fs.existsSync(marker))
     ok(/git files were changed/.test(failed?.error || '') && !d?.change, 'the change isn\'t taken, and that\'s said', failed?.error)
     ok(logOf('hooks.log').some((x) => x.status === 2 && /\.git$/.test(x.path || '')), 'its hook refused .git', logOf('hooks.log').filter((x) => x.status === 2))
-    const refusedTop = logOf('hooks.log').filter((x) => x.status === 2).map((x) => x.path || '')
+    const refusedTop = logOf('hooks.log').filter((x) => x.status === 2).map((x) => slashed(x.path))
     ok([/\.claude\.\/settings\.json$/, /CLAUDE~1\/settings\.json$/, /\.mcp\.json:x$/].every((re) => refusedTop.some((p) => re.test(p))), 'and Claude Code\'s own files at its top by the names Windows gives them too (.claude., CLAUDE~1, .mcp.json:stream)', refusedTop)
     ok(fs.readFileSync(path.join(APP, 'README.md'), 'utf8') === 'Hello wrold\n' && git(APP, 'rev-parse', 'main') === MAIN, 'your checkout untouched')
     if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })

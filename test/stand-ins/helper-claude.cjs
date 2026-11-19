@@ -200,8 +200,10 @@ function turn(text, answer, ms, made) {
 }
 
 // Its PreToolUse hooks, from --settings (a file, or JSON), as Claude Code runs them: each one whose
-// matcher takes the tool, run through the shell with the tool call on stdin; exit 2 refuses it, its
-// stderr the reason. None with disableAllHooks.
+// matcher takes the tool, with the tool call on stdin; exit 2 refuses it, its stderr the reason. One
+// with args (exec form) is started as it is, with no shell; any other through a shell: sh on a Mac
+// and Linux; on Windows Git Bash (CLAUDE_CODE_GIT_BASH_PATH, or the bash beside git on the PATH),
+// else PowerShell, or PowerShell when its shell says so. None with disableAllHooks.
 const hooks = (() => {
   const s = opt('--settings')
   if (!s) return []
@@ -209,15 +211,33 @@ const hooks = (() => {
   try { j = JSON.parse(s.trim().startsWith('{') ? s : fs.readFileSync(s, 'utf8')) } catch { return [] }
   return j?.disableAllHooks === true ? [] : j?.hooks?.PreToolUse || []
 })()
+const gitBash = () => {
+  if (process.env.CLAUDE_CODE_GIT_BASH_PATH) return process.env.CLAUDE_CODE_GIT_BASH_PATH
+  for (const d of String(process.env.PATH || '').split(path.delimiter)) {
+    if (!d || !fs.existsSync(path.join(d, 'git.exe'))) continue
+    const bash = path.join(d, '..', 'bin', 'bash.exe')
+    if (fs.existsSync(bash)) return bash
+  }
+  return null
+}
+function hookRun(h, input) {
+  const { spawnSync } = require('node:child_process')
+  const o = { input, encoding: 'utf8', timeout: (h.timeout || 60) * 1000, windowsHide: true }
+  if (Array.isArray(h.args)) return spawnSync(h.command, h.args.map(String), o)
+  if (process.platform !== 'win32') return spawnSync('/bin/sh', ['-c', h.command], o)
+  const bash = h.shell === 'powershell' ? null : gitBash()
+  return bash ? spawnSync(bash, ['-c', h.command], o) : spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', h.command], o)
+}
 function preTool(name, input) {
   for (const m of hooks) {
     if (m.matcher && !new RegExp(`^(?:${m.matcher})$`).test(name)) continue
     for (const h of m.hooks || []) {
       if (h.type !== 'command') continue
-      const r = require('node:child_process').spawnSync(process.platform === 'win32' ? 'bash' : '/bin/sh', ['-c', h.command], { input: JSON.stringify({ hook_event_name: 'PreToolUse', session_id: id, cwd: process.cwd(), tool_name: name, tool_input: input }), encoding: 'utf8', timeout: (h.timeout || 60) * 1000 })
+      const r = hookRun(h, JSON.stringify({ hook_event_name: 'PreToolUse', session_id: id, cwd: process.cwd(), tool_name: name, tool_input: input }))
       const why = String(r.stderr || '').trim()
-      // (Its command too: Claude Code may quote it back to the agent when it refuses.)
-      note('hooks.log', { tool: name, path: input.file_path || null, status: r.status, why: why.slice(0, 300), command: String(h.command).slice(0, 4000) })
+      // (Its command too, and its arguments: Claude Code may quote them back to the agent when it
+      // refuses.)
+      note('hooks.log', { tool: name, path: input.file_path || null, status: r.status, why: why.slice(0, 300), command: String(h.command).slice(0, 4000), ...(Array.isArray(h.args) ? { args: h.args.map(String) } : {}), ...(r.error ? { error: r.error.code || r.error.message } : {}) })
       if (r.status === 2) return { ok: false, why }
     }
   }
@@ -291,8 +311,8 @@ function answerTurn(text) {
     const write = (f, body, label, kind) => {
       const h = preTool('Write', { file_path: f, content: body })
       if (!h.ok) { tried(kind, false); out.push(`I couldn't write ${label}: ${h.why.split('\n')[0]}`); return }
-      fs.mkdirSync(path.dirname(f), { recursive: true })
-      fs.writeFileSync(f, body)
+      // (One the file system refuses, as Claude Code's Write says: on Windows, git's hidden .git file.)
+      try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, body) } catch (e) { tried(kind, false); out.push(`I couldn't write ${label}: ${e.code || e.message}.`); return }
       tool('Write', { file_path: f })
       tried(kind, true)
       out.push(`I changed ${label}.`)
