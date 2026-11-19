@@ -46,8 +46,9 @@
 //     it, the pointer right in Fit and Actual Size on a 5K and a portrait screen; light and dark, the
 //     states centred and readable (macOS not allowing it, with Try again); at a phone's width, fitted,
 //     pinched to zoom, locked out and told no with why; the badge's Allow; on Studio, the line saying
-//     it's being seen, Stop, the notice after, Remote Access set in Settings (and shown, not changed,
-//     from another computer's window) and Screen Activity; each reason a screen doesn't
+//     it's being seen, Stop, the notice after, Remote Access set in Settings (the password and
+//     control as steps 1 and 2 of one block, the rest under More, at a phone's width too; shown, not
+//     changed, from another computer's window) and Screen Activity; each reason a screen doesn't
 //     show, said with the button that fixes it (Reopen, Open, Allow Screen Recording, Update), on a
 //     computer and a phone; peer-to-peer between two pages where the
 //     browser can (the capture page on Studio, with a canvas), said Direct; the agent's Preview tab
@@ -1761,6 +1762,20 @@ try {
     await sec.getByRole('button', { name: 'Remove Password' }).click()
     const sw = sec.getByRole('switch', { name: /Let my other devices control this computer/ })
     ok(!!(await until(async () => !(await studio.api('/remote')).access.password && await sw.isDisabled(), 5000)) && /Set a Remote Access Password first: control needs one/.test(await sec.innerText()), 'Remove: no password, and control can\'t be turned on until there is one')
+    // One block, in order: the password (1), then control (2), which needs it, joined with nothing
+    // between them; each says what it does in a line, the rest folded under More.
+    const steps = await sec.evaluate((el) => {
+      const box = el.querySelector('.rs-steps')
+      const pw = box?.querySelector(':scope > [data-setting=remote-password]')
+      const ctl = box?.querySelector(':scope > [data-setting=remote-control]')
+      return { both: !!pw && !!ctl, order: !!pw && !!ctl && !!(pw.compareDocumentPosition(ctl) & Node.DOCUMENT_POSITION_FOLLOWING), lines: [pw, ctl].map((x) => x && getComputedStyle(x).borderTopWidth), nums: [...(box?.querySelectorAll('.rs-step-n') || [])].map((n) => n.textContent), off: !!ctl?.classList.contains('off') }
+    })
+    ok(steps.both && steps.order && steps.lines.every((w) => w === '0px') && steps.nums.join() === '1,2' && steps.off, 'the password and control are steps 1 and 2 of one block, no line between them, control greyed until there\'s a password', steps)
+    const long = sec.getByText(/wrong tries lock that device out for/)
+    ok(!(await long.isVisible()) && /Asked of each of your devices before it sees this screen\./.test(await sec.innerText()), 'each a line; the long words folded away')
+    await sec.locator('.rs-steps > .rs-more > summary').click()
+    ok(await long.isVisible(), 'and under More')
+    await sec.locator('.rs-steps > .rs-more > summary').click()
     await sec.getByRole('button', { name: 'Set Password' }).click()
     await sec.getByLabel('New password').fill(PW)
     await sec.getByLabel('The same again').fill(`${PW}x`)
@@ -1781,6 +1796,17 @@ try {
     await dk.p.locator('[data-setting=remote-access]').scrollIntoViewIfNeeded()
     await shot(dk.p, `${tag}remote-screen-remote-access-dark`)
     await dk.ctx.close()
+    // At a phone's width: the same block, nothing wider than the phone.
+    const ph2 = await page(b, studio.url, { phone: true })
+    errors.push(...ph2.errors)
+    await devices(ph2.p)
+    const pa = ph2.p.locator('[data-setting=remote-access]')
+    await pa.waitFor({ timeout: 10000 })
+    await pa.scrollIntoViewIfNeeded()
+    const fit = await ph2.p.evaluate(() => { const r = document.querySelector('[data-setting=remote-access] .rs-steps').getBoundingClientRect(); return { wide: document.documentElement.scrollWidth, right: r.right, n: document.querySelectorAll('[data-setting=remote-access] .rs-step-n').length } })
+    ok(fit.wide <= 390 && fit.right <= 390 && fit.n === 2, 'at a phone\'s width: steps 1 and 2, inside the phone', fit)
+    await shot(ph2.p, `${tag}remote-screen-remote-access-phone`)
+    await ph2.ctx.close()
     // From Laptop's window showing Studio: as it is, saying where it's changed.
     const port = (await laptop.api('/machines')).machines.find((m) => m.id === S.id)?.port
     const el = await page(b, `http://127.0.0.1:${port}/m/${S.id}/`)

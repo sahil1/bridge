@@ -128,13 +128,32 @@
 /* Settings. */
 .rs-settings .rs-ok { color: var(--good); display: flex; align-items: center; gap: 6px; margin: 0; }
 .rs-settings .rs-no { display: flex; align-items: flex-start; gap: 6px; margin: 0; }
-.rs-control { margin-top: 4px; }
+/* The password, then control, which needs it: steps 1 and 2 of one block, a line joining their
+   numbers; step 2 greyed until there's a password. Each says what it does in a line; More has the
+   rest. */
+.rs-steps { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 2px 0 10px; min-width: 0; }
+.rs-step { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr); column-gap: 10px; padding-bottom: 8px; min-width: 0; }
+.rs-step + .rs-step { padding-bottom: 2px; }
+.rs-step:has(+ .rs-step)::after { content: ''; position: absolute; left: 10px; top: 26px; bottom: -4px; width: 2px; border-radius: 1px; background: var(--line-2, var(--line)); }
+.rs-step-n { width: 22px; height: 22px; box-sizing: border-box; border-radius: 50%; display: grid; place-items: center; font-size: 11.5px; font-weight: 650; line-height: 1; background: var(--accent-soft); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.rs-step-n.done { background: color-mix(in srgb, var(--good) 14%, var(--pane)); color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent); }
+.rs-step.off .rs-step-n { background: var(--pane-3, var(--pane-2)); color: var(--ink-2); border-color: var(--line); }
+.rs-step-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; min-width: 0; }
+.rs-step-body > p { margin: 0; }
+.rs-step-body > b { line-height: 22px; }
+.rs-step.off .rs-control b { color: var(--ink-2); }
+.rs-more { min-width: 0; }
+.rs-more summary { cursor: pointer; width: fit-content; font-size: 12px; color: var(--ink-2); min-height: 24px; display: flex; align-items: center; gap: 4px; list-style: none; }
+.rs-more summary::-webkit-details-marker { display: none; }
+.rs-more summary .icon { color: var(--ink-3); transition: transform .15s; }
+.rs-more[open] > summary .icon { transform: rotate(90deg); }
+.rs-more > p { margin: 4px 0 0; }
+.rs-steps > .rs-more { margin-left: 32px; }
+@media (max-width: 760px) { .rs-more summary { min-height: 32px; } }
 .rs-block { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 10px 0; border-top: 1px solid var(--line); min-width: 0; }
 .rs-block:first-of-type { border-top: 0; padding-top: 2px; }
 .rs-block > p { margin: 0; }
 .rs-needs { display: flex; align-items: center; gap: 6px; }
-.rs-guards { display: flex; align-items: flex-start; gap: 6px; }
-.rs-guards svg { flex: none; margin-top: 3px; }
 .rs-new { margin-left: 6px; height: 18px; }
 .rs-pw-form { display: grid; gap: 8px; max-width: 420px; }
 .rs-pw-form .st-input { width: 100%; }
