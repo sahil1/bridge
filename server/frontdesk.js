@@ -532,7 +532,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       case 'write.screened': Object.assign(q, { state: 'screened', screen: { why: e.why || null, by: e.by || 'rules', at: e.at, allowed: null, handle: null } }); break
       case 'write.allowed': if (q.screen) q.screen.allowed = { by: e.by || null, via: e.via || null, at: e.at }; q.state = 'starting'; break
       case 'write.proposed': {
-        const w = { id: e.change, q: q.id, hash: e.hash, files: e.files || [], held: e.held || [], refused: e.refused || [], diff: e.diff || '', diffChars: e.diffChars ?? null, diffFile: e.diffFile || null, by: e.by || null, try: !!e.try, direct: !!e.direct, state: e.try ? 'tried' : e.refused?.length ? 'refused' : e.waits ? 'waiting' : 'proposed', at: e.at, handles: [], applied: null, denied: null, undone: null, error: null }
+        const w = { id: e.change, q: q.id, hash: e.hash, files: e.files || [], held: e.held || [], refused: e.refused || [], diff: e.diff || '', diffChars: e.diffChars ?? null, diffFile: e.diffFile || null, by: e.by || null, also: e.also || [], try: !!e.try, direct: !!e.direct, state: e.try ? 'tried' : e.refused?.length ? 'refused' : e.waits ? 'waiting' : 'proposed', at: e.at, handles: [], applied: null, denied: null, undone: null, error: null }
         st.writes.set(e.change, w)
         q.write = w
         break
@@ -670,7 +670,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         const real = await fs.promises.realpath(p)
         const rel = path.relative(realHome, real)
         const problem = !rel || rel.startsWith('..') || path.isAbsolute(rel) ? `${shown(p)} isn't inside your home folder`
-          : rel.split(path.sep).some((x) => x.startsWith('.')) ? `${shown(p)} is a hidden folder`
+          : botwrite.runsFrom(rel) ? `${shown(p)}: ${botwrite.runsFrom(rel)}`
             : !reads.some((f) => inside(real, f.real || f.path)) ? `${shown(p)} isn't one of, or inside, the folders it reads from` : null
         out.push({ path: real, shown: shown(p), ok: !problem, problem })
       } catch (e) { out.push({ path: String(w), shown: String(w), ok: false, problem: e.message }) }
@@ -717,7 +717,30 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // A run's staging copy of the folders it changes files in (botwrite.js stage), by its helper: what
   // it was as it was made stays here, never where its agent works; gone once what changed is taken.
   const stages = new Map()
-  const dropStage = async (hid) => { const s = stages.get(hid); stages.delete(hid); await botwrite.tidy(s) }
+  const dropStage = async (hid) => { const s = stages.get(hid); stages.delete(hid); guards.delete(hid); await botwrite.tidy(s) }
+  // A run's own checks (botmcp.js runFolder guard: { key, log }), by its helper, read before its MCP
+  // folder goes: what its hook and its file tools let through, the only paths taken from it.
+  const guards = new Map()
+  async function checkedOf(hid) {
+    const g = guards.get(hid)
+    guards.delete(hid)
+    return g ? botwrite.guardCheck(g.log, g.key) : () => false
+  }
+  // Your Claude Code's managed settings turning off the hook that every run changing files needs
+  // (disableAllHooks, or only its own hooks: allowManagedHooksOnly), said; null when they don't.
+  // BRIDGE_CLAUDE_MANAGED: another file to read as them (tests).
+  const MANAGED = process.env.BRIDGE_CLAUDE_MANAGED ? [process.env.BRIDGE_CLAUDE_MANAGED]
+    : process.platform === 'darwin' ? ['/Library/Application Support/ClaudeCode/managed-settings.json']
+      : IS_WIN ? ['C:\\ProgramData\\ClaudeCode\\managed-settings.json', 'C:\\Program Files\\ClaudeCode\\managed-settings.json'] : ['/etc/claude-code/managed-settings.json']
+  function hooksOff() {
+    for (const f of MANAGED) {
+      let j = null
+      try { j = JSON.parse(fs.readFileSync(f, 'utf8')) } catch { continue }
+      if (j?.disableAllHooks === true) return 'your Claude Code\'s managed settings turn off its hooks, which check each file a bot changes'
+      if (j?.allowManagedHooksOnly === true) return 'your Claude Code\'s managed settings allow only their own hooks, not the one that checks each file a bot changes'
+    }
+    return null
+  }
   botwrite.sweepOld(WRITES)
   // Each bot's changes to files, kept beside its record (botwrite.js).
   const writesDir = (id) => path.join(store.DIR, id, 'writes')
@@ -799,7 +822,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const e = record(id, 'received', { q: qid, ...fields, ...(qid === busy?.id ? { joined: true } : {}), ...(m.from?.why ? { lookup: oneLine(m.from.why, 200) } : {}) })
     const q = st.questions.get(qid)
     // (Who asked, as the platform said: a bot that hands this on gives it to the other bot as theirs.)
-    if (q && qid !== busy?.id) q.asker = m.from?.id ? { id: m.from.id, name: m.from.name || null } : null
+    if (q && qid !== busy?.id) q.asker = m.from?.id ? { id: m.from.id, name: m.from.name || null, ...['guest', 'external', 'unknown'].reduce((o, k) => (m.from[k] ? { ...o, [k]: true } : o), {}) } : null
     if (q && m.files?.length && qid !== busy?.id) q.attach = m.files
     else if (busy && m.files?.length) busy.attachMore = [...(busy.attachMore || []), ...m.files]
     // Not someone it answers: a polite no, or nothing, as you said (and nothing for a reply in a
@@ -1108,8 +1131,12 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // now; else the first that can answer now, each one passed over said in the record. Fallback off:
     // its first choice, or none. (A bot that changes files: anyone who may ask may ask for one, in Try
     // It too, where it's shown and never made.)
+    // (A change in a repository only when everyone whose words it answers may ask for one.)
     const editing = editsFiles(bot) && !q.routine
-    const wantsChange = editing || (!q.try && !q.routine && mayChange(bot, q.from))
+    const wantsChange = editing || (!q.try && !q.routine && [q.from, ...q.more.map((x) => x.person)].every((p) => mayChange(bot, p)))
+    // (Neither, when your Claude Code's managed settings turn off the hook every such run needs.)
+    const managed = editing || wantsChange ? hooksOff() : null
+    if (managed) { next(id); return toYou(id, q, `It can't change files here: ${managed}`) }
     const tries = list.map((e, i) => ({ e, i })).filter(({ i }) => i >= from && (fallback || i === 0))
     let pickd = wantsChange ? tries.find(({ e }) => botanswer.canMakeChanges(e) && !e.why) : null
     const changer = !!pickd
@@ -1167,7 +1194,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       && (was.kind === kind || c?.route?.to === 'agent') && (tree ? was.cwd === tree.dir : (paths.some((p) => inside(was.cwd, p)) || inside(was.cwd, ANSWERS))))
     const resumed = !!(resume?.session && goOn && was.id === resume.session)
     let route
-    if (stage) route = { to: 'write', kind: 'claude', cwd: stage.dir, dirs: paths, enforced: true, write: stage.parts.map((p) => ({ name: p.name, shown: p.shown, how: p.how })) }
+    // (A run that changes files starts afresh with the whole conversation: what came after the
+    // question is given with it, never in place of it.)
+    if (stage) { route = { to: 'write', kind: 'claude', cwd: stage.dir, dirs: paths, enforced: true, write: stage.parts.map((p) => ({ name: p.name, shown: p.shown, how: p.how })) }; pending = null }
     else if (tree) route = { to: 'change', kind: 'claude', cwd: tree.dir, dirs: paths, enforced: true, change: tree, ...(goOn ? { fork: was.id, followUp: true } : {}) }
     else if (goOn) {
       const to = c?.route?.to === 'change' ? 'folders' : c?.route?.to || (inside(was.cwd, ANSWERS) ? 'throwaway' : 'folders')
@@ -1236,10 +1265,18 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const all = mayAct(bot, q.from)
     // (A run that changes files has delete_file and move_file in its copy, and the hook that checks
     // every path it writes: botmcp.js.)
-    if ((bot.mcp?.length || outbox || stage) && route.kind === 'claude') {
-      try { mcp = await botmcp.runFolder(bot, { all, key: `${q.id}-${q.runs.length + 1}`, outbox, write: stage ? { root: stage.dir } : null }) } catch (e) { mcp = { dir: null, servers: [], missing: [], problem: oneLine(e.message, 200) } }
+    // (A run in a copy of a repository has the hook too, with git's own files and Claude Code's out of
+    // its reach.)
+    const guarded = stage ? { root: stage.dir, parts: stage.parts.map((p) => p.name), files: true } : tree ? { root: tree.dir, parts: [], files: false } : null
+    if ((bot.mcp?.length || outbox || guarded) && route.kind === 'claude') {
+      try { mcp = await botmcp.runFolder(bot, { all, key: `${q.id}-${q.runs.length + 1}`, outbox, write: guarded }) } catch (e) { mcp = { dir: null, servers: [], missing: [], problem: oneLine(e.message, 200) } }
       // (Without its hook, it doesn't run: nothing that changes files starts unchecked.)
-      if (stage && !mcp?.guard) { await botwrite.tidy(stage); next(id); return toYou(id, q, `Its copy of the folders couldn't be set up to change files safely: ${mcp?.problem || 'its settings couldn\'t be written'}`) }
+      if (guarded && !mcp?.guard) {
+        if (stage) await botwrite.tidy(stage)
+        if (tree) await changes.tidy(tree)
+        next(id)
+        return toYou(id, q, `Its copy couldn't be set up to change files safely: ${mcp?.problem || 'its settings couldn\'t be written'}`)
+      }
       if (mcp?.dir) route.dirs = [...route.dirs, mcp.dir]
     } else if (bot.mcp?.length && route.kind === 'model') {
       // (A model calls them through Bridge AI, under the same rules: botanswer.js runChat.)
@@ -1286,6 +1323,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const h = chat ? { cwd: route.cwd } : delegate.get(out.helper.id) || {}
     if (mcp?.dir) mcpDirs.set(out.helper.id, mcp.dir)
     if (stage) stages.set(out.helper.id, stage)
+    if (mcp?.guard) guards.set(out.helper.id, mcp.guard)
     record(id, 'run.started', at(q, {
       helper: out.helper.id, agent: route.kind, model: chat ? entry.model : entry.model || modelOf(route.kind), session: h.sessionId || null, from: route.fork || null,
       answerer: label(entry), try: pickd.i, ...(unable ? { noChange: unable } : {}), ...(handsTo.length ? { handsTo: handsTo.map((x) => ({ id: x.id, name: x.name })) } : {}),
@@ -1425,6 +1463,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       try { used = h.chat ? h.tools || [] : botmcp.usedOf(await toolsOf(h), run.mcp.servers.map((x) => x.name)) } catch { /* not readable */ }
       if (used.length) record(id, 'run.tools', at(q, { helper: h.id, tools: used.slice(0, 100) }))
     }
+    // (What its own checks let through, read before its MCP folder, where they wrote it, goes.)
+    const checked = run.write || run.change ? await checkedOf(h.id) : null
     dropMcp(h.id)
     const upTo = [q.ts, ...(run.with || [])].reduce((a, x) => (laterTs(x, a) ? x : a), q.ts)
     // (Done while you were being asked whether it may go on: nothing left to decide.)
@@ -1502,7 +1542,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     let holdChange = false
     if (tree) {
       try {
-        const got = await changes.collect({ ...tree, dir: h.cwd || tree.dir }, { message: `${bot.name}: ${oneLine(q.text, 60)}\n\nAsked by ${q.from?.name || 'someone'} in ${where(q.place)} (${labelOf(q)}), made by ${bot.name}, ${ownerName(bot)}'s bot in Bridge AI.` })
+        const got = await changes.collect({ ...tree, dir: h.cwd || tree.dir }, { checked, message: `${bot.name}: ${oneLine(q.text, 60)}\n\nAsked by ${q.from?.name || 'someone'} in ${where(q.place)} (${labelOf(q)}), made by ${bot.name}, ${ownerName(bot)}'s bot in Bridge AI.` })
         if (got.changed) {
           const diffFile = b.trace.keep('changes', `${q.id}-${q.runs.length}.diff`, got.diff)
           record(id, 'change.proposed', at(q, { mode: bot.changes, branch: tree.branch, base: tree.base, files: got.files.slice(0, 200), stat: got.stat, diffFile, diffHash: keyOf(got.diff), diff: clip(got.diff, 4000), dir: h.cwd || tree.dir, top: tree.top, remote: tree.remote, from: tree.from }))
@@ -1522,7 +1562,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // folders now, for someone it changes files for without asking you, or waiting for you (takeWrite).
     let wrote = null
     if (run.write) {
-      wrote = await takeWrite(id, q, h)
+      wrote = await takeWrite(id, q, h, checked)
       if (wrote.note) text = clip(`${text}\n\n${wrote.note}`, KEPT)
       if (wrote.warn) warn = wrote.warn
       if (wrote.hold) holdChange = true
@@ -1664,12 +1704,19 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // Undo on the reply and in Activity; else it waits for you, with the diff and who asked, in Needs
   // You, your direct messages and where it was asked (Approve and Deny there count only when you press
   // them; anyone else is told so), and whoever asked is told it waits, then that it was made or not.
-  // Whoever asks, you too, a change that deletes or moves a file, is many files or a lot, or touches a
-  // file like a secret waits for you. One refused (a link on the way, a file changed while it worked,
-  // one there already) isn't made at all, and says why. An approval names its change (its hash, or a
-  // button's own code for it): a newer change in the same conversation takes the place of one still
-  // waiting, and needs its own.
-  const REFUSED = { link: 'a link is on the way', special: 'it isn\'t a plain file', path: 'it isn\'t inside the folder', there: 'a file is there already that it couldn\'t see', conflict: 'it changed while the bot worked', big: 'it\'s too big', outside: 'it isn\'t in a folder it changes files in' }
+  // Whoever asks, you too, a change that deletes or moves a file, is many files or a lot, touches a
+  // file like a secret, a bot's instructions or a file that steers an agent or builds code, a file
+  // that runs where it's opened, or can't be shown in full, waits for you. One refused (a link on the
+  // way, a file changed while it worked, one there already, git's own folder by any name, a file its
+  // own checks never saw written) isn't made at all, and says why. A change is made without asking
+  // you only when everyone whose words its run answered may change files without asking (someone who
+  // joined in its thread while it worked too). Where it was asked, whoever asked is told how many
+  // files, never their names, before you approve. An approval names its change (its hash, or a
+  // button's own code for it), and is given where the whole change is shown: Slack's Approve opens it
+  // whole first, Needs You shows all of it before Approve and Send, Discord and Teams say when what
+  // they show is cut. A newer change in the same conversation takes the place of one still waiting,
+  // and needs its own.
+  const REFUSED = { link: 'a link is on the way', special: 'it isn\'t a plain file', path: 'it isn\'t inside the folder', there: 'a file is there already that it couldn\'t see', conflict: 'it changed while the bot worked', big: 'it\'s too big', outside: 'it isn\'t in a folder it changes files in', git: 'it\'s git\'s own folder', unchecked: 'it wasn\'t written through the checks every change goes through' }
   const refusedSaid = (list) => `${list.slice(0, 5).map((r) => `${r.file} (${REFUSED[r.why] || r.why})`).join('; ')}${list.length > 5 ? `, and ${list.length - 5} more` : ''}`
   const filesSaid = (files) => {
     const n = (files || []).map((f) => `${f.path}${f.op === 'add' ? ' (new)' : f.op === 'remove' ? ' (deleted)' : f.op === 'move' ? ` (moved from ${f.from})` : ''}`)
@@ -1679,7 +1726,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   const changedNote = (q) => `Changed: ${filesSaid(q.write?.files)}.${platOf(q) !== 'slack' ? ` To put ${q.write?.files?.length === 1 ? 'it' : 'them'} back as before, say “undo ${numOf(q)}”.` : ''}`
   const writeView = (w) => (w ? {
     // (diffCut: the diff here is its start; the whole of it is the change's own, botwrite.js.)
-    id: w.id, q: w.q, hash: w.hash, code: String(w.hash || '').slice(0, 8), state: w.state, files: w.files, diff: w.diff, diffCut: (w.diffChars || 0) > String(w.diff || '').length, by: w.by, try: !!w.try, direct: !!w.direct, at: w.at,
+    id: w.id, q: w.q, hash: w.hash, code: String(w.hash || '').slice(0, 8), state: w.state, files: w.files, diff: w.diff, diffCut: (w.diffChars || 0) > String(w.diff || '').length, by: w.by, also: w.also || [], try: !!w.try, direct: !!w.direct, at: w.at,
     held: (w.held || []).map((x) => ({ why: x.why, files: x.files, said: botwrite.HELD_SAID[x.why] || x.why })), refused: (w.refused || []).map((x) => ({ ...x, said: REFUSED[x.why] || x.why })),
     applied: w.applied || null, denied: w.denied || null, undone: w.undone || null, error: w.error || null,
   } : null)
@@ -1765,25 +1812,41 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // its copy gone; then made now, for someone it changes files for without asking you, or waiting for
   // you; refused, or in Try It, never made. { note: for the reply, warn, hold: it doesn't go without
   // you, waits: it waits for your approval }.
-  async function takeWrite(id, q, h) {
+  // Every bot's instructions file, by its real path: a change to one waits for you, whoever asked.
+  async function instructionFiles() {
+    const out = []
+    for (const x of store.list()) {
+      if (!x.instructionsFile) continue
+      const p = path.resolve(String(x.instructionsFile).replace(/^~(?=$|[\\/])/, home))
+      out.push(await fs.promises.realpath(p).catch(() => p))
+    }
+    return out
+  }
+  // Everyone whose words a run answers: whoever asked, and whoever joined them in the conversation
+  // while it ran (their words are in its brief too). Made without asking you only when every one of
+  // them may change files without asking.
+  const voices = (q) => [...new Map([q.from, ...q.more.map((x) => x.person)].filter((p) => p?.id).map((p) => [p.id, p])).values()]
+  async function takeWrite(id, q, h, checked = null) {
     const b = bots.get(id)
     const bot = botOf(id)
     const st = stages.get(h.id)
     stages.delete(h.id)
     if (!st) return { hold: true, warn: 'Its copy of the folders it changes wasn\'t there any more (Bridge AI started again while it worked), so nothing was changed' }
     let c
-    try { c = await botwrite.collect(st, { into: writesDir(id), by: q.from || null }) } catch (e) {
+    try { c = await botwrite.collect(st, { into: writesDir(id), by: q.from || null, instructions: await instructionFiles(), checked: checked || (() => false) }) } catch (e) {
       record(id, 'write.failed', at(q, { step: e.step || 'collect', error: oneLine(e.message, 300) }))
       return { hold: true, warn: `What it changed couldn't be taken, so nothing was changed: ${oneLine(e.message, 200)}` }
     } finally { await botwrite.tidy(st) }
     if (!c.entries.length && !c.refused.length) return {}
     // (A newer change in this conversation takes the place of one still waiting for you.)
     for (const x of [...b.st.questions.values()]) if (x.conv === q.conv && x.write?.state === 'waiting') await replaceWrite(id, x, c.id)
-    const direct = !q.try && !c.refused.length && !c.held.length && trusted(bot, q.from)
+    const people = voices(q)
+    const direct = !q.try && !c.refused.length && !c.held.length && people.length > 0 && people.every((p) => trusted(bot, p))
     const waits = !q.try && !c.refused.length && !direct
     let diffFile = null
     try { diffFile = b.trace.keep('changes', `${q.id}-${c.id}.diff`, c.diff) } catch { /* the change keeps it too */ }
-    record(id, 'write.proposed', at(q, { change: c.id, hash: c.hash, files: c.files.slice(0, 200), held: c.held, refused: c.refused.slice(0, 50), diff: clip(c.diff, 6000), diffChars: c.diff.length, diffFile, by: q.from || null, ...(q.try ? { try: true } : {}), direct, waits }))
+    const also = people.filter((p) => p.id !== q.from?.id).map((p) => ({ id: p.id, name: p.name || null }))
+    record(id, 'write.proposed', at(q, { change: c.id, hash: c.hash, files: c.files.slice(0, 200), held: c.held, refused: c.refused.slice(0, 50), diff: clip(c.diff, 6000), diffChars: c.diff.length, diffFile, by: q.from || null, ...(also.length ? { also } : {}), ...(q.try ? { try: true } : {}), direct, waits }))
     if (q.try) {
       await botwrite.close(writesDir(id), c.id, 'tried')
       return { note: `(Try It: nothing was changed. Asked in Slack, it would change ${filesSaid(q.write.files)}${c.refused.length ? `, but it would be refused: ${refusedSaid(c.refused)}` : c.held.length ? `, once you approve it: ${botwrite.heldSaid(c.held)}` : ''}.)` }
@@ -1807,7 +1870,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (!w) return { ok: false, error: 'There\'s no change here' }
     const roots = (await writesOf(bot)).filter((x) => x.ok).map((x) => x.path)
     try {
-      const r = await botwrite.apply(writesDir(id), w.id, { roots, approved, hash, nonce })
+      const r = await botwrite.apply(writesDir(id), w.id, { roots, approved, hash, nonce, instructions: await instructionFiles() })
       record(id, 'write.applied', at(q, { change: w.id, files: r.files, by, via, ...(device ? { device } : {}), direct: !approved }))
       if (approved) settleWrite(id, q, `Approved by ${by}: changed`)
       changed()
@@ -1850,10 +1913,17 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (!c?.nonce) return
     const n = numOf(q)
     const value = `${q.id} ${w.id} ${c.nonce}`
-    const text = `I've made the change in my copy (${filesSaid(w.files)}), and it waits for ${ownerName(bot)} to approve it${w.held.length ? `, as ${botwrite.heldSaid(w.held)}` : ''}. Nothing is changed until then.`
+    // (Where it was asked, nothing the agent chose, its files' names among them: how many, and why it
+    // waits. Approve there shows you the whole diff before it's made.)
+    const many = w.files.length === 1 ? '1 file' : `${w.files.length} files`
+    const text = `I've made the change in my copy (${many}), and it waits for ${ownerName(bot)} to approve it${w.held.length ? `, as ${botwrite.heldSaid(w.held, { files: false })}` : ''}. Nothing is changed until then.`
     q.checking = true // (told it's being checked: nothing more to say while it waits)
     queue(id, q, 'waits', text, { change: w.id, ...(platOf(q) === 'slack' ? { buttons: [{ id: 'bb_wok', label: 'Approve', value, style: 'primary' }, { id: 'bb_wno', label: 'Deny', value, style: 'danger' }] } : {}) })
-    if (platOf(q) !== 'slack') await askOwnerWords(id, q, `${bot.name}: ${q.from?.name || 'someone'} asked in ${where(q.place)} for a change: “${oneLine(q.text, 200)}”. It changes ${filesSaid(w.files)}${w.held.length ? ` (${botwrite.heldSaid(w.held)})` : ''}:\n\`\`\`\n${clip(w.diff, 900).replace(/```/g, '`​``')}\n\`\`\`\nReply “approve ${n} ${w.hash.slice(0, 8)}” to make it, or “deny ${n}”.`, { write: w.id })
+    if (platOf(q) !== 'slack') {
+      const diff = String(c.diff || w.diff || '')
+      const cut = diff.length > 900
+      await askOwnerWords(id, q, `${bot.name}: ${q.from?.name || 'someone'} asked in ${where(q.place)} for a change: “${oneLine(q.text, 200)}”. It changes ${filesSaid(w.files)}${w.held.length ? ` (${botwrite.heldSaid(w.held)})` : ''}:\n\`\`\`\n${clip(diff, 900).replace(/```/g, '`​``')}\n\`\`\`\n${cut ? `That's cut: the whole diff is in Needs You, which shows all of it before you approve. ` : ''}Reply “approve ${n} ${w.hash.slice(0, 8)}” to make it, or “deny ${n}”.`, { write: w.id })
+    }
   }
   // Undo on its reply in Slack, for a change made: its button's code, only for this change.
   async function undoOf(id, q) {
@@ -1896,11 +1966,17 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const tb = bots.get(to.id)
     const up = tb.channel?.connected ? tb.channel.connected(plat) : tb.channel?.state().state === 'connected'
     if (!up) return toYou(id, q, `It hands changes to files on to ${to.name}, which isn't connected to ${labelOf(q)}`)
+    // (Only where the other bot is there too: reached through the same app, so it's in the same
+    // conversation, never an app of its own that isn't.)
+    const viaOf = (x) => x?.channel?.parts?.[plat]?.connection?.id || null
+    if (!viaOf(bots.get(id)) || viaOf(bots.get(id)) !== viaOf(tb)) return toYou(id, q, `It hands changes to files on to ${to.name}, which answers through another app in ${labelOf(q)}, not in this conversation`)
+    // (Whoever asked, as the platform said, with whatever it said of them: a guest stays a guest.)
+    const asker = q.asker || (q.from?.id ? { id: q.from.id, name: q.from.name || null, unknown: true } : { id: null, unknown: true })
     record(id, 'handed', at(q, { to: { id: to.id, name: to.name } }))
     react(id, q, q.ts, 'eyes', true)
     done(q)
     changed()
-    await hear(to.id, { ts: q.ts, channel: q.channel, thread: q.thread, mention: true, dm: q.place?.kind === 'dm', from: q.asker || { id: q.from?.id || null, name: q.from?.name || null }, text: q.text, place: q.place, at: q.at, late: false, reply: q.reply, platform: plat, handed: { by: id, name: bot.name } })
+    await hear(to.id, { ts: q.ts, channel: q.channel, thread: q.thread, mention: true, dm: q.place?.kind === 'dm', from: asker, text: q.text, place: q.place, at: q.at, late: false, reply: q.reply, platform: plat, handed: { by: id, name: bot.name } })
   }
 
   // Your words about a change or a held request ("approve 12 ab3f19c2", "deny 12", "allow 12",
@@ -1953,9 +2029,18 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       if (!mayUndo(bot, q, a.user)) return { ok: false, error: `Only ${ownerName(bot)} can undo this change.` }
       try { await undoWrite(id, a.change, { by: isOwner(bot, a.user) ? bot.owner?.name || you() : named(a.user), via: 'slack', nonce: a.nonce || '' }); return { ok: true } } catch (e) { return { ok: false, error: e.message } }
     }
-    const what = a.act === 'sok' ? 'allow this' : a.act === 'wok' ? 'approve this change' : 'decide this'
+    const what = a.act === 'sok' ? 'allow this' : a.act === 'wok' || a.act === 'wview' ? 'approve this change' : 'decide this'
     if (!bot.owner?.id || a.user?.id !== bot.owner.id) return { ok: false, error: `Only ${ownerName(bot)} can ${what}, and they've been asked.` }
     const by = bot.owner.name || you()
+    // (Approve, pressed: the whole change to look at first, its own code checked; its Approve there
+    // makes it.)
+    if (a.act === 'wview') {
+      if (!q.write || q.write.id !== a.change) return { ok: false, error: 'A newer change took this one\'s place: look at that one' }
+      if (q.write.state !== 'waiting' || q.state !== 'draft') return { ok: false, error: q.write.state === 'applied' ? 'It was made already' : q.write.state === 'denied' ? 'It was denied already' : 'It isn\'t waiting any more' }
+      const c = await botwrite.load(writesDir(id), q.write.id)
+      if (!c?.nonce || typeof a.nonce !== 'string' || a.nonce.length !== c.nonce.length || !crypto.timingSafeEqual(Buffer.from(a.nonce), Buffer.from(c.nonce))) return { ok: false, error: 'That approval isn\'t this change\'s' }
+      return { ok: true, view: { q: q.id, change: c.id, nonce: a.nonce, bot: bot.name, who: [q.from, ...(q.write.also || [])].map((p) => p?.name || 'someone').join(' and '), where: where(q.place), files: c.files, held: botwrite.heldSaid(c.held || []), diff: c.diff || '' } }
+    }
     if (a.act === 'sok' || a.act === 'sno') { const r = await screenAct(q.id, a.act === 'sok', { by, via: 'slack' }); return r.already ? { ok: false, error: 'That isn\'t waiting any more' } : { ok: true } }
     if (!q.write || q.write.id !== a.change) return { ok: false, error: 'A newer change took this one\'s place: look at that one' }
     if (q.write.state !== 'waiting' || q.state !== 'draft') return { ok: false, error: q.write.state === 'applied' ? 'It was made already' : q.write.state === 'denied' ? 'It was denied already' : 'It isn\'t waiting any more' }
@@ -2455,7 +2540,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       return { ok: true, said: n ? 'Stopped' : 'Nothing was running there' }
     }
     // (A change to files, or a request held before it started: writeAct.)
-    if (['wok', 'wno', 'sok', 'sno', 'undo'].includes(a.act)) return writeAct(id, a)
+    if (['wok', 'wview', 'wno', 'sok', 'sno', 'undo'].includes(a.act)) return writeAct(id, a)
     if (!bot.owner?.id) return { ok: false, error: `Set "You in Slack" in Bridge AI first (Settings › Bots › ${bot.name})` }
     if (a.user?.id !== bot.owner.id) return { ok: false, error: `Only ${you()} can decide this` }
     const by = `${bot.owner.name || you()}`
@@ -2473,9 +2558,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         const r = await limitAct(a.q, a.act === 'halt' ? 'stop' : 'continue', { minutes: a.minutes, by, via: 'slack' })
         return r.already ? { ok: false, error: r.said } : { ok: true }
       }
-      // (A change to files waiting on you, its reply edited from the card that shows it: that change.)
-      const w = found.q.write?.state === 'waiting' && a.act === 'edit' ? { id: found.q.write.id, hash: found.q.write.hash } : null
-      const r = await decide(a.q, { send: a.act !== 'discard', text: a.act === 'edit' ? a.text : undefined, by, via: 'slack', write: w })
+      // (A change to files waiting on you is approved only by its own Approve, which shows all of it.)
+      if (found.q.write?.state === 'waiting' && a.act !== 'discard') return { ok: false, error: 'Approve the change first: its Approve shows you all of it. The reply can be changed in Needs You.' }
+      const r = await decide(a.q, { send: a.act !== 'discard', text: a.act === 'edit' ? a.text : undefined, by, via: 'slack' })
       if (r.already) return { ok: false, error: r.item.state === 'sent' ? 'It was sent already' : r.item.state === 'discarded' ? 'It was discarded already' : 'It isn\'t waiting any more' }
       if (r.item.state === 'draft' && r.item.problem) return { ok: false, error: r.item.problem }
       return { ok: true }

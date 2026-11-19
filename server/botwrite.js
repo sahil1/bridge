@@ -55,29 +55,66 @@ const DEPTH = 40
 const SEP = '/'
 
 const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex')
-const run = (bin, args, { cwd, timeout = 60000 } = {}) => new Promise((resolve) => {
-  execFile(bin, args, { cwd, timeout, maxBuffer: 64 * 1024 * 1024, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (err, stdout, stderr) => resolve({ ok: !err, out: String(stdout || ''), err: String(stderr || err?.message || '').trim() }))
+const run = (bin, args, { cwd, timeout = 60000, env = {} } = {}) => new Promise((resolve) => {
+  execFile(bin, args, { cwd, timeout, maxBuffer: 64 * 1024 * 1024, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...env } }, (err, stdout, stderr) => resolve({ ok: !err, out: String(stdout || ''), err: String(stderr || err?.message || '').trim() }))
 })
-const git = async (dir, args, o) => (await gitReady() ? run('git', ['-C', dir, ...args], o) : { ok: false, out: '', err: 'git isn\'t here' })
+// git, for making a copy of your repository's folder: none of its hooks, no file-system monitor and
+// no Git LFS download, for a copy made on each request.
+export const GIT_SAFE = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false']
+const git = async (dir, args, o = {}) => (await gitReady() ? run('git', [...GIT_SAFE, '-C', dir, ...args], { ...o, env: { GIT_LFS_SKIP_SMUDGE: '1', ...(o.env || {}) } }) : { ok: false, out: '', err: 'git isn\'t here' })
 const firstLine = (s) => String(s || '').split('\n').map((l) => l.trim()).filter(Boolean)[0]?.slice(0, 200) || ''
 const fail = (message, step) => Object.assign(new Error(message), { step })
 // A path inside a folder, as kept (its parts joined by /), and back to one on this computer.
 const relOf = (root, p) => path.relative(root, p).split(path.sep).join(SEP)
 const onDisk = (root, rel) => path.join(root, ...rel.split(SEP))
+// git's own folder by any name a file system gives it, as git itself refuses them (is_ntfs_dotgit):
+// .git in any case, with dots or spaces after it or an NTFS stream (.git::$INDEX_ALLOCATION), and its
+// 8.3 short name, GIT~1 (git~N).
+export const gitLike = (name) => { const n = String(name || '').toLowerCase().replace(/:.*$/, '').replace(/[. ]+$/, ''); return n === '.git' || /^git~\d+$/.test(n) }
 // (Every part a plain name: none empty, . or .., none git's own, nothing a name can't hold.)
 const okRel = (rel) => typeof rel === 'string' && rel.length > 0 && rel.length < 4096 && !rel.includes('\0') && !rel.includes('\\')
-  && rel.split(SEP).every((x) => x && x !== '.' && x !== '..' && x.toLowerCase() !== '.git')
-const gitPart = (name) => name.toLowerCase() === '.git'
+  && rel.split(SEP).every((x) => x && x !== '.' && x !== '..' && !gitLike(x))
+const gitPart = gitLike
+// A folder's path as the file system really names it (fs.promises.realpath is the system's own: on
+// Windows long names for 8.3 ones, so GIT~1 shows as .git): none of its parts below root git's own.
+async function notGitBelow(root, p) {
+  const real = await fs.promises.realpath(p).catch(() => null)
+  return !real || !relOf(root, real).split(SEP).some(gitLike)
+}
 
 // ---------- What waits for you, whoever asks ----------
 // A file that looks like it holds a secret or a setting: a dotfile or one in a dot folder (.env,
 // .ssh/…), a key or certificate, or one named for credentials, passwords or tokens.
 const SECRET_NAME = /^(id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|authorized_keys|known_hosts|netrc|npmrc|pypirc)$|\.(pem|key|p12|pfx|keystore|jks|kdbx|gpg|asc|ovpn|ppk|der|crt|cer|p8)$|(^|[^a-z])(passwords?|passwd|secrets?|credentials?|api[-_]?keys?|private[-_]?keys?|access[-_]?tokens?|auth[-_]?tokens?)([^a-z]|$)/i
-export const secretLike = (rel) => String(rel || '').split(SEP).some((x) => x.startsWith('.')) || SECRET_NAME.test(String(rel || '').split(SEP).pop())
+export const secretLike = (rel) => String(rel || '').split(SEP).some((x) => x.startsWith('.') || gitLike(x)) || SECRET_NAME.test(String(rel || '').split(SEP).pop())
+// A file that steers an agent or builds and runs code where it's opened: an agent's own instructions
+// (CLAUDE.md, AGENTS.md, a bot's BOT.md…), a project's scripts and build files (package.json, a
+// Makefile, a Dockerfile, CI workflows, git hooks' configs).
+const STEERS = /^(claude|agents|gemini|copilot-instructions|bot|instructions|system[-_]?prompt)\.md$|^\.?(cursorrules|windsurfrules|clinerules|aider\.conf\.ya?ml)$|^(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|makefile|gnumakefile|justfile|rakefile|gemfile|dockerfile|containerfile|docker-compose\.ya?ml|compose\.ya?ml|vagrantfile|procfile|cmakelists\.txt|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|pom\.xml|cargo\.toml|pyproject\.toml|setup\.py|setup\.cfg|tox\.ini|noxfile\.py|conftest\.py|manifest\.json|\.pre-commit-config\.yaml|lefthook\.ya?ml)$/i
+export const steers = (rel) => { const p = String(rel || '').split(SEP); const name = p.at(-1); return STEERS.test(name) || p.some((x) => /^(\.github|\.husky|\.circleci|\.gitlab|\.vscode|\.idea|\.claude|\.cursor)$/i.test(x)) }
+// A file a computer runs or opens as a program: a script, a launch agent or login item, a shortcut
+// or a Windows program (besides one marked runnable already).
+const LAUNCHES = /\.(sh|bash|zsh|fish|ksh|csh|command|tool|plist|fileloc|webloc|inetloc|workflow|scpt|scptd|applescript|terminal|desktop|service|timer|lnk|url|bat|cmd|ps1|psm1|psd1|vbs|vbe|js[e]?|wsf|wsh|hta|exe|com|scr|msi|msp|reg|cpl|jar|app|pkg|dmg|deb|rpm|appimage)$/i
+export const launches = (rel) => LAUNCHES.test(String(rel || '').split(SEP).pop())
+// A folder your computer runs things from, which a bot never changes files in (rel: its real path
+// from your home folder, its parts joined by /): anything hidden (~/.config/autostart, ~/.local/bin),
+// ~/Library but iCloud Drive's (launch agents, login items, services), ~/Applications, ~/bin, and
+// Windows' AppData (its Startup folder among them). Why, or null.
+export function runsFrom(rel) {
+  const p = String(rel || '').split(/[\\/]+/).filter(Boolean)
+  const top = (p[0] || '').toLowerCase()
+  if (p.some((x) => x.startsWith('.'))) return 'a hidden folder (or a link to one) can\'t be one it changes files in'
+  if (top === 'library' && (p[1] || '').toLowerCase() !== 'mobile documents') return '~/Library is where your Mac starts and runs things from, so it can\'t be one it changes files in (iCloud Drive, in ~/Library/Mobile Documents, can)'
+  if (['applications', 'bin', 'appdata'].includes(top)) return `~/${p[0]} is where your computer runs things from, so it can't be one it changes files in`
+  if (p.some((x) => /^(start menu|startup|autostart|launchagents|launchdaemons|login ?items)$/i.test(x))) return 'that\'s where your computer starts things from, so it can\'t be one it changes files in'
+  return null
+}
 // Why a change waits for you even from someone who may change files without asking: it deletes or
-// moves a file, it's many files or a lot, it touches a file like a secret, or it changes a file that
-// can be run. [{ why, files }]
-export function heldOf(entries) {
+// moves a file, it's many files or a lot, it touches a file like a secret, a bot's instructions or a
+// file that steers an agent or builds code, or a file that can be run or opened as a program.
+// ctx: { folders (the change's, their real paths), instructions: the real paths of every bot's
+// instructions file }. [{ why, files }]
+export function heldOf(entries, { folders = [], instructions = [] } = {}) {
   const out = []
   const add = (why, files) => { if (files.length) out.push({ why, files: files.slice(0, 20) }) }
   add('delete', entries.filter((e) => e.op === 'remove').map((e) => e.rel))
@@ -88,37 +125,56 @@ export function heldOf(entries) {
   if (big.length) add('large', big)
   else if (all > LARGE) add('large', [`${Math.round(all / 1024)} KB in all`])
   add('secret', entries.filter((e) => secretLike(e.rel) || (e.from && secretLike(e.from))).map((e) => e.rel))
-  add('runs', entries.filter((e) => e.before && (e.before.mode & 0o111)).map((e) => e.rel))
+  const at = (e, rel) => (folders[e.part]?.path ? path.join(folders[e.part].path, ...rel.split(SEP)) : null)
+  const own = new Set(instructions.map((p) => path.resolve(p)))
+  add('instructions', entries.filter((e) => [e.rel, e.from].filter(Boolean).some((r) => own.has(at(e, r)))).map((e) => e.rel))
+  add('steers', entries.filter((e) => steers(e.rel) || (e.from && steers(e.from))).map((e) => e.rel))
+  add('runs', entries.filter((e) => (e.before && (e.before.mode & 0o111)) || launches(e.rel) || (e.from && launches(e.from))).map((e) => e.rel))
   return out
 }
 export const HELD_SAID = {
   delete: 'it deletes files', move: 'it moves or renames files', many: `it changes more than ${MAX_FILES} files`, large: 'it\'s a very large change',
-  secret: 'it touches a file that may hold a secret or a setting (a dotfile, a key, credentials)', runs: 'it changes a file that can be run',
+  secret: 'it touches a file that may hold a secret or a setting (a dotfile, a key, credentials)', runs: 'it changes a file that can be run or opened as a program',
+  instructions: 'it changes a bot\'s instructions', steers: 'it changes a file that steers an agent or builds code (CLAUDE.md, package.json, a Makefile…)',
+  unshown: 'its diff can\'t be shown in full (a binary file, or one too long to show)',
 }
-export const heldSaid = (held) => held.map((h) => `${HELD_SAID[h.why] || h.why} (${h.files.slice(0, 3).join(', ')}${h.files.length > 3 ? ', …' : ''})`).join('; ')
+// Why, in words: with the files (for you), or without (kinds only, for whoever asked).
+export const heldSaid = (held, { files = true } = {}) => held.map((h) => (files ? `${HELD_SAID[h.why] || h.why} (${h.files.slice(0, 3).join(', ')}${h.files.length > 3 ? ', …' : ''})` : HELD_SAID[h.why] || h.why)).join('; ')
 
 // ---------- The screen ----------
 // A request read before anything starts, for what no bot should just do: wiping or destroying, mass
-// changes, reaching outside its folders or into secrets, or talking it out of its rules. It's a
+// changes, reaching outside its folders or into secrets, or talking it out of its rules. Read as
+// written and as plain letters (no accents, a word spelt out with dashes or dots between its letters
+// read as the word: d-e-l-e-t-e is delete), in English and the languages Bridge AI speaks. It's a
 // first look, not the limit: the limits are what a run can do (above). { why } or null.
+const ALL = 'everything|all of (it|them)|every( last| single)? (file|folder|document|doc|thing|one)s?|(each|every)( and every)? (file|doc|document)s?|all (the |my |your |these |those |of the |of my |of your )?(files?|folders?|documents?|docs|data|contents?|offers?|records?|notes?|stuff)|(the )?(whole|entire) (folder|directory|drive|disk|repo(sitory)?|thing)|whatever'
 const SCREEN = [
-  [/\b(delete|remove|erase|wipe|trash|purge|clear|empty|destroy|nuke|get rid of)\b[^.?!\n]{0,40}\b(everything|all of (it|them)|every (file|folder|document|thing|one)|all (the |my |your |these |those |of the )?(files?|folders?|documents?|docs|data|contents?|offers?|records?|notes?)|the (whole|entire) (folder|directory|drive|disk|repo(sitory)?)|whatever)\b/i, 'it asks to delete everything'],
+  [new RegExp(`\\b(delete|remove|erase|wipe|trash|purge|clear|empty|destroy|nuke|zap|scrub|get rid of|throw away|blank)\\b[^.?!\\n]{0,40}\\b(${ALL})\\b`, 'i'), 'it asks to delete everything'],
+  [/\b(delete|remove|erase|trash|purge|empty|clear|clean)\s+(out\s+)?(the|this|that|my|your|its)\s+(\w+\s+)?(folder|directory|drive|repo(sitory)?)\b/i, 'it asks to delete everything'],
   [/\b(wipe|nuke|obliterate|shred|destroy)\b/i, 'it asks to wipe or destroy something'],
   [/\brm\s+-[a-z]*[rf]|\bdel\s+\/[sq]|\brmdir\b|\bformat\s+(the\s+)?(c:|disk|drive)|\bmkfs\b|\bdd\s+if=/i, 'it has a command that deletes or wipes'],
-  [/\b(rename|move|rewrite|overwrite|replace|change|edit|update|encrypt|delete|remove)\b[^.?!\n]{0,40}\b(every|each|all)\s+(single\s+)?(of the\s+)?(files?|folders?|documents?|docs)\b/i, 'it asks to change every file'],
+  [/\b(rename|move|rewrite|overwrite|replace|change|edit|update|encrypt|delete|remove|blank)\b[^.?!\n]{0,40}\b(every|each|all)\s+(single\s+|last\s+)?(of the\s+)?(files?|folders?|documents?|docs?)\b/i, 'it asks to change every file'],
+  [/\b(replace|overwrite|rewrite|blank)\b[^.?!\n]{0,20}\bcontents?\b[^.?!\n]{0,20}\b(each|every|all)\b/i, 'it asks to change every file'],
+  // (The same in Spanish, French, German, Portuguese, Hindi, Japanese and Chinese.)
+  [/\b(borra|borrar|borrad|elimina|eliminar|vacía|vaciar|suprime|supprime|supprimer|efface|effacer|vide|vider|lösch\w*|leer\w*|apag\w*|exclu\w*|delet\w*)\b[^.?!\n]{0,40}\b(todo|todos|todas|tout|tous|toutes|alles|alle|tudo|tudos|todas)\b|सब\s*(कुछ\s*)?(हटा|मिटा|डिलीट)|सारी\s*फ़ाइलें\s*(हटा|मिटा)|(全部|すべて|全て)(を)?(削除|消)|(删除|清空)(所有|全部|一切)|(所有|全部)(文件)?(都)?(删除|删掉|清空)/i, 'it asks to delete everything'],
   [/\b(sudo|chmod|chown|crontab|launchctl|keychain)\b|\/etc\/|\bsystem32\b|~\/\.|\.ssh\b|\.aws\b|\.\.\//i, 'it reaches outside its folders, or into the system'],
   [/\b(ignore|disregard|forget|override)\b[^.?!\n]{0,30}\b(instructions|rules|limits|restrictions|guardrails)\b|\b(system prompt|jailbreak|developer mode|dan mode)\b/i, 'it tries to talk the bot out of its rules'],
   [/\b(send|post|upload|share|email|paste|show|give)\b[^.?!\n]{0,40}\b(passwords?|api[ _-]?keys?|private keys?|tokens?|credentials|secrets?|\.env)\b/i, 'it asks for secrets'],
 ]
+// (Plain letters: accents off, and a word spelt out letter by letter joined up.)
+const plain = (s) => String(s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
+  .replace(/\b\p{L}(?:[\s._*·•\-–—/\\|+~]+\p{L}\b){2,}/gu, (m) => m.replace(/[^\p{L}]+/gu, ''))
 export function screen(text) {
   const s = String(text || '')
-  for (const [re, why] of SCREEN) if (re.test(s)) return { why, by: 'rules' }
+  const p = plain(s)
+  for (const [re, why] of SCREEN) if (re.test(s) || re.test(p)) return { why, by: 'rules' }
   return null
 }
 // The same request read by AI Assist's model (ask(system, prompt) → its answer), for an odd or
 // irrational ask the words above don't catch: { why, by: 'model' }, null when it's fine, or
-// { problem } when the model couldn't say (none, too slow, an answer that isn't one), which lets it
-// through: the rules above and the limits still hold.
+// { problem } when there's no model to ask or it didn't answer (too slow, an error), which lets it
+// through: the rules above and the limits still hold. An answer that isn't one of the two it may
+// give (a request can try to talk it into anything) holds it for you.
 export async function screenWith(ask, text, { bot = 'the bot', folders = [], ms = 20000 } = {}) {
   if (!ask) return { problem: 'no model' }
   const system = [
@@ -131,10 +187,11 @@ export async function screenWith(ask, text, { bot = 'the bot', folders = [], ms 
     const s = String(out || '')
     const a = s.indexOf('{')
     const z = s.lastIndexOf('}')
-    const j = a >= 0 && z > a ? JSON.parse(s.slice(a, z + 1)) : null
+    let j = null
+    try { j = a >= 0 && z > a ? JSON.parse(s.slice(a, z + 1)) : null } catch { j = null }
     if (j?.ok === true) return null
     if (j?.ok === false) return { why: String(j.why || 'it looks odd').replace(/\s+/g, ' ').trim().slice(0, 160) || 'it looks odd', by: 'model' }
-    return { problem: 'its answer wasn\'t one' }
+    return { why: 'AI Assist\'s read of it wasn\'t a plain yes or no', by: 'model' }
   } catch (e) { return { problem: e.code === 'no-model' ? 'no model' : String(e.message || e).slice(0, 160) } }
 }
 
@@ -254,6 +311,7 @@ async function sweep(root) {
 // was made, real: each file of the folder as it was then, by size, time and inode). Kept by the desk
 // for its run (never in dir, where its agent works). Throws, saying why, when one can't be copied.
 export async function stage({ folders, dir }) {
+  await fs.promises.chmod(dir, 0o700).catch(() => {})
   await fs.promises.rm(dir, { recursive: true, force: true })
   await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 })
   const parts = []
@@ -277,15 +335,25 @@ export async function stage({ folders, dir }) {
       throw fail(`${f.shown} couldn't be copied for it to work on: ${e.message}`, e.step || 'stage')
     }
   }
+  // (Its top holds its folders' copies and nothing else, and nothing new can be made there: no project
+  // settings of an agent's own, say. Each copy below is the agent's to change.)
+  await fs.promises.chmod(dir, 0o555).catch(() => {})
   return { dir, parts, at: new Date().toISOString() }
 }
 // Its staging copy gone.
 export async function tidy(st) {
-  if (st?.dir) await fs.promises.rm(st.dir, { recursive: true, force: true }).catch(() => {})
+  if (!st?.dir) return
+  await fs.promises.chmod(st.dir, 0o700).catch(() => {})
+  await fs.promises.rm(st.dir, { recursive: true, force: true }).catch(() => {})
 }
 // Staging copies left from before Bridge AI started again, a day old.
 export function sweepOld(root) {
-  try { for (const d of fs.readdirSync(root)) { const p = path.join(root, d); if (Date.now() - fs.statSync(p).mtimeMs > 86400000) fs.rmSync(p, { recursive: true, force: true }) } } catch { /* none */ }
+  try {
+    for (const d of fs.readdirSync(root)) {
+      const p = path.join(root, d)
+      if (Date.now() - fs.statSync(p).mtimeMs > 86400000) { try { fs.chmodSync(p, 0o700) } catch { /* gone */ } fs.rmSync(p, { recursive: true, force: true }) }
+    }
+  } catch { /* none */ }
 }
 
 // ---------- What changed ----------
@@ -303,8 +371,11 @@ export const hashOf = (folders, entries) => sha(JSON.stringify({ folders: folder
 
 // What its agent changed in the staging copy, taken and kept in `into` (a folder of its own, made
 // here): { id, hash, folders, entries, held, refused, diff, files, at }, entries empty when nothing
-// changed. Nothing is made in the real folders here.
-export async function collect(st, { into, by = null }) {
+// changed. Nothing is made in the real folders here. instructions: every bot's instructions file (real
+// paths), a change to which waits for you. checked(kind, path): whether the run's own checks let
+// that path be written ('w') or taken away ('d') in the copy (guardCheck below); a file changed that
+// they never saw is refused, so a check that didn't run never lets anything through.
+export async function collect(st, { into, by = null, instructions = [], checked = null }) {
   const entries = []
   const refused = []
   const blobs = new Map() // hash -> buffer
@@ -321,6 +392,8 @@ export async function collect(st, { into, by = null }) {
     await walk(p.copy, {
       onFile: (rel, full, s) => { after.set(rel, statOf(s)) },
       onOther: (rel, full, s, kind) => { refused.push({ why: kind === 'link' ? 'link' : 'special', file: `${p.shown}/${rel}` }) },
+      // (git's own, by any name: none was left in the copy, so the agent made it.)
+      onGit: (rel) => { refused.push({ why: 'git', file: `${p.shown}/${rel}` }) },
       max: CLONE_FILES,
     })
     const added = []
@@ -361,20 +434,34 @@ export async function collect(st, { into, by = null }) {
     }
     entries.push(...added)
   }
-  // (Each path as it would be made in the real folder: through a link there, or outside it, it's
-  // refused now, not only when it's made.)
+  // (Each path as it would be made in the real folder: through a link there, or outside it, or into
+  // git's own folder by whatever name the file system gives it, it's refused now, not only when it's
+  // made. And each one the run's checks let through, as they said.)
+  const realCopies = await Promise.all(st.parts.map((p) => fs.promises.realpath(p.copy).catch(() => p.copy)))
   for (const e of entries) {
     const p = st.parts[e.part]
     for (const rel of [e.rel, e.from].filter(Boolean)) {
-      try { await placeOf(p.folder, rel) } catch (x) { refused.push({ why: /link/.test(x.message) ? 'link' : 'path', file: `${p.shown}/${rel}`, said: x.message }) }
+      try {
+        const place = await placeOf(p.folder, rel)
+        const up = place.missing.length ? path.dirname(place.missing[0]) : path.dirname(place.full)
+        if (!(await notGitBelow(p.folder, up))) throw fail(`${rel} is in git's own folder`, 'path')
+      } catch (x) { refused.push({ why: /link/.test(x.message) ? 'link' : 'path', file: `${p.shown}/${rel}`, said: x.message }) }
+    }
+    if (checked) {
+      const at = (rel) => path.join(realCopies[e.part], ...rel.split(SEP))
+      const ok = e.op === 'remove' ? checked('d', at(e.rel)) : e.op === 'move' ? checked('d', at(e.from)) && checked('w', at(e.rel)) : checked('w', at(e.rel))
+      if (!ok) refused.push({ why: 'unchecked', file: `${p.shown}/${e.rel}` })
     }
   }
   entries.sort((a, b) => a.part - b.part || a.rel.localeCompare(b.rel))
   const folders = st.parts.map((p) => ({ path: p.folder, shown: p.shown }))
   const id = newId()
-  const change = { id, v: 1, at: new Date().toISOString(), by, folders, entries, held: heldOf(entries), refused, hash: hashOf(folders, entries), nonce: crypto.randomBytes(16).toString('hex'), undoNonce: crypto.randomBytes(16).toString('hex'), state: 'proposed' }
+  const change = { id, v: 1, at: new Date().toISOString(), by, folders, entries, held: heldOf(entries, { folders, instructions }), refused, hash: hashOf(folders, entries), nonce: crypto.randomBytes(16).toString('hex'), undoNonce: crypto.randomBytes(16).toString('hex'), state: 'proposed' }
   if (!entries.length && !refused.length) return { ...change, diff: '', files: [] }
-  change.diff = diffOf(change, (h) => blobs.get(h))
+  // (A change whose diff can't be shown in full waits for you, whoever asked.)
+  const unshown = []
+  change.diff = diffOf(change, (h) => blobs.get(h), unshown)
+  if (unshown.length) change.held.push({ why: 'unshown', files: unshown.slice(0, 20) })
   change.files = filesOf(change)
   await fs.promises.mkdir(path.join(into, id, 'blobs'), { recursive: true, mode: 0o700 })
   for (const [h, buf] of blobs) if (entries.some((e) => e.before?.hash === h || e.after?.hash === h)) await fs.promises.writeFile(path.join(into, id, 'blobs', h), buf, { mode: 0o600 })
@@ -492,26 +579,53 @@ function lineDiff(a, b) {
 const linesOf = (buf) => { const t = buf.toString('utf8'); const l = t.split('\n'); if (l.at(-1) === '') l.pop(); return l }
 const sized = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`)
 // The whole change as a diff to read: each file's, as git shows one (each named with its folder).
-export function diffOf(c, blob) {
+// unshown: each file what it will hold can't be shown of (binary, too long, past where the diff is
+// cut), for the change to wait for you.
+export function diffOf(c, blob, unshown = []) {
   const out = []
-  for (const e of c.entries) {
+  let size = 0
+  for (const [i, e] of c.entries.entries()) {
     const at = `${c.folders[e.part]?.shown}/${e.rel}`
     const from = e.from ? `${c.folders[e.part]?.shown}/${e.from}` : at
-    if (e.op === 'move') { out.push(`rename from ${from}`, `rename to ${at}`, ''); continue }
-    const a = e.before ? blob(e.before.hash) : null
-    const b = e.after ? blob(e.after.hash) : null
-    out.push(`--- ${e.op === 'add' ? '/dev/null' : at}`, `+++ ${e.op === 'remove' ? '/dev/null' : at}`)
-    if ((a && !isText(a)) || (b && !isText(b))) out.push(`Binary file: ${e.op === 'remove' ? `${sized(a.length)} deleted` : e.op === 'add' ? `${sized(b.length)} added` : `${sized(a.length)} → ${sized(b.length)}`}`)
+    const lines = []
+    if (e.op === 'move') lines.push(`rename from ${from}`, `rename to ${at}`)
     else {
-      const la = a ? linesOf(a) : []
-      const lb = b ? linesOf(b) : []
-      if (la.length > DIFF_LINES || lb.length > DIFF_LINES) out.push(`(${la.length} lines → ${lb.length} lines: too long to show here)`)
-      else out.push(...lineDiff(la, lb))
+      const a = e.before ? blob(e.before.hash) : null
+      const b = e.after ? blob(e.after.hash) : null
+      lines.push(`--- ${e.op === 'add' ? '/dev/null' : at}`, `+++ ${e.op === 'remove' ? '/dev/null' : at}`)
+      if ((a && !isText(a)) || (b && !isText(b))) {
+        lines.push(`Binary file: ${e.op === 'remove' ? `${sized(a.length)} deleted` : e.op === 'add' ? `${sized(b.length)} added` : `${sized(a.length)} → ${sized(b.length)}`}`)
+        if (b) unshown.push(at)
+      } else {
+        const la = a ? linesOf(a) : []
+        const lb = b ? linesOf(b) : []
+        if (la.length > DIFF_LINES || lb.length > DIFF_LINES) { lines.push(`(${la.length} lines → ${lb.length} lines: too long to show here)`); if (b) unshown.push(at) } else lines.push(...lineDiff(la, lb))
+      }
     }
-    out.push('')
-    if (out.join('\n').length > DIFF_MAX) { out.push(`(The rest is too long to show here: ${c.entries.length} files in all.)`); break }
+    lines.push('')
+    const text = lines.join('\n')
+    if (size + text.length > DIFF_MAX) {
+      out.push(`(The rest is too long to show here: ${c.entries.length - i} of ${c.entries.length} files.)`)
+      for (const x of c.entries.slice(i)) if (x.after) unshown.push(`${c.folders[x.part]?.shown}/${x.rel}`)
+      break
+    }
+    out.push(text)
+    size += text.length + 1
   }
-  return out.join('\n').slice(0, DIFF_MAX)
+  return out.join('\n')
+}
+
+// ---------- The run's own checks, as they said ----------
+// The hook that checks each path a run writes (botguard.mjs) and its delete_file and move_file
+// (filesmcp.js) each write a line to the run's log for each path they let through: an HMAC, with a
+// key of the run's own that the agent is never given, of what and where ('w' written, 'd' taken
+// away, and the path's real path). collect() takes only what's there; a check that didn't run (a
+// hook that couldn't start, or one your Claude Code's settings turned off) leaves nothing, so
+// nothing of that run is made.
+export const guardLine = (key, kind, p) => crypto.createHmac('sha256', String(key)).update(`${kind}\n${p}`).digest('hex')
+export async function guardCheck(log, key) {
+  const seen = new Set(String(await fs.promises.readFile(log, 'utf8').catch(() => '')).split('\n').filter((l) => /^[0-9a-f]{64}$/.test(l)))
+  return (kind, p) => seen.has(guardLine(key, kind, p))
 }
 
 // ---------- Made, and undone ----------
@@ -571,6 +685,7 @@ async function put(root, place, buf, mode, expect) {
   const dir = path.dirname(place.full)
   const real = await fs.promises.realpath(dir)
   if (real !== root && !real.startsWith(root + path.sep)) throw fail(`${relOf(root, place.full)} isn't inside the folder`, 'path')
+  if (!(await notGitBelow(root, dir))) throw fail(`${relOf(root, place.full)} is in git's own folder`, 'path')
   const tmp = path.join(dir, `.bridge-${crypto.randomBytes(6).toString('hex')}.tmp`)
   const fh = await fs.promises.open(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600)
   try { await fh.writeFile(buf); await fh.sync().catch(() => {}) } finally { await fh.close() }
@@ -637,9 +752,10 @@ async function steps(into, c, list, roots) {
   return { files: [...new Set(plan.map((s) => s.shownAt))] }
 }
 // A change made in the real folders (roots: the bot's write folders now, their real paths), once:
-// approved (true when you approved it; a change that waits for you whoever asks needs that).
+// approved (true when you approved it; a change that waits for you whoever asks needs that, as it did
+// when it was taken or as it would now: instructions, every bot's instructions file now).
 // { files } or throws, saying why; nothing is made unless all of it can be.
-export async function apply(into, id, { roots, approved = false, nonce = null, hash = null }) {
+export async function apply(into, id, { roots, approved = false, nonce = null, hash = null, instructions = [] }) {
   if (busy.has(id)) throw fail('It\'s being made already', 'busy')
   busy.add(id)
   try {
@@ -649,7 +765,7 @@ export async function apply(into, id, { roots, approved = false, nonce = null, h
     if (hashOf(c.folders, c.entries) !== c.hash || (hash && hash !== c.hash)) throw fail('That isn\'t the change that was shown: look at it again', 'hash')
     if (nonce != null && !(typeof nonce === 'string' && nonce.length === c.nonce.length && crypto.timingSafeEqual(Buffer.from(nonce), Buffer.from(c.nonce)))) throw fail('That approval isn\'t this change\'s', 'nonce')
     if (c.refused?.length) throw fail('It was refused, so it can\'t be made', 'refused')
-    const held = heldOf(c.entries)
+    const held = [...(c.held || []), ...heldOf(c.entries, { folders: c.folders, instructions })]
     if (held.length && !approved) throw fail(`It waits for you: ${heldSaid(held)}`, 'held')
     const r = await steps(into, c, stepsOf(c), roots)
     await update(into, id, { state: 'applied', appliedAt: new Date().toISOString(), nonce: null })

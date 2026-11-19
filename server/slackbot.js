@@ -584,6 +584,12 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
         if (typeof meta === 'string') meta = { q: meta }
         return act({ act: 'edit', q: meta.q, user, team, text }, meta.channel ? { channel: meta.channel } : null)
       }
+      if (v.callback_id === 'bb_wapprove') {
+        ack()
+        let meta = {}
+        try { meta = JSON.parse(v.private_metadata) || {} } catch { /* nothing to go on */ }
+        return act({ act: 'wok', q: meta.q, change: meta.change || null, nonce: meta.nonce || null, user, team }, meta.channel ? { channel: meta.channel, thread: meta.thread || null } : null)
+      }
       if (v.callback_id === 'bb_ask') {
         const q = typed(v, 'q', 'text')
         if (!q) return ack({ response_action: 'errors', errors: { q: 'Write a question first' } })
@@ -609,7 +615,9 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       // its reply; Allow Once and Deny for a request held before it started. Its value: the question,
       // the change and that change's own code. Who pressed it is Slack's to say: the desk decides
       // whether that counts.)
-      if (['bb_wok', 'bb_wno', 'bb_sok', 'bb_sno', 'bb_undo'].includes(a.action_id)) { const [q, change, nonce] = String(a.value || '').split(' '); return act({ act: a.action_id.slice(3), q, change: change || null, nonce: nonce || null, user, team }, where) }
+      if (['bb_wno', 'bb_sok', 'bb_sno', 'bb_undo'].includes(a.action_id)) { const [q, change, nonce] = String(a.value || '').split(' '); return act({ act: a.action_id.slice(3), q, change: change || null, nonce: nonce || null, user, team }, where) }
+      // (Approve: first the whole change to look at, for you alone; its own Approve makes it.)
+      if (a.action_id === 'bb_wok') { const [q, change, nonce] = String(a.value || '').split(' '); return approver(p, { q, change: change || null, nonce: nonce || null, user, team }, where) }
       if (a.action_id === 'bb_edit') return editor(p, a.value, user, where)
       // (A bot picked for a question on a shared connection: connhub.js.)
       if (a.action_id === 'bb_pick') { const [key, bot] = String(a.value || '').split(' '); return act({ act: 'pick', key, bot, user, team }, where) }
@@ -634,6 +642,31 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
         }, { waits: 0 })
       } catch (e) { await tell(channel ? { channel, thread } : null, user.id, `Couldn't open the question: ${e.message}`) }
     }
+  }
+  // A change to files' Approve, pressed (in your direct messages or where it was asked): the desk says
+  // whether it's yours to approve and gives the whole change; a modal shows all of it (who asked,
+  // why it waits, every line of its diff) with Approve, which makes it. One too long for Slack to show
+  // whole has no Approve there: Needs You has it. Anyone else is told, privately, that only you can.
+  async function approver(p, a, where) {
+    const r = await act({ act: 'wview', ...a }, where)
+    if (!r?.ok || !r.view) return
+    const v = r.view
+    const head = { type: 'section', text: { type: 'mrkdwn', text: clip(`*${md(v.who)}* asked *${md(v.bot)}* ${md(v.where)} for a change to ${v.files.length === 1 ? '1 file' : `${v.files.length} files`}:\n${v.files.slice(0, 20).map((f) => `• \`${md(f.path)}\`${f.op === 'add' ? ' (new)' : f.op === 'remove' ? ' (deleted)' : f.op === 'move' ? ` (moved from \`${md(f.from)}\`)` : ''}`).join('\n')}${v.files.length > 20 ? `\n…and ${v.files.length - 20} more` : ''}`, 3000) } }
+    const why = v.held ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: clip(`:warning: It waits for you whoever asks: ${md(v.held)}`, 2000) }] }] : []
+    const text = md(v.diff).replace(/```/g, '`​``')
+    const chunks = []
+    for (let i = 0; i < text.length; i += 2800) chunks.push(text.slice(i, i + 2800))
+    const fits = chunks.length <= 90
+    const blocks = [head, ...why, ...(fits ? chunks.map((c) => ({ type: 'section', text: { type: 'mrkdwn', text: `\`\`\`${c}\`\`\`` } })) : [{ type: 'section', text: { type: 'mrkdwn', text: 'Its diff is too long to show here: approve it in Needs You in Bridge AI, which shows all of it.' } }])]
+    try {
+      await call('views.open', {
+        trigger_id: p.trigger_id,
+        view: {
+          type: 'modal', callback_id: 'bb_wapprove', private_metadata: JSON.stringify({ q: v.q, change: v.change, nonce: v.nonce, channel: where?.channel || null, thread: where?.thread || null }),
+          title: { type: 'plain_text', text: 'Approve the change' }, ...(fits ? { submit: { type: 'plain_text', text: 'Approve' } } : {}), close: { type: 'plain_text', text: 'Cancel' }, blocks,
+        },
+      }, { waits: 0 })
+    } catch (e) { await tell(where, a.user.id, `Couldn't show the change: ${e.message}`) }
   }
   // Edit: a modal with the draft in it, to change and send.
   async function editor(p, q, user, where) {
@@ -1038,7 +1071,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     blocks.push({
       type: 'actions', block_id: `bb_${String(it.q).slice(0, 200)}`,
       elements: waits
-        ? [button('bb_wok', 'Approve and send', w.value, 'primary'), button('bb_edit', 'Edit', it.q), button('bb_wno', 'Deny', w.value, 'danger')]
+        ? [button('bb_wok', 'Approve and send', w.value, 'primary'), button('bb_wno', 'Deny', w.value, 'danger')]
         : [
           approve ? button('bb_approve', 'Approve and open a pull request', it.q, 'primary') : button('bb_send', 'Send', it.q, 'primary'),
           button('bb_edit', it.needsOwner ? 'Write the reply' : 'Edit', it.q),

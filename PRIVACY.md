@@ -265,9 +265,10 @@ your default branch. With Suggest, none of that happens until you approve the di
 If you let a bot edit files in its folders (Settings › Bots › Changes › Edits Files in Its Folders),
 its agent edits only a copy of the folders you picked for it, in `~/.bridge-ai/front-desk/writes/`
 (deleted when it's done), with no commands and no network. Bridge AI takes what changed there and
-makes it in your folders itself, on your computer: at once for you and the people you listed, and
-for anyone else once you approve it, from Needs You or your direct messages. What waits for you is
-shown there with its diff. Each change, and the files before and after it, are kept with the bot's
+makes it in your folders itself, on your computer: at once when everyone whose words it worked from
+is you or someone you listed, and otherwise once you approve it, from Needs You or your direct
+messages. What waits for you is shown there with its diff, all of it before you approve; where it
+was asked, only how many files it changes is said until then. Each change, and the files before and after it, are kept with the bot's
 record in `~/.bridge-ai/bots/<bot>/writes/`, readable by you only, for Undo, and deleted with its
 record. A request to such a bot may be read first by AI Assist's model, if you have one, to say
 whether it looks odd; it goes nowhere else for that.

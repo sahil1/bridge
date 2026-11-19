@@ -419,12 +419,11 @@ function ScreenItem({ it, onDone, setNote }) {
 
 // A change to files with a draft: what it changes, who asked, why it waits for you whoever asks, and
 // its diff; made already, Undo.
-function WriteOf({ it, onUndo, busy }) {
+// (whole: the whole diff, fetched when the record's is its start: a change waiting is approved only
+// once all of it is shown.)
+function WriteOf({ it, onUndo, busy, whole = null, onMore = null }) {
   const w = it.write
-  const [whole, setWhole] = useState(null)
   if (!w) return null
-  // (Its diff as the record has it is its start, when it's long: the whole of it, on asking.)
-  const more = () => onDevice(null, `/bots/${encodeURIComponent(it.bot?.id || '')}/writes/${encodeURIComponent(w.id)}`).then((r) => setWhole(r.write?.diff ?? ''), () => {})
   const files = (w.files || []).map((f) => `${f.path}${f.op === 'add' ? ` (${t('new')})` : f.op === 'remove' ? ` (${t('deleted')})` : f.op === 'move' ? ` (${t('moved from {from}', { from: f.from })})` : ''}`)
   const line = w.state === 'waiting' ? t('It changed {files} in its copy. Approve it, and Bridge AI makes the change, then sends the reply.', { files: files.join(', ') })
     : w.state === 'applied' ? t('It changed {files}, without asking you.', { files: files.join(', ') })
@@ -436,7 +435,7 @@ function WriteOf({ it, onUndo, busy }) {
       {(w.held || []).map((h) => <p key={h.why} className="muted small ny-from ny-held"><Icon name="alert" size={11} /> {t('It waits for you whoever asks: {why}', { why: h.said })}</p>)}
       {(w.refused || []).slice(0, 5).map((r, i) => <p key={i} className="muted small ny-from ny-held"><Icon name="alert" size={11} /> {r.file}: {r.said}</p>)}
       {w.diff && <pre className="ny-change" aria-label={t('The diff')}>{whole ?? w.diff}</pre>}
-      {w.diffCut && whole == null && <div className="ny-acts"><button type="button" className="btn small" onClick={more}><Icon name="file" size={12} /> {t('Show the whole diff')}</button></div>}
+      {w.diffCut && whole == null && onMore && <div className="ny-acts"><button type="button" className="btn small" onClick={onMore}><Icon name="file" size={12} /> {t('Show the whole diff')}</button></div>}
       {w.state === 'applied' && onUndo && <div className="ny-acts"><button type="button" className="btn small" disabled={busy} onClick={onUndo}><Icon name="undo" size={12} /> {t('Undo the change')}</button></div>}
     </div>
   )
@@ -504,8 +503,14 @@ function DraftItem({ it, onDone, setNote }) {
   const bot = it.bot?.name || t('Your bot')
   const change = it.change || null
   const approve = change?.mode === 'suggest' && !change.pr?.url
-  // (A change to files waiting on you: Send approves that change, named by its hash, and Discard denies it.)
+  // (A change to files waiting on you: Send approves that change, named by its hash, and Discard denies
+  // it. One whose diff here is cut short has the whole of it fetched, and is approved only once it's
+  // shown.)
   const writes = it.write?.state === 'waiting'
+  const [whole, setWhole] = useState(null)
+  const more = () => onDevice(null, `/bots/${encodeURIComponent(it.bot?.id || '')}/writes/${encodeURIComponent(it.write.id)}`).then((r) => setWhole(r.write?.diff ?? ''), (e) => setProblem(e.message))
+  useEffect(() => { if (writes && it.write.diffCut && whole == null) more() }, [writes, it.write?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const unseen = writes && it.write.diffCut && whole == null
   const from = it.needsOwner ? t('Nothing could answer it: {why}. {name} was told it\'s passed on to you.', { why: it.why || '', name: who })
     : r?.to === 'agent' ? t('Answered by a read-only copy of {agent}\'s conversation.', { agent: r.name })
       : r?.to === 'throwaway' ? t('{bot} answered from what it knows: it reads no folders.', { bot })
@@ -550,12 +555,12 @@ function DraftItem({ it, onDone, setNote }) {
           {change.diff && <pre className="ny-change" aria-label={t('The diff')}>{change.diff}</pre>}
         </>
       )}
-      <WriteOf it={it} onUndo={undo} busy={busy} />
+      <WriteOf it={it} onUndo={undo} busy={busy} whole={whole} onMore={more} />
       {it.ownerAsked && <p className="muted small ny-from"><Icon name="chat" size={11} /> {t('Also in your Slack direct messages: answer it there or here.')}</p>}
       <textarea className="ny-draft" value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(8, Math.max(3, text.split('\n').length + 1))} placeholder={t('Write the reply…')} aria-label={t('Reply to {name}', { name: who })} disabled={busy || limit.busy} />
       {(problem || limit.problem) && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem || limit.problem}</p>}
       <div className="ny-acts">
-        <button type="button" className="btn small primary" disabled={busy || limit.busy || !text.trim()} onClick={() => decide(true)}><Icon name={approve ? 'branch' : writes ? 'check' : 'send'} size={12} /> {busy ? t('Sending…') : approve ? t('Approve and open a pull request') : writes ? t('Approve and Send') : t('Send')}</button>
+        <button type="button" className="btn small primary" disabled={busy || limit.busy || !text.trim() || unseen} onClick={() => decide(true)}><Icon name={approve ? 'branch' : writes ? 'check' : 'send'} size={12} /> {busy ? t('Sending…') : approve ? t('Approve and open a pull request') : writes ? t('Approve and Send') : t('Send')}</button>
         <button type="button" className="btn small" disabled={busy || limit.busy} onClick={() => decide(false)}>{writes ? t('Deny') : t('Discard')}</button>
       </div>
       {it.limit?.phase === 'stopped' && (

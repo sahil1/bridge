@@ -116,6 +116,7 @@ import { makeHubs, RULES } from './connhub.js'
 import { makeBotSetup, patchOf, proposalOf, linesOf, postSaid } from './botsetup.js'
 import * as botMcp from './botmcp.js'
 import * as botAnswer from './botanswer.js'
+import * as botWrite from './botwrite.js'
 import { keepOf } from './trace.js'
 import { makeMcp, connection, MODERN, LEGACY } from './mcpproto.js'
 import * as notify from './notify.js'
@@ -4793,9 +4794,10 @@ async function checkSettings(b, x, req) {
     }
   }
   // The folders it changes files in (botwrite.js): each there, inside your home folder (not the whole
-  // of it), nothing in its real path hidden (a dotfolder, or a link to one), not Bridge AI's own, and
-  // one of, or inside, the folders it reads from (by their real paths). A folder it reads from taken
-  // out takes out the folders it changes in it.
+  // of it), nothing in its real path hidden (a dotfolder, or a link to one), not a place your computer
+  // runs things from (botwrite.js runsFrom: ~/Library, ~/Applications, ~/bin, AppData…), not Bridge
+  // AI's own, and one of, or inside, the folders it reads from (by their real paths). A folder it
+  // reads from taken out takes out the folders it changes in it.
   const realOf = (p) => fs.promises.realpath(p).catch(() => p)
   const readsReal = async (list) => (await Promise.all(list.map((p) => places.resolveDir(p).then(realOf, () => null)))).filter(Boolean)
   if (x.writesTo !== undefined) {
@@ -4810,7 +4812,8 @@ async function checkSettings(b, x, req) {
       const home = await realOf(os.homedir())
       if (real === home || full === os.homedir()) throw new Error('Pick a folder inside your home folder, not the whole of it')
       if (!real.startsWith(home + path.sep)) throw new Error('Pick a folder inside your home folder')
-      if (path.relative(home, real).split(path.sep).some((s) => s.startsWith('.'))) throw new Error('A hidden folder (or a link to one) can\'t be one it changes files in')
+      const runs = botWrite.runsFrom(path.relative(home, real))
+      if (runs) throw new Error(runs.charAt(0).toUpperCase() + runs.slice(1))
       if (await ownFolder(full)) throw new Error('Bridge AI\'s own folder can\'t be one it changes files in')
       if (!reads.some((r) => real === r || real.startsWith(r + path.sep))) throw new Error(`${full.replace(os.homedir(), '~')} isn't one of, or inside, the folders it reads from: add it under Reads From first`)
       const t = full.replace(os.homedir(), '~')

@@ -16,6 +16,7 @@
 // bridge_outbox (outboxmcp.js), its save_file allowed: the one way that run can put a file anywhere. The folder goes once the run has ended (frontdesk.js), and any left from before
 // Bridge AI started again a day later.
 import { spawn } from 'node:child_process'
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { dataFile, writeFileAtomic, HOME, ROOT, NODE } from './paths.js'
@@ -164,10 +165,14 @@ export const configsOf = (bot) => { const have = claudeServers(); return Object.
 // it has none (or none of them is in Claude Code's config any more). What it was given is said back
 // for the record: { dir, servers: [{ name, all, tools, problem }], missing }.
 export const OUTBOX_SERVER = 'bridge_outbox'
-// A run that changes files (write: { root }, its staging copy: botwrite.js) gets Bridge AI's own
-// bridge_files too (filesmcp.js, delete_file and move_file in that copy alone), and settings of its
-// own for Claude Code (settings.json, --settings: agents.js): its PreToolUse hook, botguard.mjs, that
-// checks every path a tool that writes is given, with hooks on whatever your own settings say.
+// A run that changes files (write: { root, parts, files }: its copy, the names of its folders' copies
+// in it, botwrite.js, or a copy of a repository with no parts, botchanges.js) gets settings of its own
+// for Claude Code (settings.json, --settings: agents.js): its PreToolUse hook, botguard.mjs, that
+// checks every path a tool that writes is given, with hooks on whatever your own settings say; and
+// with files, Bridge AI's own bridge_files (filesmcp.js, delete_file and move_file in that copy
+// alone). Both write each path they let through to the run's log (guard.log) with a key of the run's
+// own (BRIDGE_GUARD_KEY in its settings and config, which the agent can't read): { guard: { key,
+// log } } back, for Bridge AI to take only what they saw (botwrite.js guardCheck).
 export const FILES_SERVER = 'bridge_files'
 const sh = (s) => `'${String(s).replace(/'/g, '\'\\\'\'')}'`
 export async function runFolder(bot, { all = false, key, outbox = null, write = null }) {
@@ -195,17 +200,23 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
   // (Its outbox's: this app's Node, on this run's outbox alone.)
   if (outbox) { servers[OUTBOX_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'outboxmcp.js'), outbox], env: { ...NODE.env } }; allow.push(toolName(OUTBOX_SERVER, 'save_file')) }
   let settings = null
+  let guard = null
   if (write?.root) {
-    servers[FILES_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'filesmcp.js'), write.root], env: { ...NODE.env } }
-    allow.push(toolName(FILES_SERVER, 'delete_file'), toolName(FILES_SERVER, 'move_file'))
-    const env = Object.entries(NODE.env).map(([k, v]) => `${k}=${sh(v)} `).join('')
-    const guard = `${env}${sh(NODE.bin)} ${sh(path.join(ROOT, 'server', 'botguard.mjs'))} ${sh(write.root)}`
+    guard = { key: crypto.randomBytes(32).toString('hex'), log: path.join(dir, 'guard.log') }
+    fs.writeFileSync(guard.log, '', { mode: 0o600 })
+    const args = [write.root, ...(write.parts || []).flatMap((p) => ['--part', p]), '--log', guard.log]
+    if (write.files) {
+      servers[FILES_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'filesmcp.js'), ...args], env: { ...NODE.env, BRIDGE_GUARD_KEY: guard.key } }
+      allow.push(toolName(FILES_SERVER, 'delete_file'), toolName(FILES_SERVER, 'move_file'))
+    }
+    const env = Object.entries({ ...NODE.env, BRIDGE_GUARD_KEY: guard.key }).map(([k, v]) => `${k}=${sh(v)} `).join('')
+    const command = `${env}${sh(NODE.bin)} ${[path.join(ROOT, 'server', 'botguard.mjs'), ...args].map(sh).join(' ')}`
     settings = path.join(dir, 'settings.json')
-    writeFileAtomic(settings, JSON.stringify({ disableAllHooks: false, hooks: { PreToolUse: [{ matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command: guard, timeout: 30 }] }] } }, null, 2), { mode: 0o600 })
+    writeFileAtomic(settings, JSON.stringify({ disableAllHooks: false, hooks: { PreToolUse: [{ matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command, timeout: 30 }] }] } }, null, 2), { mode: 0o600 })
   }
   writeFileAtomic(path.join(dir, 'config.json'), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 })
   writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny, ...(settings ? { settings } : {}) }, null, 2), { mode: 0o600 })
-  return { dir, servers: said, missing, ...(settings ? { guard: true } : {}) }
+  return { dir, servers: said, missing, ...(guard ? { guard } : {}) }
 }
 // A run's folder gone (it ended), or every one older than a day (left from before a restart).
 export function drop(dir) { if (dir && path.resolve(dir).startsWith(RUNS + path.sep)) fs.rmSync(dir, { recursive: true, force: true }) }

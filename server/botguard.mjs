@@ -1,21 +1,41 @@
-// Claude Code's PreToolUse hook for a bot's run that changes files (botwrite.js, frontdesk.js): every
-// path a tool that writes is given (Edit, Write, MultiEdit, NotebookEdit) is checked before anything
-// is written, and refused unless it's inside the run's staging copy: an absolute path (or one from the
-// run's folder), no .. in it, git's own files never, no link anywhere on the way, and inside the copy
-// as it really is. Refused: exit 2, why on stderr, which Claude Code gives back to the agent. A tool
-// call it can't read a path from is refused too.
+// Claude Code's PreToolUse hook for a bot's run that changes files (botwrite.js, botchanges.js,
+// frontdesk.js): every path a tool that writes is given (Edit, Write, MultiEdit, NotebookEdit) is
+// checked before anything is written, and refused unless it's inside the run's copy: an absolute path
+// (or one from the run's folder), no .. in it, git's own folder by no name (.git, GIT~1, .git. …), no
+// link anywhere on the way, inside the copy as it really is, and never Claude Code's own project files
+// at its top (.claude/, .mcp.json, and for a copy of folders, anything but those folders' own copies:
+// --part). Refused: exit 2, why on stderr, which Claude Code gives back to the agent. A tool call it
+// can't read a path from is refused too.
+//
+// Each path it lets through is written to the run's log (--log) as an HMAC, with a key of the run's
+// own (BRIDGE_GUARD_KEY, in the run's settings, which the agent is never given): Bridge AI takes only
+// what's there (botwrite.js guardCheck), so a hook that couldn't run lets nothing through.
 //
 // It's a lock of its own, beside Claude Code's permissions (edits allowed in its folder only, anything
 // else refused: agents.js access 'change'), so settings of yours that allow edits anywhere don't let
 // a bot's run write outside its copy; and Bridge AI checks every path again when it takes what
 // changed and when it makes it (botwrite.js). Given to the run in its settings (botmcp.js runFolder),
-// with disableAllHooks off. node botguard.mjs <copy>
+// with disableAllHooks off. node botguard.mjs <copy> [--part <name>]… [--log <file>]
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 
-const root = process.argv[2] ? path.resolve(process.argv[2]) : null
+const argv = process.argv.slice(2)
+const root = argv[0] ? path.resolve(argv[0]) : null
+const parts = []
+let log = null
+for (let i = 1; i < argv.length; i++) {
+  if (argv[i] === '--part' && argv[i + 1]) parts.push(argv[++i])
+  else if (argv[i] === '--log' && argv[i + 1]) log = argv[++i]
+}
+const key = process.env.BRIDGE_GUARD_KEY || ''
 const no = (why) => { process.stderr.write(`Refused: ${why}. You can only change files in your own copy, ${root}.\n`); process.exit(2) }
 const realRoot = (() => { try { return fs.realpathSync(root) } catch { return null } })()
+// (git's own folder by any name a file system gives it, as git refuses them: botwrite.js gitLike.)
+const gitLike = (name) => { const n = String(name || '').toLowerCase().replace(/:.*$/, '').replace(/[. ]+$/, ''); return n === '.git' || /^git~\d+$/.test(n) }
+// (Claude Code's own, at the top of the folder it runs in.)
+const OWN = /^(\.claude|\.mcp\.json|claude\.md|claude\.local\.md)$/i
+const allowed = []
 
 function check(p, cwd) {
   if (typeof p !== 'string' || !p || p.includes('\0')) no('that isn\'t a path')
@@ -26,22 +46,28 @@ function check(p, cwd) {
   const under = [root, realRoot].filter(Boolean).find((r) => norm === r || norm.startsWith(r + path.sep))
   if (!under) no(`${p} is outside your copy`)
   if (norm === under) no(`${p} is your copy's own folder, not a file in it`)
-  if (path.relative(under, norm).split(path.sep).some((x) => x.toLowerCase() === '.git')) no(`${p} is git's own`)
+  const rel = path.relative(under, norm).split(path.sep)
+  if (rel.some(gitLike)) no(`${p} is git's own`)
+  if (OWN.test(rel[0]) && (parts.length || rel[0].toLowerCase() !== 'claude.md')) no(`${p} is Claude Code's own, not part of your copy`)
+  if (parts.length && (rel.length < 2 || !parts.includes(rel[0]))) no(`${p} isn't in a copy of one of your folders (${parts.join(', ')})`)
   // Each part below the copy that's there: a folder, never a link (nor the file itself a link).
   let at = under
-  for (const x of path.relative(under, norm).split(path.sep).filter(Boolean)) {
+  for (const x of rel) {
     at = path.join(at, x)
     let st
     try { st = fs.lstatSync(at) } catch { break }
     if (st.isSymbolicLink()) no(`${path.relative(under, at)} is a link`)
   }
-  // And where it really is, the part that's there followed to its real path.
+  // And where it really is, the part that's there followed to its real path (the system's own, so a
+  // short name is its long one).
   let real = norm
   const rest = []
   for (;;) {
-    try { real = path.join(fs.realpathSync(real), ...rest.reverse()); break } catch { const up = path.dirname(real); if (up === real) break; rest.push(path.basename(real)); real = up }
+    try { real = path.join(fs.realpathSync.native(real), ...rest.reverse()); break } catch { const up = path.dirname(real); if (up === real) break; rest.push(path.basename(real)); real = up }
   }
   if (!realRoot || (real !== realRoot && !real.startsWith(realRoot + path.sep))) no(`${p} is outside your copy`)
+  if (path.relative(realRoot, real).split(path.sep).some(gitLike)) no(`${p} is git's own`)
+  allowed.push(real)
 }
 
 let input = ''
@@ -55,5 +81,9 @@ process.stdin.on('end', () => {
   const paths = [x.file_path, x.notebook_path, x.path, ...(Array.isArray(x.edits) ? x.edits.map((e) => e?.file_path) : [])].filter((v) => v !== undefined)
   if (!paths.length) no(`${j?.tool_name || 'that tool'} wasn't given a path to check`)
   for (const p of paths) check(p, j?.cwd)
+  // (What it let through, for Bridge AI to take: a log it can't write, it lets nothing through.)
+  if (log) {
+    try { fs.appendFileSync(log, allowed.map((p) => `${crypto.createHmac('sha256', key).update(`w\n${p}`).digest('hex')}\n`).join(''), { mode: 0o600 }) } catch { no('its checks couldn\'t be written down') }
+  }
   process.exit(0)
 })
