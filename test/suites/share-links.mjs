@@ -130,6 +130,21 @@ async function viewer(link, opts = {}) {
   await p.goto(link)
   return { ctx, p, errors }
 }
+// Whether this browser opens a name under localhost (a link's address on Bridge AI's relay): WebKit on
+// macOS 15 and before can't look one up, so there the parts that open one are skipped, saying so, as
+// phone-apps does (Chromium opens them everywhere).
+let underLocalhost = null
+const opensUnderLocalhost = async () => {
+  if (underLocalhost) return underLocalhost
+  const ctx = await b.newContext()
+  try { await (await ctx.newPage()).goto(`http://probe.localhost:${hosted.port}/`, { timeout: 15000 }); underLocalhost = { ok: true } } catch (e) { underLocalhost = { ok: false, why: String(e.message).split('\n')[0].slice(0, 80) } } finally { await ctx.close().catch(() => {}) }
+  return underLocalhost
+}
+const hostedPart = async (name, fn) => {
+  const u = await opensUnderLocalhost()
+  if (!u.ok) return skip(name, `${which} can't open a name under localhost here (${u.why})`)
+  return part(name, fn)
+}
 const frameOf = (p, has) => until(async () => { const f = p.frames().find((x) => /\/_c\//.test(x.url())); return f && (await f.locator(has).count()) ? f : null }, 20000, 200)
 // A request as what's shared asks it (c: 1, as share.js marks one from its frame): its status.
 async function asContent(v, id, req) {
@@ -704,7 +719,7 @@ try {
   })
 
   // ---------- Bridge AI's relay, with its share domain ----------
-  await part('Bridge AI\'s relay: a site and an app at addresses of their own', async () => {
+  await hostedPart('Bridge AI\'s relay: a site and an app at addresses of their own', async () => {
     await hk.api('/setup', { name: 'Kim' })
     await hk.api('/account/code', { email: 'kim@example.com' })
     await hk.api('/account/verify', { email: 'kim@example.com', code: await accounts.code('kim@example.com') })
@@ -827,7 +842,7 @@ try {
     ok(sent.status === 200 && (await accounts.mail()).some((m) => m.to === 'bo@example.com' && /kim@example\.com/.test(m.subject)), 'one account using up its codes to an address leaves another\'s', sent)
   })
 
-  await part('Bridge AI\'s relay: an agent\'s app', async () => {
+  await hostedPart('Bridge AI\'s relay: an agent\'s app', async () => {
     const project = path.join(hk.home, 'webapp')
     fs.mkdirSync(project, { recursive: true })
     fs.writeFileSync(path.join(project, 'app.mjs'), APP)
