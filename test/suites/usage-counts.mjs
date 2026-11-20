@@ -14,6 +14,7 @@ import os from 'node:os'
 import path from 'node:path'
 import http from 'node:http'
 import { execFileSync } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
 import { ROOT, TEST, startKit, checks, until, browser, page, shot, freePort } from '../lib/harness.mjs'
 
 const { ok, done } = checks('usage-counts')
@@ -77,8 +78,8 @@ ok([0, 1, 99, 100, 999, 1000, 4999, 5000, 19999, 20000, 90000].map(c.wordRange).
   const script = `
     import fs from 'node:fs'
     import path from 'node:path'
-    const accounts = await import(${JSON.stringify(path.join(ROOT, 'server', 'accounts.js'))})
-    const { viaBridge } = await import(${JSON.stringify(path.join(ROOT, 'server', 'usagesplit.js'))})
+    const accounts = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'server', 'accounts.js')).href)})
+    const { viaBridge } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'server', 'usagesplit.js')).href)})
     const t0 = Date.now() - 3600e3
     const ran = '11111111-2222-4333-8444-555555555555', other = '66666666-7777-4888-8999-000000000000'
     accounts.seenOn(ran, 'claude-default', t0); accounts.seenOn(ran, 'claude-default', t0 + 60e3)
