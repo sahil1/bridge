@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import CopyButton from './CopyButton.jsx'
 import { api, usePoll, fmtRelative } from '../api.js'
+import { More } from './settings/Advanced.jsx'
 import { t, tx } from '../i18n/index.js'
 import { LASTS, LAST_DEFAULT } from '../../shared/shares.js'
 import { where } from './settings/search.js'
@@ -210,7 +211,7 @@ export function SharesList() {
           <ul className="share-list">{done.map(row)}</ul>
         </details>
       )}
-      <p className="muted small">{limitsText(data.limits)}</p>
+      <p className="muted small">{t('Limits on links, devices and password tries.')} <More>{limitsText(data.limits)}</More></p>
       {data.relay && <p className="muted small share-relay-limits">{t('On Bridge AI\'s relay, your links have an allowance apart from your phones\': {window} messages in {hours} hours and {week} a week ({linkWindow} and {linkWeek} for one link), at up to {perSecond} a second.', { hours: data.relay.hours, window: data.relay.window.toLocaleString(), week: data.relay.week.toLocaleString(), linkWindow: data.relay.linkWindow.toLocaleString(), linkWeek: data.relay.linkWeek.toLocaleString(), perSecond: data.relay.perSecond })}</p>}
     </div>
   )

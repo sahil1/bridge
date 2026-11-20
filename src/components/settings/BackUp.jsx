@@ -4,7 +4,7 @@ import { api, apiUrl } from '../../api.js'
 import { download } from '../../download.js'
 import { t } from '../../i18n/index.js'
 import { where } from './search.js'
-import { Advanced } from './Advanced.jsx'
+import { Advanced, More } from './Advanced.jsx'
 import './backup.css'
 
 // Settings › Back Up & Move (server/backup.js): this computer's setup to another computer. Move sends
@@ -196,7 +196,7 @@ export default function BackUp() {
 
   return (
     <div className="bk" data-setting="backup">
-      <p className="st-note small"><Icon name="info" size={13} /><span>{t('One app can\'t be connected from two computers at once (Slack would hand each computer some of its questions), so what comes arrives paused until the computer it came from has stopped its bots.')}</span></p>
+      <p className="st-note small"><Icon name="info" size={13} /><span>{t('Bots arrive paused, until the computer they came from has stopped them.')} <More>{t('One app can\'t be connected from two computers at once (Slack would hand each computer some of its questions), so what comes arrives paused until the computer it came from has stopped its bots.')}</More></span></p>
 
       {s.incoming.length > 0 && (
         <section className="st-sec bk-incoming">
@@ -268,7 +268,7 @@ export default function BackUp() {
         <>
           <section className="st-sec">
             <h4>{t('Back Up to a File')}</h4>
-            <p className="muted small">{t('One file, everything in it sealed with a passphrase you pick (AES-256): without the passphrase nothing in it can be read, and it isn\'t kept anywhere, so keep it somewhere safe.')}</p>
+            <p className="muted small">{t('One file, sealed with a passphrase you pick. Keep the passphrase safe: it isn\'t kept anywhere.')} <More>{t('One file, everything in it sealed with a passphrase you pick (AES-256): without the passphrase nothing in it can be read, and it isn\'t kept anywhere, so keep it somewhere safe.')}</More></p>
             <div className="st-row bk-pass">
               <input type="password" className="st-input" autoComplete="new-password" value={pass.a} onChange={(e) => setPass((p) => ({ ...p, a: e.target.value }))} placeholder={t('Passphrase, {n} characters or more', { n: s.passMin })} aria-label={t('Passphrase')} />
               <input type="password" className="st-input" autoComplete="new-password" value={pass.b} onChange={(e) => setPass((p) => ({ ...p, b: e.target.value }))} placeholder={t('The same again')} aria-label={t('The passphrase again')} />

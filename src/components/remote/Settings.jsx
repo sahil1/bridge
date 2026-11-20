@@ -19,7 +19,7 @@ import { BASE, api, onThisComputer, usePoll } from '../../api.js'
 import { useTrial } from '../../trials.js'
 import { t, locale } from '../../i18n/index.js'
 import { BetaSwitch, useBeta } from '../settings/Beta.jsx'
-import { Needs } from '../settings/Advanced.jsx'
+import { Needs, More as MoreLine } from '../settings/Advanced.jsx'
 import { where } from '../settings/search.js'
 import { ACCESS } from '../../../shared/remote.js'
 import { useRemote, remoteDo } from './remote.js'
@@ -147,7 +147,7 @@ function Password({ access, here, name, refresh }) {
 // Screen Sharing Notifications: on unless turned off here (at this computer only); where they go (the
 // devices that get this computer's notifications, and each linked computer's, which it passes them
 // on to); and, when that's nowhere, saying so with the way to set one up.
-function Notify({ nt, here, name, set }) {
+function Notify({ nt, here, name, set, brief = false }) {
   if (!nt) return null
   const devices = nt.devices || []
   const through = (nt.computers || []).filter((c) => c.devices > 0)
@@ -163,21 +163,21 @@ function Notify({ nt, here, name, set }) {
           <small className="muted">{t('Your other devices are told when this screen is viewed, with Stop and Block This Device.')}</small>
         </span>
       </label>
-      {nt.on && !nowhere && (
+      {!brief && nt.on && !nowhere && (
         <ul className="rs-goes small">
           {devices.length > 0 && <li><Icon name="bell" size={12} /> {t('On this computer: {list}.', { list: devices.map((d) => d.label).join(', ') })}</li>}
           {through.map((c) => <li key={c.id}><Icon name="laptop" size={12} /> {c.devices === 1 ? t('Through {name}: 1 device.', { name: c.name }) : t('Through {name}: {n} devices.', { name: c.name, n: c.devices })}</li>)}
         </ul>
       )}
-      {nt.on && nowhere && (
+      {!brief && nt.on && nowhere && (
         <div className="st-row between rs-nowhere">
           <p className="small"><Icon name="alert" size={12} /> {t('No notification channel is set up on this computer or your other computers, so nobody would be told. Screen Activity and the notice on this computer still say each time.')}</p>
           <button type="button" className="btn small primary" onClick={setUp}>{t('Set Up Notifications')}</button>
         </div>
       )}
-      {!nt.on && <p className="small rs-no"><Icon name="info" size={12} /> {t('Off: your other devices aren\'t told when this screen is viewed. Screen Activity and the notice on this computer still say each time.')}</p>}
-      {!here && <p className="muted small">{t('Turned on and off at {name} itself.', { name })}</p>}
-      <More><p className="muted small">{t('When any device starts viewing this screen, takes control or waits on Ask Here First, your other devices are told, with Stop and Block This Device. Every window of Bridge AI shows it too, while it lasts. The device doing the viewing isn\'t told of its own session.')}</p></More>
+      {!brief && !nt.on && <p className="small rs-no"><Icon name="info" size={12} /> {t('Off: your other devices aren\'t told when this screen is viewed. Screen Activity and the notice on this computer still say each time.')}</p>}
+      {!brief && !here && <p className="muted small">{t('Turned on and off at {name} itself.', { name })}</p>}
+      {!brief && <More><p className="muted small">{t('When any device starts viewing this screen, takes control or waits on Ask Here First, your other devices are told, with Stop and Block This Device. Every window of Bridge AI shows it too, while it lasts. The device doing the viewing isn\'t told of its own session.')}</p></More>}
     </div>
   )
 }
@@ -201,7 +201,7 @@ function RemoteSettings({ c: ctl }) {
     <>
       <section className="st-sec rs-settings" data-setting="remote-screen">
         <h4>{t("This Computer's Screen")}</h4>
-        <p className="muted small">{t('Your other devices can see this screen, and the apps your agents serve here, through their encrypted link. While one does, this screen says so, with Stop, and each time is kept below.')}</p>
+        <p className="muted small">{t('Your other devices can see this screen through their encrypted link. This screen says so, with Stop.')} <MoreLine>{t('Your other devices can see this screen, and the apps your agents serve here, through their encrypted link. While one does, this screen says so, with Stop, and each time is kept below.')}</MoreLine></p>
         {sc.can
           ? <p className="small rs-ok"><Icon name="check" size={12} /> {t('Your other devices can see this screen while Bridge AI is open here.')}</p>
           : <p className="small rs-no"><Icon name="info" size={12} /> {sc.why}</p>}
@@ -339,7 +339,7 @@ export function RemoteAccess() {
       {c.on && data && (
         <section className="st-sec" data-setting="remote-sessions">
           <h4>{t('Screen Activity')}</h4>
-          <p className="muted small">{t('Who connected to this computer, from which device, when, for how long and whether they used control; and each one turned away, and why. Kept on this computer only, the last 200.')}</p>
+          <p className="muted small">{t('Each time a device connected, or was turned away. Kept on this computer, the last 200.')} <MoreLine>{t('Who connected to this computer, from which device, when, for how long and whether they used control; and each one turned away, and why. Kept on this computer only, the last 200.')}</MoreLine></p>
           {c.here ? <Sessions log={data.log} here={c.here} /> : <p className="muted small">{t('Kept at {name} itself: see it there.', { name: data.name })}</p>}
         </section>
       )}
@@ -358,7 +358,7 @@ export function ScreenNotify() {
   return (
     <section className="st-sec">
       <Needs what={t('Remote Screen and Preview')} on={c.on} onTurnOn={c.here ? () => beta.set(true) : null}>
-        <Notify nt={c.data.notify} here={c.here} name={c.data.name} set={set} />
+        <Notify nt={c.data.notify} here={c.here} name={c.data.name} set={set} brief={!c.on} />
       </Needs>
       {err && <p className="error-text small" role="alert">{err}</p>}
     </section>

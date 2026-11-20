@@ -128,7 +128,7 @@ function RoomVoices({ v, m, set, refresh }) {
       <h4>{t('Who Spoke')}</h4>
       <label className="st-check">
         <input type="checkbox" checked={m.roomVoices === true} onChange={(e) => on(e.target.checked)} />
-        <span><b>{t('Tell voices apart in a room')}</b> <span className="muted small">{t('Speaker 1, Speaker 2 and so on, worked out on this computer.')} {t('It uses a small voice model ({model}, {mb} MB, {license}), downloaded the first time.', { model: v.label, mb: v.mb, license: v.license })} <More>{`${t('With your mic only (no call), each line says Speaker 1, Speaker 2 and so on, by voice, worked out on this computer. In a room on a call, the voices on your mic are told apart too, beside the call\'s. Name a speaker once and all their lines take the name.')}${v.live ? '' : ` ${t('On this computer it runs once a meeting ends, so the transcript keeps up while it records.')}`}`}</More></span></span>
+        <span><b>{t('Tell voices apart in a room')}</b> <span className="muted small">{t('Speaker 1, Speaker 2 and so on, worked out on this computer.')} <More>{`${t('It uses a small voice model ({model}, {mb} MB, {license}), downloaded the first time.', { model: v.label, mb: v.mb, license: v.license })} ${t('With your mic only (no call), each line says Speaker 1, Speaker 2 and so on, by voice, worked out on this computer. In a room on a call, the voices on your mic are told apart too, beside the call\'s. Name a speaker once and all their lines take the name.')}${v.live ? '' : ` ${t('On this computer it runs once a meeting ends, so the transcript keeps up while it records.')}`}`}</More></span></span>
       </label>
       <label className="st-check">
         <input type="checkbox" checked={m.callVoices !== false} onChange={(e) => set({ callVoices: e.target.checked })} />
@@ -313,7 +313,7 @@ export default function Meetings({ onOpenAgent }) {
       {answers && (
         <section className="st-sec" data-setting="assist-answers">
           <h4 className="st-wand"><Icon name="wand" size={13} /> {t('Answers in AI Assist')}</h4>
-          <p className="muted small">{t('While a meeting records with AI Assist on, a question raised that has a general or factual answer is answered on a card: from your past meetings, notes, files and meeting memory first, else from what the model knows, which may be out of date.')}</p>
+          <p className="muted small">{t('A question raised while AI Assist is on is answered on a card, from your meetings and files first.')} <More>{t('While a meeting records with AI Assist on, a question raised that has a general or factual answer is answered on a card: from your past meetings, notes, files and meeting memory first, else from what the model knows, which may be out of date.')}</More></p>
           <p className="muted small" data-answers-model>{!models ? ' ' : !notes ? t('No model to answer with yet: sign in to an agent, or add one in {place}.', { place: where('providers') })
             : notes.via === 'local' ? t('The questions, and the past meetings that may answer them, go to {model}, on this computer: they stay here.', { model: notes.label })
               : t('The questions, and the past meetings that may answer them, go to {model} ({provider}) with what AI Assist reads already.', { model: notes.label, provider: notes.provider })}</p>

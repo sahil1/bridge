@@ -139,7 +139,7 @@ function WhatToSend() {
       <SaveNote note={note} />
       <Advanced order={30}>
         <section className="st-sec" data-setting="notify-more">
-          <h4>{t('Notifications')}</h4>
+          <h4>{t('Your Phone and Muted Agents')}</h4>
           <label className="ph-check" title={t('Where the phone shows them: Android and Chrome on a computer, not iPhone. A button only answers if the agent is still asking the same thing; otherwise Bridge AI opens.')}><input type="checkbox" checked={n.actions !== false} onChange={(e) => set('actions', e.target.checked)} /> {t('Answer buttons for simple questions (yes or no, or two short choices)')}</label>
           <label className="ph-check" title={t('Otherwise your phone stays quiet while Bridge AI is in front on this computer, or you typed or clicked in it in the last 2 minutes. This computer\'s own notifications don\'t change.')}><input type="checkbox" checked={!!n.phoneAtComputer} onChange={(e) => set('phoneAtComputer', e.target.checked)} /> {t('Notify my phone even when I\'m at the computer')}</label>
           {muted.length > 0 && (

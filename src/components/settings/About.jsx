@@ -33,7 +33,7 @@ export default function About() {
       <Trials />
       <section className="st-sec" data-setting="privacy">
         <h4>{t('Privacy')}</h4>
-        <p className="muted small">{t('What Bridge AI sends about itself: never what you typed, said or opened.')} <a href={`${REPO}/blob/main/PRIVACY.md`} target="_blank" rel="noreferrer">{t('Privacy')}</a></p>
+        <p className="muted small">{t('What Bridge AI sends about itself: never what you typed, said or opened.')} <a href={`${REPO}/blob/main/PRIVACY.md`} target="_blank" rel="noreferrer">{t('Privacy policy')}</a></p>
         <UsageCounts />
         <CrashReports />
       </section>
