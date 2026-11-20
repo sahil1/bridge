@@ -184,7 +184,7 @@ export default function Dictation() {
         <Needs what={t('Dictation')} on={on} onTurnOn={() => set({ on: true })}>
         <div className="st-dict-opts">
         {mode && status?.edit?.can && (
-          <Needs what={t('Works while Bridge AI is in the background')} on={background || !on} onTurnOn={() => set({ background: true })}>
+          <Needs what={t('dictation from other apps')} on={background || !on} onTurnOn={() => set({ background: true })}>
           <div className="st-dict-opts">
             <label className="st-check dict-edit" data-setting="edit-by-voice"><input type="checkbox" checked={d.edit === true} onChange={async (e) => { const on = e.target.checked; await set({ edit: on }); if (on && !status.paste?.allowed) setAskEdit((n) => n + 1) }} />
               <span><b>{t('Edit by voice')}</b> <span className="muted small">{t('Select text in another app, hold {key} and say what to change.', { key: label })} <More>{t('With text selected in another app, hold {key} and say what to change ("make this shorter", "in Spanish"): the model you pick rewrites it, and it\'s put back in its place.', { key: label })}</More></span></span></label>

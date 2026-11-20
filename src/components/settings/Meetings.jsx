@@ -330,7 +330,7 @@ export default function Meetings({ onOpenAgent }) {
             it off too, and says it's turned back on here. */}
         {calendar && window.bridgeApp?.desktop && (
           <div data-setting="meeting-remind">
-            <Needs what={t('The floating card')} on={card} onTurnOn={() => set({ floatCard: 'meetings' })}>
+            <Needs what={t('the floating card')} on={card} onTurnOn={() => set({ floatCard: 'meetings' })}>
               <label className="st-check">
                 <input type="checkbox" checked={remind} onChange={(e) => set({ remind: e.target.checked })} disabled={!card} />
                 <span><b>{t('Remind me before meetings')}</b> <span className="muted small">{t('The floating card, ten minutes before a meeting with other people, with Join.')} <More>{t('Ten minutes before a meeting with other people, the floating card shows it with Join and what to go in with. Its menu puts it off until a minute before, hides it until the next meeting or turns these reminders off. Never over a screen you share.')}</More></span></span>

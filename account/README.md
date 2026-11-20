@@ -6,7 +6,7 @@ setup never asks for one.
 [worker.js](worker.js) is a Cloudflare Worker at `https://accounts.boldbridge.ai`, run once by the
 project: the account a person signs into with their email, one per email, for the two things Bold
 Bridge runs for them, **Early Access** and **Bridge AI's relay**. [API.md](API.md) is the contract it
-keeps with the relay, Bridge AI (server/account.js, Settings › Account & Devices) and the admin view.
+keeps with the relay, Bridge AI (server/account.js, Settings › Account & Backup › Account) and the admin view.
 
 ## What it does
 
@@ -132,7 +132,7 @@ on, with boldbridge.ai already a zone there, and the account and the domains set
 10. **The admin view**: its binding, as above, and deploy it.
 11. **To point one computer at another accounts service** (a test one, say), put this in that
     computer's `~/.bridge-ai/config.json`: `"account": { "url": "https://accounts.boldbridge.ai", "publicKey": "<the public key>" }`.
-    Settings › Account & Devices appears (Devices gets its Account tab); sign in, ask for Early Access, approve it in the admin view, and
+    Settings › Account & Backup appears (Back Up & Move gets the Account tab beside it); sign in, ask for Early Access, approve it in the admin view, and
     About & Updates says Early Access is on with your account.
 12. **Ship it**: in server/account.js, set `ACCOUNTS_URL = 'https://accounts.boldbridge.ai'` and
     `ACCOUNTS_PUBLIC_KEY` to the public key, with the account's sections in PRIVACY.md and
@@ -142,7 +142,7 @@ on, with boldbridge.ai already a zone there, and the account and the domains set
     widget, for the hostname `boldbridge.ai`, Managed. Its site key goes in the website's form; its
     secret key becomes a Worker secret here (`TURNSTILE_SECRET`); and worker.js then checks the
     form's token (`cf-turnstile-response`) with Turnstile's siteverify before `/v1/request-public`
-    sends a code, refusing one that doesn't pass. Bridge AI's own sign-in (Settings › Account & Devices, which
+    sends a code, refusing one that doesn't pass. Bridge AI's own sign-in (Settings › Account & Backup › Account, which
     calls `/v1/code`) is served by each computer itself, not boldbridge.ai, so it needs a widget
     of its own thought through first; until then it rests on the limits and the rate rule (step 7).
 
@@ -202,7 +202,7 @@ and then.
    computers have that release (the Early Access codes the new key signs are checked there).
 3. **The service signs with the new one**: `OLD_KEYS = "<old>"` in wrangler.toml and deploy, then
    `npx wrangler@4.149.0 secret put SIGNING_KEY -c account/wrangler.toml < ~/.config/bridge-ai/accounts-key-2.pem`.
-   From then on each device's next `GET /v1/me` (within 6 hours, or when Settings › Account & Devices opens)
+   From then on each device's next `GET /v1/me` (within 6 hours, or when Settings › Account & Backup › Account opens)
    gives it a device token, relay token and Early Access code the new key signed.
 4. **The old one goes** once what it signed has ended: relay tokens after 7 days, Early Access codes
    after 30, device tokens after 180 (a device not seen for that long signs in again). Take it out of

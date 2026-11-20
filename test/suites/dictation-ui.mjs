@@ -595,7 +595,7 @@ try {
     const g = await editApp({ ...HELD, platform: 'darwin', background: false, paste: { can: true, via: 'bridgekeys', asks: 'accessibility', allowed: true }, edit: { can: true, via: 'bridgekeys', asks: 'accessibility', on: false } })
     await voice(g.p)
     const gs = await advanced(g.p)
-    const needs = gs.locator('.st-needs-line', { hasText: 'Works while Bridge AI is in the background' })
+    const needs = gs.locator('.st-needs-line', { hasText: 'Needs dictation from other apps on' })
     ok(await gs.locator('.dict-edit').count() === 1 && await gs.locator('.dict-edit').evaluate((e) => !!e.closest('[inert]')) && await needs.isVisible(), 'a Mac, the key from other apps off: Edit by voice greyed, saying it needs that on', await gs.innerText())
     await needs.locator('button', { hasText: 'Turn On' }).click()
     ok(!!(await until(async () => (await kit.api('/settings')).effective?.dictation?.background === true && !(await needs.count()), 4000, 100)), 'and Turn On turns it on, Edit by voice usable')

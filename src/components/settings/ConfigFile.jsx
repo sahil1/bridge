@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import CopyButton from '../CopyButton.jsx'
 import { api, settingsChanged } from '../../api.js'
 import { SaveNote } from './General.jsx'
@@ -14,6 +14,10 @@ export default function ConfigFile({ inline = false }) {
   const [text, setText] = useState('')
   const [note, setNote] = useState(null)
   const [view, setView] = useState(null) // 'effective' | 'defaults'
+  // In About & Updates, as tall as what's in it, so the page scrolls in one place.
+  const box = useRef(null)
+  const grow = (el) => { box.current = el; if (el && inline) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight + 2}px` } }
+  useLayoutEffect(() => { if (inline && box.current) grow(box.current) }) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { api('/settings').then((r) => { setS(r); setText(r.raw) }).catch((e) => setNote({ error: e.message })) }, [])
   // Changed and not saved: the desktop app doesn't update by itself meanwhile (busy.js).
   useBusy('file', !!s && text !== s.raw)
@@ -34,7 +38,7 @@ export default function ConfigFile({ inline = false }) {
         <CopyButton text={s.file} label={t('Copy path')} />
       </div>
       <p className="muted small">{t("Only what you set; the rest comes from the defaults. API keys don't belong here: add them under Model Providers.")} <More>{t('Only what you set goes here; everything else comes from the defaults. Most changes apply right away; {keys} apply after a restart.', { keys: s.restartKeys.join(', ') })}</More></p>
-      <textarea className="st-code" value={text} onChange={(e) => { setText(e.target.value); setNote(null) }} spellCheck={false} rows={16} aria-label="config.json" />
+      <textarea ref={grow} className={`st-code${inline ? ' st-code-grow' : ''}`} value={text} onChange={(e) => { setText(e.target.value); setNote(null) }} spellCheck={false} rows={16} aria-label="config.json" />
       <div className="st-row between">
         <span className={parseError ? 'error-text' : 'muted small'}>{parseError ? t('Not valid yet: {error}', { error: parseError }) : dirty ? t('Valid JSON, not saved') : t('Saved')}</span>
         <span className="st-row">
