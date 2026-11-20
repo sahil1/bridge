@@ -40,17 +40,17 @@
 .bh-test { display: grid; gap: 8px; min-width: 0; }
 .bh-test-row { flex-wrap: wrap; }
 .bh-test-sum { font-weight: 600; }
-.bh-test-sum.ok { color: var(--good); }
-.bh-test-sum.warn { color: var(--warning); }
-.bh-test-sum.fail { color: var(--critical); }
+.bh-test-sum.s-ok { color: var(--good); }
+.bh-test-sum.s-warn { color: var(--warning); }
+.bh-test-sum.s-fail { color: var(--critical); }
 .bh-checks { list-style: none; margin: 0; padding: 8px 10px; display: grid; gap: 6px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane-2); }
 .bh-check { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
 .bh-check > .icon { flex: none; margin-top: 2px; }
-.bh-check.ok > .icon { color: var(--good); }
-.bh-check.warn > .icon { color: var(--warning); }
-.bh-check.fail > .icon { color: var(--critical); }
-.bh-check.skip { opacity: .7; }
-.bh-check.skip > .icon { color: var(--ink-3); }
+.bh-check.s-ok > .icon { color: var(--good); }
+.bh-check.s-warn > .icon { color: var(--warning); }
+.bh-check.s-fail > .icon { color: var(--critical); }
+.bh-check.s-skip { opacity: .7; }
+.bh-check.s-skip > .icon { color: var(--ink-3); }
 .bh-check-text { min-width: 0; overflow-wrap: anywhere; }
 .bh-fix { display: block; margin-top: 2px; color: var(--ink); }
 .bh-you .st-row { flex-wrap: wrap; }

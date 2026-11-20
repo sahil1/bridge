@@ -229,7 +229,8 @@ try {
   // (Its settings closed as sandboxClosed requires, every key kept from its commands, GitHub out,
   // the computer's temporary folders unreadable; settings of yours that would widen it each said; and
   // with the switch off, as Bridge AI ships, nothing of it counts.)
-  await part('the sandbox, kept', async () => {
+  // (Not on Windows, where Claude Code has no sandbox.)
+  if (process.platform !== 'win32') await part('the sandbox, kept', async () => {
     const g = path.join(kit.dir, 'sandbox')
     fs.mkdirSync(path.join(g, 'cwd'), { recursive: true })
     const js = `const bm = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'server', 'botmcp.js')).href)}); const ag = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'server', 'agents.js')).href)});
@@ -393,7 +394,7 @@ await bw.tidy(st);`
   // ---------- A new bot from what it's for and a folder ----------
   await part('quick', async () => {
     const v = await kit.api('/bots/quick', { purpose: 'Answer hiring questions and keep the roles list up to date', folder: '~/notes' })
-    ok(v.name === 'Hiring Bot' && v.settings.readsFrom.join() === '~/notes' && v.settings.writesTo.join() === '~/notes' && v.settings.changes === 'edit' && v.settings.answerIn === 'thread' && v.settings.who === 'named' && v.description.startsWith('Answer hiring questions'), 'a new bot from what it\'s for and a folder: it reads and changes files there, answers in a thread, named people may ask', { name: v.name, settings: v.settings, description: v.description })
+    ok(v.name === 'Hiring Bot' && v.settings.readsFrom.join() === (process.platform === 'win32' ? '~\\notes' : '~/notes') && v.settings.writesTo.join() === (process.platform === 'win32' ? '~\\notes' : '~/notes') && v.settings.changes === 'edit' && v.settings.answerIn === 'thread' && v.settings.who === 'named' && v.description.startsWith('Answer hiring questions'), 'a new bot from what it\'s for and a folder: it reads and changes files there, answers in a thread, named people may ask', { name: v.name, settings: v.settings, description: v.description })
     const bad = await kit.api('/bots/quick', { purpose: 'Anything', folder: '/etc' }).then(() => null, (e) => e)
     ok(bad?.status === 400, 'a folder outside your home folder is refused', bad?.message)
     const none = await kit.api('/bots/quick', { folder: '~/notes' }).then(() => null, (e) => e)

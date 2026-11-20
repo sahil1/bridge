@@ -464,7 +464,7 @@ export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, 
     '----- end of earlier turns -----', '',
   ] : [])
   const busy = agents?.length ? [`What ${you}'s agents are doing now (their names and how they stand, nothing else):`, ...agents.map((a) => `- "${a.name}" (${a.label}) in ${a.folder}: ${a.status}`), ''] : agents ? [`None of ${you}'s agents is working in your folders now.`, ''] : []
-  const said = (m) => `${m.you ? `you (${bot.name}), earlier` : who(m.person)}: ${fence(m.text).replace(/\n+/g, ' ')}`
+  const said = (m) => `${m.you ? `you (${bot.name}), earlier` : who(m.person)}${m.subject ? ' (the message they asked you about)' : ''}: ${fence(m.text).replace(/\n+/g, ' ')}`
   const conversation = (msgs, pins) => {
     if (!msgs.length && !pins.length) return []
     const what = ctx.kind === 'thread' ? (route.followUp ? 'The thread since your last answer' : 'The thread you were called into, before the question') : ctx.kind === 'dm' ? (route.followUp ? 'The direct message since your last answer' : 'The direct message before the question') : scheduled ? 'The channel\'s latest messages from the people who may ask you (nobody else\'s are given to you)' : route.followUp ? `What ${who(q.from)} and you have said in the channel since your last answer (nobody else's messages there are given to you)` : `What ${who(q.from)} and you have said in the channel lately, before the question (nobody else's messages there are given to you)`
@@ -614,7 +614,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       st.convs.set(e.conv, c)
       const had = st.questions.get(e.q)
       if (had) { had.more.push({ person: e.person, text: e.text || '', ts: e.ts, at: e.at, files: e.files || [], ...(e.flags ? { flags: e.flags } : {}) });return }
-      st.questions.set(e.q, { id: e.q, bot: e.bot, conv: e.conv, how: e.how, from: e.person || null, text: e.text || '', channel: e.channel, place: e.place || null, thread: e.thread_ts || null, ts: e.ts, reply: e.reply || null, at: e.asked || e.at, heardAt: e.at, late: !!e.late, migrated: !!e.migrated, state: e.how === 'command' ? 'command' : 'received', more: [], runs: [], files: e.files || [], try: !!e.try, routine: e.routine || null, carried: !!e.carried, ...(e.consult ? { consult: e.consult } : {}), ...(e.how === 'steer' ? { steer: true } : {}), ...((e.consult || e.handed)?.people ? { chiefPeople: (e.consult || e.handed).people } : {}) })
+      st.questions.set(e.q, { id: e.q, bot: e.bot, conv: e.conv, how: e.how, from: e.person || null, text: e.text || '', channel: e.channel, place: e.place || null, thread: e.thread_ts || null, ts: e.ts, reply: e.reply || null, at: e.asked || e.at, heardAt: e.at, late: !!e.late, migrated: !!e.migrated, state: e.how === 'command' ? 'command' : 'received', more: [], runs: [], files: e.files || [], try: !!e.try, routine: e.routine || null, carried: !!e.carried, ...(e.consult ? { consult: e.consult } : {}), ...(e.how === 'steer' ? { steer: true } : {}), ...((e.consult || e.handed)?.people ? { chiefPeople: (e.consult || e.handed).people } : {}), ...(e.about ? { about: e.about } : {}) })
       c.questions.push(e.q)
       return
     }
@@ -1067,7 +1067,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       conv, channel: m.channel, thread_ts: m.thread || null, ts: m.ts, person: { id: m.from?.id || null, name: asker?.name || m.from?.name || null },
       place: m.place || null, how, text: clip(m.text, 4000), asked: m.at || now(), late: !!m.late, reply: m.reply,
       ...(m.files?.length ? { files: m.files.slice(0, 10).map((f) => ({ id: f.id || null, name: clip(f.name, 120), type: f.type || null, size: Number(f.size) || 0 })) } : {}),
-      ...(m.via ? { via: m.via } : {}), ...(m.try ? { try: true } : { platform: m.platform || platOf(m.channel) }), ...(m.routine ? { routine: m.routine } : {}),
+      ...(m.via ? { via: m.via } : {}), ...(m.about && m.via === 'shortcut' ? { about: clip(String(m.about), 40) } : {}), ...(m.try ? { try: true } : { platform: m.platform || platOf(m.channel) }), ...(m.routine ? { routine: m.routine } : {}),
       ...(m.attached?.length ? { notRead: m.attached.slice(0, 10).map((x) => clip(x, 120)) } : {}),
       ...(m.routed?.by ? { routed: m.routed } : {}), ...(goesOn ? { carried: true } : {}),
       ...(m.handed?.by ? { handed: { by: m.handed.by, name: clip(m.handed.name, 80), ...(m.handed.people ? { people: peopleIn(m.handed.people) } : {}) } } : {}),
@@ -3278,6 +3278,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const may = (m) => {
       if (m.you) return !m.as || m.as === bot.name
       if (m.bot === true || /^B[A-Z0-9]{6,}$/.test(String(m.person?.id || ''))) return false
+      // (A shortcut's subject: whoever wrote it, but a guest, another organization or someone unknown.)
+      if (m.subject) return !!m.person?.id && !m.person.guest && !m.person.external && !m.person.unknown
       return !!m.person?.id && !refusal(bot, m.person)
     }
     const mask = (list) => (list || []).map((m) => (may(m) ? m : { ...m, you: false, masked: true, text: MASKED, files: [] }))
@@ -3297,7 +3299,16 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // answer), and its post waits for you unless the bot answers on its own and each of them is someone
   // whose answer goes at once there (goesNow).
   const routineOf = (q) => !!(q.routine || q.how === 'scheduled')
+  // (A message shortcut's question is asked at the message it was used on: that message, its
+  // subject, is read with it, its author counting as anyone's words do, masked as a guest's, another
+  // organization's or an integration's are; and of the rest, as at the top of a channel, only the
+  // asker's own and the bot's own.)
   const ownOnly = (bot, q, ctx) => {
+    if (ctx && q.about) {
+      const keep = (m) => (m.you ? !m.as || m.as === bot.name : String(m.ts) === String(q.about) || (!!q.from?.id && m.person?.id === q.from.id && !m.bot))
+      const mark = (m) => (String(m.ts) === String(q.about) && !m.you ? { ...m, subject: true } : m)
+      return { ...ctx, messages: (ctx.messages || []).filter(keep).map(mark), pins: (ctx.pins || []).filter((m) => m.you || (!!q.from?.id && m.person?.id === q.from.id && !m.bot)) }
+    }
     if (!ctx || ctx.kind !== 'channel') return ctx
     if (routineOf(q)) {
       const kept = (m) => m.you || m.bot === true || /^B[A-Z0-9]{6,}$/.test(String(m.person?.id || '')) || (!!m.person?.id && refusal(bot, m.person) !== 'not-allowed')

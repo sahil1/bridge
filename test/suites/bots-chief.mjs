@@ -53,7 +53,7 @@ try {
     q1 = await slack.ask({ user: 'U0DANA', text: `${M} What's the launch plan? [ask-bot Marketing What is in the plan?] [answer That's the plan.]` })
     const s = await startOf('What\'s the launch plan')
     const brief = briefOf(s)
-    ok(/You're the Chief on Slack for Tester/.test(brief) && /- Marketing: The launch plan and campaigns \(reads ~\/marketing; only the people named may ask it\)/.test(brief) && /- Hiring: Roles and offers/.test(brief), 'Chief\'s session is told it\'s the Chief, with each bot, what it\'s for and its Access line', brief.slice(0, 1500))
+    ok(/You're the Chief on Slack for Tester/.test(brief) && /- Marketing: The launch plan and campaigns \(reads ~[\\/]marketing; only the people named may ask it\)/.test(brief) && /- Hiring: Roles and offers/.test(brief), 'Chief\'s session is told it\'s the Chief, with each bot, what it\'s for and its Access line', brief.slice(0, 1500))
     ok(s?.args.includes('mcp__bridge_session__hand_to') && s.args.includes('mcp__bridge_session__ask_bot'), 'with hand_to and ask_bot', s?.args)
     const m = await until(() => startsOf('What is in the plan?').find((x) => inFolder(x, 'marketing')), 30000)
     ok(!!m && fs.realpathSync(m.cwd) === fs.realpathSync(path.join(kit.home, 'marketing')) && !m.args.includes('mcp__bridge_session__hand_to'), 'Marketing is asked, in its own folder, in a session of its own, with no Chief\'s tools', m && { cwd: m.cwd, args: m.args })

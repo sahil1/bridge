@@ -664,7 +664,7 @@ try {
     fs.writeFileSync(H('roles.md'), '# Roles\n\nDesign\nSales\nOps\n')
     await slack.ask({ user: OWNER.id, thread: q.ts, text: `${M} Hiring: one more [try-read Hiring/roles.md] [edit Hiring/s3.md Three] [answer One more.]` })
     const t = await until(() => logOf('turns.log').find((x) => x.text.includes('one more')), 40000)
-    ok(!!t && fs.realpathSync(t.cwd) === fs.realpathSync(s1.cwd) && /changed in the real folders and are in your copy now: ~\/Hiring\/roles\.md/.test(t.text), 'its next turn is typed into the same session, in the same copy, told ~/Hiring/roles.md changed and is in its copy now', t && { cwd: t.cwd, was: s1?.cwd, text: t.text.slice(0, 600) })
+    ok(!!t && fs.realpathSync(t.cwd) === fs.realpathSync(s1.cwd) && /changed in the real folders and are in your copy now: ~[\\/]Hiring[\\/]roles\.md/.test(t.text), 'its next turn is typed into the same session, in the same copy, told ~/Hiring/roles.md changed and is in its copy now', t && { cwd: t.cwd, was: s1?.cwd, text: t.text.slice(0, 600) })
     await until(() => read(H('s3.md')) === 'Three\n', 40000)
     const r = tries().filter((x) => x.try === 'read' && x.path === 'Hiring/roles.md').at(-1)
     const p2 = events(HI).filter((e) => e.type === 'write.proposed' && (e.files || []).some((f) => /s3\.md$/.test(f.path))).at(-1)

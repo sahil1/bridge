@@ -18,7 +18,7 @@ import './bots-home.css'
 // bot each question went to, and deleting it. One not set up yet shows its app's steps first.
 // Then a shared connection to make on each platform that has none, and Telegram, coming.
 
-export function ConnectionCard({ c, reload, open = null }) {
+export function ConnectionCard({ c, reload, open = null, where = null }) {
   const [note, setNote] = useState(null)
   const [name, setName] = useState(c.name)
   const [sure, setSure] = useState(false)
@@ -60,7 +60,7 @@ export function ConnectionCard({ c, reload, open = null }) {
       {c.catchingUp && <p className="st-note" role="status" data-setting="connection-catching-up"><Icon name="refresh" size={13} /><span>{t('Catching up on what was asked while it was away: {done} of {of}.', { done: c.catchingUp.done || 0, of: c.catchingUp.of || 0 })}</span></p>}
       {!setUp && (
         <div className="bh-setup" data-setting="connection-setup">
-          <Guide key={`${c.id}-guide`} d={d} platform={c.platform} />
+          <Guide key={`${c.id}-guide`} d={d} platform={c.platform} where={where} />
           {appSteps}
         </div>
       )}
@@ -72,7 +72,7 @@ export function ConnectionCard({ c, reload, open = null }) {
         <summary><Icon name="chevron" size={11} />{t('Advanced')}</summary>
         <label className="sb-field cn-rename"><span>{t('Name')}</span><input className="st-input" value={name} maxLength={35} onChange={(e) => setName(e.target.value)} onBlur={() => { if (name.trim() && name.trim() !== c.name) patch({ name: name.trim() }); else setName(c.name) }} aria-label={t('Its name there')} /></label>
         {setUp && appSteps}
-        {setUp && <Guide key={`${c.id}-guide`} d={d} platform={c.platform} />}
+        {setUp && <Guide key={`${c.id}-guide`} d={d} platform={c.platform} where={where} />}
         {c.platform === 'slack' && <Owner d={d} save={save} />}
         {c.platform === 'slack' && <ManifestLink c={c} />}
         {c.shared && c.platform === 'slack' && (

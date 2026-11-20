@@ -718,7 +718,9 @@ function stepsFor(d, p) {
     answered,
   ]
 }
-export function Guide({ d, platform }) {
+// (where: "chat" for the copy in AI Assist's chat, so each on a page has a data-setting of its own.)
+export function Guide({ d, platform, where = null }) {
+  const ds = `${platform}-guide${where ? `-${where}` : ''}`
   const steps = stepsFor(d, platform)
   const n = steps.filter((s) => s.done).length
   const all = n === steps.length
@@ -727,7 +729,7 @@ export function Guide({ d, platform }) {
   const label = platName(platform)
   if (all && !open) {
     return (
-      <p className="small sb-guide-done" data-setting={`${platform}-guide`}>
+      <p className="small sb-guide-done" data-setting={ds}>
         <Icon name="check" size={13} />
         <span>{t('{bot} is set up in {platform}.', { bot: d.name, platform: label })}</span>
         <button type="button" className="link-btn" onClick={() => { setOpen(true); saved(key, 'open') }}>{t('How to set up')}</button>
@@ -735,7 +737,7 @@ export function Guide({ d, platform }) {
     )
   }
   return (
-    <section className="st-sec sb-guide" data-setting={`${platform}-guide`}>
+    <section className="st-sec sb-guide" data-setting={ds}>
       <h4>{t('Set Up in {platform}', { platform: label })}</h4>
       <p className="muted small">{t('{n} of {total} done. Each step ticks itself once it\'s done.', { n, total: steps.length })}</p>
       <ol className="sb-guide-list">

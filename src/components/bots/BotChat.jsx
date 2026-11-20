@@ -298,7 +298,7 @@ function ConnectCard({ d, save, reload, again, platform }) {
         ? <SharedSteps key={via.id} id={via.id} d={d} platform={at} />
         : (
           <>
-            <Guide key={at} d={d} platform={at} />
+            <Guide key={at} d={d} platform={at} where="chat" />
             {s.state !== 'connected' && at === 'slack' && <Connect d={d} reload={reload} />}
             {at === 'slack' && d.state === 'connected' && !d.settings.owner && <Owner d={d} save={save} />}
             {at === 'discord' && (s.state !== 'connected' || !d.settings.owners?.discord) && <DiscordSetup d={d} save={save} reload={reload} again={again} />}
@@ -319,8 +319,8 @@ function SharedSteps({ id, d, platform }) {
     return () => clearInterval(every)
   }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!c) return null
-  if (c.state !== 'connected' || !c.owner) return <ConnectionCard c={c} reload={load} open />
-  return <Guide key={platform} d={d} platform={platform} />
+  if (c.state !== 'connected' || !c.owner) return <ConnectionCard c={c} reload={load} open where="chat" />
+  return <Guide key={platform} d={d} platform={platform} where="chat" />
 }
 
 const EXAMPLES = () => [

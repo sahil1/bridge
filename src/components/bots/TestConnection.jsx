@@ -55,7 +55,7 @@ export default function TestConnection({ c, onDone, status = null, tone = 'ok' }
       <div className={`st-note ${tone} cn-state bh-status-row`} role="status">
         <span className="bh-status-words">
           {status}
-          {sum && !busy && <span className={`bh-test-sum ${sum.state}`}>{sum.text}{last.at ? <span className="muted"> · {ago(last.at)}</span> : null}</span>}
+          {sum && !busy && <span className={`bh-test-sum s-${sum.state}`}>{sum.text}{last.at ? <span className="muted"> · {ago(last.at)}</span> : null}</span>}
         </span>
         <button type="button" className="btn small" disabled={busy || missing} onClick={run} aria-busy={busy}><Icon name={busy ? 'refresh' : 'check'} size={12} className={busy ? 'spin' : ''} /> {busy ? t('Testing…') : t('Test this connection')}</button>
       </div>
@@ -64,7 +64,7 @@ export default function TestConnection({ c, onDone, status = null, tone = 'ok' }
       {shown.length > 0 && (
         <ul className="bh-checks" aria-label={t('What was tested')}>
           {shown.map((x, i) => (
-            <li key={x.id || i} className={`bh-check ${x.state}`} data-check={x.id || i} data-state={x.state}>
+            <li key={x.id || i} className={`bh-check s-${x.state}`} data-check={x.id || i} data-state={x.state}>
               <Icon name={ICON[x.state] || 'info'} size={12} />
               <span className="bh-check-text">
                 <b className="small">{x.label}</b>

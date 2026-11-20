@@ -754,7 +754,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
         ack()
         let meta = {}
         try { meta = JSON.parse(v.private_metadata) || {} } catch { /* nothing to go on */ }
-        return asked({ user, team, channel: meta.channel, thread: meta.thread || meta.ts, text: q })
+        return asked({ user, team, channel: meta.channel, thread: meta.thread || meta.ts, text: q, about: meta.ts || null })
       }
       return ack()
     }
@@ -851,7 +851,8 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   // conversation shows it, then handed over as a mention is, its answer in that post's thread, or in
   // the channel where the bot answers there (the shortcut's in the message's own thread). { ts }
   // back, or why not.
-  async function asked({ user, team, channel, thread = null, text, via = 'shortcut', command = null }) {
+  // about: the message the shortcut was used on (its ts), the question's subject.
+  async function asked({ user, team, channel, thread = null, text, via = 'shortcut', command = null, about = null }) {
     if (!hear || !channel || !USER.test(String(user?.id || ''))) return { error: 'Slack didn\'t say who or where' }
     const dmd = String(channel).startsWith('D')
     let posted
@@ -867,7 +868,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     const place = await placeOf(channel, dmd ? 'im' : null)
     const top = thread || posted.ts
     hear({
-      ts: posted.ts, channel, thread: thread || null, mention: true, dm: dmd, via, ...(command ? { command } : {}),
+      ts: posted.ts, channel, thread: thread || null, mention: true, dm: dmd, via, ...(command ? { command } : {}), ...(about && via === 'shortcut' ? { about: String(about) } : {}),
       from: await person({ user: user.id, user_team: team && team !== kept.team?.id ? team : undefined }),
       text: plainText(text, { bot: kept.bot?.userId, names }),
       place, at: new Date(Number(posted.ts) * 1000).toISOString(), late: false,

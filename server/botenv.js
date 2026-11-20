@@ -42,13 +42,21 @@ const on = (v) => !!v && !/^(0|false|no|off)$/i.test(String(v))
 const COMMON_UPPER = new Set([...COMMON].map((k) => k.toUpperCase()))
 
 // Whether a variable is one this kind of agent starts with.
+// (On Windows, where a bot's agent never runs commands, so nothing it runs can read its environment:
+// all but what holds a key that isn't its own sign-in, and the markers of the session Bridge AI may
+// itself run in. Windows' own and PowerShell's (its module paths and caches, the processor, the
+// profile folders) are more than a list would keep up with, and the terminal that starts the agent
+// (PowerShell, which on a run that changes files first gives up Windows' backup rights: winpriv.js)
+// needs them; a key's name is what's kept out. A name is the same whatever its case: Path is PATH.)
+const KEYLIKE = /KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|CREDENTIAL|AUTH|HEADERS/i
+const MARKERS = /^(HERDR_|TMUX$|CLAUDECODE$|CLAUDE_PID$|CLAUDE_EFFORT$|CLAUDE_CODE_(ENTRYPOINT|CHILD_SESSION|SESSION_ID|SESSION_ATTENDED|BRIDGE_SESSION_ID|MESSAGING_SOCKET|MESSAGING_TOKEN|EXECPATH|SSE_PORT)$)/i
 export function keeps(kind, name, env = {}) {
   const k = String(name)
   if (COMMON.has(k) || /^LC_[A-Z]+$/.test(k)) return true
-  // (On Windows a name is the same whatever its case: Path is PATH.)
   if (IS_WIN && (WINDOWS.has(k.toUpperCase()) || COMMON_UPPER.has(k.toUpperCase()))) return true
-  if (kind === 'claude') return CLAUDE.test(k) || (on(env.CLAUDE_CODE_USE_BEDROCK) && BEDROCK.test(k)) || (on(env.CLAUDE_CODE_USE_VERTEX) && VERTEX.test(k))
-  if (kind === 'codex') return CODEX.test(k)
+  const own = kind === 'claude' ? CLAUDE.test(k) || (on(env.CLAUDE_CODE_USE_BEDROCK) && BEDROCK.test(k)) || (on(env.CLAUDE_CODE_USE_VERTEX) && VERTEX.test(k)) : kind === 'codex' ? CODEX.test(k) : false
+  if (own) return true
+  if (IS_WIN) return !MARKERS.test(k) && !KEYLIKE.test(k) && !CREDENTIALS_SET().has(k.toUpperCase()) && !/^(ANTHROPIC_|OPENAI_|CODEX_|CLAUDE_CONFIG_DIR$)/i.test(k)
   return false
 }
 // The environment, of all given (yours, Bridge AI's, your saved keys, the account's folder), it starts
@@ -73,6 +81,8 @@ const KNOWN = [
   'AZURE_API_KEY', 'AZURE_OPENAI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'CLOUDSDK_AUTH_ACCESS_TOKEN', 'GOOGLE_OAUTH_ACCESS_TOKEN',
 ]
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+let credentialsSet = null
+const CREDENTIALS_SET = () => (credentialsSet ||= new Set(CREDENTIALS.map((x) => x.toUpperCase())))
 export const CREDENTIALS = [...new Set([
   ...KNOWN,
   ...PROVIDERS.flatMap((p) => [...p.fields.filter((f) => f.type === 'secret').map((f) => f.env), ...(p.alsoEnv || []), ...Object.keys(p.aliases || {}).filter((a) => /KEY|TOKEN|SECRET/i.test(a))]),

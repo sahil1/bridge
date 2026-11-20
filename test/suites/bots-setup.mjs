@@ -155,7 +155,7 @@ try {
     const v = await botOf(id)
     ok(!v.draft && fwds(v.settings.readsFrom).join() === '~/code/pricing,~/docs' && v.settings.mcp.join() === 'tracker' && v.settings.limits.day === 20 && v.settings.who === 'named' && !v.settings.askers.length && /Pricing Desk/.test(v.instructions.text), 'made as proposed: its folders, MCP server, limits and instructions; the people named wait until it can find them', v.settings)
     ok(events(id).some((e) => e.type === 'settings.changed' && e.setting === 'created' && e.new?.with === 'AI Assist'), 'its record says it was made with AI Assist')
-    ok(await shown(p, '.bc-connect [data-setting="slack-guide"]'), 'the chat carries on: the steps to connect it, in Slack')
+    ok(await shown(p, '.bc-connect [data-setting="slack-guide-chat"]'), 'the chat carries on: the steps to connect it, in Slack')
     await shot(p, `${tag}bots-setup-created`)
   })
 
