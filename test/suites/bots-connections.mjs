@@ -59,8 +59,20 @@ const kit = await startKit('bots-connections', {
     }
   },
 })
-const { draftOf, startOf, startsOf, briefOf, botOf, events, posted, postedLike } = lookers(kit, slack)
+const { draftOf, startOf, startsOf, briefOf, botOf, events, posted, postedLike, logOf } = lookers(kit, slack)
+// A message typed into the session already going for its conversation (a reply in a thread, the next
+// in a direct message): that session's own start, whose brief says which bot it is.
+const sidOfArgs = (a) => { const i = (a || []).indexOf('--session-id'); return i >= 0 ? a[i + 1] : null }
+const typedInto = (words, ms = 30000) => until(() => { const t = logOf('turns.log').find((x) => x.text.includes(words)); return t ? startsOf('').find((x) => sidOfArgs(x.args) === t.session) || null : null }, ms)
 const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: crashed: ${e.stack}`) } }
+// What's wrong on a phone's screen (phoneFaults), but for what's only scrolled under the tab bar, as
+// anything low on a long page is at first: the page scrolls it out from under, so it isn't a fault.
+const fits = async (p, ...scopes) => {
+  const f = await phoneFaults(p, ...scopes)
+  if (f.covered) f.covered = f.covered.filter((x) => !/ under Sections <nav\.tabbar>$/.test(x))
+  if (!f.covered?.length) delete f.covered
+  return f
+}
 const state = () => slack.state()
 fs.writeFileSync(path.join(kit.home, 'pricing', 'pricing.md'), '# Pricing\n\nEnterprise is $40 a seat, billed yearly.\n')
 fs.writeFileSync(path.join(kit.home, 'docs', 'handbook.md'), '# Handbook\n\nThe style guide is on page 4.\n')
@@ -213,8 +225,8 @@ try {
     ok(p?.thread_ts === named.ts && p.app === 'A1' && p.username === 'Pricing Desk' && p.icon_emoji === ':moneybag:', 'sent through the shared app, as Pricing Desk, with its icon', p)
     await mark(C)
     await slack.ask({ user: 'U0DANA', thread: named.ts, text: 'and with annual billing? [answer $10 a seat.]' })
-    const s = await startOf('with annual billing')
-    ok(/You're Pricing Desk/.test(briefOf(s)) && /goes on from your earlier answers/.test(briefOf(s)), 'a reply in its thread, without a mention: to the bot that answered there', briefOf(s).slice(0, 200))
+    const s = await typedInto('with annual billing')
+    ok(/You're Pricing Desk/.test(briefOf(s)) && String(s?.message || '').includes('what does the team plan cost'), 'a reply in its thread, without a mention: to the bot that answered there, typed into its session', briefOf(s).slice(0, 200))
     ok(!!(await routed(C, (e) => e.why === 'thread' && e.bot === 'b2')), 'by its thread, in the record')
   })
 
@@ -223,11 +235,12 @@ try {
     await mark(C)
     await slack.ask({ user: 'U0DANA', dm: true, text: 'Pricing Desk: is there a discount for nonprofits? [answer Yes, 30%.]' })
     ok(/You're Pricing Desk/.test(briefOf(await startOf('discount for nonprofits'))), 'in a direct message, by its name')
-    await draftOf('discount for nonprofits')
+    // (An answer in a direct message goes at once: nothing waits for you.)
+    ok(!!(await postedLike(/^Yes, 30%\.$/)), 'answered there at once')
     await slack.ask({ user: 'U0DANA', dm: true, text: 'and for schools? [answer Also 30%.]' })
-    ok(/You're Pricing Desk/.test(briefOf(await startOf('and for schools'))), 'then with no name: the bot she asked last')
+    ok(/You're Pricing Desk/.test(briefOf(await typedInto('and for schools'))), 'then with no name: the bot she asked last, in its session')
     ok(!!(await routed(C, (e) => e.why === 'last' && e.bot === 'b2')), 'as the one last used, in the record')
-    await draftOf('and for schools')
+    await postedLike(/^Also 30%\.$/)
     await slack.ask({ user: 'U0DANA', dm: true, text: 'what would Docs Helper say about the travel policy? [answer See page 9.]' })
     ok(/You're Docs Helper/.test(briefOf(await startOf('the travel policy'))), 'unless the words name another bot')
   })
@@ -368,9 +381,8 @@ try {
     const p2 = await until(async () => (await dc.state()).posted.find((x) => /\$12 a seat/.test(x.content)), 20000)
     ok(p2 && !p2.webhook && p2.app === 'D1' && p2.content === '**Pricing Desk:** $12 a seat.' && p2.in_thread === '4002', 'where it may not make webhooks: by the app, the bot\'s name first', p2)
     await dc.say({ user: '2001', dm: true, text: 'Pricing Desk: is there a discount? [answer 10% off.]' })
-    await send(await draftOf('is there a discount?'))
-    const p3 = await until(async () => (await dc.state()).posted.find((x) => /10% off/.test(x.content)), 20000)
-    ok(p3 && !p3.webhook && p3.content === '**Pricing Desk:** 10% off.', 'in a direct message, its name first', p3)
+    const p3 = await until(async () => (await dc.state()).posted.find((x) => /10% off/.test(x.content)), 30000)
+    ok(p3 && !p3.webhook && p3.content === '**Pricing Desk:** 10% off.', 'in a direct message (at once, as any answer there), its name first', p3)
   })
 
   // ---------- Microsoft Teams ----------
@@ -382,9 +394,9 @@ try {
     await tm.endpoint(`http://127.0.0.1:${on.status.listening.port}/api/messages`)
     const r = await tm.say({ user: 'dana', text: 'Docs Helper: where is the handbook? [answer On the wiki.]' })
     ok(r.status === 200 && /You're Docs Helper, Tester's bot in Microsoft Teams/.test(briefOf(await startOf('where is the handbook?'))), 'its name first: Docs Helper')
-    await send(await draftOf('where is the handbook?'))
-    const p = await until(async () => (await tm.state()).posted.find((x) => /On the wiki/.test(x.text || '')), 20000)
-    ok(p?.text === '**Docs Helper:** On the wiki.', 'its answer starts with its name, in bold', p?.text)
+    // (A chat with the bot is a direct message: its answer goes at once.)
+    const p = await until(async () => (await tm.state()).posted.find((x) => /On the wiki/.test(x.text || '')), 30000)
+    ok(p?.text === '**Docs Helper:** On the wiki.', 'its answer, at once in a chat, starts with its name, in bold', p?.text)
   })
 
   // ---------- No token anywhere ----------
@@ -515,7 +527,8 @@ try {
         await p.locator('[data-setting="phone-bots"] .bh-tabs [data-tab="connections"]').click()
         ok(await shown(p, '[data-setting="phone-bots"] [data-setting="bots-connections"] .cn-card'), `${mode}, a phone: More › Bots › Connections`)
         await sleep(400)
-        let faults = await phoneFaults(p, '[data-setting="phone-bots"]')
+        // (What's only scrolled under the tab bar, as anything low on a long page is at first, isn't a fault.)
+        let faults = await fits(p, '[data-setting="phone-bots"]')
         ok(!Object.keys(faults).length, `${mode}, a phone: Connections fits: nothing too small, off the screen or cut short`, faults)
         await shot(p, `${tag}bots-connections-phone-${mode}`)
         const pd = (await kit.api('/bots')).bots.find((x) => x.name === 'Pricing Desk')
@@ -526,7 +539,7 @@ try {
         if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
         ok(!!(await until(async () => /Reached through tester_bot/.test(await textOf(p, '.bp.phone [data-setting="bots-reach"]')), 10000)), `${mode}, a phone: a bot's Settings say how it's reached`)
         await sleep(300)
-        faults = await phoneFaults(p, '.bp.phone [data-setting="bots-reach"]')
+        faults = await fits(p, '.bp.phone [data-setting="bots-reach"]')
         ok(!Object.keys(faults).length, `${mode}, a phone: and it fits`, faults)
         await shot(p, `${tag}bots-connections-phone-bot-${mode}`)
         ok(!errors.length, `${mode}, a phone: no page errors`, errors)

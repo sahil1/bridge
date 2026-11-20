@@ -87,15 +87,12 @@ export default function TestConnection({ c, onDone, status = null, tone = 'ok' }
 function whySaid(r, c) {
   const bot = r.bot?.name || ''
   const app = c.platform === 'teams' ? c.name : `@${c.name}`
-  const ai = r.detail === 'no-chief' ? t('There\'s no Chief on this connection.')
-    : r.detail === 'not-chief' ? t('They may not ask its Chief.')
-    : r.detail === 'no-model' ? t('There\'s no model for AI Assist, so it couldn\'t pick.')
-    : r.detail === 'unsure' ? t('AI Assist couldn\'t tell which from their descriptions.')
-      : r.detail === 'off' ? t('AI Assist doesn\'t pick on this connection.')
-        : r.detail ? t('AI Assist couldn\'t answer: {why}', { why: r.detail }) : ''
-  // (The last rule is the Chief's now; a connection from before had AI Assist's pick and the bot
-  // for when nothing says which.)
-  const n = (k) => (c.rules || []).indexOf(k) + 1 || (c.rules || []).indexOf(k === 'among' || k === 'unsure' ? 'chief' : k) + 1
+  // (Why there was no Chief to take it: connhub.js route() asked's detail.)
+  const ai = r.detail === 'no-chief' ? t('There\'s no Chief on this connection.') : r.detail === 'not-chief' ? t('They may not ask its Chief.') : ''
+  // (Each rule by its place in the connection's order; the one bot they may ask, or asking them
+  // which, comes after the last, the Chief.)
+  const rules = c.rules || []
+  const n = (k) => (k === 'after' ? rules.length + 1 : rules.indexOf(k) + 1)
   switch (r.rule) {
     case 'command': return t('Rule {n}, a command: {command} goes to {bot}.', { n: n('command'), command: r.detail || '', bot })
     case 'default': return t('Rule {n}, the channel\'s bot: everything asked in #{channel} goes to {bot}.', { n: n('default'), channel: r.detail || '', bot })
@@ -104,11 +101,9 @@ function whySaid(r, c) {
     case 'last': return t('Rule {n}, a direct message: {bot} is the bot they asked last.', { n: n('last'), bot })
     case 'listen': return t('{bot} answers in that channel without a mention.', { bot })
     case 'limit': return t('Your answer about {bot}\'s run at its time limit: it goes to {bot}.', { bot })
-    case 'only': return t('Rule {n}: {bot} is the only bot they may ask here.', { n: n('among'), bot })
+    case 'only': return `${ai} ${t('Rule {n}: {bot} is the only bot they may ask here.', { n: n('after'), bot })}`.trim()
     case 'chief': return t('Nothing named a bot, so {bot}, the Chief, takes it: it answers, or hands it to one of its specialists.', { bot })
-    case 'router': return t('Rule {n}: AI Assist picked {bot} from the bots\' descriptions.', { n: n('among'), bot })
-    case 'unsure': return `${ai} ${t('Rule {n}: it goes to {bot}, as you set.', { n: n('unsure'), bot })}`.trim()
-    case 'asked': return `${ai} ${t('Rule {n}: it would ask them which: {bots}.', { n: n('unsure'), bots: (r.asks || []).map((x) => x.name).join(', ') })}`.trim()
+    case 'asked': return `${ai} ${t('Rule {n}: it would ask them which: {bots}.', { n: n('after'), bots: (r.asks || []).map((x) => x.name).join(', ') })}`.trim()
     case 'none': return r.silent ? t('They may ask none of its bots, and each says nothing to anyone else: nothing would be said.') : t('They may ask none of its bots: they\'d get the polite no.')
     case 'help': return t('!help: it would list its bots, and how to ask each.')
     case 'own': return t('Its own connection: every question is {bot}\'s.', { bot })

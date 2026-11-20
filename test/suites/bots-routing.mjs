@@ -260,8 +260,9 @@ try {
         await p.locator('.bh-tabs [data-tab="connections"]').click()
         const conn1 = p.locator(`.bh-card[data-connection="${C}"]`)
         ok(await shown(p, `.bh-card[data-connection="${C}"]`), `${mode}: Connections: tester_bot's card`)
+        // (Pricing Desk its Chief, picked on the card; the others its specialists.)
         const chips = await conn1.locator('[data-setting="connection-bots"] [data-bot]').evaluateAll((l) => l.map((e) => e.dataset.bot))
-        ok(chips.join() === [HI, MK, PD].join(), `${mode}: the three bots it reaches`, chips)
+        ok((await conn1.locator('[data-setting="connection-chief"] select').inputValue()) === PD && chips.join() === [HI, MK].join(), `${mode}: the three bots it reaches: Pricing Desk its Chief, Hiring and Marketing its specialists`, chips)
         await sleep(300)
         await shot(p, `${tag}bots-routing-rules-${mode}`)
         if (mode === 'light') {

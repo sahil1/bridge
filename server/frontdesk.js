@@ -3535,7 +3535,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   }
 
   // ---------- Sessions, for Bots' Sessions ----------
-  const waitingIn = (q) => (q.state === 'draft' && !sending(q) ? { kind: q.write?.state === 'waiting' ? 'write' : 'draft', q: q.id }
+  // (Your own step in's answer is yours already, kept for Post to thread: nothing waits on you, as
+  // it isn't in Needs You either.)
+  const waitingIn = (q) => (q.state === 'draft' && !sending(q) && !q.steer ? { kind: q.write?.state === 'waiting' ? 'write' : 'draft', q: q.id }
     : q.push?.state === 'waiting' ? { kind: 'push', q: q.id }
       : q.state === 'answering' && q.ask ? { kind: 'limit', q: q.id }
         : q.state === 'screened' ? { kind: 'screen', q: q.id } : null)
