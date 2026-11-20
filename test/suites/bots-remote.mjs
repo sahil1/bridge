@@ -24,7 +24,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startRelay, startDiscord, startTeams, checks, until, sleep, browser, page, shot, phoneFaults, phoneNotes, phoneSaw, browserNotice, ROOT, IS_WIN } from '../lib/harness.mjs'
-import { botKit, openBot, askOnce, newBotChat } from '../lib/bots.mjs'
+import { botKit, openBot, askOnce, answerIn, newBotChat } from '../lib/bots.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 
 const { ok, done } = checks('bots-remote')
@@ -243,10 +243,13 @@ try {
     ok(dl?.suggestedFilename() === 'Harbor-Desk.bridge-bot.json' && bundle?.name === 'Harbor Desk' && !leaked(body).length, 'Export: the bot\'s file downloaded to the phone, with no token in it', { name: dl?.suggestedFilename(), bot: bundle?.name, leaked: leaked(body) })
     ok(/Downloading Harbor-Desk\.bridge-bot\.json to this device\./.test(await sec('slack-export').innerText()), 'and says so', await sec('slack-export').innerText())
 
-    // A test session, asked once (Desk keeps no sessions here).
+    // A test session: its session, opened on the phone, answered on Desk.
     const tried = await askOnce(f, 'What do seats cost? [answer Seats are $40 a month.]')
-    const draft = await until(async () => { const x = await tried.locator('.sb-try-draft').innerText().catch(() => ''); return /\$40 a month/.test(x) && x }, 40000)
-    ok(!!draft, 'a test session on the phone: its draft, answered on Desk', draft || await tried.innerText().catch(() => ''))
+    const draft = await until(async () => { const x = await answerIn(tried); return /\$40 a month/.test(x) && x }, 40000)
+    ok(!!draft, 'a test session on the phone: its answer, from Desk', draft || await tried.innerText().catch(() => ''))
+    // (Back to its page from the session: its bot, over the Thread.)
+    if (await f.locator('.bh-sv').count()) await f.locator('.bh-sv-meta .link-btn').first().click()
+    await f.locator('.bp .sb-tabs').first().waitFor({ timeout: 10000 })
 
     // Memory.
     await f.locator('.sb-tabs button', { hasText: 'Memory' }).click()

@@ -629,9 +629,9 @@ try {
     const n0 = (await slack.state()).files.length
     const sec = await askOnce(p, 'The CMU book, tried [attach ~/notes/hiring/CMU_All_Resumes.pdf] [answer Here it is.]')
     const files = await until(async () => (await sec.locator('.sb-files').innerText().catch(() => '')) || null, 30000)
-    ok(/With CMU_All_Resumes\.pdf \(300 KB\)/.test(files || ''), 'a test session, asked once: the attached PDF with its draft, as a made file shows', files)
-    const record = await until(async () => { const t = await sec.innerText(); return /Attached CMU_All_Resumes\.pdf from/.test(t) ? t : null }, 10000)
-    ok(/Attached CMU_All_Resumes\.pdf from ~[\\/]notes[\\/]hiring[\\/]CMU_All_Resumes\.pdf/.test(record || '') && await sec.locator('.bf-made [data-file="CMU_All_Resumes.pdf"] .bf-from').count() === 1, 'and its record: what it attached, from where, with Open and Send to…', record)
+    ok(/With CMU_All_Resumes\.pdf \(300 KB\) from ~[\\/]notes[\\/]hiring[\\/]CMU_All_Resumes\.pdf/.test(files || ''), 'a test session: the attached PDF with its answer, saying where it\'s from', files)
+    const made = await until(() => events('b1').find((e) => e.type === 'files.made' && e.files?.some((f) => f.name === 'CMU_All_Resumes.pdf')), 10000)
+    ok(/~[\\/]notes[\\/]hiring[\\/]CMU_All_Resumes\.pdf/.test(made?.files?.find((f) => f.name === 'CMU_All_Resumes.pdf')?.from || ''), 'and its record: what it attached, from where', made)
     ok((await slack.state()).files.length === n0, 'and nothing went to Slack')
     await shot(p, `${tag}bots-files-try-phone`)
     ok(errors.length === 0, 'no page errors', errors)

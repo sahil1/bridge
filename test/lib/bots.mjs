@@ -106,16 +106,24 @@ export async function openBot(p, { name = null, tab = 'settings', basic = false 
   await p.locator('.bp [data-setting="bot-advanced"] [data-setting="slack-limits"]').waitFor({ timeout: 8000 })
 }
 
-// A question asked once, as its Overview's Start a Test Session asks where the server keeps no
-// sessions: as someone (by name), its answer's section (settings/Bots.jsx TryResult).
+// A question asked from its Overview's Start a Test Session, as someone (by name). Claude Code
+// answering, it's a session of its own, which opens (SessionView): what's given back is its Thread,
+// where its answer shows as a turn's reply (.bh-reply), with the files it made or attached (.sb-files).
+// Answered by Codex or a model (no session), or where the server keeps no sessions: its answer's
+// section under the form (settings/Bots.jsx TryResult, .sb-try-draft).
 export async function askOnce(p, text, { as = null } = {}) {
   await p.locator('.bp .sb-tabs [data-tab="overview"]').click()
   const form = p.locator('.bp [data-setting="bot-test"] [data-setting="test-session"]')
   if (as) await form.locator('select').selectOption({ label: as })
   await form.locator('textarea').fill(text)
   await form.locator('button[type="submit"]').click()
-  return form.locator('[data-setting="slack-try"]')
+  const thread = p.locator('.bh-sv .bh-thread')
+  const once = p.locator('.bp [data-setting="bot-test"] [data-setting="slack-try"]')
+  await until(async () => (await thread.count()) > 0 || (await once.count()) > 0, 20000, 150)
+  return (await thread.count()) ? thread : once
 }
+// What a test session answered (askOnce): its Thread's latest reply, or the one-off answer's draft.
+export const answerIn = (sec) => sec.locator('.bh-turn .bh-reply p, .sb-try-draft').last().innerText({ timeout: 2000 }).catch(() => '')
 
 // AI Assist's chat for a new bot: New bot's Or describe it to AI Assist. form: its form (by name, a
 // template, an import) open in it, as it is by itself with no model, else with Set it up with the form.

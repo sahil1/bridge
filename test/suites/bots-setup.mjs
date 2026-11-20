@@ -298,22 +298,25 @@ try {
 
   // ---------- A test session, as it goes (asked once, where there are no sessions) ----------
   await part('a test session live', async () => {
-    await openBot(p, 'Pricing Desk')
-    await p.locator('.bp-main .sb-tabs [data-tab="overview"]').click()
+    await openBot(p, { name: 'Pricing Desk', tab: 'overview' })
     const form = p.locator('.bp [data-setting="bot-test"] [data-setting="test-session"]')
     await form.locator('textarea').fill('Hi [answer Hello, I\'m Pricing Desk.] [work 6] [peek]')
     await form.locator('button[type="submit"]').click()
-    ok(await shown(p, '[data-setting="slack-try-live"]', 8000), 'asked: the run shows as it goes')
-    const reading = await until(async () => { const tx = await p.locator('[data-setting="slack-try-live"]').innerText().catch(() => ''); return /Reading .*README\.md/.test(tx) ? tx : null }, 10000)
-    ok(!!reading && /\d:\d\d/.test(reading) && /Stop/.test(reading), 'what it\'s reading, the time so far, and Stop', reading)
+    // (Claude Code answering: a session of its own, opened, as any other.)
+    const sv = p.locator('.bh-sv[data-session]')
+    ok(await shown(p, '.bh-sv[data-session] .bh-turns', 15000), 'asked: its session opens, the run showing as it goes')
+    const sid = await sv.getAttribute('data-session').catch(() => null)
+    const reading = await until(async () => { const tx = await p.locator('.bh-sv .bh-doing').innerText().catch(() => ''); return /README\.md/.test(tx) ? tx : null }, 10000)
+    ok(!!reading && await p.locator('[data-setting="session-stop"]').isVisible().catch(() => false), 'what it\'s reading, and Stop', reading)
     await shot(p, `${tag}bots-setup-try-live`)
-    ok(await until(async () => /Hello, I'm Pricing Desk\./.test(await p.locator('.sb-try-draft').innerText().catch(() => '')), 20000), 'its answer there the moment it\'s ready: "Hi" visibly gets a reply')
-    ok(!(await p.locator('[data-setting="slack-try-live"]').count()), 'and the run\'s line gone')
-    await form.locator('textarea').fill('Take your time [work 30]')
-    await form.locator('button[type="submit"]').click()
-    ok(await shown(p, '[data-setting="slack-try-live"] button:has-text("Stop")', 8000), 'a long one: Stop')
-    await p.locator('[data-setting="slack-try-live"] button:has-text("Stop")').click()
-    ok(await until(async () => /Stopped before it answered/.test(await p.locator('.sb-try-out').innerText().catch(() => '')), 15000), 'Stop: stopped, and said')
+    ok(await until(async () => /Hello, I'm Pricing Desk\./.test(await p.locator('.bh-sv .bh-turn .bh-reply').first().innerText().catch(() => '')), 20000), 'its answer there the moment it\'s ready: "Hi" visibly gets a reply')
+    ok(!!(await until(async () => !(await p.locator('[data-setting="session-stop"]').count()), 8000)), 'and its Stop gone')
+    // Its next turn, a long one: Stop, the session kept.
+    const pd = (await kit.api('/bots')).bots.find((x) => x.name === 'Pricing Desk')
+    await kit.api(`/bots/${pd.id}/sessions`, { text: 'Take your time [work 30]', sid })
+    ok(await shown(p, '[data-setting="session-stop"]', 10000), 'a long one: Stop')
+    await p.locator('[data-setting="session-stop"]').click()
+    ok(await until(async () => /Stopped/.test(await p.locator('.bh-sv .bh-turn').last().innerText().catch(() => '')), 15000), 'Stop: stopped, and said')
   })
 
   // ---------- Fallbacks, and a model answering ----------

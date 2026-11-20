@@ -10,8 +10,8 @@
 //   Scheduled posts through Routines: run by hand and at their time, posted at the top of the
 //   channel, waiting for you first unless it may go without asking. Answering without a mention in
 //   a channel you pick: people who may ask are answered, anyone else and what isn't for it left
-//   alone. Back after being away: what was missed (a DM, a mention, a reply in its thread) answered
-//   oldest first. Settings › Bots, Channels and Scheduled Posts, in light and dark.
+//   alone. Back after being away: what was missed (a DM, a mention, a reply in its thread) answered,
+//   its direct messages and the threads it's in first, then its channels, each oldest first. Settings › Bots, Channels and Scheduled Posts, in light and dark.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync, spawn } from 'node:child_process'
@@ -149,9 +149,11 @@ try {
     await sleep(30)
     await slack.ask({ user: 'U0DANA', thread: listened.ts, text: 'Third, in its thread [answer Three.]' })
     await slack.back()
-    for (const w of ['First, in a DM', 'Second, a mention', 'Third, in its thread']) await mac.draftOf(w, 60000)
+    // (The DM's answer goes at once; the others wait for you.)
+    ok(!!(await until(async () => (await slack.state()).posted.some((x) => x.channel === 'D0DANA' && /One\./.test(x.text || '')), 60000)), 'the DM answered at once')
+    for (const w of ['Second, a mention', 'Third, in its thread']) await mac.draftOf(w, 60000)
     const got = mac.events().filter((e) => e.type === 'received' && /^(First, in a DM|Second, a mention|Third, in its thread)/.test(e.text || ''))
-    ok(got.map((e) => e.text.split(',')[0]).join() === 'First,Second,Third' && got.every((e) => e.late) && got.map((e) => e.how).join() === 'dm,mention,follow-up', 'back after being away: a DM, a mention and a reply in its thread, each answered, oldest first', got.map((e) => [e.text.slice(0, 20), e.how, e.late]))
+    ok(got.map((e) => e.text.split(',')[0]).join() === 'First,Third,Second' && got.every((e) => e.late) && got.map((e) => e.how).join() === 'dm,follow-up,mention', 'back after being away: a DM, a mention and a reply in its thread, each answered: its direct messages and threads first (oldest first), then its channels', got.map((e) => [e.text.slice(0, 20), e.how, e.late]))
   })
 
   // ---------- A post with a time of its own ----------
