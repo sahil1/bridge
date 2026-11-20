@@ -46,6 +46,10 @@
 .update-row { font-weight: 600; }
 .status-list .update-wrap { position: static; display: grid; }
 .status-list .update-pop { position: static; width: auto; margin: 2px 4px 6px; box-shadow: none; animation: none; background: var(--pane-2); }
+/* The row's card opens under it: its arrow turns to point there. */
+.status-list .update-wrap > .status-row .status-go { transition: transform .12s; }
+.status-list .update-wrap > .status-row[aria-expanded="true"] .status-go { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .status-list .update-wrap > .status-row .status-go { transition: none; } }
 .status-list .top-note { min-height: 40px; padding: 6px 10px; border-radius: 8px; }
 .status-list .top-note:hover { background: var(--pane-2); }
 .status-list .top-note-text, .status-list .setup-chip-word { flex: 1; min-width: 0; white-space: normal; }
