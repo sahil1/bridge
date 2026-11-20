@@ -85,8 +85,52 @@ export function checks(name) {
     return false
   }
   const skip = (what, why) => { st.skip++; console.log(`SKIP ${what}: ${why}`) }
-  const done = () => { console.log(`${name}: ${st.pass} passed, ${st.fail} failed${st.skip ? `, ${st.skip} skipped` : ''}`); return st }
+  const done = () => {
+    for (const { kit, host, from } of reachedGitHub()) ok(false, `no test's server reaches GitHub: ${host}, asked by ${from || 'a program'} in test/.out/kits/${kit} (give it a stand-in)`)
+    console.log(`${name}: ${st.pass} passed, ${st.fail} failed${st.skip ? `, ${st.skip} skipped` : ''}`)
+    return st
+  }
   return { ok, skip, done, st }
+}
+// What a kit's server, or a program it started, asked of GitHub (stand-ins/no-github.mjs turned each
+// away and wrote it down): each once.
+const githubLogs = new Map() // kit name -> its log
+const githubSeen = new Set()
+function reachedGitHub() {
+  const out = []
+  for (const [kit, log] of githubLogs) {
+    let lines = []
+    try { lines = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean) } catch { /* none asked */ }
+    for (const line of lines) {
+      const [host, from] = line.split('\t')
+      const said = `${kit} ${host}`
+      if (githubSeen.has(said)) continue
+      githubSeen.add(said)
+      out.push({ kit, host, from: from ? path.relative(ROOT, from) : '' })
+    }
+  }
+  return out
+}
+
+// GitHub's releases, stood in for: server/updates.js asks them for a newer version, and here this
+// version is the newest, so a test's Bridge AI is up to date unless its test gives a stand-in of its
+// own (BRIDGE_RELEASES_API). Answered at once on every system: the real GitHub took up to the check's
+// 8 s (perf in WebKit, 20 Nov), and a closed port takes Windows two seconds to refuse.
+let releases = null
+function releasesStandIn() {
+  releases ||= new Promise((resolve, reject) => {
+    const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
+    const release = { tag_name: `v${version}`, name: `v${version}`, html_url: `https://github.com/sahil1/bridge/releases/tag/v${version}`, body: '', draft: false, prerelease: false }
+    const s = http.createServer((req, res) => {
+      const p = new URL(req.url, 'http://x').pathname
+      const json = p.endsWith('/releases/latest') ? release : p.endsWith('/releases') ? [release] : null
+      res.writeHead(json ? 200 : 404, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(json || { message: 'Not Found' }))
+    })
+    s.on('error', reject)
+    s.listen(0, '127.0.0.1', () => { s.unref(); resolve(`http://127.0.0.1:${s.address().port}/repos/sahil1/bridge/releases/latest`) })
+  })
+  return releases
 }
 
 // The folders a test's server may find programs in: the stand-ins first, then the system's own.
@@ -192,6 +236,11 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     BRIDGE_COUNTS_URL: '', BRIDGE_CRASHES_URL: '', BRIDGE_HOSTED_URL: '', BRIDGE_ACCOUNTS_URL: '', BRIDGE_ACCOUNTS_KEY: '',
     // Nor GitHub for a release's phone page (relaycheck.js): a test gives a stand-in, or there's none.
     BRIDGE_RELAY_SOURCE: 'http://127.0.0.1:9',
+    // Nor for the update check: GitHub's releases stood in for, with this version the newest. And
+    // whatever else would reach GitHub is turned away and fails the suite (stand-ins/no-github.mjs,
+    // loaded below; reachedGitHub).
+    BRIDGE_RELEASES_API: await releasesStandIn(),
+    BRIDGE_TEST_GITHUB_LOG: path.join(dir, 'github.log'),
     BRIDGE_FIX_DRYRUN: '1', LANG: 'en_US.UTF-8', TMPDIR: os.tmpdir(), USER: os.userInfo().username,
     BRIDGE_SUMMARY_RETRY_MS: '4000', BRIDGE_MODEL_RETRY_MS: '200',
     // No test ever runs a real installer or downloads Node.js: a stand-in installer runs instead
@@ -234,11 +283,14 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   else base.BRIDGE_SHELL = base.SHELL = '/bin/sh'
   const log = fs.openSync(path.join(dir, 'server.log'), 'w')
   const more = typeof env === 'function' ? env({ bin, data, home, PATH }) : env
+  // GitHub turned away (stand-ins/no-github.mjs), before what the test loads itself.
+  const NODE_OPTIONS = [`--import=${pathToFileURL(path.join(TEST, 'stand-ins', 'no-github.mjs')).href}`, more.NODE_OPTIONS].filter(Boolean).join(' ')
+  githubLogs.set(`${name}-${port}`, more.BRIDGE_TEST_GITHUB_LOG || base.BRIDGE_TEST_GITHUB_LOG)
   const url = `http://127.0.0.1:${port}`
   KITS.set(port, { data: more.BRIDGE_HOME || data, key: null })
   let server = null
   const run = async () => {
-    server = spawn(node, [path.join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...base, ...more }, stdio: ['ignore', log, log] })
+    server = spawn(node, [path.join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...base, ...more, NODE_OPTIONS }, stdio: ['ignore', log, log] })
     const up = await until(async () => (await fetch(`${url}/api/config`)).ok, 60000, 250)
     if (!up) { stopTree(server); throw new Error(`the server didn't start on ${port}: ${fs.readFileSync(path.join(dir, 'server.log'), 'utf8').slice(-1500)}`) }
     for (const ctx of contexts) await letIn(ctx)
