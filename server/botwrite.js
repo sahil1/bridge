@@ -42,6 +42,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFile, execFileSync } from 'node:child_process'
 import { gitReady, gitNothing } from './gitready.js'
+import { dropBackupRights } from './winpriv.js'
 
 export const MAX_FILES = 20 // more files than this in one change: it waits for you
 export const LARGE = 1024 * 1024 // more than this, in one file or all told: it waits for you
@@ -343,13 +344,23 @@ async function sweep(root) {
 // Windows a folder's read-only mark doesn't stop anything being made in it, so the same is said in
 // its access list: nobody may add a file or a folder to it (add-file and add-subfolder denied to
 // everyone, on that folder alone, not inherited by the copies in it, which stay the agent's to
-// change); one that can't be set means no copy (it throws).
+// change); one that can't be set means no copy (it throws). An access list holds only for a program
+// without Windows' backup and restore rights on, which pass any (Node opens every file so): they're
+// taken out of Bridge AI's token first (winpriv.js), and then it's tried, a file made there as an
+// agent would make one; one that's made means no copy, saying why.
 const ICACLS = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe')
 const EVERYONE = '*S-1-1-0'
 async function lockTop(dir) {
   if (process.platform !== 'win32') return fs.promises.chmod(dir, 0o555).catch(() => {})
+  const rights = await dropBackupRights()
   const r = await run(ICACLS, [dir, '/deny', `${EVERYONE}:(WD,AD)`], { timeout: 30000 })
   if (!r.ok) throw fail(`Its copy's folder couldn't be set so nothing new can be made in it: ${firstLine(r.err || r.out) || 'icacls said no'}`, 'stage')
+  const probe = path.join(dir, `.bridge-probe-${crypto.randomBytes(6).toString('hex')}`)
+  const made = await fs.promises.open(probe, 'wx').then((h) => h.close().then(() => true), () => false)
+  if (made) {
+    await fs.promises.rm(probe, { force: true }).catch(() => {})
+    throw fail(`Its copy's folder couldn't be closed to anything new: a program running as you can still make files in it${rights.ok ? '' : ` (Windows' backup and restore rights are on for Bridge AI, and couldn't be taken out: ${rights.said})`}`, 'stage')
+  }
 }
 async function unlockTop(dir) {
   if (process.platform !== 'win32') return fs.promises.chmod(dir, 0o700).catch(() => {})
