@@ -2,38 +2,38 @@ import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { Bot } from '../settings/Bots.jsx'
 import BotChat from './BotChat.jsx'
-import { Connections } from './Connections.jsx'
-import Overview from './Overview.jsx'
-import Routing from './Routing.jsx'
+import BotOverview from './BotOverview.jsx'
+import BotsHome from './BotsHome.jsx'
 import { BotDot } from './RailBots.jsx'
-import { useBots, statusOf, STATUS, refreshBots } from './bots.js'
+import { useBots, statusOf, refreshBots, botPlace, botView, BOTS_VIEW } from './bots.js'
 import { t } from '../../i18n/index.js'
 import './bots-page.css'
 
-// A bot as a page of its own in the main area (view:bot:<id>, from the sidebar's Bots, Settings ›
-// Bots or the phone's More › Bots), the same bot as Settings shows: its name and how it stands, its
-// tabs (Set Up, Try It, Memory, Activity), and AI Assist's chat beside them (BotChat.jsx), to set it
-// up or change it in words. A draft is its chat alone, with what AI Assist proposed and Create; a new
-// one (view:bot:new) a chat that asks what it should do. On a phone the chat takes the page while
-// it's open. phone: laid out for a phone. onOpen(id, { replace }): another bot's page (the draft just
-// made, in this tab). onGone: it was deleted. view:bot:connections is Connections (Connections.jsx),
-// the apps your bots are reached through; view:bot:overview the Bots overview (Overview.jsx), each
-// connection, its routing and its bots in one picture; view:bot:routing:<connection> a shared
-// connection's Routing (Routing.jsx), with Try a Message.
-export default function BotPage({ id, phone = false, onOpen, onGone }) {
+// Bots' pages in the main area, each in a tab of its own (App.jsx), in one module that loads when
+// the first of them opens: Bots itself (BotsHome.jsx: Connections, Bots, Sessions), a session
+// (SessionView.jsx: its Thread and Live), and a bot's page here (view:bot:<id>, from Bots, Needs You,
+// a session or the phone's More › Bots): its name and how it stands, its tabs (Overview, Settings,
+// Memory, Activity), and AI Assist's chat beside them (BotChat.jsx), to set it up or change it in
+// words. A draft is its chat alone, with what AI Assist proposed and Create; a new one (view:bot:new)
+// a chat that asks what it should do. On a phone the chat takes the page while it's open.
+// onOpen(id, { replace }): another bot's page (the draft just made, in this tab). onGone: it was
+// deleted. A page Bots had before its tabs (the overview, Connections, a connection's Routing) is
+// Bots at the tab that has it now (App.jsx moves it before it shows; here too, in case).
+export { default as BotsHome } from './BotsHome.jsx'
+export { default as SessionView } from './SessionView.jsx'
+
+export default function BotPage({ id, phone = false, onOpen, onGone, onTab }) {
   const { on, list } = useBots()
   const b = list?.find((x) => x.id === id)
+  const moved = botPlace(botView(id))
   // (A bot just made isn't in the list as it last came: that's asked for again, once, before it's
   // called gone; until then, and until the list first comes, its page waits, so a draft is never
   // shown as a made bot.)
-  const routing = String(id).startsWith('routing:') ? String(id).slice(8) : null
-  const own = id !== 'connections' && id !== 'new' && id !== 'overview' && !routing
+  const own = id !== 'new' && moved === botView(id)
   const [asked, setAsked] = useState(null) // { id, list }: the list it wasn't in
   useEffect(() => { if (own && list && !b && asked?.id !== id) { setAsked({ id, list }); refreshBots() } }, [own, id, list, b, asked])
   const waiting = own && on && (!list || (!b && (asked?.id !== id || asked.list === list)))
-  if (id === 'connections') return <div className={`bp bp-conns${phone ? ' phone' : ''}`}><div className="bp-main sb"><Connections page phone={phone} /></div></div>
-  if (id === 'overview') return <div className={`bp bp-over${phone ? ' phone' : ''}`}><div className="bp-main sb"><Overview phone={phone} /></div></div>
-  if (routing) return <div className={`bp bp-routing${phone ? ' phone' : ''}`}><div className="bp-main sb"><Routing key={routing} cid={routing} phone={phone} /></div></div>
+  if (moved !== botView(id)) return <BotsHome tab={moved.slice(BOTS_VIEW.length)} phone={phone} onTab={(x) => onTab?.(x)} />
   if (id === 'new') return <div className={`bp bp-new${phone ? ' phone' : ''}`}><BotChat id={null} phone={phone} onMade={(bid) => { refreshBots(); onOpen(bid, { replace: true }) }} /></div>
   if (waiting) return <div className={`bp${phone ? ' phone' : ''}`}><div className="skeleton-rows"><div /><div /><div /></div></div>
   if (list && !b) {
@@ -57,55 +57,9 @@ export default function BotPage({ id, phone = false, onOpen, onGone }) {
   }
   return (
     <div className={`bp${phone ? ' phone' : ''}`}>
-      <Bot key={id} id={id} page phone={phone} status={b ? statusOf(b) : null} onChanged={refreshBots} onGone={() => { refreshBots(); onGone?.() }}
+      <Bot key={id} id={id} phone={phone} status={b ? statusOf(b) : null} onChanged={refreshBots} onGone={() => { refreshBots(); onGone?.() }}
+        overview={(ctx) => <BotOverview {...ctx} />}
         assist={(ctx) => <BotChat id={id} phone={phone} {...ctx} />} />
-    </div>
-  )
-}
-
-// The phone's More › Bots: your bots as the computer's sidebar lists them, a whole row each with how
-// it stands, and New bot, which opens AI Assist's chat; the overview, and Connections.
-export function PhoneBots({ onOpen }) {
-  const { list, error } = useBots()
-  return (
-    <div className="m-stack m-more bt-phone" data-setting="phone-bots">
-      <ul className="m-more-list" aria-label={t('Your bots')}>
-        <li>
-          <button type="button" className="m-more-row" data-id="overview" onClick={() => onOpen('overview')}>
-            <span className="m-more-ico"><Icon name="grid" size={17} /></span>
-            <span className="m-more-text"><b>{t('Overview')}</b><span>{t('Each connection, its routing and its bots, at a glance')}</span></span>
-            <Icon name="chevron" size={13} className="muted" />
-          </button>
-        </li>
-        <li>
-          <button type="button" className="m-more-row" data-id="new-bot" onClick={() => onOpen('new')}>
-            <span className="m-more-ico"><Icon name="plus" size={17} /></span>
-            <span className="m-more-text"><b>{t('New bot')}</b><span>{t('Say what it should do, and who it\'s for: AI Assist sets it up')}</span></span>
-            <Icon name="chevron" size={13} className="muted" />
-          </button>
-        </li>
-        <li>
-          <button type="button" className="m-more-row" data-id="connections" onClick={() => onOpen('connections')}>
-            <span className="m-more-ico"><Icon name="link" size={17} /></span>
-            <span className="m-more-text"><b>{t('Connections')}</b><span>{t('The apps on Slack, Discord and Teams your bots are reached through')}</span></span>
-            <Icon name="chevron" size={13} className="muted" />
-          </button>
-        </li>
-        {(list || []).map((b) => {
-          const st = statusOf(b)
-          return (
-            <li key={b.id}>
-              <button type="button" className="m-more-row" data-id={b.id} onClick={() => onOpen(b.id)}>
-                <span className="m-more-ico"><BotDot status={st} size={10} /></span>
-                <span className="m-more-text"><b>{b.name}</b><span>{t(STATUS[st])}{b.waiting > 0 ? ` · ${b.waiting === 1 ? t('{n} waits for you', { n: b.waiting }) : t('{n} wait for you', { n: b.waiting })}` : ''}</span></span>
-                <Icon name="chevron" size={13} className="muted" />
-              </button>
-            </li>
-          )
-        })}
-      </ul>
-      {!list && !error && <div className="skeleton-rows pad"><div /><div /></div>}
-      {error && <p className="error-text small" role="alert">{error}</p>}
     </div>
   )
 }

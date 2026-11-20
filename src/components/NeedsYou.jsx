@@ -378,7 +378,59 @@ const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', 
 // a change to files with a draft shows in it, with Approve and Send or Deny while it waits, and Undo
 // once it's made.
 export function SlackItem(props) {
-  return props.it.state === 'screened' ? <ScreenItem {...props} /> : props.it.limit?.phase === 'asking' ? <LimitItem {...props} /> : <DraftItem {...props} />
+  return props.it.kind === 'push' || props.it.push?.state === 'waiting' ? <PushItem {...props} /> : props.it.state === 'screened' ? <ScreenItem {...props} /> : props.it.limit?.phase === 'asking' ? <LimitItem {...props} /> : <DraftItem {...props} />
+}
+
+// The bot a card is from, which opens its session (Bots › Sessions) or, with none, its page; in the
+// session's own Thread, just its name.
+function BotLink({ it, bot }) {
+  const sid = it.session?.id || (typeof it.session === 'string' ? it.session : null) || it.sid || null
+  if (it.inSession || (!sid && !it.bot?.id)) return <span className="ny-device here"><Icon name="chat" size={11} />{bot}</span>
+  const open = () => window.dispatchEvent(sid ? new CustomEvent('bridge-open-bots', { detail: { session: sid } }) : new CustomEvent('bridge-open-bot', { detail: { id: it.bot.id } }))
+  return <button type="button" className="ny-device here ny-bot-link" onClick={open} title={sid ? t('Open its session') : t('Open {bot}', { bot })}><Icon name="chat" size={11} />{bot}</button>
+}
+
+// A bot's session asking to push its work (server/sessionmcp.js request_push): what it would push,
+// and Approve (Bridge AI pushes a branch and opens a draft pull request with your gh; never a
+// merge) or Deny (it's told). Nothing leaves this computer until you approve.
+export function PushItem({ it, onDone, setNote }) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState(null)
+  const p = it.push || {}
+  const who = it.from?.name || t('Someone')
+  const bot = it.bot?.name || t('Your bot')
+  const go = async (approve) => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      const out = await onDevice(null, `/bots/questions/${encodeURIComponent(it.id)}/push`, { act: approve ? 'approve' : 'deny', hash: p.hash || null })
+      onDone(it)
+      setNote({ text: out.already ? t('That isn\'t waiting any more') : approve ? t('Approved: Bridge AI pushes it and opens a draft pull request with your gh.') : t('Denied: nothing is pushed, and {bot} is told.', { bot }) })
+    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <article className="ny-item t-slack t-push yours" aria-label={t('{bot} asks to push its work {where}', { bot, where: whereOf(it) })} data-setting="ny-push">
+      <div className="ny-top">
+        <Icon name="branch" size={12} />
+        <span className="ny-kind">{t('A push to approve')}</span>
+        <span className="ny-age" title={new Date(p.at || it.at).toLocaleString()}>{ago(p.at || it.at)}</span>
+        <span className="ny-grow" />
+        <BotLink it={it} bot={bot} />
+      </div>
+      <p className="ny-text">{t('{bot} asks to push its work for {name} {where}:', { bot, name: who, where: whereOf(it) })}</p>
+      {p.title && <p className="ny-said">“{p.title}”</p>}
+      {p.summary && <p className="muted small ny-from">{p.summary}</p>}
+      {p.branch && <p className="muted small ny-from mono"><Icon name="branch" size={11} /> {p.branch}</p>}
+      {p.stat && <p className="muted small ny-from mono">{p.stat}</p>}
+      {p.diff && <pre className="ny-change" aria-label={t('The diff')}>{p.diff}</pre>}
+      <p className="muted small ny-from"><Icon name="info" size={11} /> {t('Approve, and Bridge AI pushes a branch and opens a draft pull request with your gh. It never merges.')}</p>
+      {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
+      <div className="ny-acts">
+        <button type="button" className="btn small primary" disabled={busy} onClick={() => go(true)}><Icon name="check" size={12} /> {t('Approve the push')}</button>
+        <button type="button" className="btn small" disabled={busy} onClick={() => go(false)}><Icon name="x" size={12} /> {t('Deny')}</button>
+      </div>
+    </article>
+  )
 }
 
 // A request held before it started (server/frontdesk.js screenAct): who asked, where and what, why it
@@ -404,7 +456,7 @@ function ScreenItem({ it, onDone, setNote }) {
         <span className="ny-kind">{t('Held before it started')}</span>
         <span className="ny-age" title={new Date(it.at).toLocaleString()}>{ago(it.at)}</span>
         <span className="ny-grow" />
-        <span className="ny-device here" title={t('Through {bot} (Settings › Bots)', { bot })}><Icon name="chat" size={11} />{bot}</span>
+        <BotLink it={it} bot={bot} />
       </div>
       <p className="ny-text">{t('{name} asked {where}:', { name: who, where: whereOf(it) })}</p>
       <p className="ny-said">“{it.text}”</p>
@@ -479,15 +531,16 @@ function LimitItem({ it, onDone, setNote }) {
         <span className="ny-kind">{t('At its time limit')}</span>
         <span className="ny-age" title={new Date(l.at).toLocaleString()}>{ago(l.at)}</span>
         <span className="ny-grow" />
-        <span className="ny-device here" title={t('Through {bot} (Settings › Bots)', { bot })}><Icon name="chat" size={11} />{bot}</span>
+        <BotLink it={it} bot={bot} />
       </div>
       <p className="ny-text">{t('{bot}\'s answer to {name} {where} has run {ran}: {doing}.', { bot, name: who, where: whereOf(it), ran, doing: l.doing || t('still working') })}</p>
       <p className="ny-said">“{it.text}”</p>
-      <p className="muted small ny-from"><Icon name="clock" size={11} /> {t('It goes on until {time} while you decide. With no answer by then it\'s stopped and comes to you, and Continue still picks it up where it stopped.', { time: timeOf(l.until) })}</p>
+      <p className="muted small ny-from"><Icon name="clock" size={11} /> {t('With no answer from you it carries on, up to its Longest Run of {longest} minutes.', { longest: l.longest || 240 })}</p>
       {l.left < 30 && <p className="muted small ny-from">{t('At most {n} more minutes: its Longest Run is {longest} minutes.', { n: l.left, longest: l.longest })}</p>}
       {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
       <div className="ny-acts">
         {(l.choices || []).map((n, i) => <button key={n} type="button" className={`btn small ${i === 0 ? 'primary' : ''}`} disabled={busy} onClick={() => go('continue', n)}><Icon name="play" size={12} /> {t('Continue {n} more minutes', { n })}</button>)}
+        {!(l.choices || []).length && <button type="button" className="btn small primary" disabled={busy} onClick={() => go('continue')}><Icon name="play" size={12} /> {t('Carry on')}</button>}
         <button type="button" className="btn small" disabled={busy} onClick={() => go('stop')}><Icon name="stop" size={12} /> {t('Stop')}</button>
       </div>
     </article>
@@ -542,7 +595,7 @@ function DraftItem({ it, onDone, setNote }) {
         <span className="ny-kind">{it.needsOwner ? t('Needs your reply') : writes ? t('A change to approve') : t('Answer to check')}</span>
         <span className="ny-age" title={new Date(it.at).toLocaleString()}>{ago(it.at)}</span>
         <span className="ny-grow" />
-        <span className="ny-device here" title={t('Through {bot} (Settings › Bots)', { bot })}><Icon name="chat" size={11} />{bot}</span>
+        <BotLink it={it} bot={bot} />
       </div>
       <p className="ny-text">{t('{name} asked {where}', { name: who, where })}{it.late ? ` ${t('(while Bridge AI was away)')}` : ''}:</p>
       <p className="ny-said">“{it.text}”</p>
@@ -611,7 +664,7 @@ export function FolderItem({ it, onDone, setNote }) {
         <span className="ny-kind">{t('Folder not read')}</span>
         {it.since && <span className="ny-age" title={new Date(it.since).toLocaleString()}>{ago(it.since)}</span>}
         <span className="ny-grow" />
-        <span className="ny-device here" title={t('Through {bot} (Settings › Bots)', { bot })}><Icon name="chat" size={11} />{bot}</span>
+        <BotLink it={it} bot={bot} />
       </div>
       <p className="ny-text">{it.was
         ? t('{bot} stopped reading {folder}: it leads to {now} now, not {was} as when you picked it. It reads it again only if you say so.', { bot, folder: it.folder, now: it.leadsTo, was: it.was })
