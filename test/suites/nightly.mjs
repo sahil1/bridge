@@ -4,6 +4,12 @@
 // version Stable or Early Access take. The script: the version for main as it is, stamped into both
 // package.json files (nothing else in them changed), notes with the changes since the last nightly
 // and the macOS line the update check reads, and the nightlies to delete past the newest 7. The
+// notes, from a nightly's commits with their files (test/fixtures/nightly-commits.json): only what
+// a person using Bridge AI would notice (no commit that only touches the tests, CI or the docs, nor
+// one said to be about them, a merge, the revert of one, or a commit taken back in the same
+// nightly), a line for each part of Bridge AI (the words before a subject's colon, however it's
+// said), its first line short and at most 3 under it, Fixes last, at most 8 lines, the commit it was
+// built from in a line GitHub hides, and a plain first line. The
 // workflows: nightly.yml builds main through release.yml, which publishes it as a pre-release, never
 // GitHub's latest, and leaves the Android app, the regular Publish and the tag check alone. The
 // rules: Stable and Early Access are never offered a nightly; Nightly is offered the newest of
@@ -27,6 +33,7 @@ const au = await import('../../shared/autoupdate.js')
 const counts = await import('../../counts/worker.js')
 process.env.BRIDGE_HOME = path.join(OUT, 'kits', `nightly-unit-${process.pid}`)
 const up = await import('../../server/updates.js')
+const { shown } = await import('../../shared/rollout.js')
 
 // ---------- the version ----------
 const N = '3.20.1-nightly.20261116.57'
@@ -45,10 +52,32 @@ ok(same(nj.older(tags, 2), ['v3.20.1-nightly.20261111.2', 'v3.20.1-nightly.20261
 const pkg = '{\n  "name": "bridge-ai",\n  "version": "3.20.0",\n  "dependencies": {\n    "x": "1.0.0"\n  }\n}\n'
 const st = nj.stamped(pkg, N)
 ok(st === pkg.replace('"version": "3.20.0"', `"version": "${N}"`), 'stamped: the version changed where it stands, the rest of package.json as it was', st)
-const notes = nj.notesFor({ version: N, sha: 'abcdef1234567', since: '3.20.0', changes: ['A fix', 'A feature'], mac: '14.0' })
-ok(/^A nightly build of main at abcdef1/.test(notes) && /offers it only to computers on Nightly/.test(notes) && /## Since 3\.20\.0\n\n- A fix\n- A feature/.test(notes) && up.minMacOf(notes) === '14.0', 'its notes: what it is, the changes since the last one, and the macOS line the update check reads', notes)
-const many = nj.notesFor({ version: N, sha: 'abcdef1234567', since: '3.20.0', changes: Array.from({ length: 75 }, (_, i) => `Change ${i}`), mac: '14.0' })
-ok((many.match(/^- Change/gm) || []).length === 60 && /…and 15 more/.test(many), 'at most 60 changes listed, and how many more')
+
+// ---------- the notes ----------
+const COMMITS = JSON.parse(fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'nightly-commits.json'), 'utf8'))
+const notes = nj.notesFor({ version: N, sha: 'abcdef1234567', since: '3.20.1-nightly.20261115.56', changes: COMMITS, mac: '14.0' })
+const listed = notes.split('\n\nOnly computers')[0]
+const bullets = notes.split('\n').filter((l) => /^- /.test(l))
+const under = notes.split('\n').filter((l) => /^ {2}- /.test(l))
+ok(notes.startsWith('Nightly build of 16 November 2026, for trying what\'s next.\n\n## Since 3.20.1-nightly.20261115.56\n\n- **') && !/nightly build of main|abcdef1/i.test(listed), 'its notes start plainly: the day it was built and since which nightly, no commit named', notes)
+ok(/^<!-- main at abcdef1 -->$/m.test(notes) && !/abcdef1/.test(shown(notes)) && up.minMacOf(notes) === '14.0' && /Only computers on the Nightly update channel are offered it\. The Mac app needs macOS 14 or later\. Checksums \(SHA-256\) are in `SHA256SUMS\.txt`\./.test(notes), 'the commit it was built from in a line GitHub hides; who\'s offered it, and the macOS line the update check reads', notes.slice(-300))
+ok(!/\b(Tests?|CI|Docs|Merge|Revert)\b|\.mjs|\.md\b|~\\|phone-parity|remote-screen|README|pull request/.test(listed), 'nothing of the tests, CI, the docs, a merge or a merge taken back; no file or test named', listed)
+const labels = bullets.map((l) => l.match(/^- \*\*(.+?):\*\* \S/)?.[1])
+ok(labels.every(Boolean) && same(labels, ['Bots', 'Which Devices May Connect', 'Meetings', 'Back Up & Move', 'Phone', 'Fixes']), 'a line for each part of Bridge AI, "- **Label:** …", the busiest first and Fixes last', labels)
+ok(!/covers everything|per use case|files bots make/i.test(notes) && /^- \*\*Which Devices May Connect:\*\* An unticked device can't use that computer at all\.$/m.test(notes), 'a part said another way is that part ("Which Devices May Connect covers everything", "Bots per use case", "Back Up & Move, and files bots make"), saying what changed', bullets)
+ok(/^- \*\*Bots:\*\* A run at its time limit asks you whether it may carry on, instead of failing\.$/m.test(notes) && bullets.every((l) => l.replace(/^- \*\*.+?:\*\* /, '').length <= 90), 'each part\'s first line short and standing on its own', bullets)
+ok(under.length > 0 && under.every((l) => /^ {2}- [A-Z].*\.$/.test(l)) && notes.split(/\n(?=- )/).every((g) => (g.match(/^ {2}- /gm) || []).length <= 3), 'the rest under it, at most 3, each a sentence', under)
+ok(/^- \*\*Fixes:\*\* Studio's sheet keeps its column widths after a reload\.$/m.test(notes), 'Fixes: what was fixed', bullets)
+ok(nj.seen({ subject: 'Bots: a stand-in that answers slower', files: ['test/stand-ins/slack.mjs', 'test/suites/slack-bot.mjs'] }) === false && nj.seen({ subject: 'Bots: answers in threads', files: ['server/bots.js', 'test/suites/slack-bot.mjs'] }) === true && nj.seen({ subject: 'Bots in the release notes', files: ['CHANGELOG.md', 'scripts/release.js', '.github/workflows/release.yml'] }) === false, 'told by its files too: a commit only touching the tests, CI, the docs and the release scripts is left out, whatever its subject says')
+const back = nj.grouped([{ subject: 'Revert "Bots: answer in DMs"', files: ['server/bots.js'] }, { subject: 'Bots: answer in DMs', files: ['server/bots.js'] }, { subject: 'Meetings: a title for each one', files: ['server/meetings.js'] }])
+ok(same(back.map((g) => g.label), ['Meetings']), 'a commit and its revert in the same nightly: neither listed', back)
+const parts = ['Bots', 'Meetings', 'Studio', 'Phone', 'Settings', 'Share Links', 'Remote Screen', 'Calendar', 'Mail', 'Chat', 'Tabs', 'Relays']
+const wide = nj.notesFor({ version: N, sha: 'abcdef1234567', since: '3.20.0', mac: '14.0', changes: [...parts.map((p, i) => ({ subject: `${p}: change number ${i} that people see here`, files: ['src/App.jsx'] })), { subject: 'Fix: a sheet keeps its widths', files: ['src/components/studio/xlsx.js'] }] })
+const wideBullets = wide.split('\n').filter((l) => /^- /.test(l))
+ok(wideBullets.length === nj.MAX_GROUPS && /^- \*\*Fixes:\*\*/.test(wideBullets.at(-1)) && /^- Smaller changes to [^\n]+ and Bots\.$/.test(wideBullets.at(-2)), `at most ${nj.MAX_GROUPS} lines: past that, the parts left named in one, and Fixes always listed`, wideBullets)
+const quiet = nj.notesFor({ version: N, sha: 'abcdef1234567', since: '3.20.0', mac: '14.0', changes: COMMITS.filter((c) => /^(Tests|CI|Docs):/.test(c.subject)) })
+ok(/^- Nothing you'd notice: only the tests and how Bridge AI is built changed\.$/m.test(quiet) && /^- Nothing new: built again\.$/m.test(nj.notesFor({ version: N, sha: 'abcdef1234567', since: '3.20.0', mac: '14.0', changes: [] })), 'only tests changed, or nothing at all: said so')
+ok(same(nj.grouped(['Bots: answer in threads you started', 'Tests: slack-bot waits longer']).map((g) => g.label), ['Bots']), 'subjects alone (no files known): told by the subject')
 
 // ---------- the workflows ----------
 // With \n between lines on Windows too, where git checks them out with \r\n.
