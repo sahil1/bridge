@@ -43,6 +43,7 @@
 import { idOf, bare, failure, PLATFORMS as NAMES } from './connector.js'
 import * as conns from './connections.js'
 import { commandOf, shortcutOf } from './slackbot.js'
+import { placeEn } from '../shared/places.js'
 
 // The steps above, in order, as the Connections page shows them.
 export const RULES = ['command', 'default', 'name', 'thread', 'last', 'chief']
@@ -157,6 +158,13 @@ export function makeHubs({ bots, desk, make, you = () => 'the owner', enabled = 
     const h = hubs.get(cid)
     if (!h) return sync()
     if (h.started) { h.started = false; h.connector.stop({ quiet: true }) }
+    sync()
+  }
+  // Made again as the connection is now (a bot's own made the shared one: its connector asks the
+  // platform for more), its tokens where they were.
+  function renew(cid) {
+    const h = hubs.get(cid)
+    if (h) { if (h.started) { h.started = false; h.connector.stop({ quiet: true }) } hubs.delete(cid) }
     sync()
   }
   // Gone: its connector stopped and its tokens forgotten.
@@ -275,7 +283,7 @@ export function makeHubs({ bots, desk, make, you = () => 'the owner', enabled = 
     const p = c.platform
     const r = conns.takeLink(c.id, m.text, fromOf(c, m))
     if (!r) return false
-    const how = 'Make a new one in Bridge AI, under You Here in Bots › Connections'
+    const how = `Make a new one in Bridge AI, under You Here in ${placeEn('connections')}`
     if (r.ok) {
       conns.note(c.id, { event: 'settings', what: 'owner', old: r.before?.name || null, new: r.owner?.name || null, how: 'link code', ...(m.place?.name ? { where: m.place.name } : {}) })
       for (const b of conns.botsOn(c, bots())) desk.note(b.id, { what: 'linked', ok: true, why: `${r.owner?.name || 'You'} linked as ${you()} on ${NAMES[p]} with a code`, ...(p === 'slack' ? {} : { platform: p }) })
@@ -298,7 +306,7 @@ export function makeHubs({ bots, desk, make, you = () => 'the owner', enabled = 
     const id = idOf(c.platform, m.from.id)
     if (h.hinted.has(id)) return
     h.hinted.add(id)
-    say(c, m, `If you're ${you()}: link yourself, so your bots know it's you. In Bridge AI, open Bots › Connections, make a code under You Here, and send it to me here.`).catch(() => {})
+    say(c, m, `If you're ${you()}: link yourself, so your bots know it's you. In Bridge AI, open ${placeEn('connections')}, make a code under You Here, and send it to me here.`).catch(() => {})
   }
   // A problem you should hear of, in your direct messages with the app (Slack's), once a day for
   // each kind and place; in the connection's record whatever happens.
@@ -497,5 +505,5 @@ export function makeHubs({ bots, desk, make, you = () => 'the owner', enabled = 
 
   // Bridge AI closing: every connector stopped (a Slack app's Home tab says it's offline).
   const stopAll = () => { for (const h of hubs.values()) if (h.started) { h.started = false; try { h.connector.stop() } catch { /* going anyway */ } } }
-  return { view, sync, restart, drop, stopAll, connectorOf: (cid) => { const c = conns.get(cid); return c ? hubOf(c).connector : null }, infoOf, started: (cid) => !!hubs.get(cid)?.started, onNow: (c) => on(c), dry }
+  return { view, sync, restart, renew, drop, stopAll, connectorOf: (cid) => { const c = conns.get(cid); return c ? hubOf(c).connector : null }, infoOf, started: (cid) => !!hubs.get(cid)?.started, onNow: (c) => on(c), dry }
 }

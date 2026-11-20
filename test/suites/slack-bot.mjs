@@ -4,9 +4,11 @@
 //   The Slack Bot as #216 left it (its settings in config.json, its tokens in slack-bot.json, a
 //   question waiting) is carried over as the first bot: named as before, its folders what it reads
 //   from, their topics lines in its instructions, its tokens in its own folder (yours only), the
-//   waiting question still waiting. Off, none of it is there but its switch in Settings, marked Beta. On: its app, made from the old
-//   manifest, lacks scopes, and Settings › Bots says which and how to update it; renamed, its
-//   manifest carries the new name. A second bot, made in Settings by name, connects as its own app.
+//   waiting question still waiting. Off, none of it is there but its switch in Settings, marked
+//   Beta. On: its app, made from the old manifest, lacks scopes, and its card in Bots › Connections
+//   says which and how to update it; renamed, its manifest carries the new name; its page says
+//   where it answers in a line. A second bot, made by name, given an app of its own in Connections,
+//   connects as its own app.
 //   Questions: a mention at the top of a channel, answered by one agent that can read all of the
 //   bot's folders and nothing else (--add-dir; a read outside refused), briefed with the bot's
 //   name, whose it is, its instructions (which steer the answer), and nobody else's messages in the
@@ -20,12 +22,15 @@
 //   to start) still waits. Edits and deletions in its threads are in its record. The terms note for
 //   a personal plan. Connections dropped, gone dead, and Bridge AI closed: what was asked meanwhile,
 //   a reply in a thread included, answered once back. Settings in light and dark, on a computer and
-//   a phone.
+//   a phone. Then one app for all your bots: beside a shared connection never set up, which a new
+//   bot is on, Pricing Desk's own app becomes the shared one in one step (asked first, saying what
+//   happens): the new bot moved onto it, Pricing Desk its Chief, the empty one gone, Atlas still on
+//   its own, offered the move.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { startKit, startSlack, checks, until, sleep, browser, page, shot, phoneFaults, TEST, ROOT, IS_WIN } from '../lib/harness.mjs'
-import { openBot, newBotChat } from '../lib/bots.mjs'
+import { openBot, openBots, newBotChat } from '../lib/bots.mjs'
 import { ownFile } from '../lib/bots.mjs'
 
 const { ok, done } = checks('slack-bot')
@@ -132,56 +137,66 @@ try {
   ok(JSON.stringify(b1.scopes?.missing) === JSON.stringify(['im:write', 'users:read.email', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write']), 'its app, made from the old manifest, lacks the new scopes, from what Slack says it has', b1.scopes)
   ok(b1.manifest.oauth_config.scopes.bot.includes('pins:read') && b1.manifest.settings.event_subscriptions.bot_events.join() === 'app_mention,message.channels,message.groups,message.im,message.mpim,app_home_opened,agent_session_stopped,channel_shared,channel_unshared', 'the new manifest asks for them, and for replies in channels and threads', b1.manifest)
 
-  // ---------- In its Settings: updating the app, renaming it, a second bot ----------
-  await part('setting up in its Settings', async () => {
+  // ---------- In Connections: updating the app; renaming it; a second bot's own app ----------
+  await part('setting up in Connections', async () => {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
-    await openBot(p)
+    await openBots(p, 'connections')
     ok(/^Bots/.test((await p.locator('[data-setting="rail-bots"] .rail-nav-btn').innerText()).trim()), 'it\'s called Bots')
-    const up = await p.locator('.sb-update').innerText().catch(() => '')
-    ok(/Update Your Slack App/.test(up) && /im:write, users:read.email, reactions:write, pins:read/.test(up) && /App Manifest/.test(up) && /Reinstall/.test(up), 'Update Your Slack App: which scopes it lacks, and how (paste the manifest, reinstall)', up)
-    await sleep(500) // Settings opening
+    const own = p.locator('.bh .cn-card[data-kind="own"]').first()
+    await own.waitFor({ timeout: 10000 })
+    ok(/Bridge AI's own app/.test(await own.locator('[data-setting="connection-kind"]').innerText()) && (await p.locator('.bh .bh-plat[data-platform="slack"] .cn-card').count()) === 1, 'its own app, from before connections: in Connections, under Slack, saying whose it is')
+    const up = await until(async () => { const x = await own.locator('.sb-update').innerText().catch(() => ''); return /Update Your Slack App/.test(x) ? x : null }, 10000)
+    ok(/Update Your Slack App/.test(up || '') && /im:write, users:read.email, reactions:write, pins:read/.test(up) && /App Manifest/.test(up) && /Reinstall/.test(up), 'Update Your Slack App, right on its card: which scopes it lacks, and how (paste the manifest, reinstall)', up)
+    await sleep(500)
     await shot(p, `${tag}slack-bot-update-app`)
     await slack.scopes({ app: 'A1' })
-    await p.locator('.sb-update button', { hasText: 'Connect again' }).click()
-    ok(!!(await until(async () => !(await p.locator('.sb-update').count()), 15000)), 'updated in Slack and connected again: the notice goes')
-    // Renamed: the manifest carries the new name.
+    await own.locator('.sb-update button', { hasText: 'Connect again' }).click()
+    ok(!!(await until(async () => !(await own.locator('.sb-update').count()), 15000)), 'updated in Slack and connected again: the notice goes')
+    // Renamed on its page: the manifest carries the new name.
+    await openBot(p)
+    ok(/Reached through @Bridge AI\s*·\s*its own app\s*·\s*connected/.test(await p.locator('.bp [data-setting="bot-where"]').innerText()) && !(await p.locator('.bp [data-setting="slack-connect"], .bp [data-setting="slack-owner"]').count()), 'its page: where it answers in a line, nothing to set up there')
     const name = p.locator('.bp [data-setting="bot-name"] input')
     await name.fill('Pricing Desk')
     await name.blur()
     ok(!!(await until(async () => (await botOf()).name === 'Pricing Desk', 8000)), 'renamed in Settings')
-    const link = await until(async () => { const h = await p.locator('.sb-how a', { hasText: 'Open Slack\'s app page' }).getAttribute('href').catch(() => ''); return /Pricing%20Desk/.test(h || '') ? h : null }, 8000)
-    const mf = link ? JSON.parse(decodeURIComponent(link.split('manifest_json=')[1])) : null
-    ok(mf?.display_information.name === 'Pricing Desk' && mf.features.bot_user.display_name === 'Pricing Desk', 'the manifest carries the new name, as its app name and its bot\'s', mf?.display_information)
     ok(/can't carry an icon/.test(await p.locator('[data-setting="slack-identity"]').innerText()), 'and Settings says where its icon is set')
-    // A second bot, by its name (a new bot's form, from AI Assist's chat).
+    await p.locator('.bp [data-setting="bot-where"] button', { hasText: 'Open in Connections' }).click()
+    const link = await until(async () => { const h = await own.locator('.sb-how a', { hasText: 'Open Slack\'s app page' }).first().getAttribute('href').catch(() => ''); return /Pricing%20Desk/.test(h || '') ? h : null }, 8000)
+    const mf = link ? JSON.parse(decodeURIComponent(link.split('manifest_json=')[1])) : null
+    ok(mf?.display_information.name === 'Pricing Desk' && mf.features.bot_user.display_name === 'Pricing Desk', 'Open in Connections: its card, its manifest carrying the new name, as its app name and its bot\'s', mf?.display_information)
+    // A second bot, by its name (a new bot's form, from AI Assist's chat), given an app of its own in
+    // Connections (there's no shared one).
     await newBotChat(p, { form: true })
     await p.locator('.bc .sb-new input').fill('Atlas')
     await p.locator('.bc .sb-new button[type="submit"]').click()
     await p.locator('.bp .sb-tabs [data-tab="settings"]').waitFor({ timeout: 10000 })
     await sleep(400)
-    // (Its page opens with AI Assist's chat beside it, which walks through the same steps: closed, so
-    // they're its Settings' own here.)
     if (await p.locator('.bp-chat .ai-head-close').count()) await p.locator('.bp-chat .ai-head-close').click()
-    await p.locator('.bp .sb-tabs [data-tab="settings"]').click({ timeout: 10000 })
-    const adv = p.locator('.bp [data-setting="bot-advanced"]')
-    if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
-    await p.locator('.sb-guide').first().waitFor({ timeout: 10000 })
-    const steps = await p.locator('.sb-guide').first().innerText()
-    const manifest = JSON.parse(await p.locator('.sb-manifest pre').evaluate((e) => e.textContent))
-    ok(manifest.display_information.name === 'Atlas' && manifest.features.bot_user.display_name === 'Atlas' && /Tester/.test(manifest.display_information.description) && /\/invite @Atlas/.test(steps), 'a second bot, made by its name: its own manifest with its name, and its own steps', { name: manifest.display_information.name, steps })
+    await openBots(p, 'connections')
+    const add = p.locator('.bh [data-setting="connections-new"] .cn-new-one[data-platform="slack"]')
+    await add.locator(':scope > summary').click()
+    await add.locator('[data-setting="connection-own"] option', { hasText: 'Atlas' }).waitFor({ state: 'attached', timeout: 10000 })
+    await add.locator('[data-setting="connection-own"] select').selectOption({ label: 'Atlas' })
+    await add.locator('[data-setting="connection-own"] button', { hasText: 'Give it its own app' }).click()
+    const atlas = p.locator('.bh .cn-card[data-kind="own"]', { hasText: 'Atlas\'s own app' })
+    await atlas.locator('.sb-guide').first().waitFor({ timeout: 10000 })
+    const steps = await atlas.locator('.sb-guide').first().innerText()
+    const manifest = JSON.parse(await atlas.locator('.sb-manifest pre').evaluate((e) => e.textContent))
+    ok(manifest.display_information.name === 'Atlas' && manifest.features.bot_user.display_name === 'Atlas' && /Tester/.test(manifest.display_information.description) && /\/invite @Atlas/.test(steps), 'a second bot, made by its name, given its own app: a card with its own manifest and its own steps', { name: manifest.display_information.name, steps })
     await sleep(400)
     await shot(p, `${tag}slack-bot-settings-new`)
-    const [appIn, botIn] = [p.locator('.sb-tokens input').nth(0), p.locator('.sb-tokens input').nth(1)]
+    const [appIn, botIn] = [atlas.locator('.sb-tokens input').nth(0), atlas.locator('.sb-tokens input').nth(1)]
     await appIn.fill('xapp-two')
     await botIn.fill('xoxb-wrong')
-    await p.locator('.sb-tokens button[type="submit"]').click()
-    const said = await until(async () => (await p.locator('.sb .error-text').first().innerText().catch(() => '')) || null, 10000)
+    await atlas.locator('.sb-tokens button[type="submit"]').click()
+    const said = await until(async () => (await atlas.locator('.error-text').first().innerText().catch(() => '')) || null, 10000)
     ok(/The bot token: Slack turned the token down \(invalid_auth\)/.test(said || ''), 'a wrong token is said at once, with Slack\'s reason', said)
     await botIn.fill('xoxb-two')
-    await p.locator('.sb-tokens button[type="submit"]').click()
-    const on = await until(async () => { const x = await p.locator('.sb-status .st-note').innerText().catch(() => ''); return /Connected to Acme Test as @atlas/.test(x) ? x : null }, 15000)
-    ok(!!on, 'its own app connects, as its own bot', await p.locator('.sb-status').innerText())
+    await atlas.locator('.sb-tokens button[type="submit"]').click()
+    const on = await until(async () => { const x = await atlas.locator('.cn-state').innerText().catch(() => ''); return /Connected to Acme Test as @atlas/.test(x) ? x : null }, 15000)
+    ok(!!on, 'its own app connects, as its own bot', await atlas.innerText().catch(() => ''))
     // Everyone in its channels may ask; it reads no folders; its instructions written here.
+    await openBot(p, 'Atlas')
     await p.locator('.sb-mode', { hasText: 'Everyone in channels it\'s invited to' }).click()
     await until(async () => (await kit.api('/bots/b2')).settings.who === 'channels', 8000)
     ok(/never answered/.test(await p.locator('[data-setting="slack-askers"]').innerText()), 'guests and other companies are never answered, it says')
@@ -446,8 +461,8 @@ try {
     await part(`Settings, ${mode}${phone ? ', on a phone' : ''}`, async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme, phone })
       await openBot(p, { name: 'Pricing Desk' })
-      await p.locator('.sb-status').waitFor({ timeout: 10000 })
-      ok(/Connected to Acme Test as @bridge_ai/.test(await p.locator('.sb-status').innerText()), 'connected')
+      await p.locator('.bp [data-setting="bot-where"]').waitFor({ timeout: 10000 })
+      ok(/its own app\s*·\s*connected/.test(await p.locator('.bp [data-setting="bot-where"]').innerText()), 'connected, through its own app')
       const terms = await p.locator('.sb-terms').innerText().catch(() => '')
       ok(/Pricing Desk answers other people through your Claude account \(Max\)\. If that's a personal plan, check Anthropic's terms allow it; an API key is the usual choice for a shared bot\./.test(terms), 'its agent signed in with a personal plan: a note on its terms, not a block', terms)
       if (phone) {
@@ -482,6 +497,44 @@ try {
       await ctx.close()
     })
   }
+
+  // ---------- One app for all your bots ----------
+  // (The owner's case: bots with apps of their own, from before shared connections, beside a shared
+  // one never set up, which a new bot is on.) Pricing Desk's app is used for all of them, in one step.
+  await part('one app for all your bots', async () => {
+    const empty = (await kit.api('/connections', { platform: 'slack', name: 'tester_bot' })).id
+    const DH = (await kit.api('/bots', { name: 'Docs Helper', description: 'Answers questions about the docs' })).id
+    const mine = (await botOf('b1')).connections.slack.id
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    await openBots(p, 'connections')
+    const sh = p.locator(`.bh .cn-card[data-connection="${empty}"]`)
+    await sh.waitFor({ timeout: 10000 })
+    ok((await p.locator('.bh .bh-plat[data-platform="slack"] .cn-card').evaluateAll((l) => l.map((e) => e.dataset.kind))).join() === 'shared,own,own', 'every Slack connection under Slack: the shared one, then each bot\'s own')
+    ok(/Not set up yet, so Docs Helper isn't reached/.test(await sh.locator('.cn-state').innerText()) && /is connected: use it for all your bots instead/.test(await sh.locator('[data-setting="connection-share"]').innerText()), 'the shared one never set up: why, and a bot\'s own app that works to use instead, right there', await sh.innerText())
+    ok(!(await sh.locator('[data-setting="connection-setup"]').isVisible()) && await sh.locator('[data-setting="connection-setup-folded"]').count() === 1, 'its own steps folded away under Or set up @tester_bot itself')
+    ok(!/coming/i.test(await p.locator('.bh [data-setting="bots-connections"]').innerText()), 'nothing listed as coming')
+    const pd = p.locator(`.bh .cn-card[data-connection="${mine}"]`)
+    const use = pd.locator('[data-setting="connection-share"]')
+    ok(/isn't working \(not set up yet\): use @Pricing Desk for Docs Helper too/.test(await use.innerText()), 'Pricing Desk\'s own app: use it for Docs Helper too', await use.innerText())
+    await sleep(300)
+    await shot(p, `${tag}slack-bot-one-app-before`)
+    await use.locator('button', { hasText: 'Use it for all your bots' }).click()
+    const ask = await use.locator('.bh-share-sure').innerText()
+    ok(/@tester_bot, never set up, is removed\. Docs Helper moves to @Pricing Desk, reached by its name, with Pricing Desk as its Chief\./.test(ask) && /update the app once/.test(ask), 'asked first, naming what happens: the empty one removed, who moves, who\'s Chief', ask)
+    await shot(p, `${tag}slack-bot-one-app-confirm`)
+    await use.locator('.bh-share-sure .btn.primary').click()
+    ok(!!(await until(async () => /@Pricing Desk is your shared Slack connection now, for all 2 bots, with Pricing Desk as their Chief/.test(await p.locator('.bh [data-setting="connections-done"]').innerText().catch(() => '')), 10000)), 'done, and said so')
+    const c = await kit.api(`/connections/${mine}`)
+    ok(c.shared && c.chief?.id === 'b1' && c.bots.map((x) => x.id).sort().join() === ['b1', DH].sort().join() && !(await kit.api('/connections')).connections.some((x) => x.id === empty), 'Pricing Desk\'s app is the shared one: Pricing Desk its Chief, Docs Helper reached through it, the empty one gone', { shared: c.shared, chief: c.chief, bots: c.bots })
+    ok(!!(await until(async () => /Shared · 2 bots/.test(await pd.locator('[data-setting="connection-kind"]').innerText().catch(() => '')) && (await pd.locator('[data-setting="connection-chief"] select').inputValue().catch(() => '')) === 'b1', 10000)), 'its card: shared, two bots, Pricing Desk the Chief')
+    const atlas = p.locator('.bh .cn-card[data-kind="own"]')
+    ok(/Move Atlas to @Pricing Desk/.test(await atlas.locator('[data-setting="connection-share"]').innerText().catch(() => '')), 'Atlas keeps its own app, and can move onto the shared one')
+    ok(!!(await until(async () => (await botOf('b1')).state === 'connected', 15000)), 'connected again, as the shared one')
+    await sleep(300)
+    await shot(p, `${tag}slack-bot-one-app-after`)
+    ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+  })
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-3000))

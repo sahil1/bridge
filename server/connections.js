@@ -14,7 +14,8 @@
 //                                      bot a question goes to when nothing else says which, its
 //                                      Chief, which hands it on or asks the others: null, to ask
 //                                      them; one kept as unsure before is the chief now), teamsPort,
-//                                      migratedFrom, createdAt, paused (not connected until Start:
+//                                      migratedFrom, sharedFrom (a bot's own made the shared one:
+//                                      that bot), createdAt, paused (not connected until Start:
 //                                      one brought from another computer, or moved to one, as an
 //                                      app can't be connected from two at once; pausedWhy says so,
 //                                      and pausedBy what did it: restore, in:<move> (came with one,
@@ -36,7 +37,8 @@
 //
 // Bots made before connections had each their own app, its tokens in bots/<id>/: each becomes a
 // connection of that bot's own (migrate), named as the bot, so nothing about it changes. Move to the
-// shared connection takes a bot off its own (its app can be deleted in Slack afterwards).
+// shared connection takes a bot off its own (its app can be deleted in Slack afterwards); or its own
+// becomes the shared one (share), for every bot, where there's no shared one that works.
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -126,6 +128,19 @@ export function save(id, patch) {
   const before = get(id)
   if (!before) throw Object.assign(new Error('No such connection'), { status: 404 })
   const after = shape(id, { ...before, ...patch, platform: before.platform, bot: before.bot, shared: before.shared })
+  write(after)
+  return { before, after }
+}
+// A bot's own connection made its platform's shared one, in place (Use it for all your bots): the
+// same app, its tokens where they were, and every bot without its own reached through it from then
+// on, its Chief and the channels' bots as given. Only where the platform has no shared one (one that
+// isn't working is removed first, by the route that asks for this).
+export function share(id, { chief = null, defaults = [], perBot = false, owner = undefined } = {}) {
+  const before = get(id)
+  if (!before) throw Object.assign(new Error('No such connection'), { status: 404 })
+  if (before.shared) throw Object.assign(new Error(`${before.name} is shared already`), { status: 409 })
+  if (sharedOf(before.platform)) throw Object.assign(new Error('There\'s a shared connection there already'), { status: 409 })
+  const after = shape(id, { ...before, shared: true, bot: null, sharedFrom: before.bot, chief, defaults, perBot, ...(owner !== undefined ? { owner } : {}) })
   write(after)
   return { before, after }
 }

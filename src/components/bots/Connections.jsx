@@ -18,7 +18,7 @@ export const STATE = { connected: 'ok', connecting: 'warn', reconnecting: 'warn'
 // A connection as the platform sections take a bot: its state where each looks for it, and you there.
 export const asD = (c) => ({
   ...c, kind: 'connection',
-  where: { slack: { state: c.state, why: c.why, channels: null }, ...(c.platform !== 'slack' ? { [c.platform]: c.status || { state: c.state } } : {}) },
+  where: { slack: { state: c.state, why: c.why, channels: c.channels ?? null }, ...(c.platform !== 'slack' ? { [c.platform]: c.status || { state: c.state } } : {}) },
   settings: { owner: c.platform === 'slack' ? c.owner : null, owners: c.platform !== 'slack' && c.owner ? { [c.platform]: c.owner } : {} },
   reached: { [c.platform]: c.reached || {} },
 })
@@ -28,12 +28,13 @@ export const said = (c) => (c.state === 'connected'
       : t('Connected to {team} as @{bot}.', { team: c.team?.name || '', bot: c.bot?.name || c.name }))
   : c.state === 'no-tokens' ? t('Not set up yet: make its app with the steps below.')
     : c.state === 'error' ? t('Not connected: {why}.', { why: c.why || t('{platform} turned it down', { platform: platName(c.platform) }) })
-      : c.state === 'off' ? t('Not connected: no bot on it is answering yet.')
+      : c.state === 'off' ? (c.paused ? t('Not connected here: {why}.', { why: c.paused.why || c.why || t('it\'s paused on this computer') }) : t('Not connected: no bot on it is answering yet.'))
         : t('Not connected: {why}. Trying again by itself.', { why: c.why || t('the connection closed') }))
 
 // Which bot a question went to, and why, as its record says.
 function routedSaid(e) {
   const bot = e.name || e.bot || ''
+  if (e.event === 'settings' && e.what === 'shared') return e.old ? t('Made the shared connection, in place of {name}', { name: e.old }) : t('Made the shared connection, for all your bots')
   if (e.event === 'settings') return e.what === 'moved' ? t('{bot} moved here', { bot: e.new || '' }) : t('Changed: {what}', { what: e.what === 'defaults' ? t('the channels\' bots') : e.what === 'perBot' ? t('a command for each bot') : e.what === 'owner' ? t('you there') : e.what === 'tokens' ? t('its tokens') : e.what === 'name' ? t('its name') : e.what || '' })
   if (e.event) return e.ok ? t('Connected') : `${e.event === 'dropped' ? t('Dropped') : t('Problem')}: ${e.why || ''}`
   switch (e.why) {
@@ -132,7 +133,7 @@ export function Defaults({ c, reload, bare = false }) {
           <button type="button" className="btn small" disabled={!chan || !bot} onClick={() => { const x = free.find((y) => y.id === chan); put([...c.defaults, { id: chan, name: x?.name || null, bot }]); setChan(''); setBot('') }}><Icon name="plus" size={12} /> {t('Add')}</button>
         </div>
       )}
-      {!up && <p className="muted small">{t('Connect it first to pick from the channels it\'s in.')}</p>}
+      {!up && <p className="muted small">{t('Once it\'s connected again, pick from the channels it\'s in.')}</p>}
       {error && <p className="error-text small" role="alert">{error}</p>}
     </div>
   )

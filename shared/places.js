@@ -57,10 +57,17 @@ export const SETTINGS = {
   'mcp-server': ['mcp', 'Bridge AI as an MCP Server'],
 }
 
-// The way to a place, as names from Settings down: ['Settings', 'Devices & Access', 'Remote Access'].
-// accounts: whether Bold Bridge accounts exist (Account & Backup's name). An id that isn't a place
-// is Settings itself.
+// Places outside Settings a message names, as names from the top: Bots' tabs (the sidebar's Bots,
+// the phone's More › Bots), where every connection is set up and fixed.
+export const PAGES = {
+  connections: ['Bots', 'Connections'],
+}
+
+// The way to a place, as names from Settings down: ['Settings', 'Devices & Access', 'Remote Access'];
+// one outside Settings from the top: ['Bots', 'Connections']. accounts: whether Bold Bridge accounts
+// exist (Account & Backup's name). An id that isn't a place is Settings itself.
 export function placePath(id, { accounts = false } = {}) {
+  if (PAGES[id]) return [...PAGES[id]]
   const setting = SETTINGS[id]
   const at = setting ? setting[0] : id
   const tab = TABS[at]

@@ -749,7 +749,10 @@ export const phoneFaults = (p, ...scopes) => p.evaluate((scopes) => {
   const out = { wider: document.documentElement.scrollWidth - W, past: [], sideways: [], cut: [], small: [], covered: [], zooms: [] }
   const shown = (e) => {
     const r = e.getBoundingClientRect()
-    if (r.width < 1 || r.height < 1 || (e.closest('details:not([open])') && !e.closest('summary'))) return null
+    // (In a folded section: hidden, but for its own summary; a summary of one inside another folded
+    // one is hidden too, though the browser may still give it a box where it was.)
+    const sum = e.closest('summary')
+    if (r.width < 1 || r.height < 1 || (sum ? sum.parentElement?.parentElement?.closest('details:not([open])') : e.closest('details:not([open])'))) return null
     const c = getComputedStyle(e)
     if (c.visibility !== 'visible' || +c.opacity === 0) return null
     let { left, top, right, bottom } = r

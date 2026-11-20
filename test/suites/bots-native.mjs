@@ -46,13 +46,15 @@ try {
   ok(mf.features.app_home?.home_tab_enabled === true && mf.settings.interactivity?.is_enabled === true && mf.settings.socket_mode_enabled === true && !!mf.features.agent_view, 'the Home tab, interactivity (its buttons, modals and shortcut) over Socket Mode, declared as an agent', { home: mf.features.app_home, interactivity: mf.settings.interactivity, agent: mf.features.agent_view })
   ok(['files:read', 'files:write', 'commands', 'assistant:write'].every((x) => mf.oauth_config.scopes.bot.includes(x)) && ['app_home_opened', 'agent_session_stopped'].every((x) => mf.settings.event_subscriptions.bot_events.includes(x)), 'its new scopes and events', { scopes: mf.oauth_config.scopes.bot, events: mf.settings.event_subscriptions.bot_events })
   ok(v.updateApp.missing.join() === 'files:read,files:write,commands,assistant:write' && v.updateApp.needs.find((x) => x.scope === 'commands')?.for.includes('/pricing-desk'), 'an app made from the older manifest: what it lacks, and what each is for', v.updateApp)
-  await part('Update Your Slack App, in its Settings', async () => {
+  await part('Update Your Slack App, on its card in Connections', async () => {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
     await openBot(p)
-    const up = await p.locator('.sb-update').innerText()
-    ok(/Update Your Slack App/.test(up) && /files:read, files:write, commands, assistant:write/.test(up) && /\/pricing-desk/.test(up), 'Settings: Update Your Slack App names what it lacks and what for', up)
+    ok(/its app needs updating/.test(await p.locator('.bp [data-setting="bot-where"]').innerText()), 'its page: where it answers, in a line, saying its app needs updating')
     const icon = await p.locator('[data-setting="slack-identity"] a', { hasText: 'Add an icon in Slack' }).getAttribute('href').catch(() => null)
     ok(icon === 'https://api.slack.com/apps/A1/general', 'and links straight to its app\'s page in Slack, for its icon (the app known from Slack\'s hello)', icon)
+    await p.locator('.bp [data-setting="bot-where"] button', { hasText: 'Open in Connections' }).click()
+    const up = await until(async () => { const x = await p.locator('.bh .cn-card .sb-update').innerText().catch(() => ''); return x || null }, 10000)
+    ok(/Update Your Slack App/.test(up || '') && /files:read, files:write, commands, assistant:write/.test(up) && /\/pricing-desk/.test(up), 'Open in Connections: Update Your Slack App on its card names what it lacks and what for', up)
     await shot(p, `${tag}bots-native-update-app`)
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
