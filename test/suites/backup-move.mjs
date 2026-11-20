@@ -92,6 +92,8 @@ try {
   // A second bot whose file says things Settings wouldn't take: Bridge AI's own folder, answering
   // without asking, and someone else as you there (written in its bot.json, as a file can say anything).
   await studio.api('/bots', { name: 'Helper' })
+  // (Its changes as draft pull requests, pr, as a bot kept them before: one mode now, suggest, proposing
+  // a PR that waits for your OK.)
   const hj = path.join(studio.dataDir, 'bots', 'b2', 'bot.json')
   fs.writeFileSync(hj, JSON.stringify({ ...JSON.parse(fs.readFileSync(hj, 'utf8')), readsFrom: ['~/.bridge-ai', '~/notes'], askers: [{ id: 'U0EVE', name: 'Eve' }], auto: true, owner: { id: 'U0EVE', name: 'Eve' }, changes: 'pr', repo: '~/notes', mcp: ['tracker'], agentsStatus: true, memory: 'auto', agentCopies: true, answerers: ['agent:codex', 'agent:claude'] }, null, 2))
   await studio.api('/routines', { name: 'Monday numbers', command: 'Post the numbers [answer The numbers.]', to: 'bot', bot: 'b1', channel: { id: 'C0LAUNCH', name: 'launch' }, schedule: 'every monday at 9' })
@@ -184,7 +186,7 @@ try {
     const helper = await plan.locator('[data-bot="Helper"]').innerText()
     ok(/Pricing Desk, as Pricing Desk \(2\)/.test(pricing) && /reads ~[\\/]notes/.test(pricing) && /who can ask: Dana \(U0DANA\)/.test(pricing) && /what it keeps about each person/.test(pricing), 'each bot: renamed for the one here, what it reads, who may ask it', pricing)
     ok(/won't read ~\/\.bridge-ai: Bridge AI's own folder/.test(helper) && /reads ~\/notes/.test(helper) && /who can ask: Eve \(U0EVE\)/.test(helper) && /answered without asking there: here it waits for you/.test(helper) && /you there, in the file: Eve \(U0EVE\)\. Not taken from a file/.test(helper), 'and the one whose file asks for more: Bridge AI\'s own folder refused, who may ask, not answering without asking, who you are there not taken', helper)
-    const held = ['answered by agent:codex, agent:claude', 'opens draft pull requests in ~/notes', 'uses your MCP servers tracker', 'answers from copies of your agents\' conversations', 'says what your agents are doing', 'keeps what it learns without asking'].filter((w) => !helper.includes(`${w}: asked for in the file, off here until you turn it on`))
+    const held = ['answered by agent:codex, agent:claude', 'suggests changes in ~/notes', 'uses your MCP servers tracker', 'answers from copies of your agents\' conversations', 'says what your agents are doing', 'keeps what it learns without asking'].filter((w) => !helper.includes(`${w}: asked for in the file, off here until you turn it on`))
     ok(!held.length, 'and what would let it act for you, as the file asks, off here until you turn it on: changes and their repository, your MCP servers, copies of your agents\' conversations, saying what they do, keeping what it learns', { missing: held, helper })
     const shown = await plan.innerText()
     ok(/From Studio/.test(shown) && /Pricing Desk \(Slack\).*with its tokens, paused until you Start it/s.test(shown) && /playbook\.md, replacing the one here/.test(shown), 'its connection paused, the playbook', shown)
@@ -204,7 +206,7 @@ try {
     await plan.locator('button', { hasText: 'Apply' }).click()
     await sec.locator('button', { hasText: 'Start Them Here' }).waitFor({ timeout: 20000 })
     const said = await sec.innerText()
-    ok(/Helper doesn't read ~\/\.bridge-ai: Bridge AI's own folder can't be read from/.test(said) && /Helper doesn't answer without asking here/.test(said) && /Helper doesn't make changes here \(the file asked for draft pull requests in ~\/notes\)/.test(said) && /Helper uses none of your MCP servers here/.test(said), 'what was left out, said', said.slice(0, 1500))
+    ok(/Helper doesn't read ~\/\.bridge-ai: Bridge AI's own folder can't be read from/.test(said) && /Helper doesn't answer without asking here/.test(said) && /Helper doesn't make changes here \(the file asked for suggested changes in ~\/notes\)/.test(said) && /Helper uses none of your MCP servers here/.test(said), 'what was left out, said', said.slice(0, 1500))
     const bots = (await spare.api('/bots')).bots
     const bot = bots.find((x) => x.name === 'Pricing Desk (2)')
     const hb = bots.find((x) => x.name === 'Helper')
@@ -276,7 +278,7 @@ try {
     const plan = (await laptop.api(`/backup/pending/${inc.id}`)).plan
     ok(plan.from === 'Studio' && plan.bots[0]?.as === 'Pricing Desk' && plan.connections[0]?.tokens && !plan.optIn.length, 'Laptop sees the bot and its connection, named as the link names Studio', plan)
     const ph = plan.bots.find((x) => x.name === 'Helper')
-    ok(ph && !ph.held && ph.asks.answerers.join() === 'agent:codex,agent:claude' && ph.asks.changes === 'pr' && ph.asks.repo === '~/notes' && ph.asks.mcp.join() === 'tracker' && ph.asks.memory === 'auto', 'between your own computers what a bot does for you comes along, shown first', ph)
+    ok(ph && !ph.held && ph.asks.answerers.join() === 'agent:codex,agent:claude' && ph.asks.changes === 'suggest' && ph.asks.repo === '~/notes' && ph.asks.mcp.join() === 'tracker' && ph.asks.memory === 'auto', 'between your own computers what a bot does for you comes along, shown first', ph)
     const r = await laptop.api('/backup/apply', { id: inc.id })
     ok(r.handoff === 'done' && !r.paused.length, 'applied on Laptop; Studio paused its bots, so Laptop\'s connections start', r)
     const sb = await studio.api('/bots/b1')
@@ -290,7 +292,7 @@ try {
     ok(!!lb && !(await conns(laptop))[0]?.paused, 'Laptop: connected', lb && lb.state)
     ok(/MARKER-PEOPLE/.test(fs.readFileSync(path.join(laptop.dataDir, 'bots', 'b1', 'people.json'), 'utf8')), 'with what its bot keeps about each person')
     const lh = await laptop.api('/bots/b2')
-    ok(lh.settings.answerers?.join() === 'agent:codex,agent:claude' && lh.settings.changes === 'pr' && lh.settings.mcp.join() === 'tracker' && lh.settings.memory === 'auto' && lh.settings.agentsStatus === true, 'and Helper does for you there what it did here', lh.settings)
+    ok(lh.settings.answerers?.join() === 'agent:codex,agent:claude' && lh.settings.changes === 'suggest' && lh.settings.mcp.join() === 'tracker' && lh.settings.memory === 'auto' && lh.settings.agentsStatus === true, 'and Helper does for you there what it did here', lh.settings)
     ok(await until(async () => (await sockets()) === 1, 10000) && (await studio.api('/bots/b1')).state !== 'connected', 'one connection to Slack, Laptop\'s', await sockets())
     const again = await studio.api('/backup/move', { to: laptopM.id }).catch((e) => e)
     ok(again.status === 409 && again.j?.code === 'moved', 'one setup in one place: moving it again means Start Here Again first', again.message)
