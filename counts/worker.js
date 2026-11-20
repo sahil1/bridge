@@ -5,7 +5,7 @@
 // A report is checked against the public list (shared/telemetry-schema.json): a name that isn't on
 // it, or a value that isn't one of its ranges, is dropped, never kept. What's kept is only totals
 // per week, in D1: how many reports said each thing (version, system, layout, how long installed,
-// days used) and how many said each count was in each range. A report as it came is never stored,
+// days used) and how many said each count, and each amount (tokens, hours, words), was in each range. A report as it came is never stored,
 // and neither is anything about who sent it: the IP address isn't read, and the Worker's logs are
 // off (wrangler.toml). The report's nonce, random and new for each report, is kept for ten weeks so
 // a report sent twice (its answer lost on the way) counts once.
@@ -24,6 +24,8 @@ import { scrub } from '../shared/crashreport.js'
 const NAMES = new Set(Object.keys(SCHEMA.counters))
 const BUCKETS = new Set(SCHEMA.buckets.filter((b) => b !== '0'))
 const DAY_TIMES = new Set(SCHEMA.dayTimeRanges || [])
+// Each amount's ranges (tokenRanges, timeRanges, wordRanges), but 0, which isn't sent.
+const AMOUNTS = Object.fromEntries(Object.entries(SCHEMA.amounts || {}).filter(([k]) => k !== 'about').map(([k, v]) => [k, new Set((SCHEMA[v.ranges] || []).filter((x) => x !== '0'))]))
 // What a report may say about the install; anything else is kept as "other".
 const ONE_OF = {
   os: ['mac', 'windows', 'linux'],
@@ -128,6 +130,11 @@ export function check(r, now = new Date()) {
   let dropped = 0
   for (const [k, v] of Object.entries(r.counts && typeof r.counts === 'object' ? r.counts : {})) {
     if (NAMES.has(k) && BUCKETS.has(v)) counts[k] = v
+    else dropped++
+  }
+  // Amounts, kept as counts are (their names are apart): each with the range it was in.
+  for (const [k, v] of Object.entries(r.amounts && typeof r.amounts === 'object' && !Array.isArray(r.amounts) ? r.amounts : {})) {
+    if (AMOUNTS[k]?.has(v)) counts[k] = v
     else dropped++
   }
   // The rest, each kept as its own total (dims).

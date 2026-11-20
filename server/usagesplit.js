@@ -110,9 +110,9 @@ function codexLine(st, line) {
   add(st, st.sid, st.model || '', t, u.total_tokens || inp + out, cached, (inp - cached) * p.in + cached * p.cached + out * p.out)
 }
 
-async function read(kind, since) {
-  const files = state[kind]
-  const want = logsOf(kind, since)
+// files: what's been read (Usage's, or counts'); only: the logs to read, when not all of them.
+async function read(kind, since, files = state[kind], only = null) {
+  const want = logsOf(kind, since).filter((f) => !only || only(f.file))
   const keep = new Set(want.map((f) => f.file))
   for (const f of files.keys()) if (!keep.has(f)) files.delete(f)
   const line = kind === 'claude' ? claudeLine : codexLine
@@ -186,6 +186,29 @@ function whoRan({ spans, firsts, all }, b0, b1) {
   if (!all) return null
   const could = [...firsts].filter(([, f]) => f == null || f < b1).map(([id]) => id)
   return could.length === 1 ? could[0] : null
+}
+
+// Tokens an agent used for Bridge AI from `from` to `to`, for usage stats (counts.js): the five
+// minutes of each conversation it was seen live in one of Bridge AI's panes, or answering a
+// question Bridge AI asked it (accounts.js runs()). Only those conversations' logs are read (none,
+// when it ran none), with a state of their own, so Usage's days aren't read again for it.
+const forCounts = { claude: new Map(), codex: new Map() }
+export async function viaBridge(kind, from, to) {
+  if (!forCounts[kind]) return 0
+  const { runs } = accounts.runs()
+  const ran = (sid, b0, b1) => (runs[sid] || []).some(([id, a, z]) => String(id).startsWith(`${kind}-`) && a - SLACK < b1 && z + SLACK > b0)
+  const sids = Object.keys(runs).filter((sid) => ran(sid, from, to))
+  if (!sids.length) { forCounts[kind].clear(); return 0 }
+  const logs = await read(kind, from - STEP, forCounts[kind], (file) => sids.some((sid) => file.includes(sid)))
+  let n = 0
+  for (const st of logs) {
+    for (const [k, c] of st.cells) {
+      const [sid, , b] = k.split('\t')
+      const b0 = Number(b) * STEP
+      if (b0 >= from && b0 < to && ran(sid, b0, b0 + STEP)) n += c[0]
+    }
+  }
+  return n
 }
 
 // For Insights (insights.js): which account ran a conversation in the five minutes from b0, by

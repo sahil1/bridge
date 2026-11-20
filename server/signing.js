@@ -10,6 +10,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { PDFDocument, StandardFonts, PDFSignature, PDFTextField, PDFName, PDFRef, degrees, rgb } from 'pdf-lib'
 import { DATA, writeFileAtomic } from './paths.js'
+import * as counts from './counts.js'
 import { safePath } from './files.js'
 import { shownSize, fitImage, dateSize, dateSpot, toUser, KINDS } from '../shared/signmarks.js'
 
@@ -290,5 +291,5 @@ export function routes(app, { wrap, rootOf, sq }) {
   app.delete('/api/studio/signature/:which', wrap((req) => forget(req.params.which)))
   app.get('/api/studio/sign/check', wrap(async (req) => { const q = sq(req); return inspect(await rootOf(q.root), q.path) }))
   app.post('/api/studio/sign/explain', wrap(async (req) => { const q = sq(req); return explain(await rootOf(q.root), q.path, { pages: req.body?.pages, total: req.body?.total, model: req.body?.model ? String(req.body.model) : null, lang: req.body?.lang }) }))
-  app.post('/api/studio/sign', wrap(async (req) => { const q = sq(req); return { root: q.root, ...(await sign(await rootOf(q.root), q.path, req.body?.marks)) } }))
+  app.post('/api/studio/sign', wrap(async (req) => { const q = sq(req); const out = await sign(await rootOf(q.root), q.path, req.body?.marks); counts.add('pdfs.signed'); return { root: q.root, ...out } }))
 }

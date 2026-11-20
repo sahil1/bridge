@@ -23,7 +23,9 @@ project. Each Bridge AI with sharing on sends it one report per week, once the w
   - `reports`: one row per week and combination of answers (version, OS, chip, how it's installed,
     layout, runtime, phone paired, how long installed, days used, time in use and time running,
     each a range), with `n`, how many reports said exactly that.
-  - `counts`: one row per week, counter, range, OS and how long installed, with `n`.
+  - `counts`: one row per week, counter, range, OS and how long installed, with `n`. A week's
+    amounts (tokens, hours of meetings recorded, words dictated, time in each part of Bridge AI) go
+    here too, each with the range it was in (`tokenRanges`, `timeRanges`, `wordRanges`).
   - `seen`: the nonces of the last ten weeks, with the day each arrived.
 
   A report as it came is never stored. The IP address isn't read, and the Worker's logs are off

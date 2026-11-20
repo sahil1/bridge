@@ -32,6 +32,7 @@ import { canOpen } from './files.js'
 import { mayLook, noteAsked } from './projects.js'
 import { isLimit, search as searchWeb, searchVia } from './consult.js'
 import * as modelList from './modellist.js'
+import * as counts from './counts.js'
 
 const DIR = path.join(DATA, 'meetings')
 const RATE = 16000
@@ -646,6 +647,8 @@ export async function stop(id) {
   // More was recorded since its summary was written (reopen): it says so until it's written again.
   saveMeta({ ...m, status: 'transcribing', endedAt: new Date().toISOString(), seconds: Math.round(seconds || 0), ...(m.resumedAt && fs.existsSync(path.join(dirOf(id), 'summary.md')) ? { summaryStale: 'recorded' } : {}) })
   for (const s of Object.values(l?.sources || {})) { s.finder.flush(); (await s.out).end().catch(() => {}) }
+  // Usage stats' hours recorded: what this stretch added (one recorded again starts from before).
+  counts.amount('time.meetings', Math.max(0, (seconds || 0) - (m.resumedAt ? m.resumedFrom || 0 : 0)) / 60).catch(() => {})
   if (m.partOf) recount(m.partOf)
   settle(id)
   return meta(id)

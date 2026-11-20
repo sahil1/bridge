@@ -16,7 +16,10 @@
 //   the models behind Bridge AI's own answers (a chat, AI Assist, meeting notes, dictation…) and
 //   the ones agents start on, each as its family on the list ("claude-sonnet", "gpt-5"), never its
 //   name; how each answer was reached (a sign-in, a key, a cloud, this computer); and which part of
-//   Bridge AI asked.
+//   Bridge AI asked. And amounts, each as a range ("1-10M"): the tokens Claude Code and Codex used
+//   for Bridge AI (from their own logs, for the conversations it ran) and those in its own answers,
+//   hours of meetings recorded, words dictated (never the words), and time in use in each part of
+//   Bridge AI (Meetings, Studio, an agent…).
 // - a day's (<data>/telemetry/days/<day>.json), sent the next day: the version that day (and the
 //   one before it, the day it updated), its channel, bucket and tester as the week's has them, the
 //   OS and how it's installed, how many times it started, whether it crashed, and how long it was
@@ -92,6 +95,17 @@ export function bucket(n) {
   if (n === 1) return '1'
   return n <= 5 ? '2-5' : n <= 20 ? '6-20' : n <= 100 ? '21-100' : '100+'
 }
+// "1-10M": how a week's tokens are sent.
+export function tokenRange(n) {
+  return !(n > 0) ? '0' : n < 1e5 ? 'under 100K' : n < 1e6 ? '100K-1M' : n < 1e7 ? '1-10M' : n < 1e8 ? '10-100M' : n < 1e9 ? '100M-1B' : '1B+'
+}
+// "1K-5K": how a week's words dictated are sent.
+export function wordRange(n) {
+  return !(n > 0) ? '0' : n < 100 ? 'under 100' : n < 1000 ? '100-1K' : n < 5000 ? '1K-5K' : n < 20000 ? '5K-20K' : '20K+'
+}
+// The amounts on the list (tokens, minutes, words), each sent as one of its ranges.
+const AMOUNTS = Object.fromEntries(Object.entries(SCHEMA.amounts || {}).filter(([k]) => k !== 'about'))
+const RANGE = { tokenRanges: tokenRange, wordRanges: wordRange, timeRanges: timeRange }
 // The ISO week a moment is in, on this computer's calendar: '2026-W44'. BRIDGE_COUNTS_NOW (tests)
 // stands in for now.
 export const now = () => (process.env.BRIDGE_COUNTS_NOW ? new Date(process.env.BRIDGE_COUNTS_NOW) : new Date())
@@ -111,7 +125,7 @@ export function configure(c, { about, save } = {}) { cfg = c; if (about) context
 const sharing = () => !!(cfg && cfg.counts?.share !== false && endpoint() && !refused())
 
 // This week's counts, in memory and written down a few seconds after they change.
-let week = null // { week, counts: { name: n }, days: [1..7], active, open (minutes), nonce, installAge, about }
+let week = null // { week, counts: { name: n }, amounts: { name: n }, days: [1..7], active, open (minutes), nonce, installAge, about }
 let writing = null
 const fileOf = (w) => path.join(DIR, `${w}.json`)
 let loading = null // two counts at once wait for the same week
@@ -128,10 +142,10 @@ function current() {
 }
 // A week with nothing counted yet. What it says about this install is taken when it starts and
 // with each count, so the report sent after the week is the one shown during it.
-const fresh = async (w) => ({ week: w, counts: {}, days: [], active: 0, open: 0, nonce: crypto.randomBytes(12).toString('hex'), installAge: await installAge(), about: await context() })
+const fresh = async (w) => ({ week: w, counts: {}, amounts: {}, days: [], active: 0, open: 0, nonce: crypto.randomBytes(12).toString('hex'), installAge: await installAge(), about: await context() })
 // A week with nothing in it isn't written down. One that was only open, never used, is kept while
 // the week goes on (it may be used yet) but isn't sent (send()).
-const used = (w) => !!(Object.keys(w.counts).length || w.active > 0)
+const used = (w) => !!(Object.keys(w.counts).length || Object.keys(w.amounts || {}).length || w.active > 0)
 async function flush() {
   if (!week || !(used(week) || week.open > 0)) return
   await fs.promises.mkdir(DIR, { recursive: true })
@@ -152,6 +166,15 @@ async function addAll(names, by = 1) {
   today(w)
   later()
 }
+// More of an amount on the list (amounts): tokens, minutes or words. While sharing is off, nothing.
+export async function amount(name, by) {
+  if (!sharing() || !AMOUNTS[name] || !(by > 0)) return
+  const w = await current()
+  w.amounts ||= {}
+  w.amounts[name] = (w.amounts[name] || 0) + by
+  today(w)
+  later()
+}
 // The most of something at once this week (agents.peak).
 export async function most(name, n) {
   if (!sharing() || !NAMES.has(name) || !(n > (week?.counts[name] || 0))) return
@@ -168,12 +191,16 @@ export const familyOf = (model) => FAMILIES.find(([, re]) => re.test(String(mode
 export const agentModel = (model) => add(model ? `agents.model.${familyOf(model)}` : 'agents.model.default')
 // An answer Bridge AI asked a model for itself (chatmodels.js reply()): the model's family (the one
 // the provider says answered, when it says), how it was reached, and the part of Bridge AI that
-// asked (usagelog.js FEATURES).
+// asked (usagelog.js FEATURES). And its tokens (usagelog.js usageOf: in, the cache included, and
+// out), but for one through an agent's sign-in: that agent's own logs have it (agentTokens()).
 const VIA = (route) => (route === 'cli' ? 'signin' : route === 'bridge' ? 'builtin' : /^(ollama|lmstudio)$/.test(route) ? 'local' : /^(azure|bedrock|vertex)$/.test(route) ? 'cloud' : 'key')
-export async function answered(id, feature, said) {
+export async function answered(id, feature, said, usage = null) {
   const [route, ...rest] = String(id || '').split(':')
   await addAll([`models.${familyOf(said || rest.join(':') || route)}`, `models.via.${VIA(route)}`, NAMES.has(`ai.${feature}`) ? `ai.${feature}` : 'ai.other'])
+  if (route !== 'cli') await amount('tokens.models', (usage?.in || 0) + (usage?.out || 0))
 }
+// Words dictated (the count, never the words).
+export const dictated = (text) => amount('words.dictated', String(text || '').split(/\s+/).filter(Boolean).length)
 
 // How long Bridge AI has been on this computer, from when its data folder was made.
 async function installAge() {
@@ -198,8 +225,29 @@ export function report(w) {
     features: features({ ...(c.features || {}), ...(w.window || {}) }),
     agents: (c.agents || []).filter((k) => AGENT_KINDS.has(k)).sort(),
     counts: Object.fromEntries(Object.entries(w.counts).filter(([k, n]) => NAMES.has(k) && n > 0).sort(([a], [b]) => a.localeCompare(b)).map(([k, n]) => [k, bucket(n)])),
+    amounts: Object.fromEntries(Object.entries({ ...(w.amounts || {}), ...(w.agentTokens || {}) }).filter(([k, n]) => AMOUNTS[k] && n > 0).sort(([a], [b]) => a.localeCompare(b)).map(([k, n]) => [k, RANGE[AMOUNTS[k].ranges](n)])),
     nonce: w.nonce,
   }
+}
+// When an ISO week starts and ends, on this computer's calendar: [Monday 00:00, the next one).
+export function weekSpan(w) {
+  const [y, n] = String(w).split('-W').map(Number)
+  const jan4 = new Date(y, 0, 4)
+  const start = new Date(y, 0, 4 - ((jan4.getDay() + 6) % 7) + (n - 1) * 7)
+  return [start.getTime(), new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7).getTime()]
+}
+// The tokens Claude Code and Codex used for Bridge AI in a week, from their own logs (usagesplit.js
+// viaBridge): looked up as the week's report is shown or sent, rather than counted as they go.
+async function agentTokens(w) {
+  if (!sharing()) return w
+  const [from, to] = weekSpan(w.week)
+  const { viaBridge } = await import('./usagesplit.js')
+  const out = {}
+  for (const kind of ['claude', 'codex']) {
+    const n = await viaBridge(kind, from, to).catch(() => 0)
+    if (n > 0) out[`tokens.agents.${kind}`] = n
+  }
+  return { ...w, agentTokens: out }
 }
 // The update channel (stable, early or nightly), for Early Access from a Bold Bridge account who the
 // code is for (the account's id; none with no code), and the staged rollout's bucket (0-99, random):
@@ -231,6 +279,7 @@ export async function status() {
     to,
     stopped: cfg?.counts?.stopped || null,
     counters: SCHEMA.counters,
+    amounts: Object.fromEntries(Object.entries(AMOUNTS).map(([k, v]) => [k, v.about])),
     sent,
   }
 }
@@ -241,7 +290,7 @@ export async function preview() {
   if (!sharing()) return { share: false, week: weekOf(), report: report({ ...(await fresh(weekOf())), nonce: '(new for each report)' }) }
   const waiting = (await pending())[0]
   const w = waiting ? JSON.parse(await fs.promises.readFile(fileOf(waiting), 'utf8')) : await current()
-  return { share: true, week: w.week, report: report(w), goes: waiting ? 'next' : 'after this week', empty: !used(w) }
+  return { share: true, week: w.week, report: report(await agentTokens(w)), goes: waiting ? 'next' : 'after this week', empty: !used(w) }
 }
 export async function sentReport(w) {
   if (!/^\d{4}-W\d\d$/.test(String(w))) throw new Error('No such week')
@@ -279,7 +328,7 @@ export async function send() {
     const file = fileOf(w)
     const kept = await fs.promises.readFile(file, 'utf8').then(JSON.parse, () => null)
     if (!kept || !used({ counts: {}, ...kept })) { await fs.promises.rm(file, { force: true }); continue }
-    const body = report(kept)
+    const body = report(await agentTokens(kept))
     let r
     try {
       r = await fetch(endpoint(), { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': 'bridge-ai' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) })
@@ -391,15 +440,19 @@ export async function sendFirst() {
 }
 
 // A minute of Bridge AI in use, said by a window of it (POST /api/counts/active): counted once a
-// minute, however many windows and phones say so.
+// minute, however many windows and phones say so, to the part of Bridge AI it was in (area: one of
+// the amounts' time.area.*, else other).
 let lastActive = -1
-export async function activity() {
+export async function activity(area) {
   if (!sharing()) return { counted: false }
   const minute = Math.floor(now() / 60000)
   if (minute === lastActive) return { counted: false }
   lastActive = minute
   const w = await current()
   w.active = (w.active || 0) + 1
+  const where = AMOUNTS[`time.area.${area}`] ? `time.area.${area}` : 'time.area.other'
+  w.amounts ||= {}
+  w.amounts[where] = (w.amounts[where] || 0) + 1
   today(w)
   later()
   // And on the day's: written down every five minutes in use, and as the server stops.

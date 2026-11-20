@@ -618,6 +618,7 @@
   "An empty sheet": "空白工作表",
   "An empty whiteboard": "一个空白板",
   "An everyday word or acronym": "常用词或缩写",
+  "And how much, as ranges: the tokens agents used for Bridge AI and those in its own answers, hours of meetings recorded, words dictated (never the words), and time in each part of Bridge AI.": "以及用量，按区间：智能体为 Bridge AI 使用的 token 和它自己回答所用的 token、录制的会议时长、口述的字数（从不包括内容本身），以及在 Bridge AI 各部分花费的时间。",
   "And once, soon after Bridge AI first runs on a computer: that there's a new install, with its version, system and chip.": "另外，在 Bridge AI 首次在一台电脑上运行后不久发送一次：有一个新安装，以及它的版本、系统和芯片。",
   "And the call's sound, so the transcript knows who said what. macOS asks once to allow System Audio Recording, the first time you record a call.": "还有通话声音，这样转录才能分清谁说了什么。第一次录制通话时，macOS 会询问一次是否允许“系统录音”。",
   "And the words under it": "以及下面的文字",

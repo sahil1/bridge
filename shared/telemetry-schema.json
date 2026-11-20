@@ -37,6 +37,7 @@
     "features": "the features on, each as one of its values under features (only those)",
     "agents": "the coding agents installed on this computer, each one of agents",
     "counts": "each counter below that isn't 0, as a bucket",
+    "amounts": "each amount below (amounts) that isn't 0, as one of the ranges it names: tokens, hours of meetings recorded, words dictated, and time in use in each part of Bridge AI",
     "nonce": "random, new for each report, so a report sent twice is counted once; it says nothing about you or this computer"
   },
   "counters": {
@@ -76,6 +77,14 @@
     "dictations.saved": "Dictations saved",
     "meetings.toAgents": "A meeting's action item handed to an agent",
     "whiteboards.drawn": "Whiteboards drawn by a model",
+    "chief.delegated": "Tasks the Chief of Staff handed to a helper",
+    "routines.run": "Routines run, on their schedule or by hand",
+    "agents.handedOff": "Conversations handed off to another agent",
+    "studio.made.document": "Documents made in Studio (Word or Markdown)",
+    "studio.made.sheet": "Sheets made in Studio (Excel or CSV)",
+    "studio.made.deck": "Decks made in Studio",
+    "studio.made.other": "Other files made in Studio (a web page)",
+    "pdfs.signed": "PDFs signed in Studio",
     "models.claude-opus": "Answers from Claude Opus models that Bridge AI asked itself (chat, AI Assist, meeting notes, dictation…)",
     "models.claude-sonnet": "Answers from Claude Sonnet models that Bridge AI asked itself (chat, AI Assist, meeting notes, dictation…)",
     "models.claude-haiku": "Answers from Claude Haiku models that Bridge AI asked itself (chat, AI Assist, meeting notes, dictation…)",
@@ -142,6 +151,44 @@
     "agents.model.other": "Agents started on, or switched to, a model not on this list models",
     "agents.model.default": "Agents started on their own default model (none picked)"
   },
+  "amounts": {
+    "about": "How much, not how often (a week's report, amounts): each amount that isn't 0, as one of the ranges it names, never the number. Tokens are what a model read and wrote, what it read from its cache included, as its provider counts them. Time in a part of Bridge AI is time in use (activeTime) in the part you last typed, clicked or scrolled in.",
+    "tokens.agents.claude": { "about": "Tokens Claude Code used for Bridge AI: in its agents while Bridge AI ran them, and in the answers Bridge AI asked it for (a meeting's notes, a question), from Claude Code's own logs on this computer", "ranges": "tokenRanges" },
+    "tokens.agents.codex": { "about": "Tokens Codex used for Bridge AI: in its agents while Bridge AI ran them, and in the answers Bridge AI asked it for, from Codex's own logs on this computer", "ranges": "tokenRanges" },
+    "tokens.models": { "about": "Tokens in the answers Bridge AI got from a model itself (a chat, AI Assist, meeting notes, dictation…) with a key, through a cloud, from a model server on this computer or from its built-in model. One through an agent's sign-in is in that agent's tokens.", "ranges": "tokenRanges" },
+    "time.meetings": { "about": "Hours of meetings recorded", "ranges": "timeRanges" },
+    "words.dictated": { "about": "Words dictated: how many, never the words", "ranges": "wordRanges" },
+    "time.area.home": { "about": "Time in use on Home (Needs You, Everything, New)", "ranges": "timeRanges" },
+    "time.area.agents": { "about": "Time in use in an agent (its Chat, Terminal, Files or Changes), a terminal tab or the Agent Map", "ranges": "timeRanges" },
+    "time.area.chief": { "about": "Time in use with the Chief of Staff", "ranges": "timeRanges" },
+    "time.area.meetings": { "about": "Time in use in Meetings (a meeting, Insights, People, Memory)", "ranges": "timeRanges" },
+    "time.area.dictations": { "about": "Time in use in Dictations", "ranges": "timeRanges" },
+    "time.area.studio": { "about": "Time in use in Studio (documents, sheets, decks, PDFs, whiteboards, folders)", "ranges": "timeRanges" },
+    "time.area.today": { "about": "Time in use in the Today panel's overview or Markets", "ranges": "timeRanges" },
+    "time.area.mail": { "about": "Time in use in Mail", "ranges": "timeRanges" },
+    "time.area.calendar": { "about": "Time in use in Calendar", "ranges": "timeRanges" },
+    "time.area.usage": { "about": "Time in use in Usage", "ranges": "timeRanges" },
+    "time.area.bots": { "about": "Time in use in Bots", "ranges": "timeRanges" },
+    "time.area.settings": { "about": "Time in use in Settings", "ranges": "timeRanges" },
+    "time.area.other": { "about": "Time in use anywhere else (before anything above was used)", "ranges": "timeRanges" }
+  },
+  "tokenRanges": [
+    "0",
+    "under 100K",
+    "100K-1M",
+    "1-10M",
+    "10-100M",
+    "100M-1B",
+    "1B+"
+  ],
+  "wordRanges": [
+    "0",
+    "under 100",
+    "100-1K",
+    "1K-5K",
+    "5K-20K",
+    "20K+"
+  ],
   "timeRanges": [
     "0",
     "under 1 hour",

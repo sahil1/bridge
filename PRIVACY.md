@@ -460,7 +460,12 @@ Two reports go to the project's server, `counts.boldbridge.ai`, run on Cloudflar
   (an agent's sign-in, a key, a cloud, a model server on your computer, or the local model built
   in) and which part of Bridge AI asked; and for agents, the family of the model each started on or
   was switched to, or that none was picked. Never a model's name, and nothing from a prompt or an
-  answer.
+  answer. And amounts, each as a range: the tokens Claude Code and Codex used for Bridge AI ("1-10M":
+  read from their own logs on your computer, only for the conversations Bridge AI ran and while it
+  ran them), the tokens in the answers Bridge AI got from a model itself, the hours of meetings
+  recorded, how many words were dictated (never the words), and how long it was in use in each part
+  of Bridge AI (Home, an agent, the chief of staff, Meetings, Dictations, Studio, Today, Mail,
+  Calendar, Usage, Bots, Settings), as the part you last typed, clicked or scrolled in.
 - **Once a day**, after the day is over: the version it ran, the one it updated from that day if it
   did, its update channel, rollout bucket and account's id as above, the operating system and
   how it's installed, how many times it started (a range), whether something crashed, and how long

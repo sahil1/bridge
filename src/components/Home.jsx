@@ -106,7 +106,7 @@ export default function Home({ fleet, onLaunched, onMore, autoFocus = true }) {
   const name = project?.name?.split('/').pop()
   const addKey = <button type="button" className="link-btn" onClick={() => openSettings('providers')}>{t('add an API key')}</button>
   return (
-    <section className="pane home" aria-label={t('Start something new')}>
+    <section className="pane home" data-area="home" aria-label={t('Start something new')}>
       <div className="home-center">
         <h1 className="home-title">
           {project ? tn('What should we build in {project}?', { project: (

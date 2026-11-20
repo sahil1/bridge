@@ -682,7 +682,7 @@ export async function reply(id, messages, { signal, tools, system = SYSTEM, json
   const { usage, ...r } = await answer(id, messages, { signal, tools: canUseTools(id) ? tools : null, system, json, think })
   usagelog.record({ id, feature, usage, ms: Date.now() - started, instead })
   // The usage counts, when they're shared: the model's family, how it was reached, what asked.
-  counts.answered(id, feature, usage?.model).catch(() => {})
+  counts.answered(id, feature, usage?.model, usage).catch(() => {})
   return r
 }
 async function answer(id, messages, o) {

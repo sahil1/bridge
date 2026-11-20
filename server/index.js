@@ -684,9 +684,13 @@ app.get('/api/studio/version', async (req, res) => {
   } catch (e) { res.status(e.status || 404).json({ error: e.message }) }
 })
 app.post('/api/studio/restore', wrap(async (req) => { const q = sq(req); return studio.restore(await rootOf(q.root), q.path, String(req.body?.id || '')) }))
+// What a new file in Studio is, for usage stats (studio.made.*).
+const MADE = { '.docx': 'document', '.md': 'document', '.xlsx': 'sheet', '.csv': 'sheet', '.pptx': 'deck' }
 app.post('/api/studio/new', wrap(async (req) => {
   const q = sq(req)
-  return studio.create(await rootOf(q.root), String(req.body?.dir || ''), String(req.body?.name || ''), req.body?.data ? Buffer.from(String(req.body.data), 'base64') : Buffer.from(String(req.body?.text || '')))
+  const out = await studio.create(await rootOf(q.root), String(req.body?.dir || ''), String(req.body?.name || ''), req.body?.data ? Buffer.from(String(req.body.data), 'base64') : Buffer.from(String(req.body?.text || '')))
+  counts.add(`studio.made.${MADE[path.extname(out.name).toLowerCase()] || 'other'}`)
+  return out
 }))
 app.get('/api/studio/packs', wrap(async () => ({ packs: await studio.packs() })))
 app.post('/api/studio/packs', express.json({ limit: '1mb' }), wrap((req) => studio.savePack(req.body || {})))
@@ -1171,7 +1175,7 @@ app.post('/api/chief/threads/link', wrap(async (req) => {
 // ---------- The chief of staff's helpers (delegate.js) ----------
 // `bridge delegate`: a task on its list and a helper on it, now or once there's room. (Always the
 // chief's own list: another one's helpers are started only from here, frontdesk.js.)
-app.post('/api/chief/delegate', wrap((req) => delegate.add({ ...(req.body || {}), list: undefined })))
+app.post('/api/chief/delegate', wrap(async (req) => { const out = await delegate.add({ ...(req.body || {}), list: undefined }); counts.add('chief.delegated'); return out }))
 // Try again, on a task whose helper couldn't start or was closed before it finished.
 app.post('/api/chief/delegate/:task/retry', wrap((req) => delegate.retry(req.params.task)))
 // A helper's agent: in its own folder (made by delegate.js inside the chief's, so not checked
@@ -1289,7 +1293,7 @@ app.delete('/api/agents/:pane/queue/:id', wrap(async (req) => { queue.remove(req
 // The message box's model menu: what the agent is on, and switching it (models.js).
 makeModels({ rt, cfg, findAgent, launchAgent, archiveWhere, archive, pushFleet: () => pushFleet() }).routes(app, wrap)
 // Hand off to another agent from the same menu (handoff.js): Claude Code to Codex, say, with a handover.
-makeHandoff({ rt, cfg, chiefDir: CHIEF_DIR, findAgent, launchAgent, archiveWhere, pushFleet: () => pushFleet(), setChiefKind: (kind) => afterChange(settings.patch({ chief: { kind } })) }).routes(app, wrap)
+makeHandoff({ rt, cfg, chiefDir: CHIEF_DIR, findAgent, launchAgent: (o) => launchAgent(o).then((out) => { counts.add('agents.handedOff'); return out }), archiveWhere, pushFleet: () => pushFleet(), setChiefKind: (kind) => afterChange(settings.patch({ chief: { kind } })) }).routes(app, wrap)
 asks.routes(app, { wrap, findAgent, sendPrompt })
 
 app.get('/api/places', wrap(async () => {
@@ -1534,6 +1538,7 @@ app.post('/api/routines/:id/run', wrap(async (req) => {
 // A routine's run: a new agent in its folder, typed its command (the same agent, space and words
 // each time), or its command to the Chief of Staff, started first if it isn't running.
 async function startRoutine(def) {
+  counts.add('routines.run')
   // A bot's scheduled post: put to the bot, answered and posted in its channel (frontdesk.js).
   if (def.to === 'bot') {
     if (!botsOn()) throw new Error('Bots is off: turn it on in Settings › About & Updates › Beta Features')
@@ -1935,7 +1940,7 @@ const said = (fn) => async (req, res) => { try { res.json(await fn(req)) } catch
 app.get('/api/dictations', said((req) => dictations.list({ q: String(req.query.q || ''), before: req.query.before || null, limit: req.query.limit })))
 // The names said in each one kept go on memory's names (memoryview.js said).
 const toMemory = (r) => { if (r?.kept && r.id) dictations.get(r.id).then((d) => memoryView.said(d)).catch(() => {}); return r }
-app.post('/api/dictations', said(async (req) => toMemory(await (req.body?.restore ? dictations.add(req.body.restore, { restore: true }) : (counts.add('dictations.saved'), dictations.add(req.body || {}))))))
+app.post('/api/dictations', said(async (req) => toMemory(await (req.body?.restore ? dictations.add(req.body.restore, { restore: true }) : (counts.add('dictations.saved'), counts.dictated(req.body?.text), dictations.add(req.body || {}))))))
 app.delete('/api/dictations', said(() => dictations.clear()))
 app.get('/api/dictations/icons/:bundle', async (req, res) => {
   const f = dictations.iconFile(req.params.bundle)
@@ -3442,7 +3447,7 @@ app.get('/api/counts/preview', wrap(() => counts.preview()))
 app.get('/api/counts/sent/:week', wrap((req) => counts.sentReport(req.params.week)))
 // A minute of Bridge AI in use, from a window of it (src/activeTime.js): counted only while sharing
 // is on, once a minute however many windows say so.
-app.post('/api/counts/active', wrap(() => counts.activity()))
+app.post('/api/counts/active', wrap((req) => counts.activity(String(req.body?.area || ''))))
 
 // refresh=1: a person asked (Check now, Check for Updates…), so GitHub is asked now, and a release
 // out to some computers and not this one yet is offered here too.

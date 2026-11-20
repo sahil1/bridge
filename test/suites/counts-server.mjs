@@ -98,17 +98,23 @@ try {
     const ranges = SCHEMA.buckets.filter((b) => b !== '0')
     const full = await answer(await post(env, report({ nonce: nonce(3), counts: Object.fromEntries(names.map((n, i) => [n, ranges[i % ranges.length]])) })))
     ok(full.body?.ok === true && !full.body.dropped && names.every((n) => rows(db, 'counts').some((x) => x.name === n)), `every name on the public list is taken (${names.length})`, full)
+    // Every amount, in a range of its own kind (tokens, hours, words), kept beside the counts.
+    const amounts = Object.entries(SCHEMA.amounts).filter(([k]) => k !== 'about')
+    const inRange = ([n, v], i) => { const rs = SCHEMA[v.ranges].filter((x) => x !== '0'); return [n, rs[i % rs.length]] }
+    const sent = Object.fromEntries(amounts.map(inRange))
+    const am = await answer(await post(env, report({ nonce: nonce(4), amounts: sent })))
+    ok(am.body?.ok === true && !am.body.dropped && amounts.every(([n]) => rows(db, 'counts').some((x) => x.name === n && x.bucket === sent[n])), `every amount on the public list is taken, with its range (${amounts.length})`, am)
   }
 
   // ---------- What isn't on the list ----------
   {
     const db = d1()
     const env = { DB: db }
-    const odd = await answer(await post(env, report({ os: 'freebsd', arch: 'riscv', app: 'my fork', layout: undefined, daysActive: 12, extra: 'secret-project/notes-of-priya.txt', counts: { 'agents.started.claude': '2-5', 'repo.name': 'acme/secret', 'meetings.recorded': '7', 'prs.opened': '0' } })))
+    const odd = await answer(await post(env, report({ os: 'freebsd', arch: 'riscv', app: 'my fork', layout: undefined, daysActive: 12, extra: 'secret-project/notes-of-priya.txt', counts: { 'agents.started.claude': '2-5', 'repo.name': 'acme/secret', 'meetings.recorded': '7', 'prs.opened': '0' }, amounts: { 'tokens.models': '2-5', 'words.dictated': '1234', 'time.area.secret-project': 'under 1 hour', 'time.meetings': '0' } })))
     const r = rows(db, 'reports')[0]
-    ok(odd.status === 200 && odd.body?.dropped === 3 && r.os === 'other' && r.arch === 'other' && r.app === 'other' && r.layout === 'unknown' && r.days_active === -1, 'something unknown about the install is kept as "other" (or "unknown" when it isn\'t said), never as sent', { odd, r })
+    ok(odd.status === 200 && odd.body?.dropped === 7 && r.os === 'other' && r.arch === 'other' && r.app === 'other' && r.layout === 'unknown' && r.days_active === -1, 'something unknown about the install is kept as "other" (or "unknown" when it isn\'t said), never as sent', { odd, r })
     const all = everything(db)
-    ok(rows(db, 'counts').length === 1 && !/secret|priya|freebsd|riscv|my fork|repo\.name/.test(all), 'a name that isn\'t on the list, or a value that isn\'t a range (or 0), is dropped and never kept', all)
+    ok(rows(db, 'counts').length === 1 && !/secret|priya|freebsd|riscv|my fork|repo\.name|tokens|words|time\./.test(all), 'a name that isn\'t on the list, or a value that isn\'t its range (or 0), counts and amounts alike, is dropped and never kept', all)
   }
 
   // ---------- Turned away ----------

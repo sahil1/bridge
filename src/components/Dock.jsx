@@ -103,6 +103,9 @@ export function TodayBody({ wide, phone = false, onOpenAgent, tab, setTab, stack
   )
 }
 
+// Each tab's part of Bridge AI, for usage stats' time in each (activeTime.js); the rest is Today.
+const AREA = { mail: 'mail', calendar: 'calendar', usage: 'usage' }
+
 export default function Dock({ minimized, simple, maximized, onMinimize, onMaximize, onOpenAgent }) {
   const [tab, setTab] = useShared('cc-today-tab', 'overview')
   const here = useMailHere()
@@ -136,7 +139,7 @@ export default function Dock({ minimized, simple, maximized, onMinimize, onMaxim
     )
   }
   return (
-    <aside className={`pane dock tab-${tab}`} aria-label={t('Today')}>
+    <aside className={`pane dock tab-${tab}`} data-area={AREA[tab] || 'today'} aria-label={t('Today')}>
       <PaneHeader icon="today" title={t('Today')} minimized={false} maximized={maximized} onMinimize={onMinimize} onMaximize={onMaximize}>
         {maximized && <TodayTabs tab={tab} setTab={setTab} />}
       </PaneHeader>

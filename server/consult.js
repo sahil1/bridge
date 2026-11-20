@@ -238,7 +238,7 @@ function runOnce(kind, prompt, model, extraEnv = {}, signal) {
 async function runApi(id, prompt, model, feature, ms = TIMEOUT) {
   const started = Date.now()
   // What the answer took, on this computer, and its model's family in the usage counts (when shared).
-  const noted = (j, m) => { const usage = usagelog.usageOf(j); usagelog.record({ id: `${id}:${m}`, feature, usage, ms: Date.now() - started }); counts.answered(`${id}:${m}`, feature, usage?.model).catch(() => {}) }
+  const noted = (j, m) => { const usage = usagelog.usageOf(j); usagelog.record({ id: `${id}:${m}`, feature, usage, ms: Date.now() - started }); counts.answered(`${id}:${m}`, feature, usage?.model, usage).catch(() => {}) }
   const a = API[id]
   if (a.local) {
     const m = await localModel(model)
