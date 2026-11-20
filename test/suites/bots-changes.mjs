@@ -8,9 +8,10 @@
 //   and your Slack DM). Approved from Slack: Bridge AI pushes bot/<name>/<thread> (that branch only)
 //   and opens a draft pull request with your gh; never a merge, never the default branch; the link
 //   in the thread and the record. Someone who may ask but isn't named (everyone in its channels)
-//   gets a read-only agent: no change. pr: the draft pull request opens at once, its link in the
-//   draft; a follow-up in its thread adds to the same branch and pull request. gh signed out: said,
-//   in the draft and the record, and sent once it's back. Settings and Needs You in light and dark.
+//   gets a read-only agent: no change. pr is no more: a bot set so proposes as suggest does, its pull
+//   request opened once you approve; a follow-up in its thread, in the same session and copy, adds to
+//   the same branch and pull request. gh signed out: said, in the draft and the record, and sent once
+//   it's back. Settings and Needs You in light and dark.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -96,7 +97,7 @@ try {
     ok(!ghCalls().some((c) => c.args[1] === 'merge'), 'and never merges')
     const t1b = await timelineOf('b1', 'fix the typo in the README')
     ok(t1b.some((e) => e.type === 'change.approved' && e.by === 'Tester' && e.via === 'slack') && t1b.some((e) => e.type === 'pr.opened' && /\/pull\/\d+$/.test(e.url) && e.draft), 'approved, and the pull request, in its record', t1b.filter((e) => /^(change|pr)\./.test(e.type)).map((e) => e.type))
-    ok(!!(await until(() => !fs.existsSync(String(s1.cwd)), 10000)), 'its copy of the repository is tidied away once the pull request is open')
+    ok(fs.existsSync(String(s1.cwd)) && !!d1.session, 'its copy of the repository stays with its session, for its next turn (put away when the session ends)')
   })
 
   // ---------- Someone who may ask, but isn't named ----------
@@ -109,21 +110,24 @@ try {
     await kit.api(`/bots/questions/${d.id}`, { send: false })
   })
 
-  // ---------- pr: a draft pull request at once ----------
+  // ---------- pr: no more; it proposes, as suggest does ----------
   await part('pr', async () => {
     await kit.api('/bots/b1/settings', { changes: 'pr' })
+    ok((await botOf()).settings.changes === 'suggest', 'set to pr, it\'s kept as suggest: a pull request always waits for you')
     const q = await slack.ask({ user: 'U0DANA', text: `${M} Add a changelog line [edit CHANGELOG.md Added a line] [answer Added it.]` })
     const d = await draftOf('Add a changelog line')
-    const url = /Draft pull request: (\S+)/.exec(d?.draft || '')?.[1]
-    ok(!!url && d.change?.pr?.url === url && branches().includes(d.change.branch), 'pr: the draft pull request opens at once, its link in the draft', d?.draft)
-    ok(!d.auto && d.state === 'draft', 'the answer itself still waits for you')
+    ok(d?.change && !d.change.pr && !branches().includes(d.change.branch) && !/pull request/i.test(d.draft), 'nothing opened at once: the change waits for you', d && { draft: d.draft, change: d.change })
     await kit.api(`/bots/questions/${d.id}`, { send: true, text: d.draft })
-    ok(!!(await until(async () => (await inThread(q.ts)).find((x) => x.text.includes(url)), 15000)), 'sent, with its link')
-    // A follow-up in its thread: the same branch, the same pull request.
+    const sent = await until(async () => (await inThread(q.ts)).find((x) => /Draft pull request: (\S+)/.test(x.text)), 15000)
+    const url = /Draft pull request: (\S+)/.exec(sent?.text || '')?.[1]
+    ok(!!url && branches().includes(d.change.branch), 'approved: its pull request opens, sent with its link', sent?.text)
+    // A follow-up in its thread: the same session and copy, the same branch, the same pull request.
     await slack.ask({ user: 'U0DANA', thread: q.ts, text: 'And one more line please [edit CHANGELOG.md Added two lines] [answer Added another.]' })
     const f = await draftOf('one more line please')
-    ok(f?.change?.branch === d.change.branch && f.change.pr?.url === url && git(ORIGIN, 'show', `${d.change.branch}:CHANGELOG.md`) === 'Added two lines' && git(ORIGIN, 'rev-list', '--count', `main..${d.change.branch}`) === '2', 'a follow-up adds to the same branch and pull request', f?.change)
-    await kit.api(`/bots/questions/${f.id}`, { send: false })
+    ok(f?.change?.branch === d.change.branch && f.session === d.session, 'a follow-up goes on in the same session, on the same branch', f && { change: f.change, session: f.session, was: d.session })
+    await kit.api(`/bots/questions/${f.id}`, { send: true, text: f.draft })
+    const again = await until(async () => (await inThread(q.ts)).find((x) => /Added another\.[\s\S]*Draft pull request:/.test(x.text)), 15000)
+    ok(again?.text.includes(url) && git(ORIGIN, 'show', `${d.change.branch}:CHANGELOG.md`) === 'Added two lines' && git(ORIGIN, 'rev-list', '--count', `main..${d.change.branch}`) === '2', 'approved, it adds to the same branch and pull request', again?.text)
   })
 
   // ---------- gh signed out ----------

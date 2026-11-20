@@ -124,6 +124,30 @@
 //                                            line in ~/helpers-started.log (settings), with what
 //                                            --settings gave it (given: the file's JSON as it read it)
 //   claude --version                         2.1.312, or what ~/claude-version says
+//   claude --resume <id> ... ["<turn>"]      a bot's session started again where it left off: its
+//                                            conversation goes on in the same file, and the turn it's
+//                                            given (if any) is answered as a typed one is. Each in
+//                                            ~/resumes.log ({ id, cwd, args, message })
+//   A bot's session's later turns, typed in (or "Your next message is in <file>. Read it first…"):
+//   answered as its brief is, by what their question blocks say; an answer it asked another bot
+//   for (----- answer from <bot> -----) is said back ("<bot> says: …"). And:
+//     [push <title>]                         asks for a push with its request_push tool (bridge_session,
+//                                            as [make] calls bridge_outbox's: only when --allowedTools
+//                                            lets it), else says it couldn't
+//     [hand-to <bot> <note>], [ask-bot <bot> <question>]   a Chief's hand_to and ask_bot, the same
+//                                            way (ask-bot not again once the answer has come)
+//     [run <command>]                        runs a command with Bash: only when --tools lets it and the
+//                                            settings it loaded have sandbox.enabled, failIfUnavailable
+//                                            and allowUnsandboxedCommands false; its PreToolUse hooks
+//                                            (matcher Bash) first, as Claude Code runs them; nothing
+//                                            is really run
+//     [run-write <name> <text>]              a command that writes <name> in its folder, the same way
+//                                            (as a command would: not through its edit hooks)
+//     [fetch <host>]                         a command reaching <host>: only when its sandbox's
+//                                            network.allowedDomains has it (strictAllowlist: else
+//                                            refused)
+//     Each in ~/answer-tries.log (run, run-write, fetch, push, hand, ask).
+//   Esc while it works interrupts it: no answer, back at its prompt (each in ~/interrupts.log).
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -156,15 +180,17 @@ for (let i = 0; i < args.length; i++) {
   if (!args[i].startsWith('--') && !message) message = args[i]
 }
 // The brief in a file it's pointed to: read when it may (its folder, or a folder --add-dir gave it).
-const pointed = /^Your brief is in (.+?\.md)\. Read it first/.exec(message)
+const pointed = /^Your (?:brief|next message) is in (.+?\.md)\. Read it first/.exec(message)
 if (pointed) {
   const f = pointed[1]
   const ok = [process.cwd(), ...added].some((d) => path.resolve(f).startsWith(path.resolve(d) + path.sep))
   try { if (ok) message = fs.readFileSync(f, 'utf8') } catch { /* not there */ }
 }
-const id = opt('--session-id') || opt('--resume') || `s-${process.pid}`
+const id = (args.includes('--fork-session') ? opt('--session-id') : opt('--resume')) || opt('--session-id') || `s-${process.pid}`
 const home = os.homedir()
 const note = (file, o) => fs.appendFileSync(path.join(home, file), JSON.stringify(o) + '\n')
+// (Started again in its own conversation: a bot's session, after its pane was closed.)
+if (opt('--resume') && !args.includes('--fork-session')) note('resumes.log', { id, cwd: process.cwd(), args, message })
 // (And any Slack token it was given in its environment, by name: there should never be one.)
 const secrets = Object.entries(process.env).filter(([, v]) => /^(xox[abp]|xapp)-|^dtest\.|^teams-secret/.test(String(v))).map(([k]) => k)
 // Its settings: the sources --setting-sources names (all three without it), and --settings.
@@ -233,7 +259,8 @@ if (forked && forked !== id) {
   } catch { /* nothing to copy */ }
 }
 const log = fs.openSync(path.join(project, `${id}.jsonl`), 'a')
-let prev = null
+// (Gone on with: its conversation carries on from its last message, as Claude Code's does.)
+let prev = (() => { try { const l = fs.readFileSync(path.join(project, `${id}.jsonl`), 'utf8').trim().split('\n').pop(); return JSON.parse(l).uuid || null } catch { return null } })()
 const w = (o) => {
   const e = { sessionId: id, cwd: process.cwd(), uuid: `h-${Math.random().toString(36).slice(2)}`, parentUuid: prev, timestamp: new Date().toISOString(), ...o }
   prev = e.uuid
@@ -327,12 +354,17 @@ function preTool(name, input) {
   return { ok: true }
 }
 
-// An answer for the Slack Bot: what it can do is what it was started with.
+// An answer for the Slack Bot: what it can do is what it was started with. (A session's later turns
+// have no instructions of their own: its brief's hold.)
+let firstTold = null
+let timer = null
 function answerTurn(text) {
   // (On Windows its lines come as one, joined by " · ": runtime/spawn.js forCommandLine. Every
   // question block its brief has, as one: what someone added while it worked is asked of it too.)
   const q = [...text.matchAll(/----- question from.*? -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of question -----/g)].map((m) => m[1]).join('\n')
-  const told = (/----- instructions -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of instructions -----/.exec(text) || [])[1] || ''
+  const told = (/----- instructions -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of instructions -----/.exec(text) || [])[1] || firstTold || ''
+  if (firstTold == null) firstTold = told
+  const answered = (/----- answer from (.+?) -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of answer -----/.exec(text) || null)
   const sign = (/\[sign ([^\]]+)\]/.exec(told) || [])[1] || null
   const tools = opt('--tools')
   const can = (t) => tools == null || tools.split(',').map((x) => x.trim()).includes(t)
@@ -351,6 +383,24 @@ function answerTurn(text) {
   const outboxServer = (() => { for (const c of configs) { try { const x = JSON.parse(fs.readFileSync(c, 'utf8')).mcpServers?.bridge_outbox; if (x) return x } catch { /* unreadable */ } } return null })()
   const mayMake = !!outboxServer && args.includes('--strict-mcp-config') && allowed.includes('mcp__bridge_outbox__save_file')
   const mayAttach = !!outboxServer && args.includes('--strict-mcp-config') && allowed.includes('mcp__bridge_outbox__attach_file')
+  // Its session's own server (bridge_session): a push asked for, a Chief's hand_to and ask_bot.
+  const sessionServer = (() => { for (const c of configs) { try { const x = JSON.parse(fs.readFileSync(c, 'utf8')).mcpServers?.bridge_session; if (x) return x } catch { /* unreadable */ } } return null })()
+  const callSession = (name, input) => {
+    if (!sessionServer || !args.includes('--strict-mcp-config') || !allowed.includes(`mcp__bridge_session__${name}`)) return { ok: false, text: 'I have no tool for it' }
+    const asks = [
+      { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.312' } } },
+      { jsonrpc: '2.0', method: 'notifications/initialized' },
+      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name, arguments: input } },
+    ]
+    const r = require('node:child_process').spawnSync(sessionServer.command, sessionServer.args || [], { input: asks.map((x) => JSON.stringify(x)).join('\n') + '\n', env: { ...process.env, ...(sessionServer.env || {}) }, encoding: 'utf8', timeout: 20000 })
+    const said = String(r.stdout || '').split('\n').map((l) => { try { return JSON.parse(l) } catch { return null } }).find((x) => x?.id === 2)
+    tool(`mcp__bridge_session__${name}`, input)
+    return { ok: !!said?.result && !said.result.isError, text: said?.result?.content?.[0]?.text || said?.error?.message || r.error?.message || 'no answer' }
+  }
+  // Its sandbox, as the settings it loaded have it (the last that says).
+  const sandbox = loaded.map((x) => x.s.sandbox).filter(Boolean).at(-1) || null
+  const sandboxed = !!sandbox && sandbox.enabled === true && sandbox.failIfUnavailable === true && sandbox.allowUnsandboxedCommands === false
+  const mayRun = can('Bash') && sandboxed
   // One of its tools called, as Claude Code calls one: { ok, text }.
   const callOutbox = (name, input) => {
     const asks = [
@@ -383,8 +433,40 @@ function answerTurn(text) {
   // already; not again once it's picked up.)
   const early = []
   if (!again) for (const m of q.matchAll(/\[make-early ([^\s\]]+)(?: ([^\]]+))?\]/g)) makeTo(early)(m[1], `${m[2] || `The ${m[1]} you asked for.`}\n`)
-  setTimeout(() => {
+  timer = setTimeout(() => {
+    timer = null
     const out = [...early]
+    if (answered) out.push(`${answered[1]} says: ${answered[2].replace(/\n| · /g, ' ').trim()}`)
+    for (const m of q.matchAll(/\[push ([^\]]+)\]/g)) { const r = callSession('request_push', { title: m[1].trim(), summary: 'What I changed.' }); tried('push', r.ok); out.push(r.ok ? `I asked to push "${m[1].trim()}".` : `I couldn't ask to push: ${r.text}.`) }
+    for (const m of q.matchAll(/\[hand-to ([\w-]+)(?: ([^\]]+))?\]/g)) { const r = callSession('hand_to', { bot: m[1].replace(/-/g, ' '), note: m[2] || '' }); tried('hand', r.ok); out.push(r.ok ? `I've handed this to ${m[1].replace(/-/g, ' ')}.` : `I couldn't hand it on: ${r.text}.`) }
+    if (!answered) for (const m of q.matchAll(/\[ask-bot ([\w-]+) ([^\]]+)\]/g)) { const r = callSession('ask_bot', { bot: m[1].replace(/-/g, ' '), question: m[2] }); tried('ask', r.ok); out.push(r.ok ? `I've asked ${m[1].replace(/-/g, ' ')}.` : `I couldn't ask it: ${r.text}.`) }
+    // Commands: Bash, in its sandbox, its hooks first; nothing really run.
+    const runs = [...q.matchAll(/\[run ([^\]]+)\]/g)].map((m) => ({ cmd: m[1], kind: 'run' }))
+      .concat([...q.matchAll(/\[run-write ([\w./-]+) ([^\]]+)\]/g)].map((m) => ({ cmd: `printf '%s\\n' '${m[2]}' > ${m[1]}`, kind: 'run-write', name: m[1], body: m[2] })))
+      .concat([...q.matchAll(/\[fetch ([\w.-]+)\]/g)].map((m) => ({ cmd: `curl -s https://${m[1]}/`, kind: 'fetch', host: m[1] })))
+    for (const r of runs) {
+      if (!mayRun) { tried(r.kind, false, { command: r.cmd, why: can('Bash') ? 'no sandbox' : 'no Bash' }); out.push(`I can't run commands here.`); continue }
+      const h = preTool('Bash', { command: r.cmd })
+      if (!h.ok) { tried(r.kind, false, { command: r.cmd, why: h.why.slice(0, 300) }); out.push(`I couldn't run it: ${h.why.split('\n')[0]}`); continue }
+      tool('Bash', { command: r.cmd })
+      if (r.kind === 'fetch') {
+        const ok = (sandbox.network?.allowedDomains || []).some((d) => d === r.host || (d.startsWith('*.') && r.host.endsWith(d.slice(1))))
+        tried('fetch', ok, { command: r.cmd, host: r.host })
+        out.push(ok ? `I reached ${r.host}.` : `I couldn't reach ${r.host}: the sandbox refused it.`)
+        continue
+      }
+      if (r.kind === 'run-write') {
+        const f = path.resolve(process.cwd(), r.name)
+        const deny = (sandbox.filesystem?.denyWrite || []).some((d) => f === d || f.startsWith(d + path.sep))
+        if (deny) { tried('run-write', false, { command: r.cmd, why: 'sandbox' }); out.push(`I couldn't write ${r.name}: the sandbox refused it.`); continue }
+        try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${r.body}\n`) } catch (e) { tried('run-write', false, { command: r.cmd, why: e.code }); out.push(`I couldn't write ${r.name}: ${e.code}.`); continue }
+        tried('run-write', true, { command: r.cmd })
+        out.push(`I ran a command that wrote ${r.name}.`)
+        continue
+      }
+      tried('run', true, { command: r.cmd })
+      out.push(`I ran ${r.cmd}.`)
+    }
     for (const f of fs.readdirSync(process.cwd()).filter((x) => /\.(md|txt)$/.test(x)).slice(0, 3)) tool('Read', { file_path: path.join(process.cwd(), f) })
     const w = /\[try-write ([\w.-]+)\]/.exec(q)
     if (w) {
@@ -393,7 +475,7 @@ function answerTurn(text) {
       if (mayHere) { tool('Write', { file_path: path.join(process.cwd(), w[1]) }); fs.writeFileSync(path.join(process.cwd(), w[1]), 'Written.\n'); tried('write', true); out.push(`I wrote ${w[1]}.`) } else { tried('write', false); out.push(can('Write') ? `I can't write ${w[1]}: writing there was refused.` : `I can't write ${w[1]}: I have no tool that writes files.`) }
     }
     if (/\[try-run\]/.test(q)) {
-      if (can('Bash')) { fs.writeFileSync(path.join(process.cwd(), 'ran.txt'), ''); tried('run', true); out.push('I ran it.') } else { tried('run', false); out.push('I can\'t run commands here.') }
+      if (mayRun) { fs.writeFileSync(path.join(process.cwd(), 'ran.txt'), ''); tried('run', true); out.push('I ran it.') } else { tried('run', false); out.push('I can\'t run commands here.') }
     }
     for (const r of q.matchAll(/\[try-read ([^\]]+)\]/g)) {
       const want = path.resolve(r[1].replace(/^~/, home))
@@ -521,8 +603,13 @@ if (process.stdin.isTTY) process.stdin.setRawMode(true)
 process.stdout.write('\x1b[?2004h')
 let box = ''
 let pasting = false
+// (A paste's end cut between two reads, as a terminal hands over a long one: its start kept for the
+// next read.)
+let carry = ''
+const endCut = (t) => { for (let i = Math.max(0, t.length - 5); i < t.length; i++) if ('\x1b[201~'.startsWith(t.slice(i))) return i; return t.length }
 process.stdin.on('data', (d) => {
-  let s = String(d)
+  let s = carry + String(d)
+  carry = ''
   if (state === 'trust') {
     for (const k of s.match(/\x1b\[[AB]|[\r\n]|\x1b|./g) || []) {
       if (k === '\x1b[B') pick = 1
@@ -548,18 +635,26 @@ process.stdin.on('data', (d) => {
   while (s.length) {
     if (pasting) {
       const end = s.indexOf('\x1b[201~')
-      if (end < 0) { box += s; s = '' } else { box += s.slice(0, end); s = s.slice(end + 6); pasting = false }
+      if (end < 0) { const cut = endCut(s); box += s.slice(0, cut); carry = s.slice(cut); s = '' } else { box += s.slice(0, end); s = s.slice(end + 6); pasting = false }
     } else if (s.startsWith('\x1b[200~')) { pasting = true; s = s.slice(6) }
     else if (s.startsWith('\x1b[') || s.startsWith('\x1bO')) { const k = /^\x1b[[O][0-9;?]*[A-Za-z~]/.exec(s); s = s.slice(k ? k[0].length : 2) }
-    else if (s[0] === '\x1b') s = s.slice(1)
+    else if (s[0] === '\x1b') {
+      s = s.slice(1)
+      // (Esc while it works: interrupted, as Claude Code is, back at its prompt with no answer.)
+      if (state === 'working' && timer) { clearTimeout(timer); timer = null; user('[Request interrupted by user]'); said = 'Interrupted · What should Claude do instead?'; state = 'idle'; note('interrupts.log', { session: id, cwd: process.cwd() }); draw() }
+    }
     else {
       const c = s[0]
       s = s.slice(1)
       if (c === '\r' || c === '\n') {
-        const text = box.trim()
+        let text = box.trim()
         box = ''
         if (!text) continue
         if (!message) note('chief-got.log', { session: id, text })
+        // (A bot's session's next turn, or one pointed to in a file: answered as its brief was.)
+        const next = /^Your next message is in (.+?\.md)\. Read it first/.exec(text)
+        if (next) { try { if ([process.cwd(), ...added].some((d) => path.resolve(next[1]).startsWith(path.resolve(d) + path.sep))) text = fs.readFileSync(next[1], 'utf8') } catch { /* not there */ } }
+        if (/----- question from/.test(text)) { note('turns.log', { session: id, cwd: process.cwd(), text }); answerTurn(text); continue }
         turn(text, message ? `Followed up: ${text.split('\n')[0]}` : 'Noted.', 1000, null)
       } else if (c === '\x7f' || c === '\b') box = Array.from(box).slice(0, -1).join('')
       else if (c >= ' ') box += c
