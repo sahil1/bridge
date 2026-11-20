@@ -65,13 +65,43 @@ function micWithin(open, ms = 20_000) {
 // Bridge AI restarts), 'reset' (on, and still no screen: Reset and ask again) or 'click' (the picker
 // opens only from a click in the window itself).
 const screenErr = (text, fix = null) => Object.assign(new Error(text), { fix })
+// How long a picker is waited on before it's said, and a screen picked for its first look. On macOS
+// 15 and later the desktop app's picker is macOS's own, which Electron 45 opens itself without
+// asking the app (lib/browser/api/session.ts) and which says nothing when it's closed with nothing
+// picked, or when a pick isn't passed on: the page hears only Chromium's timeout (below), and asks
+// again. So a wait with nothing at the end of it is said, and Watch a screen offered again, rather
+// than Picking for ever (a pick that comes after is still watched); and a screen that sends nothing
+// once picked is said too. (window.__bridgePickWait and __bridgeLookWait: the tests' shorter waits.)
+const pickWait = () => Number(window.__bridgePickWait) || 60_000
+const lookWait = () => Number(window.__bridgeLookWait) || 20_000
+// macOS's own picker, as Electron 45 opens it, comes up as the screen's capture starts (its patch
+// to Chromium: ScreenCaptureKitDeviceMac::OnStart presents it, and the capture says it has started
+// only once something's picked), and Chromium gives a capture 10 seconds to start
+// (VideoCaptureImpl::kCaptureStartTimeout). So a pick that takes longer is turned down first, as an
+// AbortError "Timeout starting video source", and the pick after it goes nowhere. That's not
+// nothing picked: the screen is asked for again at once (Chromium needs no click for it), a moment
+// after, so the capture that timed out has gone, and the picker is up again for the pick, until
+// pickWait. (window.__bridgeReaskMs: the tests'.)
+const timedOut = (e) => e?.name === 'AbortError' && /timeout starting video source/i.test(e?.message || '')
+const reaskMs = () => Number(window.__bridgeReaskMs) || 1000
+// What a picked screen is, for the log: its kind and its size (not its name: a window's title can
+// be anything, and the log goes with a crash report).
+const pickedOf = (stream) => {
+  const s = stream?.getVideoTracks?.()[0]?.getSettings?.() || {}
+  return { surface: s.displaySurface || null, w: s.width || null, h: s.height || null }
+}
+
 // getDisplayMedia said no (e): why, as far as can be told. In the desktop app, its own reason first
 // (desktop/screenpick.js): Electron passes on only "Invalid capture constraints", whatever it was.
-// Nothing picked (the picker closed, or Cancel there) is said too, as none.
+// Nothing picked (the picker closed, or Cancel there) is said too, as none. The app's reason goes
+// with it (app), for the log.
 async function whyNot(e) {
+  const said = window.bridgeApp?.screenWhy ? await Promise.resolve(window.bridgeApp.screenWhy()).catch(() => null) : null
+  return Object.assign(whyFrom(e, said), { app: said?.why || null })
+}
+function whyFrom(e, said) {
   const app = window.bridgeApp
   const mac = app?.platform === 'darwin'
-  const said = app?.screenWhy ? await Promise.resolve(app.screenWhy()).catch(() => null) : null
   switch (said?.why) {
     case 'off': return screenErr(t('Screen Recording is off for Bridge AI. Turn it on under System Settings › Privacy & Security › Screen & System Audio Recording, then watch a screen again.'), 'screen')
     case 'restricted': return screenErr(t("A profile on this Mac turns off Screen Recording for Bridge AI, so it can't watch a screen here."))
@@ -91,6 +121,9 @@ async function whyNot(e) {
     if (mac) return screenErr(t('Screen Recording is off for Bridge AI. Turn it on under System Settings › Privacy & Security › Screen & System Audio Recording, then watch a screen again.'), 'screen')
     return screenErr(app ? t("This computer isn't letting Bridge AI see the screen.") : t("macOS isn't letting this browser see the screen. Turn on your browser under System Settings › Privacy & Security › Screen & System Audio Recording, in Screen Recording, then try again."))
   }
+  // The capture didn't start in time: with macOS's picker in the desktop app, nothing picked in it
+  // while it was asked (timedOut, above), else a screen that didn't start. Not "nothing picked".
+  if (timedOut(e)) return mac ? screenErr(t("macOS's picker hasn't given a screen. If it closed or you can't see it, click Watch a screen to open it again.")) : screenErr(t("Couldn't start watching the screen ({why}). Click Watch a screen to try again.", { why: e.message }))
   // Asked without a click (Safari says InvalidAccessError, Chromium InvalidStateError).
   if (e?.name === 'InvalidStateError' || e?.name === 'InvalidAccessError' || /activation|gesture/i.test(e?.message || '')) return screenErr(t('Click Watch a screen here: the picker opens only from a click in this window.'), 'click')
   if (e?.name === 'NotAllowedError' || e?.name === 'AbortError') {
@@ -254,67 +287,154 @@ export function MeetingsProvider({ children }) {
   // For a video (Record the screen too): smooth, at most 1920 wide (the stills are no bigger), and
   // with its own sound where that can be the call's (a browser offers a tab's, the desktop app on
   // Windows what the computer plays) unless Bridge AI records the call's sound itself (call: a Mac).
-  const pick = async ({ video: filmIt = false, call = false } = {}) => {
+  // Each Watch a screen: a line in the server's log once it's known how it went (server meetings.js
+  // screenLine), so one that did nothing can be traced. from: where it was clicked ('bar', 'menu',
+  // 'card', 'start' for Record the screen too as recording starts); how the screen was asked for
+  // (the desktop app says: macOS's own picker, or its own answer); then picked, with its first look
+  // and first picture or nothing from it, refused and why, cancelled, or no answer. A pick that
+  // comes after its line (after no answer, or Cancel) writes another.
+  const tries = useRef(0)
+  const tryNow = useRef(null) // the try whose picker is up
+  const attempt = (from) => {
     const app = window.bridgeApp
+    // Asked as the click is answered, not waited on: the picker needs the click's moment.
+    const how = app?.screenHow ? Promise.resolve(app.screenHow()).catch(() => null) : Promise.resolve(null)
+    return { n: ++tries.current, from, at: Date.now(), mid: null, how, lines: 0, again: 0 }
+  }
+  const tell = (a, x) => {
+    if (!a) return
+    const more = ++a.lines > 1
+    a.how.then((how) => api('/meetings/screen-log', { method: 'POST', body: { n: a.n, from: a.from, via: !window.bridgeApp ? 'browser' : how?.picker ? 'macos-picker' : 'app', off: how?.off || null, meeting: a.mid || null, more, ...x } })).catch(() => {})
+  }
+  const pick = async ({ video: filmIt = false, call = false, from = 'other' } = {}) => {
+    const app = window.bridgeApp
+    const a = attempt(from)
+    const no = (error) => { tell(a, { end: 'refused', said: error.message, ms: 0 }); return { error } }
     // A window of the desktop app showing another computer: the screen would be this one's, for a
     // meeting on that one (the app says no there too: desktop/senders.js permits).
-    if (app && machineId) return { error: screenErr(t('This window shows another of your computers. Watch a screen from a Bridge AI window on this computer.')) }
-    if (window.top !== window) return { error: screenErr(t("Watch a screen from Bridge AI's own window: this page is inside another one.")) }
-    if (!navigator.mediaDevices?.getDisplayMedia) return { error: screenErr(t('Watching a screen needs the desktop app, or a browser that can share one')) }
+    if (app && machineId) return no(screenErr(t('This window shows another of your computers. Watch a screen from a Bridge AI window on this computer.')))
+    if (window.top !== window) return no(screenErr(t("Watch a screen from Bridge AI's own window: this page is inside another one.")))
+    if (!navigator.mediaDevices?.getDisplayMedia) return no(screenErr(t('Watching a screen needs the desktop app, or a browser that can share one')))
     const sound = filmIt && !call && (!app || app.platform === 'win32')
     const n = ++pickNo.current
+    tryNow.current = a
     const slow = setTimeout(() => { if (pickNo.current === n) setPicking(true) }, 400)
+    // Nothing from the picker in a while: said on the meeting and the card, and Watch a screen
+    // there again. (Still answered later, it's watched: the wait is only what's shown.)
+    const late = setTimeout(() => {
+      if (pickNo.current !== n) return
+      setPicking(false)
+      const e = screenErr(app?.platform === 'darwin' ? t("macOS's picker hasn't given a screen. If it closed or you can't see it, click Watch a screen to open it again.") : t("No screen has been picked yet. If the picker closed or you can't see it, click Watch a screen to open it again."))
+      a.late = e.message
+      setScreenNote(e)
+      chan.current?.postMessage({ type: 'error', text: e.message })
+      tell(a, { end: 'unanswered', ms: Date.now() - a.at, again: a.again })
+    }, pickWait())
+    const ask = () => navigator.mediaDevices.getDisplayMedia({ video: filmIt ? { frameRate: { ideal: 15, max: 30 }, width: { max: 1920 }, height: { max: 1200 } } : { frameRate: { ideal: 2, max: 5 } }, audio: sound, ...(sound ? { systemAudio: 'include' } : {}), selfBrowserSurface: 'exclude', surfaceSwitching: 'include' })
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: filmIt ? { frameRate: { ideal: 15, max: 30 }, width: { max: 1920 }, height: { max: 1200 } } : { frameRate: { ideal: 2, max: 5 } }, audio: sound, ...(sound ? { systemAudio: 'include' } : {}), selfBrowserSurface: 'exclude', surfaceSwitching: 'include' })
-      if (pickNo.current !== n) { stream.getTracks().forEach((x) => x.stop()); return {} }
-      return { stream }
+      let stream = null
+      while (!stream) {
+        try { stream = await ask() } catch (e) {
+          // A pick slower than Chromium lets a capture start: asked again (above), not said as none.
+          if (app?.platform !== 'darwin' || !timedOut(e) || pickNo.current !== n || Date.now() - a.at >= pickWait()) throw e
+          a.again++
+          await new Promise((r) => setTimeout(r, reaskMs()))
+          if (pickNo.current !== n) return {}
+        }
+      }
+      const ms = Date.now() - a.at
+      // Cancelled, or asked again meanwhile: this one let go.
+      if (pickNo.current !== n) { stream.getTracks().forEach((x) => x.stop()); tell(a, { end: 'released', ms, again: a.again, ...pickedOf(stream) }); return {} }
+      Object.assign(a, { ms }, pickedOf(stream))
+      return { stream, attempt: a }
     } catch (e) {
-      return pickNo.current !== n ? {} : { error: await whyNot(e) }
+      if (pickNo.current !== n) return {}
+      const error = await whyNot(e)
+      tell(a, { end: 'refused', why: `${e?.name || 'Error'}: ${e?.message || ''}`, app: error.app, said: error.message, ms: Date.now() - a.at, again: a.again })
+      return { error }
     } finally {
       clearTimeout(slow)
-      if (pickNo.current === n) setPicking(false)
+      clearTimeout(late)
+      if (pickNo.current === n) { setPicking(false); tryNow.current = null }
     }
   }
-  const cancelPick = () => { pickNo.current++; setPicking(false) }
-  const pickFirst = () => (video && canRecordScreen() ? pick({ video: true }) : null)
-  const letGo = (picking) => { picking?.then((r) => r.stream?.getTracks().forEach((x) => x.stop())) }
+  const cancelPick = () => {
+    const a = tryNow.current
+    pickNo.current++
+    tryNow.current = null
+    setPicking(false)
+    if (a) tell(a, { end: 'cancelled', ms: Date.now() - a.at })
+  }
+  const pickFirst = () => (video && canRecordScreen() ? pick({ video: true, from: 'start' }) : null)
+  const letGo = (picking) => { picking?.then((r) => { if (!r.stream) return; r.stream.getTracks().forEach((x) => x.stop()); tell(r.attempt, { end: 'dropped', why: 'not needed: no recording to watch it for', ms: r.attempt?.ms }) }) }
   // The screen picked as recording started: watched and recorded, or why not, said on the meeting.
   const screenFrom = async (m, picking) => {
     if (!picking) return
     const r = await picking
+    if (r.attempt) r.attempt.mid = m.id
     if (!r.stream) { setScreenNote(!r.error || r.error.none ? t("The screen isn't being recorded: none was picked. Watch a screen to pick one.") : r.error); return }
     if (!handle.current) { letGo(picking); return }
-    await watchScreen({ id: m.id, stream: r.stream, video: true, call: m.call === 'on' }).catch(setScreenNote)
+    await watchScreen({ id: m.id, stream: r.stream, video: true, call: m.call === 'on', attempt: r.attempt }).catch(setScreenNote)
   }
   // Watch a screen (the window someone shares slides in): a picture each time it changes, and
   // Capture for one now. Asks which screen or window, in the browser's or macOS's own picker. With
   // Record the screen too, a video of it as well (and watched already, a video of it from now).
   // id, stream, call: the meeting just started, the screen picked as it did, and its call's sound.
-  const watchScreen = async ({ id: mid = rec?.id, stream, video: filmIt = video && canRecordScreen(), call = rec?.call === 'on' } = {}) => {
+  // from: where it was clicked; attempt: the try that picked stream (its line in the log).
+  const watchScreen = async ({ id: mid = rec?.id, stream, video: filmIt = video && canRecordScreen(), call = rec?.call === 'on', from = 'other', attempt: a = null } = {}) => {
     if (!handle.current) throw new Error(t('Start recording first'))
     if (share.current) { if (filmIt && !film.current && shown.current) await filmScreen(mid, shown.current, call); return }
     if (!stream) {
-      const r = await pick({ video: filmIt, call })
+      const r = await pick({ video: filmIt, call, from })
       if (r.error) throw r.error
       if (!r.stream) return // Cancel, while it was being picked
       stream = r.stream
+      a = r.attempt
       // Stopped meanwhile, or watching one already (picked as it started): this one isn't needed.
-      if (!handle.current || share.current) { stream.getTracks().forEach((x) => x.stop()); return }
+      if (!handle.current || share.current) { stream.getTracks().forEach((x) => x.stop()); tell(a, { end: 'dropped', why: handle.current ? 'watching another screen already' : 'the recording stopped', ms: a?.ms }); return }
     }
+    if (a) a.mid = mid
     talk.current.off = false
+    // Its first look and first picture (ms after it was picked), for its line: written with the
+    // first picture, when it stops, or after lookWait; nothing at all from it by then is said.
+    const t0 = Date.now()
+    const got = { look: null, blank: null, picture: null }
+    let waitLook = null
+    let told = false
+    const told1 = (end) => {
+      if (told) return
+      told = true
+      clearTimeout(waitLook)
+      if (a) tell(a, { end, ms: a.ms, again: a.again, surface: a.surface, w: a.w, h: a.h, ...got, waited: Date.now() - t0 })
+    }
     const w = watchShare(stream, {
       // Counted when kept: the server leaves out a change whose words are the last picture's.
       // Then cropped to what's shared in it, here (cropping.jsx).
-      onPicture: async (blob, kind) => { const r = await sendPicture(mid, blob, { kind, source: w.label }); if (r?.kept !== false) { setScreen((x) => (x ? { ...x, kept: x.kept + 1 } : x)); cropKept(mid, r, blob) } },
+      onPicture: async (blob, kind) => {
+        if (got.picture == null) { got.picture = Date.now() - t0; told1('picked') }
+        const r = await sendPicture(mid, blob, { kind, source: w.label })
+        if (r?.kept !== false) { setScreen((x) => (x ? { ...x, kept: x.kept + 1 } : x)); cropKept(mid, r, blob) }
+      },
+      onLook: (x) => { got.look = Date.now() - t0; got.blank = !!x.blank },
       glance,
       onGlance: (blob) => sendGlance(mid, blob).then((r) => { if (r.stop) talk.current.off = true }, () => {}),
-      onEnd: () => { share.current = null; shown.current = null; film.current?.stop(); setScreen(null); window.bridgeApp?.watching?.(false) },
+      onEnd: () => { told1('stopped'); share.current = null; shown.current = null; film.current?.stop(); setScreen(null); window.bridgeApp?.watching?.(false) },
     })
     share.current = w
     shown.current = stream
     setScreen({ label: w.label, kept: 0, video: null })
     setScreenNote(null)
+    if (a?.late) chan.current?.postMessage({ type: 'unsaid', text: a.late })
     window.bridgeApp?.watching?.(true)
+    waitLook = setTimeout(() => {
+      if (share.current !== w) return
+      if (got.look == null) {
+        const e = screenErr(t('Nothing has come from {name} since it was picked. Click Stop watching the screen, then Watch a screen to pick it again.', { name: w.label }))
+        setScreenNote(e)
+        chan.current?.postMessage({ type: 'error', text: e.message })
+      }
+      told1('picked')
+    }, lookWait())
     if (filmIt) await filmScreen(mid, stream, call)
   }
   // The video of the screen being watched: its size as it grows, and why, if it stops before the
@@ -406,14 +526,15 @@ export function MeetingsProvider({ children }) {
   }, [calls, listed]) // eslint-disable-line react-hooks/exhaustive-deps
   // The floating card: what's recording, and Pause, Resume and Stop from it.
   const fns = useRef(null)
-  fns.current = { pause, resume, stop, start, recordAgain, startForCall, section, watchScreen, capture, unwatch, noteScreen: setScreenNote, mine: (id) => !!handle.current && rec?.id === id }
+  fns.current = { pause, resume, stop, start, recordAgain, startForCall, section, watchScreen, capture, unwatch, cancelPick, noteScreen: setScreenNote, mine: (id) => !!handle.current && rec?.id === id }
   const chan = useRef(null)
   useEffect(() => {
     const ch = new BroadcastChannel(MEETINGS_CHANNEL)
     chan.current = ch
     ch.onmessage = (e) => {
       const d = e.data || {}
-      if (d.type === 'op' && handle.current && fns.current[d.op] && ['pause', 'resume', 'stop', 'section', 'capture', 'watchScreen', 'unwatch'].includes(d.op)) Promise.resolve().then(() => fns.current[d.op]()).catch((err) => { if (d.op === 'watchScreen') fns.current.noteScreen(err); ch.postMessage({ type: 'error', text: err.message }) })
+      // (Watch a screen and its Cancel come from the floating card.)
+      if (d.type === 'op' && handle.current && fns.current[d.op] && ['pause', 'resume', 'stop', 'section', 'capture', 'watchScreen', 'unwatch', 'cancelPick'].includes(d.op)) Promise.resolve().then(() => (d.op === 'watchScreen' ? fns.current.watchScreen({ from: 'card' }) : fns.current[d.op]())).catch((err) => { if (d.op === 'watchScreen') fns.current.noteScreen(err); ch.postMessage({ type: 'error', text: err.message }) })
       if (d.type === 'hello') ch.postMessage({ type: 'hello-back' })
     }
     // resume: carry on the meeting that stopped when Bridge AI closed (the floating card asked);
@@ -426,7 +547,7 @@ export function MeetingsProvider({ children }) {
     const onWatch = (e) => {
       const done = typeof e?.detail?.done === 'function' ? e.detail.done : null
       if (!handle.current) { ch.postMessage({ type: 'op', op: 'watchScreen' }); done?.(null); return }
-      fns.current.watchScreen().then(() => done?.(null), (err) => {
+      fns.current.watchScreen({ from: 'card' }).then(() => done?.(null), (err) => {
         const click = err.fix === 'click'
         fns.current.noteScreen(err)
         ch.postMessage({ type: 'error', text: click ? t('Click Watch a screen in the Bridge AI window: the picker opens only from a click there.') : err.message })
@@ -588,7 +709,7 @@ export function ScreenButton({ m, small = true, toNote = false }) {
       const where = app?.platform === 'darwin' ? t("Pick the window or screen to watch in macOS's picker.") : app ? t("Pick the screen to watch in the system's picker.") : t("Pick the window or screen to watch in the browser's picker.")
       return <><button type="button" className={`${cls} mt-picking-btn`} aria-disabled="true" aria-busy="true"><Icon name="screen" size={12} /> {t('Picking a screen…')}</button><span className="muted small mt-picking" role="status">{where} <button type="button" className="link-btn" onClick={m.cancelPick}>{t('Cancel')}</button></span></>
     }
-    return <><button type="button" className={cls} onClick={() => run(m.watchScreen)} title={t('Pick the window or screen being shared. A picture is kept each time it changes, for your notes.')}><Icon name="screen" size={12} /> {t('Watch a screen')}</button><ScreenWhy e={err} recording /></>
+    return <><button type="button" className={cls} onClick={() => run(() => m.watchScreen({ from: toNote ? 'menu' : 'bar' }))} title={t('Pick the window or screen being shared. A picture is kept each time it changes, for your notes.')}><Icon name="screen" size={12} /> {t('Watch a screen')}</button><ScreenWhy e={err} recording /></>
   }
   return (
     <>
