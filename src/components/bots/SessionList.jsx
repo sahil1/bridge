@@ -104,11 +104,14 @@ export function StartTest({ bots, bot = null, askers = [], owner = null, onClose
     setError(null)
     try {
       const r = await api(`/bots/${encodeURIComponent(id)}/sessions`, { method: 'POST', body: { text: text.trim(), as: as || null } })
-      const sid = r?.session?.id || r?.id || r?.sid
+      const sid = r?.session?.id || r?.sid || null
       setText('')
       refreshBots()
-      if (sid) { noteTitle({ id: sid, title: r?.session?.title || text.trim() }); openSession(sid) }
-      onClose?.()
+      if (sid) { noteTitle({ id: sid, title: r?.session?.title || text.trim() }); openSession(sid); onClose?.() } else if (r?.q) {
+        // (Answered by Codex or a model, which take one question at a time and keep no session: its
+        // answer shown here, as Try It's was.)
+        setOnce({ d: await api(`/bots/${encodeURIComponent(id)}`), q: r.q })
+      } else onClose?.()
     } catch (err) {
       if (err.status !== 404) setError(err.message)
       else {

@@ -153,7 +153,8 @@ function QuickCreate({ conns, first = false, onClose }) {
   useEffect(() => { if (!conn && shared.length) setConn((shared.find((c) => c.platform === 'slack') || shared[0]).id) }, [shared.length]) // eslint-disable-line react-hooks/exhaustive-deps
   const make = async (e) => {
     e.preventDefault()
-    if (!purpose.trim() || busy) return
+    // (Its folder too: /bots/quick makes a bot that reads and edits one, and asks for it.)
+    if (!purpose.trim() || !folder.trim() || busy) return
     setBusy(true)
     setError(null)
     const body = { purpose: purpose.trim(), folder: folder.trim() || null, connection: conn || null }
@@ -204,7 +205,7 @@ function QuickCreate({ conns, first = false, onClose }) {
       {folder.trim() && <p className="muted small">{t('It reads and edits files there: yours at once, anyone else\'s once you OK them.')}</p>}
       {error && <p className="error-text small" role="alert">{error}</p>}
       <div className="st-row">
-        <button type="submit" className="btn small primary" disabled={busy || !purpose.trim()}><Icon name="plus" size={12} /> {busy ? t('Making it…') : t('Make the bot')}</button>
+        <button type="submit" className="btn small primary" disabled={busy || !purpose.trim() || !folder.trim()}><Icon name="plus" size={12} /> {busy ? t('Making it…') : t('Make the bot')}</button>
         {onClose && <button type="button" className="ghost-btn" onClick={onClose}>{t('Cancel')}</button>}
         <span className="sb-grow" />
         <button type="button" className="link-btn small ai-assist-link" onClick={() => openBot('new')}><Icon name="wand" size={12} /> {t('Or describe it to AI Assist')}</button>
