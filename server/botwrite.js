@@ -408,11 +408,12 @@ export async function stage({ folders, dir }) {
   try { await lockTop(dir) } catch (e) { await tidy({ dir }); throw e }
   return { dir, parts, at: new Date().toISOString() }
 }
-// Its staging copy gone.
-export async function tidy(st) {
+// Its staging copy gone. (On Windows a folder its agent's tab is still open in can't be taken away:
+// once that tab's closed, it's tried again (wait), for a few seconds, as it may take a moment to go.)
+export async function tidy(st, { wait = false } = {}) {
   if (!st?.dir) return
   await unlockTop(st.dir)
-  await fs.promises.rm(st.dir, { recursive: true, force: true }).catch(() => {})
+  await fs.promises.rm(st.dir, { recursive: true, force: true, ...(wait && process.platform === 'win32' ? { maxRetries: 10, retryDelay: 200 } : {}) }).catch(() => {})
 }
 // Staging copies left from before Bridge AI started again, a day old.
 export function sweepOld(root) {

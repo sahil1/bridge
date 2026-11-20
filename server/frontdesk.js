@@ -2701,8 +2701,11 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       if (h?.paneId && h.state === 'ended') closing.push(close(h.paneId).catch(() => {}))
     }
     // (Its copy of a repository, once its pull request is open or it's discarded, goes once its
-    // agent's tab has: on Windows a folder in use can't be deleted.)
-    if (q.change?.dir && (q.change.pr || q.state === 'discarded')) Promise.all(closing).then(() => changes.tidy({ dir: q.change.dir, top: q.change.top })).catch(() => {})
+    // agent's tab has: on Windows a folder in use can't be deleted. So do its runs' copies of the
+    // folders it changes files in, taken already, which on Windows couldn't go while their tabs were
+    // open.)
+    if (q.change?.dir && (q.change.pr || q.state === 'discarded')) Promise.all(closing).then(() => changes.tidy({ dir: q.change.dir, top: q.change.top }, { wait: true })).catch(() => {})
+    if (q.runs.some((r) => r.write)) Promise.all(closing).then(() => Promise.all(q.runs.map((r, i) => (r.write && !stages.has(r.helper) ? botwrite.tidy({ dir: path.join(WRITES, `${q.id}-${i + 1}`) }, { wait: true }) : null)))).catch(() => {})
     const rm = (d) => { try { fs.rmSync(d, { recursive: true, force: true }) } catch { /* in use: next time */ } }
     rm(path.join(FILES, q.id))
     q.runs.forEach((r, i) => botfiles.drop(`${q.id}-${i + 1}`))

@@ -4839,6 +4839,11 @@ async function answererOf(b) {
 // yet isn't looked at from there (it would ask on this computer, with nobody at it). Every one is
 // checked before any is kept, so what AI Assist's setup chat applies (Create, a change you confirm)
 // goes through the same checks, or none of it does.
+// (A folder of its own named as it's shown, ~\team on Windows, or with / as anywhere else: on
+// Windows either names it, in any case, as the file system does.)
+const shownKey = (s) => (process.platform === 'win32' ? String(s).replace(/\//g, '\\').toLowerCase() : String(s))
+const sameShown = (a, b) => shownKey(a) === shownKey(b)
+const ownShown = (list, t) => (list || []).find((f) => sameShown(f, t))
 async function checkSettings(b, x, req) {
   const next = {}
   const here = !req.headers['x-bridge-relay']
@@ -4919,8 +4924,8 @@ async function checkSettings(b, x, req) {
   }
   // One folder it stops reading (Needs You's Stop reading it), the rest as they are now.
   if (x.stopFolder !== undefined && x.readsFrom === undefined) {
-    const t = String(x.stopFolder || '')
-    if (!(b.readsFrom || []).includes(t)) throw new Error('Pick one of the folders it reads from')
+    const t = ownShown(b.readsFrom, String(x.stopFolder || ''))
+    if (!t) throw new Error('Pick one of the folders it reads from')
     x = { ...x, readsFrom: b.readsFrom.filter((f) => f !== t) }
   }
   if (x.readsFrom !== undefined) {
@@ -4960,12 +4965,12 @@ async function checkSettings(b, x, req) {
   // their settings and keys). (keepAt: where you were shown it leads; if it leads somewhere else again
   // since, it isn't kept, and you're told.)
   if (x.keepFolder !== undefined) {
-    const t = String(x.keepFolder || '')
-    if (!(next.readsFrom || b.readsFrom).includes(t)) throw new Error('Pick one of the folders it reads from')
+    const t = ownShown(next.readsFrom || b.readsFrom, String(x.keepFolder || ''))
+    if (!t) throw new Error('Pick one of the folders it reads from')
     const id = await botattach.folderId(lexical(t))
     if (!id) throw new Error(`Folder not found: ${t}`)
     const tilde = (p) => (p === os.homedir() || p.startsWith(os.homedir() + path.sep) ? `~${p.slice(os.homedir().length)}` : p)
-    if (x.keepAt && tilde(id.real) !== String(x.keepAt)) throw new Error(`${t} leads to ${tilde(id.real)} now, not ${x.keepAt}: look again before you keep reading it`)
+    if (x.keepAt && !sameShown(tilde(id.real), String(x.keepAt))) throw new Error(`${t} leads to ${tilde(id.real)} now, not ${x.keepAt}: look again before you keep reading it`)
     if (botattach.folderSays(id.real)) throw new Error(`${t} can't be read: ${botattach.folderSays(id.real)}`)
     if (await ownFolder(id.real)) throw new Error('Bridge AI\'s own folder can\'t be read from')
     const where = botattach.rootSays(id.real)
@@ -5069,7 +5074,7 @@ async function applySettings(b, x, req) {
   if (before.name !== after.name) for (const c of conns.list().filter((y) => y.bot === b.id && y.name === before.name)) conns.save(c.id, { name: after.name })
   recordChanges(b.id, before, after, who)
   // (A folder kept reading where it leads now: said in its record, with where.)
-  if (x.keepFolder !== undefined) { const t = String(x.keepFolder); const home = (p) => (p ? String(p).replace(os.homedir(), '~') : null); desk.record(b.id, 'settings.changed', { setting: `keep reading ${t}`, old: home(before.folderIds?.[t]?.real), new: home(after.folderIds?.[t]?.real), ...who }) }
+  if (x.keepFolder !== undefined) { const t = ownShown(after.readsFrom || before.readsFrom, String(x.keepFolder)) || String(x.keepFolder); const home = (p) => (p ? String(p).replace(os.homedir(), '~') : null); desk.record(b.id, 'settings.changed', { setting: `keep reading ${t}`, old: home(before.folderIds?.[t]?.real), new: home(after.folderIds?.[t]?.real), ...who }) }
   if (before.retention !== after.retention) desk.prune(b.id)
   // Paused: what it's answering is stopped at once.
   if (after.paused && !before.paused) await desk.pause(b.id)
