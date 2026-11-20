@@ -13,6 +13,8 @@ import { quoteCommand, runSetup } from './spawn.js'
 import { envFor, notePane, movePane, keepPanes, accountOf, startedOn, labelOf } from '../accounts.js'
 import { paneKey, inView } from '../scope.js'
 import { DATA, dataFile, writeFileAtomic } from '../paths.js'
+import { blanked } from '../botenv.js'
+import { providerEnv } from '../providers.js'
 
 export const name = 'herdr'
 export const caps = { liveView: true, reorder: true, splits: true }
@@ -268,7 +270,10 @@ async function moveTabToSpaceNow(tabId, { workspaceId, newSpace, index } = {}) {
 // effort: how hard it thinks (agents.js effort()), for herdr's agents and the others alike.
 export const launch = after(launchNow)
 async function launchNow({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, pinModel, effort, access, dirs, account, resume, fork, setup, env: extraEnv }) {
-  const env = { ...envFor(kind, account), ...extraEnv } // a second account's config folder, if one was picked
+  // (A bot's agent, kept to its folders: herdr starts it with its shell's environment, so every
+  // variable there that holds a key, and isn't this agent's own sign-in, is set empty for it: botenv.js.)
+  const kept = access === 'read' || access === 'change'
+  const env = { ...(kept ? blanked(kind, { ...process.env, ...providerEnv() }) : {}), ...envFor(kind, account), ...extraEnv } // a second account's config folder, if one was picked
   const a = adapter(kind)
   const resumed = fork && a.fork ? a.fork(fork, a.sessionId === 'assign' ? newSessionId() : undefined) : resume && a.resume ? a.resume(resume) : []
   const allowed = [...(access && a.access ? a.access(access, { dirs }) : []), ...(effort && a.effort ? a.effort(effort) : [])] // how much it may do without asking, and how hard it thinks

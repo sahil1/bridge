@@ -51,6 +51,11 @@ for (let i = 1; i < argv.length; i++) {
 const no = (why) => { process.stderr.write(`Refused: ${why}. ${root ? `You can only change files in your own copy, ${root}.` : 'You can only read here.'}\n`); process.exit(2) }
 // A command that would push or reach GitHub, or change where git sends things: refused, by its words
 // (a shell's, so each part after ; && || | $( or a backtick is looked at as a command of its own).
+// Advice, not the boundary: a shell can spell a command a hundred ways a word match won't see. What
+// holds is the session's sandbox (botmcp.js sandboxOf): no network but the domains you allowed and
+// never GitHub (deniedDomains), no key or token in its environment (credentials, the scrub), none of
+// your files outside its folders to push with (your SSH keys and git credentials unreadable); a push
+// you approve is made by Bridge AI itself (botchanges.js publish), as the commit you were shown.
 const PUSHES = [
   [/(^|[\s;&|(`/]|\$\()git(\s+-[cC]\s+\S+|\s+--?[\w-]+(=\S+)?)*\s+(push|send-pack|send-email|request-pull)\b/, 'it pushes'],
   // (And any command with both words in it, however it's put together: $(echo git) push.)

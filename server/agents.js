@@ -77,11 +77,19 @@ const MCP_RUNS = dataFile('front-desk', 'mcp')
 // here, from the file it starts with, so a session started again (after an idle close, or Bridge AI
 // started again: runtime/builtin.js keeps its folders) has exactly what it had, and one whose file
 // is gone or says otherwise has no Bash at all.
+// (Its file also keeps from its commands every variable that holds a key (credentials.envVars, deny),
+// GitHub out of the network whatever is allowed (deniedDomains), Apple Events off, your home folder
+// and the computer's other people's and drives unreadable (permissions.blockReadsOutsideWorkingDirectories)
+// and has Claude Code strip credentials from everything it starts (env CLAUDE_CODE_SUBPROCESS_ENV_SCRUB):
+// botmcp.js sandboxOf, runFolder.)
 export const sandboxClosed = (s) => {
   const x = s?.sandbox
   return !!x && x.enabled === true && x.failIfUnavailable === true && x.allowUnsandboxedCommands === false && x.autoAllowBashIfSandboxed === true
     && x.network?.strictAllowlist === true && Array.isArray(x.network?.allowedDomains) && x.filesystem?.disabled === false && !x.excludedCommands?.length
     && Array.isArray(x.filesystem?.denyRead) && x.filesystem.denyRead.length > 0
+    && x.allowAppleEvents === false && (x.network?.deniedDomains || []).includes('github.com')
+    && (x.credentials?.envVars || []).some((e) => e?.name === 'GITHUB_TOKEN' && e.mode === 'deny')
+    && s.permissions?.blockReadsOutsideWorkingDirectories === true && s.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB === '1'
     && (s.hooks?.PreToolUse || []).some((m) => /(^|\|)Bash(\||$)/.test(String(m.matcher || '')))
 }
 export function mcpOf(dirs = []) {
@@ -101,7 +109,7 @@ export function mcpOf(dirs = []) {
 // Its flags (allowed: with its own --allowedTools; a bot's change has put its tools in its own).
 // Each takes a list, so another flag follows.
 const mcpFlags = (m, { allowed = true } = {}) => (m
-  ? ['--mcp-config', m.config, ...(allowed && m.allow.length ? ['--allowedTools', ...m.allow] : []), ...(m.deny.length ? ['--disallowedTools', ...m.deny] : [])]
+  ? ['--mcp-config', m.config, ...(allowed && (m.allow.length || m.bash) ? ['--allowedTools', ...m.allow, ...(m.bash ? ['Bash'] : [])] : []), ...(m.deny.length ? ['--disallowedTools', ...m.deny] : [])]
   : [])
 // A run kept to its folders (a bot's answer or change) works for someone other than you, in folders
 // someone else may have written (a shared repository, a synced folder), and Bridge AI trusts them for
@@ -161,11 +169,14 @@ export const AGENTS = [
       if (lvl !== 'read' && lvl !== 'change') return lvl === 'edits' ? ['--permission-mode', 'acceptEdits'] : lvl === 'full' ? ['--permission-mode', 'bypassPermissions'] : []
       const { dirs, mcp } = mcpOf(o.dirs)
       const add = dirs.length ? ['--add-dir', ...dirs] : []
-      // (A session's commands: Bash, run in its sandbox and allowed by it, never by an allow rule of
-      // ours, so a command that couldn't be sandboxed is refused by dontAsk rather than run.)
+      // (A session's commands: Bash, only while its settings file keeps it in Claude Code's sandbox,
+      // closed, sandboxClosed. Allowed by a rule (Bash), as the credential scrub that file turns on
+      // turns the sandbox's own auto-allow off (code.claude.com/docs/en/settings-reference,
+      // autoAllowBashIfSandboxed): with nothing run outside the sandbox (allowUnsandboxedCommands
+      // false, no excludedCommands, failIfUnavailable), the rule allows only sandboxed commands.)
       const bash = mcp?.bash ? ',Bash' : ''
       return lvl === 'read' ? ['--tools', `Read,Grep,Glob${bash}`, ...add, ...mcpFlags(mcp), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...keptFlags(mcp)]
-        : ['--tools', `Read,Grep,Glob,Edit,Write${bash}`, '--allowedTools', EDIT_HERE, ...(mcp ? mcp.allow : []), ...add, ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...keptFlags(mcp)]
+        : ['--tools', `Read,Grep,Glob,Edit,Write${bash}`, '--allowedTools', EDIT_HERE, ...(mcp ? mcp.allow : []), ...(mcp?.bash ? ['Bash'] : []), ...add, ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...keptFlags(mcp)]
     },
     confined: true,
     // A copy of a conversation under a new id (the original stays as it is).
@@ -460,8 +471,20 @@ const widens = (j, managed) => {
   if (f.allowRead?.length) return 'let every session read more folders (sandbox.filesystem.allowRead)'
   if (n.allowUnixSockets?.length) return 'let every session reach more sockets (sandbox.network.allowUnixSockets)'
   if (j?.permissions?.additionalDirectories?.length) return 'give every session more working directories (permissions.additionalDirectories)'
+  // (Allow rules a sandbox takes in: WebFetch(domain:…) ones into its domains, a bare * all of them;
+  // Edit ones into the folders it may write: settings-reference, sandbox.filesystem.)
+  const rules = (j?.permissions?.allow || []).map(String).filter((r) => /^(WebFetch|Edit|Write|MultiEdit|NotebookEdit)(\(|$)/.test(r.trim()))
+  if (rules.length) return `allow ${rules.slice(0, 3).join(', ')} (permissions.allow), which a sandbox takes in as more domains or folders to write`
+  if (n.allowMachLookup?.length) return 'let every session reach more macOS services (sandbox.network.allowMachLookup)'
+  if (n.httpProxyPort != null || n.socksProxyPort != null) return 'send every session\'s traffic through a proxy of your own, past the sandbox\'s domain lists (sandbox.network.httpProxyPort, socksProxyPort)'
+  if (s.allowNestedUserNamespaces === true) return 'let every session make user namespaces, which leads out of the sandbox (sandbox.allowNestedUserNamespaces)'
+  // (Variables for every session: any but a few that only turn something off or set a limit could
+  // give its commands more, a key, a proxy, a shell prefix.)
+  const vars = Object.keys(j?.env || {}).filter((k) => !/^(DISABLE_\w+|DO_NOT_TRACK|CLAUDE_CODE_DISABLE_\w+|CLAUDE_CODE_MAX_OUTPUT_TOKENS|MAX_THINKING_TOKENS|BASH_(DEFAULT|MAX)_TIMEOUT_MS|ANTHROPIC_(MODEL|SMALL_FAST_MODEL|DEFAULT_\w+_MODEL)|CLAUDE_CODE_EFFORT_LEVEL)$/.test(k))
+  if (vars.length) return `set environment variables for every session (env: ${vars.slice(0, 4).join(', ')})`
   // (A switch your own settings set is overruled by a bot's own file; your organization's isn't.)
-  if (managed && (s.enabled === false || s.allowUnsandboxedCommands === true || s.failIfUnavailable === false || f.disabled === true || n.allowAllUnixSockets === true || n.allowLocalBinding === true || s.autoAllowBashIfSandboxed === false)) return 'change how the sandbox holds'
+  if (managed && (s.enabled === false || s.allowUnsandboxedCommands === true || s.failIfUnavailable === false || f.disabled === true || n.allowAllUnixSockets === true || n.allowLocalBinding === true
+    || s.allowAppleEvents === true || s.enableWeakerNestedSandbox === true || s.enableWeakerNetworkIsolation === true)) return 'change how the sandbox holds'
   return null
 }
 // Why a bot can't run commands here, or null: this system, its Claude Code, or settings of yours or
@@ -478,9 +501,11 @@ export async function bashProblem(kind = 'claude', { home = os.homedir() } = {})
   if (!v) return 'Claude Code\'s version couldn\'t be read, so its sandbox can\'t be relied on'
   if (!atLeast(v, BASH_MIN)) return `Commands need Claude Code ${BASH_MIN} or later, for its sandbox: update it with ${KEPT_MIN.claude.update}`
   const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return null } }
-  const user = read(path.join(home, '.claude', 'settings.json'))
-  const mine = widens(user, false)
-  if (mine) return `Your Claude Code settings ${mine}, which a bot's commands would get too`
+  // (Yours: in ~/.claude, or the folder CLAUDE_CONFIG_DIR names, which a bot's agent starts with too.)
+  for (const f of [...new Set([path.join(home, '.claude', 'settings.json'), ...(process.env.CLAUDE_CONFIG_DIR ? [path.join(process.env.CLAUDE_CONFIG_DIR, 'settings.json')] : [])])]) {
+    const mine = widens(read(f), false)
+    if (mine) return `Your Claude Code settings ${mine}, which a bot's commands would get too`
+  }
   for (const f of MANAGED_SETTINGS()) {
     const why = widens(read(f), true)
     if (why) return `Your organization's Claude Code settings ${why}, which a bot's commands would get too`

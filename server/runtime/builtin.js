@@ -14,7 +14,8 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import pty from 'node-pty'
 import headless from '@xterm/headless'
-import { adapter, loginPath, newSessionId, installed } from '../agents.js'
+import { adapter, loginPath, newSessionId, installed, which } from '../agents.js'
+import { keptEnv } from '../botenv.js'
 import { discoverSession, locate } from '../transcripts.js'
 import { dataFile, ensureDir, DATA, IS_WIN, ROOT, writeFileAtomic } from '../paths.js'
 import { shellCommand, agentEnv, forCommandLine, SETUP_DONE } from './spawn.js'
@@ -118,13 +119,22 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
   }
   // (A bot's run that changes files, on Windows: its terminal takes Windows' backup and restore
   // rights out of its own token before it starts the agent, so the agent never has them: winpriv.js.)
-  const [file, argv] = shellCommand(bin, args, setup, cwd, { before: IS_WIN && access === 'change' && bin ? noBackupRightsFirst() : null })
+  // (A bot's agent, kept to its folders (read or change): started with only what it needs of your
+  // environment, botenv.js, and off Windows as it is, not through your login shell, whose profile
+  // could set more again. Its pane closes when it does; its session is started again from its
+  // conversation, --resume.)
+  const kept = (access === 'read' || access === 'change') && kind !== 'shell' && !!bin
+  const direct = kept && !IS_WIN && !setup
+  const [file, argv] = direct ? [(await which(bin, PATH)) || bin, args] : shellCommand(bin, args, setup, cwd, { before: IS_WIN && access === 'change' && bin ? noBackupRightsFirst() : null })
   // Checked without blocking: macOS can hold a look into Desktop or Documents until you answer its
   // permission prompt, and the rest of Bridge AI shouldn't wait for that.
   const there = await fs.promises.access(cwd).then(() => true, () => false)
   // What a later server needs to show it, should it find the terminal before the saved layout does.
   const meta = { tabId, workspaceId, kind, cwd, model: model || null, effort: effort || null, access: access || null, dirs: dirs?.length ? dirs : null, sessionId: sessionId || null, account: account || null, env: env || null, tab: tabs.find((t) => t.tabId === tabId)?.label, space: spaces.find((w) => w.id === workspaceId)?.label }
-  const { proc, remote } = await openTerm(paneId, file, argv, { cols: COLS, rows: ROWS, cwd: there ? cwd : process.env.HOME, env: agentEnv(PATH, { ...providerEnv(), ...accounts.envFor(kind, account), ...env }) }, meta)
+  const startEnv = kept
+    ? { ...keptEnv(kind, { ...process.env, ...providerEnv(), ...accounts.envFor(kind, account) }, env || {}), PATH: PATH || process.env.PATH, TERM: 'xterm-256color', COLORTERM: 'truecolor', LANG: process.env.LANG || 'en_US.UTF-8' }
+    : agentEnv(PATH, { ...providerEnv(), ...accounts.envFor(kind, account), ...env })
+  const { proc, remote } = await openTerm(paneId, file, argv, { cols: COLS, rows: ROWS, cwd: there ? cwd : process.env.HOME, env: startEnv }, meta)
   const p = {
     paneId, tabId, workspaceId, kind, cwd, model: model || null, effort: effort || null, access: access || null, dirs: dirs?.length ? dirs : null, sessionId: sessionId || null, account: account || null, env: env || null, proc, remote, term: null,
     title: '', status: kind === 'shell' ? null : 'idle', seq: 0, seen: true, setupPending: !!setup && !IS_WIN,
@@ -386,6 +396,8 @@ function statusOf(p) {
 // Each terminal's own process and the folder it started in: what a dev server must have been
 // started by to be shown on your other devices (servers.js ownedBy).
 export const processes = () => [...panes.values()].filter((p) => p.proc?.pid).map((p) => ({ pid: p.proc.pid, cwd: p.cwd }))
+// A pane's process (a bot's session's agent, started as it is: its commands are below it).
+export const pidOf = (paneId) => panes.get(paneId)?.proc?.pid || null
 
 export async function fleet() {
   const order = (wsId) => spaces.findIndex((w) => w.id === wsId)

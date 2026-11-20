@@ -27,6 +27,8 @@ import { claudeServers, claudeServerView } from './mcp.js'
 import { launch } from './consult.js'
 import { compare } from '../shared/version.js'
 import { keptOut, SECRET_TERMS, SECRET_BROAD, BROAD_KINDS, SECRET_STEMS, SECRET_KINDS } from './botattach.js'
+import { CREDENTIALS } from './botenv.js'
+import os from 'node:os'
 
 export const RUNS = dataFile('front-desk', 'mcp')
 const LIST_MS = 15000 // a server that hasn't listed its tools by then can't be asked
@@ -241,17 +243,33 @@ export const SESSION_SERVER = 'bridge_session'
 // or its turns, nor git's own file in a copy of a repository), else nowhere but the system's
 // temporary folder. Lists merge with your own settings' (agents.js bashProblem: a bot has no
 // commands where yours would widen these).
-export function sandboxOf({ domains = [], cwd, dirs = [], writable = false }) {
+// Besides (code.claude.com/docs/en/settings-reference, sandbox): every variable that holds a key unset
+// before each command (credentials.envVars, deny: botenv.js CREDENTIALS); GitHub refused whatever
+// domains you allowed, a denied domain holding inside an allowed wildcard (network.deniedDomains), so
+// nothing reaches it but a push you approved, made by Bridge AI (botchanges.js publish); Apple Events,
+// the weaker nested sandbox and network isolation off, whatever your own settings say (switches your
+// organization's settings turn on can't be turned off here: bashProblem refuses those); and the
+// computer's temporary folders unreadable (other programs' files, other Claude Code sessions'
+// output), its own (tmp: CLAUDE_CODE_TMPDIR, frontdesk.js) readable and written. Your home folder,
+// with the other roots of people's files and drives, is unreadable by
+// permissions.blockReadsOutsideWorkingDirectories in its settings (runFolder), which leaves its own
+// folders and what Claude Code needs of ~/.claude readable.
+export const GITHUB = ['github.com', '*.github.com', 'api.github.com', 'githubusercontent.com', '*.githubusercontent.com']
+const TEMP_ROOTS = () => [os.tmpdir(), '/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp', ...(process.platform === 'darwin' ? ['/var/folders', '/private/var/folders'] : ['/dev/shm'])]
+export function sandboxOf({ domains = [], cwd, dirs = [], writable = false, tmp = null }) {
   const real = (p) => { try { return fs.realpathSync(p) } catch { return p } }
   const both = (list) => [...new Set(list.filter(Boolean).flatMap((x) => [path.resolve(String(x)), real(path.resolve(String(x)))]))]
   const mine = both([cwd, ...dirs])
+  const temp = both(tmp ? [tmp] : [])
   return {
     enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false, autoAllowBashIfSandboxed: true,
-    network: { allowedDomains: [...new Set(domains.map(String))], strictAllowlist: true, allowLocalBinding: false, allowAllUnixSockets: false },
+    allowAppleEvents: false, enableWeakerNestedSandbox: false, enableWeakerNetworkIsolation: false,
+    network: { allowedDomains: [...new Set(domains.map(String))], deniedDomains: GITHUB, strictAllowlist: true, allowLocalBinding: false, allowAllUnixSockets: false },
+    credentials: { envVars: CREDENTIALS.map((name) => ({ name, mode: 'deny' })) },
     filesystem: {
       disabled: false,
-      denyRead: [...new Set([...both([HOME, DATA]), ...mine.map((d) => `${d}/**/.*`)])],
-      allowRead: mine,
+      denyRead: [...new Set([...both([HOME, DATA, ...TEMP_ROOTS()]), ...mine.map((d) => `${d}/**/.*`)])],
+      allowRead: [...mine, ...temp],
       denyWrite: [...new Set([...both(dirs), ...(writable ? [] : both([cwd])), ...(cwd ? both([path.join(cwd, '.git')]) : [])])],
     },
   }
@@ -344,7 +362,10 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
   // (own: its copy, the files attached, its brief); and its hook when it changes files.)
   const readDeny = reads.length ? readDenies(reads, { own }) : []
   const settings = path.join(dir, 'settings.json')
-  writeFileAtomic(settings, JSON.stringify({ ...KEPT_SETTINGS, permissions: { ...KEPT_SETTINGS.permissions, ...(readDeny.length ? { deny: readDeny } : {}) }, ...(hooks || {}), ...(bash ? { sandbox: sandboxOf(bash) } : {}) }, null, 2), { mode: 0o600 })
+  // (With commands: your home folder and the other roots of people's files unreadable to them, and to
+  // its file tools outside its folders (blockReadsOutsideWorkingDirectories, Claude Code 2.1.257, as
+  // old as commands need: agents.js BASH_MIN); and credentials stripped from all it starts.)
+  writeFileAtomic(settings, JSON.stringify({ ...KEPT_SETTINGS, permissions: { ...KEPT_SETTINGS.permissions, ...(readDeny.length ? { deny: readDeny } : {}), ...(bash ? { blockReadsOutsideWorkingDirectories: true } : {}) }, ...(hooks || {}), ...(bash ? { sandbox: sandboxOf(bash), env: { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' } } : {}) }, null, 2), { mode: 0o600 })
   writeFileAtomic(path.join(dir, 'config.json'), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 })
   writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny, settings, ...(bash ? { bash: true } : {}) }, null, 2), { mode: 0o600 })
   return { dir, servers: said, missing, ...(guard ? { guard } : {}), ...(agentEnv ? { agentEnv } : {}), ...(requests ? { requests } : {}), ...(bash ? { bash: true } : {}) }

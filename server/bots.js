@@ -95,6 +95,9 @@ export const BASH = ['off', 'sandboxed']
 export const DOMAINS_MAX = 20
 const DOMAIN = /^(\*\.)?([a-z0-9-]{1,63}\.)+[a-z]{2,63}$/
 export const domainOf = (d) => { const x = String(d || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/:].*$/, ''); return DOMAIN.test(x) ? x : null }
+// GitHub, which a bot's commands never reach (botmcp.js sandboxOf denies it whatever is listed): a push
+// or a pull request goes through Bridge AI, once you approve it. Not kept in its list.
+export const githubLike = (d) => /(^|\.)(github|githubusercontent)\.com$/.test(String(d || '').replace(/^\*\./, ''))
 const DEFAULTS = {
   name: 'Bridge AI', description: '', who: 'named', askers: [], others: 'polite', readsFrom: [], instructionsFile: null, agent: null, auto: false, agentCopies: false, retention: '1y', max: 2,
   owner: null, owners: {}, changes: 'none', repo: null, writesTo: [], trustYou: true, trusted: [], handsTo: [], limits: LIMITS, memory: 'approve', paused: false, muted: [], listen: [], agentsStatus: false, template: null, mcp: [], answerers: null, fallback: true, draft: false, icon: null,
@@ -173,7 +176,7 @@ function shape(id, j) {
   b.attachAuto = ATTACH_AUTO.includes(b.attachAuto) ? b.attachAuto : 'no'
   b.attachConfig = b.attachConfig === true
   b.bash = BASH.includes(b.bash) ? b.bash : 'off'
-  b.domains = [...new Set((Array.isArray(b.domains) ? b.domains : []).map(domainOf).filter(Boolean))].slice(0, DOMAINS_MAX)
+  b.domains = [...new Set((Array.isArray(b.domains) ? b.domains : []).map(domainOf).filter((d) => d && !githubLike(d)))].slice(0, DOMAINS_MAX)
   b.folderIds = Object.fromEntries(Object.entries(b.folderIds && typeof b.folderIds === 'object' ? b.folderIds : {}).filter(([k, v]) => b.readsFrom.includes(k) && typeof v?.real === 'string' && v.real).map(([k, v]) => [k, { real: v.real }]))
   return b
 }

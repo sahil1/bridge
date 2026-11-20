@@ -1197,7 +1197,7 @@ async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs
   // work of yours to remember the folder for.)
   if (!own && !fork && access !== 'read' && access !== 'change') return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest', access })), session: f.session || '' }
   if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
-  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: access === 'read' || access === 'change' ? dirs : undefined, fork, ...(resume && (access === 'read' || access === 'change') ? { resume } : {}), effort: 'suggest', ...(model ? { model, pinModel: true } : {}), ...(access === 'change' && env ? { env } : {}) })
+  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: access === 'read' || access === 'change' ? dirs : undefined, fork, ...(resume && (access === 'read' || access === 'change') ? { resume } : {}), effort: 'suggest', ...(model ? { model, pinModel: true } : {}), ...((access === 'read' || access === 'change') && env ? { env } : {}) })
   pushFleet()
   return { ...out, session: f.session || '' }
 }
