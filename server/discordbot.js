@@ -518,7 +518,12 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
   // messages; and the message a question replied to, if it did.
   async function context({ channel, thread, ts, since = null, dm = false }) {
     const mine = (m) => (!!kept.bot?.id && m.author?.id === kept.bot.id) || (!!m.webhook_id && Object.values(kept.hooks || {}).some((x) => x?.id === m.webhook_id))
-    const said = (m) => ({ ts: m.id, person: { id: m.author?.id || null, name: nameOf(m.author, m.member) }, text: clip(plainText(m.content, { me: kept.bot?.id, mentions: m.mentions, channels: chans }), LONGEST_SAID), you: mine(m) })
+    // (A post of this app's own, by one of its webhooks: as, the name it was posted as, so a bot takes
+    // only its own as its own words; another bot's or a webhook's: bot, its words anyone's.)
+    const said = (m) => {
+      const own = mine(m)
+      return { ts: m.id, person: { id: m.author?.id || null, name: nameOf(m.author, m.member) }, text: clip(plainText(m.content, { me: kept.bot?.id, mentions: m.mentions, channels: chans }), LONGEST_SAID), you: own, ...(own ? { as: m.webhook_id ? m.author?.username || null : null } : (m.author?.bot || m.webhook_id) ? { bot: true } : {}) }
+    }
     // (A post you scheduled has no message of Discord's to read back from: the latest, then.)
     const own = /^\d+$/.test(String(ts))
     const before = (m) => m?.id && (!own || later_(ts, m.id)) && (!since || later_(m.id, since)) && String(m.content || '').trim()

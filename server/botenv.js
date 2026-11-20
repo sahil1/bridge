@@ -7,15 +7,17 @@
 // Anthropic, Bedrock or Vertex settings and its account's folder; Codex: OpenAI's). Not your Model
 // Providers keys for other agents, nor anything else of your shell's or Bridge AI's own (keptEnv). Its
 // terminal starts it as it is, not through your login shell, whose profile could set more again
-// (runtime/builtin.js). Where the runtime starts it in a shell of its own (herdr), every variable that
-// holds a key and isn't this agent's sign-in is set empty (blanked).
+// (runtime/builtin.js). Where the runtime starts it in a shell of its own (herdr), the same: every
+// variable there that it wouldn't keep is set empty (blanked), as no variable can be taken away there.
 //
 // What it still has for its own sign-in is kept from its commands (a session's Bash, in Claude Code's
 // sandbox): each one named in sandbox.credentials.envVars with mode deny, which Claude Code unsets
 // before each sandboxed command (code.claude.com/docs/en/settings-reference, sandbox.credentials.envVars),
-// with every provider's key, GitHub's tokens and the cloud ones besides (CREDENTIALS). And the session
-// sets CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, which strips what looks like a credential from everything it
-// starts (env-vars docs, What the subprocess environment scrub removes): botmcp.js.
+// with every provider's key, GitHub's tokens and the cloud ones besides (CREDENTIALS): botmcp.js.
+// To check with the real Claude Code: whether a sandboxed command can read its parent's environment
+// (Claude Code's, which has its sign-in) another way. On Linux, /proc/<its parent>/environ; on macOS,
+// ps -wwE -p $PPID, which the system gives a process's own user (KERN_PROCARGS2) unless the sandbox's
+// profile denies it (process-info). Neither is something the stand-in can show.
 import { PROVIDERS } from './providers.js'
 import { IS_WIN } from './paths.js'
 
@@ -65,6 +67,10 @@ const KNOWN = [
   'GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN', 'GITHUB_PAT', 'GITLAB_TOKEN', 'GL_TOKEN', 'BITBUCKET_TOKEN',
   'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_BEARER_TOKEN_BEDROCK', 'GOOGLE_APPLICATION_CREDENTIALS', 'AZURE_CLIENT_SECRET',
   'NPM_TOKEN', 'NODE_AUTH_TOKEN', 'PYPI_TOKEN', 'SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN', 'DISCORD_TOKEN', 'SSH_AUTH_SOCK',
+  // (Claude Code's own that carry a sign-in: a header with a key in it, Foundry's key, a client key.)
+  'ANTHROPIC_CUSTOM_HEADERS', 'ANTHROPIC_FOUNDRY_API_KEY', 'CLAUDE_CODE_CLIENT_KEY', 'CLAUDE_CODE_CLIENT_CERT',
+  'ANTHROPIC_BEDROCK_BASE_URL', 'ANTHROPIC_VERTEX_BASE_URL', 'ANTHROPIC_FOUNDRY_BASE_URL', 'ANTHROPIC_BASE_URL',
+  'AZURE_API_KEY', 'AZURE_OPENAI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'CLOUDSDK_AUTH_ACCESS_TOKEN', 'GOOGLE_OAUTH_ACCESS_TOKEN',
 ]
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 export const CREDENTIALS = [...new Set([
@@ -73,7 +79,9 @@ export const CREDENTIALS = [...new Set([
 ])].filter((n) => NAME.test(n)).sort()
 // Of all given, the variables that look like a key and aren't this agent's own sign-in: set empty for
 // it where its runtime starts it in a shell with that shell's environment (herdr).
+// (Every name it's given, every key besides, that it wouldn't keep: keptEnv's list, as a shell's
+// environment can only be emptied a name at a time.)
 export function blanked(kind, all = {}) {
-  const names = new Set([...CREDENTIALS, ...Object.keys(all || {}).filter((k) => /KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|CREDENTIAL/i.test(k))])
+  const names = new Set([...CREDENTIALS, ...Object.keys(all || {})])
   return Object.fromEntries([...names].filter((k) => NAME.test(k) && !keeps(kind, k, all)).map((k) => [k, '']))
 }

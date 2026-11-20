@@ -179,6 +179,9 @@ const DIR = dataFile('front-desk')
 const ANSWERS = path.join(DIR, 'answers')
 const CHANGES = path.join(DIR, 'changes') // its copies of repositories, one a conversation
 const WRITES = path.join(DIR, 'writes') // staging copies of the folders it changes files in, one a run
+// (A session's copy, put aside here while Bridge AI works in it and its agent waits: botwrite.js hold.
+// Never a folder its agent's sandbox may write in.)
+const HELD = path.join(DIR, 'held')
 const FILES = path.join(DIR, 'files') // files attached to questions, one folder a question
 const OUT = path.join(DIR, 'out') // files its answers send back, until they're sent or discarded
 const BRIEFS = path.join(DIR, 'briefs') // a brief written to a file (Windows), one folder a run
@@ -567,7 +570,18 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   let pidOf = null
   // (Its agent's commands still running, ended: botsessions.js stopShells. Only a session that runs
   // commands has any.)
-  const stopShellsOf = async (s) => { if (s?.bash?.on && s.paneId && pidOf) await botsessions.stopShells(pidOf(s.paneId)).catch(() => 0) }
+  const stopShellsOf = async (s) => {
+    if (!s?.bash?.on) return
+    const st = s.stage ? botsessions.readStage(s.id) : null
+    await botsessions.stopShells({ pid: s.paneId && pidOf ? pidOf(s.paneId) : null, claude: s.claudeSession || null, mark: s.mark || null, mcp: botsessions.serversOf(s.mcpDir), roots: [st?.dir, st?.heldAt, s.tree?.dir] }).catch(() => 0)
+  }
+  // (A session's copy put aside, out of its commands' reach, as its turn ends: botwrite.js hold. Back
+  // where its agent works just before its next turn: refreshStage.)
+  const holdStage = async (s) => {
+    const st = s?.stage ? botsessions.readStage(s.id) : null
+    if (!st || st.heldAt) return
+    try { await botwrite.hold(st, HELD); botsessions.writeStage(s.id, st) } catch (e) { console.log(`A bot's copy couldn't be put aside: ${e.message}`) }
+  }
   const going = () => sessions.all().filter((s) => s.state !== 'closed')
   // The desk's own task list for its helpers, as many at once as its bots allow (2 unless set).
   delegate.list('desk', { tasks, dir: ensureDir(ANSWERS), also: [CHANGES, WRITES, FILES, BRIEFS, botmcp.RUNS, botfiles.OUTBOX, ensureDir(SESSIONS)], max: () => Math.max(1, Math.min(5, ...[...bots.keys()].map((id) => botOf(id)?.max || 2))), heard: (h) => heard(h) })
@@ -978,6 +992,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   }
   const NOT_RUN = 'The folder guard didn\'t run, so nothing was changed'
   botwrite.sweepOld(WRITES, { keep: new Set(going().map((s) => s.id)) })
+  botwrite.sweepOld(HELD, { keep: new Set(going().map((s) => s.id)) })
   // Each bot's changes to files, kept beside its record (botwrite.js).
   const writesDir = (id) => path.join(store.DIR, id, 'writes')
   // Agents of yours working in those folders, by the name you see them by: not the Chief of Staff,
@@ -1410,8 +1425,17 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // (Its session, when this conversation has one going: what it may do is the lowest of everyone
     // who has spoken in it, this turn's words too, never more than before: tierOf.)
     const sess0 = !resume ? sessionFor(id, q) : null
-    // (Asked or handed this by a Chief: no more than the least of everyone its session had heard.)
-    const tier = tierOf(bot, sess0, [...speakersOf(q), ...(q.chiefPeople || []).map(asPerson)])
+    // (The conversation it was asked in, read first, once: whoever's words in it reach its agent count
+    // among the people its session has heard, so they're known before what it may do is. What it's
+    // given later is this, from where it last read: sinceOf.)
+    let ctxRaw = null
+    if (!pending && !consulted && !q.steer && !q.consult && !resume) {
+      try { ctxRaw = await chan(b, q).context({ channel: q.channel, thread: q.reply?.thread && q.reply.thread !== q.ts ? q.reply.thread : null, ts: q.ts, since: null, dm: q.place?.kind === 'dm' }) } catch (err) { ctxRaw = { kind: q.thread ? 'thread' : 'channel', messages: [], pins: [], problem: `Couldn't read the conversation: ${err.message}` } }
+    }
+    const voices = voicesIn(heardFrom(bot, ctxRaw))
+    // (Asked or handed this by a Chief: no more than the least of everyone its session had heard. And
+    // never more than the least of everyone whose words in the conversation reach it.)
+    const tier = tierOf(bot, sess0, [...speakersOf(q), ...(q.chiefPeople || []).map(asPerson), ...voices])
     const wantsChange = editing || (!q.try && !q.routine && !q.consult && tier.change)
     // (Neither, when your Claude Code's managed settings turn off the hook every such run needs.)
     const managed = editing || wantsChange ? hooksOff() : null
@@ -1463,7 +1487,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     }
     // (Its hours at work in this conversation today, all told: past SESSION_DAY_MS, no more today.)
     if (s && s.day?.date === today() && Number(s.day.ms) >= SESSION_DAY_MS) { next(id); return toYou(id, q, `It has worked ${Math.round(SESSION_DAY_MS / 3600000)} hours in this conversation today, as long as one conversation may in a day`) }
-    if (s && await turnInto(id, q, s, { pending, entry, pickd, tier, unable: noChange, consulted })) return
+    if (s && await turnInto(id, q, s, { pending, entry, pickd, tier, unable: noChange, consulted, ctx0: ctxRaw, voices })) return
     // (Being started again: a message meanwhile waits for it, sessionBusy.)
     if (s) sessions.patch(s.id, { state: 'starting', lastAt: now() })
     const bash = kind === 'claude' && !resume ? await bashOf(bot, tier, q) : { on: false, why: null }
@@ -1488,9 +1512,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       else {
         try {
           const kept = s ? botsessions.readStage(s.id) : null
-          const same = kept && fs.existsSync(kept.dir) && kept.parts.length === ws.length && kept.parts.every((p, i) => p.folder === ws[i].path)
+          const same = kept && fs.existsSync(kept.heldAt || kept.dir) && kept.parts.length === ws.length && kept.parts.every((p, i) => p.folder === ws[i].path)
           if (same) { notes = stageNotes(await refreshStage(id, s)); stage = botsessions.readStage(s.id) }
           else {
+            if (kept) await botwrite.tidy(kept).catch(() => {})
             stage = await botwrite.stage({ folders: ws.map((w) => ({ path: w.path, shown: w.shown })), dir: path.join(WRITES, s ? s.id : `${q.id}-${q.runs.length + 1}`) })
             if (s) botsessions.writeStage(s.id, stage)
           }
@@ -1564,7 +1589,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     let ctx = null
     if (!pending && !resumed && !consulted && !q.steer && !q.consult) {
       const since = route.resume ? s.upTo || null : route.followUp && c?.session?.upTo ? c.session.upTo : null
-      try { ctx = await chan(b, q).context({ channel: q.channel, thread: q.reply?.thread && q.reply.thread !== q.ts ? q.reply.thread : null, ts: q.ts, since, dm: q.place?.kind === 'dm' }) } catch (err) { ctx = { kind: q.thread ? 'thread' : 'channel', messages: [], pins: [], problem: `Couldn't read the conversation: ${err.message}` } }
+      if (ctxRaw) ctx = sinceOf(ctxRaw, since)
+      else try { ctx = await chan(b, q).context({ channel: q.channel, thread: q.reply?.thread && q.reply.thread !== q.ts ? q.reply.thread : null, ts: q.ts, since, dm: q.place?.kind === 'dm' }) } catch (err) { ctx = { kind: q.thread ? 'thread' : 'channel', messages: [], pins: [], problem: `Couldn't read the conversation: ${err.message}` } }
       if (!q.routine) record(id, 'context', at(q, { kind: ctx.kind, since, messages: ctx.messages || [], pins: ctx.pins || [], problem: ctx.problem || null }))
       ctx = heardFrom(bot, ctx)
     }
@@ -1695,7 +1721,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         // (What its hook needs to run, where its agent has to give it: botmcp.js runFolder. And a
         // session's own temporary folder and git settings, botsessions.js envOf.)
         ...(mcp?.agentEnv && (tree || stage || mcp.bash) ? { env: mcp.agentEnv } : {}),
-        ...(s ? { env: { ...(mcp?.agentEnv && (tree || stage || mcp.bash) ? mcp.agentEnv : {}), ...botsessions.envOf(s.id, { name: bot.name, bash: !!mcp?.bash }) } } : {}),
+        ...(s ? { env: { ...(mcp?.agentEnv && (tree || stage || mcp.bash) ? mcp.agentEnv : {}), ...botsessions.envOf(s.id, { name: bot.name, mark: s.mark || sessions.patch(s.id, { mark: crypto.randomBytes(12).toString('hex') }).mark }) } } : {}),
         ...(s ? { session: s.id } : {}),
       })
     const h = chat ? { cwd: route.cwd } : delegate.get(out.helper.id) || {}
@@ -1715,7 +1741,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       if (out.helper.state === 'ended' && out.helper.end === 'failed') { if (!s.claudeSession) await endSession(s, { why: 'It couldn\'t start' }); else sessions.patch(s.id, { state: 'idle', paneId: null }) } else {
         sessions.patch(s.id, {
           helper: out.helper.id, paneId: h.paneId || null, claudeSession: h.sessionId || (route.resume ? s.claudeSession : null), cwd: h.cwd || route.cwd, access: !tree && !stage ? 'read' : 'change', state: 'live', lastAt: now(), turns: n,
-          tier, convs: [...new Set([...(s.convs || []), q.conv])], people: peopleOf(s, q), sig: sigOf(bot, tier, { bash: bash.on, roster }), bash: { on: !!mcp?.bash, why: bash.why || (bash.on && !mcp?.bash ? 'Its sandbox couldn\'t be set up' : null) },
+          tier, convs: [...new Set([...(s.convs || []), q.conv])], people: peopleOf(s, q, voices), sig: sigOf(bot, tier, { bash: bash.on, roster }), bash: { on: !!mcp?.bash, why: bash.why || (bash.on && !mcp?.bash ? 'Its sandbox couldn\'t be set up' : null) },
           tree: tree || narrowTree || s.tree || null, stage: !!stage, mcpDir: mcp?.dir || null, outbox: boxKey, model: entry.model || modelOf('claude'), runInfo,
           launch: { role: 'answer', title: launchOf.title, kind: 'claude', readOnly: launchOf.readOnly, change: launchOf.change, space: SPACE, from: id, cwd: h.cwd || route.cwd, dirs: route.dirs, ...(launchOf.env ? { env: launchOf.env } : {}), ...(launchOf.model ? { model: launchOf.model } : {}) },
         })
@@ -1864,6 +1890,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // (A session's turn: what it read and said since the turn began, its checks' log for this turn
     // read and started again, what it asked of Bridge AI taken; its folder, copies and pane stay.)
     const s = run.session ? sessions.get(run.session) : null
+    // (Its copy put aside and anything its commands left running ended, before anything is read or
+    // taken from it.)
+    if (s) { await holdStage(s); await stopShellsOf(s) }
     const turnH = s ? { ...h, startedAt: run.at } : h
     if (s) h = { ...h, said: saidSince(h, run.at) }
     let reads = []
@@ -1888,8 +1917,6 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const took = s ? Date.now() - Date.parse(run.at) : h.startedAt ? Date.now() - Date.parse(h.startedAt) : null
     record(id, 'run.finished', at(q, { helper: h.id, end: h.end, error: h.error || null, took, session: h.sessionId || null, agent: h.kind, ...(h.chat ? { model: h.model } : {}), cwd: h.cwd, upTo, transcript: keepTranscript(b, q, h), ...(s ? { sid: s.id, turn: run.turn || null } : {}) }))
     if (s) sessions.patch(s.id, { claudeSession: h.sessionId || s.claudeSession, upTo, lastAt: now(), ran: (s.ran || 0) + (took || 0), day: dayPlus(s, took), paneId: h.paneId || s.paneId })
-    // (Its turn over: a command it left running is ended.)
-    if (s) await stopShellsOf(s)
     if (asked) settleLimit(id, asked.handle, 'It finished before you decided: nothing to do')
     setStatus(id, q, false)
     const tree = run.change ? { ...(s?.tree || {}), ...run.change, dir: h.cwd } : null
@@ -2338,7 +2365,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const bot = botOf(id)
     const st = s ? botsessions.readStage(s.id) : stages.get(h.id)
     if (!s) stages.delete(h.id)
-    if (!st || (s && !fs.existsSync(st.dir))) return { hold: true, warn: 'Its copy of the folders it changes wasn\'t there any more (Bridge AI started again while it worked), so nothing was changed' }
+    if (!st || (s && !fs.existsSync(st.heldAt || st.dir))) return { hold: true, warn: 'Its copy of the folders it changes wasn\'t there any more (Bridge AI started again while it worked), so nothing was changed' }
     let c
     try { c = await botwrite.collect(st, { into: writesDir(id), by: q.from || null, instructions: await instructionFiles(), checked: checked || (() => false), commands: !!s?.bash?.on }) } catch (e) {
       record(id, 'write.failed', at(q, { step: e.step || 'collect', error: oneLine(e.message, 300) }))
@@ -2700,7 +2727,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (h && h.state !== 'ended') await delegate.drop(h.id).catch(() => {})
     // (What it changed before it stopped stays in its copy, taken with its next turn's.)
     const s = sessions.get(run.session)
-    if (s) { const g = botsessions.guardOf(s.mcpDir); if (g && !s.stage && !s.tree) await botwrite.guardTurn(g.log, g.key).catch(() => {}); await botsessions.takeRequests(s.mcpDir).catch(() => []); sessions.patch(s.id, { lastAt: now(), ran: (s.ran || 0) + (run?.at ? Date.now() - Date.parse(run.at) : 0), day: dayPlus(s, run?.at ? Date.now() - Date.parse(run.at) : 0) }); await stopShellsOf(s) }
+    if (s) { const g = botsessions.guardOf(s.mcpDir); if (g && !s.stage && !s.tree) await botwrite.guardTurn(g.log, g.key).catch(() => {}); await botsessions.takeRequests(s.mcpDir).catch(() => []); sessions.patch(s.id, { lastAt: now(), ran: (s.ran || 0) + (run?.at ? Date.now() - Date.parse(run.at) : 0), day: dayPlus(s, run?.at ? Date.now() - Date.parse(run.at) : 0) }); await holdStage(s); await stopShellsOf(s) }
     setStatus(id, q, false)
     react(id, q, q.ts, 'eyes', true)
     if (asked) settleLimit(id, asked.handle, why === 'longest' ? `Stopped after ${mins(ran)}, its Longest Run` : why === 'paused' ? `${bot?.name || 'The bot'} was paused` : `Stopped${by ? ` by ${by}` : ''}`)
@@ -3231,14 +3258,25 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // (A bot a Chief asks only answers: no commands.)
   const bashOf = (bot, tier, q) => (q.consult ? { on: false, why: 'A bot a Chief asks only answers' } : bashFor(bot, tier))
   // Context from someone who may not ask this bot isn't given to its agent: in its place, that there
-  // was a message. Only theirs who may ask it, its own and other bots' (the record keeps them all).
+  // was a message. Only theirs who may ask it (never a guest's, nor someone's from another organization,
+  // whatever it's open to), and its own earlier answers; never a bot's or an integration's (a webhook,
+  // a workflow: anyone's words), another bot's on a shared app among them (as: the name it was posted
+  // as). The record keeps them all. Whoever's words do reach it count among its session's people.
   const MASKED = '[a message from someone who can\'t ask me]'
   const heardFrom = (bot, ctx) => {
-    if (!ctx || bot.who === 'channels') return ctx
-    const may = (m) => m.you || m.bot === true || /^B[A-Z0-9]{6,}$/.test(String(m.person?.id || '')) || (!!m.person && !refusal(bot, m.person))
-    const mask = (list) => (list || []).map((m) => (may(m) ? m : { ...m, text: MASKED, files: [] }))
+    if (!ctx) return ctx
+    const may = (m) => {
+      if (m.you) return !m.as || m.as === bot.name
+      if (m.bot === true || /^B[A-Z0-9]{6,}$/.test(String(m.person?.id || ''))) return false
+      return !!m.person?.id && !refusal(bot, m.person)
+    }
+    const mask = (list) => (list || []).map((m) => (may(m) ? m : { ...m, you: false, masked: true, text: MASKED, files: [] }))
     return { ...ctx, messages: mask(ctx.messages), pins: mask(ctx.pins) }
   }
+  // (Whose words in it reach its agent: every author it's given, not its own.)
+  const voicesIn = (ctx) => (!ctx ? [] : [...new Map([...(ctx.messages || []), ...(ctx.pins || [])].filter((m) => !m.masked && !m.you && m.person?.id).map((m) => [m.person.id, m.person])).values()].slice(0, 50))
+  // (A conversation read once, as it would be read from a point on: its messages after since.)
+  const sinceOf = (ctx, since) => (!ctx || !since ? ctx : { ...ctx, messages: (ctx.messages || []).filter((m) => !m.ts || laterTs(m.ts, since)) })
   function tierOf(bot, s, people) {
     let t = s?.tier ? { ...TOP, ...s.tier } : TOP
     for (const p of people) t = lower(t, tierFor(bot, p))
@@ -3294,19 +3332,26 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // folders are), then what changed in the real folders meanwhile brought in (botwrite.js refresh).
   async function refreshStage(id, s) {
     const st = botsessions.readStage(s.id)
-    if (!st || !fs.existsSync(st.dir)) return null
-    // (Nothing of its agent's still running while its copy is written in: botwrite.js refresh.)
+    if (!st || !fs.existsSync(st.heldAt || st.dir)) return null
+    // (Nothing of its agent's still running, and its copy put aside, while Bridge AI works in it:
+    // botwrite.js hold; back where its agent works once it's done.)
     await stopShellsOf(s)
-    if (st.pending) {
-      const c = await botwrite.load(writesDir(id), st.pending)
-      if (c?.state === 'applied') await botwrite.rebase(st, c)
-      else if (!c || c.state !== 'proposed') await botwrite.reset(st)
-      if (!c || c.state !== 'proposed') st.pending = null
+    if (!st.heldAt) await botwrite.hold(st, HELD).catch(() => {})
+    let r = { pulled: [], conflicts: [] }
+    try {
+      if (st.pending) {
+        const c = await botwrite.load(writesDir(id), st.pending)
+        if (c?.state === 'applied') await botwrite.rebase(st, c)
+        else if (!c || c.state !== 'proposed') await botwrite.reset(st)
+        if (!c || c.state !== 'proposed') st.pending = null
+      }
+      const pend = st.pending ? await botwrite.load(writesDir(id), st.pending) : null
+      const waiting = pend ? new Set(pend.entries.flatMap((e) => [e.rel, e.from].filter(Boolean).map((x) => `${pend.folders[e.part]?.path}\n${x}`))) : null
+      r = await botwrite.refresh(st, { waiting }).catch(() => ({ pulled: [], conflicts: [] }))
+    } finally {
+      await botwrite.release(st).catch((e) => console.log(`A bot's copy couldn't be put back: ${e.message}`))
+      botsessions.writeStage(s.id, st)
     }
-    const pend = st.pending ? await botwrite.load(writesDir(id), st.pending) : null
-    const waiting = pend ? new Set(pend.entries.flatMap((e) => [e.rel, e.from].filter(Boolean).map((r) => `${pend.folders[e.part]?.path}\n${r}`))) : null
-    const r = await botwrite.refresh(st, { waiting }).catch(() => ({ pulled: [], conflicts: [] }))
-    botsessions.writeStage(s.id, st)
     return r
   }
   const stageNotes = (r) => [
@@ -3360,7 +3405,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // Its next turn, typed into its pane, when its pane is there as it was started and it may go on
   // as it is (its tier no narrower, its settings the same): true. Else its pane is put away and it's
   // started again (answer: --resume, with what it may do now), false.
-  async function turnInto(id, q, s, { pending = null, entry = null, pickd = null, tier, unable = null, consulted = null }) {
+  async function turnInto(id, q, s, { pending = null, entry = null, pickd = null, tier, unable = null, consulted = null, ctx0 = null, voices = [] }) {
     const bot = botOf(id)
     const b = bots.get(id)
     const h = s.helper ? delegate.get(s.helper) : null
@@ -3385,7 +3430,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (questionsIn(s).some((x) => x !== q && x.state === 'draft' && !x.steer && !sending(x))) notes.push(`Your last answer here hasn't been sent: it was waiting for ${ownerName(bot)}. Your answer to this takes its place, so answer it whole.`)
     let ctx = null
     if (!pending && !consulted && !q.steer && !q.consult) {
-      try { ctx = await chan(b, q).context({ channel: q.channel, thread: q.reply?.thread && q.reply.thread !== q.ts ? q.reply.thread : null, ts: q.ts, since: s.upTo || null, dm: q.place?.kind === 'dm' }) } catch (err) { ctx = { kind: q.thread ? 'thread' : 'channel', messages: [], pins: [], problem: `Couldn't read the conversation: ${err.message}` } }
+      if (ctx0) ctx = sinceOf(ctx0, s.upTo || null)
+      else try { ctx = await chan(b, q).context({ channel: q.channel, thread: q.reply?.thread && q.reply.thread !== q.ts ? q.reply.thread : null, ts: q.ts, since: s.upTo || null, dm: q.place?.kind === 'dm' }) } catch (err) { ctx = { kind: q.thread ? 'thread' : 'channel', messages: [], pins: [], problem: `Couldn't read the conversation: ${err.message}` } }
       if (!q.routine) record(id, 'context', at(q, { kind: ctx.kind, since: s.upTo || null, messages: ctx.messages || [], pins: [], problem: ctx.problem || null }))
       ctx = heardFrom(bot, ctx)
     }
@@ -3401,7 +3447,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     }
     if (!delegate.rearm(h.id)) return false
     typedIn.set(h.id, { paneId: h.paneId, item: paneQueue.add(h.paneId, typed).id })
-    sessions.patch(s.id, { turns: n, lastAt: now(), tier, convs: [...new Set([...(s.convs || []), q.conv])], people: peopleOf(s, q), state: 'live' })
+    sessions.patch(s.id, { turns: n, lastAt: now(), tier, convs: [...new Set([...(s.convs || []), q.conv])], people: peopleOf(s, q, voices), state: 'live' })
     const info = s.runInfo || {}
     record(id, 'run.started', at(q, {
       helper: h.id, sid: s.id, turn: n, typed: true, agent: 'claude', model: entry?.model || modelOf('claude'), session: s.claudeSession, from: null,
@@ -3425,7 +3471,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   const sessionBusy = (s, q) => (s.state === 'starting' && Date.now() - Date.parse(s.lastAt || s.startedAt || 0) < 120000) || questionsIn(s).some((x) => x !== q && (x.state === 'answering' || x.state === 'starting' || x.state === 'consulting'))
   // A Chief's turn with the answer it asked for, waiting for its session's turn under way.
   const consultWaits = new Map()
-  const peopleOf = (s, q) => [...new Map([...(s.people || []), ...speakersOf(q).map((p) => ({ id: p.id || 'you', name: p.name || null, ...(flagsOf(p) || {}) }))].map((p) => [p.id, p])).values()].slice(0, 50)
+  // (Everyone it has heard: who asked, joined or stepped in, and whose words in the conversation reached
+  // its agent: voices.)
+  const peopleOf = (s, q, voices = []) => [...new Map([...(s.people || []), ...[...speakersOf(q), ...voices].map((p) => ({ id: p.you ? 'you' : p.id || 'you', name: p.name || null, ...(flagsOf(p) || {}) }))].map((p) => [p.id, p])).values()].slice(0, 50)
   // Put away: its pane closed, its copies and folder gone; not to be gone on with again.
   async function endSession(s, { why = 'Ended', by = null } = {}) {
     if (!s || s.state === 'closed') return false

@@ -58,9 +58,9 @@ export const tmpOf = (sid) => (SID.test(String(sid)) ? path.join(TMP, String(sid
 // What a session's agent starts with besides what it keeps of yours (botenv.js): its temporary
 // folder; git's settings of its own, its name as the author and nothing of yours (your ~/.gitconfig,
 // its includes and credential helpers, the system's: GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM), in its
-// folder, readable to it and not written; and, with commands, Claude Code stripping credentials from
-// all it starts (CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, as its settings file says too: botmcp.js).
-export function envOf(sid, { name = 'A bot', bash = false } = {}) {
+// folder, readable to it and not written; and its session's mark (BRIDGE_SESSION_MARK, not a secret),
+// by which what its commands leave running is found again (stopShells).
+export function envOf(sid, { name = 'A bot', mark = null } = {}) {
   const dir = dirOf(sid)
   const tmp = tmpOf(sid)
   if (!dir || !tmp) return {}
@@ -69,33 +69,100 @@ export function envOf(sid, { name = 'A bot', bash = false } = {}) {
   const who = String(name).replace(/[^\w .'-]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || 'A bot'
   const gitconfig = path.join(dir, 'gitconfig')
   fs.writeFileSync(gitconfig, `[user]\n\tname = ${who} (Bridge AI)\n\temail = bot@bridge-ai.invalid\n[credential]\n\thelper =\n[core]\n\thooksPath = ${path.join(dir, 'no-hooks').replace(/\\/g, '/')}\n`, { mode: 0o600 }) // private-ok: a placeholder address (.invalid) for a bot's commits, nobody's
-  return { CLAUDE_CODE_TMPDIR: tmp, TMPDIR: tmp, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: '1', ...(bash ? { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' } : {}) }
+  return { CLAUDE_CODE_TMPDIR: tmp, TMPDIR: tmp, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: '1', ...(/^[0-9a-f]{16,64}$/.test(String(mark || '')) ? { BRIDGE_SESSION_MARK: mark } : {}) }
 }
-// Its agent's commands still running (a background job, or one a stopped turn left): ended, with
-// everything they started, before Bridge AI brings the real folders into its copy (a command can't
-// swap a folder there for a link meanwhile: botwrite.js refresh) and when a turn is stopped. They're
-// the shells below its agent's process (Claude Code runs each command in one, its sandbox around it),
-// found by the system's process list; its MCP servers and Claude Code itself are left. Off Windows
-// (where a bot runs no commands); with herdr, whose panes Bridge AI doesn't start, none are found.
+// Its agent's commands still running (a background job, a detached one, one a stopped turn left):
+// ended, with everything they started, when its turn ends, before Bridge AI works in its copy, and on
+// Stop. Found three ways, as each alone can be got around: below its agent's process, the shells
+// (Claude Code runs each command in one, its sandbox around it), never its MCP servers (their command
+// lines, from its config.json: mcp); anywhere else, a process with its session's mark in its
+// environment (BRIDGE_SESSION_MARK, envOf, which all it starts inherits unless one clears it) or
+// working in its copy (roots: its current folder there). Never its agent (pid, or the one started on
+// its conversation: claude), what started it (its pane's shell), nor Bridge AI. Best effort: off
+// Windows (where a bot runs no commands), from the system's process list (macOS: ps, whose -E gives a
+// process's environment to its own user, and lsof for where each works; Linux: /proc). Its copy is
+// put out of its commands' reach besides (botwrite.js hold), so one that's missed can't write there.
 const SHELL = /(^|\/)-?(sh|bash|zsh|dash|ksh|fish|sandbox-exec|bwrap)$/
-export async function stopShells(pid) {
-  if (!pid || process.platform === 'win32') return 0
-  const out = await new Promise((resolve) => execFile('/bin/ps', ['-A', '-o', 'pid=,ppid=,comm='], { timeout: 10000, maxBuffer: 8 * 1024 * 1024 }, (err, so) => resolve(err ? '' : String(so))))
-  const kids = new Map()
-  const comm = new Map()
-  for (const line of out.split('\n')) {
-    const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)
-    if (!m) continue
-    const [p, pp] = [Number(m[1]), Number(m[2])]
-    comm.set(p, m[3].trim())
-    if (!kids.has(pp)) kids.set(pp, [])
-    kids.get(pp).push(p)
+const run = (bin, args) => new Promise((resolve) => execFile(bin, args, { timeout: 10000, maxBuffer: 32 * 1024 * 1024 }, (err, so) => resolve(err && !so ? '' : String(so || ''))))
+async function processes() {
+  const all = new Map()
+  if (process.platform === 'linux') {
+    let ids = []
+    try { ids = fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)) } catch { return all }
+    const rd = (p, f) => { try { return fs.readFileSync(`/proc/${p}/${f}`, 'utf8') } catch { return null } }
+    for (const p of ids) {
+      const stat = rd(p, 'stat')
+      if (!stat) continue
+      const ppid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1])
+      let cwd = null
+      try { cwd = fs.readlinkSync(`/proc/${p}/cwd`) } catch { cwd = null }
+      all.set(Number(p), { pid: Number(p), ppid, comm: String(rd(p, 'comm') || '').trim(), args: String(rd(p, 'cmdline') || '').split('\0').join(' ').trim(), env: rd(p, 'environ')?.split('\0') || [], cwd })
+    }
+    return all
   }
-  const under = (p, acc = []) => { for (const k of kids.get(p) || []) { acc.push(k); under(k, acc) } return acc }
+  for (const line of (await run('/bin/ps', ['-A', '-o', 'pid=,ppid=,comm='])).split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)
+    if (m) all.set(Number(m[1]), { pid: Number(m[1]), ppid: Number(m[2]), comm: m[3].trim(), args: '', env: [], cwd: null })
+  }
+  // (Its command line; then with its environment after it, as ps -E gives it.)
+  for (const line of (await run('/bin/ps', ['-A', '-ww', '-o', 'pid=,command='])).split('\n')) {
+    const m = /^\s*(\d+)\s+(.*)$/.exec(line)
+    const x = m && all.get(Number(m[1]))
+    if (x) x.args = m[2]
+  }
+  for (const line of (await run('/bin/ps', ['-A', '-ww', '-E', '-o', 'pid=,command='])).split('\n')) {
+    const m = /^\s*(\d+)\s+(.*)$/.exec(line)
+    const x = m && all.get(Number(m[1]))
+    if (x) x.env = (m[2].startsWith(x.args) ? m[2].slice(x.args.length) : m[2]).split(' ').filter(Boolean)
+  }
+  let at = null
+  for (const line of (await run('/usr/sbin/lsof', ['-a', '-d', 'cwd', '-Fpn', '-u', String(process.getuid?.() ?? '')])).split('\n')) {
+    if (line[0] === 'p') at = all.get(Number(line.slice(1))) || null
+    else if (line[0] === 'n' && at) at.cwd = line.slice(1)
+  }
+  return all
+}
+export async function stopShells({ pid = null, claude = null, mark = null, mcp = [], roots = [] } = {}) {
+  if (process.platform === 'win32' || (!pid && !claude)) return 0
+  const all = await processes()
+  const kids = new Map()
+  for (const x of all.values()) { if (!kids.has(x.ppid)) kids.set(x.ppid, []); kids.get(x.ppid).push(x.pid) }
+  const under = (p, acc = new Set()) => { for (const k of kids.get(p) || []) if (!acc.has(k)) { acc.add(k); under(k, acc) } return acc }
+  const up = (p, acc = new Set()) => { for (let x = all.get(p); x && x.pid > 1 && !acc.has(x.pid); x = all.get(x.ppid)) acc.add(x.pid); return acc }
+  // (Its agent: the process given, and the one started on its conversation.)
+  const agents = [...all.values()].filter((x) => x.pid === Number(pid) || (claude && x.args.includes(String(claude)) && !SHELL.test(x.comm))).map((x) => x.pid)
+  if (!agents.length) return 0
+  const kept = new Set([process.pid, ...up(process.pid)])
+  for (const a of agents) for (const p of up(a)) kept.add(p)
+  // (Its MCP servers, started by its agent: by their command lines.)
+  const sigs = (mcp || []).map((m) => [m.command, ...(m.args || [])].filter(Boolean).map(String)).filter((x) => x.length)
+  const isMcp = (x) => sigs.some((s) => (s.length > 1 ? x.args.includes(s.slice(1).join(' ')) : x.args.split(' ')[0].endsWith(s[0])))
+  const mine = new Set()
+  for (const a of agents) for (const p of under(a)) mine.add(p)
+  for (const a of agents) for (const k of kids.get(a) || []) { const x = all.get(k); if (x && isMcp(x)) { kept.add(k); for (const p of under(k)) kept.add(p) } }
   const doomed = new Set()
-  for (const p of under(Number(pid))) if (SHELL.test(comm.get(p) || '')) { doomed.add(p); for (const k of under(p)) doomed.add(k) }
+  const doom = (p) => { if (kept.has(p)) return; doomed.add(p); for (const k of under(p)) if (!kept.has(k)) doomed.add(k) }
+  for (const p of mine) if (SHELL.test(all.get(p)?.comm || '')) doom(p)
+  const real = (r) => { try { return fs.realpathSync(r) } catch { return r } }
+  const tops = [...new Set((roots || []).filter(Boolean).flatMap((r) => [path.resolve(String(r)), real(path.resolve(String(r)))]))]
+  const inside = (d) => !!d && tops.some((t) => d === t || d.startsWith(t + path.sep))
+  const marked = mark ? `BRIDGE_SESSION_MARK=${mark}` : null
+  for (const x of all.values()) {
+    if (mine.has(x.pid) || kept.has(x.pid) || agents.includes(x.pid)) continue
+    if ((marked && x.env.includes(marked)) || inside(x.cwd)) doom(x.pid)
+  }
   for (const p of doomed) { try { process.kill(p, 'SIGKILL') } catch { /* gone */ } }
   return doomed.size
+}
+
+// A session's MCP servers as its agent starts them (its config.json, botmcp.js runFolder): their
+// command lines, so stopShells leaves them be.
+export function serversOf(mcpDir) {
+  if (!mcpDir) return []
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(mcpDir, 'config.json'), 'utf8'))
+    return Object.values(j.mcpServers || {}).filter((x) => x?.command).map((x) => ({ command: String(x.command), args: (Array.isArray(x.args) ? x.args : []).map(String) }))
+  } catch { return [] }
 }
 
 // Temporary folders of sessions that aren't going on: gone (keep: the ids of those that are).

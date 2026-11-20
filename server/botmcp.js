@@ -364,8 +364,8 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
   const settings = path.join(dir, 'settings.json')
   // (With commands: your home folder and the other roots of people's files unreadable to them, and to
   // its file tools outside its folders (blockReadsOutsideWorkingDirectories, Claude Code 2.1.257, as
-  // old as commands need: agents.js BASH_MIN); and credentials stripped from all it starts.)
-  writeFileAtomic(settings, JSON.stringify({ ...KEPT_SETTINGS, permissions: { ...KEPT_SETTINGS.permissions, ...(readDeny.length ? { deny: readDeny } : {}), ...(bash ? { blockReadsOutsideWorkingDirectories: true } : {}) }, ...(hooks || {}), ...(bash ? { sandbox: sandboxOf(bash), env: { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' } } : {}) }, null, 2), { mode: 0o600 })
+  // old as commands need: agents.js BASH_MIN).)
+  writeFileAtomic(settings, JSON.stringify({ ...KEPT_SETTINGS, permissions: { ...KEPT_SETTINGS.permissions, ...(readDeny.length ? { deny: readDeny } : {}), ...(bash ? { blockReadsOutsideWorkingDirectories: true } : {}) }, ...(hooks || {}), ...(bash ? { sandbox: sandboxOf(bash) } : {}) }, null, 2), { mode: 0o600 })
   writeFileAtomic(path.join(dir, 'config.json'), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 })
   writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny, settings, ...(bash ? { bash: true } : {}) }, null, 2), { mode: 0o600 })
   return { dir, servers: said, missing, ...(guard ? { guard } : {}), ...(agentEnv ? { agentEnv } : {}), ...(requests ? { requests } : {}), ...(bash ? { bash: true } : {}) }

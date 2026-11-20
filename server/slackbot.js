@@ -963,7 +963,22 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   let reads = 0
   async function context({ channel, thread, ts, since = null, dm = false }) {
     // (A message posted as one of a shared connection's bots carries that bot's name: username.)
-    const said = (m) => ({ ts: m.ts, person: { id: m.user || m.bot_id || null, name: (m.bot_id && m.username) || names[m.user] || m.username || m.bot_profile?.name || m.user || null }, text: clip(plainText(m.text, { bot: kept.bot?.userId, names }), LONGEST_SAID), you: !!((m.user && m.user === kept.bot?.userId) || (m.bot_id && m.bot_id === kept.bot?.botId)) })
+    // (What's known of who wrote it, as person() says of an asker: a guest, someone from another
+    // organization (also from the message's own team); a bot or an integration (a webhook, a workflow),
+    // whose words are anyone's. A post of this app's own: as, the name it was posted as, one of a shared
+    // connection's bots, so a bot takes only its own as its own words: frontdesk.js heardFrom.)
+    const team = kept.team?.id
+    const other = (t) => !!(t && team && t !== team)
+    const said = (m) => {
+      const own = !!((m.user && m.user === kept.bot?.userId) || (m.bot_id && m.bot_id === kept.bot?.botId))
+      const u = m.user ? users[m.user] : null
+      const flags = { ...(u?.guest ? { guest: true } : {}), ...(u?.stranger || other(u?.team) || other(m.user_team) || other(m.source_team) ? { external: true } : {}) }
+      return {
+        ts: m.ts, person: { id: m.user || m.bot_id || null, name: (m.bot_id && m.username) || names[m.user] || m.username || m.bot_profile?.name || m.user || null, ...flags },
+        text: clip(plainText(m.text, { bot: kept.bot?.userId, names }), LONGEST_SAID), you: own,
+        ...(own ? { as: m.username || /^\*([^*\n]{1,80}):\*/.exec(String(m.text || ''))?.[1] || null } : (m.bot_id || m.subtype === 'bot_message' || u?.bot) ? { bot: true } : {}),
+      }
+    }
     const before = (m) => Number(m.ts) < Number(ts) && (!since || Number(m.ts) > Number(since)) && String(m.text || '').trim()
     const order = (a, b) => Number(a.ts) - Number(b.ts)
     // (Names in the words too: <@U…> mentions.)

@@ -79,9 +79,11 @@ const MCP_RUNS = dataFile('front-desk', 'mcp')
 // is gone or says otherwise has no Bash at all.
 // (Its file also keeps from its commands every variable that holds a key (credentials.envVars, deny),
 // GitHub out of the network whatever is allowed (deniedDomains), Apple Events off, your home folder
-// and the computer's other people's and drives unreadable (permissions.blockReadsOutsideWorkingDirectories)
-// and has Claude Code strip credentials from everything it starts (env CLAUDE_CODE_SUBPROCESS_ENV_SCRUB):
-// botmcp.js sandboxOf, runFolder.)
+// and the computer's other people's and drives unreadable (permissions.blockReadsOutsideWorkingDirectories):
+// botmcp.js sandboxOf, runFolder. No allow rule of Bridge AI's lets a command run: the sandbox's own
+// auto-allow does, for a command in it (autoAllowBashIfSandboxed, which holds in dontAsk too:
+// code.claude.com/docs/en/sandboxing, Auto-allow mode), so a command the sandbox doesn't hold,
+// because of a policy of your organization's Bridge AI can't read, is refused by dontAsk.)
 export const sandboxClosed = (s) => {
   const x = s?.sandbox
   return !!x && x.enabled === true && x.failIfUnavailable === true && x.allowUnsandboxedCommands === false && x.autoAllowBashIfSandboxed === true
@@ -89,7 +91,7 @@ export const sandboxClosed = (s) => {
     && Array.isArray(x.filesystem?.denyRead) && x.filesystem.denyRead.length > 0
     && x.allowAppleEvents === false && (x.network?.deniedDomains || []).includes('github.com')
     && (x.credentials?.envVars || []).some((e) => e?.name === 'GITHUB_TOKEN' && e.mode === 'deny')
-    && s.permissions?.blockReadsOutsideWorkingDirectories === true && s.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB === '1'
+    && s.permissions?.blockReadsOutsideWorkingDirectories === true && !(s.permissions?.allow || []).some((r) => /^Bash(\(|$)/.test(String(r)))
     && (s.hooks?.PreToolUse || []).some((m) => /(^|\|)Bash(\||$)/.test(String(m.matcher || '')))
 }
 export function mcpOf(dirs = []) {
@@ -109,7 +111,7 @@ export function mcpOf(dirs = []) {
 // Its flags (allowed: with its own --allowedTools; a bot's change has put its tools in its own).
 // Each takes a list, so another flag follows.
 const mcpFlags = (m, { allowed = true } = {}) => (m
-  ? ['--mcp-config', m.config, ...(allowed && (m.allow.length || m.bash) ? ['--allowedTools', ...m.allow, ...(m.bash ? ['Bash'] : [])] : []), ...(m.deny.length ? ['--disallowedTools', ...m.deny] : [])]
+  ? ['--mcp-config', m.config, ...(allowed && m.allow.length ? ['--allowedTools', ...m.allow] : []), ...(m.deny.length ? ['--disallowedTools', ...m.deny] : [])]
   : [])
 // A run kept to its folders (a bot's answer or change) works for someone other than you, in folders
 // someone else may have written (a shared repository, a synced folder), and Bridge AI trusts them for
@@ -170,13 +172,11 @@ export const AGENTS = [
       const { dirs, mcp } = mcpOf(o.dirs)
       const add = dirs.length ? ['--add-dir', ...dirs] : []
       // (A session's commands: Bash, only while its settings file keeps it in Claude Code's sandbox,
-      // closed, sandboxClosed. Allowed by a rule (Bash), as the credential scrub that file turns on
-      // turns the sandbox's own auto-allow off (code.claude.com/docs/en/settings-reference,
-      // autoAllowBashIfSandboxed): with nothing run outside the sandbox (allowUnsandboxedCommands
-      // false, no excludedCommands, failIfUnavailable), the rule allows only sandboxed commands.)
+      // closed, sandboxClosed. Never allowed by a rule of ours: run by the sandbox's auto-allow, so
+      // one it doesn't hold is refused (dontAsk).)
       const bash = mcp?.bash ? ',Bash' : ''
       return lvl === 'read' ? ['--tools', `Read,Grep,Glob${bash}`, ...add, ...mcpFlags(mcp), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...keptFlags(mcp)]
-        : ['--tools', `Read,Grep,Glob,Edit,Write${bash}`, '--allowedTools', EDIT_HERE, ...(mcp ? mcp.allow : []), ...(mcp?.bash ? ['Bash'] : []), ...add, ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...keptFlags(mcp)]
+        : ['--tools', `Read,Grep,Glob,Edit,Write${bash}`, '--allowedTools', EDIT_HERE, ...(mcp ? mcp.allow : []), ...add, ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...keptFlags(mcp)]
     },
     confined: true,
     // A copy of a conversation under a new id (the original stays as it is).
@@ -475,6 +475,10 @@ const widens = (j, managed) => {
   // Edit ones into the folders it may write: settings-reference, sandbox.filesystem.)
   const rules = (j?.permissions?.allow || []).map(String).filter((r) => /^(WebFetch|Edit|Write|MultiEdit|NotebookEdit)(\(|$)/.test(r.trim()))
   if (rules.length) return `allow ${rules.slice(0, 3).join(', ')} (permissions.allow), which a sandbox takes in as more domains or folders to write`
+  // (Commands allowed by a rule of yours: they'd run even where a policy of your organization's that
+  // Bridge AI can't read turns the sandbox off, where the sandbox's own auto-allow wouldn't.)
+  const runs = (j?.permissions?.allow || []).map(String).filter((r) => /^Bash(\(|$)/.test(r.trim()))
+  if (runs.length) return `allow ${runs.slice(0, 3).join(', ')} (permissions.allow), commands that would run even outside the sandbox`
   if (n.allowMachLookup?.length) return 'let every session reach more macOS services (sandbox.network.allowMachLookup)'
   if (n.httpProxyPort != null || n.socksProxyPort != null) return 'send every session\'s traffic through a proxy of your own, past the sandbox\'s domain lists (sandbox.network.httpProxyPort, socksProxyPort)'
   if (s.allowNestedUserNamespaces === true) return 'let every session make user namespaces, which leads out of the sandbox (sandbox.allowNestedUserNamespaces)'
