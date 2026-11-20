@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { randomInt, randomUUID } from 'node:crypto'
-import { transcript, earlier, replyDiffs, markUndone, preview, locate, imageFrom } from './transcripts.js'
+import { transcript, earlier, replyDiffs, markUndone, preview, locate, imageFrom, written } from './transcripts.js'
 import { listSubagents, runningFor, forgetExcept } from './subagents.js'
 import { ttyHandler } from './tty.js'
 import { attachHandler } from './attach.js'
@@ -1453,12 +1453,16 @@ app.get('/api/search', wrap(async (req) => {
   if (fromCloud.length) { out.results = [...fromCloud, ...out.results]; out.total = (out.total || 0) + fromCloud.length }
   return out
 }))
+// never: an agent closed before it got as far as a conversation (its log was never written), which
+// Resume starts fresh, as History says.
 app.get('/api/archive', wrap(async () => {
   const live = await liveBySession()
-  return { items: archive.all().map((x) => ({ ...x, paneId: live[x.sessionId] || null, cwd: x.cwd?.replace(os.homedir(), '~'), fullCwd: x.cwd })) }
+  return { items: archive.all().map((x) => ({ ...x, paneId: live[x.sessionId] || null, cwd: x.cwd?.replace(os.homedir(), '~'), fullCwd: x.cwd, ...(!live[x.sessionId] && written(x) === false ? { never: true } : {}) })) }
 }))
 app.delete('/api/archive/:id', wrap((req) => { archive.remove(req.params.id); return { ok: true } }))
-// Open a past conversation again, with its history: in its old space if that's still open.
+// Open a past conversation again, with its history: in its old space if that's still open. One
+// that never got as far as a conversation has none to resume (an agent closed before its first
+// message): it starts fresh under its name, and says so (fresh).
 app.post('/api/sessions/resume', wrap(async (req) => {
   const { kind, sessionId, cwd, label, workspace } = req.body || {}
   if (!adapter(kind).resume || !/^[\w-]{8,64}$/.test(String(sessionId || ''))) throw new Error("That conversation can't be resumed")
@@ -1474,10 +1478,11 @@ app.post('/api/sessions/resume', wrap(async (req) => {
   if (!(await exists(dir))) throw new Error(`Its folder is gone: ${cwd}`)
   const ws = workspace ? (await rt.fleet()).workspaces.find((w) => w.label === workspace) : null
   const model = forLaunch(kind, sessionId) // the model you last picked for it, if any
-  const out = await launchAgent({ kind, cwd: dir, label: String(label || path.basename(dir)).slice(0, 60), workspaceId: ws?.id || null, newSpace: ws ? undefined : (workspace || 'Resumed'), resume: sessionId, setup: back?.setup || undefined, model, pinModel: !!model })
+  const fresh = written({ kind, sessionId, cwd: dir }) === false
+  const out = await launchAgent({ kind, cwd: dir, label: String(label || path.basename(dir)).slice(0, 60), workspaceId: ws?.id || null, newSpace: ws ? undefined : (workspace || 'Resumed'), ...(fresh ? {} : { resume: sessionId }), setup: back?.setup || undefined, model, pinModel: !!model })
   archive.removeSession(sessionId)
   pushFleet()
-  return out
+  return fresh ? { ...out, fresh: true } : out
 }))
 // A copy of an agent's conversation in a new tab next to it, to try another way.
 app.post('/api/agents/:pane/fork', wrap(async (req) => {

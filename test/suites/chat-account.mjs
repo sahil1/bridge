@@ -7,9 +7,11 @@
 // to carry on. What's in the message box goes with the conversation to the pane that takes its
 // place, and the window doesn't load again: on another account, restarted on another model (Codex,
 // stand-ins/codex.cjs, restarts to switch), handed to another agent, and closed then resumed from
-// History's Closed agents.
+// History's Closed agents. One closed before it got as far as a conversation: Closed agents says so,
+// on a computer and a phone, and Start fresh starts it under its name in a new conversation.
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { startKit, checks, until, browser, page, shot, solid, noServiceWorker, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('chat-account')
@@ -258,6 +260,51 @@ try {
     ok(resumed.ok, "resumed from Closed agents: what was in its message box is in the new one's, and the window didn't load again", resumed)
     ok(errors.length === 0, 'closed and resumed: no page errors', errors)
     await ctx.close()
+  }
+
+  // One closed before it got as far as a conversation (its Claude Code never wrote its log; here,
+  // its log taken away once it's closed): Closed agents says so, on a computer and on a phone, and
+  // Start fresh starts it under its name in a new conversation, rather than a Resume that quietly
+  // isn't one.
+  {
+    const l = await kit.api('/agents/launch', { kind: 'claude', cwd: dir, label: 'Ledger', newSpace: 'Ledger', prompt: 'idle' })
+    const was = await settled(l.paneId)
+    ok(!!was, 'a Claude Code agent to close before its conversation, done working', await agentOf((a) => a.paneId === l.paneId))
+    await kit.api(`/tabs/${encodeURIComponent(was?.tabId || '')}/close`, {})
+    await until(async () => ((await kit.api('/archive')).items || []).some((x) => x.sessionId === was?.sessionId), 15000, 300)
+    const projects = path.join(kit.home, '.claude', 'projects')
+    for (const f of fs.readdirSync(projects, { recursive: true }).map(String).filter((x) => x.endsWith(`${was?.sessionId}.jsonl`))) fs.rmSync(path.join(projects, f))
+    const listed = ((await kit.api('/archive')).items || []).find((x) => x.sessionId === was?.sessionId)
+    ok(listed?.never === true && !listed.paneId, 'Closed agents knows it never got as far as a conversation', listed)
+    const said = 'Ledger never got as far as a conversation, so it starts fresh.'
+    for (const phone of [false, true]) {
+      const shape = phone ? 'phone' : 'computer'
+      const { ctx, p, errors } = await page(b, kit.url, { mode: phone ? 'dark' : 'light', theme: 'sky', phone })
+      if (phone) {
+        await p.locator('.tabbar button', { hasText: 'More' }).click({ timeout: 20000 })
+        await p.locator('.m-more-row[data-id="history"]').click({ timeout: 10000 })
+      } else {
+        await p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
+        await p.keyboard.press('ControlOrMeta+Shift+KeyF')
+      }
+      const row = p.locator('.modal.history .hist-item', { hasText: 'Ledger' }).first()
+      const look = await until(async () => {
+        const text = await row.innerText().catch(() => '')
+        return text.includes(said) ? { text, button: (await row.locator('button.primary').innerText()).trim(), wide: await p.evaluate(() => document.documentElement.scrollWidth > innerWidth), cut: await row.locator('.hist-never').evaluate((el) => el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) } : null
+      }, 10000, 200)
+      ok(look?.button === 'Start fresh' && !look.wide && !look.cut, `${shape}: its row in Closed agents says it starts fresh, all of it, with Start fresh, not Resume`, look || await row.innerText().catch(() => ''))
+      await p.locator('.modal.history').evaluate((el) => Promise.all(el.closest('.modal-backdrop').getAnimations({ subtree: true }).map((x) => x.finished))).catch(() => {})
+      await shot(p, `chat-account-${phone ? 'phone-' : ''}never-${which}`)
+      if (!phone) { await p.keyboard.press('Escape'); ok(errors.length === 0, `${shape}: no page errors`, errors); await ctx.close(); continue }
+      await row.locator('button', { hasText: 'Start fresh' }).click()
+      const fresh = await until(() => agentOf((a) => a.tab === 'Ledger' && a.paneId !== l.paneId && a.sessionId), 30000, 500)
+      const gone = await until(async () => !((await kit.api('/archive')).items || []).some((x) => x.sessionId === was?.sessionId), 10000, 200)
+      ok(!!fresh && fresh.sessionId !== was?.sessionId && gone, 'Start fresh: Ledger again, in a new conversation, and off Closed agents', fresh && { tab: fresh.tab, session: fresh.sessionId, was: was?.sessionId, closed: ((await kit.api('/archive')).items || []).map((x) => x.label) })
+      ok(errors.length === 0, `${shape}: no page errors`, errors)
+      await ctx.close()
+    }
+    const asked = await kit.api('/sessions/resume', { kind: 'claude', sessionId: crypto.randomUUID(), cwd: dir, label: 'Never', workspace: 'Never' })
+    ok(asked.fresh === true && !!asked.paneId, 'asked of the server for a conversation never written: started fresh, and it says so (fresh)', asked)
   }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

@@ -85,8 +85,52 @@ export function checks(name) {
     return false
   }
   const skip = (what, why) => { st.skip++; console.log(`SKIP ${what}: ${why}`) }
-  const done = () => { console.log(`${name}: ${st.pass} passed, ${st.fail} failed${st.skip ? `, ${st.skip} skipped` : ''}`); return st }
+  const done = () => {
+    for (const { kit, host, from } of reachedGitHub()) ok(false, `no test's server reaches GitHub: ${host}, asked by ${from || 'a program'} in test/.out/kits/${kit} (give it a stand-in)`)
+    console.log(`${name}: ${st.pass} passed, ${st.fail} failed${st.skip ? `, ${st.skip} skipped` : ''}`)
+    return st
+  }
   return { ok, skip, done, st }
+}
+// What a kit's server, or a program it started, asked of GitHub (stand-ins/no-github.mjs turned each
+// away and wrote it down): each once.
+const githubLogs = new Map() // kit name -> its log
+const githubSeen = new Set()
+function reachedGitHub() {
+  const out = []
+  for (const [kit, log] of githubLogs) {
+    let lines = []
+    try { lines = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean) } catch { /* none asked */ }
+    for (const line of lines) {
+      const [host, from] = line.split('\t')
+      const said = `${kit} ${host}`
+      if (githubSeen.has(said)) continue
+      githubSeen.add(said)
+      out.push({ kit, host, from: from ? path.relative(ROOT, from) : '' })
+    }
+  }
+  return out
+}
+
+// GitHub's releases, stood in for: server/updates.js asks them for a newer version, and here this
+// version is the newest, so a test's Bridge AI is up to date unless its test gives a stand-in of its
+// own (BRIDGE_RELEASES_API). Answered at once on every system: the real GitHub took up to the check's
+// 8 s (perf in WebKit, 20 Nov), and a closed port takes Windows two seconds to refuse.
+let releases = null
+function releasesStandIn() {
+  releases ||= new Promise((resolve, reject) => {
+    const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
+    const release = { tag_name: `v${version}`, name: `v${version}`, html_url: `https://github.com/sahil1/bridge/releases/tag/v${version}`, body: '', draft: false, prerelease: false }
+    const s = http.createServer((req, res) => {
+      const p = new URL(req.url, 'http://x').pathname
+      const json = p.endsWith('/releases/latest') ? release : p.endsWith('/releases') ? [release] : null
+      res.writeHead(json ? 200 : 404, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(json || { message: 'Not Found' }))
+    })
+    s.on('error', reject)
+    s.listen(0, '127.0.0.1', () => { s.unref(); resolve(`http://127.0.0.1:${s.address().port}/repos/sahil1/bridge/releases/latest`) })
+  })
+  return releases
 }
 
 // The folders a test's server may find programs in: the stand-ins first, then the system's own.
@@ -192,6 +236,11 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     BRIDGE_COUNTS_URL: '', BRIDGE_CRASHES_URL: '', BRIDGE_HOSTED_URL: '', BRIDGE_ACCOUNTS_URL: '', BRIDGE_ACCOUNTS_KEY: '',
     // Nor GitHub for a release's phone page (relaycheck.js): a test gives a stand-in, or there's none.
     BRIDGE_RELAY_SOURCE: 'http://127.0.0.1:9',
+    // Nor for the update check: GitHub's releases stood in for, with this version the newest. And
+    // whatever else would reach GitHub is turned away and fails the suite (stand-ins/no-github.mjs,
+    // loaded below; reachedGitHub).
+    BRIDGE_RELEASES_API: await releasesStandIn(),
+    BRIDGE_TEST_GITHUB_LOG: path.join(dir, 'github.log'),
     BRIDGE_FIX_DRYRUN: '1', LANG: 'en_US.UTF-8', TMPDIR: os.tmpdir(), USER: os.userInfo().username,
     // A new bot starts with When You Ask: Full Access off here (on for everyone else: bots.js), so
     // a test of what your own asks may do as anyone's are tests that; a test of Full Access turns it
@@ -238,11 +287,14 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   else base.BRIDGE_SHELL = base.SHELL = '/bin/sh'
   const log = fs.openSync(path.join(dir, 'server.log'), 'w')
   const more = typeof env === 'function' ? env({ bin, data, home, PATH }) : env
+  // GitHub turned away (stand-ins/no-github.mjs), before what the test loads itself.
+  const NODE_OPTIONS = [`--import=${pathToFileURL(path.join(TEST, 'stand-ins', 'no-github.mjs')).href}`, more.NODE_OPTIONS].filter(Boolean).join(' ')
+  githubLogs.set(`${name}-${port}`, more.BRIDGE_TEST_GITHUB_LOG || base.BRIDGE_TEST_GITHUB_LOG)
   const url = `http://127.0.0.1:${port}`
   KITS.set(port, { data: more.BRIDGE_HOME || data, key: null })
   let server = null
   const run = async () => {
-    server = spawn(node, [path.join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...base, ...more }, stdio: ['ignore', log, log] })
+    server = spawn(node, [path.join(ROOT, 'server', 'index.js')], { cwd: ROOT, env: { ...base, ...more, NODE_OPTIONS }, stdio: ['ignore', log, log] })
     const up = await until(async () => (await fetch(`${url}/api/config`)).ok, 60000, 250)
     if (!up) { stopTree(server); throw new Error(`the server didn't start on ${port}: ${fs.readFileSync(path.join(dir, 'server.log'), 'utf8').slice(-1500)}`) }
     for (const ctx of contexts) await letIn(ctx)
@@ -552,8 +604,22 @@ export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440
   // A page whose process crashed is closed, and every call on it fails as "Target page, context or
   // browser has been closed" (dictation-cleanup in WebKit, once in CI): the log says so, and where.
   p.on('crash', () => console.log(`the page crashed (${b.browserType().name()}): ${p.url()}`))
-  await p.goto(url, { waitUntil })
+  try {
+    await p.goto(url, { waitUntil })
+  } catch (e) {
+    // Windows' "no buffer space" for a connection (scroll-ui, once on CI, 19 Nov): what the
+    // computer's TCP connections were then, by state, and the ports it hands out, for the log.
+    if (IS_WIN && /ERR_NO_BUFFER_SPACE|ERR_ADDRESS_(IN_USE|UNREACHABLE)/.test(e.message)) console.log(`TCP connections as it failed: ${socketsNow()}`)
+    throw e
+  }
   return { ctx, p, errors }
+}
+// Windows: this computer's TCP connections by state, and the range of ports it hands out.
+function socketsNow() {
+  const by = {}
+  for (const l of String(spawnSync('netstat', ['-an', '-p', 'tcp'], { encoding: 'utf8', windowsHide: true, timeout: 20000 }).stdout || '').split(/\r?\n/)) { const st = l.trim().split(/\s+/)[3]; if (/^[A-Z_]+$/.test(st || '')) by[st] = (by[st] || 0) + 1 }
+  const range = String(spawnSync('netsh', ['int', 'ipv4', 'show', 'dynamicport', 'tcp'], { encoding: 'utf8', windowsHide: true, timeout: 20000 }).stdout || '').replace(/\s+/g, ' ').trim()
+  return `${JSON.stringify(by)}; ${range}`
 }
 // A page's errors besides what WebKit reports for requests it couldn't make (offline, a reload, the
 // server starting again): each call to the API ("… due to access control checks"), and each of the
@@ -561,6 +627,23 @@ export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440
 // again once it's back: src/lazy.jsx).
 const OWN_FILE = /\/assets\/[\w.-]+\.(js|css)\.$/
 export const withoutCutOff = (errors) => errors.filter((e, i) => !/\/api\/\S+ due to access control checks/.test(e) && !OWN_FILE.test(e) && !(e === 'TypeError: Load failed' && OWN_FILE.test(errors[i + 1] || '')))
+// A phone page's errors besides what its link dropping reports (a computer moving to another relay,
+// going offline, the page reconnecting). The relay page's service worker answers the app's requests
+// through the link (relay/web/sw.js); what was on its way then fails with the page's own words for
+// it, which WebKit reports as page errors ("FetchEvent.respondWith received an error: Error:
+// Connection lost", read as "Error: Connection lost"), and for a file the app was loading (a
+// picture, a stylesheet, a script) whose answer had begun, WebKit adds "Cannot load ." after it: the
+// answer cut off has no address of its own to name. Each "Cannot load ." goes only with a link drop
+// of its own before it; one without stays, as does everything else (and withoutCutOff's).
+const LINK_DROP = /^Error: (Your computer (is offline|isn't answering|isn't connected to the relay)|Reconnecting to your computer|Connection lost)/
+export const withoutLinkDrop = (errors) => {
+  let dropped = 0
+  return withoutCutOff(errors).filter((e) => {
+    if (LINK_DROP.test(e)) { dropped++; return false }
+    if (/^Cannot load \.(?: @ |$)/.test(e) && dropped > 0) { dropped--; return false }
+    return true
+  })
+}
 // A reload of a page from page(), for a test that counts every page error: what WebKit reports for
 // the requests the reload cut off (as withoutCutOff) is left out, only what it reported while it
 // reloaded. Anything else then, and everything before and after, stays in errors.

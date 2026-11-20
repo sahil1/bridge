@@ -9,6 +9,9 @@
 //   --lanes N     how many at once (default 3; each has its own server and port)
 //   --browser webkit|chromium|both          which engine the app's tests run in (default chromium)
 //   --no-retry    report a failure straight away instead of running it once more on its own
+//   --browser-only   only the tests that run in a browser (CI's WebKit machines: the macOS one runs
+//                    the rest on the same system)
+//   --shard I/N   the I-th of N shares of those tests, each about as long (CI splits WebKit's in two)
 // The app is built first when its source is newer than the build. A test that fails, then passes
 // on its own, is reported as flaky rather than failed. Logs and pictures go in test/.out.
 import { spawn, spawnSync, execFileSync } from 'node:child_process'
@@ -16,6 +19,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { ROOT, OUT, stopTree } from './lib/harness.mjs'
+import { runnerChange, shareOf } from './lib/scope.mjs'
 
 // Each test, what it needs built, and the files it covers (a change to one of them runs it).
 // alone: it measures how quick things are, so it runs with no other test beside it.
@@ -216,15 +220,19 @@ const SUITES = [
   { name: 'privacy-hosts', build: null, covers: [/^server\//, /^desktop\//, /^shared\//, /^PRIVACY\.md$/] },
 ]
 // A change to these runs everything; to the package files, unless it's only the version (a release's).
-const EVERYTHING = [/^test\/(lib|stand-ins)\//, /^test\/run\.mjs$/, /^package(-lock)?\.json$/]
+// A change to this file runs the suites whose entry above changed, or everything when more did
+// (lib/scope.mjs).
+const EVERYTHING = [/^test\/(lib|stand-ins)\//, /^package(-lock)?\.json$/]
 
 const args = process.argv.slice(2)
 const flag = (n) => args.includes(n)
 const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d }
 const lanes = Math.max(1, Number(opt('--lanes', 3)))
 const engines = { both: ['chromium', 'webkit'], webkit: ['webkit'] }[opt('--browser', 'chromium')] || ['chromium']
-const named = args.filter((a, i) => !a.startsWith('--') && !['--lanes', '--browser', '--base'].includes(args[i - 1]))
+const named = args.filter((a, i) => !a.startsWith('--') && !['--lanes', '--browser', '--base', '--shard'].includes(args[i - 1]))
 const git = (...a) => { try { return execFileSync('git', a, { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean) } catch { return [] } }
+const shard = opt('--shard')?.match(/^(\d+)\/(\d+)$/)?.slice(1).map(Number)
+if (flag('--shard') && !(shard && shard[0] >= 1 && shard[0] <= shard[1])) { console.error('--shard takes I/N, such as 1/2'); process.exit(2) }
 
 let pick
 if (flag('--all')) pick = SUITES
@@ -238,12 +246,20 @@ else if (named.length) {
   // Only "version" lines changed in it, since the base (or the last commit) and in the working tree.
   const from = base ? git('merge-base', base, 'HEAD')[0] : 'HEAD'
   const versionOnly = (f) => /^package(-lock)?\.json$/.test(f) && !!from && git('diff', '-U0', from, '--', f).filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---) /.test(l)).every((l) => /^[+-]\s*"version": "[^"]*",?$/.test(l))
-  pick = changed.some((f) => EVERYTHING.some((re) => re.test(f)) && !versionOnly(f)) ? SUITES : SUITES.filter((s) => changed.some((f) => s.covers.some((re) => re.test(f))) || changed.includes(`test/suites/${s.name}.mjs`))
+  // This file: as it was there (none when it wasn't, or git can't say: every test), and as it is now.
+  const runner = !changed.includes('test/run.mjs') ? [] : (() => {
+    const was = from ? (() => { try { return execFileSync('git', ['show', `${from}:test/run.mjs`], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) } catch { return null } })() : null
+    return was == null ? null : runnerChange(was, fs.readFileSync(path.join(ROOT, 'test', 'run.mjs'), 'utf8'))
+  })()
+  pick = runner === null || changed.some((f) => EVERYTHING.some((re) => re.test(f)) && !versionOnly(f)) ? SUITES : SUITES.filter((s) => runner.includes(s.name) || changed.some((f) => s.covers.some((re) => re.test(f))) || changed.includes(`test/suites/${s.name}.mjs`))
   if (!flag('--list')) {
     console.log(changed.length ? `Changed: ${changed.length} file${changed.length === 1 ? '' : 's'}` : 'Nothing changed since the last commit.')
     if (!pick.length) { console.log('No test covers these changes. node test/run.mjs --all runs every test.'); process.exit(0) }
   }
 }
+if (flag('--browser-only')) pick = pick.filter((s) => s.browser)
+if (shard) pick = shareOf(pick, shard[0], shard[1])
+if (!pick.length && !flag('--list')) { console.log(`None of these tests is ${shard ? 'in this share' : 'in a browser'}.`); process.exit(0) }
 if (flag('--list')) {
   console.log(JSON.stringify({ names: pick.map((s) => s.name), browser: pick.some((s) => s.browser) }))
   process.exit(0)
