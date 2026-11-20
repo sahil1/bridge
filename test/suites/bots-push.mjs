@@ -79,19 +79,26 @@ try {
     await slack.click({ user: 'U0DANA', action_id: buttons[0].action_id, value: buttons[0].value, channel: asked.channel, ts: asked.ts })
     const told = await until(async () => (await slack.state()).ephemeral.find((x) => x.user === 'U0DANA' && /Only Tester/.test(x.text)), 8000)
     ok(!!told && !branches().length, 'Dana\'s press does nothing, and tells her only you decide', told)
+    ok(p.files?.includes('README.md') && /1 file changed/.test(p.stat || ''), 'you\'re shown what its branch has, from where its pull request goes from', { files: p.files, stat: p.stat })
+    // Not while the change on its branch still waits for you: decided first (approved: its own commit,
+    // pushed as you were shown it, with a draft pull request).
+    const held = await kit.api(`/bots/questions/${d1.id}/push`, { act: 'approve', hash: p.head }).then(() => null, (e) => e)
+    ok(held?.status === 409 && /still waits for you/.test(held.message || '') && !branches().length, 'not while the change on its branch still waits for you (409): nothing pushed', held?.message)
+    await kit.api(`/bots/questions/${d1.id}`, { send: true, text: d1.draft })
+    ok(!!(await until(() => git(ORIGIN, 'rev-parse', p.branch) === p.head, 15000)), 'its change approved: its own commit pushed, the one you were shown', { want: p.head, have: git(ORIGIN, 'rev-parse', p.branch) })
     // Another commit than the one shown: refused.
     const wrong = await kit.api(`/bots/questions/${d1.id}/push`, { act: 'approve', hash: MAIN }).then(() => null, (e) => e)
-    ok(wrong?.status === 409 && !branches().length, 'approving another commit than the one waiting is refused (409)', wrong?.message)
+    ok(wrong?.status === 409 && git(ORIGIN, 'rev-parse', p.branch) === p.head, 'approving another commit than the one waiting is refused (409)', wrong?.message)
     const r = await kit.api(`/bots/questions/${d1.id}/push`, { act: 'approve', hash: p.head })
     ok(/\/pull\/\d+$/.test(r.pr?.url || ''), 'approved: a draft pull request', r.pr)
     const pr = ghCalls().find((c) => c.args[0] === 'pr' && c.args[1] === 'create')
     ok(pr?.args.includes('--draft') && pr.args.includes(`--head=${p.branch}`) && pr.args.includes('--base=main'), 'opened with your gh, from its branch into main', pr?.args)
     ok(branches().join() === p.branch && git(ORIGIN, 'rev-parse', p.branch) === p.head && git(ORIGIN, 'rev-parse', 'main') === MAIN, 'its branch pushed, at the commit you were shown; main as it was', branches())
     ok(!!(await until(async () => (await inThread(q1.ts)).find((x) => /Pushed, with Tester's OK: a draft pull request is open, https:\/\/github\.com\/acme\/app\/pull\/\d+/.test(x.text || '')), 15000)), 'they\'re told, with its link')
+    const creates = ghCalls().filter((c) => c.args[1] === 'create').length
     const again = await kit.api(`/bots/questions/${d1.id}/push`, { act: 'approve', hash: p.head })
-    ok(again.already && ghCalls().filter((c) => c.args[1] === 'create').length === 1, 'approved again: nothing twice', again)
+    ok(again.already && ghCalls().filter((c) => c.args[1] === 'create').length === creates, 'approved again: nothing twice', again)
     ok(events('b1').some((e) => e.type === 'push.requested') && events('b1').some((e) => e.type === 'push.approved' && e.by === 'Tester' && /\/pull\//.test(e.url)), 'in its record: asked, and approved by you')
-    await kit.api(`/bots/questions/${d1.id}`, { send: false })
   })
 
   // ---------- Its button; and "no push" ----------
@@ -101,9 +108,14 @@ try {
     const p2 = await until(async () => (await needs()).find((x) => x.id === d2?.id)?.push, 15000)
     const asked = await until(async () => (await inThread(q1.ts)).filter((x) => /I'd like to push my changes/.test(x.text || '')).at(-1), 15000)
     const btn = (asked?.blocks || []).flatMap((x) => x.elements || []).find((e) => e.type === 'button' && e.value?.includes(p2?.id))
+    // (Its change waits for you: your press says so, and pushes nothing.)
+    const was = git(ORIGIN, 'rev-parse', p2.branch)
     await slack.click({ user: OWNER.id, action_id: btn.action_id, value: btn.value, channel: asked.channel, ts: asked.ts })
-    ok(!!(await until(() => git(ORIGIN, 'rev-parse', p2.branch) === p2.head, 15000)), 'your press of Push pushes it', { want: p2?.head, have: git(ORIGIN, 'rev-parse', p2?.branch) })
-    await kit.api(`/bots/questions/${d2.id}`, { send: false })
+    const said = await until(async () => (await slack.state()).ephemeral.find((x) => x.user === OWNER.id && /still waits for you/.test(x.text)), 8000)
+    ok(!!said && git(ORIGIN, 'rev-parse', p2.branch) === was, 'your press of Push while its change waits for you: said, nothing pushed', said?.text)
+    await kit.api(`/bots/questions/${d2.id}`, { send: true, text: d2.draft })
+    await slack.click({ user: OWNER.id, action_id: btn.action_id, value: btn.value, channel: asked.channel, ts: asked.ts })
+    ok(!!(await until(() => git(ORIGIN, 'rev-parse', p2.branch) === p2.head && events('b1').some((e) => e.type === 'push.approved' && e.push === p2.id), 15000)), 'its change decided, your press of Push pushes it, at the commit you were shown', { want: p2?.head, have: git(ORIGIN, 'rev-parse', p2?.branch) })
     await slack.ask({ user: 'U0DANA', thread: q1.ts, text: 'And the README title. [edit README.md Hello world!] [push Title] [answer Done.]' })
     const d3 = await draftOf('And the README title')
     const p3 = await until(async () => (await needs()).find((x) => x.id === d3?.id)?.push, 15000)
@@ -111,6 +123,28 @@ try {
     await slack.ask({ user: OWNER.id, dm: true, text: `no push ${n}` })
     ok(!!(await until(async () => (await posted()).find((x) => x.channel === 'D0OWNER' && /Not pushed/.test(x.text || '')), 10000)), '"no push N" in your DM: not pushed, said')
     ok(git(ORIGIN, 'rev-parse', p3.branch) !== p3.head && !!(await until(async () => (await inThread(q1.ts)).find((x) => /Tester didn't push it/.test(x.text || '')), 10000)), 'nothing pushed, and they\'re told')
+  })
+
+  // ---------- A push whose branch moved on since you were shown it ----------
+  await part('moved on', async () => {
+    const d3 = await draftOf('And the README title')
+    if (d3) await kit.api(`/bots/questions/${d3.id}`, { send: false })
+    await slack.ask({ user: 'U0DANA', thread: q1.ts, text: 'Add a version line. [edit CHANGELOG.md v2] [push Version two] [answer Added.]' })
+    const d4 = await draftOf('Add a version line')
+    const p4 = await until(async () => (await needs()).find((x) => x.id === d4?.id)?.push, 15000)
+    await kit.api(`/bots/questions/${d4.id}`, { send: true, text: d4.draft })
+    await slack.ask({ user: 'U0DANA', thread: q1.ts, text: 'And a third. [edit CHANGELOG.md v3] [answer Third.]' })
+    const d5 = await draftOf('And a third')
+    await kit.api(`/bots/questions/${d5.id}`, { send: true, text: d5.draft })
+    const h5 = await until(() => { const h = git(ORIGIN, 'rev-parse', p4.branch); return h && h !== p4.head && !h.startsWith('ERR') ? h : null }, 15000)
+    // Approving the push as you were shown it, now that its branch has moved on: refused, and asked
+    // again with what it has now.
+    const moved = await kit.api(`/bots/questions/${d4.id}/push`, { act: 'approve', hash: p4.head }).then(() => null, (e) => e)
+    const p4b = await until(async () => { const x = (await needs()).find((y) => y.id === d4.id)?.push; return x && x.id !== p4.id ? x : null }, 15000)
+    ok(moved?.status === 409 && /moved on/.test(moved.message || '') && p4b?.head === h5 && p4b.state === 'waiting' && p4b.files?.includes('CHANGELOG.md'), 'its branch moved on: approving what you were shown is refused, and it\'s asked again, with the commit and files it has now', { status: moved?.status, head: p4b?.head, want: h5, files: p4b?.files })
+    ok(events('b1').some((e) => e.type === 'push.moved' && e.push === p4.id && e.head === h5), 'its record says it moved on')
+    const r = await kit.api(`/bots/questions/${d4.id}/push`, { act: 'approve', hash: p4b.head })
+    ok(!!r.pr && git(ORIGIN, 'rev-parse', p4.branch) === h5, 'approved as it is now: pushed, at that commit', r.pr)
   })
 
   // ---------- 'pr' bots ----------

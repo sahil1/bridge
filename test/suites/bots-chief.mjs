@@ -5,8 +5,9 @@
 //   Access line, and has hand_to and ask_bot; the others don't.
 //   ask_bot: Marketing answers as whoever asked Chief (Dana, whom it answers), in a session of its own
 //   for Chief's conversation, posting nothing; its answer comes back as Chief's next turn, and
-//   Chief's answer is the one that goes. Hiring, which doesn't answer Dana, refuses her there too:
-//   Chief hears it couldn't, and Hiring says nothing in the channel.
+//   Chief's answer is the one that goes. Hiring, which doesn't answer Dana, isn't asked for her: Chief
+//   hears it wasn't, and Hiring says nothing in the channel; nor for you, in a conversation Dana spoke
+//   in, where Chief's answer then waits for you. A bot Chief asks only answers: no commands.
 //   hand_to: Marketing takes the conversation, as Dana's question, with Chief's note; the next reply
 //   in that thread goes to Marketing's session, not Chief's.
 import fs from 'node:fs'
@@ -71,10 +72,35 @@ try {
   await part('ask_bot as the asker', async () => {
     const q = await slack.ask({ user: 'U0DANA', text: `${M} Who are we hiring? [ask-bot Hiring Which roles are open?] [answer Asked Hiring.]` })
     const d = await draftOf('Who are we hiring')
-    ok(/Hiring says: \(Hiring couldn't answer: it doesn't answer Dana/.test(d?.draft || ''), 'Hiring doesn\'t answer Dana, for Chief either: Chief hears it couldn\'t', d?.draft)
-    ok(!startsOf('Which roles are open').some((x) => inFolder(x, 'hiring')) && events(ids.Hiring).some((e) => e.type === 'refused' && e.person?.id === 'U0DANA'), 'Hiring\'s agent never started; its record has the refusal')
+    ok(/Hiring says: \(Hiring wasn't asked: it doesn't answer Dana/.test(d?.draft || ''), 'Hiring doesn\'t answer Dana, for Chief either: Chief hears it wasn\'t asked', d?.draft)
+    ok(!startsOf('Which roles are open').some((x) => inFolder(x, 'hiring')) && events(ids.Chief).some((e) => e.type === 'consult.asked' && e.to?.id === ids.Hiring && e.refused?.person?.id === 'U0DANA'), 'Hiring\'s agent never started; Chief\'s record has why')
     ok(!(await inThread(q.ts)).some((x) => /only answer questions/.test(x.text || '')) && !(await posted()).some((x) => x.channel === 'C0LAUNCH' && /only answer questions/.test(x.text || '')), 'and it says nothing in the channel')
     await kit.api(`/bots/questions/${d.id}`, { send: false })
+  })
+
+  // ---------- ask_bot in a conversation someone else spoke in ----------
+  // Dana (who may ask Chief, not Hiring) starts a thread; you reply in it, and Chief asks Hiring: not
+  // asked, as Dana has spoken here; and Chief's answer waits for you, as she's in its conversation.
+  await part('ask_bot for everyone in it', async () => {
+    const q = await slack.ask({ user: 'U0DANA', text: `${M} Quick one about roles. [answer Sure.]` })
+    const d0 = await draftOf('Quick one about roles')
+    if (d0) await kit.api(`/bots/questions/${d0.id}`, { send: true, text: d0.draft })
+    await until(async () => (await inThread(q.ts)).length > 0, 15000)
+    await slack.ask({ user: OWNER.id, thread: q.ts, text: 'Thanks. [ask-bot Hiring Which roles are open now?] [answer Here it is.]' })
+    const d = await draftOf('Thanks.')
+    ok(/Hiring says: \(Hiring wasn't asked: it doesn't answer Dana, who has spoken in this conversation/.test(d?.draft || '') && !startsOf('Which roles are open now').some((x) => inFolder(x, 'hiring')), 'you asking, in a conversation Dana spoke in: Hiring isn\'t asked, as it doesn\'t answer her', d?.draft)
+    ok(!(await inThread(q.ts)).some((x) => /Hiring says/.test(x.text || '')), 'and Chief\'s answer waits for you, not posted at once, as she\'s in its conversation')
+    if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })
+  })
+
+  // ---------- a bot a Chief asks only answers ----------
+  await part('ask_bot only answers', async () => {
+    await kit.api(`/bots/${ids.Marketing}/settings`, { bash: 'sandboxed' })
+    const q = await slack.ask({ user: OWNER.id, text: `${M} What's left for the launch? [ask-bot Marketing What is left to do?] [answer That's what's left.]` })
+    const m = await until(() => startsOf('What is left to do?').find((x) => inFolder(x, 'marketing')), 30000)
+    ok(!!m && !m.args.join(' ').includes('Bash') && !m.given?.sandbox && !m.args.some((a) => /^mcp__bridge_session__/.test(a)), 'Marketing, asked by Chief for you: its session has no commands, whatever it may run for you', m?.args)
+    await until(async () => (await inThread(q.ts)).length > 0, 30000)
+    await kit.api(`/bots/${ids.Marketing}/settings`, { bash: 'off' })
   })
 
   // ---------- hand_to ----------

@@ -234,7 +234,10 @@ const denyRules = loaded.flatMap((x) => x.s.permissions?.deny || []).map((r) => 
 const denied = (p) => { const f = path.resolve(p).replace(/\\/g, '/').replace(/^([A-Za-z]):/, '$1:'); return denyRules.some((re) => re.test(f.startsWith('/') ? f : `/${f}`)) }
 // (What --settings gave it, as it read it: the run's file goes once the run has, so it's kept here.)
 const given = flagSettings ? loaded.findLast((x) => x.file === flagSettings)?.s || null : null
-if (message) note('helpers-started.log', { args, cwd: process.cwd(), message, secrets, settings: loaded.map((x) => x.file), given, ...(pointed ? { briefFile: pointed[1] } : {}) })
+// (The names in its environment that hold a key, or set its temporary folder, git's settings or the
+// credential scrub, with those values that aren't keys: what a bot's agent is started with.)
+const envSaid = Object.fromEntries(Object.keys(process.env).filter((k) => /KEY|TOKEN|SECRET|PASSWORD|SCRUB|TMPDIR|GIT_CONFIG/.test(k)).map((k) => [k, /KEY|TOKEN|SECRET|PASSWORD/.test(k) ? '(set)' : process.env[k]]))
+if (message) note('helpers-started.log', { args, cwd: process.cwd(), message, secrets, settings: loaded.map((x) => x.file), given, env: envSaid, ...(pointed ? { briefFile: pointed[1] } : {}) })
 // (On Windows, a run that changes files: whether it has Windows' backup and restore rights on, which
 // make a file past any folder's access list, in ~/rights.log, each as whoami says it, beside the
 // state of one everyone has on.)
