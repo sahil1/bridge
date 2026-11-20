@@ -25,6 +25,7 @@ import { firstRun, knows } from '../firstrun.js'
 import { lineAnsi, SCROLLBACK, watchModes, wheelBytes } from './screen.js'
 import * as host from './hostlink.js'
 import { noBackupRightsFirst } from '../winpriv.js'
+import * as counts from '../counts.js'
 
 const { Terminal } = headless
 
@@ -378,6 +379,8 @@ function statusOf(p) {
   const setup = knows(p.kind) && !p.pastSetup ? firstRun(p.kind, screenRows(p)) : null
   const key = setup ? `${setup.step} ${setup.url || ''} ${setup.code || ''}` : null
   if (key !== (p.setupKey ?? null)) { p.setupKey = key; p.seq++ }
+  // Usage stats: an agent that started at its sign-in screen, once.
+  if (setup?.step === 'login' && !p.signInCounted) { p.signInCounted = true; counts.agentFailed('signIn').catch(() => {}) }
   p.setup = setup // its keys follow the pointer, if you move it in the terminal
   let s = 'idle'
   if (setup || ASKING.test(tail)) s = 'blocked'

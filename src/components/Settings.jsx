@@ -200,7 +200,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
 
   return (
     <div className="modal-backdrop settings-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="modal settings" role="dialog" aria-label={t('Settings')}>
+      <div className="modal settings" data-area="settings" role="dialog" aria-label={t('Settings')}>
         <nav className="st-nav" aria-label={t('Settings sections')}>
           <div className="st-nav-title">{t('Settings')}</div>
           {sections.map((s) => (

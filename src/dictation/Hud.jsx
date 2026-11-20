@@ -13,6 +13,7 @@ import { untidiedWhy, TidyNeeds } from './Tidy.jsx'
 import Remember from './Remember.jsx'
 import { t } from '../i18n/index.js'
 import { sentTo } from '../sendbox.js'
+import { assistKept } from '../counts.js'
 import './dictation.css'
 
 // The desktop app's dictation window (?dictate=1, desktop/dictation.js): it shows over whatever app
@@ -198,6 +199,9 @@ export default function Hud() {
   const text = edited ?? (asSaid && s.result?.said ? s.result.said : s.result?.text || '')
   // What goes: your edit of the words, once you've started one (mine: it changed them).
   const words = draft ?? text
+  // Usage stats: the tidied words kept, or what you said used instead (Use what I said), once a dictation.
+  const tidyCounted = useRef(null)
+  const tidyUsed = (r, kept) => { if (!r?.by || tidyCounted.current === r.at) return; tidyCounted.current = r.at; assistKept('dictation', kept) }
   const mine = draft != null && draft !== text
   const typing = draft != null && !done
   // Not tidied, and why (with no model yet, what's needed shows on the card).
@@ -217,6 +221,7 @@ export default function Hud() {
     if (now && st?.edit?.on && app().hudSelection) { setEditing(true); editOr(r); return }
     if (!pasteOn || !now) return
     if (!st.paste.allowed) { setWhy('accessibility'); return }
+    tidyUsed(r, true)
     pasteIt(r)
   }, [s.result?.at]) // eslint-disable-line react-hooks/exhaustive-deps
   // Edit by voice: what was selected when the key was let go (the desktop app read it), rewritten as
@@ -281,6 +286,7 @@ export default function Hud() {
   // Paste on the card: what's there now (your edit of it, or what you said), into the app the key was
   // pressed in, brought back to the front first.
   const pasteCard = () => {
+    tidyUsed(s.result, !asSaid)
     setAllowed(false)
     pasteIt({ ...s.result, text: words, ...(mine || asSaid ? { by: null } : {}) }, { back: true, fx: mine ? corrections(text, words) : null })
   }
@@ -310,6 +316,7 @@ export default function Hud() {
       // As the message box does: your computer types it in, or holds it while the agent is busy, and
       // its answer says which.
       const r = s.result
+      tidyUsed(r, !asSaid)
       const body = { method: 'POST', body: { text: words } }
       const got = await (target.remote ? apiOn(target.remote.machine, `/agents/${encodeURIComponent(target.remote.pane)}/prompt`, body) : api(`/agents/${pid}/prompt`, body))
       amend(r, how({ how: got?.queued ? 'queued' : 'sent', agent: agentOf(target) }))
@@ -322,6 +329,7 @@ export default function Hud() {
   const copy = async () => {
     const g = press0.current
     const r = s.result
+    tidyUsed(r, !asSaid)
     try {
       if (app().hudCopy) await app().hudCopy(words)
       else await navigator.clipboard.writeText(words)

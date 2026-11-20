@@ -6,6 +6,7 @@ import { t, tx, locale } from '../../i18n/index.js'
 import { withKeys } from './keys.js'
 import { find, findKey, patternOf } from './search.js'
 import { lineDiff } from './diff.js'
+import { assistKept } from '../../counts.js'
 
 // What a document's editor is made of besides the page: its toolbar's pieces (a button, a menu, a
 // colour picker), find and replace, the outline, the word count, and asking for a change in place.
@@ -536,8 +537,8 @@ export function AskInPlace({ editor, file, selection, apply, scroller, hook, onC
     }
   }
   if (hook) hook.current = { ask, picked: () => !!selection()?.text.trim() }
-  const done = () => { ctl.current?.abort(); setJob(null); editor?.commands.focus() }
-  const take = (below = false) => { apply(job.range, job.out, below); setJob(null) }
+  const done = () => { if (job?.out && !job.busy) assistKept('studio', false); ctl.current?.abort(); setJob(null); editor?.commands.focus() }
+  const take = (below = false) => { assistKept('studio', true); apply(job.range, job.out, below); setJob(null) }
   useEffect(() => {
     if (!job) return undefined
     const k = (e) => { if (e.key === 'Escape') { e.preventDefault(); done() } }

@@ -13,6 +13,7 @@ import { solidBackground, fontsReady } from './look.js'
 import { before, mark, markOne, keep as keepIt, discard as discardIt } from './suggest.js'
 import { holderOf, contents } from './holders.js'
 import CopyButton from '../CopyButton.jsx'
+import { assistKept } from '../../counts.js'
 
 // "Draw this", "Change it" and "Ask" (about the shapes selected, answered here and changing
 // nothing): words (typed, or said with the dictation key) to a model, and back as shapes on the
@@ -420,6 +421,7 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
   const settle = (fn, all = false) => {
     const { X, api: ex } = board
     if ((!sug && !all) || !ex) return
+    assistKept('board', fn === keepIt)
     ex.updateScene({ elements: fn(X, ex.getSceneElementsIncludingDeleted(), all ? null : sug.id), captureUpdate: X.CaptureUpdateAction.IMMEDIATELY })
     setNote(fn === keepIt ? t('Kept.') : t('Discarded.'))
     setSug(null)

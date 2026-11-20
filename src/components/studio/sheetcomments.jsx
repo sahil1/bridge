@@ -5,6 +5,7 @@ import { t } from '../../i18n/index.js'
 import { api } from '../../api.js'
 import { threadsOf, AI_AUTHOR } from './wordcomments.js'
 import { mentions, requestOf, askOf } from './doccomments.jsx'
+import { assistKept } from '../../counts.js'
 
 // Comments on a sheet's cells, as threads (Comments and @bridge): a comment on the
 // cell or the cells picked, replies, resolved and opened again, deleted, all written into the Excel
@@ -252,6 +253,7 @@ export function useSheetThreads({ univer, core, ready, initial, on, author, file
     for (const id of [...ids].reverse()) {
       const s = sugsRef.current[id]
       if (!s) continue
+      assistKept('studio', keep)
       if (keep) change.keep(s); else change.back(s)
       setSug(id, null)
     }

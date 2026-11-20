@@ -21,6 +21,7 @@ import { serverWhy, releaseWhy, RETRY_HOURS, INSTALL_MINUTES } from '../shared/a
 import { newer, compare, isPre, isNightly, RELEASE_VERSION } from '../shared/version.js'
 import { rolloutOf, inRollout, shown } from '../shared/rollout.js'
 import { readCode } from './earlyaccess.js'
+import * as counts from './counts.js'
 
 const REPO = 'sahil1/bridge'
 // BRIDGE_RELEASES_API (tests): where the latest release is asked for. Early Access and Nightly ask
@@ -261,7 +262,7 @@ export async function install({ app = false, auto = false } = {}) {
   // which version not to try by itself again for a while if it didn't.
   const t = { version: latest, from: current, at: run.at, auto: !!auto, failed: null }
   setTried(t)
-  const failed = (f) => { run.failed = { ...f, ...(auto ? { auto: true } : {}) }; setTried({ ...t, failed: f }) }
+  const failed = (f) => { run.failed = { ...f, ...(auto ? { auto: true } : {}) }; setTried({ ...t, failed: f }); counts.add('fail.update').catch(() => {}) }
   child.on('exit', (code) => { const line = lastLine(log); if (didntGoThrough(code, line)) failed({ code, line: reasonOf(line) }) })
   child.on('error', (e) => failed({ code: -1, line: e.message }))
   child.unref()

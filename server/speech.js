@@ -26,6 +26,7 @@ import { providerEnv } from './providers.js'
 import { machine, freeBytes, atLeast } from './machine.js'
 import * as asr from './asr.js'
 import * as memory from './meetmemory.js'
+import * as counts from './counts.js'
 
 const env = () => ({ ...process.env, ...providerEnv() })
 const fatal = (msg, more) => Object.assign(new Error(msg), { fatal: true }, more)
@@ -521,8 +522,14 @@ export async function transcribe(wav, o = {}) {
   // A speech model picked but not on this computer yet: the Mac's own speech stands in when it has
   // your language, so a recording still turns into text instead of waiting on a download.
   if (id === 'local' && !(await localReady(o.cfg)) && mac.available) id = 'apple'
-  return id === 'local' ? local(wav, o) : id === 'apple' ? apple(wav, o) : service(id, wav, o)
+  const out = await (id === 'local' ? local(wav, o) : id === 'apple' ? apple(wav, o) : service(id, wav, o))
+  heard(id === 'local' ? localEngine(o.cfg) : id, wav)
+  return out
 }
+// Usage stats: minutes of speech turned into text, by engine (parakeet or whisper on this computer,
+// apple, or the service's id); a 16 kHz mono WAV is 32,000 bytes a second.
+const localEngine = (cfg) => (localModel(cfg)?.runtime === 'whisper' ? 'whisper' : 'parakeet')
+const heard = (engine, wav) => counts.transcribed(engine, Math.max(0, (wav?.length || 44) - 44) / 32000).catch(() => {})
 // A voice note or a dictation: on this computer only (a service is for meetings you pick it for).
 // The model picked in Settings › Voice & Meetings (or the Mac's own, picked there); not downloaded yet, the
 // Mac's own speech stands in when it can; else the model says what it needs (needs: 'model').
@@ -532,6 +539,7 @@ export async function voice(wav, o = {}) {
   const mac = await appleStatus(lang)
   const useMac = (o.cfg?.speech?.model === 'apple' && mac.available) || (!(await localReady(o.cfg)) && mac.available)
   const r = useMac ? await apple(wav, { ...o, language: lang }) : await local(wav, { ...o, language: lang, fetch: false })
+  heard(useMac ? 'apple' : localEngine(o.cfg), wav)
   return { ...r, text: memory.fix(spoken(r.text)) }
 }
 // Live words while you talk (livewords.js): the speech model a dictation would use, when sherpa-onnx

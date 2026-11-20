@@ -88,7 +88,7 @@ export default function Dictations({ toMeetings = null }) {
   const total = data?.total ?? 0
   const groups = byDay(items)
   return (
-    <div className="dc-view">
+    <div className="dc-view" data-area="dictations">
       <PaneHeader icon="wave" title={t('Dictations')} subtitle={<span className="dc-count">{data ? (total === 1 ? t('{n} dictation', { n: total }) : t('{n} dictations', { n: total })) : t('Dictations')} · {elsewhere ? t('On {name}', { name: elsewhere }) : t('On this computer')}</span>}>
         <div className="seg" role="tablist" aria-label={t('Show')}>
           {toMeetings && <button type="button" role="tab" data-view="meetings" data-kind="meetings" aria-selected={false} onClick={toMeetings}><Icon name="mic" size={14} /><span>{t('Meetings')}</span></button>}

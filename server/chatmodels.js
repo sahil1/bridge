@@ -679,10 +679,11 @@ export const SMALLEST = 8192
 export async function reply(id, messages, { signal, tools, system = SYSTEM, json = null, think = false, feature = null, instead = null } = {}) {
   if (hiddenModel(id)) throw new Error(OFF)
   const started = Date.now()
-  const { usage, ...r } = await answer(id, messages, { signal, tools: canUseTools(id) ? tools : null, system, json, think })
+  // One that failed is counted in the usage stats, by why (not one you stopped).
+  const { usage, ...r } = await answer(id, messages, { signal, tools: canUseTools(id) ? tools : null, system, json, think }).catch((e) => { if (!signal?.aborted) counts.modelFailed(counts.failReason(e)).catch(() => {}); throw e })
   usagelog.record({ id, feature, usage, ms: Date.now() - started, instead })
   // The usage counts, when they're shared: the model's family, how it was reached, what asked.
-  counts.answered(id, feature, usage?.model).catch(() => {})
+  counts.answered(id, feature, usage?.model, usage).catch(() => {})
   return r
 }
 async function answer(id, messages, o) {

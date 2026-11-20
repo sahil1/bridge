@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { t } from '../../i18n/index.js'
 import { suggestions, boundsOf, keep, discard } from './suggest.js'
+import { assistKept } from '../../counts.js'
 
 // AI Assist's suggestions on a board (suggest.js), over the drawing: a dashed outline around each,
 // with the wand, the model that made it, Keep and Discard; and at the foot of the board how many
@@ -43,7 +44,7 @@ export default function Suggestions({ board, bar = true }) {
     window.addEventListener('resize', look)
     return () => { off?.(); window.removeEventListener('resize', look); cancelAnimationFrame(raf) }
   }, [ex, X])
-  const settle = (fn, id = null) => ex.updateScene({ elements: fn(X, ex.getSceneElementsIncludingDeleted(), id), captureUpdate: X.CaptureUpdateAction.IMMEDIATELY })
+  const settle = (fn, id = null) => { assistKept('board', fn === keep); ex.updateScene({ elements: fn(X, ex.getSceneElementsIncludingDeleted(), id), captureUpdate: X.CaptureUpdateAction.IMMEDIATELY }) }
   const n = view.list.length
   return (
     <div className="wb-sugs" ref={host} aria-label={t('Suggestions')}>

@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { api, usePoll } from '../../api.js'
 import { usePersisted } from '../layout.jsx'
 import { CalendarSetup } from '../Agenda.jsx'
 import { AssistHead } from '../AiAssist.jsx'
 import { locale, t, tx } from '../../i18n/index.js'
+import { assistKept } from '../../counts.js'
 
 // AI Assist's Draft a reply: beside the open email, a reply drafted in your own tone and language by
 // the model you picked for meeting notes (server mailassist.js), from your How You Write profile
@@ -21,6 +22,8 @@ export const openMailSettings = () => window.dispatchEvent(new CustomEvent('brid
 const openProviders = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))
 // Each message's draft, kept while the app is open, so going back to it finds it as you left it.
 const drafts = new Map()
+// Usage stats: a draft used (copied, or opened in your mail app) or closed unused, once each, by message.
+const usedDrafts = new Map() // message id -> 'used' | 'dismissed'
 
 // A new message in your own mail app, with the draft in it: to, cc, subject and body. It only opens
 // there; you send it.
@@ -130,6 +133,10 @@ export function ReplyAssist({ id, data, nudge, times = false, onClose, beside })
   useEffect(() => { const d = drafts.get(id); setRes(d || null); setText(d?.text || ''); setErr(null); setShowSent(false); setFindTimes(times) }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (times) setFindTimes(true) }, [times])
   useEffect(() => { if (res) drafts.set(id, { ...res, text }) }, [id, res, text])
+  const shown = useRef(res)
+  shown.current = res
+  useEffect(() => () => { if (shown.current && !usedDrafts.has(id)) { usedDrafts.set(id, 'dismissed'); assistKept('mail', false) } }, [id])
+  const used = () => { if (usedDrafts.get(id) !== 'used') { usedDrafts.set(id, 'used'); assistKept('mail', true) } }
 
   const write = async (body = {}, what = 'draft') => {
     setBusy(what)
@@ -154,6 +161,7 @@ export function ReplyAssist({ id, data, nudge, times = false, onClose, beside })
   }, [id, !!v, intro, times]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const copy = async () => {
+    used()
     try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000) } catch { setErr({ message: t("Couldn't copy. Select the text and copy it yourself.") }) }
   }
   const who = res?.reply?.to?.[0]
@@ -204,7 +212,7 @@ export function ReplyAssist({ id, data, nudge, times = false, onClose, beside })
           </div>
           <div className="massist-acts">
             <button type="button" className="btn small" onClick={copy} disabled={!text.trim()}><Icon name="copy" size={12} /> {copied ? t('Copied') : t('Copy')}</button>
-            <a className="btn small primary" href={mailtoOf(res.reply, text)}><Icon name="mail" size={12} /> {t('Open in your mail app')}</a>
+            <a className="btn small primary" href={mailtoOf(res.reply, text)} onClick={used}><Icon name="mail" size={12} /> {t('Open in your mail app')}</a>
           </div>
           <p className="muted small massist-sent">{whatWent(res)} {t('Nothing is sent from Bridge AI: you send it from your mail app.')} <button type="button" className="link-btn" onClick={() => setShowSent(!showSent)} aria-expanded={showSent}>{showSent ? t('Hide what was sent') : t('Show what was sent')}</button></p>
           {showSent && <pre className="massist-prompt">{res.prompt}</pre>}

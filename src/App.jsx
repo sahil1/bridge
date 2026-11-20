@@ -232,6 +232,8 @@ const STUDIO = 'view:studio:'
 const studioId = (f) => `${STUDIO}${encodeURIComponent(f.root)}:${encodeURIComponent(f.path)}`
 const studioOf = (id) => { const [r, p] = id.slice(STUDIO.length).split(':'); return { root: decodeURIComponent(r || ''), path: decodeURIComponent(p || '') } }
 const isView = (id) => typeof id === 'string' && id.startsWith('view:')
+// The part of Bridge AI a view is, for usage stats' time in each (activeTime.js).
+const viewArea = (id) => (id === 'view:map' ? 'agents' : id.startsWith('view:meeting') ? 'meetings' : id.startsWith('view:studio') ? 'studio' : id.startsWith(BOT_VIEW) || id.startsWith(BOTS_VIEW) || id.startsWith(SESSION_VIEW) ? 'bots' : 'home')
 // Whiteboards are one of Studio's kinds: its Files lists them and one opens in its Preview, so they
 // have no page or tab of their own. Folders is Studio's home, every file on your computers. Whatever
 // still asks for an old place (a tab kept from before, a link, ⌘K, Home, a meeting's board, an agent)
@@ -1122,19 +1124,19 @@ function App() {
   // Home off says how to turn it on, once the settings say it's off (until they're in, nothing).
   const viewFor = (id, { onBack } = {}) => (
     <ErrorBoundary key={id} name="This view" resetKey={id}>
-      {(id === 'view:home' || id === 'view:everything') && !homeOn ? <section className="pane view-pane">{conf && <TrialOff name={t('Home')} />}</section>
-        : id === 'view:home' ? <section className="pane view-pane"><NeedsHome {...homeProps} onEverything={openEverything} /></section>
-        : id === 'view:everything' ? <section className="pane view-pane"><Everything {...homeProps} onOpenAgent={(x) => openOn(x.machine, x.a.paneId, { device: x.device, title: x.a.name || x.a.title, kind: x.a.kind })} onBack={wide ? null : () => setHomeView('home')} /></section>
+      {(id === 'view:home' || id === 'view:everything') && !homeOn ? <section className="pane view-pane" data-area={viewArea(id)}>{conf && <TrialOff name={t('Home')} />}</section>
+        : id === 'view:home' ? <section className="pane view-pane" data-area={viewArea(id)}><NeedsHome {...homeProps} onEverything={openEverything} /></section>
+        : id === 'view:everything' ? <section className="pane view-pane" data-area={viewArea(id)}><Everything {...homeProps} onOpenAgent={(x) => openOn(x.machine, x.a.paneId, { device: x.device, title: x.a.name || x.a.title, kind: x.a.kind })} onBack={wide ? null : () => setHomeView('home')} /></section>
         : id === 'view:new' ? <Home fleet={fleet} onLaunched={fromHome} onMore={(init) => setNewAgent(init)} />
-        : id === 'view:map' ? <section className="pane view-pane"><AgentMap phone={!wide} onOpen={(d, a) => openOn(d.id, a.paneId, { device: d.name, title: a.name || a.title, kind: a.kind })}
+        : id === 'view:map' ? <section className="pane view-pane" data-area={viewArea(id)}><AgentMap phone={!wide} onOpen={(d, a) => openOn(d.id, a.paneId, { device: d.name, title: a.name || a.title, kind: a.kind })}
           controls={wide ? { maximized: !!L.max, onMaximize: () => set({ max: L.max ? null : 'main' }) } : null} /></section>
-        : id === 'view:meetings' ? <section className="pane view-pane"><MeetingsHome onOpen={(mid) => openAgent(`view:meeting:${mid}`, wide ? { replace: 'view:meetings' } : {})} /></section>
-        : id === 'view:studio' && StudioHome ? <section className="pane view-pane"><StudioHome onOpen={(f) => openAgent(studioId(f), wide ? { replace: 'view:studio' } : {})} /></section>
-        : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f, o) => openAgent(studioId(f), o?.replace ? { replace: id } : {})} /></section>
-        : id.startsWith(BOTS_VIEW) ? <section className="pane view-pane">{bots.on ? <BotsHome tab={id.slice(BOTS_VIEW.length)} phone={!wide} onTab={(x) => openAgent(botsView(x), wide ? { replace: id } : {})} /> : conf && <TrialOff name={t('Bots')} />}</section>
-        : id.startsWith(SESSION_VIEW) ? <section className="pane view-pane">{bots.on ? <SessionView key={id} sid={id.slice(SESSION_VIEW.length)} phone={!wide} fleet={fleet} /> : conf && <TrialOff name={t('Bots')} />}</section>
-        : id.startsWith(BOT_VIEW) ? <section className="pane view-pane">{bots.on ? <BotPage id={id.slice(BOT_VIEW.length)} phone={!wide} onOpen={(bid, o) => openAgent(botView(bid), o?.replace ? { replace: id } : {})} onTab={(x) => openAgent(botsView(x), wide ? { replace: id } : {})} onGone={() => (wide ? closeTab(id) : setMoreView(botsView('bots')))} /> : conf && <TrialOff name={t('Bots')} />}</section>
-        : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
+        : id === 'view:meetings' ? <section className="pane view-pane" data-area={viewArea(id)}><MeetingsHome onOpen={(mid) => openAgent(`view:meeting:${mid}`, wide ? { replace: 'view:meetings' } : {})} /></section>
+        : id === 'view:studio' && StudioHome ? <section className="pane view-pane" data-area={viewArea(id)}><StudioHome onOpen={(f) => openAgent(studioId(f), wide ? { replace: 'view:studio' } : {})} /></section>
+        : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane" data-area={viewArea(id)}><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f, o) => openAgent(studioId(f), o?.replace ? { replace: id } : {})} /></section>
+        : id.startsWith(BOTS_VIEW) ? <section className="pane view-pane" data-area={viewArea(id)}>{bots.on ? <BotsHome tab={id.slice(BOTS_VIEW.length)} phone={!wide} onTab={(x) => openAgent(botsView(x), wide ? { replace: id } : {})} /> : conf && <TrialOff name={t('Bots')} />}</section>
+        : id.startsWith(SESSION_VIEW) ? <section className="pane view-pane" data-area={viewArea(id)}>{bots.on ? <SessionView key={id} sid={id.slice(SESSION_VIEW.length)} phone={!wide} fleet={fleet} /> : conf && <TrialOff name={t('Bots')} />}</section>
+        : id.startsWith(BOT_VIEW) ? <section className="pane view-pane" data-area={viewArea(id)}>{bots.on ? <BotPage id={id.slice(BOT_VIEW.length)} phone={!wide} onOpen={(bid, o) => openAgent(botView(bid), o?.replace ? { replace: id } : {})} onTab={(x) => openAgent(botsView(x), wide ? { replace: id } : {})} onGone={() => (wide ? closeTab(id) : setMoreView(botsView('bots')))} /> : conf && <TrialOff name={t('Bots')} />}</section>
+        : <section className="pane view-pane" data-area={viewArea(id)}><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
     </ErrorBoundary>
   )
 
@@ -1343,14 +1345,14 @@ function App() {
     if (a.view) return viewFor(id)
     if (a.remote) {
       return (
-        <div className={`group ${split && W.group === group ? 'focused' : ''}`} onMouseDown={() => split && W.group !== group && setW((w) => ({ ...w, group }))}>
+        <div data-area="agents" className={`group ${split && W.group === group ? 'focused' : ''}`} onMouseDown={() => split && W.group !== group && setW((w) => ({ ...w, group }))}>
           <ErrorBoundary key={a.paneId} name="This agent's view" resetKey={a.paneId}><RemoteAgent a={a} /></ErrorBoundary>
         </div>
       )
     }
     const controls = { maximized: L.max === group, onMaximize: () => set({ max: L.max === group ? null : group }) }
     return (
-      <div className={`group ${split && W.group === group ? 'focused' : ''}`} onMouseDown={() => split && W.group !== group && setW((w) => ({ ...w, group }))}>
+      <div data-area={a.chief ? 'chief' : 'agents'} className={`group ${split && W.group === group ? 'focused' : ''}`} onMouseDown={() => split && W.group !== group && setW((w) => ({ ...w, group }))}>
         {a.shellTab
           ? <ShellTab key={sessionKey + a.paneId} tab={a} onOpenInHerdr={openInHerdr} controls={controls} />
           : popped.has(a.paneId)
