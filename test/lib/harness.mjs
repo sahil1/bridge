@@ -557,6 +557,23 @@ export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440
 // again once it's back: src/lazy.jsx).
 const OWN_FILE = /\/assets\/[\w.-]+\.(js|css)\.$/
 export const withoutCutOff = (errors) => errors.filter((e, i) => !/\/api\/\S+ due to access control checks/.test(e) && !OWN_FILE.test(e) && !(e === 'TypeError: Load failed' && OWN_FILE.test(errors[i + 1] || '')))
+// A phone page's errors besides what its link dropping reports (a computer moving to another relay,
+// going offline, the page reconnecting). The relay page's service worker answers the app's requests
+// through the link (relay/web/sw.js); what was on its way then fails with the page's own words for
+// it, which WebKit reports as page errors ("FetchEvent.respondWith received an error: Error:
+// Connection lost", read as "Error: Connection lost"), and for a file the app was loading (a
+// picture, a stylesheet, a script) whose answer had begun, WebKit adds "Cannot load ." after it: the
+// answer cut off has no address of its own to name. Each "Cannot load ." goes only with a link drop
+// of its own before it; one without stays, as does everything else (and withoutCutOff's).
+const LINK_DROP = /^Error: (Your computer (is offline|isn't answering|isn't connected to the relay)|Reconnecting to your computer|Connection lost)/
+export const withoutLinkDrop = (errors) => {
+  let dropped = 0
+  return withoutCutOff(errors).filter((e) => {
+    if (LINK_DROP.test(e)) { dropped++; return false }
+    if (/^Cannot load \.(?: @ |$)/.test(e) && dropped > 0) { dropped--; return false }
+    return true
+  })
+}
 // A reload of a page from page(), for a test that counts every page error: what WebKit reports for
 // the requests the reload cut off (as withoutCutOff) is left out, only what it reported while it
 // reloaded. Anything else then, and everything before and after, stays in errors.
