@@ -75,8 +75,9 @@ const tilde = (p) => (p === HOME || p.startsWith(HOME + path.sep) ? `~${p.slice(
 // every bot's unless you say otherwise, ones made before there was a choice too), or is stopped
 // there and comes to you ('stop', as every run was before). Asking, it goes on for a few minutes
 // while you decide, and each Continue gives it more, never past its Longest Run (longest, minutes),
-// where it's stopped without asking (frontdesk.js).
-export const LIMITS = { day: 30, atOnce: 2, minutes: 10, atLimit: 'ask', longest: 120 }
+// where it's stopped without asking (frontdesk.js). Nobody answering is a yes: it carries on, up to
+// its Longest Run (240 minutes unless you set another, 1440 at most).
+export const LIMITS = { day: 30, atOnce: 2, minutes: 10, atLimit: 'ask', longest: 240 }
 export const ATTACH_AUTO = ['no', 'named', 'everyone']
 // Answer In (answerIn): where the answer to a question at the top of a channel goes, in the channel
 // itself ('channel', a new bot's) or in a thread started from the question ('thread', as every bot
@@ -86,13 +87,22 @@ export const ATTACH_AUTO = ['no', 'named', 'everyone']
 // message is one running conversation with that person, its earlier turns given as they go.
 export const ANSWER_IN = ['channel', 'thread']
 export const CARRY_ON_MIN = 30
+// Commands (bash): 'off', or 'sandboxed', run in Claude Code's own sandbox (no network but the
+// domains you list, domains; writes only in its own copy; agents.js bashProblem), for you and the
+// people you named. Never on native Windows, where Claude Code has no sandbox.
+export const BASH = ['off', 'sandboxed']
+export const DOMAINS_MAX = 20
+const DOMAIN = /^(\*\.)?([a-z0-9-]{1,63}\.)+[a-z]{2,63}$/
+export const domainOf = (d) => { const x = String(d || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/:].*$/, ''); return DOMAIN.test(x) ? x : null }
 const DEFAULTS = {
   name: 'Bridge AI', description: '', who: 'named', askers: [], others: 'polite', readsFrom: [], instructionsFile: null, agent: null, auto: false, agentCopies: false, retention: '1y', max: 2,
   owner: null, owners: {}, changes: 'none', repo: null, writesTo: [], trustYou: true, trusted: [], handsTo: [], limits: LIMITS, memory: 'approve', paused: false, muted: [], listen: [], agentsStatus: false, template: null, mcp: [], answerers: null, fallback: true, draft: false, icon: null,
-  attachAuto: 'no', attachConfig: false, folderIds: {},
+  attachAuto: 'no', attachConfig: false, folderIds: {}, bash: 'off', domains: [],
 }
-// What it may change: nothing; a suggested change or a draft pull request in a repository
-// (botchanges.js); or files in its write folders (botwrite.js), at most WRITES_MAX of them.
+// What it may change: nothing; a suggested change in a repository, its draft pull request opened once
+// you say so (botchanges.js); or files in its write folders (botwrite.js), at most WRITES_MAX of
+// them. ('pr', a pull request opened at once, is no more: a bot set so proposes, as 'suggest' does,
+// and is kept so from then on: migratePr.)
 export const CHANGES = ['none', 'suggest', 'pr', 'edit']
 export const WRITES_MAX = 10
 // Its icon where a shared connection posts as it (connhub.js): an emoji's Slack name, or a picture's
@@ -140,7 +150,7 @@ function shape(id, j) {
   b.max = Math.max(1, Math.min(5, Math.round(Number(b.max)) || 2))
   b.owner = person(b.owner)
   b.owners = Object.fromEntries(['discord', 'teams'].map((k) => [k, someone(b.owners?.[k], k)]).filter(([, v]) => v))
-  b.changes = CHANGES.includes(b.changes) ? b.changes : 'none'
+  b.changes = b.changes === 'pr' ? 'suggest' : CHANGES.includes(b.changes) ? b.changes : 'none'
   b.repo = b.repo ? String(b.repo) : null
   b.writesTo = [...new Set((Array.isArray(b.writesTo) ? b.writesTo : []).map(String).filter(Boolean))].slice(0, WRITES_MAX)
   b.trustYou = b.trustYou !== false
@@ -162,6 +172,8 @@ function shape(id, j) {
   b.answerIn = b.answerIn === 'channel' ? 'channel' : 'thread'
   b.attachAuto = ATTACH_AUTO.includes(b.attachAuto) ? b.attachAuto : 'no'
   b.attachConfig = b.attachConfig === true
+  b.bash = BASH.includes(b.bash) ? b.bash : 'off'
+  b.domains = [...new Set((Array.isArray(b.domains) ? b.domains : []).map(domainOf).filter(Boolean))].slice(0, DOMAINS_MAX)
   b.folderIds = Object.fromEntries(Object.entries(b.folderIds && typeof b.folderIds === 'object' ? b.folderIds : {}).filter(([k, v]) => b.readsFrom.includes(k) && typeof v?.real === 'string' && v.real).map(([k, v]) => [k, { real: v.real }]))
   return b
 }
@@ -228,7 +240,7 @@ export function undraft(id, instructions) {
 // connected again there, with tokens pasted there) nor anyone's running context (people.json). Its
 // folders go as they're named here (~/…), and are checked where it's brought in.
 export const BUNDLE_KIND = 'bridge-ai-bot'
-const CARRIED = ['icon', 'description', 'who', 'askers', 'others', 'readsFrom', 'instructionsFile', 'agent', 'auto', 'agentCopies', 'retention', 'max', 'owner', 'owners', 'changes', 'repo', 'writesTo', 'trustYou', 'trusted', 'limits', 'memory', 'muted', 'listen', 'agentsStatus', 'template', 'mcp', 'answerers', 'fallback', 'answerIn', 'attachAuto', 'attachConfig']
+const CARRIED = ['bash', 'domains', 'icon', 'description', 'who', 'askers', 'others', 'readsFrom', 'instructionsFile', 'agent', 'auto', 'agentCopies', 'retention', 'max', 'owner', 'owners', 'changes', 'repo', 'writesTo', 'trustYou', 'trusted', 'limits', 'memory', 'muted', 'listen', 'agentsStatus', 'template', 'mcp', 'answerers', 'fallback', 'answerIn', 'attachAuto', 'attachConfig']
 export function bundleOf(id, memory = []) {
   const b = get(id)
   if (!b) throw Object.assign(new Error('No such bot'), { status: 404 })
@@ -243,7 +255,7 @@ export function bundleOf(id, memory = []) {
 // asking, and sending files from its folders (without asking, and data and config files). Held back
 // from the bot as it's made (held), so nothing in a file is ever kept unchecked.
 // (Its folders' identities, folderIds, are this computer's: never carried, found again here.)
-export const CHECKED = ['who', 'askers', 'owner', 'owners', 'readsFrom', 'instructionsFile', 'repo', 'writesTo', 'trustYou', 'trusted', 'agent', 'answerers', 'changes', 'mcp', 'muted', 'listen', 'agentCopies', 'agentsStatus', 'memory', 'auto', 'attachAuto', 'attachConfig']
+export const CHECKED = ['bash', 'domains', 'who', 'askers', 'owner', 'owners', 'readsFrom', 'instructionsFile', 'repo', 'writesTo', 'trustYou', 'trusted', 'agent', 'answerers', 'changes', 'mcp', 'muted', 'listen', 'agentCopies', 'agentsStatus', 'memory', 'auto', 'attachAuto', 'attachConfig']
 // A bot from such a file: a new one, by its name (with a number after it when that's taken here),
 // answering as it did once its Slack app is connected here. Anything in the file that isn't one of
 // its settings is left out, so a token in it never is kept. held: the CHECKED settings aren't kept
@@ -271,6 +283,19 @@ export function save(id, patch) {
   if (patch.name !== undefined && list().some((b) => b.id !== id && b.name.toLowerCase() === after.name.toLowerCase())) throw new Error(`There's a bot called ${after.name} already`)
   write(after)
   return { before, after }
+}
+
+// The bots kept as 'pr' (a pull request opened at once, which there's no more of), kept as 'suggest'
+// now: their pull requests wait for you. [{ id, name }] of each one changed, for its record.
+export function migratePr() {
+  const out = []
+  for (const b of list()) {
+    const raw = read(fileOf(b.id, 'bot.json'))
+    if (raw?.changes !== 'pr') continue
+    write(shape(b.id, { ...raw, changes: 'suggest' }))
+    out.push({ id: b.id, name: b.name })
+  }
+  return out
 }
 
 // Gone: its settings, tokens and instructions. Its record stays, named by deleted.json, until the

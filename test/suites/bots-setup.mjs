@@ -207,17 +207,22 @@ try {
     await slack.ask({ user: 'U0EVE', text: '<@UBOT> what\'s open? [mcp tracker list_issues] [mcp tracker create_issue]' })
     const eve = await until(() => logOf('mcp-tries.log').filter((x) => x.tool === 'create_issue').length >= 1 && logOf('mcp-tries.log'), 25000)
     ok(eve && eve.find((x) => x.tool === 'list_issues')?.done === true && eve.find((x) => x.tool === 'create_issue')?.done === false, 'someone not named: the tool that only reads used, the other refused', eve)
-    const start = logOf('helpers-started.log').find((x) => /what's open/.test(x.message))
-    const args = logOf('claude-args.log').find((x) => /what's open/.test(x.message))?.args || []
+    // (Read again until both are there: a line being written as it's read reads as none.)
+    const start = await until(() => logOf('helpers-started.log').find((x) => /what's open/.test(x.message)), 10000)
+    const args = (await until(() => logOf('claude-args.log').find((x) => /what's open/.test(x.message)), 10000))?.args || []
     const cfg = args[args.indexOf('--mcp-config') + 1]
     ok(args.includes('--strict-mcp-config') && cfg && !(args.includes('--add-dir') && args.slice(args.indexOf('--add-dir')).includes(path.dirname(cfg))) && eve.every((x) => x.config && !x.read), 'its run: only its servers (--mcp-config, --strict-mcp-config), the config never a folder it may read', args)
     ok(args.includes('mcp__tracker__list_issues') && args.includes('mcp__tracker__search') && !args.includes('mcp__tracker') && args.slice(args.indexOf('--disallowedTools')).includes('mcp__tracker__create_issue'), 'allowed: the read-only tools; refused by name: the other', args)
     ok(!start.secrets?.length && !JSON.stringify(args).includes('tok-tracker-123'), 'its token not on its command line')
-    ok(await until(() => fs.existsSync(cfg) ? null : true, 20000), 'its MCP folder gone once the run\'s over')
     const spaces = ((await kit.api('/fleet?all=1')).workspaces || []).map((w) => w.label)
     ok(spaces.includes('Bot Runs') && !spaces.includes('Bots'), 'its answering agents run in the Bot Runs space, not one called Bots beside the sidebar\'s Bots', spaces)
     const shown = await kit.api('/fleet')
     ok(!shown.workspaces.some((w) => w.label === 'Bot Runs') && !shown.agents.some((a) => a.helper?.list === 'desk'), 'and none of it is in the sidebar: a bot\'s runs are on its page, under Conversations', shown.workspaces.map((w) => w.label))
+    // (Its folder is its session's: kept while the conversation may go on, gone once it ends.)
+    const sess = await until(async () => (await kit.api('/bots/sessions')).sessions.find((x) => /what's open/.test(x.title) && x.state !== 'working'), 20000)
+    ok(fs.existsSync(cfg) && !!sess, 'its MCP folder stays with its session, for its next turn', sess)
+    await kit.api(`/bots/sessions/${sess.id}/end`, {})
+    ok(await until(() => fs.existsSync(cfg) ? null : true, 20000), 'and is gone once the session ends')
     // Dana, named: every tool.
     await slack.ask({ user: 'U0DANA', text: '<@UBOT> file it please [mcp tracker create_issue]' })
     const dana = await until(() => logOf('mcp-tries.log').filter((x) => x.tool === 'create_issue').length >= 2 && logOf('mcp-tries.log').filter((x) => x.tool === 'create_issue').at(-1), 25000)

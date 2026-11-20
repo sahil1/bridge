@@ -100,7 +100,13 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
       // With a first message for the copy (the Slack Bot's question to a copy of an agent's
       // conversation), after it on the command line, as a fresh start has its own.
       if (opening && a.promptArg) args = [...args, forCommandLine(opening)]
-    } else if (hasLog) { args = a.resume(sessionId); reopened = true } else {
+    } else if (hasLog) {
+      args = a.resume(sessionId)
+      reopened = true
+      // (Started again in its conversation with something to say: a bot's session's next turn, after
+      // its pane was closed for being idle. Its folders and what it may do are as before: access.)
+      if (opening && a.promptArg) { args = [...args, forCommandLine(opening)]; reopened = false }
+    } else {
       if (resume) sessionId = null
       if (a.sessionId === 'assign' && !sessionId) sessionId = newSessionId()
       args = a.start({ sessionId: a.sessionId === 'assign' ? sessionId : undefined, prompt: a.promptArg ? forCommandLine(opening) : undefined })
@@ -388,6 +394,8 @@ export async function fleet() {
     workspace: wsLabel(p.workspaceId), tab: tabOf(p.tabId)?.label || '',
     kind: p.kind, status: statusOf(p), title: p.title, cwd: p.cwd, account: accounts.labelOf(p.account), accountId: p.account, accountSure: !!p.account,
     sessionId: p.sessionId, model: p.model, effort: p.effort || null, focused: false, seq: p.seq,
+    // (How much it may do, as it was started: a bot's session is looked at before a turn is typed in.)
+    access: p.access === 'read' || p.access === 'change' ? p.access : null,
     setup: p.setup?.step || null, setupUrl: p.setup?.url || null, setupKeys: p.setup?.keys || null, setupCode: p.setup?.code || null,
   }))
   const tabList = tabs.map((t) => ({
