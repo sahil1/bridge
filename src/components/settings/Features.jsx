@@ -14,7 +14,7 @@ import './features.css'
 // has one, how it's doing in a line ("Notes by Claude · 12 this week", "3 links open"), and Open,
 // to its place in Settings. The beta features after the rest, each marked Beta: none of them is
 // hidden here, on or off. Then Set up, what Bridge AI uses besides your agents (SetupAll).
-// Each line is only what this computer already knows, asked once as the page opens; a part that
+// Each line is one line, cut short if it's longer (all of it on hover), and only what this computer already knows, asked once as the page opens; a part that
 // can't be asked (Bots while it's off) just says Off.
 const open = (section) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section } }))
 
@@ -51,11 +51,11 @@ function Card({ id, icon, name, beta = false, on = null, onSwitch = null, why = 
   )
 }
 
-// A beta feature's card: its switch, and On or Off, with more where there's more to say (line, or
-// offLine while it's off: Remote Screen's password stays set).
-function BetaCard({ x, icon, line = null, offLine = null, why = null }) {
+// A beta feature's card: its switch, and while it's on, how it's doing (line, else On); while it's
+// off, what it is (its switch already says off).
+function BetaCard({ x, icon, line = null, why = null }) {
   const { on, set } = useBeta(x.id)
-  return <Card id={x.id} icon={icon} name={t(x.label)} beta on={on} onSwitch={set} why={why} status={on ? line || t('On') : [t('Off'), offLine].filter(Boolean).join(' · ')} to={x.setting} />
+  return <Card id={x.id} icon={icon} name={t(x.label)} beta on={on} onSwitch={set} why={why} status={on ? line || t('On') : t(x.card)} to={x.setting} />
 }
 
 const BETA_ICON = { home: 'home', 'dictation-cleanup': 'wand', 'usage-everywhere': 'bar-chart', 'meeting-insights': 'trend', routines: 'repeat', 'meeting-board': 'shapes', 'assist-answers': 'sparkle', 'slack-bot': 'chat', 'mcp-server': 'link', 'remote-screen': 'screen', 'call-video': 'video' }
@@ -92,7 +92,7 @@ export default function Features({ onOpenAgent }) {
   const d = eff.dictation || {}
   const dictOn = d.on !== false
   const touch = matchMedia('(pointer: coarse)').matches
-  const dictLine = !dictOn ? t('Off') : touch ? t('The mic button in a message box') : t('Hold {key} and talk', { key: keyLabel(dictationKey(d), keysPlatform()) })
+  const dictLine = !dictOn ? t('Talk to your agents by holding a key') : touch ? t('The mic button in a message box') : t('Hold {key} and talk', { key: keyLabel(dictationKey(d), keysPlatform()) })
 
   // The Chief of Staff: its agent, and its helpers.
   const chiefAgent = (agents || []).find((a) => a.kind === (eff.chief?.kind || 'claude'))
@@ -111,7 +111,7 @@ export default function Features({ onOpenAgent }) {
   const noteLine = [pushes ? (pushes.length ? n(pushes.length, tx('{n} device'), tx('{n} devices')) : t('This computer')) : null, sounds ? t('with sound') : t('silent')].filter(Boolean).join(' · ')
 
   // Mail: How You Write, learnt or not.
-  const mailLine = !voice ? t('Read-only') : voice.learntAt ? t('Read-only · How You Write learnt {date}', { date: new Date(voice.learntAt).toLocaleDateString(locale(), { month: 'short', day: 'numeric' }) }) : t('Read-only · How You Write not learnt yet')
+  const mailLine = !voice ? t('Read-only') : voice.learntAt ? t('How You Write learnt {date}', { date: new Date(voice.learntAt).toLocaleDateString(locale(), { month: 'short', day: 'numeric' }) }) : t('How You Write not learnt yet')
 
   // Remote Screen: the password, and control.
   const ac = remote?.access
@@ -142,7 +142,7 @@ export default function Features({ onOpenAgent }) {
       </ul>
       <h4 className="ft-head">{t('Beta')}<span className="muted small">{t('New parts of Bridge AI, each off until you turn it on.')}</span></h4>
       <ul className="ft-grid" aria-label={t('Beta Features')}>
-        {betas.map((x) => <BetaCard key={x.id} x={x} icon={BETA_ICON[x.id] || 'sparkle'} line={betaLine[x.id] || null} offLine={x.id === 'remote-screen' && ac?.password ? t('password set') : null} why={x.id === 'remote-screen' && !here ? t('Turned on and off at the computer itself.') : null} />)}
+        {betas.map((x) => <BetaCard key={x.id} x={x} icon={BETA_ICON[x.id] || 'sparkle'} line={betaLine[x.id] || null} why={x.id === 'remote-screen' && !here ? t('Turned on and off at the computer itself.') : null} />)}
       </ul>
       <div data-setting="setup"><SetupAll onOpen={onOpenAgent} /></div>
     </div>

@@ -121,3 +121,9 @@ input.tg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; 
 
 /* The config file in About & Updates: as tall as its text, no scroll of its own. */
 textarea.st-code-grow { overflow-y: hidden; resize: none; }
+/* A switch on a phone: the size of a phone's own. */
+@media (max-width: 760px) {
+  .modal.settings.phone input.tg { width: 46px; height: 28px; }
+  .modal.settings.phone input.tg::after { top: 2px; left: 2px; width: 24px; height: 24px; }
+  .modal.settings.phone input.tg:checked::after { transform: translateX(18px); }
+}

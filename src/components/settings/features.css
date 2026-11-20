@@ -8,7 +8,7 @@
 .ft-card.off .ft-ico { color: var(--ink-3); background: var(--pane-3); }
 .ft-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .ft-name b { font-size: 13.5px; font-weight: 600; line-height: 1.25; }
-.ft-status { margin: 0; line-height: 1.4; min-height: 1.4em; overflow-wrap: anywhere; }
+.ft-status { margin: 0; line-height: 1.4; min-height: 1.4em; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ft-status.warn { color: var(--warning); }
 .ft-foot { display: flex; align-items: center; gap: 8px; min-height: 26px; }
 .ft-open { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; min-height: 26px; padding: 0 4px 0 8px; border-radius: 7px; font-size: 12.5px; font-weight: 550; color: var(--accent); }
