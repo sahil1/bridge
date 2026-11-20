@@ -196,7 +196,10 @@ try {
   const lap = view.locator('.am-lane', { hasText: 'Laptop' })
   ok(/Offline · as of/.test(await lap.innerText()) && /Meeting notes/.test(await lap.innerText()) && await lap.locator('.am-main[disabled]').count() === 1, 'Laptop: offline, with what it last said, and nothing to open', await lap.innerText())
   const desk = view.locator('.am-lane', { hasText: 'Desk' })
-  const deskText = await desk.innerText()
+  // (Its lane is there with its name as soon as Desk is known; its agents once Desk has answered,
+  // a moment later through the link on a busy machine: WebKit in CI read the lane as only "Desk".)
+  const deskWhole = (x) => /billing-api/i.test(x) && /docs/i.test(x) && /Working for/.test(x) && /Done/.test(x) && /Opus 5\.5/.test(x) && /Look for rounding/.test(x)
+  const deskText = (await until(async () => { const x = await desk.innerText().catch(() => ''); return deskWhole(x) && x }, 20000, 200)) || await desk.innerText().catch(() => '')
   ok(/billing-api/i.test(deskText) && /docs/i.test(deskText) && /Working for/.test(deskText) && /Done/.test(deskText) && /Opus 5\.5/.test(deskText), "Desk's lane: its agents by project, each with its state and for how long, and its model", deskText)
   ok(/Look for rounding/.test(deskText), 'and the subagent at work under its agent')
   const chiefHand = view.locator('.am-lane', { hasText: 'Studio' }).locator('.am-handed')
