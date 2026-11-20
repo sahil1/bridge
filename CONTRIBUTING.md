@@ -162,10 +162,15 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
   signed and notarized as a release is, at a version like `3.20.1-nightly.20261116.57`
   (`scripts/nightly.js`: what main is heading for, the day and the run), set in that build only, so
   main gets no commit. It's a GitHub pre-release, never the latest, with what changed since the last
-  nightly as its notes: a line for each part of Bridge AI, named by the words before a commit
-  subject's first colon (`Bots: a run at its time limit asks…`), and nothing from commits that only
+  nightly as its notes, made from the titles of the pull requests merged since then (a pull request
+  putting several together lists them in its body, a line each, `- #252 Bots that change files: …`,
+  and those lines are used instead of its title), or from the commits when there are none or GitHub
+  can't be reached: a line for each part of Bridge AI, named by the words before a title's or
+  subject's first colon (`Bots: a run at its time limit asks…`) or the name in capitals it starts
+  with (`Remote Screen starts every time…`), and nothing from pull requests or commits that only
   touch the tests, CI or the docs, or say so (`Tests:`, `CI:`, `Docs:`). The update card in the top
-  bar shows the first four. No Android app, no Docker image, and only the newest 7 are kept. A computer
+  bar shows the first four. `node scripts/nightly.js notes <version> notes.md --at <tag>` shows the
+  notes for a nightly that's out. No Android app, no Docker image, and only the newest 7 are kept. A computer
   takes it once Nightly is picked in About & Updates, or on the computer with `bridge-ai nightly on`
   (`npm run ship -- join` does that for you), or without the command, `curl -X POST -H
   "Authorization: Bearer $(cat ~/.bridge-ai/api-token)" -H 'content-type: application/json' -d '{}'

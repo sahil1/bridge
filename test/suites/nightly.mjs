@@ -9,7 +9,13 @@
 // one said to be about them, a merge, the revert of one, or a commit taken back in the same
 // nightly), a line for each part of Bridge AI (the words before a subject's colon, however it's
 // said), its first line short and at most 3 under it, Fixes last, at most 8 lines, the commit it was
-// built from in a line GitHub hides, and a plain first line. The
+// built from in a line GitHub hides, and a plain first line; a revert's own revert (Reapply "…")
+// left out too. And first from the pull requests merged since the last nightly
+// (test/fixtures/nightly-pulls.json: main's merges, their commits, and the pull requests' titles,
+// bodies and files): an integration pull request by the lines its body lists (#252, #255, #257), not
+// its title; a feature pull request by its title; one about the tests or CI left out by its title or
+// files; one titled with its branch by its commits; a commit made on main as it is; each pull
+// request once; and the commits again when there's no pull request or GitHub can't say. The
 // workflows: nightly.yml builds main through release.yml, which publishes it as a pre-release, never
 // GitHub's latest, and leaves the Android app, the regular Publish and the tag check alone. The
 // rules: Stable and Early Access are never offered a nightly; Nightly is offered the newest of
@@ -78,6 +84,28 @@ ok(wideBullets.length === nj.MAX_GROUPS && /^- \*\*Fixes:\*\*/.test(wideBullets.
 const quiet = nj.notesFor({ version: N, sha: 'abcdef1234567', since: '3.20.0', mac: '14.0', changes: COMMITS.filter((c) => /^(Tests|CI|Docs):/.test(c.subject)) })
 ok(/^- Nothing you'd notice: only the tests and how Bridge AI is built changed\.$/m.test(quiet) && /^- Nothing new: built again\.$/m.test(nj.notesFor({ version: N, sha: 'abcdef1234567', since: '3.20.0', mac: '14.0', changes: [] })), 'only tests changed, or nothing at all: said so')
 ok(same(nj.grouped(['Bots: answer in threads you started', 'Tests: slack-bot waits longer']).map((g) => g.label), ['Bots']), 'subjects alone (no files known): told by the subject')
+const reapplied = nj.grouped([{ subject: 'Reapply "Merge remote-tracking branch \'origin/bots-write\' into nightly-next-3"', files: ['server/botwrite.js', 'server/frontdesk.js'] }, { subject: 'Bots: a file in a bot\'s folders goes with its answer as it is, PDFs and documents too', files: ['server/botattach.js'] }])
+ok(same(reapplied.map((g) => g.label), ['Bots']) && !/Reapply|Other/.test(JSON.stringify(reapplied)) && nj.seen({ subject: 'Reapply "Bots: answer in DMs"', files: ['server/bots.js'] }) === false, 'a revert\'s own revert (Reapply "…") left out, as a merge is', reapplied)
+
+// ---------- the notes, from the pull requests ----------
+const PULLS = JSON.parse(fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'nightly-pulls.json'), 'utf8'))
+const listedIn258 = nj.listedIn(PULLS.pulls['258'].body)
+ok(same(listedIn258.map((x) => x.number), [252, 255, 257, 250, 256]) && listedIn258[0].text.startsWith('Bots that change files: Edits Files') && nj.listedIn('- #246: meetings Merge into one')[0]?.text === 'meetings Merge into one', 'an integration pull request\'s body: the pull requests it lists, a line each ("- #252 …"), never a note in brackets or a line naming none', listedIn258)
+const pulled = nj.fromPulls(PULLS.log, PULLS.pulls)
+const prNotes = nj.notesFor({ version: '3.21.1-nightly.20261120.18', sha: '281d5eef1234567', since: '3.21.1-nightly.20261119.17', changes: pulled, mac: '14.0' })
+const prListed = prNotes.split('\n\nOnly computers')[0]
+const prLabels = prNotes.split('\n').filter((l) => /^- /.test(l)).map((l) => l.match(/^- \*\*(.+?):\*\* \S/)?.[1])
+ok(same(prLabels, ['Bots', 'Meetings', 'Remote Screen', 'Update card', 'Phone']), 'from the pull requests merged since the last nightly: a line for each part, "- **Label:** …", the busiest first', prNotes)
+ok(/^- \*\*Bots:\*\* Edits Files in Its Folders, approvals bound to the exact change, held kinds, Undo\.$/m.test(prNotes) && /^ {2}- Bots attach files from their folders\.$/m.test(prNotes) && /^ {2}- Bot runs load only your own Claude Code settings, never a folder's own\.$/m.test(prNotes), 'an integration pull request: the lines its body lists under their part ("Bots that change files: …", "Bots attach …", "Bot runs …" are all Bots), the first listed first, each cut at a clause', prListed)
+ok(!/Next nightly|Combines|#\d|hook|Reapply|Merge|\bTests?\b|\bCI\b|PowerShell|held up|floating card|setting-sources/.test(prListed), 'nothing from its own title, nor its commits\' steps; no pull request\'s number, no flag; a pull request only about the tests or CI left out by its title or its files, merged itself or listed in another', prListed)
+ok(/^- \*\*Remote Screen:\*\* Remote Screen starts every time, or says why with the fix\.$/m.test(prNotes), 'a feature pull request: its title to its first clause, under the name in capitals it starts with', prListed)
+ok(/^- \*\*Update card:\*\* Nightly notes a person would notice, and a calmer update card\.$/m.test(prNotes), 'a title naming no part: the one part its commits a person would notice name', prListed)
+ok(/^- \*\*Meetings:\*\* A title for each one from its calendar event\.$/m.test(prNotes) && /^ {2}- A meeting set by hand/m.test(prNotes) && /^- \*\*Phone:\*\* Scan QR code reads a pairing link from a picture too\.$/m.test(prNotes), 'one titled with its branch\'s name: by its commits; a commit made on main itself: as it is', prListed)
+ok(prNotes.startsWith('Nightly build of 20 November 2026, for trying what\'s next.\n\n## Since 3.21.1-nightly.20261119.17\n\n- **Bots:**') && /^<!-- main at 281d5ee -->$/m.test(prNotes) && !/281d5ee/.test(shown(prNotes)) && up.minMacOf(prNotes) === '14.0' && /Only computers on the Nightly update channel are offered it\. The Mac app needs macOS 14 or later\./.test(prNotes), 'its first line, the commit it was built from and the macOS line the update check reads as before', prNotes.slice(-300))
+const own255 = { title: 'Bots: a file in a bot\'s folders goes with its answer as it is, PDFs and documents too', branch: 'bots-attach', body: '', files: PULLS.pulls['255'].files }
+const once = nj.fromPulls([{ subject: 'Merge pull request #258 from sahil1/nightly-next-4' }, { subject: 'Merge pull request #255 from sahil1/bots-attach' }], { ...PULLS.pulls, 255: own255 })
+ok(once.filter((c) => c.pull === 255).length === 1 && once.find((c) => c.pull === 255).subject === own255.title, 'a pull request merged itself, then listed in another: once, by its own title', once)
+ok(nj.fromPulls([{ subject: 'Bots: answer in DMs', files: ['server/bots.js'] }], {}) === null && nj.fromPulls(PULLS.log, { ...PULLS.pulls, 251: undefined }) === null, 'no pull request merged (only commits made on main), or one GitHub couldn\'t give: none, so the notes go by the commits')
 
 // ---------- the workflows ----------
 // With \n between lines on Windows too, where git checks them out with \r\n.
@@ -91,6 +119,8 @@ ok(/- name: The nightly's version\n\s*if: inputs\.nightly\n\s*shell: bash\n/.tes
 ok(/gh release create "v\$NIGHTLY" --target "\$GITHUB_SHA" [^\n]*--prerelease --latest=false/.test(releaseYml) && /nightly\.js older 7/.test(releaseYml) && /--cleanup-tag/.test(releaseYml), 'published as a pre-release, never GitHub\'s latest, and only the newest 7 kept')
 ok(/name: Publish\n\s*if: \$\{\{ !inputs\.nightly \}\}/.test(releaseYml) && /android:\n\s*name: Android\n\s*needs: test\n\s*if: \$\{\{ !inputs\.nightly \}\}/.test(releaseYml) && /if: startsWith\(github\.ref, 'refs\/tags\/v'\)\n\s*run: \|\n\s*git fetch --no-tags origin main/.test(releaseYml), 'and the regular Publish, the Android app and the tag check are as before, left out of a nightly')
 ok(/merge-base --is-ancestor "\$GITHUB_SHA" origin\/main/.test(releaseYml.split('A nightly is of main')[1] || ''), 'a nightly is checked to be of main too')
+const publishing = releaseYml.split('\n  release:\n')[1] || ''
+ok(/permissions:\n(\s+[\w-]+: \w+\n)*\s+pull-requests: read\n/.test(publishing) && /- name: Notes and checksums\n\s*env:\n(\s+\w+: [^\n]+\n)*\s+GH_TOKEN: \$\{\{ github\.token \}\}\n/.test(publishing) && /permissions:\n(\s+[\w-]+: \w+\n)*\s+pull-requests: read\n/.test(nightlyYml.split('\n  release:\n')[1] || ''), 'its notes read the pull requests with the workflow\'s token (pull-requests: read, which nightly.yml gives it too)')
 
 // ---------- the rules ----------
 const R = (tag, o = {}) => ({ tag_name: tag, prerelease: !!o.pre, draft: false, body: `Notes\n${o.rollout != null ? `<!-- rollout: ${o.rollout} -->\n` : ''}` })

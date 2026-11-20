@@ -233,11 +233,13 @@ jobs:
     needs: [build, android]
     runs-on: ubuntu-latest
     # Writes the release, and signs where each download was built (GitHub's build provenance:
-    # gh attestation verify <file> --repo sahil1/bridge).
+    # gh attestation verify <file> --repo sahil1/bridge). A nightly's notes read the pull requests
+    # merged since the last one.
     permissions:
       contents: write
       id-token: write
       attestations: write
+      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -252,6 +254,7 @@ jobs:
       - name: Notes and checksums
         env:
           NIGHTLY: ${{ inputs.nightly }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -n "$NIGHTLY" ]; then node scripts/nightly.js notes "$NIGHTLY" notes.md
           else node scripts/release.js --notes notes.md $([ -f out/Bridge-AI-android.apk ] && echo --android); fi
