@@ -32,7 +32,7 @@ export function SessionRow({ s, showBot = true }) {
           </span>
         </span>
         <span className="bh-sess-side small">
-          <span className={`bh-state s-${st}`}>{st === 'waiting' && s.waiting?.kind ? t('Waiting for you: {what}', { what: WAITING()[s.waiting.kind] || s.waiting.kind }) : t(SESSION_STATE[st])}</span>
+          <span className={`bh-chip s-${st}`} title={st === 'waiting' && s.waiting?.kind ? t('Waiting for you: {what}', { what: WAITING()[s.waiting.kind] || s.waiting.kind }) : undefined}>{t(SESSION_STATE[st])}</span>
           <span className="muted">{[s.turns === 1 ? t('1 turn') : t('{n} turns', { n: s.turns || 0 }), sinceOf(s), s.lastAt ? ago(s.lastAt) : null].filter(Boolean).join(' · ')}</span>
         </span>
         <Icon name="chevron" size={12} className="muted bh-go" />

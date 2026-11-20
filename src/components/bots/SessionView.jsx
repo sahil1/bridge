@@ -69,13 +69,11 @@ export default function SessionView({ sid, phone = false, fleet = null }) {
         <div className="bh-sv-title">
           <span className={`bh-sdot s-${st}`} aria-hidden="true" />
           <h2 className="bp-name">{s.title || s.bot?.name || t('Session')}</h2>
+          <span className={`bh-chip s-${st}`} data-state={st} title={st === 'waiting' && s.waiting?.kind ? t('Waiting for you: {what}', { what: WAITING()[s.waiting.kind] || s.waiting.kind }) : undefined}>{t(SESSION_STATE[st])}</span>
         </div>
         <p className="muted small bh-sv-meta">
           {s.bot && <button type="button" className="link-btn" onClick={() => openBot(s.bot.id)}><Icon name="bot" size={11} /> {s.bot.name}</button>}
-          <span>{placeOf(s.place)}</span>
-          {who.length > 0 && <span>{who.join(', ')}</span>}
-          <span className={`bh-state s-${st}`}>{st === 'waiting' && s.waiting?.kind ? t('Waiting for you: {what}', { what: WAITING()[s.waiting.kind] || s.waiting.kind }) : t(SESSION_STATE[st])}</span>
-          <span>{[s.turns === 1 ? t('1 turn') : t('{n} turns', { n: s.turns || turns.length }), sinceOf(s), working && s.ran != null && s.longest ? t('{ran} of {longest} min this turn', { ran: s.ran, longest: s.longest }) : null].filter(Boolean).join(' · ')}</span>
+          <span>{[placeOf(s.place), who.join(', '), s.turns === 1 ? t('1 turn') : t('{n} turns', { n: s.turns || turns.length }), sinceOf(s)].filter(Boolean).join(' · ')}</span>
         </p>
         <div className="bh-sv-acts">
           <div className="seg" role="tablist" aria-label={t('Session')}>

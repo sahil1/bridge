@@ -50,9 +50,9 @@ export function ConnectionCard({ c, reload, open = null }) {
         <span className={`sb-dot ${STATE[c.state] || 'warn'}`} aria-hidden="true" />
         <h4 className="cn-name">{c.platform === 'teams' ? c.name : `@${c.name}`}</h4>
         <span className={`sb-plat p-${c.platform}`}>{label}</span>
-        <span className="sb-tag cn-kind">{c.shared ? t('Shared') : t('{bot}\'s own', { bot: c.own?.name || '' })}</span>
+        <span className="sb-plat cn-kind">{c.shared ? t('Shared') : t('{bot}\'s own', { bot: c.own?.name || '' })}</span>
       </header>
-      <p className={`st-note ${STATE[c.state] || 'warn'} cn-state`} role="status"><Icon name={c.state === 'connected' ? 'check' : c.state === 'error' ? 'alert' : 'info'} size={13} /><span className="sb-status-text">{said(c)}</span>{['error', 'reconnecting'].includes(c.state) && <button type="button" className="link-btn" onClick={again}>{t('Connect again')}</button>}</p>
+      {!setUp && <p className={`st-note ${STATE[c.state] || 'warn'} cn-state`} role="status"><Icon name="info" size={13} /><span className="sb-status-text">{said(c)}</span></p>}
       {(c.others || c.numConnections > 1) && <p className="st-note warn" role="status" data-setting="connection-copies"><Icon name="alert" size={13} /><span>{t('Another copy of Bridge AI is connected to this app too ({n} in all), so each message reaches only one of them. Disconnect the other copy, or give it an app of its own.', { n: Math.max(2, c.numConnections || 0, (c.others?.n || 0) + 1) })}</span></p>}
       {c.limited && <p className="st-note warn" role="status" data-setting="connection-limited"><Icon name="clock" size={13} /><span>{t('{platform} is making it wait before it reads more ({n} s): answers that need the thread come a little later.', { platform: label, n: Math.round(Number(c.limited.wait) || 0) })}</span></p>}
       {c.catchingUp && <p className="st-note" role="status" data-setting="connection-catching-up"><Icon name="refresh" size={13} /><span>{t('Catching up on what was asked while it was away: {done} of {of}.', { done: c.catchingUp.done || 0, of: c.catchingUp.of || 0 })}</span></p>}
@@ -62,7 +62,7 @@ export function ConnectionCard({ c, reload, open = null }) {
           {appSteps}
         </div>
       )}
-      {setUp && <TestConnection c={c} onDone={reload} />}
+      {setUp && <TestConnection c={c} onDone={reload} tone={STATE[c.state] || 'warn'} status={<><Icon name={c.state === 'connected' ? 'check' : c.state === 'error' ? 'alert' : 'info'} size={13} /><span className="sb-status-text">{said(c)}</span>{['error', 'reconnecting'].includes(c.state) && <button type="button" className="link-btn" onClick={again}>{t('Connect again')}</button>}</>} />}
       {setUp && <YouHere c={c} reload={reload} />}
       <Reach c={c} patch={patch} />
       {c.shared && <Defaults c={c} reload={reload} />}

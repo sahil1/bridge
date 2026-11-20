@@ -176,3 +176,26 @@
 .bh-sv.phone .bh-sv-more { min-width: 40px; min-height: 40px; margin-left: auto; }
 .bh.phone .bh-tools select.st-input { flex: 1 1 0; max-width: none; }
 .bh.phone .bh-tools .btn { flex: 1 1 100%; justify-content: center; }
+/* A connection's one status line: how it stands, its last test, and Test this connection. */
+.bh-status-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0; }
+.bh-status-row .bh-test-sum { font-size: 12.5px; }
+.bh-status-row .bh-test-sum::before { content: "·"; margin-right: 6px; color: var(--ink-3); font-weight: 400; }
+.bh-status-row > .btn { flex: none; }
+/* One chip style: a connection's platform and kind, and how a session stands. */
+.cn-kind.sb-plat { margin-left: 0; }
+.bh-chip { flex: none; display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; font: 500 11.5px/20px var(--font); white-space: nowrap; color: var(--ink-2); background: var(--pane-2); box-shadow: inset 0 0 0 1px var(--line); }
+.bh-chip.s-waiting { color: var(--needs); background: color-mix(in srgb, var(--needs) 12%, transparent); box-shadow: none; }
+.bh-chip.s-working { color: var(--working); background: color-mix(in srgb, var(--working) 12%, transparent); box-shadow: none; }
+.bh-chip.s-closed { color: var(--ink-3); }
+/* Pickers on a connection's card: compact, the same width. */
+.bh-card .bh-chief { max-width: 260px; }
+.bh-card .cn-add-default select { flex: 0 1 260px; }
+.bh.phone .bh-card .cn-add-default select { flex: 1 1 140px; }
+.bh.phone .bh-card .bh-chief { max-width: none; }
+.bh-status-words { flex: 1 1 260px; min-width: 0; line-height: 1.5; }
+.bh-status-words > .icon { vertical-align: -2px; margin-right: 6px; }
+.bh-status-words .sb-status-text { display: inline; }
+.bh-status-words .bh-test-sum { display: inline; margin-left: 6px; }
+.bh-status-words .link-btn { margin-left: 6px; }
+.bh-status-row > .btn { color: var(--ink); }
+.bh.phone .bh-tools .sb-grow { display: none; }

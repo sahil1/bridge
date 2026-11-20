@@ -104,8 +104,8 @@ export function Defaults({ c, reload, bare = false }) {
   const nameOf = (id) => c.bots.find((b) => b.id === id)?.name || id
   return (
     <div className="cn-part" data-setting="connection-defaults">
-      {!bare && <b className="small">{t('Channels\' Bots')}</b>}
-      {!bare && <p className="muted small">{t('Every question asked in these channels goes to one bot.')}</p>}
+      {!bare && <b className="small">{t('Channel Defaults')}</b>}
+      {!bare && <p className="muted small">{t('Questions in these channels go straight to one bot.')}</p>}
       {c.defaults.length > 0
         ? (
           <ul className="sb-askers">

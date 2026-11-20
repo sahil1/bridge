@@ -26,7 +26,7 @@ export function checkSummary(list) {
   return { state: 'ok', text: t('Every check passed') }
 }
 
-export default function TestConnection({ c, onDone }) {
+export default function TestConnection({ c, onDone, status = null, tone = 'ok' }) {
   const [busy, setBusy] = useState(false)
   const [out, setOut] = useState(null) // { list, at }
   const [missing, setMissing] = useState(false)
@@ -52,10 +52,12 @@ export default function TestConnection({ c, onDone }) {
   const sum = last ? checkSummary(last.list) : null
   return (
     <div className="bh-test" data-setting="connection-test">
-      <div className="st-row bh-test-row">
+      <div className={`st-note ${tone} cn-state bh-status-row`} role="status">
+        <span className="bh-status-words">
+          {status}
+          {sum && !busy && <span className={`bh-test-sum ${sum.state}`}>{sum.text}{last.at ? <span className="muted"> · {ago(last.at)}</span> : null}</span>}
+        </span>
         <button type="button" className="btn small" disabled={busy || missing} onClick={run} aria-busy={busy}><Icon name={busy ? 'refresh' : 'check'} size={12} className={busy ? 'spin' : ''} /> {busy ? t('Testing…') : t('Test this connection')}</button>
-        {sum && !busy && <span className={`small bh-test-sum ${sum.state}`} role="status">{sum.text}{last.at ? <span className="muted"> · {ago(last.at)}</span> : null}</span>}
-        {busy && <span className="muted small">{t('It sends itself a message and waits for it to come back: a few seconds.')}</span>}
       </div>
       {missing && <p className="muted small">{t('This Bridge AI can\'t test a connection yet: update it, then test again.')}</p>}
       {error && <p className="error-text small" role="alert">{error}</p>}
