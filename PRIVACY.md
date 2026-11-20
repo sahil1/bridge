@@ -465,7 +465,23 @@ Two reports go to the project's server, `counts.boldbridge.ai`, run on Cloudflar
   ran them), the tokens in the answers Bridge AI got from a model itself, the hours of meetings
   recorded, how many words were dictated (never the words), and how long it was in use in each part
   of Bridge AI (Home, an agent, the chief of staff, Meetings, Dictations, Studio, Today, Mail,
-  Calendar, Usage, Bots, Settings), as the part you last typed, clicked or scrolled in.
+  Calendar, Usage, Bots, Settings), as the part you last typed, clicked or scrolled in; the tokens
+  by the vendor of the model (Anthropic, OpenAI, Google, xAI, open-weight models, other), and the
+  minutes of speech turned into text by each engine (Parakeet or Whisper on your computer, the
+  Mac's own, or a service such as Deepgram). The tokens, hours, words and minutes of speech also go
+  as numbers rounded to two significant figures (3,417,882 tokens as 3,400,000), so the project can
+  see totals: the server only adds each to that week's total for its name and keeps nothing else of
+  it. Among the counts are also: what didn't work, by why (an agent that couldn't start because it
+  wasn't installed, needed signing in or was at its limit; an answer refused for its key, at a
+  limit or too slow; speech, the relay or an update that failed), an agent stopping at its plan's
+  limit and agents moved to another account, how often an agent needed you and how fast it was
+  answered (within a minute, ten, an hour, or later) and whether on this computer or a phone, what
+  was done from a phone (visits, approvals, messages, agents started; counted by this computer, the
+  phone apps still send nothing), whether AI Assist's suggestions were kept or dismissed, bots'
+  answers by platform and whether you approved, edited or turned them down, and first times on this
+  computer (the first agent, meeting, dictation, phone paired, Chief of Staff, Studio file, bot
+  answer), each counted once. And how many of the last four weeks Bridge AI was used (1 to 4): your
+  computer keeps the weeks it was used to say so, and never sends them.
 - **Once a day**, after the day is over: the version it ran, the one it updated from that day if it
   did, its update channel, rollout bucket and account's id as above, the operating system and
   how it's installed, how many times it started (a range), whether something crashed, and how long
@@ -485,7 +501,8 @@ copy of each report sent is kept in `~/.bridge-ai/telemetry/sent`.
 
 The server sees your IP address when a report arrives, as any website does; it doesn't read or
 store it, and its logs are off. It keeps only totals: how many reports said each thing (a version, a
-system, a feature on, a count's range), each answer counted on its own rather than together (the
+system, a feature on, a count's range), the week's sum of each number sent as a total and how many
+reports sent one, each answer counted on its own rather than together (the
 update channel, tester and rollout bucket are kept with the version, and with whether it crashed
 that day, and nothing else), never a report as it came, and each report's random number for ten weeks, so one sent twice counts once.
 Because reports carry no ID, one already sent can't be found again to delete. If the project stops

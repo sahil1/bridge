@@ -5,6 +5,7 @@ import { api } from '../../../api.js'
 import { t, tx } from '../../../i18n/index.js'
 import { base64 } from '../files.js'
 import { W, H, LAYOUTS, LOOKS, colorsOf, fontStack } from '../deck.js'
+import { assistKept } from '../../../counts.js'
 
 // The deck editor's parts: a slide drawn at a size, the menus and galleries of its toolbar,
 // presenting, and writing slides with AI.
@@ -350,7 +351,7 @@ export function AiPanel({ file, getSlides, at, mode, setMode, draw, onKeep, onCl
       if (x.name !== 'AbortError') setErr({ text: x.message, noModel: x.code === 'noModel' })
     } finally { setBusy(null) }
   }
-  const keep = (how) => { onKeep({ mode: result.mode, slides: result.slides, at: result.at, how }); setResult(null); setPrompt('') }
+  const keep = (how) => { assistKept('studio', true); onKeep({ mode: result.mode, slides: result.slides, at: result.at, how }); setResult(null); setPrompt('') }
   const modelName = (id) => models?.find((m) => m.id === id)?.label || id
   const quick = QUICK[mode] || []
   return (
@@ -414,7 +415,7 @@ export function AiPanel({ file, getSlides, at, mode, setMode, draw, onKeep, onCl
               </>
             ) : <button type="button" className="btn small primary" onClick={() => keep(result.mode === 'add' ? 'after' : 'replace')}><Icon name="check" size={12} /> {result.mode === 'add' ? t('Add it') : t('Keep it')}</button>}
             <button type="button" className="ghost-btn" onClick={(e) => go(e, true)}><Icon name="refresh" size={12} /> {t('Try again')}</button>
-            <button type="button" className="ghost-btn" onClick={() => setResult(null)}>{t('Discard')}</button>
+            <button type="button" className="ghost-btn" onClick={() => { assistKept('studio', false); setResult(null) }}>{t('Discard')}</button>
           </div>
           <p className="muted small">{result.mode === 'slide' ? t('Kept, it takes the place of slide {n}. Undo puts it back.', { n: result.at + 1 }) : t('Undo takes it back out.')}</p>
         </div>

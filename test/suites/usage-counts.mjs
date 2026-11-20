@@ -27,10 +27,14 @@ const AREAS = Object.keys(SCHEMA.amounts).filter((k) => k.startsWith('time.area.
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : /\.(m?js|jsx)$/.test(e.name) ? [path.join(d, e.name)] : []))
   const used = new Set()
   for (const f of [...walk(path.join(ROOT, 'server')), ...walk(path.join(ROOT, 'src')), ...walk(path.join(ROOT, 'shared'))]) {
-    for (const m of fs.readFileSync(f, 'utf8').matchAll(/counts\.(?:add|most)\(\s*(?:'([^']+)'|([^,)]+\?[^)]*))/g)) {
+    const text = fs.readFileSync(f, 'utf8')
+    for (const m of text.matchAll(/counts\.(?:add|most)\(\s*(?:'([^']+)'|([^,)]+\?[^)]*))/g)) {
       if (m[1]) used.add(m[1])
       else for (const q of m[2].matchAll(/'([^']+)'/g)) used.add(q[1])
     }
+    // A first-time milestone (counts.first('agent')), and AI Assist kept or dismissed (assistKept('studio', …), src/counts.js).
+    for (const m of text.matchAll(/counts\.first\(\s*'([^']+)'/g)) used.add(`firsts.${m[1]}`)
+    for (const m of text.matchAll(/assistKept\(\s*'([^']+)'/g)) { used.add(`assist.accepted.${m[1]}`); used.add(`assist.dismissed.${m[1]}`) }
   }
   const off = [...used].filter((n) => !NAMES.has(n))
   ok(used.size >= 10 && off.length === 0, 'every name the code counts is on the public list (shared/telemetry-schema.json)', { used: [...used], off })
@@ -46,7 +50,7 @@ const AREAS = Object.keys(SCHEMA.amounts).filter((k) => k.startsWith('time.area.
   const fam = Object.fromEntries(['claude-opus-5-5', 'sonnet[1m]', 'gpt-5-codex', 'gpt-5.1', 'o4-mini', 'gemini-2.5-pro', 'gemini-3-flash', 'gemma-4-e2b', 'llama3.2', 'qwen2.5-coder:7b', 'acme-billing-tuned', ''].map((m) => [m, familyOf(m)]))
   ok(JSON.stringify(Object.values(fam)) === JSON.stringify(['claude-opus', 'claude-sonnet', 'codex', 'gpt-5', 'o-series', 'gemini-pro', 'gemini-flash', 'gemma', 'llama', 'qwen', 'other', 'other']), 'a model is counted as its family, and a name off the list (a model of your own) only as other', fam)
   ok(SCHEMA.dayTimeRanges.join() === '0,under 5 minutes,5-15 minutes,15-30 minutes,30-60 minutes,1-2 hours,2-4 hours,4-8 hours,8+ hours' && [0, 1, 14, 15, 59, 60, 239, 480].map(minuteRange).join() === '0,under 5 minutes,5-15 minutes,15-30 minutes,30-60 minutes,1-2 hours,2-4 hours,8+ hours', 'a day\'s time in use goes as a range of minutes, never the minutes')
-  ok(SCHEMA.buckets.join() === '0,1,2-5,6-20,21-100,100+' && Object.keys(SCHEMA.report).join() === 'schema,week,app,channel,tester,rollout,os,osVersion,arch,chip,memory,cores,install,layout,runtime,phone,phones,computers,installAge,daysActive,activeTime,openTime,features,agents,counts,amounts,nonce' && kinds.filter((k) => k !== 'chat').every((k) => SCHEMA.agents.includes(k)) && SCHEMA.timeRanges.join() === '0,under 1 hour,1-5 hours,5-10 hours,10-20 hours,20-40 hours,40+ hours', 'the list says what a report has, field by field, and its ranges (counts, and time in use and open)')
+  ok(SCHEMA.buckets.join() === '0,1,2-5,6-20,21-100,100+' && Object.keys(SCHEMA.report).join() === 'schema,week,app,channel,tester,rollout,os,osVersion,arch,chip,memory,cores,install,layout,runtime,phone,phones,computers,installAge,daysActive,recentWeeks,activeTime,openTime,features,agents,counts,amounts,totals,nonce' && kinds.filter((k) => k !== 'chat').every((k) => SCHEMA.agents.includes(k)) && SCHEMA.timeRanges.join() === '0,under 1 hour,1-5 hours,5-10 hours,10-20 hours,20-40 hours,40+ hours', 'the list says what a report has, field by field, and its ranges (counts, and time in use and open)')
 }
 process.env.BRIDGE_HOME = path.join(os.tmpdir(), `bridge-counts-rules-${process.pid}`)
 const c = await import('../../server/counts.js')
@@ -54,6 +58,17 @@ ok([0, 1, 2, 5, 6, 20, 21, 100, 101, 5000].map(c.bucket).join() === '0,1,2-5,2-5
 ok([0, 1, 59, 60, 299, 300, 599, 600, 1199, 1200, 2399, 2400, 9000].map(c.timeRange).join() === SCHEMA.timeRanges.flatMap((r, i) => (i ? [r, r] : [r])).join(), 'time goes in ranges: 0, under 1 hour, 1-5, 5-10, 10-20, 20-40, 40+ hours')
 ok([0, 1, 99999, 1e5, 999999, 1e6, 9999999, 1e7, 99999999, 1e8, 999999999, 1e9, 5e10].map(c.tokenRange).join() === SCHEMA.tokenRanges.flatMap((r, i) => (i ? [r, r] : [r])).join(), 'tokens go in ranges: 0, under 100K, 100K-1M, 1-10M, 10-100M, 100M-1B, 1B+')
 ok([0, 1, 99, 100, 999, 1000, 4999, 5000, 19999, 20000, 90000].map(c.wordRange).join() === SCHEMA.wordRanges.flatMap((r, i) => (i ? [r, r] : [r])).join(), 'words dictated go in ranges: 0, under 100, 100-1K, 1K-5K, 5K-20K, 20K+')
+ok([3417882, 7.25, 1284, 0.123, 99, 0].map(c.twoFigures).join() === '3400000,7.3,1300,0.12,99,0', 'a total goes rounded to two significant figures', [3417882, 7.25, 1284, 0.123, 99, 0].map(c.twoFigures))
+{
+  const v = Object.fromEntries(['claude-opus-5-5', 'gpt-5.1', 'o4-mini', 'gemini-3-flash', 'gemma-4-e2b', 'grok-4', 'llama3.2', 'gpt-oss-20b', 'acme-billing-tuned'].map((m) => [m, c.vendorOf(m)]))
+  const fams = Object.keys(SCHEMA.modelFamilies).filter((k) => k !== 'about')
+  const listed = Object.entries(SCHEMA.vendors).filter(([k]) => k !== 'about').flatMap(([, f]) => f)
+  ok(JSON.stringify(Object.values(v)) === JSON.stringify(['anthropic', 'openai', 'openai', 'google', 'google', 'xai', 'open', 'open', 'other']) && fams.every((f) => listed.includes(f)) && Object.keys(SCHEMA.vendors).filter((k) => k !== 'about').every((k) => SCHEMA.amounts[`tokens.vendor.${k}`]), 'tokens by vendor: every model family has one, each with its amount on the list', { v, missing: fams.filter((f) => !listed.includes(f)) })
+  const reasons = ['notInstalled', 'signIn', 'other'].map((r) => `fail.agent.${r}`).concat(['key', 'limit', 'timeout', 'other'].map((r) => `fail.model.${r}`), ['fail.speech', 'fail.relay', 'fail.update'], ['claude', 'codex', 'gemini', 'other'].map((k) => `limits.${k}`), ['1m', '10m', '1h'].map((t) => `needs.within.${t}`), ['needs.later', 'needs.answered.phone', 'needs.answered.desktop'], ['slack', 'discord', 'teams', 'other'].map((p) => `bots.answered.${p}`))
+  ok(reasons.every((n) => NAMES.has(n)), 'failures by reason, limits by agent, how fast Needs You was answered and where, and bots\' answers by platform each have their counter', reasons.filter((n) => !NAMES.has(n)))
+  const why = [{ code: 'limit' }, new Error('429 Too Many Requests'), new Error('401 Unauthorized: invalid x-api-key'), Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }), new Error('socket hang up')].map(c.failReason)
+  ok(why.join() === 'limit,limit,key,timeout,other', 'a failed answer is counted by why: a limit, the key, too long, or another reason', why)
+}
 {
   const amounts = Object.entries(SCHEMA.amounts).filter(([k]) => k !== 'about')
   const off = amounts.filter(([, v]) => !['tokenRanges', 'timeRanges', 'wordRanges'].includes(v.ranges) || !v.about).map(([k]) => k)
@@ -92,7 +107,7 @@ ok([0, 1, 99, 100, 999, 1000, 4999, 5000, 19999, 20000, 90000].map(c.wordRange).
     process.exit(0)`
   let got = null
   try { got = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, BRIDGE_HOME: path.join(tmp, 'data'), CLAUDE_CONFIG_DIR: path.join(tmp, 'claude'), CODEX_HOME: path.join(tmp, 'codex') }, encoding: 'utf8' }).trim().split('\n').at(-1)) } catch (e) { got = String(e.stderr || e.message).slice(0, 600) }
-  ok(got?.claude === 3500 && got.codex === 0, 'tokens agents used for Bridge AI: a conversation it ran, while it ran it (in, the cache read and out), and nothing else', got)
+  ok(got?.claude?.tokens === 3500 && got.claude.byModel['claude-sonnet-4-5'] === 3500 && got.codex?.tokens === 0, 'tokens agents used for Bridge AI: a conversation it ran, while it ran it (in, the cache read and out), by model, and nothing else', got)
   fs.rmSync(tmp, { recursive: true, force: true })
 }
 ok(c.weekOf(new Date(2026, 9, 31)) === '2026-W44' && c.weekOf(new Date(2026, 0, 1)) === '2026-W01' && c.weekOf(new Date(2027, 0, 1)) === '2026-W53' && c.weekOf(new Date(2026, 10, 2)) === '2026-W45', 'weeks are ISO weeks (Monday to Sunday, the year their Thursday is in)')
@@ -185,11 +200,25 @@ try {
   const a1 = await k.api('/counts/active', { area: 'meetings' })
   const a2 = await k.api('/counts/active', { area: 'studio' })
   await k.api('/dictations', { text: 'Send Priya the acme-billing numbers before Friday' })
+  // Needs You (the fleet is watched while a window is open, so one is: the events stream): an agent
+  // asking counted once it needs you, then answered here within a minute.
+  const feed = new AbortController()
+  fetch(`${k.url}/api/events`, { headers: { Accept: 'text/event-stream' }, signal: feed.signal }).then(async (r) => { for await (const _ of r.body) { /* read, so it stays open */ } }).catch(() => {})
+  const asking = await k.api('/agents/launch', { kind: 'claude', cwd: path.join(k.home, 'code', 'acme-billing'), label: 'Deploy', newSpace: 'acme-billing', prompt: 'ask npm run deploy' })
+  const waited = await until(async () => (await k.api('/fleet')).agents.some((a) => a.paneId === asking.paneId && a.status === 'blocked'), 20000)
+  await new Promise((r) => setTimeout(r, 2500)) // (a look at the fleet sees it waiting)
+  await k.api(`/agents/${encodeURIComponent(asking.paneId)}/keys`, { keys: ['1'] })
+  const carried = await until(async () => (await k.api('/fleet')).agents.some((a) => a.paneId === asking.paneId && a.status !== 'blocked'), 20000)
+  await new Promise((r) => setTimeout(r, 2500))
+  feed.abort()
   await new Promise((r) => setTimeout(r, 600))
   const p1 = await k.api('/counts/preview')
   const r1 = p1.report
   ok(a1.counted === true && a2.counted === false && r1.activeTime === 'under 1 hour' && r1.openTime === 'under 1 hour', 'on: a minute in use is counted once however many windows say so, and the minutes it runs are counted, each sent as a range', { a1, a2, active: r1.activeTime, open: r1.openTime })
   ok(r1.amounts['time.area.meetings'] === 'under 1 hour' && !r1.amounts['time.area.studio'] && r1.amounts['words.dictated'] === 'under 100' && r1.counts['dictations.saved'] === '1' && !JSON.stringify(r1.amounts).includes('Priya'), 'and the part of Bridge AI it was in, and the words dictated, each as a range (never the words)', r1.amounts)
+  ok(JSON.stringify(r1.totals) === JSON.stringify({ 'words.dictated': 7 }) && r1.recentWeeks === 1, 'the words dictated as a total too (rounded to two figures), and one week used of the last four', { totals: r1.totals, recentWeeks: r1.recentWeeks })
+  ok(r1.counts['firsts.agent'] === '1' && r1.counts['firsts.dictation'] === '1' && r1.counts['firsts.chief'] === '1', 'and the first agent, dictation and Chief of Staff task on this computer, once each (three agents started, one first)', r1.counts)
+  ok(waited && carried && r1.counts['needs.raised'] === '1' && r1.counts['needs.answered.desktop'] === '1' && r1.counts['needs.within.1m'] === '1' && !r1.counts['needs.answered.phone'] && !r1.counts['phone.approvals'], 'an agent that needed you: counted once, and answered on this computer within a minute', { waited, carried, counts: r1.counts })
   ok(p1.share && p1.goes === 'after this week' && r1.counts['agents.started.claude'] === '2-5' && r1.counts['agents.model.default'] === '2-5' && r1.counts['errors.window'] === '2-5' && r1.counts['chief.tasks'] === '1' && r1.daysActive === 1 && r1.installAge === 'week 1', 'on: what would be sent is this week so far, in ranges (agents started, on their own default model, errors, a task)', p1)
   ok(got.length === 0 && weekFiles(k.data).length === 1, 'kept on this computer until the week is over', { got, files: weekFiles(k.data) })
   const gone = async (kit) => { kit.stop(); await until(async () => !(await fetch(`${kit.url}/api/config`).then(() => true, () => false)), 10000, 100) }
@@ -217,6 +246,7 @@ try {
   await new Promise((r) => setTimeout(r, 600))
   const p2 = await next.api('/counts/preview')
   ok(p2.report?.nonce && p2.report.nonce !== sent.nonce && p2.report.week !== sent.week, 'next week\'s report has a nonce of its own: nothing ties the two together', [p2.report?.nonce, sent.nonce])
+  ok(p2.report.recentWeeks === 2 && !p2.report.counts['firsts.agent'] && p2.report.counts['agents.started.claude'], 'it says two of the last four weeks were used, and a first agent isn\'t counted again', { recentWeeks: p2.report.recentWeeks, counts: p2.report.counts })
   await gone(next)
 
   // The endpoint says stop: sharing turns off, and says why.

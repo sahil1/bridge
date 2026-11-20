@@ -584,6 +584,7 @@
   "Also sign in {names}?": "{names} もサインインしますか？",
   "Also under a meeting's transcript. Heard on this computer.": "ミーティングの文字起こしの下にも表示されます。このコンピューター上で聞き取ります。",
   "Also undo file changes since then": "それ以降のファイルの変更も元に戻す",
+  "Also what didn't work and why, how fast agents waiting on you were answered, what was done from a phone and whether AI Assist's suggestions were kept; and the tokens, hours, words and minutes of speech as numbers rounded to two figures, which the server only adds to the week's total.": "また、うまくいかなかったこととその理由、あなたを待っていたエージェントにどれだけ早く答えたか、スマートフォンから何をしたか、AI Assist の提案を残したかどうか。そしてトークン、時間、単語数、音声の分数を有効数字2桁に丸めた数値で送ります。サーバーはそれを週の合計に足すだけです。",
   "Always": "無期限",
   "Always Allow": "常に許可",
   "Always Waits for You": "常にあなたの確認を待つもの",

@@ -7,6 +7,7 @@ import { describe, applyOps } from './convert.js'
 import { reroute } from './layout.js'
 import { fontsReady } from './look.js'
 import { before, mark, markOf, keep as keepIt, discard as discardIt } from './suggest.js'
+import { assistKept } from '../../counts.js'
 
 // Comments on a whiteboard, as threads (Comments and @bridge): on the shapes
 // picked, or on a place on the board when nothing is. Each thread is a pin on the board, a small
@@ -186,7 +187,7 @@ export function useBoardThreads({ board, on, author, look = 'clean', onOpen }) {
     const ids = rootId ? [sugOf(rootId)?.id].filter(Boolean) : threads.map((th) => sugOf(th.id)?.id).filter(Boolean)
     let els = ex.getSceneElementsIncludingDeleted()
     for (const id of ids) els = (keep ? keepIt : discardIt)(X, els, id)
-    if (ids.length) ex.updateScene({ elements: els, captureUpdate: X.CaptureUpdateAction.IMMEDIATELY })
+    if (ids.length) { assistKept('board', keep); ex.updateScene({ elements: els, captureUpdate: X.CaptureUpdateAction.IMMEDIATELY }) }
   }
   const suggestion = (rootId) => { const s = sugOf(rootId); return s ? { note: s.n === 1 ? t('1 shape, dashed on the board') : t('{n} shapes, dashed on the board', { n: s.n }) } : null }
   const suggestions = () => threads.filter((th) => sugOf(th.id)).length

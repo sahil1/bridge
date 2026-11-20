@@ -584,6 +584,7 @@
   "Also sign in {names}?": "¿Iniciar sesión también en {names}?",
   "Also under a meeting's transcript. Heard on this computer.": "También debajo de la transcripción de una reunión. Se escucha en este ordenador.",
   "Also undo file changes since then": "Deshacer también los cambios en archivos desde entonces",
+  "Also what didn't work and why, how fast agents waiting on you were answered, what was done from a phone and whether AI Assist's suggestions were kept; and the tokens, hours, words and minutes of speech as numbers rounded to two figures, which the server only adds to the week's total.": "También lo que no funcionó y por qué, cuán rápido se respondió a los agentes que te esperaban, lo que se hizo desde un teléfono y si se conservaron las sugerencias de AI Assist; y los tokens, horas, palabras y minutos de voz como números redondeados a dos cifras, que el servidor solo suma al total de la semana.",
   "Always": "Siempre",
   "Always Allow": "Permitir siempre",
   "Always Waits for You": "Siempre te espera",

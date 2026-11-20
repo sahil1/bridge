@@ -26,6 +26,12 @@ project. Each Bridge AI with sharing on sends it one report per week, once the w
   - `counts`: one row per week, counter, range, OS and how long installed, with `n`. A week's
     amounts (tokens, hours of meetings recorded, words dictated, time in each part of Bridge AI) go
     here too, each with the range it was in (`tokenRanges`, `timeRanges`, `wordRanges`).
+  - `totals`: one row per week and amount marked `total` (tokens, minutes of meetings and of
+    speech, words dictated): the sum of the numbers reports gave, each rounded to two significant
+    figures by Bridge AI and again here, and `reports`, how many gave one. A number over the most a
+    week's can be (a trillion tokens, 100,000 minutes, ten million words) is dropped.
+  - How many of the last four weeks a report's computer used Bridge AI (`recentWeeks`, 1 to 4) is
+    in `dims`, as its own total.
   - `seen`: the nonces of the last ten weeks, with the day each arrived.
 
   A report as it came is never stored. The IP address isn't read, and the Worker's logs are off

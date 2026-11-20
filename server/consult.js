@@ -197,6 +197,8 @@ export async function oneShot(kind, prompt, model, extraEnv = {}, signal) {
     try { return await runOnce(kind, prompt, model, { ...(id ? accounts.envFor(kind, id) : {}), ...extraEnv }, signal) } catch (e) {
       if (e.code !== 'limit') throw e
       last = e
+      // Usage stats: on to your next account, because this one's at its limit.
+      if (id !== ids[ids.length - 1]) counts.add('accounts.switched.auto').catch(() => {})
     }
   }
   if (ids.length > 1) throw Object.assign(new Error(`${adapter(kind).label} is at its usage limit on all ${ids.length} of your accounts (${last.said})`), { code: 'limit', said: last.said })
@@ -293,7 +295,7 @@ export async function search(question, { feature = 'assist' } = {}) {
   if (!searchVia()) throw new Error('No web search is set up: add a Perplexity key in Settings › Model Providers.')
   // (What a refusal says, without consult's tip on picking another model: a key turned down isn't that.)
   const r = await runApi('perplexity', `Answer in one to three plain sentences, from what the web says now: ${q}`, conf.consult?.models?.perplexity, feature, SEARCH_MS)
-    .catch((e) => { throw new Error(String(e.message).replace(/\.? Set another model with [\s\S]*$/, '').replace(/\.?$/, '.')) })
+    .catch((e) => { counts.modelFailed(counts.failReason(e)).catch(() => {}); throw new Error(String(e.message).replace(/\.? Set another model with [\s\S]*$/, '').replace(/\.?$/, '.')) })
   if (!r.said) throw new Error(`${API.perplexity.label} (${r.model}) sent back no answer`)
   return { text: r.said, links: r.links, via: 'Perplexity', model: r.model }
 }
@@ -312,13 +314,14 @@ export async function ask({ who, prompt, model, via, env, feature = 'consult' },
   const useCli = via ? via === 'cli' : opt.via === 'cli'
   const started = Date.now()
   if (useCli && c.cli) {
-    const r = await oneShot(c.cli, q, model, env && typeof env === 'object' ? env : {})
+    // (One that failed is counted in the usage stats, by why; reply() counts its own.)
+    const r = await oneShot(c.cli, q, model, env && typeof env === 'object' ? env : {}).catch((e) => { counts.modelFailed(counts.failReason(e)).catch(() => {}); throw e })
     usagelog.record({ id: `cli:${c.cli}`, feature, usage: r.usage, ms: Date.now() - started })
     counts.answered(`cli:${c.cli}`, feature, r.usage?.model || model).catch(() => {})
     return { who: c.id, via: 'cli', route: opt.route, model: model || null, text: r.text, ms: Date.now() - started }
   }
   if (c.api && (via === 'api' || opt.via === 'api' || !c.cli)) {
-    const r = await runApi(c.api, q, model || cfg.consult?.models?.[c.api], feature)
+    const r = await runApi(c.api, q, model || cfg.consult?.models?.[c.api], feature).catch((e) => { if (!API[c.api].local) counts.modelFailed(counts.failReason(e)).catch(() => {}); throw e })
     return { who: c.id, via: 'api', route: r.route || API[c.api].label, model: r.model, text: r.text, ms: Date.now() - started }
   }
   throw new Error(`${c.label} isn't available: ${opt.route}`)

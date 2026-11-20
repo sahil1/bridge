@@ -60,6 +60,7 @@ import { loginPath, which } from './agents.js'
 import { bundle } from '../relay/build.js'
 import { computerWelcome, computerShareWelcome, newPairCode, splitCode, formatCode, plainFrame, readPlain, b64u, boxId, K, pack, unpack, json, utf8, CHUNK, moreOf } from '../relay/web/link.js'
 import * as inbox from './inbox.js'
+import * as counts from './counts.js'
 import * as shares from './shares.js'
 import { LIMITS as SHARE_LIMITS } from '../shared/shares.js'
 import { authHeaders, localKey } from './apitoken.js'
@@ -248,6 +249,8 @@ export function start(serverBase) {
   if (!conf.url) setTimeout(maybeAuto, 20000).unref()
 }
 
+// Usage stats: the relay down, counted once until it connects again (fail.relay).
+let relayDown = false
 function connect() {
   clearTimeout(retry)
   if (!conf.url || !conf.token) return
@@ -271,10 +274,13 @@ function connect() {
   const ws = new WebSocket(`${conf.url.replace(/^http/, 'ws').replace(/\/$/, '')}/_relay/host`, { headers: { Authorization: `Bearer ${conf.token}`, ...(conf.hosted ? { 'X-Bridge-Version': VERSION, 'X-Relay-Token': relayToken } : {}) }, handshakeTimeout: 15000, ...(onThisComputer(conf.url) ? { lookup: loopback } : {}) })
   link = ws
   failed = null
+  let opened = false // (usage stats: a try that never connected, once each time the relay is down)
   let heard = Date.now() // when the relay last sent anything
   let asked = 0 // when the last ping went out
   ws.on('open', () => {
     online = true
+    opened = true
+    relayDown = false
     lastError = null
     limit = null
     backoff = FIRST_TRY
@@ -328,6 +334,7 @@ function connect() {
   })
   ws.on('close', () => {
     if (link !== ws) return
+    if (!opened && failed && !relayDown) { relayDown = true; counts.add('fail.relay').catch(() => {}) }
     online = false
     clearInterval(pinger)
     for (const c of conns.values()) c.end()
@@ -769,6 +776,8 @@ class Conn {
     if (p?.code) p.code.paired = { id: device.id, name: device.name, kind: device.kind || 'phone', at: Date.now() }
     this.device = device
     device.lastSeen = new Date().toISOString()
+    // Usage stats: a phone's visit (a linked computer's link isn't one).
+    if (device.kind !== 'computer') counts.phoneVisit(device.id).catch(() => {})
     // Since this computer moved: one that reached the address it left is told the new one (MOVE);
     // one seen here has moved, and once all have, the old address goes.
     const m = conf.moved

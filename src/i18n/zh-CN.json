@@ -584,6 +584,7 @@
   "Also sign in {names}?": "同时登录 {names}？",
   "Also under a meeting's transcript. Heard on this computer.": "也在会议转录下方。在这台电脑上识别。",
   "Also undo file changes since then": "同时撤销此后的文件更改",
+  "Also what didn't work and why, how fast agents waiting on you were answered, what was done from a phone and whether AI Assist's suggestions were kept; and the tokens, hours, words and minutes of speech as numbers rounded to two figures, which the server only adds to the week's total.": "还有哪些没成功以及原因、等待你的智能体多快得到回复、在手机上做了什么、AI Assist 的建议是否被保留；以及 token、小时、字数和语音分钟数，四舍五入到两位有效数字，服务器只把它们加到当周的总数里。",
   "Always": "永久",
   "Always Allow": "始终允许",
   "Always Waits for You": "始终等你确认",

@@ -445,6 +445,7 @@ async function run(job) {
     const file = path.join(dir, `${round(job.t0)}-${job.src}-${round(job.t1)}.wav`)
     if (!job.retry) fs.writeFileSync(file, wav(job.pcm))
     patchMeta(job.id, { error: e.message })
+    counts.add('fail.speech')
   }
 }
 // The names an engine that takes them rather than a prompt (Parakeet) listens for, one by one: who
@@ -2834,6 +2835,9 @@ export function markAssist(id, aid, state) {
   if (!x) throw new Error('No such suggestion')
   if (!['kept', 'dismissed', 'new'].includes(state)) throw new Error('Keep it or dismiss it')
   if (state === 'kept' && x.state !== 'kept') quickNote(id, x.kind === 'answer' ? answerNote(x) : `${KIND_WORD[x.kind] || 'Idea'}: ${x.text}`, x.kind === 'answer' ? x.t : null)
+  // Usage stats: AI Assist's suggestion in a meeting, kept or dismissed (not the same twice).
+  const kept = state === 'kept'
+  if (state !== 'new' && x.state !== state) counts.add(kept ? 'assist.accepted.meetings' : 'assist.dismissed.meetings').catch(() => {})
   x.state = state
   writeFileAtomic(assistFile(id), JSON.stringify(a, null, 1))
   return a

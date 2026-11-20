@@ -192,23 +192,26 @@ function whoRan({ spans, firsts, all }, b0, b1) {
 // minutes of each conversation it was seen live in one of Bridge AI's panes, or answering a
 // question Bridge AI asked it (accounts.js runs()). Only those conversations' logs are read (none,
 // when it ran none), with a state of their own, so Usage's days aren't read again for it.
+// { tokens, byModel: { model: tokens } }.
 const forCounts = { claude: new Map(), codex: new Map() }
 export async function viaBridge(kind, from, to) {
   if (!forCounts[kind]) return 0
   const { runs } = accounts.runs()
   const ran = (sid, b0, b1) => (runs[sid] || []).some(([id, a, z]) => String(id).startsWith(`${kind}-`) && a - SLACK < b1 && z + SLACK > b0)
   const sids = Object.keys(runs).filter((sid) => ran(sid, from, to))
-  if (!sids.length) { forCounts[kind].clear(); return 0 }
+  const out = { tokens: 0, byModel: {} }
+  if (!sids.length) { forCounts[kind].clear(); return out }
   const logs = await read(kind, from - STEP, forCounts[kind], (file) => sids.some((sid) => file.includes(sid)))
-  let n = 0
   for (const st of logs) {
     for (const [k, c] of st.cells) {
-      const [sid, , b] = k.split('\t')
+      const [sid, model, b] = k.split('\t')
       const b0 = Number(b) * STEP
-      if (b0 >= from && b0 < to && ran(sid, b0, b0 + STEP)) n += c[0]
+      if (!(b0 >= from && b0 < to && ran(sid, b0, b0 + STEP))) continue
+      out.tokens += c[0]
+      out.byModel[model] = (out.byModel[model] || 0) + c[0]
     }
   }
-  return n
+  return out
 }
 
 // For Insights (insights.js): which account ran a conversation in the five minutes from b0, by

@@ -4,6 +4,7 @@ import { api } from '../../api.js'
 import { threadsOf, AI_AUTHOR } from './wordcomments.js'
 import { mentions, requestOf, askOf } from './doccomments.jsx'
 import { deckComments, deckGuid } from './pptxdoc.js'
+import { assistKept } from '../../counts.js'
 
 // Comments on a PowerPoint's slides, as threads (Comments and @bridge): a comment on
 // the slide shown, or on the shape picked on it, replies, resolved and opened again, deleted, all
@@ -113,6 +114,7 @@ export function useDeckThreads({ doc, on, author, file, dirty, deck }) {
     for (const id of ids) {
       const sg = sugsRef.current[id]
       if (!sg) continue
+      assistKept('studio', keep)
       if (keep) {
         if (sg.kind === 'text') deck.keepText(sg.slide, sg.shape, sg.text)
         else {
