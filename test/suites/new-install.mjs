@@ -34,9 +34,17 @@ const signedOut = (k) => {
 const standInSignIns = (k) => { k.program('open', fs.readFileSync(path.join(TEST, 'stand-ins', 'open.cjs'), 'utf8')); fs.writeFileSync(path.join(k.home, 'claude-login.json'), '{}'); signedOut(k) }
 const noSignInPages = (c) => c.route(/^https:\/\/(claude\.com|claude\.ai|platform\.claude\.com|auth\.openai\.com)\//, (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<title>A sign-in page (a test)</title>' }))
 const signInTabs = async (k) => ((await k.api('/fleet')).tabs || []).filter((x) => /^Sign in: /.test(x.label))
-// What a sign-in's tab shows last (when it didn't close as it should have).
-// eslint-disable-next-line no-control-regex
-const tabsSay = async (k) => Promise.all((await signInTabs(k)).map(async (x) => (await k.api(`/agents/${encodeURIComponent(x.panes?.[0]?.paneId)}/screen?lines=12`).catch(() => ({}))).ansi?.replace(/\x1b\][^\x07]*\x07|\x1b\[[0-9;?]*[A-Za-z]/g, '').split(/\r?\n/).filter((l) => l.trim()).slice(-6)))
+// What a sign-in's tab shows last (when it didn't close as it should have): the last lines of its
+// screen that say anything (a screen's bottom rows are empty while what ran is near its top; read as
+// 12 rows, Windows' failures said only [[]]), and whether Bridge AI has it signed in and done, the
+// two things its tab closes on (the shell's prompt back, and signed in).
+const tabsSay = async (k) => Promise.all((await signInTabs(k)).map(async (x) => {
+  const pane = x.panes?.[0]?.paneId
+  // eslint-disable-next-line no-control-regex
+  const screen = (await k.api(`/agents/${encodeURIComponent(pane)}/screen?lines=200`).catch(() => ({}))).ansi?.replace(/\x1b\][^\x07]*\x07|\x1b\[[0-9;?]*[A-Za-z]/g, '').split(/\r?\n/).filter((l) => l.trim()).slice(-6)
+  const said = await k.api(`/signins/${encodeURIComponent(pane)}`).catch((e) => ({ error: e.message }))
+  return { screen, signedIn: said.signedIn ?? null, done: said.done ?? null, ...(said.error ? { error: said.error } : {}) }
+}))
 // And an agent's terminal (when its first run in Chat didn't move on).
 // eslint-disable-next-line no-control-regex
 const screenOf = (k, pane) => k.api(`/agents/${encodeURIComponent(pane)}/screen?lines=12`).then((s) => s.ansi?.replace(/\x1b\][^\x07]*\x07|\x1b\[[0-9;?]*[A-Za-z]/g, '').split(/\r?\n/).filter((l) => l.trim()).slice(-8), (e) => e.message)

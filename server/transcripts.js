@@ -82,6 +82,14 @@ export function locate(kind, sessionId, cwd) {
   return file
 }
 
+// Whether an agent's conversation was ever written: true or false for an agent whose log Bridge AI
+// reads, null for one it can't tell. An agent closed before its first message (Claude Code is given
+// its session's id as it starts, and writes the log only then) has none to resume.
+export function written({ kind, sessionId, cwd }) {
+  if (kind !== 'claude' && kind !== 'codex' && kind !== 'chat' && !OTHER[kind]) return null
+  try { return !!locate(kind, String(sessionId || ''), String(cwd || '')) } catch { return null }
+}
+
 // The end of the file, as whole lines; `start` is where the first whole line begins.
 function readTail(file, bytes = TAIL_BYTES) {
   const { size } = fs.statSync(file)

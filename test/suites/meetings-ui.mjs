@@ -1084,7 +1084,10 @@ process.exit(1)`)
   if (which === 'chromium') {
     await cp.locator('.mt-view .mt-resume').first().click()
     const back = await until(async () => { const m = await api(`/meetings/${Y.id}`); return m.status === 'recording' && m }, 10000)
-    ok(!!back && back.resumedFrom === 6 && await cp.locator('.mt-recbar').isVisible().catch(() => false), 'Resume recording: the same meeting records again, with its recording bar', back && [back.status, back.resumedFrom])
+    // (The server says it records as soon as it's reopened; the page shows its bar once its own
+    // recorder is going, a moment later on a slow computer.)
+    const bar = await until(() => cp.locator('.mt-recbar').isVisible().catch(() => false), 10000, 200)
+    ok(!!back && back.resumedFrom === 6 && !!bar, 'Resume recording: the same meeting records again, with its recording bar', back && [back.status, back.resumedFrom, !!bar])
     const shownTime = (await cp.locator('.mt-recbar .mt-rectime').innerText().catch(() => '')).trim()
     ok(/^0:(0[6-9]|[1-5]\d)$/.test(shownTime) && (await cp.locator('.mt-view .mt-resume').count()) === 0, 'its time carries on from where it stopped', shownTime)
     await sleep(2500)
@@ -1178,7 +1181,9 @@ process.exit(1)`)
   if (which === 'chromium') {
     await carry.locator('button', { hasText: 'Resume recording' }).click()
     const back = await until(async () => { const m = await api(`/meetings/${K.id}`); return m.status === 'recording' && m }, 10000)
-    ok(!!back && back.resumedFrom >= 5 && !back.interrupted && (await api('/meetings')).meetings.filter((x) => x.title === 'Design sync').length === 1 && await cp.locator('.mt-recbar').isVisible().catch(() => false), 'Resume recording carries on in the same meeting: no second one', back && [back.status, back.resumedFrom])
+    const bar = await until(() => cp.locator('.mt-recbar').isVisible().catch(() => false), 10000, 200)
+    const designSyncs = (await api('/meetings')).meetings.filter((x) => x.title === 'Design sync').length
+    ok(!!back && back.resumedFrom >= 5 && !back.interrupted && designSyncs === 1 && !!bar, 'Resume recording carries on in the same meeting: no second one', back && [back.status, back.resumedFrom, { interrupted: back.interrupted || null, designSyncs, bar: !!bar }])
     await sleep(2000)
     await cp.locator('.mt-recbar button', { hasText: 'Stop' }).click()
     await until(async () => (await api(`/meetings/${K.id}`)).status === 'done', 15000)

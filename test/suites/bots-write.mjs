@@ -32,10 +32,44 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
-import { checks, until, sleep, browser, page, shot, phoneFaults, startModel, IS_WIN, ROOT } from '../lib/harness.mjs'
+import { checks, until, sleep, browser, page, shot, phoneFaults, startModel, IS_WIN, ROOT, OUT } from '../lib/harness.mjs'
 import { botKit, M, OWNER, openBot } from '../lib/bots.mjs'
 
-const { ok, done } = checks('bots-write')
+const { ok, skip, done } = checks('bots-write')
+
+// ---------- Its copy's top, closed, as root (botwrite.js stage, no server) ----------
+// On a Mac and Linux the top of a bot's staging copy is read-only, and that's tried with a file made
+// there: read-only doesn't stop root (Bridge AI in a Docker container), so as root no copy is made and
+// the run doesn't start, saying Bridge AI mustn't run as root. As root for real only when this test
+// runs as root; and everywhere, root stood in for (BRIDGE_TEST_ROOT: the read-only mark left off, as
+// root passes it).
+if (IS_WIN) skip('a bot\'s copy as root', 'Windows closes its copy\'s top with an access list, tried as its agent meets it, below')
+else {
+  const scratch = path.join(OUT, 'kits', `bots-write-unit-${process.pid}`)
+  fs.rmSync(scratch, { recursive: true, force: true })
+  fs.mkdirSync(path.join(scratch, 'home', 'Notes'), { recursive: true })
+  fs.writeFileSync(path.join(scratch, 'home', 'Notes', 'todo.md'), '# To do\n')
+  const was = { BRIDGE_HOME: process.env.BRIDGE_HOME, HOME: process.env.HOME }
+  process.env.BRIDGE_HOME = path.join(scratch, 'data')
+  process.env.HOME = path.join(scratch, 'home')
+  const bw = await import('../../server/botwrite.js')
+  for (const [k, v] of Object.entries(was)) { if (v === undefined) delete process.env[k]; else process.env[k] = v }
+  const folders = [{ path: path.join(scratch, 'home', 'Notes'), shown: '~/Notes' }]
+  const staged = (dir) => bw.stage({ folders, dir }).then((st) => ({ st }), (e) => ({ error: e.message, step: e.step }))
+  const asRoot = (r, dir) => /^Changing files needs Bridge AI not to run as root: a read-only folder doesn't stop root/.test(r.error || '') && r.step === 'stage' && !fs.existsSync(dir)
+  const mine = await staged(path.join(scratch, 'w1'))
+  if (process.getuid?.() === 0) ok(asRoot(mine, path.join(scratch, 'w1')), 'as root: no copy, and its run doesn\'t start, saying Bridge AI mustn\'t run as root', mine)
+  else {
+    skip('as root for real: no copy', 'this test isn\'t running as root')
+    const closed = !!mine.st && (() => { try { fs.writeFileSync(path.join(scratch, 'w1', 'beside.md'), ''); return false } catch { return true } })()
+    ok(closed && fs.existsSync(path.join(scratch, 'w1', 'Notes', 'todo.md')) && !fs.readdirSync(path.join(scratch, 'w1')).some((n) => n.startsWith('.bridge-probe-')), 'not as root: its copy made, nothing new can be made beside it, and the try left nothing there', { ...mine, st: !!mine.st })
+    await bw.tidy(mine.st)
+    process.env.BRIDGE_TEST_ROOT = '1'
+    const root = await staged(path.join(scratch, 'w2'))
+    delete process.env.BRIDGE_TEST_ROOT
+    ok(asRoot(root, path.join(scratch, 'w2')), 'as root (stood in for): no copy, and its run doesn\'t start, saying Bridge AI mustn\'t run as root', root)
+  }
+}
 const model = await startModel('bots-write')
 // Its server needs git for a folder that's a repository: on Windows the kit's PATH has only the
 // system's folders, so git's own is added (where this test finds it).
