@@ -35,9 +35,12 @@ export const shortPath = (p) => {
 // Rows follow herdr's tab order: an agent tab shows its agents, a shell-only tab
 // (dev servers, editors) shows as one row that opens the tab's panes.
 export function groupByWorkspace(fleet) {
-  const agents = fleet?.agents || []
-  const tabs = fleet?.tabs || []
-  return (fleet?.workspaces || []).map((w, i) => {
+  // (A bot's session pane is Bots › Sessions', never a row here.)
+  const bots = new Set((fleet?.botSessions || []).map((a) => a.paneId))
+  const agents = (fleet?.agents || []).filter((a) => !bots.has(a.paneId))
+  const tabs = (fleet?.tabs || []).filter((x) => !(x.panes?.length && x.panes.every((p) => bots.has(p.paneId))))
+  const spaces = (fleet?.workspaces || []).filter((w) => !bots.size || tabs.some((x) => x.workspaceId === w.id) || agents.some((a) => a.workspaceId === w.id) || !(fleet?.tabs || []).some((x) => x.workspaceId === w.id))
+  return spaces.map((w, i) => {
     const list = agents.filter((a) => a.workspaceId === w.id)
     const rows = []
     // herdr's own order (its tab numbers don't change when a tab is moved).

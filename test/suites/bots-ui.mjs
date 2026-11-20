@@ -97,7 +97,11 @@ function standIns() {
     // The fleet as the page first asks for it, never pushed after: the session's pane among the
     // fleet's bot sessions (left out of agents and the sidebar).
     await ctx.route(/\/api\/events$/, (r) => r.abort())
-    await changeAnswer(ctx, /\/api\/fleet$/, (j) => ({ ...j, agents: (j.agents || []).filter((a) => a.paneId !== pane), botSessions: (j.agents || []).filter((a) => a.paneId === pane) }))
+    // (As the server sends it: the pane, its tab and the Bot Runs space kept out of the sidebar's.)
+    await changeAnswer(ctx, /\/api\/fleet$/, (j) => {
+      const tabs = (j.tabs || []).filter((x) => !(x.panes || []).some((q) => q.paneId === pane))
+      return { ...j, agents: (j.agents || []).filter((a) => a.paneId !== pane), tabs, workspaces: (j.workspaces || []).filter((w) => w.label !== 'Bot Runs'), botSessions: (j.agents || []).filter((a) => a.paneId === pane).map((a) => ({ ...a, helper: { ...(a.helper || {}), session: 's1' } })) }
+    })
     await changeAnswer(ctx, /\/api\/connections$/, (j) => ({ ...j, connections: (j.connections || []).map((c) => ({ ...c, chief: st.chief ? { id: st.chief, name: st.chief === FD ? 'Front Desk' : 'Hiring' } : null, check: st.check, numConnections: st.others ? 2 : 1, others: st.others, linking: null, limited: st.limited, catchingUp: null })), coming: [{ id: 'telegram', name: 'Telegram' }] }))
     await ctx.route(/\/api\/connections\/[^/?]+$/, (r) => {
       const body = r.request().method() === 'PATCH' ? r.request().postDataJSON() : null
@@ -184,6 +188,7 @@ try {
     const row = p.locator('[data-setting="rail-bots"] .rail-nav-btn')
     ok(await shown(p, '[data-setting="rail-bots"] .rail-nav-btn', 15000) && (await row.innerText()).trim().startsWith('Bots'), 'the sidebar has one Bots row', await row.innerText().catch(() => ''))
     ok(!(await p.locator('.rail-bot-list, .rail-bots-head').count()), 'and no list of bots under a heading, as before')
+    ok(!/Hiring session|Bot Runs/.test(await p.locator('.rail').innerText()), 'a session\'s pane isn\'t in the sidebar\'s Spaces')
     await row.click()
     ok(await shown(p, '.bh[data-setting="bots-home"]'), 'Bots opens in the main area')
     const tabs = await p.locator('.bh-tabs [role="tab"]').allInnerTexts()
@@ -306,7 +311,7 @@ try {
     const ids = () => p.locator('[data-setting="bots-sessions"] [data-session]').evaluateAll((l) => l.map((e) => e.dataset.session))
     ok((await ids()).join() === 's1,s2,s3', 'what waits for you first, then idle, then closed', await ids())
     const row = await textOf(p, '[data-session="s1"]')
-    ok(/Who is interviewing today\?/.test(row) && /Hiring/.test(row) && /#hiring/.test(row) && /Dana/.test(row) && /Waiting for you: a reply to check/.test(row) && /4 turns/.test(row), 'a row: its words, bot, where, who, how it stands, its turns', row)
+    ok(/Who is interviewing today\?/.test(row) && /Hiring/.test(row) && /#hiring/.test(row) && /Dana/.test(row) && /Waiting for you/.test(row) && /4 turns/.test(row), 'a row: its words, bot, where, who, how it stands, its turns', row)
     await p.locator('[data-setting="bots-sessions"] select').nth(0).selectOption(FD)
     ok(!!(await until(async () => (await ids()).join() === 's2', 6000)) && S.st.calls.some((c) => c[0] === 'list' && c[1] === FD), 'by bot: asked of the server for Front Desk')
     await p.locator('[data-setting="bots-sessions"] select').nth(0).selectOption('')
@@ -329,7 +334,8 @@ try {
   await part('a session: its Thread', async () => {
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-bots', { detail: { session: 's1' } })))
     ok(await shown(p, '.bh-sv[data-session="s1"] .bh-turns'), 'a session opens at its Thread')
-    ok(/Waiting for you: a reply to check/.test(await textOf(p, '.bh-sv-meta')) && /3 of 240 min this turn/.test(await textOf(p, '.bh-sv-meta')), 'saying what waits for you, and how long it has run of its Longest Run', await textOf(p, '.bh-sv-meta'))
+    ok((await textOf(p, '.bh-sv-head .bh-chip')) === 'Waiting for you' && /Hiring\s*#hiring · Dana, Tester · 4 turns · 29 min/.test(await textOf(p, '.bh-sv-meta')), 'how it stands, a chip; bot, where, who, its turns and time in a line', await textOf(p, '.bh-sv-meta'))
+    ok(!/of 240 min/.test(await textOf(p, '.bh-sv-head')), 'and no time limit over it')
     ok((await p.locator('.bh-turn').count()) === 6, 'its six turns')
     ok(/Sam at 2 and Lee at 4\./.test(await textOf(p, '.bh-turn[data-turn="q1"]')) && /Sent without asking/.test(await textOf(p, '.bh-turn[data-turn="q1"]')), 'a turn: what was asked, its answer and how it went')
     // A reply to check: edited, then sent.
