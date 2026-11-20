@@ -190,7 +190,7 @@ class MainActivity : Activity() {
             setPadding(0, (14 * dp).toInt(), 0, (6 * dp).toInt())
         })
         box.addView(TextView(this).apply {
-            text = "Bridge AI runs on your computer. On it, open Settings › Devices, click Pair a device, and scan the code. Or paste the link from Copy link."
+            text = "Bridge AI runs on your computer. On it, open Settings › Devices & Access › Phone, click Pair a device, and scan the code. Or paste the link from Copy link."
             textSize = 15f
             setTextColor(Color.parseColor("#9AA1AD"))
             gravity = Gravity.CENTER

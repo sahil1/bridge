@@ -6,7 +6,7 @@ For your own agents you need Bridge AI running on your computer (free and open s
 
 What it does
 
-- Pair with your computer by scanning the QR code from Settings › Devices › Pair a device, or by pasting the link from Copy link.
+- Pair with your computer by scanning the QR code from Settings › Devices & Access › Phone › Pair a device, or by pasting the link from Copy link.
 - Your agents on the lock screen: while any are working or waiting on you, a notification lists them, along with the ones that finished meanwhile. An agent that starts waiting on you gets its own alert. Tap it to open that agent.
 - Several computers: pair each one and switch between them.
 - Dictate messages. The recording goes to your computer and is turned into text there.
