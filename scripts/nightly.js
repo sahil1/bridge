@@ -60,10 +60,11 @@ export function stamped(text, version) {
 // or subject says it's about them (Tests:, Tests on …, CI:, Docs:, a test's own name, as
 // remote-screen: …); a merge, the revert of one, or a revert's own revert (Reapply "…"); a
 // release's own version and notes (3.21.0: …); a dependency's bump; and a change taken back in the
-// same nightly, with its revert. (The Chief of Staff's own .md files are what it does, so they count.)
+// same nightly, with its revert. (The Chief of Staff's own .md files are what it does, so they count,
+// and so does this script: these notes are what a computer on Nightly reads.)
 const UNSEEN = [
   /^test\//, /^\.github\//, /^\.githooks\//, /^docs?\//, /^(?!chief\/).*\.md$/i, /^(LICENSE|NOTICE)$/, /^site\//, /^counts\//,
-  /^scripts\/(nightly|release|rollout|ship|smoke|signing|ios-release|android-key|check-private|freeze-check|install-hooks|tcc-sim|cloud-mocks|i18n)\.\w+$/,
+  /^scripts\/(release|rollout|ship|smoke|signing|ios-release|android-key|check-private|freeze-check|install-hooks|tcc-sim|cloud-mocks|i18n)\.\w+$/,
 ]
 const BEHIND = /^(tests?\b|ci\b|docs?\b|merge\b|revert "merge\b|reapply\b|bump\b|v?\d+\.\d+\.\d+\b)/i
 const SUITE = /^[a-z0-9]+(-[a-z0-9]+)+(,\s*[a-z0-9]+(-[a-z0-9]+)+)*:/
@@ -133,12 +134,21 @@ function cut(s, max) {
   const first = s.indexOf(', ')
   return first >= 20 && first <= max ? s.slice(0, first) : `${s.slice(0, s.lastIndexOf(' ', max - 1))}…`
 }
-// What a subject says first: its first clause that isn't about the code (less any piece after its
-// first that is: "…, test fixes"), without code marks or a note in brackets about the code.
+// What a subject says first: its first clause with something in it that isn't about the code, less
+// the pieces that are ("…, test fixes"; "Flaky tests fixed at their cause, WebKit's tests on two
+// Macs, and Closed agents and bots-as-root fixes" says Closed agents and bots-as-root fixes), without
+// code marks or a note in brackets about the code. What's left leaning on a piece that's gone ("…,
+// so it waits") isn't a clause of its own.
+const ON = /^(so|which|because|when|while|since|as|then|but|that|where|until|after|before)\b/i
 function clauseOf(text) {
   const s = String(text).replace(/`/g, '').replace(/\s*\(([^)]*)\)/g, (m, inner) => (CODE.test(inner) ? '' : m))
-  const first = outside(s, CLAUSE).find((x) => !CODE.test(outside(x, COMMA)[0])) || ''
-  return outside(first, COMMA).filter((p, i) => !i || !CODE.test(p)).join(', ').replace(/^(and|also)\s+/i, '').replace(/[\s,:;.]+$/, '')
+  for (const clause of outside(s, CLAUSE)) {
+    const pieces = outside(clause, COMMA)
+    const kept = pieces.filter((p) => !CODE.test(p))
+    const said = kept.join(', ').replace(/^(and|also)\s+/i, '').replace(/[\s,:;.]+$/, '')
+    if (said && (kept[0] === pieces[0] || !ON.test(said))) return said
+  }
+  return ''
 }
 // What a subject says, as a line a person reads: its first clause (clauseOf), cut down when it's
 // longer than `max`, starting with a capital and ending with a full stop. Empty when nothing's left.
@@ -250,22 +260,28 @@ export function notesFor({ version, sha, since, changes, mac }) {
 // Each pull request merged into main is a merge commit on main's own line (its first parents),
 // "Merge pull request #258 from …", and its title says the change for people ("Share Links: a secure
 // link to a file, …"), where its commits are the steps. One putting several together for a nightly
-// lists them in its body, a line each ("- #252 Bots that change files: …"): those lines are what it
-// brings, not its own title. One titled with its branch's name (gh pr create --fill, for a branch of
-// several commits) says nothing of its own: its commits do.
+// (its branch nightly-next-…, or titled "Next nightly: …") lists them in its body, a line each,
+// "- #252 Bots that change files: …", at the start of the line with a space after the number: those
+// lines, of pull requests that were merged, are what it brings, not its own title. Any other pull
+// request's body is only words, whatever numbers it has ("  - #259, whose title …"). One titled with
+// its branch's name (gh pr create --fill, for a branch of several commits), or one putting several
+// together that lists none merged, says nothing of its own: its commits do.
 const MERGED = /^Merge pull request #(\d+) from /
-const LISTED = /^\s*[-*]\s+#(\d+)\b[\s:–—-]*(\S.*)$/
-// The pull requests a body lists: [{ number, text }].
-export const listedIn = (body) => String(body || '').split(/\r?\n/).map((l) => l.match(LISTED)).filter(Boolean).map((m) => ({ number: Number(m[1]), text: m[2].trim() }))
+const LISTED = /^- #(\d+) (\S.*)$/
+const NEXT = { branch: /^nightly-next(-|$)/, title: /^next nightly\b/i }
+// Whether a pull request ({ title, branch }) puts several together for a nightly.
+export const integration = (pr) => NEXT.branch.test(pr?.branch || '') || NEXT.title.test(pr?.title || '')
+// The pull requests an integration pull request's body lists: [{ number, text }].
+export const listedIn = (body) => String(body || '').split(/\r?\n/).map((l) => l.replace(/\s+$/, '').match(LISTED)).filter(Boolean).map((m) => ({ number: Number(m[1]), text: m[2].trim() }))
 const branchy = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
 // What a nightly's notes are made from, by the pull requests merged since the last one. log: main's
 // first parents since then, newest first, each { subject, commits }, commits being what it brought,
 // newest first, { subject, files } (a merge's branch, or a commit made on main itself); pulls: each
-// pull request by its number, { title, body, files, branch } (one only listed in another's body may
-// have its files alone). Newest first, as grouped takes them, each { subject, files, pull, parts,
-// only }; a pull request once, even when another lists it too. Null when none of them is a pull
-// request, or one couldn't be read: then the notes go by the commits.
+// pull request by its number, { title, body, files, branch, merged } (those an integration pull
+// request lists too). Newest first, as grouped takes them, each { subject, files, pull, parts, only };
+// a pull request once, even when another lists it too. Null when none of them is a pull request, or
+// one couldn't be read: then the notes go by the commits.
 export function fromPulls(log, pulls) {
   if (!log.some((c) => MERGED.test(c.subject))) return null
   const out = []
@@ -274,7 +290,8 @@ export function fromPulls(log, pulls) {
     const n = Number(c.subject.match(MERGED)?.[1] || 0)
     const pr = n ? pulls[n] : null
     if (n && !pr?.title) return null
-    if (!n || branchy(pr.title) === branchy(pr.branch)) {
+    const listed = n && integration(pr) ? listedIn(pr.body).filter((l) => pulls[l.number]?.merged) : []
+    if (!n || (!listed.length && (branchy(pr.title) === branchy(pr.branch) || NEXT.title.test(pr.title)))) {
       if (!done.has(n)) out.push(...[...(c.commits || [c])].reverse())
     } else {
       // The parts its commits a person would notice name ("Bots: …"), for a title that starts with
@@ -282,7 +299,6 @@ export function fromPulls(log, pulls) {
       // they name only one (Bots on Windows being Bots).
       const parts = [...new Set((c.commits || []).filter(seen).map((k) => labelOf(k.subject).label).filter((l) => l && !FIX.test(l)))]
       const roots = parts.filter((p) => !parts.some((q) => q !== p && startOf(p, q)))
-      const listed = listedIn(pr.body)
       for (const { number, text } of listed.length ? listed : [{ number: n, text: pr.title }]) {
         if (done.has(number)) continue
         done.add(number)
@@ -300,13 +316,12 @@ function repoHere() {
   try { return git('remote', 'get-url', 'origin').match(/github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/)?.[1] || null } catch { return null }
 }
 const gh = (...a) => execFileSync('gh', a, { cwd: ROOT, encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] })
-// A pull request as GitHub has it (gh, with the workflow's token in CI): the files it changed, and
-// unless only those are asked for, its title, body and branch.
-function pullOf(repo, n, filesOnly = false) {
+// A pull request as GitHub has it (gh, with the workflow's token in CI): its title, body, branch,
+// whether it was merged, and the files it changed.
+function pullOf(repo, n) {
+  const { title, body, head, merged_at: mergedAt } = JSON.parse(gh('api', `repos/${repo}/pulls/${n}`))
   const files = gh('api', '--paginate', `repos/${repo}/pulls/${n}/files?per_page=100`, '--jq', '.[].filename').split('\n').filter(Boolean)
-  if (filesOnly) return { files }
-  const { title, body, head } = JSON.parse(gh('api', `repos/${repo}/pulls/${n}`))
-  return { title, body: body || '', branch: head?.ref || '', files }
+  return { title, body: body || '', branch: head?.ref || '', merged: !!mergedAt, files }
 }
 // The changes since a tag by its pull requests (fromPulls), or null, saying why, for the commits.
 function pullsSince(prev, head) {
@@ -319,8 +334,8 @@ function pullsSince(prev, head) {
     const repo = repoHere()
     if (!repo) throw new Error('no GitHub repository for this checkout')
     for (const n of merged) pulls[n] = pullOf(repo, n)
-    for (const { number } of merged.flatMap((n) => listedIn(pulls[n].body))) {
-      if (!pulls[number]) try { pulls[number] = pullOf(repo, number, true) } catch { /* its line goes by its words alone */ }
+    for (const { number } of merged.flatMap((n) => (integration(pulls[n]) ? listedIn(pulls[n].body) : []))) {
+      if (!pulls[number]) try { pulls[number] = pullOf(repo, number) } catch { /* not known to be merged: its line is left out */ }
     }
   } catch (e) {
     console.error(`nightly: couldn't read the pull requests from GitHub (${String(e.stderr || e.message).trim().split('\n')[0]}), so the notes go by the commits`)

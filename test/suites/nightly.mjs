@@ -12,10 +12,13 @@
 // built from in a line GitHub hides, and a plain first line; a revert's own revert (Reapply "…")
 // left out too. And first from the pull requests merged since the last nightly
 // (test/fixtures/nightly-pulls.json: main's merges, their commits, and the pull requests' titles,
-// bodies and files): an integration pull request by the lines its body lists (#252, #255, #257), not
-// its title; a feature pull request by its title; one about the tests or CI left out by its title or
-// files; one titled with its branch by its commits; a commit made on main as it is; each pull
-// request once; and the commits again when there's no pull request or GitHub can't say. The
+// bodies and files): an integration pull request (a nightly-next branch, or "Next nightly" title) by
+// the lines its body lists of merged pull requests (#252, #255, #257), not its title; any other
+// body only words ("  - #259, whose title names no part;"); a feature pull request by its title; one
+// about the tests or CI left out by its title or files, and one mostly about them by the rest of its
+// title (#267: Closed agents and bots-as-root fixes); one about these notes by its own title; one
+// titled with its branch by its commits; a commit made on main as it is; each pull request once;
+// and the commits again when there's no pull request or GitHub can't say. The
 // workflows: nightly.yml builds main through release.yml, which publishes it as a pre-release, never
 // GitHub's latest, and leaves the Android app, the regular Publish and the tag check alone. The
 // rules: Stable and Early Access are never offered a nightly; Nightly is offered the newest of
@@ -90,22 +93,33 @@ ok(same(reapplied.map((g) => g.label), ['Bots']) && !/Reapply|Other/.test(JSON.s
 // ---------- the notes, from the pull requests ----------
 const PULLS = JSON.parse(fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'nightly-pulls.json'), 'utf8'))
 const listedIn258 = nj.listedIn(PULLS.pulls['258'].body)
-ok(same(listedIn258.map((x) => x.number), [252, 255, 257, 250, 256]) && listedIn258[0].text.startsWith('Bots that change files: Edits Files') && nj.listedIn('- #246: meetings Merge into one')[0]?.text === 'meetings Merge into one', 'an integration pull request\'s body: the pull requests it lists, a line each ("- #252 …"), never a note in brackets or a line naming none', listedIn258)
+ok(same(listedIn258.map((x) => x.number), [252, 255, 257, 250, 256, 904, 906]) && listedIn258[0].text.startsWith('Bots that change files: Edits Files') && same(nj.listedIn('  - #259, whose title names no part;\n- #259, whose title names no part\n- #246: meetings Merge into one\n  - #252 Bots that change files'), []), 'an integration pull request\'s body: the pull requests it lists, each "- #252 …" at the start of its line with a space after the number; never one indented, followed by a comma or a colon, or in brackets', listedIn258)
+ok(nj.integration(PULLS.pulls['258']) && nj.integration({ title: 'Next nightly: Share Links', branch: 'combined' }) && nj.integration({ title: 'Bots: Connections, Bots and live Sessions', branch: 'nightly-next-5' }) && !nj.integration(PULLS.later.pulls['261']) && !nj.integration(PULLS.pulls['259']), 'an integration pull request: its branch nightly-next-…, or its title "Next nightly …"; no other')
 const pulled = nj.fromPulls(PULLS.log, PULLS.pulls)
 const prNotes = nj.notesFor({ version: '3.21.1-nightly.20261120.18', sha: '281d5eef1234567', since: '3.21.1-nightly.20261119.17', changes: pulled, mac: '14.0' })
 const prListed = prNotes.split('\n\nOnly computers')[0]
 const prLabels = prNotes.split('\n').filter((l) => /^- /.test(l)).map((l) => l.match(/^- \*\*(.+?):\*\* \S/)?.[1])
-ok(same(prLabels, ['Bots', 'Meetings', 'Remote Screen', 'Update card', 'Phone']), 'from the pull requests merged since the last nightly: a line for each part, "- **Label:** …", the busiest first', prNotes)
+ok(same(prLabels, ['Bots', 'Meetings', 'Remote Screen', 'Nightly notes', 'Update card', 'Phone', 'Studio']), 'from the pull requests merged since the last nightly: a line for each part, "- **Label:** …", the busiest first', prNotes)
+ok(/^- \*\*Studio:\*\* A sheet opens at the last cell you were in\.$/m.test(prNotes) && !/window's size|signature|Monday/.test(prNotes), 'of the pull requests it lists, only those merged; a line indented under another, or with a comma after its number, isn\'t one', prListed)
 ok(/^- \*\*Bots:\*\* Edits Files in Its Folders, approvals bound to the exact change, held kinds, Undo\.$/m.test(prNotes) && /^ {2}- Bots attach files from their folders\.$/m.test(prNotes) && /^ {2}- Bot runs load only your own Claude Code settings, never a folder's own\.$/m.test(prNotes), 'an integration pull request: the lines its body lists under their part ("Bots that change files: …", "Bots attach …", "Bot runs …" are all Bots), the first listed first, each cut at a clause', prListed)
 ok(!/Next nightly|Combines|#\d|hook|Reapply|Merge|\bTests?\b|\bCI\b|PowerShell|held up|floating card|setting-sources/.test(prListed), 'nothing from its own title, nor its commits\' steps; no pull request\'s number, no flag; a pull request only about the tests or CI left out by its title or its files, merged itself or listed in another', prListed)
 ok(/^- \*\*Remote Screen:\*\* Remote Screen starts every time, or says why with the fix\.$/m.test(prNotes), 'a feature pull request: its title to its first clause, under the name in capitals it starts with', prListed)
-ok(/^- \*\*Update card:\*\* Nightly notes a person would notice, and a calmer update card\.$/m.test(prNotes), 'a title naming no part: the one part its commits a person would notice name', prListed)
+ok(/^- \*\*Update card:\*\* A calmer card in the top bar, what to do after what's new\.$/m.test(prNotes), 'a title naming no part: the one part its commits a person would notice name', prListed)
+ok(/^- \*\*Nightly notes:\*\* Nightly notes a person would notice, and a calmer update card\.$/m.test(prNotes), 'one about these notes: under Nightly notes, by its own title (the notes are what a computer on Nightly reads)', prListed)
 ok(/^- \*\*Meetings:\*\* A title for each one from its calendar event\.$/m.test(prNotes) && /^ {2}- A meeting set by hand/m.test(prNotes) && /^- \*\*Phone:\*\* Scan QR code reads a pairing link from a picture too\.$/m.test(prNotes), 'one titled with its branch\'s name: by its commits; a commit made on main itself: as it is', prListed)
 ok(prNotes.startsWith('Nightly build of 20 November 2026, for trying what\'s next.\n\n## Since 3.21.1-nightly.20261119.17\n\n- **Bots:**') && /^<!-- main at 281d5ee -->$/m.test(prNotes) && !/281d5ee/.test(shown(prNotes)) && up.minMacOf(prNotes) === '14.0' && /Only computers on the Nightly update channel are offered it\. The Mac app needs macOS 14 or later\./.test(prNotes), 'its first line, the commit it was built from and the macOS line the update check reads as before', prNotes.slice(-300))
-const own255 = { title: 'Bots: a file in a bot\'s folders goes with its answer as it is, PDFs and documents too', branch: 'bots-attach', body: '', files: PULLS.pulls['255'].files }
+const own255 = { title: 'Bots: a file in a bot\'s folders goes with its answer as it is, PDFs and documents too', branch: 'bots-attach', merged: true, body: '', files: PULLS.pulls['255'].files }
 const once = nj.fromPulls([{ subject: 'Merge pull request #258 from sahil1/nightly-next-4' }, { subject: 'Merge pull request #255 from sahil1/bots-attach' }], { ...PULLS.pulls, 255: own255 })
 ok(once.filter((c) => c.pull === 255).length === 1 && once.find((c) => c.pull === 255).subject === own255.title, 'a pull request merged itself, then listed in another: once, by its own title', once)
 ok(nj.fromPulls([{ subject: 'Bots: answer in DMs', files: ['server/bots.js'] }], {}) === null && nj.fromPulls(PULLS.log, { ...PULLS.pulls, 251: undefined }) === null, 'no pull request merged (only commits made on main), or one GitHub couldn\'t give: none, so the notes go by the commits')
+// As for v3.21.1-nightly.20261120.20: #261's body has "  - #259, whose title names no part;" (it
+// isn't an integration pull request), #260 is on a nightly-next branch with no list, and #267's
+// title is mostly about the tests.
+const later = nj.notesFor({ version: '3.21.1-nightly.20261120.20', sha: '6cd72750abcdef', since: '3.21.1-nightly.20261120.18', changes: nj.fromPulls(PULLS.later.log, PULLS.later.pulls), mac: '14.0' })
+const laterListed = later.split('\n\nOnly computers')[0]
+ok(laterListed.endsWith('\n\n- **Bots:** Connections, Bots and live Sessions.\n- **Other:** Nightly notes from the pull requests merged since the last nightly.\n- **Fixes:** Closed agents and bots-as-root fixes.'), 'a body that isn\'t an integration pull request\'s is only words: its title, under Other when it names no part; one on a nightly-next branch listing none: its title; a title mostly about the tests: the pieces of it that aren\'t (Closed agents and bots-as-root fixes), under Fixes', laterListed)
+ok(!/Whose title|names no part|Flaky|WebKit|Edits Files/.test(laterListed), 'never a stray piece of a body, nor the tests', laterListed)
+ok(nj.plain('Flaky tests fixed at their cause, WebKit\'s tests on two Macs, and Closed agents and bots-as-root fixes') === 'Closed agents and bots-as-root fixes.' && nj.plain('Flaky tests waited out, so a run takes longer') === '' && nj.plain('Studio: a sheet keeps its widths, and its test') === 'Studio: a sheet keeps its widths.', 'a line\'s pieces about the tests go and the rest is kept, unless all that\'s left leans on them ("so …")')
 
 // ---------- the workflows ----------
 // With \n between lines on Windows too, where git checks them out with \r\n.
