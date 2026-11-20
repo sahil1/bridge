@@ -348,15 +348,40 @@ async function sweep(root) {
 // without Windows' backup and restore rights, which pass any (Node opens every file so): the agent
 // never has them, its terminal taking them out first (winpriv.js), and the lock is tried as it meets
 // one without them, a file made there with a plain open: one that's made, or a try that can't say,
-// means no copy, saying why.
+// means no copy, saying why. On a Mac and Linux it's tried too, as this process (its agent runs as
+// the same user): read-only doesn't stop root (Bridge AI in a Docker container, say), nor a file
+// system that ignores it, so a file made there means no copy, and as root it says Bridge AI mustn't
+// run so.
 const ICACLS = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe')
 const EVERYONE = '*S-1-1-0'
 async function lockTop(dir) {
-  if (process.platform !== 'win32') return fs.promises.chmod(dir, 0o555).catch(() => {})
+  if (process.platform !== 'win32') {
+    if (process.env.BRIDGE_TEST_ROOT !== '1') await fs.promises.chmod(dir, 0o555).catch(() => {})
+    const made = await ownProbe(dir)
+    if (made === false) return
+    throw fail(made && isRoot() ? 'Changing files needs Bridge AI not to run as root: a read-only folder doesn\'t stop root, so its agent could make files beside its copy'
+      : made ? 'Its copy\'s folder couldn\'t be closed to anything new: a program running as you can still make files in it'
+        : 'Its copy\'s folder couldn\'t be checked to be closed to anything new', 'stage')
+  }
   const r = await run(ICACLS, [dir, '/deny', `${EVERYONE}:(WD,AD)`], { timeout: 30000 })
   if (!r.ok) throw fail(`Its copy's folder couldn't be set so nothing new can be made in it: ${firstLine(r.err || r.out) || 'icacls said no'}`, 'stage')
   const made = await plainProbe(dir)
   if (made !== false) throw fail(made ? 'Its copy\'s folder couldn\'t be closed to anything new: a program running as you can still make files in it' : 'Its copy\'s folder couldn\'t be checked to be closed to anything new (Windows PowerShell didn\'t say)', 'stage')
+}
+// Whether this process can make a file in dir: true made (and taken away again), false refused (as
+// a read-only folder refuses), null when it couldn't be told. BRIDGE_TEST_ROOT (tests): as root, which
+// a read-only folder doesn't stop, stood in for by not marking it so (lockTop): the try then makes
+// its file, and no copy is made.
+const isRoot = () => process.env.BRIDGE_TEST_ROOT === '1' || process.getuid?.() === 0
+async function ownProbe(dir) {
+  const p = path.join(dir, `.bridge-probe-${crypto.randomBytes(6).toString('hex')}`)
+  try {
+    await (await fs.promises.open(p, 'wx')).close()
+  } catch (e) {
+    return ['EACCES', 'EPERM', 'EROFS'].includes(e.code) ? false : null
+  }
+  await fs.promises.rm(p, { force: true }).catch(() => {})
+  return true
 }
 async function unlockTop(dir) {
   if (process.platform !== 'win32') return fs.promises.chmod(dir, 0o700).catch(() => {})
