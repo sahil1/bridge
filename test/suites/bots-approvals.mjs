@@ -541,8 +541,9 @@ try {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme, phone })
       await openBot(p)
       await p.locator('.sb-tabs [role="tab"]', { hasText: 'Settings' }).click()
-      await p.locator('[data-setting="slack-owner"]').waitFor({ timeout: 10000 })
-      ok(/Tester/.test(await p.locator('[data-setting="slack-owner"]').innerText()), 'You in Slack shows you')
+      await p.locator('[data-setting="bot-where"]').waitFor({ timeout: 10000 })
+      ok(/its own app\s*·\s*connected/.test(await p.locator('[data-setting="bot-where"]').innerText()), 'where it answers, in a line: its own app, connected')
+      ok((await kit.api('/connections')).connections.find((c) => c.own?.id === 'b1')?.owner?.name === 'Tester', 'and its card\'s You Here has you')
       ok(/30/.test(await p.locator('[data-setting="slack-limits"] input').first().inputValue()), 'its limits: 30 a day')
       const lim = p.locator('[data-setting="slack-limits"]')
       ok(/At the Time Limit/.test(await lim.innerText()) && await lim.locator('[role="radio"][aria-checked="true"]').innerText() === 'Ask Me' && await lim.locator('input').last().inputValue() === '120', 'and At the Time Limit: Ask Me, with its Longest Run, 120 minutes', await lim.innerText())
@@ -553,7 +554,7 @@ try {
         await until(async () => (await botOf()).settings.limits.atLimit === 'ask', 8000)
       }
       if (!phone) {
-        await p.locator('[data-setting="slack-owner"]').scrollIntoViewIfNeeded()
+        await p.locator('[data-setting="bot-where"]').scrollIntoViewIfNeeded()
         await shot(p, `${tag}bots-approvals-setup-${mode}`)
         await p.locator('[data-setting="slack-limits"]').scrollIntoViewIfNeeded()
         await shot(p, `${tag}bots-approvals-limits-${mode}`)

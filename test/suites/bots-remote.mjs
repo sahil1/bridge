@@ -2,9 +2,10 @@
 // the bots run (stand-ins for Slack, Discord and Teams, Claude Code answering), on a relay of its own
 // (stand-ins/relay.mjs), with a phone paired and "Studio", another computer, linked; in the browser
 // named by BRIDGE_TEST_BROWSER.
-//   The phone page, paired through the relay, 390 px wide: Settings › Bots from no bot to one made
-//   from a template, its name, who may ask, its Slack tokens pasted and connected, You in Slack found
-//   among its people, a folder to read from and its instructions file picked from Desk's own folders,
+//   The phone page, paired through the relay, 390 px wide: Bots from no bot to one made from a
+//   template, its name, who may ask, an app of its own in Connections (Slack's, Discord's and Teams'
+//   links out), its Slack tokens pasted there and connected, you linked there by a code (You Here), a
+//   folder to read from and its instructions file picked from Desk's own folders,
 //   its limits, paused and resumed, Try It answered, a memory taught, its export and its record
 //   downloaded to the phone, its links out opening in the phone's browser, and Activity naming the
 //   phone; every section, tab and place it answers in with nothing too small, off the screen or cut
@@ -100,23 +101,18 @@ try {
   }
   // The phone paired last, by its name on Desk (the page names it: "Mac, browser").
   const newestPhone = async () => [...((await desk.api('/relay')).devices || [])].filter((d) => d.kind !== 'computer').sort((x, y) => String(x.addedAt).localeCompare(String(y.addedAt))).pop()?.name || null
-  // Every section of a bot's Settings (Advanced open), each brought into view, then each tab and
-  // each place it answers in: anything too small, off the screen or cut short, by where it was.
+  // Every section of a bot's Settings (Advanced open), each brought into view, then each tab:
+  // anything too small, off the screen or cut short, by where it was.
   const allFaults = async (f) => {
     const out = {}
     const look = async (where) => { await sleep(150); const x = await phoneFaults(f, '.bp.phone .bp-main'); if (Object.keys(x).length) out[where] = x }
     const tab = (name) => f.locator('.bp .sb-tabs button', { hasText: name }).click()
     await tab('Settings')
     await advanced(f)
-    for (const p of ['slack', 'discord', 'teams']) {
-      await f.locator(`.sb-where-tabs [data-platform="${p}"]`).click()
-      await sleep(200)
-      for (const s of await f.locator('.bp .bp-main [data-setting]').all()) {
-        await s.scrollIntoViewIfNeeded().catch(() => {})
-        await look(`${p}: ${await s.getAttribute('data-setting')}`)
-      }
+    for (const s of await f.locator('.bp .bp-main [data-setting]').all()) {
+      await s.scrollIntoViewIfNeeded().catch(() => {})
+      await look(`Settings: ${await s.getAttribute('data-setting')}`)
     }
-    await f.locator('.sb-where-tabs [data-platform="slack"]').click()
     for (const t of ['Overview', 'Memory', 'Activity']) {
       await tab(t)
       await f.locator('.bp .bp-main .st-sec').first().waitFor({ timeout: 8000 })
@@ -157,46 +153,66 @@ try {
     await noChat(f)
     await f.locator('.bp .sb-tabs [data-tab="settings"]').click()
     await advanced(f)
-    await sec('slack-guide').waitFor({ timeout: 10000 })
+    await sec('bot-where').waitFor({ timeout: 10000 })
     harbor = (await desk.api('/bots')).bots.find((x) => x.name === 'Harbor')
     ok(!!harbor && !!events(harbor.id).find((e) => e.setting === 'created')?.new?.template, `a bot made on the phone, from a template (${tplName})`, harbor)
     const off = await f.locator('.bp .bp-main :is(input, select, textarea, button):disabled').evaluateAll((l) => l.map((e) => e.getAttribute('aria-label') || e.placeholder || e.innerText || e.name).filter(Boolean))
     ok(!off.some((x) => /^(Its name in Slack|xapp-…|xoxb-…|~\/code)$/.test(x)), 'nothing in its Settings is greyed out on the phone', off)
     ok(!/computer it runs on/.test(await f.locator('.bp .bp-main').innerText()), 'and nothing says to do it on the computer it runs on')
+    ok(/Not on Slack, Discord or Microsoft Teams yet/.test(await sec('bot-where').innerText()), 'where it answers, in a line: nowhere yet')
 
-    // Links out: each a link of its own to open in the phone's browser (the apps open a new
-    // window's link there: WebViewController.swift createWebViewWith, MainActivity's
-    // shouldOverrideUrlLoading); none is followed here.
-    const open = sec('slack-guide').locator('a', { hasText: 'Open Slack\'s app page' })
-    const at = { href: await open.getAttribute('href'), target: await open.getAttribute('target'), rel: await open.getAttribute('rel'), box: await open.boundingBox() }
-    ok(/^https:\/\/api\.slack\.com\/apps\?new_app=1&manifest_json=/.test(at.href || '') && at.target === '_blank' && /noreferrer/.test(at.rel || '') && at.box?.height >= 40, 'Open Slack\'s app page: shown on the phone, opening Slack\'s page in the phone\'s browser', { ...at, href: at.href?.slice(0, 60) })
-    await f.locator('.sb-where-tabs [data-platform="discord"]').click()
-    const portal = sec('discord-guide').locator('a[href="https://discord.com/developers/applications"]')
-    ok(await portal.count() === 1 && await portal.getAttribute('target') === '_blank', 'the Developer Portal, the same')
-    await f.locator('.sb-where-tabs [data-platform="teams"]').click()
-    const azure = sec('teams-guide').locator('a[href^="https://portal.azure.com/"]')
-    ok(await azure.count() === 1 && await azure.getAttribute('target') === '_blank', 'and the Azure portal')
-    await f.locator('.sb-where-tabs [data-platform="slack"]').click()
-
-    // Its name, who may ask, its tokens.
+    // Its name, who may ask.
     const nameBox = sec('bot-name').locator('input')
     await nameBox.fill('Harbor Desk')
     await nameBox.blur()
     ok(!!(await until(async () => (await botOf(harbor.id)).name === 'Harbor Desk', 8000)), 'renamed on the phone')
     await sec('slack-askers').locator('label.sb-mode', { hasText: 'Everyone in channels' }).click()
     ok(!!(await until(async () => (await botOf(harbor.id)).settings.who === 'channels', 8000)), 'who may ask, changed on the phone')
-    const tokens = sec('slack-connect').locator('form.sb-tokens')
+
+    // An app of its own on each platform, from Connections on the phone (Open in Connections).
+    await sec('bot-where').locator('button', { hasText: 'Open in Connections' }).click()
+    const own = async (platform) => {
+      const add = f.locator(`.bh [data-setting="connections-new"] .cn-new-one[data-platform="${platform}"]`)
+      if (!(await add.evaluate((d) => d.open))) await add.locator(':scope > summary').click()
+      await add.locator('[data-setting="connection-own"] option', { hasText: 'Harbor Desk' }).waitFor({ state: 'attached', timeout: 10000 })
+      await add.locator('[data-setting="connection-own"] select').selectOption({ label: 'Harbor Desk' })
+      await add.locator('[data-setting="connection-own"] button', { hasText: 'Give it its own app' }).click()
+      const card = f.locator(`.bh .cn-card[data-platform="${platform}"][data-kind="own"]`)
+      await card.locator(`[data-setting="${platform}-guide"]`).waitFor({ timeout: 10000 })
+      return card
+    }
+    const card = await own('slack')
+    // Links out: each a link of its own to open in the phone's browser (the apps open a new
+    // window's link there: WebViewController.swift createWebViewWith, MainActivity's
+    // shouldOverrideUrlLoading); none is followed here.
+    const open = card.locator('[data-setting="slack-guide"] a', { hasText: 'Open Slack\'s app page' })
+    const at = { href: await open.getAttribute('href'), target: await open.getAttribute('target'), rel: await open.getAttribute('rel'), box: await open.boundingBox() }
+    ok(/^https:\/\/api\.slack\.com\/apps\?new_app=1&manifest_json=/.test(at.href || '') && at.target === '_blank' && /noreferrer/.test(at.rel || '') && at.box?.height >= 40, 'An App of Its Own, on the phone: Open Slack\'s app page, opening Slack\'s page in the phone\'s browser', { ...at, href: at.href?.slice(0, 60) })
+    const portal = (await own('discord')).locator('[data-setting="discord-guide"] a[href="https://discord.com/developers/applications"]')
+    ok(await portal.count() === 1 && await portal.getAttribute('target') === '_blank', 'the Developer Portal, the same')
+    const azure = (await own('teams')).locator('[data-setting="teams-guide"] a[href^="https://portal.azure.com/"]')
+    ok(await azure.count() === 1 && await azure.getAttribute('target') === '_blank', 'and the Azure portal')
+
+    // Its Slack tokens, on its card.
+    const tokens = card.locator('[data-setting="slack-connect"] form.sb-tokens')
     await tokens.locator('input').nth(0).fill('xapp-test')
     await tokens.locator('input').nth(1).fill('xoxb-test')
     await tokens.locator('button[type="submit"]').click()
     ok(!!(await until(async () => (await botOf(harbor.id)).state === 'connected', 20000)), 'its Slack tokens pasted on the phone: connected')
-    ok(!!(await until(async () => /xoxb-…test|…test/.test(await sec('slack-connect').innerText()) && !leaked(await sec('slack-connect').innerText()).length, 8000)), 'and shown only by their last four', await sec('slack-connect').innerText())
-    // You in Slack, found among the workspace's people.
-    const find = sec('slack-owner').locator('.sb-search input')
-    await find.waitFor({ timeout: 15000 })
-    await find.fill('Test')
-    await sec('slack-owner').locator('.sb-found button', { hasText: 'Tester' }).click({ timeout: 10000 })
-    ok(!!(await until(async () => (await botOf(harbor.id)).settings.owner?.id === 'U0OWNER', 8000)), 'You in Slack, picked from the workspace\'s people on the phone')
+    await card.locator('[data-setting="connection-advanced"] > summary').click()
+    ok(!!(await until(async () => /xoxb-…test|…test/.test(await card.locator('[data-setting="slack-connect"]').innerText()) && !leaked(await card.locator('[data-setting="slack-connect"]').innerText()).length, 8000)), 'and shown only by their last four', await card.locator('[data-setting="slack-connect"]').innerText())
+    // You there: Link me, its code sent to the app in a direct message.
+    const you = card.locator('[data-setting="connection-you"]')
+    await you.locator('button', { hasText: 'Link me' }).click()
+    const code = (await card.locator('[data-setting="connection-link-code"]').innerText({ timeout: 10000 })).trim()
+    await slack.ask({ user: 'U0OWNER', dm: true, text: code })
+    ok(!!(await until(async () => (await botOf(harbor.id)).settings.owner?.id === 'U0OWNER' && /Tester/.test(await you.innerText()), 15000)), 'You Here: linked from the phone, its code sent to the app')
+    const cf = await phoneFaults(f, '[data-setting="phone-bots"]')
+    if (cf.covered) cf.covered = cf.covered.filter((x) => !/ under Sections <nav\.tabbar>$/.test(x))
+    if (!cf.covered?.length) delete cf.covered
+    ok(!Object.keys(cf).length, 'Connections on the phone: nothing too small, off the screen or cut short', cf)
+    await shot(phone, `${tag}bots-remote-phone-connections`)
+    await openBot(f, { name: 'Harbor Desk' })
 
     // A folder to read from, picked from Desk's own folders.
     const folders = sec('slack-folders')
@@ -451,9 +467,9 @@ try {
     const { ctx, phone, f, errors } = await phonePage({ mode: 'dark', theme: 'midnight' })
     if (!f) { await ctx.close(); return }
     await openBot(f, { name: 'Harbor Desk' })
-    await f.locator('.bp [data-setting="slack-guide"]').waitFor({ timeout: 10000 })
+    await f.locator('.bp [data-setting="bot-where"]').waitFor({ timeout: 10000 })
     const faults = await allFaults(f)
-    ok(!Object.keys(faults).length, 'dark, 390 px: every section, tab and place it answers in, with nothing too small, off the screen or cut short', faults)
+    ok(!Object.keys(faults).length, 'dark, 390 px: every section and tab, with nothing too small, off the screen or cut short', faults)
     await shot(phone, `${tag}bots-remote-phone-dark`)
     ok(errors.length === 0, 'no page errors, dark', errors)
     await ctx.close()

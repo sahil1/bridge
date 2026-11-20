@@ -23,9 +23,10 @@
 //   In the app: AI Assist's chat with a shared connection there (nothing to set up on the platform:
 //   the card says how people reach it, its command and a channel it's the default bot in; after
 //   Create, how to ask it, the people named found at once), and with none (it walks through making
-//   the shared one, once, named as you like); Bots › Connections (a card each, which bot answered
-//   and why under Advanced, no token in the page); a bot's Settings saying how it's reached, with
-//   Give it its own connection; light and dark, on a computer and at a phone's width.
+//   the shared one, once, named as you like); Bots › Connections (a card each, under its platform,
+//   a bot's own app among them, which bot answered and why under Advanced, no token in the page); a
+//   bot's Settings saying in one line how it's reached, with Open in Connections; light and dark, on
+//   a computer and at a phone's width.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startSlack, startDiscord, startTeams, startModel, checks, until, sleep, browser, page, shot, phoneFaults, TEST, IS_WIN } from '../lib/harness.mjs'
@@ -112,6 +113,7 @@ try {
     ok(events('b1').some((e) => e.type === 'settings.changed' && e.setting === 'connection' && /connection of its own/.test(e.why || '')), 'and its record says so')
     const v = await botOf('b1')
     ok(v.connections?.slack?.id === OWN && v.connections.slack.shared === false && v.state === 'connected', 'its page says it\'s reached through its own connection', v.connections)
+    ok(c?.own?.name === 'Atlas' && c.bots.length === 1, 'listed with every connection, saying whose it is', c?.own)
   })
 
   // ---------- A shared Slack connection, and two bots on it ----------
@@ -492,9 +494,9 @@ try {
         await p.locator('[data-setting="rail-bots"] .rail-nav-btn').click()
         await p.locator('.bh-tabs [data-tab="connections"]').click()
         ok(await shown(p, '.bh [data-setting="bots-connections"] .cn-card'), `${mode}: Bots › Connections`)
-        const cards = await p.locator('.bh .cn-card').allInnerTexts()
-        ok(cards.some((x) => /tester_bot/.test(x) && /Slack/.test(x) && /Pricing Desk/.test(x) && /Docs Helper/.test(x) && /Connected to Acme Test/.test(x)), `${mode}: the shared Slack connection's card: connected, its bots`, cards[0])
-        ok(cards.some((x) => /Discord/.test(x) && /Shared/i.test(x)), `${mode}: and Discord's`)
+        const cards = await p.locator('.bh .bh-plat[data-platform="slack"] .cn-card, .bh .bh-plat[data-platform="discord"] .cn-card').allInnerTexts()
+        ok(cards.some((x) => /tester_bot/.test(x) && /Shared/.test(x) && /Pricing Desk/.test(x) && /Docs Helper/.test(x) && /Connected to Acme Test/.test(x)), `${mode}: the shared Slack connection's card: connected, its bots`, cards[0])
+        ok(cards.some((x) => /Shared · \d bots?/.test(x)) && (await p.locator('.bh .bh-plat').evaluateAll((l) => l.map((e) => e.dataset.platform))).join() === 'slack,discord,teams', `${mode}: each under its platform: Slack, Discord, Microsoft Teams`)
         const slackCard = p.locator('.bh .cn-card[data-platform="slack"]').first()
         await slackCard.locator('[data-setting="connection-advanced"] > summary').click()
         await slackCard.locator('[data-setting="connection-activity"] summary').first().click()
@@ -508,9 +510,9 @@ try {
         await p.locator('.bp .sb-tabs [data-tab="settings"]').click()
         const adv = p.locator('.bp [data-setting="bot-advanced"]')
         if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
-        const reach = await until(async () => { const x = await textOf(p, '.bp [data-setting="bots-reach"]'); return /Reached through tester_bot/.test(x) ? x : null }, 10000)
-        ok(!!reach && /Give it its own connection/.test(reach), `${mode}: a bot's Settings say it's reached through tester_bot, with Give it its own connection`, reach)
-        ok(!(await p.locator('.bp [data-setting="slack-connect"]').count()), `${mode}: and no app of its own to make there`)
+        const reach = await until(async () => { const x = await textOf(p, '.bp [data-setting="bot-where"]'); return /Reached through @tester_bot/.test(x) ? x : null }, 10000)
+        ok(!!reach && /connected/.test(reach) && /Open in Connections/.test(reach), `${mode}: a bot's Settings say in a line it's reached through @tester_bot, connected, with Open in Connections`, reach)
+        ok(!(await p.locator('.bp [data-setting="slack-connect"], .bp [data-setting="slack-guide"]').count()), `${mode}: and no app of its own to make there`)
         await p.waitForTimeout(300)
         await shot(p, `${tag}bots-connections-bot-${mode}`)
         ok(!errors.length, `${mode}: no page errors`, errors)
@@ -537,9 +539,9 @@ try {
         await p.locator('.bp.phone .sb-tabs [data-tab="settings"]').click()
         const adv = p.locator('.bp.phone [data-setting="bot-advanced"]')
         if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
-        ok(!!(await until(async () => /Reached through tester_bot/.test(await textOf(p, '.bp.phone [data-setting="bots-reach"]')), 10000)), `${mode}, a phone: a bot's Settings say how it's reached`)
+        ok(!!(await until(async () => /Reached through @tester_bot/.test(await textOf(p, '.bp.phone [data-setting="bot-where"]')), 10000)), `${mode}, a phone: a bot's Settings say how it's reached`)
         await sleep(300)
-        faults = await fits(p, '.bp.phone [data-setting="bots-reach"]')
+        faults = await fits(p, '.bp.phone [data-setting="bot-where"]')
         ok(!Object.keys(faults).length, `${mode}, a phone: and it fits`, faults)
         await shot(p, `${tag}bots-connections-phone-bot-${mode}`)
         ok(!errors.length, `${mode}, a phone: no page errors`, errors)
