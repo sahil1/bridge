@@ -6,9 +6,9 @@
 #   a release's tag (release.yml), Friday night's run before the weekend's release, and a run by
 #     hand: every test.
 # The app's tests run in Chromium everywhere, and in WebKit (the engine of Safari and the iPhone app)
-# on macOS too. Beside them, the iPhone app is built for the Simulator on macOS and the Android app on
-# Linux, when every test runs or the change is to mobile/. When something fails, the logs and
-# screenshots are kept with the run for a week.
+# on macOS too, on two machines. Beside them, the iPhone app is built for the Simulator on macOS and
+# the Android app on Linux, when every test runs or the change is to mobile/. When something fails,
+# the logs and screenshots are kept with the run for a week.
 name: Tests
 
 on:
@@ -97,14 +97,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS runs every suite in both browsers, as two jobs side by side: in one they took over
-          # 40 minutes.
+          # macOS runs every suite in Chromium, and the ones in a browser in WebKit too, as jobs side
+          # by side: WebKit's in two shares (test/run.mjs --shard), each about as long, as in one they
+          # took 70 to 85 minutes (103 suites, 20 Nov), close to the time limit. The suites that run
+          # in no browser run once on macOS, in the Chromium job.
           - os: macos-15
             name: macOS
             browser: chromium
           - os: macos-15
-            name: macOS WebKit
+            name: macOS WebKit 1 of 2
             browser: webkit
+            share: --browser-only --shard 1/2
+          - os: macos-15
+            name: macOS WebKit 2 of 2
+            browser: webkit
+            share: --browser-only --shard 2/2
           - os: windows-latest
             name: Windows
             browser: chromium
@@ -112,8 +119,8 @@ jobs:
             name: Linux
             browser: chromium
     runs-on: ${{ matrix.os }}
-    # The full suite takes 45 minutes in Chromium on the Mac runners and over an hour in WebKit (93 of
-    # 115 suites in 58 minutes on 16 Nov), more with a test tried again.
+    # Every suite takes 55 to 75 minutes in Chromium on the Mac and Windows runners, more with a test
+    # tried again; each WebKit share about 40.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -121,15 +128,30 @@ jobs:
           fetch-depth: 0 # what changed since the base, for a run of only the tests for that
           persist-credentials: false
 
+      # This machine's tests (a WebKit share can have none: a change only to tests in no browser, or
+      # to one test), so one with none sets nothing up. (The runner's own Node.js: --list needs no
+      # packages.)
+      - id: share
+        name: Its tests
+        shell: bash
+        env:
+          ARGS: ${{ needs.scope.outputs.args }} ${{ matrix.share }}
+        run: |
+          node test/run.mjs --list $ARGS > share.json
+          echo "count=$(node -p "require('./share.json').names.length")" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.share.outputs.count != '0'
         with:
           node-version: 22
           cache: npm
 
       - name: Install
+        if: steps.share.outputs.count != '0'
         run: npm ci --no-audit --no-fund
 
       - name: Build the app and the demo
+        if: steps.share.outputs.count != '0'
         run: |
           npm run build
           npm run demo:build
@@ -139,6 +161,7 @@ jobs:
       # browsers alone, with a warning, so the tests still run in time (the image has Chrome's libraries
       # already, and macOS runs the same tests with every font).
       - name: Browsers
+        if: steps.share.outputs.count != '0'
         shell: bash
         run: |
           b="chromium ${{ matrix.browser != 'chromium' && 'webkit' || '' }}"
@@ -150,7 +173,7 @@ jobs:
       # The desktop app's own Electron (the version in desktop/package-lock.json), for the tests of its
       # windows: the meeting card in a real window, zoomed and in each language (float-card-window).
       - name: Electron
-        if: matrix.browser == 'chromium'
+        if: steps.share.outputs.count != '0' && matrix.browser == 'chromium'
         shell: bash
         run: |
           v=$(node -p "require('./desktop/package-lock.json').packages['node_modules/electron'].version")
@@ -163,7 +186,7 @@ jobs:
       # The herdr test drives a real herdr (elsewhere it checks only what it can without one): a
       # pinned release, refused unless it matches its checksum.
       - name: herdr
-        if: runner.os == 'Linux'
+        if: steps.share.outputs.count != '0' && runner.os == 'Linux'
         env:
           HERDR_URL: https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-linux-x86_64
           HERDR_SHA256: 14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d
@@ -177,9 +200,10 @@ jobs:
       # bash on Windows too: PowerShell reads $ARGS as its own (empty) list of arguments, and the tests
       # for "what changed since the last commit" there are none.
       - name: Tests
+        if: steps.share.outputs.count != '0'
         shell: bash
         env:
-          ARGS: ${{ needs.scope.outputs.args }}
+          ARGS: ${{ needs.scope.outputs.args }} ${{ matrix.share }}
         run: node test/run.mjs $ARGS --lanes 2 --browser ${{ matrix.browser }}
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
