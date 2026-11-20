@@ -147,3 +147,6 @@
 @media (max-width: 760px) {
   .ny-attached .link-btn { min-height: 40px; min-width: 40px; }
 }
+/* The bot a card is from, a link to its session or its page (NeedsYou.jsx BotLink). */
+button.ny-bot-link:hover { color: var(--ink); box-shadow: inset 0 0 0 1px var(--accent); }
+.ny-panel.phone .ny-bot-link { min-height: 40px; }

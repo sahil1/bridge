@@ -65,7 +65,8 @@ const PATHS = {
   'a:accounts': { phone: 'Settings › Model Providers' },
   'a:add-account': { phone: 'Search › Add another account' },
   'a:mcp': { phone: 'Settings › MCP Servers' },
-  // A beta feature's (Bots): a phone's way to them is More › Bots, its bots and New bot.
+  // A beta feature's (Bots): a phone's way to them is More › Bots, its three tabs and New bot.
+  'a:bots': { phone: 'More › Bots', shows: '[data-setting="phone-bots"]', trial: 'slack-bot' },
   'a:new-bot': { phone: 'More › Bots', shows: '[data-setting="phone-bots"]', trial: 'slack-bot' },
   'a:config': { phone: 'Settings › Config File' },
   'a:mate': { phone: 'Chief', shows: '.mate-hero, .console' },
@@ -124,7 +125,8 @@ const PATHS = {
   'rail:New space': { phone: 'Search › New agent with all the options' },
   'rail:New terminal': { phone: 'Search › New terminal' },
   'rail:History': { phone: 'More › History', shows: '.modal.history' },
-  // The sidebar's Bots (a beta feature): its bots and + are More › Bots on a phone.
+  // The sidebar's Bots (a beta feature), and its +: More › Bots on a phone, its three tabs and New bot.
+  'rail:Bots': { phone: 'More › Bots', shows: '[data-setting="phone-bots"]', trial: 'slack-bot' },
   'rail:New bot': { phone: 'More › Bots', shows: '[data-setting="phone-bots"]', trial: 'slack-bot' },
   'rail:Collapse all spaces': { none: 'Spaces fold in the sidebar; a phone lists the agents in Agents' },
   'rail:Expand all spaces': { none: 'Spaces fold in the sidebar; a phone lists the agents in Agents' },

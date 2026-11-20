@@ -170,7 +170,12 @@ goes through Bold Bridge or your relay, and no app of Bold Bridge's is involved.
 tokens are kept in `~/.bridge-ai/connections/<connection>/slack.json`, readable by you only, never
 in your settings, never shown back but by their last four, and never given to an agent or a model;
 Disconnect deletes them. (A bot made before connections had its tokens in its own folder; they moved
-to a connection of its own, unchanged.)
+to a connection of its own, unchanged.) Test this connection asks Slack, with the connection's own
+tokens, about the connection (its app, tokens, scopes, channels and you there), on `slack.com`, and
+posts a test message in your direct messages with the app, deleted once it's seen. A connection's
+card links to its app's pages on `api.slack.com` (its manifest and its settings, or a new app made
+from its manifest, the manifest in the link): they open in your browser when you click them, and
+Bridge AI sends nothing there itself.
 
 On a shared connection, which bot a question is for is decided on your computer: a bot's own slash
 command, the bot you set for that channel, a bot's name at the start, the bot that answered in that
@@ -191,7 +196,11 @@ What a bot reads from Slack, and when:
 - When it takes a question from someone it answers, it reads the conversation the question was
   asked in, then and only then: in a thread, that thread's earlier messages (at most 50); at the top
   of a channel, the channel's latest 20 messages and what's pinned there; in a direct message, its
-  latest 20. When it goes on in a thread it answered in, only what was said there since.
+  latest 20. When it goes on in a thread it answered in, only what was said there since. Of those,
+  its agent is given only the words of people who may ask that bot (never a guest's, someone's from
+  another company, or an integration's); at the top of a channel, only the asker's own and the bot's
+  own, and the message a shortcut was used on; for a scheduled post, the channel's latest messages
+  from people who may ask it.
 - When it connects again after being away (your computer asleep, Bridge AI closed), it reads its
   conversations, and the threads it's answering in, from the last message it saw (three days at
   most) for what was asked meanwhile.

@@ -1,29 +1,28 @@
-// Bots set up per use case (a beta feature, its id slack-bot): each bot's Access on its own page,
-// starting points for a use case, a shared connection's Routing with Try a Message, and the Bots
-// overview, with the stand-in Slack (its first app the shared connection), a stand-in model for
+// Bots set up per use case (a beta feature, its id slack-bot): each bot's Settings on its own page,
+// starting points for a use case, a shared connection's Routing with Try a message, and Bots' Bots
+// and Connections, with the stand-in Slack (its first app the shared connection), a stand-in model for
 // AI Assist (stand-ins/model.mjs) and the stand-in Claude Code answering (stand-ins/helper-claude.cjs).
 //   Starting points: each template says the access it starts with (Hiring: people you name, its own
 //   memory once you approve, no changes, 20 a day; Marketing: anyone in its channels, memory kept
 //   straight away, suggests changes) and its folder when that's here; Hiring made with ~/Hiring has
 //   that access as its own from the start, in its record; Marketing, with nothing here that can make
 //   a change, starts changing nothing and says so; a folder that isn't there makes nothing.
-//   Routing: its rules in connhub's order; whether AI Assist picks, and the bot for when nothing says
-//   which (one of the bots on it only).
+//   Routing: its rules in connhub's order, its Chief last (one of the bots on it only), nothing of AI
+//   Assist picking.
 //   Try a Message, for each rule: a command (the connection's; a bot's own only once there's one for
 //   each), the channel's bot, a name first, a reply in a thread, the bot last asked in a direct
-//   message, a channel a bot answers in without a mention, the only bot they may ask, AI Assist's
-//   pick, the bot set for when nothing says which, asking them which (with no model, said why; with
-//   AI Assist off, too), none they may ask, !help, and nothing for any bot; a bot named that they
+//   message, a channel a bot answers in without a mention, the only bot they may ask, its Chief
+//   (whatever the words; unsure from an older page taken as it; no model ever asked), asking them
+//   which with no Chief (said so), none they may ask, !help, and nothing for any bot; a bot named that they
 //   may not ask: that its polite no follows. None of it in the connection's record or a bot's, no
 //   last bot kept, nothing posted, no bot run. Without the key: turned away.
-//   Access, on a bot's page: its line over the tabs, the tab; who may ask changed there, and someone
-//   turned down before answered now; its limits changed there; Settings › Bots shows the same line,
-//   which opens the page at Access.
-//   In the app: the overview from the sidebar (each connection → its routing → its bots, a card each:
-//   what it's for, its access, how it stands, today, what waits), a card opening its page, its
-//   routing the Routing page; Routing: the rules in order, a channel's bot added, a description
-//   changed in place, Try a Message; a starting point from the new bot's chat, opening at Access;
-//   light and dark, on a computer and a phone.
+//   A bot's Settings, on its page: its line on top, opening Settings; who may ask changed there, and
+//   someone turned down before answered now; its limits changed there; Settings › Bots opens Bots.
+//   In the app: Bots from the sidebar (a card each: what it's for, its access, how it stands, today,
+//   what waits), a card opening its page; Connections: the bots a connection reaches, a channel's
+//   bot added on its card, Try a message there; what it's for changed in a bot's Settings; a starting
+//   point from AI Assist's chat for a new bot, opening at Settings; light and dark, on a computer and
+//   a phone.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startSlack, startModel, checks, until, sleep, browser, page, shot, phoneFaults, rawFetch, TEST } from '../lib/harness.mjs'
@@ -91,10 +90,10 @@ try {
   // ---------- Routing ----------
   await part('routing', async () => {
     const r = await kit.api(`/connections/${C}/routing`)
-    ok(r.rules.join() === 'command,default,name,thread,last,among,unsure', 'its rules, in connhub\'s order', r.rules)
-    ok(r.assist === true && r.unsure === null && r.assistModel?.model === null, 'AI Assist picks (no model yet), and when nothing says which it asks', { assist: r.assist, unsure: r.unsure, model: r.assistModel })
-    const bad = await kit.api(`/connections/${C}`, { unsure: 'b99' }, 'PATCH').then(() => null, (e) => e)
-    ok(/Pick one of the bots on this connection/.test(bad?.message || ''), 'the bot for when nothing says which is one of its bots', bad?.message)
+    ok(r.rules.join() === 'command,default,name,thread,last,chief', 'its rules, in connhub\'s order: its Chief where the AI Assist router and the bot for when nothing says which were', r.rules)
+    ok(r.chief === null && r.assist === undefined && r.unsure === undefined && r.assistModel === undefined, 'no Chief yet (so when nothing says which, it asks), and nothing of AI Assist picking', { chief: r.chief, assist: r.assist, unsure: r.unsure })
+    const bad = await kit.api(`/connections/${C}`, { chief: 'b99' }, 'PATCH').then(() => null, (e) => e)
+    ok(/Pick one of the bots on this connection/.test(bad?.message || ''), 'its Chief is one of its bots', bad?.message)
   })
 
   // ---------- Try a Message ----------
@@ -109,9 +108,9 @@ try {
     state: fs.readFileSync(stateFile, 'utf8'), posted: (await posted()).length, runs: startsOf('').length,
   })
   const before = await snap()
-  await part('try a message: with no model', async () => {
+  await part('try a message: with no chief', async () => {
     const x = await tryIt(C, { text: 'can you check something for me?', channel: 'C0PRIV', person: DANA })
-    ok(x.rule === 'asked' && x.detail === 'no-model' && x.asks.map((b) => b.id).join() === [HI, MK, PD].join(), 'more than one they may ask, and no model: it would ask them which, saying there\'s no model', x)
+    ok(x.rule === 'asked' && x.detail === 'no-chief' && x.chief === null && x.asks.map((b) => b.id).join() === [HI, MK, PD].join(), 'more than one they may ask, and no Chief: it would ask them which, saying there\'s no Chief', x)
   })
   // AI Assist's model from now on (a key, picked for Studio as AI Assist's).
   await kit.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
@@ -144,19 +143,21 @@ try {
     x = await tryIt(C, { text: 'anything new this week?', channel: 'C0PRIV', person: EVE })
     ok(x.rule === 'only' && x.bot?.id === MK && x.may.map((b) => b.id).join() === MK, '6. Eve may ask only Marketing: Marketing', x)
     const asked = model.asked(/^The bots \(an id/).length
+    await kit.api(`/connections/${C}`, { chief: PD }, 'PATCH')
     x = await tryIt(C, { text: 'what\'s the enterprise price for 50 seats?', channel: 'C0PRIV', person: DANA })
-    ok(x.rule === 'router' && x.bot?.id === PD, '6. AI Assist\'s pick from the descriptions: Pricing Desk', x)
-    ok(model.asked(/^The bots \(an id/).length === asked + 1, 'its model asked once, as it would be')
+    ok(x.rule === 'chief' && x.bot?.id === PD && x.chief?.id === PD && x.then?.may === null, '6. its Chief, Pricing Desk, which Dana may ask', x)
     x = await tryIt(C, { text: 'can you check something for me?', channel: 'C0PRIV', person: DANA })
-    ok(x.rule === 'asked' && x.detail === 'unsure' && x.asks.length === 3, '7. when AI Assist can\'t tell: it would ask them which, saying so', x)
+    ok(x.rule === 'chief' && x.bot?.id === PD, '6. whatever the words: its Chief', x)
+    ok(model.asked(/^The bots \(an id/).length === asked, 'and no model is asked which bot, ever')
+    x = await tryIt(C, { text: 'anything new this week?', channel: 'C0PRIV', person: EVE })
+    ok(x.rule === 'only' && x.bot?.id === MK, '7. Eve may not ask the Chief: the only bot she may ask, Marketing', x)
+    // (unsure, as the bot for that was called before, is the chief now.)
     await kit.api(`/connections/${C}`, { unsure: MK }, 'PATCH')
     x = await tryIt(C, { text: 'can you check something for me?', channel: 'C0PRIV', person: DANA })
-    ok(x.rule === 'unsure' && x.bot?.id === MK && x.detail === 'unsure', '7. with a bot set for that: Marketing', x)
-    await kit.api(`/connections/${C}`, { unsure: null, assist: false }, 'PATCH')
-    const n = model.asked(/^The bots \(an id/).length
+    ok(x.rule === 'chief' && x.bot?.id === MK && (await conn(C)).chief?.id === MK, 'unsure set, as an older page would: Marketing is the Chief', x)
+    await kit.api(`/connections/${C}`, { chief: null }, 'PATCH')
     x = await tryIt(C, { text: 'what\'s the enterprise price for 50 seats?', channel: 'C0PRIV', person: DANA })
-    ok(x.rule === 'asked' && x.detail === 'off' && model.asked(/^The bots \(an id/).length === n, 'AI Assist off: it would ask them which, and nothing went to the model', x)
-    await kit.api(`/connections/${C}`, { assist: true }, 'PATCH')
+    ok(x.rule === 'asked' && x.detail === 'no-chief' && model.asked(/^The bots \(an id/).length === asked, 'no Chief: it would ask them which, and nothing went to a model', x)
     await kit.api(`/bots/${MK}/settings`, { paused: true })
     x = await tryIt(C, { text: 'anything new this week?', channel: 'C0PRIV', person: EVE })
     ok(x.rule === 'none' && x.detail === 'not-allowed' && !x.bot, 'Marketing paused, Eve may ask none: the polite no', x)
@@ -177,6 +178,8 @@ try {
     const empty = await tryIt(C, { text: '  ' }).then(() => null, (e) => e)
     ok(/Type a message/.test(empty?.message || ''), 'an empty message: said', empty?.message)
   })
+  // (Pricing Desk its Chief from here on.)
+  await kit.api(`/connections/${C}`, { chief: PD }, 'PATCH')
 
   // Claude Code to answer from now on.
   kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'helper-claude.cjs'), 'utf8'))
@@ -193,19 +196,21 @@ try {
   const shown = (p, sel, ms = 10000) => p.locator(sel).first().waitFor({ timeout: ms }).then(() => true, () => false)
   const textOf = (p, sel) => p.locator(sel).first().innerText().catch(() => '')
   try {
-    // Access on a bot's page: who may ask, changed there, applies at once; its limits too.
-    await part('Access on its page', async () => {
+    // Its Settings on a bot's page: who may ask, changed there, applies at once; its limits too.
+    await part('Settings on its page', async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode: 'light' })
-      await p.locator(`.rail-bot-list [data-bot="${HI}"]`).click()
+      await p.locator('[data-setting="rail-bots"] .rail-nav-btn').click()
+      await p.locator('.bh-tabs [data-tab="bots"]').click()
+      await p.locator(`.bh .bo-card[data-bot="${HI}"]`).click()
       const line = await until(async () => { const x = await textOf(p, '.bp [data-setting="bots-access-line"]'); return /Hiring/.test(x) ? x : null }, 10000)
-      ok(/^Hiring: 1 person may ask · reads ~[\\/]Hiring · own memory · changes nothing$/.test((line || '').trim()), 'its line over the tabs: "Hiring: 1 person may ask · reads ~/Hiring · own memory · changes nothing"', line)
+      ok(/^Hiring: 1 person may ask · reads ~[\\/]Hiring · own memory · changes nothing$/.test((line || '').trim()), 'its line on top: "Hiring: 1 person may ask · reads ~/Hiring · own memory · changes nothing"', line)
       await p.locator('.bp [data-setting="bots-access-line"]').click()
-      ok(await shown(p, '.bp [data-setting="bots-access"] [data-setting="slack-askers"]') && await p.locator('.bp .sb-tabs [data-tab="access"]').getAttribute('aria-selected') === 'true', 'which opens Access: who may ask, its folders, changes, memory, MCP servers, what answers, limits')
-      const secs = await p.locator('.bp [data-setting="bots-access"] > section').evaluateAll((l) => l.map((e) => e.getAttribute('data-setting')))
-      ok(['slack-askers', 'slack-folders', 'slack-changes', 'bots-access-memory', 'bots-mcp', 'bots-answerers', 'slack-limits', 'bots-access-routing'].every((k) => secs.includes(k)), 'each part of what it may do is there', secs)
-      await p.locator('.bp .sb-tabs [role="tab"]', { hasText: 'Set Up' }).click()
-      ok(!(await p.locator('.bp [data-setting="slack-askers"]').count()) && await shown(p, '.bp [data-setting="slack-instructions"]'), 'and on its page, Set Up doesn\'t say them again')
-      await p.locator('.bp .sb-tabs [data-tab="access"]').click()
+      ok(await shown(p, '.bp [data-setting="bot-settings"] [data-setting="slack-askers"]') && await p.locator('.bp .sb-tabs [data-tab="settings"]').getAttribute('aria-selected') === 'true', 'which opens its Settings: who may ask, its folder, whether it edits files')
+      const adv = p.locator('.bp [data-setting="bot-advanced"]')
+      if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
+      await shown(p, '.bp [data-setting="bot-advanced"] [data-setting="slack-limits"]')
+      const secs = await p.locator('.bp [data-setting="bot-settings"] [data-setting]').evaluateAll((l) => l.map((e) => e.getAttribute('data-setting')))
+      ok(['slack-askers', 'slack-folders', 'bot-edits', 'slack-changes', 'bots-access-memory', 'bots-mcp', 'bots-answerers', 'slack-limits'].every((k) => secs.includes(k)), 'each part of what it may do is there, the rest under Advanced', secs)
       await p.locator('.bp [data-setting="slack-askers"] label.sb-mode', { hasText: 'Everyone in channels' }).click()
       ok(!!(await until(async () => (await botOf(HI)).settings.who === 'channels', 8000)), 'who may ask, changed on its page: everyone in its channels')
       ok(!!(await until(async () => /^Hiring: anyone in its channels may ask/.test((await textOf(p, '.bp [data-setting="bots-access-line"]')).trim()), 8000)), 'its line says so')
@@ -223,88 +228,100 @@ try {
       await slack.ask({ user: 'U0EVE', channel: 'C0PRIV', text: `${M} Hiring: which roles are open now? [answer Design and sales.]` })
       const s = await startOf('which roles are open now')
       ok(/You're Hiring/.test(briefOf(s)), 'Eve asks Hiring again: answered now, by Hiring', briefOf(s).slice(0, 120))
+      // (And in a public channel, where its answer waits for you.)
+      await slack.ask({ user: 'U0EVE', text: `${M} Hiring: any openings in sales? [answer One in sales.]` })
+      await startOf('any openings in sales')
       ok(!errors.length, 'no page errors', errors)
       await ctx.close()
     })
 
-    // Settings › Bots: the same line, which opens the page at Access.
-    await part('Settings › Bots links to Access', async () => {
+    // Settings › Bots: the switch, and Open Bots.
+    await part('Settings › Bots opens Bots', async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode: 'light' })
-      await openSettings(p)
-      await p.locator('.modal.settings .sb-chip', { hasText: 'Hiring' }).click()
-      ok(/^Hiring: anyone in its channels may ask/.test((await until(async () => textOf(p, '.modal.settings [data-setting="bots-access-line"]'), 8000) || '').trim()), 'Settings › Bots: its access in a line')
-      await p.locator('.modal.settings [data-setting="bots-access-line"]').click()
-      ok(!!(await until(async () => !(await p.locator('.modal.settings').count()) && (await p.locator('.bp .sb-tabs [data-tab="access"]').getAttribute('aria-selected').catch(() => null)) === 'true', 8000)), 'which opens its page at Access')
+      await openSettings(p, 'slack-bot', '.modal.settings [data-setting="bots-beta"]')
+      await p.locator('.modal.settings [data-setting="bots-open"]').click()
+      ok(!!(await until(async () => !(await p.locator('.modal.settings').count()) && await p.locator('.bh[data-setting="bots-home"]').isVisible(), 8000)), 'Settings › Bots: Open Bots opens Bots')
       ok(!errors.length, 'no page errors', errors)
       await ctx.close()
     })
 
-    // The overview and Routing, light and dark.
+    // Bots and its Connections, light and dark.
     for (const mode of ['light', 'dark']) {
-      await part(`overview and Routing, ${mode}`, async () => {
+      await part(`Bots and Connections, ${mode}`, async () => {
         const { ctx, p, errors } = await page(b, kit.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky' })
-        await p.locator('.rail-bot-list [data-bot="overview"]').click()
-        ok(await shown(p, `.bo .bo-lane[data-lane="${C}"] .bo-card`), `${mode}: the overview, from the sidebar`)
-        const lane = p.locator(`.bo .bo-lane[data-lane="${C}"]`)
-        ok(/@tester_bot/.test(await lane.locator('.bo-conn').innerText()) && /Routing/.test(await lane.locator('.bo-route').innerText()) && (await lane.locator('.bo-card').count()) === 3, `${mode}: tester_bot → its routing → its three bots`, await lane.innerText())
-        const card = await until(async () => { const x = await lane.locator(`.bo-card[data-bot="${HI}"]`).innerText(); return /question/.test(x) && /wait/.test(x) ? x : null }, 15000)
+        await p.locator('[data-setting="rail-bots"] .rail-nav-btn').click()
+        await p.locator('.bh-tabs [data-tab="bots"]').click()
+        ok(await shown(p, `.bh .bo-card[data-bot="${HI}"]`), `${mode}: Bots, from the sidebar, a card for each bot`)
+        ok((await p.locator('.bh .bo-card').count()) === 3, `${mode}: its three bots`)
+        const card = await until(async () => { const x = await p.locator(`.bh .bo-card[data-bot="${HI}"]`).innerText(); return /question/.test(x) && /wait/.test(x) ? x : null }, 15000)
         ok(/Answers the hiring team/.test(card || '') && /Anyone in its channels may ask · reads ~[\\/]Hiring · own memory/.test(card || '') && /Needs you/.test(card || '') && /\d questions? today/.test(card || '') && /1 waits for you/.test(card || ''), `${mode}: Hiring's card: what it's for, its access, how it stands, today, and the answer waiting for you`, card)
         await sleep(300)
         await shot(p, `${tag}bots-routing-overview-${mode}`)
-        await lane.locator('.bo-route').click()
-        ok(await shown(p, '.ro [data-setting="routing-rules"]'), `${mode}: its routing opens the Routing page`)
-        ok(/In Slack you call @tester_bot; it hands each question to one of these bots\./.test(await textOf(p, '.ro .ro-lead')), `${mode}: "In Slack you call @tester_bot; it hands each question to one of these bots."`)
-        const rules = await p.locator('.ro .ro-rules > li').evaluateAll((l) => l.map((e) => e.getAttribute('data-rule')))
-        ok(rules.join() === 'command,default,name,thread,last,among,unsure', `${mode}: its rules shown in order`, rules)
+        await p.locator('.bh-tabs [data-tab="connections"]').click()
+        const conn1 = p.locator(`.bh-card[data-connection="${C}"]`)
+        ok(await shown(p, `.bh-card[data-connection="${C}"]`), `${mode}: Connections: tester_bot's card`)
+        // (Pricing Desk its Chief, picked on the card; the others its specialists.)
+        const chips = await conn1.locator('[data-setting="connection-bots"] [data-bot]').evaluateAll((l) => l.map((e) => e.dataset.bot))
+        ok((await conn1.locator('[data-setting="connection-chief"] select').inputValue()) === PD && chips.join() === [HI, MK].join(), `${mode}: the three bots it reaches: Pricing Desk its Chief, Hiring and Marketing its specialists`, chips)
         await sleep(300)
         await shot(p, `${tag}bots-routing-rules-${mode}`)
         if (mode === 'light') {
-          // A channel's bot, added on the page.
-          const def = p.locator('.ro [data-setting="connection-defaults"]')
+          // A channel's bot, added on the card.
+          const def = conn1.locator('[data-setting="connection-defaults"]')
           await until(async () => (await def.locator('select').first().locator('option').count()) > 1, 10000)
           await def.locator('select').nth(0).selectOption('C0LAUNCH')
           await def.locator('select').nth(1).selectOption(PD)
           await def.locator('button', { hasText: 'Add' }).click()
-          ok(!!(await until(async () => (await conn(C)).defaults.some((d) => d.id === 'C0LAUNCH' && d.bot === PD), 8000)), 'a channel\'s bot added on the Routing page: #launch → Pricing Desk')
-          // A description, changed in place: what AI Assist picks by.
-          const desc = p.locator(`.ro .ro-desc[data-bot="${MK}"] input`)
-          await desc.fill('Answers questions about campaigns and the brand guide')
-          await desc.press('Enter')
-          ok(!!(await until(async () => (await botOf(MK)).description === 'Answers questions about campaigns and the brand guide', 8000)), 'Marketing\'s description, changed in place')
-          // Try a Message, on the page.
+          ok(!!(await until(async () => (await conn(C)).defaults.some((d) => d.id === 'C0LAUNCH' && d.bot === PD), 8000)), 'a channel\'s bot added on the card: #launch → Pricing Desk')
+          // (A description, changed in place, was what AI Assist picked by: the Chief does that now,
+          // set on the connection's card, bots-ui.)
+          // Try a message, on the card.
           const n0 = await snap()
-          await until(async () => (await p.locator('.ro-try select').first().locator('option').count()) > 3, 10000)
-          await p.locator('.ro-try textarea').fill('Pricing Desk: what does the team plan cost?')
-          await p.locator('.ro-try select').nth(0).selectOption('c:C0LAUNCH')
-          await p.locator('.ro-try select').nth(1).selectOption('U0SAM')
-          await p.locator('.ro-try button[type="submit"]').click()
-          ok(await shown(p, `.ro-out[data-rule="default"][data-bot="${PD}"]`, 10000), 'Try a Message: Sam in #launch goes to Pricing Desk, #launch\'s bot', await textOf(p, '.ro-out'))
+          await conn1.locator('[data-setting="routing-try"] > summary').click()
+          await until(async () => (await conn1.locator('.ro-try select').first().locator('option').count()) > 3, 10000)
+          await conn1.locator('.ro-try textarea').fill('Pricing Desk: what does the team plan cost?')
+          await conn1.locator('.ro-try select').nth(0).selectOption('c:C0LAUNCH')
+          await conn1.locator('.ro-try select').nth(1).selectOption('U0SAM')
+          await conn1.locator('.ro-try button[type="submit"]').click()
+          ok(await shown(p, `.ro-out[data-rule="default"][data-bot="${PD}"]`, 10000), 'Try a message: Sam in #launch goes to Pricing Desk, #launch\'s bot', await textOf(p, '.ro-out'))
           ok(/Rule 2, the channel's bot/.test(await textOf(p, '.ro-out')) && /They may ask Pricing Desk, so it would answer\./.test(await textOf(p, '.ro-out')) && /nothing was sent, answered or kept/.test(await textOf(p, '.ro-out')), 'saying which rule, that Sam may ask it, and that nothing was sent', await textOf(p, '.ro-out'))
-          await p.locator('.ro-try textarea').fill('Hiring: who is interviewing today?')
-          await p.locator('.ro-try select').nth(0).selectOption('dm')
-          await p.locator('.ro-try select').nth(1).selectOption('U0SAM')
-          await p.locator('.ro-try button[type="submit"]').click()
+          await conn1.locator('.ro-try textarea').fill('Hiring: who is interviewing today?')
+          await conn1.locator('.ro-try select').nth(0).selectOption('dm')
+          await conn1.locator('.ro-try select').nth(1).selectOption('U0SAM')
+          await conn1.locator('.ro-try button[type="submit"]').click()
           ok(!!(await until(async () => /named first|names Hiring/.test(await textOf(p, '.ro-out')) || null, 8000)), 'a direct message naming Hiring: Hiring', await textOf(p, '.ro-out'))
           await sleep(500)
           const n1 = await snap()
           ok(n1.routed === n0.routed && n1.events === n0.events && n1.runs === n0.runs && n1.posted === n0.posted, 'and from the page too, nothing kept, posted or run', { n0, n1 })
           await kit.api(`/connections/${C}`, { defaults: [] }, 'PATCH')
+          // What it's for, changed in its Settings: what the Chief picks it by.
+          await p.locator('.bh-tabs [data-tab="bots"]').click()
+          await p.locator(`.bh .bo-card[data-bot="${MK}"]`).click()
+          await p.locator('.bp .sb-tabs [data-tab="settings"]').click()
+          const desc = p.locator('.bp [data-setting="bot-purpose"] input')
+          await desc.fill('Answers questions about campaigns and the brand guide')
+          await desc.press('Enter')
+          ok(!!(await until(async () => (await botOf(MK)).description === 'Answers questions about campaigns and the brand guide', 8000)), 'Marketing\'s description, changed in its Settings')
+          await p.locator('[data-setting="rail-bots"] .rail-nav-btn').click()
+          await p.locator('.bh-tabs [data-tab="connections"]').click()
+          await p.locator(`.bh-card[data-connection="${C}"] .ro-try`).scrollIntoViewIfNeeded().catch(() => {})
+          await sleep(300)
+          await shot(p, `${tag}bots-routing-routing-${mode}`)
         }
-        await p.locator('.ro .ro-try').scrollIntoViewIfNeeded()
-        await sleep(300)
-        await shot(p, `${tag}bots-routing-routing-${mode}`)
-        await p.locator('.rail-bot-list [data-bot="overview"]').click()
-        await p.locator(`.bo .bo-card[data-bot="${PD}"]`).first().click()
+        await p.locator('.bh-tabs [data-tab="bots"]').click()
+        await p.locator(`.bh .bo-card[data-bot="${PD}"]`).first().click()
         ok(!!(await until(async () => (await textOf(p, '.bp .bp-name')) === 'Pricing Desk', 8000)), `${mode}: a card opens its bot's page`)
         ok(!errors.length, `${mode}: no page errors`, errors)
         await ctx.close()
       })
     }
 
-    // A starting point from the new bot's chat: opened at Access once it's made.
+    // A starting point from AI Assist's chat for a new bot: opened at Settings once it's made.
     await part('a starting point from the chat', async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode: 'light' })
-      await p.locator('.rail-bots-head .rail-tool[aria-label="New bot"]').click()
+      await p.locator('[data-setting="rail-bots"] .rail-tool[aria-label="New bot"]').click()
+      ok(await shown(p, '.bh [data-setting="bots-quick"]'), '+ in the sidebar: a new bot\'s three questions')
+      await p.locator('.bh [data-setting="bots-quick"] .ai-assist-link').click()
       await p.locator('.bc [data-setting="bots-use-cases"] [data-template="hiring"]').click()
       ok(await shown(p, '.bc [data-setting="bots-start"]'), 'Hiring, picked: what it starts with, and its folder')
       const start = await textOf(p, '.bc [data-setting="bots-start"]')
@@ -313,7 +330,7 @@ try {
       await p.locator('.bc .sb-new input').fill('Hiring West')
       await shot(p, `${tag}bots-routing-start`)
       await p.locator('.bc .sb-new button[type="submit"]').click()
-      ok(!!(await until(async () => (await textOf(p, '.bp .bp-name')) === 'Hiring West' && (await p.locator('.bp .sb-tabs [data-tab="access"]').getAttribute('aria-selected').catch(() => null)) === 'true', 10000)), 'made: its page, at Access')
+      ok(!!(await until(async () => (await textOf(p, '.bp .bp-name')) === 'Hiring West' && (await p.locator('.bp .sb-tabs [data-tab="settings"]').getAttribute('aria-selected').catch(() => null)) === 'true', 10000)), 'made: its page, at Settings')
       const v = (await kit.api('/bots')).bots.find((x) => x.name === 'Hiring West')
       const s = v && (await botOf(v.id)).settings
       ok(s?.who === 'named' && s.memory === 'approve' && fwd(s.readsFrom[0]) === '~/Hiring' && s.limits.day === 20, 'with Hiring\'s access as its own', s)
@@ -321,37 +338,41 @@ try {
       await ctx.close()
     })
 
-    // A phone: the overview, Routing with Try a Message, and a bot's Access, each fitting.
+    // A phone: Bots, a connection's Try a message, and a bot's Settings, each fitting.
     for (const mode of ['light', 'dark']) {
       await part(`a phone, ${mode}`, async () => {
         const { ctx, p, errors } = await page(b, kit.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', phone: true })
         await p.locator('.tabbar button', { hasText: 'More' }).click()
         await p.locator('.m-more-row[data-id="bots"]').click()
-        await p.locator('[data-setting="phone-bots"] .m-more-row[data-id="overview"]').click()
-        ok(await shown(p, `.bo.phone .bo-lane[data-lane="${C}"] .bo-card`), `${mode}, a phone: the overview`)
+        await p.locator('[data-setting="phone-bots"] .bh-tabs [data-tab="bots"]').click()
+        ok(await shown(p, `[data-setting="phone-bots"] .bo-card[data-bot="${HI}"]`), `${mode}, a phone: Bots`)
         await sleep(400)
-        let faults = await phoneFaults(p, '.bo.phone')
-        ok(!Object.keys(faults).length, `${mode}, a phone: the overview fits`, faults)
+        let faults = await phoneFaults(p, '[data-setting="phone-bots"]')
+        ok(!Object.keys(faults).length, `${mode}, a phone: Bots fits`, faults)
         await shot(p, `${tag}bots-routing-phone-overview-${mode}`)
-        await p.locator(`.bo.phone .bo-lane[data-lane="${C}"] .bo-route`).click()
-        ok(await shown(p, '.ro.phone [data-setting="routing-try"]'), `${mode}, a phone: Routing`)
-        await p.locator('.ro.phone .ro-try textarea').fill('what\'s the enterprise price for 50 seats?')
-        await p.locator('.ro.phone .ro-try button[type="submit"]').click()
-        ok(await shown(p, `.ro.phone .ro-out[data-rule="router"][data-bot="${PD}"]`, 15000), `${mode}, a phone: Try a Message, AI Assist's pick`, await textOf(p, '.ro-out'))
+        await p.locator('[data-setting="phone-bots"] .bh-tabs [data-tab="connections"]').click()
+        const card = p.locator(`[data-setting="phone-bots"] .bh-card[data-connection="${C}"]`)
+        await card.locator('[data-setting="routing-try"] > summary').click()
+        ok(await shown(p, `[data-setting="phone-bots"] .bh-card[data-connection="${C}"] .ro-try textarea`), `${mode}, a phone: a connection's Try a message`)
+        await card.locator('.ro-try textarea').fill('what\'s the enterprise price for 50 seats?')
+        await card.locator('.ro-try button[type="submit"]').click()
+        ok(await shown(p, `[data-setting="phone-bots"] .ro-out[data-rule="chief"][data-bot="${PD}"]`, 15000), `${mode}, a phone: Try a message, its Chief`, await textOf(p, '.ro-out'))
         await sleep(300)
-        faults = await phoneFaults(p, '.ro.phone')
-        ok(!Object.keys(faults).length, `${mode}, a phone: Routing fits`, faults)
+        faults = await phoneFaults(p, '[data-setting="phone-bots"]')
+        ok(!Object.keys(faults).length, `${mode}, a phone: Connections fits`, faults)
         await shot(p, `${tag}bots-routing-phone-routing-${mode}`)
-        await p.locator('.m-view-back', { hasText: 'Bots' }).click()
-        await p.locator(`[data-setting="phone-bots"] .m-more-row[data-id="${HI}"]`).click()
-        await p.locator('.bp.phone .sb-tabs [data-tab="access"]').click()
-        ok(await shown(p, '.bp.phone [data-setting="bots-access"] [data-setting="slack-askers"]'), `${mode}, a phone: a bot's Access`)
+        await p.locator('[data-setting="phone-bots"] .bh-tabs [data-tab="bots"]').click()
+        await p.locator(`[data-setting="phone-bots"] .bo-card[data-bot="${HI}"]`).click()
+        await p.locator('.bp.phone .sb-tabs [data-tab="settings"]').click()
+        const adv = p.locator('.bp.phone [data-setting="bot-advanced"]')
+        if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
+        ok(await shown(p, '.bp.phone [data-setting="bot-settings"] [data-setting="slack-askers"]'), `${mode}, a phone: a bot's Settings`)
         await p.locator('.bp.phone [data-setting="slack-limits"] input').first().fill('15')
         await p.locator('.bp.phone [data-setting="slack-limits"] input').first().blur()
         ok(!!(await until(async () => (await botOf(HI)).settings.limits.day === 15, 8000)), `${mode}, a phone: its limits changed from the phone`)
         await sleep(300)
         faults = await phoneFaults(p, '.bp.phone .bp-main')
-        ok(!Object.keys(faults).length, `${mode}, a phone: Access fits`, faults)
+        ok(!Object.keys(faults).length, `${mode}, a phone: its Settings fit`, faults)
         await shot(p, `${tag}bots-routing-phone-access-${mode}`)
         ok(!errors.length, `${mode}, a phone: no page errors`, errors)
         await ctx.close()

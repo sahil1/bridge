@@ -18,12 +18,13 @@
 //   Limits per person (a day, at once: the next waits its turn, a run's longest: stopped and passed
 //   to you where At the Time Limit says Stop), and pause, which stops a running answer at once and
 //   passes questions to you.
-//   At the time limit, asked (Ask Me, every bot's to start, an older one's too): in Needs You and
-//   your Slack DM with Continue 10, Continue 30 and Stop, the asker told once; Continue in the grace
-//   window goes on with no gap; no answer stops it and passes it to you, and a later Continue (Needs
-//   You, on the computer) picks up its agent's conversation where it stopped, answering in the same
-//   place; Stop; Continue held to its Longest Run, and stopped there; someone else's press, or the
-//   asker's "continue 30", refused; each in the record and Activity; Continue and Stop on the phone.
+//   At the time limit, asked (Ask Me, every bot's to start, an older one's too, a Longest Run of 240
+//   minutes): in Needs You and your Slack DM with Continue 10, Continue 30 and Stop, the asker told
+//   once that it's still on it; Continue in the grace window goes on with no gap; no answer is a yes:
+//   it carries on to its Longest Run, not asked again, and answers; Stop; Continue held to its Longest
+//   Run, where its session's turn is interrupted, the session kept, and the asker told to say "carry
+//   on", which goes on in the same session; someone else's press, or the asker's "continue 30",
+//   refused; each in the record and Activity; Continue and Stop on the phone.
 //   Answering without asking: for a public channel, an answer that quotes one of its files waits for
 //   you; in a private channel, or not quoting, it goes.
 //   A direct message's earlier turns given from the record, as sent; each person's running context,
@@ -33,7 +34,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { checks, until, sleep, browser, page, shot, phoneFaults, IS_WIN } from '../lib/harness.mjs'
-import { botKit, openSettings, M, OWNER } from '../lib/bots.mjs'
+import { botKit, M, OWNER, openBot } from '../lib/bots.mjs'
 
 const { ok, done } = checks('bots-approvals')
 const HOLD = 4000 // how long a draft waits before "I'm checking this" (BRIDGE_BOT_HOLD_MS)
@@ -74,7 +75,7 @@ try {
   delete older.limits.longest
   fs.writeFileSync(BOT_JSON, JSON.stringify(older, null, 2))
   const carried = (await botOf()).settings.limits
-  ok(fresh.atLimit === 'ask' && fresh.longest === 120 && carried.atLimit === 'ask' && carried.longest === 120, 'At the Time Limit is Ask Me and its Longest Run 120 minutes, for a new bot and an older one', { fresh, carried })
+  ok(fresh.atLimit === 'ask' && fresh.longest === 240 && carried.atLimit === 'ask' && carried.longest === 240, 'At the Time Limit is Ask Me and its Longest Run 240 minutes, for a new bot and an older one', { fresh, carried })
 
   // ---------- A draft in your Slack DM ----------
   await part('approvals in Slack', async () => {
@@ -220,7 +221,7 @@ try {
     const stopped = await until(async () => (await inThread(long.ts)).find((x) => x.text === 'Stopped.'), 15000)
     const tl = await timelineOf('b1', 'Summarize every FAQ entry')
     ok(!!stopped && tl.some((e) => e.type === 'run.finished' && e.end === 'stopped' && e.why === '!stop' && e.by === 'Sam'), '!stop: the answer running in that thread is stopped, and said', tl.filter((e) => e.type === 'run.finished'))
-    ok(!!going && !!(await until(async () => !(await kit.api('/fleet?all=1')).agents.some((a) => a.paneId === going?.paneId), 10000)), 'its agent\'s tab is closed')
+    ok(!!going && logOf('interrupts.log').length >= 1 && !!(await until(async () => (await kit.api('/fleet?all=1')).agents.some((a) => a.paneId === going?.paneId && a.status !== 'working'), 10000)), 'its session\'s turn is interrupted (Esc), its pane kept for the next', logOf('interrupts.log'))
 
     // !forget me (D3).
     const runsDir = path.join(kit.data, 'bots', 'b1', 'trace', 'runs')
@@ -302,8 +303,8 @@ try {
     ok(a?.state === 'answering' && a.limit.choices.join() === '10,30' && a.limit.ran >= 1 && !!a.limit.doing && Date.parse(a.limit.until) > Date.now(), 'at its time limit it\'s asked about in Needs You, still running: how long, what it\'s doing, until when it goes on, Continue 10 or 30', a?.limit)
     const dm = await until(() => dmOf('Count every FAQ entry'), 10000)
     ok(!!dm && /Helpdesk\*'s answer to \*Dana\* in #launch has run \d+ minutes?: /.test(JSON.stringify(dm.blocks)) && actionsOf(dm).join() === `bb_continue:${a.id} 10,bb_continue:${a.id} 30,bb_halt:${a.id}`, 'and in your Slack DM: "Helpdesk\'s answer to Dana in #launch has run 1 minute: …", Continue 10 more minutes, Continue 30 more minutes, Stop', dm && { blocks: JSON.stringify(dm.blocks).slice(0, 500), actions: actionsOf(dm) })
-    const longer = await until(async () => (await inThread(q.ts)).find((x) => /longer than usual/.test(x.text)), 8000)
-    ok(longer?.text === 'This is taking me longer than usual: I\'m checking with Tester that I can carry on.', 'Dana is told, where she asked, that it\'s taking longer and it\'s checking it can carry on', longer)
+    const longer = await until(async () => (await inThread(q.ts)).find((x) => /taking a while/.test(x.text)), 8000)
+    ok(longer?.text === 'This is taking a while; I\'m still on it.', 'Dana is told, where she asked, that it\'s taking a while and it\'s still on it', longer)
     // Nobody else can let it go on: not a press of Continue, nor the asker's words.
     await slack.click({ user: 'U0SAM', action_id: 'bb_continue', value: `${a.id} 30` })
     ok(!!(await until(async () => (await state()).ephemeral.find((x) => x.user === 'U0SAM' && /Only Tester/.test(x.text)), 8000)), 'someone else\'s Continue does nothing, and tells them only Tester decides')
@@ -317,47 +318,31 @@ try {
     const d = await draftOf('Count every FAQ entry', 30000)
     const tl = await timelineOf('b1', 'Count every FAQ entry')
     ok(d?.draft === 'Nine entries.' && tl.filter((e) => e.type === 'run.started').length === 1 && tl.filter((e) => e.type === 'run.finished').map((e) => e.end).join() === 'finished', 'it went on with no gap: one run, to its answer', tl.filter((e) => /^run\./.test(e.type)).map((e) => `${e.type}:${e.end || ''}`))
-    ok((await inThread(q.ts)).filter((x) => /longer than usual/.test(x.text)).length === 1 && tl.filter((e) => e.type === 'sent' && e.kind === 'longer').length === 1, 'told it\'s taking longer once', tl.filter((e) => e.type === 'sent').map((e) => e.kind))
+    ok((await inThread(q.ts)).filter((x) => /taking a while/.test(x.text)).length === 1 && tl.filter((e) => e.type === 'sent' && e.kind === 'longer').length === 1, 'told it\'s taking longer once', tl.filter((e) => e.type === 'sent').map((e) => e.kind))
     ok(tl.some((e) => e.type === 'limit.asked' && e.ran >= 1 && e.doing) && tl.some((e) => e.type === 'approval.asked' && e.limit && e.via === 'slack'), 'its record: asked at its time limit, in your Slack DM')
     await kit.api(`/bots/questions/${d.id}`, { send: false })
   })
 
-  await part('at the time limit: no answer in time, then Continue', async () => {
-    const q = await slack.ask({ user: 'U0DANA', text: `${M} Compare every FAQ answer [work 20] [then 2] [answer All consistent.]` })
-    await asking('Compare every FAQ answer')
+  await part('at the time limit: no answer in time, it carries on', async () => {
+    const q = await slack.ask({ user: 'U0DANA', text: `${M} Compare every FAQ answer [work 20] [answer All consistent.]` })
+    const a = await asking('Compare every FAQ answer')
+    const dm = await until(() => dmOf('Compare every FAQ answer'), 10000)
+    const carried = await until(() => events().find((e) => e.type === 'limit.carried' && e.q === a?.id), GRACE + 15000)
+    ok(!!carried && Date.parse(carried.until) > Date.now() && carried.ran >= 1, 'no answer in the grace window is a yes: it carries on, up to its Longest Run', carried)
+    ok(/No answer: carried on/.test((await until(() => updatedOf(dm?.ts), 8000))?.text || ''), 'your Slack DM says so')
     const d = await draftOf('Compare every FAQ answer', 30000)
-    const end = (await timelineOf('b1', 'Compare every FAQ answer')).find((e) => e.type === 'run.finished')
-    ok(d?.needsOwner && /nobody said to carry on in time/.test(d.why || '') && end?.end === 'timeout' && end.why === 'expired' && end.paused && end.resume === 'session' && !!end.session, 'no answer in the grace window: stopped, and passed to you as before, its conversation kept', { why: d?.why, end })
-    ok(d.limit?.phase === 'stopped' && d.limit.how === 'session' && d.limit.choices.join() === '10,30', 'Needs You still offers Continue, to pick it up where it stopped', d.limit)
-    ok(!!(await until(async () => (await inThread(q.ts)).find((x) => x.text === 'I\'ve stopped for now, as this was taking too long, and passed it on to Tester, who\'ll answer here.'), 8000)), 'Dana is told it stopped, and that it\'s passed on')
-    const dm = await until(async () => { const m = await dmOf('Compare every FAQ answer'); return actionsOf(m).includes(`bb_continue:${d.id} 10`) ? m : null }, 10000)
-    ok(!!dm && actionsOf(dm).includes(`bb_edit:${d.id}`) && /Continue picks it up where it stopped, for a day/.test(JSON.stringify(dm.blocks)), 'your Slack DM has the reply to write, and Continue', dm && actionsOf(dm))
-    // Continue, from Needs You on the computer: picked up where it stopped, answered in the same place.
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
-    await p.locator('.needs-chip').click({ timeout: 15000 })
-    const card = p.locator('.ny-item.t-slack', { hasText: 'Compare every FAQ answer' }).first()
-    await card.waitFor({ timeout: 10000 })
-    ok(/Continue picks it up where it stopped/.test(await card.innerText()), 'Needs You: the reply to write, or Continue to pick it up', await card.innerText())
-    await shot(p, `${tag}bots-approvals-limit-stopped`)
-    await card.getByRole('button', { name: 'Continue 30 more minutes' }).click()
-    const again = await until(() => startsOf('Compare every FAQ answer')[1], 20000)
-    ok(!!again && again.args.includes('--fork-session') && again.args[again.args.indexOf('--resume') + 1] === end.session && /you were paused there/.test(briefOf(again)), 'its agent\'s conversation picked up where it stopped (a copy, --fork-session), told it was paused', again?.args)
-    const done2 = await until(async () => (await needs()).find((x) => x.text.includes('Compare every FAQ answer') && x.draft === 'All consistent.'), 30000)
-    ok(done2?.place?.name === 'launch' && !done2.needsOwner, 'and its answer drafted, for the same place', done2)
     const tl = await timelineOf('b1', 'Compare every FAQ answer')
-    const c = tl.find((e) => e.type === 'limit.continued')
-    const r = tl.filter((e) => e.type === 'run.started').at(-1)
-    ok(c?.resumed && c.how === 'session' && c.by === 'Tester' && c.via === 'app' && c.minutes === 30 && r?.resumed?.how === 'session' && r.from === end.session, 'its record: Continue after it stopped, by you in Bridge AI, and the run going on from its conversation', { c, r: r?.resumed })
-    await kit.api(`/bots/questions/${done2.id}`, { send: true })
+    ok(d?.draft === 'All consistent.' && !d.needsOwner && tl.filter((e) => e.type === 'limit.asked').length === 1 && !tl.some((e) => e.type === 'run.finished' && e.end === 'timeout'), 'it answers in the end, asked about once, never stopped', { draft: d?.draft, events: tl.map((e) => e.type) })
+    ok(!(await inThread(q.ts)).some((x) => /stopped for now/.test(x.text || '')), 'and Dana isn\'t told it stopped')
+    await kit.api(`/bots/questions/${d.id}`, { send: true })
     ok(!!(await until(async () => (await inThread(q.ts)).find((x) => x.text === 'All consistent.'), 15000)), 'sent where it was asked')
     // The record's lines, in Activity.
-    await p.keyboard.press('Escape')
-    await openSettings(p)
-    await p.locator('.sb-tabs [role="tab"]', { hasText: 'Activity' }).click()
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    await openBot(p, { tab: 'activity' })
     await p.locator('.sb-conv', { hasText: 'Compare every FAQ answer' }).click()
     await p.locator('.sb-tl li').first().waitFor({ timeout: 10000 })
     const words = await p.locator('.sb-timeline').innerText()
-    ok(/At its time limit, after \d+ minutes: asked you whether it may carry on/.test(words) && /Asked you in your Slack direct messages whether it may carry on/.test(words) && /Told them it's taking longer/.test(words) && /Stopped after \d+ minutes: nobody said to carry on in time/.test(words) && /Tester let it carry on for 30 more minutes \(after it was stopped\)/.test(words) && /picking up where it stopped at its time limit, for 30 minutes/.test(words), 'Activity: asked, told, stopped for want of an answer, let carry on by you, picked up', words.slice(0, 1500))
+    ok(/At its time limit, after \d+ minutes: asked you whether it may carry on/.test(words) && /Asked you in your Slack direct messages whether it may carry on/.test(words) && /Nobody answered at its time limit, so it carried on/.test(words) && !/Stopped after/.test(words), 'Activity: asked, nobody answered, carried on, never stopped', words.slice(0, 1500))
     await shot(p, `${tag}bots-approvals-limit-activity`)
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
@@ -375,16 +360,21 @@ try {
     await kit.api(`/bots/questions/${d.id}`, { send: false })
     // Its Longest Run: Continue gives no more than what's left, and it's stopped there.
     await kit.api('/bots/b1/settings', { limits: { minutes: 1, longest: 5 } })
-    await slack.ask({ user: 'U0SAM', text: `${M} Rewrite every FAQ answer [work 40] [answer Rewritten.]` })
+    const rq = await slack.ask({ user: 'U0SAM', text: `${M} Rewrite every FAQ answer [work 40] [answer Rewritten.]` })
     const n = await asking('Rewrite every FAQ answer')
     ok(n?.limit.choices.length === 1 && n.limit.choices[0] < 10 && n.limit.longest === 5, 'near its Longest Run, Continue offers only what\'s left', n?.limit)
     const r = await kit.api(`/bots/questions/${n.id}/limit`, { act: 'continue', minutes: 10 })
     ok(r.given >= 1 && r.given < 10, 'Continue 10 gives what\'s left of its Longest Run', r)
-    const s = await draftOf('Rewrite every FAQ answer', 30000)
+    const told = await until(async () => (await inThread(rq.ts)).find((x) => /\(my longest run\)\. Say “carry on” to continue\./.test(x.text || '')), 30000)
     const tl2 = await timelineOf('b1', 'Rewrite every FAQ answer')
-    ok(s?.needsOwner && /its Longest Run is 5 minutes/.test(s.why || '') && !s.limit && tl2.find((e) => e.type === 'run.finished')?.why === 'longest' && tl2.filter((e) => e.type === 'limit.asked').length === 1 && tl2.find((e) => e.type === 'limit.continued')?.asked === 10, 'and at its Longest Run it\'s stopped, saying why, with no Continue', { why: s?.why, events: tl2.map((e) => e.type) })
-    await kit.api(`/bots/questions/${s.id}`, { send: false })
+    ok(!!told && tl2.find((e) => e.type === 'run.finished')?.why === 'longest' && tl2.filter((e) => e.type === 'limit.asked').length === 1 && tl2.find((e) => e.type === 'limit.continued')?.asked === 10, 'at its Longest Run its turn is interrupted, and Sam is told to say carry on', { told: told?.text, events: tl2.map((e) => e.type) })
+    ok(!(await needs()).some((x) => x.id === n.id), '(nothing waits on you)')
     await limitsBack()
+    await slack.ask({ user: 'U0SAM', thread: rq.ts, text: `${M} carry on [answer Rewritten.]` })
+    const t = await until(() => logOf('turns.log').find((x) => /carry on/.test(x.text)), 30000)
+    const s = await draftOf('carry on', 30000)
+    ok(!!t && s?.draft === 'Rewritten.' && s.session === n.session, '"carry on" goes on in the same session', { typed: !!t, draft: s?.draft, session: s?.session, was: n.session })
+    if (s) await kit.api(`/bots/questions/${s.id}`, { send: false })
   })
 
   await part('at the time limit: Needs You on the phone', async () => {
@@ -461,52 +451,55 @@ try {
     const people = () => { try { return JSON.parse(fs.readFileSync(path.join(kit.data, 'bots', 'b1', 'people.json'), 'utf8')).people } catch { return {} } }
     const earlier = (x) => (/----- earlier conversations -----([\s\S]*?)----- end of earlier conversations -----/.exec(briefOf(x)) || [])[1] ?? null
     const send = async (words, text) => { const d = await draftOf(words); await kit.api(`/bots/questions/${d.id}`, { send: true, ...(text ? { text } : {}) }); return d }
-    await slack.ask({ user: 'U0DANA', dm: true, text: 'Which floor is support on? [answer The third floor.]' })
-    await send('Which floor is support on', 'The third floor, by the lifts.')
-    await postedLike(/by the lifts/)
-    // Your edit there is offered as a learning: that direct message's own, waiting for your Keep even
-    // with learnings kept straight away, and never given anywhere else.
-    const fix = await until(async () => (await mem()).find((y) => y.source === 'edit' && /Which floor/.test(y.text)), 8000)
-    ok(fix?.state === 'proposed' && fix.private === true && fix.kind === 'channel' && fix.of === 'D0DANA' && fix.place?.kind === 'dm' && fix.place.name === 'Dana', 'your correction of a draft in a direct message: that place\'s own, waiting for your Keep, though learnings are kept straight away', fix)
+    const sidOf = (x) => { const i = (x?.args || []).indexOf('--session-id'); return i >= 0 ? x.args[i + 1] : null }
+    // A direct message: answered at once, and one session, its next question that session's next turn.
+    await slack.ask({ user: 'U0DANA', dm: true, text: 'Which floor is support on? [answer The third floor.] [remember Which floor is support on: the third floor, by the lifts]' })
+    const floor = await postedLike(/The third floor/)
+    ok(floor?.channel === 'D0DANA', 'Dana\'s question in a direct message is answered at once', floor)
+    // What it learns there is that direct message's own: waiting for your Keep even with learnings kept
+    // straight away, and never given anywhere else.
+    const fix = await until(async () => (await mem()).find((y) => /Which floor/.test(y.text)), 8000)
+    ok(fix?.state === 'proposed' && fix.private === true && fix.kind === 'channel' && fix.of === 'D0DANA' && fix.place?.kind === 'dm' && fix.place.name === 'Dana', 'what it learns in a direct message: that place\'s own, waiting for your Keep, though learnings are kept straight away', fix)
     const asked = await until(() => dmOf('used only there'), 10000)
     ok(/a direct message with Dana, used only there/.test(JSON.stringify(asked?.blocks || [])) && /Which floor/.test(JSON.stringify(asked?.blocks || [])), 'your Slack DM asks, saying where it came from', asked?.blocks)
     await kit.api(`/bots/b1/memory/${fix.id}`, { keep: true }, 'PATCH')
+    const s1 = await startOf('Which floor is support on')
     await slack.ask({ user: 'U0DANA', dm: true, text: 'Is it open at lunch? [answer Yes, all day.]' })
-    const s2 = await startOf('Is it open at lunch')
-    ok(/----- earlier turns -----\nDana: Which floor is support on\? \[answer The third floor\.\]\nyou \(Helpdesk\): The third floor, by the lifts\.\n----- end of earlier turns -----/.test(briefOf(s2)) && !s2.args.join(' ').includes('--fork-session'), 'a direct message, one running conversation: its earlier turns given from the record, the answer as it was sent', briefOf(s2).slice(0, 1600))
-    ok(/----- memory -----[^]*Which floor is support on[^]*----- end of memory -----/.test(briefOf(s2)), 'the correction you kept, given in that direct message', briefOf(s2).slice(0, 1600))
-    await send('Is it open at lunch')
     const lunch = await postedLike(/Yes, all day/)
     ok(lunch?.channel === 'D0DANA' && !lunch.thread_ts, 'answered plainly in the direct message', lunch)
-    ok(people().U0DANA?.kept.length === 2 && people().U0DANA.kept.every((x) => x.where?.kind === 'dm' && x.where.private) && events().some((e) => e.type === 'context.noted' && e.person?.id === 'U0DANA' && e.state === 'kept'), 'kept straight away in her running context: her words and its answers, marked private', people().U0DANA)
+    ok(!startsOf('Is it open at lunch').length && logOf('turns.log').some((t) => t.text.includes('Is it open at lunch') && t.session === sidOf(s1)), 'a direct message, one running conversation: the next question goes on in the same session', logOf('turns.log').map((t) => t.session))
+    ok(await until(() => people().U0DANA?.kept.length === 2, 8000) && people().U0DANA.kept.every((x) => x.where?.kind === 'dm' && x.where.private) && events().some((e) => e.type === 'context.noted' && e.person?.id === 'U0DANA' && e.state === 'kept'), 'kept straight away in her running context: her words and its answers, marked private', people().U0DANA)
     // Asked in a public channel: what she said in her direct messages isn't given there.
     await slack.ask({ user: 'U0DANA', text: `${M} Where do I get a badge? [answer At reception.]` })
     const s3 = await startOf('Where do I get a badge')
-    ok(earlier(s3) === null && !/third floor/.test(briefOf(s3)), 'in a public channel, nothing from her direct messages: not her running context, nor your kept correction', briefOf(s3).slice(0, 1200))
+    ok(earlier(s3) === null && !/third floor/.test(briefOf(s3)), 'in a public channel, nothing from her direct messages: not her running context', briefOf(s3).slice(0, 1200))
     await send('Where do I get a badge')
     await postedLike(/At reception/)
     // Someone else: never hers.
     await slack.ask({ user: 'U0SAM', dm: true, text: 'What is the wifi called? [answer Acme-Guest.]' })
     const s4 = await startOf('wifi called')
     ok(!/third floor|by the lifts|badge|At reception|Which floor/.test(briefOf(s4)), 'Sam\'s question: none of Dana\'s running context', briefOf(s4).slice(0, 1200))
-    await send('wifi called')
     await postedLike(/Acme-Guest/)
-    // Hers, when she asks again: what she said where others could read it, besides this conversation's turns.
+    // Hers, in a new session (!new): what she said where others could read it.
+    await slack.ask({ user: 'U0DANA', dm: true, text: '!new' })
+    await postedLike(/Starting afresh/)
     await slack.ask({ user: 'U0DANA', dm: true, text: 'Anything else I should know? [answer No.]' })
     const s5 = await startOf('Anything else I should know')
-    ok(/Where do I get a badge\?[\s\S]*At reception\./.test(earlier(s5) || '') && !/Acme-Guest|wifi/.test(briefOf(s5)) && /They're Dana's alone/.test(briefOf(s5)), 'Dana again: given her earlier conversation in #launch, as hers alone, and nothing of Sam\'s', earlier(s5))
-    ok((await timelineOf('b1', 'Anything else I should know')).find((e) => e.type === 'run.started')?.earlier?.person === 1, 'and the run says what it was given', (await timelineOf('b1', 'Anything else I should know')).find((e) => e.type === 'run.started')?.earlier)
-    await kit.api(`/bots/questions/${(await draftOf('Anything else I should know')).id}`, { send: false })
+    ok(sidOf(s5) !== sidOf(s1) && /Where do I get a badge\?[\s\S]*At reception\./.test(earlier(s5) || '') && !/Acme-Guest|wifi/.test(briefOf(s5)) && /They're Dana's alone/.test(briefOf(s5)), 'Dana in a new session: given her earlier conversation in #launch, as hers alone, and nothing of Sam\'s', earlier(s5))
+    ok((await timelineOf('b1', 'Anything else I should know')).find((e) => e.type === 'run.started')?.earlier?.person >= 1, 'and the run says what it was given', (await timelineOf('b1', 'Anything else I should know')).find((e) => e.type === 'run.started')?.earlier)
+    await postedLike(/^No\.$/)
     // Memory off: none given, none kept.
     await kit.api('/bots/b1/settings', { memory: 'off' })
     const had = people().U0DANA.kept.length
+    await slack.ask({ user: 'U0DANA', dm: true, text: '!new' })
+    await until(async () => (await posted()).filter((x) => /Starting afresh/.test(x.text || '')).length >= 2, 10000)
     await slack.ask({ user: 'U0DANA', dm: true, text: 'One more question? [answer Go ahead.]' })
     const s6 = await startOf('One more question')
     ok(earlier(s6) === null, 'memory off: no running context given', briefOf(s6).slice(0, 1200))
-    const d6 = await send('One more question')
     await postedLike(/Go ahead/)
     await sleep(800)
-    ok(people().U0DANA.kept.length === had && !events().some((e) => e.type === 'context.noted' && e.q === d6.id), 'and none kept')
+    const q6 = events().find((e) => e.type === 'received' && /One more question/.test(e.text || ''))?.q
+    ok(people().U0DANA.kept.length === had && !events().some((e) => e.type === 'context.noted' && e.q === q6), 'and none kept')
     // Forgotten, by you: gone, and not given again; Sam's untouched.
     await kit.api('/bots/b1/settings', { memory: 'auto' })
     const f = await kit.api('/bots/b1/people/U0DANA/forget', {})
@@ -546,8 +539,8 @@ try {
   for (const [mode, theme, phone] of [['light', 'sky', false], ['dark', 'midnight', false], ['light', 'sky', true], ['dark', 'midnight', true]]) {
     await part(`Settings, ${mode}${phone ? ', on a phone' : ''}`, async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme, phone })
-      await openSettings(p)
-      await p.locator('.sb-tabs [role="tab"]', { hasText: 'Set Up' }).click()
+      await openBot(p)
+      await p.locator('.sb-tabs [role="tab"]', { hasText: 'Settings' }).click()
       await p.locator('[data-setting="slack-owner"]').waitFor({ timeout: 10000 })
       ok(/Tester/.test(await p.locator('[data-setting="slack-owner"]').innerText()), 'You in Slack shows you')
       ok(/30/.test(await p.locator('[data-setting="slack-limits"] input').first().inputValue()), 'its limits: 30 a day')
@@ -573,7 +566,7 @@ try {
       const words = await box.innerText()
       ok(/Waiting for you/.test(words) && /printer is on floor 2/.test(words) && /Austin office closes at 4 on Fridays/.test(words) && /leads? the support team/.test(words), 'Memory: what waits for you, and what it keeps, each kind', words.slice(0, 600))
       if (phone) {
-        const faults = await phoneFaults(p, '.modal.settings .sb')
+        const faults = await phoneFaults(p, '.bp.phone .bp-main')
         ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults)
       }
       await shot(p, `${tag}bots-approvals-memory-${mode}${phone ? '-phone' : ''}`)
@@ -594,7 +587,7 @@ try {
         await editing.press('Enter')
         ok(!!(await until(async () => (await mem()).some((x) => x.text === 'Sam leads the support team in Austin'), 8000)), 'edited from the page')
       }
-      await p.locator('.sb-tabs [role="tab"]', { hasText: 'Set Up' }).click()
+      await p.locator('.sb-tabs [role="tab"]', { hasText: 'Settings' }).click()
       ok(errors.length === 0, 'no page errors', errors)
       await ctx.close()
     })

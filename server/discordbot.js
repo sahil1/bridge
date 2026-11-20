@@ -518,7 +518,12 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
   // messages; and the message a question replied to, if it did.
   async function context({ channel, thread, ts, since = null, dm = false }) {
     const mine = (m) => (!!kept.bot?.id && m.author?.id === kept.bot.id) || (!!m.webhook_id && Object.values(kept.hooks || {}).some((x) => x?.id === m.webhook_id))
-    const said = (m) => ({ ts: m.id, person: { id: m.author?.id || null, name: nameOf(m.author, m.member) }, text: clip(plainText(m.content, { me: kept.bot?.id, mentions: m.mentions, channels: chans }), LONGEST_SAID), you: mine(m) })
+    // (A post of this app's own, by one of its webhooks: as, the name it was posted as, so a bot takes
+    // only its own as its own words; another bot's or a webhook's: bot, its words anyone's.)
+    const said = (m) => {
+      const own = mine(m)
+      return { ts: m.id, person: { id: m.author?.id || null, name: nameOf(m.author, m.member) }, text: clip(plainText(m.content, { me: kept.bot?.id, mentions: m.mentions, channels: chans }), LONGEST_SAID), you: own, ...(own ? { as: m.webhook_id ? m.author?.username || null : null } : (m.author?.bot || m.webhook_id) ? { bot: true } : {}) }
+    }
     // (A post you scheduled has no message of Discord's to read back from: the latest, then.)
     const own = /^\d+$/.test(String(ts))
     const before = (m) => m?.id && (!own || later_(ts, m.id)) && (!since || later_(m.id, since)) && String(m.content || '').trim()
@@ -831,9 +836,36 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
     set({ state: 'no-tokens', why: null })
   }
 
+  // Test this connection's Discord part (conncheck.js): its token (who the bot is), and you there,
+  // with your direct messages with the bot opening (nothing posted). Each { id, label, state, detail, fix }.
+  async function check({ owner = null } = {}) {
+    const out = []
+    if (!kept.token) {
+      out.push({ id: 'tokens', label: 'Tokens', state: 'fail', detail: 'No bot token yet', fix: 'Paste the bot token from the Discord Developer Portal (Bot › Reset Token)' })
+      out.push({ id: 'owner', label: 'You here', state: 'skip', detail: 'Needs the token first', fix: null })
+      return out
+    }
+    try {
+      const { me } = await whoami()
+      out.push({ id: 'tokens', label: 'Tokens', state: 'ok', detail: `@${me?.username || 'the bot'}${kept.guild?.name ? ` in ${kept.guild.name}` : ''}`, fix: null })
+    } catch (e) {
+      out.push({ id: 'tokens', label: 'Tokens', state: 'fail', detail: `The bot token: ${e.message}`, fix: 'Reset the token in the Developer Portal (Bot › Reset Token) and paste the new one' })
+      out.push({ id: 'owner', label: 'You here', state: 'skip', detail: 'Needs a working token first', fix: null })
+      return out
+    }
+    if (!owner?.id) out.push({ id: 'owner', label: 'You here', state: 'warn', detail: 'Nobody is linked as you here: your bots don\'t know it\'s you', fix: 'Make a code under You Here, then send it to the bot in a direct message' })
+    else {
+      try {
+        await call('POST', '/users/@me/channels', { body: { recipient_id: String(owner.id) }, waits: 1 })
+        out.push({ id: 'owner', label: 'You here', state: 'ok', detail: `${owner.name || owner.id}, and your direct messages with the bot open`, fix: null })
+      } catch (e) { out.push({ id: 'owner', label: 'You here', state: 'fail', detail: `${owner.name || owner.id} is linked, but your direct messages with the bot don't open: ${e.message}`, fix: 'Share a server with the bot, and allow direct messages from its members' }) }
+    }
+    return out
+  }
+
   return {
     id, label: 'Discord', platform: 'discord',
     caps: { react: true, edit: true, typing: true, threads: true, history: true },
-    start, stop, state, post, edit, react, typing, whisper, context, people, channels, person, setToken, setGuild, forget, missed,
+    start, stop, state, post, edit, react, typing, whisper, context, people, channels, person, setToken, setGuild, forget, missed, check,
   }
 }

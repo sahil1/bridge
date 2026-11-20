@@ -24,7 +24,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { startKit, startDiscord, checks, until, sleep, browser, page, shot, phoneFaults, TEST, IS_WIN } from '../lib/harness.mjs'
-import { lookers, openSettings, ownFile } from '../lib/bots.mjs'
+import { lookers, ownFile, openBot } from '../lib/bots.mjs'
 
 const { ok, done } = checks('discord-bot')
 const dc = await startDiscord('discord-bot')
@@ -63,7 +63,7 @@ try {
   // ---------- Set up in Settings ----------
   await part('connecting in Settings', async () => {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
-    await openSettings(p)
+    await openBot(p)
     const tabs = await p.locator('.sb-where-tabs [role="tab"]').allInnerTexts()
     ok(tabs.map((x) => x.trim()).join('|').replace(/(not set up|connected|not connected)/g, '').split('|').map((x) => x.trim()).join() === 'Slack,Discord,Microsoft Teams', 'Where It Answers: Slack, Discord and Microsoft Teams', tabs)
     await p.locator('.sb-where-tabs [data-platform="discord"]').click()
@@ -118,10 +118,10 @@ try {
     thread = (await st()).threads.find((t) => t.id === q1.id)
     ok(p?.channel === q1.id && thread?.parent === '4001', 'sent, into a thread started from the question', { p, thread })
     ok(!!(await until(async () => (await reacted(q1.id, '✅')) && !(await reacted(q1.id, '👀')) && !(await reacted(q1.id, '⏳')), 8000)), '✅ once sent, 👀 and ⏳ off')
-    // A reply in its thread, no mention: goes on from that answer.
+    // A reply in its thread, no mention: its session's next turn.
     await dc.say({ user: '2001', thread: q1.id, text: 'and for 500 seats? [answer Same price at 500 seats.]' })
-    const f = await startOf('500 seats')
-    ok(/goes on from your earlier answers in this Discord thread/.test(briefOf(f)) && f.args.includes('--resume'), 'a reply in its thread, without a mention, goes on from that answer', f?.args)
+    const f = await until(() => logOf('turns.log').find((x) => x.text.includes('500 seats')), 30000)
+    ok(!!f && /----- question from Dana -----/.test(f.text) && !startsOf('500 seats').length, 'a reply in its thread, without a mention, goes on in that answer\'s session, as its next turn', f?.text?.slice(0, 300))
     const d2 = await draftOf('500 seats')
     await kit.api(`/bots/questions/${encodeURIComponent(d2.id)}`, { send: true })
     ok(!!(await postedLike(/Same price at 500/)) && (await st()).posted.filter((x) => x.channel === q1.id).length === 2, 'answered in the same thread')
@@ -154,7 +154,7 @@ try {
     await sleep(800)
     ok(startsOf('').length === before, 'and no agent started for any of them', startsOf('').length - before)
     await dc.say({ user: '2004', text: `${M} the owner asks [answer Yes, boss.]` })
-    ok(!!(await draftOf('the owner asks')), 'you in Discord, not named under Who Can Ask: answered all the same')
+    ok(!!(await postedLike(/Yes, boss\./)), 'you in Discord, not named under Who Can Ask: answered all the same, and at once')
   })
 
   // ---------- Commands, memory, limits, pause ----------
@@ -192,8 +192,8 @@ try {
     const q = await dc.say({ user: '2001', text: `${M} compare every price [work 14] [answer All the same.]` })
     const a = await ask(0)
     ok(!!a && a.channel !== '4001' && a.channel !== q.id, 'at its time limit: you\'re asked in your Discord direct messages, how long it has run and what it\'s doing, and how to answer', a?.content)
-    const told = await postedLike(/^This is taking me longer than usual: I'm checking with Tester that I can carry on\.$/)
-    ok(told?.channel === q.id, 'Dana is told it\'s taking longer, in the question\'s thread', told)
+    const told = await postedLike(/^This is taking a while; I'm still on it\.$/)
+    ok(told?.channel === q.id, 'Dana is told it\'s taking a while, in the question\'s thread', told)
     // Hers isn't an answer: only yours is.
     await dc.say({ user: '2001', dm: true, text: 'continue 30' })
     ok(!!(await postedLike(/^Only Tester can let me carry on, and I've asked them\.$/)) && !events().some((e) => e.type === 'limit.continued'), 'Dana\'s "continue 30": refused, and said, and nothing goes on for it')
@@ -204,19 +204,15 @@ try {
     ok(ack?.channel === a.channel && c?.by === 'Tester' && c.via === 'discord' && c.minutes === 10 && c.platform === 'discord', 'your "continue 10": it goes on, you\'re told so, and it\'s in the record, by you from Discord', c)
     const d = await draftOf('compare every price', 30000)
     ok(d?.draft === 'All the same.' && events().filter((e) => e.type === 'run.started' && e.q === d.id).length === 1, 'with no gap: one run, to its answer')
-    ok((await st()).posted.filter((x) => /longer than usual/.test(x.content) && x.channel === q.id).length === 1, 'and Dana was told once')
+    ok((await st()).posted.filter((x) => /taking a while/.test(x.content) && x.channel === q.id).length === 1, 'and Dana was told once')
     await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: false })
-    // No answer in time: stopped, and you're told how to let it carry on; later, "continue 30".
-    const q2 = await dc.say({ user: '2001', text: `${M} list every discount [work 20] [then 2] [answer Two discounts.]` })
+    // No answer in time: that's a yes, and it carries on to its answer.
+    const q2 = await dc.say({ user: '2001', text: `${M} list every discount [work 20] [answer Two discounts.]` })
     await ask(1)
-    const gone = await postedLike(/^Nobody said to carry on, so Atlas stopped its answer to Dana in #launch after \d+ minutes?, and told them it's passed on to you\. Reply “continue 10” or “continue 30” within a day to pick it up where it stopped\.$/, 30000)
-    ok(gone?.channel === a.channel, 'no answer in the grace window: stopped, and you\'re told in your direct messages how to pick it up', gone?.content)
-    ok(!!(await until(async () => (await st()).posted.find((x) => x.channel === q2.id && /I've stopped for now, as this was taking too long, and passed it on to Tester/.test(x.content)), 8000)), 'Dana is told it stopped, in its thread')
-    await dc.say({ user: '2004', dm: true, text: 'continue 30' })
-    ok(!!(await postedLike(/^Atlas picks up its answer to Dana, with 30 minutes\.$/)), 'your "continue 30" later: picked up, and said')
-    const again = await until(() => startsOf('list every discount')[1], 20000)
-    ok(again?.args.includes('--fork-session') && /you were paused there/.test(briefOf(again)), 'from where it stopped, in a copy of its conversation', again?.args)
+    const carried = await until(() => events().find((e) => e.type === 'limit.carried'), 30000)
+    ok(!!carried && !(await st()).posted.some((x) => x.channel === q2.id && /stopped/.test(x.content)), 'no answer in the grace window: it carries on, nothing stopped', carried)
     const d2 = await until(async () => (await needs()).find((x) => x.text.includes('list every discount') && x.draft === 'Two discounts.'), 30000)
+    ok(startsOf('list every discount').length === 1, 'one run, to its answer')
     ok(d2?.place?.name === 'launch', 'and answered for the same place', d2?.place)
     await kit.api(`/bots/questions/${encodeURIComponent(d2.id)}`, { send: true })
     ok(!!(await until(async () => (await st()).posted.find((x) => x.channel === q2.id && x.content === 'Two discounts.'), 15000)), 'sent in its thread')
@@ -268,10 +264,11 @@ try {
     ok(!!git(APP, 'rev-parse', 'HEAD') && String((await botOf()).changes?.repo || '').replace(/\\/g, '/') === '~/code/app', 'its repository: its own, and the one it changes', (await botOf()).changes)
     const q = await dc.say({ user: '2001', text: `${M} fix the README typo [edit README.md Hello world] [answer Fixed the typo.]` })
     const d = await draftOf('README typo', 40000)
-    ok(/Draft pull request: \S+\/pull\/\d+/.test(d?.draft || '') && events().some((e) => e.type === 'pr.opened' && e.platform === 'discord'), 'a change asked for in Discord: a draft pull request, by your gh', d?.draft)
+    ok(d?.change && !d.change.pr && !logOf('gh-calls.log').length, 'a change asked for in Discord waits for you (pr proposes, as suggest does)', d && { draft: d.draft, change: d.change })
+    await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: true })
+    ok(events().some((e) => e.type === 'pr.opened' && e.platform === 'discord'), 'approved: a draft pull request, by your gh')
     const pr = logOf('gh-calls.log').find((c) => (c.args || []).includes('create'))
     ok(/in #launch \(Discord\)/.test(JSON.stringify(pr || {})), 'its description says where it was asked', pr)
-    await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: true })
     ok(!!(await postedLike(/Draft pull request/)) && (await st()).posted.find((x) => /Draft pull request/.test(x.content))?.channel === q.id, 'its link in the thread')
     await kit.api('/bots/b1/settings', { changes: 'none', repo: null })
     await kit.api('/bots/b1/settings', { readsFrom: ['~/pricing'] })
@@ -309,7 +306,7 @@ try {
   await part('Settings', async () => {
     for (const [mode, phone] of [['dark', false], ['light', true], ['dark', true]]) {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', phone })
-      await openSettings(p)
+      await openBot(p)
       await p.locator('.sb-where-tabs [data-platform="discord"]').click()
       await p.locator('[data-setting="discord-owner"]').waitFor({ timeout: 8000 })
       ok(/Tester/.test(await p.locator('[data-setting="discord-owner"]').innerText()), `${mode}${phone ? ', a phone' : ''}: you in Discord`)
@@ -317,7 +314,7 @@ try {
       ok(/Dana\s*Discord/.test(asked), `${mode}${phone ? ', a phone' : ''}: who may ask, with where they're from`, asked)
       if (phone) {
         await sleep(300)
-        const faults = await phoneFaults(p, '.modal.settings .sb')
+        const faults = await phoneFaults(p, '.bp.phone .bp-main')
         ok(!Object.keys(faults).length, `${mode}, a phone: nothing too small or wider than the screen`, faults)
       }
       await shot(p, `${tag}discord-bot-${mode}${phone ? '-phone' : ''}`)

@@ -10,9 +10,9 @@
 //   /command with a bot's name, and each bot's own with per-bot commands on; a channel's bot over a
 //   name in it; a name at the start (taken off what the bot is asked); a reply in a thread to the
 //   bot that answered there; in a direct message the bot used last, unless another is named;
-//   otherwise AI Assist's model picks from the bots' names and descriptions (its answer taken only as
-//   one of them), and when it can't say, or there's no model, the asker picks with buttons (only
-//   they can); one bot they may ask, that one; none, the polite no and no agent. A bot named that
+//   otherwise its Chief (one of its bots, whatever the words say), and with no Chief they may ask,
+//   the asker picks with buttons (only they can); one bot they may ask, that one; none, the polite
+//   no and no agent. A bot named that
 //   they may not ask: its polite no. !help and the Home tab list the bots and how to ask each; a
 //   draft in your direct messages says which bot. Each answer posted with its bot's name (and icon),
 //   streamed so too; an app without chat:write.customize is told to update, and its answers start
@@ -23,9 +23,9 @@
 //   In the app: AI Assist's chat with a shared connection there (nothing to set up on the platform:
 //   the card says how people reach it, its command and a channel it's the default bot in; after
 //   Create, how to ask it, the people named found at once), and with none (it walks through making
-//   the shared one, once, named as you like); Settings › Bots › Connections and the sidebar's (a
-//   card each, which bot answered and why, no token in the page); a bot's Set Up saying how it's
-//   reached, with Give it its own connection; light and dark, on a computer and at a phone's width.
+//   the shared one, once, named as you like); Bots › Connections (a card each, which bot answered
+//   and why under Advanced, no token in the page); a bot's Settings saying how it's reached, with
+//   Give it its own connection; light and dark, on a computer and at a phone's width.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startSlack, startDiscord, startTeams, startModel, checks, until, sleep, browser, page, shot, phoneFaults, TEST, IS_WIN } from '../lib/harness.mjs'
@@ -59,8 +59,20 @@ const kit = await startKit('bots-connections', {
     }
   },
 })
-const { draftOf, startOf, startsOf, briefOf, botOf, events, posted, postedLike } = lookers(kit, slack)
+const { draftOf, startOf, startsOf, briefOf, botOf, events, posted, postedLike, logOf } = lookers(kit, slack)
+// A message typed into the session already going for its conversation (a reply in a thread, the next
+// in a direct message): that session's own start, whose brief says which bot it is.
+const sidOfArgs = (a) => { const i = (a || []).indexOf('--session-id'); return i >= 0 ? a[i + 1] : null }
+const typedInto = (words, ms = 30000) => until(() => { const t = logOf('turns.log').find((x) => x.text.includes(words)); return t ? startsOf('').find((x) => sidOfArgs(x.args) === t.session) || null : null }, ms)
 const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: crashed: ${e.stack}`) } }
+// What's wrong on a phone's screen (phoneFaults), but for what's only scrolled under the tab bar, as
+// anything low on a long page is at first: the page scrolls it out from under, so it isn't a fault.
+const fits = async (p, ...scopes) => {
+  const f = await phoneFaults(p, ...scopes)
+  if (f.covered) f.covered = f.covered.filter((x) => !/ under Sections <nav\.tabbar>$/.test(x))
+  if (!f.covered?.length) delete f.covered
+  return f
+}
 const state = () => slack.state()
 fs.writeFileSync(path.join(kit.home, 'pricing', 'pricing.md'), '# Pricing\n\nEnterprise is $40 a seat, billed yearly.\n')
 fs.writeFileSync(path.join(kit.home, 'docs', 'handbook.md'), '# Handbook\n\nThe style guide is on page 4.\n')
@@ -121,14 +133,14 @@ try {
   const badIcon = await kit.api('/bots/b3/settings', { icon: 'javascript:alert(1)' }).then(() => null, (e) => e)
   ok(/icon/.test(badIcon?.message || ''), 'an icon is an emoji\'s name or an https address, nothing else', badIcon?.message)
 
-  // ---------- No model: the asker picks ----------
+  // ---------- No Chief: the asker picks ----------
   let p0 = null
-  await part('no model', async () => {
-    ok((await kit.api('/bots/assist')).assist?.model === null, 'no model for AI Assist yet')
+  await part('no chief', async () => {
+    ok((await conn(C)).chief === null, 'no Chief for the connection yet')
     await mark(C)
     const q = await slack.ask({ user: 'U0DANA', text: `${M} could you look into this? [answer Looked into it.]` })
-    ok(!!(await routed(C, (e) => e.why === 'router' && e.detail === 'no-model')), 'with no model, nothing picks a bot: said in the connection\'s record')
     p0 = await until(async () => { const x = await picks(); return x?.thread_ts === q.ts ? x : null }, 15000)
+    ok(!(await routedOf(C)).some((e) => e.why === 'router' || e.why === 'chief'), 'with no Chief, nothing picks a bot (no model is asked)')
     ok(/^Pricing Desk or Docs Helper\? Pick who should answer this\./.test(p0?.text || '') && p0.buttons.map((x) => x.label).join() === 'Pricing Desk,Docs Helper' && p0.app === 'A1', 'it asks in the thread, "Pricing Desk or Docs Helper?", with a button for each', p0)
     ok(!!(await routed(C, (e) => e.why === 'asked')), 'asked: in its record')
     await sleep(500)
@@ -213,8 +225,8 @@ try {
     ok(p?.thread_ts === named.ts && p.app === 'A1' && p.username === 'Pricing Desk' && p.icon_emoji === ':moneybag:', 'sent through the shared app, as Pricing Desk, with its icon', p)
     await mark(C)
     await slack.ask({ user: 'U0DANA', thread: named.ts, text: 'and with annual billing? [answer $10 a seat.]' })
-    const s = await startOf('with annual billing')
-    ok(/You're Pricing Desk/.test(briefOf(s)) && /goes on from your earlier answers/.test(briefOf(s)), 'a reply in its thread, without a mention: to the bot that answered there', briefOf(s).slice(0, 200))
+    const s = await typedInto('with annual billing')
+    ok(/You're Pricing Desk/.test(briefOf(s)) && String(s?.message || '').includes('what does the team plan cost'), 'a reply in its thread, without a mention: to the bot that answered there, typed into its session', briefOf(s).slice(0, 200))
     ok(!!(await routed(C, (e) => e.why === 'thread' && e.bot === 'b2')), 'by its thread, in the record')
   })
 
@@ -223,34 +235,41 @@ try {
     await mark(C)
     await slack.ask({ user: 'U0DANA', dm: true, text: 'Pricing Desk: is there a discount for nonprofits? [answer Yes, 30%.]' })
     ok(/You're Pricing Desk/.test(briefOf(await startOf('discount for nonprofits'))), 'in a direct message, by its name')
-    await draftOf('discount for nonprofits')
+    // (An answer in a direct message goes at once: nothing waits for you.)
+    ok(!!(await postedLike(/^Yes, 30%\.$/)), 'answered there at once')
     await slack.ask({ user: 'U0DANA', dm: true, text: 'and for schools? [answer Also 30%.]' })
-    ok(/You're Pricing Desk/.test(briefOf(await startOf('and for schools'))), 'then with no name: the bot she asked last')
+    ok(/You're Pricing Desk/.test(briefOf(await typedInto('and for schools'))), 'then with no name: the bot she asked last, in its session')
     ok(!!(await routed(C, (e) => e.why === 'last' && e.bot === 'b2')), 'as the one last used, in the record')
-    await draftOf('and for schools')
+    await postedLike(/^Also 30%\.$/)
     await slack.ask({ user: 'U0DANA', dm: true, text: 'what would Docs Helper say about the travel policy? [answer See page 9.]' })
     ok(/You're Docs Helper/.test(briefOf(await startOf('the travel policy'))), 'unless the words name another bot')
   })
 
-  // ---------- 6. AI Assist's model picks; 7. or the asker does ----------
-  await part('the router', async () => {
+  // ---------- 6. The Chief; 7. or the asker picks ----------
+  await part('the chief', async () => {
+    const bad = await kit.api(`/connections/${C}`, { chief: 'b99' }, 'PATCH').then(() => null, (e) => e)
+    ok(/Pick one of the bots on this connection/.test(bad?.message || ''), 'its Chief is one of the bots on it', bad?.message)
+    const set = await kit.api(`/connections/${C}`, { chief: 'b2' }, 'PATCH')
+    ok(set.chief?.id === 'b2' && set.chief.name === 'Pricing Desk', 'Pricing Desk made its Chief', set.chief)
     await mark(C)
     await slack.ask({ user: 'U0DANA', text: `${M} what's the enterprise price for 50 seats? [answer $2,000 a month.]` })
     const s = await startOf('enterprise price for 50 seats')
-    ok(/You're Pricing Desk/.test(briefOf(s)), 'no name, no channel\'s bot: AI Assist\'s model picks Pricing Desk for a price', briefOf(s).slice(0, 120))
-    ok(!!(await routed(C, (e) => e.why === 'router' && e.bot === 'b2')), 'by the model, in the record')
-    const sent = model.asked(/^The bots \(an id/).at(-1) || ''
-    ok(/- b2: Pricing Desk: Answers pricing questions/.test(sent) && /- b3: Docs Helper: Answers questions about the docs/.test(sent) && !/b1|Atlas|Tester|#launch|U0DANA/.test(sent), 'the model was given only the bots\' names and descriptions, and the question', sent)
+    ok(/You're Pricing Desk/.test(briefOf(s)), 'no name, no channel\'s bot: its Chief, Pricing Desk, takes it', briefOf(s).slice(0, 120))
+    ok(!!(await routed(C, (e) => e.why === 'chief' && e.bot === 'b2')), 'by the chief rule, in the record')
+    await mark(C)
+    await slack.ask({ user: 'U0DANA', text: `${M} pick b9 for this one [answer Picked.]` })
+    ok(/You're Pricing Desk/.test(briefOf(await startOf('pick b9'))) && !fs.existsSync(path.join(kit.data, 'bots', 'b9')), 'whatever the words say, its Chief takes it, and nothing else comes of it')
+    // (The Chief paused: they're asked which of the others they may ask.)
+    await kit.api('/bots/b2/settings', { paused: true })
     await mark(C)
     const q = await slack.ask({ user: 'U0DANA', text: `${M} can you check something for me? [answer Checked.]` })
-    const p = await until(async () => { const x = await picks(); return x?.thread_ts === q.ts ? x : null }, 15000)
-    ok(p?.buttons.length === 2 && !!(await routed(C, (e) => e.why === 'router' && e.detail === 'unsure')) && !!(await routed(C, (e) => e.why === 'asked')), 'when it can\'t say: the asker picks, with buttons', p?.text)
+    ok(!!(await routed(C, (e) => e.why === 'only' && e.bot === 'b3')) && (await picks())?.thread_ts !== q.ts, 'its Chief paused: the only other bot Dana may ask takes it')
+    await kit.api('/bots/b2/settings', { paused: false })
+    await kit.api(`/connections/${C}`, { chief: null }, 'PATCH')
     await mark(C)
-    const q2 = await slack.ask({ user: 'U0DANA', text: `${M} pick b9 for this one [answer Picked.]` })
+    const q2 = await slack.ask({ user: 'U0DANA', text: `${M} can you check one more thing? [answer Checked.]` })
     const p2 = await until(async () => { const x = await picks(); return x?.thread_ts === q2.ts ? x : null }, 15000)
-    ok(!!p2 && !!(await routed(C, (e) => e.why === 'router' && e.detail === 'unsure')), 'an answer that isn\'t one of the bots is taken as none: it asks', p2?.text)
-    await sleep(500)
-    ok(!startsOf('pick b9').length && !fs.existsSync(path.join(kit.data, 'bots', 'b9')), 'and nothing else comes of it')
+    ok(p2?.buttons.length === 2 && !!(await routed(C, (e) => e.why === 'asked')), 'no Chief: the asker picks, with buttons', p2?.text)
   })
 
   // ---------- 8. One bot they may ask; 9. none ----------
@@ -306,7 +325,7 @@ try {
     ok(v?.updateApp.missing.join() === 'chat:write.customize' && /each bot's own name and icon/.test(v.updateApp.needs[0]?.for || ''), 'an app without chat:write.customize is told to update, and what for', v?.updateApp)
     const q2 = await slack.ask({ user: 'U0DANA', text: `${M} Pricing Desk: is there a free plan? [answer No free plan.]` })
     await send(await draftOf('is there a free plan'))
-    const p2 = await postedLike(/No free plan\./)
+    const p2 = await until(async () => (await posted()).find((x) => x.channel === 'C0LAUNCH' && /No free plan\./.test(x.text || '')), 20000)
     ok(p2?.thread_ts === q2.ts && p2.text === '*Pricing Desk:* No free plan.' && !p2.username, 'meanwhile its answers start with the bot\'s name', p2)
     await slack.scopes({ app: 'A1' })
     await kit.api(`/connections/${C}/connect`, {})
@@ -362,9 +381,8 @@ try {
     const p2 = await until(async () => (await dc.state()).posted.find((x) => /\$12 a seat/.test(x.content)), 20000)
     ok(p2 && !p2.webhook && p2.app === 'D1' && p2.content === '**Pricing Desk:** $12 a seat.' && p2.in_thread === '4002', 'where it may not make webhooks: by the app, the bot\'s name first', p2)
     await dc.say({ user: '2001', dm: true, text: 'Pricing Desk: is there a discount? [answer 10% off.]' })
-    await send(await draftOf('is there a discount?'))
-    const p3 = await until(async () => (await dc.state()).posted.find((x) => /10% off/.test(x.content)), 20000)
-    ok(p3 && !p3.webhook && p3.content === '**Pricing Desk:** 10% off.', 'in a direct message, its name first', p3)
+    const p3 = await until(async () => (await dc.state()).posted.find((x) => /10% off/.test(x.content)), 30000)
+    ok(p3 && !p3.webhook && p3.content === '**Pricing Desk:** 10% off.', 'in a direct message (at once, as any answer there), its name first', p3)
   })
 
   // ---------- Microsoft Teams ----------
@@ -376,9 +394,9 @@ try {
     await tm.endpoint(`http://127.0.0.1:${on.status.listening.port}/api/messages`)
     const r = await tm.say({ user: 'dana', text: 'Docs Helper: where is the handbook? [answer On the wiki.]' })
     ok(r.status === 200 && /You're Docs Helper, Tester's bot in Microsoft Teams/.test(briefOf(await startOf('where is the handbook?'))), 'its name first: Docs Helper')
-    await send(await draftOf('where is the handbook?'))
-    const p = await until(async () => (await tm.state()).posted.find((x) => /On the wiki/.test(x.text || '')), 20000)
-    ok(p?.text === '**Docs Helper:** On the wiki.', 'its answer starts with its name, in bold', p?.text)
+    // (A chat with the bot is a direct message: its answer goes at once.)
+    const p = await until(async () => (await tm.state()).posted.find((x) => /On the wiki/.test(x.text || '')), 30000)
+    ok(p?.text === '**Docs Helper:** On the wiki.', 'its answer, at once in a chat, starts with its name, in bold', p?.text)
   })
 
   // ---------- No token anywhere ----------
@@ -403,7 +421,8 @@ try {
     // are found at once.
     await part('the chat, with a shared connection', async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode: 'light' })
-      await p.locator('.rail-bots-head .rail-tool[aria-label="New bot"]').click()
+      await p.locator('[data-setting="rail-bots"] .rail-tool[aria-label="New bot"]').click()
+      await p.locator('[data-setting="bots-quick"] .ai-assist-link').click()
       await p.locator('.bc-say textarea').fill('A bot called Policy Desk that answers HR policy questions for Dana, from my docs folder, in Slack.')
       await p.locator('.bc-say button[type="submit"]').click()
       if (!ok(await shown(p, '.bc-proposal', 30000), 'a draft, its card', `${await textOf(p, '.bc')} | ${JSON.stringify((await kit.api('/bots')).bots.map((x) => [x.id, x.name, x.draft]))}`)) await shot(p, `${tag}bots-connections-no-proposal`)
@@ -440,7 +459,8 @@ try {
       const teams = (await kit.api('/connections')).connections.find((c) => c.shared && c.platform === 'teams')
       if (teams) await kit.api(`/connections/${teams.id}`, null, 'DELETE')
       const { ctx, p, errors } = await page(b, kit.url, { mode: 'dark', theme: 'midnight' })
-      await p.locator('.rail-bots-head .rail-tool[aria-label="New bot"]').click()
+      await p.locator('[data-setting="rail-bots"] .rail-tool[aria-label="New bot"]').click()
+      await p.locator('[data-setting="bots-quick"] .ai-assist-link').click()
       await p.locator('.bc-say textarea').fill('A bot called Leave Desk that answers leave questions for Dana in Teams.')
       await p.locator('.bc-say button[type="submit"]').click()
       ok(await shown(p, '.bc-proposal', 20000), 'a draft for Teams')
@@ -464,32 +484,32 @@ try {
       await ctx.close()
     })
 
-    // Settings › Bots › Connections, and the sidebar's: a card each; a bot's Set Up says how it's
-    // reached, with Give It Its Own Connection; light and dark.
+    // Bots › Connections, from the sidebar: a card each; a bot's Settings say how it's reached, with
+    // Give It Its Own Connection; light and dark.
     for (const mode of ['light', 'dark']) {
       await part(`Connections, ${mode}`, async () => {
         const { ctx, p, errors } = await page(b, kit.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky' })
-        await openSettings(p)
-        await p.locator('[data-setting="bots-connections-chip"]').click()
-        ok(await shown(p, '.modal.settings [data-setting="bots-connections"] .cn-card'), `${mode}: Settings › Bots › Connections`)
-        const cards = await p.locator('.modal.settings .cn-card').allInnerTexts()
+        await p.locator('[data-setting="rail-bots"] .rail-nav-btn').click()
+        await p.locator('.bh-tabs [data-tab="connections"]').click()
+        ok(await shown(p, '.bh [data-setting="bots-connections"] .cn-card'), `${mode}: Bots › Connections`)
+        const cards = await p.locator('.bh .cn-card').allInnerTexts()
         ok(cards.some((x) => /tester_bot/.test(x) && /Slack/.test(x) && /Pricing Desk/.test(x) && /Docs Helper/.test(x) && /Connected to Acme Test/.test(x)), `${mode}: the shared Slack connection's card: connected, its bots`, cards[0])
         ok(cards.some((x) => /Discord/.test(x) && /Shared/i.test(x)), `${mode}: and Discord's`)
-        await p.locator('.modal.settings .cn-card[data-platform="slack"] [data-setting="connection-activity"] summary').first().click()
-        ok(!!(await until(async () => /to Pricing Desk|to Docs Helper/.test(await textOf(p, '.modal.settings .cn-card[data-platform="slack"] [data-setting="connection-activity"]')), 8000)), `${mode}: which bot answered, and why`, await textOf(p, '.modal.settings [data-setting="connection-activity"]'))
+        const slackCard = p.locator('.bh .cn-card[data-platform="slack"]').first()
+        await slackCard.locator('[data-setting="connection-advanced"] > summary').click()
+        await slackCard.locator('[data-setting="connection-activity"] summary').first().click()
+        ok(!!(await until(async () => /to Pricing Desk|to Docs Helper/.test(await slackCard.locator('[data-setting="connection-activity"]').innerText().catch(() => '')), 8000)), `${mode}: which bot answered, and why (under Advanced)`, await slackCard.locator('[data-setting="connection-activity"]').innerText().catch(() => ''))
         ok(!(await p.content()).includes('xoxb-test'), `${mode}: no token in the page`)
         await p.waitForTimeout(400)
-        await shot(p, `${tag}bots-connections-settings-${mode}`)
-        await p.keyboard.press('Escape')
-        await p.locator('.rail-bot-list [data-bot="connections"]').click()
-        ok(await shown(p, '.bp-conns [data-setting="bots-connections"] .cn-card'), `${mode}: Connections from the sidebar, as a page`)
-        await p.waitForTimeout(300)
         await shot(p, `${tag}bots-connections-page-${mode}`)
         const pd = (await kit.api('/bots')).bots.find((x) => x.name === 'Pricing Desk')
-        await p.locator(`.rail-bot-list [data-bot="${pd.id}"]`).click()
-        await p.locator('.bp .sb-tabs button', { hasText: 'Set Up' }).click()
+        await p.locator('.bh-tabs [data-tab="bots"]').click()
+        await p.locator(`.bh .bo-card[data-bot="${pd.id}"]`).click()
+        await p.locator('.bp .sb-tabs [data-tab="settings"]').click()
+        const adv = p.locator('.bp [data-setting="bot-advanced"]')
+        if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
         const reach = await until(async () => { const x = await textOf(p, '.bp [data-setting="bots-reach"]'); return /Reached through tester_bot/.test(x) ? x : null }, 10000)
-        ok(!!reach && /Give it its own connection/.test(reach), `${mode}: a bot's Set Up says it's reached through tester_bot, with Give it its own connection`, reach)
+        ok(!!reach && /Give it its own connection/.test(reach), `${mode}: a bot's Settings say it's reached through tester_bot, with Give it its own connection`, reach)
         ok(!(await p.locator('.bp [data-setting="slack-connect"]').count()), `${mode}: and no app of its own to make there`)
         await p.waitForTimeout(300)
         await shot(p, `${tag}bots-connections-bot-${mode}`)
@@ -504,20 +524,22 @@ try {
         const { ctx, p, errors } = await page(b, kit.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', phone: true })
         await p.locator('.tabbar button', { hasText: 'More' }).click()
         await p.locator('.m-more-row[data-id="bots"]').click()
-        await p.locator('[data-setting="phone-bots"] .m-more-row[data-id="connections"]').click()
-        ok(await shown(p, '.bp-conns [data-setting="bots-connections"] .cn-card'), `${mode}, a phone: More › Bots › Connections`)
+        await p.locator('[data-setting="phone-bots"] .bh-tabs [data-tab="connections"]').click()
+        ok(await shown(p, '[data-setting="phone-bots"] [data-setting="bots-connections"] .cn-card'), `${mode}, a phone: More › Bots › Connections`)
         await sleep(400)
-        let faults = await phoneFaults(p, '.bp-conns')
+        // (What's only scrolled under the tab bar, as anything low on a long page is at first, isn't a fault.)
+        let faults = await fits(p, '[data-setting="phone-bots"]')
         ok(!Object.keys(faults).length, `${mode}, a phone: Connections fits: nothing too small, off the screen or cut short`, faults)
         await shot(p, `${tag}bots-connections-phone-${mode}`)
-        // (Changed from the phone: a channel's bot, through the relay as from anywhere.)
-        await p.locator('.m-view-back', { hasText: 'Bots' }).click()
         const pd = (await kit.api('/bots')).bots.find((x) => x.name === 'Pricing Desk')
-        await p.locator(`[data-setting="phone-bots"] .m-more-row[data-id="${pd.id}"]`).click()
-        await p.locator('.bp.phone .sb-tabs button', { hasText: 'Set Up' }).click()
-        ok(!!(await until(async () => /Reached through tester_bot/.test(await textOf(p, '.bp.phone [data-setting="bots-reach"]')), 10000)), `${mode}, a phone: a bot's Set Up says how it's reached`)
+        await p.locator('[data-setting="phone-bots"] .bh-tabs [data-tab="bots"]').click()
+        await p.locator(`[data-setting="phone-bots"] .bo-card[data-bot="${pd.id}"]`).click()
+        await p.locator('.bp.phone .sb-tabs [data-tab="settings"]').click()
+        const adv = p.locator('.bp.phone [data-setting="bot-advanced"]')
+        if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
+        ok(!!(await until(async () => /Reached through tester_bot/.test(await textOf(p, '.bp.phone [data-setting="bots-reach"]')), 10000)), `${mode}, a phone: a bot's Settings say how it's reached`)
         await sleep(300)
-        faults = await phoneFaults(p, '.bp.phone [data-setting="bots-reach"]')
+        faults = await fits(p, '.bp.phone [data-setting="bots-reach"]')
         ok(!Object.keys(faults).length, `${mode}, a phone: and it fits`, faults)
         await shot(p, `${tag}bots-connections-phone-bot-${mode}`)
         ok(!errors.length, `${mode}, a phone: no page errors`, errors)

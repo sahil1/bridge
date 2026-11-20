@@ -26,7 +26,11 @@
 // is served at GET /files/<id>/<name>, only with a bot token (else 403).
 // Events, as Slack sends them to an app subscribed to app_mention and message.*: a message in a
 // channel goes to each app as a message event (a mention of it besides, as app_mention); a direct
-// message to its own app; an edit or deletion as a message event of that subtype.
+// message to its own app; an edit or deletion as a message event of that subtype; and what an app
+// posts (chat.postMessage, a stream started, a file shared), back to the apps in that conversation
+// as a message event with its bot_id, as Slack sends an app its own messages. As Slack does, each
+// envelope goes to ONE of an app's open connections (the next in turn), never to each of them, and
+// hello's num_connections counts that app's connections open (with this one).
 // And, for tests:
 //   POST /_test/ask { user, text, channel?, dm?, app?, thread?, files? }   someone writes: in a
 //                      channel (#launch unless said), a direct message to an app (app: A1 unless
@@ -42,9 +46,13 @@
 //   POST /_test/drop   every connection closes at once (a network that changed)
 //   POST /_test/away   none can connect, and each one there goes dead without a word (a computer
 //                      asleep, a lid closed); POST /_test/back to let them again
-//   POST /_test/refresh  asks for a fresh connection (disconnect, refresh_requested)
-//   POST /_test/limit { method, n, wait }   the next n calls to method answer 429, Retry-After wait
+//   POST /_test/refresh { app? }  asks for a fresh connection (disconnect, refresh_requested)
+//   POST /_test/linkoff { app? }  Socket Mode turned off for the app (disconnect, link_disabled)
+//   POST /_test/limit { method, n, wait, channel? }   the next n calls to method (in that channel
+//                      only, when it's given) answer 429, Retry-After wait
 //   POST /_test/fail { method, error, n }   the next n calls to method answer { ok: false, error }
+//   POST /_test/deaf { app?, on? }   the app's Event Subscriptions off (on: false, back on): no
+//                      events_api envelopes reach it, interactivity and commands still do
 //   POST /_test/click { app?, user, action_id, value, channel?, ts? }   a button pressed (block_actions,
 //                      in an interactive envelope): on the message given, else the latest one the
 //                      app posted with that button and value
@@ -63,7 +71,9 @@
 //                      thread_ts }], views: [{ app, kind: 'open' | 'publish', user, trigger, view }],
 //                      statuses: [{ app, method, channel, thread, status }], streams: [{ app,
 //                      channel, thread, ts, text, stopped, calls, username? }], files: [{ id, name, size,
-//                      channel, thread, app, title, content, sha256 }], dms: [{ app, users, channel }] }
+//                      channel, thread, app, title, content, sha256 }], dms: [{ app, users, channel }],
+//                      deleted: [{ app, channel, ts }], perSocket: { <app>: [envelopes each of its
+//                      open connections had] } }
 import http from 'node:http'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
@@ -105,6 +115,7 @@ const statuses = []
 const streams = []
 const files = [] // files the apps shared
 const dms = []
+const deleted = []
 const ackPayloads = []
 const attachments = {} // file id -> { name, type, bytes } (attached by someone, or uploaded by an app)
 const uploads = {} // file id -> { name, length, app, bytes }
@@ -136,14 +147,30 @@ const trigger = (user, app) => { const id = `${++triggerN}.${Date.now()}.tr${tri
 
 const sockets = new Set()
 const wss = new WebSocketServer({ noServer: true, autoPong: false })
-// An envelope of any kind to each live connection of an app; events_api's wrap an event.
+const deaf = new Set() // apps whose Event Subscriptions are off
+const turn = {} // app -> the next of its connections in turn
+// An envelope of any kind to ONE live connection of an app, the next in turn (Slack sends each to
+// any one of them); events_api's wrap an event, and reach no app that's deaf.
 function envelope(app, type, payload, extra = {}) {
   const env = { envelope_id: `env-${++envelopes}`, type, accepts_response_payload: type !== 'events_api', retry_attempt: 0, retry_reason: '', payload, ...extra }
-  for (const s of sockets) if (s.app === app && s.readyState === 1 && !s.dead) s.send(JSON.stringify(env))
+  if (type === 'events_api' && deaf.has(app)) return env.envelope_id
+  const open = [...sockets].filter((s) => s.app === app && s.readyState === 1 && !s.dead)
+  if (open.length) {
+    const s = open[(turn[app] = ((turn[app] ?? -1) + 1)) % open.length]
+    s.got = (s.got || 0) + 1
+    s.send(JSON.stringify(env))
+  }
   return env.envelope_id
 }
 const send = (app, event) => envelope(app, 'events_api', { team_id: 'T0TEST', api_app_id: app, type: 'event_callback', event_id: `Ev${envelopes + 1}`, event_time: Math.floor(Date.now() / 1000), event })
 const live = (app) => [...sockets].some((s) => s.app === app && s.readyState === 1 && !s.dead)
+// What an app posted, back to the apps in that conversation as a message event (after the answer
+// to the call that posted it, as Slack's usually comes).
+const echo = (channel, m) => {
+  const c = CHANNELS[channel]
+  if (!c) return
+  setImmediate(() => { for (const a of c.apps) send(a, { ...m, channel, channel_type: c.is_im ? 'im' : c.is_private ? 'group' : 'channel', event_ts: m.ts }) })
+}
 const personOf = (id) => [...PEOPLE, ...STRANGERS].find((p) => p.id === id) || { id, name: id, team_id: 'T0TEST' }
 const userOf = (id) => { const p = personOf(id); return { id: p.id, username: p.name, name: p.name, team_id: p.team_id } }
 
@@ -264,10 +291,17 @@ const server = http.createServer(async (req, res) => {
     if (what === 'drop') { for (const s of sockets) s.terminate(); return answer(res, 200, { ok: true }) }
     if (what === 'away') { away = true; for (const s of sockets) s.dead = true; return answer(res, 200, { ok: true }) }
     if (what === 'back') { away = false; return answer(res, 200, { ok: true }) }
-    if (what === 'refresh') { for (const s of sockets) if (s.readyState === 1) s.send(JSON.stringify({ type: 'disconnect', reason: 'refresh_requested', debug_info: { host: 'test' } })); return answer(res, 200, { ok: true }) }
-    if (what === 'limit') { limits[j.method] = { n: j.n || 1, wait: j.wait || 1 }; return answer(res, 200, { ok: true }) }
+    if (what === 'refresh') { for (const s of sockets) if (s.readyState === 1 && (!j.app || s.app === j.app)) s.send(JSON.stringify({ type: 'disconnect', reason: 'refresh_requested', debug_info: { host: 'test' } })); return answer(res, 200, { ok: true }) }
+    // Socket Mode turned off for an app: its connections told so (link_disabled), and closed.
+    if (what === 'linkoff') { for (const s of sockets) if (s.readyState === 1 && s.app === app) { s.send(JSON.stringify({ type: 'disconnect', reason: 'link_disabled', debug_info: { host: 'test' } })); setTimeout(() => s.terminate(), 50) } return answer(res, 200, { ok: true }) }
+    if (what === 'limit') { limits[j.method] = { n: j.n || 1, wait: j.wait || 1, channel: j.channel || null }; return answer(res, 200, { ok: true }) }
     if (what === 'fail') { fails[j.method] = { n: j.n || 1, error: j.error }; return answer(res, 200, { ok: true }) }
-    if (what === 'state') return answer(res, 200, { connections: [...sockets].filter((s) => s.readyState === 1 && !s.dead).length, hellos, envelopes, acks, ackPayloads, posted, reactions, updated, ephemeral, views, statuses, streams, files, dms })
+    if (what === 'deaf') { if (j.on === false) deaf.delete(app); else deaf.add(app); return answer(res, 200, { ok: true }) }
+    if (what === 'state') {
+      const perSocket = {}
+      for (const s of sockets) if (s.readyState === 1 && !s.dead) (perSocket[s.app] ||= []).push(s.got || 0)
+      return answer(res, 200, { connections: [...sockets].filter((s) => s.readyState === 1 && !s.dead).length, hellos, envelopes, acks, ackPayloads, posted, reactions, updated, ephemeral, views, statuses, streams, files, dms, deleted, perSocket })
+    }
     return answer(res, 404, { error: 'no such control' })
   }
   // ---------- A file's bytes: one attached by someone (with a bot token), one an app uploads ----------
@@ -297,7 +331,8 @@ const server = http.createServer(async (req, res) => {
   const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '')
   const appId = Object.keys(APPS).find((a) => APPS[a].bot === token || APPS[a].app === token) || null
   note({ method, params, app: appId })
-  if (limits[method]?.n > 0) { limits[method].n--; return answer(res, 429, { ok: false, error: 'ratelimited' }, { 'retry-after': String(limits[method].wait) }) }
+  const lim = limits[method]
+  if (lim?.n > 0 && (!lim.channel || [params.channel, params.channel_id].includes(lim.channel))) { lim.n--; return answer(res, 429, { ok: false, error: 'ratelimited' }, { 'retry-after': String(lim.wait) }) }
   if (fails[method]?.n > 0) { fails[method].n--; return answer(res, 200, { ok: false, error: fails[method].error }) }
   if (away) return req.socket.destroy() // nothing gets through
   if (method === 'apps.connections.open') {
@@ -371,8 +406,21 @@ const server = http.createServer(async (req, res) => {
     const blocks = params.blocks ? json(params.blocks) : null
     const out = { app: a, channel: params.channel, text: params.text, thread_ts: params.thread_ts || null, ts: ts(), ...(blocks ? { blocks } : {}), ...as }
     posted.push(out)
-    put(params.channel, { ...botMsg(params.text), ts: out.ts, ...(params.thread_ts ? { thread_ts: params.thread_ts } : {}), ...(blocks ? { blocks } : {}), ...as })
+    const msg = { ...botMsg(params.text), ts: out.ts, ...(params.thread_ts ? { thread_ts: params.thread_ts } : {}), ...(blocks ? { blocks } : {}), ...as }
+    put(params.channel, msg)
+    echo(params.channel, msg)
     return ok({ channel: params.channel, ts: out.ts, message: { text: params.text, user: app.who.user_id, bot_id: app.who.bot_id } })
+  }
+  if (method === 'chat.delete') {
+    const lacks = needs('chat:write')
+    if (lacks) return lacks
+    const msg = mine(params.channel) ? find(params.channel, params.ts) : null
+    if (!msg) return no('message_not_found')
+    if (msg.user !== app.who.user_id) return no('cant_delete_message')
+    history[params.channel] = history[params.channel].filter((x) => x !== msg)
+    for (const k of Object.keys(replies)) replies[k] = replies[k].filter((x) => x !== msg)
+    deleted.push({ app: a, channel: params.channel, ts: params.ts })
+    return ok({ channel: params.channel, ts: params.ts })
   }
   if (method === 'chat.update') {
     const lacks = needs('chat:write')
@@ -431,7 +479,9 @@ const server = http.createServer(async (req, res) => {
     streams.push(s)
     const p = { app: a, channel: params.channel, text, thread_ts: params.thread_ts, ts: s.ts, streamed: true, ...as }
     posted.push(p)
-    put(params.channel, { ...botMsg(text), ts: s.ts, thread_ts: params.thread_ts, ...as })
+    const msg = { ...botMsg(text), ts: s.ts, thread_ts: params.thread_ts, ...as }
+    put(params.channel, msg)
+    echo(params.channel, msg)
     return ok({ channel: params.channel, ts: s.ts })
   }
   if (method === 'chat.appendStream' || method === 'chat.stopStream') {
@@ -474,10 +524,23 @@ const server = http.createServer(async (req, res) => {
       const shared = { id: f.id, name: u.name, title: f.title || u.name, size: u.bytes.length, channel: params.channel_id || null, thread: params.thread_ts || null, app: a, content: textLike(u.name) ? u.bytes.toString('utf8').slice(0, 20000) : null, sha256: crypto.createHash('sha256').update(u.bytes).digest('hex') }
       files.push(shared)
       done.push({ id: f.id, title: shared.title })
-      if (params.channel_id) put(params.channel_id, { ...botMsg(params.initial_comment || ''), subtype: 'file_share', ...(params.thread_ts ? { thread_ts: params.thread_ts } : {}), files: [{ id: f.id, name: u.name, title: shared.title, size: shared.size }] })
+      if (params.channel_id) {
+        const msg = { ...botMsg(params.initial_comment || ''), subtype: 'file_share', ...(params.thread_ts ? { thread_ts: params.thread_ts } : {}), files: [{ id: f.id, name: u.name, title: shared.title, size: shared.size }] }
+        put(params.channel_id, msg)
+        echo(params.channel_id, msg)
+      }
       delete uploads[f.id]
     }
     return ok({ files: done })
+  }
+  if (method === 'files.delete') {
+    const lacks = needs('files:write')
+    if (lacks) return lacks
+    const f = files.find((x) => x.id === params.file && x.app === a)
+    if (!f) return no('file_not_found')
+    f.deleted = true
+    delete attachments[params.file]
+    return ok({})
   }
   if (method === 'files.info') {
     const lacks = needs('files:read')
@@ -504,7 +567,9 @@ server.on('upgrade', (req, socket, head) => {
       try { const j = JSON.parse(String(raw)); if (j.envelope_id) { acks++; if (j.payload) ackPayloads.push({ envelope_id: j.envelope_id, payload: j.payload }) } } catch { /* not JSON */ }
     })
     hellos++
-    ws.send(JSON.stringify({ type: 'hello', num_connections: sockets.size, debug_info: { host: 'stand-in', approximate_connection_time: 18060 }, connection_info: { app_id: app } }))
+    // (Slack's count: the app's connections it holds open, this one with them, whether or not the
+    // other end is still there.)
+    ws.send(JSON.stringify({ type: 'hello', num_connections: [...sockets].filter((s) => s.app === app && s.readyState === 1).length, debug_info: { host: 'stand-in', approximate_connection_time: 18060 }, connection_info: { app_id: app } }))
   })
 })
 server.listen(Number(port), '127.0.0.1', () => console.log(`stand-in Slack on ${port}`))

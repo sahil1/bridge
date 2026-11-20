@@ -46,6 +46,11 @@ import { plainProbe } from './winpriv.js'
 
 export const MAX_FILES = 20 // more files than this in one change: it waits for you
 export const LARGE = 1024 * 1024 // more than this, in one file or all told: it waits for you
+// A session's running total (frontdesk.js): past this many files changed, or deleted, in one session
+// (each turn's change counted as it's taken), every change of its waits for you, whoever asks, and
+// you're told. A run gone rogue a little at a time is stopped as one that does it at once is.
+export const TOTAL_FILES = Number(process.env.BRIDGE_SESSION_TOTAL_FILES) || 50
+export const TOTAL_DELETES = Number(process.env.BRIDGE_SESSION_TOTAL_DELETES) || 10
 const FILE_MAX = 50 * 1024 * 1024 // a file bigger than this isn't taken: the change is refused
 const COPY_FILES = 20000 // a plain copy, at most
 const COPY_BYTES = 200 * 1024 * 1024
@@ -151,6 +156,8 @@ export const HELD_SAID = {
   instructions: 'it changes a bot\'s instructions', steers: 'it changes a file that steers an agent or builds code (CLAUDE.md, package.json, a Makefile, a tool\'s config…)',
   unshown: 'its diff can\'t be shown in full (a binary file, or one too long to show)',
   unseen: 'it adds a file in a folder its copy didn\'t have (one git ignores, say), so it couldn\'t see what\'s there',
+  command: 'a command it ran changed files, which the folder guard can\'t check one by one',
+  total: `it brings its session past ${TOTAL_FILES} files changed or ${TOTAL_DELETES} deleted`,
 }
 // How much of a diff a message shows where a change can be approved in words: Slack's card (its
 // three escapes counted, as slackbot.js posts it), and the direct message in Discord and Teams. A
@@ -408,13 +415,58 @@ export async function stage({ folders, dir }) {
 // once that tab's closed, it's tried again (wait), for a few seconds, as it may take a moment to go.)
 export async function tidy(st, { wait = false } = {}) {
   if (!st?.dir) return
-  await unlockTop(st.dir)
-  await fs.promises.rm(st.dir, { recursive: true, force: true, ...(wait && process.platform === 'win32' ? { maxRetries: 10, retryDelay: 200 } : {}) }).catch(() => {})
+  for (const d of [st.dir, st.heldAt].filter(Boolean)) {
+    const s = await fs.promises.lstat(d).catch(() => null)
+    if (s?.isDirectory()) await unlockTop(d)
+    await fs.promises.rm(d, { recursive: true, force: true, ...(wait && process.platform === 'win32' ? { maxRetries: 10, retryDelay: 200 } : {}) }).catch(() => {})
+  }
 }
-// Staging copies left from before Bridge AI started again, a day old.
-export function sweepOld(root) {
+
+// ---------- Put aside, while Bridge AI works in it ----------
+// A session's copy, moved (hold) out of where its agent's commands may write (its folder is its
+// sandbox's working folder: botmcp.js sandboxOf) to one of Bridge AI's they may not, into, when its
+// turn ends; everything Bridge AI does in it (collect, refresh, rebase, reset) done there; and moved
+// back (release) just before its next turn is typed. A command its agent left running (detached, so
+// not found to be ended: botsessions.js stopShells) can't swap a folder of the copy for a link while
+// Bridge AI, with no sandbox, writes or reads there: its sandbox's rules are paths, and none lets it
+// write where the copy is now. (On Linux, where the sandbox's folders are bind mounts, a command left
+// running inside it keeps its view: the session's commands are ended first there.) Not on Windows,
+// where a bot runs no commands, and a folder an agent works in can't be moved. Anything made where
+// it was meanwhile (a folder, a link) is taken away, never followed, before it goes back.
+const copyOf = (st, p) => (st?.heldAt ? path.join(st.heldAt, p.name) : p.copy)
+const topOf = (st) => st?.heldAt || st?.dir
+const kindAt = async (p) => { const s = await fs.promises.lstat(p).catch(() => null); return !s ? null : s.isSymbolicLink() ? 'link' : s.isDirectory() ? 'dir' : 'other' }
+const away = async (p) => { const k = await kindAt(p); if (!k) return; if (k === 'dir') await unlockTop(p); await fs.promises.rm(p, { recursive: true, force: true }) }
+export async function hold(st, into) {
+  if (!st?.dir || st.heldAt || !into || process.platform === 'win32') return st
+  if ((await kindAt(st.dir)) !== 'dir') return st
+  const to = path.join(into, path.basename(st.dir))
+  await fs.promises.mkdir(into, { recursive: true, mode: 0o700 })
+  await away(to)
+  // (A folder is moved only by one who may write in it: its top, closed to its agent, opened for it.)
+  await unlockTop(st.dir)
+  try { await fs.promises.rename(st.dir, to) } finally { await lockTop((await kindAt(to)) === 'dir' ? to : st.dir) }
+  st.heldAt = to
+  return st
+}
+export async function release(st) {
+  if (!st?.heldAt) return st
+  if ((await kindAt(st.heldAt)) === 'dir') {
+    await away(st.dir)
+    await unlockTop(st.heldAt)
+    try { await fs.promises.rename(st.heldAt, st.dir) } finally { await lockTop((await kindAt(st.dir)) === 'dir' ? st.dir : st.heldAt) }
+  }
+  delete st.heldAt
+  return st
+}
+// Where it is now: there, or put aside.
+export const placeNow = (st) => topOf(st)
+// Staging copies left from before Bridge AI started again, a day old (but a session's that may go on:
+// keep, by name).
+export function sweepOld(root, { keep = new Set() } = {}) {
   try {
     for (const d of fs.readdirSync(root)) {
+      if (keep.has(d)) continue
       const p = path.join(root, d)
       if (Date.now() - fs.statSync(p).mtimeMs > 86400000) { unlockTopSync(p); fs.rmSync(p, { recursive: true, force: true }) }
     }
@@ -424,10 +476,14 @@ export function sweepOld(root) {
 // ---------- What changed ----------
 const isText = (buf) => !buf.subarray(0, 8192).includes(0)
 async function readFile(p, max = FILE_MAX) {
-  const st = await fs.promises.lstat(p)
-  if (!st.isFile()) throw fail(`${path.basename(p)} isn't a file`, 'collect')
-  if (st.size > max) throw fail(`${path.basename(p)} is over ${Math.round(max / 1048576)} MB`, 'collect')
-  return { buf: await fs.promises.readFile(p), st }
+  // (Opened as it is, never through a link, and read from what was opened.)
+  const fh = await fs.promises.open(p, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0)).catch((e) => { throw e.code === 'ELOOP' ? fail(`${path.basename(p)} isn't a file`, 'collect') : e })
+  try {
+    const st = await fh.stat()
+    if (!st.isFile()) throw fail(`${path.basename(p)} isn't a file`, 'collect')
+    if (st.size > max) throw fail(`${path.basename(p)} is over ${Math.round(max / 1048576)} MB`, 'collect')
+    return { buf: await fh.readFile(), st }
+  } finally { await fh.close() }
 }
 const newId = () => `w${Date.now().toString(36)}${crypto.randomBytes(5).toString('hex')}`
 // The change's own hash: its folders, and each file's path, how it changes and its hashes before and
@@ -444,21 +500,24 @@ const OS_OWN = /^(\.ds_store|\.localized|thumbs\.db|desktop\.ini|icon\r)$/i
 // paths), a change to which waits for you. checked(kind, path): whether the run's own checks let
 // that path be written ('w') or taken away ('d') in the copy (guardCheck below); a file changed that
 // they never saw is refused, so a check that didn't run never lets anything through.
-export async function collect(st, { into, by = null, instructions = [], checked = null }) {
+// commands: the run could run commands (a session's Bash, in Claude Code's sandbox, which writes only
+// in its copy): a file its checks never saw written, when its hook saw a command run (checked.bash),
+// is held for you as one a command made (command) rather than refused.
+export async function collect(st, { into, by = null, instructions = [], checked = null, commands = false }) {
   const entries = []
   const refused = []
   const blobs = new Map() // hash -> buffer
   const keep = (buf) => { const h = sha(buf); blobs.set(h, buf); return h }
   // (Anything it made beside its copies, in the folder it worked in: in none of its write folders, so
   // never made, and said. An agent's own hidden files there, its settings say, aren't its change.)
-  for (const name of await fs.promises.readdir(st.dir).catch(() => [])) {
+  for (const name of await fs.promises.readdir(topOf(st)).catch(() => [])) {
     if (!name.startsWith('.') && !st.parts.some((p) => p.name === name)) refused.push({ why: 'outside', file: name })
   }
   for (const [i, p] of st.parts.entries()) {
     const base = new Map(p.base)
     const realStats = new Map(p.real)
     const after = new Map()
-    await walk(p.copy, {
+    await walk(copyOf(st, p), {
       onFile: (rel, full, s) => { after.set(rel, statOf(s)) },
       onOther: (rel, full, s, kind) => { refused.push({ why: kind === 'link' ? 'link' : 'special', file: `${p.shown}/${rel}` }) },
       // (git's own, by any name: none was left in the copy, so the agent made it.)
@@ -475,7 +534,7 @@ export async function collect(st, { into, by = null, instructions = [], checked 
       const b = base.get(rel)
       if (b && b.size === a.size && b.mtimeMs === a.mtimeMs) continue
       let got
-      try { got = await readFile(onDisk(p.copy, rel)) } catch (e) { refused.push({ why: 'big', file: `${p.shown}/${rel}`, said: e.message }); continue }
+      try { got = await readFile(onDisk(copyOf(st, p), rel)) } catch (e) { refused.push({ why: 'big', file: `${p.shown}/${rel}`, said: e.message }); continue }
       const afterHash = keep(got.buf)
       if (!b) {
         if (await realNow(rel)) { refused.push({ why: 'there', file: `${p.shown}/${rel}` }); continue }
@@ -506,7 +565,9 @@ export async function collect(st, { into, by = null, instructions = [], checked 
   // (Each path as it would be made in the real folder: through a link there, or outside it, or into
   // git's own folder by whatever name the file system gives it, it's refused now, not only when it's
   // made. And each one the run's checks let through, as they said.)
-  const realCopies = await Promise.all(st.parts.map((p) => fs.promises.realpath(p.copy).catch(() => p.copy)))
+  // (Where its agent wrote them, as its checks saw it: the copy's own place, put aside or not.)
+  const realTop = await fs.promises.realpath(path.dirname(st.dir)).then((d) => path.join(d, path.basename(st.dir)), () => st.dir)
+  const realCopies = st.parts.map((p) => path.join(realTop, p.name))
   // (A new file in a folder the real one has and its copy didn't, one git ignores say (a project's
   // venv, its node_modules), or in one its copy has only part of (a folder git ignores with a file in
   // it committed anyway): it couldn't see what's there, nor you in the diff, so it waits for you. What
@@ -534,6 +595,7 @@ export async function collect(st, { into, by = null, instructions = [], checked 
     return partly.get(k)
   }
   const unseen = []
+  const byCommand = []
   for (const e of entries) {
     if (e.op !== 'add' && e.op !== 'move') continue
     const segs = e.rel.split(SEP)
@@ -559,7 +621,8 @@ export async function collect(st, { into, by = null, instructions = [], checked 
     if (checked) {
       const at = (rel) => path.join(realCopies[e.part], ...rel.split(SEP))
       const ok = e.op === 'remove' ? checked('d', at(e.rel)) : e.op === 'move' ? checked('d', at(e.from)) && checked('w', at(e.rel)) : checked('w', at(e.rel))
-      if (!ok) refused.push({ why: 'unchecked', file: `${p.shown}/${e.rel}` })
+      if (!ok && commands && checked.bash) byCommand.push(`${p.shown}/${e.rel}`)
+      else if (!ok) refused.push({ why: 'unchecked', file: `${p.shown}/${e.rel}` })
     }
   }
   entries.sort((a, b) => a.part - b.part || a.rel.localeCompare(b.rel))
@@ -567,6 +630,7 @@ export async function collect(st, { into, by = null, instructions = [], checked 
   const id = newId()
   const held = heldOf(entries, { folders, instructions })
   if (unseen.length) held.push({ why: 'unseen', files: unseen.slice(0, 20) })
+  if (byCommand.length) held.push({ why: 'command', files: byCommand.slice(0, 20) })
   const change = { id, v: 1, at: new Date().toISOString(), by, folders, entries, held, refused, hash: hashOf(folders, entries), nonce: crypto.randomBytes(16).toString('hex'), undoNonce: crypto.randomBytes(16).toString('hex'), state: 'proposed' }
   if (!entries.length && !refused.length) return { ...change, diff: '', files: [] }
   // (A change whose diff can't be shown in full waits for you, whoever asked.)
@@ -743,7 +807,168 @@ export async function guardCheck(log, key) {
   const seen = new Set(String(text ?? '').split('\n').filter((l) => /^[0-9a-f]{64}$/.test(l)))
   const checked = (kind, p) => (kind === 'w' || kind === 'd') && seen.has(guardLine(key, kind, p))
   checked.ran = text == null ? null : seen.has(guardLine(key, 'ran', ''))
+  // (And whether it let a command run: a session's Bash, botguard.mjs.)
+  checked.bash = seen.has(guardLine(key, 'b', ''))
   return checked
+}
+// A session's log, read for one turn and started again for the next (its key stays the session's).
+export async function guardTurn(log, key) {
+  const checked = await guardCheck(log, key)
+  await fs.promises.writeFile(log, '', { mode: 0o600 }).catch(() => {})
+  return checked
+}
+
+// ---------- A session's copy, from one turn to the next ----------
+// A bot's session keeps one staging copy (frontdesk.js), its agent working in it turn after turn.
+// What it changed is taken at the end of each turn (collect) and made, or waits for you, as any
+// change does; so its copy stays what the real folders are and what its agent has done since.
+// After a change is made (applied), its files are where the copy is: the copy's record of them is
+// brought up to date (rebase). A change that's denied, refused or put away puts the copy back as the
+// real folders are (reset), so it isn't proposed again. And at the start of each turn, what changed
+// in the real folders meanwhile, by you or anyone, is brought into the copy (refresh), wherever its
+// agent hasn't changed the same file: one changed in both is said (conflicts: its change to it can't
+// be made), and left as its agent has it. (A folder copied from git: only the files its copy has;
+// what git ignores stays out, as it did when it was made.)
+const statAt = async (p) => { const s = await fs.promises.lstat(p).catch(() => null); return s?.isFile() ? statOf(s) : null }
+const sameStat = (a, b) => (!a && !b) || (!!a && !!b && a.size === b.size && a.mtimeMs === b.mtimeMs)
+// (Bridge AI writes in the copy itself, with your rights and no sandbox, while its agent may have
+// left a link in it (ln -s, with commands; or a background job, after its turn's changes were taken).
+// So nothing is written, taken away or looked at through one: each folder on the way down from the
+// copy's top is looked at (lstat) and must be a folder, not a link (one missing is made, and looked at
+// again), the folder it ends in must really be inside the copy, a new file goes in beside it with a
+// name of its own (made only if nothing is there, never through a link) and is renamed over it, and
+// a rename or unlink touches the link itself, never what it points to. The copy's links are swept
+// first, and its agent's background commands are stopped before (frontdesk.js refreshStage), so
+// nothing swaps a folder for a link meanwhile.)
+async function inCopy(root, rel, { make = false } = {}) {
+  if (!okRel(rel)) throw fail(`${rel} isn't a path inside the copy`, 'path')
+  const parts = rel.split(SEP)
+  if (parts.some((x) => !x || x === '.' || x === '..')) throw fail(`${rel} isn't a path inside the copy`, 'path')
+  let at = root
+  for (const x of parts.slice(0, -1)) {
+    at = path.join(at, x)
+    let s = await fs.promises.lstat(at).catch(() => null)
+    if (!s && make) {
+      await fs.promises.mkdir(at).catch((e) => { if (e.code !== 'EEXIST') throw e })
+      s = await fs.promises.lstat(at).catch(() => null)
+    }
+    if (!s) return null
+    if (s.isSymbolicLink() || !s.isDirectory()) throw fail(`${relOf(root, at)} in its copy is a link or isn't a folder: nothing is written through it`, 'path')
+  }
+  await within(root, at)
+  return path.join(at, parts.at(-1))
+}
+async function within(root, dir) {
+  const top = await fs.promises.realpath(root)
+  const real = await fs.promises.realpath(dir)
+  if (real !== top && !real.startsWith(top + path.sep)) throw fail(`${relOf(root, dir)} isn't inside its copy`, 'path')
+}
+// A file of its copy as it is there, or null; looked at only where nothing on the way is a link.
+async function statIn(root, rel) {
+  const at = await inCopy(root, rel)
+  return at ? statAt(at) : null
+}
+async function copyIn(root, from, rel) {
+  const to = await inCopy(root, rel, { make: true })
+  const s = await fs.promises.lstat(to).catch(() => null)
+  if (s && !s.isFile() && !s.isSymbolicLink()) throw fail(`${rel} in its copy isn't a file`, 'path')
+  const tmp = path.join(path.dirname(to), `.bridge-${crypto.randomBytes(6).toString('hex')}.tmp`)
+  await fs.promises.copyFile(from, tmp, fs.constants.COPYFILE_EXCL)
+  try {
+    await within(root, path.dirname(to))
+    await fs.promises.rename(tmp, to)
+  } catch (e) { await fs.promises.unlink(tmp).catch(() => {}); throw e }
+}
+async function removeIn(root, rel) {
+  const at = await inCopy(root, rel)
+  if (!at) return
+  const s = await fs.promises.lstat(at).catch(() => null)
+  if (!s) return
+  if (s.isDirectory() && !s.isSymbolicLink()) throw fail(`${rel} in its copy is a folder`, 'path')
+  await fs.promises.unlink(at).catch((e) => { if (e.code !== 'ENOENT') throw e })
+}
+export async function refresh(st, { waiting = null } = {}) {
+  const pulled = []
+  const conflicts = []
+  for (const p of st.parts) {
+    const base = new Map(p.base)
+    const real = new Map(p.real)
+    const now = await stats(p.folder, CLONE_FILES).catch(() => null)
+    if (!now) continue
+    // (Links its agent made in its copy since: taken out before anything is brought in.)
+    const cp = copyOf(st, p)
+    await sweep(cp).catch(() => [])
+    const rels = new Set([...now.keys(), ...real.keys()])
+    for (const rel of rels) {
+      const r = now.get(rel) || null
+      if (same(r, real.get(rel)) || (!r && !real.get(rel))) continue
+      // (A file git ignores, not in a copy made from git: left out, as it was.)
+      if (p.how === 'git' && !base.has(rel)) { if (r) real.set(rel, r); else real.delete(rel); continue }
+      if (!okRel(rel)) continue
+      let mine = true
+      try { mine = !sameStat(await statIn(cp, rel), base.get(rel) || null) } catch { mine = true }
+      if (mine || waiting?.has(`${p.folder}\n${rel}`)) { conflicts.push(`${p.shown}/${rel}`); continue }
+      try {
+        if (r) await copyIn(cp, onDisk(p.folder, rel), rel)
+        else await removeIn(cp, rel)
+      } catch { conflicts.push(`${p.shown}/${rel}`); continue }
+      const c = await statIn(cp, rel).catch(() => null)
+      if (c) base.set(rel, c); else base.delete(rel)
+      if (r) real.set(rel, r); else real.delete(rel)
+      for (let d = path.posix.dirname(rel); d && d !== '.'; d = path.posix.dirname(d)) if (!p.dirs.includes(d)) p.dirs.push(d)
+      pulled.push(`${p.shown}/${rel}`)
+    }
+    p.base = [...base]
+    p.real = [...real]
+  }
+  return { pulled, conflicts }
+}
+// A change made (c: as collect gave it, or as it's kept): each of its files' records as they are now,
+// in the copy and the real folder, which are the same.
+export async function rebase(st, c) {
+  for (const e of c?.entries || []) {
+    const p = st.parts[e.part]
+    if (!p || p.folder !== c.folders?.[e.part]?.path) continue
+    const base = new Map(p.base)
+    const real = new Map(p.real)
+    for (const rel of [e.rel, e.from].filter(Boolean)) {
+      const b = await statIn(copyOf(st, p), rel).catch(() => null)
+      const r = await statAt(onDisk(p.folder, rel))
+      if (b) base.set(rel, b); else base.delete(rel)
+      if (r) real.set(rel, r); else real.delete(rel)
+    }
+    p.base = [...base]
+    p.real = [...real]
+  }
+}
+// Its agent's changes in the copy put away: each file it changed, made or took away back as the real
+// folder has it now (and anything a copy can't hold, links and git's own, gone again).
+export async function reset(st) {
+  const back = []
+  for (const p of st.parts) {
+    const base = new Map(p.base)
+    const real = new Map(p.real)
+    const after = new Map()
+    const cp = copyOf(st, p)
+    await walk(cp, { onFile: (rel, full, s) => { after.set(rel, statOf(s)) }, max: CLONE_FILES }).catch(() => {})
+    await sweep(cp).catch(() => [])
+    for (const rel of new Set([...after.keys(), ...base.keys()])) {
+      if (sameStat(after.get(rel) || null, base.get(rel) || null)) continue
+      if (!okRel(rel)) continue
+      const r = await statAt(onDisk(p.folder, rel))
+      try {
+        if (r && base.has(rel)) await copyIn(cp, onDisk(p.folder, rel), rel)
+        else await removeIn(cp, rel)
+      } catch { continue }
+      const c = await statIn(cp, rel).catch(() => null)
+      if (c) base.set(rel, c); else base.delete(rel)
+      if (r) real.set(rel, r); else real.delete(rel)
+      back.push(`${p.shown}/${rel}`)
+    }
+    p.base = [...base]
+    p.real = [...real]
+  }
+  return back
 }
 
 // ---------- Made, and undone ----------

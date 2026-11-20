@@ -41,12 +41,37 @@ const traceLines = () => fs.readFileSync(path.join(TRACE, `${month}.jsonl`), 'ut
 const events = () => traceLines().map((l) => JSON.parse(l))
 const raw = (p) => fetch(`${kit.url}/api${p}`).then(async (r) => ({ status: r.status, type: r.headers.get('content-type'), name: r.headers.get('content-disposition'), text: await r.text() }))
 const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: crashed: ${e.stack}`) } }
-const openSettings = async (p) => {
+// Bots (the sidebar's, a phone's More › Bots) at its Bots tab, and a bot's page from its card: by its
+// name, or the first.
+const openBots = async (p) => {
   await p.locator('.topbar, .tabbar').first().waitFor({ timeout: 20000 })
-  await until(async () => {
-    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'slack-bot' } })))
-    return p.locator('.modal.settings .sb').first().waitFor({ timeout: 2500 }).then(() => true, () => false)
-  }, 20000, 100)
+  if (await p.locator('.tabbar').count()) {
+    await p.locator('.tabbar button', { hasText: 'More' }).click()
+    await p.locator('.m-more-row[data-id="bots"]').click()
+  } else await p.locator('[data-setting="rail-bots"] .rail-nav-btn').click({ timeout: 20000 })
+  await p.locator('.bh-tabs [data-tab="bots"]').click()
+}
+const openBot = async (p, name = null) => {
+  await openBots(p)
+  await (name ? p.locator('.bh .bo-card', { hasText: name }) : p.locator('.bh .bo-card')).first().click()
+  await p.locator('.bp .sb-tabs').waitFor({ timeout: 10000 })
+}
+// Its Settings, with Advanced open.
+const openAdvanced = async (p) => {
+  await p.locator('.bp .sb-tabs [data-tab="settings"]').click()
+  const adv = p.locator('.bp [data-setting="bot-advanced"]')
+  if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
+}
+// A deleted bot, under Bots' Deleted Bots.
+const openGone = async (p, id) => {
+  await openBots(p)
+  const all = p.locator('.bh [data-group="deleted"]')
+  await all.waitFor({ timeout: 4000 })
+  if (!(await all.evaluate((d) => d.open))) await all.locator(':scope > summary').click()
+  const one = p.locator(`.bh .bh-gone-one[data-bot="${id}"]`)
+  await one.waitFor({ timeout: 4000 })
+  if (!(await one.evaluate((d) => d.open))) await one.locator(':scope > summary').click()
+  return one
 }
 const M = '<@UBOT>'
 // A folder or file as shown, with / between its parts (Windows shows ~\notes).
@@ -70,7 +95,8 @@ try {
   const d2 = await draftOf('weekends')
   await kit.api(`/bots/questions/${d2.id}`, { send: true, text: d2.draft })
   await until(async () => (await slack.state()).posted.some((x) => /Closed on weekends/.test(x.text)), 15000)
-  await slack.ask({ user: 'U0SAM', dm: true, text: 'Where is the office? [answer In Austin.]' })
+  // (In #launch: an answer there waits for you, where one in a direct message would go at once.)
+  await slack.ask({ user: 'U0SAM', text: `${M} Where is the office? [answer In Austin.]` })
   const d3 = await draftOf('Where is the office')
   await kit.api(`/bots/questions/${d3.id}`, { send: false })
   await slack.ask({ user: 'U0EVE', text: `${M} Can I see the payroll?` })
@@ -105,7 +131,7 @@ try {
   const byWords = (w) => a.conversations.find((c) => c.asked.includes(w))
   ok(a.conversations.length === 3 && byWords('support open')?.outcome === 'sent' && byWords('support open').messages === 2 && byWords('office')?.outcome === 'discarded' && byWords('payroll')?.outcome === 'refused' && byWords('payroll').refused === 'not-allowed', 'its conversations, each with what came of it', a.conversations.map((c) => [c.asked.slice(0, 20), c.outcome, c.messages]))
   ok(a.integrity?.ok && a.integrity.events >= all.length && a.integrity.events <= events().length && a.retention === '1y', 'its record holds, and is kept a year to start', { integrity: a.integrity, read: all.length, now: events().length })
-  ok((await activity('?q=weekends')).conversations.length === 1 && (await activity('?person=U0SAM')).conversations.map((c) => c.asked).join() === 'Where is the office? [answer In Austin.]' && (await activity('?outcome=refused')).conversations.length === 1 && (await activity('?channel=C0LAUNCH')).conversations.length === 2, 'narrowed by a word in an answer, a person, an outcome and where')
+  ok((await activity('?q=weekends')).conversations.length === 1 && (await activity('?person=U0SAM')).conversations.map((c) => c.asked).join() === 'Where is the office? [answer In Austin.]' && (await activity('?outcome=refused')).conversations.length === 1 && (await activity('?channel=C0LAUNCH')).conversations.length === 3, 'narrowed by a word in an answer, a person, an outcome and where')
   ok((await activity(`?from=${encodeURIComponent(new Date(Date.now() + 86400000).toISOString())}`)).conversations.length === 0, 'and by dates')
   const conv = byWords('support open').id
   const tl = await kit.api(`/bots/b1/activity/${encodeURIComponent(conv)}`)
@@ -122,10 +148,10 @@ try {
   const none = await raw(`/bots/b1/export?format=csv&to=${encodeURIComponent('2001-01-01T00:00:00.000Z')}`)
   ok(none.text.trim().split('\r\n').length === 1, 'a date range with nothing in it: only the header')
 
-  // ---------- Activity, in Settings ----------
-  await part('Activity in Settings', async () => {
+  // ---------- Activity, on its page ----------
+  await part('Activity on its page', async () => {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
-    await openSettings(p)
+    await openBot(p)
     await p.locator('.sb-tabs [role="tab"]', { hasText: 'Activity' }).click()
     await p.locator('.sb-convs li').first().waitFor({ timeout: 10000 })
     ok(/The record holds: \d+ events since/.test(await p.locator('.sb-integrity').innerText()), 'Activity says the record holds')
@@ -173,14 +199,14 @@ try {
   for (const [mode, theme, phone] of [['dark', 'midnight', false], ['light', 'sky', true], ['dark', 'midnight', true]]) {
     await part(`Activity, ${mode}${phone ? ', on a phone' : ''}`, async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme, phone })
-      await openSettings(p)
+      await openBot(p)
       await p.locator('.sb-tabs [role="tab"]', { hasText: 'Activity' }).click()
       await p.locator('.sb-convs li').first().waitFor({ timeout: 10000 })
       await p.locator('.sb-conv').first().click()
       await p.locator('.sb-tl li').first().waitFor({ timeout: 10000 })
       if (phone) {
         await sleep(300)
-        const faults = await phoneFaults(p, '.modal.settings .sb')
+        const faults = await phoneFaults(p, '.bp.phone .bp-main')
         ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults)
       }
       await sleep(300)
@@ -199,45 +225,44 @@ try {
   await kit.api('/bots', { name: 'Temp' })
   await part('deleting bots', async () => {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
-    await openSettings(p)
-    await p.locator('.sb-chip', { hasText: 'Helpdesk' }).click()
-    await p.locator('.sb-tabs [role="tab"]', { hasText: 'Set Up' }).click()
+    await openBot(p, 'Helpdesk')
+    await openAdvanced(p)
     await p.locator('[data-setting="slack-replies"]').waitFor({ timeout: 10000 })
-    ok(!(await p.locator('.sb-terms').count()), 'and Settings shows no note on the terms')
+    ok(!(await p.locator('.sb-terms').count()), 'and its Settings show no note on the terms')
     await p.locator('button', { hasText: 'Delete this bot…' }).click()
     const sure = p.locator('.sb-sure')
     const box = sure.locator('input[type="checkbox"]')
     ok(/Its activity stays, to look at and export here/.test(await sure.innerText()) && /Also delete its activity history/.test(await sure.innerText()) && !(await box.isChecked()), 'Delete says its activity stays, with a box to delete that too, not ticked', await sure.innerText())
     await sure.locator('button', { hasText: 'Delete Helpdesk' }).click()
-    const chip = p.locator('.sb-chip.gone', { hasText: 'Helpdesk (deleted)' })
-    await chip.waitFor({ timeout: 10000 })
+    await until(() => !fs.existsSync(path.join(B1, 'bot.json')), 10000)
     ok(!fs.existsSync(path.join(B1, 'bot.json')) && !fs.existsSync(path.join(B1, 'instructions.md')) && !fs.existsSync(path.join(B1, 'slack.json')) && fs.existsSync(path.join(TRACE, `${month}.jsonl`)) && fs.existsSync(path.join(B1, 'deleted.json')), 'deleted: its settings, instructions and tokens go; its record stays')
-    await chip.click()
-    await p.locator('.sb-convs li').first().waitFor({ timeout: 10000 })
-    ok(/Helpdesk was deleted on .*Its record stays here, to look at and export/.test(await p.locator('.sb-deleted').innerText()) && await p.locator('.sb-convs li').count() === 3 && !(await p.locator('.sb-keep').count()), 'Settings › Bots has it under its name, marked deleted, its conversations still there', await p.locator('.sb-deleted').innerText())
+    let gone = await until(() => openGone(p, 'b1').catch(() => null), 20000, 500)
+    await gone.locator('.sb-convs li').first().waitFor({ timeout: 10000 })
+    ok(/Helpdesk was deleted on .*Its record stays here, to look at and export/.test(await gone.locator('.sb-deleted').innerText()) && await gone.locator('.sb-convs li').count() === 3 && !(await gone.locator('.sb-keep').count()), 'Bots has it under Deleted Bots, by its name, its conversations still there', await gone.locator('.sb-deleted').innerText())
     await sleep(300)
     await shot(p, `${tag}bots-activity-deleted`)
     const left = await raw('/bots/b1/export?format=jsonl')
     ok(left.status === 200 && /Helpdesk-activity\.jsonl/.test(left.name) && left.text.includes('"setting":"deleted"') && left.text.includes('When is support open'), 'and it still exports, with its deletion in it', left.name)
     ok(events().some((e) => e.type === 'settings.changed' && e.setting === 'deleted' && e.new?.history === 'kept' && e.by === 'Tester'), 'the deletion is in its record')
     // The other: its history deleted too, by ticking the box.
-    await p.locator('.sb-chip', { hasText: /^Temp$/ }).click()
-    await p.locator('.sb-tabs [role="tab"]', { hasText: 'Set Up' }).click()
-    await p.locator('button', { hasText: 'Delete this bot…' }).click()
-    await p.locator('.sb-sure input[type="checkbox"]').check()
-    await p.locator('.sb-sure button', { hasText: 'Delete Temp' }).click()
-    const temp = p.locator('.sb-chip.gone', { hasText: 'Temp (deleted)' })
-    await temp.waitFor({ timeout: 10000 })
+    await openBot(p, 'Temp')
+    await openAdvanced(p)
+    await p.locator('.bp button', { hasText: 'Delete this bot…' }).click()
+    await p.locator('.bp .sb-sure input[type="checkbox"]').check()
+    await p.locator('.bp .sb-sure button', { hasText: 'Delete Temp' }).click()
+    await until(() => fs.existsSync(path.join(kit.data, 'bots', 'b2', 'deleted.json')), 10000)
     const T2 = path.join(kit.data, 'bots', 'b2', 'trace')
     const tl = fs.readdirSync(T2).filter((f) => f.endsWith('.jsonl')).flatMap((f) => fs.readFileSync(path.join(T2, f), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)))
     ok(tl.length === 1 && tl[0].type === 'trace.deleted' && tl[0].all && tl[0].by === 'Tester' && tl[0].months.includes(month), 'with the box ticked: its activity history goes, and a trace.deleted line takes its place, saying when and by whom', tl)
-    await temp.click()
-    ok(/Temp was deleted on .*and its activity history with it/.test(await p.locator('.sb-deleted').innerText()) && !(await p.locator('button', { hasText: 'Delete its activity history' }).count()), 'Settings says so', await p.locator('.sb-deleted').innerText())
-    // A deleted bot's history deleted later, from its page.
-    await chip.click()
-    await p.locator('button', { hasText: 'Delete its activity history…' }).click()
-    await p.locator('.sb-sure button', { hasText: 'Delete the history' }).click()
-    ok(!!(await until(async () => /and its activity history with it/.test(await p.locator('.sb-deleted').innerText().catch(() => '')), 10000)), 'a kept record deleted later, from its page')
+    const temp = await until(() => openGone(p, 'b2').catch(() => null), 20000, 500)
+    ok(/Temp was deleted on .*and its activity history with it/.test(await temp.locator('.sb-deleted').innerText()) && !(await temp.locator('button', { hasText: 'Delete its activity history' }).count()), 'Bots says so', await temp.locator('.sb-deleted').innerText())
+    // A deleted bot's history deleted later, from Deleted Bots.
+    const one = p.locator('.bh .bh-gone-one[data-bot="b1"]')
+    if (!(await one.evaluate((d) => d.open))) await one.locator(':scope > summary').click()
+    gone = one
+    await gone.locator('button', { hasText: 'Delete its activity history…' }).click()
+    await gone.locator('.sb-sure button', { hasText: 'Delete the history' }).click()
+    ok(!!(await until(async () => /and its activity history with it/.test(await gone.locator('.sb-deleted').innerText().catch(() => '')), 10000)), 'a kept record deleted later, from Deleted Bots')
     const after = events()
     ok(after.length === 1 && after[0].type === 'trace.deleted' && (await kit.api('/bots/b1/activity')).conversations.length === 0 && (await kit.api('/bots/b1/activity')).integrity.ok, 'only its trace.deleted line is left, and the chain holds', after.map((e) => e.type))
     ok(errors.length === 0, 'no page errors', errors)
@@ -255,6 +280,11 @@ try {
   const startOf = (words, ms = 20000) => until(() => logOf('helpers-started.log').find((x) => x.message.includes(words)), ms)
   const briefOf = (x) => String(x?.message || '').replace(/ · /g, '\n')
   const forks = (x) => (x?.args || []).join(' ').includes('--fork-session')
+  // (A conversation is a session: what comes next in it is typed into its pane as its next turn, the
+  // session its first question started, --session-id.)
+  const typed = (words, ms = 30000) => until(() => logOf('turns.log').find((x) => x.text.includes(words)), ms)
+  const sidOf = (x) => { const a = x?.args || []; const i = a.indexOf('--session-id'); return i >= 0 ? a[i + 1] : null }
+  const started = (words) => logOf('helpers-started.log').filter((x) => x.message.includes(words))
   const fd = await kit.api('/bots', { name: 'Front Desk' })
   const F = fd.id
   const evF = () => { try { return fs.readFileSync(path.join(kit.data, 'bots', F, 'trace', `${month}.jsonl`), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } }
@@ -267,6 +297,7 @@ try {
   let p2 = null
   await part('carried on in the channel', async () => {
     const a1 = await slack.ask({ user: 'U0DANA', text: `${M2} What are the support hours? [answer From 9 to 5.]` })
+    const s1 = await startOf('support hours')
     await draftOf('support hours')
     // (While its draft waits, its answering agent's tab is open: still not in the sidebar.)
     const all = await kit.api('/fleet?all=1')
@@ -276,8 +307,8 @@ try {
     const p1 = await postedOf(/From 9 to 5/)
     ok(p1?.channel === 'C0LAUNCH' && !p1.thread_ts, 'The Channel: answered in the channel itself, not in a thread', p1)
     const a2 = await slack.ask({ user: 'U0DANA', text: `${M2} And on Saturdays? [answer Closed on Saturdays.]` })
-    const s2 = await startOf('And on Saturdays?')
-    ok(forks(s2) && /This goes on from your earlier answers in this Slack channel/.test(briefOf(s2)) && /The channel since your last answer[\s\S]*you \(Front Desk\), earlier: From 9 to 5\./.test(briefOf(s2)), 'the same person again soon after: the same conversation, going on from its answer, given what was said since', briefOf(s2).slice(0, 900))
+    const s2 = await typed('And on Saturdays?')
+    ok(!!sidOf(s1) && s2?.session === sidOf(s1) && !started('And on Saturdays?').length && /since your last answer[\s\S]*you \(Front Desk\), earlier: From 9 to 5\./.test(s2.text), 'the same person again soon after: the same conversation, its session\'s next turn, given what was said since', s2 && { session: s2.session, text: s2.text.slice(0, 900) })
     await send('And on Saturdays?')
     p2 = await postedOf(/Closed on Saturdays/)
     ok(p2?.channel === 'C0LAUNCH' && !p2.thread_ts, 'answered in place: in the channel, where its last answer went', p2)
@@ -291,8 +322,8 @@ try {
     await send('Is there parking?')
     // A reply in a thread under its answer, with no mention: that conversation too, answered there.
     const a4 = await slack.ask({ user: 'U0DANA', thread: p2.ts, text: 'What about Sundays? [answer Closed then too.]' })
-    const s4 = await startOf('What about Sundays?')
-    ok(forks(s4), 'a reply under its answer needs no mention, and goes on from it', s4?.args)
+    const s4 = await typed('What about Sundays?')
+    ok(!!s4 && s4.session === sidOf(s1), 'a reply under its answer needs no mention, and goes on in its session', s4 && { session: s4.session })
     await send('What about Sundays?')
     const p4 = await postedOf(/Closed then too/)
     ok(p4?.thread_ts === p2.ts && evF().find((e) => e.type === 'received' && e.ts === a4.ts)?.conv === r1?.conv, 'answered in that thread, part of the same conversation', p4)
@@ -300,23 +331,24 @@ try {
   await part('A Thread, still threading', async () => {
     await kit.api(`/bots/${F}/settings`, { answerIn: 'thread' })
     const t1 = await slack.ask({ user: 'U0SAM', text: `${M2} Who runs support? [answer Priya does.]` })
+    const st1 = await startOf('Who runs support?')
     await send('Who runs support?')
     const pt1 = await postedOf(/Priya does/)
     ok(pt1?.thread_ts === t1.ts, 'A Thread: answered in a thread started from the question, as before', pt1)
     await slack.ask({ user: 'U0SAM', text: `${M2} Can I email her? [answer Yes, at priya@example.com.]` })
-    const st2 = await startOf('Can I email her?')
-    ok(forks(st2) && /This goes on from your earlier answers in this Slack thread/.test(briefOf(st2)), 'the same person again soon after, at the top of the channel: carried on', briefOf(st2).slice(0, 400))
+    const st2 = await typed('Can I email her?')
+    ok(!!st2 && st2.session === sidOf(st1), 'the same person again soon after, at the top of the channel: carried on, in its session', st2 && { session: st2.session, text: st2.text.slice(0, 400) })
     await send('Can I email her?')
     ok((await postedOf(/priya@example\.com/))?.thread_ts === t1.ts, 'in that thread')
   })
   await part('a direct message, one running conversation', async () => {
+    // (Answers in a direct message go at once.)
     await slack.ask({ user: 'U0DANA', dm: true, app: 'A2', text: 'Is the office open today? [answer Yes, until 6.]' })
-    await send('office open today')
+    const sm1 = await startOf('office open today')
     const pm1 = await postedOf(/until 6/)
     await slack.ask({ user: 'U0DANA', dm: true, app: 'A2', text: 'And tomorrow? [answer Tomorrow too.]' })
-    const sm2 = await startOf('And tomorrow?')
-    ok(forks(sm2) && /This goes on from your earlier answers in this Slack direct message/.test(briefOf(sm2)) && /The direct message since your last answer[\s\S]*you \(Front Desk\), earlier: Yes, until 6\./.test(briefOf(sm2)), 'a direct message soon after: going on from its earlier answer', briefOf(sm2).slice(0, 700))
-    await send('And tomorrow?')
+    const sm2 = await typed('And tomorrow?')
+    ok(!!sm2 && sm2.session === sidOf(sm1) && /since your last answer[\s\S]*you \(Front Desk\), earlier: Yes, until 6\./.test(sm2.text), 'a direct message soon after: going on in its session from its earlier answer', sm2 && { session: sm2.session, text: sm2.text.slice(0, 700) })
     const pm2 = await postedOf(/Tomorrow too/)
     ok(pm1?.channel === 'D2DANA' && !pm1.thread_ts && pm2?.channel === 'D2DANA' && !pm2.thread_ts, 'answered plainly, in the direct message', { pm1, pm2 })
   })
@@ -327,20 +359,18 @@ try {
     const places = await kit.api(`/bots/${F}/conversations?by=place`)
     ok(places.rows.map((r) => r.id).join() === 'D2DANA,C0LAUNCH' && places.rows.find((r) => r.id === 'C0LAUNCH')?.turns === 6, 'by channel: the direct message and #launch, one row each', places.rows.map((r) => [r.id, r.turns]))
     const turns = await kit.api(`/bots/${F}/conversations/person/U0DANA`)
-    ok(turns.turns.length === 5 && turns.turns[1].carried && turns.turns.every((x) => x.outcome === 'sent' && x.answer && x.runs.length === 1 && x.runs[0].agent === 'claude') && turns.turns[0].runs[0].reads.some((f) => /faq\.md/.test(f)), 'one person\'s turns, oldest first: each with what was sent and what ran', turns.turns.map((x) => [x.text, x.outcome, x.carried]))
+    ok(turns.turns.length === 5 && turns.turns[1].carried && turns.turns.every((x) => (x.outcome === 'sent' || (x.outcome === 'auto' && /office open|tomorrow/.test(x.text))) && x.answer && x.runs.length === 1 && x.runs[0].agent === 'claude') && turns.turns[0].runs[0].reads.some((f) => /faq\.md/.test(f)), 'one person\'s turns, oldest first: each with what was sent (in her direct messages, without asking) and what ran', turns.turns.map((x) => [x.text, x.outcome, x.carried]))
     ok(turns.context?.proposed.length === 5 && turns.context.proposed.every((x) => x.asked && x.answered), 'and her running context: her words and its answers', turns.context)
   })
   for (const [mode, theme, phone] of [['light', 'sky', false], ['dark', 'midnight', true]]) {
     await part(`Conversations on its page, ${mode}${phone ? ', on a phone' : ''}`, async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme, phone })
-      if (phone) {
-        await openSettings(p)
-        await p.locator('.sb-chip', { hasText: 'Front Desk' }).click()
-      } else {
-        await p.locator('.rail-bot-list .bt-row', { hasText: 'Front Desk' }).click({ timeout: 20000 })
-        ok(!/Front Desk: question|Bot Runs/.test(await p.locator('.rail').innerText()), 'the sidebar: the bot, and none of its conversations or runs')
-      }
-      await p.locator('.sb-tabs [role="tab"]', { hasText: 'Conversations' }).click()
+      await openBot(p, 'Front Desk')
+      if (!phone) ok(!/Front Desk: question|Bot Runs/.test(await p.locator('.rail').innerText()), 'the sidebar: none of its conversations or runs')
+      await p.locator('.bp .sb-tabs [data-tab="overview"]').click()
+      const convs = p.locator('.bp [data-setting="bot-conversations"]')
+      await convs.waitFor({ timeout: 10000 })
+      if (!(await convs.evaluate((d) => d.open))) await convs.locator(':scope > summary').click()
       await p.locator('.bcv-row').first().waitFor({ timeout: 10000 })
       ok((await p.locator('.bcv-row').count()) === 3 && /^Dana/.test(await p.locator('.bcv-row').first().locator('.bcv-name').innerText()), 'Conversations: a row for each person, the latest first', await p.locator('.bcv-rows').innerText())
       await p.locator('.bcv-row[data-key="U0DANA"] .bcv-head').click()
@@ -363,7 +393,7 @@ try {
         ok((await p.locator('.bcv-row').count()) === 2 && /#launch/.test(await p.locator('.bcv-rows').innerText()), 'by channel: #launch and her direct messages', await p.locator('.bcv-rows').innerText())
       } else {
         await sleep(300)
-        const faults = await phoneFaults(p, '.modal.settings .sb')
+        const faults = await phoneFaults(p, '.bp.phone .bp-main')
         ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults)
         await shot(p, `${tag}bots-conversations-${mode}-phone`)
       }

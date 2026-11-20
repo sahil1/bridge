@@ -74,9 +74,10 @@ export const ChangesView = wrap(LOADERS.Files, 'ChangesView')
 export const PreviewView = wrap(LOADERS.Preview)
 export const CalendarView = wrap(LOADERS.CalendarView)
 export const UsageStats = wrap(LOADERS.UsageStats)
-// A bot's page, and the phone's list of them (Bots, a beta feature).
+// Bots (a beta feature): Bots itself, a bot's page and a session, in one module.
 export const BotPage = wrap(LOADERS.BotPage)
-export const PhoneBots = wrap(LOADERS.BotPage, 'PhoneBots')
+export const BotsHome = wrap(LOADERS.BotPage, 'BotsHome')
+export const SessionView = wrap(LOADERS.BotPage, 'SessionView')
 
 // Whiteboards load only when one is opened, never ahead (Excalidraw is the biggest part of the app),
 // and aren't in the demo or the phone apps' Cloud agents.

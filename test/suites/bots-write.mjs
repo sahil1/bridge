@@ -33,7 +33,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { checks, until, sleep, browser, page, shot, phoneFaults, startModel, IS_WIN, ROOT } from '../lib/harness.mjs'
-import { botKit, openSettings, M, OWNER } from '../lib/bots.mjs'
+import { botKit, M, OWNER, openBot } from '../lib/bots.mjs'
 
 const { ok, done } = checks('bots-write')
 const model = await startModel('bots-write')
@@ -73,7 +73,7 @@ const { slack, kit, home, startOf, startsOf, briefOf, logOf, events, posted, nee
     // (The repository's own hooks, which making a copy of it must never run.)
     for (const k of ['post-checkout', 'reference-transaction', 'post-index-change']) fs.writeFileSync(path.join(h, 'Docs', '.git', 'hooks', k), `#!/bin/sh\necho ${k} >> '${path.join(h, 'hooks-ran.log')}'\n`, { mode: 0o755 })
     // (No model on this computer is reached: AI Assist's is the stand-in's, once it's given.)
-    return { OLLAMA_HOST: 'http://127.0.0.1:9', LM_STUDIO_BASE_URL: 'http://127.0.0.1:9/v1', BRIDGE_CLAUDE_MANAGED: managed, ...(gitDir ? { PATH: `${PATH}${path.delimiter}${gitDir}`, BRIDGE_PATH: `${PATH}${path.delimiter}${gitDir}` } : {}) }
+    return { OLLAMA_HOST: 'http://127.0.0.1:9', LM_STUDIO_BASE_URL: 'http://127.0.0.1:9/v1', BRIDGE_CLAUDE_MANAGED: managed, BRIDGE_SESSION_TOTAL_FILES: '4', ...(gitDir ? { PATH: `${PATH}${path.delimiter}${gitDir}`, BRIDGE_PATH: `${PATH}${path.delimiter}${gitDir}` } : {}) }
   },
 })
 const { b, which } = await browser()
@@ -546,12 +546,12 @@ try {
       ok(!!(await until(() => read(H('offers', `pat-${mode}${phone ? '-phone' : ''}.md`)) === 'Offer for Pat\n', 15000)), `approved in Needs You${phone ? ' on a phone' : ''}: made`)
       void w
       await p.keyboard.press('Escape')
-      await openSettings(p)
+      await openBot(p, { name: 'Hiring' })
       const sec = p.locator('[data-setting="slack-changes"]').first()
       await sec.waitFor({ timeout: 15000 })
       await sec.scrollIntoViewIfNeeded()
       const changes = await sec.innerText()
-      ok(/Edits Files in Its Folders/.test(changes) && /Changes Files In/.test(changes) && new RegExp(HR).test(changes) &&/May Change Files Without Asking Me/.test(changes) && /Sam/.test(changes) && /Always Waits for You/.test(changes), 'Settings › Bots › Changes: its folders, who may change files without asking you, and what always waits', changes.slice(0, 600))
+      ok(/Edits Files in Its Folders/.test(changes) && /Changes Files In/.test(changes) && new RegExp(HR).test(changes) &&/May Change Files Without Asking Me/.test(changes) && /Sam/.test(changes) && /Always Waits for You/.test(changes), 'its Settings › Changes: its folders, who may change files without asking you, and what always waits', changes.slice(0, 600))
       const line = await p.locator('[data-setting="bots-access-line"]').first().innerText().catch(() => '')
       ok(new RegExp(`changes files in ${HR} for you and 1 named; asks you first for anyone else`, 'i').test(line),'its Access line says it in plain words', line)
       if (phone) { const faults = await phoneFaults(p, '[data-setting="slack-changes"]'); ok(!Object.keys(faults).length, 'Changes on a phone: nothing too small to tap, off the screen or cut short', faults) }
@@ -646,6 +646,37 @@ try {
     ok(rules.length > 0 && yes.every((p) => !refused(p)), 'a run\'s own copy inside a hidden folder of one it reads: still readable to it, as the rest of that folder is', { out: r.stderr?.slice(0, 500), refused: yes.filter(refused) })
     ok(no.every(refused), 'and everything else hidden there isn\'t: Bridge AI\'s own files, another run\'s copy, ~/.ssh, a hidden file in its copy, what\'s named as keys', no.filter((p) => !refused(p)))
     ok(Buffer.byteLength(JSON.stringify(rules)) < 1024 * 1024, 'its rules are well within what Claude Code takes in a settings file', Buffer.byteLength(JSON.stringify(rules)))
+  })
+  // ---------- A session's copy, turn after turn ----------
+  // One copy for the whole conversation: a change made at once is its copy's from then on (the next
+  // takes only what's new); what changed in ~/Hiring meanwhile is brought into the copy, and said;
+  // past its running total (4 files in this test) a change waits for you, whoever asked, and denied,
+  // the copy is put back.
+  await part('a session\'s copy', async () => {
+    const q = await slack.ask({ user: OWNER.id, text: `${M} Hiring: two notes [edit Hiring/s1.md One] [edit Hiring/s2.md Two] [answer Two notes.]` })
+    await until(() => read(H('s2.md')) === 'Two\n', 40000)
+    const p1 = events(HI).filter((e) => e.type === 'write.proposed' && e.ts === q.ts).at(-1)
+    ok(p1?.direct && p1.files.length === 2, 'your change is made at once', p1 && { direct: p1.direct, files: p1.files })
+    const s1 = startsOf('two notes').at(-1)
+    // (Between turns its copy is put aside, where its commands can't write: back before its next turn.)
+    const sid = events(HI).find((e) => e.type === 'session.started' && e.ts === q.ts)?.sid
+    if (process.platform !== 'win32') ok(!!sid && !!(await until(() => fs.existsSync(path.join(kit.data, 'front-desk', 'held', sid)) && !fs.existsSync(s1.cwd), 15000)), 'its turn over, its copy is put aside, out of where its agent and its commands work', { sid, cwd: s1?.cwd })
+    fs.writeFileSync(H('roles.md'), '# Roles\n\nDesign\nSales\nOps\n')
+    await slack.ask({ user: OWNER.id, thread: q.ts, text: `${M} Hiring: one more [try-read Hiring/roles.md] [edit Hiring/s3.md Three] [answer One more.]` })
+    const t = await until(() => logOf('turns.log').find((x) => x.text.includes('one more')), 40000)
+    ok(!!t && fs.realpathSync(t.cwd) === fs.realpathSync(s1.cwd) && /changed in the real folders and are in your copy now: ~[\\/]Hiring[\\/]roles\.md/.test(t.text), 'its next turn is typed into the same session, in the same copy, told ~/Hiring/roles.md changed and is in its copy now', t && { cwd: t.cwd, was: s1?.cwd, text: t.text.slice(0, 600) })
+    await until(() => read(H('s3.md')) === 'Three\n', 40000)
+    const r = tries().filter((x) => x.try === 'read' && x.path === 'Hiring/roles.md').at(-1)
+    const p2 = events(HI).filter((e) => e.type === 'write.proposed' && (e.files || []).some((f) => /s3\.md$/.test(f.path))).at(-1)
+    ok(r?.done && p2?.direct && p2.files.length === 1, 'it read the change in its copy, and its next change is only what\'s new (s3.md), made at once', { read: r, files: p2?.files })
+    await slack.ask({ user: OWNER.id, thread: q.ts, text: `${M} Hiring: a batch [edit-many 3 Hiring/batch] [answer A batch.]` })
+    const held = await until(() => events(HI).find((e) => e.type === 'session.held' && e.conv === `C0LAUNCH:${q.ts}`), 40000)
+    const it = await until(async () => (await needs()).find((x) => x.write?.held?.some((h) => h.why === 'total')), 20000)
+    ok(!!held && held.files === 6 && !!it && it.write.state === 'waiting' && !fs.existsSync(H('batch')), 'past its running total (6 files in this session), the change waits for you, even yours, and you\'re told', { held, write: it?.write?.held })
+    await kit.api(`/bots/questions/${it.id}`, { send: false })
+    await slack.ask({ user: OWNER.id, thread: q.ts, text: `${M} Hiring: last one [edit Hiring/s4.md Four] [answer Last.]` })
+    const p4 = await until(() => events(HI).filter((e) => e.type === 'write.proposed' && (e.files || []).some((f) => /s4\.md$/.test(f.path))).at(-1), 40000)
+    ok(p4 && p4.files.length === 1 && !p4.files.some((f) => /batch/.test(f.path)), 'denied, its copy is put back: the next change has none of it', p4?.files)
   })
   void sleep
 } catch (e) {

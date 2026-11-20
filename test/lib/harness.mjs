@@ -409,7 +409,7 @@ export async function startSlack(name) {
     url, port, calls,
     ask: (o) => ctl('ask', o), edit: (o) => ctl('edit', o), remove: (o) => ctl('delete', o), pin: (o) => ctl('pin', o), scopes: (o) => ctl('scopes', o), channel: (o) => ctl('channel', o),
     drop: () => ctl('drop'), away: () => ctl('away'), back: () => ctl('back'), refresh: () => ctl('refresh'),
-    limit: (o) => ctl('limit', o), fail: (o) => ctl('fail', o), state: () => ctl('state'),
+    limit: (o) => ctl('limit', o), fail: (o) => ctl('fail', o), state: () => ctl('state'), deaf: (o) => ctl('deaf', o || {}), linkoff: (o) => ctl('linkoff', o || {}),
     // Interactivity, /<name>, the shortcut, the Home tab and Slack's Stop button (stand-ins/slack.mjs
     // says each). (stop() ends the stand-in itself.)
     click: (o) => ctl('click', o), submit: (o) => ctl('submit', o), slash: (o) => ctl('slash', o), shortcut: (o) => ctl('shortcut', o),
