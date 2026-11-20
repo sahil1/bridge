@@ -10,7 +10,6 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { DATA, NODE, IS_WIN } from '../paths.js'
 import { PROTOCOL } from './screen.js'
-import { dropBackupRights } from '../winpriv.js'
 
 const HOST_JS = fileURLToPath(new URL('./ptyhost.js', import.meta.url))
 // host.json (the host's pid, socket and token), its log, and the socket itself when the path is
@@ -178,17 +177,12 @@ function launch() {
 
 // The host for this data folder, as this server's: the one running, or a new one. Null when it
 // can't be had (the caller then runs terminals itself); { busy } when another server has it.
-// (On Windows, Windows' backup and restore rights out of this server's token before a host is started,
-// so the host and every agent it starts haven't them; and out of a host's that's running already,
-// started by a server that had them: winpriv.js.)
-const noBackupRights = (pid) => (IS_WIN ? Promise.race([dropBackupRights(pid), sleep(20000)]).catch(() => {}) : Promise.resolve())
 export async function open({ keep = true } = {}) {
   let link = await connect(readInfo(), { control: true, keep })
   if (link && !link.busy && link.info.protocol !== PROTOCOL) { await retire(link); link = null }
   // Another server has it: likely one that's still on its way out. Give it a moment.
   for (let i = 0; i < 30 && link?.busy; i++) { await sleep(100); link = await connect(readInfo(), { control: true, keep }) }
-  if (link) { if (!link.busy && link.pid) await noBackupRights(link.pid); return link }
-  await noBackupRights(process.pid)
+  if (link) return link
   launch()
   for (let i = 0; i < 100; i++) {
     await sleep(i < 20 ? 50 : 100)
