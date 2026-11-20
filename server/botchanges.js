@@ -170,6 +170,40 @@ export async function collect(c0, { message, checked = null }) {
   return { changed: files.length > 0, files, stat, diff, head }
 }
 
+// A session's copy (frontdesk.js) lives as long as the session, its agent working in it turn after
+// turn, each turn's change committed (collect) on its branch. Where it is now (its HEAD), so a push
+// asked for is made only as you were shown it; and back to a commit it had, when you deny the change
+// a turn made (nothing of it is pushed, and the next turn starts from there). Nothing in the worktree
+// is followed for either: trusted() first, as for collect.
+export async function headOf(c0) {
+  const c = { ...c0, admin: c0.admin || await adminOf(c0.top, c0.dir) }
+  if (!c.admin) return null
+  const r = await wt(c, ['rev-parse', 'HEAD'])
+  return r.ok ? r.out : null
+}
+export async function rewind(c0, to) {
+  if (!/^[0-9a-f]{40,64}$/.test(String(to || ''))) throw Object.assign(new Error('That isn\'t a commit to go back to'), { step: 'commit' })
+  const c = { ...c0, admin: c0.admin || await adminOf(c0.top, c0.dir) }
+  await trusted(c)
+  const r = await wt(c, ['reset', '--hard', '-q', to])
+  if (!r.ok) throw Object.assign(new Error(`Couldn't put its copy back: ${firstLine(r.err)}`), { step: 'commit' })
+  await wt(c, ['clean', '-fdq'])
+  return true
+}
+// Whether commit a is b or comes before it on its branch (so going back to b keeps a).
+export async function isAncestor(c0, a, b) {
+  const c = { ...c0, admin: c0.admin || await adminOf(c0.top, c0.dir) }
+  if (!c.admin || !/^[0-9a-f]{40,64}$/.test(String(a || '')) || !/^[0-9a-f]{40,64}$/.test(String(b || ''))) return false
+  return (await wt(c, ['merge-base', '--is-ancestor', a, b])).ok
+}
+// Whether its branch has commits past where its pull request would go from: something to push.
+export async function ahead(c0) {
+  const c = { ...c0, admin: c0.admin || await adminOf(c0.top, c0.dir) }
+  if (!c.admin || !c.from) return 0
+  const r = await wt(c, ['rev-list', '--count', `${c.from}..HEAD`])
+  return r.ok ? Number(r.out) || 0 : 0
+}
+
 // The branch pushed (that branch only, never forced) and a draft pull request opened with your gh,
 // or the one this branch has already: { url, number, again }.
 export async function publish(c, { title, body }) {

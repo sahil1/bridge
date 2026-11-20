@@ -23,6 +23,10 @@
 // Read-only is started so (agents.js access 'read'), not only asked for: it can't edit files or run
 // commands. fork: a copy of an agent's conversation, so a question can be answered from what that
 // agent knows without reaching the agent itself.
+// A bot's session (frontdesk.js, botsessions.js) is a helper of the desk's that goes on: started
+// once (or started again where it left off, resume: its conversation, --resume), then given each
+// next turn in its pane, watched again for it (rearm), one report a turn. Between turns it's ended,
+// so an idle session holds no place among the desk's at once.
 import fs from 'node:fs'
 import path from 'node:path'
 import { dataFile, writeFileAtomic } from './paths.js'
@@ -124,9 +128,11 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
   async function start(h) {
     const access = h.change ? 'change' : h.readOnly ? 'read' : h.own && edits() ? 'edits' : undefined
     try {
-      const out = await launch({ kind: h.kind, cwd: h.cwd, own: h.own, label: tabName(h), space: h.space, prompt: promptOf(h), access, dirs: (h.readOnly || h.change) && h.dirs?.length ? h.dirs : undefined, fork: h.fork || undefined, model: h.model || undefined, env: h.list && h.env ? h.env : undefined })
-      Object.assign(h, { state: 'working', paneId: out.paneId, session: out.session || '', ...(out.sessionId ? { sessionId: out.sessionId } : {}), startedAt: new Date().toISOString(), access: access || null, worked: false, again: false, againAt: null, armedAt: null })
-      mark(h, { status: 'doing', pane: out.paneId })
+      const out = await launch({ kind: h.kind, cwd: h.cwd, own: h.own, label: tabName(h), space: h.space, prompt: h.idle ? undefined : promptOf(h), access, dirs: (h.readOnly || h.change) && h.dirs?.length ? h.dirs : undefined, fork: h.fork || undefined, resume: h.resume || undefined, model: h.model || undefined, env: h.list && h.env ? h.env : undefined })
+      Object.assign(h, { state: 'working', paneId: out.paneId, session: out.session || '', ...(out.sessionId ? { sessionId: out.sessionId } : h.resume ? { sessionId: h.resume } : {}), startedAt: new Date().toISOString(), access: access || null, worked: false, again: false, againAt: null, armedAt: null })
+      // (A session opened to look at, with nothing to say yet: it waits for its next turn.)
+      if (h.idle) Object.assign(h, { state: 'ended', end: 'finished', endedAt: new Date().toISOString(), report: 'none' })
+      mark(h, h.idle ? { status: 'done', pane: out.paneId } : { status: 'doing', pane: out.paneId })
       save()
       await Promise.resolve(link(h.thread, out.paneId)).catch(() => {})
     } catch (e) {
@@ -289,7 +295,8 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
         const since = h.againAt || h.startedAt
         if (h.worked || (a.status === 'done' && !h.again) || replied(a, since)) await end(h, 'finished', { agent: a })
         else if (now - Date.parse(h.armedAt || h.startedAt) > STALL_MS) {
-          if (h.again) await end(h, 'finished', { agent: a, quiet: true })
+          // (Another list's turn that never got going is heard all the same: its list says so.)
+          if (h.again) await end(h, 'finished', { agent: a, quiet: !h.list })
           else await end(h, 'failed', { error: 'it stopped before doing anything; its terminal may say why' })
         }
       }
@@ -338,6 +345,20 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
       if (n) save()
       return n
     },
+    // Another list's helper that has said its last (a bot's session between turns), given its next
+    // turn in its pane: watched again, for one more hearing. False when it can't be (it isn't one,
+    // it's at work, or it never had a pane).
+    rearm(id) {
+      const h = data.helpers.find((x) => x.id === id)
+      if (!h || !h.list || h.state !== 'ended' || !h.paneId || h.end === 'failed') return false
+      const at = new Date().toISOString()
+      Object.assign(h, { state: 'working', worked: false, again: true, againAt: at, armedAt: at, end: null, report: null, error: null })
+      delete h.missing; delete h.blocked; delete h.askedAt
+      mark(h, { status: 'doing' })
+      save()
+      changed()
+      return true
+    },
     // One its list stopped (closed its tab: a bot's answer stopped, paused or out of time), ended now
     // with nothing to hear back, so its place goes to the next at once.
     async drop(id) {
@@ -363,7 +384,7 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
     // starts on, and env, variables it starts with, on another list only (a bot's answerer, and its
     // change's hook: frontdesk.js).
     async add(b = {}) {
-      const brief = String(b.brief || '').trim()
+      const brief = String(b.brief || '').trim() || (b.list && b.idle === true && b.resume ? '(opened)' : '')
       if (!brief) throw new Error('Say what the helper should do')
       if (brief.length > 20000) throw new Error('The brief is too long: keep it under 20,000 characters and point to files for the rest')
       const kind = String(b.kind || cfg.defaultAgent || 'claude')
@@ -388,8 +409,12 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
       const env = list && b.env && typeof b.env === 'object' ? Object.fromEntries(Object.entries(b.env).filter(([k, v]) => /^[A-Z_][A-Z0-9_]{0,63}$/.test(k) && typeof v === 'string' && v.length < 1000).slice(0, 10)) : {}
       const item = on.add(title, { status: 'open', role })
       const cwd = named || await workFolder(item.title, item.id, list)
+      // (A bot's session on another list: started again where it left off, resume, a conversation of
+      // its own in that same folder; or opened with nothing to do yet, idle; and which it is.)
+      const resume = list && named && b.resume ? oneLine(b.resume, 80) : null
       const h = {
         id: `h${data.next++}`, task: item.id, role, title: item.title, brief, kind, cwd, own: !named, readOnly: b.readOnly === true && !change, ...(change ? { change: true } : {}),
+        ...(resume ? { resume } : {}), ...(list && b.idle === true && resume ? { idle: true } : {}), ...(list && b.session ? { sessionOf: oneLine(b.session, 40) } : {}),
         thread: b.thread ? oneLine(b.thread, 20) : null, space: oneLine(b.space, 40) || 'Helpers', from: oneLine(b.from, 20) || 'chief',
         ...(list ? { list } : {}), ...(b.fork && named ? { fork: oneLine(b.fork, 80) } : {}), ...(dirs.length ? { dirs } : {}), ...(list && b.model ? { model: oneLine(b.model, 80) } : {}), ...(Object.keys(env).length ? { env } : {}),
         state: 'queued', at: new Date().toISOString(), paneId: null, report: null, inRequest: true,
@@ -431,7 +456,7 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
     decorate(f) {
       for (const a of f?.agents || []) {
         const h = !a.chief && data.helpers.find((x) => x.paneId === a.paneId && x.state !== 'queued')
-        if (h) a.helper = { task: h.task, role: h.role, ...(h.list ? { list: h.list } : {}) }
+        if (h) a.helper = { task: h.task, role: h.role, ...(h.list ? { list: h.list } : {}), ...(h.sessionOf ? { session: h.sessionOf } : {}) }
       }
     },
 

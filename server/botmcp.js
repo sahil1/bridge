@@ -21,7 +21,7 @@ import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { dataFile, writeFileAtomic, HOME, ROOT, NODE, IS_WIN } from './paths.js'
+import { dataFile, writeFileAtomic, HOME, DATA, ROOT, NODE, IS_WIN } from './paths.js'
 import { loginPath, which, KEPT_SETTINGS, KEPT_MIN } from './agents.js'
 import { claudeServers, claudeServerView } from './mcp.js'
 import { launch } from './consult.js'
@@ -225,13 +225,44 @@ export async function hookTooOld() {
   const need = hookMin()
   return have && compare(have, need) < 0 ? { need, have } : null
 }
-export async function runFolder(bot, { all = false, key, outbox = null, write = null, attach = null, reads = [], own = [] }) {
-  const want = (bot.mcp || []).filter((n) => n !== OUTBOX_SERVER && n !== FILES_SERVER)
-  if (!want.length && !outbox && !write) return null
+// A bot's session (frontdesk.js, botsessions.js) has more in its folder, made the same way each
+// time it's started (its first turn, and again with --resume after an idle close or a narrower
+// tier): session: { push: request_push, for a copy of a repository; roster: hand_to and ask_bot, for a
+// connection's Chief (its own MCP server, sessionmcp.js); bash: { domains, cwd, dirs, writable } when
+// it may run commands (Claude Code's sandbox, sandboxOf below, with its hook on Bash too); who: your
+// name, for what its hook says when it refuses a push }.
+export const SESSION_SERVER = 'bridge_session'
+// Claude Code's sandbox for a session's commands, closed (agents.js sandboxClosed): it doesn't start
+// without it, nothing is retried outside it, no network but the domains you listed (any other asked
+// for is refused: dontAsk), and of your home folder (Bridge AI's own folder in it, your keys, other
+// conversations) only its own folders readable, nothing hidden in them (best effort: a sandbox glob
+// is a path pattern, not the Read rules); written only in its own copy (cwd, when it may write: a
+// copy of the folders it changes or of a repository; never the folders it reads, the files attached
+// or its turns, nor git's own file in a copy of a repository), else nowhere but the system's
+// temporary folder. Lists merge with your own settings' (agents.js bashProblem: a bot has no
+// commands where yours would widen these).
+export function sandboxOf({ domains = [], cwd, dirs = [], writable = false }) {
+  const real = (p) => { try { return fs.realpathSync(p) } catch { return p } }
+  const both = (list) => [...new Set(list.filter(Boolean).flatMap((x) => [path.resolve(String(x)), real(path.resolve(String(x)))]))]
+  const mine = both([cwd, ...dirs])
+  return {
+    enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false, autoAllowBashIfSandboxed: true,
+    network: { allowedDomains: [...new Set(domains.map(String))], strictAllowlist: true, allowLocalBinding: false, allowAllUnixSockets: false },
+    filesystem: {
+      disabled: false,
+      denyRead: [...new Set([...both([HOME, DATA]), ...mine.map((d) => `${d}/**/.*`)])],
+      allowRead: mine,
+      denyWrite: [...new Set([...both(dirs), ...(writable ? [] : both([cwd])), ...(cwd ? both([path.join(cwd, '.git')]) : [])])],
+    },
+  }
+}
+export async function runFolder(bot, { all = false, key, outbox = null, write = null, attach = null, reads = [], own = [], session = null }) {
+  const want = (bot.mcp || []).filter((n) => n !== OUTBOX_SERVER && n !== FILES_SERVER && n !== SESSION_SERVER)
+  if (!want.length && !outbox && !write && !session) return null
   const have = claudeServers()
   const picked = want.filter((n) => have[n])
   const missing = want.filter((n) => !have[n])
-  if (!picked.length && !outbox && !write) return { dir: null, servers: [], missing }
+  if (!picked.length && !outbox && !write && !session) return { dir: null, servers: [], missing }
   const allow = []
   const deny = []
   const said = []
@@ -260,17 +291,37 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
     }
     servers[OUTBOX_SERVER] = { type: 'stdio', command: NODE.bin, args, env: { ...NODE.env } }
   }
+  // (A session's own server: what it asks of Bridge AI, each line written with a key of its own,
+  // beside it here, where its agent can't read or write it: sessionmcp.js.)
+  let requests = null
+  if (session) {
+    requests = { key: crypto.randomBytes(32).toString('hex'), file: path.join(dir, 'requests.jsonl') }
+    const keyFile = path.join(dir, 'requests.key')
+    fs.writeFileSync(requests.file, '', { mode: 0o600 })
+    fs.writeFileSync(keyFile, requests.key, { mode: 0o600 })
+    fs.chmodSync(keyFile, 0o600)
+    const args = [path.join(ROOT, 'server', 'sessionmcp.js'), requests.file, keyFile]
+    if (session.push) { args.push('--push'); allow.push(toolName(SESSION_SERVER, 'request_push')) }
+    if (session.roster?.length) {
+      const file = path.join(dir, 'roster.json')
+      writeFileAtomic(file, JSON.stringify(session.roster.map((b) => ({ id: String(b.id), name: String(b.name), description: String(b.description || ''), access: String(b.access || '') })), null, 2), { mode: 0o600 })
+      args.push('--chief', file)
+      allow.push(toolName(SESSION_SERVER, 'hand_to'), toolName(SESSION_SERVER, 'ask_bot'))
+    }
+    if (args.length > 3) servers[SESSION_SERVER] = { type: 'stdio', command: NODE.bin, args, env: { ...NODE.env } }
+  }
+  const bash = session?.bash || null
   let hooks = null
   let guard = null
   let agentEnv = null
-  if (write?.root) {
+  if (write?.root || bash) {
     guard = { key: crypto.randomBytes(32).toString('hex'), log: path.join(dir, 'guard.log') }
     fs.writeFileSync(guard.log, '', { mode: 0o600 })
     const keyFile = path.join(dir, 'guard.key')
     fs.writeFileSync(keyFile, guard.key, { mode: 0o600 })
     fs.chmodSync(keyFile, 0o600)
-    const args = [write.root, ...(write.parts || []).flatMap((p) => ['--part', p]), '--log', guard.log, '--key', keyFile]
-    if (write.files) {
+    const args = [...(write?.root ? [write.root, ...(write.parts || []).flatMap((p) => ['--part', p])] : ['--bash-only']), '--log', guard.log, '--key', keyFile, ...(session?.who ? ['--who', String(session.who).replace(/[\r\n]+/g, ' ').slice(0, 80)] : []), ...(session?.push ? ['--push'] : [])]
+    if (write?.files) {
       servers[FILES_SERVER] = { type: 'stdio', command: NODE.bin, args: [path.join(ROOT, 'server', 'filesmcp.js'), ...args], env: { ...NODE.env } }
       allow.push(toolName(FILES_SERVER, 'delete_file'), toolName(FILES_SERVER, 'move_file'))
     }
@@ -285,7 +336,7 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
       ? { type: 'command', command: NODE.bin, args: guardArgs, timeout: 30 }
       : { type: 'command', command: `${Object.entries({ ...NODE.env }).map(([k, v]) => `${k}=${sh(v)} `).join('')}${sh(NODE.bin)} ${guardArgs.map(sh).join(' ')}`, timeout: 30 }
     if (execHooks() && Object.keys(NODE.env).length) agentEnv = { ...NODE.env }
-    hooks = { disableAllHooks: false, hooks: { PreToolUse: [{ matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [hook] }] } }
+    hooks = { disableAllHooks: false, hooks: { PreToolUse: [{ matcher: `Edit|Write|MultiEdit|NotebookEdit${bash ? '|Bash' : ''}`, hooks: [hook] }] } }
   }
   // (Claude Code's settings for the run, in one file, as it takes one --settings: Bridge AI's for
   // every run kept to its folders, agents.js KEPT_SETTINGS; its Read rules, nothing hidden in the
@@ -293,10 +344,10 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
   // (own: its copy, the files attached, its brief); and its hook when it changes files.)
   const readDeny = reads.length ? readDenies(reads, { own }) : []
   const settings = path.join(dir, 'settings.json')
-  writeFileAtomic(settings, JSON.stringify({ ...KEPT_SETTINGS, permissions: { ...KEPT_SETTINGS.permissions, ...(readDeny.length ? { deny: readDeny } : {}) }, ...(hooks || {}) }, null, 2), { mode: 0o600 })
+  writeFileAtomic(settings, JSON.stringify({ ...KEPT_SETTINGS, permissions: { ...KEPT_SETTINGS.permissions, ...(readDeny.length ? { deny: readDeny } : {}) }, ...(hooks || {}), ...(bash ? { sandbox: sandboxOf(bash) } : {}) }, null, 2), { mode: 0o600 })
   writeFileAtomic(path.join(dir, 'config.json'), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 })
-  writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny, settings }, null, 2), { mode: 0o600 })
-  return { dir, servers: said, missing, ...(guard ? { guard } : {}), ...(agentEnv ? { agentEnv } : {}) }
+  writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny, settings, ...(bash ? { bash: true } : {}) }, null, 2), { mode: 0o600 })
+  return { dir, servers: said, missing, ...(guard ? { guard } : {}), ...(agentEnv ? { agentEnv } : {}), ...(requests ? { requests } : {}), ...(bash ? { bash: true } : {}) }
 }
 // Claude Code's Read rules for a bot's run (gitignore-style patterns; // starts at the root), for each
 // folder it reads, as named and as its real path: no hidden file, nor anything in a hidden folder,
@@ -369,8 +420,9 @@ export function readDenies(folders, { own = [] } = {}) {
 }
 // A run's folder gone (it ended), or every one older than a day (left from before a restart).
 export function drop(dir) { if (dir && path.resolve(dir).startsWith(RUNS + path.sep)) fs.rmSync(dir, { recursive: true, force: true }) }
-export function sweep() {
-  try { for (const d of fs.readdirSync(RUNS)) { const p = path.join(RUNS, d); if (Date.now() - fs.statSync(p).mtimeMs > 86400000) fs.rmSync(p, { recursive: true, force: true }) } } catch { /* none */ }
+// (keep: the folders of sessions that may start again, by name: they stay while a session may.)
+export function sweep({ keep = new Set() } = {}) {
+  try { for (const d of fs.readdirSync(RUNS)) { const p = path.join(RUNS, d); if (!keep.has(d) && Date.now() - fs.statSync(p).mtimeMs > 86400000) fs.rmSync(p, { recursive: true, force: true }) } } catch { /* none */ }
 }
 // The MCP tools a run used, from what its agent did (its tool calls, mcp__<server>__<tool>):
 // [{ server, tool, n }], by the servers it had.

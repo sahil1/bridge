@@ -72,6 +72,18 @@ const EDIT_HERE = 'Edit(./' + '**)'
 // writes, given with --settings: keptFlags). Never a folder it may read: it comes out of dirs, and the
 // rest stay as they were. Its files gone (Bridge AI started again since), it gives none.
 const MCP_RUNS = dataFile('front-desk', 'mcp')
+// A bot's session that may run commands (bash in rules.json, botmcp.js runFolder) has Bash among its
+// tools only while its settings file holds it in Claude Code's sandbox, closed (sandboxClosed): read
+// here, from the file it starts with, so a session started again (after an idle close, or Bridge AI
+// started again: runtime/builtin.js keeps its folders) has exactly what it had, and one whose file
+// is gone or says otherwise has no Bash at all.
+export const sandboxClosed = (s) => {
+  const x = s?.sandbox
+  return !!x && x.enabled === true && x.failIfUnavailable === true && x.allowUnsandboxedCommands === false && x.autoAllowBashIfSandboxed === true
+    && x.network?.strictAllowlist === true && Array.isArray(x.network?.allowedDomains) && x.filesystem?.disabled === false && !x.excludedCommands?.length
+    && Array.isArray(x.filesystem?.denyRead) && x.filesystem.denyRead.length > 0
+    && (s.hooks?.PreToolUse || []).some((m) => /(^|\|)Bash(\||$)/.test(String(m.matcher || '')))
+}
 export function mcpOf(dirs = []) {
   const runs = (dirs || []).filter((d) => path.resolve(String(d)).startsWith(MCP_RUNS + path.sep))
   let mcp = null
@@ -79,7 +91,9 @@ export function mcpOf(dirs = []) {
     try {
       const r = JSON.parse(fs.readFileSync(path.join(d, 'rules.json'), 'utf8'))
       const settings = r.settings && path.resolve(String(r.settings)) === path.join(d, 'settings.json') && fs.existsSync(path.join(d, 'settings.json')) ? path.join(d, 'settings.json') : null
-      if (fs.existsSync(path.join(d, 'config.json'))) mcp = { config: path.join(d, 'config.json'), allow: (r.allow || []).map(String), deny: (r.deny || []).map(String), settings }
+      let bash = false
+      if (r.bash === true && settings) { try { bash = sandboxClosed(JSON.parse(fs.readFileSync(settings, 'utf8'))) } catch { bash = false } }
+      if (fs.existsSync(path.join(d, 'config.json'))) mcp = { config: path.join(d, 'config.json'), allow: (r.allow || []).map(String), deny: (r.deny || []).map(String), settings, bash }
     } catch { /* gone: none */ }
   }
   return { dirs: (dirs || []).filter((d) => !runs.includes(d)), mcp }
@@ -147,8 +161,11 @@ export const AGENTS = [
       if (lvl !== 'read' && lvl !== 'change') return lvl === 'edits' ? ['--permission-mode', 'acceptEdits'] : lvl === 'full' ? ['--permission-mode', 'bypassPermissions'] : []
       const { dirs, mcp } = mcpOf(o.dirs)
       const add = dirs.length ? ['--add-dir', ...dirs] : []
-      return lvl === 'read' ? ['--tools', 'Read,Grep,Glob', ...add, ...mcpFlags(mcp), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...keptFlags(mcp)]
-        : ['--tools', 'Read,Grep,Glob,Edit,Write', '--allowedTools', EDIT_HERE, ...(mcp ? mcp.allow : []), ...add, ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...keptFlags(mcp)]
+      // (A session's commands: Bash, run in its sandbox and allowed by it, never by an allow rule of
+      // ours, so a command that couldn't be sandboxed is refused by dontAsk rather than run.)
+      const bash = mcp?.bash ? ',Bash' : ''
+      return lvl === 'read' ? ['--tools', `Read,Grep,Glob${bash}`, ...add, ...mcpFlags(mcp), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...keptFlags(mcp)]
+        : ['--tools', `Read,Grep,Glob,Edit,Write${bash}`, '--allowedTools', EDIT_HERE, ...(mcp ? mcp.allow : []), ...add, ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...keptFlags(mcp)]
     },
     confined: true,
     // A copy of a conversation under a new id (the original stays as it is).
@@ -413,4 +430,60 @@ export async function keptProblem(kind) {
   if (!min) return null
   const v = await versionOf(kind).catch(() => null)
   return v && !atLeast(v, min.version) ? `Bots need ${adapter(kind).label} ${min.version} or later: update it with ${min.update}` : null
+}
+
+// ---------- A bot's commands, in Claude Code's sandbox ----------
+// A session may run commands (Bash) only in Claude Code's own sandbox (code.claude.com/docs/en/
+// sandboxing: macOS Seatbelt, Linux and WSL2 bubblewrap; none on native Windows), closed: it refuses
+// to start where the sandbox can't (sandbox.failIfUnavailable, 2.1.83), a command can't be retried
+// outside it (allowUnsandboxedCommands false), no network but the domains you list
+// (network.strictAllowlist, 2.1.219), sandboxed commands run without asking (autoAllowBashIfSandboxed,
+// asked for since 2.1.325 made them ask), and a deny entry ending in / holds (2.1.224). The oldest
+// Claude Code that has all of that is older than the one any bot's run needs (KEPT_MIN), so that's
+// the one: BASH_MIN. Lists in settings merge across files (code.claude.com/docs/en/settings, Lists
+// merge instead of overriding), so your own settings, or your organization's, that widen the sandbox
+// for every session (commands run outside it, more domains, more folders to write or read, more
+// working directories, its file isolation off) would widen a bot's too: then a bot has no commands,
+// and says why. MANAGED is read as frontdesk.js reads it (a file; settings pushed some other way
+// aren't seen here). BRIDGE_CLAUDE_MANAGED: another file to read as them (tests).
+export const BASH_MIN = KEPT_MIN.claude.version
+const MANAGED_SETTINGS = () => (process.env.BRIDGE_CLAUDE_MANAGED ? [process.env.BRIDGE_CLAUDE_MANAGED]
+  : process.platform === 'darwin' ? ['/Library/Application Support/ClaudeCode/managed-settings.json']
+    : IS_WIN ? ['C:\\ProgramData\\ClaudeCode\\managed-settings.json'] : ['/etc/claude-code/managed-settings.json'])
+const widens = (j, managed) => {
+  const s = j?.sandbox || {}
+  const n = s.network || {}
+  const f = s.filesystem || {}
+  if (s.excludedCommands?.length) return 'run some commands outside the sandbox (sandbox.excludedCommands)'
+  if (n.allowedDomains?.length) return 'let every session reach more domains (sandbox.network.allowedDomains)'
+  if (f.allowWrite?.length) return 'let every session write in more folders (sandbox.filesystem.allowWrite)'
+  if (f.allowRead?.length) return 'let every session read more folders (sandbox.filesystem.allowRead)'
+  if (n.allowUnixSockets?.length) return 'let every session reach more sockets (sandbox.network.allowUnixSockets)'
+  if (j?.permissions?.additionalDirectories?.length) return 'give every session more working directories (permissions.additionalDirectories)'
+  // (A switch your own settings set is overruled by a bot's own file; your organization's isn't.)
+  if (managed && (s.enabled === false || s.allowUnsandboxedCommands === true || s.failIfUnavailable === false || f.disabled === true || n.allowAllUnixSockets === true || n.allowLocalBinding === true || s.autoAllowBashIfSandboxed === false)) return 'change how the sandbox holds'
+  return null
+}
+// Why a bot can't run commands here, or null: this system, its Claude Code, or settings of yours or
+// your organization's. home: whose ~/.claude/settings.json (tests).
+export async function bashProblem(kind = 'claude', { home = os.homedir() } = {}) {
+  if (kind !== 'claude') return 'Commands need Claude Code, which runs them in its sandbox'
+  if (IS_WIN) return 'Claude Code has no sandbox on Windows, so a bot runs no commands here'
+  const PATH = await loginPath()
+  if (process.platform === 'darwin' && !fs.existsSync('/usr/bin/sandbox-exec')) return 'This Mac has no sandbox-exec, which Claude Code\'s sandbox runs commands in'
+  if (process.platform === 'linux') {
+    for (const b of ['bwrap', 'socat']) if (!(await which(b, PATH))) return `Claude Code's sandbox needs ${b === 'bwrap' ? 'bubblewrap (bwrap)' : 'socat'} on Linux, and it isn't installed`
+  }
+  const v = await versionOf(kind).catch(() => null)
+  if (!v) return 'Claude Code\'s version couldn\'t be read, so its sandbox can\'t be relied on'
+  if (!atLeast(v, BASH_MIN)) return `Commands need Claude Code ${BASH_MIN} or later, for its sandbox: update it with ${KEPT_MIN.claude.update}`
+  const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return null } }
+  const user = read(path.join(home, '.claude', 'settings.json'))
+  const mine = widens(user, false)
+  if (mine) return `Your Claude Code settings ${mine}, which a bot's commands would get too`
+  for (const f of MANAGED_SETTINGS()) {
+    const why = widens(read(f), true)
+    if (why) return `Your organization's Claude Code settings ${why}, which a bot's commands would get too`
+  }
+  return null
 }

@@ -106,6 +106,7 @@ import { mcpRoutes, bridgeMcp } from './mcp.js'
 import { make as makeMcpTools } from './mcptools.js'
 import { make as makeOutside } from './outside.js'
 import { makeFrontDesk, SPACE as BOT_RUNS } from './frontdesk.js'
+import { makeBotSessions } from './botsessions.js'
 import { makeSlack, manifest as slackManifest, connectionManifest, SCOPES as SLACK_SCOPES, SHARED_SCOPES, SCOPE_FOR as SLACK_SCOPE_FOR, commandOf as slackCommand, shortcutOf as slackShortcut } from './slackbot.js'
 import { makeDiscord } from './discordbot.js'
 import { makeTeams, PORT as TEAMS_PORT } from './teamsbot.js'
@@ -420,15 +421,18 @@ async function fleetView() {
 // question each, frontdesk.js), which are a bot's runs, seen on its page under Conversations, never a
 // chat of their own; nor their tabs, nor the space they run in while only they are in it. What
 // watches agents here (the helpers' ends, notifications, Try It) sees them all, and so does
-// /api/fleet?all=1 (a look at every agent, for tests and diagnosis).
+// /api/fleet?all=1 (a look at every agent, for tests and diagnosis). A bot's live session (a
+// conversation it goes on in, botsessions.js) is one of them, and is given on its own (botSessions,
+// each as the agents are), for Bots' Sessions to show live: still never in the sidebar.
 function shownFleet(f) {
   const runs = new Set((f?.agents || []).filter((a) => a.helper?.list === 'desk').map((a) => a.paneId))
   const theirs = (t) => t.panes?.length > 0 && t.panes.every((p) => runs.has(p.paneId))
   const tabs = new Set((f?.tabs || []).filter(theirs).map((t) => t.tabId))
   const spaces = new Set((f?.workspaces || []).filter((w) => { const own = f.tabs.filter((t) => t.workspaceId === w.id); return own.length ? own.every((t) => tabs.has(t.tabId)) : w.label === BOT_RUNS }).map((w) => w.id))
-  if (!runs.size && !spaces.size) return f
+  const botSessions = (f?.agents || []).filter((a) => a.helper?.list === 'desk' && a.helper.session)
+  if (!runs.size && !spaces.size) return { ...f, botSessions }
   const agents = f.agents.filter((a) => !runs.has(a.paneId))
-  return { ...f, agents, tabs: f.tabs.filter((t) => !tabs.has(t.tabId)), workspaces: f.workspaces.filter((w) => !spaces.has(w.id)), counts: agents.reduce((c, a) => ({ ...c, [a.status]: (c[a.status] || 0) + 1 }), {}) }
+  return { ...f, agents, botSessions, tabs: f.tabs.filter((t) => !tabs.has(t.tabId)), workspaces: f.workspaces.filter((w) => !spaces.has(w.id)), counts: agents.reduce((c, a) => ({ ...c, [a.status]: (c[a.status] || 0) + 1 }), {}) }
 }
 
 async function findAgent(paneId) {
@@ -1174,8 +1178,9 @@ app.post('/api/chief/delegate/:task/retry', wrap((req) => delegate.retry(req.par
 // as a folder you picked), allowed edits there when you said helpers may; in a folder the chief
 // named, as New agent starts one. Either way in the Helpers space, a tab each (the bots' answers in
 // their own space). Read-only (access 'read'): started so. fork: a copy of an agent's conversation, in
-// its folder.
-async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs, fork, model, env }) {
+// its folder. resume: a bot's session's own conversation, started again where it left off, in its
+// folder, kept as it was (its access and folders: its settings file says the rest, agents.js mcpOf).
+async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs, fork, model, env, resume }) {
   const f = await fleetView()
   const ws = (f.workspaces || []).find((w) => w.label.toLowerCase() === String(space).toLowerCase())
   const where = ws ? { workspaceId: ws.id } : { newSpace: space }
@@ -1192,7 +1197,7 @@ async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs
   // work of yours to remember the folder for.)
   if (!own && !fork && access !== 'read' && access !== 'change') return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest', access })), session: f.session || '' }
   if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
-  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: access === 'read' || access === 'change' ? dirs : undefined, fork, effort: 'suggest', ...(model ? { model, pinModel: true } : {}), ...(access === 'change' && env ? { env } : {}) })
+  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: access === 'read' || access === 'change' ? dirs : undefined, fork, ...(resume && (access === 'read' || access === 'change') ? { resume } : {}), effort: 'suggest', ...(model ? { model, pinModel: true } : {}), ...(access === 'change' && env ? { env } : {}) })
   pushFleet()
   return { ...out, session: f.session || '' }
 }
@@ -4543,6 +4548,7 @@ function recordChanges(id, before, after, who) {
   }
 }
 
+makeBotSessions({ desk, rt, guard: botsGuard, wrap: wrapBot, connect: (id) => connectBot(id), resolve: (p) => places.resolveDir(p), view: (b) => botView(b), you: () => botOwnerName(), changed: () => pushFleet() }).routes(app)
 app.get('/api/bots', botsGuard, wrapBot(async () => ({
   bots: await Promise.all(botsStore.list().map((b) => botView(b, { brief: true }))),
   // Bots deleted whose record is kept, to look at in Activity until its time runs out.
